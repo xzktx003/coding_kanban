@@ -5,6 +5,8 @@ dist
 .env.*
 # Keep the committed template so everyone sees which env vars exist.
 !.env.example
+certs/
+test-results/
 .worktrees/
 coverage
 *.log

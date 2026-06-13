@@ -252,10 +252,9 @@ export function TopBar({
   const totalCount = sessions.length;
   const notificationUnsupported =
     agentCompletionNotificationPermission === "unsupported";
-  const notificationDenied =
-    agentCompletionNotificationPermission === "denied";
+  const notificationDenied = agentCompletionNotificationPermission === "denied";
   const notificationStatusLabel = notificationUnsupported
-    ? "浏览器不支持"
+    ? "需要 HTTPS"
     : notificationDenied
       ? "权限已拒绝"
       : agentCompletionNotificationsEnabled
@@ -586,7 +585,7 @@ export function TopBar({
                   onClick={onToggleAgentCompletionNotifications}
                   title={
                     notificationUnsupported
-                      ? "当前浏览器不支持系统通知"
+                      ? "需要 HTTPS 安全上下文才能使用浏览器通知（当前为 HTTP）"
                       : notificationDenied
                         ? "浏览器已拒绝通知权限，请在浏览器设置中开启"
                         : "Agent 从运行中进入空闲或退出时发送浏览器通知"
@@ -594,8 +593,31 @@ export function TopBar({
                   type="button"
                 >
                   <span>{notificationStatusLabel}</span>
-                  <small>Agent 完成后提醒查看</small>
+                  <small>{notificationUnsupported ? "请通过 HTTPS 访问本页" : "Agent 完成后提醒查看"}</small>
                 </button>
+                {agentCompletionNotificationsEnabled && (
+                  <button
+                    className="top-bar-menu-item"
+                    onClick={() => {
+                      if (typeof Notification === "undefined") {
+                        alert("浏览器不支持 Notification API");
+                        return;
+                      }
+                      if (Notification.permission !== "granted") {
+                        alert(`通知权限状态: ${Notification.permission}\n请先允许浏览器通知权限`);
+                        return;
+                      }
+                      new Notification("Coding Kanban 测试通知", {
+                        body: "如果你能看到这条通知，说明浏览器通知正常工作。",
+                        tag: "notification-test",
+                      });
+                    }}
+                    type="button"
+                  >
+                    <span>发送测试通知</span>
+                    <small>验证浏览器通知是否可用</small>
+                  </button>
+                )}
               </div>
             )}
           </div>

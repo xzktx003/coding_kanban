@@ -387,3 +387,59 @@ test("immediate session updates cancel pending coalesced snapshots and publish t
     timers.restore();
   }
 });
+
+test("idle detection transitions running sessions to idle after inactivity", async () => {
+  const idleThresholdMs = 50;
+  const idleIntervalMs = 20;
+  const registry = new AgentSessionRegistry(0, 100, idleThresholdMs, idleIntervalMs);
+  const session = createSession(registry);
+
+  registry.appendOutput(session.id, "working...\n", "stdout");
+  assert.equal(registry.get(session.id).interactionState, "running");
+
+  const states: string[] = [];
+  registry.subscribe((snapshot) => {
+    const item = snapshot.items.find((s) => s.id === session.id);
+    if (item) states.push(item.interactionState);
+  });
+
+  await wait(idleThresholdMs + idleIntervalMs + 10);
+
+  assert.equal(registry.get(session.id).interactionState, "idle");
+  assert.equal(registry.get(session.id).stateConfidence, "low");
+  assert.ok(states.includes("idle"), "subscriber should receive idle state");
+});
+
+test("idle detection does not fire for sessions that keep producing output", async () => {
+  const idleThresholdMs = 60;
+  const idleIntervalMs = 20;
+  const registry = new AgentSessionRegistry(0, 100, idleThresholdMs, idleIntervalMs);
+  const session = createSession(registry);
+
+  registry.subscribe(() => {});
+
+  registry.appendOutput(session.id, "frame 1\n", "stdout");
+  await wait(30);
+  registry.appendOutput(session.id, "frame 2\n", "stdout");
+  await wait(30);
+  registry.appendOutput(session.id, "frame 3\n", "stdout");
+  await wait(30);
+
+  assert.equal(registry.get(session.id).interactionState, "running");
+});
+
+test("user input resets session back to running after idle", async () => {
+  const idleThresholdMs = 40;
+  const idleIntervalMs = 15;
+  const registry = new AgentSessionRegistry(0, 100, idleThresholdMs, idleIntervalMs);
+  const session = createSession(registry);
+
+  registry.subscribe(() => {});
+  registry.appendOutput(session.id, "done\n", "stdout");
+
+  await wait(idleThresholdMs + idleIntervalMs + 10);
+  assert.equal(registry.get(session.id).interactionState, "idle");
+
+  registry.noteUserInput(session.id, "next command");
+  assert.equal(registry.get(session.id).interactionState, "running");
+});

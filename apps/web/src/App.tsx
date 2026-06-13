@@ -30,6 +30,7 @@ import { TopBar } from "./components/TopBar";
 import { VSCodeDrawer } from "./components/VSCodeDrawer";
 import {
   collectAgentCompletionNotificationEvents,
+  createVisibilityNotificationTracker,
   dispatchAgentCompletionNotification,
   getAgentCompletionNotificationPermission,
   loadAgentCompletionNotificationsEnabled,
@@ -401,6 +402,7 @@ export default function App() {
   const previousNotificationSessionsRef = useRef<AgentSessionRecord[] | null>(
     null,
   );
+  const notificationReadyAtRef = useRef(Date.now() + 5_000);
 
   useEffect(() => {
     let cancelled = false;
@@ -475,10 +477,12 @@ export default function App() {
     }
 
     const previousSessions = previousNotificationSessionsRef.current;
+
     if (
       previousSessions &&
       agentCompletionNotificationsEnabled &&
-      agentCompletionNotificationPermission === "granted"
+      agentCompletionNotificationPermission === "granted" &&
+      Date.now() >= notificationReadyAtRef.current
     ) {
       collectAgentCompletionNotificationEvents(
         previousSessions,
@@ -492,6 +496,25 @@ export default function App() {
     agentCompletionNotificationsEnabled,
     snapshot,
   ]);
+
+  const notificationStateRef = useRef({
+    enabled: agentCompletionNotificationsEnabled,
+    permission: agentCompletionNotificationPermission,
+    sessions: snapshot?.items ?? null,
+  });
+  notificationStateRef.current = {
+    enabled: agentCompletionNotificationsEnabled,
+    permission: agentCompletionNotificationPermission,
+    sessions: snapshot?.items ?? null,
+  };
+
+  useEffect(() => {
+    return createVisibilityNotificationTracker(
+      () => notificationStateRef.current.enabled,
+      () => notificationStateRef.current.permission,
+      () => notificationStateRef.current.sessions,
+    );
+  }, []);
 
   useEffect(() => {
     saveVsCodeIframeCacheMode(vscodeIframeCacheMode);

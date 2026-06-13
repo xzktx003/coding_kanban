@@ -1,4 +1,7 @@
-import type { AgentSessionRecord, InteractionState } from "@agent-orchestrator/shared";
+import type {
+  AgentSessionRecord,
+  InteractionState,
+} from "@agent-orchestrator/shared";
 
 export const AGENT_COMPLETION_NOTIFICATIONS_STORAGE_KEY =
   "agent-completion-notifications";
@@ -83,7 +86,7 @@ export async function requestAgentCompletionNotificationPermission(): Promise<Ag
 }
 
 export function isAgentCompletionState(state: InteractionState): boolean {
-  return state === "idle" || state === "exited";
+  return state === "idle" || state === "exited" || state === "detached";
 }
 
 export function collectAgentCompletionNotificationEvents(
@@ -113,8 +116,7 @@ export function collectAgentCompletionNotificationEvents(
 export function buildAgentCompletionNotificationBody(
   event: AgentCompletionNotificationEvent,
 ): string {
-  const stateLabel =
-    event.interactionState === "exited" ? "已退出" : "已空闲";
+  const stateLabel = event.interactionState === "exited" ? "已退出" : "已空闲";
   return `「${event.displayName}」任务已经完成（${stateLabel}），请及时查看。`;
 }
 
@@ -131,4 +133,50 @@ export function dispatchAgentCompletionNotification(
     tag: `agent-completion-${event.id}`,
   });
   return true;
+}
+
+interface VisibilityTarget {
+  hidden: boolean;
+  addEventListener(type: string, listener: () => void): void;
+  removeEventListener(type: string, listener: () => void): void;
+}
+
+export function createVisibilityNotificationTracker(
+  getEnabled: () => boolean,
+  getPermission: () => AgentCompletionNotificationPermission,
+  getCurrentSessions: () => AgentSessionRecord[] | null,
+  target: VisibilityTarget = document,
+) {
+  let hiddenSnapshot: AgentSessionRecord[] | null = null;
+
+  function handleVisibilityChange() {
+    if (target.hidden) {
+      hiddenSnapshot = getCurrentSessions();
+      return;
+    }
+
+    if (
+      !hiddenSnapshot ||
+      !getEnabled() ||
+      getPermission() !== "granted"
+    ) {
+      hiddenSnapshot = null;
+      return;
+    }
+
+    const currentSessions = getCurrentSessions();
+    if (currentSessions) {
+      collectAgentCompletionNotificationEvents(
+        hiddenSnapshot,
+        currentSessions,
+      ).forEach(dispatchAgentCompletionNotification);
+    }
+    hiddenSnapshot = null;
+  }
+
+  target.addEventListener("visibilitychange", handleVisibilityChange);
+
+  return () => {
+    target.removeEventListener("visibilitychange", handleVisibilityChange);
+  };
 }

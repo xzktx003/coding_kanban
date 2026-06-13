@@ -1,22 +1,18 @@
 export type MobileTerminalControlId =
   | "interrupt"
   | "escape"
+  | "backspace"
   | "tab"
   | "shift-tab"
   | "enter"
-  | "eof"
+  | "shift-enter"
+  | "ctrl-enter"
   | "arrow-up"
   | "arrow-down"
   | "arrow-left"
   | "arrow-right"
-  | "clear"
-  | "ctrl-u"
-  | "ctrl-w"
-  | "ctrl-k"
-  | "ctrl-y"
-  | "ctrl-a"
-  | "ctrl-o"
-  | "ctrl-e";
+  | "ctrl-l"
+  | "ctrl-z";
 
 export interface MobileTerminalControl {
   id: MobileTerminalControlId;
@@ -41,6 +37,12 @@ export const MOBILE_TERMINAL_CONTROLS: MobileTerminalControl[] = [
     description: "退出 TUI 当前状态",
   },
   {
+    id: "backspace",
+    label: "⌫",
+    input: "\x7f",
+    description: "退格，删除光标前字符",
+  },
+  {
     id: "tab",
     label: "Tab",
     input: "\t",
@@ -48,7 +50,7 @@ export const MOBILE_TERMINAL_CONTROLS: MobileTerminalControl[] = [
   },
   {
     id: "shift-tab",
-    label: "Shift+Tab",
+    label: "⇧Tab",
     input: "\x1b[Z",
     description: "反向切换 TUI 焦点，适用于 Claude / Copilot 表单导航",
   },
@@ -59,10 +61,16 @@ export const MOBILE_TERMINAL_CONTROLS: MobileTerminalControl[] = [
     description: "提交当前输入",
   },
   {
-    id: "eof",
-    label: "Ctrl+D",
-    input: "\x04",
-    description: "结束输入流",
+    id: "shift-enter",
+    label: "⇧Enter",
+    input: "\x1b[13;2u",
+    description: "插入换行（不提交）",
+  },
+  {
+    id: "ctrl-enter",
+    label: "Ctrl+Enter",
+    input: "\x1b[13;5u",
+    description: "强制提交（TUI 多行编辑模式下）",
   },
   {
     id: "arrow-up",
@@ -89,52 +97,16 @@ export const MOBILE_TERMINAL_CONTROLS: MobileTerminalControl[] = [
     description: "方向键右",
   },
   {
-    id: "clear",
+    id: "ctrl-l",
     label: "Ctrl+L",
     input: "\x0c",
     description: "清屏",
   },
   {
-    id: "ctrl-u",
-    label: "Ctrl+U",
-    input: "\x15",
-    description: "删除光标前内容",
-  },
-  {
-    id: "ctrl-w",
-    label: "Ctrl+W",
-    input: "\x17",
-    description: "删除光标前一个词",
-  },
-  {
-    id: "ctrl-k",
-    label: "Ctrl+K",
-    input: "\x0b",
-    description: "删除光标后内容",
-  },
-  {
-    id: "ctrl-y",
-    label: "Ctrl+Y",
-    input: "\x19",
-    description: "粘回刚删除的内容",
-  },
-  {
-    id: "ctrl-a",
-    label: "Ctrl+A",
-    input: "\x01",
-    description: "移动到行首",
-  },
-  {
-    id: "ctrl-o",
-    label: "Ctrl+O",
-    input: "\x0f",
-    description: "触发 Claude / Copilot 常用的面板或模式快捷键",
-  },
-  {
-    id: "ctrl-e",
-    label: "Ctrl+E",
-    input: "\x05",
-    description: "移动到行尾或触发 Agent CLI 快捷操作",
+    id: "ctrl-z",
+    label: "Ctrl+Z",
+    input: "\x1a",
+    description: "挂起进程",
   },
 ];
 

@@ -18,6 +18,8 @@ type SnapshotListener = (snapshot: ListAgentSessionsResponse) => void;
 
 const DEFAULT_SNAPSHOT_THROTTLE_MS = 250;
 const MAX_INFERENCE_WINDOW_CHARS = 4096;
+const DEFAULT_IDLE_DETECTION_INTERVAL_MS = 5_000;
+const DEFAULT_IDLE_THRESHOLD_MS = 15_000;
 
 const ANSI_ESCAPE_PATTERN =
   /\u001B\][^\u0007]*(?:\u0007|\u001B\\)|\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
@@ -79,14 +81,22 @@ export class AgentSessionRegistry {
   private readonly sessionOrder = new Map<string, number>();
   private readonly listeners = new Set<SnapshotListener>();
   private pendingSnapshotTimer: NodeJS.Timeout | null = null;
+  private idleDetectionTimer: NodeJS.Timeout | null = null;
   private activeAgentSessionId: string | null = null;
   private lastSnapshotEmittedAt = 0;
   private nextSessionOrder = 0;
+  private readonly idleThresholdMs: number;
+  private readonly idleDetectionIntervalMs: number;
 
   constructor(
     private readonly snapshotThrottleMs = DEFAULT_SNAPSHOT_THROTTLE_MS,
     private readonly maxOutputEntries = DEFAULT_TERMINAL_REGISTRY_OUTPUT_ENTRIES,
-  ) {}
+    idleThresholdMs = DEFAULT_IDLE_THRESHOLD_MS,
+    idleDetectionIntervalMs = DEFAULT_IDLE_DETECTION_INTERVAL_MS,
+  ) {
+    this.idleThresholdMs = idleThresholdMs;
+    this.idleDetectionIntervalMs = idleDetectionIntervalMs;
+  }
 
   list(): ListAgentSessionsResponse {
     return {
@@ -100,12 +110,15 @@ export class AgentSessionRegistry {
 
   subscribe(listener: SnapshotListener): () => void {
     this.listeners.add(listener);
+    this.startIdleDetection();
+    this.sweepIdleSessions();
     listener(this.list());
 
     return () => {
       this.listeners.delete(listener);
       if (this.listeners.size === 0) {
         this.clearPendingSnapshot();
+        this.stopIdleDetection();
       }
     };
   }
@@ -267,7 +280,9 @@ export class AgentSessionRegistry {
     }
 
     const shouldKeepRunningState =
-      screenChanged && this.shouldKeepRunningState(agentSession);
+      screenChanged &&
+      agentSession.interactionState !== "idle" &&
+      this.shouldKeepRunningState(agentSession);
 
     const nextSession: AgentSessionRecord = {
       ...agentSession,
@@ -486,5 +501,59 @@ export class AgentSessionRegistry {
       agentSession.connectionState === "online" &&
       agentSession.sourceType !== "remote-tmux-discovered"
     );
+  }
+
+  private startIdleDetection(): void {
+    if (this.idleDetectionTimer) {
+      return;
+    }
+
+    this.idleDetectionTimer = setInterval(
+      () => this.sweepIdleSessions(),
+      this.idleDetectionIntervalMs,
+    );
+    this.idleDetectionTimer.unref();
+  }
+
+  private stopIdleDetection(): void {
+    if (!this.idleDetectionTimer) {
+      return;
+    }
+
+    clearInterval(this.idleDetectionTimer);
+    this.idleDetectionTimer = null;
+  }
+
+  private sweepIdleSessions(): void {
+    const now = Date.now();
+    let changed = false;
+
+    for (const [id, session] of this.sessions) {
+      if (
+        session.interactionState !== "running" ||
+        session.connectionState !== "online"
+      ) {
+        continue;
+      }
+
+      const lastActivity = session.lastOutputAt ?? session.lastHeartbeatAt;
+      if (!lastActivity) {
+        continue;
+      }
+
+      const elapsed = now - new Date(lastActivity).getTime();
+      if (elapsed >= this.idleThresholdMs) {
+        this.sessions.set(id, {
+          ...session,
+          interactionState: "idle",
+          stateConfidence: "low",
+        });
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      this.emitSnapshot();
+    }
   }
 }

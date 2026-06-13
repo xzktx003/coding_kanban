@@ -53,8 +53,7 @@ export function MobileWorkbenchPage({
   );
   const notificationUnsupported =
     agentCompletionNotificationPermission === "unsupported";
-  const notificationDenied =
-    agentCompletionNotificationPermission === "denied";
+  const notificationDenied = agentCompletionNotificationPermission === "denied";
   const notificationStatusLabel = notificationUnsupported
     ? "通知不可用"
     : notificationDenied

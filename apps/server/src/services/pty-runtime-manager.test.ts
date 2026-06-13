@@ -332,7 +332,7 @@ test("launch seeds tmux attach replay with pane history outside the visible scre
     tmuxCaptureLines: 120,
   });
   const sessionName = `pty-tmux-history-${Date.now()}`;
-  const marker = `TMUX_HISTORY_${Date.now()}`;
+  const marker = `H${Date.now().toString(36)}`;
 
   killTmuxSession(sessionName);
   execFileSync(
@@ -344,7 +344,7 @@ test("launch seeds tmux attach replay with pane history outside the visible scre
       sessionName,
       "-c",
       process.cwd(),
-      `sh -lc 'for i in $(seq 1 80); do printf "${marker}_%03d\\n" "$i"; done; sleep 30'`,
+      `sh -lc 'i=1; while [ "$i" -le 80 ]; do if [ "$i" -lt 10 ]; then pad="00$i"; else pad="0$i"; fi; echo "${marker}_$pad"; i=$((i + 1)); done; sleep 30'`,
     ],
     {
       stdio: "ignore",

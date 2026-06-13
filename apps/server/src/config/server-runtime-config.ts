@@ -82,11 +82,30 @@ export function resolveTerminalHistoryRuntimeConfig(
   };
 }
 
+const VALID_HOST_PATTERN = /^[\d.]+$|^[a-zA-Z\d]([a-zA-Z\d\-.]*[a-zA-Z\d])?$/;
+
+function parseHost(value: string | undefined): string {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return "0.0.0.0";
+  }
+
+  if (!VALID_HOST_PATTERN.test(normalized) || normalized.includes("_")) {
+    throw new Error(
+      `HOST value "${normalized}" does not look like a valid IP or hostname. ` +
+        "If a conda environment sets HOST to a platform triplet, override it " +
+        "with SERVER_BIND_HOST in .env.",
+    );
+  }
+
+  return normalized;
+}
+
 export function resolveServerRuntimeConfig(
   env: NodeJS.ProcessEnv,
 ): ServerRuntimeConfig {
   return {
-    host: env.HOST?.trim() || "0.0.0.0",
+    host: parseHost(env.SERVER_BIND_HOST ?? env.HOST),
     port: parsePort(resolvePortValue(env)),
     ...resolveTerminalHistoryRuntimeConfig(env),
   };

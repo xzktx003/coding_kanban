@@ -108,7 +108,7 @@ interface VsCodeWebManagerDeps {
 
 interface EnsureVsCodeWebSessionOptions {
   requestHost?: string;
-  requestProtocol?: "http";
+  requestProtocol?: "http" | "https";
 }
 
 interface DataRootPaths {

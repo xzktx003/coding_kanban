@@ -100,3 +100,22 @@ test("rejects invalid SERVER_PORT values", () => {
     /SERVER_PORT must be a positive integer between 1 and 65535/,
   );
 });
+
+test("rejects conda-style platform triplet as HOST", () => {
+  assert.throws(
+    () => resolveServerRuntimeConfig({ HOST: "x86_64-conda-linux-gnu" }),
+    /does not look like a valid IP or hostname/,
+  );
+  assert.throws(
+    () => resolveServerRuntimeConfig({ HOST: "aarch64-conda_cos7-linux-gnu" }),
+    /does not look like a valid IP or hostname/,
+  );
+});
+
+test("SERVER_BIND_HOST takes precedence over HOST", () => {
+  const config = resolveServerRuntimeConfig({
+    SERVER_BIND_HOST: "0.0.0.0",
+    HOST: "x86_64-conda-linux-gnu",
+  });
+  assert.equal(config.host, "0.0.0.0");
+});

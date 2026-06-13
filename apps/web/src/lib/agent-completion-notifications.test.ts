@@ -7,6 +7,7 @@ import {
   AGENT_COMPLETION_NOTIFICATIONS_STORAGE_KEY,
   buildAgentCompletionNotificationBody,
   collectAgentCompletionNotificationEvents,
+  createVisibilityNotificationTracker,
   formatAgentCompletionNotificationsEnabled,
   getAgentCompletionNotificationPermission,
   loadAgentCompletionNotificationsEnabled,
@@ -99,20 +100,29 @@ describe("agent completion notifications", () => {
       makeSession("new-session", "idle"),
     ];
 
-    assert.deepEqual(collectAgentCompletionNotificationEvents(previous, current), [
-      {
-        id: "alpha",
-        displayName: "alpha",
-        agentKind: "codex",
-        interactionState: "idle",
-      },
-      {
-        id: "beta",
-        displayName: "beta",
-        agentKind: "codex",
-        interactionState: "exited",
-      },
-    ]);
+    assert.deepEqual(
+      collectAgentCompletionNotificationEvents(previous, current),
+      [
+        {
+          id: "alpha",
+          displayName: "alpha",
+          agentKind: "codex",
+          interactionState: "idle",
+        },
+        {
+          id: "beta",
+          displayName: "beta",
+          agentKind: "codex",
+          interactionState: "exited",
+        },
+        {
+          id: "delta",
+          displayName: "delta",
+          agentKind: "codex",
+          interactionState: "detached",
+        },
+      ],
+    );
   });
 
   it("builds a user-facing completion notification body", () => {
@@ -125,5 +135,104 @@ describe("agent completion notifications", () => {
       }),
       "「Claude 修复任务」任务已经完成（已空闲），请及时查看。",
     );
+  });
+
+  it("dispatches notifications on visibility change from hidden to visible", () => {
+    const dispatched: string[] = [];
+    const previousNotification = globalThis.Notification;
+
+    function FakeNotification(_title: string, options?: NotificationOptions) {
+      dispatched.push(options?.tag ?? "");
+    }
+    Object.defineProperty(FakeNotification, "permission", {
+      configurable: true,
+      value: "granted",
+    });
+    FakeNotification.requestPermission = async () =>
+      "granted" as NotificationPermission;
+
+    Object.defineProperty(globalThis, "Notification", {
+      configurable: true,
+      value: FakeNotification,
+    });
+
+    let sessions = [makeSession("s1", "running")];
+    const target = new EventTarget() as EventTarget & { hidden: boolean };
+    target.hidden = false;
+
+    const cleanup = createVisibilityNotificationTracker(
+      () => true,
+      () => "granted",
+      () => sessions,
+      target,
+    );
+
+    try {
+      target.hidden = true;
+      target.dispatchEvent(new Event("visibilitychange"));
+
+      sessions = [makeSession("s1", "idle")];
+
+      target.hidden = false;
+      target.dispatchEvent(new Event("visibilitychange"));
+
+      assert.equal(dispatched.length, 1);
+      assert.equal(dispatched[0], "agent-completion-s1");
+    } finally {
+      cleanup();
+      Object.defineProperty(globalThis, "Notification", {
+        configurable: true,
+        value: previousNotification,
+      });
+    }
+  });
+
+  it("does not dispatch visibility notifications when feature is disabled", () => {
+    const dispatched: string[] = [];
+    const previousNotification = globalThis.Notification;
+
+    function FakeNotification(_title: string, options?: NotificationOptions) {
+      dispatched.push(options?.tag ?? "");
+    }
+    Object.defineProperty(FakeNotification, "permission", {
+      configurable: true,
+      value: "granted",
+    });
+    FakeNotification.requestPermission = async () =>
+      "granted" as NotificationPermission;
+
+    Object.defineProperty(globalThis, "Notification", {
+      configurable: true,
+      value: FakeNotification,
+    });
+
+    let sessions = [makeSession("s1", "running")];
+    const target = new EventTarget() as EventTarget & { hidden: boolean };
+    target.hidden = false;
+
+    const cleanup = createVisibilityNotificationTracker(
+      () => false,
+      () => "granted",
+      () => sessions,
+      target,
+    );
+
+    try {
+      target.hidden = true;
+      target.dispatchEvent(new Event("visibilitychange"));
+
+      sessions = [makeSession("s1", "idle")];
+
+      target.hidden = false;
+      target.dispatchEvent(new Event("visibilitychange"));
+
+      assert.equal(dispatched.length, 0);
+    } finally {
+      cleanup();
+      Object.defineProperty(globalThis, "Notification", {
+        configurable: true,
+        value: previousNotification,
+      });
+    }
   });
 });

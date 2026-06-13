@@ -138,7 +138,7 @@ test("POST /api/agent-sessions/:id/vscode-web prefers Origin when the proxy host
 
     assert.equal(openRes.statusCode, 200);
     assert.equal(receivedHost, "127.0.0.1:3000");
-    assert.equal(receivedProtocol, "http");
+    assert.equal(receivedProtocol, "https");
   } finally {
     await app.close();
   }

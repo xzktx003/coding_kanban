@@ -20,9 +20,10 @@ describe("MobileTerminalToolbar", () => {
     assert.match(markup, /aria-controls="mobile-terminal-shortcut-help"/);
     assert.match(markup, />说明<\/button>/);
     assert.match(markup, />Ctrl\+C<\/button>/);
-    assert.match(markup, />Ctrl\+D<\/button>/);
-    assert.match(markup, />Shift\+Tab<\/button>/);
-    assert.match(markup, />Ctrl\+O<\/button>/);
+    assert.match(markup, />⌫<\/button>/);
+    assert.match(markup, />⇧Tab<\/button>/);
+    assert.match(markup, />⇧Enter<\/button>/);
+    assert.match(markup, />Ctrl\+Enter<\/button>/);
   });
 
   it("lists shortcut descriptions for mobile users", () => {
@@ -40,11 +41,10 @@ describe("MobileTerminalToolbar", () => {
     );
     assert.match(markup, /快捷键说明/);
     assert.match(markup, /中断当前输出或命令/);
-    assert.match(markup, /结束输入流/);
     assert.match(markup, /退出 TUI 当前状态/);
     assert.match(markup, /反向切换 TUI 焦点/);
-    assert.match(markup, /Claude \/ Copilot/);
-    assert.match(markup, /方向键上/);
+    assert.match(markup, /插入换行/);
+    assert.match(markup, /强制提交/);
     assert.match(markup, /清屏/);
   });
 });

@@ -105,7 +105,7 @@
 
 - shell 解析逻辑曾默认依赖 zsh，导致 Linux/macOS 某些环境无法正常启动。修复为优先读 `SHELL`，再回退到 `bash -> zsh -> sh`。
 - tmux 路径曾只假设单一路径，导致 Homebrew Intel/Apple Silicon 或 PATH 安装下行为不稳定。修复为支持 `TMUX_BINARY`、Homebrew 常见路径和 `PATH` 自动探测。
-- 前后端端口和 Vite 代理目标曾被硬编码，切换环境后容易错连。修复为统一改成 `HOST`、`PORT`、`WEB_HOST`、`WEB_PORT`、`WEB_BACKEND_*` 等环境变量驱动。
+- 前后端端口和 Vite 代理目标曾被硬编码，切换环境后容易错连。修复为统一改成 `SERVER_BIND_HOST`、`PORT`、`WEB_HOST`、`WEB_PORT`、`WEB_BACKEND_*` 等环境变量驱动。`HOST` 仍兼容但优先级低于 `SERVER_BIND_HOST`，且会做格式校验防止 conda 等工具链污染。
 
 ## 终端焦点保留
 
@@ -127,3 +127,5 @@
 - 当前看板终端里按 `Shift+Left` 会在 Codex 输入框里出现 `[1;2D` / `D` 并可能伴随换行，同类 `Ctrl/Alt/Shift` 方向键和 Home/End/Delete/PageUp/PageDown 也存在字面量泄漏风险。根因是本地 tmux WebSocket 输入优先走 `tmux send-keys` 后，`LocalTmuxAdapter.buildTmuxSendKeySteps` 只识别普通箭头和 application-cursor 箭头，不识别 xterm 的修饰键 CSI 序列（如 `ESC[1;2D`）及常见导航键序列，于是把 `ESC` 当 Escape 键、把余下内容当普通文本注入 pane。修复为在 tmux send-keys 转换层解析 xterm 修饰键方向键、Home/End、Insert/Delete、PageUp/PageDown 和 F1-F12 tilde 序列，映射成 tmux key name；前后端过滤层补测试确保这些键序列不会被误删。
 - 当前看板终端里对 Codex 会话右键粘贴多行内容时，每一行都会被当成一次回车提交：根因是上一版为避免 `[200~` / `[201~` 泄漏而剥离 bracketed paste 起止符，导致区块内真实换行继续被 `buildTmuxSendKeySteps` 映射成 tmux `Enter`。修复为完整保留 `ESC[200~ ... ESC[201~` bracketed paste 区块并整体通过 `tmux send-keys -l` 注入，区块外的 `\r` / `\n` 仍按普通 Enter 处理，确保 Codex/TUI 能按一次粘贴接收多行文本。
 - Codex 会话中右键粘贴多行内容仍可能被逐行提交：根因是 xterm/WebSocket 可能把一次 bracketed paste 分成多帧发送，上一版只在单帧内识别完整 `ESC[200~ ... ESC[201~`，第一帧之后的裸文本帧失去了 paste 上下文，里面的 `\r` 又被映射成 tmux `Enter`。修复为 `LocalTmuxAdapter` 按 agent session 记录 bracketed paste open 状态，直到收到结束符前所有输入帧都走 literal；新增 WebSocket+真实 tmux 回归，断言 split paste 三帧最终按原始字节进入 pane。
+- `restart-dev.sh` 在 conda 环境（如 `xh2`）里启动失败，报 `getaddrinfo EAI_AGAIN x86_64-conda-linux-gnu`。根因是 conda activate 脚本把 `HOST` 环境变量设为平台编译三元组（cross-compilation triplet），而 `restart-dev.sh` 的 `SERVER_BIND_HOST` 回退链 `${HOST:-0.0.0.0}` 拿到了这个无效值并传给后端 Fastify `listen()`。修复为脚本不再回退到 `$HOST`，默认直接 `0.0.0.0`；同时后端 `resolveServerRuntimeConfig` 优先读 `SERVER_BIND_HOST`，并对 HOST 值做格式校验，含 `_` 或不符合 IP/hostname 模式时直接报错提示用户使用 `SERVER_BIND_HOST`。
+- `pty-runtime-manager` 的 tmux 历史回放测试在窄 detached pane 环境中稳定超时。根因是测试 marker 过长，tmux capture 会按 28 列默认宽度把 `_080` 拆到下一行；同时 tmux shell-command 中的 `%03d` 会被 tmux 格式处理干扰。修复为测试生成短 marker，并用 shell 补零逻辑代替 `%` 格式符，避免测试依赖 tmux pane 宽度或 tmux 格式扩展。
