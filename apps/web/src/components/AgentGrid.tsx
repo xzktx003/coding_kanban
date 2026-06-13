@@ -30,6 +30,8 @@ interface AgentGridProps {
   onHideSession?: (id: string) => void;
   onCopyConnectCommand?: (id: string) => void;
   onKillTmux?: (id: string) => void;
+  onNewSession?: () => void;
+  onScanTmux?: () => void;
   suspendedSessionId?: string | null;
   hiddenCount?: number;
   onShowHidden?: () => void;
@@ -76,6 +78,8 @@ export function AgentGrid({
   onHideSession,
   onCopyConnectCommand,
   onKillTmux,
+  onNewSession,
+  onScanTmux,
   suspendedSessionId,
   hiddenCount = 0,
   onShowHidden,
@@ -223,13 +227,37 @@ export function AgentGrid({
         </div>
       </div>
       {sessions.length === 0 ? (
-        <div className="grid-empty">
+        <div className="grid-empty grid-empty--with-actions">
           <p>
             {allSessions.length > 0
               ? "没有匹配的会话，试试调整筛选条件"
               : "暂无 Agent 会话"}
           </p>
-          {allSessions.length === 0 && <p>点击左侧面板启动或扫描 Agent</p>}
+          {allSessions.length === 0 && (
+            <div className="grid-empty-actions">
+              <p className="grid-empty-hint">点击左侧面板启动或扫描 Agent</p>
+              <div className="grid-empty-buttons">
+                {onNewSession && (
+                  <button
+                    className="grid-empty-btn grid-empty-btn--primary"
+                    onClick={onNewSession}
+                    type="button"
+                  >
+                    + 新建会话
+                  </button>
+                )}
+                {onScanTmux && (
+                  <button
+                    className="grid-empty-btn grid-empty-btn--secondary"
+                    onClick={onScanTmux}
+                    type="button"
+                  >
+                    扫描 tmux
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div

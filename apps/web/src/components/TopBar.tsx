@@ -170,6 +170,7 @@ interface TopBarProps {
   terminalFontSize: number;
   agentCompletionNotificationsEnabled: boolean;
   agentCompletionNotificationPermission: AgentCompletionNotificationPermission;
+  connectionStatus?: "connecting" | "connected" | "disconnected" | "reconnecting";
   onToggleCollapsed: () => void;
   onToggleFileBrowser: () => void;
   onToggleVsCode: () => void;
@@ -197,6 +198,7 @@ export function TopBar({
   terminalFontSize,
   agentCompletionNotificationsEnabled,
   agentCompletionNotificationPermission,
+  connectionStatus,
   onToggleCollapsed,
   onToggleFileBrowser,
   onToggleVsCode,
@@ -424,6 +426,23 @@ export function TopBar({
           </a>
         </div>
         <div className="top-bar-stats">
+          {connectionStatus && connectionStatus !== "connected" && (
+            <span
+              className={`stat-item connection-status connection-status--${connectionStatus}`}
+              data-testid="connection-status"
+              title={
+                connectionStatus === "connecting"
+                  ? "正在连接服务器..."
+                  : connectionStatus === "reconnecting"
+                    ? "连接中断，正在重连..."
+                    : "连接已断开"
+              }
+            >
+              {connectionStatus === "connecting" && "⚡ 连接中..."}
+              {connectionStatus === "reconnecting" && "⚡ 重连中..."}
+              {connectionStatus === "disconnected" && "✗ 连接断开"}
+            </span>
+          )}
           <span className="stat-item">
             共 <strong>{totalCount}</strong> 个会话
           </span>

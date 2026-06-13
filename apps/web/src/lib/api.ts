@@ -104,30 +104,52 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const contentType = response.headers.get("content-type") ?? "";
-
-    try {
-      if (contentType.includes("application/json")) {
-        const payload = (await response.json()) as { error?: string };
-        if (payload.error) {
-          throw new Error(payload.error);
-        }
-      } else {
-        const text = (await response.text()).trim();
-        if (text) {
-          throw new Error(text);
-        }
-      }
-    } catch (error) {
-      if (error instanceof Error) {
-        throw error;
-      }
-    }
-
-    throw new Error(`Request failed: ${response.status}`);
+    throw new Error(await parseFailedResponseMessage(response));
   }
 
-  return (await response.json()) as T;
+  return parseSuccessfulResponse<T>(response);
+}
+
+export async function parseFailedResponseMessage(
+  response: Response,
+): Promise<string> {
+  const fallback = `Request failed: ${response.status}`;
+  const contentType = response.headers.get("content-type") ?? "";
+  const text = (await response.text()).trim();
+
+  if (!text) {
+    return fallback;
+  }
+
+  if (!contentType.includes("application/json")) {
+    return text;
+  }
+
+  try {
+    const payload = JSON.parse(text) as { error?: unknown };
+    return typeof payload.error === "string" && payload.error.trim()
+      ? payload.error
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export async function parseSuccessfulResponse<T>(response: Response): Promise<T> {
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  const text = await response.text();
+  if (!text.trim()) {
+    return undefined as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error("Response returned invalid JSON");
+  }
 }
 
 export function listAgentSessions(): Promise<ListAgentSessionsResponse> {
@@ -239,14 +261,67 @@ export function refreshTmuxSession(
 const WS_RECONNECT_BASE_MS = 1_000;
 const WS_RECONNECT_MAX_MS = 30_000;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isAgentSessionListPayload(
+  value: unknown,
+): value is ListAgentSessionsResponse {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    Array.isArray(value.items) &&
+    (typeof value.activeAgentSessionId === "string" ||
+      value.activeAgentSessionId === null) &&
+    typeof value.updatedAt === "string"
+  );
+}
+
+export function parseAgentSessionSnapshotEvent(
+  text: string,
+): AgentSessionSnapshotEvent | null {
+  let payload: unknown;
+
+  try {
+    payload = JSON.parse(text) as unknown;
+  } catch {
+    return null;
+  }
+
+  if (!isRecord(payload) || payload.type !== "snapshot") {
+    return null;
+  }
+
+  if (!isAgentSessionListPayload(payload.payload)) {
+    return null;
+  }
+
+  return {
+    type: "snapshot",
+    payload: payload.payload,
+  };
+}
+
+export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "reconnecting";
+
 export function subscribeAgentSessions(
   onSnapshot: (snapshot: ListAgentSessionsResponse) => void,
+  onStatusChange?: (status: ConnectionStatus) => void,
 ): () => void {
   let closed = false;
   let closeAfterOpen = false;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempts = 0;
   let socket = new WebSocket(buildWebSocketUrl());
+
+  function reportStatus(status: ConnectionStatus) {
+    if (onStatusChange && !closed) {
+      onStatusChange(status);
+    }
+  }
 
   async function handleMessageData(data: unknown) {
     const text =
@@ -261,20 +336,22 @@ export function subscribeAgentSessions(
     }
 
     recordAgentSnapshotFrame(text);
-    const payload = JSON.parse(text) as AgentSessionSnapshotEvent;
+    const payload = parseAgentSessionSnapshotEvent(text);
 
-    if (payload.type === "snapshot" && !closed) {
+    if (payload && !closed) {
       onSnapshot(payload.payload);
     }
   }
 
   function connect() {
+    reportStatus("connecting");
     socket.addEventListener("message", (event) => {
       void handleMessageData(event.data);
     });
 
     socket.addEventListener("open", () => {
       reconnectAttempts = 0;
+      reportStatus("connected");
       if (closeAfterOpen) {
         socket.close();
       }
@@ -285,6 +362,7 @@ export function subscribeAgentSessions(
         return;
       }
 
+      reportStatus("reconnecting");
       const delay = Math.min(
         WS_RECONNECT_BASE_MS * 2 ** reconnectAttempts,
         WS_RECONNECT_MAX_MS,
@@ -302,6 +380,7 @@ export function subscribeAgentSessions(
 
   return () => {
     closed = true;
+    reportStatus("disconnected");
 
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
@@ -415,12 +494,10 @@ export async function downloadFile(body: {
     throw new Error(`Request failed: ${response.status}`);
   }
 
-  const disposition = response.headers.get("Content-Disposition") ?? "";
-  const filenameMatch = disposition.match(/filename="(.+?)"/);
-  const filename =
-    filenameMatch?.[1] ??
-    body.path.split("/").filter(Boolean).pop() ??
-    "download";
+  const filename = parseDownloadFilename(
+    response.headers.get("Content-Disposition") ?? "",
+    body.path,
+  );
 
   const blob = await response.blob();
   const url = URL.createObjectURL(blob);
@@ -431,6 +508,75 @@ export async function downloadFile(body: {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+function stripHeaderQuotes(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1);
+  }
+
+  return trimmed;
+}
+
+function sanitizeSuggestedDownloadFilename(filename: string): string {
+  return filename.replace(/[\\/]/g, "_").replace(/[\x00-\x1f\x7f]/g, "_");
+}
+
+function parseEncodedHeaderFilename(value: string): string | null {
+  const stripped = stripHeaderQuotes(value);
+  const match = stripped.match(/^([^']*)'[^']*'(.*)$/);
+  if (!match) {
+    return null;
+  }
+
+  const charset = match[1]?.toLowerCase() ?? "";
+  if (charset && charset !== "utf-8") {
+    return null;
+  }
+
+  try {
+    const decoded = decodeURIComponent(match[2] ?? "");
+    return decoded.trim() ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+export function parseDownloadFilename(
+  contentDisposition: string,
+  fallbackPath: string,
+): string {
+  const encodedFilenameMatch = contentDisposition.match(
+    /(?:^|;)\s*filename\*=([^;]+)/i,
+  );
+  const encodedFilename = encodedFilenameMatch?.[1]
+    ? parseEncodedHeaderFilename(encodedFilenameMatch[1])
+    : null;
+  if (encodedFilename) {
+    return sanitizeSuggestedDownloadFilename(encodedFilename);
+  }
+
+  const quotedFilenameMatch = contentDisposition.match(
+    /(?:^|;)\s*filename="([^"]*)"/i,
+  );
+  if (quotedFilenameMatch?.[1]?.trim()) {
+    return sanitizeSuggestedDownloadFilename(quotedFilenameMatch[1]);
+  }
+
+  const unquotedFilenameMatch = contentDisposition.match(
+    /(?:^|;)\s*filename=([^;]+)/i,
+  );
+  const unquotedFilename = unquotedFilenameMatch?.[1]
+    ? stripHeaderQuotes(unquotedFilenameMatch[1])
+    : "";
+  if (unquotedFilename.trim()) {
+    return sanitizeSuggestedDownloadFilename(unquotedFilename);
+  }
+
+  return sanitizeSuggestedDownloadFilename(
+    fallbackPath.split(/[\\/]/).filter(Boolean).pop() ?? "download",
+  );
 }
 
 export function uploadFiles(options: {
@@ -481,9 +627,11 @@ export function uploadFiles(options: {
         return;
       }
 
-      resolve(
-        (xhr.response ?? JSON.parse(xhr.responseText)) as FileUploadResponse,
-      );
+      try {
+        resolve(parseXhrUploadResponse(xhr.response, () => xhr.responseText));
+      } catch (error) {
+        reject(error);
+      }
     };
 
     if (options.signal) {
@@ -496,6 +644,53 @@ export function uploadFiles(options: {
 
     xhr.send(formData);
   });
+}
+
+export function parseFileUploadResponse(
+  response: unknown,
+  responseText: string,
+): FileUploadResponse {
+  const parsed =
+    response ??
+    (() => {
+      try {
+        return JSON.parse(responseText) as unknown;
+      } catch {
+        throw new Error("Upload returned invalid JSON");
+      }
+    })();
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Upload returned an invalid response");
+  }
+
+  const uploadedPaths = (parsed as Partial<FileUploadResponse>).uploadedPaths;
+  if (
+    !Array.isArray(uploadedPaths) ||
+    uploadedPaths.some((entry) => typeof entry !== "string")
+  ) {
+    throw new Error("Upload returned an invalid response");
+  }
+
+  return { uploadedPaths };
+}
+
+export function parseXhrUploadResponse(
+  response: unknown,
+  readResponseText: () => string,
+): FileUploadResponse {
+  if (response !== null && response !== undefined) {
+    return parseFileUploadResponse(response, "");
+  }
+
+  let responseText = "";
+  try {
+    responseText = readResponseText();
+  } catch {
+    responseText = "";
+  }
+
+  return parseFileUploadResponse(response, responseText);
 }
 
 export function deleteAgentSession(agentSessionId: string): Promise<void> {
