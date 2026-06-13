@@ -879,7 +879,7 @@ export default function App() {
       Math.max(FILE_BROWSER_MIN_WIDTH, resizeState.startWidth + delta),
     );
 
-    setFileBrowserUiState((current) => ({
+    setFileBrowserUiState((current: FileBrowserUiState) => ({
       ...current,
       width: nextWidth,
     }));
@@ -894,7 +894,7 @@ export default function App() {
       return;
     }
 
-    setFileBrowserUiState((current) => {
+    setFileBrowserUiState((current: FileBrowserUiState) => {
       const nextSideCollapsed = !current.sideCollapsed;
       return {
         ...current,
@@ -909,7 +909,7 @@ export default function App() {
       return;
     }
 
-    setFileBrowserUiState((current) => {
+    setFileBrowserUiState((current: FileBrowserUiState) => {
       const nextMainCollapsed = !current.mainCollapsed;
       return {
         ...current,
