@@ -343,13 +343,27 @@ export class AgentSessionRegistry {
       this.screenWindows.set(agentSessionId, normalizedScreen);
     }
 
-    const shouldKeepRunningState = agentSession.controlMode !== "observe";
+    const screenChanged = normalizedScreen !== previousScreen;
+    const now = new Date(nowMs).toISOString();
+    const shouldKeepRunningState =
+      agentSession.controlMode !== "observe" && screenChanged;
 
     return this.updateSession(agentSessionId, {
-      interactionState: shouldKeepRunningState ? "running" : "detached",
-      stateConfidence: shouldKeepRunningState ? "medium" : "high",
-      lastHeartbeatAt: new Date(nowMs).toISOString(),
-      lastRefreshedAt: new Date(nowMs).toISOString(),
+      interactionState:
+        agentSession.controlMode === "observe"
+          ? "detached"
+          : shouldKeepRunningState
+            ? "running"
+            : agentSession.interactionState,
+      stateConfidence:
+        agentSession.controlMode === "observe"
+          ? "high"
+          : shouldKeepRunningState
+            ? "medium"
+            : agentSession.stateConfidence,
+      lastHeartbeatAt: now,
+      lastOutputAt: screenChanged ? now : agentSession.lastOutputAt,
+      lastRefreshedAt: now,
     });
   }
 

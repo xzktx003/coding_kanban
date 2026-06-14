@@ -55,10 +55,12 @@ const CONTROL_KEY_MAP = new Map<string, string>([
   ["\x0b", "C-k"],
   ["\x0c", "C-l"],
   ["\x0f", "C-o"],
+  ["\x1a", "C-z"],
   ["\x15", "C-u"],
   ["\x17", "C-w"],
   ["\x19", "C-y"],
   ["\x1b", "Escape"],
+  ["\x7f", "BSpace"],
 ]);
 
 const CSI_KEY_MAP = new Map<string, string>([
@@ -85,6 +87,7 @@ const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
 
 const MODIFIED_CURSOR_KEY_PATTERN = /^\x1b\[1;([2-8])([ABCDHF])/;
+const CSI_U_KEY_PATTERN = /^\x1b\[(13);([25])u/;
 const TILDE_KEY_PATTERN =
   /^\x1b\[(1|2|3|4|5|6|7|8|11|12|13|14|15|17|18|19|20|21|23|24)(?:;([2-8]))?~/;
 
@@ -118,6 +121,11 @@ const TILDE_KEY_MAP = new Map<string, string>([
   ["21", "F10"],
   ["23", "F11"],
   ["24", "F12"],
+]);
+
+const CSI_U_KEY_MAP = new Map<string, string>([
+  ["13;2", "S-Enter"],
+  ["13;5", "C-Enter"],
 ]);
 
 interface ParsedTmuxKeySequence {
@@ -173,6 +181,20 @@ function readTmuxKeySequence(
       return {
         key: applyXtermModifier(baseKey, modifierValue),
         length: modifiedCursorMatch[0].length,
+      };
+    }
+  }
+
+  const csiUKeyMatch = CSI_U_KEY_PATTERN.exec(sequenceTail);
+
+  if (csiUKeyMatch) {
+    const [, keyCode, modifierValue] = csiUKeyMatch;
+    const key = CSI_U_KEY_MAP.get(`${keyCode};${modifierValue}`);
+
+    if (key) {
+      return {
+        key,
+        length: csiUKeyMatch[0].length,
       };
     }
   }

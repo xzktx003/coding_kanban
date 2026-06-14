@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { buildServer } from "../app.js";
@@ -32,6 +35,32 @@ function killTmuxSession(sessionName: string): void {
   } catch {
     // ignore cleanup failures
   }
+}
+
+async function waitForFileText(
+  filePath: string,
+  expectedText: string,
+  timeoutMs = 3_000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if (existsSync(filePath)) {
+      const text = readFileSync(filePath, "utf8");
+      if (text === expectedText) {
+        return text;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  const actualText = existsSync(filePath)
+    ? readFileSync(filePath, "utf8")
+    : "<missing>";
+  throw new Error(
+    `file ${filePath} did not become ${expectedText}; actual=${actualText}`,
+  );
 }
 
 function waitForTerminalMarker(
@@ -197,6 +226,126 @@ test("POST /api/agent-discovery/tmux/add can attach to a discovered tmux pane wi
 
     assert.match(terminalMessage.payload, new RegExp(marker));
   } finally {
+    if (agentSessionId) {
+      await fetch(`${baseUrl}/api/agent-sessions/${agentSessionId}`, {
+        method: "DELETE",
+      }).catch(() => {});
+    }
+
+    await app.close();
+    killTmuxSession(sessionName);
+  }
+});
+
+test("POST /api/agent-sessions/:id/stdin delivers every mobile shortcut to a local tmux pane", async () => {
+  const { app } = buildServer();
+  const sessionName = `tmux-mobile-keys-${Date.now()}`;
+  const capturePath = join(tmpdir(), `${sessionName}.hex`);
+  const readyMarker = `TMUX_MOBILE_KEYS_READY_${Date.now()}`;
+  const mobileShortcutInputs = [
+    "\x03",
+    "\x1b",
+    "\x7f",
+    "\t",
+    "\x1b[Z",
+    "\r",
+    "\x1b[13;2u",
+    "\x1b[13;5u",
+    "\x1b[A",
+    "\x1b[B",
+    "\x1b[D",
+    "\x1b[C",
+    "\x0c",
+    "\x1a",
+  ];
+  const expectedHex = Buffer.from(mobileShortcutInputs.join("")).toString(
+    "hex",
+  );
+  let agentSessionId: string | undefined;
+
+  killTmuxSession(sessionName);
+  rmSync(capturePath, { force: true });
+
+  runTmux([
+    "new-session",
+    "-d",
+    "-s",
+    sessionName,
+    "-c",
+    process.cwd(),
+    [
+      "node -e ",
+      JSON.stringify(
+        [
+          "const fs = require('node:fs');",
+          "process.stdin.setRawMode(true);",
+          "process.stdin.resume();",
+          `const capturePath = ${JSON.stringify(capturePath)};`,
+          `const expectedLength = Buffer.from(${JSON.stringify(mobileShortcutInputs.join(""))}).length;`,
+          `console.log(${JSON.stringify(readyMarker)});`,
+          "const chunks = [];",
+          "process.stdin.on('data', (chunk) => {",
+          "chunks.push(chunk);",
+          "const input = Buffer.concat(chunks);",
+          "fs.writeFileSync(capturePath, input.toString('hex'));",
+          "if (input.length >= expectedLength) process.exit(0);",
+          "});",
+        ].join(""),
+      ),
+    ].join(""),
+  ]);
+
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const address = app.server.address();
+
+  assert.ok(address && typeof address === "object");
+
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const terminalUrl = `ws://127.0.0.1:${address.port}`;
+
+  try {
+    const addResponse = await fetch(`${baseUrl}/api/agent-discovery/tmux/add`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        tmuxSession: sessionName,
+        displayName: sessionName,
+        workingDirectory: process.cwd(),
+        agentKind: "shell",
+        interactionState: "running",
+      }),
+    });
+
+    assert.equal(addResponse.status, 201);
+    const payload = (await addResponse.json()) as { id: string };
+    agentSessionId = payload.id;
+
+    await waitForTerminalMarker(
+      `${terminalUrl}/ws/agent-sessions/${agentSessionId}/terminal`,
+      readyMarker,
+    );
+
+    for (const input of mobileShortcutInputs) {
+      const stdinResponse: Response = await fetch(
+        `${baseUrl}/api/agent-sessions/${agentSessionId}/stdin`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ input }),
+        },
+      );
+
+      assert.equal(stdinResponse.status, 200);
+    }
+
+    assert.equal(await waitForFileText(capturePath, expectedHex), expectedHex);
+  } finally {
+    rmSync(capturePath, { force: true });
+
     if (agentSessionId) {
       await fetch(`${baseUrl}/api/agent-sessions/${agentSessionId}`, {
         method: "DELETE",

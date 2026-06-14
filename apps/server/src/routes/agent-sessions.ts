@@ -29,6 +29,11 @@ import {
 } from "../services/runtime-compat.js";
 import { SshRuntimeManager } from "../services/ssh-runtime-manager.js";
 import {
+  isTerminalFocusPayload,
+  isTerminalPtyControlPayload,
+  stripTerminalResponsePayload,
+} from "../services/terminal-control-filter.js";
+import {
   UnsupportedVsCodeWebSessionError,
   VsCodeWebManager,
   VsCodeWebUnavailableError,
@@ -412,24 +417,56 @@ export async function registerAgentSessionRoutes(
     "/api/agent-sessions/:id/stdin",
     async (request) => {
       const agentSession = registry.get(request.params.id);
+      const sanitizedInput = stripTerminalResponsePayload(request.body.input);
+      if (!sanitizedInput) {
+        return agentSession;
+      }
+
+      const sanitizedBody = { input: sanitizedInput };
 
       if (agentSession.sourceType === "remote-tmux-discovered") {
-        return tmuxAdapter.writeInput(agentSession, request.body);
+        return tmuxAdapter.writeInput(agentSession, sanitizedBody);
       }
 
       if (
         agentSession.sourceType === "remote-connect" &&
         agentSession.transportRef?.runtimeId?.startsWith("ssh:")
       ) {
-        return sshRuntimeManager.writeInput(request.params.id, request.body);
+        return sshRuntimeManager.writeInput(request.params.id, sanitizedBody);
+      }
+
+      if (agentSession.transportRef?.tmuxSession && !agentSession.sshTarget) {
+        if (isTerminalFocusPayload(sanitizedInput)) {
+          return agentSession;
+        }
+
+        if (isTerminalPtyControlPayload(sanitizedInput)) {
+          if (ptyRuntimeManager.has(request.params.id)) {
+            ptyRuntimeManager.write(request.params.id, sanitizedInput);
+            return registry.get(request.params.id);
+          }
+          return agentSession;
+        }
+
+        try {
+          return await tmuxAdapter.writeInput(agentSession, sanitizedBody);
+        } catch {
+          if (ptyRuntimeManager.has(request.params.id)) {
+            ptyRuntimeManager.write(request.params.id, sanitizedInput);
+            return registry.get(request.params.id);
+          }
+          throw new Error(
+            `No tmux runtime found for session: ${request.params.id}`,
+          );
+        }
       }
 
       if (ptyRuntimeManager.has(request.params.id)) {
-        ptyRuntimeManager.write(request.params.id, request.body.input);
+        ptyRuntimeManager.write(request.params.id, sanitizedInput);
         return registry.get(request.params.id);
       }
 
-      return processRuntimeManager.writeInput(request.params.id, request.body);
+      return processRuntimeManager.writeInput(request.params.id, sanitizedBody);
     },
   );
 

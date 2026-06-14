@@ -84,14 +84,29 @@ test("buildTmuxSendKeySteps preserves text submit while keeping paste raw", () =
 });
 
 test("buildTmuxSendKeySteps maps mobile control keys without appending Enter", () => {
+  assert.deepEqual(buildTmuxSendKeySteps("\x03"), [
+    { kind: "keys", keys: ["C-c"] },
+  ]);
+  assert.deepEqual(buildTmuxSendKeySteps("\x1b"), [
+    { kind: "keys", keys: ["Escape"] },
+  ]);
+  assert.deepEqual(buildTmuxSendKeySteps("\x7f"), [
+    { kind: "keys", keys: ["BSpace"] },
+  ]);
   assert.deepEqual(buildTmuxSendKeySteps("\t"), [
     { kind: "keys", keys: ["Tab"] },
   ]);
   assert.deepEqual(buildTmuxSendKeySteps("\x1b[Z"), [
     { kind: "keys", keys: ["BTab"] },
   ]);
-  assert.deepEqual(buildTmuxSendKeySteps("\x03"), [
-    { kind: "keys", keys: ["C-c"] },
+  assert.deepEqual(buildTmuxSendKeySteps("\r"), [
+    { kind: "keys", keys: ["Enter"] },
+  ]);
+  assert.deepEqual(buildTmuxSendKeySteps("\x1b[13;2u"), [
+    { kind: "keys", keys: ["S-Enter"] },
+  ]);
+  assert.deepEqual(buildTmuxSendKeySteps("\x1b[13;5u"), [
+    { kind: "keys", keys: ["C-Enter"] },
   ]);
   assert.deepEqual(buildTmuxSendKeySteps("\x0f"), [
     { kind: "keys", keys: ["C-o"] },
@@ -101,6 +116,9 @@ test("buildTmuxSendKeySteps maps mobile control keys without appending Enter", (
   ]);
   assert.deepEqual(buildTmuxSendKeySteps("\x15\x17\x0b\x19"), [
     { kind: "keys", keys: ["C-u", "C-w", "C-k", "C-y"] },
+  ]);
+  assert.deepEqual(buildTmuxSendKeySteps("\x0c\x1a"), [
+    { kind: "keys", keys: ["C-l", "C-z"] },
   ]);
   assert.deepEqual(buildTmuxSendKeySteps("\x1b[A"), [
     { kind: "keys", keys: ["Up"] },

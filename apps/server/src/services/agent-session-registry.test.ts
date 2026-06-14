@@ -280,6 +280,43 @@ test("tmux observe-only sessions stay detached even when screen is unchanged", a
   assert.equal(updated.stateConfidence, "high");
 });
 
+test("unchanged controllable tmux refreshes do not prevent idle detection", async () => {
+  const idleThresholdMs = 50;
+  const idleIntervalMs = 15;
+  const registry = new AgentSessionRegistry(
+    0,
+    100,
+    idleThresholdMs,
+    idleIntervalMs,
+  );
+  const session = registry.register({
+    workspaceId: "tmux",
+    hostId: "local-tmux",
+    sourceType: "remote-tmux-discovered",
+    agentKind: "codex",
+    displayName: "tmux pane",
+    controlMode: "control",
+    interactionState: "running",
+  });
+  const states: string[] = [];
+
+  registry.subscribe((snapshot) => {
+    const item = snapshot.items.find((entry) => entry.id === session.id);
+    if (item) states.push(item.interactionState);
+  });
+
+  registry.syncCapturedScreen(session.id, "finished prompt");
+  await wait(20);
+  registry.syncCapturedScreen(session.id, "finished prompt");
+  await wait(20);
+  registry.syncCapturedScreen(session.id, "finished prompt");
+
+  await wait(idleThresholdMs + idleIntervalMs + 10);
+
+  assert.equal(registry.get(session.id).interactionState, "idle");
+  assert.ok(states.includes("idle"), "subscriber should receive idle state");
+});
+
 test("direct sessions do not keep awaiting_input timers after output", () => {
   const registry = new AgentSessionRegistry();
   const session = registry.register({
