@@ -303,6 +303,7 @@ export interface FileEntry {
   modifiedAt: string;
   permissions: string;
   isHidden: boolean;
+  symlinkTargetType?: "file" | "directory";
 }
 
 export interface ListFilesInput {

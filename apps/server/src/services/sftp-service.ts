@@ -90,6 +90,7 @@ function attrsToFileEntry(
   name: string,
   attrs: Attributes,
   longname?: string,
+  symlinkTargetType?: "file" | "directory",
 ): FileEntry {
   const typeFromLongname = longname?.startsWith("d")
     ? "directory"
@@ -107,6 +108,7 @@ function attrsToFileEntry(
     modifiedAt,
     permissions: formatPermissions(attrs.mode ?? 0, type),
     isHidden: name.startsWith("."),
+    ...(type === "symlink" && symlinkTargetType ? { symlinkTargetType } : {}),
   };
 }
 
@@ -266,29 +268,50 @@ export class SftpService {
     return this.withConnection(target, async (client) =>
       withSftp(client, async (sftp) => {
         const items = await sftpReaddir(sftp, remotePath);
-        const entries = items
-          .map((item) =>
-            attrsToFileEntry(
+        const entries = await Promise.all(
+          items.map(async (item) => {
+            let symlinkTargetType: "file" | "directory" | undefined;
+            const typeFromLongname = item.longname?.startsWith("l");
+            const typeFromMode = detectFileEntryType(item.attrs.mode ?? 0) === "symlink";
+            if (typeFromLongname || typeFromMode) {
+              try {
+                const targetPath = joinRemotePath(remotePath, item.filename);
+                const targetStats = await sftpStat(sftp, targetPath);
+                if (((targetStats.mode ?? 0) & 0o170000) === 0o040000) {
+                  symlinkTargetType = "directory";
+                } else {
+                  symlinkTargetType = "file";
+                }
+              } catch {
+                // broken symlink
+              }
+            }
+            return attrsToFileEntry(
               remotePath,
               item.filename,
               item.attrs,
               item.longname,
-            ),
-          )
+              symlinkTargetType,
+            );
+          }),
+        );
+        const filtered = entries
           .filter((entry) => showHidden || !entry.isHidden)
           .sort((left, right) => {
-            if (left.type === "directory" && right.type !== "directory") {
+            const leftIsDir = left.type === "directory" || left.symlinkTargetType === "directory";
+            const rightIsDir = right.type === "directory" || right.symlinkTargetType === "directory";
+            if (leftIsDir && !rightIsDir) {
               return -1;
             }
 
-            if (left.type !== "directory" && right.type === "directory") {
+            if (!leftIsDir && rightIsDir) {
               return 1;
             }
 
             return left.name.localeCompare(right.name);
           });
 
-        return { path: remotePath, entries };
+        return { path: remotePath, entries: filtered };
       }),
     );
   }

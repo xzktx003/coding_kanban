@@ -70,6 +70,9 @@ function getFileIcon(entry: FileEntry): string {
   if (entry.type === "directory") {
     return "📁";
   }
+  if (entry.type === "symlink" && entry.symlinkTargetType === "directory") {
+    return "🔗📁";
+  }
 
   const lower = entry.name.toLowerCase();
   if (/\.(png|jpg|jpeg|gif|svg|webp)$/.test(lower)) {
@@ -332,10 +335,10 @@ export function FileBrowserDrawer({
     }
 
     const delta = resizeState.startY - clientY;
-    const maxHeight = Math.max(180, layout.clientHeight - 180);
+    const maxHeight = Math.max(80, layout.clientHeight - 80);
     const nextHeight = Math.min(
       maxHeight,
-      Math.max(160, resizeState.startHeight + delta),
+      Math.max(40, resizeState.startHeight + delta),
     );
     setPreviewHeight(nextHeight);
   }
@@ -540,7 +543,7 @@ export function FileBrowserDrawer({
           className="file-browser-content"
           ref={previewLayoutRef}
           style={{
-            gridTemplateRows: `minmax(180px, 1fr) 8px ${previewHeight}px`,
+            gridTemplateRows: `minmax(80px, 1fr) 8px ${previewHeight}px`,
           }}
         >
           <div className="file-browser-list">
@@ -656,7 +659,7 @@ export function FileBrowserDrawer({
                       });
                     }}
                     onDoubleClick={async () => {
-                      if (entry.type === "directory") {
+                      if (entry.type === "directory" || (entry.type === "symlink" && entry.symlinkTargetType === "directory")) {
                         await navigate(entry.path);
                         return;
                       }
@@ -682,7 +685,7 @@ export function FileBrowserDrawer({
                       <span>{entry.name}</span>
                     </label>
                     <span>
-                      {entry.type === "directory"
+                      {entry.type === "directory" || (entry.type === "symlink" && entry.symlinkTargetType === "directory")
                         ? "—"
                         : formatSize(entry.size)}
                     </span>
@@ -779,7 +782,7 @@ export function FileBrowserDrawer({
           className="file-browser-context-menu"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          {contextMenu.entry.type === "directory" && (
+          {(contextMenu.entry.type === "directory" || (contextMenu.entry.type === "symlink" && contextMenu.entry.symlinkTargetType === "directory")) && (
             <button
               onClick={() => {
                 const targetPath = contextMenu.entry.path;

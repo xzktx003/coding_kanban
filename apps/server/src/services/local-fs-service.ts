@@ -29,6 +29,7 @@ import {
 function toFileEntry(
   entryPath: string,
   stats: Awaited<ReturnType<typeof lstat>>,
+  symlinkTargetType?: "file" | "directory",
 ): FileEntry {
   const type = stats.isSymbolicLink()
     ? "symlink"
@@ -44,6 +45,7 @@ function toFileEntry(
     modifiedAt: stats.mtime.toISOString(),
     permissions: formatPermissions(Number(stats.mode), type),
     isHidden: path.basename(entryPath).startsWith("."),
+    ...(type === "symlink" && symlinkTargetType ? { symlinkTargetType } : {}),
   };
 }
 
@@ -58,7 +60,16 @@ export class LocalFsService {
       entries.map(async (name) => {
         const entryPath = path.join(resolvedPath, name);
         const stats = await lstat(entryPath);
-        return toFileEntry(entryPath, stats);
+        let symlinkTargetType: "file" | "directory" | undefined;
+        if (stats.isSymbolicLink()) {
+          try {
+            const targetStats = await stat(entryPath);
+            symlinkTargetType = targetStats.isDirectory() ? "directory" : "file";
+          } catch {
+            // broken symlink — leave symlinkTargetType undefined
+          }
+        }
+        return toFileEntry(entryPath, stats, symlinkTargetType);
       }),
     );
 
@@ -67,11 +78,13 @@ export class LocalFsService {
       entries: results
         .filter((entry: FileEntry) => showHidden || !entry.isHidden)
         .sort((left: FileEntry, right: FileEntry) => {
-          if (left.type === "directory" && right.type !== "directory") {
+          const leftIsDir = left.type === "directory" || left.symlinkTargetType === "directory";
+          const rightIsDir = right.type === "directory" || right.symlinkTargetType === "directory";
+          if (leftIsDir && !rightIsDir) {
             return -1;
           }
 
-          if (left.type !== "directory" && right.type === "directory") {
+          if (!leftIsDir && rightIsDir) {
             return 1;
           }
 
