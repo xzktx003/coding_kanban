@@ -214,12 +214,22 @@ export function buildServer(options: BuildServerOptions = {}): {
                 return;
               }
 
+              if (ptyRuntimeManager.has(id)) {
+                try {
+                  ptyRuntimeManager.write(id, sanitizedPayload);
+                } catch {
+                  // PTY may have exited; ignore.
+                }
+                return;
+              }
+
               tmuxInputQueue = tmuxInputQueue.then(async () => {
                 try {
                   await tmuxAdapter.writeInput(session, {
                     input: sanitizedPayload,
                   });
                 } catch {
+                  // Fallback: if writeInput fails, try direct PTY write.
                   try {
                     ptyRuntimeManager.write(id, sanitizedPayload);
                   } catch {

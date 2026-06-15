@@ -448,13 +448,14 @@ export async function registerAgentSessionRoutes(
           return agentSession;
         }
 
+        if (ptyRuntimeManager.has(request.params.id)) {
+          ptyRuntimeManager.write(request.params.id, sanitizedInput);
+          return registry.get(request.params.id);
+        }
+
         try {
           return await tmuxAdapter.writeInput(agentSession, sanitizedBody);
         } catch {
-          if (ptyRuntimeManager.has(request.params.id)) {
-            ptyRuntimeManager.write(request.params.id, sanitizedInput);
-            return registry.get(request.params.id);
-          }
           throw new Error(
             `No tmux runtime found for session: ${request.params.id}`,
           );

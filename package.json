@@ -16,6 +16,6 @@
     "@playwright/test": "^1.55.0",
     "concurrently": "^9.2.1",
     "dotenv": "^17.4.2",
-    "playwright": "^1.60.0"
+    "playwright": "1.58.2"
   }
 }
