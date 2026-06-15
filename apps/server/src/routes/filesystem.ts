@@ -34,6 +34,31 @@ const { ZipArchive } = archiverModule as unknown as {
   ZipArchive: ZipArchiveConstructor;
 };
 
+/**
+ * Build a Content-Disposition header that handles non-ASCII filenames.
+ * Uses RFC 5987 encoding (filename*=UTF-8''...) for names containing
+ * non-ASCII characters, and a plain ASCII fallback for the filename param.
+ */
+function buildContentDisposition(
+  basename: string,
+  suffix = "",
+): string {
+  const full = suffix ? basename + suffix : basename;
+  const hasNonAscii = /[^ -~]/.test(full);
+  if (!hasNonAscii) {
+    return `attachment; filename="${full}"`;
+  }
+  const encoded = encodeURIComponent(full)
+    .replace(/\(/g, "%28")
+    .replace(/\)/g, "%29");
+  // ASCII-safe fallback: strip non-ASCII chars
+  const asciiFallback = full
+    .replace(/[^\x20-\x7e]/g, "_")
+    .replace(/_{2,}/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return `attachment; filename="${asciiFallback || 'download'}"; filename*=UTF-8\''${encoded}`;
+}
+
 function parseMaybeSshTarget(value: string | undefined): SshTarget | undefined {
   if (!value) {
     return undefined;
@@ -233,7 +258,7 @@ export async function registerFilesystemRoutes(
           if (isDir) {
             reply.header(
               "Content-Disposition",
-              `attachment; filename="${basename}.zip"`,
+              buildContentDisposition(basename, ".zip"),
             );
             reply.header("Content-Type", "application/zip");
             const archive = new ZipArchive({ zlib: { level: 5 } });
@@ -259,7 +284,7 @@ export async function registerFilesystemRoutes(
           );
           reply.header(
             "Content-Disposition",
-            `attachment; filename="${basename}"`,
+            buildContentDisposition(basename),
           );
           reply.header("Content-Type", "application/octet-stream");
           return reply.send(stream);
@@ -271,7 +296,7 @@ export async function registerFilesystemRoutes(
         if (stats.isDirectory()) {
           reply.header(
             "Content-Disposition",
-            `attachment; filename="${basename}.zip"`,
+            buildContentDisposition(basename, ".zip"),
           );
           reply.header("Content-Type", "application/zip");
           const archive = new ZipArchive({ zlib: { level: 5 } });
@@ -283,7 +308,7 @@ export async function registerFilesystemRoutes(
         const stream = localFsService.createReadStream(targetPath);
         reply.header(
           "Content-Disposition",
-          `attachment; filename="${basename}"`,
+          buildContentDisposition(basename),
         );
         reply.header("Content-Type", "application/octet-stream");
         return reply.send(stream);
