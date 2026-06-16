@@ -14,6 +14,7 @@ import type {
 import {
   assertSafeFilesystemPath,
   detectFileEntryType,
+  formatRemoteOwner,
   formatPermissions,
   guessMimeType,
   isBinaryBuffer,
@@ -106,6 +107,7 @@ function attrsToFileEntry(
     type,
     size: type === "directory" ? 0 : (attrs.size ?? 0),
     modifiedAt,
+    owner: formatRemoteOwner(attrs.uid, longname),
     permissions: formatPermissions(attrs.mode ?? 0, type),
     isHidden: name.startsWith("."),
     ...(type === "symlink" && symlinkTargetType ? { symlinkTargetType } : {}),

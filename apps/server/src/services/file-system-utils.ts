@@ -1,5 +1,6 @@
 import path from "node:path";
 import { homedir } from "node:os";
+import { readFileSync } from "node:fs";
 
 import type { FileEntryType } from "@agent-orchestrator/shared";
 
@@ -9,6 +10,7 @@ const TYPE_MASK = 0o170000;
 const EXECUTE_BITS = [0o100, 0o010, 0o001];
 const WRITE_BITS = [0o200, 0o020, 0o002];
 const READ_BITS = [0o400, 0o040, 0o004];
+let passwdOwnerCache: Map<number, string> | null = null;
 
 const MIME_TYPES = new Map<string, string>([
   [".gif", "image/gif"],
@@ -79,6 +81,47 @@ export function formatPermissions(mode: number, type: FileEntryType): string {
     .join("");
 
   return `${typeChar}${permissionBits}`;
+}
+
+function readPasswdOwners(): Map<number, string> {
+  if (passwdOwnerCache) {
+    return passwdOwnerCache;
+  }
+
+  const owners = new Map<number, string>();
+  try {
+    const content = readFileSync("/etc/passwd", "utf8");
+    for (const line of content.split("\n")) {
+      const [name, , uid] = line.split(":");
+      const numericUid = Number(uid);
+      if (name && Number.isInteger(numericUid)) {
+        owners.set(numericUid, name);
+      }
+    }
+  } catch {
+    // Non-Unix hosts or restricted containers can still display numeric uid.
+  }
+
+  passwdOwnerCache = owners;
+  return owners;
+}
+
+export function formatLocalOwner(uid?: number): string {
+  if (!Number.isInteger(uid)) {
+    return "—";
+  }
+
+  const numericUid = Number(uid);
+  return readPasswdOwners().get(numericUid) ?? String(numericUid);
+}
+
+export function formatRemoteOwner(uid?: number, longname?: string): string {
+  const longnameOwner = longname?.trim().split(/\s+/)[2];
+  if (longnameOwner) {
+    return longnameOwner;
+  }
+
+  return Number.isInteger(uid) ? String(Number(uid)) : "—";
 }
 
 export function guessMimeType(filePath: string): string | null {

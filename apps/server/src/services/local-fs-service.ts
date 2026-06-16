@@ -19,6 +19,7 @@ import type {
 
 import {
   assertSafeFilesystemPath,
+  formatLocalOwner,
   formatPermissions,
   guessMimeType,
   isBinaryBuffer,
@@ -43,6 +44,7 @@ function toFileEntry(
     type,
     size: stats.isDirectory() ? 0 : Number(stats.size),
     modifiedAt: stats.mtime.toISOString(),
+    owner: formatLocalOwner(Number(stats.uid)),
     permissions: formatPermissions(Number(stats.mode), type),
     isHidden: path.basename(entryPath).startsWith("."),
     ...(type === "symlink" && symlinkTargetType ? { symlinkTargetType } : {}),

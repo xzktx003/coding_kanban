@@ -37,15 +37,15 @@ class FakeSftpSession {
       items?: Array<{
         filename: string;
         longname: string;
-        attrs: { mode: number; size: number; mtime: number };
+        attrs: { mode: number; size: number; mtime: number; uid?: number };
       }>,
     ) => void,
   ): void {
     callback(undefined, [
       {
         filename: "workspace",
-        longname: "drwxr-xr-x",
-        attrs: { mode: 0o040755, size: 0, mtime: 1_717_000_000 },
+        longname: "drwxr-xr-x 2 demo staff 0 May 30 12:00 workspace",
+        attrs: { mode: 0o040755, size: 0, mtime: 1_717_000_000, uid: 501 },
       },
     ]);
   }
@@ -151,5 +151,6 @@ test("list reuses a single pending connection safely for concurrent requests", a
     assert.equal(result.status, "fulfilled");
     assert.equal(result.value.path, "/home/demo");
     assert.equal(result.value.entries[0]?.name, "workspace");
+    assert.equal(result.value.entries[0]?.owner, "demo");
   }
 });

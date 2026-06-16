@@ -15,7 +15,7 @@ import {
   uploadFiles,
 } from "./api";
 
-export type SortKey = "name" | "size" | "modifiedAt" | "permissions";
+export type SortKey = "name" | "size" | "modifiedAt" | "owner" | "permissions";
 export type SortDirection = "asc" | "desc";
 const FILE_BROWSER_SCOPE_STATE_PREFIX = "file-browser-scope-state";
 
@@ -126,6 +126,7 @@ function loadPersistedBrowserScopeState(
       sortKey:
         parsed.sortKey === "size" ||
         parsed.sortKey === "modifiedAt" ||
+        parsed.sortKey === "owner" ||
         parsed.sortKey === "permissions" ||
         parsed.sortKey === "name"
           ? parsed.sortKey
@@ -386,6 +387,10 @@ export function useFileBrowser(
 
       if (sortKey === "permissions") {
         return left.permissions.localeCompare(right.permissions) * factor;
+      }
+
+      if (sortKey === "owner") {
+        return left.owner.localeCompare(right.owner) * factor;
       }
 
       return left.name.localeCompare(right.name) * factor;

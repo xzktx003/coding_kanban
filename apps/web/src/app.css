@@ -3777,18 +3777,23 @@ input {
 
 .file-browser-table {
   display: grid;
-  grid-template-columns:
-    minmax(220px, 1.8fr) minmax(90px, 0.6fr) minmax(150px, 1fr)
-    minmax(110px, 0.7fr);
+  grid-template-columns: var(
+    --file-browser-table-columns,
+    260px 96px 168px 96px 116px
+  );
   gap: 12px;
   align-items: center;
   padding: 8px 12px;
+  min-width: max-content;
 }
 
 .file-browser-table--header {
   border-top: 1px solid rgba(255, 255, 255, 0.05);
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   background: rgba(255, 255, 255, 0.03);
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 .file-browser-table--header button {
@@ -3799,6 +3804,14 @@ input {
   text-align: left;
 }
 
+.file-browser-header-cell {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+
+.file-browser-column-sort-button,
 .file-browser-name-header {
   display: flex;
   align-items: center;
@@ -3806,8 +3819,41 @@ input {
   min-width: 0;
 }
 
+.file-browser-column-sort-button,
+.file-browser-name-sort-button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .file-browser-table--header .file-browser-name-sort-button {
   font-size: 12px;
+}
+
+.file-browser-column-resizer {
+  position: absolute;
+  top: -8px;
+  right: -10px;
+  bottom: -8px;
+  width: 12px;
+  padding: 0;
+  cursor: col-resize;
+  z-index: 3;
+}
+
+.file-browser-column-resizer::after {
+  position: absolute;
+  top: 7px;
+  bottom: 7px;
+  left: 5px;
+  width: 1px;
+  content: "";
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.file-browser-column-resizer:hover::after {
+  background: rgba(246, 178, 107, 0.8);
 }
 
 .file-browser-table--header .file-browser-up-one-level {
@@ -3834,16 +3880,28 @@ input {
   opacity: 0.42;
 }
 
-.file-browser-rows {
+.file-browser-table-scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
+}
+
+.file-browser-rows {
+  min-height: 0;
+  overflow: visible;
 }
 
 .file-browser-row {
   cursor: pointer;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
   font-size: 12px;
+}
+
+.file-browser-row > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-browser-name {

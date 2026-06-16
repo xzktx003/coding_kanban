@@ -302,6 +302,7 @@ export interface FileEntry {
   type: FileEntryType;
   size: number;
   modifiedAt: string;
+  owner: string;
   permissions: string;
   isHidden: boolean;
   symlinkTargetType?: "file" | "directory";

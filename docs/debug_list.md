@@ -201,3 +201,11 @@
 - **修复**: 超过阈值时为右侧栏开启紧凑滚动模式；侧栏和滚动容器固定在焦点页高度内，卡片与终端预览允许在最小高度约束内收缩，真实溢出后才通过滚轮/滚动条浏览更多会话。
 - **测试**: `pnpm --dir apps/web test -- AgentFocusView.test.ts` 覆盖多会话启用滚动模式和少量会话保持自动模式。
 - **文件**: `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/components/AgentFocusView.test.ts`, `apps/web/src/app.css`
+
+### 文件浏览器缺少 Owner 列和列宽调整
+
+- **现象**: 文件系统列表已有名称、大小、修改时间、权限，但缺少 Owner；各列宽度固定，长文件名或元数据列无法按当前窗口手动调整。
+- **根因**: `FileEntry` 数据模型没有 owner 字段，前端文件列表表头和行使用固定 CSS grid 模板，没有列宽状态或拖拽分割线。
+- **修复**: 本地文件列表从 uid 解析 owner，SFTP 列表优先从 longname 解析 owner；前端新增 Owner 列，并用可持久化列宽状态和表头分割线支持左右拖动调整各列宽度。
+- **测试**: `pnpm --dir apps/web test -- FileBrowserDrawer.test.ts`；`pnpm --dir apps/server test -- local-fs-service.test.ts sftp-service.test.ts`。
+- **文件**: `packages/shared/src/index.ts`, `apps/server/src/services/file-system-utils.ts`, `apps/server/src/services/local-fs-service.ts`, `apps/server/src/services/sftp-service.ts`, `apps/web/src/components/FileBrowserDrawer.tsx`, `apps/web/src/app.css`

@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 
 import type {
   FileEntry,
@@ -6,7 +13,7 @@ import type {
 } from "@agent-orchestrator/shared";
 
 import { previewFile } from "../lib/api";
-import { useFileBrowser } from "../lib/use-file-browser";
+import { useFileBrowser, type SortKey } from "../lib/use-file-browser";
 import { copyTextToClipboard } from "../lib/clipboard";
 
 import { HostDropdown, type SelectedHost } from "./HostDropdown";
@@ -56,6 +63,37 @@ interface CreateEntryState {
 }
 
 type UploadChoiceKind = "file" | "folder";
+type FileBrowserColumnKey =
+  | "name"
+  | "size"
+  | "modifiedAt"
+  | "owner"
+  | "permissions";
+
+type FileBrowserColumnWidths = Record<FileBrowserColumnKey, number>;
+
+interface FileBrowserColumn {
+  key: FileBrowserColumnKey;
+  label: string;
+  sortKey?: SortKey;
+  minWidth: number;
+}
+
+const FILE_BROWSER_COLUMN_WIDTH_STORAGE_KEY = "file-browser-column-widths";
+const FILE_BROWSER_COLUMNS: FileBrowserColumn[] = [
+  { key: "name", label: "名称", sortKey: "name", minWidth: 120 },
+  { key: "size", label: "大小", sortKey: "size", minWidth: 72 },
+  { key: "modifiedAt", label: "修改时间", sortKey: "modifiedAt", minWidth: 126 },
+  { key: "owner", label: "Owner", sortKey: "owner", minWidth: 72 },
+  { key: "permissions", label: "权限", sortKey: "permissions", minWidth: 92 },
+];
+const DEFAULT_FILE_BROWSER_COLUMN_WIDTHS: FileBrowserColumnWidths = {
+  name: 260,
+  size: 96,
+  modifiedAt: 168,
+  owner: 96,
+  permissions: 116,
+};
 
 const DEFAULT_CREATE_ENTRY_NAMES: Record<CreateEntryKind, string> = {
   directory: "新建文件夹",
@@ -159,6 +197,54 @@ function isTextPreview(
   return Boolean(preview && preview.encoding === "utf8");
 }
 
+function clampFileBrowserColumnWidth(
+  key: FileBrowserColumnKey,
+  width: number,
+): number {
+  const column = FILE_BROWSER_COLUMNS.find((candidate) => candidate.key === key);
+  const minWidth = column?.minWidth ?? 72;
+  if (!Number.isFinite(width)) {
+    return DEFAULT_FILE_BROWSER_COLUMN_WIDTHS[key];
+  }
+
+  return Math.max(minWidth, Math.min(520, Math.round(width)));
+}
+
+function loadFileBrowserColumnWidths(): FileBrowserColumnWidths {
+  try {
+    const raw = localStorage.getItem(FILE_BROWSER_COLUMN_WIDTH_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_FILE_BROWSER_COLUMN_WIDTHS;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<FileBrowserColumnWidths>;
+    return {
+      name: clampFileBrowserColumnWidth(
+        "name",
+        parsed.name ?? DEFAULT_FILE_BROWSER_COLUMN_WIDTHS.name,
+      ),
+      size: clampFileBrowserColumnWidth(
+        "size",
+        parsed.size ?? DEFAULT_FILE_BROWSER_COLUMN_WIDTHS.size,
+      ),
+      modifiedAt: clampFileBrowserColumnWidth(
+        "modifiedAt",
+        parsed.modifiedAt ?? DEFAULT_FILE_BROWSER_COLUMN_WIDTHS.modifiedAt,
+      ),
+      owner: clampFileBrowserColumnWidth(
+        "owner",
+        parsed.owner ?? DEFAULT_FILE_BROWSER_COLUMN_WIDTHS.owner,
+      ),
+      permissions: clampFileBrowserColumnWidth(
+        "permissions",
+        parsed.permissions ?? DEFAULT_FILE_BROWSER_COLUMN_WIDTHS.permissions,
+      ),
+    };
+  } catch {
+    return DEFAULT_FILE_BROWSER_COLUMN_WIDTHS;
+  }
+}
+
 export function FileBrowserDrawer({
   open,
   scopeKey,
@@ -173,6 +259,11 @@ export function FileBrowserDrawer({
   const previewResizeRef = useRef<{
     startY: number;
     startHeight: number;
+  } | null>(null);
+  const columnResizeRef = useRef<{
+    key: FileBrowserColumnKey;
+    startX: number;
+    startWidth: number;
   } | null>(null);
   const previewLayoutRef = useRef<HTMLDivElement | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -196,6 +287,9 @@ export function FileBrowserDrawer({
       return 240;
     }
   });
+  const [columnWidths, setColumnWidths] = useState(
+    loadFileBrowserColumnWidths,
+  );
   const [pathInputValue, setPathInputValue] = useState("");
 
   const {
@@ -262,12 +356,41 @@ export function FileBrowserDrawer({
   }, [previewHeight]);
 
   useEffect(() => {
+    try {
+      localStorage.setItem(
+        FILE_BROWSER_COLUMN_WIDTH_STORAGE_KEY,
+        JSON.stringify(columnWidths),
+      );
+    } catch {
+      // ignore storage failures
+    }
+  }, [columnWidths]);
+
+  const updateColumnWidth = useCallback((clientX: number) => {
+    const resizeState = columnResizeRef.current;
+    if (!resizeState) {
+      return;
+    }
+
+    const delta = clientX - resizeState.startX;
+    setColumnWidths((current) => ({
+      ...current,
+      [resizeState.key]: clampFileBrowserColumnWidth(
+        resizeState.key,
+        resizeState.startWidth + delta,
+      ),
+    }));
+  }, []);
+
+  useEffect(() => {
     function handleMouseMove(event: MouseEvent) {
       updatePreviewHeight(event.clientY);
+      updateColumnWidth(event.clientX);
     }
 
     function handleMouseUp() {
       previewResizeRef.current = null;
+      columnResizeRef.current = null;
     }
 
     window.addEventListener("mousemove", handleMouseMove);
@@ -277,7 +400,7 @@ export function FileBrowserDrawer({
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
     };
-  }, []);
+  }, [updateColumnWidth]);
 
   const breadcrumbs = useMemo(
     () => buildBreadcrumbs(currentPath),
@@ -294,6 +417,15 @@ export function FileBrowserDrawer({
       ? preview
       : null;
   const dragActive = dragDepth > 0;
+  const fileTableStyle = useMemo(
+    () =>
+      ({
+        "--file-browser-table-columns": FILE_BROWSER_COLUMNS.map(
+          (column) => `${columnWidths[column.key]}px`,
+        ).join(" "),
+      }) as CSSProperties,
+    [columnWidths],
+  );
 
   async function handleOpenEditor(entry: FileEntry) {
     const filePreview =
@@ -341,6 +473,14 @@ export function FileBrowserDrawer({
       Math.max(40, resizeState.startHeight + delta),
     );
     setPreviewHeight(nextHeight);
+  }
+
+  function renderSortLabel(column: FileBrowserColumn) {
+    if (!column.sortKey || sortKey !== column.sortKey) {
+      return column.label;
+    }
+
+    return `${column.label} ${sortDirection === "asc" ? "↑" : "↓"}`;
   }
 
   return (
@@ -590,50 +730,63 @@ export function FileBrowserDrawer({
               </div>
             )}
             {error && <div className="file-browser-error">{error}</div>}
-            <div className="file-browser-table file-browser-table--header">
-              <div className="file-browser-name-header">
-                <button
-                  className="file-browser-name-sort-button"
-                  type="button"
-                  onClick={() => toggleSort("name")}
-                >
-                  名称
-                </button>
-                <button
-                  aria-label="返回上一级目录"
-                  className="file-browser-up-one-level"
-                  disabled={!ready}
-                  onClick={goUp}
-                  title="返回上一级目录"
-                  type="button"
-                >
-                  ↑
-                </button>
-              </div>
-              <button type="button" onClick={() => toggleSort("size")}>
-                大小{" "}
-                {sortKey === "size"
-                  ? sortDirection === "asc"
-                    ? "↑"
-                    : "↓"
-                  : ""}
-              </button>
-              <button type="button" onClick={() => toggleSort("modifiedAt")}>
-                修改时间{" "}
-                {sortKey === "modifiedAt"
-                  ? sortDirection === "asc"
-                    ? "↑"
-                    : "↓"
-                  : ""}
-              </button>
-              <button type="button" onClick={() => toggleSort("permissions")}>
-                权限{" "}
-                {sortKey === "permissions"
-                  ? sortDirection === "asc"
-                    ? "↑"
-                    : "↓"
-                  : ""}
-              </button>
+            <div className="file-browser-table-scroll">
+            <div
+              className="file-browser-table file-browser-table--header"
+              style={fileTableStyle}
+            >
+              {FILE_BROWSER_COLUMNS.map((column, index) => (
+                <div className="file-browser-header-cell" key={column.key}>
+                  {column.key === "name" ? (
+                    <div className="file-browser-name-header">
+                      <button
+                        className="file-browser-name-sort-button"
+                        type="button"
+                        onClick={() => toggleSort("name")}
+                      >
+                        {renderSortLabel(column)}
+                      </button>
+                      <button
+                        aria-label="返回上一级目录"
+                        className="file-browser-up-one-level"
+                        disabled={!ready}
+                        onClick={goUp}
+                        title="返回上一级目录"
+                        type="button"
+                      >
+                        ↑
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="file-browser-column-sort-button"
+                      type="button"
+                      onClick={() => column.sortKey && toggleSort(column.sortKey)}
+                    >
+                      {renderSortLabel(column)}
+                    </button>
+                  )}
+                  {index < FILE_BROWSER_COLUMNS.length - 1 && (
+                    <button
+                      aria-label={`调整${column.label}列宽`}
+                      className="file-browser-column-resizer"
+                      data-testid={`file-browser-column-resizer-${column.key}`}
+                      onMouseDown={(event) => {
+                        columnResizeRef.current = {
+                          key: column.key,
+                          startX: event.clientX,
+                          startWidth: columnWidths[column.key],
+                        };
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      role="separator"
+                      title={`拖动调整${column.label}列宽`}
+                      type="button"
+                    />
+                  )}
+                </div>
+              ))}
             </div>
             <div className="file-browser-rows" data-testid="file-browser-rows">
               {entries.map((entry) => {
@@ -643,6 +796,7 @@ export function FileBrowserDrawer({
                     key={entry.path}
                     className={`file-browser-table file-browser-row${selected ? " is-selected" : ""}`}
                     data-testid={`file-entry-${entry.name}`}
+                    style={fileTableStyle}
                     draggable
                     onDragStart={(event) => {
                       event.dataTransfer.setData("text/plain", entry.path);
@@ -695,10 +849,12 @@ export function FileBrowserDrawer({
                         : formatSize(entry.size)}
                     </span>
                     <span>{new Date(entry.modifiedAt).toLocaleString()}</span>
+                    <span>{entry.owner}</span>
                     <span>{entry.permissions}</span>
                   </div>
                 );
               })}
+            </div>
             </div>
           </div>
           <div

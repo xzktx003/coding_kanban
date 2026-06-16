@@ -63,6 +63,8 @@ test("LocalFsService creates, renames, chmods, and removes files", async () => {
       (candidate) => candidate.name === "final.txt",
     );
     assert.ok(entry);
+    assert.equal(typeof entry.owner, "string");
+    assert.notEqual(entry.owner.length, 0);
     assert.equal(entry.permissions, "-rw-r-----");
 
     await service.remove(renamedPath);
