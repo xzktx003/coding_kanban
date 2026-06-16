@@ -87,6 +87,8 @@
 - `Shift+Left` 等修饰键组合在本地 tmux 终端里变成 `[1;2D` / `D`：xterm 发出 `ESC[1;2D`，但 `buildTmuxSendKeySteps` 只识别普通箭头，导致 send-keys 路径把 ESC 和字面量拆开注入 pane。修复为将 xterm modified cursor/navigation CSI 序列映射成 tmux key name（如 `S-Left`、`C-Right`、`C-S-Down`、`S-PPage`），并保护前后端过滤层继续原样转发这些键序列。
 - Codex 会话中右键粘贴多行内容被逐行提交：上一版剥离 bracketed paste 起止符后，区块内换行重新落入 `Enter` 映射。最终修复为完整保留 `ESC[200~ ... ESC[201~` 区块并作为单个 literal 发送给 tmux，区块外换行仍保持 Enter 语义。
 - Codex 会话多行右键粘贴的 bracketed paste 可能被 WebSocket/xterm 分成多帧：tmux 输入转换必须按 session 记住 `ESC[200~` 已打开，直到看到 `ESC[201~` 才恢复普通 Enter 映射；不要只依赖单个 stdin payload 内完整匹配 paste 区块。
+- Kanban VS Code Web 启动失败但 `code-server` 实际可用：另一个项目占用了默认 `4000/8484`，当前仓库后端在 `4000` 反复 `EADDRINUSE`，前端代理错连外部服务；已清理当前仓库陈旧 watcher，用 `SERVER_PORT=8282 WEB_PORT=8584` 验证可用实例，并让 `restart-dev.sh` 在重启时强制回收目标 `SERVER_PORT/WEB_PORT` 上的监听进程。
+- 聚焦视图右侧“其他会话”数量增加后卡片被越挤越小，第一版固定卡片高度后又会过早滚动且显得过大：侧栏 flex 链路高度约束不完整，且缺少卡片指定最小高度策略；修复为超过阈值开启紧凑滚动模式，卡片和终端预览先压缩到最小高度，真实溢出后再滚动。
 
 ## PM 审计增强 (2026-06-16)
 

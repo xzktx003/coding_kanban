@@ -81,6 +81,24 @@ kill_from_pid_file() {
   rm -f "$pid_file"
 }
 
+pid_belongs_to_repo() {
+  local pid="$1"
+  local cwd
+  local cmdline
+
+  cwd="$(readlink "/proc/${pid}/cwd" 2>/dev/null || true)"
+  if [[ "$cwd" == "$ROOT_DIR" || "$cwd" == "$ROOT_DIR/"* ]]; then
+    return 0
+  fi
+
+  cmdline="$(tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null || true)"
+  if [[ "$cmdline" == *"$ROOT_DIR"* ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
 kill_listeners_on_port() {
   local name="$1"
   local port="$2"
@@ -92,12 +110,32 @@ kill_listeners_on_port() {
     return
   fi
 
-  log "Freeing ${name} port ${port}: ${pids//$'\n'/, }"
+  local repo_pids=()
+  local foreign_pids=()
+  local pid
+
+  for pid in $pids; do
+    if pid_belongs_to_repo "$pid"; then
+      repo_pids+=("$pid")
+    else
+      foreign_pids+=("$pid")
+    fi
+  done
+
+  if (( ${#repo_pids[@]} > 0 && ${#foreign_pids[@]} > 0 )); then
+    log "Freeing ${name} port ${port}: repo listeners ${repo_pids[*]}, foreign listeners ${foreign_pids[*]}"
+  elif (( ${#foreign_pids[@]} > 0 )); then
+    log "Freeing ${name} port ${port}: foreign listeners ${foreign_pids[*]}"
+  else
+    log "Freeing ${name} port ${port}: ${repo_pids[*]}"
+  fi
+
   kill $pids 2>/dev/null || true
   sleep 0.3
 
   pids="$(lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)"
   if [[ -n "$pids" ]]; then
+    log "Force killing ${name} port ${port}: ${pids//$'\n'/, }"
     kill -9 $pids 2>/dev/null || true
   fi
 }
@@ -208,10 +246,10 @@ if ! WEB_HTTPS="$WEB_HTTPS" WEB_HTTPS_CERT="$WEB_HTTPS_CERT" WEB_HTTPS_KEY="$WEB
   exit 1
 fi
 
-kill_from_pid_file backend "$SERVER_PID_FILE"
-kill_from_pid_file frontend "$WEB_PID_FILE"
 kill_listeners_on_port backend "$SERVER_PORT"
 kill_listeners_on_port frontend "$WEB_PORT"
+kill_from_pid_file backend "$SERVER_PID_FILE"
+kill_from_pid_file frontend "$WEB_PID_FILE"
 
 : >"$SERVER_LOG"
 : >"$WEB_LOG"

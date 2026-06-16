@@ -185,3 +185,19 @@
 - **修复**: 文件条目添加 `draggable` 属性和 `onDragStart`（设置 `text/plain` MIME 为文件路径）；TerminalView 添加 `onDragOver` 和 `onDrop` 处理器，接收文件路径后写入当前终端输入。
 - **测试**: Playwright 集成测试验证。
 - **文件**: `apps/web/src/components/FileBrowserDrawer.tsx`, `apps/web/src/components/TerminalView.tsx`
+
+### VS Code Web 端口错连
+
+- **现象**: Kanban 打开 VS Code Web 失败，`.dev-runtime/server.log` 反复出现 `listen EADDRINUSE: address already in use 0.0.0.0:4000`，前端 `/api` 和 `/vscode` 实际代理到另一个项目服务。
+- **根因**: `paper_wrighting` 占用默认 `4000/8484`，当前仓库后端没有成功启动；陈旧 `coding_kanban` watcher 持续重启并污染日志，导致看起来像 `code-server` 异常。
+- **修复**: 清理当前仓库陈旧 watcher，用 `SERVER_PORT=8282 WEB_PORT=8584` 拉起可用实例并验证 `code-server` 代理返回 VS Code HTML；随后按当前运行策略调整 `restart-dev.sh`，重启时强制回收目标 `SERVER_PORT/WEB_PORT` 上的监听进程，即使监听进程来自其他仓库。
+- **测试**: `node --test scripts/restart-dev.test.mjs`；手动验证 `https://10.30.0.22:8584`、`POST /api/agent-sessions/:id/vscode-web`、`/vscode/` HTML。
+- **文件**: `scripts/restart-dev.sh`, `scripts/restart-dev.test.mjs`
+
+### 聚焦视图其他会话滚动过早且卡片过大
+
+- **现象**: 右侧“其他会话”数量增加后，要么所有会话卡片一股脑挤在侧栏里越压越小，要么卡片固定为较大高度后过早出现滚动。
+- **根因**: 侧栏虽然有滚动容器，但焦点页和侧栏 flex 链路没有完整的高度约束；第一版修复又把卡片完全固定，缺少“先缩到指定下限、再滚动”的中间态。
+- **修复**: 超过阈值时为右侧栏开启紧凑滚动模式；侧栏和滚动容器固定在焦点页高度内，卡片与终端预览允许在最小高度约束内收缩，真实溢出后才通过滚轮/滚动条浏览更多会话。
+- **测试**: `pnpm --dir apps/web test -- AgentFocusView.test.ts` 覆盖多会话启用滚动模式和少量会话保持自动模式。
+- **文件**: `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/components/AgentFocusView.test.ts`, `apps/web/src/app.css`

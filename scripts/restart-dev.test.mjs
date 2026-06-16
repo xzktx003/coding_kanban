@@ -38,3 +38,20 @@ test("restart-dev does not fall back to HOST env var for server bind address", (
     /SERVER_BIND_HOST="\$\{SERVER_BIND_HOST:-\$\{HOST/,
   );
 });
+
+test("restart-dev force reclaims listeners outside this repository", () => {
+  assert.match(script, /pid_belongs_to_repo\(\)/);
+  assert.match(
+    script,
+    /Freeing \$\{name\} port \$\{port\}: foreign listeners \$\{foreign_pids\[\*\]\}/,
+  );
+  assert.match(script, /Force killing \$\{name\} port \$\{port\}/);
+  assert.doesNotMatch(script, /Refusing to free/);
+});
+
+test("restart-dev checks target ports before stopping pid-file processes", () => {
+  assert.match(
+    script,
+    /kill_listeners_on_port backend "\$SERVER_PORT"\s+kill_listeners_on_port frontend "\$WEB_PORT"\s+kill_from_pid_file backend "\$SERVER_PID_FILE"\s+kill_from_pid_file frontend "\$WEB_PID_FILE"/,
+  );
+});

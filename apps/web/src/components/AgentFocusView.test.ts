@@ -89,4 +89,56 @@ describe("AgentFocusView", () => {
       1,
     );
   });
+
+  it("enables an internal scroll region when the other-session sidebar is crowded", () => {
+    installLocalStorageStub("single");
+    const sessions = Array.from({ length: 7 }, (_, index) =>
+      makeSession(`session-${index + 1}`, `Session ${index + 1}`),
+    );
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: sessions[0],
+        sessions,
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    assert.match(markup, /focus-sidebar--scrollable/);
+    assert.match(markup, /data-sidebar-scroll-mode="enabled"/);
+    assert.match(markup, /data-testid="focus-sidebar-scroll"/);
+    assert.equal(
+      (markup.match(/data-terminal-sidebar-menu-scope="other-session"/g) ?? [])
+        .length,
+      6,
+    );
+  });
+
+  it("keeps the sidebar in auto mode for a small number of other sessions", () => {
+    installLocalStorageStub("single");
+    const sessions = [
+      makeSession("session-1", "Alpha"),
+      makeSession("session-2", "Beta"),
+      makeSession("session-3", "Gamma"),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: sessions[0],
+        sessions,
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    assert.doesNotMatch(markup, /focus-sidebar--scrollable/);
+    assert.match(markup, /data-sidebar-scroll-mode="auto"/);
+  });
 });

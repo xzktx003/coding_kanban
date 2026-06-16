@@ -1646,6 +1646,7 @@ input {
   display: flex;
   height: 100%;
   gap: 8px;
+  min-height: 0;
 }
 
 .focus-view--sidebar-collapsed {
@@ -1657,6 +1658,7 @@ input {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 .focus-main-header {
@@ -2158,6 +2160,8 @@ input {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  height: 100%;
+  max-height: 100%;
   min-height: 0;
   overflow: hidden;
 }
@@ -2165,12 +2169,18 @@ input {
 .focus-sidebar-scroll {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding-right: 2px;
 }
 
+.focus-sidebar--scrollable .focus-sidebar-scroll {
+  overflow-y: auto;
+}
 
 .focus-sidebar-search {
   width: 100%;
@@ -2200,11 +2210,19 @@ input {
 }
 
 .focus-sidebar-card {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 10px;
   overflow: hidden;
   cursor: pointer;
   transition: border-color 0.2s;
+}
+
+.focus-sidebar--scrollable .focus-sidebar-card {
+  flex: 1 1 104px;
+  min-height: 32px;
 }
 
 .focus-sidebar-card[draggable="true"] {
@@ -2233,6 +2251,13 @@ input {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
+.focus-sidebar-card-header > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .focus-sidebar-card-actions {
   display: flex;
   align-items: center;
@@ -2241,8 +2266,15 @@ input {
 }
 
 .focus-sidebar-terminal {
+  flex: 0 0 120px;
   height: 120px;
   overflow: hidden;
+}
+
+.focus-sidebar--scrollable .focus-sidebar-terminal {
+  flex: 1 1 72px;
+  min-height: 5px;
+  height: auto;
 }
 
 /* ===== Status Hint ===== */

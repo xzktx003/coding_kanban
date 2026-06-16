@@ -66,6 +66,7 @@ const DEFAULT_TERMINAL_MONITOR_SLOT_ID = "terminal-monitor-slot-1";
 const FOCUS_HEADER_COLLAPSED_STORAGE_KEY = "focus-header-collapsed";
 const TERMINAL_MONITOR_DRAG_MIME =
   "application/x-coding-kanban-terminal-session";
+const FOCUS_SIDEBAR_SCROLL_THRESHOLD = 4;
 
 interface TerminalMonitorDragPayload {
   sessionId: string;
@@ -235,6 +236,8 @@ export function AgentFocusView({
         (s.workingDirectory ?? "").toLowerCase().includes(sidebarSearchQuery.toLowerCase()),
       )
     : otherSessions;
+  const sidebarScrollMode =
+    filteredSidebarSessions.length > FOCUS_SIDEBAR_SCROLL_THRESHOLD;
   const activeSlotAvailable = terminalSlots.some(
     (slot) => slot.id === activeSlotId,
   );
@@ -1186,7 +1189,10 @@ export function AgentFocusView({
             </button>
           </div>
           {!sidebarCollapsed && (
-            <div className="focus-sidebar">
+            <div
+              className={`focus-sidebar${sidebarScrollMode ? " focus-sidebar--scrollable" : ""}`}
+              data-sidebar-scroll-mode={sidebarScrollMode ? "enabled" : "auto"}
+            >
               <h3 className="focus-sidebar-title">其他会话</h3>
               {otherSessions.length > 2 && (
                 <input
@@ -1197,21 +1203,24 @@ export function AgentFocusView({
                   value={sidebarSearchQuery}
                 />
               )}
-              <div className="focus-sidebar-scroll">
-              {filteredSidebarSessions.map((session) => (
-                <FocusSidebarSessionCard
-                  key={session.id}
-                  session={session}
-                  onDragStart={startSessionDrag}
-                  onDragEnd={finishSessionDrag}
-                  onContextMenu={handleSidebarContextMenu}
-                  onRename={onRename}
-                  onSwitchFocus={handleSidebarSwitchFocus}
-                  useLightweightTerminalPreview={useLightweightTerminalPreview}
-                  terminalFontSize={terminalFontSize}
-                  onTerminalFontSizeChange={onTerminalFontSizeChange}
-                />
-              ))}
+              <div
+                className="focus-sidebar-scroll"
+                data-testid="focus-sidebar-scroll"
+              >
+                {filteredSidebarSessions.map((session) => (
+                  <FocusSidebarSessionCard
+                    key={session.id}
+                    session={session}
+                    onDragStart={startSessionDrag}
+                    onDragEnd={finishSessionDrag}
+                    onContextMenu={handleSidebarContextMenu}
+                    onRename={onRename}
+                    onSwitchFocus={handleSidebarSwitchFocus}
+                    useLightweightTerminalPreview={useLightweightTerminalPreview}
+                    terminalFontSize={terminalFontSize}
+                    onTerminalFontSizeChange={onTerminalFontSizeChange}
+                  />
+                ))}
               </div>
             </div>
           )}
