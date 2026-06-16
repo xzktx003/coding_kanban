@@ -1197,6 +1197,7 @@ export function AgentFocusView({
                   value={sidebarSearchQuery}
                 />
               )}
+              <div className="focus-sidebar-scroll">
               {filteredSidebarSessions.map((session) => (
                 <FocusSidebarSessionCard
                   key={session.id}
@@ -1211,6 +1212,7 @@ export function AgentFocusView({
                   onTerminalFontSizeChange={onTerminalFontSizeChange}
                 />
               ))}
+              </div>
             </div>
           )}
         </>
