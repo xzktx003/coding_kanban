@@ -132,3 +132,56 @@
 - 合并 GitLab 的连接状态与空态 UX 提交后，前端构建报缺少 `focus-view-state`、`file-browser-ui-state`、`side-panel-session-state` 模块。根因是该提交引用了拆分后的状态解析模块但远端分支未包含文件。修复为补齐三个轻量状态解析模块，并给文件浏览器宽度状态 updater 补明确类型，恢复 `pnpm check` 通过。
 - 手机端快捷键在本地 tmux/Codex 会话里存在不一致风险，表现为 `Tab` 按钮没有触发 Codex 队列提交。根因是手机端按钮走 REST `/stdin`，本地 running tmux 会话却直接写入 attached PTY；桌面终端 WebSocket 已优先走 `tmux send-keys` 到目标 pane，两条路径语义不一致。同时 `Backspace`、`Ctrl+Z`、`Shift+Enter`、`Ctrl+Enter` 在 tmux 映射层不完整，CSI-u Enter 序列会被拆成 Escape 加普通文本。修复为 REST `/stdin` 对本地 tmux 会话同样优先走 `tmuxAdapter.writeInput`，只让鼠标/PTY 控制 payload 回落 attached PTY；补齐 `BSpace`、`C-z`、`S-Enter`、`C-Enter` 映射，并新增真实 tmux raw-stdin 回归测试，逐个断言手机端所有快捷键最终到达 pane 的字节序列。
 - Coding Kanban 发送完成通知再次失效，尤其是接管/刷新本地 tmux 中的 Codex 会话后长期不弹“任务完成”。根因是 `syncCapturedScreen()` 每次捕获可控 tmux 屏幕都会无条件把会话写回 `running` 并刷新 `lastHeartbeatAt`，即使屏幕内容完全没变；idle 扫描因此一直看不到静默窗口，前端也收不到 `running -> idle` 的通知边沿。修复为只有屏幕内容变化时才刷新 `lastOutputAt` 并保持 `running`，重复捕获只更新刷新时间，不再阻止 idle 广播；新增回归测试覆盖连续相同 tmux refresh 后仍进入 idle。
+
+---
+
+## PM 审计修复 (2026-06-16)
+
+### #32: shellQuote/formatWorkingDirectory 去重
+
+- **现象**: `shellQuote` 和 `formatWorkingDirectory` 在前端 `session-matching.ts`、后端 `agent-sessions.ts`、前端 `QuickTmuxConnect.tsx` 三处重复实现。
+- **修复**: 提取到 `packages/shared/src/shell-utils.ts`，三处改为从 `@agent-orchestrator/shared` 导入并 re-export。
+- **测试**: `packages/shared/src/shell-utils.test.ts` — 12 个测试用例覆盖 shellQuote 和 formatWorkingDirectory 的各种边界情况。
+- **文件**: `packages/shared/src/shell-utils.ts`, `packages/shared/src/index.ts`, `apps/web/src/lib/session-matching.ts`, `apps/server/src/routes/agent-sessions.ts`, `apps/web/src/components/QuickTmuxConnect.tsx`
+
+### #21: 宫格空态引导增强
+
+- **现象**: 空态只有"暂无 Agent 会话"和两个按钮，缺少快速上手指引。
+- **修复**: 增加三步快速入门指引（1.新建会话 2.双击进入聚焦 3.快捷键），样式使用步骤编号圆点 + kbd 标签。
+- **测试**: `apps/web/src/components/AgentGrid.test.ts` — 验证空态显示引导文本、新建会话按钮、扫描 tmux 按钮。
+- **文件**: `apps/web/src/components/AgentGrid.tsx`, `apps/web/src/app.css`
+
+### #29: 聚焦视图折叠标题栏增强
+
+- **现象**: 标题栏折叠后只显示名称和展开按钮，缺少状态和类型信息。
+- **修复**: 折叠时在名称后显示状态徽标和 agentKind 标签。
+- **测试**: Playwright 集成测试验证。
+- **文件**: `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/app.css`
+
+### #16: 快速连接 tmux 记忆历史
+
+- **现象**: 每次打开快速连接弹窗都需要重新选择主机、填写会话名。
+- **修复**: 新增 `recent-connections.ts` 模块，连接成功后自动保存到 localStorage（最多 8 条），下次打开时在主机搜索前显示"最近连接"快捷入口，支持一键填充。
+- **测试**: `apps/web/src/lib/recent-connections.test.ts` — 5 个测试用例覆盖保存、加载、去重、上限、清空。
+- **文件**: `apps/web/src/lib/recent-connections.ts`, `apps/web/src/components/QuickTmuxConnect.tsx`, `apps/web/src/app.css`
+
+### #20: 聚焦视图侧栏会话搜索
+
+- **现象**: 聚焦视图右侧"其他会话"侧栏没有搜索能力，会话多时难以定位。
+- **修复**: 当其他会话超过 2 个时，在标题下方显示搜索输入框，支持按名称、类型、工作目录模糊过滤。
+- **测试**: Playwright 集成测试验证。
+- **文件**: `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/app.css`
+
+### #19: 会话标签/分组支持
+
+- **现象**: 所有会话平铺展示，无法按自定义维度分组。
+- **修复**: `AgentSessionRecord` 新增可选 `tags: string[]` 字段；FilterBar 新增标签筛选器（仅在存在标签时显示）；卡片 footer 显示用户标签（蓝色样式）；App.tsx 过滤逻辑支持标签过滤。
+- **测试**: 已有 FilterState 相关测试覆盖标签字段。
+- **文件**: `packages/shared/src/index.ts`, `apps/web/src/components/FilterBar.tsx`, `apps/web/src/components/AgentGridCard.tsx`, `apps/web/src/App.tsx`, `apps/web/src/app.css`
+
+### #23: 文件浏览器拖拽路径到终端
+
+- **现象**: 文件浏览器中无法将文件路径拖拽到终端。
+- **修复**: 文件条目添加 `draggable` 属性和 `onDragStart`（设置 `text/plain` MIME 为文件路径）；TerminalView 添加 `onDragOver` 和 `onDrop` 处理器，接收文件路径后写入当前终端输入。
+- **测试**: Playwright 集成测试验证。
+- **文件**: `apps/web/src/components/FileBrowserDrawer.tsx`, `apps/web/src/components/TerminalView.tsx`

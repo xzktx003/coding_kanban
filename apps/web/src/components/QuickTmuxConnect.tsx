@@ -5,7 +5,12 @@ import type {
   SshHostPreset,
 } from "@agent-orchestrator/shared";
 
+import {
+  shellQuote,
+  formatWorkingDirectory,
+} from "@agent-orchestrator/shared";
 import { getSshHosts, launchPtyAgent, launchSshPtyAgent } from "../lib/api";
+import { saveRecentConnection, loadRecentConnections, type RecentTmuxConnection } from "../lib/recent-connections";
 import { DEFAULT_TMUX_HISTORY_LIMIT_LINES } from "../lib/session-matching";
 
 interface QuickTmuxConnectProps {
@@ -14,28 +19,7 @@ interface QuickTmuxConnectProps {
   onConnected: (session: AgentSessionRecord) => void;
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
 
-function formatWorkingDirectory(workingDirectory: string): string {
-  if (workingDirectory === "~" || workingDirectory === "~/") {
-    return "~";
-  }
-
-  if (workingDirectory.startsWith("~/")) {
-    const suffix = workingDirectory
-      .slice(2)
-      .split("/")
-      .filter(Boolean)
-      .map((segment) => shellQuote(segment))
-      .join("/");
-
-    return suffix ? `~/${suffix}` : "~";
-  }
-
-  return shellQuote(workingDirectory);
-}
 
 function buildQuickTmuxCommand(
   tmuxSessionName: string,
@@ -96,6 +80,7 @@ export function QuickTmuxConnect({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [hostQuery, setHostQuery] = useState("");
   const [selectedHost, setSelectedHost] = useState<ExtendedHost | null>(null);
+  const [recentConnections] = useState<RecentTmuxConnection[]>(() => loadRecentConnections());
   const [sessionName, setSessionName] = useState("");
   const [workingDirectory, setWorkingDirectory] = useState("");
   const hostSearchRef = useRef<HTMLInputElement>(null);
@@ -267,6 +252,12 @@ export function QuickTmuxConnect({
             tmuxSessionName: nextSessionName,
           });
 
+      saveRecentConnection({
+        hostName: selectedHost.name,
+        hostId: selectedHost.host,
+        sessionName: nextSessionName,
+        workingDirectory: nextWorkingDirectory,
+      });
       onConnected(launchedSession);
       onClose();
     } catch {
@@ -305,6 +296,30 @@ export function QuickTmuxConnect({
 
         {!selectedHost ? (
           <div className="quick-tmux-step">
+            {recentConnections.length > 0 && !hostQuery && (
+              <div className="quick-tmux-recent" data-testid="recent-connections">
+                <span className="quick-tmux-recent-label">最近连接</span>
+                {recentConnections.slice(0, 3).map((conn, idx) => (
+                  <button
+                    key={`${conn.hostId}-${conn.sessionName}-${idx}`}
+                    className="quick-tmux-recent-item"
+                    onClick={() => {
+                      const matchedHost = allHosts.find(h => h.host === conn.hostId || h.name === conn.hostName);
+                      if (matchedHost) {
+                        setSelectedHost(matchedHost);
+                        setWorkingDirectory(conn.workingDirectory);
+                        setSessionName(conn.sessionName);
+                      }
+                    }}
+                    type="button"
+                  >
+                    <span className="quick-tmux-recent-host">{conn.hostName}</span>
+                    <span className="quick-tmux-recent-session">{conn.sessionName}</span>
+                    <span className="quick-tmux-recent-dir">{conn.workingDirectory}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             <label
               className="quick-tmux-label"
               htmlFor="quick-tmux-host-search"

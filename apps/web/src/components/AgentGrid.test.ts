@@ -48,6 +48,7 @@ describe("AgentGrid", () => {
           kind: null,
           transport: null,
           dirQuery: "",
+          tag: null,
         },
         hiddenCount: 2,
         onDeleteSession: () => {},
@@ -66,5 +67,56 @@ describe("AgentGrid", () => {
     );
     assert.doesNotMatch(markup, /stat-awaiting/);
     assert.doesNotMatch(markup, /等待输入/);
+  });
+});
+
+describe("AgentGrid empty states", () => {
+  const noop = () => {};
+
+  it("shows onboarding guidance when no sessions exist", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AgentGrid, {
+        sessions: [],
+        allSessions: [],
+        filters: { host: null, kind: null, transport: null, dirQuery: "", tag: null },
+        hiddenCount: 0,
+        onDeleteSession: noop,
+        onFiltersChange: noop,
+        onFocusSession: noop,
+        onReconnectSession: noop,
+        onShowHidden: noop,
+        onNewSession: noop,
+        onScanTmux: noop,
+      }),
+    );
+
+    assert.match(markup, /暂无 Agent 会话/);
+    assert.match(markup, /点击左侧面板启动或扫描 Agent/);
+    assert.match(markup, /新建会话/);
+    assert.match(markup, /扫描 tmux/);
+    assert.doesNotMatch(markup, /没有匹配的会话/);
+  });
+
+  it("shows filtered empty state when sessions exist but none match", () => {
+    const sessions = [
+      makeSession({ id: "s1", displayName: "Session 1" }),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentGrid, {
+        sessions: [],
+        allSessions: sessions,
+        filters: { host: "remote", kind: null, transport: null, dirQuery: "", tag: null },
+        hiddenCount: 0,
+        onDeleteSession: noop,
+        onFiltersChange: noop,
+        onFocusSession: noop,
+        onReconnectSession: noop,
+        onShowHidden: noop,
+      }),
+    );
+
+    assert.match(markup, /没有匹配的会话，试试调整筛选条件/);
+    assert.doesNotMatch(markup, /暂无 Agent 会话/);
   });
 });

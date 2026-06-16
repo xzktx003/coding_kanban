@@ -87,3 +87,13 @@
 - `Shift+Left` 等修饰键组合在本地 tmux 终端里变成 `[1;2D` / `D`：xterm 发出 `ESC[1;2D`，但 `buildTmuxSendKeySteps` 只识别普通箭头，导致 send-keys 路径把 ESC 和字面量拆开注入 pane。修复为将 xterm modified cursor/navigation CSI 序列映射成 tmux key name（如 `S-Left`、`C-Right`、`C-S-Down`、`S-PPage`），并保护前后端过滤层继续原样转发这些键序列。
 - Codex 会话中右键粘贴多行内容被逐行提交：上一版剥离 bracketed paste 起止符后，区块内换行重新落入 `Enter` 映射。最终修复为完整保留 `ESC[200~ ... ESC[201~` 区块并作为单个 literal 发送给 tmux，区块外换行仍保持 Enter 语义。
 - Codex 会话多行右键粘贴的 bracketed paste 可能被 WebSocket/xterm 分成多帧：tmux 输入转换必须按 session 记住 `ESC[200~` 已打开，直到看到 `ESC[201~` 才恢复普通 Enter 映射；不要只依赖单个 stdin payload 内完整匹配 paste 区块。
+
+## PM 审计增强 (2026-06-16)
+
+- #32: shellQuote/formatWorkingDirectory 去重 → 提取到 shared 包，三处改为导入
+- #21: 宫格空态引导增强 → 三步快速入门指引
+- #29: 聚焦视图折叠标题栏 → 显示状态徽标+agentKind
+- #16: 快速连接 tmux 记忆历史 → localStorage 保存最近 8 条连接
+- #20: 聚焦视图侧栏会话搜索 → 支持按名称/类型/目录模糊过滤
+- #19: 会话标签/分组 → AgentSessionRecord.tags + FilterBar 标签筛选器
+- #23: 文件浏览器拖拽到终端 → 文件条目 draggable + TerminalView onDrop

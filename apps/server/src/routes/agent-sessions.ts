@@ -15,6 +15,10 @@ import type {
   DiscoverTmuxInput,
   AddDiscoveredTmuxInput,
 } from "@agent-orchestrator/shared";
+import {
+  shellQuote,
+  formatWorkingDirectory,
+} from "@agent-orchestrator/shared";
 
 import { scanAgentDirectory } from "../services/agent-scanner.js";
 import { AgentSessionRegistry } from "../services/agent-session-registry.js";
@@ -40,28 +44,7 @@ import {
 } from "../services/vscode-web-manager.js";
 import { resolveVsCodeWebRequestTarget } from "./vscode-web-request-target.js";
 
-function shellQuote(value: string): string {
-  return quoteForPosixShell(value);
-}
 
-function formatWorkingDirectory(workingDirectory: string): string {
-  if (workingDirectory === "~" || workingDirectory === "~/") {
-    return "~";
-  }
-
-  if (workingDirectory.startsWith("~/")) {
-    const suffix = workingDirectory
-      .slice(2)
-      .split("/")
-      .filter(Boolean)
-      .map((segment) => shellQuote(segment))
-      .join("/");
-
-    return suffix ? `~/${suffix}` : "~";
-  }
-
-  return shellQuote(workingDirectory);
-}
 
 function buildAgentInvocation(
   agentKind: string,

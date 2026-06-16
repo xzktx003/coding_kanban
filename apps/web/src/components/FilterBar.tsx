@@ -5,6 +5,7 @@ export interface FilterState {
   kind: string | null;
   transport: string | null;
   dirQuery: string;
+  tag: string | null;
 }
 
 interface FilterBarProps {
@@ -23,8 +24,11 @@ export function FilterBar({
   const transports = sessions.some((s) => s.transportRef?.tmuxSession)
     ? ["tmux"]
     : [];
+  const allTags = Array.from(
+    new Set(sessions.flatMap((s) => s.tags ?? [])),
+  ).sort();
   const hasFilters =
-    filters.host || filters.kind || filters.transport || filters.dirQuery;
+    filters.host || filters.kind || filters.transport || filters.dirQuery || filters.tag;
 
   return (
     <div className="filter-bar">
@@ -82,6 +86,26 @@ export function FilterBar({
         </select>
       </label>
 
+      {allTags.length > 0 && (
+        <label className="filter-item">
+          <span className="filter-label">标签</span>
+          <select
+            className="filter-select"
+            value={filters.tag ?? ""}
+            onChange={(e) =>
+              onFiltersChange({ ...filters, tag: e.target.value || null })
+            }
+          >
+            <option value="">全部</option>
+            {allTags.map((tag) => (
+              <option key={tag} value={tag}>
+                {tag}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
       <label className="filter-item">
         <span className="filter-label">目录</span>
         <input
@@ -103,6 +127,7 @@ export function FilterBar({
               kind: null,
               transport: null,
               dirQuery: "",
+              tag: null,
             })
           }
         >

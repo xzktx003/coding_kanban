@@ -111,3 +111,34 @@
 - 文章编辑页右侧 AI 区域中，`Skill` 不再作为与 `Chat` 并列的顶层 tab 展示；它绑定在 chat 窗口内，点击 chat 头部的 `Skill` 按钮会展开 skill 选项，选择后直接创建并进入带该 skill 的 chat 会话。
 - Chat 输入区支持两种大模型接入模式：默认 `Built-in LLM` 继续走现有 `/api/ai/send`、`/api/ai/stream` 后端；`Bash Agent` 模式允许配置 `copilot`、`codex`、`claude` 等 bash 命令，并随 chat 请求把 `mode` 和 `bashCommand` 发送给后端执行层。
 - 当前运行的 Paper Writer 静态构建入口包含前端资源自动同步逻辑，会轮询已加载的 `/assets/*.js` 和 `/assets/*.css` 资源签名；运行产物变化后页面会自动刷新，避免每次改前端后都需要手动刷新浏览器。
+
+## 13. PM 审计增强 (2026-06-16)
+
+### 13.1 宫格空态引导
+- 空态下显示三步快速入门指引：新建会话 → 双击进入聚焦 → 快捷键操作。
+- 保留原有新建会话和扫描 tmux 按钮。
+
+### 13.2 聚焦视图折叠标题栏增强
+- 标题栏折叠时显示状态徽标（running/idle/detached/exited）和 agentKind 标签。
+
+### 13.3 快速连接 tmux 记忆历史
+- 连接成功后自动保存最近连接记录（最多 8 条）到 localStorage。
+- 下次打开快速连接弹窗时，在主机搜索前显示"最近连接"快捷入口。
+- 点击最近连接条目可一键填充主机、会话名和工作目录。
+
+### 13.4 聚焦视图侧栏会话搜索
+- 当"其他会话"超过 2 个时，侧栏标题下方显示搜索输入框。
+- 支持按会话名称、Agent 类型、工作目录模糊过滤。
+
+### 13.5 会话标签/分组支持
+- `AgentSessionRecord` 新增可选 `tags: string[]` 字段。
+- FilterBar 新增标签筛选器（仅在存在标签时显示）。
+- 卡片 footer 显示用户自定义标签（蓝色标签样式）。
+
+### 13.6 文件浏览器拖拽路径到终端
+- 文件浏览器中的文件和目录条目支持拖拽。
+- 拖拽到聚焦视图的终端区域时，自动将文件路径写入终端输入并追加空格。
+
+### 13.7 Shell 工具函数共享
+- `shellQuote` 和 `formatWorkingDirectory` 提取到 `packages/shared/src/shell-utils.ts`。
+- 前端和后端统一从 `@agent-orchestrator/shared` 导入，消除三处重复实现。

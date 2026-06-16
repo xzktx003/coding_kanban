@@ -2,12 +2,18 @@ import type {
   AgentSessionRecord,
   ScanResult,
 } from "@agent-orchestrator/shared";
+import {
+  shellQuote,
+  formatWorkingDirectory,
+} from "@agent-orchestrator/shared";
 
 import {
   buildResilientCopilotInvocation,
   buildRemoteInteractiveShellCommand,
   buildRemoteTmuxCommand,
 } from "./platform-compat";
+
+export { shellQuote, formatWorkingDirectory };
 
 export type LaunchMode = "direct" | "tmux";
 
@@ -27,28 +33,7 @@ export function sortScanResults(results: ScanResult[]): ScanResult[] {
   });
 }
 
-export function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
 
-export function formatWorkingDirectory(workingDirectory: string): string {
-  if (workingDirectory === "~" || workingDirectory === "~/") {
-    return "~";
-  }
-
-  if (workingDirectory.startsWith("~/")) {
-    const suffix = workingDirectory
-      .slice(2)
-      .split("/")
-      .filter(Boolean)
-      .map((segment) => shellQuote(segment))
-      .join("/");
-
-    return suffix ? `~/${suffix}` : "~";
-  }
-
-  return shellQuote(workingDirectory);
-}
 
 function buildAgentInvocation(
   agentKind: string,

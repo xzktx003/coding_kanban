@@ -195,6 +195,9 @@ export function AgentGridCard({
       <div className="grid-card-footer">
         <span className="grid-card-kind">{session.agentKind}</span>
         {isTmuxManaged && <span className="grid-card-tag">tmux</span>}
+        {(session.tags ?? []).map((tag) => (
+          <span key={tag} className="grid-card-tag grid-card-tag--user">{tag}</span>
+        ))}
         <span className="grid-card-dir">
           {shortenPath(session.workingDirectory)}
         </span>

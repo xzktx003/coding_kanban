@@ -63,6 +63,7 @@ export interface AgentSessionRecord {
   sshTarget?: SshTarget;
   remoteCommand?: string;
   hidden?: boolean;
+  tags?: string[];
 }
 
 export interface AgentOutputEntry {
@@ -348,3 +349,6 @@ export interface FileOperationInput {
 export interface FileUploadResponse {
   uploadedPaths: string[];
 }
+
+// --- Shell Utilities ---
+export { shellQuote, formatWorkingDirectory } from "./shell-utils.js";

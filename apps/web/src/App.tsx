@@ -301,6 +301,7 @@ export default function App() {
     kind: null,
     transport: null,
     dirQuery: "",
+    tag: null,
   });
   const [useLightweightTerminalPreview, setUseLightweightTerminalPreview] =
     useState(loadTerminalPreviewLightweightMode);
@@ -553,6 +554,7 @@ export default function App() {
         .includes(filters.dirQuery.toLowerCase())
     )
       return false;
+    if (filters.tag && !(s.tags ?? []).includes(filters.tag)) return false;
     return true;
   });
 

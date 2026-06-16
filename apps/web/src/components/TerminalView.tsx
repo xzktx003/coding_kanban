@@ -1445,6 +1445,21 @@ export function TerminalView({
         height: "100%",
         overflow: "hidden",
       }}
+      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
+      onDrop={(e) => {
+        e.preventDefault();
+        const filePath = e.dataTransfer.getData("text/plain");
+        if (filePath && interactive && inputEnabled) {
+          const textarea = termRef.current?.textarea;
+          if (textarea) {
+            textarea.focus();
+          }
+          const term = termRef.current;
+          if (term) {
+            term.write(filePath + " ");
+          }
+        }
+      }}
     >
       {!interactive && !suspended && (
         <div ref={stageRef} className="terminal-view-stage" />

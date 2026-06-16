@@ -200,6 +200,7 @@ export function AgentFocusView({
       }),
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   const [headerCollapsed, setHeaderCollapsed] = useState(
     loadFocusHeaderCollapsed,
   );
@@ -227,6 +228,13 @@ export function AgentFocusView({
   const otherSessions = sessions.filter(
     (session) => !session.hidden && !renderedSessionIds.has(session.id),
   );
+  const filteredSidebarSessions = sidebarSearchQuery
+    ? otherSessions.filter((s) =>
+        s.displayName.toLowerCase().includes(sidebarSearchQuery.toLowerCase()) ||
+        s.agentKind.toLowerCase().includes(sidebarSearchQuery.toLowerCase()) ||
+        (s.workingDirectory ?? "").toLowerCase().includes(sidebarSearchQuery.toLowerCase()),
+      )
+    : otherSessions;
   const activeSlotAvailable = terminalSlots.some(
     (slot) => slot.id === activeSlotId,
   );
@@ -948,6 +956,14 @@ export function AgentFocusView({
           <span className="focus-main-name">
             {activeHeaderSession.displayName}
           </span>
+          {headerCollapsed && (
+            <>
+              <span className={`grid-card-badge badge-${activeHeaderSession.interactionState}`} style={{fontSize: '11px', padding: '2px 6px'}}>
+                {stateLabels[activeHeaderSession.interactionState] ?? activeHeaderSession.interactionState}
+              </span>
+              <span className="focus-main-kind">{activeHeaderSession.agentKind}</span>
+            </>
+          )}
           {!headerCollapsed && (
             <>
               <span
@@ -1172,7 +1188,16 @@ export function AgentFocusView({
           {!sidebarCollapsed && (
             <div className="focus-sidebar">
               <h3 className="focus-sidebar-title">其他会话</h3>
-              {otherSessions.map((session) => (
+              {otherSessions.length > 2 && (
+                <input
+                  className="focus-sidebar-search"
+                  data-testid="sidebar-session-search"
+                  onChange={(e) => setSidebarSearchQuery(e.target.value)}
+                  placeholder="搜索会话..."
+                  value={sidebarSearchQuery}
+                />
+              )}
+              {filteredSidebarSessions.map((session) => (
                 <FocusSidebarSessionCard
                   key={session.id}
                   session={session}

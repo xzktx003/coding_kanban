@@ -1267,6 +1267,49 @@ input {
   outline-offset: 2px;
 }
 
+.grid-empty-quickstart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0;
+  text-align: left;
+  max-width: 400px;
+}
+
+.grid-empty-quickstart-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: rgba(244, 241, 234, 0.72);
+}
+
+.grid-empty-step-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(255, 152, 0, 0.15);
+  color: #ff9800;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.grid-empty-quickstart-step kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  font-family: monospace;
+  font-size: 11px;
+  color: rgba(244, 241, 234, 0.85);
+}
+
+
 /* ===== Grid Card ===== */
 .grid-card {
   display: flex;
@@ -1438,6 +1481,13 @@ input {
   color: #93b4f5;
   font-size: 11px;
   text-transform: lowercase;
+}
+
+
+.grid-card-tag--user {
+  background: rgba(100, 181, 246, 0.12);
+  border-color: rgba(100, 181, 246, 0.3);
+  color: #90caf9;
 }
 
 .grid-card-dir {
@@ -1644,6 +1694,15 @@ input {
   border-color: rgba(255, 152, 0, 0.4);
 }
 
+
+.focus-main-kind {
+  font-size: 11px;
+  color: rgba(244, 241, 234, 0.5);
+  padding: 1px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+}
 .focus-main-name {
   max-width: 260px;
   overflow: hidden;
@@ -2097,6 +2156,27 @@ input {
   overflow-y: auto;
 }
 
+
+.focus-sidebar-search {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(244, 241, 234, 0.9);
+  font-size: 12px;
+  margin-bottom: 8px;
+  box-sizing: border-box;
+}
+
+.focus-sidebar-search::placeholder {
+  color: rgba(244, 241, 234, 0.35);
+}
+
+.focus-sidebar-search:focus {
+  outline: none;
+  border-color: rgba(255, 152, 0, 0.4);
+}
 .focus-sidebar-title {
   margin: 0;
   font-size: 13px;
@@ -2585,6 +2665,53 @@ input {
   font-size: 12px;
 }
 
+
+.quick-tmux-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.quick-tmux-recent-label {
+  font-size: 11px;
+  color: rgba(244, 241, 234, 0.45);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.quick-tmux-recent-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  color: rgba(244, 241, 234, 0.85);
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+}
+
+.quick-tmux-recent-item:hover {
+  background: rgba(255, 152, 0, 0.08);
+  border-color: rgba(255, 152, 0, 0.3);
+}
+
+.quick-tmux-recent-host {
+  font-weight: 600;
+}
+
+.quick-tmux-recent-session {
+  color: rgba(244, 241, 234, 0.6);
+}
+
+.quick-tmux-recent-dir {
+  color: rgba(244, 241, 234, 0.4);
+  font-size: 11px;
+  margin-left: auto;
+}
 .quick-tmux-backdrop {
   position: fixed;
   inset: 0;

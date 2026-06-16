@@ -235,7 +235,23 @@ export function AgentGrid({
           </p>
           {allSessions.length === 0 && (
             <div className="grid-empty-actions">
-              <p className="grid-empty-hint">点击左侧面板启动或扫描 Agent</p>
+              <p className="grid-empty-hint">
+                点击左侧面板启动或扫描 Agent，也可以使用下方快捷入口
+              </p>
+              <div className="grid-empty-quickstart">
+                <div className="grid-empty-quickstart-step">
+                  <span className="grid-empty-step-num">1</span>
+                  <span>新建一个 Copilot / Codex / Claude 会话</span>
+                </div>
+                <div className="grid-empty-quickstart-step">
+                  <span className="grid-empty-step-num">2</span>
+                  <span>双击卡片进入聚焦视图开始输入</span>
+                </div>
+                <div className="grid-empty-quickstart-step">
+                  <span className="grid-empty-step-num">3</span>
+                  <span>使用 <kbd>Alt+Q</kbd> 返回宫格，<kbd>Ctrl+E</kbd> 快连 tmux</span>
+                </div>
+              </div>
               <div className="grid-empty-buttons">
                 {onNewSession && (
                   <button

@@ -643,6 +643,11 @@ export function FileBrowserDrawer({
                     key={entry.path}
                     className={`file-browser-table file-browser-row${selected ? " is-selected" : ""}`}
                     data-testid={`file-entry-${entry.name}`}
+                    draggable
+                    onDragStart={(event) => {
+                      event.dataTransfer.setData("text/plain", entry.path);
+                      event.dataTransfer.effectAllowed = "copy";
+                    }}
                     onClick={(event) =>
                       selectPath(entry.path, {
                         additive: event.metaKey || event.ctrlKey,
