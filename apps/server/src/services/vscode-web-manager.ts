@@ -22,6 +22,10 @@ import { buildSshArgs } from "./ssh-command.js";
 
 const DEFAULT_VSCODE_WEB_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_VSCODE_WEB_PROXY_PATH = "/vscode/";
+const VSCODE_WEB_IME_SETTINGS = {
+  "editor.editContext": false,
+  "editor.experimentalEditContextEnabled": false,
+};
 
 export class UnsupportedVsCodeWebSessionError extends Error {
   constructor(message: string) {
@@ -203,39 +207,11 @@ function buildUserTerminalArgs(shellPath: string): string[] {
   return ["-i"];
 }
 
-function buildUserSettingsContent(shellPath: string): string {
-  const profileName = "coding-kanban-user-shell";
-
-  return `${JSON.stringify(
-    {
-      "terminal.integrated.defaultProfile.linux": profileName,
-      "terminal.integrated.inheritEnv": true,
-      "terminal.integrated.profiles.linux": {
-        [profileName]: {
-          path: shellPath,
-          args: buildUserTerminalArgs(shellPath),
-        },
-      },
-    },
-    null,
-    2,
-  )}\n`;
-}
-
-function mergeUserSettingsContent(
-  existingContent: string | null,
+function buildManagedUserSettings(
   shellPath: string,
-): string {
+  existingSettings: Record<string, unknown> = {},
+): Record<string, unknown> {
   const profileName = "coding-kanban-user-shell";
-  let existingSettings: Record<string, unknown> = {};
-
-  if (existingContent) {
-    const parsed = JSON.parse(existingContent);
-    if (isRecord(parsed)) {
-      existingSettings = parsed;
-    }
-  }
-
   const existingProfiles = isRecord(
     existingSettings["terminal.integrated.profiles.linux"],
   )
@@ -245,19 +221,40 @@ function mergeUserSettingsContent(
       >)
     : {};
 
-  return `${JSON.stringify(
-    {
-      ...existingSettings,
-      "terminal.integrated.defaultProfile.linux": profileName,
-      "terminal.integrated.inheritEnv": true,
-      "terminal.integrated.profiles.linux": {
-        ...existingProfiles,
-        [profileName]: {
-          path: shellPath,
-          args: buildUserTerminalArgs(shellPath),
-        },
+  return {
+    ...existingSettings,
+    ...VSCODE_WEB_IME_SETTINGS,
+    "terminal.integrated.defaultProfile.linux": profileName,
+    "terminal.integrated.inheritEnv": true,
+    "terminal.integrated.profiles.linux": {
+      ...existingProfiles,
+      [profileName]: {
+        path: shellPath,
+        args: buildUserTerminalArgs(shellPath),
       },
     },
+  };
+}
+
+function buildUserSettingsContent(shellPath: string): string {
+  return `${JSON.stringify(buildManagedUserSettings(shellPath), null, 2)}\n`;
+}
+
+function mergeUserSettingsContent(
+  existingContent: string | null,
+  shellPath: string,
+): string {
+  let existingSettings: Record<string, unknown> = {};
+
+  if (existingContent) {
+    const parsed = JSON.parse(existingContent);
+    if (isRecord(parsed)) {
+      existingSettings = parsed;
+    }
+  }
+
+  return `${JSON.stringify(
+    buildManagedUserSettings(shellPath, existingSettings),
     null,
     2,
   )}\n`;
@@ -959,7 +956,30 @@ function buildRemoteCodeServerLaunchCommand(
     'USER_DATA_DIR="$ROOT/user-data"',
     'EXTENSIONS_DIR="$HOME/.vscode-server/extensions"',
     'if [ ! -d "$EXTENSIONS_DIR" ]; then EXTENSIONS_DIR="$ROOT/extensions"; fi',
-    'mkdir -p "$USER_DATA_DIR" "$EXTENSIONS_DIR"',
+    'mkdir -p "$USER_DATA_DIR/User" "$EXTENSIONS_DIR"',
+    'SETTINGS_FILE="$USER_DATA_DIR/User/settings.json"',
+    "python3 - \"$SETTINGS_FILE\" <<'PY'",
+    "import json",
+    "import os",
+    "import sys",
+    "",
+    "settings_file = sys.argv[1]",
+    "settings = {}",
+    "try:",
+    "    with open(settings_file, 'r', encoding='utf-8') as handle:",
+    "        parsed = json.load(handle)",
+    "        if isinstance(parsed, dict):",
+    "            settings = parsed",
+    "except (OSError, json.JSONDecodeError):",
+    "    pass",
+    "",
+    "settings['editor.editContext'] = False",
+    "settings['editor.experimentalEditContextEnabled'] = False",
+    "os.makedirs(os.path.dirname(settings_file), exist_ok=True)",
+    "with open(settings_file, 'w', encoding='utf-8') as handle:",
+    "    json.dump(settings, handle, ensure_ascii=False, indent=2)",
+    "    handle.write('\\n')",
+    "PY",
     `WORKING_DIRECTORY=${quoteForPosixShell(workingDirectory)}`,
     'if cd "$WORKING_DIRECTORY" 2>/dev/null; then',
     '  WORKING_DIRECTORY="$(pwd -P)"',

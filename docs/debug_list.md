@@ -209,3 +209,11 @@
 - **修复**: 本地文件列表从 uid 解析 owner，SFTP 列表优先从 longname 解析 owner；前端新增 Owner 列，并用可持久化列宽状态和表头分割线支持左右拖动调整各列宽度。
 - **测试**: `pnpm --dir apps/web test -- FileBrowserDrawer.test.ts`；`pnpm --dir apps/server test -- local-fs-service.test.ts sftp-service.test.ts`。
 - **文件**: `packages/shared/src/index.ts`, `apps/server/src/services/file-system-utils.ts`, `apps/server/src/services/local-fs-service.ts`, `apps/server/src/services/sftp-service.ts`, `apps/web/src/components/FileBrowserDrawer.tsx`, `apps/web/src/app.css`
+
+### VS Code Web 中文 IME 标点无法输入
+
+- **现象**: 看板内嵌 VS Code Web 编辑器中，中文和英文字符可输入，英文标点可输入，但中文 IME 标点无法提交到文档。
+- **根因**: 现象只影响 IME 标点提交，不是整体焦点丢失；根因指向 VS Code Web/EditContext 输入路径与 CJK IME 标点提交兼容性问题。
+- **修复**: 本地 code-server managed `settings.json` 写入 `editor.editContext=false` 和旧版兼容键 `editor.experimentalEditContextEnabled=false`；SSH 远端 code-server 启动脚本也在启动前合并同样设置，确保本地/远端 VS Code Web 都回到稳定输入路径。
+- **测试**: `pnpm --dir apps/server test -- vscode-web-manager.test.ts`（实际通过 server 全量测试：132 pass，1 skip）。
+- **文件**: `apps/server/src/services/vscode-web-manager.ts`, `apps/server/src/services/vscode-web-manager.test.ts`, `docs/project-overview.md`

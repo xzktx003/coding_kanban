@@ -101,6 +101,11 @@ test("ensureSession starts remote code-server targets for SSH sessions", async (
   assert.equal(remoteCommands.length, 1);
   assert.match(remoteCommands[0] ?? "", /code-server/);
   assert.match(remoteCommands[0] ?? "", /python3/);
+  assert.match(remoteCommands[0] ?? "", /editor\.editContext/);
+  assert.match(
+    remoteCommands[0] ?? "",
+    /editor\.experimentalEditContextEnabled/,
+  );
   assert.doesNotMatch(
     remoteCommands[0] ?? "",
     /\.vscode-server\/(?:bin|cli\/servers)\//,
@@ -289,6 +294,8 @@ test("ensureSession launches one global code-server and returns session-specific
     userSettings["terminal.integrated.defaultProfile.linux"],
     "coding-kanban-user-shell",
   );
+  assert.equal(userSettings["editor.editContext"], false);
+  assert.equal(userSettings["editor.experimentalEditContextEnabled"], false);
   assert.equal(userSettings["terminal.integrated.inheritEnv"], true);
   assert.equal(
     userSettings["terminal.integrated.profiles.linux"][

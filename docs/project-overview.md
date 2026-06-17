@@ -507,6 +507,7 @@ UI 和 API 应围绕 `AgentSessionRecord` 工作。不要让 terminal id、tmux 
 - code-server 返回 URL 使用请求 host 或 `VSCODE_WEB_PUBLIC_HOST`。
 - 启动时会先解析当前用户的 login shell 环境，尽量复用 `PATH`、`SHELL`、`HOME` 和 rc 文件里导出的工具链变量。
 - 会在 code-server 的 `user-data/User/settings.json` 里写入 Linux 终端默认 profile，让集成终端继承这份 login 环境，并以 interactive shell 方式启动当前用户 shell。
+- 同一份 `settings.json` 会关闭 VS Code Web/EditContext 输入路径，规避浏览器内嵌编辑器中中文 IME 标点提交被吞的问题；本地和 SSH 远端 code-server 启动路径都应用该设置。
 - 启动前会清理继承的 `npm_config_*` 变量，避免 `nvm` 因 `npm_config_prefix` 等脚本环境污染而失效。
 - 扩展默认复用当前用户的 `~/.vscode-server/extensions`；如果需要单独目录，可设置 `VSCODE_WEB_EXTENSIONS_DIR`。
 - 启动时会清理继承的 `VSCODE_IPC_HOOK_CLI`，避免从 VS Code 终端拉起时误连到已有实例。
