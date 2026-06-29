@@ -455,8 +455,10 @@ export function listFiles(body: ListFilesInput): Promise<ListFilesResponse> {
   });
 }
 
-export function fileOperation(body: FileOperationInput): Promise<{ ok: true }> {
-  return request<{ ok: true }>("/api/fs/operation", {
+export function fileOperation(
+  body: FileOperationInput,
+): Promise<{ ok: true; path?: string }> {
+  return request<{ ok: true; path?: string }>("/api/fs/operation", {
     method: "POST",
     body: JSON.stringify(body),
   });

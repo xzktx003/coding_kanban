@@ -177,3 +177,74 @@ test('new session: 远端目录建议不可用时不显示候选框', async ({ p
   await expect.poll(() => disabledRequests).toBeGreaterThan(0);
   await expect(page.getByTestId('directory-suggestions')).toHaveCount(0);
 });
+
+test('new session: 可在目录选择器当前目录下新建文件夹并选中', async ({
+  page,
+}) => {
+  await mockShell(page);
+
+  const parentPath = '/data01/home/houmo';
+  const createdPath = `${parentPath}/kanban-new-work`;
+  const fsOperations: Array<Record<string, unknown>> = [];
+  let listRequests = 0;
+
+  await page.route('**/api/fs/list', async (route) => {
+    listRequests += 1;
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        path: body.path || parentPath,
+        entries: [
+          {
+            name: 'existing-work',
+            path: `${parentPath}/existing-work`,
+            type: 'directory',
+            size: 0,
+            modifiedAt: new Date().toISOString(),
+            owner: 'houmo',
+            permissions: 'drwxr-xr-x',
+            isHidden: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.route('**/api/fs/operation', async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown>;
+    fsOperations.push(body);
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, path: body.path }),
+    });
+  });
+
+  await page.goto('/');
+  await openNewSessionForHost(page, 'hm15');
+  await page.getByTestId('new-session-dir').fill(parentPath);
+  await page.getByTestId('new-session-browse-dir').click();
+
+  await expect.poll(() => listRequests).toBeGreaterThan(0);
+  await expect(page.getByTestId('new-session-directory-picker')).toBeVisible();
+  await expect(page.getByTestId('new-session-directory-current')).toContainText(
+    parentPath,
+  );
+
+  await page.getByTestId('new-session-new-folder-name').fill('kanban-new-work');
+  await page.getByTestId('new-session-create-folder').click();
+
+  await expect
+    .poll(() => fsOperations)
+    .toContainEqual({
+      operation: 'mkdir',
+      path: createdPath,
+      sshTarget: {
+        host: mockSshHost.host,
+        port: mockSshHost.port,
+        username: mockSshHost.username,
+      },
+    });
+  await expect(page.getByTestId('new-session-dir')).toHaveValue(createdPath);
+  await expect(page.getByTestId('new-session-directory-picker')).toHaveCount(0);
+});

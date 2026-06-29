@@ -3108,6 +3108,19 @@ input {
   position: relative;
 }
 
+.new-session-dir-input-row,
+.new-session-create-folder-row,
+.new-session-directory-toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+.new-session-dir-input-row .drawer-input,
+.new-session-create-folder-row .drawer-input {
+  min-width: 0;
+  flex: 1;
+}
+
 .directory-suggestions {
   margin-top: 8px;
   display: flex;
@@ -3134,6 +3147,81 @@ input {
 
 .directory-suggestion-item:hover {
   background: rgba(246, 178, 107, 0.1);
+}
+
+.new-session-directory-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.new-session-directory-picker-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.new-session-directory-current-wrap {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.new-session-directory-current,
+.new-session-directory-path {
+  overflow-wrap: anywhere;
+}
+
+.new-session-directory-current {
+  color: #f8debf;
+  font-size: 13px;
+}
+
+.new-session-directory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 210px;
+  overflow-y: auto;
+}
+
+.new-session-directory-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.new-session-directory-item:hover {
+  border-color: rgba(246, 178, 107, 0.24);
+  background: rgba(246, 178, 107, 0.08);
+}
+
+.new-session-directory-name {
+  flex: 0 0 auto;
+  color: rgba(244, 241, 234, 0.88);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.new-session-directory-path {
+  min-width: 0;
+  color: rgba(244, 241, 234, 0.48);
+  font-size: 12px;
+  text-align: right;
 }
 
 .new-session-message {
@@ -3230,6 +3318,19 @@ input {
 
   .new-session-mode-toggle {
     flex-direction: column;
+  }
+
+  .new-session-dir-input-row,
+  .new-session-create-folder-row,
+  .new-session-directory-toolbar,
+  .new-session-directory-picker-header,
+  .new-session-directory-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .new-session-directory-path {
+    text-align: left;
   }
 
   .quick-tmux-dialog {
