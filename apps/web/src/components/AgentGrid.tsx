@@ -17,6 +17,8 @@ import {
 } from "../lib/grid-virtualization";
 import { AgentGridCard } from "./AgentGridCard";
 import { FilterBar, type FilterState } from "./FilterBar";
+import { SessionGroupHeader } from "./SessionGroupControls";
+import { groupSessions, type SessionGroupState } from "../lib/session-groups";
 
 interface AgentGridProps {
   sessions: AgentSessionRecord[];
@@ -38,6 +40,11 @@ interface AgentGridProps {
   useLightweightTerminalPreview?: boolean;
   terminalFontSize?: number;
   onTerminalFontSizeChange?: (fontSize: number) => void;
+  sessionGroups?: SessionGroupState;
+  onCreateSessionGroup?: (sessionId?: string) => void;
+  onDeleteSessionGroup?: (groupId: string) => void;
+  onMoveSessionToGroup?: (sessionId: string, groupId: string | null) => void;
+  onRenameSessionGroup?: (groupId: string) => void;
 }
 
 interface GridMetrics {
@@ -86,6 +93,11 @@ export function AgentGrid({
   useLightweightTerminalPreview = true,
   terminalFontSize,
   onTerminalFontSizeChange,
+  sessionGroups = { groups: [], assignments: {} },
+  onCreateSessionGroup,
+  onDeleteSessionGroup,
+  onMoveSessionToGroup,
+  onRenameSessionGroup,
 }: AgentGridProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
@@ -94,8 +106,13 @@ export function AgentGrid({
   const runningCount = sessions.filter(
     (session) => session.interactionState === "running",
   ).length;
+  const groupingEnabled = sessionGroups.groups.length > 0;
   const shouldVirtualize =
-    sessions.length > AGENT_GRID_VIRTUALIZATION_THRESHOLD;
+    !groupingEnabled && sessions.length > AGENT_GRID_VIRTUALIZATION_THRESHOLD;
+  const groupedSessions = useMemo(
+    () => groupSessions(sessions, sessionGroups),
+    [sessionGroups, sessions],
+  );
 
   const updateGridMetrics = useCallback(() => {
     const element = gridRef.current;
@@ -190,6 +207,9 @@ export function AgentGrid({
         onHide={onHideSession}
         onCopyConnectCommand={onCopyConnectCommand}
         onKillTmux={onKillTmux}
+        sessionGroups={sessionGroups}
+        onCreateSessionGroup={onCreateSessionGroup}
+        onMoveSessionToGroup={onMoveSessionToGroup}
         terminalSuspended={session.id === suspendedSessionId}
         useLightweightTerminalPreview={useLightweightTerminalPreview}
         terminalFontSize={terminalFontSize}
@@ -207,6 +227,13 @@ export function AgentGrid({
           onFiltersChange={onFiltersChange}
         />
         <div className="agent-grid-toolbar-actions">
+          <button
+            className="session-group-add-button"
+            onClick={() => onCreateSessionGroup?.()}
+            type="button"
+          >
+            ＋ 新建分组
+          </button>
           {hiddenCount > 0 && (
             <button
               className="hidden-sessions-btn"
@@ -249,7 +276,9 @@ export function AgentGrid({
                 </div>
                 <div className="grid-empty-quickstart-step">
                   <span className="grid-empty-step-num">3</span>
-                  <span>使用 <kbd>Alt+Q</kbd> 返回宫格，<kbd>Ctrl+E</kbd> 快连 tmux</span>
+                  <span>
+                    使用 <kbd>Alt+Q</kbd> 返回宫格，<kbd>Ctrl+E</kbd> 快连 tmux
+                  </span>
                 </div>
               </div>
               <div className="grid-empty-buttons">
@@ -274,6 +303,23 @@ export function AgentGrid({
               </div>
             </div>
           )}
+        </div>
+      ) : groupingEnabled ? (
+        <div className="agent-group-list" data-testid="agent-group-list">
+          {groupedSessions.map((group) => (
+            <section className="agent-group-section" key={group.id}>
+              <SessionGroupHeader
+                count={group.sessions.length}
+                groupId={group.id}
+                name={group.name}
+                onDeleteGroup={onDeleteSessionGroup}
+                onRenameGroup={onRenameSessionGroup}
+              />
+              <div className="agent-grid agent-group-grid">
+                {group.sessions.map(renderSessionCard)}
+              </div>
+            </section>
+          ))}
         </div>
       ) : (
         <div

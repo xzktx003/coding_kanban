@@ -81,6 +81,16 @@ import {
   buildRemoteDirectLaunchCommand,
   wrapRemoteInteractiveCommand,
 } from "./lib/session-matching";
+import {
+  addSessionGroup,
+  assignSessionToGroup,
+  deleteSessionGroup,
+  getSessionGroupKey,
+  loadSessionGroups,
+  renameSessionGroup,
+  saveSessionGroups,
+  type SessionGroupState,
+} from "./lib/session-groups";
 import { isVsCodeAvailable } from "./lib/side-panel-availability";
 import {
   loadTerminalPreviewLightweightMode,
@@ -288,6 +298,8 @@ export default function App() {
     [],
   );
   const [layoutState, setLayoutState] = useState<LayoutState>(loadLayoutState);
+  const [sessionGroups, setSessionGroups] =
+    useState<SessionGroupState>(loadSessionGroups);
   const [sshHosts, setSshHosts] = useState<SshHostPreset[]>([]);
   const [discoveryState, setDiscoveryState] = useState<{
     open: boolean;
@@ -389,6 +401,10 @@ export default function App() {
   useEffect(() => {
     saveFileBrowserUiState(fileBrowserUiState);
   }, [fileBrowserUiState]);
+
+  useEffect(() => {
+    saveSessionGroups(sessionGroups);
+  }, [sessionGroups]);
 
   useEffect(() => {
     saveSidePanelSessionStates(fileBrowserSessionStates);
@@ -741,6 +757,107 @@ export default function App() {
           `改名失败: ${error instanceof Error ? error.message : "未知错误"}`,
         );
       }
+    },
+    [sessions],
+  );
+
+  const handleCreateSessionGroup = useCallback(
+    (sessionId?: string) => {
+      const requestedName = window.prompt("输入新分组名称");
+      if (requestedName === null) return;
+
+      const name = requestedName.trim();
+      if (!name) {
+        window.alert("分组名称不能为空");
+        return;
+      }
+      if (
+        sessionGroups.groups.some(
+          (group) =>
+            group.name.localeCompare(name, undefined, {
+              sensitivity: "accent",
+            }) === 0,
+        )
+      ) {
+        window.alert("分组名称已存在");
+        return;
+      }
+
+      const randomId = globalThis.crypto?.randomUUID?.() ??
+        `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const groupId = `group-${randomId}`;
+      setSessionGroups((current) => {
+        let next = addSessionGroup(current, { id: groupId, name });
+        const session = sessionId
+          ? sessions.find((item) => item.id === sessionId)
+          : undefined;
+        if (session) {
+          next = assignSessionToGroup(
+            next,
+            getSessionGroupKey(session),
+            groupId,
+          );
+        }
+        return next;
+      });
+    },
+    [sessionGroups.groups, sessions],
+  );
+
+  const handleRenameSessionGroup = useCallback(
+    (groupId: string) => {
+      const group = sessionGroups.groups.find((item) => item.id === groupId);
+      if (!group) return;
+
+      const requestedName = window.prompt("输入新的分组名称", group.name);
+      if (requestedName === null) return;
+
+      const name = requestedName.trim();
+      if (!name) {
+        window.alert("分组名称不能为空");
+        return;
+      }
+      if (
+        sessionGroups.groups.some(
+          (item) =>
+            item.id !== groupId &&
+            item.name.localeCompare(name, undefined, {
+              sensitivity: "accent",
+            }) === 0,
+        )
+      ) {
+        window.alert("分组名称已存在");
+        return;
+      }
+
+      setSessionGroups((current) => renameSessionGroup(current, groupId, name));
+    },
+    [sessionGroups.groups],
+  );
+
+  const handleDeleteSessionGroup = useCallback(
+    (groupId: string) => {
+      const group = sessionGroups.groups.find((item) => item.id === groupId);
+      if (!group) return;
+      if (
+        !window.confirm(`删除分组“${group.name}”？其中的卡片将回到未分组。`)
+      ) {
+        return;
+      }
+
+      setSessionGroups((current) => deleteSessionGroup(current, groupId));
+    },
+    [sessionGroups.groups],
+  );
+
+  const handleMoveSessionToGroup = useCallback(
+    (sessionId: string, groupId: string | null) => {
+      const session = sessions.find((item) => item.id === sessionId);
+      if (!session) return;
+
+      setSessionGroups((current) =>
+        assignSessionToGroup(current, getSessionGroupKey(session), groupId),
+      );
     },
     [sessions],
   );
@@ -1242,6 +1359,11 @@ export default function App() {
               onDeleteSession={handleDeleteSession}
               onHideSession={handleHideSession}
               onRename={handleRenameSession}
+              sessionGroups={sessionGroups}
+              onCreateSessionGroup={handleCreateSessionGroup}
+              onDeleteSessionGroup={handleDeleteSessionGroup}
+              onMoveSessionToGroup={handleMoveSessionToGroup}
+              onRenameSessionGroup={handleRenameSessionGroup}
               useLightweightTerminalPreview={useLightweightTerminalPreview}
               mobileTerminalTouchMode={mobileTerminalTouchMode}
               terminalFontSize={terminalFontSize}
@@ -1260,6 +1382,11 @@ export default function App() {
               onHideSession={handleHideSession}
               onCopyConnectCommand={handleCopyConnectCommand}
               onKillTmux={handleKillTmux}
+              sessionGroups={sessionGroups}
+              onCreateSessionGroup={handleCreateSessionGroup}
+              onDeleteSessionGroup={handleDeleteSessionGroup}
+              onMoveSessionToGroup={handleMoveSessionToGroup}
+              onRenameSessionGroup={handleRenameSessionGroup}
               onNewSession={() => setNewSessionHost({ type: "local" })}
               onScanTmux={() =>
                 setDiscoveryState({

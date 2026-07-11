@@ -33,6 +33,40 @@ function makeSession(id: string, displayName: string): AgentSessionRecord {
 }
 
 describe("AgentFocusView", () => {
+  it("renders the same session groups in the other-session sidebar", () => {
+    installLocalStorageStub("single");
+    const sessions = [
+      makeSession("session-1", "Alpha"),
+      makeSession("session-2", "Beta"),
+      makeSession("session-3", "Gamma"),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: sessions[0],
+        sessions,
+        sessionGroups: {
+          groups: [{ id: "group-review", name: "评审" }],
+          assignments: { "session:session-2": "group-review" },
+        },
+        onCreateSessionGroup: () => {},
+        onDeleteSessionGroup: () => {},
+        onMoveSessionToGroup: () => {},
+        onRenameSessionGroup: () => {},
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    assert.match(markup, /data-session-group-id="group-review"/);
+    assert.match(markup, />评审</);
+    assert.match(markup, /data-session-group-id="__ungrouped__"/);
+    assert.equal((markup.match(/aria-label="移动到分组"/g) ?? []).length, 2);
+  });
+
   it("renders a prominent current-input badge for the active monitor pane", () => {
     installLocalStorageStub();
     const sessions = [
@@ -140,5 +174,39 @@ describe("AgentFocusView", () => {
 
     assert.doesNotMatch(markup, /focus-sidebar--scrollable/);
     assert.match(markup, /data-sidebar-scroll-mode="auto"/);
+  });
+
+  it("enables sidebar scrolling when group headers exceed the compact space", () => {
+    installLocalStorageStub("single");
+    const sessions = Array.from({ length: 5 }, (_, index) =>
+      makeSession(`session-${index + 1}`, `Session ${index + 1}`),
+    );
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: sessions[0],
+        sessions,
+        sessionGroups: {
+          groups: Array.from({ length: 4 }, (_, index) => ({
+            id: `group-${index + 1}`,
+            name: `Group ${index + 1}`,
+          })),
+          assignments: Object.fromEntries(
+            Array.from({ length: 4 }, (_, index) => [
+              `session:session-${index + 2}`,
+              `group-${index + 1}`,
+            ]),
+          ),
+        },
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    assert.match(markup, /focus-sidebar--scrollable/);
+    assert.match(markup, /data-sidebar-scroll-mode="enabled"/);
   });
 });

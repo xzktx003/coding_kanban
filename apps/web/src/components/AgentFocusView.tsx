@@ -11,7 +11,9 @@ import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import { FocusSidebarSessionCard } from "./FocusSidebarSessionCard";
 import { LazyTerminalView } from "./LazyTerminalView";
+import { SessionGroupHeader } from "./SessionGroupControls";
 import { TerminalPreview } from "./TerminalPreview";
+import { groupSessions, type SessionGroupState } from "../lib/session-groups";
 import {
   focusActiveTerminalTextarea,
   getActiveTerminalTextarea,
@@ -52,6 +54,11 @@ interface AgentFocusViewProps {
   useLightweightTerminalPreview?: boolean;
   terminalFontSize?: number;
   onTerminalFontSizeChange?: (fontSize: number) => void;
+  sessionGroups?: SessionGroupState;
+  onCreateSessionGroup?: (sessionId?: string) => void;
+  onDeleteSessionGroup?: (groupId: string) => void;
+  onMoveSessionToGroup?: (sessionId: string, groupId: string | null) => void;
+  onRenameSessionGroup?: (groupId: string) => void;
 }
 
 const stateLabels: Record<string, string> = {
@@ -171,6 +178,11 @@ export function AgentFocusView({
   useLightweightTerminalPreview = true,
   terminalFontSize,
   onTerminalFontSizeChange,
+  sessionGroups = { groups: [], assignments: {} },
+  onCreateSessionGroup,
+  onDeleteSessionGroup,
+  onMoveSessionToGroup,
+  onRenameSessionGroup,
 }: AgentFocusViewProps) {
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !session.hidden),
@@ -230,14 +242,29 @@ export function AgentFocusView({
     (session) => !session.hidden && !renderedSessionIds.has(session.id),
   );
   const filteredSidebarSessions = sidebarSearchQuery
-    ? otherSessions.filter((s) =>
-        s.displayName.toLowerCase().includes(sidebarSearchQuery.toLowerCase()) ||
-        s.agentKind.toLowerCase().includes(sidebarSearchQuery.toLowerCase()) ||
-        (s.workingDirectory ?? "").toLowerCase().includes(sidebarSearchQuery.toLowerCase()),
+    ? otherSessions.filter(
+        (s) =>
+          s.displayName
+            .toLowerCase()
+            .includes(sidebarSearchQuery.toLowerCase()) ||
+          s.agentKind
+            .toLowerCase()
+            .includes(sidebarSearchQuery.toLowerCase()) ||
+          (s.workingDirectory ?? "")
+            .toLowerCase()
+            .includes(sidebarSearchQuery.toLowerCase()),
       )
     : otherSessions;
+  const groupingEnabled = sessionGroups.groups.length > 0;
+  const groupedSidebarSessions = useMemo(
+    () => groupSessions(filteredSidebarSessions, sessionGroups),
+    [filteredSidebarSessions, sessionGroups],
+  );
+  const sidebarRenderedUnitCount = groupingEnabled
+    ? filteredSidebarSessions.length + groupedSidebarSessions.length
+    : filteredSidebarSessions.length;
   const sidebarScrollMode =
-    filteredSidebarSessions.length > FOCUS_SIDEBAR_SCROLL_THRESHOLD;
+    sidebarRenderedUnitCount > FOCUS_SIDEBAR_SCROLL_THRESHOLD;
   const activeSlotAvailable = terminalSlots.some(
     (slot) => slot.id === activeSlotId,
   );
@@ -1193,7 +1220,16 @@ export function AgentFocusView({
               className={`focus-sidebar${sidebarScrollMode ? " focus-sidebar--scrollable" : ""}`}
               data-sidebar-scroll-mode={sidebarScrollMode ? "enabled" : "auto"}
             >
-              <h3 className="focus-sidebar-title">其他会话</h3>
+              <div className="focus-sidebar-heading-row">
+                <h3 className="focus-sidebar-title">其他会话</h3>
+                <button
+                  className="session-group-add-button session-group-add-button--compact"
+                  onClick={() => onCreateSessionGroup?.()}
+                  type="button"
+                >
+                  ＋ 分组
+                </button>
+              </div>
               {otherSessions.length > 2 && (
                 <input
                   className="focus-sidebar-search"
@@ -1207,19 +1243,47 @@ export function AgentFocusView({
                 className="focus-sidebar-scroll"
                 data-testid="focus-sidebar-scroll"
               >
-                {filteredSidebarSessions.map((session) => (
-                  <FocusSidebarSessionCard
-                    key={session.id}
-                    session={session}
-                    onDragStart={startSessionDrag}
-                    onDragEnd={finishSessionDrag}
-                    onContextMenu={handleSidebarContextMenu}
-                    onRename={onRename}
-                    onSwitchFocus={handleSidebarSwitchFocus}
-                    useLightweightTerminalPreview={useLightweightTerminalPreview}
-                    terminalFontSize={terminalFontSize}
-                    onTerminalFontSizeChange={onTerminalFontSizeChange}
-                  />
+                {(groupingEnabled
+                  ? groupedSidebarSessions
+                  : [
+                      {
+                        id: "__flat__",
+                        name: "",
+                        sessions: filteredSidebarSessions,
+                      },
+                    ]
+                ).map((group) => (
+                  <div className="focus-sidebar-group" key={group.id}>
+                    {groupingEnabled && (
+                      <SessionGroupHeader
+                        compact
+                        count={group.sessions.length}
+                        groupId={group.id}
+                        name={group.name}
+                        onDeleteGroup={onDeleteSessionGroup}
+                        onRenameGroup={onRenameSessionGroup}
+                      />
+                    )}
+                    {group.sessions.map((session) => (
+                      <FocusSidebarSessionCard
+                        key={session.id}
+                        session={session}
+                        sessionGroups={sessionGroups}
+                        onCreateSessionGroup={onCreateSessionGroup}
+                        onMoveSessionToGroup={onMoveSessionToGroup}
+                        onDragStart={startSessionDrag}
+                        onDragEnd={finishSessionDrag}
+                        onContextMenu={handleSidebarContextMenu}
+                        onRename={onRename}
+                        onSwitchFocus={handleSidebarSwitchFocus}
+                        useLightweightTerminalPreview={
+                          useLightweightTerminalPreview
+                        }
+                        terminalFontSize={terminalFontSize}
+                        onTerminalFontSizeChange={onTerminalFontSizeChange}
+                      />
+                    ))}
+                  </div>
                 ))}
               </div>
             </div>

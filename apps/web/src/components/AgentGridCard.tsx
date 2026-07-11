@@ -4,7 +4,9 @@ import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import { CardMoreMenu } from "./CardMoreMenu";
 import { LazyTerminalView } from "./LazyTerminalView";
+import { SessionGroupMenu } from "./SessionGroupControls";
 import { TerminalPreview } from "./TerminalPreview";
+import type { SessionGroupState } from "../lib/session-groups";
 
 interface AgentGridCardProps {
   session: AgentSessionRecord;
@@ -15,6 +17,9 @@ interface AgentGridCardProps {
   onHide?: (id: string) => void;
   onCopyConnectCommand?: (id: string) => void;
   onKillTmux?: (id: string) => void;
+  sessionGroups?: SessionGroupState;
+  onCreateSessionGroup?: (sessionId?: string) => void;
+  onMoveSessionToGroup?: (sessionId: string, groupId: string | null) => void;
   terminalSuspended?: boolean;
   useLightweightTerminalPreview?: boolean;
   terminalFontSize?: number;
@@ -62,6 +67,9 @@ export function AgentGridCard({
   onHide,
   onCopyConnectCommand,
   onKillTmux,
+  sessionGroups = { groups: [], assignments: {} },
+  onCreateSessionGroup,
+  onMoveSessionToGroup,
   terminalSuspended = false,
   useLightweightTerminalPreview = true,
   terminalFontSize,
@@ -106,6 +114,12 @@ export function AgentGridCard({
           <span className="grid-card-name">{session.displayName}</span>
         </div>
         <div className="grid-card-header-actions">
+          <SessionGroupMenu
+            session={session}
+            sessionGroups={sessionGroups}
+            onCreateGroup={onCreateSessionGroup}
+            onMoveSessionToGroup={onMoveSessionToGroup}
+          />
           <button
             className="grid-card-rename"
             onClick={(e) => {
@@ -196,7 +210,9 @@ export function AgentGridCard({
         <span className="grid-card-kind">{session.agentKind}</span>
         {isTmuxManaged && <span className="grid-card-tag">tmux</span>}
         {(session.tags ?? []).map((tag) => (
-          <span key={tag} className="grid-card-tag grid-card-tag--user">{tag}</span>
+          <span key={tag} className="grid-card-tag grid-card-tag--user">
+            {tag}
+          </span>
         ))}
         <span className="grid-card-dir">
           {shortenPath(session.workingDirectory)}

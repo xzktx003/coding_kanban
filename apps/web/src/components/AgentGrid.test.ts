@@ -25,6 +25,44 @@ function makeSession(
 }
 
 describe("AgentGrid", () => {
+  it("renders configured session groups and card assignment controls", () => {
+    const sessions = [
+      makeSession({ id: "session-1", displayName: "Alpha" }),
+      makeSession({ id: "session-2", displayName: "Beta" }),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentGrid, {
+        sessions,
+        allSessions: sessions,
+        filters: {
+          host: null,
+          kind: null,
+          transport: null,
+          dirQuery: "",
+          tag: null,
+        },
+        sessionGroups: {
+          groups: [{ id: "group-backend", name: "后端" }],
+          assignments: { "session:session-1": "group-backend" },
+        },
+        onCreateSessionGroup: () => {},
+        onDeleteSessionGroup: () => {},
+        onMoveSessionToGroup: () => {},
+        onRenameSessionGroup: () => {},
+        onDeleteSession: () => {},
+        onFiltersChange: () => {},
+        onFocusSession: () => {},
+        onReconnectSession: () => {},
+      }),
+    );
+
+    assert.match(markup, /data-session-group-id="group-backend"/);
+    assert.match(markup, />后端</);
+    assert.match(markup, /data-session-group-id="__ungrouped__"/);
+    assert.equal((markup.match(/aria-label="移动到分组"/g) ?? []).length, 2);
+  });
+
   it("shows running counts as compact grid toolbar chips", () => {
     const sessions = [
       makeSession({
@@ -78,7 +116,13 @@ describe("AgentGrid empty states", () => {
       createElement(AgentGrid, {
         sessions: [],
         allSessions: [],
-        filters: { host: null, kind: null, transport: null, dirQuery: "", tag: null },
+        filters: {
+          host: null,
+          kind: null,
+          transport: null,
+          dirQuery: "",
+          tag: null,
+        },
         hiddenCount: 0,
         onDeleteSession: noop,
         onFiltersChange: noop,
@@ -98,15 +142,19 @@ describe("AgentGrid empty states", () => {
   });
 
   it("shows filtered empty state when sessions exist but none match", () => {
-    const sessions = [
-      makeSession({ id: "s1", displayName: "Session 1" }),
-    ];
+    const sessions = [makeSession({ id: "s1", displayName: "Session 1" })];
 
     const markup = renderToStaticMarkup(
       createElement(AgentGrid, {
         sessions: [],
         allSessions: sessions,
-        filters: { host: "remote", kind: null, transport: null, dirQuery: "", tag: null },
+        filters: {
+          host: "remote",
+          kind: null,
+          transport: null,
+          dirQuery: "",
+          tag: null,
+        },
         hiddenCount: 0,
         onDeleteSession: noop,
         onFiltersChange: noop,

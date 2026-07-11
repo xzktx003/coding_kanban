@@ -3,7 +3,9 @@ import { Suspense } from "react";
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import { LazyTerminalView } from "./LazyTerminalView";
+import { SessionGroupMenu } from "./SessionGroupControls";
 import { TerminalPreview } from "./TerminalPreview";
+import type { SessionGroupState } from "../lib/session-groups";
 
 interface FocusSidebarSessionCardProps {
   session: AgentSessionRecord;
@@ -18,6 +20,9 @@ interface FocusSidebarSessionCardProps {
     session: AgentSessionRecord,
     event: React.MouseEvent<HTMLDivElement>,
   ) => void;
+  sessionGroups?: SessionGroupState;
+  onCreateSessionGroup?: (sessionId?: string) => void;
+  onMoveSessionToGroup?: (sessionId: string, groupId: string | null) => void;
   useLightweightTerminalPreview?: boolean;
   terminalFontSize?: number;
   onTerminalFontSizeChange?: (fontSize: number) => void;
@@ -43,6 +48,9 @@ export function FocusSidebarSessionCard({
   onDragStart,
   onDragEnd,
   onContextMenu,
+  sessionGroups = { groups: [], assignments: {} },
+  onCreateSessionGroup,
+  onMoveSessionToGroup,
   useLightweightTerminalPreview = true,
   terminalFontSize,
   onTerminalFontSizeChange,
@@ -86,6 +94,12 @@ export function FocusSidebarSessionCard({
       <div className="focus-sidebar-card-header">
         <span>{session.displayName}</span>
         <div className="focus-sidebar-card-actions">
+          <SessionGroupMenu
+            session={session}
+            sessionGroups={sessionGroups}
+            onCreateGroup={onCreateSessionGroup}
+            onMoveSessionToGroup={onMoveSessionToGroup}
+          />
           <button
             className="grid-card-rename"
             onClick={(event) => {

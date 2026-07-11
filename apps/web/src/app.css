@@ -594,8 +594,13 @@ input {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 .loading-state {
@@ -615,7 +620,9 @@ input {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* ===== Main Layout ===== */
@@ -1068,6 +1075,138 @@ input {
   flex-wrap: wrap;
 }
 
+.session-group-add-button {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(246, 178, 107, 0.3);
+  border-radius: 7px;
+  background: rgba(246, 178, 107, 0.08);
+  color: rgba(255, 231, 204, 0.92);
+  cursor: pointer;
+  font: inherit;
+}
+
+.session-group-add-button:hover {
+  border-color: rgba(246, 178, 107, 0.5);
+  background: rgba(246, 178, 107, 0.14);
+}
+
+.session-group-add-button--compact {
+  min-height: 26px;
+  padding: 0 7px;
+  font-size: 12px;
+}
+
+.agent-group-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 2px 20px;
+}
+
+.agent-group-section + .agent-group-section {
+  margin-top: 18px;
+}
+
+.agent-group-grid {
+  min-height: 0;
+  overflow: visible;
+}
+
+.session-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  margin-bottom: 8px;
+  padding: 0 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.session-group-heading,
+.session-group-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.session-group-name {
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-group-count {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 11px;
+  text-align: center;
+}
+
+.session-group-header-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.62);
+  cursor: pointer;
+}
+
+.session-group-header-actions button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.session-group-header--compact {
+  min-height: 28px;
+  margin: 4px 0 6px;
+  padding: 0 2px;
+}
+
+.session-group-header--compact .session-group-name {
+  font-size: 12px;
+}
+
+.session-group-menu {
+  flex: 0 0 auto;
+}
+
+.session-group-menu-select {
+  width: 28px;
+  height: 26px;
+  padding: 0 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.72);
+  cursor: pointer;
+  font-size: 0;
+}
+
+.session-group-menu-select:hover,
+.session-group-menu-select:focus {
+  border-color: rgba(246, 178, 107, 0.44);
+  outline: none;
+}
+
+.session-group-menu-select option {
+  background: #1b1d22;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 13px;
+}
+
 .grid-status-chip {
   min-height: 26px;
   padding: 3px 8px;
@@ -1314,7 +1453,6 @@ input {
   color: rgba(244, 241, 234, 0.85);
 }
 
-
 /* ===== Grid Card ===== */
 .grid-card {
   display: flex;
@@ -1487,7 +1625,6 @@ input {
   font-size: 11px;
   text-transform: lowercase;
 }
-
 
 .grid-card-tag--user {
   background: rgba(100, 181, 246, 0.12);
@@ -1700,7 +1837,6 @@ input {
   background: rgba(255, 255, 255, 0.08);
   border-color: rgba(255, 152, 0, 0.4);
 }
-
 
 .focus-main-kind {
   font-size: 11px;
@@ -2209,6 +2345,21 @@ input {
   color: rgba(244, 241, 234, 0.7);
 }
 
+.focus-sidebar-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.focus-sidebar-heading-row .focus-sidebar-title {
+  min-width: 0;
+}
+
+.focus-sidebar-group + .focus-sidebar-group {
+  margin-top: 10px;
+}
+
 .focus-sidebar-card {
   flex: 0 0 auto;
   display: flex;
@@ -2712,7 +2863,6 @@ input {
   color: #ffb0a2;
   font-size: 12px;
 }
-
 
 .quick-tmux-recent {
   display: flex;
