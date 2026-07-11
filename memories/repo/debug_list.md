@@ -91,6 +91,7 @@
 - 聚焦视图右侧“其他会话”数量增加后卡片被越挤越小，第一版固定卡片高度后又会过早滚动且显得过大：侧栏 flex 链路高度约束不完整，且缺少卡片指定最小高度策略；修复为超过阈值开启紧凑滚动模式，卡片和终端预览先压缩到最小高度，真实溢出后再滚动。
 - 文件浏览器列表缺少 Owner 且列宽固定：`FileEntry` 未携带 owner，前端表头/行使用固定 grid；已从本地 uid 和 SFTP longname/uid 补 owner，并给名称、大小、修改时间、Owner、权限列增加可持久化拖拽列宽。
 - VS Code Web 编辑器中文 IME 标点无法输入：中文/英文字符和英文标点正常，说明不是整体丢焦；问题集中在 VS Code Web/EditContext 的 CJK 标点提交路径。修复为本地和 SSH 远端 code-server 的 managed settings 都写入 `editor.editContext=false` 与 `editor.experimentalEditContextEnabled=false`，回到稳定输入路径，并用 `vscode-web-manager` 测试覆盖本地 settings 与远端启动脚本。
+- Kanban tmux 卡片第一次改名后再次改名可能无反应：如果第一次显示名包含 `:`，tmux 会把 session 名规范化或把冒号当 target 分隔，但 registry 仍保存原显示名到 `transportRef.tmuxSession`，第二次改名 target 错误且前端吞掉异常。修复为改名前后通过 pane id 查询真实 `#{session_name}`，registry 保存真实 tmux session，显示名和 pane title 保留用户输入；前端改名失败弹出错误。
 
 ## PM 审计增强 (2026-06-16)
 

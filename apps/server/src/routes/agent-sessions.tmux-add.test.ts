@@ -360,11 +360,15 @@ test("POST /api/agent-sessions/:id/stdin delivers every mobile shortcut to a loc
 test("PATCH /api/agent-sessions/:id renames the tmux session and pane title together", async () => {
   const { app } = buildServer();
   const sessionName = `tmux-rename-${Date.now()}`;
-  const renamedSession = `tmux-renamed-${Date.now()}`;
+  const renamedSession = `tmux:renamed-${Date.now()}`;
+  const renamedTmuxSession = renamedSession.replace(/:/g, "_");
+  const secondRenamedSession = `tmux-renamed-again-${Date.now()}`;
   let agentSessionId: string | undefined;
 
   killTmuxSession(sessionName);
   killTmuxSession(renamedSession);
+  killTmuxSession(renamedTmuxSession);
+  killTmuxSession(secondRenamedSession);
 
   runTmux([
     "new-session",
@@ -426,9 +430,35 @@ test("PATCH /api/agent-sessions/:id renames the tmux session and pane title toge
 
     assert.equal(renamed.displayName, renamedSession);
     assert.equal(renamed.workspaceId, renamedSession);
-    assert.equal(renamed.transportRef?.tmuxSession, renamedSession);
-    assert.equal(paneFormat(tmuxPane, "#{session_name}"), renamedSession);
+    assert.equal(renamed.transportRef?.tmuxSession, renamedTmuxSession);
+    assert.equal(paneFormat(tmuxPane, "#{session_name}"), renamedTmuxSession);
     assert.equal(paneFormat(tmuxPane, "#{pane_title}"), renamedSession);
+
+    const secondRenameResponse = await fetch(
+      `${baseUrl}/api/agent-sessions/${agentSessionId}`,
+      {
+        method: "PATCH",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          displayName: secondRenamedSession,
+        }),
+      },
+    );
+
+    assert.equal(secondRenameResponse.status, 200);
+    const secondRenamed = (await secondRenameResponse.json()) as {
+      displayName: string;
+      workspaceId: string;
+      transportRef?: { tmuxSession?: string };
+    };
+
+    assert.equal(secondRenamed.displayName, secondRenamedSession);
+    assert.equal(secondRenamed.workspaceId, secondRenamedSession);
+    assert.equal(secondRenamed.transportRef?.tmuxSession, secondRenamedSession);
+    assert.equal(paneFormat(tmuxPane, "#{session_name}"), secondRenamedSession);
+    assert.equal(paneFormat(tmuxPane, "#{pane_title}"), secondRenamedSession);
   } finally {
     if (agentSessionId) {
       await fetch(`${baseUrl}/api/agent-sessions/${agentSessionId}`, {
@@ -439,5 +469,7 @@ test("PATCH /api/agent-sessions/:id renames the tmux session and pane title toge
     await app.close();
     killTmuxSession(sessionName);
     killTmuxSession(renamedSession);
+    killTmuxSession(renamedTmuxSession);
+    killTmuxSession(secondRenamedSession);
   }
 });

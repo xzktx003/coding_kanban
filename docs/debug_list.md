@@ -217,3 +217,11 @@
 - **修复**: 本地 code-server managed `settings.json` 写入 `editor.editContext=false` 和旧版兼容键 `editor.experimentalEditContextEnabled=false`；SSH 远端 code-server 启动脚本也在启动前合并同样设置，确保本地/远端 VS Code Web 都回到稳定输入路径。
 - **测试**: `pnpm --dir apps/server test -- vscode-web-manager.test.ts`（实际通过 server 全量测试：132 pass，1 skip）。
 - **文件**: `apps/server/src/services/vscode-web-manager.ts`, `apps/server/src/services/vscode-web-manager.test.ts`, `docs/project-overview.md`
+
+### Kanban tmux 卡片改名只能继续改一次
+
+- **现象**: tmux 管理的 Kanban 卡片第一次改名后，再次改名可能没有任何反应。
+- **根因**: 用户输入的显示名允许包含 `:`，但 tmux 会把 session 名规范化为下划线，或在后续 `-t name:part` 中把冒号解析成 window 分隔；服务端仍把用户输入原文保存到 `transportRef.tmuxSession`，第二次改名用这个错误 target 找不到真实 tmux session。前端又吞掉 PATCH 异常，表现为“只能改一次”。
+- **修复**: tmux 改名前后都通过 pane id 查询真实 `#{session_name}`；改名前用真实 session 修复已有坏状态，改名后把 registry 的 `transportRef.tmuxSession` 写成 tmux 实际名称，同时保留用户输入作为 `displayName` 和 pane title。前端改名失败时弹出具体错误，不再静默忽略。
+- **测试**: `pnpm --dir apps/server exec tsx --test --test-name-pattern "renames the tmux session" src/routes/agent-sessions.tmux-add.test.ts`。
+- **文件**: `apps/server/src/services/local-tmux-adapter.ts`, `apps/server/src/routes/agent-sessions.tmux-add.test.ts`, `apps/web/src/App.tsx`

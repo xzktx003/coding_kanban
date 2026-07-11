@@ -489,10 +489,14 @@ export class LocalTmuxAdapter {
 
     const paneId = agentSession.transportRef?.tmuxPane;
     const sshTarget = agentSession.sshTarget;
+    const currentTarget =
+      (await this.resolvePaneSessionName(paneId, sshTarget).catch(
+        () => undefined,
+      )) ?? currentTmuxSession;
 
     if (sshTarget) {
       const remoteCommands = [
-        `tmux rename-session -t ${quoteForPosixShell(currentTmuxSession)} ${quoteForPosixShell(nextName)}`,
+        `tmux rename-session -t ${quoteForPosixShell(currentTarget)} ${quoteForPosixShell(nextName)}`,
       ];
       if (paneId) {
         remoteCommands.push(
@@ -504,7 +508,7 @@ export class LocalTmuxAdapter {
       await this.runTmux([
         "rename-session",
         "-t",
-        currentTmuxSession,
+        currentTarget,
         nextName,
       ]);
       if (paneId) {
@@ -512,20 +516,24 @@ export class LocalTmuxAdapter {
       }
     }
 
+    const actualTmuxSession =
+      (await this.resolvePaneSessionName(paneId, sshTarget).catch(
+        () => undefined,
+      )) ?? nextName;
     const sshHost = sshTarget?.host ?? agentSession.transportRef?.sshHost;
     const nextRuntimeId = agentSession.transportRef?.runtimeId?.startsWith(
       "tmux:",
     )
       ? sshHost
-        ? `tmux:${sshHost}:${nextName}`
-        : `tmux:${nextName}`
+        ? `tmux:${sshHost}:${actualTmuxSession}`
+        : `tmux:${actualTmuxSession}`
       : agentSession.transportRef?.runtimeId;
 
     return this.registry.updateSession(agentSession.id, {
       displayName: nextName,
       workspaceId: nextName,
       transportRef: {
-        tmuxSession: nextName,
+        tmuxSession: actualTmuxSession,
         ...(nextRuntimeId ? { runtimeId: nextRuntimeId } : {}),
       },
     });
@@ -736,6 +744,32 @@ export class LocalTmuxAdapter {
     );
 
     return stdout;
+  }
+
+  private async resolvePaneSessionName(
+    paneId: string | undefined,
+    sshTarget?: SshTarget,
+  ): Promise<string | undefined> {
+    if (!paneId) {
+      return undefined;
+    }
+
+    if (sshTarget) {
+      const stdout = await this.runRemoteCommand(
+        sshTarget,
+        `tmux display-message -p -t ${quoteForPosixShell(paneId)} ${quoteForPosixShell("#{session_name}")}`,
+      );
+      return stdout.trim() || undefined;
+    }
+
+    const { stdout } = await this.runTmux([
+      "display-message",
+      "-p",
+      "-t",
+      paneId,
+      "#{session_name}",
+    ]);
+    return stdout.trim() || undefined;
   }
 
   getCaptureLines(): number {

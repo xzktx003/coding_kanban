@@ -731,10 +731,16 @@ export default function App() {
         return;
       }
 
-      await updateAgentSession(id, { displayName }).catch(() => {});
-      listAgentSessions()
-        .then(setSnapshot)
-        .catch(() => {});
+      try {
+        await updateAgentSession(id, { displayName });
+        listAgentSessions()
+          .then(setSnapshot)
+          .catch(() => {});
+      } catch (error) {
+        window.alert(
+          `改名失败: ${error instanceof Error ? error.message : "未知错误"}`,
+        );
+      }
     },
     [sessions],
   );
