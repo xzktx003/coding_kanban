@@ -76,8 +76,10 @@ interface SessionGroupHeaderProps {
   name: string;
   count: number;
   compact?: boolean;
+  collapsed?: boolean;
   onDeleteGroup?: (groupId: string) => void;
   onRenameGroup?: (groupId: string) => void;
+  onToggleGroup?: (groupId: string) => void;
 }
 
 export function SessionGroupHeader({
@@ -85,20 +87,35 @@ export function SessionGroupHeader({
   name,
   count,
   compact = false,
+  collapsed = false,
   onDeleteGroup,
   onRenameGroup,
+  onToggleGroup,
 }: SessionGroupHeaderProps) {
   const editable = groupId !== UNGROUPED_SESSION_GROUP_ID;
 
   return (
     <div
       className={`session-group-header${compact ? " session-group-header--compact" : ""}`}
+      data-collapsed={collapsed ? "true" : "false"}
       data-session-group-id={groupId}
     >
-      <div className="session-group-heading">
-        <span className="session-group-name">{name}</span>
-        <span className="session-group-count">{count}</span>
-      </div>
+      <button
+        aria-expanded={!collapsed}
+        aria-label={`${collapsed ? "展开" : "折叠"}分组 ${name}`}
+        className="session-group-toggle"
+        onClick={() => onToggleGroup?.(groupId)}
+        title={collapsed ? "展开分组" : "折叠分组"}
+        type="button"
+      >
+        <span aria-hidden="true" className="session-group-chevron">
+          {collapsed ? "▸" : "▾"}
+        </span>
+        <span className="session-group-heading">
+          <span className="session-group-name">{name}</span>
+          <span className="session-group-count">{count}</span>
+        </span>
+      </button>
       {editable && (
         <div className="session-group-header-actions">
           <button

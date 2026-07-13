@@ -7,6 +7,7 @@ Add user-managed session groups to the home Kanban and the maximized-session sid
 ## Scope
 
 - Add, rename, and delete groups.
+- Collapse and expand every configured group and the automatic ungrouped group.
 - Move a session to a configured group or back to `未分组` from either view.
 - Keep the current flat, virtualized grid until the first group is created.
 - Persist group definitions and assignments in browser local storage, consistent with the existing layout persistence model.
@@ -20,10 +21,13 @@ Cross-browser/server-side synchronization and automatic semantic classification 
 
 Configured groups retain creation order. `未分组` is a virtual group and always appears last when it has matching sessions. Deleting a group removes its assignments, returning affected sessions to `未分组`.
 
+Collapsed group ids are stored beside group definitions and assignments. The home Kanban and focus sidebar therefore show the same expanded state, and deleting a group removes its stale collapse entry.
+
 ## Interaction
 
 - A compact `新建分组` command appears in the home toolbar and focus sidebar header.
 - Group headers show the group name and card count. User-created groups expose rename and delete icon controls.
+- Every group header includes an accessible disclosure control. Collapsing a group hides only its cards while preserving its name, count, and management controls.
 - Each card exposes a group menu listing `未分组`, all configured groups, and a `新建分组` command.
 - Existing focus-sidebar drag behavior remains dedicated to terminal monitor placement; group movement uses the menu to avoid ambiguous drops.
 

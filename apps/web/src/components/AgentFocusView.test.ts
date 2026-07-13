@@ -33,6 +33,40 @@ function makeSession(id: string, displayName: string): AgentSessionRecord {
 }
 
 describe("AgentFocusView", () => {
+  it("collapses an individual group in the other-session sidebar", () => {
+    installLocalStorageStub("single");
+    const sessions = [
+      makeSession("session-1", "Alpha"),
+      makeSession("session-2", "Beta"),
+      makeSession("session-3", "Gamma"),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: sessions[0],
+        sessions,
+        sessionGroups: {
+          groups: [{ id: "group-review", name: "评审" }],
+          assignments: { "session:session-2": "group-review" },
+          collapsedGroupIds: ["group-review"],
+        },
+        onToggleSessionGroup: () => {},
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    assert.match(
+      markup,
+      /data-collapsed="true"[^>]*data-session-group-id="group-review"/,
+    );
+    assert.doesNotMatch(markup, /data-session-id="session-2"/);
+    assert.match(markup, /data-session-id="session-3"/);
+  });
+
   it("renders the same session groups in the other-session sidebar", () => {
     installLocalStorageStub("single");
     const sessions = [
@@ -48,6 +82,7 @@ describe("AgentFocusView", () => {
         sessionGroups: {
           groups: [{ id: "group-review", name: "评审" }],
           assignments: { "session:session-2": "group-review" },
+          collapsedGroupIds: [],
         },
         onCreateSessionGroup: () => {},
         onDeleteSessionGroup: () => {},
@@ -197,6 +232,7 @@ describe("AgentFocusView", () => {
               `group-${index + 1}`,
             ]),
           ),
+          collapsedGroupIds: [],
         },
         onExit: () => {},
         onDeleteSession: () => {},

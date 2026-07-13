@@ -18,7 +18,11 @@ import {
 import { AgentGridCard } from "./AgentGridCard";
 import { FilterBar, type FilterState } from "./FilterBar";
 import { SessionGroupHeader } from "./SessionGroupControls";
-import { groupSessions, type SessionGroupState } from "../lib/session-groups";
+import {
+  groupSessions,
+  isSessionGroupCollapsed,
+  type SessionGroupState,
+} from "../lib/session-groups";
 
 interface AgentGridProps {
   sessions: AgentSessionRecord[];
@@ -45,6 +49,7 @@ interface AgentGridProps {
   onDeleteSessionGroup?: (groupId: string) => void;
   onMoveSessionToGroup?: (sessionId: string, groupId: string | null) => void;
   onRenameSessionGroup?: (groupId: string) => void;
+  onToggleSessionGroup?: (groupId: string) => void;
 }
 
 interface GridMetrics {
@@ -93,11 +98,12 @@ export function AgentGrid({
   useLightweightTerminalPreview = true,
   terminalFontSize,
   onTerminalFontSizeChange,
-  sessionGroups = { groups: [], assignments: {} },
+  sessionGroups = { groups: [], assignments: {}, collapsedGroupIds: [] },
   onCreateSessionGroup,
   onDeleteSessionGroup,
   onMoveSessionToGroup,
   onRenameSessionGroup,
+  onToggleSessionGroup,
 }: AgentGridProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
@@ -306,20 +312,30 @@ export function AgentGrid({
         </div>
       ) : groupingEnabled ? (
         <div className="agent-group-list" data-testid="agent-group-list">
-          {groupedSessions.map((group) => (
-            <section className="agent-group-section" key={group.id}>
-              <SessionGroupHeader
-                count={group.sessions.length}
-                groupId={group.id}
-                name={group.name}
-                onDeleteGroup={onDeleteSessionGroup}
-                onRenameGroup={onRenameSessionGroup}
-              />
-              <div className="agent-grid agent-group-grid">
-                {group.sessions.map(renderSessionCard)}
-              </div>
-            </section>
-          ))}
+          {groupedSessions.map((group) => {
+            const collapsed = isSessionGroupCollapsed(
+              sessionGroups,
+              group.id,
+            );
+            return (
+              <section className="agent-group-section" key={group.id}>
+                <SessionGroupHeader
+                  collapsed={collapsed}
+                  count={group.sessions.length}
+                  groupId={group.id}
+                  name={group.name}
+                  onDeleteGroup={onDeleteSessionGroup}
+                  onRenameGroup={onRenameSessionGroup}
+                  onToggleGroup={onToggleSessionGroup}
+                />
+                {!collapsed && (
+                  <div className="agent-grid agent-group-grid">
+                    {group.sessions.map(renderSessionCard)}
+                  </div>
+                )}
+              </section>
+            );
+          })}
         </div>
       ) : (
         <div

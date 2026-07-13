@@ -67,7 +67,7 @@ export function AgentGridCard({
   onHide,
   onCopyConnectCommand,
   onKillTmux,
-  sessionGroups = { groups: [], assignments: {} },
+  sessionGroups = { groups: [], assignments: {}, collapsedGroupIds: [] },
   onCreateSessionGroup,
   onMoveSessionToGroup,
   terminalSuspended = false,

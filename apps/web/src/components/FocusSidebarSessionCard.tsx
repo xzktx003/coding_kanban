@@ -48,7 +48,7 @@ export function FocusSidebarSessionCard({
   onDragStart,
   onDragEnd,
   onContextMenu,
-  sessionGroups = { groups: [], assignments: {} },
+  sessionGroups = { groups: [], assignments: {}, collapsedGroupIds: [] },
   onCreateSessionGroup,
   onMoveSessionToGroup,
   useLightweightTerminalPreview = true,

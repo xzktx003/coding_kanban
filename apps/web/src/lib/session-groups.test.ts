@@ -12,6 +12,8 @@ import {
   loadSessionGroups,
   renameSessionGroup,
   saveSessionGroups,
+  isSessionGroupCollapsed,
+  toggleSessionGroupCollapsed,
   type SessionGroupState,
 } from "./session-groups.js";
 
@@ -111,16 +113,46 @@ describe("session groups", () => {
   });
 
   it("adds, renames, assigns, and deletes groups immutably", () => {
-    const initial: SessionGroupState = { groups: [], assignments: {} };
+    const initial: SessionGroupState = {
+      groups: [],
+      assignments: {},
+      collapsedGroupIds: [],
+    };
     const added = addSessionGroup(initial, { id: "group-1", name: "后端" });
     const assigned = assignSessionToGroup(added, "session:alpha", "group-1");
     const renamed = renameSessionGroup(assigned, "group-1", "核心后端");
     const deleted = deleteSessionGroup(renamed, "group-1");
 
-    assert.deepEqual(initial, { groups: [], assignments: {} });
+    assert.deepEqual(initial, {
+      groups: [],
+      assignments: {},
+      collapsedGroupIds: [],
+    });
     assert.equal(renamed.groups[0]?.name, "核心后端");
     assert.equal(renamed.assignments["session:alpha"], "group-1");
-    assert.deepEqual(deleted, { groups: [], assignments: {} });
+    assert.deepEqual(deleted, {
+      groups: [],
+      assignments: {},
+      collapsedGroupIds: [],
+    });
+  });
+
+  it("toggles collapsed groups and removes deleted group collapse state", () => {
+    const state: SessionGroupState = {
+      groups: [{ id: "group-1", name: "后端" }],
+      assignments: {},
+      collapsedGroupIds: [],
+    };
+
+    const collapsed = toggleSessionGroupCollapsed(state, "group-1");
+    assert.equal(isSessionGroupCollapsed(collapsed, "group-1"), true);
+    assert.equal(isSessionGroupCollapsed(state, "group-1"), false);
+
+    const expanded = toggleSessionGroupCollapsed(collapsed, "group-1");
+    assert.equal(isSessionGroupCollapsed(expanded, "group-1"), false);
+
+    const deleted = deleteSessionGroup(collapsed, "group-1");
+    assert.deepEqual(deleted.collapsedGroupIds, []);
   });
 
   it("orders configured groups before the automatic ungrouped section", () => {
@@ -132,6 +164,7 @@ describe("session groups", () => {
         { id: "group-f", name: "前端" },
       ],
       assignments: { "session:beta": "group-f" },
+      collapsedGroupIds: [],
     });
 
     assert.deepEqual(
@@ -146,11 +179,16 @@ describe("session groups", () => {
 
   it("normalizes corrupt storage and persists valid state", () => {
     const values = installStorage("{not-json");
-    assert.deepEqual(loadSessionGroups(), { groups: [], assignments: {} });
+    assert.deepEqual(loadSessionGroups(), {
+      groups: [],
+      assignments: {},
+      collapsedGroupIds: [],
+    });
 
     const state: SessionGroupState = {
       groups: [{ id: "group-1", name: "前端" }],
       assignments: { "session:alpha": "group-1" },
+      collapsedGroupIds: ["group-1"],
     };
     saveSessionGroups(state);
 

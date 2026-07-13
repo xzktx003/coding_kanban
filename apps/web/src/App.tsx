@@ -89,6 +89,7 @@ import {
   loadSessionGroups,
   renameSessionGroup,
   saveSessionGroups,
+  toggleSessionGroupCollapsed,
   type SessionGroupState,
 } from "./lib/session-groups";
 import { isVsCodeAvailable } from "./lib/side-panel-availability";
@@ -862,6 +863,12 @@ export default function App() {
     [sessions],
   );
 
+  const handleToggleSessionGroup = useCallback((groupId: string) => {
+    setSessionGroups((current) =>
+      toggleSessionGroupCollapsed(current, groupId),
+    );
+  }, []);
+
   const focusedSession: AgentSessionRecord | undefined = focusedId
     ? sessions.find((s) => s.id === focusedId)
     : undefined;
@@ -1364,6 +1371,7 @@ export default function App() {
               onDeleteSessionGroup={handleDeleteSessionGroup}
               onMoveSessionToGroup={handleMoveSessionToGroup}
               onRenameSessionGroup={handleRenameSessionGroup}
+              onToggleSessionGroup={handleToggleSessionGroup}
               useLightweightTerminalPreview={useLightweightTerminalPreview}
               mobileTerminalTouchMode={mobileTerminalTouchMode}
               terminalFontSize={terminalFontSize}
@@ -1387,6 +1395,7 @@ export default function App() {
               onDeleteSessionGroup={handleDeleteSessionGroup}
               onMoveSessionToGroup={handleMoveSessionToGroup}
               onRenameSessionGroup={handleRenameSessionGroup}
+              onToggleSessionGroup={handleToggleSessionGroup}
               onNewSession={() => setNewSessionHost({ type: "local" })}
               onScanTmux={() =>
                 setDiscoveryState({

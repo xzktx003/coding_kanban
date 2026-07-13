@@ -25,6 +25,45 @@ function makeSession(
 }
 
 describe("AgentGrid", () => {
+  it("collapses an individual group while keeping its header visible", () => {
+    const sessions = [
+      makeSession({ id: "session-1", displayName: "Alpha" }),
+      makeSession({ id: "session-2", displayName: "Beta" }),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentGrid, {
+        sessions,
+        allSessions: sessions,
+        filters: {
+          host: null,
+          kind: null,
+          transport: null,
+          dirQuery: "",
+          tag: null,
+        },
+        sessionGroups: {
+          groups: [{ id: "group-backend", name: "后端" }],
+          assignments: { "session:session-1": "group-backend" },
+          collapsedGroupIds: ["group-backend"],
+        },
+        onToggleSessionGroup: () => {},
+        onDeleteSession: () => {},
+        onFiltersChange: () => {},
+        onFocusSession: () => {},
+        onReconnectSession: () => {},
+      }),
+    );
+
+    assert.match(
+      markup,
+      /data-collapsed="true"[^>]*data-session-group-id="group-backend"/,
+    );
+    assert.match(markup, /aria-expanded="false"/);
+    assert.doesNotMatch(markup, /data-testid="terminal-preview-session-1"/);
+    assert.match(markup, /data-testid="terminal-preview-session-2"/);
+  });
+
   it("renders configured session groups and card assignment controls", () => {
     const sessions = [
       makeSession({ id: "session-1", displayName: "Alpha" }),
@@ -45,6 +84,7 @@ describe("AgentGrid", () => {
         sessionGroups: {
           groups: [{ id: "group-backend", name: "后端" }],
           assignments: { "session:session-1": "group-backend" },
+          collapsedGroupIds: [],
         },
         onCreateSessionGroup: () => {},
         onDeleteSessionGroup: () => {},

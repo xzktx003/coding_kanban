@@ -13,7 +13,11 @@ import { FocusSidebarSessionCard } from "./FocusSidebarSessionCard";
 import { LazyTerminalView } from "./LazyTerminalView";
 import { SessionGroupHeader } from "./SessionGroupControls";
 import { TerminalPreview } from "./TerminalPreview";
-import { groupSessions, type SessionGroupState } from "../lib/session-groups";
+import {
+  groupSessions,
+  isSessionGroupCollapsed,
+  type SessionGroupState,
+} from "../lib/session-groups";
 import {
   focusActiveTerminalTextarea,
   getActiveTerminalTextarea,
@@ -59,6 +63,7 @@ interface AgentFocusViewProps {
   onDeleteSessionGroup?: (groupId: string) => void;
   onMoveSessionToGroup?: (sessionId: string, groupId: string | null) => void;
   onRenameSessionGroup?: (groupId: string) => void;
+  onToggleSessionGroup?: (groupId: string) => void;
 }
 
 const stateLabels: Record<string, string> = {
@@ -178,11 +183,12 @@ export function AgentFocusView({
   useLightweightTerminalPreview = true,
   terminalFontSize,
   onTerminalFontSizeChange,
-  sessionGroups = { groups: [], assignments: {} },
+  sessionGroups = { groups: [], assignments: {}, collapsedGroupIds: [] },
   onCreateSessionGroup,
   onDeleteSessionGroup,
   onMoveSessionToGroup,
   onRenameSessionGroup,
+  onToggleSessionGroup,
 }: AgentFocusViewProps) {
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !session.hidden),
@@ -261,7 +267,15 @@ export function AgentFocusView({
     [filteredSidebarSessions, sessionGroups],
   );
   const sidebarRenderedUnitCount = groupingEnabled
-    ? filteredSidebarSessions.length + groupedSidebarSessions.length
+    ? groupedSidebarSessions.reduce(
+        (total, group) =>
+          total +
+          1 +
+          (isSessionGroupCollapsed(sessionGroups, group.id)
+            ? 0
+            : group.sessions.length),
+        0,
+      )
     : filteredSidebarSessions.length;
   const sidebarScrollMode =
     sidebarRenderedUnitCount > FOCUS_SIDEBAR_SCROLL_THRESHOLD;
@@ -1252,39 +1266,47 @@ export function AgentFocusView({
                         sessions: filteredSidebarSessions,
                       },
                     ]
-                ).map((group) => (
-                  <div className="focus-sidebar-group" key={group.id}>
-                    {groupingEnabled && (
-                      <SessionGroupHeader
-                        compact
-                        count={group.sessions.length}
-                        groupId={group.id}
-                        name={group.name}
-                        onDeleteGroup={onDeleteSessionGroup}
-                        onRenameGroup={onRenameSessionGroup}
-                      />
-                    )}
-                    {group.sessions.map((session) => (
-                      <FocusSidebarSessionCard
-                        key={session.id}
-                        session={session}
-                        sessionGroups={sessionGroups}
-                        onCreateSessionGroup={onCreateSessionGroup}
-                        onMoveSessionToGroup={onMoveSessionToGroup}
-                        onDragStart={startSessionDrag}
-                        onDragEnd={finishSessionDrag}
-                        onContextMenu={handleSidebarContextMenu}
-                        onRename={onRename}
-                        onSwitchFocus={handleSidebarSwitchFocus}
-                        useLightweightTerminalPreview={
-                          useLightweightTerminalPreview
-                        }
-                        terminalFontSize={terminalFontSize}
-                        onTerminalFontSizeChange={onTerminalFontSizeChange}
-                      />
-                    ))}
-                  </div>
-                ))}
+                ).map((group) => {
+                  const collapsed =
+                    groupingEnabled &&
+                    isSessionGroupCollapsed(sessionGroups, group.id);
+                  return (
+                    <div className="focus-sidebar-group" key={group.id}>
+                      {groupingEnabled && (
+                        <SessionGroupHeader
+                          compact
+                          collapsed={collapsed}
+                          count={group.sessions.length}
+                          groupId={group.id}
+                          name={group.name}
+                          onDeleteGroup={onDeleteSessionGroup}
+                          onRenameGroup={onRenameSessionGroup}
+                          onToggleGroup={onToggleSessionGroup}
+                        />
+                      )}
+                      {!collapsed &&
+                        group.sessions.map((session) => (
+                          <FocusSidebarSessionCard
+                            key={session.id}
+                            session={session}
+                            sessionGroups={sessionGroups}
+                            onCreateSessionGroup={onCreateSessionGroup}
+                            onMoveSessionToGroup={onMoveSessionToGroup}
+                            onDragStart={startSessionDrag}
+                            onDragEnd={finishSessionDrag}
+                            onContextMenu={handleSidebarContextMenu}
+                            onRename={onRename}
+                            onSwitchFocus={handleSidebarSwitchFocus}
+                            useLightweightTerminalPreview={
+                              useLightweightTerminalPreview
+                            }
+                            terminalFontSize={terminalFontSize}
+                            onTerminalFontSizeChange={onTerminalFontSizeChange}
+                          />
+                        ))}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

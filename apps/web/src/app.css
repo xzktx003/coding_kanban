@@ -1123,12 +1123,37 @@ input {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+.session-group-toggle,
 .session-group-heading,
 .session-group-header-actions {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+
+.session-group-toggle {
+  flex: 1 1 auto;
+  justify-content: flex-start;
+  min-width: 0;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.session-group-chevron {
+  flex: 0 0 14px;
+  color: rgba(246, 178, 107, 0.76);
+  font-size: 13px;
+  text-align: center;
+}
+
+.session-group-toggle:hover .session-group-name {
+  color: #fff4e5;
 }
 
 .session-group-name {

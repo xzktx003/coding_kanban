@@ -12,6 +12,7 @@ export interface SessionGroup {
 export interface SessionGroupState {
   groups: SessionGroup[];
   assignments: Record<string, string>;
+  collapsedGroupIds: string[];
 }
 
 export interface GroupedSessions extends SessionGroup {
@@ -21,6 +22,7 @@ export interface GroupedSessions extends SessionGroup {
 const EMPTY_SESSION_GROUP_STATE: SessionGroupState = {
   groups: [],
   assignments: {},
+  collapsedGroupIds: [],
 };
 
 function normalizeSessionGroups(value: unknown): SessionGroupState {
@@ -51,8 +53,20 @@ function normalizeSessionGroups(value: unknown): SessionGroupState {
           ),
         )
       : {};
+  const collapsedGroupIds = Array.isArray(candidate.collapsedGroupIds)
+    ? [
+        ...new Set(
+          candidate.collapsedGroupIds.filter(
+            (groupId): groupId is string =>
+              typeof groupId === "string" &&
+              (knownGroupIds.has(groupId) ||
+                groupId === UNGROUPED_SESSION_GROUP_ID),
+          ),
+        ),
+      ]
+    : [];
 
-  return { groups, assignments };
+  return { groups, assignments, collapsedGroupIds };
 }
 
 export function loadSessionGroups(): SessionGroupState {
@@ -131,8 +145,8 @@ export function addSessionGroup(
   }
 
   return {
+    ...state,
     groups: [...state.groups, { id: group.id, name }],
-    assignments: state.assignments,
   };
 }
 
@@ -173,12 +187,36 @@ export function deleteSessionGroup(
   }
 
   return {
+    ...state,
     groups,
     assignments: Object.fromEntries(
       Object.entries(state.assignments).filter(
         ([, assignedGroupId]) => assignedGroupId !== groupId,
       ),
     ),
+    collapsedGroupIds: state.collapsedGroupIds.filter(
+      (collapsedGroupId) => collapsedGroupId !== groupId,
+    ),
+  };
+}
+
+export function isSessionGroupCollapsed(
+  state: SessionGroupState,
+  groupId: string,
+): boolean {
+  return state.collapsedGroupIds.includes(groupId);
+}
+
+export function toggleSessionGroupCollapsed(
+  state: SessionGroupState,
+  groupId: string,
+): SessionGroupState {
+  const collapsed = isSessionGroupCollapsed(state, groupId);
+  return {
+    ...state,
+    collapsedGroupIds: collapsed
+      ? state.collapsedGroupIds.filter((item) => item !== groupId)
+      : [...state.collapsedGroupIds, groupId],
   };
 }
 
