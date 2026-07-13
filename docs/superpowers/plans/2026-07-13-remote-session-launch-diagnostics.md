@@ -22,10 +22,12 @@
 ### Task 1: Remote Launch Preflight Service
 
 **Files:**
+
 - Create: `apps/server/src/services/remote-launch-preflight.ts`
 - Create: `apps/server/src/services/remote-launch-preflight.test.ts`
 
 **Interfaces:**
+
 - Consumes: `LaunchSshPtyInput`, `buildSshArgs`, `buildInteractiveShellCommand`, and `quoteForPosixShell`.
 - Produces: `RemoteLaunchPreflight` with `check(input: LaunchSshPtyInput): Promise<void>` and exported pure command/result classification helpers for unit tests.
 
@@ -52,11 +54,13 @@ Expected: all preflight tests pass.
 ### Task 2: Gate The SSH PTY Launch Route
 
 **Files:**
+
 - Modify: `apps/server/src/app.ts`
 - Modify: `apps/server/src/routes/agent-sessions.ts`
 - Create: `apps/server/src/routes/agent-sessions.remote-preflight.test.ts`
 
 **Interfaces:**
+
 - Consumes: `RemoteLaunchPreflight.check` from Task 1.
 - Produces: `POST /api/agent-launch/ssh-pty` returning `400` for typed environment failures, `502` for SSH/preflight transport failures, and `201` only after successful preflight and PTY registration.
 
@@ -83,10 +87,12 @@ Expected: all tests pass.
 ### Task 3: Display The Backend Launch Error
 
 **Files:**
+
 - Modify: `apps/web/src/components/NewSessionDialog.tsx`
 - Create or modify: `apps/web/src/components/NewSessionDialog.test.tsx` or the nearest existing pure helper test.
 
 **Interfaces:**
+
 - Consumes: `launchSshPtyAgent` rejection message already parsed by `apps/web/src/lib/api.ts`.
 - Produces: dialog status text `创建失败：<backend message>` while leaving the dialog open.
 
@@ -113,11 +119,13 @@ Expected: all focused tests pass.
 ### Task 4: Documentation And Verification
 
 **Files:**
+
 - Modify: `docs/func_list.md`
 - Modify: `docs/debug_list.md`
 - Modify: `memories/repo/debug_list.md`
 
 **Interfaces:**
+
 - Consumes: verified behavior from Tasks 1-3.
 - Produces: reader-facing feature and bug records describing preflight failures and retained exit diagnostics.
 

@@ -21,6 +21,7 @@ import {
   buildTmuxLaunchCommand,
   wrapRemoteInteractiveCommand,
 } from "../lib/session-matching";
+import { formatSessionLaunchError } from "../lib/session-launch-error";
 import { buildDefaultSessionName } from "../lib/session-naming";
 import type { SelectedHost } from "./HostDropdown";
 
@@ -429,8 +430,8 @@ export function NewSessionDialog({
 
       onLaunched();
       onClose();
-    } catch {
-      setStatusMessage(`创建失败: ${name}`);
+    } catch (error) {
+      setStatusMessage(formatSessionLaunchError(error, name));
     } finally {
       setSubmitting(false);
     }

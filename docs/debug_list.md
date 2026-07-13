@@ -225,3 +225,11 @@
 - **修复**: tmux 改名前后都通过 pane id 查询真实 `#{session_name}`；改名前用真实 session 修复已有坏状态，改名后把 registry 的 `transportRef.tmuxSession` 写成 tmux 实际名称，同时保留用户输入作为 `displayName` 和 pane title。前端改名失败时弹出具体错误，不再静默忽略。
 - **测试**: `pnpm --dir apps/server exec tsx --test --test-name-pattern "renames the tmux session" src/routes/agent-sessions.tmux-add.test.ts`。
 - **文件**: `apps/server/src/services/local-tmux-adapter.ts`, `apps/server/src/routes/agent-sessions.tmux-add.test.ts`, `apps/web/src/App.tsx`
+
+### SSH 远程会话连接成功后立即退出且没有原因
+
+- **现象**: 新建 SSH 远程终端时接口返回成功，卡片随后立即退出；目录不存在、Agent 未安装或 tmux 缺失时，页面只显示笼统的创建失败或 exited 状态。
+- **根因**: `/api/agent-launch/ssh-pty` 在 SSH PTY 创建后立即返回 `201`，没有先验证远端目录和交互式 shell PATH；新建会话窗口的 catch 分支又丢弃了后端错误正文。
+- **修复**: 服务端在注册会话前执行有超时和输出上限的只读 SSH 预检，分别返回目录、Agent、tmux 和连接错误；前端保留并显示后端具体消息。预检通过后的运行期退出继续使用既有 registry 逻辑保留终端输出和退出码。
+- **测试**: `remote-launch-preflight.test.ts`、`agent-sessions.remote-preflight.test.ts`、`session-launch-error.test.ts`。
+- **文件**: `apps/server/src/services/remote-launch-preflight.ts`, `apps/server/src/routes/agent-sessions.ts`, `apps/server/src/app.ts`, `apps/web/src/components/NewSessionDialog.tsx`, `apps/web/src/lib/session-launch-error.ts`

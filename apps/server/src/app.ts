@@ -20,6 +20,10 @@ import { LocalFsService } from "./services/local-fs-service.js";
 import { LocalProcessRuntimeManager } from "./services/local-process-runtime-manager.js";
 import { LocalTmuxAdapter } from "./services/local-tmux-adapter.js";
 import { PtyRuntimeManager } from "./services/pty-runtime-manager.js";
+import {
+  RemoteLaunchPreflight,
+  type RemoteLaunchPreflightLike,
+} from "./services/remote-launch-preflight.js";
 import { SftpService } from "./services/sftp-service.js";
 import { SshRuntimeManager } from "./services/ssh-runtime-manager.js";
 import {
@@ -35,6 +39,7 @@ interface BuildServerOptions {
   sftpService?: SftpService;
   terminalHistoryConfig?: TerminalHistoryRuntimeConfig;
   vsCodeWebManager?: VsCodeWebManager;
+  remoteLaunchPreflight?: RemoteLaunchPreflightLike;
 }
 
 export function buildServer(): {
@@ -69,6 +74,8 @@ export function buildServer(options: BuildServerOptions = {}): {
   const localFsService = options.localFsService ?? new LocalFsService();
   const sftpService = options.sftpService ?? new SftpService();
   const vsCodeWebManager = options.vsCodeWebManager ?? new VsCodeWebManager();
+  const remoteLaunchPreflight =
+    options.remoteLaunchPreflight ?? new RemoteLaunchPreflight();
 
   app.register(cors, {
     origin: true,
@@ -83,6 +90,7 @@ export function buildServer(options: BuildServerOptions = {}): {
       tmuxAdapter,
       sshRuntimeManager,
       ptyRuntimeManager,
+      remoteLaunchPreflight,
       vsCodeWebManager,
     });
 

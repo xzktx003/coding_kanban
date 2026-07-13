@@ -15,16 +15,17 @@ import type {
   DiscoverTmuxInput,
   AddDiscoveredTmuxInput,
 } from "@agent-orchestrator/shared";
-import {
-  shellQuote,
-  formatWorkingDirectory,
-} from "@agent-orchestrator/shared";
+import { shellQuote, formatWorkingDirectory } from "@agent-orchestrator/shared";
 
 import { scanAgentDirectory } from "../services/agent-scanner.js";
 import { AgentSessionRegistry } from "../services/agent-session-registry.js";
 import { LocalProcessRuntimeManager } from "../services/local-process-runtime-manager.js";
 import { LocalTmuxAdapter } from "../services/local-tmux-adapter.js";
 import { PtyRuntimeManager } from "../services/pty-runtime-manager.js";
+import {
+  RemoteLaunchPreflightError,
+  type RemoteLaunchPreflightLike,
+} from "../services/remote-launch-preflight.js";
 import { DEFAULT_TERMINAL_TMUX_CAPTURE_LINES } from "../config/server-runtime-config.js";
 import {
   buildInteractiveShellCommand,
@@ -43,8 +44,6 @@ import {
   VsCodeWebUnavailableError,
 } from "../services/vscode-web-manager.js";
 import { resolveVsCodeWebRequestTarget } from "./vscode-web-request-target.js";
-
-
 
 function buildAgentInvocation(
   agentKind: string,
@@ -118,6 +117,7 @@ interface AgentSessionRoutesOptions {
   tmuxAdapter: LocalTmuxAdapter;
   sshRuntimeManager: SshRuntimeManager;
   ptyRuntimeManager: PtyRuntimeManager;
+  remoteLaunchPreflight: RemoteLaunchPreflightLike;
   vsCodeWebManager: VsCodeWebManager;
 }
 
@@ -131,6 +131,7 @@ export async function registerAgentSessionRoutes(
     tmuxAdapter,
     sshRuntimeManager,
     ptyRuntimeManager,
+    remoteLaunchPreflight,
     vsCodeWebManager,
   } = options;
 
@@ -228,9 +229,19 @@ export async function registerAgentSessionRoutes(
   fastify.post<{ Body: LaunchSshPtyInput }>(
     "/api/agent-launch/ssh-pty",
     async (request, reply) => {
-      const agentSession = ptyRuntimeManager.launchRemote(request.body);
-      reply.code(201);
-      return agentSession;
+      try {
+        await remoteLaunchPreflight.check(request.body);
+        const agentSession = ptyRuntimeManager.launchRemote(request.body);
+        reply.code(201);
+        return agentSession;
+      } catch (error) {
+        if (error instanceof RemoteLaunchPreflightError) {
+          reply.code(error.httpStatus);
+          return { error: error.message, code: error.code };
+        }
+
+        throw error;
+      }
     },
   );
 
