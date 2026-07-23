@@ -668,11 +668,17 @@ export default function App() {
     setAgentCompletionNotificationsEnabled(enabled);
   }, [agentCompletionNotificationsEnabled]);
 
-  function handleLaunched() {
-    listAgentSessions()
-      .then(setSnapshot)
-      .catch(() => {});
-  }
+  const handleLaunched = useCallback(
+    (session: AgentSessionRecord, groupId: string | null) => {
+      setSessionGroups((current) =>
+        assignSessionToGroup(current, getSessionGroupKey(session), groupId),
+      );
+      listAgentSessions()
+        .then(setSnapshot)
+        .catch(() => {});
+    },
+    [],
+  );
 
   async function handleDeleteSession(id: string) {
     await deleteAgentSession(id);
@@ -1418,6 +1424,7 @@ export default function App() {
         open={Boolean(newSessionHost)}
         host={newSessionHost}
         sessions={sessions}
+        sessionGroups={sessionGroups}
         onClose={() => setNewSessionHost(null)}
         onLaunched={handleLaunched}
       />

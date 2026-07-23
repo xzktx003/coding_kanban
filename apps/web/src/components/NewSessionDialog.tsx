@@ -24,13 +24,18 @@ import {
 import { formatSessionLaunchError } from "../lib/session-launch-error";
 import { buildDefaultSessionName } from "../lib/session-naming";
 import type { SelectedHost } from "./HostDropdown";
+import {
+  UNGROUPED_SESSION_GROUP_ID,
+  type SessionGroupState,
+} from "../lib/session-groups";
 
 interface NewSessionDialogProps {
   open: boolean;
   host: SelectedHost | null;
   sessions: AgentSessionRecord[];
+  sessionGroups?: SessionGroupState;
   onClose: () => void;
-  onLaunched: () => void;
+  onLaunched: (session: AgentSessionRecord, groupId: string | null) => void;
 }
 
 export function joinDirectoryPath(basePath: string, name: string): string {
@@ -68,6 +73,7 @@ export function NewSessionDialog({
   open,
   host,
   sessions,
+  sessionGroups = { groups: [], assignments: {}, collapsedGroupIds: [] },
   onClose,
   onLaunched,
 }: NewSessionDialogProps) {
@@ -75,6 +81,9 @@ export function NewSessionDialog({
   const [newKind, setNewKind] = useState("copilot");
   const [newDir, setNewDir] = useState("");
   const [launchMode, setLaunchMode] = useState<LaunchMode>("direct");
+  const [selectedGroupId, setSelectedGroupId] = useState(
+    UNGROUPED_SESSION_GROUP_ID,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [directorySuggestions, setDirectorySuggestions] = useState<string[]>(
@@ -104,6 +113,7 @@ export function NewSessionDialog({
       setNewKind("copilot");
       setNewDir("");
       setLaunchMode("direct");
+      setSelectedGroupId(UNGROUPED_SESSION_GROUP_ID);
       setSubmitting(false);
       setStatusMessage(null);
       setDirectorySuggestions([]);
@@ -122,6 +132,7 @@ export function NewSessionDialog({
     setNewKind("copilot");
     setNewDir(host?.type === "ssh" ? host.preset.defaultPath || "~/" : "");
     setLaunchMode("direct");
+    setSelectedGroupId(UNGROUPED_SESSION_GROUP_ID);
     setSubmitting(false);
     setStatusMessage(null);
     setDirectorySuggestions([]);
@@ -367,6 +378,7 @@ export function NewSessionDialog({
     setStatusMessage(null);
 
     try {
+      let launchedSession: AgentSessionRecord;
       if (selectedHost.type === "ssh") {
         const remoteWorkingDirectory =
           rawDir || selectedHost.preset.defaultPath || "~/";
@@ -394,7 +406,7 @@ export function NewSessionDialog({
               ),
         );
 
-        await launchSshPtyAgent({
+        launchedSession = await launchSshPtyAgent({
           workspaceId: "default",
           displayName: name,
           agentKind: newKind,
@@ -425,10 +437,13 @@ export function NewSessionDialog({
           workingDirectory: localWorkingDirectory,
           tmuxSessionName,
         };
-        await launchPtyAgent(input);
+        launchedSession = await launchPtyAgent(input);
       }
 
-      onLaunched();
+      onLaunched(
+        launchedSession,
+        selectedGroupId === UNGROUPED_SESSION_GROUP_ID ? null : selectedGroupId,
+      );
       onClose();
     } catch (error) {
       setStatusMessage(formatSessionLaunchError(error, name));
@@ -551,6 +566,24 @@ export function NewSessionDialog({
               </button>
             </div>
           </div>
+
+          <label className="new-session-field">
+            <span className="new-session-label">会话分组</span>
+            <select
+              className="drawer-input"
+              data-testid="new-session-group"
+              disabled={submitting}
+              onChange={(event) => setSelectedGroupId(event.target.value)}
+              value={selectedGroupId}
+            >
+              <option value={UNGROUPED_SESSION_GROUP_ID}>未分组</option>
+              {sessionGroups.groups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </select>
+          </label>
 
           <label className="new-session-field new-session-field--wide">
             <span className="new-session-label">工作目录</span>
