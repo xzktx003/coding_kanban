@@ -233,3 +233,11 @@
 - **修复**: 服务端在注册会话前执行有超时和输出上限的只读 SSH 预检，分别返回目录、Agent、tmux 和连接错误；前端保留并显示后端具体消息。预检通过后的运行期退出继续使用既有 registry 逻辑保留终端输出和退出码。
 - **测试**: `remote-launch-preflight.test.ts`、`agent-sessions.remote-preflight.test.ts`、`session-launch-error.test.ts`。
 - **文件**: `apps/server/src/services/remote-launch-preflight.ts`, `apps/server/src/routes/agent-sessions.ts`, `apps/server/src/app.ts`, `apps/web/src/components/NewSessionDialog.tsx`, `apps/web/src/lib/session-launch-error.ts`
+
+### 聚焦视图监控会话从右侧卡片列表消失
+
+- **现象**: 会话进入大屏监控窗格后会从右侧小卡片分组中消失，用户无法从卡片判断其对应的窗格序号，也看不到当前黄色焦点的双向关联。
+- **根因**: 右侧列表直接排除了 `terminalSlots` 中已显示的会话，并且小卡片没有接收窗格序号或活动窗格状态。
+- **修复**: 右侧列表改为继续渲染全部未隐藏会话并保留原分组；监控中的卡片显示对应序号，活动窗格与卡片同步黄色高亮。点击已监控卡片只激活原窗格，点击未监控卡片继续沿用替换当前窗格的行为。
+- **测试**: `pnpm --filter web test`（242/242）；`tests/e2e/terminal-preview.spec.ts`（12/12），覆盖编号、黄色关联、不搬移激活和未监控会话替换。
+- **文件**: `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/components/FocusSidebarSessionCard.tsx`, `apps/web/src/components/AgentFocusView.test.ts`, `apps/web/src/app.css`, `tests/e2e/terminal-preview.spec.ts`
