@@ -109,6 +109,8 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 聚焦主终端由 xterm.js 渲染，后端通过 `node-pty` 和 WebSocket 驱动。终端预览模式默认使用轻量文本预览，宫格卡片和聚焦右侧栏不创建真实 xterm 实例，也不打开 `/terminal` WebSocket；用户可从顶栏切换到完整预览模式，恢复旧版小终端行为。聚焦视图通过一个 `屏幕布局` 菜单提供单屏、左右双屏、上下双屏、左中右三屏、四屏、六屏和八屏监控布局，用于显式打开最多 8 个实时终端窗格。
 
+聚焦视图右侧列表继续遵循现有分组、折叠、搜索和排序规则，同时显示全部可见会话。已进入大屏布局的会话小卡会显示与窗格一致的编号；当前输入窗格和对应小卡共享黄色高亮。点击带编号小卡只激活已有窗格，点击未编号小卡才替换当前输入窗格。这些关联状态完全由前端 `terminalSlots` 和 `activeSlotId` 派生，不新增后端字段、接口或 WebSocket 事件。
+
 - 终端 WebSocket：`/ws/agent-sessions/:id/terminal`。
 - 终端字号由 `terminal-font-size` 本地存储项持久化，默认 14px；滑杆拖动过程中只更新控件显示，鼠标松开、键盘调整结束或失焦提交后才更新已有 `TerminalView` 的 `fontSize` 并触发 fit/resize，不需要重建 WebSocket。
 - 会先发送 scrollback replay，再发送 `replay-complete`。
