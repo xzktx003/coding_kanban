@@ -258,6 +258,22 @@
 - **测试**: `tmux-display-name.test.ts`、`session-state-store.test.ts`、`local-tmux-adapter.test.ts`、`agent-scanner.test.ts`、`agent-sessions.tmux-add.test.ts`、`AgentFocusView.test.ts` 和 `terminal-preview.spec.ts` 覆盖标题、旧数据迁移、元数据、内部 ID、侧栏标签、窗格序号与黄色关联。
 - **文件**: `apps/server/src/services/tmux-display-name.ts`, `apps/server/src/services/session-state-store.ts`, `apps/server/src/services/local-tmux-adapter.ts`, `apps/server/src/services/agent-scanner.ts`, `apps/server/src/routes/agent-sessions.ts`, `apps/web/src/components/FocusSidebarSessionCard.tsx`, `apps/web/src/app.css`
 
+### tmux 中 Codex 的 Option/Alt+Space 无法换行
+
+- **现象**: macOS 浏览器中的 `Option+Space` 不会到达 Codex；Windows/Linux 的 `Alt+Space` 即使被浏览器接收，也可能在 tmux 输入链路中失去组合键语义。
+- **根因**: xterm 默认关闭 `macOptionIsMeta`，macOS Option 被当作字符输入修饰；后端又把 Meta 的 `ESC+Space` 拆成独立 `Escape` 和字面空格发送，Codex 无法把它识别为同一个快捷键。
+- **修复**: xterm 统一开启 Option-as-Meta；本地 tmux adapter 在完整 CSI 键之后把 `ESC+Space` 和常用 Meta 字母、数字组合原子映射为 `M-*`。Windows 系统若在浏览器之前占用 `Alt+Space`，继续使用已支持的 `Shift+Enter` 换行。
+- **测试**: `local-tmux-adapter.test.ts` 验证原子 `M-Space`/`M-b` 计划；隔离 Playwright E2E 分别模拟 macOS 和 Windows，验证 xterm WebSocket 帧及真实 tmux raw stdin 最终均为 `1b20`。
+- **文件**: `apps/web/src/components/TerminalView.tsx`, `apps/server/src/services/local-tmux-adapter.ts`, `tests/e2e/hot-update-session-restore.spec.ts`
+
+### tmux 当前窗格无法用鼠标滚轮控制
+
+- **现象**: tmux/Codex 已开启 mouse tracking，点击可以选中对应 pane，但滚轮没有响应；只能滚 Kanban 的 xterm 历史。
+- **根因**: 为防止普通 Codex 输入框把滚轮误解释为上下方向键，`TerminalView` 曾在 capture 阶段无条件 `preventDefault` 并停止所有 wheel 事件，连已明确开启 mouse tracking 的 TUI 也无法收到滚轮。原 E2E 又在滚轮前点击并只比较总帧数，把点击帧误判成滚轮帧。
+- **修复**: 根据交互权和 `term.modes.mouseTrackingMode` 分流：交互 TUI 的普通滚轮放行给 xterm/tmux 当前 pane，`Shift+滚轮` 明确滚本地 scrollback；普通 shell、非输入监控 pane 和弹层仍保持原有本地滚动/防穿透行为。
+- **测试**: `terminal-wheel.test.ts` 覆盖路由矩阵；修正后的 `tmux-enhancements.spec.ts` 在点击后重新取基线，并只接受 SGR/legacy wheel code `64/65`。同时回归普通终端历史、tmux 预灌历史、持续输出锁定、多屏非输入 pane 和扫描弹层防穿透。
+- **文件**: `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/terminal-wheel.ts`, `tests/e2e/tmux-enhancements.spec.ts`
+
 ### 热更新与历史会话恢复
 
 - 本地 tmux 的普通输入、移动端快捷键和分帧 bracketed paste 曾全部走 attached client PTY，导致 `Ctrl+A` / `Ctrl+B` 前缀与普通 TUI 输入互相干扰。修复为 `LocalTmuxInputRouter` 统一 REST/WebSocket 队列：普通输入走目标 pane，鼠标和 tmux 前缀及其下一条命令走 attached PTY，CSI-u Enter 保持原始字节。

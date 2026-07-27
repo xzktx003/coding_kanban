@@ -94,6 +94,8 @@
 - Kanban tmux 卡片第一次改名后再次改名可能无反应：如果第一次显示名包含 `:`，tmux 会把 session 名规范化或把冒号当 target 分隔，但 registry 仍保存原显示名到 `transportRef.tmuxSession`，第二次改名 target 错误且前端吞掉异常。修复为改名前后通过 pane id 查询真实 `#{session_name}`，registry 保存真实 tmux session，显示名和 pane title 保留用户输入；前端改名失败弹出错误。
 - SSH 远程终端连接成功后立即退出且原因不可见：启动路由此前先创建 SSH PTY 并返回 `201`，没有验证远端目录、交互式 PATH 中的 Agent 或 tmux，前端还会把具体 API 错误覆盖成会话名。修复为注册会话前执行有时限的 SSH 预检，按目录、Agent、tmux 或连接错误返回结构化消息，前端原样展示；预检后的运行期退出继续保留 exited 卡片、终端输出和退出码。
 - 删除 tmux 后“历史会话部分恢复失败”通知永久停留：失败分支缺少关闭按钮，自动关闭逻辑只覆盖 `restore-complete`。修复为失败通知增加 `×` 并在 10 秒后自动消失，成功通知保持 5 秒，恢复中通知不自动关闭；effect cleanup 负责取消状态变化后的旧定时器。
+- tmux 中 Codex 的 macOS `Option+Space` / Windows `Alt+Space` 无法作为换行快捷键：xterm 默认未把 macOS Option 当作 Meta，后端又把 `ESC+Space` 拆成 Escape 与空格；修复为开启 `macOptionIsMeta`，并把 Meta+Space、常用 Meta 字母/数字原子映射为 tmux `M-*`。Windows 窗口管理器若先占用 `Alt+Space`，使用现有 `Shift+Enter` 作为跨平台备用。
+- tmux/Codex mouse tracking 已开启时当前 pane 仍无法滚轮控制：此前为避免 wheel 变成输入历史方向键，在 capture 阶段无条件阻断所有 wheel，连合法鼠标协议也被吞掉；修复为普通 wheel 在交互 mouse-tracking 终端中放行给 xterm/tmux，`Shift+wheel`、普通 shell 和非输入 pane 仍滚本地 scrollback，并把 E2E 从“点击后总帧数增加”收紧为真实 wheel code `64/65`。
 
 ## PM 审计增强 (2026-06-16)
 

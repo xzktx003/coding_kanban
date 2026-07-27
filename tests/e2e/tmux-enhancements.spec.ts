@@ -1313,47 +1313,34 @@ test("browser: tmux 终端会转发鼠标二进制事件", async ({ page, reques
       )
       .not.toBe("none");
 
-    const before = await page.evaluate(
-      () =>
-        (
-          window as typeof window & {
-            __terminalMouseFrames?: string[];
-          }
-        ).__terminalMouseFrames?.length ?? 0,
-    );
-
     await screen.click({ position: { x: 80, y: 40 } });
+    const beforeWheel = (await terminalSentFrames(page)).length;
     await page.mouse.wheel(0, -300);
 
     await expect
-      .poll(async () =>
-        page.evaluate(
-          () =>
-            (
-              window as typeof window & {
-                __terminalMouseFrames?: string[];
-              }
-            ).__terminalMouseFrames?.length ?? 0,
-        ),
-      )
-      .toBeGreaterThan(before);
-
-    const frames = await page.evaluate(
-      () =>
-        (
-          window as typeof window & {
-            __terminalMouseFrames?: string[];
+      .poll(async () => {
+        const wheelFrames = (await terminalSentFrames(page)).slice(beforeWheel);
+        return wheelFrames.some((frame) => {
+          let payload = frame;
+          try {
+            const parsed = JSON.parse(frame) as {
+              type?: string;
+              data?: string;
+            };
+            if (parsed.type === "binary" && parsed.data) {
+              payload = Buffer.from(parsed.data, "base64").toString("latin1");
+            }
+          } catch {
+            // Raw terminal mouse reports are expected to be non-JSON.
           }
-        ).__terminalMouseFrames ?? [],
-    );
-    expect(
-      frames.some(
-        (frame) =>
-          frame.includes('"type":"binary"') ||
-          frame.includes("\u001b") ||
-          frame.includes("[M"),
-      ),
-    ).toBeTruthy();
+
+          return (
+            /\u001b\[<(?:64|65);\d+;\d+M/.test(payload) ||
+            /\u001b\[M[\x60\x61][\s\S]{2}/.test(payload)
+          );
+        });
+      })
+      .toBeTruthy();
   } finally {
     if (launchedSessionId) {
       await request.delete(

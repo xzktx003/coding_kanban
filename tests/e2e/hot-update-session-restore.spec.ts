@@ -12,7 +12,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { resolveTmuxBinary } from "./tmux-binary";
 
@@ -267,6 +267,32 @@ class IsolatedKanbanRuntime {
     ]);
   }
 
+  createRawInputTmuxSession(sessionName: string, capturePath: string): void {
+    this.runTmux([
+      "new-session",
+      "-d",
+      "-s",
+      sessionName,
+      "-c",
+      REPOSITORY_ROOT,
+      [
+        "node -e ",
+        JSON.stringify(
+          [
+            "const fs = require('node:fs');",
+            "process.stdin.setRawMode(true);",
+            "process.stdin.resume();",
+            "const chunks = [];",
+            "process.stdin.on('data', (chunk) => {",
+            "chunks.push(chunk);",
+            `fs.writeFileSync(${JSON.stringify(capturePath)}, Buffer.concat(chunks).toString('hex'));`,
+            "});",
+          ].join(""),
+        ),
+      ].join(""),
+    ]);
+  }
+
   createSplitTmuxSession(sessionName: string): {
     leftPane: string;
     rightPane: string;
@@ -379,6 +405,69 @@ async function addManagedSession(
   );
 }
 
+async function installTerminalKeyboardProbe(
+  page: Page,
+  platform: "mac" | "windows",
+): Promise<void> {
+  await page.addInitScript((emulatedPlatform) => {
+    const navigatorPlatform = emulatedPlatform === "mac" ? "MacIntel" : "Win32";
+    const userAgent =
+      emulatedPlatform === "mac"
+        ? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/136.0.0.0 Safari/537.36"
+        : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/136.0.0.0 Safari/537.36";
+
+    Object.defineProperty(window.navigator, "platform", {
+      configurable: true,
+      get: () => navigatorPlatform,
+    });
+    Object.defineProperty(window.navigator, "userAgent", {
+      configurable: true,
+      get: () => userAgent,
+    });
+
+    const sentFrames: string[] = [];
+    (
+      window as typeof window & { __terminalKeyboardFrames?: string[] }
+    ).__terminalKeyboardFrames = sentFrames;
+
+    const originalSend = window.WebSocket.prototype.send;
+    window.WebSocket.prototype.send = function patchedSend(data: unknown) {
+      if (typeof data === "string" && !data.includes('"type":"resize"')) {
+        sentFrames.push(data);
+      }
+
+      return originalSend.call(this, data as Parameters<WebSocket["send"]>[0]);
+    };
+  }, platform);
+}
+
+async function openFocusedTerminal(
+  page: Page,
+  frontendUrl: string,
+  displayName: string,
+): Promise<void> {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto(frontendUrl);
+  const card = page.locator(".grid-card", {
+    has: page.locator(".grid-card-name", { hasText: displayName }),
+  });
+  await expect(card).toBeVisible({ timeout: 20_000 });
+  await card.dblclick();
+
+  const screen = page.locator(".focus-main .terminal-view .xterm-screen");
+  await expect(screen).toBeVisible({ timeout: 20_000 });
+  await screen.click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          document.activeElement?.classList.contains("xterm-helper-textarea") ??
+          false,
+      ),
+    )
+    .toBeTruthy();
+}
+
 test("hot update restores stable managed sessions and the dual-pane workspace", async ({
   page,
 }) => {
@@ -423,7 +512,9 @@ test("hot update restores stable managed sessions and the dual-pane workspace", 
     await page.goto(runtime.frontendUrl);
 
     const firstCard = page.locator(".grid-card", {
-      has: page.locator(".grid-card-name", { hasText: firstDisplayName }),
+      has: page.locator(".grid-card-name", {
+        hasText: firstSession.displayName,
+      }),
     });
     await expect(firstCard).toBeVisible({ timeout: 20_000 });
     await firstCard.dblclick();
@@ -664,12 +755,19 @@ test("browser input follows the pane selected inside one split tmux window", asy
   try {
     await runtime.start();
     const { leftPane, rightPane } = runtime.createSplitTmuxSession(tmuxSession);
-    await addManagedSession(runtime, tmuxSession, displayName, leftPane);
+    const managedSession = await addManagedSession(
+      runtime,
+      tmuxSession,
+      displayName,
+      leftPane,
+    );
 
     await page.setViewportSize({ width: 1400, height: 900 });
     await page.goto(runtime.frontendUrl);
     const card = page.locator(".grid-card", {
-      has: page.locator(".grid-card-name", { hasText: displayName }),
+      has: page.locator(".grid-card-name", {
+        hasText: managedSession.displayName,
+      }),
     });
     await expect(card).toBeVisible({ timeout: 20_000 });
     await card.dblclick();
@@ -719,6 +817,97 @@ test("browser input follows the pane selected inside one split tmux window", asy
       })
       .toBeTruthy();
     expect(runtime.paneContainsText(leftPane, marker)).toBeFalsy();
+  } finally {
+    await runtime.dispose();
+  }
+});
+
+test("macOS Option+Space and Windows Alt+Space reach tmux as Meta+Space", async ({
+  browser,
+}) => {
+  test.setTimeout(120_000);
+  const runtime = new IsolatedKanbanRuntime();
+  const suffix = Date.now();
+  const platforms = [
+    {
+      platform: "mac" as const,
+      tmuxSession: `meta-space-mac-${suffix}`,
+      displayName: `Meta Space macOS ${suffix}`,
+    },
+    {
+      platform: "windows" as const,
+      tmuxSession: `meta-space-windows-${suffix}`,
+      displayName: `Meta Space Windows ${suffix}`,
+    },
+  ];
+
+  try {
+    await runtime.start();
+
+    for (const scenario of platforms) {
+      const capturePath = join(
+        runtime.root,
+        `${scenario.platform}-meta-space.hex`,
+      );
+      runtime.createRawInputTmuxSession(scenario.tmuxSession, capturePath);
+      const managedSession = await addManagedSession(
+        runtime,
+        scenario.tmuxSession,
+        scenario.displayName,
+      );
+
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      try {
+        await installTerminalKeyboardProbe(page, scenario.platform);
+        await openFocusedTerminal(
+          page,
+          runtime.frontendUrl,
+          managedSession.displayName,
+        );
+
+        await expect
+          .poll(() =>
+            page.evaluate(() => {
+              const terminal = document.querySelector(
+                ".focus-main .terminal-view",
+              ) as
+                | (HTMLDivElement & {
+                    __xterm?: { options?: { macOptionIsMeta?: boolean } };
+                  })
+                | null;
+              return terminal?.__xterm?.options?.macOptionIsMeta;
+            }),
+          )
+          .toBe(true);
+
+        await page.keyboard.press("Alt+Space");
+        await expect
+          .poll(() =>
+            page.evaluate(
+              () =>
+                (
+                  window as typeof window & {
+                    __terminalKeyboardFrames?: string[];
+                  }
+                ).__terminalKeyboardFrames ?? [],
+            ),
+          )
+          .toContain("\x1b ");
+
+        await expect
+          .poll(() => {
+            try {
+              return readFileSync(capturePath, "utf8");
+            } catch {
+              return "";
+            }
+          })
+          .toBe("1b20");
+      } finally {
+        await context.close();
+      }
+    }
   } finally {
     await runtime.dispose();
   }

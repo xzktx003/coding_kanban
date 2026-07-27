@@ -166,6 +166,15 @@ test("buildTmuxSendKeySteps maps mobile control keys without appending Enter", (
   ]);
 });
 
+test("buildTmuxSendKeySteps keeps cross-platform Meta shortcuts atomic", () => {
+  assert.deepEqual(buildTmuxSendKeySteps("\x1b "), [
+    { kind: "keys", keys: ["M-Space"] },
+  ]);
+  assert.deepEqual(buildTmuxSendKeySteps("\x1bb"), [
+    { kind: "keys", keys: ["M-b"] },
+  ]);
+});
+
 test("buildTmuxSendKeySteps maps application-cursor arrow keys without literal input", () => {
   assert.deepEqual(buildTmuxSendKeySteps("\x1bOA"), [
     { kind: "keys", keys: ["Up"] },

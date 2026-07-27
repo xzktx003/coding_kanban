@@ -15,6 +15,29 @@ interface TerminalWheelScrollResult {
   scrollLines: number;
 }
 
+interface TerminalWheelApplicationRoutingOptions {
+  inputEnabled: boolean;
+  interactive: boolean;
+  mouseTrackingMode: string;
+  shiftKey: boolean;
+}
+
+const TERMINAL_WHEEL_MOUSE_TRACKING_MODES = new Set(["vt200", "drag", "any"]);
+
+export function shouldForwardTerminalWheelToApplication({
+  inputEnabled,
+  interactive,
+  mouseTrackingMode,
+  shiftKey,
+}: TerminalWheelApplicationRoutingOptions): boolean {
+  return (
+    interactive &&
+    inputEnabled &&
+    TERMINAL_WHEEL_MOUSE_TRACKING_MODES.has(mouseTrackingMode) &&
+    !shiftKey
+  );
+}
+
 export function normalizeTerminalWheelDeltaY({
   deltaMode,
   deltaY,

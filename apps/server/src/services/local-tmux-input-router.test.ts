@@ -112,10 +112,14 @@ test("LocalTmuxInputRouter forces mouse/control payloads through the tmux client
   const { router, session, writes, setPtyAvailable } = buildRouter();
 
   await router.write(session, { input: "\x1b[<0;12;8M" }, { forcePty: true });
+  await router.write(session, { input: "\x1b[<64;12;8M" }, { forcePty: true });
   setPtyAvailable(false);
   await router.write(session, { input: "\x1b[<0;12;8m" }, { forcePty: true });
 
-  assert.deepEqual(writes, [{ target: "pty", input: "\x1b[<0;12;8M" }]);
+  assert.deepEqual(writes, [
+    { target: "pty", input: "\x1b[<0;12;8M" },
+    { target: "pty", input: "\x1b[<64;12;8M" },
+  ]);
 });
 
 test("LocalTmuxInputRouter follows the tmux client's active pane after mouse selection", async () => {

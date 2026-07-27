@@ -210,6 +210,26 @@ function readTmuxKeySequence(
   return null;
 }
 
+function readTmuxMetaKeySequence(
+  input: string,
+  index: number,
+): ParsedTmuxKeySequence | null {
+  if (input[index] !== "\x1b" || index + 1 >= input.length) {
+    return null;
+  }
+
+  const modifiedChar = input[index + 1];
+  if (modifiedChar === " ") {
+    return { key: "M-Space", length: 2 };
+  }
+
+  if (/^[a-zA-Z0-9]$/.test(modifiedChar)) {
+    return { key: `M-${modifiedChar}`, length: 2 };
+  }
+
+  return null;
+}
+
 function appendLiteralStep(steps: TmuxSendKeyStep[], value: string): void {
   if (!value) {
     return;
@@ -302,6 +322,15 @@ export function buildTmuxSendKeyPlan(
       flushLiteral();
       appendKeyStep(steps, keySequence.key);
       index += keySequence.length;
+      continue;
+    }
+
+    const metaKeySequence = readTmuxMetaKeySequence(input, index);
+
+    if (metaKeySequence) {
+      flushLiteral();
+      appendKeyStep(steps, metaKeySequence.key);
+      index += metaKeySequence.length;
       continue;
     }
 

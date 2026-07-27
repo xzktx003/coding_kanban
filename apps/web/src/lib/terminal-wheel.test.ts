@@ -6,6 +6,7 @@ import {
   TERMINAL_WHEEL_DELTA_PAGE,
   TERMINAL_WHEEL_DELTA_PIXEL,
   computeTerminalWheelScrollLines,
+  shouldForwardTerminalWheelToApplication,
 } from "./terminal-wheel.js";
 
 describe("computeTerminalWheelScrollLines", () => {
@@ -80,6 +81,62 @@ describe("computeTerminalWheelScrollLines", () => {
         remainingDeltaY: 0,
         scrollLines: 8,
       },
+    );
+  });
+});
+
+describe("shouldForwardTerminalWheelToApplication", () => {
+  it("forwards a plain wheel gesture when the active TUI tracks the mouse", () => {
+    assert.equal(
+      shouldForwardTerminalWheelToApplication({
+        inputEnabled: true,
+        interactive: true,
+        mouseTrackingMode: "vt200",
+        shiftKey: false,
+      }),
+      true,
+    );
+  });
+
+  it("keeps Shift+wheel and non-interactive terminals on local scrollback", () => {
+    assert.equal(
+      shouldForwardTerminalWheelToApplication({
+        inputEnabled: true,
+        interactive: true,
+        mouseTrackingMode: "any",
+        shiftKey: true,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldForwardTerminalWheelToApplication({
+        inputEnabled: false,
+        interactive: false,
+        mouseTrackingMode: "vt200",
+        shiftKey: false,
+      }),
+      false,
+    );
+  });
+
+  it("keeps wheel gestures local when the terminal application does not track the mouse", () => {
+    assert.equal(
+      shouldForwardTerminalWheelToApplication({
+        inputEnabled: true,
+        interactive: true,
+        mouseTrackingMode: "none",
+        shiftKey: false,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldForwardTerminalWheelToApplication({
+        inputEnabled: true,
+        interactive: true,
+        mouseTrackingMode: "x10",
+        shiftKey: false,
+      }),
+      false,
     );
   });
 });

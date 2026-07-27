@@ -29,7 +29,10 @@ import {
 } from "../lib/terminal-font-size";
 import { shouldAttemptTerminalInputForward } from "../lib/terminal-input-forwarding";
 import { stripTerminalResponsePayload } from "../lib/terminal-input";
-import { computeTerminalWheelScrollLines } from "../lib/terminal-wheel";
+import {
+  computeTerminalWheelScrollLines,
+  shouldForwardTerminalWheelToApplication,
+} from "../lib/terminal-wheel";
 
 interface TerminalViewProps {
   agentSessionId: string;
@@ -265,6 +268,7 @@ export function TerminalView({
       },
       scrollback: TERMINAL_SCROLLBACK_LINES,
       disableStdin: true,
+      macOptionIsMeta: true,
     });
 
     const fitAddon = new FitAddon();
@@ -430,6 +434,14 @@ export function TerminalView({
         refreshUserScrollLock();
       }
     };
+
+    const shouldForwardWheelToApplication = (event: WheelEvent): boolean =>
+      shouldForwardTerminalWheelToApplication({
+        inputEnabled: inputEnabledRef.current,
+        interactive,
+        mouseTrackingMode: term.modes.mouseTrackingMode,
+        shiftKey: event.shiftKey,
+      });
 
     const eventStartsInTerminalWheelBlocker = (event: WheelEvent): boolean => {
       const target = event.target;
@@ -1097,6 +1109,10 @@ export function TerminalView({
       };
 
       term.attachCustomWheelEventHandler((event) => {
+        if (shouldForwardWheelToApplication(event)) {
+          return true;
+        }
+
         scrollTerminalWithWheel(event);
         return false;
       });
@@ -1254,6 +1270,12 @@ export function TerminalView({
     }
 
     handleTerminalWheelCapture = (event) => {
+      if (shouldForwardWheelToApplication(event)) {
+        rememberTerminalIntent();
+        focusInteractiveTerminal(true);
+        return;
+      }
+
       scrollTerminalWithWheel(event);
     };
 
@@ -1445,7 +1467,10 @@ export function TerminalView({
         height: "100%",
         overflow: "hidden",
       }}
-      onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }}
       onDrop={(e) => {
         e.preventDefault();
         const filePath = e.dataTransfer.getData("text/plain");

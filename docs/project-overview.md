@@ -129,6 +129,8 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 前端资源诊断会记录 `/ws/agent-sessions` 全量快照消息速率和大小、`/ws/agent-sessions/:id/terminal` 实时流速率、终端 WebSocket 生命周期、DOM 中的 xterm/预览/监控窗格/VS Code iframe 数量，以及浏览器暴露的 JS heap；同时每秒按需调用 `/api/diagnostics/terminal-history` 和 `/api/diagnostics/vscode-web-proxy` 读取后端终端历史与 VS Code 代理吞吐。诊断只在面板打开时刷新，不保存历史。
 - 后端对终端输出导致的全量会话快照做 trailing 合并广播，降低轻量预览下的网络流量、浏览器 JSON 解析和 React 更新频率；新建、删除、聚焦、重命名等结构性变化仍通过即时快照刷新。
 - 本地 tmux 输入按语义分流：普通文本、快捷键和 bracketed paste 通过有序 `send-keys` 写入；鼠标协议及 `Ctrl+A` / `Ctrl+B` 前缀命令写入 attached tmux client PTY。鼠标或前缀命令成功进入 client 后，路由器会让后续 `send-keys` 以 tmux session 为动态目标，从而跟随 client 当前选中的 pane；连接清理或重建时恢复持久化 pane 绑定。CSI-u 的 `Shift+Enter` / `Ctrl+Enter` 保留原始字节，避免依赖 tmux 版本键名。
+- `TerminalView` 开启 xterm 的 `macOptionIsMeta`，因此 macOS Option 与 Windows/Linux Alt 在浏览器能够接收事件时使用相同的 Meta 编码。adapter 在完整 CSI 键序列之后识别 `ESC+Space` 及常用 `ESC+字母/数字`，并原子映射为 tmux `M-*` 键，避免 Codex 把两个分离事件解释为 Escape 和普通输入；Windows 窗口管理器若截获 `Alt+Space`，使用已支持的 `Shift+Enter` 作为换行备用键。
+- 滚轮按终端能力动态路由：当前交互终端启用 xterm mouse tracking 时，普通 wheel 事件放行给 xterm 并经 terminal WebSocket/attached PTY 到达 tmux 当前 pane；按住 `Shift` 时强制浏览本地 xterm scrollback。未启用 mouse tracking 或不具备输入所有权的监控窗格继续只滚动自己的 scrollback，弹层上的 wheel 也不会穿透。
 
 ### 应用更新与会话恢复
 
