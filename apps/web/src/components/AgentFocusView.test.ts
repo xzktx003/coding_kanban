@@ -19,7 +19,11 @@ function installLocalStorageStub(layoutMode = "dual") {
   });
 }
 
-function makeSession(id: string, displayName: string): AgentSessionRecord {
+function makeSession(
+  id: string,
+  displayName: string,
+  overrides: Partial<AgentSessionRecord> = {},
+): AgentSessionRecord {
   return {
     id,
     workspaceId: "default",
@@ -29,6 +33,7 @@ function makeSession(id: string, displayName: string): AgentSessionRecord {
     connectionState: "online",
     interactionState: "running",
     controlMode: "control",
+    ...overrides,
   };
 }
 
@@ -177,6 +182,42 @@ describe("AgentFocusView", () => {
       (markup.match(/aria-label="对应第 [12] 个监控窗格"/g) ?? []).length,
       2,
     );
+  });
+
+  it("marks tmux transport separately without changing the sidebar title or monitor index", () => {
+    installLocalStorageStub("dual");
+    const sessions = [
+      makeSession("session-1", "dev", {
+        transportRef: {
+          runtimeId: "tmux:dev",
+          tmuxSession: "dev",
+        },
+      }),
+      makeSession("session-2", "Direct shell"),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: sessions[0],
+        sessions,
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    const tmuxCard = getSidebarCardTag(markup, "session-1");
+
+    assert.match(markup, /focus-sidebar-card-name">dev<\/span>/);
+    assert.doesNotMatch(markup, /focus-sidebar-card-name">tmux:dev/);
+    assert.match(markup, /aria-label="tmux 会话"/);
+    assert.equal(
+      (markup.match(/class="focus-sidebar-transport-tag"/g) ?? []).length,
+      1,
+    );
+    assert.match(tmuxCard, /data-monitor-index="1"/);
   });
 
   it("marks every sidebar card as a title-safe context menu target", () => {

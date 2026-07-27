@@ -2463,6 +2463,19 @@ input {
   white-space: nowrap;
 }
 
+.focus-sidebar-transport-tag {
+  flex: 0 0 auto;
+  padding: 1px 4px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.025);
+  color: rgba(244, 241, 234, 0.42);
+  font-size: 8px;
+  line-height: 1.2;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+
 .focus-sidebar-monitor-index {
   display: inline-flex;
   width: 18px;

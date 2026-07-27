@@ -650,8 +650,12 @@ test("links sidebar cards to monitor panes without moving monitored sessions", a
   await mockSessions(page, [
     makeSession({
       id: "alpha-session",
-      displayName: "Alpha Session",
+      displayName: "alpha",
       outputPreview: "alpha ready",
+      transportRef: {
+        runtimeId: "tmux:alpha",
+        tmuxSession: "alpha",
+      },
     }),
     makeSession({
       id: "beta-session",
@@ -668,7 +672,7 @@ test("links sidebar cards to monitor panes without moving monitored sessions", a
   await page.goto("/");
   await page
     .locator(".grid-card", {
-      has: page.locator(".grid-card-name", { hasText: "Alpha Session" }),
+      has: page.locator(".grid-card-name", { hasText: "alpha" }),
     })
     .dblclick();
   await page.getByRole("button", { name: /屏幕布局/ }).click();
@@ -691,6 +695,13 @@ test("links sidebar cards to monitor panes without moving monitored sessions", a
   );
 
   await expect(alphaCard).toHaveAttribute("data-monitor-index", "1");
+  await expect(alphaCard.locator(".focus-sidebar-card-name")).toHaveText(
+    "alpha",
+  );
+  await expect(alphaCard.locator(".focus-sidebar-transport-tag")).toHaveText(
+    "tmux",
+  );
+  await expect(betaCard.locator(".focus-sidebar-transport-tag")).toHaveCount(0);
   await expect(alphaCard).toHaveAttribute(
     "data-active-monitor-session",
     "true",

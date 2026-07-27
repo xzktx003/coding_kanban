@@ -59,6 +59,8 @@ export function FocusSidebarSessionCard({
   terminalFontSize,
   onTerminalFontSizeChange,
 }: FocusSidebarSessionCardProps) {
+  const isTmuxManaged = Boolean(session.transportRef?.tmuxSession);
+
   const cancelPendingSingleClick = () => {
     const clickTimer = pendingSidebarClickTimers.get(session.id);
     if (!clickTimer) {
@@ -109,6 +111,15 @@ export function FocusSidebarSessionCard({
             </span>
           )}
           <span className="focus-sidebar-card-name">{session.displayName}</span>
+          {isTmuxManaged && (
+            <span
+              aria-label="tmux 会话"
+              className="focus-sidebar-transport-tag"
+              title="tmux 会话"
+            >
+              tmux
+            </span>
+          )}
         </div>
         <div className="focus-sidebar-card-actions">
           <SessionGroupMenu
