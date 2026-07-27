@@ -169,6 +169,7 @@ describe("AgentFocusView", () => {
     assert.match(firstCard, /data-monitor-index="1"/);
     assert.match(firstCard, /data-active-monitor-session="true"/);
     assert.match(firstCard, /aria-current="true"/);
+    assert.match(firstCard, /focus-sidebar-card--monitor-active/);
     assert.match(secondCard, /data-monitor-index="2"/);
     assert.doesNotMatch(secondCard, /data-active-monitor-session/);
     assert.doesNotMatch(unmonitoredCard, /data-monitor-index/);

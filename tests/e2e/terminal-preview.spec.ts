@@ -695,12 +695,24 @@ test("links sidebar cards to monitor panes without moving monitored sessions", a
     "data-active-monitor-session",
     "true",
   );
+  await expect(firstPane).toHaveCSS(
+    "border-top-color",
+    "rgba(255, 152, 0, 0.95)",
+  );
+  await expect(alphaCard).toHaveCSS(
+    "border-top-color",
+    "rgba(255, 152, 0, 0.95)",
+  );
   await expect(betaCard).toHaveAttribute("data-monitor-index", "2");
   await expect(gammaCard).not.toHaveAttribute("data-monitor-index", /.+/);
 
   await betaCard.click();
   await expect(secondPane).toHaveAttribute("data-active-terminal-pane", "true");
   await expect(betaCard).toHaveAttribute("data-active-monitor-session", "true");
+  await expect(betaCard).toHaveCSS(
+    "border-top-color",
+    "rgba(255, 152, 0, 0.95)",
+  );
   await expect(firstPane).toHaveAttribute(
     "data-terminal-pane-session",
     "alpha-session",
