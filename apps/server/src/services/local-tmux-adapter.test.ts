@@ -74,6 +74,45 @@ test("buildTmuxCapturePaneArgs uses the configured capture line window", () => {
   ]);
 });
 
+test("local tmux discovery exposes the real session name", async () => {
+  const adapter = new LocalTmuxAdapter(new AgentSessionRegistry());
+  (
+    adapter as unknown as {
+      runTmux(args: string[]): Promise<{ stdout: string; stderr: string }>;
+    }
+  ).runTmux = async (args) => ({
+    stdout: args.includes("list-panes")
+      ? "dev\t0\t1\t1\t%1\tbash\t/work/dev"
+      : "",
+    stderr: "",
+  });
+
+  const result = await adapter.discover();
+
+  assert.equal(result.items[0]?.displayName, "dev");
+  assert.doesNotMatch(result.items[0]?.outputPreview ?? "", /^tmux:/);
+  assert.equal(result.items[0]?.transportRef?.runtimeId, "tmux:dev");
+});
+
+test("remote tmux discovery exposes the real session name", async () => {
+  const adapter = new LocalTmuxAdapter(new AgentSessionRegistry());
+  (
+    adapter as unknown as {
+      runRemoteCommand(): Promise<string>;
+    }
+  ).runRemoteCommand = async () =>
+    "remote-dev\t0\t1\t1\t%2\tbash\t/work/remote-dev";
+
+  const result = await adapter.discoverRemote({ host: "remote-a" });
+
+  assert.equal(result.items[0]?.displayName, "remote-dev");
+  assert.doesNotMatch(result.items[0]?.outputPreview ?? "", /^tmux:/);
+  assert.equal(
+    result.items[0]?.transportRef?.runtimeId,
+    "tmux:remote-a:remote-dev",
+  );
+});
+
 test("buildTmuxSendKeySteps preserves text submit while keeping paste raw", () => {
   assert.deepEqual(buildTmuxSendKeySteps("hello codex\r"), [
     { kind: "literal", value: "hello codex" },

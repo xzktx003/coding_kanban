@@ -149,6 +149,35 @@ test("scanAgentDirectory excludes tmux panes whose cwd is outside the scanned su
   }
 });
 
+test("scanAgentDirectory uses the real tmux session name as its title", () => {
+  const scanDir = makeTempDir("agent-scan-tmux-name-");
+  const sessionName = `scan-title-${Date.now()}`;
+
+  killTmuxSession(sessionName);
+  execFileSync(
+    TMUX_BINARY,
+    ["new-session", "-d", "-s", sessionName, "-c", scanDir, "sleep", "30"],
+    {
+      stdio: "ignore",
+    },
+  );
+
+  try {
+    const response = scanAgentDirectory({ path: scanDir });
+    const tmuxResult = response.results.find(
+      (result) => result.tmuxSession === sessionName,
+    );
+
+    assert.ok(tmuxResult);
+    assert.equal(tmuxResult.displayName, sessionName);
+    assert.equal(tmuxResult.agentKind, "shell");
+    assert.equal(tmuxResult.workingDirectory, scanDir);
+  } finally {
+    killTmuxSession(sessionName);
+    rmSync(scanDir, { recursive: true, force: true });
+  }
+});
+
 test(
   "scanAgentDirectory merges tmux state when tmux reports the real local cwd alias",
   { skip: process.platform !== "darwin" },

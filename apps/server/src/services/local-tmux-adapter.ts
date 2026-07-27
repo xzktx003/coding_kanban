@@ -14,6 +14,7 @@ import { AgentSessionRegistry } from "./agent-session-registry.js";
 import { DEFAULT_TERMINAL_TMUX_CAPTURE_LINES } from "../config/server-runtime-config.js";
 import { quoteForPosixShell, resolveTmuxBinary } from "./runtime-compat.js";
 import { buildSshArgs, formatSshDestination } from "./ssh-command.js";
+import { canonicalTmuxDisplayName } from "./tmux-display-name.js";
 
 const TMUX_BINARY = resolveTmuxBinary();
 
@@ -449,7 +450,7 @@ function pickPreview(text: string): string | undefined {
 function buildTmuxStatusPreview(sessionInfo: TmuxSessionInfo): string {
   const stateLabel =
     sessionInfo.interactionState === "running" ? "连接中" : "detached";
-  return `tmux:${sessionInfo.sessionName} · ${sessionInfo.currentCommand} · ${stateLabel}`;
+  return `${canonicalTmuxDisplayName(sessionInfo.sessionName)} · ${sessionInfo.currentCommand} · ${stateLabel}`;
 }
 
 export class LocalTmuxAdapter {
@@ -572,7 +573,7 @@ export class LocalTmuxAdapter {
         hostId: "local",
         sourceType: "remote-tmux-discovered",
         agentKind: sessionInfo.currentCommand,
-        displayName: `tmux:${sessionInfo.sessionName}`,
+        displayName: canonicalTmuxDisplayName(sessionInfo.sessionName),
         workingDirectory: sessionInfo.currentPath,
         connectionState: "online",
         interactionState: sessionInfo.interactionState,
@@ -796,7 +797,7 @@ export class LocalTmuxAdapter {
         hostId,
         sourceType: "remote-tmux-discovered",
         agentKind: sessionInfo.currentCommand,
-        displayName: `tmux:${sessionInfo.sessionName}`,
+        displayName: canonicalTmuxDisplayName(sessionInfo.sessionName),
         workingDirectory: sessionInfo.currentPath,
         connectionState: "online",
         interactionState: sessionInfo.interactionState,

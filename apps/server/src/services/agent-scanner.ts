@@ -20,6 +20,7 @@ import {
   resolveTmuxBinary,
 } from "./runtime-compat.js";
 import { buildSshArgs } from "./ssh-command.js";
+import { canonicalTmuxDisplayName } from "./tmux-display-name.js";
 
 const AGENT_INDICATORS: Record<string, { dirs: string[]; files: string[] }> = {
   claude: {
@@ -350,7 +351,7 @@ function scanLocalTmux(dirPath: string): ScanResult[] {
     results.push({
       agentKind: isAgent ? (command ?? "shell") : "shell",
       status: "running",
-      displayName: `tmux:${session} (${command})`,
+      displayName: canonicalTmuxDisplayName(session),
       workingDirectory: panePath ?? dirPath,
       tmuxSession: session,
       tmuxPane: paneId,
@@ -627,7 +628,7 @@ function scanRemoteTmux(
     results.push({
       agentKind: isAgent ? (command ?? "shell") : "shell",
       status: "running",
-      displayName: `tmux:${session}/${command} (远程: ${panePath ? path.posix.basename(panePath) : remotePath})`,
+      displayName: canonicalTmuxDisplayName(session),
       workingDirectory: panePath ?? remotePath,
       tmuxSession: session,
       tmuxPane: paneId,

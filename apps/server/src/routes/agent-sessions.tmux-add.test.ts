@@ -106,6 +106,36 @@ function waitForTerminalMarker(
   });
 }
 
+test("POST /api/agent-discovery/tmux/add ignores a stale generated title", async () => {
+  const { app } = buildServer();
+  const sessionName = `tmux-canonical-${Date.now()}`;
+
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/agent-discovery/tmux/add",
+      payload: {
+        tmuxSession: sessionName,
+        displayName: `tmux:${sessionName} (bash)`,
+        workingDirectory: process.cwd(),
+        agentKind: "shell",
+        interactionState: "detached",
+      },
+    });
+
+    assert.equal(response.statusCode, 201);
+    const payload = response.json() as {
+      displayName: string;
+      transportRef?: { runtimeId?: string; tmuxSession?: string };
+    };
+    assert.equal(payload.displayName, sessionName);
+    assert.equal(payload.transportRef?.tmuxSession, sessionName);
+    assert.equal(payload.transportRef?.runtimeId, `tmux:${sessionName}`);
+  } finally {
+    await app.close();
+  }
+});
+
 test("POST /api/agent-discovery/tmux/add creates a live terminal session for the added tmux card", async () => {
   const { app } = buildServer();
   const sessionName = `tmux-add-live-${Date.now()}`;

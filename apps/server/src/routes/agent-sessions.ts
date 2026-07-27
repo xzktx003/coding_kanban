@@ -34,6 +34,7 @@ import {
   quoteForPosixShell,
 } from "../services/runtime-compat.js";
 import { SshRuntimeManager } from "../services/ssh-runtime-manager.js";
+import { canonicalTmuxDisplayName } from "../services/tmux-display-name.js";
 import {
   isTerminalFocusPayload,
   isTerminalPtyControlPayload,
@@ -372,7 +373,6 @@ export async function registerAgentSessionRoutes(
       const {
         tmuxSession,
         tmuxPane,
-        displayName,
         workingDirectory,
         agentKind,
         interactionState,
@@ -384,6 +384,7 @@ export async function registerAgentSessionRoutes(
       const runtimeId = sshTarget
         ? `tmux:${hostId}:${tmuxSession}`
         : `tmux:${tmuxSession}`;
+      const canonicalDisplayName = canonicalTmuxDisplayName(tmuxSession);
 
       if (interactionState === "running") {
         const existingSession = registry.findByRuntimeId(runtimeId);
@@ -400,7 +401,7 @@ export async function registerAgentSessionRoutes(
         const attachedSession = sshTarget
           ? ptyRuntimeManager.launchRemote({
               workspaceId: tmuxSession,
-              displayName,
+              displayName: canonicalDisplayName,
               agentKind,
               sshTarget,
               remoteCommand: buildInteractiveShellCommand(
@@ -417,7 +418,7 @@ export async function registerAgentSessionRoutes(
           : ptyRuntimeManager.launch({
               workspaceId: tmuxSession,
               hostId,
-              displayName,
+              displayName: canonicalDisplayName,
               agentKind,
               command: buildTmuxAttachCommand(
                 tmuxSession,
@@ -438,7 +439,7 @@ export async function registerAgentSessionRoutes(
         hostId,
         sourceType: "remote-tmux-discovered",
         agentKind,
-        displayName,
+        displayName: canonicalDisplayName,
         workingDirectory,
         connectionState: "online",
         interactionState: interactionState ?? "detached",
