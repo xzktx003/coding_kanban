@@ -116,3 +116,4 @@
 - 受管 tmux attach 和显式 direct 命令经用户登录 shell 执行时可能被 `.zshrc` 自动启动的 Agent TUI 劫持；修复为两类命令通过非交互 `/bin/sh -c` 执行，仅无命令终端保留用户原生交互 shell。
 - 更新提示长期遮挡终端；修复为按 revision 记忆关闭状态，新版本重新提示。恢复成功提示支持主动关闭并在 5 秒内自动隐藏，失败提示保留。
 - 单个 tmux window 内鼠标选中右 pane 后输入仍进左 pane：鼠标经 attached client 更新了活动 pane，但普通输入继续向接入时保存的固定 `tmuxPane` 执行 `send-keys`；修复为鼠标或前缀命令后改用 session 级动态目标跟随当前活动 pane，连接清理时重置该跟随状态。
+- 扫描、新建或接入 tmux 后标题出现 `tmux:dev (bash)` 或远端路径后缀：根因是 adapter、scanner 和加入路由把传输/命令/主机元数据拼进 `displayName`；修复为用户可见标题统一使用真实 tmux session 名，内部 ID 与结构化元数据保持独立，旧状态只迁移可确定的系统生成标题，并在宫格与聚焦侧栏用独立低调的 `tmux` 标签标识传输类型。

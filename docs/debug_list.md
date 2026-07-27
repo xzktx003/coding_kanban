@@ -242,6 +242,14 @@
 - **测试**: `pnpm --filter web test`（242/242）；`tests/e2e/terminal-preview.spec.ts`（12/12），覆盖编号、黄色关联、不搬移激活和未监控会话替换。
 - **文件**: `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/components/FocusSidebarSessionCard.tsx`, `apps/web/src/components/AgentFocusView.test.ts`, `apps/web/src/app.css`, `tests/e2e/terminal-preview.spec.ts`
 
+### 扫描或接入 tmux 后标题出现 `tmux:dev (bash)`
+
+- **现象**: tmux 会话扫描、新建或接入后，卡片标题被自动改成 `tmux:<session>`、`tmux:<session> (<command>)`，远端扫描还会拼接目录和主机；用户无法把真实会话名与连接元数据分开阅读。
+- **根因**: 本地/远端 tmux adapter、Agent scanner 和加入路由分别自行构造 `displayName`，把传输类型、命令、目录和主机都编码进用户可见标题；旧状态文件又会持久化这些系统生成标题。
+- **修复**: 统一用真实 tmux session 名生成扫描、快速连接和加入后的标题，命令、目录、SSH 和 tmux 绑定继续使用现有结构化字段，内部 runtime id 保留命名空间；加载状态文件时只迁移可确定的旧版系统标题并保留自定义标题。宫格和聚焦右侧小卡用独立低调的 `tmux` 标签表达传输类型。
+- **测试**: `tmux-display-name.test.ts`、`session-state-store.test.ts`、`local-tmux-adapter.test.ts`、`agent-scanner.test.ts`、`agent-sessions.tmux-add.test.ts`、`AgentFocusView.test.ts` 和 `terminal-preview.spec.ts` 覆盖标题、旧数据迁移、元数据、内部 ID、侧栏标签、窗格序号与黄色关联。
+- **文件**: `apps/server/src/services/tmux-display-name.ts`, `apps/server/src/services/session-state-store.ts`, `apps/server/src/services/local-tmux-adapter.ts`, `apps/server/src/services/agent-scanner.ts`, `apps/server/src/routes/agent-sessions.ts`, `apps/web/src/components/FocusSidebarSessionCard.tsx`, `apps/web/src/app.css`
+
 ### 热更新与历史会话恢复
 
 - 本地 tmux 的普通输入、移动端快捷键和分帧 bracketed paste 曾全部走 attached client PTY，导致 `Ctrl+A` / `Ctrl+B` 前缀与普通 TUI 输入互相干扰。修复为 `LocalTmuxInputRouter` 统一 REST/WebSocket 队列：普通输入走目标 pane，鼠标和 tmux 前缀及其下一条命令走 attached PTY，CSI-u Enter 保持原始字节。

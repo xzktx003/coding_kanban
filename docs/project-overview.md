@@ -19,7 +19,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 ### 会话看板
 
 - 宫格展示所有未隐藏的 `AgentSessionRecord`。
-- 卡片显示名称、状态、Agent 类型、主机、工作目录和轻量终端文本预览。
+- 卡片显示名称、状态、Agent 类型、主机、工作目录和轻量终端文本预览；受管 tmux 用独立的小号标签表达传输类型，不污染标题。
 - 支持按服务器、Agent 类型、tmux 类别、目录关键字筛选。
 - 支持创建、重命名和删除会话分组；创建第一个分组后，主页看板与聚焦视图右侧“其他会话”按同一配置分组展示，未指定归属的会话自动进入“未分组”。
 - 主页卡片和聚焦侧栏卡片都提供分组选择菜单，可移动到已有分组、移回“未分组”，或新建分组并立即移入；删除分组只解除归属，不删除会话。
@@ -93,6 +93,8 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - tmux 会话是底层真实进程，`kill` 会杀掉底层 tmux session。
 - 对运行中 tmux 的接入会通过 PTY attach，不只是静态观察。
 - `transportRef.tmuxSession` 和 `transportRef.tmuxPane` 是 tmux 绑定关系的关键字段。
+- tmux 扫描、快速连接和加入看板时，`displayName` 使用真实 tmux session 名；`agentKind`、`workingDirectory`、`sshTarget` 和 `transportRef` 分别承载命令类型、目录、远端主机和 tmux 绑定，不再把这些信息拼成 `tmux:<session> (<command>)` 一类标题。
+- `transportRef.runtimeId` 等内部标识可以继续使用 `tmux:` 命名空间，它们不直接作为用户可见标题。状态文件恢复只把可确定为旧版系统生成的标题迁移为真实 session 名，避免覆盖用户自定义标题。
 
 ### 扫描已有 Agent 工作目录
 
@@ -110,7 +112,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 聚焦主终端由 xterm.js 渲染，后端通过 `node-pty` 和 WebSocket 驱动。终端预览模式默认使用轻量文本预览，宫格卡片和聚焦右侧栏不创建真实 xterm 实例，也不打开 `/terminal` WebSocket；用户可从顶栏切换到完整预览模式，恢复旧版小终端行为。聚焦视图通过一个 `屏幕布局` 菜单提供单屏、左右双屏、上下双屏、左中右三屏、四屏、六屏和八屏监控布局，用于显式打开最多 8 个实时终端窗格。
 
-聚焦视图右侧列表继续遵循现有分组、折叠、搜索和排序规则，同时显示全部可见会话。已进入大屏布局的会话小卡会显示与窗格一致的编号；当前输入窗格和对应小卡共享黄色高亮。点击带编号小卡只激活已有窗格，点击未编号小卡才替换当前输入窗格。这些关联状态完全由前端 `terminalSlots` 和 `activeSlotId` 派生，不新增后端字段、接口或 WebSocket 事件。
+聚焦视图右侧列表继续遵循现有分组、折叠、搜索和排序规则，同时显示全部可见会话。受管 tmux 小卡在真实标题后显示低对比度 `tmux` 标签，标签直接由现有 `transportRef.tmuxSession` 派生。已进入大屏布局的会话小卡会显示与窗格一致的编号；当前输入窗格和对应小卡共享黄色高亮。点击带编号小卡只激活已有窗格，点击未编号小卡才替换当前输入窗格。这些关联状态完全由前端 `terminalSlots` 和 `activeSlotId` 派生，不新增后端字段、接口或 WebSocket 事件。
 
 - 终端 WebSocket：`/ws/agent-sessions/:id/terminal`。
 - 终端字号由 `terminal-font-size` 本地存储项持久化，默认 14px；滑杆拖动过程中只更新控件显示，鼠标松开、键盘调整结束或失焦提交后才更新已有 `TerminalView` 的 `fontSize` 并触发 fit/resize，不需要重建 WebSocket。
