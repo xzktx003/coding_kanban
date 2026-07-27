@@ -244,11 +244,28 @@ export function AgentFocusView({
       .filter((sessionId): sessionId is string => Boolean(sessionId)),
   );
   const usedSessionIds = renderedSessionIds;
-  const otherSessions = sessions.filter(
-    (session) => !session.hidden && !renderedSessionIds.has(session.id),
+  const sidebarSessions = visibleSessions;
+  const otherSessions = visibleSessions.filter(
+    (session) => !renderedSessionIds.has(session.id),
+  );
+  const sessionMonitorPlacementById = useMemo(
+    () =>
+      new Map(
+        terminalSlots.flatMap((slot, index) =>
+          slot.sessionId
+            ? [
+                [
+                  slot.sessionId,
+                  { slotId: slot.id, monitorIndex: index + 1 },
+                ] as const,
+              ]
+            : [],
+        ),
+      ),
+    [terminalSlots],
   );
   const filteredSidebarSessions = sidebarSearchQuery
-    ? otherSessions.filter(
+    ? sidebarSessions.filter(
         (s) =>
           s.displayName
             .toLowerCase()
@@ -260,7 +277,7 @@ export function AgentFocusView({
             .toLowerCase()
             .includes(sidebarSearchQuery.toLowerCase()),
       )
-    : otherSessions;
+    : sidebarSessions;
   const groupingEnabled = sessionGroups.groups.length > 0;
   const groupedSidebarSessions = useMemo(
     () => groupSessions(filteredSidebarSessions, sessionGroups),
@@ -834,6 +851,14 @@ export function AgentFocusView({
   }
 
   function handleSidebarSwitchFocus(sessionId: string) {
+    const existingSlot = terminalSlots.find(
+      (slot) => slot.sessionId === sessionId,
+    );
+    if (existingSlot) {
+      activateSlot(existingSlot);
+      return;
+    }
+
     const slotId = safeActiveSlotId;
     setRestorableTerminalMonitorLayout(null);
     setTerminalSlots((current) =>
@@ -1002,10 +1027,16 @@ export function AgentFocusView({
           </span>
           {headerCollapsed && (
             <>
-              <span className={`grid-card-badge badge-${activeHeaderSession.interactionState}`} style={{fontSize: '11px', padding: '2px 6px'}}>
-                {stateLabels[activeHeaderSession.interactionState] ?? activeHeaderSession.interactionState}
+              <span
+                className={`grid-card-badge badge-${activeHeaderSession.interactionState}`}
+                style={{ fontSize: "11px", padding: "2px 6px" }}
+              >
+                {stateLabels[activeHeaderSession.interactionState] ??
+                  activeHeaderSession.interactionState}
               </span>
-              <span className="focus-main-kind">{activeHeaderSession.agentKind}</span>
+              <span className="focus-main-kind">
+                {activeHeaderSession.agentKind}
+              </span>
             </>
           )}
           {!headerCollapsed && (
@@ -1216,7 +1247,7 @@ export function AgentFocusView({
         </div>
       </div>
 
-      {otherSessions.length > 0 && (
+      {sidebarSessions.length > 0 && (
         <>
           <div className="focus-sidebar-toggle">
             <button
@@ -1235,7 +1266,7 @@ export function AgentFocusView({
               data-sidebar-scroll-mode={sidebarScrollMode ? "enabled" : "auto"}
             >
               <div className="focus-sidebar-heading-row">
-                <h3 className="focus-sidebar-title">其他会话</h3>
+                <h3 className="focus-sidebar-title">全部会话</h3>
                 <button
                   className="session-group-add-button session-group-add-button--compact"
                   onClick={() => onCreateSessionGroup?.()}
@@ -1244,7 +1275,7 @@ export function AgentFocusView({
                   ＋ 分组
                 </button>
               </div>
-              {otherSessions.length > 2 && (
+              {sidebarSessions.length > 2 && (
                 <input
                   className="focus-sidebar-search"
                   data-testid="sidebar-session-search"
@@ -1285,25 +1316,35 @@ export function AgentFocusView({
                         />
                       )}
                       {!collapsed &&
-                        group.sessions.map((session) => (
-                          <FocusSidebarSessionCard
-                            key={session.id}
-                            session={session}
-                            sessionGroups={sessionGroups}
-                            onCreateSessionGroup={onCreateSessionGroup}
-                            onMoveSessionToGroup={onMoveSessionToGroup}
-                            onDragStart={startSessionDrag}
-                            onDragEnd={finishSessionDrag}
-                            onContextMenu={handleSidebarContextMenu}
-                            onRename={onRename}
-                            onSwitchFocus={handleSidebarSwitchFocus}
-                            useLightweightTerminalPreview={
-                              useLightweightTerminalPreview
-                            }
-                            terminalFontSize={terminalFontSize}
-                            onTerminalFontSizeChange={onTerminalFontSizeChange}
-                          />
-                        ))}
+                        group.sessions.map((session) => {
+                          const monitorPlacement =
+                            sessionMonitorPlacementById.get(session.id);
+                          return (
+                            <FocusSidebarSessionCard
+                              key={session.id}
+                              session={session}
+                              monitorIndex={monitorPlacement?.monitorIndex}
+                              isActiveMonitor={
+                                monitorPlacement?.slotId === safeActiveSlotId
+                              }
+                              sessionGroups={sessionGroups}
+                              onCreateSessionGroup={onCreateSessionGroup}
+                              onMoveSessionToGroup={onMoveSessionToGroup}
+                              onDragStart={startSessionDrag}
+                              onDragEnd={finishSessionDrag}
+                              onContextMenu={handleSidebarContextMenu}
+                              onRename={onRename}
+                              onSwitchFocus={handleSidebarSwitchFocus}
+                              useLightweightTerminalPreview={
+                                useLightweightTerminalPreview
+                              }
+                              terminalFontSize={terminalFontSize}
+                              onTerminalFontSizeChange={
+                                onTerminalFontSizeChange
+                              }
+                            />
+                          );
+                        })}
                     </div>
                   );
                 })}

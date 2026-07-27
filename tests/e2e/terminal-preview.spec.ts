@@ -166,11 +166,16 @@ async function dragRangeToValueBeforeRelease(
 }
 
 async function focusedTerminalFontSize(page: Page): Promise<number | null> {
-  return page.locator(".focus-main-terminal .terminal-view-live").evaluate(
-    (element) =>
-      ((element as HTMLElement & { __xterm?: { options?: { fontSize?: number } } })
-        .__xterm?.options?.fontSize ?? null),
-  );
+  return page
+    .locator(".focus-main-terminal .terminal-view-live")
+    .evaluate(
+      (element) =>
+        (
+          element as HTMLElement & {
+            __xterm?: { options?: { fontSize?: number } };
+          }
+        ).__xterm?.options?.fontSize ?? null,
+    );
 }
 
 async function dragElementToPane(
@@ -337,7 +342,9 @@ test("grid virtualizes full terminal previews when many tmux sessions are joined
   const grid = page.getByTestId("agent-grid");
   await expect(grid).toHaveAttribute("data-virtualized", "true");
   await expect
-    .poll(async () => page.locator(".grid-card-terminal .terminal-view").count())
+    .poll(async () =>
+      page.locator(".grid-card-terminal .terminal-view").count(),
+    )
     .toBeGreaterThan(0);
 
   const initiallyMountedCards = await page.locator(".grid-card").count();
@@ -382,7 +389,9 @@ test("VS Code preserve-state profile restores full terminal previews for running
   const vscodeProfileToggle = page.getByTestId("vscode-cache-mode-toggle");
   const vscodeProfileLabel = vscodeProfileToggle.locator("span").first();
   await expect(vscodeProfileLabel).toHaveText("VS Code 省内存");
-  const terminalPreviewToggle = page.getByTestId("terminal-preview-mode-toggle");
+  const terminalPreviewToggle = page.getByTestId(
+    "terminal-preview-mode-toggle",
+  );
   const terminalPreviewLabel = terminalPreviewToggle.locator("span").first();
   await expect(terminalPreviewLabel).toHaveText("轻量预览：开");
   await expect(
@@ -632,6 +641,89 @@ test("focus monitor panes accept dragged sidebar sessions and swap dragged panes
     "data-terminal-pane-session",
     "gamma-session",
   );
+});
+
+test("links sidebar cards to monitor panes without moving monitored sessions", async ({
+  page,
+}) => {
+  await mockSessions(page, [
+    makeSession({
+      id: "alpha-session",
+      displayName: "Alpha Session",
+      outputPreview: "alpha ready",
+    }),
+    makeSession({
+      id: "beta-session",
+      displayName: "Beta Session",
+      outputPreview: "beta ready",
+    }),
+    makeSession({
+      id: "gamma-session",
+      displayName: "Gamma Session",
+      outputPreview: "gamma ready",
+    }),
+  ]);
+
+  await page.goto("/");
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: "Alpha Session" }),
+    })
+    .dblclick();
+  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
+
+  const firstPane = page.locator(
+    '[data-terminal-pane-slot="terminal-monitor-slot-1"]',
+  );
+  const secondPane = page.locator(
+    '[data-terminal-pane-slot="terminal-monitor-slot-2"]',
+  );
+  const alphaCard = page.locator(
+    '.focus-sidebar-card[data-session-id="alpha-session"]',
+  );
+  const betaCard = page.locator(
+    '.focus-sidebar-card[data-session-id="beta-session"]',
+  );
+  const gammaCard = page.locator(
+    '.focus-sidebar-card[data-session-id="gamma-session"]',
+  );
+
+  await expect(alphaCard).toHaveAttribute("data-monitor-index", "1");
+  await expect(alphaCard).toHaveAttribute(
+    "data-active-monitor-session",
+    "true",
+  );
+  await expect(betaCard).toHaveAttribute("data-monitor-index", "2");
+  await expect(gammaCard).not.toHaveAttribute("data-monitor-index", /.+/);
+
+  await betaCard.click();
+  await expect(secondPane).toHaveAttribute("data-active-terminal-pane", "true");
+  await expect(betaCard).toHaveAttribute("data-active-monitor-session", "true");
+  await expect(firstPane).toHaveAttribute(
+    "data-terminal-pane-session",
+    "alpha-session",
+  );
+  await expect(secondPane).toHaveAttribute(
+    "data-terminal-pane-session",
+    "beta-session",
+  );
+
+  await gammaCard.click();
+  await expect(firstPane).toHaveAttribute(
+    "data-terminal-pane-session",
+    "alpha-session",
+  );
+  await expect(secondPane).toHaveAttribute(
+    "data-terminal-pane-session",
+    "gamma-session",
+  );
+  await expect(gammaCard).toHaveAttribute("data-monitor-index", "2");
+  await expect(gammaCard).toHaveAttribute(
+    "data-active-monitor-session",
+    "true",
+  );
+  await expect(betaCard).not.toHaveAttribute("data-monitor-index", /.+/);
 });
 
 test("focus sidebar double-click replaces the active monitor pane only once", async ({

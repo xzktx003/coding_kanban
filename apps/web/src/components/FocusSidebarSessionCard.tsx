@@ -9,6 +9,8 @@ import type { SessionGroupState } from "../lib/session-groups";
 
 interface FocusSidebarSessionCardProps {
   session: AgentSessionRecord;
+  monitorIndex?: number;
+  isActiveMonitor?: boolean;
   onSwitchFocus: (id: string) => void;
   onRename?: (id: string) => void;
   onDragStart?: (
@@ -43,6 +45,8 @@ const pendingSidebarClickTimers = new Map<
 
 export function FocusSidebarSessionCard({
   session,
+  monitorIndex,
+  isActiveMonitor = false,
   onSwitchFocus,
   onRename,
   onDragStart,
@@ -81,7 +85,10 @@ export function FocusSidebarSessionCard({
 
   return (
     <div
-      className={`focus-sidebar-card card-${session.interactionState}`}
+      aria-current={isActiveMonitor ? "true" : undefined}
+      className={`focus-sidebar-card card-${session.interactionState}${monitorIndex ? " focus-sidebar-card--monitored" : ""}${isActiveMonitor ? " focus-sidebar-card--monitor-active" : ""}`}
+      data-active-monitor-session={isActiveMonitor ? "true" : undefined}
+      data-monitor-index={monitorIndex}
       data-terminal-sidebar-menu-scope="other-session"
       data-session-id={session.id}
       draggable={Boolean(onDragStart)}
@@ -92,7 +99,17 @@ export function FocusSidebarSessionCard({
       onDoubleClick={switchFocusOnce}
     >
       <div className="focus-sidebar-card-header">
-        <span>{session.displayName}</span>
+        <div className="focus-sidebar-card-identity">
+          {monitorIndex && (
+            <span
+              aria-label={`对应第 ${monitorIndex} 个监控窗格`}
+              className="focus-sidebar-monitor-index"
+            >
+              {monitorIndex}
+            </span>
+          )}
+          <span className="focus-sidebar-card-name">{session.displayName}</span>
+        </div>
         <div className="focus-sidebar-card-actions">
           <SessionGroupMenu
             session={session}

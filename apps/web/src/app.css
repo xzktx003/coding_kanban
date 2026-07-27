@@ -2413,6 +2413,19 @@ input {
   border-color: rgba(255, 152, 0, 0.4);
 }
 
+.focus-sidebar-card--monitored {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.focus-sidebar-card--monitor-active,
+.focus-sidebar-card--monitor-active:hover {
+  border-color: rgba(255, 152, 0, 0.95);
+  box-shadow:
+    0 0 0 2px rgba(255, 152, 0, 0.38),
+    0 12px 28px rgba(255, 111, 0, 0.18),
+    inset 0 0 0 1px rgba(255, 213, 128, 0.18);
+}
+
 .focus-sidebar-card.card-awaiting_input {
   border-color: rgba(255, 152, 0, 0.4);
 }
@@ -2427,11 +2440,47 @@ input {
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.focus-sidebar-card-header > span {
+.focus-sidebar-card--monitor-active .focus-sidebar-card-header {
+  border-bottom-color: rgba(255, 152, 0, 0.34);
+  background: linear-gradient(
+    90deg,
+    rgba(255, 152, 0, 0.2),
+    rgba(255, 152, 0, 0.05)
+  );
+}
+
+.focus-sidebar-card-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.focus-sidebar-card-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.focus-sidebar-monitor-index {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(244, 241, 234, 0.8);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.focus-sidebar-card--monitor-active .focus-sidebar-monitor-index {
+  background: #ff9800;
+  color: #1a1206;
+  box-shadow: 0 0 0 2px rgba(255, 152, 0, 0.24);
 }
 
 .focus-sidebar-card-actions {

@@ -32,6 +32,14 @@ function makeSession(id: string, displayName: string): AgentSessionRecord {
   };
 }
 
+function getSidebarCardTag(markup: string, sessionId: string): string {
+  const match = markup.match(
+    new RegExp(`<div[^>]*data-session-id="${sessionId}"[^>]*>`),
+  );
+  assert.ok(match, `missing sidebar card for ${sessionId}`);
+  return match[0];
+}
+
 describe("AgentFocusView", () => {
   it("collapses an individual group in the other-session sidebar", () => {
     installLocalStorageStub("single");
@@ -67,7 +75,7 @@ describe("AgentFocusView", () => {
     assert.match(markup, /data-session-id="session-3"/);
   });
 
-  it("renders the same session groups in the other-session sidebar", () => {
+  it("renders the same session groups in the all-session sidebar", () => {
     installLocalStorageStub("single");
     const sessions = [
       makeSession("session-1", "Alpha"),
@@ -99,7 +107,7 @@ describe("AgentFocusView", () => {
     assert.match(markup, /data-session-group-id="group-review"/);
     assert.match(markup, />评审</);
     assert.match(markup, /data-session-group-id="__ungrouped__"/);
-    assert.equal((markup.match(/aria-label="移动到分组"/g) ?? []).length, 2);
+    assert.equal((markup.match(/aria-label="移动到分组"/g) ?? []).length, 3);
   });
 
   it("renders a prominent current-input badge for the active monitor pane", () => {
@@ -133,7 +141,44 @@ describe("AgentFocusView", () => {
     assert.doesNotMatch(markup, /data-testid="terminal-pane-context-menu"/);
   });
 
-  it("marks other-session cards as title-safe context menu targets", () => {
+  it("links every monitored pane to the matching card in the existing sidebar groups", () => {
+    installLocalStorageStub("dual");
+    const sessions = [
+      makeSession("session-1", "Alpha"),
+      makeSession("session-2", "Beta"),
+      makeSession("session-3", "Gamma"),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: sessions[0],
+        sessions,
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    const firstCard = getSidebarCardTag(markup, "session-1");
+    const secondCard = getSidebarCardTag(markup, "session-2");
+    const unmonitoredCard = getSidebarCardTag(markup, "session-3");
+
+    assert.match(markup, />全部会话</);
+    assert.match(firstCard, /data-monitor-index="1"/);
+    assert.match(firstCard, /data-active-monitor-session="true"/);
+    assert.match(firstCard, /aria-current="true"/);
+    assert.match(secondCard, /data-monitor-index="2"/);
+    assert.doesNotMatch(secondCard, /data-active-monitor-session/);
+    assert.doesNotMatch(unmonitoredCard, /data-monitor-index/);
+    assert.equal(
+      (markup.match(/aria-label="对应第 [12] 个监控窗格"/g) ?? []).length,
+      2,
+    );
+  });
+
+  it("marks every sidebar card as a title-safe context menu target", () => {
     installLocalStorageStub("single");
     const sessions = [
       makeSession("session-1", "Alpha"),
@@ -155,11 +200,11 @@ describe("AgentFocusView", () => {
     assert.equal(
       (markup.match(/data-terminal-sidebar-menu-scope="other-session"/g) ?? [])
         .length,
-      1,
+      2,
     );
   });
 
-  it("enables an internal scroll region when the other-session sidebar is crowded", () => {
+  it("enables an internal scroll region when the all-session sidebar is crowded", () => {
     installLocalStorageStub("single");
     const sessions = Array.from({ length: 7 }, (_, index) =>
       makeSession(`session-${index + 1}`, `Session ${index + 1}`),
@@ -183,11 +228,11 @@ describe("AgentFocusView", () => {
     assert.equal(
       (markup.match(/data-terminal-sidebar-menu-scope="other-session"/g) ?? [])
         .length,
-      6,
+      7,
     );
   });
 
-  it("keeps the sidebar in auto mode for a small number of other sessions", () => {
+  it("keeps the sidebar in auto mode for a small number of sessions", () => {
     installLocalStorageStub("single");
     const sessions = [
       makeSession("session-1", "Alpha"),
