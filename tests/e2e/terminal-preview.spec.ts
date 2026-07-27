@@ -166,16 +166,14 @@ async function dragRangeToValueBeforeRelease(
 }
 
 async function focusedTerminalFontSize(page: Page): Promise<number | null> {
-  return page
-    .locator(".focus-main-terminal .terminal-view-live")
-    .evaluate(
-      (element) =>
-        (
-          element as HTMLElement & {
-            __xterm?: { options?: { fontSize?: number } };
-          }
-        ).__xterm?.options?.fontSize ?? null,
-    );
+  return page.locator(".focus-main-terminal .terminal-view-live").evaluate(
+    (element) =>
+      (
+        element as HTMLElement & {
+          __xterm?: { options?: { fontSize?: number } };
+        }
+      ).__xterm?.options?.fontSize ?? null,
+  );
 }
 
 async function dragElementToPane(
@@ -427,7 +425,7 @@ test("VS Code preserve-state profile restores full terminal previews for running
     .toBe("full");
 });
 
-test("focus view opens a real terminal only for the focused session", async ({
+test("focus view keeps every sidebar card lightweight while only the main pane opens a real terminal", async ({
   page,
 }) => {
   await mockSessions(page, [
@@ -456,13 +454,16 @@ test("focus view opens a real terminal only for the focused session", async ({
   ).toBeVisible();
   await expect(
     page.locator(".focus-sidebar-terminal .terminal-preview"),
-  ).toHaveCount(1);
+  ).toHaveCount(2);
   await expect(
     page.locator(".focus-sidebar-terminal .terminal-view"),
   ).toHaveCount(0);
-  await expect(page.locator(".focus-sidebar-card")).toContainText(
-    "sidebar ready",
-  );
+  await expect(
+    page.getByTestId("terminal-preview-focused-session"),
+  ).toContainText("focused ready");
+  await expect(
+    page.getByTestId("terminal-preview-sidebar-session"),
+  ).toContainText("sidebar ready");
 
   await expect
     .poll(() => terminalWebSocketUrls(page))
