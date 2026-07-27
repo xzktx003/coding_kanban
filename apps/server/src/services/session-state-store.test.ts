@@ -180,6 +180,39 @@ test("file store still writes when persisted session metadata changes", () => {
   }
 });
 
+test("file store migrates only system-generated tmux display names", () => {
+  const directory = mkdtempSync(join(tmpdir(), "coding-kanban-sessions-"));
+  const filePath = join(directory, "sessions.json");
+  const store = new FileSessionStateStore(filePath);
+
+  try {
+    store.save({
+      items: [
+        buildSession("legacy", {
+          displayName: "tmux:tmux-legacy (bash)",
+        }),
+        buildSession("custom", {
+          displayName: "tmux:tmux-custom custom",
+        }),
+      ],
+      activeAgentSessionId: "legacy",
+      updatedAt: "2026-07-27T00:00:00.000Z",
+    });
+
+    const loaded = store.load();
+    assert.equal(
+      loaded?.items.find((session) => session.id === "legacy")?.displayName,
+      "tmux-legacy",
+    );
+    assert.equal(
+      loaded?.items.find((session) => session.id === "custom")?.displayName,
+      "tmux:tmux-custom custom",
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("registry restores stable ids and marks tmux/direct sessions with the correct recovery boundary", () => {
   const registry = new AgentSessionRegistry();
 

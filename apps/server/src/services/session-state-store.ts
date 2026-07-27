@@ -14,6 +14,8 @@ import type {
   SshTarget,
 } from "@agent-orchestrator/shared";
 
+import { normalizeTmuxDisplayName } from "./tmux-display-name.js";
+
 const SESSION_STATE_VERSION = 1;
 
 interface PersistedSessionState {
@@ -123,7 +125,10 @@ function parseSession(value: unknown): AgentSessionRecord | null {
     workspaceId: value.workspaceId,
     sourceType,
     agentKind: value.agentKind,
-    displayName: value.displayName,
+    displayName: normalizeTmuxDisplayName(
+      value.displayName,
+      transport?.tmuxSession,
+    ),
     connectionState: "offline",
     interactionState: transport?.tmuxSession ? "detached" : "exited",
     ...(hostId ? { hostId } : {}),
