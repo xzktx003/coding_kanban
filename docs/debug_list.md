@@ -234,6 +234,14 @@
 - **测试**: `remote-launch-preflight.test.ts`、`agent-sessions.remote-preflight.test.ts`、`session-launch-error.test.ts`。
 - **文件**: `apps/server/src/services/remote-launch-preflight.ts`, `apps/server/src/routes/agent-sessions.ts`, `apps/server/src/app.ts`, `apps/web/src/components/NewSessionDialog.tsx`, `apps/web/src/lib/session-launch-error.ts`
 
+### 删除 tmux 后历史会话恢复失败通知永久停留
+
+- **现象**: 删除 tmux 终端并执行 `exit` 后，页面显示“历史会话部分恢复失败”，例如提示 `paper_writing: tmux 会话不存在或当前不可访问`，但通知没有关闭按钮且不会自动消失。
+- **根因**: 恢复成功通知实现了关闭按钮和 5 秒自动关闭，恢复失败分支没有渲染关闭按钮，自动关闭判定函数也只接受 `restore-complete` 状态。
+- **修复**: 恢复失败通知增加可访问的 `×` 按钮，并设置 10 秒自动关闭；恢复成功继续使用 5 秒，恢复进行中保持常驻。状态变化或手动关闭时 React effect 会清理未触发的定时器。
+- **测试**: `apps/web/src/components/AppUpdateBanner.test.ts` 覆盖失败通知关闭按钮、成功/失败差异化自动关闭时间和恢复中不自动关闭。
+- **文件**: `apps/web/src/components/AppUpdateBanner.tsx`, `apps/web/src/App.tsx`
+
 ### 聚焦视图监控会话从右侧卡片列表消失
 
 - **现象**: 会话进入大屏监控窗格后会从右侧小卡片分组中消失，用户无法从卡片判断其对应的窗格序号，也看不到当前黄色焦点的双向关联。

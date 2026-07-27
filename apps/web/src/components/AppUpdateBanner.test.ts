@@ -6,6 +6,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   AppUpdateBanner,
   RESTORE_COMPLETE_AUTO_DISMISS_MS,
+  RESTORE_FAILED_AUTO_DISMISS_MS,
+  getRestoreBannerAutoDismissMs,
   shouldAutoDismissRestoreBanner,
 } from "./AppUpdateBanner.js";
 
@@ -56,9 +58,11 @@ test("renders visible managed-session restore progress and failures", () => {
   );
   assert.match(failed, /已恢复 2 个会话/);
   assert.match(failed, /agent-3: tmux 会话不存在/);
+  assert.match(failed, /data-testid="dismiss-session-restore"/);
+  assert.match(failed, /aria-label="关闭历史会话恢复失败提示"/);
 });
 
-test("renders a close action for restore completion and limits auto-dismiss to that state", () => {
+test("assigns close actions and state-specific auto-dismiss delays to restore results", () => {
   const restoredState = {
     kind: "restore-complete" as const,
     restored: 2,
@@ -76,6 +80,8 @@ test("renders a close action for restore completion and limits auto-dismiss to t
   assert.match(markup, /data-testid="dismiss-session-restore"/);
   assert.match(markup, /aria-label="关闭历史会话恢复提示"/);
   assert.equal(RESTORE_COMPLETE_AUTO_DISMISS_MS, 5_000);
+  assert.equal(RESTORE_FAILED_AUTO_DISMISS_MS, 10_000);
+  assert.equal(getRestoreBannerAutoDismissMs(restoredState), 5_000);
   assert.equal(shouldAutoDismissRestoreBanner(restoredState), true);
   assert.equal(
     shouldAutoDismissRestoreBanner({ kind: "restoring", total: 2 }),
@@ -87,6 +93,18 @@ test("renders a close action for restore completion and limits auto-dismiss to t
       restored: 1,
       failures: ["failed"],
     }),
-    false,
+    true,
+  );
+  assert.equal(
+    getRestoreBannerAutoDismissMs({
+      kind: "restore-failed",
+      restored: 1,
+      failures: ["failed"],
+    }),
+    10_000,
+  );
+  assert.equal(
+    getRestoreBannerAutoDismissMs({ kind: "restoring", total: 2 }),
+    null,
   );
 });

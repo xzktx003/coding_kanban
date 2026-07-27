@@ -24,11 +24,26 @@ interface AppUpdateBannerProps {
 }
 
 export const RESTORE_COMPLETE_AUTO_DISMISS_MS = 5_000;
+export const RESTORE_FAILED_AUTO_DISMISS_MS = 10_000;
+
+export function getRestoreBannerAutoDismissMs(
+  state: AppUpdateBannerState,
+): number | null {
+  if (state.kind === "restore-complete") {
+    return RESTORE_COMPLETE_AUTO_DISMISS_MS;
+  }
+
+  if (state.kind === "restore-failed") {
+    return RESTORE_FAILED_AUTO_DISMISS_MS;
+  }
+
+  return null;
+}
 
 export function shouldAutoDismissRestoreBanner(
   state: AppUpdateBannerState,
 ): boolean {
-  return state.kind === "restore-complete";
+  return getRestoreBannerAutoDismissMs(state) !== null;
 }
 
 export function AppUpdateBanner({
@@ -117,6 +132,15 @@ export function AppUpdateBanner({
             ))}
           </ul>
         </div>
+        <button
+          aria-label="关闭历史会话恢复失败提示"
+          className="app-update-banner__dismiss"
+          data-testid="dismiss-session-restore"
+          onClick={onDismiss}
+          type="button"
+        >
+          ×
+        </button>
       </aside>
     );
   }

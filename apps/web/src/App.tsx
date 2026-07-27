@@ -18,7 +18,7 @@ import { AgentFocusView } from "./components/AgentFocusView";
 import { AgentGrid } from "./components/AgentGrid";
 import {
   AppUpdateBanner,
-  RESTORE_COMPLETE_AUTO_DISMISS_MS,
+  getRestoreBannerAutoDismissMs,
   shouldAutoDismissRestoreBanner,
   type AppUpdateBannerState,
 } from "./components/AppUpdateBanner";
@@ -537,7 +537,8 @@ export default function App() {
   }, [appVersion, isLoading, sessionRestoreState.kind, snapshot]);
 
   useEffect(() => {
-    if (!shouldAutoDismissRestoreBanner(sessionRestoreState)) {
+    const autoDismissMs = getRestoreBannerAutoDismissMs(sessionRestoreState);
+    if (autoDismissMs === null) {
       return;
     }
 
@@ -545,7 +546,7 @@ export default function App() {
       setSessionRestoreState((current) =>
         shouldAutoDismissRestoreBanner(current) ? { kind: "idle" } : current,
       );
-    }, RESTORE_COMPLETE_AUTO_DISMISS_MS);
+    }, autoDismissMs);
 
     return () => {
       window.clearTimeout(timeoutId);
