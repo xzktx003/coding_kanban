@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  set -euo pipefail
+fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -41,6 +43,8 @@ TERMINAL_SCROLLBACK_BYTES="${TERMINAL_SCROLLBACK_BYTES:-4194304}"
 TERMINAL_TMUX_CAPTURE_LINES="${TERMINAL_TMUX_CAPTURE_LINES:-5000}"
 TERMINAL_REGISTRY_OUTPUT_ENTRIES="${TERMINAL_REGISTRY_OUTPUT_ENTRIES:-1000}"
 VITE_TERMINAL_SCROLLBACK_LINES="${VITE_TERMINAL_SCROLLBACK_LINES:-20000}"
+SESSION_STATE_PATH="${SESSION_STATE_PATH:-${RUNTIME_DIR}/agent-sessions.json}"
+APP_SOURCE_ROOT="${APP_SOURCE_ROOT:-${ROOT_DIR}}"
 
 SERVER_LOG="${RUNTIME_DIR}/server.log"
 WEB_LOG="${RUNTIME_DIR}/web.log"
@@ -68,13 +72,13 @@ kill_from_pid_file() {
   local pid
   pid="$(cat "$pid_file")"
 
-  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+  if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 -- "$pid" 2>/dev/null; then
     log "Stopping ${name} process ${pid}"
-    kill "$pid" 2>/dev/null || true
+    kill -- "$pid" 2>/dev/null || true
     sleep 0.3
 
-    if kill -0 "$pid" 2>/dev/null; then
-      kill -9 "$pid" 2>/dev/null || true
+    if kill -0 -- "$pid" 2>/dev/null; then
+      kill -9 -- "$pid" 2>/dev/null || true
     fi
   fi
 
@@ -99,22 +103,46 @@ pid_belongs_to_repo() {
   return 1
 }
 
+has_repo_listener_on_port() {
+  local port="$1"
+  local pids=()
+  local pid
+
+  while IFS= read -r pid; do
+    if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+      pids+=("$pid")
+    fi
+  done < <(lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)
+
+  for pid in "${pids[@]}"; do
+    if pid_belongs_to_repo "$pid"; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 kill_listeners_on_port() {
   local name="$1"
   local port="$2"
-  local pids
-
-  pids="$(lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)"
-
-  if [[ -z "$pids" ]]; then
-    return
-  fi
-
+  local pids=()
   local repo_pids=()
   local foreign_pids=()
   local pid
+  local force_pid_list
 
-  for pid in $pids; do
+  while IFS= read -r pid; do
+    if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+      pids+=("$pid")
+    fi
+  done < <(lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)
+
+  if (( ${#pids[@]} == 0 )); then
+    return
+  fi
+
+  for pid in "${pids[@]}"; do
     if pid_belongs_to_repo "$pid"; then
       repo_pids+=("$pid")
     else
@@ -130,13 +158,21 @@ kill_listeners_on_port() {
     log "Freeing ${name} port ${port}: ${repo_pids[*]}"
   fi
 
-  kill $pids 2>/dev/null || true
+  kill -- "${pids[@]}" 2>/dev/null || true
   sleep 0.3
 
-  pids="$(lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)"
-  if [[ -n "$pids" ]]; then
-    log "Force killing ${name} port ${port}: ${pids//$'\n'/, }"
-    kill -9 $pids 2>/dev/null || true
+  pids=()
+  while IFS= read -r pid; do
+    if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+      pids+=("$pid")
+    fi
+  done < <(lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)
+
+  if (( ${#pids[@]} > 0 )); then
+    printf -v force_pid_list '%s, ' "${pids[@]}"
+    force_pid_list="${force_pid_list%, }"
+    log "Force killing ${name} port ${port}: ${force_pid_list}"
+    kill -9 -- "${pids[@]}" 2>/dev/null || true
   fi
 }
 
@@ -213,6 +249,24 @@ show_log_tail() {
   fi
 }
 
+capture_current_session_state() {
+  local sessions_url="http://${SERVER_PUBLIC_HOST}:${SERVER_PORT}/api/agent-sessions"
+
+  if ! has_repo_listener_on_port "$SERVER_PORT"; then
+    log "No running repo backend needs migration"
+    return 0
+  fi
+
+  if node "${ROOT_DIR}/scripts/capture-session-state.mjs" \
+    "$sessions_url" "$SESSION_STATE_PATH"; then
+    log "Captured current session registry before restart"
+    return 0
+  else
+    log "Refusing to restart: active repo backend state could not be migrated"
+    return 1
+  fi
+}
+
 build_default_https_san() {
   local san_entries=("DNS:localhost" "IP:127.0.0.1")
   local host_name
@@ -235,92 +289,103 @@ build_default_https_san() {
   printf '%s\n' "${san_entries[*]}"
 }
 
-if [[ -z "$WEB_HTTPS_SAN" ]]; then
-  WEB_HTTPS_SAN="$(build_default_https_san)"
-fi
+main() {
+  if [[ -z "$WEB_HTTPS_SAN" ]]; then
+    WEB_HTTPS_SAN="$(build_default_https_san)"
+  fi
 
-mkdir -p "$RUNTIME_DIR"
+  mkdir -p "$RUNTIME_DIR"
 
-if ! WEB_HTTPS="$WEB_HTTPS" WEB_HTTPS_CERT="$WEB_HTTPS_CERT" WEB_HTTPS_KEY="$WEB_HTTPS_KEY" WEB_HTTPS_SAN="$WEB_HTTPS_SAN" \
-  node "${ROOT_DIR}/scripts/ensure-dev-https-cert.mjs"; then
-  exit 1
-fi
-
-kill_listeners_on_port backend "$SERVER_PORT"
-kill_listeners_on_port frontend "$WEB_PORT"
-kill_from_pid_file backend "$SERVER_PID_FILE"
-kill_from_pid_file frontend "$WEB_PID_FILE"
-
-: >"$SERVER_LOG"
-: >"$WEB_LOG"
-
-cd "$ROOT_DIR"
-
-RUNTIME_PATH="$(build_runtime_path)"
-
-log "Starting backend on ${SERVER_BIND_HOST}:${SERVER_PORT}"
-setsid env -u VSCODE_IPC_HOOK_CLI PATH="$RUNTIME_PATH" SERVER_BIND_HOST="$SERVER_BIND_HOST" HOST="$SERVER_BIND_HOST" PORT="$SERVER_PORT" SERVER_PORT="$SERVER_PORT" \
-  CHOKIDAR_USEPOLLING=1 \
-  TERMINAL_SCROLLBACK_BYTES="$TERMINAL_SCROLLBACK_BYTES" TERMINAL_TMUX_CAPTURE_LINES="$TERMINAL_TMUX_CAPTURE_LINES" TERMINAL_REGISTRY_OUTPUT_ENTRIES="$TERMINAL_REGISTRY_OUTPUT_ENTRIES" \
-  pnpm --dir "$SERVER_APP_DIR" dev >"$SERVER_LOG" 2>&1 < /dev/null &
-echo $! >"$SERVER_PID_FILE"
-
-SERVER_URL="http://${SERVER_PUBLIC_HOST}:${SERVER_PORT}"
-SERVER_HEALTH_URL="${SERVER_URL}/api/health"
-
-log "Waiting for backend to be ready…"
-if ! wait_for_http backend "$SERVER_HEALTH_URL"; then
-  show_log_tail backend "$SERVER_LOG"
-  exit 1
-fi
-log "Backend ready ✓"
-
-log "Starting frontend on ${WEB_HOST}:${WEB_PORT}"
-if [[ "$WEB_HTTPS" == "1" ]]; then
-  log "Frontend HTTPS enabled"
-  setsid env -u VSCODE_IPC_HOOK_CLI PATH="$RUNTIME_PATH" WEB_BACKEND_HOST="$SERVER_PUBLIC_HOST" WEB_BACKEND_PORT="$SERVER_PORT" SERVER_PORT="$SERVER_PORT" PORT="$SERVER_PORT" \
-    CHOKIDAR_USEPOLLING=1 \
-    VITE_DEV_HTTPS=1 VITE_DEV_HTTPS_CERT="$WEB_HTTPS_CERT" VITE_DEV_HTTPS_KEY="$WEB_HTTPS_KEY" \
-    VITE_TERMINAL_SCROLLBACK_LINES="$VITE_TERMINAL_SCROLLBACK_LINES" \
-    pnpm --dir "$WEB_APP_DIR" exec vite --host "$WEB_HOST" --port "$WEB_PORT" \
-    >"$WEB_LOG" 2>&1 < /dev/null &
-else
-  setsid env -u VSCODE_IPC_HOOK_CLI PATH="$RUNTIME_PATH" WEB_BACKEND_HOST="$SERVER_PUBLIC_HOST" WEB_BACKEND_PORT="$SERVER_PORT" SERVER_PORT="$SERVER_PORT" PORT="$SERVER_PORT" \
-    CHOKIDAR_USEPOLLING=1 \
-    VITE_TERMINAL_SCROLLBACK_LINES="$VITE_TERMINAL_SCROLLBACK_LINES" pnpm --dir "$WEB_APP_DIR" exec vite --host "$WEB_HOST" --port "$WEB_PORT" \
-    >"$WEB_LOG" 2>&1 < /dev/null &
-fi
-echo $! >"$WEB_PID_FILE"
-
-(
-  if ! wait_for_frontend_urls "$WEB_LOG"; then
+  if ! WEB_HTTPS="$WEB_HTTPS" WEB_HTTPS_CERT="$WEB_HTTPS_CERT" WEB_HTTPS_KEY="$WEB_HTTPS_KEY" WEB_HTTPS_SAN="$WEB_HTTPS_SAN" \
+    node "${ROOT_DIR}/scripts/ensure-dev-https-cert.mjs"; then
     exit 1
   fi
-  FRONTEND_LOCAL_URL="$(extract_frontend_url Local "$WEB_LOG")"
-  FRONTEND_READY_URL="${FRONTEND_LOCAL_URL}/@vite/client"
-  if ! wait_for_http frontend "$FRONTEND_READY_URL"; then
+
+  if ! capture_current_session_state; then
     exit 1
   fi
-) &
-FRONTEND_WAIT_PID=$!
 
-if ! wait "$FRONTEND_WAIT_PID"; then
-  show_log_tail frontend "$WEB_LOG"
-  exit 1
+  kill_listeners_on_port backend "$SERVER_PORT"
+  kill_listeners_on_port frontend "$WEB_PORT"
+  kill_from_pid_file backend "$SERVER_PID_FILE"
+  kill_from_pid_file frontend "$WEB_PID_FILE"
+
+  : >"$SERVER_LOG"
+  : >"$WEB_LOG"
+
+  cd "$ROOT_DIR"
+
+  RUNTIME_PATH="$(build_runtime_path)"
+
+  log "Starting backend on ${SERVER_BIND_HOST}:${SERVER_PORT}"
+  setsid env -u VSCODE_IPC_HOOK_CLI PATH="$RUNTIME_PATH" SERVER_BIND_HOST="$SERVER_BIND_HOST" HOST="$SERVER_BIND_HOST" PORT="$SERVER_PORT" SERVER_PORT="$SERVER_PORT" \
+    SESSION_STATE_PATH="$SESSION_STATE_PATH" APP_SOURCE_ROOT="$APP_SOURCE_ROOT" \
+    CHOKIDAR_USEPOLLING=1 \
+    TERMINAL_SCROLLBACK_BYTES="$TERMINAL_SCROLLBACK_BYTES" TERMINAL_TMUX_CAPTURE_LINES="$TERMINAL_TMUX_CAPTURE_LINES" TERMINAL_REGISTRY_OUTPUT_ENTRIES="$TERMINAL_REGISTRY_OUTPUT_ENTRIES" \
+    pnpm --dir "$SERVER_APP_DIR" dev >"$SERVER_LOG" 2>&1 < /dev/null &
+  echo $! >"$SERVER_PID_FILE"
+
+  SERVER_URL="http://${SERVER_PUBLIC_HOST}:${SERVER_PORT}"
+  SERVER_HEALTH_URL="${SERVER_URL}/api/health"
+
+  log "Waiting for backend to be ready…"
+  if ! wait_for_http backend "$SERVER_HEALTH_URL"; then
+    show_log_tail backend "$SERVER_LOG"
+    exit 1
+  fi
+  log "Backend ready ✓"
+
+  log "Starting frontend on ${WEB_HOST}:${WEB_PORT}"
+  if [[ "$WEB_HTTPS" == "1" ]]; then
+    log "Frontend HTTPS enabled"
+    setsid env -u VSCODE_IPC_HOOK_CLI PATH="$RUNTIME_PATH" WEB_BACKEND_HOST="$SERVER_PUBLIC_HOST" WEB_BACKEND_PORT="$SERVER_PORT" SERVER_PORT="$SERVER_PORT" PORT="$SERVER_PORT" \
+      CHOKIDAR_USEPOLLING=1 \
+      VITE_DEV_HTTPS=1 VITE_DEV_HTTPS_CERT="$WEB_HTTPS_CERT" VITE_DEV_HTTPS_KEY="$WEB_HTTPS_KEY" \
+      VITE_TERMINAL_SCROLLBACK_LINES="$VITE_TERMINAL_SCROLLBACK_LINES" \
+      pnpm --dir "$WEB_APP_DIR" exec vite --host "$WEB_HOST" --port "$WEB_PORT" \
+      >"$WEB_LOG" 2>&1 < /dev/null &
+  else
+    setsid env -u VSCODE_IPC_HOOK_CLI PATH="$RUNTIME_PATH" WEB_BACKEND_HOST="$SERVER_PUBLIC_HOST" WEB_BACKEND_PORT="$SERVER_PORT" SERVER_PORT="$SERVER_PORT" PORT="$SERVER_PORT" \
+      CHOKIDAR_USEPOLLING=1 \
+      VITE_TERMINAL_SCROLLBACK_LINES="$VITE_TERMINAL_SCROLLBACK_LINES" pnpm --dir "$WEB_APP_DIR" exec vite --host "$WEB_HOST" --port "$WEB_PORT" \
+      >"$WEB_LOG" 2>&1 < /dev/null &
+  fi
+  echo $! >"$WEB_PID_FILE"
+
+  (
+    if ! wait_for_frontend_urls "$WEB_LOG"; then
+      exit 1
+    fi
+    FRONTEND_LOCAL_URL="$(extract_frontend_url Local "$WEB_LOG")"
+    FRONTEND_READY_URL="${FRONTEND_LOCAL_URL}/@vite/client"
+    if ! wait_for_http frontend "$FRONTEND_READY_URL"; then
+      exit 1
+    fi
+  ) &
+  FRONTEND_WAIT_PID=$!
+
+  if ! wait "$FRONTEND_WAIT_PID"; then
+    show_log_tail frontend "$WEB_LOG"
+    exit 1
+  fi
+
+  # Re-extract URLs after parallel wait (subshell can't export)
+  wait_for_frontend_urls "$WEB_LOG" 5
+
+  FRONTEND_PORT="$(extract_url_port "$FRONTEND_LOCAL_URL")"
+  if [[ -n "$FRONTEND_PORT" && "$FRONTEND_PORT" != "$WEB_PORT" ]]; then
+    log "Requested frontend port ${WEB_PORT} was busy; Vite selected ${FRONTEND_PORT}"
+  fi
+
+  printf '\nBackend  : %s\n' "$SERVER_URL"
+  printf 'Health   : %s\n' "$SERVER_HEALTH_URL"
+  printf 'Frontend : %s\n' "$FRONTEND_LOCAL_URL"
+  if [[ -n "$FRONTEND_NETWORK_URL" ]]; then
+    printf 'Network  : %s\n' "$FRONTEND_NETWORK_URL"
+  fi
+  printf 'Logs     : %s | %s\n' "$SERVER_LOG" "$WEB_LOG"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
 fi
-
-# Re-extract URLs after parallel wait (subshell can't export)
-wait_for_frontend_urls "$WEB_LOG" 5
-
-FRONTEND_PORT="$(extract_url_port "$FRONTEND_LOCAL_URL")"
-if [[ -n "$FRONTEND_PORT" && "$FRONTEND_PORT" != "$WEB_PORT" ]]; then
-  log "Requested frontend port ${WEB_PORT} was busy; Vite selected ${FRONTEND_PORT}"
-fi
-
-printf '\nBackend  : %s\n' "$SERVER_URL"
-printf 'Health   : %s\n' "$SERVER_HEALTH_URL"
-printf 'Frontend : %s\n' "$FRONTEND_LOCAL_URL"
-if [[ -n "$FRONTEND_NETWORK_URL" ]]; then
-  printf 'Network  : %s\n' "$FRONTEND_NETWORK_URL"
-fi
-printf 'Logs     : %s | %s\n' "$SERVER_LOG" "$WEB_LOG"

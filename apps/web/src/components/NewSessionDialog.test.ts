@@ -78,3 +78,24 @@ describe("NewSessionDialog session groups", () => {
     assert.match(markup, /value="group-docs">文档<\/option>/);
   });
 });
+
+describe("NewSessionDialog managed session default", () => {
+  it("selects tmux by default so new sessions survive application restarts", () => {
+    const markup = renderToStaticMarkup(
+      createElement(NewSessionDialog, {
+        open: true,
+        host: { type: "local" },
+        sessions: [] as AgentSessionRecord[],
+        sessionGroups: { groups: [], assignments: {}, collapsedGroupIds: [] },
+        onClose: () => {},
+        onLaunched: () => {},
+      }),
+    );
+
+    assert.match(
+      markup,
+      /<button(?=[^>]*data-testid="new-session-mode-tmux")(?=[^>]*aria-pressed="true")[^>]*>/,
+    );
+    assert.match(markup, /受管 tmux/);
+  });
+});

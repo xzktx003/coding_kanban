@@ -11,14 +11,28 @@ import {
   resolveTerminalHistoryRuntimeConfig,
   type TerminalHistoryRuntimeConfig,
 } from "./config/server-runtime-config.js";
-import { registerAgentSessionRoutes } from "./routes/agent-sessions.js";
+import {
+  reconnectRegisteredAgentSession,
+  registerAgentSessionRoutes,
+} from "./routes/agent-sessions.js";
+import {
+  registerAppUpdateRoutes,
+  type AppVersionServiceLike,
+  type ManagedSessionRestorerLike,
+} from "./routes/app-update.js";
 import { registerFilesystemRoutes } from "./routes/filesystem.js";
 import { registerSshHostsRoutes } from "./routes/ssh-hosts.js";
 import { registerVsCodeWebProxyRoutes } from "./routes/vscode-web-proxy.js";
 import { AgentSessionRegistry } from "./services/agent-session-registry.js";
+import { AppVersionService } from "./services/app-version-service.js";
 import { LocalFsService } from "./services/local-fs-service.js";
 import { LocalProcessRuntimeManager } from "./services/local-process-runtime-manager.js";
 import { LocalTmuxAdapter } from "./services/local-tmux-adapter.js";
+import { LocalTmuxInputRouter } from "./services/local-tmux-input-router.js";
+import {
+  createSingleFlightManagedSessionRestorer,
+  restoreManagedSessions,
+} from "./services/managed-session-restorer.js";
 import { PtyRuntimeManager } from "./services/pty-runtime-manager.js";
 import {
   RemoteLaunchPreflight,
@@ -26,6 +40,7 @@ import {
 } from "./services/remote-launch-preflight.js";
 import { SftpService } from "./services/sftp-service.js";
 import { SshRuntimeManager } from "./services/ssh-runtime-manager.js";
+import type { SessionStateStore } from "./services/session-state-store.js";
 import {
   isTerminalFocusPayload,
   isTerminalPtyControlPayload,
@@ -40,6 +55,39 @@ interface BuildServerOptions {
   terminalHistoryConfig?: TerminalHistoryRuntimeConfig;
   vsCodeWebManager?: VsCodeWebManager;
   remoteLaunchPreflight?: RemoteLaunchPreflightLike;
+  appVersionService?: AppVersionServiceLike;
+  managedSessionRestorer?: ManagedSessionRestorerLike;
+  sessionStateStore?: SessionStateStore;
+}
+
+interface LocalTmuxSocketInputStateDependencies {
+  localTmuxInputRouter: Pick<LocalTmuxInputRouter, "clear">;
+}
+
+export function createLocalTmuxSocketInputState(
+  agentSessionId: string,
+  dependencies: LocalTmuxSocketInputStateDependencies,
+): {
+  markInputSent(): void;
+  clearOnClose(): void;
+} {
+  let sentLocalTmuxInput = false;
+
+  return {
+    markInputSent() {
+      sentLocalTmuxInput = true;
+    },
+    clearOnClose() {
+      if (!sentLocalTmuxInput) {
+        return;
+      }
+
+      sentLocalTmuxInput = false;
+      void dependencies.localTmuxInputRouter
+        .clear(agentSessionId)
+        .catch(() => {});
+    },
+  };
 }
 
 export function buildServer(): {
@@ -62,6 +110,10 @@ export function buildServer(options: BuildServerOptions = {}): {
     undefined,
     terminalHistoryConfig.terminalRegistryOutputEntries,
   );
+  const restoredSnapshot = options.sessionStateStore?.load();
+  if (restoredSnapshot) {
+    registry.restore(restoredSnapshot);
+  }
   const processRuntimeManager = new LocalProcessRuntimeManager(registry);
   const tmuxAdapter = new LocalTmuxAdapter(registry, {
     captureLines: terminalHistoryConfig.terminalTmuxCaptureLines,
@@ -71,11 +123,47 @@ export function buildServer(options: BuildServerOptions = {}): {
     maxScrollbackBytes: terminalHistoryConfig.terminalScrollbackBytes,
     tmuxCaptureLines: terminalHistoryConfig.terminalTmuxCaptureLines,
   });
+  const localTmuxInputRouter = new LocalTmuxInputRouter({
+    registry,
+    tmuxAdapter,
+    ptyRuntimeManager,
+  });
   const localFsService = options.localFsService ?? new LocalFsService();
   const sftpService = options.sftpService ?? new SftpService();
   const vsCodeWebManager = options.vsCodeWebManager ?? new VsCodeWebManager();
   const remoteLaunchPreflight =
     options.remoteLaunchPreflight ?? new RemoteLaunchPreflight();
+  const appVersionService =
+    options.appVersionService ??
+    new AppVersionService({
+      sourceRoot: process.cwd(),
+    });
+  const managedSessionRestorer =
+    options.managedSessionRestorer ??
+    createManagedSessionRestorer({
+      registry,
+      tmuxAdapter,
+      localTmuxInputRouter,
+      ptyRuntimeManager,
+    });
+
+  const stopSessionStatePersistence = options.sessionStateStore
+    ? registry.subscribe((snapshot) => {
+        try {
+          options.sessionStateStore?.save(snapshot);
+        } catch (error) {
+          app.log.error(
+            { err: error },
+            "Failed to persist agent session state",
+          );
+        }
+      })
+    : null;
+  if (stopSessionStatePersistence) {
+    app.addHook("onClose", async () => {
+      stopSessionStatePersistence();
+    });
+  }
 
   app.register(cors, {
     origin: true,
@@ -88,10 +176,15 @@ export function buildServer(options: BuildServerOptions = {}): {
       registry,
       processRuntimeManager,
       tmuxAdapter,
+      localTmuxInputRouter,
       sshRuntimeManager,
       ptyRuntimeManager,
       remoteLaunchPreflight,
       vsCodeWebManager,
+    });
+    await registerAppUpdateRoutes(instance, {
+      appVersionService,
+      managedSessionRestorer,
     });
 
     await registerSshHostsRoutes(instance);
@@ -138,6 +231,9 @@ export function buildServer(options: BuildServerOptions = {}): {
       { websocket: true },
       (socket, request) => {
         const { id } = request.params;
+        const localTmuxSocketInputState = createLocalTmuxSocketInputState(id, {
+          localTmuxInputRouter,
+        });
 
         const buildTerminalControlFrame = (
           event: "replay" | "replay-complete",
@@ -152,8 +248,6 @@ export function buildServer(options: BuildServerOptions = {}): {
         let replaying = true;
         const bufferedLiveFrames: string[] = [];
         let unsubscribe = () => {};
-        let tmuxInputQueue = Promise.resolve();
-
         if (ptyRuntimeManager.has(id)) {
           unsubscribe = ptyRuntimeManager.subscribe(
             id,
@@ -210,43 +304,21 @@ export function buildServer(options: BuildServerOptions = {}): {
               }
 
               if (isTerminalPtyControlPayload(sanitizedPayload)) {
-                if (ptyRuntimeManager.has(id)) {
-                  try {
-                    ptyRuntimeManager.write(id, sanitizedPayload);
-                  } catch {
-                    // Mouse reports must enter tmux through the attached
-                    // client PTY. Falling back to send-keys would inject raw
-                    // escape bytes into the pane.
-                  }
-                }
+                localTmuxSocketInputState.markInputSent();
+                void localTmuxInputRouter
+                  .write(
+                    session,
+                    { input: sanitizedPayload },
+                    { forcePty: true },
+                  )
+                  .catch(() => {});
                 return;
               }
 
-              if (ptyRuntimeManager.has(id)) {
-                try {
-                  ptyRuntimeManager.write(id, sanitizedPayload);
-                } catch {
-                  // PTY may have exited; ignore.
-                }
-                return;
-              }
-
-              tmuxInputQueue = tmuxInputQueue.then(async () => {
-                try {
-                  await tmuxAdapter.writeInput(session, {
-                    input: sanitizedPayload,
-                  });
-                } catch {
-                  // Fallback: if writeInput fails, try direct PTY write.
-                  try {
-                    ptyRuntimeManager.write(id, sanitizedPayload);
-                  } catch {
-                    // The browser can still flush a final input frame after
-                    // the PTY has exited or the session has been deleted.
-                  }
-                }
-              });
-              void tmuxInputQueue.catch(() => {});
+              localTmuxSocketInputState.markInputSent();
+              void localTmuxInputRouter
+                .write(session, { input: sanitizedPayload })
+                .catch(() => {});
               return;
             }
 
@@ -300,6 +372,7 @@ export function buildServer(options: BuildServerOptions = {}): {
 
         socket.on("close", () => {
           unsubscribe();
+          localTmuxSocketInputState.clearOnClose();
         });
       },
     );
@@ -310,4 +383,82 @@ export function buildServer(options: BuildServerOptions = {}): {
   });
 
   return { app, registry };
+}
+
+function createManagedSessionRestorer({
+  registry,
+  tmuxAdapter,
+  localTmuxInputRouter,
+  ptyRuntimeManager,
+}: {
+  registry: AgentSessionRegistry;
+  tmuxAdapter: LocalTmuxAdapter;
+  localTmuxInputRouter: LocalTmuxInputRouter;
+  ptyRuntimeManager: PtyRuntimeManager;
+}): ManagedSessionRestorerLike {
+  return createSingleFlightManagedSessionRestorer(async () => {
+    let localDiscovery: ReturnType<LocalTmuxAdapter["discover"]> | undefined;
+    const remoteDiscoveries = new Map<
+      string,
+      ReturnType<LocalTmuxAdapter["discoverRemote"]>
+    >();
+
+    return restoreManagedSessions({
+      sessions: registry.list().items,
+      isConnected: (agentSessionId) => ptyRuntimeManager.has(agentSessionId),
+      resolveTmuxTarget: async (session) => {
+        const tmuxSession = session.transportRef?.tmuxSession;
+        if (!tmuxSession) {
+          return null;
+        }
+
+        const discovery = session.sshTarget
+          ? (() => {
+              const key = JSON.stringify(session.sshTarget);
+              const existing = remoteDiscoveries.get(key);
+              if (existing) {
+                return existing;
+              }
+              const created = tmuxAdapter.discoverRemote(session.sshTarget);
+              remoteDiscoveries.set(key, created);
+              return created;
+            })()
+          : (localDiscovery ??= tmuxAdapter.discover());
+        const result = await discovery;
+        const matched = result.items.find(
+          (item) => item.transportRef?.tmuxSession === tmuxSession,
+        );
+        if (!matched) {
+          return null;
+        }
+
+        return {
+          tmuxSession,
+          tmuxPane: matched.transportRef?.tmuxPane,
+        };
+      },
+      clearInputState: (agentSessionId) =>
+        localTmuxInputRouter.clear(agentSessionId),
+      reconnect: async (session, target) => {
+        registry.updateSession(session.id, {
+          transportRef: {
+            tmuxSession: target.tmuxSession,
+            tmuxPane: target.tmuxPane,
+          },
+        });
+        await reconnectRegisteredAgentSession(
+          session.id,
+          {
+            registry,
+            tmuxAdapter,
+            localTmuxInputRouter,
+            ptyRuntimeManager,
+          },
+          {
+            inputStateAlreadyCleared: true,
+          },
+        );
+      },
+    });
+  });
 }

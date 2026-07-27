@@ -1,3 +1,5 @@
+import { resolve } from "node:path";
+
 export type ServerRuntimeConfig = {
   host: string;
   port: number;
@@ -12,6 +14,11 @@ export type TerminalHistoryRuntimeConfig = Pick<
   | "terminalTmuxCaptureLines"
   | "terminalRegistryOutputEntries"
 >;
+
+export type ServerStorageRuntimeConfig = {
+  appSourceRoot: string;
+  sessionStatePath: string;
+};
 
 export const DEFAULT_TERMINAL_SCROLLBACK_BYTES = 4 * 1024 * 1024;
 export const DEFAULT_TERMINAL_TMUX_CAPTURE_LINES = 20_000;
@@ -108,5 +115,21 @@ export function resolveServerRuntimeConfig(
     host: parseHost(env.SERVER_BIND_HOST ?? env.HOST),
     port: parsePort(resolvePortValue(env)),
     ...resolveTerminalHistoryRuntimeConfig(env),
+  };
+}
+
+export function resolveServerStorageRuntimeConfig(
+  env: NodeJS.ProcessEnv,
+  repositoryRoot: string,
+): ServerStorageRuntimeConfig {
+  const appSourceRoot = env.APP_SOURCE_ROOT?.trim();
+  const sessionStatePath = env.SESSION_STATE_PATH?.trim();
+
+  return {
+    appSourceRoot: resolve(repositoryRoot, appSourceRoot || "."),
+    sessionStatePath: resolve(
+      repositoryRoot,
+      sessionStatePath || ".dev-runtime/agent-sessions.json",
+    ),
   };
 }

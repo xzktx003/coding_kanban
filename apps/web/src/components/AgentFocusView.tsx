@@ -42,6 +42,10 @@ import {
   type TerminalMonitorLayoutMode,
   type TerminalMonitorSlot,
 } from "../lib/terminal-layout";
+import {
+  loadTerminalWorkspaceState,
+  saveTerminalWorkspaceState,
+} from "../lib/terminal-workspace-state";
 
 interface AgentFocusViewProps {
   focusedSession: AgentSessionRecord;
@@ -73,7 +77,6 @@ const stateLabels: Record<string, string> = {
   exited: "已退出",
 };
 
-const TERMINAL_MONITOR_LAYOUT_STORAGE_KEY = "terminal-monitor-layout-mode";
 const DEFAULT_TERMINAL_MONITOR_SLOT_ID = "terminal-monitor-slot-1";
 const FOCUS_HEADER_COLLAPSED_STORAGE_KEY = "focus-header-collapsed";
 const TERMINAL_MONITOR_DRAG_MIME =
@@ -107,23 +110,6 @@ function shouldUseTerminalMonitorDragImage(): boolean {
   }
 
   return !navigator.webdriver;
-}
-
-function loadTerminalMonitorLayoutMode(): TerminalMonitorLayoutMode {
-  try {
-    const raw = localStorage.getItem(TERMINAL_MONITOR_LAYOUT_STORAGE_KEY);
-    return isTerminalMonitorLayoutMode(raw) ? raw : "single";
-  } catch {
-    return "single";
-  }
-}
-
-function saveTerminalMonitorLayoutMode(mode: TerminalMonitorLayoutMode): void {
-  try {
-    localStorage.setItem(TERMINAL_MONITOR_LAYOUT_STORAGE_KEY, mode);
-  } catch {
-    // ignore storage failures
-  }
 }
 
 function loadFocusHeaderCollapsed(): boolean {
@@ -204,19 +190,27 @@ export function AgentFocusView({
       ...visibleSessions.filter((session) => session.id !== focusedSession.id),
     ];
   }, [focusedSession, visibleSessions]);
+  const initialTerminalWorkspaceState = useMemo(loadTerminalWorkspaceState, []);
   const [terminalLayoutMode, setTerminalLayoutMode] =
-    useState<TerminalMonitorLayoutMode>(loadTerminalMonitorLayoutMode);
+    useState<TerminalMonitorLayoutMode>(initialTerminalWorkspaceState.mode);
   const [activeSlotId, setActiveSlotId] = useState(
-    DEFAULT_TERMINAL_MONITOR_SLOT_ID,
+    initialTerminalWorkspaceState.activeSlotId,
   );
   const [terminalSlots, setTerminalSlots] = useState<TerminalMonitorSlot[]>(
-    () =>
-      normalizeTerminalMonitorSlots({
+    () => {
+      const closedSlotIds = new Set(
+        initialTerminalWorkspaceState.closedSlotIds,
+      );
+      return normalizeTerminalMonitorSlots({
         mode: terminalLayoutMode,
         sessions: displayableSessions,
         preferredSessionId: focusedSession.id,
-        preferredSlotId: DEFAULT_TERMINAL_MONITOR_SLOT_ID,
-      }),
+        preferredSlotId: initialTerminalWorkspaceState.activeSlotId,
+        previousSlots: initialTerminalWorkspaceState.slots,
+      }).map((slot) =>
+        closedSlotIds.has(slot.id) ? { ...slot, sessionId: null } : slot,
+      );
+    },
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
@@ -226,7 +220,7 @@ export function AgentFocusView({
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [dragOverSlotId, setDragOverSlotId] = useState<string | null>(null);
   const [closedSlotIds, setClosedSlotIds] = useState<Set<string>>(
-    () => new Set(),
+    () => new Set(initialTerminalWorkspaceState.closedSlotIds),
   );
   const [paneContextMenu, setPaneContextMenu] =
     useState<TerminalPaneContextMenuState | null>(null);
@@ -321,8 +315,13 @@ export function AgentFocusView({
     getTerminalPaneContextPrimaryActionLabel(canRestoreMultiPaneLayout);
 
   useEffect(() => {
-    saveTerminalMonitorLayoutMode(terminalLayoutMode);
-  }, [terminalLayoutMode]);
+    saveTerminalWorkspaceState({
+      mode: terminalLayoutMode,
+      slots: terminalSlots,
+      activeSlotId: safeActiveSlotId,
+      closedSlotIds: Array.from(closedSlotIds),
+    });
+  }, [closedSlotIds, safeActiveSlotId, terminalLayoutMode, terminalSlots]);
 
   useEffect(() => {
     saveFocusHeaderHeaderCollapsed(headerCollapsed);

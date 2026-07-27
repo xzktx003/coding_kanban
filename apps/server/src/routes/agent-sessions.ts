@@ -21,6 +21,7 @@ import { scanAgentDirectory } from "../services/agent-scanner.js";
 import { AgentSessionRegistry } from "../services/agent-session-registry.js";
 import { LocalProcessRuntimeManager } from "../services/local-process-runtime-manager.js";
 import { LocalTmuxAdapter } from "../services/local-tmux-adapter.js";
+import { LocalTmuxInputRouter } from "../services/local-tmux-input-router.js";
 import { PtyRuntimeManager } from "../services/pty-runtime-manager.js";
 import {
   RemoteLaunchPreflightError,
@@ -115,10 +116,105 @@ interface AgentSessionRoutesOptions {
   registry: AgentSessionRegistry;
   processRuntimeManager: LocalProcessRuntimeManager;
   tmuxAdapter: LocalTmuxAdapter;
+  localTmuxInputRouter: LocalTmuxInputRouter;
   sshRuntimeManager: SshRuntimeManager;
   ptyRuntimeManager: PtyRuntimeManager;
   remoteLaunchPreflight: RemoteLaunchPreflightLike;
   vsCodeWebManager: VsCodeWebManager;
+}
+
+export interface ReconnectAgentSessionDependencies {
+  registry: Pick<AgentSessionRegistry, "get">;
+  tmuxAdapter: Pick<LocalTmuxAdapter, "getCaptureLines">;
+  localTmuxInputRouter: Pick<LocalTmuxInputRouter, "clear">;
+  ptyRuntimeManager: Pick<
+    PtyRuntimeManager,
+    "reconnectLocal" | "reconnectRemote"
+  >;
+}
+
+interface ReconnectAgentSessionOptions {
+  inputStateAlreadyCleared?: boolean;
+}
+
+function clearLocalTmuxInputState(
+  agentSessionId: string,
+  localTmuxInputRouter: Pick<LocalTmuxInputRouter, "clear">,
+): Promise<void> {
+  return localTmuxInputRouter.clear(agentSessionId);
+}
+
+export async function reconnectRegisteredAgentSession(
+  agentSessionId: string,
+  dependencies: ReconnectAgentSessionDependencies,
+  options: ReconnectAgentSessionOptions = {},
+): Promise<AgentSessionRecord> {
+  const { registry, tmuxAdapter, localTmuxInputRouter, ptyRuntimeManager } =
+    dependencies;
+  const session = registry.get(agentSessionId);
+
+  if (!options.inputStateAlreadyCleared) {
+    await clearLocalTmuxInputState(agentSessionId, localTmuxInputRouter);
+  }
+
+  if (session.sshTarget && session.transportRef?.tmuxSession) {
+    return ptyRuntimeManager.reconnectRemote(agentSessionId, {
+      workspaceId: session.workspaceId,
+      displayName: session.displayName,
+      agentKind: session.agentKind,
+      sshTarget: session.sshTarget,
+      remoteCommand: buildTmuxAttachCommand(
+        session.transportRef.tmuxSession,
+        session.transportRef.tmuxPane,
+        tmuxAdapter.getCaptureLines(),
+      ),
+      workingDirectory: session.workingDirectory,
+      tmuxSessionName: session.transportRef.tmuxSession,
+      tmuxPaneId: session.transportRef.tmuxPane,
+    });
+  }
+
+  if (session.sshTarget && session.remoteCommand) {
+    return ptyRuntimeManager.reconnectRemote(agentSessionId, {
+      workspaceId: session.workspaceId,
+      displayName: session.displayName,
+      agentKind: session.agentKind,
+      sshTarget: session.sshTarget,
+      remoteCommand: session.remoteCommand,
+      workingDirectory: session.workingDirectory,
+      tmuxSessionName: session.transportRef?.tmuxSession,
+      tmuxPaneId: session.transportRef?.tmuxPane,
+    });
+  }
+
+  const command = session.transportRef?.tmuxSession
+    ? buildTmuxAttachCommand(
+        session.transportRef.tmuxSession,
+        session.transportRef.tmuxPane,
+        tmuxAdapter.getCaptureLines(),
+      )
+    : session.agentSessionId
+      ? buildDirectLaunchCommand(
+          session.agentKind,
+          session.workingDirectory ?? "~",
+          session.displayName,
+          session.agentSessionId,
+        )
+      : buildDirectLaunchCommand(
+          session.agentKind,
+          session.workingDirectory ?? "~",
+          session.displayName,
+        );
+
+  return ptyRuntimeManager.reconnectLocal(agentSessionId, {
+    workspaceId: session.workspaceId,
+    displayName: session.displayName,
+    agentKind: session.agentKind,
+    command,
+    workingDirectory: session.workingDirectory,
+    tmuxSessionName: session.transportRef?.tmuxSession,
+    tmuxPaneId: session.transportRef?.tmuxPane,
+  });
 }
 
 export async function registerAgentSessionRoutes(
@@ -129,6 +225,7 @@ export async function registerAgentSessionRoutes(
     registry,
     processRuntimeManager,
     tmuxAdapter,
+    localTmuxInputRouter,
     sshRuntimeManager,
     ptyRuntimeManager,
     remoteLaunchPreflight,
@@ -376,6 +473,7 @@ export async function registerAgentSessionRoutes(
         reply.code(400);
         return { error: "Session has no tmux session reference" };
       }
+      await clearLocalTmuxInputState(id, localTmuxInputRouter);
       ptyRuntimeManager.kill(id);
       await tmuxAdapter.killSession(tmuxSessionName, session.sshTarget);
       registry.remove(id);
@@ -435,25 +533,12 @@ export async function registerAgentSessionRoutes(
         }
 
         if (isTerminalPtyControlPayload(sanitizedInput)) {
-          if (ptyRuntimeManager.has(request.params.id)) {
-            ptyRuntimeManager.write(request.params.id, sanitizedInput);
-            return registry.get(request.params.id);
-          }
-          return agentSession;
+          return localTmuxInputRouter.write(agentSession, sanitizedBody, {
+            forcePty: true,
+          });
         }
 
-        if (ptyRuntimeManager.has(request.params.id)) {
-          ptyRuntimeManager.write(request.params.id, sanitizedInput);
-          return registry.get(request.params.id);
-        }
-
-        try {
-          return await tmuxAdapter.writeInput(agentSession, sanitizedBody);
-        } catch {
-          throw new Error(
-            `No tmux runtime found for session: ${request.params.id}`,
-          );
-        }
+        return localTmuxInputRouter.write(agentSession, sanitizedBody);
       }
 
       if (ptyRuntimeManager.has(request.params.id)) {
@@ -516,6 +601,7 @@ export async function registerAgentSessionRoutes(
         await tmuxAdapter.release(session);
       }
 
+      await clearLocalTmuxInputState(id, localTmuxInputRouter);
       ptyRuntimeManager.kill(id);
       registry.remove(id);
       reply.code(204);
@@ -524,64 +610,12 @@ export async function registerAgentSessionRoutes(
 
   fastify.post<{ Params: { id: string } }>(
     "/api/agent-sessions/:id/reconnect",
-    async (request) => {
-      const session = registry.get(request.params.id);
-      if (session.sshTarget && session.transportRef?.tmuxSession) {
-        return ptyRuntimeManager.reconnectRemote(request.params.id, {
-          workspaceId: session.workspaceId,
-          displayName: session.displayName,
-          agentKind: session.agentKind,
-          sshTarget: session.sshTarget,
-          remoteCommand: buildTmuxAttachCommand(
-            session.transportRef.tmuxSession,
-            session.transportRef.tmuxPane,
-            tmuxAdapter.getCaptureLines(),
-          ),
-          workingDirectory: session.workingDirectory,
-          tmuxSessionName: session.transportRef.tmuxSession,
-          tmuxPaneId: session.transportRef.tmuxPane,
-        });
-      }
-
-      if (session.sshTarget && session.remoteCommand) {
-        return ptyRuntimeManager.reconnectRemote(request.params.id, {
-          workspaceId: session.workspaceId,
-          displayName: session.displayName,
-          agentKind: session.agentKind,
-          sshTarget: session.sshTarget,
-          remoteCommand: session.remoteCommand,
-          workingDirectory: session.workingDirectory,
-          tmuxSessionName: session.transportRef?.tmuxSession,
-          tmuxPaneId: session.transportRef?.tmuxPane,
-        });
-      }
-      const cmd = session.transportRef?.tmuxSession
-        ? buildTmuxAttachCommand(
-            session.transportRef.tmuxSession,
-            session.transportRef.tmuxPane,
-            tmuxAdapter.getCaptureLines(),
-          )
-        : session.agentSessionId
-          ? buildDirectLaunchCommand(
-              session.agentKind,
-              session.workingDirectory ?? "~",
-              session.displayName,
-              session.agentSessionId,
-            )
-          : buildDirectLaunchCommand(
-              session.agentKind,
-              session.workingDirectory ?? "~",
-              session.displayName,
-            );
-      return ptyRuntimeManager.reconnectLocal(request.params.id, {
-        workspaceId: session.workspaceId,
-        displayName: session.displayName,
-        agentKind: session.agentKind,
-        command: cmd,
-        workingDirectory: session.workingDirectory,
-        tmuxSessionName: session.transportRef?.tmuxSession,
-        tmuxPaneId: session.transportRef?.tmuxPane,
-      });
-    },
+    async (request) =>
+      reconnectRegisteredAgentSession(request.params.id, {
+        registry,
+        tmuxAdapter,
+        localTmuxInputRouter,
+        ptyRuntimeManager,
+      }),
   );
 }

@@ -7,6 +7,7 @@ import test from "node:test";
 import { AgentSessionRegistry } from "./agent-session-registry.js";
 import {
   appendPtyScrollback,
+  buildLocalSpawnPlan,
   buildRemoteTmuxCaptureCommand,
   PtyRuntimeManager,
   sanitizeReplayForTerminal,
@@ -194,6 +195,35 @@ test("stripAlternateScreenSwitches keeps tmux attach output in the normal scroll
     stripAlternateScreenSwitches(output),
     "beforefullscreencursorafter",
   );
+});
+
+test("managed tmux commands bypass interactive user shell startup files", () => {
+  const plan = buildLocalSpawnPlan("/bin/zsh", {
+    workspaceId: "default",
+    displayName: "isolated tmux",
+    agentKind: "shell",
+    command: "tmux attach -t 'isolated-tmux'",
+    workingDirectory: process.cwd(),
+    tmuxSessionName: "isolated-tmux",
+  });
+
+  assert.equal(plan.file, "/bin/sh");
+  assert.deepEqual(plan.args, ["-c", "exec tmux attach -t 'isolated-tmux'"]);
+  assert.equal(plan.sendInitialCommand, false);
+});
+
+test("explicit direct commands bypass interactive user shell startup files", () => {
+  const plan = buildLocalSpawnPlan("/bin/zsh", {
+    workspaceId: "default",
+    displayName: "direct command",
+    agentKind: "shell",
+    command: "printf '__DIRECT_COMMAND__\\n'; exit",
+    workingDirectory: process.cwd(),
+  });
+
+  assert.equal(plan.file, "/bin/sh");
+  assert.deepEqual(plan.args, ["-c", "printf '__DIRECT_COMMAND__\\n'; exit"]);
+  assert.equal(plan.sendInitialCommand, false);
 });
 
 test("launch prefers the resolved copilot binary on PATH for shell sessions", async () => {

@@ -6,9 +6,11 @@ import {
   buildTmuxSendKeyPlan,
   buildTmuxSendKeySteps,
   isNoTmuxServerError,
+  LocalTmuxAdapter,
   parsePaneInfo,
   summarizeTmuxSessions,
 } from "./local-tmux-adapter.js";
+import { AgentSessionRegistry } from "./agent-session-registry.js";
 
 test("parsePaneInfo reads pane metadata including attach state", () => {
   const panes = parsePaneInfo(
@@ -103,10 +105,10 @@ test("buildTmuxSendKeySteps maps mobile control keys without appending Enter", (
     { kind: "keys", keys: ["Enter"] },
   ]);
   assert.deepEqual(buildTmuxSendKeySteps("\x1b[13;2u"), [
-    { kind: "keys", keys: ["S-Enter"] },
+    { kind: "literal", value: "\x1b[13;2u" },
   ]);
   assert.deepEqual(buildTmuxSendKeySteps("\x1b[13;5u"), [
-    { kind: "keys", keys: ["C-Enter"] },
+    { kind: "literal", value: "\x1b[13;5u" },
   ]);
   assert.deepEqual(buildTmuxSendKeySteps("\x0f"), [
     { kind: "keys", keys: ["C-o"] },
@@ -218,5 +220,42 @@ test("buildTmuxSendKeyPlan keeps split bracketed paste chunks literal", () => {
   assert.deepEqual(finalChunk.steps, [
     { kind: "literal", value: "line 3\x1b[201~" },
     { kind: "keys", keys: ["Enter"] },
+  ]);
+});
+
+test("LocalTmuxAdapter clears abandoned bracketed paste state before later input", async () => {
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "shell",
+    displayName: "tmux session",
+    connectionState: "online",
+    interactionState: "running",
+    controlMode: "control",
+    transportRef: {
+      tmuxSession: "session-1",
+      tmuxPane: "%1",
+    },
+  });
+  const calls: string[][] = [];
+  const adapter = new LocalTmuxAdapter(registry);
+  (
+    adapter as unknown as {
+      runTmux(args: string[]): Promise<{ stdout: string; stderr: string }>;
+    }
+  ).runTmux = async (args) => {
+    calls.push(args);
+    return { stdout: "", stderr: "" };
+  };
+
+  await adapter.writeInput(session, { input: "\x1b[200~partial\r" });
+  adapter.clearInputState(session.id);
+  await adapter.writeInput(registry.get(session.id), { input: "next\r" });
+
+  assert.deepEqual(calls.slice(-2), [
+    ["send-keys", "-t", "%1", "-l", "next"],
+    ["send-keys", "-t", "%1", "Enter"],
   ]);
 });

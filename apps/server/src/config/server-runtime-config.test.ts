@@ -6,6 +6,7 @@ import {
   DEFAULT_TERMINAL_SCROLLBACK_BYTES,
   DEFAULT_TERMINAL_TMUX_CAPTURE_LINES,
   resolveServerRuntimeConfig,
+  resolveServerStorageRuntimeConfig,
   resolveTerminalHistoryRuntimeConfig,
 } from "./server-runtime-config.js";
 
@@ -118,4 +119,25 @@ test("SERVER_BIND_HOST takes precedence over HOST", () => {
     HOST: "x86_64-conda-linux-gnu",
   });
   assert.equal(config.host, "0.0.0.0");
+});
+
+test("resolves source and session-state paths from the repository root", () => {
+  assert.deepEqual(resolveServerStorageRuntimeConfig({}, "/repo"), {
+    appSourceRoot: "/repo",
+    sessionStatePath: "/repo/.dev-runtime/agent-sessions.json",
+  });
+
+  assert.deepEqual(
+    resolveServerStorageRuntimeConfig(
+      {
+        APP_SOURCE_ROOT: "/tmp/source",
+        SESSION_STATE_PATH: "runtime/test-sessions.json",
+      },
+      "/repo",
+    ),
+    {
+      appSourceRoot: "/tmp/source",
+      sessionStatePath: "/repo/runtime/test-sessions.json",
+    },
+  );
 });

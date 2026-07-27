@@ -4,13 +4,28 @@ import { fileURLToPath } from "node:url";
 import { config as loadDotenv } from "dotenv";
 
 import { buildServer } from "./app.js";
-import { resolveServerRuntimeConfig } from "./config/server-runtime-config.js";
+import {
+  resolveServerRuntimeConfig,
+  resolveServerStorageRuntimeConfig,
+} from "./config/server-runtime-config.js";
+import { AppVersionService } from "./services/app-version-service.js";
+import { FileSessionStateStore } from "./services/session-state-store.js";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
-loadDotenv({ path: resolve(currentDirectory, "../../../.env") });
+const repositoryRoot = resolve(currentDirectory, "../../..");
+loadDotenv({ path: resolve(repositoryRoot, ".env") });
 
-const { app } = buildServer();
 const { host, port } = resolveServerRuntimeConfig(process.env);
+const { appSourceRoot, sessionStatePath } = resolveServerStorageRuntimeConfig(
+  process.env,
+  repositoryRoot,
+);
+const { app } = buildServer({
+  appVersionService: new AppVersionService({
+    sourceRoot: appSourceRoot,
+  }),
+  sessionStateStore: new FileSessionStateStore(sessionStatePath),
+});
 
 app.listen({ port, host }).catch((error: unknown) => {
   app.log.error(error);

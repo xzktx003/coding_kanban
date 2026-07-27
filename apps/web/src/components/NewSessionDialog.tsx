@@ -80,7 +80,7 @@ export function NewSessionDialog({
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState("copilot");
   const [newDir, setNewDir] = useState("");
-  const [launchMode, setLaunchMode] = useState<LaunchMode>("direct");
+  const [launchMode, setLaunchMode] = useState<LaunchMode>("tmux");
   const [selectedGroupId, setSelectedGroupId] = useState(
     UNGROUPED_SESSION_GROUP_ID,
   );
@@ -112,7 +112,7 @@ export function NewSessionDialog({
       setNewName("");
       setNewKind("copilot");
       setNewDir("");
-      setLaunchMode("direct");
+      setLaunchMode("tmux");
       setSelectedGroupId(UNGROUPED_SESSION_GROUP_ID);
       setSubmitting(false);
       setStatusMessage(null);
@@ -131,7 +131,7 @@ export function NewSessionDialog({
     setNewName("");
     setNewKind("copilot");
     setNewDir(host?.type === "ssh" ? host.preset.defaultPath || "~/" : "");
-    setLaunchMode("direct");
+    setLaunchMode("tmux");
     setSelectedGroupId(UNGROUPED_SESSION_GROUP_ID);
     setSubmitting(false);
     setStatusMessage(null);
@@ -553,7 +553,7 @@ export function NewSessionDialog({
                 onClick={() => setLaunchMode("direct")}
                 type="button"
               >
-                直接创建
+                直接进程
               </button>
               <button
                 aria-pressed={launchMode === "tmux"}
@@ -562,7 +562,7 @@ export function NewSessionDialog({
                 onClick={() => setLaunchMode("tmux")}
                 type="button"
               >
-                从 tmux 创建
+                受管 tmux
               </button>
             </div>
           </div>
@@ -751,7 +751,12 @@ export function NewSessionDialog({
             className="new-session-message"
             data-testid="new-session-tmux-note"
           >
-            tmux session 名将使用当前显示名称；未填写时会自动生成唯一名称
+            推荐模式：更新或重启看板后，可重新连接仍在运行的 tmux 会话
+          </p>
+        )}
+        {launchMode === "direct" && (
+          <p className="new-session-message">
+            direct 进程会随后端退出；更新后只能显式重新启动，无法保留原 PTY
           </p>
         )}
 

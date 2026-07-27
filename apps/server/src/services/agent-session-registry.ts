@@ -108,6 +108,49 @@ export class AgentSessionRegistry {
     };
   }
 
+  restore(snapshot: ListAgentSessionsResponse): void {
+    this.sessions.clear();
+    this.outputEntries.clear();
+    this.screenWindows.clear();
+    this.sessionOrder.clear();
+    this.nextSessionOrder = 0;
+
+    for (const persisted of snapshot.items) {
+      const tmuxSession = persisted.transportRef?.tmuxSession;
+      const restored: AgentSessionRecord = {
+        ...persisted,
+        connectionState: "offline",
+        interactionState: tmuxSession ? "detached" : "exited",
+        stateConfidence: "high",
+        outputPreview: tmuxSession
+          ? "服务已更新，等待恢复 tmux 会话"
+          : "direct 会话无法保留原 PTY，需要手动恢复",
+        transportRef: persisted.transportRef
+          ? {
+              tmuxSession: persisted.transportRef.tmuxSession,
+              tmuxPane: persisted.transportRef.tmuxPane,
+              sshHost: persisted.transportRef.sshHost,
+              sshPort: persisted.transportRef.sshPort,
+              sshUsername: persisted.transportRef.sshUsername,
+            }
+          : undefined,
+      };
+
+      this.sessions.set(restored.id, restored);
+      this.outputEntries.set(restored.id, []);
+      this.screenWindows.set(restored.id, "");
+      this.sessionOrder.set(restored.id, this.nextSessionOrder);
+      this.nextSessionOrder += 1;
+    }
+
+    this.activeAgentSessionId =
+      snapshot.activeAgentSessionId &&
+      this.sessions.has(snapshot.activeAgentSessionId)
+        ? snapshot.activeAgentSessionId
+        : null;
+    this.emitSnapshot();
+  }
+
   subscribe(listener: SnapshotListener): () => void {
     this.listeners.add(listener);
     this.startIdleDetection();

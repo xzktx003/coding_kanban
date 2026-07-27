@@ -1,7 +1,7 @@
 import * as pty from "node-pty";
 import { execFileSync } from "node:child_process";
 import { devNull } from "node:os";
-import { basename, delimiter, dirname, normalize } from "node:path";
+import { delimiter, dirname, normalize } from "node:path";
 
 import type {
   AgentSessionRecord,
@@ -155,24 +155,14 @@ function parseDirectCopilotArgs(command: string): string[] | null {
   return match[1] ? [match[1]] : [];
 }
 
-function buildShellCommandArgs(shell: string, command: string): string[] {
-  const shellName = basename(shell).toLowerCase();
-
-  if (shellName === "sh" || shellName === "dash") {
-    return ["-i", "-c", command];
-  }
-
-  return ["-l", "-i", "-c", command];
-}
-
-function buildLocalSpawnPlan(
+export function buildLocalSpawnPlan(
   shell: string,
   input: LaunchLocalAgentInput,
 ): LocalPtySpawnPlan {
   if (input.tmuxSessionName && input.command) {
     return {
-      file: shell,
-      args: buildShellCommandArgs(shell, input.command),
+      file: "/bin/sh",
+      args: ["-c", `exec ${input.command}`],
       env: buildPtyEnv(input.agentKind),
       sendInitialCommand: false,
     };
@@ -193,6 +183,15 @@ function buildLocalSpawnPlan(
         sendInitialCommand: false,
       };
     }
+  }
+
+  if (input.command) {
+    return {
+      file: "/bin/sh",
+      args: ["-c", input.command],
+      env: buildPtyEnv(input.agentKind),
+      sendInitialCommand: false,
+    };
   }
 
   return {

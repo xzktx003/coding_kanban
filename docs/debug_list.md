@@ -241,3 +241,18 @@
 - **修复**: 右侧列表改为继续渲染全部未隐藏会话并保留原分组；监控中的卡片显示对应序号，活动窗格与卡片同步黄色高亮。点击已监控卡片只激活原窗格，点击未监控卡片继续沿用替换当前窗格的行为。
 - **测试**: `pnpm --filter web test`（242/242）；`tests/e2e/terminal-preview.spec.ts`（12/12），覆盖编号、黄色关联、不搬移激活和未监控会话替换。
 - **文件**: `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/components/FocusSidebarSessionCard.tsx`, `apps/web/src/components/AgentFocusView.test.ts`, `apps/web/src/app.css`, `tests/e2e/terminal-preview.spec.ts`
+
+### 热更新与历史会话恢复
+
+- 本地 tmux 的普通输入、移动端快捷键和分帧 bracketed paste 曾全部走 attached client PTY，导致 `Ctrl+A` / `Ctrl+B` 前缀与普通 TUI 输入互相干扰。修复为 `LocalTmuxInputRouter` 统一 REST/WebSocket 队列：普通输入走目标 pane，鼠标和 tmux 前缀及其下一条命令走 attached PTY，CSI-u Enter 保持原始字节。
+- 单个 tmux window 左右分屏后，鼠标可以把活动 pane 切到右侧，但键盘和输入法内容仍进入左侧。根因是鼠标报告通过 attached client 改变了 tmux 活动 pane，而后续普通输入仍按会话接入时保存的固定 `tmuxPane` 执行 `send-keys`。修复为鼠标或前缀命令经过 client 后切换到 session 级动态目标，让普通输入跟随 tmux 当前活动 pane；连接清理后恢复固定 pane 绑定。
+- WebSocket 关闭或重连后可能遗留半个 `Ctrl+A` / `Ctrl+B` 前缀或未结束的 bracketed paste，后续输入被 tmux 当成前缀命令或粘贴正文。根因是清理不完整且可能早于排队输入执行；修复为把清理作为同一 session 队列中的屏障，按序发送 best-effort Escape、清除 paste 状态，并在重连、恢复、删除和 kill 前等待完成，只读预览关闭不触发清理。
+- 页面 reload 后，持久化的聚焦会话会在首个真实 session snapshot 到达前被当成“不存在”并清空。修复为清理 `focusedId` 前同时等待 `isLoading=false` 和非空 snapshot，稳定 ID 恢复后再校验。
+- 会话状态文件指纹曾包含 `updatedAt`、连接态和交互态，终端输出或 idle/running 切换会造成持续落盘。修复为只对稳定元数据计算指纹，并把持久化运行态规范化为离线恢复态。
+- 多个浏览器标签可同时触发 managed restore，重复 reconnect 同一稳定 session ID 并互相 kill PTY。修复为后端 restore single-flight，同一轮并发请求共享结果；Git 版本指纹读取也使用同类合并与缓存。
+- 首次升级迁移曾把 `/api/agent-sessions` 原始快照直接写盘，短时间保留 `outputPreview`、PTY PID 和 runtime id。修复为迁移脚本写入前投影稳定允许字段，并用原子替换保存。
+- 状态文件不可写时，registry 的首次订阅保存会直接阻止后端构建；重复 session ID 也会在 Map 恢复时静默覆盖卡片。修复为持久化错误只记录日志，并在加载时拒绝重复 ID。
+- 大型 tracked binary diff 会超过 `execFile` 缓冲区并把版本检测永久降级为固定 revision，未跟踪大文件则先整体读入内存再截断。修复为流式哈希 tracked diff、循环有界读取未跟踪文件，并对超时 Git 子进程执行确定性终止。
+- `restart-dev.sh` 即使活跃的本仓库后端会话目录捕获失败也继续停止进程，可能丢失首次迁移现场。修复为先识别仓库归属监听器，只有本仓库后端存在时才要求捕获成功，并在失败时于任何 kill 前退出；PID 只接受严格正整数并使用安全数组传给 `kill --`。
+- 受管 tmux 恢复后浏览器终端可能显示用户 `.zshrc` 自动启动的 Claude，而真实 pane 仍是 Bash；同一问题也会让显式 direct 命令超时或被 TUI 吞掉。根因是命令经用户交互式登录 shell 执行，初始化脚本抢在目标命令前运行；修复为服务端生成的 tmux attach 和显式 direct 命令统一走非交互 `/bin/sh -c`，仅无命令终端保留用户原生交互 shell。
+- 更新与恢复提示会长期遮挡大屏终端。修复为版本提示提供按 revision 持久化的关闭按钮，新 revision 才重新出现；恢复成功提示提供关闭按钮并在 5 秒内自动隐藏，恢复失败信息继续保留。

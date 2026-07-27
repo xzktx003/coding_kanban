@@ -9,12 +9,19 @@ import {
 
 import type {
   AgentSessionRecord,
+  AppVersionResponse,
   ListAgentSessionsResponse,
   SshHostPreset,
 } from "@agent-orchestrator/shared";
 
 import { AgentFocusView } from "./components/AgentFocusView";
 import { AgentGrid } from "./components/AgentGrid";
+import {
+  AppUpdateBanner,
+  RESTORE_COMPLETE_AUTO_DISMISS_MS,
+  shouldAutoDismissRestoreBanner,
+  type AppUpdateBannerState,
+} from "./components/AppUpdateBanner";
 import type { DiscoveryMode } from "./components/DiscoveryDialog";
 import { DiscoveryDialog } from "./components/DiscoveryDialog";
 import type { AddToGridItem } from "./components/DiscoveryDialog";
@@ -42,6 +49,7 @@ import {
   addDiscoveredTmux,
   deleteAgentSession,
   focusAgentSession,
+  getAppVersion,
   getSshHosts,
   hideAgentSession,
   killTmuxSession,
@@ -49,11 +57,21 @@ import {
   launchSshPtyAgent,
   listAgentSessions,
   reconnectAgentSession,
+  restoreManagedAgentSessions,
   subscribeAgentSessions,
   unhideAgentSession,
   updateAgentSession,
   type ConnectionStatus,
 } from "./lib/api";
+import {
+  acceptAppRevision,
+  consumeRestoreAfterReload,
+  dismissAppRevision,
+  initializeAcceptedAppRevision,
+  readAcceptedAppRevision,
+  readDismissedAppRevision,
+  shouldOfferAppUpdate,
+} from "./lib/app-update";
 import {
   deriveLayoutMode,
   loadLayoutState,
@@ -123,6 +141,7 @@ const FILE_BROWSER_UI_STORAGE_KEY = "file-browser-ui-state";
 const SIDE_PANEL_SESSION_STORAGE_KEY = "side-panel-session-state";
 const FOCUS_VIEW_STORAGE_KEY = "focus-view-state";
 const MAX_CACHED_VSCODE_IFRAMES = 8;
+const APP_VERSION_POLL_INTERVAL_MS = 3_000;
 
 function readMobileTerminalTouchMode(): boolean {
   return shouldEnableMobileTerminalTouchMode({
@@ -273,6 +292,19 @@ export default function App() {
   const [snapshot, setSnapshot] = useState<ListAgentSessionsResponse | null>(
     null,
   );
+  const [appVersion, setAppVersion] = useState<AppVersionResponse | null>(null);
+  const [acceptedAppRevision, setAcceptedAppRevision] = useState<string | null>(
+    () => readAcceptedAppRevision(localStorage),
+  );
+  const [dismissedAppRevision, setDismissedAppRevision] = useState<
+    string | null
+  >(() => readDismissedAppRevision(localStorage));
+  const [sessionRestoreState, setSessionRestoreState] =
+    useState<AppUpdateBannerState>(() =>
+      consumeRestoreAfterReload(localStorage)
+        ? { kind: "restoring", total: 0 }
+        : { kind: "idle" },
+    );
   const [viewMode, setViewMode] = useState<ViewMode>(
     initialFocusViewState.viewMode,
   );
@@ -308,7 +340,8 @@ export default function App() {
     host: SelectedHost;
   } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
+  const [connectionStatus, setConnectionStatus] =
+    useState<ConnectionStatus>("connecting");
   const [filters, setFilters] = useState<FilterState>({
     host: null,
     kind: null,
@@ -344,6 +377,43 @@ export default function App() {
     null,
   );
   const notificationReadyAtRef = useRef(Date.now() + 5_000);
+  const restoreAttemptedRuntimeIdsRef = useRef(new Set<string>());
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const refreshVersion = () => {
+      getAppVersion()
+        .then((version) => {
+          if (cancelled) {
+            return;
+          }
+
+          setAppVersion(version);
+          setAcceptedAppRevision((current) => {
+            if (current) {
+              return current;
+            }
+            return initializeAcceptedAppRevision(
+              localStorage,
+              version.sourceRevision,
+            );
+          });
+        })
+        .catch(() => {});
+    };
+
+    refreshVersion();
+    const intervalId = window.setInterval(
+      refreshVersion,
+      APP_VERSION_POLL_INTERVAL_MS,
+    );
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -398,6 +468,89 @@ export default function App() {
       unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!appVersion || isLoading || !snapshot) {
+      return;
+    }
+
+    const managedSessions = snapshot.items.filter(
+      (session) =>
+        Boolean(session.transportRef?.tmuxSession) &&
+        session.connectionState === "offline",
+    );
+    if (managedSessions.length === 0) {
+      if (sessionRestoreState.kind === "restoring") {
+        setSessionRestoreState({
+          kind: "restore-complete",
+          restored: 0,
+          manualRecovery: snapshot.items.filter(
+            (session) =>
+              !session.transportRef?.tmuxSession &&
+              session.connectionState === "offline",
+          ).length,
+        });
+      }
+      return;
+    }
+
+    if (restoreAttemptedRuntimeIdsRef.current.has(appVersion.runtimeId)) {
+      return;
+    }
+    restoreAttemptedRuntimeIdsRef.current.add(appVersion.runtimeId);
+    setSessionRestoreState({
+      kind: "restoring",
+      total: managedSessions.length,
+    });
+
+    restoreManagedAgentSessions()
+      .then(async (result) => {
+        const nextSnapshot = await listAgentSessions().catch(() => null);
+        if (nextSnapshot) {
+          setSnapshot(nextSnapshot);
+        }
+
+        if (result.failed.length > 0) {
+          setSessionRestoreState({
+            kind: "restore-failed",
+            restored: result.restoredIds.length,
+            failures: result.failed.map(
+              (failure) => `${failure.displayName}: ${failure.error}`,
+            ),
+          });
+          return;
+        }
+
+        setSessionRestoreState({
+          kind: "restore-complete",
+          restored: result.restoredIds.length,
+          manualRecovery: result.manualRecoveryIds.length,
+        });
+      })
+      .catch((error) => {
+        setSessionRestoreState({
+          kind: "restore-failed",
+          restored: 0,
+          failures: [error instanceof Error ? error.message : "恢复请求失败"],
+        });
+      });
+  }, [appVersion, isLoading, sessionRestoreState.kind, snapshot]);
+
+  useEffect(() => {
+    if (!shouldAutoDismissRestoreBanner(sessionRestoreState)) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setSessionRestoreState((current) =>
+        shouldAutoDismissRestoreBanner(current) ? { kind: "idle" } : current,
+      );
+    }, RESTORE_COMPLETE_AUTO_DISMISS_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [sessionRestoreState]);
 
   useEffect(() => {
     saveFileBrowserUiState(fileBrowserUiState);
@@ -524,7 +677,7 @@ export default function App() {
   const [showHiddenDrawer, setShowHiddenDrawer] = useState(false);
 
   useEffect(() => {
-    if (isLoading) {
+    if (isLoading || !snapshot) {
       return;
     }
 
@@ -790,7 +943,8 @@ export default function App() {
         return;
       }
 
-      const randomId = globalThis.crypto?.randomUUID?.() ??
+      const randomId =
+        globalThis.crypto?.randomUUID?.() ??
         `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const groupId = `group-${randomId}`;
       setSessionGroups((current) => {
@@ -946,6 +1100,41 @@ export default function App() {
     ...layoutState,
     sidebarCollapsed: false,
   });
+  const appUpdateAvailable = Boolean(
+    appVersion &&
+    shouldOfferAppUpdate(
+      acceptedAppRevision,
+      appVersion.sourceRevision,
+      dismissedAppRevision,
+    ),
+  );
+  const appUpdateBannerState: AppUpdateBannerState =
+    appUpdateAvailable && appVersion
+      ? {
+          kind: "update-available",
+          branch: appVersion.gitBranch,
+          shortHead: appVersion.gitHead?.slice(0, 8) ?? null,
+        }
+      : sessionRestoreState;
+
+  function handleApplyAppUpdate() {
+    if (!appVersion) {
+      return;
+    }
+
+    acceptAppRevision(localStorage, appVersion.sourceRevision);
+    window.location.reload();
+  }
+
+  function handleDismissAppUpdateBanner() {
+    if (appUpdateAvailable && appVersion) {
+      dismissAppRevision(localStorage, appVersion.sourceRevision);
+      setDismissedAppRevision(appVersion.sourceRevision);
+      return;
+    }
+
+    setSessionRestoreState({ kind: "idle" });
+  }
 
   function updateLayout(partial: Partial<LayoutState>) {
     setLayoutState((prev) => {
@@ -1172,6 +1361,11 @@ export default function App() {
 
   return (
     <main className={`app-shell-v2 layout-${layoutMode}`}>
+      <AppUpdateBanner
+        state={appUpdateBannerState}
+        onApplyUpdate={handleApplyAppUpdate}
+        onDismiss={handleDismissAppUpdateBanner}
+      />
       <TopBar
         sessions={sessions}
         collapsed={layoutState.topbarCollapsed}

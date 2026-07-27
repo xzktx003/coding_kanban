@@ -32,6 +32,7 @@
 - 支持本机和 SSH 主机两类目标。
 - Agent 类型支持 `copilot`、`codex`、`claude`、`shell`。
 - 启动方式支持 `direct` 和 `tmux`。
+- 新建本地或 SSH 会话默认选择受管 `tmux` 模式；`direct` 仍可显式选择，但应用更新或后端重启后只能保留卡片元数据，不能恢复原 PTY。
 - 显示名称留空时，前端根据主机、Agent 类型和启动方式自动生成唯一默认名。
 - 工作目录输入支持目录建议和目录选择器；目录选择器可浏览本机或 SSH 目标目录，并可在当前文件夹下新建文件夹后直接选为会话工作目录。
 - 本地会话通过 `/api/agent-launch/pty` 启动，远端会话通过 `/api/agent-launch/ssh-pty` 启动。
@@ -68,6 +69,9 @@
 - 后端会对高频终端输出触发的看板全量快照做合并广播；结构性操作仍即时刷新，避免轻量预览场景下 `/ws/agent-sessions` 因逐帧输出形成网络和 JSON 解析风暴。
 - 支持 replay 完成前缓冲 live frame，避免历史输出与新输出乱序。
 - 支持 stdin、resize、binary 消息，binary 用于 tmux 鼠标等二进制事件。
+- 服务端生成的 tmux attach 命令和带显式命令的 direct PTY 使用非交互 `/bin/sh` 执行，不加载用户 shell 启动文件；未指定命令时仍启动用户原生交互 shell。
+- 本地 tmux 普通文本、移动端快捷键、方向键和 bracketed paste 通过有序 `send-keys` 路径写入；鼠标协议以及 `Ctrl+A` / `Ctrl+B` 前缀和紧随其后的 tmux 命令通过 attached client PTY 处理。鼠标或前缀命令改变 tmux 活动 pane 后，后续普通输入按 session 级目标跟随当前活动 pane，不再继续写入接入时记录的旧 pane。
+- `Shift+Enter`、`Ctrl+Enter` 的 CSI-u 序列按浏览器原始字节写入 pane，不依赖不同 tmux 版本对 `S-Enter` / `C-Enter` 键名的支持。
 - 支持终端输出发起的 OSC 52 剪贴板写入；tmux copy-mode 可通过 pane 内选择把内容写入浏览器剪贴板，前端只接受 clipboard target 且限制 payload 大小。
 - 支持终端焦点补救和输入所有权；真实 stdin 默认只落到当前聚焦主终端，多终端监控模式下也只落到当前输入窗格；鼠标滚轮固定滚动终端 scrollback 上下文，不作为 Codex CLI 输入历史翻页事件转发，输入历史仍通过键盘上下箭头完成。
 
@@ -106,9 +110,22 @@
 - 每个会话分组（包括自动生成的“未分组”）都可独立折叠或展开，折叠状态与分组配置一起持久化并在主页和聚焦侧栏同步。
 - 前端提供轻量 UI 动效：顶栏菜单、资源诊断、主机下拉、卡片、抽屉和弹窗使用 opacity/transform 入场与悬停过渡，并遵循 `prefers-reduced-motion` 降级。
 - 聚焦视图终端监控布局模式保存在本地存储，重新进入时保持 `屏幕布局` 菜单中的单屏、左右双屏、上下双屏、左中右三屏、四屏、六屏或八屏选择。
+- 聚焦视图还会保存每个监控 slot 的稳定 session id、当前输入 slot 和用户主动关闭的 slot；应用更新 reload 后按仍存在的稳定 session id 恢复原分屏现场。
 - 文件浏览器按会话和主机维度保存独立浏览状态。
 - VS Code Web 会话缓存支持跨切换复用。
 - VS Code iframe 缓存模式保存在本地存储，默认省内存；自动超时卸载暂未默认启用，保留为下一阶段策略。
+
+## 11. 应用更新检测与历史会话恢复
+
+- 后端通过 `GET /api/app-version` 暴露当前进程 runtime id、启动时间、Git branch/head 和本地源码指纹；指纹覆盖 tracked 修改、未跟踪文件、commit、checkout 和 pull 后的 HEAD 变化，不主动 fetch 或修改远程仓库。tracked diff 使用流式哈希，未跟踪文件按总预算有界读取；并发轮询会复用同一次指纹计算和短期缓存。
+- 前端每 3 秒检查版本。源码 revision 变化时只显示“检测到新版本 / 更新并恢复”，不会在用户输入终端时自动刷新；提示可主动关闭，同一 revision 在后续轮询和 reload 后保持隐藏，新的 revision 会重新提示。
+- 点击“更新并恢复”会接受当前 revision、记录一次性恢复意图并 reload；同一 revision 不会形成刷新循环。
+- 后端把稳定会话目录持久化到 `SESSION_STATE_PATH`，默认 `.dev-runtime/agent-sessions.json`。只保存 session id、显示信息、目录、tmux/SSH 绑定、标签和当前卡片等元数据，不保存 terminal output、PTY PID 或 runtime id。
+- 后端重启后，`POST /api/agent-sessions/restore-managed` 只重新 attach 仍存在的受管 tmux 会话；tmux 已不存在时显示失败，不会根据旧命令重建。direct 会话保留为需要手动恢复的 exited 卡片。多标签页并发恢复会在后端合并为同一次执行。
+- 恢复成功提示支持主动关闭，并在出现后 5 秒内自动隐藏；恢复失败提示保留在页面上，避免错误信息来不及查看。
+- `restart-dev.sh` 在停止旧后端前读取 `/api/agent-sessions`，用于首次升级时把旧版内存注册表迁移到状态文件；迁移时立即剔除 terminal output、PTY PID、runtime id 和其他瞬态字段。只有目标端口存在本仓库后端且捕获失败时才拒绝重启；无本仓库监听器或只有外部监听器时不会误判为迁移失败。
+- 会话状态文件只在持久化元数据实际变化时原子写入，终端输出快照、连接运行态或单纯 `updatedAt` 变化不会造成持续落盘；写入失败只记录后端错误，不中断看板服务。
+- 隔离 E2E 使用临时 Git 根目录、状态文件、前后端端口和 tmux socket，覆盖两张受管卡片、左右双屏、输入 slot、后端重启、更新提示关闭/重新出现、恢复提示关闭/自动隐藏、reload、稳定 ID、终端重连、tmux 前缀分屏，以及单个 tmux window 内鼠标切换左右 pane 后的输入跟随。
 
 ## 12. Paper Writer 项目工作区
 

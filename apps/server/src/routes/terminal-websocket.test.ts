@@ -9,6 +9,8 @@ import { buildServer } from "../app.js";
 import { resolveTmuxBinary } from "../services/runtime-compat.js";
 
 const TMUX_BINARY = resolveTmuxBinary();
+const INTERACTIVE_FILTER_SHELL_COMMAND =
+  "printf '__READY__\\n'; exec /bin/sh -i";
 
 function runTmux(args: string[]): string {
   return execFileSync(TMUX_BINARY, args, {
@@ -133,7 +135,7 @@ test("terminal websocket forwards primary device-attribute replies so TUIs can f
         displayName: "terminal-filter",
         agentKind: "shell",
         workingDirectory: process.cwd(),
-        command: "printf '__READY__\\n'",
+        command: INTERACTIVE_FILTER_SHELL_COMMAND,
       }),
     });
 
@@ -477,7 +479,7 @@ test("terminal websocket strips secondary device-attribute replies so shell prom
         displayName: "terminal-secondary-da-filter",
         agentKind: "shell",
         workingDirectory: process.cwd(),
-        command: "printf '__READY__\\n'",
+        command: INTERACTIVE_FILTER_SHELL_COMMAND,
       }),
     });
 
@@ -534,7 +536,7 @@ test("terminal websocket strips OSC color-query replies so rgb payload noise nev
         displayName: "terminal-osc-color-filter",
         agentKind: "shell",
         workingDirectory: process.cwd(),
-        command: "printf '__READY__\\n'",
+        command: INTERACTIVE_FILTER_SHELL_COMMAND,
       }),
     });
 

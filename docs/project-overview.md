@@ -63,6 +63,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 启动方式：
   - direct：直接启动命令。
   - tmux：通过 `tmux new-session` 启动。
+- 默认启动方式为受管 `tmux`；`direct` 适合一次性任务，但后端重启后不能恢复原 PTY。
 - 名称为空时，前端根据主机、Agent 类型和启动方式自动生成唯一名称。
 - 本地会话走 `/api/agent-launch/pty`。
 - 远端会话走 `/api/agent-launch/ssh-pty`。
@@ -125,6 +126,26 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 完整预览模式下，非活跃卡片和右侧栏会恢复只读 `TerminalView`，因此会重新建立终端 WebSocket，适合需要实时小窗预览的场景。
 - 前端资源诊断会记录 `/ws/agent-sessions` 全量快照消息速率和大小、`/ws/agent-sessions/:id/terminal` 实时流速率、终端 WebSocket 生命周期、DOM 中的 xterm/预览/监控窗格/VS Code iframe 数量，以及浏览器暴露的 JS heap；同时每秒按需调用 `/api/diagnostics/terminal-history` 和 `/api/diagnostics/vscode-web-proxy` 读取后端终端历史与 VS Code 代理吞吐。诊断只在面板打开时刷新，不保存历史。
 - 后端对终端输出导致的全量会话快照做 trailing 合并广播，降低轻量预览下的网络流量、浏览器 JSON 解析和 React 更新频率；新建、删除、聚焦、重命名等结构性变化仍通过即时快照刷新。
+- 本地 tmux 输入按语义分流：普通文本、快捷键和 bracketed paste 通过有序 `send-keys` 写入；鼠标协议及 `Ctrl+A` / `Ctrl+B` 前缀命令写入 attached tmux client PTY。鼠标或前缀命令成功进入 client 后，路由器会让后续 `send-keys` 以 tmux session 为动态目标，从而跟随 client 当前选中的 pane；连接清理或重建时恢复持久化 pane 绑定。CSI-u 的 `Shift+Enter` / `Ctrl+Enter` 保留原始字节，避免依赖 tmux 版本键名。
+
+### 应用更新与会话恢复
+
+后端 `AppVersionService` 对配置的 `APP_SOURCE_ROOT` 计算本地 Git 指纹，`GET /api/app-version` 返回 process runtime id、Git branch/head 和 source revision。它只读取本地仓库，不 fetch 远程、不 checkout，也不接受来自 HTTP 的路径或命令参数。tracked `git diff --binary` 直接流入 SHA-256，不把大 diff 缓冲进内存；未跟踪文件使用有界 `FileHandle.read`。并发请求共享同一个进行中的计算，完成后使用短期缓存，避免多个浏览器标签重复启动 Git 扫描。
+
+前端轮询该接口。检测到 revision 变化时展示显式“更新并恢复”按钮，不自动刷新。用户可以关闭提示，浏览器按 source revision 记录关闭状态；同一版本在轮询和 reload 后继续隐藏，新版本会重新显示。点击更新后把 revision 标记为已接受并 reload 一次，避免终端输入中断和重复刷新。恢复成功提示可主动关闭并在 5 秒内自动隐藏，恢复失败提示保持可见。
+
+生产入口使用 `FileSessionStateStore` 把稳定会话目录保存到 `SESSION_STATE_PATH`，默认 `.dev-runtime/agent-sessions.json`：
+
+- 保存稳定 session id、显示信息、工作目录、tmux/SSH 绑定、隐藏状态和标签。
+- 不保存 terminal output、进程 PID、runtime id 或密钥内容。
+- 后端启动时先恢复离线卡片，再由 `POST /api/agent-sessions/restore-managed` 重新 attach 仍存在的受管 tmux。
+- 恢复端点使用 single-flight 协调，多标签页同时请求时只执行一轮 tmux discovery 和 PTY reconnect。
+- 缺失的 tmux 只报告失败，不执行旧命令重建；direct 会话保留为手动恢复卡片。
+- 状态文件使用原子替换，并按稳定元数据去重写入，终端输出、连接运行态和纯时间戳变化不会持续触发磁盘 I/O；文件不可写时记录错误但不阻断后端启动和会话操作。
+
+浏览器使用 `focus-view-state` 和 `terminal-monitor-workspace-v1` 恢复聚焦视图、布局模式、slot-to-session 分配、当前输入 slot 和主动关闭的 slot。稳定 session id 让这些状态跨后端重启继续有效。`restart-dev.sh` 会在停止旧后端前尝试捕获当前 `/api/agent-sessions`，用于首次升级迁移；迁移脚本在写盘前先投影稳定字段，不会把旧快照中的 terminal output、PTY PID 或 runtime id 写入状态文件。若目标端口上确有本仓库后端而迁移捕获失败，脚本会在任何 kill 前退出；无本仓库监听器或只有外部监听器时跳过迁移捕获。
+
+受管本地 tmux 的 attach/reconnect 和带显式命令的 direct PTY 使用非交互 `/bin/sh` 执行，不加载用户 `zsh/bash` 登录启动文件，避免 shell 初始化钩子抢先启动 Agent TUI；未指定命令的 direct PTY 仍使用用户原生交互 shell。WebSocket 写入者关闭、手动重连、自动恢复、删除或终止会话时，输入清理与既有队列有序执行，取消遗留 tmux 前缀并清除跨帧 bracketed paste 状态；只读预览连接关闭不会清理活跃输入状态。
 
 ### 手机端终端控制页
 
@@ -225,6 +246,10 @@ memories/        仓库记忆，不是产品运行依赖
 - `LocalProcessRuntimeManager`：旧的本地进程运行管理。
 - `SshRuntimeManager`：远端连接类运行管理。
 - `LocalTmuxAdapter`：tmux 发现、详情、输入、接管、释放、杀会话。
+- `LocalTmuxInputRouter`：统一 REST/WebSocket 的本地 tmux 输入队列，并区分 pane 输入、鼠标协议和 tmux 前缀命令。
+- `AppVersionService`：计算本地 Git source revision 和 backend runtime version。
+- `FileSessionStateStore`：校验、投影并原子持久化稳定会话目录。
+- `restoreManagedSessions`：分类并恢复仍存在的受管 tmux，会话缺失时保持显式失败边界。
 - `LocalFsService`：本地文件系统。
 - `SftpService`：远端 SFTP 文件系统。
 - `VsCodeWebManager`：code-server/openvscode-server 生命周期。
@@ -247,6 +272,8 @@ memories/        仓库记忆，不是产品运行依赖
 - `POST /api/agent-sessions/:id/resize`
 - `POST /api/agent-sessions/:id/stdin`
 - `POST /api/agent-sessions/:id/reconnect`
+- `GET /api/app-version`
+- `POST /api/agent-sessions/restore-managed`
 - `POST /api/agent-discovery/tmux/scan`
 - `POST /api/agent-discovery/tmux/add`
 - `POST /api/agent-sessions/:id/tmux/kill`
@@ -271,6 +298,7 @@ memories/        仓库记忆，不是产品运行依赖
 主要组件：
 
 - `App.tsx`：全局状态、会话订阅、路由弹窗、聚焦/宫格切换、侧栏工具状态。
+- `AppUpdateBanner.tsx`：源码更新提示、恢复进度和失败结果。
 - `TopBar.tsx`：分组顶栏、显示/工具菜单、操作提示、主入口、折叠。
 - `AgentGrid.tsx` / `AgentGridCard.tsx`：宫格和卡片。
 - `AgentFocusView.tsx`：聚焦终端和会话切换。
@@ -279,6 +307,8 @@ memories/        仓库记忆，不是产品运行依赖
 - `resource-diagnostics.ts`：浏览器资源诊断采样、WebSocket 吞吐统计和压力源分类。
 - `terminal-font-size.ts`：终端字号范围、持久化和归一化逻辑。
 - `terminal-preview-mode.ts`：终端预览模式持久化，默认轻量模式，可切换完整预览。
+- `app-update.ts`：已接受 revision 和一次性 reload 恢复意图。
+- `terminal-workspace-state.ts`：多屏 slot、输入 slot 和关闭 slot 的版本化持久化。
 - `NewSessionDialog.tsx`：新建本地/SSH/direct/tmux 会话。
 - `DiscoveryDialog.tsx`、`TmuxDiscoveryPanel.tsx`、`AppDiscoveryPanel.tsx`：扫描和加入宫格。
 - `QuickTmuxConnect.tsx`：快速连接 tmux。
@@ -293,6 +323,8 @@ memories/        仓库记忆，不是产品运行依赖
 - `file-browser-ui-state`：文件浏览器主/侧面板尺寸和折叠。
 - `side-panel-session-state`：每个会话打开的是文件还是 VS Code，以及选中的主机。
 - `focus-view-state`：聚焦会话和视图模式。
+- `terminal-monitor-workspace-v1`：分屏模式、slot 会话、当前输入 slot 和关闭 slot。
+- `coding-kanban-accepted-revision-v1`：浏览器已接受的 source revision。
 - `terminal-font-size`：所有内置 xterm 终端共用字号，默认 `14`，范围 `10` 到 `24`。
 - `terminal-preview-mode`：终端预览模式，`lightweight` 为默认轻量预览，`full` 为旧版完整小终端预览。
 - `vscode-iframe-cache-mode`：VS Code iframe 缓存模式，`memory-saving` 为默认省内存模式，`preserve-state` 为最多保留最近 8 个 iframe 的保持状态模式。
@@ -379,6 +411,8 @@ curl http://127.0.0.1:4000/api/health
 - `VSCODE_WEB_EXTENSIONS_DIR`：覆盖 VS Code Web 的扩展目录；默认优先使用 `~/.vscode-server/extensions`。
 - `VSCODE_WEB_REMOTE_BIND_HOST`：SSH 远端 code-server 的绑定地址，默认 `127.0.0.1`。
 - `VSCODE_WEB_REMOTE_PORT`：SSH 远端 code-server 的固定端口，默认 `13338`。
+- `APP_SOURCE_ROOT`：更新检测读取的本地源码根目录，默认仓库根目录。
+- `SESSION_STATE_PATH`：稳定会话目录文件，默认 `.dev-runtime/agent-sessions.json`。
 
 ### SSH
 
@@ -396,13 +430,11 @@ curl http://127.0.0.1:4000/api/health
 
 ### 后端运行态
 
-当前会话注册表是内存态。后端重启后：
+会话运行句柄仍在内存中，但稳定目录会写入 `.dev-runtime/agent-sessions.json`。后端重启后：
 
-- 看板里的会话记录不会自动完整恢复。
-- 底层 tmux 会话仍存在，可以重新扫描加入。
-- 本地 PTY 进程一般会随后端退出而结束。
-
-README 中“重启后支持恢复历史对话”仍是 TODO。
+- 受管 tmux 卡片保持稳定 id，并在底层 tmux 仍存在时自动重新 attach。
+- direct 卡片保留元数据并标记为需要手动恢复，原 PTY 不会伪装成仍然存活。
+- terminal scrollback 不写入状态文件，持久历史继续由 tmux 负责。
 
 ### VS Code Web 持久数据
 
@@ -471,6 +503,7 @@ E2E：
 
 ```bash
 pnpm e2e
+PLAYWRIGHT_SKIP_WEBSERVER=1 pnpm exec playwright test tests/e2e/hot-update-session-restore.spec.ts
 ```
 
 注意：
@@ -601,7 +634,9 @@ pnpm --dir apps/web dev -- --host 0.0.0.0
 
 ## 当前限制和后续方向
 
-- 会话注册表仍以内存为主，后端重启后需要重新扫描/接入。
+- direct PTY 无法跨后端进程重启，更新后需要用户显式重新连接。
+- 更新检测只覆盖本地工作树和 HEAD，不主动查询远程分支是否有新提交。
+- 会话状态文件不保存 terminal output；非 tmux 会话没有持久 scrollback 保证。
 - SSH 远端 VS Code Web 当前依赖远端 `code-server` 和后端维持的单实例 SSH 本地转发，不支持更复杂的多实例调度。
 - SSH 能力依赖本机 SSH 配置和免密/可用认证。
 - Playwright 视觉验证依赖系统浏览器库。

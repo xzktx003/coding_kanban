@@ -1,0 +1,92 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+
+import {
+  AppUpdateBanner,
+  RESTORE_COMPLETE_AUTO_DISMISS_MS,
+  shouldAutoDismissRestoreBanner,
+} from "./AppUpdateBanner.js";
+
+test("renders an explicit update action without applying it automatically", () => {
+  const markup = renderToStaticMarkup(
+    createElement(AppUpdateBanner, {
+      state: {
+        kind: "update-available",
+        branch: "feature/hot-update",
+        shortHead: "01234567",
+      },
+      onApplyUpdate: () => {},
+      onDismiss: () => {},
+    }),
+  );
+
+  assert.match(markup, /检测到新版本/);
+  assert.match(markup, /feature\/hot-update/);
+  assert.match(markup, /更新并恢复/);
+  assert.match(markup, /data-testid="apply-app-update"/);
+  assert.match(markup, /data-testid="dismiss-app-update"/);
+  assert.match(markup, /aria-label="关闭版本更新提示"/);
+});
+
+test("renders visible managed-session restore progress and failures", () => {
+  const restoring = renderToStaticMarkup(
+    createElement(AppUpdateBanner, {
+      state: {
+        kind: "restoring",
+        total: 3,
+      },
+      onApplyUpdate: () => {},
+      onDismiss: () => {},
+    }),
+  );
+  assert.match(restoring, /正在恢复 3 个受管 tmux 会话/);
+
+  const failed = renderToStaticMarkup(
+    createElement(AppUpdateBanner, {
+      state: {
+        kind: "restore-failed",
+        restored: 2,
+        failures: ["agent-3: tmux 会话不存在"],
+      },
+      onApplyUpdate: () => {},
+      onDismiss: () => {},
+    }),
+  );
+  assert.match(failed, /已恢复 2 个会话/);
+  assert.match(failed, /agent-3: tmux 会话不存在/);
+});
+
+test("renders a close action for restore completion and limits auto-dismiss to that state", () => {
+  const restoredState = {
+    kind: "restore-complete" as const,
+    restored: 2,
+    manualRecovery: 0,
+  };
+  const markup = renderToStaticMarkup(
+    createElement(AppUpdateBanner, {
+      state: restoredState,
+      onApplyUpdate: () => {},
+      onDismiss: () => {},
+    }),
+  );
+
+  assert.match(markup, /历史会话已恢复/);
+  assert.match(markup, /data-testid="dismiss-session-restore"/);
+  assert.match(markup, /aria-label="关闭历史会话恢复提示"/);
+  assert.equal(RESTORE_COMPLETE_AUTO_DISMISS_MS, 5_000);
+  assert.equal(shouldAutoDismissRestoreBanner(restoredState), true);
+  assert.equal(
+    shouldAutoDismissRestoreBanner({ kind: "restoring", total: 2 }),
+    false,
+  );
+  assert.equal(
+    shouldAutoDismissRestoreBanner({
+      kind: "restore-failed",
+      restored: 1,
+      failures: ["failed"],
+    }),
+    false,
+  );
+});

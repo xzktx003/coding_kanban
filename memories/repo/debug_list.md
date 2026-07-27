@@ -104,3 +104,15 @@
 - #19: 会话标签/分组 → AgentSessionRecord.tags + FilterBar 标签筛选器
 - #23: 文件浏览器拖拽到终端 → 文件条目 draggable + TerminalView onDrop
 - 聚焦视图中会话进入大屏监控后从右侧分组卡片消失：根因是 sidebar 数据源排除了 `terminalSlots` 中的会话，卡片也没有窗格序号和活动状态。修复为全部未隐藏会话继续混在原分组中，监控卡片显示窗格序号，活动大屏与卡片同步黄色高亮；点击已监控卡片只激活原窗格，未监控卡片保持替换行为。
+- 热更新恢复中的本地 tmux 输入路由错误：普通输入和分帧 paste 走 attached PTY 会干扰 TUI 与前缀命令；修复为普通输入走 pane，鼠标及 `Ctrl+A` / `Ctrl+B` 前缀和下一条命令走 attached PTY，REST/WebSocket 共用有序路由。
+- reload 后持久化焦点过早被清空：首个真实 session snapshot 尚未到达时就校验稳定 ID；修复为等待加载完成且 snapshot 存在后再清理无效焦点。
+- 会话状态文件被时间戳和运行态持续触发写入：修复为只指纹稳定元数据，并把持久化连接/交互态规范化为离线恢复态。
+- 多标签页可重复恢复同一 tmux 并互相重建 PTY，版本轮询也会重复执行 Git 扫描；修复为 managed restore 和 Git fingerprint 增加后端 single-flight 与缓存。
+- 首次迁移原样写入旧 API 快照，会暂存终端输出、PID 和 runtime id；修复为捕获脚本先投影稳定字段再原子写盘。
+- 状态文件写入失败会阻止后端启动，重复 session ID 会静默覆盖卡片；修复为写入错误降级为日志并拒绝重复 ID 状态文件。
+- 热更新 WebSocket 关闭、重连或恢复时可能遗留 tmux 前缀和跨帧 paste 状态；修复为把 Escape/paste 清理作为 session 输入队列屏障，并在破坏性生命周期前等待，只读预览关闭不清理。
+- 大型 tracked diff 超出 Git 输出缓冲区、未跟踪大文件先整体读取会让版本检测失效或占用过多内存；修复为 tracked diff 流式哈希、未跟踪文件循环有界读取，并确定性终止超时 Git 子进程。
+- 首次迁移捕获失败仍继续停止本仓库后端会丢失会话目录；修复为仅对仓库归属监听器强制迁移成功，失败时在 kill 前退出，并严格校验正整数 PID。
+- 受管 tmux attach 和显式 direct 命令经用户登录 shell 执行时可能被 `.zshrc` 自动启动的 Agent TUI 劫持；修复为两类命令通过非交互 `/bin/sh -c` 执行，仅无命令终端保留用户原生交互 shell。
+- 更新提示长期遮挡终端；修复为按 revision 记忆关闭状态，新版本重新提示。恢复成功提示支持主动关闭并在 5 秒内自动隐藏，失败提示保留。
+- 单个 tmux window 内鼠标选中右 pane 后输入仍进左 pane：鼠标经 attached client 更新了活动 pane，但普通输入继续向接入时保存的固定 `tmuxPane` 执行 `send-keys`；修复为鼠标或前缀命令后改用 session 级动态目标跟随当前活动 pane，连接清理时重置该跟随状态。

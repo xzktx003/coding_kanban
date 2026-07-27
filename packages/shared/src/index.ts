@@ -79,6 +79,28 @@ export interface ListAgentSessionsResponse {
   updatedAt: string;
 }
 
+export interface AppVersionResponse {
+  runtimeId: string;
+  startedAt: string;
+  sourceRevision: string;
+  gitAvailable: boolean;
+  gitHead: string | null;
+  gitBranch: string | null;
+}
+
+export interface RestoreManagedSessionFailure {
+  agentSessionId: string;
+  displayName: string;
+  error: string;
+}
+
+export interface RestoreManagedSessionsResponse {
+  restoredIds: string[];
+  alreadyConnectedIds: string[];
+  manualRecoveryIds: string[];
+  failed: RestoreManagedSessionFailure[];
+}
+
 export interface AgentSessionDetailResponse {
   agentSession: AgentSessionRecord;
   outputEntries: AgentOutputEntry[];

@@ -1,5 +1,6 @@
 import type {
   AddDiscoveredTmuxInput,
+  AppVersionResponse,
   AgentSessionDetailResponse,
   AgentSessionSnapshotEvent,
   AgentSessionRecord,
@@ -21,6 +22,7 @@ import type {
   ListAgentSessionsResponse,
   OpenVsCodeWebResponse,
   RegisterAgentSessionInput,
+  RestoreManagedSessionsResponse,
   ScanDirectoryInput,
   ScanDirectoryResponse,
   SshHostsResponse,
@@ -135,7 +137,9 @@ export async function parseFailedResponseMessage(
   }
 }
 
-export async function parseSuccessfulResponse<T>(response: Response): Promise<T> {
+export async function parseSuccessfulResponse<T>(
+  response: Response,
+): Promise<T> {
   if (response.status === 204) {
     return undefined as T;
   }
@@ -154,6 +158,19 @@ export async function parseSuccessfulResponse<T>(response: Response): Promise<T>
 
 export function listAgentSessions(): Promise<ListAgentSessionsResponse> {
   return request<ListAgentSessionsResponse>("/api/agent-sessions");
+}
+
+export function getAppVersion(): Promise<AppVersionResponse> {
+  return request<AppVersionResponse>("/api/app-version");
+}
+
+export function restoreManagedAgentSessions(): Promise<RestoreManagedSessionsResponse> {
+  return request<RestoreManagedSessionsResponse>(
+    "/api/agent-sessions/restore-managed",
+    {
+      method: "POST",
+    },
+  );
 }
 
 export function getAgentSessionDetail(
@@ -305,7 +322,11 @@ export function parseAgentSessionSnapshotEvent(
   };
 }
 
-export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "reconnecting";
+export type ConnectionStatus =
+  | "connecting"
+  | "connected"
+  | "disconnected"
+  | "reconnecting";
 
 export function subscribeAgentSessions(
   onSnapshot: (snapshot: ListAgentSessionsResponse) => void,
