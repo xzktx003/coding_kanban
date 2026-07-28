@@ -40,6 +40,34 @@ const stateColors: Record<string, string> = {
   exited: "card-exited",
 };
 
+const interactiveDoubleClickSelectors = [
+  "button",
+  "input",
+  "select",
+  "textarea",
+  "a",
+  '[contenteditable="true"]',
+  '[role="button"]',
+  '[role="menuitem"]',
+];
+
+export function shouldFocusGridCardFromDoubleClick(
+  target: EventTarget | null,
+): boolean {
+  const element = target as { closest?: (selector: string) => unknown } | null;
+  if (!element || typeof element.closest !== "function") {
+    return true;
+  }
+
+  if (element.closest(".xterm-helper-textarea")) {
+    return true;
+  }
+
+  return !interactiveDoubleClickSelectors.some((selector) =>
+    element.closest?.(selector),
+  );
+}
+
 function shortenPath(dir?: string): string {
   if (!dir) return "";
   let p = dir;
@@ -107,7 +135,11 @@ export function AgentGridCard({
   return (
     <div
       className={`grid-card ${stateClass}`}
-      onDoubleClick={() => onDoubleClick(session.id)}
+      onDoubleClickCapture={(event) => {
+        if (shouldFocusGridCardFromDoubleClick(event.target)) {
+          onDoubleClick(session.id);
+        }
+      }}
     >
       <div className="grid-card-header">
         <div className="grid-card-title-group">

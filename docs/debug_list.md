@@ -242,6 +242,14 @@
 - **测试**: `apps/web/src/components/AppUpdateBanner.test.ts` 覆盖失败通知关闭按钮、成功/失败差异化自动关闭时间和恢复中不自动关闭。
 - **文件**: `apps/web/src/components/AppUpdateBanner.tsx`, `apps/web/src/App.tsx`
 
+### 返回宫格后双击终端卡片无法再次进入主窗口
+
+- **现象**: 从聚焦主窗口返回宫格后，双击卡片的终端区域有时不会再次放大到主窗口，尤其容易受完整 xterm 预览和卡片内部控件的鼠标事件影响。
+- **根因**: 宫格卡片只在冒泡阶段监听 `onDoubleClick`；终端/xterm 或其他嵌套元素可以在特定浏览器状态下提前处理并阻断双击事件，导致外层卡片收不到通知。
+- **修复**: 卡片改用 `onDoubleClickCapture` 在捕获阶段处理双击；按钮、输入框、分组选择器、链接等真实控件仍被排除，xterm helper textarea 则明确按终端区域处理。
+- **测试**: `apps/web/src/components/AgentGridCard.test.ts` 覆盖嵌套终端与真实控件的目标判定；真实 Chromium 分别验证轻量预览和完整 xterm 预览的“进入主窗口 → 返回宫格 → 再次双击进入主窗口”。
+- **文件**: `apps/web/src/components/AgentGridCard.tsx`
+
 ### 聚焦视图监控会话从右侧卡片列表消失
 
 - **现象**: 会话进入大屏监控窗格后会从右侧小卡片分组中消失，用户无法从卡片判断其对应的窗格序号，也看不到当前黄色焦点的双向关联。
