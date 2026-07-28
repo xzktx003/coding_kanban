@@ -97,6 +97,7 @@
 - tmux 中 Codex 的 macOS `Option+Space` / Windows `Alt+Space` 无法作为换行快捷键：xterm 默认未把 macOS Option 当作 Meta，后端又把 `ESC+Space` 拆成 Escape 与空格；修复为开启 `macOptionIsMeta`，并把 Meta+Space、常用 Meta 字母/数字原子映射为 tmux `M-*`。Windows 窗口管理器若先占用 `Alt+Space`，使用现有 `Shift+Enter` 作为跨平台备用。
 - tmux/Codex mouse tracking 已开启时当前 pane 仍无法滚轮控制：此前为避免 wheel 变成输入历史方向键，在 capture 阶段无条件阻断所有 wheel，连合法鼠标协议也被吞掉；修复为普通 wheel 在交互 mouse-tracking 终端中放行给 xterm/tmux，`Shift+wheel`、普通 shell 和非输入 pane 仍滚本地 scrollback，并把 E2E 从“点击后总帧数增加”收紧为真实 wheel code `64/65`。
 - 返回宫格后双击卡片终端区域偶发无法再次进入主窗口：卡片只在冒泡阶段监听双击，嵌套终端/xterm 可能先处理并阻断事件。修复为卡片在捕获阶段接管双击，过滤按钮、输入框、分组下拉等真实控件，并允许 xterm helper textarea 触发聚焦。
+- Markdown 文件中的 LaTeX 公式显示为源码：原渲染链没有数学 AST；而 `remark-math` 只识别 `$...$` / `$$...$$`，目标论文使用 `\(...\)` / `\[...\]`。修复为接入 KaTeX 链路，并仅在非代码 Markdown 区域规范化反斜线分隔符；目标文件完整生成 93 个 KaTeX/MathML 节点且无公式错误。
 
 ## PM 审计增强 (2026-06-16)
 

@@ -3,7 +3,16 @@ import { describe, it } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { FileBrowserDrawer } from "./FileBrowserDrawer.js";
+import { FileBrowserDrawer, isMarkdownFileName } from "./FileBrowserDrawer.js";
+
+describe("Markdown file detection", () => {
+  it("recognizes md and markdown extensions case-insensitively", () => {
+    assert.equal(isMarkdownFileName("README.md"), true);
+    assert.equal(isMarkdownFileName("notes.MARKDOWN"), true);
+    assert.equal(isMarkdownFileName("archive.md.txt"), false);
+    assert.equal(isMarkdownFileName("markdown"), false);
+  });
+});
 
 describe("FileBrowserDrawer", () => {
   it("renders the file list without the legacy side directory tree", () => {

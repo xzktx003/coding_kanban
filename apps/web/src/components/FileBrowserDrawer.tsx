@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -17,6 +19,18 @@ import { useFileBrowser, type SortKey } from "../lib/use-file-browser";
 import { copyTextToClipboard } from "../lib/clipboard";
 
 import { HostDropdown, type SelectedHost } from "./HostDropdown";
+import type { MarkdownPreviewMode } from "./MarkdownFilePreview";
+
+const LazyMarkdownFilePreview = lazy(() =>
+  import("./MarkdownFilePreview").then((module) => ({
+    default: module.MarkdownFilePreview,
+  })),
+);
+const LazyMarkdownFileDialog = lazy(() =>
+  import("./MarkdownFileDialog").then((module) => ({
+    default: module.MarkdownFileDialog,
+  })),
+);
 
 interface FileBrowserDrawerProps {
   open: boolean;
@@ -48,6 +62,13 @@ interface RenameState {
 interface EditorState {
   path: string;
   content: string;
+}
+
+interface MarkdownEditorState {
+  path: string;
+  content: string;
+  savedContent: string;
+  mode: MarkdownPreviewMode;
 }
 
 interface ChmodState {
@@ -83,7 +104,12 @@ const FILE_BROWSER_COLUMN_WIDTH_STORAGE_KEY = "file-browser-column-widths";
 const FILE_BROWSER_COLUMNS: FileBrowserColumn[] = [
   { key: "name", label: "名称", sortKey: "name", minWidth: 120 },
   { key: "size", label: "大小", sortKey: "size", minWidth: 72 },
-  { key: "modifiedAt", label: "修改时间", sortKey: "modifiedAt", minWidth: 126 },
+  {
+    key: "modifiedAt",
+    label: "修改时间",
+    sortKey: "modifiedAt",
+    minWidth: 126,
+  },
   { key: "owner", label: "Owner", sortKey: "owner", minWidth: 72 },
   { key: "permissions", label: "权限", sortKey: "permissions", minWidth: 92 },
 ];
@@ -129,6 +155,10 @@ function getFileIcon(entry: FileEntry): string {
     return "⚙️";
   }
   return "📋";
+}
+
+export function isMarkdownFileName(name: string): boolean {
+  return /\.(?:md|markdown)$/i.test(name);
 }
 
 function buildBreadcrumbs(
@@ -201,7 +231,9 @@ function clampFileBrowserColumnWidth(
   key: FileBrowserColumnKey,
   width: number,
 ): number {
-  const column = FILE_BROWSER_COLUMNS.find((candidate) => candidate.key === key);
+  const column = FILE_BROWSER_COLUMNS.find(
+    (candidate) => candidate.key === key,
+  );
   const minWidth = column?.minWidth ?? 72;
   if (!Number.isFinite(width)) {
     return DEFAULT_FILE_BROWSER_COLUMN_WIDTHS[key];
@@ -272,6 +304,10 @@ export function FileBrowserDrawer({
     useState<CreateEntryState | null>(null);
   const [uploadChoiceOpen, setUploadChoiceOpen] = useState(false);
   const [editorState, setEditorState] = useState<EditorState | null>(null);
+  const [markdownEditorState, setMarkdownEditorState] =
+    useState<MarkdownEditorState | null>(null);
+  const [markdownDialogOpen, setMarkdownDialogOpen] = useState(false);
+  const [savingMarkdown, setSavingMarkdown] = useState(false);
   const [chmodState, setChmodState] = useState<ChmodState | null>(null);
   const [dragDepth, setDragDepth] = useState(0);
   const [previewHeight, setPreviewHeight] = useState(() => {
@@ -287,9 +323,7 @@ export function FileBrowserDrawer({
       return 240;
     }
   });
-  const [columnWidths, setColumnWidths] = useState(
-    loadFileBrowserColumnWidths,
-  );
+  const [columnWidths, setColumnWidths] = useState(loadFileBrowserColumnWidths);
   const [pathInputValue, setPathInputValue] = useState("");
 
   const {
@@ -410,6 +444,13 @@ export function FileBrowserDrawer({
     selectedPaths.includes(entry.path),
   );
   const selectedFile = selectedEntries.length === 1 ? selectedEntries[0] : null;
+  const selectedMarkdownPreview =
+    selectedFile &&
+    isMarkdownFileName(selectedFile.name) &&
+    isTextPreview(preview) &&
+    preview.path === selectedFile.path
+      ? preview
+      : null;
   const imagePreview =
     preview &&
     preview.encoding === "binary" &&
@@ -427,6 +468,79 @@ export function FileBrowserDrawer({
     [columnWidths],
   );
 
+  useEffect(() => {
+    if (!selectedMarkdownPreview || !selectedFile) {
+      if (selectedFile && !isMarkdownFileName(selectedFile.name)) {
+        setMarkdownEditorState(null);
+        setMarkdownDialogOpen(false);
+      }
+      return;
+    }
+
+    setMarkdownEditorState((current) => {
+      if (current?.path !== selectedFile.path) {
+        return {
+          path: selectedFile.path,
+          content: selectedMarkdownPreview.content,
+          savedContent: selectedMarkdownPreview.content,
+          mode: "preview",
+        };
+      }
+
+      if (
+        current.content === current.savedContent &&
+        current.savedContent !== selectedMarkdownPreview.content
+      ) {
+        return {
+          ...current,
+          content: selectedMarkdownPreview.content,
+          savedContent: selectedMarkdownPreview.content,
+        };
+      }
+
+      return current;
+    });
+  }, [selectedFile, selectedMarkdownPreview]);
+
+  function selectFileBrowserPath(
+    pathValue: string,
+    modifiers?: { additive?: boolean; range?: boolean },
+  ): boolean {
+    if (
+      markdownEditorState &&
+      markdownEditorState.content !== markdownEditorState.savedContent &&
+      markdownEditorState.path !== pathValue &&
+      !window.confirm("当前 Markdown 有未保存修改，确定放弃并切换文件？")
+    ) {
+      return false;
+    }
+
+    selectPath(pathValue, modifiers);
+    if (markdownEditorState?.path !== pathValue) {
+      setMarkdownDialogOpen(false);
+    }
+    return true;
+  }
+
+  async function handleSaveMarkdown() {
+    if (!markdownEditorState) {
+      return;
+    }
+
+    const { path, content } = markdownEditorState;
+    setSavingMarkdown(true);
+    try {
+      await saveTextFile(path, content);
+      setMarkdownEditorState((current) =>
+        current?.path === path
+          ? { ...current, savedContent: content }
+          : current,
+      );
+    } finally {
+      setSavingMarkdown(false);
+    }
+  }
+
   async function handleOpenEditor(entry: FileEntry) {
     const filePreview =
       preview && preview.path === entry.path
@@ -434,6 +548,21 @@ export function FileBrowserDrawer({
         : await previewFile({ path: entry.path, sshTarget });
 
     if (filePreview.encoding !== "utf8") {
+      return;
+    }
+
+    if (isMarkdownFileName(entry.name)) {
+      setMarkdownEditorState((current) => ({
+        path: entry.path,
+        content:
+          current?.path === entry.path ? current.content : filePreview.content,
+        savedContent:
+          current?.path === entry.path
+            ? current.savedContent
+            : filePreview.content,
+        mode: "edit",
+      }));
+      setMarkdownDialogOpen(true);
       return;
     }
 
@@ -731,130 +860,143 @@ export function FileBrowserDrawer({
             )}
             {error && <div className="file-browser-error">{error}</div>}
             <div className="file-browser-table-scroll">
-            <div
-              className="file-browser-table file-browser-table--header"
-              style={fileTableStyle}
-            >
-              {FILE_BROWSER_COLUMNS.map((column, index) => (
-                <div className="file-browser-header-cell" key={column.key}>
-                  {column.key === "name" ? (
-                    <div className="file-browser-name-header">
+              <div
+                className="file-browser-table file-browser-table--header"
+                style={fileTableStyle}
+              >
+                {FILE_BROWSER_COLUMNS.map((column, index) => (
+                  <div className="file-browser-header-cell" key={column.key}>
+                    {column.key === "name" ? (
+                      <div className="file-browser-name-header">
+                        <button
+                          className="file-browser-name-sort-button"
+                          type="button"
+                          onClick={() => toggleSort("name")}
+                        >
+                          {renderSortLabel(column)}
+                        </button>
+                        <button
+                          aria-label="返回上一级目录"
+                          className="file-browser-up-one-level"
+                          disabled={!ready}
+                          onClick={goUp}
+                          title="返回上一级目录"
+                          type="button"
+                        >
+                          ↑
+                        </button>
+                      </div>
+                    ) : (
                       <button
-                        className="file-browser-name-sort-button"
+                        className="file-browser-column-sort-button"
                         type="button"
-                        onClick={() => toggleSort("name")}
+                        onClick={() =>
+                          column.sortKey && toggleSort(column.sortKey)
+                        }
                       >
                         {renderSortLabel(column)}
                       </button>
+                    )}
+                    {index < FILE_BROWSER_COLUMNS.length - 1 && (
                       <button
-                        aria-label="返回上一级目录"
-                        className="file-browser-up-one-level"
-                        disabled={!ready}
-                        onClick={goUp}
-                        title="返回上一级目录"
+                        aria-label={`调整${column.label}列宽`}
+                        className="file-browser-column-resizer"
+                        data-testid={`file-browser-column-resizer-${column.key}`}
+                        onMouseDown={(event) => {
+                          columnResizeRef.current = {
+                            key: column.key,
+                            startX: event.clientX,
+                            startWidth: columnWidths[column.key],
+                          };
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        role="separator"
+                        title={`拖动调整${column.label}列宽`}
                         type="button"
-                      >
-                        ↑
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      className="file-browser-column-sort-button"
-                      type="button"
-                      onClick={() => column.sortKey && toggleSort(column.sortKey)}
-                    >
-                      {renderSortLabel(column)}
-                    </button>
-                  )}
-                  {index < FILE_BROWSER_COLUMNS.length - 1 && (
-                    <button
-                      aria-label={`调整${column.label}列宽`}
-                      className="file-browser-column-resizer"
-                      data-testid={`file-browser-column-resizer-${column.key}`}
-                      onMouseDown={(event) => {
-                        columnResizeRef.current = {
-                          key: column.key,
-                          startX: event.clientX,
-                          startWidth: columnWidths[column.key],
-                        };
-                        event.preventDefault();
-                        event.stopPropagation();
-                      }}
-                      role="separator"
-                      title={`拖动调整${column.label}列宽`}
-                      type="button"
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="file-browser-rows" data-testid="file-browser-rows">
-              {entries.map((entry) => {
-                const selected = selectedPaths.includes(entry.path);
-                return (
-                  <div
-                    key={entry.path}
-                    className={`file-browser-table file-browser-row${selected ? " is-selected" : ""}`}
-                    data-testid={`file-entry-${entry.name}`}
-                    style={fileTableStyle}
-                    draggable
-                    onDragStart={(event) => {
-                      event.dataTransfer.setData("text/plain", entry.path);
-                      event.dataTransfer.effectAllowed = "copy";
-                    }}
-                    onClick={(event) =>
-                      selectPath(entry.path, {
-                        additive: event.metaKey || event.ctrlKey,
-                        range: event.shiftKey,
-                      })
-                    }
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      selectPath(entry.path);
-                      setContextMenu({
-                        entry,
-                        x: event.clientX,
-                        y: event.clientY,
-                      });
-                    }}
-                    onDoubleClick={async () => {
-                      if (entry.type === "directory" || (entry.type === "symlink" && entry.symlinkTargetType === "directory")) {
-                        await navigate(entry.path);
-                        return;
-                      }
-
-                      await handleOpenEditor(entry);
-                    }}
-                  >
-                    <label className="file-browser-name">
-                      <input
-                        checked={selected}
-                        onClick={(event) => event.stopPropagation()}
-                        onChange={(event) =>
-                          setCheckboxSelection(
-                            entry.path,
-                            event.currentTarget.checked,
-                          )
-                        }
-                        type="checkbox"
                       />
-                      <span className="file-browser-icon">
-                        {getFileIcon(entry)}
-                      </span>
-                      <span>{entry.name}</span>
-                    </label>
-                    <span>
-                      {entry.type === "directory" || (entry.type === "symlink" && entry.symlinkTargetType === "directory")
-                        ? "—"
-                        : formatSize(entry.size)}
-                    </span>
-                    <span>{new Date(entry.modifiedAt).toLocaleString()}</span>
-                    <span>{entry.owner}</span>
-                    <span>{entry.permissions}</span>
+                    )}
                   </div>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+              <div
+                className="file-browser-rows"
+                data-testid="file-browser-rows"
+              >
+                {entries.map((entry) => {
+                  const selected = selectedPaths.includes(entry.path);
+                  return (
+                    <div
+                      key={entry.path}
+                      className={`file-browser-table file-browser-row${selected ? " is-selected" : ""}`}
+                      data-testid={`file-entry-${entry.name}`}
+                      style={fileTableStyle}
+                      draggable
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData("text/plain", entry.path);
+                        event.dataTransfer.effectAllowed = "copy";
+                      }}
+                      onClick={(event) =>
+                        selectFileBrowserPath(entry.path, {
+                          additive: event.metaKey || event.ctrlKey,
+                          range: event.shiftKey,
+                        })
+                      }
+                      onContextMenu={(event) => {
+                        event.preventDefault();
+                        if (!selectFileBrowserPath(entry.path)) {
+                          return;
+                        }
+                        setContextMenu({
+                          entry,
+                          x: event.clientX,
+                          y: event.clientY,
+                        });
+                      }}
+                      onDoubleClick={async () => {
+                        if (
+                          entry.type === "directory" ||
+                          (entry.type === "symlink" &&
+                            entry.symlinkTargetType === "directory")
+                        ) {
+                          await navigate(entry.path);
+                          return;
+                        }
+
+                        await handleOpenEditor(entry);
+                      }}
+                    >
+                      <label className="file-browser-name">
+                        <input
+                          checked={selected}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) =>
+                            setCheckboxSelection(
+                              entry.path,
+                              event.currentTarget.checked,
+                            )
+                          }
+                          type="checkbox"
+                        />
+                        <span className="file-browser-icon">
+                          {getFileIcon(entry)}
+                        </span>
+                        <span>{entry.name}</span>
+                      </label>
+                      <span>
+                        {entry.type === "directory" ||
+                        (entry.type === "symlink" &&
+                          entry.symlinkTargetType === "directory")
+                          ? "—"
+                          : formatSize(entry.size)}
+                      </span>
+                      <span>{new Date(entry.modifiedAt).toLocaleString()}</span>
+                      <span>{entry.owner}</span>
+                      <span>{entry.permissions}</span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
           <div
@@ -883,15 +1025,8 @@ export function FileBrowserDrawer({
               {selectedFile ? (
                 isTextPreview(preview) ? (
                   <>
-                    <div className="file-browser-preview-actions">
-                      <button
-                        className="file-browser-pill"
-                        onClick={() => handleOpenEditor(selectedFile)}
-                        type="button"
-                      >
-                        编辑
-                      </button>
-                      {sshTarget && (
+                    {selectedMarkdownPreview && sshTarget && (
+                      <div className="file-browser-preview-actions">
                         <button
                           className="file-browser-pill"
                           onClick={() =>
@@ -906,11 +1041,69 @@ export function FileBrowserDrawer({
                         >
                           chmod
                         </button>
-                      )}
-                    </div>
-                    <pre className="file-browser-preview-text">
-                      {preview.content}
-                    </pre>
+                      </div>
+                    )}
+                    {selectedMarkdownPreview && markdownEditorState ? (
+                      <Suspense
+                        fallback={
+                          <div className="file-browser-preview-empty">
+                            正在加载 Markdown 预览...
+                          </div>
+                        }
+                      >
+                        <LazyMarkdownFilePreview
+                          content={markdownEditorState.content}
+                          dirty={
+                            markdownEditorState.content !==
+                            markdownEditorState.savedContent
+                          }
+                          mode={markdownEditorState.mode}
+                          onContentChange={(content) =>
+                            setMarkdownEditorState((current) =>
+                              current ? { ...current, content } : current,
+                            )
+                          }
+                          onModeChange={(mode) =>
+                            setMarkdownEditorState((current) =>
+                              current ? { ...current, mode } : current,
+                            )
+                          }
+                          onSave={handleSaveMarkdown}
+                          saving={savingMarkdown}
+                        />
+                      </Suspense>
+                    ) : (
+                      <>
+                        <div className="file-browser-preview-actions">
+                          <button
+                            className="file-browser-pill"
+                            onClick={() => handleOpenEditor(selectedFile)}
+                            type="button"
+                          >
+                            编辑
+                          </button>
+                          {sshTarget && (
+                            <button
+                              className="file-browser-pill"
+                              onClick={() =>
+                                setChmodState({
+                                  path: selectedFile.path,
+                                  value: toModeFromPermissions(
+                                    selectedFile.permissions,
+                                  ),
+                                })
+                              }
+                              type="button"
+                            >
+                              chmod
+                            </button>
+                          )}
+                        </div>
+                        <pre className="file-browser-preview-text">
+                          {preview.content}
+                        </pre>
+                      </>
+                    )}
                   </>
                 ) : imagePreview ? (
                   <img
@@ -943,7 +1136,9 @@ export function FileBrowserDrawer({
           className="file-browser-context-menu"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
-          {(contextMenu.entry.type === "directory" || (contextMenu.entry.type === "symlink" && contextMenu.entry.symlinkTargetType === "directory")) && (
+          {(contextMenu.entry.type === "directory" ||
+            (contextMenu.entry.type === "symlink" &&
+              contextMenu.entry.symlinkTargetType === "directory")) && (
             <button
               onClick={() => {
                 const targetPath = contextMenu.entry.path;
@@ -1234,6 +1429,35 @@ export function FileBrowserDrawer({
             </div>
           </div>
         </div>
+      )}
+
+      {markdownDialogOpen && markdownEditorState && (
+        <Suspense fallback={null}>
+          <LazyMarkdownFileDialog
+            content={markdownEditorState.content}
+            dirty={
+              markdownEditorState.content !== markdownEditorState.savedContent
+            }
+            fileName={
+              markdownEditorState.path.split("/").filter(Boolean).pop() ??
+              "Markdown"
+            }
+            mode={markdownEditorState.mode}
+            onClose={() => setMarkdownDialogOpen(false)}
+            onContentChange={(content) =>
+              setMarkdownEditorState((current) =>
+                current ? { ...current, content } : current,
+              )
+            }
+            onModeChange={(mode) =>
+              setMarkdownEditorState((current) =>
+                current ? { ...current, mode } : current,
+              )
+            }
+            onSave={handleSaveMarkdown}
+            saving={savingMarkdown}
+          />
+        </Suspense>
       )}
 
       {chmodState && (

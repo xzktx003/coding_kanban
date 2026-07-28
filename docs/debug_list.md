@@ -282,6 +282,14 @@
 - **测试**: `terminal-wheel.test.ts` 覆盖路由矩阵；修正后的 `tmux-enhancements.spec.ts` 在点击后重新取基线，并只接受 SGR/legacy wheel code `64/65`。同时回归普通终端历史、tmux 预灌历史、持续输出锁定、多屏非输入 pane 和扫描弹层防穿透。
 - **文件**: `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/terminal-wheel.ts`, `tests/e2e/tmux-enhancements.spec.ts`
 
+### Markdown 预览中的 LaTeX 公式无法渲染
+
+- **现象**: `.md` / `.markdown` 文件中的数学公式在内联预览、双击弹窗和实时分屏中显示为原始源码；尤其是论文文档常用的 `\(...\)` 和 `\[...\]` 即使接入 `remark-math` 后仍无法解析。
+- **根因**: 初始 Markdown 渲染链没有数学 AST 和排版引擎；后续接入的 `remark-math` 官方语法又只识别美元分隔符，不识别目标文档使用的 LaTeX 反斜线分隔符。
+- **修复**: 使用 `remark-math`、`rehype-katex` 和 `katex` 渲染美元分隔符；在 Markdown 解析前把普通文本区域的 `\(...\)` / `\[...\]` 规范化为对应美元分隔符，同时跳过行内代码、fenced code 和缩进代码。长块级公式允许横向滚动，错误公式降级为可见错误文本，原始 HTML 仍不执行。
+- **测试**: `MarkdownFilePreview.test.ts` 覆盖四种公式分隔符、块级积分/分式、KaTeX display、MathML 和代码区域保护；目标 `APA_RF_LABC_RANKSTATIC_UNIFORM_BME_COMPARISON.md` 完整渲染得到 93 个 KaTeX/MathML 节点、37 个块级公式和 0 个 KaTeX 错误。
+- **文件**: `apps/web/src/components/MarkdownFilePreview.tsx`, `apps/web/src/components/MarkdownFilePreview.test.ts`, `apps/web/src/app.css`
+
 ### 热更新与历史会话恢复
 
 - 本地 tmux 的普通输入、移动端快捷键和分帧 bracketed paste 曾全部走 attached client PTY，导致 `Ctrl+A` / `Ctrl+B` 前缀与普通 TUI 输入互相干扰。修复为 `LocalTmuxInputRouter` 统一 REST/WebSocket 队列：普通输入走目标 pane，鼠标和 tmux 前缀及其下一条命令走 attached PTY，CSI-u Enter 保持原始字节。
