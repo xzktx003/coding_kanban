@@ -1443,6 +1443,155 @@ test("browser: tmux mouse clicks are handled by tmux instead of leaking escape b
   }
 });
 
+test("browser: Safari native insertText recovers characters missed by xterm during fast typing", async ({
+  page,
+  request,
+}) => {
+  const sessionName = `e2e-safari-fast-input-${Date.now()}`;
+  const displayName = `E2E Safari Fast Input ${Date.now()}`;
+  const recoveredMarker = `recovered${Date.now()}`;
+  const fastMarker = "abcdefghijklmnopqrstuvwxyz".repeat(4);
+  const readyMarker = `SAFARI_FAST_READY_${Date.now()}`;
+  const capturePath = path.join(
+    os.tmpdir(),
+    `coding-kanban-safari-fast-${Date.now()}.txt`,
+  );
+  let launchedSessionId: string | undefined;
+
+  killTmuxSession(sessionName);
+  fs.rmSync(capturePath, { force: true });
+
+  try {
+    runTmux([
+      "new-session",
+      "-d",
+      "-s",
+      sessionName,
+      "-c",
+      process.cwd(),
+      [
+        "node -e ",
+        JSON.stringify(
+          [
+            "const fs = require('node:fs');",
+            "process.stdin.setRawMode(true);",
+            "process.stdin.resume();",
+            `console.log(${JSON.stringify(readyMarker)});`,
+            "const chunks = [];",
+            "process.stdin.on('data', (chunk) => {",
+            "chunks.push(chunk);",
+            `fs.writeFileSync(${JSON.stringify(capturePath)}, Buffer.concat(chunks));`,
+            "});",
+          ].join(""),
+        ),
+      ].join(""),
+    ]);
+
+    const launchResponse = await request.post(
+      backendPath("/api/agent-launch/pty"),
+      {
+        data: {
+          workspaceId: "default",
+          displayName,
+          agentKind: "copilot",
+          command: `tmux attach -t '${sessionName}'`,
+          workingDirectory: process.cwd(),
+          tmuxSessionName: sessionName,
+        },
+      },
+    );
+
+    expect(launchResponse.ok()).toBeTruthy();
+    launchedSessionId = (await launchResponse.json()).id;
+    await waitForSessionInList(request, launchedSessionId!);
+
+    await page.addInitScript(() => {
+      Object.defineProperty(window.navigator, "userAgent", {
+        configurable: true,
+        get: () =>
+          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/18.5 Safari/605.1.15",
+      });
+      Object.defineProperty(window.navigator, "vendor", {
+        configurable: true,
+        get: () => "Apple Computer, Inc.",
+      });
+    });
+    await page.goto("/");
+    await ensureGridMode(page);
+
+    const card = page.locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: displayName }),
+    });
+    await expect(card).toBeVisible({ timeout: 15000 });
+    await card.dblclick();
+
+    const screen = page.locator(".focus-main .terminal-view .xterm-screen");
+    await expect(screen).toBeVisible({ timeout: 15000 });
+    await expect
+      .poll(() => tmuxPaneContainsText(sessionName, readyMarker))
+      .toBeTruthy();
+    await screen.click();
+
+    await page.evaluate((nativeText) => {
+      const textarea = document.querySelector(
+        ".focus-main .xterm-helper-textarea",
+      );
+      if (!(textarea instanceof HTMLTextAreaElement)) {
+        throw new Error("xterm helper textarea is unavailable");
+      }
+
+      // WebKit can deliver composed insertText while xterm still records an
+      // active keydown, causing xterm's single _keyDownSeen flag to suppress it.
+      textarea.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Shift",
+          keyCode: 16,
+        }),
+      );
+      textarea.dispatchEvent(
+        new InputEvent("input", {
+          bubbles: true,
+          composed: true,
+          data: nativeText,
+          inputType: "insertText",
+        }),
+      );
+      textarea.dispatchEvent(
+        new KeyboardEvent("keyup", {
+          bubbles: true,
+          key: "Shift",
+          keyCode: 16,
+        }),
+      );
+    }, recoveredMarker);
+
+    await page.keyboard.type(fastMarker);
+
+    const expectedInput = `${recoveredMarker}${fastMarker}`;
+    await expect
+      .poll(
+        () => {
+          try {
+            return fs.readFileSync(capturePath, "utf8");
+          } catch {
+            return "";
+          }
+        },
+        { timeout: 10000 },
+      )
+      .toBe(expectedInput);
+  } finally {
+    if (launchedSessionId) {
+      await request.delete(
+        backendPath(`/api/agent-sessions/${launchedSessionId}`),
+      );
+    }
+    fs.rmSync(capturePath, { force: true });
+    killTmuxSession(sessionName);
+  }
+});
+
 test("browser: 切回浏览器窗口后会恢复 tmux 输入焦点", async ({
   page,
   request,

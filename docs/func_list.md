@@ -74,6 +74,7 @@
 - 服务端生成的 tmux attach 命令和带显式命令的 direct PTY 使用非交互 `/bin/sh` 执行，不加载用户 shell 启动文件；未指定命令时仍启动用户原生交互 shell。
 - 本地 tmux 普通文本、移动端快捷键、方向键和 bracketed paste 通过有序 `send-keys` 路径写入；鼠标协议以及 `Ctrl+A` / `Ctrl+B` 前缀和紧随其后的 tmux 命令通过 attached client PTY 处理。鼠标或前缀命令改变 tmux 活动 pane 后，后续普通输入按 session 级目标跟随当前活动 pane，不再继续写入接入时记录的旧 pane。
 - 桌面 xterm 把 macOS `Option` 和 Windows/Linux `Alt` 统一编码为终端 Meta 修饰键；`Option+Space` / `Alt+Space` 及常用 Meta 字母、数字组合在本地 tmux 中作为单个 `M-*` 键发送，不再拆成 `Escape` 与普通字符。Windows 系统若优先占用 `Alt+Space`，可使用跨平台 `Shift+Enter` 换行。
+- Safari 快速输入时同时核对 xterm `onData` 与浏览器原生 `insertText`；若 WebKit 已产生文本输入但 xterm 没有发出对应数据，只补发缺失字符。该恢复路径仅在 Safari 启用，并排除 IME composition、控制键及其他浏览器。
 - `Shift+Enter`、`Ctrl+Enter` 的 CSI-u 序列按浏览器原始字节写入 pane，不依赖不同 tmux 版本对 `S-Enter` / `C-Enter` 键名的支持。
 - 支持终端输出发起的 OSC 52 剪贴板写入；tmux copy-mode 可通过 pane 内选择把内容写入浏览器剪贴板，前端只接受 clipboard target 且限制 payload 大小。
 - 支持终端焦点补救和输入所有权；真实 stdin 默认只落到当前聚焦主终端，多终端监控模式下也只落到当前输入窗格。交互终端开启 mouse tracking 时，普通滚轮作为鼠标协议发送到当前 tmux/TUI pane；`Shift+滚轮`、未开启 mouse tracking 的终端和非输入监控窗格继续滚动各自 xterm scrollback。

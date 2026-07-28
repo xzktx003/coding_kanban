@@ -30,6 +30,12 @@ import {
 import { shouldAttemptTerminalInputForward } from "../lib/terminal-input-forwarding";
 import { stripTerminalResponsePayload } from "../lib/terminal-input";
 import {
+  createSafariTextInputRecoveryState,
+  isSafariTerminalInputRecoveryRequired,
+  recordTerminalTextForSafariRecovery,
+  recoverSafariNativeTextInput,
+} from "../lib/terminal-safari-input";
+import {
   computeTerminalWheelScrollLines,
   shouldForwardTerminalWheelToApplication,
 } from "../lib/terminal-wheel";
@@ -184,12 +190,20 @@ export function TerminalView({
       null;
     let handleDocumentKeyDownCapture: ((event: KeyboardEvent) => void) | null =
       null;
+    let handleSafariNativeInput: ((event: Event) => void) | null = null;
     let disposed = false;
     let closeAfterOpen = false;
     let lastExternalPointerIntentAt = 0;
     let lastExternalUserIntentAt = 0;
     let lastTerminalIntentAt = 0;
     let wheelScrollRemainder = 0;
+    const safariInputRecoveryState = createSafariTextInputRecoveryState();
+    const recoverSafariNativeInput =
+      typeof navigator !== "undefined" &&
+      isSafariTerminalInputRecoveryRequired({
+        userAgent: navigator.userAgent,
+        vendor: navigator.vendor,
+      });
 
     const ensureInputOwner = () => {
       if (!inputEnabledRef.current) {
@@ -1027,7 +1041,10 @@ export function TerminalView({
       }
     };
 
-    term.onData((data) => {
+    const forwardTerminalInput = (
+      data: string,
+      recordForSafariRecovery: boolean,
+    ): boolean => {
       const sanitized = stripTerminalResponsePayload(data);
       const socketOpen = ws?.readyState === WebSocket.OPEN;
       if (
@@ -1037,14 +1054,57 @@ export function TerminalView({
           socketOpen,
         })
       ) {
-        return;
+        return false;
       }
 
       if (ws && (!inputEnabledRef.current || ensureInputOwner())) {
         reportFocusedTerminalBeforeInput();
         ws.send(sanitized);
+        if (recoverSafariNativeInput && recordForSafariRecovery) {
+          recordTerminalTextForSafariRecovery(
+            safariInputRecoveryState,
+            sanitized,
+            performance.now(),
+          );
+        }
+        return true;
       }
+
+      return false;
+    };
+
+    term.onData((data) => {
+      forwardTerminalInput(data, true);
     });
+
+    if (recoverSafariNativeInput) {
+      handleSafariNativeInput = (event) => {
+        const inputEvent = event as InputEvent;
+        const target = inputEvent.target as HTMLTextAreaElement | null;
+        if (
+          !target ||
+          target !== getHelperTextarea() ||
+          inputEvent.inputType !== "insertText" ||
+          inputEvent.isComposing ||
+          !inputEvent.data
+        ) {
+          return;
+        }
+
+        const missingText = recoverSafariNativeTextInput(
+          safariInputRecoveryState,
+          inputEvent.data,
+          performance.now(),
+        );
+        if (!missingText) {
+          return;
+        }
+
+        target.value = "";
+        forwardTerminalInput(missingText, false);
+      };
+      container.addEventListener("input", handleSafariNativeInput);
+    }
 
     term.onBinary((data) => {
       const sanitized = stripTerminalResponsePayload(data);
@@ -1418,6 +1478,9 @@ export function TerminalView({
           handleDocumentKeyDownCapture,
           true,
         );
+      }
+      if (handleSafariNativeInput) {
+        container.removeEventListener("input", handleSafariNativeInput);
       }
       if (handleWindowFocus) {
         window.removeEventListener("focus", handleWindowFocus);

@@ -274,6 +274,14 @@
 - **测试**: `terminal-wheel.test.ts` 覆盖路由矩阵；修正后的 `tmux-enhancements.spec.ts` 在点击后重新取基线，并只接受 SGR/legacy wheel code `64/65`。同时回归普通终端历史、tmux 预灌历史、持续输出锁定、多屏非输入 pane 和扫描弹层防穿透。
 - **文件**: `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/terminal-wheel.ts`, `tests/e2e/tmux-enhancements.spec.ts`
 
+### Safari 快速输入时终端漏字
+
+- **现象**: Safari 中连续快速输入字母时，Codex/tmux 输入框会间歇漏字；降低输入速度后字符完整。
+- **根因**: WebKit 快速输入时可能在 xterm 仍记录着活动 `keydown` 的情况下派发 composed `insertText`；xterm 6 使用单个 `_keyDownSeen` 状态判断原生 input 是否已经由键盘事件处理，因此会忽略这条仍有效的文本事件且不触发 `onData`。
+- **修复**: 仅在 Safari 中记录 xterm 已发送的短时普通文本；当 xterm 忽略的原生 `insertText` 冒泡到 `TerminalView` 时，按顺序抵消已发送字符并只补发缺失部分。恢复状态 100ms 后过期，控制序列会清空状态，IME composition 和非 Safari 浏览器保持原路径。
+- **测试**: `terminal-safari-input.test.ts` 覆盖浏览器识别、完整去重、缺失后缀、交错按键和过期状态；Playwright 复现 WebKit 的 `keydown`/`insertText` 交错并断言完整字符串到达真实 tmux raw stdin，同时回归窗口切回、helper textarea 失焦和标题失焦后的普通输入。
+- **文件**: `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/terminal-safari-input.ts`, `tests/e2e/tmux-enhancements.spec.ts`
+
 ### 热更新与历史会话恢复
 
 - 本地 tmux 的普通输入、移动端快捷键和分帧 bracketed paste 曾全部走 attached client PTY，导致 `Ctrl+A` / `Ctrl+B` 前缀与普通 TUI 输入互相干扰。修复为 `LocalTmuxInputRouter` 统一 REST/WebSocket 队列：普通输入走目标 pane，鼠标和 tmux 前缀及其下一条命令走 attached PTY，CSI-u Enter 保持原始字节。
