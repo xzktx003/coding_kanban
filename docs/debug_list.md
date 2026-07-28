@@ -242,6 +242,14 @@
 - **测试**: `apps/web/src/components/AppUpdateBanner.test.ts` 覆盖失败通知关闭按钮、成功/失败差异化自动关闭时间和恢复中不自动关闭。
 - **文件**: `apps/web/src/components/AppUpdateBanner.tsx`, `apps/web/src/App.tsx`
 
+### 返回宫格后双击终端卡片无法再次进入主窗口
+
+- **现象**: 从聚焦主窗口返回宫格后，双击卡片的终端区域有时不会再次放大到主窗口，尤其容易受完整 xterm 预览和卡片内部控件的鼠标事件影响。
+- **根因**: 宫格卡片只在冒泡阶段监听 `onDoubleClick`；终端/xterm 或其他嵌套元素可以在特定浏览器状态下提前处理并阻断双击事件，导致外层卡片收不到通知。
+- **修复**: 卡片改用 `onDoubleClickCapture` 在捕获阶段处理双击；按钮、输入框、分组选择器、链接等真实控件仍被排除，xterm helper textarea 则明确按终端区域处理。
+- **测试**: `apps/web/src/components/AgentGridCard.test.ts` 覆盖嵌套终端与真实控件的目标判定；真实 Chromium 分别验证轻量预览和完整 xterm 预览的“进入主窗口 → 返回宫格 → 再次双击进入主窗口”。
+- **文件**: `apps/web/src/components/AgentGridCard.tsx`
+
 ### 聚焦视图监控会话从右侧卡片列表消失
 
 - **现象**: 会话进入大屏监控窗格后会从右侧小卡片分组中消失，用户无法从卡片判断其对应的窗格序号，也看不到当前黄色焦点的双向关联。
@@ -281,6 +289,14 @@
 - **修复**: 仅在 Safari 中记录 xterm 已发送的短时普通文本；当 xterm 忽略的原生 `insertText` 冒泡到 `TerminalView` 时，按顺序抵消已发送字符并只补发缺失部分。恢复状态 100ms 后过期，控制序列会清空状态，IME composition 和非 Safari 浏览器保持原路径。
 - **测试**: `terminal-safari-input.test.ts` 覆盖浏览器识别、完整去重、缺失后缀、交错按键和过期状态；Playwright 复现 WebKit 的 `keydown`/`insertText` 交错并断言完整字符串到达真实 tmux raw stdin，同时回归窗口切回、helper textarea 失焦和标题失焦后的普通输入。
 - **文件**: `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/terminal-safari-input.ts`, `tests/e2e/tmux-enhancements.spec.ts`
+
+### Markdown 预览中的 LaTeX 公式无法渲染
+
+- **现象**: `.md` / `.markdown` 文件中的数学公式在内联预览、双击弹窗和实时分屏中显示为原始源码；尤其是论文文档常用的 `\(...\)` 和 `\[...\]` 即使接入 `remark-math` 后仍无法解析。
+- **根因**: 初始 Markdown 渲染链没有数学 AST 和排版引擎；后续接入的 `remark-math` 官方语法又只识别美元分隔符，不识别目标文档使用的 LaTeX 反斜线分隔符。
+- **修复**: 使用 `remark-math`、`rehype-katex` 和 `katex` 渲染美元分隔符；在 Markdown 解析前把普通文本区域的 `\(...\)` / `\[...\]` 规范化为对应美元分隔符，同时跳过行内代码、fenced code 和缩进代码。长块级公式允许横向滚动，错误公式降级为可见错误文本，原始 HTML 仍不执行。
+- **测试**: `MarkdownFilePreview.test.ts` 覆盖四种公式分隔符、块级积分/分式、KaTeX display、MathML 和代码区域保护；目标 `APA_RF_LABC_RANKSTATIC_UNIFORM_BME_COMPARISON.md` 完整渲染得到 93 个 KaTeX/MathML 节点、37 个块级公式和 0 个 KaTeX 错误。
+- **文件**: `apps/web/src/components/MarkdownFilePreview.tsx`, `apps/web/src/components/MarkdownFilePreview.test.ts`, `apps/web/src/app.css`
 
 ### 热更新与历史会话恢复
 

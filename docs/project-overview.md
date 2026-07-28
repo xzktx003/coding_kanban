@@ -170,6 +170,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 本地和 SSH 远端文件列表。
 - 面包屑、返回上级目录、显示隐藏文件、过滤、排序。
 - 文件预览，文本文件可编辑保存。
+- Markdown 文件默认渲染 GFM 和 KaTeX 数学公式；支持 `$...$` / `\(...\)` 行内公式与 `$$...$$` / `\[...\]` 块级公式。反斜线分隔符只在普通 Markdown 文本中规范化，行内代码、fenced code 和缩进代码保持原样。单击使用文件面板内联预览，双击打开浏览/编辑大窗口。桌面端大窗口可从右下角拖动调整宽高，并受当前视口边界约束；窗口支持预览、源码编辑和实时分屏，保存前显示未保存状态，原始 HTML 不注入页面。
 - 新建文件/目录、重命名、删除、chmod。
 - 上传、下载。
 - 支持拖拽上传。
@@ -318,6 +319,7 @@ memories/        仓库记忆，不是产品运行依赖
 - `DiscoveryDialog.tsx`、`TmuxDiscoveryPanel.tsx`、`AppDiscoveryPanel.tsx`：扫描和加入宫格。
 - `QuickTmuxConnect.tsx`：快速连接 tmux。
 - `FileBrowserDrawer.tsx`：文件浏览器。
+- `MarkdownFilePreview.tsx` / `MarkdownFileDialog.tsx`：按需加载的安全 Markdown/GFM/KaTeX 渲染、实时编辑、分屏和双击大窗口。
 - `VSCodeDrawer.tsx`：VS Code Web iframe 管理。
 - `HiddenSessionsDrawer.tsx`：隐藏会话管理。
 - `FilterBar.tsx`：筛选条。
@@ -563,6 +565,7 @@ UI 和 API 应围绕 `AgentSessionRecord` 工作。不要让 terminal id、tmux 
 - 本地和远端文件操作共用 UI，但底层分别走 `LocalFsService` 和 `SftpService`。
 - 上传限制为 500MB。
 - 预览要区分 utf8 和 binary。
+- Markdown 渲染使用 `react-markdown`、`remark-gfm`、`remark-math`、`rehype-katex` 和 `katex`；不启用原始 HTML 解析，KaTeX 保持默认非信任模式，外部链接使用新窗口和 `noopener noreferrer`。
 - 远端路径和身份要随 `sshTarget` 一起传，避免不同 SSH identity 混用。
 
 ### 设计和 UI 约束
