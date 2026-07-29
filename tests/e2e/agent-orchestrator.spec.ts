@@ -53,7 +53,7 @@ test("v2: 启动 PTY Agent 并在宫格中显示", async ({ page, request }) => 
   }
 });
 
-test("v2: 双击放大终端并可交互", async ({ page, request }) => {
+test("v2: 宫格卡片可从终端区域反复双击进入单屏", async ({ page, request }) => {
   const displayName = `交互测试-${Date.now()}`;
   let sessionId: string | undefined;
 
@@ -66,7 +66,7 @@ test("v2: 双击放大终端并可交互", async ({ page, request }) => {
       has: page.locator(".grid-card-name", { hasText: displayName }),
     });
     await expect(targetCard).toBeVisible({ timeout: 15000 });
-    await targetCard.dblclick();
+    await targetCard.locator(".grid-card-terminal").dblclick();
 
     await expect(page.locator(".focus-main")).toBeVisible({ timeout: 5000 });
     await expect(page.locator(".focus-main-name")).toContainText(displayName);
@@ -76,6 +76,11 @@ test("v2: 双击放大终端并可交互", async ({ page, request }) => {
 
     await expect(page.locator(".focus-main")).not.toBeVisible();
     await expect(targetCard).toBeVisible();
+
+    await targetCard.locator(".grid-card-footer").dblclick();
+
+    await expect(page.locator(".focus-main")).toBeVisible({ timeout: 5000 });
+    await expect(page.locator(".focus-main-name")).toContainText(displayName);
   } finally {
     await deleteSessionIfPresent(request, sessionId);
   }

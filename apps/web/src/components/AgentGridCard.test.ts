@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { shouldFocusGridCardFromDoubleClick } from "./AgentGridCard.js";
+import {
+  shouldFocusGridCardFromDoubleClick,
+  shouldFocusGridCardFromMouseDown,
+} from "./AgentGridCard.js";
 
 function targetMatching(...matchedSelectors: string[]): EventTarget {
   return {
@@ -42,4 +45,16 @@ test("grid cards ignore double clicks from real controls", () => {
       selector,
     );
   }
+});
+
+test("grid cards focus on the second primary-button press before descendants can disrupt dblclick", () => {
+  const terminalTarget = targetMatching(".terminal-preview");
+
+  assert.equal(shouldFocusGridCardFromMouseDown(1, 0, terminalTarget), false);
+  assert.equal(shouldFocusGridCardFromMouseDown(2, 0, terminalTarget), true);
+  assert.equal(shouldFocusGridCardFromMouseDown(2, 1, terminalTarget), false);
+  assert.equal(
+    shouldFocusGridCardFromMouseDown(2, 0, targetMatching("button")),
+    false,
+  );
 });

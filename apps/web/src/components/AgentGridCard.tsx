@@ -68,6 +68,18 @@ export function shouldFocusGridCardFromDoubleClick(
   );
 }
 
+export function shouldFocusGridCardFromMouseDown(
+  detail: number,
+  button: number,
+  target: EventTarget | null,
+): boolean {
+  return (
+    detail === 2 &&
+    button === 0 &&
+    shouldFocusGridCardFromDoubleClick(target)
+  );
+}
+
 function shortenPath(dir?: string): string {
   if (!dir) return "";
   let p = dir;
@@ -135,8 +147,14 @@ export function AgentGridCard({
   return (
     <div
       className={`grid-card ${stateClass}`}
-      onDoubleClickCapture={(event) => {
-        if (shouldFocusGridCardFromDoubleClick(event.target)) {
+      onMouseDownCapture={(event) => {
+        if (
+          shouldFocusGridCardFromMouseDown(
+            event.detail,
+            event.button,
+            event.target,
+          )
+        ) {
           onDoubleClick(session.id);
         }
       }}
