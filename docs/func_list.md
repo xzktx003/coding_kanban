@@ -68,7 +68,7 @@
 - 默认轻量预览模式下，宫格卡片和聚焦右侧栏不打开真实终端 WebSocket，只展示轻量文本预览，避免多会话时浏览器内存和网络流量随卡片数量线性膨胀。
 - 可切换到完整预览模式，恢复宫格卡片和聚焦右侧栏的旧版小终端预览。
 - 前端会对会话快照 WebSocket、终端实时 WebSocket、挂载中的 xterm/终端视图和 JS heap 做轻量采样，资源诊断面板只在打开时刷新，避免诊断自身形成持续负载。
-- 后端会对高频终端输出触发的看板全量快照做合并广播；结构性操作仍即时刷新，避免轻量预览场景下 `/ws/agent-sessions` 因逐帧输出形成网络和 JSON 解析风暴。
+- 后端会对高频终端输出触发的看板全量快照做约 1 秒的合并广播；结构性操作仍即时刷新，避免轻量预览场景下 `/ws/agent-sessions` 长时间形成网络、JSON 解析和 React 分配压力。
 - 支持 replay 完成前缓冲 live frame，避免历史输出与新输出乱序。
 - 支持 stdin、resize、binary 消息，binary 用于 tmux 鼠标等二进制事件。
 - 服务端生成的 tmux attach 命令和带显式命令的 direct PTY 使用非交互 `/bin/sh` 执行，不加载用户 shell 启动文件；未指定命令时仍启动用户原生交互 shell。
@@ -96,7 +96,7 @@
 - 本地后端优先复用 `code-server`，其次支持 `openvscode-server`；SSH 远端首版通过 SSH 启动/复用远端 `code-server`。
 - 本地会话使用稳定的 `.code-workspace` 文件；SSH 远端会话直接打开远端工作目录。
 - 扩展目录优先复用用户的 `~/.vscode-server/extensions`。
-- 浏览器侧 iframe 默认使用 VS Code 省内存模式，只保留当前打开的 iframe；可切换到保持状态模式，最多保留最近 8 个 iframe。
+- 浏览器侧 iframe 默认使用 VS Code 省内存模式，只保留当前打开的 iframe；可切换到保持状态模式，最多保留最近 3 个 iframe。
 - 支持一键释放 VS Code iframe 缓存，卸载非当前 iframe 以回收浏览器内存。
 
 ## 9. SSH 与环境适配

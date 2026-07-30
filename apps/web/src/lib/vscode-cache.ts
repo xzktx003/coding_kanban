@@ -1,4 +1,5 @@
 export const VSCODE_IFRAME_CACHE_MODE_STORAGE_KEY = "vscode-iframe-cache-mode";
+export const MAX_CACHED_VSCODE_IFRAMES = 3;
 
 export type VsCodeIframeCacheMode = "memory-saving" | "preserve-state";
 

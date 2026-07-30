@@ -250,6 +250,14 @@
 - **测试**: `apps/web/src/components/AgentGridCard.test.ts` 覆盖第二次主键按下、非主键和真实控件过滤；`tests/e2e/agent-orchestrator.spec.ts` 覆盖终端区域进入单屏、返回宫格、再从卡片底部进入单屏。
 - **文件**: `apps/web/src/components/AgentGridCard.tsx`
 
+### 看板长时间运行后浏览器内存再次持续增长
+
+- **现象**: 宫格已使用轻量预览且没有挂载 xterm/VS Code iframe 时，真实资源诊断仍显示 12 张卡片持续接收约 `4.2 msg/s`、`84 KB/s` 的全量会话快照；长时间运行会反复分配和解析数 GB JSON。保持状态模式还允许同时保活 8 个重量级 code-server iframe。
+- **根因**: 之前的快照合并窗口只有 250ms，活跃终端会稳定触发约 4 次/秒的全量看板 payload；资源诊断只按消息数判断，漏报低频大包。VS Code 成功响应缓存没有淘汰策略，iframe 保持上限也偏高。
+- **修复**: 输出触发的全量快照默认收紧到约 1 次/秒，结构性操作和聚焦终端实时流保持即时；诊断同时按消息频率和 `64 KB/s` 吞吐判压；保持状态 iframe 上限降为 3；VS Code 打开响应改为最多 16 条的有界最近缓存，并吞掉派生 Promise 的已处理拒绝，避免历史错误对象被未处理链路保留。
+- **测试**: 服务端覆盖默认 1 秒合并预算；前端覆盖高吞吐诊断、3 iframe 上限和历史响应淘汰；真实 Chromium 复测资源面板和反复宫格/单屏切换。
+- **文件**: `apps/server/src/services/agent-session-registry.ts`, `apps/web/src/lib/resource-diagnostics.ts`, `apps/web/src/lib/vscode-cache.ts`, `apps/web/src/lib/vscode-web-open.ts`
+
 ### 聚焦视图监控会话从右侧卡片列表消失
 
 - **现象**: 会话进入大屏监控窗格后会从右侧小卡片分组中消失，用户无法从卡片判断其对应的窗格序号，也看不到当前黄色焦点的双向关联。

@@ -381,6 +381,34 @@ test("bursty terminal output coalesces session snapshots behind an unref-ed time
   }
 });
 
+test("default snapshot coalescing keeps board-wide payloads to about once per second", () => {
+  const timers = installFakeTimers();
+
+  try {
+    const registry = new AgentSessionRegistry();
+    registry.subscribe(() => {});
+    const session = registry.register({
+      workspaceId: "test",
+      hostId: "local",
+      sourceType: "remote-tmux-discovered",
+      agentKind: "shell",
+      displayName: "snapshot-memory-budget",
+      interactionState: "running",
+    });
+
+    registry.appendOutput(session.id, "frame 1\n", "stdout");
+
+    assert.equal(timers.scheduled.size, 1);
+    const [timer] = [...timers.scheduled.keys()];
+    assert.ok(
+      timers.scheduled.get(timer)!.delay >= 900,
+      "default full-board snapshots should be coalesced to roughly 1 Hz",
+    );
+  } finally {
+    timers.restore();
+  }
+});
+
 test("immediate session updates cancel pending coalesced snapshots and publish the latest state", () => {
   const timers = installFakeTimers();
 

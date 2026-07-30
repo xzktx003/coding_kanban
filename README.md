@@ -261,7 +261,7 @@ curl http://127.0.0.1:4000/api/health
 - 本地会话使用稳定 `.code-workspace` 文件；SSH 远端会话直接打开远端工作目录。
 - 扩展目录优先复用用户的 `~/.vscode-server/extensions`。
 - 浏览器 iframe 默认使用“VS Code 省内存”模式，只保留当前 iframe。
-- 可切换到“VS Code 保持状态”模式，最多保留最近 8 个 iframe。
+- 可切换到“VS Code 保持状态”模式，最多保留最近 3 个 iframe。
 - “释放 VS Code 缓存”只卸载非当前 iframe，不停止后端 code-server 进程。
 
 ### 8. 顶栏、快捷键和状态持久化
@@ -343,8 +343,8 @@ Coding Kanban 的默认策略是“先省资源，再按需打开完整实时能
 
 - **轻量预览默认开启**：卡片和侧栏只展示轻量文本预览，不为非活跃会话打开终端 WebSocket。
 - **完整预览按需开启**：需要实时小终端预览时，可在“资源调节”里切换回完整预览。
-- **会话快照合并广播**：高频终端输出不会逐帧触发全量看板快照。
-- **VS Code iframe 省内存**：默认只保留当前 iframe；保持状态模式最多保留最近 8 个。
+- **会话快照合并广播**：高频终端输出不会逐帧触发全量看板快照，默认最多约每秒刷新一次卡片摘要。
+- **VS Code iframe 省内存**：默认只保留当前 iframe；保持状态模式最多保留最近 3 个。
 - **释放 VS Code 缓存**：可手动卸载隐藏 iframe，释放浏览器内存。
 - **资源诊断**：展示 xterm 实例数、终端 WebSocket 数、会话快照吞吐、终端实时流吞吐、VS Code iframe 数、VS Code 代理吞吐、主线程 long task 和 JS heap。
 - **轻量动效**：菜单、诊断面板、主机下拉、卡片、抽屉和弹窗只动画 `opacity` 与 `transform`，并遵循 `prefers-reduced-motion`。

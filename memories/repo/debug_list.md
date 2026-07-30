@@ -97,6 +97,7 @@
 - tmux 中 Codex 的 macOS `Option+Space` / Windows `Alt+Space` 无法作为换行快捷键：xterm 默认未把 macOS Option 当作 Meta，后端又把 `ESC+Space` 拆成 Escape 与空格；修复为开启 `macOptionIsMeta`，并把 Meta+Space、常用 Meta 字母/数字原子映射为 tmux `M-*`。Windows 窗口管理器若先占用 `Alt+Space`，使用现有 `Shift+Enter` 作为跨平台备用。
 - tmux/Codex mouse tracking 已开启时当前 pane 仍无法滚轮控制：此前为避免 wheel 变成输入历史方向键，在 capture 阶段无条件阻断所有 wheel，连合法鼠标协议也被吞掉；修复为普通 wheel 在交互 mouse-tracking 终端中放行给 xterm/tmux，`Shift+wheel`、普通 shell 和非输入 pane 仍滚本地 scrollback，并把 E2E 从“点击后总帧数增加”收紧为真实 wheel code `64/65`。
 - 返回宫格后双击卡片终端区域偶发无法再次进入主窗口：仅等待最终 `dblclick` 时，终端焦点接管或命中节点变化可能让浏览器不再向同一卡片派发双击。修复为卡片在捕获阶段识别第二次主键按下并立即聚焦，过滤按钮、输入框、分组下拉等真实控件，并允许 xterm helper textarea 触发聚焦。
+- 看板长时间运行后浏览器内存再次增长：真实轻量宫格仍接收约 4.2 次/秒、84 KB/s 的全量会话快照，累计产生大量 JSON/React 分配；保持状态还可保活 8 个 code-server iframe，VS Code 响应缓存无上限。修复为输出快照默认约 1 Hz、诊断增加 64 KB/s 吞吐阈值、iframe 上限降至 3，并把历史打开响应限制为最近 16 条。
 - Markdown 文件中的 LaTeX 公式显示为源码：原渲染链没有数学 AST；而 `remark-math` 只识别 `$...$` / `$$...$$`，目标论文使用 `\(...\)` / `\[...\]`。修复为接入 KaTeX 链路，并仅在非代码 Markdown 区域规范化反斜线分隔符；目标文件完整生成 93 个 KaTeX/MathML 节点且无公式错误。
 
 ## PM 审计增强 (2026-06-16)

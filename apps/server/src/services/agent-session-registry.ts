@@ -16,7 +16,7 @@ import { DEFAULT_TERMINAL_REGISTRY_OUTPUT_ENTRIES } from "../config/server-runti
 
 type SnapshotListener = (snapshot: ListAgentSessionsResponse) => void;
 
-const DEFAULT_SNAPSHOT_THROTTLE_MS = 250;
+const DEFAULT_SNAPSHOT_THROTTLE_MS = 1_000;
 const MAX_INFERENCE_WINDOW_CHARS = 4096;
 const DEFAULT_IDLE_DETECTION_INTERVAL_MS = 5_000;
 const DEFAULT_IDLE_THRESHOLD_MS = 15_000;

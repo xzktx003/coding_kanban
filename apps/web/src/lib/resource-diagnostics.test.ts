@@ -384,6 +384,26 @@ describe("resource diagnostics", () => {
     );
   });
 
+  it("flags full snapshot allocation pressure when payload throughput is high", () => {
+    const findings = classifyResourcePressure({
+      snapshot: makeSnapshot({
+        agentSessionSocket: {
+          messagesPerSecond: 4,
+          kilobytesPerSecond: 80,
+          totalMessages: 100,
+          totalKilobytes: 2_000,
+          lastPayloadKilobytes: 20,
+        },
+      }),
+      useLightweightTerminalPreview: true,
+    });
+
+    assert.equal(
+      findings.some((finding) => finding.includes("会话快照推送频率偏高")),
+      true,
+    );
+  });
+
   it("asks for backend proxy diagnostics when vscode is open but proxy metrics are missing", () => {
     const findings = classifyResourcePressure({
       snapshot: makeSnapshot({

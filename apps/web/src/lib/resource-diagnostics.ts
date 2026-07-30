@@ -397,7 +397,10 @@ export function classifyResourcePressure({
     );
   }
 
-  if (snapshot.agentSessionSocket.messagesPerSecond >= 5) {
+  if (
+    snapshot.agentSessionSocket.messagesPerSecond >= 2 ||
+    snapshot.agentSessionSocket.kilobytesPerSecond >= 64
+  ) {
     findings.push(
       "会话快照推送频率偏高，浏览器会持续 JSON 解析并触发 React 更新。",
     );
@@ -470,7 +473,8 @@ export function classifyResourcePressure({
 
   if (
     snapshot.dom.xtermCount <= intentionalLiveTerminalBudget &&
-    snapshot.agentSessionSocket.messagesPerSecond < 5 &&
+    snapshot.agentSessionSocket.messagesPerSecond < 2 &&
+    snapshot.agentSessionSocket.kilobytesPerSecond < 64 &&
     snapshot.terminalFrames.messagesPerSecond < 20 &&
     snapshot.terminalFrames.kilobytesPerSecond < 256 &&
     snapshot.terminalSockets.total <= intentionalLiveTerminalBudget &&

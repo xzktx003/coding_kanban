@@ -103,4 +103,38 @@ describe("vscode-web-open", () => {
     assert.equal(callCount, 0);
     assert.equal(result.url, "http://example.test/editor-primed");
   });
+
+  it("evicts old successful responses instead of retaining every historical session", async () => {
+    for (let index = 1; index <= 17; index += 1) {
+      primeVsCodeWebOpenResponse(
+        `session-${index}`,
+        buildResponse(`http://example.test/editor-${index}`),
+      );
+    }
+
+    let oldSessionCalls = 0;
+    const oldSession = await openVsCodeWebOnce(
+      "session-1",
+      async () => {
+        oldSessionCalls += 1;
+        return buildResponse("http://example.test/editor-1-refreshed");
+      },
+      { allowCachedResponse: true },
+    );
+
+    let recentSessionCalls = 0;
+    const recentSession = await openVsCodeWebOnce(
+      "session-17",
+      async () => {
+        recentSessionCalls += 1;
+        return buildResponse("http://example.test/editor-17-refreshed");
+      },
+      { allowCachedResponse: true },
+    );
+
+    assert.equal(oldSessionCalls, 1);
+    assert.equal(oldSession.url, "http://example.test/editor-1-refreshed");
+    assert.equal(recentSessionCalls, 0);
+    assert.equal(recentSession.url, "http://example.test/editor-17");
+  });
 });

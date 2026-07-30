@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  MAX_CACHED_VSCODE_IFRAMES,
   VSCODE_IFRAME_CACHE_MODE_STORAGE_KEY,
   formatVsCodeIframeCacheMode,
   loadVsCodeIframeCacheMode,
@@ -67,6 +68,10 @@ describe("touchVsCodeCacheSessionIds", () => {
 });
 
 describe("VS Code iframe cache mode", () => {
+  it("caps preserve-state mode at three heavyweight editor iframes", () => {
+    assert.equal(MAX_CACHED_VSCODE_IFRAMES, 3);
+  });
+
   it("defaults to memory-saving mode unless preserve-state was explicitly saved", () => {
     assert.equal(parseVsCodeIframeCacheMode(null), "memory-saving");
     assert.equal(parseVsCodeIframeCacheMode("memory-saving"), "memory-saving");
@@ -145,19 +150,10 @@ describe("resolveRenderedVsCodeSessionIds", () => {
           "session-f",
           "session-g",
         ],
-        maxCachedIframes: 8,
+        maxCachedIframes: MAX_CACHED_VSCODE_IFRAMES,
         mode: "preserve-state",
       }),
-      [
-        "session-a",
-        "session-b",
-        "session-c",
-        "session-d",
-        "session-e",
-        "session-f",
-        "session-g",
-        "session-h",
-      ],
+      ["session-f", "session-g", "session-h"],
     );
   });
 

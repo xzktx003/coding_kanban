@@ -127,7 +127,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 多终端监控模式会按所选屏幕布局显式挂载 1、2、3、4、6 或 8 个实时 `TerminalView`；所有窗格都能接收后端输出并保持实时观察，但只有当前“输入中”窗格开启 stdin、焦点修复和终端输入所有权，避免广播输入。
 - 完整预览模式下，非活跃卡片和右侧栏会恢复只读 `TerminalView`，因此会重新建立终端 WebSocket，适合需要实时小窗预览的场景。
 - 前端资源诊断会记录 `/ws/agent-sessions` 全量快照消息速率和大小、`/ws/agent-sessions/:id/terminal` 实时流速率、终端 WebSocket 生命周期、DOM 中的 xterm/预览/监控窗格/VS Code iframe 数量，以及浏览器暴露的 JS heap；同时每秒按需调用 `/api/diagnostics/terminal-history` 和 `/api/diagnostics/vscode-web-proxy` 读取后端终端历史与 VS Code 代理吞吐。诊断只在面板打开时刷新，不保存历史。
-- 后端对终端输出导致的全量会话快照做 trailing 合并广播，降低轻量预览下的网络流量、浏览器 JSON 解析和 React 更新频率；新建、删除、聚焦、重命名等结构性变化仍通过即时快照刷新。
+- 后端对终端输出导致的全量会话快照做约 1 秒的 trailing 合并广播，降低轻量预览长期运行时的网络流量、浏览器 JSON 解析和 React 更新频率；新建、删除、聚焦、重命名等结构性变化仍通过即时快照刷新。
 - 本地 tmux 输入按语义分流：普通文本、快捷键和 bracketed paste 通过有序 `send-keys` 写入；鼠标协议及 `Ctrl+A` / `Ctrl+B` 前缀命令写入 attached tmux client PTY。鼠标或前缀命令成功进入 client 后，路由器会让后续 `send-keys` 以 tmux session 为动态目标，从而跟随 client 当前选中的 pane；连接清理或重建时恢复持久化 pane 绑定。CSI-u 的 `Shift+Enter` / `Ctrl+Enter` 保留原始字节，避免依赖 tmux 版本键名。
 - `TerminalView` 开启 xterm 的 `macOptionIsMeta`，因此 macOS Option 与 Windows/Linux Alt 在浏览器能够接收事件时使用相同的 Meta 编码。adapter 在完整 CSI 键序列之后识别 `ESC+Space` 及常用 `ESC+字母/数字`，并原子映射为 tmux `M-*` 键，避免 Codex 把两个分离事件解释为 Escape 和普通输入；Windows 窗口管理器若截获 `Alt+Space`，使用已支持的 `Shift+Enter` 作为换行备用键。
 - Safari 的快速文本输入额外经过短时恢复状态机：`TerminalView` 记录已经通过 xterm `onData` 发出的普通文本，并在原生 `insertText` 冒泡时按顺序抵消已发送部分，仅把缺失后缀送入原有 WebSocket 输入链路。状态按 100ms 过期，控制序列会清空状态，IME composition 不参与恢复，避免重复输入或跨按键误匹配。
@@ -204,7 +204,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 旧版本曾把 code-server 配置放到 `/tmp/coding-kanban-vscode-*`，如果看到每次都要重新配置，先检查是否还有旧 code-server 进程。
 - VS Code Web 面板左上角只保留重新加载按钮，不再常驻展示 provider/reused 状态标签。
 - `reused` 只表示后端进程复用了同一个 VS Code Web server，不等同于浏览器 iframe 缓存。
-- 浏览器侧 iframe 默认使用“VS Code 省内存”模式，只保留当前打开的 iframe；“VS Code 保持状态”模式最多保留最近 8 个 iframe。
+- 浏览器侧 iframe 默认使用“VS Code 省内存”模式，只保留当前打开的 iframe；“VS Code 保持状态”模式最多保留最近 3 个 iframe。VS Code Web 打开响应使用有界最近缓存，历史会话不会永久累积在页面内存中。
 - 顶栏提供“释放 VS Code 缓存”按钮，用于卸载非当前 VS Code iframe，释放浏览器内存；这不会停止后端 code-server 进程。
 - 自动超时卸载 VS Code iframe 暂不默认启用，后续可在确认用户体验后作为第二阶段策略。
 
@@ -334,7 +334,7 @@ memories/        仓库记忆，不是产品运行依赖
 - `coding-kanban-accepted-revision-v1`：浏览器已接受的 source revision。
 - `terminal-font-size`：所有内置 xterm 终端共用字号，默认 `14`，范围 `10` 到 `24`。
 - `terminal-preview-mode`：终端预览模式，`lightweight` 为默认轻量预览，`full` 为旧版完整小终端预览。
-- `vscode-iframe-cache-mode`：VS Code iframe 缓存模式，`memory-saving` 为默认省内存模式，`preserve-state` 为最多保留最近 8 个 iframe 的保持状态模式。
+- `vscode-iframe-cache-mode`：VS Code iframe 缓存模式，`memory-saving` 为默认省内存模式，`preserve-state` 为最多保留最近 3 个 iframe 的保持状态模式。
 - `file-browser-preview-height`：文件浏览器内部预览高度。
 
 ## 启动和访问
