@@ -167,6 +167,7 @@ export function VSCodeDrawer({
         )}
         {!loading && !error && editorState && (
           <iframe
+            allow="clipboard-read; clipboard-write"
             className="vscode-drawer-frame"
             {...(active ? { "data-testid": "vscode-web-frame" } : {})}
             key={`${editorState.url}::${editorEntry?.reloadKey ?? 0}`}

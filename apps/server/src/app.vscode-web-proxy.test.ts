@@ -35,6 +35,7 @@ test("GET /vscode/* proxies HTTP requests to the active VS Code Web target", asy
     receivedHost = request.headers.host ?? "";
     response.statusCode = 200;
     response.setHeader("content-type", "text/plain; charset=utf-8");
+    response.setHeader("permissions-policy", "geolocation=()");
     response.end("proxied-ok");
   });
   const upstreamPort = await listen(upstream);
@@ -59,6 +60,10 @@ test("GET /vscode/* proxies HTTP requests to the active VS Code Web target", asy
     assert.equal(await response.text(), "proxied-ok");
     assert.equal(receivedUrl, "/test/path?via=proxy");
     assert.equal(receivedHost, `127.0.0.1:${address.port}`);
+    assert.equal(
+      response.headers.get("permissions-policy"),
+      "geolocation=(), clipboard-read=(self), clipboard-write=(self)",
+    );
   } finally {
     await app.close();
     await new Promise<void>((resolve, reject) => {

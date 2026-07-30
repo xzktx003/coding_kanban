@@ -162,6 +162,42 @@ test("launch stores the resolved local working directory when input is omitted",
   );
 });
 
+test("a replaced PTY exit cannot mark the current runtime offline", async () => {
+  const registry = new AgentSessionRegistry();
+  const runtimeManager = new PtyRuntimeManager(registry);
+  const launchInput = {
+    workspaceId: "default",
+    displayName: "stale-exit-test",
+    agentKind: "shell" as const,
+    workingDirectory: process.cwd(),
+    command: "sleep 30",
+  };
+  const session = runtimeManager.launch(launchInput);
+
+  try {
+    const replacement = runtimeManager.reconnectLocal(session.id, launchInput);
+
+    assert.notEqual(
+      replacement.transportRef?.runtimeId,
+      session.transportRef?.runtimeId,
+    );
+
+    await sleep(250);
+
+    const current = registry.get(session.id);
+    assert.equal(
+      current.transportRef?.runtimeId,
+      replacement.transportRef?.runtimeId,
+    );
+    assert.equal(current.connectionState, "online");
+    assert.notEqual(current.interactionState, "exited");
+    assert.equal(runtimeManager.has(session.id), true);
+  } finally {
+    runtimeManager.kill(session.id);
+    registry.remove(session.id);
+  }
+});
+
 test("appendPtyScrollback tracks truncation when replay buffer is exceeded", () => {
   const state = {
     droppedScrollbackBytes: 0,

@@ -8,6 +8,8 @@ import { resolveVsCodeWebRequestTarget } from "./vscode-web-request-target.js";
 
 const VSCODE_WEB_PROXY_PREFIX = "/vscode";
 const DIAGNOSTIC_RATE_WINDOW_MS = 5_000;
+const VSCODE_CLIPBOARD_PERMISSIONS_POLICY =
+  "clipboard-read=(self), clipboard-write=(self)";
 
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -232,6 +234,25 @@ function firstHeaderValue(
   return value;
 }
 
+function withVsCodeClipboardPermissions(
+  value: string | string[] | undefined,
+): string {
+  const existingDirectives = (
+    Array.isArray(value) ? value.join(",") : (value ?? "")
+  )
+    .split(",")
+    .map((directive) => directive.trim())
+    .filter(
+      (directive) =>
+        directive.length > 0 &&
+        !/^clipboard-(?:read|write)\s*=/i.test(directive),
+    );
+
+  return [...existingDirectives, VSCODE_CLIPBOARD_PERMISSIONS_POLICY].join(
+    ", ",
+  );
+}
+
 function appendForwardedFor(
   existing: string | string[] | undefined,
   remoteAddress?: string,
@@ -420,6 +441,12 @@ async function proxyHttpRequest(
 
         reply.raw.setHeader(name, value);
       }
+      reply.raw.setHeader(
+        "permissions-policy",
+        withVsCodeClipboardPermissions(
+          proxyResponse.headers["permissions-policy"],
+        ),
+      );
 
       proxyResponse.on("data", (chunk: Buffer) => {
         recordVsCodeProxyHttpDownload(chunk.byteLength);

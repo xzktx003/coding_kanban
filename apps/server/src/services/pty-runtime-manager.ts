@@ -262,7 +262,10 @@ export class PtyRuntimeManager {
     this.seedScrollback(agentSession.id, handle, tmuxScrollback);
 
     ptyProcess.onData((data: string) => {
-      if (!this.registry.has(agentSession.id)) {
+      if (
+        this.handles.get(agentSession.id) !== handle ||
+        !this.registry.has(agentSession.id)
+      ) {
         return;
       }
 
@@ -281,6 +284,10 @@ export class PtyRuntimeManager {
     });
 
     ptyProcess.onExit(({ exitCode }) => {
+      if (this.handles.get(agentSession.id) !== handle) {
+        return;
+      }
+
       this.handles.delete(agentSession.id);
 
       if (!this.registry.has(agentSession.id)) {
@@ -348,7 +355,10 @@ export class PtyRuntimeManager {
     this.seedScrollback(agentSession.id, handle, tmuxScrollback);
 
     ptyProcess.onData((data: string) => {
-      if (!this.registry.has(agentSession.id)) {
+      if (
+        this.handles.get(agentSession.id) !== handle ||
+        !this.registry.has(agentSession.id)
+      ) {
         return;
       }
 
@@ -367,6 +377,10 @@ export class PtyRuntimeManager {
     });
 
     ptyProcess.onExit(({ exitCode }) => {
+      if (this.handles.get(agentSession.id) !== handle) {
+        return;
+      }
+
       this.handles.delete(agentSession.id);
 
       if (!this.registry.has(agentSession.id)) {
@@ -500,7 +514,10 @@ export class PtyRuntimeManager {
     });
 
     ptyProcess.onData((data: string) => {
-      if (!this.registry.has(agentSessionId)) {
+      if (
+        this.handles.get(agentSessionId) !== handle ||
+        !this.registry.has(agentSessionId)
+      ) {
         return;
       }
 
@@ -517,6 +534,10 @@ export class PtyRuntimeManager {
     });
 
     ptyProcess.onExit(({ exitCode }) => {
+      if (this.handles.get(agentSessionId) !== handle) {
+        return;
+      }
+
       this.handles.delete(agentSessionId);
 
       if (!this.registry.has(agentSessionId)) {
@@ -571,7 +592,10 @@ export class PtyRuntimeManager {
     });
 
     ptyProcess.onData((data: string) => {
-      if (!this.registry.has(agentSessionId)) {
+      if (
+        this.handles.get(agentSessionId) !== handle ||
+        !this.registry.has(agentSessionId)
+      ) {
         return;
       }
 
@@ -588,6 +612,10 @@ export class PtyRuntimeManager {
     });
 
     ptyProcess.onExit(({ exitCode }) => {
+      if (this.handles.get(agentSessionId) !== handle) {
+        return;
+      }
+
       this.handles.delete(agentSessionId);
 
       if (!this.registry.has(agentSessionId)) {

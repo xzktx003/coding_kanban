@@ -290,6 +290,22 @@
 - **测试**: `terminal-wheel.test.ts` 覆盖路由矩阵；修正后的 `tmux-enhancements.spec.ts` 在点击后重新取基线，并只接受 SGR/legacy wheel code `64/65`。同时回归普通终端历史、tmux 预灌历史、持续输出锁定、多屏非输入 pane 和扫描弹层防穿透。
 - **文件**: `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/terminal-wheel.ts`, `tests/e2e/tmux-enhancements.spec.ts`
 
+### VS Code Web 无法读取浏览器剪贴板
+
+- **现象**: Kanban 内嵌 VS Code 执行粘贴或读取剪贴板时提示 `Unable to read from the browser's clipboard`，即使 Kanban 使用 HTTPS。
+- **根因**: `VSCodeDrawer` 的 iframe 没有通过 `allow` 委派 `clipboard-read` / `clipboard-write`；`/vscode/*` 代理也没有返回明确的同源剪贴板 Permissions-Policy。
+- **修复**: iframe 显式声明两项剪贴板权限；代理保留上游已有的其他权限策略，替换剪贴板指令为 `clipboard-read=(self), clipboard-write=(self)`。
+- **测试**: `VSCodeDrawer.test.ts` 断言 iframe 权限委派；`app.vscode-web-proxy.test.ts` 断言代理保留 `geolocation=()` 并追加同源剪贴板策略。
+- **文件**: `apps/web/src/components/VSCodeDrawer.tsx`, `apps/server/src/routes/vscode-web-proxy.ts`
+
+### tmux 重连后窗口显示在线但无法输入
+
+- **现象**: 受管 tmux 窗口长时间运行或在手动重连与热更新恢复相邻发生后，pane 和内部 Codex 进程仍存活，但 Kanban 会话可能变为离线并无法输入。
+- **根因**: `PtyRuntimeManager` 的旧 PTY `onData` / `onExit` 回调只按稳定 session ID 更新状态；新 PTY 替换旧 PTY 后，旧 runtime 的迟到退出仍会删除当前 handle 并执行 `markExited`，覆盖新 runtime 的在线状态。
+- **修复**: 所有本地/远程 PTY 启动与重连回调在处理 data/exit 前校验当前 Map 中的 handle 身份；只有仍为当前 runtime 的 handle 可以写入输出或改变连接状态。
+- **测试**: `pty-runtime-manager.test.ts` 真实启动并替换 PTY，等待旧进程退出后断言 registry 仍指向新 runtime、状态保持 online 且 manager 仍持有新 handle。
+- **文件**: `apps/server/src/services/pty-runtime-manager.ts`, `apps/server/src/services/pty-runtime-manager.test.ts`
+
 ### Safari 快速输入时终端漏字
 
 - **现象**: Safari 中连续快速输入字母时，Codex/tmux 输入框会间歇漏字；降低输入速度后字符完整。

@@ -117,6 +117,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 终端 WebSocket：`/ws/agent-sessions/:id/terminal`。
 - 终端字号由 `terminal-font-size` 本地存储项持久化，默认 14px；滑杆拖动过程中只更新控件显示，鼠标松开、键盘调整结束或失焦提交后才更新已有 `TerminalView` 的 `fontSize` 并触发 fit/resize，不需要重建 WebSocket。
 - 会先发送 scrollback replay，再发送 `replay-complete`。
+- PTY 重连沿用稳定 session ID，但每次生成独立 runtime handle；只有当前 handle 可以追加输出、删除运行时或把会话标记为退出。被替换 PTY 的迟到 data/exit 回调必须忽略，避免并发恢复或手动重连后新 PTY 被旧回调误下线。
 - live PTY replay 上限默认 4 MiB，可通过 `TERMINAL_SCROLLBACK_BYTES` 调整；tmux observe/refresh 默认捕获最近 20000 行，可通过 `TERMINAL_TMUX_CAPTURE_LINES` 调整；registry fallback 默认保留 5000 条，可通过 `TERMINAL_REGISTRY_OUTPUT_ENTRIES` 调整；浏览器 xterm 默认保留 20000 行，可通过 `VITE_TERMINAL_SCROLLBACK_LINES` 调整。
 - replay 阶段会缓冲 live frame，避免新输出和历史输出乱序。
 - 前端会在 replay complete 后解锁 stdin；8 秒兜底避免永久无法输入。
@@ -204,6 +205,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 旧版本曾把 code-server 配置放到 `/tmp/coding-kanban-vscode-*`，如果看到每次都要重新配置，先检查是否还有旧 code-server 进程。
 - VS Code Web 面板左上角只保留重新加载按钮，不再常驻展示 provider/reused 状态标签。
 - `reused` 只表示后端进程复用了同一个 VS Code Web server，不等同于浏览器 iframe 缓存。
+- VS Code iframe 显式委派 `clipboard-read` / `clipboard-write`，`/vscode/*` 代理响应保留上游 Permissions-Policy 的同时把两项剪贴板权限限制为同源；浏览器仍可按站点设置要求用户确认剪贴板访问。
 - 浏览器侧 iframe 默认使用“VS Code 省内存”模式，只保留当前打开的 iframe；“VS Code 保持状态”模式最多保留最近 3 个 iframe。VS Code Web 打开响应使用有界最近缓存，历史会话不会永久累积在页面内存中。
 - 顶栏提供“释放 VS Code 缓存”按钮，用于卸载非当前 VS Code iframe，释放浏览器内存；这不会停止后端 code-server 进程。
 - 自动超时卸载 VS Code iframe 暂不默认启用，后续可在确认用户体验后作为第二阶段策略。
