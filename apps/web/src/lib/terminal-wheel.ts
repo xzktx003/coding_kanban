@@ -23,6 +23,30 @@ interface TerminalWheelApplicationRoutingOptions {
 }
 
 const TERMINAL_WHEEL_MOUSE_TRACKING_MODES = new Set(["vt200", "drag", "any"]);
+const TERMINAL_WHEEL_BLOCKING_OVERLAYS = [
+  ".discovery-overlay",
+  ".new-session-backdrop",
+];
+
+interface ClosestTarget {
+  closest(selector: string): unknown;
+}
+
+export function isTerminalWheelBlockedByOverlayTarget(
+  target: EventTarget | null,
+): boolean {
+  if (
+    !target ||
+    typeof (target as Partial<ClosestTarget>).closest !== "function"
+  ) {
+    return false;
+  }
+
+  const element = target as unknown as ClosestTarget;
+  return TERMINAL_WHEEL_BLOCKING_OVERLAYS.some((selector) =>
+    Boolean(element.closest(selector)),
+  );
+}
 
 export function shouldForwardTerminalWheelToApplication({
   inputEnabled,

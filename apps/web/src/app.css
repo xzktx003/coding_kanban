@@ -3154,6 +3154,7 @@ input {
   padding: 24px;
   background: rgba(6, 8, 11, 0.68);
   backdrop-filter: blur(12px);
+  overscroll-behavior: none;
 }
 
 .new-session-dialog {
@@ -3174,6 +3175,7 @@ input {
     rgba(14, 18, 23, 0.96);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .new-session-header {

@@ -336,3 +336,11 @@
 - `restart-dev.sh` 即使活跃的本仓库后端会话目录捕获失败也继续停止进程，可能丢失首次迁移现场。修复为先识别仓库归属监听器，只有本仓库后端存在时才要求捕获成功，并在失败时于任何 kill 前退出；PID 只接受严格正整数并使用安全数组传给 `kill --`。
 - 受管 tmux 恢复后浏览器终端可能显示用户 `.zshrc` 自动启动的 Claude，而真实 pane 仍是 Bash；同一问题也会让显式 direct 命令超时或被 TUI 吞掉。根因是命令经用户交互式登录 shell 执行，初始化脚本抢在目标命令前运行；修复为服务端生成的 tmux attach 和显式 direct 命令统一走非交互 `/bin/sh -c`，仅无命令终端保留用户原生交互 shell。
 - 更新与恢复提示会长期遮挡大屏终端。修复为版本提示提供按 revision 持久化的关闭按钮，新 revision 才重新出现；恢复成功提示提供关闭按钮并在 5 秒内自动隐藏，恢复失败信息继续保留。
+
+### 新建会话弹窗无法用鼠标滚轮滚动
+
+- **现象**: 新建会话弹窗覆盖在终端卡片上时，鼠标滚轮不能滚动弹窗内容，滚轮操作反而作用到后方看板或终端。
+- **根因**: `TerminalView` 的 document capture 滚轮兜底会按坐标命中被弹窗遮挡的终端，但此前只排除了 `.discovery-overlay`，没有识别 `.new-session-backdrop`；弹窗滚到边界后也没有独立阻断滚动链。
+- **修复**: 将发现弹层和新建会话遮罩统一纳入终端滚轮阻断目标；新建会话遮罩使用 `overscroll-behavior: none`，弹窗滚动容器使用 `overscroll-behavior: contain`，确保滚轮留在当前弹窗内。
+- **测试**: `terminal-wheel.test.ts` 覆盖弹层目标路由；Playwright 在短视口中验证弹窗 `scrollTop` 增长、背景看板不滚动，并覆盖弹窗到达底部后的滚动链隔离。
+- **文件**: `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/terminal-wheel.ts`, `apps/web/src/app.css`, `tests/e2e/discovery-new-session-ui.spec.ts`

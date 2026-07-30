@@ -6,8 +6,17 @@ import {
   TERMINAL_WHEEL_DELTA_PAGE,
   TERMINAL_WHEEL_DELTA_PIXEL,
   computeTerminalWheelScrollLines,
+  isTerminalWheelBlockedByOverlayTarget,
   shouldForwardTerminalWheelToApplication,
 } from "./terminal-wheel.js";
+
+function targetInsideOverlay(selector: string): EventTarget {
+  return {
+    closest(candidate: string) {
+      return candidate === selector ? this : null;
+    },
+  } as unknown as EventTarget;
+}
 
 describe("computeTerminalWheelScrollLines", () => {
   it("turns wheel-down pixels into positive terminal scrollback lines", () => {
@@ -138,5 +147,27 @@ describe("shouldForwardTerminalWheelToApplication", () => {
       }),
       false,
     );
+  });
+});
+
+describe("isTerminalWheelBlockedByOverlayTarget", () => {
+  it("prevents terminal cards from intercepting wheel gestures over overlays", () => {
+    assert.equal(
+      isTerminalWheelBlockedByOverlayTarget(
+        targetInsideOverlay(".new-session-backdrop"),
+      ),
+      true,
+    );
+    assert.equal(
+      isTerminalWheelBlockedByOverlayTarget(
+        targetInsideOverlay(".discovery-overlay"),
+      ),
+      true,
+    );
+    assert.equal(
+      isTerminalWheelBlockedByOverlayTarget(targetInsideOverlay(".grid-card")),
+      false,
+    );
+    assert.equal(isTerminalWheelBlockedByOverlayTarget(null), false);
   });
 });

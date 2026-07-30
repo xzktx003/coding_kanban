@@ -37,6 +37,7 @@ import {
 } from "../lib/terminal-safari-input";
 import {
   computeTerminalWheelScrollLines,
+  isTerminalWheelBlockedByOverlayTarget,
   shouldForwardTerminalWheelToApplication,
 } from "../lib/terminal-wheel";
 
@@ -456,14 +457,6 @@ export function TerminalView({
         mouseTrackingMode: term.modes.mouseTrackingMode,
         shiftKey: event.shiftKey,
       });
-
-    const eventStartsInTerminalWheelBlocker = (event: WheelEvent): boolean => {
-      const target = event.target;
-      return (
-        target instanceof Element &&
-        Boolean(target.closest(".discovery-overlay"))
-      );
-    };
 
     const eventPointIsInsideContainer = (event: WheelEvent): boolean => {
       const rect = container.getBoundingClientRect();
@@ -1344,7 +1337,7 @@ export function TerminalView({
         return;
       }
 
-      if (eventStartsInTerminalWheelBlocker(event)) {
+      if (isTerminalWheelBlockedByOverlayTarget(event.target)) {
         return;
       }
 

@@ -126,6 +126,51 @@ test('new session: 启动方式使用二选一按钮而不是下拉框', async (
   );
 });
 
+test('new session: 鼠标滚轮只滚动会话弹窗而不穿透到看板', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 520 });
+  await mockShell(page);
+
+  await page.goto('/');
+  await openNewSessionForHost(page, '本机');
+
+  const dialog = page.getByTestId('new-session-dialog');
+  const mainContent = page.locator('.main-content');
+  await expect
+    .poll(() =>
+      dialog.evaluate((element) => element.scrollHeight > element.clientHeight),
+    )
+    .toBe(true);
+
+  const backgroundScrollTop = await mainContent.evaluate((element) => {
+    element.style.overflowY = 'auto';
+    const spacer = document.createElement('div');
+    spacer.dataset.testid = 'background-scroll-spacer';
+    spacer.style.height = '2000px';
+    spacer.style.flex = '0 0 2000px';
+    element.appendChild(spacer);
+    element.scrollTop = 120;
+    return element.scrollTop;
+  });
+
+  await dialog.hover();
+  await page.mouse.wheel(0, 480);
+
+  await expect
+    .poll(() => dialog.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  await expect
+    .poll(() => mainContent.evaluate((element) => element.scrollTop))
+    .toBe(backgroundScrollTop);
+
+  await dialog.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await page.mouse.wheel(0, 480);
+  await expect
+    .poll(() => mainContent.evaluate((element) => element.scrollTop))
+    .toBe(backgroundScrollTop);
+});
+
 test('new session: 目录建议仅在后端声明可用时显示候选框', async ({ page }) => {
   await mockShell(page);
 
