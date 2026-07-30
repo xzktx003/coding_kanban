@@ -127,3 +127,5 @@
 - Safari 中快速连续输入会间歇漏字：WebKit 可能在 xterm 仍记录活动 `keydown` 时派发 composed `insertText`，而 xterm 6 的单一 `_keyDownSeen` 状态会把仍有效的文本事件判为已处理。修复为仅在 Safari 对比短时 xterm `onData` 与原生 `insertText`，只补发缺失字符；状态过期、控制序列、IME composition 和其他浏览器不会进入补发路径。
 - 受管 tmux 重连后 pane 与 Codex 仍存活但 Kanban 会话离线、无法输入：旧 PTY 的迟到 `onExit` 按稳定 session ID 删除了新 handle 并覆盖为 exited。修复为本地/远程 PTY 的 data/exit 回调必须先验证自己仍是当前 handle，被替换 runtime 的迟到事件全部忽略。
 - Kanban 内嵌 VS Code 提示无法读取浏览器剪贴板：iframe 未委派 clipboard 权限，代理也未声明同源策略。修复为 iframe 增加 `clipboard-read; clipboard-write`，`/vscode/*` 在保留上游其他 Permissions-Policy 指令后追加两项 `(self)` 剪贴板策略。
+- 聚焦视图右侧轻量预览空白、竖线或出现 `(B`：PTY 最后一个数据块可能只有 TUI 光标、擦除、边框、短文本碎片或字符集切换，却覆盖了已有可读 `outputPreview`。修复为服务端清理控制序列和框线，只用包含足够可读字符的行更新预览，并对受管 tmux 使用更严格的短碎片阈值；纯绘制块继续用于活动检测但保留旧文本，前端同步清理 `ESC(B` / `ESC(0`。
+- 用户在后台 Git 检查尚未结束时确认拉取，apply 曾被 single-flight 误合并为 check。修复为 apply 排队等待 check，随后只执行一次用户确认的 fast-forward；并发 apply 继续共享结果。

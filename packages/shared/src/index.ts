@@ -79,6 +79,32 @@ export interface ListAgentSessionsResponse {
   updatedAt: string;
 }
 
+export type GitAutoUpdatePhase =
+  | "disabled"
+  | "idle"
+  | "checking"
+  | "available"
+  | "updated"
+  | "conflict"
+  | "error";
+
+export type GitAutoUpdateConflictReason =
+  | "local-changes"
+  | "diverged"
+  | "merge-blocked";
+
+export interface GitAutoUpdateStatus {
+  enabled: boolean;
+  intervalMinutes: 10 | 30 | null;
+  phase: GitAutoUpdatePhase;
+  branch: string | null;
+  remoteHead: string | null;
+  lastCheckedAt: string | null;
+  lastUpdatedAt: string | null;
+  conflictReason: GitAutoUpdateConflictReason | null;
+  message: string | null;
+}
+
 export interface AppVersionResponse {
   runtimeId: string;
   startedAt: string;
@@ -86,6 +112,7 @@ export interface AppVersionResponse {
   gitAvailable: boolean;
   gitHead: string | null;
   gitBranch: string | null;
+  autoUpdate?: GitAutoUpdateStatus;
 }
 
 export interface RestoreManagedSessionFailure {

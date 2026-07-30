@@ -5,10 +5,40 @@ import {
   DEFAULT_TERMINAL_REGISTRY_OUTPUT_ENTRIES,
   DEFAULT_TERMINAL_SCROLLBACK_BYTES,
   DEFAULT_TERMINAL_TMUX_CAPTURE_LINES,
+  resolveGitAutoPullIntervalMinutes,
   resolveServerRuntimeConfig,
   resolveServerStorageRuntimeConfig,
   resolveTerminalHistoryRuntimeConfig,
 } from "./server-runtime-config.js";
+
+test("accepts only disabled, 10-minute, or 30-minute Git auto-pull intervals", () => {
+  assert.equal(resolveGitAutoPullIntervalMinutes({}), null);
+  assert.equal(
+    resolveGitAutoPullIntervalMinutes({
+      GIT_AUTO_PULL_INTERVAL_MINUTES: "0",
+    }),
+    null,
+  );
+  assert.equal(
+    resolveGitAutoPullIntervalMinutes({
+      GIT_AUTO_PULL_INTERVAL_MINUTES: "10",
+    }),
+    10,
+  );
+  assert.equal(
+    resolveGitAutoPullIntervalMinutes({
+      GIT_AUTO_PULL_INTERVAL_MINUTES: "30",
+    }),
+    30,
+  );
+  assert.throws(
+    () =>
+      resolveGitAutoPullIntervalMinutes({
+        GIT_AUTO_PULL_INTERVAL_MINUTES: "15",
+      }),
+    /GIT_AUTO_PULL_INTERVAL_MINUTES must be 0, 10, or 30/,
+  );
+});
 
 test("uses repo defaults when HOST and SERVER_PORT are unset", () => {
   assert.deepEqual(resolveServerRuntimeConfig({}), {

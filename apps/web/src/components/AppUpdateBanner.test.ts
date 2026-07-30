@@ -21,6 +21,8 @@ test("renders an explicit update action without applying it automatically", () =
       },
       onApplyUpdate: () => {},
       onDismiss: () => {},
+      onPullUpdate: () => {},
+      onRetryUpdate: () => {},
     }),
   );
 
@@ -32,6 +34,51 @@ test("renders an explicit update action without applying it automatically", () =
   assert.match(markup, /aria-label="关闭版本更新提示"/);
 });
 
+test("offers a user-confirmed pull when the remote branch advances", () => {
+  const markup = renderToStaticMarkup(
+    createElement(AppUpdateBanner, {
+      state: {
+        kind: "remote-update-available",
+        branch: "v1.3.0",
+        shortHead: "89abcdef",
+      },
+      onApplyUpdate: () => {},
+      onDismiss: () => {},
+      onPullUpdate: () => {},
+      onRetryUpdate: () => {},
+    }),
+  );
+
+  assert.match(markup, /远程有新版本/);
+  assert.match(markup, /确认后才会拉取/);
+  assert.match(markup, /拉取并更新/);
+  assert.match(markup, /data-testid="pull-app-update"/);
+  assert.doesNotMatch(markup, /data-testid="apply-app-update"/);
+});
+
+test("requires explicit confirmation before retrying a conflicted pull", () => {
+  const markup = renderToStaticMarkup(
+    createElement(AppUpdateBanner, {
+      state: {
+        kind: "update-conflict",
+        branch: "v1.3.0",
+        shortHead: "89abcdef",
+        message: "本地未提交修改会被远程版本覆盖",
+      },
+      onApplyUpdate: () => {},
+      onDismiss: () => {},
+      onPullUpdate: () => {},
+      onRetryUpdate: () => {},
+    }),
+  );
+
+  assert.match(markup, /检测到新版本，但存在冲突/);
+  assert.match(markup, /本地未提交修改会被远程版本覆盖/);
+  assert.match(markup, /重新拉取并更新/);
+  assert.match(markup, /data-testid="retry-app-update"/);
+  assert.doesNotMatch(markup, /data-testid="apply-app-update"/);
+});
+
 test("renders visible managed-session restore progress and failures", () => {
   const restoring = renderToStaticMarkup(
     createElement(AppUpdateBanner, {
@@ -41,6 +88,8 @@ test("renders visible managed-session restore progress and failures", () => {
       },
       onApplyUpdate: () => {},
       onDismiss: () => {},
+      onPullUpdate: () => {},
+      onRetryUpdate: () => {},
     }),
   );
   assert.match(restoring, /正在恢复 3 个受管 tmux 会话/);
@@ -54,6 +103,8 @@ test("renders visible managed-session restore progress and failures", () => {
       },
       onApplyUpdate: () => {},
       onDismiss: () => {},
+      onPullUpdate: () => {},
+      onRetryUpdate: () => {},
     }),
   );
   assert.match(failed, /已恢复 2 个会话/);
@@ -73,6 +124,8 @@ test("assigns close actions and state-specific auto-dismiss delays to restore re
       state: restoredState,
       onApplyUpdate: () => {},
       onDismiss: () => {},
+      onPullUpdate: () => {},
+      onRetryUpdate: () => {},
     }),
   );
 

@@ -65,7 +65,7 @@
 - 手机端标题区提供同一套 Agent 完成通知开关；手机浏览器支持并授权通知时，页面保持打开即可在任务完成后收到系统通知。
 - 手机端终端页锁定浏览器根页面滚动，终端区域用捕获阶段的非 passive touch 监听接管上下滑动，触屏设备在桌面聚焦页也启用同一终端手势控制，避免 Codex 长上下文下拉时触发浏览器下拉刷新；单指滑动滚动 xterm scrollback，双指 pinch 调整终端字号，并提供”底部”按钮返回最新输出。
 - 手机端快捷键工具栏保持单行横向选择器布局，用户可左右滑动选择较多的 Claude / Copilot 快捷键；字号持久化到 localStorage，reload 后保持上次缩放级别。
-- 默认轻量预览模式下，宫格卡片和聚焦右侧栏不打开真实终端 WebSocket，只展示轻量文本预览，避免多会话时浏览器内存和网络流量随卡片数量线性膨胀。
+- 默认轻量预览模式下，宫格卡片和聚焦右侧栏不打开真实终端 WebSocket，只展示轻量文本预览；预览会清理 ANSI 和终端字符集切换，并忽略纯光标、擦除、边框绘制块，避免可读内容被空白终端帧覆盖，同时避免多会话时浏览器内存和网络流量随卡片数量线性膨胀。
 - 可切换到完整预览模式，恢复宫格卡片和聚焦右侧栏的旧版小终端预览。
 - 前端会对会话快照 WebSocket、终端实时 WebSocket、挂载中的 xterm/终端视图和 JS heap 做轻量采样，资源诊断面板只在打开时刷新，避免诊断自身形成持续负载。
 - 后端会对高频终端输出触发的看板全量快照做约 1 秒的合并广播；结构性操作仍即时刷新，避免轻量预览场景下 `/ws/agent-sessions` 长时间形成网络、JSON 解析和 React 分配压力。
@@ -122,7 +122,10 @@
 
 ## 11. 应用更新检测与历史会话恢复
 
-- 后端通过 `GET /api/app-version` 暴露当前进程 runtime id、启动时间、Git branch/head 和本地源码指纹；指纹覆盖 tracked 修改、未跟踪文件、commit、checkout 和 pull 后的 HEAD 变化，不主动 fetch 或修改远程仓库。tracked diff 使用流式哈希，未跟踪文件按总预算有界读取；并发轮询会复用同一次指纹计算和短期缓存。
+- 后端通过 `GET /api/app-version` 暴露当前进程 runtime id、启动时间、Git branch/head、本地源码指纹和自动更新状态；指纹覆盖 tracked 修改、未跟踪文件、commit、checkout 和 pull 后的 HEAD 变化。tracked diff 使用流式哈希，未跟踪文件按总预算有界读取；并发版本查询会复用同一次指纹计算和短期缓存。
+- `GIT_AUTO_PULL_INTERVAL_MINUTES` 可设置为 `10`、`30` 或 `0`。启用后，独立 `GitAutoUpdateService` 在启动时立即检查并按配置周期固定执行 `fetch --prune`，只更新 `available` 提醒状态，绝不由定时器执行 pull 或 merge；定时器和手动操作通过 single-flight 串行化。
+- 检测到远程新版本时，前端显示可关闭的“拉取并更新”提示。只有用户点击确认后，后端才通过 `POST /api/app-update/apply` 尝试 `merge --ff-only <remote-head>`；成功后自动保存恢复意图、reload 并恢复受管 tmux，不再要求第二次确认。
+- 用户确认拉取后，如本地未提交修改会被覆盖、存在未跟踪同名文件、分支已经分叉或 fast-forward 被 Git 拒绝，后端保持 HEAD 和工作区不变，前端显示“检测到新版本，但存在冲突”，仅允许再次显式确认重试拉取。网络、上游或凭证错误显示独立检查失败提示。
 - 前端每 3 秒检查版本。源码 revision 变化时只显示“检测到新版本 / 更新并恢复”，不会在用户输入终端时自动刷新；提示可主动关闭，同一 revision 在后续轮询和 reload 后保持隐藏，新的 revision 会重新提示。
 - 点击“更新并恢复”会接受当前 revision、记录一次性恢复意图并 reload；同一 revision 不会形成刷新循环。
 - 后端把稳定会话目录持久化到 `SESSION_STATE_PATH`，默认 `.dev-runtime/agent-sessions.json`。只保存 session id、显示信息、目录、tmux/SSH 绑定、标签和当前卡片等元数据，不保存 terminal output、PTY PID 或 runtime id。
@@ -130,7 +133,7 @@
 - 恢复成功提示支持主动关闭，并在出现后 5 秒内自动隐藏；恢复失败提示保留在页面上，避免错误信息来不及查看。
 - `restart-dev.sh` 在停止旧后端前读取 `/api/agent-sessions`，用于首次升级时把旧版内存注册表迁移到状态文件；迁移时立即剔除 terminal output、PTY PID、runtime id 和其他瞬态字段。只有目标端口存在本仓库后端且捕获失败时才拒绝重启；无本仓库监听器或只有外部监听器时不会误判为迁移失败。
 - 会话状态文件只在持久化元数据实际变化时原子写入，终端输出快照、连接运行态或单纯 `updatedAt` 变化不会造成持续落盘；写入失败只记录后端错误，不中断看板服务。
-- 隔离 E2E 使用临时 Git 根目录、状态文件、前后端端口和 tmux socket，覆盖两张受管卡片、左右双屏、输入 slot、后端重启、更新提示关闭/重新出现、恢复提示关闭/自动隐藏、reload、稳定 ID、终端重连、tmux 前缀分屏，以及单个 tmux window 内鼠标切换左右 pane 后的输入跟随。
+- Git 更新测试使用临时 bare remote 和两个 clone，覆盖后台只 fetch/check 且不改 HEAD、用户确认后的 clean fast-forward、未提交修改冲突、分支分叉、并发 single-flight、10/30 分钟定时器和手动接口；隔离 E2E 继续使用临时 Git 根目录、状态文件、前后端端口和 tmux socket，覆盖提醒、确认、冲突到自动会话恢复的完整链路。
 
 ## 12. Paper Writer 项目工作区
 

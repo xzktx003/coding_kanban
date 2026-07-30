@@ -18,6 +18,7 @@ import {
 import {
   registerAppUpdateRoutes,
   type AppVersionServiceLike,
+  type GitAutoUpdateServiceLike,
   type ManagedSessionRestorerLike,
 } from "./routes/app-update.js";
 import { registerFilesystemRoutes } from "./routes/filesystem.js";
@@ -25,6 +26,7 @@ import { registerSshHostsRoutes } from "./routes/ssh-hosts.js";
 import { registerVsCodeWebProxyRoutes } from "./routes/vscode-web-proxy.js";
 import { AgentSessionRegistry } from "./services/agent-session-registry.js";
 import { AppVersionService } from "./services/app-version-service.js";
+import { GitAutoUpdateService } from "./services/git-auto-update-service.js";
 import { LocalFsService } from "./services/local-fs-service.js";
 import { LocalProcessRuntimeManager } from "./services/local-process-runtime-manager.js";
 import { LocalTmuxAdapter } from "./services/local-tmux-adapter.js";
@@ -56,6 +58,7 @@ interface BuildServerOptions {
   vsCodeWebManager?: VsCodeWebManager;
   remoteLaunchPreflight?: RemoteLaunchPreflightLike;
   appVersionService?: AppVersionServiceLike;
+  gitAutoUpdateService?: GitAutoUpdateServiceLike;
   managedSessionRestorer?: ManagedSessionRestorerLike;
   sessionStateStore?: SessionStateStore;
 }
@@ -138,6 +141,12 @@ export function buildServer(options: BuildServerOptions = {}): {
     new AppVersionService({
       sourceRoot: process.cwd(),
     });
+  const gitAutoUpdateService =
+    options.gitAutoUpdateService ??
+    new GitAutoUpdateService({
+      sourceRoot: process.cwd(),
+      intervalMinutes: null,
+    });
   const managedSessionRestorer =
     options.managedSessionRestorer ??
     createManagedSessionRestorer({
@@ -184,6 +193,7 @@ export function buildServer(options: BuildServerOptions = {}): {
     });
     await registerAppUpdateRoutes(instance, {
       appVersionService,
+      gitAutoUpdateService,
       managedSessionRestorer,
     });
 
@@ -380,6 +390,12 @@ export function buildServer(options: BuildServerOptions = {}): {
 
   app.addHook("onClose", () => {
     return vsCodeWebManager.dispose();
+  });
+  app.addHook("onReady", () => {
+    gitAutoUpdateService.start();
+  });
+  app.addHook("onClose", () => {
+    gitAutoUpdateService.stop();
   });
 
   return { app, registry };

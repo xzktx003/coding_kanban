@@ -3,10 +3,13 @@ import test from "node:test";
 
 import {
   acceptAppRevision,
+  beginConfirmedAppPull,
+  clearConfirmedAppPull,
   consumeRestoreAfterReload,
   dismissAppRevision,
   initializeAcceptedAppRevision,
   readAcceptedAppRevision,
+  readConfirmedAppPullBaseline,
   readDismissedAppRevision,
   shouldOfferAppUpdate,
 } from "./app-update.js";
@@ -71,4 +74,17 @@ test("initializing the first observed revision does not create a restore intent"
     initializeAcceptedAppRevision(storage, "revision-newer"),
     "revision-initial",
   );
+});
+
+test("persists a confirmed pull baseline until pull completion or conflict", () => {
+  const storage = createStorage();
+
+  beginConfirmedAppPull(storage, "revision-before-pull");
+  assert.equal(
+    readConfirmedAppPullBaseline(storage),
+    "revision-before-pull",
+  );
+
+  clearConfirmedAppPull(storage);
+  assert.equal(readConfirmedAppPullBaseline(storage), null);
 });

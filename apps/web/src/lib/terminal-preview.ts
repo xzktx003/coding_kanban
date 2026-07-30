@@ -1,5 +1,5 @@
 const ANSI_ESCAPE_PATTERN =
-  /\u001B\][^\u0007]*(?:\u0007|\u001B\\)|\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+  /\u001B\][^\u0007]*(?:\u0007|\u001B\\)|\u001B(?:[()][0-2A-Z]|[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
 const CONTROL_CHAR_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 const DEFAULT_MAX_LINES = 6;
 const DEFAULT_MAX_LINE_LENGTH = 160;

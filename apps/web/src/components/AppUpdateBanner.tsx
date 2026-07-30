@@ -5,6 +5,23 @@ export type AppUpdateBannerState =
       branch: string | null;
       shortHead: string | null;
     }
+  | {
+      kind: "remote-update-available";
+      branch: string | null;
+      shortHead: string | null;
+    }
+  | {
+      kind: "update-conflict";
+      branch: string | null;
+      shortHead: string | null;
+      message: string;
+    }
+  | {
+      kind: "update-error";
+      branch: string | null;
+      shortHead: string | null;
+      message: string;
+    }
   | { kind: "restoring"; total: number }
   | {
       kind: "restore-complete";
@@ -21,6 +38,8 @@ interface AppUpdateBannerProps {
   state: AppUpdateBannerState;
   onApplyUpdate: () => void;
   onDismiss: () => void;
+  onPullUpdate: () => void;
+  onRetryUpdate: () => void;
 }
 
 export const RESTORE_COMPLETE_AUTO_DISMISS_MS = 5_000;
@@ -50,6 +69,8 @@ export function AppUpdateBanner({
   state,
   onApplyUpdate,
   onDismiss,
+  onPullUpdate,
+  onRetryUpdate,
 }: AppUpdateBannerProps) {
   if (state.kind === "idle") {
     return null;
@@ -87,6 +108,96 @@ export function AppUpdateBanner({
             aria-label="关闭版本更新提示"
             className="app-update-banner__dismiss"
             data-testid="dismiss-app-update"
+            onClick={onDismiss}
+            type="button"
+          >
+            ×
+          </button>
+        </div>
+      </aside>
+    );
+  }
+
+  if (state.kind === "remote-update-available") {
+    const versionLabel = [
+      state.branch,
+      state.shortHead ? `@ ${state.shortHead}` : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    return (
+      <aside
+        aria-live="polite"
+        className="app-update-banner app-update-banner--available"
+        data-testid="remote-update-banner"
+      >
+        <div className="app-update-banner__copy">
+          <strong>远程有新版本</strong>
+          <span>
+            {versionLabel || "当前上游分支已更新"}
+            。确认后才会拉取；拉取成功将自动热更新并恢复现场。
+          </span>
+        </div>
+        <div className="app-update-banner__actions">
+          <button
+            data-testid="pull-app-update"
+            onClick={onPullUpdate}
+            type="button"
+          >
+            拉取并更新
+          </button>
+          <button
+            aria-label="关闭远程版本提示"
+            className="app-update-banner__dismiss"
+            data-testid="dismiss-remote-update"
+            onClick={onDismiss}
+            type="button"
+          >
+            ×
+          </button>
+        </div>
+      </aside>
+    );
+  }
+
+  if (state.kind === "update-conflict" || state.kind === "update-error") {
+    const versionLabel = [
+      state.branch,
+      state.shortHead ? `@ ${state.shortHead}` : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    return (
+      <aside
+        aria-live="assertive"
+        className="app-update-banner app-update-banner--warning"
+        data-testid="app-update-conflict-banner"
+      >
+        <div className="app-update-banner__copy">
+          <strong>
+            {state.kind === "update-conflict"
+              ? "检测到新版本，但存在冲突"
+              : "自动检查新版本失败"}
+          </strong>
+          <span>
+            {versionLabel ? `${versionLabel}。` : ""}
+            {state.message}
+          </span>
+        </div>
+        <div className="app-update-banner__actions">
+          <button
+            data-testid="retry-app-update"
+            onClick={onRetryUpdate}
+            type="button"
+          >
+            {state.kind === "update-conflict" ? "重新拉取并更新" : "重新检查"}
+          </button>
+          <button
+            aria-label="关闭自动更新提示"
+            className="app-update-banner__dismiss"
+            data-testid="dismiss-app-update-conflict"
             onClick={onDismiss}
             type="button"
           >

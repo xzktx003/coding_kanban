@@ -108,6 +108,35 @@ test("keeps direct sessions running after screen stays unchanged", async () => {
   assert.equal(registry.get(session.id).stateConfidence, "medium");
 });
 
+test("pure terminal drawing updates do not replace readable output previews", () => {
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "test",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "copilot",
+    displayName: "Preview Test",
+    interactionState: "running",
+    outputPreview: "Ready for input",
+    transportRef: {
+      tmuxSession: "preview-test",
+    },
+  });
+
+  registry.appendOutput(
+    session.id,
+    "\u001b[?25l\u001b[1;89H\u001b[38;5;236m│\u001b[2;89H│\u001b[3;89H│",
+    "stdout",
+  );
+  const updated = registry.appendOutput(
+    session.id,
+    "\u001b[4;89H\u001b[38;5;236mteal\u001b[5;89H│",
+    "stdout",
+  );
+
+  assert.equal(updated.outputPreview, "Ready for input");
+});
+
 test("uses configured output entry retention limit for fallback replay", () => {
   const registry = new AgentSessionRegistry(250, 3);
   const session = createSession(registry);

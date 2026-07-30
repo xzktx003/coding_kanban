@@ -35,6 +35,11 @@ interface AgentSessionSnapshot {
 interface AppVersion {
   runtimeId: string;
   sourceRevision: string;
+  autoUpdate?: {
+    phase: string;
+    conflictReason: string | null;
+    remoteHead: string | null;
+  };
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -136,6 +141,8 @@ async function stopProcess(processHandle: ChildProcess | null): Promise<void> {
 class IsolatedKanbanRuntime {
   readonly root = mkdtempSync(join(tmpdir(), "coding-kanban-hot-update-"));
   readonly sourceRoot = join(this.root, "source");
+  readonly remoteRoot = join(this.root, "remote.git");
+  readonly peerRoot = join(this.root, "peer");
   readonly sessionStatePath = join(this.root, "runtime", "sessions.json");
   readonly tmuxTmpDir = join(this.root, "tmux");
   readonly backendLogPath = join(this.root, "backend.log");
@@ -144,6 +151,8 @@ class IsolatedKanbanRuntime {
   frontendPort = 0;
   backend: ChildProcess | null = null;
   frontend: ChildProcess | null = null;
+
+  constructor(readonly gitAutoPullIntervalMinutes?: 10 | 30) {}
 
   get backendUrl(): string {
     return `http://127.0.0.1:${this.backendPort}`;
@@ -178,6 +187,31 @@ class IsolatedKanbanRuntime {
     execFileSync("git", ["commit", "-qm", "initial"], {
       cwd: this.sourceRoot,
     });
+    if (this.gitAutoPullIntervalMinutes) {
+      execFileSync(
+        "git",
+        ["init", "--bare", "--initial-branch=main", this.remoteRoot],
+        { cwd: this.root },
+      );
+      execFileSync("git", ["branch", "-M", "main"], {
+        cwd: this.sourceRoot,
+      });
+      execFileSync("git", ["remote", "add", "origin", this.remoteRoot], {
+        cwd: this.sourceRoot,
+      });
+      execFileSync("git", ["push", "-u", "origin", "main"], {
+        cwd: this.sourceRoot,
+      });
+      execFileSync("git", ["clone", this.remoteRoot, this.peerRoot], {
+        cwd: this.root,
+      });
+      execFileSync("git", ["config", "user.email", "peer@example.invalid"], {
+        cwd: this.peerRoot,
+      });
+      execFileSync("git", ["config", "user.name", "Coding Kanban Peer"], {
+        cwd: this.peerRoot,
+      });
+    }
 
     this.backendPort = await reservePort();
     this.frontendPort = await reservePort();
@@ -199,6 +233,9 @@ class IsolatedKanbanRuntime {
           SERVER_BIND_HOST: "127.0.0.1",
           SERVER_PORT: String(this.backendPort),
           SESSION_STATE_PATH: this.sessionStatePath,
+          GIT_AUTO_PULL_INTERVAL_MINUTES: String(
+            this.gitAutoPullIntervalMinutes ?? 0,
+          ),
         },
         stdio: ["ignore", logFd, logFd],
       },
@@ -221,6 +258,32 @@ class IsolatedKanbanRuntime {
 
   changeSourceRevision(revision: string): void {
     writeFileSync(join(this.sourceRoot, "revision.txt"), `${revision}\n`);
+  }
+
+  pushRemoteRevision(revision: string): string {
+    writeFileSync(join(this.peerRoot, "revision.txt"), `${revision}\n`);
+    execFileSync("git", ["add", "revision.txt"], { cwd: this.peerRoot });
+    execFileSync("git", ["commit", "-qm", revision], {
+      cwd: this.peerRoot,
+    });
+    execFileSync("git", ["push"], { cwd: this.peerRoot });
+    return execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: this.peerRoot,
+      encoding: "utf8",
+    }).trim();
+  }
+
+  restoreLocalSource(): void {
+    execFileSync("git", ["restore", "--", "revision.txt"], {
+      cwd: this.sourceRoot,
+    });
+  }
+
+  sourceHead(): string {
+    return execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: this.sourceRoot,
+      encoding: "utf8",
+    }).trim();
   }
 
   async startFrontend(): Promise<void> {
@@ -467,6 +530,92 @@ async function openFocusedTerminal(
     )
     .toBeTruthy();
 }
+
+test("automatic Git polling reports conflicts and resumes the existing hot-update flow", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const runtime = new IsolatedKanbanRuntime(10);
+
+  try {
+    await runtime.start();
+    const initialHead = runtime.sourceHead();
+    const initialVersion = await requestJson<AppVersion>(
+      `${runtime.backendUrl}/api/app-version`,
+    );
+
+    await page.goto(runtime.frontendUrl);
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          localStorage.getItem("coding-kanban-accepted-revision-v1"),
+        ),
+      )
+      .toBe(initialVersion.sourceRevision);
+
+    runtime.changeSourceRevision("local draft");
+    const remoteHead = runtime.pushRemoteRevision("remote update");
+    const availableStatus = await requestJson<{
+      phase: string;
+      conflictReason: string | null;
+      remoteHead: string | null;
+    }>(`${runtime.backendUrl}/api/app-update/check`, {
+      method: "POST",
+      body: "{}",
+    });
+
+    expect(availableStatus).toMatchObject({
+      phase: "available",
+      conflictReason: null,
+      remoteHead,
+    });
+    expect(runtime.sourceHead()).toBe(initialHead);
+    expect(readFileSync(join(runtime.sourceRoot, "revision.txt"), "utf8")).toBe(
+      "local draft\n",
+    );
+
+    const availableBanner = page.getByTestId("remote-update-banner");
+    await expect(availableBanner).toBeVisible({ timeout: 20_000 });
+    await expect(availableBanner).toContainText("确认后才会拉取");
+    await expect(page.getByTestId("pull-app-update")).toHaveText("拉取并更新");
+    await expect(page.getByTestId("apply-app-update")).toHaveCount(0);
+
+    await page.getByTestId("pull-app-update").click();
+    const conflictBanner = page.getByTestId("app-update-conflict-banner");
+    await expect(conflictBanner).toBeVisible({ timeout: 20_000 });
+    await expect(conflictBanner).toContainText("检测到新版本，但存在冲突");
+    await expect(conflictBanner).toContainText("本地未提交修改会被覆盖");
+    await expect(page.getByTestId("retry-app-update")).toBeVisible();
+    await expect(page.getByTestId("apply-app-update")).toHaveCount(0);
+
+    runtime.restoreLocalSource();
+    await Promise.all([
+      page.waitForEvent("framenavigated"),
+      page.getByTestId("retry-app-update").click(),
+    ]);
+
+    await expect
+      .poll(() => runtime.sourceHead(), { timeout: 20_000 })
+      .toBe(remoteHead);
+    const updatedVersion = await requestJson<AppVersion>(
+      `${runtime.backendUrl}/api/app-version`,
+    );
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          localStorage.getItem("coding-kanban-accepted-revision-v1"),
+        ),
+      )
+      .toBe(updatedVersion.sourceRevision);
+    await expect(page.getByTestId("session-restore-banner")).toContainText(
+      "历史会话已恢复",
+    );
+    await expect(page.getByTestId("app-update-banner")).toHaveCount(0);
+    await expect(page.getByTestId("app-update-conflict-banner")).toHaveCount(0);
+  } finally {
+    await runtime.dispose();
+  }
+});
 
 test("hot update restores stable managed sessions and the dual-pane workspace", async ({
   page,

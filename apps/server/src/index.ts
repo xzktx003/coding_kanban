@@ -7,8 +7,10 @@ import { buildServer } from "./app.js";
 import {
   resolveServerRuntimeConfig,
   resolveServerStorageRuntimeConfig,
+  resolveGitAutoPullIntervalMinutes,
 } from "./config/server-runtime-config.js";
 import { AppVersionService } from "./services/app-version-service.js";
+import { GitAutoUpdateService } from "./services/git-auto-update-service.js";
 import { FileSessionStateStore } from "./services/session-state-store.js";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
@@ -20,9 +22,16 @@ const { appSourceRoot, sessionStatePath } = resolveServerStorageRuntimeConfig(
   process.env,
   repositoryRoot,
 );
+const gitAutoPullIntervalMinutes = resolveGitAutoPullIntervalMinutes(
+  process.env,
+);
 const { app } = buildServer({
   appVersionService: new AppVersionService({
     sourceRoot: appSourceRoot,
+  }),
+  gitAutoUpdateService: new GitAutoUpdateService({
+    sourceRoot: appSourceRoot,
+    intervalMinutes: gitAutoPullIntervalMinutes,
   }),
   sessionStateStore: new FileSessionStateStore(sessionStatePath),
 });

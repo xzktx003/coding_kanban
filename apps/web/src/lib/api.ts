@@ -14,6 +14,7 @@ import type {
   FilePreviewResponse,
   FileUploadResponse,
   FocusAgentSessionInput,
+  GitAutoUpdateStatus,
   ListFilesInput,
   ListFilesResponse,
   LaunchLocalAgentInput,
@@ -162,6 +163,18 @@ export function listAgentSessions(): Promise<ListAgentSessionsResponse> {
 
 export function getAppVersion(): Promise<AppVersionResponse> {
   return request<AppVersionResponse>("/api/app-version");
+}
+
+export function checkForAppUpdate(): Promise<GitAutoUpdateStatus> {
+  return request<GitAutoUpdateStatus>("/api/app-update/check", {
+    method: "POST",
+  });
+}
+
+export function applyAppUpdatePull(): Promise<GitAutoUpdateStatus> {
+  return request<GitAutoUpdateStatus>("/api/app-update/apply", {
+    method: "POST",
+  });
 }
 
 export function restoreManagedAgentSessions(): Promise<RestoreManagedSessionsResponse> {

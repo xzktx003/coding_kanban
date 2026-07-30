@@ -314,6 +314,14 @@
 - **测试**: `terminal-safari-input.test.ts` 覆盖浏览器识别、完整去重、缺失后缀、交错按键和过期状态；Playwright 复现 WebKit 的 `keydown`/`insertText` 交错并断言完整字符串到达真实 tmux raw stdin，同时回归窗口切回、helper textarea 失焦和标题失焦后的普通输入。
 - **文件**: `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/terminal-safari-input.ts`, `tests/e2e/tmux-enhancements.spec.ts`
 
+### 聚焦视图右侧轻量预览变成空白或竖线
+
+- **现象**: tmux/Codex 主窗格仍正常，但聚焦视图右侧小卡片只显示空白、连续 `│` 或 `(B` 等乱码。
+- **根因**: `outputPreview` 直接采用最后一个 PTY 数据块；TUI 高频重绘的末尾数据块经常只包含光标定位、擦除、边框绘制或终端字符集切换，覆盖了之前的可读预览。
+- **修复**: 服务端先清理终端控制序列和框线，仅让包含足够可读字母、数字或中日韩字符的输出行更新预览，并对受管 tmux 使用更严格的短碎片阈值；绘制块仍更新活动状态但保留旧预览。前端补充清理 `ESC(B` / `ESC(0` 等字符集切换序列。
+- **测试**: `agent-session-registry.test.ts` 覆盖绘制块不覆盖可读预览；`terminal-preview.test.ts` 覆盖终端字符集切换清理；实际 Chromium 聚焦页截图验证右侧卡片恢复可读文本。
+- **文件**: `apps/server/src/services/agent-session-registry.ts`, `apps/web/src/lib/terminal-preview.ts`
+
 ### Markdown 预览中的 LaTeX 公式无法渲染
 
 - **现象**: `.md` / `.markdown` 文件中的数学公式在内联预览、双击弹窗和实时分屏中显示为原始源码；尤其是论文文档常用的 `\(...\)` 和 `\[...\]` 即使接入 `remark-math` 后仍无法解析。
@@ -336,6 +344,8 @@
 - `restart-dev.sh` 即使活跃的本仓库后端会话目录捕获失败也继续停止进程，可能丢失首次迁移现场。修复为先识别仓库归属监听器，只有本仓库后端存在时才要求捕获成功，并在失败时于任何 kill 前退出；PID 只接受严格正整数并使用安全数组传给 `kill --`。
 - 受管 tmux 恢复后浏览器终端可能显示用户 `.zshrc` 自动启动的 Claude，而真实 pane 仍是 Bash；同一问题也会让显式 direct 命令超时或被 TUI 吞掉。根因是命令经用户交互式登录 shell 执行，初始化脚本抢在目标命令前运行；修复为服务端生成的 tmux attach 和显式 direct 命令统一走非交互 `/bin/sh -c`，仅无命令终端保留用户原生交互 shell。
 - 更新与恢复提示会长期遮挡大屏终端。修复为版本提示提供按 revision 持久化的关闭按钮，新 revision 才重新出现；恢复成功提示提供关闭按钮并在 5 秒内自动隐藏，恢复失败信息继续保留。
+- 热更新 E2E 曾继承开发机 `.env` 的 Git 轮询开关，使无 upstream 的隔离仓库进入错误状态并遮住本地源码更新提示。修复为隔离运行时始终显式设置 `GIT_AUTO_PULL_INTERVAL_MINUTES=0|10|30`，测试行为不再受本机配置污染。
+- 用户恰好在后台 Git 检查未结束时确认拉取，旧 single-flight 会把 apply 合并成 check，导致按钮已点击却没有 pull。修复为用户确认的 apply 等待当前 check 完成后继续执行；并发 apply 仍合并为一次，后台 check 也不会重复运行。
 
 ### 新建会话弹窗无法用鼠标滚轮滚动
 

@@ -47,6 +47,8 @@ import {
 } from "./lib/agent-completion-notifications";
 import {
   addDiscoveredTmux,
+  applyAppUpdatePull,
+  checkForAppUpdate,
   deleteAgentSession,
   focusAgentSession,
   getAppVersion,
@@ -65,10 +67,13 @@ import {
 } from "./lib/api";
 import {
   acceptAppRevision,
+  beginConfirmedAppPull,
+  clearConfirmedAppPull,
   consumeRestoreAfterReload,
   dismissAppRevision,
   initializeAcceptedAppRevision,
   readAcceptedAppRevision,
+  readConfirmedAppPullBaseline,
   readDismissedAppRevision,
   shouldOfferAppUpdate,
 } from "./lib/app-update";
@@ -299,6 +304,12 @@ export default function App() {
   const [dismissedAppRevision, setDismissedAppRevision] = useState<
     string | null
   >(() => readDismissedAppRevision(localStorage));
+  const [dismissedAutoUpdateNotice, setDismissedAutoUpdateNotice] = useState<
+    string | null
+  >(null);
+  const [confirmedPullBaseline, setConfirmedPullBaseline] = useState<
+    string | null
+  >(() => readConfirmedAppPullBaseline(localStorage));
   const [sessionRestoreState, setSessionRestoreState] =
     useState<AppUpdateBannerState>(() =>
       consumeRestoreAfterReload(localStorage)
@@ -414,6 +425,31 @@ export default function App() {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  useEffect(() => {
+    if (!appVersion || !confirmedPullBaseline) {
+      return;
+    }
+
+    if (appVersion.sourceRevision !== confirmedPullBaseline) {
+      clearConfirmedAppPull(localStorage);
+      setConfirmedPullBaseline(null);
+      acceptAppRevision(localStorage, appVersion.sourceRevision);
+      window.location.reload();
+      return;
+    }
+
+    const phase = appVersion.autoUpdate?.phase;
+    if (
+      phase === "conflict" ||
+      phase === "error" ||
+      phase === "available" ||
+      phase === "idle"
+    ) {
+      clearConfirmedAppPull(localStorage);
+      setConfirmedPullBaseline(null);
+    }
+  }, [appVersion, confirmedPullBaseline]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1109,14 +1145,42 @@ export default function App() {
       dismissedAppRevision,
     ),
   );
+  const autoUpdateNotice = appVersion?.autoUpdate;
+  const autoUpdateNoticeKey =
+    autoUpdateNotice &&
+    (autoUpdateNotice.phase === "available" ||
+      autoUpdateNotice.phase === "conflict" ||
+      autoUpdateNotice.phase === "error")
+      ? [
+          autoUpdateNotice.phase,
+          autoUpdateNotice.remoteHead,
+        ].join(":")
+      : null;
+  const autoUpdateNoticeVisible = Boolean(
+    autoUpdateNoticeKey && autoUpdateNoticeKey !== dismissedAutoUpdateNotice,
+  );
   const appUpdateBannerState: AppUpdateBannerState =
-    appUpdateAvailable && appVersion
+    autoUpdateNoticeVisible && autoUpdateNotice
       ? {
-          kind: "update-available",
-          branch: appVersion.gitBranch,
-          shortHead: appVersion.gitHead?.slice(0, 8) ?? null,
+          kind:
+            autoUpdateNotice.phase === "available"
+              ? "remote-update-available"
+              : autoUpdateNotice.phase === "conflict"
+              ? "update-conflict"
+              : "update-error",
+          branch: autoUpdateNotice.branch,
+          shortHead: autoUpdateNotice.remoteHead?.slice(0, 8) ?? null,
+          message:
+            autoUpdateNotice.message ??
+            "自动更新未完成，请检查本地仓库状态后重新检查。",
         }
-      : sessionRestoreState;
+      : appUpdateAvailable && appVersion
+        ? {
+            kind: "update-available",
+            branch: appVersion.gitBranch,
+            shortHead: appVersion.gitHead?.slice(0, 8) ?? null,
+          }
+        : sessionRestoreState;
 
   function handleApplyAppUpdate() {
     if (!appVersion) {
@@ -1128,6 +1192,11 @@ export default function App() {
   }
 
   function handleDismissAppUpdateBanner() {
+    if (autoUpdateNoticeVisible && autoUpdateNoticeKey) {
+      setDismissedAutoUpdateNotice(autoUpdateNoticeKey);
+      return;
+    }
+
     if (appUpdateAvailable && appVersion) {
       dismissAppRevision(localStorage, appVersion.sourceRevision);
       setDismissedAppRevision(appVersion.sourceRevision);
@@ -1135,6 +1204,80 @@ export default function App() {
     }
 
     setSessionRestoreState({ kind: "idle" });
+  }
+
+  function beginPullAndHotUpdate() {
+    if (!appVersion) {
+      return;
+    }
+
+    const baselineRevision = appVersion.sourceRevision;
+    beginConfirmedAppPull(localStorage, baselineRevision);
+    setConfirmedPullBaseline(baselineRevision);
+    setDismissedAutoUpdateNotice(null);
+    setAppVersion((current) =>
+      current?.autoUpdate
+        ? {
+            ...current,
+            autoUpdate: {
+              ...current.autoUpdate,
+              phase: "checking",
+              conflictReason: null,
+              message: null,
+            },
+          }
+        : current,
+    );
+
+    applyAppUpdatePull()
+      .then((status) => {
+        setAppVersion((current) =>
+          current ? { ...current, autoUpdate: status } : current,
+        );
+        if (status.phase !== "updated") {
+          clearConfirmedAppPull(localStorage);
+          setConfirmedPullBaseline(null);
+        }
+      })
+      .catch(() => {
+        void getAppVersion()
+          .then(setAppVersion)
+          .catch(() => {});
+      });
+  }
+
+  function handleRetryAppUpdate() {
+    if (appVersion?.autoUpdate?.phase === "conflict") {
+      beginPullAndHotUpdate();
+      return;
+    }
+
+    setDismissedAutoUpdateNotice(null);
+    setAppVersion((current) =>
+      current?.autoUpdate
+        ? {
+            ...current,
+            autoUpdate: {
+              ...current.autoUpdate,
+              phase: "checking",
+              conflictReason: null,
+              message: null,
+            },
+          }
+        : current,
+    );
+
+    checkForAppUpdate()
+      .then((status) => {
+        setAppVersion((current) =>
+          current ? { ...current, autoUpdate: status } : current,
+        );
+      })
+      .catch(() => {
+        void getAppVersion()
+          .then(setAppVersion)
+          .catch(() => {});
+      });
   }
 
   function updateLayout(partial: Partial<LayoutState>) {
@@ -1366,6 +1509,8 @@ export default function App() {
         state={appUpdateBannerState}
         onApplyUpdate={handleApplyAppUpdate}
         onDismiss={handleDismissAppUpdateBanner}
+        onPullUpdate={beginPullAndHotUpdate}
+        onRetryUpdate={handleRetryAppUpdate}
       />
       <TopBar
         sessions={sessions}

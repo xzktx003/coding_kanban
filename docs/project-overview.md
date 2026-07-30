@@ -124,7 +124,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 后端会过滤终端自动响应 payload，避免 CPR/设备属性响应被写回真实 PTY。
 - 支持 resize 消息和 binary 消息，binary 用于 tmux 鼠标等二进制事件。
 - 前端 `TerminalView` 支持 OSC 52 剪贴板写入，允许 tmux copy-mode、SSH 会话或 CLI 工具把当前终端 pane 内复制内容写入浏览器剪贴板；该能力只消费终端输出中的 clipboard target 请求，不改变 stdin、resize 或 tmux 鼠标事件转发。
-- 轻量预览模式下，默认只有当前聚焦主终端发送 resize 和 stdin；非活跃区域依赖会话 `outputPreview` 展示轻量文本预览。
+- 轻量预览模式下，默认只有当前聚焦主终端发送 resize 和 stdin；非活跃区域依赖会话 `outputPreview` 展示轻量文本预览。服务端只用包含足够可读字母、数字或中日韩字符的输出块更新预览，并对受管 tmux 使用更严格的碎片阈值；纯光标、擦除和边框绘制块仍参与活动检测但不会覆盖已有可读文本。前端继续清理 ANSI 与终端字符集切换序列。
 - 多终端监控模式会按所选屏幕布局显式挂载 1、2、3、4、6 或 8 个实时 `TerminalView`；所有窗格都能接收后端输出并保持实时观察，但只有当前“输入中”窗格开启 stdin、焦点修复和终端输入所有权，避免广播输入。
 - 完整预览模式下，非活跃卡片和右侧栏会恢复只读 `TerminalView`，因此会重新建立终端 WebSocket，适合需要实时小窗预览的场景。
 - 前端资源诊断会记录 `/ws/agent-sessions` 全量快照消息速率和大小、`/ws/agent-sessions/:id/terminal` 实时流速率、终端 WebSocket 生命周期、DOM 中的 xterm/预览/监控窗格/VS Code iframe 数量，以及浏览器暴露的 JS heap；同时每秒按需调用 `/api/diagnostics/terminal-history` 和 `/api/diagnostics/vscode-web-proxy` 读取后端终端历史与 VS Code 代理吞吐。诊断只在面板打开时刷新，不保存历史。
@@ -136,9 +136,13 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 ### 应用更新与会话恢复
 
-后端 `AppVersionService` 对配置的 `APP_SOURCE_ROOT` 计算本地 Git 指纹，`GET /api/app-version` 返回 process runtime id、Git branch/head 和 source revision。它只读取本地仓库，不 fetch 远程、不 checkout，也不接受来自 HTTP 的路径或命令参数。tracked `git diff --binary` 直接流入 SHA-256，不把大 diff 缓冲进内存；未跟踪文件使用有界 `FileHandle.read`。并发请求共享同一个进行中的计算，完成后使用短期缓存，避免多个浏览器标签重复启动 Git 扫描。
+后端 `AppVersionService` 对配置的 `APP_SOURCE_ROOT` 计算本地 Git 指纹，`GET /api/app-version` 返回 process runtime id、Git branch/head、source revision 和独立的 Git 自动更新状态。指纹计算本身仍只读取本地仓库：tracked `git diff --binary` 直接流入 SHA-256，不把大 diff 缓冲进内存；未跟踪文件使用有界 `FileHandle.read`。并发请求共享同一个进行中的计算和短期缓存。
 
-前端轮询该接口。检测到 revision 变化时展示显式“更新并恢复”按钮，不自动刷新。用户可以关闭提示，浏览器按 source revision 记录关闭状态；同一版本在轮询和 reload 后继续隐藏，新版本会重新显示。点击更新后把 revision 标记为已接受并 reload 一次，避免终端输入中断和重复刷新。恢复成功提示可主动关闭并在 5 秒内自动隐藏，恢复失败提示保持可见。
+`GitAutoUpdateService` 由 `GIT_AUTO_PULL_INTERVAL_MINUTES=10|30` 显式启用，`0` 或未设置时关闭。它在后端启动时检查一次，之后按周期执行固定参数的 `git fetch --prune`，解析当前分支的既有 upstream，并只维护远程版本提醒；后台定时器绝不执行 pull 或 merge。Git ref 会经过严格格式校验，命令使用 `execFile`、禁用终端凭证提示、限制输出和超时；HTTP 只能触发无参数 `POST /api/app-update/check` 与 `POST /api/app-update/apply`，不能传入路径、remote、branch 或命令。
+
+更新状态机为 `disabled / idle / checking / available / updated / conflict / error`。定时器与手动操作共享 single-flight；发现上游领先时只进入 `available` 并提醒用户。只有用户点击“拉取并更新”后，apply 端点才允许 `merge --ff-only <remote-head>`。HEAD 与 upstream 分叉时不创建 merge commit；本地修改或未跟踪文件阻止 fast-forward 时保留原 HEAD 和工作区；Git 错误只返回有界、去机器路径的用户消息。
+
+用户确认后的安全 fast-forward 成功后，source revision 变化会自动复用既有热更新链：前端记录恢复意图并 reload 一次，不再要求第二次确认，随后恢复受管 tmux。未经“拉取并更新”确认，后台检查不会修改源码或刷新浏览器。恢复成功提示可主动关闭并在 5 秒内自动隐藏，恢复失败提示保持可见。
 
 生产入口使用 `FileSessionStateStore` 把稳定会话目录保存到 `SESSION_STATE_PATH`，默认 `.dev-runtime/agent-sessions.json`：
 
@@ -256,6 +260,7 @@ memories/        仓库记忆，不是产品运行依赖
 - `LocalTmuxAdapter`：tmux 发现、详情、输入、接管、释放、杀会话。
 - `LocalTmuxInputRouter`：统一 REST/WebSocket 的本地 tmux 输入队列，并区分 pane 输入、鼠标协议和 tmux 前缀命令。
 - `AppVersionService`：计算本地 Git source revision 和 backend runtime version。
+- `GitAutoUpdateService`：按配置周期只 fetch/check 当前 upstream；用户确认后才执行安全 fast-forward，并维护可用更新、冲突和错误状态。
 - `FileSessionStateStore`：校验、投影并原子持久化稳定会话目录。
 - `restoreManagedSessions`：分类并恢复仍存在的受管 tmux，会话缺失时保持显式失败边界。
 - `LocalFsService`：本地文件系统。
@@ -281,6 +286,8 @@ memories/        仓库记忆，不是产品运行依赖
 - `POST /api/agent-sessions/:id/stdin`
 - `POST /api/agent-sessions/:id/reconnect`
 - `GET /api/app-version`
+- `POST /api/app-update/check`
+- `POST /api/app-update/apply`
 - `POST /api/agent-sessions/restore-managed`
 - `POST /api/agent-discovery/tmux/scan`
 - `POST /api/agent-discovery/tmux/add`
@@ -306,7 +313,7 @@ memories/        仓库记忆，不是产品运行依赖
 主要组件：
 
 - `App.tsx`：全局状态、会话订阅、路由弹窗、聚焦/宫格切换、侧栏工具状态。
-- `AppUpdateBanner.tsx`：源码更新提示、恢复进度和失败结果。
+- `AppUpdateBanner.tsx`：远程更新提醒与确认拉取、冲突/错误提示、恢复进度和失败结果。
 - `TopBar.tsx`：分组顶栏、显示/工具菜单、操作提示、主入口、折叠。
 - `AgentGrid.tsx` / `AgentGridCard.tsx`：宫格和卡片。
 - `AgentFocusView.tsx`：聚焦终端和会话切换。
@@ -315,7 +322,7 @@ memories/        仓库记忆，不是产品运行依赖
 - `resource-diagnostics.ts`：浏览器资源诊断采样、WebSocket 吞吐统计和压力源分类。
 - `terminal-font-size.ts`：终端字号范围、持久化和归一化逻辑。
 - `terminal-preview-mode.ts`：终端预览模式持久化，默认轻量模式，可切换完整预览。
-- `app-update.ts`：已接受 revision 和一次性 reload 恢复意图。
+- `app-update.ts`：已接受 revision、用户确认拉取基线和一次性 reload 恢复意图。
 - `terminal-workspace-state.ts`：多屏 slot、输入 slot 和关闭 slot 的版本化持久化。
 - `NewSessionDialog.tsx`：新建本地/SSH/direct/tmux 会话。
 - `DiscoveryDialog.tsx`、`TmuxDiscoveryPanel.tsx`、`AppDiscoveryPanel.tsx`：扫描和加入宫格。

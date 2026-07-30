@@ -22,15 +22,29 @@ const DEFAULT_IDLE_DETECTION_INTERVAL_MS = 5_000;
 const DEFAULT_IDLE_THRESHOLD_MS = 15_000;
 
 const ANSI_ESCAPE_PATTERN =
-  /\u001B\][^\u0007]*(?:\u0007|\u001B\\)|\u001B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+  /\u001B\][^\u0007]*(?:\u0007|\u001B\\)|\u001B(?:[()][0-2A-Z]|[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g;
+const READABLE_PREVIEW_CHARACTER_PATTERN = /[\p{L}\p{N}]/gu;
+const TERMINAL_DRAWING_CHARACTER_PATTERN = /[\u2500-\u259F]+/g;
 
-function pickOutputPreview(text: string): string | undefined {
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.trim())
+function pickOutputPreview(
+  text: string,
+  minimumReadableCharacters = 2,
+): string | undefined {
+  const lines = normalizeTerminalText(text)
+    .split("\n")
+    .map((line) =>
+      line.replace(TERMINAL_DRAWING_CHARACTER_PATTERN, " ").trim(),
+    )
     .filter(Boolean);
 
-  return lines.at(-1)?.slice(0, 160);
+  return lines
+    .reverse()
+    .find(
+      (line) =>
+        (line.match(READABLE_PREVIEW_CHARACTER_PATTERN)?.length ?? 0) >=
+        minimumReadableCharacters,
+    )
+    ?.slice(0, 160);
 }
 
 function normalizeTerminalText(text: string): string {
@@ -309,7 +323,11 @@ export class AgentSessionRegistry {
   ): AgentSessionRecord {
     const agentSession = this.get(agentSessionId);
     const now = new Date().toISOString();
-    const outputPreview = pickOutputPreview(text) ?? agentSession.outputPreview;
+    const outputPreview =
+      pickOutputPreview(
+        text,
+        agentSession.transportRef?.tmuxSession ? 6 : 2,
+      ) ?? agentSession.outputPreview;
     const nextScreenWindow = mergeScreenWindow(
       this.screenWindows.get(agentSessionId) ?? "",
       text,

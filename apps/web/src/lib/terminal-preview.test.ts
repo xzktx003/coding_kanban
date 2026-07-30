@@ -18,6 +18,15 @@ describe("terminal preview", () => {
     );
   });
 
+  it("strips terminal character-set selection sequences", () => {
+    assert.equal(
+      sanitizeTerminalPreviewText(
+        "\u001b(B\u001b[31mready\u001b[0m\u001b(0\u001b(B",
+      ),
+      "ready",
+    );
+  });
+
   it("keeps only the most recent non-empty lines", () => {
     assert.deepEqual(
       buildTerminalPreviewLines("one\n\ntwo\nthree\nfour", { maxLines: 2 }),

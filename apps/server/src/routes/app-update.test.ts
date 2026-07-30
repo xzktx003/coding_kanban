@@ -3,6 +3,7 @@ import test from "node:test";
 
 import type {
   AppVersionResponse,
+  GitAutoUpdateStatus,
   RestoreManagedSessionsResponse,
 } from "@agent-orchestrator/shared";
 
@@ -24,10 +25,29 @@ const restoreResult: RestoreManagedSessionsResponse = {
   failed: [],
 };
 
+const autoUpdateStatus: GitAutoUpdateStatus = {
+  enabled: true,
+  intervalMinutes: 10,
+  phase: "conflict",
+  branch: "v1.3.0",
+  remoteHead: "fedcba9876543210",
+  lastCheckedAt: "2026-07-30T03:00:00.000Z",
+  lastUpdatedAt: null,
+  conflictReason: "local-changes",
+  message: "本地未提交修改会被远程版本覆盖",
+};
+
 test("GET /api/app-version returns the injected source revision", async () => {
   const { app } = buildServer({
     appVersionService: {
       getVersion: async () => version,
+    },
+    gitAutoUpdateService: {
+      getStatus: () => autoUpdateStatus,
+      checkNow: async () => autoUpdateStatus,
+      applyUpdate: async () => autoUpdateStatus,
+      start: () => {},
+      stop: () => {},
     },
     managedSessionRestorer: {
       restore: async () => restoreResult,
@@ -40,7 +60,73 @@ test("GET /api/app-version returns the injected source revision", async () => {
   });
 
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.json(), version);
+  assert.deepEqual(response.json(), {
+    ...version,
+    autoUpdate: autoUpdateStatus,
+  });
+  await app.close();
+});
+
+test("POST /api/app-update/check triggers a bounded manual retry", async () => {
+  let checks = 0;
+  const { app } = buildServer({
+    appVersionService: {
+      getVersion: async () => version,
+    },
+    gitAutoUpdateService: {
+      getStatus: () => autoUpdateStatus,
+      checkNow: async () => {
+        checks += 1;
+        return autoUpdateStatus;
+      },
+      applyUpdate: async () => autoUpdateStatus,
+      start: () => {},
+      stop: () => {},
+    },
+    managedSessionRestorer: {
+      restore: async () => restoreResult,
+    },
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/app-update/check",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), autoUpdateStatus);
+  assert.equal(checks, 1);
+  await app.close();
+});
+
+test("POST /api/app-update/apply performs the user-confirmed pull", async () => {
+  let applies = 0;
+  const { app } = buildServer({
+    appVersionService: {
+      getVersion: async () => version,
+    },
+    gitAutoUpdateService: {
+      getStatus: () => autoUpdateStatus,
+      checkNow: async () => autoUpdateStatus,
+      applyUpdate: async () => {
+        applies += 1;
+        return autoUpdateStatus;
+      },
+      start: () => {},
+      stop: () => {},
+    },
+    managedSessionRestorer: {
+      restore: async () => restoreResult,
+    },
+  });
+
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/app-update/apply",
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(applies, 1);
   await app.close();
 });
 
