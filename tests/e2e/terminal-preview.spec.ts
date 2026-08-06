@@ -269,6 +269,214 @@ test("grid cards use lightweight terminal previews without opening terminal WebS
   expect(await terminalWebSocketUrls(page)).toEqual([]);
 });
 
+test("monitor session switcher groups choices and marks occupied panes", async ({
+  page,
+}) => {
+  const sessions = [
+    makeSession({ id: "session-alpha", displayName: "Alpha" }),
+    makeSession({ id: "session-beta", displayName: "Beta" }),
+    makeSession({ id: "session-gamma", displayName: "Gamma" }),
+    makeSession({ id: "session-delta", displayName: "Delta" }),
+    ...[
+      "Epsilon",
+      "Zeta",
+      "Eta",
+      "Theta",
+      "Iota",
+      "Kappa",
+      "Lambda",
+      "Mu",
+      "Nu",
+      "Xi",
+      "Omicron",
+      "Pi",
+    ].map((displayName) =>
+      makeSession({
+        id: `session-${displayName.toLowerCase()}`,
+        displayName,
+      }),
+    ),
+  ];
+  await mockSessions(page, sessions);
+  await page.addInitScript(
+    ({ sessionIds }) => {
+      localStorage.setItem(
+        "coding-kanban-session-groups-v1",
+        JSON.stringify({
+          groups: [
+            { id: "group-research", name: "模型与量化" },
+            { id: "group-platform", name: "工程与平台" },
+          ],
+          assignments: {
+            "session:session-alpha": "group-research",
+            "session:session-beta": "group-research",
+            "session:session-epsilon": "group-research",
+            "session:session-zeta": "group-research",
+            "session:session-eta": "group-research",
+            "session:session-theta": "group-research",
+            "session:session-gamma": "group-platform",
+            "session:session-iota": "group-platform",
+          },
+          collapsedGroupIds: [],
+        }),
+      );
+      localStorage.setItem(
+        "terminal-monitor-workspace-v1",
+        JSON.stringify({
+          mode: "dual",
+          slots: [
+            { id: "terminal-monitor-slot-1", sessionId: sessionIds[0] },
+            { id: "terminal-monitor-slot-2", sessionId: sessionIds[1] },
+          ],
+          activeSlotId: "terminal-monitor-slot-1",
+          closedSlotIds: [],
+        }),
+      );
+    },
+    { sessionIds: sessions.map((session) => session.id) },
+  );
+  await page.goto("/");
+
+  const alphaCard = page.locator(".grid-card", {
+    has: page.locator(".grid-card-name", { hasText: "Alpha" }),
+  });
+  await alphaCard.dblclick();
+
+  const firstPane = page.locator(
+    '[data-terminal-pane-slot="terminal-monitor-slot-1"]',
+  );
+  await firstPane
+    .getByRole("combobox", { name: "选择第 1 个监控终端" })
+    .click();
+
+  const menu = page.getByRole("dialog", {
+    name: "切换第 1 个监控终端",
+  });
+  await expect(menu).toBeVisible();
+  const groupedList = menu.getByRole("listbox", {
+    name: "第 1 个终端可选会话",
+  });
+  await expect(
+    groupedList.locator(":scope > [data-terminal-switch-group-id]"),
+  ).toHaveCount(3);
+  await expect(
+    menu.locator('[data-terminal-switch-group-id="group-research"]'),
+  ).toContainText("模型与量化6");
+  await expect(
+    menu.locator('[data-terminal-switch-group-id="group-platform"]'),
+  ).toContainText("工程与平台2");
+  await expect(
+    menu.locator('[data-terminal-switch-group-id="__ungrouped__"]'),
+  ).toContainText("未分组8");
+  await expect(
+    menu.locator('[data-terminal-switch-session-id="session-alpha"]'),
+  ).toContainText("当前");
+  await expect(
+    menu.locator('[data-terminal-switch-session-id="session-beta"]'),
+  ).toContainText("窗格 2");
+  await expect(
+    menu.locator('[data-terminal-switch-session-id="session-beta"]'),
+  ).toBeDisabled();
+  await groupedList.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+  await groupedList.hover();
+  await page.mouse.wheel(0, 420);
+  await expect
+    .poll(() => groupedList.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  const researchHeader = menu
+    .locator('[data-terminal-switch-group-id="group-research"]')
+    .locator(".terminal-session-switch-group-header");
+  await groupedList.evaluate((element) => {
+    element.scrollTop = 96;
+  });
+  await expect
+    .poll(async () => {
+      const [listBox, headerBox, paddingTop] = await Promise.all([
+        groupedList.boundingBox(),
+        researchHeader.boundingBox(),
+        groupedList.evaluate((element) =>
+          Number.parseFloat(getComputedStyle(element).paddingTop),
+        ),
+      ]);
+      return Math.abs(
+        (headerBox?.y ?? -1000) - (listBox?.y ?? 1000) - paddingTop,
+      );
+    })
+    .toBeLessThan(3);
+
+  const platformHeader = menu
+    .locator('[data-terminal-switch-group-id="group-platform"]')
+    .locator(".terminal-session-switch-group-header");
+  await groupedList.evaluate((element) => {
+    const platformGroup = element.querySelector<HTMLElement>(
+      '[data-terminal-switch-group-id="group-platform"]',
+    );
+    if (!platformGroup) {
+      throw new Error("platform group is missing");
+    }
+    const paddingTop = Number.parseFloat(getComputedStyle(element).paddingTop);
+    element.scrollTop +=
+      platformGroup.getBoundingClientRect().top -
+      element.getBoundingClientRect().top -
+      paddingTop +
+      12;
+  });
+  await expect
+    .poll(async () => {
+      const [listBox, headerBox, paddingTop] = await Promise.all([
+        groupedList.boundingBox(),
+        platformHeader.boundingBox(),
+        groupedList.evaluate((element) =>
+          Number.parseFloat(getComputedStyle(element).paddingTop),
+        ),
+      ]);
+      return Math.abs(
+        (headerBox?.y ?? -1000) - (listBox?.y ?? 1000) - paddingTop,
+      );
+    })
+    .toBeLessThan(3);
+  await expect
+    .poll(async () => {
+      const [researchBox, platformBox] = await Promise.all([
+        researchHeader.boundingBox(),
+        platformHeader.boundingBox(),
+      ]);
+      return (researchBox?.y ?? 1000) < (platformBox?.y ?? -1000);
+    })
+    .toBe(true);
+  const finalUngroupedOption = menu.locator(
+    '[data-terminal-switch-session-id="session-pi"]',
+  );
+  await finalUngroupedOption.scrollIntoViewIfNeeded();
+  await expect(finalUngroupedOption).toBeVisible();
+
+  await menu
+    .locator('[data-terminal-switch-session-id="session-delta"]')
+    .click();
+  await expect(firstPane).toHaveAttribute(
+    "data-terminal-pane-session",
+    "session-delta",
+  );
+  await expect(menu).toBeHidden();
+
+  const secondPane = page.locator(
+    '[data-terminal-pane-slot="terminal-monitor-slot-2"]',
+  );
+  await secondPane
+    .getByRole("combobox", { name: "选择第 2 个监控终端" })
+    .click();
+  await page
+    .locator('[data-terminal-switch-session-id="session-beta"]')
+    .click();
+  await expect(firstPane).toHaveAttribute("data-active-terminal-pane", "true");
+  await expect(secondPane).toHaveAttribute(
+    "data-active-terminal-pane",
+    "false",
+  );
+});
+
 test("preview mode toggle restores full terminal previews on demand", async ({
   page,
 }) => {

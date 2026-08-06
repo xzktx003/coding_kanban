@@ -17,6 +17,23 @@ export type SessionGroupSelectionAction =
   | { type: "create" }
   | { type: "move"; groupId: string | null };
 
+const SESSION_GROUP_TONES = ["amber", "teal", "sky", "coral"] as const;
+
+export type SessionGroupTone = (typeof SESSION_GROUP_TONES)[number] | "neutral";
+
+export function resolveSessionGroupTone(groupId: string): SessionGroupTone {
+  if (groupId === UNGROUPED_SESSION_GROUP_ID) {
+    return "neutral";
+  }
+
+  let hash = 0;
+  for (const character of groupId) {
+    hash = (Math.imul(hash, 31) + (character.codePointAt(0) ?? 0)) >>> 0;
+  }
+
+  return SESSION_GROUP_TONES[hash % SESSION_GROUP_TONES.length];
+}
+
 export function resolveSessionGroupSelection(
   value: string,
 ): SessionGroupSelectionAction {
@@ -93,11 +110,13 @@ export function SessionGroupHeader({
   onToggleGroup,
 }: SessionGroupHeaderProps) {
   const editable = groupId !== UNGROUPED_SESSION_GROUP_ID;
+  const tone = resolveSessionGroupTone(groupId);
 
   return (
     <div
       className={`session-group-header${compact ? " session-group-header--compact" : ""}`}
       data-collapsed={collapsed ? "true" : "false"}
+      data-group-tone={tone}
       data-session-group-id={groupId}
     >
       <button

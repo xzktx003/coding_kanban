@@ -347,6 +347,17 @@ test("restart-dev defaults to HTTPS for the frontend dev server", () => {
   assert.match(script, /WEB_HTTPS="\$\{WEB_HTTPS:-1\}"/);
 });
 
+test("restart-dev exposes only a CA that verifies the active frontend certificate", () => {
+  assert.match(
+    script,
+    /openssl verify -CAfile "\$candidate" "\$WEB_HTTPS_CERT"/,
+  );
+  assert.match(
+    script,
+    /VITE_DEV_HTTPS_CA_CERT="\$WEB_HTTPS_CA_CERT"/,
+  );
+});
+
 test("restart-dev detaches dev servers from the invoking shell session", () => {
   assert.match(
     script,

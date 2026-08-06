@@ -392,6 +392,31 @@ test("launch keeps tmux attach sessions alive when the card is labeled as copilo
   }
 });
 
+test("dispose kills every active PTY so backend reloads cannot orphan tmux clients", () => {
+  const registry = new AgentSessionRegistry();
+  const runtimeManager = new PtyRuntimeManager(registry);
+  const first = runtimeManager.launch({
+    workspaceId: "default",
+    displayName: "dispose-first",
+    agentKind: "shell",
+    command: "sleep 30",
+  });
+  const second = runtimeManager.launch({
+    workspaceId: "default",
+    displayName: "dispose-second",
+    agentKind: "shell",
+    command: "sleep 30",
+  });
+
+  assert.equal(runtimeManager.has(first.id), true);
+  assert.equal(runtimeManager.has(second.id), true);
+
+  runtimeManager.dispose();
+
+  assert.equal(runtimeManager.has(first.id), false);
+  assert.equal(runtimeManager.has(second.id), false);
+});
+
 test("launch seeds tmux attach replay with pane history outside the visible screen", async () => {
   const registry = new AgentSessionRegistry();
   const runtimeManager = new PtyRuntimeManager(registry, {

@@ -389,6 +389,9 @@ export function buildServer(options: BuildServerOptions = {}): {
   });
 
   app.addHook("onClose", () => {
+    ptyRuntimeManager.dispose();
+  });
+  app.addHook("onClose", () => {
     return vsCodeWebManager.dispose();
   });
   app.addHook("onReady", () => {

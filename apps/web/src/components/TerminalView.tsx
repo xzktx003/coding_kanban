@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { createCoalescedTrailingScheduler } from "../lib/frame-schedulers";
 import "@xterm/xterm/css/xterm.css";
 
 import { buildTerminalWebSocketUrl } from "../lib/api";
@@ -38,6 +39,7 @@ import {
 import {
   computeTerminalWheelScrollLines,
   isTerminalWheelBlockedByOverlayTarget,
+  shouldCaptureTerminalWheel,
   shouldForwardTerminalWheelToApplication,
 } from "../lib/terminal-wheel";
 
@@ -49,6 +51,7 @@ interface TerminalViewProps {
   fontSize?: number;
   onFontSizeChange?: (fontSize: number) => void;
   suspended?: boolean;
+  wheelPassthrough?: boolean;
 }
 
 type TerminalContainer = HTMLDivElement & {
@@ -98,6 +101,7 @@ export function TerminalView({
   fontSize,
   onFontSizeChange,
   suspended = false,
+  wheelPassthrough = false,
 }: TerminalViewProps) {
   const inputEnabled = inputEnabledProp ?? interactive;
   const terminalFontSize = clampTerminalFontSize(
@@ -826,19 +830,16 @@ export function TerminalView({
       }
     };
 
+    const fitScheduler = createCoalescedTrailingScheduler({
+      cancelFrame: window.cancelAnimationFrame.bind(window),
+      clearTimer: window.clearTimeout.bind(window),
+      requestFrame: window.requestAnimationFrame.bind(window),
+      run: fitTerminal,
+      scheduleTimer: window.setTimeout.bind(window),
+    });
+
     const scheduleFit = () => {
-      const frameId = window.requestAnimationFrame(() => {
-        fitTerminal();
-
-        const nestedFrameId = window.requestAnimationFrame(() => {
-          fitTerminal();
-        });
-        animationFrameIds.push(nestedFrameId);
-      });
-      animationFrameIds.push(frameId);
-
-      timeoutIds.push(window.setTimeout(fitTerminal, 32));
-      timeoutIds.push(window.setTimeout(fitTerminal, 96));
+      fitScheduler.schedule();
     };
 
     if (mobileTouchMode && interactive) {
@@ -1323,6 +1324,10 @@ export function TerminalView({
     }
 
     handleTerminalWheelCapture = (event) => {
+      if (shouldCaptureTerminalWheel({ wheelPassthrough }) === false) {
+        return;
+      }
+
       if (shouldForwardWheelToApplication(event)) {
         rememberTerminalIntent();
         focusInteractiveTerminal(true);
@@ -1333,6 +1338,10 @@ export function TerminalView({
     };
 
     handleDocumentWheelCapture = (event) => {
+      if (shouldCaptureTerminalWheel({ wheelPassthrough }) === false) {
+        return;
+      }
+
       if (event.defaultPrevented) {
         return;
       }
@@ -1384,7 +1393,11 @@ export function TerminalView({
     window.addEventListener("resize", handleWindowResize);
 
     const resizeObserver = new ResizeObserver(() => {
-      scheduleFit();
+      if (container.closest(".main-layout--resizing")) {
+        fitScheduler.scheduleTrailing();
+      } else {
+        scheduleFit();
+      }
     });
     resizeObserver.observe(container);
 
@@ -1482,6 +1495,7 @@ export function TerminalView({
         window.removeEventListener("blur", handleWindowBlur);
       }
       window.clearTimeout(connectTimeoutId);
+      fitScheduler.dispose();
       for (const timeoutId of timeoutIds) {
         window.clearTimeout(timeoutId);
       }
@@ -1512,12 +1526,18 @@ export function TerminalView({
       pendingResizeRef.current = null;
       terminalInputReadyRef.current = false;
     };
-  }, [agentSessionId, interactive, mobileTouchMode, suspended]);
+  }, [
+    agentSessionId,
+    interactive,
+    mobileTouchMode,
+    suspended,
+    wheelPassthrough,
+  ]);
 
   return (
     <div
       ref={containerRef}
-      className={`terminal-view ${interactive ? "terminal-view-live" : "terminal-view-preview"} ${inputEnabled ? "terminal-view-input-active" : "terminal-view-input-monitor"}${mobileTouchMode ? " terminal-view-mobile-touch" : ""}`}
+      className={`terminal-view ${interactive ? "terminal-view-live" : "terminal-view-preview"} ${inputEnabled ? "terminal-view-input-active" : "terminal-view-input-monitor"}${mobileTouchMode ? " terminal-view-mobile-touch" : ""}${wheelPassthrough ? " terminal-view-wheel-passthrough" : ""}`}
       style={{
         width: "100%",
         height: "100%",

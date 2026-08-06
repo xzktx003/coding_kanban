@@ -6,6 +6,8 @@ import {
 } from "@playwright/test";
 import path from "node:path";
 
+import { selectTerminalPaneSession } from "./terminal-session-switcher";
+
 declare const process: {
   cwd(): string;
 };
@@ -56,12 +58,91 @@ async function switchFocusedSession(page: Page, displayName: string) {
   });
   await expect(sidebarCard).toBeVisible();
   await sidebarCard
-    .locator(".focus-sidebar-card-header")
-    .click({ force: true, timeout: 2000 });
+    .locator(".focus-sidebar-card-name")
+    .click({ timeout: 2000 });
   await expect(page.locator(".focus-main-name")).toContainText(displayName, {
     timeout: 5000,
   });
 }
+
+test("vscode divider keeps pointer capture and persists only the final width", async ({
+  page,
+  request,
+}) => {
+  const sessionName = `vscode-web-resize-${Date.now()}`;
+  let sessionId: string | undefined;
+
+  await page.route("**/api/agent-sessions/*/vscode-web", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        provider: "code-server",
+        url: "data:text/html,<html><body>resize-editor</body></html>",
+        reused: false,
+        workingDirectory: "/tmp/project-resize",
+      }),
+    });
+  });
+
+  try {
+    sessionId = await launchMockSession(
+      request,
+      sessionName,
+      "/tmp/project-resize",
+    );
+    await focusSession(page, sessionName);
+    await page.getByTestId("vscode-toggle").click();
+    await expect(page.getByTestId("vscode-web-frame")).toBeVisible();
+
+    await page.evaluate(() => {
+      const trackedWindow = window as Window & {
+        __fileBrowserStateWriteCount: number;
+      };
+      const originalSetItem = Storage.prototype.setItem;
+      trackedWindow.__fileBrowserStateWriteCount = 0;
+      Storage.prototype.setItem = function setItem(key, value) {
+        if (key === "file-browser-ui-state") {
+          trackedWindow.__fileBrowserStateWriteCount += 1;
+        }
+        return originalSetItem.call(this, key, value);
+      };
+    });
+
+    const sidePanel = page.locator(".file-browser-shell");
+    const splitter = page.getByTestId("file-browser-main-splitter");
+    const sidePanelBefore = await sidePanel.boundingBox();
+    const splitterBox = await splitter.boundingBox();
+    expect(sidePanelBefore).not.toBeNull();
+    expect(splitterBox).not.toBeNull();
+
+    const startX = splitterBox!.x + splitterBox!.width / 2;
+    const centerY = splitterBox!.y + splitterBox!.height / 2;
+    await page.mouse.move(startX, centerY);
+    await page.mouse.down();
+    await page.mouse.move(startX - 100, centerY, { steps: 24 });
+    await expect(page.locator(".main-layout")).toHaveClass(/resizing/);
+    await page.mouse.up();
+
+    const sidePanelAfter = await sidePanel.boundingBox();
+    expect(sidePanelAfter).not.toBeNull();
+    expect(sidePanelAfter!.width).toBeLessThan(sidePanelBefore!.width - 80);
+    await expect(page.locator(".main-layout")).not.toHaveClass(/resizing/);
+    await expect(page.getByTestId("vscode-web-frame")).toBeVisible();
+
+    const storageWriteCount = await page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __fileBrowserStateWriteCount: number;
+          }
+        ).__fileBrowserStateWriteCount,
+    );
+    expect(storageWriteCount).toBe(1);
+  } finally {
+    await deleteSessionIfPresent(request, sessionId);
+  }
+});
 
 test("vscode web drawer is scoped per focused session and replaces the old capture entry point", async ({
   page,
@@ -221,16 +302,14 @@ test("vscode web follows the active monitor terminal only when opened or explici
     const secondPane = page.locator(
       '[data-terminal-pane-slot="terminal-monitor-slot-2"]',
     );
-    await secondPane
-      .getByRole("combobox", { name: "选择第 2 个监控终端" })
-      .selectOption(sessionBId!);
+    await selectTerminalPaneSession(page, secondPane, sessionBId!);
     await expect(secondPane).toHaveAttribute(
       "data-terminal-pane-session",
       sessionBId!,
     );
     await secondPane.locator(".terminal-view").click();
 
-    await expect(page.locator(".focus-main-name")).toContainText(sessionAName);
+    await expect(page.locator(".focus-main-name")).toContainText(sessionBName);
     await page.getByTestId("vscode-toggle").click();
     await expect(page.locator(".focus-main-name")).toContainText(sessionBName);
     await expect(page.getByTestId("vscode-web-frame")).toHaveAttribute(
@@ -303,9 +382,7 @@ test("vscode side collapse state is controlled only by collapse buttons during m
     const secondPane = page.locator(
       '[data-terminal-pane-slot="terminal-monitor-slot-2"]',
     );
-    await secondPane
-      .getByRole("combobox", { name: "选择第 2 个监控终端" })
-      .selectOption(sessionBId!);
+    await selectTerminalPaneSession(page, secondPane, sessionBId!);
     await firstPane.locator(".terminal-view").click();
     await expect(page.locator(".focus-main-name")).toContainText(sessionAName);
 

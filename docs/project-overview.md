@@ -24,6 +24,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 支持创建、重命名和删除会话分组；创建第一个分组后，主页看板与聚焦视图右侧“其他会话”按同一配置分组展示，未指定归属的会话自动进入“未分组”。
 - 主页卡片和聚焦侧栏卡片都提供分组选择菜单，可移动到已有分组、移回“未分组”，或新建分组并立即移入；删除分组只解除归属，不删除会话。
 - 每个用户分组和“未分组”标题都可独立折叠/展开；折叠时保留名称与卡片计数，主页和聚焦侧栏共享并持久化折叠状态。
+- 分组标题使用稳定的分类色、放大的粗体名称、整行浅色背景和同色数量徽标形成组级视觉锚点；主页与聚焦侧栏共享色调，“未分组”使用中性色，同时保留文字、数量和折叠箭头以避免只靠颜色区分。
 - 支持重命名、隐藏、关闭/脱离、终止 tmux、复制 tmux attach 命令。
 - 宫格筛选行在卡片上方展示小号“等待输入 / 运行中”统计徽标，位置紧邻已隐藏会话入口。
 - 已隐藏会话进入隐藏抽屉，可以恢复或删除。
@@ -31,6 +32,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 默认轻量预览模式下，卡片和聚焦右侧栏显示轻量文本预览；用户可从顶栏切换回完整小终端预览。
 - 聚焦视图可以直接输入主终端，并在侧栏保留其它会话上下文。
 - 聚焦视图支持单屏、左右双屏、上下双屏、左中右三屏、四屏、六屏、八屏终端监控；多窗格可以同时观察多个真实终端，但输入所有权始终只有一个“输入中”窗格，不做广播输入。
+- 每个监控窗格通过分组会话切换器选择内容：弹层复用看板现有分组顺序和稳定分类色，显示组内数量、会话状态、当前项及其他窗格占用编号；已占用项不可重复选择，未分组会话自动归入独立分区。侧栏折叠状态不隐藏切换器选项，长列表由弹层内部滚动。
 - 聚焦视图支持一键折叠右侧“其他会话”侧栏，方便在主终端和其它会话上下文之间切换。
 - 前端交互使用轻量 CSS 动效增强观感：菜单、诊断面板、主机下拉、卡片、抽屉和弹窗只动画 `opacity` 与 `transform`，并通过 `prefers-reduced-motion` 对低运动偏好用户降级。
 
@@ -114,6 +116,8 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 聚焦视图右侧列表继续遵循现有分组、折叠、搜索和排序规则，同时显示全部可见会话。受管 tmux 小卡在真实标题后显示低对比度 `tmux` 标签，标签直接由现有 `transportRef.tmuxSession` 派生。已进入大屏布局的会话小卡会显示与窗格一致的编号；当前输入窗格和对应小卡共享黄色高亮。点击带编号小卡只激活已有窗格，点击未编号小卡才替换当前输入窗格。这些关联状态完全由前端 `terminalSlots` 和 `activeSlotId` 派生，不新增后端字段、接口或 WebSocket 事件。
 
+窗格标题栏的 `TerminalSessionSwitcher` 从同一 `SessionGroupState` 派生分组列表，不复制分组持久化状态。它忽略侧栏的折叠显示状态，保证所有可见会话始终可切换；通过 portal 挂载到页面根层，避免被终端窗格的裁切边界截断，并根据触发器和视口空间向上或向下定位。弹层只让外层分组列表承担滚动，分组容器使用不创建滚动祖先的裁切方式，因此组标题可以相对外层列表吸顶，并在下一组到达时自然上推替换。当前 slot 与其他 slot 的占用标记由现有 `terminalSlots` 投影生成，选择动作继续复用原有 slot 更新逻辑。
+
 - 终端 WebSocket：`/ws/agent-sessions/:id/terminal`。
 - 终端字号由 `terminal-font-size` 本地存储项持久化，默认 14px；滑杆拖动过程中只更新控件显示，鼠标松开、键盘调整结束或失焦提交后才更新已有 `TerminalView` 的 `fontSize` 并触发 fit/resize，不需要重建 WebSocket。
 - 会先发送 scrollback replay，再发送 `replay-complete`。
@@ -125,14 +129,16 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 支持 resize 消息和 binary 消息，binary 用于 tmux 鼠标等二进制事件。
 - 前端 `TerminalView` 支持 OSC 52 剪贴板写入，允许 tmux copy-mode、SSH 会话或 CLI 工具把当前终端 pane 内复制内容写入浏览器剪贴板；该能力只消费终端输出中的 clipboard target 请求，不改变 stdin、resize 或 tmux 鼠标事件转发。
 - 轻量预览模式下，默认只有当前聚焦主终端发送 resize 和 stdin；非活跃区域依赖会话 `outputPreview` 展示轻量文本预览。服务端只用包含足够可读字母、数字或中日韩字符的输出块更新预览，并对受管 tmux 使用更严格的碎片阈值；纯光标、擦除和边框绘制块仍参与活动检测但不会覆盖已有可读文本。前端继续清理 ANSI 与终端字符集切换序列。
-- 多终端监控模式会按所选屏幕布局显式挂载 1、2、3、4、6 或 8 个实时 `TerminalView`；所有窗格都能接收后端输出并保持实时观察，但只有当前“输入中”窗格开启 stdin、焦点修复和终端输入所有权，避免广播输入。
+- 多终端监控模式会按所选屏幕布局显式挂载 1、2、3、4、6 或 8 个实时 `TerminalView`；所有窗格都能接收后端输出并保持实时观察，但只有当前“输入中”窗格开启 stdin、焦点修复和终端输入所有权，避免广播输入。`activeSlotId` 是当前输入目标，任何会改变它的窗格点击、会话替换、拖放、关闭补位或侧栏切换都会同步 App 级 `focusedId`，保证标题和文件/VS Code 工具不会继续引用旧会话；重复选择非活动窗格中已经显示的当前项仍是无操作。
 - 完整预览模式下，非活跃卡片和右侧栏会恢复只读 `TerminalView`，因此会重新建立终端 WebSocket，适合需要实时小窗预览的场景。
 - 前端资源诊断会记录 `/ws/agent-sessions` 全量快照消息速率和大小、`/ws/agent-sessions/:id/terminal` 实时流速率、终端 WebSocket 生命周期、DOM 中的 xterm/预览/监控窗格/VS Code iframe 数量，以及浏览器暴露的 JS heap；同时每秒按需调用 `/api/diagnostics/terminal-history` 和 `/api/diagnostics/vscode-web-proxy` 读取后端终端历史与 VS Code 代理吞吐。诊断只在面板打开时刷新，不保存历史。
 - 后端对终端输出导致的全量会话快照做约 1 秒的 trailing 合并广播，降低轻量预览长期运行时的网络流量、浏览器 JSON 解析和 React 更新频率；新建、删除、聚焦、重命名等结构性变化仍通过即时快照刷新。
-- 本地 tmux 输入按语义分流：普通文本、快捷键和 bracketed paste 通过有序 `send-keys` 写入；鼠标协议及 `Ctrl+A` / `Ctrl+B` 前缀命令写入 attached tmux client PTY。鼠标或前缀命令成功进入 client 后，路由器会让后续 `send-keys` 以 tmux session 为动态目标，从而跟随 client 当前选中的 pane；连接清理或重建时恢复持久化 pane 绑定。CSI-u 的 `Shift+Enter` / `Ctrl+Enter` 保留原始字节，避免依赖 tmux 版本键名。
+- 本地 tmux 输入按语义分流：普通文本、快捷键和 bracketed paste 通过有序 `send-keys` 写入；鼠标协议及 `Ctrl+A` / `Ctrl+B` 前缀命令写入 attached tmux client PTY。路由器查询当前 `prefix` key table，凡绑定 `command-prompt` 或 `confirm-before` 的前缀键都进入持续 client-prompt 状态，后续编辑保持 PTY 通道直到 Enter 或 Ctrl+C；`status-keys vi` 的 Escape 仅切换编辑模式。裸 Ctrl+C 也固定走 client PTY，用于取消跨服务重载残留且已无法由内存状态识别的 prompt；无 prompt 时 tmux 把它正常转发给活动 pane。只要 attached client PTY 存在，普通 pane 输入就以 tmux session 为动态目标；PTY 不存在时才恢复持久化 pane 绑定。
+- 服务生命周期把 Fastify 关闭与 PTY 关闭绑定：SIGTERM/SIGINT 先执行 `app.close()`，`onClose` 再统一 dispose 本进程创建的 PTY，最后退出。这样 `tsx watch` 与脚本重启不会把旧 `tmux attach` 进程留给 PID 1，也不会持续增加 session 的 attached client 数量。
 - `TerminalView` 开启 xterm 的 `macOptionIsMeta`，因此 macOS Option 与 Windows/Linux Alt 在浏览器能够接收事件时使用相同的 Meta 编码。adapter 在完整 CSI 键序列之后识别 `ESC+Space` 及常用 `ESC+字母/数字`，并原子映射为 tmux `M-*` 键，避免 Codex 把两个分离事件解释为 Escape 和普通输入；Windows 窗口管理器若截获 `Alt+Space`，使用已支持的 `Shift+Enter` 作为换行备用键。
 - Safari 的快速文本输入额外经过短时恢复状态机：`TerminalView` 记录已经通过 xterm `onData` 发出的普通文本，并在原生 `insertText` 冒泡时按顺序抵消已发送部分，仅把缺失后缀送入原有 WebSocket 输入链路。状态按 100ms 过期，控制序列会清空状态，IME composition 不参与恢复，避免重复输入或跨按键误匹配。
-- 滚轮按终端能力动态路由：当前交互终端启用 xterm mouse tracking 时，普通 wheel 事件放行给 xterm 并经 terminal WebSocket/attached PTY 到达 tmux 当前 pane；按住 `Shift` 时强制浏览本地 xterm scrollback。未启用 mouse tracking 或不具备输入所有权的监控窗格继续只滚动自己的 scrollback，弹层上的 wheel 也不会穿透。
+- 滚轮按终端能力动态路由：当前交互终端启用 xterm mouse tracking 时，普通 wheel 事件放行给 xterm 并经 terminal WebSocket/attached PTY 到达 tmux 当前 pane；按住 `Shift` 时强制浏览本地 xterm scrollback。未启用 mouse tracking 或不具备输入所有权的大屏监控窗格继续只滚动自己的 scrollback；聚焦页右侧小卡即使启用完整 xterm 预览也使用 `wheelPassthrough` 被动命中面，滚轮只滚外层会话侧栏。
+- 文件/VS Code 侧面板分隔条使用 pointer capture 跨越 iframe 保持拖动；宽度通过 latest-value animation-frame scheduler 直接写入面板 DOM，React 状态和 localStorage 只在松手时提交一次。`TerminalView` 的 fit 使用 frame + trailing 合并调度，并在侧面板拖动期间只保留 trailing fit，避免 xterm、VS Code iframe 和整个 App 同时高频重排。
 
 ### 应用更新与会话恢复
 
@@ -203,6 +209,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
   - `~/.vscode-server/extensions`，若不存在则回退到 `~/.local/share/coding-kanban/vscode-web/extensions`
   - `~/.local/share/coding-kanban/vscode-web/workspaces`
 - SSH 远端首版会通过系统 `ssh` 在远端启动/复用 `code-server`，再建立一个本地 `ssh -L` 转发，让当前后端继续把 `/vscode/` 代理到本机回环端口。
+- 浏览器 `/vscode` WebSocket 和 code-server 上游 WebSocket 是两个独立握手；代理会在上游进入 OPEN 前用 1 MiB 有界队列保留浏览器首包，随后按顺序冲刷，避免扩展宿主初始化消息在连接竞态中丢失。
 
 注意：
 
@@ -210,7 +217,9 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - VS Code Web 面板左上角只保留重新加载按钮，不再常驻展示 provider/reused 状态标签。
 - `reused` 只表示后端进程复用了同一个 VS Code Web server，不等同于浏览器 iframe 缓存。
 - VS Code iframe 显式委派 `clipboard-read` / `clipboard-write`，`/vscode/*` 代理响应保留上游 Permissions-Policy 的同时把两项剪贴板权限限制为同源；浏览器仍可按站点设置要求用户确认剪贴板访问。
+- iframe 挂载前会使用独立 scope 注册并立即注销一个最小 Service Worker，提前验证当前浏览器是否真正信任 HTTPS。远端浏览器拒绝证书时，面板会提供当前开发 CA 的公有证书下载和 Safari/macOS 信任步骤；下载路由只输出重新编码的 CA 公有证书，不读取或暴露私钥。
 - 浏览器侧 iframe 默认使用“VS Code 省内存”模式，只保留当前打开的 iframe；“VS Code 保持状态”模式最多保留最近 3 个 iframe。VS Code Web 打开响应使用有界最近缓存，历史会话不会永久累积在页面内存中。
+- 拖动 VS Code 与终端之间的分隔条时暂时禁用 iframe pointer events，并由分隔条持有 pointer capture；鼠标进入编辑器区域不会中断拖动，终端 fit/resize 在拖动稳定后合并执行。
 - 顶栏提供“释放 VS Code 缓存”按钮，用于卸载非当前 VS Code iframe，释放浏览器内存；这不会停止后端 code-server 进程。
 - 自动超时卸载 VS Code iframe 暂不默认启用，后续可在确认用户体验后作为第二阶段策略。
 
@@ -317,6 +326,7 @@ memories/        仓库记忆，不是产品运行依赖
 - `TopBar.tsx`：分组顶栏、显示/工具菜单、操作提示、主入口、折叠。
 - `AgentGrid.tsx` / `AgentGridCard.tsx`：宫格和卡片。
 - `AgentFocusView.tsx`：聚焦终端和会话切换。
+- `TerminalSessionSwitcher.tsx`：多终端窗格的分组会话选择、占用标记和视口内弹层定位。
 - `TerminalView.tsx`：聚焦主终端的 xterm.js、WebSocket、replay、输入所有权。
 - `TerminalPreview.tsx`：宫格卡片和聚焦右侧栏的轻量文本预览，不建立终端 WebSocket。
 - `resource-diagnostics.ts`：浏览器资源诊断采样、WebSocket 吞吐统计和压力源分类。
@@ -364,7 +374,7 @@ pnpm install
 
 - 清理默认端口监听。
 - 启动后端和前端。
-- 默认使用 HTTP。
+- 默认使用 HTTPS，并在 `mkcert` 可用时复用其 CA 签发开发证书。
 - 写日志到 `.dev-runtime/server.log` 和 `.dev-runtime/web.log`。
 
 常用变量：
@@ -392,7 +402,7 @@ pnpm --dir apps/server dev
 
 - 前端默认端口 8484，后端默认端口 4000。
 - 手动启动前端默认是 HTTP，访问 `http://10.30.0.22:8484/`。
-- `scripts/restart-dev.sh` 默认也使用 HTTP，地址形如 `http://10.30.0.22:8484/`。
+- `scripts/restart-dev.sh` 默认使用 HTTPS，地址形如 `https://10.30.0.22:8484/`；局域网内其他设备首次访问时必须信任启动日志给出的开发 CA，否则 VS Code WebView 的 Service Worker 会被浏览器拒绝。
 - 如果只启动前端，页面会打开，但 API、WebSocket、tmux、文件浏览器、VS Code Web 都不可用。
 - Vite 前端代理 `/api` 到 `http://localhost:4000`，代理 `/ws` 到 `ws://localhost:4000`。
 
@@ -415,6 +425,7 @@ curl http://127.0.0.1:4000/api/health
 - `VITE_API_BASE_URL`：覆盖 API 基础地址。默认空字符串，使用同源代理。
 - `VITE_DEV_HTTPS=1`：前端 dev server 使用 HTTPS。
 - `VITE_DEV_HTTPS_CERT`、`VITE_DEV_HTTPS_KEY`：HTTPS 证书路径。
+- `VITE_DEV_HTTPS_CA_CERT`：由启动脚本传给 Vite 的 CA 公有证书路径，仅用于 VS Code WebView 证书信任恢复入口。
 
 ### 后端
 
@@ -567,7 +578,7 @@ UI 和 API 应围绕 `AgentSessionRecord` 工作。不要让 terminal id、tmux 
 - 扩展默认复用当前用户的 `~/.vscode-server/extensions`；如果需要单独目录，可设置 `VSCODE_WEB_EXTENSIONS_DIR`。
 - 启动时会清理继承的 `VSCODE_IPC_HOOK_CLI`，避免从 VS Code 终端拉起时误连到已有实例。
 - SSH 远端模式依赖后端到目标主机的 SSH 本地转发能力，不要求远端额外暴露 HTTP 端口。
-- 前端和 code-server 均使用 HTTP 协议，无混合内容限制。
+- code-server 由同源 `/vscode/` 代理提供；HTTPS 前端会先验证 Service Worker 能力，避免证书不受信任时进入不可恢复的空白 WebView。
 
 ### 文件浏览器
 
@@ -609,7 +620,7 @@ pnpm --dir apps/server dev
 http://10.30.0.22:8484/
 ```
 
-如需临时测试 HTTPS，请显式设置 `WEB_HTTPS=1` 或配置 `VITE_DEV_HTTPS`、证书路径。确保后端也已启动。
+推荐使用 `./scripts/restart-dev.sh` 启动默认 HTTPS 服务；手动测试 HTTPS 时需显式配置 `VITE_DEV_HTTPS` 和证书路径。局域网客户端还必须信任签发该证书的 CA，单纯在浏览器警告页选择继续访问不足以启用 Service Worker。
 
 ### VS Code 每次都像重新配置
 

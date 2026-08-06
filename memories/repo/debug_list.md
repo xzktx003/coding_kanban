@@ -129,3 +129,14 @@
 - Kanban 内嵌 VS Code 提示无法读取浏览器剪贴板：iframe 未委派 clipboard 权限，代理也未声明同源策略。修复为 iframe 增加 `clipboard-read; clipboard-write`，`/vscode/*` 在保留上游其他 Permissions-Policy 指令后追加两项 `(self)` 剪贴板策略。
 - 聚焦视图右侧轻量预览空白、竖线或出现 `(B`：PTY 最后一个数据块可能只有 TUI 光标、擦除、边框、短文本碎片或字符集切换，却覆盖了已有可读 `outputPreview`。修复为服务端清理控制序列和框线，只用包含足够可读字符的行更新预览，并对受管 tmux 使用更严格的短碎片阈值；纯绘制块继续用于活动检测但保留旧文本，前端同步清理 `ESC(B` / `ESC(0`。
 - 用户在后台 Git 检查尚未结束时确认拉取，apply 曾被 single-flight 误合并为 check。修复为 apply 排队等待 check，随后只执行一次用户确认的 fast-forward；并发 apply 继续共享结果。
+- Codex 的黄色 `(jump to forward)` 在 Kanban 中无法用方向键关闭：attached client 已切到新 pane，但输入路由尚未收到鼠标或前缀事件，普通按键仍写入持久化旧 pane。修复为 attached PTY 存在期间从首次普通输入起以 tmux session 为动态目标，持续跟随实际显示 pane；PTY 不存在时才回退固定 pane。
+- 局域网 Safari 允许临时绕过 Kanban 证书警告，但 VS Code WebView 的 Service Worker 仍因 SSL 失败：远端设备没有信任开发机的 mkcert CA，顶层页面例外不适用于 Service Worker。修复为 iframe 前置 Service Worker 探测，失败时提供 CA 公有证书下载、Safari/macOS 信任步骤和重试；启动链只暴露能验证当前叶证书且重新编码后的 CA 公有证书，绝不暴露私钥。
+- 证书信任后 VS Code 扩展宿主仍可能握手超时：浏览器 WebSocket 已打开时 code-server 上游还在 CONNECTING，旧代理静默丢弃首批初始化消息。修复为用 1 MiB 有界队列保留并按序冲刷握手期消息，超限显式关闭。
+- VS Code iframe 与终端之间的分隔条拖动严重卡顿：每个 mousemove 都重渲染整个 App、写 localStorage，并让 xterm 排入多次 fit；鼠标进入 iframe 还会切断父页面事件。修复为 pointer capture、按动画帧直接写面板宽度、松手单次提交状态，并在拖动期把终端 fit 延后到 trailing 收尾。
+- tmux 前缀后的 client prompt 不能只识别 `:`：`zhuanli` 实际卡在 `Ctrl+B ,` 打开的 `(rename-window)`，后续输入错误恢复到 pane；主机 `status-keys vi` 下 Escape 又只切换编辑模式。修复为查询当前 prefix key table，所有 `command-prompt` / `confirm-before` 绑定持续走 client PTY，Enter 提交、Ctrl+C/cleanup 取消；裸 Ctrl+C 也走 client，以恢复服务重载后内存状态已丢失的 prompt。
+- 源码热重载会把 node-pty 创建的 `tmux attach` 留给 PID 1，`zhuanli` 曾累积 7 个孤儿 Kanban clients。修复为 SIGTERM/SIGINT 先 `app.close()`，Fastify onClose 调用 `PtyRuntimeManager.dispose()` 清理全部受管 PTY；现场 detach 6 个历史孤儿后，只保留当前 Kanban client 和用户手工 attach。
+- 聚焦页右侧完整终端预览会吞掉 wheel 并滚动小终端内部历史：`interactive=false` 不会禁用 xterm 自身 wheel listener。修复为侧栏预览启用 `wheelPassthrough` 和被动 pointer 命中面，让滚轮只滚动外层“全部会话”列表。
+- 多终端分组切换器点击非输入窗格的“当前”项会意外抢走输入权：自定义选项对已选值仍执行 slot 回调，且 portal 事件时序可能改变回调读取的活动状态。修复为弹层打开时冻结同步意图，当前项只关闭弹层并恢复触发器焦点，不更新 slot 或聚焦状态。
+- 多终端分组切换器通过 portal 挂载后，document 级终端滚轮兜底会抢走列表 wheel，导致只能看到顶部选项并像是没有分组。修复为把切换器弹层纳入终端滚轮阻断目标；E2E 同时断言 3 个直接分组容器、组名/数量和真实鼠标滚动。
+- 多终端分组切换器的标题虽然声明 sticky，但父分组的 `overflow: hidden` 让标题无法相对外层列表吸顶。修复为改用不建立滚动祖先的 `overflow: clip`，当前标题固定到下一组标题上推替代；E2E 用实际边界坐标覆盖两阶段行为。
+- 多窗格局部 `activeSlotId` 与 App 级 `focusedId` 曾因侧面板条件同步而分叉，导致输入已到新窗格但标题、文件或 VS Code 仍引用旧会话。修复为所有改变当前输入目标的入口统一同步顶层焦点，重复选择非活动窗格的当前项继续不抢输入；侧栏 E2E 点击明确的会话名称，避免误命中同一标题行内的分组下拉框。

@@ -156,6 +156,7 @@ export function FocusSidebarSessionCard({
               fontSize={terminalFontSize}
               interactive={false}
               onFontSizeChange={onTerminalFontSizeChange}
+              wheelPassthrough
             />
           </Suspense>
         )}

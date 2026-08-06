@@ -8,6 +8,7 @@ import { resolveVsCodeWebRequestTarget } from "./vscode-web-request-target.js";
 
 const VSCODE_WEB_PROXY_PREFIX = "/vscode";
 const DIAGNOSTIC_RATE_WINDOW_MS = 5_000;
+const MAX_PENDING_WEBSOCKET_BYTES = 1024 * 1024;
 const VSCODE_CLIPBOARD_PERMISSIONS_POLICY =
   "clipboard-read=(self), clipboard-write=(self)";
 
@@ -499,18 +500,43 @@ function proxyWebSocketConnection(
       request.raw.url ?? request.url,
     )}`,
   );
+  const pendingMessages: Array<{ data: Buffer; isBinary: boolean }> = [];
+  let pendingBytes = 0;
+  let clientClosed = false;
   upstream.binaryType = "arraybuffer";
 
   clientSocket.on("message", (data: Buffer, isBinary: boolean) => {
-    if (upstream.readyState !== WebSocket.OPEN) {
+    if (upstream.readyState === WebSocket.OPEN) {
+      recordVsCodeProxyWebSocketUpload(data.byteLength);
+      upstream.send(isBinary ? data : data.toString("utf8"));
       return;
     }
 
-    recordVsCodeProxyWebSocketUpload(data.byteLength);
-    upstream.send(isBinary ? data : data.toString("utf8"));
+    if (upstream.readyState !== WebSocket.CONNECTING) {
+      return;
+    }
+
+    if (pendingBytes + data.byteLength > MAX_PENDING_WEBSOCKET_BYTES) {
+      pendingMessages.length = 0;
+      pendingBytes = 0;
+      clientSocket.close(
+        1009,
+        Buffer.from("VS Code Web upstream handshake queue exceeded"),
+      );
+      upstream.close();
+      return;
+    }
+
+    // code-server sends its handshake as soon as the browser-side socket opens.
+    // Preserve it until the proxy's independent upstream handshake completes.
+    pendingMessages.push({ data: Buffer.from(data), isBinary });
+    pendingBytes += data.byteLength;
   });
 
   clientSocket.on("close", () => {
+    clientClosed = true;
+    pendingMessages.length = 0;
+    pendingBytes = 0;
     finishDiagnostics();
     if (
       upstream.readyState === WebSocket.OPEN ||
@@ -521,6 +547,9 @@ function proxyWebSocketConnection(
   });
 
   clientSocket.on("error", () => {
+    clientClosed = true;
+    pendingMessages.length = 0;
+    pendingBytes = 0;
     finishDiagnostics();
     if (
       upstream.readyState === WebSocket.OPEN ||
@@ -530,15 +559,34 @@ function proxyWebSocketConnection(
     }
   });
 
+  upstream.addEventListener("open", () => {
+    if (clientClosed) {
+      upstream.close();
+      return;
+    }
+
+    for (const message of pendingMessages) {
+      recordVsCodeProxyWebSocketUpload(message.data.byteLength);
+      upstream.send(
+        message.isBinary ? message.data : message.data.toString("utf8"),
+      );
+    }
+    pendingMessages.length = 0;
+    pendingBytes = 0;
+  });
   upstream.addEventListener("message", (event) => {
     recordVsCodeProxyWebSocketDownload(proxyDataByteLength(event.data));
     void forwardUpstreamMessage(clientSocket, event.data);
   });
   upstream.addEventListener("close", () => {
+    pendingMessages.length = 0;
+    pendingBytes = 0;
     finishDiagnostics();
     clientSocket.close();
   });
   upstream.addEventListener("error", () => {
+    pendingMessages.length = 0;
+    pendingBytes = 0;
     finishDiagnostics();
     clientSocket.close(1011, Buffer.from("VS Code Web upstream failed"));
   });

@@ -39,6 +39,7 @@ WEB_HTTPS="${WEB_HTTPS:-1}"
 WEB_HTTPS_CERT="${WEB_HTTPS_CERT:-${RUNTIME_DIR}/certs/dev-cert.pem}"
 WEB_HTTPS_KEY="${WEB_HTTPS_KEY:-${RUNTIME_DIR}/certs/dev-key.pem}"
 WEB_HTTPS_SAN="${WEB_HTTPS_SAN:-}"
+WEB_HTTPS_CA_CERT="${WEB_HTTPS_CA_CERT:-}"
 TERMINAL_SCROLLBACK_BYTES="${TERMINAL_SCROLLBACK_BYTES:-4194304}"
 TERMINAL_TMUX_CAPTURE_LINES="${TERMINAL_TMUX_CAPTURE_LINES:-5000}"
 TERMINAL_REGISTRY_OUTPUT_ENTRIES="${TERMINAL_REGISTRY_OUTPUT_ENTRIES:-1000}"
@@ -289,6 +290,32 @@ build_default_https_san() {
   printf '%s\n' "${san_entries[*]}"
 }
 
+verify_https_ca_cert() {
+  local candidate="$1"
+
+  [[ -r "$candidate" ]] || return 1
+  openssl x509 -in "$candidate" -noout -text 2>/dev/null \
+    | grep -q 'CA:TRUE' || return 1
+  openssl verify -CAfile "$candidate" "$WEB_HTTPS_CERT" >/dev/null 2>&1
+}
+
+resolve_mkcert_ca_cert() {
+  local ca_root
+  local candidate
+
+  command -v mkcert >/dev/null 2>&1 || return 0
+  ca_root="$(mkcert -CAROOT 2>/dev/null || true)"
+  [[ -n "$ca_root" ]] || return 0
+  candidate="${ca_root}/rootCA.pem"
+
+  if verify_https_ca_cert "$candidate"; then
+    # Keep this explicit verification here: only the CA that signed the
+    # currently served leaf certificate may be offered to browser clients.
+    openssl verify -CAfile "$candidate" "$WEB_HTTPS_CERT" >/dev/null 2>&1
+    printf '%s\n' "$candidate"
+  fi
+}
+
 main() {
   if [[ -z "$WEB_HTTPS_SAN" ]]; then
     WEB_HTTPS_SAN="$(build_default_https_san)"
@@ -299,6 +326,17 @@ main() {
   if ! WEB_HTTPS="$WEB_HTTPS" WEB_HTTPS_CERT="$WEB_HTTPS_CERT" WEB_HTTPS_KEY="$WEB_HTTPS_KEY" WEB_HTTPS_SAN="$WEB_HTTPS_SAN" \
     node "${ROOT_DIR}/scripts/ensure-dev-https-cert.mjs"; then
     exit 1
+  fi
+
+  if [[ "$WEB_HTTPS" == "1" ]]; then
+    if [[ -n "$WEB_HTTPS_CA_CERT" ]]; then
+      if ! verify_https_ca_cert "$WEB_HTTPS_CA_CERT"; then
+        log "WEB_HTTPS_CA_CERT must be a CA certificate that verifies WEB_HTTPS_CERT"
+        exit 1
+      fi
+    else
+      WEB_HTTPS_CA_CERT="$(resolve_mkcert_ca_cert)"
+    fi
   fi
 
   if ! capture_current_session_state; then
@@ -340,7 +378,7 @@ main() {
     log "Frontend HTTPS enabled"
     setsid env -u VSCODE_IPC_HOOK_CLI PATH="$RUNTIME_PATH" WEB_BACKEND_HOST="$SERVER_PUBLIC_HOST" WEB_BACKEND_PORT="$SERVER_PORT" SERVER_PORT="$SERVER_PORT" PORT="$SERVER_PORT" \
       CHOKIDAR_USEPOLLING=1 \
-      VITE_DEV_HTTPS=1 VITE_DEV_HTTPS_CERT="$WEB_HTTPS_CERT" VITE_DEV_HTTPS_KEY="$WEB_HTTPS_KEY" \
+      VITE_DEV_HTTPS=1 VITE_DEV_HTTPS_CERT="$WEB_HTTPS_CERT" VITE_DEV_HTTPS_KEY="$WEB_HTTPS_KEY" VITE_DEV_HTTPS_CA_CERT="$WEB_HTTPS_CA_CERT" \
       VITE_TERMINAL_SCROLLBACK_LINES="$VITE_TERMINAL_SCROLLBACK_LINES" \
       pnpm --dir "$WEB_APP_DIR" exec vite --host "$WEB_HOST" --port "$WEB_PORT" \
       >"$WEB_LOG" 2>&1 < /dev/null &
@@ -382,6 +420,9 @@ main() {
   printf 'Frontend : %s\n' "$FRONTEND_LOCAL_URL"
   if [[ -n "$FRONTEND_NETWORK_URL" ]]; then
     printf 'Network  : %s\n' "$FRONTEND_NETWORK_URL"
+  fi
+  if [[ "$WEB_HTTPS" == "1" && -n "$WEB_HTTPS_CA_CERT" ]]; then
+    printf 'HTTPS CA : %s%s\n' "${FRONTEND_NETWORK_URL:-$FRONTEND_LOCAL_URL}" "/__coding-kanban/https-ca.crt"
   fi
   printf 'Logs     : %s | %s\n' "$SERVER_LOG" "$WEB_LOG"
 }

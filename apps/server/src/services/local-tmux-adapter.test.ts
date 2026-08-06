@@ -113,6 +113,52 @@ test("remote tmux discovery exposes the real session name", async () => {
   );
 });
 
+test("getClientPromptBinding classifies command and confirmation prompts from the active tmux prefix table", async () => {
+  const adapter = new LocalTmuxAdapter(new AgentSessionRegistry());
+  const calls: string[][] = [];
+  (
+    adapter as unknown as {
+      runTmux(args: string[]): Promise<{ stdout: string; stderr: string }>;
+    }
+  ).runTmux = async (args) => {
+    calls.push(args);
+    return {
+      stdout:
+        args.at(-1) === ","
+          ? 'bind-key -T prefix , command-prompt -I "#W" "rename-window -- \'%%\'"'
+          : 'bind-key -T prefix x confirm-before -p "kill-pane? (y/n)" kill-pane',
+      stderr: "",
+    };
+  };
+
+  assert.equal(await adapter.getClientPromptBinding(","), "command-prompt");
+  assert.equal(await adapter.getClientPromptBinding("x"), "confirm-before");
+  assert.deepEqual(calls, [
+    ["list-keys", "-T", "prefix", ","],
+    ["list-keys", "-T", "prefix", "x"],
+  ]);
+});
+
+test("getClientPromptBinding rejects non-prompt bindings and multi-key payloads", async () => {
+  const adapter = new LocalTmuxAdapter(new AgentSessionRegistry());
+  let calls = 0;
+  (
+    adapter as unknown as {
+      runTmux(args: string[]): Promise<{ stdout: string; stderr: string }>;
+    }
+  ).runTmux = async () => {
+    calls += 1;
+    return {
+      stdout: "bind-key -T prefix % split-window -h",
+      stderr: "",
+    };
+  };
+
+  assert.equal(await adapter.getClientPromptBinding("%"), null);
+  assert.equal(await adapter.getClientPromptBinding("rename"), null);
+  assert.equal(calls, 1);
+});
+
 test("buildTmuxSendKeySteps preserves text submit while keeping paste raw", () => {
   assert.deepEqual(buildTmuxSendKeySteps("hello codex\r"), [
     { kind: "literal", value: "hello codex" },

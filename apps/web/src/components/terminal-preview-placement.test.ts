@@ -54,6 +54,31 @@ function collectElementTypes(
   return types;
 }
 
+function findElementByType(
+  node: ReactNode,
+  type: unknown,
+): ReactElement<Record<string, unknown>> | null {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const match = findElementByType(child, type);
+      if (match) {
+        return match;
+      }
+    }
+    return null;
+  }
+
+  if (!isReactElement(node)) {
+    return null;
+  }
+
+  if (node.type === type) {
+    return node as ReactElement<Record<string, unknown>>;
+  }
+
+  return findElementByType(node.props.children, type);
+}
+
 describe("terminal preview placement", () => {
   it("uses lightweight preview by default in grid cards", () => {
     const element = AgentGridCard({
@@ -103,5 +128,9 @@ describe("terminal preview placement", () => {
 
     assert.equal(types.includes(TerminalPreview), false);
     assert.equal(types.includes(LazyTerminalView), true);
+    assert.equal(
+      findElementByType(element, LazyTerminalView)?.props.wheelPassthrough,
+      true,
+    );
   });
 });

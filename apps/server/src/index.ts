@@ -11,6 +11,7 @@ import {
 } from "./config/server-runtime-config.js";
 import { AppVersionService } from "./services/app-version-service.js";
 import { GitAutoUpdateService } from "./services/git-auto-update-service.js";
+import { installGracefulShutdown } from "./services/server-lifecycle.js";
 import { FileSessionStateStore } from "./services/session-state-store.js";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
@@ -34,6 +35,13 @@ const { app } = buildServer({
     intervalMinutes: gitAutoPullIntervalMinutes,
   }),
   sessionStateStore: new FileSessionStateStore(sessionStatePath),
+});
+
+installGracefulShutdown({
+  app,
+  logError(error) {
+    app.log.error(error);
+  },
 });
 
 app.listen({ port, host }).catch((error: unknown) => {

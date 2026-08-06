@@ -22,10 +22,15 @@ interface TerminalWheelApplicationRoutingOptions {
   shiftKey: boolean;
 }
 
+interface TerminalWheelCaptureOptions {
+  wheelPassthrough: boolean;
+}
+
 const TERMINAL_WHEEL_MOUSE_TRACKING_MODES = new Set(["vt200", "drag", "any"]);
 const TERMINAL_WHEEL_BLOCKING_OVERLAYS = [
   ".discovery-overlay",
   ".new-session-backdrop",
+  ".terminal-session-switcher-menu",
 ];
 
 interface ClosestTarget {
@@ -60,6 +65,12 @@ export function shouldForwardTerminalWheelToApplication({
     TERMINAL_WHEEL_MOUSE_TRACKING_MODES.has(mouseTrackingMode) &&
     !shiftKey
   );
+}
+
+export function shouldCaptureTerminalWheel({
+  wheelPassthrough,
+}: TerminalWheelCaptureOptions): boolean {
+  return !wheelPassthrough;
 }
 
 export function normalizeTerminalWheelDeltaY({

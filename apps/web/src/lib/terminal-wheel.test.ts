@@ -7,6 +7,7 @@ import {
   TERMINAL_WHEEL_DELTA_PIXEL,
   computeTerminalWheelScrollLines,
   isTerminalWheelBlockedByOverlayTarget,
+  shouldCaptureTerminalWheel,
   shouldForwardTerminalWheelToApplication,
 } from "./terminal-wheel.js";
 
@@ -150,6 +151,13 @@ describe("shouldForwardTerminalWheelToApplication", () => {
   });
 });
 
+describe("shouldCaptureTerminalWheel", () => {
+  it("lets focus-sidebar previews bubble wheel events to the sidebar scroller", () => {
+    assert.equal(shouldCaptureTerminalWheel({ wheelPassthrough: true }), false);
+    assert.equal(shouldCaptureTerminalWheel({ wheelPassthrough: false }), true);
+  });
+});
+
 describe("isTerminalWheelBlockedByOverlayTarget", () => {
   it("prevents terminal cards from intercepting wheel gestures over overlays", () => {
     assert.equal(
@@ -161,6 +169,12 @@ describe("isTerminalWheelBlockedByOverlayTarget", () => {
     assert.equal(
       isTerminalWheelBlockedByOverlayTarget(
         targetInsideOverlay(".discovery-overlay"),
+      ),
+      true,
+    );
+    assert.equal(
+      isTerminalWheelBlockedByOverlayTarget(
+        targetInsideOverlay(".terminal-session-switcher-menu"),
       ),
       true,
     );

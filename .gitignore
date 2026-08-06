@@ -16,6 +16,7 @@ apps/web/.turbo
 vibe-kanban
 ./vibe-kanban
 .playwright
+.playwright-cli/
 .playwright-bin/
 .playwright-debs/
 .playwright-deps/

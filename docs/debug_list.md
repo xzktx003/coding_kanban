@@ -346,6 +346,9 @@
 - 更新与恢复提示会长期遮挡大屏终端。修复为版本提示提供按 revision 持久化的关闭按钮，新 revision 才重新出现；恢复成功提示提供关闭按钮并在 5 秒内自动隐藏，恢复失败信息继续保留。
 - 热更新 E2E 曾继承开发机 `.env` 的 Git 轮询开关，使无 upstream 的隔离仓库进入错误状态并遮住本地源码更新提示。修复为隔离运行时始终显式设置 `GIT_AUTO_PULL_INTERVAL_MINUTES=0|10|30`，测试行为不再受本机配置污染。
 - 用户恰好在后台 Git 检查未结束时确认拉取，旧 single-flight 会把 apply 合并成 check，导致按钮已点击却没有 pull。修复为用户确认的 apply 等待当前 check 完成后继续执行；并发 apply 仍合并为一次，后台 check 也不会重复运行。
+- Codex 进入黄色 `(jump to forward)` 历史回退状态后，在 Kanban 中按方向键无法关闭。根因是 attached tmux client 已由其他客户端或会话操作切到新 pane，但输入路由只有经过鼠标或前缀命令后才跟随活动 pane，导致画面显示 `%992` 时按键仍发往登记 pane `%648`。修复为 attached PTY 存在期间从首次普通输入起始终按 session 级目标发送，PTY 不存在时才回退固定 pane；真实 `vibe` 窗口用 `ArrowRight` 清除黄条并截图回归。
+- 局域网 Safari 可以通过证书警告进入 Kanban，但 VS Code WebView 报 `Could not register service worker ... An SSL certificate error occurred`。根因是远端设备没有信任开发机的 `mkcert` CA；浏览器对顶层页面的临时例外不会授权 Service Worker。修复为 iframe 挂载前执行隔离 Service Worker 探测，失败时显示 CA 公有证书下载、Safari/macOS 信任步骤和重新检测按钮；`restart-dev.sh` 只在 CA 能验证当前叶证书时传给 Vite，下载路由重新编码单张 CA 证书，绝不返回私钥或原始 PEM bundle。
+- 证书被信任后 VS Code 工作台能显示，但扩展宿主 WebSocket 偶发持续握手超时。根因是浏览器侧 WebSocket 已 OPEN 时，代理到 code-server 的独立上游仍在 CONNECTING，旧实现直接丢弃此时到达的初始化消息。修复为增加 1 MiB 有界首包队列，上游 OPEN 后按顺序冲刷；超限时显式以 1009 关闭，避免无界缓存。
 
 ### 新建会话弹窗无法用鼠标滚轮滚动
 
@@ -354,3 +357,59 @@
 - **修复**: 将发现弹层和新建会话遮罩统一纳入终端滚轮阻断目标；新建会话遮罩使用 `overscroll-behavior: none`，弹窗滚动容器使用 `overscroll-behavior: contain`，确保滚轮留在当前弹窗内。
 - **测试**: `terminal-wheel.test.ts` 覆盖弹层目标路由；Playwright 在短视口中验证弹窗 `scrollTop` 增长、背景看板不滚动，并覆盖弹窗到达底部后的滚动链隔离。
 - **文件**: `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/terminal-wheel.ts`, `apps/web/src/app.css`, `tests/e2e/discovery-new-session-ui.spec.ts`
+
+### VS Code 与终端分隔条拖动严重卡顿
+
+- **现象**: 左侧打开 VS Code Web 时，拖动其与右侧终端之间的分隔条明显掉帧；鼠标进入 iframe 后还可能丢失拖动事件。
+- **根因**: 每个 `mousemove` 都更新 App React state 并写一次 localStorage，导致整个聚焦视图和重量级 iframe 重渲染；终端 `ResizeObserver` 又为每次变化排入多次 `fit()`、refresh 和 WebSocket resize。
+- **修复**: 分隔条改用 pointer capture；宽度按 animation frame 合并并直接更新侧面板 DOM，松手只提交一次 React state；拖动期间 iframe 不接管 pointer，终端 fit 延后并合并为稳定后的收尾执行。
+- **测试**: `frame-schedulers.test.ts` 覆盖 latest-value frame、同步 flush、frame + trailing 合并和 trailing-only；`vscode-web.spec.ts` 在真实 iframe 上把指针拖入编辑器并断言宽度生效、状态清理和 localStorage 只写一次。真实页面同一 120 步拖动从约 10.1 秒降到 3.1 秒，最大长任务从约 495ms 降到约 62ms。
+- **文件**: `apps/web/src/App.tsx`, `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/frame-schedulers.ts`, `apps/web/src/app.css`
+
+### tmux 命令提示符出现后无法继续输入
+
+- **现象**: `Ctrl+B :` 的通用命令行或 `Ctrl+B ,` 的 `(rename-window)` prompt 出现后，后续文本进入原 pane；`zhuanli` 长期停在 `(rename-window) zsh`，Escape 也关不掉。
+- **根因**: 输入路由曾只硬编码识别 `:`，没有识别当前 prefix key table 中其他 `command-prompt` / `confirm-before` 绑定；同时主机使用 `status-keys vi`，Escape 只切换 prompt 编辑模式而不取消。后端热重载又未关闭 node-pty 子进程，使 `zhuanli` 累积 7 个孤儿 Kanban attach clients，单独恢复一个 client 不能代表当前浏览器 client 已恢复。
+- **修复**: `LocalTmuxInputRouter` 动态查询 prefix binding，所有 client prompt 的文本与编辑键持续走 attached PTY；Enter 提交，Ctrl+C 或连接清理取消。裸 Ctrl+C 始终走 client，因此未知旧 prompt 也能取消，无 prompt 时仍由 tmux 转发到 pane。服务 SIGTERM/SIGINT 先关闭 Fastify，`PtyRuntimeManager.dispose()` 再清理全部 PTY，防止热重载继续遗留 attach client。
+- **测试**: 单元测试覆盖动态 `command-prompt` / `confirm-before` 探测、rename-window 编辑、vi Escape、Ctrl+C 与 cleanup。真实 tmux 路由测试提交一次窗口重命名，再打开 prompt 输入另一个名称并以 Escape + Ctrl+C 取消，确认窗口名不变。现场 PTY 重放先直接确认 `(rename-window) zsh`，修复后确认测试文本进入 prompt、正常状态栏最后重绘、session 仍为 `zhuanli` 且 online；6 个 PPID=1 的历史 Kanban clients 已 detach，只保留当前 Kanban client 和用户手工 client。
+- **文件**: `apps/server/src/services/local-tmux-input-router.ts`, `apps/server/src/services/local-tmux-adapter.ts`, `apps/server/src/services/pty-runtime-manager.ts`, `apps/server/src/services/server-lifecycle.ts`, `apps/server/src/routes/agent-sessions.tmux-add.test.ts`
+
+### 聚焦页右侧小终端吞掉侧栏滚轮
+
+- **现象**: 关闭轻量预览、启用完整终端预览后，鼠标放在右侧会话小卡上滚动会控制小终端历史，无法正常浏览“全部会话”列表。
+- **根因**: 右侧卡片复用了 `interactive=false` 的 `TerminalView`，但非交互只关闭 stdin，不会关闭 xterm 自己的 wheel listener；外层侧栏因此收不到滚动。
+- **修复**: 右侧完整预览显式启用 `wheelPassthrough`，终端不捕获 wheel，并通过专用 class 禁止 xterm 成为 pointer target；卡片点击/双击仍由父卡处理，滚轮直接命中侧栏。
+- **测试**: `terminal-preview-placement.test.ts` 断言侧栏 LazyTerminalView 开启透传；`terminal-wheel.test.ts` 覆盖捕获判定。真实 8484 Chromium 在小卡上滚动 420px 后，侧栏 `scrollTop` 从 0 变为 420，小终端 viewport 保持 0。
+- **文件**: `apps/web/src/components/FocusSidebarSessionCard.tsx`, `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/terminal-wheel.ts`, `apps/web/src/app.css`
+
+### 分组会话切换器重复选择当前项后输入窗格改变
+
+- **现象**: 在多终端布局中打开非输入窗格的分组切换器，再点击已经显示“当前”的会话，输入所有权会意外切到该窗格；原生下拉框对当前值不会触发此变化。
+- **根因**: 自定义选项无论是否已经选中都会执行 slot 选择回调；portal 的 pointer/click 时序还可能让回调读取到点击期间更新后的活动窗格状态。
+- **修复**: 打开弹层时冻结本次选择是否需要同步聚焦会话；点击当前项只关闭弹层并恢复触发器焦点，不更新 slot、输入所有权或聚焦会话。
+- **测试**: 分组切换 E2E 在左右双屏中点击右窗格当前项，断言左窗格继续持有输入权；跨窗格文件面板用例回归真实会话更换后的活动标题和侧面板状态。
+- **文件**: `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/components/TerminalSessionSwitcher.tsx`, `tests/e2e/terminal-preview.spec.ts`, `tests/e2e/file-browser.spec.ts`
+
+### 分组会话切换器无法用鼠标滚轮浏览
+
+- **现象**: 多终端窗格的会话切换器虽然生成了分组容器，但鼠标滚轮无法向下浏览，用户只能看到顶部选项，容易误认为会话仍是平铺展示。
+- **根因**: 切换器通过 portal 挂载到 `document.body` 后，`TerminalView` 的 document capture 滚轮兜底仍会按事件目标处理滚轮；切换器没有被列入终端滚轮阻断区域，因此列表自身的滚动被终端抢走。
+- **修复**: 将 `.terminal-session-switcher-menu` 纳入终端滚轮阻断目标，让滚轮留在切换器的分组列表中；保留外层统一滚动和分组卡片边界，不裁切组内选项。
+- **测试**: `terminal-wheel.test.ts` 覆盖 portal 切换器的滚轮路由；Playwright 直接断言“模型与量化 / 工程与平台 / 未分组”3 个分组及各自数量，并用真实 `page.mouse.wheel()` 验证 `scrollTop` 增长和末项可见。
+- **文件**: `apps/web/src/lib/terminal-wheel.ts`, `apps/web/src/lib/terminal-wheel.test.ts`, `tests/e2e/terminal-preview.spec.ts`
+
+### 分组会话切换器滚动后看不到当前组标题
+
+- **现象**: 会话较多时，用户滚过分组开头后，大标题会和组内会话一起消失，无法持续确认当前正在浏览哪个分组。
+- **根因**: 分组标题虽然设置了 `position: sticky`，但父级分组容器使用 `overflow: hidden`，该容器成为标题最近的 overflow 祖先，导致标题不能相对真正滚动的外层列表吸顶。
+- **修复**: 分组容器改用不建立滚动祖先的 `overflow: clip` 保留圆角裁切；标题继续受本组边界约束，在组内内容滚动时固定于列表顶部，下一分组标题到达后将其向上顶出并替代。
+- **测试**: Playwright 使用长首组和足够的末组滚动余量，先复现标题与列表内容顶部相差 87px，再分别断言首组标题吸顶，以及第二组标题到达后替代首组。
+- **文件**: `apps/web/src/app.css`, `tests/e2e/terminal-preview.spec.ts`
+
+### 多窗格当前输入与顶部会话焦点分叉
+
+- **现象**: 侧栏、分屏终端或分组切换器切到另一个会话后，实际输入窗格已经变化，但顶部标题、文件浏览器或 VS Code 抽屉仍可能停留在旧会话。
+- **根因**: `AgentFocusView` 只在侧面板打开或原窗格已是输入窗格时同步 App 级 `focusedId`，导致局部 `activeSlotId` 与全局工具上下文形成两个事实源；相关 E2E 还通过整行标题中心点击，实际命中了分组下拉框而没有触发卡片切换。
+- **修复**: 所有会改变当前输入窗格的入口统一调用 `onSwitchFocus`；已选当前项仍保持无操作，避免非活动窗格抢输入。侧栏回归改为点击明确的会话名称，分组控件继续独立操作。
+- **测试**: 独立 Playwright 环境覆盖无侧栏双屏点击后的活动标题，以及打开 VS Code 后通过侧栏名称在两个会话间往返切换。
+- **文件**: `apps/web/src/App.tsx`, `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/components/TerminalSessionSwitcher.tsx`, `tests/e2e/file-browser.spec.ts`, `tests/e2e/vscode-web.spec.ts`

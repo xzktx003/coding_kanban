@@ -470,6 +470,19 @@ export class PtyRuntimeManager {
     }
   }
 
+  dispose(): void {
+    const handles = Array.from(this.handles.values());
+    this.handles.clear();
+
+    for (const handle of handles) {
+      try {
+        handle.ptyProcess.kill();
+      } catch {
+        // Shutdown must continue even if a PTY exited between collection and kill.
+      }
+    }
+  }
+
   reconnectRemote(
     agentSessionId: string,
     input: LaunchSshPtyInput,

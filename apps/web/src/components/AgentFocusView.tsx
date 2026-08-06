@@ -13,6 +13,7 @@ import { FocusSidebarSessionCard } from "./FocusSidebarSessionCard";
 import { LazyTerminalView } from "./LazyTerminalView";
 import { SessionGroupHeader } from "./SessionGroupControls";
 import { TerminalPreview } from "./TerminalPreview";
+import { TerminalSessionSwitcher } from "./TerminalSessionSwitcher";
 import {
   groupSessions,
   isSessionGroupCollapsed,
@@ -50,7 +51,6 @@ import {
 interface AgentFocusViewProps {
   focusedSession: AgentSessionRecord;
   sessions: AgentSessionRecord[];
-  syncActiveTerminalWithFocus?: boolean;
   onActiveTerminalSessionChange?: (id: string | null) => void;
   onSwitchFocus: (id: string) => void;
   onExit: () => void;
@@ -157,7 +157,6 @@ function readTerminalMonitorDragPayload(
 export function AgentFocusView({
   focusedSession,
   sessions,
-  syncActiveTerminalWithFocus = false,
   onActiveTerminalSessionChange,
   onSwitchFocus,
   onExit,
@@ -237,7 +236,6 @@ export function AgentFocusView({
       .map((slot) => slot.sessionId)
       .filter((sessionId): sessionId is string => Boolean(sessionId)),
   );
-  const usedSessionIds = renderedSessionIds;
   const sidebarSessions = visibleSessions;
   const otherSessions = visibleSessions.filter(
     (session) => !renderedSessionIds.has(session.id),
@@ -296,9 +294,7 @@ export function AgentFocusView({
   const safeActiveSlotId = activeSlotAvailable
     ? activeSlotId
     : (terminalSlots[0]?.id ?? DEFAULT_TERMINAL_MONITOR_SLOT_ID);
-  // Derive the title/rename target from the active slot's session directly,
-  // so the header always reflects the pane the user is currently typing into,
-  // regardless of whether App-level focusedId is synchronized.
+  // Derive immediately from the active slot while App-level focus catches up.
   const activeSlotSessionId =
     terminalSlots.find((slot) => slot.id === safeActiveSlotId)?.sessionId ??
     null;
@@ -450,7 +446,7 @@ export function AgentFocusView({
     }
 
     setActiveSlotId(slot.id);
-    if (syncActiveTerminalWithFocus && slot.sessionId !== focusedSession.id) {
+    if (slot.sessionId !== focusedSession.id) {
       onSwitchFocus(slot.sessionId);
     }
   }
@@ -495,10 +491,7 @@ export function AgentFocusView({
       return next;
     });
     setActiveSlotId(slotId);
-    if (
-      (syncActiveTerminalWithFocus || slotId === safeActiveSlotId) &&
-      sessionId !== focusedSession.id
-    ) {
+    if (sessionId !== focusedSession.id) {
       onSwitchFocus(sessionId);
     }
   }
@@ -525,12 +518,7 @@ export function AgentFocusView({
       return next;
     });
     setActiveSlotId(slotId);
-    if (
-      (syncActiveTerminalWithFocus ||
-        slotId === safeActiveSlotId ||
-        sourceSlotId === safeActiveSlotId) &&
-      sessionId !== focusedSession.id
-    ) {
+    if (sessionId !== focusedSession.id) {
       onSwitchFocus(sessionId);
     }
   }
@@ -800,7 +788,6 @@ export function AgentFocusView({
     if (nextActiveSlot) {
       setActiveSlotId(nextActiveSlot.id);
       if (
-        syncActiveTerminalWithFocus &&
         nextActiveSlot.sessionId &&
         nextActiveSlot.sessionId !== focusedSession.id
       ) {
@@ -1184,32 +1171,16 @@ export function AgentFocusView({
                         当前输入
                       </span>
                     )}
-                    <select
-                      aria-label={`选择第 ${index + 1} 个监控终端`}
-                      className="focus-terminal-session-select"
-                      onChange={(event) =>
-                        handleSelectSlotSession(slot.id, event.target.value)
+                    <TerminalSessionSwitcher
+                      onSelect={(sessionId) =>
+                        handleSelectSlotSession(slot.id, sessionId)
                       }
-                      value={session?.id ?? ""}
-                    >
-                      {!session && <option value="">无可用会话</option>}
-                      {displayableSessions.map((candidate) => {
-                        const usedElsewhere =
-                          usedSessionIds.has(candidate.id) &&
-                          candidate.id !== session?.id;
-
-                        return (
-                          <option
-                            key={candidate.id}
-                            disabled={usedElsewhere}
-                            value={candidate.id}
-                          >
-                            {candidate.displayName}
-                            {usedElsewhere ? "（已显示）" : ""}
-                          </option>
-                        );
-                      })}
-                    </select>
+                      paneIndex={index + 1}
+                      placementBySessionId={sessionMonitorPlacementById}
+                      selectedSessionId={session?.id ?? null}
+                      sessionGroups={sessionGroups}
+                      sessions={displayableSessions}
+                    />
                     <button
                       className={`focus-terminal-input-btn${isActiveInputPane ? " focus-terminal-input-btn--active" : ""}`}
                       aria-disabled={isActiveInputPane ? "true" : undefined}

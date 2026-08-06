@@ -16,6 +16,8 @@ import {
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 
+import { selectTerminalPaneSession } from "./terminal-session-switcher";
+
 declare const process: {
   cwd(): string;
   env: Record<string, string | undefined>;
@@ -261,18 +263,19 @@ async function switchFocusedSession(
 ) {
   if (sessionId) {
     try {
-      await page
-        .locator('[data-active-terminal-pane="true"]')
-        .getByRole("combobox")
-        .selectOption(sessionId, { timeout: 2000 });
+      await selectTerminalPaneSession(
+        page,
+        page.locator('[data-active-terminal-pane="true"]'),
+        sessionId,
+      );
       await expect(page.locator(".focus-main-name")).toContainText(
         displayName,
         { timeout: 2000 },
       );
       return;
     } catch {
-      // Fall back to the normal sidebar interaction when monitor-pane select
-      // changes are blocked by a transient layout state during resize tests.
+      // Fall back to the normal sidebar interaction when monitor-pane changes
+      // are blocked by a transient layout state during resize tests.
     }
   }
 
@@ -281,8 +284,8 @@ async function switchFocusedSession(
   });
   await expect(sidebarCard).toBeVisible();
   await sidebarCard
-    .locator(".focus-sidebar-card-header")
-    .click({ force: true, timeout: 2000 });
+    .locator(".focus-sidebar-card-name")
+    .click({ timeout: 2000 });
   await expect(page.locator(".focus-main-name")).toContainText(displayName);
 }
 
@@ -479,9 +482,7 @@ test("file browser context menu copies file and directory paths without clipboar
     await focusSession(page, displayName);
     const drawer = await openFileBrowserForFocusedSession(page);
 
-    await drawer
-      .getByTestId("file-entry-note.txt")
-      .click({ button: "right" });
+    await drawer.getByTestId("file-entry-note.txt").click({ button: "right" });
     await page
       .locator(".file-browser-context-menu")
       .getByRole("button", { name: "复制路径" })
@@ -699,9 +700,7 @@ test("file browser follows the active monitor terminal when the side panel is op
     const secondPane = page.locator(
       '[data-terminal-pane-slot="terminal-monitor-slot-2"]',
     );
-    await secondPane
-      .getByRole("combobox", { name: "选择第 2 个监控终端" })
-      .selectOption(sessionBId!);
+    await selectTerminalPaneSession(page, secondPane, sessionBId!);
     await expect(secondPane).toHaveAttribute(
       "data-terminal-pane-session",
       sessionBId!,
@@ -757,9 +756,7 @@ test("open file browser retargets to a monitor terminal that never opened files 
     const secondPane = page.locator(
       '[data-terminal-pane-slot="terminal-monitor-slot-2"]',
     );
-    await secondPane
-      .getByRole("combobox", { name: "选择第 2 个监控终端" })
-      .selectOption(sessionBId!);
+    await selectTerminalPaneSession(page, secondPane, sessionBId!);
     await firstPane.locator(".terminal-view").click();
     await expect(page.locator(".focus-main-name")).toContainText(sessionAName);
 
@@ -819,9 +816,7 @@ test("file browser collapse state is controlled only by collapse buttons during 
     const secondPane = page.locator(
       '[data-terminal-pane-slot="terminal-monitor-slot-2"]',
     );
-    await secondPane
-      .getByRole("combobox", { name: "选择第 2 个监控终端" })
-      .selectOption(sessionBId!);
+    await selectTerminalPaneSession(page, secondPane, sessionBId!);
 
     await openFileBrowserForFocusedSession(page);
 
@@ -893,9 +888,7 @@ test("file browser stays mounted and retargets during repeated monitor terminal 
     const secondPane = page.locator(
       '[data-terminal-pane-slot="terminal-monitor-slot-2"]',
     );
-    await secondPane
-      .getByRole("combobox", { name: "选择第 2 个监控终端" })
-      .selectOption(sessionBId!);
+    await selectTerminalPaneSession(page, secondPane, sessionBId!);
 
     await secondPane.locator(".terminal-view").click();
     await expect(page.locator(".focus-main-name")).toContainText(sessionBName);
@@ -981,9 +974,7 @@ test("file browser final target remains stable after rapid monitor terminal swit
       '[data-terminal-pane-slot="terminal-monitor-slot-2"]',
     );
     const secondTerminal = secondPane.locator(".terminal-view");
-    await secondPane
-      .getByRole("combobox", { name: "选择第 2 个监控终端" })
-      .selectOption(sessionBId!);
+    await selectTerminalPaneSession(page, secondPane, sessionBId!);
 
     await secondTerminal.click();
     await firstTerminal.click();
@@ -1006,7 +997,7 @@ test("file browser final target remains stable after rapid monitor terminal swit
   }
 });
 
-test("monitor terminal switching does not change the focused side-panel session when no side panel is open", async ({
+test("monitor terminal switching updates the active header without opening a side panel", async ({
   page,
   request,
 }) => {
@@ -1038,16 +1029,14 @@ test("monitor terminal switching does not change the focused side-panel session 
     const secondPane = page.locator(
       '[data-terminal-pane-slot="terminal-monitor-slot-2"]',
     );
-    await secondPane
-      .getByRole("combobox", { name: "选择第 2 个监控终端" })
-      .selectOption(sessionBId!);
+    await selectTerminalPaneSession(page, secondPane, sessionBId!);
     await expect(secondPane).toHaveAttribute(
       "data-terminal-pane-session",
       sessionBId!,
     );
     await secondPane.locator(".terminal-view").click();
 
-    await expect(page.locator(".focus-main-name")).toContainText(sessionAName);
+    await expect(page.locator(".focus-main-name")).toContainText(sessionBName);
     await expect(secondPane).toHaveAttribute(
       "data-active-terminal-pane",
       "true",

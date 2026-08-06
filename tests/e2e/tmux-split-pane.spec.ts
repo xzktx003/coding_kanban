@@ -1,5 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Page,
+} from "@playwright/test";
 import { resolveTmuxBinary } from "./tmux-binary";
 
 const TMUX = resolveTmuxBinary();
@@ -17,7 +22,9 @@ function runTmux(args: string[]): string {
 }
 
 function killSession(name: string) {
-  try { execFileSync(TMUX, ["kill-session", "-t", name], { stdio: ["ignore"] }); } catch {}
+  try {
+    execFileSync(TMUX, ["kill-session", "-t", name], { stdio: ["ignore"] });
+  } catch {}
 }
 
 function paneCount(sessionName: string): number {
@@ -25,14 +32,32 @@ function paneCount(sessionName: string): number {
   return out.split("\n").filter(Boolean).length;
 }
 
-async function waitForSessionInApi(request: APIRequestContext, sessionId: string): Promise<void> {
+function readSessionOption(sessionName: string, optionName: string): string {
+  try {
+    return runTmux(["show-options", "-v", "-t", sessionName, optionName]);
+  } catch {
+    return "";
+  }
+}
+
+async function waitForSessionInApi(
+  request: APIRequestContext,
+  sessionId: string,
+): Promise<void> {
   await expect
-    .poll(async () => {
-      const res = await request.get(backendPath("/api/agent-sessions"));
-      if (!res.ok()) return false;
-      const payload = await res.json();
-      return payload.items?.some((item: { id: string }) => item.id === sessionId) ?? false;
-    }, { timeout: 15000 })
+    .poll(
+      async () => {
+        const res = await request.get(backendPath("/api/agent-sessions"));
+        if (!res.ok()) return false;
+        const payload = await res.json();
+        return (
+          payload.items?.some(
+            (item: { id: string }) => item.id === sessionId,
+          ) ?? false
+        );
+      },
+      { timeout: 15000 },
+    )
     .toBeTruthy();
 }
 
@@ -44,18 +69,33 @@ async function ensureGridMode(page: Page) {
   }
 }
 
-async function createTmuxAndAdd(request: APIRequestContext, sessionName: string, displayName: string): Promise<string> {
-  runTmux(["new-session", "-d", "-s", sessionName, "-c", process.cwd(), "bash"]);
-  const addRes = await request.post(backendPath("/api/agent-discovery/tmux/add"), {
-    data: {
-      tmuxSession: sessionName,
-      displayName,
-      workingDirectory: process.cwd(),
-      agentKind: "copilot",
-      interactionState: "running",
-      outputPreview: "",
+async function createTmuxAndAdd(
+  request: APIRequestContext,
+  sessionName: string,
+  displayName: string,
+): Promise<string> {
+  runTmux([
+    "new-session",
+    "-d",
+    "-s",
+    sessionName,
+    "-c",
+    process.cwd(),
+    "bash",
+  ]);
+  const addRes = await request.post(
+    backendPath("/api/agent-discovery/tmux/add"),
+    {
+      data: {
+        tmuxSession: sessionName,
+        displayName,
+        workingDirectory: process.cwd(),
+        agentKind: "copilot",
+        interactionState: "running",
+        outputPreview: "",
+      },
     },
-  });
+  );
   expect(addRes.ok()).toBeTruthy();
   const added = await addRes.json();
   await waitForSessionInApi(request, added.id);
@@ -68,11 +108,50 @@ async function sendCtrlB(request: APIRequestContext, sessionId: string) {
   });
 }
 
-async function sendKey(request: APIRequestContext, sessionId: string, key: string) {
+async function sendKey(
+  request: APIRequestContext,
+  sessionId: string,
+  key: string,
+) {
   await request.post(backendPath(`/api/agent-sessions/${sessionId}/stdin`), {
     data: { input: key },
   });
 }
+
+test("tmux: Ctrl+B + : keeps command-prompt input on the attached client", async ({
+  request,
+}) => {
+  const sessionName = `e2e-command-prompt-${Date.now()}`;
+  const displayName = `命令提示符-${Date.now()}`;
+  const optionName = "@kanban-command-prompt-ok";
+  let sessionId: string | undefined;
+
+  try {
+    sessionId = await createTmuxAndAdd(request, sessionName, displayName);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    await sendCtrlB(request, sessionId);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await sendKey(request, sessionId, ":");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await sendKey(request, sessionId, `set-option ${optionName} yes`);
+    await sendKey(request, sessionId, "\r");
+
+    await expect
+      .poll(() => readSessionOption(sessionName, optionName), {
+        timeout: 8_000,
+        intervals: [200],
+      })
+      .toBe("yes");
+  } finally {
+    if (sessionId) {
+      await request
+        .delete(backendPath(`/api/agent-sessions/${sessionId}`))
+        .catch(() => {});
+    }
+    killSession(sessionName);
+  }
+});
 
 test("tmux: Ctrl+B + % 横向分屏 — 浏览器打开 focus 模式后 API 触发分屏，tmux pane 变为 2", async ({
   page,
@@ -92,7 +171,7 @@ test("tmux: Ctrl+B + % 横向分屏 — 浏览器打开 focus 模式后 API 触�
 
     // 找到卡片并进入 focus 模式
     const card = page.locator(".grid-card", {
-      has: page.locator(".grid-card-name", { hasText: displayName }),
+      has: page.locator(".grid-card-name", { hasText: sessionName }),
     });
     await expect(card).toBeVisible({ timeout: 20000 });
     await card.dblclick();
@@ -121,12 +200,15 @@ test("tmux: Ctrl+B + % 横向分屏 — 浏览器打开 focus 模式后 API 触�
 
     console.log(`✅ 横向分屏成功: pane ${paneCount(sessionName)}`);
   } finally {
-    if (sessionId) await request.delete(backendPath(`/api/agent-sessions/${sessionId}`)).catch(() => {});
+    if (sessionId)
+      await request
+        .delete(backendPath(`/api/agent-sessions/${sessionId}`))
+        .catch(() => {});
     killSession(sessionName);
   }
 });
 
-test("tmux: Ctrl+B + \" 纵向分屏 — 浏览器打开 focus 模式后 API 触发分屏，tmux pane 变为 2", async ({
+test('tmux: Ctrl+B + " 纵向分屏 — 浏览器打开 focus 模式后 API 触发分屏，tmux pane 变为 2', async ({
   page,
   request,
 }) => {
@@ -142,7 +224,7 @@ test("tmux: Ctrl+B + \" 纵向分屏 — 浏览器打开 focus 模式后 API 触
     await ensureGridMode(page);
 
     const card = page.locator(".grid-card", {
-      has: page.locator(".grid-card-name", { hasText: displayName }),
+      has: page.locator(".grid-card-name", { hasText: sessionName }),
     });
     await expect(card).toBeVisible({ timeout: 20000 });
     await card.dblclick();
@@ -167,7 +249,10 @@ test("tmux: Ctrl+B + \" 纵向分屏 — 浏览器打开 focus 模式后 API 触
 
     console.log(`✅ 纵向分屏成功: pane ${paneCount(sessionName)}`);
   } finally {
-    if (sessionId) await request.delete(backendPath(`/api/agent-sessions/${sessionId}`)).catch(() => {});
+    if (sessionId)
+      await request
+        .delete(backendPath(`/api/agent-sessions/${sessionId}`))
+        .catch(() => {});
     killSession(sessionName);
   }
 });

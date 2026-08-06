@@ -63,6 +63,28 @@ async function waitForFileText(
   );
 }
 
+async function waitForTmuxFormat(
+  target: string,
+  format: string,
+  expectedText: string,
+  timeoutMs = 3_000,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const value = paneFormat(target, format);
+    if (value === expectedText) {
+      return value;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  throw new Error(
+    `tmux format ${format} for ${target} did not become ${expectedText}; actual=${paneFormat(target, format)}`,
+  );
+}
+
 function waitForTerminalMarker(
   terminalUrl: string,
   marker: string,
@@ -382,6 +404,98 @@ test("POST /api/agent-sessions/:id/stdin delivers every mobile shortcut to a loc
       }).catch(() => {});
     }
 
+    await app.close();
+    killTmuxSession(sessionName);
+  }
+});
+
+test("POST /api/agent-sessions/:id/stdin edits and cancels a real tmux rename-window prompt", async () => {
+  const { app } = buildServer();
+  const sessionName = `tmux-rename-prompt-${Date.now()}`;
+  const originalWindowName = "original-window";
+  const committedWindowName = `renamed-${Date.now()}`;
+  const cancelledWindowName = `cancelled-${Date.now()}`;
+  const readyMarker = `TMUX_RENAME_PROMPT_READY_${Date.now()}`;
+  let agentSessionId: string | undefined;
+
+  killTmuxSession(sessionName);
+  runTmux([
+    "new-session",
+    "-d",
+    "-s",
+    sessionName,
+    "-n",
+    originalWindowName,
+    "-c",
+    process.cwd(),
+    `sh -lc 'printf "${readyMarker}\\n"; sleep 30'`,
+  ]);
+  runTmux(["set-option", "-t", sessionName, "status-keys", "vi"]);
+
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const address = app.server.address();
+  assert.ok(address && typeof address === "object");
+
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const terminalUrl = `ws://127.0.0.1:${address.port}`;
+
+  const sendInput = async (input: string) => {
+    const response = await fetch(
+      `${baseUrl}/api/agent-sessions/${agentSessionId}/stdin`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ input }),
+      },
+    );
+    assert.equal(response.status, 200);
+  };
+
+  try {
+    const addResponse = await fetch(`${baseUrl}/api/agent-discovery/tmux/add`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        tmuxSession: sessionName,
+        displayName: sessionName,
+        workingDirectory: process.cwd(),
+        agentKind: "shell",
+        interactionState: "running",
+      }),
+    });
+    assert.equal(addResponse.status, 201);
+    agentSessionId = ((await addResponse.json()) as { id: string }).id;
+
+    await waitForTerminalMarker(
+      `${terminalUrl}/ws/agent-sessions/${agentSessionId}/terminal`,
+      readyMarker,
+    );
+
+    await sendInput("\x02");
+    await sendInput(",");
+    await sendInput("\x15");
+    await sendInput(committedWindowName);
+    await sendInput("\r");
+    await waitForTmuxFormat(sessionName, "#{window_name}", committedWindowName);
+
+    await sendInput("\x02");
+    await sendInput(",");
+    await sendInput("\x15");
+    await sendInput(cancelledWindowName);
+    await sendInput("\x1b");
+    await sendInput("\x03");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    assert.equal(
+      paneFormat(sessionName, "#{window_name}"),
+      committedWindowName,
+    );
+  } finally {
+    if (agentSessionId) {
+      await fetch(`${baseUrl}/api/agent-sessions/${agentSessionId}`, {
+        method: "DELETE",
+      }).catch(() => {});
+    }
     await app.close();
     killTmuxSession(sessionName);
   }

@@ -4,7 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
-  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import type {
@@ -94,6 +94,10 @@ import {
   parseFileBrowserUiState,
   type FileBrowserUiState,
 } from "./lib/file-browser-ui-state";
+import {
+  createLatestFrameValueScheduler,
+  type LatestFrameValueScheduler,
+} from "./lib/frame-schedulers";
 import {
   parseInitialSidePanelTool,
   parseSidePanelSessionStates,
@@ -380,7 +384,13 @@ export default function App() {
     readMobileTerminalTouchMode,
   );
   const mainLayoutRef = useRef<HTMLDivElement | null>(null);
+  const fileBrowserShellRef = useRef<HTMLDivElement | null>(null);
+  const fileBrowserWidthSchedulerRef =
+    useRef<LatestFrameValueScheduler<number> | null>(null);
   const fileBrowserResizeRef = useRef<{
+    latestWidth: number;
+    maxWidth: number;
+    pointerId: number;
     startX: number;
     startWidth: number;
   } | null>(null);
@@ -592,6 +602,25 @@ export default function App() {
   useEffect(() => {
     saveFileBrowserUiState(fileBrowserUiState);
   }, [fileBrowserUiState]);
+
+  useEffect(() => {
+    const scheduler = createLatestFrameValueScheduler<number>({
+      apply: (width) => {
+        if (fileBrowserShellRef.current) {
+          fileBrowserShellRef.current.style.width = `${width}px`;
+        }
+      },
+      cancelFrame: window.cancelAnimationFrame.bind(window),
+      requestFrame: window.requestAnimationFrame.bind(window),
+    });
+    fileBrowserWidthSchedulerRef.current = scheduler;
+
+    return () => {
+      scheduler.cancel();
+      fileBrowserWidthSchedulerRef.current = null;
+      document.body.classList.remove("side-panel-resize-active");
+    };
+  }, []);
 
   useEffect(() => {
     saveSessionGroups(sessionGroups);
@@ -1151,10 +1180,7 @@ export default function App() {
     (autoUpdateNotice.phase === "available" ||
       autoUpdateNotice.phase === "conflict" ||
       autoUpdateNotice.phase === "error")
-      ? [
-          autoUpdateNotice.phase,
-          autoUpdateNotice.remoteHead,
-        ].join(":")
+      ? [autoUpdateNotice.phase, autoUpdateNotice.remoteHead].join(":")
       : null;
   const autoUpdateNoticeVisible = Boolean(
     autoUpdateNoticeKey && autoUpdateNoticeKey !== dismissedAutoUpdateNotice,
@@ -1166,8 +1192,8 @@ export default function App() {
             autoUpdateNotice.phase === "available"
               ? "remote-update-available"
               : autoUpdateNotice.phase === "conflict"
-              ? "update-conflict"
-              : "update-error",
+                ? "update-conflict"
+                : "update-error",
           branch: autoUpdateNotice.branch,
           shortHead: autoUpdateNotice.remoteHead?.slice(0, 8) ?? null,
           message:
@@ -1322,42 +1348,72 @@ export default function App() {
   }
 
   const beginFileBrowserResize = useCallback(
-    (event: ReactMouseEvent<HTMLDivElement>) => {
-      if (sidePanelCollapsed || mainPanelCollapsed) {
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (
+        sidePanelCollapsed ||
+        mainPanelCollapsed ||
+        (event.target as HTMLElement).closest("button")
+      ) {
         return;
       }
 
+      const mainLayout = mainLayoutRef.current;
+      const fileBrowserShell = fileBrowserShellRef.current;
+      if (!mainLayout || !fileBrowserShell) {
+        return;
+      }
+
+      const startWidth = fileBrowserShell.getBoundingClientRect().width;
       fileBrowserResizeRef.current = {
+        latestWidth: startWidth,
+        maxWidth: Math.max(420, mainLayout.clientWidth - 320),
+        pointerId: event.pointerId,
         startX: event.clientX,
-        startWidth: fileBrowserUiState.width,
+        startWidth,
       };
+      mainLayout.classList.add("main-layout--resizing");
+      document.body.classList.add("side-panel-resize-active");
+      event.currentTarget.setPointerCapture(event.pointerId);
       event.preventDefault();
     },
-    [fileBrowserUiState.width, mainPanelCollapsed, sidePanelCollapsed],
+    [mainPanelCollapsed, sidePanelCollapsed],
   );
 
   const updateFileBrowserWidth = useCallback((clientX: number) => {
     const resizeState = fileBrowserResizeRef.current;
-    const mainLayout = mainLayoutRef.current;
-    if (!resizeState || !mainLayout) {
+    if (!resizeState) {
       return;
     }
 
     const delta = clientX - resizeState.startX;
-    const maxWidth = Math.max(420, mainLayout.clientWidth - 320);
     const nextWidth = Math.min(
-      maxWidth,
+      resizeState.maxWidth,
       Math.max(FILE_BROWSER_MIN_WIDTH, resizeState.startWidth + delta),
     );
 
-    setFileBrowserUiState((current: FileBrowserUiState) => ({
-      ...current,
-      width: nextWidth,
-    }));
+    if (nextWidth === resizeState.latestWidth) {
+      return;
+    }
+
+    resizeState.latestWidth = nextWidth;
+    fileBrowserWidthSchedulerRef.current?.schedule(nextWidth);
   }, []);
 
   const endFileBrowserResize = useCallback(() => {
+    const resizeState = fileBrowserResizeRef.current;
+    if (!resizeState) {
+      return;
+    }
+
+    fileBrowserWidthSchedulerRef.current?.flush();
     fileBrowserResizeRef.current = null;
+    mainLayoutRef.current?.classList.remove("main-layout--resizing");
+    document.body.classList.remove("side-panel-resize-active");
+    setFileBrowserUiState((current: FileBrowserUiState) =>
+      current.width === resizeState.latestWidth
+        ? current
+        : { ...current, width: resizeState.latestWidth },
+    );
   }, []);
 
   const toggleSidePanelCollapsed = useCallback(() => {
@@ -1389,24 +1445,6 @@ export default function App() {
       };
     });
   }, [sidePanelOpen]);
-
-  useEffect(() => {
-    function handlePointerMove(event: MouseEvent) {
-      updateFileBrowserWidth(event.clientX);
-    }
-
-    function handlePointerUp() {
-      endFileBrowserResize();
-    }
-
-    window.addEventListener("mousemove", handlePointerMove);
-    window.addEventListener("mouseup", handlePointerUp);
-
-    return () => {
-      window.removeEventListener("mousemove", handlePointerMove);
-      window.removeEventListener("mouseup", handlePointerUp);
-    };
-  }, [endFileBrowserResize, updateFileBrowserWidth]);
 
   async function handleAddToGrid(items: AddToGridItem[]) {
     for (const item of items) {
@@ -1595,6 +1633,7 @@ export default function App() {
           <>
             <div
               className={`file-browser-shell${!sidePanelOpen || sidePanelCollapsed ? " file-browser-shell--collapsed" : ""}${mainPanelCollapsed ? " file-browser-shell--fill" : ""}`}
+              ref={fileBrowserShellRef}
               style={
                 !sidePanelOpen || sidePanelCollapsed
                   ? undefined
@@ -1661,7 +1700,16 @@ export default function App() {
               <div
                 className="main-layout-splitter"
                 data-testid="file-browser-main-splitter"
-                onMouseDown={beginFileBrowserResize}
+                onPointerCancel={endFileBrowserResize}
+                onPointerDown={beginFileBrowserResize}
+                onPointerMove={(event) => {
+                  if (
+                    fileBrowserResizeRef.current?.pointerId === event.pointerId
+                  ) {
+                    updateFileBrowserWidth(event.clientX);
+                  }
+                }}
+                onPointerUp={endFileBrowserResize}
                 role="separator"
               >
                 <button
@@ -1704,7 +1752,6 @@ export default function App() {
             <AgentFocusView
               focusedSession={focusedSession}
               sessions={sessions}
-              syncActiveTerminalWithFocus={sidePanelOpen}
               onActiveTerminalSessionChange={handleActiveTerminalSessionChange}
               onSwitchFocus={handleSwitchFocus}
               onExit={handleExitFocus}

@@ -356,6 +356,36 @@ export function buildTmuxSendKeySteps(input: string): TmuxSendKeyStep[] {
   return buildTmuxSendKeyPlan(input).steps;
 }
 
+function resolveTmuxPrefixBindingKey(input: string): string | undefined {
+  const steps = buildTmuxSendKeySteps(input);
+  if (steps.length !== 1) {
+    return undefined;
+  }
+
+  const [step] = steps;
+  if (step.kind === "keys") {
+    return step.keys.length === 1 ? step.keys[0] : undefined;
+  }
+
+  return Array.from(step.value).length === 1 ? step.value : undefined;
+}
+
+export type TmuxClientPromptBinding = "command-prompt" | "confirm-before";
+
+function classifyTmuxClientPromptBinding(
+  binding: string,
+): TmuxClientPromptBinding | null {
+  if (/\bcommand-prompt\b/u.test(binding)) {
+    return "command-prompt";
+  }
+
+  if (/\bconfirm-before\b/u.test(binding)) {
+    return "confirm-before";
+  }
+
+  return null;
+}
+
 export interface TmuxSessionInfo {
   sessionName: string;
   paneId: string;
@@ -689,6 +719,18 @@ export class LocalTmuxAdapter {
 
   clearInputState(agentSessionId: string): void {
     this.bracketedPasteSessionIds.delete(agentSessionId);
+  }
+
+  async getClientPromptBinding(
+    input: string,
+  ): Promise<TmuxClientPromptBinding | null> {
+    const key = resolveTmuxPrefixBindingKey(input);
+    if (!key) {
+      return null;
+    }
+
+    const { stdout } = await this.runTmux(["list-keys", "-T", "prefix", key]);
+    return classifyTmuxClientPromptBinding(stdout);
   }
 
   async takeOver(

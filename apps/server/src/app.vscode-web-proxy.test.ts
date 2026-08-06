@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
+import type { Duplex } from "node:stream";
 import test from "node:test";
 
 import { buildServer } from "./app.js";
@@ -25,6 +26,18 @@ function wsAccept(key: string): string {
   return createHash("sha1")
     .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
     .digest("base64");
+}
+
+function decodeClientTextFrame(frame: Buffer): string {
+  const payloadLength = frame[1]! & 0x7f;
+  assert.ok(payloadLength < 126);
+  assert.ok((frame[1]! & 0x80) !== 0);
+
+  const mask = frame.subarray(2, 6);
+  const payload = frame.subarray(6, 6 + payloadLength);
+  return Buffer.from(
+    payload.map((byte, index) => byte ^ mask[index % mask.length]!),
+  ).toString("utf8");
 }
 
 test("GET /vscode/* proxies HTTP requests to the active VS Code Web target", async () => {
@@ -268,6 +281,89 @@ test("/vscode proxies WebSocket upgrades to the active VS Code Web target", asyn
     assert.ok(diagnostics.websocket.messagesPerSecond > 0);
     assert.ok(diagnostics.websocket.totalDownloadKilobytes > 0);
   } finally {
+    await app.close();
+    await new Promise<void>((resolve, reject) => {
+      upstream.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+});
+
+test("/vscode preserves client messages sent before the upstream WebSocket opens", async () => {
+  let resolveUpstreamMessage: (message: string) => void = () => {};
+  const upstreamSockets = new Set<Duplex>();
+  const upstreamMessage = new Promise<string>((resolve) => {
+    resolveUpstreamMessage = resolve;
+  });
+  const upstream = createServer();
+  upstream.on("upgrade", (request, socket) => {
+    upstreamSockets.add(socket);
+    const keyHeader = request.headers["sec-websocket-key"];
+    const key = Array.isArray(keyHeader) ? keyHeader[0] : keyHeader;
+    assert.ok(key);
+
+    setTimeout(() => {
+      socket.write(
+        [
+          "HTTP/1.1 101 Switching Protocols",
+          "Upgrade: websocket",
+          "Connection: Upgrade",
+          `Sec-WebSocket-Accept: ${wsAccept(key)}`,
+          "",
+          "",
+        ].join("\r\n"),
+      );
+      socket.once("data", (frame) => {
+        resolveUpstreamMessage(decodeClientTextFrame(frame));
+      });
+    }, 100);
+  });
+  const upstreamPort = await listen(upstream);
+
+  const { app } = buildServer({
+    vsCodeWebManager: {
+      dispose: async () => {},
+      getProxyTargetUrl: () => `http://127.0.0.1:${upstreamPort}`,
+    } as never,
+  });
+
+  await app.listen({ host: "127.0.0.1", port: 0 });
+  const address = app.server.address();
+  assert.ok(address && typeof address !== "string");
+
+  let socket: WebSocket | undefined;
+  try {
+    socket = new WebSocket(
+      `ws://127.0.0.1:${address.port}/vscode/socket?channel=early`,
+    );
+    const received = await Promise.race([
+      new Promise<string>((resolve, reject) => {
+        socket!.addEventListener("open", () => {
+          socket!.send("client-handshake");
+          void upstreamMessage.then(resolve);
+        });
+        socket!.addEventListener("error", () => {
+          reject(new Error("WebSocket proxy handshake failed"));
+        });
+      }),
+      new Promise<never>((_resolve, reject) => {
+        setTimeout(
+          () => reject(new Error("Early WebSocket message was dropped")),
+          1_000,
+        );
+      }),
+    ]);
+    assert.equal(received, "client-handshake");
+  } finally {
+    for (const upstreamSocket of upstreamSockets) {
+      upstreamSocket.destroy();
+    }
+    socket?.close();
     await app.close();
     await new Promise<void>((resolve, reject) => {
       upstream.close((error) => {
