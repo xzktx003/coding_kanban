@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useTransition,
   type CSSProperties,
 } from "react";
 
@@ -64,11 +65,29 @@ interface EditorState {
   content: string;
 }
 
-interface MarkdownEditorState {
+export interface MarkdownEditorState {
   path: string;
   content: string;
   savedContent: string;
   mode: MarkdownPreviewMode;
+}
+
+export function createMarkdownEditorState(
+  path: string,
+  content: string,
+): MarkdownEditorState {
+  return {
+    path,
+    content,
+    savedContent: content,
+    mode: "edit",
+  };
+}
+
+export function shouldRenderInlineMarkdownEditor(
+  markdownDialogOpen: boolean,
+): boolean {
+  return !markdownDialogOpen;
 }
 
 interface ChmodState {
@@ -308,6 +327,7 @@ export function FileBrowserDrawer({
     useState<MarkdownEditorState | null>(null);
   const [markdownDialogOpen, setMarkdownDialogOpen] = useState(false);
   const [savingMarkdown, setSavingMarkdown] = useState(false);
+  const [, startMarkdownPreviewTransition] = useTransition();
   const [chmodState, setChmodState] = useState<ChmodState | null>(null);
   const [dragDepth, setDragDepth] = useState(0);
   const [previewHeight, setPreviewHeight] = useState(() => {
@@ -479,12 +499,10 @@ export function FileBrowserDrawer({
 
     setMarkdownEditorState((current) => {
       if (current?.path !== selectedFile.path) {
-        return {
-          path: selectedFile.path,
-          content: selectedMarkdownPreview.content,
-          savedContent: selectedMarkdownPreview.content,
-          mode: "preview",
-        };
+        return createMarkdownEditorState(
+          selectedFile.path,
+          selectedMarkdownPreview.content,
+        );
       }
 
       if (
@@ -541,6 +559,20 @@ export function FileBrowserDrawer({
     }
   }
 
+  function handleMarkdownModeChange(mode: MarkdownPreviewMode) {
+    const updateMode = () =>
+      setMarkdownEditorState((current) =>
+        current ? { ...current, mode } : current,
+      );
+
+    if (mode === "edit") {
+      updateMode();
+      return;
+    }
+
+    startMarkdownPreviewTransition(updateMode);
+  }
+
   async function handleOpenEditor(entry: FileEntry) {
     const filePreview =
       preview && preview.path === entry.path
@@ -552,16 +584,11 @@ export function FileBrowserDrawer({
     }
 
     if (isMarkdownFileName(entry.name)) {
-      setMarkdownEditorState((current) => ({
-        path: entry.path,
-        content:
-          current?.path === entry.path ? current.content : filePreview.content,
-        savedContent:
-          current?.path === entry.path
-            ? current.savedContent
-            : filePreview.content,
-        mode: "edit",
-      }));
+      setMarkdownEditorState((current) =>
+        current?.path === entry.path
+          ? { ...current, mode: "edit" }
+          : createMarkdownEditorState(entry.path, filePreview.content),
+      );
       setMarkdownDialogOpen(true);
       return;
     }
@@ -1044,34 +1071,36 @@ export function FileBrowserDrawer({
                       </div>
                     )}
                     {selectedMarkdownPreview && markdownEditorState ? (
-                      <Suspense
-                        fallback={
-                          <div className="file-browser-preview-empty">
-                            正在加载 Markdown 预览...
-                          </div>
-                        }
-                      >
-                        <LazyMarkdownFilePreview
-                          content={markdownEditorState.content}
-                          dirty={
-                            markdownEditorState.content !==
-                            markdownEditorState.savedContent
+                      shouldRenderInlineMarkdownEditor(markdownDialogOpen) ? (
+                        <Suspense
+                          fallback={
+                            <div className="file-browser-preview-empty">
+                              正在加载 Markdown 预览...
+                            </div>
                           }
-                          mode={markdownEditorState.mode}
-                          onContentChange={(content) =>
-                            setMarkdownEditorState((current) =>
-                              current ? { ...current, content } : current,
-                            )
-                          }
-                          onModeChange={(mode) =>
-                            setMarkdownEditorState((current) =>
-                              current ? { ...current, mode } : current,
-                            )
-                          }
-                          onSave={handleSaveMarkdown}
-                          saving={savingMarkdown}
-                        />
-                      </Suspense>
+                        >
+                          <LazyMarkdownFilePreview
+                            content={markdownEditorState.content}
+                            dirty={
+                              markdownEditorState.content !==
+                              markdownEditorState.savedContent
+                            }
+                            mode={markdownEditorState.mode}
+                            onContentChange={(content) =>
+                              setMarkdownEditorState((current) =>
+                                current ? { ...current, content } : current,
+                              )
+                            }
+                            onModeChange={handleMarkdownModeChange}
+                            onSave={handleSaveMarkdown}
+                            saving={savingMarkdown}
+                          />
+                        </Suspense>
+                      ) : (
+                        <div className="file-browser-preview-empty">
+                          Markdown 已在独立窗口中打开
+                        </div>
+                      )
                     ) : (
                       <>
                         <div className="file-browser-preview-actions">
@@ -1449,11 +1478,7 @@ export function FileBrowserDrawer({
                 current ? { ...current, content } : current,
               )
             }
-            onModeChange={(mode) =>
-              setMarkdownEditorState((current) =>
-                current ? { ...current, mode } : current,
-              )
-            }
+            onModeChange={handleMarkdownModeChange}
             onSave={handleSaveMarkdown}
             saving={savingMarkdown}
           />

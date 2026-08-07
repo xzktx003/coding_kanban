@@ -407,6 +407,64 @@ test("file browser supports real local browsing, edit, upload, download, and del
   }
 });
 
+test("Markdown files open in edit mode and render only one preview on demand", async ({
+  page,
+  request,
+}) => {
+  const fixture = setupFixture();
+  const displayName = `file-browser-markdown-${Date.now()}`;
+  const markdownPath = path.join(fixture.rootDir, "paper.md");
+  let sessionId: string | undefined;
+
+  writeFileSync(
+    markdownPath,
+    Array.from(
+      { length: 80 },
+      (_, index) =>
+        `## Section ${index + 1}\n\nFormula: $x_${index + 1} = \\frac{${index + 1}}{2}$.\n`,
+    ).join("\n"),
+  );
+
+  try {
+    sessionId = await launchMockSession(request, displayName, fixture.rootDir);
+    await focusSession(page, displayName);
+    const drawer = await openFileBrowserForFocusedSession(page);
+
+    await drawer.getByTestId("file-entry-paper.md").click();
+    await expect(drawer.getByTestId("markdown-editor")).toBeVisible();
+    await expect(drawer.getByTestId("markdown-mode-edit")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(drawer.getByTestId("markdown-rendered")).toHaveCount(0);
+
+    await drawer.getByTestId("markdown-mode-preview").click();
+    await expect(drawer.getByTestId("markdown-rendered")).toContainText(
+      "Section 1",
+    );
+
+    await drawer.getByTestId("file-entry-paper.md").dblclick();
+    const dialog = page.getByTestId("markdown-file-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("markdown-editor")).toBeVisible();
+    await expect(dialog.getByTestId("markdown-mode-edit")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(drawer).toContainText("Markdown 已在独立窗口中打开");
+
+    await dialog.getByTestId("markdown-mode-preview").click();
+    await expect(dialog.getByTestId("markdown-rendered")).toContainText(
+      "Section 80",
+    );
+    await expect(page.getByTestId("markdown-rendered")).toHaveCount(1);
+  } finally {
+    await deleteSessionIfPresent(request, sessionId);
+    rmSync(fixture.rootDir, { recursive: true, force: true });
+    rmSync(fixture.uploadFilePath, { force: true });
+  }
+});
+
 test("file browser create dialog supports creating an empty file", async ({
   page,
   request,

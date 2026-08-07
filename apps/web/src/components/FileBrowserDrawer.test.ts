@@ -3,7 +3,12 @@ import { describe, it } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { FileBrowserDrawer, isMarkdownFileName } from "./FileBrowserDrawer.js";
+import {
+  createMarkdownEditorState,
+  FileBrowserDrawer,
+  isMarkdownFileName,
+  shouldRenderInlineMarkdownEditor,
+} from "./FileBrowserDrawer.js";
 
 describe("Markdown file detection", () => {
   it("recognizes md and markdown extensions case-insensitively", () => {
@@ -11,6 +16,20 @@ describe("Markdown file detection", () => {
     assert.equal(isMarkdownFileName("notes.MARKDOWN"), true);
     assert.equal(isMarkdownFileName("archive.md.txt"), false);
     assert.equal(isMarkdownFileName("markdown"), false);
+  });
+
+  it("opens Markdown files in edit mode before preview is requested", () => {
+    assert.deepEqual(createMarkdownEditorState("/workspace/README.md", "# A"), {
+      path: "/workspace/README.md",
+      content: "# A",
+      savedContent: "# A",
+      mode: "edit",
+    });
+  });
+
+  it("keeps the hidden drawer preview unmounted while the dialog is open", () => {
+    assert.equal(shouldRenderInlineMarkdownEditor(false), true);
+    assert.equal(shouldRenderInlineMarkdownEditor(true), false);
   });
 });
 

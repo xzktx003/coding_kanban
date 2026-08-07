@@ -15,7 +15,7 @@ test("renders a large Markdown browsing and editing dialog", () => {
       content: "# Dialog preview",
       dirty: false,
       fileName: "README.md",
-      mode: "preview",
+      mode: "edit",
       onClose: () => {},
       onContentChange: () => {},
       onModeChange: () => {},
@@ -28,7 +28,8 @@ test("renders a large Markdown browsing and editing dialog", () => {
   assert.match(markup, /file-browser-modal--markdown/);
   assert.match(markup, /data-resizable="true"/);
   assert.match(markup, /README\.md/);
-  assert.match(markup, /<h1>Dialog preview<\/h1>/);
+  assert.match(markup, /data-testid="markdown-editor"/);
+  assert.doesNotMatch(markup, /<h1>Dialog preview<\/h1>/);
   assert.match(markup, /aria-label="关闭 Markdown 文件窗口"/);
   assert.match(markup, /data-testid="markdown-mode-edit"/);
   assert.match(markup, /data-testid="markdown-mode-split"/);

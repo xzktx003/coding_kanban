@@ -4813,6 +4813,15 @@ input {
   line-height: 1.65;
 }
 
+.markdown-file-preview-loading {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  color: rgba(244, 241, 234, 0.54);
+  font-size: 12px;
+}
+
 .markdown-file-preview-rendered > :first-child {
   margin-top: 0;
 }

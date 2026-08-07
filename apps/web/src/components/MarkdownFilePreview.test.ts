@@ -7,6 +7,7 @@ import {
   MarkdownFilePreview,
   normalizeLatexMathDelimiters,
 } from "./MarkdownFilePreview.js";
+import { MarkdownRenderedContent } from "./MarkdownRenderedContent.js";
 
 const markdown = `# Project
 
@@ -22,8 +23,15 @@ const markdown = `# Project
 <script>alert("unsafe")</script>
 `;
 
+function renderMarkdownContent(content: string): string {
+  return renderToStaticMarkup(
+    createElement(MarkdownRenderedContent, { content }),
+  );
+}
+
 test("renders GitHub-flavored Markdown safely in preview mode", () => {
-  const markup = renderToStaticMarkup(
+  const markup = renderMarkdownContent(markdown);
+  const controls = renderToStaticMarkup(
     createElement(MarkdownFilePreview, {
       content: markdown,
       dirty: false,
@@ -41,7 +49,8 @@ test("renders GitHub-flavored Markdown safely in preview mode", () => {
   assert.match(markup, /target="_blank"/);
   assert.match(markup, /rel="noopener noreferrer"/);
   assert.doesNotMatch(markup, /<script>/);
-  assert.match(markup, /data-testid="markdown-mode-preview"/);
+  assert.match(controls, /data-testid="markdown-mode-preview"/);
+  assert.match(controls, /data-testid="markdown-render(?:ed|-loading)"/);
 });
 
 test("renders inline and display LaTeX formulas with accessible MathML", () => {
@@ -50,17 +59,7 @@ test("renders inline and display LaTeX formulas with accessible MathML", () => {
 $$
 \int_0^1 x^2\,dx = \frac{1}{3}
 $$`;
-  const markup = renderToStaticMarkup(
-    createElement(MarkdownFilePreview, {
-      content: formulaMarkdown,
-      dirty: false,
-      mode: "preview",
-      onContentChange: () => {},
-      onModeChange: () => {},
-      onSave: () => {},
-      saving: false,
-    }),
-  );
+  const markup = renderMarkdownContent(formulaMarkdown);
 
   assert.match(markup, /class="katex"/);
   assert.match(markup, /class="katex-display"/);
@@ -84,17 +83,7 @@ test("renders parenthesis and bracket LaTeX delimiters without changing code", (
     String.raw`\[not_math\]`,
     "```",
   ].join("\n");
-  const markup = renderToStaticMarkup(
-    createElement(MarkdownFilePreview, {
-      content: formulaMarkdown,
-      dirty: false,
-      mode: "preview",
-      onContentChange: () => {},
-      onModeChange: () => {},
-      onSave: () => {},
-      saving: false,
-    }),
-  );
+  const markup = renderMarkdownContent(formulaMarkdown);
 
   assert.equal((markup.match(/class="katex"/g) ?? []).length, 2);
   assert.match(markup, /class="katex-display"/);
@@ -127,7 +116,7 @@ test("normalizes alternate LaTeX delimiters only outside Markdown code", () => {
   );
 });
 
-test("renders editable source and live preview together in split mode", () => {
+test("keeps editing available while split preview loads on demand", () => {
   const markup = renderToStaticMarkup(
     createElement(MarkdownFilePreview, {
       content: "# Live draft",
@@ -142,7 +131,7 @@ test("renders editable source and live preview together in split mode", () => {
 
   assert.match(markup, /data-testid="markdown-editor"/);
   assert.match(markup, /# Live draft/);
-  assert.match(markup, /<h1>Live draft<\/h1>/);
+  assert.match(markup, /data-testid="markdown-render(?:ed|-loading)"/);
   assert.match(markup, /未保存/);
   assert.match(markup, /data-testid="save-markdown"/);
 });
@@ -162,4 +151,12 @@ test("edit mode keeps the source editor without rendering the document body", ()
 
   assert.match(markup, /data-testid="markdown-editor"/);
   assert.doesNotMatch(markup, /<h1>Source only<\/h1>/);
+  assert.doesNotMatch(markup, /data-testid="markdown-render-loading"/);
+});
+
+test("memoizes the heavy Markdown renderer across unrelated board updates", () => {
+  assert.equal(
+    (MarkdownRenderedContent as unknown as { $$typeof: symbol }).$$typeof,
+    Symbol.for("react.memo"),
+  );
 });

@@ -1,11 +1,12 @@
-import rehypeKatex from "rehype-katex";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
+import { lazy, Suspense, useDeferredValue } from "react";
 
-if (typeof document !== "undefined") {
-  void import("katex/dist/katex.min.css");
-}
+export { normalizeLatexMathDelimiters } from "./markdown-latex";
+
+const LazyMarkdownRenderedContent = lazy(() =>
+  import("./MarkdownRenderedContent").then((module) => ({
+    default: module.MarkdownRenderedContent,
+  })),
+);
 
 export type MarkdownPreviewMode = "preview" | "edit" | "split";
 
@@ -25,98 +26,6 @@ const modeLabels: Array<{ mode: MarkdownPreviewMode; label: string }> = [
   { mode: "split", label: "分屏" },
 ];
 
-interface MarkdownFence {
-  marker: "`" | "~";
-  length: number;
-}
-
-function normalizeInlineLatexDelimiters(line: string): string {
-  let output = "";
-  let codeTickLength = 0;
-  let index = 0;
-
-  while (index < line.length) {
-    if (line[index] === "`") {
-      let tickEnd = index + 1;
-      while (line[tickEnd] === "`") {
-        tickEnd += 1;
-      }
-      const tickLength = tickEnd - index;
-      if (codeTickLength === 0) {
-        codeTickLength = tickLength;
-      } else if (codeTickLength === tickLength) {
-        codeTickLength = 0;
-      }
-      output += line.slice(index, tickEnd);
-      index = tickEnd;
-      continue;
-    }
-
-    const isUnescapedDelimiter = index === 0 || line[index - 1] !== "\\";
-    if (
-      codeTickLength === 0 &&
-      isUnescapedDelimiter &&
-      (line.startsWith("\\(", index) || line.startsWith("\\)", index))
-    ) {
-      output += "$";
-      index += 2;
-      continue;
-    }
-
-    output += line[index];
-    index += 1;
-  }
-
-  return output;
-}
-
-export function normalizeLatexMathDelimiters(content: string): string {
-  let fence: MarkdownFence | null = null;
-
-  return content
-    .split(/(\r?\n)/)
-    .map((line) => {
-      if (line === "\n" || line === "\r\n") {
-        return line;
-      }
-
-      const fenceMatch = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-      if (fenceMatch) {
-        const marker = fenceMatch[1][0] as MarkdownFence["marker"];
-        const markerLength = fenceMatch[1].length;
-        if (fence) {
-          if (
-            marker === fence.marker &&
-            markerLength >= fence.length &&
-            fenceMatch[2].trim() === ""
-          ) {
-            fence = null;
-          }
-        } else {
-          fence = { marker, length: markerLength };
-        }
-        return line;
-      }
-
-      if (fence || /^(?: {4}|\t)/.test(line)) {
-        return line;
-      }
-
-      const blockStart = /^(\s*)\\\[(\s*)$/.exec(line);
-      if (blockStart) {
-        return `${blockStart[1]}$$${blockStart[2]}`;
-      }
-
-      const blockEnd = /^(\s*)\\\](\s*)$/.exec(line);
-      if (blockEnd) {
-        return `${blockEnd[1]}$$${blockEnd[2]}`;
-      }
-
-      return normalizeInlineLatexDelimiters(line);
-    })
-    .join("");
-}
-
 export function MarkdownFilePreview({
   content,
   dirty,
@@ -128,6 +37,7 @@ export function MarkdownFilePreview({
 }: MarkdownFilePreviewProps) {
   const showEditor = mode === "edit" || mode === "split";
   const showPreview = mode === "preview" || mode === "split";
+  const deferredPreviewContent = useDeferredValue(content);
 
   return (
     <div className={`markdown-file-preview markdown-file-preview--${mode}`}>
@@ -176,26 +86,18 @@ export function MarkdownFilePreview({
           />
         )}
         {showPreview && (
-          <article
-            className="markdown-file-preview-rendered"
-            data-testid="markdown-rendered"
+          <Suspense
+            fallback={
+              <div
+                className="markdown-file-preview-loading"
+                data-testid="markdown-render-loading"
+              >
+                正在生成预览...
+              </div>
+            }
           >
-            <ReactMarkdown
-              components={{
-                a: ({ children, ...props }) => (
-                  <a {...props} rel="noopener noreferrer" target="_blank">
-                    {children}
-                  </a>
-                ),
-              }}
-              rehypePlugins={[
-                [rehypeKatex, { strict: "ignore", throwOnError: false }],
-              ]}
-              remarkPlugins={[remarkGfm, remarkMath]}
-            >
-              {normalizeLatexMathDelimiters(content)}
-            </ReactMarkdown>
-          </article>
+            <LazyMarkdownRenderedContent content={deferredPreviewContent} />
+          </Suspense>
         )}
       </div>
     </div>

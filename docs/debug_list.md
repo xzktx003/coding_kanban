@@ -413,3 +413,10 @@
 - **修复**: 所有会改变当前输入窗格的入口统一调用 `onSwitchFocus`；已选当前项仍保持无操作，避免非活动窗格抢输入。侧栏回归改为点击明确的会话名称，分组控件继续独立操作。
 - **测试**: 独立 Playwright 环境覆盖无侧栏双屏点击后的活动标题，以及打开 VS Code 后通过侧栏名称在两个会话间往返切换。
 - **文件**: `apps/web/src/App.tsx`, `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/components/TerminalSessionSwitcher.tsx`, `tests/e2e/file-browser.spec.ts`, `tests/e2e/vscode-web.spec.ts`
+### Markdown 预览打开后看板持续卡顿
+
+- **现象**: 文件浏览器选中 Markdown 后立即进入预览；点击预览或在弹窗中预览后，整个看板交互明显变慢，包含较多公式的文档更严重。
+- **根因**: 编辑器外壳静态加载 `react-markdown`、GFM、KaTeX 等重型依赖；预览正文没有记忆化，看板周期性 session snapshot 会重复解析同一篇文档；独立弹窗打开后，后方文件浏览器仍同时渲染第二份 Markdown；分屏编辑的每次按键也会同步重算完整预览。
+- **修复**: Markdown 默认模式改为编辑，预览/分屏只在手动切换后启用；重型渲染器拆为独立懒加载模块并使用 `React.memo`，LaTeX 规范化使用内容级 memo；分屏预览读取 deferred content；弹窗打开时卸载后方内嵌 Markdown 实例，确保只保留一份渲染正文。
+- **测试**: `FileBrowserDrawer.test.ts` 覆盖默认编辑和弹窗单实例规则；`MarkdownFilePreview.test.ts` 覆盖按需渲染、公式和 memo；Playwright 使用 80 节含公式文档验证单击默认编辑、手动预览、双击弹窗默认编辑以及全页仅一个渲染实例。
+- **文件**: `apps/web/src/components/FileBrowserDrawer.tsx`, `apps/web/src/components/MarkdownFilePreview.tsx`, `apps/web/src/components/MarkdownRenderedContent.tsx`, `apps/web/src/components/markdown-latex.ts`, `tests/e2e/file-browser.spec.ts`
