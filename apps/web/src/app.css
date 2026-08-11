@@ -4786,6 +4786,7 @@ input {
   width: 100%;
   min-width: 0;
   min-height: 0;
+  overscroll-behavior: contain;
   resize: none;
   padding: 14px;
   border: 0;
@@ -4808,6 +4809,7 @@ input {
   margin: 0;
   padding: 14px 18px 24px;
   overflow: auto;
+  overscroll-behavior: contain;
   color: rgba(244, 241, 234, 0.86);
   font-size: 13px;
   line-height: 1.65;
@@ -4991,6 +4993,7 @@ input {
   justify-content: center;
   padding: 16px;
   background: rgba(0, 0, 0, 0.46);
+  overscroll-behavior: contain;
 }
 
 .file-browser-modal--markdown {
@@ -5127,6 +5130,7 @@ input {
 .file-browser-editor {
   flex: 1;
   min-height: 320px;
+  overscroll-behavior: contain;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;

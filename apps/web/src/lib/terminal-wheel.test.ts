@@ -179,6 +179,12 @@ describe("isTerminalWheelBlockedByOverlayTarget", () => {
       true,
     );
     assert.equal(
+      isTerminalWheelBlockedByOverlayTarget(
+        targetInsideOverlay(".file-browser-modal"),
+      ),
+      true,
+    );
+    assert.equal(
       isTerminalWheelBlockedByOverlayTarget(targetInsideOverlay(".grid-card")),
       false,
     );

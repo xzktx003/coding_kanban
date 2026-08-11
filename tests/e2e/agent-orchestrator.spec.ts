@@ -86,6 +86,55 @@ test("v2: 宫格卡片可从终端区域反复双击进入单屏", async ({ page
   }
 });
 
+test("v2: 彻底删除聚焦终端后双击其他卡片仍显示对应终端", async ({
+  page,
+  request,
+}) => {
+  const deletedName = `待删除终端-${Date.now()}`;
+  const remainingName = `保留终端-${Date.now()}`;
+  let deletedId: string | undefined;
+  let remainingId: string | undefined;
+
+  try {
+    await page.goto("/");
+    deletedId = await launchMockSession(request, deletedName);
+    remainingId = await launchMockSession(request, remainingName);
+    await page.getByRole("combobox", { name: "类型" }).selectOption("copilot");
+
+    const deletedCard = page.locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: deletedName }),
+    });
+    await expect(deletedCard).toBeVisible({ timeout: 15000 });
+    await deletedCard.dblclick();
+    await expect(page.locator(".focus-main-name")).toContainText(deletedName);
+
+    page.once("dialog", (dialog) => dialog.accept());
+    await page.locator(".focus-terminal-pane-header").first().click({
+      button: "right",
+    });
+    await page.getByRole("menuitem", { name: "彻底删除该终端" }).click();
+
+    const remainingCard = page.locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: remainingName }),
+    });
+    await expect(remainingCard).toBeVisible({ timeout: 15000 });
+    await remainingCard.dblclick();
+
+    const primaryPane = page.locator(
+      '[data-terminal-pane-slot="terminal-monitor-slot-1"]',
+    );
+    await expect(page.locator(".focus-main-name")).toContainText(remainingName);
+    await expect(primaryPane).toHaveAttribute(
+      "data-terminal-pane-session",
+      remainingId,
+    );
+    await expect(primaryPane.locator(".focus-terminal-empty")).toHaveCount(0);
+  } finally {
+    await deleteSessionIfPresent(request, deletedId);
+    await deleteSessionIfPresent(request, remainingId);
+  }
+});
+
 test("v2: 聚焦视图可以一键折叠右侧其他会话小窗", async ({
   page,
   request,

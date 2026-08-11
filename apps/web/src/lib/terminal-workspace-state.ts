@@ -1,7 +1,9 @@
 import {
   getTerminalMonitorSlotIds,
   isTerminalMonitorLayoutMode,
+  normalizeTerminalMonitorSlots,
   type TerminalMonitorLayoutMode,
+  type TerminalMonitorSession,
   type TerminalMonitorSlot,
 } from "./terminal-layout";
 
@@ -106,6 +108,37 @@ export function loadTerminalWorkspaceState(
   } catch {
     return defaultState();
   }
+}
+
+export function resolveTerminalWorkspaceStateForFocus(
+  state: TerminalWorkspaceState,
+  sessions: TerminalMonitorSession[],
+  focusedSessionId: string,
+): TerminalWorkspaceState {
+  const slotIds = getTerminalMonitorSlotIds(state.mode);
+  const activeSlotId = slotIds.includes(state.activeSlotId)
+    ? state.activeSlotId
+    : (slotIds[0] ?? DEFAULT_SLOT_ID);
+  const closedSlotIds = state.closedSlotIds.filter(
+    (slotId) => slotId !== activeSlotId,
+  );
+  const closedSlotIdSet = new Set(closedSlotIds);
+  const slots = normalizeTerminalMonitorSlots({
+    mode: state.mode,
+    sessions,
+    preferredSessionId: focusedSessionId,
+    preferredSlotId: activeSlotId,
+    previousSlots: state.slots,
+  }).map((slot) =>
+    closedSlotIdSet.has(slot.id) ? { ...slot, sessionId: null } : slot,
+  );
+
+  return {
+    mode: state.mode,
+    slots,
+    activeSlotId,
+    closedSlotIds,
+  };
 }
 
 export function saveTerminalWorkspaceState(
