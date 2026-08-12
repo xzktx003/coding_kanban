@@ -358,6 +358,22 @@
 - **测试**: `terminal-wheel.test.ts` 覆盖弹层目标路由；Playwright 在短视口中验证弹窗 `scrollTop` 增长、背景看板不滚动，并覆盖弹窗到达底部后的滚动链隔离。
 - **文件**: `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/terminal-wheel.ts`, `apps/web/src/app.css`, `tests/e2e/discovery-new-session-ui.spec.ts`
 
+### 文件浏览弹窗滚轮穿透到后台终端
+
+- **现象**: 在文件系统中双击 Markdown 文件打开独立浏览窗口后，鼠标滚轮无法滚动文件内容，滚轮操作反而滚动被弹窗遮挡的终端卡片。
+- **根因**: `TerminalView` 的 document capture 滚轮兜底会按坐标命中后台终端；统一阻断列表没有包含通过 portal 挂载的 `.file-browser-modal`，因此事件在到达 Markdown 预览滚动区前已被终端处理并阻止默认行为。
+- **修复**: 将文件浏览弹窗纳入终端滚轮阻断目标；文件弹窗、Markdown 预览与源码编辑器增加滚动链隔离，使滚轮留在弹窗内容内，到达边界后也不会继续传给背景。
+- **测试**: `terminal-wheel.test.ts` 先红后绿覆盖文件弹窗目标路由；Playwright 双击长 Markdown、手动切换预览并用真实鼠标滚轮验证预览 `scrollTop` 增长。
+- **文件**: `apps/web/src/lib/terminal-wheel.ts`, `apps/web/src/lib/terminal-wheel.test.ts`, `apps/web/src/app.css`, `tests/e2e/file-browser.spec.ts`
+
+### 彻底删除聚焦终端后双击其他卡片显示空白
+
+- **现象**: 在聚焦页彻底删除当前终端并返回宫格后，双击另一张卡片可以进入聚焦界面，但主终端窗格显示空白。
+- **根因**: 彻底删除会话时错误地把当前监控窗格写入持久化 `closedSlotIds`；下次进入聚焦页虽然选中了新的 session，初始化逻辑仍按旧关闭标记把活动主窗格清空。
+- **修复**: 彻底删除只清理会话占位，不再把窗格标记为用户主动关闭；从宫格明确进入聚焦页时，恢复逻辑始终重新开放活动窗格并放入本次聚焦的 session，同时自动修复浏览器里已经保存的旧坏状态。显式关闭监控窗格的行为保持不变。
+- **测试**: `terminal-workspace-state.test.ts` 先红后绿覆盖“已删除 session + 关闭的活动窗格”恢复；Playwright 完整执行创建 A/B、聚焦 A、彻底删除 A、返回宫格、双击 B，并断言主窗格绑定 B 且没有空状态。
+- **文件**: `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/lib/terminal-workspace-state.ts`, `apps/web/src/lib/terminal-workspace-state.test.ts`, `tests/e2e/agent-orchestrator.spec.ts`
+
 ### VS Code 与终端分隔条拖动严重卡顿
 
 - **现象**: 左侧打开 VS Code Web 时，拖动其与右侧终端之间的分隔条明显掉帧；鼠标进入 iframe 后还可能丢失拖动事件。

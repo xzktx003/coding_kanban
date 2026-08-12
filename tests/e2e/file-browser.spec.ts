@@ -454,10 +454,18 @@ test("Markdown files open in edit mode and render only one preview on demand", a
     await expect(drawer).toContainText("Markdown 已在独立窗口中打开");
 
     await dialog.getByTestId("markdown-mode-preview").click();
-    await expect(dialog.getByTestId("markdown-rendered")).toContainText(
-      "Section 80",
-    );
+    const renderedPreview = dialog.getByTestId("markdown-rendered");
+    await expect(renderedPreview).toContainText("Section 80");
     await expect(page.getByTestId("markdown-rendered")).toHaveCount(1);
+
+    await renderedPreview.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await renderedPreview.hover();
+    await page.mouse.wheel(0, 480);
+    await expect
+      .poll(() => renderedPreview.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0);
   } finally {
     await deleteSessionIfPresent(request, sessionId);
     rmSync(fixture.rootDir, { recursive: true, force: true });

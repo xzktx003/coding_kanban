@@ -45,6 +45,7 @@ import {
 } from "../lib/terminal-layout";
 import {
   loadTerminalWorkspaceState,
+  resolveTerminalWorkspaceStateForFocus,
   saveTerminalWorkspaceState,
 } from "../lib/terminal-workspace-state";
 
@@ -189,27 +190,22 @@ export function AgentFocusView({
       ...visibleSessions.filter((session) => session.id !== focusedSession.id),
     ];
   }, [focusedSession, visibleSessions]);
-  const initialTerminalWorkspaceState = useMemo(loadTerminalWorkspaceState, []);
+  const initialTerminalWorkspaceState = useMemo(
+    () =>
+      resolveTerminalWorkspaceStateForFocus(
+        loadTerminalWorkspaceState(),
+        displayableSessions,
+        focusedSession.id,
+      ),
+    [],
+  );
   const [terminalLayoutMode, setTerminalLayoutMode] =
     useState<TerminalMonitorLayoutMode>(initialTerminalWorkspaceState.mode);
   const [activeSlotId, setActiveSlotId] = useState(
     initialTerminalWorkspaceState.activeSlotId,
   );
   const [terminalSlots, setTerminalSlots] = useState<TerminalMonitorSlot[]>(
-    () => {
-      const closedSlotIds = new Set(
-        initialTerminalWorkspaceState.closedSlotIds,
-      );
-      return normalizeTerminalMonitorSlots({
-        mode: terminalLayoutMode,
-        sessions: displayableSessions,
-        preferredSessionId: focusedSession.id,
-        preferredSlotId: initialTerminalWorkspaceState.activeSlotId,
-        previousSlots: initialTerminalWorkspaceState.slots,
-      }).map((slot) =>
-        closedSlotIds.has(slot.id) ? { ...slot, sessionId: null } : slot,
-      );
-    },
+    initialTerminalWorkspaceState.slots,
   );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
@@ -830,7 +826,11 @@ export function AgentFocusView({
 
     setRestorableTerminalMonitorLayout(null);
     if (source === "pane") {
-      setClosedSlotIds((current) => new Set(current).add(slotId));
+      setClosedSlotIds((current) => {
+        const next = new Set(current);
+        next.delete(slotId);
+        return next;
+      });
       setTerminalSlots((current) => closeTerminalMonitorSlot(current, slotId));
     }
     await onDeleteSession(sessionId);

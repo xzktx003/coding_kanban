@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   loadTerminalWorkspaceState,
+  resolveTerminalWorkspaceStateForFocus,
   saveTerminalWorkspaceState,
 } from "./terminal-workspace-state.js";
 
@@ -80,4 +81,32 @@ test("migrates the previous layout-mode-only storage and rejects malformed slots
     activeSlotId: "terminal-monitor-slot-1",
     closedSlotIds: [],
   });
+});
+
+test("reopens a stale closed active slot for a newly focused session", () => {
+  assert.deepEqual(
+    resolveTerminalWorkspaceStateForFocus(
+      {
+        mode: "single",
+        slots: [
+          { id: "terminal-monitor-slot-1", sessionId: "deleted-session" },
+        ],
+        activeSlotId: "terminal-monitor-slot-1",
+        closedSlotIds: ["terminal-monitor-slot-1"],
+      },
+      [{ id: "remaining-session" }],
+      "remaining-session",
+    ),
+    {
+      mode: "single",
+      slots: [
+        {
+          id: "terminal-monitor-slot-1",
+          sessionId: "remaining-session",
+        },
+      ],
+      activeSlotId: "terminal-monitor-slot-1",
+      closedSlotIds: [],
+    },
+  );
 });
