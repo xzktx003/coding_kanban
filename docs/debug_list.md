@@ -461,3 +461,11 @@
 - **修复**: 提示容器改为 pointer-events 透传，仅更新、重试和关闭操作区域重新启用点击，不改变用户确认更新的安全门禁。
 - **测试**: Playwright 在 1280px 视口拖动字号滑杆，覆盖拖动中不 resize、松手后提交与持久化；`terminal-preview.spec.ts` 15 项完整通过。
 - **文件**: `apps/web/src/app.css`, `tests/e2e/terminal-preview.spec.ts`
+
+### `.env` 含空格值导致重启脚本中断
+
+- **现象**: 本地 `.env` 中 `PORTAL_NAME=Coding Kanban` 一类 dotenv 合法值会在 `restart-dev.sh` 启动前报 `Kanban: command not found`，服务无法重启。
+- **根因**: 脚本把 `.env` 直接 `source` 两次，Bash 会把未加引号的后半段当作命令执行；端口默认值又在 `.env` 读取之前固化，使 `PORT=8282` 仍错误启动 `4000`。同时让配置文件具备不必要的 shell 执行能力。
+- **修复**: 用一次安全 dotenv 赋值解析替代两次 `source`，只接受合法变量名，保留空格值且不执行命令替换；在解析后才计算 `SERVER_PORT` 和 `WEB_PORT` 默认值。无效格式或未闭合引号会在任何进程被停止前失败。本地该值改为显式双引号。
+- **测试**: `restart-dev.test.mjs` 先复现未加引号的空格值丢失和 `PORT` 被错误回退到 4000，再断言完整值、`8282` 配置和未执行 `Kanban`。
+- **文件**: `scripts/restart-dev.sh`, `scripts/restart-dev.test.mjs`, `.env.example`

@@ -141,6 +141,7 @@
 - 后端重启后，`POST /api/agent-sessions/restore-managed` 只重新 attach 仍存在的受管 tmux 会话；tmux 已不存在时显示失败，不会根据旧命令重建。direct 会话保留为需要手动恢复的 exited 卡片。多标签页并发恢复会在后端合并为同一次执行。
 - 恢复成功提示支持主动关闭，并在出现后 5 秒内自动隐藏；恢复失败提示保留在页面上，避免错误信息来不及查看。
 - `restart-dev.sh` 在停止旧后端前读取 `/api/agent-sessions`，用于首次升级时把旧版内存注册表迁移到状态文件；迁移时立即剔除 terminal output、PTY PID、runtime id 和其他瞬态字段。只有目标端口存在本仓库后端且捕获失败时才拒绝重启；无本仓库监听器或只有外部监听器时不会误判为迁移失败。
+- `restart-dev.sh` 在计算后端和前端端口默认值前，把 `.env` 按 dotenv 的 `KEY=value` 数据读取，不执行其中的 shell 片段；未加引号的空格值可被保留，带引号值会去除外围引号，`SERVER_PORT`、`PORT` 和 `WEB_PORT` 会按该配置生效，格式错误会在停止任何服务前明确失败。
 - 会话状态文件只在持久化元数据实际变化时原子写入，终端输出快照、连接运行态或单纯 `updatedAt` 变化不会造成持续落盘；写入失败只记录后端错误，不中断看板服务。
 - Git 更新测试使用临时 bare remote 和两个 clone，覆盖后台只 fetch/check 且不改 HEAD、用户确认后的 clean fast-forward、未提交修改冲突、分支分叉、并发 single-flight、10/30 分钟定时器和手动接口；隔离 E2E 继续使用临时 Git 根目录、状态文件、前后端端口和 tmux socket，覆盖提醒、确认、冲突到自动会话恢复的完整链路。
 

@@ -146,3 +146,4 @@
 - 终端 WebSocket 在后端热重载、代理闪断或网络中断后曾只显示断开提示而不重连，导致 xterm 有焦点但所有输入被静默丢弃。修复为挂载中的 `TerminalView` 使用 250ms 到 5 秒有界退避自动重连，replay 完成后恢复输入、resize 和焦点；卸载时取消待执行重连。
 - Vite 代理异常时终端 WebSocket 可能永久停在 `CONNECTING`，原有 `onclose` 重连无法触发，xterm 会因等待 replay 一直禁用 stdin。修复为 3 秒握手超时主动关闭并复用退避重连；重启脚本把公开 LAN 地址与同机代理上游分离，默认代理 `127.0.0.1`，仍支持 `.env` 显式远端后端。
 - 居中的版本更新提示在 1280px 桌面宽度覆盖顶栏字号滑杆，整个 fixed `aside` 即使空白区域也会截获鼠标。修复为提示容器 pointer-events 透传，只给更新、重试和关闭操作区域恢复点击；Playwright 字号拖拽用例在实际覆盖坐标下回归通过。
+- `.env` 中未加引号的空格值（如 `PORTAL_NAME=Coding Kanban`）会被 `restart-dev.sh` 的两次 `source` 当作 shell 命令执行并中断重启，且脚本会在加载 `.env` 前把 `SERVER_PORT` 固定为 4000，忽略 `PORT=8282`。修复为单次安全 dotenv 赋值解析，并在解析后计算端口默认值；保留空格、拒绝格式错误/未闭合引号且不执行配置内容。

@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +17,7 @@ import { fileURLToPath } from "node:url";
 const scriptPath = fileURLToPath(new URL("./restart-dev.sh", import.meta.url));
 const script = readFileSync(scriptPath, "utf8");
 
-function runSourcedScript(body) {
+function runSourcedScript(body, { envFile } = {}) {
   const tempDir = mkdtempSync(join(tmpdir(), "restart-dev-test-"));
   const fakeRepoPath = join(tempDir, "repo");
   const fakeScriptsPath = join(fakeRepoPath, "scripts");
@@ -25,6 +26,9 @@ function runSourcedScript(body) {
 
   mkdirSync(fakeScriptsPath, { recursive: true });
   copyFileSync(scriptPath, fakeScriptPath);
+  if (envFile !== undefined) {
+    writeFileSync(join(fakeRepoPath, ".env"), envFile, "utf8");
+  }
 
   try {
     const result = spawnSync(
@@ -96,6 +100,31 @@ test("sourcing restart-dev preserves caller shell options", () => {
   const [, before, after] =
     /^before=(.*)\nafter=(.*)\n$/.exec(result.stdout) ?? [];
   assert.equal(after, before);
+});
+
+test("restart-dev reads dotenv values with spaces without executing them", () => {
+  const result = runSourcedScript(
+    String.raw`
+      printf 'portal=%s\n' "$PORTAL_NAME"
+    `,
+    { envFile: "PORTAL_NAME=Coding Kanban\n" },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "portal=Coding Kanban\n");
+  assert.doesNotMatch(result.stderr, /Kanban: command not found/);
+});
+
+test("restart-dev applies dotenv ports before computing defaults", () => {
+  const result = runSourcedScript(
+    String.raw`
+      printf 'server=%s web=%s\n' "$SERVER_PORT" "$WEB_PORT"
+    `,
+    { envFile: "PORT=45678\nWEB_PORT=45679\n" },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, "server=45678 web=45679\n");
 });
 
 test("capture skips node when no backend listener exists", () => {

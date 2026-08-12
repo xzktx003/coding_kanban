@@ -6,15 +6,49 @@ fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if [[ -f "${ROOT_DIR}/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  . "${ROOT_DIR}/.env"
-  set +a
-fi
+load_dotenv_file() {
+  local env_file="$1"
+  local line
+  local line_number=0
+  local trimmed
+  local key
+  local value
+  local first_character
 
-SERVER_PORT="${SERVER_PORT:-${PORT:-4000}}"
-WEB_PORT="${WEB_PORT:-8484}"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line_number=$((line_number + 1))
+    line="${line%$'\r'}"
+    trimmed="${line#"${line%%[!$' \t']*}"}"
+    if [[ -z "$trimmed" || "$trimmed" == \#* ]]; then
+      continue
+    fi
+
+    if [[ "$trimmed" == export[[:space:]]* ]]; then
+      trimmed="${trimmed#export}"
+      trimmed="${trimmed#"${trimmed%%[!$' \t']*}"}"
+    fi
+
+    if [[ ! "$trimmed" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      printf '[dev-restart] invalid .env line %s: expected KEY=value\n' "$line_number" >&2
+      return 1
+    fi
+
+    key="${BASH_REMATCH[1]}"
+    value="${BASH_REMATCH[2]}"
+    first_character="${value:0:1}"
+    if [[ "$first_character" == '"' || "$first_character" == "'" ]]; then
+      if [[ ${#value} -lt 2 || "${value: -1}" != "$first_character" ]]; then
+        printf '[dev-restart] invalid .env line %s: unterminated quoted value\n' "$line_number" >&2
+        return 1
+      fi
+      value="${value:1:${#value}-2}"
+    fi
+
+    # Treat .env as data, not shell code. This preserves dotenv values with
+    # spaces while preventing command substitutions from running on restart.
+    export "$key=$value"
+  done <"$env_file"
+}
 
 RUNTIME_DIR="${ROOT_DIR}/.dev-runtime"
 PLAYWRIGHT_BIN_DIR="${ROOT_DIR}/.playwright-bin"
@@ -22,14 +56,15 @@ SERVER_APP_DIR="${ROOT_DIR}/apps/server"
 WEB_APP_DIR="${ROOT_DIR}/apps/web"
 
 # Load repo-root .env (if present) BEFORE computing defaults so users can
-# override HOST/PORT/WEB_PORT/etc. without editing this script. .env is
-# git-ignored — see .env.example for the documented variable list.
+# override HOST/PORT/WEB_PORT/etc. without editing this script. Parse dotenv
+# assignments as data rather than sourcing shell code. .env is git-ignored —
+# see .env.example for the documented variable list.
 if [[ -f "${ROOT_DIR}/.env" ]]; then
-  set -a
-  # shellcheck disable=SC1090,SC1091
-  source "${ROOT_DIR}/.env"
-  set +a
+  load_dotenv_file "${ROOT_DIR}/.env"
 fi
+
+SERVER_PORT="${SERVER_PORT:-${PORT:-4000}}"
+WEB_PORT="${WEB_PORT:-8484}"
 
 SERVER_BIND_HOST="${SERVER_BIND_HOST:-0.0.0.0}"
 SERVER_PUBLIC_HOST="${SERVER_PUBLIC_HOST:-127.0.0.1}"

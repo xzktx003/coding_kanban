@@ -162,6 +162,8 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 浏览器使用 `focus-view-state` 和 `terminal-monitor-workspace-v1` 恢复聚焦视图、布局模式、slot-to-session 分配、当前输入 slot 和主动关闭的 slot。稳定 session id 让这些状态跨后端重启继续有效。`restart-dev.sh` 会在停止旧后端前尝试捕获当前 `/api/agent-sessions`，用于首次升级迁移；迁移脚本在写盘前先投影稳定字段，不会把旧快照中的 terminal output、PTY PID 或 runtime id 写入状态文件。若目标端口上确有本仓库后端而迁移捕获失败，脚本会在任何 kill 前退出；无本仓库监听器或只有外部监听器时跳过迁移捕获。
 
+重启脚本会先把 `.env` 作为 dotenv 赋值数据读取，再计算 `SERVER_PORT`、`PORT` 和 `WEB_PORT` 的默认值；它绝不 `source` 或执行配置内容。未加引号的空格值会完整保留，单/双引号只用于包裹值且在传入进程前移除；非 `KEY=value` 或未闭合的引号会在任何服务停止前报出行号并退出。
+
 受管本地 tmux 的 attach/reconnect 和带显式命令的 direct PTY 使用非交互 `/bin/sh` 执行，不加载用户 `zsh/bash` 登录启动文件，避免 shell 初始化钩子抢先启动 Agent TUI；未指定命令的 direct PTY 仍使用用户原生交互 shell。WebSocket 写入者关闭、手动重连、自动恢复、删除或终止会话时，输入清理与既有队列有序执行，取消遗留 tmux 前缀并清除跨帧 bracketed paste 状态；只读预览连接关闭不会清理活跃输入状态。
 
 ### 手机端终端控制页
