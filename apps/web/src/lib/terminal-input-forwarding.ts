@@ -1,5 +1,20 @@
 import { isTerminalProtocolResponsePayload } from "./terminal-input";
 
+const TERMINAL_RECONNECT_BASE_DELAY_MS = 250;
+const TERMINAL_RECONNECT_MAX_DELAY_MS = 5_000;
+
+export function computeTerminalReconnectDelay(attempt: number): number {
+  const boundedAttempt = Math.min(
+    20,
+    Math.max(0, Math.floor(Number.isFinite(attempt) ? attempt : 0)),
+  );
+
+  return Math.min(
+    TERMINAL_RECONNECT_MAX_DELAY_MS,
+    TERMINAL_RECONNECT_BASE_DELAY_MS * 2 ** boundedAttempt,
+  );
+}
+
 export function shouldAttemptTerminalInputForward({
   inputEnabled,
   sanitizedPayload,

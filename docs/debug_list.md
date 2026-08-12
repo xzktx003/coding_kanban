@@ -413,6 +413,7 @@
 - **修复**: 所有会改变当前输入窗格的入口统一调用 `onSwitchFocus`；已选当前项仍保持无操作，避免非活动窗格抢输入。侧栏回归改为点击明确的会话名称，分组控件继续独立操作。
 - **测试**: 独立 Playwright 环境覆盖无侧栏双屏点击后的活动标题，以及打开 VS Code 后通过侧栏名称在两个会话间往返切换。
 - **文件**: `apps/web/src/App.tsx`, `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/components/TerminalSessionSwitcher.tsx`, `tests/e2e/file-browser.spec.ts`, `tests/e2e/vscode-web.spec.ts`
+
 ### Markdown 预览打开后看板持续卡顿
 
 - **现象**: 文件浏览器选中 Markdown 后立即进入预览；点击预览或在弹窗中预览后，整个看板交互明显变慢，包含较多公式的文档更严重。
@@ -420,3 +421,27 @@
 - **修复**: Markdown 默认模式改为编辑，预览/分屏只在手动切换后启用；重型渲染器拆为独立懒加载模块并使用 `React.memo`，LaTeX 规范化使用内容级 memo；分屏预览读取 deferred content；弹窗打开时卸载后方内嵌 Markdown 实例，确保只保留一份渲染正文。
 - **测试**: `FileBrowserDrawer.test.ts` 覆盖默认编辑和弹窗单实例规则；`MarkdownFilePreview.test.ts` 覆盖按需渲染、公式和 memo；Playwright 使用 80 节含公式文档验证单击默认编辑、手动预览、双击弹窗默认编辑以及全页仅一个渲染实例。
 - **文件**: `apps/web/src/components/FileBrowserDrawer.tsx`, `apps/web/src/components/MarkdownFilePreview.tsx`, `apps/web/src/components/MarkdownRenderedContent.tsx`, `apps/web/src/components/markdown-latex.ts`, `tests/e2e/file-browser.spec.ts`
+
+### 终端连接闪断后无法继续打字
+
+- **现象**: 后端热重载、代理闪断或网络短暂中断后，xterm 仍能获得焦点并显示原内容，但键盘输入不再到达 tmux；刷新页面后暂时恢复。
+- **根因**: 每个 `TerminalView` 只在首次挂载时创建一次终端 WebSocket；`onclose` 只显示断开提示，没有重建连接。后续 xterm `onData` 因 socket 不再是 OPEN 而静默丢弃输入。
+- **修复**: 挂载中的终端连接异常关闭后按 250ms 到 5 秒的有界指数退避自动重连；重连期间锁定 stdin，新连接完成 replay 后恢复 resize、焦点和输入。组件卸载时取消重连及 replay 安全定时器，避免旧终端后台复活。
+- **测试**: Playwright 主动关闭已聚焦终端的 WebSocket，断言自动建立第二条连接并能继续发送文本；单元测试覆盖重连退避上限，`pnpm check` 覆盖前后端类型与构建。
+- **文件**: `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/terminal-input-forwarding.ts`, `tests/e2e/terminal-preview.spec.ts`
+
+### 终端 WebSocket 卡在连接中导致输入永久锁定
+
+- **现象**: Vite 到后端的 WebSocket 代理超时后，终端有时不会触发明确的 close，而是长期保持 `CONNECTING`；xterm 因等待 replay 保持禁用 stdin，用户无法继续输入。
+- **根因**: 原恢复逻辑只覆盖已经 OPEN 后的 `onclose`，没有为握手阶段设置上限；重启脚本还把 `SERVER_PUBLIC_HOST` 强制作为同机 Vite 代理上游，使本机代理不必要地依赖 LAN 地址。
+- **修复**: `TerminalView` 为每次终端连接设置 3 秒握手超时，超时后关闭该 socket 并复用有界退避重连；`restart-dev.sh` 把公开地址和代理上游分离，代理默认 `127.0.0.1` 并仍允许 `.env` 显式指定远端后端。
+- **测试**: Playwright 模拟第一个终端 socket 永久停在 `CONNECTING`，断言自动创建第二条连接并可继续发送输入；脚本测试覆盖回环默认值和可配置代理变量。
+- **文件**: `apps/web/src/components/TerminalView.tsx`, `scripts/restart-dev.sh`, `tests/e2e/terminal-preview.spec.ts`, `scripts/restart-dev.test.mjs`
+
+### 更新提示层遮挡顶栏输入控件
+
+- **现象**: 在 1280px 等常见桌面宽度，居中的版本更新提示覆盖“终端字号”滑杆；鼠标拖拽落在提示 `aside` 上，滑杆不响应，其他被覆盖的控件也可能无法点击。
+- **根因**: 提示使用高层级固定定位，但整个容器默认接收 pointer event，即使命中的是空白或文本区域。
+- **修复**: 提示容器改为 pointer-events 透传，仅更新、重试和关闭操作区域重新启用点击，不改变用户确认更新的安全门禁。
+- **测试**: Playwright 在 1280px 视口拖动字号滑杆，覆盖拖动中不 resize、松手后提交与持久化；`terminal-preview.spec.ts` 15 项完整通过。
+- **文件**: `apps/web/src/app.css`, `tests/e2e/terminal-preview.spec.ts`

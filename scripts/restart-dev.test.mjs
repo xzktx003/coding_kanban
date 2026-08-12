@@ -369,9 +369,17 @@ test("restart-dev detaches dev servers from the invoking shell session", () => {
   );
 });
 
-test("restart-dev passes backend proxy settings to the frontend dev server", () => {
-  assert.match(script, /WEB_BACKEND_HOST="\$SERVER_PUBLIC_HOST"/);
-  assert.match(script, /WEB_BACKEND_PORT="\$SERVER_PORT"/);
+test("restart-dev keeps the frontend proxy local by default and configurable", () => {
+  assert.match(
+    script,
+    /WEB_BACKEND_HOST="\$\{WEB_BACKEND_HOST:-127\.0\.0\.1\}"/,
+  );
+  assert.match(
+    script,
+    /WEB_BACKEND_PORT="\$\{WEB_BACKEND_PORT:-\$SERVER_PORT\}"/,
+  );
+  assert.match(script, /WEB_BACKEND_HOST="\$WEB_BACKEND_HOST"/);
+  assert.match(script, /WEB_BACKEND_PORT="\$WEB_BACKEND_PORT"/);
 });
 
 test("restart-dev does not fall back to HOST env var for server bind address", () => {

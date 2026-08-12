@@ -28,7 +28,10 @@ import {
   DEFAULT_TERMINAL_FONT_SIZE,
   clampTerminalFontSize,
 } from "../lib/terminal-font-size";
-import { shouldAttemptTerminalInputForward } from "../lib/terminal-input-forwarding";
+import {
+  computeTerminalReconnectDelay,
+  shouldAttemptTerminalInputForward,
+} from "../lib/terminal-input-forwarding";
 import { stripTerminalResponsePayload } from "../lib/terminal-input";
 import {
   createSafariTextInputRecoveryState,
@@ -85,6 +88,7 @@ const DEFAULT_PREVIEW_GEOMETRY: TerminalGeometry = {
 
 const EXTERNAL_FOCUS_GRACE_MS = 750;
 const PASSIVE_FOCUS_REPAIR_INTERVAL_MS = 500;
+const TERMINAL_CONNECT_TIMEOUT_MS = 3_000;
 const MOBILE_TOUCH_LISTENER_OPTIONS = {
   capture: true,
   passive: false,
@@ -661,10 +665,15 @@ export function TerminalView({
 
     const wsUrl = buildTerminalWebSocketUrl(agentSessionId);
     let ws: WebSocket | null = null;
-    let terminalSocketTracker: ReturnType<
+    let activeTerminalSocketTracker: ReturnType<
       typeof registerTerminalWebSocket
     > | null = null;
     let replayComplete = false;
+    let reconnectAttempt = 0;
+    let reconnectTimerId: number | null = null;
+    let connectionTimeoutId: number | null = null;
+    let replaySafetyTimerId: number | null = null;
+    let disconnectNoticeShown = false;
     let lastReportedTerminalFocus: "in" | "out" | null = null;
 
     const terminalWantsFocusReports = () => {
@@ -739,64 +748,147 @@ export function TerminalView({
       }
     };
 
-    // Safety net: if the WebSocket never sends replay-complete (e.g. connection
-    // refused, server error, or long replay transfer), unblock stdin after 8
-    // seconds so the user is never permanently locked out.
-    timeoutIds.push(
-      window.setTimeout(() => {
-        if (!disposed) {
+    const clearReplaySafetyTimer = () => {
+      if (replaySafetyTimerId === null) {
+        return;
+      }
+
+      window.clearTimeout(replaySafetyTimerId);
+      replaySafetyTimerId = null;
+    };
+
+    const armReplaySafetyTimer = () => {
+      clearReplaySafetyTimer();
+      replaySafetyTimerId = window.setTimeout(() => {
+        replaySafetyTimerId = null;
+        if (!disposed && ws?.readyState === WebSocket.OPEN) {
           enableTerminalInput();
         }
-      }, 8000),
-    );
+      }, 8_000);
+    };
 
-    const connectTimeoutId = window.setTimeout(() => {
+    const clearTerminalConnectionTimeout = (socket?: WebSocket) => {
+      if (socket && socket !== ws) {
+        return;
+      }
+      if (connectionTimeoutId === null) {
+        return;
+      }
+
+      window.clearTimeout(connectionTimeoutId);
+      connectionTimeoutId = null;
+    };
+
+    const armTerminalConnectionTimeout = (socket: WebSocket) => {
+      clearTerminalConnectionTimeout();
+      connectionTimeoutId = window.setTimeout(() => {
+        connectionTimeoutId = null;
+        if (
+          disposed ||
+          socket !== ws ||
+          socket.readyState !== WebSocket.CONNECTING
+        ) {
+          return;
+        }
+
+        // A proxy can leave the browser socket in CONNECTING indefinitely.
+        // Closing it forces the normal onclose retry path instead of leaving
+        // xterm stdin locked forever.
+        socket.close();
+      }, TERMINAL_CONNECT_TIMEOUT_MS);
+    };
+
+    const scheduleTerminalReconnect = () => {
+      if (disposed || reconnectTimerId !== null) {
+        return;
+      }
+
+      const delay = computeTerminalReconnectDelay(reconnectAttempt);
+      reconnectAttempt += 1;
+      reconnectTimerId = window.setTimeout(() => {
+        reconnectTimerId = null;
+        connectTerminalWebSocket();
+      }, delay);
+    };
+
+    const connectTerminalWebSocket = () => {
       if (disposed) {
         return;
       }
 
-      terminalSocketTracker = registerTerminalWebSocket(agentSessionId);
-      ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+      replayComplete = false;
+      terminalInputReadyRef.current = false;
+      term.options.disableStdin = true;
+      lastReportedTerminalFocus = null;
 
-      ws.onmessage = (event) => {
+      const tracker = registerTerminalWebSocket(agentSessionId);
+      const socket = new WebSocket(wsUrl);
+      activeTerminalSocketTracker = tracker;
+      ws = socket;
+      wsRef.current = socket;
+
+      socket.onmessage = (event) => {
+        if (disposed || socket !== ws) {
+          return;
+        }
+
+        reconnectAttempt = 0;
         if (typeof event.data === "string") {
           handleTerminalFrame(event.data);
         } else if (event.data instanceof Blob) {
           void event.data.text().then((text) => {
-            if (!disposed) {
+            if (!disposed && socket === ws) {
               handleTerminalFrame(text);
             }
           });
         }
       };
 
-      ws.onopen = () => {
-        terminalSocketTracker?.markOpen();
-        if (disposed || closeAfterOpen) {
-          ws?.close();
+      socket.onopen = () => {
+        clearTerminalConnectionTimeout(socket);
+        tracker.markOpen();
+        if (disposed || closeAfterOpen || socket !== ws) {
+          socket.close();
           return;
         }
 
+        armReplaySafetyTimer();
         flushResize();
         scheduleFit();
         scheduleFocusInteractiveTerminal();
         scheduleTerminalFocusReport();
       };
 
-      ws.onclose = () => {
-        terminalSocketTracker?.markClosed();
-        if (disposed) {
+      socket.onclose = () => {
+        clearTerminalConnectionTimeout(socket);
+        tracker.markClosed();
+        if (activeTerminalSocketTracker === tracker) {
+          activeTerminalSocketTracker = null;
+        }
+        if (disposed || socket !== ws) {
           return;
         }
 
-        // Ensure stdin is always unblocked even if the connection dropped
-        // before the server sent replay-complete. Without this, disableStdin
-        // stays true permanently and the terminal silently ignores all input.
-        enableTerminalInput();
-        writeTerminalOutput("\r\n\x1b[33m[连接已断开]\x1b[0m\r\n");
+        clearReplaySafetyTimer();
+        ws = null;
+        wsRef.current = null;
+        replayComplete = false;
+        terminalInputReadyRef.current = false;
+        term.options.disableStdin = true;
+        lastReportedTerminalFocus = null;
+        if (!disconnectNoticeShown) {
+          disconnectNoticeShown = true;
+          writeTerminalOutput(
+            "\r\n\x1b[33m[连接已断开，正在自动重连]\x1b[0m\r\n",
+          );
+        }
+        scheduleTerminalReconnect();
       };
-    }, 0);
+
+      armTerminalConnectionTimeout(socket);
+    };
+
+    const connectTimeoutId = window.setTimeout(connectTerminalWebSocket, 0);
 
     const flushResize = () => {
       if (isPreview) {
@@ -994,7 +1086,10 @@ export function TerminalView({
         return;
       }
 
+      clearReplaySafetyTimer();
       replayComplete = true;
+      reconnectAttempt = 0;
+      disconnectNoticeShown = false;
       terminalInputReadyRef.current = true;
       // Keep xterm stdin enabled even for monitor-only previews so terminal
       // protocol replies such as CPR/DA can be generated and forwarded. Normal
@@ -1495,6 +1590,12 @@ export function TerminalView({
         window.removeEventListener("blur", handleWindowBlur);
       }
       window.clearTimeout(connectTimeoutId);
+      if (reconnectTimerId !== null) {
+        window.clearTimeout(reconnectTimerId);
+        reconnectTimerId = null;
+      }
+      clearTerminalConnectionTimeout();
+      clearReplaySafetyTimer();
       fitScheduler.dispose();
       for (const timeoutId of timeoutIds) {
         window.clearTimeout(timeoutId);
@@ -1516,7 +1617,8 @@ export function TerminalView({
       } else if (ws?.readyState === WebSocket.OPEN) {
         ws.close();
       }
-      terminalSocketTracker?.markClosed();
+      activeTerminalSocketTracker?.markClosed();
+      activeTerminalSocketTracker = null;
 
       term.dispose();
       delete container.__xterm;

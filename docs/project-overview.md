@@ -119,6 +119,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 窗格标题栏的 `TerminalSessionSwitcher` 从同一 `SessionGroupState` 派生分组列表，不复制分组持久化状态。它忽略侧栏的折叠显示状态，保证所有可见会话始终可切换；通过 portal 挂载到页面根层，避免被终端窗格的裁切边界截断，并根据触发器和视口空间向上或向下定位。弹层只让外层分组列表承担滚动，分组容器使用不创建滚动祖先的裁切方式，因此组标题可以相对外层列表吸顶，并在下一组到达时自然上推替换。当前 slot 与其他 slot 的占用标记由现有 `terminalSlots` 投影生成，选择动作继续复用原有 slot 更新逻辑。
 
 - 终端 WebSocket：`/ws/agent-sessions/:id/terminal`。
+- 每个仍挂载的实时 `TerminalView` 在终端 WebSocket 异常关闭后使用 250ms 起步、最大 5 秒的指数退避重建连接；连接在 3 秒内未完成握手也会主动关闭并进入同一恢复链。新连接完成 replay 后才重新开放 stdin，并重新同步 resize 和焦点。组件卸载会取消待执行的重连，避免隐藏终端或旧会话产生后台连接。
 - 终端字号由 `terminal-font-size` 本地存储项持久化，默认 14px；滑杆拖动过程中只更新控件显示，鼠标松开、键盘调整结束或失焦提交后才更新已有 `TerminalView` 的 `fontSize` 并触发 fit/resize，不需要重建 WebSocket。
 - 会先发送 scrollback replay，再发送 `replay-complete`。
 - PTY 重连沿用稳定 session ID，但每次生成独立 runtime handle；只有当前 handle 可以追加输出、删除运行时或把会话标记为退出。被替换 PTY 的迟到 data/exit 回调必须忽略，避免并发恢复或手动重连后新 PTY 被旧回调误下线。
@@ -148,7 +149,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 更新状态机为 `disabled / idle / checking / available / updated / conflict / error`。定时器与手动操作共享 single-flight；发现上游领先时只进入 `available` 并提醒用户。只有用户点击“拉取并更新”后，apply 端点才允许 `merge --ff-only <remote-head>`。HEAD 与 upstream 分叉时不创建 merge commit；本地修改或未跟踪文件阻止 fast-forward 时保留原 HEAD 和工作区；Git 错误只返回有界、去机器路径的用户消息。
 
-用户确认后的安全 fast-forward 成功后，source revision 变化会自动复用既有热更新链：前端记录恢复意图并 reload 一次，不再要求第二次确认，随后恢复受管 tmux。未经“拉取并更新”确认，后台检查不会修改源码或刷新浏览器。恢复成功提示可主动关闭并在 5 秒内自动隐藏，恢复失败提示保持可见。
+用户确认后的安全 fast-forward 成功后，source revision 变化会自动复用既有热更新链：前端记录恢复意图并 reload 一次，不再要求第二次确认，随后恢复受管 tmux。未经“拉取并更新”确认，后台检查不会修改源码或刷新浏览器。版本和恢复提示是非模态的，只有其操作按钮接收指针事件，提示本身不会截获底下终端或顶栏控件的输入；恢复成功提示可主动关闭并在 5 秒内自动隐藏，恢复失败提示保持可见。
 
 生产入口使用 `FileSessionStateStore` 把稳定会话目录保存到 `SESSION_STATE_PATH`，默认 `.dev-runtime/agent-sessions.json`：
 

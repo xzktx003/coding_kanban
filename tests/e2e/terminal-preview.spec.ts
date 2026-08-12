@@ -32,18 +32,28 @@ function buildSnapshot(items: AgentSessionRecord[]): ListAgentSessionsResponse {
   };
 }
 
-async function installTrackingWebSocket(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+async function installTrackingWebSocket(
+  page: Page,
+  {
+    stalledTerminalConnections = 0,
+  }: { stalledTerminalConnections?: number } = {},
+): Promise<void> {
+  await page.addInitScript((initialStalledTerminalConnections: number) => {
     localStorage.clear();
 
     const trackedWindow = window as Window & {
       __allWebSocketUrls?: string[];
+      __closeLatestTerminalWebSocket?: () => void;
       __disableTerminalMonitorDragImageForTest?: boolean;
+      __terminalWebSocketSends?: string[];
       __terminalWebSocketUrls?: string[];
     };
     trackedWindow.__allWebSocketUrls = [];
     trackedWindow.__disableTerminalMonitorDragImageForTest = true;
+    trackedWindow.__terminalWebSocketSends = [];
     trackedWindow.__terminalWebSocketUrls = [];
+    const terminalSockets: MockWebSocket[] = [];
+    let remainingStalledTerminalConnections = initialStalledTerminalConnections;
 
     class MockWebSocket extends EventTarget {
       static CONNECTING = 0;
@@ -52,7 +62,7 @@ async function installTrackingWebSocket(page: Page): Promise<void> {
       static CLOSED = 3;
 
       url: string;
-      readyState = MockWebSocket.OPEN;
+      readyState = MockWebSocket.CONNECTING;
       bufferedAmount = 0;
       extensions = "";
       protocol = "";
@@ -67,21 +77,42 @@ async function installTrackingWebSocket(page: Page): Promise<void> {
         this.url = String(url);
 
         trackedWindow.__allWebSocketUrls?.push(this.url);
-        if (
+        const isTerminalSocket =
           this.url.includes("/ws/agent-sessions/") &&
-          this.url.includes("/terminal")
-        ) {
+          this.url.includes("/terminal");
+        if (isTerminalSocket) {
           trackedWindow.__terminalWebSocketUrls?.push(this.url);
+          terminalSockets.push(this);
+        }
+
+        if (isTerminalSocket && remainingStalledTerminalConnections > 0) {
+          remainingStalledTerminalConnections -= 1;
+          return;
         }
 
         queueMicrotask(() => {
+          this.readyState = MockWebSocket.OPEN;
           const event = new Event("open");
           this.dispatchEvent(event);
           this.onopen?.(event);
+          if (this.url.includes("/terminal")) {
+            const message = new MessageEvent("message", {
+              data: JSON.stringify({
+                __agentOrchestrator: "terminal-control",
+                event: "replay-complete",
+              }),
+            });
+            this.dispatchEvent(message);
+            this.onmessage?.(message);
+          }
         });
       }
 
-      send(_data?: unknown) {}
+      send(data?: unknown) {
+        if (this.url.includes("/terminal")) {
+          trackedWindow.__terminalWebSocketSends?.push(String(data ?? ""));
+        }
+      }
 
       close() {
         this.readyState = MockWebSocket.CLOSED;
@@ -91,19 +122,24 @@ async function installTrackingWebSocket(page: Page): Promise<void> {
       }
     }
 
+    trackedWindow.__closeLatestTerminalWebSocket = () => {
+      terminalSockets.at(-1)?.close();
+    };
+
     Object.defineProperty(window, "WebSocket", {
       configurable: true,
       writable: true,
       value: MockWebSocket,
     });
-  });
+  }, stalledTerminalConnections);
 }
 
 async function mockSessions(
   page: Page,
   sessions: AgentSessionRecord[],
+  options?: { stalledTerminalConnections?: number },
 ): Promise<void> {
-  await installTrackingWebSocket(page);
+  await installTrackingWebSocket(page, options);
 
   await page.route("**/api/ssh-hosts", async (route) => {
     await route.fulfill({
@@ -130,6 +166,15 @@ async function terminalWebSocketUrls(page: Page): Promise<string[]> {
     return [
       ...((window as Window & { __terminalWebSocketUrls?: string[] })
         .__terminalWebSocketUrls ?? []),
+    ];
+  });
+}
+
+async function terminalWebSocketSends(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    return [
+      ...((window as Window & { __terminalWebSocketSends?: string[] })
+        .__terminalWebSocketSends ?? []),
     ];
   });
 }
@@ -267,6 +312,74 @@ test("grid cards use lightweight terminal previews without opening terminal WebS
   ).toContainText("alpha ready");
 
   expect(await terminalWebSocketUrls(page)).toEqual([]);
+});
+
+test("focused terminal reconnects after an unexpected WebSocket close and accepts input", async ({
+  page,
+}) => {
+  const session = makeSession({
+    id: "reconnect-session",
+    displayName: "Reconnect Session",
+    outputPreview: "ready",
+  });
+  await mockSessions(page, [session]);
+  await page.goto("/");
+
+  const card = page.locator(".grid-card", {
+    has: page.locator(".grid-card-name", { hasText: session.displayName }),
+  });
+  await card.dblclick();
+  await expect(page.locator(".focus-main")).toBeVisible();
+  await expect.poll(() => terminalWebSocketUrls(page)).toHaveLength(1);
+
+  await page.evaluate(() => {
+    (
+      window as Window & { __closeLatestTerminalWebSocket?: () => void }
+    ).__closeLatestTerminalWebSocket?.();
+  });
+
+  await expect
+    .poll(() => terminalWebSocketUrls(page), { timeout: 5_000 })
+    .toHaveLength(2);
+
+  const textarea = page.locator(
+    '[data-active-terminal-pane="true"] .xterm-helper-textarea',
+  );
+  await textarea.click();
+  await page.keyboard.type("reconnected-input");
+  await expect
+    .poll(async () => (await terminalWebSocketSends(page)).join(""))
+    .toContain("reconnected-input");
+});
+
+test("focused terminal retries a WebSocket that never finishes connecting", async ({
+  page,
+}) => {
+  const session = makeSession({
+    id: "connecting-session",
+    displayName: "Connecting Session",
+    outputPreview: "ready",
+  });
+  await mockSessions(page, [session], { stalledTerminalConnections: 1 });
+  await page.goto("/");
+
+  const card = page.locator(".grid-card", {
+    has: page.locator(".grid-card-name", { hasText: session.displayName }),
+  });
+  await card.dblclick();
+  await expect(page.locator(".focus-main")).toBeVisible();
+  await expect
+    .poll(() => terminalWebSocketUrls(page), { timeout: 6_000 })
+    .toHaveLength(2);
+
+  const textarea = page.locator(
+    '[data-active-terminal-pane="true"] .xterm-helper-textarea',
+  );
+  await textarea.click();
+  await page.keyboard.type("recovered-from-connecting");
+  await expect
+    .poll(async () => (await terminalWebSocketSends(page)).join(""))
+    .toContain("recovered-from-connecting");
 });
 
 test("monitor session switcher groups choices and marks occupied panes", async ({

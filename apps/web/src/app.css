@@ -5762,6 +5762,8 @@ input {
     );
   border: 1px solid rgba(125, 213, 187, 0.45);
   border-radius: 14px;
+  /* Keep this non-modal notice from blocking controls beneath its empty area. */
+  pointer-events: none;
   box-shadow: 0 18px 48px rgba(3, 10, 14, 0.38);
   transform: translateX(-50%);
 }
@@ -5777,6 +5779,7 @@ input {
   flex: none;
   align-items: center;
   gap: 8px;
+  pointer-events: auto;
 }
 
 .app-update-banner strong {
