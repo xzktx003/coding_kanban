@@ -54,6 +54,7 @@ interface AgentGridProps {
   onMoveSessionToGroup?: (sessionId: string, groupId: string | null) => void;
   onRenameSessionGroup?: (groupId: string) => void;
   onToggleSessionGroup?: (groupId: string, scope?: string) => void;
+  onUnreadCompletionChange?: (id: string, unread: boolean) => void;
   sortMode?: AgentGridSortMode;
   onSortModeChange?: (mode: AgentGridSortMode) => void;
 }
@@ -202,6 +203,7 @@ export function AgentGrid({
   onMoveSessionToGroup,
   onRenameSessionGroup,
   onToggleSessionGroup,
+  onUnreadCompletionChange,
   sortMode = "recent",
   onSortModeChange,
 }: AgentGridProps) {
@@ -299,6 +301,7 @@ export function AgentGrid({
         onHide={onHideSession}
         onCopyConnectCommand={onCopyConnectCommand}
         onKillTmux={onKillTmux}
+        onUnreadCompletionChange={onUnreadCompletionChange}
         sessionGroups={sessionGroups}
         onCreateSessionGroup={onCreateSessionGroup}
         onMoveSessionToGroup={onMoveSessionToGroup}

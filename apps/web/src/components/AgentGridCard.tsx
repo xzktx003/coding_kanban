@@ -19,6 +19,7 @@ interface AgentGridCardProps {
   onHide?: (id: string) => void;
   onCopyConnectCommand?: (id: string) => void;
   onKillTmux?: (id: string) => void;
+  onUnreadCompletionChange?: (id: string, unread: boolean) => void;
   sessionGroups?: SessionGroupState;
   onCreateSessionGroup?: (sessionId?: string) => void;
   onMoveSessionToGroup?: (sessionId: string, groupId: string | null) => void;
@@ -109,6 +110,7 @@ export function AgentGridCard({
   onHide,
   onCopyConnectCommand,
   onKillTmux,
+  onUnreadCompletionChange,
   sessionGroups = { groups: [], assignments: {}, collapsedGroupIds: [] },
   onCreateSessionGroup,
   onMoveSessionToGroup,
@@ -131,6 +133,9 @@ export function AgentGridCard({
   const isTmuxManaged = Boolean(session.transportRef?.tmuxSession);
   const isExited = session.interactionState === "exited";
   const canReconnect = isExited && !isTmux;
+  const canToggleUnread =
+    session.interactionState !== "running" &&
+    session.interactionState !== "awaiting_input";
 
   function getCloseTitle(): string {
     if (isTmux || isTmuxManaged) {
@@ -200,6 +205,20 @@ export function AgentGridCard({
           <span className={`grid-card-badge badge-${badgeState}`}>
             {stateLabel}
           </span>
+          {canToggleUnread && onUnreadCompletionChange && (
+            <button
+              aria-label={needsCompletionReview ? "标记已读" : "标记未读"}
+              className="grid-card-unread-toggle"
+              onClick={(event) => {
+                event.stopPropagation();
+                onUnreadCompletionChange(session.id, !needsCompletionReview);
+              }}
+              title={needsCompletionReview ? "标记已读" : "标记未读"}
+              type="button"
+            >
+              {needsCompletionReview ? "●" : "○"}
+            </button>
+          )}
           <button
             className="grid-card-hide"
             onClick={(e) => {

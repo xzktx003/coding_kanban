@@ -1011,6 +1011,21 @@ export default function App() {
       .catch(() => {});
   }
 
+  const handleUnreadCompletionChange = useCallback(
+    async (id: string, unread: boolean) => {
+      try {
+        await updateAgentSession(id, { hasUnreadCompletion: unread });
+        const snap = await listAgentSessions();
+        setSnapshot(snap);
+      } catch (error) {
+        window.alert(
+          error instanceof Error ? error.message : "更新会话已读状态失败",
+        );
+      }
+    },
+    [],
+  );
+
   const handleRenameSession = useCallback(
     async (id: string) => {
       const session = sessions.find((item) => item.id === id);
@@ -1838,6 +1853,7 @@ export default function App() {
               onFocusSession={handleFocusSession}
               onDeleteSession={handleDeleteSession}
               onReconnectSession={handleReconnectSession}
+              onUnreadCompletionChange={handleUnreadCompletionChange}
               onRenameSession={handleRenameSession}
               onHideSession={handleHideSession}
               onCopyConnectCommand={handleCopyConnectCommand}

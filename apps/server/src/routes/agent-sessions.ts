@@ -382,7 +382,7 @@ export async function registerAgentSessionRoutes(
   fastify.patch<{ Params: { id: string }; Body: UpdateAgentSessionInput }>(
     "/api/agent-sessions/:id",
     async (request, reply) => {
-      const { displayName, hidden } = request.body ?? {};
+      const { displayName, hidden, hasUnreadCompletion } = request.body ?? {};
       let agentSession = registry.get(request.params.id);
       const updates: Partial<AgentSessionRecord> = {};
 
@@ -402,6 +402,20 @@ export async function registerAgentSessionRoutes(
 
       if (hidden !== undefined) {
         updates.hidden = Boolean(hidden);
+      }
+
+      if (hasUnreadCompletion !== undefined) {
+        if (
+          hasUnreadCompletion &&
+          (agentSession.interactionState === "running" ||
+            agentSession.interactionState === "awaiting_input")
+        ) {
+          reply.code(409);
+          return {
+            error: "Only completed or ready sessions can be marked unread",
+          };
+        }
+        updates.hasUnreadCompletion = Boolean(hasUnreadCompletion);
       }
 
       if (Object.keys(updates).length === 0) {

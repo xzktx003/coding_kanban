@@ -1915,7 +1915,8 @@ input {
 }
 
 .grid-card-close,
-.grid-card-rename {
+.grid-card-rename,
+.grid-card-unread-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1937,6 +1938,16 @@ input {
 .grid-card-rename {
   color: rgba(244, 241, 234, 0.42);
   font-size: 13px;
+}
+
+.grid-card-unread-toggle {
+  color: rgba(255, 211, 138, 0.72);
+  font-size: 13px;
+}
+
+.grid-card-unread-toggle:hover {
+  color: #ffd38a;
+  background: rgba(255, 195, 106, 0.12);
 }
 
 .grid-card-rename:hover {

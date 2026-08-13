@@ -220,3 +220,49 @@ test("focus API acknowledges an unread completed session", async () => {
     await app.close();
   }
 });
+
+test("PATCH API marks a completed session unread and read", async () => {
+  const events: string[] = [];
+  const { app, registry } = await buildRouteApp(events);
+  const session = registerLocalTmuxSession(registry);
+  registry.updateSession(session.id, { interactionState: "idle" });
+  registry.focus({ agentSessionId: session.id });
+
+  try {
+    const unreadResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/agent-sessions/${session.id}`,
+      payload: { hasUnreadCompletion: true },
+    });
+    assert.equal(unreadResponse.statusCode, 200);
+    assert.equal(unreadResponse.json().hasUnreadCompletion, true);
+
+    const readResponse = await app.inject({
+      method: "PATCH",
+      url: `/api/agent-sessions/${session.id}`,
+      payload: { hasUnreadCompletion: false },
+    });
+    assert.equal(readResponse.statusCode, 200);
+    assert.equal(readResponse.json().hasUnreadCompletion, false);
+  } finally {
+    await app.close();
+  }
+});
+
+test("PATCH API rejects marking a running session unread", async () => {
+  const events: string[] = [];
+  const { app, registry } = await buildRouteApp(events);
+  const session = registerLocalTmuxSession(registry);
+
+  try {
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/agent-sessions/${session.id}`,
+      payload: { hasUnreadCompletion: true },
+    });
+    assert.equal(response.statusCode, 409);
+    assert.equal(registry.get(session.id).hasUnreadCompletion, undefined);
+  } finally {
+    await app.close();
+  }
+});

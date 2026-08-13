@@ -574,6 +574,21 @@ test("process exit stays unread until the session is focused", () => {
   assert.equal(registry.get(session.id).hasUnreadCompletion, false);
 });
 
+test("completed sessions can be manually marked unread and read", () => {
+  const registry = new AgentSessionRegistry();
+  const session = createSession(registry);
+
+  registry.updateSession(session.id, { interactionState: "idle" });
+  registry.focus({ agentSessionId: session.id });
+  assert.equal(registry.get(session.id).hasUnreadCompletion, false);
+
+  registry.updateSession(session.id, { hasUnreadCompletion: true });
+  assert.equal(registry.get(session.id).hasUnreadCompletion, true);
+
+  registry.updateSession(session.id, { hasUnreadCompletion: false });
+  assert.equal(registry.get(session.id).hasUnreadCompletion, false);
+});
+
 test("new input moves an unread exited session back to running", () => {
   const registry = new AgentSessionRegistry();
   const session = createSession(registry);

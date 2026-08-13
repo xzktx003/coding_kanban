@@ -68,6 +68,48 @@ test("grid cards show compact project and Git summaries", () => {
   assert.match(markup, /-17/);
 });
 
+test("completed grid cards expose mark unread and mark read actions", () => {
+  const readyMarkup = renderToStaticMarkup(
+    createElement(AgentGridCard, {
+      session: {
+        id: "session-ready",
+        workspaceId: "default",
+        sourceType: "local",
+        agentKind: "codex",
+        displayName: "Ready Session",
+        connectionState: "online",
+        interactionState: "idle",
+        hasUnreadCompletion: false,
+      },
+      onDoubleClick: () => {},
+      onDelete: () => {},
+      onReconnect: () => {},
+      onUnreadCompletionChange: () => {},
+    }),
+  );
+  assert.match(readyMarkup, /title="标记未读"/);
+
+  const reviewMarkup = renderToStaticMarkup(
+    createElement(AgentGridCard, {
+      session: {
+        id: "session-review",
+        workspaceId: "default",
+        sourceType: "local",
+        agentKind: "codex",
+        displayName: "Review Session",
+        connectionState: "online",
+        interactionState: "idle",
+        hasUnreadCompletion: true,
+      },
+      onDoubleClick: () => {},
+      onDelete: () => {},
+      onReconnect: () => {},
+      onUnreadCompletionChange: () => {},
+    }),
+  );
+  assert.match(reviewMarkup, /title="标记已读"/);
+});
+
 test("grid cards keep the fixed height when task summaries are visible", () => {
   const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
   assert.match(css, /\.grid-card\s*\{[\s\S]*?height:\s*240px;/);

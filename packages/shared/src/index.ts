@@ -218,6 +218,7 @@ export interface FocusAgentSessionInput {
 export interface UpdateAgentSessionInput {
   displayName?: string;
   hidden?: boolean;
+  hasUnreadCompletion?: boolean;
 }
 
 export interface StdinAgentSessionInput {
