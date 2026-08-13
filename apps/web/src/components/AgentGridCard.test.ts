@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -33,6 +34,16 @@ test("grid cards show structured task summaries above terminal previews", () => 
   assert.match(markup, /任务[\s\S]*修复手机端入口/);
   assert.match(markup, /回复[\s\S]*已完成入口并通过测试/);
   assert.match(markup, /terminal-preview-session-summary/);
+});
+
+test("grid cards keep the fixed height when task summaries are visible", () => {
+  const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+  assert.match(css, /\.grid-card\s*\{[\s\S]*?height:\s*240px;/);
+  assert.match(
+    css,
+    /\.grid-card-task-summary\s*\{[\s\S]*?max-height:\s*48px;/,
+  );
+  assert.match(css, /\.grid-card-terminal\s*\{[\s\S]*?min-height:\s*0;/);
 });
 
 function targetMatching(...matchedSelectors: string[]): EventTarget {

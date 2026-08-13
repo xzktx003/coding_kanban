@@ -1706,6 +1706,7 @@ input {
     border-color 0.3s,
     box-shadow 0.3s,
     transform 0.18s ease;
+  height: 240px;
   min-height: 240px;
   box-shadow: 0 14px 32px rgba(0, 0, 0, 0.2);
   animation: ui-card-in var(--motion-standard) var(--motion-ease-soft) both;
@@ -1927,7 +1928,7 @@ input {
 
 .grid-card-terminal {
   flex: 1;
-  min-height: 150px;
+  min-height: 0;
   overflow: hidden;
   position: relative;
   background: #080b0f;
@@ -1936,7 +1937,9 @@ input {
 .grid-card-task-summary {
   display: grid;
   gap: 4px;
+  max-height: 48px;
   padding: 7px 12px;
+  overflow: hidden;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.025);
