@@ -1,10 +1,18 @@
+import type { CSSProperties } from "react";
 import { useEffect, useState } from "react";
 
 import type { AgentTranscriptResponse } from "@agent-orchestrator/shared";
 
 import { getAgentTranscript } from "../lib/api";
+import {
+  clampTerminalFontSize,
+  DEFAULT_TERMINAL_FONT_SIZE,
+} from "../lib/terminal-font-size";
+
+import { LazyMarkdownContent } from "./LazyMarkdownRenderedContent";
 
 interface AgentTranscriptEntriesProps {
+  terminalFontSize?: number;
   transcript: AgentTranscriptResponse;
 }
 
@@ -12,6 +20,7 @@ interface AgentTranscriptDialogProps {
   agentSessionId: string;
   displayName: string;
   onClose: () => void;
+  terminalFontSize?: number;
 }
 
 function formatTimestamp(timestamp: string): string {
@@ -23,6 +32,7 @@ function formatTimestamp(timestamp: string): string {
 }
 
 export function AgentTranscriptEntries({
+  terminalFontSize = DEFAULT_TERMINAL_FONT_SIZE,
   transcript,
 }: AgentTranscriptEntriesProps) {
   if (!transcript.available) {
@@ -49,19 +59,44 @@ export function AgentTranscriptEntries({
           ? ` · 更新于 ${formatTimestamp(transcript.updatedAt)}`
           : ""}
       </div>
-      <div className="agent-transcript-list">
+      <div
+        className="agent-transcript-list"
+        style={
+          {
+            "--agent-transcript-font-size": `${clampTerminalFontSize(terminalFontSize)}px`,
+          } as CSSProperties
+        }
+      >
         {visibleEntries.length === 0 ? (
           <div className="agent-transcript-empty">
             记录中还没有可展示的消息。
           </div>
         ) : (
           visibleEntries.map((entry) => {
-            const content = (
-              <pre className="agent-transcript-text">{entry.text}</pre>
-            );
+            const content =
+              entry.kind === "tool" ? (
+                <pre
+                  className="agent-transcript-text"
+                  data-transcript-rendering="text"
+                >
+                  {entry.text}
+                </pre>
+              ) : (
+                <div data-transcript-rendering="markdown">
+                  <LazyMarkdownContent
+                    className="agent-transcript-markdown"
+                    content={entry.text}
+                    deferUntilVisible
+                    fallbackClassName="agent-transcript-markdown-loading"
+                    fallbackText="正在渲染消息…"
+                    testId="agent-transcript-markdown"
+                  />
+                </div>
+              );
             return (
               <article
                 className={`agent-transcript-entry agent-transcript-entry--${entry.kind}`}
+                data-transcript-entry-id={entry.id}
                 key={entry.id}
               >
                 {entry.collapsedByDefault ? (
@@ -94,6 +129,7 @@ export function AgentTranscriptDialog({
   agentSessionId,
   displayName,
   onClose,
+  terminalFontSize = DEFAULT_TERMINAL_FONT_SIZE,
 }: AgentTranscriptDialogProps) {
   const [transcript, setTranscript] = useState<AgentTranscriptResponse | null>(
     null,
@@ -163,7 +199,10 @@ export function AgentTranscriptDialog({
               {error}
             </div>
           ) : transcript ? (
-            <AgentTranscriptEntries transcript={transcript} />
+            <AgentTranscriptEntries
+              terminalFontSize={terminalFontSize}
+              transcript={transcript}
+            />
           ) : (
             <div className="agent-transcript-empty">正在读取 Codex 记录…</div>
           )}

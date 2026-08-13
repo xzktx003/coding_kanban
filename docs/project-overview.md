@@ -41,7 +41,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 ### 顶栏和快捷入口
 
 - 顶栏分组展示：左侧是“电脑端 Coding Kanban”、会话数量徽标和“手机端 Coding Kanban”切换入口，中间保留新建会话、扫描、文件、VS Code 等高频入口，右侧提供“工具”“资源调节”、全屏和折叠入口。
-- 顶栏右侧常驻“终端字号”滑杆，可在 10px 到 24px 之间拖动调整所有内置 xterm 终端字号。
+- 顶栏右侧常驻“终端字号”滑杆，可在 10px 到 24px 之间拖动调整所有内置 xterm 终端及“完整记录”正文的字号。
 - 手机端页面标题区对应显示“手机端 Coding Kanban”，并提供“电脑端 Coding Kanban”切换入口和 Agent 完成通知开关。
 - `扫描` 菜单收纳扫描 tmux 和扫描会话；`工具` 菜单收纳操作提示和 Agent 完成通知开关；`资源调节` 菜单收纳终端预览模式、VS Code 省内存/保持状态、释放 VS Code 缓存和资源诊断。
 - 顶栏可折叠；折叠状态保存在 `localStorage` 的 `agent-console-layout`。
@@ -122,7 +122,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 - 终端 WebSocket：`/ws/agent-sessions/:id/terminal`。
 - 每个仍挂载的实时 `TerminalView` 在终端 WebSocket 异常关闭后使用 250ms 起步、最大 5 秒的指数退避重建连接；连接在 3 秒内未完成握手也会主动关闭并进入同一恢复链。新连接完成 replay 后才重新开放 stdin，并重新同步 resize 和焦点。组件卸载会取消待执行的重连，避免隐藏终端或旧会话产生后台连接。
-- 完整记录 HTTP 接口：`GET /api/agent-sessions/:id/transcript`。它只根据 registry 中可信的本机会话元数据访问 `~/.codex/sessions`，不接受客户端文件路径；优先按 `agentSessionId` 匹配，缺失时按 `workingDirectory` 匹配最近活动的 Codex JSONL。解析层只公开 user/assistant message 及非 `exec` 工具调用和输出，忽略 developer/system/reasoning，并同时过滤 `exec` 调用与对应输出；前端按最新记录在前展示。终端继续承担实时交互，完整记录弹窗承担不会被 ANSI/TUI 重绘覆盖的追加式历史浏览。
+- 完整记录 HTTP 接口：`GET /api/agent-sessions/:id/transcript`。它只根据 registry 中可信的本机会话元数据访问 `~/.codex/sessions`，不接受客户端文件路径；优先按 `agentSessionId` 匹配，缺失时按 `workingDirectory` 匹配最近活动的 Codex JSONL。解析层只公开 user/assistant message 及非 `exec` 工具调用和输出，忽略 developer/system/reasoning，并同时过滤 `exec` 调用与对应输出；前端按最新记录在前展示，用户与 Codex 消息复用按需加载、memo 化的安全 Markdown/GFM/KaTeX 渲染器，长历史只在消息接近可视区域时解析，工具输出仍为等宽原文，两类记录正文共享全局终端字号。终端继续承担实时交互，完整记录弹窗承担不会被 ANSI/TUI 重绘覆盖的追加式历史浏览。
 - 终端字号由 `terminal-font-size` 本地存储项持久化，默认 14px；滑杆拖动过程中只更新控件显示，鼠标松开、键盘调整结束或失焦提交后才更新已有 `TerminalView` 的 `fontSize` 并触发 fit/resize，不需要重建 WebSocket。
 - 会先发送 scrollback replay，再发送 `replay-complete`。
 - PTY 重连沿用稳定 session ID，但每次生成独立 runtime handle；只有当前 handle 可以追加输出、删除运行时或把会话标记为退出。被替换 PTY 的迟到 data/exit 回调必须忽略，避免并发恢复或手动重连后新 PTY 被旧回调误下线。

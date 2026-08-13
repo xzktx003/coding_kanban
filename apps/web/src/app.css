@@ -3238,7 +3238,7 @@ input {
 .mobile-session-switcher {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   color: rgba(244, 241, 234, 0.64);
@@ -3253,6 +3253,24 @@ input {
   border-radius: 10px;
   background: rgba(4, 7, 11, 0.8);
   color: rgba(244, 241, 234, 0.88);
+}
+
+.mobile-transcript-btn {
+  align-self: center;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid rgba(255, 143, 31, 0.34);
+  border-radius: 7px;
+  background: rgba(255, 143, 31, 0.1);
+  color: #ffd1a1;
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.mobile-transcript-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .mobile-terminal-surface {
@@ -4968,6 +4986,9 @@ input {
   padding: 14px 18px 24px;
   overflow: auto;
   overscroll-behavior: contain;
+}
+
+.markdown-rendered-content {
   color: rgba(244, 241, 234, 0.86);
   font-size: 13px;
   line-height: 1.65;
@@ -4982,43 +5003,43 @@ input {
   font-size: 12px;
 }
 
-.markdown-file-preview-rendered > :first-child {
+.markdown-rendered-content > :first-child {
   margin-top: 0;
 }
 
-.markdown-file-preview-rendered h1,
-.markdown-file-preview-rendered h2,
-.markdown-file-preview-rendered h3,
-.markdown-file-preview-rendered h4 {
+.markdown-rendered-content h1,
+.markdown-rendered-content h2,
+.markdown-rendered-content h3,
+.markdown-rendered-content h4 {
   margin: 1.2em 0 0.55em;
   color: #f8e1c8;
   line-height: 1.3;
 }
 
-.markdown-file-preview-rendered h1 {
+.markdown-rendered-content h1 {
   padding-bottom: 0.35em;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   font-size: 1.65em;
 }
 
-.markdown-file-preview-rendered h2 {
+.markdown-rendered-content h2 {
   font-size: 1.35em;
 }
 
-.markdown-file-preview-rendered p,
-.markdown-file-preview-rendered ul,
-.markdown-file-preview-rendered ol,
-.markdown-file-preview-rendered blockquote,
-.markdown-file-preview-rendered pre,
-.markdown-file-preview-rendered table {
+.markdown-rendered-content p,
+.markdown-rendered-content ul,
+.markdown-rendered-content ol,
+.markdown-rendered-content blockquote,
+.markdown-rendered-content pre,
+.markdown-rendered-content table {
   margin: 0.75em 0;
 }
 
-.markdown-file-preview-rendered a {
+.markdown-rendered-content a {
   color: #79d7b5;
 }
 
-.markdown-file-preview-rendered code {
+.markdown-rendered-content code {
   padding: 0.12em 0.35em;
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.08);
@@ -5026,7 +5047,7 @@ input {
   font-family: "IBM Plex Mono", monospace;
 }
 
-.markdown-file-preview-rendered pre {
+.markdown-rendered-content pre {
   padding: 12px;
   overflow: auto;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -5034,42 +5055,42 @@ input {
   background: rgba(4, 7, 11, 0.72);
 }
 
-.markdown-file-preview-rendered pre code {
+.markdown-rendered-content pre code {
   padding: 0;
   background: transparent;
 }
 
-.markdown-file-preview-rendered blockquote {
+.markdown-rendered-content blockquote {
   padding-left: 12px;
-  border-left: 3px solid rgba(246, 178, 107, 0.45);
+  border-left: 1px solid rgba(246, 178, 107, 0.45);
   color: rgba(244, 241, 234, 0.62);
 }
 
-.markdown-file-preview-rendered table {
+.markdown-rendered-content table {
   width: 100%;
   border-collapse: collapse;
 }
 
-.markdown-file-preview-rendered th,
-.markdown-file-preview-rendered td {
+.markdown-rendered-content th,
+.markdown-rendered-content td {
   padding: 6px 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   text-align: left;
 }
 
-.markdown-file-preview-rendered th {
+.markdown-rendered-content th {
   background: rgba(255, 255, 255, 0.055);
 }
 
-.markdown-file-preview-rendered input[type="checkbox"] {
+.markdown-rendered-content input[type="checkbox"] {
   margin-right: 6px;
 }
 
-.markdown-file-preview-rendered .katex {
+.markdown-rendered-content .katex {
   font-size: 1.05em;
 }
 
-.markdown-file-preview-rendered .katex-display {
+.markdown-rendered-content .katex-display {
   max-width: 100%;
   margin: 1em 0;
   padding: 4px 0 8px;
@@ -5077,7 +5098,7 @@ input {
   overflow-y: hidden;
 }
 
-.markdown-file-preview-rendered .katex-error {
+.markdown-rendered-content .katex-error {
   color: #ffaaa0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -6079,7 +6100,10 @@ input {
 }
 
 .focus-transcript-btn {
-  padding: 4px 9px;
+  min-height: 24px;
+  padding: 2px 7px;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 .agent-transcript-body {
@@ -6115,7 +6139,7 @@ input {
     rgba(25, 61, 91, 0.1)
   );
   border-color: rgba(89, 177, 255, 0.48);
-  box-shadow: inset 3px 0 0 #59b1ff;
+  box-shadow: inset 1px 0 0 #59b1ff;
 }
 
 .agent-transcript-entry--assistant {
@@ -6126,7 +6150,7 @@ input {
     rgba(30, 75, 43, 0.09)
   );
   border-color: rgba(126, 217, 143, 0.44);
-  box-shadow: inset 3px 0 0 #7ed98f;
+  box-shadow: inset 1px 0 0 #7ed98f;
 }
 
 .agent-transcript-entry--user header strong {
@@ -6169,10 +6193,41 @@ input {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   word-break: break-word;
-  font:
-    13px/1.55 "IBM Plex Mono",
-    "SFMono-Regular",
-    monospace;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: var(--agent-transcript-font-size, 14px);
+  line-height: 1.55;
+}
+
+.agent-transcript-markdown {
+  margin: 0;
+  color: inherit;
+  font-size: var(--agent-transcript-font-size, 14px);
+}
+
+.agent-transcript-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.agent-transcript-entry--user .agent-transcript-markdown h1,
+.agent-transcript-entry--user .agent-transcript-markdown h2,
+.agent-transcript-entry--user .agent-transcript-markdown h3,
+.agent-transcript-entry--user .agent-transcript-markdown h4 {
+  color: #cce9ff;
+}
+
+.agent-transcript-entry--assistant .agent-transcript-markdown h1,
+.agent-transcript-entry--assistant .agent-transcript-markdown h2,
+.agent-transcript-entry--assistant .agent-transcript-markdown h3,
+.agent-transcript-entry--assistant .agent-transcript-markdown h4 {
+  color: #d2f3d8;
+}
+
+.agent-transcript-markdown-loading {
+  min-height: 3.2em;
+  padding: 10px 0;
+  color: currentColor;
+  font-size: var(--agent-transcript-font-size, 14px);
+  opacity: 0.62;
 }
 
 .agent-transcript-empty,

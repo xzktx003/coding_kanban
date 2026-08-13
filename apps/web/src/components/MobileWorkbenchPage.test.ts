@@ -49,4 +49,32 @@ describe("MobileWorkbenchPage", () => {
     );
     assert.match(markup, /通知关/);
   });
+
+  it("shows a compact transcript entry for the active mobile session", () => {
+    installDocumentStub();
+
+    const markup = renderToStaticMarkup(
+      createElement(MobileWorkbenchPage, {
+        activeSessionId: "mobile-session",
+        isLoading: false,
+        sessions: [
+          {
+            id: "mobile-session",
+            workspaceId: "default",
+            sourceType: "local",
+            agentKind: "codex",
+            displayName: "Mobile Codex",
+            connectionState: "online",
+            interactionState: "idle",
+          },
+        ],
+        onSwitchSession: () => {},
+      }),
+    );
+
+    assert.match(
+      markup,
+      /class="mobile-transcript-btn"[^>]*>完整记录<\/button>/,
+    );
+  });
 });

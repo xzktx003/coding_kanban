@@ -29,6 +29,21 @@ function renderMarkdownContent(content: string): string {
   );
 }
 
+test("supports a reusable surface class without dropping shared Markdown styles", () => {
+  const markup = renderToStaticMarkup(
+    createElement(MarkdownRenderedContent, {
+      className: "agent-transcript-markdown",
+      content: "**Rendered**",
+    }),
+  );
+
+  assert.match(
+    markup,
+    /class="markdown-rendered-content agent-transcript-markdown"/,
+  );
+  assert.match(markup, /<strong>Rendered<\/strong>/);
+});
+
 test("renders GitHub-flavored Markdown safely in preview mode", () => {
   const markup = renderMarkdownContent(markdown);
   const controls = renderToStaticMarkup(

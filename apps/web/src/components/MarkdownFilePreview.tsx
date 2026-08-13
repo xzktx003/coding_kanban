@@ -1,12 +1,8 @@
-import { lazy, Suspense, useDeferredValue } from "react";
+import { useDeferredValue } from "react";
+
+import { LazyMarkdownContent } from "./LazyMarkdownRenderedContent";
 
 export { normalizeLatexMathDelimiters } from "./markdown-latex";
-
-const LazyMarkdownRenderedContent = lazy(() =>
-  import("./MarkdownRenderedContent").then((module) => ({
-    default: module.MarkdownRenderedContent,
-  })),
-);
 
 export type MarkdownPreviewMode = "preview" | "edit" | "split";
 
@@ -86,18 +82,13 @@ export function MarkdownFilePreview({
           />
         )}
         {showPreview && (
-          <Suspense
-            fallback={
-              <div
-                className="markdown-file-preview-loading"
-                data-testid="markdown-render-loading"
-              >
-                正在生成预览...
-              </div>
-            }
-          >
-            <LazyMarkdownRenderedContent content={deferredPreviewContent} />
-          </Suspense>
+          <LazyMarkdownContent
+            className="markdown-file-preview-rendered"
+            content={deferredPreviewContent}
+            fallbackClassName="markdown-file-preview-loading"
+            fallbackTestId="markdown-render-loading"
+            fallbackText="正在生成预览..."
+          />
         )}
       </div>
     </div>

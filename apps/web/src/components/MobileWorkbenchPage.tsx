@@ -4,6 +4,7 @@ import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import type { AgentCompletionNotificationPermission } from "../lib/agent-completion-notifications";
 import { sendAgentInput } from "../lib/api";
+import { AgentTranscriptDialog } from "./AgentTranscriptDialog";
 import { LazyTerminalView } from "./LazyTerminalView";
 import { MobileAgentComposer } from "./MobileAgentComposer";
 import { MobileTerminalToolbar } from "./MobileTerminalToolbar";
@@ -41,6 +42,8 @@ export function MobileWorkbenchPage({
 }: MobileWorkbenchPageProps) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sendingInput, setSendingInput] = useState(false);
+  const [transcriptSession, setTranscriptSession] =
+    useState<AgentSessionRecord | null>(null);
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !session.hidden),
     [sessions],
@@ -122,7 +125,7 @@ export function MobileWorkbenchPage({
             </button>
           )}
         </div>
-        <label className="mobile-session-switcher">
+        <div className="mobile-session-switcher">
           <span>会话</span>
           <select
             disabled={!activeSession}
@@ -135,7 +138,16 @@ export function MobileWorkbenchPage({
               </option>
             ))}
           </select>
-        </label>
+          <button
+            className="mobile-transcript-btn"
+            disabled={!activeSession}
+            onClick={() => activeSession && setTranscriptSession(activeSession)}
+            title="查看不受终端重绘影响的完整 Codex 记录"
+            type="button"
+          >
+            完整记录
+          </button>
+        </div>
       </header>
 
       <section className="mobile-terminal-surface">
@@ -183,6 +195,14 @@ export function MobileWorkbenchPage({
         disabled={!activeSession || sendingInput}
         onSendInput={handleSendInput}
       />
+      {transcriptSession && (
+        <AgentTranscriptDialog
+          agentSessionId={transcriptSession.id}
+          displayName={transcriptSession.displayName}
+          onClose={() => setTranscriptSession(null)}
+          terminalFontSize={terminalFontSize}
+        />
+      )}
     </main>
   );
 }

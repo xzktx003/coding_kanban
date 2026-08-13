@@ -1378,6 +1378,7 @@ export function AgentFocusView({
           agentSessionId={transcriptSession.id}
           displayName={transcriptSession.displayName}
           onClose={() => setTranscriptSession(null)}
+          terminalFontSize={terminalFontSize}
         />
       )}
     </div>

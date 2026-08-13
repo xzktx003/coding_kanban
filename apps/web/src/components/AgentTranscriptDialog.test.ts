@@ -20,6 +20,14 @@ test("transcript entries hide exec calls and outputs while showing visible recor
     updatedAt: "2026-08-13T01:00:00.000Z",
     entries: [
       {
+        id: "user-markdown",
+        timestamp: "2026-08-13T00:59:59.000Z",
+        kind: "user",
+        title: "你",
+        text: "# Request\n\n- keep this readable",
+        collapsedByDefault: false,
+      },
+      {
         id: "before",
         timestamp: "2026-08-13T01:00:00.000Z",
         kind: "assistant",
@@ -63,15 +71,37 @@ test("transcript entries hide exec calls and outputs while showing visible recor
   };
 
   const markup = renderToStaticMarkup(
-    createElement(AgentTranscriptEntries, { transcript }),
+    createElement(AgentTranscriptEntries, {
+      terminalFontSize: 18,
+      transcript,
+    }),
   );
 
-  assert.ok(markup.indexOf("after") < markup.indexOf("visible tool output"));
-  assert.ok(markup.indexOf("visible tool output") < markup.indexOf("before"));
+  assert.ok(
+    markup.indexOf('data-transcript-entry-id="after"') <
+      markup.indexOf('data-transcript-entry-id="visible-tool-output"'),
+  );
+  assert.ok(
+    markup.indexOf('data-transcript-entry-id="visible-tool-output"') <
+      markup.indexOf('data-transcript-entry-id="before"'),
+  );
   assert.doesNotMatch(markup, /exec 调用/);
   assert.doesNotMatch(markup, /exec 输出/);
   assert.doesNotMatch(markup, /hidden command/);
   assert.doesNotMatch(markup, /middle-1/);
   assert.match(markup, /按工作目录匹配/);
   assert.match(markup, /<details/);
+  assert.equal(
+    (markup.match(/data-transcript-rendering="markdown"/g) ?? []).length,
+    3,
+  );
+  assert.equal(
+    (markup.match(/data-transcript-rendering="text"/g) ?? []).length,
+    1,
+  );
+  assert.match(
+    markup,
+    /data-transcript-rendering="text"[^>]*>visible tool output<\/pre>/,
+  );
+  assert.match(markup, /style="--agent-transcript-font-size:18px"/);
 });

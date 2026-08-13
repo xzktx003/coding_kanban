@@ -11,11 +11,15 @@ if (typeof document !== "undefined") {
 }
 
 interface MarkdownRenderedContentProps {
+  className?: string;
   content: string;
+  testId?: string;
 }
 
 export const MarkdownRenderedContent = memo(function MarkdownRenderedContent({
+  className,
   content,
+  testId = "markdown-rendered",
 }: MarkdownRenderedContentProps) {
   const normalizedContent = useMemo(
     () => normalizeLatexMathDelimiters(content),
@@ -24,8 +28,8 @@ export const MarkdownRenderedContent = memo(function MarkdownRenderedContent({
 
   return (
     <article
-      className="markdown-file-preview-rendered"
-      data-testid="markdown-rendered"
+      className={`markdown-rendered-content${className ? ` ${className}` : ""}`}
+      data-testid={testId}
     >
       <ReactMarkdown
         components={{
