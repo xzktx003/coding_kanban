@@ -1933,6 +1933,44 @@ input {
   background: #080b0f;
 }
 
+.grid-card-task-summary {
+  display: grid;
+  gap: 4px;
+  padding: 7px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.grid-card-task-summary-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 7px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.grid-card-task-summary-row span {
+  color: #ffd38a;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.grid-card-task-summary-row p {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: rgba(244, 241, 234, 0.78);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.grid-card-task-summary-row--agent span {
+  color: #a9ebb5;
+}
+
 .grid-card-terminal::after {
   position: absolute;
   inset: 0;

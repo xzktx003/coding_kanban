@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 
 import type {
   AgentSessionRecord,
+  AgentTaskSummaryResponse,
   OpenVsCodeWebResponse,
   LaunchRemoteAgentInput,
   LaunchLocalAgentInput,
@@ -20,6 +21,7 @@ import { shellQuote, formatWorkingDirectory } from "@agent-orchestrator/shared";
 import { scanAgentDirectory } from "../services/agent-scanner.js";
 import { AgentSessionRegistry } from "../services/agent-session-registry.js";
 import { CodexTranscriptService } from "../services/codex-transcript-service.js";
+import { summarizeCodexTranscript } from "../services/codex-transcript-service.js";
 import { LocalProcessRuntimeManager } from "../services/local-process-runtime-manager.js";
 import { LocalTmuxAdapter } from "../services/local-tmux-adapter.js";
 import { LocalTmuxInputRouter } from "../services/local-tmux-input-router.js";
@@ -239,6 +241,48 @@ export async function registerAgentSessionRoutes(
   fastify.get("/api/health", async () => ({ status: "ok" }));
 
   fastify.get("/api/agent-sessions", async () => registry.list());
+
+  fastify.get<{ Params: { id: string } }>(
+    "/api/agent-sessions/:id/task-summary",
+    async (request): Promise<AgentTaskSummaryResponse> => {
+      const agentSession = registry.get(request.params.id);
+      const isLocalSession =
+        !agentSession.sshTarget &&
+        (!agentSession.hostId || agentSession.hostId === "local");
+      if (!isLocalSession) {
+        return { available: false, updatedAt: null };
+      }
+
+      const transcript = codexTranscriptService.read({
+        sessionId: agentSession.agentSessionId,
+        workingDirectory: agentSession.workingDirectory,
+      });
+      if (!transcript.available) {
+        return { available: false, updatedAt: transcript.updatedAt };
+      }
+
+      const summaries = summarizeCodexTranscript(transcript.entries);
+      const summaryUpdatedAt = transcript.updatedAt ?? new Date().toISOString();
+      const cachedSummaryChanged =
+        agentSession.lastUserMessageSummary !==
+          summaries.lastUserMessageSummary ||
+        agentSession.lastAgentMessageSummary !==
+          summaries.lastAgentMessageSummary ||
+        agentSession.taskSummaryUpdatedAt !== summaryUpdatedAt;
+      if (cachedSummaryChanged) {
+        registry.updateSession(agentSession.id, {
+          ...summaries,
+          taskSummaryUpdatedAt: summaryUpdatedAt,
+        });
+      }
+
+      return {
+        available: true,
+        ...summaries,
+        updatedAt: summaryUpdatedAt,
+      };
+    },
+  );
 
   fastify.get<{ Params: { id: string } }>(
     "/api/agent-sessions/:id/transcript",

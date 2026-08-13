@@ -160,6 +160,15 @@ export class AgentSessionRegistry {
         outputPreview: tmuxSession
           ? "服务已更新，等待恢复 tmux 会话"
           : "direct 会话无法保留原 PTY，需要手动恢复",
+        ...(persisted.lastUserMessageSummary
+          ? { lastUserMessageSummary: persisted.lastUserMessageSummary }
+          : {}),
+        ...(persisted.lastAgentMessageSummary
+          ? { lastAgentMessageSummary: persisted.lastAgentMessageSummary }
+          : {}),
+        ...(persisted.taskSummaryUpdatedAt
+          ? { taskSummaryUpdatedAt: persisted.taskSummaryUpdatedAt }
+          : {}),
         transportRef: persisted.transportRef
           ? {
               tmuxSession: persisted.transportRef.tmuxSession,

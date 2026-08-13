@@ -3,6 +3,7 @@ import type {
   AppVersionResponse,
   AgentSessionDetailResponse,
   AgentTranscriptResponse,
+  AgentTaskSummaryResponse,
   AgentSessionSnapshotEvent,
   AgentSessionRecord,
   ChmodInput,
@@ -100,6 +101,14 @@ export function getAgentTranscript(
 ): Promise<AgentTranscriptResponse> {
   return request<AgentTranscriptResponse>(
     `/api/agent-sessions/${agentSessionId}/transcript`,
+  );
+}
+
+export function getAgentTaskSummary(
+  agentSessionId: string,
+): Promise<AgentTaskSummaryResponse> {
+  return request<AgentTaskSummaryResponse>(
+    `/api/agent-sessions/${agentSessionId}/task-summary`,
   );
 }
 

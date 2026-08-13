@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { AgentTranscriptResponse } from "@agent-orchestrator/shared";
+import type {
+  AgentTaskSummaryResponse,
+  AgentTranscriptResponse,
+} from "@agent-orchestrator/shared";
 import Fastify from "fastify";
 
 import { AgentSessionRegistry } from "../services/agent-session-registry.js";
@@ -105,5 +108,134 @@ test("GET transcript does not read local Codex files for remote sessions", async
   assert.equal(response.statusCode, 200);
   assert.equal(readCalled, false);
   assert.equal((response.json() as AgentTranscriptResponse).available, false);
+  await app.close();
+});
+
+test("GET task summary extracts the latest structured Codex messages", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "codex",
+    displayName: "codex pane",
+    workingDirectory: "/workspace/project",
+    interactionState: "idle",
+  });
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {} as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    codexTranscriptService: {
+      read() {
+        return {
+          available: true,
+          agentKind: "codex",
+          sessionId: "codex-session-id",
+          matchedBy: "working-directory",
+          updatedAt: "2026-08-13T02:00:00.000Z",
+          entries: [
+            {
+              id: "user-1",
+              timestamp: "",
+              kind: "user",
+              title: "你",
+              text: "实现卡片摘要",
+              collapsedByDefault: false,
+            },
+            {
+              id: "assistant-1",
+              timestamp: "",
+              kind: "assistant",
+              title: "Codex",
+              text: "已完成实现并通过测试",
+              collapsedByDefault: false,
+            },
+          ],
+        };
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/agent-sessions/${session.id}/task-summary`,
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json() as AgentTaskSummaryResponse, {
+    available: true,
+    lastUserMessageSummary: "实现卡片摘要",
+    lastAgentMessageSummary: "已完成实现并通过测试",
+    updatedAt: "2026-08-13T02:00:00.000Z",
+  });
+  assert.equal(
+    registry.get(session.id).lastAgentMessageSummary,
+    "已完成实现并通过测试",
+  );
+  await app.close();
+});
+
+test("GET task summary supports local tmux sessions even when agentKind is shell", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    sourceType: "local",
+    agentKind: "shell",
+    displayName: "local tmux",
+    workingDirectory: "/workspace/project",
+    interactionState: "idle",
+    transportRef: { tmuxSession: "kanban-summary" },
+  });
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {} as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    codexTranscriptService: {
+      read() {
+        return {
+          available: true,
+          agentKind: "codex",
+          sessionId: "codex-session-id",
+          matchedBy: "working-directory",
+          updatedAt: "2026-08-13T02:00:00.000Z",
+          entries: [
+            {
+              id: "user-1",
+              timestamp: "",
+              kind: "user",
+              title: "你",
+              text: "处理 tmux 任务",
+              collapsedByDefault: false,
+            },
+          ],
+        };
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/agent-sessions/${session.id}/task-summary`,
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal((response.json() as AgentTaskSummaryResponse).available, true);
+  assert.equal(
+    registry.get(session.id).lastUserMessageSummary,
+    "处理 tmux 任务",
+  );
   await app.close();
 });

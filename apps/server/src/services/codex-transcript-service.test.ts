@@ -13,6 +13,7 @@ import test from "node:test";
 import {
   CodexTranscriptService,
   parseCodexTranscript,
+  summarizeCodexTranscript,
 } from "./codex-transcript-service.js";
 
 function line(value: unknown): string {
@@ -80,6 +81,40 @@ test("parseCodexTranscript hides exec calls and their associated output", () => 
     entries.some((entry) => entry.text.includes("output-1")),
     false,
   );
+});
+
+test("summarizeCodexTranscript extracts the latest user and assistant messages without an LLM", () => {
+  const summary = summarizeCodexTranscript([
+    {
+      id: "user-1",
+      timestamp: "",
+      kind: "user",
+      title: "你",
+      text: "先检查项目",
+      collapsedByDefault: false,
+    },
+    {
+      id: "assistant-1",
+      timestamp: "",
+      kind: "assistant",
+      title: "Codex",
+      text: "项目检查完成，发现了一个问题。\n\n请确认是否继续。",
+      collapsedByDefault: false,
+    },
+    {
+      id: "user-2",
+      timestamp: "",
+      kind: "user",
+      title: "你",
+      text: "修复这个问题并运行测试",
+      collapsedByDefault: false,
+    },
+  ]);
+
+  assert.deepEqual(summary, {
+    lastUserMessageSummary: "修复这个问题并运行测试",
+    lastAgentMessageSummary: "项目检查完成，发现了一个问题。 请确认是否继续。",
+  });
 });
 
 test("CodexTranscriptService selects the newest session with the same working directory", () => {

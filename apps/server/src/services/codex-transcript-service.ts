@@ -27,6 +27,13 @@ interface ReadTranscriptInput {
   workingDirectory?: string;
 }
 
+export interface AgentMessageSummaries {
+  lastUserMessageSummary?: string;
+  lastAgentMessageSummary?: string;
+}
+
+const MESSAGE_SUMMARY_MAX_CHARS = 180;
+
 interface SessionMetadata {
   id: string;
   cwd: string;
@@ -74,6 +81,35 @@ function parseRecord(line: string): JsonRecord | null {
     // Codex may be appending the final JSONL record while this endpoint reads.
     return null;
   }
+}
+
+function summarizeMessageText(text: string): string {
+  const normalized = text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/[`*_>#]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (normalized.length <= MESSAGE_SUMMARY_MAX_CHARS) {
+    return normalized;
+  }
+  return `${normalized.slice(0, MESSAGE_SUMMARY_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+export function summarizeCodexTranscript(
+  entries: AgentTranscriptEntry[],
+): AgentMessageSummaries {
+  const lastUser = [...entries].reverse().find((entry) => entry.kind === "user");
+  const lastAssistant = [...entries]
+    .reverse()
+    .find((entry) => entry.kind === "assistant");
+  const summary: AgentMessageSummaries = {};
+  if (lastUser) {
+    summary.lastUserMessageSummary = summarizeMessageText(lastUser.text);
+  }
+  if (lastAssistant) {
+    summary.lastAgentMessageSummary = summarizeMessageText(lastAssistant.text);
+  }
+  return summary;
 }
 
 export function parseCodexTranscript(content: string): AgentTranscriptEntry[] {

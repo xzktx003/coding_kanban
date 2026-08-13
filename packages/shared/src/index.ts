@@ -63,6 +63,9 @@ export interface AgentSessionRecord {
   lastHeartbeatAt?: string;
   lastRefreshedAt?: string;
   outputPreview?: string;
+  lastUserMessageSummary?: string;
+  lastAgentMessageSummary?: string;
+  taskSummaryUpdatedAt?: string;
   controlMode?: AgentControlMode;
   transportRef?: AgentTransportRef;
   agentSessionId?: string;
@@ -158,6 +161,13 @@ export interface AgentTranscriptResponse {
   updatedAt: string | null;
   entries: AgentTranscriptEntry[];
   message?: string;
+}
+
+export interface AgentTaskSummaryResponse {
+  available: boolean;
+  lastUserMessageSummary?: string;
+  lastAgentMessageSummary?: string;
+  updatedAt: string | null;
 }
 
 export interface RegisterAgentSessionInput {

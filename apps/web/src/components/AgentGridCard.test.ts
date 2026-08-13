@@ -1,10 +1,39 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  AgentGridCard,
   shouldFocusGridCardFromDoubleClick,
   shouldFocusGridCardFromMouseDown,
 } from "./AgentGridCard.js";
+
+test("grid cards show structured task summaries above terminal previews", () => {
+  const markup = renderToStaticMarkup(
+    createElement(AgentGridCard, {
+      session: {
+        id: "session-summary",
+        workspaceId: "default",
+        sourceType: "local",
+        agentKind: "codex",
+        displayName: "Summary Session",
+        connectionState: "online",
+        interactionState: "idle",
+        lastUserMessageSummary: "修复手机端入口",
+        lastAgentMessageSummary: "已完成入口并通过测试",
+      },
+      onDoubleClick: () => {},
+      onDelete: () => {},
+      onReconnect: () => {},
+    }),
+  );
+
+  assert.match(markup, /grid-card-task-summary/);
+  assert.match(markup, /任务[\s\S]*修复手机端入口/);
+  assert.match(markup, /回复[\s\S]*已完成入口并通过测试/);
+  assert.match(markup, /terminal-preview-session-summary/);
+});
 
 function targetMatching(...matchedSelectors: string[]): EventTarget {
   return {

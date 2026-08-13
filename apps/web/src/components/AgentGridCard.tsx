@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import { CardMoreMenu } from "./CardMoreMenu";
+import { AgentGridTaskSummary } from "./AgentGridTaskSummary";
 import { LazyTerminalView } from "./LazyTerminalView";
 import { SessionGroupMenu } from "./SessionGroupControls";
 import { TerminalPreview } from "./TerminalPreview";
@@ -236,6 +237,18 @@ export function AgentGridCard({
           </button>
         </div>
       </div>
+      <AgentGridTaskSummary
+        agentKind={session.agentKind}
+        agentSessionId={session.id}
+        supportsStructuredSummary={
+          session.agentKind === "codex" ||
+          (session.sourceType === "local" &&
+            Boolean(session.transportRef?.tmuxSession))
+        }
+        initialAgentSummary={session.lastAgentMessageSummary}
+        initialUserSummary={session.lastUserMessageSummary}
+        lastOutputAt={session.lastOutputAt}
+      />
       <div className="grid-card-terminal">
         {useLightweightTerminalPreview ? (
           <TerminalPreview session={session} suspended={terminalSuspended} />

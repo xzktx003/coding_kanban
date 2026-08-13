@@ -119,6 +119,9 @@ function parseSession(value: unknown): AgentSessionRecord | null {
   const sshTarget = parseSshTarget(value.sshTarget);
   const remoteCommand = optionalString(value.remoteCommand);
   const tags = optionalStringArray(value.tags);
+  const lastUserMessageSummary = optionalString(value.lastUserMessageSummary);
+  const lastAgentMessageSummary = optionalString(value.lastAgentMessageSummary);
+  const taskSummaryUpdatedAt = optionalString(value.taskSummaryUpdatedAt);
 
   return {
     id: value.id,
@@ -147,6 +150,9 @@ function parseSession(value: unknown): AgentSessionRecord | null {
       ? { hasUnreadCompletion: value.hasUnreadCompletion }
       : {}),
     ...(tags ? { tags } : {}),
+    ...(lastUserMessageSummary ? { lastUserMessageSummary } : {}),
+    ...(lastAgentMessageSummary ? { lastAgentMessageSummary } : {}),
+    ...(taskSummaryUpdatedAt ? { taskSummaryUpdatedAt } : {}),
   };
 }
 
@@ -226,6 +232,15 @@ function projectSession(session: AgentSessionRecord): AgentSessionRecord {
       ? { hasUnreadCompletion: session.hasUnreadCompletion }
       : {}),
     ...(session.tags ? { tags: session.tags } : {}),
+    ...(session.lastUserMessageSummary
+      ? { lastUserMessageSummary: session.lastUserMessageSummary }
+      : {}),
+    ...(session.lastAgentMessageSummary
+      ? { lastAgentMessageSummary: session.lastAgentMessageSummary }
+      : {}),
+    ...(session.taskSummaryUpdatedAt
+      ? { taskSummaryUpdatedAt: session.taskSummaryUpdatedAt }
+      : {}),
   };
 }
 
