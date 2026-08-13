@@ -5,7 +5,12 @@ export type AgentSourceType =
 
 export type ConnectionState = "online" | "degraded" | "offline";
 
-export type InteractionState = "running" | "idle" | "detached" | "exited";
+export type InteractionState =
+  | "awaiting_input"
+  | "running"
+  | "idle"
+  | "detached"
+  | "exited";
 
 export type StateConfidence = "high" | "medium" | "low";
 export type AgentOutputStream = "stdout" | "stderr" | "system";
@@ -52,6 +57,7 @@ export interface AgentSessionRecord {
   workingDirectory?: string;
   connectionState: ConnectionState;
   interactionState: InteractionState;
+  hasUnreadCompletion?: boolean;
   stateConfidence?: StateConfidence;
   lastOutputAt?: string;
   lastHeartbeatAt?: string;
@@ -131,6 +137,27 @@ export interface RestoreManagedSessionsResponse {
 export interface AgentSessionDetailResponse {
   agentSession: AgentSessionRecord;
   outputEntries: AgentOutputEntry[];
+}
+
+export type AgentTranscriptEntryKind = "user" | "assistant" | "tool";
+
+export interface AgentTranscriptEntry {
+  id: string;
+  timestamp: string;
+  kind: AgentTranscriptEntryKind;
+  title: string;
+  text: string;
+  collapsedByDefault: boolean;
+}
+
+export interface AgentTranscriptResponse {
+  available: boolean;
+  agentKind: "codex";
+  sessionId: string | null;
+  matchedBy: "session-id" | "working-directory" | null;
+  updatedAt: string | null;
+  entries: AgentTranscriptEntry[];
+  message?: string;
 }
 
 export interface RegisterAgentSessionInput {
@@ -255,6 +282,7 @@ export interface ScanDirectoryResponse {
 }
 
 export const interactionStateOrder: InteractionState[] = [
+  "awaiting_input",
   "running",
   "idle",
   "detached",

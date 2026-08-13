@@ -185,6 +185,12 @@ describe("isTerminalWheelBlockedByOverlayTarget", () => {
       true,
     );
     assert.equal(
+      isTerminalWheelBlockedByOverlayTarget(
+        targetInsideOverlay(".agent-transcript-backdrop"),
+      ),
+      true,
+    );
+    assert.equal(
       isTerminalWheelBlockedByOverlayTarget(targetInsideOverlay(".grid-card")),
       false,
     );

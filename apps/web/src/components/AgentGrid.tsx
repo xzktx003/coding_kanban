@@ -49,33 +49,124 @@ interface AgentGridProps {
   onDeleteSessionGroup?: (groupId: string) => void;
   onMoveSessionToGroup?: (sessionId: string, groupId: string | null) => void;
   onRenameSessionGroup?: (groupId: string) => void;
-  onToggleSessionGroup?: (groupId: string) => void;
+  onToggleSessionGroup?: (groupId: string, scope?: string) => void;
 }
+
+type AgentKanbanColumnId = "response" | "executing" | "review" | "ready";
 
 interface GridMetrics {
   width: number;
   height: number;
   scrollTop: number;
+  columnContentTops: Record<AgentKanbanColumnId, number>;
 }
+
+interface AgentKanbanColumn {
+  id: AgentKanbanColumnId;
+  label: string;
+  emptyLabel: string;
+  sessions: AgentSessionRecord[];
+}
+
+const agentKanbanColumnDefinitions: Array<Omit<AgentKanbanColumn, "sessions">> =
+  [
+    { id: "response", label: "需响应", emptyLabel: "暂无等待响应的会话" },
+    { id: "executing", label: "执行中", emptyLabel: "暂无执行中的会话" },
+    { id: "review", label: "待验收", emptyLabel: "暂无待验收结果" },
+    { id: "ready", label: "可继续", emptyLabel: "暂无可继续会话" },
+  ];
 
 const defaultGridMetrics: GridMetrics = {
   width: 0,
   height: 0,
   scrollTop: 0,
+  columnContentTops: {
+    response: 0,
+    executing: 0,
+    review: 0,
+    ready: 0,
+  },
 };
 
 function readGridMetrics(element: HTMLDivElement): GridMetrics {
+  const boardRect = element.getBoundingClientRect();
+  const columnContentTops = Object.fromEntries(
+    agentKanbanColumnDefinitions.map((column) => {
+      const content = element.querySelector<HTMLElement>(
+        `[data-kanban-column-content="${column.id}"]`,
+      );
+      const contentTop = content
+        ? content.getBoundingClientRect().top -
+          boardRect.top +
+          element.scrollTop
+        : 0;
+      return [column.id, Math.max(0, contentTop)];
+    }),
+  ) as Record<AgentKanbanColumnId, number>;
+
   return {
     width: element.clientWidth,
     height: element.clientHeight,
     scrollTop: element.scrollTop,
+    columnContentTops,
   };
 }
 
 function sameGridMetrics(a: GridMetrics, b: GridMetrics): boolean {
   return (
-    a.width === b.width && a.height === b.height && a.scrollTop === b.scrollTop
+    a.width === b.width &&
+    a.height === b.height &&
+    a.scrollTop === b.scrollTop &&
+    agentKanbanColumnDefinitions.every(
+      (column) =>
+        a.columnContentTops[column.id] === b.columnContentTops[column.id],
+    )
   );
+}
+
+export function getAgentKanbanColumnScrollTop(
+  boardScrollTop: number,
+  columnContentTop: number,
+): number {
+  return Math.max(0, boardScrollTop - columnContentTop);
+}
+
+export function getAgentKanbanColumnId(
+  session: AgentSessionRecord,
+): AgentKanbanColumnId {
+  if (session.interactionState === "awaiting_input") {
+    return "response";
+  }
+
+  if (session.interactionState === "running") {
+    return "executing";
+  }
+
+  if (session.hasUnreadCompletion) {
+    return "review";
+  }
+
+  return "ready";
+}
+
+export function buildAgentKanbanColumns(
+  sessions: AgentSessionRecord[],
+): AgentKanbanColumn[] {
+  const sessionsByColumn: Record<AgentKanbanColumnId, AgentSessionRecord[]> = {
+    response: [],
+    executing: [],
+    review: [],
+    ready: [],
+  };
+
+  for (const session of sessions) {
+    sessionsByColumn[getAgentKanbanColumnId(session)].push(session);
+  }
+
+  return agentKanbanColumnDefinitions.map((column) => ({
+    ...column,
+    sessions: sessionsByColumn[column.id],
+  }));
 }
 
 export function AgentGrid({
@@ -109,16 +200,16 @@ export function AgentGrid({
   const scrollFrameRef = useRef<number | null>(null);
   const [gridMetrics, setGridMetrics] =
     useState<GridMetrics>(defaultGridMetrics);
-  const runningCount = sessions.filter(
-    (session) => session.interactionState === "running",
-  ).length;
   const groupingEnabled = sessionGroups.groups.length > 0;
+  const kanbanColumns = useMemo(
+    () => buildAgentKanbanColumns(sessions),
+    [sessions],
+  );
+  const kanbanColumnSizeKey = kanbanColumns
+    .map((column) => column.sessions.length)
+    .join(":");
   const shouldVirtualize =
     !groupingEnabled && sessions.length > AGENT_GRID_VIRTUALIZATION_THRESHOLD;
-  const groupedSessions = useMemo(
-    () => groupSessions(sessions, sessionGroups),
-    [sessionGroups, sessions],
-  );
 
   const updateGridMetrics = useCallback(() => {
     const element = gridRef.current;
@@ -155,7 +246,7 @@ export function AgentGrid({
   useEffect(() => {
     if (!shouldVirtualize) return;
     updateGridMetrics();
-  }, [sessions.length, shouldVirtualize, updateGridMetrics]);
+  }, [kanbanColumnSizeKey, shouldVirtualize, updateGridMetrics]);
 
   useEffect(() => {
     return () => {
@@ -170,31 +261,17 @@ export function AgentGrid({
 
     scrollFrameRef.current = window.requestAnimationFrame(() => {
       scrollFrameRef.current = null;
-      updateGridMetrics();
+      const element = gridRef.current;
+      if (!element) return;
+
+      setGridMetrics((current) =>
+        current.scrollTop === element.scrollTop
+          ? current
+          : { ...current, scrollTop: element.scrollTop },
+      );
     });
-  }, [shouldVirtualize, updateGridMetrics]);
+  }, [shouldVirtualize]);
 
-  const virtualWindow = useMemo(() => {
-    if (!shouldVirtualize) return null;
-
-    return computeVirtualGridWindow({
-      itemCount: sessions.length,
-      containerWidth: gridMetrics.width,
-      viewportHeight: gridMetrics.height,
-      scrollTop: gridMetrics.scrollTop,
-    });
-  }, [
-    gridMetrics.height,
-    gridMetrics.scrollTop,
-    gridMetrics.width,
-    sessions.length,
-    shouldVirtualize,
-  ]);
-
-  const visibleSessions =
-    virtualWindow === null
-      ? sessions
-      : sessions.slice(virtualWindow.startIndex, virtualWindow.endIndex);
   const gridStyle = shouldVirtualize
     ? ({
         "--agent-grid-card-height": `${AGENT_GRID_CARD_HEIGHT}px`,
@@ -249,14 +326,6 @@ export function AgentGrid({
               已隐藏 ({hiddenCount})
             </button>
           )}
-          {runningCount > 0 && (
-            <span
-              className="stat-item stat-running grid-status-chip"
-              data-testid="grid-stat-running"
-            >
-              🟢 {runningCount} 运行中
-            </span>
-          )}
         </div>
       </div>
       {sessions.length === 0 ? (
@@ -310,61 +379,120 @@ export function AgentGrid({
             </div>
           )}
         </div>
-      ) : groupingEnabled ? (
-        <div className="agent-group-list" data-testid="agent-group-list">
-          {groupedSessions.map((group) => {
-            const collapsed = isSessionGroupCollapsed(
-              sessionGroups,
-              group.id,
-            );
-            return (
-              <section className="agent-group-section" key={group.id}>
-                <SessionGroupHeader
-                  collapsed={collapsed}
-                  count={group.sessions.length}
-                  groupId={group.id}
-                  name={group.name}
-                  onDeleteGroup={onDeleteSessionGroup}
-                  onRenameGroup={onRenameSessionGroup}
-                  onToggleGroup={onToggleSessionGroup}
-                />
-                {!collapsed && (
-                  <div className="agent-grid agent-group-grid">
-                    {group.sessions.map(renderSessionCard)}
-                  </div>
-                )}
-              </section>
-            );
-          })}
-        </div>
       ) : (
         <div
-          className={`agent-grid${shouldVirtualize ? " agent-grid--virtualized" : ""}`}
+          aria-label="会话状态看板"
+          className={`agent-grid agent-kanban-board${shouldVirtualize ? " agent-grid--virtualized" : ""}`}
           data-testid="agent-grid"
           data-virtualized={shouldVirtualize ? "true" : "false"}
           onScroll={handleGridScroll}
           ref={gridRef}
           style={gridStyle}
         >
-          {virtualWindow === null ? (
-            visibleSessions.map(renderSessionCard)
-          ) : (
-            <div
-              className="agent-grid-virtual-spacer"
-              style={{ height: `${virtualWindow.totalHeight}px` }}
-            >
-              <div
-                className="agent-grid-virtual-window"
-                style={{
-                  gap: `${AGENT_GRID_GAP}px`,
-                  gridTemplateColumns: `repeat(${virtualWindow.columns}, minmax(0, 1fr))`,
-                  transform: `translateY(${virtualWindow.offsetY}px)`,
-                }}
+          {kanbanColumns.map((column) => {
+            const groupedColumnSessions = groupingEnabled
+              ? groupSessions(column.sessions, sessionGroups).filter(
+                  (group) => group.sessions.length > 0,
+                )
+              : [];
+            const virtualWindow = shouldVirtualize
+              ? computeVirtualGridWindow({
+                  itemCount: column.sessions.length,
+                  containerWidth: gridMetrics.width / kanbanColumns.length,
+                  viewportHeight: gridMetrics.height,
+                  scrollTop: getAgentKanbanColumnScrollTop(
+                    gridMetrics.scrollTop,
+                    gridMetrics.columnContentTops[column.id],
+                  ),
+                })
+              : null;
+            const visibleColumnSessions = virtualWindow
+              ? column.sessions.slice(
+                  virtualWindow.startIndex,
+                  virtualWindow.endIndex,
+                )
+              : column.sessions;
+
+            return (
+              <section
+                aria-labelledby={`agent-kanban-column-${column.id}`}
+                className={`agent-kanban-column agent-kanban-column--${column.id}`}
+                data-kanban-column={column.id}
+                key={column.id}
               >
-                {visibleSessions.map(renderSessionCard)}
-              </div>
-            </div>
-          )}
+                <header className="agent-kanban-column-header">
+                  <h2 id={`agent-kanban-column-${column.id}`}>
+                    {column.label}
+                  </h2>
+                  <span
+                    aria-label={`${column.label} ${column.sessions.length} 个会话`}
+                    className="agent-kanban-column-count"
+                    data-kanban-count={column.sessions.length}
+                  >
+                    {column.sessions.length}
+                  </span>
+                </header>
+                <div
+                  className="agent-kanban-column-content"
+                  data-kanban-column-content={column.id}
+                >
+                  {column.sessions.length === 0 ? (
+                    <div className="agent-kanban-column-empty">
+                      {column.emptyLabel}
+                    </div>
+                  ) : groupingEnabled ? (
+                    groupedColumnSessions.map((group) => {
+                      const collapsed = isSessionGroupCollapsed(
+                        sessionGroups,
+                        group.id,
+                        column.id,
+                      );
+                      return (
+                        <section className="agent-group-section" key={group.id}>
+                          <SessionGroupHeader
+                            collapsed={collapsed}
+                            count={group.sessions.length}
+                            groupId={group.id}
+                            name={group.name}
+                            onDeleteGroup={onDeleteSessionGroup}
+                            onRenameGroup={onRenameSessionGroup}
+                            onToggleGroup={(groupId) =>
+                              onToggleSessionGroup?.(groupId, column.id)
+                            }
+                          />
+                          {!collapsed && (
+                            <div className="agent-kanban-card-list agent-group-grid">
+                              {group.sessions.map(renderSessionCard)}
+                            </div>
+                          )}
+                        </section>
+                      );
+                    })
+                  ) : virtualWindow ? (
+                    <div
+                      className="agent-grid-virtual-spacer"
+                      style={{ height: `${virtualWindow.totalHeight}px` }}
+                    >
+                      <div
+                        className="agent-grid-virtual-window"
+                        style={{
+                          gap: `${AGENT_GRID_GAP}px`,
+                          gridTemplateColumns: "minmax(0, 1fr)",
+                          transform: `translateY(${virtualWindow.offsetY}px)`,
+                        }}
+                      >
+                        {visibleColumnSessions.map(renderSessionCard)}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="agent-kanban-card-list">
+                      {visibleColumnSessions.map(renderSessionCard)}
+                    </div>
+                  )}
+                </div>
+              </section>
+            );
+          })}
         </div>
       )}
     </div>

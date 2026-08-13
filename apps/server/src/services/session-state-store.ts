@@ -143,6 +143,9 @@ function parseSession(value: unknown): AgentSessionRecord | null {
     ...(sshTarget ? { sshTarget } : {}),
     ...(remoteCommand ? { remoteCommand } : {}),
     ...(typeof value.hidden === "boolean" ? { hidden: value.hidden } : {}),
+    ...(typeof value.hasUnreadCompletion === "boolean"
+      ? { hasUnreadCompletion: value.hasUnreadCompletion }
+      : {}),
     ...(tags ? { tags } : {}),
   };
 }
@@ -219,6 +222,9 @@ function projectSession(session: AgentSessionRecord): AgentSessionRecord {
     ...(session.sshTarget ? { sshTarget: session.sshTarget } : {}),
     ...(session.remoteCommand ? { remoteCommand: session.remoteCommand } : {}),
     ...(session.hidden !== undefined ? { hidden: session.hidden } : {}),
+    ...(session.hasUnreadCompletion !== undefined
+      ? { hasUnreadCompletion: session.hasUnreadCompletion }
+      : {}),
     ...(session.tags ? { tags: session.tags } : {}),
   };
 }

@@ -155,6 +155,33 @@ describe("session groups", () => {
     assert.deepEqual(deleted.collapsedGroupIds, []);
   });
 
+  it("tracks kanban group collapse state independently per status column", () => {
+    const state: SessionGroupState = {
+      groups: [{ id: "group-1", name: "后端" }],
+      assignments: {},
+      collapsedGroupIds: [],
+    };
+
+    const collapsedExecuting = toggleSessionGroupCollapsed(
+      state,
+      "group-1",
+      "executing",
+    );
+
+    assert.equal(
+      isSessionGroupCollapsed(collapsedExecuting, "group-1", "executing"),
+      true,
+    );
+    assert.equal(
+      isSessionGroupCollapsed(collapsedExecuting, "group-1", "response"),
+      false,
+    );
+    assert.equal(isSessionGroupCollapsed(collapsedExecuting, "group-1"), false);
+
+    const deleted = deleteSessionGroup(collapsedExecuting, "group-1");
+    assert.deepEqual(deleted.collapsedGroupIds, []);
+  });
+
   it("orders configured groups before the automatic ungrouped section", () => {
     const alpha = makeSession("alpha");
     const beta = makeSession("beta");

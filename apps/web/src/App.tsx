@@ -794,10 +794,17 @@ export default function App() {
     return true;
   });
 
+  const acknowledgeFocusedSession = useCallback((id: string) => {
+    focusAgentSession({ agentSessionId: id })
+      .then(setSnapshot)
+      .catch(() => {});
+  }, []);
+
   function handleFocusSession(id: string) {
     setFocusedId(id);
     setActiveTerminalSessionId(id);
     setViewMode("focus");
+    acknowledgeFocusedSession(id);
   }
 
   const handleQuickTmuxConnected = useCallback(
@@ -855,20 +862,58 @@ export default function App() {
 
     setFocusedId(id);
     setActiveTerminalSessionId(id);
+    acknowledgeFocusedSession(id);
   }
 
-  const handleActiveTerminalSessionChange = useCallback((id: string | null) => {
-    setActiveTerminalSessionId(id);
-  }, []);
+  const handleActiveTerminalSessionChange = useCallback(
+    (id: string | null) => {
+      setActiveTerminalSessionId(id);
+      if (id) {
+        acknowledgeFocusedSession(id);
+      }
+    },
+    [acknowledgeFocusedSession],
+  );
 
-  const handleMobileSwitchSession = useCallback((id: string) => {
-    setFocusedId(id);
-    setActiveTerminalSessionId(id);
-    setViewMode("focus");
-    focusAgentSession({ agentSessionId: id })
-      .then(setSnapshot)
-      .catch(() => {});
-  }, []);
+  const handleMobileSwitchSession = useCallback(
+    (id: string) => {
+      setFocusedId(id);
+      setActiveTerminalSessionId(id);
+      setViewMode("focus");
+      acknowledgeFocusedSession(id);
+    },
+    [acknowledgeFocusedSession],
+  );
+
+  const mobileActiveSessionId = isMobileWorkbenchLocation(window.location)
+    ? (visibleSessions.find(
+        (session) =>
+          session.id === (focusedId ?? snapshot?.activeAgentSessionId),
+      )?.id ??
+      visibleSessions[0]?.id ??
+      null)
+    : null;
+
+  useEffect(() => {
+    const viewedSessionId =
+      mobileActiveSessionId ?? (viewMode === "focus" ? focusedId : null);
+    if (!viewedSessionId) {
+      return;
+    }
+
+    const viewedSession = snapshot?.items.find(
+      (session) => session.id === viewedSessionId,
+    );
+    if (viewedSession?.hasUnreadCompletion) {
+      acknowledgeFocusedSession(viewedSessionId);
+    }
+  }, [
+    acknowledgeFocusedSession,
+    focusedId,
+    mobileActiveSessionId,
+    snapshot,
+    viewMode,
+  ]);
 
   const handleToggleAgentCompletionNotifications = useCallback(async () => {
     if (agentCompletionNotificationsEnabled) {
@@ -1089,11 +1134,14 @@ export default function App() {
     [sessions],
   );
 
-  const handleToggleSessionGroup = useCallback((groupId: string) => {
-    setSessionGroups((current) =>
-      toggleSessionGroupCollapsed(current, groupId),
-    );
-  }, []);
+  const handleToggleSessionGroup = useCallback(
+    (groupId: string, scope?: string) => {
+      setSessionGroups((current) =>
+        toggleSessionGroupCollapsed(current, groupId, scope),
+      );
+    },
+    [],
+  );
 
   const focusedSession: AgentSessionRecord | undefined = focusedId
     ? sessions.find((s) => s.id === focusedId)
@@ -1514,12 +1562,6 @@ export default function App() {
   }
 
   if (isMobileWorkbenchLocation(window.location)) {
-    const mobileActiveSessionId =
-      focusedId ??
-      snapshot?.activeAgentSessionId ??
-      visibleSessions[0]?.id ??
-      null;
-
     return (
       <MobileWorkbenchPage
         activeSessionId={mobileActiveSessionId}

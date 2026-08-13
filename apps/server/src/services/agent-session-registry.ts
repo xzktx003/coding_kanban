@@ -32,9 +32,7 @@ function pickOutputPreview(
 ): string | undefined {
   const lines = normalizeTerminalText(text)
     .split("\n")
-    .map((line) =>
-      line.replace(TERMINAL_DRAWING_CHARACTER_PATTERN, " ").trim(),
-    )
+    .map((line) => line.replace(TERMINAL_DRAWING_CHARACTER_PATTERN, " ").trim())
     .filter(Boolean);
 
   return lines
@@ -86,6 +84,29 @@ function byInteractionState(
 ): number {
   // Only sort by displayName (宫格名)
   return left.displayName.localeCompare(right.displayName);
+}
+
+function resolveUnreadCompletion(
+  current: AgentSessionRecord,
+  nextInteractionState: AgentSessionRecord["interactionState"],
+  explicitValue?: boolean,
+): boolean | undefined {
+  if (explicitValue !== undefined) {
+    return explicitValue;
+  }
+
+  if (nextInteractionState === "running") {
+    return false;
+  }
+
+  if (
+    current.interactionState === "running" &&
+    (nextInteractionState === "idle" || nextInteractionState === "exited")
+  ) {
+    return true;
+  }
+
+  return current.hasUnreadCompletion;
 }
 
 export class AgentSessionRegistry {
@@ -258,10 +279,17 @@ export class AgentSessionRegistry {
       return this.register(input);
     }
 
+    const nextInteractionState =
+      input.interactionState ?? existingSession.interactionState;
     const nextSession: AgentSessionRecord = {
       ...existingSession,
       ...input,
       id: existingSession.id,
+      interactionState: nextInteractionState,
+      hasUnreadCompletion: resolveUnreadCompletion(
+        existingSession,
+        nextInteractionState,
+      ),
       controlMode: input.controlMode ?? existingSession.controlMode,
       transportRef: {
         ...existingSession.transportRef,
@@ -277,11 +305,15 @@ export class AgentSessionRegistry {
   }
 
   focus(input: FocusAgentSessionInput): ListAgentSessionsResponse {
-    if (!this.sessions.has(input.agentSessionId)) {
-      throw new Error(`Unknown agent session: ${input.agentSessionId}`);
-    }
+    const agentSession = this.get(input.agentSessionId);
 
     this.activeAgentSessionId = input.agentSessionId;
+    if (agentSession.hasUnreadCompletion) {
+      this.sessions.set(input.agentSessionId, {
+        ...agentSession,
+        hasUnreadCompletion: false,
+      });
+    }
     this.emitSnapshot();
 
     return this.list();
@@ -324,10 +356,8 @@ export class AgentSessionRegistry {
     const agentSession = this.get(agentSessionId);
     const now = new Date().toISOString();
     const outputPreview =
-      pickOutputPreview(
-        text,
-        agentSession.transportRef?.tmuxSession ? 6 : 2,
-      ) ?? agentSession.outputPreview;
+      pickOutputPreview(text, agentSession.transportRef?.tmuxSession ? 6 : 2) ??
+      agentSession.outputPreview;
     const nextScreenWindow = mergeScreenWindow(
       this.screenWindows.get(agentSessionId) ?? "",
       text,
@@ -433,10 +463,18 @@ export class AgentSessionRegistry {
     updater: Partial<AgentSessionRecord>,
   ): AgentSessionRecord {
     const agentSession = this.get(agentSessionId);
+    const nextInteractionState =
+      updater.interactionState ?? agentSession.interactionState;
     const nextSession: AgentSessionRecord = {
       ...agentSession,
       ...updater,
       id: agentSession.id,
+      interactionState: nextInteractionState,
+      hasUnreadCompletion: resolveUnreadCompletion(
+        agentSession,
+        nextInteractionState,
+        updater.hasUnreadCompletion,
+      ),
       controlMode: updater.controlMode ?? agentSession.controlMode,
       transportRef: {
         ...agentSession.transportRef,
@@ -558,14 +596,12 @@ export class AgentSessionRegistry {
   }
 
   noteUserInput(agentSessionId: string, input: string): AgentSessionRecord {
-    const agentSession = this.get(agentSessionId);
-
-    if (agentSession.interactionState === "exited") {
-      return agentSession;
-    }
+    this.get(agentSessionId);
 
     return this.updateSession(agentSessionId, {
+      connectionState: "online",
       interactionState: "running",
+      hasUnreadCompletion: false,
       stateConfidence: "medium",
       lastHeartbeatAt: new Date().toISOString(),
     });
@@ -621,6 +657,7 @@ export class AgentSessionRegistry {
         this.sessions.set(id, {
           ...session,
           interactionState: "idle",
+          hasUnreadCompletion: true,
           stateConfidence: "low",
         });
         changed = true;

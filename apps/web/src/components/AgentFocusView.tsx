@@ -9,6 +9,7 @@ import {
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
+import { AgentTranscriptDialog } from "./AgentTranscriptDialog";
 import { FocusSidebarSessionCard } from "./FocusSidebarSessionCard";
 import { LazyTerminalView } from "./LazyTerminalView";
 import { SessionGroupHeader } from "./SessionGroupControls";
@@ -213,6 +214,8 @@ export function AgentFocusView({
     loadFocusHeaderCollapsed,
   );
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
+  const [transcriptSession, setTranscriptSession] =
+    useState<AgentSessionRecord | null>(null);
   const [dragOverSlotId, setDragOverSlotId] = useState<string | null>(null);
   const [closedSlotIds, setClosedSlotIds] = useState<Set<string>>(
     () => new Set(initialTerminalWorkspaceState.closedSlotIds),
@@ -1025,6 +1028,14 @@ export function AgentFocusView({
               </span>
             </>
           )}
+          <button
+            className="focus-transcript-btn"
+            onClick={() => setTranscriptSession(activeHeaderSession)}
+            title="查看不受终端重绘影响的完整 Codex 记录"
+            type="button"
+          >
+            完整记录
+          </button>
           {!headerCollapsed && (
             <>
               <span
@@ -1361,6 +1372,13 @@ export function AgentFocusView({
             彻底删除该终端
           </button>
         </div>
+      )}
+      {transcriptSession && (
+        <AgentTranscriptDialog
+          agentSessionId={transcriptSession.id}
+          displayName={transcriptSession.displayName}
+          onClose={() => setTranscriptSession(null)}
+        />
       )}
     </div>
   );

@@ -19,6 +19,7 @@ import { shellQuote, formatWorkingDirectory } from "@agent-orchestrator/shared";
 
 import { scanAgentDirectory } from "../services/agent-scanner.js";
 import { AgentSessionRegistry } from "../services/agent-session-registry.js";
+import { CodexTranscriptService } from "../services/codex-transcript-service.js";
 import { LocalProcessRuntimeManager } from "../services/local-process-runtime-manager.js";
 import { LocalTmuxAdapter } from "../services/local-tmux-adapter.js";
 import { LocalTmuxInputRouter } from "../services/local-tmux-input-router.js";
@@ -122,6 +123,7 @@ interface AgentSessionRoutesOptions {
   ptyRuntimeManager: PtyRuntimeManager;
   remoteLaunchPreflight: RemoteLaunchPreflightLike;
   vsCodeWebManager: VsCodeWebManager;
+  codexTranscriptService?: Pick<CodexTranscriptService, "read">;
 }
 
 export interface ReconnectAgentSessionDependencies {
@@ -231,11 +233,38 @@ export async function registerAgentSessionRoutes(
     ptyRuntimeManager,
     remoteLaunchPreflight,
     vsCodeWebManager,
+    codexTranscriptService = new CodexTranscriptService(),
   } = options;
 
   fastify.get("/api/health", async () => ({ status: "ok" }));
 
   fastify.get("/api/agent-sessions", async () => registry.list());
+
+  fastify.get<{ Params: { id: string } }>(
+    "/api/agent-sessions/:id/transcript",
+    async (request) => {
+      const agentSession = registry.get(request.params.id);
+      if (
+        agentSession.sshTarget ||
+        (agentSession.hostId && agentSession.hostId !== "local")
+      ) {
+        return {
+          available: false,
+          agentKind: "codex" as const,
+          sessionId: null,
+          matchedBy: null,
+          updatedAt: null,
+          entries: [],
+          message: "首版完整记录仅支持本机会话。",
+        };
+      }
+
+      return codexTranscriptService.read({
+        sessionId: agentSession.agentSessionId,
+        workingDirectory: agentSession.workingDirectory,
+      });
+    },
+  );
 
   fastify.get<{ Params: { id: string } }>(
     "/api/agent-sessions/:id",

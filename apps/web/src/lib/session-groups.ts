@@ -19,6 +19,19 @@ export interface GroupedSessions extends SessionGroup {
   sessions: AgentSessionRecord[];
 }
 
+export type SessionGroupCollapseScope = string;
+
+export function getSessionGroupCollapseKey(
+  groupId: string,
+  scope?: SessionGroupCollapseScope,
+): string {
+  return scope ? `kanban:${scope}:${groupId}` : groupId;
+}
+
+function isCollapseKeyForGroup(collapseKey: string, groupId: string): boolean {
+  return collapseKey === groupId || collapseKey.endsWith(`:${groupId}`);
+}
+
 const EMPTY_SESSION_GROUP_STATE: SessionGroupState = {
   groups: [],
   assignments: {},
@@ -60,7 +73,11 @@ function normalizeSessionGroups(value: unknown): SessionGroupState {
             (groupId): groupId is string =>
               typeof groupId === "string" &&
               (knownGroupIds.has(groupId) ||
-                groupId === UNGROUPED_SESSION_GROUP_ID),
+                groupId === UNGROUPED_SESSION_GROUP_ID ||
+                [...knownGroupIds, UNGROUPED_SESSION_GROUP_ID].some(
+                  (knownGroupId) =>
+                    isCollapseKeyForGroup(groupId, knownGroupId),
+                )),
           ),
         ),
       ]
@@ -195,7 +212,8 @@ export function deleteSessionGroup(
       ),
     ),
     collapsedGroupIds: state.collapsedGroupIds.filter(
-      (collapsedGroupId) => collapsedGroupId !== groupId,
+      (collapsedGroupId) =>
+        !isCollapseKeyForGroup(collapsedGroupId, groupId),
     ),
   };
 }
@@ -203,20 +221,25 @@ export function deleteSessionGroup(
 export function isSessionGroupCollapsed(
   state: SessionGroupState,
   groupId: string,
+  scope?: SessionGroupCollapseScope,
 ): boolean {
-  return state.collapsedGroupIds.includes(groupId);
+  return state.collapsedGroupIds.includes(
+    getSessionGroupCollapseKey(groupId, scope),
+  );
 }
 
 export function toggleSessionGroupCollapsed(
   state: SessionGroupState,
   groupId: string,
+  scope?: SessionGroupCollapseScope,
 ): SessionGroupState {
-  const collapsed = isSessionGroupCollapsed(state, groupId);
+  const collapseKey = getSessionGroupCollapseKey(groupId, scope);
+  const collapsed = isSessionGroupCollapsed(state, groupId, scope);
   return {
     ...state,
     collapsedGroupIds: collapsed
-      ? state.collapsedGroupIds.filter((item) => item !== groupId)
-      : [...state.collapsedGroupIds, groupId],
+      ? state.collapsedGroupIds.filter((item) => item !== collapseKey)
+      : [...state.collapsedGroupIds, collapseKey],
   };
 }
 

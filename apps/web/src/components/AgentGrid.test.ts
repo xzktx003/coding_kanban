@@ -5,7 +5,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
-import { AgentGrid } from "./AgentGrid.js";
+import {
+  AgentGrid,
+  getAgentKanbanColumnId,
+  getAgentKanbanColumnScrollTop,
+} from "./AgentGrid.js";
 
 function makeSession(
   overrides: Partial<AgentSessionRecord> = {},
@@ -25,6 +29,198 @@ function makeSession(
 }
 
 describe("AgentGrid", () => {
+  it("prioritizes explicit response and execution states over stale completion review metadata", () => {
+    assert.equal(
+      getAgentKanbanColumnId(
+        makeSession({
+          interactionState: "awaiting_input",
+          hasUnreadCompletion: true,
+        }),
+      ),
+      "response",
+    );
+    assert.equal(
+      getAgentKanbanColumnId(
+        makeSession({
+          interactionState: "running",
+          hasUnreadCompletion: true,
+        }),
+      ),
+      "executing",
+    );
+  });
+
+  it("sorts sessions into four status columns and shows every count", () => {
+    const sessions = [
+      makeSession({
+        id: "response-session",
+        displayName: "Needs Response",
+        interactionState: "awaiting_input",
+      }),
+      makeSession({
+        id: "unread-completion-session",
+        displayName: "Unread Completion",
+        interactionState: "idle",
+        hasUnreadCompletion: true,
+      }),
+      makeSession({
+        id: "working-session",
+        displayName: "Working",
+        interactionState: "running",
+      }),
+      makeSession({
+        id: "completed-idle-session",
+        displayName: "Completed Idle",
+        interactionState: "idle",
+      }),
+      makeSession({
+        id: "completed-exited-session",
+        displayName: "Completed Exited",
+        interactionState: "exited",
+      }),
+      makeSession({
+        id: "available-session",
+        displayName: "Available",
+        interactionState: "detached",
+      }),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentGrid, {
+        sessions,
+        allSessions: sessions,
+        filters: {
+          host: null,
+          kind: null,
+          transport: null,
+          dirQuery: "",
+          tag: null,
+        },
+        onDeleteSession: () => {},
+        onFiltersChange: () => {},
+        onFocusSession: () => {},
+        onReconnectSession: () => {},
+      }),
+    );
+
+    assert.match(
+      markup,
+      /data-kanban-column="response"[\s\S]*?需响应[\s\S]*?data-kanban-count="1"[\s\S]*?terminal-preview-response-session/,
+    );
+    assert.match(
+      markup,
+      /data-kanban-column="executing"[\s\S]*?执行中[\s\S]*?data-kanban-count="1"[\s\S]*?terminal-preview-working-session/,
+    );
+    assert.match(
+      markup,
+      /data-kanban-column="review"[\s\S]*?待验收[\s\S]*?data-kanban-count="1"[\s\S]*?terminal-preview-unread-completion-session/,
+    );
+    assert.match(
+      markup,
+      /data-kanban-column="ready"[\s\S]*?可继续[\s\S]*?data-kanban-count="3"[\s\S]*?terminal-preview-completed-idle-session[\s\S]*?terminal-preview-completed-exited-session[\s\S]*?terminal-preview-available-session/,
+    );
+    assert.equal((markup.match(/data-kanban-column=/g) ?? []).length, 4);
+  });
+
+  it("keeps user groups inside their matching status columns", () => {
+    const sessions = [
+      makeSession({
+        id: "grouped-working-session",
+        displayName: "Grouped Working",
+        interactionState: "running",
+      }),
+      makeSession({
+        id: "ungrouped-completed-session",
+        displayName: "Ungrouped Completed",
+        interactionState: "idle",
+      }),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentGrid, {
+        sessions,
+        allSessions: sessions,
+        filters: {
+          host: null,
+          kind: null,
+          transport: null,
+          dirQuery: "",
+          tag: null,
+        },
+        sessionGroups: {
+          groups: [{ id: "group-backend", name: "后端" }],
+          assignments: { "session:grouped-working-session": "group-backend" },
+          collapsedGroupIds: [],
+        },
+        onDeleteSession: () => {},
+        onFiltersChange: () => {},
+        onFocusSession: () => {},
+        onReconnectSession: () => {},
+      }),
+    );
+
+    assert.match(
+      markup,
+      /data-kanban-column="executing"[\s\S]*?data-session-group-id="group-backend"[\s\S]*?terminal-preview-grouped-working-session/,
+    );
+    assert.match(
+      markup,
+      /data-kanban-column="ready"[\s\S]*?data-session-group-id="__ungrouped__"[\s\S]*?terminal-preview-ungrouped-completed-session/,
+    );
+  });
+
+  it("collapses the same group independently in each status column", () => {
+    const sessions = [
+      makeSession({
+        id: "response-session",
+        interactionState: "awaiting_input",
+      }),
+      makeSession({
+        id: "executing-session",
+        interactionState: "running",
+      }),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentGrid, {
+        sessions,
+        allSessions: sessions,
+        filters: {
+          host: null,
+          kind: null,
+          transport: null,
+          dirQuery: "",
+          tag: null,
+        },
+        sessionGroups: {
+          groups: [{ id: "group-backend", name: "后端" }],
+          assignments: {
+            "session:response-session": "group-backend",
+            "session:executing-session": "group-backend",
+          },
+          collapsedGroupIds: ["kanban:executing:group-backend"],
+        },
+        onDeleteSession: () => {},
+        onFiltersChange: () => {},
+        onFocusSession: () => {},
+        onReconnectSession: () => {},
+      }),
+    );
+
+    assert.match(
+      markup,
+      /data-kanban-column="response"[\s\S]*?data-session-group-id="group-backend"[\s\S]*?aria-expanded="true"[\s\S]*?terminal-preview-response-session/,
+    );
+    assert.match(
+      markup,
+      /data-kanban-column="executing"[\s\S]*?data-session-group-id="group-backend"[\s\S]*?aria-expanded="false"/,
+    );
+    assert.doesNotMatch(
+      markup,
+      /data-kanban-column="executing"[\s\S]*?terminal-preview-executing-session/,
+    );
+  });
+
   it("collapses an individual group while keeping its header visible", () => {
     const sessions = [
       makeSession({ id: "session-1", displayName: "Alpha" }),
@@ -45,7 +241,7 @@ describe("AgentGrid", () => {
         sessionGroups: {
           groups: [{ id: "group-backend", name: "后端" }],
           assignments: { "session:session-1": "group-backend" },
-          collapsedGroupIds: ["group-backend"],
+          collapsedGroupIds: ["kanban:ready:group-backend"],
         },
         onToggleSessionGroup: () => {},
         onDeleteSession: () => {},
@@ -103,7 +299,7 @@ describe("AgentGrid", () => {
     assert.equal((markup.match(/aria-label="移动到分组"/g) ?? []).length, 2);
   });
 
-  it("shows running counts as compact grid toolbar chips", () => {
+  it("keeps toolbar actions without duplicating status counts", () => {
     const sessions = [
       makeSession({
         id: "running-session",
@@ -139,12 +335,13 @@ describe("AgentGrid", () => {
 
     assert.match(markup, /class="agent-grid-toolbar-actions"/);
     assert.match(markup, /class="hidden-sessions-btn"[^>]*>已隐藏 \(2\)/);
-    assert.match(
-      markup,
-      /class="stat-item stat-running grid-status-chip"[^>]*>🟢 1 运行中/,
-    );
-    assert.doesNotMatch(markup, /stat-awaiting/);
-    assert.doesNotMatch(markup, /等待输入/);
+    assert.doesNotMatch(markup, /grid-stat-running/);
+    assert.equal((markup.match(/data-kanban-count=/g) ?? []).length, 4);
+  });
+
+  it("computes virtualization scroll positions relative to each column", () => {
+    assert.equal(getAgentKanbanColumnScrollTop(120, 300), 0);
+    assert.equal(getAgentKanbanColumnScrollTop(420, 300), 120);
   });
 });
 

@@ -485,7 +485,12 @@ test("immediate session updates cancel pending coalesced snapshots and publish t
 test("idle detection transitions running sessions to idle after inactivity", async () => {
   const idleThresholdMs = 50;
   const idleIntervalMs = 20;
-  const registry = new AgentSessionRegistry(0, 100, idleThresholdMs, idleIntervalMs);
+  const registry = new AgentSessionRegistry(
+    0,
+    100,
+    idleThresholdMs,
+    idleIntervalMs,
+  );
   const session = createSession(registry);
 
   registry.appendOutput(session.id, "working...\n", "stdout");
@@ -507,7 +512,12 @@ test("idle detection transitions running sessions to idle after inactivity", asy
 test("idle detection does not fire for sessions that keep producing output", async () => {
   const idleThresholdMs = 60;
   const idleIntervalMs = 20;
-  const registry = new AgentSessionRegistry(0, 100, idleThresholdMs, idleIntervalMs);
+  const registry = new AgentSessionRegistry(
+    0,
+    100,
+    idleThresholdMs,
+    idleIntervalMs,
+  );
   const session = createSession(registry);
 
   registry.subscribe(() => {});
@@ -525,7 +535,12 @@ test("idle detection does not fire for sessions that keep producing output", asy
 test("user input resets session back to running after idle", async () => {
   const idleThresholdMs = 40;
   const idleIntervalMs = 15;
-  const registry = new AgentSessionRegistry(0, 100, idleThresholdMs, idleIntervalMs);
+  const registry = new AgentSessionRegistry(
+    0,
+    100,
+    idleThresholdMs,
+    idleIntervalMs,
+  );
   const session = createSession(registry);
 
   registry.subscribe(() => {});
@@ -533,7 +548,92 @@ test("user input resets session back to running after idle", async () => {
 
   await wait(idleThresholdMs + idleIntervalMs + 10);
   assert.equal(registry.get(session.id).interactionState, "idle");
+  assert.equal(registry.get(session.id).hasUnreadCompletion, true);
+
+  registry.focus({ agentSessionId: session.id });
+  assert.equal(registry.get(session.id).interactionState, "idle");
+  assert.equal(registry.get(session.id).hasUnreadCompletion, false);
 
   registry.noteUserInput(session.id, "next command");
   assert.equal(registry.get(session.id).interactionState, "running");
+  assert.equal(registry.get(session.id).hasUnreadCompletion, false);
+});
+
+test("process exit stays unread until the session is focused", () => {
+  const registry = new AgentSessionRegistry();
+  const session = createSession(registry);
+
+  registry.markExited(session.id, 0, null);
+
+  assert.equal(registry.get(session.id).interactionState, "exited");
+  assert.equal(registry.get(session.id).hasUnreadCompletion, true);
+
+  registry.focus({ agentSessionId: session.id });
+
+  assert.equal(registry.get(session.id).interactionState, "exited");
+  assert.equal(registry.get(session.id).hasUnreadCompletion, false);
+});
+
+test("new input moves an unread exited session back to running", () => {
+  const registry = new AgentSessionRegistry();
+  const session = createSession(registry);
+
+  registry.markExited(session.id, 0, null);
+  assert.equal(registry.get(session.id).hasUnreadCompletion, true);
+
+  registry.noteUserInput(session.id, "continue after exit");
+
+  assert.equal(registry.get(session.id).connectionState, "online");
+  assert.equal(registry.get(session.id).interactionState, "running");
+  assert.equal(registry.get(session.id).hasUnreadCompletion, false);
+});
+
+test("new input moves an unread completed session back to running", () => {
+  const registry = new AgentSessionRegistry();
+  const session = createSession(registry);
+
+  registry.updateSession(session.id, { interactionState: "idle" });
+  assert.equal(registry.get(session.id).hasUnreadCompletion, true);
+
+  registry.noteUserInput(session.id, "continue");
+
+  assert.equal(registry.get(session.id).interactionState, "running");
+  assert.equal(registry.get(session.id).hasUnreadCompletion, false);
+});
+
+test("upserting a restored tmux session as running clears unread completion", () => {
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "tmux-test",
+    hostId: "local",
+    sourceType: "remote-tmux-discovered",
+    agentKind: "codex",
+    displayName: "Restored tmux",
+    interactionState: "running",
+    controlMode: "observe",
+    transportRef: {
+      runtimeId: "tmux:restored",
+      tmuxSession: "restored",
+    },
+  });
+
+  registry.updateSession(session.id, { interactionState: "idle" });
+  assert.equal(registry.get(session.id).hasUnreadCompletion, true);
+
+  const restored = registry.upsertByTransportRef("tmux:restored", {
+    workspaceId: "tmux-test",
+    hostId: "local",
+    sourceType: "remote-tmux-discovered",
+    agentKind: "codex",
+    displayName: "Restored tmux",
+    interactionState: "running",
+    controlMode: "control",
+    transportRef: {
+      runtimeId: "tmux:restored",
+      tmuxSession: "restored",
+    },
+  });
+
+  assert.equal(restored.interactionState, "running");
+  assert.equal(restored.hasUnreadCompletion, false);
 });

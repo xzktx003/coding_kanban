@@ -2,6 +2,8 @@
 
 本文档根据现有仓库记忆整理历史 bug 修复记录。后续每次修复 bug，都应在本文件追加简短记录，说明现象、根因和关键修复点。
 
+- 宫格四个状态栏中的同一分组展开/收起状态互相联动。根因是分组折叠状态只按分组 id 保存，未包含状态栏作用域。修复为宫格使用 `kanban:<状态栏>:<分组 id>` 复合键，状态栏分别传递作用域；聚焦视图继续使用原有分组级状态。
+
 - `local-fs-service.test.ts` 中 chmod 测试使用 `640` 但 `validateChmodMode` 要求八进制模式必须以 `0` 开头（如 `0640`）。修复为更新测试值为 `0640`。
 - `relativePaths` 解析后直接用于 `path.join(targetDirectory, relativePaths[fileIndex])`，未校验 `..` 分段，可构造 `../../../etc/passwd` 实现目录穿越上传。修复为在解析后逐条调用 `assertSafeFilesystemPath` 校验路径条目。
 - `buildRemoteCommand` 对 `input.command` 仅做单引号包裹，未拦截反引号 `$() \"` 等危险 shell 元字符，攻击者可注入命令。修复为执行前用正则 `[\x00-\x1f\x7f`$\"\\]` 检测危险字符，超标则拒绝执行。
@@ -11,6 +13,8 @@
 
 ## 焦点与输入
 
+- `awaiting-input` 真实 shell 浏览器验收会被启动时的版本更新或历史会话恢复横幅覆盖“新建会话”入口；会话较多触发四列共享纵向虚拟化后，新建卡片还可能位于当前虚拟窗口外，导致状态逻辑尚未断言就出现假红。修复为先等待恢复过程结束、关闭当前可关闭提示，通过 API 确认新会话处于运行态，并使用覆盖全部测试卡片的高视口进行 UI 断言。
+- Agent 运行完成后直接进入“已完成”，用户容易漏掉尚未查看和验收的结果；同时 tmux 会话恢复运行时可能残留旧的待验收标记。根因是看板只按 `interactionState` 分列，缺少独立、可持久化的完成未查看状态，且 tmux upsert 绕过统一状态迁移。修复为增加 `hasUnreadCompletion`：`running → idle/exited` 时置为待验收，聚焦查看时确认，新输入或任何恢复为 `running` 的路径清除；桌面、手机和多终端活动窗格统一调用 focus API。
 - 文件浏览器右键文件或文件夹后点击“复制路径”在局域网 HTTP 页面会失败。根因是代码直接调用 `navigator.clipboard.writeText`，而 Clipboard API 在非安全上下文或权限受限时不可用。修复为增加剪贴板 helper，优先使用 Clipboard API，不可用或被拒绝时回退到隐藏 textarea + `execCommand('copy')`，并补右键文件/目录复制路径回归测试。
 - 多屏聚焦视图中，选中不同终端后顶部标题栏和“改名”按钮仍指向最初进入聚焦页的终端。根因是标题栏直接读取 App 层 `focusedSession`，而多屏切换输入窗格在侧栏工具未打开时不会同步外层 focused session。修复为标题、状态、改名和重连按钮优先使用当前 active monitor slot 对应的 session，找不到时再回退到 `focusedSession`。
 - 多屏聚焦视图从“其他会话”拖入屏幕时，浏览器拖拽缩影会混入多个其他会话预览。根因是未显式设置 drag image，浏览器默认截图包含终端预览的侧栏卡片时容易把相邻缩影一起带入拖影。修复为拖拽开始时创建只包含当前会话名称和少量输出的专用单会话拖影，拖拽结束或 drop 后清理。
@@ -430,6 +434,14 @@
 - **测试**: 独立 Playwright 环境覆盖无侧栏双屏点击后的活动标题，以及打开 VS Code 后通过侧栏名称在两个会话间往返切换。
 - **文件**: `apps/web/src/App.tsx`, `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/components/TerminalSessionSwitcher.tsx`, `tests/e2e/file-browser.spec.ts`, `tests/e2e/vscode-web.spec.ts`
 
+### Codex 长输出的中间内容无法从终端滚轮找回
+
+- **现象**: Codex 看似按顺序产生大量输出，但输出继续增长后，中间一段内容会消失；即使 tmux、PTY 和 xterm 历史未达到容量上限，滚轮也无法找回。
+- **根因**: Codex TUI 使用大量光标定位和擦除行序列原地刷新屏幕，终端 scrollback 保存的是控制序列执行后的屏幕历史，不是追加式会话日志。现场 replay 中约 3596 个换行对应超过 5 万次擦除行和 7 万次光标定位，因此中间画面可被后续重绘覆盖。
+- **修复**: 聚焦页新增“完整记录”弹窗，后端只读解析本机 Codex JSONL，按时间顺序返回用户消息、助手回答、工具调用和完整工具输出；已知 session ID 时精确匹配，否则按工作目录选择最近记录并在 UI 明示。工具输出默认折叠，弹窗滚轮不会穿透给后台终端。
+- **测试**: parser 回归用例断言 100 行工具输出完整保留；API 测试覆盖本机会话映射与远端拒绝；组件测试断言前段、50 行中段和后段顺序完整；终端滚轮测试覆盖 transcript overlay 阻断。真实当前会话接口匹配到 Codex session，返回 144 条有序记录。
+- **文件**: `packages/shared/src/index.ts`, `apps/server/src/services/codex-transcript-service.ts`, `apps/server/src/routes/agent-sessions.ts`, `apps/web/src/components/AgentTranscriptDialog.tsx`, `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/lib/api.ts`, `apps/web/src/lib/terminal-wheel.ts`, `apps/web/src/app.css`
+
 ### Markdown 预览打开后看板持续卡顿
 
 - **现象**: 文件浏览器选中 Markdown 后立即进入预览；点击预览或在弹窗中预览后，整个看板交互明显变慢，包含较多公式的文档更严重。
@@ -469,3 +481,11 @@
 - **修复**: 用一次安全 dotenv 赋值解析替代两次 `source`，只接受合法变量名，保留空格值且不执行命令替换；在解析后才计算 `SERVER_PORT` 和 `WEB_PORT` 默认值。无效格式或未闭合引号会在任何进程被停止前失败。本地该值改为显式双引号。
 - **测试**: `restart-dev.test.mjs` 先复现未加引号的空格值丢失和 `PORT` 被错误回退到 4000，再断言完整值、`8282` 配置和未执行 `Kanban`。
 - **文件**: `scripts/restart-dev.sh`, `scripts/restart-dev.test.mjs`, `.env.example`
+
+### 完整记录仍展示 exec 输入输出
+
+- **现象**: 完整记录弹窗仍可看到 `exec 调用` 或 `exec 输出`，执行命令的输入输出没有按产品要求隐藏。
+- **根因**: 服务端只跳过了 `custom_tool_call` 中名为 `exec` 的调用记录，仍把同一 `call_id` 的 `custom_tool_call_output` 返回给前端；前端兼容过滤也只排除了 `exec 调用`。
+- **修复**: 服务端利用已有的 `call_id → tool name` 关联同时跳过 `exec` 输出；前端同时过滤 `exec 调用` 和 `exec 输出`，避免旧响应或缓存重新显示。其余记录继续按最新在前展示。
+- **测试**: 服务端 parser 回归断言 `exec` 调用和 100 行关联输出均不存在；前端组件回归断言旧响应中的 `exec` 输入输出全部隐藏且可见消息仍为逆序。
+- **文件**: `apps/server/src/services/codex-transcript-service.ts`, `apps/server/src/services/codex-transcript-service.test.ts`, `apps/web/src/components/AgentTranscriptDialog.tsx`, `apps/web/src/components/AgentTranscriptDialog.test.ts`

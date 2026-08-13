@@ -27,8 +27,9 @@ interface AgentGridCardProps {
 }
 
 const stateLabels: Record<string, string> = {
-  running: "运行中",
+  running: "执行中",
   idle: "空闲",
+  awaiting_input: "需响应",
   detached: "已分离",
   exited: "已退出",
 };
@@ -36,6 +37,7 @@ const stateLabels: Record<string, string> = {
 const stateColors: Record<string, string> = {
   running: "card-running",
   idle: "card-idle",
+  awaiting_input: "card-awaiting_input",
   detached: "card-detached",
   exited: "card-exited",
 };
@@ -74,9 +76,7 @@ export function shouldFocusGridCardFromMouseDown(
   target: EventTarget | null,
 ): boolean {
   return (
-    detail === 2 &&
-    button === 0 &&
-    shouldFocusGridCardFromDoubleClick(target)
+    detail === 2 && button === 0 && shouldFocusGridCardFromDoubleClick(target)
   );
 }
 
@@ -115,9 +115,16 @@ export function AgentGridCard({
   terminalFontSize,
   onTerminalFontSizeChange,
 }: AgentGridCardProps) {
-  const stateClass = stateColors[session.interactionState] ?? "";
-  const stateLabel =
-    stateLabels[session.interactionState] ?? session.interactionState;
+  const needsCompletionReview = Boolean(session.hasUnreadCompletion);
+  const stateClass = needsCompletionReview
+    ? "card-review"
+    : (stateColors[session.interactionState] ?? "");
+  const stateLabel = needsCompletionReview
+    ? "待验收"
+    : (stateLabels[session.interactionState] ?? session.interactionState);
+  const badgeState = needsCompletionReview
+    ? "review"
+    : session.interactionState;
   const isTmux = session.sourceType === "remote-tmux-discovered";
   const isTmuxManaged = Boolean(session.transportRef?.tmuxSession);
   const isExited = session.interactionState === "exited";
@@ -188,7 +195,7 @@ export function AgentGridCard({
               onCopyConnectCommand={(id) => onCopyConnectCommand?.(id)}
             />
           )}
-          <span className={`grid-card-badge badge-${session.interactionState}`}>
+          <span className={`grid-card-badge badge-${badgeState}`}>
             {stateLabel}
           </span>
           <button

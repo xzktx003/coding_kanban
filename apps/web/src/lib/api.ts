@@ -2,6 +2,7 @@ import type {
   AddDiscoveredTmuxInput,
   AppVersionResponse,
   AgentSessionDetailResponse,
+  AgentTranscriptResponse,
   AgentSessionSnapshotEvent,
   AgentSessionRecord,
   ChmodInput,
@@ -92,6 +93,14 @@ function buildWebSocketUrl(): string {
 
 export function buildTerminalWebSocketUrl(agentSessionId: string): string {
   return `${wsBase()}/ws/agent-sessions/${agentSessionId}/terminal`;
+}
+
+export function getAgentTranscript(
+  agentSessionId: string,
+): Promise<AgentTranscriptResponse> {
+  return request<AgentTranscriptResponse>(
+    `/api/agent-sessions/${agentSessionId}/transcript`,
+  );
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

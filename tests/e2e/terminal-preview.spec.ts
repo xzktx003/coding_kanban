@@ -140,6 +140,8 @@ async function mockSessions(
   options?: { stalledTerminalConnections?: number },
 ): Promise<void> {
   await installTrackingWebSocket(page, options);
+  let currentSessions = sessions;
+  let activeAgentSessionId = sessions[0]?.id ?? null;
 
   await page.route("**/api/ssh-hosts", async (route) => {
     await route.fulfill({
@@ -156,7 +158,29 @@ async function mockSessions(
 
     await route.fulfill({
       contentType: "application/json",
-      body: JSON.stringify(buildSnapshot(sessions)),
+      body: JSON.stringify({
+        ...buildSnapshot(currentSessions),
+        activeAgentSessionId,
+      }),
+    });
+  });
+
+  await page.route("**/api/agent-sessions/focus", async (route) => {
+    const body = route.request().postDataJSON() as {
+      agentSessionId: string;
+    };
+    activeAgentSessionId = body.agentSessionId;
+    currentSessions = currentSessions.map((session) =>
+      session.id === body.agentSessionId
+        ? { ...session, hasUnreadCompletion: false }
+        : session,
+    );
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ...buildSnapshot(currentSessions),
+        activeAgentSessionId,
+      }),
     });
   });
 }
@@ -380,6 +404,172 @@ test("focused terminal retries a WebSocket that never finishes connecting", asyn
   await expect
     .poll(async () => (await terminalWebSocketSends(page)).join(""))
     .toContain("recovered-from-connecting");
+});
+
+test("grid sorts sessions into four status columns and stacks them on narrow screens", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await mockSessions(page, [
+    makeSession({
+      id: "response-session",
+      displayName: "Needs Response",
+      interactionState: "awaiting_input",
+    }),
+    makeSession({
+      id: "working-session",
+      displayName: "Working Session",
+      interactionState: "running",
+    }),
+    makeSession({
+      id: "review-session",
+      displayName: "Review Session",
+      interactionState: "idle",
+      hasUnreadCompletion: true,
+    }),
+    makeSession({
+      id: "ready-session",
+      displayName: "Ready Session",
+      interactionState: "idle",
+    }),
+    makeSession({
+      id: "exited-session",
+      displayName: "Exited Session",
+      interactionState: "exited",
+    }),
+    makeSession({
+      id: "available-session",
+      displayName: "Available Session",
+      interactionState: "detached",
+    }),
+  ]);
+
+  await page.goto("/");
+
+  const board = page.getByTestId("agent-grid");
+  const response = board.locator('[data-kanban-column="response"]');
+  const executing = board.locator('[data-kanban-column="executing"]');
+  const review = board.locator('[data-kanban-column="review"]');
+  const ready = board.locator('[data-kanban-column="ready"]');
+
+  await expect(board.locator(".agent-kanban-column")).toHaveCount(4);
+  await expect(response).toContainText("需响应1");
+  await expect(response).toContainText("Needs Response");
+  await expect(response).not.toContainText("Review Session");
+  await expect(executing).toContainText("执行中1");
+  await expect(executing).toContainText("Working Session");
+  await expect(review).toContainText("待验收1");
+  await expect(review).toContainText("Review Session");
+  await expect(ready).toContainText("可继续3");
+  await expect(ready).toContainText("Ready Session");
+  await expect(ready).toContainText("Exited Session");
+  await expect(ready).toContainText("Available Session");
+  await expect
+    .poll(() =>
+      board.evaluate(
+        (element) =>
+          getComputedStyle(element).gridTemplateColumns.split(" ").length,
+      ),
+    )
+    .toBe(4);
+
+  await page.setViewportSize({ width: 800, height: 720 });
+
+  await expect
+    .poll(() =>
+      board.evaluate(
+        (element) =>
+          getComputedStyle(element).gridTemplateColumns.split(" ").length,
+      ),
+    )
+    .toBe(1);
+  await expect
+    .poll(async () => {
+      const responseBox = await response.boundingBox();
+      const executingBox = await executing.boundingBox();
+      return Boolean(
+        responseBox && executingBox && executingBox.y > responseBox.y,
+      );
+    })
+    .toBe(true);
+});
+
+test("viewing an unread completion moves it from review to ready", async ({
+  page,
+}) => {
+  await mockSessions(page, [
+    makeSession({
+      id: "review-session",
+      displayName: "Review Result",
+      interactionState: "idle",
+      hasUnreadCompletion: true,
+    }),
+  ]);
+
+  await page.goto("/");
+
+  const review = page.locator('[data-kanban-column="review"]');
+  const ready = page.locator('[data-kanban-column="ready"]');
+  await expect(review).toContainText("Review Result");
+  await expect(review).toContainText("待验收");
+
+  await page.locator(".grid-card", { hasText: "Review Result" }).dblclick();
+  await expect(page.locator(".focus-view")).toBeVisible();
+  await page.getByRole("button", { name: "返回宫格" }).click();
+
+  await expect(ready).toContainText("Review Result");
+  await expect(review).not.toContainText("Review Result");
+});
+
+test("viewing a response-required session keeps it in response", async ({
+  page,
+}) => {
+  await mockSessions(page, [
+    makeSession({
+      id: "response-required-session",
+      displayName: "Answer Required",
+      interactionState: "awaiting_input",
+    }),
+  ]);
+
+  await page.goto("/");
+
+  const response = page.locator('[data-kanban-column="response"]');
+  await expect(response).toContainText("Answer Required");
+
+  await page.locator(".grid-card", { hasText: "Answer Required" }).dblclick();
+  await expect(page.locator(".focus-view")).toBeVisible();
+  await page.getByRole("button", { name: "返回宫格" }).click();
+
+  await expect(response).toContainText("Answer Required");
+  await expect(page.locator('[data-kanban-column="ready"]')).not.toContainText(
+    "Answer Required",
+  );
+});
+
+test("opening an unread completion on mobile acknowledges it", async ({
+  page,
+}) => {
+  await mockSessions(page, [
+    makeSession({
+      id: "mobile-review-session",
+      displayName: "Mobile Review Result",
+      interactionState: "idle",
+      hasUnreadCompletion: true,
+    }),
+  ]);
+
+  await page.goto("/?view=mobile");
+
+  await expect(page.locator(".mobile-workbench-page")).toContainText(
+    "Mobile Review Result",
+  );
+  await page.getByRole("link", { name: "电脑端 Coding Kanban" }).click();
+
+  const review = page.locator('[data-kanban-column="review"]');
+  const ready = page.locator('[data-kanban-column="ready"]');
+  await expect(ready).toContainText("Mobile Review Result");
+  await expect(review).not.toContainText("Mobile Review Result");
 });
 
 test("monitor session switcher groups choices and marks occupied panes", async ({

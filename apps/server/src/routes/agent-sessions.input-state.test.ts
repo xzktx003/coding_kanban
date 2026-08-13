@@ -191,3 +191,32 @@ test("tmux kill clears local input state before killing the PTY and tmux session
     await app.close();
   }
 });
+
+test("focus API acknowledges an unread completed session", async () => {
+  const events: string[] = [];
+  const { app, registry } = await buildRouteApp(events);
+  const session = registerLocalTmuxSession(registry);
+  registry.updateSession(session.id, { interactionState: "idle" });
+
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/agent-sessions/focus",
+      payload: { agentSessionId: session.id },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const snapshot = response.json() as {
+      activeAgentSessionId: string | null;
+      items: Array<{ id: string; hasUnreadCompletion?: boolean }>;
+    };
+    assert.equal(snapshot.activeAgentSessionId, session.id);
+    assert.equal(
+      snapshot.items.find((item) => item.id === session.id)
+        ?.hasUnreadCompletion,
+      false,
+    );
+  } finally {
+    await app.close();
+  }
+});

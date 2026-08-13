@@ -1,5 +1,8 @@
+- Playwright 创建会话前需等待 `session-restore-banner` 的 restoring 状态结束并关闭可关闭横幅；会话数达到四列共享虚拟化阈值时，先用 API 确认创建结果，并用足够高的视口挂载各列测试卡片，避免 UI 假红。
+
 # 仓库 bug 修复记录
 
+- Agent 完成结果直接进入“已完成”会被用户漏看，tmux 恢复运行还可能残留旧标记：新增持久化 `hasUnreadCompletion`，完成先进入“需要你”，聚焦查看后进入“已完成”，新输入或恢复运行后清除并进入“工作中”；所有桌面、手机和多终端查看入口统一走 focus API。
 - 手机端快捷键缺少 Claude / Copilot CLI 常用控制键：`Shift+Tab`、`Ctrl+O`、`Ctrl+E` 和行编辑组合无法从手机触发，且快捷键类型中残留旧 id 有构建失败风险；修复为扩展手机快捷键表，并在本地 tmux 转换层映射到 `BTab`、`C-o`、`C-e`、`C-u/w/k/y` 等 key name。
 - 手机端快捷键说明弹窗缺少无障碍属性：没有 `aria-modal`、`aria-labelledby` 和 Tab 聚焦陷阱，屏幕阅读器用户无法正确聚焦弹窗；修复为增加 `aria-modal=”true”`、`aria-labelledby` 指向标题、Tab 循环限制和 Escape 关闭，卸载时还原页面焦点。
 - 手机端快捷键工具栏多行平铺占用纵向空间且不符合横向选择预期：修复为 `flex` 单行横向选择器，使用 `overflow-x: auto` 和 `touch-action: pan-x` 支持左右滑动，并把 `EOF` 按钮展示为 `Ctrl+D`。
@@ -147,3 +150,5 @@
 - Vite 代理异常时终端 WebSocket 可能永久停在 `CONNECTING`，原有 `onclose` 重连无法触发，xterm 会因等待 replay 一直禁用 stdin。修复为 3 秒握手超时主动关闭并复用退避重连；重启脚本把公开 LAN 地址与同机代理上游分离，默认代理 `127.0.0.1`，仍支持 `.env` 显式远端后端。
 - 居中的版本更新提示在 1280px 桌面宽度覆盖顶栏字号滑杆，整个 fixed `aside` 即使空白区域也会截获鼠标。修复为提示容器 pointer-events 透传，只给更新、重试和关闭操作区域恢复点击；Playwright 字号拖拽用例在实际覆盖坐标下回归通过。
 - `.env` 中未加引号的空格值（如 `PORTAL_NAME=Coding Kanban`）会被 `restart-dev.sh` 的两次 `source` 当作 shell 命令执行并中断重启，且脚本会在加载 `.env` 前把 `SERVER_PORT` 固定为 4000，忽略 `PORT=8282`。修复为单次安全 dotenv 赋值解析，并在解析后计算端口默认值；保留空格、拒绝格式错误/未闭合引号且不执行配置内容。
+- Codex 长输出的中间内容无法靠增加 tmux/xterm scrollback 恢复：TUI 会用擦除行和光标定位原地覆盖屏幕，终端历史不是追加日志。修复为聚焦页增加本机 Codex“完整记录”视图，从 `~/.codex/sessions` JSONL 按序展示 user/assistant 与完整工具调用输出；接口不接受外部路径，优先 session ID、否则按工作目录匹配并明示推断，远端首版禁用。
+- 完整记录仍展示 `exec` 输入输出：服务端此前只过滤 `exec` 调用，未按 `call_id` 过滤关联输出，前端兼容层也只识别调用标题。修复为前后端同时隐藏 `exec 调用` 和 `exec 输出`，其余记录继续按最新在前展示。

@@ -1398,9 +1398,151 @@ input {
   padding-bottom: 2px;
 }
 
+.agent-kanban-board {
+  grid-template-columns: repeat(4, minmax(230px, 1fr));
+  align-items: stretch;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.agent-kanban-column {
+  --agent-kanban-accent: #aab3bf;
+  --agent-kanban-border: rgba(170, 179, 191, 0.18);
+  --agent-kanban-surface: rgba(170, 179, 191, 0.045);
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-self: stretch;
+  border: 1px solid var(--agent-kanban-border);
+  border-radius: 10px;
+  background: linear-gradient(
+    180deg,
+    var(--agent-kanban-surface),
+    rgba(255, 255, 255, 0.012) 180px
+  );
+}
+
+.agent-kanban-column--response {
+  --agent-kanban-accent: #ff9b8a;
+  --agent-kanban-border: rgba(255, 155, 138, 0.25);
+  --agent-kanban-surface: rgba(255, 155, 138, 0.075);
+}
+
+.agent-kanban-column--executing {
+  --agent-kanban-accent: #86efac;
+  --agent-kanban-border: rgba(134, 239, 172, 0.2);
+  --agent-kanban-surface: rgba(134, 239, 172, 0.055);
+}
+
+.agent-kanban-column--review {
+  --agent-kanban-accent: #ffc36a;
+  --agent-kanban-border: rgba(255, 195, 106, 0.25);
+  --agent-kanban-surface: rgba(255, 195, 106, 0.075);
+}
+
+.agent-kanban-column--ready {
+  --agent-kanban-accent: #93b4f5;
+  --agent-kanban-border: rgba(147, 180, 245, 0.2);
+  --agent-kanban-surface: rgba(147, 180, 245, 0.055);
+}
+
+.agent-kanban-column-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--agent-kanban-border);
+  border-radius: 10px 10px 0 0;
+  background: rgba(14, 18, 23, 0.94);
+  backdrop-filter: blur(10px);
+}
+
+.agent-kanban-column-header h2 {
+  margin: 0;
+  color: var(--agent-kanban-accent);
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0.02em;
+}
+
+.agent-kanban-column-count {
+  display: inline-flex;
+  min-width: 24px;
+  min-height: 22px;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 7px;
+  border: 1px solid var(--agent-kanban-border);
+  border-radius: 999px;
+  background: var(--agent-kanban-surface);
+  color: var(--agent-kanban-accent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.agent-kanban-column-content {
+  min-height: 0;
+  padding: 10px;
+}
+
+.agent-kanban-card-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+
+.agent-kanban-column-empty {
+  display: flex;
+  min-height: 96px;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  border: 1px dashed var(--agent-kanban-border);
+  border-radius: 8px;
+  color: rgba(244, 241, 234, 0.34);
+  font-size: 12px;
+  text-align: center;
+}
+
+.agent-kanban-column .agent-group-section + .agent-group-section {
+  margin-top: 14px;
+}
+
+.agent-kanban-column .session-group-header {
+  min-height: 36px;
+  margin-bottom: 8px;
+}
+
+.agent-kanban-column .session-group-name {
+  font-size: 0.8125rem;
+}
+
+.agent-kanban-column .session-group-header-actions {
+  gap: 2px;
+}
+
+.agent-kanban-column .session-group-header-actions button {
+  width: 22px;
+  height: 22px;
+}
+
 .agent-grid--virtualized {
   display: block;
   position: relative;
+  contain: layout paint style;
+}
+
+.agent-kanban-board.agent-grid--virtualized {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(230px, 1fr));
   contain: layout paint style;
 }
 
@@ -1592,9 +1734,15 @@ input {
   }
 }
 
-.grid-card.card-awaiting {
+.grid-card.card-awaiting,
+.grid-card.card-awaiting_input {
   border-color: rgba(255, 152, 0, 0.5);
   animation: pulse-awaiting 2s ease-in-out infinite;
+}
+
+.grid-card.card-review {
+  border-color: rgba(255, 195, 106, 0.5);
+  box-shadow: 0 0 0 1px rgba(255, 195, 106, 0.08);
 }
 
 .grid-card.card-idle {
@@ -1676,6 +1824,11 @@ input {
 .badge-awaiting_input {
   background: rgba(255, 152, 0, 0.2);
   color: #ffc36a;
+}
+
+.badge-review {
+  background: rgba(255, 195, 106, 0.2);
+  color: #ffd38a;
 }
 
 .badge-idle {
@@ -3872,6 +4025,11 @@ input {
     grid-template-columns: 1fr;
   }
 
+  .agent-kanban-board,
+  .agent-kanban-board.agent-grid--virtualized {
+    grid-template-columns: 1fr;
+  }
+
   .focus-sidebar {
     display: none;
   }
@@ -5855,5 +6013,198 @@ input {
 
   .app-update-banner__actions {
     justify-content: flex-end;
+  }
+}
+.agent-transcript-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgba(4, 8, 12, 0.78);
+  backdrop-filter: blur(4px);
+}
+
+.agent-transcript-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(1100px, 94vw);
+  height: min(860px, 90vh);
+  overflow: hidden;
+  color: #f4f1ea;
+  background: #111820;
+  border: 1px solid rgba(255, 143, 31, 0.42);
+  border-radius: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.52);
+}
+
+.agent-transcript-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.agent-transcript-header > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.agent-transcript-header span,
+.agent-transcript-match,
+.agent-transcript-entry time {
+  color: #9ba8b6;
+}
+
+.agent-transcript-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.agent-transcript-actions button,
+.focus-transcript-btn {
+  color: #f4f1ea;
+  background: rgba(255, 143, 31, 0.12);
+  border: 1px solid rgba(255, 143, 31, 0.38);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.agent-transcript-actions button {
+  padding: 6px 12px;
+}
+
+.focus-transcript-btn {
+  padding: 4px 9px;
+}
+
+.agent-transcript-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  overscroll-behavior: contain;
+}
+
+.agent-transcript-match {
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+.agent-transcript-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-transcript-entry {
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+}
+
+.agent-transcript-entry--user {
+  color: #eaf6ff;
+  background: linear-gradient(
+    135deg,
+    rgba(52, 130, 194, 0.22),
+    rgba(25, 61, 91, 0.1)
+  );
+  border-color: rgba(89, 177, 255, 0.48);
+  box-shadow: inset 3px 0 0 #59b1ff;
+}
+
+.agent-transcript-entry--assistant {
+  color: #edf9f0;
+  background: linear-gradient(
+    135deg,
+    rgba(72, 153, 91, 0.2),
+    rgba(30, 75, 43, 0.09)
+  );
+  border-color: rgba(126, 217, 143, 0.44);
+  box-shadow: inset 3px 0 0 #7ed98f;
+}
+
+.agent-transcript-entry--user header strong {
+  color: #9bd3ff;
+}
+
+.agent-transcript-entry--assistant header strong {
+  color: #a9ebb5;
+}
+
+.agent-transcript-entry--tool {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.agent-transcript-entry header,
+.agent-transcript-entry summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.agent-transcript-entry summary {
+  margin-bottom: 0;
+  cursor: pointer;
+}
+
+.agent-transcript-entry details[open] summary {
+  margin-bottom: 8px;
+}
+
+.agent-transcript-entry time {
+  flex: none;
+  font-size: 11px;
+}
+
+.agent-transcript-text {
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font:
+    13px/1.55 "IBM Plex Mono",
+    "SFMono-Regular",
+    monospace;
+}
+
+.agent-transcript-empty,
+.agent-transcript-error {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  color: #aab4bf;
+  text-align: center;
+}
+
+.agent-transcript-error {
+  color: #ff9a9a;
+}
+
+@media (max-width: 720px) {
+  .agent-transcript-backdrop {
+    padding: 8px;
+  }
+
+  .agent-transcript-dialog {
+    width: 100%;
+    height: 96vh;
+  }
+
+  .agent-transcript-header {
+    align-items: flex-start;
+  }
+
+  .agent-transcript-header > div:first-child {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
   }
 }

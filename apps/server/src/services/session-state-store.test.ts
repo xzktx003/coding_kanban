@@ -41,6 +41,7 @@ function buildSnapshot(): ListAgentSessionsResponse {
     items: [
       buildSession("managed", {
         hidden: true,
+        hasUnreadCompletion: true,
         tags: ["hot-update"],
       }),
       buildSession("direct", {
@@ -73,6 +74,7 @@ test("file store persists stable metadata without ephemeral process references",
       ["managed", "direct"],
     );
     assert.equal(loaded?.items[0]?.hidden, true);
+    assert.equal(loaded?.items[0]?.hasUnreadCompletion, true);
     assert.deepEqual(loaded?.items[0]?.tags, ["hot-update"]);
   } finally {
     rmSync(directory, { recursive: true, force: true });
