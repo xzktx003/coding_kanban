@@ -36,9 +36,12 @@
 - 终端 focus-report mock 没有先进入 raw mode，会导致 `CSI I/O` 焦点事件被行缓冲，产生假红测试。修复为在断言聚焦输入前显式把 mock stdin 切到 raw mode。
 - shell/prompt 行编辑态触发的 Secondary DA 原样转发会把终端版本串回显到提示符。修复为仅过滤这类会污染 shell 提示符的 Secondary DA，应答性能力握手仍保留。
 - kanban 终端偶发回显 `11;rgb:... 10;rgb:... 4;...`。根因是 OSC 10/11/4 color-query replies 通过 live stdin 泄漏到 PTY。修复为在 live stdin 路径做窄化过滤，只屏蔽这类 rgb 回包，同时保留 DA/DSR/CPR 等握手回复。
+- 终端或 tmux 中的 Copilot/Codex 可响应 `Ctrl+C`，但快速普通输入无效，启动命令还可能变成 `5Rnode ...`。根因是浏览器为旧 DA 查询发出的回复先到，而当前 PTY 的 CPR 回复后到，二者与 REST/键盘文本交错进入 shell。修复为按 PTY 输出的 DA/DSR/CPR 查询类型建立短暂 pending 队列，只写入匹配回复，等全部匹配后再释放普通文本；无匹配回复在 250ms 后超时释放，陈旧回复不进入 PTY。单元和真实浏览器 Copilot 启动回归覆盖该顺序。
 
 ## tmux 与终端渲染
 
+- 本地 tmux 中 Ctrl+C 等快捷键可用但普通文字无法输入，或文字落到与当前可见 pane 不同的目标。根因是普通文本走 `tmux send-keys`，而控制键、鼠标和前缀走 attached client PTY，两条通道的活动 pane 与时序可能分叉。修复为 attached client 存在时统一把所有原始输入写入同一个有序 PTY；仅无 client 的离线场景回退到固定 pane 的 `send-keys`。单元回归覆盖普通文本、前缀、清理和 detached fallback，真实 WebSocket+tmux 回归覆盖握手、焦点过滤和分帧粘贴。
+- 新建或恢复本地 tmux 后，浏览器已经看到 scrollback 却立刻输入时，Ctrl+C 能到达而普通文字、tmux 前缀或 Codex 文本可能被启动 shell 吞掉。根因是 scrollback replay 早于 `tmux attach` client 完成。修复为按 `tmux list-clients` 中的 `client_pid` 匹配 PTY PID 后才走 native PTY；就绪前输入短暂等待，超时安全回退 pane adapter。CSI-u 修饰 Enter 则保留 `send-keys -l` 例外，避免旧 tmux client 吞掉原始字节。真实 rename-window prompt 回归覆盖首帧输入、提交和取消。
 - tmux mouse mode 下直接拖拽会被 tmux/TUI 接管，浏览器侧 xterm 不会产生可复制 selection，导致 kanban 无法把 pane 内选择自动写入剪贴板。修复为 `TerminalView` 消费 OSC 52 clipboard 请求并调用浏览器剪贴板 API，让 tmux copy-mode 负责 pane 内选择边界，普通鼠标/二进制事件转发保持不变。
 - 手机浏览器打开 Codex 长上下文终端时，用户在终端区域下拉查看历史会触发浏览器下拉刷新，或者滑动的是页面而不是 xterm 历史。根因是移动端仍复用桌面页面滚动结构，浏览器根滚动链路没有被锁住；首版终端 touch 监听只在冒泡阶段接管，遇到 xterm 内部 viewport/浏览器手势竞争时拦截不够早，且用户停留在桌面聚焦页时没有启用手机触控模式。修复为新增 `/mobile` 手机终端页，挂载时锁定 `html/body/#root` 滚动，并让 `TerminalView` 在手机触控模式下用捕获阶段的非 passive `touchstart/touchmove` 拦截单指滑动、滚动 xterm 历史，双指缩放字号；触屏设备的桌面聚焦页也启用同一逻辑。
 - 手机访问 `/mobile` 进不去或 404。根因是部分当前运行入口只暴露根页面或只启动了后端，`/mobile` 这种 history route 依赖前端开发服务/静态服务提供 SPA fallback。修复为移动端按钮改用 `/?view=mobile` 根路径 query 入口，并保留 `/mobile`、`/m`、`#/mobile` 兼容解析。

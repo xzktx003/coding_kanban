@@ -29,16 +29,19 @@ function buildSession(): AgentSessionRecord {
 
 function buildRouter(
   options: {
-    now?: () => number;
     getClientPromptBinding?: (
       input: string,
     ) => Promise<"command-prompt" | "confirm-before" | null>;
+    waitForTmuxClientReady?: () => Promise<boolean>;
   } = {},
 ) {
   const session = buildSession();
-  const writes: Array<{ target: "adapter" | "pty"; input: string }> = [];
+  const writes: Array<{
+    target: "adapter" | "pty";
+    input: string;
+    terminalProtocolResponse?: boolean;
+  }> = [];
   const clearedInputStateSessionIds: string[] = [];
-  const settleWaits: number[] = [];
   let ptyAvailable = true;
 
   const router = new LocalTmuxInputRouter({
@@ -62,13 +65,18 @@ function buildRouter(
     },
     ptyRuntimeManager: {
       has: () => ptyAvailable,
-      write: (_agentSessionId: string, input: string) => {
-        writes.push({ target: "pty", input });
+      write: (_agentSessionId: string, input: string, writeOptions) => {
+        writes.push({
+          target: "pty",
+          input,
+          ...(writeOptions?.terminalProtocolResponse
+            ? { terminalProtocolResponse: true }
+            : {}),
+        });
       },
-    },
-    now: options.now,
-    sleep: async (milliseconds) => {
-      settleWaits.push(milliseconds);
+      ...(options.waitForTmuxClientReady
+        ? { waitForTmuxClientReady: options.waitForTmuxClientReady }
+        : {}),
     },
   });
 
@@ -76,7 +84,6 @@ function buildRouter(
     router,
     session,
     writes,
-    settleWaits,
     clearedInputStateSessionIds,
     setPtyAvailable(value: boolean) {
       ptyAvailable = value;
@@ -84,27 +91,87 @@ function buildRouter(
   };
 }
 
-test("LocalTmuxInputRouter sends ordinary input through the pane adapter", async () => {
+test("LocalTmuxInputRouter sends ordinary input through the attached tmux client PTY", async () => {
   const { router, session, writes } = buildRouter();
 
   await router.write(session, { input: "hello\r" });
 
-  assert.deepEqual(writes, [{ target: "adapter", input: "hello\r" }]);
+  assert.deepEqual(writes, [{ target: "pty", input: "hello\r" }]);
 });
 
-test("LocalTmuxInputRouter sends bare Escape through the tmux client so stale prompts can be cancelled", async () => {
-  const { router, session, writes, settleWaits } = buildRouter({
-    now: () => 1_000,
+test("LocalTmuxInputRouter lets terminal protocol replies bypass a blocked ordinary input", async () => {
+  const session = buildSession();
+  const writes: Array<{
+    input: string;
+    terminalProtocolResponse?: boolean;
+  }> = [];
+  let releaseOrdinaryInput: (() => void) | undefined;
+  const router = new LocalTmuxInputRouter({
+    registry: { get: () => session },
+    tmuxAdapter: {
+      async writeInput() {
+        throw new Error("attached client input must not use send-keys");
+      },
+      clearInputState: () => {},
+    },
+    ptyRuntimeManager: {
+      has: () => true,
+      write: (_agentSessionId, input, options) => {
+        writes.push({
+          input,
+          terminalProtocolResponse: options?.terminalProtocolResponse,
+        });
+        if (input !== "ordinary") {
+          return;
+        }
+
+        return new Promise<void>((resolve) => {
+          releaseOrdinaryInput = resolve;
+        });
+      },
+    },
   });
+
+  const ordinary = router.write(session, { input: "ordinary" });
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await router.write(session, { input: "\u001b[12;34R" });
+
+  assert.deepEqual(writes, [
+    { input: "ordinary", terminalProtocolResponse: undefined },
+    { input: "\u001b[12;34R", terminalProtocolResponse: true },
+  ]);
+
+  releaseOrdinaryInput?.();
+  await ordinary;
+});
+
+test("LocalTmuxInputRouter keeps early input out of a tmux client that is still attaching", async () => {
+  const { router, session, writes } = buildRouter({
+    waitForTmuxClientReady: async () => false,
+  });
+
+  await router.write(session, { input: "hello\r" });
+  await router.write(session, { input: "\x02" });
+  await router.write(session, { input: "," });
+
+  assert.deepEqual(writes, [
+    { target: "adapter", input: "hello\r" },
+    { target: "adapter", input: "\x02" },
+    { target: "adapter", input: "," },
+  ]);
+});
+
+test("LocalTmuxInputRouter keeps ordinary text on the tmux client after Escape", async () => {
+  const { router, session, writes } = buildRouter();
 
   await router.write(session, { input: "\x1b" });
   await router.write(session, { input: "plain" });
 
   assert.deepEqual(writes, [
     { target: "pty", input: "\x1b" },
-    { target: "adapter", input: "plain" },
+    { target: "pty", input: "plain" },
   ]);
-  assert.deepEqual(settleWaits, [50]);
 });
 
 test("LocalTmuxInputRouter sends bare Ctrl+C through the tmux client so unknown prompts can be cancelled", async () => {
@@ -115,48 +182,50 @@ test("LocalTmuxInputRouter sends bare Ctrl+C through the tmux client so unknown 
   assert.deepEqual(writes, [{ target: "pty", input: "\x03" }]);
 });
 
-test("LocalTmuxInputRouter returns to pane input after the Escape burst settles", async () => {
-  let now = 1_000;
-  const { router, session, writes, settleWaits } = buildRouter({
-    now: () => now,
-  });
+test("LocalTmuxInputRouter keeps ordinary text on the tmux client after Escape settles", async () => {
+  const { router, session, writes } = buildRouter();
 
   await router.write(session, { input: "\x1b" });
-  now += 101;
   await router.write(session, { input: "plain" });
 
   assert.deepEqual(writes, [
     { target: "pty", input: "\x1b" },
-    { target: "adapter", input: "plain" },
+    { target: "pty", input: "plain" },
   ]);
-  assert.deepEqual(settleWaits, []);
 });
 
-test("LocalTmuxInputRouter targets the attached client's active pane from the first ordinary input", async () => {
+test("LocalTmuxInputRouter sends cursor input through the attached tmux client", async () => {
   const session = buildSession();
-  const adapterTargets: AgentSessionRecord[] = [];
+  const writes: string[] = [];
   const router = new LocalTmuxInputRouter({
     registry: {
       get: () => session,
     },
     tmuxAdapter: {
-      async writeInput(targetSession: AgentSessionRecord) {
-        adapterTargets.push(targetSession);
-        return session;
+      async writeInput() {
+        throw new Error("attached client input must not use send-keys");
       },
       clearInputState: () => {},
     },
     ptyRuntimeManager: {
       has: () => true,
-      write: () => {},
+      write: (_agentSessionId: string, input: string) => {
+        writes.push(input);
+      },
     },
   });
 
   await router.write(session, { input: "\x1b[C" });
 
-  assert.equal(adapterTargets.length, 1);
-  assert.equal(adapterTargets[0]?.transportRef?.tmuxSession, "session-1");
-  assert.equal(adapterTargets[0]?.transportRef?.tmuxPane, undefined);
+  assert.deepEqual(writes, ["\x1b[C"]);
+});
+
+test("LocalTmuxInputRouter preserves CSI-u modified Enter through the pane adapter", async () => {
+  const { router, session, writes } = buildRouter();
+
+  await router.write(session, { input: "\x1b[13;2u" });
+
+  assert.deepEqual(writes, [{ target: "adapter", input: "\x1b[13;2u" }]);
 });
 
 test("LocalTmuxInputRouter keeps Ctrl+A and Ctrl+B prefix commands on the tmux client PTY", async () => {
@@ -171,7 +240,7 @@ test("LocalTmuxInputRouter keeps Ctrl+A and Ctrl+B prefix commands on the tmux c
   assert.deepEqual(writes, [
     { target: "pty", input: "\x02" },
     { target: "pty", input: "%" },
-    { target: "adapter", input: "plain" },
+    { target: "pty", input: "plain" },
     { target: "pty", input: "\x01" },
     { target: "pty", input: '"' },
   ]);
@@ -187,7 +256,7 @@ test("LocalTmuxInputRouter treats a repeated prefix as the pending tmux command"
   assert.deepEqual(writes, [
     { target: "pty", input: "\x02" },
     { target: "pty", input: "\x02" },
-    { target: "adapter", input: "next" },
+    { target: "pty", input: "next" },
   ]);
 });
 
@@ -205,7 +274,7 @@ test("LocalTmuxInputRouter keeps tmux command-prompt input on the client PTY unt
     { target: "pty", input: ":" },
     { target: "pty", input: "display-message hello" },
     { target: "pty", input: "\r" },
-    { target: "adapter", input: "plain" },
+    { target: "pty", input: "plain" },
   ]);
 });
 
@@ -225,7 +294,7 @@ test("LocalTmuxInputRouter keeps rename-window prompt input on the tmux client P
     { target: "pty", input: "draft-name" },
     { target: "pty", input: "\x1b" },
     { target: "pty", input: "\x03" },
-    { target: "adapter", input: "plain" },
+    { target: "pty", input: "plain" },
   ]);
 });
 
@@ -244,7 +313,7 @@ test("LocalTmuxInputRouter leaves confirm-before mode after its single reply", a
     { target: "pty", input: "\x02" },
     { target: "pty", input: "x" },
     { target: "pty", input: "n" },
-    { target: "adapter", input: "plain" },
+    { target: "pty", input: "plain" },
   ]);
 });
 
@@ -266,7 +335,7 @@ test("LocalTmuxInputRouter keeps tmux command-prompt mode after vi Escape until 
     { target: "pty", input: "\x1b" },
     { target: "pty", input: "plain" },
     { target: "pty", input: "\x03" },
-    { target: "adapter", input: "after cancel" },
+    { target: "pty", input: "after cancel" },
   ]);
 });
 
@@ -284,7 +353,7 @@ test("LocalTmuxInputRouter cancels tmux command-prompt mode during input cleanup
     { target: "pty", input: ":" },
     { target: "pty", input: "list-windows" },
     { target: "pty", input: "\x03" },
-    { target: "adapter", input: "plain" },
+    { target: "pty", input: "plain" },
   ]);
 });
 
@@ -302,40 +371,38 @@ test("LocalTmuxInputRouter forces mouse/control payloads through the tmux client
   ]);
 });
 
-test("LocalTmuxInputRouter keeps following the tmux client's active pane after input state cleanup", async () => {
+test("LocalTmuxInputRouter keeps native input on the tmux client after state cleanup", async () => {
   const session = buildSession();
-  const adapterTargets: AgentSessionRecord[] = [];
+  const writes: string[] = [];
   const router = new LocalTmuxInputRouter({
     registry: {
       get: () => session,
     },
     tmuxAdapter: {
-      async writeInput(
-        targetSession: AgentSessionRecord,
-        _input: StdinAgentSessionInput,
-      ) {
-        adapterTargets.push(targetSession);
-        return session;
+      async writeInput() {
+        throw new Error("attached client input must not use send-keys");
       },
       clearInputState: () => {},
     },
     ptyRuntimeManager: {
       has: () => true,
-      write: () => {},
+      write: (_agentSessionId: string, input: string) => {
+        writes.push(input);
+      },
     },
   });
 
   await router.write(session, { input: "\x1b[<0;72;8M" }, { forcePty: true });
   await router.write(session, { input: "typed in the selected pane\r" });
 
-  assert.equal(adapterTargets.length, 1);
-  assert.equal(adapterTargets[0]?.transportRef?.tmuxSession, "session-1");
-  assert.equal(adapterTargets[0]?.transportRef?.tmuxPane, undefined);
-
   await router.clear(session.id);
   await router.write(session, { input: "after reconnect\r" });
 
-  assert.equal(adapterTargets[1]?.transportRef?.tmuxPane, undefined);
+  assert.deepEqual(writes, [
+    "\x1b[<0;72;8M",
+    "typed in the selected pane\r",
+    "after reconnect\r",
+  ]);
 });
 
 test("LocalTmuxInputRouter falls back to the registered pane without an attached client", async () => {
@@ -363,23 +430,24 @@ test("LocalTmuxInputRouter falls back to the registered pane without an attached
   assert.equal(adapterTargets[0]?.transportRef?.tmuxPane, "%1");
 });
 
-test("LocalTmuxInputRouter follows pane changes made by tmux prefix commands", async () => {
+test("LocalTmuxInputRouter keeps text on the tmux client after pane selection commands", async () => {
   const session = buildSession();
-  const adapterTargets: AgentSessionRecord[] = [];
+  const writes: string[] = [];
   const router = new LocalTmuxInputRouter({
     registry: {
       get: () => session,
     },
     tmuxAdapter: {
-      async writeInput(targetSession: AgentSessionRecord) {
-        adapterTargets.push(targetSession);
-        return session;
+      async writeInput() {
+        throw new Error("attached client input must not use send-keys");
       },
       clearInputState: () => {},
     },
     ptyRuntimeManager: {
       has: () => true,
-      write: () => {},
+      write: (_agentSessionId: string, input: string) => {
+        writes.push(input);
+      },
     },
   });
 
@@ -387,9 +455,7 @@ test("LocalTmuxInputRouter follows pane changes made by tmux prefix commands", a
   await router.write(session, { input: "o" });
   await router.write(session, { input: "typed after select-pane\r" });
 
-  assert.equal(adapterTargets.length, 1);
-  assert.equal(adapterTargets[0]?.transportRef?.tmuxSession, "session-1");
-  assert.equal(adapterTargets[0]?.transportRef?.tmuxPane, undefined);
+  assert.deepEqual(writes, ["\x02", "o", "typed after select-pane\r"]);
 });
 
 test("LocalTmuxInputRouter cancels an abandoned prefix when session input state is cleared", async () => {
@@ -403,7 +469,7 @@ test("LocalTmuxInputRouter cancels an abandoned prefix when session input state 
   assert.deepEqual(writes, [
     { target: "pty", input: "\x02" },
     { target: "pty", input: "\x03" },
-    { target: "adapter", input: "plain" },
+    { target: "pty", input: "plain" },
   ]);
   assert.deepEqual(clearedInputStateSessionIds, [session.id]);
 });
@@ -469,10 +535,10 @@ test("LocalTmuxInputRouter keeps queued writes ordered when input state is clear
   });
 
   const first = router.write(session, { input: "first" });
-  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
   router.clear(session.id);
   const second = router.write(session, { input: "second" });
-  await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
 
   assert.deepEqual(started, ["first"]);
   releaseFirstWrite?.();
@@ -480,28 +546,16 @@ test("LocalTmuxInputRouter keeps queued writes ordered when input state is clear
   assert.deepEqual(started, ["first", "second"]);
 });
 
-test("LocalTmuxInputRouter queues cleanup after an earlier write and queued prefix", async () => {
+test("LocalTmuxInputRouter orders native client input around cleanup", async () => {
   const session = buildSession();
   const events: string[] = [];
-  let releaseFirstWrite: (() => void) | undefined;
-  const firstWriteGate = new Promise<void>((resolve) => {
-    releaseFirstWrite = resolve;
-  });
   const router = new LocalTmuxInputRouter({
     registry: {
       get: () => session,
     },
     tmuxAdapter: {
-      async writeInput(
-        _session: AgentSessionRecord,
-        input: StdinAgentSessionInput,
-      ) {
-        events.push(`adapter-start:${input.input}`);
-        if (input.input === "first") {
-          await firstWriteGate;
-        }
-        events.push(`adapter-end:${input.input}`);
-        return session;
+      async writeInput() {
+        throw new Error("attached client input must not use send-keys");
       },
       clearInputState: () => {
         events.push("adapter-clear");
@@ -515,25 +569,16 @@ test("LocalTmuxInputRouter queues cleanup after an earlier write and queued pref
     },
   });
 
-  const first = router.write(session, { input: "first" });
-  await Promise.resolve();
-  const prefix = router.write(session, { input: "\x02" });
-  const cleanup = router.clear(session.id);
-  const plain = router.write(session, { input: "plain" });
-  await Promise.resolve();
-
-  assert.deepEqual(events, ["adapter-start:first"]);
-
-  releaseFirstWrite?.();
-  await Promise.all([first, prefix, Promise.resolve(cleanup), plain]);
+  await router.write(session, { input: "first" });
+  await router.write(session, { input: "\x02" });
+  await router.clear(session.id);
+  await router.write(session, { input: "plain" });
 
   assert.deepEqual(events, [
-    "adapter-start:first",
-    "adapter-end:first",
+    "pty:first",
     "pty:\x02",
     "pty:\x03",
     "adapter-clear",
-    "adapter-start:plain",
-    "adapter-end:plain",
+    "pty:plain",
   ]);
 });

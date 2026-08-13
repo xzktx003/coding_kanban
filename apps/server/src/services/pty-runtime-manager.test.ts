@@ -368,6 +368,8 @@ test("launch keeps tmux attach sessions alive when the card is labeled as copilo
   });
 
   try {
+    assert.equal(await runtimeManager.waitForTmuxClientReady(session.id), true);
+
     const outputText = await waitForOutputMatch(
       registry,
       session.id,
@@ -487,4 +489,49 @@ test("keep normal styling escapes in replay", () => {
   const sanitized = sanitizeReplayForTerminal(replay);
 
   assert.equal(sanitized, replay);
+});
+
+test("holds ordinary input until all terminal capability replies have reached the PTY", async () => {
+  const registry = new AgentSessionRegistry();
+  const runtimeManager = new PtyRuntimeManager(registry);
+  const session = runtimeManager.launch({
+    workspaceId: "default",
+    displayName: "terminal-protocol-ordering",
+    agentKind: "shell",
+    workingDirectory: process.cwd(),
+    command:
+      "stty raw -echo; printf '\\033['; sleep 0.05; printf '6n'; head -c 8 | od -An -t x1; stty sane; IFS= read -r command; printf '__COMMAND__%s\\n' \"$command\"; exit",
+  });
+
+  try {
+    await waitForOutputMatch(registry, session.id, /6n/);
+
+    let ordinaryInputCompleted = false;
+    const ordinaryInput = runtimeManager
+      .write(session.id, "node\n")
+      .then(() => {
+        ordinaryInputCompleted = true;
+      });
+
+    await sleep(25);
+    assert.equal(ordinaryInputCompleted, false);
+
+    await runtimeManager.write(session.id, "\u001b[?1;2c");
+    await sleep(25);
+    assert.equal(ordinaryInputCompleted, false);
+
+    await runtimeManager.write(session.id, "\u001b[12;34R");
+    await ordinaryInput;
+
+    const outputText = await waitForOutputMatch(
+      registry,
+      session.id,
+      /__COMMAND__node/,
+    );
+
+    assert.match(outputText, /1b 5b 31 32 3b 33 34 52/);
+  } finally {
+    runtimeManager.kill(session.id);
+    registry.remove(session.id);
+  }
 });

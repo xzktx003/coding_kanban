@@ -572,7 +572,7 @@ export async function registerAgentSessionRoutes(
       }
 
       if (ptyRuntimeManager.has(request.params.id)) {
-        ptyRuntimeManager.write(request.params.id, sanitizedInput);
+        await ptyRuntimeManager.write(request.params.id, sanitizedInput);
         return registry.get(request.params.id);
       }
 

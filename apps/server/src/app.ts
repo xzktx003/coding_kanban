@@ -332,12 +332,10 @@ export function buildServer(options: BuildServerOptions = {}): {
               return;
             }
 
-            try {
-              ptyRuntimeManager.write(id, sanitizedPayload);
-            } catch {
+            void ptyRuntimeManager.write(id, sanitizedPayload).catch(() => {
               // The browser can still flush a final input frame after the
               // PTY has exited or the session has been deleted.
-            }
+            });
           };
 
           const text =

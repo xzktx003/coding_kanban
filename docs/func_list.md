@@ -76,13 +76,14 @@
 - 后端会对高频终端输出触发的看板全量快照做约 1 秒的合并广播；结构性操作仍即时刷新，避免轻量预览场景下 `/ws/agent-sessions` 长时间形成网络、JSON 解析和 React 分配压力。
 - 支持 replay 完成前缓冲 live frame，避免历史输出与新输出乱序。
 - 支持 stdin、resize、binary 消息，binary 用于 tmux 鼠标等二进制事件。
+- 直接 PTY 会按会话串行 stdin，并在输出 `CSI c`、`CSI 5n`、`CSI 6n` 查询后短暂等待匹配的 DA、DSR、CPR 回复；陈旧或类型不符的浏览器回复不会写入 shell。这样普通文本不会与终端协议字节交错，Copilot/Codex 启动后的快速输入不会丢字或变成命令前缀。
 - 服务端生成的 tmux attach 命令和带显式命令的 direct PTY 使用非交互 `/bin/sh` 执行，不加载用户 shell 启动文件；未指定命令时仍启动用户原生交互 shell。
-- 本地 tmux 普通文本、移动端快捷键、方向键和 bracketed paste 通过有序 `send-keys` 路径写入；鼠标协议以及 `Ctrl+A` / `Ctrl+B` 前缀和紧随其后的 tmux 命令通过 attached client PTY 处理。attached client 存在期间，`send-keys` 从首次输入起就以 session 为动态目标，持续跟随 client 当前活动 pane；只有 client 不存在时才回退到接入时记录的 pane。
+- 本地 tmux 在 attached client 的 PID 被 `tmux list-clients` 确认前，不会把首个输入误写进即将 `exec tmux attach` 的启动 shell；输入短暂排队，超时则安全回退到 pane 的 `send-keys`。确认后普通文本、方向键、bracketed paste、鼠标协议和 `Ctrl+A` / `Ctrl+B` 前缀都按原始字节经同一个有序 PTY 输入，因此始终跟随浏览器当前可见 pane；tmux client 不支持的 CSI-u 修饰键例外走 `send-keys -l`，以保留原始字节。
 - `Ctrl+A` / `Ctrl+B` 后会按当前 tmux `prefix` key table 判断下一键是否绑定 `command-prompt` / `confirm-before`；`:`、`,`、`$`、`'`、`.`、`/`、`f` 及自定义 prompt 的文本和编辑键持续写入 attached client PTY，直到 Enter 提交或 Ctrl+C/连接清理取消。`status-keys vi` 下 Escape 只切换编辑模式，不再误判为 prompt 已退出；裸 Ctrl+C 始终经过 attached client，因此服务重载后即使内存状态丢失也能取消残留 prompt，无 prompt 时由 tmux 正常转发给当前 pane。
 - 后端收到 SIGTERM/SIGINT 时先关闭 Fastify，并由 `PtyRuntimeManager.dispose()` 终止该进程创建的全部本地/SSH PTY；源码热重载不再遗留 PPID=1 的 `tmux attach` clients。
 - 桌面 xterm 把 macOS `Option` 和 Windows/Linux `Alt` 统一编码为终端 Meta 修饰键；`Option+Space` / `Alt+Space` 及常用 Meta 字母、数字组合在本地 tmux 中作为单个 `M-*` 键发送，不再拆成 `Escape` 与普通字符。Windows 系统若优先占用 `Alt+Space`，可使用跨平台 `Shift+Enter` 换行。
 - Safari 快速输入时同时核对 xterm `onData` 与浏览器原生 `insertText`；若 WebKit 已产生文本输入但 xterm 没有发出对应数据，只补发缺失字符。该恢复路径仅在 Safari 启用，并排除 IME composition、控制键及其他浏览器。
-- `Shift+Enter`、`Ctrl+Enter` 的 CSI-u 序列按浏览器原始字节写入 pane，不依赖不同 tmux 版本对 `S-Enter` / `C-Enter` 键名的支持。
+- `Shift+Enter`、`Ctrl+Enter` 的 CSI-u 序列在 tmux client 不支持 extended keys 时通过 `send-keys -l` 原样写入当前 pane，不依赖不同 tmux 版本对 `S-Enter` / `C-Enter` 键名的支持。
 - 支持终端输出发起的 OSC 52 剪贴板写入；tmux copy-mode 可通过 pane 内选择把内容写入浏览器剪贴板，前端只接受 clipboard target 且限制 payload 大小。
 - 支持终端焦点补救和输入所有权；真实 stdin 默认只落到当前聚焦主终端，多终端监控模式下也只落到当前输入窗格。交互终端开启 mouse tracking 时，普通滚轮作为鼠标协议发送到当前 tmux/TUI pane；`Shift+滚轮`、未开启 mouse tracking 的大屏终端和非输入监控窗格继续滚动各自 xterm scrollback。聚焦页右侧会话小卡始终是被动预览，滚轮穿透小终端并滚动“全部会话”侧栏，不控制预览内部历史。
 

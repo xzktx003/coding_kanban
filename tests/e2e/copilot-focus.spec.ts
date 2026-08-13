@@ -97,6 +97,21 @@ async function createShellSessionAndFocus(
   await gridCard.dblclick();
   await expect(page.locator(".focus-main-name")).toContainText(displayName);
 
+  const terminal = page.locator(".focus-main .terminal-view-live");
+  await expect(terminal).toBeVisible({ timeout: 15_000 });
+  await expect
+    .poll(() =>
+      terminal.evaluate(
+        (element) =>
+          (
+            element as HTMLDivElement & {
+              __xterm?: { options?: { disableStdin?: boolean } };
+            }
+          ).__xterm?.options?.disableStdin ?? true,
+      ),
+    )
+    .toBe(false);
+
   return sessionId;
 }
 

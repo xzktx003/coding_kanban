@@ -5,6 +5,9 @@ import {
   isTerminalFocusPayload,
   isTerminalPtyControlPayload,
   isTerminalMousePayload,
+  getTerminalProtocolQueryResponseKinds,
+  getTerminalProtocolResponses,
+  isTerminalProtocolResponsePayload,
   sanitizeReplayForTerminal,
   stripTerminalResponsePayload,
 } from "./terminal-control-filter.js";
@@ -53,6 +56,26 @@ test("keep DSR replies intact so TUIs receive their status answers", () => {
   const sanitized = stripTerminalResponsePayload("\u001b[0n");
 
   assert.equal(sanitized, "\u001b[0n");
+});
+
+test("identifies complete protocol replies so they can be serialized before user input", () => {
+  assert.equal(isTerminalProtocolResponsePayload("\u001b[?1;2c"), true);
+  assert.equal(isTerminalProtocolResponsePayload("\u001b[0n"), true);
+  assert.equal(isTerminalProtocolResponsePayload("\u001b[12;42R"), true);
+  assert.equal(isTerminalProtocolResponsePayload("\u001b[12R"), false);
+  assert.equal(isTerminalProtocolResponsePayload("\u001b[A"), false);
+});
+
+test("classifies protocol queries and replies so stale replies cannot complete a different query", () => {
+  assert.deepEqual(
+    getTerminalProtocolQueryResponseKinds("\u001b[c\u001b[5n\u001b[6n"),
+    ["device-attributes", "status", "cursor-position"],
+  );
+  assert.deepEqual(getTerminalProtocolResponses("\u001b[?1;2c\u001b[0n\u001b[12;42R"), [
+    { kind: "device-attributes", payload: "\u001b[?1;2c" },
+    { kind: "status", payload: "\u001b[0n" },
+    { kind: "cursor-position", payload: "\u001b[12;42R" },
+  ]);
 });
 
 test("identify xterm mouse reports that must enter tmux through the attached PTY", () => {
