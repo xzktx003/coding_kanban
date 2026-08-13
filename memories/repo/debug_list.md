@@ -3,6 +3,8 @@
 # 仓库 bug 修复记录
 
 - Agent 完成结果直接进入“已完成”会被用户漏看，tmux 恢复运行还可能残留旧标记：新增持久化 `hasUnreadCompletion`，完成先进入“需要你”，聚焦查看后进入“已完成”，新输入或恢复运行后清除并进入“工作中”；所有桌面、手机和多终端查看入口统一走 focus API。
+- 本地 tmux 中 Ctrl+C 等快捷键可用但普通文字无法输入，或文字落到与当前可见 pane 不同的目标。根因是普通文本走 `tmux send-keys`，而控制键、鼠标和前缀走 attached client PTY，两条通道的活动 pane 与时序可能分叉。修复为 attached client 存在时统一把所有原始输入写入同一个有序 PTY；仅无 client 的离线场景回退到固定 pane 的 `send-keys`。单元回归覆盖普通文本、前缀、清理和 detached fallback，真实 WebSocket+tmux 回归覆盖握手、焦点过滤和分帧粘贴。
+- 新建或恢复本地 tmux 时，scrollback replay 可早于 `tmux attach` client 完成，首个文字、前缀或 Codex 输入会被启动 shell 吞掉。修复为用 `tmux list-clients` 的 `client_pid` 匹配 PTY PID 后再写 native PTY；就绪前短暂等待，超时安全回退 pane adapter。CSI-u 修饰 Enter 保持 `send-keys -l` 例外，避免旧 tmux client 吞掉原始字节；真实 rename-window prompt 回归覆盖首帧输入、提交和取消。
 - 手机端快捷键缺少 Claude / Copilot CLI 常用控制键：`Shift+Tab`、`Ctrl+O`、`Ctrl+E` 和行编辑组合无法从手机触发，且快捷键类型中残留旧 id 有构建失败风险；修复为扩展手机快捷键表，并在本地 tmux 转换层映射到 `BTab`、`C-o`、`C-e`、`C-u/w/k/y` 等 key name。
 - 手机端快捷键说明弹窗缺少无障碍属性：没有 `aria-modal`、`aria-labelledby` 和 Tab 聚焦陷阱，屏幕阅读器用户无法正确聚焦弹窗；修复为增加 `aria-modal=”true”`、`aria-labelledby` 指向标题、Tab 循环限制和 Escape 关闭，卸载时还原页面焦点。
 - 手机端快捷键工具栏多行平铺占用纵向空间且不符合横向选择预期：修复为 `flex` 单行横向选择器，使用 `overflow-x: auto` 和 `touch-action: pan-x` 支持左右滑动，并把 `EOF` 按钮展示为 `Ctrl+D`。
@@ -19,6 +21,7 @@
 - 远端 SSH 会话已经退出时，kanban 终端只剩 `[连接已断开]`：PTY runtime 退出就删除 handle，terminal websocket 后续重连拿不到 scrollback，只能 4004 关闭，导致真实错误（例如 `fatal: Gerrit Code Review: exec: not found`）被泛化提示覆盖。修复为 runtime 已退出但 session 仍存在时，从 registry 的历史输出回放 terminal 内容。
 - tmux mouse mode 下 pane 内拖拽选择停留在 tmux/TUI 内，浏览器侧 xterm 没有 selection 可复制：修复为 `TerminalView` 支持 OSC 52 clipboard 写入，让 tmux copy-mode 负责选择边界并把内容写入浏览器剪贴板。
 - live stdin 过滤握手应答导致 Copilot CLI 等 TUI 卡死：修复为仅清洗 replay，不过滤 live stdin 的 DA/DSR/CPR 等应答。
+- 终端或 tmux 中 Copilot/Codex 的 Ctrl+C 可用但快速普通文本无效，启动命令还可能被写成 `5Rnode ...`：浏览器较早 DA 回复会和当前 CPR、REST/键盘文本乱序交错。修复为根据 PTY 输出的 DA/DSR/CPR 查询类型跟踪短暂 pending，只转发匹配的完整回复，全部完成后才释放普通文本；陈旧回复丢弃，250ms 无回复超时释放。单元及真实浏览器 Copilot 启动回归覆盖该顺序。
 - Codex CLI 运行后鼠标滚轮偶发变成输入历史上下翻页：xterm.js 会在 TUI 鼠标追踪或无 scrollback 路径中把 wheel 转成鼠标协议/方向键输入；修复为前端接管 wheel，只滚动 xterm scrollback 并阻止 wheel 进入 stdin。
 - 多屏或完整预览终端偶发无法滚动上下文：wheel 只挂在 xterm 内部 handler，事件落在外层容器、缩放空白区或非输入预览终端时可能漏掉；修复为 `TerminalView` 容器捕获阶段统一接管 wheel，所有终端视图都滚动自己的 scrollback 并阻止进入 stdin。
 - 运行中终端滚上去后马上被实时输出拉回底部：live `term.write()` 持续刷新底部跟随，覆盖用户刚选的 scrollback viewport；修复为滚轮离开底部后短暂锁定 viewport，新输出写入完成后恢复到该行，回到底部时解除锁定。

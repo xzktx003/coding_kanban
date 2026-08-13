@@ -1,7 +1,9 @@
 import * as pty from "node-pty";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { devNull } from "node:os";
 import { delimiter, dirname, normalize } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { promisify } from "node:util";
 
 import type {
   AgentSessionRecord,
@@ -22,9 +24,19 @@ import {
   resolveTmuxBinary,
 } from "./runtime-compat.js";
 import { buildSshArgs, formatSshDestination } from "./ssh-command.js";
-import { sanitizeReplayForTerminal } from "./terminal-control-filter.js";
+import {
+  getTerminalProtocolQueryResponseKinds,
+  getTerminalProtocolResponses,
+  isTerminalProtocolResponsePayload,
+  sanitizeReplayForTerminal,
+  type TerminalProtocolResponseKind,
+} from "./terminal-control-filter.js";
 
 type PtyDataListener = (data: string) => void;
+const execFileAsync = promisify(execFile);
+const TMUX_CLIENT_READY_TIMEOUT_MS = 1_000;
+const TMUX_CLIENT_READY_POLL_MS = 20;
+const TERMINAL_PROTOCOL_REPLY_TIMEOUT_MS = 250;
 
 export interface PtyRuntimeManagerOptions {
   maxScrollbackBytes?: number;
@@ -57,7 +69,22 @@ export interface PtyScrollbackState {
 interface PtyHandle extends PtyScrollbackState {
   ptyProcess: pty.IPty;
   dataListeners: Set<PtyDataListener>;
+  localTmuxClientReady: boolean;
+  localTmuxClientReadyWait?: Promise<boolean>;
+  localTmuxSessionName?: string;
   stripAlternateScreen: boolean;
+  terminalProtocolQueryRemainder: string;
+}
+
+interface PendingTerminalProtocolReplies {
+  completion: Promise<void>;
+  expectedKinds: TerminalProtocolResponseKind[];
+  resolve: () => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
+export interface PtyRuntimeWriteOptions {
+  terminalProtocolResponse?: boolean;
 }
 
 export function appendPtyScrollback(
@@ -203,6 +230,11 @@ export function buildLocalSpawnPlan(
 }
 
 export class PtyRuntimeManager {
+  private readonly pendingTerminalProtocolReplies = new Map<
+    string,
+    PendingTerminalProtocolReplies
+  >();
+  private readonly writeQueues = new Map<string, Promise<void>>();
   private readonly handles = new Map<string, PtyHandle>();
   private readonly maxScrollbackBytes: number;
   private readonly tmuxCaptureLines: number;
@@ -255,6 +287,7 @@ export class PtyRuntimeManager {
     });
 
     const handle = this.createHandle(ptyProcess, {
+      localTmuxSessionName: input.tmuxSessionName,
       stripAlternateScreen: Boolean(input.tmuxSessionName),
     });
 
@@ -268,6 +301,8 @@ export class PtyRuntimeManager {
       ) {
         return;
       }
+
+      this.noteTerminalProtocolQueries(agentSession.id, handle, data);
 
       const output = this.normalizePtyOutput(handle, data);
       if (!output) {
@@ -362,6 +397,8 @@ export class PtyRuntimeManager {
         return;
       }
 
+      this.noteTerminalProtocolQueries(agentSession.id, handle, data);
+
       const output = this.normalizePtyOutput(handle, data);
       if (!output) {
         return;
@@ -393,15 +430,47 @@ export class PtyRuntimeManager {
     return this.registry.get(agentSession.id);
   }
 
-  write(agentSessionId: string, data: string): void {
-    const handle = this.handles.get(agentSessionId);
-
-    if (!handle) {
-      throw new Error(`没有找到 PTY 运行时: ${agentSessionId}`);
+  write(
+    agentSessionId: string,
+    data: string,
+    options: PtyRuntimeWriteOptions = {},
+  ): Promise<void> {
+    if (
+      options.terminalProtocolResponse ||
+      isTerminalProtocolResponsePayload(data)
+    ) {
+      return this.writeTerminalProtocolResponse(agentSessionId, data);
     }
 
-    this.registry.noteUserInput(agentSessionId, data);
-    handle.ptyProcess.write(data);
+    const previous = this.writeQueues.get(agentSessionId) ?? Promise.resolve();
+    const operation = previous.catch(() => {}).then(async () => {
+      const handle = this.handles.get(agentSessionId);
+
+      if (!handle) {
+        throw new Error(`没有找到 PTY 运行时: ${agentSessionId}`);
+      }
+
+      // A terminal query must receive its full reply before a competing REST
+      // request or keypress reaches the line discipline. Otherwise a CPR can
+      // be split around text, yielding input such as "5Rnode".
+      await this.waitForTerminalProtocolReplies(agentSessionId);
+
+      this.registry.noteUserInput(agentSessionId, data);
+      handle.ptyProcess.write(data);
+    });
+    const queueTail = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    this.writeQueues.set(agentSessionId, queueTail);
+    void queueTail.then(() => {
+      if (this.writeQueues.get(agentSessionId) === queueTail) {
+        this.writeQueues.delete(agentSessionId);
+      }
+    });
+
+    return operation;
   }
 
   resize(agentSessionId: string, cols: number, rows: number): void {
@@ -462,17 +531,49 @@ export class PtyRuntimeManager {
     return this.handles.has(agentSessionId);
   }
 
+  async waitForTmuxClientReady(agentSessionId: string): Promise<boolean> {
+    const handle = this.handles.get(agentSessionId);
+
+    if (!handle) {
+      return false;
+    }
+
+    if (!handle.localTmuxSessionName || handle.localTmuxClientReady) {
+      return true;
+    }
+
+    if (!handle.localTmuxClientReadyWait) {
+      const wait = this.waitForLocalTmuxClient(
+        agentSessionId,
+        handle,
+        handle.localTmuxSessionName,
+      );
+      handle.localTmuxClientReadyWait = wait;
+      void wait.finally(() => {
+        if (this.handles.get(agentSessionId) === handle) {
+          handle.localTmuxClientReadyWait = undefined;
+        }
+      });
+    }
+
+    return handle.localTmuxClientReadyWait;
+  }
+
   kill(agentSessionId: string): void {
     const handle = this.handles.get(agentSessionId);
     if (handle) {
       handle.ptyProcess.kill();
       this.handles.delete(agentSessionId);
     }
+    this.writeQueues.delete(agentSessionId);
+    this.clearTerminalProtocolReplies(agentSessionId);
   }
 
   dispose(): void {
     const handles = Array.from(this.handles.values());
     this.handles.clear();
+    this.writeQueues.clear();
+    this.clearAllTerminalProtocolReplies();
 
     for (const handle of handles) {
       try {
@@ -534,6 +635,8 @@ export class PtyRuntimeManager {
         return;
       }
 
+      this.noteTerminalProtocolQueries(agentSessionId, handle, data);
+
       const output = this.normalizePtyOutput(handle, data);
       if (!output) {
         return;
@@ -585,6 +688,7 @@ export class PtyRuntimeManager {
     });
 
     const handle = this.createHandle(ptyProcess, {
+      localTmuxSessionName: input.tmuxSessionName,
       stripAlternateScreen: Boolean(input.tmuxSessionName),
     });
     this.handles.set(agentSessionId, handle);
@@ -611,6 +715,8 @@ export class PtyRuntimeManager {
       ) {
         return;
       }
+
+      this.noteTerminalProtocolQueries(agentSessionId, handle, data);
 
       const output = this.normalizePtyOutput(handle, data);
       if (!output) {
@@ -680,16 +786,22 @@ export class PtyRuntimeManager {
 
   private createHandle(
     ptyProcess: pty.IPty,
-    options: { stripAlternateScreen?: boolean } = {},
+    options: {
+      localTmuxSessionName?: string;
+      stripAlternateScreen?: boolean;
+    } = {},
   ): PtyHandle {
     return {
       ptyProcess,
       dataListeners: new Set(),
       droppedScrollbackBytes: 0,
       droppedScrollbackChunks: 0,
+      localTmuxClientReady: false,
+      localTmuxSessionName: options.localTmuxSessionName,
       scrollback: [],
       scrollbackBytes: 0,
       stripAlternateScreen: Boolean(options.stripAlternateScreen),
+      terminalProtocolQueryRemainder: "",
     };
   }
 
@@ -697,10 +809,184 @@ export class PtyRuntimeManager {
     appendPtyScrollback(handle, data, this.maxScrollbackBytes);
   }
 
+  private noteTerminalProtocolQueries(
+    agentSessionId: string,
+    handle: PtyHandle,
+    data: string,
+  ): void {
+    const combined = `${handle.terminalProtocolQueryRemainder}${data}`;
+    const remainder =
+      combined.match(/\u001b(?:\[(?:\?)?[\d;]*)?$/u)?.[0] ?? "";
+    handle.terminalProtocolQueryRemainder = remainder;
+    const completeData = remainder
+      ? combined.slice(0, Math.max(0, combined.length - remainder.length))
+      : combined;
+    const expectedKinds = getTerminalProtocolQueryResponseKinds(completeData);
+
+    if (expectedKinds.length === 0) {
+      return;
+    }
+
+    const pending = this.pendingTerminalProtocolReplies.get(agentSessionId);
+    if (pending) {
+      pending.expectedKinds.push(...expectedKinds);
+      return;
+    }
+
+    let resolve!: () => void;
+    const completion = new Promise<void>((done) => {
+      resolve = done;
+    });
+    const timeout = setTimeout(() => {
+      const current = this.pendingTerminalProtocolReplies.get(agentSessionId);
+      if (!current || current.completion !== completion) {
+        return;
+      }
+
+      this.pendingTerminalProtocolReplies.delete(agentSessionId);
+      current.resolve();
+    }, TERMINAL_PROTOCOL_REPLY_TIMEOUT_MS);
+    timeout.unref();
+
+    this.pendingTerminalProtocolReplies.set(agentSessionId, {
+      completion,
+      expectedKinds,
+      resolve,
+      timeout,
+    });
+  }
+
+  private waitForTerminalProtocolReplies(agentSessionId: string): Promise<void> {
+    return (
+      this.pendingTerminalProtocolReplies.get(agentSessionId)?.completion ??
+      Promise.resolve()
+    );
+  }
+
+  private writeTerminalProtocolResponse(
+    agentSessionId: string,
+    data: string,
+  ): Promise<void> {
+    const pending = this.pendingTerminalProtocolReplies.get(agentSessionId);
+    if (!pending) {
+      // Responses are only meaningful for a query emitted by this PTY. An
+      // xterm instance can finish an old handshake after reconnect, and
+      // forwarding that stale reply writes escape fragments into the shell.
+      return Promise.resolve();
+    }
+
+    const responses = getTerminalProtocolResponses(data);
+    const matchingPayload = responses
+      .filter((response) => {
+        if (pending.expectedKinds[0] !== response.kind) {
+          return false;
+        }
+
+        pending.expectedKinds.shift();
+        return true;
+      })
+      .map((response) => response.payload)
+      .join("");
+
+    if (!matchingPayload) {
+      return Promise.resolve();
+    }
+
+    const handle = this.handles.get(agentSessionId);
+    if (!handle) {
+      return Promise.reject(new Error(`没有找到 PTY 运行时: ${agentSessionId}`));
+    }
+
+    this.registry.noteUserInput(agentSessionId, matchingPayload);
+    handle.ptyProcess.write(matchingPayload);
+    this.resolveTerminalProtocolReplies(agentSessionId);
+    return Promise.resolve();
+  }
+
+  private resolveTerminalProtocolReplies(agentSessionId: string): void {
+    const pending = this.pendingTerminalProtocolReplies.get(agentSessionId);
+    if (!pending) {
+      return;
+    }
+
+    if (pending.expectedKinds.length > 0) {
+      return;
+    }
+
+    this.clearTerminalProtocolReplies(agentSessionId);
+  }
+
+  private clearTerminalProtocolReplies(agentSessionId: string): void {
+    const pending = this.pendingTerminalProtocolReplies.get(agentSessionId);
+    if (!pending) {
+      return;
+    }
+
+    this.pendingTerminalProtocolReplies.delete(agentSessionId);
+    clearTimeout(pending.timeout);
+    pending.resolve();
+  }
+
+  private clearAllTerminalProtocolReplies(): void {
+    for (const agentSessionId of this.pendingTerminalProtocolReplies.keys()) {
+      this.clearTerminalProtocolReplies(agentSessionId);
+    }
+  }
+
   private normalizePtyOutput(handle: PtyHandle, data: string): string {
     return handle.stripAlternateScreen
       ? stripAlternateScreenSwitches(data)
       : data;
+  }
+
+  private async waitForLocalTmuxClient(
+    agentSessionId: string,
+    handle: PtyHandle,
+    tmuxSessionName: string,
+  ): Promise<boolean> {
+    const deadline = Date.now() + TMUX_CLIENT_READY_TIMEOUT_MS;
+
+    while (
+      Date.now() < deadline &&
+      this.handles.get(agentSessionId) === handle
+    ) {
+      if (
+        await this.isLocalTmuxClientAttached(
+          tmuxSessionName,
+          handle.ptyProcess.pid,
+        )
+      ) {
+        handle.localTmuxClientReady = true;
+        return true;
+      }
+
+      await sleep(TMUX_CLIENT_READY_POLL_MS);
+    }
+
+    return false;
+  }
+
+  private async isLocalTmuxClientAttached(
+    tmuxSessionName: string,
+    ptyProcessId: number,
+  ): Promise<boolean> {
+    try {
+      const { stdout } = await execFileAsync(
+        resolveTmuxBinary(),
+        ["list-clients", "-t", tmuxSessionName, "-F", "#{client_pid}"],
+        {
+          encoding: "utf8",
+          env: buildPtyEnv(),
+          timeout: TMUX_CLIENT_READY_POLL_MS * 4,
+        },
+      );
+
+      return String(stdout)
+        .split("\n")
+        .some((clientPid) => Number.parseInt(clientPid, 10) === ptyProcessId);
+    } catch {
+      return false;
+    }
   }
 
   private configureLocalTmuxHistory(tmuxSessionName?: string): void {

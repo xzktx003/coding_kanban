@@ -18,12 +18,27 @@ const TERMINAL_INPUT_PATTERNS = [
 const TERMINAL_MOUSE_PAYLOAD_PATTERN =
   /^(?:(?:\u001b\[<\d+;\d+;\d+[mM])|(?:\u001b\[\d+;\d+;\d+M)|(?:\u001b\[M[\s\S]{3}))+$/;
 const TERMINAL_FOCUS_PAYLOAD_PATTERN = /^(?:\u001b\[[IO])+$/;
+const TERMINAL_PROTOCOL_QUERY_PATTERN = /\u001b\[\??(0?c|[56]n)/g;
+const TERMINAL_PROTOCOL_RESPONSE_SEQUENCE_PATTERN =
+  /\u001b\[(?:\?[\d;]*|>[\d;]*|[\d;]*)c|\u001b\[\??[\d;]+n|\u001b\[\d+;\d+R/g;
+const TERMINAL_PROTOCOL_RESPONSE_PAYLOAD_PATTERN =
+  /^(?:\u001b\[(?:\?[\d;]*|>[\d;]*|[\d;]*)c|\u001b\[\??[\d;]+n|\u001b\[\d+;\d+R)+$/;
 
 function stripPatterns(text: string, patterns: RegExp[]): string {
   return patterns.reduce(
     (sanitized, pattern) => sanitized.replace(pattern, ""),
     text,
   );
+}
+
+export type TerminalProtocolResponseKind =
+  | "device-attributes"
+  | "status"
+  | "cursor-position";
+
+export interface TerminalProtocolResponse {
+  kind: TerminalProtocolResponseKind;
+  payload: string;
 }
 
 export function sanitizeReplayForTerminal(data: string): string {
@@ -40,6 +55,44 @@ export function sanitizeReplayForTerminal(data: string): string {
 // OSC color queries with rgb payloads that should not be echoed into stdin.
 export function stripTerminalResponsePayload(payload: string): string {
   return stripPatterns(payload, TERMINAL_INPUT_PATTERNS);
+}
+
+export function isTerminalProtocolResponsePayload(payload: string): boolean {
+  return TERMINAL_PROTOCOL_RESPONSE_PAYLOAD_PATTERN.test(payload);
+}
+
+export function getTerminalProtocolQueryResponseKinds(
+  payload: string,
+): TerminalProtocolResponseKind[] {
+  return Array.from(payload.matchAll(TERMINAL_PROTOCOL_QUERY_PATTERN), (match) => {
+    switch (match[1]) {
+      case "5n":
+        return "status";
+      case "6n":
+        return "cursor-position";
+      default:
+        return "device-attributes";
+    }
+  });
+}
+
+export function getTerminalProtocolResponses(
+  payload: string,
+): TerminalProtocolResponse[] {
+  return Array.from(
+    payload.matchAll(TERMINAL_PROTOCOL_RESPONSE_SEQUENCE_PATTERN),
+    (match) => {
+      const response = match[0]!;
+      return {
+        kind: response.endsWith("c")
+          ? "device-attributes"
+          : response.endsWith("n")
+            ? "status"
+            : "cursor-position",
+        payload: response,
+      };
+    },
+  );
 }
 
 export function isTerminalMousePayload(payload: string): boolean {

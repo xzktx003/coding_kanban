@@ -129,7 +129,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - live PTY replay 上限默认 4 MiB，可通过 `TERMINAL_SCROLLBACK_BYTES` 调整；tmux observe/refresh 默认捕获最近 20000 行，可通过 `TERMINAL_TMUX_CAPTURE_LINES` 调整；registry fallback 默认保留 5000 条，可通过 `TERMINAL_REGISTRY_OUTPUT_ENTRIES` 调整；浏览器 xterm 默认保留 20000 行，可通过 `VITE_TERMINAL_SCROLLBACK_LINES` 调整。
 - replay 阶段会缓冲 live frame，避免新输出和历史输出乱序。
 - 前端会在 replay complete 后解锁 stdin；8 秒兜底避免永久无法输入。
-- 后端会过滤终端自动响应 payload，避免 CPR/设备属性响应被写回真实 PTY。
+- 后端只清理会污染提示符的 Secondary DA 与 OSC 色彩回复；其余 live DA/DSR/CPR 按终端输出查询类型匹配后写回 PTY。输出 `CSI c`、`CSI 5n`、`CSI 6n` 后，普通 stdin 会在 250ms 上限内等待对应回复，陈旧或类型不符的回复直接丢弃，避免 `5Rnode` 这类协议残片进入 shell。
 - 支持 resize 消息和 binary 消息，binary 用于 tmux 鼠标等二进制事件。
 - 前端 `TerminalView` 支持 OSC 52 剪贴板写入，允许 tmux copy-mode、SSH 会话或 CLI 工具把当前终端 pane 内复制内容写入浏览器剪贴板；该能力只消费终端输出中的 clipboard target 请求，不改变 stdin、resize 或 tmux 鼠标事件转发。
 - 轻量预览模式下，默认只有当前聚焦主终端发送 resize 和 stdin；非活跃区域依赖会话 `outputPreview` 展示轻量文本预览。服务端只用包含足够可读字母、数字或中日韩字符的输出块更新预览，并对受管 tmux 使用更严格的碎片阈值；纯光标、擦除和边框绘制块仍参与活动检测但不会覆盖已有可读文本。前端继续清理 ANSI 与终端字符集切换序列。
@@ -137,7 +137,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 完整预览模式下，非活跃卡片和右侧栏会恢复只读 `TerminalView`，因此会重新建立终端 WebSocket，适合需要实时小窗预览的场景。
 - 前端资源诊断会记录 `/ws/agent-sessions` 全量快照消息速率和大小、`/ws/agent-sessions/:id/terminal` 实时流速率、终端 WebSocket 生命周期、DOM 中的 xterm/预览/监控窗格/VS Code iframe 数量，以及浏览器暴露的 JS heap；同时每秒按需调用 `/api/diagnostics/terminal-history` 和 `/api/diagnostics/vscode-web-proxy` 读取后端终端历史与 VS Code 代理吞吐。诊断只在面板打开时刷新，不保存历史。
 - 后端对终端输出导致的全量会话快照做约 1 秒的 trailing 合并广播，降低轻量预览长期运行时的网络流量、浏览器 JSON 解析和 React 更新频率；新建、删除、聚焦、重命名等结构性变化仍通过即时快照刷新。
-- 本地 tmux 输入按语义分流：普通文本、快捷键和 bracketed paste 通过有序 `send-keys` 写入；鼠标协议及 `Ctrl+A` / `Ctrl+B` 前缀命令写入 attached tmux client PTY。路由器查询当前 `prefix` key table，凡绑定 `command-prompt` 或 `confirm-before` 的前缀键都进入持续 client-prompt 状态，后续编辑保持 PTY 通道直到 Enter 或 Ctrl+C；`status-keys vi` 的 Escape 仅切换编辑模式。裸 Ctrl+C 也固定走 client PTY，用于取消跨服务重载残留且已无法由内存状态识别的 prompt；无 prompt 时 tmux 把它正常转发给活动 pane。只要 attached client PTY 存在，普通 pane 输入就以 tmux session 为动态目标；PTY 不存在时才恢复持久化 pane 绑定。
+- 本地 tmux 先用 `tmux list-clients` 将 attached client PID 与 PTY PID 精确匹配；回放可见但 attach 尚未完成时，首个输入不会误写入启动 shell，而是短暂等待或安全回退 pane adapter。确认后 attached tmux client PTY 是普通文本、快捷键、bracketed paste、鼠标协议及 `Ctrl+A` / `Ctrl+B` 前缀的唯一实时输入通道，确保输入始终跟随可见的当前 pane；tmux client 不支持 extended keys 的 CSI-u 修饰键例外用 `send-keys -l` 保留原始字节。路由器仍查询当前 `prefix` key table，记录 `command-prompt` / `confirm-before` 状态以便连接关闭、重连和恢复时用 Ctrl+C 清理残留 prompt；`status-keys vi` 的 Escape 仅切换编辑模式。
 - 服务生命周期把 Fastify 关闭与 PTY 关闭绑定：SIGTERM/SIGINT 先执行 `app.close()`，`onClose` 再统一 dispose 本进程创建的 PTY，最后退出。这样 `tsx watch` 与脚本重启不会把旧 `tmux attach` 进程留给 PID 1，也不会持续增加 session 的 attached client 数量。
 - `TerminalView` 开启 xterm 的 `macOptionIsMeta`，因此 macOS Option 与 Windows/Linux Alt 在浏览器能够接收事件时使用相同的 Meta 编码。adapter 在完整 CSI 键序列之后识别 `ESC+Space` 及常用 `ESC+字母/数字`，并原子映射为 tmux `M-*` 键，避免 Codex 把两个分离事件解释为 Escape 和普通输入；Windows 窗口管理器若截获 `Alt+Space`，使用已支持的 `Shift+Enter` 作为换行备用键。
 - Safari 的快速文本输入额外经过短时恢复状态机：`TerminalView` 记录已经通过 xterm `onData` 发出的普通文本，并在原生 `insertText` 冒泡时按顺序抵消已发送部分，仅把缺失后缀送入原有 WebSocket 输入链路。状态按 100ms 过期，控制序列会清空状态，IME composition 不参与恢复，避免重复输入或跨按键误匹配。

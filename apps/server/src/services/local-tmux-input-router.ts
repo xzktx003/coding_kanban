@@ -6,15 +6,24 @@ import type {
 import type { AgentSessionRegistry } from "./agent-session-registry.js";
 import type { LocalTmuxAdapter } from "./local-tmux-adapter.js";
 import type { TmuxClientPromptBinding } from "./local-tmux-adapter.js";
-import type { PtyRuntimeManager } from "./pty-runtime-manager.js";
+import { isTerminalProtocolResponsePayload } from "./terminal-control-filter.js";
+import type {
+  PtyRuntimeManager,
+  PtyRuntimeWriteOptions,
+} from "./pty-runtime-manager.js";
 
 interface LocalTmuxInputRouterDependencies {
   registry: Pick<AgentSessionRegistry, "get">;
   tmuxAdapter: Pick<LocalTmuxAdapter, "clearInputState" | "writeInput"> &
     Partial<Pick<LocalTmuxAdapter, "getClientPromptBinding">>;
-  ptyRuntimeManager: Pick<PtyRuntimeManager, "has" | "write">;
-  now?: () => number;
-  sleep?: (milliseconds: number) => Promise<void>;
+  ptyRuntimeManager: Pick<PtyRuntimeManager, "has"> & {
+    write(
+      agentSessionId: string,
+      input: string,
+      options?: PtyRuntimeWriteOptions,
+    ): void | Promise<void>;
+  } &
+    Partial<Pick<PtyRuntimeManager, "waitForTmuxClientReady">>;
 }
 
 interface LocalTmuxInputOptions {
@@ -33,6 +42,12 @@ function isTmuxClientCancelInput(input: string): boolean {
   return input === "\x03";
 }
 
+function requiresTmuxPaneAdapter(input: string): boolean {
+  // tmux clients without extended-keys support consume CSI-u modified keys
+  // before they reach the active pane. send-keys -l preserves these bytes.
+  return /^(?:\x1b\[\d+(?:;\d+)+u)+$/u.test(input);
+}
+
 function containsTmuxClientPromptTerminator(input: string): boolean {
   return /[\r\n\x03]/u.test(input);
 }
@@ -47,13 +62,7 @@ const DEFAULT_TMUX_CLIENT_PROMPT_INPUTS = new Set([
   ":",
   "f",
 ]);
-const TMUX_CLIENT_INPUT_SETTLE_MS = 50;
-
 export class LocalTmuxInputRouter {
-  private readonly clientInputSettleDeadlineBySessionId = new Map<
-    string,
-    number
-  >();
   private readonly clientPromptBySessionId = new Map<
     string,
     TmuxClientPromptBinding
@@ -70,18 +79,21 @@ export class LocalTmuxInputRouter {
     input: StdinAgentSessionInput,
     options: LocalTmuxInputOptions = {},
   ): Promise<AgentSessionRecord> {
+    if (isTerminalProtocolResponsePayload(input.input)) {
+      return this.writeTerminalProtocolResponse(agentSession, input);
+    }
+
     return this.enqueue(agentSession.id, () =>
       this.writeNow(agentSession, input, options),
     );
   }
 
   clear(agentSessionId: string): Promise<void> {
-    return this.enqueue(agentSessionId, () => {
+    return this.enqueue(agentSessionId, async () => {
       const hadPendingPrefix =
         this.pendingPrefixSessionIds.delete(agentSessionId);
       const hadClientPrompt =
         this.clientPromptBySessionId.delete(agentSessionId);
-      this.clientInputSettleDeadlineBySessionId.delete(agentSessionId);
 
       try {
         if (
@@ -89,7 +101,10 @@ export class LocalTmuxInputRouter {
           this.dependencies.ptyRuntimeManager.has(agentSessionId)
         ) {
           try {
-            this.dependencies.ptyRuntimeManager.write(agentSessionId, "\x03");
+            await this.dependencies.ptyRuntimeManager.write(
+              agentSessionId,
+              "\x03",
+            );
           } catch {
             // The PTY can exit between has() and write(); state cleanup must
             // still complete so reconnect and delete operations can proceed.
@@ -128,7 +143,19 @@ export class LocalTmuxInputRouter {
     options: LocalTmuxInputOptions,
   ): Promise<AgentSessionRecord> {
     const { registry, tmuxAdapter, ptyRuntimeManager } = this.dependencies;
-    const now = this.dependencies.now?.() ?? Date.now();
+    const ptyAvailable = ptyRuntimeManager.has(agentSession.id);
+    const ptyReady = await this.isAttachedTmuxClientReady(
+      agentSession.id,
+      ptyAvailable,
+    );
+
+    // Scrollback replay can reach the browser before `tmux attach` has
+    // finished. Do not send early bytes to the shell that is about to exec
+    // tmux; the pane adapter preserves them until the client is available.
+    if (ptyAvailable && !ptyReady) {
+      return this.writeThroughAdapter(agentSession, input);
+    }
+
     const clientPrompt = this.clientPromptBySessionId.get(agentSession.id);
     const hadClientPrompt = clientPrompt !== undefined;
     const hadPendingPrefix = this.pendingPrefixSessionIds.has(agentSession.id);
@@ -160,6 +187,7 @@ export class LocalTmuxInputRouter {
     }
 
     const shouldUsePty =
+      (ptyReady && !requiresTmuxPaneAdapter(input.input)) ||
       options.forcePty === true ||
       hadClientPrompt ||
       hadPendingPrefix ||
@@ -168,8 +196,7 @@ export class LocalTmuxInputRouter {
       isClientCancelInput;
 
     if (shouldUsePty) {
-      if (!ptyRuntimeManager.has(agentSession.id)) {
-        this.clientInputSettleDeadlineBySessionId.delete(agentSession.id);
+      if (!ptyReady) {
         this.pendingPrefixSessionIds.delete(agentSession.id);
         this.clientPromptBySessionId.delete(agentSession.id);
         return options.forcePty || hadClientPrompt || openedClientPrompt
@@ -177,19 +204,8 @@ export class LocalTmuxInputRouter {
           : this.writeThroughAdapter(agentSession, input);
       }
 
-      ptyRuntimeManager.write(agentSession.id, input.input);
-      if (isClientEscapeInput || isClientCancelInput) {
-        this.clientInputSettleDeadlineBySessionId.set(
-          agentSession.id,
-          now + TMUX_CLIENT_INPUT_SETTLE_MS,
-        );
-      }
+      await ptyRuntimeManager.write(agentSession.id, input.input);
       return registry.get(agentSession.id);
-    }
-
-    const clientSettle = this.waitForClientInputToSettle(agentSession.id);
-    if (clientSettle) {
-      await clientSettle;
     }
 
     try {
@@ -199,9 +215,33 @@ export class LocalTmuxInputRouter {
         throw error;
       }
 
-      ptyRuntimeManager.write(agentSession.id, input.input);
+      await ptyRuntimeManager.write(agentSession.id, input.input);
       return registry.get(agentSession.id);
     }
+  }
+
+  private async writeTerminalProtocolResponse(
+    agentSession: AgentSessionRecord,
+    input: StdinAgentSessionInput,
+  ): Promise<AgentSessionRecord> {
+    const { ptyRuntimeManager, registry } = this.dependencies;
+    const ptyAvailable = ptyRuntimeManager.has(agentSession.id);
+    const ptyReady = await this.isAttachedTmuxClientReady(
+      agentSession.id,
+      ptyAvailable,
+    );
+
+    // Before `tmux attach` owns the client PTY, a terminal response would be
+    // interpreted by the launch shell. Dropping it is safer than falling back
+    // to send-keys; the runtime's pending query will release on its timeout.
+    if (!ptyReady) {
+      return registry.get(agentSession.id);
+    }
+
+    await ptyRuntimeManager.write(agentSession.id, input.input, {
+      terminalProtocolResponse: true,
+    });
+    return registry.get(agentSession.id);
   }
 
   private async getClientPromptBinding(
@@ -227,28 +267,27 @@ export class LocalTmuxInputRouter {
     }
   }
 
-  private waitForClientInputToSettle(
+  private async isAttachedTmuxClientReady(
     agentSessionId: string,
-  ): Promise<void> | undefined {
-    const deadline =
-      this.clientInputSettleDeadlineBySessionId.get(agentSessionId);
-    if (deadline === undefined) {
-      return undefined;
+    ptyAvailable: boolean,
+  ): Promise<boolean> {
+    if (!ptyAvailable) {
+      return false;
     }
 
-    this.clientInputSettleDeadlineBySessionId.delete(agentSessionId);
-    const remaining = deadline - (this.dependencies.now?.() ?? Date.now());
-    if (remaining <= 0) {
-      return undefined;
+    const waiter = this.dependencies.ptyRuntimeManager.waitForTmuxClientReady;
+    if (!waiter) {
+      return true;
     }
 
-    if (this.dependencies.sleep) {
-      return this.dependencies.sleep(remaining);
+    try {
+      return await waiter.call(
+        this.dependencies.ptyRuntimeManager,
+        agentSessionId,
+      );
+    } catch {
+      return false;
     }
-
-    return new Promise<void>((resolve) => {
-      setTimeout(resolve, remaining);
-    });
   }
 
   private writeThroughAdapter(
@@ -256,23 +295,20 @@ export class LocalTmuxInputRouter {
     input: StdinAgentSessionInput,
   ): Promise<AgentSessionRecord> {
     if (
-      !this.dependencies.ptyRuntimeManager.has(agentSession.id) ||
-      !agentSession.transportRef?.tmuxSession
+      this.dependencies.ptyRuntimeManager.has(agentSession.id) &&
+      agentSession.transportRef?.tmuxSession
     ) {
-      return this.dependencies.tmuxAdapter.writeInput(agentSession, input);
+      const { tmuxPane: _fixedPane, ...activePaneTarget } =
+        agentSession.transportRef;
+      return this.dependencies.tmuxAdapter.writeInput(
+        {
+          ...agentSession,
+          transportRef: activePaneTarget,
+        },
+        input,
+      );
     }
 
-    // The attached client can change its active pane without sending a mouse
-    // or prefix event through this router. Target the session while it is live
-    // so keyboard input always follows the pane currently shown in the PTY.
-    const { tmuxPane: _fixedPane, ...activePaneTarget } =
-      agentSession.transportRef;
-    return this.dependencies.tmuxAdapter.writeInput(
-      {
-        ...agentSession,
-        transportRef: activePaneTarget,
-      },
-      input,
-    );
+    return this.dependencies.tmuxAdapter.writeInput(agentSession, input);
   }
 }
