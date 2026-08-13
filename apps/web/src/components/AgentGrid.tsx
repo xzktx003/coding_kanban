@@ -19,6 +19,10 @@ import { AgentGridCard } from "./AgentGridCard";
 import { FilterBar, type FilterState } from "./FilterBar";
 import { SessionGroupHeader } from "./SessionGroupControls";
 import {
+  type AgentGridSortMode,
+  sortAgentSessions,
+} from "../lib/agent-grid-sort";
+import {
   groupSessions,
   isSessionGroupCollapsed,
   type SessionGroupState,
@@ -50,6 +54,8 @@ interface AgentGridProps {
   onMoveSessionToGroup?: (sessionId: string, groupId: string | null) => void;
   onRenameSessionGroup?: (groupId: string) => void;
   onToggleSessionGroup?: (groupId: string, scope?: string) => void;
+  sortMode?: AgentGridSortMode;
+  onSortModeChange?: (mode: AgentGridSortMode) => void;
 }
 
 type AgentKanbanColumnId = "response" | "executing" | "review" | "ready";
@@ -151,6 +157,7 @@ export function getAgentKanbanColumnId(
 
 export function buildAgentKanbanColumns(
   sessions: AgentSessionRecord[],
+  sortMode: AgentGridSortMode = "recent",
 ): AgentKanbanColumn[] {
   const sessionsByColumn: Record<AgentKanbanColumnId, AgentSessionRecord[]> = {
     response: [],
@@ -165,7 +172,7 @@ export function buildAgentKanbanColumns(
 
   return agentKanbanColumnDefinitions.map((column) => ({
     ...column,
-    sessions: sessionsByColumn[column.id],
+    sessions: sortAgentSessions(sessionsByColumn[column.id], sortMode),
   }));
 }
 
@@ -195,6 +202,8 @@ export function AgentGrid({
   onMoveSessionToGroup,
   onRenameSessionGroup,
   onToggleSessionGroup,
+  sortMode = "recent",
+  onSortModeChange,
 }: AgentGridProps) {
   const gridRef = useRef<HTMLDivElement | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
@@ -202,8 +211,8 @@ export function AgentGrid({
     useState<GridMetrics>(defaultGridMetrics);
   const groupingEnabled = sessionGroups.groups.length > 0;
   const kanbanColumns = useMemo(
-    () => buildAgentKanbanColumns(sessions),
-    [sessions],
+    () => buildAgentKanbanColumns(sessions, sortMode),
+    [sessions, sortMode],
   );
   const kanbanColumnSizeKey = kanbanColumns
     .map((column) => column.sessions.length)
@@ -310,6 +319,20 @@ export function AgentGrid({
           onFiltersChange={onFiltersChange}
         />
         <div className="agent-grid-toolbar-actions">
+          <label className="agent-grid-sort-control">
+            <span>排序</span>
+            <select
+              aria-label="看板排序"
+              value={sortMode}
+              onChange={(event) =>
+                onSortModeChange?.(event.target.value as AgentGridSortMode)
+              }
+            >
+              <option value="recent">最近活动</option>
+              <option value="project">项目</option>
+              <option value="name">名称</option>
+            </select>
+          </label>
           <button
             className="session-group-add-button"
             onClick={() => onCreateSessionGroup?.()}

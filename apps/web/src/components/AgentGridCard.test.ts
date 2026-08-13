@@ -36,6 +36,38 @@ test("grid cards show structured task summaries above terminal previews", () => 
   assert.match(markup, /terminal-preview-session-summary/);
 });
 
+test("grid cards show compact project and Git summaries", () => {
+  const markup = renderToStaticMarkup(
+    createElement(AgentGridCard, {
+      session: {
+        id: "session-git",
+        workspaceId: "default",
+        sourceType: "local",
+        agentKind: "codex",
+        displayName: "Git Session",
+        connectionState: "online",
+        interactionState: "idle",
+        projectName: "coding_kanban",
+        gitBranch: "feature/summary",
+        gitIsWorktree: true,
+        gitChangedFiles: 5,
+        gitAddedLines: 82,
+        gitDeletedLines: 17,
+      },
+      onDoubleClick: () => {},
+      onDelete: () => {},
+      onReconnect: () => {},
+    }),
+  );
+
+  assert.match(markup, /grid-card-git-summary/);
+  assert.match(markup, /coding_kanban/);
+  assert.match(markup, /feature\/summary · worktree/);
+  assert.match(markup, /5 文件/);
+  assert.match(markup, /\+82/);
+  assert.match(markup, /-17/);
+});
+
 test("grid cards keep the fixed height when task summaries are visible", () => {
   const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
   assert.match(css, /\.grid-card\s*\{[\s\S]*?height:\s*240px;/);
@@ -44,6 +76,10 @@ test("grid cards keep the fixed height when task summaries are visible", () => {
     /\.grid-card-task-summary\s*\{[\s\S]*?max-height:\s*48px;/,
   );
   assert.match(css, /\.grid-card-terminal\s*\{[\s\S]*?min-height:\s*0;/);
+  assert.match(
+    css,
+    /\.grid-card-git-summary\s*\{[\s\S]*?max-height:\s*24px;/,
+  );
 });
 
 function targetMatching(...matchedSelectors: string[]): EventTarget {

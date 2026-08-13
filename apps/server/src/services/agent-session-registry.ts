@@ -169,6 +169,26 @@ export class AgentSessionRegistry {
         ...(persisted.taskSummaryUpdatedAt
           ? { taskSummaryUpdatedAt: persisted.taskSummaryUpdatedAt }
           : {}),
+        ...(persisted.projectName ? { projectName: persisted.projectName } : {}),
+        ...(persisted.repositoryRoot
+          ? { repositoryRoot: persisted.repositoryRoot }
+          : {}),
+        ...(persisted.gitBranch ? { gitBranch: persisted.gitBranch } : {}),
+        ...(persisted.gitChangedFiles !== undefined
+          ? { gitChangedFiles: persisted.gitChangedFiles }
+          : {}),
+        ...(persisted.gitAddedLines !== undefined
+          ? { gitAddedLines: persisted.gitAddedLines }
+          : {}),
+        ...(persisted.gitDeletedLines !== undefined
+          ? { gitDeletedLines: persisted.gitDeletedLines }
+          : {}),
+        ...(persisted.gitIsWorktree !== undefined
+          ? { gitIsWorktree: persisted.gitIsWorktree }
+          : {}),
+        ...(persisted.gitSummaryUpdatedAt
+          ? { gitSummaryUpdatedAt: persisted.gitSummaryUpdatedAt }
+          : {}),
         transportRef: persisted.transportRef
           ? {
               tmuxSession: persisted.transportRef.tmuxSession,

@@ -4,6 +4,7 @@ import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import { CardMoreMenu } from "./CardMoreMenu";
 import { AgentGridTaskSummary } from "./AgentGridTaskSummary";
+import { AgentGridGitSummary } from "./AgentGridGitSummary";
 import { LazyTerminalView } from "./LazyTerminalView";
 import { SessionGroupMenu } from "./SessionGroupControls";
 import { TerminalPreview } from "./TerminalPreview";
@@ -249,6 +250,7 @@ export function AgentGridCard({
         initialUserSummary={session.lastUserMessageSummary}
         lastOutputAt={session.lastOutputAt}
       />
+      <AgentGridGitSummary session={session} />
       <div className="grid-card-terminal">
         {useLightweightTerminalPreview ? (
           <TerminalPreview session={session} suspended={terminalSuspended} />

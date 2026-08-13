@@ -78,6 +78,11 @@ import {
   shouldOfferAppUpdate,
 } from "./lib/app-update";
 import {
+  loadAgentGridSortMode,
+  saveAgentGridSortMode,
+  type AgentGridSortMode,
+} from "./lib/agent-grid-sort";
+import {
   deriveLayoutMode,
   loadLayoutState,
   saveLayoutState,
@@ -364,6 +369,8 @@ export default function App() {
     dirQuery: "",
     tag: null,
   });
+  const [agentGridSortMode, setAgentGridSortMode] =
+    useState<AgentGridSortMode>(loadAgentGridSortMode);
   const [useLightweightTerminalPreview, setUseLightweightTerminalPreview] =
     useState(loadTerminalPreviewLightweightMode);
   const [terminalFontSize, setTerminalFontSize] =
@@ -793,6 +800,14 @@ export default function App() {
     if (filters.tag && !(s.tags ?? []).includes(filters.tag)) return false;
     return true;
   });
+
+  const handleAgentGridSortModeChange = useCallback(
+    (mode: AgentGridSortMode) => {
+      setAgentGridSortMode(mode);
+      saveAgentGridSortMode(mode);
+    },
+    [],
+  );
 
   const acknowledgeFocusedSession = useCallback((id: string) => {
     focusAgentSession({ agentSessionId: id })
@@ -1816,6 +1831,8 @@ export default function App() {
             <AgentGrid
               sessions={filteredSessions}
               allSessions={visibleSessions}
+              sortMode={agentGridSortMode}
+              onSortModeChange={handleAgentGridSortModeChange}
               filters={filters}
               onFiltersChange={setFilters}
               onFocusSession={handleFocusSession}

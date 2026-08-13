@@ -122,6 +122,32 @@ function parseSession(value: unknown): AgentSessionRecord | null {
   const lastUserMessageSummary = optionalString(value.lastUserMessageSummary);
   const lastAgentMessageSummary = optionalString(value.lastAgentMessageSummary);
   const taskSummaryUpdatedAt = optionalString(value.taskSummaryUpdatedAt);
+  const gitSummaryFields = {
+    ...(optionalString(value.projectName)
+      ? { projectName: optionalString(value.projectName) }
+      : {}),
+    ...(optionalString(value.repositoryRoot)
+      ? { repositoryRoot: optionalString(value.repositoryRoot) }
+      : {}),
+    ...(optionalString(value.gitBranch)
+      ? { gitBranch: optionalString(value.gitBranch) }
+      : {}),
+    ...(typeof value.gitChangedFiles === "number"
+      ? { gitChangedFiles: value.gitChangedFiles }
+      : {}),
+    ...(typeof value.gitAddedLines === "number"
+      ? { gitAddedLines: value.gitAddedLines }
+      : {}),
+    ...(typeof value.gitDeletedLines === "number"
+      ? { gitDeletedLines: value.gitDeletedLines }
+      : {}),
+    ...(typeof value.gitIsWorktree === "boolean"
+      ? { gitIsWorktree: value.gitIsWorktree }
+      : {}),
+    ...(optionalString(value.gitSummaryUpdatedAt)
+      ? { gitSummaryUpdatedAt: optionalString(value.gitSummaryUpdatedAt) }
+      : {}),
+  };
 
   return {
     id: value.id,
@@ -153,6 +179,7 @@ function parseSession(value: unknown): AgentSessionRecord | null {
     ...(lastUserMessageSummary ? { lastUserMessageSummary } : {}),
     ...(lastAgentMessageSummary ? { lastAgentMessageSummary } : {}),
     ...(taskSummaryUpdatedAt ? { taskSummaryUpdatedAt } : {}),
+    ...gitSummaryFields,
   };
 }
 
@@ -240,6 +267,26 @@ function projectSession(session: AgentSessionRecord): AgentSessionRecord {
       : {}),
     ...(session.taskSummaryUpdatedAt
       ? { taskSummaryUpdatedAt: session.taskSummaryUpdatedAt }
+      : {}),
+    ...(session.projectName ? { projectName: session.projectName } : {}),
+    ...(session.repositoryRoot
+      ? { repositoryRoot: session.repositoryRoot }
+      : {}),
+    ...(session.gitBranch ? { gitBranch: session.gitBranch } : {}),
+    ...(session.gitChangedFiles !== undefined
+      ? { gitChangedFiles: session.gitChangedFiles }
+      : {}),
+    ...(session.gitAddedLines !== undefined
+      ? { gitAddedLines: session.gitAddedLines }
+      : {}),
+    ...(session.gitDeletedLines !== undefined
+      ? { gitDeletedLines: session.gitDeletedLines }
+      : {}),
+    ...(session.gitIsWorktree !== undefined
+      ? { gitIsWorktree: session.gitIsWorktree }
+      : {}),
+    ...(session.gitSummaryUpdatedAt
+      ? { gitSummaryUpdatedAt: session.gitSummaryUpdatedAt }
       : {}),
   };
 }

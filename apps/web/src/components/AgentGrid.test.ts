@@ -122,6 +122,49 @@ describe("AgentGrid", () => {
     assert.equal((markup.match(/data-kanban-column=/g) ?? []).length, 4);
   });
 
+  it("sorts sessions inside each column using the selected board order", () => {
+    const sessions = [
+      makeSession({
+        id: "zeta-session",
+        displayName: "Zeta",
+        interactionState: "running",
+        projectName: "alpha-project",
+      }),
+      makeSession({
+        id: "alpha-session",
+        displayName: "Alpha",
+        interactionState: "running",
+        projectName: "beta-project",
+      }),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentGrid, {
+        sessions,
+        allSessions: sessions,
+        filters: {
+          host: null,
+          kind: null,
+          transport: null,
+          dirQuery: "",
+          tag: null,
+        },
+        sortMode: "name",
+        onSortModeChange: () => {},
+        onDeleteSession: () => {},
+        onFiltersChange: () => {},
+        onFocusSession: () => {},
+        onReconnectSession: () => {},
+      }),
+    );
+
+    assert.match(markup, /aria-label="看板排序"/);
+    assert.match(
+      markup,
+      /data-kanban-column="executing"[\s\S]*?terminal-preview-alpha-session[\s\S]*?terminal-preview-zeta-session/,
+    );
+  });
+
   it("keeps user groups inside their matching status columns", () => {
     const sessions = [
       makeSession({

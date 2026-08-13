@@ -1089,6 +1089,29 @@ input {
   flex-wrap: wrap;
 }
 
+.agent-grid-sort-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.agent-grid-sort-control select {
+  min-height: 30px;
+  padding: 0 24px 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.agent-grid-sort-control select:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
 .session-group-add-button {
   min-height: 30px;
   padding: 0 10px;
@@ -1972,6 +1995,50 @@ input {
 
 .grid-card-task-summary-row--agent span {
   color: #a9ebb5;
+}
+
+.grid-card-git-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  max-height: 24px;
+  padding: 3px 12px;
+  overflow: hidden;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(7, 11, 15, 0.76);
+  color: rgba(244, 241, 234, 0.62);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.grid-card-git-project,
+.grid-card-git-details,
+.grid-card-git-details > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.grid-card-git-project {
+  max-width: 38%;
+  color: #b9c8d8;
+}
+
+.grid-card-git-details {
+  display: flex;
+  flex: 1;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.grid-card-git-added,
+.grid-card-git-clean {
+  color: #86efac;
+}
+
+.grid-card-git-deleted {
+  color: #ff9b8a;
 }
 
 .grid-card-terminal::after {

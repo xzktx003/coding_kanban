@@ -4,6 +4,7 @@ import type {
   AgentSessionDetailResponse,
   AgentTranscriptResponse,
   AgentTaskSummaryResponse,
+  AgentGitSummary,
   AgentSessionSnapshotEvent,
   AgentSessionRecord,
   ChmodInput,
@@ -109,6 +110,14 @@ export function getAgentTaskSummary(
 ): Promise<AgentTaskSummaryResponse> {
   return request<AgentTaskSummaryResponse>(
     `/api/agent-sessions/${agentSessionId}/task-summary`,
+  );
+}
+
+export function getAgentGitSummary(
+  agentSessionId: string,
+): Promise<AgentGitSummary> {
+  return request<AgentGitSummary>(
+    `/api/agent-sessions/${agentSessionId}/git-summary`,
   );
 }
 

@@ -66,6 +66,14 @@ export interface AgentSessionRecord {
   lastUserMessageSummary?: string;
   lastAgentMessageSummary?: string;
   taskSummaryUpdatedAt?: string;
+  projectName?: string;
+  repositoryRoot?: string;
+  gitBranch?: string;
+  gitChangedFiles?: number;
+  gitAddedLines?: number;
+  gitDeletedLines?: number;
+  gitIsWorktree?: boolean;
+  gitSummaryUpdatedAt?: string;
   controlMode?: AgentControlMode;
   transportRef?: AgentTransportRef;
   agentSessionId?: string;
@@ -167,6 +175,21 @@ export interface AgentTaskSummaryResponse {
   available: boolean;
   lastUserMessageSummary?: string;
   lastAgentMessageSummary?: string;
+  updatedAt: string | null;
+}
+
+export interface AgentGitSummary {
+  available: boolean;
+  projectName?: string;
+  repositoryRoot?: string;
+  branch?: string;
+  head?: string;
+  isGitRepository?: boolean;
+  isWorktree?: boolean;
+  changedFiles?: number;
+  addedLines?: number;
+  deletedLines?: number;
+  unavailableReason?: string;
   updatedAt: string | null;
 }
 

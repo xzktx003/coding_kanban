@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 
 import type {
   AgentSessionRecord,
+  AgentGitSummary,
   AgentTaskSummaryResponse,
   OpenVsCodeWebResponse,
   LaunchRemoteAgentInput,
@@ -23,6 +24,7 @@ import { AgentSessionRegistry } from "../services/agent-session-registry.js";
 import { CodexTranscriptService } from "../services/codex-transcript-service.js";
 import { summarizeCodexTranscript } from "../services/codex-transcript-service.js";
 import { LocalProcessRuntimeManager } from "../services/local-process-runtime-manager.js";
+import { GitProjectSummaryService } from "../services/git-project-summary-service.js";
 import { LocalTmuxAdapter } from "../services/local-tmux-adapter.js";
 import { LocalTmuxInputRouter } from "../services/local-tmux-input-router.js";
 import { PtyRuntimeManager } from "../services/pty-runtime-manager.js";
@@ -126,6 +128,7 @@ interface AgentSessionRoutesOptions {
   remoteLaunchPreflight: RemoteLaunchPreflightLike;
   vsCodeWebManager: VsCodeWebManager;
   codexTranscriptService?: Pick<CodexTranscriptService, "read">;
+  gitProjectSummaryService?: Pick<GitProjectSummaryService, "read">;
 }
 
 export interface ReconnectAgentSessionDependencies {
@@ -236,11 +239,50 @@ export async function registerAgentSessionRoutes(
     remoteLaunchPreflight,
     vsCodeWebManager,
     codexTranscriptService = new CodexTranscriptService(),
+    gitProjectSummaryService = new GitProjectSummaryService(),
   } = options;
 
   fastify.get("/api/health", async () => ({ status: "ok" }));
 
   fastify.get("/api/agent-sessions", async () => registry.list());
+
+  fastify.get<{ Params: { id: string } }>(
+    "/api/agent-sessions/:id/git-summary",
+    async (request): Promise<AgentGitSummary> => {
+      const agentSession = registry.get(request.params.id);
+      const isRemote =
+        Boolean(agentSession.sshTarget) ||
+        Boolean(agentSession.hostId && agentSession.hostId !== "local");
+      if (isRemote) {
+        return {
+          available: false,
+          projectName: agentSession.workingDirectory
+            ?.split("/")
+            .filter(Boolean)
+            .at(-1),
+          unavailableReason: "远端 Git 信息暂不可用",
+          updatedAt: new Date().toISOString(),
+        };
+      }
+
+      const summary = await gitProjectSummaryService.read(
+        agentSession.workingDirectory,
+      );
+      if (summary.available) {
+        registry.updateSession(agentSession.id, {
+          projectName: summary.projectName,
+          repositoryRoot: summary.repositoryRoot,
+          gitBranch: summary.branch,
+          gitChangedFiles: summary.changedFiles,
+          gitAddedLines: summary.addedLines,
+          gitDeletedLines: summary.deletedLines,
+          gitIsWorktree: summary.isWorktree,
+          gitSummaryUpdatedAt: summary.updatedAt ?? undefined,
+        });
+      }
+      return summary;
+    },
+  );
 
   fastify.get<{ Params: { id: string } }>(
     "/api/agent-sessions/:id/task-summary",
