@@ -30,6 +30,11 @@ function runSourcedScript(body, { envFile } = {}) {
     writeFileSync(join(fakeRepoPath, ".env"), envFile, "utf8");
   }
 
+  const childEnv = { ...process.env };
+  delete childEnv.PORT;
+  delete childEnv.SERVER_PORT;
+  delete childEnv.WEB_PORT;
+
   try {
     const result = spawnSync(
       "bash",
@@ -75,7 +80,7 @@ function runSourcedScript(body, { envFile } = {}) {
       ],
       {
         encoding: "utf8",
-        env: { ...process.env },
+        env: childEnv,
       },
     );
 
@@ -381,10 +386,7 @@ test("restart-dev exposes only a CA that verifies the active frontend certificat
     script,
     /openssl verify -CAfile "\$candidate" "\$WEB_HTTPS_CERT"/,
   );
-  assert.match(
-    script,
-    /VITE_DEV_HTTPS_CA_CERT="\$WEB_HTTPS_CA_CERT"/,
-  );
+  assert.match(script, /VITE_DEV_HTTPS_CA_CERT="\$WEB_HTTPS_CA_CERT"/);
 });
 
 test("restart-dev detaches dev servers from the invoking shell session", () => {
