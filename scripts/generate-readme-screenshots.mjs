@@ -66,7 +66,27 @@ const demoSessions = [
     workingDirectory: process.cwd(),
     tmuxSessionName: 'readme-demo',
   },
+  {
+    displayName: 'README Review Demo',
+    agentKind: 'codex',
+    command: 'printf "README review completed\\n"',
+    workingDirectory: process.cwd(),
+  },
 ];
+
+async function updateSessionByDisplayName(displayName, updates) {
+  const sessions = await listSessions();
+  const target = sessions.find((session) => session.displayName === displayName);
+
+  if (!target) {
+    throw new Error(`missing demo session: ${displayName}`);
+  }
+
+  return requestJson(`/api/agent-sessions/${target.id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(updates),
+  });
+}
 
 function runTmux(args) {
   return execFileSync(tmuxBinary, args, {
@@ -136,6 +156,19 @@ async function waitForVsCodeDrawer(page) {
 
   await page.waitForTimeout(1_500);
   return await frame.isVisible().catch(() => false);
+}
+
+async function dismissBlockingBanners(page) {
+  for (const testId of [
+    'dismiss-app-update',
+    'dismiss-remote-update',
+    'dismiss-restore-banner',
+  ]) {
+    const button = page.getByTestId(testId);
+    if (await button.isVisible().catch(() => false)) {
+      await button.click({ force: true });
+    }
+  }
 }
 
 async function requestJson(pathname, init) {
@@ -217,6 +250,19 @@ async function ensureDemoSessions() {
     );
 
     if (ready) {
+      const reviewDeadline = Date.now() + 10_000;
+      while (Date.now() < reviewDeadline) {
+        const review = (await listSessions()).find(
+          (item) => item.displayName === 'README Review Demo',
+        );
+        if (review?.interactionState === 'exited' || review?.interactionState === 'idle') {
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      await updateSessionByDisplayName('README Review Demo', {
+        hasUnreadCompletion: true,
+      });
       return;
     }
 
@@ -256,11 +302,24 @@ async function main() {
     const page = await context.newPage();
 
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' });
+    await page.addStyleTag({
+      content: '.app-update-banner { display: none !important; }',
+    });
     await page.waitForSelector('.grid-card');
     await page.waitForTimeout(6_000);
+    await dismissBlockingBanners(page);
 
     await page.screenshot({
       path: path.join(outputDir, 'board-overview.png'),
+      fullPage: true,
+    });
+
+    const sortSelect = page.getByRole('combobox', { name: '看板排序' });
+    if (await sortSelect.isVisible().catch(() => false)) {
+      await sortSelect.selectOption('project');
+    }
+    await page.screenshot({
+      path: path.join(outputDir, 'board-sorting-and-summaries.png'),
       fullPage: true,
     });
 
@@ -318,7 +377,32 @@ async function main() {
       fullPage: true,
     });
 
-    await page.getByTestId('file-browser-toggle').click();
+    const changesButton = page.getByRole('button', { name: '变更', exact: true });
+    if (await changesButton.isVisible().catch(() => false)) {
+      await changesButton.click();
+      await page.getByTestId('changes-panel').waitFor();
+      await page.waitForTimeout(1_000);
+      await page.screenshot({
+        path: path.join(outputDir, 'changes-review.png'),
+        fullPage: true,
+      });
+      const fullscreenButton = page.getByRole('button', { name: '全屏查看' });
+      if (await fullscreenButton.isVisible().catch(() => false)) {
+        await fullscreenButton.click();
+        await page.getByRole('dialog', { name: '全屏文件变更' }).waitFor();
+        await page.screenshot({
+          path: path.join(outputDir, 'changes-fullscreen-diff.png'),
+          fullPage: true,
+        });
+        await page.getByRole('button', { name: '退出全屏' }).click({ force: true });
+      }
+    }
+
+    const topBarExpand = page.getByTestId('top-bar-expand');
+    if (await topBarExpand.isVisible().catch(() => false)) {
+      await topBarExpand.click();
+    }
+    await page.getByTestId('file-browser-toggle').click({ force: true });
     await page.getByTestId('file-browser-drawer').waitFor();
     await page.getByTestId('file-entry-README.md').click();
     await page.locator('.file-browser-preview-text').waitFor();
@@ -337,6 +421,21 @@ async function main() {
 
     await page.getByRole('button', { name: '返回宫格' }).click();
     await page.waitForSelector('.grid-card');
+
+    const resourceMenu = page.getByTestId('resource-tuning-menu-toggle');
+    if (await resourceMenu.isVisible().catch(() => false)) {
+      await resourceMenu.click();
+      const diagnosticsButton = page.getByTestId('resource-diagnostics-toggle');
+      if (await diagnosticsButton.isVisible().catch(() => false)) {
+        await diagnosticsButton.click();
+        await page.waitForTimeout(500);
+        await page.screenshot({
+          path: path.join(outputDir, 'resource-diagnostics.png'),
+          fullPage: true,
+        });
+        await page.keyboard.press('Escape');
+      }
+    }
 
     await page.keyboard.press('Control+E');
     await page.waitForSelector('[data-testid="quick-tmux-connect-dialog"]');
@@ -371,6 +470,45 @@ async function main() {
       path: path.join(outputDir, 'hidden-sessions-drawer.png'),
       fullPage: true,
     });
+
+    const mobileContext = await browser.newContext({
+      viewport: { width: 430, height: 932 },
+      deviceScaleFactor: 1,
+      isMobile: true,
+      hasTouch: true,
+    });
+    const mobilePage = await mobileContext.newPage();
+    await mobilePage.goto(`${baseUrl}/?view=mobile`, {
+      waitUntil: 'domcontentloaded',
+    });
+    await mobilePage.waitForSelector('.mobile-workbench-page');
+    await mobilePage.waitForTimeout(1_000);
+    await mobilePage.screenshot({
+      path: path.join(outputDir, 'mobile-workspace.png'),
+      fullPage: true,
+    });
+    await mobilePage
+      .getByRole('button', { name: '当前会话', exact: true })
+      .click();
+    await mobilePage.waitForTimeout(800);
+    await mobilePage.screenshot({
+      path: path.join(outputDir, 'mobile-terminal.png'),
+      fullPage: true,
+    });
+    const mobileChangesButton = mobilePage.getByRole('button', {
+      name: '变更',
+      exact: true,
+    });
+    if (await mobileChangesButton.isVisible().catch(() => false)) {
+      await mobileChangesButton.click();
+      await mobilePage.getByTestId('changes-panel').waitFor();
+      await mobilePage.waitForTimeout(800);
+      await mobilePage.screenshot({
+        path: path.join(outputDir, 'mobile-changes.png'),
+        fullPage: true,
+      });
+    }
+    await mobileContext.close();
   } finally {
     await browser?.close().catch(() => {});
     scanFixture.cleanup();

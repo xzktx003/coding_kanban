@@ -1,103 +1,255 @@
 # Coding Kanban
 
-面向 CLI Coding Agent 的本地/内网工作台。
+<p align="center">
+  <strong>面向 CLI Coding Agent 的本地 / 内网多会话工作台</strong><br />
+  把看板、真实终端、tmux、SSH、结构化会话记录、Git Diff、文件浏览器、VS Code Web 和手机接管整合为一个连续工作流。
+</p>
 
-Coding Kanban 把本地 PTY、SSH 远端 PTY、tmux、Agent 工作目录扫描、文件浏览器、VS Code Web、手机端终端控制页放到同一个浏览器工作台里。它的目标不是做公网 SaaS，而是把“同时观察多个 Agent → 聚焦一个终端继续输入 → 旁路查看文件或打开 VS Code → 必要时从手机接管”压缩成一个连续工作流。
+<p align="center">
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#产品视图与功能导览">截图导览</a> ·
+  <a href="#完整功能说明">完整功能</a> ·
+  <a href="#典型工作流">工作流</a> ·
+  <a href="#部署安全与边界">安全边界</a>
+</p>
 
-> 安全边界：后端可以执行终端、SSH、tmux 和文件系统操作。请部署在可信本机或内网环境，不要直接暴露到公网。
+> [!WARNING]
+> Coding Kanban 的后端可以执行终端、SSH、tmux、Git 只读查询和文件系统操作。它面向可信本机或内网环境，**不要直接暴露到公网**。
 
-## 你会用它解决什么
+## 为什么需要 Coding Kanban
 
-- **多 Agent 看板**：同时观察多个 `copilot`、`codex`、`claude` 或 shell 会话，快速判断谁在运行、谁在等待输入。
-- **终端接管**：双击卡片进入聚焦视图，用真实 xterm.js 继续输入；多屏布局可同时监控多个终端，但输入只落到一个“输入中”窗格。
-- **tmux 接入**：扫描本机/远端 tmux，把已有 pane 加入看板；也可以用快捷键快速创建或 attach tmux session。
-- **远端工作流**：读取 `~/.ssh/config`，支持 SSH PTY、SSH tmux、远端文件浏览、远端 VS Code Web。
-- **文件和编辑器**：聚焦终端旁边打开文件浏览器或 VS Code Web，不必在浏览器、终端、编辑器之间反复切窗口。
-- **手机端控制**：用 `/?view=mobile` 打开手机端页面，提供 `Ctrl+C`、`Esc`、方向键、Tab、Enter、EOF、终端历史滑动和双指缩放。
-- **资源控制**：默认轻量预览，避免每张卡片都开终端 WebSocket；资源调节菜单提供 VS Code iframe 省内存、缓存释放和浏览器资源诊断。
+同时运行多个 Copilot、Codex、Claude 或 shell 会话时，真正困难的通常不是“再打开一个终端”，而是：
 
-## 快速导航
+- 哪个 Agent 正在执行，哪个在等待确认，哪个已经完成但还没验收？
+- 如何从几十个 tmux pane 中快速找到目标，并继续输入而不丢上下文？
+- 如何在终端旁边查看任务摘要、Git 变化、文件和完整会话记录？
+- 如何让桌面和手机使用同一套会话，不在移动端重新建立一套工作流？
+- 如何控制大量终端 WebSocket、xterm 和 VS Code iframe 带来的浏览器资源开销？
 
-- [截图导览](#截图导览)
-- [快速启动](#快速启动)
-- [核心功能](#核心功能)
-- [常用工作流](#常用工作流)
-- [资源与性能策略](#资源与性能策略)
-- [仓库结构](#仓库结构)
-- [常用命令](#常用命令)
-- [截图更新](#截图更新)
-- [故障排查](#故障排查)
-- [当前边界](#当前边界)
+Coding Kanban 将这些问题收敛为一条主流程：
 
-## 截图导览
+```text
+扫描 / 新建会话
+      ↓
+四列注意力看板
+      ↓
+聚焦一个终端或同时监控多个终端
+      ↓
+查看结构化记录、Git Changes、文件或 VS Code
+      ↓
+桌面继续工作，或在手机端接管
+```
 
-截图素材位于 `docs/readme-assets/`。如果你刚改过 UI，可以按 [截图更新](#截图更新) 重新生成。
+## 核心能力一览
 
-### 架构总览
+| 能力 | 当前行为 |
+| --- | --- |
+| 注意力看板 | 自动分为“需响应 / 执行中 / 待验收 / 可继续”，列头显示数量 |
+| 卡片上下文 | 展示最后用户任务、最后 Agent 回复、项目、分支/worktree、文件数及增删行 |
+| 已读管理 | 完成态可主动标记已读/未读，状态由服务端持久化 |
+| 排序与分组 | 按最近活动、项目、名称排序；用户分组在四列内独立折叠 |
+| 真实终端 | xterm.js + WebSocket，支持 replay、resize、stdin、控制键和 OSC 52 |
+| 多屏监控 | 1/2/3/4/6/8 屏；多个终端同时观察，但只有一个输入窗格 |
+| tmux | 本地/SSH 扫描、创建、attach、接管、释放、刷新、终止 |
+| Agent 扫描 | 扫描本地或 SSH 工作目录，识别结构化 Agent 会话并与 tmux 合并 |
+| 完整记录 | 本机 Codex JSONL 结构化记录，隐藏 exec 噪声，Markdown/GFM/KaTeX 渲染 |
+| 变更审查 | “本次任务”与“当前工作区”双 Diff，文件筛选、全屏查看、复制和引用 |
+| 文件浏览器 | 本地/SSH 浏览、预览、编辑、上传、下载、拖拽、chmod、Markdown/LaTeX |
+| VS Code Web | 本地与 SSH 远端 code-server，通过 `/vscode/` 内嵌并限制 iframe 缓存 |
+| 手机工作区 | 注意力看板、活动、项目/文件、终端快捷键、完整记录和手机 Diff |
+| 更新与恢复 | 用户确认后 fast-forward 更新；重启后恢复 managed tmux 和布局 |
+| 资源诊断 | xterm、WebSocket、快照吞吐、终端流、VS Code iframe、long task、heap |
 
-![架构总览](docs/readme-assets/architecture-overview.svg)
+## 产品视图与功能导览
 
-### 使用工作流
+截图位于 [docs/readme-assets](docs/readme-assets)。现有截图可以直接浏览；扩展截图脚本已覆盖最新看板、Diff、资源诊断和手机端视图。生成方式见[更新 README 截图](#更新-readme-截图)。
 
-![使用工作流](docs/readme-assets/usage-workflow.svg)
+### 1. 四列注意力看板
 
-### 安装和启动流程
+主页不是简单的终端缩略图墙，而是按用户下一步动作组织会话：
 
-![安装流程](docs/readme-assets/install-flow.svg)
+- **需响应**：Agent 明确等待回答、权限或确认。
+- **执行中**：当前任务仍在运行。
+- **待验收**：任务已经完成，但结果尚未查看或被主动标记为未读。
+- **可继续**：结果已查看、进程已分离，或可以继续输入新任务。
 
-### 看板总览
+卡片固定高度，结构化“任务 / 回复”和 Git 摘要都收在卡片内部，不会因信息增多撑高布局。完成态还可以使用 `○ / ●` 主动标记未读或已读。
 
-宫格展示未隐藏会话，卡片上直接显示名称、状态、Agent 类型、主机、工作目录和轻量终端预览。默认轻量预览不会为每张卡片打开真实 xterm 或终端 WebSocket。
+![四列注意力看板](docs/readme-assets/board-overview.png)
 
-![宫格总览](docs/readme-assets/board-overview.png)
+看板支持按服务器、Agent 类型、tmux、标签和目录筛选；支持按最近活动、项目和名称进行列内排序。用户分组嵌套在状态列中，同一个分组在四列内分别控制展开和收起。
 
-### 聚焦终端
+下面的视图同时展示了排序菜单、结构化任务/回复摘要、Git 分支和增删行统计。摘要优先来自 Agent 的结构化对话记录，不调用大模型二次生成。
 
-双击卡片进入聚焦视图。主区域是真实可输入终端；右侧保留其他会话上下文，也可以折叠减少桌面占用。
+![看板排序与结构化摘要](docs/readme-assets/board-sorting-and-summaries.png)
+
+### 2. 聚焦终端与多屏监控
+
+双击卡片进入聚焦视图。主窗格是真实可输入的 xterm 终端，右侧继续保留全部会话上下文。
 
 ![聚焦终端](docs/readme-assets/focus-view.png)
 
-### 新建会话
+支持单屏、左右双屏、上下双屏、三屏、四屏、六屏和八屏。多个窗格可以同时接收输出，但键盘输入始终只发送给带“当前输入”标识的一个窗格，避免误广播。
 
-新建会话支持本机和 SSH 主机，Agent 类型支持 `copilot`、`codex`、`claude`、`shell`，启动方式支持直接创建或从 tmux 创建。
+右侧会话卡片可以拖入窗格，窗格之间也可以拖拽换位；布局、slot 会话和当前输入窗格会保存到浏览器本地并在刷新后恢复。
+
+### 3. 新建独立会话
+
+每次只创建一个独立会话。可以选择：
+
+- 本机或 SSH 主机。
+- `copilot`、`codex`、`claude` 或 `shell`。
+- `direct` 或受管 `tmux` 模式。
+- 工作目录、显示名称和所属用户分组。
 
 ![新建会话](docs/readme-assets/new-session-dialog.png)
 
-### 快速连接 tmux
+推荐使用受管 tmux：应用更新或后端重启后可以重新 attach；direct PTY 只能保留卡片元数据，无法恢复原进程。
 
-按 `Ctrl/⌘+E` 打开快速连接 tmux，会话存在即 attach，不存在则创建。该入口适合临时接管本机或远端已有工作区。
+### 4. 快速连接与扫描 tmux
+
+按 `Ctrl/⌘+E` 打开快速连接。目标 session 存在时 attach，不存在时创建。
 
 ![快速连接 tmux](docs/readme-assets/quick-tmux-connect.png)
 
-### 隐藏会话
+扫描入口支持本地或 SSH 远端：
 
-不想临时处理的会话可以隐藏到抽屉里，之后再恢复或关闭，避免看板被低优先级任务占满。
+- 扫描 tmux pane 并加入看板。
+- 扫描 Agent 工作目录，识别 Copilot 会话状态。
+- 合并能够确认属于同一会话的 tmux 与 Agent 记录，减少重复卡片。
+
+Agent 工作目录扫描会先列出识别到的会话，由用户确认后再加入看板：
+
+![Agent 会话扫描](docs/readme-assets/app-discovery-dialog.png)
+
+tmux 扫描会展示 session/window/pane、工作目录、前台命令及当前接管状态：
+
+![tmux 会话扫描](docs/readme-assets/tmux-discovery-dialog.png)
+
+### 5. 文件浏览器
+
+聚焦终端旁边可以展开文件浏览器，终端上下文不会丢失。
+
+![文件浏览器](docs/readme-assets/file-browser-drawer.png)
+
+支持：
+
+- 本地文件系统和 SSH/SFTP。
+- 面包屑、上一级、过滤、隐藏文件和排序。
+- 名称、大小、修改时间、Owner、权限及可拖动列宽。
+- 文本预览、编辑和保存。
+- Markdown 编辑/预览/分屏，以及 GFM、表格、任务列表和 KaTeX。
+- 新建、重命名、删除、chmod、上传、下载和拖拽上传。
+- 右键复制路径、下载、上传到目录、重命名、删除和 chmod。
+
+### 6. VS Code Web
+
+本地和 SSH 会话都可以在当前工作台打开 VS Code Web。
+
+![VS Code Web](docs/readme-assets/vscode-drawer.png)
+
+后端优先复用 `code-server`，其次支持 `openvscode-server`；本机未安装时可以尝试安装官方 standalone。SSH 模式通过本地转发代理远端 code-server。
+
+浏览器默认使用“省内存”模式，只保留当前 iframe；“保持状态”模式最多保留最近 3 个 iframe，也可以手动释放隐藏 iframe。
+
+### 7. Git Changes 与双 Diff Review
+
+聚焦页的“变更”入口区分两个完全不同的语义：
+
+- **本次任务**：本机 Codex 根据最新用户任务后的结构化文件操作记录归因。
+- **当前工作区**：根据该会话真实工作目录读取 checkout 的 Git 状态和 Diff。
+
+面板支持按路径筛选文件、按状态分组、查看增删统计、复制路径、引用文件到输入框，以及把当前文件内容放大到全屏 Diff。任务记录无法可靠归因时会明确降级，不会拿当前工作区 Diff 冒充 Agent 本次修改。
+
+![任务与工作区双 Diff](docs/readme-assets/changes-review.png)
+
+全屏模式保留文件选择、Diff 统计与操作入口，适合审查长文件或在较小窗口中查看变更：
+
+![全屏文件变更](docs/readme-assets/changes-fullscreen-diff.png)
+
+### 8. 结构化任务摘要与完整记录
+
+本机 Codex 以及绑定本地 tmux 的 Agent 卡片会优先读取结构化 JSONL：
+
+- 卡片只提取最新用户指令和最新 Agent 回复。
+- 不调用大模型重新总结。
+- 清理空白和 Markdown 标记，并做长度限制。
+- 找不到结构化记录时回退到轻量终端预览。
+
+聚焦页和手机当前会话都提供“完整记录”：用户消息与最终回答使用安全 Markdown/GFM/KaTeX 渲染，工具过程折叠，`exec` 调用及其输出不展示，避免日志噪声覆盖真正对话。
+
+### 9. 手机工作区
+
+手机端入口：
+
+```text
+https://<局域网地址>:<WEB_PORT>/?view=mobile
+```
+
+兼容 `/mobile`、`/m` 和 `#/mobile`。
+
+手机首页先展示轻量注意力看板，不会为每个会话创建真实终端。底部导航包括：
+
+- 看板
+- 活动
+- 当前会话
+- 项目/文件
+
+进入当前会话后才挂载真实终端。快捷键栏提供 `Ctrl+C/D`、`Esc`、`Tab`、`Shift+Tab`、方向键、清屏和常见行编辑控制键；单指滚动终端历史，双指缩放字号。
+
+手机变更视图使用下拉框选择文件，避免完整文件列表占满屏幕；Diff 可以全屏查看，并支持复制路径或引用到输入框。
+
+| 手机注意力看板 | 当前会话终端 | 手机 Changes |
+| --- | --- | --- |
+| ![手机注意力看板](docs/readme-assets/mobile-workspace.png) | ![手机当前会话终端](docs/readme-assets/mobile-terminal.png) | ![手机文件变更](docs/readme-assets/mobile-changes.png) |
+
+### 10. 隐藏会话与安全操作
+
+低优先级会话可以隐藏到抽屉，而不是直接删除。
 
 ![隐藏会话](docs/readme-assets/hidden-sessions-drawer.png)
 
-### 演示视频
+隐藏不会终止底层进程。关闭 direct 会话、终止 tmux 等破坏性操作会明确展示确认；tmux 的“脱离会话”和“终止底层 session”是不同操作。
+
+### 11. 资源调节与诊断
+
+默认轻量预览不为每张卡片创建 xterm 和终端 WebSocket。需要实时小终端时，可以手动切换到完整预览。
+
+资源诊断按需显示：
+
+- 挂载中的 xterm 和终端视图。
+- 活跃/隐藏终端 WebSocket。
+- 会话快照吞吐和终端实时流吞吐。
+- PTY replay 是否裁剪。
+- 当前/隐藏 VS Code iframe。
+- VS Code 代理 HTTP/WS 吞吐。
+- 主线程 long task 和 Chromium JS heap。
+
+高频终端输出触发的全量看板快照会在后端合并广播，卡片摘要请求也按时间桶刷新，避免持续输出形成请求风暴。
+
+![资源调节与运行诊断](docs/readme-assets/resource-diagnostics.png)
+
+### 12. 演示视频
 
 <video src="docs/readme-assets/20260423_151840.mp4" controls muted playsinline width="100%"></video>
 
-如果 Markdown 渲染器不支持内嵌视频，可以直接打开：
+如果 Markdown 渲染器不支持内嵌视频，请直接打开：
 
-[docs/readme-assets/20260423_151840.mp4](docs/readme-assets/20260423_151840.mp4)
+[查看演示视频](docs/readme-assets/20260423_151840.mp4)
 
-## 快速启动
+## 快速开始
 
 ### 环境要求
 
 必需：
 
-- Node.js 20 或更新版本。
-- pnpm，仓库声明使用 `pnpm@10.13.1`。
+- Node.js 20 或更高版本。
+- pnpm；仓库声明使用 `pnpm@10.13.1`。
 
-按需安装：
+按需：
 
-- `tmux`：创建、扫描、接管、恢复 tmux 会话时需要。
-- OpenSSH 客户端：连接 SSH 远端时需要。
-
-常见系统安装：
+- `tmux`：扫描、创建、接管和恢复 tmux 会话。
+- OpenSSH 客户端：SSH PTY、远端 tmux、远端文件和远端 VS Code。
 
 ```bash
 # Ubuntu / Debian
@@ -111,77 +263,45 @@ sudo dnf install -y tmux openssh-clients
 brew install tmux
 ```
 
-### 安装依赖
+### 安装
 
 ```bash
 git clone <your-repo-url>
 cd coding_kanban
 pnpm install
-```
-
-### 配置环境变量
-
-推荐复制模板：
-
-```bash
 cp .env.example .env
 ```
 
-常用配置：
-
-| 变量                              | 作用                              | 默认值                                   |
-| --------------------------------- | --------------------------------- | ---------------------------------------- |
-| `HOST`                            | 后端 Fastify 监听地址             | `0.0.0.0`                                |
-| `PORT`                            | 后端 REST + WebSocket 端口        | `3200`                                   |
-| `WEB_HOST`                        | Vite 前端监听地址                 | `0.0.0.0`                                |
-| `WEB_PORT`                        | Vite 前端端口                     | `3100`                                   |
-| `WEB_BACKEND_HOST`                | 前端代理到后端的主机              | `localhost`                              |
-| `WEB_BACKEND_PORT`                | 前端代理到后端的端口              | `3200`                                   |
-| `FILE_BROWSER_DEFAULT_LOCAL_PATH` | 文件浏览器默认本地目录            | 自动探测仓库根目录                       |
-| `VSCODE_WEB_EXTENSIONS_DIR`       | VS Code Web 扩展目录              | `~/.vscode-server/extensions` 或内置目录 |
-| `VSCODE_WEB_PUBLIC_HOST`          | 浏览器访问 `/vscode` 的公共主机名 | 当前请求 Host                            |
-| `VSCODE_WEB_BIND_HOST`            | 本地 code-server 绑定地址         | `0.0.0.0`                                |
-| `VSCODE_WEB_REMOTE_BIND_HOST`     | SSH 远端 code-server 绑定地址     | `127.0.0.1`                              |
-| `VSCODE_WEB_REMOTE_PORT`          | SSH 远端 code-server 固定端口     | `13338`                                  |
-
-说明：
-
-- `.env` 会被 git 忽略，适合写本机端口、路径和主机配置。
-- `scripts/restart-dev.sh` 会读取 `.env`。
-- 如果没有 `.env`，`restart-dev.sh` 自身默认前端 `3100`、后端 `3200`。
-- 如果直接复制 `.env.example`，其中 `WEB_PORT=3100`、`PORT=3200` 会保持脚本默认端口。
-
-### 推荐启动方式
+### 推荐启动
 
 ```bash
 ./scripts/restart-dev.sh
 ```
 
-脚本会完成这些事：
+脚本会：
 
-- 释放目标端口上的旧前后端进程。
-- 启动 Fastify 后端。
-- 启动 Vite 前端并绑定 `0.0.0.0`，方便局域网访问。
-- 默认使用 HTTPS 协议，并自动准备开发证书。
-- 输出 Local / Network 前端地址、后端健康检查地址和日志路径。
+1. 在停止旧后端前捕获可迁移会话状态。
+2. 校验并释放目标端口。
+3. 启动 Fastify 后端和 Vite 前端。
+4. 默认启用 HTTPS，并准备开发证书。
+5. 绑定前端到 `0.0.0.0`，输出 Local、Network、健康检查和日志地址。
 
-从手机或同网段机器访问，使用脚本输出的 `Network` 地址，例如：
+局域网访问示例：
 
 ```text
-https://10.30.0.22:3100
+https://10.30.0.22:8484
 ```
 
-### 备用启动方式
+实际端口以 `.env` 和脚本输出为准。
+
+### 其他启动方式
 
 ```bash
 pnpm dev
-```
 
-或分别启动：
-
-```bash
-pnpm --filter server dev
-pnpm --filter web dev
+# 或分别启动
+pnpm --filter server run dev:app
+pnpm --filter web run dev:app
 ```
 
 健康检查：
@@ -190,202 +310,187 @@ pnpm --filter web dev
 curl http://127.0.0.1:4000/api/health
 ```
 
-如果你用 `.env` 改了端口，请替换成实际后端端口。
+## 配置说明
 
-## 核心功能
+所有机器相关配置都放在被 Git 忽略的 `.env` 中。完整注释见 [.env.example](.env.example)。
 
-### 1. 会话看板
+### 服务与 HTTPS
 
-- 展示所有未隐藏的 `AgentSessionRecord`。
-- 卡片显示名称、状态、Agent 类型、主机、工作目录和轻量终端文本预览。
-- 支持按服务器、Agent 类型、tmux 类别和目录关键字筛选。
-- 支持重命名、隐藏、恢复、删除、关闭/脱离、终止 tmux、复制 tmux attach 命令。
-- 筛选行展示小号“等待输入 / 运行中”统计徽标，快速判断当前任务状态。
-- 双击卡片进入聚焦视图。
+| 变量 | 默认示例 | 说明 |
+| --- | --- | --- |
+| `SERVER_BIND_HOST` | `0.0.0.0` | 后端监听地址 |
+| `PORT` | `4000` | REST + WebSocket 端口 |
+| `WEB_HOST` | `0.0.0.0` | Vite 监听地址，局域网联调必须可见 |
+| `WEB_PORT` | `8484` | 前端端口 |
+| `WEB_BACKEND_HOST` | `localhost` | Vite 代理目标主机 |
+| `WEB_BACKEND_PORT` | `4000` | Vite 代理目标端口 |
+| `WEB_HTTPS` | `1` | 默认 HTTPS；局域网 Notification 需要安全上下文 |
+| `VITE_DEV_HTTPS_CA_CERT` | 可选 | 可公开下载并用于信任前端证书的 CA 公钥证书 |
 
-### 2. 聚焦终端和多屏监控
+### 终端与持久化
 
-- 聚焦视图主区域是真实 xterm.js 终端。
-- 支持单屏、左右双屏、上下双屏、左中右三屏、四屏、六屏、八屏布局。
-- 多窗格可以同时观察多个真实终端。
-- 输入所有权始终只有一个“输入中”窗格，不做广播输入。
-- 右侧其他会话卡片可拖入分屏窗格；窗格头部也可以互相拖拽交换会话位置。
-- 右侧“其他会话”侧栏可折叠，折叠后只保留窄标签。
+| 变量 | 默认示例 | 说明 |
+| --- | --- | --- |
+| `TERMINAL_SCROLLBACK_BYTES` | `4194304` | 每个活跃 PTY 的后端 replay 字节上限 |
+| `TERMINAL_TMUX_CAPTURE_LINES` | `20000` | tmux observe/refresh 捕获行数 |
+| `TERMINAL_REGISTRY_OUTPUT_ENTRIES` | `5000` | 无 live PTY 时的 registry 回放条目 |
+| `VITE_TERMINAL_SCROLLBACK_LINES` | `20000` | 浏览器 xterm scrollback 行数 |
+| `SESSION_STATE_PATH` | `.dev-runtime/agent-sessions.json` | 可恢复会话元数据；不保存终端正文和凭证 |
+| `GIT_AUTO_PULL_INTERVAL_MINUTES` | `10`、`30` 或 `0` | 后台只 fetch/check，绝不自动 pull |
 
-### 3. 终端 WebSocket 和轻量预览
+### 文件与 VS Code Web
 
-- 聚焦终端通过 `/ws/agent-sessions/:id/terminal` 接收 scrollback replay 和实时输出。
-- replay 完成前会缓冲 live frame，避免历史输出和新输出乱序。
-- 支持 stdin、resize、binary 消息，binary 用于 tmux 鼠标等二进制事件。
-- 默认轻量预览模式下，宫格卡片和聚焦侧栏不打开真实终端 WebSocket，只展示 `outputPreview`。
-- 可从“资源调节”菜单切换到完整预览模式，恢复旧版小终端实时预览。
-- 后端会合并高频终端输出触发的看板全量快照，降低网络流量和浏览器 JSON 解析压力。
+| 变量 | 说明 |
+| --- | --- |
+| `FILE_BROWSER_DEFAULT_LOCAL_PATH` | 文件浏览器首次打开目录 |
+| `VSCODE_WEB_EXTENSIONS_DIR` | code-server 共用扩展目录 |
+| `VSCODE_WEB_PUBLIC_HOST` | 浏览器访问 `/vscode/` 的公共主机 |
+| `VSCODE_WEB_BIND_HOST` | 本地 code-server 内部监听地址 |
+| `VSCODE_WEB_REMOTE_BIND_HOST` | SSH 远端 code-server 监听地址，默认 `127.0.0.1` |
+| `VSCODE_WEB_REMOTE_PORT` | 远端 code-server 首选端口，默认 `13338` |
 
-### 4. 手机端终端控制页
+## 完整功能说明
 
-- 默认入口：`/?view=mobile`。
-- 兼容入口：`/mobile`、`/m`、`#/mobile`。
-- 手机端使用单会话全屏终端，不复用桌面分屏和侧栏布局。
-- 底部快捷键条支持中断、Esc、Tab、Enter、EOF、方向键、清屏、行首、行尾。
-- 快捷键按原始 stdin 控制字符发送，Tab、Esc、Ctrl+C、方向键不会被额外追加 Enter。
-- “说明”按钮会展示各快捷键作用。
-- 多行输入框用普通 `<textarea>` 承载手机输入法，支持发送、粘贴、粘贴执行。
-- 终端区域接管触控滚动，避免长上下文下拉时触发浏览器刷新。
-- 单指滑动滚动 xterm scrollback，双指 pinch 调整终端字号。
+### 会话生命周期与状态
 
-### 5. 新建、扫描和接入
+- 会话记录统一使用 `AgentSessionRecord`，包含来源、Agent、工作目录、连接状态、交互状态、摘要、Git 元数据和传输绑定。
+- `running → idle/exited` 时产生待验收状态；聚焦查看后确认已读；新输入或恢复运行后清除旧待验收。
+- 已读/未读状态随服务端会话状态持久化，刷新页面和跨设备访问保持一致。
+- 明确等待输入的会话不会因“查看”而自动清除，只有实际发送输入或底层恢复执行才离开“需响应”。
+- 会话支持重命名、隐藏、恢复、关闭、脱离 tmux、终止 tmux 和重连。
 
-- 新建会话支持本机和 SSH 主机。
-- Agent 类型支持 `copilot`、`codex`、`claude`、`shell`。
-- 启动方式支持 `direct` 和 `tmux`。
-- 名称为空时，前端会根据主机、Agent 类型和启动方式生成唯一默认名。
-- 支持扫描本机或 SSH 远端 tmux，并把运行中的 pane 接入为可交互终端。
-- 支持扫描本地或 SSH 远端 Agent 工作目录，识别 Copilot `session-state`，并和 tmux pane 合并减少重复卡片。
+### 终端协议与输入兼容
 
-### 6. 文件浏览器
+- replay 完成前缓冲 live frame，防止历史与实时输出乱序。
+- WebSocket 支持文本 stdin、resize 和 tmux 鼠标等 binary 消息。
+- 实时连接异常后以 250ms～5s 有界退避重连；长期停在 `CONNECTING` 时主动回收。
+- 支持 DA、DSR、CPR 等终端能力握手，并避免陈旧回复写入 shell。
+- 支持 bracketed paste、Safari `insertText` 补救、CSI-u 修饰键、macOS Option/Windows Alt Meta 键。
+- 支持 OSC 52 剪贴板，限制 target 和 payload 大小。
+- tmux 输入经 attached client 保持当前 pane 语义，兼容 prefix、command-prompt、confirm-before 和 vi status keys。
 
-- 聚焦视图中可打开文件浏览器。
-- 支持本地文件系统和 SSH/SFTP 远端文件系统。
-- 支持面包屑、返回上一级目录、显示隐藏文件、过滤、排序。
-- 支持文本预览和编辑保存。
-- 支持新建文件/目录、重命名、删除、chmod、上传、下载、拖拽上传。
-- 右键菜单支持上传到当前目录或选中目录、下载、重命名、删除、复制路径、chmod。
-- 文件面板宽度、预览高度等状态保存在 `localStorage`。
+### SSH 与远端工作流
 
-### 7. VS Code Web
+- 从当前用户 `~/.ssh/config` 读取主机。
+- 新建会话前预检远端目录、Agent 命令和 tmux 可用性。
+- SSH 会话退出后仍保留最后输出、退出码和重连入口。
+- 文件浏览器使用 SFTP，优先显式 identity file，其次标准默认私钥和 SSH Agent。
+- VS Code Web 通过 SSH 本地转发访问远端 code-server。
 
-- 聚焦本地会话和 SSH 远端会话时都可以打开内嵌 VS Code Web。
-- 本地优先复用 `code-server`，其次支持 `openvscode-server`。
-- 找不到 code-server 时，会尝试自动安装官方 standalone 版本。
-- SSH 远端通过 SSH 启动/复用远端 code-server，再由当前后端代理到 `/vscode/`。
-- 本地会话使用稳定 `.code-workspace` 文件；SSH 远端会话直接打开远端工作目录。
-- 扩展目录优先复用用户的 `~/.vscode-server/extensions`。
-- 浏览器 iframe 默认使用“VS Code 省内存”模式，只保留当前 iframe。
-- 可切换到“VS Code 保持状态”模式，最多保留最近 3 个 iframe。
-- “释放 VS Code 缓存”只卸载非当前 iframe，不停止后端 code-server 进程。
+### Git 与变更安全边界
 
-### 8. 顶栏、快捷键和状态持久化
+- 卡片 Git 摘要和 Changes 面板使用固定参数的只读 Git 命令。
+- 当前工作区 Diff 不执行 stage、discard、commit、merge、rebase、reset 或覆盖。
+- 自动更新后台只执行 fetch/check；只有用户确认后才尝试当前 upstream 的 fast-forward。
+- 本地修改、未跟踪文件冲突、分支分叉或 Git 失败时保持工作区不变。
 
-- 桌面标题区显示“电脑端 Coding Kanban”，并提供“手机端 Coding Kanban”入口。
-- 手机端标题区显示“手机端 Coding Kanban”，并提供“电脑端 Coding Kanban”入口。
-- 顶栏按“端切换品牌 / 主操作 / 当前会话工具 / 工具 / 资源调节 / 窗口控制”分组。
-- `Ctrl/⌘+E` 打开快速连接 tmux。
-- `Ctrl/⌘+Shift+S` 打开本地 tmux 扫描。
-- `Alt+Q` 从聚焦视图返回宫格。
-- `Tab` 用于常规焦点切换。
-- 顶栏折叠、文件浏览器布局、聚焦视图状态、侧边工具选择、VS Code iframe 缓存模式等 UI 偏好保存在浏览器本地。
+### 应用更新与恢复
 
-## 常用工作流
+- 后端计算覆盖 tracked、untracked、branch 和 HEAD 的源码 revision。
+- 前端发现新 revision 时显示非模态提示，不会在终端输入过程中自动刷新。
+- 用户确认更新后保存恢复意图并 reload；同一 revision 不形成刷新循环。
+- managed tmux 在后端重启后重新 attach；不存在的 tmux 不会根据旧命令自动重建。
+- direct 会话只能保留 exited 卡片和元数据，需要手动恢复。
 
-### 新建一个本地 Agent
+### 浏览器资源策略
+
+- 看板默认轻量预览，不为非活跃卡片挂载 xterm。
+- 会话数量超过阈值时按视口虚拟化卡片。
+- 高频输出触发的全量快照合并到约 1 Hz。
+- 卡片任务摘要和 Git 摘要使用分桶刷新，减少持续输出下的请求频率。
+- VS Code iframe 默认只保留当前项；保持状态模式最多 3 个。
+- 所有轻量动效只使用 `opacity/transform`，并遵循 `prefers-reduced-motion`。
+
+## 典型工作流
+
+### 工作流 A：启动一个本地 Codex 任务
 
 1. 点击“新建会话”。
-2. 选择“本机”。
-3. 选择 `copilot`、`codex`、`claude` 或 `shell`。
-4. 输入工作目录。
-5. 选择 `direct` 或 `tmux`。
-6. 创建后双击卡片进入聚焦视图。
+2. 选择本机、`codex` 和 tmux 模式。
+3. 选择工作目录和用户分组。
+4. 创建后在“执行中”列观察任务摘要和终端片段。
+5. 任务结束后卡片进入“待验收”。
+6. 双击查看结果；确认后进入“可继续”。
 
-### 连接 SSH 远端
+### 工作流 B：接管已有远端 tmux
 
-先配置 `~/.ssh/config`：
+1. 在 `~/.ssh/config` 中配置目标主机。
+2. 按 `Ctrl/⌘+E`。
+3. 选择主机并输入 tmux session 名。
+4. 已存在则 attach，不存在则创建。
+5. 在聚焦终端继续输入，旁边可以打开远端文件或 VS Code。
 
-```sshconfig
-Host devbox
-  HostName 10.30.0.24
-  User your-user
-  Port 22
-```
+### 工作流 C：审查 Agent 改动并反馈
 
-然后在新建会话、扫描会话、扫描 tmux、快速连接 tmux 或文件浏览器中选择该主机。
+1. 聚焦目标会话。
+2. 点击“变更”。
+3. 在“本次任务”和“当前工作区”间切换。
+4. 按路径筛选或从状态分组选择文件。
+5. 点击“全屏查看”阅读完整 Diff。
+6. 使用“引用文件”把 `@path` 插入当前输入框，再补充审查反馈。
 
-### 扫描 tmux
+### 工作流 D：手机接管长任务
 
-1. 点击顶栏“扫描”。
-2. 选择“扫描 tmux”。
-3. 选择本机或 SSH 主机。
-4. 把已有 tmux pane 加入看板，或接管为可交互终端。
+1. 手机打开脚本输出的 Network 地址并加 `/?view=mobile`。
+2. 在注意力看板中选择需响应或待验收任务。
+3. 进入当前会话，使用快捷键和多行输入继续操作。
+4. 查看完整记录或变更面板。
+5. 手机 Diff 使用下拉框选择文件，必要时全屏阅读。
 
-快捷键：`Ctrl/⌘+Shift+S` 会直接打开本地 tmux 扫描。
+### 工作流 E：安全更新应用
 
-### 快速连接 tmux
+1. 后台周期性 fetch 发现 upstream 有更新。
+2. 页面显示更新提示，但不自动修改工作区。
+3. 用户点击确认后执行 fast-forward 检查。
+4. 成功后保存 managed tmux 和布局状态并 reload。
+5. 有本地修改或分叉时保持原状态，并显示具体冲突原因。
 
-1. 按 `Ctrl/⌘+E`。
-2. 选择本机或 SSH 主机。
-3. 输入 tmux session 名和工作目录。
-4. 系统运行 `tmux new-session -A -s <session> -c <dir>`。
+## 快捷键
 
-### 打开文件浏览器
-
-1. 双击卡片进入聚焦视图。
-2. 点击顶栏“文件”。
-3. 使用面包屑或名称旁的上箭头切目录。
-4. 预览、编辑、上传、下载或右键管理文件。
-
-### 打开 VS Code Web
-
-1. 双击本地或 SSH 会话进入聚焦视图。
-2. 点击顶栏“VS Code”。
-3. 根据需要在“资源调节”里切换“VS Code 省内存 / VS Code 保持状态”。
-4. 如果浏览器内存偏高，点击“释放 VS Code 缓存”卸载非当前 iframe。
-
-### 手机接管终端
-
-1. 在同网段手机浏览器打开桌面页的同一个 Network 地址。
-2. 点击标题区的“手机端 Coding Kanban”，或直接访问 `/?view=mobile`。
-3. 选择会话。
-4. 用底部快捷键条发送 `Ctrl+C`、`Esc`、方向键、Tab、Enter 等控制字符。
-5. 单指上下滑动查看终端历史，双指缩放字体。
-
-## 资源与性能策略
-
-Coding Kanban 的默认策略是“先省资源，再按需打开完整实时能力”。
-
-- **轻量预览默认开启**：卡片和侧栏只展示轻量文本预览，不为非活跃会话打开终端 WebSocket。
-- **完整预览按需开启**：需要实时小终端预览时，可在“资源调节”里切换回完整预览。
-- **会话快照合并广播**：高频终端输出不会逐帧触发全量看板快照，默认最多约每秒刷新一次卡片摘要。
-- **VS Code iframe 省内存**：默认只保留当前 iframe；保持状态模式最多保留最近 3 个。
-- **释放 VS Code 缓存**：可手动卸载隐藏 iframe，释放浏览器内存。
-- **资源诊断**：展示 xterm 实例数、终端 WebSocket 数、会话快照吞吐、终端实时流吞吐、VS Code iframe 数、VS Code 代理吞吐、主线程 long task 和 JS heap。
-- **轻量动效**：菜单、诊断面板、主机下拉、卡片、抽屉和弹窗只动画 `opacity` 与 `transform`，并遵循 `prefers-reduced-motion`。
+| 快捷键 | 作用 |
+| --- | --- |
+| `Ctrl/⌘+E` | 快速连接本机或 SSH tmux |
+| `Ctrl/⌘+Shift+S` | 打开本地 tmux 扫描 |
+| `Alt+Q` | 从聚焦视图返回看板 |
+| `Tab` | 常规焦点切换 |
+| `Esc` | 关闭支持 Escape 的弹窗、菜单或全屏 Diff |
+| `Shift+Enter` | 跨平台终端换行，避免系统抢占 `Alt+Space` |
 
 ## 仓库结构
 
 ```text
-apps/web/                React + Vite + xterm.js 前端
-apps/server/             Fastify + WebSocket + PTY/SSH/tmux 后端
-packages/shared/         前后端共享 DTO、类型和协议
-packages/agent-protocol/ Agent 运行时协议定义
-packages/ui/             预留的跨应用 UI 原语
-scripts/                 开发、重启、截图和辅助脚本
-tests/e2e/               Playwright 端到端测试
-docs/                    功能说明、项目概览、设计文档和截图资源
-memories/                仓库级排障记忆，不参与产品运行
+apps/web/                 React 19 + Vite + xterm.js 前端
+apps/server/              Fastify + WebSocket + node-pty + SSH/tmux 后端
+packages/shared/          前后端共享 DTO、类型和协议
+scripts/                  启动、重启、截图、演示和测试辅助脚本
+tests/e2e/                Playwright 端到端测试
+docs/                     PRD、架构、功能、排障和截图资源
+memories/repo/            仓库级排障记忆，不参与产品运行
 ```
 
 ## 技术栈
 
-- 前端：React 19、Vite、TypeScript、xterm.js。
-- 后端：Fastify、@fastify/websocket、node-pty、ssh2、TypeScript。
-- 文件系统：本地 FS + SSH/SFTP。
-- 终端：本地 PTY、SSH PTY、tmux attach/scan/control。
-- VS Code Web：code-server / openvscode-server + `/vscode/` 代理。
-- 测试：Node test runner、Playwright。
-- 包管理：pnpm workspace。
+- **前端**：React 19、Vite、TypeScript、xterm.js。
+- **后端**：Fastify、`@fastify/websocket`、node-pty、ssh2。
+- **终端**：本地 PTY、SSH PTY、tmux attach/scan/control。
+- **文件**：Node.js 本地文件系统 + SSH/SFTP。
+- **编辑器**：code-server / openvscode-server + `/vscode/` 代理。
+- **测试**：Node test runner、Playwright。
+- **包管理**：pnpm workspace。
 
-## 常用命令
+## 开发与验证
 
 ```bash
 pnpm dev          # 并发启动前后端
-pnpm dev:restart  # 调用 scripts/restart-dev.sh
+pnpm dev:restart  # 安全重启开发服务
 pnpm build        # 构建 shared / server / web
-pnpm check        # 类型检查 + 构建
-pnpm test         # 运行所有 workspace test
-pnpm e2e          # 运行 Playwright E2E
-pnpm format       # 格式化全仓库
+pnpm check        # 类型检查并构建
+pnpm test         # workspace 单元/集成测试 + scripts 测试
+pnpm e2e          # Playwright E2E
+pnpm format       # 格式化 workspace
 ```
 
-更常用的定向验证：
+常用定向命令：
 
 ```bash
 pnpm --filter web test
@@ -393,112 +498,132 @@ pnpm --filter server test
 pnpm --filter shared build
 ```
 
-## 截图更新
+仓库要求行为改动使用红绿灯测试，并同步维护：
 
-截图脚本：
+- [docs/func_list.md](docs/func_list.md)
+- [docs/debug_list.md](docs/debug_list.md)
+- 相关设计或 PRD
+
+## 更新 README 截图
+
+截图脚本会创建临时 demo 会话、操作当前 UI、保存截图并清理会话：
 
 ```bash
-node ./scripts/generate-readme-screenshots.mjs
-```
-
-运行前请先启动前后端。脚本会读取 `.env`，默认使用当前配置里的前端和后端地址。也可以手动覆盖：
-
-```bash
-README_BASE_URL=http://localhost:3000 \
+README_BASE_URL=https://127.0.0.1:8484 \
 README_API_URL=http://127.0.0.1:4000 \
+NODE_TLS_REJECT_UNAUTHORIZED=0 \
 node ./scripts/generate-readme-screenshots.mjs
 ```
 
-脚本会创建临时 demo 会话、截图、再清理 demo 会话。建议使用一套干净的临时开发服务生成截图，避免真实会话混入 README 素材。
+计划生成的主要资产包括：
 
-Linux 上如缺少浏览器依赖：
-
-```bash
-npx playwright install
-sudo npx playwright install-deps
+```text
+board-overview.png
+board-sorting-and-summaries.png
+app-discovery-dialog.png
+tmux-discovery-dialog.png
+new-session-dialog.png
+focus-view.png
+changes-review.png
+changes-fullscreen-diff.png
+file-browser-drawer.png
+vscode-drawer.png
+resource-diagnostics.png
+quick-tmux-connect.png
+hidden-sessions-drawer.png
+mobile-workspace.png
+mobile-terminal.png
+mobile-changes.png
 ```
 
-如果环境不能安装系统依赖，可以在具备 Playwright Chromium 运行库的机器上生成截图后提交 `docs/readme-assets/`。
+> [!NOTE]
+> 当前服务器若报缺少 `libatk-1.0.so.0`、GTK、Cairo 等 Chromium 动态库，脚本无法启动 Playwright。请在有权限的 Linux 环境执行 `npx playwright install` 和 `sudo npx playwright install-deps`，或在已经具备 Chromium 运行库的机器上生成截图。不要使用真实生产会话生成 README 素材。
 
 ## 故障排查
 
-### 页面打不开
+### 页面或健康检查不可用
 
 ```bash
 ./scripts/restart-dev.sh
 curl http://127.0.0.1:4000/api/health
 ```
 
-如果复制了 `.env.example`，后端端口可能是 `4000`。如果你使用自己的 `.env`，请按实际 `PORT` 检查。
+端口以 `.env` 和启动日志为准。
 
-### 手机或局域网设备访问不了
+### 手机或局域网设备无法访问
 
-- 确认前端绑定 `0.0.0.0`，不要只绑定 `localhost`。
-- 使用 `restart-dev.sh` 输出的 `Network` 地址。
-- 确认前端绑定 `0.0.0.0`（已默认）。
-- 检查防火墙是否放行前端端口。
-- 手机端默认入口为 `/?view=mobile`。
+- 确认 `WEB_HOST=0.0.0.0`。
+- 使用启动脚本输出的 Network 地址，不要使用手机上的 `localhost`。
+- 放行前端端口。
+- HTTPS 首次使用时在设备上信任开发 CA。
+- 手机入口追加 `/?view=mobile`。
 
 ### SSH 主机列表为空
 
-- 检查 `~/.ssh/config` 是否存在。
-- 使用明确的 `Host` 条目，避免只依赖通配符。
-- 确认当前用户可读取该文件。
-- 远端目录建议、远端 tmux、远端 VS Code Web 依赖当前用户可用的 SSH 认证。
+- 检查当前用户的 `~/.ssh/config`。
+- 使用明确的 `Host` 条目。
+- 确认当前后端用户可读取配置、私钥或 `SSH_AUTH_SOCK`。
 
-### tmux 功能不可用
+### tmux 不可用
 
-- 确认本机已安装 `tmux`。
-- 如果 tmux 不在标准路径，设置 `TMUX_BINARY`。
-- SSH 远端 tmux 需要远端主机也安装 tmux。
-- `kill tmux` 会终止底层真实 tmux session，请确认后再执行。
+- 本机和目标 SSH 主机都需要安装 tmux。
+- 非标准路径可设置 `TMUX_BINARY`。
+- “脱离”只关闭当前接入；“终止 tmux”会杀掉真实底层 session。
 
-### VS Code Web 打不开
+### VS Code Web 无法打开
 
-- 确认本机或远端能启动 `code-server`。
-- 本地找不到时会尝试 `openvscode-server` 或自动安装 code-server standalone。
-- SSH 远端依赖后端能建立 SSH 本地转发。
-- 如遇预览或 webview 异常，检查 code-server 是否正常运行。
-- 可检查 `VSCODE_WEB_EXTENSIONS_DIR`、`VSCODE_WEB_PUBLIC_HOST`、`VSCODE_WEB_BIND_HOST`、`VSCODE_WEB_REMOTE_BIND_HOST`、`VSCODE_WEB_REMOTE_PORT`。
+- 检查本地或远端是否能运行 code-server。
+- 检查 SSH 本地转发和 `/vscode/` 代理。
+- HTTPS/局域网环境需要信任开发 CA，否则 Service Worker、webview 或 iframe 可能失败。
+- 可检查 `VSCODE_WEB_*` 配置。
 
-### 浏览器内存继续增长
+### 浏览器内存或网络持续增长
 
-- 保持“轻量预览”模式。
-- VS Code iframe 使用“省内存”模式；只有需要保留编辑器状态时再切到“保持状态”。
-- 用“释放 VS Code 缓存”卸载非当前 iframe。
-- 打开“资源诊断”查看增长来源：xterm、终端 WebSocket、会话快照、终端实时流、VS Code iframe、VS Code 代理流量、JS heap 或主线程 long task。
-- 如果资源诊断没有明显压力源但 heap 持续增长，应抓取 Chrome Heap Snapshot 对比 retained objects。
+1. 保持轻量预览。
+2. 将 VS Code 设为省内存模式。
+3. 释放隐藏 VS Code iframe。
+4. 打开资源诊断，确认压力来自 xterm、终端 WebSocket、快照、实时流、VS Code 代理还是 heap。
+5. 若诊断无明显来源但 heap 持续增长，使用 Chrome Heap Snapshot 对比 retained objects。
 
 ### Playwright 无法启动
 
-如果报缺 `libatk-1.0.so.0` 等系统库，需要安装 Playwright 浏览器依赖：
+若报缺少 `libatk-1.0.so.0` 等系统库：
 
 ```bash
 npx playwright install
 sudo npx playwright install-deps
 ```
 
-在无法安装系统库的环境中，可以只运行 Node 测试和构建：
+无系统权限时仍可运行：
 
 ```bash
 pnpm test
 pnpm check
 ```
 
-## 当前边界
+## 部署安全与边界
 
-- 会话注册表主要存在当前后端进程内存中，后端重启后仍需要重新扫描/接入。
-- 底层 tmux 会话通常仍存在，可以通过扫描重新加入看板。
-- 本地 direct PTY 一般会随后端退出而结束。
-- VS Code iframe 自动超时卸载暂未默认启用。
-- 多终端监控不支持广播输入，设计上只允许一个“输入中”窗格。
-- 本项目面向可信内网环境；不要把执行能力直接暴露到公网。
-- Electron 打包仍是后续方向，不是当前默认分发方式。
+- 仅部署在可信本机或内网，不提供公网多租户安全边界。
+- 不提交 `.env`、Token、SSH 私钥或主机相关凭证。
+- 后端命令、路径和主机参数必须经过固定参数调用或严格校验。
+- 自动更新不接受 HTTP 传入 remote、branch、ref、仓库路径或任意 Git 参数。
+- 后台定时任务只 fetch/check，不自动 pull、merge、rebase、stash 或 reset。
+- Git Changes 当前只读，不提供 stage、discard、commit 或覆盖工作区。
+- 多屏终端不广播输入；始终只有一个当前输入窗格。
+- direct PTY 无法跨后端重启恢复；需要恢复能力时使用 managed tmux。
+- 完整记录和任务归因首版主要支持本机 Codex；远端和其他 Agent 会明确降级。
+- 当前不是 Electron 桌面包，默认通过浏览器访问。
 
 ## 进一步文档
 
-- 功能清单：`docs/func_list.md`
-- 项目概览：`docs/project-overview.md`
-- Bug 修复记录：`docs/debug_list.md`
-- 手机端适配说明：`docs/mobile-terminal-adaptation.md`
-- 文件浏览器设计背景：`docs/specs/2026-04-20-file-browser-architecture.md`
+- [功能清单](docs/func_list.md)
+- [项目概览](docs/project-overview.md)
+- [Bug 修复记录](docs/debug_list.md)
+- [手机终端适配](docs/mobile-terminal-adaptation.md)
+- [文件浏览器架构](docs/specs/2026-04-20-file-browser-architecture.md)
+- [双 Diff 架构](docs/specs/2026-08-14-dual-diff-architecture.md)
+- [v1.4.0 PRD](docs/plans/2026-08-12-v1.4.0-prd.md)
+
+## License
+
+参见 [LICENSE.txt](LICENSE.txt)。
