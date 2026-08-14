@@ -690,6 +690,52 @@ input {
 .diff-row--hunk { margin: 7px 0; color: #87c4ef; background: rgba(57, 124, 178, 0.15); }
 .diff-row--meta { color: #596975; }
 
+.fullscreen-diff-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: #dce4eb;
+  background: #0b0f14;
+}
+
+.fullscreen-diff-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 58px;
+  padding: 9px 14px;
+  border-bottom: 1px solid #28323c;
+  background: #12181f;
+}
+
+.fullscreen-diff-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+@media (max-width: 720px) {
+  .fullscreen-diff-header {
+    align-items: stretch;
+    flex-direction: column;
+    padding-top: max(9px, env(safe-area-inset-top));
+  }
+
+  .fullscreen-diff-header .diff-file-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+
+  .fullscreen-diff-header .diff-file-actions button {
+    min-height: 36px;
+  }
+}
+
 .changes-empty {
   display: grid;
   place-content: center;
@@ -724,9 +770,38 @@ input {
 }
 
 .changes-panel--compact .changes-files {
-  max-height: 34vh;
+  overflow: visible;
   border-right: 0;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.changes-compact-file-picker {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  margin: 0 10px 10px;
+  color: #8795a1;
+  font-size: 10px;
+}
+
+.changes-compact-file-picker select {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 30px 0 10px;
+  overflow: hidden;
+  border: 1px solid #344451;
+  border-radius: 7px;
+  outline: none;
+  background: #121b23;
+  color: #e2e9ee;
+  font: 11px "IBM Plex Mono", monospace;
+  text-overflow: ellipsis;
+}
+
+.changes-compact-file-picker select:focus {
+  border-color: #4da3e8;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -27,6 +27,18 @@ interface RenderedDiffLine {
   newLine: number | null;
 }
 
+interface CompactChangesFilePickerProps {
+  files: DiffFileChange[];
+  selectedPath: string | null;
+  onSelectPath: (path: string) => void;
+}
+
+interface FullscreenDiffViewProps {
+  file: DiffFileChange;
+  onClose: () => void;
+  onReference?: (reference: string) => void;
+}
+
 const statusMetadata: Record<DiffFileStatus, { label: string; short: string }> = {
   modified: { label: "已修改", short: "M" },
   added: { label: "新增", short: "A" },
@@ -80,6 +92,116 @@ function renderDiffLines(patch: string): RenderedDiffLine[] {
   });
 }
 
+export function CompactChangesFilePicker({
+  files,
+  selectedPath,
+  onSelectPath,
+}: CompactChangesFilePickerProps) {
+  return (
+    <label className="changes-compact-file-picker">
+      <span>文件</span>
+      <select
+        aria-label="选择变更文件"
+        onChange={(event) => onSelectPath(event.target.value)}
+        value={selectedPath ?? ""}
+      >
+        {files.map((file) => (
+          <option key={file.path} value={file.path}>
+            {statusMetadata[file.status].short} · {file.path} (+{file.addedLines} / -{file.deletedLines})
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function DiffCode({ file }: { file: DiffFileChange }) {
+  const diffLines = renderDiffLines(file.patch ?? "");
+
+  if (file.binary) {
+    return <div className="changes-empty">二进制文件不提供文本 Diff。</div>;
+  }
+
+  return (
+    <div className="diff-code" role="table">
+      {diffLines.map((line, index) => (
+        <div
+          className={`diff-row diff-row--${line.kind}`}
+          key={`${index}-${line.content}`}
+          role="row"
+        >
+          <span className="diff-line-number">{line.oldLine ?? ""}</span>
+          <span className="diff-line-number">{line.newLine ?? ""}</span>
+          <code>{line.content || " "}</code>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function FullscreenDiffView({
+  file,
+  onClose,
+  onReference,
+}: FullscreenDiffViewProps) {
+  const parts = splitFilePath(file.path);
+  const reference = `@${file.path}`;
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      aria-label="全屏文件变更"
+      className="fullscreen-diff-overlay"
+      role="dialog"
+    >
+      <header className="fullscreen-diff-header">
+        <div className="diff-file-title">
+          <span
+            className={`changes-file-status changes-file-status--${file.status}`}
+          >
+            {statusMetadata[file.status].short}
+          </span>
+          <div>
+            <strong>{parts.name}</strong>
+            <small>{parts.directory}</small>
+          </div>
+        </div>
+        <div className="diff-file-actions">
+          <button
+            onClick={() => void copyTextToClipboard(file.path)}
+            type="button"
+          >
+            复制路径
+          </button>
+          <button
+            onClick={() =>
+              onReference
+                ? onReference(reference)
+                : void copyTextToClipboard(reference)
+            }
+            type="button"
+          >
+            引用文件
+          </button>
+          <button onClick={onClose} type="button">
+            退出全屏
+          </button>
+        </div>
+      </header>
+      <div className="fullscreen-diff-content">
+        <DiffCode file={file} />
+      </div>
+    </div>
+  );
+}
+
 export function ChangesPanel({
   session,
   compact = false,
@@ -95,6 +217,8 @@ export function ChangesPanel({
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState("");
+  const [fullscreenFile, setFullscreenFile] =
+    useState<DiffFileChange | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -129,11 +253,6 @@ export function ChangesPanel({
   }, [files]);
   const selectedFile =
     files.find((file) => file.path === selectedPath) ?? files[0] ?? null;
-  const diffLines = useMemo(
-    () => renderDiffLines(selectedFile?.patch ?? ""),
-    [selectedFile],
-  );
-
   useEffect(() => {
     if (files.length && !files.some((file) => file.path === selectedPath)) {
       setSelectedPath(files[0]!.path);
@@ -193,23 +312,31 @@ export function ChangesPanel({
           <div className="changes-body">
             <aside className="changes-files">
               <div className="changes-search"><span aria-hidden="true">⌕</span><input aria-label="筛选变更文件" onChange={(event) => setQuery(event.target.value)} placeholder="按文件名筛选" value={query} /></div>
-              <div className="changes-file-list">
-                {groups.map(([status, groupFiles]) => (
-                  <section className="changes-file-group" key={status}>
-                    <header><span>{statusMetadata[status].label}</span><b>{groupFiles.length}</b></header>
-                    {groupFiles.map((file) => {
-                      const parts = splitFilePath(file.path);
-                      return (
-                        <button className={selectedFile?.path === file.path ? "active" : ""} key={file.path} onClick={() => setSelectedPath(file.path)} type="button">
-                          <span className={`changes-file-status changes-file-status--${file.status}`}>{statusMetadata[file.status].short}</span>
-                          <span className="changes-file-identity"><strong title={file.path}>{parts.name}</strong><small title={parts.directory}>{parts.directory}</small></span>
-                          <span className="changes-file-stats"><em>+{file.addedLines}</em><i>-{file.deletedLines}</i></span>
-                        </button>
-                      );
-                    })}
-                  </section>
-                ))}
-              </div>
+              {compact ? (
+                <CompactChangesFilePicker
+                  files={files}
+                  selectedPath={selectedFile?.path ?? null}
+                  onSelectPath={setSelectedPath}
+                />
+              ) : (
+                <div className="changes-file-list">
+                  {groups.map(([status, groupFiles]) => (
+                    <section className="changes-file-group" key={status}>
+                      <header><span>{statusMetadata[status].label}</span><b>{groupFiles.length}</b></header>
+                      {groupFiles.map((file) => {
+                        const parts = splitFilePath(file.path);
+                        return (
+                          <button className={selectedFile?.path === file.path ? "active" : ""} key={file.path} onClick={() => setSelectedPath(file.path)} type="button">
+                            <span className={`changes-file-status changes-file-status--${file.status}`}>{statusMetadata[file.status].short}</span>
+                            <span className="changes-file-identity"><strong title={file.path}>{parts.name}</strong><small title={parts.directory}>{parts.directory}</small></span>
+                            <span className="changes-file-stats"><em>+{file.addedLines}</em><i>-{file.deletedLines}</i></span>
+                          </button>
+                        );
+                      })}
+                    </section>
+                  ))}
+                </div>
+              )}
             </aside>
 
             <article className="diff-viewer">
@@ -217,17 +344,20 @@ export function ChangesPanel({
                 <>
                   <div className="diff-file-header">
                     <div className="diff-file-title"><span className={`changes-file-status changes-file-status--${selectedFile.status}`}>{statusMetadata[selectedFile.status].short}</span><div><strong>{selectedParts.name}</strong><small>{selectedParts.directory}</small></div></div>
-                    <div className="diff-file-actions"><button onClick={() => void copyTextToClipboard(selectedFile.path)} type="button">复制路径</button><button onClick={() => onReference ? onReference(reference) : void copyTextToClipboard(reference)} type="button">引用文件</button></div>
+                    <div className="diff-file-actions"><button onClick={() => setFullscreenFile(selectedFile)} type="button">全屏查看</button><button onClick={() => void copyTextToClipboard(selectedFile.path)} type="button">复制路径</button><button onClick={() => onReference ? onReference(reference) : void copyTextToClipboard(reference)} type="button">引用文件</button></div>
                   </div>
-                  {selectedFile.binary ? <div className="changes-empty">二进制文件不提供文本 Diff。</div> : (
-                    <div className="diff-code" role="table">
-                      {diffLines.map((line, index) => <div className={`diff-row diff-row--${line.kind}`} key={`${index}-${line.content}`} role="row"><span className="diff-line-number">{line.oldLine ?? ""}</span><span className="diff-line-number">{line.newLine ?? ""}</span><code>{line.content || " "}</code></div>)}
-                    </div>
-                  )}
+                  <DiffCode file={selectedFile} />
                 </>
               ) : <div className="changes-empty">没有匹配的文件变更。</div>}
             </article>
           </div>
+          {fullscreenFile && (
+            <FullscreenDiffView
+              file={fullscreenFile}
+              onClose={() => setFullscreenFile(null)}
+              onReference={onReference}
+            />
+          )}
         </>
       ) : null}
     </section>

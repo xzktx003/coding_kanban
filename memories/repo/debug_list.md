@@ -9,6 +9,8 @@
 
 # 仓库 bug 修复记录
 
+- 手机端变更面板展开全部文件会挤压 Diff：紧凑模式改用原生下拉框选择文件，并提供独立全屏 Diff 覆盖层，支持退出、复制路径和引用文件。
+
 - Agent 完成结果直接进入“已完成”会被用户漏看，tmux 恢复运行还可能残留旧标记：新增持久化 `hasUnreadCompletion`，完成先进入“需要你”，聚焦查看后进入“已完成”，新输入或恢复运行后清除并进入“工作中”；所有桌面、手机和多终端查看入口统一走 focus API。
 - 本地 tmux 中 Ctrl+C 等快捷键可用但普通文字无法输入，或文字落到与当前可见 pane 不同的目标。根因是普通文本走 `tmux send-keys`，而控制键、鼠标和前缀走 attached client PTY，两条通道的活动 pane 与时序可能分叉。修复为 attached client 存在时统一把所有原始输入写入同一个有序 PTY；仅无 client 的离线场景回退到固定 pane 的 `send-keys`。单元回归覆盖普通文本、前缀、清理和 detached fallback，真实 WebSocket+tmux 回归覆盖握手、焦点过滤和分帧粘贴。
 - 新建或恢复本地 tmux 时，scrollback replay 可早于 `tmux attach` client 完成，首个文字、前缀或 Codex 输入会被启动 shell 吞掉。修复为用 `tmux list-clients` 的 `client_pid` 匹配 PTY PID 后再写 native PTY；就绪前短暂等待，超时安全回退 pane adapter。CSI-u 修饰 Enter 保持 `send-keys -l` 例外，避免旧 tmux client 吞掉原始字节；真实 rename-window prompt 回归覆盖首帧输入、提交和取消。
