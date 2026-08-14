@@ -5,6 +5,7 @@ import type { AgentGitSummary, AgentSessionRecord } from "@agent-orchestrator/sh
 import { getAgentGitSummary } from "../lib/api";
 
 interface AgentGridGitSummaryProps {
+  refreshKey: string;
   session: AgentSessionRecord;
 }
 
@@ -24,7 +25,10 @@ function initialSummary(session: AgentSessionRecord): AgentGitSummary | null {
   };
 }
 
-export function AgentGridGitSummary({ session }: AgentGridGitSummaryProps) {
+export function AgentGridGitSummary({
+  refreshKey,
+  session,
+}: AgentGridGitSummaryProps) {
   const [summary, setSummary] = useState<AgentGitSummary | null>(() =>
     initialSummary(session),
   );
@@ -39,7 +43,7 @@ export function AgentGridGitSummary({ session }: AgentGridGitSummaryProps) {
     return () => {
       cancelled = true;
     };
-  }, [session.id, session.lastOutputAt, session.workingDirectory]);
+  }, [refreshKey, session.id]);
 
   if (!summary?.projectName && !summary?.unavailableReason) return null;
 

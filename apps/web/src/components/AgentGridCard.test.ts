@@ -6,9 +6,60 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   AgentGridCard,
+  getAgentCardGitSummaryRefreshKey,
+  getAgentCardTaskSummaryRefreshKey,
   shouldFocusGridCardFromDoubleClick,
   shouldFocusGridCardFromMouseDown,
 } from "./AgentGridCard.js";
+
+test("continuous terminal output does not invalidate card summaries", () => {
+  const session = {
+    id: "session-refresh-key",
+    workspaceId: "default",
+    sourceType: "local" as const,
+    agentKind: "codex",
+    displayName: "Refresh Key",
+    connectionState: "online" as const,
+    interactionState: "running" as const,
+    lastOutputAt: "2026-08-14T15:00:00.000Z",
+  };
+
+  assert.equal(
+    getAgentCardTaskSummaryRefreshKey(session),
+    getAgentCardTaskSummaryRefreshKey({
+      ...session,
+      lastOutputAt: "2026-08-14T15:00:14.999Z",
+    }),
+  );
+  assert.equal(
+    getAgentCardTaskSummaryRefreshKey(session),
+    getAgentCardTaskSummaryRefreshKey({
+      ...session,
+      interactionState: "idle",
+    }),
+  );
+  assert.notEqual(
+    getAgentCardTaskSummaryRefreshKey(session),
+    getAgentCardTaskSummaryRefreshKey({
+      ...session,
+      lastOutputAt: "2026-08-14T15:00:15.000Z",
+    }),
+  );
+  assert.equal(
+    getAgentCardGitSummaryRefreshKey(session),
+    getAgentCardGitSummaryRefreshKey({
+      ...session,
+      lastOutputAt: "2026-08-14T15:00:59.999Z",
+    }),
+  );
+  assert.notEqual(
+    getAgentCardGitSummaryRefreshKey(session),
+    getAgentCardGitSummaryRefreshKey({
+      ...session,
+      lastOutputAt: "2026-08-14T15:01:00.000Z",
+    }),
+  );
+});
 
 test("grid cards show structured task summaries above terminal previews", () => {
   const markup = renderToStaticMarkup(

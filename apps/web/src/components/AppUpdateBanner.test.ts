@@ -111,6 +111,10 @@ test("renders visible managed-session restore progress and failures", () => {
   assert.match(failed, /agent-3: tmux 会话不存在/);
   assert.match(failed, /data-testid="dismiss-session-restore"/);
   assert.match(failed, /aria-label="关闭历史会话恢复失败提示"/);
+  assert.match(
+    failed,
+    /app-update-banner__actions[\s\S]*dismiss-session-restore/,
+  );
 });
 
 test("assigns close actions and state-specific auto-dismiss delays to restore results", () => {
@@ -132,6 +136,10 @@ test("assigns close actions and state-specific auto-dismiss delays to restore re
   assert.match(markup, /历史会话已恢复/);
   assert.match(markup, /data-testid="dismiss-session-restore"/);
   assert.match(markup, /aria-label="关闭历史会话恢复提示"/);
+  assert.match(
+    markup,
+    /app-update-banner__actions[\s\S]*dismiss-session-restore/,
+  );
   assert.equal(RESTORE_COMPLETE_AUTO_DISMISS_MS, 5_000);
   assert.equal(RESTORE_FAILED_AUTO_DISMISS_MS, 10_000);
   assert.equal(getRestoreBannerAutoDismissMs(restoredState), 5_000);

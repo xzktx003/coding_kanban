@@ -243,15 +243,17 @@ export function AppUpdateBanner({
             ))}
           </ul>
         </div>
-        <button
-          aria-label="关闭历史会话恢复失败提示"
-          className="app-update-banner__dismiss"
-          data-testid="dismiss-session-restore"
-          onClick={onDismiss}
-          type="button"
-        >
-          ×
-        </button>
+        <div className="app-update-banner__actions">
+          <button
+            aria-label="关闭历史会话恢复失败提示"
+            className="app-update-banner__dismiss"
+            data-testid="dismiss-session-restore"
+            onClick={onDismiss}
+            type="button"
+          >
+            ×
+          </button>
+        </div>
       </aside>
     );
   }
@@ -271,15 +273,17 @@ export function AppUpdateBanner({
             : ""}
         </span>
       </div>
-      <button
-        aria-label="关闭历史会话恢复提示"
-        className="app-update-banner__dismiss"
-        data-testid="dismiss-session-restore"
-        onClick={onDismiss}
-        type="button"
-      >
-        ×
-      </button>
+      <div className="app-update-banner__actions">
+        <button
+          aria-label="关闭历史会话恢复提示"
+          className="app-update-banner__dismiss"
+          data-testid="dismiss-session-restore"
+          onClick={onDismiss}
+          type="button"
+        >
+          ×
+        </button>
+      </div>
     </aside>
   );
 }

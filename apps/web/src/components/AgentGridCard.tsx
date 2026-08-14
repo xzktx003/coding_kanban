@@ -56,6 +56,37 @@ const interactiveDoubleClickSelectors = [
   '[role="menuitem"]',
 ];
 
+const TASK_SUMMARY_REFRESH_INTERVAL_MS = 15_000;
+const GIT_SUMMARY_REFRESH_INTERVAL_MS = 60_000;
+
+function getSummaryRefreshKey(
+  session: AgentSessionRecord,
+  intervalMs: number,
+): string {
+  const lastOutputAt = Date.parse(session.lastOutputAt ?? "");
+  const outputBucket = Number.isFinite(lastOutputAt)
+    ? Math.floor(lastOutputAt / intervalMs)
+    : 0;
+  return [
+    session.id,
+    session.workingDirectory ?? "",
+    session.connectionState,
+    outputBucket,
+  ].join(":");
+}
+
+export function getAgentCardTaskSummaryRefreshKey(
+  session: AgentSessionRecord,
+): string {
+  return getSummaryRefreshKey(session, TASK_SUMMARY_REFRESH_INTERVAL_MS);
+}
+
+export function getAgentCardGitSummaryRefreshKey(
+  session: AgentSessionRecord,
+): string {
+  return getSummaryRefreshKey(session, GIT_SUMMARY_REFRESH_INTERVAL_MS);
+}
+
 export function shouldFocusGridCardFromDoubleClick(
   target: EventTarget | null,
 ): boolean {
@@ -119,6 +150,8 @@ export function AgentGridCard({
   terminalFontSize,
   onTerminalFontSizeChange,
 }: AgentGridCardProps) {
+  const taskSummaryRefreshKey = getAgentCardTaskSummaryRefreshKey(session);
+  const gitSummaryRefreshKey = getAgentCardGitSummaryRefreshKey(session);
   const needsCompletionReview = Boolean(session.hasUnreadCompletion);
   const stateClass = needsCompletionReview
     ? "card-review"
@@ -267,9 +300,12 @@ export function AgentGridCard({
         }
         initialAgentSummary={session.lastAgentMessageSummary}
         initialUserSummary={session.lastUserMessageSummary}
-        lastOutputAt={session.lastOutputAt}
+        refreshKey={taskSummaryRefreshKey}
       />
-      <AgentGridGitSummary session={session} />
+      <AgentGridGitSummary
+        refreshKey={gitSummaryRefreshKey}
+        session={session}
+      />
       <div className="grid-card-terminal">
         {useLightweightTerminalPreview ? (
           <TerminalPreview session={session} suspended={terminalSuspended} />

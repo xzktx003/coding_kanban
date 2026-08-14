@@ -109,6 +109,7 @@ import {
   parseSidePanelSessionStates,
   type FileBrowserSessionState,
 } from "./lib/side-panel-session-state";
+import { updateSessionUnreadCompletion } from "./lib/session-snapshot-updates";
 import {
   buildDirectLaunchCommand,
   buildRemoteDirectLaunchCommand,
@@ -1014,11 +1015,24 @@ export default function App() {
 
   const handleUnreadCompletionChange = useCallback(
     async (id: string, unread: boolean) => {
+      setSnapshot((current) =>
+        updateSessionUnreadCompletion(current, id, unread),
+      );
       try {
-        await updateAgentSession(id, { hasUnreadCompletion: unread });
-        const snap = await listAgentSessions();
-        setSnapshot(snap);
+        const updatedSession = await updateAgentSession(id, {
+          hasUnreadCompletion: unread,
+        });
+        setSnapshot((current) =>
+          updateSessionUnreadCompletion(
+            current,
+            id,
+            Boolean(updatedSession.hasUnreadCompletion),
+          ),
+        );
       } catch (error) {
+        setSnapshot((current) =>
+          updateSessionUnreadCompletion(current, id, !unread),
+        );
         window.alert(
           error instanceof Error ? error.message : "更新会话已读状态失败",
         );

@@ -10,7 +10,7 @@ interface AgentGridTaskSummaryProps {
   supportsStructuredSummary?: boolean;
   initialAgentSummary?: string;
   initialUserSummary?: string;
-  lastOutputAt?: string;
+  refreshKey: string;
 }
 
 const EMPTY_SUMMARY: AgentTaskSummaryResponse = {
@@ -24,7 +24,7 @@ export function AgentGridTaskSummary({
   supportsStructuredSummary = agentKind === "codex",
   initialAgentSummary,
   initialUserSummary,
-  lastOutputAt,
+  refreshKey,
 }: AgentGridTaskSummaryProps) {
   const [summary, setSummary] = useState<AgentTaskSummaryResponse>(() => ({
     available: Boolean(initialUserSummary || initialAgentSummary),
@@ -51,7 +51,7 @@ export function AgentGridTaskSummary({
     return () => {
       cancelled = true;
     };
-  }, [agentKind, agentSessionId, lastOutputAt, supportsStructuredSummary]);
+  }, [agentSessionId, refreshKey, supportsStructuredSummary]);
 
   if (
     !summary.available ||

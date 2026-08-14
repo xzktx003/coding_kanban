@@ -182,6 +182,66 @@ test("GET task summary extracts the latest structured Codex messages", async () 
   await app.close();
 });
 
+test("GET task summary reuses the cached transcript within the refresh window", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "codex",
+    displayName: "cached codex pane",
+    workingDirectory: "/workspace/project",
+    interactionState: "running",
+  });
+  let readCount = 0;
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {} as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    codexTranscriptService: {
+      read() {
+        readCount += 1;
+        return {
+          available: true,
+          agentKind: "codex",
+          sessionId: "codex-session-id",
+          matchedBy: "working-directory",
+          updatedAt: "2026-08-13T02:00:00.000Z",
+          entries: [],
+        };
+      },
+    },
+  });
+
+  const [first, second] = await Promise.all([
+    app.inject({
+      method: "GET",
+      url: `/api/agent-sessions/${session.id}/task-summary`,
+    }),
+    app.inject({
+      method: "GET",
+      url: `/api/agent-sessions/${session.id}/task-summary`,
+    }),
+  ]);
+  const third = await app.inject({
+    method: "GET",
+    url: `/api/agent-sessions/${session.id}/task-summary`,
+  });
+
+  assert.equal(first.statusCode, 200);
+  assert.equal(second.statusCode, 200);
+  assert.equal(third.statusCode, 200);
+  assert.equal(readCount, 1);
+  await app.close();
+});
+
 test("GET task summary supports local tmux sessions even when agentKind is shell", async () => {
   const app = Fastify();
   const registry = new AgentSessionRegistry();

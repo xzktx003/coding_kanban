@@ -56,6 +56,14 @@ import {
 } from "../services/vscode-web-manager.js";
 import { resolveVsCodeWebRequestTarget } from "./vscode-web-request-target.js";
 
+const TASK_SUMMARY_CACHE_TTL_MS = 15_000;
+const GIT_SUMMARY_CACHE_TTL_MS = 60_000;
+
+interface TimedCacheEntry<T> {
+  value: T;
+  expiresAt: number;
+}
+
 function buildAgentInvocation(
   agentKind: string,
   displayName: string,
@@ -249,6 +257,16 @@ export async function registerAgentSessionRoutes(
     codexChangeService = new CodexChangeService(),
     gitChangesService = new GitChangesService(),
   } = options;
+  const taskSummaryCache = new Map<
+    string,
+    TimedCacheEntry<AgentTaskSummaryResponse>
+  >();
+  const taskSummaryInFlight = new Map<
+    string,
+    Promise<AgentTaskSummaryResponse>
+  >();
+  const gitSummaryCache = new Map<string, TimedCacheEntry<AgentGitSummary>>();
+  const gitSummaryInFlight = new Map<string, Promise<AgentGitSummary>>();
 
   fastify.get("/api/health", async () => ({ status: "ok" }));
 
@@ -273,22 +291,48 @@ export async function registerAgentSessionRoutes(
         };
       }
 
-      const summary = await gitProjectSummaryService.read(
-        agentSession.workingDirectory,
-      );
-      if (summary.available) {
-        registry.updateSession(agentSession.id, {
-          projectName: summary.projectName,
-          repositoryRoot: summary.repositoryRoot,
-          gitBranch: summary.branch,
-          gitChangedFiles: summary.changedFiles,
-          gitAddedLines: summary.addedLines,
-          gitDeletedLines: summary.deletedLines,
-          gitIsWorktree: summary.isWorktree,
-          gitSummaryUpdatedAt: summary.updatedAt ?? undefined,
+      const cached = gitSummaryCache.get(agentSession.id);
+      if (cached && cached.expiresAt > Date.now()) return cached.value;
+      const pending = gitSummaryInFlight.get(agentSession.id);
+      if (pending) return pending;
+
+      const readPromise = (async () => {
+        const summary = await gitProjectSummaryService.read(
+          agentSession.workingDirectory,
+        );
+        const cachedSummaryChanged =
+          summary.available &&
+          (agentSession.projectName !== summary.projectName ||
+            agentSession.repositoryRoot !== summary.repositoryRoot ||
+            agentSession.gitBranch !== summary.branch ||
+            agentSession.gitChangedFiles !== summary.changedFiles ||
+            agentSession.gitAddedLines !== summary.addedLines ||
+            agentSession.gitDeletedLines !== summary.deletedLines ||
+            agentSession.gitIsWorktree !== summary.isWorktree);
+        if (cachedSummaryChanged) {
+          registry.updateSession(agentSession.id, {
+            projectName: summary.projectName,
+            repositoryRoot: summary.repositoryRoot,
+            gitBranch: summary.branch,
+            gitChangedFiles: summary.changedFiles,
+            gitAddedLines: summary.addedLines,
+            gitDeletedLines: summary.deletedLines,
+            gitIsWorktree: summary.isWorktree,
+            gitSummaryUpdatedAt: summary.updatedAt ?? undefined,
+          });
+        }
+        gitSummaryCache.set(agentSession.id, {
+          value: summary,
+          expiresAt: Date.now() + GIT_SUMMARY_CACHE_TTL_MS,
         });
+        return summary;
+      })();
+      gitSummaryInFlight.set(agentSession.id, readPromise);
+      try {
+        return await readPromise;
+      } finally {
+        gitSummaryInFlight.delete(agentSession.id);
       }
-      return summary;
     },
   );
 
@@ -357,34 +401,53 @@ export async function registerAgentSessionRoutes(
         return { available: false, updatedAt: null };
       }
 
-      const transcript = codexTranscriptService.read({
-        sessionId: agentSession.agentSessionId,
-        workingDirectory: agentSession.workingDirectory,
-      });
-      if (!transcript.available) {
-        return { available: false, updatedAt: transcript.updatedAt };
-      }
+      const cached = taskSummaryCache.get(agentSession.id);
+      if (cached && cached.expiresAt > Date.now()) return cached.value;
+      const pending = taskSummaryInFlight.get(agentSession.id);
+      if (pending) return pending;
 
-      const summaries = summarizeCodexTranscript(transcript.entries);
-      const summaryUpdatedAt = transcript.updatedAt ?? new Date().toISOString();
-      const cachedSummaryChanged =
-        agentSession.lastUserMessageSummary !==
-          summaries.lastUserMessageSummary ||
-        agentSession.lastAgentMessageSummary !==
-          summaries.lastAgentMessageSummary ||
-        agentSession.taskSummaryUpdatedAt !== summaryUpdatedAt;
-      if (cachedSummaryChanged) {
-        registry.updateSession(agentSession.id, {
-          ...summaries,
-          taskSummaryUpdatedAt: summaryUpdatedAt,
+      const readPromise = (async () => {
+        const transcript = codexTranscriptService.read({
+          sessionId: agentSession.agentSessionId,
+          workingDirectory: agentSession.workingDirectory,
         });
-      }
+        if (!transcript.available) {
+          return { available: false, updatedAt: transcript.updatedAt };
+        }
 
-      return {
-        available: true,
-        ...summaries,
-        updatedAt: summaryUpdatedAt,
-      };
+        const summaries = summarizeCodexTranscript(transcript.entries);
+        const summaryUpdatedAt =
+          transcript.updatedAt ?? new Date().toISOString();
+        const cachedSummaryChanged =
+          agentSession.lastUserMessageSummary !==
+            summaries.lastUserMessageSummary ||
+          agentSession.lastAgentMessageSummary !==
+            summaries.lastAgentMessageSummary ||
+          agentSession.taskSummaryUpdatedAt !== summaryUpdatedAt;
+        if (cachedSummaryChanged) {
+          registry.updateSession(agentSession.id, {
+            ...summaries,
+            taskSummaryUpdatedAt: summaryUpdatedAt,
+          });
+        }
+
+        return {
+          available: true,
+          ...summaries,
+          updatedAt: summaryUpdatedAt,
+        };
+      })();
+      taskSummaryInFlight.set(agentSession.id, readPromise);
+      try {
+        const summary = await readPromise;
+        taskSummaryCache.set(agentSession.id, {
+          value: summary,
+          expiresAt: Date.now() + TASK_SUMMARY_CACHE_TTL_MS,
+        });
+        return summary;
+      } finally {
+        taskSummaryInFlight.delete(agentSession.id);
+      }
     },
   );
 
