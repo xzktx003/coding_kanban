@@ -4,6 +4,8 @@ import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 
+export const SESSION_CAPTURE_TIMEOUT_MS = 15_000;
+
 function isRecord(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -114,7 +116,7 @@ export async function captureSessionState({
 }) {
   try {
     const response = await fetchImpl(apiUrl, {
-      signal: AbortSignal.timeout(2_500),
+      signal: AbortSignal.timeout(SESSION_CAPTURE_TIMEOUT_MS),
     });
     if (!response.ok) {
       return false;

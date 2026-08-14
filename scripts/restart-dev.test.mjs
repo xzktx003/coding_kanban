@@ -451,6 +451,20 @@ test("restart-dev checks target ports before stopping pid-file processes", () =>
   );
 });
 
+test("restart-dev removes stale repo dev-server process groups", () => {
+  assert.match(script, /kill_repo_dev_server_process_groups\(\)/);
+  assert.match(
+    script,
+    /kill_from_pid_file frontend "\$WEB_PID_FILE"\s+kill_repo_dev_server_process_groups/,
+  );
+  assert.match(
+    script,
+    /tsx[^\n]*watch src\/index\.ts|vite[^\n]*--host/,
+  );
+  assert.match(script, /kill -- "-\$\{pgid\}"/);
+  assert.match(script, /kill -9 -- "-\$\{pgid\}"/);
+});
+
 test("restart-dev captures the current registry before stopping any process", () => {
   const captureInvocation =
     /^\s*(?:if ! )?capture_current_session_state(?:; then)?\s*$/m.exec(script);

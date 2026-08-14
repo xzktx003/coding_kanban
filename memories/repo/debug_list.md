@@ -1,4 +1,5 @@
 - 当前工作区 Diff 把未跟踪目录显示为文件：`git status --porcelain -z` 会折叠目录；修复为用 `git ls-files --others --exclude-standard` 展开目录，只返回实际文件。
+- 看板频繁自动重连且后端反复 `EADDRINUSE: 4000`：旧 `tsx watch` / Vite 子进程组没有被 PID 文件和端口清理完整覆盖，高负载下会话捕获的 2.5 秒超时又会阻止安全重启；现按仓库路径与开发服务命令定向清理残留进程组，并把会话迁移超时放宽到 15 秒后再启动唯一实例。
 - 工作区 Diff 中只有 `new file mode` 的长路径可能是 0 字节未跟踪 `.done` 标记文件，不是目录；生成 Diff 前过滤 0 字节未跟踪文件。
 - 用户 push 后仍看到 Diff：push 不会清理 `??` 未跟踪输出；当前工作区 Diff 改为 `git status --untracked-files=no`，只显示已跟踪文件的未提交变化。
 - Playwright 创建会话前需等待 `session-restore-banner` 的 restoring 状态结束并关闭可关闭横幅；会话数达到四列共享虚拟化阈值时，先用 API 确认创建结果，并用足够高的视口挂载各列测试卡片，避免 UI 假红。

@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   captureSessionState,
   isAgentSessionSnapshot,
+  SESSION_CAPTURE_TIMEOUT_MS,
 } from "./capture-session-state.mjs";
 
 const snapshot = {
@@ -34,6 +35,10 @@ const snapshot = {
   activeAgentSessionId: "session-1",
   updatedAt: "2026-07-27T00:00:00.000Z",
 };
+
+test("allows a busy backend enough time to return the session registry", () => {
+  assert.equal(SESSION_CAPTURE_TIMEOUT_MS, 15_000);
+});
 
 test("validates the minimal agent-session snapshot contract", () => {
   assert.equal(isAgentSessionSnapshot(snapshot), true);

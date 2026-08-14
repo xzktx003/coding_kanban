@@ -126,6 +126,46 @@ kill_from_pid_file() {
   rm -f "$pid_file"
 }
 
+kill_repo_dev_server_process_groups() {
+  local pid
+  local pgid
+  local cmdline
+  local rest
+  local full_cmdline
+  local -A process_groups=()
+
+  while read -r pid pgid cmdline rest; do
+    if [[ ! "$pid" =~ ^[1-9][0-9]*$ || ! "$pgid" =~ ^[1-9][0-9]*$ ]]; then
+      continue
+    fi
+
+    full_cmdline="$cmdline $rest"
+    if [[ "$full_cmdline" == *"$ROOT_DIR"* &&
+      ( ( "$full_cmdline" == *"tsx"* || "$full_cmdline" == *"tsx/dist/cli.mjs"* ) &&
+          "$full_cmdline" == *"watch src/index.ts"* ||
+        "$full_cmdline" == *"vite"* && "$full_cmdline" == *"--host"* ) ]]; then
+      process_groups["$pgid"]="$pid"
+    fi
+  done < <(ps -eo pid=,pgid=,args= 2>/dev/null || true)
+
+  if (( ${#process_groups[@]} == 0 )); then
+    return
+  fi
+
+  for pgid in "${!process_groups[@]}"; do
+    log "Stopping stale repo dev-server process group ${pgid}"
+    kill -- "-${pgid}" 2>/dev/null || true
+  done
+  sleep 0.3
+
+  for pgid in "${!process_groups[@]}"; do
+    if kill -0 -- "-${pgid}" 2>/dev/null; then
+      log "Force killing stale repo dev-server process group ${pgid}"
+      kill -9 -- "-${pgid}" 2>/dev/null || true
+    fi
+  done
+}
+
 pid_belongs_to_repo() {
   local pid="$1"
   local cwd
@@ -387,6 +427,7 @@ main() {
   kill_listeners_on_port frontend "$WEB_PORT"
   kill_from_pid_file backend "$SERVER_PID_FILE"
   kill_from_pid_file frontend "$WEB_PID_FILE"
+  kill_repo_dev_server_process_groups
 
   : >"$SERVER_LOG"
   : >"$WEB_LOG"
