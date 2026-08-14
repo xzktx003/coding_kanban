@@ -139,6 +139,7 @@ describe("AgentFocusView", () => {
     assert.match(markup, /aria-label="当前输入终端"/);
     assert.match(markup, />当前输入<\/span>/);
     assert.match(markup, />完整记录<\/button>/);
+    assert.match(markup, />变更<\/button>/);
     assert.equal(
       (markup.match(/data-terminal-pane-menu-scope="active-titlebar"/g) ?? [])
         .length,

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 test.use({ ignoreHTTPSErrors: true });
 
@@ -16,6 +16,11 @@ const browserDepsAvailable = (() => {
 test.describe("Mobile Terminal", () => {
   const displayName = `Mobile E2E ${Date.now()}`;
 
+  async function openCurrentSession(page: Page) {
+    await page.goto("/mobile");
+    await page.getByRole("button", { name: "当前会话" }).click();
+  }
+
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
   });
@@ -24,6 +29,10 @@ test.describe("Mobile Terminal", () => {
     page,
   }) => {
     await page.goto("/mobile");
+    await expect(
+      page.getByRole("heading", { name: "手机工作区" }),
+    ).toBeVisible({ timeout: 8000 });
+    await page.getByRole("button", { name: "当前会话" }).click();
     const mobileToolbar = page.getByRole("toolbar", {
       name: "手机终端快捷键",
     });
@@ -34,6 +43,7 @@ test.describe("Mobile Terminal", () => {
     page,
   }) => {
     await page.goto("/?view=mobile");
+    await page.getByRole("button", { name: "当前会话" }).click();
     const mobileToolbar = page.getByRole("toolbar", {
       name: "手机终端快捷键",
     });
@@ -41,7 +51,7 @@ test.describe("Mobile Terminal", () => {
   });
 
   test("shortcut help dialog opens and closes", async ({ page }) => {
-    await page.goto("/mobile");
+    await openCurrentSession(page);
     const helpBtn = page.getByRole("button", { name: "说明" });
     await expect(helpBtn).toBeVisible({ timeout: 8000 });
 
@@ -59,7 +69,7 @@ test.describe("Mobile Terminal", () => {
   test("shortcut buttons are present and not disabled on idle session", async ({
     page,
   }) => {
-    await page.goto("/mobile");
+    await openCurrentSession(page);
     const toolbar = page.getByRole("toolbar", {
       name: "手机终端快捷键",
     });
@@ -82,7 +92,7 @@ test.describe("Mobile Terminal", () => {
   });
 
   test("composer: text input and send button visible", async ({ page }) => {
-    await page.goto("/mobile");
+    await openCurrentSession(page);
     const textarea = page.locator(".mobile-agent-composer-input");
     await expect(textarea).toBeVisible({ timeout: 8000 });
 
@@ -97,7 +107,7 @@ test.describe("Mobile Terminal", () => {
   test("composer: typing in textarea and clearing on send", async ({
     page,
   }) => {
-    await page.goto("/mobile");
+    await openCurrentSession(page);
     const textarea = page.locator(".mobile-agent-composer-input");
     await expect(textarea).toBeVisible({ timeout: 8000 });
 
@@ -112,7 +122,7 @@ test.describe("Mobile Terminal", () => {
   });
 
   test("shortcut buttons disable during send", async ({ page }) => {
-    await page.goto("/mobile");
+    await openCurrentSession(page);
     const textarea = page.locator(".mobile-agent-composer-input");
     await expect(textarea).toBeVisible({ timeout: 8000 });
 
@@ -133,7 +143,7 @@ test.describe("Mobile Terminal", () => {
     // Playwright pinch gesture is only reliably supported in webkit
     test.skip(browserName !== "webkit");
 
-    await page.goto("/mobile");
+    await openCurrentSession(page);
     const terminal = page.locator(".mobile-terminal-surface");
     await expect(terminal).toBeVisible({ timeout: 8000 });
 
@@ -147,6 +157,7 @@ test.describe("Mobile Terminal", () => {
 
     // Reload — font size should be restored from localStorage
     await page.reload();
+    await page.getByRole("button", { name: "当前会话" }).click();
     await expect(terminal).toBeVisible({ timeout: 8000 });
   });
 
@@ -155,7 +166,7 @@ test.describe("Mobile Terminal", () => {
   }) => {
     await page.setViewportSize({ width: 390, height: 844 }); // iPhone 14 Pro
 
-    await page.goto("/mobile");
+    await openCurrentSession(page);
     const toolbar = page.getByRole("toolbar", {
       name: "手机终端快捷键",
     });
@@ -184,7 +195,7 @@ test.describe("Mobile Terminal", () => {
   }) => {
     await page.setViewportSize({ width: 844, height: 390 }); // landscape
 
-    await page.goto("/mobile");
+    await openCurrentSession(page);
     const toolbar = page.getByRole("toolbar", {
       name: "手机终端快捷键",
     });

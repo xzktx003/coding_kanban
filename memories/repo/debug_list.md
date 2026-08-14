@@ -1,3 +1,6 @@
+- 当前工作区 Diff 把未跟踪目录显示为文件：`git status --porcelain -z` 会折叠目录；修复为用 `git ls-files --others --exclude-standard` 展开目录，只返回实际文件。
+- 工作区 Diff 中只有 `new file mode` 的长路径可能是 0 字节未跟踪 `.done` 标记文件，不是目录；生成 Diff 前过滤 0 字节未跟踪文件。
+- 用户 push 后仍看到 Diff：push 不会清理 `??` 未跟踪输出；当前工作区 Diff 改为 `git status --untracked-files=no`，只显示已跟踪文件的未提交变化。
 - Playwright 创建会话前需等待 `session-restore-banner` 的 restoring 状态结束并关闭可关闭横幅；会话数达到四列共享虚拟化阈值时，先用 API 确认创建结果，并用足够高的视口挂载各列测试卡片，避免 UI 假红。
 
 # 仓库 bug 修复记录

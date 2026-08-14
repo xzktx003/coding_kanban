@@ -193,6 +193,61 @@ export interface AgentGitSummary {
   updatedAt: string | null;
 }
 
+export type DiffFileStatus =
+  | "modified"
+  | "added"
+  | "deleted"
+  | "renamed"
+  | "untracked"
+  | "conflicted"
+  | "binary";
+
+export interface DiffFileChange {
+  path: string;
+  previousPath?: string;
+  status: DiffFileStatus;
+  addedLines: number;
+  deletedLines: number;
+  patch: string;
+  binary?: boolean;
+  truncated?: boolean;
+}
+
+export interface CheckoutDiffResponse {
+  available: boolean;
+  scope: "checkout";
+  projectName?: string;
+  repositoryRoot?: string;
+  branch?: string;
+  head?: string;
+  changedFiles: number;
+  addedLines: number;
+  deletedLines: number;
+  files: DiffFileChange[];
+  generatedAt: string;
+  truncated?: boolean;
+  unavailableReason?: string;
+}
+
+export interface AgentTaskDiffResponse {
+  available: boolean;
+  scope: "task";
+  agentKind: "codex";
+  sessionId: string | null;
+  matchedBy: "session-id" | "working-directory" | null;
+  confidence: "medium" | "unavailable";
+  taskTitle?: string;
+  startedAt?: string;
+  completedAt?: string;
+  changedFiles: number;
+  addedLines: number;
+  deletedLines: number;
+  files: DiffFileChange[];
+  generatedAt: string;
+  warning?: string;
+  unavailableReason?: string;
+}
+
 export interface RegisterAgentSessionInput {
   workspaceId: string;
   hostId?: string;

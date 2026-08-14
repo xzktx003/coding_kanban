@@ -60,6 +60,8 @@ interface AgentFocusViewProps {
   onDeleteSession: (id: string) => Promise<void> | void;
   onHideSession: (id: string) => Promise<void> | void;
   onRename?: (id: string) => void;
+  changesOpen?: boolean;
+  onToggleChanges?: () => void;
   mobileTerminalTouchMode?: boolean;
   useLightweightTerminalPreview?: boolean;
   terminalFontSize?: number;
@@ -166,6 +168,8 @@ export function AgentFocusView({
   onDeleteSession,
   onHideSession,
   onRename,
+  changesOpen = false,
+  onToggleChanges,
   mobileTerminalTouchMode = false,
   useLightweightTerminalPreview = true,
   terminalFontSize,
@@ -1035,6 +1039,15 @@ export function AgentFocusView({
             type="button"
           >
             完整记录
+          </button>
+          <button
+            aria-pressed={changesOpen}
+            className={`focus-transcript-btn focus-changes-btn${changesOpen ? " focus-changes-btn--active" : ""}`}
+            onClick={onToggleChanges}
+            title="查看本次任务和当前工作区的文件变更"
+            type="button"
+          >
+            变更
           </button>
           {!headerCollapsed && (
             <>

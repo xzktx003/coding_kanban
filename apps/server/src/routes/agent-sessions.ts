@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
 import type {
+  AgentTaskDiffResponse,
   AgentSessionRecord,
   AgentGitSummary,
   AgentTaskSummaryResponse,
@@ -16,6 +17,7 @@ import type {
   UpdateAgentSessionInput,
   DiscoverTmuxInput,
   AddDiscoveredTmuxInput,
+  CheckoutDiffResponse,
 } from "@agent-orchestrator/shared";
 import { shellQuote, formatWorkingDirectory } from "@agent-orchestrator/shared";
 
@@ -23,6 +25,8 @@ import { scanAgentDirectory } from "../services/agent-scanner.js";
 import { AgentSessionRegistry } from "../services/agent-session-registry.js";
 import { CodexTranscriptService } from "../services/codex-transcript-service.js";
 import { summarizeCodexTranscript } from "../services/codex-transcript-service.js";
+import { CodexChangeService } from "../services/codex-change-service.js";
+import { GitChangesService } from "../services/git-changes-service.js";
 import { LocalProcessRuntimeManager } from "../services/local-process-runtime-manager.js";
 import { GitProjectSummaryService } from "../services/git-project-summary-service.js";
 import { LocalTmuxAdapter } from "../services/local-tmux-adapter.js";
@@ -129,6 +133,8 @@ interface AgentSessionRoutesOptions {
   vsCodeWebManager: VsCodeWebManager;
   codexTranscriptService?: Pick<CodexTranscriptService, "read">;
   gitProjectSummaryService?: Pick<GitProjectSummaryService, "read">;
+  codexChangeService?: Pick<CodexChangeService, "read">;
+  gitChangesService?: Pick<GitChangesService, "read">;
 }
 
 export interface ReconnectAgentSessionDependencies {
@@ -240,6 +246,8 @@ export async function registerAgentSessionRoutes(
     vsCodeWebManager,
     codexTranscriptService = new CodexTranscriptService(),
     gitProjectSummaryService = new GitProjectSummaryService(),
+    codexChangeService = new CodexChangeService(),
+    gitChangesService = new GitChangesService(),
   } = options;
 
   fastify.get("/api/health", async () => ({ status: "ok" }));
@@ -281,6 +289,60 @@ export async function registerAgentSessionRoutes(
         });
       }
       return summary;
+    },
+  );
+
+  fastify.get<{ Params: { id: string } }>(
+    "/api/agent-sessions/:id/git-changes",
+    async (request): Promise<CheckoutDiffResponse> => {
+      const agentSession = registry.get(request.params.id);
+      const isRemote =
+        Boolean(agentSession.sshTarget) ||
+        Boolean(agentSession.hostId && agentSession.hostId !== "local");
+      if (isRemote) {
+        return {
+          available: false,
+          scope: "checkout",
+          changedFiles: 0,
+          addedLines: 0,
+          deletedLines: 0,
+          files: [],
+          generatedAt: new Date().toISOString(),
+          unavailableReason: "远端 Git Diff 暂不可用",
+        };
+      }
+      return gitChangesService.read(agentSession.workingDirectory);
+    },
+  );
+
+  fastify.get<{ Params: { id: string } }>(
+    "/api/agent-sessions/:id/task-changes",
+    async (request): Promise<AgentTaskDiffResponse> => {
+      const agentSession = registry.get(request.params.id);
+      const isLocalCodex =
+        agentSession.agentKind === "codex" &&
+        !agentSession.sshTarget &&
+        (!agentSession.hostId || agentSession.hostId === "local");
+      if (!isLocalCodex) {
+        return {
+          available: false,
+          scope: "task",
+          agentKind: "codex",
+          sessionId: null,
+          matchedBy: null,
+          confidence: "unavailable",
+          changedFiles: 0,
+          addedLines: 0,
+          deletedLines: 0,
+          files: [],
+          generatedAt: new Date().toISOString(),
+          unavailableReason: "本次任务变更首版仅支持本机 Codex 会话",
+        };
+      }
+      return codexChangeService.read({
+        sessionId: agentSession.agentSessionId,
+        workingDirectory: agentSession.workingDirectory,
+      });
     },
   );
 

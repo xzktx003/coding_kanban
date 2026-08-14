@@ -5,6 +5,7 @@ import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 import type { AgentCompletionNotificationPermission } from "../lib/agent-completion-notifications";
 import { sendAgentInput } from "../lib/api";
 import { AgentTranscriptDialog } from "./AgentTranscriptDialog";
+import { ChangesPanel } from "./ChangesPanel";
 import { LazyTerminalView } from "./LazyTerminalView";
 import { MobileAgentComposer } from "./MobileAgentComposer";
 import { MobileTerminalToolbar } from "./MobileTerminalToolbar";
@@ -21,13 +22,143 @@ interface MobileWorkbenchPageProps {
   onToggleAgentCompletionNotifications?: () => void;
 }
 
+type MobileWorkbenchView = "board" | "activity" | "session" | "projects";
+type MobileAttentionGroup = "response" | "review" | "executing" | "ready";
+
 const stateLabels: Record<string, string> = {
-  running: "运行中",
-  idle: "空闲",
-  awaiting_input: "等待输入",
+  running: "执行中",
+  idle: "可继续",
+  awaiting_input: "需响应",
   detached: "已分离",
   exited: "已退出",
 };
+
+const connectionLabels: Record<string, string> = {
+  online: "已连接",
+  degraded: "连接不稳",
+  offline: "已断开",
+};
+
+const attentionGroups: Array<{
+  id: MobileAttentionGroup;
+  label: string;
+  description: string;
+}> = [
+  { id: "response", label: "需响应", description: "等待你的回答或确认" },
+  { id: "review", label: "待验收", description: "Agent 已完成，等待查看" },
+  { id: "executing", label: "执行中", description: "Agent 正在处理任务" },
+  { id: "ready", label: "可继续", description: "可以继续输入或检查" },
+];
+
+function timestampValue(value?: string): number {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function latestActivity(session: AgentSessionRecord): number {
+  return Math.max(
+    timestampValue(session.lastOutputAt),
+    timestampValue(session.lastHeartbeatAt),
+    timestampValue(session.lastRefreshedAt),
+    timestampValue(session.taskSummaryUpdatedAt),
+  );
+}
+
+function getAttentionGroup(session: AgentSessionRecord): MobileAttentionGroup {
+  if (session.interactionState === "awaiting_input") return "response";
+  if (session.hasUnreadCompletion) return "review";
+  if (session.interactionState === "running") return "executing";
+  return "ready";
+}
+
+function attentionRank(session: AgentSessionRecord): number {
+  return attentionGroups.findIndex(
+    (group) => group.id === getAttentionGroup(session),
+  );
+}
+
+export function sortMobileSessionsByAttention(
+  sessions: AgentSessionRecord[],
+): AgentSessionRecord[] {
+  return sessions
+    .map((session, index) => ({ session, index }))
+    .sort((left, right) => {
+      const rankDifference =
+        attentionRank(left.session) - attentionRank(right.session);
+      if (rankDifference !== 0) return rankDifference;
+
+      const activityDifference =
+        latestActivity(right.session) - latestActivity(left.session);
+      return activityDifference !== 0
+        ? activityDifference
+        : left.index - right.index;
+    })
+    .map(({ session }) => session);
+}
+
+function formatActivityTime(session: AgentSessionRecord): string {
+  const timestamp = Math.max(
+    timestampValue(session.lastOutputAt),
+    timestampValue(session.lastHeartbeatAt),
+    timestampValue(session.lastRefreshedAt),
+  );
+  if (!timestamp) return "暂无活动时间";
+
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(timestamp);
+}
+
+function shortenPath(path?: string): string {
+  if (!path) return "未提供工作目录";
+  return path.replace(/^\/(?:data\d+\/)?home\/[^/]+/, "~");
+}
+
+function sessionSummary(session: AgentSessionRecord): string {
+  return (
+    session.lastAgentMessageSummary ??
+    session.lastUserMessageSummary ??
+    session.outputPreview?.split(/\r?\n/).filter(Boolean).slice(-1)[0] ??
+    "暂无摘要，进入当前会话查看详情。"
+  );
+}
+
+function MobileSessionCard({
+  session,
+  onOpen,
+}: {
+  session: AgentSessionRecord;
+  onOpen: (session: AgentSessionRecord) => void;
+}) {
+  const attentionGroup = getAttentionGroup(session);
+  return (
+    <button
+      className={`mobile-session-card mobile-session-card--${attentionGroup}`}
+      data-session-id={session.id}
+      onClick={() => onOpen(session)}
+      type="button"
+    >
+      <span className="mobile-session-card-heading">
+        <strong>{session.displayName}</strong>
+        <span>
+          {stateLabels[session.interactionState] ?? session.interactionState}
+        </span>
+      </span>
+      <span className="mobile-session-card-summary">
+        {sessionSummary(session)}
+      </span>
+      <span className="mobile-session-card-meta">
+        <span>{session.projectName ?? shortenPath(session.workingDirectory)}</span>
+        <span>{session.agentKind}</span>
+        <span>{formatActivityTime(session)}</span>
+      </span>
+    </button>
+  );
+}
 
 export function MobileWorkbenchPage({
   activeSessionId,
@@ -40,20 +171,55 @@ export function MobileWorkbenchPage({
   onTerminalFontSizeChange,
   onToggleAgentCompletionNotifications,
 }: MobileWorkbenchPageProps) {
+  const [view, setView] = useState<MobileWorkbenchView>("board");
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
+    activeSessionId,
+  );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sendingInput, setSendingInput] = useState(false);
   const [transcriptSession, setTranscriptSession] =
     useState<AgentSessionRecord | null>(null);
+  const [changesOpen, setChangesOpen] = useState(false);
+  const [pendingReference, setPendingReference] = useState("");
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !session.hidden),
     [sessions],
   );
+  const attentionSortedSessions = useMemo(
+    () => sortMobileSessionsByAttention(visibleSessions),
+    [visibleSessions],
+  );
+  const activitySortedSessions = useMemo(
+    () =>
+      [...visibleSessions].sort(
+        (left, right) => latestActivity(right) - latestActivity(left),
+      ),
+    [visibleSessions],
+  );
   const activeSession = useMemo(
     () =>
+      visibleSessions.find((session) => session.id === selectedSessionId) ??
       visibleSessions.find((session) => session.id === activeSessionId) ??
-      visibleSessions[0],
-    [activeSessionId, visibleSessions],
+      attentionSortedSessions[0],
+    [
+      activeSessionId,
+      attentionSortedSessions,
+      selectedSessionId,
+      visibleSessions,
+    ],
   );
+  const projectGroups = useMemo(() => {
+    const groups = new Map<string, AgentSessionRecord[]>();
+    for (const session of visibleSessions) {
+      const key =
+        session.projectName ??
+        session.repositoryRoot ??
+        session.workingDirectory ??
+        "未归属项目";
+      groups.set(key, [...(groups.get(key) ?? []), session]);
+    }
+    return [...groups.entries()];
+  }, [visibleSessions]);
   const notificationUnsupported =
     agentCompletionNotificationPermission === "unsupported";
   const notificationDenied = agentCompletionNotificationPermission === "denied";
@@ -74,10 +240,22 @@ export function MobileWorkbenchPage({
     };
   }, []);
 
-  const handleSendInput = async (input: string) => {
-    if (!activeSession || sendingInput) {
-      return;
+  const openSession = (session: AgentSessionRecord) => {
+    setSelectedSessionId(session.id);
+    onSwitchSession(session.id);
+    setView("session");
+  };
+
+  const navigateToSession = () => {
+    if (activeSession) {
+      setSelectedSessionId(activeSession.id);
+      onSwitchSession(activeSession.id);
     }
+    setView("session");
+  };
+
+  const handleSendInput = async (input: string) => {
+    if (!activeSession || sendingInput) return;
 
     setErrorMessage(null);
     setSendingInput(true);
@@ -97,10 +275,9 @@ export function MobileWorkbenchPage({
           <div className="mobile-workbench-title">
             <strong>手机端 Coding Kanban</strong>
             <span>
-              {activeSession?.displayName ?? "无可用会话"}
               {activeSession
-                ? ` · ${stateLabels[activeSession.interactionState] ?? activeSession.interactionState} · ${activeSession.agentKind}`
-                : ""}
+                ? `${activeSession.projectName ?? activeSession.hostId ?? "默认工作区"} · ${connectionLabels[activeSession.connectionState] ?? activeSession.connectionState}`
+                : "暂无可用会话"}
             </span>
           </div>
           <a className="mobile-workbench-desktop-link" href="/">
@@ -125,76 +302,265 @@ export function MobileWorkbenchPage({
             </button>
           )}
         </div>
-        <div className="mobile-session-switcher">
-          <span>会话</span>
-          <select
-            disabled={!activeSession}
-            onChange={(event) => onSwitchSession(event.target.value)}
-            value={activeSession?.id ?? ""}
-          >
-            {visibleSessions.map((session) => (
-              <option key={session.id} value={session.id}>
-                {session.displayName}
-              </option>
-            ))}
-          </select>
-          <button
-            className="mobile-transcript-btn"
-            disabled={!activeSession}
-            onClick={() => activeSession && setTranscriptSession(activeSession)}
-            title="查看不受终端重绘影响的完整 Codex 记录"
-            type="button"
-          >
-            完整记录
-          </button>
-        </div>
       </header>
 
-      <section className="mobile-terminal-surface">
-        <div className="mobile-terminal-frame">
-          {isLoading ? (
-            <div className="grid-empty">
-              <p>正在加载...</p>
+      <section className="mobile-workbench-content">
+        {view === "board" && (
+          <div className="mobile-workspace-view">
+            <div className="mobile-view-heading">
+              <div>
+                <span>ATTENTION QUEUE</span>
+                <h1>手机工作区</h1>
+              </div>
+              <strong>{visibleSessions.length} 个会话</strong>
             </div>
-          ) : activeSession ? (
-            <Suspense
-              fallback={
-                <div className="grid-empty">
-                  <p>正在加载终端...</p>
+            {isLoading ? (
+              <div className="mobile-workbench-empty">正在加载会话...</div>
+            ) : attentionSortedSessions.length === 0 ? (
+              <div className="mobile-workbench-empty">
+                暂无会话，请到电脑端新建或接入会话。
+              </div>
+            ) : (
+              attentionGroups.map((group) => {
+                const groupSessions = attentionSortedSessions.filter(
+                  (session) => getAttentionGroup(session) === group.id,
+                );
+                if (groupSessions.length === 0) return null;
+                return (
+                  <section className="mobile-attention-group" key={group.id}>
+                    <header>
+                      <div>
+                        <h2>{group.label}</h2>
+                        <span>{group.description}</span>
+                      </div>
+                      <strong>{groupSessions.length}</strong>
+                    </header>
+                    <div className="mobile-session-list">
+                      {groupSessions.map((session) => (
+                        <MobileSessionCard
+                          key={session.id}
+                          onOpen={openSession}
+                          session={session}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                );
+              })
+            )}
+          </div>
+        )}
+
+        {view === "activity" && (
+          <div className="mobile-workspace-view">
+            <div className="mobile-view-heading">
+              <div>
+                <span>RECENT UPDATES</span>
+                <h1>最近活动</h1>
+              </div>
+            </div>
+            <div className="mobile-activity-list">
+              {activitySortedSessions.map((session) => (
+                <button
+                  className="mobile-activity-item"
+                  key={session.id}
+                  onClick={() => openSession(session)}
+                  type="button"
+                >
+                  <span
+                    className={`mobile-activity-dot mobile-activity-dot--${getAttentionGroup(session)}`}
+                  />
+                  <span>
+                    <strong>{session.displayName}</strong>
+                    <small>{sessionSummary(session)}</small>
+                  </span>
+                  <time>{formatActivityTime(session)}</time>
+                </button>
+              ))}
+              {!isLoading && activitySortedSessions.length === 0 && (
+                <div className="mobile-workbench-empty">暂无活动。</div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {view === "projects" && (
+          <div className="mobile-workspace-view">
+            <div className="mobile-view-heading">
+              <div>
+                <span>WORKSPACES</span>
+                <h1>项目与文件</h1>
+              </div>
+            </div>
+            <div className="mobile-project-list">
+              {projectGroups.map(([project, projectSessions]) => (
+                <section className="mobile-project-card" key={project}>
+                  <header>
+                    <div>
+                      <strong>{projectSessions[0]?.projectName ?? project}</strong>
+                      <span>
+                        {shortenPath(projectSessions[0]?.workingDirectory)}
+                      </span>
+                    </div>
+                    <span>{projectSessions.length} 个会话</span>
+                  </header>
+                  {projectSessions.map((session) => (
+                    <button
+                      key={session.id}
+                      onClick={() => openSession(session)}
+                      type="button"
+                    >
+                      <span>{session.displayName}</span>
+                      <small>{stateLabels[session.interactionState]}</small>
+                    </button>
+                  ))}
+                </section>
+              ))}
+              {!isLoading && projectGroups.length === 0 && (
+                <div className="mobile-workbench-empty">
+                  暂无项目或文件入口。
                 </div>
-              }
-            >
-              <LazyTerminalView
-                agentSessionId={activeSession.id}
-                fontSize={terminalFontSize}
-                inputEnabled={false}
-                interactive
-                mobileTouchMode
-                onFontSizeChange={onTerminalFontSizeChange}
-              />
-            </Suspense>
-          ) : (
-            <div className="grid-empty">
-              <p>没有可用会话。请先回到桌面端新建或接入一个会话。</p>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {view === "session" && (
+          <div className="mobile-session-view">
+            <div className="mobile-session-switcher">
+              <span>当前会话</span>
+              <select
+                disabled={!activeSession}
+                onChange={(event) => {
+                  const session = visibleSessions.find(
+                    (item) => item.id === event.target.value,
+                  );
+                  if (session) openSession(session);
+                }}
+                value={activeSession?.id ?? ""}
+              >
+                {attentionSortedSessions.map((session) => (
+                  <option key={session.id} value={session.id}>
+                    {session.displayName}
+                  </option>
+                ))}
+              </select>
+              <button
+                className="mobile-transcript-btn"
+                disabled={!activeSession}
+                onClick={() =>
+                  activeSession && setTranscriptSession(activeSession)
+                }
+                type="button"
+              >
+                完整记录
+              </button>
+              <button
+                className="mobile-transcript-btn"
+                disabled={!activeSession}
+                onClick={() => setChangesOpen(true)}
+                type="button"
+              >
+                变更
+              </button>
+            </div>
+            <section className="mobile-terminal-surface">
+              <div className="mobile-terminal-frame">
+                {isLoading ? (
+                  <div className="grid-empty">
+                    <p>正在加载...</p>
+                  </div>
+                ) : activeSession ? (
+                  <Suspense
+                    fallback={
+                      <div className="grid-empty">
+                        <p>正在加载终端...</p>
+                      </div>
+                    }
+                  >
+                    <LazyTerminalView
+                      agentSessionId={activeSession.id}
+                      fontSize={terminalFontSize}
+                      inputEnabled={false}
+                      interactive
+                      mobileTouchMode
+                      onFontSizeChange={onTerminalFontSizeChange}
+                    />
+                  </Suspense>
+                ) : (
+                  <div className="grid-empty">
+                    <p>没有可用会话。</p>
+                  </div>
+                )}
+              </div>
+            </section>
+            {errorMessage && (
+              <div className="mobile-workbench-error" role="alert">
+                {errorMessage}
+              </div>
+            )}
+            <MobileTerminalToolbar
+              disabled={!activeSession || sendingInput}
+              onSendInput={handleSendInput}
+            />
+            <MobileAgentComposer
+              disabled={!activeSession || sendingInput}
+              insertedText={pendingReference}
+              onInsertedTextConsumed={() => setPendingReference("")}
+              onSendInput={handleSendInput}
+            />
+          </div>
+        )}
       </section>
 
-      {errorMessage && (
-        <div className="mobile-workbench-error" role="alert">
-          {errorMessage}
+      <nav aria-label="手机端主导航" className="mobile-primary-nav">
+        <button
+          aria-label="看板"
+          className={view === "board" ? "active" : ""}
+          onClick={() => setView("board")}
+          type="button"
+        >
+          <span>▦</span>看板
+        </button>
+        <button
+          aria-label="活动"
+          className={view === "activity" ? "active" : ""}
+          onClick={() => setView("activity")}
+          type="button"
+        >
+          <span>◴</span>活动
+        </button>
+        <button
+          aria-label="当前会话"
+          className={view === "session" ? "active" : ""}
+          onClick={navigateToSession}
+          type="button"
+        >
+          <span>⌁</span>当前会话
+        </button>
+        <button
+          aria-label="项目/文件"
+          className={view === "projects" ? "active" : ""}
+          onClick={() => setView("projects")}
+          type="button"
+        >
+          <span>▤</span>项目/文件
+        </button>
+      </nav>
+
+      {changesOpen && activeSession && (
+        <div className="mobile-changes-overlay">
+          <ChangesPanel
+            compact
+            session={activeSession}
+            onClose={() => setChangesOpen(false)}
+            onReference={(reference) => {
+              setPendingReference(reference);
+              setChangesOpen(false);
+            }}
+          />
         </div>
       )}
-
-      <MobileTerminalToolbar
-        disabled={!activeSession || sendingInput}
-        onSendInput={handleSendInput}
-      />
-      <MobileAgentComposer
-        disabled={!activeSession || sendingInput}
-        onSendInput={handleSendInput}
-      />
       {transcriptSession && (
         <AgentTranscriptDialog
           agentSessionId={transcriptSession.id}

@@ -26,6 +26,7 @@ import type { DiscoveryMode } from "./components/DiscoveryDialog";
 import { DiscoveryDialog } from "./components/DiscoveryDialog";
 import type { AddToGridItem } from "./components/DiscoveryDialog";
 import { FileBrowserDrawer } from "./components/FileBrowserDrawer";
+import { ChangesPanel } from "./components/ChangesPanel";
 import type { FilterState } from "./components/FilterBar";
 import { HiddenSessionsDrawer } from "./components/HiddenSessionsDrawer";
 import type { SelectedHost } from "./components/HostDropdown";
@@ -150,7 +151,7 @@ import {
 import { copyTextToClipboard } from "./lib/clipboard";
 import "./app.css";
 
-type SidePanelTool = "files" | "vscode";
+type SidePanelTool = "files" | "vscode" | "changes";
 
 const FILE_BROWSER_UI_STORAGE_KEY = "file-browser-ui-state";
 const SIDE_PANEL_SESSION_STORAGE_KEY = "side-panel-session-state";
@@ -1199,7 +1200,8 @@ export default function App() {
   });
   const fileBrowserOpen = panelAvailable && openSidePanelTool === "files";
   const vscodeOpen = panelAvailable && openSidePanelTool === "vscode";
-  const sidePanelOpen = fileBrowserOpen || vscodeOpen;
+  const changesOpen = panelAvailable && openSidePanelTool === "changes";
+  const sidePanelOpen = fileBrowserOpen || vscodeOpen || changesOpen;
   const activeVsCodeSessionId =
     vscodeOpen && focusedSession ? focusedSession.id : null;
   const renderedVsCodeSessionIds = useMemo(() => {
@@ -1221,8 +1223,7 @@ export default function App() {
     renderedVsCodeSessionIds.some(
       (sessionId) => !retainedVsCodeSessionIds.includes(sessionId),
     );
-  const sidePanelRendered =
-    sidePanelOpen || renderedVsCodeSessionIds.length > 0;
+  const sidePanelRendered = sidePanelOpen || renderedVsCodeSessionIds.length > 0;
   const sidePanelCollapsed = sidePanelOpen && fileBrowserUiState.sideCollapsed;
   const mainPanelCollapsed = sidePanelOpen && fileBrowserUiState.mainCollapsed;
 
@@ -1745,6 +1746,12 @@ export default function App() {
                   sshHosts={sshHosts}
                 />
               </SidePanelView>
+              <SidePanelView active={changesOpen}>
+                <ChangesPanel
+                  session={focusedSession}
+                  onClose={closeSidePanelTool}
+                />
+              </SidePanelView>
               {renderedVsCodeSessionIds.map((sessionId) => {
                 const session = sessions.find((item) => item.id === sessionId);
                 if (!session) {
@@ -1831,6 +1838,15 @@ export default function App() {
               onDeleteSession={handleDeleteSession}
               onHideSession={handleHideSession}
               onRename={handleRenameSession}
+              changesOpen={changesOpen}
+              onToggleChanges={() => {
+                if (changesOpen) {
+                  closeSidePanelTool();
+                  return;
+                }
+                setOpenSidePanelTool("changes");
+                ensureSidePanelStateForSession(focusedSession);
+              }}
               sessionGroups={sessionGroups}
               onCreateSessionGroup={handleCreateSessionGroup}
               onDeleteSessionGroup={handleDeleteSessionGroup}

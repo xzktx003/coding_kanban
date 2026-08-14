@@ -1,10 +1,12 @@
 import type {
+  AgentTaskDiffResponse,
   AddDiscoveredTmuxInput,
   AppVersionResponse,
   AgentSessionDetailResponse,
   AgentTranscriptResponse,
   AgentTaskSummaryResponse,
   AgentGitSummary,
+  CheckoutDiffResponse,
   AgentSessionSnapshotEvent,
   AgentSessionRecord,
   ChmodInput,
@@ -118,6 +120,22 @@ export function getAgentGitSummary(
 ): Promise<AgentGitSummary> {
   return request<AgentGitSummary>(
     `/api/agent-sessions/${agentSessionId}/git-summary`,
+  );
+}
+
+export function getCheckoutDiff(
+  agentSessionId: string,
+): Promise<CheckoutDiffResponse> {
+  return request<CheckoutDiffResponse>(
+    `/api/agent-sessions/${agentSessionId}/git-changes`,
+  );
+}
+
+export function getAgentTaskDiff(
+  agentSessionId: string,
+): Promise<AgentTaskDiffResponse> {
+  return request<AgentTaskDiffResponse>(
+    `/api/agent-sessions/${agentSessionId}/task-changes`,
   );
 }
 

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   buildMobileComposerInputFrames,
@@ -7,15 +7,25 @@ import {
 
 interface MobileAgentComposerProps {
   disabled?: boolean;
+  insertedText?: string;
   onSendInput: (input: string) => Promise<void> | void;
+  onInsertedTextConsumed?: () => void;
 }
 
 export function MobileAgentComposer({
   disabled = false,
+  insertedText,
   onSendInput,
+  onInsertedTextConsumed,
 }: MobileAgentComposerProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    if (!insertedText) return;
+    setText((current) => (current ? `${current}\n${insertedText}` : insertedText));
+    onInsertedTextConsumed?.();
+  }, [insertedText, onInsertedTextConsumed]);
 
   const send = async (mode: MobileComposerSendMode) => {
     if (!text || disabled || sending) {
