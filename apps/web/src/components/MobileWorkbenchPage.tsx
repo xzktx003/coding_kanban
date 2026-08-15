@@ -1,4 +1,12 @@
-import { Suspense, useLayoutEffect, useMemo, useState } from "react";
+import type { RefObject } from "react";
+import {
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
@@ -160,6 +168,89 @@ function MobileSessionCard({
   );
 }
 
+interface MobileSessionSwitcherProps {
+  activeSession?: AgentSessionRecord;
+  containerRef?: RefObject<HTMLDivElement | null>;
+  onOpenChanges: () => void;
+  onOpenTranscript: () => void;
+  onSelectSession: (session: AgentSessionRecord) => void;
+  onToggle: () => void;
+  open: boolean;
+  sessions: AgentSessionRecord[];
+}
+
+export function MobileSessionSwitcher({
+  activeSession,
+  containerRef,
+  onOpenChanges,
+  onOpenTranscript,
+  onSelectSession,
+  onToggle,
+  open,
+  sessions,
+}: MobileSessionSwitcherProps) {
+  const menuOpen = open && Boolean(activeSession);
+
+  return (
+    <div className="mobile-session-switcher" ref={containerRef}>
+      <span>当前会话</span>
+      <button
+        aria-controls="mobile-session-picker-list"
+        aria-expanded={menuOpen}
+        aria-haspopup="listbox"
+        className="mobile-session-picker-trigger"
+        disabled={!activeSession}
+        onClick={onToggle}
+        type="button"
+      >
+        <span>{activeSession?.displayName ?? "没有可用会话"}</span>
+      </button>
+      <div className="mobile-session-actions">
+        <button
+          className="mobile-transcript-btn"
+          disabled={!activeSession}
+          onClick={onOpenTranscript}
+          type="button"
+        >
+          完整记录
+        </button>
+        <button
+          className="mobile-transcript-btn"
+          disabled={!activeSession}
+          onClick={onOpenChanges}
+          type="button"
+        >
+          变更
+        </button>
+      </div>
+      {menuOpen && (
+        <div
+          aria-label="选择终端会话"
+          className="mobile-session-picker-menu"
+          id="mobile-session-picker-list"
+          role="listbox"
+        >
+          {sessions.map((session) => (
+            <button
+              aria-selected={session.id === activeSession?.id}
+              key={session.id}
+              onClick={() => onSelectSession(session)}
+              role="option"
+              type="button"
+            >
+              <span>{session.displayName}</span>
+              <small>
+                {stateLabels[session.interactionState] ??
+                  session.interactionState}
+              </small>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MobileWorkbenchPage({
   activeSessionId,
   isLoading,
@@ -180,7 +271,9 @@ export function MobileWorkbenchPage({
   const [transcriptSession, setTranscriptSession] =
     useState<AgentSessionRecord | null>(null);
   const [changesOpen, setChangesOpen] = useState(false);
+  const [sessionPickerOpen, setSessionPickerOpen] = useState(false);
   const [pendingReference, setPendingReference] = useState("");
+  const sessionSwitcherRef = useRef<HTMLDivElement>(null);
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !session.hidden),
     [sessions],
@@ -240,13 +333,38 @@ export function MobileWorkbenchPage({
     };
   }, []);
 
+  useEffect(() => {
+    if (!sessionPickerOpen) return;
+
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && !sessionSwitcherRef.current?.contains(target)) {
+        setSessionPickerOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setSessionPickerOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", closeOutside, true);
+    document.addEventListener("keydown", closeOnEscape, true);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside, true);
+      document.removeEventListener("keydown", closeOnEscape, true);
+    };
+  }, [sessionPickerOpen]);
+
   const openSession = (session: AgentSessionRecord) => {
+    setSessionPickerOpen(false);
     setSelectedSessionId(session.id);
     onSwitchSession(session.id);
     setView("session");
   };
 
   const navigateToSession = () => {
+    setSessionPickerOpen(false);
     if (activeSession) {
       setSelectedSessionId(activeSession.id);
       onSwitchSession(activeSession.id);
@@ -427,43 +545,22 @@ export function MobileWorkbenchPage({
 
         {view === "session" && (
           <div className="mobile-session-view">
-            <div className="mobile-session-switcher">
-              <span>当前会话</span>
-              <select
-                disabled={!activeSession}
-                onChange={(event) => {
-                  const session = visibleSessions.find(
-                    (item) => item.id === event.target.value,
-                  );
-                  if (session) openSession(session);
-                }}
-                value={activeSession?.id ?? ""}
-              >
-                {attentionSortedSessions.map((session) => (
-                  <option key={session.id} value={session.id}>
-                    {session.displayName}
-                  </option>
-                ))}
-              </select>
-              <button
-                className="mobile-transcript-btn"
-                disabled={!activeSession}
-                onClick={() =>
-                  activeSession && setTranscriptSession(activeSession)
-                }
-                type="button"
-              >
-                完整记录
-              </button>
-              <button
-                className="mobile-transcript-btn"
-                disabled={!activeSession}
-                onClick={() => setChangesOpen(true)}
-                type="button"
-              >
-                变更
-              </button>
-            </div>
+            <MobileSessionSwitcher
+              activeSession={activeSession}
+              containerRef={sessionSwitcherRef}
+              onOpenChanges={() => {
+                setSessionPickerOpen(false);
+                setChangesOpen(true);
+              }}
+              onOpenTranscript={() => {
+                setSessionPickerOpen(false);
+                if (activeSession) setTranscriptSession(activeSession);
+              }}
+              onSelectSession={openSession}
+              onToggle={() => setSessionPickerOpen((current) => !current)}
+              open={sessionPickerOpen}
+              sessions={attentionSortedSessions}
+            />
             <section className="mobile-terminal-surface">
               <div className="mobile-terminal-frame">
                 {isLoading ? (
@@ -517,7 +614,10 @@ export function MobileWorkbenchPage({
         <button
           aria-label="看板"
           className={view === "board" ? "active" : ""}
-          onClick={() => setView("board")}
+          onClick={() => {
+            setSessionPickerOpen(false);
+            setView("board");
+          }}
           type="button"
         >
           <span>▦</span>看板
@@ -525,7 +625,10 @@ export function MobileWorkbenchPage({
         <button
           aria-label="活动"
           className={view === "activity" ? "active" : ""}
-          onClick={() => setView("activity")}
+          onClick={() => {
+            setSessionPickerOpen(false);
+            setView("activity");
+          }}
           type="button"
         >
           <span>◴</span>活动
@@ -541,7 +644,10 @@ export function MobileWorkbenchPage({
         <button
           aria-label="项目/文件"
           className={view === "projects" ? "active" : ""}
-          onClick={() => setView("projects")}
+          onClick={() => {
+            setSessionPickerOpen(false);
+            setView("projects");
+          }}
           type="button"
         >
           <span>▤</span>项目/文件

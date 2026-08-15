@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  MobileSessionSwitcher,
   MobileWorkbenchPage,
   sortMobileSessionsByAttention,
 } from "./MobileWorkbenchPage.js";
@@ -29,6 +31,60 @@ function installDocumentStub() {
 }
 
 describe("MobileWorkbenchPage", () => {
+  it("uses one in-page session menu and keeps transcript actions on the same row", () => {
+    const sessions = [
+      {
+        id: "active",
+        workspaceId: "default",
+        sourceType: "local" as const,
+        agentKind: "codex",
+        displayName: "Active Codex",
+        connectionState: "online" as const,
+        interactionState: "running" as const,
+      },
+      {
+        id: "ready",
+        workspaceId: "default",
+        sourceType: "local" as const,
+        agentKind: "shell",
+        displayName: "Ready Shell",
+        connectionState: "online" as const,
+        interactionState: "idle" as const,
+      },
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(MobileSessionSwitcher, {
+        activeSession: sessions[0],
+        open: true,
+        sessions,
+        onOpenChanges: () => {},
+        onOpenTranscript: () => {},
+        onSelectSession: () => {},
+        onToggle: () => {},
+      }),
+    );
+
+    assert.doesNotMatch(markup, /<select/);
+    assert.equal((markup.match(/role="listbox"/g) ?? []).length, 1);
+    assert.equal((markup.match(/role="option"/g) ?? []).length, 2);
+    assert.match(markup, /aria-expanded="true"/);
+    assert.match(
+      markup,
+      /class="mobile-session-actions"[^>]*>.*完整记录.*变更.*<\/div>/,
+    );
+
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+    assert.match(
+      css,
+      /\.mobile-session-actions\s*{[^}]*display:\s*flex;[^}]*white-space:\s*nowrap;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-session-picker-menu\s*{[^}]*position:\s*absolute;/s,
+    );
+  });
+
   it("opens on a lightweight attention-sorted workspace instead of a terminal", () => {
     installDocumentStub();
 
