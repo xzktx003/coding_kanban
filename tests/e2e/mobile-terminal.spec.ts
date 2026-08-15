@@ -85,10 +85,20 @@ test.describe("Mobile Terminal", () => {
     await expect(escBtn).toBeVisible();
     await expect(escBtn).not.toBeDisabled();
 
+    const shiftBtn = page.getByRole("button", { name: "Shift" });
+    await expect(shiftBtn).toBeVisible();
+    await expect(shiftBtn).toHaveAttribute("aria-pressed", "false");
+    await expect(shiftBtn).not.toBeDisabled();
+
     // Arrow up
     const upBtn = page.getByRole("button", { name: "↑" });
     await expect(upBtn).toBeVisible();
     await expect(upBtn).not.toBeDisabled();
+
+    await shiftBtn.click();
+    await expect(shiftBtn).toHaveAttribute("aria-pressed", "true");
+    await upBtn.click();
+    await expect(shiftBtn).toHaveAttribute("aria-pressed", "false");
   });
 
   test("composer: text input and send button visible", async ({ page }) => {

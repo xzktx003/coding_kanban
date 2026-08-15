@@ -19,6 +19,7 @@ describe("MobileTerminalToolbar", () => {
     assert.match(markup, /aria-label="手机终端快捷键"/);
     assert.match(markup, /aria-controls="mobile-terminal-shortcut-help"/);
     assert.match(markup, />说明<\/button>/);
+    assert.match(markup, /aria-pressed="false"[^>]*>Shift<\/button>/);
     assert.match(markup, />Ctrl\+C<\/button>/);
     assert.match(markup, />⌫<\/button>/);
     assert.match(markup, />⇧Tab<\/button>/);
@@ -40,6 +41,7 @@ describe("MobileTerminalToolbar", () => {
       /aria-labelledby="mobile-terminal-shortcut-help-title"/,
     );
     assert.match(markup, /快捷键说明/);
+    assert.match(markup, /下一次快捷键启用 Shift/);
     assert.match(markup, /中断当前输出或命令/);
     assert.match(markup, /退出 TUI 当前状态/);
     assert.match(markup, /反向切换 TUI 焦点/);

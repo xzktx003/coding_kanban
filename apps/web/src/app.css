@@ -4071,6 +4071,17 @@ input {
   color: #bfdbfe;
 }
 
+.mobile-terminal-key--modifier {
+  border-color: rgba(167, 139, 250, 0.38);
+  color: #ddd6fe;
+}
+
+.mobile-terminal-key--modifier.active {
+  border-color: rgba(196, 181, 253, 0.76);
+  background: rgba(124, 58, 237, 0.34);
+  color: #f5f3ff;
+}
+
 .mobile-terminal-key:disabled {
   cursor: not-allowed;
   opacity: 0.45;

@@ -25,6 +25,16 @@ describe("mobile terminal controls", () => {
     assert.equal(getMobileTerminalControlInput("ctrl-z"), "\x1a");
   });
 
+  it("applies a one-shot Shift modifier to supported terminal controls", () => {
+    assert.equal(getMobileTerminalControlInput("tab", true), "\x1b[Z");
+    assert.equal(getMobileTerminalControlInput("enter", true), "\x1b[13;2u");
+    assert.equal(getMobileTerminalControlInput("arrow-up", true), "\x1b[1;2A");
+    assert.equal(getMobileTerminalControlInput("arrow-down", true), "\x1b[1;2B");
+    assert.equal(getMobileTerminalControlInput("arrow-left", true), "\x1b[1;2D");
+    assert.equal(getMobileTerminalControlInput("arrow-right", true), "\x1b[1;2C");
+    assert.equal(getMobileTerminalControlInput("interrupt", true), "\x03");
+  });
+
   it("turns composer send into paste followed by a separate submit key", () => {
     assert.deepEqual(buildMobileComposerInputFrames("hello codex", "send"), [
       "\x1b[200~hello codex\x1b[201~",

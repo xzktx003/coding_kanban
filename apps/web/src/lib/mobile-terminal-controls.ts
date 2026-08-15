@@ -110,6 +110,17 @@ export const MOBILE_TERMINAL_CONTROLS: MobileTerminalControl[] = [
   },
 ];
 
+const SHIFTED_MOBILE_TERMINAL_INPUTS: Partial<
+  Record<MobileTerminalControlId, string>
+> = {
+  tab: "\x1b[Z",
+  enter: "\x1b[13;2u",
+  "arrow-up": "\x1b[1;2A",
+  "arrow-down": "\x1b[1;2B",
+  "arrow-left": "\x1b[1;2D",
+  "arrow-right": "\x1b[1;2C",
+};
+
 export type MobileComposerSendMode = "send" | "paste" | "paste-run";
 
 const BRACKETED_PASTE_START = "\x1b[200~";
@@ -145,10 +156,13 @@ export function buildMobileComposerInputFrames(
 
 export function getMobileTerminalControlInput(
   id: MobileTerminalControlId,
+  shifted = false,
 ): string {
   const control = MOBILE_TERMINAL_CONTROLS.find((item) => item.id === id);
   if (!control) {
     throw new Error(`Unknown mobile terminal control: ${id}`);
   }
-  return control.input;
+  return shifted
+    ? SHIFTED_MOBILE_TERMINAL_INPUTS[id] ?? control.input
+    : control.input;
 }

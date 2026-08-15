@@ -208,9 +208,7 @@ export function ChangesPanel({
   onClose,
   onReference,
 }: ChangesPanelProps) {
-  const [scope, setScope] = useState<DiffScope>(
-    session.agentKind === "codex" ? "task" : "checkout",
-  );
+  const [scope, setScope] = useState<DiffScope>("checkout");
   const [taskDiff, setTaskDiff] = useState<AgentTaskDiffResponse | null>(null);
   const [checkoutDiff, setCheckoutDiff] =
     useState<CheckoutDiffResponse | null>(null);

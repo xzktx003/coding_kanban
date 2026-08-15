@@ -30,13 +30,18 @@ async function runGit(cwd: string, args: string[], allowFailure = false): Promis
   }
 }
 
-function parseStatus(status: string): Map<string, DiffFileStatus> {
-  const files = new Map<string, DiffFileStatus>();
+interface ParsedStatus {
+  status: DiffFileStatus;
+  previousPath?: string;
+}
+
+function parseStatus(status: string): Map<string, ParsedStatus> {
+  const files = new Map<string, ParsedStatus>();
   const entries = status.split("\0").filter(Boolean);
-  for (const entry of entries) {
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]!;
     const code = entry.slice(0, 2);
-    const rawPath = entry.slice(3);
-    const path = rawPath.includes(" -> ") ? rawPath.split(" -> ").at(-1)! : rawPath;
+    const path = entry.slice(3);
     const statusCode = code.includes("?")
       ? "untracked"
       : code.includes("U")
@@ -48,7 +53,11 @@ function parseStatus(status: string): Map<string, DiffFileStatus> {
             : code.includes("D")
               ? "deleted"
               : "modified";
-    files.set(path, statusCode);
+    const previousPath = code.includes("R") || code.includes("C")
+      ? entries[index + 1]
+      : undefined;
+    if (previousPath) index += 1;
+    files.set(path, { status: statusCode, previousPath });
   }
   return files;
 }
@@ -91,7 +100,7 @@ export class GitChangesService {
         runGit(directory, [
           "status",
           "--porcelain=v1",
-          "--untracked-files=no",
+          "--untracked-files=all",
           "-z",
         ]),
       ]);
@@ -99,22 +108,30 @@ export class GitChangesService {
       const files: DiffFileChange[] = [];
       for (const path of [...statuses.keys()].sort()) {
         const safePath = filePatchPath(directory, path);
-        const statusValue = statuses.get(path)!;
-        let patch = "";
-        let binary = false;
-        patch = await runGit(directory, [
-          "diff",
-          "HEAD",
-          "--no-ext-diff",
-          "--binary",
-          "--",
-          safePath,
-        ], true);
-        binary = patch.includes("Binary files") || patch.includes("GIT binary patch");
+        const { status: statusValue, previousPath } = statuses.get(path)!;
+        const patch = statusValue === "untracked"
+          ? await runGit(directory, [
+              "diff",
+              "--no-index",
+              "--no-ext-diff",
+              "--binary",
+              "--",
+              "/dev/null",
+              safePath,
+            ], true)
+          : await runGit(directory, [
+              "diff",
+              "HEAD",
+              "--no-ext-diff",
+              "--binary",
+              "--",
+              safePath,
+            ], true);
+        const binary = patch.includes("Binary files") || patch.includes("GIT binary patch");
         const counts = binary
           ? { addedLines: 0, deletedLines: 0 }
           : countPatchLines(patch);
-        files.push({ path, status: statusValue, patch, binary, ...counts });
+        files.push({ path, previousPath, status: statusValue, patch, binary, ...counts });
       }
 
       return {

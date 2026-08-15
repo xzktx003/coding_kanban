@@ -27,6 +27,10 @@ test("ChangesPanel presents task and checkout as separate top-level scopes", () 
   assert.match(html, /本次任务/);
   assert.match(html, /当前工作区/);
   assert.match(html, /文件变更/);
+  assert.match(
+    html,
+    /aria-selected="true" class="active"[^>]*role="tab"[^>]*>\s*当前工作区/,
+  );
 });
 
 test("compact changes use a collapsed file selector instead of expanded rows", () => {

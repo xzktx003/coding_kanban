@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
-import { MOBILE_TERMINAL_CONTROLS } from "../lib/mobile-terminal-controls";
+import {
+  getMobileTerminalControlInput,
+  MOBILE_TERMINAL_CONTROLS,
+} from "../lib/mobile-terminal-controls";
 
 interface MobileTerminalToolbarProps {
   disabled?: boolean;
@@ -80,6 +83,10 @@ export function MobileTerminalShortcutHelp({
           </button>
         </div>
         <dl className="mobile-terminal-help-list">
+          <div className="mobile-terminal-help-item">
+            <dt>Shift</dt>
+            <dd>为下一次快捷键启用 Shift，发送后自动复位</dd>
+          </div>
           {MOBILE_TERMINAL_CONTROLS.map((control) => (
             <div className="mobile-terminal-help-item" key={control.id}>
               <dt>{control.label}</dt>
@@ -104,6 +111,15 @@ export function MobileTerminalToolbar({
   onSendInput,
 }: MobileTerminalToolbarProps) {
   const [showHelp, setShowHelp] = useState(false);
+  const [shifted, setShifted] = useState(false);
+
+  const sendControl = (
+    controlId: (typeof MOBILE_TERMINAL_CONTROLS)[number]["id"],
+  ) => {
+    const input = getMobileTerminalControlInput(controlId, shifted);
+    setShifted(false);
+    void onSendInput(input);
+  };
 
   return (
     <>
@@ -121,12 +137,22 @@ export function MobileTerminalToolbar({
         >
           说明
         </button>
+        <button
+          aria-pressed={shifted}
+          className={`mobile-terminal-key mobile-terminal-key--modifier${shifted ? " active" : ""}`}
+          disabled={disabled}
+          onClick={() => setShifted((active) => !active)}
+          title="为下一次快捷键启用 Shift"
+          type="button"
+        >
+          Shift
+        </button>
         {MOBILE_TERMINAL_CONTROLS.map((control) => (
           <button
             className={`mobile-terminal-key${control.danger ? " mobile-terminal-key--danger" : ""}`}
             disabled={disabled}
             key={control.id}
-            onClick={() => void onSendInput(control.input)}
+            onClick={() => sendControl(control.id)}
             title={control.description}
             type="button"
           >

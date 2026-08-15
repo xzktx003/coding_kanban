@@ -307,6 +307,10 @@ test("POST /api/agent-sessions/:id/stdin delivers every mobile shortcut to a loc
     "\x1b[B",
     "\x1b[D",
     "\x1b[C",
+    "\x1b[1;2A",
+    "\x1b[1;2B",
+    "\x1b[1;2D",
+    "\x1b[1;2C",
     "\x0c",
     "\x1a",
   ];
