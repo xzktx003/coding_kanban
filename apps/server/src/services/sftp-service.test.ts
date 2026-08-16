@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { Readable } from "node:stream";
 import test from "node:test";
 
 import {
@@ -21,6 +22,8 @@ function createDependencies(
 }
 
 class FakeSftpSession {
+  constructor(private readonly content = Buffer.alloc(0)) {}
+
   end(): void {}
 
   realpath(
@@ -49,12 +52,39 @@ class FakeSftpSession {
       },
     ]);
   }
+
+  stat(
+    _remotePath: string,
+    callback: (
+      error: Error | undefined,
+      attributes?: { mode: number; size: number; mtime: number },
+    ) => void,
+  ): void {
+    callback(undefined, {
+      mode: 0o100644,
+      size: this.content.length,
+      mtime: 1_717_000_000,
+    });
+  }
+
+  createReadStream(
+    _remotePath: string,
+    options: { start?: number; end?: number },
+  ): Readable {
+    const start = options.start ?? 0;
+    const end = Math.min(this.content.length, (options.end ?? -1) + 1);
+    return Readable.from([this.content.subarray(start, end)]);
+  }
 }
 
 class FakeSshClient extends EventEmitter {
   private ready = false;
 
   connectCalls = 0;
+
+  constructor(private readonly content = Buffer.alloc(0)) {
+    super();
+  }
 
   connect(): this {
     this.connectCalls += 1;
@@ -73,7 +103,7 @@ class FakeSshClient extends EventEmitter {
       return;
     }
 
-    callback(undefined, new FakeSftpSession());
+    callback(undefined, new FakeSftpSession(this.content));
   }
 
   end(): this {
@@ -153,4 +183,21 @@ test("list reuses a single pending connection safely for concurrent requests", a
     assert.equal(result.value.entries[0]?.name, "workspace");
     assert.equal(result.value.entries[0]?.owner, "demo");
   }
+});
+
+test("preview reads only the requested SFTP window", async () => {
+  const client = new FakeSshClient(Buffer.from("first-second-third", "utf8"));
+  const service = new SftpService(() => client as never);
+  const preview = await service.preview(
+    { host: "example.com", username: "demo" },
+    "/home/demo/window.txt",
+    6,
+    6,
+  );
+
+  assert.equal(preview.content, "second");
+  assert.equal(preview.offset, 6);
+  assert.equal(preview.bytesRead, 6);
+  assert.equal(preview.previousOffset, 0);
+  assert.equal(preview.nextOffset, 12);
 });

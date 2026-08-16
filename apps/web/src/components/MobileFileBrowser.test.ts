@@ -6,7 +6,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   classifyMobileFilePreview,
+  formatMobileFilePreviewRange,
   MobileFileBrowser,
+  resolveMobileMarkdownDisplayKind,
 } from "./MobileFileBrowser.js";
 
 const markdownEntry = {
@@ -27,6 +29,10 @@ const textPreview = {
   truncated: false,
   size: 18,
   mimeType: "text/markdown",
+  offset: 0,
+  bytesRead: 18,
+  previousOffset: null,
+  nextOffset: null,
 };
 
 describe("MobileFileBrowser", () => {
@@ -77,15 +83,66 @@ describe("MobileFileBrowser", () => {
       ),
       "text",
     );
+    assert.equal(
+      resolveMobileMarkdownDisplayKind("markdown", "rendered"),
+      "markdown",
+    );
+    assert.equal(
+      resolveMobileMarkdownDisplayKind("markdown", "source"),
+      "text",
+    );
+    assert.equal(resolveMobileMarkdownDisplayKind("image", "source"), "image");
 
     const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
     assert.match(
       css,
-      /\.mobile-file-preview-content\s*{[^}]*height:\s*clamp\([^;]+;[^}]*overflow-y:\s*auto;[^}]*touch-action:\s*pan-y;/s,
+      /\.mobile-workbench-content:has\(\.mobile-file-preview\)\s*{[^}]*overflow-y:\s*hidden;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-file-preview\s*{[^}]*grid-template-areas:[^;]+"mode"[^;]+"pagination"[^;]+;[^}]*grid-template-rows:[^;]*minmax\(0,\s*1fr\);[^}]*height:\s*100%;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-file-preview-content\s*{[^}]*grid-area:\s*content;[^}]*height:\s*auto;[^}]*overflow-y:\s*auto;[^}]*touch-action:\s*pan-y;/s,
     );
     assert.match(
       css,
       /\.mobile-file-preview-markdown\s*{[^}]*overflow-wrap:\s*anywhere;/s,
     );
+    assert.match(
+      css,
+      /\.mobile-file-preview-mode\s*{[^}]*grid-area:\s*mode;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-file-preview-mode button\s*{[^}]*min-height:\s*44px;/s,
+    );
+
+    const source = readFileSync(
+      new URL("./MobileFileBrowser.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.match(source, /aria-label="Markdown 查看方式"/);
+    assert.match(source, /aria-pressed={markdownViewMode === "rendered"}/);
+    assert.match(source, /aria-pressed={markdownViewMode === "source"}/);
+  });
+
+  it("describes the active bounded window instead of claiming only the prefix is available", () => {
+    assert.equal(
+      formatMobileFilePreviewRange({
+        ...textPreview,
+        size: 196_608,
+        offset: 65_536,
+        bytesRead: 65_536,
+        previousOffset: 0,
+        nextOffset: 131_072,
+        truncated: true,
+      }),
+      "64.0 KB–128.0 KB / 192.0 KB",
+    );
+
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+    assert.match(css, /\.mobile-file-preview-pagination\s*{/);
   });
 });

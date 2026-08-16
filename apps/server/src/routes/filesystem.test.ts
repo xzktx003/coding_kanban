@@ -44,7 +44,18 @@ test("filesystem routes list, preview, rename, and delete local files", async ()
       },
     });
     assert.equal(previewRes.statusCode, 200);
-    assert.equal(JSON.parse(previewRes.payload).content, "route preview");
+    assert.deepEqual(JSON.parse(previewRes.payload), {
+      path: sourcePath,
+      content: "route preview",
+      encoding: "utf8",
+      truncated: false,
+      size: 13,
+      mimeType: "text/plain",
+      offset: 0,
+      bytesRead: 13,
+      previousOffset: null,
+      nextOffset: null,
+    });
 
     const renameRes = await app.inject({
       method: "POST",
@@ -98,6 +109,38 @@ test("filesystem routes list, preview, rename, and delete local files", async ()
   }
 });
 
+test("filesystem preview route accepts a bounded window offset", async () => {
+  const rootDir = createTempRoot();
+  const sourcePath = path.join(rootDir, "window.txt");
+  writeFileSync(sourcePath, "first-second-third");
+
+  const { app } = buildServer();
+  await app.ready();
+
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/fs/preview",
+      payload: {
+        path: sourcePath,
+        offset: 6,
+        maxBytes: 6,
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    const preview = JSON.parse(response.payload);
+    assert.equal(preview.content, "second");
+    assert.equal(preview.offset, 6);
+    assert.equal(preview.bytesRead, 6);
+    assert.equal(preview.previousOffset, 0);
+    assert.equal(preview.nextOffset, 12);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+    await app.close();
+  }
+});
+
 test("filesystem routes delegate remote list requests to the SFTP service", async () => {
   const calls: Array<{ path: string; showHidden?: boolean }> = [];
   const fakeSftpService = {
@@ -118,6 +161,10 @@ test("filesystem routes delegate remote list requests to the SFTP service", asyn
       truncated: false,
       size: 6,
       mimeType: "text/plain",
+      offset: 0,
+      bytesRead: 6,
+      previousOffset: null,
+      nextOffset: null,
     }),
     chmod: async () => {},
     createReadStream: async () => {
@@ -175,6 +222,10 @@ test("filesystem routes keep distinct SSH identities separate in the SFTP servic
       truncated: false,
       size: 6,
       mimeType: "text/plain",
+      offset: 0,
+      bytesRead: 6,
+      previousOffset: null,
+      nextOffset: null,
     }),
     chmod: async () => {},
     createReadStream: async () => {

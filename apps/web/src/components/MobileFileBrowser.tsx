@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   AgentSessionRecord,
@@ -23,12 +23,15 @@ interface MobileFileBrowserProps {
 
 interface MobileFilePreviewState {
   entry: FileEntry;
+  requestedOffset: number;
   loading: boolean;
   preview: FilePreviewResponse | null;
   error: string | null;
 }
 
 type MobileFilePreviewKind = "markdown" | "text" | "image" | "binary";
+export type MobileMarkdownViewMode = "rendered" | "source";
+const MOBILE_FILE_PREVIEW_WINDOW_BYTES = 64 * 1024;
 
 export function classifyMobileFilePreview(
   entry: FileEntry,
@@ -38,6 +41,15 @@ export function classifyMobileFilePreview(
     return isMarkdownFileName(entry.name) ? "markdown" : "text";
   }
   return preview.mimeType?.startsWith("image/") ? "image" : "binary";
+}
+
+export function resolveMobileMarkdownDisplayKind(
+  previewKind: MobileFilePreviewKind,
+  viewMode: MobileMarkdownViewMode,
+): MobileFilePreviewKind {
+  return previewKind === "markdown" && viewMode === "source"
+    ? "text"
+    : previewKind;
 }
 
 function isDirectory(entry: FileEntry): boolean {
@@ -54,6 +66,13 @@ function formatFileSize(size: number): string {
     return `${(size / (1024 * 1024)).toFixed(1)} MB`;
   }
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+export function formatMobileFilePreviewRange(
+  preview: FilePreviewResponse,
+): string {
+  const end = Math.min(preview.size, preview.offset + preview.bytesRead);
+  return `${formatFileSize(preview.offset)}–${formatFileSize(end)} / ${formatFileSize(preview.size)}`;
 }
 
 function fileKindLabel(entry: FileEntry): string {
@@ -112,19 +131,40 @@ export function MobileFileBrowser({
   const [filePreview, setFilePreview] = useState<MobileFilePreviewState | null>(
     null,
   );
+  const [markdownViewMode, setMarkdownViewMode] =
+    useState<MobileMarkdownViewMode>("rendered");
   const previewRequestIdRef = useRef(0);
+  const previewContentRef = useRef<HTMLDivElement>(null);
 
-  const openFile = async (entry: FileEntry) => {
+  const loadPreviewWindow = async (entry: FileEntry, offset = 0) => {
     const requestId = ++previewRequestIdRef.current;
-    setFilePreview({ entry, loading: true, preview: null, error: null });
+    setFilePreview((current) => ({
+      entry,
+      requestedOffset: offset,
+      loading: true,
+      preview: current?.entry.path === entry.path ? current.preview : null,
+      error: null,
+    }));
     try {
-      const preview = await previewFile({ path: entry.path, sshTarget });
+      const preview = await previewFile({
+        path: entry.path,
+        sshTarget,
+        maxBytes: MOBILE_FILE_PREVIEW_WINDOW_BYTES,
+        offset,
+      });
       if (requestId !== previewRequestIdRef.current) return;
-      setFilePreview({ entry, loading: false, preview, error: null });
+      setFilePreview({
+        entry,
+        requestedOffset: preview.offset,
+        loading: false,
+        preview,
+        error: null,
+      });
     } catch (caughtError) {
       if (requestId !== previewRequestIdRef.current) return;
       setFilePreview({
         entry,
+        requestedOffset: offset,
         loading: false,
         preview: null,
         error:
@@ -133,10 +173,22 @@ export function MobileFileBrowser({
     }
   };
 
+  const openFile = (entry: FileEntry) => {
+    setMarkdownViewMode("rendered");
+    return loadPreviewWindow(entry);
+  };
+
+  useEffect(() => {
+    previewContentRef.current?.scrollTo({ top: 0, left: 0 });
+  }, [filePreview?.preview?.offset, markdownViewMode]);
+
   if (filePreview) {
     const { entry, preview, loading: previewLoading } = filePreview;
     const previewKind = preview
       ? classifyMobileFilePreview(entry, preview)
+      : null;
+    const displayKind = previewKind
+      ? resolveMobileMarkdownDisplayKind(previewKind, markdownViewMode)
       : null;
     return (
       <section aria-label="手机文件预览" className="mobile-file-preview">
@@ -164,18 +216,87 @@ export function MobileFileBrowser({
           </button>
         </header>
         <code className="mobile-file-preview-path">{entry.path}</code>
-        <div className="mobile-file-preview-content">
+        {previewKind === "markdown" && (
+          <div
+            aria-label="Markdown 查看方式"
+            className="mobile-file-preview-mode"
+            role="group"
+          >
+            <button
+              aria-pressed={markdownViewMode === "rendered"}
+              onClick={() => setMarkdownViewMode("rendered")}
+              type="button"
+            >
+              渲染
+            </button>
+            <button
+              aria-pressed={markdownViewMode === "source"}
+              onClick={() => setMarkdownViewMode("source")}
+              type="button"
+            >
+              源码
+            </button>
+          </div>
+        )}
+        {preview &&
+          preview.encoding === "utf8" &&
+          (preview.previousOffset !== null || preview.nextOffset !== null) && (
+            <nav
+              aria-label="文件分段导航"
+              className="mobile-file-preview-pagination"
+            >
+              <button
+                disabled={previewLoading || preview.previousOffset === null}
+                onClick={() =>
+                  void loadPreviewWindow(
+                    entry,
+                    preview.previousOffset ?? preview.offset,
+                  )
+                }
+                type="button"
+              >
+                上一段
+              </button>
+              <div>
+                <strong>{formatMobileFilePreviewRange(preview)}</strong>
+                <span>仅保留当前段，切换后释放旧段</span>
+              </div>
+              <button
+                disabled={previewLoading || preview.nextOffset === null}
+                onClick={() =>
+                  void loadPreviewWindow(
+                    entry,
+                    preview.nextOffset ?? preview.offset,
+                  )
+                }
+                type="button"
+              >
+                下一段
+              </button>
+            </nav>
+          )}
+        {preview?.truncated && preview.encoding === "binary" && (
+          <div className="mobile-file-preview-truncated">
+            二进制文件较大，预览已按资源上限截断。
+          </div>
+        )}
+        <div className="mobile-file-preview-content" ref={previewContentRef}>
           {previewLoading ? (
             <div className="mobile-file-browser-state">正在读取文件...</div>
           ) : filePreview.error ? (
             <div className="mobile-file-browser-state" role="alert">
               <strong>文件读取失败</strong>
               <span>{filePreview.error}</span>
-              <button onClick={() => void openFile(entry)} type="button">
+              <button
+                onClick={() =>
+                  void loadPreviewWindow(entry, filePreview.requestedOffset)
+                }
+                type="button"
+              >
                 重试
               </button>
             </div>
-          ) : preview && previewKind === "markdown" ? (
+          ) : preview && displayKind === "markdown" ? (
             <LazyMarkdownContent
               className="mobile-file-preview-markdown"
               content={preview.content}
@@ -184,9 +305,9 @@ export function MobileFileBrowser({
               fallbackText="正在渲染 Markdown..."
               testId="mobile-markdown-preview"
             />
-          ) : preview && previewKind === "text" ? (
+          ) : preview && displayKind === "text" ? (
             <pre>{preview.content}</pre>
-          ) : preview && previewKind === "image" ? (
+          ) : preview && displayKind === "image" ? (
             <img
               alt={entry.name}
               src={`data:${preview.mimeType};base64,${preview.content}`}
@@ -200,11 +321,6 @@ export function MobileFileBrowser({
             </div>
           )}
         </div>
-        {preview?.truncated && (
-          <div className="mobile-file-preview-truncated">
-            文件较大，当前仅展示开头部分。
-          </div>
-        )}
       </section>
     );
   }

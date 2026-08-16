@@ -16,11 +16,13 @@ import {
   detectFileEntryType,
   formatRemoteOwner,
   formatPermissions,
-  guessMimeType,
-  isBinaryBuffer,
   joinRemotePath,
   validateChmodMode,
 } from "./file-system-utils.js";
+import {
+  buildFilePreviewResponse,
+  normalizeFilePreviewWindow,
+} from "./file-preview-window.js";
 
 interface PooledConnection {
   client: Client;
@@ -416,34 +418,37 @@ export class SftpService {
   async preview(
     target: SshTarget,
     inputPath: string,
-    maxBytes = 64 * 1024,
+    maxBytes?: number,
+    offset?: number,
   ): Promise<FilePreviewResponse> {
     const remotePath = await this.resolveRemotePath(target, inputPath);
 
     return this.withConnection(target, async (client) =>
       withSftp(client, async (sftp) => {
         const fileStats = await sftpStat(sftp, remotePath);
+        const fileSize = fileStats.size ?? 0;
+        const window = normalizeFilePreviewWindow(fileSize, maxBytes, offset);
         const chunks: Buffer[] = [];
-        const stream = sftp.createReadStream(remotePath, {
-          start: 0,
-          end: Math.max(0, maxBytes - 1),
-        });
+        const buffer =
+          window.readBytes === 0
+            ? Buffer.alloc(0)
+            : await new Promise<Buffer>((resolve, reject) => {
+                const stream = sftp.createReadStream(remotePath, {
+                  start: window.offset,
+                  end: window.offset + window.readBytes - 1,
+                });
+                stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+                stream.on("error", reject);
+                stream.on("end", () => resolve(Buffer.concat(chunks)));
+              });
 
-        const buffer = await new Promise<Buffer>((resolve, reject) => {
-          stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-          stream.on("error", reject);
-          stream.on("end", () => resolve(Buffer.concat(chunks)));
-        });
-        const binary = isBinaryBuffer(buffer);
-
-        return {
+        return buildFilePreviewResponse({
           path: remotePath,
-          content: binary ? buffer.toString("base64") : buffer.toString("utf8"),
-          encoding: binary ? "binary" : "utf8",
-          truncated: (fileStats.size ?? 0) > buffer.length,
-          size: fileStats.size ?? buffer.length,
-          mimeType: guessMimeType(remotePath),
-        };
+          buffer,
+          fileSize,
+          offset: window.offset,
+          maxBytes: window.maxBytes,
+        });
       }),
     );
   }

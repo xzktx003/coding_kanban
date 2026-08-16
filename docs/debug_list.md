@@ -520,3 +520,18 @@
 - **修复**: 抽取桌面与手机共用的 Markdown 文件类型判断；手机端 `.md/.markdown` 复用安全的 GFM/KaTeX 渲染组件。预览区使用基于应用高度的受控高度、独立纵向滚动和 `touch-action: pan-y`，窄屏图片自适应，表格与代码块保留横向滚动。
 - **测试**: 组件测试覆盖大小写 Markdown 分类、普通文本分支和纵向触控滚动样式；手机 Playwright 用例使用 40 段 Markdown，断言渲染后的标题可见、内容高度溢出且 `scrollTop` 可以移动。
 - **文件**: `apps/web/src/lib/file-types.ts`, `apps/web/src/components/FileBrowserDrawer.tsx`, `apps/web/src/components/MobileFileBrowser.tsx`, `apps/web/src/components/MobileFileBrowser.test.ts`, `apps/web/src/app.css`, `tests/e2e/mobile-workspace.spec.ts`
+
+### 大文件预览只能看到开头
+
+- **现象**: 手机端打开超过预览上限的文本或 Markdown 时，页面只提示“当前仅展示开头部分”，无法继续阅读后续内容。
+- **根因**: `/api/fs/preview` 仅从字节 0 读取固定前缀，响应没有前后窗口偏移；前端也没有继续加载入口。
+- **修复**: 本地与 SFTP 预览改为有界字节窗口，服务端单次最多 256 KiB 并保护 UTF-8 边界；手机端每次请求 64 KiB，提供上一段/下一段和当前范围，切换时释放旧窗口。
+- **测试**: 单元与路由测试覆盖本地/SFTP 偏移读取、UTF-8 多字节边界和 256 KiB 硬上限；手机 Playwright 用例覆盖 Markdown 窗口前后切换与旧内容卸载。
+- **文件**: `apps/server/src/services/file-preview-window.ts`, `apps/server/src/services/local-fs-service.ts`, `apps/server/src/services/sftp-service.ts`, `apps/web/src/components/MobileFileBrowser.tsx`, `tests/e2e/mobile-workspace.spec.ts`
+
+### 手机大文件分段按钮被预览区裁掉
+
+- **现象**: 大文件接口已返回 `nextOffset`，但手机端仍只能看到第一段，页面上找不到“下一段”。
+- **根因**: 预览内容使用基于整个视口的固定高度，分段导航排在它下方；内层预览又使用 `overscroll-behavior: contain`，所以滚动无法把外层带到被裁掉的导航条。
+- **修复**: 文件预览改为填满手机工作区剩余高度的四行网格，按“标题 / 路径 / 分段导航 / 可滚动内容”排布。导航条始终留在可见区，只有文档内容占用剩余空间并独立滚动。
+- **测试**: 组件样式测试覆盖剩余高度网格、导航行和内容滚动行；手机 Playwright 用例在翻段前断言“下一段”位于视口内。

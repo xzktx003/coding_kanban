@@ -489,6 +489,7 @@ export interface FilePreviewInput {
   path: string;
   sshTarget?: SshTarget;
   maxBytes?: number;
+  offset?: number;
 }
 
 export interface FilePreviewResponse {
@@ -498,6 +499,10 @@ export interface FilePreviewResponse {
   truncated: boolean;
   size: number;
   mimeType: string | null;
+  offset: number;
+  bytesRead: number;
+  previousOffset: number | null;
+  nextOffset: number | null;
 }
 
 export interface ChmodInput {

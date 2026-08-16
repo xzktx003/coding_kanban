@@ -181,6 +181,8 @@ test.describe("Mobile workspace", () => {
       });
     });
     await page.route("**/api/fs/preview", async (route) => {
+      const body = route.request().postDataJSON() as { offset?: number };
+      const offset = body.offset ?? 0;
       const paragraphs = Array.from(
         { length: 40 },
         (_, index) => `第 ${index + 1} 段：手机端 Markdown 阅读内容。`,
@@ -189,11 +191,18 @@ test.describe("Mobile workspace", () => {
         contentType: "application/json",
         body: JSON.stringify({
           path: "/workspace/kanban/docs/guide.md",
-          content: `# Mobile file view\n\n${paragraphs}`,
+          content:
+            offset === 0
+              ? `# Mobile file view\n\n${paragraphs}`
+              : "# Second window\n\n这是按需读取的下一段。",
           encoding: "utf8",
-          truncated: false,
-          size: 18,
+          truncated: offset === 0,
+          size: 131_072,
           mimeType: "text/markdown",
+          offset,
+          bytesRead: 65_536,
+          previousOffset: offset === 0 ? null : 0,
+          nextOffset: offset === 0 ? 65_536 : null,
         }),
       });
     });
@@ -223,6 +232,28 @@ test.describe("Mobile workspace", () => {
         .getByRole("heading", { name: "Mobile file view" }),
     ).toBeVisible();
     const previewSurface = page.locator(".mobile-file-preview-content");
+    const markdownViewMode = page.getByRole("group", {
+      name: "Markdown 查看方式",
+    });
+    const renderedModeButton = markdownViewMode.getByRole("button", {
+      name: "渲染",
+    });
+    const sourceModeButton = markdownViewMode.getByRole("button", {
+      name: "源码",
+    });
+    await expect(renderedModeButton).toHaveAttribute("aria-pressed", "true");
+    await sourceModeButton.click();
+    await expect(sourceModeButton).toHaveAttribute("aria-pressed", "true");
+    await expect(previewSurface.locator("pre")).toContainText(
+      "# Mobile file view",
+    );
+    await expect(page.getByTestId("mobile-markdown-preview")).toHaveCount(0);
+    await renderedModeButton.click();
+    await expect(
+      page
+        .getByTestId("mobile-markdown-preview")
+        .getByRole("heading", { name: "Mobile file view" }),
+    ).toBeVisible();
     await expect
       .poll(() =>
         previewSurface.evaluate(
@@ -236,6 +267,28 @@ test.describe("Mobile workspace", () => {
     await expect
       .poll(() => previewSurface.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
+    const nextWindowButton = page.getByRole("button", { name: "下一段" });
+    await expect(nextWindowButton).toBeInViewport();
+    await sourceModeButton.click();
+    await nextWindowButton.click();
+    await expect(sourceModeButton).toHaveAttribute("aria-pressed", "true");
+    await expect(previewSurface.locator("pre")).toContainText("# Second window");
+    await renderedModeButton.click();
+    await expect(
+      page
+        .getByTestId("mobile-markdown-preview")
+        .getByRole("heading", { name: "Second window" }),
+    ).toBeVisible();
+    await expect(page.getByText("64.0 KB–128.0 KB / 128.0 KB")).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "Mobile file view" }),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "上一段" }).click();
+    await expect(
+      page
+        .getByTestId("mobile-markdown-preview")
+        .getByRole("heading", { name: "Mobile file view" }),
+    ).toBeVisible();
     await expect(page.locator(".terminal-view")).toHaveCount(0);
   });
 });

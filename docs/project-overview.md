@@ -182,7 +182,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 快捷键条是单行横向滑动选择器，发送真实终端控制字符，支持 `Ctrl+C/D`、`Esc`、`Tab`、`Shift+Tab`、`Enter`、方向键、`Ctrl+L`、`Ctrl+U/W/K/Y/A/O/E` 等 Claude / Copilot CLI 常用焦点切换、面板打开和行编辑快捷键；一次性 `Shift` 修饰键可与下一次 Tab、Enter 或方向键组合并自动复位，用户可点击“说明”查看每个快捷键的作用。
 - 多行输入框通过普通 `<textarea>` 承载手机输入法，支持“发送”“粘贴”“粘贴执行”，避免依赖 xterm helper textarea 直接唤起软键盘；“发送”和“粘贴执行”会分两帧写入：先 bracketed paste 文本，再单独发送 `Enter`，保证 Copilot、Claude 和 Codex 把内容当作任务提交而不是只停在输入框里。
 - 手机端标题区的通知按钮复用桌面 Agent 完成通知状态；手机浏览器支持并授权通知时，页面保持打开即可收到任务完成提醒。
-- “项目/文件”按主机与项目目录聚合会话，并提供适配触屏的只读文件系统入口。本地项目直接读取工作目录，SSH 项目沿用会话的远端连接信息；用户可进入目录、搜索当前目录、切换隐藏文件、在独立纵向滚动区预览文本或图片并复制路径。Markdown 文件复用电脑端按需加载的安全 GFM/KaTeX 渲染组件，窄屏下图片自适应、表格和代码块可横向滚动。该入口复用现有 `/api/fs/list` 与 `/api/fs/preview`，不会创建终端连接，也不暴露编辑、上传、删除等写操作。
+- “项目/文件”按主机与项目目录聚合会话，并提供适配触屏的只读文件系统入口。本地项目直接读取工作目录，SSH 项目沿用会话的远端连接信息；用户可进入目录、搜索当前目录、切换隐藏文件、在独立纵向滚动区预览文本或图片并复制路径。Markdown 文件复用电脑端按需加载的安全 GFM/KaTeX 渲染组件，默认显示渲染结果，也可通过触屏友好的“渲染 / 源码”控件查看原始 Markdown；窄屏下图片自适应、表格和代码块可横向滚动。大型 UTF-8 文件不再固定截取开头：前端通过 `/api/fs/preview` 的 `offset` 继续请求 64 KiB 窗口，用户可前后切换；切换查看方式不会复制内容，翻段后也会替换而非追加内容，因此浏览器内存与文件总大小无关。该入口不会创建终端连接，也不暴露编辑、上传、删除等写操作。
 - 页面挂载时会锁定 `html/body/#root` 滚动，并在终端区域用捕获阶段的非 passive `touchstart/touchmove` 接管单指滑动，防止 Codex 长上下文下拉时触发浏览器下拉刷新；触屏设备即使仍停留在桌面聚焦页，也会给真实终端窗格启用同一触控模式。
 - 单指滑动滚动 xterm scrollback；双指 pinch 调整终端字号并触发 fit/resize，同步 PTY cols/rows；终端右下角提供“底部”按钮回到最新输出。
 
@@ -286,6 +286,7 @@ memories/        仓库记忆，不是产品运行依赖
 - `restoreManagedSessions`：分类并恢复仍存在的受管 tmux，会话缺失时保持显式失败边界。
 - `LocalFsService`：本地文件系统。
 - `SftpService`：远端 SFTP 文件系统。
+- 本地与 SFTP 预览共用有界窗口协议：`offset` 和 `maxBytes` 控制读取范围，响应返回 `previousOffset` / `nextOffset`、实际字节数和文件总长度。服务端将单次请求硬限制为 256 KiB，并在 UTF-8 字符边界分段，避免分页乱码。
 - `VsCodeWebManager`：code-server/openvscode-server 生命周期。
 
 ### 后端 HTTP 和 WebSocket

@@ -205,12 +205,14 @@ export async function registerFilesystemRoutes(
             request.body.sshTarget,
             request.body.path,
             request.body.maxBytes,
+            request.body.offset,
           );
         }
 
         return await localFsService.preview(
           request.body.path,
           request.body.maxBytes,
+          request.body.offset,
         );
       } catch (error) {
         reply.code(getErrorStatusCode(error));

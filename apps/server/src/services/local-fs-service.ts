@@ -21,11 +21,13 @@ import {
   assertSafeFilesystemPath,
   formatLocalOwner,
   formatPermissions,
-  guessMimeType,
-  isBinaryBuffer,
   normalizeLocalPath,
   validateChmodMode,
 } from "./file-system-utils.js";
+import {
+  buildFilePreviewResponse,
+  normalizeFilePreviewWindow,
+} from "./file-preview-window.js";
 
 function toFileEntry(
   entryPath: string,
@@ -128,29 +130,34 @@ export class LocalFsService {
 
   async preview(
     inputPath: string,
-    maxBytes = 64 * 1024,
+    maxBytes?: number,
+    offset?: number,
   ): Promise<FilePreviewResponse> {
     const resolvedPath = normalizeLocalPath(inputPath);
     const fileHandle = await open(resolvedPath, "r");
 
     try {
       const fileStats = await stat(resolvedPath);
-      const bytesToRead = Math.min(fileStats.size, maxBytes);
-      const buffer = Buffer.alloc(bytesToRead);
-      const { bytesRead } = await fileHandle.read(buffer, 0, bytesToRead, 0);
-      const contentBuffer = buffer.subarray(0, bytesRead);
-      const binary = isBinaryBuffer(contentBuffer);
+      const window = normalizeFilePreviewWindow(
+        fileStats.size,
+        maxBytes,
+        offset,
+      );
+      const buffer = Buffer.alloc(window.readBytes);
+      const { bytesRead } = await fileHandle.read(
+        buffer,
+        0,
+        window.readBytes,
+        window.offset,
+      );
 
-      return {
+      return buildFilePreviewResponse({
         path: resolvedPath,
-        content: binary
-          ? contentBuffer.toString("base64")
-          : contentBuffer.toString("utf8"),
-        encoding: binary ? "binary" : "utf8",
-        truncated: fileStats.size > bytesRead,
-        size: fileStats.size,
-        mimeType: guessMimeType(resolvedPath),
-      };
+        buffer: buffer.subarray(0, bytesRead),
+        fileSize: fileStats.size,
+        offset: window.offset,
+        maxBytes: window.maxBytes,
+      });
     } finally {
       await fileHandle.close();
     }
