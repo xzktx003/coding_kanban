@@ -117,7 +117,7 @@ test.describe("Mobile workspace", () => {
     await expect(page.locator(".terminal-view")).toHaveCount(0);
   });
 
-  test("browses project files and previews text without mounting a terminal", async ({
+  test("browses project files and reads a scrollable Markdown document without mounting a terminal", async ({
     page,
   }) => {
     const modifiedAt = "2026-08-16T08:00:00.000Z";
@@ -181,11 +181,15 @@ test.describe("Mobile workspace", () => {
       });
     });
     await page.route("**/api/fs/preview", async (route) => {
+      const paragraphs = Array.from(
+        { length: 40 },
+        (_, index) => `第 ${index + 1} 段：手机端 Markdown 阅读内容。`,
+      ).join("\n\n");
       await route.fulfill({
         contentType: "application/json",
         body: JSON.stringify({
           path: "/workspace/kanban/docs/guide.md",
-          content: "# Mobile file view",
+          content: `# Mobile file view\n\n${paragraphs}`,
           encoding: "utf8",
           truncated: false,
           size: 18,
@@ -213,9 +217,25 @@ test.describe("Mobile workspace", () => {
     await expect(
       page.getByRole("region", { name: "手机文件预览" }),
     ).toBeVisible();
-    await expect(page.locator(".mobile-file-preview-content pre")).toHaveText(
-      "# Mobile file view",
-    );
+    await expect(
+      page
+        .getByTestId("mobile-markdown-preview")
+        .getByRole("heading", { name: "Mobile file view" }),
+    ).toBeVisible();
+    const previewSurface = page.locator(".mobile-file-preview-content");
+    await expect
+      .poll(() =>
+        previewSurface.evaluate(
+          (element) => element.scrollHeight > element.clientHeight,
+        ),
+      )
+      .toBe(true);
+    await previewSurface.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect
+      .poll(() => previewSurface.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0);
     await expect(page.locator(".terminal-view")).toHaveCount(0);
   });
 });

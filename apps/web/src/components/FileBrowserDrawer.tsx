@@ -16,8 +16,9 @@ import type {
 } from "@agent-orchestrator/shared";
 
 import { previewFile } from "../lib/api";
-import { useFileBrowser, type SortKey } from "../lib/use-file-browser";
 import { copyTextToClipboard } from "../lib/clipboard";
+import { isMarkdownFileName } from "../lib/file-types";
+import { useFileBrowser, type SortKey } from "../lib/use-file-browser";
 
 import { HostDropdown, type SelectedHost } from "./HostDropdown";
 import type { MarkdownPreviewMode } from "./MarkdownFilePreview";
@@ -176,9 +177,7 @@ function getFileIcon(entry: FileEntry): string {
   return "📋";
 }
 
-export function isMarkdownFileName(name: string): boolean {
-  return /\.(?:md|markdown)$/i.test(name);
-}
+export { isMarkdownFileName } from "../lib/file-types";
 
 function buildBreadcrumbs(
   pathValue: string,

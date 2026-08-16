@@ -3979,12 +3979,17 @@ input {
 }
 
 .mobile-file-preview-content {
-  min-height: 55vh;
-  overflow: auto;
+  width: 100%;
+  height: clamp(280px, calc(var(--app-height) - 230px), 720px);
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: auto;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   background: #080c11;
   overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
 }
 
 .mobile-file-preview-content pre {
@@ -4007,6 +4012,34 @@ input {
   max-height: 70vh;
   margin: 0 auto;
   object-fit: contain;
+}
+
+.mobile-file-preview-markdown {
+  min-width: 0;
+  margin: 0;
+  padding: 18px 16px 32px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.mobile-file-preview-markdown img {
+  max-width: 100%;
+  height: auto;
+}
+
+.mobile-file-preview-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.mobile-file-preview-loading {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  padding: 24px;
+  color: rgba(244, 241, 234, 0.58);
+  font-size: 13px;
 }
 
 .mobile-file-preview-truncated {

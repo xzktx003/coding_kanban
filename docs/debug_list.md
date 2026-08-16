@@ -512,3 +512,11 @@
 - **修复**: 服务端利用已有的 `call_id → tool name` 关联同时跳过 `exec` 输出；前端同时过滤 `exec 调用` 和 `exec 输出`，避免旧响应或缓存重新显示。其余记录继续按最新在前展示。
 - **测试**: 服务端 parser 回归断言 `exec` 调用和 100 行关联输出均不存在；前端组件回归断言旧响应中的 `exec` 输入输出全部隐藏且可见消息仍为逆序。
 - **文件**: `apps/server/src/services/codex-transcript-service.ts`, `apps/server/src/services/codex-transcript-service.test.ts`, `apps/web/src/components/AgentTranscriptDialog.tsx`, `apps/web/src/components/AgentTranscriptDialog.test.ts`
+
+### 手机文件系统无法完整阅读文档或渲染 Markdown
+
+- **现象**: 手机端虽然能进入目录并点击文件，但 UTF-8 文件统一显示为原始等宽文本，Markdown 标题、列表、表格和公式不会渲染；预览容器只有最小高度，没有形成稳定的内部滚动区，长文档在触屏上无法可靠上下翻阅。
+- **根因**: 手机文件预览没有复用桌面端按需加载的 Markdown 渲染链，并且 `overflow: auto` 所在容器缺少受控高度，内容会直接撑开容器而不是产生可滚动视口。
+- **修复**: 抽取桌面与手机共用的 Markdown 文件类型判断；手机端 `.md/.markdown` 复用安全的 GFM/KaTeX 渲染组件。预览区使用基于应用高度的受控高度、独立纵向滚动和 `touch-action: pan-y`，窄屏图片自适应，表格与代码块保留横向滚动。
+- **测试**: 组件测试覆盖大小写 Markdown 分类、普通文本分支和纵向触控滚动样式；手机 Playwright 用例使用 40 段 Markdown，断言渲染后的标题可见、内容高度溢出且 `scrollTop` 可以移动。
+- **文件**: `apps/web/src/lib/file-types.ts`, `apps/web/src/components/FileBrowserDrawer.tsx`, `apps/web/src/components/MobileFileBrowser.tsx`, `apps/web/src/components/MobileFileBrowser.test.ts`, `apps/web/src/app.css`, `tests/e2e/mobile-workspace.spec.ts`

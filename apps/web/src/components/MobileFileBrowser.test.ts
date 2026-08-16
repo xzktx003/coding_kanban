@@ -4,7 +4,30 @@ import { describe, it } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { MobileFileBrowser } from "./MobileFileBrowser.js";
+import {
+  classifyMobileFilePreview,
+  MobileFileBrowser,
+} from "./MobileFileBrowser.js";
+
+const markdownEntry = {
+  name: "README.MD",
+  path: "/workspace/project/README.MD",
+  type: "file" as const,
+  size: 18,
+  modifiedAt: "2026-08-16T08:00:00.000Z",
+  owner: "codex",
+  permissions: "-rw-r--r--",
+  isHidden: false,
+};
+
+const textPreview = {
+  path: markdownEntry.path,
+  content: "# Mobile file view",
+  encoding: "utf8" as const,
+  truncated: false,
+  size: 18,
+  mimeType: "text/markdown",
+};
 
 describe("MobileFileBrowser", () => {
   it("renders touch-friendly directory controls and a file list surface", () => {
@@ -40,5 +63,29 @@ describe("MobileFileBrowser", () => {
       /\.mobile-project-card-controls button,\s*\.mobile-file-browser-control,\s*\.mobile-file-browser-state button\s*{[^}]*min-height:\s*44px;/s,
     );
     assert.match(css, /\.mobile-file-entry\s*{[^}]*min-height:\s*56px;/s);
+  });
+
+  it("routes Markdown through the rendered preview and keeps documents vertically scrollable", () => {
+    assert.equal(
+      classifyMobileFilePreview(markdownEntry, textPreview),
+      "markdown",
+    );
+    assert.equal(
+      classifyMobileFilePreview(
+        { ...markdownEntry, name: "notes.txt" },
+        { ...textPreview, mimeType: "text/plain" },
+      ),
+      "text",
+    );
+
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+    assert.match(
+      css,
+      /\.mobile-file-preview-content\s*{[^}]*height:\s*clamp\([^;]+;[^}]*overflow-y:\s*auto;[^}]*touch-action:\s*pan-y;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-file-preview-markdown\s*{[^}]*overflow-wrap:\s*anywhere;/s,
+    );
   });
 });

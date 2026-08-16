@@ -8,10 +8,12 @@ import type {
 
 import { previewFile } from "../lib/api";
 import { copyTextToClipboard } from "../lib/clipboard";
+import { isMarkdownFileName } from "../lib/file-types";
 import {
   useFileBrowser,
   type UseFileBrowserHost,
 } from "../lib/use-file-browser";
+import { LazyMarkdownContent } from "./LazyMarkdownRenderedContent";
 
 interface MobileFileBrowserProps {
   session: AgentSessionRecord;
@@ -24,6 +26,18 @@ interface MobileFilePreviewState {
   loading: boolean;
   preview: FilePreviewResponse | null;
   error: string | null;
+}
+
+type MobileFilePreviewKind = "markdown" | "text" | "image" | "binary";
+
+export function classifyMobileFilePreview(
+  entry: FileEntry,
+  preview: FilePreviewResponse,
+): MobileFilePreviewKind {
+  if (preview.encoding === "utf8") {
+    return isMarkdownFileName(entry.name) ? "markdown" : "text";
+  }
+  return preview.mimeType?.startsWith("image/") ? "image" : "binary";
 }
 
 function isDirectory(entry: FileEntry): boolean {
@@ -121,10 +135,9 @@ export function MobileFileBrowser({
 
   if (filePreview) {
     const { entry, preview, loading: previewLoading } = filePreview;
-    const imagePreview =
-      preview?.encoding === "binary" && preview.mimeType?.startsWith("image/")
-        ? preview
-        : null;
+    const previewKind = preview
+      ? classifyMobileFilePreview(entry, preview)
+      : null;
     return (
       <section aria-label="手机文件预览" className="mobile-file-preview">
         <header className="mobile-file-preview-header">
@@ -162,12 +175,21 @@ export function MobileFileBrowser({
                 重试
               </button>
             </div>
-          ) : preview?.encoding === "utf8" ? (
+          ) : preview && previewKind === "markdown" ? (
+            <LazyMarkdownContent
+              className="mobile-file-preview-markdown"
+              content={preview.content}
+              fallbackClassName="mobile-file-preview-loading"
+              fallbackTestId="mobile-markdown-loading"
+              fallbackText="正在渲染 Markdown..."
+              testId="mobile-markdown-preview"
+            />
+          ) : preview && previewKind === "text" ? (
             <pre>{preview.content}</pre>
-          ) : imagePreview ? (
+          ) : preview && previewKind === "image" ? (
             <img
               alt={entry.name}
-              src={`data:${imagePreview.mimeType};base64,${imagePreview.content}`}
+              src={`data:${preview.mimeType};base64,${preview.content}`}
             />
           ) : (
             <div className="mobile-file-browser-state">
