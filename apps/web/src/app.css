@@ -3737,6 +3737,297 @@ input {
   background: transparent;
 }
 
+.mobile-project-card > header .mobile-project-card-controls {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.mobile-project-card-controls button,
+.mobile-file-browser-control,
+.mobile-file-browser-state button {
+  min-height: 44px;
+  padding: 8px 11px;
+  border: 1px solid rgba(246, 178, 107, 0.34);
+  border-radius: 9px;
+  background: rgba(246, 178, 107, 0.1);
+  color: #ffd39f;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.mobile-project-card-controls button:focus-visible,
+.mobile-file-browser-control:focus-visible,
+.mobile-file-browser-state button:focus-visible,
+.mobile-file-entry:focus-visible {
+  outline: 2px solid #f6b26b;
+  outline-offset: 2px;
+}
+
+.mobile-file-browser,
+.mobile-file-preview {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.mobile-file-browser-header,
+.mobile-file-preview-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.mobile-file-browser-header {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.mobile-file-browser-header > div,
+.mobile-file-preview-header > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.mobile-file-browser-header strong,
+.mobile-file-preview-header strong {
+  overflow: hidden;
+  color: #fff4e4;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-file-browser-header span,
+.mobile-file-preview-header span {
+  overflow: hidden;
+  color: rgba(244, 241, 234, 0.5);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-file-browser-pathbar {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.mobile-file-browser-pathbar code,
+.mobile-file-preview-path {
+  display: block;
+  overflow-x: auto;
+  color: rgba(244, 241, 234, 0.7);
+  font:
+    11px/1.5 "IBM Plex Mono",
+    monospace;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  white-space: nowrap;
+}
+
+.mobile-file-browser-pathbar > div {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+}
+
+.mobile-file-browser-control:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.mobile-file-browser-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-file-browser-filters > input {
+  min-width: 0;
+  min-height: 44px;
+  padding: 9px 11px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  outline: none;
+  background: rgba(4, 8, 12, 0.62);
+  color: #f4f1ea;
+  font-size: 16px;
+}
+
+.mobile-file-browser-filters > input:focus {
+  border-color: rgba(246, 178, 107, 0.7);
+  box-shadow: 0 0 0 2px rgba(246, 178, 107, 0.14);
+}
+
+.mobile-file-browser-filters > label {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 7px;
+  color: rgba(244, 241, 234, 0.7);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.mobile-file-browser-filters > label input {
+  width: 18px;
+  height: 18px;
+  accent-color: #f6b26b;
+}
+
+.mobile-file-list {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(5, 9, 13, 0.54);
+}
+
+.mobile-file-entry {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  min-height: 56px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 11px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.mobile-file-entry:last-child {
+  border-bottom: 0;
+}
+
+.mobile-file-entry:active {
+  background: rgba(246, 178, 107, 0.1);
+}
+
+.mobile-file-entry-kind {
+  display: grid;
+  width: 42px;
+  height: 32px;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(96, 165, 250, 0.12);
+  color: #a9d2ff;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+.mobile-file-entry-identity {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.mobile-file-entry-identity strong,
+.mobile-file-entry-identity small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobile-file-entry-identity strong {
+  color: #f4f1ea;
+  font-size: 13px;
+}
+
+.mobile-file-entry-identity small {
+  color: rgba(244, 241, 234, 0.46);
+  font-size: 10px;
+}
+
+.mobile-file-entry-action {
+  color: #f6b26b;
+  font-size: 11px;
+}
+
+.mobile-file-browser-state {
+  display: grid;
+  min-height: 148px;
+  place-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 24px;
+  color: rgba(244, 241, 234, 0.56);
+  font-size: 12px;
+  text-align: center;
+}
+
+.mobile-file-browser-state strong {
+  color: #f4f1ea;
+  font-size: 13px;
+}
+
+.mobile-file-preview-path {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.mobile-file-preview-content {
+  min-height: 55vh;
+  overflow: auto;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: #080c11;
+  overscroll-behavior: contain;
+}
+
+.mobile-file-preview-content pre {
+  min-width: max-content;
+  margin: 0;
+  padding: 14px;
+  color: #dce4eb;
+  font:
+    12px/1.6 "IBM Plex Mono",
+    monospace;
+  tab-size: 2;
+  white-space: pre;
+}
+
+.mobile-file-preview-content img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: 70vh;
+  margin: 0 auto;
+  object-fit: contain;
+}
+
+.mobile-file-preview-truncated {
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: rgba(251, 191, 36, 0.1);
+  color: #f9d77c;
+  font-size: 11px;
+  text-align: center;
+}
+
+@media (max-width: 380px) {
+  .mobile-project-card > header {
+    flex-wrap: wrap;
+  }
+
+  .mobile-file-browser-filters {
+    grid-template-columns: 1fr;
+  }
+}
+
 .mobile-primary-nav {
   position: fixed;
   right: 0;
@@ -3878,7 +4169,7 @@ input {
   align-items: center;
   width: 100%;
   min-width: 0;
-  height: 34px;
+  height: 44px;
   padding: 4px 28px 4px 9px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -3898,7 +4189,7 @@ input {
 
 .mobile-session-picker-trigger::after {
   position: absolute;
-  top: 11px;
+  top: 15px;
   right: 11px;
   width: 7px;
   height: 7px;
@@ -3909,7 +4200,7 @@ input {
 }
 
 .mobile-session-picker-trigger[aria-expanded="true"]::after {
-  top: 15px;
+  top: 19px;
   transform: rotate(225deg);
 }
 
@@ -3995,7 +4286,7 @@ input {
 
 .mobile-transcript-btn {
   align-self: center;
-  min-height: 34px;
+  min-height: 44px;
   padding: 3px 8px;
   border: 1px solid rgba(255, 143, 31, 0.34);
   border-radius: 7px;

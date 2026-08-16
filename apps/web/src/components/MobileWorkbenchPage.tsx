@@ -16,6 +16,7 @@ import { AgentTranscriptDialog } from "./AgentTranscriptDialog";
 import { ChangesPanel } from "./ChangesPanel";
 import { LazyTerminalView } from "./LazyTerminalView";
 import { MobileAgentComposer } from "./MobileAgentComposer";
+import { MobileFileBrowser } from "./MobileFileBrowser";
 import { MobileTerminalToolbar } from "./MobileTerminalToolbar";
 
 interface MobileWorkbenchPageProps {
@@ -172,6 +173,7 @@ interface MobileSessionSwitcherProps {
   activeSession?: AgentSessionRecord;
   containerRef?: RefObject<HTMLDivElement | null>;
   onOpenChanges: () => void;
+  onOpenFiles: () => void;
   onOpenTranscript: () => void;
   onSelectSession: (session: AgentSessionRecord) => void;
   onToggle: () => void;
@@ -183,6 +185,7 @@ export function MobileSessionSwitcher({
   activeSession,
   containerRef,
   onOpenChanges,
+  onOpenFiles,
   onOpenTranscript,
   onSelectSession,
   onToggle,
@@ -221,6 +224,14 @@ export function MobileSessionSwitcher({
           type="button"
         >
           变更
+        </button>
+        <button
+          className="mobile-transcript-btn"
+          disabled={!activeSession}
+          onClick={onOpenFiles}
+          type="button"
+        >
+          文件
         </button>
       </div>
       {menuOpen && (
@@ -273,6 +284,10 @@ export function MobileWorkbenchPage({
   const [changesOpen, setChangesOpen] = useState(false);
   const [sessionPickerOpen, setSessionPickerOpen] = useState(false);
   const [pendingReference, setPendingReference] = useState("");
+  const [fileBrowserSessionId, setFileBrowserSessionId] = useState<
+    string | null
+  >(null);
+  const [sessionFilesOpen, setSessionFilesOpen] = useState(false);
   const sessionSwitcherRef = useRef<HTMLDivElement>(null);
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !session.hidden),
@@ -304,15 +319,22 @@ export function MobileWorkbenchPage({
   const projectGroups = useMemo(() => {
     const groups = new Map<string, AgentSessionRecord[]>();
     for (const session of visibleSessions) {
-      const key =
-        session.projectName ??
+      const location =
         session.repositoryRoot ??
         session.workingDirectory ??
+        session.projectName ??
         "未归属项目";
+      const host = session.sshTarget
+        ? `${session.sshTarget.username ?? ""}@${session.sshTarget.host}:${session.sshTarget.port ?? 22}`
+        : "local";
+      const key = `${host}:${location}`;
       groups.set(key, [...(groups.get(key) ?? []), session]);
     }
     return [...groups.entries()];
   }, [visibleSessions]);
+  const fileBrowserSession = visibleSessions.find(
+    (session) => session.id === fileBrowserSessionId,
+  );
   const notificationUnsupported =
     agentCompletionNotificationPermission === "unsupported";
   const notificationDenied = agentCompletionNotificationPermission === "denied";
@@ -358,6 +380,7 @@ export function MobileWorkbenchPage({
 
   const openSession = (session: AgentSessionRecord) => {
     setSessionPickerOpen(false);
+    setSessionFilesOpen(false);
     setSelectedSessionId(session.id);
     onSwitchSession(session.id);
     setView("session");
@@ -365,6 +388,7 @@ export function MobileWorkbenchPage({
 
   const navigateToSession = () => {
     setSessionPickerOpen(false);
+    setSessionFilesOpen(false);
     if (activeSession) {
       setSelectedSessionId(activeSession.id);
       onSwitchSession(activeSession.id);
@@ -504,108 +528,146 @@ export function MobileWorkbenchPage({
 
         {view === "projects" && (
           <div className="mobile-workspace-view">
-            <div className="mobile-view-heading">
-              <div>
-                <span>WORKSPACES</span>
-                <h1>项目与文件</h1>
-              </div>
-            </div>
-            <div className="mobile-project-list">
-              {projectGroups.map(([project, projectSessions]) => (
-                <section className="mobile-project-card" key={project}>
-                  <header>
-                    <div>
-                      <strong>{projectSessions[0]?.projectName ?? project}</strong>
-                      <span>
-                        {shortenPath(projectSessions[0]?.workingDirectory)}
-                      </span>
-                    </div>
-                    <span>{projectSessions.length} 个会话</span>
-                  </header>
-                  {projectSessions.map((session) => (
-                    <button
-                      key={session.id}
-                      onClick={() => openSession(session)}
-                      type="button"
-                    >
-                      <span>{session.displayName}</span>
-                      <small>{stateLabels[session.interactionState]}</small>
-                    </button>
-                  ))}
-                </section>
-              ))}
-              {!isLoading && projectGroups.length === 0 && (
-                <div className="mobile-workbench-empty">
-                  暂无项目或文件入口。
+            {fileBrowserSession ? (
+              <MobileFileBrowser
+                onBack={() => setFileBrowserSessionId(null)}
+                session={fileBrowserSession}
+              />
+            ) : (
+              <>
+                <div className="mobile-view-heading">
+                  <div>
+                    <span>WORKSPACES</span>
+                    <h1>项目与文件</h1>
+                  </div>
                 </div>
-              )}
-            </div>
+                <div className="mobile-project-list">
+                  {projectGroups.map(([project, projectSessions]) => (
+                    <section className="mobile-project-card" key={project}>
+                      <header>
+                        <div>
+                          <strong>
+                            {projectSessions[0]?.projectName ??
+                              projectSessions[0]?.repositoryRoot ??
+                              projectSessions[0]?.workingDirectory ??
+                              "未归属项目"}
+                          </strong>
+                          <span>
+                            {shortenPath(projectSessions[0]?.workingDirectory)}
+                          </span>
+                        </div>
+                        <div className="mobile-project-card-controls">
+                          <span>{projectSessions.length} 个会话</span>
+                          <button
+                            onClick={() =>
+                              setFileBrowserSessionId(projectSessions[0]!.id)
+                            }
+                            type="button"
+                          >
+                            浏览文件
+                          </button>
+                        </div>
+                      </header>
+                      {projectSessions.map((session) => (
+                        <button
+                          key={session.id}
+                          onClick={() => openSession(session)}
+                          type="button"
+                        >
+                          <span>{session.displayName}</span>
+                          <small>{stateLabels[session.interactionState]}</small>
+                        </button>
+                      ))}
+                    </section>
+                  ))}
+                  {!isLoading && projectGroups.length === 0 && (
+                    <div className="mobile-workbench-empty">
+                      暂无项目或文件入口。
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         )}
 
         {view === "session" && (
           <div className="mobile-session-view">
-            <MobileSessionSwitcher
-              activeSession={activeSession}
-              containerRef={sessionSwitcherRef}
-              onOpenChanges={() => {
-                setSessionPickerOpen(false);
-                setChangesOpen(true);
-              }}
-              onOpenTranscript={() => {
-                setSessionPickerOpen(false);
-                if (activeSession) setTranscriptSession(activeSession);
-              }}
-              onSelectSession={openSession}
-              onToggle={() => setSessionPickerOpen((current) => !current)}
-              open={sessionPickerOpen}
-              sessions={attentionSortedSessions}
-            />
-            <section className="mobile-terminal-surface">
-              <div className="mobile-terminal-frame">
-                {isLoading ? (
-                  <div className="grid-empty">
-                    <p>正在加载...</p>
-                  </div>
-                ) : activeSession ? (
-                  <Suspense
-                    fallback={
+            {sessionFilesOpen && activeSession ? (
+              <MobileFileBrowser
+                backLabel="返回终端"
+                onBack={() => setSessionFilesOpen(false)}
+                session={activeSession}
+              />
+            ) : (
+              <>
+                <MobileSessionSwitcher
+                  activeSession={activeSession}
+                  containerRef={sessionSwitcherRef}
+                  onOpenChanges={() => {
+                    setSessionPickerOpen(false);
+                    setChangesOpen(true);
+                  }}
+                  onOpenFiles={() => {
+                    setSessionPickerOpen(false);
+                    if (activeSession) setSessionFilesOpen(true);
+                  }}
+                  onOpenTranscript={() => {
+                    setSessionPickerOpen(false);
+                    if (activeSession) setTranscriptSession(activeSession);
+                  }}
+                  onSelectSession={openSession}
+                  onToggle={() => setSessionPickerOpen((current) => !current)}
+                  open={sessionPickerOpen}
+                  sessions={attentionSortedSessions}
+                />
+                <section className="mobile-terminal-surface">
+                  <div className="mobile-terminal-frame">
+                    {isLoading ? (
                       <div className="grid-empty">
-                        <p>正在加载终端...</p>
+                        <p>正在加载...</p>
                       </div>
-                    }
-                  >
-                    <LazyTerminalView
-                      agentSessionId={activeSession.id}
-                      fontSize={terminalFontSize}
-                      inputEnabled={false}
-                      interactive
-                      mobileTouchMode
-                      onFontSizeChange={onTerminalFontSizeChange}
-                    />
-                  </Suspense>
-                ) : (
-                  <div className="grid-empty">
-                    <p>没有可用会话。</p>
+                    ) : activeSession ? (
+                      <Suspense
+                        fallback={
+                          <div className="grid-empty">
+                            <p>正在加载终端...</p>
+                          </div>
+                        }
+                      >
+                        <LazyTerminalView
+                          agentSessionId={activeSession.id}
+                          fontSize={terminalFontSize}
+                          inputEnabled={false}
+                          interactive
+                          mobileTouchMode
+                          onFontSizeChange={onTerminalFontSizeChange}
+                        />
+                      </Suspense>
+                    ) : (
+                      <div className="grid-empty">
+                        <p>没有可用会话。</p>
+                      </div>
+                    )}
+                  </div>
+                </section>
+                {errorMessage && (
+                  <div className="mobile-workbench-error" role="alert">
+                    {errorMessage}
                   </div>
                 )}
-              </div>
-            </section>
-            {errorMessage && (
-              <div className="mobile-workbench-error" role="alert">
-                {errorMessage}
-              </div>
+                <MobileTerminalToolbar
+                  disabled={!activeSession || sendingInput}
+                  onSendInput={handleSendInput}
+                />
+                <MobileAgentComposer
+                  disabled={!activeSession || sendingInput}
+                  insertedText={pendingReference}
+                  onInsertedTextConsumed={() => setPendingReference("")}
+                  onSendInput={handleSendInput}
+                />
+              </>
             )}
-            <MobileTerminalToolbar
-              disabled={!activeSession || sendingInput}
-              onSendInput={handleSendInput}
-            />
-            <MobileAgentComposer
-              disabled={!activeSession || sendingInput}
-              insertedText={pendingReference}
-              onInsertedTextConsumed={() => setPendingReference("")}
-              onSendInput={handleSendInput}
-            />
           </div>
         )}
       </section>
@@ -616,6 +678,7 @@ export function MobileWorkbenchPage({
           className={view === "board" ? "active" : ""}
           onClick={() => {
             setSessionPickerOpen(false);
+            setSessionFilesOpen(false);
             setView("board");
           }}
           type="button"
@@ -627,6 +690,7 @@ export function MobileWorkbenchPage({
           className={view === "activity" ? "active" : ""}
           onClick={() => {
             setSessionPickerOpen(false);
+            setSessionFilesOpen(false);
             setView("activity");
           }}
           type="button"
@@ -646,6 +710,7 @@ export function MobileWorkbenchPage({
           className={view === "projects" ? "active" : ""}
           onClick={() => {
             setSessionPickerOpen(false);
+            setSessionFilesOpen(false);
             setView("projects");
           }}
           type="button"

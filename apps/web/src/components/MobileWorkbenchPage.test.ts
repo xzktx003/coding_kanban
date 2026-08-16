@@ -59,6 +59,7 @@ describe("MobileWorkbenchPage", () => {
         open: true,
         sessions,
         onOpenChanges: () => {},
+        onOpenFiles: () => {},
         onOpenTranscript: () => {},
         onSelectSession: () => {},
         onToggle: () => {},
@@ -71,13 +72,17 @@ describe("MobileWorkbenchPage", () => {
     assert.match(markup, /aria-expanded="true"/);
     assert.match(
       markup,
-      /class="mobile-session-actions"[^>]*>.*完整记录.*变更.*<\/div>/,
+      /class="mobile-session-actions"[^>]*>.*完整记录.*变更.*文件.*<\/div>/,
     );
 
     const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
     assert.match(
       css,
       /\.mobile-session-actions\s*{[^}]*display:\s*flex;[^}]*white-space:\s*nowrap;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-transcript-btn\s*{[^}]*min-height:\s*44px;/s,
     );
     assert.match(
       css,
