@@ -1366,6 +1366,54 @@ input {
   --session-group-surface: rgba(255, 159, 142, 0.09);
 }
 
+.session-group-header[data-group-tone="violet"] {
+  --session-group-accent: #c6a5ff;
+  --session-group-border: rgba(198, 165, 255, 0.34);
+  --session-group-surface: rgba(198, 165, 255, 0.11);
+}
+
+.session-group-header[data-group-tone="lime"] {
+  --session-group-accent: #c6ef6b;
+  --session-group-border: rgba(198, 239, 107, 0.34);
+  --session-group-surface: rgba(198, 239, 107, 0.11);
+}
+
+.session-group-header[data-group-tone="rose"] {
+  --session-group-accent: #ff8fb3;
+  --session-group-border: rgba(255, 143, 179, 0.34);
+  --session-group-surface: rgba(255, 143, 179, 0.11);
+}
+
+.session-group-header[data-group-tone="cyan"] {
+  --session-group-accent: #64e6ff;
+  --session-group-border: rgba(100, 230, 255, 0.34);
+  --session-group-surface: rgba(100, 230, 255, 0.11);
+}
+
+.session-group-header[data-group-tone="gold"] {
+  --session-group-accent: #ffd166;
+  --session-group-border: rgba(255, 209, 102, 0.34);
+  --session-group-surface: rgba(255, 209, 102, 0.11);
+}
+
+.session-group-header[data-group-tone="emerald"] {
+  --session-group-accent: #78e08f;
+  --session-group-border: rgba(120, 224, 143, 0.34);
+  --session-group-surface: rgba(120, 224, 143, 0.11);
+}
+
+.session-group-header[data-group-tone="indigo"] {
+  --session-group-accent: #9aa7ff;
+  --session-group-border: rgba(154, 167, 255, 0.34);
+  --session-group-surface: rgba(154, 167, 255, 0.11);
+}
+
+.session-group-header[data-group-tone="magenta"] {
+  --session-group-accent: #f39adf;
+  --session-group-border: rgba(243, 154, 223, 0.34);
+  --session-group-surface: rgba(243, 154, 223, 0.11);
+}
+
 .session-group-toggle,
 .session-group-heading,
 .session-group-header-actions {
@@ -2938,6 +2986,54 @@ input {
   --terminal-switch-group-accent: #ff9f8e;
   --terminal-switch-group-border: rgba(255, 159, 142, 0.26);
   --terminal-switch-group-surface: rgba(255, 159, 142, 0.08);
+}
+
+.terminal-session-switch-group[data-group-tone="violet"] {
+  --terminal-switch-group-accent: #c6a5ff;
+  --terminal-switch-group-border: rgba(198, 165, 255, 0.3);
+  --terminal-switch-group-surface: rgba(198, 165, 255, 0.1);
+}
+
+.terminal-session-switch-group[data-group-tone="lime"] {
+  --terminal-switch-group-accent: #c6ef6b;
+  --terminal-switch-group-border: rgba(198, 239, 107, 0.3);
+  --terminal-switch-group-surface: rgba(198, 239, 107, 0.1);
+}
+
+.terminal-session-switch-group[data-group-tone="rose"] {
+  --terminal-switch-group-accent: #ff8fb3;
+  --terminal-switch-group-border: rgba(255, 143, 179, 0.3);
+  --terminal-switch-group-surface: rgba(255, 143, 179, 0.1);
+}
+
+.terminal-session-switch-group[data-group-tone="cyan"] {
+  --terminal-switch-group-accent: #64e6ff;
+  --terminal-switch-group-border: rgba(100, 230, 255, 0.3);
+  --terminal-switch-group-surface: rgba(100, 230, 255, 0.1);
+}
+
+.terminal-session-switch-group[data-group-tone="gold"] {
+  --terminal-switch-group-accent: #ffd166;
+  --terminal-switch-group-border: rgba(255, 209, 102, 0.3);
+  --terminal-switch-group-surface: rgba(255, 209, 102, 0.1);
+}
+
+.terminal-session-switch-group[data-group-tone="emerald"] {
+  --terminal-switch-group-accent: #78e08f;
+  --terminal-switch-group-border: rgba(120, 224, 143, 0.3);
+  --terminal-switch-group-surface: rgba(120, 224, 143, 0.1);
+}
+
+.terminal-session-switch-group[data-group-tone="indigo"] {
+  --terminal-switch-group-accent: #9aa7ff;
+  --terminal-switch-group-border: rgba(154, 167, 255, 0.3);
+  --terminal-switch-group-surface: rgba(154, 167, 255, 0.1);
+}
+
+.terminal-session-switch-group[data-group-tone="magenta"] {
+  --terminal-switch-group-accent: #f39adf;
+  --terminal-switch-group-border: rgba(243, 154, 223, 0.3);
+  --terminal-switch-group-surface: rgba(243, 154, 223, 0.1);
 }
 
 .terminal-session-switch-group-header {

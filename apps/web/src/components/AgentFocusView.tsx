@@ -1303,6 +1303,9 @@ export function AgentFocusView({
                           collapsed={collapsed}
                           count={group.sessions.length}
                           groupId={group.id}
+                          groupIndex={sessionGroups.groups.findIndex(
+                            (item) => item.id === group.id,
+                          )}
                           name={group.name}
                           onDeleteGroup={onDeleteSessionGroup}
                           onRenameGroup={onRenameSessionGroup}

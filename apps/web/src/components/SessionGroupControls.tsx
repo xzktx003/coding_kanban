@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import {
@@ -17,13 +19,40 @@ export type SessionGroupSelectionAction =
   | { type: "create" }
   | { type: "move"; groupId: string | null };
 
-const SESSION_GROUP_TONES = ["amber", "teal", "sky", "coral"] as const;
+const SESSION_GROUP_TONES = [
+  "amber",
+  "teal",
+  "sky",
+  "coral",
+  "violet",
+  "lime",
+  "rose",
+  "cyan",
+  "gold",
+  "emerald",
+  "indigo",
+  "magenta",
+] as const;
+
+const SESSION_GROUP_HUE_OFFSET = 28;
+const SESSION_GROUP_HUE_STEP = 137.508;
 
 export type SessionGroupTone = (typeof SESSION_GROUP_TONES)[number] | "neutral";
 
-export function resolveSessionGroupTone(groupId: string): SessionGroupTone {
+export function resolveSessionGroupTone(
+  groupId: string,
+  groupIndex?: number,
+): SessionGroupTone {
   if (groupId === UNGROUPED_SESSION_GROUP_ID) {
     return "neutral";
+  }
+
+  if (
+    groupIndex !== undefined &&
+    Number.isInteger(groupIndex) &&
+    groupIndex >= 0
+  ) {
+    return SESSION_GROUP_TONES[groupIndex % SESSION_GROUP_TONES.length]!;
   }
 
   let hash = 0;
@@ -32,6 +61,32 @@ export function resolveSessionGroupTone(groupId: string): SessionGroupTone {
   }
 
   return SESSION_GROUP_TONES[hash % SESSION_GROUP_TONES.length];
+}
+
+export function resolveSessionGroupInlineStyle(
+  groupId: string,
+  groupIndex?: number,
+  target: "session" | "terminal" = "session",
+): CSSProperties | undefined {
+  if (
+    groupId === UNGROUPED_SESSION_GROUP_ID ||
+    groupIndex === undefined ||
+    !Number.isInteger(groupIndex) ||
+    groupIndex < 0
+  ) {
+    return undefined;
+  }
+
+  const hue =
+    (SESSION_GROUP_HUE_OFFSET + groupIndex * SESSION_GROUP_HUE_STEP) % 360;
+  const prefix =
+    target === "terminal" ? "--terminal-switch-group" : "--session-group";
+
+  return {
+    [`${prefix}-accent`]: `hsl(${hue.toFixed(3)} 88% 74%)`,
+    [`${prefix}-border`]: `hsl(${hue.toFixed(3)} 86% 68% / 0.38)`,
+    [`${prefix}-surface`]: `hsl(${hue.toFixed(3)} 88% 60% / 0.12)`,
+  } as CSSProperties;
 }
 
 export function resolveSessionGroupSelection(
@@ -90,6 +145,7 @@ export function SessionGroupMenu({
 
 interface SessionGroupHeaderProps {
   groupId: string;
+  groupIndex?: number;
   name: string;
   count: number;
   compact?: boolean;
@@ -101,6 +157,7 @@ interface SessionGroupHeaderProps {
 
 export function SessionGroupHeader({
   groupId,
+  groupIndex,
   name,
   count,
   compact = false,
@@ -110,7 +167,8 @@ export function SessionGroupHeader({
   onToggleGroup,
 }: SessionGroupHeaderProps) {
   const editable = groupId !== UNGROUPED_SESSION_GROUP_ID;
-  const tone = resolveSessionGroupTone(groupId);
+  const tone = resolveSessionGroupTone(groupId, groupIndex);
+  const colorStyle = resolveSessionGroupInlineStyle(groupId, groupIndex);
 
   return (
     <div
@@ -118,6 +176,7 @@ export function SessionGroupHeader({
       data-collapsed={collapsed ? "true" : "false"}
       data-group-tone={tone}
       data-session-group-id={groupId}
+      style={colorStyle}
     >
       <button
         aria-expanded={!collapsed}

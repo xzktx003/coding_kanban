@@ -7,7 +7,9 @@ import {
   addSessionGroup,
   assignSessionToGroup,
   deleteSessionGroup,
+  getSessionGroupId,
   getSessionGroupKey,
+  getSessionGroupKeys,
   groupSessions,
   loadSessionGroups,
   renameSessionGroup,
@@ -74,6 +76,52 @@ describe("session groups", () => {
 
     assert.equal(getSessionGroupKey(before), "session:stable-session");
     assert.equal(getSessionGroupKey(after), "session:stable-session");
+  });
+
+  it("keeps assignments when runtime, agent, or tmux pane identities change", () => {
+    const before = makeSession("stable-session", {
+      agentSessionId: "agent-before",
+      hostId: "local",
+      transportRef: {
+        tmuxSession: "stable-tmux",
+        tmuxPane: "%1",
+      },
+    });
+    const after = makeSession("stable-session", {
+      agentSessionId: "agent-after",
+      hostId: "local",
+      transportRef: {
+        runtimeId: "pty:2048",
+        tmuxSession: "stable-tmux",
+        tmuxPane: "%2",
+      },
+    });
+    const state: SessionGroupState = {
+      groups: [{ id: "group-research", name: "研究" }],
+      assignments: {},
+      collapsedGroupIds: [],
+    };
+
+    const assigned = assignSessionToGroup(
+      state,
+      getSessionGroupKeys(before),
+      "group-research",
+    );
+
+    assert.equal(getSessionGroupId(after, assigned), "group-research");
+    assert.ok(assigned.assignments["session:stable-session"]);
+    assert.deepEqual(getSessionGroupKeys(before), [
+      "agent-session:agent-before",
+      "session:stable-session",
+    ]);
+
+    const paneLess = makeSession("single-pane", {
+      transportRef: { tmuxSession: "single-pane-tmux" },
+    });
+    assert.deepEqual(getSessionGroupKeys(paneLess), [
+      "session:single-pane",
+      "tmux-session:local:single-pane-tmux",
+    ]);
   });
 
   it("separates remote tmux panes by username and port", () => {

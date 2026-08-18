@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { UNGROUPED_SESSION_GROUP_ID } from "../lib/session-groups.js";
 import {
   resolveSessionGroupSelection,
+  resolveSessionGroupInlineStyle,
   resolveSessionGroupTone,
   SessionGroupHeader,
 } from "./SessionGroupControls.js";
@@ -46,6 +47,40 @@ describe("SessionGroupHeader appearance", () => {
 
     assert.equal(new Set(tones).size, groupIds.length);
     assert.deepEqual(groupIds.map(resolveSessionGroupTone), tones);
+  });
+
+  it("assigns distinct tones by configured group order", () => {
+    const groupIds = Array.from(
+      { length: 12 },
+      (_, index) => `group-${index}`,
+    );
+    const tones = groupIds.map((groupId, index) =>
+      resolveSessionGroupTone(groupId, index),
+    );
+
+    assert.equal(new Set(tones).size, groupIds.length);
+  });
+
+  it("keeps generated colors distinct beyond the named tone palette", () => {
+    const styles = Array.from({ length: 24 }, (_, index) =>
+      resolveSessionGroupInlineStyle(`group-${index}`, index),
+    ) as Array<Record<string, string>>;
+    const accents = styles.map((style) => style["--session-group-accent"]);
+
+    assert.equal(new Set(accents).size, styles.length);
+    assert.deepEqual(
+      resolveSessionGroupInlineStyle("group-7", 7),
+      resolveSessionGroupInlineStyle("renamed-group", 7),
+    );
+    assert.equal(
+      (
+        resolveSessionGroupInlineStyle("group-7", 7, "terminal") as Record<
+          string,
+          string
+        >
+      )["--terminal-switch-group-accent"],
+      accents[7],
+    );
   });
 
   it("exposes the resolved tone on the shared group header", () => {

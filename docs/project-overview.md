@@ -50,7 +50,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 手机端页面标题区对应显示“手机端 Coding Kanban”，并提供“电脑端 Coding Kanban”切换入口和 Agent 完成通知开关。
 - `扫描` 菜单收纳扫描 tmux 和扫描会话；`工具` 菜单收纳操作提示和 Agent 完成通知开关；`资源调节` 菜单收纳终端预览模式、VS Code 省内存/保持状态、释放 VS Code 缓存和资源诊断。
 - 顶栏可折叠；折叠状态保存在 `localStorage` 的 `agent-console-layout`。
-- 会话分组配置保存在 `localStorage` 的 `coding-kanban-session-groups-v1`，两处桌面看板视图共享，当前不做跨浏览器同步。
+- 会话分组配置保存在 `localStorage` 的 `coding-kanban-session-groups-v1`，两处桌面看板视图共享，当前不做跨浏览器同步；分组颜色按配置顺序稳定分配，前 12 个使用醒目分类色，更多分组继续生成不同的高对比 HSL 色值；assignment 同时保存稳定会话和安全运行身份别名，以便重启后恢复归属。
 - `资源调节` 菜单提供终端预览模式按钮：`轻量预览：开` 为默认省资源模式，`完整预览` 恢复旧版小终端模式。
 - `资源调节` 菜单提供 `资源诊断` 面板，打开时每秒刷新浏览器侧资源指标与后端诊断：xterm/终端视图数量、终端 WebSocket 数、会话快照吞吐、终端实时流吞吐、终端历史缓冲裁剪状态、VS Code iframe 当前/隐藏数量、主线程长任务、VS Code 代理 HTTP/WS 吞吐和 Chromium JS heap；面板会给出当前压力源判读，用于区分完整预览、多终端 WebSocket、快照频率、活跃终端输出、终端 replay 裁剪、隐藏 VS Code iframe、code-server 代理流量和真实 retained-object 泄漏。
 - `工具` 菜单中的“操作提示”弹出以下提示：

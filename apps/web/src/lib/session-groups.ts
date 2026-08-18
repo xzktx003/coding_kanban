@@ -132,14 +132,61 @@ export function getSessionGroupKey(session: AgentSessionRecord): string {
   return `session:${session.id}`;
 }
 
+function getTmuxSessionScope(session: AgentSessionRecord): string {
+  const sshHost = session.sshTarget?.host ?? session.transportRef?.sshHost;
+  if (sshHost) {
+    const sshUsername =
+      session.sshTarget?.username ??
+      session.transportRef?.sshUsername ??
+      "default";
+    const sshPort =
+      session.sshTarget?.port ?? session.transportRef?.sshPort ?? 22;
+    return `ssh:${sshUsername}@${sshHost}:${sshPort}`;
+  }
+
+  return session.hostId ?? "local";
+}
+
+/**
+ * Return every durable identity currently available for a session.
+ *
+ * The browser grouping state outlives PTY runtimes. Keeping aliases lets a
+ * restored session retain its assignment when a runtime/agent id or tmux pane
+ * identity changes between snapshots.
+ */
+export function getSessionGroupKeys(session: AgentSessionRecord): string[] {
+  const keys = [getSessionGroupKey(session), `session:${session.id}`];
+
+  if (session.agentSessionId) {
+    keys.push(`agent-session:${session.agentSessionId}`);
+  }
+
+  const tmuxSession = session.transportRef?.tmuxSession;
+  // A session-level alias is safe only when there is no pane identity. When
+  // several panes from one tmux session are displayed, sharing this alias
+  // would incorrectly move all panes into one group.
+  if (tmuxSession && !session.transportRef?.tmuxPane) {
+    keys.push(
+      `tmux-session:${getTmuxSessionScope(session)}:${tmuxSession}`,
+    );
+  }
+
+  return [...new Set(keys)];
+}
+
 export function getSessionGroupId(
   session: AgentSessionRecord,
   state: SessionGroupState,
 ): string {
-  const groupId = state.assignments[getSessionGroupKey(session)];
-  return state.groups.some((group) => group.id === groupId)
-    ? groupId
-    : UNGROUPED_SESSION_GROUP_ID;
+  const groupIds = new Set(state.groups.map((group) => group.id));
+  for (const sessionKey of getSessionGroupKeys(session)) {
+    const groupId = state.assignments[sessionKey];
+    if (groupId && groupIds.has(groupId)) {
+      return groupId;
+    }
+  }
+
+  return UNGROUPED_SESSION_GROUP_ID;
 }
 
 export function addSessionGroup(
@@ -245,18 +292,21 @@ export function toggleSessionGroupCollapsed(
 
 export function assignSessionToGroup(
   state: SessionGroupState,
-  sessionKey: string,
+  sessionKey: string | readonly string[],
   groupId: string | null,
 ): SessionGroupState {
   const assignments = { ...state.assignments };
+  const sessionKeys = Array.isArray(sessionKey) ? sessionKey : [sessionKey];
   if (
     !groupId ||
     groupId === UNGROUPED_SESSION_GROUP_ID ||
     !state.groups.some((group) => group.id === groupId)
   ) {
-    delete assignments[sessionKey];
+    sessionKeys.forEach((key) => delete assignments[key]);
   } else {
-    assignments[sessionKey] = groupId;
+    sessionKeys.forEach((key) => {
+      assignments[key] = groupId;
+    });
   }
 
   return { ...state, assignments };

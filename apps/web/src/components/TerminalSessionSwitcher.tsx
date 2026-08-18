@@ -10,7 +10,10 @@ import { createPortal } from "react-dom";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
-import { resolveSessionGroupTone } from "./SessionGroupControls";
+import {
+  resolveSessionGroupInlineStyle,
+  resolveSessionGroupTone,
+} from "./SessionGroupControls";
 import { groupSessions, type SessionGroupState } from "../lib/session-groups";
 
 const ALL_SESSIONS_GROUP_ID = "__all_sessions__";
@@ -98,7 +101,10 @@ export function buildTerminalSessionSwitchGroups({
       tone:
         group.id === ALL_SESSIONS_GROUP_ID
           ? "neutral"
-          : resolveSessionGroupTone(group.id),
+          : resolveSessionGroupTone(
+              group.id,
+              sessionGroups.groups.findIndex((item) => item.id === group.id),
+            ),
       items: group.sessions.map((session) => {
         const selected = session.id === selectedSessionId;
         return {
@@ -468,6 +474,13 @@ export function TerminalSessionSwitcher({
                     data-group-tone={group.tone}
                     data-terminal-switch-group-id={group.id}
                     role="group"
+                    style={resolveSessionGroupInlineStyle(
+                      group.id,
+                      sessionGroups.groups.findIndex(
+                        (item) => item.id === group.id,
+                      ),
+                      "terminal",
+                    )}
                   >
                     <div className="terminal-session-switch-group-header">
                       <span>{group.name}</span>

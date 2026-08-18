@@ -119,7 +119,7 @@ import {
   addSessionGroup,
   assignSessionToGroup,
   deleteSessionGroup,
-  getSessionGroupKey,
+  getSessionGroupKeys,
   loadSessionGroups,
   renameSessionGroup,
   saveSessionGroups,
@@ -952,7 +952,7 @@ export default function App() {
   const handleLaunched = useCallback(
     (session: AgentSessionRecord, groupId: string | null) => {
       setSessionGroups((current) =>
-        assignSessionToGroup(current, getSessionGroupKey(session), groupId),
+        assignSessionToGroup(current, getSessionGroupKeys(session), groupId),
       );
       listAgentSessions()
         .then(setSnapshot)
@@ -1111,7 +1111,7 @@ export default function App() {
         if (session) {
           next = assignSessionToGroup(
             next,
-            getSessionGroupKey(session),
+            getSessionGroupKeys(session),
             groupId,
           );
         }
@@ -1173,7 +1173,7 @@ export default function App() {
       if (!session) return;
 
       setSessionGroups((current) =>
-        assignSessionToGroup(current, getSessionGroupKey(session), groupId),
+        assignSessionToGroup(current, getSessionGroupKeys(session), groupId),
       );
     },
     [sessions],

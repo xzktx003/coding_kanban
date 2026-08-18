@@ -449,6 +449,14 @@
 - **测试**: Playwright 使用长首组和足够的末组滚动余量，先复现标题与列表内容顶部相差 87px，再分别断言首组标题吸顶，以及第二组标题到达后替代首组。
 - **文件**: `apps/web/src/app.css`, `tests/e2e/terminal-preview.spec.ts`
 
+### 分组颜色重复与重启后会话归属丢失
+
+- **现象**: 分组数量增加后，不同分组显示相同颜色；后端或看板重启后，部分会话回到“未分组”。
+- **根因**: 颜色只用 4 个 tone 对 group ID 做哈希，碰撞不可避免；分组 assignment 只保存一个可能随 agent/runtime/tmux 元数据变化的 key，恢复后的会话无法命中旧归属。
+- **修复**: 提供 12 个醒目基础 tone，并按配置分组顺序生成稳定的高对比 HSL 色值，超过基础色板也不会循环复用；所有看板列、聚焦侧栏和终端切换器使用同一顺序。assignment 同时保存 session ID、agent session ID 和安全的 tmux pane/无 pane session 别名，恢复时按别名查找，避免把同一 tmux session 的多个 pane 错误合并。
+- **测试**: 分组单元测试覆盖 12 个顺序 tone、runtime/agent/pane 变化后的归属恢复和 pane-less tmux session 别名；前端构建与全量测试覆盖所有分组展示入口。
+- **文件**: `apps/web/src/components/SessionGroupControls.tsx`, `apps/web/src/lib/session-groups.ts`, `apps/web/src/App.tsx`, `apps/web/src/app.css`
+
 ### 多窗格当前输入与顶部会话焦点分叉
 
 - **现象**: 侧栏、分屏终端或分组切换器切到另一个会话后，实际输入窗格已经变化，但顶部标题、文件浏览器或 VS Code 抽屉仍可能停留在旧会话。
