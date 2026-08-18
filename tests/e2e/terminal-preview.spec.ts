@@ -656,6 +656,25 @@ test("monitor session switcher groups choices and marks occupied panes", async (
     name: "切换第 1 个监控终端",
   });
   await expect(menu).toBeVisible();
+  const searchInput = menu.getByRole("searchbox", {
+    name: "搜索会话或分组",
+  });
+  await expect(searchInput).toBeFocused();
+  await searchInput.fill("平台");
+  await expect(
+    menu.locator('[data-terminal-switch-group-id="group-platform"]'),
+  ).toContainText("工程与平台2");
+  await expect(
+    menu.locator('[data-terminal-switch-group-id="group-research"]'),
+  ).toHaveCount(0);
+  await searchInput.fill("Delta");
+  await expect(
+    menu.locator('[data-terminal-switch-group-id="__ungrouped__"]'),
+  ).toContainText("未分组1");
+  await expect(
+    menu.locator('[data-terminal-switch-session-id="session-delta"]'),
+  ).toBeVisible();
+  await searchInput.fill("");
   const groupedList = menu.getByRole("listbox", {
     name: "第 1 个终端可选会话",
   });

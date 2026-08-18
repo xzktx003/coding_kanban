@@ -11,7 +11,6 @@
   line-height: 1.5;
   font-weight: 400;
 }
-
 @supports (height: 100dvh) {
   :root {
     --app-height: 100dvh;
@@ -2746,16 +2745,21 @@ input {
 }
 
 .terminal-session-switcher-menu-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
   gap: 12px;
   padding: 11px 12px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.025);
 }
 
-.terminal-session-switcher-menu-header > div:first-child {
+.terminal-session-switcher-menu-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.terminal-session-switcher-menu-title-row > div:first-child {
   display: grid;
   gap: 1px;
 }
@@ -2813,6 +2817,75 @@ input {
   outline: none;
 }
 
+.terminal-session-switcher-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 184, 108, 0.2);
+  border-radius: 9px;
+  background: rgba(4, 7, 11, 0.62);
+  color: rgba(246, 178, 107, 0.8);
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    box-shadow 0.15s;
+}
+
+.terminal-session-switcher-search:focus-within {
+  border-color: rgba(255, 184, 108, 0.62);
+  background: rgba(255, 152, 0, 0.08);
+  box-shadow: 0 0 0 2px rgba(255, 152, 0, 0.1);
+}
+
+.terminal-session-switcher-search > span {
+  flex: 0 0 auto;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.terminal-session-switcher-search input {
+  min-width: 0;
+  flex: 1;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: rgba(255, 251, 244, 0.96);
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.terminal-session-switcher-search input::placeholder {
+  color: rgba(244, 241, 234, 0.36);
+}
+
+.terminal-session-switcher-search button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: rgba(244, 241, 234, 0.52);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.terminal-session-switcher-search button:hover,
+.terminal-session-switcher-search button:focus-visible {
+  background: rgba(255, 184, 108, 0.14);
+  color: #ffe5bd;
+  outline: none;
+}
+
 .terminal-session-switcher-groups {
   display: grid;
   grid-auto-rows: max-content;
@@ -2822,6 +2895,15 @@ input {
   padding: 8px;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.terminal-session-switcher-empty {
+  padding: 28px 16px;
+  border: 1px dashed rgba(255, 184, 108, 0.2);
+  border-radius: 10px;
+  color: rgba(244, 241, 234, 0.5);
+  font-size: 0.75rem;
+  text-align: center;
 }
 
 .terminal-session-switch-group {

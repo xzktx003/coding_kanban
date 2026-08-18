@@ -44,6 +44,11 @@ interface BuildTerminalSessionSwitchGroupsOptions {
   sessionGroups: SessionGroupState;
   selectedSessionId: string | null;
   placementBySessionId: ReadonlyMap<string, TerminalSessionPlacement>;
+  searchQuery?: string;
+}
+
+function normalizeSearchText(value: string): string {
+  return value.trim().toLocaleLowerCase();
 }
 
 export function buildTerminalSessionSwitchGroups({
@@ -51,6 +56,7 @@ export function buildTerminalSessionSwitchGroups({
   sessionGroups,
   selectedSessionId,
   placementBySessionId,
+  searchQuery = "",
 }: BuildTerminalSessionSwitchGroupsOptions): TerminalSessionSwitchGroup[] {
   const grouped =
     sessionGroups.groups.length > 0
@@ -63,7 +69,28 @@ export function buildTerminalSessionSwitchGroups({
           },
         ];
 
+  const normalizedQuery = normalizeSearchText(searchQuery);
+
   return grouped
+    .map((group) => {
+      if (!normalizedQuery) {
+        return group;
+      }
+
+      const groupMatches = normalizeSearchText(group.name).includes(
+        normalizedQuery,
+      );
+      return {
+        ...group,
+        sessions: groupMatches
+          ? group.sessions
+          : group.sessions.filter((session) =>
+              normalizeSearchText(session.displayName).includes(
+                normalizedQuery,
+              ),
+            ),
+      };
+    })
     .filter((group) => group.sessions.length > 0)
     .map((group) => ({
       id: group.id,
@@ -119,15 +146,22 @@ export function TerminalSessionSwitcher({
   const [menuPosition, setMenuPosition] = useState<SwitcherMenuPosition | null>(
     null,
   );
+  const [searchQuery, setSearchQuery] = useState("");
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const menuId = useId();
   const groups = buildTerminalSessionSwitchGroups({
     sessions,
     sessionGroups,
     selectedSessionId,
     placementBySessionId,
+    searchQuery,
   });
+  const visibleSessionCount = groups.reduce(
+    (count, group) => count + group.items.length,
+    0,
+  );
   const selectedSession = sessions.find(
     (session) => session.id === selectedSessionId,
   );
@@ -214,6 +248,11 @@ export function TerminalSessionSwitcher({
     }
 
     const frame = requestAnimationFrame(() => {
+      if (searchInputRef.current) {
+        searchInputRef.current.focus();
+        return;
+      }
+
       const preferred = menuRef.current?.querySelector<HTMLButtonElement>(
         '[role="option"][aria-selected="true"]',
       );
@@ -226,8 +265,14 @@ export function TerminalSessionSwitcher({
   }, [menuPosition, open]);
 
   function openMenu() {
+    setSearchQuery("");
     setMenuPosition(null);
     setOpen(true);
+  }
+
+  function selectSession(sessionId: string) {
+    setOpen(false);
+    onSelect(sessionId);
   }
 
   function handleTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
@@ -270,8 +315,12 @@ export function TerminalSessionSwitcher({
         : event.key === "End"
           ? options.length - 1
           : event.key === "ArrowUp"
-            ? (currentIndex - 1 + options.length) % options.length
-            : (currentIndex + 1) % options.length;
+            ? currentIndex < 0
+              ? options.length - 1
+              : (currentIndex - 1 + options.length) % options.length
+            : currentIndex < 0
+              ? 0
+              : (currentIndex + 1) % options.length;
     options[nextIndex]?.focus();
   }
 
@@ -324,25 +373,81 @@ export function TerminalSessionSwitcher({
             style={menuStyle}
           >
             <div className="terminal-session-switcher-menu-header">
-              <div>
-                <span className="terminal-session-switcher-kicker">
-                  终端窗格 {paneIndex}
-                </span>
-                <strong>切换会话</strong>
+              <div className="terminal-session-switcher-menu-title-row">
+                <div>
+                  <span className="terminal-session-switcher-kicker">
+                    终端窗格 {paneIndex}
+                  </span>
+                  <strong>切换会话</strong>
+                </div>
+                <div className="terminal-session-switcher-menu-meta">
+                  <span>{groups.length} 组</span>
+                  <span>
+                    {searchQuery
+                      ? `${visibleSessionCount} 个结果`
+                      : `${sessions.length} 个会话`}
+                  </span>
+                  <button
+                    aria-label="关闭会话切换列表"
+                    onClick={() => {
+                      setOpen(false);
+                      triggerRef.current?.focus();
+                    }}
+                    type="button"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
-              <div className="terminal-session-switcher-menu-meta">
-                <span>{groups.length} 组</span>
-                <span>{sessions.length} 个会话</span>
-                <button
-                  aria-label="关闭会话切换列表"
-                  onClick={() => {
-                    setOpen(false);
-                    triggerRef.current?.focus();
+              <div className="terminal-session-switcher-search">
+                <span aria-hidden="true">⌕</span>
+                <input
+                  ref={searchInputRef}
+                  aria-label="搜索会话或分组"
+                  autoComplete="off"
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      setOpen(false);
+                      triggerRef.current?.focus();
+                      return;
+                    }
+
+                    if (event.key !== "Enter") {
+                      return;
+                    }
+
+                    const firstSelectable = groups
+                      .flatMap((group) => group.items)
+                      .find((item) => item.occupiedPaneIndex === null);
+                    if (firstSelectable && visibleSessionCount === 1) {
+                      event.preventDefault();
+                      if (firstSelectable.selected) {
+                        setOpen(false);
+                        triggerRef.current?.focus();
+                      } else {
+                        selectSession(firstSelectable.session.id);
+                      }
+                    }
                   }}
-                  type="button"
-                >
-                  ×
-                </button>
+                  placeholder="搜索会话名或分组名"
+                  role="searchbox"
+                  type="search"
+                  value={searchQuery}
+                />
+                {searchQuery && (
+                  <button
+                    aria-label="清除会话搜索"
+                    onClick={() => {
+                      setSearchQuery("");
+                      searchInputRef.current?.focus();
+                    }}
+                    type="button"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             </div>
             <div
@@ -350,63 +455,69 @@ export function TerminalSessionSwitcher({
               className="terminal-session-switcher-groups"
               role="listbox"
             >
-              {groups.map((group) => (
-                <section
-                  key={group.id}
-                  aria-label={group.name}
-                  className="terminal-session-switch-group"
-                  data-group-tone={group.tone}
-                  data-terminal-switch-group-id={group.id}
-                  role="group"
-                >
-                  <div className="terminal-session-switch-group-header">
-                    <span>{group.name}</span>
-                    <strong>{group.items.length}</strong>
-                  </div>
-                  <div className="terminal-session-switch-group-items">
-                    {group.items.map((item) => {
-                      const stateLabel =
-                        stateLabels[item.session.interactionState] ??
-                        item.session.interactionState;
-                      return (
-                        <button
-                          key={item.session.id}
-                          aria-selected={item.selected}
-                          className="terminal-session-switch-option"
-                          data-session-state={item.session.interactionState}
-                          data-terminal-switch-session-id={item.session.id}
-                          disabled={item.occupiedPaneIndex !== null}
-                          onClick={() => {
-                            setOpen(false);
-                            if (item.selected) {
-                              triggerRef.current?.focus();
-                              return;
-                            }
-                            onSelect(item.session.id);
-                          }}
-                          role="option"
-                          type="button"
-                        >
-                          <span
-                            aria-label={stateLabel}
-                            className="terminal-session-switch-status"
-                          />
-                          <span className="terminal-session-switch-identity">
-                            <strong>{item.session.displayName}</strong>
-                            <small>{formatSessionMeta(item.session)}</small>
-                          </span>
-                          <span className="terminal-session-switch-badges">
-                            {item.selected && <span>当前</span>}
-                            {item.occupiedPaneIndex !== null && (
-                              <span>窗格 {item.occupiedPaneIndex}</span>
-                            )}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </section>
-              ))}
+              {groups.length === 0 ? (
+                <div className="terminal-session-switcher-empty" role="status">
+                  未找到匹配的会话或分组
+                </div>
+              ) : (
+                groups.map((group) => (
+                  <section
+                    key={group.id}
+                    aria-label={group.name}
+                    className="terminal-session-switch-group"
+                    data-group-tone={group.tone}
+                    data-terminal-switch-group-id={group.id}
+                    role="group"
+                  >
+                    <div className="terminal-session-switch-group-header">
+                      <span>{group.name}</span>
+                      <strong>{group.items.length}</strong>
+                    </div>
+                    <div className="terminal-session-switch-group-items">
+                      {group.items.map((item) => {
+                        const stateLabel =
+                          stateLabels[item.session.interactionState] ??
+                          item.session.interactionState;
+                        return (
+                          <button
+                            key={item.session.id}
+                            aria-selected={item.selected}
+                            className="terminal-session-switch-option"
+                            data-session-state={item.session.interactionState}
+                            data-terminal-switch-session-id={item.session.id}
+                            disabled={item.occupiedPaneIndex !== null}
+                            onClick={() => {
+                              if (item.selected) {
+                                setOpen(false);
+                                triggerRef.current?.focus();
+                                return;
+                              }
+                              selectSession(item.session.id);
+                            }}
+                            role="option"
+                            type="button"
+                          >
+                            <span
+                              aria-label={stateLabel}
+                              className="terminal-session-switch-status"
+                            />
+                            <span className="terminal-session-switch-identity">
+                              <strong>{item.session.displayName}</strong>
+                              <small>{formatSessionMeta(item.session)}</small>
+                            </span>
+                            <span className="terminal-session-switch-badges">
+                              {item.selected && <span>当前</span>}
+                              {item.occupiedPaneIndex !== null && (
+                                <span>窗格 {item.occupiedPaneIndex}</span>
+                              )}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
+                ))
+              )}
             </div>
           </div>,
           document.body,

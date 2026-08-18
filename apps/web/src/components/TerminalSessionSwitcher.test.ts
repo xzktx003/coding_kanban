@@ -82,4 +82,82 @@ describe("buildTerminalSessionSwitchGroups", () => {
     assert.equal(group?.items[1]?.selected, false);
     assert.equal(group?.items[1]?.occupiedPaneIndex, 2);
   });
+
+  it("matches session names while preserving their original group", () => {
+    const groups = buildTerminalSessionSwitchGroups({
+      sessions: [
+        makeSession("session-alpha", "Alpha Console"),
+        makeSession("session-beta", "Beta Console"),
+        makeSession("session-gamma", "Gamma Notes"),
+      ],
+      sessionGroups: {
+        groups: [
+          { id: "group-research", name: "模型与量化" },
+          { id: "group-platform", name: "工程与平台" },
+        ],
+        assignments: {
+          "session:session-alpha": "group-research",
+          "session:session-beta": "group-research",
+          "session:session-gamma": "group-platform",
+        },
+        collapsedGroupIds: [],
+      },
+      selectedSessionId: null,
+      placementBySessionId: new Map(),
+      searchQuery: "beta",
+    });
+
+    assert.deepEqual(
+      groups.map((group) => [
+        group.name,
+        group.items.map((item) => item.session.displayName),
+      ]),
+      [["模型与量化", ["Beta Console"]]],
+    );
+  });
+
+  it("matches a group name and keeps every session in that group", () => {
+    const groups = buildTerminalSessionSwitchGroups({
+      sessions: [
+        makeSession("session-alpha", "Alpha"),
+        makeSession("session-beta", "Beta"),
+        makeSession("session-gamma", "Gamma"),
+      ],
+      sessionGroups: {
+        groups: [
+          { id: "group-research", name: "模型与量化" },
+          { id: "group-platform", name: "工程与平台" },
+        ],
+        assignments: {
+          "session:session-alpha": "group-research",
+          "session:session-beta": "group-research",
+          "session:session-gamma": "group-platform",
+        },
+        collapsedGroupIds: [],
+      },
+      selectedSessionId: null,
+      placementBySessionId: new Map(),
+      searchQuery: "平台",
+    });
+
+    assert.deepEqual(
+      groups.map((group) => [
+        group.name,
+        group.items.map((item) => item.session.displayName),
+      ]),
+      [["工程与平台", ["Gamma"]]],
+    );
+  });
+
+  it("returns no groups when the search has no match", () => {
+    const groups = buildTerminalSessionSwitchGroups({
+      sessions: [makeSession("session-alpha", "Alpha")],
+      sessionGroups: { groups: [], assignments: {}, collapsedGroupIds: [] },
+      selectedSessionId: null,
+      placementBySessionId: new Map(),
+      searchQuery: "missing",
+    });
+
+    assert.deepEqual(groups, []);
+  });
 });
