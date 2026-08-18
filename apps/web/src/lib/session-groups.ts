@@ -155,7 +155,9 @@ function getTmuxSessionScope(session: AgentSessionRecord): string {
  * identity changes between snapshots.
  */
 export function getSessionGroupKeys(session: AgentSessionRecord): string[] {
-  const keys = [getSessionGroupKey(session), `session:${session.id}`];
+  // The registry id survives managed-session restores and is the strongest
+  // identity. Runtime aliases remain useful for legacy browser assignments.
+  const keys = [`session:${session.id}`, getSessionGroupKey(session)];
 
   if (session.agentSessionId) {
     keys.push(`agent-session:${session.agentSessionId}`);

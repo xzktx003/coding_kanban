@@ -799,6 +799,151 @@ test("monitor session switcher groups choices and marks occupied panes", async (
   );
 });
 
+test("renders distinct group colors consistently across board and switcher", async ({
+  page,
+}) => {
+  const sessions = Array.from({ length: 14 }, (_, index) =>
+    makeSession({
+      id: `color-session-${index}`,
+      displayName: `Color Session ${index}`,
+    }),
+  );
+  const groups = sessions.map((_, index) => ({
+    id: `color-group-${index}`,
+    name: `颜色组 ${index}`,
+  }));
+
+  await mockSessions(page, sessions);
+  await page.addInitScript(
+    ({ groups: configuredGroups, sessionIds }) => {
+      localStorage.setItem(
+        "coding-kanban-session-groups-v1",
+        JSON.stringify({
+          groups: configuredGroups,
+          assignments: Object.fromEntries(
+            sessionIds.map((sessionId, index) => [
+              `session:${sessionId}`,
+              `color-group-${index}`,
+            ]),
+          ),
+          collapsedGroupIds: [],
+        }),
+      );
+    },
+    { groups, sessionIds: sessions.map((session) => session.id) },
+  );
+  await page.goto("/");
+
+  const boardHeaders = page.locator(
+    '.session-group-header[data-session-group-id^="color-group-"]',
+  );
+  await expect(boardHeaders).toHaveCount(groups.length);
+  const boardColors = await boardHeaders.evaluateAll((elements) =>
+    elements.map((element) =>
+      getComputedStyle(element)
+        .getPropertyValue("--session-group-accent")
+        .trim(),
+    ),
+  );
+  expect(new Set(boardColors).size).toBe(groups.length);
+
+  await page.locator(".grid-card").first().dblclick();
+  const firstPane = page.locator(
+    '[data-terminal-pane-slot="terminal-monitor-slot-1"]',
+  );
+  await firstPane
+    .getByRole("combobox", { name: "选择第 1 个监控终端" })
+    .click();
+
+  const menu = page.getByRole("dialog", {
+    name: "切换第 1 个监控终端",
+  });
+  const switchGroups = menu.locator(
+    '.terminal-session-switch-group[data-terminal-switch-group-id^="color-group-"]',
+  );
+  await expect(switchGroups).toHaveCount(groups.length);
+  const switcherColors = await switchGroups.evaluateAll((elements) =>
+    elements.map((element) =>
+      getComputedStyle(element)
+        .getPropertyValue("--terminal-switch-group-accent")
+        .trim(),
+    ),
+  );
+  expect(new Set(switcherColors).size).toBe(groups.length);
+  expect(switcherColors).toEqual(boardColors);
+});
+
+test("keeps a session in its group after a restarted snapshot changes runtime ids", async ({
+  page,
+}) => {
+  const initialSession = makeSession({
+    id: "stable-session",
+    displayName: "Restarted Session",
+    agentSessionId: "agent-before",
+    transportRef: {
+      runtimeId: "pty:1001",
+      tmuxSession: "stable-tmux",
+      tmuxPane: "%1",
+    },
+  });
+  const restoredSession = {
+    ...initialSession,
+    agentSessionId: "agent-after",
+    transportRef: {
+      runtimeId: "pty:2048",
+      tmuxSession: "stable-tmux",
+      tmuxPane: "%2",
+    },
+  };
+  let currentSession = initialSession;
+
+  await installTrackingWebSocket(page);
+  await page.route("**/api/ssh-hosts", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ hosts: [] }),
+    });
+  });
+  await page.route("**/api/agent-sessions", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify(buildSnapshot([currentSession])),
+    });
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "coding-kanban-session-groups-v1",
+      JSON.stringify({
+        groups: [{ id: "group-research", name: "模型与量化" }],
+        assignments: {
+          "session:stable-session": "group-research",
+          "agent-session:agent-before": "group-research",
+        },
+        collapsedGroupIds: [],
+      }),
+    );
+  });
+
+  await page.goto("/");
+  const groupSection = page.locator(".agent-group-section").filter({
+    has: page.locator('[data-session-group-id="group-research"]'),
+  });
+  await expect(groupSection).toContainText("Restarted Session");
+
+  currentSession = restoredSession;
+  await page.reload();
+  await expect(
+    page.locator(".agent-group-section").filter({
+      has: page.locator('[data-session-group-id="group-research"]'),
+    }),
+  ).toContainText("Restarted Session");
+});
+
 test("preview mode toggle restores full terminal previews on demand", async ({
   page,
 }) => {

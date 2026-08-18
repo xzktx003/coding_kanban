@@ -111,8 +111,8 @@ describe("session groups", () => {
     assert.equal(getSessionGroupId(after, assigned), "group-research");
     assert.ok(assigned.assignments["session:stable-session"]);
     assert.deepEqual(getSessionGroupKeys(before), [
-      "agent-session:agent-before",
       "session:stable-session",
+      "agent-session:agent-before",
     ]);
 
     const paneLess = makeSession("single-pane", {
@@ -122,6 +122,25 @@ describe("session groups", () => {
       "session:single-pane",
       "tmux-session:local:single-pane-tmux",
     ]);
+  });
+
+  it("prefers the stable session assignment over a stale runtime alias", () => {
+    const session = makeSession("stable-session", {
+      agentSessionId: "agent-before",
+    });
+    const state: SessionGroupState = {
+      groups: [
+        { id: "group-current", name: "当前" },
+        { id: "group-stale", name: "旧分组" },
+      ],
+      assignments: {
+        "session:stable-session": "group-current",
+        "agent-session:agent-before": "group-stale",
+      },
+      collapsedGroupIds: [],
+    };
+
+    assert.equal(getSessionGroupId(session, state), "group-current");
   });
 
   it("separates remote tmux panes by username and port", () => {

@@ -14,7 +14,7 @@
 - 手机端原生受控会话选择框会在实时快照重渲染时被部分手机浏览器重复创建系统选择层，且“变更”按钮作为第四个网格项会换行占高；修复为单实例页面内会话列表，并把“完整记录 / 变更”收进同一行操作组。
 
 - Agent 完成结果直接进入“已完成”会被用户漏看，tmux 恢复运行还可能残留旧标记：新增持久化 `hasUnreadCompletion`，完成先进入“需要你”，聚焦查看后进入“已完成”，新输入或恢复运行后清除并进入“工作中”；所有桌面、手机和多终端查看入口统一走 focus API。
-- 分组数量增加后不同分组颜色会碰撞，重启后部分会话回到未分组：旧实现只有四个按 group ID 哈希的 tone，assignment 也只保存单一动态会话 key。修复为按配置顺序使用 12 个醒目基础 tone，并为更多分组生成稳定的高对比 HSL 色值；保存 session ID、agent ID 及安全 tmux 别名，恢复时按别名匹配，同时不使用 pane-less 以外的 tmux session 广义别名，避免同一 tmux session 的多个 pane 被错误合并。
+- 分组数量增加后不同分组颜色会碰撞，重启后部分会话回到未分组：旧实现只有四个按 group ID 哈希的 tone，assignment 也只保存单一动态会话 key。修复为按配置顺序使用 12 个醒目基础 tone，并为更多分组生成稳定的高对比 HSL 色值；保存稳定 session ID、agent ID 及安全 tmux 别名，恢复时先按稳定 session ID、再按别名匹配，同时不使用 pane-less 以外的 tmux session 广义别名，避免旧运行身份覆盖当前归属，也避免同一 tmux session 的多个 pane 被错误合并。
 - 本地 tmux 中 Ctrl+C 等快捷键可用但普通文字无法输入，或文字落到与当前可见 pane 不同的目标。根因是普通文本走 `tmux send-keys`，而控制键、鼠标和前缀走 attached client PTY，两条通道的活动 pane 与时序可能分叉。修复为 attached client 存在时统一把所有原始输入写入同一个有序 PTY；仅无 client 的离线场景回退到固定 pane 的 `send-keys`。单元回归覆盖普通文本、前缀、清理和 detached fallback，真实 WebSocket+tmux 回归覆盖握手、焦点过滤和分帧粘贴。
 - 新建或恢复本地 tmux 时，scrollback replay 可早于 `tmux attach` client 完成，首个文字、前缀或 Codex 输入会被启动 shell 吞掉。修复为用 `tmux list-clients` 的 `client_pid` 匹配 PTY PID 后再写 native PTY；就绪前短暂等待，超时安全回退 pane adapter。CSI-u 修饰 Enter 保持 `send-keys -l` 例外，避免旧 tmux client 吞掉原始字节；真实 rename-window prompt 回归覆盖首帧输入、提交和取消。
 - 手机端快捷键缺少 Claude / Copilot CLI 常用控制键：`Shift+Tab`、`Ctrl+O`、`Ctrl+E` 和行编辑组合无法从手机触发，且快捷键类型中残留旧 id 有构建失败风险；修复为扩展手机快捷键表，并在本地 tmux 转换层映射到 `BTab`、`C-o`、`C-e`、`C-u/w/k/y` 等 key name。
