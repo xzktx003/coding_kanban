@@ -102,7 +102,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - tmux 会话是底层真实进程，`kill` 会杀掉底层 tmux session。
 - 对运行中 tmux 的接入会通过 PTY attach，不只是静态观察。
 - `transportRef.tmuxSession` 和 `transportRef.tmuxPane` 是 tmux 绑定关系的关键字段。
-- tmux 扫描、快速连接和加入看板时，`displayName` 使用真实 tmux session 名；`agentKind`、`workingDirectory`、`sshTarget` 和 `transportRef` 分别承载命令类型、目录、远端主机和 tmux 绑定，不再把这些信息拼成 `tmux:<session> (<command>)` 一类标题。
+- tmux 扫描、快速连接和加入看板时，`displayName` 使用真实 tmux session 名；`agentKind`、`workingDirectory`、`sshTarget` 和 `transportRef` 分别承载命令类型、目录、远端主机和 tmux 绑定，不再把这些信息拼成 `tmux:<session> (<command>)` 一类标题。服务端是 tmux 传输目标的规范化边界：tmux 会把 session 名中的 `.`、`:` 转换为 `_`，因此 PTY 启动、重连和状态恢复都使用同样的规范名，用户自定义 `displayName` 则保持原文。
 - `transportRef.runtimeId` 等内部标识可以继续使用 `tmux:` 命名空间，它们不直接作为用户可见标题。状态文件恢复只把可确定为旧版系统生成的标题迁移为真实 session 名，避免覆盖用户自定义标题。
 
 ### 扫描已有 Agent 工作目录

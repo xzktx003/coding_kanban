@@ -215,6 +215,31 @@ test("file store migrates only system-generated tmux display names", () => {
   }
 });
 
+test("file store repairs tmux target separators while preserving the user display name", () => {
+  const directory = mkdtempSync(join(tmpdir(), "coding-kanban-sessions-"));
+  const filePath = join(directory, "sessions.json");
+  const store = new FileSessionStateStore(filePath);
+
+  try {
+    store.save({
+      items: [
+        buildSession("dotted", {
+          displayName: "qwen3.8-27b",
+          transportRef: { tmuxSession: "qwen3.8-27b" },
+        }),
+      ],
+      activeAgentSessionId: "dotted",
+      updatedAt: "2026-08-18T00:00:00.000Z",
+    });
+
+    const loaded = store.load();
+    assert.equal(loaded?.items[0]?.displayName, "qwen3.8-27b");
+    assert.equal(loaded?.items[0]?.transportRef?.tmuxSession, "qwen3_8-27b");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("registry restores stable ids and marks tmux/direct sessions with the correct recovery boundary", () => {
   const registry = new AgentSessionRegistry();
 

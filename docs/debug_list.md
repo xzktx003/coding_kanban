@@ -551,3 +551,11 @@
 - **修复**: 记录继续按最新在前排序，但首次只挂载 30 条；当前批次末尾显示“继续加载”，每次由用户手动追加最多 30 条较早记录，滚动本身不会自动扩充 DOM。
 - **测试**: 组件红绿灯测试用 65 条记录复现全量挂载，断言首屏仅含最新 30 条、边界后的记录未渲染、继续加载计数按 30 条递增并在总数处停止。
 - **文件**: `apps/web/src/components/AgentTranscriptDialog.tsx`, `apps/web/src/components/AgentTranscriptDialog.test.ts`, `apps/web/src/app.css`
+
+### 名称含点号的受管 tmux 无法输入英文
+
+- **现象**: 在看板新建名为 `qwen3.8-27b` 的本地 tmux 后，终端能显示 Bash 提示符，但键盘输入的英文不会进入 pane。
+- **根因**: tmux 创建 session 时会把名称中的 `.`、`:` 规范为 `_`，实际 session 因而是 `qwen3_8-27b`；Kanban registry 和 PTY 就绪检查仍保存请求原名，既无法识别已附着 client，回退的 `send-keys` 也指向不存在的 target。
+- **修复**: PTY 启动、远端启动、重连、服务端命令构造和持久化状态恢复统一规范 tmux 传输名；卡片 `displayName` 保留用户原文。无 pane 信息的改名流程也使用实际规范名兜底。
+- **测试**: 真实 tmux 红绿灯测试以含点号名称启动受管 PTY，断言 registry 绑定规范名、client 能就绪，并通过英文 `printf` 输入得到 pane 输出；状态存储测试覆盖旧错误目标自动迁移。现场 `qwen3.8-27b` 已通过 Kanban `/stdin` 路由执行英文 `echo` 并回到提示符。
+- **文件**: `apps/server/src/services/tmux-display-name.ts`, `apps/server/src/services/pty-runtime-manager.ts`, `apps/server/src/services/session-state-store.ts`, `apps/server/src/services/local-tmux-adapter.ts`, `apps/server/src/routes/agent-sessions.ts`

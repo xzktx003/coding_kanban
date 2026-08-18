@@ -394,6 +394,43 @@ test("launch keeps tmux attach sessions alive when the card is labeled as copilo
   }
 });
 
+test("launch keeps English input working when tmux normalizes periods in the requested name", async () => {
+  const registry = new AgentSessionRegistry();
+  const runtimeManager = new PtyRuntimeManager(registry);
+  const requestedSessionName = `pty.tmux-input-${Date.now()}`;
+  const actualSessionName = requestedSessionName.replaceAll(".", "_");
+  const marker = `TMUX_DOTTED_INPUT_${Date.now()}`;
+
+  killTmuxSession(requestedSessionName);
+  killTmuxSession(actualSessionName);
+
+  const session = runtimeManager.launch({
+    workspaceId: "default",
+    displayName: requestedSessionName,
+    agentKind: "shell",
+    command: `tmux new-session -s '${requestedSessionName}' -c '${process.cwd()}'`,
+    workingDirectory: process.cwd(),
+    tmuxSessionName: requestedSessionName,
+  });
+
+  try {
+    assert.equal(session.displayName, requestedSessionName);
+    assert.equal(session.transportRef?.tmuxSession, actualSessionName);
+    assert.equal(await runtimeManager.waitForTmuxClientReady(session.id), true);
+
+    await runtimeManager.write(session.id, `printf '${marker}\\n'\r`);
+    const output = await waitForTmuxCaptureMatch(
+      actualSessionName,
+      new RegExp(marker),
+    );
+    assert.match(output, new RegExp(marker));
+  } finally {
+    runtimeManager.kill(session.id);
+    registry.remove(session.id);
+    killTmuxSession(actualSessionName);
+  }
+});
+
 test("dispose kills every active PTY so backend reloads cannot orphan tmux clients", () => {
   const registry = new AgentSessionRegistry();
   const runtimeManager = new PtyRuntimeManager(registry);

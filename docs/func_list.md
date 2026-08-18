@@ -52,7 +52,7 @@
 - 支持快速连接本机或远端 tmux，会话存在即 attach，不存在即创建。
 - 支持将已运行的 tmux pane 接入为可交互 PTY。
 - 支持对 tmux 会话执行 `refresh`、`takeover`、`release`、`kill`。
-- tmux 扫描、快速连接和加入看板时，卡片显示名称使用真实 tmux session 名，不再生成 `tmux:<session>`、`tmux:<session> (<command>)` 或远端路径后缀；命令、目录、主机和 tmux 绑定分别保存在现有结构化字段中，内部 runtime id 仍可使用 `tmux:` 命名空间。
+- tmux 扫描、快速连接和加入看板时，卡片显示名称使用真实 tmux session 名，不再生成 `tmux:<session>`、`tmux:<session> (<command>)` 或远端路径后缀；命令、目录、主机和 tmux 绑定分别保存在现有结构化字段中，内部 runtime id 仍可使用 `tmux:` 命名空间。新建或恢复受管 tmux 时，服务端按 tmux 规则把传输目标中的 `.`、`:` 规范为 `_`，但保留用户输入的卡片显示名称，避免目标名不一致导致键盘输入失效。
 - 状态文件读取时只迁移可确定为旧版系统生成的 tmux 标题，用户自定义标题和非 tmux 标题保持不变。
 
 ## 5. Agent 工作目录扫描

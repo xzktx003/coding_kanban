@@ -31,6 +31,7 @@ import {
   sanitizeReplayForTerminal,
   type TerminalProtocolResponseKind,
 } from "./terminal-control-filter.js";
+import { normalizeTmuxSessionName } from "./tmux-display-name.js";
 
 type PtyDataListener = (data: string) => void;
 const execFileAsync = promisify(execFile);
@@ -250,13 +251,15 @@ export class PtyRuntimeManager {
   }
 
   launch(input: LaunchLocalAgentInput): AgentSessionRecord {
+    const tmuxSessionName = normalizeTmuxSessionName(input.tmuxSessionName);
+    const normalizedInput = { ...input, tmuxSessionName };
     const shell = resolvePreferredShell();
     const resolvedWorkingDirectory = resolveLocalWorkingDirectory(
       input.workingDirectory,
     );
-    const spawnPlan = buildLocalSpawnPlan(shell, input);
-    this.configureLocalTmuxHistory(input.tmuxSessionName);
-    const tmuxScrollback = this.captureLocalTmuxScrollback(input);
+    const spawnPlan = buildLocalSpawnPlan(shell, normalizedInput);
+    this.configureLocalTmuxHistory(tmuxSessionName);
+    const tmuxScrollback = this.captureLocalTmuxScrollback(normalizedInput);
 
     const ptyProcess = pty.spawn(spawnPlan.file, spawnPlan.args, {
       name: "xterm-256color",
@@ -280,15 +283,15 @@ export class PtyRuntimeManager {
       controlMode: "control",
       transportRef: {
         processId: ptyProcess.pid,
-        tmuxSession: input.tmuxSessionName,
+        tmuxSession: tmuxSessionName,
         tmuxPane: input.tmuxPaneId,
         runtimeId: `pty:${ptyProcess.pid}`,
       },
     });
 
     const handle = this.createHandle(ptyProcess, {
-      localTmuxSessionName: input.tmuxSessionName,
-      stripAlternateScreen: Boolean(input.tmuxSessionName),
+      localTmuxSessionName: tmuxSessionName,
+      stripAlternateScreen: Boolean(tmuxSessionName),
     });
 
     this.handles.set(agentSession.id, handle);
@@ -341,7 +344,9 @@ export class PtyRuntimeManager {
   }
 
   launchRemote(input: LaunchSshPtyInput): AgentSessionRecord {
-    const tmuxScrollback = this.captureRemoteTmuxScrollback(input);
+    const tmuxSessionName = normalizeTmuxSessionName(input.tmuxSessionName);
+    const normalizedInput = { ...input, tmuxSessionName };
+    const tmuxScrollback = this.captureRemoteTmuxScrollback(normalizedInput);
     const args = buildSshArgs(input.sshTarget, {
       requestTty: true,
       remoteCommand: input.remoteCommand,
@@ -370,7 +375,7 @@ export class PtyRuntimeManager {
       controlMode: "control",
       transportRef: {
         processId: ptyProcess.pid,
-        tmuxSession: input.tmuxSessionName,
+        tmuxSession: tmuxSessionName,
         tmuxPane: input.tmuxPaneId,
         runtimeId: `ssh-pty:${ptyProcess.pid}`,
         sshHost: input.sshTarget.host,
@@ -383,7 +388,7 @@ export class PtyRuntimeManager {
     });
 
     const handle = this.createHandle(ptyProcess, {
-      stripAlternateScreen: Boolean(input.tmuxSessionName),
+      stripAlternateScreen: Boolean(tmuxSessionName),
     });
 
     this.handles.set(agentSession.id, handle);
@@ -589,7 +594,9 @@ export class PtyRuntimeManager {
     input: LaunchSshPtyInput,
   ): AgentSessionRecord {
     this.kill(agentSessionId);
-    const tmuxScrollback = this.captureRemoteTmuxScrollback(input);
+    const tmuxSessionName = normalizeTmuxSessionName(input.tmuxSessionName);
+    const normalizedInput = { ...input, tmuxSessionName };
+    const tmuxScrollback = this.captureRemoteTmuxScrollback(normalizedInput);
 
     const args = buildSshArgs(input.sshTarget, {
       requestTty: true,
@@ -606,7 +613,7 @@ export class PtyRuntimeManager {
     });
 
     const handle = this.createHandle(ptyProcess, {
-      stripAlternateScreen: Boolean(input.tmuxSessionName),
+      stripAlternateScreen: Boolean(tmuxSessionName),
     });
     this.handles.set(agentSessionId, handle);
     this.seedScrollback(agentSessionId, handle, tmuxScrollback);
@@ -618,7 +625,7 @@ export class PtyRuntimeManager {
       outputPreview: `重新连接中: SSH → ${userHost}`,
       transportRef: {
         processId: ptyProcess.pid,
-        tmuxSession: input.tmuxSessionName,
+        tmuxSession: tmuxSessionName,
         tmuxPane: input.tmuxPaneId,
         runtimeId: `ssh-pty:${ptyProcess.pid}`,
         sshHost: input.sshTarget.host,
@@ -672,13 +679,16 @@ export class PtyRuntimeManager {
   ): AgentSessionRecord {
     this.kill(agentSessionId);
 
+    const tmuxSessionName = normalizeTmuxSessionName(input.tmuxSessionName);
+    const normalizedInput = { ...input, tmuxSessionName };
+
     const shell = resolvePreferredShell();
     const resolvedWorkingDirectory = resolveLocalWorkingDirectory(
       input.workingDirectory,
     );
-    const spawnPlan = buildLocalSpawnPlan(shell, input);
-    this.configureLocalTmuxHistory(input.tmuxSessionName);
-    const tmuxScrollback = this.captureLocalTmuxScrollback(input);
+    const spawnPlan = buildLocalSpawnPlan(shell, normalizedInput);
+    this.configureLocalTmuxHistory(tmuxSessionName);
+    const tmuxScrollback = this.captureLocalTmuxScrollback(normalizedInput);
     const ptyProcess = pty.spawn(spawnPlan.file, spawnPlan.args, {
       name: "xterm-256color",
       cols: 120,
@@ -688,8 +698,8 @@ export class PtyRuntimeManager {
     });
 
     const handle = this.createHandle(ptyProcess, {
-      localTmuxSessionName: input.tmuxSessionName,
-      stripAlternateScreen: Boolean(input.tmuxSessionName),
+      localTmuxSessionName: tmuxSessionName,
+      stripAlternateScreen: Boolean(tmuxSessionName),
     });
     this.handles.set(agentSessionId, handle);
     this.seedScrollback(agentSessionId, handle, tmuxScrollback);
@@ -702,7 +712,7 @@ export class PtyRuntimeManager {
       workingDirectory: resolvedWorkingDirectory,
       transportRef: {
         processId: ptyProcess.pid,
-        tmuxSession: input.tmuxSessionName,
+        tmuxSession: tmuxSessionName,
         tmuxPane: input.tmuxPaneId,
         runtimeId: `pty:${ptyProcess.pid}`,
       },

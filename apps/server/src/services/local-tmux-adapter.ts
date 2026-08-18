@@ -14,7 +14,10 @@ import { AgentSessionRegistry } from "./agent-session-registry.js";
 import { DEFAULT_TERMINAL_TMUX_CAPTURE_LINES } from "../config/server-runtime-config.js";
 import { quoteForPosixShell, resolveTmuxBinary } from "./runtime-compat.js";
 import { buildSshArgs, formatSshDestination } from "./ssh-command.js";
-import { canonicalTmuxDisplayName } from "./tmux-display-name.js";
+import {
+  canonicalTmuxDisplayName,
+  normalizeTmuxSessionName,
+} from "./tmux-display-name.js";
 
 const TMUX_BINARY = resolveTmuxBinary();
 
@@ -562,7 +565,7 @@ export class LocalTmuxAdapter {
     const actualTmuxSession =
       (await this.resolvePaneSessionName(paneId, sshTarget).catch(
         () => undefined,
-      )) ?? nextName;
+      )) ?? normalizeTmuxSessionName(nextName)!;
     const sshHost = sshTarget?.host ?? agentSession.transportRef?.sshHost;
     const nextRuntimeId = agentSession.transportRef?.runtimeId?.startsWith(
       "tmux:",

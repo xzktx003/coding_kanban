@@ -43,7 +43,10 @@ import {
   quoteForPosixShell,
 } from "../services/runtime-compat.js";
 import { SshRuntimeManager } from "../services/ssh-runtime-manager.js";
-import { canonicalTmuxDisplayName } from "../services/tmux-display-name.js";
+import {
+  canonicalTmuxDisplayName,
+  normalizeTmuxSessionName,
+} from "../services/tmux-display-name.js";
 import {
   isTerminalFocusPayload,
   isTerminalPtyControlPayload,
@@ -107,13 +110,14 @@ function buildTmuxLaunchCommand(
   sessionId?: string,
   tmuxHistoryLimit = DEFAULT_TERMINAL_TMUX_CAPTURE_LINES,
 ): string {
+  const normalizedTmuxSessionName = normalizeTmuxSessionName(tmuxSessionName)!;
   const tmuxPrefix = `tmux set-option -g history-limit ${tmuxHistoryLimit} \\; new-session`;
 
   if (agentKind === "shell") {
-    return `${tmuxPrefix} -s ${shellQuote(tmuxSessionName)} -c ${formatWorkingDirectory(workingDirectory)}`;
+    return `${tmuxPrefix} -s ${shellQuote(normalizedTmuxSessionName)} -c ${formatWorkingDirectory(workingDirectory)}`;
   }
 
-  return `${tmuxPrefix} -s ${shellQuote(tmuxSessionName)} ${buildTmuxCommand(buildDirectLaunchCommand(agentKind, workingDirectory, displayName, sessionId), true)}`;
+  return `${tmuxPrefix} -s ${shellQuote(normalizedTmuxSessionName)} ${buildTmuxCommand(buildDirectLaunchCommand(agentKind, workingDirectory, displayName, sessionId), true)}`;
 }
 
 function buildTmuxAttachCommand(
@@ -121,13 +125,14 @@ function buildTmuxAttachCommand(
   tmuxPaneId?: string,
   tmuxHistoryLimit = DEFAULT_TERMINAL_TMUX_CAPTURE_LINES,
 ): string {
-  const tmuxPrefix = `tmux set-option -t ${shellQuote(tmuxSessionName)} history-limit ${tmuxHistoryLimit}`;
+  const normalizedTmuxSessionName = normalizeTmuxSessionName(tmuxSessionName)!;
+  const tmuxPrefix = `tmux set-option -t ${shellQuote(normalizedTmuxSessionName)} history-limit ${tmuxHistoryLimit}`;
 
   if (tmuxPaneId) {
-    return `${tmuxPrefix} \\; select-pane -t ${shellQuote(tmuxPaneId)} \\; attach -t ${shellQuote(tmuxSessionName)}`;
+    return `${tmuxPrefix} \\; select-pane -t ${shellQuote(tmuxPaneId)} \\; attach -t ${shellQuote(normalizedTmuxSessionName)}`;
   }
 
-  return `${tmuxPrefix} \\; attach -t ${shellQuote(tmuxSessionName)}`;
+  return `${tmuxPrefix} \\; attach -t ${shellQuote(normalizedTmuxSessionName)}`;
 }
 
 interface AgentSessionRoutesOptions {

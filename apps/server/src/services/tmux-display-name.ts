@@ -6,6 +6,12 @@ export function canonicalTmuxDisplayName(tmuxSession: string): string {
   return tmuxSession;
 }
 
+export function normalizeTmuxSessionName(
+  tmuxSession: string | undefined,
+): string | undefined {
+  return tmuxSession?.replace(/[.:]/g, "_");
+}
+
 export function normalizeTmuxDisplayName(
   displayName: string,
   tmuxSession?: string,

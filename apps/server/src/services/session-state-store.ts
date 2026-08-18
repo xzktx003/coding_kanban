@@ -14,7 +14,10 @@ import type {
   SshTarget,
 } from "@agent-orchestrator/shared";
 
-import { normalizeTmuxDisplayName } from "./tmux-display-name.js";
+import {
+  normalizeTmuxDisplayName,
+  normalizeTmuxSessionName,
+} from "./tmux-display-name.js";
 
 const SESSION_STATE_VERSION = 1;
 
@@ -93,10 +96,14 @@ function parseSession(value: unknown): AgentSessionRecord | null {
     return null;
   }
 
+  const persistedTmuxSession = isRecord(value.transportRef)
+    ? optionalString(value.transportRef.tmuxSession)
+    : undefined;
+  const normalizedTmuxSession = normalizeTmuxSessionName(persistedTmuxSession);
   const transport = isRecord(value.transportRef)
     ? {
-        ...(optionalString(value.transportRef.tmuxSession)
-          ? { tmuxSession: optionalString(value.transportRef.tmuxSession) }
+        ...(normalizedTmuxSession
+          ? { tmuxSession: normalizedTmuxSession }
           : {}),
         ...(optionalString(value.transportRef.tmuxPane)
           ? { tmuxPane: optionalString(value.transportRef.tmuxPane) }
@@ -156,7 +163,7 @@ function parseSession(value: unknown): AgentSessionRecord | null {
     agentKind: value.agentKind,
     displayName: normalizeTmuxDisplayName(
       value.displayName,
-      transport?.tmuxSession,
+      persistedTmuxSession,
     ),
     connectionState: "offline",
     interactionState: transport?.tmuxSession ? "detached" : "exited",
