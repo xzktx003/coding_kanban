@@ -5,6 +5,8 @@ import {
   clampMobileTerminalFontSize,
   computeMobilePinchFontSize,
   computeMobileTerminalScrollLines,
+  getMobileTerminalCursorOptions,
+  initializeMobileTerminalCursor,
   measureTouchDistance,
 } from "./mobile-terminal-touch.js";
 
@@ -51,5 +53,55 @@ describe("mobile terminal touch helpers", () => {
       }),
       24,
     );
+  });
+
+  it("keeps an underline cursor visible while mobile controls own focus", () => {
+    assert.deepEqual(getMobileTerminalCursorOptions(true), {
+      cursorInactiveStyle: "underline",
+      cursorStyle: "underline",
+    });
+    assert.deepEqual(getMobileTerminalCursorOptions(false), {
+      cursorInactiveStyle: "outline",
+      cursorStyle: "block",
+    });
+  });
+
+  it("initializes the xterm cursor without leaving the monitor focused", () => {
+    const calls: string[] = [];
+    const terminal = {
+      blur: () => calls.push("blur"),
+      focus: () => calls.push("focus"),
+    };
+
+    assert.equal(
+      initializeMobileTerminalCursor({
+        inputEnabled: false,
+        mobileTouchMode: true,
+        terminal,
+      }),
+      true,
+    );
+    assert.deepEqual(calls, ["focus", "blur"]);
+
+    calls.length = 0;
+    assert.equal(
+      initializeMobileTerminalCursor({
+        inputEnabled: false,
+        mobileTouchMode: false,
+        terminal,
+      }),
+      false,
+    );
+    assert.deepEqual(calls, []);
+
+    assert.equal(
+      initializeMobileTerminalCursor({
+        inputEnabled: true,
+        mobileTouchMode: true,
+        terminal,
+      }),
+      false,
+    );
+    assert.deepEqual(calls, []);
   });
 });

@@ -9,6 +9,8 @@ import { buildTerminalWebSocketUrl } from "../lib/api";
 import {
   computeMobilePinchFontSize,
   computeMobileTerminalScrollLines,
+  getMobileTerminalCursorOptions,
+  initializeMobileTerminalCursor,
   loadMobileTerminalFontSize,
   measureTouchDistance,
   saveMobileTerminalFontSize,
@@ -281,6 +283,7 @@ export function TerminalView({
     const initialFontSize = terminalFontSizeRef.current;
     const term = new Terminal({
       cursorBlink: inputEnabledRef.current,
+      ...getMobileTerminalCursorOptions(mobileTouchMode),
       fontSize: initialFontSize,
       fontFamily: '"IBM Plex Mono", "SFMono-Regular", monospace',
       theme: {
@@ -299,7 +302,20 @@ export function TerminalView({
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
     applyPreviewLayout();
+    const activeElementBeforeOpen = document.activeElement;
     term.open(stage);
+    if (
+      initializeMobileTerminalCursor({
+        inputEnabled: inputEnabledRef.current,
+        mobileTouchMode,
+        terminal: term,
+      }) &&
+      activeElementBeforeOpen instanceof HTMLElement &&
+      activeElementBeforeOpen !== document.body &&
+      activeElementBeforeOpen.isConnected
+    ) {
+      activeElementBeforeOpen.focus({ preventScroll: true });
+    }
     container.__xterm = term;
 
     const copyTextToClipboard = (text: string) => {

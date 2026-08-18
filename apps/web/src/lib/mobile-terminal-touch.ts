@@ -14,6 +14,47 @@ export interface MobileTerminalScrollState {
   lineHeight: number;
 }
 
+interface MobileTerminalCursorTarget {
+  blur: () => void;
+  focus: () => void;
+}
+
+export function initializeMobileTerminalCursor({
+  inputEnabled,
+  mobileTouchMode,
+  terminal,
+}: {
+  inputEnabled: boolean;
+  mobileTouchMode: boolean;
+  terminal: MobileTerminalCursorTarget;
+}): boolean {
+  if (!mobileTouchMode || inputEnabled) {
+    return false;
+  }
+
+  // xterm does not render a cursor until it has been focused at least once.
+  // Mobile monitor mode forwards input outside xterm, so initialize it and
+  // immediately return to the inactive cursor without enabling direct stdin.
+  terminal.focus();
+  terminal.blur();
+  return true;
+}
+
+export function getMobileTerminalCursorOptions(mobileTouchMode: boolean): {
+  cursorInactiveStyle: "outline" | "underline";
+  cursorStyle: "block" | "underline";
+} {
+  return mobileTouchMode
+    ? {
+        cursorInactiveStyle: "underline",
+        cursorStyle: "underline",
+      }
+    : {
+        cursorInactiveStyle: "outline",
+        cursorStyle: "block",
+      };
+}
+
 export function clampMobileTerminalFontSize(fontSize: number): number {
   if (!Number.isFinite(fontSize)) {
     return MOBILE_TERMINAL_DEFAULT_FONT_SIZE;
