@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type { AgentTranscriptResponse } from "@agent-orchestrator/shared";
 
@@ -23,6 +23,15 @@ interface AgentTranscriptDialogProps {
   terminalFontSize?: number;
 }
 
+export const AGENT_TRANSCRIPT_BATCH_SIZE = 30;
+
+export function getNextTranscriptVisibleCount(
+  currentCount: number,
+  totalCount: number,
+): number {
+  return Math.min(totalCount, currentCount + AGENT_TRANSCRIPT_BATCH_SIZE);
+}
+
 function formatTimestamp(timestamp: string): string {
   if (!timestamp) {
     return "";
@@ -35,6 +44,21 @@ export function AgentTranscriptEntries({
   terminalFontSize = DEFAULT_TERMINAL_FONT_SIZE,
   transcript,
 }: AgentTranscriptEntriesProps) {
+  const [visibleCount, setVisibleCount] = useState(AGENT_TRANSCRIPT_BATCH_SIZE);
+  const orderedEntries = useMemo(
+    () =>
+      [...transcript.entries]
+        .filter(
+          (entry) => entry.title !== "exec 调用" && entry.title !== "exec 输出",
+        )
+        .reverse(),
+    [transcript.entries],
+  );
+
+  useEffect(() => {
+    setVisibleCount(AGENT_TRANSCRIPT_BATCH_SIZE);
+  }, [transcript]);
+
   if (!transcript.available) {
     return (
       <div className="agent-transcript-empty">
@@ -43,11 +67,8 @@ export function AgentTranscriptEntries({
     );
   }
 
-  const visibleEntries = [...transcript.entries]
-    .filter(
-      (entry) => entry.title !== "exec 调用" && entry.title !== "exec 输出",
-    )
-    .reverse();
+  const renderedEntries = orderedEntries.slice(0, visibleCount);
+  const hasMoreEntries = renderedEntries.length < orderedEntries.length;
 
   return (
     <>
@@ -67,12 +88,12 @@ export function AgentTranscriptEntries({
           } as CSSProperties
         }
       >
-        {visibleEntries.length === 0 ? (
+        {orderedEntries.length === 0 ? (
           <div className="agent-transcript-empty">
             记录中还没有可展示的消息。
           </div>
         ) : (
-          visibleEntries.map((entry) => {
+          renderedEntries.map((entry) => {
             const content =
               entry.kind === "tool" ? (
                 <pre
@@ -120,6 +141,26 @@ export function AgentTranscriptEntries({
             );
           })
         )}
+        {hasMoreEntries ? (
+          <div className="agent-transcript-load-more">
+            <span>
+              已显示 {renderedEntries.length} / {orderedEntries.length} 条
+            </span>
+            <button
+              onClick={() => {
+                setVisibleCount((currentCount) =>
+                  getNextTranscriptVisibleCount(
+                    currentCount,
+                    orderedEntries.length,
+                  ),
+                );
+              }}
+              type="button"
+            >
+              继续加载
+            </button>
+          </div>
+        ) : null}
       </div>
     </>
   );

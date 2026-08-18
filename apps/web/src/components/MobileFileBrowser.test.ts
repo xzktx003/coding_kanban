@@ -100,7 +100,7 @@ describe("MobileFileBrowser", () => {
     );
     assert.match(
       css,
-      /\.mobile-file-preview\s*{[^}]*grid-template-areas:[^;]+"mode"[^;]+"pagination"[^;]+;[^}]*grid-template-rows:[^;]*minmax\(0,\s*1fr\);[^}]*height:\s*100%;/s,
+      /\.mobile-file-preview\s*{[^}]*grid-template-rows:[^;]*minmax\(0,\s*1fr\);[^}]*height:\s*100%;/s,
     );
     assert.match(
       css,
@@ -112,7 +112,7 @@ describe("MobileFileBrowser", () => {
     );
     assert.match(
       css,
-      /\.mobile-file-preview-mode\s*{[^}]*grid-area:\s*mode;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s,
+      /\.mobile-file-preview-mode\s*{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/s,
     );
     assert.match(
       css,
@@ -144,5 +144,33 @@ describe("MobileFileBrowser", () => {
 
     const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
     assert.match(css, /\.mobile-file-preview-pagination\s*{/);
+  });
+
+  it("collapses secondary file controls by default so the document keeps the available height", () => {
+    const source = readFileSync(
+      new URL("./MobileFileBrowser.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.match(
+      source,
+      /\[previewControlsExpanded, setPreviewControlsExpanded\] =\s*useState\(false\)/,
+    );
+    assert.match(source, /aria-expanded={previewControlsExpanded}/);
+    assert.match(source, /aria-controls="mobile-file-preview-controls"/);
+    assert.match(source, /previewControlsExpanded && \(/);
+
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+    assert.match(
+      css,
+      /\.mobile-file-preview\s*{[^}]*grid-template-areas:[^;]+"header"[^;]+"content"[^;]*;[^}]*grid-template-rows:\s*auto minmax\(0,\s*1fr\);/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-file-preview--controls-expanded\s*{[^}]*grid-template-areas:[^;]+"controls"[^;]+;[^}]*grid-template-rows:\s*auto auto minmax\(0,\s*1fr\);/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-file-preview-controls\s*{[^}]*grid-area:\s*controls;[^}]*max-height:[^;]+;[^}]*overflow-y:\s*auto;/s,
+    );
   });
 });

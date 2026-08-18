@@ -5,7 +5,10 @@ import type { AgentTranscriptResponse } from "@agent-orchestrator/shared";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { AgentTranscriptEntries } from "./AgentTranscriptDialog.js";
+import {
+  AgentTranscriptEntries,
+  getNextTranscriptVisibleCount,
+} from "./AgentTranscriptDialog.js";
 
 test("transcript entries hide exec calls and outputs while showing visible records newest first", () => {
   const middle = Array.from(
@@ -104,4 +107,35 @@ test("transcript entries hide exec calls and outputs while showing visible recor
     /data-transcript-rendering="text"[^>]*>visible tool output<\/pre>/,
   );
   assert.match(markup, /style="--agent-transcript-font-size:18px"/);
+});
+
+test("transcript entries initially stop after one batch and offer manual continuation", () => {
+  const transcript: AgentTranscriptResponse = {
+    available: true,
+    agentKind: "codex",
+    sessionId: "codex-long",
+    matchedBy: "session-id",
+    updatedAt: "2026-08-18T01:00:00.000Z",
+    entries: Array.from({ length: 65 }, (_, index) => ({
+      id: `message-${index + 1}`,
+      timestamp: `2026-08-18T00:00:${String(index).padStart(2, "0")}.000Z`,
+      kind: "assistant" as const,
+      title: "Codex",
+      text: `message body ${index + 1}`,
+      collapsedByDefault: false,
+    })),
+  };
+
+  const markup = renderToStaticMarkup(
+    createElement(AgentTranscriptEntries, { transcript }),
+  );
+
+  assert.match(markup, /data-transcript-entry-id="message-65"/);
+  assert.match(markup, /data-transcript-entry-id="message-36"/);
+  assert.doesNotMatch(markup, /data-transcript-entry-id="message-35"/);
+  assert.equal((markup.match(/data-transcript-entry-id=/g) ?? []).length, 30);
+  assert.match(markup, /已显示 30 \/ 65 条/);
+  assert.match(markup, />继续加载</);
+  assert.equal(getNextTranscriptVisibleCount(30, 65), 60);
+  assert.equal(getNextTranscriptVisibleCount(60, 65), 65);
 });

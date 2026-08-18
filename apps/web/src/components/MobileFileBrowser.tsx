@@ -133,6 +133,7 @@ export function MobileFileBrowser({
   );
   const [markdownViewMode, setMarkdownViewMode] =
     useState<MobileMarkdownViewMode>("rendered");
+  const [previewControlsExpanded, setPreviewControlsExpanded] = useState(false);
   const previewRequestIdRef = useRef(0);
   const previewContentRef = useRef<HTMLDivElement>(null);
 
@@ -175,6 +176,7 @@ export function MobileFileBrowser({
 
   const openFile = (entry: FileEntry) => {
     setMarkdownViewMode("rendered");
+    setPreviewControlsExpanded(false);
     return loadPreviewWindow(entry);
   };
 
@@ -191,7 +193,14 @@ export function MobileFileBrowser({
       ? resolveMobileMarkdownDisplayKind(previewKind, markdownViewMode)
       : null;
     return (
-      <section aria-label="手机文件预览" className="mobile-file-preview">
+      <section
+        aria-label="手机文件预览"
+        className={`mobile-file-preview${
+          previewControlsExpanded
+            ? " mobile-file-preview--controls-expanded"
+            : ""
+        }`}
+      >
         <header className="mobile-file-preview-header">
           <button
             className="mobile-file-browser-control"
@@ -208,76 +217,99 @@ export function MobileFileBrowser({
             <span>{formatFileSize(entry.size)}</span>
           </div>
           <button
+            aria-controls="mobile-file-preview-controls"
+            aria-expanded={previewControlsExpanded}
+            aria-label={
+              previewControlsExpanded ? "收起文件选项" : "展开文件选项"
+            }
             className="mobile-file-browser-control"
-            onClick={() => void copyTextToClipboard(entry.path)}
+            onClick={() => setPreviewControlsExpanded((expanded) => !expanded)}
             type="button"
           >
-            复制路径
+            {previewControlsExpanded ? "收起" : "选项"}
           </button>
         </header>
-        <code className="mobile-file-preview-path">{entry.path}</code>
-        {previewKind === "markdown" && (
+        {previewControlsExpanded && (
           <div
-            aria-label="Markdown 查看方式"
-            className="mobile-file-preview-mode"
-            role="group"
+            aria-label="文件预览选项"
+            className="mobile-file-preview-controls"
+            id="mobile-file-preview-controls"
           >
-            <button
-              aria-pressed={markdownViewMode === "rendered"}
-              onClick={() => setMarkdownViewMode("rendered")}
-              type="button"
-            >
-              渲染
-            </button>
-            <button
-              aria-pressed={markdownViewMode === "source"}
-              onClick={() => setMarkdownViewMode("source")}
-              type="button"
-            >
-              源码
-            </button>
-          </div>
-        )}
-        {preview &&
-          preview.encoding === "utf8" &&
-          (preview.previousOffset !== null || preview.nextOffset !== null) && (
-            <nav
-              aria-label="文件分段导航"
-              className="mobile-file-preview-pagination"
-            >
-              <button
-                disabled={previewLoading || preview.previousOffset === null}
-                onClick={() =>
-                  void loadPreviewWindow(
-                    entry,
-                    preview.previousOffset ?? preview.offset,
-                  )
-                }
-                type="button"
+            {previewKind === "markdown" && (
+              <div
+                aria-label="Markdown 查看方式"
+                className="mobile-file-preview-mode"
+                role="group"
               >
-                上一段
-              </button>
-              <div>
-                <strong>{formatMobileFilePreviewRange(preview)}</strong>
-                <span>仅保留当前段，切换后释放旧段</span>
+                <button
+                  aria-pressed={markdownViewMode === "rendered"}
+                  onClick={() => setMarkdownViewMode("rendered")}
+                  type="button"
+                >
+                  渲染
+                </button>
+                <button
+                  aria-pressed={markdownViewMode === "source"}
+                  onClick={() => setMarkdownViewMode("source")}
+                  type="button"
+                >
+                  源码
+                </button>
               </div>
+            )}
+            {preview &&
+              preview.encoding === "utf8" &&
+              (preview.previousOffset !== null ||
+                preview.nextOffset !== null) && (
+                <nav
+                  aria-label="文件分段导航"
+                  className="mobile-file-preview-pagination"
+                >
+                  <button
+                    disabled={previewLoading || preview.previousOffset === null}
+                    onClick={() =>
+                      void loadPreviewWindow(
+                        entry,
+                        preview.previousOffset ?? preview.offset,
+                      )
+                    }
+                    type="button"
+                  >
+                    上一段
+                  </button>
+                  <div>
+                    <strong>{formatMobileFilePreviewRange(preview)}</strong>
+                    <span>仅保留当前段，切换后释放旧段</span>
+                  </div>
+                  <button
+                    disabled={previewLoading || preview.nextOffset === null}
+                    onClick={() =>
+                      void loadPreviewWindow(
+                        entry,
+                        preview.nextOffset ?? preview.offset,
+                      )
+                    }
+                    type="button"
+                  >
+                    下一段
+                  </button>
+                </nav>
+              )}
+            {preview?.truncated && preview.encoding === "binary" && (
+              <div className="mobile-file-preview-truncated">
+                二进制文件较大，预览已按资源上限截断。
+              </div>
+            )}
+            <div className="mobile-file-preview-path-row">
+              <code className="mobile-file-preview-path">{entry.path}</code>
               <button
-                disabled={previewLoading || preview.nextOffset === null}
-                onClick={() =>
-                  void loadPreviewWindow(
-                    entry,
-                    preview.nextOffset ?? preview.offset,
-                  )
-                }
+                className="mobile-file-browser-control"
+                onClick={() => void copyTextToClipboard(entry.path)}
                 type="button"
               >
-                下一段
+                复制路径
               </button>
-            </nav>
-          )}
-        {preview?.truncated && preview.encoding === "binary" && (
-          <div className="mobile-file-preview-truncated">
-            二进制文件较大，预览已按资源上限截断。
+            </div>
           </div>
         )}
         <div className="mobile-file-preview-content" ref={previewContentRef}>

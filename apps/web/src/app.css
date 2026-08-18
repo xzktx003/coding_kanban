@@ -3969,13 +3969,18 @@ input {
 .mobile-file-preview {
   grid-template-areas:
     "header"
-    "path"
-    "mode"
-    "pagination"
     "content";
-  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
+}
+
+.mobile-file-preview--controls-expanded {
+  grid-template-areas:
+    "header"
+    "controls"
+    "content";
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .mobile-file-preview-header {
@@ -4181,14 +4186,35 @@ input {
 }
 
 .mobile-file-preview-path {
-  grid-area: path;
   padding: 8px 10px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
 }
 
+.mobile-file-preview-controls {
+  grid-area: controls;
+  display: grid;
+  max-height: min(44vh, 240px);
+  gap: 8px;
+  min-height: 0;
+  padding: 2px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.mobile-file-preview-path-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-file-preview-path-row .mobile-file-preview-path {
+  min-width: 0;
+}
+
 .mobile-file-preview-mode {
-  grid-area: mode;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
@@ -4286,7 +4312,6 @@ input {
 }
 
 .mobile-file-preview-truncated {
-  grid-area: pagination;
   padding: 9px 11px;
   border-radius: 9px;
   background: rgba(251, 191, 36, 0.1);
@@ -4296,7 +4321,6 @@ input {
 }
 
 .mobile-file-preview-pagination {
-  grid-area: pagination;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -7452,6 +7476,7 @@ input {
 }
 
 .agent-transcript-actions button,
+.agent-transcript-load-more button,
 .focus-transcript-btn {
   color: #f4f1ea;
   background: rgba(255, 143, 31, 0.12);
@@ -7487,6 +7512,27 @@ input {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.agent-transcript-load-more {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 4px 0 10px;
+  color: #9ba8b6;
+  font-size: 12px;
+}
+
+.agent-transcript-load-more button {
+  min-width: 128px;
+  min-height: 44px;
+  padding: 8px 18px;
+  font: inherit;
+}
+
+.agent-transcript-load-more button:focus-visible {
+  outline: 2px solid #ff9f43;
+  outline-offset: 2px;
 }
 
 .agent-transcript-entry {
