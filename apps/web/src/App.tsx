@@ -336,6 +336,10 @@ export default function App() {
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<
     string | null
   >(initialFocusViewState.focusedId);
+  const focusRequestRef = useRef<{
+    sessionId: string;
+    request: Promise<ListAgentSessionsResponse>;
+  } | null>(null);
   const [newSessionHost, setNewSessionHost] = useState<SelectedHost | null>(
     null,
   );
@@ -812,9 +816,26 @@ export default function App() {
   );
 
   const acknowledgeFocusedSession = useCallback((id: string) => {
-    focusAgentSession({ agentSessionId: id })
-      .then(setSnapshot)
-      .catch(() => {});
+    if (focusRequestRef.current?.sessionId === id) {
+      return;
+    }
+
+    const request = focusAgentSession({ agentSessionId: id });
+    focusRequestRef.current = { sessionId: id, request };
+    request
+      .then((nextSnapshot) => {
+        // A slower response from an earlier session must not overwrite a
+        // newer focus selection.
+        if (focusRequestRef.current?.request === request) {
+          setSnapshot(nextSnapshot);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (focusRequestRef.current?.request === request) {
+          focusRequestRef.current = null;
+        }
+      });
   }, []);
 
   function handleFocusSession(id: string) {

@@ -1500,6 +1500,57 @@ test("focus sidebar double-click replaces the active monitor pane only once", as
   );
 });
 
+test("focus sidebar single click switches the main pane without a debounce delay", async ({
+  page,
+}) => {
+  const focusRequests: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/agent-sessions/focus")) {
+      focusRequests.push(request.postData() ?? "");
+    }
+  });
+
+  await mockSessions(page, [
+    makeSession({
+      id: "alpha-session",
+      displayName: "Alpha Session",
+      outputPreview: "alpha ready",
+    }),
+    makeSession({
+      id: "beta-session",
+      displayName: "Beta Session",
+      outputPreview: "beta ready",
+    }),
+  ]);
+
+  await page.goto("/");
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: "Alpha Session" }),
+    })
+    .dblclick();
+  await expect(page.locator(".focus-main-name")).toContainText("Alpha Session");
+  focusRequests.length = 0;
+
+  const betaCard = page.locator(".focus-sidebar-card", {
+    hasText: "Beta Session",
+  });
+  const startedAt = await page.evaluate(() => performance.now());
+  await betaCard.click();
+  await expect(betaCard).toHaveAttribute(
+    "data-active-monitor-session",
+    "true",
+  );
+  await expect(page.locator(".focus-main-name")).toContainText("Beta Session");
+  await expect.poll(() => focusRequests.length).toBe(1);
+  const elapsed = await page.evaluate(
+    (start) => performance.now() - start,
+    startedAt,
+  );
+
+  expect(elapsed).toBeLessThan(300);
+});
+
 test("focus header follows the active monitor terminal session", async ({
   page,
 }) => {

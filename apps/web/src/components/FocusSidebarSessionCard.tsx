@@ -38,11 +38,6 @@ const stateLabels: Record<string, string> = {
   exited: "已退出",
 };
 
-const pendingSidebarClickTimers = new Map<
-  string,
-  ReturnType<typeof setTimeout>
->();
-
 export function FocusSidebarSessionCard({
   session,
   monitorIndex,
@@ -61,28 +56,14 @@ export function FocusSidebarSessionCard({
 }: FocusSidebarSessionCardProps) {
   const isTmuxManaged = Boolean(session.transportRef?.tmuxSession);
 
-  const cancelPendingSingleClick = () => {
-    const clickTimer = pendingSidebarClickTimers.get(session.id);
-    if (!clickTimer) {
+  const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    // Switch on the first click. A double-click emits a second click with
+    // detail=2; ignore that duplicate instead of delaying every single click.
+    if (event.detail > 1) {
       return;
     }
 
-    clearTimeout(clickTimer);
-    pendingSidebarClickTimers.delete(session.id);
-  };
-
-  const switchFocusOnce = () => {
-    cancelPendingSingleClick();
     onSwitchFocus(session.id);
-  };
-
-  const handleClick = () => {
-    cancelPendingSingleClick();
-    const clickTimer = setTimeout(() => {
-      pendingSidebarClickTimers.delete(session.id);
-      onSwitchFocus(session.id);
-    }, 220);
-    pendingSidebarClickTimers.set(session.id, clickTimer);
   };
 
   return (
@@ -98,7 +79,6 @@ export function FocusSidebarSessionCard({
       onDragEnd={onDragEnd}
       onDragStart={(event) => onDragStart?.(session.id, event)}
       onClick={handleClick}
-      onDoubleClick={switchFocusOnce}
     >
       <div className="focus-sidebar-card-header">
         <div className="focus-sidebar-card-identity">
