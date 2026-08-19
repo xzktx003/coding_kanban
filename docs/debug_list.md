@@ -576,3 +576,27 @@
 - **修复**: xterm helper textarea 明确参与窗格激活，普通表单控件继续阻止误切换；完整记录只保存开关状态，标题栏按钮和弹窗会话持续从当前活动窗格派生，并以会话 ID 重建弹窗，避免旧请求内容覆盖新会话。
 - **测试**: 红绿灯测试覆盖 helper textarea 可激活窗格而普通 textarea 不会，并在四屏持久化布局中断言“完整记录”入口绑定第二个活动窗格的名称与会话 ID。
 - **文件**: `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/components/AgentFocusView.test.ts`, `apps/web/src/lib/terminal-focus.ts`, `apps/web/src/lib/terminal-focus.test.ts`
+
+### 全屏 Diff 的退出按钮被顶栏遮挡
+
+- **现象**: 在变更面板中全屏查看文件后，应用顶栏仍压在全屏 Diff 上方，导致“退出全屏”按钮被遮挡或无法点击。
+- **根因**: 全屏 Diff 虽使用 fixed 定位，但仍挂载在主布局的低层叠上下文内；子元素的 z-index 无法越过作为兄弟节点的高层级顶栏。
+- **修复**: 全屏 Diff 通过 React Portal 直接挂载到 `document.body` 的应用模态层，补充 modal 语义、Escape、关闭按钮自动聚焦与焦点归还；独立定义 Portal 后的按钮样式，并为手机安全区和双列操作区预留空间。
+- **测试**: 组件红绿灯测试断言应用模态层、`aria-modal`、明确的退出按钮和逐改动块还原入口；Web 测试与生产构建覆盖 Portal 服务端回退。
+- **文件**: `apps/web/src/components/ChangesPanel.tsx`, `apps/web/src/components/ChangesPanel.test.ts`, `apps/web/src/app.css`
+
+### 变更还原错误地作用于整个文件
+
+- **现象**: 一个文件包含多处独立修改时，还原入口只能丢弃整个文件的全部改动，无法像 VS Code 一样只撤销鼠标所在的一个 Diff 改动块。
+- **根因**: 首版写操作按文件路径调用 `git restore`，数据协议和界面都没有表达 `@@` hunk 的身份，也就无法保留同文件的其他改动。
+- **修复**: Diff 渲染按 `@@` 分组，在每个改动块悬停或聚焦时提供“还原此改动”；客户端只传路径、块序号和块头，服务端重新读取实时 diff、校验块身份并从可信内容构造反向补丁，同时处理该块与暂存区重叠的内容。触屏设备始终显示按钮；过期 diff、远端会话和任务历史视图拒绝写操作。
+- **测试**: 服务红绿灯测试覆盖同文件两块只还原目标块、完全暂存、暂存与未暂存混合、新增/untracked、重命名和过期块；组件测试覆盖每个改动块独立入口、确认文案及全屏刷新。
+- **文件**: `apps/server/src/services/git-changes-service.ts`, `apps/server/src/services/git-changes-service.test.ts`, `apps/server/src/routes/agent-sessions.ts`, `apps/server/src/routes/agent-sessions.git-changes.test.ts`, `apps/web/src/components/ChangesPanel.tsx`, `apps/web/src/components/ChangesPanel.test.ts`, `apps/web/src/app.css`
+
+### 同一工作目录的多个 tmux 显示相同完整记录
+
+- **现象**: 同一个目录被两个 tmux 分别打开并各自运行 Codex 时，切换两个终端查看“完整记录”会得到同一份对话，而不是各自 Codex 的历史。
+- **根因**: 新建或接入 tmux 卡片时通常没有已知的 Codex session ID，记录服务只能按工作目录选择最近更新的 JSONL；两个 tmux 的目录相同，因而都命中同一个最近记录。
+- **修复**: 本地 tmux 在读取记录前先解析目标 pane PID，只读遍历其进程树和打开的 `~/.codex/sessions/*.jsonl`，筛选工作目录一致的顶层 Codex session 并排除 subagent；精确 ID 会回写卡片绑定，同一 tmux 内重启 Codex 时可更新。解析失败时保留既有 ID/目录兜底，不影响非 tmux 和远端边界。
+- **测试**: 红绿灯测试覆盖同目录双 tmux 分别解析到不同 session、同一进程持有更新的子代理 JSONL 时仍选择父会话，以及两个完整记录 HTTP 请求分别传入并保存各自 ID。现场用 `qwen3_8-27b` 与 `vllm-merak` 两个同目录 tmux 只读验证得到不同的顶层 session ID。
+- **文件**: `apps/server/src/services/codex-session-locator.ts`, `apps/server/src/services/codex-session-locator.test.ts`, `apps/server/src/routes/agent-sessions.ts`, `apps/server/src/routes/agent-sessions.transcript.test.ts`

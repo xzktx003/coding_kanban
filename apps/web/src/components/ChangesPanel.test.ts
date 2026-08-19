@@ -9,6 +9,7 @@ import {
   ChangesPanel,
   CompactChangesFilePicker,
   FullscreenDiffView,
+  getRevertHunkConfirmation,
 } from "./ChangesPanel.js";
 
 const session: AgentSessionRecord = {
@@ -72,20 +73,57 @@ test("file changes can render in a dedicated fullscreen diff view", () => {
     status: "modified",
     addedLines: 1,
     deletedLines: 1,
-    patch: "@@ -1,1 +1,1 @@\n-old\n+new",
+    patch:
+      "diff --git a/apps/web/src/App.tsx b/apps/web/src/App.tsx\n--- a/apps/web/src/App.tsx\n+++ b/apps/web/src/App.tsx\n@@ -1,1 +1,1 @@\n-old\n+new\n@@ -20,1 +20,1 @@\n-before\n+after",
     binary: false,
   };
   const html = renderToStaticMarkup(
     createElement(FullscreenDiffView, {
       file,
       onClose: () => {},
+      onRevertHunk: () => {},
       onReference: () => {},
     }),
   );
 
   assert.match(html, /aria-label="全屏文件变更"/);
+  assert.match(html, /aria-modal="true"/);
+  assert.match(html, /data-layer="app-modal"/);
   assert.match(html, /App\.tsx/);
+  assert.match(html, /还原此改动/);
+  assert.equal((html.match(/class="diff-hunk-revert"/g) ?? []).length, 2);
+  assert.doesNotMatch(html, /还原此文件/);
+  assert.match(html, /class="fullscreen-diff-close"/);
   assert.match(html, /退出全屏/);
   assert.match(html, /diff-row--deleted/);
   assert.match(html, /diff-row--added/);
+});
+
+test("hunk revert confirmation distinguishes new-file content from tracked edits", () => {
+  const tracked: DiffFileChange = {
+    path: "tracked.txt",
+    status: "modified",
+    addedLines: 1,
+    deletedLines: 1,
+    patch: "",
+    binary: false,
+  };
+  const untracked: DiffFileChange = {
+    ...tracked,
+    path: "new.txt",
+    status: "untracked",
+  };
+
+  assert.match(
+    getRevertHunkConfirmation(tracked, "@@ -1 +1 @@"),
+    /这一处改动/,
+  );
+  assert.match(
+    getRevertHunkConfirmation(tracked, "@@ -1 +1 @@"),
+    /无法撤销/,
+  );
+  assert.match(
+    getRevertHunkConfirmation(untracked, "@@ -0,0 +1 @@"),
+    /文件可能会从磁盘删除/,
+  );
 });

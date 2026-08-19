@@ -67,6 +67,87 @@ test("GET transcript resolves a local Codex record from the registered session",
   await app.close();
 });
 
+test("GET transcript keeps two tmux panes in the same directory on distinct Codex sessions", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const first = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "codex",
+    displayName: "first codex",
+    workingDirectory: "/workspace/shared",
+    connectionState: "online",
+    interactionState: "running",
+    transportRef: { tmuxSession: "tmux-a" },
+    agentSessionId: "stale-codex-session",
+  });
+  const second = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "codex",
+    displayName: "second codex",
+    workingDirectory: "/workspace/shared",
+    connectionState: "online",
+    interactionState: "running",
+    transportRef: { tmuxSession: "tmux-b" },
+  });
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {} as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    codexSessionLocator: {
+      async resolve({ tmuxTarget }) {
+        return tmuxTarget === "tmux-a"
+          ? "codex-session-a"
+          : "codex-session-b";
+      },
+    },
+    codexTranscriptService: {
+      read(input) {
+        return {
+          available: true,
+          agentKind: "codex",
+          sessionId: input.sessionId ?? null,
+          matchedBy: "session-id",
+          updatedAt: "2026-08-19T00:00:00.000Z",
+          entries: [],
+        };
+      },
+    },
+  });
+
+  const [firstResponse, secondResponse] = await Promise.all([
+    app.inject({
+      method: "GET",
+      url: `/api/agent-sessions/${first.id}/transcript`,
+    }),
+    app.inject({
+      method: "GET",
+      url: `/api/agent-sessions/${second.id}/transcript`,
+    }),
+  ]);
+
+  assert.equal(
+    (firstResponse.json() as AgentTranscriptResponse).sessionId,
+    "codex-session-a",
+  );
+  assert.equal(
+    (secondResponse.json() as AgentTranscriptResponse).sessionId,
+    "codex-session-b",
+  );
+  assert.equal(registry.get(first.id).agentSessionId, "codex-session-a");
+  assert.equal(registry.get(second.id).agentSessionId, "codex-session-b");
+  await app.close();
+});
+
 test("GET transcript does not read local Codex files for remote sessions", async () => {
   const app = Fastify();
   const registry = new AgentSessionRegistry();

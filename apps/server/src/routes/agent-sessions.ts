@@ -18,6 +18,8 @@ import type {
   DiscoverTmuxInput,
   AddDiscoveredTmuxInput,
   CheckoutDiffResponse,
+  RevertGitHunkInput,
+  RevertGitHunkResponse,
 } from "@agent-orchestrator/shared";
 import { shellQuote, formatWorkingDirectory } from "@agent-orchestrator/shared";
 
@@ -25,8 +27,12 @@ import { scanAgentDirectory } from "../services/agent-scanner.js";
 import { AgentSessionRegistry } from "../services/agent-session-registry.js";
 import { CodexTranscriptService } from "../services/codex-transcript-service.js";
 import { summarizeCodexTranscript } from "../services/codex-transcript-service.js";
+import { CodexSessionLocator } from "../services/codex-session-locator.js";
 import { CodexChangeService } from "../services/codex-change-service.js";
-import { GitChangesService } from "../services/git-changes-service.js";
+import {
+  GitHunkRevertError,
+  GitChangesService,
+} from "../services/git-changes-service.js";
 import { LocalProcessRuntimeManager } from "../services/local-process-runtime-manager.js";
 import { GitProjectSummaryService } from "../services/git-project-summary-service.js";
 import { LocalTmuxAdapter } from "../services/local-tmux-adapter.js";
@@ -145,9 +151,10 @@ interface AgentSessionRoutesOptions {
   remoteLaunchPreflight: RemoteLaunchPreflightLike;
   vsCodeWebManager: VsCodeWebManager;
   codexTranscriptService?: Pick<CodexTranscriptService, "read">;
+  codexSessionLocator?: Pick<CodexSessionLocator, "resolve">;
   gitProjectSummaryService?: Pick<GitProjectSummaryService, "read">;
   codexChangeService?: Pick<CodexChangeService, "read">;
-  gitChangesService?: Pick<GitChangesService, "read">;
+  gitChangesService?: Pick<GitChangesService, "read" | "revertHunk">;
 }
 
 export interface ReconnectAgentSessionDependencies {
@@ -258,6 +265,7 @@ export async function registerAgentSessionRoutes(
     remoteLaunchPreflight,
     vsCodeWebManager,
     codexTranscriptService = new CodexTranscriptService(),
+    codexSessionLocator = new CodexSessionLocator(),
     gitProjectSummaryService = new GitProjectSummaryService(),
     codexChangeService = new CodexChangeService(),
     gitChangesService = new GitChangesService(),
@@ -272,6 +280,27 @@ export async function registerAgentSessionRoutes(
   >();
   const gitSummaryCache = new Map<string, TimedCacheEntry<AgentGitSummary>>();
   const gitSummaryInFlight = new Map<string, Promise<AgentGitSummary>>();
+
+  const resolveCodexSessionId = async (
+    agentSession: AgentSessionRecord,
+  ): Promise<string | undefined> => {
+    const tmuxTarget =
+      agentSession.transportRef?.tmuxPane ??
+      agentSession.transportRef?.tmuxSession;
+    if (!tmuxTarget) return agentSession.agentSessionId;
+
+    const activeSessionId = await codexSessionLocator.resolve({
+      tmuxTarget,
+      workingDirectory: agentSession.workingDirectory,
+    });
+    if (!activeSessionId) return agentSession.agentSessionId;
+    if (activeSessionId !== agentSession.agentSessionId) {
+      registry.updateSession(agentSession.id, {
+        agentSessionId: activeSessionId,
+      });
+    }
+    return activeSessionId;
+  };
 
   fastify.get("/api/health", async () => ({ status: "ok" }));
 
@@ -341,6 +370,52 @@ export async function registerAgentSessionRoutes(
     },
   );
 
+  fastify.post<{
+    Params: { id: string };
+    Body: RevertGitHunkInput;
+  }>(
+    "/api/agent-sessions/:id/git-changes/revert-hunk",
+    async (request, reply): Promise<RevertGitHunkResponse | { error: string }> => {
+      const agentSession = registry.get(request.params.id);
+      const isRemote =
+        Boolean(agentSession.sshTarget) ||
+        Boolean(agentSession.hostId && agentSession.hostId !== "local");
+      if (isRemote) {
+        reply.code(400);
+        return { error: "远端 Git 改动块暂不支持还原" };
+      }
+
+      const { path, hunkIndex, hunkHeader } = request.body ?? {};
+      if (typeof path !== "string" || !path.trim()) {
+        reply.code(400);
+        return { error: "缺少要还原的文件路径" };
+      }
+      if (!Number.isInteger(hunkIndex) || hunkIndex < 0) {
+        reply.code(400);
+        return { error: "改动块序号无效" };
+      }
+      if (typeof hunkHeader !== "string" || !hunkHeader.trim()) {
+        reply.code(400);
+        return { error: "缺少改动块标识" };
+      }
+
+      try {
+        return await gitChangesService.revertHunk(
+          agentSession.workingDirectory,
+          path,
+          hunkIndex,
+          hunkHeader,
+        );
+      } catch (error) {
+        if (error instanceof GitHunkRevertError) {
+          reply.code(error.statusCode);
+          return { error: error.message };
+        }
+        throw error;
+      }
+    },
+  );
+
   fastify.get<{ Params: { id: string } }>(
     "/api/agent-sessions/:id/git-changes",
     async (request): Promise<CheckoutDiffResponse> => {
@@ -388,8 +463,9 @@ export async function registerAgentSessionRoutes(
           unavailableReason: "本次任务变更首版仅支持本机 Codex 会话",
         };
       }
+      const sessionId = await resolveCodexSessionId(agentSession);
       return codexChangeService.read({
-        sessionId: agentSession.agentSessionId,
+        sessionId,
         workingDirectory: agentSession.workingDirectory,
       });
     },
@@ -406,14 +482,17 @@ export async function registerAgentSessionRoutes(
         return { available: false, updatedAt: null };
       }
 
-      const cached = taskSummaryCache.get(agentSession.id);
+      const sessionId = await resolveCodexSessionId(agentSession);
+      const summaryCacheKey = `${agentSession.id}:${sessionId ?? "directory"}`;
+
+      const cached = taskSummaryCache.get(summaryCacheKey);
       if (cached && cached.expiresAt > Date.now()) return cached.value;
-      const pending = taskSummaryInFlight.get(agentSession.id);
+      const pending = taskSummaryInFlight.get(summaryCacheKey);
       if (pending) return pending;
 
       const readPromise = (async () => {
         const transcript = codexTranscriptService.read({
-          sessionId: agentSession.agentSessionId,
+          sessionId,
           workingDirectory: agentSession.workingDirectory,
         });
         if (!transcript.available) {
@@ -442,16 +521,16 @@ export async function registerAgentSessionRoutes(
           updatedAt: summaryUpdatedAt,
         };
       })();
-      taskSummaryInFlight.set(agentSession.id, readPromise);
+      taskSummaryInFlight.set(summaryCacheKey, readPromise);
       try {
         const summary = await readPromise;
-        taskSummaryCache.set(agentSession.id, {
+        taskSummaryCache.set(summaryCacheKey, {
           value: summary,
           expiresAt: Date.now() + TASK_SUMMARY_CACHE_TTL_MS,
         });
         return summary;
       } finally {
-        taskSummaryInFlight.delete(agentSession.id);
+        taskSummaryInFlight.delete(summaryCacheKey);
       }
     },
   );
@@ -475,8 +554,9 @@ export async function registerAgentSessionRoutes(
         };
       }
 
+      const sessionId = await resolveCodexSessionId(agentSession);
       return codexTranscriptService.read({
-        sessionId: agentSession.agentSessionId,
+        sessionId,
         workingDirectory: agentSession.workingDirectory,
       });
     },

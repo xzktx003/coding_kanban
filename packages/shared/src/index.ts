@@ -229,6 +229,19 @@ export interface CheckoutDiffResponse {
   unavailableReason?: string;
 }
 
+export interface RevertGitHunkInput {
+  path: string;
+  hunkIndex: number;
+  hunkHeader: string;
+}
+
+export interface RevertGitHunkResponse {
+  ok: true;
+  path: string;
+  hunkIndex: number;
+  hunkHeader: string;
+}
+
 export interface AgentTaskDiffResponse {
   available: boolean;
   scope: "task";

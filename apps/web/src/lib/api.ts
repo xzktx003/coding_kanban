@@ -14,6 +14,8 @@ import type {
   DirectorySuggestionsResponse,
   DiscoverTmuxInput,
   DiscoverTmuxSessionsResponse,
+  RevertGitHunkInput,
+  RevertGitHunkResponse,
   FileOperationInput,
   FilePreviewInput,
   FilePreviewResponse,
@@ -128,6 +130,19 @@ export function getCheckoutDiff(
 ): Promise<CheckoutDiffResponse> {
   return request<CheckoutDiffResponse>(
     `/api/agent-sessions/${agentSessionId}/git-changes`,
+  );
+}
+
+export function revertCheckoutDiffHunk(
+  agentSessionId: string,
+  body: RevertGitHunkInput,
+): Promise<RevertGitHunkResponse> {
+  return request<RevertGitHunkResponse>(
+    `/api/agent-sessions/${agentSessionId}/git-changes/revert-hunk`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
   );
 }
 

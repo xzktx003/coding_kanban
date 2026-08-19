@@ -4,7 +4,7 @@
 
 ## 产品定位
 
-变更审查将“Codex 本次任务记录的文件操作”和“当前 checkout 的 Git 工作区状态”建模为两种独立数据产品。两者只共享 Diff 文件/行的视觉渲染，不共享归因、统计和缓存语义；任务记录无法可靠归因时显示不可用，禁止把当前 `git diff` 冒充 Codex 改动。变更入口默认展示更完整的当前工作区，其中包含 tracked 修改/新增/删除以及未被忽略的 untracked 新文件；手机端使用紧凑下拉框选择变更文件，避免完整文件列表挤占 Diff 空间；桌面和手机的文件内容均可进入独立全屏 Diff，并支持退出、复制路径和引用文件。
+变更审查将“Codex 本次任务记录的文件操作”和“当前 checkout 的 Git 工作区状态”建模为两种独立数据产品。两者只共享 Diff 文件/行的视觉渲染，不共享归因、统计和缓存语义；任务记录无法可靠归因时显示不可用，禁止把当前 `git diff` 冒充 Codex 改动。变更入口默认展示更完整的当前工作区，其中包含 tracked 修改/新增/删除以及未被忽略的 untracked 新文件；手机端使用紧凑下拉框选择变更文件，避免完整文件列表挤占 Diff 空间；桌面和手机的文件内容均可进入挂载于应用级 Portal 的独立全屏 Diff，避免被顶栏层叠上下文遮挡，并支持退出、复制路径和引用文件。当前工作区额外提供带不可撤销确认的逐改动块还原：客户端只提交相对路径、块序号和块头，后端从已注册本机会话的当前实时 diff 重新定位并构造反向补丁，过期块会被拒绝；目标块在 index/worktree 中的对应内容会一起撤销，同文件其他改动和已完成的重命名保持不变，新增或 untracked 文件的唯一改动块还原后可能删除文件。远端会话和“本次任务”历史视图不执行 Git 写操作。
 
 Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它把本地 PTY、SSH 远端 PTY、tmux 会话、扫描到的 Agent 工作目录、文件浏览器和 VS Code Web 放在同一个浏览器界面里，核心目标是：
 
@@ -128,7 +128,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 终端 WebSocket：`/ws/agent-sessions/:id/terminal`。
 - 每个仍挂载的实时 `TerminalView` 在终端 WebSocket 异常关闭后使用 250ms 起步、最大 5 秒的指数退避重建连接；连接在 3 秒内未完成握手也会主动关闭并进入同一恢复链。新连接完成 replay 后才重新开放 stdin，并重新同步 resize 和焦点。组件卸载会取消待执行的重连，避免隐藏终端或旧会话产生后台连接。
 - 手机终端继续由输入框和快捷键通过既有 stdin 接口驱动，不让 xterm 的隐藏输入框长期抢占软键盘焦点。由于 tmux replay 只有屏幕内容和最终坐标、不一定包含 xterm 用来初始化光标的控制序列，触控监控终端在 `open` 后通过一次同步 `focus → blur` 初始化 xterm 光标，再归还挂载前仍有效的页面焦点；活动与失焦光标都使用高对比度下划线，因此用户用方向键调整已粘贴文字时仍能看到 TUI 当前编辑位置。桌面终端保持块状活动光标和轮廓失焦光标。
-- 完整记录 HTTP 接口：`GET /api/agent-sessions/:id/transcript`。它只根据 registry 中可信的本机会话元数据访问 `~/.codex/sessions`，不接受客户端文件路径；优先按 `agentSessionId` 匹配，缺失时按 `workingDirectory` 匹配最近活动的 Codex JSONL。多屏聚焦页不再保存打开瞬间的会话对象，而只保存弹窗开关；弹窗会话始终由当前活动窗格派生并以会话 ID 作为 React key，活动窗格变化会卸载旧请求视图、重新读取新会话。xterm helper textarea 被视为终端内容而非外部编辑器，点击它同样更新 `activeSlotId`。解析层只公开 user/assistant message 及非 `exec` 工具调用和输出，忽略 developer/system/reasoning，并同时过滤 `exec` 调用与对应输出；前端按最新记录在前展示，用户与 Codex 消息复用按需加载、memo 化的安全 Markdown/GFM/KaTeX 渲染器，长历史首次只挂载最新 30 条，用户滚动到批次末尾并点击“继续加载”后才按每批 30 条追加较早记录，工具输出仍为等宽原文，两类记录正文共享全局终端字号。终端继续承担实时交互，完整记录弹窗承担不会被 ANSI/TUI 重绘覆盖的追加式历史浏览。
+- 完整记录 HTTP 接口：`GET /api/agent-sessions/:id/transcript`。它只根据 registry 中可信的本机会话元数据访问 `~/.codex/sessions`，不接受客户端文件路径。本地 tmux 会通过固定参数调用 `tmux display-message` 获取 pane PID，再只读遍历该 pane 的 `/proc` 子进程和已打开文件，从对应 Codex 进程持有的 JSONL 中选择工作目录一致、非 subagent 的顶层 session；解析成功后把精确 ID 回写会话绑定，Codex 在同一 tmux 内重启时也会重新识别。只有进程身份不可用时才使用既有 `agentSessionId`，仍缺失则按 `workingDirectory` 匹配最近活动记录。多屏聚焦页不再保存打开瞬间的会话对象，而只保存弹窗开关；弹窗会话始终由当前活动窗格派生并以会话 ID 作为 React key，活动窗格变化会卸载旧请求视图、重新读取新会话。xterm helper textarea 被视为终端内容而非外部编辑器，点击它同样更新 `activeSlotId`。解析层只公开 user/assistant message 及非 `exec` 工具调用和输出，忽略 developer/system/reasoning，并同时过滤 `exec` 调用与对应输出；前端按最新记录在前展示，用户与 Codex 消息复用按需加载、memo 化的安全 Markdown/GFM/KaTeX 渲染器，长历史首次只挂载最新 30 条，用户滚动到批次末尾并点击“继续加载”后才按每批 30 条追加较早记录，工具输出仍为等宽原文，两类记录正文共享全局终端字号。终端继续承担实时交互，完整记录弹窗承担不会被 ANSI/TUI 重绘覆盖的追加式历史浏览。
 - 终端字号由 `terminal-font-size` 本地存储项持久化，默认 14px；滑杆拖动过程中只更新控件显示，鼠标松开、键盘调整结束或失焦提交后才更新已有 `TerminalView` 的 `fontSize` 并触发 fit/resize，不需要重建 WebSocket。
 - 会先发送 scrollback replay，再发送 `replay-complete`。
 - PTY 重连沿用稳定 session ID，但每次生成独立 runtime handle；只有当前 handle 可以追加输出、删除运行时或把会话标记为退出。被替换 PTY 的迟到 data/exit 回调必须忽略，避免并发恢复或手动重连后新 PTY 被旧回调误下线。
