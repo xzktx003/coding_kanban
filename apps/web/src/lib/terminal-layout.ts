@@ -118,6 +118,36 @@ export function getTerminalMonitorSlotIds(
   );
 }
 
+export function resolveFocusedTerminalMonitorSlotId({
+  mode,
+  slots,
+  activeSlotId,
+  focusedSessionId,
+  closedSlotIds,
+}: {
+  mode: TerminalMonitorLayoutMode;
+  slots: TerminalMonitorSlot[];
+  activeSlotId: string;
+  focusedSessionId: string;
+  closedSlotIds?: ReadonlySet<string>;
+}): string {
+  const availableSlotIds = getTerminalMonitorSlotIds(mode);
+  const focusedSlot = slots.find(
+    (slot) =>
+      availableSlotIds.includes(slot.id) &&
+      !closedSlotIds?.has(slot.id) &&
+      slot.sessionId === focusedSessionId,
+  );
+
+  if (focusedSlot) {
+    return focusedSlot.id;
+  }
+
+  return availableSlotIds.includes(activeSlotId)
+    ? activeSlotId
+    : availableSlotIds[0]!;
+}
+
 export function normalizeTerminalMonitorSlots({
   mode,
   sessions,

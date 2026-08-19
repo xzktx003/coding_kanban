@@ -13,6 +13,7 @@ import {
   isTerminalMonitorLayoutMode,
   normalizeTerminalMonitorSlots,
   placeTerminalMonitorSlotSession,
+  resolveFocusedTerminalMonitorSlotId,
   restoreTerminalMonitorLayoutSnapshot,
   setTerminalMonitorSlotSession,
 } from "./terminal-layout.js";
@@ -29,6 +30,21 @@ const sessions = [
 ];
 
 describe("terminal monitor layout", () => {
+  it("activates the pane that already contains the newly focused session", () => {
+    assert.equal(
+      resolveFocusedTerminalMonitorSlotId({
+        mode: "dual",
+        slots: [
+          { id: "terminal-monitor-slot-1", sessionId: "agent-1" },
+          { id: "terminal-monitor-slot-2", sessionId: "agent-2" },
+        ],
+        activeSlotId: "terminal-monitor-slot-1",
+        focusedSessionId: "agent-2",
+      }),
+      "terminal-monitor-slot-2",
+    );
+  });
+
   it("caps monitor panes to the selected layout size", () => {
     assert.equal(getTerminalMonitorLayoutCapacity("single"), 1);
     assert.equal(getTerminalMonitorLayoutCapacity("dual"), 2);
