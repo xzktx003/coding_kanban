@@ -375,7 +375,10 @@ export async function registerAgentSessionRoutes(
     Body: RevertGitHunkInput;
   }>(
     "/api/agent-sessions/:id/git-changes/revert-hunk",
-    async (request, reply): Promise<RevertGitHunkResponse | { error: string }> => {
+    async (
+      request,
+      reply,
+    ): Promise<RevertGitHunkResponse | { error: string }> => {
       const agentSession = registry.get(request.params.id);
       const isRemote =
         Boolean(agentSession.sshTarget) ||
@@ -443,11 +446,17 @@ export async function registerAgentSessionRoutes(
     "/api/agent-sessions/:id/task-changes",
     async (request): Promise<AgentTaskDiffResponse> => {
       const agentSession = registry.get(request.params.id);
-      const isLocalCodex =
-        agentSession.agentKind === "codex" &&
+      const isLocalSession =
         !agentSession.sshTarget &&
         (!agentSession.hostId || agentSession.hostId === "local");
-      if (!isLocalCodex) {
+      const hasTmuxTarget = Boolean(
+        agentSession.transportRef?.tmuxPane ??
+        agentSession.transportRef?.tmuxSession,
+      );
+      if (
+        !isLocalSession ||
+        (agentSession.agentKind !== "codex" && !hasTmuxTarget)
+      ) {
         return {
           available: false,
           scope: "task",
@@ -460,7 +469,8 @@ export async function registerAgentSessionRoutes(
           deletedLines: 0,
           files: [],
           generatedAt: new Date().toISOString(),
-          unavailableReason: "本次任务变更首版仅支持本机 Codex 会话",
+          unavailableReason:
+            "本次任务变更仅支持本机 Codex 或运行 Codex 的本地 tmux 会话",
         };
       }
       const sessionId = await resolveCodexSessionId(agentSession);

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type {
+  AgentTaskDiffResponse,
   AgentTaskSummaryResponse,
   AgentTranscriptResponse,
 } from "@agent-orchestrator/shared";
@@ -105,9 +106,7 @@ test("GET transcript keeps two tmux panes in the same directory on distinct Code
     vsCodeWebManager: {} as never,
     codexSessionLocator: {
       async resolve({ tmuxTarget }) {
-        return tmuxTarget === "tmux-a"
-          ? "codex-session-a"
-          : "codex-session-b";
+        return tmuxTarget === "tmux-a" ? "codex-session-a" : "codex-session-b";
       },
     },
     codexTranscriptService: {
@@ -145,6 +144,70 @@ test("GET transcript keeps two tmux panes in the same directory on distinct Code
   );
   assert.equal(registry.get(first.id).agentSessionId, "codex-session-a");
   assert.equal(registry.get(second.id).agentSessionId, "codex-session-b");
+  await app.close();
+});
+
+test("GET task changes maps a local tmux node card to its active Codex diff", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "node",
+    displayName: "tmux codex",
+    workingDirectory: "/workspace/shared",
+    connectionState: "online",
+    interactionState: "running",
+    transportRef: { tmuxSession: "tmux-codex" },
+  });
+  let receivedInput: unknown;
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {} as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    codexSessionLocator: {
+      async resolve() {
+        return "active-codex-session";
+      },
+    },
+    codexChangeService: {
+      read(input) {
+        receivedInput = input;
+        return {
+          available: true,
+          scope: "task",
+          agentKind: "codex",
+          sessionId: input.sessionId ?? null,
+          matchedBy: "session-id",
+          confidence: "medium",
+          changedFiles: 1,
+          addedLines: 1,
+          deletedLines: 1,
+          files: [],
+          generatedAt: "2026-08-19T00:00:00.000Z",
+        };
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/agent-sessions/${session.id}/task-changes`,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal((response.json() as AgentTaskDiffResponse).available, true);
+  assert.deepEqual(receivedInput, {
+    sessionId: "active-codex-session",
+    workingDirectory: "/workspace/shared",
+  });
   await app.close();
 });
 
