@@ -88,7 +88,7 @@ describe("MobileWorkbenchPage", () => {
     );
   });
 
-  it("opens on a lightweight attention-sorted workspace instead of a terminal", () => {
+  it("opens directly on the current session instead of the board", () => {
     installDocumentStub();
 
     const markup = renderToStaticMarkup(
@@ -126,14 +126,11 @@ describe("MobileWorkbenchPage", () => {
     assert.match(markup, /手机端 Coding Kanban/);
     assert.match(markup, /电脑端 Coding Kanban/);
     assert.match(markup, /href="\/"/);
-    assert.match(markup, /手机工作区/);
-    assert.match(markup, /需要确认的任务/);
     assert.match(markup, /执行中的任务/);
-    assert.ok(
-      markup.indexOf("需要确认的任务") < markup.indexOf("执行中的任务"),
-    );
-    assert.doesNotMatch(markup, /mobile-terminal-surface/);
-    assert.doesNotMatch(markup, /手机终端快捷键/);
+    assert.match(markup, /mobile-terminal-surface/);
+    assert.match(markup, /手机终端快捷键/);
+    assert.match(markup, /aria-label="当前会话" class="active"/);
+    assert.doesNotMatch(markup, /等待你的回答或确认/);
     assert.match(
       markup,
       /data-testid="mobile-agent-completion-notification-toggle"/,

@@ -4748,7 +4748,7 @@ input {
 
 .mobile-terminal-toolbar {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-shrink: 0;
   padding: 8px 10px;
   overflow-x: auto;
@@ -4764,9 +4764,9 @@ input {
 
 .mobile-terminal-key {
   flex: 0 0 auto;
-  min-width: 48px;
-  min-height: 32px;
-  padding: 5px 8px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 7px 8px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.055);
@@ -4774,6 +4774,17 @@ input {
   cursor: pointer;
   font-size: 12px;
   white-space: nowrap;
+}
+
+.mobile-terminal-key--repeatable {
+  touch-action: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.mobile-terminal-key--repeatable:active {
+  border-color: rgba(246, 178, 107, 0.54);
+  background: rgba(246, 178, 107, 0.16);
 }
 
 .mobile-terminal-key--danger {
@@ -4802,6 +4813,14 @@ input {
 .mobile-terminal-key:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.mobile-terminal-input-error {
+  flex-shrink: 0;
+  padding: 7px 10px;
+  background: rgba(181, 55, 55, 0.2);
+  color: #ffb0a2;
+  font-size: 12px;
 }
 
 .mobile-terminal-help-backdrop {
@@ -4928,9 +4947,36 @@ input {
   border-radius: 12px;
   background: rgba(4, 7, 11, 0.84);
   color: #f4f1ea;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.45;
   outline: none;
+}
+
+.mobile-agent-composer-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #ffb0a2;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.mobile-agent-composer-error span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mobile-agent-composer-error button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 176, 162, 0.5);
+  border-radius: 10px;
+  background: rgba(181, 55, 55, 0.18);
+  color: #ffd4cc;
+  cursor: pointer;
+  font-weight: 700;
 }
 
 .mobile-agent-composer-input:focus {
@@ -4945,7 +4991,7 @@ input {
 
 .mobile-agent-composer-btn {
   flex: 1;
-  min-height: 38px;
+  min-height: 44px;
   padding: 8px 10px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 11px;
@@ -4964,14 +5010,6 @@ input {
 .mobile-agent-composer-btn:disabled {
   cursor: not-allowed;
   opacity: 0.45;
-}
-
-.mobile-workbench-error {
-  flex-shrink: 0;
-  padding: 7px 10px;
-  background: rgba(181, 55, 55, 0.2);
-  color: #ffb0a2;
-  font-size: 12px;
 }
 
 .quick-tmux-recent {

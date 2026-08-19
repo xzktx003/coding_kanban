@@ -1,8 +1,14 @@
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { useEffect, useRef, useState } from "react";
 
 import {
+  createMobilePressRepeater,
   getMobileTerminalControlInput,
+  isMobileTerminalControlRepeatable,
   MOBILE_TERMINAL_CONTROLS,
+  MOBILE_TERMINAL_TOOLBAR_ORDER,
+  type MobilePressRepeater,
+  type MobileTerminalControlId,
 } from "../lib/mobile-terminal-controls";
 
 interface MobileTerminalToolbarProps {
@@ -90,7 +96,12 @@ export function MobileTerminalShortcutHelp({
           {MOBILE_TERMINAL_CONTROLS.map((control) => (
             <div className="mobile-terminal-help-item" key={control.id}>
               <dt>{control.label}</dt>
-              <dd>{control.description}</dd>
+              <dd>
+                {control.description}
+                {isMobileTerminalControlRepeatable(control.id)
+                  ? "；长按可连续发送"
+                  : ""}
+              </dd>
             </div>
           ))}
         </dl>
@@ -112,13 +123,70 @@ export function MobileTerminalToolbar({
 }: MobileTerminalToolbarProps) {
   const [showHelp, setShowHelp] = useState(false);
   const [shifted, setShifted] = useState(false);
+  const [inputError, setInputError] = useState<string | null>(null);
+  const repeaterRef = useRef<MobilePressRepeater | null>(null);
+  const suppressClickRef = useRef<MobileTerminalControlId | null>(null);
 
-  const sendControl = (
-    controlId: (typeof MOBILE_TERMINAL_CONTROLS)[number]["id"],
+  const stopRepeating = () => {
+    repeaterRef.current?.stop();
+    repeaterRef.current = null;
+  };
+
+  useEffect(() => stopRepeating, []);
+
+  const sendControl = async (
+    controlId: MobileTerminalControlId,
+    shiftedForPress = shifted,
   ) => {
-    const input = getMobileTerminalControlInput(controlId, shifted);
+    const input = getMobileTerminalControlInput(controlId, shiftedForPress);
     setShifted(false);
-    void onSendInput(input);
+    setInputError(null);
+    try {
+      await onSendInput(input);
+    } catch (error) {
+      setInputError(error instanceof Error ? error.message : "快捷键发送失败");
+      throw error;
+    }
+  };
+
+  const sendControlWithoutUnhandledRejection = (
+    controlId: MobileTerminalControlId,
+  ) => {
+    void sendControl(controlId).catch(() => undefined);
+  };
+
+  const startRepeating = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    controlId: MobileTerminalControlId,
+  ) => {
+    if (disabled || event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    stopRepeating();
+    suppressClickRef.current = controlId;
+    const shiftedForPress = shifted;
+    const repeater = createMobilePressRepeater(() =>
+      sendControl(controlId, shiftedForPress),
+    );
+    repeaterRef.current = repeater;
+    repeater.start();
+  };
+
+  const stopRepeatingAfterPointer = (controlId: MobileTerminalControlId) => {
+    stopRepeating();
+    globalThis.setTimeout(() => {
+      if (suppressClickRef.current === controlId) {
+        suppressClickRef.current = null;
+      }
+    }, 0);
+  };
+
+  const handleControlClick = (controlId: MobileTerminalControlId) => {
+    if (suppressClickRef.current === controlId) {
+      suppressClickRef.current = null;
+      return;
+    }
+    sendControlWithoutUnhandledRejection(controlId);
   };
 
   return (
@@ -128,38 +196,88 @@ export function MobileTerminalToolbar({
         className="mobile-terminal-toolbar"
         role="toolbar"
       >
-        <button
-          aria-controls="mobile-terminal-shortcut-help"
-          aria-expanded={showHelp}
-          className="mobile-terminal-key mobile-terminal-key--help"
-          onClick={() => setShowHelp(true)}
-          type="button"
-        >
-          说明
-        </button>
-        <button
-          aria-pressed={shifted}
-          className={`mobile-terminal-key mobile-terminal-key--modifier${shifted ? " active" : ""}`}
-          disabled={disabled}
-          onClick={() => setShifted((active) => !active)}
-          title="为下一次快捷键启用 Shift"
-          type="button"
-        >
-          Shift
-        </button>
-        {MOBILE_TERMINAL_CONTROLS.map((control) => (
-          <button
-            className={`mobile-terminal-key${control.danger ? " mobile-terminal-key--danger" : ""}`}
-            disabled={disabled}
-            key={control.id}
-            onClick={() => sendControl(control.id)}
-            title={control.description}
-            type="button"
-          >
-            {control.label}
-          </button>
-        ))}
+        {MOBILE_TERMINAL_TOOLBAR_ORDER.map((item) => {
+          if (item === "shift") {
+            return (
+              <button
+                aria-pressed={shifted}
+                className={`mobile-terminal-key mobile-terminal-key--modifier${shifted ? " active" : ""}`}
+                disabled={disabled}
+                key={item}
+                onClick={() => setShifted((active) => !active)}
+                title="为下一次快捷键启用 Shift"
+                type="button"
+              >
+                Shift
+              </button>
+            );
+          }
+          if (item === "help") {
+            return (
+              <button
+                aria-controls="mobile-terminal-shortcut-help"
+                aria-expanded={showHelp}
+                className="mobile-terminal-key mobile-terminal-key--help"
+                key={item}
+                onClick={() => setShowHelp(true)}
+                type="button"
+              >
+                说明
+              </button>
+            );
+          }
+
+          const control = MOBILE_TERMINAL_CONTROLS.find(
+            (candidate) => candidate.id === item,
+          );
+          if (!control) return null;
+          const repeatable = isMobileTerminalControlRepeatable(control.id);
+          const description = repeatable
+            ? `${control.description}，长按连续发送`
+            : control.description;
+          return (
+            <button
+              aria-label={description}
+              className={`mobile-terminal-key${repeatable ? " mobile-terminal-key--repeatable" : ""}${control.danger ? " mobile-terminal-key--danger" : ""}`}
+              disabled={disabled}
+              key={control.id}
+              onClick={() => handleControlClick(control.id)}
+              onContextMenu={
+                repeatable ? (event) => event.preventDefault() : undefined
+              }
+              onLostPointerCapture={
+                repeatable
+                  ? () => stopRepeatingAfterPointer(control.id)
+                  : undefined
+              }
+              onPointerCancel={
+                repeatable
+                  ? () => stopRepeatingAfterPointer(control.id)
+                  : undefined
+              }
+              onPointerDown={
+                repeatable
+                  ? (event) => startRepeating(event, control.id)
+                  : undefined
+              }
+              onPointerUp={
+                repeatable
+                  ? () => stopRepeatingAfterPointer(control.id)
+                  : undefined
+              }
+              title={description}
+              type="button"
+            >
+              {control.label}
+            </button>
+          );
+        })}
       </div>
+      {inputError && (
+        <div className="mobile-terminal-input-error" role="alert">
+          {inputError}
+        </div>
+      )}
       {showHelp && (
         <div id="mobile-terminal-shortcut-help">
           <MobileTerminalShortcutHelp onClose={() => setShowHelp(false)} />

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -25,6 +26,23 @@ describe("MobileTerminalToolbar", () => {
     assert.match(markup, />⇧Tab<\/button>/);
     assert.match(markup, />⇧Enter<\/button>/);
     assert.match(markup, />Ctrl\+Enter<\/button>/);
+    assert.ok(
+      markup.indexOf(">Shift</button>") < markup.indexOf(">ESC</button>"),
+    );
+    assert.ok(
+      markup.indexOf(">ESC</button>") < markup.indexOf(">Ctrl+C</button>"),
+    );
+    assert.ok(
+      markup.indexOf(">Ctrl+C</button>") < markup.indexOf(">←</button>"),
+    );
+    assert.ok(markup.indexOf(">→</button>") < markup.indexOf(">⌫</button>"));
+    assert.ok(
+      markup.indexOf(">Ctrl+Z</button>") < markup.indexOf(">说明</button>"),
+    );
+    assert.match(markup, /mobile-terminal-key--repeatable[^>]*>←<\/button>/);
+
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+    assert.match(css, /\.mobile-terminal-key\s*{[^}]*min-height:\s*44px;/s);
   });
 
   it("lists shortcut descriptions for mobile users", () => {
@@ -48,5 +66,6 @@ describe("MobileTerminalToolbar", () => {
     assert.match(markup, /插入换行/);
     assert.match(markup, /强制提交/);
     assert.match(markup, /清屏/);
+    assert.match(markup, /长按可连续发送/);
   });
 });

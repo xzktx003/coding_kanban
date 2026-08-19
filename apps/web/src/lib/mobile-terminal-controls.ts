@@ -24,6 +24,12 @@ export interface MobileTerminalControl {
 
 export const MOBILE_TERMINAL_CONTROLS: MobileTerminalControl[] = [
   {
+    id: "escape",
+    label: "ESC",
+    input: "\x1b",
+    description: "退出 TUI 当前状态",
+  },
+  {
     id: "interrupt",
     label: "Ctrl+C",
     input: "\x03",
@@ -31,46 +37,10 @@ export const MOBILE_TERMINAL_CONTROLS: MobileTerminalControl[] = [
     danger: true,
   },
   {
-    id: "escape",
-    label: "ESC",
-    input: "\x1b",
-    description: "退出 TUI 当前状态",
-  },
-  {
-    id: "backspace",
-    label: "⌫",
-    input: "\x7f",
-    description: "退格，删除光标前字符",
-  },
-  {
-    id: "tab",
-    label: "Tab",
-    input: "\t",
-    description: "补全或切换焦点",
-  },
-  {
-    id: "shift-tab",
-    label: "⇧Tab",
-    input: "\x1b[Z",
-    description: "反向切换 TUI 焦点，适用于 Claude / Copilot 表单导航",
-  },
-  {
-    id: "enter",
-    label: "Enter",
-    input: "\r",
-    description: "提交当前输入",
-  },
-  {
-    id: "shift-enter",
-    label: "⇧Enter",
-    input: "\x1b[13;2u",
-    description: "插入换行（不提交）",
-  },
-  {
-    id: "ctrl-enter",
-    label: "Ctrl+Enter",
-    input: "\x1b[13;5u",
-    description: "强制提交（TUI 多行编辑模式下）",
+    id: "arrow-left",
+    label: "←",
+    input: "\x1b[D",
+    description: "方向键左",
   },
   {
     id: "arrow-up",
@@ -85,16 +55,46 @@ export const MOBILE_TERMINAL_CONTROLS: MobileTerminalControl[] = [
     description: "方向键下",
   },
   {
-    id: "arrow-left",
-    label: "←",
-    input: "\x1b[D",
-    description: "方向键左",
-  },
-  {
     id: "arrow-right",
     label: "→",
     input: "\x1b[C",
     description: "方向键右",
+  },
+  {
+    id: "backspace",
+    label: "⌫",
+    input: "\x7f",
+    description: "退格，删除光标前字符",
+  },
+  {
+    id: "tab",
+    label: "Tab",
+    input: "\t",
+    description: "补全或切换焦点",
+  },
+  {
+    id: "enter",
+    label: "Enter",
+    input: "\r",
+    description: "提交当前输入",
+  },
+  {
+    id: "shift-tab",
+    label: "⇧Tab",
+    input: "\x1b[Z",
+    description: "反向切换 TUI 焦点，适用于 Claude / Copilot 表单导航",
+  },
+  {
+    id: "shift-enter",
+    label: "⇧Enter",
+    input: "\x1b[13;2u",
+    description: "插入换行（不提交）",
+  },
+  {
+    id: "ctrl-enter",
+    label: "Ctrl+Enter",
+    input: "\x1b[13;5u",
+    description: "强制提交（TUI 多行编辑模式下）",
   },
   {
     id: "ctrl-l",
@@ -110,6 +110,107 @@ export const MOBILE_TERMINAL_CONTROLS: MobileTerminalControl[] = [
   },
 ];
 
+export type MobileTerminalToolbarItem =
+  | MobileTerminalControlId
+  | "shift"
+  | "help";
+
+export const MOBILE_TERMINAL_TOOLBAR_ORDER: MobileTerminalToolbarItem[] = [
+  "shift",
+  "escape",
+  "interrupt",
+  "arrow-left",
+  "arrow-up",
+  "arrow-down",
+  "arrow-right",
+  "backspace",
+  "tab",
+  "enter",
+  "shift-tab",
+  "shift-enter",
+  "ctrl-enter",
+  "ctrl-l",
+  "ctrl-z",
+  "help",
+];
+
+const REPEATABLE_MOBILE_TERMINAL_CONTROLS = new Set<MobileTerminalControlId>([
+  "backspace",
+  "arrow-up",
+  "arrow-down",
+  "arrow-left",
+  "arrow-right",
+]);
+
+export function isMobileTerminalControlRepeatable(
+  id: MobileTerminalControlId,
+): boolean {
+  return REPEATABLE_MOBILE_TERMINAL_CONTROLS.has(id);
+}
+
+interface MobilePressRepeatScheduler {
+  setTimeout(callback: () => void, delayMs: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+
+interface MobilePressRepeaterOptions {
+  delayMs?: number;
+  intervalMs?: number;
+  scheduler?: MobilePressRepeatScheduler;
+}
+
+export interface MobilePressRepeater {
+  start(): void;
+  stop(): void;
+}
+
+const defaultRepeatScheduler: MobilePressRepeatScheduler = {
+  setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
+  clearTimeout: (handle) =>
+    globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
+
+export function createMobilePressRepeater(
+  action: () => Promise<void> | void,
+  options: MobilePressRepeaterOptions = {},
+): MobilePressRepeater {
+  const delayMs = options.delayMs ?? 360;
+  const intervalMs = options.intervalMs ?? 85;
+  const scheduler = options.scheduler ?? defaultRepeatScheduler;
+  let active = false;
+  let generation = 0;
+  let timer: unknown;
+
+  const run = async (currentGeneration: number, first: boolean) => {
+    try {
+      await action();
+    } catch {
+      active = false;
+      return;
+    }
+    if (!active || generation !== currentGeneration) return;
+    timer = scheduler.setTimeout(
+      () => void run(currentGeneration, false),
+      first ? delayMs : intervalMs,
+    );
+  };
+
+  return {
+    start() {
+      if (active) return;
+      active = true;
+      generation += 1;
+      void run(generation, true);
+    },
+    stop() {
+      active = false;
+      generation += 1;
+      if (timer !== undefined) scheduler.clearTimeout(timer);
+      timer = undefined;
+    },
+  };
+}
+
 const SHIFTED_MOBILE_TERMINAL_INPUTS: Partial<
   Record<MobileTerminalControlId, string>
 > = {
@@ -121,7 +222,7 @@ const SHIFTED_MOBILE_TERMINAL_INPUTS: Partial<
   "arrow-right": "\x1b[1;2C",
 };
 
-export type MobileComposerSendMode = "send" | "paste" | "paste-run";
+export type MobileComposerSendMode = "send" | "paste";
 
 const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
@@ -143,15 +244,29 @@ export function buildMobileComposerInputFrames(
 ): string[] {
   const normalized = normalizeComposerText(text);
 
-  if (mode === "paste") {
-    return [normalized];
-  }
+  const pastedPrompt =
+    mode === "send" ? normalized.replace(/\n+$/g, "") : normalized;
+  const pasteFrame = `${BRACKETED_PASTE_START}${pastedPrompt}${BRACKETED_PASTE_END}`;
+  return mode === "paste" ? [pasteFrame] : [pasteFrame, "\r"];
+}
 
-  const pastedPrompt = normalized.replace(/\n+$/g, "");
-  return [
-    `${BRACKETED_PASTE_START}${pastedPrompt}${BRACKETED_PASTE_END}`,
-    "\r",
-  ];
+export type MobileComposerSendResult =
+  | { ok: true }
+  | { ok: false; error: unknown; nextFrameIndex: number };
+
+export async function sendMobileComposerFrames(
+  frames: string[],
+  onSendInput: (input: string) => Promise<void> | void,
+  startFrameIndex = 0,
+): Promise<MobileComposerSendResult> {
+  for (let index = startFrameIndex; index < frames.length; index += 1) {
+    try {
+      await onSendInput(frames[index]!);
+    } catch (error) {
+      return { ok: false, error, nextFrameIndex: index };
+    }
+  }
+  return { ok: true };
 }
 
 export function getMobileTerminalControlInput(
@@ -163,6 +278,6 @@ export function getMobileTerminalControlInput(
     throw new Error(`Unknown mobile terminal control: ${id}`);
   }
   return shifted
-    ? SHIFTED_MOBILE_TERMINAL_INPUTS[id] ?? control.input
+    ? (SHIFTED_MOBILE_TERMINAL_INPUTS[id] ?? control.input)
     : control.input;
 }

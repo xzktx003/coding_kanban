@@ -1,46 +1,79 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import {
   buildMobileComposerInputFrames,
+  sendMobileComposerFrames,
   type MobileComposerSendMode,
 } from "../lib/mobile-terminal-controls";
 
 interface MobileAgentComposerProps {
   disabled?: boolean;
-  insertedText?: string;
   onSendInput: (input: string) => Promise<void> | void;
-  onInsertedTextConsumed?: () => void;
+}
+
+interface FailedComposerAttempt {
+  draft: string;
+  frames: string[];
+  nextFrameIndex: number;
+}
+
+function errorMessage(error: unknown): string {
+  const detail = error instanceof Error ? error.message.trim() : "";
+  return detail ? `发送失败，内容已保留：${detail}` : "发送失败，内容已保留。";
 }
 
 export function MobileAgentComposer({
   disabled = false,
-  insertedText,
   onSendInput,
-  onInsertedTextConsumed,
 }: MobileAgentComposerProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [failedAttempt, setFailedAttempt] =
+    useState<FailedComposerAttempt | null>(null);
 
-  useEffect(() => {
-    if (!insertedText) return;
-    setText((current) => (current ? `${current}\n${insertedText}` : insertedText));
-    onInsertedTextConsumed?.();
-  }, [insertedText, onInsertedTextConsumed]);
-
-  const send = async (mode: MobileComposerSendMode) => {
-    if (!text || disabled || sending) {
-      return;
-    }
-
+  const deliver = async (
+    frames: string[],
+    startFrameIndex: number,
+    draft: string,
+  ) => {
     setSending(true);
+    setSendError(null);
     try {
-      for (const input of buildMobileComposerInputFrames(text, mode)) {
-        await onSendInput(input);
+      const result = await sendMobileComposerFrames(
+        frames,
+        onSendInput,
+        startFrameIndex,
+      );
+      if (!result.ok) {
+        setFailedAttempt({
+          draft,
+          frames,
+          nextFrameIndex: result.nextFrameIndex,
+        });
+        setSendError(errorMessage(result.error));
+        return;
       }
-      setText("");
+      setFailedAttempt(null);
+      setText((current) => (current === draft ? "" : current));
     } finally {
       setSending(false);
     }
+  };
+
+  const send = async (mode: MobileComposerSendMode) => {
+    if (!text || disabled || sending) return;
+    const draft = text;
+    await deliver(buildMobileComposerInputFrames(draft, mode), 0, draft);
+  };
+
+  const retry = async () => {
+    if (!failedAttempt || disabled || sending) return;
+    await deliver(
+      failedAttempt.frames,
+      failedAttempt.nextFrameIndex,
+      failedAttempt.draft,
+    );
   };
 
   return (
@@ -59,6 +92,18 @@ export function MobileAgentComposer({
         rows={3}
         value={text}
       />
+      {sendError && (
+        <div className="mobile-agent-composer-error" role="alert">
+          <span>{sendError}</span>
+          <button
+            disabled={disabled || sending}
+            onClick={() => void retry()}
+            type="button"
+          >
+            重试
+          </button>
+        </div>
+      )}
       <div className="mobile-agent-composer-actions">
         <button
           className="mobile-agent-composer-btn mobile-agent-composer-btn--primary"
@@ -74,14 +119,6 @@ export function MobileAgentComposer({
           type="button"
         >
           粘贴
-        </button>
-        <button
-          className="mobile-agent-composer-btn"
-          disabled={!text || disabled || sending}
-          onClick={() => void send("paste-run")}
-          type="button"
-        >
-          粘贴执行
         </button>
       </div>
     </form>

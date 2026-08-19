@@ -305,22 +305,20 @@ export function MobileWorkbenchPage({
   onTerminalFontSizeChange,
   onToggleAgentCompletionNotifications,
 }: MobileWorkbenchPageProps) {
-  const [view, setView] = useState<MobileWorkbenchView>("board");
+  const [view, setView] = useState<MobileWorkbenchView>("session");
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     activeSessionId,
   );
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [sendingInput, setSendingInput] = useState(false);
   const [transcriptSession, setTranscriptSession] =
     useState<AgentSessionRecord | null>(null);
   const [changesOpen, setChangesOpen] = useState(false);
   const [sessionPickerOpen, setSessionPickerOpen] = useState(false);
-  const [pendingReference, setPendingReference] = useState("");
   const [fileBrowserSessionId, setFileBrowserSessionId] = useState<
     string | null
   >(null);
   const [sessionFilesOpen, setSessionFilesOpen] = useState(false);
   const sessionSwitcherRef = useRef<HTMLDivElement>(null);
+  const inputQueueRef = useRef<Promise<void>>(Promise.resolve());
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !session.hidden),
     [sessions],
@@ -432,18 +430,15 @@ export function MobileWorkbenchPage({
     setView("session");
   };
 
-  const handleSendInput = async (input: string) => {
-    if (!activeSession || sendingInput) return;
+  const handleSendInput = (input: string): Promise<void> => {
+    const sessionId = activeSession?.id;
+    if (!sessionId) return Promise.reject(new Error("没有可用会话"));
 
-    setErrorMessage(null);
-    setSendingInput(true);
-    try {
-      await sendAgentInput(activeSession.id, { input });
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "发送失败");
-    } finally {
-      setSendingInput(false);
-    }
+    const pending = inputQueueRef.current.then(async () => {
+      await sendAgentInput(sessionId, { input });
+    });
+    inputQueueRef.current = pending.catch(() => undefined);
+    return pending;
   };
 
   return (
@@ -687,19 +682,12 @@ export function MobileWorkbenchPage({
                     )}
                   </div>
                 </section>
-                {errorMessage && (
-                  <div className="mobile-workbench-error" role="alert">
-                    {errorMessage}
-                  </div>
-                )}
                 <MobileTerminalToolbar
-                  disabled={!activeSession || sendingInput}
+                  disabled={!activeSession}
                   onSendInput={handleSendInput}
                 />
                 <MobileAgentComposer
-                  disabled={!activeSession || sendingInput}
-                  insertedText={pendingReference}
-                  onInsertedTextConsumed={() => setPendingReference("")}
+                  disabled={!activeSession}
                   onSendInput={handleSendInput}
                 />
               </>
@@ -761,10 +749,6 @@ export function MobileWorkbenchPage({
             compact
             session={activeSession}
             onClose={() => setChangesOpen(false)}
-            onReference={(reference) => {
-              setPendingReference(reference);
-              setChangesOpen(false);
-            }}
           />
         </div>
       )}

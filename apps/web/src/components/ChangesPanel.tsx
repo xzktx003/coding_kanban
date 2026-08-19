@@ -23,7 +23,6 @@ interface ChangesPanelProps {
   session: AgentSessionRecord;
   compact?: boolean;
   onClose?: () => void;
-  onReference?: (reference: string) => void;
 }
 
 interface RenderedDiffLine {
@@ -49,7 +48,6 @@ interface CompactChangesFilePickerProps {
 interface FullscreenDiffViewProps {
   file: DiffFileChange;
   onClose: () => void;
-  onReference?: (reference: string) => void;
   onRevertHunk?: (hunkIndex: number, hunkHeader: string) => void;
   revertingHunkIndex?: number | null;
 }
@@ -269,12 +267,10 @@ function DiffCode({
 export function FullscreenDiffView({
   file,
   onClose,
-  onReference,
   onRevertHunk,
   revertingHunkIndex = null,
 }: FullscreenDiffViewProps) {
   const parts = splitFilePath(file.path);
-  const reference = `@${file.path}`;
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -320,16 +316,6 @@ export function FullscreenDiffView({
             复制路径
           </button>
           <button
-            onClick={() =>
-              onReference
-                ? onReference(reference)
-                : void copyTextToClipboard(reference)
-            }
-            type="button"
-          >
-            引用文件
-          </button>
-          <button
             className="fullscreen-diff-close"
             onClick={onClose}
             ref={closeButtonRef}
@@ -368,7 +354,6 @@ export function ChangesPanel({
   session,
   compact = false,
   onClose,
-  onReference,
 }: ChangesPanelProps) {
   const [scope, setScope] = useState<DiffScope>("checkout");
   const [taskDiff, setTaskDiff] = useState<AgentTaskDiffResponse | null>(null);
@@ -425,7 +410,6 @@ export function ChangesPanel({
     }
   }, [files, selectedPath]);
 
-  const reference = selectedFile ? `@${selectedFile.path}` : "";
   const selectedParts = selectedFile ? splitFilePath(selectedFile.path) : null;
 
   const revertHunk = async (
@@ -556,7 +540,6 @@ export function ChangesPanel({
                     <div className="diff-file-actions">
                       <button onClick={() => setFullscreenFile(selectedFile)} type="button">全屏查看</button>
                       <button onClick={() => void copyTextToClipboard(selectedFile.path)} type="button">复制路径</button>
-                      <button onClick={() => onReference ? onReference(reference) : void copyTextToClipboard(reference)} type="button">引用文件</button>
                     </div>
                   </div>
                   <DiffCode
@@ -591,7 +574,6 @@ export function ChangesPanel({
                       void revertHunk(fullscreenFile, hunkIndex, hunkHeader)
                   : undefined
               }
-              onReference={onReference}
               revertingHunkIndex={
                 revertingHunk?.path === fullscreenFile.path
                   ? revertingHunk.index

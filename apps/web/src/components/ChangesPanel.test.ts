@@ -82,7 +82,6 @@ test("file changes can render in a dedicated fullscreen diff view", () => {
       file,
       onClose: () => {},
       onRevertHunk: () => {},
-      onReference: () => {},
     }),
   );
 
@@ -95,6 +94,8 @@ test("file changes can render in a dedicated fullscreen diff view", () => {
   assert.doesNotMatch(html, /还原此文件/);
   assert.match(html, /class="fullscreen-diff-close"/);
   assert.match(html, /退出全屏/);
+  assert.match(html, /复制路径/);
+  assert.doesNotMatch(html, /引用文件/);
   assert.match(html, /diff-row--deleted/);
   assert.match(html, /diff-row--added/);
 });
