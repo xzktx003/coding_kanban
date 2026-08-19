@@ -84,6 +84,7 @@
 - 顶栏“终端字号”滑杆拖动时页面明显卡顿。根因是每个 range `input` 中间值都会立刻更新全局 `terminalFontSize`，所有挂载的 xterm 都同步执行 `fontSize`、`fit()` 和 `refresh()`。修复为拖动时只更新顶栏草稿值，鼠标松开、键盘调整结束或失焦提交后才应用到真实终端并持久化。
 - 拖动顶栏“终端字号”滑杆后，Codex-like TUI 会收到 `focus-out`，松手后直接打字没有进入终端。根因是 `input[type=range]` 被终端焦点保护逻辑视为真实输入控件，鼠标提交字号后焦点仍停留在滑杆上。修复为鼠标提交字号后主动恢复当前 active terminal 的 xterm helper textarea 焦点，键盘调整滑杆仍保留控件焦点。
 - 多屏 focus view 里把 sidebar session 拖到当前输入 pane，或在当前输入 pane 的下拉框切换 session 后，pane 会短暂变化又被恢复成原 focused session。根因是 `normalizeTerminalMonitorSlots` 会把 App 级 `focusedSession` 强制放回 active slot，而 active slot select/drag 在 `syncActiveTerminalWithFocus=false` 时没有同步 focused session。修复为 active slot select、拖入 active slot、从 active slot 拖出时同步 active slot/focused session，并让 sidebar 卡片单击即可切换 focus。
+- 聚焦视图侧栏切换主窗口感觉有明显延迟，快速切换时还会触发重复快照更新。根因是侧栏单击用 `220ms` 定时器等待双击，以及 App 的切换处理和 active slot effect 同时请求 `/focus`。修复为首次 click 立即切换、忽略双击产生的第二次 click，并合并同一会话的 in-flight focus 请求、丢弃过期响应；切换回归覆盖 300ms 内主窗格更新和单次 focus 请求。
 
 ## 文件浏览器
 
