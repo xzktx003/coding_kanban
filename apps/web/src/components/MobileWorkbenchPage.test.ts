@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import {
   MobileSessionSwitcher,
   MobileWorkbenchPage,
+  sortMobileSessionPickerSessions,
   sortMobileSessionsByAttention,
 } from "./MobileWorkbenchPage.js";
 
@@ -80,10 +81,7 @@ describe("MobileWorkbenchPage", () => {
       css,
       /\.mobile-session-actions\s*{[^}]*display:\s*flex;[^}]*white-space:\s*nowrap;/s,
     );
-    assert.match(
-      css,
-      /\.mobile-transcript-btn\s*{[^}]*min-height:\s*44px;/s,
-    );
+    assert.match(css, /\.mobile-transcript-btn\s*{[^}]*min-height:\s*44px;/s);
     assert.match(
       css,
       /\.mobile-session-picker-menu\s*{[^}]*position:\s*absolute;/s,
@@ -216,6 +214,67 @@ describe("MobileWorkbenchPage", () => {
     assert.deepEqual(
       sortMobileSessionsByAttention(sessions).map((session) => session.id),
       ["response", "review", "running", "ready"],
+    );
+  });
+
+  it("sorts the current-session picker by ready, executing, then session name", () => {
+    const sessions = [
+      {
+        id: "running-zulu",
+        workspaceId: "default",
+        sourceType: "local" as const,
+        agentKind: "codex",
+        displayName: "Zulu running",
+        connectionState: "online" as const,
+        interactionState: "running" as const,
+      },
+      {
+        id: "ready-zulu",
+        workspaceId: "default",
+        sourceType: "local" as const,
+        agentKind: "shell",
+        displayName: "Zulu ready",
+        connectionState: "online" as const,
+        interactionState: "idle" as const,
+      },
+      {
+        id: "running-alpha",
+        workspaceId: "default",
+        sourceType: "local" as const,
+        agentKind: "codex",
+        displayName: "alpha running",
+        connectionState: "online" as const,
+        interactionState: "running" as const,
+      },
+      {
+        id: "ready-alpha",
+        workspaceId: "default",
+        sourceType: "local" as const,
+        agentKind: "shell",
+        displayName: "alpha ready",
+        connectionState: "online" as const,
+        interactionState: "idle" as const,
+      },
+      {
+        id: "response",
+        workspaceId: "default",
+        sourceType: "local" as const,
+        agentKind: "copilot",
+        displayName: "Needs response",
+        connectionState: "online" as const,
+        interactionState: "awaiting_input" as const,
+      },
+    ];
+
+    assert.deepEqual(
+      sortMobileSessionPickerSessions(sessions).map((session) => session.id),
+      [
+        "ready-alpha",
+        "ready-zulu",
+        "running-alpha",
+        "running-zulu",
+        "response",
+      ],
     );
   });
 });

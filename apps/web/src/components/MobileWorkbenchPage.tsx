@@ -59,6 +59,17 @@ const attentionGroups: Array<{
   { id: "ready", label: "可继续", description: "可以继续输入或检查" },
 ];
 
+const sessionPickerGroupOrder: MobileAttentionGroup[] = [
+  "ready",
+  "executing",
+  "response",
+  "review",
+];
+const sessionNameCollator = new Intl.Collator("zh-CN-u-co-pinyin", {
+  numeric: true,
+  sensitivity: "base",
+});
+
 function timestampValue(value?: string): number {
   if (!value) return 0;
   const parsed = Date.parse(value);
@@ -104,6 +115,25 @@ export function sortMobileSessionsByAttention(
         : left.index - right.index;
     })
     .map(({ session }) => session);
+}
+
+export function sortMobileSessionPickerSessions(
+  sessions: AgentSessionRecord[],
+): AgentSessionRecord[] {
+  return [...sessions].sort((left, right) => {
+    const groupDifference =
+      sessionPickerGroupOrder.indexOf(getAttentionGroup(left)) -
+      sessionPickerGroupOrder.indexOf(getAttentionGroup(right));
+    if (groupDifference !== 0) return groupDifference;
+
+    const nameDifference = sessionNameCollator.compare(
+      left.displayName.trim(),
+      right.displayName.trim(),
+    );
+    return nameDifference !== 0
+      ? nameDifference
+      : sessionNameCollator.compare(left.id, right.id);
+  });
 }
 
 function formatActivityTime(session: AgentSessionRecord): string {
@@ -161,7 +191,9 @@ function MobileSessionCard({
         {sessionSummary(session)}
       </span>
       <span className="mobile-session-card-meta">
-        <span>{session.projectName ?? shortenPath(session.workingDirectory)}</span>
+        <span>
+          {session.projectName ?? shortenPath(session.workingDirectory)}
+        </span>
         <span>{session.agentKind}</span>
         <span>{formatActivityTime(session)}</span>
       </span>
@@ -295,6 +327,10 @@ export function MobileWorkbenchPage({
   );
   const attentionSortedSessions = useMemo(
     () => sortMobileSessionsByAttention(visibleSessions),
+    [visibleSessions],
+  );
+  const sessionPickerSortedSessions = useMemo(
+    () => sortMobileSessionPickerSessions(visibleSessions),
     [visibleSessions],
   );
   const activitySortedSessions = useMemo(
@@ -619,7 +655,7 @@ export function MobileWorkbenchPage({
                   onSelectSession={openSession}
                   onToggle={() => setSessionPickerOpen((current) => !current)}
                   open={sessionPickerOpen}
-                  sessions={attentionSortedSessions}
+                  sessions={sessionPickerSortedSessions}
                 />
                 <section className="mobile-terminal-surface">
                   <div className="mobile-terminal-frame">
