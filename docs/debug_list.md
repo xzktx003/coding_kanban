@@ -567,3 +567,11 @@
 - **修复**: 触控监控终端在 `open` 后使用公开 API 同步执行一次 `focus → blur`，让 xterm 初始化光标后立即回到失焦状态，并归还挂载前仍有效的页面焦点；活动和失焦光标均使用高对比度下划线。直接 stdin、手机软键盘和桌面光标行为保持不变。
 - **测试**: 红绿灯单元测试覆盖手机监控终端严格执行一次 `focus → blur`、桌面和直接输入终端不执行初始化；同时覆盖手机活动/失焦光标均为下划线，桌面仍使用块状活动光标和轮廓失焦光标。现场只读 WebSocket 采样确认目标 tmux replay 包含最终光标坐标但不包含光标初始化序列。
 - **文件**: `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/mobile-terminal-touch.ts`, `apps/web/src/lib/mobile-terminal-touch.test.ts`
+
+### 多屏切换终端后完整记录仍指向旧会话
+
+- **现象**: 四屏或其他多屏布局中，用户点击另一个终端卡片后再查看“完整记录”，入口或弹窗仍可能继续使用之前终端的会话。
+- **根因**: 终端窗格把所有 `textarea` 都当作外部输入控件，点击 xterm 自己的 helper textarea 时浏览器焦点已经移动，但看板 `activeSlotId` 没有更新；完整记录又保存了打开瞬间的完整会话对象，无法在活动窗格变化时重新派生数据源。
+- **修复**: xterm helper textarea 明确参与窗格激活，普通表单控件继续阻止误切换；完整记录只保存开关状态，标题栏按钮和弹窗会话持续从当前活动窗格派生，并以会话 ID 重建弹窗，避免旧请求内容覆盖新会话。
+- **测试**: 红绿灯测试覆盖 helper textarea 可激活窗格而普通 textarea 不会，并在四屏持久化布局中断言“完整记录”入口绑定第二个活动窗格的名称与会话 ID。
+- **文件**: `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/components/AgentFocusView.test.ts`, `apps/web/src/lib/terminal-focus.ts`, `apps/web/src/lib/terminal-focus.test.ts`

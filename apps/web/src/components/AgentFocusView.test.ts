@@ -7,11 +7,17 @@ import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import { AgentFocusView } from "./AgentFocusView.js";
 
-function installLocalStorageStub(layoutMode = "dual") {
+function installLocalStorageStub(
+  layoutMode = "dual",
+  workspaceState?: Record<string, unknown>,
+) {
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
     value: {
       getItem(key: string) {
+        if (key === "terminal-monitor-workspace-v1" && workspaceState) {
+          return JSON.stringify(workspaceState);
+        }
         return key === "terminal-monitor-layout-mode" ? layoutMode : null;
       },
       setItem: () => {},
@@ -146,6 +152,41 @@ describe("AgentFocusView", () => {
       1,
     );
     assert.doesNotMatch(markup, /data-testid="terminal-pane-context-menu"/);
+  });
+
+  it("binds the complete transcript action to the active monitor session", () => {
+    installLocalStorageStub("quad", {
+      mode: "quad",
+      slots: [
+        { id: "terminal-monitor-slot-1", sessionId: "session-1" },
+        { id: "terminal-monitor-slot-2", sessionId: "session-2" },
+        { id: "terminal-monitor-slot-3", sessionId: "session-3" },
+        { id: "terminal-monitor-slot-4", sessionId: "session-4" },
+      ],
+      activeSlotId: "terminal-monitor-slot-2",
+      closedSlotIds: [],
+    });
+    const sessions = [
+      makeSession("session-1", "Alpha"),
+      makeSession("session-2", "Beta"),
+      makeSession("session-3", "Gamma"),
+      makeSession("session-4", "Delta"),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: sessions[0],
+        sessions,
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    assert.match(markup, /aria-label="查看 Beta 的完整记录"/);
+    assert.match(markup, /data-transcript-session-id="session-2"/);
   });
 
   it("links every monitored pane to the matching card in the existing sidebar groups", () => {

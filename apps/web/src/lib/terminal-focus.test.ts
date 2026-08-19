@@ -107,6 +107,27 @@ describe("shouldActivateTerminalPaneFromPointer", () => {
       true,
     );
   });
+
+  it("treats xterm's helper textarea as pane content instead of an external editor", () => {
+    assert.equal(
+      shouldActivateTerminalPaneFromPointer({
+        button: 0,
+        pointerType: "mouse",
+        targetIsInteractiveControl: true,
+        targetIsTerminalHelperTextarea: true,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldActivateTerminalPaneFromPointer({
+        button: 0,
+        pointerType: "mouse",
+        targetIsInteractiveControl: true,
+        targetIsTerminalHelperTextarea: false,
+      }),
+      false,
+    );
+  });
 });
 
 describe("hasIntentionalExternalFocus", () => {

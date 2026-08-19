@@ -218,8 +218,7 @@ export function AgentFocusView({
     loadFocusHeaderCollapsed,
   );
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
-  const [transcriptSession, setTranscriptSession] =
-    useState<AgentSessionRecord | null>(null);
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [dragOverSlotId, setDragOverSlotId] = useState<string | null>(null);
   const [closedSlotIds, setClosedSlotIds] = useState<Set<string>>(
     () => new Set(initialTerminalWorkspaceState.closedSlotIds),
@@ -304,6 +303,7 @@ export function AgentFocusView({
   const activeHeaderSession =
     (activeSlotSessionId ? sessionById.get(activeSlotSessionId) : undefined) ??
     focusedSession;
+  const activeTranscriptSession = transcriptOpen ? activeHeaderSession : null;
   const activeLayoutOption =
     TERMINAL_MONITOR_LAYOUT_OPTIONS.find(
       (option) => option.mode === terminalLayoutMode,
@@ -458,20 +458,19 @@ export function AgentFocusView({
     slot: TerminalMonitorSlot,
     event: React.PointerEvent<HTMLDivElement>,
   ) {
+    const target = event.target as HTMLElement | null;
+    const interactiveControl = target?.closest(
+      'button, input, textarea, select, a, [contenteditable="true"], [contenteditable=""]',
+    );
     if (
       !shouldActivateTerminalPaneFromPointer({
         button: event.button,
         pointerType: event.pointerType,
+        targetIsInteractiveControl: Boolean(interactiveControl),
+        targetIsTerminalHelperTextarea: Boolean(
+          target?.closest("textarea.xterm-helper-textarea"),
+        ),
       })
-    ) {
-      return;
-    }
-
-    const target = event.target as HTMLElement | null;
-    if (
-      target?.closest(
-        'button, input, textarea, select, a, [contenteditable="true"], [contenteditable=""]',
-      )
     ) {
       return;
     }
@@ -1033,8 +1032,10 @@ export function AgentFocusView({
             </>
           )}
           <button
+            aria-label={`查看 ${activeHeaderSession.displayName} 的完整记录`}
             className="focus-transcript-btn"
-            onClick={() => setTranscriptSession(activeHeaderSession)}
+            data-transcript-session-id={activeHeaderSession.id}
+            onClick={() => setTranscriptOpen(true)}
             title="查看不受终端重绘影响的完整 Codex 记录"
             type="button"
           >
@@ -1389,11 +1390,12 @@ export function AgentFocusView({
           </button>
         </div>
       )}
-      {transcriptSession && (
+      {activeTranscriptSession && (
         <AgentTranscriptDialog
-          agentSessionId={transcriptSession.id}
-          displayName={transcriptSession.displayName}
-          onClose={() => setTranscriptSession(null)}
+          key={activeTranscriptSession.id}
+          agentSessionId={activeTranscriptSession.id}
+          displayName={activeTranscriptSession.displayName}
+          onClose={() => setTranscriptOpen(false)}
           terminalFontSize={terminalFontSize}
         />
       )}

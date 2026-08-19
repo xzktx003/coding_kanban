@@ -30,6 +30,8 @@ interface ExternalFocusPromotionOptions {
 interface TerminalPanePointerActivationOptions {
   button: number;
   pointerType: string;
+  targetIsInteractiveControl?: boolean;
+  targetIsTerminalHelperTextarea?: boolean;
 }
 
 export function getActiveTerminalTextarea(): HTMLTextAreaElement | null {
@@ -47,7 +49,14 @@ export function focusActiveTerminalTextarea(): void {
 export function shouldActivateTerminalPaneFromPointer(
   options: TerminalPanePointerActivationOptions,
 ): boolean {
-  return options.pointerType !== "mouse" || options.button === 0;
+  if (options.pointerType === "mouse" && options.button !== 0) {
+    return false;
+  }
+
+  return (
+    !options.targetIsInteractiveControl ||
+    Boolean(options.targetIsTerminalHelperTextarea)
+  );
 }
 
 export function hasIntentionalExternalFocus(
