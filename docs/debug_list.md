@@ -560,3 +560,11 @@
 - **修复**: PTY 启动、远端启动、重连、服务端命令构造和持久化状态恢复统一规范 tmux 传输名；卡片 `displayName` 保留用户原文。无 pane 信息的改名流程也使用实际规范名兜底。
 - **测试**: 真实 tmux 红绿灯测试以含点号名称启动受管 PTY，断言 registry 绑定规范名、client 能就绪，并通过英文 `printf` 输入得到 pane 输出；状态存储测试覆盖旧错误目标自动迁移。现场 `qwen3.8-27b` 已通过 Kanban `/stdin` 路由执行英文 `echo` 并回到提示符。
 - **文件**: `apps/server/src/services/tmux-display-name.ts`, `apps/server/src/services/pty-runtime-manager.ts`, `apps/server/src/services/session-state-store.ts`, `apps/server/src/services/local-tmux-adapter.ts`, `apps/server/src/routes/agent-sessions.ts`
+
+### 手机快捷键移动后看不到终端编辑光标
+
+- **现象**: 手机端把长文本粘贴进 Codex 后，点击方向键可以移动编辑位置，但终端里看不到表示当前位置的光标，无法判断即将修改哪一个字符。
+- **根因**: 手机端为了避免 xterm 隐藏输入框与多行输入框争抢软键盘，刻意关闭直接 stdin；现有 tmux replay 只包含屏幕绘制和最终坐标，没有备用屏幕切换或其他光标初始化序列。xterm 在从未获得焦点、从未处理直接键盘输入且未切换备用屏幕时保持 `isCursorInitialized=false`，所以单纯配置下划线样式也不会创建光标节点。
+- **修复**: 触控监控终端在 `open` 后使用公开 API 同步执行一次 `focus → blur`，让 xterm 初始化光标后立即回到失焦状态，并归还挂载前仍有效的页面焦点；活动和失焦光标均使用高对比度下划线。直接 stdin、手机软键盘和桌面光标行为保持不变。
+- **测试**: 红绿灯单元测试覆盖手机监控终端严格执行一次 `focus → blur`、桌面和直接输入终端不执行初始化；同时覆盖手机活动/失焦光标均为下划线，桌面仍使用块状活动光标和轮廓失焦光标。现场只读 WebSocket 采样确认目标 tmux replay 包含最终光标坐标但不包含光标初始化序列。
+- **文件**: `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/mobile-terminal-touch.ts`, `apps/web/src/lib/mobile-terminal-touch.test.ts`

@@ -127,6 +127,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 - 终端 WebSocket：`/ws/agent-sessions/:id/terminal`。
 - 每个仍挂载的实时 `TerminalView` 在终端 WebSocket 异常关闭后使用 250ms 起步、最大 5 秒的指数退避重建连接；连接在 3 秒内未完成握手也会主动关闭并进入同一恢复链。新连接完成 replay 后才重新开放 stdin，并重新同步 resize 和焦点。组件卸载会取消待执行的重连，避免隐藏终端或旧会话产生后台连接。
+- 手机终端继续由输入框和快捷键通过既有 stdin 接口驱动，不让 xterm 的隐藏输入框长期抢占软键盘焦点。由于 tmux replay 只有屏幕内容和最终坐标、不一定包含 xterm 用来初始化光标的控制序列，触控监控终端在 `open` 后通过一次同步 `focus → blur` 初始化 xterm 光标，再归还挂载前仍有效的页面焦点；活动与失焦光标都使用高对比度下划线，因此用户用方向键调整已粘贴文字时仍能看到 TUI 当前编辑位置。桌面终端保持块状活动光标和轮廓失焦光标。
 - 完整记录 HTTP 接口：`GET /api/agent-sessions/:id/transcript`。它只根据 registry 中可信的本机会话元数据访问 `~/.codex/sessions`，不接受客户端文件路径；优先按 `agentSessionId` 匹配，缺失时按 `workingDirectory` 匹配最近活动的 Codex JSONL。解析层只公开 user/assistant message 及非 `exec` 工具调用和输出，忽略 developer/system/reasoning，并同时过滤 `exec` 调用与对应输出；前端按最新记录在前展示，用户与 Codex 消息复用按需加载、memo 化的安全 Markdown/GFM/KaTeX 渲染器，长历史首次只挂载最新 30 条，用户滚动到批次末尾并点击“继续加载”后才按每批 30 条追加较早记录，工具输出仍为等宽原文，两类记录正文共享全局终端字号。终端继续承担实时交互，完整记录弹窗承担不会被 ANSI/TUI 重绘覆盖的追加式历史浏览。
 - 终端字号由 `terminal-font-size` 本地存储项持久化，默认 14px；滑杆拖动过程中只更新控件显示，鼠标松开、键盘调整结束或失焦提交后才更新已有 `TerminalView` 的 `fontSize` 并触发 fit/resize，不需要重建 WebSocket。
 - 会先发送 scrollback replay，再发送 `replay-complete`。
