@@ -38,6 +38,7 @@ import {
   normalizeTerminalMonitorSlots,
   placeTerminalMonitorSlotSession,
   restoreTerminalMonitorLayoutSnapshot,
+  resolveFocusedTerminalMonitorSlotId,
   setTerminalMonitorSlotSession,
   type RestorableTerminalMonitorLayoutMode,
   type TerminalMonitorLayoutSnapshot,
@@ -399,10 +400,13 @@ export function AgentFocusView({
   }, [paneContextMenu]);
 
   useEffect(() => {
-    const availableSlotIds = getTerminalMonitorSlotIds(terminalLayoutMode);
-    const nextActiveSlotId = availableSlotIds.includes(activeSlotId)
-      ? activeSlotId
-      : availableSlotIds[0]!;
+    const nextActiveSlotId = resolveFocusedTerminalMonitorSlotId({
+      mode: terminalLayoutMode,
+      slots: terminalSlots,
+      activeSlotId,
+      focusedSessionId: focusedSession.id,
+      closedSlotIds,
+    });
 
     if (nextActiveSlotId !== activeSlotId) {
       setActiveSlotId(nextActiveSlotId);
@@ -428,6 +432,7 @@ export function AgentFocusView({
     displayableSessions,
     focusedSession.id,
     terminalLayoutMode,
+    terminalSlots,
   ]);
 
   useEffect(() => {

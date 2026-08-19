@@ -85,6 +85,7 @@
 - 拖动顶栏“终端字号”滑杆后，Codex-like TUI 会收到 `focus-out`，松手后直接打字没有进入终端。根因是 `input[type=range]` 被终端焦点保护逻辑视为真实输入控件，鼠标提交字号后焦点仍停留在滑杆上。修复为鼠标提交字号后主动恢复当前 active terminal 的 xterm helper textarea 焦点，键盘调整滑杆仍保留控件焦点。
 - 多屏 focus view 里把 sidebar session 拖到当前输入 pane，或在当前输入 pane 的下拉框切换 session 后，pane 会短暂变化又被恢复成原 focused session。根因是 `normalizeTerminalMonitorSlots` 会把 App 级 `focusedSession` 强制放回 active slot，而 active slot select/drag 在 `syncActiveTerminalWithFocus=false` 时没有同步 focused session。修复为 active slot select、拖入 active slot、从 active slot 拖出时同步 active slot/focused session，并让 sidebar 卡片单击即可切换 focus。
 - 聚焦视图侧栏切换主窗口感觉有明显延迟，快速切换时还会触发重复快照更新。根因是侧栏单击用 `220ms` 定时器等待双击，以及 App 的切换处理和 active slot effect 同时请求 `/focus`。修复为首次 click 立即切换、忽略双击产生的第二次 click，并合并同一会话的 in-flight focus 请求、丢弃过期响应；切换回归覆盖 300ms 内主窗格更新和单次 focus 请求。
+- 多屏聚焦视图中，从看板进入一个已经显示在非活动监控窗格里的 tmux 会话后，画面可见但键盘无法输入。根因是 App 已把该会话设为 focused session，局部布局却因会话“已经可见”而继续保留旧 `activeSlotId`，使输入权仍属于旧窗格。修复为外部焦点变化时优先激活包含 focused session 的可见窗格，并补充布局回归测试。
 
 ## 文件浏览器
 
