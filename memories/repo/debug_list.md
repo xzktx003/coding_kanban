@@ -35,6 +35,7 @@
 - 远端 SSH 会话在线时，文件浏览器首屏偶发空白并报 `write ECONNRESET` / `No response from server`：`SftpService` 在连接还没 `ready` 时就把连接放进池里，UI 初始化打出的并发 `/api/fs/list` 会抢到半初始化连接。修复为复用连接前必须等待 `ready`，并在连接失败时及时把坏连接移出池。
 - 远端 SSH 会话已经退出时，kanban 终端只剩 `[连接已断开]`：PTY runtime 退出就删除 handle，terminal websocket 后续重连拿不到 scrollback，只能 4004 关闭，导致真实错误（例如 `fatal: Gerrit Code Review: exec: not found`）被泛化提示覆盖。修复为 runtime 已退出但 session 仍存在时，从 registry 的历史输出回放 terminal 内容。
 - tmux mouse mode 下 pane 内拖拽选择停留在 tmux/TUI 内，浏览器侧 xterm 没有 selection 可复制：修复为 `TerminalView` 支持 OSC 52 clipboard 写入，让 tmux copy-mode 负责选择边界并把内容写入浏览器剪贴板。
+- OpenCode 开启 mouse tracking 时直接拖选会被 tmux 转发给 TUI，部分界面会把复制手势解释成 prompt 输入并提交；OpenCode 活动终端现在延迟无修饰键左键手势，超过阈值后转为 xterm 本地 Shift 选区且不写 PTY，单击重放给 TUI、滚轮不变。
 - live stdin 过滤握手应答导致 Copilot CLI 等 TUI 卡死：修复为仅清洗 replay，不过滤 live stdin 的 DA/DSR/CPR 等应答。
 - 终端或 tmux 中 Copilot/Codex 的 Ctrl+C 可用但快速普通文本无效，启动命令还可能被写成 `5Rnode ...`：浏览器较早 DA 回复会和当前 CPR、REST/键盘文本乱序交错。修复为根据 PTY 输出的 DA/DSR/CPR 查询类型跟踪短暂 pending，只转发匹配的完整回复，全部完成后才释放普通文本；陈旧回复丢弃，250ms 无回复超时释放。单元及真实浏览器 Copilot 启动回归覆盖该顺序。
 - Codex CLI 运行后鼠标滚轮偶发变成输入历史上下翻页：xterm.js 会在 TUI 鼠标追踪或无 scrollback 路径中把 wheel 转成鼠标协议/方向键输入；修复为前端接管 wheel，只滚动 xterm scrollback 并阻止 wheel 进入 stdin。

@@ -96,7 +96,7 @@
 - 桌面 xterm 把 macOS `Option` 和 Windows/Linux `Alt` 统一编码为终端 Meta 修饰键；`Option+Space` / `Alt+Space` 及常用 Meta 字母、数字组合在本地 tmux 中作为单个 `M-*` 键发送，不再拆成 `Escape` 与普通字符。Windows 系统若优先占用 `Alt+Space`，可使用跨平台 `Shift+Enter` 换行。
 - Safari 快速输入时同时核对 xterm `onData` 与浏览器原生 `insertText`；若 WebKit 已产生文本输入但 xterm 没有发出对应数据，只补发缺失字符。该恢复路径仅在 Safari 启用，并排除 IME composition、控制键及其他浏览器。
 - `Shift+Enter`、`Ctrl+Enter` 的 CSI-u 序列在 tmux client 不支持 extended keys 时通过 `send-keys -l` 原样写入当前 pane，不依赖不同 tmux 版本对 `S-Enter` / `C-Enter` 键名的支持。
-- 支持终端输出发起的 OSC 52 剪贴板写入；tmux copy-mode 可通过 pane 内选择把内容写入浏览器剪贴板，前端只接受 clipboard target 且限制 payload 大小。
+- 支持终端输出发起的 OSC 52 剪贴板写入；tmux copy-mode 可通过 pane 内选择把内容写入浏览器剪贴板，前端只接受 clipboard target 且限制 payload 大小。OpenCode 活动终端默认让普通左键拖拽建立本地选区并复制，避免 mouse tracking 把复制手势回灌为模型输入；单击和滚轮仍保留 TUI 操作。
 - 支持终端焦点补救和输入所有权；真实 stdin 默认只落到当前聚焦主终端，多终端监控模式下也只落到当前输入窗格。交互终端开启 mouse tracking 时，普通滚轮作为鼠标协议发送到当前 tmux/TUI pane；`Shift+滚轮`、未开启 mouse tracking 的大屏终端和非输入监控窗格继续滚动各自 xterm scrollback。聚焦页右侧会话小卡始终是被动预览，滚轮穿透小终端并滚动“全部会话”侧栏，不控制预览内部历史。
 
 ## 7. 文件浏览器

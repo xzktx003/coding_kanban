@@ -1234,6 +1234,9 @@ export function AgentFocusView({
                           inputEnabled={isActiveInputPane}
                           mobileTouchMode={mobileTerminalTouchMode}
                           onFontSizeChange={onTerminalFontSizeChange}
+                          preferLocalMouseSelection={
+                            session.agentKind.toLowerCase() === "opencode"
+                          }
                         />
                       </Suspense>
                     ) : (

@@ -35,6 +35,7 @@ import {
   shouldAttemptTerminalInputForward,
 } from "../lib/terminal-input-forwarding";
 import { stripTerminalResponsePayload } from "../lib/terminal-input";
+import { resolveTerminalMouseGestureAction } from "../lib/terminal-mouse-selection";
 import {
   createSafariTextInputRecoveryState,
   isSafariTerminalInputRecoveryRequired,
@@ -57,6 +58,7 @@ interface TerminalViewProps {
   onFontSizeChange?: (fontSize: number) => void;
   suspended?: boolean;
   wheelPassthrough?: boolean;
+  preferLocalMouseSelection?: boolean;
 }
 
 type TerminalContainer = HTMLDivElement & {
@@ -108,6 +110,7 @@ export function TerminalView({
   onFontSizeChange,
   suspended = false,
   wheelPassthrough = false,
+  preferLocalMouseSelection = false,
 }: TerminalViewProps) {
   const inputEnabled = inputEnabledProp ?? interactive;
   const terminalFontSize = clampTerminalFontSize(
@@ -183,7 +186,7 @@ export function TerminalView({
     const isPreview = !interactive;
     const ownerToken = Symbol(agentSessionId);
     const ownerPriority = 2;
-    let handleMouseDownCapture: (() => void) | null = null;
+    let handleMouseDownCapture: ((event: MouseEvent) => void) | null = null;
     let handlePointerDownCapture: ((event: PointerEvent) => void) | null = null;
     let handleTerminalFocusIn: ((event: FocusEvent) => void) | null = null;
     let handleTerminalFocusOut: ((event: FocusEvent) => void) | null = null;
@@ -202,6 +205,7 @@ export function TerminalView({
     let handleDocumentKeyDownCapture: ((event: KeyboardEvent) => void) | null =
       null;
     let handleSafariNativeInput: ((event: Event) => void) | null = null;
+    let clearPreferredMouseGesture: (() => void) | null = null;
     let disposed = false;
     let closeAfterOpen = false;
     let lastExternalPointerIntentAt = 0;
@@ -396,6 +400,209 @@ export function TerminalView({
       copyTerminalSelectionToClipboard();
     };
     stage.addEventListener("keydown", handleStageCopyKey);
+
+    let replayingPreferredMouseGesture = false;
+    let preferredMouseGesture: {
+      target: HTMLElement;
+      startX: number;
+      startY: number;
+      selectionStarted: boolean;
+      downEvent: MouseEvent;
+    } | null = null;
+
+    const stopPreferredMouseEvent = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+    };
+
+    const dispatchPreferredMouseEvent = (
+      type: "mousedown" | "mousemove" | "mouseup",
+      target: HTMLElement,
+      source: MouseEvent,
+      options: { shiftKey: boolean; buttons: number },
+    ) => {
+      replayingPreferredMouseGesture = true;
+      try {
+        target.dispatchEvent(
+          new MouseEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            view: window,
+            detail: source.detail,
+            screenX: source.screenX,
+            screenY: source.screenY,
+            clientX: source.clientX,
+            clientY: source.clientY,
+            button: 0,
+            buttons: options.buttons,
+            ctrlKey: source.ctrlKey,
+            altKey: source.altKey,
+            metaKey: source.metaKey,
+            shiftKey: options.shiftKey,
+          }),
+        );
+      } finally {
+        replayingPreferredMouseGesture = false;
+      }
+    };
+
+    const removePreferredMouseGestureListeners = () => {
+      document.removeEventListener("mousemove", handlePreferredMouseMove, true);
+      document.removeEventListener("mouseup", handlePreferredMouseUp, true);
+    };
+
+    const startPreferredLocalSelection = (event: MouseEvent) => {
+      const gesture = preferredMouseGesture;
+      if (!gesture || gesture.selectionStarted) {
+        return;
+      }
+
+      gesture.selectionStarted = true;
+      dispatchPreferredMouseEvent(
+        "mousedown",
+        gesture.target,
+        gesture.downEvent,
+        { shiftKey: true, buttons: 1 },
+      );
+      const moveTarget =
+        (document.elementFromPoint(
+          event.clientX,
+          event.clientY,
+        ) as HTMLElement | null) ?? gesture.target;
+      dispatchPreferredMouseEvent("mousemove", moveTarget, event, {
+        shiftKey: true,
+        buttons: 1,
+      });
+    };
+
+    function handlePreferredMouseMove(event: MouseEvent) {
+      const gesture = preferredMouseGesture;
+      if (!gesture || replayingPreferredMouseGesture) {
+        return;
+      }
+
+      stopPreferredMouseEvent(event);
+      const action = resolveTerminalMouseGestureAction({
+        phase: "move",
+        startX: gesture.startX,
+        startY: gesture.startY,
+        currentX: event.clientX,
+        currentY: event.clientY,
+        selectionStarted: gesture.selectionStarted,
+      });
+      if (action === "hold") {
+        return;
+      }
+      if (action === "start-selection") {
+        startPreferredLocalSelection(event);
+        return;
+      }
+
+      const moveTarget =
+        (document.elementFromPoint(
+          event.clientX,
+          event.clientY,
+        ) as HTMLElement | null) ?? gesture.target;
+      dispatchPreferredMouseEvent("mousemove", moveTarget, event, {
+        shiftKey: true,
+        buttons: 1,
+      });
+    }
+
+    function handlePreferredMouseUp(event: MouseEvent) {
+      const gesture = preferredMouseGesture;
+      if (!gesture || replayingPreferredMouseGesture) {
+        return;
+      }
+
+      stopPreferredMouseEvent(event);
+      if (!gesture.selectionStarted) {
+        const moveAction = resolveTerminalMouseGestureAction({
+          phase: "move",
+          startX: gesture.startX,
+          startY: gesture.startY,
+          currentX: event.clientX,
+          currentY: event.clientY,
+          selectionStarted: false,
+        });
+        if (moveAction === "start-selection") {
+          startPreferredLocalSelection(event);
+        }
+      }
+
+      const action = resolveTerminalMouseGestureAction({
+        phase: "up",
+        startX: gesture.startX,
+        startY: gesture.startY,
+        currentX: event.clientX,
+        currentY: event.clientY,
+        selectionStarted: gesture.selectionStarted,
+      });
+      const upTarget =
+        (document.elementFromPoint(
+          event.clientX,
+          event.clientY,
+        ) as HTMLElement | null) ?? gesture.target;
+
+      if (action === "finish-selection") {
+        dispatchPreferredMouseEvent("mouseup", upTarget, event, {
+          shiftKey: true,
+          buttons: 0,
+        });
+        timeoutIds.push(window.setTimeout(copyTerminalSelectionToClipboard, 0));
+      } else {
+        dispatchPreferredMouseEvent(
+          "mousedown",
+          gesture.target,
+          gesture.downEvent,
+          { shiftKey: false, buttons: 1 },
+        );
+        dispatchPreferredMouseEvent("mouseup", gesture.target, event, {
+          shiftKey: false,
+          buttons: 0,
+        });
+      }
+
+      preferredMouseGesture = null;
+      removePreferredMouseGestureListeners();
+    }
+
+    const beginPreferredMouseGesture = (event: MouseEvent): boolean => {
+      const target = event.target as HTMLElement | null;
+      if (
+        replayingPreferredMouseGesture ||
+        !preferLocalMouseSelection ||
+        !inputEnabledRef.current ||
+        event.button !== 0 ||
+        event.shiftKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        event.metaKey ||
+        !target?.closest(".xterm-screen")
+      ) {
+        return false;
+      }
+
+      preferredMouseGesture = {
+        target,
+        startX: event.clientX,
+        startY: event.clientY,
+        selectionStarted: false,
+        downEvent: event,
+      };
+      document.addEventListener("mousemove", handlePreferredMouseMove, true);
+      document.addEventListener("mouseup", handlePreferredMouseUp, true);
+      stopPreferredMouseEvent(event);
+      return true;
+    };
+
+    clearPreferredMouseGesture = () => {
+      preferredMouseGesture = null;
+      removePreferredMouseGestureListeners();
+    };
+
     const getHelperTextarea = () =>
       container.querySelector(
         ".xterm-helper-textarea",
@@ -1296,13 +1503,14 @@ export function TerminalView({
         focusInteractiveTerminal(true);
       };
 
-      handleMouseDownCapture = () => {
+      handleMouseDownCapture = (event) => {
         if (!inputEnabledRef.current) {
           return;
         }
 
         rememberTerminalIntent();
         focusInteractiveTerminal(true);
+        beginPreferredMouseGesture(event);
       };
 
       handleTerminalFocusOut = (event) => {
@@ -1519,6 +1727,7 @@ export function TerminalView({
       osc52ClipboardDisposable.dispose();
       stage.removeEventListener("mouseup", handleStageMouseUp);
       stage.removeEventListener("keydown", handleStageCopyKey);
+      clearPreferredMouseGesture?.();
       if (handlePointerDownCapture) {
         container.removeEventListener(
           "pointerdown",
@@ -1648,6 +1857,7 @@ export function TerminalView({
     agentSessionId,
     interactive,
     mobileTouchMode,
+    preferLocalMouseSelection,
     suspended,
     wheelPassthrough,
   ]);
