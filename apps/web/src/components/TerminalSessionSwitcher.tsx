@@ -14,9 +14,14 @@ import {
   resolveSessionGroupInlineStyle,
   resolveSessionGroupTone,
 } from "./SessionGroupControls";
-import { groupSessions, type SessionGroupState } from "../lib/session-groups";
+import {
+  groupSessions,
+  isSessionGroupCollapsed,
+  type SessionGroupState,
+} from "../lib/session-groups";
 
 const ALL_SESSIONS_GROUP_ID = "__all_sessions__";
+const TERMINAL_SWITCHER_COLLAPSE_SCOPE = "terminal-switcher";
 
 const stateLabels: Record<string, string> = {
   running: "运行中",
@@ -125,6 +130,7 @@ interface TerminalSessionSwitcherProps {
   sessionGroups: SessionGroupState;
   placementBySessionId: ReadonlyMap<string, TerminalSessionPlacement>;
   onSelect: (sessionId: string) => void;
+  onToggleGroup?: (groupId: string, scope?: string) => void;
 }
 
 interface SwitcherMenuPosition {
@@ -140,6 +146,102 @@ function formatSessionMeta(session: AgentSessionRecord): string {
   return [session.agentKind, transport].filter(Boolean).join(" · ");
 }
 
+interface TerminalSessionSwitchGroupProps {
+  collapsed: boolean;
+  collapseDisabled: boolean;
+  group: TerminalSessionSwitchGroup;
+  groupIndex: number;
+  onSelect: (item: TerminalSessionSwitchItem) => void;
+  onToggle: () => void;
+}
+
+export function TerminalSessionSwitchGroup({
+  collapsed,
+  collapseDisabled,
+  group,
+  groupIndex,
+  onSelect,
+  onToggle,
+}: TerminalSessionSwitchGroupProps) {
+  return (
+    <section
+      aria-label={group.name}
+      className="terminal-session-switch-group"
+      data-collapsed={collapsed ? "true" : "false"}
+      data-group-tone={group.tone}
+      data-terminal-switch-group-id={group.id}
+      role="group"
+      style={resolveSessionGroupInlineStyle(group.id, groupIndex, "terminal")}
+    >
+      <button
+        aria-expanded={!collapsed}
+        aria-label={
+          collapseDisabled
+            ? `${group.name}，搜索时保持展开`
+            : `${collapsed ? "展开" : "折叠"}分组 ${group.name}`
+        }
+        className="terminal-session-switch-group-header"
+        disabled={collapseDisabled}
+        onClick={onToggle}
+        title={
+          collapseDisabled
+            ? "搜索时分组保持展开"
+            : collapsed
+              ? "展开分组"
+              : "折叠分组"
+        }
+        type="button"
+      >
+        <span className="terminal-session-switch-group-heading">
+          <span
+            aria-hidden="true"
+            className="terminal-session-switch-group-chevron"
+          />
+          <span>{group.name}</span>
+        </span>
+        <strong>{group.items.length}</strong>
+      </button>
+      {!collapsed && (
+        <div className="terminal-session-switch-group-items">
+          {group.items.map((item) => {
+            const stateLabel =
+              stateLabels[item.session.interactionState] ??
+              item.session.interactionState;
+            return (
+              <button
+                key={item.session.id}
+                aria-selected={item.selected}
+                className="terminal-session-switch-option"
+                data-session-state={item.session.interactionState}
+                data-terminal-switch-session-id={item.session.id}
+                disabled={item.occupiedPaneIndex !== null}
+                onClick={() => onSelect(item)}
+                role="option"
+                type="button"
+              >
+                <span
+                  aria-label={stateLabel}
+                  className="terminal-session-switch-status"
+                />
+                <span className="terminal-session-switch-identity">
+                  <strong>{item.session.displayName}</strong>
+                  <small>{formatSessionMeta(item.session)}</small>
+                </span>
+                <span className="terminal-session-switch-badges">
+                  {item.selected && <span>当前</span>}
+                  {item.occupiedPaneIndex !== null && (
+                    <span>窗格 {item.occupiedPaneIndex}</span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function TerminalSessionSwitcher({
   paneIndex,
   selectedSessionId,
@@ -147,6 +249,7 @@ export function TerminalSessionSwitcher({
   sessionGroups,
   placementBySessionId,
   onSelect,
+  onToggleGroup,
 }: TerminalSessionSwitcherProps) {
   const [open, setOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<SwitcherMenuPosition | null>(
@@ -466,70 +569,41 @@ export function TerminalSessionSwitcher({
                   未找到匹配的会话或分组
                 </div>
               ) : (
-                groups.map((group) => (
-                  <section
-                    key={group.id}
-                    aria-label={group.name}
-                    className="terminal-session-switch-group"
-                    data-group-tone={group.tone}
-                    data-terminal-switch-group-id={group.id}
-                    role="group"
-                    style={resolveSessionGroupInlineStyle(
+                groups.map((group) => {
+                  const collapseDisabled = Boolean(searchQuery);
+                  const collapsed =
+                    !collapseDisabled &&
+                    isSessionGroupCollapsed(
+                      sessionGroups,
                       group.id,
-                      sessionGroups.groups.findIndex(
+                      TERMINAL_SWITCHER_COLLAPSE_SCOPE,
+                    );
+                  return (
+                    <TerminalSessionSwitchGroup
+                      key={group.id}
+                      collapsed={collapsed}
+                      collapseDisabled={collapseDisabled}
+                      group={group}
+                      groupIndex={sessionGroups.groups.findIndex(
                         (item) => item.id === group.id,
-                      ),
-                      "terminal",
-                    )}
-                  >
-                    <div className="terminal-session-switch-group-header">
-                      <span>{group.name}</span>
-                      <strong>{group.items.length}</strong>
-                    </div>
-                    <div className="terminal-session-switch-group-items">
-                      {group.items.map((item) => {
-                        const stateLabel =
-                          stateLabels[item.session.interactionState] ??
-                          item.session.interactionState;
-                        return (
-                          <button
-                            key={item.session.id}
-                            aria-selected={item.selected}
-                            className="terminal-session-switch-option"
-                            data-session-state={item.session.interactionState}
-                            data-terminal-switch-session-id={item.session.id}
-                            disabled={item.occupiedPaneIndex !== null}
-                            onClick={() => {
-                              if (item.selected) {
-                                setOpen(false);
-                                triggerRef.current?.focus();
-                                return;
-                              }
-                              selectSession(item.session.id);
-                            }}
-                            role="option"
-                            type="button"
-                          >
-                            <span
-                              aria-label={stateLabel}
-                              className="terminal-session-switch-status"
-                            />
-                            <span className="terminal-session-switch-identity">
-                              <strong>{item.session.displayName}</strong>
-                              <small>{formatSessionMeta(item.session)}</small>
-                            </span>
-                            <span className="terminal-session-switch-badges">
-                              {item.selected && <span>当前</span>}
-                              {item.occupiedPaneIndex !== null && (
-                                <span>窗格 {item.occupiedPaneIndex}</span>
-                              )}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </section>
-                ))
+                      )}
+                      onSelect={(item) => {
+                        if (item.selected) {
+                          setOpen(false);
+                          triggerRef.current?.focus();
+                          return;
+                        }
+                        selectSession(item.session.id);
+                      }}
+                      onToggle={() =>
+                        onToggleGroup?.(
+                          group.id,
+                          TERMINAL_SWITCHER_COLLAPSE_SCOPE,
+                        )
+                      }
+                    />
+                  );
+                })
               )}
             </div>
           </div>,

@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
-import { buildTerminalSessionSwitchGroups } from "./TerminalSessionSwitcher.js";
+import {
+  buildTerminalSessionSwitchGroups,
+  TerminalSessionSwitchGroup,
+} from "./TerminalSessionSwitcher.js";
 
 function makeSession(id: string, displayName: string): AgentSessionRecord {
   return {
@@ -159,5 +164,50 @@ describe("buildTerminalSessionSwitchGroups", () => {
     });
 
     assert.deepEqual(groups, []);
+  });
+});
+
+describe("TerminalSessionSwitchGroup", () => {
+  it("keeps a collapsed group header visible while hiding its sessions", () => {
+    const group = {
+      id: "group-research",
+      name: "模型与量化",
+      tone: "amber" as const,
+      items: [
+        {
+          session: makeSession("session-alpha", "Alpha"),
+          selected: true,
+          occupiedPaneIndex: null,
+        },
+      ],
+    };
+    const collapsed = renderToStaticMarkup(
+      createElement(TerminalSessionSwitchGroup, {
+        collapsed: true,
+        collapseDisabled: false,
+        group,
+        groupIndex: 0,
+        onSelect: () => {},
+        onToggle: () => {},
+      }),
+    );
+
+    assert.match(collapsed, /aria-expanded="false"/);
+    assert.match(collapsed, /aria-label="展开分组 模型与量化"/);
+    assert.match(collapsed, /模型与量化/);
+    assert.doesNotMatch(collapsed, /data-terminal-switch-session-id/);
+
+    const expanded = renderToStaticMarkup(
+      createElement(TerminalSessionSwitchGroup, {
+        collapsed: false,
+        collapseDisabled: false,
+        group,
+        groupIndex: 0,
+        onSelect: () => {},
+        onToggle: () => {},
+      }),
+    );
+    assert.match(expanded, /aria-expanded="true"/);
+    assert.match(expanded, /data-terminal-switch-session-id="session-alpha"/);
   });
 });

@@ -72,7 +72,7 @@ interface AgentFocusViewProps {
   onDeleteSessionGroup?: (groupId: string) => void;
   onMoveSessionToGroup?: (sessionId: string, groupId: string | null) => void;
   onRenameSessionGroup?: (groupId: string) => void;
-  onToggleSessionGroup?: (groupId: string) => void;
+  onToggleSessionGroup?: (groupId: string, scope?: string) => void;
 }
 
 const stateLabels: Record<string, string> = {
@@ -1210,6 +1210,7 @@ export function AgentFocusView({
                       selectedSessionId={session?.id ?? null}
                       sessionGroups={sessionGroups}
                       sessions={displayableSessions}
+                      onToggleGroup={onToggleSessionGroup}
                     />
                     <button
                       className={`focus-terminal-input-btn${isActiveInputPane ? " focus-terminal-input-btn--active" : ""}`}
