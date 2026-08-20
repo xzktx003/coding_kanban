@@ -180,6 +180,12 @@ describe("isTerminalWheelBlockedByOverlayTarget", () => {
     );
     assert.equal(
       isTerminalWheelBlockedByOverlayTarget(
+        targetInsideOverlay(".mobile-session-picker-menu"),
+      ),
+      true,
+    );
+    assert.equal(
+      isTerminalWheelBlockedByOverlayTarget(
         targetInsideOverlay(".file-browser-modal"),
       ),
       true,

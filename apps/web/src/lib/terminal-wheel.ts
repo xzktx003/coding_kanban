@@ -33,6 +33,7 @@ const TERMINAL_WHEEL_BLOCKING_OVERLAYS = [
   ".agent-transcript-backdrop",
   ".new-session-backdrop",
   ".terminal-session-switcher-menu",
+  ".mobile-session-picker-menu",
 ];
 
 interface ClosestTarget {
