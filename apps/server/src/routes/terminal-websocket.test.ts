@@ -334,7 +334,7 @@ test("terminal websocket drops focus reports for local tmux sessions so they do 
   }
 });
 
-test("terminal websocket keeps split bracketed paste chunks literal for local tmux sessions", async () => {
+test("terminal websocket keeps split bracketed paste text intact for local tmux sessions", async () => {
   const { app } = buildServer();
   const sessionName = `tmux-split-bracketed-paste-${Date.now()}`;
   const readyMarker = `TMUX_SPLIT_PASTE_READY_${Date.now()}`;
@@ -436,7 +436,7 @@ test("terminal websocket keeps split bracketed paste chunks literal for local tm
 
     const capturedHex = readFileSync(capturePath, "utf8");
     const expectedHex = Buffer.from(
-      `\u001b[200~first pasted line\rsecond pasted line\rthird pasted line ${pasteMarker}\u001b[201~`,
+      `first pasted line\rsecond pasted line\rthird pasted line ${pasteMarker}`,
     ).toString("hex");
 
     assert.equal(capturedHex, expectedHex);

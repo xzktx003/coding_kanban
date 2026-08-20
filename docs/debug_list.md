@@ -63,6 +63,8 @@
 - shell/prompt 行编辑态触发的 Secondary DA 原样转发会把终端版本串回显到提示符。修复为仅过滤这类会污染 shell 提示符的 Secondary DA，应答性能力握手仍保留。
 - kanban 终端偶发回显 `11;rgb:... 10;rgb:... 4;...`。根因是 OSC 10/11/4 color-query replies 通过 live stdin 泄漏到 PTY。修复为在 live stdin 路径做窄化过滤，只屏蔽这类 rgb 回包，同时保留 DA/DSR/CPR 等握手回复。
 - 终端或 tmux 中的 Copilot/Codex 可响应 `Ctrl+C`，但快速普通输入无效，启动命令还可能变成 `5Rnode ...`。根因是浏览器为旧 DA 查询发出的回复先到，而当前 PTY 的 CPR 回复后到，二者与 REST/键盘文本交错进入 shell。修复为按 PTY 输出的 DA/DSR/CPR 查询类型建立短暂 pending 队列，只写入匹配回复，等全部匹配后再释放普通文本；无匹配回复在 250ms 后超时释放，陈旧回复不进入 PTY。单元和真实浏览器 Copilot 启动回归覆盖该顺序。
+- OpenCode 开启 mouse tracking 后，Kanban 把 hover 鼠标报告当成用户输入：会话被持续标成 running、预览变成 `Last input: ESC[<35;...M`，并高频刷新完整看板。修复为鼠标移动报告只作为终端控制流处理，不进入 TUI、不记用户输入、不覆盖预览；明确的 OpenCode/其他非 Codex 会话不再读取同目录 Codex JSONL 摘要。
+- OpenCode 会话与 Codex 共用工作目录时，卡片摘要/完整记录/任务变更曾按目录回退读取最近 Codex JSONL，导致显示其他会话内容。修复为明确的 OpenCode、Claude、Copilot 等非 Codex 会话在三条 Codex 数据路由和移动端摘要展示中统一不可用，同时保留 `shell` / `node` tmux 的 Codex 兼容定位。
 
 ## tmux 与终端渲染
 

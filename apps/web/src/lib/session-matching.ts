@@ -2,10 +2,7 @@ import type {
   AgentSessionRecord,
   ScanResult,
 } from "@agent-orchestrator/shared";
-import {
-  shellQuote,
-  formatWorkingDirectory,
-} from "@agent-orchestrator/shared";
+import { shellQuote, formatWorkingDirectory } from "@agent-orchestrator/shared";
 
 import {
   buildResilientCopilotInvocation,
@@ -32,8 +29,6 @@ export function sortScanResults(results: ScanResult[]): ScanResult[] {
     return a.displayName.localeCompare(b.displayName);
   });
 }
-
-
 
 function buildAgentInvocation(
   agentKind: string,

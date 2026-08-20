@@ -443,3 +443,104 @@ test("GET task summary supports local tmux sessions even when agentKind is shell
   );
   await app.close();
 });
+
+test("Codex JSONL routes ignore explicit OpenCode tmux sessions", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "opencode",
+    displayName: "OpenCode tmux",
+    workingDirectory: "/workspace/shared",
+    connectionState: "online",
+    interactionState: "running",
+    transportRef: { tmuxSession: "tmux-opencode" },
+  });
+  let locatorCalled = false;
+  let transcriptReadCalled = false;
+  let changesReadCalled = false;
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {} as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    codexSessionLocator: {
+      async resolve() {
+        locatorCalled = true;
+        return "wrong-codex-session";
+      },
+    },
+    codexTranscriptService: {
+      read() {
+        transcriptReadCalled = true;
+        return {
+          available: true,
+          agentKind: "codex",
+          sessionId: "wrong-codex-session",
+          matchedBy: "working-directory",
+          updatedAt: "2026-08-20T00:00:00.000Z",
+          entries: [],
+        };
+      },
+    },
+    codexChangeService: {
+      read() {
+        changesReadCalled = true;
+        return {
+          available: true,
+          scope: "task",
+          agentKind: "codex",
+          sessionId: "wrong-codex-session",
+          matchedBy: "working-directory",
+          confidence: "medium",
+          changedFiles: 0,
+          addedLines: 0,
+          deletedLines: 0,
+          files: [],
+          generatedAt: "2026-08-20T00:00:00.000Z",
+        };
+      },
+    },
+  });
+
+  const [summaryResponse, changesResponse, transcriptResponse] =
+    await Promise.all([
+      app.inject({
+        method: "GET",
+        url: `/api/agent-sessions/${session.id}/task-summary`,
+      }),
+      app.inject({
+        method: "GET",
+        url: `/api/agent-sessions/${session.id}/task-changes`,
+      }),
+      app.inject({
+        method: "GET",
+        url: `/api/agent-sessions/${session.id}/transcript`,
+      }),
+    ]);
+
+  assert.equal(
+    (summaryResponse.json() as AgentTaskSummaryResponse).available,
+    false,
+  );
+  assert.equal(
+    (changesResponse.json() as AgentTaskDiffResponse).available,
+    false,
+  );
+  assert.equal(
+    (transcriptResponse.json() as AgentTranscriptResponse).available,
+    false,
+  );
+  assert.equal(locatorCalled, false);
+  assert.equal(transcriptReadCalled, false);
+  assert.equal(changesReadCalled, false);
+  assert.equal(registry.get(session.id).agentSessionId, undefined);
+  await app.close();
+});

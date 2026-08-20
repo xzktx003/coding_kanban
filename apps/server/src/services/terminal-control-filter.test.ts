@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isTerminalControlPayload,
   isTerminalFocusPayload,
   isTerminalPtyControlPayload,
   isTerminalMousePayload,
@@ -104,6 +105,13 @@ test("identify terminal control payloads that must bypass tmux send-keys", () =>
   assert.equal(isTerminalPtyControlPayload("\u001bOA"), false);
   assert.equal(isTerminalPtyControlPayload("\u001b[A"), false);
   assert.equal(isTerminalPtyControlPayload("whoami"), false);
+});
+
+test("classify mouse motion reports as non-semantic terminal control input", () => {
+  assert.equal(isTerminalControlPayload("\u001b[<35;68;23M"), true);
+  assert.equal(isTerminalControlPayload("\u001b[<64;68;23M"), true);
+  assert.equal(isTerminalControlPayload("\u001b[<0;68;23M"), true);
+  assert.equal(isTerminalControlPayload("hello\r"), false);
 });
 
 test("strip OSC color-query replies so shell prompts do not echo rgb payload noise", () => {

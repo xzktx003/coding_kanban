@@ -170,6 +170,33 @@ test("user input keeps direct sessions running after inactivity", async () => {
   await waitForInteractionState(registry, session.id, "running");
 });
 
+test("mouse motion reports do not count as semantic user input", () => {
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "test",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "opencode",
+    displayName: "OpenCode Preview",
+    interactionState: "idle",
+    outputPreview: "Build auto · gpt-5.6-sol",
+    transportRef: {
+      tmuxSession: "modelzoo-frontend",
+    },
+  });
+
+  const updated = registry.writeToSession(session.id, {
+    input: "\u001b[<35;68;23M",
+  });
+
+  assert.equal(updated.interactionState, "idle");
+  assert.equal(updated.outputPreview, "Build auto · gpt-5.6-sol");
+  assert.equal(
+    registry.getDetail(session.id).outputEntries.at(-1)?.text,
+    undefined,
+  );
+});
+
 test("repeated identical terminal redraws still keep sessions running", async () => {
   const registry = new AgentSessionRegistry();
   const session = createSession(registry);

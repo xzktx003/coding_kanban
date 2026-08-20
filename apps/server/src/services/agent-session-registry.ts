@@ -13,6 +13,7 @@ import {
 } from "@agent-orchestrator/shared";
 
 import { DEFAULT_TERMINAL_REGISTRY_OUTPUT_ENTRIES } from "../config/server-runtime-config.js";
+import { isTerminalControlPayload } from "./terminal-control-filter.js";
 
 type SnapshotListener = (snapshot: ListAgentSessionsResponse) => void;
 
@@ -352,6 +353,10 @@ export class AgentSessionRegistry {
     agentSessionId: string,
     input: StdinAgentSessionInput,
   ): AgentSessionRecord {
+    if (isTerminalControlPayload(input.input)) {
+      return this.get(agentSessionId);
+    }
+
     this.noteUserInput(agentSessionId, input.input);
 
     const agentSession = this.get(agentSessionId);
@@ -626,6 +631,10 @@ export class AgentSessionRegistry {
 
   noteUserInput(agentSessionId: string, input: string): AgentSessionRecord {
     this.get(agentSessionId);
+
+    if (isTerminalControlPayload(input)) {
+      return this.get(agentSessionId);
+    }
 
     return this.updateSession(agentSessionId, {
       connectionState: "online",

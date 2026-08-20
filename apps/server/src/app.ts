@@ -45,6 +45,7 @@ import { SshRuntimeManager } from "./services/ssh-runtime-manager.js";
 import type { SessionStateStore } from "./services/session-state-store.js";
 import {
   isTerminalFocusPayload,
+  isTerminalMouseMotionPayload,
   isTerminalPtyControlPayload,
   sanitizeReplayForTerminal,
   stripTerminalResponsePayload,
@@ -310,6 +311,10 @@ export function buildServer(options: BuildServerOptions = {}): {
             const session = registry.has(id) ? registry.get(id) : null;
             if (session?.transportRef?.tmuxSession && !session.sshTarget) {
               if (isTerminalFocusPayload(sanitizedPayload)) {
+                return;
+              }
+
+              if (isTerminalMouseMotionPayload(sanitizedPayload)) {
                 return;
               }
 

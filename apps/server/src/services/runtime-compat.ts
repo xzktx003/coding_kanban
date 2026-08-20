@@ -239,6 +239,10 @@ export function resolveTmuxBinary(
     return configured;
   }
 
+  if (isExecutableOnPath("tmux", env.PATH)) {
+    return "tmux";
+  }
+
   const candidates = [
     "/opt/homebrew/bin/tmux",
     "/usr/local/bin/tmux",

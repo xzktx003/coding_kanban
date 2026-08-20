@@ -7,7 +7,7 @@
 - 主页把未隐藏的会话自动分入“需响应 / 执行中 / 待验收 / 可继续”四列，并在列头显示数量：明确等待用户回答、权限或确认的 `awaiting_input` 会话进入“需响应”，`running` 进入“执行中”，刚从运行态完成且尚未查看的 `idle` / `exited` 会话进入“待验收”，已查看的完成会话以及 `detached` 会话进入“可继续”。查看“需响应”只打开上下文，不会清除等待输入状态；执行新命令或恢复运行后进入“执行中”。桌面端四列并排，窄屏纵向排列。
 - 完成待验收状态由后端随会话快照持久化，不依赖单个浏览器页面；双击看板卡片、切换聚焦会话、激活多终端窗格或在手机端打开会话均视为已查看。
 - 每列展示会话卡片的名称、状态、Agent 类型、主机、工作目录和轻量终端文本预览；受管 tmux 使用独立的小号 `tmux` 标签，不把传输类型拼进显示名称。用户分组继续保留，并嵌套在各状态列内。
-- 本机 Codex 卡片以及绑定本地 tmux 的 Agent 卡片从结构化 JSONL 会话记录中提取最后一条用户指令和最后一条 Agent 回复，经过空白清理、Markdown 标记移除和长度截断后，以“任务 / 回复”摘要展示在终端片段上方；不调用大模型。没有结构化记录或远端会话继续只显示终端预览。
+- 本机 Codex 卡片以及绑定本地 tmux 的 `shell` / `node` 兼容卡片从结构化 JSONL 会话记录中提取最后一条用户指令和最后一条 Agent 回复，经过空白清理、Markdown 标记移除和长度截断后，以“任务 / 回复”摘要展示在终端片段上方；明确的 OpenCode、Claude、Copilot 等非 Codex 会话不会读取同目录 Codex JSONL。没有结构化记录或远端会话继续只显示终端预览。
 - 本地会话卡片按工作目录读取只读 Git 摘要，以固定高度单行展示项目名、当前分支或 detached HEAD、worktree 标记、变更文件数及已跟踪内容的增删行数；未跟踪文件计入文件数但不计增删行。非 Git 目录显示项目名和“非 Git 工作目录”，远端会话显示“远端 Git 信息暂不可用”。
 - 宫格看板支持按最近活动、项目和名称切换列内排序；排序不会打乱四个状态列或用户分组，选择保存在浏览器本地。
 - 完成态宫格卡片支持主动标记已读/未读；未读状态进入“待验收”，并通过后端会话状态持久化。
@@ -71,7 +71,7 @@
 - 手机端提供固定主导航：看板、活动、当前会话、项目/文件；活动按最近更新时间展示摘要，项目/文件按主机和项目目录聚合会话入口，并可直接进入只读文件系统。文件系统复用本地/SSH 文件接口，支持目录导航、当前目录搜索、隐藏文件开关、可纵向触摸滚动的文本与图片预览、复制路径；Markdown 与电脑端复用安全的 GFM/KaTeX 渲染链并适配窄屏表格、代码和图片，同时提供“渲染 / 源码”查看方式切换。文件路径、查看方式和分段导航默认收进可折叠的“文件选项”，让正文优先占用手机视口；大型 UTF-8 文件按 64 KiB 窗口流式读取，可用“上一段 / 下一段”继续阅读，切换查看方式或翻段时页面始终只保留当前窗口。该视图不挂载终端，也不提供修改或删除操作。
 
 - 聚焦主终端使用 xterm.js 渲染，后端通过 WebSocket 发送 scrollback replay 与实时输出。
-- 聚焦页标题栏提供“完整记录”入口：多屏模式下入口持续绑定带“当前输入”标记的活动窗格，点击终端内容（包括 xterm 的 helper textarea）、“设为输入”或侧栏卡片切换当前窗格后，标题、入口会话 ID 和已打开弹窗的数据源同步切换。本机会话可读取 `~/.codex/sessions` 中的 Codex JSONL，按最新记录在前的倒序展示用户消息、助手回答及非 `exec` 工具记录，不受 TUI 光标移动、擦除行或终端重绘影响；`exec` 的调用与输出均不展示。用户与 Codex 发言统一使用安全 Markdown/GFM/KaTeX 渲染，并在接近可视区域时才懒加载；长记录首次只挂载最新 30 条，滚动到当前批次末尾后必须点击“继续加载”才追加下一批 30 条较早记录，避免一次性创建大量 DOM 和 Markdown 渲染任务。工具输出保持折叠的等宽原文，可按需展开和手动刷新；两类正文均跟随全局终端字号。本地 tmux 会先从对应 pane 的进程树识别当前 Codex 持有的顶层 session JSONL，并排除子代理记录，因此多个 tmux 即使共享工作目录也各自显示对应历史；无法解析进程身份时才按已绑定 session ID 或工作目录最近记录兜底。首版不读取远端主机文件。
+- 聚焦页标题栏提供“完整记录”入口：多屏模式下入口持续绑定带“当前输入”标记的活动窗格，点击终端内容（包括 xterm 的 helper textarea）、“设为输入”或侧栏卡片切换当前窗格后，标题、入口会话 ID 和已打开弹窗的数据源同步切换。本机 Codex 及明确登记为 Codex 的本地 tmux 兼容会话可读取 `~/.codex/sessions` 中的 Codex JSONL，按最新记录在前的倒序展示用户消息、助手回答及非 `exec` 工具记录，不受 TUI 光标移动、擦除行或终端重绘影响；OpenCode、Claude、Copilot 等明确非 Codex 会话不读取同目录记录。`exec` 的调用与输出均不展示。用户与 Codex 发言统一使用安全 Markdown/GFM/KaTeX 渲染，并在接近可视区域时才懒加载；长记录首次只挂载最新 30 条，滚动到当前批次末尾后必须点击“继续加载”才追加下一批 30 条较早记录，避免一次性创建大量 DOM 和 Markdown 渲染任务。工具输出保持折叠的等宽原文，可按需展开和手动刷新；本地 tmux 会先从对应 pane 的进程树识别当前 Codex 持有的顶层 session JSONL，并排除子代理记录，因此多个 tmux 即使共享工作目录也各自显示对应历史；无法解析进程身份时才按已绑定 session ID 或工作目录最近记录兜底。首版不读取远端主机文件。
 - 终端历史保留上限可配置：后端 live PTY replay 默认保留 4 MiB，tmux observe/refresh 默认捕获最近 20000 行，registry fallback 默认保留 5000 条输出记录，前端 xterm 默认保留 20000 行；tmux attach 会在连接前把 pane 历史预灌到 PTY replay，资源诊断会提示 PTY replay 是否已发生裁剪。
 - 所有内置 xterm 终端共用顶栏字号设置；滑杆拖动中只更新顶栏显示，鼠标松开、键盘调整结束或失焦提交后才对聚焦主终端、多屏监控终端、完整预览终端和手机端终端生效，并重新 fit/resize。
 - 提供手机端终端控制页，默认入口为 `/?view=mobile`，兼容 `/mobile`、`/m` 和 `#/mobile`；进入后默认直接展示单会话全屏终端，复用现有会话和终端通道，以底部快捷键条和多行输入框为主，解决手机缺少 `Ctrl+C`、`Esc`、方向键、稳定软键盘输入和终端历史滑动的问题。手机终端在挂载时完成一次不启用 stdin 的光标初始化，并使用高对比度下划线光标；输入框或快捷键持有页面焦点时仍显示 TUI 当前编辑位置，初始化后会立即归还此前的页面焦点；快捷键条提供”说明”按钮，可弹出各快捷键用途说明；说明弹窗支持 `aria-modal`、`aria-labelledby`、Tab 聚焦陷阱和 Escape 关闭。
@@ -88,9 +88,9 @@
 - 后端会对高频终端输出触发的看板全量快照做约 1 秒的合并广播；结构性操作仍即时刷新，避免轻量预览场景下 `/ws/agent-sessions` 长时间形成网络、JSON 解析和 React 分配压力。
 - 支持 replay 完成前缓冲 live frame，避免历史输出与新输出乱序。
 - 支持 stdin、resize、binary 消息，binary 用于 tmux 鼠标等二进制事件。
-- 直接 PTY 会按会话串行 stdin，并在输出 `CSI c`、`CSI 5n`、`CSI 6n` 查询后短暂等待匹配的 DA、DSR、CPR 回复；陈旧或类型不符的浏览器回复不会写入 shell。这样普通文本不会与终端协议字节交错，Copilot/Codex 启动后的快速输入不会丢字或变成命令前缀。
+- 直接 PTY 会按会话串行 stdin，并在输出 `CSI c`、`CSI 5n`、`CSI 6n` 查询后短暂等待匹配的 DA、DSR、CPR 回复；陈旧或类型不符的浏览器回复不会写入 shell。这样普通文本不会与终端协议字节交错，Copilot/Codex/OpenCode 启动后的快速输入不会丢字或变成命令前缀。鼠标移动/hover 报告属于终端控制流，不记为用户输入，也不刷新看板预览。
 - 服务端生成的 tmux attach 命令和带显式命令的 direct PTY 使用非交互 `/bin/sh` 执行，不加载用户 shell 启动文件；未指定命令时仍启动用户原生交互 shell。
-- 本地 tmux 在 attached client 的 PID 被 `tmux list-clients` 确认前，不会把首个输入误写进即将 `exec tmux attach` 的启动 shell；输入短暂排队，超时则安全回退到 pane 的 `send-keys`。确认后普通文本、方向键、bracketed paste、鼠标协议和 `Ctrl+A` / `Ctrl+B` 前缀都按原始字节经同一个有序 PTY 输入，因此始终跟随浏览器当前可见 pane；tmux client 不支持的 CSI-u 修饰键例外走 `send-keys -l`，以保留原始字节。
+- 本地 tmux 在 attached client 的 PID 被 `tmux list-clients` 确认前，不会把首个输入误写进即将 `exec tmux attach` 的启动 shell；输入短暂排队，超时则安全回退到 pane 的 `send-keys`。确认后普通文本、方向键、bracketed paste、鼠标点击/滚轮协议和 `Ctrl+A` / `Ctrl+B` 前缀都按原始字节经同一个有序 PTY 输入，因此始终跟随浏览器当前可见 pane；tmux client 不支持的 CSI-u 修饰键例外走 `send-keys -l`，以保留原始字节。
 - `Ctrl+A` / `Ctrl+B` 后会按当前 tmux `prefix` key table 判断下一键是否绑定 `command-prompt` / `confirm-before`；`:`、`,`、`$`、`'`、`.`、`/`、`f` 及自定义 prompt 的文本和编辑键持续写入 attached client PTY，直到 Enter 提交或 Ctrl+C/连接清理取消。`status-keys vi` 下 Escape 只切换编辑模式，不再误判为 prompt 已退出；裸 Ctrl+C 始终经过 attached client，因此服务重载后即使内存状态丢失也能取消残留 prompt，无 prompt 时由 tmux 正常转发给当前 pane。
 - 后端收到 SIGTERM/SIGINT 时先关闭 Fastify，并由 `PtyRuntimeManager.dispose()` 终止该进程创建的全部本地/SSH PTY；源码热重载不再遗留 PPID=1 的 `tmux attach` clients。
 - 桌面 xterm 把 macOS `Option` 和 Windows/Linux `Alt` 统一编码为终端 Meta 修饰键；`Option+Space` / `Alt+Space` 及常用 Meta 字母、数字组合在本地 tmux 中作为单个 `M-*` 键发送，不再拆成 `Escape` 与普通字符。Windows 系统若优先占用 `Alt+Space`，可使用跨平台 `Shift+Enter` 换行。

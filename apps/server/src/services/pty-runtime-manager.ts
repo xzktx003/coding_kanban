@@ -27,6 +27,7 @@ import { buildSshArgs, formatSshDestination } from "./ssh-command.js";
 import {
   getTerminalProtocolQueryResponseKinds,
   getTerminalProtocolResponses,
+  isTerminalControlPayload,
   isTerminalProtocolResponsePayload,
   sanitizeReplayForTerminal,
   type TerminalProtocolResponseKind,
@@ -460,7 +461,9 @@ export class PtyRuntimeManager {
       // be split around text, yielding input such as "5Rnode".
       await this.waitForTerminalProtocolReplies(agentSessionId);
 
-      this.registry.noteUserInput(agentSessionId, data);
+      if (!isTerminalControlPayload(data)) {
+        this.registry.noteUserInput(agentSessionId, data);
+      }
       handle.ptyProcess.write(data);
     });
     const queueTail = operation.then(

@@ -5,6 +5,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  getMobileSessionSummary,
   MobileSessionSwitcher,
   MobileWorkbenchPage,
   sortMobileSessionPickerSessions,
@@ -85,6 +86,24 @@ describe("MobileWorkbenchPage", () => {
     assert.match(
       css,
       /\.mobile-session-picker-menu\s*{[^}]*position:\s*absolute;/s,
+    );
+  });
+
+  it("ignores persisted Codex summaries on OpenCode mobile cards", () => {
+    assert.equal(
+      getMobileSessionSummary({
+        id: "opencode-summary",
+        workspaceId: "default",
+        sourceType: "local",
+        agentKind: "opencode",
+        displayName: "OpenCode",
+        connectionState: "online",
+        interactionState: "running",
+        transportRef: { tmuxSession: "opencode-tmux" },
+        lastAgentMessageSummary: "错误匹配的 Codex 回复",
+        outputPreview: "OpenCode 正在等待输入",
+      }),
+      "OpenCode 正在等待输入",
     );
   });
 

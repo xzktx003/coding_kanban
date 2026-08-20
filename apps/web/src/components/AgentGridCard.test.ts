@@ -87,6 +87,31 @@ test("grid cards show structured task summaries above terminal previews", () => 
   assert.match(markup, /terminal-preview-session-summary/);
 });
 
+test("OpenCode tmux cards ignore persisted Codex task summaries", () => {
+  const markup = renderToStaticMarkup(
+    createElement(AgentGridCard, {
+      session: {
+        id: "session-opencode-summary",
+        workspaceId: "default",
+        sourceType: "local",
+        agentKind: "opencode",
+        displayName: "OpenCode Session",
+        connectionState: "online",
+        interactionState: "running",
+        transportRef: { tmuxSession: "opencode-tmux" },
+        lastUserMessageSummary: "错误匹配的 Codex 任务",
+        lastAgentMessageSummary: "错误匹配的 Codex 回复",
+      },
+      onDoubleClick: () => {},
+      onDelete: () => {},
+      onReconnect: () => {},
+    }),
+  );
+
+  assert.doesNotMatch(markup, /grid-card-task-summary/);
+  assert.doesNotMatch(markup, /错误匹配的 Codex/);
+});
+
 test("grid cards show compact project and Git summaries", () => {
   const markup = renderToStaticMarkup(
     createElement(AgentGridCard, {
@@ -164,15 +189,9 @@ test("completed grid cards expose mark unread and mark read actions", () => {
 test("grid cards keep the fixed height when task summaries are visible", () => {
   const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
   assert.match(css, /\.grid-card\s*\{[\s\S]*?height:\s*240px;/);
-  assert.match(
-    css,
-    /\.grid-card-task-summary\s*\{[\s\S]*?max-height:\s*48px;/,
-  );
+  assert.match(css, /\.grid-card-task-summary\s*\{[\s\S]*?max-height:\s*48px;/);
   assert.match(css, /\.grid-card-terminal\s*\{[\s\S]*?min-height:\s*0;/);
-  assert.match(
-    css,
-    /\.grid-card-git-summary\s*\{[\s\S]*?max-height:\s*24px;/,
-  );
+  assert.match(css, /\.grid-card-git-summary\s*\{[\s\S]*?max-height:\s*24px;/);
 });
 
 function targetMatching(...matchedSelectors: string[]): EventTarget {

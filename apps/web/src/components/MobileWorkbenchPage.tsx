@@ -8,7 +8,10 @@ import {
   useState,
 } from "react";
 
-import type { AgentSessionRecord } from "@agent-orchestrator/shared";
+import {
+  isLocalCodexSessionCandidate,
+  type AgentSessionRecord,
+} from "@agent-orchestrator/shared";
 
 import type { AgentCompletionNotificationPermission } from "../lib/agent-completion-notifications";
 import { sendAgentInput } from "../lib/api";
@@ -81,7 +84,11 @@ function latestActivity(session: AgentSessionRecord): number {
     timestampValue(session.lastOutputAt),
     timestampValue(session.lastHeartbeatAt),
     timestampValue(session.lastRefreshedAt),
-    timestampValue(session.taskSummaryUpdatedAt),
+    timestampValue(
+      isLocalCodexSessionCandidate(session)
+        ? session.taskSummaryUpdatedAt
+        : undefined,
+    ),
   );
 }
 
@@ -157,10 +164,11 @@ function shortenPath(path?: string): string {
   return path.replace(/^\/(?:data\d+\/)?home\/[^/]+/, "~");
 }
 
-function sessionSummary(session: AgentSessionRecord): string {
+export function getMobileSessionSummary(session: AgentSessionRecord): string {
+  const supportsStructuredSummary = isLocalCodexSessionCandidate(session);
   return (
-    session.lastAgentMessageSummary ??
-    session.lastUserMessageSummary ??
+    (supportsStructuredSummary ? session.lastAgentMessageSummary : undefined) ??
+    (supportsStructuredSummary ? session.lastUserMessageSummary : undefined) ??
     session.outputPreview?.split(/\r?\n/).filter(Boolean).slice(-1)[0] ??
     "暂无摘要，进入当前会话查看详情。"
   );
@@ -188,7 +196,7 @@ function MobileSessionCard({
         </span>
       </span>
       <span className="mobile-session-card-summary">
-        {sessionSummary(session)}
+        {getMobileSessionSummary(session)}
       </span>
       <span className="mobile-session-card-meta">
         <span>
@@ -545,7 +553,7 @@ export function MobileWorkbenchPage({
                   />
                   <span>
                     <strong>{session.displayName}</strong>
-                    <small>{sessionSummary(session)}</small>
+                    <small>{getMobileSessionSummary(session)}</small>
                   </span>
                   <time>{formatActivityTime(session)}</time>
                 </button>

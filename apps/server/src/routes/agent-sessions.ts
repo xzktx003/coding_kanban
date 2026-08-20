@@ -1,27 +1,28 @@
 import type { FastifyInstance } from "fastify";
 
-import type {
-  AgentTaskDiffResponse,
-  AgentSessionRecord,
-  AgentGitSummary,
-  AgentTaskSummaryResponse,
-  OpenVsCodeWebResponse,
-  LaunchRemoteAgentInput,
-  LaunchLocalAgentInput,
-  LaunchSshPtyInput,
-  FocusAgentSessionInput,
-  PtyResizeInput,
-  RegisterAgentSessionInput,
-  ScanDirectoryInput,
-  StdinAgentSessionInput,
-  UpdateAgentSessionInput,
-  DiscoverTmuxInput,
-  AddDiscoveredTmuxInput,
-  CheckoutDiffResponse,
-  RevertGitHunkInput,
-  RevertGitHunkResponse,
+import {
+  isLocalCodexSessionCandidate,
+  type AgentTaskDiffResponse,
+  type AgentSessionRecord,
+  type AgentGitSummary,
+  type AgentTaskSummaryResponse,
+  type OpenVsCodeWebResponse,
+  type LaunchRemoteAgentInput,
+  type LaunchLocalAgentInput,
+  type LaunchSshPtyInput,
+  type FocusAgentSessionInput,
+  type PtyResizeInput,
+  type RegisterAgentSessionInput,
+  type ScanDirectoryInput,
+  type StdinAgentSessionInput,
+  type UpdateAgentSessionInput,
+  type DiscoverTmuxInput,
+  type AddDiscoveredTmuxInput,
+  type CheckoutDiffResponse,
+  type RevertGitHunkInput,
+  type RevertGitHunkResponse,
 } from "@agent-orchestrator/shared";
-import { shellQuote, formatWorkingDirectory } from "@agent-orchestrator/shared";
+import { formatWorkingDirectory, shellQuote } from "@agent-orchestrator/shared";
 
 import { scanAgentDirectory } from "../services/agent-scanner.js";
 import { AgentSessionRegistry } from "../services/agent-session-registry.js";
@@ -446,17 +447,7 @@ export async function registerAgentSessionRoutes(
     "/api/agent-sessions/:id/task-changes",
     async (request): Promise<AgentTaskDiffResponse> => {
       const agentSession = registry.get(request.params.id);
-      const isLocalSession =
-        !agentSession.sshTarget &&
-        (!agentSession.hostId || agentSession.hostId === "local");
-      const hasTmuxTarget = Boolean(
-        agentSession.transportRef?.tmuxPane ??
-        agentSession.transportRef?.tmuxSession,
-      );
-      if (
-        !isLocalSession ||
-        (agentSession.agentKind !== "codex" && !hasTmuxTarget)
-      ) {
+      if (!isLocalCodexSessionCandidate(agentSession)) {
         return {
           available: false,
           scope: "task",
@@ -469,8 +460,7 @@ export async function registerAgentSessionRoutes(
           deletedLines: 0,
           files: [],
           generatedAt: new Date().toISOString(),
-          unavailableReason:
-            "本次任务变更仅支持本机 Codex 或运行 Codex 的本地 tmux 会话",
+          unavailableReason: "本次任务变更仅支持本机 Codex 会话",
         };
       }
       const sessionId = await resolveCodexSessionId(agentSession);
@@ -485,10 +475,7 @@ export async function registerAgentSessionRoutes(
     "/api/agent-sessions/:id/task-summary",
     async (request): Promise<AgentTaskSummaryResponse> => {
       const agentSession = registry.get(request.params.id);
-      const isLocalSession =
-        !agentSession.sshTarget &&
-        (!agentSession.hostId || agentSession.hostId === "local");
-      if (!isLocalSession) {
+      if (!isLocalCodexSessionCandidate(agentSession)) {
         return { available: false, updatedAt: null };
       }
 
@@ -549,10 +536,7 @@ export async function registerAgentSessionRoutes(
     "/api/agent-sessions/:id/transcript",
     async (request) => {
       const agentSession = registry.get(request.params.id);
-      if (
-        agentSession.sshTarget ||
-        (agentSession.hostId && agentSession.hostId !== "local")
-      ) {
+      if (!isLocalCodexSessionCandidate(agentSession)) {
         return {
           available: false,
           agentKind: "codex" as const,
@@ -560,7 +544,7 @@ export async function registerAgentSessionRoutes(
           matchedBy: null,
           updatedAt: null,
           entries: [],
-          message: "首版完整记录仅支持本机会话。",
+          message: "完整记录仅支持本机 Codex 会话。",
         };
       }
 

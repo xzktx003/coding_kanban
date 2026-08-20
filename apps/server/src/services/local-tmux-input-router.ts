@@ -6,7 +6,10 @@ import type {
 import type { AgentSessionRegistry } from "./agent-session-registry.js";
 import type { LocalTmuxAdapter } from "./local-tmux-adapter.js";
 import type { TmuxClientPromptBinding } from "./local-tmux-adapter.js";
-import { isTerminalProtocolResponsePayload } from "./terminal-control-filter.js";
+import {
+  isTerminalMouseMotionPayload,
+  isTerminalProtocolResponsePayload,
+} from "./terminal-control-filter.js";
 import type {
   PtyRuntimeManager,
   PtyRuntimeWriteOptions,
@@ -79,6 +82,10 @@ export class LocalTmuxInputRouter {
     input: StdinAgentSessionInput,
     options: LocalTmuxInputOptions = {},
   ): Promise<AgentSessionRecord> {
+    if (isTerminalMouseMotionPayload(input.input)) {
+      return Promise.resolve(this.dependencies.registry.get(agentSession.id));
+    }
+
     if (isTerminalProtocolResponsePayload(input.input)) {
       return this.writeTerminalProtocolResponse(agentSession, input);
     }

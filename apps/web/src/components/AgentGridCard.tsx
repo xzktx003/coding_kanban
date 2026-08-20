@@ -1,6 +1,9 @@
 import { Suspense } from "react";
 
-import type { AgentSessionRecord } from "@agent-orchestrator/shared";
+import {
+  isLocalCodexSessionCandidate,
+  type AgentSessionRecord,
+} from "@agent-orchestrator/shared";
 
 import { CardMoreMenu } from "./CardMoreMenu";
 import { AgentGridTaskSummary } from "./AgentGridTaskSummary";
@@ -293,11 +296,7 @@ export function AgentGridCard({
       <AgentGridTaskSummary
         agentKind={session.agentKind}
         agentSessionId={session.id}
-        supportsStructuredSummary={
-          session.agentKind === "codex" ||
-          (session.sourceType === "local" &&
-            Boolean(session.transportRef?.tmuxSession))
-        }
+        supportsStructuredSummary={isLocalCodexSessionCandidate(session)}
         initialAgentSummary={session.lastAgentMessageSummary}
         initialUserSummary={session.lastUserMessageSummary}
         refreshKey={taskSummaryRefreshKey}

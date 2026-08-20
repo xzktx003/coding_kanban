@@ -27,9 +27,15 @@ export function AgentGridTaskSummary({
   refreshKey,
 }: AgentGridTaskSummaryProps) {
   const [summary, setSummary] = useState<AgentTaskSummaryResponse>(() => ({
-    available: Boolean(initialUserSummary || initialAgentSummary),
-    lastUserMessageSummary: initialUserSummary,
-    lastAgentMessageSummary: initialAgentSummary,
+    available: supportsStructuredSummary
+      ? Boolean(initialUserSummary || initialAgentSummary)
+      : false,
+    lastUserMessageSummary: supportsStructuredSummary
+      ? initialUserSummary
+      : undefined,
+    lastAgentMessageSummary: supportsStructuredSummary
+      ? initialAgentSummary
+      : undefined,
     updatedAt: null,
   }));
 
@@ -54,6 +60,7 @@ export function AgentGridTaskSummary({
   }, [agentSessionId, refreshKey, supportsStructuredSummary]);
 
   if (
+    !supportsStructuredSummary ||
     !summary.available ||
     (!summary.lastUserMessageSummary && !summary.lastAgentMessageSummary)
   ) {

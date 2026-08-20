@@ -18,6 +18,8 @@ const TERMINAL_INPUT_PATTERNS = [
 const TERMINAL_MOUSE_PAYLOAD_PATTERN =
   /^(?:(?:\u001b\[<\d+;\d+;\d+[mM])|(?:\u001b\[\d+;\d+;\d+M)|(?:\u001b\[M[\s\S]{3}))+$/;
 const TERMINAL_FOCUS_PAYLOAD_PATTERN = /^(?:\u001b\[[IO])+$/;
+const TERMINAL_MOUSE_MOTION_PAYLOAD_PATTERN =
+  /^(?:\u001b\[<3[2-5];\d+;\d+[mM])+$/;
 const TERMINAL_PROTOCOL_QUERY_PATTERN = /\u001b\[\??(0?c|[56]n)/g;
 const TERMINAL_PROTOCOL_RESPONSE_SEQUENCE_PATTERN =
   /\u001b\[(?:\?[\d;]*|>[\d;]*|[\d;]*)c|\u001b\[\??[\d;]+n|\u001b\[\d+;\d+R/g;
@@ -107,5 +109,16 @@ export function isTerminalPtyControlPayload(payload: string): boolean {
   return (
     TERMINAL_MOUSE_PAYLOAD_PATTERN.test(payload) ||
     TERMINAL_FOCUS_PAYLOAD_PATTERN.test(payload)
+  );
+}
+
+export function isTerminalMouseMotionPayload(payload: string): boolean {
+  return TERMINAL_MOUSE_MOTION_PAYLOAD_PATTERN.test(payload);
+}
+
+export function isTerminalControlPayload(payload: string): boolean {
+  return (
+    isTerminalPtyControlPayload(payload) ||
+    isTerminalProtocolResponsePayload(payload)
   );
 }

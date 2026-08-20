@@ -99,6 +99,15 @@ test("LocalTmuxInputRouter sends ordinary input through the attached tmux client
   assert.deepEqual(writes, [{ target: "pty", input: "hello\r" }]);
 });
 
+test("LocalTmuxInputRouter drops mouse motion reports so hover does not reach the TUI", async () => {
+  const { router, session, writes } = buildRouter();
+
+  await router.write(session, { input: "\u001b[<35;68;23M" }, { forcePty: true });
+  await router.write(session, { input: "hello\r" });
+
+  assert.deepEqual(writes, [{ target: "pty", input: "hello\r" }]);
+});
+
 test("LocalTmuxInputRouter lets terminal protocol replies bypass a blocked ordinary input", async () => {
   const session = buildSession();
   const writes: Array<{

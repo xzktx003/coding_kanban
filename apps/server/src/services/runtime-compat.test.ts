@@ -8,6 +8,7 @@ import test from "node:test";
 import {
   buildInteractiveShellCommand,
   buildTmuxCommand,
+  resolveTmuxBinary,
   resolveShellStartupEnv,
 } from "./runtime-compat.js";
 
@@ -117,6 +118,18 @@ test("tmux command can keep the pane open in the selected shell", () => {
 
   assert.match(command, /exec "\$SHELL_BIN" -i/);
   assert.match(command, /printf "RUN"; exit 0/);
+});
+
+test("resolveTmuxBinary prefers the tmux executable from PATH", () => {
+  const tempDirectory = mkdtempSync(join(tmpdir(), "runtime-compat-tmux-"));
+
+  try {
+    createShellStub(tempDirectory, "tmux", "tmux");
+
+    assert.equal(resolveTmuxBinary({ PATH: tempDirectory }), "tmux");
+  } finally {
+    rmSync(tempDirectory, { force: true, recursive: true });
+  }
 });
 
 test("resolveShellStartupEnv prefers login and interactive startup for non-sh shells", async () => {
