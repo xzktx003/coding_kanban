@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -152,6 +153,23 @@ describe("AgentFocusView", () => {
       1,
     );
     assert.doesNotMatch(markup, /data-testid="terminal-pane-context-menu"/);
+  });
+
+  it("keeps the desktop focus header compact on narrow workspaces", () => {
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+    assert.match(
+      css,
+      /\.focus-main-header\s*{[^}]*flex-wrap:\s*nowrap;[^}]*gap:\s*6px;[^}]*padding:\s*6px 10px;/s,
+    );
+    assert.match(
+      css,
+      /\.focus-main-name\s*{[^}]*flex:\s*1 1 160px;[^}]*min-width:\s*0;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,
+    );
+    assert.match(
+      css,
+      /\.focus-main-header button\s*{[^}]*flex:\s*0 0 auto;[^}]*white-space:\s*nowrap;/s,
+    );
   });
 
   it("binds the complete transcript action to the active monitor session", () => {
