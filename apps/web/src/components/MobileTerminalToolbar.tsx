@@ -3,9 +3,11 @@ import { useEffect, useRef, useState } from "react";
 
 import {
   createMobilePressRepeater,
+  exceedsMobileTerminalHoldMovement,
   getMobileTerminalControlInput,
   isMobileTerminalControlRepeatable,
   MOBILE_TERMINAL_CONTROLS,
+  MOBILE_TERMINAL_HOLD_REPEAT_DELAY_MS,
   MOBILE_TERMINAL_TOOLBAR_ORDER,
   type MobilePressRepeater,
   type MobileTerminalControlId,
@@ -18,6 +20,13 @@ interface MobileTerminalToolbarProps {
 
 interface MobileTerminalShortcutHelpProps {
   onClose: () => void;
+}
+
+interface MobileTerminalHoldGesture {
+  controlId: MobileTerminalControlId;
+  pointerId: number;
+  startX: number;
+  startY: number;
 }
 
 export function MobileTerminalShortcutHelp({
@@ -99,7 +108,7 @@ export function MobileTerminalShortcutHelp({
               <dd>
                 {control.description}
                 {isMobileTerminalControlRepeatable(control.id)
-                  ? "；长按可连续发送"
+                  ? "；按住 3 秒后连续发送"
                   : ""}
               </dd>
             </div>
@@ -125,11 +134,13 @@ export function MobileTerminalToolbar({
   const [shifted, setShifted] = useState(false);
   const [inputError, setInputError] = useState<string | null>(null);
   const repeaterRef = useRef<MobilePressRepeater | null>(null);
+  const holdGestureRef = useRef<MobileTerminalHoldGesture | null>(null);
   const suppressClickRef = useRef<MobileTerminalControlId | null>(null);
 
   const stopRepeating = () => {
     repeaterRef.current?.stop();
     repeaterRef.current = null;
+    holdGestureRef.current = null;
   };
 
   useEffect(() => stopRepeating, []);
@@ -160,16 +171,49 @@ export function MobileTerminalToolbar({
     controlId: MobileTerminalControlId,
   ) => {
     if (disabled || event.button !== 0) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture?.(event.pointerId);
     stopRepeating();
-    suppressClickRef.current = controlId;
+    holdGestureRef.current = {
+      controlId,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
     const shiftedForPress = shifted;
-    const repeater = createMobilePressRepeater(() =>
-      sendControl(controlId, shiftedForPress),
+    const repeater = createMobilePressRepeater(
+      () => {
+        suppressClickRef.current = controlId;
+        return sendControl(controlId, shiftedForPress);
+      },
+      {
+        delayMs: 85,
+        intervalMs: 85,
+        startDelayMs: MOBILE_TERMINAL_HOLD_REPEAT_DELAY_MS,
+      },
     );
     repeaterRef.current = repeater;
     repeater.start();
+  };
+
+  const cancelRepeatingOnDrag = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    controlId: MobileTerminalControlId,
+  ) => {
+    const gesture = holdGestureRef.current;
+    if (
+      !gesture ||
+      gesture.controlId !== controlId ||
+      gesture.pointerId !== event.pointerId ||
+      !exceedsMobileTerminalHoldMovement(
+        gesture.startX,
+        gesture.startY,
+        event.clientX,
+        event.clientY,
+      )
+    ) {
+      return;
+    }
+    suppressClickRef.current = controlId;
+    stopRepeating();
   };
 
   const stopRepeatingAfterPointer = (controlId: MobileTerminalControlId) => {
@@ -233,7 +277,7 @@ export function MobileTerminalToolbar({
           if (!control) return null;
           const repeatable = isMobileTerminalControlRepeatable(control.id);
           const description = repeatable
-            ? `${control.description}，长按连续发送`
+            ? `${control.description}，按住 3 秒后连续发送`
             : control.description;
           return (
             <button
@@ -258,6 +302,11 @@ export function MobileTerminalToolbar({
               onPointerDown={
                 repeatable
                   ? (event) => startRepeating(event, control.id)
+                  : undefined
+              }
+              onPointerMove={
+                repeatable
+                  ? (event) => cancelRepeatingOnDrag(event, control.id)
                   : undefined
               }
               onPointerUp={

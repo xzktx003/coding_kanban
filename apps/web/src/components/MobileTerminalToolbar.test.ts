@@ -33,8 +33,12 @@ describe("MobileTerminalToolbar", () => {
       markup.indexOf(">ESC</button>") < markup.indexOf(">Ctrl+C</button>"),
     );
     assert.ok(
-      markup.indexOf(">Ctrl+C</button>") < markup.indexOf(">←</button>"),
+      markup.indexOf(">Ctrl+C</button>") < markup.indexOf(">Enter</button>"),
     );
+    assert.ok(
+      markup.indexOf(">Enter</button>") < markup.indexOf(">Tab</button>"),
+    );
+    assert.ok(markup.indexOf(">Tab</button>") < markup.indexOf(">←</button>"));
     assert.ok(markup.indexOf(">→</button>") < markup.indexOf(">⌫</button>"));
     assert.ok(
       markup.indexOf(">Ctrl+Z</button>") < markup.indexOf(">说明</button>"),
@@ -43,6 +47,10 @@ describe("MobileTerminalToolbar", () => {
 
     const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
     assert.match(css, /\.mobile-terminal-key\s*{[^}]*min-height:\s*44px;/s);
+    assert.match(
+      css,
+      /\.mobile-terminal-key--repeatable\s*{[^}]*touch-action:\s*pan-x;/s,
+    );
   });
 
   it("lists shortcut descriptions for mobile users", () => {
@@ -66,6 +74,6 @@ describe("MobileTerminalToolbar", () => {
     assert.match(markup, /插入换行/);
     assert.match(markup, /强制提交/);
     assert.match(markup, /清屏/);
-    assert.match(markup, /长按可连续发送/);
+    assert.match(markup, /按住 3 秒后连续发送/);
   });
 });

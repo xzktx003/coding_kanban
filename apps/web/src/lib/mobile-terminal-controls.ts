@@ -119,13 +119,13 @@ export const MOBILE_TERMINAL_TOOLBAR_ORDER: MobileTerminalToolbarItem[] = [
   "shift",
   "escape",
   "interrupt",
+  "enter",
+  "tab",
   "arrow-left",
   "arrow-up",
   "arrow-down",
   "arrow-right",
   "backspace",
-  "tab",
-  "enter",
   "shift-tab",
   "shift-enter",
   "ctrl-enter",
@@ -157,11 +157,25 @@ interface MobilePressRepeaterOptions {
   delayMs?: number;
   intervalMs?: number;
   scheduler?: MobilePressRepeatScheduler;
+  startDelayMs?: number;
 }
 
 export interface MobilePressRepeater {
   start(): void;
   stop(): void;
+}
+
+export const MOBILE_TERMINAL_HOLD_REPEAT_DELAY_MS = 3000;
+export const MOBILE_TERMINAL_HOLD_MOVEMENT_SLOP_PX = 10;
+
+export function exceedsMobileTerminalHoldMovement(
+  startX: number,
+  startY: number,
+  currentX: number,
+  currentY: number,
+  slopPx = MOBILE_TERMINAL_HOLD_MOVEMENT_SLOP_PX,
+): boolean {
+  return Math.hypot(currentX - startX, currentY - startY) > slopPx;
 }
 
 const defaultRepeatScheduler: MobilePressRepeatScheduler = {
@@ -176,6 +190,7 @@ export function createMobilePressRepeater(
 ): MobilePressRepeater {
   const delayMs = options.delayMs ?? 360;
   const intervalMs = options.intervalMs ?? 85;
+  const startDelayMs = options.startDelayMs ?? 0;
   const scheduler = options.scheduler ?? defaultRepeatScheduler;
   let active = false;
   let generation = 0;
@@ -200,7 +215,15 @@ export function createMobilePressRepeater(
       if (active) return;
       active = true;
       generation += 1;
-      void run(generation, true);
+      const currentGeneration = generation;
+      if (startDelayMs > 0) {
+        timer = scheduler.setTimeout(
+          () => void run(currentGeneration, true),
+          startDelayMs,
+        );
+        return;
+      }
+      void run(currentGeneration, true);
     },
     stop() {
       active = false;

@@ -4777,7 +4777,7 @@ input {
 }
 
 .mobile-terminal-key--repeatable {
-  touch-action: none;
+  touch-action: pan-x;
   user-select: none;
   -webkit-touch-callout: none;
 }

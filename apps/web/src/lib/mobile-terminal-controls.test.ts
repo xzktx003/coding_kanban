@@ -5,8 +5,10 @@ import {
   buildMobileComposerInput,
   buildMobileComposerInputFrames,
   createMobilePressRepeater,
+  exceedsMobileTerminalHoldMovement,
   getMobileTerminalControlInput,
   isMobileTerminalControlRepeatable,
+  MOBILE_TERMINAL_HOLD_REPEAT_DELAY_MS,
   MOBILE_TERMINAL_TOOLBAR_ORDER,
   sendMobileComposerFrames,
 } from "./mobile-terminal-controls.js";
@@ -85,13 +87,13 @@ describe("mobile terminal controls", () => {
       "shift",
       "escape",
       "interrupt",
+      "enter",
+      "tab",
       "arrow-left",
       "arrow-up",
       "arrow-down",
       "arrow-right",
       "backspace",
-      "tab",
-      "enter",
       "shift-tab",
       "shift-enter",
       "ctrl-enter",
@@ -111,15 +113,27 @@ describe("mobile terminal controls", () => {
     assert.equal(isMobileTerminalControlRepeatable("interrupt"), false);
   });
 
+  it("cancels a pending hold when the finger starts scrolling", () => {
+    assert.equal(MOBILE_TERMINAL_HOLD_REPEAT_DELAY_MS, 3000);
+    assert.equal(exceedsMobileTerminalHoldMovement(0, 0, 6, 8), false);
+    assert.equal(exceedsMobileTerminalHoldMovement(0, 0, 11, 0), true);
+  });
+
   it("repeats serially while held and stops without building a backlog", async () => {
-    let scheduled: (() => void) | undefined;
+    interface ScheduledTask {
+      callback: () => void;
+      delayMs: number;
+    }
+    const scheduled: ScheduledTask[] = [];
     const scheduler = {
-      setTimeout(callback: () => void) {
-        scheduled = callback;
-        return 1;
+      setTimeout(callback: () => void, delayMs: number) {
+        const task = { callback, delayMs };
+        scheduled.push(task);
+        return task;
       },
-      clearTimeout() {
-        scheduled = undefined;
+      clearTimeout(handle: unknown) {
+        const index = scheduled.indexOf(handle as ScheduledTask);
+        if (index >= 0) scheduled.splice(index, 1);
       },
     };
     let calls = 0;
@@ -127,23 +141,28 @@ describe("mobile terminal controls", () => {
       async () => {
         calls += 1;
       },
-      { scheduler },
+      { delayMs: 85, intervalMs: 85, scheduler, startDelayMs: 3000 },
     );
 
     repeater.start();
     await Promise.resolve();
-    assert.equal(calls, 1);
-    assert.ok(scheduled);
+    assert.equal(calls, 0);
+    assert.equal(scheduled[0]?.delayMs, 3000);
 
-    const repeat = scheduled;
-    scheduled = undefined;
-    repeat();
+    const start = scheduled.shift();
+    start?.callback();
+    await Promise.resolve();
+    assert.equal(calls, 1);
+    assert.equal(scheduled[0]?.delayMs, 85);
+
+    const repeat = scheduled.shift();
+    repeat?.callback();
     await Promise.resolve();
     assert.equal(calls, 2);
-    assert.ok(scheduled);
+    assert.equal(scheduled[0]?.delayMs, 85);
 
     repeater.stop();
-    assert.equal(scheduled, undefined);
+    assert.equal(scheduled.length, 0);
   });
 
   it("reports the failed composer frame so retry only sends the remainder", async () => {
