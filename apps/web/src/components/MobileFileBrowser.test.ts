@@ -173,4 +173,31 @@ describe("MobileFileBrowser", () => {
       /\.mobile-file-preview-controls\s*{[^}]*grid-area:\s*controls;[^}]*max-height:[^;]+;[^}]*overflow-y:\s*auto;/s,
     );
   });
+
+  it("opens the desktop-equivalent file actions from a touch long press", () => {
+    const source = readFileSync(
+      new URL("./MobileFileBrowser.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.match(source, /MOBILE_FILE_LONG_PRESS_MS\s*=\s*600/);
+    assert.match(source, /onPointerDown=.*startFileLongPress/s);
+    assert.match(source, /onPointerMove={moveFileLongPress}/);
+    assert.match(source, /onPointerCancel={cancelFileLongPress}/);
+    assert.match(source, /onContextMenu=/);
+    assert.match(source, /aria-label="文件操作菜单"/);
+    assert.match(source, />\s*复制路径\s*</);
+    assert.match(source, />\s*下载\s*</);
+    assert.match(source, />\s*重命名\s*</);
+    assert.match(source, />\s*删除\s*</);
+
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+    assert.match(
+      css,
+      /\.mobile-file-context-backdrop\s*{[^}]*position:\s*fixed;[^}]*inset:\s*0;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-file-context-menu\s*{[^}]*position:\s*absolute;[^}]*bottom:/s,
+    );
+  });
 });

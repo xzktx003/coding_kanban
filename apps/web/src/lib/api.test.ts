@@ -33,3 +33,12 @@ test("buildTerminalWebSocketUrl keeps ws on an HTTP frontend", () => {
     "ws://127.0.0.1:3100/ws/agent-sessions/agent-1/terminal",
   );
 });
+
+test("buildTerminalWebSocketUrl requests a bounded replay for mobile terminals", () => {
+  setWindowLocation("https:", "10.30.0.24:3100");
+
+  assert.equal(
+    buildTerminalWebSocketUrl("agent-1", { replayBytes: 256 * 1024 }),
+    "wss://10.30.0.24:3100/ws/agent-sessions/agent-1/terminal?replayBytes=262144",
+  );
+});

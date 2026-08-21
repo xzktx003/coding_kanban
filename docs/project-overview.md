@@ -130,7 +130,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 手机终端继续由输入框和快捷键通过既有 stdin 接口驱动，不让 xterm 的隐藏输入框长期抢占软键盘焦点。由于 tmux replay 只有屏幕内容和最终坐标、不一定包含 xterm 用来初始化光标的控制序列，触控监控终端在 `open` 后通过一次同步 `focus → blur` 初始化 xterm 光标，再归还挂载前仍有效的页面焦点；活动与失焦光标都使用高对比度下划线，因此用户用方向键调整已粘贴文字时仍能看到 TUI 当前编辑位置。桌面终端保持块状活动光标和轮廓失焦光标。
 - 完整记录 HTTP 接口：`GET /api/agent-sessions/:id/transcript?limit=30&cursor=<byte-offset>`。它只根据 registry 中可信的本机会话元数据访问 `~/.codex/sessions`，不接受客户端文件路径；服务端从 JSONL 尾部以 64 KiB 块向前扫描，只解析足够组成当前页的 user/assistant message 与非 `exec` 工具记录，并返回下一页字节游标，不再使用 `readFileSync` 全量读取大型历史。本地 tmux 会通过固定参数调用 `tmux display-message` 获取 pane PID，再只读遍历该 pane 的 `/proc` 子进程和已打开文件，从对应 Codex 进程持有的 JSONL 中选择工作目录一致、非 subagent 的顶层 session；解析成功后把精确 ID 回写会话绑定，Codex 在同一 tmux 内重启时也会重新识别。只有进程身份不可用时才使用既有 `agentSessionId`，仍缺失则按 `workingDirectory` 匹配最近活动记录。多屏聚焦页不再保存打开瞬间的会话对象，而只保存弹窗开关；弹窗会话始终由当前活动窗格派生并以会话 ID 作为 React key，活动窗格变化会卸载旧请求视图、重新读取新会话。xterm helper textarea 被视为终端内容而非外部编辑器，点击它同样更新 `activeSlotId`。解析层忽略 developer/system/reasoning，并在倒序扫描时把工具调用与输出作为不可拆分记录组，因此跨页仍能同时过滤 `exec` 调用和对应输出；前端按最新记录在前展示，用户与 Codex 消息复用按需加载、memo 化的安全 Markdown/GFM/KaTeX 渲染器。轻量预览最多保留连续 90 条、完整预览最多保留 300 条；继续向前浏览时释放窗口外较新记录，刷新可回到最新。工具输出仍为等宽原文，两类记录正文共享全局终端字号。终端继续承担实时交互，完整记录弹窗承担不会被 ANSI/TUI 重绘覆盖的追加式历史浏览。
 - 终端字号由 `terminal-font-size` 本地存储项持久化，默认 14px；滑杆拖动过程中只更新控件显示，鼠标松开、键盘调整结束或失焦提交后才更新已有 `TerminalView` 的 `fontSize` 并触发 fit/resize，不需要重建 WebSocket。
-- 会先发送 scrollback replay，再发送 `replay-complete`。
+- 会先发送 scrollback replay，再发送 `replay-complete`；手机终端连接携带服务端校验的 `replayBytes=262144`，只回放最近 256 KiB，桌面端保持配置允许的完整回放。
 - PTY 重连沿用稳定 session ID，但每次生成独立 runtime handle；只有当前 handle 可以追加输出、删除运行时或把会话标记为退出。被替换 PTY 的迟到 data/exit 回调必须忽略，避免并发恢复或手动重连后新 PTY 被旧回调误下线。
 - live PTY replay 上限默认 4 MiB，可通过 `TERMINAL_SCROLLBACK_BYTES` 调整；tmux observe/refresh 默认捕获最近 20000 行，可通过 `TERMINAL_TMUX_CAPTURE_LINES` 调整；registry fallback 默认保留 5000 条，可通过 `TERMINAL_REGISTRY_OUTPUT_ENTRIES` 调整；浏览器 xterm 默认保留 20000 行，可通过 `VITE_TERMINAL_SCROLLBACK_LINES` 调整。
 - replay 阶段会缓冲 live frame，避免新输出和历史输出乱序。
@@ -141,8 +141,8 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 轻量预览模式下，默认只有当前聚焦主终端发送 resize 和 stdin；非活跃区域依赖会话 `outputPreview` 展示轻量文本预览。服务端只用包含足够可读字母、数字或中日韩字符的输出块更新预览，并对受管 tmux 使用更严格的碎片阈值；纯光标、擦除和边框绘制块仍参与活动检测但不会覆盖已有可读文本。前端继续清理 ANSI 与终端字符集切换序列。
 - 多终端监控模式会按所选屏幕布局显式挂载 1、2、3、4、6 或 8 个实时 `TerminalView`；所有窗格都能接收后端输出并保持实时观察，但只有当前“输入中”窗格开启 stdin、焦点修复和终端输入所有权，避免广播输入。`activeSlotId` 是当前输入目标，任何会改变它的窗格点击、会话替换、拖放、关闭补位或侧栏切换都会同步 App 级 `focusedId`，保证标题和文件/VS Code 工具不会继续引用旧会话；重复选择非活动窗格中已经显示的当前项仍是无操作。
 - 完整预览模式下，非活跃卡片和右侧栏会恢复只读 `TerminalView`，因此会重新建立终端 WebSocket，适合需要实时小窗预览的场景。
-- 前端资源诊断会记录 `/ws/agent-sessions` 全量快照消息速率和大小、`/ws/agent-sessions/:id/terminal` 实时流速率、终端 WebSocket 生命周期、DOM 中的 xterm/预览/监控窗格/VS Code iframe 数量，以及浏览器暴露的 JS heap；同时每秒按需调用 `/api/diagnostics/terminal-history` 和 `/api/diagnostics/vscode-web-proxy` 读取后端终端历史与 VS Code 代理吞吐。诊断只在面板打开时刷新，不保存历史。
-- 后端对终端输出导致的全量会话快照做约 1 秒的 trailing 合并广播，降低轻量预览长期运行时的网络流量、浏览器 JSON 解析和 React 更新频率；新建、删除、聚焦、重命名等结构性变化仍通过即时快照刷新。
+- 前端资源诊断会记录 `/ws/agent-sessions` 会话状态消息速率和大小、`/ws/agent-sessions/:id/terminal` 实时流速率、终端 WebSocket 生命周期、DOM 中的 xterm/预览/监控窗格/VS Code iframe 数量，以及浏览器暴露的 JS heap；同时每秒按需调用 `/api/diagnostics/terminal-history` 和 `/api/diagnostics/vscode-web-proxy` 读取后端终端历史与 VS Code 代理吞吐。诊断只在面板打开时刷新，不保存历史。
+- `/ws/agent-sessions` 每次连接先发送完整 `snapshot`，此后发送仅含变化会话、删除 ID、焦点与时间戳的 `delta`；前端合并后继续向应用暴露完整列表，断线重连后重新以全量快照建立基线。后端仍对终端输出导致的状态更新做约 1 秒 trailing 合并，新建、删除、聚焦、重命名等结构性变化即时广播。
 - 本地 tmux 先用 `tmux list-clients` 将 attached client PID 与 PTY PID 精确匹配；回放可见但 attach 尚未完成时，首个输入不会误写入启动 shell，而是短暂等待或安全回退 pane adapter。确认后 attached tmux client PTY 是普通文本、快捷键、bracketed paste、鼠标协议及 `Ctrl+A` / `Ctrl+B` 前缀的唯一实时输入通道，确保输入始终跟随可见的当前 pane；tmux client 不支持 extended keys 的 CSI-u 修饰键例外用 `send-keys -l` 保留原始字节。路由器仍查询当前 `prefix` key table，记录 `command-prompt` / `confirm-before` 状态以便连接关闭、重连和恢复时用 Ctrl+C 清理残留 prompt；`status-keys vi` 的 Escape 仅切换编辑模式。
 - 服务生命周期把 Fastify 关闭与 PTY 关闭绑定：SIGTERM/SIGINT 先执行 `app.close()`，`onClose` 再统一 dispose 本进程创建的 PTY，最后退出。这样 `tsx watch` 与脚本重启不会把旧 `tmux attach` 进程留给 PID 1，也不会持续增加 session 的 attached client 数量。
 - `TerminalView` 开启 xterm 的 `macOptionIsMeta`，因此 macOS Option 与 Windows/Linux Alt 在浏览器能够接收事件时使用相同的 Meta 编码。adapter 在完整 CSI 键序列之后识别 `ESC+Space` 及常用 `ESC+字母/数字`，并原子映射为 tmux `M-*` 键，避免 Codex 把两个分离事件解释为 Escape 和普通输入；Windows 窗口管理器若截获 `Alt+Space`，使用已支持的 `Shift+Enter` 作为换行备用键。
@@ -177,13 +177,13 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 ### 手机端终端控制页
 
-手机端入口是面向手机浏览器的专用 Agent 工作区，不复用桌面分屏和侧栏布局。默认入口为 `/?view=mobile`，并兼容 `/mobile`、`/m` 和 `#/mobile`；这样即使部署入口不支持 SPA history fallback，手机也能通过根页面 query 进入。进入后默认直接打开“当前会话”并按需挂载一个真实终端；底部主导航继续提供看板、活动、当前会话和项目/文件入口，看板按“需响应 / 待验收 / 执行中 / 可继续”的注意力顺序展示独立会话轻量摘要。终端复用已有 `AgentSessionRecord`、`/ws/agent-sessions/:id/terminal` 输出通道和 `/api/agent-sessions/:id/stdin` 输入通道，不新增后端协议。
+手机端入口是面向手机浏览器的专用 Agent 工作区，不复用桌面分屏和侧栏布局。默认入口为 `/?view=mobile`，并兼容 `/mobile`、`/m` 和 `#/mobile`；这样即使部署入口不支持 SPA history fallback，手机也能通过根页面 query 进入。进入后默认直接打开“当前会话”并按需挂载一个真实终端；底部主导航继续提供看板、活动、当前会话和项目/文件入口，看板按“需响应 / 待验收 / 执行中 / 可继续”的注意力顺序展示独立会话轻量摘要。终端复用已有 `AgentSessionRecord`、`/ws/agent-sessions/:id/terminal` 输出通道和 `/api/agent-sessions/:id/stdin` 输入通道，并为手机连接增加有界回放参数。
 
-- 当前会话页面采用单会话全屏终端：顶部显示桌面入口、当前会话状态和单实例页面内会话选择器，“完整记录 / 变更 / 文件”在同一行操作组；“文件”就地切换到当前会话的只读文件系统并提供“返回终端”，中间终端仅在返回后重新展示。会话列表不使用浏览器原生选择层，实时快照更新时不会重复堆叠，支持点外部或 Escape 关闭。
+- 当前会话页面采用单会话全屏终端：顶部显示桌面入口、当前会话状态和单实例页面内会话选择器，“完整记录 / 变更 / 文件”在同一行操作组；“文件”就地切换到当前会话的文件系统并提供“返回终端”，中间终端仅在返回后重新展示。会话列表不使用浏览器原生选择层，实时快照更新时不会重复堆叠，支持点外部或 Escape 关闭。
 - 快捷键条是单行横向滑动选择器，所有快捷键常驻而不增加二级“更多”菜单；高频的 `Esc`、`Ctrl+C`、`Enter`、`Tab`、方向键和退格前置，一次性 `Shift` 与其余组合键继续保留。方向键和退格支持短按一次，只有静止按住满 3 秒才开始串行重复；从重复键上横向滑动会先取消按键计时并交由原生滚动处理。上一笔 stdin 请求完成后才安排下一笔，避免慢网络产生松手后继续执行的积压；用户可点击末尾“说明”查看每个快捷键的作用。
 - 多行输入框通过普通 `<textarea>` 承载手机输入法，只保留“发送”和“粘贴”：两者都以 bracketed paste 写入文本，“发送”再单独发送 `Enter`。失败时输入框保留原文并就近显示“重试”；若粘贴帧已成功而提交帧失败，重试只续发提交帧，避免重复内容。
 - 手机端标题区的通知按钮复用桌面 Agent 完成通知状态；手机浏览器支持并授权通知时，页面保持打开即可收到任务完成提醒。
-- “项目/文件”按主机与项目目录聚合会话，并提供适配触屏的只读文件系统入口。本地项目直接读取工作目录，SSH 项目沿用会话的远端连接信息；用户可进入目录、搜索当前目录、切换隐藏文件、在独立纵向滚动区预览文本或图片并复制路径。文件预览默认只保留一行紧凑标题栏，路径、复制路径、查看方式和分段导航收进可折叠的“文件选项”，展开区域自身有高度上限和滚动边界，避免挤占正文。Markdown 文件复用电脑端按需加载的安全 GFM/KaTeX 渲染组件，默认显示渲染结果，也可通过触屏友好的“渲染 / 源码”控件查看原始 Markdown；窄屏下图片自适应、表格和代码块可横向滚动。大型 UTF-8 文件不再固定截取开头：前端通过 `/api/fs/preview` 的 `offset` 继续请求 64 KiB 窗口，用户可前后切换；切换查看方式不会复制内容，翻段后也会替换而非追加内容，因此浏览器内存与文件总大小无关。该入口不会创建终端连接，也不暴露编辑、上传、删除等写操作。
+- “项目/文件”按主机与项目目录聚合会话，并提供适配触屏的文件系统入口。本地项目直接读取工作目录，SSH 项目沿用会话的远端连接信息；用户可进入目录、搜索当前目录、切换隐藏文件、在独立纵向滚动区预览文本或图片并复制路径。文件预览默认只保留一行紧凑标题栏，路径、复制路径、查看方式和分段导航收进可折叠的“文件选项”，展开区域自身有高度上限和滚动边界，避免挤占正文。Markdown 文件复用电脑端按需加载的安全 GFM/KaTeX 渲染组件，默认显示渲染结果，也可通过触屏友好的“渲染 / 源码”控件查看原始 Markdown；窄屏下图片自适应、表格和代码块可横向滚动。大型 UTF-8 文件不再固定截取开头：前端通过 `/api/fs/preview` 的 `offset` 继续请求 64 KiB 窗口，用户可前后切换；切换查看方式不会复制内容，翻段后也会替换而非追加内容，因此浏览器内存与文件总大小无关。文件条目长按 600ms 弹出底部操作菜单，滑动超过 12px 会取消，避免滚动误触；菜单可进入/预览、下载、重命名、删除和复制路径，删除继续使用现有本地/SFTP 安全校验并要求确认。
 - 页面挂载时会锁定 `html/body/#root` 滚动，并在终端区域用捕获阶段的非 passive `touchstart/touchmove` 接管单指滑动，防止 Codex 长上下文下拉时触发浏览器下拉刷新；触屏设备即使仍停留在桌面聚焦页，也会给真实终端窗格启用同一触控模式。
 - 单指滑动滚动 xterm scrollback；双指 pinch 调整终端字号并触发 fit/resize，同步 PTY cols/rows；终端右下角提供“底部”按钮回到最新输出。
 

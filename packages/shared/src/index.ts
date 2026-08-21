@@ -355,6 +355,21 @@ export interface AgentSessionSnapshotEvent {
   payload: ListAgentSessionsResponse;
 }
 
+export interface AgentSessionDeltaEvent {
+  type: "delta";
+  payload: {
+    upserts: AgentSessionRecord[];
+    removedIds: string[];
+    orderedIds: string[];
+    activeAgentSessionId: string | null;
+    updatedAt: string;
+  };
+}
+
+export type AgentSessionStreamEvent =
+  | AgentSessionSnapshotEvent
+  | AgentSessionDeltaEvent;
+
 export interface PtyResizeInput {
   cols: number;
   rows: number;

@@ -93,6 +93,7 @@ const DEFAULT_PREVIEW_GEOMETRY: TerminalGeometry = {
 const EXTERNAL_FOCUS_GRACE_MS = 750;
 const PASSIVE_FOCUS_REPAIR_INTERVAL_MS = 500;
 const TERMINAL_CONNECT_TIMEOUT_MS = 3_000;
+const MOBILE_TERMINAL_REPLAY_BYTES = 256 * 1024;
 const MOBILE_TOUCH_LISTENER_OPTIONS = {
   capture: true,
   passive: false,
@@ -886,7 +887,9 @@ export function TerminalView({
       );
     };
 
-    const wsUrl = buildTerminalWebSocketUrl(agentSessionId);
+    const wsUrl = buildTerminalWebSocketUrl(agentSessionId, {
+      replayBytes: mobileTouchMode ? MOBILE_TERMINAL_REPLAY_BYTES : undefined,
+    });
     let ws: WebSocket | null = null;
     let activeTerminalSocketTracker: ReturnType<
       typeof registerTerminalWebSocket

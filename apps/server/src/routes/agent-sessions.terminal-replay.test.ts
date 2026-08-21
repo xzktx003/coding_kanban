@@ -185,3 +185,34 @@ test("terminal websocket replays exited session output instead of closing before
     await app.close();
   }
 });
+
+test("terminal websocket honors a bounded mobile replay window", async () => {
+  const { app, registry } = buildServer();
+  const session = registry.register({
+    workspaceId: "default",
+    sourceType: "local",
+    agentKind: "codex",
+    displayName: "bounded mobile replay",
+    workingDirectory: process.cwd(),
+  });
+  registry.appendOutput(
+    session.id,
+    `${"旧".repeat(2_000)}-newest-tail`,
+    "stdout",
+  );
+
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const address = app.server.address();
+  assert.ok(address && typeof address === "object");
+
+  try {
+    const replayFrame = await waitForReplayFrame(
+      `ws://127.0.0.1:${address.port}/ws/agent-sessions/${session.id}/terminal?replayBytes=1024`,
+    );
+    assert.match(replayFrame.data ?? "", /-newest-tail$/);
+    assert.ok(Buffer.byteLength(replayFrame.data ?? "", "utf8") <= 1024);
+    assert.doesNotMatch(replayFrame.data ?? "", /�/);
+  } finally {
+    await app.close();
+  }
+});

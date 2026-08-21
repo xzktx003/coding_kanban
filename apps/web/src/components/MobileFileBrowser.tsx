@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 
 import type {
   AgentSessionRecord,
@@ -29,9 +35,17 @@ interface MobileFilePreviewState {
   error: string | null;
 }
 
+interface MobileFileContextMenuState {
+  entry: FileEntry;
+  error: string | null;
+  busy: boolean;
+}
+
 type MobileFilePreviewKind = "markdown" | "text" | "image" | "binary";
 export type MobileMarkdownViewMode = "rendered" | "source";
 const MOBILE_FILE_PREVIEW_WINDOW_BYTES = 64 * 1024;
+const MOBILE_FILE_LONG_PRESS_MS = 600;
+const MOBILE_FILE_LONG_PRESS_MOVE_PX = 12;
 
 export function classifyMobileFilePreview(
   entry: FileEntry,
@@ -124,6 +138,9 @@ export function MobileFileBrowser({
     refresh,
     goHome,
     goUp,
+    renameEntry,
+    deleteEntries,
+    downloadEntries,
   } = useFileBrowser(selectedHost, true, {
     scopeKey: `mobile-files:${session.id}`,
     defaultPath,
@@ -136,6 +153,54 @@ export function MobileFileBrowser({
   const [previewControlsExpanded, setPreviewControlsExpanded] = useState(false);
   const previewRequestIdRef = useRef(0);
   const previewContentRef = useRef<HTMLDivElement>(null);
+  const [contextMenu, setContextMenu] =
+    useState<MobileFileContextMenuState | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+  const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
+  const suppressNextFileClickRef = useRef(false);
+
+  const cancelFileLongPress = () => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+    longPressStartRef.current = null;
+  };
+
+  const startFileLongPress = (
+    entry: FileEntry,
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ) => {
+    if (event.button !== 0 || event.pointerType === "mouse") return;
+    cancelFileLongPress();
+    longPressStartRef.current = { x: event.clientX, y: event.clientY };
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTimerRef.current = null;
+      longPressStartRef.current = null;
+      suppressNextFileClickRef.current = true;
+      setContextMenu({ entry, error: null, busy: false });
+    }, MOBILE_FILE_LONG_PRESS_MS);
+  };
+
+  const moveFileLongPress = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const start = longPressStartRef.current;
+    if (
+      start &&
+      Math.hypot(event.clientX - start.x, event.clientY - start.y) >
+        MOBILE_FILE_LONG_PRESS_MOVE_PX
+    ) {
+      cancelFileLongPress();
+    }
+  };
+
+  useEffect(
+    () => () => {
+      if (longPressTimerRef.current !== null) {
+        window.clearTimeout(longPressTimerRef.current);
+      }
+    },
+    [],
+  );
 
   const loadPreviewWindow = async (entry: FileEntry, offset = 0) => {
     const requestId = ++previewRequestIdRef.current;
@@ -178,6 +243,33 @@ export function MobileFileBrowser({
     setMarkdownViewMode("rendered");
     setPreviewControlsExpanded(false);
     return loadPreviewWindow(entry);
+  };
+
+  const runContextAction = async (
+    action: (entry: FileEntry) => Promise<unknown>,
+  ) => {
+    const entry = contextMenu?.entry;
+    if (!entry || contextMenu.busy) return;
+    setContextMenu((current) =>
+      current ? { ...current, error: null, busy: true } : current,
+    );
+    try {
+      await action(entry);
+      setContextMenu(null);
+    } catch (caughtError) {
+      setContextMenu((current) =>
+        current
+          ? {
+              ...current,
+              busy: false,
+              error:
+                caughtError instanceof Error
+                  ? caughtError.message
+                  : "文件操作失败",
+            }
+          : current,
+      );
+    }
   };
 
   useEffect(() => {
@@ -441,9 +533,24 @@ export function MobileFileBrowser({
               <button
                 className="mobile-file-entry"
                 key={entry.path}
-                onClick={() =>
-                  directory ? void navigate(entry.path) : void openFile(entry)
-                }
+                onClick={(event) => {
+                  if (suppressNextFileClickRef.current) {
+                    suppressNextFileClickRef.current = false;
+                    event.preventDefault();
+                    return;
+                  }
+                  directory ? void navigate(entry.path) : void openFile(entry);
+                }}
+                onContextMenu={(event) => {
+                  event.preventDefault();
+                  cancelFileLongPress();
+                  setContextMenu({ entry, error: null, busy: false });
+                }}
+                onPointerCancel={cancelFileLongPress}
+                onPointerDown={(event) => startFileLongPress(entry, event)}
+                onPointerLeave={cancelFileLongPress}
+                onPointerMove={moveFileLongPress}
+                onPointerUp={cancelFileLongPress}
                 type="button"
               >
                 <span className="mobile-file-entry-kind">
@@ -465,6 +572,98 @@ export function MobileFileBrowser({
           })
         )}
       </div>
+      {contextMenu && (
+        <div
+          className="mobile-file-context-backdrop"
+          onClick={() => setContextMenu(null)}
+          role="presentation"
+        >
+          <div
+            aria-label="文件操作菜单"
+            aria-modal="true"
+            className="mobile-file-context-menu"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <header>
+              <strong>{contextMenu.entry.name}</strong>
+              <code>{contextMenu.entry.path}</code>
+            </header>
+            {contextMenu.error && <div role="alert">{contextMenu.error}</div>}
+            <div className="mobile-file-context-actions">
+              <button
+                disabled={contextMenu.busy}
+                onClick={() => {
+                  const entry = contextMenu.entry;
+                  setContextMenu(null);
+                  isDirectory(entry)
+                    ? void navigate(entry.path)
+                    : void openFile(entry);
+                }}
+                type="button"
+              >
+                {isDirectory(contextMenu.entry) ? "进入目录" : "预览文件"}
+              </button>
+              <button
+                disabled={contextMenu.busy}
+                onClick={() =>
+                  void runContextAction((entry) =>
+                    downloadEntries([entry.path]),
+                  )
+                }
+                type="button"
+              >
+                下载
+              </button>
+              <button
+                disabled={contextMenu.busy}
+                onClick={() => {
+                  const entry = contextMenu.entry;
+                  const nextName = window.prompt("重命名", entry.name)?.trim();
+                  if (!nextName || nextName === entry.name) return;
+                  void runContextAction(() =>
+                    renameEntry(entry.path, nextName),
+                  );
+                }}
+                type="button"
+              >
+                重命名
+              </button>
+              <button
+                disabled={contextMenu.busy}
+                onClick={() => {
+                  const entry = contextMenu.entry;
+                  if (!window.confirm(`删除 ${entry.name}？此操作无法撤销。`)) {
+                    return;
+                  }
+                  void runContextAction(() => deleteEntries([entry.path]));
+                }}
+                type="button"
+              >
+                删除
+              </button>
+              <button
+                disabled={contextMenu.busy}
+                onClick={() =>
+                  void runContextAction((entry) =>
+                    copyTextToClipboard(entry.path),
+                  )
+                }
+                type="button"
+              >
+                复制路径
+              </button>
+              <button
+                disabled={contextMenu.busy}
+                onClick={() => setContextMenu(null)}
+                type="button"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

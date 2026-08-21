@@ -7,7 +7,6 @@ import type {
   AgentTaskSummaryResponse,
   AgentGitSummary,
   CheckoutDiffResponse,
-  AgentSessionSnapshotEvent,
   AgentSessionRecord,
   ChmodInput,
   DirectorySuggestionsInput,
@@ -42,6 +41,10 @@ import type {
 } from "@agent-orchestrator/shared";
 
 import { recordAgentSnapshotFrame } from "./resource-diagnostics";
+import {
+  applyAgentSessionStreamEvent,
+  parseAgentSessionStreamEvent,
+} from "./agent-session-stream";
 
 const viteEnv = import.meta.env ?? {};
 const rawApiBaseUrl = viteEnv.VITE_API_BASE_URL ?? "";
@@ -97,8 +100,16 @@ function buildWebSocketUrl(): string {
   return `${wsBase()}/ws/agent-sessions`;
 }
 
-export function buildTerminalWebSocketUrl(agentSessionId: string): string {
-  return `${wsBase()}/ws/agent-sessions/${agentSessionId}/terminal`;
+export function buildTerminalWebSocketUrl(
+  agentSessionId: string,
+  options: { replayBytes?: number } = {},
+): string {
+  const baseUrl = `${wsBase()}/ws/agent-sessions/${agentSessionId}/terminal`;
+  if (!options.replayBytes) return baseUrl;
+  const query = new URLSearchParams({
+    replayBytes: String(options.replayBytes),
+  });
+  return `${baseUrl}?${query.toString()}`;
 }
 
 export function getAgentTranscript(
@@ -360,50 +371,6 @@ export function refreshTmuxSession(
 const WS_RECONNECT_BASE_MS = 1_000;
 const WS_RECONNECT_MAX_MS = 30_000;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isAgentSessionListPayload(
-  value: unknown,
-): value is ListAgentSessionsResponse {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  return (
-    Array.isArray(value.items) &&
-    (typeof value.activeAgentSessionId === "string" ||
-      value.activeAgentSessionId === null) &&
-    typeof value.updatedAt === "string"
-  );
-}
-
-export function parseAgentSessionSnapshotEvent(
-  text: string,
-): AgentSessionSnapshotEvent | null {
-  let payload: unknown;
-
-  try {
-    payload = JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
-
-  if (!isRecord(payload) || payload.type !== "snapshot") {
-    return null;
-  }
-
-  if (!isAgentSessionListPayload(payload.payload)) {
-    return null;
-  }
-
-  return {
-    type: "snapshot",
-    payload: payload.payload,
-  };
-}
-
 export type ConnectionStatus =
   | "connecting"
   | "connected"
@@ -419,6 +386,7 @@ export function subscribeAgentSessions(
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconnectAttempts = 0;
   let socket = new WebSocket(buildWebSocketUrl());
+  let latestSnapshot: ListAgentSessionsResponse | null = null;
 
   function reportStatus(status: ConnectionStatus) {
     if (onStatusChange && !closed) {
@@ -439,10 +407,14 @@ export function subscribeAgentSessions(
     }
 
     recordAgentSnapshotFrame(text);
-    const payload = parseAgentSessionSnapshotEvent(text);
+    const event = parseAgentSessionStreamEvent(text);
 
-    if (payload && !closed) {
-      onSnapshot(payload.payload);
+    if (event && !closed) {
+      const nextSnapshot = applyAgentSessionStreamEvent(latestSnapshot, event);
+      if (nextSnapshot) {
+        latestSnapshot = nextSnapshot;
+        onSnapshot(nextSnapshot);
+      }
     }
   }
 
@@ -473,6 +445,7 @@ export function subscribeAgentSessions(
       reconnectAttempts += 1;
       reconnectTimer = setTimeout(() => {
         if (closed) return;
+        latestSnapshot = null;
         socket = new WebSocket(buildWebSocketUrl());
         connect();
       }, delay);

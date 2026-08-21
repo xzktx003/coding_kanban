@@ -2,10 +2,7 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 
-import type {
-  AgentSessionSnapshotEvent,
-  TerminalHistoryDiagnosticsResponse,
-} from "@agent-orchestrator/shared";
+import type { TerminalHistoryDiagnosticsResponse } from "@agent-orchestrator/shared";
 
 import {
   resolveTerminalHistoryRuntimeConfig,
@@ -25,6 +22,7 @@ import { registerFilesystemRoutes } from "./routes/filesystem.js";
 import { registerSshHostsRoutes } from "./routes/ssh-hosts.js";
 import { registerVsCodeWebProxyRoutes } from "./routes/vscode-web-proxy.js";
 import { AgentSessionRegistry } from "./services/agent-session-registry.js";
+import { createAgentSessionStreamEvent } from "./services/agent-session-stream.js";
 import { AppVersionService } from "./services/app-version-service.js";
 import { GitAutoUpdateService } from "./services/git-auto-update-service.js";
 import { LocalFsService } from "./services/local-fs-service.js";
@@ -50,6 +48,10 @@ import {
   sanitizeReplayForTerminal,
   stripTerminalResponsePayload,
 } from "./services/terminal-control-filter.js";
+import {
+  resolveTerminalReplayByteLimit,
+  takeUtf8Tail,
+} from "./services/terminal-replay-window.js";
 import { VsCodeWebManager } from "./services/vscode-web-manager.js";
 
 interface BuildServerOptions {
@@ -223,12 +225,11 @@ export function buildServer(options: BuildServerOptions = {}): {
     });
 
     instance.get("/ws/agent-sessions", { websocket: true }, (socket) => {
+      let previousSnapshot: ReturnType<AgentSessionRegistry["list"]> | null =
+        null;
       const unsubscribe = registry.subscribe((snapshot) => {
-        const event: AgentSessionSnapshotEvent = {
-          type: "snapshot",
-          payload: snapshot,
-        };
-
+        const event = createAgentSessionStreamEvent(previousSnapshot, snapshot);
+        previousSnapshot = snapshot;
         socket.send(JSON.stringify(event));
       });
 
@@ -237,11 +238,18 @@ export function buildServer(options: BuildServerOptions = {}): {
       });
     });
 
-    instance.get<{ Params: { id: string } }>(
+    instance.get<{
+      Params: { id: string };
+      Querystring: { replayBytes?: string };
+    }>(
       "/ws/agent-sessions/:id/terminal",
       { websocket: true },
       (socket, request) => {
         const { id } = request.params;
+        const replayByteLimit = resolveTerminalReplayByteLimit(
+          request.query.replayBytes,
+          terminalHistoryConfig.terminalScrollbackBytes,
+        );
         const localTmuxSocketInputState = createLocalTmuxSocketInputState(id, {
           localTmuxInputRouter,
         });
@@ -273,18 +281,22 @@ export function buildServer(options: BuildServerOptions = {}): {
             { replay: false },
           );
 
-          const replay = sanitizeReplayForTerminal(
-            ptyRuntimeManager.getScrollback(id),
+          const replay = takeUtf8Tail(
+            sanitizeReplayForTerminal(ptyRuntimeManager.getScrollback(id)),
+            replayByteLimit,
           );
           if (replay) {
             socket.send(buildTerminalControlFrame("replay", replay));
           }
         } else if (registry.has(id)) {
-          const replay = sanitizeReplayForTerminal(
-            registry
-              .getDetail(id)
-              .outputEntries.map((entry) => entry.text)
-              .join(""),
+          const replay = takeUtf8Tail(
+            sanitizeReplayForTerminal(
+              registry
+                .getDetail(id)
+                .outputEntries.map((entry) => entry.text)
+                .join(""),
+            ),
+            replayByteLimit,
           );
           if (replay) {
             socket.send(buildTerminalControlFrame("replay", replay));
