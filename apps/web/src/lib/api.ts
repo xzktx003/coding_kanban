@@ -103,9 +103,18 @@ export function buildTerminalWebSocketUrl(agentSessionId: string): string {
 
 export function getAgentTranscript(
   agentSessionId: string,
+  options: { cursor?: string; limit?: number } = {},
 ): Promise<AgentTranscriptResponse> {
+  const query = new URLSearchParams();
+  if (options.cursor) {
+    query.set("cursor", options.cursor);
+  }
+  if (options.limit) {
+    query.set("limit", String(options.limit));
+  }
+  const suffix = query.size > 0 ? `?${query.toString()}` : "";
   return request<AgentTranscriptResponse>(
-    `/api/agent-sessions/${agentSessionId}/transcript`,
+    `/api/agent-sessions/${agentSessionId}/transcript${suffix}`,
   );
 }
 

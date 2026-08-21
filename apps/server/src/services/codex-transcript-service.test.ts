@@ -12,76 +12,12 @@ import test from "node:test";
 
 import {
   CodexTranscriptService,
-  parseCodexTranscript,
   summarizeCodexTranscript,
 } from "./codex-transcript-service.js";
 
 function line(value: unknown): string {
   return `${JSON.stringify(value)}\n`;
 }
-
-test("parseCodexTranscript hides exec calls and their associated output", () => {
-  const expectedLines = Array.from(
-    { length: 100 },
-    (_, index) => `output-${index + 1}`,
-  ).join("\n");
-  const transcript = [
-    line({
-      timestamp: "2026-08-13T01:00:00.000Z",
-      type: "response_item",
-      payload: {
-        type: "message",
-        id: "user-1",
-        role: "user",
-        content: [{ type: "input_text", text: "run it" }],
-      },
-    }),
-    line({
-      timestamp: "2026-08-13T01:00:01.000Z",
-      type: "response_item",
-      payload: {
-        type: "custom_tool_call",
-        name: "exec",
-        call_id: "call-1",
-        input: "do work",
-      },
-    }),
-    line({
-      timestamp: "2026-08-13T01:00:02.000Z",
-      type: "response_item",
-      payload: {
-        type: "custom_tool_call_output",
-        call_id: "call-1",
-        output: [{ type: "input_text", text: expectedLines }],
-      },
-    }),
-    line({
-      timestamp: "2026-08-13T01:00:03.000Z",
-      type: "response_item",
-      payload: {
-        type: "message",
-        id: "assistant-1",
-        role: "assistant",
-        content: [{ type: "output_text", text: "finished" }],
-      },
-    }),
-  ].join("");
-
-  const entries = parseCodexTranscript(transcript);
-
-  assert.deepEqual(
-    entries.map((entry) => entry.kind),
-    ["user", "assistant"],
-  );
-  assert.equal(
-    entries.some((entry) => entry.title.startsWith("exec ")),
-    false,
-  );
-  assert.equal(
-    entries.some((entry) => entry.text.includes("output-1")),
-    false,
-  );
-});
 
 test("summarizeCodexTranscript extracts the latest user and assistant messages without an LLM", () => {
   const summary = summarizeCodexTranscript([
@@ -188,6 +124,159 @@ test("CodexTranscriptService selects the newest session with the same working di
     assert.equal(response.sessionId, "new-session");
     assert.equal(response.matchedBy, "working-directory");
     assert.equal(response.entries.at(-1)?.text, "new");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CodexTranscriptService reads transcript pages backward from a byte cursor", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-transcript-page-"));
+  const sessionsRoot = join(root, "sessions", "2026", "08", "21");
+  const sessionId = "paged-session";
+  const path = join(sessionsRoot, `rollout-${sessionId}.jsonl`);
+  mkdirSync(sessionsRoot, { recursive: true });
+  writeFileSync(
+    path,
+    [
+      line({
+        timestamp: "2026-08-21T00:00:00.000Z",
+        type: "session_meta",
+        payload: { id: sessionId, cwd: "/workspace/paged" },
+      }),
+      ...Array.from({ length: 75 }, (_, index) =>
+        line({
+          timestamp: `2026-08-21T00:00:${String(index).padStart(2, "0")}.000Z`,
+          type: "response_item",
+          payload: {
+            type: "message",
+            id: `message-${index + 1}`,
+            role: "assistant",
+            content: [
+              {
+                type: "output_text",
+                text:
+                  index === 39
+                    ? `message ${index + 1} ${"x".repeat(70 * 1024)}`
+                    : `message ${index + 1}`,
+              },
+            ],
+          },
+        }),
+      ),
+    ].join(""),
+  );
+
+  try {
+    const service = new CodexTranscriptService({
+      sessionsRoot: join(root, "sessions"),
+    });
+    const newest = service.read({ sessionId, limit: 30 });
+    const middle = service.read({
+      sessionId,
+      limit: 30,
+      cursor: newest.nextCursor ?? undefined,
+    });
+    const oldest = service.read({
+      sessionId,
+      limit: 30,
+      cursor: middle.nextCursor ?? undefined,
+    });
+
+    assert.deepEqual(
+      newest.entries.map((entry) => entry.id),
+      Array.from({ length: 30 }, (_, index) => `message-${index + 46}`),
+    );
+    assert.equal(newest.hasMore, true);
+    assert.match(newest.nextCursor ?? "", /^\d+$/);
+    assert.deepEqual(
+      middle.entries.map((entry) => entry.id),
+      Array.from({ length: 30 }, (_, index) => `message-${index + 16}`),
+    );
+    assert.equal(middle.hasMore, true);
+    assert.equal(middle.entries[24]?.text.startsWith("message 40 "), true);
+    assert.deepEqual(
+      oldest.entries.map((entry) => entry.id),
+      Array.from({ length: 15 }, (_, index) => `message-${index + 1}`),
+    );
+    assert.equal(oldest.hasMore, false);
+    assert.equal(oldest.nextCursor, null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CodexTranscriptService keeps exec calls hidden while filling a page", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-transcript-exec-page-"));
+  const sessionsRoot = join(root, "sessions", "2026", "08", "21");
+  const sessionId = "exec-page-session";
+  mkdirSync(sessionsRoot, { recursive: true });
+  writeFileSync(
+    join(sessionsRoot, `rollout-${sessionId}.jsonl`),
+    [
+      line({
+        timestamp: "2026-08-21T00:00:00.000Z",
+        type: "session_meta",
+        payload: { id: sessionId, cwd: "/workspace/exec-page" },
+      }),
+      ...Array.from({ length: 29 }, (_, index) =>
+        line({
+          timestamp: "2026-08-21T00:00:01.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            id: `message-${index + 1}`,
+            role: "assistant",
+            content: [{ type: "output_text", text: `message ${index + 1}` }],
+          },
+        }),
+      ),
+      line({
+        timestamp: "2026-08-21T00:01:00.000Z",
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          call_id: "hidden-exec",
+          input: "large command",
+        },
+      }),
+      line({
+        timestamp: "2026-08-21T00:01:01.000Z",
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call_output",
+          call_id: "hidden-exec",
+          output: "large output",
+        },
+      }),
+      line({
+        timestamp: "2026-08-21T00:01:02.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          id: "message-30",
+          role: "assistant",
+          content: [{ type: "output_text", text: "message 30" }],
+        },
+      }),
+    ].join(""),
+  );
+
+  try {
+    const response = new CodexTranscriptService({
+      sessionsRoot: join(root, "sessions"),
+    }).read({ sessionId, limit: 30 });
+
+    assert.equal(response.entries.length, 30);
+    assert.equal(
+      response.entries.some((entry) => entry.title.startsWith("exec ")),
+      false,
+    );
+    assert.equal(
+      response.entries.some((entry) => entry.text.includes("large output")),
+      false,
+    );
+    assert.equal(response.hasMore, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -46,6 +46,8 @@ test("GET transcript resolves a local Codex record from the registered session",
           matchedBy: "session-id",
           updatedAt: "2026-08-13T01:00:00.000Z",
           entries: [],
+          hasMore: false,
+          nextCursor: null,
         };
       },
     },
@@ -65,6 +67,63 @@ test("GET transcript resolves a local Codex record from the registered session",
     (response.json() as AgentTranscriptResponse).matchedBy,
     "session-id",
   );
+  await app.close();
+});
+
+test("GET transcript forwards the server page cursor and bounded page size", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "codex",
+    displayName: "paged codex",
+    workingDirectory: "/workspace/project",
+    connectionState: "online",
+    interactionState: "running",
+    agentSessionId: "paged-codex-session",
+  });
+  let receivedInput: unknown;
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {} as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    codexTranscriptService: {
+      read(input) {
+        receivedInput = input;
+        return {
+          available: true,
+          agentKind: "codex",
+          sessionId: "paged-codex-session",
+          matchedBy: "session-id",
+          updatedAt: "2026-08-21T01:00:00.000Z",
+          entries: [],
+          hasMore: true,
+          nextCursor: "1024",
+        };
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/agent-sessions/${session.id}/transcript?cursor=2048&limit=30`,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(receivedInput, {
+    sessionId: "paged-codex-session",
+    workingDirectory: "/workspace/project",
+    cursor: "2048",
+    limit: 30,
+  });
   await app.close();
 });
 
@@ -118,6 +177,8 @@ test("GET transcript keeps two tmux panes in the same directory on distinct Code
           matchedBy: "session-id",
           updatedAt: "2026-08-19T00:00:00.000Z",
           entries: [],
+          hasMore: false,
+          nextCursor: null,
         };
       },
     },
@@ -285,6 +346,8 @@ test("GET task summary extracts the latest structured Codex messages", async () 
           sessionId: "codex-session-id",
           matchedBy: "working-directory",
           updatedAt: "2026-08-13T02:00:00.000Z",
+          hasMore: false,
+          nextCursor: null,
           entries: [
             {
               id: "user-1",
@@ -359,6 +422,8 @@ test("GET task summary reuses the cached transcript within the refresh window", 
           matchedBy: "working-directory",
           updatedAt: "2026-08-13T02:00:00.000Z",
           entries: [],
+          hasMore: false,
+          nextCursor: null,
         };
       },
     },
@@ -416,6 +481,8 @@ test("GET task summary supports local tmux sessions even when agentKind is shell
           sessionId: "codex-session-id",
           matchedBy: "working-directory",
           updatedAt: "2026-08-13T02:00:00.000Z",
+          hasMore: false,
+          nextCursor: null,
           entries: [
             {
               id: "user-1",
@@ -487,6 +554,8 @@ test("Codex JSONL routes ignore explicit OpenCode tmux sessions", async () => {
           matchedBy: "working-directory",
           updatedAt: "2026-08-20T00:00:00.000Z",
           entries: [],
+          hasMore: false,
+          nextCursor: null,
         };
       },
     },

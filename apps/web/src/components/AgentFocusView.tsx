@@ -1406,6 +1406,7 @@ export function AgentFocusView({
           displayName={activeTranscriptSession.displayName}
           onClose={() => setTranscriptOpen(false)}
           terminalFontSize={terminalFontSize}
+          useLightweightTerminalPreview={useLightweightTerminalPreview}
         />
       )}
     </div>

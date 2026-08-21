@@ -27,6 +27,7 @@ interface MobileWorkbenchPageProps {
   isLoading: boolean;
   sessions: AgentSessionRecord[];
   terminalFontSize?: number;
+  useLightweightTerminalPreview?: boolean;
   agentCompletionNotificationsEnabled?: boolean;
   agentCompletionNotificationPermission?: AgentCompletionNotificationPermission;
   onSwitchSession: (id: string) => void;
@@ -307,6 +308,7 @@ export function MobileWorkbenchPage({
   isLoading,
   sessions,
   terminalFontSize,
+  useLightweightTerminalPreview = true,
   agentCompletionNotificationsEnabled = false,
   agentCompletionNotificationPermission = "unsupported",
   onSwitchSession,
@@ -762,10 +764,12 @@ export function MobileWorkbenchPage({
       )}
       {transcriptSession && (
         <AgentTranscriptDialog
+          key={transcriptSession.id}
           agentSessionId={transcriptSession.id}
           displayName={transcriptSession.displayName}
           onClose={() => setTranscriptSession(null)}
           terminalFontSize={terminalFontSize}
+          useLightweightTerminalPreview={useLightweightTerminalPreview}
         />
       )}
     </main>

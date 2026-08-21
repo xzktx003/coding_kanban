@@ -193,6 +193,8 @@ export interface AgentTranscriptResponse {
   matchedBy: "session-id" | "working-directory" | null;
   updatedAt: string | null;
   entries: AgentTranscriptEntry[];
+  hasMore: boolean;
+  nextCursor: string | null;
   message?: string;
 }
 

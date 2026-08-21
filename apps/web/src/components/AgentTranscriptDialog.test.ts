@@ -6,8 +6,9 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
+  AGENT_TRANSCRIPT_PAGE_SIZE,
   AgentTranscriptEntries,
-  getNextTranscriptVisibleCount,
+  mergeTranscriptPage,
 } from "./AgentTranscriptDialog.js";
 
 test("transcript entries hide exec calls and outputs while showing visible records newest first", () => {
@@ -21,6 +22,8 @@ test("transcript entries hide exec calls and outputs while showing visible recor
     sessionId: "codex-1",
     matchedBy: "working-directory",
     updatedAt: "2026-08-13T01:00:00.000Z",
+    hasMore: false,
+    nextCursor: null,
     entries: [
       {
         id: "user-markdown",
@@ -109,14 +112,16 @@ test("transcript entries hide exec calls and outputs while showing visible recor
   assert.match(markup, /style="--agent-transcript-font-size:18px"/);
 });
 
-test("transcript entries initially stop after one batch and offer manual continuation", () => {
+test("transcript entries render one server page and offer manual continuation", () => {
   const transcript: AgentTranscriptResponse = {
     available: true,
     agentKind: "codex",
     sessionId: "codex-long",
     matchedBy: "session-id",
     updatedAt: "2026-08-18T01:00:00.000Z",
-    entries: Array.from({ length: 65 }, (_, index) => ({
+    hasMore: true,
+    nextCursor: "4096",
+    entries: Array.from({ length: AGENT_TRANSCRIPT_PAGE_SIZE }, (_, index) => ({
       id: `message-${index + 1}`,
       timestamp: `2026-08-18T00:00:${String(index).padStart(2, "0")}.000Z`,
       kind: "assistant" as const,
@@ -130,12 +135,45 @@ test("transcript entries initially stop after one batch and offer manual continu
     createElement(AgentTranscriptEntries, { transcript }),
   );
 
-  assert.match(markup, /data-transcript-entry-id="message-65"/);
-  assert.match(markup, /data-transcript-entry-id="message-36"/);
-  assert.doesNotMatch(markup, /data-transcript-entry-id="message-35"/);
+  assert.match(markup, /data-transcript-entry-id="message-30"/);
+  assert.match(markup, /data-transcript-entry-id="message-1"/);
   assert.equal((markup.match(/data-transcript-entry-id=/g) ?? []).length, 30);
-  assert.match(markup, /已显示 30 \/ 65 条/);
+  assert.match(markup, /已加载 30 条/);
   assert.match(markup, />继续加载</);
-  assert.equal(getNextTranscriptVisibleCount(30, 65), 60);
-  assert.equal(getNextTranscriptVisibleCount(60, 65), 65);
+});
+
+test("lightweight transcript window keeps the newly loaded older records bounded", () => {
+  const page = (start: number, count: number): AgentTranscriptResponse => ({
+    available: true,
+    agentKind: "codex",
+    sessionId: "codex-long",
+    matchedBy: "session-id",
+    updatedAt: "2026-08-18T01:00:00.000Z",
+    hasMore: start > 1,
+    nextCursor: start > 1 ? String(start * 100) : null,
+    entries: Array.from({ length: count }, (_, index) => ({
+      id: `message-${start + index}`,
+      timestamp: "2026-08-18T00:00:00.000Z",
+      kind: "assistant" as const,
+      title: "Codex",
+      text: `message body ${start + index}`,
+      collapsedByDefault: false,
+    })),
+  });
+
+  const newest = page(91, 30);
+  const merged = mergeTranscriptPage(newest, page(61, 30), 90);
+  const bounded = mergeTranscriptPage(merged, page(31, 30), 90);
+  const shifted = mergeTranscriptPage(bounded, page(1, 30), 90);
+
+  assert.deepEqual(
+    shifted.entries.map((entry) => entry.id),
+    Array.from({ length: 90 }, (_, index) => `message-${index + 1}`),
+  );
+  assert.equal(
+    shifted.entries.some((entry) => entry.id === "message-120"),
+    false,
+  );
+  assert.equal(shifted.hasMore, false);
+  assert.equal(shifted.nextCursor, null);
 });

@@ -532,29 +532,36 @@ export async function registerAgentSessionRoutes(
     },
   );
 
-  fastify.get<{ Params: { id: string } }>(
-    "/api/agent-sessions/:id/transcript",
-    async (request) => {
-      const agentSession = registry.get(request.params.id);
-      if (!isLocalCodexSessionCandidate(agentSession)) {
-        return {
-          available: false,
-          agentKind: "codex" as const,
-          sessionId: null,
-          matchedBy: null,
-          updatedAt: null,
-          entries: [],
-          message: "完整记录仅支持本机 Codex 会话。",
-        };
-      }
+  fastify.get<{
+    Params: { id: string };
+    Querystring: { cursor?: string; limit?: string };
+  }>("/api/agent-sessions/:id/transcript", async (request) => {
+    const agentSession = registry.get(request.params.id);
+    if (!isLocalCodexSessionCandidate(agentSession)) {
+      return {
+        available: false,
+        agentKind: "codex" as const,
+        sessionId: null,
+        matchedBy: null,
+        updatedAt: null,
+        entries: [],
+        hasMore: false,
+        nextCursor: null,
+        message: "完整记录仅支持本机 Codex 会话。",
+      };
+    }
 
-      const sessionId = await resolveCodexSessionId(agentSession);
-      return codexTranscriptService.read({
-        sessionId,
-        workingDirectory: agentSession.workingDirectory,
-      });
-    },
-  );
+    const sessionId = await resolveCodexSessionId(agentSession);
+    const requestedLimit = Number(request.query.limit);
+    return codexTranscriptService.read({
+      sessionId,
+      workingDirectory: agentSession.workingDirectory,
+      ...(request.query.cursor ? { cursor: request.query.cursor } : {}),
+      ...(Number.isSafeInteger(requestedLimit)
+        ? { limit: requestedLimit }
+        : {}),
+    });
+  });
 
   fastify.get<{ Params: { id: string } }>(
     "/api/agent-sessions/:id",

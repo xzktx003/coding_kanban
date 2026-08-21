@@ -1634,6 +1634,7 @@ export default function App() {
         isLoading={isLoading}
         sessions={sessions}
         terminalFontSize={terminalFontSize}
+        useLightweightTerminalPreview={useLightweightTerminalPreview}
         agentCompletionNotificationsEnabled={
           agentCompletionNotificationsEnabled
         }

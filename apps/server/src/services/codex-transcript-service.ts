@@ -2,7 +2,6 @@ import {
   closeSync,
   existsSync,
   openSync,
-  readFileSync,
   readSync,
   readdirSync,
   statSync,
@@ -16,15 +15,20 @@ import type {
 } from "@agent-orchestrator/shared";
 
 const SESSION_HEADER_BYTES = 64 * 1024;
+const TRANSCRIPT_READ_BLOCK_BYTES = 64 * 1024;
+const DEFAULT_TRANSCRIPT_PAGE_LIMIT = 30;
+const MAX_TRANSCRIPT_PAGE_LIMIT = 100;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 
 interface CodexTranscriptServiceOptions {
   sessionsRoot?: string;
 }
 
-interface ReadTranscriptInput {
+export interface ReadTranscriptInput {
   sessionId?: string;
   workingDirectory?: string;
+  cursor?: string;
+  limit?: number;
 }
 
 export interface AgentMessageSummaries {
@@ -43,6 +47,16 @@ interface JsonRecord {
   timestamp?: unknown;
   type?: unknown;
   payload?: Record<string, unknown>;
+}
+
+interface TranscriptPage {
+  entries: AgentTranscriptEntry[];
+  hasMore: boolean;
+  nextCursor: string | null;
+}
+
+interface PendingToolOutput {
+  entry: AgentTranscriptEntry;
 }
 
 function stringValue(value: unknown): string {
@@ -83,6 +97,200 @@ function parseRecord(line: string): JsonRecord | null {
   }
 }
 
+function normalizePageLimit(limit: number | undefined): number {
+  if (!Number.isSafeInteger(limit) || !limit || limit < 1) {
+    return DEFAULT_TRANSCRIPT_PAGE_LIMIT;
+  }
+  return Math.min(limit, MAX_TRANSCRIPT_PAGE_LIMIT);
+}
+
+function resolveCursorOffset(
+  cursor: string | undefined,
+  fileSize: number,
+): number {
+  if (!cursor || !/^\d+$/.test(cursor)) {
+    return fileSize;
+  }
+  const offset = Number(cursor);
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset > fileSize) {
+    return fileSize;
+  }
+  return offset;
+}
+
+function scanJsonlLinesBackward(
+  path: string,
+  endOffset: number,
+  visit: (line: string, lineStartOffset: number) => boolean,
+): void {
+  const descriptor = openSync(path, "r");
+  let position = endOffset;
+  let suffix = Buffer.alloc(0);
+
+  try {
+    while (position > 0) {
+      const blockStart = Math.max(0, position - TRANSCRIPT_READ_BLOCK_BYTES);
+      const block = Buffer.allocUnsafe(position - blockStart);
+      const bytesRead = readSync(
+        descriptor,
+        block,
+        0,
+        block.length,
+        blockStart,
+      );
+      const combined = suffix.length
+        ? Buffer.concat([block.subarray(0, bytesRead), suffix])
+        : block.subarray(0, bytesRead);
+      let lineEnd = combined.length;
+
+      for (let index = combined.length - 1; index >= 0; index -= 1) {
+        if (combined[index] !== 0x0a) {
+          continue;
+        }
+        const lineStart = index + 1;
+        if (
+          lineEnd > lineStart &&
+          visit(
+            combined.subarray(lineStart, lineEnd).toString("utf8"),
+            blockStart + lineStart,
+          )
+        ) {
+          return;
+        }
+        lineEnd = index;
+      }
+
+      suffix = Buffer.from(combined.subarray(0, lineEnd));
+      position = blockStart;
+    }
+
+    if (suffix.length > 0) {
+      visit(suffix.toString("utf8"), 0);
+    }
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function readTranscriptGroupsBackward(
+  path: string,
+  endOffset: number,
+  limit: number,
+): { entries: AgentTranscriptEntry[]; nextOffset: number } {
+  const groups: AgentTranscriptEntry[][] = [];
+  const pendingOutputs = new Map<string, PendingToolOutput>();
+  let entryCount = 0;
+  let nextOffset = 0;
+
+  scanJsonlLinesBackward(path, endOffset, (line, lineStartOffset) => {
+    nextOffset = lineStartOffset;
+    const record = parseRecord(line);
+    if (record?.type !== "response_item" || !record.payload) {
+      return false;
+    }
+
+    const payload = record.payload;
+    const payloadType = stringValue(payload.type);
+    const timestamp = stringValue(record.timestamp);
+
+    if (payloadType === "custom_tool_call_output") {
+      const callId = stringValue(payload.call_id);
+      if (callId) {
+        pendingOutputs.set(callId, {
+          entry: {
+            id: `${callId}-output`,
+            timestamp,
+            kind: "tool",
+            title: "工具输出",
+            text: collectText(payload.output),
+            collapsedByDefault: true,
+          },
+        });
+      }
+      return false;
+    }
+
+    let group: AgentTranscriptEntry[] | null = null;
+    if (payloadType === "custom_tool_call") {
+      const callId = stringValue(payload.call_id) || `call-${lineStartOffset}`;
+      const name = stringValue(payload.name) || "工具";
+      const pendingOutput = pendingOutputs.get(callId);
+      pendingOutputs.delete(callId);
+      if (name !== "exec") {
+        group = [
+          {
+            id: `${callId}-request`,
+            timestamp,
+            kind: "tool",
+            title: `${name} 调用`,
+            text: collectText(payload.input),
+            collapsedByDefault: true,
+          },
+          ...(pendingOutput
+            ? [
+                {
+                  ...pendingOutput.entry,
+                  title: `${name} 输出`,
+                },
+              ]
+            : []),
+        ];
+      }
+    } else if (payloadType === "message") {
+      const role = stringValue(payload.role);
+      const text = collectText(payload.content);
+      if ((role === "user" || role === "assistant") && text) {
+        group = [
+          {
+            id: stringValue(payload.id) || `message-${lineStartOffset}`,
+            timestamp,
+            kind: role,
+            title: role === "user" ? "你" : "Codex",
+            text,
+            collapsedByDefault: false,
+          },
+        ];
+      }
+    }
+
+    if (group) {
+      groups.push(group);
+      entryCount += group.length;
+    }
+    return entryCount >= limit && pendingOutputs.size === 0;
+  });
+
+  return {
+    entries: groups.reverse().flat(),
+    nextOffset,
+  };
+}
+
+function readTranscriptPage(
+  path: string,
+  cursor: string | undefined,
+  requestedLimit: number | undefined,
+): TranscriptPage {
+  const fileSize = statSync(path).size;
+  const endOffset = resolveCursorOffset(cursor, fileSize);
+  const page = readTranscriptGroupsBackward(
+    path,
+    endOffset,
+    normalizePageLimit(requestedLimit),
+  );
+  if (page.entries.length === 0) {
+    return { entries: [], hasMore: false, nextCursor: null };
+  }
+
+  const lookBehind = readTranscriptGroupsBackward(path, page.nextOffset, 1);
+  const hasMore = lookBehind.entries.length > 0;
+  return {
+    entries: page.entries,
+    hasMore,
+    nextCursor: hasMore ? String(page.nextOffset) : null,
+  };
+}
+
 function summarizeMessageText(text: string): string {
   const normalized = text
     .replace(/```[\s\S]*?```/g, " ")
@@ -98,7 +306,9 @@ function summarizeMessageText(text: string): string {
 export function summarizeCodexTranscript(
   entries: AgentTranscriptEntry[],
 ): AgentMessageSummaries {
-  const lastUser = [...entries].reverse().find((entry) => entry.kind === "user");
+  const lastUser = [...entries]
+    .reverse()
+    .find((entry) => entry.kind === "user");
   const lastAssistant = [...entries]
     .reverse()
     .find((entry) => entry.kind === "assistant");
@@ -110,81 +320,6 @@ export function summarizeCodexTranscript(
     summary.lastAgentMessageSummary = summarizeMessageText(lastAssistant.text);
   }
   return summary;
-}
-
-export function parseCodexTranscript(content: string): AgentTranscriptEntry[] {
-  const entries: AgentTranscriptEntry[] = [];
-  const toolNames = new Map<string, string>();
-
-  for (const [lineIndex, line] of content.split("\n").entries()) {
-    if (!line.trim()) {
-      continue;
-    }
-    const record = parseRecord(line);
-    if (record?.type !== "response_item" || !record.payload) {
-      continue;
-    }
-
-    const payload = record.payload;
-    const payloadType = stringValue(payload.type);
-    const timestamp = stringValue(record.timestamp);
-
-    if (payloadType === "message") {
-      const role = stringValue(payload.role);
-      if (role !== "user" && role !== "assistant") {
-        continue;
-      }
-      const text = collectText(payload.content);
-      if (!text) {
-        continue;
-      }
-      entries.push({
-        id: stringValue(payload.id) || `message-${lineIndex}`,
-        timestamp,
-        kind: role,
-        title: role === "user" ? "你" : "Codex",
-        text,
-        collapsedByDefault: false,
-      });
-      continue;
-    }
-
-    if (payloadType === "custom_tool_call") {
-      const callId = stringValue(payload.call_id) || `call-${lineIndex}`;
-      const name = stringValue(payload.name) || "工具";
-      toolNames.set(callId, name);
-      if (name === "exec") {
-        continue;
-      }
-      entries.push({
-        id: `${callId}-request`,
-        timestamp,
-        kind: "tool",
-        title: `${name} 调用`,
-        text: collectText(payload.input),
-        collapsedByDefault: true,
-      });
-      continue;
-    }
-
-    if (payloadType === "custom_tool_call_output") {
-      const callId = stringValue(payload.call_id) || `output-${lineIndex}`;
-      const name = toolNames.get(callId) ?? "工具";
-      if (name === "exec") {
-        continue;
-      }
-      entries.push({
-        id: `${callId}-output`,
-        timestamp,
-        kind: "tool",
-        title: `${name} 输出`,
-        text: collectText(payload.output),
-        collapsedByDefault: true,
-      });
-    }
-  }
-
-  return entries;
 }
 
 function listJsonlFiles(root: string): string[] {
@@ -247,18 +382,20 @@ export class CodexTranscriptService {
         matchedBy: null,
         updatedAt: null,
         entries: [],
+        hasMore: false,
+        nextCursor: null,
         message: "没有找到与当前工作目录匹配的本机 Codex 记录。",
       };
     }
 
-    const content = readFileSync(match.path, "utf8");
+    const page = readTranscriptPage(match.path, input.cursor, input.limit);
     return {
       available: true,
       agentKind: "codex",
       sessionId: match.metadata.id,
       matchedBy: match.matchedBy,
       updatedAt: statSync(match.path).mtime.toISOString(),
-      entries: parseCodexTranscript(content),
+      ...page,
     };
   }
 

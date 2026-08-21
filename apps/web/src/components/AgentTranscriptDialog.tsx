@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { AgentTranscriptResponse } from "@agent-orchestrator/shared";
 
@@ -12,8 +12,11 @@ import {
 import { LazyMarkdownContent } from "./LazyMarkdownRenderedContent";
 
 interface AgentTranscriptEntriesProps {
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
   terminalFontSize?: number;
   transcript: AgentTranscriptResponse;
+  windowTrimmed?: boolean;
 }
 
 interface AgentTranscriptDialogProps {
@@ -21,15 +24,38 @@ interface AgentTranscriptDialogProps {
   displayName: string;
   onClose: () => void;
   terminalFontSize?: number;
+  useLightweightTerminalPreview?: boolean;
 }
 
-export const AGENT_TRANSCRIPT_BATCH_SIZE = 30;
+export const AGENT_TRANSCRIPT_PAGE_SIZE = 30;
+export const LIGHTWEIGHT_TRANSCRIPT_WINDOW_SIZE = 90;
+export const FULL_TRANSCRIPT_WINDOW_SIZE = 300;
 
-export function getNextTranscriptVisibleCount(
-  currentCount: number,
-  totalCount: number,
-): number {
-  return Math.min(totalCount, currentCount + AGENT_TRANSCRIPT_BATCH_SIZE);
+export function mergeTranscriptPage(
+  current: AgentTranscriptResponse,
+  olderPage: AgentTranscriptResponse,
+  maxEntries: number,
+): AgentTranscriptResponse {
+  if (
+    !current.available ||
+    !olderPage.available ||
+    current.sessionId !== olderPage.sessionId
+  ) {
+    return olderPage;
+  }
+
+  const seen = new Set<string>();
+  const entries = [...olderPage.entries, ...current.entries].filter((entry) => {
+    if (seen.has(entry.id)) {
+      return false;
+    }
+    seen.add(entry.id);
+    return true;
+  });
+  return {
+    ...olderPage,
+    entries: entries.slice(0, Math.max(1, maxEntries)),
+  };
 }
 
 function formatTimestamp(timestamp: string): string {
@@ -41,10 +67,12 @@ function formatTimestamp(timestamp: string): string {
 }
 
 export function AgentTranscriptEntries({
+  loadingMore = false,
+  onLoadMore,
   terminalFontSize = DEFAULT_TERMINAL_FONT_SIZE,
   transcript,
+  windowTrimmed = false,
 }: AgentTranscriptEntriesProps) {
-  const [visibleCount, setVisibleCount] = useState(AGENT_TRANSCRIPT_BATCH_SIZE);
   const orderedEntries = useMemo(
     () =>
       [...transcript.entries]
@@ -55,10 +83,6 @@ export function AgentTranscriptEntries({
     [transcript.entries],
   );
 
-  useEffect(() => {
-    setVisibleCount(AGENT_TRANSCRIPT_BATCH_SIZE);
-  }, [transcript]);
-
   if (!transcript.available) {
     return (
       <div className="agent-transcript-empty">
@@ -66,9 +90,6 @@ export function AgentTranscriptEntries({
       </div>
     );
   }
-
-  const renderedEntries = orderedEntries.slice(0, visibleCount);
-  const hasMoreEntries = renderedEntries.length < orderedEntries.length;
 
   return (
     <>
@@ -93,7 +114,7 @@ export function AgentTranscriptEntries({
             记录中还没有可展示的消息。
           </div>
         ) : (
-          renderedEntries.map((entry) => {
+          orderedEntries.map((entry) => {
             const content =
               entry.kind === "tool" ? (
                 <pre
@@ -141,24 +162,17 @@ export function AgentTranscriptEntries({
             );
           })
         )}
-        {hasMoreEntries ? (
+        {transcript.hasMore || windowTrimmed ? (
           <div className="agent-transcript-load-more">
             <span>
-              已显示 {renderedEntries.length} / {orderedEntries.length} 条
+              已加载 {orderedEntries.length} 条
+              {windowTrimmed ? " · 已释放窗口外较新记录，刷新可回到最新" : ""}
             </span>
-            <button
-              onClick={() => {
-                setVisibleCount((currentCount) =>
-                  getNextTranscriptVisibleCount(
-                    currentCount,
-                    orderedEntries.length,
-                  ),
-                );
-              }}
-              type="button"
-            >
-              继续加载
-            </button>
+            {transcript.hasMore ? (
+              <button disabled={loadingMore} onClick={onLoadMore} type="button">
+                {loadingMore ? "加载中…" : "继续加载"}
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -171,27 +185,108 @@ export function AgentTranscriptDialog({
   displayName,
   onClose,
   terminalFontSize = DEFAULT_TERMINAL_FONT_SIZE,
+  useLightweightTerminalPreview = true,
 }: AgentTranscriptDialogProps) {
   const [transcript, setTranscript] = useState<AgentTranscriptResponse | null>(
     null,
   );
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
+  const [windowTrimmed, setWindowTrimmed] = useState(false);
+  const requestIdRef = useRef(0);
+  const maxRetainedEntries = useLightweightTerminalPreview
+    ? LIGHTWEIGHT_TRANSCRIPT_WINDOW_SIZE
+    : FULL_TRANSCRIPT_WINDOW_SIZE;
 
-  const load = () => {
+  const load = useCallback(() => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
+    setLoadingMore(false);
     setError(null);
-    void getAgentTranscript(agentSessionId)
-      .then(setTranscript)
+    setLoadMoreError(null);
+    setWindowTrimmed(false);
+    void getAgentTranscript(agentSessionId, {
+      limit: AGENT_TRANSCRIPT_PAGE_SIZE,
+    })
+      .then((response) => {
+        if (requestId === requestIdRef.current) {
+          setTranscript(response);
+        }
+      })
       .catch((loadError: unknown) => {
-        setError(
-          loadError instanceof Error ? loadError.message : "完整记录加载失败",
+        if (requestId === requestIdRef.current) {
+          setError(
+            loadError instanceof Error ? loadError.message : "完整记录加载失败",
+          );
+        }
+      })
+      .finally(() => {
+        if (requestId === requestIdRef.current) {
+          setLoading(false);
+        }
+      });
+  }, [agentSessionId]);
+
+  useEffect(() => {
+    load();
+    return () => {
+      requestIdRef.current += 1;
+    };
+  }, [load]);
+
+  useEffect(() => {
+    if (!transcript || transcript.entries.length <= maxRetainedEntries) {
+      return;
+    }
+    setWindowTrimmed(true);
+    setTranscript({
+      ...transcript,
+      entries: transcript.entries.slice(0, maxRetainedEntries),
+    });
+  }, [maxRetainedEntries, transcript]);
+
+  const loadMore = useCallback(() => {
+    if (!transcript?.hasMore || !transcript.nextCursor || loadingMore) {
+      return;
+    }
+    const requestId = ++requestIdRef.current;
+    setLoadingMore(true);
+    setLoadMoreError(null);
+    void getAgentTranscript(agentSessionId, {
+      cursor: transcript.nextCursor,
+      limit: AGENT_TRANSCRIPT_PAGE_SIZE,
+    })
+      .then((olderPage) => {
+        if (requestId !== requestIdRef.current) {
+          return;
+        }
+        setWindowTrimmed(
+          (current) =>
+            current ||
+            transcript.entries.length + olderPage.entries.length >
+              maxRetainedEntries,
+        );
+        setTranscript((current) =>
+          current
+            ? mergeTranscriptPage(current, olderPage, maxRetainedEntries)
+            : olderPage,
         );
       })
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(load, [agentSessionId]);
+      .catch((loadError: unknown) => {
+        if (requestId === requestIdRef.current) {
+          setLoadMoreError(
+            loadError instanceof Error ? loadError.message : "更早记录加载失败",
+          );
+        }
+      })
+      .finally(() => {
+        if (requestId === requestIdRef.current) {
+          setLoadingMore(false);
+        }
+      });
+  }, [agentSessionId, loadingMore, maxRetainedEntries, transcript]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -226,7 +321,11 @@ export function AgentTranscriptDialog({
             <span>{displayName}</span>
           </div>
           <div className="agent-transcript-actions">
-            <button disabled={loading} onClick={load} type="button">
+            <button
+              disabled={loading || loadingMore}
+              onClick={load}
+              type="button"
+            >
               {loading ? "加载中…" : "刷新"}
             </button>
             <button onClick={onClose} type="button">
@@ -240,10 +339,20 @@ export function AgentTranscriptDialog({
               {error}
             </div>
           ) : transcript ? (
-            <AgentTranscriptEntries
-              terminalFontSize={terminalFontSize}
-              transcript={transcript}
-            />
+            <>
+              {loadMoreError ? (
+                <div className="agent-transcript-error" role="alert">
+                  {loadMoreError}
+                </div>
+              ) : null}
+              <AgentTranscriptEntries
+                loadingMore={loadingMore}
+                onLoadMore={loadMore}
+                terminalFontSize={terminalFontSize}
+                transcript={transcript}
+                windowTrimmed={windowTrimmed}
+              />
+            </>
           ) : (
             <div className="agent-transcript-empty">正在读取 Codex 记录…</div>
           )}
