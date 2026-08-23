@@ -5,6 +5,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { flushSync } from "react-dom";
 
 import type {
   AgentSessionRecord,
@@ -42,6 +43,7 @@ interface MobileFileContextMenuState {
 }
 
 interface MobileCreateMenuState {
+  name: string;
   error: string | null;
   busy: boolean;
 }
@@ -180,6 +182,7 @@ export function MobileFileBrowser({
   const [createMenu, setCreateMenu] = useState<MobileCreateMenuState | null>(
     null,
   );
+  const createNameInputRef = useRef<HTMLInputElement>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
   const suppressNextFileClickRef = useRef(false);
@@ -297,24 +300,33 @@ export function MobileFileBrowser({
     }
   };
 
+  const openCreateMenu = () => {
+    flushSync(() => {
+      setCreateMenu({ name: "", busy: false, error: null });
+    });
+    createNameInputRef.current?.focus({ preventScroll: true });
+  };
+
   const runCreateAction = async (kind: "file" | "directory") => {
     if (createMenu?.busy) return;
-    const requestedName = window.prompt(
-      kind === "file" ? "输入新文件名称" : "输入新文件夹名称",
-      kind === "file" ? "untitled.txt" : "新建文件夹",
-    );
-    if (requestedName === null) return;
-
-    const name = normalizeMobileNewEntryName(requestedName);
+    const name = normalizeMobileNewEntryName(createMenu?.name ?? "");
     if (!name) {
-      setCreateMenu({
-        busy: false,
-        error: "名称不能为空、不能是 . 或 ..，也不能包含路径分隔符。",
-      });
+      setCreateMenu((current) =>
+        current
+          ? {
+              ...current,
+              busy: false,
+              error: "名称不能为空、不能是 . 或 ..，也不能包含路径分隔符。",
+            }
+          : current,
+      );
+      createNameInputRef.current?.focus({ preventScroll: true });
       return;
     }
 
-    setCreateMenu({ busy: true, error: null });
+    setCreateMenu((current) =>
+      current ? { ...current, busy: true, error: null } : current,
+    );
     try {
       if (kind === "file") {
         await createFile(name);
@@ -323,10 +335,16 @@ export function MobileFileBrowser({
       }
       setCreateMenu(null);
     } catch (caughtError) {
-      setCreateMenu({
-        busy: false,
-        error: caughtError instanceof Error ? caughtError.message : "新建失败",
-      });
+      setCreateMenu((current) =>
+        current
+          ? {
+              ...current,
+              busy: false,
+              error:
+                caughtError instanceof Error ? caughtError.message : "新建失败",
+            }
+          : current,
+      );
     }
   };
 
@@ -553,7 +571,7 @@ export function MobileFileBrowser({
           <button
             className="mobile-file-browser-control"
             disabled={loading}
-            onClick={() => setCreateMenu({ busy: false, error: null })}
+            onClick={openCreateMenu}
             type="button"
           >
             新建
@@ -655,6 +673,27 @@ export function MobileFileBrowser({
               <strong>在当前目录新建</strong>
               <code>{currentPath}</code>
             </header>
+            <input
+              aria-label="新文件或文件夹名称"
+              autoCapitalize="none"
+              autoComplete="off"
+              autoCorrect="off"
+              autoFocus
+              className="mobile-file-create-input"
+              disabled={createMenu.busy}
+              onChange={(event) =>
+                setCreateMenu((current) =>
+                  current
+                    ? { ...current, name: event.target.value, error: null }
+                    : current,
+                )
+              }
+              placeholder="输入名称，例如 notes.md"
+              ref={createNameInputRef}
+              spellCheck={false}
+              type="text"
+              value={createMenu.name}
+            />
             {createMenu.error && <div role="alert">{createMenu.error}</div>}
             <div className="mobile-file-context-actions">
               <button

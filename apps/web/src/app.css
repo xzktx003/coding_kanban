@@ -4361,6 +4361,23 @@ input {
   font-size: 11px;
 }
 
+.mobile-file-create-input {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  outline: none;
+  background: rgba(4, 8, 12, 0.72);
+  color: #f4f1ea;
+  font-size: 16px;
+}
+
+.mobile-file-create-input:focus {
+  border-color: rgba(246, 178, 107, 0.72);
+  box-shadow: 0 0 0 2px rgba(246, 178, 107, 0.14);
+}
+
 .mobile-file-context-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

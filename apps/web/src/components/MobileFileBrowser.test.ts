@@ -232,6 +232,14 @@ describe("MobileFileBrowser", () => {
       "utf8",
     );
     assert.match(source, /aria-label="新建文件或文件夹"/);
+    assert.match(source, /aria-label="新文件或文件夹名称"/);
+    assert.match(source, /createNameInputRef\.current\?\.focus/);
+    const createActionSource =
+      source.match(
+        /const runCreateAction = async[\s\S]*?\n  };\n\n  useEffect/,
+      )?.[0] ?? "";
+    assert.notEqual(createActionSource, "");
+    assert.doesNotMatch(createActionSource, /window\.prompt/);
     assert.match(source, /createFile\(name\)/);
     assert.match(source, /createFolder\(name\)/);
     assert.match(source, />\s*新建文件\s*</);
@@ -241,6 +249,10 @@ describe("MobileFileBrowser", () => {
     assert.match(
       css,
       /\.mobile-file-browser-pathbar > div\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*1fr\);/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-file-create-input\s*{[^}]*min-height:\s*48px;[^}]*font-size:\s*16px;/s,
     );
   });
 });
