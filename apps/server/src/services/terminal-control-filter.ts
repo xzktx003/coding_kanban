@@ -18,8 +18,7 @@ const TERMINAL_INPUT_PATTERNS = [
 const TERMINAL_MOUSE_PAYLOAD_PATTERN =
   /^(?:(?:\u001b\[<\d+;\d+;\d+[mM])|(?:\u001b\[\d+;\d+;\d+M)|(?:\u001b\[M[\s\S]{3}))+$/;
 const TERMINAL_FOCUS_PAYLOAD_PATTERN = /^(?:\u001b\[[IO])+$/;
-const TERMINAL_MOUSE_MOTION_PAYLOAD_PATTERN =
-  /^(?:\u001b\[<3[2-5];\d+;\d+[mM])+$/;
+const TERMINAL_SGR_MOUSE_REPORT_PATTERN = /\u001b\[<(\d+);\d+;\d+([mM])/g;
 const TERMINAL_PROTOCOL_QUERY_PATTERN = /\u001b\[\??(0?c|[56]n)/g;
 const TERMINAL_PROTOCOL_RESPONSE_SEQUENCE_PATTERN =
   /\u001b\[(?:\?[\d;]*|>[\d;]*|[\d;]*)c|\u001b\[\??[\d;]+n|\u001b\[\d+;\d+R/g;
@@ -66,16 +65,19 @@ export function isTerminalProtocolResponsePayload(payload: string): boolean {
 export function getTerminalProtocolQueryResponseKinds(
   payload: string,
 ): TerminalProtocolResponseKind[] {
-  return Array.from(payload.matchAll(TERMINAL_PROTOCOL_QUERY_PATTERN), (match) => {
-    switch (match[1]) {
-      case "5n":
-        return "status";
-      case "6n":
-        return "cursor-position";
-      default:
-        return "device-attributes";
-    }
-  });
+  return Array.from(
+    payload.matchAll(TERMINAL_PROTOCOL_QUERY_PATTERN),
+    (match) => {
+      switch (match[1]) {
+        case "5n":
+          return "status";
+        case "6n":
+          return "cursor-position";
+        default:
+          return "device-attributes";
+      }
+    },
+  );
 }
 
 export function getTerminalProtocolResponses(
@@ -113,7 +115,33 @@ export function isTerminalPtyControlPayload(payload: string): boolean {
 }
 
 export function isTerminalMouseMotionPayload(payload: string): boolean {
-  return TERMINAL_MOUSE_MOTION_PAYLOAD_PATTERN.test(payload);
+  let consumedLength = 0;
+  let foundReport = false;
+
+  for (const match of payload.matchAll(TERMINAL_SGR_MOUSE_REPORT_PATTERN)) {
+    if (match.index !== consumedLength) {
+      return false;
+    }
+
+    const buttonCode = Number(match[1]);
+    // SGR mouse bit 5 marks motion and the low two bits identify the
+    // no-button state. Only those hover reports are safe to discard. A
+    // pressed-button motion report (32/33/34, including modifiers) is part
+    // of tmux copy-mode selection and must be forwarded unchanged.
+    if (
+      match[2] !== "M" ||
+      !Number.isSafeInteger(buttonCode) ||
+      (buttonCode & 32) === 0 ||
+      (buttonCode & 3) !== 3
+    ) {
+      return false;
+    }
+
+    consumedLength += match[0].length;
+    foundReport = true;
+  }
+
+  return foundReport && consumedLength === payload.length;
 }
 
 export function isTerminalControlPayload(payload: string): boolean {

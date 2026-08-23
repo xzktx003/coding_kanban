@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm --filter @agent-orchestrator/shared build && pnpm run dev:app",
-    "dev:app": "tsx watch src/index.ts",
+    "dev:app": "tsx watch --exclude '../../packages/shared/dist/**' --include '../../packages/shared/src/**' src/index.ts",
     "build": "pnpm --filter @agent-orchestrator/shared build && tsc -p tsconfig.json",
     "test": "tsx --test src/**/*.test.ts",
     "format": "prettier --write 'src/**/*.ts'"

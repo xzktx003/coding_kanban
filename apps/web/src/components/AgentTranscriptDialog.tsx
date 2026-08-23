@@ -1,5 +1,12 @@
-import type { CSSProperties } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, UIEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import type { AgentTranscriptResponse } from "@agent-orchestrator/shared";
 
@@ -28,8 +35,38 @@ interface AgentTranscriptDialogProps {
 }
 
 export const AGENT_TRANSCRIPT_PAGE_SIZE = 30;
+export const AGENT_TRANSCRIPT_SESSION_POLL_MS = 2_000;
 export const LIGHTWEIGHT_TRANSCRIPT_WINDOW_SIZE = 90;
 export const FULL_TRANSCRIPT_WINDOW_SIZE = 300;
+export const AGENT_TRANSCRIPT_LOAD_THRESHOLD_PX = 160;
+
+export function shouldLoadOlderTranscript(
+  scrollTop: number,
+  hasMore: boolean,
+  loadingMore: boolean,
+): boolean {
+  return (
+    hasMore && !loadingMore && scrollTop <= AGENT_TRANSCRIPT_LOAD_THRESHOLD_PX
+  );
+}
+
+export function getTranscriptScrollTopAfterPrepend(
+  previousScrollTop: number,
+  previousScrollHeight: number,
+  nextScrollHeight: number,
+): number {
+  return Math.max(
+    0,
+    previousScrollTop + nextScrollHeight - previousScrollHeight,
+  );
+}
+
+export function shouldReplaceTranscriptSession(
+  currentSessionId: string | null,
+  nextTranscript: AgentTranscriptResponse,
+): boolean {
+  return currentSessionId !== nextTranscript.sessionId;
+}
 
 export function mergeTranscriptPage(
   current: AgentTranscriptResponse,
@@ -73,13 +110,12 @@ export function AgentTranscriptEntries({
   transcript,
   windowTrimmed = false,
 }: AgentTranscriptEntriesProps) {
+  // Each server page is chronological; keep the newest entry at the bottom.
   const orderedEntries = useMemo(
     () =>
-      [...transcript.entries]
-        .filter(
-          (entry) => entry.title !== "exec 调用" && entry.title !== "exec 输出",
-        )
-        .reverse(),
+      [...transcript.entries].filter(
+        (entry) => entry.title !== "exec 调用" && entry.title !== "exec 输出",
+      ),
     [transcript.entries],
   );
 
@@ -109,6 +145,24 @@ export function AgentTranscriptEntries({
           } as CSSProperties
         }
       >
+        {transcript.hasMore || windowTrimmed ? (
+          <div className="agent-transcript-load-more agent-transcript-load-more--top">
+            <span>
+              {transcript.hasMore
+                ? loadingMore
+                  ? "正在加载更早记录…"
+                  : "向上滚动可自动加载更早记录"
+                : "已到最早记录"}
+              {` · 已加载 ${orderedEntries.length} 条`}
+              {windowTrimmed ? " · 已释放窗口外较新记录，刷新可回到最新" : ""}
+            </span>
+            {transcript.hasMore ? (
+              <button disabled={loadingMore} onClick={onLoadMore} type="button">
+                {loadingMore ? "加载中…" : "加载更早记录"}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {orderedEntries.length === 0 ? (
           <div className="agent-transcript-empty">
             记录中还没有可展示的消息。
@@ -162,19 +216,6 @@ export function AgentTranscriptEntries({
             );
           })
         )}
-        {transcript.hasMore || windowTrimmed ? (
-          <div className="agent-transcript-load-more">
-            <span>
-              已加载 {orderedEntries.length} 条
-              {windowTrimmed ? " · 已释放窗口外较新记录，刷新可回到最新" : ""}
-            </span>
-            {transcript.hasMore ? (
-              <button disabled={loadingMore} onClick={onLoadMore} type="button">
-                {loadingMore ? "加载中…" : "继续加载"}
-              </button>
-            ) : null}
-          </div>
-        ) : null}
       </div>
     </>
   );
@@ -196,6 +237,15 @@ export function AgentTranscriptDialog({
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [windowTrimmed, setWindowTrimmed] = useState(false);
   const requestIdRef = useRef(0);
+  const sessionProbeIdRef = useRef(0);
+  const transcriptSessionIdRef = useRef<string | null>(null);
+  const loadingMoreRef = useRef(false);
+  const transcriptBodyRef = useRef<HTMLDivElement | null>(null);
+  const scrollToBottomRef = useRef(false);
+  const pendingScrollRestoreRef = useRef<{
+    scrollTop: number;
+    scrollHeight: number;
+  } | null>(null);
   const maxRetainedEntries = useLightweightTerminalPreview
     ? LIGHTWEIGHT_TRANSCRIPT_WINDOW_SIZE
     : FULL_TRANSCRIPT_WINDOW_SIZE;
@@ -204,14 +254,19 @@ export function AgentTranscriptDialog({
     const requestId = ++requestIdRef.current;
     setLoading(true);
     setLoadingMore(false);
+    loadingMoreRef.current = false;
     setError(null);
     setLoadMoreError(null);
     setWindowTrimmed(false);
+    scrollToBottomRef.current = true;
+    pendingScrollRestoreRef.current = null;
+    transcriptSessionIdRef.current = null;
     void getAgentTranscript(agentSessionId, {
       limit: AGENT_TRANSCRIPT_PAGE_SIZE,
     })
       .then((response) => {
         if (requestId === requestIdRef.current) {
+          transcriptSessionIdRef.current = response.sessionId;
           setTranscript(response);
         }
       })
@@ -237,6 +292,56 @@ export function AgentTranscriptDialog({
   }, [load]);
 
   useEffect(() => {
+    loadingMoreRef.current = loadingMore;
+  }, [loadingMore]);
+
+  useEffect(() => {
+    const probe = () => {
+      if (loadingMoreRef.current) {
+        return;
+      }
+
+      const probeId = ++sessionProbeIdRef.current;
+      void getAgentTranscript(agentSessionId, {
+        limit: AGENT_TRANSCRIPT_PAGE_SIZE,
+      })
+        .then((response) => {
+          if (probeId !== sessionProbeIdRef.current) {
+            return;
+          }
+          if (
+            !shouldReplaceTranscriptSession(
+              transcriptSessionIdRef.current,
+              response,
+            )
+          ) {
+            return;
+          }
+
+          requestIdRef.current += 1;
+          transcriptSessionIdRef.current = response.sessionId;
+          setLoading(false);
+          loadingMoreRef.current = false;
+          setLoadingMore(false);
+          setLoadMoreError(null);
+          setWindowTrimmed(false);
+          scrollToBottomRef.current = true;
+          pendingScrollRestoreRef.current = null;
+          setTranscript(response);
+        })
+        .catch(() => {
+          // A transient tmux/Codex lookup failure must not erase visible history.
+        });
+    };
+
+    const timer = window.setInterval(probe, AGENT_TRANSCRIPT_SESSION_POLL_MS);
+    return () => {
+      sessionProbeIdRef.current += 1;
+      window.clearInterval(timer);
+    };
+  }, [agentSessionId]);
+
+  useEffect(() => {
     if (!transcript || transcript.entries.length <= maxRetainedEntries) {
       return;
     }
@@ -247,12 +352,47 @@ export function AgentTranscriptDialog({
     });
   }, [maxRetainedEntries, transcript]);
 
-  const loadMore = useCallback(() => {
-    if (!transcript?.hasMore || !transcript.nextCursor || loadingMore) {
+  useLayoutEffect(() => {
+    const body = transcriptBodyRef.current;
+    if (!body || !transcript) {
       return;
     }
+
+    const pending = pendingScrollRestoreRef.current;
+    if (pending) {
+      pendingScrollRestoreRef.current = null;
+      body.scrollTop = getTranscriptScrollTopAfterPrepend(
+        pending.scrollTop,
+        pending.scrollHeight,
+        body.scrollHeight,
+      );
+      return;
+    }
+
+    if (scrollToBottomRef.current) {
+      scrollToBottomRef.current = false;
+      body.scrollTop = body.scrollHeight;
+    }
+  }, [transcript]);
+
+  const loadMore = useCallback(() => {
+    if (
+      !transcript?.hasMore ||
+      !transcript.nextCursor ||
+      loadingMoreRef.current
+    ) {
+      return;
+    }
+    const body = transcriptBodyRef.current;
+    pendingScrollRestoreRef.current = body
+      ? {
+          scrollTop: body.scrollTop,
+          scrollHeight: body.scrollHeight,
+        }
+      : null;
     const requestId = ++requestIdRef.current;
     setLoadingMore(true);
+    loadingMoreRef.current = true;
     setLoadMoreError(null);
     void getAgentTranscript(agentSessionId, {
       cursor: transcript.nextCursor,
@@ -283,10 +423,28 @@ export function AgentTranscriptDialog({
       })
       .finally(() => {
         if (requestId === requestIdRef.current) {
+          loadingMoreRef.current = false;
           setLoadingMore(false);
         }
       });
-  }, [agentSessionId, loadingMore, maxRetainedEntries, transcript]);
+  }, [agentSessionId, maxRetainedEntries, transcript]);
+
+  const handleTranscriptScroll = useCallback(
+    (event: UIEvent<HTMLDivElement>) => {
+      if (
+        !transcript ||
+        !shouldLoadOlderTranscript(
+          event.currentTarget.scrollTop,
+          transcript.hasMore,
+          loadingMoreRef.current,
+        )
+      ) {
+        return;
+      }
+      loadMore();
+    },
+    [loadMore, transcript],
+  );
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -333,7 +491,11 @@ export function AgentTranscriptDialog({
             </button>
           </div>
         </header>
-        <div className="agent-transcript-body">
+        <div
+          className="agent-transcript-body"
+          onScroll={handleTranscriptScroll}
+          ref={transcriptBodyRef}
+        >
           {error ? (
             <div className="agent-transcript-error" role="alert">
               {error}

@@ -193,4 +193,9 @@
 - 多屏中点击 xterm helper textarea 会让浏览器焦点进入新终端，却曾被窗格捕获逻辑按普通 textarea 排除，导致 `activeSlotId` 和完整记录仍指向旧终端；完整记录还保存了打开瞬间的会话对象。现在 helper textarea 可激活窗格，普通表单仍受保护；完整记录只保存开关并持续从当前活动窗格派生，以会话 ID 重建弹窗和请求视图。
 - 全屏 Diff 曾嵌在主布局的低层叠上下文中，fixed 子层无法越过顶栏，导致“退出全屏”被遮挡。现在全屏视图通过 React Portal 挂到应用模态层，保留 Escape、焦点管理、手机安全区和独立按钮样式。
 - 变更还原曾以文件为粒度调用 `git restore`，一个文件多处修改时无法只撤销目标位置。现在 Diff 按 `@@` 改动块提供悬停/聚焦还原入口，服务端重新读取实时 diff 并校验路径、块序号和块头，再构造反向补丁；同文件其他块、重命名状态均保留，暂存/未暂存混合、新增文件和过期块均有回归覆盖。
-- 同一目录内多个 tmux 未绑定 Codex session ID 时，完整记录曾全部按目录命中最近 JSONL。现在本地 tmux 会从目标 pane PID 的 `/proc` 进程树和打开文件中解析工作目录一致的顶层 Codex session，排除 subagent 并回写精确绑定；解析失败才回退既有 ID/目录匹配。同目录 `qwen3_8-27b` 与 `vllm-merak` 现场验证得到不同 ID。
+- 同一目录内多个 tmux 未绑定 Codex session ID 时，完整记录曾全部按目录命中最近 JSONL；切换同一 tmux 的活动 pane 后还会继续显示注册时固定 pane 的历史。现在本地 tmux 先校验 Kanban PTY 对应的 client PID，再从 session 当前活动 pane 的 `/proc` 进程树和打开文件中解析工作目录一致的顶层 Codex session，排除 subagent 并回写精确绑定；新 Codex 短时关闭 rollout 文件句柄时，仅对明确运行 Codex 的 pane 做工作目录回退；活动 shell pane 不回退旧 Codex，只有无活动 Kanban client 时才回退既有 ID/目录匹配；弹窗低频探测 session ID 并在切换后替换视图。同目录 `qwen3_8-27b` 与 `vllm-merak` 现场验证得到不同 ID。
+- 拉取远程代码后 `tsx watch` 可能先重启服务端，再读取旧的 `packages/shared/dist`，导致新 import 报共享包导出不存在、后端退出；带 watcher 参数的旧进程还可能未被旧正则清理。服务端现在启动前先构建共享包，watcher 监听源码并排除 dist，重启脚本按完整命令清理旧 watcher。
+- 远程同步曾把跨帧 bracketed-paste 测试期望改成去掉 `ESC[200~`/`ESC[201~`，与既有 Codex 多行粘贴协议不一致；恢复完整区块断言，运行时保留标记避免换行被逐行提交。
+- `research` 切到最后的 `pre_smooth_vq` pane 后完整记录仍显示旧的 `moe_quant`/CRISP 会话：卡片旧 `workingDirectory` 过滤掉活动 pane 的 JSONL 后又触发旧目录回退。现在活动 Kanban client 使用 `/proc/<pane_pid>/cwd` 作为 Codex 定位目录，并覆盖打开句柄与关闭句柄回退；新增活动目录不一致和现场 VQ session 回归。
+- tmux copy-mode 拖动选择失效：输入过滤器把有按钮的 SGR `32/33/34` 拖动 motion 与无按钮 `35` hover 一起丢弃，tmux 无法完成 `MouseDrag1Pane` 选择。现在按 SGR bit 位仅过滤 hover（含修饰键变体），拖动按下/移动/释放经 attached PTY 保序转发；可控大屏 xterm 捕获阶段屏蔽浏览器右键菜单，真实 WebSocket+tmux 回归确认 copy-mode 返回 OSC52 剪贴板。
+- Codex 完整记录按倒序和底部按钮翻页，不符合从最新消息向上回看旧消息的阅读习惯：前端改为正常时间顺序，首次定位到底部，滚动接近顶部自动加载更早页并补偿 prepend 高度保持阅读位置；保留手动按钮和 90/300 条窗口上限，组件测试覆盖阈值、顺序和锚点。

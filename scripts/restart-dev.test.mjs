@@ -459,7 +459,7 @@ test("restart-dev removes stale repo dev-server process groups", () => {
   );
   assert.match(
     script,
-    /tsx[^\n]*watch src\/index\.ts|vite[^\n]*--host/,
+    /tsx[^\n]*watch[^\n]*src\/index\.ts|vite[^\n]*--host/,
   );
   assert.match(script, /kill -- "-\$\{pgid\}"/);
   assert.match(script, /kill -9 -- "-\$\{pgid\}"/);

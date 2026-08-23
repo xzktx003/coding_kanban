@@ -208,6 +208,210 @@ test("GET transcript keeps two tmux panes in the same directory on distinct Code
   await app.close();
 });
 
+test("GET transcript passes the attached tmux client context to Codex resolution", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "codex",
+    displayName: "active tmux codex",
+    workingDirectory: "/workspace/shared",
+    connectionState: "online",
+    interactionState: "running",
+    transportRef: {
+      tmuxSession: "tmux-session",
+      tmuxPane: "%fixed",
+      processId: 9876,
+    },
+  });
+  let receivedLocatorInput: unknown;
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {} as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    codexSessionLocator: {
+      async resolve(input) {
+        receivedLocatorInput = input;
+        return "codex-active-pane";
+      },
+    },
+    codexTranscriptService: {
+      read(input) {
+        return {
+          available: true,
+          agentKind: "codex",
+          sessionId: input.sessionId ?? null,
+          matchedBy: "session-id",
+          updatedAt: "2026-08-22T00:00:00.000Z",
+          entries: [],
+          hasMore: false,
+          nextCursor: null,
+        };
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/agent-sessions/${session.id}/transcript`,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(receivedLocatorInput, {
+    tmuxTarget: "%fixed",
+    tmuxSession: "tmux-session",
+    tmuxClientProcessId: 9876,
+    workingDirectory: "/workspace/shared",
+  });
+  assert.equal(
+    (response.json() as AgentTranscriptResponse).sessionId,
+    "codex-active-pane",
+  );
+  await app.close();
+});
+
+test("GET transcript does not fall back to a previous Codex pane when the active pane is a shell", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "codex",
+    displayName: "active shell pane",
+    workingDirectory: "/workspace/shared",
+    connectionState: "online",
+    interactionState: "running",
+    transportRef: {
+      tmuxSession: "tmux-session",
+      tmuxPane: "%fixed",
+      processId: 9876,
+    },
+    agentSessionId: "previous-codex-session",
+  });
+  let receivedInput: unknown;
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {} as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    codexSessionLocator: {
+      async resolve() {
+        return undefined;
+      },
+    },
+    codexTranscriptService: {
+      read(input) {
+        receivedInput = input;
+        return {
+          available: false,
+          agentKind: "codex",
+          sessionId: null,
+          matchedBy: null,
+          updatedAt: null,
+          entries: [],
+          hasMore: false,
+          nextCursor: null,
+        };
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/agent-sessions/${session.id}/transcript`,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(receivedInput, {
+    sessionId: undefined,
+    workingDirectory: undefined,
+  });
+  await app.close();
+});
+
+test("GET transcript keeps using the active tmux pane while Kanban is reattaching", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "node",
+    displayName: "reloading tmux codex",
+    workingDirectory: "/workspace/old",
+    connectionState: "offline",
+    interactionState: "detached",
+    transportRef: {
+      tmuxSession: "tmux-session",
+      tmuxPane: "%stale",
+    },
+    agentSessionId: "old-codex-session",
+  });
+  let receivedInput: unknown;
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {} as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    codexSessionLocator: {
+      async resolve(input) {
+        receivedInput = input;
+        return "active-reload-session";
+      },
+    },
+    codexTranscriptService: {
+      read(input) {
+        return {
+          available: true,
+          agentKind: "codex",
+          sessionId: input.sessionId ?? null,
+          matchedBy: "session-id",
+          updatedAt: "2026-08-23T00:00:00.000Z",
+          entries: [],
+          hasMore: false,
+          nextCursor: null,
+        };
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/agent-sessions/${session.id}/transcript`,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(receivedInput, {
+    tmuxTarget: "%stale",
+    tmuxSession: "tmux-session",
+    workingDirectory: "/workspace/old",
+  });
+  assert.equal(
+    (response.json() as AgentTranscriptResponse).sessionId,
+    "active-reload-session",
+  );
+  await app.close();
+});
+
 test("GET task changes maps a local tmux node card to its active Codex diff", async () => {
   const app = Fastify();
   const registry = new AgentSessionRegistry();

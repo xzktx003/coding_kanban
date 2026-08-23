@@ -15,6 +15,20 @@ interface TerminalMouseGestureInput {
   dragThreshold?: number;
 }
 
+interface TerminalContextMenuInput {
+  interactive: boolean;
+  inputEnabled: boolean;
+  targetIsTerminal: boolean;
+}
+
+export function shouldSuppressTerminalContextMenu({
+  interactive,
+  inputEnabled,
+  targetIsTerminal,
+}: TerminalContextMenuInput): boolean {
+  return interactive && inputEnabled && targetIsTerminal;
+}
+
 export function resolveTerminalMouseGestureAction({
   phase,
   startX,

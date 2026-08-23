@@ -6,6 +6,7 @@ import {
   isTerminalFocusPayload,
   isTerminalPtyControlPayload,
   isTerminalMousePayload,
+  isTerminalMouseMotionPayload,
   getTerminalProtocolQueryResponseKinds,
   getTerminalProtocolResponses,
   isTerminalProtocolResponsePayload,
@@ -72,11 +73,14 @@ test("classifies protocol queries and replies so stale replies cannot complete a
     getTerminalProtocolQueryResponseKinds("\u001b[c\u001b[5n\u001b[6n"),
     ["device-attributes", "status", "cursor-position"],
   );
-  assert.deepEqual(getTerminalProtocolResponses("\u001b[?1;2c\u001b[0n\u001b[12;42R"), [
-    { kind: "device-attributes", payload: "\u001b[?1;2c" },
-    { kind: "status", payload: "\u001b[0n" },
-    { kind: "cursor-position", payload: "\u001b[12;42R" },
-  ]);
+  assert.deepEqual(
+    getTerminalProtocolResponses("\u001b[?1;2c\u001b[0n\u001b[12;42R"),
+    [
+      { kind: "device-attributes", payload: "\u001b[?1;2c" },
+      { kind: "status", payload: "\u001b[0n" },
+      { kind: "cursor-position", payload: "\u001b[12;42R" },
+    ],
+  );
 });
 
 test("identify xterm mouse reports that must enter tmux through the attached PTY", () => {
@@ -111,6 +115,15 @@ test("classify mouse motion reports as non-semantic terminal control input", () 
   assert.equal(isTerminalControlPayload("\u001b[<35;68;23M"), true);
   assert.equal(isTerminalControlPayload("\u001b[<64;68;23M"), true);
   assert.equal(isTerminalControlPayload("\u001b[<0;68;23M"), true);
+  assert.equal(isTerminalMouseMotionPayload("\u001b[<35;68;23M"), true);
+  assert.equal(isTerminalMouseMotionPayload("\u001b[<39;68;23M"), true);
+  assert.equal(
+    isTerminalMouseMotionPayload("\u001b[<35;68;23M\u001b[<39;69;23M"),
+    true,
+  );
+  assert.equal(isTerminalMouseMotionPayload("\u001b[<32;68;23M"), false);
+  assert.equal(isTerminalMouseMotionPayload("\u001b[<34;68;23M"), false);
+  assert.equal(isTerminalMouseMotionPayload("\u001b[<36;68;23M"), false);
   assert.equal(isTerminalControlPayload("hello\r"), false);
 });
 

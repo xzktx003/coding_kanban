@@ -116,3 +116,60 @@ test("terminal websocket closes clear only sockets that sent local tmux input", 
     LocalTmuxInputRouter.prototype.clear = originalClear;
   }
 });
+
+test("terminal websocket keeps tmux drag reports but filters hover reports", async () => {
+  const writes: string[] = [];
+  const originalWrite = LocalTmuxInputRouter.prototype.write;
+
+  LocalTmuxInputRouter.prototype.write = async function (
+    agentSession: AgentSessionRecord,
+    input: StdinAgentSessionInput,
+  ) {
+    writes.push(input.input);
+    return agentSession;
+  };
+
+  const { app, registry } = buildServer();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "shell",
+    displayName: "tmux mouse session",
+    connectionState: "online",
+    interactionState: "running",
+    controlMode: "control",
+    transportRef: {
+      tmuxSession: "session-1",
+      tmuxPane: "%1",
+    },
+  });
+  let socket: WebSocket | undefined;
+
+  try {
+    await app.listen({ host: "127.0.0.1", port: 0 });
+    const address = app.server.address();
+    assert.ok(address && typeof address === "object");
+    socket = await openSocket(
+      `ws://127.0.0.1:${address.port}/ws/agent-sessions/${session.id}/terminal`,
+    );
+
+    socket.send("\u001b[<0;10;5M");
+    socket.send("\u001b[<32;12;5M");
+    socket.send("\u001b[<0;12;5m");
+    socket.send("\u001b[<35;14;5M");
+
+    await waitFor(() => writes.length === 3, "tmux mouse drag routing");
+    assert.deepEqual(writes, [
+      "\u001b[<0;10;5M",
+      "\u001b[<32;12;5M",
+      "\u001b[<0;12;5m",
+    ]);
+  } finally {
+    if (socket) {
+      await closeSocket(socket);
+    }
+    await app.close();
+    LocalTmuxInputRouter.prototype.write = originalWrite;
+  }
+});

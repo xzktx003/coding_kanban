@@ -1,9 +1,47 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { resolveTerminalMouseGestureAction } from "./terminal-mouse-selection.js";
+import {
+  resolveTerminalMouseGestureAction,
+  shouldSuppressTerminalContextMenu,
+} from "./terminal-mouse-selection.js";
 
 describe("terminal mouse selection", () => {
+  it("suppresses the browser context menu only for the active interactive terminal", () => {
+    assert.equal(
+      shouldSuppressTerminalContextMenu({
+        interactive: true,
+        inputEnabled: true,
+        targetIsTerminal: true,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldSuppressTerminalContextMenu({
+        interactive: true,
+        inputEnabled: false,
+        targetIsTerminal: true,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldSuppressTerminalContextMenu({
+        interactive: false,
+        inputEnabled: true,
+        targetIsTerminal: true,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldSuppressTerminalContextMenu({
+        interactive: true,
+        inputEnabled: true,
+        targetIsTerminal: false,
+      }),
+      false,
+    );
+  });
+
   it("turns a direct primary-button drag into local terminal selection", () => {
     assert.equal(
       resolveTerminalMouseGestureAction({

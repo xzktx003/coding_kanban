@@ -29,6 +29,35 @@ function killTmuxSession(sessionName: string): void {
   }
 }
 
+async function waitForTmuxPaneMode(
+  sessionName: string,
+  timeoutMs = 10_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    try {
+      if (
+        runTmux([
+          "display-message",
+          "-p",
+          "-t",
+          sessionName,
+          "#{pane_in_mode}",
+        ]) === "1"
+      ) {
+        return;
+      }
+    } catch {
+      // The tmux client can briefly disappear while the PTY is starting.
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  throw new Error(`tmux session ${sessionName} did not enter copy-mode`);
+}
+
 interface WaitForTerminalTextResult {
   close: () => void;
   getBuffer: () => string;
@@ -436,13 +465,105 @@ test("terminal websocket keeps split bracketed paste text intact for local tmux 
 
     const capturedHex = readFileSync(capturePath, "utf8");
     const expectedHex = Buffer.from(
-      `first pasted line\rsecond pasted line\rthird pasted line ${pasteMarker}`,
+      `\u001b[200~first pasted line\rsecond pasted line\rthird pasted line ${pasteMarker}\u001b[201~`,
     ).toString("hex");
 
     assert.equal(capturedHex, expectedHex);
   } finally {
     terminal?.close();
     rmSync(capturePath, { force: true });
+
+    if (agentSessionId) {
+      await fetch(`${baseUrl}/api/agent-sessions/${agentSessionId}`, {
+        method: "DELETE",
+      }).catch(() => {});
+    }
+
+    await app.close();
+    killTmuxSession(sessionName);
+  }
+});
+
+test("terminal websocket preserves tmux copy-mode drag selection and OSC52 clipboard output", async () => {
+  const { app } = buildServer();
+  const sessionName = `tmux-copy-mode-${Date.now()}`;
+  const copyLine = `TMUX_COPY_LINE_${Date.now()}`;
+  let agentSessionId: string | undefined;
+  let terminal: WaitForTerminalTextResult | undefined;
+
+  killTmuxSession(sessionName);
+
+  runTmux([
+    "new-session",
+    "-d",
+    "-s",
+    sessionName,
+    "-c",
+    process.cwd(),
+    `sh -lc 'printf "${copyLine}\\nSECOND_LINE\\n"; exec sh'`,
+  ]);
+  runTmux(["set-option", "-t", sessionName, "mouse", "on"]);
+  runTmux(["set-option", "-t", sessionName, "set-clipboard", "on"]);
+  runTmux([
+    "set-option",
+    "-t",
+    sessionName,
+    "-as",
+    "terminal-features",
+    ",*:clipboard",
+  ]);
+
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const address = app.server.address();
+
+  assert.ok(address && typeof address === "object");
+
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const terminalBaseUrl = `ws://127.0.0.1:${address.port}`;
+
+  try {
+    const addResponse = await fetch(`${baseUrl}/api/agent-discovery/tmux/add`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        tmuxSession: sessionName,
+        displayName: sessionName,
+        workingDirectory: process.cwd(),
+        agentKind: "shell",
+        interactionState: "running",
+      }),
+    });
+
+    assert.equal(addResponse.status, 201);
+
+    const payload = (await addResponse.json()) as { id: string };
+    agentSessionId = payload.id;
+    terminal = await openTerminal(
+      `${terminalBaseUrl}/ws/agent-sessions/${agentSessionId}/terminal`,
+    );
+    await terminal.waitFor(copyLine);
+    // SGR 1006 coordinates are 1-based. Dragging across the first row enters
+    // tmux copy-mode; the pressed-button motion (32) is the part that must
+    // not be discarded by the Kanban input filter.
+    const endColumn = copyLine.length + 1;
+    terminal.send("\u001b[<0;1;1M");
+    // The server may still be draining attach and terminal-protocol startup
+    // frames. tmux reports pane_in_mode=0 until the first motion arrives, so
+    // give the press time to reach the client instead of polling that state.
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    terminal.send(`\u001b[<32;${endColumn};1M`);
+    await waitForTmuxPaneMode(sessionName);
+    terminal.send(`\u001b[<0;${endColumn};1m`);
+    const encodedLine = Buffer.from(copyLine, "utf8").toString("base64");
+    await terminal.waitFor(`\u001b]52;c;${encodedLine}`, 10_000);
+
+    assert.ok(
+      terminal.getBuffer().includes(`\u001b]52;c;${encodedLine}\u0007`),
+    );
+  } finally {
+    terminal?.close();
 
     if (agentSessionId) {
       await fetch(`${baseUrl}/api/agent-sessions/${agentSessionId}`, {

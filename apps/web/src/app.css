@@ -7763,6 +7763,7 @@ input {
 }
 
 .agent-transcript-body {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
   padding: 16px;
@@ -7787,6 +7788,10 @@ input {
   padding: 4px 0 10px;
   color: #9ba8b6;
   font-size: 12px;
+}
+
+.agent-transcript-load-more--top {
+  padding: 0 0 12px;
 }
 
 .agent-transcript-load-more button {

@@ -7,11 +7,43 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   AGENT_TRANSCRIPT_PAGE_SIZE,
+  getTranscriptScrollTopAfterPrepend,
   AgentTranscriptEntries,
   mergeTranscriptPage,
+  shouldLoadOlderTranscript,
+  shouldReplaceTranscriptSession,
 } from "./AgentTranscriptDialog.js";
 
-test("transcript entries hide exec calls and outputs while showing visible records newest first", () => {
+test("transcript refresh replaces the view when the active tmux Codex session changes", () => {
+  assert.equal(
+    shouldReplaceTranscriptSession("codex-a", {
+      available: true,
+      agentKind: "codex",
+      sessionId: "codex-a",
+      matchedBy: "session-id",
+      updatedAt: null,
+      entries: [],
+      hasMore: false,
+      nextCursor: null,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldReplaceTranscriptSession("codex-a", {
+      available: true,
+      agentKind: "codex",
+      sessionId: "codex-b",
+      matchedBy: "session-id",
+      updatedAt: null,
+      entries: [],
+      hasMore: false,
+      nextCursor: null,
+    }),
+    true,
+  );
+});
+
+test("transcript entries hide exec calls and keep the newest visible record at the bottom", () => {
   const middle = Array.from(
     { length: 50 },
     (_, index) => `middle-${index + 1}`,
@@ -84,12 +116,12 @@ test("transcript entries hide exec calls and outputs while showing visible recor
   );
 
   assert.ok(
-    markup.indexOf('data-transcript-entry-id="after"') <
+    markup.indexOf('data-transcript-entry-id="before"') <
       markup.indexOf('data-transcript-entry-id="visible-tool-output"'),
   );
   assert.ok(
     markup.indexOf('data-transcript-entry-id="visible-tool-output"') <
-      markup.indexOf('data-transcript-entry-id="before"'),
+      markup.indexOf('data-transcript-entry-id="after"'),
   );
   assert.doesNotMatch(markup, /exec 调用/);
   assert.doesNotMatch(markup, /exec 输出/);
@@ -112,7 +144,7 @@ test("transcript entries hide exec calls and outputs while showing visible recor
   assert.match(markup, /style="--agent-transcript-font-size:18px"/);
 });
 
-test("transcript entries render one server page and offer manual continuation", () => {
+test("transcript entries render one server page and offer upward continuation", () => {
   const transcript: AgentTranscriptResponse = {
     available: true,
     agentKind: "codex",
@@ -139,7 +171,21 @@ test("transcript entries render one server page and offer manual continuation", 
   assert.match(markup, /data-transcript-entry-id="message-1"/);
   assert.equal((markup.match(/data-transcript-entry-id=/g) ?? []).length, 30);
   assert.match(markup, /已加载 30 条/);
-  assert.match(markup, />继续加载</);
+  assert.match(markup, />加载更早记录</);
+  assert.ok(
+    markup.indexOf("加载更早记录") <
+      markup.indexOf('data-transcript-entry-id="message-1"'),
+  );
+});
+
+test("transcript paging auto-loads near the top and preserves the scroll anchor", () => {
+  assert.equal(shouldLoadOlderTranscript(0, true, false), true);
+  assert.equal(shouldLoadOlderTranscript(160, true, false), true);
+  assert.equal(shouldLoadOlderTranscript(161, true, false), false);
+  assert.equal(shouldLoadOlderTranscript(0, false, false), false);
+  assert.equal(shouldLoadOlderTranscript(0, true, true), false);
+  assert.equal(getTranscriptScrollTopAfterPrepend(120, 1_000, 1_600), 720);
+  assert.equal(getTranscriptScrollTopAfterPrepend(0, 1_000, 900), 0);
 });
 
 test("lightweight transcript window keeps the newly loaded older records bounded", () => {

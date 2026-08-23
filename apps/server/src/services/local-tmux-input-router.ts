@@ -25,8 +25,7 @@ interface LocalTmuxInputRouterDependencies {
       input: string,
       options?: PtyRuntimeWriteOptions,
     ): void | Promise<void>;
-  } &
-    Partial<Pick<PtyRuntimeManager, "waitForTmuxClientReady">>;
+  } & Partial<Pick<PtyRuntimeManager, "waitForTmuxClientReady">>;
 }
 
 interface LocalTmuxInputOptions {
@@ -107,14 +106,23 @@ export class LocalTmuxInputRouter {
           (hadPendingPrefix || hadClientPrompt) &&
           this.dependencies.ptyRuntimeManager.has(agentSessionId)
         ) {
-          try {
-            await this.dependencies.ptyRuntimeManager.write(
-              agentSessionId,
-              "\x03",
-            );
-          } catch {
-            // The PTY can exit between has() and write(); state cleanup must
-            // still complete so reconnect and delete operations can proceed.
+          // Escape cancels tmux's one-shot prefix state. Ctrl+C is reserved
+          // for an open tmux command/confirm prompt; sending it for a bare
+          // prefix can leak an interrupt into the active pane instead.
+          const cleanupInputs = [
+            ...(hadPendingPrefix ? ["\x1b"] : []),
+            ...(hadClientPrompt ? ["\x03"] : []),
+          ];
+          for (const cleanupInput of cleanupInputs) {
+            try {
+              await this.dependencies.ptyRuntimeManager.write(
+                agentSessionId,
+                cleanupInput,
+              );
+            } catch {
+              // The PTY can exit between has() and write(); state cleanup must
+              // still complete so reconnect and delete operations can proceed.
+            }
           }
         }
       } finally {

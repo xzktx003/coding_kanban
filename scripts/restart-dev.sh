@@ -141,9 +141,10 @@ kill_repo_dev_server_process_groups() {
 
     full_cmdline="$cmdline $rest"
     if [[ "$full_cmdline" == *"$ROOT_DIR"* &&
-      ( ( "$full_cmdline" == *"tsx"* || "$full_cmdline" == *"tsx/dist/cli.mjs"* ) &&
-          "$full_cmdline" == *"watch src/index.ts"* ||
-        "$full_cmdline" == *"vite"* && "$full_cmdline" == *"--host"* ) ]]; then
+      ( ( "$full_cmdline" == *"tsx"* &&
+          "$full_cmdline" == *"watch"* &&
+          "$full_cmdline" == *"src/index.ts"* ) ||
+        ( "$full_cmdline" == *"vite"* && "$full_cmdline" == *"--host"* ) ) ]]; then
       process_groups["$pgid"]="$pid"
     fi
   done < <(ps -eo pid=,pgid=,args= 2>/dev/null || true)

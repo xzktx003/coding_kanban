@@ -99,13 +99,35 @@ test("LocalTmuxInputRouter sends ordinary input through the attached tmux client
   assert.deepEqual(writes, [{ target: "pty", input: "hello\r" }]);
 });
 
-test("LocalTmuxInputRouter drops mouse motion reports so hover does not reach the TUI", async () => {
+test("LocalTmuxInputRouter drops hover motion reports so hover does not reach the TUI", async () => {
   const { router, session, writes } = buildRouter();
 
-  await router.write(session, { input: "\u001b[<35;68;23M" }, { forcePty: true });
+  await router.write(
+    session,
+    { input: "\u001b[<35;68;23M" },
+    { forcePty: true },
+  );
   await router.write(session, { input: "hello\r" });
 
   assert.deepEqual(writes, [{ target: "pty", input: "hello\r" }]);
+});
+
+test("LocalTmuxInputRouter forwards pressed-button motion for tmux copy-mode drags", async () => {
+  const { router, session, writes } = buildRouter();
+
+  await router.write(session, { input: "\u001b[<0;10;5M" }, { forcePty: true });
+  await router.write(
+    session,
+    { input: "\u001b[<32;12;5M" },
+    { forcePty: true },
+  );
+  await router.write(session, { input: "\u001b[<0;12;5m" }, { forcePty: true });
+
+  assert.deepEqual(writes, [
+    { target: "pty", input: "\u001b[<0;10;5M" },
+    { target: "pty", input: "\u001b[<32;12;5M" },
+    { target: "pty", input: "\u001b[<0;12;5m" },
+  ]);
 });
 
 test("LocalTmuxInputRouter lets terminal protocol replies bypass a blocked ordinary input", async () => {
@@ -477,7 +499,7 @@ test("LocalTmuxInputRouter cancels an abandoned prefix when session input state 
 
   assert.deepEqual(writes, [
     { target: "pty", input: "\x02" },
-    { target: "pty", input: "\x03" },
+    { target: "pty", input: "\x1b" },
     { target: "pty", input: "plain" },
   ]);
   assert.deepEqual(clearedInputStateSessionIds, [session.id]);
@@ -586,7 +608,7 @@ test("LocalTmuxInputRouter orders native client input around cleanup", async () 
   assert.deepEqual(events, [
     "pty:first",
     "pty:\x02",
-    "pty:\x03",
+    "pty:\x1b",
     "adapter-clear",
     "pty:plain",
   ]);

@@ -566,8 +566,8 @@
 
 - **现象**: Codex 完整记录较长时，打开弹窗会一次性创建全部记录节点；即使 Markdown 正文延迟到接近可视区才解析，大量条目外壳和观察器仍会拖慢浏览。
 - **根因**: 前端只做了单条消息的懒渲染，没有限制当前挂载的记录数量。
-- **修复**: 记录继续按最新在前排序，但首次只挂载 30 条；当前批次末尾显示“继续加载”，每次由用户手动追加最多 30 条较早记录，滚动本身不会自动扩充 DOM。
-- **测试**: 组件红绿灯测试用 65 条记录复现全量挂载，断言首屏仅含最新 30 条、边界后的记录未渲染、继续加载计数按 30 条递增并在总数处停止。
+- **修复**: 记录改为正常时间顺序，最新消息固定在底部；首次从 JSONL 尾部只挂载最新 30 条，向上滚动接近顶部时自动请求最多 30 条更早记录并在顶部插入，加载后补偿新增高度以保持当前阅读锚点。顶部仍保留“加载更早记录”作为手动兜底，轻量/完整预览的 90/300 条窗口上限不变。
+- **测试**: 组件红绿灯测试覆盖时间顺序、顶部手动入口、向上加载阈值、窗口上限和 prepend 后滚动高度补偿，避免回退为倒序列表或底部翻页。
 - **文件**: `apps/web/src/components/AgentTranscriptDialog.tsx`, `apps/web/src/components/AgentTranscriptDialog.test.ts`, `apps/web/src/app.css`
 
 ### 名称含点号的受管 tmux 无法输入英文
@@ -614,6 +614,36 @@
 
 - **现象**: 同一个目录被两个 tmux 分别打开并各自运行 Codex 时，切换两个终端查看“完整记录”会得到同一份对话，而不是各自 Codex 的历史。
 - **根因**: 新建或接入 tmux 卡片时通常没有已知的 Codex session ID，记录服务只能按工作目录选择最近更新的 JSONL；两个 tmux 的目录相同，因而都命中同一个最近记录。
-- **修复**: 本地 tmux 在读取记录前先解析目标 pane PID，只读遍历其进程树和打开的 `~/.codex/sessions/*.jsonl`，筛选工作目录一致的顶层 Codex session 并排除 subagent；精确 ID 会回写卡片绑定，同一 tmux 内重启 Codex 时可更新。解析失败时保留既有 ID/目录兜底，不影响非 tmux 和远端边界。
-- **测试**: 红绿灯测试覆盖同目录双 tmux 分别解析到不同 session、同一进程持有更新的子代理 JSONL 时仍选择父会话，以及两个完整记录 HTTP 请求分别传入并保存各自 ID。现场用 `qwen3_8-27b` 与 `vllm-merak` 两个同目录 tmux 只读验证得到不同的顶层 session ID。
-- **文件**: `apps/server/src/services/codex-session-locator.ts`, `apps/server/src/services/codex-session-locator.test.ts`, `apps/server/src/routes/agent-sessions.ts`, `apps/server/src/routes/agent-sessions.transcript.test.ts`
+- **修复**: 本地 tmux 在读取记录前先校验 Kanban PTY 对应的 tmux client PID；client 存在或 Kanban 正在重连时，都以该 session 当前活动 pane 的 PID 为准，只读遍历其进程树和打开的 `~/.codex/sessions/*.jsonl`，筛选工作目录一致的顶层 Codex session 并排除 subagent；对新 Codex 短时关闭 rollout 文件句柄的情况，仅在进程树明确包含 Codex 时按可信工作目录回退到最新 rollout。精确 ID 会回写卡片绑定，同一 tmux 内重启 Codex 时可更新。活动 pane 没有 Codex 时不再回退到上一个 pane 或同目录最近记录；只有 tmux 查询失败时才保留固定 pane/既有 ID 兼容回退。完整记录弹窗每 2 秒探测返回的 Codex session ID，只有 ID 变化时才替换历史，避免切换 tmux pane 后继续显示旧对话。
+- **测试**: 红绿灯测试覆盖同目录双 tmux 分别解析到不同 session、活动 client 从固定 pane 切换到另一 pane、活动 shell pane 不回退旧 session、同一进程持有更新的子代理 JSONL 时仍选择父会话、两个完整记录 HTTP 请求分别传入并保存各自 ID，以及前端检测到 session ID 变化后替换视图。现场用 `qwen3_8-27b` 与 `vllm-merak` 两个同目录 tmux 只读验证得到不同的顶层 session ID。
+- **文件**: `apps/server/src/services/codex-session-locator.ts`, `apps/server/src/services/codex-session-locator.test.ts`, `apps/server/src/routes/agent-sessions.ts`, `apps/server/src/routes/agent-sessions.transcript.test.ts`, `apps/web/src/components/AgentTranscriptDialog.tsx`, `apps/web/src/components/AgentTranscriptDialog.test.ts`
+
+### 拉取远程代码后共享包导出错误导致后端退出
+
+- **现象**: 用户确认拉取远程版本后，后端热重启失败，日志报 `@agent-orchestrator/shared does not provide an export named ...`，前端代理随后报 `ECONNREFUSED`。
+- **根因**: `tsx watch` 发现服务端源码变化后直接重启，但工作区共享包的 `dist` 仍是拉取前的构建产物；服务端新代码与旧共享包导出不一致。
+- **修复**: 服务端动态导入应用模块前先构建 `@agent-orchestrator/shared`，并让开发 watcher 监听 `packages/shared/src`、排除生成的 `packages/shared/dist`；重启脚本同时按“包含 watcher 参数的完整命令”清理旧服务进程组，避免旧 watcher 与新 watcher 争抢端口。
+- **测试**: 新增共享包启动构建器的成功与失败测试；`pnpm check` 通过，并用重启脚本验证后端健康接口及前端代理均返回 200。
+- **文件**: `apps/server/src/index.ts`, `apps/server/src/services/shared-package-builder.ts`, `apps/server/src/services/shared-package-builder.test.ts`, `apps/server/package.json`, `scripts/restart-dev.sh`, `scripts/restart-dev.test.mjs`
+
+### 拉取后分片 bracketed-paste 测试契约回退
+
+- **现象**: 完整服务测试中，跨 WebSocket 帧的粘贴用例期望去掉 `ESC[200~` / `ESC[201~`，实际发送内容仍保留标记，导致测试失败。
+- **根因**: 远程同步只改了测试期望，没有同步此前已经确定的 tmux/Codex 粘贴协议；多行粘贴需要完整区块标记，才能避免换行被当作提交键。
+- **修复**: 恢复测试对完整 bracketed-paste 区块的断言，不改变已正确工作的运行时输入路由。
+- **测试**: `terminal-websocket.test.ts` 定向测试和完整 `pnpm test` 均通过。
+
+### 同一 research tmux 内活动 VQ pane 的完整记录错配
+
+- **现象**: `research` 已切到最后一个 `pre_smooth_vq` pane，但 Kanban 的完整记录仍显示旧的 `moe_quant`/CRISP 对话。
+- **根因**: 卡片保存的是首次发现 pane 的 `workingDirectory`；活动 pane 切换后，定位器仍用旧目录过滤当前 Codex JSONL，过滤失败后又按旧目录回退到最近记录。
+- **修复**: 有活动 Kanban tmux client 时，Codex 定位器读取当前活动 pane 的 `/proc/<pane_pid>/cwd`，覆盖过期卡片目录；打开句柄和关闭句柄回退都按该真实目录匹配，活动 pane 的 Codex 记录不再串 pane。
+- **测试**: 覆盖活动 pane 目录与卡片旧目录不同、rollout 句柄关闭时仍按活动目录选择，以及现场 `research/%365` 返回 VQ session `01a02a70-408e-7d12-a6b2-40039fad897b`。
+
+### tmux copy-mode 拖动选择和复制失效
+
+- **现象**: Kanban 中 tmux 的鼠标拖动、copy-mode 选择和复制无效，点击可能正常但拖动选区不连续。
+- **根因**: WebSocket 输入路由把所有 xterm `32/33/34` 鼠标拖动 motion 与无按钮 hover motion 一起丢弃，tmux 收不到拖动过程中的坐标，无法完成 `MouseDrag1Pane` 选择。
+- **修复**: 只过滤无按钮的 `35` hover motion；按下按钮的拖动 motion、按下和释放事件继续经 attached tmux PTY 有序传递。tmux 原生 copy-mode 和已有 OSC 52 浏览器剪贴板链路保持不变。
+- **修复**: 按 SGR bit 位过滤无按钮 hover（含修饰键变体），保留所有按住按钮的拖动 motion；可控大屏 xterm 在捕获阶段屏蔽浏览器原生右键菜单，避免 tmux 右键报告被菜单抢占。tmux 原生 copy-mode 和 OSC52 浏览器剪贴板链路保持不变。
+- **测试**: 新增 terminal control filter、`LocalTmuxInputRouter`、前端右键策略和 WebSocket 路由回归，并用真实 tmux attach 流程断言拖动按下/移动/释放完整保留、copy-mode 返回 OSC52 选中内容。

@@ -338,6 +338,93 @@ test("grid cards use lightweight terminal previews without opening terminal WebS
   expect(await terminalWebSocketUrls(page)).toEqual([]);
 });
 
+test("complete transcript starts at the newest page and loads older pages upward", async ({
+  page,
+}) => {
+  const session = makeSession({
+    id: "transcript-session",
+    displayName: "Transcript Session",
+  });
+  await mockSessions(page, [session]);
+
+  await page.route(
+    "**/api/agent-sessions/transcript-session/transcript**",
+    async (route) => {
+      const url = new URL(route.request().url());
+      const isOlderPage = url.searchParams.has("cursor");
+      const start = isOlderPage ? 1 : 31;
+      const end = isOlderPage ? 30 : 60;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          available: true,
+          agentKind: "codex",
+          sessionId: "codex-transcript",
+          matchedBy: "session-id",
+          updatedAt: "2026-08-23T00:00:00.000Z",
+          hasMore: !isOlderPage,
+          nextCursor: isOlderPage ? null : "older-page",
+          entries: Array.from({ length: end - start + 1 }, (_, index) => ({
+            id: `message-${start + index}`,
+            timestamp: `2026-08-23T00:00:${String(start + index).padStart(2, "0")}.000Z`,
+            kind: "assistant",
+            title: "Codex",
+            text: Array.from(
+              { length: 8 },
+              (_, line) => `message-${start + index} line ${line + 1}`,
+            ).join("\n"),
+            collapsedByDefault: false,
+          })),
+        }),
+      });
+    },
+  );
+
+  await page.goto("/");
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: session.displayName }),
+    })
+    .dblclick();
+  await expect(page.locator(".focus-main")).toBeVisible();
+  await page.getByRole("button", { name: "完整记录" }).click();
+
+  const body = page.locator(".agent-transcript-body");
+  await expect(
+    body.locator('[data-transcript-entry-id="message-60"]'),
+  ).toHaveCount(1);
+  await expect(
+    body.locator('[data-transcript-entry-id="message-30"]'),
+  ).toHaveCount(0);
+  await expect(body.locator("[data-transcript-entry-id]")).toHaveCount(30);
+
+  const initialScroll = await body.evaluate((element) => ({
+    scrollHeight: element.scrollHeight,
+    scrollTop: element.scrollTop,
+    clientHeight: element.clientHeight,
+  }));
+  expect(initialScroll.scrollHeight).toBeGreaterThan(
+    initialScroll.clientHeight,
+  );
+  expect(initialScroll.scrollTop).toBeGreaterThan(0);
+
+  await body.evaluate((element) => {
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+
+  await expect(body.locator("[data-transcript-entry-id]")).toHaveCount(60);
+  await expect(
+    body.locator('[data-transcript-entry-id="message-1"]'),
+  ).toHaveCount(1);
+  await expect(
+    body.locator('[data-transcript-entry-id="message-60"]'),
+  ).toHaveCount(1);
+  await expect
+    .poll(() => body.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+});
+
 test("focused terminal reconnects after an unexpected WebSocket close and accepts input", async ({
   page,
 }) => {

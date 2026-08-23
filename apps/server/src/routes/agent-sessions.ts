@@ -285,22 +285,48 @@ export async function registerAgentSessionRoutes(
   const resolveCodexSessionId = async (
     agentSession: AgentSessionRecord,
   ): Promise<string | undefined> => {
-    const tmuxTarget =
-      agentSession.transportRef?.tmuxPane ??
-      agentSession.transportRef?.tmuxSession;
+    const tmuxSession = agentSession.transportRef?.tmuxSession;
+    const rawTmuxClientProcessId = agentSession.transportRef?.processId;
+    const tmuxClientProcessId =
+      agentSession.connectionState === "online" &&
+      typeof rawTmuxClientProcessId === "number" &&
+      Number.isSafeInteger(rawTmuxClientProcessId) &&
+      rawTmuxClientProcessId > 0
+        ? rawTmuxClientProcessId
+        : undefined;
+    const tmuxTarget = agentSession.transportRef?.tmuxPane ?? tmuxSession;
     if (!tmuxTarget) return agentSession.agentSessionId;
 
     const activeSessionId = await codexSessionLocator.resolve({
       tmuxTarget,
+      ...(tmuxSession ? { tmuxSession } : {}),
+      ...(tmuxClientProcessId !== undefined ? { tmuxClientProcessId } : {}),
       workingDirectory: agentSession.workingDirectory,
     });
-    if (!activeSessionId) return agentSession.agentSessionId;
+    if (!activeSessionId) {
+      // With a live Kanban tmux client, an empty result means the user is
+      // currently viewing a non-Codex pane. Do not fall back to the previous
+      // pane's session or a same-directory transcript. The same rule applies
+      // after a backend reload: another attached tmux client still exposes the
+      // session's current pane even while Kanban is reattaching.
+      return tmuxSession ? undefined : agentSession.agentSessionId;
+    }
     if (activeSessionId !== agentSession.agentSessionId) {
       registry.updateSession(agentSession.id, {
         agentSessionId: activeSessionId,
       });
     }
     return activeSessionId;
+  };
+
+  const resolveCodexWorkingDirectory = (
+    agentSession: AgentSessionRecord,
+    sessionId: string | undefined,
+  ): string | undefined => {
+    const hasTmuxSession = Boolean(agentSession.transportRef?.tmuxSession);
+    return hasTmuxSession && !sessionId
+      ? undefined
+      : agentSession.workingDirectory;
   };
 
   fastify.get("/api/health", async () => ({ status: "ok" }));
@@ -466,7 +492,7 @@ export async function registerAgentSessionRoutes(
       const sessionId = await resolveCodexSessionId(agentSession);
       return codexChangeService.read({
         sessionId,
-        workingDirectory: agentSession.workingDirectory,
+        workingDirectory: resolveCodexWorkingDirectory(agentSession, sessionId),
       });
     },
   );
@@ -480,7 +506,7 @@ export async function registerAgentSessionRoutes(
       }
 
       const sessionId = await resolveCodexSessionId(agentSession);
-      const summaryCacheKey = `${agentSession.id}:${sessionId ?? "directory"}`;
+      const summaryCacheKey = `${agentSession.id}:${sessionId ?? "active-pane-unavailable"}`;
 
       const cached = taskSummaryCache.get(summaryCacheKey);
       if (cached && cached.expiresAt > Date.now()) return cached.value;
@@ -490,7 +516,10 @@ export async function registerAgentSessionRoutes(
       const readPromise = (async () => {
         const transcript = codexTranscriptService.read({
           sessionId,
-          workingDirectory: agentSession.workingDirectory,
+          workingDirectory: resolveCodexWorkingDirectory(
+            agentSession,
+            sessionId,
+          ),
         });
         if (!transcript.available) {
           return { available: false, updatedAt: transcript.updatedAt };
@@ -555,7 +584,7 @@ export async function registerAgentSessionRoutes(
     const requestedLimit = Number(request.query.limit);
     return codexTranscriptService.read({
       sessionId,
-      workingDirectory: agentSession.workingDirectory,
+      workingDirectory: resolveCodexWorkingDirectory(agentSession, sessionId),
       ...(request.query.cursor ? { cursor: request.query.cursor } : {}),
       ...(Number.isSafeInteger(requestedLimit)
         ? { limit: requestedLimit }
