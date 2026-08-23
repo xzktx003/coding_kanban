@@ -41,11 +41,31 @@ interface MobileFileContextMenuState {
   busy: boolean;
 }
 
+interface MobileCreateMenuState {
+  error: string | null;
+  busy: boolean;
+}
+
 type MobileFilePreviewKind = "markdown" | "text" | "image" | "binary";
 export type MobileMarkdownViewMode = "rendered" | "source";
 const MOBILE_FILE_PREVIEW_WINDOW_BYTES = 64 * 1024;
 const MOBILE_FILE_LONG_PRESS_MS = 600;
 const MOBILE_FILE_LONG_PRESS_MOVE_PX = 12;
+
+export function normalizeMobileNewEntryName(value: string): string | null {
+  const normalized = value.trim();
+  if (
+    !normalized ||
+    normalized === "." ||
+    normalized === ".." ||
+    normalized.includes("/") ||
+    normalized.includes("\\") ||
+    normalized.includes("\0")
+  ) {
+    return null;
+  }
+  return normalized;
+}
 
 export function classifyMobileFilePreview(
   entry: FileEntry,
@@ -141,6 +161,8 @@ export function MobileFileBrowser({
     renameEntry,
     deleteEntries,
     downloadEntries,
+    createFile,
+    createFolder,
   } = useFileBrowser(selectedHost, true, {
     scopeKey: `mobile-files:${session.id}`,
     defaultPath,
@@ -155,6 +177,9 @@ export function MobileFileBrowser({
   const previewContentRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] =
     useState<MobileFileContextMenuState | null>(null);
+  const [createMenu, setCreateMenu] = useState<MobileCreateMenuState | null>(
+    null,
+  );
   const longPressTimerRef = useRef<number | null>(null);
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
   const suppressNextFileClickRef = useRef(false);
@@ -269,6 +294,39 @@ export function MobileFileBrowser({
             }
           : current,
       );
+    }
+  };
+
+  const runCreateAction = async (kind: "file" | "directory") => {
+    if (createMenu?.busy) return;
+    const requestedName = window.prompt(
+      kind === "file" ? "输入新文件名称" : "输入新文件夹名称",
+      kind === "file" ? "untitled.txt" : "新建文件夹",
+    );
+    if (requestedName === null) return;
+
+    const name = normalizeMobileNewEntryName(requestedName);
+    if (!name) {
+      setCreateMenu({
+        busy: false,
+        error: "名称不能为空、不能是 . 或 ..，也不能包含路径分隔符。",
+      });
+      return;
+    }
+
+    setCreateMenu({ busy: true, error: null });
+    try {
+      if (kind === "file") {
+        await createFile(name);
+      } else {
+        await createFolder(name);
+      }
+      setCreateMenu(null);
+    } catch (caughtError) {
+      setCreateMenu({
+        busy: false,
+        error: caughtError instanceof Error ? caughtError.message : "新建失败",
+      });
     }
   };
 
@@ -492,6 +550,14 @@ export function MobileFileBrowser({
           >
             刷新
           </button>
+          <button
+            className="mobile-file-browser-control"
+            disabled={loading}
+            onClick={() => setCreateMenu({ busy: false, error: null })}
+            type="button"
+          >
+            新建
+          </button>
         </div>
       </div>
 
@@ -572,6 +638,50 @@ export function MobileFileBrowser({
           })
         )}
       </div>
+      {createMenu && (
+        <div
+          className="mobile-file-context-backdrop"
+          onClick={() => !createMenu.busy && setCreateMenu(null)}
+          role="presentation"
+        >
+          <div
+            aria-label="新建文件或文件夹"
+            aria-modal="true"
+            className="mobile-file-context-menu"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <header>
+              <strong>在当前目录新建</strong>
+              <code>{currentPath}</code>
+            </header>
+            {createMenu.error && <div role="alert">{createMenu.error}</div>}
+            <div className="mobile-file-context-actions">
+              <button
+                disabled={createMenu.busy}
+                onClick={() => void runCreateAction("file")}
+                type="button"
+              >
+                新建文件
+              </button>
+              <button
+                disabled={createMenu.busy}
+                onClick={() => void runCreateAction("directory")}
+                type="button"
+              >
+                新建文件夹
+              </button>
+              <button
+                disabled={createMenu.busy}
+                onClick={() => setCreateMenu(null)}
+                type="button"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {contextMenu && (
         <div
           className="mobile-file-context-backdrop"

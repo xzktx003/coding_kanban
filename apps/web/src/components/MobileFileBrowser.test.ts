@@ -8,6 +8,7 @@ import {
   classifyMobileFilePreview,
   formatMobileFilePreviewRange,
   MobileFileBrowser,
+  normalizeMobileNewEntryName,
   resolveMobileMarkdownDisplayKind,
 } from "./MobileFileBrowser.js";
 
@@ -198,6 +199,48 @@ describe("MobileFileBrowser", () => {
     assert.match(
       css,
       /\.mobile-file-context-menu\s*{[^}]*position:\s*absolute;[^}]*bottom:/s,
+    );
+  });
+
+  it("creates files and folders from a touch-friendly new-entry menu", () => {
+    assert.equal(normalizeMobileNewEntryName("  notes.md  "), "notes.md");
+    assert.equal(normalizeMobileNewEntryName(""), null);
+    assert.equal(normalizeMobileNewEntryName("."), null);
+    assert.equal(normalizeMobileNewEntryName(".."), null);
+    assert.equal(normalizeMobileNewEntryName("nested/file"), null);
+    assert.equal(normalizeMobileNewEntryName("nested\\file"), null);
+
+    const markup = renderToStaticMarkup(
+      createElement(MobileFileBrowser, {
+        session: {
+          id: "mobile-create",
+          workspaceId: "default",
+          sourceType: "local",
+          agentKind: "codex",
+          displayName: "Mobile create",
+          workingDirectory: "/workspace/project",
+          connectionState: "online",
+          interactionState: "idle",
+        },
+        onBack: () => {},
+      }),
+    );
+    assert.match(markup, />新建<\/button>/);
+
+    const source = readFileSync(
+      new URL("./MobileFileBrowser.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.match(source, /aria-label="新建文件或文件夹"/);
+    assert.match(source, /createFile\(name\)/);
+    assert.match(source, /createFolder\(name\)/);
+    assert.match(source, />\s*新建文件\s*</);
+    assert.match(source, />\s*新建文件夹\s*</);
+
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+    assert.match(
+      css,
+      /\.mobile-file-browser-pathbar > div\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*1fr\);/s,
     );
   });
 });
