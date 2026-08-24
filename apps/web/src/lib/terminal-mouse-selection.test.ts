@@ -1,45 +1,17 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import {
-  resolveTerminalMouseGestureAction,
-  shouldSuppressTerminalContextMenu,
-} from "./terminal-mouse-selection.js";
+import { resolveTerminalMouseGestureAction } from "./terminal-mouse-selection.js";
 
 describe("terminal mouse selection", () => {
-  it("suppresses the browser context menu only for the active interactive terminal", () => {
-    assert.equal(
-      shouldSuppressTerminalContextMenu({
-        interactive: true,
-        inputEnabled: true,
-        targetIsTerminal: true,
-      }),
-      true,
+  it("keeps the browser context menu available for terminal copy and paste", () => {
+    const source = readFileSync(
+      new URL("../components/TerminalView.tsx", import.meta.url),
+      "utf8",
     );
-    assert.equal(
-      shouldSuppressTerminalContextMenu({
-        interactive: true,
-        inputEnabled: false,
-        targetIsTerminal: true,
-      }),
-      false,
-    );
-    assert.equal(
-      shouldSuppressTerminalContextMenu({
-        interactive: false,
-        inputEnabled: true,
-        targetIsTerminal: true,
-      }),
-      false,
-    );
-    assert.equal(
-      shouldSuppressTerminalContextMenu({
-        interactive: true,
-        inputEnabled: true,
-        targetIsTerminal: false,
-      }),
-      false,
-    );
+    assert.doesNotMatch(source, /onContextMenuCapture=/);
+    assert.doesNotMatch(source, /shouldSuppressTerminalContextMenu/);
   });
 
   it("turns a direct primary-button drag into local terminal selection", () => {

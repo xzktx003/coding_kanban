@@ -35,10 +35,7 @@ import {
   shouldAttemptTerminalInputForward,
 } from "../lib/terminal-input-forwarding";
 import { stripTerminalResponsePayload } from "../lib/terminal-input";
-import {
-  resolveTerminalMouseGestureAction,
-  shouldSuppressTerminalContextMenu,
-} from "../lib/terminal-mouse-selection";
+import { resolveTerminalMouseGestureAction } from "../lib/terminal-mouse-selection";
 import {
   createSafariTextInputRecoveryState,
   isSafariTerminalInputRecoveryRequired,
@@ -1893,22 +1890,6 @@ export function TerminalView({
           if (term) {
             term.write(filePath + " ");
           }
-        }
-      }}
-      onContextMenuCapture={(event) => {
-        const target = event.target;
-        if (
-          shouldSuppressTerminalContextMenu({
-            interactive,
-            inputEnabled,
-            targetIsTerminal:
-              target instanceof HTMLElement &&
-              target.closest(".xterm") !== null,
-          })
-        ) {
-          // tmux uses the right button for mouse bindings and copy-mode. The
-          // browser menu would consume that gesture before xterm can report it.
-          event.preventDefault();
         }
       }}
     >
