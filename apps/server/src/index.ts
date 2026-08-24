@@ -20,7 +20,8 @@ loadDotenv({ path: resolve(repositoryRoot, ".env") });
 
 async function main(): Promise<void> {
   // Pulls can change shared source and server imports in the same update.
-  // Rebuild before importing the app so tsx never loads a stale workspace dist.
+  // Ensure the output is current before importing the app, without rewriting
+  // an already-current dist and retriggering legacy tsx watchers.
   await ensureSharedPackageBuilt(repositoryRoot);
 
   const { buildServer } = await import("./app.js");
