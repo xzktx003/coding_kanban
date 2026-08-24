@@ -7,6 +7,7 @@ import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import {
   buildTerminalSessionSwitchGroups,
+  isTerminalSessionSwitchItemDisabled,
   TerminalSessionSwitchGroup,
 } from "./TerminalSessionSwitcher.js";
 
@@ -164,6 +165,19 @@ describe("buildTerminalSessionSwitchGroups", () => {
     });
 
     assert.deepEqual(groups, []);
+  });
+});
+
+describe("terminal session switch selection", () => {
+  it("allows activating an occupied pane when group arrangement is active", () => {
+    const item = {
+      session: makeSession("session-beta", "Beta"),
+      selected: false,
+      occupiedPaneIndex: 2,
+    };
+
+    assert.equal(isTerminalSessionSwitchItemDisabled(item), true);
+    assert.equal(isTerminalSessionSwitchItemDisabled(item, true), false);
   });
 });
 

@@ -207,6 +207,65 @@ describe("AgentFocusView", () => {
     assert.match(markup, /data-transcript-session-id="session-2"/);
   });
 
+  it("renders every session from the selected group in group arrangement mode", () => {
+    installLocalStorageStub("triple", {
+      mode: "triple",
+      arrangementMode: "group",
+      arrangementGroupId: "group-research",
+      slots: [],
+      activeSlotId: "terminal-monitor-slot-1",
+      closedSlotIds: [],
+    });
+    const sessions = [
+      ...Array.from({ length: 6 }, (_, index) =>
+        makeSession(`group-session-${index + 1}`, `Research ${index + 1}`),
+      ),
+      makeSession("outside-session", "Outside group"),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: sessions[0],
+        sessions,
+        sessionGroups: {
+          groups: [{ id: "group-research", name: "研究" }],
+          assignments: Object.fromEntries(
+            sessions
+              .slice(0, 6)
+              .map((session) => [`session:${session.id}`, "group-research"]),
+          ),
+          collapsedGroupIds: [],
+        },
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    assert.match(markup, /data-terminal-arrangement="group"/);
+    assert.match(markup, /data-terminal-arrangement-group-id="group-research"/);
+    assert.match(
+      getSidebarCardTag(markup, "group-session-1"),
+      /data-active-monitor-session="true"/,
+    );
+    assert.equal(
+      (markup.match(/data-active-terminal-pane="true"/g) ?? []).length,
+      1,
+    );
+    assert.match(
+      markup,
+      /data-active-terminal-pane="true"[^>]*data-terminal-pane-session="group-session-1"/,
+    );
+    assert.equal(
+      (markup.match(/data-terminal-pane-session="group-session-/g) ?? [])
+        .length,
+      6,
+    );
+    assert.doesNotMatch(markup, /data-terminal-pane-session="outside-session"/);
+  });
+
   it("links every monitored pane to the matching card in the existing sidebar groups", () => {
     installLocalStorageStub("dual");
     const sessions = [

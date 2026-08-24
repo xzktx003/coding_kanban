@@ -1,7 +1,9 @@
 import {
+  isTerminalMonitorArrangementMode,
   getTerminalMonitorSlotIds,
   isTerminalMonitorLayoutMode,
   normalizeTerminalMonitorSlots,
+  type TerminalMonitorArrangementMode,
   type TerminalMonitorLayoutMode,
   type TerminalMonitorSession,
   type TerminalMonitorSlot,
@@ -18,6 +20,8 @@ interface StorageLike {
 
 export interface TerminalWorkspaceState {
   mode: TerminalMonitorLayoutMode;
+  arrangementMode: TerminalMonitorArrangementMode;
+  arrangementGroupId: string | null;
   slots: TerminalMonitorSlot[];
   activeSlotId: string;
   closedSlotIds: string[];
@@ -28,6 +32,8 @@ function defaultState(
 ): TerminalWorkspaceState {
   return {
     mode,
+    arrangementMode: "manual",
+    arrangementGroupId: null,
     slots: [],
     activeSlotId: DEFAULT_SLOT_ID,
     closedSlotIds: [],
@@ -85,6 +91,16 @@ export function loadTerminalWorkspaceState(
     const mode = isTerminalMonitorLayoutMode(parsed.mode)
       ? parsed.mode
       : "single";
+    const arrangementMode = isTerminalMonitorArrangementMode(
+      parsed.arrangementMode,
+    )
+      ? parsed.arrangementMode
+      : "manual";
+    const arrangementGroupId =
+      arrangementMode === "group" &&
+      typeof parsed.arrangementGroupId === "string"
+        ? parsed.arrangementGroupId
+        : null;
     const validSlotIds = new Set(getTerminalMonitorSlotIds(mode));
     const slots = parseSlots(parsed.slots, validSlotIds);
     const activeSlotId =
@@ -101,6 +117,8 @@ export function loadTerminalWorkspaceState(
 
     return {
       mode,
+      arrangementMode,
+      arrangementGroupId,
       slots,
       activeSlotId,
       closedSlotIds,
@@ -135,6 +153,8 @@ export function resolveTerminalWorkspaceStateForFocus(
 
   return {
     mode: state.mode,
+    arrangementMode: state.arrangementMode,
+    arrangementGroupId: state.arrangementGroupId,
     slots,
     activeSlotId,
     closedSlotIds,

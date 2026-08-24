@@ -202,3 +202,4 @@
 - `research` 切到最后的 `pre_smooth_vq` pane 后完整记录仍显示旧的 `moe_quant`/CRISP 会话：卡片旧 `workingDirectory` 过滤掉活动 pane 的 JSONL 后又触发旧目录回退。现在活动 Kanban client 使用 `/proc/<pane_pid>/cwd` 作为 Codex 定位目录，并覆盖打开句柄与关闭句柄回退；新增活动目录不一致和现场 VQ session 回归。
 - tmux copy-mode 拖动选择失效：输入过滤器把有按钮的 SGR `32/33/34` 拖动 motion 与无按钮 `35` hover 一起丢弃，tmux 无法完成 `MouseDrag1Pane` 选择。现在按 SGR bit 位仅过滤 hover（含修饰键变体），拖动按下/移动/释放经 attached PTY 保序转发；可控大屏 xterm 捕获阶段屏蔽浏览器右键菜单，真实 WebSocket+tmux 回归确认 copy-mode 返回 OSC52 剪贴板。
 - Codex 完整记录按倒序和底部按钮翻页，不符合从最新消息向上回看旧消息的阅读习惯：前端改为正常时间顺序，首次定位到底部，滚动接近顶部自动加载更早页并补偿 prepend 高度保持阅读位置；保留手动按钮和 90/300 条窗口上限，组件测试覆盖阈值、顺序和锚点。
+- 分组监控排列曾受固定自由槽位限制且滚轮被单个 xterm 消费：新增自由/分组排列持久化，分组按组内会话生成动态窗格，超出容量由外层布局按帧合并滚动；普通滚轮浏览整体、Shift/⇧ 滚轮浏览当前 xterm、Ctrl/⌘ 保留浏览器行为，分组切换器仅允许同组，并覆盖单屏禁用、活动窗格和浏览器 E2E 回归。

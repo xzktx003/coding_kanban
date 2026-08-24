@@ -886,6 +886,127 @@ test("monitor session switcher groups choices and marks occupied panes", async (
   );
 });
 
+test("group arrangement renders only one group and scrolls through overflow", async ({
+  page,
+}) => {
+  const groupedSessions = Array.from({ length: 6 }, (_, index) =>
+    makeSession({
+      id: `group-session-${index + 1}`,
+      displayName: `Research ${index + 1}`,
+    }),
+  );
+  const outsideSession = makeSession({
+    id: "outside-session",
+    displayName: "Outside group",
+  });
+  const sessions = [...groupedSessions, outsideSession];
+
+  await mockSessions(page, sessions);
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "coding-kanban-session-groups-v1",
+      JSON.stringify({
+        groups: [{ id: "group-research", name: "研究" }],
+        assignments: Object.fromEntries(
+          Array.from({ length: 6 }, (_, index) => [
+            `session:group-session-${index + 1}`,
+            "group-research",
+          ]),
+        ),
+        collapsedGroupIds: [],
+      }),
+    );
+    localStorage.setItem(
+      "terminal-monitor-workspace-v1",
+      JSON.stringify({
+        mode: "triple",
+        arrangementMode: "manual",
+        arrangementGroupId: null,
+        slots: [],
+        activeSlotId: "terminal-monitor-slot-1",
+        closedSlotIds: [],
+      }),
+    );
+  });
+  await page.goto("/");
+
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: "Research 1" }),
+    })
+    .dblclick();
+
+  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .getByRole("menuitemradio", { name: /分组：研究/ })
+    .click();
+
+  const layout = page.locator(
+    '.focus-terminal-layout[data-terminal-arrangement="group"]',
+  );
+  await expect(layout).toBeVisible();
+  await expect(layout).toHaveAttribute(
+    "data-terminal-scroll-mode",
+    "wheel-layout-shift-terminal",
+  );
+  await expect(layout.locator("[data-terminal-pane-session]")).toHaveCount(6);
+  await expect(
+    layout.locator('[data-terminal-pane-session="outside-session"]'),
+  ).toHaveCount(0);
+  await expect(
+    layout.locator('[data-active-terminal-pane="true"]'),
+  ).toHaveAttribute("data-terminal-pane-session", "group-session-1");
+
+  await expect
+    .poll(() =>
+      layout.evaluate((element) => element.scrollHeight - element.clientHeight),
+    )
+    .toBeGreaterThan(20);
+  await layout.hover();
+  await page.mouse.wheel(0, 420);
+  await expect
+    .poll(() => layout.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+
+  const scrollState = await layout.evaluate((element) => ({
+    scrollTop: element.scrollTop,
+    maxScrollTop: element.scrollHeight - element.clientHeight,
+  }));
+  expect(scrollState.scrollTop).toBeLessThan(scrollState.maxScrollTop);
+
+  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await expect(
+    page.getByRole("menuitemradio", { name: /分组：研究/ }),
+  ).toHaveAttribute("aria-checked", "true");
+  await expect(
+    page.getByRole("menuitemradio", { name: /单屏/ }),
+  ).toBeDisabled();
+
+  const firstPane = layout.locator(
+    '[data-terminal-pane-session="group-session-1"]',
+  );
+  await firstPane
+    .getByRole("combobox", { name: "选择第 1 个监控终端" })
+    .click();
+  const switcher = page.getByRole("dialog", {
+    name: "切换第 1 个监控终端",
+  });
+  await expect(switcher).toBeVisible();
+  await expect(
+    switcher.locator('[data-terminal-switch-session-id="outside-session"]'),
+  ).toHaveCount(0);
+  const secondSessionOption = switcher.locator(
+    '[data-terminal-switch-session-id="group-session-2"]',
+  );
+  await expect(secondSessionOption).toBeEnabled();
+  await secondSessionOption.click();
+  await expect(
+    layout.locator(
+      '[data-terminal-pane-session="group-session-2"][data-active-terminal-pane="true"]',
+    ),
+  ).toHaveCount(1);
+});
+
 test("renders distinct group colors consistently across board and switcher", async ({
   page,
 }) => {

@@ -28,6 +28,8 @@ test("persists monitor layout, slot assignments, active input slot, and closed s
   saveTerminalWorkspaceState(
     {
       mode: "quad",
+      arrangementMode: "manual",
+      arrangementGroupId: null,
       slots: [
         { id: "terminal-monitor-slot-1", sessionId: "session-a" },
         { id: "terminal-monitor-slot-2", sessionId: null },
@@ -42,6 +44,8 @@ test("persists monitor layout, slot assignments, active input slot, and closed s
 
   assert.deepEqual(loadTerminalWorkspaceState(storage), {
     mode: "quad",
+    arrangementMode: "manual",
+    arrangementGroupId: null,
     slots: [
       { id: "terminal-monitor-slot-1", sessionId: "session-a" },
       { id: "terminal-monitor-slot-2", sessionId: null },
@@ -53,6 +57,31 @@ test("persists monitor layout, slot assignments, active input slot, and closed s
   });
 });
 
+test("persists the selected group arrangement without replacing manual slots", () => {
+  const storage = createStorage();
+
+  saveTerminalWorkspaceState(
+    {
+      mode: "triple",
+      arrangementMode: "group",
+      arrangementGroupId: "group-research",
+      slots: [{ id: "terminal-monitor-slot-1", sessionId: "session-a" }],
+      activeSlotId: "terminal-monitor-slot-1",
+      closedSlotIds: [],
+    },
+    storage,
+  );
+
+  assert.deepEqual(loadTerminalWorkspaceState(storage), {
+    mode: "triple",
+    arrangementMode: "group",
+    arrangementGroupId: "group-research",
+    slots: [{ id: "terminal-monitor-slot-1", sessionId: "session-a" }],
+    activeSlotId: "terminal-monitor-slot-1",
+    closedSlotIds: [],
+  });
+});
+
 test("migrates the previous layout-mode-only storage and rejects malformed slots", () => {
   const storage = createStorage({
     "terminal-monitor-layout-mode": "dual",
@@ -60,6 +89,8 @@ test("migrates the previous layout-mode-only storage and rejects malformed slots
 
   assert.deepEqual(loadTerminalWorkspaceState(storage), {
     mode: "dual",
+    arrangementMode: "manual",
+    arrangementGroupId: null,
     slots: [],
     activeSlotId: "terminal-monitor-slot-1",
     closedSlotIds: [],
@@ -77,6 +108,8 @@ test("migrates the previous layout-mode-only storage and rejects malformed slots
 
   assert.deepEqual(loadTerminalWorkspaceState(storage), {
     mode: "quad",
+    arrangementMode: "manual",
+    arrangementGroupId: null,
     slots: [],
     activeSlotId: "terminal-monitor-slot-1",
     closedSlotIds: [],
@@ -88,6 +121,8 @@ test("reopens a stale closed active slot for a newly focused session", () => {
     resolveTerminalWorkspaceStateForFocus(
       {
         mode: "single",
+        arrangementMode: "manual",
+        arrangementGroupId: null,
         slots: [
           { id: "terminal-monitor-slot-1", sessionId: "deleted-session" },
         ],
@@ -99,6 +134,8 @@ test("reopens a stale closed active slot for a newly focused session", () => {
     ),
     {
       mode: "single",
+      arrangementMode: "manual",
+      arrangementGroupId: null,
       slots: [
         {
           id: "terminal-monitor-slot-1",

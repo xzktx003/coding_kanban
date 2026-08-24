@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type WheelEvent as ReactWheelEvent,
 } from "react";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
@@ -28,6 +29,7 @@ import {
 import {
   TERMINAL_MONITOR_LAYOUT_OPTIONS,
   areTerminalMonitorSlotsEqual,
+  buildTerminalMonitorGroupSlots,
   closeTerminalMonitorSlot,
   closeTerminalMonitorSlotWithReplacement,
   findFirstTerminalMonitorReplacementSession,
@@ -41,6 +43,7 @@ import {
   resolveFocusedTerminalMonitorSlotId,
   setTerminalMonitorSlotSession,
   type RestorableTerminalMonitorLayoutMode,
+  type TerminalMonitorArrangementMode,
   type TerminalMonitorLayoutSnapshot,
   type TerminalMonitorLayoutMode,
   type TerminalMonitorSlot,
@@ -50,6 +53,10 @@ import {
   resolveTerminalWorkspaceStateForFocus,
   saveTerminalWorkspaceState,
 } from "../lib/terminal-workspace-state";
+import {
+  normalizeTerminalWheelDeltaY,
+  shouldKeepGroupWheelInsideTerminal,
+} from "../lib/terminal-wheel";
 
 interface AgentFocusViewProps {
   focusedSession: AgentSessionRecord;
@@ -83,6 +90,7 @@ const stateLabels: Record<string, string> = {
 };
 
 const DEFAULT_TERMINAL_MONITOR_SLOT_ID = "terminal-monitor-slot-1";
+const DEFAULT_GROUP_TERMINAL_LAYOUT_MODE: TerminalMonitorLayoutMode = "triple";
 const FOCUS_HEADER_COLLAPSED_STORAGE_KEY = "focus-header-collapsed";
 const TERMINAL_MONITOR_DRAG_MIME =
   "application/x-coding-kanban-terminal-session";
@@ -207,6 +215,13 @@ export function AgentFocusView({
   );
   const [terminalLayoutMode, setTerminalLayoutMode] =
     useState<TerminalMonitorLayoutMode>(initialTerminalWorkspaceState.mode);
+  const [terminalArrangementMode, setTerminalArrangementMode] =
+    useState<TerminalMonitorArrangementMode>(
+      initialTerminalWorkspaceState.arrangementMode,
+    );
+  const [terminalArrangementGroupId, setTerminalArrangementGroupId] = useState<
+    string | null
+  >(initialTerminalWorkspaceState.arrangementGroupId);
   const [activeSlotId, setActiveSlotId] = useState(
     initialTerminalWorkspaceState.activeSlotId,
   );
@@ -224,6 +239,12 @@ export function AgentFocusView({
   const [closedSlotIds, setClosedSlotIds] = useState<Set<string>>(
     () => new Set(initialTerminalWorkspaceState.closedSlotIds),
   );
+  const [activeGroupSessionId, setActiveGroupSessionId] = useState<
+    string | null
+  >(null);
+  const groupLayoutScrollElementRef = useRef<HTMLDivElement | null>(null);
+  const groupLayoutScrollDeltaRef = useRef(0);
+  const groupLayoutScrollFrameRef = useRef<number | null>(null);
   const [paneContextMenu, setPaneContextMenu] =
     useState<TerminalPaneContextMenuState | null>(null);
   const [restorableTerminalMonitorLayout, setRestorableTerminalMonitorLayout] =
@@ -234,8 +255,66 @@ export function AgentFocusView({
   const sessionById = useMemo(() => {
     return new Map(sessions.map((session) => [session.id, session]));
   }, [sessions]);
+  const activeSlotAvailable = terminalSlots.some(
+    (slot) => slot.id === activeSlotId,
+  );
+  const safeActiveSlotId = activeSlotAvailable
+    ? activeSlotId
+    : (terminalSlots[0]?.id ?? DEFAULT_TERMINAL_MONITOR_SLOT_ID);
+  const groupingEnabled = sessionGroups.groups.length > 0;
+  const arrangementGroups = useMemo(
+    () =>
+      groupSessions(displayableSessions, sessionGroups).filter(
+        (group) => group.sessions.length > 0,
+      ),
+    [displayableSessions, sessionGroups],
+  );
+  const selectedArrangementGroup = arrangementGroups.find(
+    (group) => group.id === terminalArrangementGroupId,
+  );
+  const groupArrangementEnabled =
+    terminalArrangementMode === "group" &&
+    selectedArrangementGroup !== undefined;
+  const groupArrangementSessions = selectedArrangementGroup?.sessions ?? [];
+  const groupTerminalSlots = useMemo(
+    () =>
+      selectedArrangementGroup
+        ? buildTerminalMonitorGroupSlots(
+            selectedArrangementGroup.id,
+            selectedArrangementGroup.sessions,
+          )
+        : [],
+    [selectedArrangementGroup],
+  );
+  const resolvedActiveGroupSessionId = groupArrangementSessions.some(
+    (session) => session.id === activeGroupSessionId,
+  )
+    ? activeGroupSessionId
+    : (groupArrangementSessions.find(
+        (session) => session.id === focusedSession.id,
+      )?.id ??
+      groupArrangementSessions[0]?.id ??
+      null);
+  const displayedTerminalSlots = groupArrangementEnabled
+    ? groupTerminalSlots
+    : terminalSlots;
+  const displayedActiveSlotId = groupArrangementEnabled
+    ? (groupTerminalSlots.find(
+        (slot) => slot.sessionId === resolvedActiveGroupSessionId,
+      )?.id ??
+      groupTerminalSlots[0]?.id ??
+      DEFAULT_TERMINAL_MONITOR_SLOT_ID)
+    : safeActiveSlotId;
+  // Derive immediately from the active slot while App-level focus catches up.
+  const activeSlotSessionId =
+    displayedTerminalSlots.find((slot) => slot.id === displayedActiveSlotId)
+      ?.sessionId ?? null;
+  const activeHeaderSession =
+    (activeSlotSessionId ? sessionById.get(activeSlotSessionId) : undefined) ??
+    focusedSession;
+  const activeTranscriptSession = transcriptOpen ? activeHeaderSession : null;
   const renderedSessionIds = new Set(
-    terminalSlots
+    displayedTerminalSlots
       .map((slot) => slot.sessionId)
       .filter((sessionId): sessionId is string => Boolean(sessionId)),
   );
@@ -246,7 +325,7 @@ export function AgentFocusView({
   const sessionMonitorPlacementById = useMemo(
     () =>
       new Map(
-        terminalSlots.flatMap((slot, index) =>
+        displayedTerminalSlots.flatMap((slot, index) =>
           slot.sessionId
             ? [
                 [
@@ -257,7 +336,7 @@ export function AgentFocusView({
             : [],
         ),
       ),
-    [terminalSlots],
+    [displayedTerminalSlots],
   );
   const filteredSidebarSessions = sidebarSearchQuery
     ? sidebarSessions.filter(
@@ -273,7 +352,6 @@ export function AgentFocusView({
             .includes(sidebarSearchQuery.toLowerCase()),
       )
     : sidebarSessions;
-  const groupingEnabled = sessionGroups.groups.length > 0;
   const groupedSidebarSessions = useMemo(
     () => groupSessions(filteredSidebarSessions, sessionGroups),
     [filteredSidebarSessions, sessionGroups],
@@ -291,37 +369,42 @@ export function AgentFocusView({
     : filteredSidebarSessions.length;
   const sidebarScrollMode =
     sidebarRenderedUnitCount > FOCUS_SIDEBAR_SCROLL_THRESHOLD;
-  const activeSlotAvailable = terminalSlots.some(
-    (slot) => slot.id === activeSlotId,
-  );
-  const safeActiveSlotId = activeSlotAvailable
-    ? activeSlotId
-    : (terminalSlots[0]?.id ?? DEFAULT_TERMINAL_MONITOR_SLOT_ID);
-  // Derive immediately from the active slot while App-level focus catches up.
-  const activeSlotSessionId =
-    terminalSlots.find((slot) => slot.id === safeActiveSlotId)?.sessionId ??
-    null;
-  const activeHeaderSession =
-    (activeSlotSessionId ? sessionById.get(activeSlotSessionId) : undefined) ??
-    focusedSession;
-  const activeTranscriptSession = transcriptOpen ? activeHeaderSession : null;
   const activeLayoutOption =
     TERMINAL_MONITOR_LAYOUT_OPTIONS.find(
       (option) => option.mode === terminalLayoutMode,
     ) ?? TERMINAL_MONITOR_LAYOUT_OPTIONS[0]!;
+  const activeArrangementLabel = groupArrangementEnabled
+    ? `分组：${selectedArrangementGroup.name}`
+    : "自由排列";
+  const activeArrangementCount = groupArrangementEnabled
+    ? groupArrangementSessions.length
+    : activeLayoutOption.capacity;
   const canRestoreMultiPaneLayout =
-    terminalLayoutMode === "single" && restorableTerminalMonitorLayout !== null;
-  const primaryContextMenuActionLabel =
-    getTerminalPaneContextPrimaryActionLabel(canRestoreMultiPaneLayout);
+    !groupArrangementEnabled &&
+    terminalLayoutMode === "single" &&
+    restorableTerminalMonitorLayout !== null;
+  const primaryContextMenuActionLabel = groupArrangementEnabled
+    ? "退出分组排列"
+    : getTerminalPaneContextPrimaryActionLabel(canRestoreMultiPaneLayout);
 
   useEffect(() => {
     saveTerminalWorkspaceState({
       mode: terminalLayoutMode,
+      arrangementMode: terminalArrangementMode,
+      arrangementGroupId:
+        terminalArrangementMode === "group" ? terminalArrangementGroupId : null,
       slots: terminalSlots,
       activeSlotId: safeActiveSlotId,
       closedSlotIds: Array.from(closedSlotIds),
     });
-  }, [closedSlotIds, safeActiveSlotId, terminalLayoutMode, terminalSlots]);
+  }, [
+    closedSlotIds,
+    safeActiveSlotId,
+    terminalArrangementGroupId,
+    terminalArrangementMode,
+    terminalLayoutMode,
+    terminalSlots,
+  ]);
 
   useEffect(() => {
     saveFocusHeaderHeaderCollapsed(headerCollapsed);
@@ -332,8 +415,36 @@ export function AgentFocusView({
   }, [activeSlotSessionId, onActiveTerminalSessionChange]);
 
   useEffect(() => {
+    if (terminalArrangementMode !== "group") {
+      return;
+    }
+
+    if (!selectedArrangementGroup) {
+      setTerminalArrangementMode("manual");
+      setTerminalArrangementGroupId(null);
+      return;
+    }
+
+    if (resolvedActiveGroupSessionId !== activeGroupSessionId) {
+      setActiveGroupSessionId(resolvedActiveGroupSessionId);
+    }
+    if (terminalLayoutMode === "single") {
+      setTerminalLayoutMode(DEFAULT_GROUP_TERMINAL_LAYOUT_MODE);
+    }
+  }, [
+    activeGroupSessionId,
+    resolvedActiveGroupSessionId,
+    selectedArrangementGroup,
+    terminalArrangementMode,
+    terminalLayoutMode,
+  ]);
+
+  useEffect(() => {
     return () => {
       removeTerminalMonitorDragPreview();
+      if (groupLayoutScrollFrameRef.current !== null) {
+        cancelAnimationFrame(groupLayoutScrollFrameRef.current);
+      }
     };
   }, []);
 
@@ -400,6 +511,10 @@ export function AgentFocusView({
   }, [paneContextMenu]);
 
   useEffect(() => {
+    if (terminalArrangementMode === "group") {
+      return;
+    }
+
     const nextActiveSlotId = resolveFocusedTerminalMonitorSlotId({
       mode: terminalLayoutMode,
       slots: terminalSlots,
@@ -431,6 +546,7 @@ export function AgentFocusView({
     closedSlotIds,
     displayableSessions,
     focusedSession.id,
+    terminalArrangementMode,
     terminalLayoutMode,
     terminalSlots,
   ]);
@@ -446,14 +562,24 @@ export function AgentFocusView({
     }
 
     focusActiveTerminalTextarea();
-  }, [focusedSession.id, safeActiveSlotId, terminalLayoutMode, terminalSlots]);
+  }, [
+    displayedActiveSlotId,
+    displayedTerminalSlots,
+    focusedSession.id,
+    terminalArrangementMode,
+    terminalLayoutMode,
+  ]);
 
   function activateSlot(slot: TerminalMonitorSlot) {
     if (!slot.sessionId) {
       return;
     }
 
-    setActiveSlotId(slot.id);
+    if (groupArrangementEnabled) {
+      setActiveGroupSessionId(slot.sessionId);
+    } else {
+      setActiveSlotId(slot.id);
+    }
     if (slot.sessionId !== focusedSession.id) {
       onSwitchFocus(slot.sessionId);
     }
@@ -488,6 +614,21 @@ export function AgentFocusView({
       return;
     }
 
+    if (groupArrangementEnabled) {
+      if (
+        !groupArrangementSessions.some((session) => session.id === sessionId)
+      ) {
+        return;
+      }
+      const existingSlot = displayedTerminalSlots.find(
+        (slot) => slot.sessionId === sessionId,
+      );
+      if (existingSlot) {
+        activateSlot(existingSlot);
+      }
+      return;
+    }
+
     setRestorableTerminalMonitorLayout(null);
     setTerminalSlots((current) =>
       setTerminalMonitorSlotSession(current, slotId, sessionId),
@@ -508,7 +649,7 @@ export function AgentFocusView({
     sessionId: string,
     sourceSlotId?: string,
   ) {
-    if (!sessionById.has(sessionId)) {
+    if (groupArrangementEnabled || !sessionById.has(sessionId)) {
       return;
     }
 
@@ -710,6 +851,11 @@ export function AgentFocusView({
       return;
     }
 
+    if (groupArrangementEnabled) {
+      setTerminalArrangementMode("manual");
+      setTerminalArrangementGroupId(null);
+    }
+
     if (terminalLayoutMode !== "single") {
       setRestorableTerminalMonitorLayout({
         mode: terminalLayoutMode as RestorableTerminalMonitorLayoutMode,
@@ -762,6 +908,12 @@ export function AgentFocusView({
     contextMenu: TerminalPaneContextMenuState | null = paneContextMenu,
   ) {
     if (!contextMenu || contextMenu.source !== "pane") {
+      return;
+    }
+
+    if (groupArrangementEnabled) {
+      handleManualArrangementMode();
+      setPaneContextMenu(null);
       return;
     }
 
@@ -836,7 +988,7 @@ export function AgentFocusView({
     }
 
     setRestorableTerminalMonitorLayout(null);
-    if (source === "pane") {
+    if (source === "pane" && !groupArrangementEnabled) {
       setClosedSlotIds((current) => {
         const next = new Set(current);
         next.delete(slotId);
@@ -848,6 +1000,23 @@ export function AgentFocusView({
   }
 
   function handleSidebarSwitchFocus(sessionId: string) {
+    if (groupArrangementEnabled) {
+      if (
+        groupArrangementSessions.some((session) => session.id === sessionId)
+      ) {
+        const existingSlot = displayedTerminalSlots.find(
+          (slot) => slot.sessionId === sessionId,
+        );
+        if (existingSlot) {
+          activateSlot(existingSlot);
+        }
+        return;
+      }
+
+      setTerminalArrangementMode("manual");
+      setTerminalArrangementGroupId(null);
+    }
+
     const existingSlot = terminalSlots.find(
       (slot) => slot.sessionId === sessionId,
     );
@@ -873,6 +1042,10 @@ export function AgentFocusView({
   }
 
   function handleLayoutModeChange(mode: TerminalMonitorLayoutMode) {
+    if (groupArrangementEnabled && mode === "single") {
+      return;
+    }
+
     setTerminalLayoutMode(mode);
     setRestorableTerminalMonitorLayout(null);
     setClosedSlotIds(new Set());
@@ -881,6 +1054,93 @@ export function AgentFocusView({
     if (!slotIds.includes(activeSlotId)) {
       setActiveSlotId(slotIds[0] ?? DEFAULT_TERMINAL_MONITOR_SLOT_ID);
     }
+  }
+
+  function handleGroupLayoutWheelCapture(
+    event: ReactWheelEvent<HTMLDivElement>,
+  ) {
+    if (
+      !groupArrangementEnabled ||
+      shouldKeepGroupWheelInsideTerminal({
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+      }) ||
+      event.ctrlKey ||
+      event.metaKey
+    ) {
+      return;
+    }
+
+    const layout = event.currentTarget;
+    const maxScrollTop = layout.scrollHeight - layout.clientHeight;
+    if (maxScrollTop <= 0) {
+      return;
+    }
+
+    const deltaY = normalizeTerminalWheelDeltaY({
+      deltaMode: event.deltaMode,
+      deltaY: event.deltaY,
+      lineHeight: 16,
+      pageHeight: layout.clientHeight,
+    });
+    if (deltaY === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    groupLayoutScrollElementRef.current = layout;
+    groupLayoutScrollDeltaRef.current += deltaY;
+    if (groupLayoutScrollFrameRef.current !== null) {
+      return;
+    }
+
+    groupLayoutScrollFrameRef.current = requestAnimationFrame(() => {
+      groupLayoutScrollFrameRef.current = null;
+      const scrollElement = groupLayoutScrollElementRef.current;
+      const pendingDelta = groupLayoutScrollDeltaRef.current;
+      groupLayoutScrollDeltaRef.current = 0;
+      if (!scrollElement || pendingDelta === 0) {
+        return;
+      }
+
+      const currentMaxScrollTop =
+        scrollElement.scrollHeight - scrollElement.clientHeight;
+      scrollElement.scrollTop = Math.max(
+        0,
+        Math.min(currentMaxScrollTop, scrollElement.scrollTop + pendingDelta),
+      );
+    });
+  }
+
+  function handleManualArrangementMode() {
+    setTerminalArrangementMode("manual");
+    setTerminalArrangementGroupId(null);
+    setLayoutMenuOpen(false);
+  }
+
+  function handleGroupArrangementMode(groupId: string) {
+    const group = arrangementGroups.find((item) => item.id === groupId);
+    if (!group || group.sessions.length === 0) {
+      return;
+    }
+
+    setTerminalArrangementMode("group");
+    setTerminalArrangementGroupId(group.id);
+    setActiveGroupSessionId(
+      group.sessions.find((session) => session.id === activeSlotSessionId)
+        ?.id ??
+        group.sessions.find((session) => session.id === focusedSession.id)
+          ?.id ??
+        group.sessions[0]?.id ??
+        null,
+    );
+    if (terminalLayoutMode === "single") {
+      setTerminalLayoutMode(DEFAULT_GROUP_TERMINAL_LAYOUT_MODE);
+    }
+    setClosedSlotIds(new Set());
+    setLayoutMenuOpen(false);
   }
 
   function handleFocusViewPointerDownCapture(
@@ -1085,10 +1345,10 @@ export function AgentFocusView({
                 >
                   屏幕布局
                   <span className="focus-layout-menu-current">
-                    {activeLayoutOption.label}
+                    {activeArrangementLabel} · {activeLayoutOption.label}
                   </span>
                   <span className="focus-layout-menu-count">
-                    {activeLayoutOption.capacity}
+                    {activeArrangementCount}
                   </span>
                   <span
                     aria-hidden="true"
@@ -1099,11 +1359,53 @@ export function AgentFocusView({
                 </button>
                 {layoutMenuOpen && (
                   <div className="focus-layout-menu-options" role="menu">
+                    <div className="focus-layout-menu-section-label">
+                      窗口排列
+                    </div>
+                    <button
+                      aria-checked={!groupArrangementEnabled}
+                      className={`focus-layout-option${!groupArrangementEnabled ? " focus-layout-option--active" : ""}`}
+                      onClick={handleManualArrangementMode}
+                      role="menuitemradio"
+                      type="button"
+                    >
+                      <span>自由排列</span>
+                      <small>按槽位选择</small>
+                    </button>
+                    {arrangementGroups.length > 0 && (
+                      <>
+                        <div className="focus-layout-menu-section-label">
+                          分组排列
+                        </div>
+                        {arrangementGroups.map((group) => (
+                          <button
+                            key={group.id}
+                            aria-checked={
+                              groupArrangementEnabled &&
+                              terminalArrangementGroupId === group.id
+                            }
+                            className={`focus-layout-option${groupArrangementEnabled && terminalArrangementGroupId === group.id ? " focus-layout-option--active" : ""}`}
+                            onClick={() => handleGroupArrangementMode(group.id)}
+                            role="menuitemradio"
+                            type="button"
+                          >
+                            <span>分组：{group.name}</span>
+                            <strong>{group.sessions.length}</strong>
+                          </button>
+                        ))}
+                      </>
+                    )}
+                    <div className="focus-layout-menu-section-label">
+                      屏幕布局
+                    </div>
                     {TERMINAL_MONITOR_LAYOUT_OPTIONS.map((option) => (
                       <button
                         key={option.mode}
                         aria-checked={terminalLayoutMode === option.mode}
                         className={`focus-layout-option${terminalLayoutMode === option.mode ? " focus-layout-option--active" : ""}`}
+                        disabled={
+                          groupArrangementEnabled && option.mode === "single"
+                        }
                         onClick={() => handleLayoutModeChange(option.mode)}
                         role="menuitemradio"
                         title={`${option.label}监控 ${option.capacity} 个终端`}
@@ -1133,14 +1435,26 @@ export function AgentFocusView({
         </div>
         <div className="focus-main-terminal">
           <div
-            className={`focus-terminal-layout focus-terminal-layout--${terminalLayoutMode}`}
+            className={`focus-terminal-layout focus-terminal-layout--${terminalLayoutMode}${groupArrangementEnabled ? " focus-terminal-layout--group" : ""}`}
+            data-terminal-arrangement={
+              groupArrangementEnabled ? "group" : "manual"
+            }
+            data-terminal-arrangement-group-id={
+              groupArrangementEnabled ? selectedArrangementGroup?.id : undefined
+            }
+            data-terminal-scroll-mode={
+              groupArrangementEnabled
+                ? "wheel-layout-shift-terminal"
+                : undefined
+            }
+            onWheelCapture={handleGroupLayoutWheelCapture}
           >
-            {terminalSlots.map((slot, index) => {
+            {displayedTerminalSlots.map((slot, index) => {
               const session = slot.sessionId
                 ? (sessionById.get(slot.sessionId) ?? null)
                 : null;
               const isActiveInputPane = Boolean(
-                session && slot.id === safeActiveSlotId,
+                session && slot.id === displayedActiveSlotId,
               );
 
               return (
@@ -1174,7 +1488,7 @@ export function AgentFocusView({
                     data-terminal-pane-menu-scope={
                       isActiveInputPane ? "active-titlebar" : undefined
                     }
-                    draggable={Boolean(session)}
+                    draggable={Boolean(session) && !groupArrangementEnabled}
                     onContextMenuCapture={(event) =>
                       handlePaneTitleContextMenu(
                         slot,
@@ -1202,6 +1516,7 @@ export function AgentFocusView({
                       </span>
                     )}
                     <TerminalSessionSwitcher
+                      allowOccupiedSessionSelection={groupArrangementEnabled}
                       onSelect={(sessionId) =>
                         handleSelectSlotSession(slot.id, sessionId)
                       }
@@ -1209,7 +1524,11 @@ export function AgentFocusView({
                       placementBySessionId={sessionMonitorPlacementById}
                       selectedSessionId={session?.id ?? null}
                       sessionGroups={sessionGroups}
-                      sessions={displayableSessions}
+                      sessions={
+                        groupArrangementEnabled
+                          ? groupArrangementSessions
+                          : displayableSessions
+                      }
                       onToggleGroup={onToggleSessionGroup}
                     />
                     <button
@@ -1238,6 +1557,7 @@ export function AgentFocusView({
                           preferLocalMouseSelection={
                             session.agentKind.toLowerCase() === "opencode"
                           }
+                          wheelPassthrough={groupArrangementEnabled}
                         />
                       </Suspense>
                     ) : (
@@ -1332,7 +1652,7 @@ export function AgentFocusView({
                               session={session}
                               monitorIndex={monitorPlacement?.monitorIndex}
                               isActiveMonitor={
-                                monitorPlacement?.slotId === safeActiveSlotId
+                                monitorPlacement?.slotId === displayedActiveSlotId
                               }
                               sessionGroups={sessionGroups}
                               onCreateSessionGroup={onCreateSessionGroup}
@@ -1372,9 +1692,14 @@ export function AgentFocusView({
           {paneContextMenu.source === "pane" && (
             <button
               onClick={
-                canRestoreMultiPaneLayout
-                  ? restoreContextMultiPaneLayout
-                  : showContextSessionInSinglePane
+                groupArrangementEnabled
+                  ? () => {
+                      handleManualArrangementMode();
+                      setPaneContextMenu(null);
+                    }
+                  : canRestoreMultiPaneLayout
+                    ? restoreContextMultiPaneLayout
+                    : showContextSessionInSinglePane
               }
               role="menuitem"
               type="button"

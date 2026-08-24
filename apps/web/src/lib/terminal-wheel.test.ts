@@ -7,8 +7,10 @@ import {
   TERMINAL_WHEEL_DELTA_PIXEL,
   computeTerminalWheelScrollLines,
   isTerminalWheelBlockedByOverlayTarget,
+  shouldAllowTerminalWheelToBubble,
   shouldCaptureTerminalWheel,
   shouldForwardTerminalWheelToApplication,
+  shouldKeepGroupWheelInsideTerminal,
 } from "./terminal-wheel.js";
 
 function targetInsideOverlay(selector: string): EventTarget {
@@ -155,6 +157,56 @@ describe("shouldCaptureTerminalWheel", () => {
   it("lets focus-sidebar previews bubble wheel events to the sidebar scroller", () => {
     assert.equal(shouldCaptureTerminalWheel({ wheelPassthrough: true }), false);
     assert.equal(shouldCaptureTerminalWheel({ wheelPassthrough: false }), true);
+  });
+});
+
+describe("shouldAllowTerminalWheelToBubble", () => {
+  it("bubbles wheel events when the outer workspace owns scrolling", () => {
+    assert.equal(
+      shouldAllowTerminalWheelToBubble({ wheelPassthrough: true }),
+      true,
+    );
+    assert.equal(
+      shouldAllowTerminalWheelToBubble({ wheelPassthrough: false }),
+      false,
+    );
+  });
+});
+
+describe("shouldKeepGroupWheelInsideTerminal", () => {
+  it("uses Shift+wheel for terminal history without stealing browser zoom", () => {
+    assert.equal(
+      shouldKeepGroupWheelInsideTerminal({
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: true,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldKeepGroupWheelInsideTerminal({
+        ctrlKey: true,
+        metaKey: false,
+        shiftKey: true,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldKeepGroupWheelInsideTerminal({
+        ctrlKey: false,
+        metaKey: true,
+        shiftKey: true,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldKeepGroupWheelInsideTerminal({
+        ctrlKey: false,
+        metaKey: false,
+        shiftKey: false,
+      }),
+      false,
+    );
   });
 });
 

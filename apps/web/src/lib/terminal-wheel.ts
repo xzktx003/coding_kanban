@@ -76,6 +76,24 @@ export function shouldCaptureTerminalWheel({
   return !wheelPassthrough;
 }
 
+export function shouldAllowTerminalWheelToBubble({
+  wheelPassthrough,
+}: TerminalWheelCaptureOptions): boolean {
+  return wheelPassthrough;
+}
+
+export function shouldKeepGroupWheelInsideTerminal({
+  ctrlKey,
+  metaKey,
+  shiftKey,
+}: {
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+}): boolean {
+  return shiftKey && !ctrlKey && !metaKey;
+}
+
 export function normalizeTerminalWheelDeltaY({
   deltaMode,
   deltaY,

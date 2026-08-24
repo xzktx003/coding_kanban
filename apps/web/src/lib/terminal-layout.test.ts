@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   TERMINAL_MONITOR_LAYOUT_OPTIONS,
   areTerminalMonitorSlotsEqual,
+  buildTerminalMonitorGroupSlots,
   closeTerminalMonitorSlot,
   closeTerminalMonitorSlotWithReplacement,
   findFirstTerminalMonitorReplacementSession,
@@ -64,6 +65,19 @@ describe("terminal monitor layout", () => {
     assert.deepEqual(
       slots.map((slot) => slot.sessionId),
       ["agent-1", "agent-2", "agent-3", "agent-4"],
+    );
+  });
+
+  it("builds every session in a group as stable scrollable slots", () => {
+    const slots = buildTerminalMonitorGroupSlots("group-research", sessions);
+
+    assert.equal(slots.length, sessions.length);
+    assert.deepEqual(
+      slots.slice(0, 3),
+      ["agent-1", "agent-2", "agent-3"].map((sessionId) => ({
+        id: `terminal-monitor-group-slot:group-research:${sessionId}`,
+        sessionId,
+      })),
     );
   });
 

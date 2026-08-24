@@ -40,6 +40,17 @@ export interface TerminalSessionSwitchItem {
   occupiedPaneIndex: number | null;
 }
 
+export function isTerminalSessionSwitchItemDisabled(
+  item: TerminalSessionSwitchItem,
+  allowOccupiedSessionSelection = false,
+): boolean {
+  return (
+    !item.selected &&
+    item.occupiedPaneIndex !== null &&
+    !allowOccupiedSessionSelection
+  );
+}
+
 export interface TerminalSessionSwitchGroup {
   id: string;
   name: string;
@@ -124,6 +135,7 @@ export function buildTerminalSessionSwitchGroups({
 }
 
 interface TerminalSessionSwitcherProps {
+  allowOccupiedSessionSelection?: boolean;
   paneIndex: number;
   selectedSessionId: string | null;
   sessions: AgentSessionRecord[];
@@ -147,6 +159,7 @@ function formatSessionMeta(session: AgentSessionRecord): string {
 }
 
 interface TerminalSessionSwitchGroupProps {
+  allowOccupiedSessionSelection?: boolean;
   collapsed: boolean;
   collapseDisabled: boolean;
   group: TerminalSessionSwitchGroup;
@@ -156,6 +169,7 @@ interface TerminalSessionSwitchGroupProps {
 }
 
 export function TerminalSessionSwitchGroup({
+  allowOccupiedSessionSelection = false,
   collapsed,
   collapseDisabled,
   group,
@@ -214,7 +228,10 @@ export function TerminalSessionSwitchGroup({
                 className="terminal-session-switch-option"
                 data-session-state={item.session.interactionState}
                 data-terminal-switch-session-id={item.session.id}
-                disabled={item.occupiedPaneIndex !== null}
+                disabled={isTerminalSessionSwitchItemDisabled(
+                  item,
+                  allowOccupiedSessionSelection,
+                )}
                 onClick={() => onSelect(item)}
                 role="option"
                 type="button"
@@ -243,6 +260,7 @@ export function TerminalSessionSwitchGroup({
 }
 
 export function TerminalSessionSwitcher({
+  allowOccupiedSessionSelection = false,
   paneIndex,
   selectedSessionId,
   sessions,
@@ -529,7 +547,13 @@ export function TerminalSessionSwitcher({
 
                     const firstSelectable = groups
                       .flatMap((group) => group.items)
-                      .find((item) => item.occupiedPaneIndex === null);
+                      .find(
+                        (item) =>
+                          !isTerminalSessionSwitchItemDisabled(
+                            item,
+                            allowOccupiedSessionSelection,
+                          ),
+                      );
                     if (firstSelectable && visibleSessionCount === 1) {
                       event.preventDefault();
                       if (firstSelectable.selected) {
@@ -580,6 +604,9 @@ export function TerminalSessionSwitcher({
                     );
                   return (
                     <TerminalSessionSwitchGroup
+                      allowOccupiedSessionSelection={
+                        allowOccupiedSessionSelection
+                      }
                       key={group.id}
                       collapsed={collapsed}
                       collapseDisabled={collapseDisabled}

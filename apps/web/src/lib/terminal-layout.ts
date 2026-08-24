@@ -7,6 +7,8 @@ export type TerminalMonitorLayoutMode =
   | "six"
   | "eight";
 
+export type TerminalMonitorArrangementMode = "manual" | "group";
+
 export interface TerminalMonitorSession {
   id: string;
 }
@@ -107,6 +109,29 @@ export function isTerminalMonitorLayoutMode(
     value === "six" ||
     value === "eight"
   );
+}
+
+export function isTerminalMonitorArrangementMode(
+  value: unknown,
+): value is TerminalMonitorArrangementMode {
+  return value === "manual" || value === "group";
+}
+
+export function getTerminalMonitorGroupSlotId(
+  groupId: string,
+  sessionId: string,
+): string {
+  return `terminal-monitor-group-slot:${groupId}:${sessionId}`;
+}
+
+export function buildTerminalMonitorGroupSlots(
+  groupId: string,
+  sessions: TerminalMonitorSession[],
+): TerminalMonitorSlot[] {
+  return sessions.map((session) => ({
+    id: getTerminalMonitorGroupSlotId(groupId, session.id),
+    sessionId: session.id,
+  }));
 }
 
 export function getTerminalMonitorSlotIds(

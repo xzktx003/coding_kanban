@@ -45,6 +45,7 @@ import {
 import {
   computeTerminalWheelScrollLines,
   isTerminalWheelBlockedByOverlayTarget,
+  shouldAllowTerminalWheelToBubble,
   shouldCaptureTerminalWheel,
   shouldForwardTerminalWheelToApplication,
 } from "../lib/terminal-wheel";
@@ -1484,6 +1485,10 @@ export function TerminalView({
       };
 
       term.attachCustomWheelEventHandler((event) => {
+        if (shouldAllowTerminalWheelToBubble({ wheelPassthrough })) {
+          return true;
+        }
+
         if (shouldForwardWheelToApplication(event)) {
           return true;
         }

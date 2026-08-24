@@ -650,3 +650,11 @@
 - **修复**: 只过滤无按钮的 `35` hover motion；按下按钮的拖动 motion、按下和释放事件继续经 attached tmux PTY 有序传递。tmux 原生 copy-mode 和已有 OSC 52 浏览器剪贴板链路保持不变。
 - **修复**: 按 SGR bit 位过滤无按钮 hover（含修饰键变体），保留所有按住按钮的拖动 motion；可控大屏 xterm 在捕获阶段屏蔽浏览器原生右键菜单，避免 tmux 右键报告被菜单抢占。tmux 原生 copy-mode 和 OSC52 浏览器剪贴板链路保持不变。
 - **测试**: 新增 terminal control filter、`LocalTmuxInputRouter`、前端右键策略和 WebSocket 路由回归，并用真实 tmux attach 流程断言拖动按下/移动/释放完整保留、copy-mode 返回 OSC52 选中内容。
+
+### 分组监控排列无法浏览超出屏幕的会话
+
+- **现象**: 选择一个有多个会话的分组后，监控窗格仍受固定槽位容量限制；分组外会话可能出现在切换列表，滚轮也会被单个 xterm 消费。
+- **根因**: 旧布局只持久化固定数量的自由槽位，没有把分组投影为连续窗格，也没有区分“终端历史滚动”和“分组布局滚动”的输入所有权。
+- **修复**: 增加自由/分组排列状态；分组模式按组内会话生成稳定动态槽位，单屏禁用并以网格隐式行承载溢出。普通滚轮在布局捕获阶段按帧合并后滚动外层，Shift/⇧ 滚轮保留给当前 xterm，Ctrl/⌘ 组合不被拦截；拖拽和切换器均限制为当前组，已显示同组项直接激活对应窗格。
+- **测试**: 单元测试覆盖分组槽位、持久化、活动窗格和滚轮路由；Playwright 覆盖六会话分组、组外隔离、实际滚轮滚动、单屏禁用及同组切换。
+- **文件**: `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/components/TerminalSessionSwitcher.tsx`, `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/terminal-layout.ts`, `apps/web/src/lib/terminal-workspace-state.ts`, `apps/web/src/lib/terminal-wheel.ts`, `tests/e2e/terminal-preview.spec.ts`
