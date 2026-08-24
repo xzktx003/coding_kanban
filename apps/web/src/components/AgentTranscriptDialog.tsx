@@ -241,7 +241,8 @@ export function AgentTranscriptDialog({
   const transcriptSessionIdRef = useRef<string | null>(null);
   const loadingMoreRef = useRef(false);
   const transcriptBodyRef = useRef<HTMLDivElement | null>(null);
-  const scrollToBottomRef = useRef(false);
+  const transcriptContentRef = useRef<HTMLDivElement | null>(null);
+  const initialBottomPinRef = useRef(false);
   const pendingScrollRestoreRef = useRef<{
     scrollTop: number;
     scrollHeight: number;
@@ -258,7 +259,7 @@ export function AgentTranscriptDialog({
     setError(null);
     setLoadMoreError(null);
     setWindowTrimmed(false);
-    scrollToBottomRef.current = true;
+    initialBottomPinRef.current = true;
     pendingScrollRestoreRef.current = null;
     transcriptSessionIdRef.current = null;
     void getAgentTranscript(agentSessionId, {
@@ -325,7 +326,7 @@ export function AgentTranscriptDialog({
           setLoadingMore(false);
           setLoadMoreError(null);
           setWindowTrimmed(false);
-          scrollToBottomRef.current = true;
+          initialBottomPinRef.current = true;
           pendingScrollRestoreRef.current = null;
           setTranscript(response);
         })
@@ -360,6 +361,7 @@ export function AgentTranscriptDialog({
 
     const pending = pendingScrollRestoreRef.current;
     if (pending) {
+      initialBottomPinRef.current = false;
       pendingScrollRestoreRef.current = null;
       body.scrollTop = getTranscriptScrollTopAfterPrepend(
         pending.scrollTop,
@@ -369,11 +371,45 @@ export function AgentTranscriptDialog({
       return;
     }
 
-    if (scrollToBottomRef.current) {
-      scrollToBottomRef.current = false;
+    if (initialBottomPinRef.current) {
       body.scrollTop = body.scrollHeight;
     }
   }, [transcript]);
+
+  useEffect(() => {
+    const body = transcriptBodyRef.current;
+    const content = transcriptContentRef.current;
+    if (
+      !transcript ||
+      !body ||
+      !content ||
+      typeof ResizeObserver === "undefined"
+    ) {
+      return;
+    }
+
+    let animationFrame = 0;
+    const keepLatestEntryVisible = () => {
+      if (!initialBottomPinRef.current) return;
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(() => {
+        if (initialBottomPinRef.current) {
+          body.scrollTop = body.scrollHeight;
+        }
+      });
+    };
+    const resizeObserver = new ResizeObserver(keepLatestEntryVisible);
+    resizeObserver.observe(content);
+    keepLatestEntryVisible();
+    return () => {
+      resizeObserver.disconnect();
+      window.cancelAnimationFrame(animationFrame);
+    };
+  }, [transcript?.sessionId]);
+
+  const cancelInitialBottomPin = useCallback(() => {
+    initialBottomPinRef.current = false;
+  }, []);
 
   const loadMore = useCallback(() => {
     if (
@@ -383,6 +419,7 @@ export function AgentTranscriptDialog({
     ) {
       return;
     }
+    initialBottomPinRef.current = false;
     const body = transcriptBodyRef.current;
     pendingScrollRestoreRef.current = body
       ? {
@@ -432,6 +469,7 @@ export function AgentTranscriptDialog({
   const handleTranscriptScroll = useCallback(
     (event: UIEvent<HTMLDivElement>) => {
       if (
+        initialBottomPinRef.current ||
         !transcript ||
         !shouldLoadOlderTranscript(
           event.currentTarget.scrollTop,
@@ -494,30 +532,35 @@ export function AgentTranscriptDialog({
         <div
           className="agent-transcript-body"
           onScroll={handleTranscriptScroll}
+          onPointerDown={cancelInitialBottomPin}
+          onTouchStart={cancelInitialBottomPin}
+          onWheel={cancelInitialBottomPin}
           ref={transcriptBodyRef}
         >
-          {error ? (
-            <div className="agent-transcript-error" role="alert">
-              {error}
-            </div>
-          ) : transcript ? (
-            <>
-              {loadMoreError ? (
-                <div className="agent-transcript-error" role="alert">
-                  {loadMoreError}
-                </div>
-              ) : null}
-              <AgentTranscriptEntries
-                loadingMore={loadingMore}
-                onLoadMore={loadMore}
-                terminalFontSize={terminalFontSize}
-                transcript={transcript}
-                windowTrimmed={windowTrimmed}
-              />
-            </>
-          ) : (
-            <div className="agent-transcript-empty">正在读取 Codex 记录…</div>
-          )}
+          <div ref={transcriptContentRef}>
+            {error ? (
+              <div className="agent-transcript-error" role="alert">
+                {error}
+              </div>
+            ) : transcript ? (
+              <>
+                {loadMoreError ? (
+                  <div className="agent-transcript-error" role="alert">
+                    {loadMoreError}
+                  </div>
+                ) : null}
+                <AgentTranscriptEntries
+                  loadingMore={loadingMore}
+                  onLoadMore={loadMore}
+                  terminalFontSize={terminalFontSize}
+                  transcript={transcript}
+                  windowTrimmed={windowTrimmed}
+                />
+              </>
+            ) : (
+              <div className="agent-transcript-empty">正在读取 Codex 记录…</div>
+            )}
+          </div>
         </div>
       </section>
     </div>

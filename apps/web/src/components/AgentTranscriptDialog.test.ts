@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import type { AgentTranscriptResponse } from "@agent-orchestrator/shared";
@@ -186,6 +187,19 @@ test("transcript paging auto-loads near the top and preserves the scroll anchor"
   assert.equal(shouldLoadOlderTranscript(0, true, true), false);
   assert.equal(getTranscriptScrollTopAfterPrepend(120, 1_000, 1_600), 720);
   assert.equal(getTranscriptScrollTopAfterPrepend(0, 1_000, 900), 0);
+});
+
+test("initial transcript remains pinned while deferred Markdown changes height", () => {
+  const source = readFileSync(
+    new URL("./AgentTranscriptDialog.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /initialBottomPinRef/);
+  assert.match(source, /new ResizeObserver/);
+  assert.match(source, /body\.scrollTop = body\.scrollHeight/);
+  assert.match(source, /onWheel={cancelInitialBottomPin}/);
+  assert.match(source, /onTouchStart={cancelInitialBottomPin}/);
 });
 
 test("lightweight transcript window keeps the newly loaded older records bounded", () => {
