@@ -165,6 +165,68 @@ describe("AgentGrid", () => {
     );
   });
 
+  it("switches the board to user groups as the primary sections", () => {
+    const sessions = [
+      makeSession({
+        id: "backend-response",
+        displayName: "Backend Response",
+        interactionState: "awaiting_input",
+      }),
+      makeSession({
+        id: "backend-running",
+        displayName: "Backend Running",
+        interactionState: "running",
+      }),
+      makeSession({
+        id: "ungrouped-ready",
+        displayName: "Ungrouped Ready",
+        interactionState: "idle",
+      }),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentGrid, {
+        sessions,
+        allSessions: sessions,
+        filters: {
+          host: null,
+          kind: null,
+          transport: null,
+          dirQuery: "",
+          tag: null,
+        },
+        layoutMode: "group",
+        sessionGroups: {
+          groups: [{ id: "group-backend", name: "后端" }],
+          assignments: {
+            "session:backend-response": "group-backend",
+            "session:backend-running": "group-backend",
+          },
+          collapsedGroupIds: [],
+        },
+        onDeleteSession: () => {},
+        onFiltersChange: () => {},
+        onFocusSession: () => {},
+        onLayoutModeChange: () => {},
+        onReconnectSession: () => {},
+      }),
+    );
+
+    assert.match(markup, /aria-label="宫格分区方式"/);
+    assert.match(markup, />按状态</);
+    assert.match(markup, /aria-pressed="true"[^>]*>按分组</);
+    assert.match(markup, /data-grid-layout="group"/);
+    assert.match(
+      markup,
+      /data-grid-group="group-backend"[\s\S]*?>后端<[\s\S]*?terminal-preview-backend-response[\s\S]*?terminal-preview-backend-running/,
+    );
+    assert.match(
+      markup,
+      /data-grid-group="__ungrouped__"[\s\S]*?>未分组<[\s\S]*?terminal-preview-ungrouped-ready/,
+    );
+    assert.doesNotMatch(markup, /data-kanban-column=/);
+  });
+
   it("keeps user groups inside their matching status columns", () => {
     const sessions = [
       makeSession({

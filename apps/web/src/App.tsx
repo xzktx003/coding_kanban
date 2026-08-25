@@ -79,6 +79,11 @@ import {
   shouldOfferAppUpdate,
 } from "./lib/app-update";
 import {
+  loadAgentGridLayoutMode,
+  saveAgentGridLayoutMode,
+  type AgentGridLayoutMode,
+} from "./lib/agent-grid-layout";
+import {
   loadAgentGridSortMode,
   saveAgentGridSortMode,
   type AgentGridSortMode,
@@ -373,6 +378,8 @@ export default function App() {
   });
   const [agentGridSortMode, setAgentGridSortMode] =
     useState<AgentGridSortMode>(loadAgentGridSortMode);
+  const [agentGridLayoutMode, setAgentGridLayoutMode] =
+    useState<AgentGridLayoutMode>(loadAgentGridLayoutMode);
   const [useLightweightTerminalPreview, setUseLightweightTerminalPreview] =
     useState(loadTerminalPreviewLightweightMode);
   const [terminalFontSize, setTerminalFontSize] =
@@ -807,6 +814,14 @@ export default function App() {
     (mode: AgentGridSortMode) => {
       setAgentGridSortMode(mode);
       saveAgentGridSortMode(mode);
+    },
+    [],
+  );
+
+  const handleAgentGridLayoutModeChange = useCallback(
+    (mode: AgentGridLayoutMode) => {
+      setAgentGridLayoutMode(mode);
+      saveAgentGridLayoutMode(mode);
     },
     [],
   );
@@ -1873,6 +1888,8 @@ export default function App() {
             <AgentGrid
               sessions={filteredSessions}
               allSessions={visibleSessions}
+              layoutMode={agentGridLayoutMode}
+              onLayoutModeChange={handleAgentGridLayoutModeChange}
               sortMode={agentGridSortMode}
               onSortModeChange={handleAgentGridSortModeChange}
               filters={filters}

@@ -22,6 +22,7 @@ import {
   type AgentGridSortMode,
   sortAgentSessions,
 } from "../lib/agent-grid-sort";
+import type { AgentGridLayoutMode } from "../lib/agent-grid-layout";
 import {
   groupSessions,
   isSessionGroupCollapsed,
@@ -55,6 +56,8 @@ interface AgentGridProps {
   onRenameSessionGroup?: (groupId: string) => void;
   onToggleSessionGroup?: (groupId: string, scope?: string) => void;
   onUnreadCompletionChange?: (id: string, unread: boolean) => void;
+  layoutMode?: AgentGridLayoutMode;
+  onLayoutModeChange?: (mode: AgentGridLayoutMode) => void;
   sortMode?: AgentGridSortMode;
   onSortModeChange?: (mode: AgentGridSortMode) => void;
 }
@@ -204,6 +207,8 @@ export function AgentGrid({
   onRenameSessionGroup,
   onToggleSessionGroup,
   onUnreadCompletionChange,
+  layoutMode = "status",
+  onLayoutModeChange,
   sortMode = "recent",
   onSortModeChange,
 }: AgentGridProps) {
@@ -216,11 +221,17 @@ export function AgentGrid({
     () => buildAgentKanbanColumns(sessions, sortMode),
     [sessions, sortMode],
   );
+  const groupedBoardSessions = useMemo(
+    () => groupSessions(sortAgentSessions(sessions, sortMode), sessionGroups),
+    [sessionGroups, sessions, sortMode],
+  );
   const kanbanColumnSizeKey = kanbanColumns
     .map((column) => column.sessions.length)
     .join(":");
   const shouldVirtualize =
-    !groupingEnabled && sessions.length > AGENT_GRID_VIRTUALIZATION_THRESHOLD;
+    layoutMode === "status" &&
+    !groupingEnabled &&
+    sessions.length > AGENT_GRID_VIRTUALIZATION_THRESHOLD;
 
   const updateGridMetrics = useCallback(() => {
     const element = gridRef.current;
@@ -322,6 +333,26 @@ export function AgentGrid({
           onFiltersChange={onFiltersChange}
         />
         <div className="agent-grid-toolbar-actions">
+          <div
+            aria-label="宫格分区方式"
+            className="agent-grid-layout-switch"
+            role="group"
+          >
+            <button
+              aria-pressed={layoutMode === "status"}
+              onClick={() => onLayoutModeChange?.("status")}
+              type="button"
+            >
+              按状态
+            </button>
+            <button
+              aria-pressed={layoutMode === "group"}
+              onClick={() => onLayoutModeChange?.("group")}
+              type="button"
+            >
+              按分组
+            </button>
+          </div>
           <label className="agent-grid-sort-control">
             <span>排序</span>
             <select
@@ -405,10 +436,58 @@ export function AgentGrid({
             </div>
           )}
         </div>
+      ) : layoutMode === "group" ? (
+        <div
+          aria-label="会话分组看板"
+          className="agent-group-board"
+          data-grid-layout="group"
+          data-testid="agent-grid"
+        >
+          {groupedBoardSessions.map((group) => {
+            const collapsed = isSessionGroupCollapsed(
+              sessionGroups,
+              group.id,
+              "group",
+            );
+            return (
+              <section
+                className="agent-group-board-section"
+                data-grid-group={group.id}
+                key={group.id}
+              >
+                <SessionGroupHeader
+                  collapsed={collapsed}
+                  count={group.sessions.length}
+                  groupId={group.id}
+                  groupIndex={sessionGroups.groups.findIndex(
+                    (item) => item.id === group.id,
+                  )}
+                  name={group.name}
+                  onDeleteGroup={onDeleteSessionGroup}
+                  onRenameGroup={onRenameSessionGroup}
+                  onToggleGroup={(groupId) =>
+                    onToggleSessionGroup?.(groupId, "group")
+                  }
+                />
+                {!collapsed &&
+                  (group.sessions.length > 0 ? (
+                    <div className="agent-group-board-cards">
+                      {group.sessions.map(renderSessionCard)}
+                    </div>
+                  ) : (
+                    <div className="agent-kanban-column-empty">
+                      本筛选下暂无会话
+                    </div>
+                  ))}
+              </section>
+            );
+          })}
+        </div>
       ) : (
         <div
           aria-label="会话状态看板"
           className={`agent-grid agent-kanban-board${shouldVirtualize ? " agent-grid--virtualized" : ""}`}
+          data-grid-layout="status"
           data-testid="agent-grid"
           data-virtualized={shouldVirtualize ? "true" : "false"}
           onScroll={handleGridScroll}

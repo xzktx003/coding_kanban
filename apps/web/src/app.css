@@ -1339,6 +1339,38 @@ input {
   flex-wrap: wrap;
 }
 
+.agent-grid-layout-switch {
+  display: inline-flex;
+  min-height: 30px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+
+.agent-grid-layout-switch button {
+  min-height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+}
+
+.agent-grid-layout-switch button[aria-pressed="true"] {
+  background: rgba(127, 184, 255, 0.16);
+  color: #dceaff;
+  box-shadow: inset 0 0 0 1px rgba(127, 184, 255, 0.2);
+}
+
+.agent-grid-layout-switch button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .agent-grid-sort-control {
   display: inline-flex;
   align-items: center;
@@ -1398,6 +1430,39 @@ input {
 .agent-group-grid {
   min-height: 0;
   overflow: visible;
+}
+
+.agent-group-board {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 2px 2px 0;
+  scrollbar-gutter: stable;
+}
+
+.agent-group-board-section {
+  padding: 10px;
+  border: 1px solid rgba(170, 179, 191, 0.14);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.012);
+}
+
+.agent-group-board-section + .agent-group-board-section {
+  margin-top: 14px;
+}
+
+.agent-group-board .session-group-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  margin-bottom: 12px;
+  backdrop-filter: blur(10px);
+}
+
+.agent-group-board-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(390px, 100%), 1fr));
+  gap: 14px;
 }
 
 .session-group-header {
