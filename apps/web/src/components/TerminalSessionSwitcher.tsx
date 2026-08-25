@@ -478,6 +478,7 @@ export function TerminalSessionSwitcher({
         onClick={() => (open ? setOpen(false) : openMenu())}
         onKeyDown={handleTriggerKeyDown}
         role="combobox"
+        title={`点击切换第 ${paneIndex} 个窗格会话`}
         type="button"
       >
         <span className="terminal-session-switcher-current">

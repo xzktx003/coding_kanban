@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 
 import {
+  isCodexSessionCandidate,
   isLocalCodexSessionCandidate,
   type AgentTaskDiffResponse,
   type AgentSessionRecord,
@@ -39,6 +40,7 @@ import { GitProjectSummaryService } from "../services/git-project-summary-servic
 import { LocalTmuxAdapter } from "../services/local-tmux-adapter.js";
 import { LocalTmuxInputRouter } from "../services/local-tmux-input-router.js";
 import { PtyRuntimeManager } from "../services/pty-runtime-manager.js";
+import type { SftpService } from "../services/sftp-service.js";
 import {
   RemoteLaunchPreflightError,
   type RemoteLaunchPreflightLike,
@@ -72,6 +74,14 @@ const GIT_SUMMARY_CACHE_TTL_MS = 60_000;
 interface TimedCacheEntry<T> {
   value: T;
   expiresAt: number;
+}
+
+function isRemoteAgentSession(
+  session: Pick<AgentSessionRecord, "hostId" | "sshTarget">,
+): boolean {
+  return Boolean(
+    session.sshTarget || (session.hostId && session.hostId !== "local"),
+  );
 }
 
 function buildAgentInvocation(
@@ -151,8 +161,13 @@ interface AgentSessionRoutesOptions {
   ptyRuntimeManager: PtyRuntimeManager;
   remoteLaunchPreflight: RemoteLaunchPreflightLike;
   vsCodeWebManager: VsCodeWebManager;
-  codexTranscriptService?: Pick<CodexTranscriptService, "read">;
+  codexTranscriptService?: Pick<CodexTranscriptService, "read"> &
+    Partial<Pick<CodexTranscriptService, "readRemote">>;
   codexSessionLocator?: Pick<CodexSessionLocator, "resolve">;
+  sftpService?: Pick<
+    SftpService,
+    "listRecursive" | "readRange" | "readRanges" | "resolveRemotePath"
+  >;
   gitProjectSummaryService?: Pick<GitProjectSummaryService, "read">;
   codexChangeService?: Pick<CodexChangeService, "read">;
   gitChangesService?: Pick<GitChangesService, "read" | "revertHunk">;
@@ -265,7 +280,10 @@ export async function registerAgentSessionRoutes(
     ptyRuntimeManager,
     remoteLaunchPreflight,
     vsCodeWebManager,
-    codexTranscriptService = new CodexTranscriptService(),
+    sftpService,
+    codexTranscriptService = new CodexTranscriptService({
+      remoteFileAccess: sftpService,
+    }),
     codexSessionLocator = new CodexSessionLocator(),
     gitProjectSummaryService = new GitProjectSummaryService(),
     codexChangeService = new CodexChangeService(),
@@ -285,6 +303,10 @@ export async function registerAgentSessionRoutes(
   const resolveCodexSessionId = async (
     agentSession: AgentSessionRecord,
   ): Promise<string | undefined> => {
+    if (isRemoteAgentSession(agentSession)) {
+      return agentSession.agentSessionId;
+    }
+
     const tmuxSession = agentSession.transportRef?.tmuxSession;
     const rawTmuxClientProcessId = agentSession.transportRef?.processId;
     const tmuxClientProcessId =
@@ -324,7 +346,7 @@ export async function registerAgentSessionRoutes(
     sessionId: string | undefined,
   ): string | undefined => {
     const hasTmuxSession = Boolean(agentSession.transportRef?.tmuxSession);
-    return hasTmuxSession && !sessionId
+    return hasTmuxSession && !sessionId && !isRemoteAgentSession(agentSession)
       ? undefined
       : agentSession.workingDirectory;
   };
@@ -566,7 +588,7 @@ export async function registerAgentSessionRoutes(
     Querystring: { cursor?: string; limit?: string };
   }>("/api/agent-sessions/:id/transcript", async (request) => {
     const agentSession = registry.get(request.params.id);
-    if (!isLocalCodexSessionCandidate(agentSession)) {
+    if (!isCodexSessionCandidate(agentSession)) {
       return {
         available: false,
         agentKind: "codex" as const,
@@ -576,12 +598,45 @@ export async function registerAgentSessionRoutes(
         entries: [],
         hasMore: false,
         nextCursor: null,
-        message: "完整记录仅支持本机 Codex 会话。",
+        message: "当前会话没有可读取的 Codex 记录。",
       };
     }
 
     const sessionId = await resolveCodexSessionId(agentSession);
     const requestedLimit = Number(request.query.limit);
+    if (isRemoteAgentSession(agentSession)) {
+      if (!agentSession.sshTarget || !codexTranscriptService.readRemote) {
+        return {
+          available: false,
+          agentKind: "codex" as const,
+          sessionId: null,
+          matchedBy: null,
+          updatedAt: null,
+          entries: [],
+          hasMore: false,
+          nextCursor: null,
+          message: "当前远端会话没有可用的 Codex 历史读取通道。",
+        };
+      }
+
+      return codexTranscriptService.readRemote({
+        sshTarget: agentSession.sshTarget,
+        ...(sessionId ? { sessionId } : {}),
+        ...(resolveCodexWorkingDirectory(agentSession, sessionId)
+          ? {
+              workingDirectory: resolveCodexWorkingDirectory(
+                agentSession,
+                sessionId,
+              ),
+            }
+          : {}),
+        ...(request.query.cursor ? { cursor: request.query.cursor } : {}),
+        ...(Number.isSafeInteger(requestedLimit)
+          ? { limit: requestedLimit }
+          : {}),
+      });
+    }
+
     return codexTranscriptService.read({
       sessionId,
       workingDirectory: resolveCodexWorkingDirectory(agentSession, sessionId),

@@ -520,6 +520,67 @@ test("GET transcript does not read local Codex files for remote sessions", async
   await app.close();
 });
 
+test("GET transcript reads remote Codex history through the remote reader", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "remote.example",
+    sourceType: "remote-connect",
+    agentKind: "shell",
+    displayName: "remote tmux Codex",
+    workingDirectory: "~/workspace/project",
+    connectionState: "online",
+    interactionState: "running",
+    transportRef: { tmuxSession: "remote-tmux" },
+    sshTarget: { host: "remote.example", port: 22, username: "demo" },
+  });
+  let receivedInput: unknown;
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {} as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    codexTranscriptService: {
+      read() {
+        throw new Error("remote sessions must not use the local reader");
+      },
+      async readRemote(input) {
+        receivedInput = input;
+        return {
+          available: true,
+          agentKind: "codex" as const,
+          sessionId: "remote-session",
+          matchedBy: "working-directory" as const,
+          updatedAt: "2026-08-25T00:00:00.000Z",
+          entries: [],
+          hasMore: false,
+          nextCursor: null,
+        };
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/agent-sessions/${session.id}/transcript?limit=30`,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal((response.json() as AgentTranscriptResponse).available, true);
+  assert.deepEqual(receivedInput, {
+    sshTarget: { host: "remote.example", port: 22, username: "demo" },
+    workingDirectory: "~/workspace/project",
+    limit: 30,
+  });
+  await app.close();
+});
+
 test("GET task summary extracts the latest structured Codex messages", async () => {
   const app = Fastify();
   const registry = new AgentSessionRegistry();

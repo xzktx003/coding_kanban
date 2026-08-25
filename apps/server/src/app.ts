@@ -193,6 +193,7 @@ export function buildServer(options: BuildServerOptions = {}): {
       ptyRuntimeManager,
       remoteLaunchPreflight,
       vsCodeWebManager,
+      sftpService,
     });
     await registerAppUpdateRoutes(instance, {
       appVersionService,

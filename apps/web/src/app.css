@@ -1469,12 +1469,13 @@ input {
   --session-group-accent: #c5ccd6;
   --session-group-border: rgba(197, 204, 214, 0.24);
   --session-group-surface: rgba(197, 204, 214, 0.07);
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  min-height: 42px;
-  margin-bottom: 10px;
-  padding: 4px 7px;
+  min-height: 58px;
+  margin-bottom: 12px;
+  padding: 5px 8px 5px 12px;
   border: 1px solid var(--session-group-border);
   border-radius: 10px;
   background: linear-gradient(
@@ -1482,6 +1483,39 @@ input {
     var(--session-group-surface),
     rgba(255, 255, 255, 0.012) 72%
   );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 8px 18px rgba(0, 0, 0, 0.12);
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.session-group-header::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: var(--session-group-accent);
+  box-shadow: 0 0 18px var(--session-group-accent);
+  content: "";
+  opacity: 0.92;
+  pointer-events: none;
+}
+
+.session-group-header::after {
+  position: absolute;
+  top: -38px;
+  left: 50%;
+  width: 260px;
+  height: 100px;
+  background: radial-gradient(
+    ellipse,
+    var(--session-group-surface),
+    transparent 68%
+  );
+  content: "";
+  opacity: 0.9;
+  pointer-events: none;
+  transform: translateX(-50%);
 }
 
 .session-group-header[data-group-tone="amber"] {
@@ -1566,24 +1600,36 @@ input {
 }
 
 .session-group-toggle {
-  flex: 1 1 auto;
-  justify-content: flex-start;
+  grid-column: 2;
+  grid-row: 1;
+  z-index: 1;
+  justify-self: center;
+  width: 100%;
+  max-width: min(70vw, 560px);
+  justify-content: center;
   min-width: 0;
-  min-height: 32px;
-  padding: 0;
+  min-height: 46px;
+  padding: 0 10px;
   border: 0;
   background: transparent;
   color: inherit;
   cursor: pointer;
-  text-align: left;
+  text-align: center;
 }
 
 .session-group-chevron {
   flex: 0 0 14px;
   color: var(--session-group-accent);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   text-align: center;
+}
+
+.session-group-heading {
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  max-width: min(70vw, 560px);
 }
 
 .session-group-toggle:hover .session-group-name {
@@ -1600,26 +1646,37 @@ input {
 .session-group-name {
   overflow: hidden;
   color: var(--session-group-accent);
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  line-height: 1.2;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.035em;
+  line-height: 1.15;
   text-overflow: ellipsis;
+  text-align: center;
+  text-shadow: 0 0 14px var(--session-group-surface);
   white-space: nowrap;
 }
 
 .session-group-count {
-  min-width: 20px;
-  padding: 2px 7px;
+  min-width: 25px;
+  padding: 3px 8px;
   border: 1px solid var(--session-group-border);
   border-radius: 999px;
   background: var(--session-group-surface);
   color: var(--session-group-accent);
-  font-size: 0.75rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
+  font-weight: 800;
   line-height: 1.2;
   text-align: center;
+}
+
+.session-group-header-actions {
+  grid-column: 3;
+  grid-row: 1;
+  z-index: 1;
+  justify-self: end;
 }
 
 .session-group-header-actions button {
@@ -1642,18 +1699,28 @@ input {
 }
 
 .session-group-header--compact {
-  min-height: 34px;
+  min-height: 46px;
   margin: 5px 0 7px;
-  padding: 2px 5px;
+  padding: 3px 5px 3px 8px;
+}
+
+.session-group-header--compact .session-group-toggle {
+  min-height: 36px;
+  padding: 0 6px;
+}
+
+.session-group-header--compact .session-group-heading {
+  gap: 7px;
 }
 
 .session-group-header--compact .session-group-name {
-  font-size: 0.875rem;
+  font-size: 0.98rem;
 }
 
 .session-group-header--compact .session-group-count {
-  padding: 1px 5px;
-  font-size: 0.6875rem;
+  min-width: 22px;
+  padding: 2px 6px;
+  font-size: 0.72rem;
 }
 
 .session-group-header--compact .session-group-header-actions button {
@@ -1903,12 +1970,13 @@ input {
 }
 
 .agent-kanban-column .session-group-header {
-  min-height: 36px;
-  margin-bottom: 8px;
+  min-height: 54px;
+  margin-bottom: 10px;
+  padding: 4px 8px 4px 12px;
 }
 
 .agent-kanban-column .session-group-name {
-  font-size: 0.8125rem;
+  font-size: 1.08rem;
 }
 
 .agent-kanban-column .session-group-header-actions {
@@ -2921,21 +2989,35 @@ input {
 }
 
 .terminal-session-switcher-trigger {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
   gap: 8px;
   width: 100%;
   min-width: 0;
-  height: 24px;
-  padding: 2px 7px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 7px;
-  background: rgba(4, 7, 11, 0.72);
-  color: rgba(244, 241, 234, 0.88);
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.08),
+    rgba(4, 7, 11, 0.78)
+  );
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  color: rgba(255, 251, 244, 0.94);
   cursor: pointer;
-  font-size: 11px;
-  text-align: left;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    box-shadow 0.15s,
+    color 0.15s;
 }
 
 .terminal-session-switcher-trigger:hover,
@@ -2950,15 +3032,57 @@ input {
   outline-offset: 1px;
 }
 
+.focus-terminal-pane--active .terminal-session-switcher-trigger {
+  min-height: 34px;
+  padding: 5px 10px;
+  border-color: rgba(255, 190, 96, 0.78);
+  background: linear-gradient(
+    90deg,
+    rgba(255, 152, 0, 0.3),
+    rgba(255, 152, 0, 0.12) 62%,
+    rgba(4, 7, 11, 0.72)
+  );
+  box-shadow:
+    0 0 0 2px rgba(255, 152, 0, 0.14),
+    inset 0 1px 0 rgba(255, 231, 183, 0.22),
+    0 0 18px rgba(255, 152, 0, 0.12);
+  color: #fff0d2;
+  font-weight: 800;
+}
+
+.focus-terminal-pane--active .terminal-session-switcher-trigger:hover,
+.focus-terminal-pane--active
+  .terminal-session-switcher-trigger[aria-expanded="true"] {
+  border-color: rgba(255, 214, 128, 0.96);
+  background: linear-gradient(
+    90deg,
+    rgba(255, 169, 35, 0.42),
+    rgba(255, 152, 0, 0.18) 62%,
+    rgba(4, 7, 11, 0.68)
+  );
+  color: #fff7e8;
+}
+
+.focus-terminal-pane--active .terminal-session-switcher-chevron {
+  color: #ffd58a;
+  font-size: 11px;
+}
+
 .terminal-session-switcher-current {
+  display: block;
+  max-width: calc(100% - 28px);
   overflow: hidden;
   min-width: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
 }
 
 .terminal-session-switcher-chevron {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 50%;
+  right: 9px;
+  transform: translateY(-50%);
   color: rgba(244, 241, 234, 0.52);
   font-size: 10px;
 }

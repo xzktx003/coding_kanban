@@ -281,3 +281,100 @@ test("CodexTranscriptService keeps exec calls hidden while filling a page", () =
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("CodexTranscriptService reads a remote Codex JSONL session by working directory", async () => {
+  const remoteRoot = "/home/demo/.codex/sessions/2026/08/25";
+  const olderPath = `${remoteRoot}/rollout-older.jsonl`;
+  const newerPath = `${remoteRoot}/rollout-newer.jsonl`;
+  const olderContent = Buffer.from(
+    [
+      line({
+        timestamp: "2026-08-25T01:00:00.000Z",
+        type: "session_meta",
+        payload: { id: "remote-older", cwd: "/home/demo/project" },
+      }),
+      line({
+        timestamp: "2026-08-25T01:00:01.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          id: "older-message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "older" }],
+        },
+      }),
+    ].join(""),
+  );
+  const newerContent = Buffer.from(
+    [
+      line({
+        timestamp: "2026-08-25T02:00:00.000Z",
+        type: "session_meta",
+        payload: { id: "remote-newer", cwd: "/home/demo/project" },
+      }),
+      line({
+        timestamp: "2026-08-25T02:00:01.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          id: "remote-message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "remote history" }],
+        },
+      }),
+    ].join(""),
+  );
+  const contents = new Map([
+    [olderPath, olderContent],
+    [newerPath, newerContent],
+  ]);
+  const remoteAccess = {
+    async resolveRemotePath(
+      _target: unknown,
+      inputPath: string,
+    ): Promise<string> {
+      return inputPath === "~/project"
+        ? "/home/demo/project"
+        : "/home/demo/.codex/sessions";
+    },
+    async listRecursive() {
+      return [
+        {
+          path: olderPath,
+          size: olderContent.length,
+          modifiedAt: "2026-08-25T01:00:01.000Z",
+        },
+        {
+          path: newerPath,
+          size: newerContent.length,
+          modifiedAt: "2026-08-25T02:00:01.000Z",
+        },
+      ];
+    },
+    async readRange(
+      _target: unknown,
+      path: string,
+      offset: number,
+      length: number,
+    ) {
+      const content = contents.get(path) ?? Buffer.alloc(0);
+      return {
+        path,
+        size: content.length,
+        buffer: content.subarray(offset, offset + length),
+      };
+    },
+  };
+
+  const response = await new CodexTranscriptService({
+    remoteFileAccess: remoteAccess as never,
+  }).readRemote({
+    sshTarget: { host: "remote.example", username: "demo" },
+    workingDirectory: "~/project",
+  });
+
+  assert.equal(response.available, true);
+  assert.equal(response.sessionId, "remote-newer");
+  assert.equal(response.matchedBy, "working-directory");
+  assert.equal(response.entries.at(-1)?.text, "remote history");
+});

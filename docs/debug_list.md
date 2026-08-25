@@ -662,3 +662,35 @@
 - **修复**: 增加自由/分组排列状态；分组模式按组内会话生成稳定动态槽位，单屏禁用并以网格隐式行承载溢出。普通滚轮在布局捕获阶段按帧合并后滚动外层，Shift/⇧ 滚轮保留给当前 xterm，Ctrl/⌘ 组合不被拦截；拖拽和切换器均限制为当前组，已显示同组项直接激活对应窗格。
 - **测试**: 单元测试覆盖分组槽位、持久化、活动窗格和滚轮路由；Playwright 覆盖六会话分组、组外隔离、实际滚轮滚动、单屏禁用及同组切换。
 - **文件**: `apps/web/src/components/AgentFocusView.tsx`, `apps/web/src/components/TerminalSessionSwitcher.tsx`, `apps/web/src/components/TerminalView.tsx`, `apps/web/src/lib/terminal-layout.ts`, `apps/web/src/lib/terminal-workspace-state.ts`, `apps/web/src/lib/terminal-wheel.ts`, `tests/e2e/terminal-preview.spec.ts`
+
+### 分组标题识别度不足
+
+- **现象**: `ModelZoo`、`hmops`、`XH3_ModelZoo` 等分组名与普通卡片文字接近，长时间浏览看板时不易快速定位分组边界。
+- **根因**: 标题沿用较小的普通文本字号，布局偏左且缺少稳定的分组视觉锚点；看板主列和聚焦侧栏的标题层级也不一致。
+- **修复**: 统一分组标题为居中三列布局，提升字重和字号，复用分组色增加左侧色带、弱光晕、边框和计数胶囊，并为主列/紧凑侧栏设置响应式层级。
+- **测试**: Playwright 断言分组标题居中、字号、字重和色彩一致；既有分组组件单测继续覆盖折叠、重命名、删除和颜色稳定性。
+- **文件**: `apps/web/src/app.css`, `apps/web/src/components/SessionGroupControls.tsx`, `tests/e2e/terminal-preview.spec.ts`
+
+### 监控窗格会话切换标题不显眼
+
+- **现象**: 聚焦视图中每个终端窗格顶部的当前会话名称字号较小、边界不明显，用户不容易发现点击该标题即可切换对应窗格会话。
+- **根因**: 会话切换器沿用紧凑的 24px 暗色按钮样式，当前输入窗格与普通窗格的标题层级差异主要依赖外层边框。
+- **修复**: 提升会话切换按钮的可点击高度、字号、字重和对比度；标题文本在按钮中央显示，下拉箭头固定在右侧；当前输入窗格增加橙色渐变、边框和光晕，并补充明确的鼠标提示，不改变已有切换事件和拖拽行为。
+- **测试**: Playwright 断言当前窗格标题的提示、尺寸、字号、字重和高亮样式，并继续点击标题验证会话切换菜单可打开。
+- **文件**: `apps/web/src/app.css`, `apps/web/src/components/TerminalSessionSwitcher.tsx`, `tests/e2e/terminal-preview.spec.ts`
+
+### 完整记录误限制为本机 Codex 会话
+
+- **现象**: 选择 SSH 远端 Codex 或远端 tmux 中的 Codex 会话后打开“完整记录”，接口返回“完整记录仅支持本机 Codex 会话”。
+- **根因**: transcript 路由只接受本机会话候选，并且 `CodexTranscriptService` 只能从服务端本机 `~/.codex/sessions` 读取 JSONL；远端会话没有独立的目标主机读取路径。
+- **修复**: 增加本地/远端 Codex 候选区分；远端 transcript 通过已登记 `sshTarget` 复用 SFTP，在目标主机的 `~/.codex/sessions` 中按 session ID 或工作目录选择记录，并使用有界原始字节窗口分页解析，远端请求不会回退到本机文件。没有匹配记录时改为明确的“当前会话没有可读取的 Codex 记录”。
+- **测试**: 服务端 transcript 路由、远程 JSONL 分页解析、SFTP 单窗口/批量窗口读取均有回归；本地 Codex、tmux 活动 pane 和非 Codex 会话的既有隔离测试继续通过。
+- **文件**: `packages/shared/src/index.ts`, `apps/server/src/services/sftp-service.ts`, `apps/server/src/services/codex-transcript-service.ts`, `apps/server/src/routes/agent-sessions.ts`
+
+### 完整记录滚动到顶部后未加载更早页面
+
+- **现象**: 完整记录首次定位到最新页面后，直接把滚动容器滚到顶部时仍只显示首个页面，无法继续读取更早记录。
+- **根因**: 初次定位到底部使用的 pin 标记只在指针或滚轮事件中取消；程序化滚动只触发 `scroll` 事件时被初始状态提前拦截。
+- **修复**: 在滚动事件中根据当前是否仍在底部判断；确认离开底部后立即释放初始 pin，再复用既有阈值触发上一页加载。
+- **测试**: `tests/e2e/terminal-preview.spec.ts` 的完整记录分页用例覆盖从最新 30 条滚动到顶部后加载到 60 条。
+- **文件**: `apps/web/src/components/AgentTranscriptDialog.tsx`, `tests/e2e/terminal-preview.spec.ts`

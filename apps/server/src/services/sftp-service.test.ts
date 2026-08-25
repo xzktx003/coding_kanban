@@ -75,6 +75,36 @@ class FakeSftpSession {
     const end = Math.min(this.content.length, (options.end ?? -1) + 1);
     return Readable.from([this.content.subarray(start, end)]);
   }
+
+  open(
+    _remotePath: string,
+    _mode: string,
+    callback: (error: Error | undefined, handle?: Buffer) => void,
+  ): void {
+    callback(undefined, Buffer.from("fake-handle"));
+  }
+
+  read(
+    _handle: Buffer,
+    buffer: Buffer,
+    offset: number,
+    length: number,
+    position: number,
+    callback: (
+      error: Error | undefined,
+      bytesRead: number,
+      buffer: Buffer,
+      position: number,
+    ) => void,
+  ): void {
+    const chunk = this.content.subarray(position, position + length);
+    chunk.copy(buffer, offset);
+    callback(undefined, chunk.length, buffer, position + chunk.length);
+  }
+
+  close(_handle: Buffer, callback: (error?: Error) => void): void {
+    callback();
+  }
 }
 
 class FakeSshClient extends EventEmitter {
@@ -200,4 +230,37 @@ test("preview reads only the requested SFTP window", async () => {
   assert.equal(preview.bytesRead, 6);
   assert.equal(preview.previousOffset, 0);
   assert.equal(preview.nextOffset, 12);
+});
+
+test("readRange returns a bounded raw SFTP byte window", async () => {
+  const client = new FakeSshClient(Buffer.from("first-second-third", "utf8"));
+  const service = new SftpService(() => client as never);
+  const result = await service.readRange(
+    { host: "example.com", username: "demo" },
+    "/home/demo/transcript.jsonl",
+    6,
+    6,
+  );
+
+  assert.equal(result.path, "/home/demo/transcript.jsonl");
+  assert.equal(result.size, Buffer.byteLength("first-second-third"));
+  assert.equal(result.buffer.toString("utf8"), "second");
+});
+
+test("readRanges reuses one SFTP channel for multiple metadata windows", async () => {
+  const client = new FakeSshClient(Buffer.from("first-second-third", "utf8"));
+  const service = new SftpService(() => client as never);
+  const results = await service.readRanges(
+    { host: "example.com", username: "demo" },
+    [
+      { path: "/home/demo/first.jsonl", offset: 0, length: 5 },
+      { path: "/home/demo/second.jsonl", offset: 6, length: 6 },
+    ],
+  );
+
+  assert.deepEqual(
+    results.map((result) => result.buffer.toString("utf8")),
+    ["first", "second"],
+  );
+  assert.equal(client.connectCalls, 1);
 });

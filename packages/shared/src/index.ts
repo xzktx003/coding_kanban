@@ -83,16 +83,12 @@ export interface AgentSessionRecord {
   tags?: string[];
 }
 
-export function isLocalCodexSessionCandidate(
+export function isCodexSessionCandidate(
   session: Pick<
     AgentSessionRecord,
     "agentKind" | "agentSessionId" | "hostId" | "sshTarget" | "transportRef"
   >,
 ): boolean {
-  if (session.sshTarget || (session.hostId && session.hostId !== "local")) {
-    return false;
-  }
-
   const agentKind = session.agentKind.trim().toLowerCase();
   if (agentKind === "codex") {
     return true;
@@ -106,6 +102,19 @@ export function isLocalCodexSessionCandidate(
     session.transportRef?.tmuxPane ||
     session.transportRef?.tmuxSession,
   );
+}
+
+export function isLocalCodexSessionCandidate(
+  session: Pick<
+    AgentSessionRecord,
+    "agentKind" | "agentSessionId" | "hostId" | "sshTarget" | "transportRef"
+  >,
+): boolean {
+  if (session.sshTarget || (session.hostId && session.hostId !== "local")) {
+    return false;
+  }
+
+  return isCodexSessionCandidate(session);
 }
 
 export interface AgentOutputEntry {

@@ -468,11 +468,21 @@ export function AgentTranscriptDialog({
 
   const handleTranscriptScroll = useCallback(
     (event: UIEvent<HTMLDivElement>) => {
+      const body = event.currentTarget;
+      if (initialBottomPinRef.current) {
+        const isAtBottom =
+          body.scrollTop + body.clientHeight >= body.scrollHeight - 1;
+        if (isAtBottom) {
+          return;
+        }
+        // Programmatic scrolls do not emit pointer or wheel events.
+        initialBottomPinRef.current = false;
+      }
+
       if (
-        initialBottomPinRef.current ||
         !transcript ||
         !shouldLoadOlderTranscript(
-          event.currentTarget.scrollTop,
+          body.scrollTop,
           transcript.hasMore,
           loadingMoreRef.current,
         )

@@ -40,6 +40,20 @@ const DEFAULT_SSH_IDENTITY_FILES = [
   "id_xmss",
 ] as const;
 
+const MAX_SFTP_READ_RANGE_BYTES = 4 * 1024 * 1024;
+
+export interface SftpRecursiveFileEntry {
+  path: string;
+  size: number;
+  modifiedAt: string;
+}
+
+export interface SftpReadRange {
+  path: string;
+  size: number;
+  buffer: Buffer;
+}
+
 export interface SftpAuthenticationDependencies {
   homeDirectory: string;
   env: Record<string, string | undefined>;
@@ -165,6 +179,68 @@ function sftpStat(sftp: SFTPWrapper, remotePath: string): Promise<Attributes> {
   });
 }
 
+async function readSftpRange(
+  sftp: SFTPWrapper,
+  remotePath: string,
+  offset: number,
+  length: number,
+): Promise<SftpReadRange> {
+  const fileStats = await sftpStat(sftp, remotePath);
+  const fileSize = Math.max(0, fileStats.size ?? 0);
+  const start = Math.min(offset, fileSize);
+  const end = Math.min(fileSize, start + length);
+  if (end <= start) {
+    return { path: remotePath, size: fileSize, buffer: Buffer.alloc(0) };
+  }
+
+  const handle = await new Promise<Buffer>((resolve, reject) => {
+    sftp.open(remotePath, "r", (error, openedHandle) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(openedHandle);
+    });
+  });
+
+  try {
+    const buffer = Buffer.alloc(end - start);
+    let bytesRead = 0;
+    while (bytesRead < buffer.length) {
+      const result = await new Promise<number>((resolve, reject) => {
+        sftp.read(
+          handle,
+          buffer,
+          bytesRead,
+          buffer.length - bytesRead,
+          start + bytesRead,
+          (error, readBytes) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+            resolve(readBytes);
+          },
+        );
+      });
+      if (result <= 0) {
+        break;
+      }
+      bytesRead += result;
+    }
+
+    return {
+      path: remotePath,
+      size: fileSize,
+      buffer: buffer.subarray(0, bytesRead),
+    };
+  } finally {
+    await new Promise<void>((resolve) => {
+      sftp.close(handle, () => resolve());
+    });
+  }
+}
+
 function sftpReaddir(
   sftp: SFTPWrapper,
   remotePath: string,
@@ -276,7 +352,8 @@ export class SftpService {
           items.map(async (item) => {
             let symlinkTargetType: "file" | "directory" | undefined;
             const typeFromLongname = item.longname?.startsWith("l");
-            const typeFromMode = detectFileEntryType(item.attrs.mode ?? 0) === "symlink";
+            const typeFromMode =
+              detectFileEntryType(item.attrs.mode ?? 0) === "symlink";
             if (typeFromLongname || typeFromMode) {
               try {
                 const targetPath = joinRemotePath(remotePath, item.filename);
@@ -302,8 +379,12 @@ export class SftpService {
         const filtered = entries
           .filter((entry) => showHidden || !entry.isHidden)
           .sort((left, right) => {
-            const leftIsDir = left.type === "directory" || left.symlinkTargetType === "directory";
-            const rightIsDir = right.type === "directory" || right.symlinkTargetType === "directory";
+            const leftIsDir =
+              left.type === "directory" ||
+              left.symlinkTargetType === "directory";
+            const rightIsDir =
+              right.type === "directory" ||
+              right.symlinkTargetType === "directory";
             if (leftIsDir && !rightIsDir) {
               return -1;
             }
@@ -362,9 +443,9 @@ export class SftpService {
   async listRecursive(
     target: SshTarget,
     inputPath: string,
-  ): Promise<Array<{ path: string }>> {
+  ): Promise<SftpRecursiveFileEntry[]> {
     const remotePath = await this.resolveRemotePath(target, inputPath);
-    const results: Array<{ path: string }> = [];
+    const results: SftpRecursiveFileEntry[] = [];
 
     await this.withConnection(target, async (client) =>
       withSftp(client, async (sftp) => {
@@ -377,7 +458,13 @@ export class SftpService {
             if (isDir) {
               await walk(fullPath);
             } else {
-              results.push({ path: fullPath });
+              results.push({
+                path: fullPath,
+                size: item.attrs.size ?? 0,
+                modifiedAt: new Date(
+                  (item.attrs.mtime ?? 0) * 1000,
+                ).toISOString(),
+              });
             }
           }
         };
@@ -386,6 +473,67 @@ export class SftpService {
     );
 
     return results;
+  }
+
+  async readRange(
+    target: SshTarget,
+    inputPath: string,
+    offset: number,
+    length: number,
+  ): Promise<SftpReadRange> {
+    if (
+      !Number.isSafeInteger(offset) ||
+      offset < 0 ||
+      !Number.isSafeInteger(length) ||
+      length < 0 ||
+      length > MAX_SFTP_READ_RANGE_BYTES
+    ) {
+      throw new Error("Invalid remote file read range");
+    }
+
+    const remotePath = await this.resolveRemotePath(target, inputPath);
+    return this.withConnection(target, async (client) =>
+      withSftp(client, async (sftp) => {
+        return readSftpRange(sftp, remotePath, offset, length);
+      }),
+    );
+  }
+
+  async readRanges(
+    target: SshTarget,
+    requests: Array<{ path: string; offset: number; length: number }>,
+  ): Promise<SftpReadRange[]> {
+    for (const request of requests) {
+      if (
+        !Number.isSafeInteger(request.offset) ||
+        request.offset < 0 ||
+        !Number.isSafeInteger(request.length) ||
+        request.length < 0 ||
+        request.length > MAX_SFTP_READ_RANGE_BYTES
+      ) {
+        throw new Error("Invalid remote file read range");
+      }
+    }
+
+    const remotePaths = await Promise.all(
+      requests.map((request) => this.resolveRemotePath(target, request.path)),
+    );
+    return this.withConnection(target, async (client) =>
+      withSftp(client, async (sftp) => {
+        const results: SftpReadRange[] = [];
+        for (const [index, request] of requests.entries()) {
+          results.push(
+            await readSftpRange(
+              sftp,
+              remotePaths[index]!,
+              request.offset,
+              request.length,
+            ),
+          );
+        }
+        return results;
+      }),
+    );
   }
 
   async rename(

@@ -735,9 +735,29 @@ test("monitor session switcher groups choices and marks occupied panes", async (
   const firstPane = page.locator(
     '[data-terminal-pane-slot="terminal-monitor-slot-1"]',
   );
-  await firstPane
-    .getByRole("combobox", { name: "选择第 1 个监控终端" })
-    .click();
+  const firstPaneSwitcher = firstPane.getByRole("combobox", {
+    name: "选择第 1 个监控终端",
+  });
+  await expect(firstPaneSwitcher).toHaveAttribute(
+    "title",
+    "点击切换第 1 个窗格会话",
+  );
+  const switcherAppearance = await firstPaneSwitcher.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return {
+      height: element.getBoundingClientRect().height,
+      fontSize: Number.parseFloat(style.fontSize),
+      fontWeight: Number.parseInt(style.fontWeight, 10),
+      borderColor: style.borderTopColor,
+      textAlign: style.textAlign,
+    };
+  });
+  expect(switcherAppearance.height).toBeGreaterThanOrEqual(34);
+  expect(switcherAppearance.fontSize).toBeGreaterThanOrEqual(12);
+  expect(switcherAppearance.fontWeight).toBeGreaterThanOrEqual(700);
+  expect(switcherAppearance.borderColor).not.toBe("rgba(255, 255, 255, 0.22)");
+  expect(switcherAppearance.textAlign).toBe("center");
+  await firstPaneSwitcher.click();
 
   const menu = page.getByRole("dialog", {
     name: "切换第 1 个监控终端",
@@ -937,9 +957,7 @@ test("group arrangement renders only one group and scrolls through overflow", as
     .dblclick();
 
   await page.getByRole("button", { name: /屏幕布局/ }).click();
-  await page
-    .getByRole("menuitemradio", { name: /分组：研究/ })
-    .click();
+  await page.getByRole("menuitemradio", { name: /分组：研究/ }).click();
 
   const layout = page.locator(
     '.focus-terminal-layout[data-terminal-arrangement="group"]',
@@ -1046,6 +1064,36 @@ test("renders distinct group colors consistently across board and switcher", asy
     '.session-group-header[data-session-group-id^="color-group-"]',
   );
   await expect(boardHeaders).toHaveCount(groups.length);
+  const headingAppearance = await boardHeaders.first().evaluate((element) => {
+    const headerStyle = getComputedStyle(element);
+    const heading = element.querySelector<HTMLElement>(
+      ".session-group-heading",
+    );
+    const name = element.querySelector<HTMLElement>(".session-group-name");
+    const headerBox = element.getBoundingClientRect();
+    const headingBox = heading?.getBoundingClientRect();
+    return {
+      display: headerStyle.display,
+      fontSize: Number.parseFloat(
+        getComputedStyle(name as HTMLElement).fontSize,
+      ),
+      fontWeight: Number.parseInt(
+        getComputedStyle(name as HTMLElement).fontWeight,
+        10,
+      ),
+      textAlign: getComputedStyle(name as HTMLElement).textAlign,
+      centerOffset: Math.abs(
+        (headingBox?.left ?? 0) +
+          (headingBox?.width ?? 0) / 2 -
+          (headerBox.left + headerBox.width / 2),
+      ),
+    };
+  });
+  expect(headingAppearance.display).toBe("grid");
+  expect(headingAppearance.fontSize).toBeGreaterThanOrEqual(16);
+  expect(headingAppearance.fontWeight).toBeGreaterThanOrEqual(700);
+  expect(headingAppearance.textAlign).toBe("center");
+  expect(headingAppearance.centerOffset).toBeLessThan(12);
   const boardColors = await boardHeaders.evaluateAll((elements) =>
     elements.map((element) =>
       getComputedStyle(element)
@@ -1745,10 +1793,7 @@ test("focus sidebar single click switches the main pane without a debounce delay
   });
   const startedAt = await page.evaluate(() => performance.now());
   await betaCard.click();
-  await expect(betaCard).toHaveAttribute(
-    "data-active-monitor-session",
-    "true",
-  );
+  await expect(betaCard).toHaveAttribute("data-active-monitor-session", "true");
   await expect(page.locator(".focus-main-name")).toContainText("Beta Session");
   await expect.poll(() => focusRequests.length).toBe(1);
   const elapsed = await page.evaluate(
