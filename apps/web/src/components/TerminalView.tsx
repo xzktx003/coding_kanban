@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -103,7 +103,7 @@ const MOBILE_TOUCH_LISTENER_OPTIONS = {
 const previewGeometryCache = new Map<string, TerminalGeometry>();
 const terminalInputOwners = new Map<string, TerminalInputOwner>();
 
-export function TerminalView({
+export const TerminalView = memo(function TerminalView({
   agentSessionId,
   interactive = true,
   inputEnabled: inputEnabledProp,
@@ -1916,4 +1916,4 @@ export function TerminalView({
       )}
     </div>
   );
-}
+});

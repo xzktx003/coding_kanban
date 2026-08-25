@@ -263,6 +263,14 @@ describe("AgentFocusView", () => {
         .length,
       6,
     );
+    assert.equal(
+      (markup.match(/data-terminal-render-mode="live"/g) ?? []).length,
+      1,
+    );
+    assert.equal(
+      (markup.match(/data-terminal-render-mode="preview"/g) ?? []).length,
+      5,
+    );
     assert.doesNotMatch(markup, /data-terminal-pane-session="outside-session"/);
   });
 

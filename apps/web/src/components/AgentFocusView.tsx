@@ -1,5 +1,4 @@
 import {
-  Suspense,
   useEffect,
   useMemo,
   useRef,
@@ -12,9 +11,8 @@ import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import { AgentTranscriptDialog } from "./AgentTranscriptDialog";
 import { FocusSidebarSessionCard } from "./FocusSidebarSessionCard";
-import { LazyTerminalView } from "./LazyTerminalView";
 import { SessionGroupHeader } from "./SessionGroupControls";
-import { TerminalPreview } from "./TerminalPreview";
+import { TerminalPaneContent } from "./TerminalPaneContent";
 import { TerminalSessionSwitcher } from "./TerminalSessionSwitcher";
 import {
   groupSessions,
@@ -57,6 +55,7 @@ import {
   normalizeTerminalWheelDeltaY,
   shouldKeepGroupWheelInsideTerminal,
 } from "../lib/terminal-wheel";
+import { SINGLE_PANE_TERMINAL_CACHE_SIZE } from "../lib/terminal-pane-render-policy";
 
 interface AgentFocusViewProps {
   focusedSession: AgentSessionRecord;
@@ -1541,29 +1540,27 @@ export function AgentFocusView({
                       {isActiveInputPane ? "输入中" : "设为输入"}
                     </button>
                   </div>
-                  <div className="focus-terminal-pane-terminal">
-                    {session ? (
-                      <Suspense
-                        fallback={<TerminalPreview session={session} />}
-                      >
-                        <LazyTerminalView
-                          key={session.id}
-                          agentSessionId={session.id}
-                          fontSize={terminalFontSize}
-                          interactive={true}
-                          inputEnabled={isActiveInputPane}
-                          mobileTouchMode={mobileTerminalTouchMode}
-                          onFontSizeChange={onTerminalFontSizeChange}
-                          preferLocalMouseSelection={
-                            session.agentKind.toLowerCase() === "opencode"
-                          }
-                          wheelPassthrough={groupArrangementEnabled}
-                        />
-                      </Suspense>
-                    ) : (
+                  {session ? (
+                    <TerminalPaneContent
+                      active={isActiveInputPane}
+                      cacheCapacity={
+                        !groupArrangementEnabled &&
+                        terminalLayoutMode === "single"
+                          ? SINGLE_PANE_TERMINAL_CACHE_SIZE
+                          : 1
+                      }
+                      fontSize={terminalFontSize}
+                      groupArrangement={groupArrangementEnabled}
+                      mobileTouchMode={mobileTerminalTouchMode}
+                      onFontSizeChange={onTerminalFontSizeChange}
+                      session={session}
+                      sessions={sessions}
+                    />
+                  ) : (
+                    <div className="focus-terminal-pane-terminal">
                       <div className="focus-terminal-empty">暂无可监控会话</div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               );
             })}

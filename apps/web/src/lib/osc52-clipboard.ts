@@ -21,12 +21,12 @@ function decodeBase64Bytes(value: string): Uint8Array | null {
 
 export function decodeOsc52ClipboardPayload(data: string): string | null {
   const separatorIndex = data.indexOf(";");
-  if (separatorIndex <= 0) {
+  if (separatorIndex < 0) {
     return null;
   }
 
   const target = data.slice(0, separatorIndex);
-  if (target !== "c") {
+  if (target !== "" && target !== "c") {
     return null;
   }
 

@@ -616,7 +616,10 @@ export async function registerAgentSessionRoutes(
 
   fastify.post<{ Body: FocusAgentSessionInput }>(
     "/api/agent-sessions/focus",
-    async (request) => registry.focus(request.body),
+    async (request, reply) => {
+      registry.focus(request.body);
+      reply.code(204);
+    },
   );
 
   fastify.patch<{ Params: { id: string }; Body: UpdateAgentSessionInput }>(

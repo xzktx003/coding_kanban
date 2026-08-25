@@ -334,7 +334,7 @@ export class AgentSessionRegistry {
     return nextSession;
   }
 
-  focus(input: FocusAgentSessionInput): ListAgentSessionsResponse {
+  focus(input: FocusAgentSessionInput): void {
     const agentSession = this.get(input.agentSessionId);
 
     this.activeAgentSessionId = input.agentSessionId;
@@ -345,8 +345,6 @@ export class AgentSessionRegistry {
       });
     }
     this.emitSnapshot();
-
-    return this.list();
   }
 
   writeToSession(

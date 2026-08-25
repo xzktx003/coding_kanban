@@ -39,6 +39,8 @@ const execFileAsync = promisify(execFile);
 const TMUX_CLIENT_READY_TIMEOUT_MS = 1_000;
 const TMUX_CLIENT_READY_POLL_MS = 20;
 const TERMINAL_PROTOCOL_REPLY_TIMEOUT_MS = 250;
+const SCROLLBACK_COMPACTION_BYTES = 64 * 1024;
+const SCROLLBACK_COMPACTION_CHUNKS = 128;
 
 export interface PtyRuntimeManagerOptions {
   maxScrollbackBytes?: number;
@@ -66,6 +68,21 @@ export interface PtyScrollbackState {
   scrollbackBytes: number;
   droppedScrollbackBytes: number;
   droppedScrollbackChunks: number;
+  /** Internal cursor into scrollback. Entries before it are reclaimed in batches. */
+  scrollbackStartIndex?: number;
+  /** UTF-8 byte offset into the first active chunk. */
+  scrollbackHeadBytes?: number;
+  /** JavaScript string offset matching scrollbackHeadBytes. */
+  scrollbackHeadCodeUnits?: number;
+  /** Cached byte length of the first active chunk. */
+  scrollbackHeadChunkBytes?: number;
+  /** Whether truncation of the current head chunk was already diagnosed. */
+  scrollbackHeadDropCounted?: boolean;
+  /** Uncompacted fragments at the tail of scrollback. */
+  pendingScrollbackChunks?: number;
+  pendingScrollbackBytes?: number;
+  /** Cached materialized replay, invalidated by appendPtyScrollback. */
+  scrollbackReplayCache?: string;
 }
 
 interface PtyHandle extends PtyScrollbackState {
@@ -94,18 +111,205 @@ export function appendPtyScrollback(
   data: string,
   maxScrollbackBytes: number,
 ): void {
+  if (!data) {
+    return;
+  }
+
+  const dataBytes = Buffer.byteLength(data, "utf8");
   state.scrollback.push(data);
-  state.scrollbackBytes += Buffer.byteLength(data, "utf8");
+  state.scrollbackBytes += dataBytes;
+  state.pendingScrollbackChunks = (state.pendingScrollbackChunks ?? 0) + 1;
+  state.pendingScrollbackBytes =
+    (state.pendingScrollbackBytes ?? 0) + dataBytes;
+  state.scrollbackReplayCache = undefined;
+
+  compactPendingScrollback(state);
+  const normalizedMaxScrollbackBytes = Math.max(
+    0,
+    Math.floor(maxScrollbackBytes),
+  );
+  const excessBytes = state.scrollbackBytes - normalizedMaxScrollbackBytes;
+  const bytesBeforePending =
+    state.scrollbackBytes - (state.pendingScrollbackBytes ?? 0);
+  if (excessBytes > bytesBeforePending) {
+    compactPendingScrollback(state, true);
+  }
+  truncatePtyScrollback(state, normalizedMaxScrollbackBytes);
+  reclaimDroppedScrollback(state);
+}
+
+export function readPtyScrollback(state: PtyScrollbackState): string {
+  if (state.scrollbackReplayCache !== undefined) {
+    return state.scrollbackReplayCache;
+  }
+
+  const startIndex = state.scrollbackStartIndex ?? 0;
+  if (startIndex >= state.scrollback.length) {
+    state.scrollbackReplayCache = "";
+    return "";
+  }
+
+  const headBytes = state.scrollbackHeadBytes ?? 0;
+  const headCodeUnits = state.scrollbackHeadCodeUnits ?? 0;
+  const firstChunk = state.scrollback[startIndex]!;
+  const first = headBytes ? firstChunk.slice(headCodeUnits) : firstChunk;
+  const replay =
+    startIndex + 1 < state.scrollback.length
+      ? first + state.scrollback.slice(startIndex + 1).join("")
+      : first;
+
+  state.scrollbackReplayCache = replay;
+  return replay;
+}
+
+function compactPendingScrollback(
+  state: PtyScrollbackState,
+  force = false,
+): void {
+  const pendingChunks = state.pendingScrollbackChunks ?? 0;
+  const pendingBytes = state.pendingScrollbackBytes ?? 0;
+  if (pendingChunks === 0) {
+    return;
+  }
+  if (
+    !force &&
+    pendingChunks < SCROLLBACK_COMPACTION_CHUNKS &&
+    pendingBytes < SCROLLBACK_COMPACTION_BYTES
+  ) {
+    return;
+  }
+
+  const activeStart = state.scrollbackStartIndex ?? 0;
+  let compactedBytes = pendingBytes;
+  let compactedStart = state.scrollback.length - pendingChunks;
+  while (compactedStart > activeStart) {
+    const previousIndex = compactedStart - 1;
+    if (previousIndex === activeStart && (state.scrollbackHeadBytes ?? 0) > 0) {
+      break;
+    }
+
+    const previousBytes = Buffer.byteLength(
+      state.scrollback[previousIndex]!,
+      "utf8",
+    );
+    if (compactedBytes + previousBytes > SCROLLBACK_COMPACTION_BYTES) {
+      break;
+    }
+
+    compactedStart = previousIndex;
+    compactedBytes += previousBytes;
+  }
+
+  const compacted = state.scrollback.slice(compactedStart).join("");
+  state.scrollback.splice(
+    compactedStart,
+    state.scrollback.length - compactedStart,
+    compacted,
+  );
+  state.pendingScrollbackChunks = 0;
+  state.pendingScrollbackBytes = 0;
+}
+
+function truncatePtyScrollback(
+  state: PtyScrollbackState,
+  maxScrollbackBytes: number,
+): void {
+  let startIndex = state.scrollbackStartIndex ?? 0;
+  let headBytes = state.scrollbackHeadBytes ?? 0;
+  let headCodeUnits = state.scrollbackHeadCodeUnits ?? 0;
+  let headChunkBytes = state.scrollbackHeadChunkBytes;
+  let headDropCounted = state.scrollbackHeadDropCounted ?? false;
 
   while (
     state.scrollbackBytes > maxScrollbackBytes &&
-    state.scrollback.length > 1
+    startIndex < state.scrollback.length
   ) {
-    const removed = state.scrollback.shift()!;
-    const removedBytes = Buffer.byteLength(removed, "utf8");
+    const chunk = state.scrollback[startIndex]!;
+    headChunkBytes ??= Buffer.byteLength(chunk, "utf8");
+    const availableBytes = headChunkBytes - headBytes;
+    const excessBytes = state.scrollbackBytes - maxScrollbackBytes;
+
+    if (availableBytes <= excessBytes) {
+      state.scrollbackBytes -= availableBytes;
+      state.droppedScrollbackBytes += availableBytes;
+      if (!headDropCounted) {
+        state.droppedScrollbackChunks += 1;
+      }
+      startIndex += 1;
+      headBytes = 0;
+      headCodeUnits = 0;
+      headChunkBytes = undefined;
+      headDropCounted = false;
+      continue;
+    }
+
+    const advanced = advanceUtf8StringOffset(chunk, headCodeUnits, excessBytes);
+    const removedBytes = advanced.bytes;
     state.scrollbackBytes -= removedBytes;
     state.droppedScrollbackBytes += removedBytes;
-    state.droppedScrollbackChunks += 1;
+    if (!headDropCounted) {
+      state.droppedScrollbackChunks += 1;
+      headDropCounted = true;
+    }
+    headBytes += removedBytes;
+    headCodeUnits = advanced.codeUnits;
+  }
+
+  state.scrollbackStartIndex = startIndex;
+  state.scrollbackHeadBytes = headBytes;
+  state.scrollbackHeadCodeUnits = headCodeUnits;
+  state.scrollbackHeadChunkBytes = headChunkBytes;
+  state.scrollbackHeadDropCounted = headDropCounted;
+}
+
+function advanceUtf8StringOffset(
+  value: string,
+  startCodeUnits: number,
+  minimumBytes: number,
+): { bytes: number; codeUnits: number } {
+  let bytes = 0;
+  let codeUnits = startCodeUnits;
+
+  while (bytes < minimumBytes && codeUnits < value.length) {
+    const codePoint = value.codePointAt(codeUnits)!;
+    bytes +=
+      codePoint <= 0x7f
+        ? 1
+        : codePoint <= 0x7ff
+          ? 2
+          : codePoint <= 0xffff
+            ? 3
+            : 4;
+    codeUnits += codePoint > 0xffff ? 2 : 1;
+  }
+
+  return { bytes, codeUnits };
+}
+
+function reclaimDroppedScrollback(state: PtyScrollbackState): void {
+  const startIndex = state.scrollbackStartIndex ?? 0;
+  if (startIndex === 0) {
+    return;
+  }
+
+  if (startIndex >= state.scrollback.length) {
+    state.scrollback = [];
+    state.scrollbackStartIndex = 0;
+    state.scrollbackHeadBytes = 0;
+    state.scrollbackHeadCodeUnits = 0;
+    state.scrollbackHeadChunkBytes = undefined;
+    state.scrollbackHeadDropCounted = false;
+    state.pendingScrollbackChunks = 0;
+    state.pendingScrollbackBytes = 0;
+    return;
+  }
+
+  if (
+    startIndex >= SCROLLBACK_COMPACTION_CHUNKS ||
+    startIndex * 2 >= state.scrollback.length
+  ) {
+    state.scrollback = state.scrollback.slice(startIndex);
+    state.scrollbackStartIndex = 0;
   }
 }
 
@@ -506,7 +710,7 @@ export class PtyRuntimeManager {
       throw new Error(`没有找到 PTY 运行时: ${agentSessionId}`);
     }
 
-    return handle.scrollback.join("");
+    return readPtyScrollback(handle);
   }
 
   subscribe(
@@ -521,8 +725,8 @@ export class PtyRuntimeManager {
     }
 
     // Replay scrollback buffer to the new subscriber
-    if (options?.replay !== false && handle.scrollback.length > 0) {
-      const replay = sanitizeReplayForTerminal(handle.scrollback.join(""));
+    if (options?.replay !== false && handle.scrollbackBytes > 0) {
+      const replay = sanitizeReplayForTerminal(readPtyScrollback(handle));
       if (replay) {
         listener(replay);
       }
@@ -771,7 +975,8 @@ export class PtyRuntimeManager {
         droppedScrollbackBytes: handle.droppedScrollbackBytes,
         droppedScrollbackChunks: handle.droppedScrollbackChunks,
         scrollbackBytes: handle.scrollbackBytes,
-        scrollbackChunks: handle.scrollback.length,
+        scrollbackChunks:
+          handle.scrollback.length - (handle.scrollbackStartIndex ?? 0),
       }),
     );
 

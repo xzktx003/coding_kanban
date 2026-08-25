@@ -205,11 +205,10 @@ test("focus API acknowledges an unread completed session", async () => {
       payload: { agentSessionId: session.id },
     });
 
-    assert.equal(response.statusCode, 200);
-    const snapshot = response.json() as {
-      activeAgentSessionId: string | null;
-      items: Array<{ id: string; hasUnreadCompletion?: boolean }>;
-    };
+    assert.equal(response.statusCode, 204);
+    assert.equal(response.body, "");
+
+    const snapshot = registry.list();
     assert.equal(snapshot.activeAgentSessionId, session.id);
     assert.equal(
       snapshot.items.find((item) => item.id === session.id)

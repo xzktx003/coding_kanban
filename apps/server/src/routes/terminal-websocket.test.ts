@@ -557,10 +557,12 @@ test("terminal websocket preserves tmux copy-mode drag selection and OSC52 clipb
     await waitForTmuxPaneMode(sessionName);
     terminal.send(`\u001b[<0;${endColumn};1m`);
     const encodedLine = Buffer.from(copyLine, "utf8").toString("base64");
-    await terminal.waitFor(`\u001b]52;c;${encodedLine}`, 10_000);
+    await terminal.waitFor(`;${encodedLine}`, 10_000);
 
     assert.ok(
-      terminal.getBuffer().includes(`\u001b]52;c;${encodedLine}\u0007`),
+      new RegExp(`\\u001b]52;(?:c)?;${encodedLine}\\u0007`).test(
+        terminal.getBuffer(),
+      ),
     );
   } finally {
     terminal?.close();

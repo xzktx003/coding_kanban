@@ -15,6 +15,7 @@ describe("decodeOsc52ClipboardPayload", () => {
     const text = "pane 内复制\nsecond line";
 
     assert.equal(decodeOsc52ClipboardPayload(`c;${encodeBase64(text)}`), text);
+    assert.equal(decodeOsc52ClipboardPayload(`;${encodeBase64(text)}`), text);
   });
 
   it("ignores unsupported targets, queries, malformed base64, and oversized payloads", () => {

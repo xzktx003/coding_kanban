@@ -10,6 +10,7 @@ import {
   buildLocalSpawnPlan,
   buildRemoteTmuxCaptureCommand,
   PtyRuntimeManager,
+  readPtyScrollback,
   sanitizeReplayForTerminal,
   stripAlternateScreenSwitches,
 } from "./pty-runtime-manager.js";
@@ -210,10 +211,72 @@ test("appendPtyScrollback tracks truncation when replay buffer is exceeded", () 
   appendPtyScrollback(state, "TRUNC_B\n", 16);
   appendPtyScrollback(state, "TRUNC_C\n", 16);
 
-  assert.deepEqual(state.scrollback, ["TRUNC_B\n", "TRUNC_C\n"]);
+  assert.equal(readPtyScrollback(state), "TRUNC_B\nTRUNC_C\n");
   assert.equal(state.scrollbackBytes, 16);
   assert.equal(state.droppedScrollbackBytes, 8);
   assert.equal(state.droppedScrollbackChunks, 1);
+});
+
+test("appendPtyScrollback compacts many small PTY fragments without changing replay", () => {
+  const state = {
+    droppedScrollbackBytes: 0,
+    droppedScrollbackChunks: 0,
+    scrollback: [],
+    scrollbackBytes: 0,
+  };
+
+  for (let index = 0; index < 1_024; index += 1) {
+    appendPtyScrollback(state, String(index % 10), 8_192);
+  }
+
+  assert.equal(
+    readPtyScrollback(state),
+    Array.from({ length: 1_024 }, (_, index) => String(index % 10)).join(""),
+  );
+  assert.ok(
+    state.scrollback.length <= 128,
+    `expected bounded chunks, received ${state.scrollback.length}`,
+  );
+});
+
+test("appendPtyScrollback keeps a UTF-8-safe suffix within the byte limit", () => {
+  const state = {
+    droppedScrollbackBytes: 0,
+    droppedScrollbackChunks: 0,
+    scrollback: [],
+    scrollbackBytes: 0,
+  };
+
+  appendPtyScrollback(state, "甲乙丙", 5);
+
+  assert.equal(readPtyScrollback(state), "丙");
+  assert.equal(state.scrollbackBytes, 3);
+  assert.equal(state.droppedScrollbackBytes, 6);
+  assert.equal(state.droppedScrollbackChunks, 1);
+});
+
+test("appendPtyScrollback keeps the newest byte window across repeated compaction", () => {
+  const state = {
+    droppedScrollbackBytes: 0,
+    droppedScrollbackChunks: 0,
+    scrollback: [],
+    scrollbackBytes: 0,
+  };
+  const output = Array.from({ length: 2_000 }, (_, index) =>
+    String(index % 10),
+  ).join("");
+
+  for (const fragment of output) {
+    appendPtyScrollback(state, fragment, 137);
+  }
+
+  assert.equal(readPtyScrollback(state), output.slice(-137));
+  assert.equal(state.scrollbackBytes, 137);
+  assert.equal(state.droppedScrollbackBytes, output.length - 137);
+  assert.ok(state.scrollback.length <= 128);
+
+  appendPtyScrollback(state, "tail", 137);
+  assert.equal(readPtyScrollback(state), `${output}tail`.slice(-137));
 });
 
 test("buildRemoteTmuxCaptureCommand sets history limit before capturing pane history", () => {

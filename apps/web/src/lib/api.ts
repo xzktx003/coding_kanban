@@ -283,13 +283,30 @@ export function registerAgentSession(
   });
 }
 
-export function focusAgentSession(
-  body: FocusAgentSessionInput,
-): Promise<ListAgentSessionsResponse> {
-  return request<ListAgentSessionsResponse>("/api/agent-sessions/focus", {
-    method: "POST",
-    body: JSON.stringify(body),
+let focusRequestTail: Promise<void> = Promise.resolve();
+let lastQueuedFocusSessionId: string | null = null;
+
+export function focusAgentSession(body: FocusAgentSessionInput): Promise<void> {
+  if (lastQueuedFocusSessionId === body.agentSessionId) {
+    return focusRequestTail;
+  }
+
+  lastQueuedFocusSessionId = body.agentSessionId;
+  const requestPromise = focusRequestTail
+    .catch(() => undefined)
+    .then(() =>
+      request<void>("/api/agent-sessions/focus", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    );
+  const settledPromise = requestPromise.finally(() => {
+    if (focusRequestTail === settledPromise) {
+      lastQueuedFocusSessionId = null;
+    }
   });
+  focusRequestTail = settledPromise;
+  return settledPromise;
 }
 
 export function sendAgentInput(
