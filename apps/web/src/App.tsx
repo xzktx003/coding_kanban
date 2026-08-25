@@ -898,11 +898,8 @@ export default function App() {
   const handleActiveTerminalSessionChange = useCallback(
     (id: string | null) => {
       setActiveTerminalSessionId(id);
-      if (id) {
-        acknowledgeFocusedSession(id);
-      }
     },
-    [acknowledgeFocusedSession],
+    [],
   );
 
   const handleMobileSwitchSession = useCallback(
@@ -1857,6 +1854,7 @@ export default function App() {
             <AgentFocusView
               focusedSession={focusedSession}
               sessions={sessions}
+              syncActiveTerminalWithFocus={sidePanelOpen}
               onActiveTerminalSessionChange={handleActiveTerminalSessionChange}
               onSwitchFocus={handleSwitchFocus}
               onExit={handleExitFocus}

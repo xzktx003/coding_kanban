@@ -60,6 +60,7 @@ import { SINGLE_PANE_TERMINAL_CACHE_SIZE } from "../lib/terminal-pane-render-pol
 interface AgentFocusViewProps {
   focusedSession: AgentSessionRecord;
   sessions: AgentSessionRecord[];
+  syncActiveTerminalWithFocus?: boolean;
   onActiveTerminalSessionChange?: (id: string | null) => void;
   onSwitchFocus: (id: string) => void;
   onExit: () => void;
@@ -169,6 +170,7 @@ function readTerminalMonitorDragPayload(
 export function AgentFocusView({
   focusedSession,
   sessions,
+  syncActiveTerminalWithFocus = false,
   onActiveTerminalSessionChange,
   onSwitchFocus,
   onExit,
@@ -514,13 +516,15 @@ export function AgentFocusView({
       return;
     }
 
-    const nextActiveSlotId = resolveFocusedTerminalMonitorSlotId({
-      mode: terminalLayoutMode,
-      slots: terminalSlots,
-      activeSlotId,
-      focusedSessionId: focusedSession.id,
-      closedSlotIds,
-    });
+    const nextActiveSlotId = syncActiveTerminalWithFocus
+      ? resolveFocusedTerminalMonitorSlotId({
+          mode: terminalLayoutMode,
+          slots: terminalSlots,
+          activeSlotId,
+          focusedSessionId: focusedSession.id,
+          closedSlotIds,
+        })
+      : activeSlotId;
 
     if (nextActiveSlotId !== activeSlotId) {
       setActiveSlotId(nextActiveSlotId);
@@ -530,7 +534,9 @@ export function AgentFocusView({
       const normalized = normalizeTerminalMonitorSlots({
         mode: terminalLayoutMode,
         sessions: displayableSessions,
-        preferredSessionId: focusedSession.id,
+        preferredSessionId: syncActiveTerminalWithFocus
+          ? focusedSession.id
+          : null,
         preferredSlotId: nextActiveSlotId,
         previousSlots: current,
       });
@@ -545,6 +551,7 @@ export function AgentFocusView({
     closedSlotIds,
     displayableSessions,
     focusedSession.id,
+    syncActiveTerminalWithFocus,
     terminalArrangementMode,
     terminalLayoutMode,
     terminalSlots,
@@ -579,7 +586,7 @@ export function AgentFocusView({
     } else {
       setActiveSlotId(slot.id);
     }
-    if (slot.sessionId !== focusedSession.id) {
+    if (syncActiveTerminalWithFocus && slot.sessionId !== focusedSession.id) {
       onSwitchFocus(slot.sessionId);
     }
   }
@@ -638,7 +645,7 @@ export function AgentFocusView({
       return next;
     });
     setActiveSlotId(slotId);
-    if (sessionId !== focusedSession.id) {
+    if (syncActiveTerminalWithFocus && sessionId !== focusedSession.id) {
       onSwitchFocus(sessionId);
     }
   }
@@ -665,7 +672,7 @@ export function AgentFocusView({
       return next;
     });
     setActiveSlotId(slotId);
-    if (sessionId !== focusedSession.id) {
+    if (syncActiveTerminalWithFocus && sessionId !== focusedSession.id) {
       onSwitchFocus(sessionId);
     }
   }
@@ -946,6 +953,7 @@ export function AgentFocusView({
     if (nextActiveSlot) {
       setActiveSlotId(nextActiveSlot.id);
       if (
+        syncActiveTerminalWithFocus &&
         nextActiveSlot.sessionId &&
         nextActiveSlot.sessionId !== focusedSession.id
       ) {

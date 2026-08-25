@@ -463,6 +463,102 @@ test("focused terminal reconnects after an unexpected WebSocket close and accept
     .toContain("reconnected-input");
 });
 
+test("activating the other monitor pane keeps both terminal instances mounted", async ({
+  page,
+}) => {
+  const focusRequestSessionIds: string[] = [];
+  page.on("request", (request) => {
+    if (!request.url().endsWith("/api/agent-sessions/focus")) {
+      return;
+    }
+    const body = request.postDataJSON() as { agentSessionId?: string } | null;
+    if (body?.agentSessionId) {
+      focusRequestSessionIds.push(body.agentSessionId);
+    }
+  });
+
+  await mockSessions(page, [
+    makeSession({
+      id: "left-session",
+      displayName: "Left Session",
+      outputPreview: "left ready",
+    }),
+    makeSession({
+      id: "right-session",
+      displayName: "Right Session",
+      outputPreview: "right ready",
+    }),
+  ]);
+  await page.goto("/");
+
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: "Left Session" }),
+    })
+    .dblclick();
+  await expect.poll(() => focusRequestSessionIds).toHaveLength(1);
+  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
+
+  const leftPane = page.locator(
+    '[data-terminal-pane-slot="terminal-monitor-slot-1"]',
+  );
+  const rightPane = page.locator(
+    '[data-terminal-pane-slot="terminal-monitor-slot-2"]',
+  );
+  const leftTerminal = leftPane.locator(".terminal-view-live");
+  const rightTerminal = rightPane.locator(".terminal-view-live");
+  await expect(leftTerminal).toHaveCount(1);
+  await expect(rightTerminal).toHaveCount(1);
+  await expect.poll(() => terminalWebSocketUrls(page)).toHaveLength(2);
+
+  await leftTerminal.evaluate((element) => {
+    const terminalElement = element as HTMLElement & {
+      __testXterm?: object;
+      __xterm?: object;
+    };
+    terminalElement.__testXterm = terminalElement.__xterm;
+  });
+  await rightTerminal.evaluate((element) => {
+    const terminalElement = element as HTMLElement & {
+      __testXterm?: object;
+      __xterm?: object;
+    };
+    terminalElement.__testXterm = terminalElement.__xterm;
+  });
+
+  const focusRequestCountBeforePaneActivation = focusRequestSessionIds.length;
+  await rightTerminal.click({ position: { x: 24, y: 24 } });
+  await expect(rightPane).toHaveAttribute("data-active-terminal-pane", "true");
+  await expect(leftPane).toHaveAttribute("data-active-terminal-pane", "false");
+  await expect
+    .poll(() =>
+      leftTerminal.evaluate((element) => {
+        const terminalElement = element as HTMLElement & {
+          __testXterm?: object;
+          __xterm?: object;
+        };
+        return terminalElement.__testXterm === terminalElement.__xterm;
+      }),
+    )
+    .toBe(true);
+  await expect
+    .poll(() =>
+      rightTerminal.evaluate((element) => {
+        const terminalElement = element as HTMLElement & {
+          __testXterm?: object;
+          __xterm?: object;
+        };
+        return terminalElement.__testXterm === terminalElement.__xterm;
+      }),
+    )
+    .toBe(true);
+  await expect.poll(() => terminalWebSocketUrls(page)).toHaveLength(2);
+  expect(focusRequestSessionIds).toHaveLength(
+    focusRequestCountBeforePaneActivation,
+  );
+});
+
 test("focused terminal retries a WebSocket that never finishes connecting", async ({
   page,
 }) => {

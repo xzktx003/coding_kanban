@@ -694,3 +694,11 @@
 - **修复**: 在滚动事件中根据当前是否仍在底部判断；确认离开底部后立即释放初始 pin，再复用既有阈值触发上一页加载。
 - **测试**: `tests/e2e/terminal-preview.spec.ts` 的完整记录分页用例覆盖从最新 30 条滚动到顶部后加载到 60 条。
 - **文件**: `apps/web/src/components/AgentTranscriptDialog.tsx`, `tests/e2e/terminal-preview.spec.ts`
+
+### 左右切换监控窗格导致全局焦点刷新
+
+- **现象**: 左右双屏中点击另一窗格时，终端本身没有必要重建，但看板会额外刷新一次，像窗格被重新加载；切换过程中还会产生多余的 `/focus` 请求。
+- **根因**: active pane 的点击无条件同步 App 级 `focusedId`，布局归一化 effect 又按旧 focused session 把 `activeSlotId` 校正回来；active terminal 回调同时重复确认 focus，触发额外会话快照。
+- **修复**: 恢复 active slot 与全局 focused session 的条件边界：无侧栏工具时只更新输入槽位和活动标题，侧栏打开时才同步 focused session；归一化逻辑在无侧栏时保留用户选择，并移除 active terminal 回调的重复 focus 请求。
+- **测试**: Playwright 红绿灯用例验证切换右窗格后两侧 xterm 实例与 WebSocket 保持不变，且无侧栏时 focus 请求数不增加；文件/编辑器侧栏既有跟随活动窗格用例继续覆盖同步行为。
+- **文件**: `apps/web/src/App.tsx`, `apps/web/src/components/AgentFocusView.tsx`, `tests/e2e/terminal-preview.spec.ts`
