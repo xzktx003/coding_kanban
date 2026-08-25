@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   getMobileSessionSummary,
+  MobileSessionCard,
   MobileSessionSwitcher,
   MobileWorkbenchPage,
   sortMobileSessionPickerSessions,
@@ -72,6 +73,8 @@ describe("MobileWorkbenchPage", () => {
     assert.equal((markup.match(/role="listbox"/g) ?? []).length, 1);
     assert.equal((markup.match(/role="option"/g) ?? []).length, 2);
     assert.match(markup, /aria-expanded="true"/);
+    assert.match(markup, /mobile-session-switcher--active/);
+    assert.match(markup, /mobile-session-picker-state[^>]*>执行中</);
     assert.match(
       markup,
       /class="mobile-session-actions"[^>]*>.*完整记录.*变更.*文件.*<\/div>/,
@@ -86,6 +89,59 @@ describe("MobileWorkbenchPage", () => {
     assert.match(
       css,
       /\.mobile-session-picker-menu\s*{[^}]*position:\s*absolute;/s,
+    );
+  });
+
+  it("presents mobile board sessions as compact terminal cards", () => {
+    const markup = renderToStaticMarkup(
+      createElement(MobileSessionCard, {
+        session: {
+          id: "mobile-card",
+          workspaceId: "default",
+          sourceType: "local",
+          agentKind: "codex",
+          displayName: "Review agent",
+          connectionState: "online",
+          interactionState: "idle",
+          hasUnreadCompletion: true,
+          workingDirectory: "/data01/home/tester/projects/coding_kanban",
+          projectName: "coding_kanban",
+          gitBranch: "feature/mobile-card",
+          gitChangedFiles: 3,
+          gitAddedLines: 18,
+          gitDeletedLines: 4,
+          lastUserMessageSummary: "把桌面终端卡片适配到手机端",
+          lastAgentMessageSummary: "正在整理紧凑的状态与预览层级",
+          outputPreview: "first\nsecond\nthird\nfourth",
+        },
+        onOpen: () => {},
+      }),
+    );
+
+    assert.match(markup, /mobile-session-card--review/);
+    assert.match(markup, /mobile-session-card-state[^>]*>待验收</);
+    assert.match(markup, /mobile-session-card-summary-row[^>]*>.*任务/);
+    assert.match(markup, /把桌面终端卡片适配到手机端/);
+    assert.match(markup, /mobile-session-card-summary-row--agent/);
+    assert.match(markup, /正在整理紧凑的状态与预览层级/);
+    assert.match(markup, /feature\/mobile-card/);
+    assert.match(markup, /3 文件/);
+    assert.match(markup, /\+18/);
+    assert.match(markup, /-4/);
+    assert.match(markup, /aria-label="Review agent 终端轻量预览"/);
+    assert.doesNotMatch(markup, /first/);
+    assert.match(markup, /second/);
+    assert.match(markup, /third/);
+    assert.match(markup, /fourth/);
+
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+    assert.match(
+      css,
+      /\.mobile-session-card-terminal\s*{[^}]*font-family:[^}]*IBM Plex Mono/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-session-card:active\s*{[^}]*transform:\s*scale\(0\.99\)/s,
     );
   });
 

@@ -15,6 +15,7 @@ import {
 
 import type { AgentCompletionNotificationPermission } from "../lib/agent-completion-notifications";
 import { sendAgentInput } from "../lib/api";
+import { buildTerminalPreviewLines } from "../lib/terminal-preview";
 import { AgentTranscriptDialog } from "./AgentTranscriptDialog";
 import { ChangesPanel } from "./ChangesPanel";
 import { LazyTerminalView } from "./LazyTerminalView";
@@ -175,7 +176,13 @@ export function getMobileSessionSummary(session: AgentSessionRecord): string {
   );
 }
 
-function MobileSessionCard({
+function getMobileSessionStateLabel(session: AgentSessionRecord): string {
+  return getAttentionGroup(session) === "review"
+    ? "待验收"
+    : (stateLabels[session.interactionState] ?? session.interactionState);
+}
+
+export function MobileSessionCard({
   session,
   onOpen,
 }: {
@@ -183,8 +190,22 @@ function MobileSessionCard({
   onOpen: (session: AgentSessionRecord) => void;
 }) {
   const attentionGroup = getAttentionGroup(session);
+  const supportsStructuredSummary = isLocalCodexSessionCandidate(session);
+  const userSummary = supportsStructuredSummary
+    ? session.lastUserMessageSummary
+    : undefined;
+  const agentSummary = supportsStructuredSummary
+    ? session.lastAgentMessageSummary
+    : undefined;
+  const terminalLines = buildTerminalPreviewLines(session.outputPreview, {
+    maxLines: 3,
+  });
+  const hasGitSummary = Boolean(session.projectName || session.gitBranch);
+  const hasGitChanges = Boolean(session.gitChangedFiles);
+
   return (
     <button
+      aria-label={`打开 ${session.displayName} 当前会话`}
       className={`mobile-session-card mobile-session-card--${attentionGroup}`}
       data-session-id={session.id}
       onClick={() => onOpen(session)}
@@ -192,12 +213,56 @@ function MobileSessionCard({
     >
       <span className="mobile-session-card-heading">
         <strong>{session.displayName}</strong>
-        <span>
-          {stateLabels[session.interactionState] ?? session.interactionState}
+        <span className="mobile-session-card-state">
+          {getMobileSessionStateLabel(session)}
         </span>
       </span>
-      <span className="mobile-session-card-summary">
-        {getMobileSessionSummary(session)}
+      {userSummary || agentSummary ? (
+        <span className="mobile-session-card-summaries">
+          {userSummary && (
+            <span className="mobile-session-card-summary-row">
+              <span>任务</span>
+              <span>{userSummary}</span>
+            </span>
+          )}
+          {agentSummary && (
+            <span className="mobile-session-card-summary-row mobile-session-card-summary-row--agent">
+              <span>回复</span>
+              <span>{agentSummary}</span>
+            </span>
+          )}
+        </span>
+      ) : (
+        <span className="mobile-session-card-summary">
+          {getMobileSessionSummary(session)}
+        </span>
+      )}
+      {hasGitSummary && (
+        <span className="mobile-session-card-git">
+          <span>
+            ▰ {session.projectName ?? shortenPath(session.workingDirectory)}
+          </span>
+          {session.gitBranch && <span>{session.gitBranch}</span>}
+          {hasGitChanges ? (
+            <span className="mobile-session-card-git-changes">
+              <span>{session.gitChangedFiles} 文件</span>
+              <span>+{session.gitAddedLines ?? 0}</span>
+              <span>-{session.gitDeletedLines ?? 0}</span>
+            </span>
+          ) : session.gitBranch ? (
+            <span className="mobile-session-card-git-clean">✓ 干净</span>
+          ) : null}
+        </span>
+      )}
+      <span
+        aria-label={`${session.displayName} 终端轻量预览`}
+        className="mobile-session-card-terminal"
+      >
+        <span className="mobile-session-card-terminal-toolbar">
+          <span aria-hidden="true" />
+          终端预览
+        </span>
+        <code>{terminalLines.join("\n")}</code>
       </span>
       <span className="mobile-session-card-meta">
         <span>
@@ -236,7 +301,10 @@ export function MobileSessionSwitcher({
   const menuOpen = open && Boolean(activeSession);
 
   return (
-    <div className="mobile-session-switcher" ref={containerRef}>
+    <div
+      className={`mobile-session-switcher${activeSession ? " mobile-session-switcher--active" : ""}`}
+      ref={containerRef}
+    >
       <span>当前会话</span>
       <button
         aria-controls="mobile-session-picker-list"
@@ -248,6 +316,11 @@ export function MobileSessionSwitcher({
         type="button"
       >
         <span>{activeSession?.displayName ?? "没有可用会话"}</span>
+        {activeSession && (
+          <small className="mobile-session-picker-state">
+            {getMobileSessionStateLabel(activeSession)}
+          </small>
+        )}
       </button>
       <div className="mobile-session-actions">
         <button
@@ -510,7 +583,10 @@ export function MobileWorkbenchPage({
                 );
                 if (groupSessions.length === 0) return null;
                 return (
-                  <section className="mobile-attention-group" key={group.id}>
+                  <section
+                    className={`mobile-attention-group mobile-attention-group--${group.id}`}
+                    key={group.id}
+                  >
                     <header>
                       <div>
                         <h2>{group.label}</h2>
