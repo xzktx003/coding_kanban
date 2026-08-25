@@ -197,7 +197,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 本地和 SSH 远端文件列表。
 - 面包屑、返回上级目录、显示隐藏文件、过滤、排序。
 - 文件预览，文本文件可编辑保存。
-- Markdown 文件默认渲染 GFM 和 KaTeX 数学公式；支持 `$...$` / `\(...\)` 行内公式与 `$$...$$` / `\[...\]` 块级公式。反斜线分隔符只在普通 Markdown 文本中规范化，行内代码、fenced code 和缩进代码保持原样。单击使用文件面板内联预览，双击打开浏览/编辑大窗口。桌面端大窗口可从右下角拖动调整宽高，并受当前视口边界约束；窗口支持预览、源码编辑和实时分屏，保存前显示未保存状态，原始 HTML 不注入页面。
+- Markdown 文件默认渲染 GFM 和 KaTeX 数学公式；支持 `$...$` / `\(...\)` 行内公式与 `$$...$$` / `\[...\]` 块级公式。反斜线分隔符只在普通 Markdown 文本中规范化，行内代码、fenced code 和缩进代码保持原样。单击在文件列表下方显示紧凑预览；双击会让左侧文件面板进入全高内联预览并隐藏列表，右侧终端始终保持可见。“返回文件列表”恢复列表和原预览高度；全高预览从 Markdown 标题生成可折叠目录和稳定行锚点，点击目录只滚动文件正文。实时分屏默认按可滚动范围双向同步源码与渲染区，并提供独立滚动开关。电脑端通过既有 `/api/fs/preview` 偏移协议连续合并最多约 1 MiB 为当前窗口，超大文件前后翻段时替换正文而不累积；分段窗口为只读，只有从文件头完整载入且无下一段时才允许编辑保存。原始 HTML 不注入页面，手机端文件浏览不受此桌面交互影响。
 - 新建文件/目录、重命名、删除、chmod。
 - 上传、下载。
 - 支持拖拽上传。
@@ -355,7 +355,7 @@ memories/        仓库记忆，不是产品运行依赖
 - `DiscoveryDialog.tsx`、`TmuxDiscoveryPanel.tsx`、`AppDiscoveryPanel.tsx`：扫描和加入宫格。
 - `QuickTmuxConnect.tsx`：快速连接 tmux。
 - `FileBrowserDrawer.tsx`：文件浏览器。
-- `MarkdownFilePreview.tsx` / `MarkdownFileDialog.tsx`：按需加载的安全 Markdown/GFM/KaTeX 渲染、实时编辑、分屏和双击大窗口。
+- `MarkdownFilePreview.tsx`：文件侧栏内按需加载的安全 Markdown/GFM/KaTeX 渲染、标题目录、源码编辑和双向同步分屏；桌面大文件由 `markdown-preview-window.ts` 控制有界滑窗。
 - `VSCodeDrawer.tsx`：VS Code Web iframe 管理。
 - `HiddenSessionsDrawer.tsx`：隐藏会话管理。
 - `FilterBar.tsx`：筛选条。

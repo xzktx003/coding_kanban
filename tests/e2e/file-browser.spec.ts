@@ -344,10 +344,16 @@ test("file browser supports real local browsing, edit, upload, download, and del
     );
 
     await drawer.getByTestId("file-entry-note.txt").dblclick();
+    await expect(drawer.locator(".file-browser-content")).toHaveAttribute(
+      "data-preview-expanded",
+      "true",
+    );
+    await drawer.getByRole("button", { name: "编辑" }).click();
     const editor = drawer.locator(".file-browser-editor");
     await expect(editor).toBeVisible();
     await editor.fill("hello file browser\nedited by playwright");
     await drawer.getByRole("button", { name: "保存" }).click();
+    await drawer.getByRole("button", { name: "返回文件列表" }).click();
     await drawer
       .getByTestId("file-entry-note.txt")
       .getByRole("checkbox")
@@ -407,7 +413,7 @@ test("file browser supports real local browsing, edit, upload, download, and del
   }
 });
 
-test("Markdown files open in edit mode and render only one preview on demand", async ({
+test("Markdown files stay inline beside the terminal and render only one preview", async ({
   page,
   request,
 }) => {
@@ -429,34 +435,47 @@ test("Markdown files open in edit mode and render only one preview on demand", a
     sessionId = await launchMockSession(request, displayName, fixture.rootDir);
     await focusSession(page, displayName);
     const drawer = await openFileBrowserForFocusedSession(page);
+    const terminal = page.locator(".focus-main .terminal-view").first();
 
     await drawer.getByTestId("file-entry-paper.md").click();
-    await expect(drawer.getByTestId("markdown-editor")).toBeVisible();
-    await expect(drawer.getByTestId("markdown-mode-edit")).toHaveAttribute(
+    await expect(drawer.getByTestId("markdown-mode-preview")).toHaveAttribute(
       "aria-pressed",
       "true",
     );
-    await expect(drawer.getByTestId("markdown-rendered")).toHaveCount(0);
-
-    await drawer.getByTestId("markdown-mode-preview").click();
     await expect(drawer.getByTestId("markdown-rendered")).toContainText(
       "Section 1",
     );
 
     await drawer.getByTestId("file-entry-paper.md").dblclick();
-    const dialog = page.getByTestId("markdown-file-dialog");
-    await expect(dialog).toBeVisible();
-    await expect(dialog.getByTestId("markdown-editor")).toBeVisible();
-    await expect(dialog.getByTestId("markdown-mode-edit")).toHaveAttribute(
-      "aria-pressed",
+    await expect(drawer.locator(".file-browser-content")).toHaveAttribute(
+      "data-preview-expanded",
       "true",
     );
-    await expect(drawer).toContainText("Markdown 已在独立窗口中打开");
+    await expect(page.getByTestId("markdown-file-dialog")).toHaveCount(0);
+    await expect(drawer.getByTestId("file-entry-paper.md")).toBeHidden();
+    await expect(terminal).toBeVisible();
 
-    await dialog.getByTestId("markdown-mode-preview").click();
-    const renderedPreview = dialog.getByTestId("markdown-rendered");
+    const renderedPreview = drawer.getByTestId("markdown-rendered");
     await expect(renderedPreview).toContainText("Section 80");
     await expect(page.getByTestId("markdown-rendered")).toHaveCount(1);
+    const outline = drawer.getByRole("navigation", {
+      name: "Markdown 目录",
+    });
+    await expect(outline).toBeVisible();
+    await outline
+      .getByRole("button", { name: "Section 60", exact: true })
+      .click();
+    await expect
+      .poll(() => renderedPreview.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0);
+
+    const drawerBounds = await drawer.boundingBox();
+    const terminalBounds = await terminal.boundingBox();
+    expect(drawerBounds).not.toBeNull();
+    expect(terminalBounds).not.toBeNull();
+    expect(drawerBounds!.x + drawerBounds!.width).toBeLessThanOrEqual(
+      terminalBounds!.x + 2,
+    );
 
     await renderedPreview.evaluate((element) => {
       element.scrollTop = 0;
@@ -466,6 +485,23 @@ test("Markdown files open in edit mode and render only one preview on demand", a
     await expect
       .poll(() => renderedPreview.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
+
+    await drawer.getByTestId("markdown-mode-split").click();
+    const sourceEditor = drawer.getByTestId("markdown-editor");
+    await expect(drawer.getByTestId("markdown-sync-scroll")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await sourceEditor.evaluate((element) => {
+      element.scrollTop = Math.max(1, element.scrollHeight / 2);
+      element.dispatchEvent(new Event("scroll"));
+    });
+    await expect
+      .poll(() => renderedPreview.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0);
+
+    await drawer.getByRole("button", { name: "返回文件列表" }).click();
+    await expect(drawer.getByTestId("file-entry-paper.md")).toBeVisible();
   } finally {
     await deleteSessionIfPresent(request, sessionId);
     rmSync(fixture.rootDir, { recursive: true, force: true });
@@ -603,6 +639,7 @@ test("file browser editor keeps focus instead of the terminal stealing it back",
 
     const drawer = await openFileBrowserForFocusedSession(page);
     await drawer.getByTestId("file-entry-note.txt").dblclick();
+    await drawer.getByRole("button", { name: "编辑" }).click();
 
     const editor = drawer.locator(".file-browser-editor");
     await expect(editor).toBeVisible();

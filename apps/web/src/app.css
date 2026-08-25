@@ -6410,6 +6410,15 @@ input {
   min-width: 0;
 }
 
+.file-browser-content--preview-open .file-browser-list,
+.file-browser-content--preview-open .file-browser-preview-splitter {
+  display: none;
+}
+
+.file-browser-content--preview-open .file-browser-preview {
+  border-top: 0;
+}
+
 .file-browser-preview-splitter {
   height: 8px;
   cursor: row-resize;
@@ -6447,6 +6456,35 @@ input {
 .file-browser-pane-hint {
   font-weight: 400;
   color: rgba(244, 241, 234, 0.46);
+}
+
+.file-browser-preview .file-browser-pane-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-browser-inline-back {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(244, 241, 234, 0.78);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.file-browser-inline-back:hover {
+  border-color: rgba(246, 178, 107, 0.32);
+  background: rgba(246, 178, 107, 0.09);
+}
+
+.file-browser-inline-back:focus-visible {
+  outline: 2px solid rgba(246, 178, 107, 0.72);
+  outline-offset: 2px;
 }
 
 .file-browser-pane-hint.success {
@@ -6656,6 +6694,11 @@ input {
   padding: 0 12px 10px;
 }
 
+.file-browser-preview-actions {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .file-browser-preview-text {
   flex: 1;
   margin: 0;
@@ -6680,6 +6723,7 @@ input {
   flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 0 12px 10px;
 }
@@ -6711,12 +6755,151 @@ input {
 .markdown-file-preview-status {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 
-.markdown-file-preview-dirty {
+.markdown-file-preview-dirty,
+.markdown-file-preview-readonly {
   color: #ffc36a;
   font-size: 11px;
+}
+
+.markdown-file-preview-readonly {
+  color: rgba(244, 241, 234, 0.58);
+}
+
+.file-browser-inline-error {
+  flex-shrink: 0;
+  margin: 0 12px 8px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 122, 112, 0.28);
+  border-radius: 6px;
+  background: rgba(255, 122, 112, 0.08);
+  color: #ffb0a8;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.markdown-file-preview-pagination {
+  display: grid;
+  flex-shrink: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(4, 7, 11, 0.34);
+}
+
+.markdown-file-preview-pagination span {
+  overflow: hidden;
+  color: rgba(244, 241, 234, 0.58);
+  font-size: 11px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.markdown-file-preview-pagination button {
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.045);
+  color: rgba(244, 241, 234, 0.76);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.markdown-file-preview-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.markdown-file-preview-workspace {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.markdown-file-preview-workspace--outline-open {
+  grid-template-columns: minmax(150px, 176px) minmax(0, 1fr);
+}
+
+.markdown-file-outline {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 8px 16px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(4, 7, 11, 0.42);
+  scrollbar-gutter: stable;
+}
+
+.markdown-file-outline > strong {
+  padding: 0 7px;
+  color: rgba(244, 241, 234, 0.58);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.markdown-file-outline > span {
+  padding: 4px 7px;
+  color: rgba(244, 241, 234, 0.46);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.markdown-file-outline-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.markdown-file-outline-items > span {
+  padding: 6px 7px;
+  color: rgba(244, 241, 234, 0.46);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.markdown-file-outline-items button {
+  width: 100%;
+  min-height: 28px;
+  padding: 5px 7px 5px calc(7px + var(--markdown-outline-indent, 0px));
+  overflow: hidden;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: rgba(244, 241, 234, 0.68);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.markdown-file-outline-items button:hover,
+.markdown-file-outline-items button[aria-current="location"] {
+  background: rgba(246, 178, 107, 0.12);
+  color: #ffe0ad;
+}
+
+.markdown-file-outline-items button:focus-visible,
+.markdown-file-preview-pagination button:focus-visible {
+  outline: 2px solid rgba(246, 178, 107, 0.78);
+  outline-offset: 1px;
 }
 
 .markdown-file-preview-content {
@@ -6749,6 +6932,11 @@ input {
   outline: none;
 }
 
+.markdown-file-preview-editor[readonly] {
+  color: rgba(244, 241, 234, 0.72);
+  cursor: text;
+}
+
 .markdown-file-preview--split .markdown-file-preview-editor {
   border-right: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -6760,6 +6948,11 @@ input {
   padding: 14px 18px 24px;
   overflow: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.markdown-file-preview-rendered > [id^="markdown-heading-"] {
+  scroll-margin-top: 12px;
 }
 
 .markdown-rendered-content {
@@ -6949,10 +7142,6 @@ input {
   overscroll-behavior: contain;
 }
 
-.file-browser-modal--markdown {
-  position: fixed;
-}
-
 .file-browser-dialog {
   width: min(420px, 100%);
   display: flex;
@@ -6969,117 +7158,6 @@ input {
   gap: 8px;
 }
 
-.file-browser-dialog--editor {
-  width: min(760px, 100%);
-  height: min(70vh, 640px);
-}
-
-.file-browser-dialog--markdown {
-  position: relative;
-  width: min(1180px, calc(100vw - 48px));
-  height: min(820px, calc(var(--app-height) - 48px));
-  min-width: 560px;
-  min-height: 420px;
-  max-width: calc(100vw - 24px);
-  max-height: calc(var(--app-height) - 24px);
-  padding: 0;
-  overflow: hidden;
-}
-
-.markdown-file-dialog-header {
-  display: flex;
-  flex-shrink: 0;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 16px 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.markdown-file-dialog-header h3 {
-  margin: 2px 0 0;
-  color: #f8e1c8;
-  font-size: 16px;
-}
-
-.markdown-file-dialog-kicker {
-  color: rgba(244, 241, 234, 0.45);
-  font-size: 10px;
-  text-transform: uppercase;
-}
-
-.markdown-file-dialog-close {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  flex: none;
-  padding: 0;
-  place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.05);
-  color: rgba(244, 241, 234, 0.76);
-  cursor: pointer;
-  font-size: 20px;
-}
-
-.markdown-file-dialog-resizer {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  z-index: 2;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: rgba(246, 178, 107, 0.68);
-  cursor: nwse-resize;
-  touch-action: none;
-}
-
-.markdown-file-dialog-resizer::before,
-.markdown-file-dialog-resizer::after {
-  position: absolute;
-  right: 5px;
-  bottom: 5px;
-  width: 8px;
-  height: 8px;
-  border-right: 1px solid currentColor;
-  border-bottom: 1px solid currentColor;
-  content: "";
-}
-
-.markdown-file-dialog-resizer::after {
-  right: 9px;
-  bottom: 9px;
-  width: 4px;
-  height: 4px;
-  opacity: 0.72;
-}
-
-.markdown-file-dialog-resizer:focus-visible {
-  outline: 2px solid rgba(246, 178, 107, 0.72);
-  outline-offset: -4px;
-}
-
-.file-browser-dialog--markdown .markdown-file-preview-toolbar {
-  padding: 10px 16px;
-}
-
-@media (max-width: 720px) {
-  .file-browser-dialog--markdown {
-    width: calc(100vw - 20px);
-    height: calc(var(--app-height) - 20px);
-    min-width: 0;
-    min-height: 0;
-  }
-
-  .markdown-file-dialog-resizer {
-    display: none;
-  }
-}
-
 .file-browser-editor {
   flex: 1;
   min-height: 320px;
@@ -7090,6 +7168,18 @@ input {
   background: rgba(255, 255, 255, 0.03);
   color: inherit;
   font-family: "IBM Plex Mono", monospace;
+}
+
+.file-browser-editor--inline {
+  width: calc(100% - 24px);
+  min-height: 0;
+  margin: 0 12px 12px;
+  resize: none;
+}
+
+.file-browser-editor--inline:focus {
+  border-color: rgba(246, 178, 107, 0.45);
+  outline: none;
 }
 
 .file-browser-chmod-grid {

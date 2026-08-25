@@ -58,11 +58,12 @@ test("renders GitHub-flavored Markdown safely in preview mode", () => {
     }),
   );
 
-  assert.match(markup, /<h1>Project<\/h1>/);
+  assert.match(markup, /<h1 id="markdown-heading-1">Project<\/h1>/);
   assert.match(markup, /type="checkbox"[^>]*checked/);
   assert.match(markup, /<table>/);
   assert.match(markup, /target="_blank"/);
   assert.match(markup, /rel="noopener noreferrer"/);
+  assert.doesNotMatch(markup, / node=/);
   assert.doesNotMatch(markup, /<script>/);
   assert.match(controls, /data-testid="markdown-mode-preview"/);
   assert.match(controls, /data-testid="markdown-render(?:ed|-loading)"/);
@@ -149,6 +150,56 @@ test("keeps editing available while split preview loads on demand", () => {
   assert.match(markup, /data-testid="markdown-render(?:ed|-loading)"/);
   assert.match(markup, /未保存/);
   assert.match(markup, /data-testid="save-markdown"/);
+  assert.match(markup, /aria-label="Markdown 目录"/);
+  assert.match(markup, /data-testid="markdown-sync-scroll"/);
+  assert.match(markup, /aria-pressed="true"/);
+});
+
+test("keeps large Markdown windows read-only while retaining split browsing", () => {
+  const markup = renderToStaticMarkup(
+    createElement(MarkdownFilePreview, {
+      content: "# Window",
+      dirty: false,
+      mode: "split",
+      onContentChange: () => {},
+      onModeChange: () => {},
+      onSave: () => {},
+      readOnly: true,
+      saving: false,
+    }),
+  );
+
+  assert.match(markup, /Markdown 源码编辑器[^>]*readOnly/);
+  assert.match(markup, /分段预览只读/);
+  assert.match(markup, /data-testid="markdown-mode-edit"[^>]*disabled/);
+});
+
+test("shows bounded Markdown window navigation without retaining every segment", () => {
+  const markup = renderToStaticMarkup(
+    createElement(MarkdownFilePreview, {
+      content: "# Current window",
+      dirty: false,
+      mode: "preview",
+      onContentChange: () => {},
+      onModeChange: () => {},
+      onSave: () => {},
+      readOnly: true,
+      saving: false,
+      windowNavigation: {
+        label: "0 B–1.0 MB / 3.0 MB · 仅保留当前段",
+        loading: false,
+        nextAvailable: true,
+        onNext: () => {},
+        onPrevious: () => {},
+        previousAvailable: false,
+      },
+    }),
+  );
+
+  assert.match(markup, /aria-label="Markdown 分段导航"/);
+  assert.match(markup, />上一段<\/button>/);
+  assert.match(markup, />下一段<\/button>/);
+  assert.match(markup, /仅保留当前段/);
 });
 
 test("edit mode keeps the source editor without rendering the document body", () => {

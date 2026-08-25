@@ -1,4 +1,13 @@
-import { lazy, memo, Suspense, useEffect, useRef, useState } from "react";
+import {
+  lazy,
+  memo,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type Ref,
+  type UIEventHandler,
+} from "react";
 
 const LazyMarkdownRenderedContent = lazy(() =>
   import("./MarkdownRenderedContent").then((module) => ({
@@ -9,20 +18,24 @@ const LazyMarkdownRenderedContent = lazy(() =>
 interface LazyMarkdownContentProps {
   className?: string;
   content: string;
+  contentRef?: Ref<HTMLElement>;
   deferUntilVisible?: boolean;
   fallbackClassName: string;
   fallbackTestId?: string;
   fallbackText: string;
+  onScroll?: UIEventHandler<HTMLElement>;
   testId?: string;
 }
 
 export const LazyMarkdownContent = memo(function LazyMarkdownContent({
   className,
   content,
+  contentRef,
   deferUntilVisible = false,
   fallbackClassName,
   fallbackTestId,
   fallbackText,
+  onScroll,
   testId,
 }: LazyMarkdownContentProps) {
   const canDefer =
@@ -73,6 +86,8 @@ export const LazyMarkdownContent = memo(function LazyMarkdownContent({
       <LazyMarkdownRenderedContent
         className={className}
         content={content}
+        contentRef={contentRef}
+        onScroll={onScroll}
         testId={testId}
       />
     </Suspense>

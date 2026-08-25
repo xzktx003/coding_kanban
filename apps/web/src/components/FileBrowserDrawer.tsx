@@ -18,6 +18,10 @@ import type {
 import { previewFile } from "../lib/api";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { isMarkdownFileName } from "../lib/file-types";
+import {
+  loadMarkdownPreviewWindow,
+  type MarkdownPreviewWindow,
+} from "../lib/markdown-preview-window";
 import { useFileBrowser, type SortKey } from "../lib/use-file-browser";
 
 import { HostDropdown, type SelectedHost } from "./HostDropdown";
@@ -26,11 +30,6 @@ import type { MarkdownPreviewMode } from "./MarkdownFilePreview";
 const LazyMarkdownFilePreview = lazy(() =>
   import("./MarkdownFilePreview").then((module) => ({
     default: module.MarkdownFilePreview,
-  })),
-);
-const LazyMarkdownFileDialog = lazy(() =>
-  import("./MarkdownFileDialog").then((module) => ({
-    default: module.MarkdownFileDialog,
   })),
 );
 
@@ -64,6 +63,7 @@ interface RenameState {
 interface EditorState {
   path: string;
   content: string;
+  savedContent: string;
 }
 
 export interface MarkdownEditorState {
@@ -81,14 +81,17 @@ export function createMarkdownEditorState(
     path,
     content,
     savedContent: content,
-    mode: "edit",
+    mode: "preview",
   };
 }
 
-export function shouldRenderInlineMarkdownEditor(
-  markdownDialogOpen: boolean,
-): boolean {
-  return !markdownDialogOpen;
+export function getFileBrowserPreviewGridRows(
+  expanded: boolean,
+  previewHeight: number,
+): string {
+  return expanded
+    ? "minmax(0, 1fr)"
+    : `minmax(80px, 1fr) 8px ${previewHeight}px`;
 }
 
 interface ChmodState {
@@ -212,6 +215,11 @@ function formatSize(size: number): string {
   return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+function formatMarkdownWindowRange(window: MarkdownPreviewWindow): string {
+  const end = Math.min(window.size, window.offset + window.bytesRead);
+  return `${formatSize(window.offset)}–${formatSize(end)} / ${formatSize(window.size)} · 仅保留当前段`;
+}
+
 function toModeFromPermissions(permissions: string): string {
   const symbols = permissions.slice(1).split("");
   const groups = [
@@ -324,7 +332,25 @@ export function FileBrowserDrawer({
   const [editorState, setEditorState] = useState<EditorState | null>(null);
   const [markdownEditorState, setMarkdownEditorState] =
     useState<MarkdownEditorState | null>(null);
-  const [markdownDialogOpen, setMarkdownDialogOpen] = useState(false);
+  const [markdownPreviewWindow, setMarkdownPreviewWindow] =
+    useState<MarkdownPreviewWindow | null>(null);
+  const [markdownWindowHistory, setMarkdownWindowHistory] = useState<number[]>(
+    [],
+  );
+  const [markdownWindowLoading, setMarkdownWindowLoading] = useState(false);
+  const [markdownWindowError, setMarkdownWindowError] = useState<string | null>(
+    null,
+  );
+  const markdownWindowRequestIdRef = useRef(0);
+  const selectedFilePathRef = useRef<string | null>(null);
+  const resetMarkdownWindow = useCallback(() => {
+    markdownWindowRequestIdRef.current += 1;
+    setMarkdownPreviewWindow(null);
+    setMarkdownWindowHistory([]);
+    setMarkdownWindowError(null);
+    setMarkdownWindowLoading(false);
+  }, []);
+  const [previewExpanded, setPreviewExpanded] = useState(false);
   const [savingMarkdown, setSavingMarkdown] = useState(false);
   const [, startMarkdownPreviewTransition] = useTransition();
   const [chmodState, setChmodState] = useState<ChmodState | null>(null);
@@ -389,7 +415,10 @@ export function FileBrowserDrawer({
 
   useEffect(() => {
     setContextMenu(null);
-  }, [selectedHost]);
+    setPreviewExpanded(false);
+    selectedFilePathRef.current = null;
+    resetMarkdownWindow();
+  }, [resetMarkdownWindow, selectedHost]);
 
   useEffect(() => {
     function handleCloseContextMenu() {
@@ -488,10 +517,25 @@ export function FileBrowserDrawer({
   );
 
   useEffect(() => {
+    if (!selectedFile) {
+      setPreviewExpanded(false);
+    }
+  }, [selectedFile]);
+
+  useEffect(() => {
+    const nextPath = selectedFile?.path ?? null;
+    if (selectedFilePathRef.current === nextPath) return;
+    selectedFilePathRef.current = nextPath;
+    resetMarkdownWindow();
+  }, [resetMarkdownWindow, selectedFile?.path]);
+
+  useEffect(() => {
     if (!selectedMarkdownPreview || !selectedFile) {
       if (selectedFile && !isMarkdownFileName(selectedFile.name)) {
         setMarkdownEditorState(null);
-        setMarkdownDialogOpen(false);
+        setMarkdownPreviewWindow(null);
+        setMarkdownWindowHistory([]);
+        setMarkdownWindowError(null);
       }
       return;
     }
@@ -503,44 +547,123 @@ export function FileBrowserDrawer({
           selectedMarkdownPreview.content,
         );
       }
-
-      if (
-        current.content === current.savedContent &&
-        current.savedContent !== selectedMarkdownPreview.content
-      ) {
-        return {
-          ...current,
-          content: selectedMarkdownPreview.content,
-          savedContent: selectedMarkdownPreview.content,
-        };
-      }
-
       return current;
     });
+    setMarkdownPreviewWindow((current) => {
+      if (current?.path === selectedFile.path) return current;
+      return {
+        bytesRead: selectedMarkdownPreview.bytesRead,
+        complete:
+          selectedMarkdownPreview.offset === 0 &&
+          selectedMarkdownPreview.nextOffset === null,
+        content: selectedMarkdownPreview.content,
+        nextOffset: selectedMarkdownPreview.nextOffset,
+        offset: selectedMarkdownPreview.offset,
+        path: selectedMarkdownPreview.path,
+        size: selectedMarkdownPreview.size,
+      };
+    });
   }, [selectedFile, selectedMarkdownPreview]);
+
+  async function loadMarkdownWindow(
+    entry: FileEntry,
+    offset: number,
+    mode: MarkdownPreviewMode,
+  ): Promise<boolean> {
+    const requestId = ++markdownWindowRequestIdRef.current;
+    setMarkdownWindowLoading(true);
+    setMarkdownWindowError(null);
+    try {
+      const loadedWindow = await loadMarkdownPreviewWindow({
+        path: entry.path,
+        sshTarget,
+        offset,
+      });
+      if (requestId !== markdownWindowRequestIdRef.current) return false;
+
+      setMarkdownPreviewWindow(loadedWindow);
+      setMarkdownEditorState({
+        ...createMarkdownEditorState(entry.path, loadedWindow.content),
+        mode: mode === "edit" && !loadedWindow.complete ? "preview" : mode,
+      });
+      return true;
+    } catch (caughtError) {
+      if (requestId === markdownWindowRequestIdRef.current) {
+        setMarkdownWindowError(
+          caughtError instanceof Error
+            ? caughtError.message
+            : "读取 Markdown 分段失败",
+        );
+      }
+      return false;
+    } finally {
+      if (requestId === markdownWindowRequestIdRef.current) {
+        setMarkdownWindowLoading(false);
+      }
+    }
+  }
+
+  async function loadNextMarkdownWindow() {
+    if (
+      !selectedFile ||
+      !markdownPreviewWindow ||
+      markdownPreviewWindow.nextOffset === null
+    ) {
+      return;
+    }
+    const currentOffset = markdownPreviewWindow.offset;
+    const loaded = await loadMarkdownWindow(
+      selectedFile,
+      markdownPreviewWindow.nextOffset,
+      markdownEditorState?.mode ?? "preview",
+    );
+    if (loaded) {
+      setMarkdownWindowHistory((current) => [...current, currentOffset]);
+    }
+  }
+
+  async function loadPreviousMarkdownWindow() {
+    if (!selectedFile || markdownWindowHistory.length === 0) return;
+    const previousOffset = markdownWindowHistory.at(-1)!;
+    const loaded = await loadMarkdownWindow(
+      selectedFile,
+      previousOffset,
+      markdownEditorState?.mode ?? "preview",
+    );
+    if (loaded) {
+      setMarkdownWindowHistory((current) => current.slice(0, -1));
+    }
+  }
 
   function selectFileBrowserPath(
     pathValue: string,
     modifiers?: { additive?: boolean; range?: boolean },
   ): boolean {
     if (
-      markdownEditorState &&
-      markdownEditorState.content !== markdownEditorState.savedContent &&
-      markdownEditorState.path !== pathValue &&
-      !window.confirm("当前 Markdown 有未保存修改，确定放弃并切换文件？")
+      ((markdownEditorState &&
+        markdownEditorState.content !== markdownEditorState.savedContent &&
+        markdownEditorState.path !== pathValue) ||
+        (editorState &&
+          editorState.content !== editorState.savedContent &&
+          editorState.path !== pathValue)) &&
+      !window.confirm("当前文件有未保存修改，确定放弃并切换文件？")
     ) {
       return false;
     }
 
+    if (selectedFilePathRef.current !== pathValue) {
+      selectedFilePathRef.current = pathValue;
+      resetMarkdownWindow();
+    }
     selectPath(pathValue, modifiers);
-    if (markdownEditorState?.path !== pathValue) {
-      setMarkdownDialogOpen(false);
+    if (editorState?.path !== pathValue) {
+      setEditorState(null);
     }
     return true;
   }
 
   async function handleSaveMarkdown() {
-    if (!markdownEditorState) {
+    if (!markdownEditorState || !markdownPreviewWindow?.complete) {
       return;
     }
 
@@ -559,6 +682,10 @@ export function FileBrowserDrawer({
   }
 
   function handleMarkdownModeChange(mode: MarkdownPreviewMode) {
+    if (mode !== "preview") {
+      setPreviewExpanded(true);
+    }
+
     const updateMode = () =>
       setMarkdownEditorState((current) =>
         current ? { ...current, mode } : current,
@@ -570,6 +697,18 @@ export function FileBrowserDrawer({
     }
 
     startMarkdownPreviewTransition(updateMode);
+
+    if (
+      mode === "split" &&
+      selectedFile &&
+      markdownPreviewWindow?.path === selectedFile.path &&
+      !markdownPreviewWindow.complete &&
+      markdownPreviewWindow.offset === 0
+    ) {
+      void loadMarkdownWindow(selectedFile, 0, mode).then((loaded) => {
+        if (loaded) setMarkdownWindowHistory([]);
+      });
+    }
   }
 
   async function handleOpenEditor(entry: FileEntry) {
@@ -583,19 +722,37 @@ export function FileBrowserDrawer({
     }
 
     if (isMarkdownFileName(entry.name)) {
-      setMarkdownEditorState((current) =>
-        current?.path === entry.path
-          ? { ...current, mode: "edit" }
-          : createMarkdownEditorState(entry.path, filePreview.content),
-      );
-      setMarkdownDialogOpen(true);
+      setEditorState(null);
+      setPreviewExpanded(true);
+      const loaded = await loadMarkdownWindow(entry, 0, "edit");
+      if (loaded) setMarkdownWindowHistory([]);
       return;
     }
 
     setEditorState({
       path: entry.path,
       content: filePreview.content,
+      savedContent: filePreview.content,
     });
+    setPreviewExpanded(true);
+  }
+
+  async function handleOpenPreview(entry: FileEntry) {
+    const filePreview =
+      preview && preview.path === entry.path
+        ? preview
+        : await previewFile({ path: entry.path, sshTarget });
+
+    if (filePreview.encoding === "utf8" && isMarkdownFileName(entry.name)) {
+      setPreviewExpanded(true);
+      const loaded = await loadMarkdownWindow(entry, 0, "preview");
+      if (loaded) setMarkdownWindowHistory([]);
+    }
+
+    if (editorState?.path !== entry.path) {
+      setEditorState(null);
+    }
+    setPreviewExpanded(true);
   }
 
   async function handleDeleteSelected() {
@@ -835,10 +992,14 @@ export function FileBrowserDrawer({
 
       <div className="file-browser-body">
         <section
-          className="file-browser-content"
+          className={`file-browser-content${previewExpanded ? " file-browser-content--preview-open" : ""}`}
+          data-preview-expanded={previewExpanded ? "true" : "false"}
           ref={previewLayoutRef}
           style={{
-            gridTemplateRows: `minmax(80px, 1fr) 8px ${previewHeight}px`,
+            gridTemplateRows: getFileBrowserPreviewGridRows(
+              previewExpanded,
+              previewHeight,
+            ),
           }}
         >
           <div className="file-browser-list">
@@ -989,7 +1150,10 @@ export function FileBrowserDrawer({
                           return;
                         }
 
-                        await handleOpenEditor(entry);
+                        if (!selectFileBrowserPath(entry.path)) {
+                          return;
+                        }
+                        await handleOpenPreview(entry);
                       }}
                     >
                       <label className="file-browser-name">
@@ -1040,7 +1204,17 @@ export function FileBrowserDrawer({
 
           <div className="file-browser-preview">
             <div className="file-browser-pane-title">
-              预览
+              {previewExpanded && (
+                <button
+                  aria-label="返回文件列表"
+                  className="file-browser-inline-back"
+                  onClick={() => setPreviewExpanded(false)}
+                  type="button"
+                >
+                  ← 文件列表
+                </button>
+              )}
+              <span>预览</span>
               {selectedFile && (
                 <span className="file-browser-pane-hint">
                   {selectedFile.name}
@@ -1070,46 +1244,127 @@ export function FileBrowserDrawer({
                       </div>
                     )}
                     {selectedMarkdownPreview && markdownEditorState ? (
-                      shouldRenderInlineMarkdownEditor(markdownDialogOpen) ? (
-                        <Suspense
-                          fallback={
-                            <div className="file-browser-preview-empty">
-                              正在加载 Markdown 预览...
-                            </div>
-                          }
-                        >
-                          <LazyMarkdownFilePreview
-                            content={markdownEditorState.content}
-                            dirty={
-                              markdownEditorState.content !==
+                      <Suspense
+                        fallback={
+                          <div className="file-browser-preview-empty">
+                            正在加载 Markdown 预览...
+                          </div>
+                        }
+                      >
+                        {markdownWindowError && (
+                          <div
+                            className="file-browser-inline-error"
+                            role="alert"
+                          >
+                            {markdownWindowError}
+                          </div>
+                        )}
+                        <LazyMarkdownFilePreview
+                          content={markdownEditorState.content}
+                          dirty={
+                            markdownPreviewWindow?.complete === true &&
+                            markdownEditorState.content !==
                               markdownEditorState.savedContent
-                            }
-                            mode={markdownEditorState.mode}
-                            onContentChange={(content) =>
-                              setMarkdownEditorState((current) =>
-                                current ? { ...current, content } : current,
-                              )
-                            }
-                            onModeChange={handleMarkdownModeChange}
-                            onSave={handleSaveMarkdown}
-                            saving={savingMarkdown}
-                          />
-                        </Suspense>
-                      ) : (
-                        <div className="file-browser-preview-empty">
-                          Markdown 已在独立窗口中打开
-                        </div>
-                      )
+                          }
+                          loading={markdownWindowLoading}
+                          mode={markdownEditorState.mode}
+                          onContentChange={(content) =>
+                            setMarkdownEditorState((current) =>
+                              current &&
+                              markdownPreviewWindow?.complete &&
+                              !markdownWindowLoading
+                                ? { ...current, content }
+                                : current,
+                            )
+                          }
+                          onModeChange={handleMarkdownModeChange}
+                          onSave={handleSaveMarkdown}
+                          readOnly={!markdownPreviewWindow?.complete}
+                          saving={savingMarkdown}
+                          showNavigation={previewExpanded}
+                          windowNavigation={
+                            previewExpanded &&
+                            markdownPreviewWindow &&
+                            (markdownWindowHistory.length > 0 ||
+                              markdownPreviewWindow.nextOffset !== null)
+                              ? {
+                                  label: formatMarkdownWindowRange(
+                                    markdownPreviewWindow,
+                                  ),
+                                  loading: markdownWindowLoading,
+                                  nextAvailable:
+                                    markdownPreviewWindow.nextOffset !== null,
+                                  onNext: () => {
+                                    void loadNextMarkdownWindow();
+                                  },
+                                  onPrevious: () => {
+                                    void loadPreviousMarkdownWindow();
+                                  },
+                                  previousAvailable:
+                                    markdownWindowHistory.length > 0,
+                                }
+                              : undefined
+                          }
+                        />
+                      </Suspense>
                     ) : (
                       <>
                         <div className="file-browser-preview-actions">
-                          <button
-                            className="file-browser-pill"
-                            onClick={() => handleOpenEditor(selectedFile)}
-                            type="button"
-                          >
-                            编辑
-                          </button>
+                          {editorState?.path === selectedFile.path ? (
+                            <>
+                              {editorState.content !==
+                                editorState.savedContent && (
+                                <span className="markdown-file-preview-dirty">
+                                  未保存
+                                </span>
+                              )}
+                              <button
+                                className="file-browser-pill"
+                                onClick={() => {
+                                  if (
+                                    editorState.content !==
+                                      editorState.savedContent &&
+                                    !window.confirm(
+                                      "当前文件有未保存修改，确定退出编辑？",
+                                    )
+                                  ) {
+                                    return;
+                                  }
+                                  setEditorState(null);
+                                }}
+                                type="button"
+                              >
+                                退出编辑
+                              </button>
+                              <button
+                                className="file-browser-pill"
+                                disabled={
+                                  editorState.content ===
+                                  editorState.savedContent
+                                }
+                                onClick={async () => {
+                                  const { path, content } = editorState;
+                                  await saveTextFile(path, content);
+                                  setEditorState((current) =>
+                                    current?.path === path
+                                      ? { ...current, savedContent: content }
+                                      : current,
+                                  );
+                                }}
+                                type="button"
+                              >
+                                保存
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              className="file-browser-pill"
+                              onClick={() => handleOpenEditor(selectedFile)}
+                              type="button"
+                            >
+                              编辑
+                            </button>
+                          )}
                           {sshTarget && (
                             <button
                               className="file-browser-pill"
@@ -1127,9 +1382,25 @@ export function FileBrowserDrawer({
                             </button>
                           )}
                         </div>
-                        <pre className="file-browser-preview-text">
-                          {preview.content}
-                        </pre>
+                        {editorState?.path === selectedFile.path ? (
+                          <textarea
+                            aria-label={`${selectedFile.name} 源码编辑器`}
+                            className="file-browser-editor file-browser-editor--inline"
+                            onChange={(event) =>
+                              setEditorState((current) =>
+                                current
+                                  ? { ...current, content: event.target.value }
+                                  : current,
+                              )
+                            }
+                            spellCheck={false}
+                            value={editorState.content}
+                          />
+                        ) : (
+                          <pre className="file-browser-preview-text">
+                            {preview.content}
+                          </pre>
+                        )}
                       </>
                     )}
                   </>
@@ -1416,72 +1687,6 @@ export function FileBrowserDrawer({
             </div>
           </div>
         </div>
-      )}
-
-      {editorState && (
-        <div className="file-browser-modal">
-          <div className="file-browser-dialog file-browser-dialog--editor">
-            <h3>编辑 {editorState.path.split("/").filter(Boolean).pop()}</h3>
-            <textarea
-              className="file-browser-editor"
-              value={editorState.content}
-              onChange={(event) =>
-                setEditorState((current) =>
-                  current
-                    ? {
-                        ...current,
-                        content: event.target.value,
-                      }
-                    : current,
-                )
-              }
-            />
-            <div className="file-browser-dialog-actions">
-              <button
-                className="file-browser-pill"
-                onClick={() => setEditorState(null)}
-                type="button"
-              >
-                取消
-              </button>
-              <button
-                className="file-browser-pill"
-                onClick={async () => {
-                  await saveTextFile(editorState.path, editorState.content);
-                  setEditorState(null);
-                }}
-                type="button"
-              >
-                保存
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {markdownDialogOpen && markdownEditorState && (
-        <Suspense fallback={null}>
-          <LazyMarkdownFileDialog
-            content={markdownEditorState.content}
-            dirty={
-              markdownEditorState.content !== markdownEditorState.savedContent
-            }
-            fileName={
-              markdownEditorState.path.split("/").filter(Boolean).pop() ??
-              "Markdown"
-            }
-            mode={markdownEditorState.mode}
-            onClose={() => setMarkdownDialogOpen(false)}
-            onContentChange={(content) =>
-              setMarkdownEditorState((current) =>
-                current ? { ...current, content } : current,
-              )
-            }
-            onModeChange={handleMarkdownModeChange}
-            onSave={handleSaveMarkdown}
-            saving={savingMarkdown}
-          />
-        </Suspense>
       )}
 
       {chmodState && (
