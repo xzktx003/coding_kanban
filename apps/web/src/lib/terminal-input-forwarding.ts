@@ -2,6 +2,15 @@ import { isTerminalProtocolResponsePayload } from "./terminal-input";
 
 const TERMINAL_RECONNECT_BASE_DELAY_MS = 250;
 const TERMINAL_RECONNECT_MAX_DELAY_MS = 5_000;
+const BRACKETED_PASTE_ENABLE_SEQUENCE = "\u001b[?2004h";
+
+export function getTerminalInputModeRestoreSequence({
+  restoreBracketedPaste,
+}: {
+  restoreBracketedPaste: boolean;
+}): string {
+  return restoreBracketedPaste ? BRACKETED_PASTE_ENABLE_SEQUENCE : "";
+}
 
 export function computeTerminalReconnectDelay(attempt: number): number {
   const boundedAttempt = Math.min(

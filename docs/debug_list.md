@@ -79,6 +79,7 @@
 - 终端或 tmux 中的 Copilot/Codex 可响应 `Ctrl+C`，但快速普通输入无效，启动命令还可能变成 `5Rnode ...`。根因是浏览器为旧 DA 查询发出的回复先到，而当前 PTY 的 CPR 回复后到，二者与 REST/键盘文本交错进入 shell。修复为按 PTY 输出的 DA/DSR/CPR 查询类型建立短暂 pending 队列，只写入匹配回复，等全部匹配后再释放普通文本；无匹配回复在 250ms 后超时释放，陈旧回复不进入 PTY。单元和真实浏览器 Copilot 启动回归覆盖该顺序。
 - OpenCode 开启 mouse tracking 后，Kanban 把 hover 鼠标报告当成用户输入：会话被持续标成 running、预览变成 `Last input: ESC[<35;...M`，并高频刷新完整看板。修复为鼠标移动报告只作为终端控制流处理，不进入 TUI、不记用户输入、不覆盖预览；明确的 OpenCode/其他非 Codex 会话不再读取同目录 Codex JSONL 摘要。
 - OpenCode 会话与 Codex 共用工作目录时，卡片摘要/完整记录/任务变更曾按目录回退读取最近 Codex JSONL，导致显示其他会话内容。修复为明确的 OpenCode、Claude、Copilot 等非 Codex 会话在三条 Codex 数据路由和移动端摘要展示中统一不可用，同时保留 `shell` / `node` tmux 的 Codex 兼容定位。
+- 已运行的 OpenCode 会话在 Kanban 重新挂载后，粘贴带末尾换行的文本会立即提交。根因是 terminal replay 为避免重放陈旧状态会清除 `CSI ?2004h`，新 xterm 因而不知道 OpenCode 已启用 bracketed paste，把剪贴板末尾换行当成独立 `Return`，命中 OpenCode 的 `input.submit`。修复为仅对 OpenCode 活动终端在开放输入前恢复 bracketed-paste 模式；粘贴只更新 prompt，显式 Enter 仍负责提交，shell、Codex 等终端语义不变。
 
 ## tmux 与终端渲染
 
@@ -86,6 +87,7 @@
 - 新建或恢复本地 tmux 后，浏览器已经看到 scrollback 却立刻输入时，Ctrl+C 能到达而普通文字、tmux 前缀或 Codex 文本可能被启动 shell 吞掉。根因是 scrollback replay 早于 `tmux attach` client 完成。修复为按 `tmux list-clients` 中的 `client_pid` 匹配 PTY PID 后才走 native PTY；就绪前输入短暂等待，超时安全回退 pane adapter。CSI-u 修饰 Enter 则保留 `send-keys -l` 例外，避免旧 tmux client 吞掉原始字节。真实 rename-window prompt 回归覆盖首帧输入、提交和取消。
 - tmux mouse mode 下直接拖拽会被 tmux/TUI 接管，浏览器侧 xterm 不会产生可复制 selection，导致 kanban 无法把 pane 内选择自动写入剪贴板。修复为 `TerminalView` 消费 OSC 52 clipboard 请求并调用浏览器剪贴板 API，让 tmux copy-mode 负责 pane 内选择边界，普通鼠标/二进制事件转发保持不变。
 - OpenCode 开启 mouse tracking 后，在 Kanban 里直接左键拖选文字会被 tmux 按 `send-keys -M` 转发给 OpenCode，而不是进入 tmux/browser 复制；部分 OpenCode 界面会把这组拖拽解释为 prompt 输入甚至提交。修复为 OpenCode 活动终端采用拖拽复制优先：无修饰键左键移动超过阈值后重放为 xterm 本地 Shift 选区并复制，不向 PTY 发送拖拽；未形成拖拽的单击仍重放给 TUI，滚轮和其他 Agent 的鼠标路径不变。
+- 普通 zsh tmux pane 未启用 mouse tracking 时，Kanban 中点击或滚轮仍会在提示符自动输入 `0;...M`、`64;...M`、`65;...M`。根因是用户级 tmux root key table 将 `MouseDown1Pane` / `WheelDownPane` 无条件 `send-keys -M`，绕过了 pane 的 `mouse_any_flag=0`。修复为这两个绑定仅在 pane 主动接管鼠标时转发；普通 shell 点击只选择 pane，滚轮进入 copy-mode。Kanban 继续把鼠标协议交给 attached tmux client，不覆盖用户的全局 tmux key table；隔离 tmux client 测试覆盖普通 shell 点击和滚轮不污染命令行。
 - 手机浏览器打开 Codex 长上下文终端时，用户在终端区域下拉查看历史会触发浏览器下拉刷新，或者滑动的是页面而不是 xterm 历史。根因是移动端仍复用桌面页面滚动结构，浏览器根滚动链路没有被锁住；首版终端 touch 监听只在冒泡阶段接管，遇到 xterm 内部 viewport/浏览器手势竞争时拦截不够早，且用户停留在桌面聚焦页时没有启用手机触控模式。修复为新增 `/mobile` 手机终端页，挂载时锁定 `html/body/#root` 滚动，并让 `TerminalView` 在手机触控模式下用捕获阶段的非 passive `touchstart/touchmove` 拦截单指滑动、滚动 xterm 历史，双指缩放字号；触屏设备的桌面聚焦页也启用同一逻辑。
 - 手机访问 `/mobile` 进不去或 404。根因是部分当前运行入口只暴露根页面或只启动了后端，`/mobile` 这种 history route 依赖前端开发服务/静态服务提供 SPA fallback。修复为移动端按钮改用 `/?view=mobile` 根路径 query 入口，并保留 `/mobile`、`/m`、`#/mobile` 兼容解析。
 - 手机端 Tab、Esc、Ctrl+C、方向键等快捷键在部分会话里会变成”控制键 + Enter”或不能作为真实按键送入 Codex。根因是手机端快捷键走已有 stdin 路由，而旧的非 PTY runtime 会给任意输入追加换行，tmux 控制路径也把输入按行拆分并总是补 Enter。修复为对 stdin payload 做控制字符识别：普通文本仍可补换行提交，Tab/Esc/Ctrl/方向键和多行粘贴按原始输入转发；tmux 接入路径把通用控制字符转换成 `send-keys` 按键名但不增加 tmux 专用快捷键按钮。

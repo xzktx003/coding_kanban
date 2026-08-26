@@ -32,6 +32,7 @@ import {
 } from "../lib/terminal-font-size";
 import {
   computeTerminalReconnectDelay,
+  getTerminalInputModeRestoreSequence,
   shouldAttemptTerminalInputForward,
 } from "../lib/terminal-input-forwarding";
 import {
@@ -64,6 +65,7 @@ interface TerminalViewProps {
   suspended?: boolean;
   wheelPassthrough?: boolean;
   preferLocalMouseSelection?: boolean;
+  restoreBracketedPasteMode?: boolean;
 }
 
 type TerminalContainer = HTMLDivElement & {
@@ -118,6 +120,7 @@ export const TerminalView = memo(function TerminalView({
   suspended = false,
   wheelPassthrough = false,
   preferLocalMouseSelection = false,
+  restoreBracketedPasteMode = false,
 }: TerminalViewProps) {
   const inputEnabled = inputEnabledProp ?? interactive;
   const terminalFontSize = clampTerminalFontSize(
@@ -329,6 +332,14 @@ export const TerminalView = memo(function TerminalView({
     applyPreviewLayout();
     const activeElementBeforeOpen = document.activeElement;
     term.open(stage);
+    const inputModeRestoreSequence = getTerminalInputModeRestoreSequence({
+      restoreBracketedPaste: restoreBracketedPasteMode,
+    });
+    if (inputModeRestoreSequence) {
+      // Replay drops historical mode toggles. OpenCode still expects paste to
+      // arrive as one event so a clipboard newline cannot submit the prompt.
+      term.write(inputModeRestoreSequence);
+    }
     if (
       initializeMobileTerminalCursor({
         inputEnabled: inputEnabledRef.current,
@@ -2018,6 +2029,7 @@ export const TerminalView = memo(function TerminalView({
     interactive,
     mobileTouchMode,
     preferLocalMouseSelection,
+    restoreBracketedPasteMode,
     suspended,
     wheelPassthrough,
   ]);

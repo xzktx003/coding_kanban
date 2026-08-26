@@ -238,6 +238,9 @@ export function TerminalPaneContent({
                     preferLocalMouseSelection={
                       mountedSession.agentKind.toLowerCase() === "opencode"
                     }
+                    restoreBracketedPasteMode={
+                      mountedSession.agentKind.toLowerCase() === "opencode"
+                    }
                     wheelPassthrough={groupArrangement}
                   />
                 </Suspense>

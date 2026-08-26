@@ -55,7 +55,9 @@
 - tmux mouse mode 下 pane 内拖拽选择停留在 tmux/TUI 内，浏览器侧 xterm 没有 selection 可复制：修复为 `TerminalView` 支持 OSC 52 clipboard 写入，让 tmux copy-mode 负责选择边界并把内容写入浏览器剪贴板。
 - OpenCode 开启 mouse tracking 后 hover 会被 Kanban 当成用户输入，持续刷新看板并把鼠标转义串写进预览；修复为鼠标移动报告不进入 TUI、不记用户输入，并阻止明确非 Codex 会话读取同目录 Codex JSONL 摘要。
 - OpenCode 与 Codex 共用工作目录时，卡片摘要/完整记录/任务变更曾按目录回退读取最近 Codex JSONL；修复为明确的 OpenCode、Claude、Copilot 等非 Codex 会话不再走这三条 Codex 数据路由，同时保留 `shell` / `node` tmux 的 Codex 兼容定位。
+- 已运行的 OpenCode 会话在 Kanban 重挂载后，replay 会清除历史 `CSI ?2004h`，新 xterm 不知道 TUI 已启用 bracketed paste，剪贴板末尾换行会变成 `Return` 并直接提交。修复为只给 OpenCode 活动终端在开放输入前恢复 bracketed-paste 模式；粘贴保留在 prompt，显式 Enter 才提交。
 - OpenCode 开启 mouse tracking 时直接拖选会被 tmux 转发给 TUI，部分界面会把复制手势解释成 prompt 输入并提交；OpenCode 活动终端现在延迟无修饰键左键手势，超过阈值后转为 xterm 本地 Shift 选区且不写 PTY，单击重放给 TUI、滚轮不变。
+- 普通 zsh tmux pane 的 `mouse_any_flag=0` 时，点击或滚轮仍可能把 `0/64/65;...M` 写进提示符：用户级 `MouseDown1Pane` / `WheelDownPane` 无条件执行了 `send-keys -M`。修复为仅在 pane 主动接管鼠标时转发；普通 shell 点击只选择 pane、滚轮进入 copy-mode。Kanban 不覆盖用户全局 tmux key table，隔离 attached-client 测试确认 shell 命令行不再被鼠标报告污染。
 - live stdin 过滤握手应答导致 Copilot CLI 等 TUI 卡死：修复为仅清洗 replay，不过滤 live stdin 的 DA/DSR/CPR 等应答。
 - 终端或 tmux 中 Copilot/Codex 的 Ctrl+C 可用但快速普通文本无效，启动命令还可能被写成 `5Rnode ...`：浏览器较早 DA 回复会和当前 CPR、REST/键盘文本乱序交错。修复为根据 PTY 输出的 DA/DSR/CPR 查询类型跟踪短暂 pending，只转发匹配的完整回复，全部完成后才释放普通文本；陈旧回复丢弃，250ms 无回复超时释放。单元及真实浏览器 Copilot 启动回归覆盖该顺序。
 - Codex CLI 运行后鼠标滚轮偶发变成输入历史上下翻页：xterm.js 会在 TUI 鼠标追踪或无 scrollback 路径中把 wheel 转成鼠标协议/方向键输入；修复为前端接管 wheel，只滚动 xterm scrollback 并阻止 wheel 进入 stdin。

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   computeTerminalReconnectDelay,
+  getTerminalInputModeRestoreSequence,
   shouldAttemptTerminalInputForward,
 } from "./terminal-input-forwarding.js";
 
@@ -92,5 +93,16 @@ describe("terminal input forwarding", () => {
     );
     assert.equal(computeTerminalReconnectDelay(-1), 250);
     assert.equal(computeTerminalReconnectDelay(Number.NaN), 250);
+  });
+
+  it("restores bracketed paste after sanitized OpenCode replay", () => {
+    assert.equal(
+      getTerminalInputModeRestoreSequence({ restoreBracketedPaste: true }),
+      "\u001b[?2004h",
+    );
+    assert.equal(
+      getTerminalInputModeRestoreSequence({ restoreBracketedPaste: false }),
+      "",
+    );
   });
 });
