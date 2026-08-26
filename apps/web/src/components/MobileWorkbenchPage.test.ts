@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   getMobileSessionSummary,
+  MobileAttentionGroupSection,
   MobileSessionCard,
   MobileSessionSwitcher,
   MobileWorkbenchPage,
@@ -142,6 +143,80 @@ describe("MobileWorkbenchPage", () => {
     assert.match(
       css,
       /\.mobile-session-card:active\s*{[^}]*transform:\s*scale\(0\.99\)/s,
+    );
+  });
+
+  it("collapses each mobile attention group from its status header", () => {
+    const sessions = [
+      {
+        id: "review-session",
+        workspaceId: "default",
+        sourceType: "local" as const,
+        agentKind: "codex",
+        displayName: "Review session",
+        connectionState: "online" as const,
+        interactionState: "idle" as const,
+        hasUnreadCompletion: true,
+        outputPreview: "等待验收",
+      },
+    ];
+
+    const collapsedMarkup = renderToStaticMarkup(
+      createElement(MobileAttentionGroupSection, {
+        collapsed: true,
+        group: {
+          id: "review",
+          label: "待验收",
+          description: "Agent 已完成，等待查看",
+        },
+        onOpenSession: () => {},
+        onToggle: () => {},
+        sessions,
+      }),
+    );
+
+    assert.match(collapsedMarkup, /aria-expanded="false"/);
+    assert.match(
+      collapsedMarkup,
+      /aria-controls="mobile-attention-group-review"/,
+    );
+    assert.match(
+      collapsedMarkup,
+      /mobile-attention-group-chevron mobile-attention-group-chevron--collapsed/,
+    );
+    assert.match(
+      collapsedMarkup,
+      /class="mobile-session-list" hidden="" id="mobile-attention-group-review"/,
+    );
+    assert.doesNotMatch(collapsedMarkup, /data-session-id="review-session"/);
+
+    const expandedMarkup = renderToStaticMarkup(
+      createElement(MobileAttentionGroupSection, {
+        collapsed: false,
+        group: {
+          id: "review",
+          label: "待验收",
+          description: "Agent 已完成，等待查看",
+        },
+        onOpenSession: () => {},
+        onToggle: () => {},
+        sessions,
+      }),
+    );
+
+    assert.match(expandedMarkup, /aria-expanded="true"/);
+    assert.match(expandedMarkup, /class="mobile-attention-group-chevron"/);
+    assert.match(expandedMarkup, /id="mobile-attention-group-review"/);
+    assert.match(expandedMarkup, /data-session-id="review-session"/);
+
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+    assert.match(
+      css,
+      /\.mobile-attention-group-toggle\s*{[^}]*min-height:\s*52px;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-attention-group-toggle:active\s*{[^}]*background:/s,
     );
   });
 

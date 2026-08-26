@@ -39,6 +39,12 @@ interface MobileWorkbenchPageProps {
 type MobileWorkbenchView = "board" | "activity" | "session" | "projects";
 type MobileAttentionGroup = "response" | "review" | "executing" | "ready";
 
+interface MobileAttentionGroupDefinition {
+  id: MobileAttentionGroup;
+  label: string;
+  description: string;
+}
+
 const stateLabels: Record<string, string> = {
   running: "执行中",
   idle: "可继续",
@@ -53,11 +59,7 @@ const connectionLabels: Record<string, string> = {
   offline: "已断开",
 };
 
-const attentionGroups: Array<{
-  id: MobileAttentionGroup;
-  label: string;
-  description: string;
-}> = [
+const attentionGroups: MobileAttentionGroupDefinition[] = [
   { id: "response", label: "需响应", description: "等待你的回答或确认" },
   { id: "review", label: "待验收", description: "Agent 已完成，等待查看" },
   { id: "executing", label: "执行中", description: "Agent 正在处理任务" },
@@ -275,6 +277,61 @@ export function MobileSessionCard({
   );
 }
 
+export function MobileAttentionGroupSection({
+  collapsed,
+  group,
+  onOpenSession,
+  onToggle,
+  sessions,
+}: {
+  collapsed: boolean;
+  group: MobileAttentionGroupDefinition;
+  onOpenSession: (session: AgentSessionRecord) => void;
+  onToggle: () => void;
+  sessions: AgentSessionRecord[];
+}) {
+  const contentId = `mobile-attention-group-${group.id}`;
+
+  return (
+    <section
+      className={`mobile-attention-group mobile-attention-group--${group.id}${collapsed ? " mobile-attention-group--collapsed" : ""}`}
+    >
+      <header>
+        <button
+          aria-controls={contentId}
+          aria-expanded={!collapsed}
+          aria-label={`${collapsed ? "展开" : "收起"}${group.label}会话，共 ${sessions.length} 个`}
+          className="mobile-attention-group-toggle"
+          onClick={onToggle}
+          type="button"
+        >
+          <span className="mobile-attention-group-identity">
+            <strong>{group.label}</strong>
+            <small>{group.description}</small>
+          </span>
+          <span className="mobile-attention-group-count">
+            {sessions.length}
+          </span>
+          <span
+            aria-hidden="true"
+            className={`mobile-attention-group-chevron${collapsed ? " mobile-attention-group-chevron--collapsed" : ""}`}
+          />
+        </button>
+      </header>
+      <div className="mobile-session-list" hidden={collapsed} id={contentId}>
+        {!collapsed &&
+          sessions.map((session) => (
+            <MobileSessionCard
+              key={session.id}
+              onOpen={onOpenSession}
+              session={session}
+            />
+          ))}
+      </div>
+    </section>
+  );
+}
+
 interface MobileSessionSwitcherProps {
   activeSession?: AgentSessionRecord;
   containerRef?: RefObject<HTMLDivElement | null>;
@@ -400,6 +457,9 @@ export function MobileWorkbenchPage({
     string | null
   >(null);
   const [sessionFilesOpen, setSessionFilesOpen] = useState(false);
+  const [collapsedAttentionGroups, setCollapsedAttentionGroups] = useState<
+    Set<MobileAttentionGroup>
+  >(() => new Set());
   const sessionSwitcherRef = useRef<HTMLDivElement>(null);
   const inputQueueRef = useRef<Promise<void>>(Promise.resolve());
   const visibleSessions = useMemo(
@@ -583,27 +643,24 @@ export function MobileWorkbenchPage({
                 );
                 if (groupSessions.length === 0) return null;
                 return (
-                  <section
-                    className={`mobile-attention-group mobile-attention-group--${group.id}`}
+                  <MobileAttentionGroupSection
+                    collapsed={collapsedAttentionGroups.has(group.id)}
+                    group={group}
                     key={group.id}
-                  >
-                    <header>
-                      <div>
-                        <h2>{group.label}</h2>
-                        <span>{group.description}</span>
-                      </div>
-                      <strong>{groupSessions.length}</strong>
-                    </header>
-                    <div className="mobile-session-list">
-                      {groupSessions.map((session) => (
-                        <MobileSessionCard
-                          key={session.id}
-                          onOpen={openSession}
-                          session={session}
-                        />
-                      ))}
-                    </div>
-                  </section>
+                    onOpenSession={openSession}
+                    onToggle={() =>
+                      setCollapsedAttentionGroups((current) => {
+                        const next = new Set(current);
+                        if (next.has(group.id)) {
+                          next.delete(group.id);
+                        } else {
+                          next.add(group.id);
+                        }
+                        return next;
+                      })
+                    }
+                    sessions={groupSessions}
+                  />
                 );
               })
             )}
