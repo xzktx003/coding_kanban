@@ -133,6 +133,15 @@ function tmuxPaneContainsText(sessionName: string, text: string): boolean {
   }
 }
 
+function tmuxPaneTextCount(sessionName: string, text: string): number {
+  try {
+    const output = runTmux(["capture-pane", "-pt", sessionName]);
+    return output.split(text).length - 1;
+  } catch {
+    return 0;
+  }
+}
+
 async function waitForSessionInList(
   request: APIRequestContext,
   sessionId: string,
@@ -1691,7 +1700,7 @@ test("browser: 切回浏览器窗口后会恢复 tmux 输入焦点", async ({
   }
 });
 
-test("browser: 切换窗口后会把 focus in/out 事件发回 tmux 应用", async ({
+test("browser: 切换窗口后不会把 focus in/out 报告泄漏到本地 tmux", async ({
   page,
   request,
 }) => {
@@ -1789,6 +1798,8 @@ test("browser: 切换窗口后会把 focus in/out 事件发回 tmux 应用", asy
       )
       .toBeTruthy();
 
+    const focusOutCountBefore = tmuxPaneTextCount(sessionName, "focus-out");
+    const focusInCountBefore = tmuxPaneTextCount(sessionName, "focus-in");
     await backButton.focus();
 
     await expect
@@ -1802,19 +1813,17 @@ test("browser: 切换窗口后会把 focus in/out 事件发回 tmux 应用", asy
       )
       .toBeFalsy();
 
-    await expect
-      .poll(() => tmuxPaneContainsText(sessionName, "focus-out"), {
-        timeout: 5000,
-      })
-      .toBeTruthy();
+    // Local tmux deliberately drops CSI I/O focus reports. Forwarding them
+    // can surface literal [I/[O text in Codex prompts during pane swaps.
+    await page.waitForTimeout(250);
+    expect(tmuxPaneTextCount(sessionName, "focus-out")).toBe(
+      focusOutCountBefore,
+    );
 
     await screen.click({ position: { x: 90, y: 50 } });
 
-    await expect
-      .poll(() => tmuxPaneContainsText(sessionName, "focus-in"), {
-        timeout: 5000,
-      })
-      .toBeTruthy();
+    await page.waitForTimeout(250);
+    expect(tmuxPaneTextCount(sessionName, "focus-in")).toBe(focusInCountBefore);
   } finally {
     if (launchedSessionId) {
       await request.delete(

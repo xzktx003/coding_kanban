@@ -265,6 +265,10 @@ describe("AgentFocusView", () => {
     );
     assert.equal(
       (markup.match(/data-terminal-render-mode="live"/g) ?? []).length,
+      0,
+    );
+    assert.equal(
+      (markup.match(/data-terminal-render-mode="loading"/g) ?? []).length,
       1,
     );
     assert.equal(

@@ -755,6 +755,19 @@ export function FileBrowserDrawer({
     setPreviewExpanded(true);
   }
 
+  function handleReturnToFileList() {
+    if (
+      editorState &&
+      editorState.content !== editorState.savedContent &&
+      !window.confirm("当前文件有未保存修改，确定返回文件列表？")
+    ) {
+      return;
+    }
+
+    setEditorState(null);
+    setPreviewExpanded(false);
+  }
+
   async function handleDeleteSelected() {
     if (selectedPaths.length === 0) {
       return;
@@ -1208,7 +1221,7 @@ export function FileBrowserDrawer({
                 <button
                   aria-label="返回文件列表"
                   className="file-browser-inline-back"
-                  onClick={() => setPreviewExpanded(false)}
+                  onClick={handleReturnToFileList}
                   type="button"
                 >
                   ← 文件列表

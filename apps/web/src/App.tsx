@@ -376,8 +376,9 @@ export default function App() {
     dirQuery: "",
     tag: null,
   });
-  const [agentGridSortMode, setAgentGridSortMode] =
-    useState<AgentGridSortMode>(loadAgentGridSortMode);
+  const [agentGridSortMode, setAgentGridSortMode] = useState<AgentGridSortMode>(
+    loadAgentGridSortMode,
+  );
   const [agentGridLayoutMode, setAgentGridLayoutMode] =
     useState<AgentGridLayoutMode>(loadAgentGridLayoutMode);
   const [useLightweightTerminalPreview, setUseLightweightTerminalPreview] =
@@ -827,6 +828,10 @@ export default function App() {
   );
 
   const acknowledgeFocusedSession = useCallback((id: string) => {
+    // Move the card out of review immediately. The focus request is persisted
+    // asynchronously, so waiting for the next websocket snapshot leaves the
+    // grid showing stale unread state when the user returns quickly.
+    setSnapshot((current) => updateSessionUnreadCompletion(current, id, false));
     focusAgentSession({ agentSessionId: id }).catch(() => {});
   }, []);
 
@@ -895,12 +900,9 @@ export default function App() {
     acknowledgeFocusedSession(id);
   }
 
-  const handleActiveTerminalSessionChange = useCallback(
-    (id: string | null) => {
-      setActiveTerminalSessionId(id);
-    },
-    [],
-  );
+  const handleActiveTerminalSessionChange = useCallback((id: string | null) => {
+    setActiveTerminalSessionId(id);
+  }, []);
 
   const handleMobileSwitchSession = useCallback(
     (id: string) => {
@@ -1245,7 +1247,8 @@ export default function App() {
     renderedVsCodeSessionIds.some(
       (sessionId) => !retainedVsCodeSessionIds.includes(sessionId),
     );
-  const sidePanelRendered = sidePanelOpen || renderedVsCodeSessionIds.length > 0;
+  const sidePanelRendered =
+    sidePanelOpen || renderedVsCodeSessionIds.length > 0;
   const sidePanelCollapsed = sidePanelOpen && fileBrowserUiState.sideCollapsed;
   const mainPanelCollapsed = sidePanelOpen && fileBrowserUiState.mainCollapsed;
 

@@ -102,6 +102,23 @@ interface PendingTerminalProtocolReplies {
   timeout: ReturnType<typeof setTimeout>;
 }
 
+function buildTerminalProtocolFallback(
+  expectedKinds: readonly TerminalProtocolResponseKind[],
+): string {
+  return expectedKinds
+    .map((kind) => {
+      switch (kind) {
+        case "device-attributes":
+          return "\u001b[?1;2c";
+        case "status":
+          return "\u001b[0n";
+        case "cursor-position":
+          return "\u001b[1;1R";
+      }
+    })
+    .join("");
+}
+
 export interface PtyRuntimeWriteOptions {
   terminalProtocolResponse?: boolean;
 }
@@ -653,23 +670,25 @@ export class PtyRuntimeManager {
     }
 
     const previous = this.writeQueues.get(agentSessionId) ?? Promise.resolve();
-    const operation = previous.catch(() => {}).then(async () => {
-      const handle = this.handles.get(agentSessionId);
+    const operation = previous
+      .catch(() => {})
+      .then(async () => {
+        const handle = this.handles.get(agentSessionId);
 
-      if (!handle) {
-        throw new Error(`没有找到 PTY 运行时: ${agentSessionId}`);
-      }
+        if (!handle) {
+          throw new Error(`没有找到 PTY 运行时: ${agentSessionId}`);
+        }
 
-      // A terminal query must receive its full reply before a competing REST
-      // request or keypress reaches the line discipline. Otherwise a CPR can
-      // be split around text, yielding input such as "5Rnode".
-      await this.waitForTerminalProtocolReplies(agentSessionId);
+        // A terminal query must receive its full reply before a competing REST
+        // request or keypress reaches the line discipline. Otherwise a CPR can
+        // be split around text, yielding input such as "5Rnode".
+        await this.waitForTerminalProtocolReplies(agentSessionId);
 
-      if (!isTerminalControlPayload(data)) {
-        this.registry.noteUserInput(agentSessionId, data);
-      }
-      handle.ptyProcess.write(data);
-    });
+        if (!isTerminalControlPayload(data)) {
+          this.registry.noteUserInput(agentSessionId, data);
+        }
+        handle.ptyProcess.write(data);
+      });
     const queueTail = operation.then(
       () => undefined,
       () => undefined,
@@ -1033,8 +1052,7 @@ export class PtyRuntimeManager {
     data: string,
   ): void {
     const combined = `${handle.terminalProtocolQueryRemainder}${data}`;
-    const remainder =
-      combined.match(/\u001b(?:\[(?:\?)?[\d;]*)?$/u)?.[0] ?? "";
+    const remainder = combined.match(/\u001b(?:\[(?:\?)?[\d;]*)?$/u)?.[0] ?? "";
     handle.terminalProtocolQueryRemainder = remainder;
     const completeData = remainder
       ? combined.slice(0, Math.max(0, combined.length - remainder.length))
@@ -1061,6 +1079,18 @@ export class PtyRuntimeManager {
         return;
       }
 
+      const fallback = buildTerminalProtocolFallback(current.expectedKinds);
+      const handle = this.handles.get(agentSessionId);
+      if (fallback && handle) {
+        // A TUI can start before any browser terminal is mounted. In that
+        // case replay sanitization intentionally removes the old query, so
+        // no xterm instance can answer it. Use conservative VT replies after
+        // the normal browser-response grace period instead of leaving the
+        // process blocked forever. A real xterm reply clears this state first.
+        this.registry.noteUserInput(agentSessionId, fallback);
+        handle.ptyProcess.write(fallback);
+      }
+
       this.pendingTerminalProtocolReplies.delete(agentSessionId);
       current.resolve();
     }, TERMINAL_PROTOCOL_REPLY_TIMEOUT_MS);
@@ -1074,7 +1104,9 @@ export class PtyRuntimeManager {
     });
   }
 
-  private waitForTerminalProtocolReplies(agentSessionId: string): Promise<void> {
+  private waitForTerminalProtocolReplies(
+    agentSessionId: string,
+  ): Promise<void> {
     return (
       this.pendingTerminalProtocolReplies.get(agentSessionId)?.completion ??
       Promise.resolve()
@@ -1112,7 +1144,9 @@ export class PtyRuntimeManager {
 
     const handle = this.handles.get(agentSessionId);
     if (!handle) {
-      return Promise.reject(new Error(`没有找到 PTY 运行时: ${agentSessionId}`));
+      return Promise.reject(
+        new Error(`没有找到 PTY 运行时: ${agentSessionId}`),
+      );
     }
 
     this.registry.noteUserInput(agentSessionId, matchingPayload);

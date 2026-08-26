@@ -286,6 +286,72 @@ test("CodexSessionLocator supports Codex builds that close rollout files between
   }
 });
 
+test("CodexSessionLocator uses the pane process snapshot when multiple Codex sessions share a cwd", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-session-snapshot-binding-"));
+  const sessionsRoot = join(root, "sessions");
+  const shellSnapshotsRoot = join(root, "shell-snapshots");
+  const procRoot = join(root, "proc");
+  mkdirSync(sessionsRoot, { recursive: true });
+  mkdirSync(shellSnapshotsRoot, { recursive: true });
+  mkdirSync(procRoot, { recursive: true });
+
+  try {
+    writeSession(sessionsRoot, "selected", "codex-selected", "cli");
+    writeSession(sessionsRoot, "newer", "codex-newer", "cli");
+    writeSession(
+      sessionsRoot,
+      "other-directory",
+      "codex-other-directory",
+      "cli",
+      "/workspace/other",
+    );
+
+    const paneRoot = join(procRoot, "601");
+    mkdirSync(join(paneRoot, "task", "601"), { recursive: true });
+    writeFileSync(join(paneRoot, "task", "601", "children"), "602\n");
+    const codexRoot = join(procRoot, "602");
+    mkdirSync(codexRoot, { recursive: true });
+    exposeCodexCommand(procRoot, 602);
+    exposeProcessWorkingDirectory(procRoot, 602, "/workspace/shared");
+    mkdirSync(join(codexRoot, "task", "602"), { recursive: true });
+    writeFileSync(join(codexRoot, "task", "602", "children"), "");
+
+    const processStartMs = Date.now() - 30_000;
+    utimesSync(codexRoot, processStartMs / 1_000, processStartMs / 1_000);
+    writeFileSync(
+      join(
+        shellSnapshotsRoot,
+        `codex-selected.${BigInt(Math.round((processStartMs + 5_000) * 1_000_000))}.sh`,
+      ),
+      "",
+    );
+    writeFileSync(
+      join(
+        shellSnapshotsRoot,
+        `codex-other-directory.${BigInt(Math.round((processStartMs + 1_000) * 1_000_000))}.sh`,
+      ),
+      "",
+    );
+
+    const locator = new CodexSessionLocator({
+      procRoot,
+      sessionsRoot,
+      shellSnapshotsRoot,
+      resolveTmuxPanePid: async () => 601,
+    });
+
+    assert.equal(
+      await locator.resolve({
+        tmuxTarget: "tmux-shared-cwd",
+        workingDirectory: "/workspace/shared",
+      }),
+      "codex-selected",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("CodexSessionLocator ignores newer subagent JSONL files held by the same Codex process", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-session-subagent-"));
   const sessionsRoot = join(root, "sessions");

@@ -14,25 +14,40 @@ const browserDepsAvailable = (() => {
 })();
 
 test.describe("Mobile Terminal", () => {
-  const displayName = `Mobile E2E ${Date.now()}`;
+  let sessionId: string | undefined;
 
   async function openCurrentSession(page: Page) {
     await page.goto("/mobile");
-    await page.getByRole("button", { name: "当前会话" }).click();
+    await expect(page.locator(".mobile-session-picker-trigger")).toBeEnabled({
+      timeout: 8000,
+    });
   }
 
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, request }) => {
+    const response = await request.post("/api/agent-launch/pty", {
+      data: {
+        workspaceId: "default",
+        displayName: `Mobile E2E ${Date.now()}`,
+        agentKind: "shell",
+        command: "node scripts/mock-terminal-agent.mjs raw",
+        workingDirectory: process.cwd(),
+      },
+    });
+    expect(response.ok()).toBeTruthy();
+    sessionId = (await response.json()).id as string;
     await page.goto("/");
+  });
+
+  test.afterEach(async ({ request }) => {
+    if (!sessionId) return;
+    await request.delete(`/api/agent-sessions/${sessionId}`);
+    sessionId = undefined;
   });
 
   test("route detection: /mobile redirects to mobile terminal view", async ({
     page,
   }) => {
     await page.goto("/mobile");
-    await expect(
-      page.getByRole("heading", { name: "手机工作区" }),
-    ).toBeVisible({ timeout: 8000 });
-    await page.getByRole("button", { name: "当前会话" }).click();
     const mobileToolbar = page.getByRole("toolbar", {
       name: "手机终端快捷键",
     });
@@ -43,7 +58,6 @@ test.describe("Mobile Terminal", () => {
     page,
   }) => {
     await page.goto("/?view=mobile");
-    await page.getByRole("button", { name: "当前会话" }).click();
     const mobileToolbar = page.getByRole("toolbar", {
       name: "手机终端快捷键",
     });
@@ -57,7 +71,7 @@ test.describe("Mobile Terminal", () => {
 
     await helpBtn.click();
     const dialog = page.getByRole("dialog", {
-      name: "手机终端快捷键说明",
+      name: "快捷键说明",
     });
     await expect(dialog).toBeVisible();
 
@@ -76,12 +90,14 @@ test.describe("Mobile Terminal", () => {
     await expect(toolbar).toBeVisible({ timeout: 8000 });
 
     // Ctrl+C interrupt button
-    const interruptBtn = page.getByRole("button", { name: "Ctrl+C" });
+    const interruptBtn = page.getByRole("button", {
+      name: "中断当前输出或命令",
+    });
     await expect(interruptBtn).toBeVisible();
     await expect(interruptBtn).not.toBeDisabled();
 
     // ESC button
-    const escBtn = page.getByRole("button", { name: "ESC" });
+    const escBtn = page.getByRole("button", { name: "退出 TUI 当前状态" });
     await expect(escBtn).toBeVisible();
     await expect(escBtn).not.toBeDisabled();
 
@@ -91,7 +107,7 @@ test.describe("Mobile Terminal", () => {
     await expect(shiftBtn).not.toBeDisabled();
 
     // Arrow up
-    const upBtn = page.getByRole("button", { name: "↑" });
+    const upBtn = page.getByRole("button", { name: /方向键上/ });
     await expect(upBtn).toBeVisible();
     await expect(upBtn).not.toBeDisabled();
 
@@ -106,12 +122,10 @@ test.describe("Mobile Terminal", () => {
     const textarea = page.locator(".mobile-agent-composer-input");
     await expect(textarea).toBeVisible({ timeout: 8000 });
 
-    const sendBtn = page.getByRole("button", { name: "发送" });
+    const sendBtn = page.getByRole("button", { name: "发送", exact: true });
     await expect(sendBtn).toBeVisible();
     const pasteBtn = page.getByRole("button", { name: "粘贴" });
     await expect(pasteBtn).toBeVisible();
-    const pasteRunBtn = page.getByRole("button", { name: "粘贴执行" });
-    await expect(pasteRunBtn).toBeVisible();
   });
 
   test("composer: typing in textarea and clearing on send", async ({
@@ -124,7 +138,7 @@ test.describe("Mobile Terminal", () => {
     await textarea.fill("echo hello");
     await expect(textarea).toHaveValue("echo hello");
 
-    const sendBtn = page.getByRole("button", { name: "发送" });
+    const sendBtn = page.getByRole("button", { name: "发送", exact: true });
     await sendBtn.click();
 
     // Input should clear after send
@@ -136,7 +150,7 @@ test.describe("Mobile Terminal", () => {
     const textarea = page.locator(".mobile-agent-composer-input");
     await expect(textarea).toBeVisible({ timeout: 8000 });
 
-    const sendBtn = page.getByRole("button", { name: "发送" });
+    const sendBtn = page.getByRole("button", { name: "发送", exact: true });
     const interruptBtn = page.getByRole("button", { name: "Ctrl+C" });
 
     await textarea.fill("sleep 5");

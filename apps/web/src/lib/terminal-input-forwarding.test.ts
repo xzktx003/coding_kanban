@@ -64,6 +64,27 @@ describe("terminal input forwarding", () => {
     );
   });
 
+  it("forwards only protocol replies while the terminal replay is still loading", () => {
+    assert.equal(
+      shouldAttemptTerminalInputForward({
+        inputEnabled: true,
+        terminalInputReady: false,
+        sanitizedPayload: "typed too early",
+        socketOpen: true,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldAttemptTerminalInputForward({
+        inputEnabled: true,
+        terminalInputReady: false,
+        sanitizedPayload: "\u001b[?1;2c",
+        socketOpen: true,
+      }),
+      true,
+    );
+  });
+
   it("reconnects quickly with a bounded exponential delay", () => {
     assert.deepEqual(
       [0, 1, 2, 3, 4, 5, 100].map(computeTerminalReconnectDelay),

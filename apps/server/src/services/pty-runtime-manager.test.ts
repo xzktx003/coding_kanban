@@ -635,3 +635,30 @@ test("holds ordinary input until all terminal capability replies have reached th
     registry.remove(session.id);
   }
 });
+
+test("falls back to conservative terminal replies when no browser has mounted yet", async () => {
+  const registry = new AgentSessionRegistry();
+  const runtimeManager = new PtyRuntimeManager(registry);
+  const session = runtimeManager.launch({
+    workspaceId: "default",
+    displayName: "terminal-protocol-fallback",
+    agentKind: "shell",
+    workingDirectory: process.cwd(),
+    command:
+      "stty raw -echo; printf '\\033[c\\033[6n'; head -c 13 | od -An -t x1; stty sane; printf '__FALLBACK__\\n'; exit",
+  });
+
+  try {
+    const outputText = await waitForOutputMatch(
+      registry,
+      session.id,
+      /__FALLBACK__/,
+    );
+
+    assert.match(outputText, /1b 5b 3f 31 3b 32 63/);
+    assert.match(outputText, /1b 5b 31 3b 31 52/);
+  } finally {
+    runtimeManager.kill(session.id);
+    registry.remove(session.id);
+  }
+});

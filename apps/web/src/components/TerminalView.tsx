@@ -34,7 +34,10 @@ import {
   computeTerminalReconnectDelay,
   shouldAttemptTerminalInputForward,
 } from "../lib/terminal-input-forwarding";
-import { stripTerminalResponsePayload } from "../lib/terminal-input";
+import {
+  isTerminalProtocolResponsePayload,
+  stripTerminalResponsePayload,
+} from "../lib/terminal-input";
 import { resolveTerminalMouseGestureAction } from "../lib/terminal-mouse-selection";
 import {
   createSafariTextInputRecoveryState,
@@ -57,6 +60,7 @@ interface TerminalViewProps {
   mobileTouchMode?: boolean;
   fontSize?: number;
   onFontSizeChange?: (fontSize: number) => void;
+  onReady?: () => void;
   suspended?: boolean;
   wheelPassthrough?: boolean;
   preferLocalMouseSelection?: boolean;
@@ -110,6 +114,7 @@ export const TerminalView = memo(function TerminalView({
   mobileTouchMode = false,
   fontSize,
   onFontSizeChange,
+  onReady,
   suspended = false,
   wheelPassthrough = false,
   preferLocalMouseSelection = false,
@@ -128,6 +133,7 @@ export const TerminalView = memo(function TerminalView({
   const fitRef = useRef<FitAddon | null>(null);
   const terminalFontSizeRef = useRef(terminalFontSize);
   const onFontSizeChangeRef = useRef(onFontSizeChange);
+  const onReadyRef = useRef(onReady);
   const pendingResizeRef = useRef<{ cols: number; rows: number } | null>(null);
   const inputEnabledRef = useRef(inputEnabled);
   const terminalInputReadyRef = useRef(false);
@@ -158,14 +164,20 @@ export const TerminalView = memo(function TerminalView({
   }, [onFontSizeChange]);
 
   useEffect(() => {
+    onReadyRef.current = onReady;
+  }, [onReady]);
+
+  useEffect(() => {
     inputEnabledRef.current = inputEnabled;
     const term = termRef.current;
     if (!term) {
       return;
     }
 
-    term.options.cursorBlink = inputEnabled;
-    term.options.disableStdin = !terminalInputReadyRef.current;
+    // Keep xterm's protocol response path alive while replay is in progress.
+    // The forwarding guard below still blocks ordinary user input until the
+    // replay-complete frame arrives.
+    term.options.disableStdin = false;
   }, [inputEnabled]);
 
   useEffect(() => {
@@ -192,6 +204,7 @@ export const TerminalView = memo(function TerminalView({
     let handlePointerDownCapture: ((event: PointerEvent) => void) | null = null;
     let handleTerminalFocusIn: ((event: FocusEvent) => void) | null = null;
     let handleTerminalFocusOut: ((event: FocusEvent) => void) | null = null;
+    let handleTerminalBlurCapture: ((event: FocusEvent) => void) | null = null;
     let handleWindowBlur: (() => void) | null = null;
     let handleWindowFocus: (() => void) | null = null;
     let handleMobileTouchStart: ((event: TouchEvent) => void) | null = null;
@@ -213,6 +226,9 @@ export const TerminalView = memo(function TerminalView({
     let lastExternalPointerIntentAt = 0;
     let lastExternalUserIntentAt = 0;
     let lastTerminalIntentAt = 0;
+    let initialReadyReported = false;
+    let pendingInitialReplayWrites = 0;
+    let replayCompletionObserved = false;
     let wheelScrollRemainder = 0;
     const safariInputRecoveryState = createSafariTextInputRecoveryState();
     const recoverSafariNativeInput =
@@ -299,7 +315,10 @@ export const TerminalView = memo(function TerminalView({
         selectionBackground: "rgba(255, 152, 0, 0.3)",
       },
       scrollback: TERMINAL_SCROLLBACK_LINES,
-      disableStdin: true,
+      // xterm uses the same stdin switch for user input and automatic DA/DSR
+      // replies. Keep it open and gate user data in the forwarding layer so a
+      // TUI that started before this view mounted can finish its handshake.
+      disableStdin: false,
       macOptionIsMeta: true,
     });
 
@@ -636,20 +655,43 @@ export const TerminalView = memo(function TerminalView({
       userScrollLockedRef.current = false;
     };
 
-    const writeTerminalOutput = (data: string) => {
+    const reportInitialReadyIfSettled = () => {
+      if (
+        disposed ||
+        initialReadyReported ||
+        !replayCompletionObserved ||
+        pendingInitialReplayWrites > 0
+      ) {
+        return;
+      }
+
+      initialReadyReported = true;
+      onReadyRef.current?.();
+    };
+
+    const writeTerminalOutput = (data: string, blocksInitialReady = false) => {
       const preserveViewport =
         userScrollLockedRef.current &&
         term.buffer.active.viewportY < term.buffer.active.baseY;
       const viewportYBeforeWrite = term.buffer.active.viewportY;
 
+      if (blocksInitialReady) {
+        pendingInitialReplayWrites += 1;
+      }
       term.write(data, () => {
-        if (disposed || !preserveViewport || !userScrollLockedRef.current) {
-          return;
+        if (blocksInitialReady) {
+          pendingInitialReplayWrites = Math.max(
+            0,
+            pendingInitialReplayWrites - 1,
+          );
+        }
+        if (!disposed && preserveViewport && userScrollLockedRef.current) {
+          term.scrollToLine(
+            Math.min(viewportYBeforeWrite, term.buffer.active.baseY),
+          );
         }
 
-        term.scrollToLine(
-          Math.min(viewportYBeforeWrite, term.buffer.active.baseY),
-        );
+        reportInitialReadyIfSettled();
       });
     };
 
@@ -902,6 +944,11 @@ export const TerminalView = memo(function TerminalView({
     let replaySafetyTimerId: number | null = null;
     let disconnectNoticeShown = false;
     let lastReportedTerminalFocus: "in" | "out" | null = null;
+    const pendingInputBeforeReplay: Array<{
+      data: string;
+      recordForSafariRecovery: boolean;
+    }> = [];
+    let flushPendingInput = () => {};
 
     const terminalWantsFocusReports = () => {
       return (
@@ -989,7 +1036,9 @@ export const TerminalView = memo(function TerminalView({
       replaySafetyTimerId = window.setTimeout(() => {
         replaySafetyTimerId = null;
         if (!disposed && ws?.readyState === WebSocket.OPEN) {
+          replayCompletionObserved = true;
           enableTerminalInput();
+          reportInitialReadyIfSettled();
         }
       }, 8_000);
     };
@@ -1044,8 +1093,11 @@ export const TerminalView = memo(function TerminalView({
       }
 
       replayComplete = false;
+      if (!initialReadyReported) {
+        replayCompletionObserved = false;
+      }
       terminalInputReadyRef.current = false;
-      term.options.disableStdin = true;
+      term.options.disableStdin = false;
       lastReportedTerminalFocus = null;
 
       const tracker = registerTerminalWebSocket(agentSessionId);
@@ -1101,7 +1153,7 @@ export const TerminalView = memo(function TerminalView({
         wsRef.current = null;
         replayComplete = false;
         terminalInputReadyRef.current = false;
-        term.options.disableStdin = true;
+        term.options.disableStdin = false;
         lastReportedTerminalFocus = null;
         if (!disconnectNoticeShown) {
           disconnectNoticeShown = true;
@@ -1322,6 +1374,7 @@ export const TerminalView = memo(function TerminalView({
       // protocol replies such as CPR/DA can be generated and forwarded. Normal
       // user input from monitor panes is still filtered in term.onData.
       term.options.disableStdin = false;
+      flushPendingInput();
       if (inputEnabledRef.current) {
         scheduleFocusInteractiveTerminal();
         scheduleTerminalFocusReport();
@@ -1334,26 +1387,34 @@ export const TerminalView = memo(function TerminalView({
       try {
         const parsed = JSON.parse(payload) as TerminalControlFrame;
         if (parsed.__agentOrchestrator !== "terminal-control") {
+          const blocksInitialReady = !replayCompletionObserved;
+          replayCompletionObserved = true;
           enableTerminalInput();
-          writeTerminalOutput(payload);
+          writeTerminalOutput(payload, blocksInitialReady);
           scheduleTerminalFocusReport();
+          reportInitialReadyIfSettled();
           return;
         }
 
         if (parsed.event === "replay" && typeof parsed.data === "string") {
-          writeTerminalOutput(parsed.data);
+          writeTerminalOutput(parsed.data, true);
           scheduleTerminalFocusReport();
           return;
         }
 
         if (parsed.event === "replay-complete") {
+          replayCompletionObserved = true;
           enableTerminalInput();
+          reportInitialReadyIfSettled();
         }
         return;
       } catch {
+        const blocksInitialReady = !replayCompletionObserved;
+        replayCompletionObserved = true;
         enableTerminalInput();
-        writeTerminalOutput(payload);
+        writeTerminalOutput(payload, blocksInitialReady);
         scheduleTerminalFocusReport();
+        reportInitialReadyIfSettled();
       }
     };
 
@@ -1362,10 +1423,24 @@ export const TerminalView = memo(function TerminalView({
       recordForSafariRecovery: boolean,
     ): boolean => {
       const sanitized = stripTerminalResponsePayload(data);
+      if (
+        !terminalInputReadyRef.current &&
+        inputEnabledRef.current &&
+        sanitized.length > 0 &&
+        !isTerminalProtocolResponsePayload(sanitized)
+      ) {
+        pendingInputBeforeReplay.push({
+          data: sanitized,
+          recordForSafariRecovery,
+        });
+        return true;
+      }
+
       const socketOpen = ws?.readyState === WebSocket.OPEN;
       if (
         !shouldAttemptTerminalInputForward({
           inputEnabled: inputEnabledRef.current,
+          terminalInputReady: terminalInputReadyRef.current,
           sanitizedPayload: sanitized,
           socketOpen,
         })
@@ -1387,6 +1462,23 @@ export const TerminalView = memo(function TerminalView({
       }
 
       return false;
+    };
+
+    flushPendingInput = () => {
+      if (
+        !terminalInputReadyRef.current ||
+        pendingInputBeforeReplay.length === 0
+      ) {
+        return;
+      }
+
+      const pending = pendingInputBeforeReplay.splice(
+        0,
+        pendingInputBeforeReplay.length,
+      );
+      for (const item of pending) {
+        forwardTerminalInput(item.data, item.recordForSafariRecovery);
+      }
     };
 
     term.onData((data) => {
@@ -1424,10 +1516,24 @@ export const TerminalView = memo(function TerminalView({
 
     term.onBinary((data) => {
       const sanitized = stripTerminalResponsePayload(data);
+      if (
+        !terminalInputReadyRef.current &&
+        inputEnabledRef.current &&
+        sanitized.length > 0 &&
+        !isTerminalProtocolResponsePayload(sanitized)
+      ) {
+        pendingInputBeforeReplay.push({
+          data: sanitized,
+          recordForSafariRecovery: false,
+        });
+        return;
+      }
+
       const socketOpen = ws?.readyState === WebSocket.OPEN;
       if (
         !shouldAttemptTerminalInputForward({
           inputEnabled: inputEnabledRef.current,
+          terminalInputReady: terminalInputReadyRef.current,
           sanitizedPayload: sanitized,
           socketOpen,
         })
@@ -1447,6 +1553,31 @@ export const TerminalView = memo(function TerminalView({
     });
 
     if (interactive) {
+      handleTerminalBlurCapture = (event) => {
+        const related = event.relatedTarget as HTMLElement | null;
+        const relatedTerminal = related?.closest(
+          ".terminal-view",
+        ) as HTMLElement | null;
+        if (!relatedTerminal || relatedTerminal === container) {
+          return;
+        }
+
+        const relatedHelper = related?.closest(".xterm-helper-textarea");
+        if (!relatedHelper) {
+          return;
+        }
+
+        // xterm refreshes the cursor row on every textarea blur. During a
+        // pane-to-pane handoff that redraws an otherwise unchanged monitor;
+        // focus reporting still goes through our focusout handler below.
+        const target = event.target;
+        if (target instanceof HTMLTextAreaElement) {
+          target.value = "";
+        }
+        event.stopImmediatePropagation();
+        term.element?.classList.remove("focus");
+      };
+
       const repairPassiveFocusDrift = () => {
         if (!inputEnabledRef.current) {
           return;
@@ -1632,6 +1763,7 @@ export const TerminalView = memo(function TerminalView({
       container.addEventListener("mousedown", handleMouseDownCapture, true);
       container.addEventListener("focusin", handleTerminalFocusIn, true);
       container.addEventListener("focusout", handleTerminalFocusOut, true);
+      container.addEventListener("blur", handleTerminalBlurCapture, true);
       window.addEventListener("blur", handleWindowBlur);
       window.addEventListener("focus", handleWindowFocus);
       document.addEventListener(
@@ -1719,7 +1851,23 @@ export const TerminalView = memo(function TerminalView({
     };
     window.addEventListener("resize", handleWindowResize);
 
-    const resizeObserver = new ResizeObserver(() => {
+    let lastObservedContainerSize: { width: number; height: number } | null =
+      null;
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      const width = Math.round(
+        entry?.contentRect.width ?? container.clientWidth,
+      );
+      const height = Math.round(
+        entry?.contentRect.height ?? container.clientHeight,
+      );
+      if (
+        lastObservedContainerSize?.width === width &&
+        lastObservedContainerSize.height === height
+      ) {
+        return;
+      }
+      lastObservedContainerSize = { width, height };
+
       if (container.closest(".main-layout--resizing")) {
         fitScheduler.scheduleTrailing();
       } else {
@@ -1755,6 +1903,9 @@ export const TerminalView = memo(function TerminalView({
       }
       if (handleTerminalFocusIn) {
         container.removeEventListener("focusin", handleTerminalFocusIn, true);
+      }
+      if (handleTerminalBlurCapture) {
+        container.removeEventListener("blur", handleTerminalBlurCapture, true);
       }
       if (handleMobileTouchStart) {
         container.removeEventListener(
@@ -1860,6 +2011,7 @@ export const TerminalView = memo(function TerminalView({
       fitRef.current = null;
       pendingResizeRef.current = null;
       terminalInputReadyRef.current = false;
+      pendingInputBeforeReplay.length = 0;
     };
   }, [
     agentSessionId,

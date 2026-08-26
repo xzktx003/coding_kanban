@@ -7,34 +7,38 @@ test.describe("Mobile workspace", () => {
     page,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
+    const snapshot = {
+      activeAgentSessionId: "mobile-alpha",
+      items: [
+        {
+          id: "mobile-alpha",
+          workspaceId: "default",
+          sourceType: "local" as const,
+          agentKind: "codex" as const,
+          displayName: "Mobile Alpha",
+          connectionState: "online" as const,
+          interactionState: "running" as const,
+        },
+        {
+          id: "mobile-beta",
+          workspaceId: "default",
+          sourceType: "local" as const,
+          agentKind: "shell" as const,
+          displayName: "Mobile Beta",
+          connectionState: "online" as const,
+          interactionState: "idle" as const,
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    };
     await page.route("**/api/agent-sessions", async (route) => {
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({
-          activeAgentSessionId: "mobile-alpha",
-          items: [
-            {
-              id: "mobile-alpha",
-              workspaceId: "default",
-              sourceType: "local",
-              agentKind: "codex",
-              displayName: "Mobile Alpha",
-              connectionState: "online",
-              interactionState: "running",
-            },
-            {
-              id: "mobile-beta",
-              workspaceId: "default",
-              sourceType: "local",
-              agentKind: "shell",
-              displayName: "Mobile Beta",
-              connectionState: "online",
-              interactionState: "idle",
-            },
-          ],
-          updatedAt: new Date().toISOString(),
-        }),
+        body: JSON.stringify(snapshot),
       });
+    });
+    await page.routeWebSocket("**/ws/agent-sessions", (websocket) => {
+      websocket.send(JSON.stringify({ type: "snapshot", payload: snapshot }));
     });
     await page.route("**/api/fs/list", async (route) => {
       const body = route.request().postDataJSON() as { path: string };
@@ -45,7 +49,7 @@ test.describe("Mobile workspace", () => {
     });
 
     await page.goto("/?view=mobile");
-    await page.getByRole("button", { name: "当前会话" }).click();
+    await page.getByRole("button", { name: "当前会话", exact: true }).click();
 
     const picker = page.locator(".mobile-session-picker-trigger");
     for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -85,18 +89,46 @@ test.describe("Mobile workspace", () => {
     page,
   }) => {
     await page.setViewportSize({ width: 390, height: 844 });
+    const snapshot = {
+      activeAgentSessionId: "mobile-board-session",
+      items: [
+        {
+          id: "mobile-board-session",
+          workspaceId: "default",
+          sourceType: "local" as const,
+          agentKind: "shell" as const,
+          displayName: "Mobile Board Session",
+          connectionState: "online" as const,
+          interactionState: "idle" as const,
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+    };
+    await page.route("**/api/agent-sessions", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(snapshot),
+      });
+    });
+    await page.routeWebSocket("**/ws/agent-sessions", (websocket) => {
+      websocket.send(JSON.stringify({ type: "snapshot", payload: snapshot }));
+    });
     await page.goto("/?view=mobile");
 
-    await expect(
-      page.getByRole("heading", { name: "手机工作区" }),
-    ).toBeVisible();
+    await expect(page.locator(".mobile-session-picker-trigger")).toBeVisible();
     await expect(
       page.getByRole("navigation", { name: "手机端主导航" }),
     ).toBeVisible();
-    await expect(page.locator(".mobile-terminal-surface")).toHaveCount(0);
+    await expect(page.locator(".mobile-terminal-surface")).toHaveCount(1);
     await expect(page.locator(".terminal-view")).toHaveCount(0);
 
-    await page.getByRole("button", { name: "当前会话" }).click();
+    await page.getByRole("button", { name: "看板" }).click();
+    await expect(
+      page.getByRole("heading", { name: "手机工作区" }),
+    ).toBeVisible();
+    await expect(page.locator(".mobile-terminal-surface")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "当前会话", exact: true }).click();
     await expect(page.locator(".mobile-terminal-surface")).toBeVisible();
     await expect(page.locator(".terminal-view")).toHaveCount(1);
   });
@@ -135,29 +167,33 @@ test.describe("Mobile workspace", () => {
     page,
   }) => {
     const modifiedAt = "2026-08-16T08:00:00.000Z";
+    const snapshot = {
+      activeAgentSessionId: "mobile-files",
+      items: [
+        {
+          id: "mobile-files",
+          workspaceId: "default",
+          sourceType: "local" as const,
+          agentKind: "codex" as const,
+          displayName: "Mobile Files",
+          projectName: "Kanban",
+          repositoryRoot: "/workspace/kanban",
+          workingDirectory: "/workspace/kanban",
+          connectionState: "online" as const,
+          interactionState: "idle" as const,
+        },
+      ],
+      updatedAt: modifiedAt,
+    };
     await page.setViewportSize({ width: 390, height: 844 });
     await page.route("**/api/agent-sessions", async (route) => {
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({
-          activeAgentSessionId: "mobile-files",
-          items: [
-            {
-              id: "mobile-files",
-              workspaceId: "default",
-              sourceType: "local",
-              agentKind: "codex",
-              displayName: "Mobile Files",
-              projectName: "Kanban",
-              repositoryRoot: "/workspace/kanban",
-              workingDirectory: "/workspace/kanban",
-              connectionState: "online",
-              interactionState: "idle",
-            },
-          ],
-          updatedAt: modifiedAt,
-        }),
+        body: JSON.stringify(snapshot),
       });
+    });
+    await page.routeWebSocket("**/ws/agent-sessions", (websocket) => {
+      websocket.send(JSON.stringify({ type: "snapshot", payload: snapshot }));
     });
     await page.route("**/api/fs/list", async (route) => {
       const body = route.request().postDataJSON() as { path: string };

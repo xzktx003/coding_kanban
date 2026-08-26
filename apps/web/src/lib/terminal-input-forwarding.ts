@@ -17,16 +17,19 @@ export function computeTerminalReconnectDelay(attempt: number): number {
 
 export function shouldAttemptTerminalInputForward({
   inputEnabled,
+  terminalInputReady = true,
   sanitizedPayload,
   socketOpen,
 }: {
   inputEnabled: boolean;
+  terminalInputReady?: boolean;
   sanitizedPayload: string;
   socketOpen: boolean;
 }): boolean {
   return (
     sanitizedPayload.length > 0 &&
     socketOpen &&
-    (inputEnabled || isTerminalProtocolResponsePayload(sanitizedPayload))
+    ((inputEnabled && terminalInputReady) ||
+      isTerminalProtocolResponsePayload(sanitizedPayload))
   );
 }

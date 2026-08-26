@@ -45,11 +45,15 @@ async function installTrackingWebSocket(
       __allWebSocketUrls?: string[];
       __closeLatestTerminalWebSocket?: () => void;
       __disableTerminalMonitorDragImageForTest?: boolean;
+      __terminalWebSocketMaxPendingReplayCount?: number;
+      __terminalWebSocketPendingReplayCount?: number;
       __terminalWebSocketSends?: string[];
       __terminalWebSocketUrls?: string[];
     };
     trackedWindow.__allWebSocketUrls = [];
     trackedWindow.__disableTerminalMonitorDragImageForTest = true;
+    trackedWindow.__terminalWebSocketMaxPendingReplayCount = 0;
+    trackedWindow.__terminalWebSocketPendingReplayCount = 0;
     trackedWindow.__terminalWebSocketSends = [];
     trackedWindow.__terminalWebSocketUrls = [];
     const terminalSockets: MockWebSocket[] = [];
@@ -71,6 +75,19 @@ async function installTrackingWebSocket(
       onerror: ((event: Event) => void) | null = null;
       onclose: ((event: Event) => void) | null = null;
       onmessage: ((event: MessageEvent) => void) | null = null;
+      private terminalReplayPending = false;
+
+      private settleTerminalReplay() {
+        if (!this.terminalReplayPending) {
+          return;
+        }
+
+        this.terminalReplayPending = false;
+        trackedWindow.__terminalWebSocketPendingReplayCount = Math.max(
+          0,
+          (trackedWindow.__terminalWebSocketPendingReplayCount ?? 0) - 1,
+        );
+      }
 
       constructor(url: string | URL) {
         super();
@@ -83,6 +100,13 @@ async function installTrackingWebSocket(
         if (isTerminalSocket) {
           trackedWindow.__terminalWebSocketUrls?.push(this.url);
           terminalSockets.push(this);
+          this.terminalReplayPending = true;
+          trackedWindow.__terminalWebSocketPendingReplayCount =
+            (trackedWindow.__terminalWebSocketPendingReplayCount ?? 0) + 1;
+          trackedWindow.__terminalWebSocketMaxPendingReplayCount = Math.max(
+            trackedWindow.__terminalWebSocketMaxPendingReplayCount ?? 0,
+            trackedWindow.__terminalWebSocketPendingReplayCount,
+          );
         }
 
         if (isTerminalSocket && remainingStalledTerminalConnections > 0) {
@@ -96,6 +120,15 @@ async function installTrackingWebSocket(
           this.dispatchEvent(event);
           this.onopen?.(event);
           if (this.url.includes("/terminal")) {
+            const replay = new MessageEvent("message", {
+              data: JSON.stringify({
+                __agentOrchestrator: "terminal-control",
+                event: "replay",
+                data: "tracked terminal replay\r\n",
+              }),
+            });
+            this.dispatchEvent(replay);
+            this.onmessage?.(replay);
             const message = new MessageEvent("message", {
               data: JSON.stringify({
                 __agentOrchestrator: "terminal-control",
@@ -104,6 +137,7 @@ async function installTrackingWebSocket(
             });
             this.dispatchEvent(message);
             this.onmessage?.(message);
+            this.settleTerminalReplay();
           }
         });
       }
@@ -115,6 +149,7 @@ async function installTrackingWebSocket(
       }
 
       close() {
+        this.settleTerminalReplay();
         this.readyState = MockWebSocket.CLOSED;
         const event = new Event("close");
         this.dispatchEvent(event);
@@ -201,6 +236,17 @@ async function terminalWebSocketSends(page: Page): Promise<string[]> {
         .__terminalWebSocketSends ?? []),
     ];
   });
+}
+
+async function maximumPendingTerminalReplays(page: Page): Promise<number> {
+  return page.evaluate(
+    () =>
+      (
+        window as Window & {
+          __terminalWebSocketMaxPendingReplayCount?: number;
+        }
+      ).__terminalWebSocketMaxPendingReplayCount ?? 0,
+  );
 }
 
 async function dragRangeToValue(
@@ -425,6 +471,81 @@ test("complete transcript starts at the newest page and loads older pages upward
     .toBeGreaterThan(0);
 });
 
+test("complete transcript follows the selected monitor pane", async ({
+  page,
+}) => {
+  const transcriptRequests: string[] = [];
+  await mockSessions(page, [
+    makeSession({ id: "left-session", displayName: "Left Session" }),
+    makeSession({ id: "right-session", displayName: "xh3_refmodel" }),
+  ]);
+  await page.route("**/api/agent-sessions/*/transcript**", async (route) => {
+    const match = new URL(route.request().url()).pathname.match(
+      /\/api\/agent-sessions\/([^/]+)\/transcript$/,
+    );
+    const sessionId = match?.[1] ?? "unknown-session";
+    transcriptRequests.push(sessionId);
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        available: true,
+        agentKind: "codex",
+        sessionId: `codex-${sessionId}`,
+        matchedBy: "session-id",
+        updatedAt: "2026-08-25T00:00:00.000Z",
+        hasMore: false,
+        nextCursor: null,
+        entries: [
+          {
+            id: `entry-${sessionId}`,
+            timestamp: "2026-08-25T00:00:00.000Z",
+            kind: "assistant",
+            title: "Codex",
+            text: sessionId,
+            collapsedByDefault: false,
+          },
+        ],
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: "Left Session" }),
+    })
+    .dblclick();
+  await expect(page.locator(".focus-main")).toBeVisible();
+  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
+
+  const rightPane = page.locator(
+    '[data-terminal-pane-slot="terminal-monitor-slot-2"]',
+  );
+  await expect(rightPane).toHaveAttribute(
+    "data-terminal-pane-session",
+    "right-session",
+  );
+  await rightPane.locator(".focus-terminal-pane-header").click({
+    position: { x: 10, y: 15 },
+  });
+  await expect(rightPane).toHaveAttribute("data-active-terminal-pane", "true");
+  await expect(page.locator("[data-transcript-session-id]")).toHaveAttribute(
+    "data-transcript-session-id",
+    "right-session",
+  );
+
+  await page.getByRole("button", { name: "完整记录" }).click();
+  await expect(page.locator(".agent-transcript-dialog")).toHaveAttribute(
+    "aria-label",
+    "xh3_refmodel 完整记录",
+  );
+  await expect.poll(() => transcriptRequests.at(-1)).toBe("right-session");
+  await expect(
+    page.locator("[data-transcript-entry-id='entry-right-session']"),
+  ).toHaveCount(1);
+});
+
 test("focused terminal reconnects after an unexpected WebSocket close and accepts input", async ({
   page,
 }) => {
@@ -527,8 +648,62 @@ test("activating the other monitor pane keeps both terminal instances mounted", 
     terminalElement.__testXterm = terminalElement.__xterm;
   });
 
+  await leftTerminal.evaluate((element) => {
+    const terminalElement = element as HTMLElement & {
+      __testRefreshCount?: number;
+      __xterm?: {
+        refresh: (start: number, end: number) => void;
+      };
+    };
+    const terminal = terminalElement.__xterm;
+    if (!terminal) {
+      throw new Error("Left xterm instance is missing");
+    }
+    const refresh = terminal.refresh.bind(terminal);
+    terminalElement.__testRefreshCount = 0;
+    terminal.refresh = (start, end) => {
+      terminalElement.__testRefreshCount =
+        (terminalElement.__testRefreshCount ?? 0) + 1;
+      refresh(start, end);
+    };
+  });
+  await rightTerminal.evaluate((element) => {
+    const terminalElement = element as HTMLElement & {
+      __testRefreshCount?: number;
+      __xterm?: {
+        refresh: (start: number, end: number) => void;
+      };
+    };
+    const terminal = terminalElement.__xterm;
+    if (!terminal) {
+      throw new Error("Right xterm instance is missing");
+    }
+    const refresh = terminal.refresh.bind(terminal);
+    terminalElement.__testRefreshCount = 0;
+    terminal.refresh = (start, end) => {
+      terminalElement.__testRefreshCount =
+        (terminalElement.__testRefreshCount ?? 0) + 1;
+      refresh(start, end);
+    };
+  });
+  await page.waitForTimeout(100);
+
   const focusRequestCountBeforePaneActivation = focusRequestSessionIds.length;
-  await rightTerminal.click({ position: { x: 24, y: 24 } });
+  const refreshCountsBeforePaneActivation = await Promise.all([
+    leftTerminal.evaluate(
+      (element) =>
+        (element as HTMLElement & { __testRefreshCount?: number })
+          .__testRefreshCount ?? 0,
+    ),
+    rightTerminal.evaluate(
+      (element) =>
+        (element as HTMLElement & { __testRefreshCount?: number })
+          .__testRefreshCount ?? 0,
+    ),
+  ]);
+  await rightPane.locator(".focus-terminal-pane-header").click({
+    position: { x: 10, y: 15 },
+  });
   await expect(rightPane).toHaveAttribute("data-active-terminal-pane", "true");
   await expect(leftPane).toHaveAttribute("data-active-terminal-pane", "false");
   await expect
@@ -557,6 +732,20 @@ test("activating the other monitor pane keeps both terminal instances mounted", 
   expect(focusRequestSessionIds).toHaveLength(
     focusRequestCountBeforePaneActivation,
   );
+  expect(
+    await Promise.all([
+      leftTerminal.evaluate(
+        (element) =>
+          (element as HTMLElement & { __testRefreshCount?: number })
+            .__testRefreshCount ?? 0,
+      ),
+      rightTerminal.evaluate(
+        (element) =>
+          (element as HTMLElement & { __testRefreshCount?: number })
+            .__testRefreshCount ?? 0,
+      ),
+    ]),
+  ).toEqual(refreshCountsBeforePaneActivation);
 });
 
 test("focused terminal retries a WebSocket that never finishes connecting", async ({
@@ -587,6 +776,53 @@ test("focused terminal retries a WebSocket that never finishes connecting", asyn
   await expect
     .poll(async () => (await terminalWebSocketSends(page)).join(""))
     .toContain("recovered-from-connecting");
+});
+
+test("multi-pane layout bounds initial replays and keeps queued panes visible", async ({
+  page,
+}) => {
+  const sessions = Array.from({ length: 8 }, (_, index) =>
+    makeSession({
+      id: `multi-load-session-${index + 1}`,
+      displayName: `Multi Load ${index + 1}`,
+      outputPreview: `preview ${index + 1}`,
+    }),
+  );
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await mockSessions(page, sessions, { stalledTerminalConnections: 2 });
+  await page.goto("/");
+
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: "Multi Load 1" }),
+    })
+    .dblclick();
+  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page.getByRole("menuitemradio", { name: /八屏/ }).click();
+
+  const layout = page.locator(".focus-terminal-layout--eight");
+  await expect(layout.locator("[data-terminal-pane-session]")).toHaveCount(8);
+  await expect.poll(() => terminalWebSocketUrls(page)).toHaveLength(2);
+  await expect(layout.getByRole("status")).toHaveCount(8);
+  await expect(
+    layout.locator('[data-terminal-render-mode="loading"]'),
+  ).toHaveCount(6);
+
+  await expect
+    .poll(() => terminalWebSocketUrls(page), { timeout: 8_000 })
+    .toHaveLength(10);
+  await expect(layout.locator('[data-terminal-ready="true"]')).toHaveCount(8);
+  await expect(layout.getByRole("status")).toHaveCount(0);
+  expect(await maximumPendingTerminalReplays(page)).toBeLessThanOrEqual(2);
+  expect(await terminalWebSocketUrls(page)).toEqual(
+    expect.arrayContaining(
+      sessions.map((session) =>
+        expect.stringMatching(
+          new RegExp(`/agent-sessions/${session.id}/terminal$`),
+        ),
+      ),
+    ),
+  );
 });
 
 test("grid sorts sessions into four status columns and stacks them on narrow screens", async ({

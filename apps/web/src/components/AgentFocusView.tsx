@@ -110,6 +110,36 @@ interface TerminalPaneContextMenuState {
   y: number;
 }
 
+interface PendingTerminalKeyEvent {
+  altKey: boolean;
+  code: string;
+  ctrlKey: boolean;
+  key: string;
+  metaKey: boolean;
+  repeat: boolean;
+  shiftKey: boolean;
+  which: number;
+}
+
+const QUEUEABLE_TERMINAL_KEYS = new Set([
+  "Backspace",
+  "Delete",
+  "End",
+  "Enter",
+  "Home",
+  "PageDown",
+  "PageUp",
+  "Tab",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "ArrowUp",
+]);
+
+function isQueueableTerminalKey(event: KeyboardEvent): boolean {
+  return event.key.length === 1 || QUEUEABLE_TERMINAL_KEYS.has(event.key);
+}
+
 function shouldUseTerminalMonitorDragImage(): boolean {
   const testFlags = window as Window & {
     __disableTerminalMonitorDragImageForTest?: boolean;
@@ -253,6 +283,109 @@ export function AgentFocusView({
   const layoutMenuRef = useRef<HTMLDivElement | null>(null);
   const paneContextMenuRef = useRef<HTMLDivElement | null>(null);
   const dragPreviewElementRef = useRef<HTMLElement | null>(null);
+  const pendingTerminalKeysRef = useRef<PendingTerminalKeyEvent[]>([]);
+  const pendingTerminalKeyTimerRef = useRef<number | null>(null);
+
+  function dispatchPendingTerminalKey(event: PendingTerminalKeyEvent): boolean {
+    const textarea = getActiveTerminalTextarea();
+    if (!textarea) {
+      return false;
+    }
+
+    textarea.focus();
+    const forwarded = new KeyboardEvent("keydown", {
+      altKey: event.altKey,
+      bubbles: true,
+      cancelable: true,
+      code: event.code,
+      composed: true,
+      ctrlKey: event.ctrlKey,
+      key: event.key,
+      metaKey: event.metaKey,
+      repeat: event.repeat,
+      shiftKey: event.shiftKey,
+    });
+    Object.defineProperties(forwarded, {
+      keyCode: { configurable: true, value: event.which },
+      which: { configurable: true, value: event.which },
+    });
+    textarea.dispatchEvent(forwarded);
+    return true;
+  }
+
+  function flushPendingTerminalKeys(): boolean {
+    if (pendingTerminalKeysRef.current.length === 0) {
+      return true;
+    }
+
+    if (!getActiveTerminalTextarea()) {
+      return false;
+    }
+
+    const pending = pendingTerminalKeysRef.current.splice(
+      0,
+      pendingTerminalKeysRef.current.length,
+    );
+    for (const event of pending) {
+      dispatchPendingTerminalKey(event);
+    }
+    return true;
+  }
+
+  function schedulePendingTerminalKeyFlush(): void {
+    if (pendingTerminalKeyTimerRef.current !== null) {
+      return;
+    }
+
+    const deadline = Date.now() + 2_000;
+    const attempt = () => {
+      pendingTerminalKeyTimerRef.current = null;
+      if (flushPendingTerminalKeys()) {
+        return;
+      }
+
+      if (Date.now() < deadline) {
+        pendingTerminalKeyTimerRef.current = window.setTimeout(attempt, 16);
+        return;
+      }
+
+      pendingTerminalKeysRef.current.length = 0;
+    };
+
+    pendingTerminalKeyTimerRef.current = window.setTimeout(attempt, 0);
+  }
+
+  function queuePendingTerminalKey(event: KeyboardEvent): void {
+    if (!isQueueableTerminalKey(event)) {
+      return;
+    }
+
+    if (pendingTerminalKeysRef.current.length >= 256) {
+      pendingTerminalKeysRef.current.shift();
+    }
+    pendingTerminalKeysRef.current.push({
+      altKey: event.altKey,
+      code: event.code,
+      ctrlKey: event.ctrlKey,
+      key: event.key,
+      metaKey: event.metaKey,
+      repeat: event.repeat,
+      shiftKey: event.shiftKey,
+      which: event.which,
+    });
+    schedulePendingTerminalKeyFlush();
+  }
+
+  useEffect(() => {
+    return () => {
+      if (pendingTerminalKeyTimerRef.current !== null) {
+        window.clearTimeout(pendingTerminalKeyTimerRef.current);
+        pendingTerminalKeyTimerRef.current = null;
+      }
+      pendingTerminalKeysRef.current.length = 0;
+    };
+  }, []);
+
   const sessionById = useMemo(() => {
     return new Map(sessions.map((session) => [session.id, session]));
   }, [sessions]);
@@ -1233,6 +1366,13 @@ export function AgentFocusView({
       // textarea's native input handler fires the key naturally on focus —
       // forwarding here would send the same key twice.
       if (active === document.body || active === null) {
+        if (!isInActiveTerminal(target)) {
+          queuePendingTerminalKey(e);
+          if (pendingTerminalKeysRef.current.length > 0) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }
         return;
       }
 
@@ -1657,7 +1797,8 @@ export function AgentFocusView({
                               session={session}
                               monitorIndex={monitorPlacement?.monitorIndex}
                               isActiveMonitor={
-                                monitorPlacement?.slotId === displayedActiveSlotId
+                                monitorPlacement?.slotId ===
+                                displayedActiveSlotId
                               }
                               sessionGroups={sessionGroups}
                               onCreateSessionGroup={onCreateSessionGroup}

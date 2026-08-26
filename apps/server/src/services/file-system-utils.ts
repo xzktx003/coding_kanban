@@ -152,7 +152,7 @@ export function normalizeLocalPath(inputPath: string): string {
   return path.resolve(inputPath);
 }
 
-export const VALID_CHMOD_PATTERN = /^0[0-7]{3,4}$/;
+export const VALID_CHMOD_PATTERN = /^[0-7]{3,4}$/;
 
 export function validateChmodMode(mode: string): number {
   if (!VALID_CHMOD_PATTERN.test(mode)) {

@@ -1352,10 +1352,13 @@ test("file browser supports real SSH/SFTP browsing, edit, chmod, upload, downloa
     );
 
     await drawer.getByTestId("file-entry-note.txt").dblclick();
+    await drawer.getByRole("button", { name: "编辑" }).click();
     const editor = drawer.locator(".file-browser-editor");
     await expect(editor).toBeVisible();
     await editor.fill("hello remote file browser\nedited over ssh");
     await drawer.getByRole("button", { name: "保存" }).click();
+    await expect(drawer.getByRole("button", { name: "保存" })).toBeDisabled();
+    await drawer.getByRole("button", { name: "返回文件列表" }).click();
     await drawer
       .getByTestId("file-entry-note.txt")
       .getByRole("checkbox")
@@ -1397,6 +1400,7 @@ test("file browser supports real SSH/SFTP browsing, edit, chmod, upload, downloa
       .getByLabel("r")
       .uncheck();
     await chmodDialog.getByRole("button", { name: /应用 600/ }).click();
+    await expect(chmodDialog).toHaveCount(0);
     await expect(
       drawer.getByTestId("file-entry-renamed-remote.txt"),
     ).toContainText("-rw-------");

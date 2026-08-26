@@ -18,10 +18,12 @@ const SESSION_HEADER_BYTES = 64 * 1024;
 const MAX_PROCESS_TREE_SIZE = 512;
 const TMUX_TIMEOUT_MS = 2_000;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
+const SHELL_SNAPSHOT_MATCH_WINDOW_MS = 2 * 60 * 1_000;
 
 interface CodexSessionLocatorOptions {
   procRoot?: string;
   sessionsRoot?: string;
+  shellSnapshotsRoot?: string;
   resolveTmuxPanePid?: (target: string) => Promise<number | null>;
   resolveTmuxActivePanePid?: (
     sessionName: string,
@@ -182,6 +184,79 @@ function listSessionFiles(root: string): string[] {
   return files;
 }
 
+function readProcessStartTime(
+  procRoot: string,
+  processId: number,
+): number | null {
+  try {
+    const modifiedAt = statSync(join(procRoot, String(processId))).mtimeMs;
+    return Number.isFinite(modifiedAt) ? modifiedAt : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveShellSnapshotSessionId(
+  shellSnapshotsRoot: string,
+  procRoot: string,
+  processId: number,
+  allowedSessionIds?: ReadonlySet<string>,
+): string | null {
+  const processStartTime = readProcessStartTime(procRoot, processId);
+  if (processStartTime === null) {
+    return null;
+  }
+
+  let entries: Dirent<string>[];
+  try {
+    entries = readdirSync(shellSnapshotsRoot, {
+      encoding: "utf8",
+      withFileTypes: true,
+    });
+  } catch {
+    return null;
+  }
+
+  let closest: { distance: number; sessionId: string } | null = null;
+  for (const entry of entries) {
+    if (!entry.isFile()) {
+      continue;
+    }
+
+    const match =
+      /^(?<sessionId>[a-zA-Z0-9_-]{8,128})\.(?<timestamp>\d+)\.sh$/.exec(
+        entry.name,
+      );
+    if (!match?.groups) {
+      continue;
+    }
+
+    if (allowedSessionIds && !allowedSessionIds.has(match.groups.sessionId)) {
+      continue;
+    }
+
+    const snapshotTime = Number(match.groups.timestamp) / 1_000_000;
+    if (!Number.isFinite(snapshotTime)) {
+      continue;
+    }
+
+    const distance = Math.abs(snapshotTime - processStartTime);
+    if (
+      distance > SHELL_SNAPSHOT_MATCH_WINDOW_MS ||
+      (closest && closest.distance <= distance)
+    ) {
+      continue;
+    }
+
+    closest = {
+      distance,
+      sessionId: match.groups.sessionId,
+    };
+  }
+
+  return closest?.sessionId ?? null;
+}
+
 function isValidTmuxTarget(target: string): boolean {
   return (
     Boolean(target.trim()) && !target.includes("\0") && target.length <= 256
@@ -269,6 +344,7 @@ async function defaultResolveTmuxActivePanePid(
 export class CodexSessionLocator {
   private readonly procRoot: string;
   private readonly sessionsRoot: string;
+  private readonly shellSnapshotsRoot: string;
   private readonly resolveTmuxPanePid: (
     target: string,
   ) => Promise<number | null>;
@@ -281,6 +357,9 @@ export class CodexSessionLocator {
     this.procRoot = options.procRoot ?? "/proc";
     this.sessionsRoot =
       options.sessionsRoot ?? join(homedir(), ".codex", "sessions");
+    this.shellSnapshotsRoot =
+      options.shellSnapshotsRoot ??
+      join(homedir(), ".codex", "shell_snapshots");
     this.resolveTmuxPanePid =
       options.resolveTmuxPanePid ?? defaultResolveTmuxPanePid;
     this.resolveTmuxActivePanePid =
@@ -354,25 +433,57 @@ export class CodexSessionLocator {
       )[0]?.id;
     }
 
+    const codexProcessIds = processIds.filter((processId) =>
+      isCodexProcess(this.procRoot, processId),
+    );
+    const sessionFiles = listSessionFiles(this.sessionsRoot);
+    const sessionCandidates = sessionFiles
+      .map((path) => readOpenSession(path))
+      .filter((candidate): candidate is OpenSessionCandidate =>
+        Boolean(
+          candidate &&
+          !candidate.subagent &&
+          (!normalizedDirectory ||
+            resolve(candidate.cwd) === normalizedDirectory),
+        ),
+      );
+    const sessionCandidateIds = new Set(
+      sessionCandidates.map((candidate) => candidate.id),
+    );
+
+    // `codex resume` can close the rollout file between writes. In that case
+    // directory recency is unsafe when several Codex processes share a cwd.
+    // Codex's shell snapshot is created next to the process startup and keeps
+    // the selected conversation ID unambiguous for the matching tmux pane.
+    for (const processId of codexProcessIds) {
+      const snapshotSessionId = resolveShellSnapshotSessionId(
+        this.shellSnapshotsRoot,
+        this.procRoot,
+        processId,
+        sessionCandidateIds,
+      );
+      if (!snapshotSessionId) {
+        continue;
+      }
+
+      const matchingSession = sessionCandidates.find(
+        (candidate) => candidate.id === snapshotSessionId,
+      );
+      if (matchingSession) {
+        return matchingSession.id;
+      }
+    }
+
     // Recent Codex builds append rollout JSONL through short-lived handles
     // instead of keeping the session file open. Only use the directory
     // fallback when the active pane is demonstrably running Codex; a shell
     // pane must not inherit the previous pane's transcript.
     if (
       normalizedDirectory &&
-      processIds.some((processId) => isCodexProcess(this.procRoot, processId))
+      codexProcessIds.length > 0 &&
+      sessionCandidates.length === 1
     ) {
-      return listSessionFiles(this.sessionsRoot)
-        .map((path) => readOpenSession(path))
-        .filter((candidate): candidate is OpenSessionCandidate =>
-          Boolean(
-            candidate &&
-            !candidate.subagent &&
-            resolve(candidate.cwd) === normalizedDirectory,
-          ),
-        )
-        .sort((left, right) => right.mtimeMs - left.mtimeMs)
-        .at(0)?.id;
+      return sessionCandidates[0]?.id;
     }
 
     return undefined;
