@@ -142,6 +142,31 @@ function isCodexProcess(procRoot: string, processId: number): boolean {
   }
 }
 
+function readExplicitResumeSessionId(
+  procRoot: string,
+  processId: number,
+): string | null {
+  try {
+    const arguments_ = readFileSync(
+      join(procRoot, String(processId), "cmdline"),
+      "utf8",
+    )
+      .split("\0")
+      .filter(Boolean);
+    const resumeIndex = arguments_.indexOf("resume");
+    if (resumeIndex < 0) return null;
+
+    for (const argument of arguments_.slice(resumeIndex + 1)) {
+      if (!argument.startsWith("-") && SESSION_ID_PATTERN.test(argument)) {
+        return argument;
+      }
+    }
+  } catch {
+    // The process may exit while its command line is being inspected.
+  }
+  return null;
+}
+
 function readProcessWorkingDirectory(
   procRoot: string,
   processId: number,
@@ -389,6 +414,9 @@ export class CodexSessionLocator {
         : undefined;
     const candidates = new Map<string, OpenSessionCandidate>();
     const processIds = collectProcessTree(this.procRoot, panePid);
+    const codexProcessIds = processIds.filter((processId) =>
+      isCodexProcess(this.procRoot, processId),
+    );
 
     for (const processId of processIds) {
       let descriptors: string[];
@@ -426,16 +454,20 @@ export class CodexSessionLocator {
       }
     }
 
+    const explicitResumeSessionIds = new Set(
+      codexProcessIds
+        .map((processId) =>
+          readExplicitResumeSessionId(this.procRoot, processId),
+        )
+        .filter((sessionId): sessionId is string => Boolean(sessionId)),
+    );
     const openCandidates = [...candidates.values()];
-    if (openCandidates.length > 0) {
+    if (explicitResumeSessionIds.size === 0 && openCandidates.length > 0) {
       return openCandidates.sort(
         (left, right) => right.mtimeMs - left.mtimeMs,
       )[0]?.id;
     }
 
-    const codexProcessIds = processIds.filter((processId) =>
-      isCodexProcess(this.procRoot, processId),
-    );
     const sessionFiles = listSessionFiles(this.sessionsRoot);
     const sessionCandidates = sessionFiles
       .map((path) => readOpenSession(path))
@@ -447,6 +479,22 @@ export class CodexSessionLocator {
             resolve(candidate.cwd) === normalizedDirectory),
         ),
       );
+
+    // `codex resume <session-id>` exposes the selected conversation directly
+    // in the pane process tree. Prefer that exact identity over file recency or
+    // shell-snapshot timing, while still validating the rollout and cwd.
+    for (const sessionId of explicitResumeSessionIds) {
+      if (sessionCandidates.some((candidate) => candidate.id === sessionId)) {
+        return sessionId;
+      }
+    }
+
+    if (openCandidates.length > 0) {
+      return openCandidates.sort(
+        (left, right) => right.mtimeMs - left.mtimeMs,
+      )[0]?.id;
+    }
+
     const sessionCandidateIds = new Set(
       sessionCandidates.map((candidate) => candidate.id),
     );

@@ -84,6 +84,22 @@ function isRemoteAgentSession(
   );
 }
 
+function canProbeLocalTmuxForCodex(
+  session: Pick<
+    AgentSessionRecord,
+    "agentKind" | "hostId" | "sshTarget" | "transportRef"
+  >,
+): boolean {
+  if (isRemoteAgentSession(session) || !session.transportRef?.tmuxSession) {
+    return false;
+  }
+
+  // Process-shaped kinds can become stale when the user switches windows in
+  // one tmux session. Explicit non-Codex agent cards retain their own reader.
+  const agentKind = session.agentKind.trim().toLowerCase();
+  return !["claude", "copilot", "opencode"].includes(agentKind);
+}
+
 function buildAgentInvocation(
   agentKind: string,
   displayName: string,
@@ -588,7 +604,10 @@ export async function registerAgentSessionRoutes(
     Querystring: { cursor?: string; limit?: string };
   }>("/api/agent-sessions/:id/transcript", async (request) => {
     const agentSession = registry.get(request.params.id);
-    if (!isCodexSessionCandidate(agentSession)) {
+    if (
+      !isCodexSessionCandidate(agentSession) &&
+      !canProbeLocalTmuxForCodex(agentSession)
+    ) {
       return {
         available: false,
         agentKind: "codex" as const,

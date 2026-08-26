@@ -712,6 +712,13 @@
 - **修复**: 沿当前 tmux client 的活动 pane 遍历 Codex 进程树，并用进程启动时间匹配 `~/.codex/shell_snapshots/<session-id>.<timestamp>.sh`，再校验顶层 session 和工作目录；同目录存在多个候选但无法确认时不再展示错误记录。
 - **测试**: Codex session locator 覆盖同目录双 Codex 的 pane snapshot 绑定；前端覆盖选中 monitor pane 后完整记录请求使用对应 session ID；真实 `xh3_refmodel` pane 的解析结果与该 pane 内 Codex session ID 一致。
 
+### tmux 卡片类型过期导致完整记录拒绝或命中错误会话
+
+- **现象**: `zhuanli` 卡片最初记录为 `vim`，切换到同一 tmux session 内的 Codex 窗口后点击“完整记录”，无法读取当前对话；旧的同目录回退还可能显示另一个 Codex 的内容。
+- **根因**: transcript 路由在检查活动 tmux pane 前先按卡片创建时的 `agentKind` 拒绝请求；同时 `codex resume <session-id>` 已在进程命令行给出精确 ID，定位器却只依赖打开的 JSONL、工作目录和 shell snapshot。
+- **修复**: 对本机 tmux 的普通进程类型动态探测当前 pane，并继续排除明确的 Claude、Copilot、OpenCode 卡片；解析 `codex resume` 的显式 session ID，且用顶层 rollout 和活动 cwd 二次校验后优先使用。
+- **测试**: 路由回归覆盖 `vim` 类型的 `zhuanli` tmux 卡片仍按活动 pane 解析；定位器回归覆盖同目录多个 rollout 时显式 resume ID 优先；真实页面确认接口与弹窗均精确命中活动 Codex session。
+
 ### 切换输入窗格导致终端高度抖动和整屏重绘
 
 - **现象**: 左右窗格切换输入目标时，选中窗格标题高度变化，两个终端高度互换并触发整屏 fit，看起来像另一窗格重新刷新。

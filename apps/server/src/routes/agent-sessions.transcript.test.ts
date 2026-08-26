@@ -278,6 +278,82 @@ test("GET transcript passes the attached tmux client context to Codex resolution
   await app.close();
 });
 
+test("GET transcript probes the active Codex pane when the tmux card has a stale vim kind", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "vim",
+    displayName: "zhuanli",
+    workingDirectory: "/workspace/zhuanli",
+    connectionState: "online",
+    interactionState: "idle",
+    transportRef: {
+      tmuxSession: "zhuanli",
+      tmuxPane: "%98",
+      processId: 9876,
+    },
+  });
+  let receivedLocatorInput: unknown;
+  let receivedTranscriptInput: unknown;
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {} as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    codexSessionLocator: {
+      async resolve(input) {
+        receivedLocatorInput = input;
+        return "codex-zhuanli-active";
+      },
+    },
+    codexTranscriptService: {
+      read(input) {
+        receivedTranscriptInput = input;
+        return {
+          available: true,
+          agentKind: "codex",
+          sessionId: input.sessionId ?? null,
+          matchedBy: "session-id",
+          updatedAt: "2026-08-26T00:00:00.000Z",
+          entries: [],
+          hasMore: false,
+          nextCursor: null,
+        };
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/agent-sessions/${session.id}/transcript`,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(receivedLocatorInput, {
+    tmuxTarget: "%98",
+    tmuxSession: "zhuanli",
+    tmuxClientProcessId: 9876,
+    workingDirectory: "/workspace/zhuanli",
+  });
+  assert.deepEqual(receivedTranscriptInput, {
+    sessionId: "codex-zhuanli-active",
+    workingDirectory: "/workspace/zhuanli",
+  });
+  assert.equal(
+    (response.json() as AgentTranscriptResponse).sessionId,
+    "codex-zhuanli-active",
+  );
+  await app.close();
+});
+
 test("GET transcript does not fall back to a previous Codex pane when the active pane is a shell", async () => {
   const app = Fastify();
   const registry = new AgentSessionRegistry();

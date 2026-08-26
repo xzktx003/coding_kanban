@@ -352,6 +352,47 @@ test("CodexSessionLocator uses the pane process snapshot when multiple Codex ses
   }
 });
 
+test("CodexSessionLocator uses the explicit resume session id before same-directory recency", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-session-resume-binding-"));
+  const sessionsRoot = join(root, "sessions");
+  const procRoot = join(root, "proc");
+  mkdirSync(sessionsRoot, { recursive: true });
+  mkdirSync(procRoot, { recursive: true });
+
+  try {
+    writeSession(sessionsRoot, "selected", "codex-selected", "cli");
+    writeSession(sessionsRoot, "newer", "codex-newer", "cli");
+
+    const paneRoot = join(procRoot, "801");
+    mkdirSync(join(paneRoot, "task", "801"), { recursive: true });
+    writeFileSync(join(paneRoot, "task", "801", "children"), "802\n");
+    const codexRoot = join(procRoot, "802");
+    mkdirSync(join(codexRoot, "task", "802"), { recursive: true });
+    writeFileSync(join(codexRoot, "task", "802", "children"), "");
+    writeFileSync(
+      join(codexRoot, "cmdline"),
+      "/usr/local/bin/codex\0--yolo\0resume\0codex-selected\0",
+    );
+    exposeProcessWorkingDirectory(procRoot, 802, "/workspace/shared");
+
+    const locator = new CodexSessionLocator({
+      procRoot,
+      sessionsRoot,
+      resolveTmuxPanePid: async () => 801,
+    });
+
+    assert.equal(
+      await locator.resolve({
+        tmuxTarget: "tmux-resumed-codex",
+        workingDirectory: "/workspace/shared",
+      }),
+      "codex-selected",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("CodexSessionLocator ignores newer subagent JSONL files held by the same Codex process", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-session-subagent-"));
   const sessionsRoot = join(root, "sessions");
