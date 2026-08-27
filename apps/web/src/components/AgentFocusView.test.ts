@@ -189,6 +189,23 @@ describe("AgentFocusView", () => {
     );
   });
 
+  it("keeps narrow single-column monitor panes readable and scrollable", () => {
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+    assert.match(
+      css,
+      /@container\s+focus-terminal\s*\(max-width:\s*720px\)\s*{[\s\S]*?\.focus-terminal-layout--quad\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[^}]*grid-template-rows:\s*none;[^}]*overflow-y:\s*auto;[^}]*scrollbar-gutter:\s*stable;/s,
+    );
+    assert.match(
+      css,
+      /@container\s+focus-terminal\s*\(max-width:\s*720px\)\s*{[\s\S]*?\.focus-terminal-layout--dual,[\s\S]*?\.focus-terminal-layout--triple\s*{[^}]*grid-auto-rows:\s*100%;/s,
+    );
+    assert.match(
+      css,
+      /@container\s+focus-terminal\s*\(max-width:\s*720px\)\s*{[\s\S]*?\.focus-terminal-layout--quad,[\s\S]*?\.focus-terminal-layout--eight\s*{[^}]*grid-auto-rows:\s*50%;/s,
+    );
+  });
+
   it("binds the complete transcript action to the active monitor session", () => {
     installLocalStorageStub("quad", {
       mode: "quad",

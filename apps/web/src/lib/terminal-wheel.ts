@@ -82,16 +82,18 @@ export function shouldAllowTerminalWheelToBubble({
   return wheelPassthrough;
 }
 
-export function shouldKeepGroupWheelInsideTerminal({
+export function shouldScrollTerminalLayoutWheel({
   ctrlKey,
+  hasOverflow,
   metaKey,
   shiftKey,
 }: {
   ctrlKey: boolean;
+  hasOverflow: boolean;
   metaKey: boolean;
   shiftKey: boolean;
 }): boolean {
-  return shiftKey && !ctrlKey && !metaKey;
+  return hasOverflow && !ctrlKey && !metaKey && !shiftKey;
 }
 
 export function normalizeTerminalWheelDeltaY({

@@ -53,7 +53,7 @@ import {
 } from "../lib/terminal-workspace-state";
 import {
   normalizeTerminalWheelDeltaY,
-  shouldKeepGroupWheelInsideTerminal,
+  shouldScrollTerminalLayoutWheel,
 } from "../lib/terminal-wheel";
 import { SINGLE_PANE_TERMINAL_CACHE_SIZE } from "../lib/terminal-pane-render-policy";
 
@@ -273,9 +273,9 @@ export function AgentFocusView({
   const [activeGroupSessionId, setActiveGroupSessionId] = useState<
     string | null
   >(null);
-  const groupLayoutScrollElementRef = useRef<HTMLDivElement | null>(null);
-  const groupLayoutScrollDeltaRef = useRef(0);
-  const groupLayoutScrollFrameRef = useRef<number | null>(null);
+  const terminalLayoutScrollElementRef = useRef<HTMLDivElement | null>(null);
+  const terminalLayoutScrollDeltaRef = useRef(0);
+  const terminalLayoutScrollFrameRef = useRef<number | null>(null);
   const [paneContextMenu, setPaneContextMenu] =
     useState<TerminalPaneContextMenuState | null>(null);
   const [restorableTerminalMonitorLayout, setRestorableTerminalMonitorLayout] =
@@ -576,8 +576,8 @@ export function AgentFocusView({
   useEffect(() => {
     return () => {
       removeTerminalMonitorDragPreview();
-      if (groupLayoutScrollFrameRef.current !== null) {
-        cancelAnimationFrame(groupLayoutScrollFrameRef.current);
+      if (terminalLayoutScrollFrameRef.current !== null) {
+        cancelAnimationFrame(terminalLayoutScrollFrameRef.current);
       }
     };
   }, []);
@@ -1196,25 +1196,19 @@ export function AgentFocusView({
     }
   }
 
-  function handleGroupLayoutWheelCapture(
+  function handleTerminalLayoutWheelCapture(
     event: ReactWheelEvent<HTMLDivElement>,
   ) {
-    if (
-      !groupArrangementEnabled ||
-      shouldKeepGroupWheelInsideTerminal({
-        ctrlKey: event.ctrlKey,
-        metaKey: event.metaKey,
-        shiftKey: event.shiftKey,
-      }) ||
-      event.ctrlKey ||
-      event.metaKey
-    ) {
-      return;
-    }
-
     const layout = event.currentTarget;
     const maxScrollTop = layout.scrollHeight - layout.clientHeight;
-    if (maxScrollTop <= 0) {
+    if (
+      !shouldScrollTerminalLayoutWheel({
+        ctrlKey: event.ctrlKey,
+        hasOverflow: maxScrollTop > 1,
+        metaKey: event.metaKey,
+        shiftKey: event.shiftKey,
+      })
+    ) {
       return;
     }
 
@@ -1230,17 +1224,17 @@ export function AgentFocusView({
 
     event.preventDefault();
     event.stopPropagation();
-    groupLayoutScrollElementRef.current = layout;
-    groupLayoutScrollDeltaRef.current += deltaY;
-    if (groupLayoutScrollFrameRef.current !== null) {
+    terminalLayoutScrollElementRef.current = layout;
+    terminalLayoutScrollDeltaRef.current += deltaY;
+    if (terminalLayoutScrollFrameRef.current !== null) {
       return;
     }
 
-    groupLayoutScrollFrameRef.current = requestAnimationFrame(() => {
-      groupLayoutScrollFrameRef.current = null;
-      const scrollElement = groupLayoutScrollElementRef.current;
-      const pendingDelta = groupLayoutScrollDeltaRef.current;
-      groupLayoutScrollDeltaRef.current = 0;
+    terminalLayoutScrollFrameRef.current = requestAnimationFrame(() => {
+      terminalLayoutScrollFrameRef.current = null;
+      const scrollElement = terminalLayoutScrollElementRef.current;
+      const pendingDelta = terminalLayoutScrollDeltaRef.current;
+      terminalLayoutScrollDeltaRef.current = 0;
       if (!scrollElement || pendingDelta === 0) {
         return;
       }
@@ -1594,7 +1588,7 @@ export function AgentFocusView({
                 ? "wheel-layout-shift-terminal"
                 : undefined
             }
-            onWheelCapture={handleGroupLayoutWheelCapture}
+            onWheelCapture={handleTerminalLayoutWheelCapture}
           >
             {displayedTerminalSlots.map((slot, index) => {
               const session = slot.sessionId

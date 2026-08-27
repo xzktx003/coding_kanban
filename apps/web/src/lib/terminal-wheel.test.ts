@@ -10,7 +10,7 @@ import {
   shouldAllowTerminalWheelToBubble,
   shouldCaptureTerminalWheel,
   shouldForwardTerminalWheelToApplication,
-  shouldKeepGroupWheelInsideTerminal,
+  shouldScrollTerminalLayoutWheel,
 } from "./terminal-wheel.js";
 
 function targetInsideOverlay(selector: string): EventTarget {
@@ -173,40 +173,42 @@ describe("shouldAllowTerminalWheelToBubble", () => {
   });
 });
 
-describe("shouldKeepGroupWheelInsideTerminal", () => {
-  it("uses Shift+wheel for terminal history without stealing browser zoom", () => {
+describe("shouldScrollTerminalLayoutWheel", () => {
+  it("scrolls an overflowing narrow monitor layout with an ordinary wheel", () => {
     assert.equal(
-      shouldKeepGroupWheelInsideTerminal({
+      shouldScrollTerminalLayoutWheel({
         ctrlKey: false,
+        hasOverflow: true,
         metaKey: false,
-        shiftKey: true,
+        shiftKey: false,
       }),
       true,
     );
     assert.equal(
-      shouldKeepGroupWheelInsideTerminal({
-        ctrlKey: true,
-        metaKey: false,
-        shiftKey: true,
-      }),
-      false,
-    );
-    assert.equal(
-      shouldKeepGroupWheelInsideTerminal({
+      shouldScrollTerminalLayoutWheel({
         ctrlKey: false,
-        metaKey: true,
-        shiftKey: true,
-      }),
-      false,
-    );
-    assert.equal(
-      shouldKeepGroupWheelInsideTerminal({
-        ctrlKey: false,
+        hasOverflow: false,
         metaKey: false,
         shiftKey: false,
       }),
       false,
     );
+  });
+
+  it("leaves modified wheel gestures to the terminal or browser", () => {
+    for (const modifiers of [
+      { ctrlKey: false, metaKey: false, shiftKey: true },
+      { ctrlKey: true, metaKey: false, shiftKey: false },
+      { ctrlKey: false, metaKey: true, shiftKey: false },
+    ]) {
+      assert.equal(
+        shouldScrollTerminalLayoutWheel({
+          ...modifiers,
+          hasOverflow: true,
+        }),
+        false,
+      );
+    }
   });
 });
 

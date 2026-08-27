@@ -886,6 +886,55 @@ test("multi-pane layout bounds initial replays and keeps queued panes visible", 
   );
 });
 
+test("narrow multi-pane layouts preserve terminal height and scroll the pane list", async ({
+  page,
+}) => {
+  const sessions = Array.from({ length: 6 }, (_, index) =>
+    makeSession({
+      id: `narrow-layout-session-${index + 1}`,
+      displayName: `Narrow Layout ${index + 1}`,
+      outputPreview: `preview ${index + 1}`,
+    }),
+  );
+  await page.setViewportSize({ width: 760, height: 800 });
+  await mockSessions(page, sessions);
+  await page.goto("/");
+
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: "Narrow Layout 1" }),
+    })
+    .dblclick();
+  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page.getByRole("menuitemradio", { name: /六屏/ }).click();
+
+  const layout = page.locator(".focus-terminal-layout--six");
+  await expect(layout.locator(".focus-terminal-pane")).toHaveCount(6);
+  const metrics = await layout.evaluate((element) => {
+    const pane = element.querySelector<HTMLElement>(".focus-terminal-pane");
+    const style = getComputedStyle(element);
+    return {
+      clientHeight: element.clientHeight,
+      columnCount: style.gridTemplateColumns.split(" ").length,
+      overflowY: style.overflowY,
+      paneHeight: pane?.getBoundingClientRect().height ?? 0,
+      scrollHeight: element.scrollHeight,
+    };
+  });
+  expect(metrics.columnCount).toBe(1);
+  expect(metrics.overflowY).toBe("auto");
+  expect(metrics.paneHeight).toBeGreaterThanOrEqual(
+    metrics.clientHeight * 0.45,
+  );
+  expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight * 2.5);
+
+  await layout.hover();
+  await page.mouse.wheel(0, 320);
+  await expect
+    .poll(() => layout.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+});
+
 test("grid sorts sessions into four status columns and stacks them on narrow screens", async ({
   page,
 }) => {
