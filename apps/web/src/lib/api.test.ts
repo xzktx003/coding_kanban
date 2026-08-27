@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildTerminalWebSocketUrl, focusAgentSession } from "./api.js";
+import {
+  buildTerminalWebSocketUrl,
+  fetchMarkdownImage,
+  focusAgentSession,
+} from "./api.js";
 
 function setWindowLocation(protocol: "http:" | "https:", host: string): void {
   Object.defineProperty(globalThis, "window", {
@@ -72,4 +76,31 @@ test("focus requests stay ordered and use lightweight empty responses", async ()
   releaseFirstRequest();
   await Promise.all([first, second, third]);
   assert.deepEqual(requestedSessionIds, ["agent-1", "agent-2", "agent-1"]);
+});
+
+test("fetchMarkdownImage posts path context and returns an image Blob", async () => {
+  let requestBody: unknown;
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async (_input: string | URL | Request, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(new Uint8Array([1, 2, 3]), {
+        headers: { "Content-Type": "image/png" },
+      });
+    },
+  });
+
+  const blob = await fetchMarkdownImage({
+    documentPath: "/workspace/docs/guide.md",
+    rootPath: "/workspace",
+    source: "../assets/diagram.png",
+  });
+
+  assert.equal(blob.type, "image/png");
+  assert.equal(blob.size, 3);
+  assert.deepEqual(requestBody, {
+    documentPath: "/workspace/docs/guide.md",
+    rootPath: "/workspace",
+    source: "../assets/diagram.png",
+  });
 });

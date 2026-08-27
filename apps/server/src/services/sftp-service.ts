@@ -179,6 +179,18 @@ function sftpStat(sftp: SFTPWrapper, remotePath: string): Promise<Attributes> {
   });
 }
 
+function sftpRealpath(sftp: SFTPWrapper, remotePath: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    sftp.realpath(remotePath, (error, resolvedPath) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(resolvedPath);
+    });
+  });
+}
+
 async function readSftpRange(
   sftp: SFTPWrapper,
   remotePath: string,
@@ -437,6 +449,29 @@ export class SftpService {
         const stats = await sftpStat(sftp, remotePath);
         return (stats.mode & 0o40000) !== 0;
       }),
+    );
+  }
+
+  async getFileMetadata(
+    target: SshTarget,
+    inputPath: string,
+  ): Promise<{ isDirectory: boolean; size: number }> {
+    const remotePath = await this.resolveRemotePath(target, inputPath);
+    return this.withConnection(target, async (client) =>
+      withSftp(client, async (sftp) => {
+        const stats = await sftpStat(sftp, remotePath);
+        return {
+          isDirectory: ((stats.mode ?? 0) & 0o170000) === 0o040000,
+          size: Math.max(0, stats.size ?? 0),
+        };
+      }),
+    );
+  }
+
+  async realpath(target: SshTarget, inputPath: string): Promise<string> {
+    const remotePath = await this.resolveRemotePath(target, inputPath);
+    return this.withConnection(target, async (client) =>
+      withSftp(client, (sftp) => sftpRealpath(sftp, remotePath)),
     );
   }
 

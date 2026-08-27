@@ -7829,6 +7829,58 @@ input {
   color: #79d7b5;
 }
 
+.markdown-rendered-content img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  max-height: min(70vh, 920px);
+  margin: 1em auto;
+  object-fit: contain;
+}
+
+.markdown-resource-image {
+  display: grid;
+  min-height: 72px;
+  margin: 1em 0;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  background: rgba(4, 7, 11, 0.42);
+}
+
+.markdown-resource-image > img {
+  margin: 0 auto;
+}
+
+.markdown-resource-image-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 72px;
+  padding: 12px;
+  color: rgba(244, 241, 234, 0.56);
+  font-size: 12px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.markdown-resource-image--error {
+  border-color: rgba(255, 170, 160, 0.22);
+}
+
+.markdown-resource-image-status button {
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid rgba(121, 215, 181, 0.32);
+  border-radius: 5px;
+  background: rgba(121, 215, 181, 0.08);
+  color: #9de7cd;
+  cursor: pointer;
+}
+
 .markdown-rendered-content code {
   padding: 0.12em 0.35em;
   border-radius: 4px;

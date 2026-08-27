@@ -129,6 +129,63 @@ export function guessMimeType(filePath: string): string | null {
   return MIME_TYPES.get(extension) ?? null;
 }
 
+function isPathInside(rootPath: string, candidatePath: string): boolean {
+  const relative = path.posix.relative(rootPath, candidatePath);
+  return (
+    relative === "" ||
+    (!relative.startsWith("../") &&
+      relative !== ".." &&
+      !path.posix.isAbsolute(relative))
+  );
+}
+
+export function assertPathInside(
+  rootPath: string,
+  candidatePath: string,
+): void {
+  if (!isPathInside(rootPath, candidatePath)) {
+    throw new Error("Markdown image is outside the file browser root");
+  }
+}
+
+export function resolveMarkdownImagePath(input: {
+  documentPath: string;
+  rootPath: string;
+  source: string;
+}): string {
+  const documentPath = path.posix.normalize(input.documentPath);
+  const rootPath = path.posix.normalize(input.rootPath);
+  const sourceWithoutSuffix = input.source.split(/[?#]/, 1)[0]?.trim() ?? "";
+  let source: string;
+
+  try {
+    source = decodeURIComponent(sourceWithoutSuffix);
+  } catch {
+    throw new Error("Markdown image path has invalid URL encoding");
+  }
+
+  if (
+    !source ||
+    /[\0\r\n\\]/.test(source) ||
+    /^[a-z][a-z\d+.-]*:/i.test(source) ||
+    source.startsWith("//")
+  ) {
+    throw new Error("source must be a local Markdown image path");
+  }
+
+  assertPathInside(rootPath, documentPath);
+  const normalizedAbsoluteSource = path.posix.normalize(source);
+  const resolvedPath = source.startsWith("/")
+    ? isPathInside(rootPath, normalizedAbsoluteSource)
+      ? normalizedAbsoluteSource
+      : path.posix.normalize(path.posix.join(rootPath, source.slice(1)))
+    : path.posix.normalize(
+        path.posix.join(path.posix.dirname(documentPath), source),
+      );
+  assertPathInside(rootPath, resolvedPath);
+  return resolvedPath;
+}
+
 export function isBinaryBuffer(buffer: Buffer): boolean {
   for (const value of buffer.values()) {
     if (value === 0) {

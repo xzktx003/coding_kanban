@@ -68,7 +68,9 @@ export class LocalFsService {
         if (stats.isSymbolicLink()) {
           try {
             const targetStats = await stat(entryPath);
-            symlinkTargetType = targetStats.isDirectory() ? "directory" : "file";
+            symlinkTargetType = targetStats.isDirectory()
+              ? "directory"
+              : "file";
           } catch {
             // broken symlink — leave symlinkTargetType undefined
           }
@@ -82,8 +84,11 @@ export class LocalFsService {
       entries: results
         .filter((entry: FileEntry) => showHidden || !entry.isHidden)
         .sort((left: FileEntry, right: FileEntry) => {
-          const leftIsDir = left.type === "directory" || left.symlinkTargetType === "directory";
-          const rightIsDir = right.type === "directory" || right.symlinkTargetType === "directory";
+          const leftIsDir =
+            left.type === "directory" || left.symlinkTargetType === "directory";
+          const rightIsDir =
+            right.type === "directory" ||
+            right.symlinkTargetType === "directory";
           if (leftIsDir && !rightIsDir) {
             return -1;
           }
@@ -117,6 +122,14 @@ export class LocalFsService {
 
   createReadStream(inputPath: string) {
     return createReadStream(normalizeLocalPath(inputPath));
+  }
+
+  async getFileMetadata(inputPath: string): Promise<{
+    isDirectory: boolean;
+    size: number;
+  }> {
+    const stats = await stat(normalizeLocalPath(inputPath));
+    return { isDirectory: stats.isDirectory(), size: stats.size };
   }
 
   createWriteStream(inputPath: string) {

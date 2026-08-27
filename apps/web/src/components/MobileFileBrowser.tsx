@@ -503,6 +503,11 @@ export function MobileFileBrowser({
               fallbackClassName="mobile-file-preview-loading"
               fallbackTestId="mobile-markdown-loading"
               fallbackText="正在渲染 Markdown..."
+              resourceContext={{
+                documentPath: entry.path,
+                rootPath: defaultPath,
+                sshTarget,
+              }}
               testId="mobile-markdown-preview"
             />
           ) : preview && displayKind === "text" ? (

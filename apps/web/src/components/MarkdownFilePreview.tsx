@@ -15,6 +15,7 @@ import {
   MARKDOWN_OUTLINE_ITEM_LIMIT,
 } from "../lib/markdown-navigation";
 import { LazyMarkdownContent } from "./LazyMarkdownRenderedContent";
+import type { MarkdownResourceContext } from "./MarkdownImage";
 
 export { normalizeLatexMathDelimiters } from "./markdown-latex";
 
@@ -29,6 +30,7 @@ interface MarkdownFilePreviewProps {
   onModeChange: (mode: MarkdownPreviewMode) => void;
   onSave: () => void;
   readOnly?: boolean;
+  resourceContext?: MarkdownResourceContext;
   saving: boolean;
   showNavigation?: boolean;
   windowNavigation?: {
@@ -56,6 +58,7 @@ export function MarkdownFilePreview({
   onModeChange,
   onSave,
   readOnly = false,
+  resourceContext,
   saving,
   showNavigation = true,
   windowNavigation,
@@ -303,6 +306,7 @@ export function MarkdownFilePreview({
               fallbackTestId="markdown-render-loading"
               fallbackText="正在生成预览..."
               onScroll={handlePreviewScroll}
+              resourceContext={resourceContext}
             />
           )}
         </div>

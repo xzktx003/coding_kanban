@@ -35,6 +35,7 @@ const LazyMarkdownFilePreview = lazy(() =>
 
 interface FileBrowserDrawerProps {
   open: boolean;
+  resourceRootPath?: string;
   scopeKey: string;
   defaultPath?: string;
   sshHosts: Array<{
@@ -305,6 +306,7 @@ function loadFileBrowserColumnWidths(): FileBrowserColumnWidths {
 
 export function FileBrowserDrawer({
   open,
+  resourceRootPath,
   scopeKey,
   defaultPath,
   sshHosts,
@@ -1293,6 +1295,16 @@ export function FileBrowserDrawer({
                           onModeChange={handleMarkdownModeChange}
                           onSave={handleSaveMarkdown}
                           readOnly={!markdownPreviewWindow?.complete}
+                          resourceContext={{
+                            documentPath: markdownEditorState.path,
+                            rootPath:
+                              selectedHost.type === "ssh"
+                                ? selectedHost.preset.defaultPath
+                                : (resourceRootPath ??
+                                  defaultPath ??
+                                  currentPath),
+                            sshTarget,
+                          }}
                           saving={savingMarkdown}
                           showNavigation={previewExpanded}
                           windowNavigation={

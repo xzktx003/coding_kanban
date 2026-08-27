@@ -569,6 +569,13 @@ export interface FilePreviewResponse {
   nextOffset: number | null;
 }
 
+export interface MarkdownImageInput {
+  documentPath: string;
+  rootPath: string;
+  source: string;
+  sshTarget?: SshTarget;
+}
+
 export interface ChmodInput {
   path: string;
   mode: string;

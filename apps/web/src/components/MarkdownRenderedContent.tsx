@@ -6,6 +6,7 @@ import remarkMath from "remark-math";
 
 import { normalizeLatexMathDelimiters } from "./markdown-latex";
 import { createMarkdownHeadingId } from "../lib/markdown-navigation";
+import { MarkdownImage, type MarkdownResourceContext } from "./MarkdownImage";
 
 if (typeof document !== "undefined") {
   void import("katex/dist/katex.min.css");
@@ -16,6 +17,7 @@ interface MarkdownRenderedContentProps {
   content: string;
   contentRef?: Ref<HTMLElement>;
   onScroll?: UIEventHandler<HTMLElement>;
+  resourceContext?: MarkdownResourceContext;
   testId?: string;
 }
 
@@ -24,6 +26,7 @@ export const MarkdownRenderedContent = memo(function MarkdownRenderedContent({
   content,
   contentRef,
   onScroll,
+  resourceContext,
   testId = "markdown-rendered",
 }: MarkdownRenderedContentProps) {
   const normalizedContent = useMemo(
@@ -79,6 +82,14 @@ export const MarkdownRenderedContent = memo(function MarkdownRenderedContent({
             <h6
               {...props}
               id={createMarkdownHeadingId(node?.position?.start.line)}
+            />
+          ),
+          img: ({ alt, node: _node, src, title }) => (
+            <MarkdownImage
+              alt={alt}
+              resourceContext={resourceContext}
+              source={src}
+              title={title}
             />
           ),
         }}

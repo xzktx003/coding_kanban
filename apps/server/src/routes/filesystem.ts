@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, stat } from "node:fs/promises";
+import { mkdir, realpath, stat } from "node:fs/promises";
 import { pipeline } from "node:stream/promises";
 import path from "node:path";
 
@@ -14,12 +14,18 @@ import type {
   FilePreviewInput,
   FileUploadResponse,
   ListFilesInput,
+  MarkdownImageInput,
   SshTarget,
 } from "@agent-orchestrator/shared";
 
 import { LocalFsService } from "../services/local-fs-service.js";
 import { SftpService } from "../services/sftp-service.js";
-import { assertSafeFilesystemPath } from "../services/file-system-utils.js";
+import {
+  assertPathInside,
+  assertSafeFilesystemPath,
+  guessMimeType,
+  resolveMarkdownImagePath,
+} from "../services/file-system-utils.js";
 
 interface FilesystemRouteOptions {
   localFsService: LocalFsService;
@@ -34,15 +40,14 @@ const { ZipArchive } = archiverModule as unknown as {
   ZipArchive: ZipArchiveConstructor;
 };
 
+const MAX_MARKDOWN_IMAGE_BYTES = 16 * 1024 * 1024;
+
 /**
  * Build a Content-Disposition header that handles non-ASCII filenames.
  * Uses RFC 5987 encoding (filename*=UTF-8''...) for names containing
  * non-ASCII characters, and a plain ASCII fallback for the filename param.
  */
-function buildContentDisposition(
-  basename: string,
-  suffix = "",
-): string {
+function buildContentDisposition(basename: string, suffix = ""): string {
   const full = suffix ? basename + suffix : basename;
   const hasNonAscii = /[^ -~]/.test(full);
   if (!hasNonAscii) {
@@ -56,7 +61,7 @@ function buildContentDisposition(
     .replace(/[^\x20-\x7e]/g, "_")
     .replace(/_{2,}/g, "_")
     .replace(/^_+|_+$/g, "");
-  return `attachment; filename="${asciiFallback || 'download'}"; filename*=UTF-8\''${encoded}`;
+  return `attachment; filename="${asciiFallback || "download"}"; filename*=UTF-8\''${encoded}`;
 }
 
 function parseMaybeSshTarget(value: string | undefined): SshTarget | undefined {
@@ -103,6 +108,22 @@ function getErrorStatusCode(error: unknown): number {
   }
 
   if (message.includes("cannot contain")) {
+    return 400;
+  }
+
+  if (message.includes("Unsupported Markdown image type")) {
+    return 415;
+  }
+
+  if (message.includes("Markdown image exceeds")) {
+    return 413;
+  }
+
+  if (
+    message.includes("Markdown image") ||
+    message.includes("local Markdown image path") ||
+    message.includes("invalid URL encoding")
+  ) {
     return 400;
   }
 
@@ -223,6 +244,96 @@ export async function registerFilesystemRoutes(
     },
   );
 
+  fastify.post<{ Body: MarkdownImageInput }>(
+    "/api/fs/markdown-image",
+    async (request, reply) => {
+      try {
+        const { documentPath, rootPath, source, sshTarget } = request.body;
+        if (!documentPath?.trim() || !rootPath?.trim() || !source?.trim()) {
+          reply.code(400);
+          return { error: "documentPath, rootPath, and source are required" };
+        }
+
+        let imagePath: string;
+        let imageSize: number;
+
+        if (sshTarget) {
+          const resolvedRoot = await sftpService.resolveRemotePath(
+            sshTarget,
+            rootPath,
+          );
+          const resolvedDocument = await sftpService.resolveRemotePath(
+            sshTarget,
+            documentPath,
+          );
+          const candidate = resolveMarkdownImagePath({
+            documentPath: resolvedDocument,
+            rootPath: resolvedRoot,
+            source,
+          });
+          const [canonicalRoot, canonicalImage] = await Promise.all([
+            sftpService.realpath(sshTarget, resolvedRoot),
+            sftpService.realpath(sshTarget, candidate),
+          ]);
+          assertPathInside(canonicalRoot, canonicalImage);
+          const metadata = await sftpService.getFileMetadata(
+            sshTarget,
+            canonicalImage,
+          );
+          if (metadata.isDirectory) {
+            throw new Error("Unsupported Markdown image type");
+          }
+          imagePath = canonicalImage;
+          imageSize = metadata.size;
+        } else {
+          const resolvedRoot = localFsService.resolvePath(rootPath);
+          const resolvedDocument = localFsService.resolvePath(documentPath);
+          const candidate = resolveMarkdownImagePath({
+            documentPath: resolvedDocument,
+            rootPath: resolvedRoot,
+            source,
+          });
+          const [canonicalRoot, canonicalImage] = await Promise.all([
+            realpath(resolvedRoot),
+            realpath(candidate),
+          ]);
+          assertPathInside(canonicalRoot, canonicalImage);
+          const metadata = await localFsService.getFileMetadata(canonicalImage);
+          if (metadata.isDirectory) {
+            throw new Error("Unsupported Markdown image type");
+          }
+          imagePath = canonicalImage;
+          imageSize = metadata.size;
+        }
+
+        const mimeType = guessMimeType(imagePath);
+        if (!mimeType?.startsWith("image/")) {
+          throw new Error("Unsupported Markdown image type");
+        }
+        if (imageSize > MAX_MARKDOWN_IMAGE_BYTES) {
+          throw new Error(
+            `Markdown image exceeds ${MAX_MARKDOWN_IMAGE_BYTES} bytes`,
+          );
+        }
+
+        const imageStream = sshTarget
+          ? await sftpService.createReadStream(sshTarget, imagePath)
+          : localFsService.createReadStream(imagePath);
+
+        reply.header("Cache-Control", "private, max-age=60");
+        reply.header("Content-Length", imageSize);
+        reply.header("Content-Type", mimeType);
+        reply.header("X-Content-Type-Options", "nosniff");
+        return reply.send(imageStream);
+      } catch (error) {
+        reply.code(getErrorStatusCode(error));
+        return {
+          error: error instanceof Error ? error.message : "Unknown error",
+        };
+      }
+    },
+  );
+
   fastify.post<{ Body: ChmodInput }>(
     "/api/fs/chmod",
     async (request, reply) => {
@@ -308,10 +419,7 @@ export async function registerFilesystemRoutes(
         }
 
         const stream = localFsService.createReadStream(targetPath);
-        reply.header(
-          "Content-Disposition",
-          buildContentDisposition(basename),
-        );
+        reply.header("Content-Disposition", buildContentDisposition(basename));
         reply.header("Content-Type", "application/octet-stream");
         return reply.send(stream);
       } catch (error) {

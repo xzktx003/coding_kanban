@@ -32,6 +32,7 @@ import type {
   RestoreManagedSessionsResponse,
   ScanDirectoryInput,
   ScanDirectoryResponse,
+  MarkdownImageInput,
   SshHostsResponse,
   StdinAgentSessionInput,
   TerminalHistoryDiagnosticsResponse,
@@ -564,6 +565,37 @@ export function previewFile(
     method: "POST",
     body: JSON.stringify(body),
   });
+}
+
+export async function fetchMarkdownImage(
+  body: MarkdownImageInput,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const response = await fetch(`${apiBaseUrl}/api/fs/markdown-image`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!response.ok) {
+    let message = `图片读取失败 (${response.status})`;
+    try {
+      const payload = (await response.json()) as { error?: string };
+      if (payload.error) message = payload.error;
+    } catch {
+      // Keep the status-based fallback for non-JSON proxy errors.
+    }
+    throw new Error(message);
+  }
+
+  const contentType = response.headers.get("Content-Type") ?? "";
+  if (!contentType.startsWith("image/")) {
+    throw new Error("服务器返回了非图片内容");
+  }
+  return response.blob();
 }
 
 export function chmodFile(body: ChmodInput): Promise<{ ok: true }> {

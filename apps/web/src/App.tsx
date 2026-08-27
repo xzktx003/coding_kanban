@@ -1745,6 +1745,10 @@ export default function App() {
                 <FileBrowserDrawer
                   key={focusedSession.id}
                   open={fileBrowserOpen}
+                  resourceRootPath={
+                    focusedSession.repositoryRoot ??
+                    focusedSession.workingDirectory
+                  }
                   scopeKey={focusedSession.id}
                   defaultPath={
                     focusedSession.sshTarget

@@ -9,6 +9,8 @@ import {
   type UIEventHandler,
 } from "react";
 
+import type { MarkdownResourceContext } from "./MarkdownImage";
+
 const LazyMarkdownRenderedContent = lazy(() =>
   import("./MarkdownRenderedContent").then((module) => ({
     default: module.MarkdownRenderedContent,
@@ -24,6 +26,7 @@ interface LazyMarkdownContentProps {
   fallbackTestId?: string;
   fallbackText: string;
   onScroll?: UIEventHandler<HTMLElement>;
+  resourceContext?: MarkdownResourceContext;
   testId?: string;
 }
 
@@ -36,6 +39,7 @@ export const LazyMarkdownContent = memo(function LazyMarkdownContent({
   fallbackTestId,
   fallbackText,
   onScroll,
+  resourceContext,
   testId,
 }: LazyMarkdownContentProps) {
   const canDefer =
@@ -88,6 +92,7 @@ export const LazyMarkdownContent = memo(function LazyMarkdownContent({
         content={content}
         contentRef={contentRef}
         onScroll={onScroll}
+        resourceContext={resourceContext}
         testId={testId}
       />
     </Suspense>

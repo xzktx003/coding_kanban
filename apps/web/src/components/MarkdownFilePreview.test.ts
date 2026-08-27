@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -67,6 +68,35 @@ test("renders GitHub-flavored Markdown safely in preview mode", () => {
   assert.doesNotMatch(markup, /<script>/);
   assert.match(controls, /data-testid="markdown-mode-preview"/);
   assert.match(controls, /data-testid="markdown-render(?:ed|-loading)"/);
+});
+
+test("keeps remote images direct and defers project images to the resource loader", () => {
+  const markup = renderToStaticMarkup(
+    createElement(MarkdownRenderedContent, {
+      content:
+        "![Local diagram](../assets/diagram.png)\n\n![Remote](https://example.com/cover.png)",
+      resourceContext: {
+        documentPath: "/workspace/project/docs/guide.md",
+        rootPath: "/workspace/project",
+      },
+    }),
+  );
+
+  assert.match(
+    markup,
+    /data-markdown-image-source="\.\.\/assets\/diagram\.png"/,
+  );
+  assert.match(markup, /图片将在滚动到附近时加载/);
+  assert.match(markup, /src="https:\/\/example\.com\/cover\.png"/);
+  assert.match(markup, /loading="lazy"/);
+});
+
+test("passes the active document context into the lazy Markdown renderer", () => {
+  const source = readFileSync(
+    new URL("./MarkdownFilePreview.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /resourceContext={resourceContext}/);
 });
 
 test("renders inline and display LaTeX formulas with accessible MathML", () => {
