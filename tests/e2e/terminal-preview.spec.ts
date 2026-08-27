@@ -471,6 +471,67 @@ test("complete transcript starts at the newest page and loads older pages upward
     .toBeGreaterThan(0);
 });
 
+test("complete transcript controls stay above app chrome in a compact desktop window", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 880, height: 480 });
+  const session = makeSession({
+    id: "compact-transcript-session",
+    displayName: "Compact Transcript Session",
+  });
+  await mockSessions(page, [session]);
+  let transcriptRequests = 0;
+  await page.route(
+    "**/api/agent-sessions/compact-transcript-session/transcript**",
+    async (route) => {
+      transcriptRequests += 1;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          available: true,
+          agentKind: "codex",
+          sessionId: "codex-compact-transcript",
+          matchedBy: "session-id",
+          updatedAt: "2026-08-27T00:00:00.000Z",
+          hasMore: false,
+          nextCursor: null,
+          entries: [],
+        }),
+      });
+    },
+  );
+
+  await page.goto("/");
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: session.displayName }),
+    })
+    .dblclick();
+  await page.getByRole("button", { name: "完整记录" }).click();
+
+  const backdrop = page.locator(".agent-transcript-backdrop");
+  const refresh = page.getByRole("button", { name: "刷新" });
+  const close = page.getByRole("button", { name: "关闭", exact: true });
+  await expect(backdrop).toBeVisible();
+  expect(
+    await backdrop.evaluate(
+      (element) => element.parentElement === document.body,
+    ),
+  ).toBe(true);
+
+  for (const control of [refresh, close]) {
+    const bounds = await control.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds?.y ?? -1).toBeGreaterThanOrEqual(0);
+    expect((bounds?.y ?? 0) + (bounds?.height ?? 0)).toBeLessThanOrEqual(480);
+  }
+
+  await refresh.click();
+  await expect.poll(() => transcriptRequests).toBe(2);
+  await close.click();
+  await expect(backdrop).toHaveCount(0);
+});
+
 test("complete transcript follows the selected monitor pane", async ({
   page,
 }) => {

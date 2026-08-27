@@ -202,6 +202,21 @@ test("initial transcript remains pinned while deferred Markdown changes height",
   assert.match(source, /onTouchStart={cancelInitialBottomPin}/);
 });
 
+test("mounts the transcript modal at document body above application chrome", () => {
+  const source = readFileSync(
+    new URL("./AgentTranscriptDialog.tsx", import.meta.url),
+    "utf8",
+  );
+  const styles = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+  assert.match(source, /createPortal\(view, document\.body\)/);
+  assert.match(styles, /\.agent-transcript-backdrop\s*{[^}]*z-index:\s*5100;/s);
+  assert.match(
+    styles,
+    /\.agent-transcript-dialog\s*{[^}]*max-height:\s*calc\(\s*100dvh\s*-\s*var\(--agent-transcript-inset\)\s*-\s*var\(--agent-transcript-inset\)\s*\);/s,
+  );
+});
+
 test("lightweight transcript window keeps the newly loaded older records bounded", () => {
   const page = (start: number, count: number): AgentTranscriptResponse => ({
     available: true,

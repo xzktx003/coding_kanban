@@ -8,7 +8,10 @@ import {
   MarkdownFilePreview,
   normalizeLatexMathDelimiters,
 } from "./MarkdownFilePreview.js";
-import { MarkdownRenderedContent } from "./MarkdownRenderedContent.js";
+import {
+  areMarkdownRenderedContentPropsEqual,
+  MarkdownRenderedContent,
+} from "./MarkdownRenderedContent.js";
 
 const markdown = `# Project
 
@@ -97,6 +100,48 @@ test("passes the active document context into the lazy Markdown renderer", () =>
     "utf8",
   );
   assert.match(source, /resourceContext={resourceContext}/);
+});
+
+test("keeps an equivalent Markdown image context mounted across parent refreshes", () => {
+  const previous = {
+    content: "![Diagram](../assets/diagram.png)",
+    resourceContext: {
+      documentPath: "/workspace/project/docs/guide.md",
+      rootPath: "/workspace/project",
+      sshTarget: {
+        host: "example.test",
+        port: 22,
+        username: "developer",
+      },
+    },
+  };
+  const next = {
+    ...previous,
+    resourceContext: {
+      ...previous.resourceContext,
+      sshTarget: { ...previous.resourceContext.sshTarget },
+    },
+  };
+
+  assert.equal(areMarkdownRenderedContentPropsEqual(previous, next), true);
+  assert.equal(
+    areMarkdownRenderedContentPropsEqual(previous, {
+      ...next,
+      resourceContext: {
+        ...next.resourceContext,
+        documentPath: "/workspace/project/docs/other.md",
+      },
+    }),
+    false,
+  );
+  assert.equal(
+    (
+      MarkdownRenderedContent as unknown as {
+        compare?: typeof areMarkdownRenderedContentPropsEqual;
+      }
+    ).compare,
+    areMarkdownRenderedContentPropsEqual,
+  );
 });
 
 test("renders inline and display LaTeX formulas with accessible MathML", () => {

@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 
 import type { AgentTranscriptResponse } from "@agent-orchestrator/shared";
 
@@ -505,7 +506,7 @@ export function AgentTranscriptDialog({
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [onClose]);
 
-  return (
+  const view = (
     <div
       className="agent-transcript-backdrop"
       onPointerDown={(event) => {
@@ -575,4 +576,8 @@ export function AgentTranscriptDialog({
       </section>
     </div>
   );
+
+  return typeof document === "undefined"
+    ? view
+    : createPortal(view, document.body);
 }

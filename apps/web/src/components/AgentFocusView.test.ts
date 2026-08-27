@@ -172,6 +172,23 @@ describe("AgentFocusView", () => {
     );
   });
 
+  it("keeps multi-screen grids intact until the terminal area is truly narrow", () => {
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+    assert.match(
+      css,
+      /\.focus-main-terminal\s*{[^}]*container:\s*focus-terminal\s*\/\s*inline-size;/s,
+    );
+    assert.match(
+      css,
+      /@container\s+focus-terminal\s*\(max-width:\s*720px\)\s*{[\s\S]*?\.focus-terminal-layout--six[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);/,
+    );
+    assert.doesNotMatch(
+      css,
+      /@media\s*\(max-width:\s*1180px\)\s*{[\s\S]*?\.focus-terminal-layout--six/,
+    );
+  });
+
   it("binds the complete transcript action to the active monitor session", () => {
     installLocalStorageStub("quad", {
       mode: "quad",
