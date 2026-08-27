@@ -9,6 +9,7 @@ import {
   useTransition,
   type CSSProperties,
 } from "react";
+import { createPortal } from "react-dom";
 
 import type {
   FileEntry,
@@ -316,6 +317,8 @@ export function FileBrowserDrawer({
   const PREVIEW_HEIGHT_STORAGE_KEY = "file-browser-preview-height";
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const fullscreenPreviewTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const fullscreenPreviewExitRef = useRef<HTMLButtonElement | null>(null);
   const previewResizeRef = useRef<{
     startY: number;
     startHeight: number;
@@ -353,6 +356,7 @@ export function FileBrowserDrawer({
     setMarkdownWindowLoading(false);
   }, []);
   const [previewExpanded, setPreviewExpanded] = useState(false);
+  const [previewFullscreen, setPreviewFullscreen] = useState(false);
   const [savingMarkdown, setSavingMarkdown] = useState(false);
   const [, startMarkdownPreviewTransition] = useTransition();
   const [chmodState, setChmodState] = useState<ChmodState | null>(null);
@@ -418,9 +422,67 @@ export function FileBrowserDrawer({
   useEffect(() => {
     setContextMenu(null);
     setPreviewExpanded(false);
+    setPreviewFullscreen(false);
     selectedFilePathRef.current = null;
     resetMarkdownWindow();
   }, [resetMarkdownWindow, selectedHost]);
+
+  useEffect(() => {
+    if (!previewFullscreen) return;
+
+    const previousBodyOverflow = document.body.style.overflow;
+    const focusFrame = window.requestAnimationFrame(() => {
+      fullscreenPreviewExitRef.current?.focus();
+    });
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setPreviewFullscreen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+
+      const fullscreenPreview = fullscreenPreviewExitRef.current?.closest(
+        ".file-browser-fullscreen-preview",
+      );
+      if (!fullscreenPreview) return;
+
+      const focusableElements = Array.from(
+        fullscreenPreview.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => element.offsetParent !== null);
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements.at(-1);
+      if (!firstFocusable || !lastFocusable) {
+        event.preventDefault();
+        return;
+      }
+
+      if (
+        event.shiftKey &&
+        (document.activeElement === firstFocusable ||
+          !fullscreenPreview.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        lastFocusable.focus();
+      } else if (!event.shiftKey && document.activeElement === lastFocusable) {
+        event.preventDefault();
+        firstFocusable.focus();
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", handleKeyDown, true);
+      document.body.style.overflow = previousBodyOverflow;
+      window.requestAnimationFrame(() => {
+        fullscreenPreviewTriggerRef.current?.focus();
+      });
+    };
+  }, [previewFullscreen]);
 
   useEffect(() => {
     function handleCloseContextMenu() {
@@ -521,6 +583,7 @@ export function FileBrowserDrawer({
   useEffect(() => {
     if (!selectedFile) {
       setPreviewExpanded(false);
+      setPreviewFullscreen(false);
     }
   }, [selectedFile]);
 
@@ -767,6 +830,7 @@ export function FileBrowserDrawer({
     }
 
     setEditorState(null);
+    setPreviewFullscreen(false);
     setPreviewExpanded(false);
   }
 
@@ -808,6 +872,265 @@ export function FileBrowserDrawer({
     }
 
     return `${column.label} ${sortDirection === "asc" ? "↑" : "↓"}`;
+  }
+
+  function renderFilePreview(fullscreen: boolean) {
+    const previewAvailable = Boolean(
+      selectedFile && preview?.path === selectedFile.path,
+    );
+    const showMarkdownNavigation = previewExpanded || fullscreen;
+
+    return (
+      <section
+        aria-label={
+          fullscreen ? `${selectedFile?.name ?? "文件"} 全屏预览` : undefined
+        }
+        aria-modal={fullscreen ? "true" : undefined}
+        className={`file-browser-preview${fullscreen ? " file-browser-fullscreen-preview" : ""}`}
+        role={fullscreen ? "dialog" : undefined}
+      >
+        <div className="file-browser-pane-title">
+          {!fullscreen && previewExpanded && (
+            <button
+              aria-label="返回文件列表"
+              className="file-browser-inline-back"
+              onClick={handleReturnToFileList}
+              type="button"
+            >
+              ← 文件列表
+            </button>
+          )}
+          <span>{fullscreen ? "文件预览" : "预览"}</span>
+          {selectedFile && (
+            <span className="file-browser-pane-hint">{selectedFile.name}</span>
+          )}
+          {previewAvailable && (
+            <button
+              aria-label={fullscreen ? "退出全屏预览" : "全屏预览"}
+              className="file-browser-fullscreen-toggle"
+              onClick={() => setPreviewFullscreen(!fullscreen)}
+              ref={
+                fullscreen
+                  ? fullscreenPreviewExitRef
+                  : fullscreenPreviewTriggerRef
+              }
+              title={fullscreen ? "退出全屏预览（Esc）" : "全屏预览文件"}
+              type="button"
+            >
+              {fullscreen ? "退出全屏" : "全屏预览"}
+            </button>
+          )}
+        </div>
+        <div className="file-browser-preview-body">
+          {selectedFile ? (
+            isTextPreview(preview) ? (
+              <>
+                {selectedMarkdownPreview && sshTarget && (
+                  <div className="file-browser-preview-actions">
+                    <button
+                      className="file-browser-pill"
+                      onClick={() =>
+                        setChmodState({
+                          path: selectedFile.path,
+                          value: toModeFromPermissions(
+                            selectedFile.permissions,
+                          ),
+                        })
+                      }
+                      type="button"
+                    >
+                      chmod
+                    </button>
+                  </div>
+                )}
+                {selectedMarkdownPreview && markdownEditorState ? (
+                  <Suspense
+                    fallback={
+                      <div className="file-browser-preview-empty">
+                        正在加载 Markdown 预览...
+                      </div>
+                    }
+                  >
+                    {markdownWindowError && (
+                      <div className="file-browser-inline-error" role="alert">
+                        {markdownWindowError}
+                      </div>
+                    )}
+                    <LazyMarkdownFilePreview
+                      content={markdownEditorState.content}
+                      dirty={
+                        markdownPreviewWindow?.complete === true &&
+                        markdownEditorState.content !==
+                          markdownEditorState.savedContent
+                      }
+                      loading={markdownWindowLoading}
+                      mode={markdownEditorState.mode}
+                      onContentChange={(content) =>
+                        setMarkdownEditorState((current) =>
+                          current &&
+                          markdownPreviewWindow?.complete &&
+                          !markdownWindowLoading
+                            ? { ...current, content }
+                            : current,
+                        )
+                      }
+                      onModeChange={handleMarkdownModeChange}
+                      onSave={handleSaveMarkdown}
+                      readOnly={!markdownPreviewWindow?.complete}
+                      resourceContext={{
+                        documentPath: markdownEditorState.path,
+                        rootPath:
+                          selectedHost.type === "ssh"
+                            ? selectedHost.preset.defaultPath
+                            : (resourceRootPath ?? defaultPath ?? currentPath),
+                        sshTarget,
+                      }}
+                      saving={savingMarkdown}
+                      showNavigation={showMarkdownNavigation}
+                      windowNavigation={
+                        showMarkdownNavigation &&
+                        markdownPreviewWindow &&
+                        (markdownWindowHistory.length > 0 ||
+                          markdownPreviewWindow.nextOffset !== null)
+                          ? {
+                              label: formatMarkdownWindowRange(
+                                markdownPreviewWindow,
+                              ),
+                              loading: markdownWindowLoading,
+                              nextAvailable:
+                                markdownPreviewWindow.nextOffset !== null,
+                              onNext: () => {
+                                void loadNextMarkdownWindow();
+                              },
+                              onPrevious: () => {
+                                void loadPreviousMarkdownWindow();
+                              },
+                              previousAvailable:
+                                markdownWindowHistory.length > 0,
+                            }
+                          : undefined
+                      }
+                    />
+                  </Suspense>
+                ) : (
+                  <>
+                    <div className="file-browser-preview-actions">
+                      {editorState?.path === selectedFile.path ? (
+                        <>
+                          {editorState.content !== editorState.savedContent && (
+                            <span className="markdown-file-preview-dirty">
+                              未保存
+                            </span>
+                          )}
+                          <button
+                            className="file-browser-pill"
+                            onClick={() => {
+                              if (
+                                editorState.content !==
+                                  editorState.savedContent &&
+                                !window.confirm(
+                                  "当前文件有未保存修改，确定退出编辑？",
+                                )
+                              ) {
+                                return;
+                              }
+                              setEditorState(null);
+                            }}
+                            type="button"
+                          >
+                            退出编辑
+                          </button>
+                          <button
+                            className="file-browser-pill"
+                            disabled={
+                              editorState.content === editorState.savedContent
+                            }
+                            onClick={async () => {
+                              const { path, content } = editorState;
+                              await saveTextFile(path, content);
+                              setEditorState((current) =>
+                                current?.path === path
+                                  ? { ...current, savedContent: content }
+                                  : current,
+                              );
+                            }}
+                            type="button"
+                          >
+                            保存
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="file-browser-pill"
+                          onClick={() => handleOpenEditor(selectedFile)}
+                          type="button"
+                        >
+                          编辑
+                        </button>
+                      )}
+                      {sshTarget && (
+                        <button
+                          className="file-browser-pill"
+                          onClick={() =>
+                            setChmodState({
+                              path: selectedFile.path,
+                              value: toModeFromPermissions(
+                                selectedFile.permissions,
+                              ),
+                            })
+                          }
+                          type="button"
+                        >
+                          chmod
+                        </button>
+                      )}
+                    </div>
+                    {editorState?.path === selectedFile.path ? (
+                      <textarea
+                        aria-label={`${selectedFile.name} 源码编辑器`}
+                        className="file-browser-editor file-browser-editor--inline"
+                        onChange={(event) =>
+                          setEditorState((current) =>
+                            current
+                              ? { ...current, content: event.target.value }
+                              : current,
+                          )
+                        }
+                        spellCheck={false}
+                        value={editorState.content}
+                      />
+                    ) : (
+                      <pre className="file-browser-preview-text">
+                        {preview.content}
+                      </pre>
+                    )}
+                  </>
+                )}
+              </>
+            ) : imagePreview ? (
+              <img
+                alt={selectedFile.name}
+                className="file-browser-preview-image"
+                src={`data:${imagePreview.mimeType};base64,${imagePreview.content}`}
+              />
+            ) : (
+              <div className="file-browser-preview-meta">
+                <div>名称：{selectedFile.name}</div>
+                <div>大小：{formatSize(selectedFile.size)}</div>
+                <div>权限：{selectedFile.permissions}</div>
+                <div>
+                  时间：{new Date(selectedFile.modifiedAt).toLocaleString()}
+                </div>
+              </div>
+            )
+          ) : (
+            <div className="file-browser-preview-empty">
+              选择一个文件查看预览
+            </div>
+          )}
+        </div>
+      </section>
+    );
   }
 
   return (
@@ -1217,243 +1540,13 @@ export function FileBrowserDrawer({
             role="separator"
           />
 
-          <div className="file-browser-preview">
-            <div className="file-browser-pane-title">
-              {previewExpanded && (
-                <button
-                  aria-label="返回文件列表"
-                  className="file-browser-inline-back"
-                  onClick={handleReturnToFileList}
-                  type="button"
-                >
-                  ← 文件列表
-                </button>
-              )}
-              <span>预览</span>
-              {selectedFile && (
-                <span className="file-browser-pane-hint">
-                  {selectedFile.name}
-                </span>
-              )}
-            </div>
-            <div className="file-browser-preview-body">
-              {selectedFile ? (
-                isTextPreview(preview) ? (
-                  <>
-                    {selectedMarkdownPreview && sshTarget && (
-                      <div className="file-browser-preview-actions">
-                        <button
-                          className="file-browser-pill"
-                          onClick={() =>
-                            setChmodState({
-                              path: selectedFile.path,
-                              value: toModeFromPermissions(
-                                selectedFile.permissions,
-                              ),
-                            })
-                          }
-                          type="button"
-                        >
-                          chmod
-                        </button>
-                      </div>
-                    )}
-                    {selectedMarkdownPreview && markdownEditorState ? (
-                      <Suspense
-                        fallback={
-                          <div className="file-browser-preview-empty">
-                            正在加载 Markdown 预览...
-                          </div>
-                        }
-                      >
-                        {markdownWindowError && (
-                          <div
-                            className="file-browser-inline-error"
-                            role="alert"
-                          >
-                            {markdownWindowError}
-                          </div>
-                        )}
-                        <LazyMarkdownFilePreview
-                          content={markdownEditorState.content}
-                          dirty={
-                            markdownPreviewWindow?.complete === true &&
-                            markdownEditorState.content !==
-                              markdownEditorState.savedContent
-                          }
-                          loading={markdownWindowLoading}
-                          mode={markdownEditorState.mode}
-                          onContentChange={(content) =>
-                            setMarkdownEditorState((current) =>
-                              current &&
-                              markdownPreviewWindow?.complete &&
-                              !markdownWindowLoading
-                                ? { ...current, content }
-                                : current,
-                            )
-                          }
-                          onModeChange={handleMarkdownModeChange}
-                          onSave={handleSaveMarkdown}
-                          readOnly={!markdownPreviewWindow?.complete}
-                          resourceContext={{
-                            documentPath: markdownEditorState.path,
-                            rootPath:
-                              selectedHost.type === "ssh"
-                                ? selectedHost.preset.defaultPath
-                                : (resourceRootPath ??
-                                  defaultPath ??
-                                  currentPath),
-                            sshTarget,
-                          }}
-                          saving={savingMarkdown}
-                          showNavigation={previewExpanded}
-                          windowNavigation={
-                            previewExpanded &&
-                            markdownPreviewWindow &&
-                            (markdownWindowHistory.length > 0 ||
-                              markdownPreviewWindow.nextOffset !== null)
-                              ? {
-                                  label: formatMarkdownWindowRange(
-                                    markdownPreviewWindow,
-                                  ),
-                                  loading: markdownWindowLoading,
-                                  nextAvailable:
-                                    markdownPreviewWindow.nextOffset !== null,
-                                  onNext: () => {
-                                    void loadNextMarkdownWindow();
-                                  },
-                                  onPrevious: () => {
-                                    void loadPreviousMarkdownWindow();
-                                  },
-                                  previousAvailable:
-                                    markdownWindowHistory.length > 0,
-                                }
-                              : undefined
-                          }
-                        />
-                      </Suspense>
-                    ) : (
-                      <>
-                        <div className="file-browser-preview-actions">
-                          {editorState?.path === selectedFile.path ? (
-                            <>
-                              {editorState.content !==
-                                editorState.savedContent && (
-                                <span className="markdown-file-preview-dirty">
-                                  未保存
-                                </span>
-                              )}
-                              <button
-                                className="file-browser-pill"
-                                onClick={() => {
-                                  if (
-                                    editorState.content !==
-                                      editorState.savedContent &&
-                                    !window.confirm(
-                                      "当前文件有未保存修改，确定退出编辑？",
-                                    )
-                                  ) {
-                                    return;
-                                  }
-                                  setEditorState(null);
-                                }}
-                                type="button"
-                              >
-                                退出编辑
-                              </button>
-                              <button
-                                className="file-browser-pill"
-                                disabled={
-                                  editorState.content ===
-                                  editorState.savedContent
-                                }
-                                onClick={async () => {
-                                  const { path, content } = editorState;
-                                  await saveTextFile(path, content);
-                                  setEditorState((current) =>
-                                    current?.path === path
-                                      ? { ...current, savedContent: content }
-                                      : current,
-                                  );
-                                }}
-                                type="button"
-                              >
-                                保存
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              className="file-browser-pill"
-                              onClick={() => handleOpenEditor(selectedFile)}
-                              type="button"
-                            >
-                              编辑
-                            </button>
-                          )}
-                          {sshTarget && (
-                            <button
-                              className="file-browser-pill"
-                              onClick={() =>
-                                setChmodState({
-                                  path: selectedFile.path,
-                                  value: toModeFromPermissions(
-                                    selectedFile.permissions,
-                                  ),
-                                })
-                              }
-                              type="button"
-                            >
-                              chmod
-                            </button>
-                          )}
-                        </div>
-                        {editorState?.path === selectedFile.path ? (
-                          <textarea
-                            aria-label={`${selectedFile.name} 源码编辑器`}
-                            className="file-browser-editor file-browser-editor--inline"
-                            onChange={(event) =>
-                              setEditorState((current) =>
-                                current
-                                  ? { ...current, content: event.target.value }
-                                  : current,
-                              )
-                            }
-                            spellCheck={false}
-                            value={editorState.content}
-                          />
-                        ) : (
-                          <pre className="file-browser-preview-text">
-                            {preview.content}
-                          </pre>
-                        )}
-                      </>
-                    )}
-                  </>
-                ) : imagePreview ? (
-                  <img
-                    alt={selectedFile.name}
-                    className="file-browser-preview-image"
-                    src={`data:${imagePreview.mimeType};base64,${imagePreview.content}`}
-                  />
-                ) : (
-                  <div className="file-browser-preview-meta">
-                    <div>名称：{selectedFile.name}</div>
-                    <div>大小：{formatSize(selectedFile.size)}</div>
-                    <div>权限：{selectedFile.permissions}</div>
-                    <div>
-                      时间：{new Date(selectedFile.modifiedAt).toLocaleString()}
-                    </div>
-                  </div>
-                )
-              ) : (
-                <div className="file-browser-preview-empty">
-                  选择一个文件查看预览
-                </div>
-              )}
-            </div>
-          </div>
+          {!previewFullscreen && renderFilePreview(false)}
         </section>
       </div>
+
+      {previewFullscreen && typeof document !== "undefined"
+        ? createPortal(renderFilePreview(true), document.body)
+        : null}
 
       {contextMenu && (
         <div

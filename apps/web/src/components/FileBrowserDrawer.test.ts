@@ -129,4 +129,28 @@ describe("FileBrowserDrawer", () => {
     assert.match(css, /\.file-browser-inline-back[\s\S]*?min-height:\s*28px/);
     assert.doesNotMatch(css, /\.mobile-file-browser[^}]*display:\s*none/);
   });
+
+  it("offers the current desktop preview in a body-level fullscreen layer", () => {
+    const source = readFileSync(
+      new URL("./FileBrowserDrawer.tsx", import.meta.url),
+      "utf8",
+    );
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+    assert.match(
+      source,
+      /createPortal\(renderFilePreview\(true\), document\.body\)/,
+    );
+    assert.match(
+      source,
+      /aria-label={\s*fullscreen\s*\?\s*"退出全屏预览"\s*:\s*"全屏预览"\s*}/s,
+    );
+    assert.match(source, /event\.key === "Escape"/);
+    assert.match(source, /event\.key !== "Tab"/);
+    assert.match(source, /document\.body\.style\.overflow = "hidden"/);
+    assert.match(
+      css,
+      /\.file-browser-fullscreen-preview\s*{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*z-index:\s*5200;/s,
+    );
+  });
 });

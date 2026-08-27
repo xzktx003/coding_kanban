@@ -343,6 +343,25 @@ test("file browser supports real local browsing, edit, upload, download, and del
       "hello file browser",
     );
 
+    await drawer.getByRole("button", { name: "全屏预览" }).click();
+    const fullscreenPreview = page.getByRole("dialog", {
+      name: "note.txt 全屏预览",
+    });
+    await expect(fullscreenPreview).toBeVisible();
+    await expect(
+      fullscreenPreview.getByRole("button", { name: "退出全屏预览" }),
+    ).toBeFocused();
+    await expect(
+      fullscreenPreview.locator(".file-browser-preview-text"),
+    ).toContainText("hello file browser");
+    const fullscreenBounds = await fullscreenPreview.boundingBox();
+    expect(fullscreenBounds?.x).toBe(0);
+    expect(fullscreenBounds?.y).toBe(0);
+    expect(fullscreenBounds?.width).toBe(page.viewportSize()?.width);
+    expect(fullscreenBounds?.height).toBe(page.viewportSize()?.height);
+    await page.keyboard.press("Escape");
+    await expect(fullscreenPreview).toHaveCount(0);
+
     await drawer.getByTestId("file-entry-note.txt").dblclick();
     await expect(drawer.locator(".file-browser-content")).toHaveAttribute(
       "data-preview-expanded",
