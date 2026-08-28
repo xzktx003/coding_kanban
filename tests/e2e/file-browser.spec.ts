@@ -505,6 +505,28 @@ test("Markdown files stay inline beside the terminal and render only one preview
       .poll(() => renderedPreview.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
 
+    await drawer.getByRole("button", { name: "全屏预览" }).click();
+    const fullscreenPreview = page.getByRole("dialog", {
+      name: "paper.md 全屏预览",
+    });
+    const fullscreenRenderedPreview =
+      fullscreenPreview.getByTestId("markdown-rendered");
+    await expect(fullscreenPreview).toBeVisible();
+    await fullscreenRenderedPreview.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await fullscreenRenderedPreview.hover();
+    await page.mouse.wheel(0, 480);
+    await expect
+      .poll(() =>
+        fullscreenRenderedPreview.evaluate((element) => element.scrollTop),
+      )
+      .toBeGreaterThan(0);
+    await fullscreenPreview
+      .getByRole("button", { name: "退出全屏预览" })
+      .click();
+    await expect(fullscreenPreview).toHaveCount(0);
+
     await drawer.getByTestId("markdown-mode-split").click();
     const sourceEditor = drawer.getByTestId("markdown-editor");
     await expect(drawer.getByTestId("markdown-sync-scroll")).toHaveAttribute(

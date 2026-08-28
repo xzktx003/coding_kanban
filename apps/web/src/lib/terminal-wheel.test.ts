@@ -246,6 +246,12 @@ describe("isTerminalWheelBlockedByOverlayTarget", () => {
     );
     assert.equal(
       isTerminalWheelBlockedByOverlayTarget(
+        targetInsideOverlay(".file-browser-fullscreen-preview"),
+      ),
+      true,
+    );
+    assert.equal(
+      isTerminalWheelBlockedByOverlayTarget(
         targetInsideOverlay(".agent-transcript-backdrop"),
       ),
       true,

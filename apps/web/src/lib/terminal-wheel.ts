@@ -30,6 +30,7 @@ const TERMINAL_WHEEL_MOUSE_TRACKING_MODES = new Set(["vt200", "drag", "any"]);
 const TERMINAL_WHEEL_BLOCKING_OVERLAYS = [
   ".discovery-overlay",
   ".file-browser-modal",
+  ".file-browser-fullscreen-preview",
   ".agent-transcript-backdrop",
   ".new-session-backdrop",
   ".terminal-session-switcher-menu",
