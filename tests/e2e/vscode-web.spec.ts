@@ -476,6 +476,17 @@ test("vscode split view keeps editor focus after clicking back from the terminal
       .frameLocator(`iframe[title="VS Code - ${sessionName}"]`)
       .locator("#editor");
     await editorTextarea.click();
+    await page.waitForTimeout(1_200);
+    await expect
+      .poll(async () =>
+        page.evaluate(
+          (title) =>
+            document.activeElement instanceof HTMLIFrameElement &&
+            document.activeElement.title === title,
+          `VS Code - ${sessionName}`,
+        ),
+      )
+      .toBeTruthy();
     await page.keyboard.type(typedMarker);
 
     await expect(editorTextarea).toHaveValue(typedMarker);

@@ -221,3 +221,6 @@
 - 多屏左右切换曾无条件改写 App focused session，布局归一化又按旧 focused session 把 active slot 改回，造成额外 `/focus` 快照刷新；现在无侧栏只切换 active slot，侧栏打开才同步全局焦点，active terminal 回调不再重复确认。
 - 自由排列从多屏缩到单屏曾直接截断 slot 数组并卸载其余 xterm，扩屏后所有历史和 WebSocket 都要重建。现在聚焦页保留本页已实际挂载的最多八个手动窗格，缩屏用明确的 `.focus-terminal-pane[hidden]` 规则将多余窗格移出布局（避免基础 `display:flex` 覆盖 HTML hidden），单屏仅展示一个终端，扩屏继续复用；会话删除/移动会去重清理，隐藏零尺寸期间跳过 fit/resize，避免错误改写 tmux 尺寸。
 - Markdown 全屏预览通过 Portal 覆盖终端时，后台 xterm 的 document-level wheel 兜底曾按坐标接管滚轮，导致渲染文档无法滚动。现在 `.file-browser-fullscreen-preview` 纳入终端滚轮阻断目标，全屏渲染区、目录和编辑器各自保留原生滚动，事件不再穿透到后台终端。
+- 桌面内嵌 VS Code 的 iframe 虽已被 `TerminalView` 保护，聚焦视图的布局同步 effect 仍会绕过该保护并直接聚焦 xterm，导致点击编辑器后焦点稍后被抢回。现在该 effect 同样把 iframe 视为外部输入面，只有用户重新点击终端才切回输入权；回归用例等待超过被动修复周期验证焦点稳定。
+- 版本可用、远程可用、冲突和检查失败不再显示占空间的大横幅，统一改成左上角 `24px` 状态灯；状态灯不点击就常驻小尺寸，点击直接更新/拉取/重试，详细版本或错误仍通过 title 与无障碍名称提供。
+- Markdown 渲染预览选中文字后很快消失并非内容刷新，而是聚焦页的终端兜底入口会连续三次聚焦 xterm 隐藏 textarea，从而折叠浏览器选区。现在每次同步和延迟聚焦前都检查非折叠 `Selection`，选区存在时不抢焦点；点击终端令选区自然折叠后仍可恢复输入。

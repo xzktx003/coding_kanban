@@ -53,6 +53,18 @@ function getSidebarCardTag(markup: string, sessionId: string): string {
 }
 
 describe("AgentFocusView", () => {
+  it("does not reclaim terminal focus while the VS Code iframe owns focus", () => {
+    const source = readFileSync(
+      new URL("./AgentFocusView.tsx", import.meta.url),
+      "utf8",
+    );
+
+    assert.match(
+      source,
+      /active\?\.closest\(\s*['"]iframe, input, textarea, select,/,
+    );
+  });
+
   it("keeps mounted manual terminals alive while their layout panes are hidden", () => {
     const source = readFileSync(
       new URL("./AgentFocusView.tsx", import.meta.url),

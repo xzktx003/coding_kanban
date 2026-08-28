@@ -2,11 +2,67 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  focusActiveTerminalTextarea,
   hasIntentionalExternalFocus,
   shouldActivateTerminalPaneFromPointer,
   shouldPromoteExternalFocusToUserIntent,
   shouldRepairPassiveTerminalFocus,
 } from "./terminal-focus.js";
+
+describe("focusActiveTerminalTextarea", () => {
+  it("does not collapse a document text selection during passive focus recovery", () => {
+    const documentDescriptor = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "document",
+    );
+    const windowDescriptor = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "window",
+    );
+    let focusCalls = 0;
+
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: {
+        querySelector: () => ({
+          focus: () => {
+            focusCalls += 1;
+          },
+        }),
+      },
+    });
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        getSelection: () => ({ isCollapsed: false, rangeCount: 1 }),
+        requestAnimationFrame: (callback: FrameRequestCallback) => {
+          callback(0);
+          return 1;
+        },
+        setTimeout: (callback: TimerHandler) => {
+          if (typeof callback === "function") callback();
+          return 1;
+        },
+      },
+    });
+
+    try {
+      focusActiveTerminalTextarea();
+      assert.equal(focusCalls, 0);
+    } finally {
+      if (documentDescriptor) {
+        Object.defineProperty(globalThis, "document", documentDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, "document");
+      }
+      if (windowDescriptor) {
+        Object.defineProperty(globalThis, "window", windowDescriptor);
+      } else {
+        Reflect.deleteProperty(globalThis, "window");
+      }
+    }
+  });
+});
 
 describe("shouldRepairPassiveTerminalFocus", () => {
   it("repairs focus when the terminal was the user's most recent focus target", () => {

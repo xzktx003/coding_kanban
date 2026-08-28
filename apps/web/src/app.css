@@ -8844,6 +8844,55 @@ input {
   border-color: rgba(110, 194, 255, 0.45);
 }
 
+.app-update-indicator {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 5000;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  place-items: center;
+  background: rgba(15, 25, 32, 0.94);
+  border: 1px solid rgba(125, 213, 187, 0.48);
+  border-radius: 50%;
+  box-shadow: 0 4px 14px rgba(3, 10, 14, 0.32);
+  cursor: pointer;
+}
+
+.app-update-indicator:hover {
+  background: rgba(24, 46, 50, 0.98);
+  border-color: rgba(125, 213, 187, 0.82);
+}
+
+.app-update-indicator:focus-visible {
+  outline: 2px solid rgba(153, 232, 207, 0.92);
+  outline-offset: 2px;
+}
+
+.app-update-indicator__light {
+  width: 8px;
+  height: 8px;
+  background: #79d7b5;
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(121, 215, 181, 0.82);
+}
+
+.app-update-indicator--warning {
+  border-color: rgba(244, 170, 91, 0.62);
+}
+
+.app-update-indicator--warning:hover {
+  background: rgba(62, 39, 23, 0.98);
+  border-color: rgba(244, 170, 91, 0.9);
+}
+
+.app-update-indicator--warning .app-update-indicator__light {
+  background: #f4aa5b;
+  box-shadow: 0 0 8px rgba(244, 170, 91, 0.82);
+}
+
 @media (max-width: 720px) {
   .app-update-banner {
     top: 10px;

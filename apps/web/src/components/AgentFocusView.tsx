@@ -727,7 +727,7 @@ export function AgentFocusView({
     const active = document.activeElement as HTMLElement | null;
     if (
       active?.closest(
-        'input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="dialog"], [role="alertdialog"]',
+        'iframe, input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="dialog"], [role="alertdialog"]',
       )
     ) {
       return;

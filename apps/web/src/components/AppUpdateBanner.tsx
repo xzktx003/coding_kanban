@@ -65,6 +65,36 @@ export function shouldAutoDismissRestoreBanner(
   return getRestoreBannerAutoDismissMs(state) !== null;
 }
 
+interface AppUpdateIndicatorProps {
+  ariaLabel: string;
+  onClick: () => void;
+  testId: string;
+  title: string;
+  warning?: boolean;
+}
+
+function AppUpdateIndicator({
+  ariaLabel,
+  onClick,
+  testId,
+  title,
+  warning = false,
+}: AppUpdateIndicatorProps) {
+  return (
+    <button
+      aria-label={ariaLabel}
+      aria-live={warning ? "assertive" : "polite"}
+      className={`app-update-indicator${warning ? " app-update-indicator--warning" : ""}`}
+      data-testid={testId}
+      onClick={onClick}
+      title={title}
+      type="button"
+    >
+      <span aria-hidden="true" className="app-update-indicator__light" />
+    </button>
+  );
+}
+
 export function AppUpdateBanner({
   state,
   onApplyUpdate,
@@ -85,36 +115,12 @@ export function AppUpdateBanner({
       .join(" ");
 
     return (
-      <aside
-        aria-live="polite"
-        className="app-update-banner app-update-banner--available"
-        data-testid="app-update-banner"
-      >
-        <div className="app-update-banner__copy">
-          <strong>检测到新版本</strong>
-          <span>
-            {versionLabel || "本地源码已变化"}。更新前会保存当前看板和分屏现场。
-          </span>
-        </div>
-        <div className="app-update-banner__actions">
-          <button
-            data-testid="apply-app-update"
-            onClick={onApplyUpdate}
-            type="button"
-          >
-            更新并恢复
-          </button>
-          <button
-            aria-label="关闭版本更新提示"
-            className="app-update-banner__dismiss"
-            data-testid="dismiss-app-update"
-            onClick={onDismiss}
-            type="button"
-          >
-            ×
-          </button>
-        </div>
-      </aside>
+      <AppUpdateIndicator
+        ariaLabel="检测到新版本，点击更新并恢复"
+        onClick={onApplyUpdate}
+        testId="apply-app-update"
+        title={`${versionLabel || "本地源码已变化"}。点击更新并恢复当前看板和分屏现场`}
+      />
     );
   }
 
@@ -127,37 +133,12 @@ export function AppUpdateBanner({
       .join(" ");
 
     return (
-      <aside
-        aria-live="polite"
-        className="app-update-banner app-update-banner--available"
-        data-testid="remote-update-banner"
-      >
-        <div className="app-update-banner__copy">
-          <strong>远程有新版本</strong>
-          <span>
-            {versionLabel || "当前上游分支已更新"}
-            。确认后才会拉取；拉取成功将自动热更新并恢复现场。
-          </span>
-        </div>
-        <div className="app-update-banner__actions">
-          <button
-            data-testid="pull-app-update"
-            onClick={onPullUpdate}
-            type="button"
-          >
-            拉取并更新
-          </button>
-          <button
-            aria-label="关闭远程版本提示"
-            className="app-update-banner__dismiss"
-            data-testid="dismiss-remote-update"
-            onClick={onDismiss}
-            type="button"
-          >
-            ×
-          </button>
-        </div>
-      </aside>
+      <AppUpdateIndicator
+        ariaLabel="远程有新版本，点击拉取并更新"
+        onClick={onPullUpdate}
+        testId="pull-app-update"
+        title={`${versionLabel || "当前上游分支已更新"}。点击拉取、热更新并恢复现场`}
+      />
     );
   }
 
@@ -169,42 +150,19 @@ export function AppUpdateBanner({
       .filter(Boolean)
       .join(" ");
 
+    const label =
+      state.kind === "update-conflict"
+        ? "检测到新版本，但存在冲突"
+        : "自动检查新版本失败";
+
     return (
-      <aside
-        aria-live="assertive"
-        className="app-update-banner app-update-banner--warning"
-        data-testid="app-update-conflict-banner"
-      >
-        <div className="app-update-banner__copy">
-          <strong>
-            {state.kind === "update-conflict"
-              ? "检测到新版本，但存在冲突"
-              : "自动检查新版本失败"}
-          </strong>
-          <span>
-            {versionLabel ? `${versionLabel}。` : ""}
-            {state.message}
-          </span>
-        </div>
-        <div className="app-update-banner__actions">
-          <button
-            data-testid="retry-app-update"
-            onClick={onRetryUpdate}
-            type="button"
-          >
-            {state.kind === "update-conflict" ? "重新拉取并更新" : "重新检查"}
-          </button>
-          <button
-            aria-label="关闭自动更新提示"
-            className="app-update-banner__dismiss"
-            data-testid="dismiss-app-update-conflict"
-            onClick={onDismiss}
-            type="button"
-          >
-            ×
-          </button>
-        </div>
-      </aside>
+      <AppUpdateIndicator
+        ariaLabel={`${label}，点击重试`}
+        onClick={onRetryUpdate}
+        testId="retry-app-update"
+        title={`${label}。${versionLabel ? `${versionLabel}。` : ""}${state.message}。点击重试`}
+        warning
+      />
     );
   }
 

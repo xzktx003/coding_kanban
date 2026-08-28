@@ -574,18 +574,26 @@ test("automatic Git polling reports conflicts and resumes the existing hot-updat
       "local draft\n",
     );
 
-    const availableBanner = page.getByTestId("remote-update-banner");
-    await expect(availableBanner).toBeVisible({ timeout: 20_000 });
-    await expect(availableBanner).toContainText("确认后才会拉取");
-    await expect(page.getByTestId("pull-app-update")).toHaveText("拉取并更新");
+    const availableIndicator = page.getByTestId("pull-app-update");
+    await expect(availableIndicator).toBeVisible({ timeout: 20_000 });
+    await expect(availableIndicator).toHaveAttribute(
+      "aria-label",
+      "远程有新版本，点击拉取并更新",
+    );
+    await expect(availableIndicator).toHaveClass(/app-update-indicator/);
     await expect(page.getByTestId("apply-app-update")).toHaveCount(0);
 
-    await page.getByTestId("pull-app-update").click();
-    const conflictBanner = page.getByTestId("app-update-conflict-banner");
-    await expect(conflictBanner).toBeVisible({ timeout: 20_000 });
-    await expect(conflictBanner).toContainText("检测到新版本，但存在冲突");
-    await expect(conflictBanner).toContainText("本地未提交修改会被覆盖");
-    await expect(page.getByTestId("retry-app-update")).toBeVisible();
+    await availableIndicator.click();
+    const conflictIndicator = page.getByTestId("retry-app-update");
+    await expect(conflictIndicator).toBeVisible({ timeout: 20_000 });
+    await expect(conflictIndicator).toHaveAttribute(
+      "aria-label",
+      "检测到新版本，但存在冲突，点击重试",
+    );
+    await expect(conflictIndicator).toHaveAttribute(
+      "title",
+      /本地未提交修改会被覆盖/,
+    );
     await expect(page.getByTestId("apply-app-update")).toHaveCount(0);
 
     runtime.restoreLocalSource();
@@ -610,8 +618,8 @@ test("automatic Git polling reports conflicts and resumes the existing hot-updat
     await expect(page.getByTestId("session-restore-banner")).toContainText(
       "历史会话已恢复",
     );
-    await expect(page.getByTestId("app-update-banner")).toHaveCount(0);
-    await expect(page.getByTestId("app-update-conflict-banner")).toHaveCount(0);
+    await expect(page.getByTestId("apply-app-update")).toHaveCount(0);
+    await expect(page.getByTestId("retry-app-update")).toHaveCount(0);
   } finally {
     await runtime.dispose();
   }
@@ -733,26 +741,22 @@ test("hot update restores stable managed sessions and the dual-pane workspace", 
       initialVersion.sourceRevision,
     );
 
-    await expect(page.getByTestId("app-update-banner")).toBeVisible({
+    await expect(page.getByTestId("apply-app-update")).toBeVisible({
       timeout: 20_000,
     });
-    await expect(page.getByTestId("apply-app-update")).toHaveText("更新并恢复");
+    await expect(page.getByTestId("apply-app-update")).toHaveAttribute(
+      "aria-label",
+      "检测到新版本，点击更新并恢复",
+    );
+    await expect(page.getByTestId("apply-app-update")).toHaveClass(
+      /app-update-indicator/,
+    );
     await expect(page.locator(".focus-main")).toBeVisible();
-
-    await page.getByTestId("dismiss-app-update").click();
-    await expect(page.getByTestId("app-update-banner")).toBeHidden();
-    await expect
-      .poll(() =>
-        page.evaluate(() =>
-          localStorage.getItem("coding-kanban-dismissed-revision-v1"),
-        ),
-      )
-      .toBe(updatedVersion.sourceRevision);
 
     await page.reload();
     await expect(page.locator(".focus-main")).toBeVisible({ timeout: 20_000 });
     await page.waitForTimeout(3_500);
-    await expect(page.getByTestId("app-update-banner")).toBeHidden();
+    await expect(page.getByTestId("apply-app-update")).toBeVisible();
 
     runtime.changeSourceRevision("revision-3");
     await expect
@@ -766,16 +770,9 @@ test("hot update restores stable managed sessions and the dual-pane workspace", 
         { timeout: 20_000 },
       )
       .not.toBe(updatedVersion.sourceRevision);
-    await expect(page.getByTestId("app-update-banner")).toBeVisible({
+    await expect(page.getByTestId("apply-app-update")).toBeVisible({
       timeout: 20_000,
     });
-    await expect
-      .poll(() =>
-        page.evaluate(() =>
-          localStorage.getItem("coding-kanban-dismissed-revision-v1"),
-        ),
-      )
-      .toBe(updatedVersion.sourceRevision);
 
     await expect
       .poll(

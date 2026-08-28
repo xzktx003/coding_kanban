@@ -477,6 +477,20 @@ test("Markdown files stay inline beside the terminal and render only one preview
     const renderedPreview = drawer.getByTestId("markdown-rendered");
     await expect(renderedPreview).toContainText("Section 80");
     await expect(page.getByTestId("markdown-rendered")).toHaveCount(1);
+    await renderedPreview.evaluate((element) => {
+      const heading = element.querySelector("h2");
+      if (!heading) throw new Error("missing Markdown heading");
+      const range = document.createRange();
+      range.selectNodeContents(heading);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    });
+    await page.waitForTimeout(1_200);
+    await expect
+      .poll(() => page.evaluate(() => window.getSelection()?.toString()))
+      .toContain("Section 1");
+
     const outline = drawer.getByRole("navigation", {
       name: "Markdown 目录",
     });

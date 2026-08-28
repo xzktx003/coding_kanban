@@ -41,9 +41,21 @@ export function getActiveTerminalTextarea(): HTMLTextAreaElement | null {
 }
 
 export function focusActiveTerminalTextarea(): void {
-  getActiveTerminalTextarea()?.focus();
-  window.requestAnimationFrame(() => getActiveTerminalTextarea()?.focus());
-  window.setTimeout(() => getActiveTerminalTextarea()?.focus(), 0);
+  const focusUnlessSelectingText = () => {
+    // This helper is used by passive layout/focus recovery. Focusing xterm's
+    // hidden textarea while the user is selecting a preview collapses the
+    // browser selection, so every deferred retry must re-check ownership.
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+      return;
+    }
+
+    getActiveTerminalTextarea()?.focus();
+  };
+
+  focusUnlessSelectingText();
+  window.requestAnimationFrame(focusUnlessSelectingText);
+  window.setTimeout(focusUnlessSelectingText, 0);
 }
 
 export function shouldActivateTerminalPaneFromPointer(

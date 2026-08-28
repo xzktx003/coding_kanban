@@ -11,7 +11,7 @@ import {
   shouldAutoDismissRestoreBanner,
 } from "./AppUpdateBanner.js";
 
-test("renders an explicit update action without applying it automatically", () => {
+test("renders a compact one-click update indicator without a large banner", () => {
   const markup = renderToStaticMarkup(
     createElement(AppUpdateBanner, {
       state: {
@@ -26,12 +26,12 @@ test("renders an explicit update action without applying it automatically", () =
     }),
   );
 
-  assert.match(markup, /检测到新版本/);
-  assert.match(markup, /feature\/hot-update/);
-  assert.match(markup, /更新并恢复/);
+  assert.match(markup, /app-update-indicator/);
   assert.match(markup, /data-testid="apply-app-update"/);
-  assert.match(markup, /data-testid="dismiss-app-update"/);
-  assert.match(markup, /aria-label="关闭版本更新提示"/);
+  assert.match(markup, /aria-label="检测到新版本，点击更新并恢复"/);
+  assert.match(markup, /title="feature\/hot-update @ 01234567/);
+  assert.doesNotMatch(markup, /app-update-banner__copy/);
+  assert.doesNotMatch(markup, /data-testid="dismiss-app-update"/);
 });
 
 test("offers a user-confirmed pull when the remote branch advances", () => {
@@ -49,10 +49,10 @@ test("offers a user-confirmed pull when the remote branch advances", () => {
     }),
   );
 
-  assert.match(markup, /远程有新版本/);
-  assert.match(markup, /确认后才会拉取/);
-  assert.match(markup, /拉取并更新/);
+  assert.match(markup, /app-update-indicator/);
   assert.match(markup, /data-testid="pull-app-update"/);
+  assert.match(markup, /aria-label="远程有新版本，点击拉取并更新"/);
+  assert.doesNotMatch(markup, /app-update-banner__copy/);
   assert.doesNotMatch(markup, /data-testid="apply-app-update"/);
 });
 
@@ -72,10 +72,11 @@ test("requires explicit confirmation before retrying a conflicted pull", () => {
     }),
   );
 
-  assert.match(markup, /检测到新版本，但存在冲突/);
-  assert.match(markup, /本地未提交修改会被远程版本覆盖/);
-  assert.match(markup, /重新拉取并更新/);
+  assert.match(markup, /app-update-indicator--warning/);
   assert.match(markup, /data-testid="retry-app-update"/);
+  assert.match(markup, /aria-label="检测到新版本，但存在冲突，点击重试"/);
+  assert.match(markup, /title="[^"]*本地未提交修改会被远程版本覆盖/);
+  assert.doesNotMatch(markup, /app-update-banner__copy/);
   assert.doesNotMatch(markup, /data-testid="apply-app-update"/);
 });
 
