@@ -53,6 +53,23 @@ function getSidebarCardTag(markup: string, sessionId: string): string {
 }
 
 describe("AgentFocusView", () => {
+  it("keeps mounted manual terminals alive while their layout panes are hidden", () => {
+    const source = readFileSync(
+      new URL("./AgentFocusView.tsx", import.meta.url),
+      "utf8",
+    );
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+    assert.match(source, /resolveRetainedTerminalMonitorSlots/);
+    assert.match(source, /retainedTerminalSlotsRef/);
+    assert.match(source, /hidden={!isVisibleManualPane}/);
+    assert.match(source, /previousSlots:\s*retainedTerminalSlotsRef\.current/);
+    assert.match(
+      css,
+      /\.focus-terminal-pane\[hidden\]\s*{[^}]*display:\s*none;/s,
+    );
+  });
+
   it("collapses an individual group in the other-session sidebar", () => {
     installLocalStorageStub("single");
     const sessions = [

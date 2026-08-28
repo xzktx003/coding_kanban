@@ -35,6 +35,7 @@ import {
   getTerminalInputModeRestoreSequence,
   shouldAttemptTerminalInputForward,
 } from "../lib/terminal-input-forwarding";
+import { isTerminalViewportMeasurable } from "../lib/terminal-resize";
 import {
   isTerminalProtocolResponsePayload,
   stripTerminalResponsePayload,
@@ -146,7 +147,16 @@ export const TerminalView = memo(function TerminalView({
     terminalFontSizeRef.current = terminalFontSize;
     const term = termRef.current;
     const fitAddon = fitRef.current;
-    if (!term || term.options.fontSize === terminalFontSize) {
+    const container = containerRef.current;
+    if (
+      !term ||
+      !container ||
+      term.options.fontSize === terminalFontSize ||
+      !isTerminalViewportMeasurable(
+        container.clientWidth,
+        container.clientHeight,
+      )
+    ) {
       return;
     }
 
@@ -1200,6 +1210,15 @@ export const TerminalView = memo(function TerminalView({
     };
 
     const fitTerminal = () => {
+      if (
+        !isTerminalViewportMeasurable(
+          container.clientWidth,
+          container.clientHeight,
+        )
+      ) {
+        return;
+      }
+
       try {
         applyPreviewLayout();
         fitAddon.fit();
@@ -1871,6 +1890,9 @@ export const TerminalView = memo(function TerminalView({
       const height = Math.round(
         entry?.contentRect.height ?? container.clientHeight,
       );
+      if (!isTerminalViewportMeasurable(width, height)) {
+        return;
+      }
       if (
         lastObservedContainerSize?.width === width &&
         lastObservedContainerSize.height === height

@@ -219,3 +219,4 @@
 - 完整记录曾只允许本机 Codex：远端 SSH/tmux 请求现在通过登记的 sshTarget 使用 SFTP 在目标主机读取 ~/.codex/sessions，按 session ID/工作目录选择并用有界字节分页；不会把远端请求回退到本机文件，服务端路由和 SFTP 回归已覆盖。
 - 完整记录初次定位到底部后，程序化滚动只触发 scroll 而没有 pointer/wheel 事件时会绕过初始 pin 并继续加载更早页面，避免分页被初始状态永远拦截。
 - 多屏左右切换曾无条件改写 App focused session，布局归一化又按旧 focused session 把 active slot 改回，造成额外 `/focus` 快照刷新；现在无侧栏只切换 active slot，侧栏打开才同步全局焦点，active terminal 回调不再重复确认。
+- 自由排列从多屏缩到单屏曾直接截断 slot 数组并卸载其余 xterm，扩屏后所有历史和 WebSocket 都要重建。现在聚焦页保留本页已实际挂载的最多八个手动窗格，缩屏用明确的 `.focus-terminal-pane[hidden]` 规则将多余窗格移出布局（避免基础 `display:flex` 覆盖 HTML hidden），单屏仅展示一个终端，扩屏继续复用；会话删除/移动会去重清理，隐藏零尺寸期间跳过 fit/resize，避免错误改写 tmux 尺寸。

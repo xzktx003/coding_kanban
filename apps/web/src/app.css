@@ -3251,6 +3251,10 @@ input {
     box-shadow 0.15s;
 }
 
+.focus-terminal-pane[hidden] {
+  display: none;
+}
+
 .focus-terminal-pane--active {
   border-color: rgba(255, 152, 0, 0.95);
   box-shadow:

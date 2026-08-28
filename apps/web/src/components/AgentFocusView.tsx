@@ -55,7 +55,10 @@ import {
   normalizeTerminalWheelDeltaY,
   shouldScrollTerminalLayoutWheel,
 } from "../lib/terminal-wheel";
-import { SINGLE_PANE_TERMINAL_CACHE_SIZE } from "../lib/terminal-pane-render-policy";
+import {
+  SINGLE_PANE_TERMINAL_CACHE_SIZE,
+  resolveRetainedTerminalMonitorSlots,
+} from "../lib/terminal-pane-render-policy";
 
 interface AgentFocusViewProps {
   focusedSession: AgentSessionRecord;
@@ -259,6 +262,9 @@ export function AgentFocusView({
   const [terminalSlots, setTerminalSlots] = useState<TerminalMonitorSlot[]>(
     initialTerminalWorkspaceState.slots,
   );
+  const retainedTerminalSlotsRef = useRef<TerminalMonitorSlot[]>(
+    initialTerminalWorkspaceState.slots,
+  );
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   const [headerCollapsed, setHeaderCollapsed] = useState(
@@ -389,12 +395,32 @@ export function AgentFocusView({
   const sessionById = useMemo(() => {
     return new Map(sessions.map((session) => [session.id, session]));
   }, [sessions]);
-  const activeSlotAvailable = terminalSlots.some(
+  const displayableSessionIds = useMemo(
+    () => new Set(displayableSessions.map((session) => session.id)),
+    [displayableSessions],
+  );
+  const visibleManualSlotIds = useMemo(
+    () => new Set(getTerminalMonitorSlotIds(terminalLayoutMode)),
+    [terminalLayoutMode],
+  );
+  const retainedTerminalSlots = useMemo(
+    () =>
+      resolveRetainedTerminalMonitorSlots({
+        currentSlots: terminalSlots,
+        retainedSlots: retainedTerminalSlotsRef.current,
+        validSessionIds: displayableSessionIds,
+      }),
+    [displayableSessionIds, terminalSlots],
+  );
+  const visibleManualTerminalSlots = terminalSlots.filter((slot) =>
+    visibleManualSlotIds.has(slot.id),
+  );
+  const activeSlotAvailable = visibleManualTerminalSlots.some(
     (slot) => slot.id === activeSlotId,
   );
   const safeActiveSlotId = activeSlotAvailable
     ? activeSlotId
-    : (terminalSlots[0]?.id ?? DEFAULT_TERMINAL_MONITOR_SLOT_ID);
+    : (visibleManualTerminalSlots[0]?.id ?? DEFAULT_TERMINAL_MONITOR_SLOT_ID);
   const groupingEnabled = sessionGroups.groups.length > 0;
   const arrangementGroups = useMemo(
     () =>
@@ -431,7 +457,10 @@ export function AgentFocusView({
       null);
   const displayedTerminalSlots = groupArrangementEnabled
     ? groupTerminalSlots
-    : terminalSlots;
+    : visibleManualTerminalSlots;
+  const renderedTerminalSlots = groupArrangementEnabled
+    ? groupTerminalSlots
+    : retainedTerminalSlots;
   const displayedActiveSlotId = groupArrangementEnabled
     ? (groupTerminalSlots.find(
         (slot) => slot.sessionId === resolvedActiveGroupSessionId,
@@ -486,6 +515,10 @@ export function AgentFocusView({
             .includes(sidebarSearchQuery.toLowerCase()),
       )
     : sidebarSessions;
+
+  useEffect(() => {
+    retainedTerminalSlotsRef.current = retainedTerminalSlots;
+  }, [retainedTerminalSlots]);
   const groupedSidebarSessions = useMemo(
     () => groupSessions(filteredSidebarSessions, sessionGroups),
     [filteredSidebarSessions, sessionGroups],
@@ -671,7 +704,7 @@ export function AgentFocusView({
           ? focusedSession.id
           : null,
         preferredSlotId: nextActiveSlotId,
-        previousSlots: current,
+        previousSlots: retainedTerminalSlotsRef.current,
       });
       const next = normalized.map((slot) =>
         closedSlotIds.has(slot.id) ? { ...slot, sessionId: null } : slot,
@@ -1590,23 +1623,35 @@ export function AgentFocusView({
             }
             onWheelCapture={handleTerminalLayoutWheelCapture}
           >
-            {displayedTerminalSlots.map((slot, index) => {
+            {renderedTerminalSlots.map((slot) => {
               const session = slot.sessionId
                 ? (sessionById.get(slot.sessionId) ?? null)
                 : null;
-              const isActiveInputPane = Boolean(
-                session && slot.id === displayedActiveSlotId,
+              const displayedIndex = displayedTerminalSlots.findIndex(
+                (displayedSlot) => displayedSlot.id === slot.id,
               );
+              const isVisibleManualPane =
+                groupArrangementEnabled || displayedIndex >= 0;
+              const isActiveInputPane = Boolean(
+                session &&
+                isVisibleManualPane &&
+                slot.id === displayedActiveSlotId,
+              );
+              const paneIndex = displayedIndex >= 0 ? displayedIndex + 1 : 0;
 
               return (
                 <div
+                  aria-hidden={isVisibleManualPane ? undefined : "true"}
                   key={slot.id}
                   className={`focus-terminal-pane${isActiveInputPane ? " focus-terminal-pane--active" : ""}${dragOverSlotId === slot.id ? " focus-terminal-pane--drag-over" : ""}`}
                   data-active-terminal-pane={
                     isActiveInputPane ? "true" : "false"
                   }
                   data-terminal-pane-slot={slot.id}
-                  data-terminal-pane-session={session?.id}
+                  data-terminal-pane-session={
+                    isVisibleManualPane ? session?.id : undefined
+                  }
+                  hidden={!isVisibleManualPane}
                   onDragLeave={(event) => {
                     if (dragOverSlotId !== slot.id) {
                       return;
@@ -1646,7 +1691,7 @@ export function AgentFocusView({
                     onDragEnd={finishSessionDrag}
                   >
                     <span className="focus-terminal-pane-index">
-                      {index + 1}
+                      {paneIndex}
                     </span>
                     {isActiveInputPane && (
                       <span
@@ -1661,7 +1706,7 @@ export function AgentFocusView({
                       onSelect={(sessionId) =>
                         handleSelectSlotSession(slot.id, sessionId)
                       }
-                      paneIndex={index + 1}
+                      paneIndex={paneIndex}
                       placementBySessionId={sessionMonitorPlacementById}
                       selectedSessionId={session?.id ?? null}
                       sessionGroups={sessionGroups}
@@ -1687,7 +1732,8 @@ export function AgentFocusView({
                       active={isActiveInputPane}
                       cacheCapacity={
                         !groupArrangementEnabled &&
-                        terminalLayoutMode === "single"
+                        terminalLayoutMode === "single" &&
+                        isVisibleManualPane
                           ? SINGLE_PANE_TERMINAL_CACHE_SIZE
                           : 1
                       }

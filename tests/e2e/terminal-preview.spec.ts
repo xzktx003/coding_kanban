@@ -886,6 +886,46 @@ test("multi-pane layout bounds initial replays and keeps queued panes visible", 
   );
 });
 
+test("manual layout switches reuse terminal sockets already opened on this page", async ({
+  page,
+}) => {
+  const sessions = Array.from({ length: 6 }, (_, index) =>
+    makeSession({
+      id: `retained-layout-session-${index + 1}`,
+      displayName: `Retained Layout ${index + 1}`,
+      outputPreview: `preview ${index + 1}`,
+    }),
+  );
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await mockSessions(page, sessions);
+  await page.goto("/");
+
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: "Retained Layout 1" }),
+    })
+    .dblclick();
+  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page.getByRole("menuitemradio", { name: /六屏/ }).click();
+
+  const layout = page.locator(".focus-terminal-layout");
+  await expect(layout.locator("[data-terminal-pane-session]")).toHaveCount(6);
+  await expect
+    .poll(() => terminalWebSocketUrls(page), { timeout: 8_000 })
+    .toHaveLength(6);
+
+  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page.getByRole("menuitemradio", { name: /单屏/ }).click();
+  await expect(layout.locator("[data-terminal-pane-session]")).toHaveCount(1);
+  await expect(layout.locator(".focus-terminal-pane:visible")).toHaveCount(1);
+
+  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page.getByRole("menuitemradio", { name: /六屏/ }).click();
+  await expect(layout.locator("[data-terminal-pane-session]")).toHaveCount(6);
+  await expect(layout.locator(".focus-terminal-pane:visible")).toHaveCount(6);
+  await expect.poll(() => terminalWebSocketUrls(page)).toHaveLength(6);
+});
+
 test("narrow multi-pane layouts preserve terminal height and scroll the pane list", async ({
   page,
 }) => {
