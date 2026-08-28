@@ -5,6 +5,7 @@ import {
   buildTerminalWebSocketUrl,
   fetchMarkdownImage,
   focusAgentSession,
+  sendCodexImageMessage,
 } from "./api.js";
 
 function setWindowLocation(protocol: "http:" | "https:", host: string): void {
@@ -102,5 +103,42 @@ test("fetchMarkdownImage posts path context and returns an image Blob", async ()
     documentPath: "/workspace/docs/guide.md",
     rootPath: "/workspace",
     source: "../assets/diagram.png",
+  });
+});
+
+test("sendCodexImageMessage uploads the image and prompt to the selected Kanban session", async () => {
+  let requestUrl = "";
+  const captured: { requestBody: FormData | null } = { requestBody: null };
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async (input: string | URL | Request, init?: RequestInit) => {
+      requestUrl = String(input);
+      captured.requestBody = init?.body as FormData;
+      return Response.json(
+        {
+          ok: true,
+          threadId: "019eeed3-69ee-7850-b89e-53c3d48db0e2",
+        },
+        { status: 202 },
+      );
+    },
+  });
+  const image = new File([new Uint8Array([1, 2, 3])], "screen.png", {
+    type: "image/png",
+  });
+
+  const response = await sendCodexImageMessage({
+    agentSessionId: "agent-1",
+    image,
+    message: "请查看截图",
+  });
+
+  assert.equal(requestUrl, "/api/agent-sessions/agent-1/image-message");
+  assert.ok(captured.requestBody);
+  assert.equal(captured.requestBody.get("message"), "请查看截图");
+  assert.equal(captured.requestBody.get("image"), image);
+  assert.deepEqual(response, {
+    ok: true,
+    threadId: "019eeed3-69ee-7850-b89e-53c3d48db0e2",
   });
 });

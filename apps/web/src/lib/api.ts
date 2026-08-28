@@ -773,6 +773,45 @@ export function uploadFiles(options: {
   });
 }
 
+export interface CodexImageMessageResponse {
+  ok: true;
+  threadId: string;
+}
+
+export async function sendCodexImageMessage(options: {
+  agentSessionId: string;
+  image: File;
+  message: string;
+}): Promise<CodexImageMessageResponse> {
+  const formData = new FormData();
+  formData.append("message", options.message);
+  formData.append("image", options.image);
+  const response = await fetch(
+    `${apiBaseUrl}/api/agent-sessions/${encodeURIComponent(options.agentSessionId)}/image-message`,
+    {
+      method: "POST",
+      body: formData,
+    },
+  );
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: unknown;
+    } | null;
+    const detail =
+      typeof body?.error === "string" && body.error.trim()
+        ? body.error.trim()
+        : `请求失败（${response.status}）`;
+    throw new Error(detail);
+  }
+
+  const body = (await response.json()) as Partial<CodexImageMessageResponse>;
+  if (body.ok !== true || typeof body.threadId !== "string") {
+    throw new Error("Codex 图片发送返回了无效结果");
+  }
+  return { ok: true, threadId: body.threadId };
+}
+
 export function parseFileUploadResponse(
   response: unknown,
   responseText: string,

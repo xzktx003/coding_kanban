@@ -27,6 +27,10 @@ import { formatWorkingDirectory, shellQuote } from "@agent-orchestrator/shared";
 
 import { scanAgentDirectory } from "../services/agent-scanner.js";
 import { AgentSessionRegistry } from "../services/agent-session-registry.js";
+import {
+  isRemoteAgentSession,
+  resolveActiveCodexSessionId,
+} from "../services/active-codex-session-resolver.js";
 import { CodexTranscriptService } from "../services/codex-transcript-service.js";
 import { summarizeCodexTranscript } from "../services/codex-transcript-service.js";
 import { CodexSessionLocator } from "../services/codex-session-locator.js";
@@ -74,14 +78,6 @@ const GIT_SUMMARY_CACHE_TTL_MS = 60_000;
 interface TimedCacheEntry<T> {
   value: T;
   expiresAt: number;
-}
-
-function isRemoteAgentSession(
-  session: Pick<AgentSessionRecord, "hostId" | "sshTarget">,
-): boolean {
-  return Boolean(
-    session.sshTarget || (session.hostId && session.hostId !== "local"),
-  );
 }
 
 function canProbeLocalTmuxForCodex(
@@ -318,44 +314,11 @@ export async function registerAgentSessionRoutes(
 
   const resolveCodexSessionId = async (
     agentSession: AgentSessionRecord,
-  ): Promise<string | undefined> => {
-    if (isRemoteAgentSession(agentSession)) {
-      return agentSession.agentSessionId;
-    }
-
-    const tmuxSession = agentSession.transportRef?.tmuxSession;
-    const rawTmuxClientProcessId = agentSession.transportRef?.processId;
-    const tmuxClientProcessId =
-      agentSession.connectionState === "online" &&
-      typeof rawTmuxClientProcessId === "number" &&
-      Number.isSafeInteger(rawTmuxClientProcessId) &&
-      rawTmuxClientProcessId > 0
-        ? rawTmuxClientProcessId
-        : undefined;
-    const tmuxTarget = agentSession.transportRef?.tmuxPane ?? tmuxSession;
-    if (!tmuxTarget) return agentSession.agentSessionId;
-
-    const activeSessionId = await codexSessionLocator.resolve({
-      tmuxTarget,
-      ...(tmuxSession ? { tmuxSession } : {}),
-      ...(tmuxClientProcessId !== undefined ? { tmuxClientProcessId } : {}),
-      workingDirectory: agentSession.workingDirectory,
+  ): Promise<string | undefined> =>
+    resolveActiveCodexSessionId(agentSession, {
+      registry,
+      codexSessionLocator,
     });
-    if (!activeSessionId) {
-      // With a live Kanban tmux client, an empty result means the user is
-      // currently viewing a non-Codex pane. Do not fall back to the previous
-      // pane's session or a same-directory transcript. The same rule applies
-      // after a backend reload: another attached tmux client still exposes the
-      // session's current pane even while Kanban is reattaching.
-      return tmuxSession ? undefined : agentSession.agentSessionId;
-    }
-    if (activeSessionId !== agentSession.agentSessionId) {
-      registry.updateSession(agentSession.id, {
-        agentSessionId: activeSessionId,
-      });
-    }
-    return activeSessionId;
-  };
 
   const resolveCodexWorkingDirectory = (
     agentSession: AgentSessionRecord,

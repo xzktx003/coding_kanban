@@ -132,6 +132,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 终端 WebSocket：`/ws/agent-sessions/:id/terminal`。
 - 每个仍挂载的实时 `TerminalView` 在终端 WebSocket 异常关闭后使用 250ms 起步、最大 5 秒的指数退避重建连接；连接在 3 秒内未完成握手也会主动关闭并进入同一恢复链。新连接完成 replay 后才重新开放 stdin，并重新同步 resize 和焦点。组件卸载会取消待执行的重连，避免隐藏终端或旧会话产生后台连接。
 - 手机终端继续由输入框和快捷键通过既有 stdin 接口驱动，不让 xterm 的隐藏输入框长期抢占软键盘焦点。由于 tmux replay 只有屏幕内容和最终坐标、不一定包含 xterm 用来初始化光标的控制序列，触控监控终端在 `open` 后通过一次同步 `focus → blur` 初始化 xterm 光标，再归还挂载前仍有效的页面焦点；活动与失焦光标都使用高对比度下划线，因此用户用方向键调整已粘贴文字时仍能看到 TUI 当前编辑位置。桌面终端保持块状活动光标和轮廓失焦光标。
+- Codex 图片消息接口：`POST /api/agent-sessions/:id/image-message` 使用 `multipart/form-data` 接收一张图片和说明文字。浏览器只提交 Kanban session ID，不提交主机、线程 ID、执行路径或临时路径；后端从 registry 读取可信会话元数据，本地 tmux 复用完整记录的活动 pane 定位逻辑得到精确 Codex thread，远端会话使用已登记的 Codex session ID。接口将单张图片限制为 10 MB，并按文件头只接受 PNG、JPEG、WebP。`CodexImageMessageService` 在本机创建权限为 `0600` 的系统临时文件，或经已登记 SFTP 通道写入远端用户缓存目录，随后优先以参数数组执行本机 `codex queue --thread <id> --message <text> -i <path>`，远端则通过经过 shell 引号保护的 SSH 命令执行；多行说明先编码后在远端还原，避免换行进入 SSH command。部分 Codex CLI 版本虽在帮助中声明 `queue -i`、运行时却拒绝图片附件；服务会识别该明确错误并自动改投包含可信绝对路径的文字消息，使同一 Codex 通过图片查看工具读取，按本机或 SSH 目标缓存能力结果，避免每次重复失败探测。原生附件投递后立即清理；路径回退投递后延迟最多 24 小时清理，让异步对话有时间读取；失败则立即清理。附件不写入项目目录、会话快照或完整记录接口。第一版只接入电脑端聚焦页，粘贴图片和文件选择共用同一预览/确认窗口，并提供显式取消入口。
 - 完整记录 HTTP 接口：`GET /api/agent-sessions/:id/transcript?limit=30&cursor=<byte-offset>`。本机会话根据 registry 中可信元数据访问本机 `~/.codex/sessions`，远端会话则根据 registry 中的 `sshTarget` 通过 SFTP 访问目标主机对应目录；两者都不接受客户端文件路径，也不会在远端失败时回退到本机历史。服务端从 JSONL 尾部按有界字节窗口向前扫描，只解析足够组成当前页的 user/assistant message 与非 `exec` 工具记录，并返回下一页字节游标，不再全量读取大型历史。本地 tmux 会先校验 Kanban PTY 对应的 tmux client PID；client 存在或 Kanban 正在重连时，都读取该 tmux session 当前活动 pane 的 PID，并以该 pane 的 `/proc/<pane_pid>/cwd` 覆盖卡片首次发现时可能过期的工作目录；只有 tmux 查询失败才使用固定 pane、既有 `agentSessionId` 或工作目录兜底。随后只读遍历该 pane 的 `/proc` 子进程和已打开文件，从对应 Codex 进程持有的 JSONL 中选择当前目录一致、非 subagent 的顶层 session。新 Codex 短时关闭 rollout 文件句柄时，仅在进程树明确包含 Codex 的前提下按当前 pane 目录回退到最新 rollout。解析成功后把精确 ID 回写会话绑定，Codex 在同一 tmux 内重启时也会重新识别。活动 pane 没有 Codex 时不回退到上一个 pane 或同目录最近记录。多屏聚焦页不再保存打开瞬间的会话对象，而只保存弹窗开关；弹窗会话始终由当前活动窗格派生并以会话 ID 作为 React key，活动窗格变化会卸载旧请求视图、重新读取新会话；弹窗打开期间还会低频探测返回的 session ID，实际切换 tmux pane 后自动替换历史。xterm helper textarea 被视为终端内容而非外部编辑器，点击它同样更新 `activeSlotId`。解析层忽略 developer/system/reasoning，并在倒序扫描时把工具调用与输出作为不可拆分记录组，因此跨页仍能同时过滤 `exec` 调用和对应输出；前端按时间正序展示，最新记录位于底部，首次定位到底部，向上滚动接近顶部自动加载更早页并在加载后保持滚动锚点，用户与 Codex 消息复用按需加载、memo 化的安全 Markdown/GFM/KaTeX 渲染器。轻量预览最多保留连续 90 条、完整预览最多保留 300 条；继续向前浏览时释放窗口外较新记录，刷新可回到最新。工具输出仍为等宽原文，两类记录正文共享全局终端字号。终端继续承担实时交互，完整记录弹窗承担不会被 ANSI/TUI 重绘覆盖的追加式历史浏览。
 - 远端完整记录是同一 transcript 接口的目标主机适配：后端只使用 registry 中的 `sshTarget`，通过 `SftpService` 读取远端 Codex JSONL 的元数据和尾部窗口；不把远端路径作为浏览器参数执行，也不在远端失败时回退到本机历史。
 - 终端字号由 `terminal-font-size` 本地存储项持久化，默认 14px；滑杆拖动过程中只更新控件显示，鼠标松开、键盘调整结束或失焦提交后才更新已有 `TerminalView` 的 `fontSize` 并触发 fit/resize，不需要重建 WebSocket。
@@ -293,6 +294,7 @@ memories/        仓库记忆，不是产品运行依赖
 - `restoreManagedSessions`：分类并恢复仍存在的受管 tmux，会话缺失时保持显式失败边界。
 - `LocalFsService`：本地文件系统。
 - `SftpService`：远端 SFTP 文件系统。
+- `CodexImageMessageService`：把浏览器图片转换为本机或 SSH 目标主机上的短生命周期附件，并投递到后端解析出的精确 Codex thread。
 - 本地与 SFTP 预览共用有界窗口协议：`offset` 和 `maxBytes` 控制读取范围，响应返回 `previousOffset` / `nextOffset`、实际字节数和文件总长度。服务端将单次请求硬限制为 256 KiB，并在 UTF-8 字符边界分段，避免分页乱码。
 - `VsCodeWebManager`：code-server/openvscode-server 生命周期。
 
@@ -313,6 +315,7 @@ memories/        仓库记忆，不是产品运行依赖
 - `POST /api/agent-launch/ssh-pty`
 - `POST /api/agent-sessions/:id/resize`
 - `POST /api/agent-sessions/:id/stdin`
+- `POST /api/agent-sessions/:id/image-message`
 - `POST /api/agent-sessions/:id/reconnect`
 - `GET /api/app-version`
 - `POST /api/app-update/check`
@@ -346,6 +349,7 @@ memories/        仓库记忆，不是产品运行依赖
 - `TopBar.tsx`：分组顶栏、显示/工具菜单、操作提示、主入口、折叠。
 - `AgentGrid.tsx` / `AgentGridCard.tsx`：宫格和卡片。
 - `AgentFocusView.tsx`：聚焦终端和会话切换。
+- `AgentImageMessageDialog.tsx`：电脑端图片预览、目标确认、说明编辑和失败重试。
 - `TerminalSessionSwitcher.tsx`：多终端窗格的分组会话选择、占用标记和视口内弹层定位。
 - `TerminalView.tsx`：聚焦主终端的 xterm.js、WebSocket、replay、输入所有权。
 - `TerminalPreview.tsx`：宫格卡片和聚焦右侧栏的轻量文本预览，不建立终端 WebSocket。

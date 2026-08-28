@@ -3,12 +3,21 @@ import {
   useMemo,
   useRef,
   useState,
+  type ClipboardEvent as ReactClipboardEvent,
   type MouseEvent as ReactMouseEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
 
-import type { AgentSessionRecord } from "@agent-orchestrator/shared";
+import {
+  isCodexSessionCandidate,
+  type AgentSessionRecord,
+} from "@agent-orchestrator/shared";
 
+import {
+  AgentImageMessageDialog,
+  extractClipboardImage,
+  validateCodexImageFile,
+} from "./AgentImageMessageDialog";
 import { AgentTranscriptDialog } from "./AgentTranscriptDialog";
 import { FocusSidebarSessionCard } from "./FocusSidebarSessionCard";
 import { SessionGroupHeader } from "./SessionGroupControls";
@@ -59,6 +68,7 @@ import {
   SINGLE_PANE_TERMINAL_CACHE_SIZE,
   resolveRetainedTerminalMonitorSlots,
 } from "../lib/terminal-pane-render-policy";
+import { sendCodexImageMessage } from "../lib/api";
 
 interface AgentFocusViewProps {
   focusedSession: AgentSessionRecord;
@@ -98,6 +108,13 @@ const FOCUS_HEADER_COLLAPSED_STORAGE_KEY = "focus-header-collapsed";
 const TERMINAL_MONITOR_DRAG_MIME =
   "application/x-coding-kanban-terminal-session";
 const FOCUS_SIDEBAR_SCROLL_THRESHOLD = 4;
+const DEFAULT_CODEX_IMAGE_MESSAGE = "请查看这张图片并根据图片内容回答。";
+
+interface CodexImageDraft {
+  file: File;
+  targetSessionId: string;
+  targetSessionName: string;
+}
 
 interface TerminalMonitorDragPayload {
   sessionId: string;
@@ -272,6 +289,15 @@ export function AgentFocusView({
   );
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const [imageDraft, setImageDraft] = useState<CodexImageDraft | null>(null);
+  const [imageMessage, setImageMessage] = useState(DEFAULT_CODEX_IMAGE_MESSAGE);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState("");
+  const [imageSendError, setImageSendError] = useState<string | null>(null);
+  const [imageSending, setImageSending] = useState(false);
+  const [imageSendNotice, setImageSendNotice] = useState<{
+    kind: "error" | "success";
+    message: string;
+  } | null>(null);
   const [dragOverSlotId, setDragOverSlotId] = useState<string | null>(null);
   const [closedSlotIds, setClosedSlotIds] = useState<Set<string>>(
     () => new Set(initialTerminalWorkspaceState.closedSlotIds),
@@ -291,6 +317,30 @@ export function AgentFocusView({
   const dragPreviewElementRef = useRef<HTMLElement | null>(null);
   const pendingTerminalKeysRef = useRef<PendingTerminalKeyEvent[]>([]);
   const pendingTerminalKeyTimerRef = useRef<number | null>(null);
+  const imageFileInputRef = useRef<HTMLInputElement | null>(null);
+  const imagePickerTargetRef = useRef<{
+    id: string;
+    name: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!imageDraft) {
+      setImagePreviewUrl("");
+      return;
+    }
+
+    const nextPreviewUrl = URL.createObjectURL(imageDraft.file);
+    setImagePreviewUrl(nextPreviewUrl);
+    return () => URL.revokeObjectURL(nextPreviewUrl);
+  }, [imageDraft]);
+
+  useEffect(() => {
+    if (!imageSendNotice) {
+      return;
+    }
+    const timeout = window.setTimeout(() => setImageSendNotice(null), 4_000);
+    return () => window.clearTimeout(timeout);
+  }, [imageSendNotice]);
 
   function dispatchPendingTerminalKey(event: PendingTerminalKeyEvent): boolean {
     const textarea = getActiveTerminalTextarea();
@@ -476,6 +526,101 @@ export function AgentFocusView({
     (activeSlotSessionId ? sessionById.get(activeSlotSessionId) : undefined) ??
     focusedSession;
   const activeTranscriptSession = transcriptOpen ? activeHeaderSession : null;
+  const canSendImageToActiveSession =
+    isCodexSessionCandidate(activeHeaderSession);
+
+  function openImageDraft(
+    file: File,
+    target: { id: string; name: string },
+  ): void {
+    const validationError = validateCodexImageFile(file);
+    if (validationError) {
+      setImageSendNotice({ kind: "error", message: validationError });
+      return;
+    }
+
+    setTranscriptOpen(false);
+    setImageDraft({
+      file,
+      targetSessionId: target.id,
+      targetSessionName: target.name,
+    });
+    setImageMessage(DEFAULT_CODEX_IMAGE_MESSAGE);
+    setImageSendError(null);
+    setImageSendNotice(null);
+  }
+
+  function openImageFilePicker(target: { id: string; name: string }): void {
+    imagePickerTargetRef.current = target;
+    if (imageFileInputRef.current) {
+      imageFileInputRef.current.value = "";
+      imageFileInputRef.current.click();
+    }
+  }
+
+  function handleImageFileChange(): void {
+    const file = imageFileInputRef.current?.files?.[0];
+    const target = imagePickerTargetRef.current;
+    if (!file || !target) {
+      return;
+    }
+    openImageDraft(file, target);
+  }
+
+  function handleFocusPasteCapture(
+    event: ReactClipboardEvent<HTMLDivElement>,
+  ): void {
+    const image = extractClipboardImage(event.clipboardData);
+    if (!image) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const targetSession = imageDraft
+      ? sessionById.get(imageDraft.targetSessionId)
+      : activeHeaderSession;
+    if (!targetSession || !isCodexSessionCandidate(targetSession)) {
+      setImageSendNotice({
+        kind: "error",
+        message: "当前终端不是可识别的 Codex 会话",
+      });
+      return;
+    }
+    openImageDraft(image, {
+      id: targetSession.id,
+      name: targetSession.displayName,
+    });
+  }
+
+  async function handleSendImageMessage(): Promise<void> {
+    if (!imageDraft || imageSending || imageMessage.trim().length === 0) {
+      return;
+    }
+
+    setImageSending(true);
+    setImageSendError(null);
+    try {
+      await sendCodexImageMessage({
+        agentSessionId: imageDraft.targetSessionId,
+        image: imageDraft.file,
+        message: imageMessage.trim(),
+      });
+      const targetName = imageDraft.targetSessionName;
+      setImageDraft(null);
+      setImageMessage(DEFAULT_CODEX_IMAGE_MESSAGE);
+      setImageSendNotice({
+        kind: "success",
+        message: `图片已发送到 ${targetName}`,
+      });
+    } catch (error) {
+      setImageSendError(
+        error instanceof Error ? error.message : "图片发送失败，请重试",
+      );
+    } finally {
+      setImageSending(false);
+    }
+  }
   const renderedSessionIds = new Set(
     displayedTerminalSlots
       .map((slot) => slot.sessionId)
@@ -1439,6 +1584,7 @@ export function AgentFocusView({
   return (
     <div
       className={`focus-view${sidebarCollapsed ? " focus-view--sidebar-collapsed" : ""}`}
+      onPasteCapture={handleFocusPasteCapture}
       onPointerDownCapture={handleFocusViewPointerDownCapture}
     >
       <div className="focus-main">
@@ -1489,6 +1635,31 @@ export function AgentFocusView({
           >
             变更
           </button>
+          {canSendImageToActiveSession && (
+            <button
+              aria-label={`向 ${activeHeaderSession.displayName} 的 Codex 对话发送图片`}
+              className="focus-transcript-btn focus-image-message-btn"
+              onClick={() =>
+                openImageFilePicker({
+                  id: activeHeaderSession.id,
+                  name: activeHeaderSession.displayName,
+                })
+              }
+              title="点击选择图片，或直接在终端中粘贴截图"
+              type="button"
+            >
+              图片
+            </button>
+          )}
+          <input
+            accept="image/png,image/jpeg,image/webp"
+            aria-hidden="true"
+            className="focus-image-message-file-input"
+            onChange={handleImageFileChange}
+            ref={imageFileInputRef}
+            tabIndex={-1}
+            type="file"
+          />
           {!headerCollapsed && (
             <>
               <span
@@ -1865,6 +2036,36 @@ export function AgentFocusView({
             </div>
           )}
         </>
+      )}
+      {imageSendNotice && (
+        <div
+          className={`focus-image-send-notice focus-image-send-notice--${imageSendNotice.kind}`}
+          role="status"
+        >
+          {imageSendNotice.message}
+        </div>
+      )}
+      {imageDraft && imagePreviewUrl && (
+        <AgentImageMessageDialog
+          error={imageSendError}
+          image={imageDraft.file}
+          message={imageMessage}
+          onCancel={() => {
+            setImageDraft(null);
+            setImageSendError(null);
+          }}
+          onChooseAnother={() =>
+            openImageFilePicker({
+              id: imageDraft.targetSessionId,
+              name: imageDraft.targetSessionName,
+            })
+          }
+          onMessageChange={setImageMessage}
+          onSend={handleSendImageMessage}
+          previewUrl={imagePreviewUrl}
+          sending={imageSending}
+          targetName={imageDraft.targetSessionName}
+        />
       )}
       {paneContextMenu && (
         <div

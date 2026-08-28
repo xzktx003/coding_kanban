@@ -12,6 +12,7 @@ import {
   reconnectRegisteredAgentSession,
   registerAgentSessionRoutes,
 } from "./routes/agent-sessions.js";
+import { registerCodexImageMessageRoutes } from "./routes/codex-image-message.js";
 import {
   registerAppUpdateRoutes,
   type AppVersionServiceLike,
@@ -24,6 +25,11 @@ import { registerVsCodeWebProxyRoutes } from "./routes/vscode-web-proxy.js";
 import { AgentSessionRegistry } from "./services/agent-session-registry.js";
 import { createAgentSessionStreamEvent } from "./services/agent-session-stream.js";
 import { AppVersionService } from "./services/app-version-service.js";
+import {
+  CodexImageMessageService,
+  createCodexImageRemoteFileAccess,
+} from "./services/codex-image-message-service.js";
+import { CodexSessionLocator } from "./services/codex-session-locator.js";
 import { GitAutoUpdateService } from "./services/git-auto-update-service.js";
 import { LocalFsService } from "./services/local-fs-service.js";
 import { LocalProcessRuntimeManager } from "./services/local-process-runtime-manager.js";
@@ -64,6 +70,7 @@ interface BuildServerOptions {
   gitAutoUpdateService?: GitAutoUpdateServiceLike;
   managedSessionRestorer?: ManagedSessionRestorerLike;
   sessionStateStore?: SessionStateStore;
+  codexImageMessageService?: Pick<CodexImageMessageService, "send">;
 }
 
 interface LocalTmuxSocketInputStateDependencies {
@@ -136,6 +143,12 @@ export function buildServer(options: BuildServerOptions = {}): {
   });
   const localFsService = options.localFsService ?? new LocalFsService();
   const sftpService = options.sftpService ?? new SftpService();
+  const codexSessionLocator = new CodexSessionLocator();
+  const codexImageMessageService =
+    options.codexImageMessageService ??
+    new CodexImageMessageService({
+      remoteFileAccess: createCodexImageRemoteFileAccess(sftpService),
+    });
   const vsCodeWebManager = options.vsCodeWebManager ?? new VsCodeWebManager();
   const remoteLaunchPreflight =
     options.remoteLaunchPreflight ?? new RemoteLaunchPreflight();
@@ -194,6 +207,14 @@ export function buildServer(options: BuildServerOptions = {}): {
       remoteLaunchPreflight,
       vsCodeWebManager,
       sftpService,
+      codexSessionLocator,
+    });
+    await instance.register(async (imageMessageRoutes) => {
+      await registerCodexImageMessageRoutes(imageMessageRoutes, {
+        registry,
+        codexSessionLocator,
+        codexImageMessageService,
+      });
     });
     await registerAppUpdateRoutes(instance, {
       appVersionService,
