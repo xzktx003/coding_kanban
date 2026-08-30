@@ -67,6 +67,22 @@ describe("AgentImageMessageDialog", () => {
       } as unknown as Pick<DataTransfer, "files">),
       null,
     );
+
+    const itemOnlyTransfer = {
+      files: {
+        length: 0,
+        item: () => null,
+      },
+      items: {
+        0: {
+          kind: "file",
+          type: "image/png",
+          getAsFile: () => image,
+        },
+        length: 1,
+      },
+    } as unknown as Pick<DataTransfer, "files" | "items">;
+    assert.equal(extractClipboardImage(itemOnlyTransfer), image);
   });
 
   it("rejects unsupported or oversized files before upload", () => {

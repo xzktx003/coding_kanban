@@ -183,7 +183,6 @@ export function AgentTranscriptEntries({
                   <LazyMarkdownContent
                     className="agent-transcript-markdown"
                     content={entry.text}
-                    deferUntilVisible
                     fallbackClassName="agent-transcript-markdown-loading"
                     fallbackText="正在渲染消息…"
                     testId="agent-transcript-markdown"

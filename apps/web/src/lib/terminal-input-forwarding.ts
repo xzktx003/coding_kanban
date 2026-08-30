@@ -42,3 +42,14 @@ export function shouldAttemptTerminalInputForward({
       isTerminalProtocolResponsePayload(sanitizedPayload))
   );
 }
+
+export function shouldLetBrowserHandleTerminalPaste(
+  event: Pick<KeyboardEvent, "altKey" | "ctrlKey" | "key" | "metaKey" | "type">,
+): boolean {
+  return (
+    event.type === "keydown" &&
+    !event.altKey &&
+    (event.ctrlKey || event.metaKey) &&
+    event.key.toLowerCase() === "v"
+  );
+}

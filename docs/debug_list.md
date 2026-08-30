@@ -806,6 +806,20 @@
 - **修复**: 确认窗口增加显式“取消”；后端仍优先尝试原生图片附件，遇到唯一明确的不支持错误时自动改投带可信绝对临时路径的文字消息，让同一 Codex 使用图片查看工具读取。路径回退的图片最多保留 24 小时，相同本机或 SSH 目标缓存能力结果；其它失败仍立即清理并原样提示。
 - **测试**: `AgentImageMessageDialog.test.ts` 锁定显式取消入口；`codex-image-message-service.test.ts` 覆盖本机和 SSH 的原生附件成功、明确不支持后的路径回退、延迟清理及多行消息安全编码。
 
+### 终端粘贴图片误触发远端 X11 剪贴板超时
+
+- **现象**: 在电脑端终端直接粘贴截图时，没有出现 Kanban 图片确认窗口，远端 Codex 反而提示 `clipboard unavailable`，并因无法连接服务端 X11 而超时。
+- **根因**: Chromium 在 xterm 隐藏输入框上的图片剪贴板可能只通过 `DataTransfer.items` 暴露，而旧提取逻辑只读取 `files`；同时 xterm 没有明确把 `Ctrl/Cmd+V` 留给浏览器，快捷键可能作为终端输入抵达远端 TUI。远端进程无法访问发起粘贴的本地浏览器剪贴板。
+- **修复**: xterm 自定义按键处理器在 keydown 阶段放行无 Alt 的 `Ctrl/Cmd+V`，由浏览器 paste 事件统一分流；图片提取同时扫描 `files` 和 `items` 并进入既有确认窗口，普通文本继续走 xterm 原生粘贴链路。
+- **测试**: `terminal-input-forwarding.test.ts` 与 `AgentImageMessageDialog.test.ts` 红绿灯覆盖快捷键隔离和 items-only 图片；新增 Playwright 浏览器回归，当前开发机因缺少 `libatk-bridge2.0-0` 未能启动 Chromium。
+
+### 完整记录按单条进入视口才渲染 Markdown
+
+- **现象**: 完整记录接口已经一次返回约 30 条，但用户向上浏览时，每条 Markdown 仍要等接近可视区域才开始渲染，阅读过程中会不断出现“正在渲染消息”。
+- **根因**: 记录分页只限制了网络和 DOM 数量，消息正文仍给共享懒加载组件传入 `deferUntilVisible`，为每条消息分别创建 IntersectionObserver。
+- **修复**: 保留 Markdown 渲染器代码分包、服务端 30 条游标分页和前端 90/300 条窗口上限；移除完整记录的单条可见性门槛，每次返回的当前分页立即整批渲染，继续加载时新取得的约 30 条也作为一批渲染。
+- **测试**: `AgentTranscriptDialog.test.ts` 红绿灯锁定完整记录仍使用共享 Markdown 渲染器，但不再启用 `deferUntilVisible`；既有测试继续覆盖每页 30 条和窗口上限。
+
 ## 2026-08-26
 
 - 文件浏览器 SSH chmod 面板提交三位权限时返回 500 并保持弹窗：前端生成 `600`，后端校验却只接受带前导 `0` 的格式；放宽为标准三位或四位八进制权限并补充服务层测试。

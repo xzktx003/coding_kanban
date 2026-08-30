@@ -33,6 +33,7 @@ import {
 import {
   computeTerminalReconnectDelay,
   getTerminalInputModeRestoreSequence,
+  shouldLetBrowserHandleTerminalPaste,
   shouldAttemptTerminalInputForward,
 } from "../lib/terminal-input-forwarding";
 import { isTerminalViewportMeasurable } from "../lib/terminal-resize";
@@ -334,6 +335,9 @@ export const TerminalView = memo(function TerminalView({
       disableStdin: false,
       macOptionIsMeta: true,
     });
+    term.attachCustomKeyEventHandler(
+      (event) => !shouldLetBrowserHandleTerminalPaste(event),
+    );
 
     const fitAddon = new FitAddon();
     const webLinksAddon = new WebLinksAddon();

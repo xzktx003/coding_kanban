@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   computeTerminalReconnectDelay,
   getTerminalInputModeRestoreSequence,
+  shouldLetBrowserHandleTerminalPaste,
   shouldAttemptTerminalInputForward,
 } from "./terminal-input-forwarding.js";
 
@@ -103,6 +104,59 @@ describe("terminal input forwarding", () => {
     assert.equal(
       getTerminalInputModeRestoreSequence({ restoreBracketedPaste: false }),
       "",
+    );
+  });
+
+  it("keeps browser paste shortcuts away from the remote terminal", () => {
+    assert.equal(
+      shouldLetBrowserHandleTerminalPaste({
+        type: "keydown",
+        key: "v",
+        ctrlKey: true,
+        metaKey: false,
+        altKey: false,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldLetBrowserHandleTerminalPaste({
+        type: "keydown",
+        key: "V",
+        ctrlKey: false,
+        metaKey: true,
+        altKey: false,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldLetBrowserHandleTerminalPaste({
+        type: "keyup",
+        key: "v",
+        ctrlKey: true,
+        metaKey: false,
+        altKey: false,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldLetBrowserHandleTerminalPaste({
+        type: "keydown",
+        key: "v",
+        ctrlKey: true,
+        metaKey: false,
+        altKey: true,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldLetBrowserHandleTerminalPaste({
+        type: "keydown",
+        key: "v",
+        ctrlKey: false,
+        metaKey: false,
+        altKey: false,
+      }),
+      false,
     );
   });
 });

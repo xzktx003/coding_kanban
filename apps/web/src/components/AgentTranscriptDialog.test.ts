@@ -179,6 +179,16 @@ test("transcript entries render one server page and offer upward continuation", 
   );
 });
 
+test("renders every Markdown message in the loaded page without per-entry visibility gating", () => {
+  const source = readFileSync(
+    new URL("./AgentTranscriptDialog.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /<LazyMarkdownContent/);
+  assert.doesNotMatch(source, /<LazyMarkdownContent[\s\S]*?deferUntilVisible/);
+});
+
 test("transcript paging auto-loads near the top and preserves the scroll anchor", () => {
   assert.equal(shouldLoadOlderTranscript(0, true, false), true);
   assert.equal(shouldLoadOlderTranscript(160, true, false), true);
@@ -189,7 +199,7 @@ test("transcript paging auto-loads near the top and preserves the scroll anchor"
   assert.equal(getTranscriptScrollTopAfterPrepend(0, 1_000, 900), 0);
 });
 
-test("initial transcript remains pinned while deferred Markdown changes height", () => {
+test("initial transcript remains pinned while batched Markdown rendering changes height", () => {
   const source = readFileSync(
     new URL("./AgentTranscriptDialog.tsx", import.meta.url),
     "utf8",

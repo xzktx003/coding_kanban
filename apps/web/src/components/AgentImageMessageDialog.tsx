@@ -21,11 +21,28 @@ interface AgentImageMessageDialogProps {
 }
 
 export function extractClipboardImage(
-  clipboardData: Pick<DataTransfer, "files">,
+  clipboardData: Pick<DataTransfer, "files"> &
+    Partial<Pick<DataTransfer, "items">>,
 ): File | null {
   for (let index = 0; index < clipboardData.files.length; index += 1) {
     const file = clipboardData.files.item(index) ?? clipboardData.files[index];
     if (file?.type.startsWith("image/")) {
+      return file;
+    }
+  }
+
+  // Chromium can expose screenshots and copied web images only through
+  // DataTransfer.items when the paste target is xterm's hidden textarea.
+  // Resolve those browser-owned bytes before the shortcut reaches the remote
+  // Codex TUI, which cannot access the user's local clipboard or X11 server.
+  const items = clipboardData.items;
+  for (let index = 0; index < (items?.length ?? 0); index += 1) {
+    const item = items?.[index];
+    if (item?.kind !== "file" || !item.type.startsWith("image/")) {
+      continue;
+    }
+    const file = item.getAsFile();
+    if (file) {
       return file;
     }
   }
