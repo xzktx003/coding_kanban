@@ -3,11 +3,26 @@ import { describe, it } from "node:test";
 
 import {
   focusActiveTerminalTextarea,
+  hasDocumentTextSelection,
   hasIntentionalExternalFocus,
   shouldActivateTerminalPaneFromPointer,
   shouldPromoteExternalFocusToUserIntent,
   shouldRepairPassiveTerminalFocus,
 } from "./terminal-focus.js";
+
+describe("hasDocumentTextSelection", () => {
+  it("distinguishes a readable browser selection from a collapsed caret", () => {
+    assert.equal(
+      hasDocumentTextSelection({ isCollapsed: false, rangeCount: 1 }),
+      true,
+    );
+    assert.equal(
+      hasDocumentTextSelection({ isCollapsed: true, rangeCount: 1 }),
+      false,
+    );
+    assert.equal(hasDocumentTextSelection(null), false);
+  });
+});
 
 describe("focusActiveTerminalTextarea", () => {
   it("does not collapse a document text selection during passive focus recovery", () => {

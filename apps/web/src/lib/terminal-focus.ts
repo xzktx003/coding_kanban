@@ -40,13 +40,25 @@ export function getActiveTerminalTextarea(): HTMLTextAreaElement | null {
   ) as HTMLTextAreaElement | null;
 }
 
+interface DocumentTextSelection {
+  isCollapsed: boolean;
+  rangeCount: number;
+}
+
+export function hasDocumentTextSelection(
+  selection: DocumentTextSelection | null = window.getSelection(),
+): boolean {
+  return Boolean(
+    selection && selection.rangeCount > 0 && !selection.isCollapsed,
+  );
+}
+
 export function focusActiveTerminalTextarea(): void {
   const focusUnlessSelectingText = () => {
     // This helper is used by passive layout/focus recovery. Focusing xterm's
     // hidden textarea while the user is selecting a preview collapses the
     // browser selection, so every deferred retry must re-check ownership.
-    const selection = window.getSelection();
-    if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+    if (hasDocumentTextSelection()) {
       return;
     }
 

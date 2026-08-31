@@ -1,4 +1,8 @@
-import type { CSSProperties, UIEvent } from "react";
+import type {
+  CSSProperties,
+  PointerEvent as ReactPointerEvent,
+  UIEvent,
+} from "react";
 import {
   useCallback,
   useEffect,
@@ -413,6 +417,16 @@ export function AgentTranscriptDialog({
     initialBottomPinRef.current = false;
   }, []);
 
+  const handleTranscriptPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      cancelInitialBottomPin();
+      if (presentation === "panel") {
+        event.currentTarget.focus({ preventScroll: true });
+      }
+    },
+    [cancelInitialBottomPin, presentation],
+  );
+
   const loadMore = useCallback(() => {
     if (
       !transcript?.hasMore ||
@@ -542,10 +556,11 @@ export function AgentTranscriptDialog({
       <div
         className="agent-transcript-body"
         onScroll={handleTranscriptScroll}
-        onPointerDown={cancelInitialBottomPin}
+        onPointerDown={handleTranscriptPointerDown}
         onTouchStart={cancelInitialBottomPin}
         onWheel={cancelInitialBottomPin}
         ref={transcriptBodyRef}
+        tabIndex={presentation === "panel" ? -1 : undefined}
       >
         <div ref={transcriptContentRef}>
           {error ? (

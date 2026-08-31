@@ -21,6 +21,7 @@ import {
 } from "../lib/resource-diagnostics";
 import { decodeOsc52ClipboardPayload } from "../lib/osc52-clipboard";
 import {
+  hasDocumentTextSelection,
   hasIntentionalExternalFocus,
   shouldPromoteExternalFocusToUserIntent,
   shouldRepairPassiveTerminalFocus,
@@ -789,6 +790,7 @@ export const TerminalView = memo(function TerminalView({
         active instanceof HTMLSelectElement ||
         active instanceof HTMLTextAreaElement ||
         Boolean(active.isContentEditable) ||
+        active.closest('[data-terminal-keyboard-isolation="true"]') !== null ||
         active.closest('[role="dialog"]') !== null ||
         active.closest('[role="alertdialog"]') !== null
       );
@@ -910,6 +912,9 @@ export const TerminalView = memo(function TerminalView({
       // don't steal focus from intentional text-entry surfaces, iframes, or
       // open dialogs.
       if (!unlockInput) {
+        if (hasDocumentTextSelection()) {
+          return;
+        }
         rememberActiveExternalFocusIfUserDriven();
         if (isIntentionalExternalFocus()) {
           return;

@@ -9325,6 +9325,14 @@ input {
 
 .agent-transcript-panel .agent-transcript-body {
   padding: 12px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.agent-transcript-panel .agent-transcript-body::selection,
+.agent-transcript-panel .agent-transcript-body *::selection {
+  color: #fffaf3;
+  background: rgba(255, 143, 31, 0.42);
 }
 
 .agent-transcript-match {

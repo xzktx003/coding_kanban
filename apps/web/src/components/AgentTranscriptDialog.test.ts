@@ -34,6 +34,32 @@ test("renders an embedded transcript panel without a modal backdrop", () => {
   assert.doesNotMatch(markup, /aria-modal/);
 });
 
+test("keeps desktop transcript text selectable while a terminal is mounted", () => {
+  const transcriptSource = readFileSync(
+    new URL("./AgentTranscriptDialog.tsx", import.meta.url),
+    "utf8",
+  );
+  const terminalSource = readFileSync(
+    new URL("./TerminalView.tsx", import.meta.url),
+    "utf8",
+  );
+  const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+  assert.match(
+    transcriptSource,
+    /onPointerDown=\{handleTranscriptPointerDown\}/,
+  );
+  assert.match(
+    terminalSource,
+    /active\.closest\(['"]\[data-terminal-keyboard-isolation="true"\]['"]\)/,
+  );
+  assert.match(terminalSource, /hasDocumentTextSelection\(\)/);
+  assert.match(
+    css,
+    /\.agent-transcript-panel \.agent-transcript-body\s*\{[^}]*user-select:\s*text;/s,
+  );
+});
+
 test("transcript refresh replaces the view when the active tmux Codex session changes", () => {
   assert.equal(
     shouldReplaceTranscriptSession("codex-a", {
