@@ -15,6 +15,7 @@ import type {
 } from "@agent-orchestrator/shared";
 
 import { AgentFocusView } from "./components/AgentFocusView";
+import { AgentTranscriptDialog } from "./components/AgentTranscriptDialog";
 import { AgentGrid } from "./components/AgentGrid";
 import {
   AppUpdateBanner,
@@ -157,7 +158,7 @@ import {
 import { copyTextToClipboard } from "./lib/clipboard";
 import "./app.css";
 
-type SidePanelTool = "files" | "vscode" | "changes";
+type SidePanelTool = "files" | "vscode" | "changes" | "transcript";
 
 const FILE_BROWSER_UI_STORAGE_KEY = "file-browser-ui-state";
 const SIDE_PANEL_SESSION_STORAGE_KEY = "side-panel-session-state";
@@ -884,6 +885,11 @@ export default function App() {
     });
   }
 
+  function returnToFileBrowser(session: AgentSessionRecord) {
+    ensureSidePanelStateForSession(session);
+    setOpenSidePanelTool("files");
+  }
+
   function closeSidePanelTool() {
     setOpenSidePanelTool(null);
   }
@@ -1225,7 +1231,9 @@ export default function App() {
   const fileBrowserOpen = panelAvailable && openSidePanelTool === "files";
   const vscodeOpen = panelAvailable && openSidePanelTool === "vscode";
   const changesOpen = panelAvailable && openSidePanelTool === "changes";
-  const sidePanelOpen = fileBrowserOpen || vscodeOpen || changesOpen;
+  const transcriptOpen = panelAvailable && openSidePanelTool === "transcript";
+  const sidePanelOpen =
+    fileBrowserOpen || vscodeOpen || changesOpen || transcriptOpen;
   const activeVsCodeSessionId =
     vscodeOpen && focusedSession ? focusedSession.id : null;
   const renderedVsCodeSessionIds = useMemo(() => {
@@ -1782,6 +1790,21 @@ export default function App() {
                   onClose={closeSidePanelTool}
                 />
               </SidePanelView>
+              <SidePanelView active={transcriptOpen}>
+                {transcriptOpen ? (
+                  <AgentTranscriptDialog
+                    key={focusedSession.id}
+                    agentSessionId={focusedSession.id}
+                    displayName={focusedSession.displayName}
+                    onClose={() => returnToFileBrowser(focusedSession)}
+                    presentation="panel"
+                    terminalFontSize={terminalFontSize}
+                    useLightweightTerminalPreview={
+                      useLightweightTerminalPreview
+                    }
+                  />
+                ) : null}
+              </SidePanelView>
               {renderedVsCodeSessionIds.map((sessionId) => {
                 const session = sessions.find((item) => item.id === sessionId);
                 if (!session) {
@@ -1877,6 +1900,25 @@ export default function App() {
                 }
                 setOpenSidePanelTool("changes");
                 ensureSidePanelStateForSession(focusedSession);
+              }}
+              transcriptOpen={transcriptOpen}
+              onToggleTranscript={(sessionId) => {
+                if (transcriptOpen && sessionId === focusedSession.id) {
+                  returnToFileBrowser(focusedSession);
+                  return;
+                }
+                const targetSession = sessions.find(
+                  (session) => session.id === sessionId,
+                );
+                if (!targetSession) {
+                  return;
+                }
+                if (targetSession.id !== focusedId) {
+                  setFocusedId(targetSession.id);
+                }
+                setActiveTerminalSessionId(targetSession.id);
+                setOpenSidePanelTool("transcript");
+                ensureSidePanelStateForSession(targetSession);
               }}
               sessionGroups={sessionGroups}
               onCreateSessionGroup={handleCreateSessionGroup}

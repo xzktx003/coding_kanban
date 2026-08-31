@@ -31,6 +31,7 @@ interface AgentTranscriptDialogProps {
   agentSessionId: string;
   displayName: string;
   onClose: () => void;
+  presentation?: "dialog" | "panel";
   terminalFontSize?: number;
   useLightweightTerminalPreview?: boolean;
 }
@@ -225,6 +226,7 @@ export function AgentTranscriptDialog({
   agentSessionId,
   displayName,
   onClose,
+  presentation = "dialog",
   terminalFontSize = DEFAULT_TERMINAL_FONT_SIZE,
   useLightweightTerminalPreview = true,
 }: AgentTranscriptDialogProps) {
@@ -495,6 +497,9 @@ export function AgentTranscriptDialog({
   );
 
   useEffect(() => {
+    if (presentation !== "dialog") {
+      return;
+    }
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -503,7 +508,76 @@ export function AgentTranscriptDialog({
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [onClose]);
+  }, [onClose, presentation]);
+
+  const surface = (
+    <section
+      aria-label={`${displayName} 完整记录`}
+      aria-modal={presentation === "dialog" ? true : undefined}
+      className={`agent-transcript-surface agent-transcript-${presentation}`}
+      data-terminal-keyboard-isolation={
+        presentation === "panel" ? "true" : undefined
+      }
+      role={presentation === "dialog" ? "dialog" : "region"}
+      tabIndex={presentation === "panel" ? -1 : undefined}
+    >
+      <header className="agent-transcript-header">
+        <div>
+          <strong>完整记录</strong>
+          <span>{displayName}</span>
+        </div>
+        <div className="agent-transcript-actions">
+          <button
+            disabled={loading || loadingMore}
+            onClick={load}
+            type="button"
+          >
+            {loading ? "加载中…" : "刷新"}
+          </button>
+          <button onClick={onClose} type="button">
+            关闭
+          </button>
+        </div>
+      </header>
+      <div
+        className="agent-transcript-body"
+        onScroll={handleTranscriptScroll}
+        onPointerDown={cancelInitialBottomPin}
+        onTouchStart={cancelInitialBottomPin}
+        onWheel={cancelInitialBottomPin}
+        ref={transcriptBodyRef}
+      >
+        <div ref={transcriptContentRef}>
+          {error ? (
+            <div className="agent-transcript-error" role="alert">
+              {error}
+            </div>
+          ) : transcript ? (
+            <>
+              {loadMoreError ? (
+                <div className="agent-transcript-error" role="alert">
+                  {loadMoreError}
+                </div>
+              ) : null}
+              <AgentTranscriptEntries
+                loadingMore={loadingMore}
+                onLoadMore={loadMore}
+                terminalFontSize={terminalFontSize}
+                transcript={transcript}
+                windowTrimmed={windowTrimmed}
+              />
+            </>
+          ) : (
+            <div className="agent-transcript-empty">正在读取 Codex 记录…</div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+
+  if (presentation === "panel") {
+    return surface;
+  }
 
   const view = (
     <div
@@ -515,64 +589,7 @@ export function AgentTranscriptDialog({
       }}
       role="presentation"
     >
-      <section
-        aria-label={`${displayName} 完整记录`}
-        aria-modal="true"
-        className="agent-transcript-dialog"
-        role="dialog"
-      >
-        <header className="agent-transcript-header">
-          <div>
-            <strong>完整记录</strong>
-            <span>{displayName}</span>
-          </div>
-          <div className="agent-transcript-actions">
-            <button
-              disabled={loading || loadingMore}
-              onClick={load}
-              type="button"
-            >
-              {loading ? "加载中…" : "刷新"}
-            </button>
-            <button onClick={onClose} type="button">
-              关闭
-            </button>
-          </div>
-        </header>
-        <div
-          className="agent-transcript-body"
-          onScroll={handleTranscriptScroll}
-          onPointerDown={cancelInitialBottomPin}
-          onTouchStart={cancelInitialBottomPin}
-          onWheel={cancelInitialBottomPin}
-          ref={transcriptBodyRef}
-        >
-          <div ref={transcriptContentRef}>
-            {error ? (
-              <div className="agent-transcript-error" role="alert">
-                {error}
-              </div>
-            ) : transcript ? (
-              <>
-                {loadMoreError ? (
-                  <div className="agent-transcript-error" role="alert">
-                    {loadMoreError}
-                  </div>
-                ) : null}
-                <AgentTranscriptEntries
-                  loadingMore={loadingMore}
-                  onLoadMore={loadMore}
-                  terminalFontSize={terminalFontSize}
-                  transcript={transcript}
-                  windowTrimmed={windowTrimmed}
-                />
-              </>
-            ) : (
-              <div className="agent-transcript-empty">正在读取 Codex 记录…</div>
-            )}
-          </div>
-        </div>
-      </section>
+      {surface}
     </div>
   );
 

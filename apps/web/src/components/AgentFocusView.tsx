@@ -18,7 +18,6 @@ import {
   extractClipboardImage,
   validateCodexImageFile,
 } from "./AgentImageMessageDialog";
-import { AgentTranscriptDialog } from "./AgentTranscriptDialog";
 import { FocusSidebarSessionCard } from "./FocusSidebarSessionCard";
 import { SessionGroupHeader } from "./SessionGroupControls";
 import { TerminalPaneContent } from "./TerminalPaneContent";
@@ -83,6 +82,8 @@ interface AgentFocusViewProps {
   onRename?: (id: string) => void;
   changesOpen?: boolean;
   onToggleChanges?: () => void;
+  transcriptOpen?: boolean;
+  onToggleTranscript?: (sessionId: string) => void;
   mobileTerminalTouchMode?: boolean;
   useLightweightTerminalPreview?: boolean;
   terminalFontSize?: number;
@@ -230,6 +231,8 @@ export function AgentFocusView({
   onRename,
   changesOpen = false,
   onToggleChanges,
+  transcriptOpen = false,
+  onToggleTranscript,
   mobileTerminalTouchMode = false,
   useLightweightTerminalPreview = true,
   terminalFontSize,
@@ -288,7 +291,6 @@ export function AgentFocusView({
     loadFocusHeaderCollapsed,
   );
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
-  const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [imageDraft, setImageDraft] = useState<CodexImageDraft | null>(null);
   const [imageMessage, setImageMessage] = useState(DEFAULT_CODEX_IMAGE_MESSAGE);
   const [imagePreviewUrl, setImagePreviewUrl] = useState("");
@@ -525,7 +527,6 @@ export function AgentFocusView({
   const activeHeaderSession =
     (activeSlotSessionId ? sessionById.get(activeSlotSessionId) : undefined) ??
     focusedSession;
-  const activeTranscriptSession = transcriptOpen ? activeHeaderSession : null;
   const canSendImageToActiveSession =
     isCodexSessionCandidate(activeHeaderSession);
 
@@ -539,7 +540,6 @@ export function AgentFocusView({
       return;
     }
 
-    setTranscriptOpen(false);
     setImageDraft({
       file,
       targetSessionId: target.id,
@@ -1528,6 +1528,7 @@ export function AgentFocusView({
         active instanceof HTMLTextAreaElement ||
         active instanceof HTMLSelectElement ||
         active?.isContentEditable ||
+        active?.closest('[data-terminal-keyboard-isolation="true"]') !== null ||
         active?.closest('[role="dialog"]') !== null ||
         active?.closest('[role="alertdialog"]') !== null;
       // Guard: skip forwarding when active element is body or null.
@@ -1618,9 +1619,10 @@ export function AgentFocusView({
           )}
           <button
             aria-label={`查看 ${activeHeaderSession.displayName} 的完整记录`}
-            className="focus-transcript-btn"
+            aria-pressed={transcriptOpen}
+            className={`focus-transcript-btn${transcriptOpen ? " focus-transcript-btn--active" : ""}`}
             data-transcript-session-id={activeHeaderSession.id}
-            onClick={() => setTranscriptOpen(true)}
+            onClick={() => onToggleTranscript?.(activeHeaderSession.id)}
             title="查看不受终端重绘影响的完整 Codex 记录"
             type="button"
           >
@@ -2110,16 +2112,6 @@ export function AgentFocusView({
             彻底删除该终端
           </button>
         </div>
-      )}
-      {activeTranscriptSession && (
-        <AgentTranscriptDialog
-          key={activeTranscriptSession.id}
-          agentSessionId={activeTranscriptSession.id}
-          displayName={activeTranscriptSession.displayName}
-          onClose={() => setTranscriptOpen(false)}
-          terminalFontSize={terminalFontSize}
-          useLightweightTerminalPreview={useLightweightTerminalPreview}
-        />
       )}
     </div>
   );

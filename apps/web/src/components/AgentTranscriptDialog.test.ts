@@ -8,12 +8,31 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   AGENT_TRANSCRIPT_PAGE_SIZE,
+  AgentTranscriptDialog,
   getTranscriptScrollTopAfterPrepend,
   AgentTranscriptEntries,
   mergeTranscriptPage,
   shouldLoadOlderTranscript,
   shouldReplaceTranscriptSession,
 } from "./AgentTranscriptDialog.js";
+
+test("renders an embedded transcript panel without a modal backdrop", () => {
+  const markup = renderToStaticMarkup(
+    createElement(AgentTranscriptDialog, {
+      agentSessionId: "codex-panel",
+      displayName: "Panel session",
+      onClose: () => {},
+      presentation: "panel",
+    }),
+  );
+
+  assert.match(markup, /class="[^"]*agent-transcript-panel[^"]*"/);
+  assert.match(markup, /aria-label="Panel session 完整记录"/);
+  assert.match(markup, /role="region"/);
+  assert.match(markup, /data-terminal-keyboard-isolation="true"/);
+  assert.doesNotMatch(markup, /agent-transcript-backdrop/);
+  assert.doesNotMatch(markup, /aria-modal/);
+});
 
 test("transcript refresh replaces the view when the active tmux Codex session changes", () => {
   assert.equal(

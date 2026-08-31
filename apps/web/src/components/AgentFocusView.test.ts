@@ -65,6 +65,18 @@ describe("AgentFocusView", () => {
     );
   });
 
+  it("does not forward keys typed while the transcript side panel owns focus", () => {
+    const source = readFileSync(
+      new URL("./AgentFocusView.tsx", import.meta.url),
+      "utf8",
+    );
+
+    assert.match(
+      source,
+      /active\?\.closest\(['"]\[data-terminal-keyboard-isolation="true"\]['"]\)/,
+    );
+  });
+
   it("keeps mounted manual terminals alive while their layout panes are hidden", () => {
     const source = readFileSync(
       new URL("./AgentFocusView.tsx", import.meta.url),
@@ -260,6 +272,8 @@ describe("AgentFocusView", () => {
       createElement(AgentFocusView, {
         focusedSession: sessions[0],
         sessions,
+        transcriptOpen: true,
+        onToggleTranscript: () => {},
         onExit: () => {},
         onDeleteSession: () => {},
         onHideSession: () => {},
@@ -270,6 +284,8 @@ describe("AgentFocusView", () => {
 
     assert.match(markup, /aria-label="查看 Beta 的完整记录"/);
     assert.match(markup, /data-transcript-session-id="session-2"/);
+    assert.match(markup, /aria-pressed="true"/);
+    assert.match(markup, /focus-transcript-btn--active/);
   });
 
   it("renders every session from the selected group in group arrangement mode", () => {

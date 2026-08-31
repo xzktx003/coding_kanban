@@ -8916,9 +8916,17 @@ input {
   backdrop-filter: blur(4px);
 }
 
-.agent-transcript-dialog {
+.agent-transcript-surface {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: #f4f1ea;
+  background: #111820;
+}
+
+.agent-transcript-dialog {
   width: min(1100px, 94vw);
   height: min(860px, 90vh);
   max-height: calc(
@@ -8927,12 +8935,23 @@ input {
   max-height: calc(
     100dvh - var(--agent-transcript-inset) - var(--agent-transcript-inset)
   );
-  overflow: hidden;
-  color: #f4f1ea;
-  background: #111820;
   border: 1px solid rgba(255, 143, 31, 0.42);
   border-radius: 14px;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.52);
+}
+
+.agent-transcript-panel {
+  width: 100%;
+  height: 100%;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(246, 178, 107, 0.12),
+      transparent 32%
+    ),
+    rgba(12, 16, 21, 0.94);
+  animation: ui-panel-in var(--motion-standard) var(--motion-ease-out) both;
 }
 
 .agent-transcript-header {
@@ -8975,6 +8994,12 @@ input {
   border: 1px solid rgba(255, 143, 31, 0.38);
   border-radius: 7px;
   cursor: pointer;
+}
+
+.focus-transcript-btn--active {
+  color: #fff1df;
+  border-color: #ff9f43;
+  background: rgba(255, 143, 31, 0.28);
 }
 
 .agent-transcript-actions button {
@@ -9269,6 +9294,37 @@ input {
   overflow: auto;
   padding: 16px;
   overscroll-behavior: contain;
+}
+
+.agent-transcript-panel .agent-transcript-header {
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.agent-transcript-panel .agent-transcript-header > div:first-child {
+  min-width: 0;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-transcript-panel .agent-transcript-header span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-transcript-panel .agent-transcript-actions {
+  gap: 6px;
+}
+
+.agent-transcript-panel .agent-transcript-actions button {
+  padding: 5px 8px;
+}
+
+.agent-transcript-panel .agent-transcript-body {
+  padding: 12px;
 }
 
 .agent-transcript-match {
