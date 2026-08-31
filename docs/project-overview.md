@@ -59,6 +59,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
   - macOS 为 `⌘+E` 快连 tmux，其它平台为 `Ctrl+E`
   - Tab 切换焦点
 - Agent 完成通知使用浏览器 Notification API：用户在桌面工具菜单或手机标题区开启并授权后，前端基于 `/ws/agent-sessions` 快照检测已知会话从 `running` 进入 `idle` 或 `exited`，并发送“任务已经完成，请及时查看”的系统通知；该轻量能力要求页面保持打开，不包含 Web Push 后台推送。
+- Codex 还可通过用户级 `notify` 调用 `scripts/codex-feishu-notify.mjs`，在原生 `agent-turn-complete` 事件后主动向飞书群聊或用户发送 bot 消息。桥接器只处理 `cwd` 位于本仓库内的事件，与浏览器通知相互独立，不依赖页面是否打开，也不复用启发式 `idle` 状态；它从仓库根目录 `.env` 读取唯一目标，以固定参数、无 shell 的方式调用 `lark-cli`，只接受 `ok: true` 成功信封，并使用 thread/turn 派生的稳定幂等键执行有界重试。完整配置和安全边界见 [`docs/codex-feishu-notifications.md`](./codex-feishu-notifications.md)。
 - 额外快捷键：
   - `Ctrl/⌘+E` 打开快速连接 tmux。
   - `Ctrl/⌘+Shift+S` 打开本地 tmux 扫描弹窗。

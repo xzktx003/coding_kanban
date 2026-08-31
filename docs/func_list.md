@@ -35,6 +35,7 @@
 - 开发入口默认使用 HTTPS 协议；`restart-dev.sh` 输出局域网可访问的 HTTPS 前端地址，并自动准备开发证书。
 - 顶栏常驻“终端字号”滑杆，支持在 10px 到 24px 之间拖动调整所有内置 xterm 终端及“完整记录”正文的字号，并持久化到本地存储。
 - 顶栏“工具”菜单提供 Agent 完成通知开关；浏览器授权后，已知会话从 `running` 进入 `idle` 或 `exited` 时会发送系统通知，提示当前看板任务已经完成并需要查看。
+- 仓库提供 `scripts/codex-feishu-notify.mjs` 作为 Codex 原生 `agent-turn-complete` 通知桥接器：从仓库根目录 `.env` 读取唯一的飞书群聊或用户目标，显式使用 `lark-cli --as bot` 发送纯文本提示；消息只包含项目目录名和有界最终摘要，不转发用户原始 prompt 或完整机器路径，并以 Codex thread/turn 生成稳定幂等键。
 - 顶栏“资源调节”菜单提供终端预览模式切换，可在默认轻量预览和旧版完整小终端预览之间切换，并收纳 VS Code 省内存/保持状态、释放 VS Code 缓存和资源诊断。
 - 顶栏“资源调节”菜单提供资源诊断面板，按需展示 xterm 实例数、终端 WebSocket 数、会话快照吞吐、终端实时流吞吐、终端历史缓冲裁剪状态、VS Code iframe 当前/隐藏数量、主线程长任务、VS Code 代理 HTTP/WS 吞吐和 Chromium JS heap 指标，用于定位浏览器内存、网络增长、长输出丢失与 VS Code iframe 卡顿来源。
 - 提供 `Ctrl/⌘+E` 快速连接 tmux、`Ctrl/⌘+Shift+S` 打开 tmux 扫描、`Alt+Q` 从聚焦视图返回宫格等快捷操作。
