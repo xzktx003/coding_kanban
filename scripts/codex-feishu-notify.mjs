@@ -2,17 +2,20 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { config as loadDotenv } from "dotenv";
 
 const EVENT_TYPE = "agent-turn-complete";
-const DEFAULT_SUMMARY_MAX_CHARS = 600;
+const DEFAULT_MESSAGE_CHUNK_CHARS = 12_000;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MAX_ATTEMPTS = 2;
 const MAX_COMMAND_OUTPUT_BYTES = 64 * 1024;
 const RETRY_DELAY_MS = 250;
+const LEGACY_NOTIFICATION_SETTINGS_VERSION = 1;
+const NOTIFICATION_SETTINGS_VERSION = 2;
 const CHAT_ID_PATTERN = /^oc_[A-Za-z0-9_-]+$/;
 const USER_ID_PATTERN = /^ou_[A-Za-z0-9_-]+$/;
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
@@ -20,6 +23,10 @@ const CONTROL_CHARACTER_PATTERN =
   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, "..");
+const notificationSettingsPath = resolve(
+  repositoryRoot,
+  ".dev-runtime/feishu-notification-settings.json",
+);
 
 class LarkCliResponseError extends Error {
   constructor(message) {
@@ -77,6 +84,52 @@ function parseBoundedInteger(value, name, defaultValue, minimum, maximum) {
   return parsed;
 }
 
+function readFeishuNotificationSettings(statePath = notificationSettingsPath) {
+  let raw;
+  try {
+    raw = readFileSync(statePath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return { enabled: true, deliveryMode: "hook" };
+    }
+    throw new Error("Unable to read Feishu notification settings");
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!isRecord(parsed) || typeof parsed.enabled !== "boolean") {
+      throw new Error("invalid settings shape");
+    }
+    if (parsed.version === LEGACY_NOTIFICATION_SETTINGS_VERSION) {
+      return { enabled: parsed.enabled, deliveryMode: "hook" };
+    }
+    if (
+      parsed.version === NOTIFICATION_SETTINGS_VERSION &&
+      parsed.deliveryMode === "kanban"
+    ) {
+      return { enabled: parsed.enabled, deliveryMode: "kanban" };
+    }
+    throw new Error("invalid settings version");
+  } catch {
+    throw new Error("Feishu notification settings are invalid");
+  }
+}
+
+export function readCodexHookNotificationEnabled(
+  statePath = notificationSettingsPath,
+) {
+  const settings = readFeishuNotificationSettings(statePath);
+  return settings.enabled && settings.deliveryMode === "hook";
+}
+
+export function readKanbanNotificationEnabled(
+  statePath = notificationSettingsPath,
+) {
+  return readFeishuNotificationSettings(statePath).enabled;
+}
+
+export const readFeishuNotificationEnabled = readCodexHookNotificationEnabled;
+
 function resolveDestination(env) {
   const chatId = env.FEISHU_NOTIFY_CHAT_ID?.trim() ?? "";
   const userId = env.FEISHU_NOTIFY_USER_ID?.trim() ?? "";
@@ -112,6 +165,14 @@ function sanitizeText(value) {
     .trim();
 }
 
+function sanitizeOutputText(value) {
+  return String(value ?? "")
+    .replace(ANSI_ESCAPE_PATTERN, "")
+    .replace(CONTROL_CHARACTER_PATTERN, "")
+    .replace(/\r\n?/g, "\n")
+    .trim();
+}
+
 function truncateText(value, maxCharacters) {
   const characters = Array.from(value);
   if (characters.length <= maxCharacters) {
@@ -126,6 +187,18 @@ function projectNameFromCwd(cwd) {
     normalized.split("/").filter(Boolean).at(-1) || "未知项目",
     120,
   );
+}
+
+function formatAgentKind(value) {
+  const normalized = sanitizeText(value).toLowerCase();
+  const labels = {
+    claude: "Claude",
+    codex: "Codex",
+    copilot: "Copilot",
+    opencode: "OpenCode",
+    shell: "Shell",
+  };
+  return labels[normalized] ?? truncateText(sanitizeText(value), 80);
 }
 
 function redactCurrentWorkingDirectory(value, cwd, projectName) {
@@ -164,34 +237,75 @@ function isRepositoryWorkingDirectory(cwd) {
 
 export function buildCompletionMessage(
   notification,
-  maxSummaryCharacters = DEFAULT_SUMMARY_MAX_CHARS,
+  maxChunkCharacters = DEFAULT_MESSAGE_CHUNK_CHARS,
+) {
+  return buildCompletionMessages(notification, maxChunkCharacters).join("\n\n");
+}
+
+function splitOutputText(value, maxChunkCharacters) {
+  const characters = Array.from(value);
+  if (characters.length === 0) {
+    return [""];
+  }
+
+  const chunks = [];
+  for (let index = 0; index < characters.length; index += maxChunkCharacters) {
+    chunks.push(characters.slice(index, index + maxChunkCharacters).join(""));
+  }
+  return chunks;
+}
+
+export function buildCompletionMessages(
+  notification,
+  maxChunkCharacters = DEFAULT_MESSAGE_CHUNK_CHARS,
 ) {
   const cwd = typeof notification.cwd === "string" ? notification.cwd : "";
-  const rawSummary =
+  const rawOutput =
     typeof notification["last-assistant-message"] === "string" &&
     notification["last-assistant-message"].trim()
       ? notification["last-assistant-message"]
       : "Codex 已完成本轮任务，请打开 Coding Kanban 查看结果。";
   const projectName = projectNameFromCwd(cwd);
-  const summary = truncateText(
-    redactCurrentWorkingDirectory(sanitizeText(rawSummary), cwd, projectName),
-    maxSummaryCharacters,
+  const output = redactCurrentWorkingDirectory(
+    sanitizeOutputText(rawOutput),
+    cwd,
+    projectName,
   );
+  const agentKind =
+    typeof notification["agent-kind"] === "string"
+      ? formatAgentKind(notification["agent-kind"])
+      : "Codex";
+  const displayName =
+    typeof notification["display-name"] === "string"
+      ? truncateText(sanitizeText(notification["display-name"]), 160)
+      : "";
 
-  return [
-    "Coding Kanban · Codex 任务完成",
+  const header = [
+    `Coding Kanban · ${agentKind || "Agent"} 任务完成`,
     `项目：${projectName}`,
-    `摘要：${summary}`,
+    ...(displayName ? [`会话：${displayName}`] : []),
   ].join("\n");
+  const chunks = splitOutputText(output, maxChunkCharacters);
+  return chunks.map((chunk, index) =>
+    [
+      header,
+      chunks.length === 1
+        ? "最后输出："
+        : `最后输出（${index + 1}/${chunks.length}）：`,
+      chunk,
+    ].join("\n"),
+  );
 }
 
-export function createIdempotencyKey(notification) {
+export function createIdempotencyKey(notification, partIndex = 0) {
   const threadId = requiredString(notification, "thread-id");
   const turnId = requiredString(notification, "turn-id");
   const digest = createHash("sha256")
     .update(threadId)
     .update("\0")
     .update(turnId)
+    .update("\0")
+    .update(String(partIndex))
     .digest("hex")
     .slice(0, 40);
   return `codex-${digest}`;
@@ -300,6 +414,8 @@ function delay(milliseconds) {
 export async function runCodexFeishuNotification({
   rawNotification,
   env = process.env,
+  resolveNotificationEnabled = () => true,
+  enforceRepositoryScope = true,
   runCommand = execFileCommand,
   sleep = delay,
 }) {
@@ -307,17 +423,23 @@ export async function runCodexFeishuNotification({
   if (notification.type !== EVENT_TYPE) {
     return { status: "ignored" };
   }
-  if (!isRepositoryWorkingDirectory(notification.cwd)) {
+  if (
+    enforceRepositoryScope &&
+    !isRepositoryWorkingDirectory(notification.cwd)
+  ) {
     return { status: "ignored" };
+  }
+  if (!resolveNotificationEnabled()) {
+    return { status: "disabled" };
   }
 
   const destination = resolveDestination(env);
-  const summaryMaxCharacters = parseBoundedInteger(
-    env.FEISHU_NOTIFY_SUMMARY_MAX_CHARS,
-    "FEISHU_NOTIFY_SUMMARY_MAX_CHARS",
-    DEFAULT_SUMMARY_MAX_CHARS,
-    80,
-    2_000,
+  const messageChunkCharacters = parseBoundedInteger(
+    env.FEISHU_NOTIFY_MESSAGE_CHUNK_CHARS,
+    "FEISHU_NOTIFY_MESSAGE_CHUNK_CHARS",
+    DEFAULT_MESSAGE_CHUNK_CHARS,
+    1_000,
+    30_000,
   );
   const timeout = parseBoundedInteger(
     env.FEISHU_NOTIFY_TIMEOUT_MS,
@@ -333,22 +455,10 @@ export async function runCodexFeishuNotification({
     1,
     3,
   );
-  const message = buildCompletionMessage(notification, summaryMaxCharacters);
-  const idempotencyKey = createIdempotencyKey(notification);
-  const args = [
-    "im",
-    "+messages-send",
-    "--format",
-    "json",
-    "--as",
-    "bot",
-    destination.flag,
-    destination.id,
-    "--text",
-    message,
-    "--idempotency-key",
-    idempotencyKey,
-  ];
+  const messages = buildCompletionMessages(
+    notification,
+    messageChunkCharacters,
+  );
   const commandEnv = {
     ...process.env,
     ...env,
@@ -356,31 +466,57 @@ export async function runCodexFeishuNotification({
     LARKSUITE_CLI_NO_SKILLS_NOTIFIER: "1",
   };
 
-  let lastError;
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    try {
-      const { stdout } = await runCommand("lark-cli", args, {
-        env: commandEnv,
-        timeout,
-      });
-      const response = parseLarkCliResponse(stdout);
-      const messageId = isRecord(response.data)
-        ? response.data.message_id
-        : undefined;
-      return {
-        status: "sent",
-        ...(typeof messageId === "string" ? { messageId } : {}),
-      };
-    } catch (error) {
-      lastError = error;
-      if (attempt >= maxAttempts - 1 || !isRetryableCommandError(error)) {
+  const messageIds = [];
+  for (const [partIndex, message] of messages.entries()) {
+    const args = [
+      "im",
+      "+messages-send",
+      "--format",
+      "json",
+      "--as",
+      "bot",
+      destination.flag,
+      destination.id,
+      "--text",
+      message,
+      "--idempotency-key",
+      createIdempotencyKey(notification, partIndex),
+    ];
+    let lastError;
+    let sent = false;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        const { stdout } = await runCommand("lark-cli", args, {
+          env: commandEnv,
+          timeout,
+        });
+        const response = parseLarkCliResponse(stdout);
+        const messageId = isRecord(response.data)
+          ? response.data.message_id
+          : undefined;
+        if (typeof messageId === "string") {
+          messageIds.push(messageId);
+        }
+        sent = true;
         break;
+      } catch (error) {
+        lastError = error;
+        if (attempt >= maxAttempts - 1 || !isRetryableCommandError(error)) {
+          break;
+        }
+        await sleep(RETRY_DELAY_MS * 2 ** attempt);
       }
-      await sleep(RETRY_DELAY_MS * 2 ** attempt);
+    }
+    if (!sent) {
+      throw safeCommandError(lastError);
     }
   }
 
-  throw safeCommandError(lastError);
+  return {
+    status: "sent",
+    ...(messageIds.length === 1 ? { messageId: messageIds[0] } : {}),
+    ...(messageIds.length > 1 ? { messageIds } : {}),
+  };
 }
 
 function loadRepositoryEnv() {
@@ -393,17 +529,24 @@ function loadRepositoryEnv() {
 
 async function main() {
   loadRepositoryEnv();
-  const rawNotification = process.argv[2];
+  const kanbanDelivery = process.argv[2] === "--kanban";
+  const rawNotification = process.argv[kanbanDelivery ? 3 : 2];
   if (!rawNotification) {
     process.stderr.write(
-      "Usage: codex-feishu-notify.mjs '<codex-notification-json>'\n",
+      "Usage: codex-feishu-notify.mjs [--kanban] '<notification-json>'\n",
     );
     process.exitCode = 2;
     return;
   }
 
   try {
-    const result = await runCodexFeishuNotification({ rawNotification });
+    const result = await runCodexFeishuNotification({
+      rawNotification,
+      resolveNotificationEnabled: kanbanDelivery
+        ? readKanbanNotificationEnabled
+        : readCodexHookNotificationEnabled,
+      enforceRepositoryScope: !kanbanDelivery,
+    });
     if (result.status === "sent") {
       process.stdout.write("Codex completion notification sent to Feishu.\n");
     }

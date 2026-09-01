@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
-import { TopBar } from "./TopBar.js";
+import { TOP_BAR_SETTINGS_SECTIONS, TopBar } from "./TopBar.js";
 
 function installDocumentStub() {
   Object.defineProperty(globalThis, "document", {
@@ -57,6 +57,12 @@ function renderTopBar(overrides: Partial<Parameters<typeof TopBar>[0]> = {}) {
       terminalFontSize: 16,
       agentCompletionNotificationsEnabled: false,
       agentCompletionNotificationPermission: "default",
+      feishuNotificationSettings: {
+        configured: true,
+        destinationType: "user",
+        enabled: true,
+      },
+      feishuNotificationSettingsUpdating: false,
       onToggleCollapsed: () => {},
       onToggleFileBrowser: () => {},
       onToggleVsCode: () => {},
@@ -65,6 +71,7 @@ function renderTopBar(overrides: Partial<Parameters<typeof TopBar>[0]> = {}) {
       onToggleTerminalPreviewMode: () => {},
       onTerminalFontSizeChange: () => {},
       onToggleAgentCompletionNotifications: () => {},
+      onToggleFeishuNotifications: () => {},
       onOpenNewSession: () => {},
       onScanTmux: () => {},
       onScanApps: () => {},
@@ -74,6 +81,17 @@ function renderTopBar(overrides: Partial<Parameters<typeof TopBar>[0]> = {}) {
 }
 
 describe("TopBar", () => {
+  it("groups tools, resource tuning, and Feishu notifications under settings", () => {
+    assert.deepEqual(
+      TOP_BAR_SETTINGS_SECTIONS.map(({ id, label }) => ({ id, label })),
+      [
+        { id: "tools", label: "工具" },
+        { id: "resource", label: "资源调节" },
+        { id: "feishu", label: "飞书通知" },
+      ],
+    );
+  });
+
   it("keeps only grouped high-level actions visible by default", () => {
     const markup = renderTopBar();
 
@@ -82,9 +100,10 @@ describe("TopBar", () => {
     assert.match(markup, /共 <strong>2<\/strong> 个会话/);
     assert.match(markup, /data-testid="new-session-toggle"/);
     assert.match(markup, /data-testid="scan-menu-toggle"/);
-    assert.match(markup, /data-testid="tools-menu-toggle"/);
+    assert.match(markup, /data-testid="settings-menu-toggle"/);
+    assert.doesNotMatch(markup, /data-testid="tools-menu-toggle"/);
     assert.doesNotMatch(markup, /完成通知/);
-    assert.match(markup, /data-testid="resource-tuning-menu-toggle"/);
+    assert.doesNotMatch(markup, /data-testid="resource-tuning-menu-toggle"/);
     assert.match(markup, /data-testid="terminal-font-size-slider"/);
     assert.match(markup, /aria-label="终端字号"/);
     assert.match(markup, /value="16"/);
@@ -112,7 +131,7 @@ describe("TopBar", () => {
       agentCompletionNotificationsEnabled: true,
     });
 
-    assert.match(markup, /data-testid="tools-menu-toggle"/);
+    assert.match(markup, /data-testid="settings-menu-toggle"/);
     assert.doesNotMatch(
       markup,
       /data-testid="agent-completion-notification-toggle"/,

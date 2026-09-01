@@ -18,6 +18,7 @@ import type {
 const SESSION_HEADER_BYTES = 64 * 1024;
 const TRANSCRIPT_READ_BLOCK_BYTES = 64 * 1024;
 const REMOTE_TRANSCRIPT_READ_BLOCK_BYTES = 4 * 1024 * 1024;
+const LATEST_COMPLETION_SCAN_BYTES = 1024 * 1024;
 const DEFAULT_TRANSCRIPT_PAGE_LIMIT = 30;
 const MAX_TRANSCRIPT_PAGE_LIMIT = 100;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
@@ -65,6 +66,12 @@ export interface ReadRemoteTranscriptInput extends ReadTranscriptInput {
 export interface AgentMessageSummaries {
   lastUserMessageSummary?: string;
   lastAgentMessageSummary?: string;
+}
+
+export interface CodexTurnCompletion {
+  completionId: string;
+  content: string;
+  completedAt: string;
 }
 
 const MESSAGE_SUMMARY_MAX_CHARS = 180;
@@ -125,6 +132,67 @@ function parseRecord(line: string): JsonRecord | null {
   } catch {
     // Codex may be appending the final JSONL record while this endpoint reads.
     return null;
+  }
+}
+
+function parseTurnCompletion(
+  record: JsonRecord | null,
+): CodexTurnCompletion | null {
+  if (record?.type !== "event_msg" || !record.payload) {
+    return null;
+  }
+  const payload = record.payload;
+  if (stringValue(payload.type) !== "task_complete") {
+    return null;
+  }
+
+  const completionId = stringValue(payload.turn_id);
+  const content = stringValue(payload.last_agent_message);
+  const completedAt = stringValue(record.timestamp);
+  if (!completionId || !content.trim() || !completedAt) {
+    return null;
+  }
+  return { completionId, content, completedAt };
+}
+
+function findLatestCompletionInTail(
+  buffer: Buffer,
+  startsMidFile: boolean,
+): CodexTurnCompletion | null {
+  let text = buffer.toString("utf8");
+  if (startsMidFile) {
+    const firstCompleteLine = text.indexOf("\n");
+    if (firstCompleteLine < 0) {
+      return null;
+    }
+    text = text.slice(firstCompleteLine + 1);
+  }
+
+  const lines = text.split("\n");
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const completion = parseTurnCompletion(parseRecord(lines[index] ?? ""));
+    if (completion) {
+      return completion;
+    }
+  }
+  return null;
+}
+
+function readLatestCompletionFromFile(
+  path: string,
+): CodexTurnCompletion | null {
+  const fileSize = statSync(path).size;
+  const offset = Math.max(0, fileSize - LATEST_COMPLETION_SCAN_BYTES);
+  const descriptor = openSync(path, "r");
+  try {
+    const buffer = Buffer.allocUnsafe(fileSize - offset);
+    const bytesRead = readSync(descriptor, buffer, 0, buffer.length, offset);
+    return findLatestCompletionInTail(
+      buffer.subarray(0, bytesRead),
+      offset > 0,
+    );
+  } finally {
+    closeSync(descriptor);
   }
 }
 
@@ -530,6 +598,7 @@ function readSessionMetadata(path: string): SessionMetadata | null {
 export class CodexTranscriptService {
   private readonly sessionsRoot: string;
   private readonly remoteFileAccess?: RemoteCodexFileAccess;
+  private readonly localSessionPathById = new Map<string, string>();
 
   constructor(options: CodexTranscriptServiceOptions = {}) {
     this.sessionsRoot =
@@ -562,6 +631,11 @@ export class CodexTranscriptService {
       updatedAt: statSync(match.path).mtime.toISOString(),
       ...page,
     };
+  }
+
+  readLatestCompletion(input: ReadTranscriptInput): CodexTurnCompletion | null {
+    const match = this.findSession(input);
+    return match ? readLatestCompletionFromFile(match.path) : null;
   }
 
   async readRemote(
@@ -637,15 +711,58 @@ export class CodexTranscriptService {
     };
   }
 
+  async readLatestRemoteCompletion(
+    input: ReadRemoteTranscriptInput,
+  ): Promise<CodexTurnCompletion | null> {
+    if (!this.remoteFileAccess) {
+      return null;
+    }
+
+    let match: Awaited<ReturnType<CodexTranscriptService["findRemoteSession"]>>;
+    try {
+      match = await this.findRemoteSession(input);
+    } catch {
+      return null;
+    }
+    if (!match) {
+      return null;
+    }
+
+    const offset = Math.max(0, match.file.size - LATEST_COMPLETION_SCAN_BYTES);
+    const result = await this.remoteFileAccess.readRange(
+      input.sshTarget,
+      match.file.path,
+      offset,
+      match.file.size - offset,
+    );
+    return findLatestCompletionInTail(result.buffer, offset > 0);
+  }
+
   private findSession(input: ReadTranscriptInput): {
     path: string;
     metadata: SessionMetadata;
     matchedBy: "session-id" | "working-directory";
   } | null {
+    const requestedSessionId = input.sessionId?.trim();
+
+    if (requestedSessionId && SESSION_ID_PATTERN.test(requestedSessionId)) {
+      const cachedPath = this.localSessionPathById.get(requestedSessionId);
+      if (cachedPath && existsSync(cachedPath)) {
+        const metadata = readSessionMetadata(cachedPath);
+        if (metadata?.id === requestedSessionId) {
+          return {
+            path: cachedPath,
+            metadata,
+            matchedBy: "session-id",
+          };
+        }
+        this.localSessionPathById.delete(requestedSessionId);
+      }
+    }
+
     const files = listJsonlFiles(this.sessionsRoot).sort(
       (left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs,
     );
-    const requestedSessionId = input.sessionId?.trim();
 
     if (requestedSessionId && SESSION_ID_PATTERN.test(requestedSessionId)) {
       for (const path of files) {
@@ -654,6 +771,7 @@ export class CodexTranscriptService {
         }
         const metadata = readSessionMetadata(path);
         if (metadata?.id === requestedSessionId) {
+          this.localSessionPathById.set(metadata.id, path);
           return { path, metadata, matchedBy: "session-id" };
         }
       }
@@ -667,6 +785,7 @@ export class CodexTranscriptService {
     for (const path of files) {
       const metadata = readSessionMetadata(path);
       if (metadata && resolve(metadata.cwd) === normalizedDirectory) {
+        this.localSessionPathById.set(metadata.id, path);
         return { path, metadata, matchedBy: "working-directory" };
       }
     }

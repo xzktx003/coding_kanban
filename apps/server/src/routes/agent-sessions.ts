@@ -57,6 +57,10 @@ import {
 } from "../services/runtime-compat.js";
 import { SshRuntimeManager } from "../services/ssh-runtime-manager.js";
 import {
+  assertValidSshTarget,
+  InvalidSshTargetError,
+} from "../services/ssh-command.js";
+import {
   canonicalTmuxDisplayName,
   normalizeTmuxSessionName,
 } from "../services/tmux-display-name.js";
@@ -737,11 +741,20 @@ export async function registerAgentSessionRoutes(
     "/api/agent-launch/ssh-pty",
     async (request, reply) => {
       try {
+        assertValidSshTarget(request.body?.sshTarget);
         await remoteLaunchPreflight.check(request.body);
         const agentSession = ptyRuntimeManager.launchRemote(request.body);
         reply.code(201);
         return agentSession;
       } catch (error) {
+        if (error instanceof InvalidSshTargetError) {
+          reply.code(400);
+          return {
+            error: "SSH 连接参数无效",
+            code: "INVALID_SSH_TARGET",
+          };
+        }
+
         if (error instanceof RemoteLaunchPreflightError) {
           reply.code(error.httpStatus);
           return { error: error.message, code: error.code };

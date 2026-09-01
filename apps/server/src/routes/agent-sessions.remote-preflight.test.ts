@@ -84,3 +84,34 @@ test("SSH PTY launch maps preflight transport failures to a gateway error", asyn
     await app.close();
   }
 });
+
+test("SSH PTY launch rejects unsafe connection parameters before preflight", async () => {
+  let preflightCalls = 0;
+  const remoteLaunchPreflight: RemoteLaunchPreflightLike = {
+    async check() {
+      preflightCalls += 1;
+    },
+  };
+  const { app, registry } = buildServer({ remoteLaunchPreflight });
+
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/agent-launch/ssh-pty",
+      payload: {
+        ...requestBody,
+        sshTarget: { host: "-oProxyCommand=touch /tmp/unsafe", port: 22 },
+      },
+    });
+
+    assert.equal(response.statusCode, 400);
+    assert.deepEqual(response.json(), {
+      error: "SSH 连接参数无效",
+      code: "INVALID_SSH_TARGET",
+    });
+    assert.equal(preflightCalls, 0);
+    assert.deepEqual(registry.list().items, []);
+  } finally {
+    await app.close();
+  }
+});

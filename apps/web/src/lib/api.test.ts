@@ -5,7 +5,9 @@ import {
   buildTerminalWebSocketUrl,
   fetchMarkdownImage,
   focusAgentSession,
+  getFeishuNotificationSettings,
   sendCodexImageMessage,
+  updateFeishuNotificationSettings,
 } from "./api.js";
 
 function setWindowLocation(protocol: "http:" | "https:", host: string): void {
@@ -141,4 +143,41 @@ test("sendCodexImageMessage uploads the image and prompt to the selected Kanban 
     ok: true,
     threadId: "019eeed3-69ee-7850-b89e-53c3d48db0e2",
   });
+});
+
+test("Feishu notification settings use the sanitized settings endpoint", async () => {
+  const requests: Array<{ input: string; method: string; body: unknown }> = [];
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push({
+        input: String(input),
+        method: init?.method ?? "GET",
+        body: init?.body ? JSON.parse(String(init.body)) : null,
+      });
+      return Response.json({
+        configured: true,
+        destinationType: "user",
+        enabled: init?.method === "PUT" ? false : true,
+      });
+    },
+  });
+
+  assert.equal((await getFeishuNotificationSettings()).enabled, true);
+  assert.equal(
+    (await updateFeishuNotificationSettings({ enabled: false })).enabled,
+    false,
+  );
+  assert.deepEqual(requests, [
+    {
+      input: "/api/settings/feishu-notifications",
+      method: "GET",
+      body: null,
+    },
+    {
+      input: "/api/settings/feishu-notifications",
+      method: "PUT",
+      body: { enabled: false },
+    },
+  ]);
 });

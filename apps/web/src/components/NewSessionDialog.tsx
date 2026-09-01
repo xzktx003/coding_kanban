@@ -23,7 +23,7 @@ import {
 } from "../lib/session-matching";
 import { formatSessionLaunchError } from "../lib/session-launch-error";
 import { buildDefaultSessionName } from "../lib/session-naming";
-import type { SelectedHost } from "./HostDropdown";
+import type { NewSessionHost } from "./HostDropdown";
 import {
   UNGROUPED_SESSION_GROUP_ID,
   type SessionGroupState,
@@ -31,11 +31,46 @@ import {
 
 interface NewSessionDialogProps {
   open: boolean;
-  host: SelectedHost | null;
+  host: NewSessionHost | null;
   sessions: AgentSessionRecord[];
   sessionGroups?: SessionGroupState;
   onClose: () => void;
   onLaunched: (session: AgentSessionRecord, groupId: string | null) => void;
+}
+
+export interface ManualSshConnectionInput {
+  host: string;
+  port: string;
+  username: string;
+  identityFile: string;
+}
+
+export function buildManualSshTarget(
+  input: ManualSshConnectionInput,
+): SshTarget {
+  const host = input.host.trim();
+  if (!host) {
+    throw new Error("请输入 SSH 主机地址");
+  }
+
+  const rawPort = input.port.trim() || "22";
+  if (!/^\d+$/.test(rawPort)) {
+    throw new Error("SSH 端口必须是 1 到 65535 之间的整数");
+  }
+
+  const port = Number(rawPort);
+  if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("SSH 端口必须是 1 到 65535 之间的整数");
+  }
+
+  const username = input.username.trim();
+  const identityFile = input.identityFile.trim();
+  return {
+    host,
+    port,
+    ...(username ? { username } : {}),
+    ...(identityFile ? { identityFile } : {}),
+  };
 }
 
 export function joinDirectoryPath(basePath: string, name: string): string {
@@ -80,6 +115,10 @@ export function NewSessionDialog({
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState("copilot");
   const [newDir, setNewDir] = useState("");
+  const [manualSshHost, setManualSshHost] = useState("");
+  const [manualSshPort, setManualSshPort] = useState("22");
+  const [manualSshUsername, setManualSshUsername] = useState("");
+  const [manualSshIdentityFile, setManualSshIdentityFile] = useState("");
   const [launchMode, setLaunchMode] = useState<LaunchMode>("tmux");
   const [selectedGroupId, setSelectedGroupId] = useState(
     UNGROUPED_SESSION_GROUP_ID,
@@ -103,6 +142,7 @@ export function NewSessionDialog({
   const [newFolderName, setNewFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const manualSshHostInputRef = useRef<HTMLInputElement>(null);
   const suggestionRequestRef = useRef(0);
   const directoryRequestRef = useRef(0);
   const backdropPointerDownRef = useRef(false);
@@ -112,6 +152,10 @@ export function NewSessionDialog({
       setNewName("");
       setNewKind("copilot");
       setNewDir("");
+      setManualSshHost("");
+      setManualSshPort("22");
+      setManualSshUsername("");
+      setManualSshIdentityFile("");
       setLaunchMode("tmux");
       setSelectedGroupId(UNGROUPED_SESSION_GROUP_ID);
       setSubmitting(false);
@@ -130,7 +174,17 @@ export function NewSessionDialog({
 
     setNewName("");
     setNewKind("copilot");
-    setNewDir(host?.type === "ssh" ? host.preset.defaultPath || "~/" : "");
+    setNewDir(
+      host?.type === "ssh"
+        ? host.preset.defaultPath || "~/"
+        : host?.type === "ssh-manual"
+          ? "~/"
+          : "",
+    );
+    setManualSshHost("");
+    setManualSshPort("22");
+    setManualSshUsername("");
+    setManualSshIdentityFile("");
     setLaunchMode("tmux");
     setSelectedGroupId(UNGROUPED_SESSION_GROUP_ID);
     setSubmitting(false);
@@ -152,7 +206,11 @@ export function NewSessionDialog({
     }
 
     const timerId = window.setTimeout(() => {
-      nameInputRef.current?.focus();
+      if (host.type === "ssh-manual") {
+        manualSshHostInputRef.current?.focus();
+      } else {
+        nameInputRef.current?.focus();
+      }
     }, 0);
 
     return () => {
@@ -198,6 +256,11 @@ export function NewSessionDialog({
 
     const timerId = window.setTimeout(() => {
       const sshTarget = currentSshTarget();
+      if (selectedHost.type === "ssh-manual" && !sshTarget) {
+        setDirectorySuggestionsEnabled(false);
+        setDirectorySuggestions([]);
+        return;
+      }
       getDirectorySuggestions({
         prefix,
         ...(sshTarget ? { sshTarget } : {}),
@@ -223,7 +286,15 @@ export function NewSessionDialog({
     return () => {
       window.clearTimeout(timerId);
     };
-  }, [host, newDir, open]);
+  }, [
+    host,
+    manualSshHost,
+    manualSshIdentityFile,
+    manualSshPort,
+    manualSshUsername,
+    newDir,
+    open,
+  ]);
 
   if (!open || !host) {
     return null;
@@ -233,7 +304,9 @@ export function NewSessionDialog({
   const defaultHostLabel =
     selectedHost.type === "local"
       ? "local"
-      : selectedHost.preset.host || selectedHost.preset.name;
+      : selectedHost.type === "ssh"
+        ? selectedHost.preset.host || selectedHost.preset.name
+        : manualSshHost.trim() || "ssh";
   const defaultSessionName = buildDefaultSessionName({
     hostLabel: defaultHostLabel,
     agentKind: newKind,
@@ -242,16 +315,51 @@ export function NewSessionDialog({
   });
 
   function currentSshTarget(): SshTarget | undefined {
-    if (selectedHost.type !== "ssh") {
+    if (selectedHost.type === "local") {
       return undefined;
     }
 
-    return {
-      host: selectedHost.preset.host,
-      port: selectedHost.preset.port,
-      username: selectedHost.preset.username,
-      identityFile: selectedHost.preset.identityFile,
-    };
+    if (selectedHost.type === "ssh") {
+      return {
+        host: selectedHost.preset.host,
+        port: selectedHost.preset.port,
+        username: selectedHost.preset.username,
+        identityFile: selectedHost.preset.identityFile,
+      };
+    }
+
+    try {
+      return buildManualSshTarget({
+        host: manualSshHost,
+        port: manualSshPort,
+        username: manualSshUsername,
+        identityFile: manualSshIdentityFile,
+      });
+    } catch {
+      return undefined;
+    }
+  }
+
+  function requireCurrentSshTarget(): SshTarget {
+    if (selectedHost.type === "ssh") {
+      return {
+        host: selectedHost.preset.host,
+        port: selectedHost.preset.port,
+        username: selectedHost.preset.username,
+        identityFile: selectedHost.preset.identityFile,
+      };
+    }
+
+    if (selectedHost.type === "ssh-manual") {
+      return buildManualSshTarget({
+        host: manualSshHost,
+        port: manualSshPort,
+        username: manualSshUsername,
+        identityFile: manualSshIdentityFile,
+      });
+    }
+
+    throw new Error("当前目标不是 SSH 主机");
   }
 
   const showDirectorySuggestions =
@@ -261,7 +369,11 @@ export function NewSessionDialog({
   const directoryEntries = directoryPickerEntries.filter(isDirectoryEntry);
 
   const currentTargetLabel =
-    selectedHost.type === "local" ? "本地" : selectedHost.preset.name;
+    selectedHost.type === "local"
+      ? "本地"
+      : selectedHost.type === "ssh"
+        ? selectedHost.preset.name
+        : manualSshHost.trim() || "新增 SSH 连接";
 
   function getInitialDirectoryPickerPath(): string {
     const rawDir = newDir.trim();
@@ -271,6 +383,10 @@ export function NewSessionDialog({
 
     if (selectedHost.type === "ssh") {
       return selectedHost.preset.defaultPath || "~/";
+    }
+
+    if (selectedHost.type === "ssh-manual") {
+      return "~/";
     }
 
     return "";
@@ -379,9 +495,13 @@ export function NewSessionDialog({
 
     try {
       let launchedSession: AgentSessionRecord;
-      if (selectedHost.type === "ssh") {
+      if (selectedHost.type !== "local") {
         const remoteWorkingDirectory =
-          rawDir || selectedHost.preset.defaultPath || "~/";
+          rawDir ||
+          (selectedHost.type === "ssh"
+            ? selectedHost.preset.defaultPath
+            : "~/") ||
+          "~/";
         const command =
           launchMode === "tmux"
             ? buildTmuxLaunchCommand(
@@ -391,10 +511,7 @@ export function NewSessionDialog({
                 tmuxSessionName ?? name,
               )
             : buildDirectLaunchCommand(newKind, remoteWorkingDirectory, name);
-        const target = currentSshTarget();
-        if (!target) {
-          throw new Error("missing ssh target");
-        }
+        const target = requireCurrentSshTarget();
 
         const remoteCommand = wrapRemoteInteractiveCommand(
           launchMode === "tmux"
@@ -501,6 +618,75 @@ export function NewSessionDialog({
           </p>
         </div>
 
+        {selectedHost.type === "ssh-manual" && (
+          <section
+            aria-label="SSH 连接信息"
+            className="new-session-ssh-connection"
+            data-testid="new-session-ssh-connection"
+          >
+            <div className="new-session-ssh-heading">
+              <div>
+                <span className="new-session-label">SSH 连接</span>
+                <p className="new-session-message">
+                  使用本机 SSH 配置、ssh-agent 或私钥文件认证
+                </p>
+              </div>
+              <span className="new-session-ssh-badge">仅本次会话</span>
+            </div>
+            <div className="new-session-ssh-grid">
+              <label className="new-session-field new-session-ssh-host-field">
+                <span className="new-session-label">主机地址 *</span>
+                <input
+                  ref={manualSshHostInputRef}
+                  autoComplete="off"
+                  className="drawer-input"
+                  data-testid="new-session-ssh-host"
+                  onChange={(event) => setManualSshHost(event.target.value)}
+                  placeholder="IP、域名或 SSH Host 别名"
+                  value={manualSshHost}
+                />
+              </label>
+              <label className="new-session-field">
+                <span className="new-session-label">端口</span>
+                <input
+                  className="drawer-input"
+                  data-testid="new-session-ssh-port"
+                  inputMode="numeric"
+                  max={65_535}
+                  min={1}
+                  onChange={(event) => setManualSshPort(event.target.value)}
+                  type="number"
+                  value={manualSshPort}
+                />
+              </label>
+              <label className="new-session-field">
+                <span className="new-session-label">用户名</span>
+                <input
+                  autoComplete="username"
+                  className="drawer-input"
+                  data-testid="new-session-ssh-username"
+                  onChange={(event) => setManualSshUsername(event.target.value)}
+                  placeholder="可留空，沿用 SSH 配置"
+                  value={manualSshUsername}
+                />
+              </label>
+              <label className="new-session-field new-session-ssh-identity-field">
+                <span className="new-session-label">本机私钥路径</span>
+                <input
+                  autoComplete="off"
+                  className="drawer-input"
+                  data-testid="new-session-ssh-identity-file"
+                  onChange={(event) =>
+                    setManualSshIdentityFile(event.target.value)
+                  }
+                  placeholder="可留空，例如 /home/user/.ssh/id_ed25519"
+                  value={manualSshIdentityFile}
+                />
+              </label>
+            </div>
+          </section>
+        )}
+
         <div
           className="new-session-grid"
           data-testid="new-session-details-step"
@@ -599,7 +785,11 @@ export function NewSessionDialog({
                 <button
                   className="new-session-secondary-btn"
                   data-testid="new-session-browse-dir"
-                  disabled={directoryPickerLoading || submitting}
+                  disabled={
+                    directoryPickerLoading ||
+                    submitting ||
+                    (selectedHost.type === "ssh-manual" && !currentSshTarget())
+                  }
                   onClick={openDirectoryPicker}
                   type="button"
                 >

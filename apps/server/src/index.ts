@@ -9,7 +9,9 @@ import {
   resolveGitAutoPullIntervalMinutes,
 } from "./config/server-runtime-config.js";
 import { AppVersionService } from "./services/app-version-service.js";
+import { ScriptFeishuCompletionSender } from "./services/agent-completion-feishu-notifier.js";
 import { GitAutoUpdateService } from "./services/git-auto-update-service.js";
+import { FeishuNotificationSettingsService } from "./services/feishu-notification-settings-service.js";
 import { installGracefulShutdown } from "./services/server-lifecycle.js";
 import { FileSessionStateStore } from "./services/session-state-store.js";
 import { ensureSharedPackageBuilt } from "./services/shared-package-builder.js";
@@ -33,6 +35,15 @@ async function main(): Promise<void> {
   const gitAutoPullIntervalMinutes = resolveGitAutoPullIntervalMinutes(
     process.env,
   );
+  const feishuNotificationSettingsService =
+    new FeishuNotificationSettingsService({
+      env: process.env,
+      statePath: resolve(
+        repositoryRoot,
+        ".dev-runtime/feishu-notification-settings.json",
+      ),
+    });
+  feishuNotificationSettingsService.activateKanbanDelivery();
   const { app } = buildServer({
     appVersionService: new AppVersionService({
       sourceRoot: appSourceRoot,
@@ -42,6 +53,11 @@ async function main(): Promise<void> {
       intervalMinutes: gitAutoPullIntervalMinutes,
     }),
     sessionStateStore: new FileSessionStateStore(sessionStatePath),
+    feishuNotificationSettingsService,
+    feishuCompletionSender: new ScriptFeishuCompletionSender({
+      scriptPath: resolve(repositoryRoot, "scripts/codex-feishu-notify.mjs"),
+      fallbackWorkingDirectory: repositoryRoot,
+    }),
   });
 
   installGracefulShutdown({

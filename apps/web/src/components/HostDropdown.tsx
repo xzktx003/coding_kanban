@@ -6,9 +6,58 @@ export type SelectedHost =
   | { type: "local" }
   | { type: "ssh"; preset: SshHostPreset };
 
+export type NewSessionHost = SelectedHost | { type: "ssh-manual" };
+
+export type HostDropdownOption =
+  | {
+      kind: "host";
+      host: SelectedHost;
+      label: string;
+      detail?: string;
+      icon: string;
+    }
+  | {
+      kind: "manual-ssh";
+      label: string;
+      detail: string;
+      icon: string;
+    };
+
+export function buildHostDropdownOptions(
+  sshHosts: SshHostPreset[],
+  allowManualSsh: boolean,
+): HostDropdownOption[] {
+  return [
+    {
+      kind: "host",
+      host: { type: "local" },
+      label: "本机",
+      icon: "🖥",
+    },
+    ...sshHosts.map((preset) => ({
+      kind: "host" as const,
+      host: { type: "ssh" as const, preset },
+      label: preset.name,
+      detail: `${preset.username ? `${preset.username}@` : ""}${preset.host}`,
+      icon: "🌐",
+    })),
+    ...(allowManualSsh
+      ? [
+          {
+            kind: "manual-ssh" as const,
+            label: "新增 SSH 连接",
+            detail: "输入主机、端口和用户名",
+            icon: "＋",
+          },
+        ]
+      : []),
+  ];
+}
+
 interface HostDropdownProps {
   sshHosts: SshHostPreset[];
   onSelectHost: (host: SelectedHost) => void;
+  onSelectManualSsh?: () => void;
   triggerLabel: string;
   disabled?: boolean;
   buttonTestId?: string;
@@ -20,6 +69,7 @@ interface HostDropdownProps {
 export function HostDropdown({
   sshHosts,
   onSelectHost,
+  onSelectManualSsh,
   triggerLabel,
   disabled,
   buttonTestId,
@@ -57,33 +107,30 @@ export function HostDropdown({
           className={`host-dropdown-menu${menuAlign === "end" ? " host-dropdown-menu--end" : ""}`}
           data-testid={menuTestId ?? "host-dropdown-menu"}
         >
-          <button
-            className="host-dropdown-item"
-            onClick={() => {
-              onSelectHost({ type: "local" });
-              setOpen(false);
-            }}
-            type="button"
-          >
-            <span className="host-dropdown-name">🖥 本机</span>
-          </button>
-          {sshHosts.map((h) => (
-            <button
-              key={h.name}
-              className="host-dropdown-item"
-              onClick={() => {
-                onSelectHost({ type: "ssh", preset: h });
-                setOpen(false);
-              }}
-              type="button"
-            >
-              <span className="host-dropdown-name">🌐 {h.name}</span>
-              <span className="host-dropdown-detail">
-                {h.username ? `${h.username}@` : ""}
-                {h.host}
-              </span>
-            </button>
-          ))}
+          {buildHostDropdownOptions(sshHosts, Boolean(onSelectManualSsh)).map(
+            (option) => (
+              <button
+                key={`${option.kind}:${option.label}`}
+                className="host-dropdown-item"
+                onClick={() => {
+                  if (option.kind === "manual-ssh") {
+                    onSelectManualSsh?.();
+                  } else {
+                    onSelectHost(option.host);
+                  }
+                  setOpen(false);
+                }}
+                type="button"
+              >
+                <span className="host-dropdown-name">
+                  {option.icon} {option.label}
+                </span>
+                {option.detail && (
+                  <span className="host-dropdown-detail">{option.detail}</span>
+                )}
+              </button>
+            ),
+          )}
         </div>
       )}
     </div>

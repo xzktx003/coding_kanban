@@ -10,6 +10,7 @@ import {
 import type {
   AgentSessionRecord,
   AppVersionResponse,
+  FeishuNotificationSettingsResponse,
   ListAgentSessionsResponse,
   SshHostPreset,
 } from "@agent-orchestrator/shared";
@@ -30,7 +31,7 @@ import { FileBrowserDrawer } from "./components/FileBrowserDrawer";
 import { ChangesPanel } from "./components/ChangesPanel";
 import type { FilterState } from "./components/FilterBar";
 import { HiddenSessionsDrawer } from "./components/HiddenSessionsDrawer";
-import type { SelectedHost } from "./components/HostDropdown";
+import type { NewSessionHost, SelectedHost } from "./components/HostDropdown";
 import { MobileWorkbenchPage } from "./components/MobileWorkbenchPage";
 import { NewSessionDialog } from "./components/NewSessionDialog";
 import { QuickTmuxConnect } from "./components/QuickTmuxConnect";
@@ -54,6 +55,7 @@ import {
   deleteAgentSession,
   focusAgentSession,
   getAppVersion,
+  getFeishuNotificationSettings,
   getSshHosts,
   hideAgentSession,
   killTmuxSession,
@@ -65,6 +67,7 @@ import {
   subscribeAgentSessions,
   unhideAgentSession,
   updateAgentSession,
+  updateFeishuNotificationSettings,
   type ConnectionStatus,
 } from "./lib/api";
 import {
@@ -342,7 +345,7 @@ export default function App() {
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<
     string | null
   >(initialFocusViewState.focusedId);
-  const [newSessionHost, setNewSessionHost] = useState<SelectedHost | null>(
+  const [newSessionHost, setNewSessionHost] = useState<NewSessionHost | null>(
     null,
   );
   const [quickTmuxOpen, setQuickTmuxOpen] = useState(false);
@@ -396,6 +399,14 @@ export default function App() {
   ] = useState<AgentCompletionNotificationPermission>(
     getAgentCompletionNotificationPermission,
   );
+  const [feishuNotificationSettings, setFeishuNotificationSettings] =
+    useState<FeishuNotificationSettingsResponse | null>(null);
+  const [
+    feishuNotificationSettingsUpdating,
+    setFeishuNotificationSettingsUpdating,
+  ] = useState(false);
+  const [feishuNotificationSettingsError, setFeishuNotificationSettingsError] =
+    useState<string | null>(null);
   const [vscodeIframeCacheMode, setVscodeIframeCacheMode] =
     useState<VsCodeIframeCacheMode>(loadVsCodeIframeCacheMode);
   const [mobileTerminalTouchMode, setMobileTerminalTouchMode] = useState(
@@ -513,6 +524,18 @@ export default function App() {
         setSshHosts(res.hosts);
       })
       .catch(() => {});
+
+    fetchWithRetry(getFeishuNotificationSettings)
+      .then((settings) => {
+        if (cancelled) return;
+        setFeishuNotificationSettings(settings);
+        setFeishuNotificationSettingsError(null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFeishuNotificationSettingsError("无法读取飞书通知设置");
+        }
+      });
 
     const unsubscribe = subscribeAgentSessions(
       (data) => {
@@ -966,6 +989,31 @@ export default function App() {
     saveAgentCompletionNotificationsEnabled(enabled);
     setAgentCompletionNotificationsEnabled(enabled);
   }, [agentCompletionNotificationsEnabled]);
+
+  const handleToggleFeishuNotifications = useCallback(async () => {
+    if (
+      !feishuNotificationSettings ||
+      !feishuNotificationSettings.configured ||
+      feishuNotificationSettingsUpdating
+    ) {
+      return;
+    }
+
+    setFeishuNotificationSettingsUpdating(true);
+    setFeishuNotificationSettingsError(null);
+    try {
+      const settings = await updateFeishuNotificationSettings({
+        enabled: !feishuNotificationSettings.enabled,
+      });
+      setFeishuNotificationSettings(settings);
+    } catch (error) {
+      setFeishuNotificationSettingsError(
+        error instanceof Error ? error.message : "飞书通知设置保存失败",
+      );
+    } finally {
+      setFeishuNotificationSettingsUpdating(false);
+    }
+  }, [feishuNotificationSettings, feishuNotificationSettingsUpdating]);
 
   const handleLaunched = useCallback(
     (session: AgentSessionRecord, groupId: string | null) => {
@@ -1675,6 +1723,9 @@ export default function App() {
         agentCompletionNotificationPermission={
           agentCompletionNotificationPermission
         }
+        feishuNotificationSettings={feishuNotificationSettings}
+        feishuNotificationSettingsUpdating={feishuNotificationSettingsUpdating}
+        feishuNotificationSettingsError={feishuNotificationSettingsError}
         connectionStatus={connectionStatus}
         onToggleCollapsed={() =>
           updateLayout({ topbarCollapsed: !layoutState.topbarCollapsed })
@@ -1730,6 +1781,7 @@ export default function App() {
         onToggleAgentCompletionNotifications={
           handleToggleAgentCompletionNotifications
         }
+        onToggleFeishuNotifications={handleToggleFeishuNotifications}
         onOpenNewSession={setNewSessionHost}
         onScanTmux={handleScanTmux}
         onScanApps={handleScanApps}

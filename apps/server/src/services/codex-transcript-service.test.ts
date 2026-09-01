@@ -129,6 +129,60 @@ test("CodexTranscriptService selects the newest session with the same working di
   }
 });
 
+test("CodexTranscriptService reads the latest task_complete event as one exact turn completion", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-turn-completion-"));
+  const sessionsRoot = join(root, "sessions", "2026", "09", "01");
+  const sessionId = "turn-completion-session";
+  mkdirSync(sessionsRoot, { recursive: true });
+  writeFileSync(
+    join(sessionsRoot, `rollout-${sessionId}.jsonl`),
+    [
+      line({
+        timestamp: "2026-09-01T10:00:00.000Z",
+        type: "session_meta",
+        payload: { id: sessionId, cwd: "/workspace/turn-completion" },
+      }),
+      line({
+        timestamp: "2026-09-01T10:00:05.000Z",
+        type: "event_msg",
+        payload: {
+          type: "task_complete",
+          turn_id: "turn-one",
+          last_agent_message: "第一条完整回答",
+        },
+      }),
+      line({
+        timestamp: "2026-09-01T10:00:06.000Z",
+        type: "event_msg",
+        payload: { type: "task_started", turn_id: "turn-two" },
+      }),
+      line({
+        timestamp: "2026-09-01T10:00:08.000Z",
+        type: "event_msg",
+        payload: {
+          type: "task_complete",
+          turn_id: "turn-two",
+          last_agent_message: "第二条完整回答\n\n保留换行与缩进",
+        },
+      }),
+    ].join(""),
+  );
+
+  try {
+    const completion = new CodexTranscriptService({
+      sessionsRoot: join(root, "sessions"),
+    }).readLatestCompletion({ sessionId });
+
+    assert.deepEqual(completion, {
+      completionId: "turn-two",
+      content: "第二条完整回答\n\n保留换行与缩进",
+      completedAt: "2026-09-01T10:00:08.000Z",
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("CodexTranscriptService reads transcript pages backward from a byte cursor", () => {
   const root = mkdtempSync(join(tmpdir(), "codex-transcript-page-"));
   const sessionsRoot = join(root, "sessions", "2026", "08", "21");
@@ -322,6 +376,15 @@ test("CodexTranscriptService reads a remote Codex JSONL session by working direc
           content: [{ type: "output_text", text: "remote history" }],
         },
       }),
+      line({
+        timestamp: "2026-08-25T02:00:02.000Z",
+        type: "event_msg",
+        payload: {
+          type: "task_complete",
+          turn_id: "remote-turn",
+          last_agent_message: "remote history",
+        },
+      }),
     ].join(""),
   );
   const contents = new Map([
@@ -377,4 +440,16 @@ test("CodexTranscriptService reads a remote Codex JSONL session by working direc
   assert.equal(response.sessionId, "remote-newer");
   assert.equal(response.matchedBy, "working-directory");
   assert.equal(response.entries.at(-1)?.text, "remote history");
+
+  const completion = await new CodexTranscriptService({
+    remoteFileAccess: remoteAccess as never,
+  }).readLatestRemoteCompletion({
+    sshTarget: { host: "remote.example", username: "demo" },
+    workingDirectory: "~/project",
+  });
+  assert.deepEqual(completion, {
+    completionId: "remote-turn",
+    content: "remote history",
+    completedAt: "2026-08-25T02:00:02.000Z",
+  });
 });

@@ -129,3 +129,14 @@ test("formatSshDestination rejects unsafe values", () => {
     /Invalid username/,
   );
 });
+
+test("buildSshArgs rejects option-shaped hosts and invalid ports", () => {
+  assert.throws(
+    () => buildSshArgs({ host: "-oProxyCommand=touch /tmp/unsafe" }),
+    /Invalid host/,
+  );
+  assert.throws(
+    () => buildSshArgs({ host: "server.example.test", port: 65_536 }),
+    /Invalid port/,
+  );
+});

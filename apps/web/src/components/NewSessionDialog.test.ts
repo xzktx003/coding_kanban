@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import {
+  buildManualSshTarget,
   getParentDirectoryPath,
   joinDirectoryPath,
   NewSessionDialog,
@@ -97,5 +98,67 @@ describe("NewSessionDialog managed session default", () => {
       /<button(?=[^>]*data-testid="new-session-mode-tmux")(?=[^>]*aria-pressed="true")[^>]*>/,
     );
     assert.match(markup, /受管 tmux/);
+  });
+});
+
+describe("NewSessionDialog manual SSH connection", () => {
+  it("renders direct SSH connection fields without asking for a password", () => {
+    const markup = renderToStaticMarkup(
+      createElement(NewSessionDialog, {
+        open: true,
+        host: { type: "ssh-manual" },
+        sessions: [] as AgentSessionRecord[],
+        sessionGroups: { groups: [], assignments: {}, collapsedGroupIds: [] },
+        onClose: () => {},
+        onLaunched: () => {},
+      }),
+    );
+
+    assert.match(markup, /data-testid="new-session-ssh-host"/);
+    assert.match(markup, /data-testid="new-session-ssh-port"/);
+    assert.match(markup, /data-testid="new-session-ssh-username"/);
+    assert.match(markup, /data-testid="new-session-ssh-identity-file"/);
+    assert.match(markup, /ssh-agent/);
+    assert.doesNotMatch(markup, /type="password"/);
+  });
+
+  it("normalizes manual SSH fields and defaults the port to 22", () => {
+    assert.deepEqual(
+      buildManualSshTarget({
+        host: " 10.30.0.24 ",
+        port: "",
+        username: " xuzk ",
+        identityFile: " /data01/home/xuzk/.ssh/id_ed25519 ",
+      }),
+      {
+        host: "10.30.0.24",
+        port: 22,
+        username: "xuzk",
+        identityFile: "/data01/home/xuzk/.ssh/id_ed25519",
+      },
+    );
+  });
+
+  it("rejects missing hosts and ports outside the SSH range", () => {
+    assert.throws(
+      () =>
+        buildManualSshTarget({
+          host: " ",
+          port: "22",
+          username: "",
+          identityFile: "",
+        }),
+      /SSH 主机/,
+    );
+    assert.throws(
+      () =>
+        buildManualSshTarget({
+          host: "server.example.test",
+          port: "65536",
+          username: "",
+          identityFile: "",
+        }),
+      /端口/,
+    );
   });
 });

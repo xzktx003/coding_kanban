@@ -1,6 +1,7 @@
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
+import { resolve } from "node:path";
 
 import type { TerminalHistoryDiagnosticsResponse } from "@agent-orchestrator/shared";
 
@@ -20,17 +21,29 @@ import {
   type ManagedSessionRestorerLike,
 } from "./routes/app-update.js";
 import { registerFilesystemRoutes } from "./routes/filesystem.js";
+import { registerFeishuNotificationSettingsRoutes } from "./routes/feishu-notification-settings.js";
 import { registerSshHostsRoutes } from "./routes/ssh-hosts.js";
 import { registerVsCodeWebProxyRoutes } from "./routes/vscode-web-proxy.js";
 import { AgentSessionRegistry } from "./services/agent-session-registry.js";
 import { createAgentSessionStreamEvent } from "./services/agent-session-stream.js";
+import {
+  AgentCompletionFeishuNotifier,
+  type FeishuCompletionContentResolverLike,
+  type FeishuCompletionSenderLike,
+} from "./services/agent-completion-feishu-notifier.js";
 import { AppVersionService } from "./services/app-version-service.js";
 import {
   CodexImageMessageService,
   createCodexImageRemoteFileAccess,
 } from "./services/codex-image-message-service.js";
+import { CodexCompletionContentResolver } from "./services/codex-completion-content-resolver.js";
 import { CodexSessionLocator } from "./services/codex-session-locator.js";
+import { CodexTranscriptService } from "./services/codex-transcript-service.js";
 import { GitAutoUpdateService } from "./services/git-auto-update-service.js";
+import {
+  FeishuNotificationSettingsService,
+  type FeishuNotificationSettingsServiceLike,
+} from "./services/feishu-notification-settings-service.js";
 import { LocalFsService } from "./services/local-fs-service.js";
 import { LocalProcessRuntimeManager } from "./services/local-process-runtime-manager.js";
 import { LocalTmuxAdapter } from "./services/local-tmux-adapter.js";
@@ -71,6 +84,9 @@ interface BuildServerOptions {
   managedSessionRestorer?: ManagedSessionRestorerLike;
   sessionStateStore?: SessionStateStore;
   codexImageMessageService?: Pick<CodexImageMessageService, "send">;
+  feishuNotificationSettingsService?: FeishuNotificationSettingsServiceLike;
+  feishuCompletionSender?: FeishuCompletionSenderLike;
+  feishuCompletionContentResolver?: FeishuCompletionContentResolverLike;
 }
 
 interface LocalTmuxSocketInputStateDependencies {
@@ -144,6 +160,9 @@ export function buildServer(options: BuildServerOptions = {}): {
   const localFsService = options.localFsService ?? new LocalFsService();
   const sftpService = options.sftpService ?? new SftpService();
   const codexSessionLocator = new CodexSessionLocator();
+  const codexTranscriptService = new CodexTranscriptService({
+    remoteFileAccess: sftpService,
+  });
   const codexImageMessageService =
     options.codexImageMessageService ??
     new CodexImageMessageService({
@@ -171,6 +190,14 @@ export function buildServer(options: BuildServerOptions = {}): {
       localTmuxInputRouter,
       ptyRuntimeManager,
     });
+  const feishuNotificationSettingsService =
+    options.feishuNotificationSettingsService ??
+    new FeishuNotificationSettingsService({
+      statePath: resolve(
+        process.cwd(),
+        ".dev-runtime/feishu-notification-settings.json",
+      ),
+    });
 
   const stopSessionStatePersistence = options.sessionStateStore
     ? registry.subscribe((snapshot) => {
@@ -184,9 +211,31 @@ export function buildServer(options: BuildServerOptions = {}): {
         }
       })
     : null;
-  if (stopSessionStatePersistence) {
+  const stopFeishuCompletionNotifier = options.feishuCompletionSender
+    ? new AgentCompletionFeishuNotifier({
+        source: registry,
+        ...(restoredSnapshot ? { restoredSnapshot } : {}),
+        settings: feishuNotificationSettingsService,
+        sender: options.feishuCompletionSender,
+        contentResolver:
+          options.feishuCompletionContentResolver ??
+          new CodexCompletionContentResolver({
+            registry,
+            codexSessionLocator,
+            codexTranscriptService,
+          }),
+        logError(error, event) {
+          app.log.error(
+            { err: error, agentSessionId: event.sessionId },
+            "Failed to send Agent completion notification to Feishu",
+          );
+        },
+      }).start()
+    : null;
+  if (stopSessionStatePersistence || stopFeishuCompletionNotifier) {
     app.addHook("onClose", async () => {
-      stopSessionStatePersistence();
+      stopSessionStatePersistence?.();
+      stopFeishuCompletionNotifier?.();
     });
   }
 
@@ -208,6 +257,7 @@ export function buildServer(options: BuildServerOptions = {}): {
       vsCodeWebManager,
       sftpService,
       codexSessionLocator,
+      codexTranscriptService,
     });
     await instance.register(async (imageMessageRoutes) => {
       await registerCodexImageMessageRoutes(imageMessageRoutes, {
@@ -227,6 +277,10 @@ export function buildServer(options: BuildServerOptions = {}): {
       localFsService,
       sftpService,
     });
+    await registerFeishuNotificationSettingsRoutes(
+      instance,
+      feishuNotificationSettingsService,
+    );
     await registerVsCodeWebProxyRoutes(instance, {
       vsCodeWebManager,
     });

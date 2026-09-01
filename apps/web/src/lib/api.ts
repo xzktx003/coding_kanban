@@ -19,6 +19,7 @@ import type {
   FilePreviewInput,
   FilePreviewResponse,
   FileUploadResponse,
+  FeishuNotificationSettingsResponse,
   FocusAgentSessionInput,
   GitAutoUpdateStatus,
   ListFilesInput,
@@ -38,6 +39,7 @@ import type {
   TerminalHistoryDiagnosticsResponse,
   TmuxControlActionResponse,
   UpdateAgentSessionInput,
+  UpdateFeishuNotificationSettingsInput,
   VsCodeWebProxyDiagnosticsResponse,
 } from "@agent-orchestrator/shared";
 
@@ -904,6 +906,24 @@ export function getVsCodeWebProxyDiagnostics(): Promise<VsCodeWebProxyDiagnostic
 export function getTerminalHistoryDiagnostics(): Promise<TerminalHistoryDiagnosticsResponse> {
   return request<TerminalHistoryDiagnosticsResponse>(
     "/api/diagnostics/terminal-history",
+  );
+}
+
+export function getFeishuNotificationSettings(): Promise<FeishuNotificationSettingsResponse> {
+  return request<FeishuNotificationSettingsResponse>(
+    "/api/settings/feishu-notifications",
+  );
+}
+
+export function updateFeishuNotificationSettings(
+  input: UpdateFeishuNotificationSettingsInput,
+): Promise<FeishuNotificationSettingsResponse> {
+  return request<FeishuNotificationSettingsResponse>(
+    "/api/settings/feishu-notifications",
+    {
+      method: "PUT",
+      body: JSON.stringify(input),
+    },
   );
 }
 

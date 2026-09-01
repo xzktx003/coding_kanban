@@ -166,6 +166,18 @@ export interface AppVersionResponse {
   autoUpdate?: GitAutoUpdateStatus;
 }
 
+export type FeishuNotificationDestinationType = "user" | "chat";
+
+export interface FeishuNotificationSettingsResponse {
+  enabled: boolean;
+  configured: boolean;
+  destinationType: FeishuNotificationDestinationType | null;
+}
+
+export interface UpdateFeishuNotificationSettingsInput {
+  enabled: boolean;
+}
+
 export interface RestoreManagedSessionFailure {
   agentSessionId: string;
   displayName: string;

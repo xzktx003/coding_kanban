@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type {
   AgentSessionRecord,
+  FeishuNotificationSettingsResponse,
   SshHostPreset,
   TerminalHistoryDiagnosticsResponse,
   VsCodeWebProxyDiagnosticsResponse,
@@ -27,11 +28,26 @@ import { TERMINAL_SCROLLBACK_LINES } from "../lib/terminal-history-config";
 import { focusActiveTerminalTextarea } from "../lib/terminal-focus";
 import type { VsCodeIframeCacheMode } from "../lib/vscode-cache";
 
-import { HostDropdown, type SelectedHost } from "./HostDropdown";
+import {
+  HostDropdown,
+  type NewSessionHost,
+  type SelectedHost,
+} from "./HostDropdown";
 
 const RESOURCE_DIAGNOSTICS_POLL_MS = 1_000;
 
-type TopBarMenuId = "scan" | "tools" | "resource";
+type TopBarMenuId = "scan" | "settings";
+type TopBarSettingsSectionId = "tools" | "resource" | "feishu";
+
+export const TOP_BAR_SETTINGS_SECTIONS: ReadonlyArray<{
+  id: TopBarSettingsSectionId;
+  label: string;
+  description: string;
+}> = [
+  { id: "tools", label: "工具", description: "提示与浏览器通知" },
+  { id: "resource", label: "资源调节", description: "预览、缓存与诊断" },
+  { id: "feishu", label: "飞书通知", description: "所有看板任务完成提醒" },
+];
 
 function formatKilobytes(value: number): string {
   return `${value.toFixed(value >= 100 ? 0 : 1)} KB`;
@@ -170,7 +186,14 @@ interface TopBarProps {
   terminalFontSize: number;
   agentCompletionNotificationsEnabled: boolean;
   agentCompletionNotificationPermission: AgentCompletionNotificationPermission;
-  connectionStatus?: "connecting" | "connected" | "disconnected" | "reconnecting";
+  feishuNotificationSettings: FeishuNotificationSettingsResponse | null;
+  feishuNotificationSettingsUpdating: boolean;
+  feishuNotificationSettingsError?: string | null;
+  connectionStatus?:
+    | "connecting"
+    | "connected"
+    | "disconnected"
+    | "reconnecting";
   onToggleCollapsed: () => void;
   onToggleFileBrowser: () => void;
   onToggleVsCode: () => void;
@@ -179,7 +202,8 @@ interface TopBarProps {
   onToggleTerminalPreviewMode: () => void;
   onTerminalFontSizeChange: (fontSize: number) => void;
   onToggleAgentCompletionNotifications: () => void;
-  onOpenNewSession: (host: SelectedHost) => void;
+  onToggleFeishuNotifications: () => void;
+  onOpenNewSession: (host: NewSessionHost) => void;
   onScanTmux: (host: SelectedHost) => void;
   onScanApps: (host: SelectedHost) => void;
 }
@@ -198,6 +222,9 @@ export function TopBar({
   terminalFontSize,
   agentCompletionNotificationsEnabled,
   agentCompletionNotificationPermission,
+  feishuNotificationSettings,
+  feishuNotificationSettingsUpdating,
+  feishuNotificationSettingsError = null,
   connectionStatus,
   onToggleCollapsed,
   onToggleFileBrowser,
@@ -207,6 +234,7 @@ export function TopBar({
   onToggleTerminalPreviewMode,
   onTerminalFontSizeChange,
   onToggleAgentCompletionNotifications,
+  onToggleFeishuNotifications,
   onOpenNewSession,
   onScanTmux,
   onScanApps,
@@ -249,6 +277,8 @@ export function TopBar({
   }, []);
   const topBarUtilityRef = useRef<HTMLDivElement | null>(null);
   const [openMenu, setOpenMenu] = useState<TopBarMenuId | null>(null);
+  const [settingsSection, setSettingsSection] =
+    useState<TopBarSettingsSectionId>("tools");
   const hintsPopoverId = "operation-hints-popover";
   const diagnosticsPopoverId = "resource-diagnostics-popover";
   const totalCount = sessions.length;
@@ -260,8 +290,14 @@ export function TopBar({
     : notificationDenied
       ? "权限已拒绝"
       : agentCompletionNotificationsEnabled
-        ? "完成通知：开"
-        : "完成通知：关";
+        ? "浏览器通知：开"
+        : "浏览器通知：关";
+  const feishuDestinationLabel =
+    feishuNotificationSettings?.destinationType === "user"
+      ? "私聊接收者已配置"
+      : feishuNotificationSettings?.destinationType === "chat"
+        ? "群聊接收者已配置"
+        : "未配置本地接收者";
   const resourceFindings = classifyResourcePressure({
     snapshot: diagnosticsSnapshot,
     terminalHistoryDiagnostics,
@@ -453,6 +489,7 @@ export function TopBar({
           <HostDropdown
             sshHosts={sshHosts}
             onSelectHost={onOpenNewSession}
+            onSelectManualSsh={() => onOpenNewSession({ type: "ssh-manual" })}
             triggerLabel="新建会话"
             buttonTestId="new-session-toggle"
             triggerClassName="top-bar-action top-bar-action--primary"
@@ -568,155 +605,234 @@ export function TopBar({
             />
             <strong>{draftTerminalFontSize}px</strong>
           </label>
+
           <div className="top-bar-menu">
             <button
-              aria-controls="top-bar-tools-menu"
-              aria-expanded={openMenu === "tools"}
-              className={`top-bar-action top-bar-action--ghost${openMenu === "tools" || showHints ? " top-bar-action--active" : ""}`}
-              data-testid="tools-menu-toggle"
-              onClick={() => toggleMenu("tools")}
+              aria-controls="top-bar-settings-menu"
+              aria-expanded={openMenu === "settings"}
+              className={`top-bar-action top-bar-action--ghost${openMenu === "settings" || showHints || showDiagnostics ? " top-bar-action--active" : ""}`}
+              data-testid="settings-menu-toggle"
+              onClick={() => toggleMenu("settings")}
               type="button"
             >
-              工具 ▾
+              设置 ▾
             </button>
-            {openMenu === "tools" && (
+            {openMenu === "settings" && (
               <div
-                aria-label="工具入口"
-                className="top-bar-menu-popover"
-                id="top-bar-tools-menu"
-                role="menu"
+                aria-label="设置"
+                className="top-bar-settings-popover"
+                data-testid="settings-menu"
+                id="top-bar-settings-menu"
+                role="dialog"
               >
-                <button
-                  aria-controls={hintsPopoverId}
-                  aria-expanded={showHints}
-                  className="top-bar-menu-item"
-                  data-testid="help-hints-toggle"
-                  onClick={openHints}
-                  type="button"
+                <div
+                  aria-label="设置分类"
+                  className="top-bar-settings-nav"
+                  role="tablist"
                 >
-                  <span>操作提示</span>
-                  <small>快捷键和基础操作</small>
-                </button>
-                <button
-                  className={`top-bar-menu-item${agentCompletionNotificationsEnabled ? " top-bar-menu-item--active" : ""}`}
-                  data-testid="agent-completion-notification-toggle"
-                  disabled={notificationUnsupported || notificationDenied}
-                  onClick={onToggleAgentCompletionNotifications}
-                  title={
-                    notificationUnsupported
-                      ? "需要 HTTPS 安全上下文才能使用浏览器通知（当前为 HTTP）"
-                      : notificationDenied
-                        ? "浏览器已拒绝通知权限，请在浏览器设置中开启"
-                        : "Agent 从运行中进入空闲或退出时发送浏览器通知"
+                  {TOP_BAR_SETTINGS_SECTIONS.map((section) => (
+                    <button
+                      aria-controls={`top-bar-settings-panel-${section.id}`}
+                      aria-selected={settingsSection === section.id}
+                      className={`top-bar-settings-nav-item${settingsSection === section.id ? " top-bar-settings-nav-item--active" : ""}`}
+                      data-testid={`settings-section-${section.id}`}
+                      key={section.id}
+                      onClick={() => setSettingsSection(section.id)}
+                      role="tab"
+                      type="button"
+                    >
+                      <strong>{section.label}</strong>
+                      <small>{section.description}</small>
+                    </button>
+                  ))}
+                </div>
+                <div
+                  aria-label={
+                    TOP_BAR_SETTINGS_SECTIONS.find(
+                      (section) => section.id === settingsSection,
+                    )?.label
                   }
-                  type="button"
+                  className="top-bar-settings-panel"
+                  id={`top-bar-settings-panel-${settingsSection}`}
+                  role="tabpanel"
                 >
-                  <span>{notificationStatusLabel}</span>
-                  <small>{notificationUnsupported ? "请通过 HTTPS 访问本页" : "Agent 完成后提醒查看"}</small>
-                </button>
-                {agentCompletionNotificationsEnabled && (
-                  <button
-                    className="top-bar-menu-item"
-                    onClick={() => {
-                      if (typeof Notification === "undefined") {
-                        alert("浏览器不支持 Notification API");
-                        return;
-                      }
-                      if (Notification.permission !== "granted") {
-                        alert(`通知权限状态: ${Notification.permission}\n请先允许浏览器通知权限`);
-                        return;
-                      }
-                      new Notification("Coding Kanban 测试通知", {
-                        body: "如果你能看到这条通知，说明浏览器通知正常工作。",
-                        tag: "notification-test",
-                      });
-                    }}
-                    type="button"
-                  >
-                    <span>发送测试通知</span>
-                    <small>验证浏览器通知是否可用</small>
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-          <div className="top-bar-menu">
-            <button
-              aria-controls="top-bar-resource-menu"
-              aria-expanded={openMenu === "resource"}
-              className={`top-bar-action top-bar-action--ghost${openMenu === "resource" || showDiagnostics ? " top-bar-action--active" : ""}`}
-              data-testid="resource-tuning-menu-toggle"
-              onClick={() => toggleMenu("resource")}
-              type="button"
-            >
-              资源调节 ▾
-            </button>
-            {openMenu === "resource" && (
-              <div
-                aria-label="资源调节"
-                className="top-bar-menu-popover"
-                id="top-bar-resource-menu"
-                role="menu"
-              >
-                <button
-                  className={`top-bar-menu-item${useLightweightTerminalPreview ? " top-bar-menu-item--active" : ""}`}
-                  data-testid="terminal-preview-mode-toggle"
-                  onClick={onToggleTerminalPreviewMode}
-                  title={
-                    useLightweightTerminalPreview
-                      ? "当前为轻量化预览：非活跃会话不打开终端 WebSocket"
-                      : "当前为完整终端预览：恢复旧版小终端模式"
-                  }
-                  type="button"
-                >
-                  <span>
-                    {useLightweightTerminalPreview
-                      ? "轻量预览：开"
-                      : "完整预览"}
-                  </span>
-                  <small>终端卡片预览模式</small>
-                </button>
-                <button
-                  className={`top-bar-menu-item${vscodeIframeCacheMode === "memory-saving" ? " top-bar-menu-item--active" : ""}`}
-                  data-testid="vscode-cache-mode-toggle"
-                  onClick={onToggleVsCodeIframeCacheMode}
-                  title={
-                    vscodeIframeCacheMode === "memory-saving"
-                      ? "当前为 VS Code 省内存模式：只保留当前 iframe，并使用轻量终端预览"
-                      : "当前为 VS Code 保持状态模式：最多保留最近 3 个 iframe，并完整渲染运行终端窗格"
-                  }
-                  type="button"
-                >
-                  <span>
-                    {vscodeIframeCacheMode === "memory-saving"
-                      ? "VS Code 省内存"
-                      : "VS Code 保持状态"}
-                  </span>
-                  <small>iframe 缓存模式</small>
-                </button>
-                <button
-                  className="top-bar-menu-item"
-                  data-testid="vscode-cache-release"
-                  disabled={!vscodeCacheReleaseAvailable}
-                  onClick={onReleaseVsCodeIframeCache}
-                  title="卸载非当前 VS Code iframe，释放浏览器内存"
-                  type="button"
-                >
-                  <span>释放 VS Code 缓存</span>
-                  <small>卸载隐藏 iframe</small>
-                </button>
-                <button
-                  aria-controls={diagnosticsPopoverId}
-                  aria-expanded={showDiagnostics}
-                  className="top-bar-menu-item"
-                  data-testid="resource-diagnostics-toggle"
-                  onClick={openDiagnostics}
-                  title="查看浏览器内存、终端实例和 WebSocket 吞吐指标"
-                  type="button"
-                >
-                  <span>资源诊断</span>
-                  <small>内存、WebSocket 和 VS Code 指标</small>
-                </button>
+                  {settingsSection === "tools" && (
+                    <>
+                      <div className="top-bar-settings-heading">
+                        <strong>工具</strong>
+                        <span>操作帮助与当前浏览器的完成通知</span>
+                      </div>
+                      <button
+                        aria-controls={hintsPopoverId}
+                        aria-expanded={showHints}
+                        className="top-bar-menu-item"
+                        data-testid="help-hints-toggle"
+                        onClick={openHints}
+                        type="button"
+                      >
+                        <span>操作提示</span>
+                        <small>快捷键和基础操作</small>
+                      </button>
+                      <button
+                        className={`top-bar-menu-item${agentCompletionNotificationsEnabled ? " top-bar-menu-item--active" : ""}`}
+                        data-testid="agent-completion-notification-toggle"
+                        disabled={notificationUnsupported || notificationDenied}
+                        onClick={onToggleAgentCompletionNotifications}
+                        title={
+                          notificationUnsupported
+                            ? "需要 HTTPS 安全上下文才能使用浏览器通知（当前为 HTTP）"
+                            : notificationDenied
+                              ? "浏览器已拒绝通知权限，请在浏览器设置中开启"
+                              : "Agent 从运行中进入空闲或退出时发送浏览器通知"
+                        }
+                        type="button"
+                      >
+                        <span>{notificationStatusLabel}</span>
+                        <small>
+                          {notificationUnsupported
+                            ? "请通过 HTTPS 访问本页"
+                            : "只影响当前浏览器"}
+                        </small>
+                      </button>
+                      {agentCompletionNotificationsEnabled && (
+                        <button
+                          className="top-bar-menu-item"
+                          onClick={() => {
+                            if (typeof Notification === "undefined") {
+                              alert("浏览器不支持 Notification API");
+                              return;
+                            }
+                            if (Notification.permission !== "granted") {
+                              alert(
+                                `通知权限状态: ${Notification.permission}\n请先允许浏览器通知权限`,
+                              );
+                              return;
+                            }
+                            new Notification("Coding Kanban 测试通知", {
+                              body: "如果你能看到这条通知，说明浏览器通知正常工作。",
+                              tag: "notification-test",
+                            });
+                          }}
+                          type="button"
+                        >
+                          <span>发送测试通知</span>
+                          <small>验证浏览器通知是否可用</small>
+                        </button>
+                      )}
+                    </>
+                  )}
+                  {settingsSection === "resource" && (
+                    <>
+                      <div className="top-bar-settings-heading">
+                        <strong>资源调节</strong>
+                        <span>控制终端预览、VS Code 缓存并查看诊断</span>
+                      </div>
+                      <button
+                        className={`top-bar-menu-item${useLightweightTerminalPreview ? " top-bar-menu-item--active" : ""}`}
+                        data-testid="terminal-preview-mode-toggle"
+                        onClick={onToggleTerminalPreviewMode}
+                        title={
+                          useLightweightTerminalPreview
+                            ? "当前为轻量化预览：非活跃会话不打开终端 WebSocket"
+                            : "当前为完整终端预览：恢复旧版小终端模式"
+                        }
+                        type="button"
+                      >
+                        <span>
+                          {useLightweightTerminalPreview
+                            ? "轻量预览：开"
+                            : "完整预览"}
+                        </span>
+                        <small>终端卡片预览模式</small>
+                      </button>
+                      <button
+                        className={`top-bar-menu-item${vscodeIframeCacheMode === "memory-saving" ? " top-bar-menu-item--active" : ""}`}
+                        data-testid="vscode-cache-mode-toggle"
+                        onClick={onToggleVsCodeIframeCacheMode}
+                        title={
+                          vscodeIframeCacheMode === "memory-saving"
+                            ? "当前为 VS Code 省内存模式：只保留当前 iframe，并使用轻量终端预览"
+                            : "当前为 VS Code 保持状态模式：最多保留最近 3 个 iframe，并完整渲染运行终端窗格"
+                        }
+                        type="button"
+                      >
+                        <span>
+                          {vscodeIframeCacheMode === "memory-saving"
+                            ? "VS Code 省内存"
+                            : "VS Code 保持状态"}
+                        </span>
+                        <small>iframe 缓存模式</small>
+                      </button>
+                      <button
+                        className="top-bar-menu-item"
+                        data-testid="vscode-cache-release"
+                        disabled={!vscodeCacheReleaseAvailable}
+                        onClick={onReleaseVsCodeIframeCache}
+                        title="卸载非当前 VS Code iframe，释放浏览器内存"
+                        type="button"
+                      >
+                        <span>释放 VS Code 缓存</span>
+                        <small>卸载隐藏 iframe</small>
+                      </button>
+                      <button
+                        aria-controls={diagnosticsPopoverId}
+                        aria-expanded={showDiagnostics}
+                        className="top-bar-menu-item"
+                        data-testid="resource-diagnostics-toggle"
+                        onClick={openDiagnostics}
+                        title="查看浏览器内存、终端实例和 WebSocket 吞吐指标"
+                        type="button"
+                      >
+                        <span>资源诊断</span>
+                        <small>内存、WebSocket 和 VS Code 指标</small>
+                      </button>
+                    </>
+                  )}
+                  {settingsSection === "feishu" && (
+                    <>
+                      <div className="top-bar-settings-heading">
+                        <strong>飞书通知</strong>
+                        <span>控制所有看板任务完成后的机器人提醒</span>
+                      </div>
+                      <button
+                        aria-checked={Boolean(
+                          feishuNotificationSettings?.enabled,
+                        )}
+                        className={`top-bar-menu-item${feishuNotificationSettings?.enabled ? " top-bar-menu-item--active" : ""}`}
+                        data-testid="feishu-notification-toggle"
+                        disabled={
+                          !feishuNotificationSettings?.configured ||
+                          feishuNotificationSettingsUpdating
+                        }
+                        onClick={onToggleFeishuNotifications}
+                        role="switch"
+                        title={
+                          feishuNotificationSettings?.configured
+                            ? "开启或关闭所有已登记看板任务的飞书完成通知"
+                            : "请先在本地 .env 配置飞书通知接收者"
+                        }
+                        type="button"
+                      >
+                        <span>
+                          {feishuNotificationSettings === null
+                            ? "飞书通知：读取中…"
+                            : feishuNotificationSettings.enabled
+                              ? "飞书通知：开"
+                              : "飞书通知：关"}
+                        </span>
+                        <small>
+                          {feishuNotificationSettingsUpdating
+                            ? "正在保存…"
+                            : feishuNotificationSettingsError ||
+                              feishuDestinationLabel}
+                        </small>
+                      </button>
+                      <p className="top-bar-settings-note">
+                        开启后，已经运行及之后启动的看板任务都会在完成时提醒；接收者和凭证只保存在本机。
+                      </p>
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>

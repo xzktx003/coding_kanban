@@ -16,6 +16,13 @@ export interface BuildSshArgsOptions {
   requestTty?: boolean;
 }
 
+export class InvalidSshTargetError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidSshTargetError";
+  }
+}
+
 function assertSafeSshField(name: string, value: string | undefined): void {
   if (!value) {
     return;
@@ -26,9 +33,55 @@ function assertSafeSshField(name: string, value: string | undefined): void {
   }
 }
 
+export function assertValidSshTarget(
+  sshTarget: SshTarget | null | undefined,
+): asserts sshTarget is SshTarget {
+  if (!sshTarget || typeof sshTarget.host !== "string") {
+    throw new InvalidSshTargetError("Invalid host");
+  }
+
+  const host = sshTarget.host;
+  if (
+    !host ||
+    host.length > 255 ||
+    host !== host.trim() ||
+    host.startsWith("-") ||
+    host.includes("@") ||
+    /[\s\0]/.test(host)
+  ) {
+    throw new InvalidSshTargetError("Invalid host");
+  }
+
+  if (
+    sshTarget.port !== undefined &&
+    (!Number.isInteger(sshTarget.port) ||
+      sshTarget.port < 1 ||
+      sshTarget.port > 65_535)
+  ) {
+    throw new InvalidSshTargetError("Invalid port");
+  }
+
+  if (
+    sshTarget.username !== undefined &&
+    (!sshTarget.username ||
+      sshTarget.username.length > 128 ||
+      !/^[A-Za-z0-9._-]+$/.test(sshTarget.username))
+  ) {
+    throw new InvalidSshTargetError("Invalid username");
+  }
+
+  if (
+    sshTarget.identityFile !== undefined &&
+    (!sshTarget.identityFile ||
+      sshTarget.identityFile.length > 4096 ||
+      /[\r\n\0]/.test(sshTarget.identityFile))
+  ) {
+    throw new InvalidSshTargetError("Invalid identity file");
+  }
+}
+
 export function formatSshDestination(sshTarget: SshTarget): string {
-  assertSafeSshField("host", sshTarget.host);
-  assertSafeSshField("username", sshTarget.username);
+  assertValidSshTarget(sshTarget);
 
   return sshTarget.username
     ? `${sshTarget.username}@${sshTarget.host}`
@@ -39,6 +92,7 @@ export function buildSshArgs(
   sshTarget: SshTarget,
   options: BuildSshArgsOptions = {},
 ): string[] {
+  assertValidSshTarget(sshTarget);
   assertSafeSshField("identity file", sshTarget.identityFile);
   assertSafeSshField("remote command", options.remoteCommand);
   for (const forward of options.localForwardings ?? []) {

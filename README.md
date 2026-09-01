@@ -7,6 +7,8 @@
 
 <p align="center">
   <a href="#快速开始">快速开始</a> ·
+  <a href="#新用户安装检查清单">安装检查</a> ·
+  <a href="#更新日志">更新日志</a> ·
   <a href="#产品视图与功能导览">截图导览</a> ·
   <a href="#完整功能说明">完整功能</a> ·
   <a href="#典型工作流">工作流</a> ·
@@ -57,8 +59,110 @@ Coding Kanban 将这些问题收敛为一条主流程：
 | 文件浏览器 | 本地/SSH 浏览、预览、编辑、上传、下载、拖拽、chmod、Markdown/LaTeX |
 | VS Code Web | 本地与 SSH 远端 code-server，通过 `/vscode/` 内嵌并限制 iframe 缓存 |
 | 手机工作区 | 注意力看板、活动、项目/文件、终端快捷键、完整记录和手机 Diff |
+| 飞书完成提醒 | 所有已登记看板任务结束后可通过本地 `lark-cli` 机器人发送私聊/群聊提醒；Codex 优先发送最后一条完整回复，长正文自动分片，接收者与凭证不进入仓库 |
 | 更新与恢复 | 用户确认后 fast-forward 更新；重启后恢复 managed tmux 和布局 |
 | 资源诊断 | xterm、WebSocket、快照吞吐、终端流、VS Code iframe、long task、heap |
+
+## 更新日志
+
+> [!IMPORTANT]
+> **2026-09-01 · 所有看板任务完成后可主动发送飞书提醒**
+>
+> Kanban 后端会观察已登记会话从运行中进入空闲或退出的完成边沿，再由本机 `lark-cli` 机器人向指定用户或群聊发送消息。按钮开启前已经运行的 Codex 以及之后启动的其他 Agent 会话都能覆盖，不依赖页面保持打开；Codex 通知优先携带对话最后一条完整回复，长正文自动分片。个人接收者 ID、登录态和凭证继续只保存在本机。配置与边界见 [Kanban 任务完成飞书通知](docs/codex-feishu-notifications.md)。
+
+### 重要里程碑
+
+| 时间 | 更新内容 |
+| --- | --- |
+| 2026-09 | 接入 Codex → 飞书任务完成提醒，增加仓库作用域、隐私裁剪、重试和幂等保护 |
+| 2026-08 | 新增结构化会话摘要、完整记录、双 Diff Review、Markdown 阅读和手机工作区 |
+| 2026-07 | 加入用户分组、应用热更新、managed tmux 会话恢复及监控窗格联动 |
+| 2026-06 | 上线手机终端、浏览器资源诊断、完成通知、常驻开发服务和多终端布局 |
+| 2026-05 | 文件上传新增相对路径支持和上传状态反馈 |
+| 2026-04 | 上线文件浏览器、VS Code Web、SSH 远端文件与远端 VS Code 工作流 |
+| 2026-03 | 建立四列看板、真实终端、tmux 会话管理、快速连接和局域网访问基础 |
+
+### 功能更新时间线（新 → 旧）
+
+> 这里只记录新增能力和已有工作流的功能扩展，不收录 Bug 修复、测试、文档、重构或合并提交。链接为该功能的代表性提交，并非完整提交清单。
+
+#### 2026 年 9 月
+
+- `2026-09-01` — “新建会话”增加手动 SSH 连接，可直接填写主机、端口、用户名和本机私钥路径；Codex 飞书提醒改为发送最后一条完整回复，长正文按序分片而不截断。
+- `2026-09-01` — 顶栏把“工具”和“资源调节”合并进统一设置面板；飞书通知开关由后端统一覆盖按钮开启前已经运行和之后启动的所有看板任务。
+- `2026-09-01` [`6e00f4f`](https://github.com/xzktx003/coding_kanban/commit/6e00f4f5513fe990ea8c244c918ed0be0242a85b) — 接入 Codex 原生完成事件到飞书机器人通知，支持仓库作用域、隐私裁剪、重试和幂等发送。
+
+#### 2026 年 8 月
+
+- `2026-08-31` [`1e94262`](https://github.com/xzktx003/coding_kanban/commit/1e94262b0800bd125c002f6e6d2bf3a4c5da6d00) — 在活动终端旁直接查看 Codex 历史记录。
+- `2026-08-28` [`dad52a3`](https://github.com/xzktx003/coding_kanban/commit/dad52a3138245fe104037b48b531ac7ca24f73df) — 支持把图片等视觉上下文交给桌面端 Codex 会话。
+- `2026-08-28` [`62cd9a0`](https://github.com/xzktx003/coding_kanban/commit/62cd9a0d21e4899f12de907db64f440db91658d1) — 支持在聚焦视图中脱离工作区尺寸限制进行完整文件审查。
+- `2026-08-27` [`e019278`](https://github.com/xzktx003/coding_kanban/commit/e019278ae390b915d43446b66ffa95f5d2b69c01) — Markdown 文档支持解析和展示项目内嵌图片。
+- `2026-08-26` [`89c64c6`](https://github.com/xzktx003/coding_kanban/commit/89c64c6e21d2c703a0637056ce34173754492366) — 手机端状态队列支持按需折叠。
+- `2026-08-25` [`6ac2e7c`](https://github.com/xzktx003/coding_kanban/commit/6ac2e7c539ee3f1a5aea6ae52200aa87c0e4dbbb) — 把桌面终端上下文带入手机会话。
+- `2026-08-25` [`5476d07`](https://github.com/xzktx003/coding_kanban/commit/5476d073778f122d705b47fddfa8ad36ce17e0c7) — 支持读取 SSH 远端 Codex 会话的完整记录。
+- `2026-08-25` [`56b5fda`](https://github.com/xzktx003/coding_kanban/commit/56b5fda03182c45fda3f233bb701ef268383030c) — 支持在活动终端旁并排阅读 Markdown。
+- `2026-08-25` [`5dc5ab8`](https://github.com/xzktx003/coding_kanban/commit/5dc5ab815e0333cc6aa5182f8b15068743a813f9) — 支持用户按自定义会话分组组织四列看板。
+- `2026-08-24` [`97cbd99`](https://github.com/xzktx003/coding_kanban/commit/97cbd99810763892cac3ced89e3717748eb3045b) — 新增分组式多终端监控布局。
+- `2026-08-23` [`55b6280`](https://github.com/xzktx003/coding_kanban/commit/55b628041e35c889274d1883d3514e4e4eac2e36) — 手机文件浏览器支持直接创建项目文件和目录。
+- `2026-08-20` [`e0d6458`](https://github.com/xzktx003/coding_kanban/commit/e0d6458ffed8b5b15c094bbc75d3ddacad5ca052) — 为高密度终端切换器增加更易浏览的导航。
+- `2026-08-18` [`54424f7`](https://github.com/xzktx003/coding_kanban/commit/54424f7fec4136ea4b2d433caa22df57887e6533) — 会话切换器新增搜索能力。
+- `2026-08-16` [`eb17027`](https://github.com/xzktx003/coding_kanban/commit/eb17027505be23c09704a62e1b004ee2d740d7e1)、[`95d92d8`](https://github.com/xzktx003/coding_kanban/commit/95d92d8d6c2bd38469eed520e308a991365671f2) — 手机端支持访问项目文件并阅读文件预览。
+- `2026-08-14` [`4e3eb06`](https://github.com/xzktx003/coding_kanban/commit/4e3eb069f614ed033f7719a4be691a8180824302)、[`3a2ac6e`](https://github.com/xzktx003/coding_kanban/commit/3a2ac6e06af65d54652f01cccf3c71346a04dfaa)、[`01026e7`](https://github.com/xzktx003/coding_kanban/commit/01026e73167c57439976677fab8c57e3650fa46b) — 新增手机工作区、跟踪变更、Diff 导航和卡片已读状态控制。
+- `2026-08-13` [`8911e68`](https://github.com/xzktx003/coding_kanban/commit/8911e68f8f03804e520fab345f4e123742e43b21)、[`66a2780`](https://github.com/xzktx003/coding_kanban/commit/66a27800424dc1e4d73ee5a649d065be60c4e356)、[`1a01d0c`](https://github.com/xzktx003/coding_kanban/commit/1a01d0c6b8b68ac013d8b26d8ac4fae6a8b566a1) — 新增看板排序、Git 摘要、结构化任务摘要及增强的记录/Markdown 阅读。
+
+#### 2026 年 7 月
+
+- `2026-07-30` [`6fd9c70`](https://github.com/xzktx003/coding_kanban/commit/6fd9c7012e506e1cacb01dcc396254c4c3aa894f) — 支持用户确认后执行 Git fast-forward 更新，并衔接会话恢复。
+- `2026-07-28` [`04eef06`](https://github.com/xzktx003/coding_kanban/commit/04eef066971a8a4e0dc14a7962d1a0d0893cbd0a) — 技术 Markdown 支持更贴近源码语义的渲染。
+- `2026-07-27` [`c8089d4`](https://github.com/xzktx003/coding_kanban/commit/c8089d4687931d49b7d47bf276320b88e7b04d04) — 聚焦侧栏增加 tmux 会话标识。
+- `2026-07-27` [`d762ae5`](https://github.com/xzktx003/coding_kanban/commit/d762ae585adb6ee3b25a5a13c4b0aab0ff84ac6b) — 新增应用热更新提示和 managed tmux 会话恢复。
+- `2026-07-27` [`ab3585a`](https://github.com/xzktx003/coding_kanban/commit/ab3585a7c52e18cf4b54cd2daab3ef95ef733572) — 聚焦侧栏卡片可直接关联到多屏监控窗格。
+- `2026-07-23` [`b2bd85d`](https://github.com/xzktx003/coding_kanban/commit/b2bd85d8fe40326c756fa396e05c32482c7f27d7) — 新建会话可直接进入用户选择的看板分组。
+- `2026-07-11` [`b248e95`](https://github.com/xzktx003/coding_kanban/commit/b248e953432762a352103cfed93ddd909dabc831) — 支持按工作上下文组织终端卡片分组。
+
+#### 2026 年 6 月
+
+- `2026-06-29` [`a984720`](https://github.com/xzktx003/coding_kanban/commit/a984720c3d43ad82ff656b5cc36f8661b18a9c0f) — 新建会话时可自动创建缺失的工作目录。
+- `2026-06-16` [`b7bd9e9`](https://github.com/xzktx003/coding_kanban/commit/b7bd9e9024c0f99991d4d5f17b6d823b03eecf2d) — 文件浏览器的元数据列支持查看和调整。
+- `2026-06-15` [`4096f51`](https://github.com/xzktx003/coding_kanban/commit/4096f51fd24a58e41855df122c91be242ea0bc5b) — 文件浏览器支持将指向目录的符号链接作为目录访问。
+- `2026-06-12` [`6b9defa`](https://github.com/xzktx003/coding_kanban/commit/6b9defa3e0c2cfd11f8217f9c6671960ce84660a) — 新增连接状态反馈和空状态引导。
+- `2026-06-12` [`ace6466`](https://github.com/xzktx003/coding_kanban/commit/ace6466f13215aa3e4e3192ae78a53fcf2d09f60) — Agent 工作完成后可发送浏览器系统通知。
+- `2026-06-10` [`540ed3d`](https://github.com/xzktx003/coding_kanban/commit/540ed3dee879efaf8297071a0b344175cafaf5e4) — 新增带自动重启包装器的常驻开发服务。
+- `2026-06-08` [`82c710d`](https://github.com/xzktx003/coding_kanban/commit/82c710dad00df2bf5e8c8d37fbe5897bbadc6999) — 终端侧边面板状态可跨聚焦切换保存。
+- `2026-06-07` [`ff20cac`](https://github.com/xzktx003/coding_kanban/commit/ff20cace26459f83b07c746bc4852c2440944b28) — 上线手机终端，支持用手机控制长时间运行的 Agent。
+- `2026-06-06` [`b447bfe`](https://github.com/xzktx003/coding_kanban/commit/b447bfe165b4f173d1d32e0bab94f4b6c0fe689d) — 多终端监控布局收敛为统一选择器。
+- `2026-06-06` [`f8222e3`](https://github.com/xzktx003/coding_kanban/commit/f8222e31d1dc0dde1c4e54d5158fa0f0ea831aca) — 看板新增 VS Code Web 和浏览器资源诊断入口。
+- `2026-06-06` [`0ad1e49`](https://github.com/xzktx003/coding_kanban/commit/0ad1e49dde1ce37e919c9f98bfa8311e4cea93a9) — 新增标题栏折叠、终端布局选项和文件浏览器增强能力。
+- `2026-06-05` [`757c13e`](https://github.com/xzktx003/coding_kanban/commit/757c13e7892966771e5314410a14ad261374d8a7) — 新增浏览器资源压力观测指标。
+- `2026-06-05` [`03df3c8`](https://github.com/xzktx003/coding_kanban/commit/03df3c8ac7663f39bc8790a8425491b8d047cb31) — 终端预览支持按资源需求调节保真度。
+- `2026-06-03` [`583bd44`](https://github.com/xzktx003/coding_kanban/commit/583bd44caeca9ce6a11cd49e450ed4286aa1a7f1) — 新增一键同步 GitLab 与 GitHub 的双远端推送脚本。
+
+#### 2026 年 5 月
+
+- `2026-05-31` [`0c6b5c3`](https://github.com/xzktx003/coding_kanban/commit/0c6b5c3b7c45fe9a8e20ce575216a3264f0b252d) — 文件上传支持相对路径并展示上传状态。
+
+#### 2026 年 4 月
+
+- `2026-04-29` [`0cd0a39`](https://github.com/xzktx003/coding_kanban/commit/0cd0a396e0b7e147af22c8ba7d8192a581fb539a) — 支持通过 SSH 打开远端 VS Code Web。
+- `2026-04-28` [`0b4484f`](https://github.com/xzktx003/coding_kanban/commit/0b4484f4c88d0e0cefcb3c6e8aa1a9649b685a05) — 开发工具和服务端口支持从环境变量配置。
+- `2026-04-28` [`aa7fd6a`](https://github.com/xzktx003/coding_kanban/commit/aa7fd6a85f62733f985572dacce6d4eeb3ae5cff) — 新增 SSH 远端会话和远端文件浏览器工作流。
+- `2026-04-23` [`8fa9933`](https://github.com/xzktx003/coding_kanban/commit/8fa9933802726a87a6e037f1b5ad4241ea06a397) — 聚焦终端侧栏支持一键折叠。
+- `2026-04-23` [`2d17b85`](https://github.com/xzktx003/coding_kanban/commit/2d17b857b0b81caa5b6d1543c488666980560364) — 新增常用终端快捷操作指令。
+- `2026-04-21` [`81c5152`](https://github.com/xzktx003/coding_kanban/commit/81c5152d659a4de584564b8e0cb90b6c050d75c0) — VS Code Web 支持复用终端插件系统。
+- `2026-04-21` [`1495c16`](https://github.com/xzktx003/coding_kanban/commit/1495c16fd119b482409e75dcfcb74f7e46a5b8b5) — 以会话绑定的 VS Code Web 替代窗口捕获路径。
+- `2026-04-21` [`8d08c32`](https://github.com/xzktx003/coding_kanban/commit/8d08c328158b6b5f94c48c8dda9377dc4298b1bc) — 文件浏览器可跟随当前聚焦终端切换工作目录。
+- `2026-04-20` [`3cadb91`](https://github.com/xzktx003/coding_kanban/commit/3cadb91799b54982fa8d4dd6941706cd071bb8d3) — 上线本地文件浏览器。
+
+#### 2026 年 3 月
+
+- `2026-03-31` [`22d3dfe`](https://github.com/xzktx003/coding_kanban/commit/22d3dfef68bf99367fec13a7266157ebda4a42e2) — 新建会话弹窗新增 Agent 类型选择界面。
+- `2026-03-31` [`451e523`](https://github.com/xzktx003/coding_kanban/commit/451e523f1ca9155fb4212a80bb73c71c3758f1de) — 新增会话操作菜单和隐藏会话管理。
+- `2026-03-31` [`d823fd9`](https://github.com/xzktx003/coding_kanban/commit/d823fd9a72feda0276652a05334e1a30fb78da99) — 新建会话支持选择本机或 SSH 主机。
+- `2026-03-30` [`7107c37`](https://github.com/xzktx003/coding_kanban/commit/7107c37b8efa44b1cf815e4126b52bd0a1373e52)、[`a6729de`](https://github.com/xzktx003/coding_kanban/commit/a6729de71d5cba403324e0d4aacacc35a397e32b) — 新增本地窗口捕获和窗口共享能力。
+- `2026-03-30` [`921d9fb`](https://github.com/xzktx003/coding_kanban/commit/921d9fbdf108fd4d93c49075f12de84ea0e73182) — 新增快速 tmux 连接入口。
+- `2026-03-29` [`4fbffc2`](https://github.com/xzktx003/coding_kanban/commit/4fbffc252170f5779ded1a9dfad7f77d447e4ff9) — 会话管理和界面新增传输类型筛选。
+- `2026-03-29` [`f24a05a`](https://github.com/xzktx003/coding_kanban/commit/f24a05a4b3e565b4b3ec235ad814773415542a1a) — 建立 tmux 会话管理和“等待输入”状态识别。
 
 ## 产品视图与功能导览
 
@@ -211,7 +315,13 @@ https://<局域网地址>:<WEB_PORT>/?view=mobile
 
 隐藏不会终止底层进程。关闭 direct 会话、终止 tmux 等破坏性操作会明确展示确认；tmux 的“脱离会话”和“终止底层 session”是不同操作。
 
-### 11. 资源调节与诊断
+### 11. 设置、资源调节与通知
+
+顶栏使用统一“设置”入口，内部包含三个分类：
+
+- **工具**：操作提示、当前浏览器的任务完成通知和测试通知。
+- **资源调节**：轻量/完整终端预览、VS Code iframe 缓存、手动释放缓存和资源诊断。
+- **飞书通知**：控制所有已登记看板任务的完成提醒；开启前已经运行的会话后续完成时同样发送，目标必须先在本地 `.env` 配置，页面不会读取或展示具体接收者 ID。
 
 默认轻量预览不为每张卡片创建 xterm 和终端 WebSocket。需要实时小终端时，可以手动切换到完整预览。
 
@@ -243,24 +353,80 @@ https://<局域网地址>:<WEB_PORT>/?view=mobile
 
 必需：
 
+- Git。
 - Node.js 20 或更高版本。
 - pnpm；仓库声明使用 `pnpm@10.13.1`。
+- `curl`、`lsof` 和 OpenSSL；推荐启动脚本使用它们检查服务、端口和生成 HTTPS 证书。
+- Linux 使用推荐启动脚本时需要 `setsid`，通常由 `util-linux` 提供。
 
 按需：
 
 - `tmux`：扫描、创建、接管和恢复 tmux 会话。
 - OpenSSH 客户端：SSH PTY、远端 tmux、远端文件和远端 VS Code。
+- `mkcert`：为局域网生成浏览器可信任的本地 HTTPS 证书，强烈推荐与 VS Code Web 一起使用。
+- `code-server` 或 `openvscode-server`：内嵌 VS Code Web；未安装时应用可尝试通过网络安装 `code-server`。
+- Codex、Copilot 或 Claude CLI：只需安装并登录实际要从看板启动的 Agent；纯 shell 会话不需要。
+- `lark-cli`：仅 Codex 完成后发送飞书提醒时需要。
+- Playwright 浏览器和系统依赖：仅运行 E2E 或生成 README 截图时需要。
 
 ```bash
 # Ubuntu / Debian
 sudo apt update
-sudo apt install -y tmux openssh-client
+sudo apt install -y git curl lsof openssl util-linux tmux openssh-client
 
 # Fedora / RHEL
-sudo dnf install -y tmux openssh-clients
+sudo dnf install -y git curl lsof openssl util-linux tmux openssh-clients
 
 # macOS
-brew install tmux
+brew install git node tmux openssl mkcert
+
+# 安装 Node.js 20+ 后，启用仓库声明的 pnpm 版本
+corepack enable
+corepack prepare pnpm@10.13.1 --activate
+```
+
+如果 `pnpm install` 在构建 `node-pty` 时报告 `node-gyp` 错误，再安装 Python 3、`make` 和 C/C++ 编译工具链。macOS 若没有可用的 `setsid`，可以使用下文的 `pnpm dev` 启动方式。
+
+### 新用户安装检查清单
+
+首次启动前，建议从上到下逐项确认。
+
+基础启动：
+
+- [ ] `git --version`、`node --version` 和 `pnpm --version` 均可执行；Node.js 至少为 20，pnpm 建议为 `10.13.1`。
+- [ ] `curl`、`lsof`、`openssl` 可执行；Linux 使用 `restart-dev.sh` 时，`setsid` 也可执行。
+- [ ] 已运行 `pnpm install`，且 `node-pty` 没有原生编译错误。
+- [ ] 已执行 `cp .env.example .env`，并只在 `.env` 中填写本机路径、端口和通知接收者。
+- [ ] `.env` 仍被 Git 忽略，没有把 Token、SSH 私钥、App Secret 或个人飞书 ID 加入暂存区。
+- [ ] 后端端口和前端端口未被其他服务占用；默认分别为 `4000` 和 `8484`。
+- [ ] 局域网访问时保留 `WEB_HOST=0.0.0.0`，并确认防火墙允许前端端口。
+
+按需功能：
+
+- [ ] **tmux 会话恢复**：`tmux -V` 可执行；本地和准备连接的 SSH 主机都已安装 tmux。
+- [ ] **Coding Agent**：需要使用的 `codex`、`copilot` 或 `claude` 命令已加入 `PATH` 并完成登录；远端会话还需在远端主机安装。
+- [ ] **SSH 工作流**：`ssh -V` 可执行；可使用 `~/.ssh/config` 中的预设主机，也可在“新建会话 → 新增 SSH 连接”直接填写目标。请先确认本机 `ssh-agent`、SSH 配置或私钥能够免交互登录。
+- [ ] **可信 HTTPS**：已安装 `mkcert`，或配置自己的可信证书；手机和其他局域网设备已信任对应 CA。只接受 OpenSSL 自签警告可能导致 VS Code Web 的 Service Worker、图片或 webview 无法加载。
+- [ ] **VS Code Web**：本机/远端已有 `code-server` 或 `openvscode-server`；若依赖自动安装，已确认机器可以访问 `code-server.dev`。
+- [ ] **飞书提醒**：`lark-cli` 已配置机器人身份和发送权限，`.env` 中只设置 `FEISHU_NOTIFY_CHAT_ID` 或 `FEISHU_NOTIFY_USER_ID` 其中一个；Kanban 后端会统一发送 Codex 最后一条完整回复，无需为新安装单独配置 Codex 用户级 notify hook。确认目标会话允许接收可能包含代码和日志的完整正文。
+- [ ] **飞书开关**：启动后进入“设置 → 飞书通知”，确认显示“私聊接收者已配置”或“群聊接收者已配置”，再按需开启。
+- [ ] **E2E/截图**：只有需要运行 Playwright 时才执行 `npx playwright install`；Linux 缺少 Chromium 动态库时再执行 `sudo npx playwright install-deps`。
+
+可以先运行下面的命令快速核对基础命令；带“可选”的项目没有输出时，只会影响对应功能：
+
+```bash
+git --version
+node --version
+pnpm --version
+curl --version | head -n 1
+lsof -v 2>&1 | head -n 1
+openssl version
+command -v setsid || true       # Linux 推荐启动脚本需要
+command -v tmux || true         # 可选：tmux 工作流
+command -v ssh || true          # 可选：SSH 工作流
+command -v codex || command -v copilot || command -v claude || true
+command -v mkcert || true       # 可选但推荐：可信局域网 HTTPS
+command -v lark-cli || true     # 可选：飞书完成提醒
 ```
 
 ### 安装
@@ -348,6 +514,10 @@ curl http://127.0.0.1:4000/api/health
 | `VSCODE_WEB_BIND_HOST` | 本地 code-server 内部监听地址 |
 | `VSCODE_WEB_REMOTE_BIND_HOST` | SSH 远端 code-server 监听地址，默认 `127.0.0.1` |
 | `VSCODE_WEB_REMOTE_PORT` | 远端 code-server 首选端口，默认 `13338` |
+
+### 飞书完成提醒
+
+接收者、正文分片大小和重试参数只写入被 Git 忽略的 `.env`。配置目标后，在“设置 → 飞书通知”控制启用状态；Kanban 后端统一观察所有已登记会话，因此按钮开启前已经运行的任务后续完成时也会发送。Codex 会优先发送结构化记录中的最后一条完整回复，长正文自动分片；读取不到时回退到看板摘要。开关保存在 `.dev-runtime/feishu-notification-settings.json`，只包含模式、布尔状态和更新时间，不包含个人 ID 或机器人凭证。完整步骤见 [Kanban 任务完成飞书通知](docs/codex-feishu-notifications.md)。
 
 ## 完整功能说明
 
@@ -444,6 +614,13 @@ curl http://127.0.0.1:4000/api/health
 3. 用户点击确认后执行 fast-forward 检查。
 4. 成功后保存 managed tmux 和布局状态并 reload。
 5. 有本地修改或分叉时保持原状态，并显示具体冲突原因。
+
+### 工作流 F：调整工具、资源与飞书通知
+
+1. 点击顶栏“设置”。
+2. 在“工具”中查看操作提示或控制当前浏览器的完成通知。
+3. 在“资源调节”中切换终端预览、VS Code 缓存模式或打开资源诊断。
+4. 在“飞书通知”中确认本地目标类型，再开启或关闭所有已登记看板任务的完成提醒。
 
 ## 快捷键
 
@@ -622,6 +799,7 @@ pnpm check
 - [手机终端适配](docs/mobile-terminal-adaptation.md)
 - [文件浏览器架构](docs/specs/2026-04-20-file-browser-architecture.md)
 - [双 Diff 架构](docs/specs/2026-08-14-dual-diff-architecture.md)
+- [Codex 飞书任务完成通知](docs/codex-feishu-notifications.md)
 - [v1.4.0 PRD](docs/plans/2026-08-12-v1.4.0-prd.md)
 
 ## License
