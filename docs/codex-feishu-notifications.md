@@ -9,8 +9,8 @@ AgentSessionRegistry
   -> Codex 最终 task_complete，或其他会话 running → idle / exited / detached
   -> AgentCompletionFeishuNotifier
   -> scripts/codex-feishu-notify.mjs --kanban
-  -> lark-cli im +messages-send --as bot
-  -> 飞书群聊或用户（记录发出消息 message_id）
+  -> lark-cli im +messages-send --msg-type interactive --as bot
+  -> 飞书群聊或用户（Card 2.0，并记录发出消息 message_id）
 
 私聊用户回复某条通知
   -> lark-cli event consume im.message.receive_v1 --as bot
@@ -27,7 +27,7 @@ AgentSessionRegistry
 
 - Agent 类型和看板会话名。
 - 工作目录的最后一级项目名，不发送完整机器路径。
-- 最后一条结构化 Agent 摘要或有界终端摘要，默认最多 600 个字符。
+- Codex 最终 turn 的完整结构化输出；其他 Agent 或结构化记录不可用时使用有界终端摘要。
 
 用户原始 prompt 不会被转发。摘要会移除 ANSI 和控制字符，但仍可能包含 Agent 输出中的业务信息；目标群或用户应按信息敏感级别选择。
 
@@ -67,7 +67,7 @@ FEISHU_NOTIFY_MAX_ATTEMPTS=2
 
 配置边界：
 
-- `FEISHU_NOTIFY_MESSAGE_CHUNK_CHARS`：1000–30000，默认 12000；控制完整最后输出的单条消息分片大小，不截断正文。
+- `FEISHU_NOTIFY_MESSAGE_CHUNK_CHARS`：1000–30000，默认 12000；控制完整最后输出的单张卡片分片大小，不截断正文。
 - `FEISHU_NOTIFY_TIMEOUT_MS`：1000–30000，默认 10000。
 - `FEISHU_NOTIFY_MAX_ATTEMPTS`：1–3，默认 2。
 
@@ -103,7 +103,7 @@ Codex 会话输出变化后，后端会先从当前看板会话定位真实 Code
 
 因此 Codex 回复后即使在终端 15 秒空闲阈值内继续人工提问，两个独立 turn 也不会被合并或漏报；人工发起的新一轮不会把上一轮误判为 Goal 内部续跑。随后卡片进入 idle 时会按同一 `turn_id` 去重。即使卡片暂时标记为 `shell`，只要它是本机受管 tmux 且当前 pane 中运行的是 Codex，也会使用实际 Codex 对话正文。本机 session 文件路径和短期 pane 定位结果会缓存，远端读取使用有界尾部窗口；读取不到结构化完成记录、目标是其他明确 Agent，或远端缺少读取通道时，才回退到卡片摘要或终端预览。
 
-发送使用 `lark-cli im +messages-send --text`，保留正文换行、缩进和 Markdown 字符的字面内容；ANSI 转义、不可见控制字符和完整工作目录会被清理。正文超过 `FEISHU_NOTIFY_MESSAGE_CHUNK_CHARS` 时按 Unicode 字符边界拆成多条“最后输出（序号/总数）”消息，每片使用独立且稳定的幂等键，因此不会为了满足单条消息大小而截断最后输出。
+发送使用 `lark-cli im +messages-send --msg-type interactive --content` 构造飞书 Card 2.0：绿色 header 表达完成状态，紧凑宽度的信息块展示项目与会话，默认展开的折叠面板展示完整最后输出。Agent 动态正文放在 `plain_text` 组件中，保留换行、缩进和 Markdown 字符的字面内容，同时避免输出里的标签、链接或 `@` 被飞书解释执行；ANSI 转义、不可见控制字符和完整工作目录会被清理。正文超过 `FEISHU_NOTIFY_MESSAGE_CHUNK_CHARS` 时按 Unicode 字符边界拆成多张“完整输出（序号/总数）”卡片，每张使用独立且稳定的幂等键，因此不会为了满足单条消息大小而截断最后输出。
 
 开启此功能意味着最后一条 Codex assistant 输出会被发送给 `.env` 中配置的飞书接收者。该正文可能包含代码、日志或任务上下文，配置私聊/群聊目标前应确认接收范围；用户提示、私钥内容、Token 和完整工作目录不会由通知器主动附加。
 
@@ -131,7 +131,8 @@ Codex 会话输出变化后，后端会先从当前看板会话定位真实 Code
 lark-cli im +messages-send \
   --as bot \
   --chat-id oc_xxx \
-  --text "Coding Kanban notification dry run" \
+  --msg-type interactive \
+  --content '{"schema":"2.0","header":{"title":{"tag":"plain_text","content":"Coding Kanban 测试"},"template":"green"},"body":{"elements":[{"tag":"div","text":{"tag":"plain_text","content":"任务完成卡片 dry run"}}]}}' \
   --idempotency-key kanban-notify-dry-run \
   --dry-run
 ```

@@ -6,8 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
-  buildCompletionMessage,
-  buildCompletionMessages,
+  buildCompletionCards,
   createIdempotencyKey,
   parseLarkCliResponse,
   readCodexHookNotificationEnabled,
@@ -79,7 +78,9 @@ test("allows the Kanban backend to notify for sessions outside this repository",
 
   assert.deepEqual(result, { status: "sent", messages: [] });
   assert.equal(calls.length, 1);
-  assert.match(calls[0][1][9], /another-project/);
+  const contentIndex = calls[0][1].indexOf("--content");
+  assert.notEqual(contentIndex, -1);
+  assert.match(calls[0][1][contentIndex + 1], /another-project/);
 });
 
 test("does not invoke lark-cli when the persisted Feishu switch is off", async () => {
@@ -170,8 +171,8 @@ test("requires exactly one validated Feishu destination", async () => {
   );
 });
 
-test("builds sanitized plain text without forwarding the prompt or full path", () => {
-  const message = buildCompletionMessage(
+test("builds a sanitized Card 2.0 without forwarding the prompt or full path", () => {
+  const [card] = buildCompletionCards(
     {
       ...completion,
       "last-assistant-message":
@@ -181,19 +182,27 @@ test("builds sanitized plain text without forwarding the prompt or full path", (
     2_000,
   );
 
-  assert.match(message, /^Coding Kanban · Codex 任务完成/m);
-  assert.match(message, /项目：coding_kanban/);
-  assert.match(message, /最后输出：\nDone!/);
-  assert.match(message, /coding_kanban\/scripts\/notify\.mjs/);
-  assert.doesNotMatch(message, /do not forward this private prompt/);
-  assert.doesNotMatch(message, /data01\/home/);
-  assert.doesNotMatch(message, /\u001b|\u0000/);
-  assert.match(message, /x{120}$/);
+  assert.equal(card.schema, "2.0");
+  assert.equal(card.config.width_mode, "compact");
+  assert.equal(card.header.template, "green");
+  assert.equal(card.header.title.content, "Coding Kanban · Codex 任务完成");
+  assert.equal(card.body.elements[0].tag, "column_set");
+  assert.equal(card.body.elements[1].tag, "collapsible_panel");
+  assert.equal(card.body.elements[1].expanded, true);
+  const serialized = JSON.stringify(card);
+  const output = card.body.elements[1].elements[0].text.content;
+  assert.match(serialized, /coding_kanban/);
+  assert.match(output, /^Done!/);
+  assert.match(output, /coding_kanban\/scripts\/notify\.mjs/);
+  assert.doesNotMatch(serialized, /do not forward this private prompt/);
+  assert.doesNotMatch(serialized, /data01\/home/);
+  assert.doesNotMatch(serialized, /\u001b|\u0000/);
+  assert.match(output, /x{120}$/);
 });
 
-test("preserves the complete last Codex output across plain-text message chunks", () => {
+test("preserves the complete last Codex output across Card 2.0 chunks", () => {
   const completeOutput = `第一行\n\n  保留缩进\n${"完整内容".repeat(700)}`;
-  const messages = buildCompletionMessages(
+  const cards = buildCompletionCards(
     {
       ...completion,
       "last-assistant-message": completeOutput,
@@ -201,12 +210,19 @@ test("preserves the complete last Codex output across plain-text message chunks"
     1_000,
   );
 
-  assert.ok(messages.length > 1);
-  const reconstructed = messages
-    .map((message) => message.replace(/^[\s\S]*最后输出（\d+\/\d+）：\n/, ""))
+  assert.ok(cards.length > 1);
+  const reconstructed = cards
+    .map((card) => card.body.elements[1].elements[0].text.content)
     .join("");
   assert.equal(reconstructed, completeOutput);
-  assert.match(messages[0], /  保留缩进/);
+  assert.match(
+    cards[0].body.elements[1].elements[0].text.content,
+    /  保留缩进/,
+  );
+  assert.equal(
+    cards[0].body.elements[1].header.title.content,
+    `完整输出（1/${cards.length}）`,
+  );
 });
 
 test("sends every complete output chunk with a distinct idempotency key", async () => {
@@ -241,9 +257,26 @@ test("sends every complete output chunk with a distinct idempotency key", async 
     ],
     messageIds: ["om_1", "om_2", "om_3"],
   });
-  assert.equal(new Set(calls.map(([, args]) => args[11])).size, 3);
-  assert.match(calls[0][1][9], /最后输出（1\/3）：/);
-  assert.match(calls[2][1][9], /最后输出（3\/3）：/);
+  assert.equal(
+    new Set(
+      calls.map(([, args]) => args[args.indexOf("--idempotency-key") + 1]),
+    ).size,
+    3,
+  );
+  const firstCard = JSON.parse(
+    calls[0][1][calls[0][1].indexOf("--content") + 1],
+  );
+  const lastCard = JSON.parse(
+    calls[2][1][calls[2][1].indexOf("--content") + 1],
+  );
+  assert.equal(
+    firstCard.body.elements[1].header.title.content,
+    "完整输出（1/3）",
+  );
+  assert.equal(
+    lastCard.body.elements[1].header.title.content,
+    "完整输出（3/3）",
+  );
 });
 
 test("uses a stable, bounded idempotency key per Codex turn", () => {
@@ -295,10 +328,16 @@ test("sends through lark-cli with fixed bot identity and a group target", async 
     "--chat-id",
     "oc_group123",
   ]);
-  assert.equal(args[8], "--text");
-  assert.match(args[9], /Coding Kanban · Codex 任务完成/);
-  assert.equal(args[10], "--idempotency-key");
-  assert.match(args[11], /^codex-[a-f0-9]+$/);
+  assert.deepEqual(args.slice(8, 11), [
+    "--msg-type",
+    "interactive",
+    "--content",
+  ]);
+  const card = JSON.parse(args[11]);
+  assert.equal(card.schema, "2.0");
+  assert.equal(card.header.title.content, "Coding Kanban · Codex 任务完成");
+  assert.equal(args[12], "--idempotency-key");
+  assert.match(args[13], /^codex-[a-f0-9]+$/);
   assert.equal(options.timeout, 10_000);
   assert.equal(options.env.LARKSUITE_CLI_NO_UPDATE_NOTIFIER, "1");
   assert.equal(options.env.LARKSUITE_CLI_NO_SKILLS_NOTIFIER, "1");

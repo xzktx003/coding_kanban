@@ -237,13 +237,6 @@ function isRepositoryWorkingDirectory(cwd) {
   );
 }
 
-export function buildCompletionMessage(
-  notification,
-  maxChunkCharacters = DEFAULT_MESSAGE_CHUNK_CHARS,
-) {
-  return buildCompletionMessages(notification, maxChunkCharacters).join("\n\n");
-}
-
 function splitOutputText(value, maxChunkCharacters) {
   const characters = Array.from(value);
   if (characters.length === 0) {
@@ -257,7 +250,36 @@ function splitOutputText(value, maxChunkCharacters) {
   return chunks;
 }
 
-export function buildCompletionMessages(
+function buildCardMetadataColumn(label, content) {
+  return {
+    tag: "column",
+    width: "weighted",
+    weight: 1,
+    padding: "12px",
+    vertical_spacing: "4px",
+    elements: [
+      {
+        tag: "div",
+        text: {
+          tag: "plain_text",
+          content: label,
+          text_size: "notation",
+          text_color: "grey",
+        },
+      },
+      {
+        tag: "div",
+        text: {
+          tag: "plain_text",
+          content,
+          lines: 2,
+        },
+      },
+    ],
+  };
+}
+
+export function buildCompletionCards(
   notification,
   maxChunkCharacters = DEFAULT_MESSAGE_CHUNK_CHARS,
 ) {
@@ -282,21 +304,86 @@ export function buildCompletionMessages(
       ? truncateText(sanitizeText(notification["display-name"]), 160)
       : "";
 
-  const header = [
-    `Coding Kanban · ${agentKind || "Agent"} 任务完成`,
-    `项目：${projectName}`,
-    ...(displayName ? [`会话：${displayName}`] : []),
-  ].join("\n");
   const chunks = splitOutputText(output, maxChunkCharacters);
-  return chunks.map((chunk, index) =>
-    [
-      header,
-      chunks.length === 1
-        ? "最后输出："
-        : `最后输出（${index + 1}/${chunks.length}）：`,
-      chunk,
-    ].join("\n"),
-  );
+  return chunks.map((chunk, index) => ({
+    schema: "2.0",
+    config: {
+      update_multi: true,
+      width_mode: "compact",
+      enable_forward: true,
+      summary: {
+        content: `${agentKind || "Agent"} 任务完成 · ${projectName}`,
+      },
+    },
+    header: {
+      title: {
+        tag: "plain_text",
+        content: `Coding Kanban · ${agentKind || "Agent"} 任务完成`,
+      },
+      subtitle: {
+        tag: "plain_text",
+        content: displayName ? `${projectName} · ${displayName}` : projectName,
+      },
+      template: "green",
+      icon: {
+        tag: "standard_icon",
+        token: "ai-common_colorful",
+      },
+      text_tag_list: [
+        {
+          tag: "text_tag",
+          text: { tag: "plain_text", content: "已完成" },
+          color: "green",
+        },
+      ],
+    },
+    body: {
+      direction: "vertical",
+      padding: "12px 12px 20px 12px",
+      vertical_spacing: "12px",
+      elements: [
+        {
+          tag: "column_set",
+          flex_mode: "none",
+          horizontal_spacing: "12px",
+          background_style: "green-50",
+          columns: [
+            buildCardMetadataColumn("项目", projectName),
+            ...(displayName
+              ? [buildCardMetadataColumn("会话", displayName)]
+              : []),
+          ],
+        },
+        {
+          tag: "collapsible_panel",
+          expanded: true,
+          background_color: "grey-50",
+          border: { color: "grey-100", corner_radius: "8px" },
+          padding: "0px 12px 12px 12px",
+          vertical_spacing: "8px",
+          header: {
+            title: {
+              tag: "plain_text",
+              content:
+                chunks.length === 1
+                  ? "完整输出"
+                  : `完整输出（${index + 1}/${chunks.length}）`,
+            },
+            width: "fill",
+          },
+          elements: [
+            {
+              tag: "div",
+              text: {
+                tag: "plain_text",
+                content: chunk,
+              },
+            },
+          ],
+        },
+      ],
+    },
+  }));
 }
 
 export function createIdempotencyKey(notification, partIndex = 0) {
@@ -457,10 +544,7 @@ export async function runCodexFeishuNotification({
     1,
     3,
   );
-  const messages = buildCompletionMessages(
-    notification,
-    messageChunkCharacters,
-  );
+  const cards = buildCompletionCards(notification, messageChunkCharacters);
   const commandEnv = {
     ...process.env,
     ...env,
@@ -470,7 +554,7 @@ export async function runCodexFeishuNotification({
 
   const messageIds = [];
   const sentMessages = [];
-  for (const [partIndex, message] of messages.entries()) {
+  for (const [partIndex, card] of cards.entries()) {
     const args = [
       "im",
       "+messages-send",
@@ -480,8 +564,10 @@ export async function runCodexFeishuNotification({
       "bot",
       destination.flag,
       destination.id,
-      "--text",
-      message,
+      "--msg-type",
+      "interactive",
+      "--content",
+      JSON.stringify(card),
       "--idempotency-key",
       createIdempotencyKey(notification, partIndex),
     ];
