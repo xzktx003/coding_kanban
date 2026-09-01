@@ -72,6 +72,8 @@ export interface CodexTurnCompletion {
   completionId: string;
   content: string;
   completedAt: string;
+  shouldNotify?: boolean;
+  pendingContinuationSource?: boolean;
 }
 
 const MESSAGE_SUMMARY_MAX_CHARS = 180;
@@ -168,14 +170,90 @@ function findLatestCompletionInTail(
     text = text.slice(firstCompleteLine + 1);
   }
 
-  const lines = text.split("\n");
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const completion = parseTurnCompletion(parseRecord(lines[index] ?? ""));
+  const records = text.split("\n").map(parseRecord);
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const completion = parseTurnCompletion(records[index] ?? null);
     if (completion) {
-      return completion;
+      return classifyCompletionContinuation(records, index, completion);
     }
   }
   return null;
+}
+
+function recordPayloadType(record: JsonRecord | null): string {
+  return stringValue(record?.payload?.type);
+}
+
+function isUserMessageForTurn(
+  record: JsonRecord | null,
+  turnId: string,
+): { goalContinuation: boolean } | null {
+  if (
+    record?.type !== "response_item" ||
+    !record.payload ||
+    recordPayloadType(record) !== "message" ||
+    stringValue(record.payload.role) !== "user"
+  ) {
+    return null;
+  }
+  const metadata = record.payload.internal_chat_message_metadata_passthrough;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+  const metadataRecord = metadata as Record<string, unknown>;
+  if (stringValue(metadataRecord.turn_id) !== turnId) {
+    return null;
+  }
+  const contentItemKinds = Array.isArray(metadataRecord.content_item_kinds)
+    ? metadataRecord.content_item_kinds
+    : [];
+  return {
+    goalContinuation: contentItemKinds.includes("goal.internal_context"),
+  };
+}
+
+function classifyCompletionContinuation(
+  records: Array<JsonRecord | null>,
+  completionIndex: number,
+  completion: CodexTurnCompletion,
+): CodexTurnCompletion | null {
+  let followingTurnId = "";
+  for (let index = completionIndex + 1; index < records.length; index += 1) {
+    const record = records[index] ?? null;
+    if (
+      record?.type === "event_msg" &&
+      recordPayloadType(record) === "task_started"
+    ) {
+      followingTurnId = stringValue(record.payload?.turn_id);
+      break;
+    }
+  }
+  if (!followingTurnId) {
+    return completion;
+  }
+
+  for (let index = completionIndex + 1; index < records.length; index += 1) {
+    const userMessage = isUserMessageForTurn(
+      records[index] ?? null,
+      followingTurnId,
+    );
+    if (!userMessage) {
+      continue;
+    }
+    return userMessage.goalContinuation
+      ? { ...completion, shouldNotify: false }
+      : completion;
+  }
+
+  // Codex records task_started slightly before the user-message metadata that
+  // distinguishes a human prompt from Goal's automatic continuation. Keep the
+  // completion visible as pending so callers suppress fallback delivery without
+  // consuming its id before that source record arrives.
+  return {
+    ...completion,
+    shouldNotify: false,
+    pendingContinuationSource: true,
+  };
 }
 
 function readLatestCompletionFromFile(

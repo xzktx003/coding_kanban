@@ -7,6 +7,7 @@ import type {
 
 import {
   FeishuNotificationNotConfiguredError,
+  FeishuReplyNotConfiguredError,
   type FeishuNotificationSettingsServiceLike,
 } from "../services/feishu-notification-settings-service.js";
 
@@ -29,18 +30,22 @@ export async function registerFeishuNotificationSettingsRoutes(
         body: {
           type: "object",
           additionalProperties: false,
-          required: ["enabled"],
+          minProperties: 1,
           properties: {
             enabled: { type: "boolean" },
+            replyEnabled: { type: "boolean" },
           },
         },
       },
     },
     async (request, reply) => {
       try {
-        return service.update(request.body.enabled);
+        return service.update(request.body);
       } catch (error) {
-        if (error instanceof FeishuNotificationNotConfiguredError) {
+        if (
+          error instanceof FeishuNotificationNotConfiguredError ||
+          error instanceof FeishuReplyNotConfiguredError
+        ) {
           return reply.code(409).send({ error: error.message });
         }
         throw error;

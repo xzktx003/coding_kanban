@@ -10,6 +10,7 @@ import {
   AgentCompletionFeishuNotifier,
   ScriptFeishuCompletionSender,
   type FeishuCompletionEvent,
+  type FeishuCompletionObservation,
 } from "./agent-completion-feishu-notifier.js";
 
 function makeSession(
@@ -243,6 +244,175 @@ test("notifies every structured Codex turn even when the terminal never becomes 
   }
 });
 
+test("suppresses Goal continuation completions until the Goal reaches its final turn", async () => {
+  const source = new SnapshotSource({
+    items: [
+      {
+        ...makeSession("running"),
+        lastOutputAt: "2026-09-01T10:00:00.000Z",
+      },
+    ],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-09-01T10:00:00.000Z",
+  });
+  let completion = {
+    completionId: "turn-existing",
+    content: "启动前的回答",
+    completedAt: "2026-09-01T09:59:00.000Z",
+    shouldNotify: true,
+  };
+  const sent: FeishuCompletionEvent[] = [];
+  const stop = new AgentCompletionFeishuNotifier({
+    source,
+    settings: {
+      get: () => ({
+        configured: true,
+        destinationType: "user",
+        enabled: true,
+      }),
+    },
+    contentResolver: {
+      resolve: async () => completion.content,
+      inspectLatestCompletion: async () => completion,
+    },
+    structuredCompletionProbeDelayMs: 0,
+    structuredCompletionProbeIntervalMs: 0,
+    sender: {
+      send: async (event) => {
+        sent.push(event);
+      },
+    },
+  }).start();
+
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    completion = {
+      completionId: "turn-goal-intermediate",
+      content: "Goal 阶段结果",
+      completedAt: "2026-09-01T10:00:05.000Z",
+      shouldNotify: false,
+    };
+    source.emitSession({
+      ...makeSession("running"),
+      lastOutputAt: "2026-09-01T10:00:05.000Z",
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    source.emit("idle");
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    assert.equal(sent.length, 0);
+
+    completion = {
+      completionId: "turn-goal-final",
+      content: "Goal 最终结果",
+      completedAt: "2026-09-01T10:00:10.000Z",
+      shouldNotify: true,
+    };
+    source.emitSession({
+      ...makeSession("running"),
+      lastOutputAt: "2026-09-01T10:00:10.000Z",
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+    assert.deepEqual(
+      sent.map((event) => ({
+        completionId: event.completionId,
+        summary: event.summary,
+      })),
+      [{ completionId: "turn-goal-final", summary: "Goal 最终结果" }],
+    );
+  } finally {
+    stop();
+  }
+});
+
+test("does not fall back to a card summary while the next turn source is pending", async () => {
+  const source = new SnapshotSource({
+    items: [
+      {
+        ...makeSession("running"),
+        lastOutputAt: "2026-09-01T10:00:00.000Z",
+      },
+    ],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-09-01T10:00:00.000Z",
+  });
+  let completion: FeishuCompletionObservation = {
+    completionId: "turn-existing",
+    content: "启动前的回答",
+    completedAt: "2026-09-01T09:59:00.000Z",
+  };
+  const sent: FeishuCompletionEvent[] = [];
+  const stop = new AgentCompletionFeishuNotifier({
+    source,
+    settings: {
+      get: () => ({
+        configured: true,
+        destinationType: "user",
+        enabled: true,
+      }),
+    },
+    contentResolver: {
+      resolve: async () => "不应发送的卡片降级摘要",
+      inspectLatestCompletion: async () => completion,
+    },
+    structuredCompletionProbeDelayMs: 0,
+    structuredCompletionProbeIntervalMs: 0,
+    sender: {
+      send: async (event) => {
+        sent.push(event);
+      },
+    },
+  }).start();
+
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    completion = {
+      completionId: "turn-one",
+      content: "来源尚未落盘的回答",
+      completedAt: "2026-09-01T10:00:05.000Z",
+      shouldNotify: false,
+      pendingContinuationSource: true,
+    };
+    source.emitSession({
+      ...makeSession("running"),
+      lastOutputAt: "2026-09-01T10:00:05.000Z",
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    source.emit("idle");
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    assert.equal(sent.length, 0);
+
+    completion = {
+      completionId: "turn-one",
+      content: "人工追问前的真实完成回答",
+      completedAt: "2026-09-01T10:00:05.000Z",
+      shouldNotify: true,
+    };
+    source.emitSession({
+      ...makeSession("running"),
+      lastOutputAt: "2026-09-01T10:00:06.000Z",
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+    assert.deepEqual(
+      sent.map((event) => ({
+        completionId: event.completionId,
+        summary: event.summary,
+      })),
+      [
+        {
+          completionId: "turn-one",
+          summary: "人工追问前的真实完成回答",
+        },
+      ],
+    );
+  } finally {
+    stop();
+  }
+});
+
 test("does not notify for an idle session present in the initial snapshot", async () => {
   const source = new SnapshotSource({
     items: [makeSession("idle")],
@@ -364,10 +534,16 @@ test("script sender uses a fixed executable and Kanban delivery mode without a s
     fallbackWorkingDirectory: "/workspace/coding_kanban",
     runCommand: async (binary, args, options) => {
       calls.push({ binary, args, options });
+      return {
+        stdout: JSON.stringify({
+          status: "sent",
+          messages: [{ messageId: "om_notice", chatId: "oc_private" }],
+        }),
+      };
     },
   });
 
-  await sender.send({
+  const delivery = await sender.send({
     sessionId: "session-1",
     displayName: "现有任务",
     agentKind: "codex",
@@ -391,6 +567,9 @@ test("script sender uses a fixed executable and Kanban delivery mode without a s
     "last-assistant-message": "已经完成",
   });
   assert.equal(calls[0]?.options.timeout, 300_000);
+  assert.deepEqual(delivery, {
+    messages: [{ messageId: "om_notice", chatId: "oc_private" }],
+  });
 });
 
 test("script sender hides notification content when the child process fails", async () => {

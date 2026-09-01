@@ -20,10 +20,21 @@ export interface FeishuCompletionObservation {
   completionId: string;
   content: string;
   completedAt: string;
+  shouldNotify?: boolean;
+  pendingContinuationSource?: boolean;
+}
+
+export interface FeishuCompletionDeliveryMessage {
+  messageId: string;
+  chatId: string;
+}
+
+export interface FeishuCompletionDelivery {
+  messages: FeishuCompletionDeliveryMessage[];
 }
 
 export interface FeishuCompletionSenderLike {
-  send(event: FeishuCompletionEvent): Promise<void>;
+  send(event: FeishuCompletionEvent): Promise<FeishuCompletionDelivery | void>;
 }
 
 export interface FeishuCompletionContentResolverLike {
@@ -40,7 +51,14 @@ interface SnapshotSourceLike {
 }
 
 interface FeishuNotificationSettingsReaderLike {
-  get(): FeishuNotificationSettingsResponse;
+  get(): Pick<FeishuNotificationSettingsResponse, "configured" | "enabled">;
+}
+
+interface FeishuCompletionDeliveryRecorderLike {
+  record(
+    event: FeishuCompletionEvent,
+    delivery: FeishuCompletionDelivery,
+  ): void;
 }
 
 interface AgentCompletionFeishuNotifierOptions {
@@ -48,6 +66,7 @@ interface AgentCompletionFeishuNotifierOptions {
   restoredSnapshot?: ListAgentSessionsResponse;
   settings: FeishuNotificationSettingsReaderLike;
   sender: FeishuCompletionSenderLike;
+  deliveryRecorder?: FeishuCompletionDeliveryRecorderLike;
   contentResolver?: FeishuCompletionContentResolverLike;
   structuredCompletionProbeDelayMs?: number;
   structuredCompletionProbeIntervalMs?: number;
@@ -114,6 +133,7 @@ export class AgentCompletionFeishuNotifier {
   readonly #source: SnapshotSourceLike;
   readonly #settings: FeishuNotificationSettingsReaderLike;
   readonly #sender: FeishuCompletionSenderLike;
+  readonly #deliveryRecorder?: FeishuCompletionDeliveryRecorderLike;
   readonly #contentResolver?: FeishuCompletionContentResolverLike;
   readonly #structuredCompletionProbeDelayMs: number;
   readonly #structuredCompletionProbeIntervalMs: number;
@@ -136,6 +156,7 @@ export class AgentCompletionFeishuNotifier {
     this.#source = options.source;
     this.#settings = options.settings;
     this.#sender = options.sender;
+    this.#deliveryRecorder = options.deliveryRecorder;
     this.#contentResolver = options.contentResolver;
     this.#structuredCompletionProbeDelayMs = Math.max(
       0,
@@ -362,6 +383,10 @@ export class AgentCompletionFeishuNotifier {
       return;
     }
 
+    if (observation?.pendingContinuationSource) {
+      return;
+    }
+
     const sessionId = probe.event.sessionId;
     const hadBaseline = this.#observedCompletionIds.has(sessionId);
     const previousCompletionId = this.#observedCompletionIds.get(sessionId);
@@ -374,6 +399,10 @@ export class AgentCompletionFeishuNotifier {
     }
 
     if (!hadBaseline && probe.baselineOnly) {
+      return;
+    }
+
+    if (observation.shouldNotify === false) {
       return;
     }
 
@@ -395,7 +424,10 @@ export class AgentCompletionFeishuNotifier {
       return;
     }
 
-    let settings: FeishuNotificationSettingsResponse;
+    let settings: Pick<
+      FeishuNotificationSettingsResponse,
+      "configured" | "enabled"
+    >;
     try {
       settings = this.#settings.get();
     } catch (error) {
@@ -415,7 +447,8 @@ export class AgentCompletionFeishuNotifier {
     };
     this.#completionDeliveryInFlight.add(deliveryKey);
     try {
-      await this.#sender.send(deliveryEvent);
+      const delivery = await this.#sender.send(deliveryEvent);
+      this.#recordDelivery(deliveryEvent, delivery);
       this.#deliveredCompletionIds.set(
         event.sessionId,
         observation.completionId,
@@ -433,10 +466,16 @@ export class AgentCompletionFeishuNotifier {
         const observation =
           await this.#contentResolver.inspectLatestCompletion(event);
         if (observation) {
+          if (observation.pendingContinuationSource) {
+            return;
+          }
           this.#observedCompletionIds.set(
             event.sessionId,
             observation.completionId,
           );
+          if (observation.shouldNotify === false) {
+            return;
+          }
           await this.#deliverObservation(event, observation);
           return;
         }
@@ -464,9 +503,24 @@ export class AgentCompletionFeishuNotifier {
       ? { ...event, agentKind: "codex", summary: resolvedContent }
       : event;
     try {
-      await this.#sender.send(deliveryEvent);
+      const delivery = await this.#sender.send(deliveryEvent);
+      this.#recordDelivery(deliveryEvent, delivery);
     } catch (error) {
       this.#logError(error, deliveryEvent);
+    }
+  }
+
+  #recordDelivery(
+    event: FeishuCompletionEvent,
+    delivery: FeishuCompletionDelivery | void,
+  ): void {
+    if (!delivery || delivery.messages.length === 0) {
+      return;
+    }
+    try {
+      this.#deliveryRecorder?.record(event, delivery);
+    } catch (error) {
+      this.#logError(error, event);
     }
   }
 }
@@ -482,20 +536,20 @@ type ScriptCommandRunner = (
   binary: string,
   args: string[],
   options: ScriptCommandOptions,
-) => Promise<void>;
+) => Promise<{ stdout: string }>;
 
 function runScriptCommand(
   binary: string,
   args: string[],
   options: ScriptCommandOptions,
-): Promise<void> {
+): Promise<{ stdout: string }> {
   return new Promise((resolve, reject) => {
-    execFile(binary, args, options, (error) => {
+    execFile(binary, args, options, (error, stdout) => {
       if (error) {
         reject(error);
         return;
       }
-      resolve();
+      resolve({ stdout });
     });
   });
 }
@@ -518,7 +572,7 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
     this.#runCommand = options.runCommand ?? runScriptCommand;
   }
 
-  async send(event: FeishuCompletionEvent): Promise<void> {
+  async send(event: FeishuCompletionEvent): Promise<FeishuCompletionDelivery> {
     const notification = {
       type: "agent-turn-complete",
       "thread-id": `kanban-${event.sessionId}`,
@@ -530,7 +584,7 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
     };
 
     try {
-      await this.#runCommand(
+      const { stdout } = await this.#runCommand(
         this.#nodeBinary,
         [this.#scriptPath, "--kanban", JSON.stringify(notification)],
         {
@@ -540,6 +594,29 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
           windowsHide: true,
         },
       );
+      const parsed = JSON.parse(stdout) as {
+        status?: unknown;
+        messages?: unknown;
+      };
+      if (parsed.status !== "sent" || !Array.isArray(parsed.messages)) {
+        throw new Error("invalid delivery result");
+      }
+      const messages = parsed.messages.flatMap((message) => {
+        if (!message || typeof message !== "object") {
+          return [];
+        }
+        const candidate = message as Record<string, unknown>;
+        return typeof candidate.messageId === "string" &&
+          typeof candidate.chatId === "string"
+          ? [
+              {
+                messageId: candidate.messageId,
+                chatId: candidate.chatId,
+              },
+            ]
+          : [];
+      });
+      return { messages };
     } catch {
       // execFile errors may repeat argv, which contains the task summary and cwd.
       throw new Error("Feishu notification delivery failed");

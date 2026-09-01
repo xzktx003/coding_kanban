@@ -77,7 +77,7 @@ test("allows the Kanban backend to notify for sessions outside this repository",
     },
   });
 
-  assert.deepEqual(result, { status: "sent" });
+  assert.deepEqual(result, { status: "sent", messages: [] });
   assert.equal(calls.length, 1);
   assert.match(calls[0][1][9], /another-project/);
 });
@@ -225,7 +225,7 @@ test("sends every complete output chunk with a distinct idempotency key", async 
     runCommand: async (...args) => {
       calls.push(args);
       return {
-        stdout: `{"ok":true,"data":{"message_id":"om_${calls.length}"}}`,
+        stdout: `{"ok":true,"data":{"message_id":"om_${calls.length}","chat_id":"oc_private"}}`,
         stderr: "",
       };
     },
@@ -234,6 +234,11 @@ test("sends every complete output chunk with a distinct idempotency key", async 
   assert.equal(calls.length, 3);
   assert.deepEqual(result, {
     status: "sent",
+    messages: [
+      { messageId: "om_1", chatId: "oc_private" },
+      { messageId: "om_2", chatId: "oc_private" },
+      { messageId: "om_3", chatId: "oc_private" },
+    ],
     messageIds: ["om_1", "om_2", "om_3"],
   });
   assert.equal(new Set(calls.map(([, args]) => args[11])).size, 3);
@@ -265,7 +270,8 @@ test("sends through lark-cli with fixed bot identity and a group target", async 
     runCommand: async (...args) => {
       calls.push(args);
       return {
-        stdout: '{"ok":true,"identity":"bot","data":{"message_id":"om_123"}}',
+        stdout:
+          '{"ok":true,"identity":"bot","data":{"message_id":"om_123","chat_id":"oc_group123"}}',
         stderr: "",
       };
     },
@@ -273,6 +279,7 @@ test("sends through lark-cli with fixed bot identity and a group target", async 
 
   assert.deepEqual(result, {
     status: "sent",
+    messages: [{ messageId: "om_123", chatId: "oc_group123" }],
     messageId: "om_123",
   });
   assert.equal(calls.length, 1);

@@ -15,7 +15,8 @@ const DEFAULT_MAX_ATTEMPTS = 2;
 const MAX_COMMAND_OUTPUT_BYTES = 64 * 1024;
 const RETRY_DELAY_MS = 250;
 const LEGACY_NOTIFICATION_SETTINGS_VERSION = 1;
-const NOTIFICATION_SETTINGS_VERSION = 2;
+const KANBAN_NOTIFICATION_SETTINGS_VERSION = 2;
+const NOTIFICATION_SETTINGS_VERSION = 3;
 const CHAT_ID_PATTERN = /^oc_[A-Za-z0-9_-]+$/;
 const USER_ID_PATTERN = /^ou_[A-Za-z0-9_-]+$/;
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
@@ -104,7 +105,8 @@ function readFeishuNotificationSettings(statePath = notificationSettingsPath) {
       return { enabled: parsed.enabled, deliveryMode: "hook" };
     }
     if (
-      parsed.version === NOTIFICATION_SETTINGS_VERSION &&
+      (parsed.version === KANBAN_NOTIFICATION_SETTINGS_VERSION ||
+        parsed.version === NOTIFICATION_SETTINGS_VERSION) &&
       parsed.deliveryMode === "kanban"
     ) {
       return { enabled: parsed.enabled, deliveryMode: "kanban" };
@@ -467,6 +469,7 @@ export async function runCodexFeishuNotification({
   };
 
   const messageIds = [];
+  const sentMessages = [];
   for (const [partIndex, message] of messages.entries()) {
     const args = [
       "im",
@@ -497,6 +500,12 @@ export async function runCodexFeishuNotification({
         if (typeof messageId === "string") {
           messageIds.push(messageId);
         }
+        const chatId = isRecord(response.data)
+          ? response.data.chat_id
+          : undefined;
+        if (typeof messageId === "string" && typeof chatId === "string") {
+          sentMessages.push({ messageId, chatId });
+        }
         sent = true;
         break;
       } catch (error) {
@@ -514,6 +523,7 @@ export async function runCodexFeishuNotification({
 
   return {
     status: "sent",
+    messages: sentMessages,
     ...(messageIds.length === 1 ? { messageId: messageIds[0] } : {}),
     ...(messageIds.length > 1 ? { messageIds } : {}),
   };
@@ -547,7 +557,9 @@ async function main() {
         : readCodexHookNotificationEnabled,
       enforceRepositoryScope: !kanbanDelivery,
     });
-    if (result.status === "sent") {
+    if (kanbanDelivery) {
+      process.stdout.write(`${JSON.stringify(result)}\n`);
+    } else if (result.status === "sent") {
       process.stdout.write("Codex completion notification sent to Feishu.\n");
     }
   } catch (error) {

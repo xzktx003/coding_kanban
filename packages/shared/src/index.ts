@@ -172,10 +172,13 @@ export interface FeishuNotificationSettingsResponse {
   enabled: boolean;
   configured: boolean;
   destinationType: FeishuNotificationDestinationType | null;
+  replyEnabled: boolean;
+  replyConfigured: boolean;
 }
 
 export interface UpdateFeishuNotificationSettingsInput {
-  enabled: boolean;
+  enabled?: boolean;
+  replyEnabled?: boolean;
 }
 
 export interface RestoreManagedSessionFailure {

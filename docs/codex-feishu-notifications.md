@@ -1,4 +1,4 @@
-# Kanban 任务完成飞书通知
+# Kanban 任务完成飞书通知与回复续跑
 
 ## 目标与边界
 
@@ -6,11 +6,17 @@
 
 ```text
 AgentSessionRegistry
-  -> 已知会话 running → idle / exited / detached
+  -> Codex 最终 task_complete，或其他会话 running → idle / exited / detached
   -> AgentCompletionFeishuNotifier
   -> scripts/codex-feishu-notify.mjs --kanban
   -> lark-cli im +messages-send --as bot
-  -> 飞书群聊或用户
+  -> 飞书群聊或用户（记录发出消息 message_id）
+
+私聊用户回复某条通知
+  -> lark-cli event consume im.message.receive_v1 --as bot
+  -> message_id 精确反查看板 sessionId
+  -> AgentSessionInputService
+  -> 对应的在线、可控 Codex 终端
 ```
 
 后端启动时把重启前持久化的会话状态作为基线：原本已经空闲或退出的 managed 会话在恢复期间即使短暂出现 `running`，也不会被误当成新任务并补发；重启前确实仍在运行的会话保持已武装，恢复后进入完成态时会正常发送。关闭按钮期间不发送，重新开启后只处理新的完成边沿。
@@ -32,6 +38,12 @@ AgentSessionRegistry
 3. 飞书应用已启用机器人能力和 `im:message:send_as_bot` 权限。
 4. 群聊通知时，机器人已经加入目标群；私聊通知时，机器人与目标用户已有可发送关系。
 5. Coding Kanban 后端保持运行并能观察目标会话。
+
+如果还要使用“飞书回复继续执行”，必须使用私聊目标，并额外完成：
+
+1. 为机器人应用开通 `im:message.p2p_msg:readonly` 权限。
+2. 在飞书开放平台为应用订阅 `im.message.receive_v1` 事件，并使用长连接接收事件。
+3. `.env` 只配置 `FEISHU_NOTIFY_USER_ID=ou_xxx`；群聊目标不能开启回复控制。
 
 凭证由 `lark-cli` 自己管理。不要把 App Secret、access token 或 webhook secret 写入仓库 `.env.example`、Codex 配置或脚本参数。
 
@@ -67,15 +79,17 @@ FEISHU_NOTIFY_MAX_ATTEMPTS=2
 设置 → 飞书通知 → 飞书通知：开 / 关
 ```
 
-前端通过 `GET /api/settings/feishu-notifications` 读取状态，并通过 `PUT /api/settings/feishu-notifications` 只提交布尔值 `enabled`。后端响应只包含：
+前端通过 `GET /api/settings/feishu-notifications` 读取状态，并通过 `PUT /api/settings/feishu-notifications` 提交 `enabled` 或 `replyEnabled` 布尔值。后端响应只包含：
 
 - `enabled`：共享开关是否开启。
 - `configured`：本地环境中是否恰好存在一个合法目标。
 - `destinationType`：`user`、`chat` 或 `null`。
+- `replyEnabled`：是否允许受信任私聊用户回复通知并继续对应 Codex。
+- `replyConfigured`：当前配置是否满足回复控制要求；只有合法私聊用户目标为 `true`。
 
 接口不会返回接收者 ID、App Secret、Token 或 `lark-cli` 登录态。接收者缺失、格式无效或同时配置群聊与用户时，界面会禁用开关；修改 `.env` 后需要重启 Coding Kanban 后端重新读取配置。
 
-开关写入被 Git 忽略的 `.dev-runtime/feishu-notification-settings.json`，文件权限限制为当前用户，只包含版本、`kanban` 发送模式、布尔值和更新时间。后端启动会保留旧开关值并把旧版 hook 模式迁移成 Kanban 后端模式。
+两个开关互相独立。“任务完成通知”可以单独开启；“飞书回复继续执行”默认关闭，且只在私聊目标配置正确时允许开启。开关写入被 Git 忽略的 `.dev-runtime/feishu-notification-settings.json`，文件权限限制为当前用户，只包含版本、`kanban` 发送模式、布尔值和更新时间。后端启动会保留旧通知开关值、把旧版 hook 模式迁移成 Kanban 后端模式，并把新增的回复开关初始化为关闭。
 
 ## 与 Codex 原生 notify 的关系
 
@@ -85,11 +99,29 @@ Codex 官方的 `notify` 配置会在支持的事件（当前为 `agent-turn-com
 
 ## 通知正文
 
-Codex 会话输出变化后，后端会先从当前看板会话定位真实 Codex session，再防抖读取结构化 JSONL 尾部的原生 `task_complete` 事件。初次看到的旧事件只建立基线；新的 `turn_id` 各自触发一次通知，并直接使用该事件的完整 `last_agent_message`。因此 Codex 回复后即使在终端 15 秒空闲阈值内继续提问，两个 turn 也不会被合并或漏报；随后卡片进入 idle 时会按同一 `turn_id` 去重。即使卡片暂时标记为 `shell`，只要它是本机受管 tmux 且当前 pane 中运行的是 Codex，也会使用实际 Codex 对话正文。本机 session 文件路径和短期 pane 定位结果会缓存，远端读取使用有界尾部窗口；读取不到结构化完成记录、目标是其他明确 Agent，或远端缺少读取通道时，才回退到卡片摘要或终端预览。
+Codex 会话输出变化后，后端会先从当前看板会话定位真实 Codex session，再防抖读取结构化 JSONL 尾部的原生 `task_complete` 事件。初次看到的旧事件只建立基线；新的最终 `turn_id` 各自触发一次通知，并直接使用该事件的完整 `last_agent_message`。Goal 模式会在一次 `task_complete` 后立即自动创建带 `goal.internal_context` 的下一轮，此类完成只表示内部阶段结束，通知器会等待续跑而不发送；直到没有 Goal 内部续轮的最终 `task_complete` 才通知。若已经出现下一轮开始事件、但下一轮来源元数据尚未写入，探测会先延迟判断，避免在 JSONL 写入竞态窗口误发。
+
+因此 Codex 回复后即使在终端 15 秒空闲阈值内继续人工提问，两个独立 turn 也不会被合并或漏报；人工发起的新一轮不会把上一轮误判为 Goal 内部续跑。随后卡片进入 idle 时会按同一 `turn_id` 去重。即使卡片暂时标记为 `shell`，只要它是本机受管 tmux 且当前 pane 中运行的是 Codex，也会使用实际 Codex 对话正文。本机 session 文件路径和短期 pane 定位结果会缓存，远端读取使用有界尾部窗口；读取不到结构化完成记录、目标是其他明确 Agent，或远端缺少读取通道时，才回退到卡片摘要或终端预览。
 
 发送使用 `lark-cli im +messages-send --text`，保留正文换行、缩进和 Markdown 字符的字面内容；ANSI 转义、不可见控制字符和完整工作目录会被清理。正文超过 `FEISHU_NOTIFY_MESSAGE_CHUNK_CHARS` 时按 Unicode 字符边界拆成多条“最后输出（序号/总数）”消息，每片使用独立且稳定的幂等键，因此不会为了满足单条消息大小而截断最后输出。
 
 开启此功能意味着最后一条 Codex assistant 输出会被发送给 `.env` 中配置的飞书接收者。该正文可能包含代码、日志或任务上下文，配置私聊/群聊目标前应确认接收范围；用户提示、私钥内容、Token 和完整工作目录不会由通知器主动附加。
+
+## 从飞书回复继续执行
+
+开启“飞书回复继续执行”后，机器人通过 `lark-cli` 长连接监听私聊消息。用户必须使用飞书的“回复”动作回复某一条 Coding Kanban 完成通知；普通新消息、群聊消息、非文本消息、其他用户消息，以及回复无法映射的历史消息都会被忽略。若一次完整输出被拆成多条，每一片都绑定到同一个看板会话，回复任意一片均可继续该会话。
+
+后端仅保存发送成功后的 `message_id`、`chat_id`、看板 `sessionId`、完成标识和时间，不保存通知正文或用户回复。绑定和已处理事件 ID 原子写入被 Git 忽略的 `.dev-runtime/feishu-reply-bindings.json`，文件权限限制为当前用户；绑定默认保留 30 天并限制总量。相同飞书事件重复投递只会处理一次。
+
+回复写入前会再次校验：
+
+- 发送者必须与本地 `FEISHU_NOTIFY_USER_ID` 完全一致，且消息来自对应私聊。
+- 被回复消息必须由本次 Kanban 实例成功发送并仍有有效绑定。
+- 目标会话必须仍在线、可输入且实际是 Codex；已退出、已脱离、只读观察或不可控会话拒绝写入。
+- 文本最多 8000 个 Unicode 字符；NUL、ESC 和其他危险控制字符会被拒绝。
+- 单行回复按一条 prompt 加 Enter 发送；多行回复使用 bracketed paste 后再发送 Enter，避免换行被终端逐行执行。
+
+接收链路不开放公网 webhook，不修改 Codex 或 Hermes 源码，也不把个人 open_id 返回前端。关闭回复开关后，后端会停止事件消费进程；重新开启时自动恢复监听。
 
 ## 验证
 
@@ -110,7 +142,11 @@ lark-cli im +messages-send \
 pnpm --filter server exec tsx --test \
   src/services/agent-completion-feishu-notifier.test.ts \
   src/services/codex-completion-content-resolver.test.ts \
-  src/services/feishu-notification-settings-service.test.ts
+  src/services/codex-transcript-service.test.ts \
+  src/services/feishu-notification-settings-service.test.ts \
+  src/services/feishu-reply-binding-store.test.ts \
+  src/services/feishu-reply-command-service.test.ts \
+  src/services/feishu-reply-event-listener.test.ts
 node --test scripts/codex-feishu-notify.test.mjs
 ```
 
@@ -123,5 +159,7 @@ node --test scripts/codex-feishu-notify.test.mjs
 - 网络或进程类失败按 250ms 指数退避重试，认证、配置、权限、校验错误和高风险确认门禁不会盲目重试。
 - 后端使用固定 Node 可执行文件和参数数组启动桥接脚本；桥接脚本以固定 `lark-cli` 参数数组发送，整个链路不经过 shell。
 - 看板开关关闭时不会创建发送子进程；原生 hook 在 Kanban 接管模式下也会在启动 `lark-cli` 前短路。
+- Goal 模式内部续跑不会创建发送子进程；下一轮来源尚不完整时先延迟判断，不使用半写入记录猜测任务已经结束。
+- 回复监听仅在私聊目标有效且独立回复开关开启时启动；事件字段采用白名单校验，终端输入复用现有统一输入服务。
 - 只把 `lark-cli` JSON 信封中的 `ok: true` 视为成功。
 - 发送失败写入 Kanban 后端日志，不会改变任务状态或伪造成功；当前没有持久化 outbox，机器断电或后端被强制终止时不保证补发。

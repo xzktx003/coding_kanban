@@ -203,6 +203,7 @@ interface TopBarProps {
   onTerminalFontSizeChange: (fontSize: number) => void;
   onToggleAgentCompletionNotifications: () => void;
   onToggleFeishuNotifications: () => void;
+  onToggleFeishuReplies: () => void;
   onOpenNewSession: (host: NewSessionHost) => void;
   onScanTmux: (host: SelectedHost) => void;
   onScanApps: (host: SelectedHost) => void;
@@ -235,6 +236,7 @@ export function TopBar({
   onTerminalFontSizeChange,
   onToggleAgentCompletionNotifications,
   onToggleFeishuNotifications,
+  onToggleFeishuReplies,
   onOpenNewSession,
   onScanTmux,
   onScanApps,
@@ -827,8 +829,44 @@ export function TopBar({
                               feishuDestinationLabel}
                         </small>
                       </button>
+                      <button
+                        aria-checked={Boolean(
+                          feishuNotificationSettings?.replyEnabled,
+                        )}
+                        className={`top-bar-menu-item${feishuNotificationSettings?.replyEnabled ? " top-bar-menu-item--active" : ""}`}
+                        data-testid="feishu-reply-toggle"
+                        disabled={
+                          !feishuNotificationSettings?.replyConfigured ||
+                          feishuNotificationSettingsUpdating
+                        }
+                        onClick={onToggleFeishuReplies}
+                        role="switch"
+                        title={
+                          feishuNotificationSettings?.replyConfigured
+                            ? "允许配置的私聊用户回复完成通知并继续对应 Codex 会话"
+                            : "飞书回复控制只支持本地 .env 配置的私聊用户"
+                        }
+                        type="button"
+                      >
+                        <span>
+                          {feishuNotificationSettings === null
+                            ? "飞书回复控制：读取中…"
+                            : feishuNotificationSettings.replyEnabled
+                              ? "飞书回复控制：开"
+                              : "飞书回复控制：关"}
+                        </span>
+                        <small>
+                          {feishuNotificationSettingsUpdating
+                            ? "正在保存…"
+                            : feishuNotificationSettingsError ||
+                              (feishuNotificationSettings?.replyConfigured
+                                ? "仅接受对通知消息的本人私聊回复"
+                                : "需要配置私聊接收者")}
+                        </small>
+                      </button>
                       <p className="top-bar-settings-note">
-                        开启后，已经运行及之后启动的看板任务都会在完成时提醒；接收者和凭证只保存在本机。
+                        完成通知与回复控制相互独立。回复控制只接受本人对已绑定通知的私聊文字，并发送到仍在线且可控制的
+                        Codex 卡片；接收者和凭证只保存在本机。
                       </p>
                     </>
                   )}

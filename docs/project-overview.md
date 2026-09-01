@@ -48,7 +48,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 顶栏分组展示：左侧是“电脑端 Coding Kanban”、会话数量徽标和“手机端 Coding Kanban”切换入口，中间保留新建会话、扫描、文件、VS Code 等高频入口，右侧提供统一“设置”、全屏和折叠入口。
 - 顶栏右侧常驻“终端字号”滑杆，可在 10px 到 24px 之间拖动调整所有内置 xterm 终端及“完整记录”正文的字号。
 - 手机端页面标题区对应显示“手机端 Coding Kanban”，并提供“电脑端 Coding Kanban”切换入口和 Agent 完成通知开关。
-- `扫描` 菜单收纳扫描 tmux 和扫描会话；`设置` 面板以侧栏分类收纳“工具 / 资源调节 / 飞书通知”。工具包含操作提示和当前浏览器完成通知，资源调节包含终端预览模式、VS Code 省内存/保持状态、释放 VS Code 缓存和资源诊断，飞书通知控制所有已登记看板任务的后端完成提醒。
+- `扫描` 菜单收纳扫描 tmux 和扫描会话；`设置` 面板以侧栏分类收纳“工具 / 资源调节 / 飞书通知”。工具包含操作提示和当前浏览器完成通知，资源调节包含终端预览模式、VS Code 省内存/保持状态、释放 VS Code 缓存和资源诊断，飞书通知分别控制所有已登记看板任务的后端完成提醒与私聊回复续跑。
 - 顶栏可折叠；折叠状态保存在 `localStorage` 的 `agent-console-layout`。
 - 会话分组配置保存在 `localStorage` 的 `coding-kanban-session-groups-v1`，两处桌面看板视图共享，当前不做跨浏览器同步；分组颜色按配置顺序稳定分配，前 12 个使用醒目分类色，更多分组继续生成不同的高对比 HSL 色值；assignment 同时保存稳定会话和安全运行身份别名，以便重启后恢复归属。
 - 设置的“资源调节”分类提供终端预览模式按钮：`轻量预览：开` 为默认省资源模式，`完整预览` 恢复旧版小终端模式。
@@ -59,7 +59,10 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
   - macOS 为 `⌘+E` 快连 tmux，其它平台为 `Ctrl+E`
   - Tab 切换焦点
 - Agent 完成通知使用浏览器 Notification API：用户在桌面设置的“工具”分类或手机标题区开启并授权后，前端基于 `/ws/agent-sessions` 快照检测已知会话从 `running` 进入 `idle` 或 `exited`，并发送“任务已经完成，请及时查看”的系统通知；该轻量能力要求页面保持打开，不包含 Web Push 后台推送。
-- Kanban 后端的 `AgentCompletionFeishuNotifier` 始终订阅 `AgentSessionRegistry`，把初始快照和已有 Codex `task_complete` 作为基线。Codex 卡片输出变化后会防抖探测本机或 SSH JSONL 尾部，由 `CodexCompletionContentResolver` 复用活动 tmux pane 定位，按原生 `turn_id` 逐 turn 发送完整 `last_agent_message`；因此不再依赖终端连续静默 15 秒，也不会把快速连续提问合并漏报。初始旧完成记录不补发，同一 `turn_id` 与随后出现的 idle 边沿共享去重；明确非 Codex 或结构化记录不可用时，仍以 `running → idle/exited/detached` 和卡片摘要降级。桌面设置的“飞书通知”分类通过 `GET/PUT /api/settings/feishu-notifications` 控制仓库本地开关，不要求重启 Agent，也不要求页面保持打开。后端只返回 `enabled/configured/destinationType`，不返回 ID；状态原子保存为权限受限、被 Git 忽略的 `.dev-runtime/feishu-notification-settings.json`。发送器从仓库根目录 `.env` 读取唯一目标，以固定参数、无 shell 的方式调用 `scripts/codex-feishu-notify.mjs --kanban` 和 `lark-cli`，完整输出过长时按序分片，每片使用独立幂等键，并且只接受 `ok: true` 成功信封。状态迁移到 `deliveryMode=kanban` 后，旧用户级 Codex `notify` 即使仍被运行中的 Codex 调用也会静默跳过，避免后端与原生 hook 重复发送。完整配置和安全边界见 [`docs/codex-feishu-notifications.md`](./codex-feishu-notifications.md)。
+- Kanban 后端的 `AgentCompletionFeishuNotifier` 始终订阅 `AgentSessionRegistry`，把初始快照和已有 Codex `task_complete` 作为基线。Codex 卡片输出变化后会防抖探测本机或 SSH JSONL 尾部，由 `CodexCompletionContentResolver` 复用活动 tmux pane 定位，按原生 `turn_id` 发送完整 `last_agent_message`；Goal 模式在 `task_complete` 后自动启动带 `goal.internal_context` 的下一轮时，前一轮只作为内部阶段完成而不发送，来源元数据尚未落盘时也先延迟判断。人工快速连续提问仍按独立 turn 发送，初始旧完成记录不补发，同一 `turn_id` 与随后出现的 idle 边沿共享去重；明确非 Codex 或结构化记录不可用时，仍以 `running → idle/exited/detached` 和卡片摘要降级。
+
+  桌面设置的“飞书通知”分类通过 `GET/PUT /api/settings/feishu-notifications` 控制两个仓库本地开关，不要求重启 Agent，也不要求页面保持打开。后端只返回 `enabled/configured/destinationType/replyEnabled/replyConfigured`，不返回 ID；状态原子保存为权限受限、被 Git 忽略的 `.dev-runtime/feishu-notification-settings.json`。发送器从仓库根目录 `.env` 读取唯一目标，以固定参数、无 shell 的方式调用 `scripts/codex-feishu-notify.mjs --kanban` 和 `lark-cli`，完整输出过长时按序分片，每片使用独立幂等键，并且只接受 `ok: true` 成功信封。发送成功的 `message_id` 会短期绑定到看板 session；私聊回复开关开启后，`FeishuReplyEventListener` 以长连接消费 `im.message.receive_v1`，`FeishuReplyCommandService` 校验配置用户、私聊、回复关系、事件去重和可控 Codex 状态，再由 `AgentSessionInputService` 复用现有输入链路。状态迁移到 `deliveryMode=kanban` 后，旧用户级 Codex `notify` 即使仍被运行中的 Codex 调用也会静默跳过，避免后端与原生 hook 重复发送。完整配置和安全边界见 [`docs/codex-feishu-notifications.md`](./codex-feishu-notifications.md)。
+
 - 额外快捷键：
   - `Ctrl/⌘+E` 打开快速连接 tmux。
   - `Ctrl/⌘+Shift+S` 打开本地 tmux 扫描弹窗。
@@ -294,8 +297,12 @@ memories/        仓库记忆，不是产品运行依赖
 - `GitAutoUpdateService`：按配置周期只 fetch/check 当前 upstream；用户确认后才执行安全 fast-forward，并维护可用更新、冲突和错误状态。
 - `FileSessionStateStore`：校验、投影并原子持久化稳定会话目录。
 - `AgentCompletionFeishuNotifier`：观察所有已登记会话的新完成边沿，并在共享开关开启时异步交给飞书发送器；初始空闲会话和重复快照不会补发。
-- `CodexCompletionContentResolver`：从完成的看板会话定位当前 Codex session，并读取最后一条完整 assistant 输出作为飞书正文；明确的非 Codex Agent 或读取失败返回摘要降级。
+- `CodexCompletionContentResolver`：从完成的看板会话定位当前 Codex session，并读取最后一条完整 assistant 输出作为飞书正文；Goal 内部自动续轮先抑制，明确的非 Codex Agent 或读取失败返回摘要降级。
 - `ScriptFeishuCompletionSender`：以固定 Node 可执行文件和参数数组调用本仓库飞书桥接脚本，不经过 shell。
+- `FeishuReplyBindingStore`：原子持久化发送消息与看板会话的短期绑定和已处理事件 ID，不保存正文或回复文本。
+- `FeishuReplyEventListener`：按独立回复开关启动或停止 `lark-cli` 飞书事件长连接，并对 NDJSON 事件做有界、串行消费和退避重连。
+- `FeishuReplyCommandService`：执行私聊发送者、回复关系、消息类型、文本和会话可控状态的白名单校验。
+- `AgentSessionInputService`：统一 HTTP 终端输入和飞书回复输入的本地/SSH、tmux/PTY 路由。
 - `restoreManagedSessions`：分类并恢复仍存在的受管 tmux，会话缺失时保持显式失败边界。
 - `LocalFsService`：本地文件系统。
 - `SftpService`：远端 SFTP 文件系统。
@@ -353,8 +360,8 @@ memories/        仓库记忆，不是产品运行依赖
 
 - `App.tsx`：全局状态、会话订阅、路由弹窗、聚焦/宫格切换、侧栏工具状态。
 - `AppUpdateBanner.tsx`：远程更新提醒与确认拉取、冲突/错误提示、恢复进度和失败结果。
-- `TopBar.tsx`：分组顶栏、统一设置面板、操作提示、资源调节、飞书开关、主入口和折叠。
-- `feishu-notification-settings-service.ts`：解析脱敏的本地飞书配置状态，原子持久化启用开关并拒绝在目标缺失或冲突时开启。
+- `TopBar.tsx`：分组顶栏、统一设置面板、操作提示、资源调节、飞书通知/回复开关、主入口和折叠。
+- `feishu-notification-settings-service.ts`：解析脱敏的本地飞书配置状态，原子持久化两个独立开关，并拒绝在目标缺失、冲突或非私聊时开启对应能力。
 - `AgentGrid.tsx` / `AgentGridCard.tsx`：宫格和卡片。
 - `AgentFocusView.tsx`：聚焦终端和会话切换。
 - `AgentImageMessageDialog.tsx`：电脑端图片预览、目标确认、说明编辑和失败重试。
@@ -495,7 +502,7 @@ curl http://127.0.0.1:4000/api/health
 - direct 卡片保留元数据并标记为需要手动恢复，原 PTY 不会伪装成仍然存活。
 - terminal scrollback 不写入状态文件，持久历史继续由 tmux 负责。
 
-飞书通知启用状态和 `kanban` 发送模式单独写入 `.dev-runtime/feishu-notification-settings.json`；该文件不包含接收者 ID 或机器人凭证，并与 `.env` 一样保持在 Git 之外。后端启动时保留旧开关值并迁移发送模式，让所有运行中会话由后端统一覆盖。
+飞书通知、回复续跑启用状态和 `kanban` 发送模式单独写入 `.dev-runtime/feishu-notification-settings.json`；该文件不包含接收者 ID 或机器人凭证，并与 `.env` 一样保持在 Git 之外。后端启动时保留旧通知开关值并迁移发送模式，新增回复开关默认关闭。发送成功的飞书 `message_id` 与看板会话绑定、以及已处理事件 ID 写入 `.dev-runtime/feishu-reply-bindings.json`，默认保留 30 天、限制总量且不保存通知正文或用户回复。
 
 ### VS Code Web 持久数据
 

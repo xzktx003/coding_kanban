@@ -159,6 +159,8 @@ test("Feishu notification settings use the sanitized settings endpoint", async (
         configured: true,
         destinationType: "user",
         enabled: init?.method === "PUT" ? false : true,
+        replyConfigured: true,
+        replyEnabled: false,
       });
     },
   });

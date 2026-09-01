@@ -11,12 +11,14 @@ test("Feishu notification settings API returns sanitized state and updates the s
     configured: true,
     destinationType: "user",
     enabled: true,
+    replyConfigured: true,
+    replyEnabled: false,
   };
   const { app } = buildServer({
     feishuNotificationSettingsService: {
       get: () => state,
-      update: (enabled) => {
-        state = { ...state, enabled };
+      update: (input) => {
+        state = { ...state, ...input };
         return state;
       },
     },
@@ -40,7 +42,17 @@ test("Feishu notification settings API returns sanitized state and updates the s
       configured: true,
       destinationType: "user",
       enabled: false,
+      replyConfigured: true,
+      replyEnabled: false,
     });
+
+    const replyUpdated = await app.inject({
+      method: "PUT",
+      url: "/api/settings/feishu-notifications",
+      payload: { replyEnabled: true },
+    });
+    assert.equal(replyUpdated.statusCode, 200);
+    assert.equal(replyUpdated.json().replyEnabled, true);
 
     const invalid = await app.inject({
       method: "PUT",
@@ -60,6 +72,8 @@ test("Feishu notification settings API rejects enabling without a local destinat
         configured: false,
         destinationType: null,
         enabled: false,
+        replyConfigured: false,
+        replyEnabled: false,
       }),
       update: () => {
         throw new FeishuNotificationNotConfiguredError();

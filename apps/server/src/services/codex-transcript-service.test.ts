@@ -183,6 +183,168 @@ test("CodexTranscriptService reads the latest task_complete event as one exact t
   }
 });
 
+test("CodexTranscriptService marks a completion followed by Goal internal continuation as non-final", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-goal-completion-"));
+  const sessionsRoot = join(root, "sessions", "2026", "09", "01");
+  const sessionId = "goal-completion-session";
+  mkdirSync(sessionsRoot, { recursive: true });
+  writeFileSync(
+    join(sessionsRoot, `rollout-${sessionId}.jsonl`),
+    [
+      line({
+        timestamp: "2026-09-01T10:00:00.000Z",
+        type: "session_meta",
+        payload: { id: sessionId, cwd: "/workspace/goal-completion" },
+      }),
+      line({
+        timestamp: "2026-09-01T10:00:05.000Z",
+        type: "event_msg",
+        payload: {
+          type: "task_complete",
+          turn_id: "turn-intermediate",
+          last_agent_message: "Goal 仍在执行中的阶段结果",
+        },
+      }),
+      line({
+        timestamp: "2026-09-01T10:00:05.020Z",
+        type: "event_msg",
+        payload: { type: "task_started", turn_id: "turn-continuation" },
+      }),
+      line({
+        timestamp: "2026-09-01T10:00:05.800Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          internal_chat_message_metadata_passthrough: {
+            turn_id: "turn-continuation",
+            content_item_kinds: ["goal.internal_context"],
+          },
+          content: [{ type: "input_text", text: "internal" }],
+        },
+      }),
+    ].join(""),
+  );
+
+  try {
+    const completion = new CodexTranscriptService({
+      sessionsRoot: join(root, "sessions"),
+    }).readLatestCompletion({ sessionId });
+
+    assert.deepEqual(completion, {
+      completionId: "turn-intermediate",
+      content: "Goal 仍在执行中的阶段结果",
+      completedAt: "2026-09-01T10:00:05.000Z",
+      shouldNotify: false,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CodexTranscriptService marks an ambiguous completion pending until the following turn source is recorded", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-pending-completion-"));
+  const sessionsRoot = join(root, "sessions", "2026", "09", "01");
+  const sessionId = "pending-completion-session";
+  mkdirSync(sessionsRoot, { recursive: true });
+  writeFileSync(
+    join(sessionsRoot, `rollout-${sessionId}.jsonl`),
+    [
+      line({
+        timestamp: "2026-09-01T10:00:00.000Z",
+        type: "session_meta",
+        payload: { id: sessionId, cwd: "/workspace/pending-completion" },
+      }),
+      line({
+        timestamp: "2026-09-01T10:00:05.000Z",
+        type: "event_msg",
+        payload: {
+          type: "task_complete",
+          turn_id: "turn-one",
+          last_agent_message: "完成内容",
+        },
+      }),
+      line({
+        timestamp: "2026-09-01T10:00:05.020Z",
+        type: "event_msg",
+        payload: { type: "task_started", turn_id: "turn-two" },
+      }),
+    ].join(""),
+  );
+
+  try {
+    const completion = new CodexTranscriptService({
+      sessionsRoot: join(root, "sessions"),
+    }).readLatestCompletion({ sessionId });
+    assert.deepEqual(completion, {
+      completionId: "turn-one",
+      content: "完成内容",
+      completedAt: "2026-09-01T10:00:05.000Z",
+      shouldNotify: false,
+      pendingContinuationSource: true,
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CodexTranscriptService keeps a prior completion notifyable when a human starts the next turn", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-human-followup-"));
+  const sessionsRoot = join(root, "sessions", "2026", "09", "01");
+  const sessionId = "human-followup-session";
+  mkdirSync(sessionsRoot, { recursive: true });
+  writeFileSync(
+    join(sessionsRoot, `rollout-${sessionId}.jsonl`),
+    [
+      line({
+        timestamp: "2026-09-01T10:00:00.000Z",
+        type: "session_meta",
+        payload: { id: sessionId, cwd: "/workspace/human-followup" },
+      }),
+      line({
+        timestamp: "2026-09-01T10:00:05.000Z",
+        type: "event_msg",
+        payload: {
+          type: "task_complete",
+          turn_id: "turn-one",
+          last_agent_message: "第一轮最终回答",
+        },
+      }),
+      line({
+        timestamp: "2026-09-01T10:00:05.020Z",
+        type: "event_msg",
+        payload: { type: "task_started", turn_id: "turn-two" },
+      }),
+      line({
+        timestamp: "2026-09-01T10:00:05.100Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          internal_chat_message_metadata_passthrough: {
+            turn_id: "turn-two",
+            content_item_kinds: ["user_message"],
+          },
+          content: [{ type: "input_text", text: "下一条人工提问" }],
+        },
+      }),
+    ].join(""),
+  );
+
+  try {
+    const completion = new CodexTranscriptService({
+      sessionsRoot: join(root, "sessions"),
+    }).readLatestCompletion({ sessionId });
+    assert.deepEqual(completion, {
+      completionId: "turn-one",
+      content: "第一轮最终回答",
+      completedAt: "2026-09-01T10:00:05.000Z",
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("CodexTranscriptService reads transcript pages backward from a byte cursor", () => {
   const root = mkdtempSync(join(tmpdir(), "codex-transcript-page-"));
   const sessionsRoot = join(root, "sessions", "2026", "08", "21");

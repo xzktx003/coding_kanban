@@ -27,6 +27,7 @@ import { formatWorkingDirectory, shellQuote } from "@agent-orchestrator/shared";
 
 import { scanAgentDirectory } from "../services/agent-scanner.js";
 import { AgentSessionRegistry } from "../services/agent-session-registry.js";
+import { AgentSessionInputService } from "../services/agent-session-input-service.js";
 import {
   isRemoteAgentSession,
   resolveActiveCodexSessionId,
@@ -64,11 +65,6 @@ import {
   canonicalTmuxDisplayName,
   normalizeTmuxSessionName,
 } from "../services/tmux-display-name.js";
-import {
-  isTerminalFocusPayload,
-  isTerminalPtyControlPayload,
-  stripTerminalResponsePayload,
-} from "../services/terminal-control-filter.js";
 import {
   UnsupportedVsCodeWebSessionError,
   VsCodeWebManager,
@@ -170,6 +166,7 @@ function buildTmuxAttachCommand(
 
 interface AgentSessionRoutesOptions {
   registry: AgentSessionRegistry;
+  inputService?: Pick<AgentSessionInputService, "write">;
   processRuntimeManager: LocalProcessRuntimeManager;
   tmuxAdapter: LocalTmuxAdapter;
   localTmuxInputRouter: LocalTmuxInputRouter;
@@ -305,6 +302,16 @@ export async function registerAgentSessionRoutes(
     codexChangeService = new CodexChangeService(),
     gitChangesService = new GitChangesService(),
   } = options;
+  const inputService =
+    options.inputService ??
+    new AgentSessionInputService({
+      registry,
+      tmuxAdapter,
+      localTmuxInputRouter,
+      sshRuntimeManager,
+      ptyRuntimeManager,
+      processRuntimeManager,
+    });
   const taskSummaryCache = new Map<
     string,
     TimedCacheEntry<AgentTaskSummaryResponse>
@@ -930,47 +937,8 @@ export async function registerAgentSessionRoutes(
 
   fastify.post<{ Params: { id: string }; Body: StdinAgentSessionInput }>(
     "/api/agent-sessions/:id/stdin",
-    async (request) => {
-      const agentSession = registry.get(request.params.id);
-      const sanitizedInput = stripTerminalResponsePayload(request.body.input);
-      if (!sanitizedInput) {
-        return agentSession;
-      }
-
-      const sanitizedBody = { input: sanitizedInput };
-
-      if (agentSession.sourceType === "remote-tmux-discovered") {
-        return tmuxAdapter.writeInput(agentSession, sanitizedBody);
-      }
-
-      if (
-        agentSession.sourceType === "remote-connect" &&
-        agentSession.transportRef?.runtimeId?.startsWith("ssh:")
-      ) {
-        return sshRuntimeManager.writeInput(request.params.id, sanitizedBody);
-      }
-
-      if (agentSession.transportRef?.tmuxSession && !agentSession.sshTarget) {
-        if (isTerminalFocusPayload(sanitizedInput)) {
-          return agentSession;
-        }
-
-        if (isTerminalPtyControlPayload(sanitizedInput)) {
-          return localTmuxInputRouter.write(agentSession, sanitizedBody, {
-            forcePty: true,
-          });
-        }
-
-        return localTmuxInputRouter.write(agentSession, sanitizedBody);
-      }
-
-      if (ptyRuntimeManager.has(request.params.id)) {
-        await ptyRuntimeManager.write(request.params.id, sanitizedInput);
-        return registry.get(request.params.id);
-      }
-
-      return processRuntimeManager.writeInput(request.params.id, sanitizedBody);
-    },
+    async (request) =>
+      inputService.write(request.params.id, request.body.input),
   );
 
   fastify.post<{ Body: ScanDirectoryInput }>(

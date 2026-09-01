@@ -28,19 +28,32 @@ test("configured notifications stay enabled until the user explicitly disables t
       configured: true,
       destinationType: "user",
       enabled: true,
+      replyConfigured: true,
+      replyEnabled: false,
     });
 
     fixture.service.activateKanbanDelivery();
 
-    assert.deepEqual(fixture.service.update(false), {
+    assert.deepEqual(fixture.service.update({ enabled: false }), {
       configured: true,
       destinationType: "user",
       enabled: false,
+      replyConfigured: true,
+      replyEnabled: false,
+    });
+
+    assert.deepEqual(fixture.service.update({ replyEnabled: true }), {
+      configured: true,
+      destinationType: "user",
+      enabled: false,
+      replyConfigured: true,
+      replyEnabled: true,
     });
 
     const persisted = JSON.parse(readFileSync(fixture.statePath, "utf8"));
-    assert.equal(persisted.version, 2);
+    assert.equal(persisted.version, 3);
     assert.equal(persisted.enabled, false);
+    assert.equal(persisted.replyEnabled, true);
     assert.equal(persisted.deliveryMode, "kanban");
     assert.equal("destination" in persisted, false);
     assert.equal("userId" in persisted, false);
@@ -50,6 +63,7 @@ test("configured notifications stay enabled until the user explicitly disables t
       statePath: fixture.statePath,
     });
     assert.equal(reloaded.get().enabled, false);
+    assert.equal(reloaded.get().replyEnabled, true);
   } finally {
     fixture.cleanup();
   }
@@ -68,8 +82,9 @@ test("migrates a legacy hook switch to Kanban delivery without changing its valu
 
     assert.equal(fixture.service.get().enabled, false);
     const migrated = JSON.parse(readFileSync(fixture.statePath, "utf8"));
-    assert.equal(migrated.version, 2);
+    assert.equal(migrated.version, 3);
     assert.equal(migrated.enabled, false);
+    assert.equal(migrated.replyEnabled, false);
     assert.equal(migrated.deliveryMode, "kanban");
     assert.equal(typeof migrated.updatedAt, "string");
   } finally {
@@ -84,9 +99,11 @@ test("unconfigured notifications are reported disabled without exposing config v
       configured: false,
       destinationType: null,
       enabled: false,
+      replyConfigured: false,
+      replyEnabled: false,
     });
     assert.throws(
-      () => fixture.service.update(true),
+      () => fixture.service.update({ enabled: true }),
       FeishuNotificationNotConfiguredError,
     );
   } finally {
@@ -108,13 +125,34 @@ test("conflicting or malformed destinations cannot be enabled", () => {
         configured: false,
         destinationType: null,
         enabled: false,
+        replyConfigured: false,
+        replyEnabled: false,
       });
       assert.throws(
-        () => fixture.service.update(true),
+        () => fixture.service.update({ enabled: true }),
         FeishuNotificationNotConfiguredError,
       );
     } finally {
       fixture.cleanup();
     }
+  }
+});
+
+test("reply control can only be enabled for the configured private user", () => {
+  const fixture = createFixture({ FEISHU_NOTIFY_CHAT_ID: "oc_group123" });
+  try {
+    assert.deepEqual(fixture.service.get(), {
+      configured: true,
+      destinationType: "chat",
+      enabled: true,
+      replyConfigured: false,
+      replyEnabled: false,
+    });
+    assert.throws(
+      () => fixture.service.update({ replyEnabled: true }),
+      /只支持私聊/,
+    );
+  } finally {
+    fixture.cleanup();
   }
 });

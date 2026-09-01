@@ -12,6 +12,7 @@ import { AppVersionService } from "./services/app-version-service.js";
 import { ScriptFeishuCompletionSender } from "./services/agent-completion-feishu-notifier.js";
 import { GitAutoUpdateService } from "./services/git-auto-update-service.js";
 import { FeishuNotificationSettingsService } from "./services/feishu-notification-settings-service.js";
+import { FeishuReplyBindingStore } from "./services/feishu-reply-binding-store.js";
 import { installGracefulShutdown } from "./services/server-lifecycle.js";
 import { FileSessionStateStore } from "./services/session-state-store.js";
 import { ensureSharedPackageBuilt } from "./services/shared-package-builder.js";
@@ -44,6 +45,12 @@ async function main(): Promise<void> {
       ),
     });
   feishuNotificationSettingsService.activateKanbanDelivery();
+  const feishuReplyBindingStore = new FeishuReplyBindingStore({
+    statePath: resolve(
+      repositoryRoot,
+      ".dev-runtime/feishu-reply-bindings.json",
+    ),
+  });
   const { app } = buildServer({
     appVersionService: new AppVersionService({
       sourceRoot: appSourceRoot,
@@ -54,6 +61,10 @@ async function main(): Promise<void> {
     }),
     sessionStateStore: new FileSessionStateStore(sessionStatePath),
     feishuNotificationSettingsService,
+    feishuReplyBindingStore,
+    ...(process.env.FEISHU_NOTIFY_USER_ID?.trim()
+      ? { feishuReplyAllowedUserId: process.env.FEISHU_NOTIFY_USER_ID.trim() }
+      : {}),
     feishuCompletionSender: new ScriptFeishuCompletionSender({
       scriptPath: resolve(repositoryRoot, "scripts/codex-feishu-notify.mjs"),
       fallbackWorkingDirectory: repositoryRoot,

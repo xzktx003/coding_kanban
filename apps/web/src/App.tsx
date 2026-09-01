@@ -1015,6 +1015,31 @@ export default function App() {
     }
   }, [feishuNotificationSettings, feishuNotificationSettingsUpdating]);
 
+  const handleToggleFeishuReplies = useCallback(async () => {
+    if (
+      !feishuNotificationSettings ||
+      !feishuNotificationSettings.replyConfigured ||
+      feishuNotificationSettingsUpdating
+    ) {
+      return;
+    }
+
+    setFeishuNotificationSettingsUpdating(true);
+    setFeishuNotificationSettingsError(null);
+    try {
+      const settings = await updateFeishuNotificationSettings({
+        replyEnabled: !feishuNotificationSettings.replyEnabled,
+      });
+      setFeishuNotificationSettings(settings);
+    } catch (error) {
+      setFeishuNotificationSettingsError(
+        error instanceof Error ? error.message : "飞书回复控制保存失败",
+      );
+    } finally {
+      setFeishuNotificationSettingsUpdating(false);
+    }
+  }, [feishuNotificationSettings, feishuNotificationSettingsUpdating]);
+
   const handleLaunched = useCallback(
     (session: AgentSessionRecord, groupId: string | null) => {
       setSessionGroups((current) =>
@@ -1782,6 +1807,7 @@ export default function App() {
           handleToggleAgentCompletionNotifications
         }
         onToggleFeishuNotifications={handleToggleFeishuNotifications}
+        onToggleFeishuReplies={handleToggleFeishuReplies}
         onOpenNewSession={setNewSessionHost}
         onScanTmux={handleScanTmux}
         onScanApps={handleScanApps}

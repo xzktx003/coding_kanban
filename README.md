@@ -59,22 +59,22 @@ Coding Kanban 将这些问题收敛为一条主流程：
 | 文件浏览器 | 本地/SSH 浏览、预览、编辑、上传、下载、拖拽、chmod、Markdown/LaTeX |
 | VS Code Web | 本地与 SSH 远端 code-server，通过 `/vscode/` 内嵌并限制 iframe 缓存 |
 | 手机工作区 | 注意力看板、活动、项目/文件、终端快捷键、完整记录和手机 Diff |
-| 飞书完成提醒 | 所有已登记看板任务结束后可通过本地 `lark-cli` 机器人发送私聊/群聊提醒；Codex 优先发送最后一条完整回复，长正文自动分片，接收者与凭证不进入仓库 |
+| 飞书通知与续跑 | 所有已登记看板任务结束后可通过本地 `lark-cli` 机器人发送私聊/群聊提醒；私聊用户还可回复某条通知，把文字安全送回对应的在线 Codex 终端 |
 | 更新与恢复 | 用户确认后 fast-forward 更新；重启后恢复 managed tmux 和布局 |
 | 资源诊断 | xterm、WebSocket、快照吞吐、终端流、VS Code iframe、long task、heap |
 
 ## 更新日志
 
 > [!IMPORTANT]
-> **2026-09-01 · 所有看板任务完成后可主动发送飞书提醒**
+> **2026-09-01 · 飞书通知支持直接回复并继续对应 Codex**
 >
-> Kanban 后端会观察已登记会话从运行中进入空闲或退出的完成边沿，再由本机 `lark-cli` 机器人向指定用户或群聊发送消息。按钮开启前已经运行的 Codex 以及之后启动的其他 Agent 会话都能覆盖，不依赖页面保持打开；Codex 通知优先携带对话最后一条完整回复，长正文自动分片。个人接收者 ID、登录态和凭证继续只保存在本机。配置与边界见 [Kanban 任务完成飞书通知](docs/codex-feishu-notifications.md)。
+> Kanban 后端会观察已登记会话的真正完成点，再由本机 `lark-cli` 机器人向指定用户或群聊发送消息。按钮开启前已经运行的 Codex 以及之后启动的其他 Agent 会话都能覆盖，不依赖页面保持打开；Codex 通知优先携带对话最后一条完整回复，长正文自动分片。使用私聊目标时，还可单独开启“飞书回复继续执行”，回复某条通知即可把文字送回它绑定的在线 Codex 终端。个人接收者 ID、登录态、回复绑定和凭证继续只保存在本机。配置与边界见 [Kanban 任务完成飞书通知与回复续跑](docs/codex-feishu-notifications.md)。
 
 ### 重要里程碑
 
 | 时间 | 更新内容 |
 | --- | --- |
-| 2026-09 | 接入 Codex → 飞书任务完成提醒，增加仓库作用域、隐私裁剪、重试和幂等保护 |
+| 2026-09 | 接入 Codex ↔ 飞书双向工作流：完成提醒、完整回复分片，以及从私聊回复继续对应会话 |
 | 2026-08 | 新增结构化会话摘要、完整记录、双 Diff Review、Markdown 阅读和手机工作区 |
 | 2026-07 | 加入用户分组、应用热更新、managed tmux 会话恢复及监控窗格联动 |
 | 2026-06 | 上线手机终端、浏览器资源诊断、完成通知、常驻开发服务和多终端布局 |
@@ -88,6 +88,7 @@ Coding Kanban 将这些问题收敛为一条主流程：
 
 #### 2026 年 9 月
 
+- `2026-09-01` — 飞书私聊通知支持直接回复继续对应的在线 Codex，会话绑定、发送者校验、事件去重和输入限制全部保留在 Kanban 本地；完成通知与回复控制使用两个独立开关。
 - `2026-09-01` — “新建会话”增加手动 SSH 连接，可直接填写主机、端口、用户名和本机私钥路径；Codex 飞书提醒改为发送最后一条完整回复，长正文按序分片而不截断。
 - `2026-09-01` — 顶栏把“工具”和“资源调节”合并进统一设置面板；飞书通知开关由后端统一覆盖按钮开启前已经运行和之后启动的所有看板任务。
 - `2026-09-01` [`6e00f4f`](https://github.com/xzktx003/coding_kanban/commit/6e00f4f5513fe990ea8c244c918ed0be0242a85b) — 接入 Codex 原生完成事件到飞书机器人通知，支持仓库作用域、隐私裁剪、重试和幂等发送。
@@ -321,7 +322,7 @@ https://<局域网地址>:<WEB_PORT>/?view=mobile
 
 - **工具**：操作提示、当前浏览器的任务完成通知和测试通知。
 - **资源调节**：轻量/完整终端预览、VS Code iframe 缓存、手动释放缓存和资源诊断。
-- **飞书通知**：控制所有已登记看板任务的完成提醒；开启前已经运行的会话后续完成时同样发送，目标必须先在本地 `.env` 配置，页面不会读取或展示具体接收者 ID。
+- **飞书通知**：分别控制所有已登记看板任务的完成提醒，以及私聊回复继续执行；开启前已经运行的会话后续完成时同样发送，目标必须先在本地 `.env` 配置，页面不会读取或展示具体接收者 ID。回复控制默认关闭，群聊目标不能开启。
 
 默认轻量预览不为每张卡片创建 xterm 和终端 WebSocket。需要实时小终端时，可以手动切换到完整预览。
 
@@ -366,7 +367,7 @@ https://<局域网地址>:<WEB_PORT>/?view=mobile
 - `mkcert`：为局域网生成浏览器可信任的本地 HTTPS 证书，强烈推荐与 VS Code Web 一起使用。
 - `code-server` 或 `openvscode-server`：内嵌 VS Code Web；未安装时应用可尝试通过网络安装 `code-server`。
 - Codex、Copilot 或 Claude CLI：只需安装并登录实际要从看板启动的 Agent；纯 shell 会话不需要。
-- `lark-cli`：仅 Codex 完成后发送飞书提醒时需要。
+- `lark-cli`：仅发送飞书提醒或从飞书回复继续 Codex 时需要。
 - Playwright 浏览器和系统依赖：仅运行 E2E 或生成 README 截图时需要。
 
 ```bash
@@ -408,8 +409,9 @@ corepack prepare pnpm@10.13.1 --activate
 - [ ] **SSH 工作流**：`ssh -V` 可执行；可使用 `~/.ssh/config` 中的预设主机，也可在“新建会话 → 新增 SSH 连接”直接填写目标。请先确认本机 `ssh-agent`、SSH 配置或私钥能够免交互登录。
 - [ ] **可信 HTTPS**：已安装 `mkcert`，或配置自己的可信证书；手机和其他局域网设备已信任对应 CA。只接受 OpenSSL 自签警告可能导致 VS Code Web 的 Service Worker、图片或 webview 无法加载。
 - [ ] **VS Code Web**：本机/远端已有 `code-server` 或 `openvscode-server`；若依赖自动安装，已确认机器可以访问 `code-server.dev`。
-- [ ] **飞书提醒**：`lark-cli` 已配置机器人身份和发送权限，`.env` 中只设置 `FEISHU_NOTIFY_CHAT_ID` 或 `FEISHU_NOTIFY_USER_ID` 其中一个；Kanban 后端会统一发送 Codex 最后一条完整回复，无需为新安装单独配置 Codex 用户级 notify hook。确认目标会话允许接收可能包含代码和日志的完整正文。
-- [ ] **飞书开关**：启动后进入“设置 → 飞书通知”，确认显示“私聊接收者已配置”或“群聊接收者已配置”，再按需开启。
+- [ ] **飞书提醒**：`lark-cli` 已配置机器人身份和 `im:message:send_as_bot` 权限，`.env` 中只设置 `FEISHU_NOTIFY_CHAT_ID` 或 `FEISHU_NOTIFY_USER_ID` 其中一个；Kanban 后端会统一发送 Codex 最后一条完整回复，无需为新安装单独配置 Codex 用户级 notify hook。确认目标会话允许接收可能包含代码和日志的完整正文。
+- [ ] **飞书回复续跑（可选）**：仅使用私聊 `FEISHU_NOTIFY_USER_ID`；应用已开通 `im:message.p2p_msg:readonly`，并在飞书开放平台订阅 `im.message.receive_v1` 长连接事件。群聊目标只能接收通知，不能启用回复控制。
+- [ ] **飞书开关**：启动后进入“设置 → 飞书通知”，确认目标类型，再分别按需开启“任务完成通知”和默认关闭的“飞书回复继续执行”。
 - [ ] **E2E/截图**：只有需要运行 Playwright 时才执行 `npx playwright install`；Linux 缺少 Chromium 动态库时再执行 `sudo npx playwright install-deps`。
 
 可以先运行下面的命令快速核对基础命令；带“可选”的项目没有输出时，只会影响对应功能：
@@ -515,9 +517,9 @@ curl http://127.0.0.1:4000/api/health
 | `VSCODE_WEB_REMOTE_BIND_HOST` | SSH 远端 code-server 监听地址，默认 `127.0.0.1` |
 | `VSCODE_WEB_REMOTE_PORT` | 远端 code-server 首选端口，默认 `13338` |
 
-### 飞书完成提醒
+### 飞书完成提醒与回复续跑
 
-接收者、正文分片大小和重试参数只写入被 Git 忽略的 `.env`。配置目标后，在“设置 → 飞书通知”控制启用状态；Kanban 后端统一观察所有已登记会话，因此按钮开启前已经运行的任务后续完成时也会发送。Codex 会优先发送结构化记录中的最后一条完整回复，长正文自动分片；读取不到时回退到看板摘要。开关保存在 `.dev-runtime/feishu-notification-settings.json`，只包含模式、布尔状态和更新时间，不包含个人 ID 或机器人凭证。完整步骤见 [Kanban 任务完成飞书通知](docs/codex-feishu-notifications.md)。
+接收者、正文分片大小和重试参数只写入被 Git 忽略的 `.env`。配置目标后，在“设置 → 飞书通知”分别控制完成提醒和回复续跑；Kanban 后端统一观察所有已登记会话，因此按钮开启前已经运行的任务后续完成时也会发送。Codex 会优先发送结构化记录中的最后一条完整回复，长正文自动分片；Goal 模式内部自动续轮不视为最终完成。使用私聊目标并完成接收事件授权后，回复任意一片通知都可继续它绑定的在线 Codex。设置和短期消息绑定分别保存在 `.dev-runtime/feishu-notification-settings.json` 与 `.dev-runtime/feishu-reply-bindings.json`，不包含个人凭证或正文，也不进入 Git。完整步骤见 [Kanban 任务完成飞书通知与回复续跑](docs/codex-feishu-notifications.md)。
 
 ## 完整功能说明
 
@@ -620,7 +622,7 @@ curl http://127.0.0.1:4000/api/health
 1. 点击顶栏“设置”。
 2. 在“工具”中查看操作提示或控制当前浏览器的完成通知。
 3. 在“资源调节”中切换终端预览、VS Code 缓存模式或打开资源诊断。
-4. 在“飞书通知”中确认本地目标类型，再开启或关闭所有已登记看板任务的完成提醒。
+4. 在“飞书通知”中确认本地目标类型，再分别开启或关闭所有已登记看板任务的完成提醒与私聊回复续跑。
 
 ## 快捷键
 

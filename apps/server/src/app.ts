@@ -25,6 +25,7 @@ import { registerFeishuNotificationSettingsRoutes } from "./routes/feishu-notifi
 import { registerSshHostsRoutes } from "./routes/ssh-hosts.js";
 import { registerVsCodeWebProxyRoutes } from "./routes/vscode-web-proxy.js";
 import { AgentSessionRegistry } from "./services/agent-session-registry.js";
+import { AgentSessionInputService } from "./services/agent-session-input-service.js";
 import { createAgentSessionStreamEvent } from "./services/agent-session-stream.js";
 import {
   AgentCompletionFeishuNotifier,
@@ -44,6 +45,9 @@ import {
   FeishuNotificationSettingsService,
   type FeishuNotificationSettingsServiceLike,
 } from "./services/feishu-notification-settings-service.js";
+import { FeishuReplyBindingStore } from "./services/feishu-reply-binding-store.js";
+import { FeishuReplyCommandService } from "./services/feishu-reply-command-service.js";
+import { FeishuReplyEventListener } from "./services/feishu-reply-event-listener.js";
 import { LocalFsService } from "./services/local-fs-service.js";
 import { LocalProcessRuntimeManager } from "./services/local-process-runtime-manager.js";
 import { LocalTmuxAdapter } from "./services/local-tmux-adapter.js";
@@ -87,6 +91,8 @@ interface BuildServerOptions {
   feishuNotificationSettingsService?: FeishuNotificationSettingsServiceLike;
   feishuCompletionSender?: FeishuCompletionSenderLike;
   feishuCompletionContentResolver?: FeishuCompletionContentResolverLike;
+  feishuReplyBindingStore?: FeishuReplyBindingStore;
+  feishuReplyAllowedUserId?: string;
 }
 
 interface LocalTmuxSocketInputStateDependencies {
@@ -157,6 +163,14 @@ export function buildServer(options: BuildServerOptions = {}): {
     tmuxAdapter,
     ptyRuntimeManager,
   });
+  const agentSessionInputService = new AgentSessionInputService({
+    registry,
+    tmuxAdapter,
+    localTmuxInputRouter,
+    sshRuntimeManager,
+    ptyRuntimeManager,
+    processRuntimeManager,
+  });
   const localFsService = options.localFsService ?? new LocalFsService();
   const sftpService = options.sftpService ?? new SftpService();
   const codexSessionLocator = new CodexSessionLocator();
@@ -217,6 +231,22 @@ export function buildServer(options: BuildServerOptions = {}): {
         ...(restoredSnapshot ? { restoredSnapshot } : {}),
         settings: feishuNotificationSettingsService,
         sender: options.feishuCompletionSender,
+        ...(options.feishuReplyBindingStore
+          ? {
+              deliveryRecorder: {
+                record(event, delivery) {
+                  if (event.agentKind.trim().toLowerCase() !== "codex") {
+                    return;
+                  }
+                  options.feishuReplyBindingStore?.record({
+                    sessionId: event.sessionId,
+                    completionId: event.completionId ?? event.completedAt,
+                    messages: delivery.messages,
+                  });
+                },
+              },
+            }
+          : {}),
         contentResolver:
           options.feishuCompletionContentResolver ??
           new CodexCompletionContentResolver({
@@ -232,10 +262,34 @@ export function buildServer(options: BuildServerOptions = {}): {
         },
       }).start()
     : null;
-  if (stopSessionStatePersistence || stopFeishuCompletionNotifier) {
+  const feishuReplyCommandService =
+    options.feishuReplyBindingStore && options.feishuReplyAllowedUserId
+      ? new FeishuReplyCommandService({
+          allowedUserId: options.feishuReplyAllowedUserId,
+          settings: feishuNotificationSettingsService,
+          bindings: options.feishuReplyBindingStore,
+          registry,
+          input: agentSessionInputService,
+        })
+      : null;
+  const stopFeishuReplyListener = feishuReplyCommandService
+    ? new FeishuReplyEventListener({
+        settings: feishuNotificationSettingsService,
+        handleEvent: (event) => feishuReplyCommandService.handle(event),
+        logError(error) {
+          app.log.error({ err: error }, "Feishu reply listener failed");
+        },
+      }).start()
+    : null;
+  if (
+    stopSessionStatePersistence ||
+    stopFeishuCompletionNotifier ||
+    stopFeishuReplyListener
+  ) {
     app.addHook("onClose", async () => {
       stopSessionStatePersistence?.();
       stopFeishuCompletionNotifier?.();
+      stopFeishuReplyListener?.();
     });
   }
 
@@ -248,6 +302,7 @@ export function buildServer(options: BuildServerOptions = {}): {
   app.register(async (instance) => {
     await registerAgentSessionRoutes(instance, {
       registry,
+      inputService: agentSessionInputService,
       processRuntimeManager,
       tmuxAdapter,
       localTmuxInputRouter,
