@@ -47,6 +47,7 @@
 - 新建或恢复本地 tmux 时，scrollback replay 可早于 `tmux attach` client 完成，首个文字、前缀或 Codex 输入会被启动 shell 吞掉。修复为用 `tmux list-clients` 的 `client_pid` 匹配 PTY PID 后再写 native PTY；就绪前短暂等待，超时安全回退 pane adapter。CSI-u 修饰 Enter 保持 `send-keys -l` 例外，避免旧 tmux client 吞掉原始字节；真实 rename-window prompt 回归覆盖首帧输入、提交和取消。
 - 聚焦视图侧栏切换主窗口延迟且重复请求 focus：单击原先等待 220ms 区分双击，App 切换路径和 active slot effect 又会重复请求同一 focus。修复为首击立即切换、忽略双击第二次 click，并以 in-flight 请求合并和旧响应丢弃保证快速切换只更新一次。
 - 多屏聚焦视图从看板进入已显示在非活动窗格里的 tmux 后无法输入：focused session 已更新，但局部 `activeSlotId` 仍指向旧窗格。修复为外部聚焦变化时激活 focused session 所在的可见窗格，使标题、当前输入标记和键盘所有权一致。
+- 无侧栏多屏为避免额外 `/focus` 而解耦 `activeSlotId` 后，真正的外部 focused session 变化也可能不再转移输入权，导致用户在 `coding` 中的退格、中文和快捷键持续写入旧“清理空间” pane。修复为仅让同一 focused session 下的本地监控切换保持解耦；focused session ID 真实变化时始终激活对应可见窗格。
 - 手机端快捷键缺少 Claude / Copilot CLI 常用控制键：`Shift+Tab`、`Ctrl+O`、`Ctrl+E` 和行编辑组合无法从手机触发，且快捷键类型中残留旧 id 有构建失败风险；修复为扩展手机快捷键表，并在本地 tmux 转换层映射到 `BTab`、`C-o`、`C-e`、`C-u/w/k/y` 等 key name。
 - 手机端快捷键说明弹窗缺少无障碍属性：没有 `aria-modal`、`aria-labelledby` 和 Tab 聚焦陷阱，屏幕阅读器用户无法正确聚焦弹窗；修复为增加 `aria-modal=”true”`、`aria-labelledby` 指向标题、Tab 循环限制和 Escape 关闭，卸载时还原页面焦点。
 - 手机端快捷键工具栏多行平铺占用纵向空间且不符合横向选择预期：修复为 `flex` 单行横向选择器，使用 `overflow-x: auto` 和 `touch-action: pan-x` 支持左右滑动，并把 `EOF` 按钮展示为 `Ctrl+D`。

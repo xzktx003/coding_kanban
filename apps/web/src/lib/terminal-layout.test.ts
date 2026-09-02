@@ -17,6 +17,7 @@ import {
   resolveFocusedTerminalMonitorSlotId,
   restoreTerminalMonitorLayoutSnapshot,
   setTerminalMonitorSlotSession,
+  shouldSyncTerminalInputWithFocusedSession,
 } from "./terminal-layout.js";
 
 const sessions = [
@@ -43,6 +44,33 @@ describe("terminal monitor layout", () => {
         focusedSessionId: "agent-2",
       }),
       "terminal-monitor-slot-2",
+    );
+  });
+
+  it("follows an external focus change without re-coupling local monitor switches", () => {
+    assert.equal(
+      shouldSyncTerminalInputWithFocusedSession({
+        focusedSessionId: "agent-2",
+        previousFocusedSessionId: "agent-1",
+        syncActiveTerminalWithFocus: false,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldSyncTerminalInputWithFocusedSession({
+        focusedSessionId: "agent-2",
+        previousFocusedSessionId: "agent-2",
+        syncActiveTerminalWithFocus: false,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldSyncTerminalInputWithFocusedSession({
+        focusedSessionId: "agent-2",
+        previousFocusedSessionId: "agent-2",
+        syncActiveTerminalWithFocus: true,
+      }),
+      true,
     );
   });
 

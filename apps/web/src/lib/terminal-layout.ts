@@ -173,6 +173,20 @@ export function resolveFocusedTerminalMonitorSlotId({
     : availableSlotIds[0]!;
 }
 
+export function shouldSyncTerminalInputWithFocusedSession({
+  focusedSessionId,
+  previousFocusedSessionId,
+  syncActiveTerminalWithFocus,
+}: {
+  focusedSessionId: string;
+  previousFocusedSessionId: string;
+  syncActiveTerminalWithFocus: boolean;
+}): boolean {
+  return (
+    syncActiveTerminalWithFocus || focusedSessionId !== previousFocusedSessionId
+  );
+}
+
 export function normalizeTerminalMonitorSlots({
   mode,
   sessions,

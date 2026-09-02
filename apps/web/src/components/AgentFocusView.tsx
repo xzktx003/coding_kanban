@@ -48,6 +48,7 @@ import {
   restoreTerminalMonitorLayoutSnapshot,
   resolveFocusedTerminalMonitorSlotId,
   setTerminalMonitorSlotSession,
+  shouldSyncTerminalInputWithFocusedSession,
   type RestorableTerminalMonitorLayoutMode,
   type TerminalMonitorArrangementMode,
   type TerminalMonitorLayoutSnapshot,
@@ -324,6 +325,7 @@ export function AgentFocusView({
     id: string;
     name: string;
   } | null>(null);
+  const previousFocusedSessionIdRef = useRef(focusedSession.id);
 
   useEffect(() => {
     if (!imageDraft) {
@@ -343,7 +345,6 @@ export function AgentFocusView({
     const timeout = window.setTimeout(() => setImageSendNotice(null), 4_000);
     return () => window.clearTimeout(timeout);
   }, [imageSendNotice]);
-
   function dispatchPendingTerminalKey(event: PendingTerminalKeyEvent): boolean {
     const textarea = getActiveTerminalTextarea();
     if (!textarea) {
@@ -823,11 +824,26 @@ export function AgentFocusView({
   }, [paneContextMenu]);
 
   useEffect(() => {
+    const shouldSyncInput = shouldSyncTerminalInputWithFocusedSession({
+      focusedSessionId: focusedSession.id,
+      previousFocusedSessionId: previousFocusedSessionIdRef.current,
+      syncActiveTerminalWithFocus,
+    });
+    previousFocusedSessionIdRef.current = focusedSession.id;
+
     if (terminalArrangementMode === "group") {
+      if (
+        shouldSyncInput &&
+        groupArrangementSessions.some(
+          (session) => session.id === focusedSession.id,
+        )
+      ) {
+        setActiveGroupSessionId(focusedSession.id);
+      }
       return;
     }
 
-    const nextActiveSlotId = syncActiveTerminalWithFocus
+    const nextActiveSlotId = shouldSyncInput
       ? resolveFocusedTerminalMonitorSlotId({
           mode: terminalLayoutMode,
           slots: terminalSlots,
@@ -845,9 +861,7 @@ export function AgentFocusView({
       const normalized = normalizeTerminalMonitorSlots({
         mode: terminalLayoutMode,
         sessions: displayableSessions,
-        preferredSessionId: syncActiveTerminalWithFocus
-          ? focusedSession.id
-          : null,
+        preferredSessionId: shouldSyncInput ? focusedSession.id : null,
         preferredSlotId: nextActiveSlotId,
         previousSlots: retainedTerminalSlotsRef.current,
       });
@@ -862,6 +876,7 @@ export function AgentFocusView({
     closedSlotIds,
     displayableSessions,
     focusedSession.id,
+    groupArrangementSessions,
     syncActiveTerminalWithFocus,
     terminalArrangementMode,
     terminalLayoutMode,
