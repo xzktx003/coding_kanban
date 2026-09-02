@@ -119,7 +119,7 @@ Codex 会话输出变化后，后端会先从当前看板会话定位真实 Code
 - 被回复消息必须由本次 Kanban 实例成功发送并仍有有效绑定。
 - 目标会话必须仍在线、可输入且实际是 Codex；已退出、已脱离、只读观察或不可控会话拒绝写入。
 - 文本最多 8000 个 Unicode 字符；NUL、ESC 和其他危险控制字符会被拒绝。
-- 单行回复按一条 prompt 加 Enter 发送；多行回复使用 bracketed paste 后再发送 Enter，避免换行被终端逐行执行。
+- 交互 PTY/tmux 会先写入 prompt，再单独发送 Enter；多行 prompt 使用 bracketed paste，避免换行被终端逐行执行。旧版直连进程/SSH pipe 使用一个末尾换行提交，不额外发送第二个 Enter。
 
 接收链路不开放公网 webhook，不修改 Codex 或 Hermes 源码，也不把个人 open_id 返回前端。关闭回复开关后，后端会停止事件消费进程；重新开启时自动恢复监听。
 

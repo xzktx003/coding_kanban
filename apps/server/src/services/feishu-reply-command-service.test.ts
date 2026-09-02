@@ -5,7 +5,6 @@ import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import {
   FeishuReplyCommandService,
-  buildFeishuPromptInput,
   type FeishuInboundMessageEvent,
 } from "./feishu-reply-command-service.js";
 
@@ -48,7 +47,7 @@ function createFixture(
     targetSession?: AgentSessionRecord;
   } = {},
 ) {
-  const writes: Array<{ sessionId: string; input: string }> = [];
+  const writes: Array<{ sessionId: string; prompt: string }> = [];
   const processed = new Set<string>();
   const service = new FeishuReplyCommandService({
     allowedUserId: "ou_owner",
@@ -72,8 +71,8 @@ function createFixture(
       get: () => overrides.targetSession ?? session,
     },
     input: {
-      write: async (sessionId, input) => {
-        writes.push({ sessionId, input });
+      writePrompt: async (sessionId, prompt) => {
+        writes.push({ sessionId, prompt });
       },
     },
   });
@@ -86,7 +85,7 @@ test("routes a trusted direct reply to the bound Codex terminal exactly once", a
 
   assert.equal(await fixture.service.handle(validEvent), "delivered");
   assert.deepEqual(fixture.writes, [
-    { sessionId: "session-1", input: "继续运行测试\r" },
+    { sessionId: "session-1", prompt: "继续运行测试" },
   ]);
   assert.equal(fixture.processed.has("om_reply"), true);
 
@@ -94,11 +93,18 @@ test("routes a trusted direct reply to the bound Codex terminal exactly once", a
   assert.equal(fixture.writes.length, 1);
 });
 
-test("uses bracketed paste for a multiline Feishu prompt", () => {
-  assert.equal(
-    buildFeishuPromptInput("先检查\n然后修复"),
-    "\x1b[200~先检查\n然后修复\x1b[201~\r",
-  );
+test("passes multiline Feishu replies to prompt input handling", async () => {
+  const fixture = createFixture();
+  const event = {
+    ...validEvent,
+    message_id: "om_multiline",
+    content: "先检查\n然后修复",
+  };
+
+  assert.equal(await fixture.service.handle(event), "delivered");
+  assert.deepEqual(fixture.writes, [
+    { sessionId: "session-1", prompt: "先检查\n然后修复" },
+  ]);
 });
 
 test("rejects messages that are not a trusted private text reply", async () => {
@@ -162,7 +168,7 @@ test("does not mark an inbound message processed when terminal delivery fails", 
     },
     registry: { get: () => session },
     input: {
-      write: async () => {
+      writePrompt: async () => {
         throw new Error("terminal unavailable");
       },
     },

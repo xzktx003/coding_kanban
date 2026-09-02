@@ -3,7 +3,10 @@ import test from "node:test";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
-import { AgentSessionInputService } from "./agent-session-input-service.js";
+import {
+  AgentSessionInputService,
+  buildInteractivePromptInput,
+} from "./agent-session-input-service.js";
 
 function makeSession(
   overrides: Partial<AgentSessionRecord> = {},
@@ -105,4 +108,88 @@ test("keeps SSH runtime input on the existing remote connection", async () => {
 
   assert.equal(result, session);
   assert.deepEqual(writes, [{ id: session.id, input: "继续执行\r" }]);
+});
+
+test("submits interactive prompts with Enter in a separate write", async () => {
+  const session = makeSession();
+  const writes: string[] = [];
+  const service = new AgentSessionInputService({
+    registry: { get: () => session },
+    tmuxAdapter: {
+      writeInput: async () => {
+        throw new Error("unexpected direct tmux adapter write");
+      },
+    },
+    localTmuxInputRouter: {
+      write: async (target, body) => {
+        writes.push(body.input);
+        return target;
+      },
+    },
+    sshRuntimeManager: {
+      writeInput: () => {
+        throw new Error("unexpected SSH write");
+      },
+    },
+    ptyRuntimeManager: {
+      has: () => false,
+      write: async () => {
+        throw new Error("unexpected PTY write");
+      },
+    },
+    processRuntimeManager: {
+      writeInput: () => {
+        throw new Error("unexpected process write");
+      },
+    },
+  });
+
+  await service.writePrompt(session.id, "先检查\n然后修复");
+
+  assert.deepEqual(writes, [
+    buildInteractivePromptInput("先检查\n然后修复"),
+    "\r",
+  ]);
+});
+
+test("submits legacy direct runtimes with one newline-delimited payload", async () => {
+  const session = makeSession({
+    transportRef: { runtimeId: "local:session-1" },
+  });
+  const writes: string[] = [];
+  const service = new AgentSessionInputService({
+    registry: { get: () => session },
+    tmuxAdapter: {
+      writeInput: async () => {
+        throw new Error("unexpected tmux write");
+      },
+    },
+    localTmuxInputRouter: {
+      write: async () => {
+        throw new Error("unexpected local tmux write");
+      },
+    },
+    sshRuntimeManager: {
+      writeInput: () => {
+        throw new Error("unexpected SSH write");
+      },
+    },
+    ptyRuntimeManager: {
+      has: () => false,
+      write: async () => {
+        throw new Error("unexpected PTY write");
+      },
+    },
+    processRuntimeManager: {
+      writeInput: (id, body) => {
+        assert.equal(id, session.id);
+        writes.push(body.input);
+        return session;
+      },
+    },
+  });
+
+  await service.writePrompt(session.id, "先检查\n然后修复");
+
+  assert.deepEqual(writes, ["先检查\n然后修复\n"]);
 });

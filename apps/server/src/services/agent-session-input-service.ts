@@ -21,6 +21,20 @@ interface AgentSessionInputServiceOptions {
   processRuntimeManager: Pick<LocalProcessRuntimeManager, "writeInput">;
 }
 
+const BRACKETED_PASTE_START = "\x1b[200~";
+const BRACKETED_PASTE_END = "\x1b[201~";
+
+/**
+ * Keep multiline prompts together when they are written to an interactive
+ * terminal. The submit key is intentionally sent separately by writePrompt.
+ */
+export function buildInteractivePromptInput(prompt: string): string {
+  if (prompt.includes("\n")) {
+    return `${BRACKETED_PASTE_START}${prompt}${BRACKETED_PASTE_END}`;
+  }
+  return prompt;
+}
+
 export class AgentSessionInputService {
   constructor(private readonly options: AgentSessionInputServiceOptions) {}
 
@@ -68,5 +82,30 @@ export class AgentSessionInputService {
       sessionId,
       sanitizedBody,
     );
+  }
+
+  /**
+   * Deliver a prompt and submit it using the terminal semantics supported by
+   * the target runtime. Interactive PTY/tmux sessions need a distinct Enter
+   * write because some TUI clients consume a same-packet CR as plain input.
+   * Legacy direct process/SSH pipes instead receive one newline-delimited
+   * payload so they do not get an extra blank command.
+   */
+  async writePrompt(
+    sessionId: string,
+    prompt: string,
+  ): Promise<AgentSessionRecord> {
+    const agentSession = this.options.registry.get(sessionId);
+    const isInteractiveTerminal =
+      this.options.ptyRuntimeManager.has(sessionId) ||
+      agentSession.sourceType === "remote-tmux-discovered" ||
+      Boolean(agentSession.transportRef?.tmuxSession);
+
+    if (!isInteractiveTerminal) {
+      return this.write(sessionId, `${prompt}\n`);
+    }
+
+    await this.write(sessionId, buildInteractivePromptInput(prompt));
+    return this.write(sessionId, "\r");
   }
 }

@@ -44,7 +44,7 @@ interface FeishuReplyCommandServiceOptions {
   };
   registry: { get(sessionId: string): AgentSessionRecord };
   input: {
-    write(sessionId: string, input: string): Promise<unknown>;
+    writePrompt(sessionId: string, prompt: string): Promise<unknown>;
   };
 }
 
@@ -58,13 +58,6 @@ function normalizePrompt(content: string): string | null {
     return null;
   }
   return normalized;
-}
-
-export function buildFeishuPromptInput(prompt: string): string {
-  if (prompt.includes("\n")) {
-    return `\x1b[200~${prompt}\x1b[201~\r`;
-  }
-  return `${prompt}\r`;
 }
 
 function isAvailableCodexSession(session: AgentSessionRecord): boolean {
@@ -151,10 +144,7 @@ export class FeishuReplyCommandService {
 
     this.#inFlightMessageIds.add(event.message_id);
     try {
-      await this.#input.write(
-        binding.sessionId,
-        buildFeishuPromptInput(prompt),
-      );
+      await this.#input.writePrompt(binding.sessionId, prompt);
       this.#bindings.markProcessed(event.message_id);
       return "delivered";
     } finally {
