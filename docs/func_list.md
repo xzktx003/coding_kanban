@@ -36,7 +36,7 @@
 - 顶栏常驻“终端字号”滑杆，支持在 10px 到 24px 之间拖动调整所有内置 xterm 终端及“完整记录”正文的字号，并持久化到本地存储。
 - 设置的“工具”分类提供操作提示和浏览器完成通知；浏览器授权后，已知会话从 `running` 进入 `idle` 或 `exited` 时会发送系统通知。该开关只影响当前浏览器，页面必须保持打开。
 - 设置的“飞书通知”分类分别控制后端完成通知器和“飞书回复继续执行”。前端通过 `GET/PUT /api/settings/feishu-notifications` 读取和更新脱敏状态，只能看到是否配置、私聊/群聊类型和两个启用状态，永远不会收到目标 ID。后端持续观察全部已登记会话的新完成点，因此开启按钮前已经运行的本地或 SSH 会话在后续完成时同样发送；关闭期间不发送，重新开启后只处理新的完成点。
-- 飞书发送器从仓库根目录 `.env` 读取唯一的群聊或用户目标，以固定参数、无 shell 的方式执行 `scripts/codex-feishu-notify.mjs --kanban` 和 `lark-cli --as bot`。Codex 消息使用结构化 `task_complete` 的完整最终回复并按需分片，Goal 模式内部带 `goal.internal_context` 的自动续轮不发送；其他 Agent 或记录不可用时回退有界摘要。旧 Codex 原生 hook 在 Kanban 接管模式下静默，避免同一任务重复提醒。
+- 飞书发送器从仓库根目录 `.env` 读取唯一的群聊或用户目标，以固定参数、无 shell 的方式执行 `scripts/codex-feishu-notify.mjs --kanban` 和 `lark-cli --as bot`。Codex、已有 Codex session ID 和本地 tmux 中常见的 `node` 包装会话只在出现新的结构化 `task_complete` 后发送完整最终回复并按需分片；编辑提示词、终端空闲、session 尚未创建或解析暂时失败都不降级发送。Goal 模式内部带 `goal.internal_context` 的自动续轮不发送；明确的其他 Agent 仍可使用有界终端摘要。旧 Codex 原生 hook 在 Kanban 接管模式下静默，避免同一任务重复提醒。
 - 私聊目标可以单独开启“飞书回复继续执行”，后端通过 `lark-cli event consume im.message.receive_v1 --as bot` 长连接接收事件，将被回复通知的 `message_id` 精确映射到看板 `sessionId`，并复用统一终端输入服务把文本送入仍在线、可控的 Codex。发送者、私聊、文本类型、长度、控制字符、会话状态和重复事件均经过白名单校验；普通新消息、群聊、其他用户及无绑定回复不会执行。该开关默认关闭，群聊目标不可开启，不需要修改 Codex 或 Hermes。
 - 设置的“资源调节”分类提供终端预览模式切换，可在默认轻量预览和旧版完整小终端预览之间切换，并收纳 VS Code 省内存/保持状态、释放 VS Code 缓存和资源诊断。
 - 资源诊断面板按需展示 xterm 实例数、终端 WebSocket 数、会话快照吞吐、终端实时流吞吐、终端历史缓冲裁剪状态、VS Code iframe 当前/隐藏数量、主线程长任务、VS Code 代理 HTTP/WS 吞吐和 Chromium JS heap 指标，用于定位浏览器内存、网络增长、长输出丢失与 VS Code iframe 卡顿来源。
@@ -143,7 +143,7 @@
 
 - 顶栏折叠、文件浏览器布局、聚焦视图状态、侧边工具选择等 UI 状态保存在本地存储。
 - 飞书完成通知和回复续跑的独立开关及 `kanban` 发送模式保存在仓库本地 `.dev-runtime/feishu-notification-settings.json`，由后端原子写入且不包含接收者或凭证；该文件不进入 Git，并由所有浏览器共享。飞书消息与看板会话的短期绑定及事件去重信息另存为 `.dev-runtime/feishu-reply-bindings.json`，不保存通知正文或用户回复。
-- Codex 完成通知优先定位当前 tmux pane 的真实 Codex session，并从本机或已登记 SSH 目标的结构化记录读取原生 `task_complete`；每个真正结束的 `turn_id` 独立触发且只发送一次，即使两次人工提问间隔不足终端空闲阈值、卡片始终显示 running，也不会合并漏报。Goal 模式的内部自动续轮先抑制通知，等待最终完成。通知使用紧凑的飞书 Card 2.0，以完成态 header、项目/会话信息块和默认展开的完整输出面板承载最终 turn 的 `last_agent_message`；长正文按 Unicode 字符边界拆成多张卡片，每张使用独立幂等键。动态正文使用 `plain_text`，避免 Agent 输出被解释成卡片 Markdown 或 `@` 指令。初始旧记录只建立基线，明确的其他 Agent 或记录不可用时保留终端完成边沿与摘要降级。
+- Codex 完成通知定位当前 tmux pane 的真实 Codex session，并从本机或已登记 SSH 目标的结构化记录读取原生 `task_complete`；每个真正结束的 `turn_id` 独立触发且只发送一次，即使两次人工提问间隔不足终端空闲阈值、卡片始终显示 running，也不会合并漏报。`node` 标记的本地 tmux Codex 在首轮 session 尚未创建、用户只编辑提示词或解析暂时失败时保持等待，不把 `running → idle` 降级成完成。Goal 模式的内部自动续轮先抑制通知，等待最终完成。通知使用紧凑的飞书 Card 2.0，以完成态 header、项目/会话信息块和默认展开的完整输出面板承载最终 turn 的 `last_agent_message`；长正文按 Unicode 字符边界拆成多张卡片，每张使用独立幂等键。动态正文使用 `plain_text`，避免 Agent 输出被解释成卡片 Markdown 或 `@` 指令。初始旧记录只建立基线，明确的其他 Agent 仍保留终端完成边沿与摘要降级。
 - 文件/VS Code 侧面板的拖动宽度只在 pointer release 时提交到 `file-browser-ui-state`；中间帧直接更新面板 DOM，刷新后仍恢复最后一次完成的宽度。
 - 会话分组配置保存在 `coding-kanban-session-groups-v1`：主页看板与聚焦视图“其他会话”侧栏共享分组名称和卡片归属，刷新页面后保持。
 - 新建会话窗口支持选择“未分组”或已有会话分组；会话创建成功后立即按稳定会话标识写入所选分组，创建失败不会产生分组归属。

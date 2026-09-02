@@ -30,6 +30,28 @@ function makeSession(
   };
 }
 
+function makeFallbackSession(
+  interactionState: AgentSessionRecord["interactionState"],
+): AgentSessionRecord {
+  return {
+    ...makeSession(interactionState),
+    agentKind: "shell",
+    displayName: "普通 Shell 任务",
+    transportRef: { tmuxSession: "existing-task" },
+  };
+}
+
+function makeNodeTmuxSession(
+  interactionState: AgentSessionRecord["interactionState"],
+): AgentSessionRecord {
+  return {
+    ...makeSession(interactionState),
+    agentKind: "node",
+    agentSessionId: undefined,
+    transportRef: { tmuxSession: "existing-task", tmuxPane: "%12" },
+  };
+}
+
 class SnapshotSource {
   #listener: ((snapshot: ListAgentSessionsResponse) => void) | null = null;
 
@@ -57,9 +79,9 @@ class SnapshotSource {
   }
 }
 
-test("notifies when an already-running Kanban session completes after the switch is enabled", async () => {
+test("notifies when an already-running non-Codex session completes after the switch is enabled", async () => {
   const source = new SnapshotSource({
-    items: [makeSession("running")],
+    items: [makeFallbackSession("running")],
     activeAgentSessionId: "session-1",
     updatedAt: "2026-09-01T10:00:00.000Z",
   });
@@ -79,32 +101,32 @@ test("notifies when an already-running Kanban session completes after the switch
   const stop = notifier.start();
 
   try {
-    source.emit("idle");
+    source.emitSession(makeFallbackSession("idle"));
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     assert.equal(sent.length, 1);
     assert.deepEqual(sent[0], {
       sessionId: "session-1",
-      displayName: "已经运行的 Codex",
-      agentKind: "codex",
+      displayName: "普通 Shell 任务",
+      agentKind: "shell",
       workingDirectory: "/workspace/existing-project",
       summary: "实现已经完成",
       completedAt: sent[0]?.completedAt,
     });
 
-    source.emit("idle");
+    source.emitSession(makeFallbackSession("idle"));
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(sent.length, 1);
 
-    source.emit("running");
+    source.emitSession(makeFallbackSession("running"));
     enabled = false;
-    source.emit("idle");
+    source.emitSession(makeFallbackSession("idle"));
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(sent.length, 1);
 
-    source.emit("running");
+    source.emitSession(makeFallbackSession("running"));
     enabled = true;
-    source.emit("exited");
+    source.emitSession(makeFallbackSession("exited"));
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(sent.length, 2);
   } finally {
@@ -131,6 +153,11 @@ test("replaces the card summary with the complete resolved Codex output", async 
     },
     contentResolver: {
       resolve: async () => completeOutput,
+      inspectLatestCompletion: async () => ({
+        completionId: "turn-complete-output",
+        content: completeOutput,
+        completedAt: "2026-09-01T10:00:01.000Z",
+      }),
     },
     sender: {
       send: async (event) => {
@@ -151,11 +178,67 @@ test("replaces the card summary with the complete resolved Codex output", async 
   }
 });
 
-test("notifies every structured Codex turn even when the terminal never becomes idle between turns", async () => {
+test("does not send a fallback card while a node-labelled tmux Codex is only editing a prompt", async () => {
+  const editingSession = (
+    interactionState: AgentSessionRecord["interactionState"],
+    outputPreview: string,
+  ): AgentSessionRecord => ({
+    ...makeNodeTmuxSession(interactionState),
+    outputPreview,
+    lastAgentMessageSummary: undefined,
+  });
+  const source = new SnapshotSource({
+    items: [editingSession("running", "正在编辑第一段提示词")],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-09-02T13:35:00.000Z",
+  });
+  const sent: FeishuCompletionEvent[] = [];
+  let fallbackReads = 0;
+  const stop = new AgentCompletionFeishuNotifier({
+    source,
+    settings: {
+      get: () => ({
+        configured: true,
+        destinationType: "user",
+        enabled: true,
+      }),
+    },
+    contentResolver: {
+      inspectLatestCompletion: async () => null,
+      resolve: async () => {
+        fallbackReads += 1;
+        return "不应发送的旧回复或终端摘要";
+      },
+    },
+    structuredCompletionProbeDelayMs: 0,
+    structuredCompletionProbeIntervalMs: 0,
+    sender: {
+      send: async (event) => {
+        sent.push(event);
+      },
+    },
+  }).start();
+
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    source.emitSession(editingSession("idle", "正在编辑第一段提示词"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    source.emitSession(editingSession("running", "正在编辑第二段提示词"));
+    source.emitSession(editingSession("idle", "正在编辑第二段提示词"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(sent.length, 0);
+    assert.equal(fallbackReads, 0);
+  } finally {
+    stop();
+  }
+});
+
+test("notifies every structured node-labelled Codex turn even when the terminal never becomes idle", async () => {
   const source = new SnapshotSource({
     items: [
       {
-        ...makeSession("running"),
+        ...makeNodeTmuxSession("running"),
         lastOutputAt: "2026-09-01T10:00:00.000Z",
       },
     ],
@@ -200,7 +283,7 @@ test("notifies every structured Codex turn even when the terminal never becomes 
       completedAt: "2026-09-01T10:00:05.000Z",
     };
     source.emitSession({
-      ...makeSession("running"),
+      ...makeNodeTmuxSession("running"),
       lastOutputAt: "2026-09-01T10:00:05.000Z",
     });
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
@@ -211,7 +294,7 @@ test("notifies every structured Codex turn even when the terminal never becomes 
       completedAt: "2026-09-01T10:00:08.000Z",
     };
     source.emitSession({
-      ...makeSession("running"),
+      ...makeNodeTmuxSession("running"),
       lastOutputAt: "2026-09-01T10:00:08.000Z",
     });
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
@@ -236,7 +319,7 @@ test("notifies every structured Codex turn even when the terminal never becomes 
       ],
     );
 
-    source.emit("idle");
+    source.emitSession(makeNodeTmuxSession("idle"));
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
     assert.equal(sent.length, 2);
   } finally {
@@ -443,13 +526,13 @@ test("does not notify for an idle session present in the initial snapshot", asyn
 
 test("does not treat restoration of a previously idle session as new work", async () => {
   const restoredSnapshot: ListAgentSessionsResponse = {
-    items: [makeSession("idle")],
+    items: [makeFallbackSession("idle")],
     activeAgentSessionId: "session-1",
     updatedAt: "2026-09-01T10:00:00.000Z",
   };
   const source = new SnapshotSource({
     ...restoredSnapshot,
-    items: [makeSession("detached")],
+    items: [makeFallbackSession("detached")],
   });
   const sent: FeishuCompletionEvent[] = [];
   const stop = new AgentCompletionFeishuNotifier({
@@ -470,13 +553,13 @@ test("does not treat restoration of a previously idle session as new work", asyn
   }).start();
 
   try {
-    source.emit("running");
-    source.emit("idle");
+    source.emitSession(makeFallbackSession("running"));
+    source.emitSession(makeFallbackSession("idle"));
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(sent.length, 0);
 
-    source.emit("running");
-    source.emit("idle");
+    source.emitSession(makeFallbackSession("running"));
+    source.emitSession(makeFallbackSession("idle"));
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(sent.length, 1);
   } finally {
@@ -486,13 +569,13 @@ test("does not treat restoration of a previously idle session as new work", asyn
 
 test("keeps a session armed when it was already running before restoration", async () => {
   const restoredSnapshot: ListAgentSessionsResponse = {
-    items: [makeSession("running")],
+    items: [makeFallbackSession("running")],
     activeAgentSessionId: "session-1",
     updatedAt: "2026-09-01T10:00:00.000Z",
   };
   const source = new SnapshotSource({
     ...restoredSnapshot,
-    items: [makeSession("detached")],
+    items: [makeFallbackSession("detached")],
   });
   let sends = 0;
   const stop = new AgentCompletionFeishuNotifier({
@@ -513,8 +596,8 @@ test("keeps a session armed when it was already running before restoration", asy
   }).start();
 
   try {
-    source.emit("running");
-    source.emit("idle");
+    source.emitSession(makeFallbackSession("running"));
+    source.emitSession(makeFallbackSession("idle"));
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(sends, 1);
   } finally {

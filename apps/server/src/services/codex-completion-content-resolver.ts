@@ -193,11 +193,15 @@ export class CodexCompletionContentResolver {
       registry: this.#registry,
       codexSessionLocator: this.#codexSessionLocator,
     });
-    this.#sessionResolutionCache.set(session.id, {
-      signature,
-      ...(sessionId ? { sessionId } : {}),
-      expiresAt: now + SESSION_RESOLUTION_CACHE_MS,
-    });
+    if (sessionId) {
+      this.#sessionResolutionCache.set(session.id, {
+        signature,
+        sessionId,
+        expiresAt: now + SESSION_RESOLUTION_CACHE_MS,
+      });
+    } else {
+      this.#sessionResolutionCache.delete(session.id);
+    }
     return sessionId;
   }
 }

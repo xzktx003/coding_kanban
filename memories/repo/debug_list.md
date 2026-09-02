@@ -19,6 +19,7 @@
 
 # 仓库 bug 修复记录
 
+- tmux 中由 `node` 包装的 Codex 在升级重启、首轮尚未提交时没有 rollout session，提示词编辑和状态栏重绘产生的 `running → idle` 曾被降级成飞书完成卡片。现对 Codex/已有 session/本地 tmux `node` 会话只认可新的结构化 `task_complete`，解析为空或失败不再发送终端摘要；未解析 session 不做负缓存，避免随后首轮短任务漏报，普通非 Codex 边沿降级保持不变。
 - Goal 模式的 Codex 会在内部阶段写出 `task_complete` 后自动创建 `goal.internal_context` 下一轮，旧通知器因此把中间状态误发为任务完成。现结合后续 `task_started` 和用户记录来源抑制 Goal 自动续轮，来源元数据尚未写入时先延迟判断，最终完成与人工快速追问仍按真实 turn 通知。
 - 飞书完成通知曾依赖终端连续静默 15 秒后的 `running → idle`，所以用户在 Codex 回复后快速继续提问时，多个 turn 会合并并漏报。现直接读取 JSONL 原生 `task_complete`，按 `turn_id` 对本机/SSH Codex 每个完成 turn 单独触发和去重；初始旧记录只作基线，状态边沿保留降级且不会双发，探测按输出变化防抖并缓存定位结果。
 - 飞书完成通知过去只发送卡片摘要并再次截断，无法看到 Codex 的完整最终答复。现复用活动 tmux pane/session 定位读取最后一条结构化 assistant 消息，保留纯文本换行与缩进，过长正文按序分片且每片使用稳定幂等键；只有读取不到记录时才回退摘要。

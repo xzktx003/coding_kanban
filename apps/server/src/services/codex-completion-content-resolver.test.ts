@@ -141,6 +141,58 @@ test("does not read a Codex transcript for an explicit non-Codex agent", async (
   assert.equal(reads, 0);
 });
 
+test("retries local Codex session discovery after an unresolved result", async () => {
+  const session = makeShellSession();
+  let activeSessionId: string | undefined;
+  let locatorCalls = 0;
+  const resolver = new CodexCompletionContentResolver({
+    registry: {
+      get: () => session,
+      updateSession: () => session,
+    },
+    codexSessionLocator: {
+      resolve: async () => {
+        locatorCalls += 1;
+        return activeSessionId;
+      },
+    },
+    codexTranscriptService: {
+      read: () => ({
+        available: true,
+        agentKind: "codex",
+        sessionId: activeSessionId ?? null,
+        matchedBy: "session-id",
+        updatedAt: "2026-09-02T13:35:01.000Z",
+        entries: [
+          {
+            id: "assistant-new-session",
+            timestamp: "2026-09-02T13:35:01.000Z",
+            kind: "assistant",
+            title: "Codex",
+            text: "新会话的完整回复",
+            collapsedByDefault: false,
+          },
+        ],
+        hasMore: false,
+        nextCursor: null,
+      }),
+    },
+  });
+  const event = {
+    sessionId: session.id,
+    displayName: session.displayName,
+    agentKind: session.agentKind,
+    workingDirectory: session.workingDirectory,
+    summary: "终端摘要",
+    completedAt: "2026-09-02T13:35:00.000Z",
+  };
+
+  assert.equal(await resolver.resolve(event), null);
+  activeSessionId = "codex-session-new-12345678";
+  assert.equal(await resolver.resolve(event), "新会话的完整回复");
+  assert.equal(locatorCalls, 2);
+});
+
 test("reads the complete last assistant entry from a registered SSH Codex session", async () => {
   const session: AgentSessionRecord = {
     ...makeShellSession(),

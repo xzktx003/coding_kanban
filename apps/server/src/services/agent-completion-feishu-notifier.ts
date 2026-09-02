@@ -85,9 +85,11 @@ function isCompletionState(
 }
 
 function canObserveStructuredCompletion(session: AgentSessionRecord): boolean {
+  const agentKind = session.agentKind.trim().toLowerCase();
   return (
-    session.agentKind.trim().toLowerCase() === "codex" ||
-    Boolean(session.agentSessionId)
+    agentKind === "codex" ||
+    Boolean(session.agentSessionId) ||
+    (agentKind === "node" && Boolean(session.transportRef?.tmuxSession))
   );
 }
 
@@ -224,7 +226,13 @@ export class AgentCompletionFeishuNotifier {
           if (!settings.configured || !settings.enabled) {
             continue;
           }
-          void this.#deliver(event);
+          const session = snapshot.items.find(
+            (candidate) => candidate.id === event.sessionId,
+          );
+          void this.#deliver(
+            event,
+            session ? canObserveStructuredCompletion(session) : false,
+          );
         } catch (error) {
           this.#logError(error, event);
         }
@@ -460,7 +468,10 @@ export class AgentCompletionFeishuNotifier {
     }
   }
 
-  async #deliver(event: FeishuCompletionEvent): Promise<void> {
+  async #deliver(
+    event: FeishuCompletionEvent,
+    requiresStructuredCompletion: boolean,
+  ): Promise<void> {
     if (this.#contentResolver?.inspectLatestCompletion) {
       try {
         const observation =
@@ -485,6 +496,10 @@ export class AgentCompletionFeishuNotifier {
           event,
         );
       }
+    }
+
+    if (requiresStructuredCompletion) {
+      return;
     }
 
     let resolvedContent: string | null = null;
