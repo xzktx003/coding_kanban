@@ -9099,6 +9099,33 @@ input {
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.52);
 }
 
+.agent-transcript-fullscreen-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 5200;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #0b0f14;
+  overscroll-behavior: contain;
+}
+
+.agent-transcript-fullscreen {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  background:
+    radial-gradient(
+      circle at top left,
+      rgba(246, 178, 107, 0.12),
+      transparent 32%
+    ),
+    #111820;
+}
+
 .agent-transcript-panel {
   width: 100%;
   height: 100%;
@@ -9147,7 +9174,8 @@ input {
 
 .agent-transcript-actions button,
 .agent-transcript-load-more button,
-.focus-transcript-btn {
+.focus-transcript-btn,
+.agent-transcript-fullscreen-toggle {
   color: #f4f1ea;
   background: rgba(255, 143, 31, 0.12);
   border: 1px solid rgba(255, 143, 31, 0.38);
@@ -9163,6 +9191,16 @@ input {
 
 .agent-transcript-actions button {
   padding: 6px 12px;
+}
+
+.agent-transcript-fullscreen-toggle {
+  padding: 6px 12px;
+}
+
+.agent-transcript-actions button:focus-visible,
+.agent-transcript-fullscreen-toggle:focus-visible {
+  outline: 2px solid #ff9f43;
+  outline-offset: 2px;
 }
 
 .focus-transcript-btn {
@@ -9494,6 +9532,29 @@ input {
   background: rgba(255, 143, 31, 0.42);
 }
 
+.agent-transcript-fullscreen .agent-transcript-header {
+  min-height: 58px;
+  padding: 9px clamp(14px, 3vw, 32px);
+  background: #12181f;
+}
+
+.agent-transcript-fullscreen .agent-transcript-body {
+  padding: 20px clamp(16px, 3vw, 40px) 32px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.agent-transcript-fullscreen .agent-transcript-body::selection,
+.agent-transcript-fullscreen .agent-transcript-body *::selection {
+  color: #fffaf3;
+  background: rgba(255, 143, 31, 0.42);
+}
+
+.agent-transcript-fullscreen .agent-transcript-list {
+  width: min(1200px, 100%);
+  margin: 0 auto;
+}
+
 .agent-transcript-match {
   margin-bottom: 12px;
   font-size: 12px;
@@ -9667,5 +9728,20 @@ input {
     align-items: flex-start;
     flex-direction: column;
     gap: 2px;
+  }
+
+  .agent-transcript-fullscreen .agent-transcript-header {
+    align-items: flex-start;
+    flex-direction: column;
+    padding-top: calc(9px + env(safe-area-inset-top));
+  }
+
+  .agent-transcript-fullscreen .agent-transcript-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .agent-transcript-fullscreen .agent-transcript-actions button {
+    min-height: 36px;
   }
 }

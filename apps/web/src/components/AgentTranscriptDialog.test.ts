@@ -272,6 +272,35 @@ test("mounts the transcript modal at document body above application chrome", ()
   );
 });
 
+test("offers a body-level fullscreen transcript surface with keyboard exit", () => {
+  const markup = renderToStaticMarkup(
+    createElement(AgentTranscriptDialog, {
+      agentSessionId: "codex-fullscreen",
+      displayName: "Fullscreen session",
+      onClose: () => {},
+      presentation: "panel",
+    }),
+  );
+  const source = readFileSync(
+    new URL("./AgentTranscriptDialog.tsx", import.meta.url),
+    "utf8",
+  );
+  const styles = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+  assert.match(markup, /aria-label="全屏查看完整记录"/);
+  assert.match(source, /setTranscriptFullscreen\(false\)/);
+  assert.match(source, /document\.body\.style\.overflow = "hidden"/);
+  assert.match(source, /createPortal\(view, document\.body\)/);
+  assert.match(
+    styles,
+    /\.agent-transcript-fullscreen-backdrop\s*\{[^}]*position:\s*fixed;[^}]*z-index:\s*5200;/s,
+  );
+  assert.match(
+    styles,
+    /\.agent-transcript-fullscreen\s*\{[^}]*height:\s*100%;/s,
+  );
+});
+
 test("lightweight transcript window keeps the newly loaded older records bounded", () => {
   const page = (start: number, count: number): AgentTranscriptResponse => ({
     available: true,

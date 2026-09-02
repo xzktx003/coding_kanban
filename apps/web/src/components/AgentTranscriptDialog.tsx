@@ -246,6 +246,8 @@ export function AgentTranscriptDialog({
   const sessionProbeIdRef = useRef(0);
   const transcriptSessionIdRef = useRef<string | null>(null);
   const loadingMoreRef = useRef(false);
+  const transcriptFullscreenTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const transcriptFullscreenExitRef = useRef<HTMLButtonElement | null>(null);
   const transcriptBodyRef = useRef<HTMLDivElement | null>(null);
   const transcriptContentRef = useRef<HTMLDivElement | null>(null);
   const initialBottomPinRef = useRef(false);
@@ -256,6 +258,7 @@ export function AgentTranscriptDialog({
   const maxRetainedEntries = useLightweightTerminalPreview
     ? LIGHTWEIGHT_TRANSCRIPT_WINDOW_SIZE
     : FULL_TRANSCRIPT_WINDOW_SIZE;
+  const [transcriptFullscreen, setTranscriptFullscreen] = useState(false);
 
   const load = useCallback(() => {
     const requestId = ++requestIdRef.current;
@@ -297,6 +300,10 @@ export function AgentTranscriptDialog({
       requestIdRef.current += 1;
     };
   }, [load]);
+
+  useEffect(() => {
+    setTranscriptFullscreen(false);
+  }, [agentSessionId, presentation]);
 
   useEffect(() => {
     loadingMoreRef.current = loadingMore;
@@ -511,7 +518,71 @@ export function AgentTranscriptDialog({
   );
 
   useEffect(() => {
-    if (presentation !== "dialog") {
+    if (!transcriptFullscreen) {
+      return;
+    }
+
+    const previousBodyOverflow = document.body.style.overflow;
+    const focusFrame = window.requestAnimationFrame(() => {
+      transcriptFullscreenExitRef.current?.focus();
+    });
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        setTranscriptFullscreen(false);
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+
+      const fullscreenSurface = transcriptFullscreenExitRef.current?.closest(
+        ".agent-transcript-fullscreen",
+      );
+      if (!fullscreenSurface) {
+        return;
+      }
+
+      const focusableElements = Array.from(
+        fullscreenSurface.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), summary, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => element.offsetParent !== null);
+      const firstFocusable = focusableElements[0];
+      const lastFocusable = focusableElements.at(-1);
+      if (!firstFocusable || !lastFocusable) {
+        event.preventDefault();
+        return;
+      }
+
+      if (
+        event.shiftKey &&
+        (document.activeElement === firstFocusable ||
+          !fullscreenSurface.contains(document.activeElement))
+      ) {
+        event.preventDefault();
+        lastFocusable.focus();
+      } else if (!event.shiftKey && document.activeElement === lastFocusable) {
+        event.preventDefault();
+        firstFocusable.focus();
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      window.removeEventListener("keydown", handleKeyDown, true);
+      document.body.style.overflow = previousBodyOverflow;
+      window.requestAnimationFrame(() => {
+        transcriptFullscreenTriggerRef.current?.focus();
+      });
+    };
+  }, [transcriptFullscreen]);
+
+  useEffect(() => {
+    if (presentation !== "dialog" || transcriptFullscreen) {
       return;
     }
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -522,18 +593,32 @@ export function AgentTranscriptDialog({
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [onClose, presentation]);
+  }, [onClose, presentation, transcriptFullscreen]);
+
+  const surfacePresentation = transcriptFullscreen
+    ? "fullscreen"
+    : presentation;
 
   const surface = (
     <section
       aria-label={`${displayName} 完整记录`}
-      aria-modal={presentation === "dialog" ? true : undefined}
-      className={`agent-transcript-surface agent-transcript-${presentation}`}
-      data-terminal-keyboard-isolation={
-        presentation === "panel" ? "true" : undefined
+      aria-modal={
+        surfacePresentation === "dialog" || surfacePresentation === "fullscreen"
+          ? true
+          : undefined
       }
-      role={presentation === "dialog" ? "dialog" : "region"}
-      tabIndex={presentation === "panel" ? -1 : undefined}
+      className={`agent-transcript-surface agent-transcript-${surfacePresentation}`}
+      data-terminal-keyboard-isolation={
+        presentation === "panel" || transcriptFullscreen ? "true" : undefined
+      }
+      role={
+        surfacePresentation === "dialog" || surfacePresentation === "fullscreen"
+          ? "dialog"
+          : "region"
+      }
+      tabIndex={
+        presentation === "panel" || transcriptFullscreen ? -1 : undefined
+      }
     >
       <header className="agent-transcript-header">
         <div>
@@ -541,6 +626,24 @@ export function AgentTranscriptDialog({
           <span>{displayName}</span>
         </div>
         <div className="agent-transcript-actions">
+          <button
+            aria-label={
+              transcriptFullscreen ? "退出完整记录全屏" : "全屏查看完整记录"
+            }
+            className="agent-transcript-fullscreen-toggle"
+            onClick={() => setTranscriptFullscreen((current) => !current)}
+            ref={
+              transcriptFullscreen
+                ? transcriptFullscreenExitRef
+                : transcriptFullscreenTriggerRef
+            }
+            title={
+              transcriptFullscreen ? "退出全屏（Esc）" : "全屏查看完整记录"
+            }
+            type="button"
+          >
+            {transcriptFullscreen ? "退出全屏" : "全屏"}
+          </button>
           <button
             disabled={loading || loadingMore}
             onClick={load}
@@ -560,7 +663,9 @@ export function AgentTranscriptDialog({
         onTouchStart={cancelInitialBottomPin}
         onWheel={cancelInitialBottomPin}
         ref={transcriptBodyRef}
-        tabIndex={presentation === "panel" ? -1 : undefined}
+        tabIndex={
+          presentation === "panel" || transcriptFullscreen ? -1 : undefined
+        }
       >
         <div ref={transcriptContentRef}>
           {error ? (
@@ -589,6 +694,22 @@ export function AgentTranscriptDialog({
       </div>
     </section>
   );
+
+  if (transcriptFullscreen) {
+    const view = (
+      <div
+        className="agent-transcript-fullscreen-backdrop"
+        data-layer="app-modal"
+        role="presentation"
+      >
+        {surface}
+      </div>
+    );
+
+    return typeof document === "undefined"
+      ? view
+      : createPortal(view, document.body);
+  }
 
   if (presentation === "panel") {
     return surface;
