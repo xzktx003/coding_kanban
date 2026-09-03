@@ -16,13 +16,6 @@ export type LaunchMode = "direct" | "tmux";
 
 export const DEFAULT_TMUX_HISTORY_LIMIT_LINES = 20_000;
 
-const kindPriority: Record<string, number> = {
-  copilot: 0,
-  codex: 1,
-  claude: 2,
-  shell: 3,
-};
-
 export function sortScanResults(results: ScanResult[]): ScanResult[] {
   return [...results].sort((a, b) => {
     // Only sort by displayName (宫格名)

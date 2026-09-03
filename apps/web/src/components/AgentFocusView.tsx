@@ -42,7 +42,6 @@ import {
   findNextOccupiedTerminalMonitorSlot,
   getTerminalMonitorSlotIds,
   getTerminalPaneContextPrimaryActionLabel,
-  isTerminalMonitorLayoutMode,
   normalizeTerminalMonitorSlots,
   placeTerminalMonitorSlotSession,
   restoreTerminalMonitorLayoutSnapshot,

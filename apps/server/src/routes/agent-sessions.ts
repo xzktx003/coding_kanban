@@ -51,11 +51,7 @@ import {
   type RemoteLaunchPreflightLike,
 } from "../services/remote-launch-preflight.js";
 import { DEFAULT_TERMINAL_TMUX_CAPTURE_LINES } from "../config/server-runtime-config.js";
-import {
-  buildInteractiveShellCommand,
-  buildTmuxCommand,
-  quoteForPosixShell,
-} from "../services/runtime-compat.js";
+import { buildInteractiveShellCommand } from "../services/runtime-compat.js";
 import { SshRuntimeManager } from "../services/ssh-runtime-manager.js";
 import {
   assertValidSshTarget,
@@ -129,24 +125,6 @@ function buildDirectLaunchCommand(
   }
 
   return `cd ${formatWorkingDirectory(workingDirectory)} && ${invocation}`;
-}
-
-function buildTmuxLaunchCommand(
-  agentKind: string,
-  workingDirectory: string,
-  displayName: string,
-  tmuxSessionName: string,
-  sessionId?: string,
-  tmuxHistoryLimit = DEFAULT_TERMINAL_TMUX_CAPTURE_LINES,
-): string {
-  const normalizedTmuxSessionName = normalizeTmuxSessionName(tmuxSessionName)!;
-  const tmuxPrefix = `tmux set-option -g history-limit ${tmuxHistoryLimit} \\; new-session`;
-
-  if (agentKind === "shell") {
-    return `${tmuxPrefix} -s ${shellQuote(normalizedTmuxSessionName)} -c ${formatWorkingDirectory(workingDirectory)}`;
-  }
-
-  return `${tmuxPrefix} -s ${shellQuote(normalizedTmuxSessionName)} ${buildTmuxCommand(buildDirectLaunchCommand(agentKind, workingDirectory, displayName, sessionId), true)}`;
 }
 
 function buildTmuxAttachCommand(

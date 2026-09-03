@@ -1,7 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 
-import type { OpenVsCodeWebResponse } from "@agent-orchestrator/shared";
-
 import { openVsCodeWeb } from "../lib/api";
 import {
   openVsCodeWebOnce,

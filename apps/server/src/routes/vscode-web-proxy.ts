@@ -225,16 +225,6 @@ export function resetVsCodeWebProxyDiagnosticsForTest(): void {
   totalWebSocketDownloadBytes = 0;
 }
 
-function firstHeaderValue(
-  value: string | string[] | undefined,
-): string | undefined {
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-
-  return value;
-}
-
 function withVsCodeClipboardPermissions(
   value: string | string[] | undefined,
 ): string {

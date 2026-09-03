@@ -108,7 +108,6 @@ interface CreateEntryState {
   value: string;
 }
 
-type UploadChoiceKind = "file" | "folder";
 type FileBrowserColumnKey =
   | "name"
   | "size"
@@ -183,26 +182,6 @@ function getFileIcon(entry: FileEntry): string {
 }
 
 export { isMarkdownFileName } from "../lib/file-types";
-
-function buildBreadcrumbs(
-  pathValue: string,
-): Array<{ label: string; path: string }> {
-  if (!pathValue) {
-    return [{ label: "Home", path: "" }];
-  }
-
-  const absolute = pathValue.startsWith("/");
-  const segments = pathValue.split("/").filter(Boolean);
-
-  if (segments.length === 0) {
-    return [{ label: "/", path: "/" }];
-  }
-
-  return segments.map((segment, index) => ({
-    label: segment,
-    path: `${absolute ? "/" : ""}${segments.slice(0, index + 1).join("/")}`,
-  }));
-}
 
 function formatSize(size: number): string {
   if (size < 1024) {
@@ -548,10 +527,6 @@ export function FileBrowserDrawer({
     };
   }, [updateColumnWidth]);
 
-  const breadcrumbs = useMemo(
-    () => buildBreadcrumbs(currentPath),
-    [currentPath],
-  );
   const selectedEntries = entries.filter((entry) =>
     selectedPaths.includes(entry.path),
   );

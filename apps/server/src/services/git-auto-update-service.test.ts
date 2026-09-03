@@ -271,7 +271,7 @@ test("starts an immediate check and an unref-ed interval at the configured caden
     },
   } as unknown as NodeJS.Timeout;
 
-  globalThis.setInterval = ((callback: () => void, delay?: number) => {
+  globalThis.setInterval = ((_callback: () => void, delay?: number) => {
     scheduledDelay = Number(delay ?? 0);
     return fakeTimer;
   }) as unknown as typeof setInterval;

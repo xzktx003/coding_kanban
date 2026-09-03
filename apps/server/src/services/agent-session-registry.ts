@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 
 import {
-  interactionStateOrder,
   type AgentOutputEntry,
   type AgentOutputStream,
   type AgentSessionRecord,
@@ -81,7 +80,6 @@ function mergeScreenWindow(previous: string, incoming: string): string {
 function byInteractionState(
   left: AgentSessionRecord,
   right: AgentSessionRecord,
-  getSessionOrder: (agentSessionId: string) => number,
 ): number {
   // Only sort by displayName (宫格名)
   return left.displayName.localeCompare(right.displayName);
@@ -114,13 +112,11 @@ export class AgentSessionRegistry {
   private readonly sessions = new Map<string, AgentSessionRecord>();
   private readonly outputEntries = new Map<string, AgentOutputEntry[]>();
   private readonly screenWindows = new Map<string, string>();
-  private readonly sessionOrder = new Map<string, number>();
   private readonly listeners = new Set<SnapshotListener>();
   private pendingSnapshotTimer: NodeJS.Timeout | null = null;
   private idleDetectionTimer: NodeJS.Timeout | null = null;
   private activeAgentSessionId: string | null = null;
   private lastSnapshotEmittedAt = 0;
-  private nextSessionOrder = 0;
   private readonly idleThresholdMs: number;
   private readonly idleDetectionIntervalMs: number;
 
@@ -136,9 +132,7 @@ export class AgentSessionRegistry {
 
   list(): ListAgentSessionsResponse {
     return {
-      items: [...this.sessions.values()].sort((left, right) =>
-        byInteractionState(left, right, this.getSessionOrder),
-      ),
+      items: [...this.sessions.values()].sort(byInteractionState),
       activeAgentSessionId: this.activeAgentSessionId,
       updatedAt: new Date().toISOString(),
     };
@@ -148,8 +142,6 @@ export class AgentSessionRegistry {
     this.sessions.clear();
     this.outputEntries.clear();
     this.screenWindows.clear();
-    this.sessionOrder.clear();
-    this.nextSessionOrder = 0;
 
     for (const persisted of snapshot.items) {
       const tmuxSession = persisted.transportRef?.tmuxSession;
@@ -170,7 +162,9 @@ export class AgentSessionRegistry {
         ...(persisted.taskSummaryUpdatedAt
           ? { taskSummaryUpdatedAt: persisted.taskSummaryUpdatedAt }
           : {}),
-        ...(persisted.projectName ? { projectName: persisted.projectName } : {}),
+        ...(persisted.projectName
+          ? { projectName: persisted.projectName }
+          : {}),
         ...(persisted.repositoryRoot
           ? { repositoryRoot: persisted.repositoryRoot }
           : {}),
@@ -204,8 +198,6 @@ export class AgentSessionRegistry {
       this.sessions.set(restored.id, restored);
       this.outputEntries.set(restored.id, []);
       this.screenWindows.set(restored.id, "");
-      this.sessionOrder.set(restored.id, this.nextSessionOrder);
-      this.nextSessionOrder += 1;
     }
 
     this.activeAgentSessionId =
@@ -279,8 +271,6 @@ export class AgentSessionRegistry {
     this.sessions.set(agentSession.id, agentSession);
     this.outputEntries.set(agentSession.id, []);
     this.screenWindows.set(agentSession.id, "");
-    this.sessionOrder.set(agentSession.id, this.nextSessionOrder);
-    this.nextSessionOrder += 1;
 
     if (!this.activeAgentSessionId) {
       this.activeAgentSessionId = agentSession.id;
@@ -554,7 +544,6 @@ export class AgentSessionRegistry {
     this.sessions.delete(agentSessionId);
     this.outputEntries.delete(agentSessionId);
     this.screenWindows.delete(agentSessionId);
-    this.sessionOrder.delete(agentSessionId);
     if (this.activeAgentSessionId === agentSessionId) {
       this.activeAgentSessionId = null;
     }
@@ -572,9 +561,6 @@ export class AgentSessionRegistry {
       currentEntries.slice(-this.maxOutputEntries),
     );
   }
-
-  private getSessionOrder = (agentSessionId: string): number =>
-    this.sessionOrder.get(agentSessionId) ?? Number.MAX_SAFE_INTEGER;
 
   private emitSnapshot(): void {
     this.clearPendingSnapshot();

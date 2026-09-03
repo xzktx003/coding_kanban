@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
-import { interactionStateOrder } from "@agent-orchestrator/shared";
 
 const stateLabels: Record<string, string> = {
   running: "运行中",

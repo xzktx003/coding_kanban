@@ -157,7 +157,7 @@ export class LocalTmuxInputRouter {
     input: StdinAgentSessionInput,
     options: LocalTmuxInputOptions,
   ): Promise<AgentSessionRecord> {
-    const { registry, tmuxAdapter, ptyRuntimeManager } = this.dependencies;
+    const { registry, ptyRuntimeManager } = this.dependencies;
     const ptyAvailable = ptyRuntimeManager.has(agentSession.id);
     const ptyReady = await this.isAttachedTmuxClientReady(
       agentSession.id,

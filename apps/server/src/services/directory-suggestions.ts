@@ -1,9 +1,4 @@
-import {
-  execFileSync,
-  execSync,
-  type ExecFileSyncOptions,
-  type ExecSyncOptions,
-} from "node:child_process";
+import { execFileSync, type ExecFileSyncOptions } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -19,19 +14,6 @@ import { buildSshArgs } from "./ssh-command.js";
 
 const DIRECTORY_SUGGESTIONS_READY = "__DIRECTORY_SUGGESTIONS_READY__";
 const MAX_DIRECTORY_SUGGESTIONS = 200;
-
-function execLocal(command: string, options?: ExecSyncOptions): string {
-  try {
-    const output = execSync(command, {
-      encoding: "utf8",
-      timeout: 5_000,
-      ...options,
-    });
-    return typeof output === "string" ? output.trim() : "";
-  } catch {
-    return "";
-  }
-}
 
 function execRemote(sshTarget: SshTarget, command: string): string {
   try {

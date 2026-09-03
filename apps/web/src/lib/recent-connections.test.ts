@@ -1,14 +1,22 @@
 import assert from "node:assert/strict";
-import { describe, it, beforeEach, before, after } from "node:test";
+import { describe, it, beforeEach } from "node:test";
 
 // Polyfill localStorage for Node.js test env
 const store = new Map<string, string>();
 const mockLocalStorage = {
   getItem: (key: string) => store.get(key) ?? null,
-  setItem: (key: string, value: string) => { store.set(key, value); },
-  removeItem: (key: string) => { store.delete(key); },
-  clear: () => { store.clear(); },
-  get length() { return store.size; },
+  setItem: (key: string, value: string) => {
+    store.set(key, value);
+  },
+  removeItem: (key: string) => {
+    store.delete(key);
+  },
+  clear: () => {
+    store.clear();
+  },
+  get length() {
+    return store.size;
+  },
   key: (i: number) => [...store.keys()][i] ?? null,
 };
 
@@ -48,8 +56,18 @@ describe("recent-connections", () => {
   });
 
   it("deduplicates by hostId + sessionName", () => {
-    saveRecentConnection({ hostName: "s1", hostId: "h1", sessionName: "t1", workingDirectory: "~/a" });
-    saveRecentConnection({ hostName: "s1", hostId: "h1", sessionName: "t1", workingDirectory: "~/b" });
+    saveRecentConnection({
+      hostName: "s1",
+      hostId: "h1",
+      sessionName: "t1",
+      workingDirectory: "~/a",
+    });
+    saveRecentConnection({
+      hostName: "s1",
+      hostId: "h1",
+      sessionName: "t1",
+      workingDirectory: "~/b",
+    });
 
     const result = loadRecentConnections();
     assert.equal(result.length, 1);
@@ -58,7 +76,12 @@ describe("recent-connections", () => {
 
   it("caps at 8 recent connections", () => {
     for (let i = 0; i < 10; i++) {
-      saveRecentConnection({ hostName: `h${i}`, hostId: `hid${i}`, sessionName: `t${i}`, workingDirectory: `~/${i}` });
+      saveRecentConnection({
+        hostName: `h${i}`,
+        hostId: `hid${i}`,
+        sessionName: `t${i}`,
+        workingDirectory: `~/${i}`,
+      });
     }
     const result = loadRecentConnections();
     assert.equal(result.length, 8);
@@ -67,7 +90,12 @@ describe("recent-connections", () => {
   });
 
   it("clears all connections", () => {
-    saveRecentConnection({ hostName: "s1", hostId: "h1", sessionName: "t1", workingDirectory: "~" });
+    saveRecentConnection({
+      hostName: "s1",
+      hostId: "h1",
+      sessionName: "t1",
+      workingDirectory: "~",
+    });
     clearRecentConnections();
     assert.deepEqual(loadRecentConnections(), []);
   });

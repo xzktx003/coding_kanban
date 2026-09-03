@@ -639,11 +639,6 @@ function scanRemoteTmux(
   return results;
 }
 
-function normalizePathForMatch(value?: string): string {
-  if (!value) return "";
-  return value.replace(/\/+$|\s+/g, "").toLowerCase();
-}
-
 function isSameSshTarget(left?: SshTarget, right?: SshTarget): boolean {
   if (!left && !right) return true;
   if (!left || !right) return false;
