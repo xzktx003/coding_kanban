@@ -2,6 +2,7 @@
 
 本文档根据现有仓库记忆整理历史 bug 修复记录。后续每次修复 bug，都应在本文件追加简短记录，说明现象、根因和关键修复点。
 
+- 飞书回复对应通知卡片后，少数 Codex 会话仍只填入文字而不自动执行。根因是单行回复未标记为 bracketed paste，会触发新版 Codex 的 paste-burst 识别；同时 node-pty 的写入 Promise 只表示进入应用队列，不表示字节已落入终端，紧随其后的 Enter 仍可能被合并处理。修复为所有交互回复统一使用 bracketed paste，并在活跃 PTY 写入后保留 50 ms 稳定窗口再单独发送 Enter；普通键盘输入和旧版直连 pipe 不受影响。
 - 飞书回复对应通知卡片后，文字已经进入 Codex 编辑区但没有自动执行。根因是 prompt 与 Enter 被合并成同一个 stdin 数据包，部分 Codex TUI 会消费文字却忽略同批次回车。修复为统一输入服务对交互 PTY/tmux 先写入 prompt（多行使用 bracketed paste），再单独写入 Enter；旧版直连进程/SSH pipe 则使用单个末尾换行提交，避免重复空命令。
 - Codex 升级重启后，在 tmux 中只编辑提示词、尚未提交任务也会连续发送飞书完成卡片。根因是新 Codex 首轮提交前还没有 rollout session，看板又把 `node` 包装进程的终端重绘和 15 秒空闲组成的 `running → idle` 当作完成边沿；结构化完成解析为空后通知器继续用提示词片段或 tmux 状态栏降级发送。修复为 Codex、已有 session ID 以及本地 tmux 中的 `node` 会话严格等待新的结构化 `task_complete`，解析为空或失败时不再发送终端摘要；未解析到 session 的结果不做 30 秒负缓存，避免首轮短任务随后真实完成时漏报。普通非 Codex 会话仍保留原完成边沿降级。红绿灯测试覆盖编辑停顿零通知、`node` 标记的真实 Codex turn 正常通知和 session 延迟创建后立即重试。
 - Goal 模式执行期间会在内部阶段写出 `task_complete`，旧通知器把每一个事件都当作整段对话结束，导致任务还会自动续跑时提前、重复发送飞书消息。修复为结合其后的 `task_started` 与用户记录元数据判断完成来源：带 `goal.internal_context` 的自动续轮不通知；下一轮已开始但来源元数据尚未落盘时先延迟；真实人工新一轮仍保留上一轮完成通知。红绿灯测试覆盖 Goal 中间完成、最终完成、JSONL 写入竞态和人工快速追问。

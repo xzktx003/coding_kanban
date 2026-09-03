@@ -3,10 +3,7 @@ import test from "node:test";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
-import {
-  AgentSessionInputService,
-  buildInteractivePromptInput,
-} from "./agent-session-input-service.js";
+import { AgentSessionInputService } from "./agent-session-input-service.js";
 
 function makeSession(
   overrides: Partial<AgentSessionRecord> = {},
@@ -144,12 +141,53 @@ test("submits interactive prompts with Enter in a separate write", async () => {
     },
   });
 
-  await service.writePrompt(session.id, "先检查\n然后修复");
+  await service.writePrompt(session.id, "继续执行");
 
-  assert.deepEqual(writes, [
-    buildInteractivePromptInput("先检查\n然后修复"),
-    "\r",
-  ]);
+  assert.deepEqual(writes, ["\x1b[200~继续执行\x1b[201~", "\r"]);
+});
+
+test("lets PTY prompt input settle before submitting it", async () => {
+  const session = makeSession({
+    transportRef: { runtimeId: "pty:session-1" },
+  });
+  const writes: string[] = [];
+  const service = new AgentSessionInputService({
+    registry: { get: () => session },
+    tmuxAdapter: {
+      writeInput: async () => {
+        throw new Error("unexpected tmux write");
+      },
+    },
+    localTmuxInputRouter: {
+      write: async () => {
+        throw new Error("unexpected local tmux write");
+      },
+    },
+    sshRuntimeManager: {
+      writeInput: () => {
+        throw new Error("unexpected SSH write");
+      },
+    },
+    ptyRuntimeManager: {
+      has: () => true,
+      write: async (_id, input) => {
+        writes.push(input);
+      },
+    },
+    processRuntimeManager: {
+      writeInput: () => {
+        throw new Error("unexpected process write");
+      },
+    },
+  });
+
+  const pending = service.writePrompt(session.id, "继续执行");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(writes, ["\x1b[200~继续执行\x1b[201~"]);
+
+  await pending;
+  assert.deepEqual(writes, ["\x1b[200~继续执行\x1b[201~", "\r"]);
 });
 
 test("submits legacy direct runtimes with one newline-delimited payload", async () => {

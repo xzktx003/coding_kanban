@@ -23,16 +23,18 @@ interface AgentSessionInputServiceOptions {
 
 const BRACKETED_PASTE_START = "\x1b[200~";
 const BRACKETED_PASTE_END = "\x1b[201~";
+const PTY_PROMPT_SETTLE_MS = 50;
 
 /**
- * Keep multiline prompts together when they are written to an interactive
- * terminal. The submit key is intentionally sent separately by writePrompt.
+ * Mark automated prompts as one paste operation so TUI paste-burst detection
+ * cannot absorb a following Enter as part of the pasted text.
  */
 export function buildInteractivePromptInput(prompt: string): string {
-  if (prompt.includes("\n")) {
-    return `${BRACKETED_PASTE_START}${prompt}${BRACKETED_PASTE_END}`;
-  }
-  return prompt;
+  return `${BRACKETED_PASTE_START}${prompt}${BRACKETED_PASTE_END}`;
+}
+
+function waitForPtyPromptToSettle(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, PTY_PROMPT_SETTLE_MS));
 }
 
 export class AgentSessionInputService {
@@ -106,6 +108,11 @@ export class AgentSessionInputService {
     }
 
     await this.write(sessionId, buildInteractivePromptInput(prompt));
+    // node-pty queues writes asynchronously and exposes no drain callback.
+    // Give the paste frame one short event boundary before submitting it.
+    if (this.options.ptyRuntimeManager.has(sessionId)) {
+      await waitForPtyPromptToSettle();
+    }
     return this.write(sessionId, "\r");
   }
 }

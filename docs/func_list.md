@@ -37,7 +37,7 @@
 - 设置的“工具”分类提供操作提示和浏览器完成通知；浏览器授权后，已知会话从 `running` 进入 `idle` 或 `exited` 时会发送系统通知。该开关只影响当前浏览器，页面必须保持打开。
 - 设置的“飞书通知”分类分别控制后端完成通知器和“飞书回复继续执行”。前端通过 `GET/PUT /api/settings/feishu-notifications` 读取和更新脱敏状态，只能看到是否配置、私聊/群聊类型和两个启用状态，永远不会收到目标 ID。后端持续观察全部已登记会话的新完成点，因此开启按钮前已经运行的本地或 SSH 会话在后续完成时同样发送；关闭期间不发送，重新开启后只处理新的完成点。
 - 飞书发送器从仓库根目录 `.env` 读取唯一的群聊或用户目标，以固定参数、无 shell 的方式执行 `scripts/codex-feishu-notify.mjs --kanban` 和 `lark-cli --as bot`。Codex、已有 Codex session ID 和本地 tmux 中常见的 `node` 包装会话只在出现新的结构化 `task_complete` 后发送完整最终回复并按需分片；编辑提示词、终端空闲、session 尚未创建或解析暂时失败都不降级发送。Goal 模式内部带 `goal.internal_context` 的自动续轮不发送；明确的其他 Agent 仍可使用有界终端摘要。旧 Codex 原生 hook 在 Kanban 接管模式下静默，避免同一任务重复提醒。
-- 私聊目标可以单独开启“飞书回复继续执行”，后端通过 `lark-cli event consume im.message.receive_v1 --as bot` 长连接接收事件，将被回复通知的 `message_id` 精确映射到看板 `sessionId`，并复用统一终端输入服务把文本送入仍在线、可控的 Codex；交互 PTY/tmux 先写入 prompt、再单独发送 Enter，多行使用 bracketed paste，旧版直连 pipe 使用末尾换行提交。发送者、私聊、文本类型、长度、控制字符、会话状态和重复事件均经过白名单校验；普通新消息、群聊、其他用户及无绑定回复不会执行。该开关默认关闭，群聊目标不可开启，不需要修改 Codex 或 Hermes。
+- 私聊目标可以单独开启“飞书回复继续执行”，后端通过 `lark-cli event consume im.message.receive_v1 --as bot` 长连接接收事件，将被回复通知的 `message_id` 精确映射到看板 `sessionId`，并复用统一终端输入服务把文本送入仍在线、可控的 Codex；交互 PTY/tmux 对单行和多行 prompt 都使用 bracketed paste，活跃 PTY 等待短暂稳定窗口后再单独发送 Enter，旧版直连 pipe 使用末尾换行提交。发送者、私聊、文本类型、长度、控制字符、会话状态和重复事件均经过白名单校验；普通新消息、群聊、其他用户及无绑定回复不会执行。该开关默认关闭，群聊目标不可开启，不需要修改 Codex 或 Hermes。
 - 设置的“资源调节”分类提供终端预览模式切换，可在默认轻量预览和旧版完整小终端预览之间切换，并收纳 VS Code 省内存/保持状态、释放 VS Code 缓存和资源诊断。
 - 资源诊断面板按需展示 xterm 实例数、终端 WebSocket 数、会话快照吞吐、终端实时流吞吐、终端历史缓冲裁剪状态、VS Code iframe 当前/隐藏数量、主线程长任务、VS Code 代理 HTTP/WS 吞吐和 Chromium JS heap 指标，用于定位浏览器内存、网络增长、长输出丢失与 VS Code iframe 卡顿来源。
 - 提供 `Ctrl/⌘+E` 快速连接 tmux、`Ctrl/⌘+Shift+S` 打开 tmux 扫描、`Alt+Q` 从聚焦视图返回宫格等快捷操作。
