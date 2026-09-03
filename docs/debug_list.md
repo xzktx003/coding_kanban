@@ -731,6 +731,13 @@
 - **修复**: 对本机 tmux 的普通进程类型动态探测当前 pane，并继续排除明确的 Claude、Copilot、OpenCode 卡片；解析 `codex resume` 的显式 session ID，且用顶层 rollout 和活动 cwd 二次校验后优先使用。
 - **测试**: 路由回归覆盖 `vim` 类型的 `zhuanli` tmux 卡片仍按活动 pane 解析；定位器回归覆盖同目录多个 rollout 时显式 resume ID 优先；真实页面确认接口与弹窗均精确命中活动 Codex session。
 
+### 长时间运行的 Codex 因 proc mtime 漂移找不到完整记录
+
+- **现象**: `research` tmux 中切到 `AtlasVQ` 等 Codex 窗口后点击“完整记录”，提示“没有找到与当前工作目录匹配的本机 Codex 记录”，尽管对应 rollout 仍在持续写入。
+- **根因**: shell snapshot 回退错误地使用 `/proc/<pid>` 目录 mtime 作为进程启动时间；该 mtime 会随运行期文件描述符等状态变化而漂移，长时间运行后与真实启动时间相差数分钟乃至数天，超过 snapshot 匹配窗口。
+- **修复**: 从 `/proc/stat` 的 `btime` 和 `/proc/<pid>/stat` 的 `starttime` tick 计算真实进程启动时刻，并使用 `getconf CLK_TCK` 获取系统 tick 频率；仅在合成 proc fixture 或瞬时读取失败时保留旧兜底。
+- **测试**: 定位器回归人为将 proc 目录 mtime 漂移 10 分钟，验证仍按真实 start tick 命中 session；真实 `research` 的 `mix_quant`、`pre_smooth_vq`、`AtlasVQ`、`channel_pruning` 四个活动 Codex pane 均解析为各自的精确 session ID。
+
 ### 切换输入窗格导致终端高度抖动和整屏重绘
 
 - **现象**: 左右窗格切换输入目标时，选中窗格标题高度变化，两个终端高度互换并触发整屏 fit，看起来像另一窗格重新刷新。
@@ -845,3 +852,4 @@
 ## 2026-08-26
 
 - 文件浏览器 SSH chmod 面板提交三位权限时返回 500 并保持弹窗：前端生成 `600`，后端校验却只接受带前导 `0` 的格式；放宽为标准三位或四位八进制权限并补充服务层测试。
+- 聚焦视图的全局键盘捕获声称把 `Esc` 留给弹窗，却会在 `window` 捕获阶段阻断所有非终端目标，导致分组窗格切换器进入“跳转/交换”二级操作后无法按 `Esc` 返回。现对 `dialog` / `alertdialog` 内的事件和焦点显式放行，切换器自身在捕获阶段读取最新二级状态并返回候选列表，避免 portal 重绘后的焦点过渡让快捷键失效。

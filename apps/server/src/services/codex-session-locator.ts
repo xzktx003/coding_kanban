@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import {
   closeSync,
   openSync,
@@ -19,8 +19,12 @@ const MAX_PROCESS_TREE_SIZE = 512;
 const TMUX_TIMEOUT_MS = 2_000;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 const SHELL_SNAPSHOT_MATCH_WINDOW_MS = 2 * 60 * 1_000;
+const FALLBACK_LINUX_CLOCK_TICKS_PER_SECOND = 100;
+
+let cachedLinuxClockTicksPerSecond: number | undefined;
 
 interface CodexSessionLocatorOptions {
+  clockTicksPerSecond?: number;
   procRoot?: string;
   sessionsRoot?: string;
   shellSnapshotsRoot?: string;
@@ -209,10 +213,66 @@ function listSessionFiles(root: string): string[] {
   return files;
 }
 
+function linuxClockTicksPerSecond(): number {
+  if (cachedLinuxClockTicksPerSecond !== undefined) {
+    return cachedLinuxClockTicksPerSecond;
+  }
+
+  try {
+    const value = Number(
+      execFileSync("getconf", ["CLK_TCK"], {
+        encoding: "utf8",
+        timeout: TMUX_TIMEOUT_MS,
+        maxBuffer: 16 * 1024,
+      }).trim(),
+    );
+    if (Number.isFinite(value) && value > 0) {
+      cachedLinuxClockTicksPerSecond = value;
+      return value;
+    }
+  } catch {
+    // Linux USER_HZ is 100 on the supported hosts; keep lookup best-effort.
+  }
+
+  cachedLinuxClockTicksPerSecond = FALLBACK_LINUX_CLOCK_TICKS_PER_SECOND;
+  return cachedLinuxClockTicksPerSecond;
+}
+
 function readProcessStartTime(
   procRoot: string,
   processId: number,
+  clockTicksPerSecond: number,
 ): number | null {
+  try {
+    const procStat = readFileSync(join(procRoot, String(processId), "stat"), {
+      encoding: "utf8",
+    });
+    const commandEnd = procStat.lastIndexOf(")");
+    const processFields =
+      commandEnd >= 0
+        ? procStat
+            .slice(commandEnd + 1)
+            .trim()
+            .split(/\s+/)
+        : [];
+    // `/proc/<pid>/stat` field 22 is starttime. After removing pid/comm,
+    // field 3 (`state`) is index 0, so starttime is index 19.
+    const startTicks = Number(processFields[19]);
+    const systemStat = readFileSync(join(procRoot, "stat"), "utf8");
+    const bootTimeMatch = /^btime\s+(?<seconds>\d+)$/m.exec(systemStat);
+    const bootTimeSeconds = Number(bootTimeMatch?.groups?.seconds);
+    if (
+      Number.isFinite(startTicks) &&
+      startTicks >= 0 &&
+      Number.isFinite(bootTimeSeconds) &&
+      bootTimeSeconds > 0
+    ) {
+      return (bootTimeSeconds + startTicks / clockTicksPerSecond) * 1_000;
+    }
+  } catch {
+    // Fall through for synthetic proc fixtures and short-lived processes.
+  }
+
   try {
     const modifiedAt = statSync(join(procRoot, String(processId))).mtimeMs;
     return Number.isFinite(modifiedAt) ? modifiedAt : null;
@@ -225,9 +285,14 @@ function resolveShellSnapshotSessionId(
   shellSnapshotsRoot: string,
   procRoot: string,
   processId: number,
+  clockTicksPerSecond: number,
   allowedSessionIds?: ReadonlySet<string>,
 ): string | null {
-  const processStartTime = readProcessStartTime(procRoot, processId);
+  const processStartTime = readProcessStartTime(
+    procRoot,
+    processId,
+    clockTicksPerSecond,
+  );
   if (processStartTime === null) {
     return null;
   }
@@ -367,6 +432,7 @@ async function defaultResolveTmuxActivePanePid(
 }
 
 export class CodexSessionLocator {
+  private readonly clockTicksPerSecond: number;
   private readonly procRoot: string;
   private readonly sessionsRoot: string;
   private readonly shellSnapshotsRoot: string;
@@ -379,6 +445,12 @@ export class CodexSessionLocator {
   ) => Promise<number | null>;
 
   constructor(options: CodexSessionLocatorOptions = {}) {
+    this.clockTicksPerSecond =
+      options.clockTicksPerSecond &&
+      Number.isFinite(options.clockTicksPerSecond) &&
+      options.clockTicksPerSecond > 0
+        ? options.clockTicksPerSecond
+        : linuxClockTicksPerSecond();
     this.procRoot = options.procRoot ?? "/proc";
     this.sessionsRoot =
       options.sessionsRoot ?? join(homedir(), ".codex", "sessions");
@@ -508,6 +580,7 @@ export class CodexSessionLocator {
         this.shellSnapshotsRoot,
         this.procRoot,
         processId,
+        this.clockTicksPerSecond,
         sessionCandidateIds,
       );
       if (!snapshotSessionId) {

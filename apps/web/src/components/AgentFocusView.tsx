@@ -21,7 +21,10 @@ import {
 import { FocusSidebarSessionCard } from "./FocusSidebarSessionCard";
 import { SessionGroupHeader } from "./SessionGroupControls";
 import { TerminalPaneContent } from "./TerminalPaneContent";
-import { TerminalSessionSwitcher } from "./TerminalSessionSwitcher";
+import {
+  TerminalSessionSwitcher,
+  type TerminalSessionSwitchAction,
+} from "./TerminalSessionSwitcher";
 import {
   groupSessions,
   isSessionGroupCollapsed,
@@ -42,12 +45,15 @@ import {
   findNextOccupiedTerminalMonitorSlot,
   getTerminalMonitorSlotIds,
   getTerminalPaneContextPrimaryActionLabel,
+  normalizeTerminalMonitorGroupOrder,
   normalizeTerminalMonitorSlots,
+  orderTerminalMonitorGroupSessions,
   placeTerminalMonitorSlotSession,
   restoreTerminalMonitorLayoutSnapshot,
   resolveFocusedTerminalMonitorSlotId,
   setTerminalMonitorSlotSession,
   shouldSyncTerminalInputWithFocusedSession,
+  swapTerminalMonitorGroupOrder,
   type RestorableTerminalMonitorLayoutMode,
   type TerminalMonitorArrangementMode,
   type TerminalMonitorLayoutSnapshot,
@@ -282,6 +288,9 @@ export function AgentFocusView({
   const [terminalSlots, setTerminalSlots] = useState<TerminalMonitorSlot[]>(
     initialTerminalWorkspaceState.slots,
   );
+  const [groupSessionOrderByGroupId, setGroupSessionOrderByGroupId] = useState(
+    initialTerminalWorkspaceState.groupSessionOrderByGroupId,
+  );
   const retainedTerminalSlotsRef = useRef<TerminalMonitorSlot[]>(
     initialTerminalWorkspaceState.slots,
   );
@@ -484,19 +493,41 @@ export function AgentFocusView({
   const selectedArrangementGroup = arrangementGroups.find(
     (group) => group.id === terminalArrangementGroupId,
   );
+  const normalizedGroupSessionOrderByGroupId = useMemo(
+    () =>
+      Object.fromEntries(
+        arrangementGroups.map((group) => [
+          group.id,
+          normalizeTerminalMonitorGroupOrder(
+            group.sessions,
+            groupSessionOrderByGroupId[group.id],
+          ),
+        ]),
+      ),
+    [arrangementGroups, groupSessionOrderByGroupId],
+  );
   const groupArrangementEnabled =
     terminalArrangementMode === "group" &&
     selectedArrangementGroup !== undefined;
-  const groupArrangementSessions = selectedArrangementGroup?.sessions ?? [];
+  const groupArrangementSessions = useMemo(
+    () =>
+      selectedArrangementGroup
+        ? orderTerminalMonitorGroupSessions(
+            selectedArrangementGroup.sessions,
+            normalizedGroupSessionOrderByGroupId[selectedArrangementGroup.id],
+          )
+        : [],
+    [normalizedGroupSessionOrderByGroupId, selectedArrangementGroup],
+  );
   const groupTerminalSlots = useMemo(
     () =>
       selectedArrangementGroup
         ? buildTerminalMonitorGroupSlots(
             selectedArrangementGroup.id,
-            selectedArrangementGroup.sessions,
+            groupArrangementSessions,
           )
         : [],
-    [selectedArrangementGroup],
+    [groupArrangementSessions, selectedArrangementGroup],
   );
   const resolvedActiveGroupSessionId = groupArrangementSessions.some(
     (session) => session.id === activeGroupSessionId,
@@ -705,12 +736,14 @@ export function AgentFocusView({
       arrangementMode: terminalArrangementMode,
       arrangementGroupId:
         terminalArrangementMode === "group" ? terminalArrangementGroupId : null,
+      groupSessionOrderByGroupId: normalizedGroupSessionOrderByGroupId,
       slots: terminalSlots,
       activeSlotId: safeActiveSlotId,
       closedSlotIds: Array.from(closedSlotIds),
     });
   }, [
     closedSlotIds,
+    normalizedGroupSessionOrderByGroupId,
     safeActiveSlotId,
     terminalArrangementGroupId,
     terminalArrangementMode,
@@ -916,6 +949,40 @@ export function AgentFocusView({
     }
   }
 
+  function scrollGroupSessionIntoView(sessionId: string) {
+    requestAnimationFrame(() => {
+      const layout = terminalLayoutScrollElementRef.current;
+      const pane = Array.from(
+        layout?.querySelectorAll<HTMLElement>("[data-terminal-pane-session]") ??
+          [],
+      ).find((element) => element.dataset.terminalPaneSession === sessionId);
+      if (!layout || !pane) {
+        return;
+      }
+
+      const layoutRect = layout.getBoundingClientRect();
+      const paneRect = pane.getBoundingClientRect();
+      if (
+        paneRect.top >= layoutRect.top &&
+        paneRect.bottom <= layoutRect.bottom
+      ) {
+        return;
+      }
+
+      const paneTop = layout.scrollTop + paneRect.top - layoutRect.top;
+      const centeredTop =
+        paneTop - Math.max(0, (layout.clientHeight - paneRect.height) / 2);
+      const maxScrollTop = Math.max(
+        0,
+        layout.scrollHeight - layout.clientHeight,
+      );
+      layout.scrollTo({
+        behavior: "smooth",
+        top: Math.max(0, Math.min(maxScrollTop, centeredTop)),
+      });
+    });
+  }
+
   function handlePanePointerDownCapture(
     slot: TerminalMonitorSlot,
     event: React.PointerEvent<HTMLDivElement>,
@@ -940,7 +1007,11 @@ export function AgentFocusView({
     activateSlot(slot);
   }
 
-  function handleSelectSlotSession(slotId: string, sessionId: string) {
+  function handleSelectSlotSession(
+    slotId: string,
+    sessionId: string,
+    action: TerminalSessionSwitchAction,
+  ) {
     if (!sessionId) {
       return;
     }
@@ -954,9 +1025,46 @@ export function AgentFocusView({
       const existingSlot = displayedTerminalSlots.find(
         (slot) => slot.sessionId === sessionId,
       );
-      if (existingSlot) {
-        activateSlot(existingSlot);
+      if (!existingSlot) {
+        return;
       }
+
+      if (action === "swap") {
+        const sourceSlot = displayedTerminalSlots.find(
+          (slot) => slot.id === slotId,
+        );
+        if (
+          !sourceSlot?.sessionId ||
+          !selectedArrangementGroup ||
+          sourceSlot.sessionId === sessionId
+        ) {
+          return;
+        }
+
+        setGroupSessionOrderByGroupId((current) => {
+          const groupId = selectedArrangementGroup.id;
+          const currentOrder = normalizeTerminalMonitorGroupOrder(
+            selectedArrangementGroup.sessions,
+            current[groupId],
+          );
+          return {
+            ...current,
+            [groupId]: swapTerminalMonitorGroupOrder(
+              currentOrder,
+              sourceSlot.sessionId!,
+              sessionId,
+            ),
+          };
+        });
+        setActiveGroupSessionId(sessionId);
+        if (syncActiveTerminalWithFocus && sessionId !== focusedSession.id) {
+          onSwitchFocus(sessionId);
+        }
+        return;
+      }
+
+      activateSlot(existingSlot);
+      scrollGroupSessionIntoView(sessionId);
       return;
     }
 
@@ -1513,6 +1621,12 @@ export function AgentFocusView({
 
       if (e.key === "Escape") {
         // Esc is reserved for dialog-like interactions; never use it to exit focus mode.
+        if (
+          target?.closest('[role="dialog"], [role="alertdialog"]') ||
+          active?.closest('[role="dialog"], [role="alertdialog"]')
+        ) {
+          return;
+        }
         if (!isInActiveTerminal(target) && !isInActiveTerminal(active)) {
           e.stopPropagation();
         }
@@ -1796,6 +1910,7 @@ export function AgentFocusView({
         </div>
         <div className="focus-main-terminal">
           <div
+            ref={terminalLayoutScrollElementRef}
             className={`focus-terminal-layout focus-terminal-layout--${terminalLayoutMode}${groupArrangementEnabled ? " focus-terminal-layout--group" : ""}`}
             data-terminal-arrangement={
               groupArrangementEnabled ? "group" : "manual"
@@ -1890,8 +2005,8 @@ export function AgentFocusView({
                     )}
                     <TerminalSessionSwitcher
                       allowOccupiedSessionSelection={groupArrangementEnabled}
-                      onSelect={(sessionId) =>
-                        handleSelectSlotSession(slot.id, sessionId)
+                      onSelect={(sessionId, action) =>
+                        handleSelectSlotSession(slot.id, sessionId, action)
                       }
                       paneIndex={paneIndex}
                       placementBySessionId={sessionMonitorPlacementById}

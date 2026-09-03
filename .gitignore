@@ -26,5 +26,6 @@ vibe-kanban
 .codex/
 apps/server/.codex
 apps/server/.codex/
+.agents/skills/sun_yu_chen/
 .omx/
 .worktrees/

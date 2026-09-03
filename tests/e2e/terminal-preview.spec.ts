@@ -39,7 +39,10 @@ async function installTrackingWebSocket(
   }: { stalledTerminalConnections?: number } = {},
 ): Promise<void> {
   await page.addInitScript((initialStalledTerminalConnections: number) => {
-    localStorage.clear();
+    if (!sessionStorage.getItem("coding-kanban-e2e-storage-initialized")) {
+      localStorage.clear();
+      sessionStorage.setItem("coding-kanban-e2e-storage-initialized", "true");
+    }
 
     const trackedWindow = window as Window & {
       __allWebSocketUrls?: string[];
@@ -236,6 +239,11 @@ async function terminalWebSocketSends(page: Page): Promise<string[]> {
         .__terminalWebSocketSends ?? []),
     ];
   });
+}
+
+async function openResourceSettings(page: Page): Promise<void> {
+  await page.getByTestId("settings-menu-toggle").click();
+  await page.getByTestId("settings-section-resource").click();
 }
 
 async function maximumPendingTerminalReplays(page: Page): Promise<number> {
@@ -471,7 +479,7 @@ test("complete transcript starts at the newest page and loads older pages upward
     .toBeGreaterThan(0);
 });
 
-test("complete transcript controls stay above app chrome in a compact desktop window", async ({
+test("complete transcript controls stay visible in a compact desktop side panel", async ({
   page,
 }) => {
   await page.setViewportSize({ width: 880, height: 480 });
@@ -509,15 +517,14 @@ test("complete transcript controls stay above app chrome in a compact desktop wi
     .dblclick();
   await page.getByRole("button", { name: "完整记录" }).click();
 
-  const backdrop = page.locator(".agent-transcript-backdrop");
+  const panel = page.locator(".agent-transcript-panel");
   const refresh = page.getByRole("button", { name: "刷新" });
   const close = page.getByRole("button", { name: "关闭", exact: true });
-  await expect(backdrop).toBeVisible();
-  expect(
-    await backdrop.evaluate(
-      (element) => element.parentElement === document.body,
-    ),
-  ).toBe(true);
+  await expect(panel).toBeVisible();
+  await expect(panel).toHaveAttribute(
+    "aria-label",
+    "Compact Transcript Session 完整记录",
+  );
 
   for (const control of [refresh, close]) {
     const bounds = await control.boundingBox();
@@ -526,10 +533,13 @@ test("complete transcript controls stay above app chrome in a compact desktop wi
     expect((bounds?.y ?? 0) + (bounds?.height ?? 0)).toBeLessThanOrEqual(480);
   }
 
+  const transcriptRequestsBeforeRefresh = transcriptRequests;
   await refresh.click();
-  await expect.poll(() => transcriptRequests).toBe(2);
+  await expect
+    .poll(() => transcriptRequests)
+    .toBeGreaterThan(transcriptRequestsBeforeRefresh);
   await close.click();
-  await expect(backdrop).toHaveCount(0);
+  await expect(panel).toHaveCount(0);
 });
 
 test("complete transcript follows the selected monitor pane", async ({
@@ -597,7 +607,7 @@ test("complete transcript follows the selected monitor pane", async ({
   );
 
   await page.getByRole("button", { name: "完整记录" }).click();
-  await expect(page.locator(".agent-transcript-dialog")).toHaveAttribute(
+  await expect(page.locator(".agent-transcript-panel")).toHaveAttribute(
     "aria-label",
     "xh3_refmodel 完整记录",
   );
@@ -1405,30 +1415,34 @@ test("group arrangement renders only one group and scrolls through overflow", as
 
   await mockSessions(page, sessions);
   await page.addInitScript(() => {
-    localStorage.setItem(
-      "coding-kanban-session-groups-v1",
-      JSON.stringify({
-        groups: [{ id: "group-research", name: "研究" }],
-        assignments: Object.fromEntries(
-          Array.from({ length: 6 }, (_, index) => [
-            `session:group-session-${index + 1}`,
-            "group-research",
-          ]),
-        ),
-        collapsedGroupIds: [],
-      }),
-    );
-    localStorage.setItem(
-      "terminal-monitor-workspace-v1",
-      JSON.stringify({
-        mode: "triple",
-        arrangementMode: "manual",
-        arrangementGroupId: null,
-        slots: [],
-        activeSlotId: "terminal-monitor-slot-1",
-        closedSlotIds: [],
-      }),
-    );
+    if (!localStorage.getItem("coding-kanban-session-groups-v1")) {
+      localStorage.setItem(
+        "coding-kanban-session-groups-v1",
+        JSON.stringify({
+          groups: [{ id: "group-research", name: "研究" }],
+          assignments: Object.fromEntries(
+            Array.from({ length: 6 }, (_, index) => [
+              `session:group-session-${index + 1}`,
+              "group-research",
+            ]),
+          ),
+          collapsedGroupIds: [],
+        }),
+      );
+    }
+    if (!localStorage.getItem("terminal-monitor-workspace-v1")) {
+      localStorage.setItem(
+        "terminal-monitor-workspace-v1",
+        JSON.stringify({
+          mode: "triple",
+          arrangementMode: "manual",
+          arrangementGroupId: null,
+          slots: [],
+          activeSlotId: "terminal-monitor-slot-1",
+          closedSlotIds: [],
+        }),
+      );
+    }
   });
   await page.goto("/");
 
@@ -1495,16 +1509,115 @@ test("group arrangement renders only one group and scrolls through overflow", as
   await expect(
     switcher.locator('[data-terminal-switch-session-id="outside-session"]'),
   ).toHaveCount(0);
-  const secondSessionOption = switcher.locator(
-    '[data-terminal-switch-session-id="group-session-2"]',
+  const fifthSessionOption = switcher.locator(
+    '[data-terminal-switch-session-id="group-session-5"]',
   );
-  await expect(secondSessionOption).toBeEnabled();
-  await secondSessionOption.click();
+  await expect(fifthSessionOption).toBeEnabled();
+  await fifthSessionOption.click();
+  const placementActions = page.getByTestId(
+    "terminal-session-placement-actions",
+  );
+  await expect(placementActions).toContainText("Research 5");
+  await expect(
+    placementActions.getByRole("button", { name: "跳到对应位置" }),
+  ).toBeVisible();
+  await expect(
+    placementActions.getByRole("button", { name: "与当前位置交换" }),
+  ).toBeVisible();
+  await placementActions
+    .getByRole("button", { name: "跳到对应位置" })
+    .press("Escape");
+  await expect(placementActions).toBeHidden();
+  await expect(switcher.getByRole("searchbox")).toBeFocused();
+  await fifthSessionOption.click();
+  await placementActions.getByRole("button", { name: "跳到对应位置" }).click();
   await expect(
     layout.locator(
-      '[data-terminal-pane-session="group-session-2"][data-active-terminal-pane="true"]',
+      '[data-terminal-pane-session="group-session-5"][data-active-terminal-pane="true"]',
     ),
   ).toHaveCount(1);
+  await expect
+    .poll(() => layout.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(0);
+  await expect(
+    layout
+      .locator("[data-terminal-pane-session]")
+      .evaluateAll((panes) =>
+        panes.map((pane) => pane.getAttribute("data-terminal-pane-session")),
+      ),
+  ).resolves.toEqual(groupedSessions.map((session) => session.id));
+
+  const firstVisualPane = layout.locator("[data-terminal-pane-session]").nth(0);
+  await firstVisualPane
+    .getByRole("combobox", { name: "选择第 1 个监控终端" })
+    .click();
+  await page
+    .getByRole("dialog", { name: "切换第 1 个监控终端" })
+    .locator('[data-terminal-switch-session-id="group-session-6"]')
+    .click();
+  await page
+    .getByTestId("terminal-session-placement-actions")
+    .getByRole("button", { name: "与当前位置交换" })
+    .click();
+
+  const expectedSwappedOrder = [
+    "group-session-6",
+    "group-session-2",
+    "group-session-3",
+    "group-session-4",
+    "group-session-5",
+    "group-session-1",
+  ];
+  await expect(
+    layout
+      .locator("[data-terminal-pane-session]")
+      .evaluateAll((panes) =>
+        panes.map((pane) => pane.getAttribute("data-terminal-pane-session")),
+      ),
+  ).resolves.toEqual(expectedSwappedOrder);
+  await expect(firstVisualPane).toHaveAttribute(
+    "data-terminal-pane-session",
+    "group-session-6",
+  );
+  await expect(firstVisualPane).toHaveAttribute(
+    "data-active-terminal-pane",
+    "true",
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const raw = localStorage.getItem("terminal-monitor-workspace-v1");
+        if (!raw) return null;
+        const state = JSON.parse(raw) as {
+          arrangementGroupId?: string | null;
+          arrangementMode?: string;
+          groupSessionOrderByGroupId?: Record<string, string[]>;
+        };
+        return {
+          arrangementGroupId: state.arrangementGroupId ?? null,
+          arrangementMode: state.arrangementMode ?? null,
+          order: state.groupSessionOrderByGroupId?.["group-research"] ?? null,
+        };
+      }),
+    )
+    .toEqual({
+      arrangementGroupId: "group-research",
+      arrangementMode: "group",
+      order: expectedSwappedOrder,
+    });
+
+  await page.reload();
+  const restoredLayout = page.locator(
+    '.focus-terminal-layout[data-terminal-arrangement="group"]',
+  );
+  await expect(restoredLayout).toBeVisible();
+  await expect(
+    restoredLayout
+      .locator("[data-terminal-pane-session]")
+      .evaluateAll((panes) =>
+        panes.map((pane) => pane.getAttribute("data-terminal-pane-session")),
+      ),
+  ).resolves.toEqual(expectedSwappedOrder);
 });
 
 test("renders distinct group colors consistently across board and switcher", async ({
@@ -1700,7 +1813,7 @@ test("preview mode toggle restores full terminal previews on demand", async ({
 
   await page.goto("/");
 
-  await page.getByTestId("resource-tuning-menu-toggle").click();
+  await openResourceSettings(page);
   const toggle = page.getByTestId("terminal-preview-mode-toggle");
   const toggleLabel = toggle.locator("span").first();
   await expect(toggleLabel).toHaveText("轻量预览：开");
@@ -1747,7 +1860,7 @@ test("grid virtualizes full terminal previews when many tmux sessions are joined
   await mockSessions(page, sessions);
   await page.goto("/");
 
-  await page.getByTestId("resource-tuning-menu-toggle").click();
+  await openResourceSettings(page);
   await page.getByTestId("terminal-preview-mode-toggle").click();
 
   const grid = page.getByTestId("agent-grid");
@@ -1796,7 +1909,7 @@ test("VS Code preserve-state profile restores full terminal previews for running
 
   await page.goto("/");
 
-  await page.getByTestId("resource-tuning-menu-toggle").click();
+  await openResourceSettings(page);
   const vscodeProfileToggle = page.getByTestId("vscode-cache-mode-toggle");
   const vscodeProfileLabel = vscodeProfileToggle.locator("span").first();
   await expect(vscodeProfileLabel).toHaveText("VS Code 省内存");

@@ -40,6 +40,12 @@ export interface TerminalSessionSwitchItem {
   occupiedPaneIndex: number | null;
 }
 
+export type TerminalSessionSwitchAction = "select" | "jump" | "swap";
+export type TerminalSessionSwitchSelection =
+  | "close"
+  | "select"
+  | "choose-placement-action";
+
 export function isTerminalSessionSwitchItemDisabled(
   item: TerminalSessionSwitchItem,
   allowOccupiedSessionSelection = false,
@@ -49,6 +55,19 @@ export function isTerminalSessionSwitchItemDisabled(
     item.occupiedPaneIndex !== null &&
     !allowOccupiedSessionSelection
   );
+}
+
+export function resolveTerminalSessionSwitchSelection(
+  item: TerminalSessionSwitchItem,
+  allowOccupiedSessionSelection = false,
+): TerminalSessionSwitchSelection {
+  if (item.selected) {
+    return "close";
+  }
+  if (allowOccupiedSessionSelection && item.occupiedPaneIndex !== null) {
+    return "choose-placement-action";
+  }
+  return "select";
 }
 
 export interface TerminalSessionSwitchGroup {
@@ -141,7 +160,7 @@ interface TerminalSessionSwitcherProps {
   sessions: AgentSessionRecord[];
   sessionGroups: SessionGroupState;
   placementBySessionId: ReadonlyMap<string, TerminalSessionPlacement>;
-  onSelect: (sessionId: string) => void;
+  onSelect: (sessionId: string, action: TerminalSessionSwitchAction) => void;
   onToggleGroup?: (groupId: string, scope?: string) => void;
 }
 
@@ -274,9 +293,16 @@ export function TerminalSessionSwitcher({
     null,
   );
   const [searchQuery, setSearchQuery] = useState("");
+  const [pendingPlacementItem, setPendingPlacementItem] =
+    useState<TerminalSessionSwitchItem | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const placementPrimaryActionRef = useRef<HTMLButtonElement | null>(null);
+  const pendingPlacementItemRef = useRef<TerminalSessionSwitchItem | null>(
+    null,
+  );
+  pendingPlacementItemRef.current = pendingPlacementItem;
   const menuId = useId();
   const groups = buildTerminalSessionSwitchGroups({
     sessions,
@@ -351,6 +377,12 @@ export function TerminalSessionSwitcher({
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
+        if (pendingPlacementItemRef.current) {
+          setPendingPlacementItem(null);
+          requestAnimationFrame(() => searchInputRef.current?.focus());
+          return;
+        }
         setOpen(false);
         triggerRef.current?.focus();
       }
@@ -358,12 +390,12 @@ export function TerminalSessionSwitcher({
 
     updatePosition();
     document.addEventListener("pointerdown", handlePointerDown, true);
-    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown, true);
     window.addEventListener("resize", updatePosition);
     window.addEventListener("scroll", updatePosition, true);
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown, true);
-      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown, true);
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
@@ -375,6 +407,10 @@ export function TerminalSessionSwitcher({
     }
 
     const frame = requestAnimationFrame(() => {
+      if (pendingPlacementItem) {
+        placementPrimaryActionRef.current?.focus();
+        return;
+      }
       if (searchInputRef.current) {
         searchInputRef.current.focus();
         return;
@@ -389,17 +425,45 @@ export function TerminalSessionSwitcher({
       (preferred ?? fallback)?.focus();
     });
     return () => cancelAnimationFrame(frame);
-  }, [menuPosition, open]);
+  }, [menuPosition, open, pendingPlacementItem]);
 
   function openMenu() {
     setSearchQuery("");
+    setPendingPlacementItem(null);
     setMenuPosition(null);
     setOpen(true);
   }
 
-  function selectSession(sessionId: string) {
+  function selectSession(
+    sessionId: string,
+    action: TerminalSessionSwitchAction,
+  ) {
     setOpen(false);
-    onSelect(sessionId);
+    setPendingPlacementItem(null);
+    onSelect(sessionId, action);
+  }
+
+  function handleSessionSelection(item: TerminalSessionSwitchItem) {
+    const selection = resolveTerminalSessionSwitchSelection(
+      item,
+      allowOccupiedSessionSelection,
+    );
+    if (selection === "close") {
+      setOpen(false);
+      setPendingPlacementItem(null);
+      triggerRef.current?.focus();
+      return;
+    }
+    if (selection === "choose-placement-action") {
+      setPendingPlacementItem(item);
+      return;
+    }
+    selectSession(item.session.id, "select");
+  }
+
+  function returnToSessionList() {
+    setPendingPlacementItem(null);
+    requestAnimationFrame(() => searchInputRef.current?.focus());
   }
 
   function handleTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
@@ -414,6 +478,18 @@ export function TerminalSessionSwitcher({
   }
 
   function handleMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      if (pendingPlacementItem) {
+        returnToSessionList();
+      } else {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+      return;
+    }
+
     if (
       event.key !== "ArrowDown" &&
       event.key !== "ArrowUp" &&
@@ -506,7 +582,9 @@ export function TerminalSessionSwitcher({
                   <span className="terminal-session-switcher-kicker">
                     终端窗格 {paneIndex}
                   </span>
-                  <strong>切换会话</strong>
+                  <strong>
+                    {pendingPlacementItem ? "选择操作" : "切换会话"}
+                  </strong>
                 </div>
                 <div className="terminal-session-switcher-menu-meta">
                   <span>{groups.length} 组</span>
@@ -527,113 +605,150 @@ export function TerminalSessionSwitcher({
                   </button>
                 </div>
               </div>
-              <div className="terminal-session-switcher-search">
-                <span aria-hidden="true">⌕</span>
-                <input
-                  ref={searchInputRef}
-                  aria-label="搜索会话或分组"
-                  autoComplete="off"
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") {
-                      event.preventDefault();
-                      setOpen(false);
-                      triggerRef.current?.focus();
-                      return;
-                    }
-
-                    if (event.key !== "Enter") {
-                      return;
-                    }
-
-                    const firstSelectable = groups
-                      .flatMap((group) => group.items)
-                      .find(
-                        (item) =>
-                          !isTerminalSessionSwitchItemDisabled(
-                            item,
-                            allowOccupiedSessionSelection,
-                          ),
-                      );
-                    if (firstSelectable && visibleSessionCount === 1) {
-                      event.preventDefault();
-                      if (firstSelectable.selected) {
-                        setOpen(false);
-                        triggerRef.current?.focus();
-                      } else {
-                        selectSession(firstSelectable.session.id);
+              {!pendingPlacementItem && (
+                <div className="terminal-session-switcher-search">
+                  <span aria-hidden="true">⌕</span>
+                  <input
+                    ref={searchInputRef}
+                    aria-label="搜索会话或分组"
+                    autoComplete="off"
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter") {
+                        return;
                       }
-                    }
-                  }}
-                  placeholder="搜索会话名或分组名"
-                  role="searchbox"
-                  type="search"
-                  value={searchQuery}
-                />
-                {searchQuery && (
-                  <button
-                    aria-label="清除会话搜索"
-                    onClick={() => {
-                      setSearchQuery("");
-                      searchInputRef.current?.focus();
+
+                      const firstSelectable = groups
+                        .flatMap((group) => group.items)
+                        .find(
+                          (item) =>
+                            !isTerminalSessionSwitchItemDisabled(
+                              item,
+                              allowOccupiedSessionSelection,
+                            ),
+                        );
+                      if (firstSelectable && visibleSessionCount === 1) {
+                        event.preventDefault();
+                        handleSessionSelection(firstSelectable);
+                      }
                     }}
-                    type="button"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            </div>
-            <div
-              aria-label={`第 ${paneIndex} 个终端可选会话`}
-              className="terminal-session-switcher-groups"
-              role="listbox"
-            >
-              {groups.length === 0 ? (
-                <div className="terminal-session-switcher-empty" role="status">
-                  未找到匹配的会话或分组
-                </div>
-              ) : (
-                groups.map((group) => {
-                  const collapseDisabled = Boolean(searchQuery);
-                  const collapsed =
-                    !collapseDisabled &&
-                    isSessionGroupCollapsed(
-                      sessionGroups,
-                      group.id,
-                      TERMINAL_SWITCHER_COLLAPSE_SCOPE,
-                    );
-                  return (
-                    <TerminalSessionSwitchGroup
-                      allowOccupiedSessionSelection={
-                        allowOccupiedSessionSelection
-                      }
-                      key={group.id}
-                      collapsed={collapsed}
-                      collapseDisabled={collapseDisabled}
-                      group={group}
-                      groupIndex={sessionGroups.groups.findIndex(
-                        (item) => item.id === group.id,
-                      )}
-                      onSelect={(item) => {
-                        if (item.selected) {
-                          setOpen(false);
-                          triggerRef.current?.focus();
-                          return;
-                        }
-                        selectSession(item.session.id);
+                    placeholder="搜索会话名或分组名"
+                    role="searchbox"
+                    type="search"
+                    value={searchQuery}
+                  />
+                  {searchQuery && (
+                    <button
+                      aria-label="清除会话搜索"
+                      onClick={() => {
+                        setSearchQuery("");
+                        searchInputRef.current?.focus();
                       }}
-                      onToggle={() =>
-                        onToggleGroup?.(
-                          group.id,
-                          TERMINAL_SWITCHER_COLLAPSE_SCOPE,
-                        )
-                      }
-                    />
-                  );
-                })
+                      type="button"
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
               )}
             </div>
+            {pendingPlacementItem ? (
+              <div
+                aria-label={`选择如何处理 ${pendingPlacementItem.session.displayName}`}
+                className="terminal-session-placement-actions"
+                data-testid="terminal-session-placement-actions"
+                role="group"
+              >
+                <div className="terminal-session-placement-summary">
+                  <span>目标窗格 {pendingPlacementItem.occupiedPaneIndex}</span>
+                  <strong>{pendingPlacementItem.session.displayName}</strong>
+                  <p>
+                    从当前窗格 {paneIndex}{" "}
+                    前往目标位置，或者交换两个窗格的展示位置。
+                  </p>
+                </div>
+                <div className="terminal-session-placement-action-list">
+                  <button
+                    ref={placementPrimaryActionRef}
+                    aria-label="跳到对应位置"
+                    onClick={() =>
+                      selectSession(pendingPlacementItem.session.id, "jump")
+                    }
+                    type="button"
+                  >
+                    <strong>跳到对应位置</strong>
+                    <small>
+                      保持排列不变，定位到窗格{" "}
+                      {pendingPlacementItem.occupiedPaneIndex}
+                    </small>
+                  </button>
+                  <button
+                    aria-label="与当前位置交换"
+                    onClick={() =>
+                      selectSession(pendingPlacementItem.session.id, "swap")
+                    }
+                    type="button"
+                  >
+                    <strong>与当前位置交换</strong>
+                    <small>目标会话移到当前窗格，并成为当前输入</small>
+                  </button>
+                </div>
+                <button
+                  className="terminal-session-placement-back"
+                  onClick={returnToSessionList}
+                  type="button"
+                >
+                  ← 返回会话列表
+                </button>
+              </div>
+            ) : (
+              <div
+                aria-label={`第 ${paneIndex} 个终端可选会话`}
+                className="terminal-session-switcher-groups"
+                role="listbox"
+              >
+                {groups.length === 0 ? (
+                  <div
+                    className="terminal-session-switcher-empty"
+                    role="status"
+                  >
+                    未找到匹配的会话或分组
+                  </div>
+                ) : (
+                  groups.map((group) => {
+                    const collapseDisabled = Boolean(searchQuery);
+                    const collapsed =
+                      !collapseDisabled &&
+                      isSessionGroupCollapsed(
+                        sessionGroups,
+                        group.id,
+                        TERMINAL_SWITCHER_COLLAPSE_SCOPE,
+                      );
+                    return (
+                      <TerminalSessionSwitchGroup
+                        allowOccupiedSessionSelection={
+                          allowOccupiedSessionSelection
+                        }
+                        key={group.id}
+                        collapsed={collapsed}
+                        collapseDisabled={collapseDisabled}
+                        group={group}
+                        groupIndex={sessionGroups.groups.findIndex(
+                          (item) => item.id === group.id,
+                        )}
+                        onSelect={handleSessionSelection}
+                        onToggle={() =>
+                          onToggleGroup?.(
+                            group.id,
+                            TERMINAL_SWITCHER_COLLAPSE_SCOPE,
+                          )
+                        }
+                      />
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>,
           document.body,
         )}

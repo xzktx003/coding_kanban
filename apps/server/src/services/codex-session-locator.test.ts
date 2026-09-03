@@ -59,6 +59,29 @@ function exposeProcessWorkingDirectory(
   symlinkSync(workingDirectory, join(procRoot, String(processId), "cwd"));
 }
 
+function exposeLinuxProcessStartTime(
+  procRoot: string,
+  processId: number,
+  processStartMs: number,
+): void {
+  const bootTimeSeconds = Math.floor(processStartMs / 1_000) - 3_600;
+  writeFileSync(
+    join(procRoot, "stat"),
+    `cpu 0 0 0 0\nbtime ${bootTimeSeconds}\n`,
+  );
+  const fields = Array.from({ length: 52 }, () => "0");
+  fields[0] = String(processId);
+  fields[1] = "(codex)";
+  fields[2] = "S";
+  fields[21] = String(
+    Math.round((processStartMs / 1_000 - bootTimeSeconds) * 100),
+  );
+  writeFileSync(
+    join(procRoot, String(processId), "stat"),
+    `${fields.join(" ")}\n`,
+  );
+}
+
 test("CodexSessionLocator keeps same-directory tmux panes bound to their own top-level Codex sessions", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-session-locator-"));
   const sessionsRoot = join(root, "sessions");
@@ -343,6 +366,64 @@ test("CodexSessionLocator uses the pane process snapshot when multiple Codex ses
     assert.equal(
       await locator.resolve({
         tmuxTarget: "tmux-shared-cwd",
+        workingDirectory: "/workspace/shared",
+      }),
+      "codex-selected",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CodexSessionLocator uses proc stat start ticks when the proc directory mtime drifts", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-session-proc-start-"));
+  const sessionsRoot = join(root, "sessions");
+  const shellSnapshotsRoot = join(root, "shell-snapshots");
+  const procRoot = join(root, "proc");
+  mkdirSync(sessionsRoot, { recursive: true });
+  mkdirSync(shellSnapshotsRoot, { recursive: true });
+  mkdirSync(procRoot, { recursive: true });
+
+  try {
+    writeSession(sessionsRoot, "selected", "codex-selected", "cli");
+    writeSession(sessionsRoot, "newer", "codex-newer", "cli");
+
+    const paneRoot = join(procRoot, "901");
+    mkdirSync(join(paneRoot, "task", "901"), { recursive: true });
+    writeFileSync(join(paneRoot, "task", "901", "children"), "902\n");
+    const codexRoot = join(procRoot, "902");
+    mkdirSync(join(codexRoot, "task", "902"), { recursive: true });
+    writeFileSync(join(codexRoot, "task", "902", "children"), "");
+    exposeCodexCommand(procRoot, 902);
+    exposeProcessWorkingDirectory(procRoot, 902, "/workspace/shared");
+
+    const processStartMs = Date.now() - 30_000;
+    exposeLinuxProcessStartTime(procRoot, 902, processStartMs);
+    const driftedProcMtimeMs = processStartMs + 10 * 60 * 1_000;
+    utimesSync(
+      codexRoot,
+      driftedProcMtimeMs / 1_000,
+      driftedProcMtimeMs / 1_000,
+    );
+    writeFileSync(
+      join(
+        shellSnapshotsRoot,
+        `codex-selected.${BigInt(Math.round((processStartMs + 5_000) * 1_000_000))}.sh`,
+      ),
+      "",
+    );
+
+    const locator = new CodexSessionLocator({
+      clockTicksPerSecond: 100,
+      procRoot,
+      sessionsRoot,
+      shellSnapshotsRoot,
+      resolveTmuxPanePid: async () => 901,
+    });
+
+    assert.equal(
+      await locator.resolve({
+        tmuxTarget: "tmux-drifted-proc-mtime",
         workingDirectory: "/workspace/shared",
       }),
       "codex-selected",

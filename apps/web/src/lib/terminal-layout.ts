@@ -134,6 +134,71 @@ export function buildTerminalMonitorGroupSlots(
   }));
 }
 
+export function normalizeTerminalMonitorGroupOrder(
+  sessions: readonly TerminalMonitorSession[],
+  preferredOrder: readonly string[] = [],
+): string[] {
+  const availableSessionIds = new Set(sessions.map((session) => session.id));
+  const usedSessionIds = new Set<string>();
+  const normalizedOrder: string[] = [];
+
+  for (const sessionId of preferredOrder) {
+    if (!availableSessionIds.has(sessionId) || usedSessionIds.has(sessionId)) {
+      continue;
+    }
+    usedSessionIds.add(sessionId);
+    normalizedOrder.push(sessionId);
+  }
+
+  for (const session of sessions) {
+    if (usedSessionIds.has(session.id)) {
+      continue;
+    }
+    usedSessionIds.add(session.id);
+    normalizedOrder.push(session.id);
+  }
+
+  return normalizedOrder;
+}
+
+export function orderTerminalMonitorGroupSessions<
+  Session extends TerminalMonitorSession,
+>(
+  sessions: readonly Session[],
+  preferredOrder: readonly string[] = [],
+): Session[] {
+  const sessionById = new Map(
+    sessions.map((session) => [session.id, session] as const),
+  );
+  return normalizeTerminalMonitorGroupOrder(sessions, preferredOrder).flatMap(
+    (sessionId) => {
+      const session = sessionById.get(sessionId);
+      return session ? [session] : [];
+    },
+  );
+}
+
+export function swapTerminalMonitorGroupOrder(
+  order: readonly string[],
+  sourceSessionId: string,
+  targetSessionId: string,
+): string[] {
+  const sourceIndex = order.indexOf(sourceSessionId);
+  const targetIndex = order.indexOf(targetSessionId);
+  if (
+    sourceSessionId === targetSessionId ||
+    sourceIndex < 0 ||
+    targetIndex < 0
+  ) {
+    return [...order];
+  }
+
+  const nextOrder = [...order];
+  nextOrder[sourceIndex] = targetSessionId;
+  nextOrder[targetIndex] = sourceSessionId;
+  return nextOrder;
+}
+
 export function getTerminalMonitorSlotIds(
   mode: TerminalMonitorLayoutMode,
 ): string[] {

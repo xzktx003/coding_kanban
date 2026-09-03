@@ -30,6 +30,7 @@ test("persists monitor layout, slot assignments, active input slot, and closed s
       mode: "quad",
       arrangementMode: "manual",
       arrangementGroupId: null,
+      groupSessionOrderByGroupId: {},
       slots: [
         { id: "terminal-monitor-slot-1", sessionId: "session-a" },
         { id: "terminal-monitor-slot-2", sessionId: null },
@@ -46,6 +47,7 @@ test("persists monitor layout, slot assignments, active input slot, and closed s
     mode: "quad",
     arrangementMode: "manual",
     arrangementGroupId: null,
+    groupSessionOrderByGroupId: {},
     slots: [
       { id: "terminal-monitor-slot-1", sessionId: "session-a" },
       { id: "terminal-monitor-slot-2", sessionId: null },
@@ -65,6 +67,9 @@ test("persists the selected group arrangement without replacing manual slots", (
       mode: "triple",
       arrangementMode: "group",
       arrangementGroupId: "group-research",
+      groupSessionOrderByGroupId: {
+        "group-research": ["session-b", "session-a"],
+      },
       slots: [{ id: "terminal-monitor-slot-1", sessionId: "session-a" }],
       activeSlotId: "terminal-monitor-slot-1",
       closedSlotIds: [],
@@ -76,6 +81,9 @@ test("persists the selected group arrangement without replacing manual slots", (
     mode: "triple",
     arrangementMode: "group",
     arrangementGroupId: "group-research",
+    groupSessionOrderByGroupId: {
+      "group-research": ["session-b", "session-a"],
+    },
     slots: [{ id: "terminal-monitor-slot-1", sessionId: "session-a" }],
     activeSlotId: "terminal-monitor-slot-1",
     closedSlotIds: [],
@@ -91,6 +99,7 @@ test("migrates the previous layout-mode-only storage and rejects malformed slots
     mode: "dual",
     arrangementMode: "manual",
     arrangementGroupId: null,
+    groupSessionOrderByGroupId: {},
     slots: [],
     activeSlotId: "terminal-monitor-slot-1",
     closedSlotIds: [],
@@ -110,6 +119,7 @@ test("migrates the previous layout-mode-only storage and rejects malformed slots
     mode: "quad",
     arrangementMode: "manual",
     arrangementGroupId: null,
+    groupSessionOrderByGroupId: {},
     slots: [],
     activeSlotId: "terminal-monitor-slot-1",
     closedSlotIds: [],
@@ -123,6 +133,7 @@ test("reopens a stale closed active slot for a newly focused session", () => {
         mode: "single",
         arrangementMode: "manual",
         arrangementGroupId: null,
+        groupSessionOrderByGroupId: {},
         slots: [
           { id: "terminal-monitor-slot-1", sessionId: "deleted-session" },
         ],
@@ -136,6 +147,7 @@ test("reopens a stale closed active slot for a newly focused session", () => {
       mode: "single",
       arrangementMode: "manual",
       arrangementGroupId: null,
+      groupSessionOrderByGroupId: {},
       slots: [
         {
           id: "terminal-monitor-slot-1",
@@ -144,6 +156,30 @@ test("reopens a stale closed active slot for a newly focused session", () => {
       ],
       activeSlotId: "terminal-monitor-slot-1",
       closedSlotIds: [],
+    },
+  );
+});
+
+test("sanitizes persisted group orders without losing valid session positions", () => {
+  const storage = createStorage({
+    "terminal-monitor-workspace-v1": JSON.stringify({
+      mode: "triple",
+      arrangementMode: "group",
+      arrangementGroupId: "group-research",
+      groupSessionOrderByGroupId: {
+        "group-research": ["session-b", 42, "session-a", "session-b", ""],
+        invalid: "not-an-array",
+      },
+      slots: [],
+      activeSlotId: "terminal-monitor-slot-1",
+      closedSlotIds: [],
+    }),
+  });
+
+  assert.deepEqual(
+    loadTerminalWorkspaceState(storage).groupSessionOrderByGroupId,
+    {
+      "group-research": ["session-b", "session-a"],
     },
   );
 });

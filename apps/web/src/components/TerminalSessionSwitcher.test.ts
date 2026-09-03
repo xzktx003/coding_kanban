@@ -8,6 +8,7 @@ import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 import {
   buildTerminalSessionSwitchGroups,
   isTerminalSessionSwitchItemDisabled,
+  resolveTerminalSessionSwitchSelection,
   TerminalSessionSwitchGroup,
 } from "./TerminalSessionSwitcher.js";
 
@@ -178,6 +179,15 @@ describe("terminal session switch selection", () => {
 
     assert.equal(isTerminalSessionSwitchItemDisabled(item), true);
     assert.equal(isTerminalSessionSwitchItemDisabled(item, true), false);
+    assert.equal(
+      resolveTerminalSessionSwitchSelection(item, true),
+      "choose-placement-action",
+    );
+    assert.equal(resolveTerminalSessionSwitchSelection(item, false), "select");
+    assert.equal(
+      resolveTerminalSessionSwitchSelection({ ...item, selected: true }, true),
+      "close",
+    );
   });
 });
 

@@ -13,11 +13,14 @@ import {
   getTerminalPaneContextPrimaryActionLabel,
   isTerminalMonitorLayoutMode,
   normalizeTerminalMonitorSlots,
+  normalizeTerminalMonitorGroupOrder,
+  orderTerminalMonitorGroupSessions,
   placeTerminalMonitorSlotSession,
   resolveFocusedTerminalMonitorSlotId,
   restoreTerminalMonitorLayoutSnapshot,
   setTerminalMonitorSlotSession,
   shouldSyncTerminalInputWithFocusedSession,
+  swapTerminalMonitorGroupOrder,
 } from "./terminal-layout.js";
 
 const sessions = [
@@ -106,6 +109,62 @@ describe("terminal monitor layout", () => {
         id: `terminal-monitor-group-slot:group-research:${sessionId}`,
         sessionId,
       })),
+    );
+  });
+
+  it("normalizes and swaps group order while preserving session-based pane keys", () => {
+    const normalizedOrder = normalizeTerminalMonitorGroupOrder(sessions, [
+      "agent-3",
+      "missing-agent",
+      "agent-1",
+      "agent-3",
+    ]);
+
+    assert.deepEqual(normalizedOrder, [
+      "agent-3",
+      "agent-1",
+      "agent-2",
+      "agent-4",
+      "agent-5",
+      "agent-6",
+      "agent-7",
+      "agent-8",
+    ]);
+
+    const swappedOrder = swapTerminalMonitorGroupOrder(
+      normalizedOrder,
+      "agent-3",
+      "agent-6",
+    );
+    assert.deepEqual(swappedOrder, [
+      "agent-6",
+      "agent-1",
+      "agent-2",
+      "agent-4",
+      "agent-5",
+      "agent-3",
+      "agent-7",
+      "agent-8",
+    ]);
+
+    const orderedSessions = orderTerminalMonitorGroupSessions(
+      sessions,
+      swappedOrder,
+    );
+    const slots = buildTerminalMonitorGroupSlots(
+      "group-research",
+      orderedSessions,
+    );
+    assert.deepEqual(
+      slots.map((slot) => slot.sessionId),
+      swappedOrder,
+    );
+    assert.deepEqual(
+      slots.map((slot) => slot.id),
+      swappedOrder.map(
+        (sessionId) =>
+          `terminal-monitor-group-slot:group-research:${sessionId}`,
+      ),
     );
   });
 

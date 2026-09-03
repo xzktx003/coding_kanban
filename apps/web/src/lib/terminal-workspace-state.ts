@@ -22,6 +22,7 @@ export interface TerminalWorkspaceState {
   mode: TerminalMonitorLayoutMode;
   arrangementMode: TerminalMonitorArrangementMode;
   arrangementGroupId: string | null;
+  groupSessionOrderByGroupId: Record<string, string[]>;
   slots: TerminalMonitorSlot[];
   activeSlotId: string;
   closedSlotIds: string[];
@@ -34,10 +35,37 @@ function defaultState(
     mode,
     arrangementMode: "manual",
     arrangementGroupId: null,
+    groupSessionOrderByGroupId: {},
     slots: [],
     activeSlotId: DEFAULT_SLOT_ID,
     closedSlotIds: [],
   };
+}
+
+function parseGroupSessionOrderByGroupId(
+  value: unknown,
+): Record<string, string[]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([groupId, sessionIds]) => {
+      if (!groupId || !Array.isArray(sessionIds)) {
+        return [];
+      }
+
+      const uniqueSessionIds = Array.from(
+        new Set(
+          sessionIds.filter(
+            (sessionId): sessionId is string =>
+              typeof sessionId === "string" && Boolean(sessionId),
+          ),
+        ),
+      );
+      return uniqueSessionIds.length > 0 ? [[groupId, uniqueSessionIds]] : [];
+    }),
+  );
 }
 
 function resolveStorage(storage?: StorageLike): StorageLike {
@@ -101,6 +129,9 @@ export function loadTerminalWorkspaceState(
       typeof parsed.arrangementGroupId === "string"
         ? parsed.arrangementGroupId
         : null;
+    const groupSessionOrderByGroupId = parseGroupSessionOrderByGroupId(
+      parsed.groupSessionOrderByGroupId,
+    );
     const validSlotIds = new Set(getTerminalMonitorSlotIds(mode));
     const slots = parseSlots(parsed.slots, validSlotIds);
     const activeSlotId =
@@ -119,6 +150,7 @@ export function loadTerminalWorkspaceState(
       mode,
       arrangementMode,
       arrangementGroupId,
+      groupSessionOrderByGroupId,
       slots,
       activeSlotId,
       closedSlotIds,
@@ -155,6 +187,7 @@ export function resolveTerminalWorkspaceStateForFocus(
     mode: state.mode,
     arrangementMode: state.arrangementMode,
     arrangementGroupId: state.arrangementGroupId,
+    groupSessionOrderByGroupId: state.groupSessionOrderByGroupId,
     slots,
     activeSlotId,
     closedSlotIds,
