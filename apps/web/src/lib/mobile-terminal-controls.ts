@@ -7,6 +7,7 @@ export type MobileTerminalControlId =
   | "enter"
   | "shift-enter"
   | "ctrl-enter"
+  | "ctrl-b"
   | "arrow-up"
   | "arrow-down"
   | "arrow-left"
@@ -35,6 +36,12 @@ export const MOBILE_TERMINAL_CONTROLS: MobileTerminalControl[] = [
     input: "\x03",
     description: "中断当前输出或命令",
     danger: true,
+  },
+  {
+    id: "ctrl-b",
+    label: "Ctrl+B",
+    input: "\x02",
+    description: "发送 Ctrl+B；tmux 默认用作前缀键",
   },
   {
     id: "arrow-left",
@@ -119,6 +126,7 @@ export const MOBILE_TERMINAL_TOOLBAR_ORDER: MobileTerminalToolbarItem[] = [
   "shift",
   "escape",
   "interrupt",
+  "ctrl-b",
   "enter",
   "tab",
   "arrow-left",

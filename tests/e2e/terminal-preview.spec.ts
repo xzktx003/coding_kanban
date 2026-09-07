@@ -479,6 +479,85 @@ test("complete transcript starts at the newest page and loads older pages upward
     .toBeGreaterThan(0);
 });
 
+test("fullscreen transcript scrolls with the wheel above the underlying terminal", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const session = makeSession({
+    id: "fullscreen-wheel",
+    displayName: "Wheel transcript",
+  });
+  await mockSessions(page, [session]);
+  await page.route(
+    "**/api/agent-sessions/fullscreen-wheel/transcript**",
+    (route) =>
+      route.fulfill({
+        json: {
+          available: true,
+          agentKind: "codex",
+          sessionId: "codex-wheel-transcript",
+          matchedBy: "session-id",
+          updatedAt: "2026-09-07T00:00:00.000Z",
+          hasMore: false,
+          nextCursor: null,
+          entries: Array.from({ length: 40 }, (_, index) => ({
+            id: `wheel-${index}`,
+            kind: "user",
+            title: "你",
+            timestamp: "2026-09-07T00:00:00.000Z",
+            text: `记录 ${index}\n用于验证全屏记录的鼠标滚动。`,
+            collapsedByDefault: false,
+          })),
+        },
+      }),
+  );
+  await page.goto("/");
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: session.displayName }),
+    })
+    .dblclick();
+  await page
+    .getByRole("button", {
+      name: `查看 ${session.displayName} 的完整记录`,
+      exact: true,
+    })
+    .click();
+  const terminal = page
+    .locator(".focus-terminal-pane-terminal .xterm-screen")
+    .first();
+  await expect(terminal).toBeVisible();
+  const bounds = await terminal.boundingBox();
+  expect(bounds).not.toBeNull();
+  await page
+    .getByRole("button", { name: "全屏查看完整记录", exact: true })
+    .click();
+  const body = page.locator(
+    ".agent-transcript-fullscreen .agent-transcript-body",
+  );
+  await expect(body).toBeVisible();
+  await body.evaluate((element) => {
+    element.scrollTop = 600;
+  });
+  await page.mouse.move(
+    bounds!.x + bounds!.width / 2,
+    bounds!.y + bounds!.height / 2,
+  );
+  const start = await body.evaluate((element) => element.scrollTop);
+  await page.mouse.wheel(0, 400);
+  await expect
+    .poll(() => body.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(start);
+  const afterDown = await body.evaluate((element) => element.scrollTop);
+  await page.mouse.wheel(0, -400);
+  await expect
+    .poll(() => body.evaluate((element) => element.scrollTop))
+    .toBeLessThan(afterDown);
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".agent-transcript-fullscreen")).toHaveCount(0);
+  await expect(page.locator(".agent-transcript-panel")).toBeVisible();
+});
+
 test("complete transcript controls stay visible in a compact desktop side panel", async ({
   page,
 }) => {

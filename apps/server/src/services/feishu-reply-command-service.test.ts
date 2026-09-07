@@ -45,6 +45,8 @@ function createFixture(
     replyEnabled?: boolean;
     resolvedBinding?: typeof binding | null;
     targetSession?: AgentSessionRecord;
+    threadId?: string | null;
+    sendText?: () => Promise<void>;
   } = {},
 ) {
   const writes: Array<{ sessionId: string; prompt: string }> = [];
@@ -70,9 +72,14 @@ function createFixture(
     registry: {
       get: () => overrides.targetSession ?? session,
     },
-    input: {
-      writePrompt: async (sessionId, prompt) => {
-        writes.push({ sessionId, prompt });
+    codex: {
+      resolveSessionId: async () =>
+        overrides.threadId === null
+          ? undefined
+          : (overrides.threadId ?? "codex-thread-1"),
+      sendText: async (input) => {
+        writes.push({ sessionId: input.threadId, prompt: input.message });
+        await overrides.sendText?.();
       },
     },
   });
@@ -85,7 +92,7 @@ test("routes a trusted direct reply to the bound Codex terminal exactly once", a
 
   assert.equal(await fixture.service.handle(validEvent), "delivered");
   assert.deepEqual(fixture.writes, [
-    { sessionId: "session-1", prompt: "继续运行测试" },
+    { sessionId: "codex-thread-1", prompt: "继续运行测试" },
   ]);
   assert.equal(fixture.processed.has("om_reply"), true);
 
@@ -103,8 +110,47 @@ test("passes multiline Feishu replies to prompt input handling", async () => {
 
   assert.equal(await fixture.service.handle(event), "delivered");
   assert.deepEqual(fixture.writes, [
-    { sessionId: "session-1", prompt: "先检查\n然后修复" },
+    { sessionId: "codex-thread-1", prompt: "先检查\n然后修复" },
   ]);
+});
+
+test("does not queue a reply when the active Codex thread cannot be resolved", async () => {
+  const fixture = createFixture({ threadId: null });
+  assert.equal(await fixture.service.handle(validEvent), "ignored_unavailable");
+  assert.deepEqual(fixture.writes, []);
+  assert.equal(fixture.processed.size, 0);
+});
+
+test("queues the complete goal instruction on a running thread without terminal keystrokes", async () => {
+  const fixture = createFixture({
+    targetSession: { ...session, interactionState: "running" },
+  });
+  const content = "/goal 继续训练\n目标超过基线";
+  assert.equal(
+    await fixture.service.handle({ ...validEvent, content }),
+    "delivered",
+  );
+  assert.deepEqual(fixture.writes, [
+    { sessionId: "codex-thread-1", prompt: content },
+  ]);
+});
+
+test("waits for native queue acknowledgement and deduplicates in-flight events", async () => {
+  let acknowledge!: () => void;
+  const fixture = createFixture({
+    sendText: () =>
+      new Promise<void>((resolve) => {
+        acknowledge = resolve;
+      }),
+  });
+  const pending = fixture.service.handle(validEvent);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(fixture.processed.size, 0);
+  assert.equal(await fixture.service.handle(validEvent), "ignored_duplicate");
+  acknowledge();
+  assert.equal(await pending, "delivered");
+  assert.equal(fixture.processed.size, 1);
+  assert.equal(fixture.writes.length, 1);
 });
 
 test("rejects messages that are not a trusted private text reply", async () => {
@@ -138,6 +184,7 @@ test("requires an enabled reply switch and a live controllable Codex session", a
     { ...session, connectionState: "offline" as const },
     { ...session, interactionState: "exited" as const },
     { ...session, controlMode: "observe" as const },
+    { ...session, hostId: "remote-host-without-ssh-target" },
   ]) {
     const fixture = createFixture({ targetSession });
     assert.equal(
@@ -167,8 +214,9 @@ test("does not mark an inbound message processed when terminal delivery fails", 
       markProcessed: (messageId) => processed.add(messageId),
     },
     registry: { get: () => session },
-    input: {
-      writePrompt: async () => {
+    codex: {
+      resolveSessionId: async () => "codex-thread-1",
+      sendText: async () => {
         throw new Error("terminal unavailable");
       },
     },

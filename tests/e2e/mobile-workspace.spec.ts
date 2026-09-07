@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { Buffer } from "node:buffer";
 
 test.use({ ignoreHTTPSErrors: true });
 
@@ -83,6 +84,104 @@ test.describe("Mobile workspace", () => {
     await expect(page.locator(".terminal-view")).toHaveCount(0);
     await page.getByRole("button", { name: "返回终端" }).click();
     await expect(page.locator(".terminal-view")).toHaveCount(1);
+  });
+
+  test("uploads a file from the mobile system picker and refreshes the directory", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const modifiedAt = "2026-09-05T08:00:00.000Z";
+    const snapshot = {
+      activeAgentSessionId: "mobile-upload",
+      items: [
+        {
+          id: "mobile-upload",
+          workspaceId: "default",
+          sourceType: "local" as const,
+          agentKind: "codex" as const,
+          displayName: "Mobile Upload",
+          repositoryRoot: "/workspace/upload",
+          workingDirectory: "/workspace/upload",
+          connectionState: "online" as const,
+          interactionState: "idle" as const,
+        },
+      ],
+      updatedAt: modifiedAt,
+    };
+    let uploaded = false;
+
+    await page.route("**/api/agent-sessions", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(snapshot),
+      });
+    });
+    await page.routeWebSocket("**/ws/agent-sessions", (websocket) => {
+      websocket.send(JSON.stringify({ type: "snapshot", payload: snapshot }));
+    });
+    await page.route("**/api/fs/list", async (route) => {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          path: "/workspace/upload",
+          entries: uploaded
+            ? [
+                {
+                  name: "mobile-note.txt",
+                  path: "/workspace/upload/mobile-note.txt",
+                  type: "file",
+                  size: 13,
+                  modifiedAt,
+                  owner: "codex",
+                  permissions: "-rw-r--r--",
+                  isHidden: false,
+                },
+              ]
+            : [],
+        }),
+      });
+    });
+    await page.route("**/api/fs/upload", async (route) => {
+      const requestBody = route.request().postDataBuffer()?.toString("utf8");
+      expect(requestBody).toContain('filename="mobile-note.txt"');
+      expect(requestBody).toContain("mobile upload");
+      uploaded = true;
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          uploadedPaths: ["/workspace/upload/mobile-note.txt"],
+        }),
+      });
+    });
+
+    await page.goto("/?view=mobile");
+    await page.getByRole("button", { name: "当前会话", exact: true }).click();
+    await page.getByRole("button", { name: "文件", exact: true }).click();
+
+    const uploadButton = page.getByRole("button", {
+      name: "上传文件到当前目录",
+    });
+    await expect(uploadButton).toBeVisible();
+    expect((await uploadButton.boundingBox())?.height).toBeGreaterThanOrEqual(
+      44,
+    );
+
+    const fileChooserPromise = page.waitForEvent("filechooser");
+    await uploadButton.click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
+      name: "mobile-note.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("mobile upload"),
+    });
+
+    await expect.poll(() => uploaded).toBe(true);
+    await expect(
+      page.locator(".mobile-file-upload-status--success"),
+    ).toContainText("上传完成");
+    await expect(
+      page.locator(".mobile-file-entry", { hasText: "mobile-note.txt" }),
+    ).toBeVisible();
   });
 
   test("opens the lightweight board and mounts a terminal only after session navigation", async ({

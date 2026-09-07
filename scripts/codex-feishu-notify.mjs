@@ -244,10 +244,50 @@ function splitOutputText(value, maxChunkCharacters) {
   }
 
   const chunks = [];
-  for (let index = 0; index < characters.length; index += maxChunkCharacters) {
-    chunks.push(characters.slice(index, index + maxChunkCharacters).join(""));
+  for (let index = 0; index < characters.length; ) {
+    let end = Math.min(index + maxChunkCharacters, characters.length);
+    if (end < characters.length) {
+      // Prefer complete Markdown lines; hard-split only oversized single lines.
+      for (let boundary = end - 1; boundary >= index; boundary -= 1) {
+        if (characters[boundary] === "\n") {
+          end = boundary + 1;
+          break;
+        }
+      }
+    }
+    chunks.push(characters.slice(index, end).join(""));
+    index = end;
   }
   return chunks;
+}
+
+function splitMarkdownOutput(value, maxChunkCharacters) {
+  let fence = null;
+  return splitOutputText(value, maxChunkCharacters).map((chunk) => {
+    const prefix = fence ? `${fence.opening}\n` : "";
+    for (const line of chunk.split("\n")) {
+      const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+      if (!match) continue;
+      const [, marker, suffix] = match;
+      if (!fence) {
+        fence = { marker, opening: line };
+      } else if (
+        marker[0] === fence.marker[0] &&
+        marker.length >= fence.marker.length &&
+        !suffix.trim()
+      ) {
+        fence = null;
+      }
+    }
+    const suffix = fence
+      ? `${chunk.endsWith("\n") ? "" : "\n"}${fence.marker}`
+      : "";
+    // Generated output is not authority to mention users or resolve person IDs.
+    return `${prefix}${chunk}${suffix}`.replace(
+      /<(?=\/?(?:at|person)\b)/gi,
+      "&#60;",
+    );
+  });
 }
 
 function buildCardMetadataColumn(label, content) {
@@ -304,7 +344,7 @@ export function buildCompletionCards(
       ? truncateText(sanitizeText(notification["display-name"]), 160)
       : "";
 
-  const chunks = splitOutputText(output, maxChunkCharacters);
+  const chunks = splitMarkdownOutput(output, maxChunkCharacters);
   return chunks.map((chunk, index) => ({
     schema: "2.0",
     config: {
@@ -373,11 +413,8 @@ export function buildCompletionCards(
           },
           elements: [
             {
-              tag: "div",
-              text: {
-                tag: "plain_text",
-                content: chunk,
-              },
+              tag: "markdown",
+              content: chunk,
             },
           ],
         },

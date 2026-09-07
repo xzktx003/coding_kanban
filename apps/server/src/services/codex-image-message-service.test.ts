@@ -203,6 +203,128 @@ test("send preserves multiline prompts without placing line breaks in an SSH com
   assert.doesNotMatch(remoteCommand, /第一行|第二行/);
 });
 
+test("sendText queues a local text message on the exact Codex thread", async () => {
+  const invocations: Array<{ command: string; args: string[]; cwd?: string }> =
+    [];
+  const service = new CodexImageMessageService({
+    async runCommand(command, args, options) {
+      invocations.push({ command, args, cwd: options.cwd });
+    },
+  });
+
+  await service.sendText({
+    threadId: "019eeed3-69ee-7850-b89e-53c3d48db0e2",
+    message: "/goal 训练其它模型\n目标超过 qtip && echo '$HOME'",
+    workingDirectory: "/workspace/project",
+  });
+
+  assert.deepEqual(invocations, [
+    {
+      command: "codex",
+      args: [
+        "queue",
+        "--thread",
+        "019eeed3-69ee-7850-b89e-53c3d48db0e2",
+        "--message",
+        "/goal 训练其它模型\n目标超过 qtip && echo '$HOME'",
+      ],
+      cwd: "/workspace/project",
+    },
+  ]);
+});
+
+test("sendText queues a remote text message with shell-safe encoding", async () => {
+  let remoteCommand = "";
+  const service = new CodexImageMessageService({
+    async runCommand(command, args) {
+      assert.equal(command, "ssh");
+      remoteCommand = args.at(-1) ?? "";
+      assert.deepEqual(args.slice(0, -1), [
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=10",
+        "-p",
+        "2202",
+        "demo@example.test",
+      ]);
+    },
+  });
+
+  const message = "/goal 继续训练\n目标超过 qtip && echo '$HOME'";
+  await service.sendText({
+    threadId: "019eeed3-69ee-7850-b89e-53c3d48db0e2",
+    message,
+    workingDirectory: "~/project with spaces",
+    sshTarget: { host: "example.test", port: 2202, username: "demo" },
+  });
+
+  assert.match(remoteCommand, /SHELL_BIN/);
+  assert.match(remoteCommand, /codex queue/);
+  assert.ok(remoteCommand.includes("019eeed3-69ee-7850-b89e-53c3d48db0e2"));
+  assert.match(remoteCommand, /base64 -d/);
+  assert.ok(
+    remoteCommand.includes(Buffer.from(message, "utf8").toString("base64")),
+  );
+  assert.doesNotMatch(remoteCommand, /\n/);
+  assert.doesNotMatch(remoteCommand, /目标超过 qtip/);
+});
+
+test("sendText rejects invalid thread IDs before queueing", async () => {
+  const service = new CodexImageMessageService({
+    async runCommand() {
+      throw new Error("should not run");
+    },
+  });
+
+  await assert.rejects(
+    service.sendText({
+      threadId: "bad thread",
+      message: "继续",
+    }),
+    /Codex 会话标识/,
+  );
+});
+
+test("sendText validates SSH targets before queueing", async () => {
+  const service = new CodexImageMessageService({
+    async runCommand() {
+      throw new Error("should not run");
+    },
+  });
+
+  await assert.rejects(
+    service.sendText({
+      threadId: "019eeed3-69ee-7850-b89e-53c3d48db0e2",
+      message: "继续",
+      sshTarget: { host: "-bad" },
+    }),
+    /文本消息发送失败/,
+  );
+});
+
+test("sendText reports queue failures without leaking the prompt", async () => {
+  let attempts = 0;
+  const service = new CodexImageMessageService({
+    async runCommand() {
+      attempts += 1;
+      throw new Error("queue rejected secret prompt body");
+    },
+  });
+
+  await assert.rejects(
+    service.sendText({
+      threadId: "019eeed3-69ee-7850-b89e-53c3d48db0e2",
+      message: "secret prompt body",
+    }),
+    (error) =>
+      error instanceof Error &&
+      error.message === "Codex 文本消息发送失败" &&
+      !error.message.includes("secret prompt body"),
+  );
+  assert.equal(attempts, 1);
+});
+
 test("send falls back to a queued remote file reference and delays SSH cleanup", async () => {
   const remoteCommands: string[] = [];
   const removed: string[] = [];

@@ -190,7 +190,8 @@ test("builds a sanitized Card 2.0 without forwarding the prompt or full path", (
   assert.equal(card.body.elements[1].tag, "collapsible_panel");
   assert.equal(card.body.elements[1].expanded, true);
   const serialized = JSON.stringify(card);
-  const output = card.body.elements[1].elements[0].text.content;
+  const output = card.body.elements[1].elements[0].content;
+  assert.equal(card.body.elements[1].elements[0].tag, "markdown");
   assert.match(serialized, /coding_kanban/);
   assert.match(output, /^Done!/);
   assert.match(output, /coding_kanban\/scripts\/notify\.mjs/);
@@ -212,17 +213,60 @@ test("preserves the complete last Codex output across Card 2.0 chunks", () => {
 
   assert.ok(cards.length > 1);
   const reconstructed = cards
-    .map((card) => card.body.elements[1].elements[0].text.content)
+    .map((card) => card.body.elements[1].elements[0].content)
     .join("");
   assert.equal(reconstructed, completeOutput);
-  assert.match(
-    cards[0].body.elements[1].elements[0].text.content,
-    /  保留缩进/,
-  );
+  assert.match(cards[0].body.elements[1].elements[0].content, /  保留缩进/);
   assert.equal(
     cards[0].body.elements[1].header.title.content,
     `完整输出（1/${cards.length}）`,
   );
+});
+
+test("renders Markdown output while keeping card metadata plain text", () => {
+  const markdown =
+    "# 结果\n\n**完成**\n- 测试通过\n\n```ts\nconst x = 1;\n```\n[说明](https://example.com)";
+  const [card] = buildCompletionCards({
+    ...completion,
+    "last-assistant-message": markdown,
+  });
+  assert.equal(card.body.elements[1].elements[0].tag, "markdown");
+  assert.equal(card.body.elements[1].elements[0].content, markdown);
+  assert.equal(card.header.title.tag, "plain_text");
+});
+
+test("keeps code fences balanced across Markdown cards", () => {
+  const code = Array.from(
+    { length: 18 },
+    (_, index) => `const value${index} = ${index};\n`,
+  ).join("");
+  const cards = buildCompletionCards(
+    { ...completion, "last-assistant-message": "```js\n" + code + "```" },
+    100,
+  );
+  assert.ok(cards.length > 1);
+  const bodies = cards.map((card) => card.body.elements[1].elements[0].content);
+  for (const body of bodies) {
+    assert.match(body, /^```js\n/);
+    assert.match(body, /\n```$/);
+  }
+  assert.equal(
+    bodies
+      .map((body) => body.replace(/^```js\n/, "").replace(/```$/, ""))
+      .join(""),
+    code,
+  );
+});
+
+test("does not turn literal Feishu mention tags into notifications", () => {
+  const [card] = buildCompletionCards({
+    ...completion,
+    "last-assistant-message":
+      '**示例** <at id=all></at> <person id="ou_invalid"></person>',
+  });
+  const body = card.body.elements[1].elements[0].content;
+  assert.match(body, /\*\*示例\*\*/);
+  assert.doesNotMatch(body, /<\/?(?:at|person)\b/);
 });
 
 test("sends every complete output chunk with a distinct idempotency key", async () => {

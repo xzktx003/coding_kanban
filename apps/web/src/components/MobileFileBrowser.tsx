@@ -165,6 +165,10 @@ export function MobileFileBrowser({
     downloadEntries,
     createFile,
     createFolder,
+    uploadProgress,
+    uploadStatus,
+    upload,
+    cancelUpload,
   } = useFileBrowser(selectedHost, true, {
     scopeKey: `mobile-files:${session.id}`,
     defaultPath,
@@ -183,6 +187,7 @@ export function MobileFileBrowser({
     null,
   );
   const createNameInputRef = useRef<HTMLInputElement>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
   const suppressNextFileClickRef = useRef(false);
@@ -581,8 +586,89 @@ export function MobileFileBrowser({
           >
             新建
           </button>
+          <button
+            aria-label="上传文件到当前目录"
+            className="mobile-file-browser-control"
+            disabled={uploadProgress !== null || !currentPath.trim()}
+            onClick={() => uploadInputRef.current?.click()}
+            type="button"
+          >
+            上传
+          </button>
         </div>
       </div>
+
+      <input
+        aria-label="选择要上传的文件"
+        data-testid="mobile-file-upload-input"
+        hidden
+        multiple
+        onChange={async (event) => {
+          const input = event.currentTarget;
+          const files = Array.from(input.files ?? []);
+          try {
+            if (files.length > 0) {
+              await upload(files);
+            }
+          } finally {
+            input.value = "";
+          }
+        }}
+        ref={uploadInputRef}
+        type="file"
+      />
+
+      {(uploadProgress !== null || uploadStatus) && (
+        <div
+          aria-live="polite"
+          className={`mobile-file-upload-status${
+            uploadStatus?.state === "success"
+              ? " mobile-file-upload-status--success"
+              : uploadStatus?.state === "error"
+                ? " mobile-file-upload-status--error"
+                : ""
+          }`}
+          role={uploadStatus?.state === "error" ? "alert" : "status"}
+        >
+          <div>
+            <strong>
+              {uploadProgress !== null
+                ? `正在上传 ${Math.round(uploadProgress * 100)}%`
+                : uploadStatus?.state === "success"
+                  ? "上传完成"
+                  : "上传失败"}
+            </strong>
+            <span>
+              {uploadProgress !== null
+                ? `${uploadStatus?.total ?? 0} 个文件正在传输`
+                : uploadStatus?.state === "success"
+                  ? `${uploadStatus.total} 个文件已上传到当前目录`
+                  : (uploadStatus?.message ?? "请重新选择文件后再试")}
+            </span>
+          </div>
+          {uploadProgress !== null && (
+            <button
+              className="mobile-file-browser-control"
+              onClick={cancelUpload}
+              type="button"
+            >
+              取消上传
+            </button>
+          )}
+          {uploadProgress !== null && (
+            <div
+              aria-label="上传进度"
+              aria-valuemax={100}
+              aria-valuemin={0}
+              aria-valuenow={Math.round(uploadProgress * 100)}
+              className="mobile-file-upload-progress"
+              role="progressbar"
+            >
+              <span style={{ width: `${Math.round(uploadProgress * 100)}%` }} />
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="mobile-file-browser-filters">
         <input

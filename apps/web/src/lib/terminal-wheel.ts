@@ -32,6 +32,7 @@ const TERMINAL_WHEEL_BLOCKING_OVERLAYS = [
   ".file-browser-modal",
   ".file-browser-fullscreen-preview",
   ".agent-transcript-backdrop",
+  ".agent-transcript-fullscreen-backdrop",
   ".new-session-backdrop",
   ".terminal-session-switcher-menu",
   ".mobile-session-picker-menu",

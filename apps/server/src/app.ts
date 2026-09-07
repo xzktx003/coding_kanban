@@ -25,6 +25,7 @@ import { registerFeishuNotificationSettingsRoutes } from "./routes/feishu-notifi
 import { registerSshHostsRoutes } from "./routes/ssh-hosts.js";
 import { registerVsCodeWebProxyRoutes } from "./routes/vscode-web-proxy.js";
 import { AgentSessionRegistry } from "./services/agent-session-registry.js";
+import { resolveActiveCodexSessionId } from "./services/active-codex-session-resolver.js";
 import { AgentSessionInputService } from "./services/agent-session-input-service.js";
 import { createAgentSessionStreamEvent } from "./services/agent-session-stream.js";
 import {
@@ -87,7 +88,10 @@ interface BuildServerOptions {
   gitAutoUpdateService?: GitAutoUpdateServiceLike;
   managedSessionRestorer?: ManagedSessionRestorerLike;
   sessionStateStore?: SessionStateStore;
-  codexImageMessageService?: Pick<CodexImageMessageService, "send">;
+  codexImageMessageService?: Pick<
+    CodexImageMessageService,
+    "send" | "sendText"
+  >;
   feishuNotificationSettingsService?: FeishuNotificationSettingsServiceLike;
   feishuCompletionSender?: FeishuCompletionSenderLike;
   feishuCompletionContentResolver?: FeishuCompletionContentResolverLike;
@@ -269,13 +273,27 @@ export function buildServer(options: BuildServerOptions = {}): {
           settings: feishuNotificationSettingsService,
           bindings: options.feishuReplyBindingStore,
           registry,
-          input: agentSessionInputService,
+          codex: {
+            resolveSessionId: (session) =>
+              resolveActiveCodexSessionId(session, {
+                registry,
+                codexSessionLocator,
+              }),
+            sendText: (input) => codexImageMessageService.sendText(input),
+          },
         })
       : null;
   const stopFeishuReplyListener = feishuReplyCommandService
     ? new FeishuReplyEventListener({
         settings: feishuNotificationSettingsService,
-        handleEvent: (event) => feishuReplyCommandService.handle(event),
+        handleEvent: async (event) => {
+          const outcome = await feishuReplyCommandService.handle(event);
+          app.log.info(
+            { messageId: event.message_id, outcome },
+            "Feishu reply processed (delivered means accepted by Codex queue)",
+          );
+          return outcome;
+        },
         logError(error) {
           app.log.error({ err: error }, "Feishu reply listener failed");
         },

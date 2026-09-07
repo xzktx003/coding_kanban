@@ -96,6 +96,12 @@ test.describe("Mobile Terminal", () => {
     await expect(interruptBtn).toBeVisible();
     await expect(interruptBtn).not.toBeDisabled();
 
+    const ctrlBBtn = page.getByRole("button", {
+      name: "发送 Ctrl+B；tmux 默认用作前缀键",
+    });
+    await expect(ctrlBBtn).toBeVisible();
+    await expect(ctrlBBtn).not.toBeDisabled();
+
     // ESC button
     const escBtn = page.getByRole("button", { name: "退出 TUI 当前状态" });
     await expect(escBtn).toBeVisible();

@@ -248,11 +248,53 @@ describe("MobileFileBrowser", () => {
     const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
     assert.match(
       css,
-      /\.mobile-file-browser-pathbar > div\s*{[^}]*grid-template-columns:\s*repeat\(4,\s*1fr\);/s,
+      /\.mobile-file-browser-pathbar > div\s*{[^}]*grid-template-columns:\s*repeat\(3,\s*1fr\);/s,
     );
     assert.match(
       css,
       /\.mobile-file-create-input\s*{[^}]*min-height:\s*48px;[^}]*font-size:\s*16px;/s,
+    );
+  });
+
+  it("uploads multiple files into the current directory with visible progress and cancellation", () => {
+    const markup = renderToStaticMarkup(
+      createElement(MobileFileBrowser, {
+        session: {
+          id: "mobile-upload",
+          workspaceId: "default",
+          sourceType: "local",
+          agentKind: "codex",
+          displayName: "Mobile upload",
+          workingDirectory: "/workspace/project",
+          connectionState: "online",
+          interactionState: "idle",
+        },
+        onBack: () => {},
+      }),
+    );
+
+    assert.match(markup, />上传<\/button>/);
+    assert.match(markup, /data-testid="mobile-file-upload-input"/);
+    assert.match(markup, /aria-label="选择要上传的文件"/);
+    assert.match(markup, /multiple=""/);
+
+    const source = readFileSync(
+      new URL("./MobileFileBrowser.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.match(source, /uploadInputRef\.current\?\.click\(\)/);
+    assert.match(source, /await upload\(files\)/);
+    assert.match(source, /aria-live="polite"/);
+    assert.match(source, />\s*取消上传\s*</);
+
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+    assert.match(
+      css,
+      /\.mobile-file-upload-progress\s*{[^}]*overflow:\s*hidden;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-file-upload-status\s*{[^}]*min-height:\s*44px;/s,
     );
   });
 });

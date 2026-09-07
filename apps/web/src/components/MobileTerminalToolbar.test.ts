@@ -22,6 +22,7 @@ describe("MobileTerminalToolbar", () => {
     assert.match(markup, />说明<\/button>/);
     assert.match(markup, /aria-pressed="false"[^>]*>Shift<\/button>/);
     assert.match(markup, />Ctrl\+C<\/button>/);
+    assert.match(markup, />Ctrl\+B<\/button>/);
     assert.match(markup, />⌫<\/button>/);
     assert.match(markup, />⇧Tab<\/button>/);
     assert.match(markup, />⇧Enter<\/button>/);
@@ -33,7 +34,10 @@ describe("MobileTerminalToolbar", () => {
       markup.indexOf(">ESC</button>") < markup.indexOf(">Ctrl+C</button>"),
     );
     assert.ok(
-      markup.indexOf(">Ctrl+C</button>") < markup.indexOf(">Enter</button>"),
+      markup.indexOf(">Ctrl+C</button>") < markup.indexOf(">Ctrl+B</button>"),
+    );
+    assert.ok(
+      markup.indexOf(">Ctrl+B</button>") < markup.indexOf(">Enter</button>"),
     );
     assert.ok(
       markup.indexOf(">Enter</button>") < markup.indexOf(">Tab</button>"),
@@ -69,6 +73,7 @@ describe("MobileTerminalToolbar", () => {
     assert.match(markup, /快捷键说明/);
     assert.match(markup, /下一次快捷键启用 Shift/);
     assert.match(markup, /中断当前输出或命令/);
+    assert.match(markup, /发送 Ctrl\+B；tmux 默认用作前缀键/);
     assert.match(markup, /退出 TUI 当前状态/);
     assert.match(markup, /反向切换 TUI 焦点/);
     assert.match(markup, /插入换行/);

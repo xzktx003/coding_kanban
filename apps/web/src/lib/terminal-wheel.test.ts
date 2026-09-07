@@ -213,6 +213,14 @@ describe("shouldScrollTerminalLayoutWheel", () => {
 });
 
 describe("isTerminalWheelBlockedByOverlayTarget", () => {
+  it("leaves fullscreen transcript wheel gestures to the transcript", () => {
+    assert.equal(
+      isTerminalWheelBlockedByOverlayTarget(
+        targetInsideOverlay(".agent-transcript-fullscreen-backdrop"),
+      ),
+      true,
+    );
+  });
   it("prevents terminal cards from intercepting wheel gestures over overlays", () => {
     assert.equal(
       isTerminalWheelBlockedByOverlayTarget(

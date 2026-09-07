@@ -84,6 +84,13 @@ export interface SendCodexImageMessageInput {
   sshTarget?: SshTarget;
 }
 
+export interface SendCodexTextMessageInput {
+  threadId: string;
+  message: string;
+  workingDirectory?: string;
+  sshTarget?: SshTarget;
+}
+
 export class CodexImageMessageUnavailableError extends Error {}
 
 function resolveLocalWorkingDirectory(
@@ -208,6 +215,18 @@ function toUnavailableError(error: unknown): CodexImageMessageUnavailableError {
   );
 }
 
+function toTextUnavailableError(
+  error: unknown,
+): CodexImageMessageUnavailableError {
+  const detail = error instanceof Error ? error.message.trim() : "";
+  if (/ENOENT|not found|command not found/i.test(detail)) {
+    return new CodexImageMessageUnavailableError(
+      "当前会话主机未找到 codex 命令，无法发送飞书回复",
+    );
+  }
+  return new CodexImageMessageUnavailableError("Codex 文本消息发送失败");
+}
+
 export class CodexImageMessageService {
   private readonly createId: () => string;
   private readonly remoteFileAccess?: CodexImageRemoteFileAccess;
@@ -242,6 +261,44 @@ export class CodexImageMessageService {
         throw error;
       }
       throw toUnavailableError(error);
+    }
+  }
+
+  async sendText(input: SendCodexTextMessageInput): Promise<void> {
+    if (!CODEX_THREAD_ID_PATTERN.test(input.threadId)) {
+      throw new CodexImageMessageUnavailableError(
+        "当前终端没有可用的 Codex 会话标识",
+      );
+    }
+
+    try {
+      if (input.sshTarget) {
+        await this.runRemoteQueueCommand(
+          input.sshTarget,
+          buildInteractiveShellCommand(
+            buildRemoteQueueCommand({
+              threadId: input.threadId,
+              message: input.message,
+              workingDirectory: input.workingDirectory,
+            }),
+          ),
+        );
+        return;
+      }
+
+      await this.runCommand(
+        "codex",
+        buildLocalQueueArgs({
+          threadId: input.threadId,
+          message: input.message,
+        }),
+        { cwd: resolveLocalWorkingDirectory(input.workingDirectory) },
+      );
+    } catch (error) {
+      if (error instanceof CodexImageMessageUnavailableError) {
+        throw error;
+      }
+      throw toTextUnavailableError(error);
     }
   }
 

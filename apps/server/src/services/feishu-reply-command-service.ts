@@ -5,6 +5,7 @@ import {
 } from "@agent-orchestrator/shared";
 
 import type { FeishuReplyBinding } from "./feishu-reply-binding-store.js";
+import type { CodexImageMessageService } from "./codex-image-message-service.js";
 
 const USER_ID_PATTERN = /^ou_[A-Za-z0-9_-]+$/;
 const MESSAGE_ID_PATTERN = /^om_[A-Za-z0-9_-]+$/;
@@ -43,8 +44,9 @@ interface FeishuReplyCommandServiceOptions {
     markProcessed(messageId: string): void;
   };
   registry: { get(sessionId: string): AgentSessionRecord };
-  input: {
-    writePrompt(sessionId: string, prompt: string): Promise<unknown>;
+  codex: {
+    resolveSessionId(session: AgentSessionRecord): Promise<string | undefined>;
+    sendText: CodexImageMessageService["sendText"];
   };
 }
 
@@ -66,7 +68,10 @@ function isAvailableCodexSession(session: AgentSessionRecord): boolean {
     session.connectionState === "online" &&
     session.interactionState !== "exited" &&
     session.interactionState !== "detached" &&
-    session.controlMode !== "observe"
+    session.controlMode !== "observe" &&
+    (!session.hostId ||
+      session.hostId === "local" ||
+      Boolean(session.sshTarget))
   );
 }
 
@@ -75,7 +80,7 @@ export class FeishuReplyCommandService {
   readonly #settings: FeishuReplyCommandServiceOptions["settings"];
   readonly #bindings: FeishuReplyCommandServiceOptions["bindings"];
   readonly #registry: FeishuReplyCommandServiceOptions["registry"];
-  readonly #input: FeishuReplyCommandServiceOptions["input"];
+  readonly #codex: FeishuReplyCommandServiceOptions["codex"];
   readonly #inFlightMessageIds = new Set<string>();
 
   constructor(options: FeishuReplyCommandServiceOptions) {
@@ -85,7 +90,7 @@ export class FeishuReplyCommandService {
     this.#settings = options.settings;
     this.#bindings = options.bindings;
     this.#registry = options.registry;
-    this.#input = options.input;
+    this.#codex = options.codex;
   }
 
   async handle(
@@ -144,7 +149,21 @@ export class FeishuReplyCommandService {
 
     this.#inFlightMessageIds.add(event.message_id);
     try {
-      await this.#input.writePrompt(binding.sessionId, prompt);
+      const threadId = await this.#codex.resolveSessionId(session);
+      if (
+        !threadId ||
+        !isAvailableCodexSession(this.#registry.get(binding.sessionId))
+      ) {
+        return "ignored_unavailable";
+      }
+      // The native queue acknowledges receipt without relying on TUI paste,
+      // focus, Enter timing, or an idle composer. Busy threads keep the message.
+      await this.#codex.sendText({
+        threadId,
+        message: prompt,
+        workingDirectory: session.workingDirectory,
+        sshTarget: session.sshTarget,
+      });
       this.#bindings.markProcessed(event.message_id);
       return "delivered";
     } finally {

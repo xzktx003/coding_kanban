@@ -16,6 +16,7 @@ import {
 describe("mobile terminal controls", () => {
   it("maps touch buttons to real terminal control sequences", () => {
     assert.equal(getMobileTerminalControlInput("interrupt"), "\x03");
+    assert.equal(getMobileTerminalControlInput("ctrl-b"), "\x02");
     assert.equal(getMobileTerminalControlInput("escape"), "\x1b");
     assert.equal(getMobileTerminalControlInput("backspace"), "\x7f");
     assert.equal(getMobileTerminalControlInput("tab"), "\t");
@@ -87,6 +88,7 @@ describe("mobile terminal controls", () => {
       "shift",
       "escape",
       "interrupt",
+      "ctrl-b",
       "enter",
       "tab",
       "arrow-left",
@@ -111,6 +113,7 @@ describe("mobile terminal controls", () => {
     assert.equal(isMobileTerminalControlRepeatable("backspace"), true);
     assert.equal(isMobileTerminalControlRepeatable("enter"), false);
     assert.equal(isMobileTerminalControlRepeatable("interrupt"), false);
+    assert.equal(isMobileTerminalControlRepeatable("ctrl-b"), false);
   });
 
   it("cancels a pending hold when the finger starts scrolling", () => {
