@@ -201,6 +201,8 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 ### 文件浏览器
 
+- PDF 点击即预览：桌面文件侧栏和手机文件页复用 `PdfFilePreview`，通过现有 `POST /api/fs/download` 获取本机或 SSH 的完整二进制数据，校验 PDF 文件头后创建 `application/pdf` Blob URL，交给浏览器内置阅读器。支持桌面全屏、加载失败重试和新标签打开；组件卸载时中止请求并释放 Blob URL。无需新增服务端接口或 PDF 渲染依赖；大文件需等待读取完成，手机内嵌能力取决于浏览器。
+
 聚焦视图中可以打开文件面板：
 
 - 本地和 SSH 远端文件列表。

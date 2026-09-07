@@ -600,6 +600,23 @@ export async function fetchMarkdownImage(
   return response.blob();
 }
 
+export function fetchFileDownload(
+  body: {
+    path: string;
+    sshTarget?: ListFilesInput["sshTarget"];
+  },
+  signal?: AbortSignal,
+): Promise<Response> {
+  return fetch(`${apiBaseUrl}/api/fs/download`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
 export function chmodFile(body: ChmodInput): Promise<{ ok: true }> {
   return request<{ ok: true }>("/api/fs/chmod", {
     method: "POST",
@@ -611,13 +628,7 @@ export async function downloadFile(body: {
   path: string;
   sshTarget?: ListFilesInput["sshTarget"];
 }): Promise<void> {
-  const response = await fetch(`${apiBaseUrl}/api/fs/download`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  const response = await fetchFileDownload(body);
 
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status}`);

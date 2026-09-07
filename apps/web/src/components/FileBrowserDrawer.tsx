@@ -19,6 +19,8 @@ import type {
 import { previewFile } from "../lib/api";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { isMarkdownFileName } from "../lib/file-types";
+import { isPdfFile } from "../lib/pdf-preview";
+import { PdfFilePreview } from "./PdfFilePreview";
 import {
   loadMarkdownPreviewWindow,
   type MarkdownPreviewWindow,
@@ -851,7 +853,8 @@ export function FileBrowserDrawer({
 
   function renderFilePreview(fullscreen: boolean) {
     const previewAvailable = Boolean(
-      selectedFile && preview?.path === selectedFile.path,
+      selectedFile &&
+      (isPdfFile(selectedFile.name) || preview?.path === selectedFile.path),
     );
     const showMarkdownNavigation = previewExpanded || fullscreen;
 
@@ -897,7 +900,17 @@ export function FileBrowserDrawer({
           )}
         </div>
         <div className="file-browser-preview-body">
-          {selectedFile ? (
+          {selectedFile &&
+          isPdfFile(
+            selectedFile.name,
+            preview?.path === selectedFile.path ? preview.mimeType : undefined,
+          ) ? (
+            <PdfFilePreview
+              key={selectedFile.path}
+              path={selectedFile.path}
+              sshTarget={sshTarget}
+            />
+          ) : selectedFile ? (
             isTextPreview(preview) ? (
               <>
                 {selectedMarkdownPreview && sshTarget && (

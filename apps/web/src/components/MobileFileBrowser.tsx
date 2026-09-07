@@ -16,6 +16,8 @@ import type {
 import { previewFile } from "../lib/api";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { isMarkdownFileName } from "../lib/file-types";
+import { isPdfFile } from "../lib/pdf-preview";
+import { PdfFilePreview } from "./PdfFilePreview";
 import {
   useFileBrowser,
   type UseFileBrowserHost,
@@ -48,7 +50,7 @@ interface MobileCreateMenuState {
   busy: boolean;
 }
 
-type MobileFilePreviewKind = "markdown" | "text" | "image" | "binary";
+type MobileFilePreviewKind = "markdown" | "text" | "image" | "pdf" | "binary";
 export type MobileMarkdownViewMode = "rendered" | "source";
 const MOBILE_FILE_PREVIEW_WINDOW_BYTES = 64 * 1024;
 const MOBILE_FILE_LONG_PRESS_MS = 600;
@@ -73,6 +75,7 @@ export function classifyMobileFilePreview(
   entry: FileEntry,
   preview: FilePreviewResponse,
 ): MobileFilePreviewKind {
+  if (isPdfFile(entry.name, preview.mimeType)) return "pdf";
   if (preview.encoding === "utf8") {
     return isMarkdownFileName(entry.name) ? "markdown" : "text";
   }
@@ -275,6 +278,17 @@ export function MobileFileBrowser({
   const openFile = (entry: FileEntry) => {
     setMarkdownViewMode("rendered");
     setPreviewControlsExpanded(false);
+    if (isPdfFile(entry.name)) {
+      previewRequestIdRef.current += 1;
+      setFilePreview({
+        entry,
+        requestedOffset: 0,
+        loading: false,
+        preview: null,
+        error: null,
+      });
+      return;
+    }
     return loadPreviewWindow(entry);
   };
 
@@ -486,7 +500,13 @@ export function MobileFileBrowser({
           </div>
         )}
         <div className="mobile-file-preview-content" ref={previewContentRef}>
-          {previewLoading ? (
+          {isPdfFile(entry.name, preview?.mimeType) ? (
+            <PdfFilePreview
+              key={entry.path}
+              path={entry.path}
+              sshTarget={sshTarget}
+            />
+          ) : previewLoading ? (
             <div className="mobile-file-browser-state">正在读取文件...</div>
           ) : filePreview.error ? (
             <div className="mobile-file-browser-state" role="alert">

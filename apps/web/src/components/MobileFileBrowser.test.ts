@@ -37,6 +37,15 @@ const textPreview = {
 };
 
 describe("MobileFileBrowser", () => {
+  it("recognizes PDF before text heuristics or truncated binary previews", () => {
+    assert.equal(
+      classifyMobileFilePreview(
+        { ...markdownEntry, name: "report.PDF" },
+        { ...textPreview, content: "%PDF-1.7", truncated: true },
+      ),
+      "pdf",
+    );
+  });
   it("renders touch-friendly directory controls and a file list surface", () => {
     const markup = renderToStaticMarkup(
       createElement(MobileFileBrowser, {

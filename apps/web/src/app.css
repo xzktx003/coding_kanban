@@ -7317,6 +7317,30 @@ input {
   flex-direction: column;
 }
 
+.pdf-file-preview {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 300px;
+  gap: 8px;
+}
+
+.pdf-file-preview-frame {
+  display: block;
+  flex: 1;
+  width: 100%;
+  min-height: 260px;
+  border: 0;
+  background: #fff;
+}
+
+.pdf-file-preview a {
+  padding: 8px 12px;
+  color: #f6b26b;
+}
+
 .file-browser-pane-title {
   display: flex;
   align-items: center;
