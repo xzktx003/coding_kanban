@@ -1,6 +1,8 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import type {
+  AgentTranscriptEntry,
+  AgentTranscriptResponse,
   AgentSessionRecord,
   ListAgentSessionsResponse,
 } from "@agent-orchestrator/shared";
@@ -221,6 +223,94 @@ async function mockSessions(
       }),
     });
   });
+}
+
+function goalTranscriptPage({
+  entries,
+  hasMore = false,
+  nextCursor = null,
+  sessionId = "codex-fold-transcript",
+}: {
+  entries: AgentTranscriptEntry[];
+  hasMore?: boolean;
+  nextCursor?: string | null;
+  sessionId?: string;
+}): AgentTranscriptResponse {
+  return {
+    available: true,
+    agentKind: "codex",
+    sessionId,
+    matchedBy: "session-id",
+    updatedAt: "2026-09-07T03:00:00.000Z",
+    hasMore,
+    nextCursor,
+    entries,
+  };
+}
+
+async function mockGoalTranscript(
+  page: Page,
+  sessionId: string,
+  {
+    longGoalText,
+    routeRequests,
+  }: {
+    longGoalText: string;
+    routeRequests?: string[];
+  },
+): Promise<void> {
+  await page.route(
+    `**/api/agent-sessions/${sessionId}/transcript**`,
+    async (route) => {
+      const url = new URL(route.request().url());
+      const cursor = url.searchParams.get("cursor");
+      routeRequests?.push(cursor ?? "latest");
+
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(
+          cursor === "older-page"
+            ? goalTranscriptPage({
+                entries: [
+                  {
+                    id: "older-context",
+                    timestamp: "2026-09-07T02:59:00.000Z",
+                    kind: "assistant",
+                    title: "Codex",
+                    text: "更早的上下文已经加载。",
+                    collapsedByDefault: false,
+                  },
+                ],
+                hasMore: false,
+                sessionId: "codex-fold-transcript",
+              })
+            : goalTranscriptPage({
+                entries: [
+                  {
+                    id: "long-goal-input",
+                    timestamp: "2026-09-07T03:00:00.000Z",
+                    kind: "user",
+                    title: "你",
+                    text: longGoalText,
+                    collapsedByDefault: false,
+                  },
+                  {
+                    id: "assistant-summary",
+                    timestamp: "2026-09-07T03:01:00.000Z",
+                    kind: "assistant",
+                    title: "Codex",
+                    text: "我会按这个 goal 继续执行。",
+                    collapsedByDefault: false,
+                  },
+                ],
+                hasMore: true,
+                nextCursor: "older-page",
+                sessionId: "codex-fold-transcript",
+              }),
+        ),
+      });
+    },
+  );
 }
 
 async function terminalWebSocketUrls(page: Page): Promise<string[]> {
@@ -477,6 +567,232 @@ test("complete transcript starts at the newest page and loads older pages upward
   await expect
     .poll(() => body.evaluate((element) => element.scrollTop))
     .toBeGreaterThan(0);
+});
+
+test("desktop complete transcript can collapse long goal messages and keep state through fullscreen", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 820 });
+  const session = makeSession({
+    id: "desktop-fold-transcript",
+    displayName: "Desktop Fold Transcript",
+  });
+  const routeRequests: string[] = [];
+  const longGoalText = [
+    "/goal 请完整执行下面的长任务",
+    ...Array.from(
+      { length: 80 },
+      (_, index) =>
+        `goal-line-${String(index + 1).padStart(2, "0")} 这是一段很长的 goal 输入，用来验证折叠后不会继续渲染完整正文。`,
+    ),
+    "GOAL-END-SENTINEL-UNIQUE",
+  ].join("\n");
+
+  await mockSessions(page, [session]);
+  await mockGoalTranscript(page, session.id, { longGoalText, routeRequests });
+
+  await page.goto("/");
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: session.displayName }),
+    })
+    .dblclick();
+  await page.getByRole("button", { name: "完整记录" }).click();
+
+  const body = page.locator(".agent-transcript-body");
+  const entry = body.locator('[data-transcript-entry-id="long-goal-input"]');
+  const foldToggle = entry.locator(".agent-transcript-fold-toggle");
+  const preview = entry.locator(".agent-transcript-collapsed-preview");
+
+  await expect(entry).toContainText("GOAL-END-SENTINEL-UNIQUE");
+  await expect(foldToggle).toHaveAttribute("aria-label", "折叠消息：你");
+  await expect(foldToggle).toHaveAttribute("aria-expanded", "true");
+  await expect(
+    entry.locator("header .agent-transcript-fold-toggle"),
+  ).toHaveCount(1);
+  await expect
+    .poll(() =>
+      foldToggle.evaluate((button) => button.getBoundingClientRect().height),
+    )
+    .toBeLessThanOrEqual(20);
+  await expect
+    .poll(() =>
+      entry
+        .locator(".agent-transcript-entry-meta")
+        .evaluate((meta) => getComputedStyle(meta).display),
+    )
+    .toBe("flex");
+  await expect
+    .poll(() =>
+      entry.evaluate((element) => {
+        const time = element.querySelector("time")?.getBoundingClientRect();
+        const button = element.querySelector("button")?.getBoundingClientRect();
+        if (!time || !button) {
+          return false;
+        }
+        return (
+          Math.abs(time.y + time.height / 2 - button.y - button.height / 2) < 1
+        );
+      }),
+    )
+    .toBe(true);
+
+  const expandedHeight = await entry.evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
+  await foldToggle.scrollIntoViewIfNeeded();
+  await expect
+    .poll(async () => {
+      const bodyBox = await body.boundingBox();
+      const buttonBox = await foldToggle.boundingBox();
+      return Boolean(
+        bodyBox &&
+        buttonBox &&
+        buttonBox.y >= bodyBox.y &&
+        buttonBox.y + buttonBox.height <= bodyBox.y + bodyBox.height,
+      );
+    })
+    .toBe(true);
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath("desktop-expanded-bottom.png"),
+  });
+
+  await foldToggle.click();
+  await expect(foldToggle).toHaveAttribute("aria-label", "展开消息：你");
+  await expect(foldToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(preview).toBeVisible();
+  await expect(entry).not.toContainText("GOAL-END-SENTINEL-UNIQUE");
+  await expect(
+    entry.locator('[data-testid="agent-transcript-markdown"]'),
+  ).toHaveCount(0);
+  const collapsedHeight = await entry.evaluate(
+    (element) => element.getBoundingClientRect().height,
+  );
+  expect(collapsedHeight).toBeLessThan(expandedHeight / 2);
+
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath("desktop-collapsed.png"),
+  });
+
+  await page
+    .getByRole("button", { name: "全屏查看完整记录", exact: true })
+    .click();
+  await expect(page.locator(".agent-transcript-fullscreen")).toBeVisible();
+  const fullscreenEntry = page.locator(
+    '.agent-transcript-fullscreen [data-transcript-entry-id="long-goal-input"]',
+  );
+  await expect(
+    fullscreenEntry.locator(".agent-transcript-fold-toggle"),
+  ).toHaveAttribute("aria-label", "展开消息：你");
+  await expect(fullscreenEntry).not.toContainText("GOAL-END-SENTINEL-UNIQUE");
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".agent-transcript-fullscreen")).toHaveCount(0);
+  await expect(foldToggle).toHaveAttribute("aria-label", "展开消息：你");
+
+  await body.evaluate((element) => {
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  await expect(
+    body.locator('[data-transcript-entry-id="older-context"]'),
+  ).toBeVisible();
+  await expect.poll(() => routeRequests).toContain("older-page");
+  await expect(foldToggle).toHaveAttribute("aria-label", "展开消息：你");
+
+  await foldToggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(foldToggle).toHaveAttribute("aria-label", "折叠消息：你");
+  await expect(foldToggle).toHaveAttribute("aria-expanded", "true");
+  await expect(entry).toContainText("GOAL-END-SENTINEL-UNIQUE");
+
+  await foldToggle.focus();
+  await page.keyboard.press("Space");
+  await expect(foldToggle).toHaveAttribute("aria-label", "展开消息：你");
+  await expect(foldToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(entry).not.toContainText("GOAL-END-SENTINEL-UNIQUE");
+
+  await page.getByRole("button", { name: "刷新" }).click();
+  await expect(foldToggle).toHaveAttribute("aria-label", "展开消息：你");
+  await expect(foldToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(entry).not.toContainText("GOAL-END-SENTINEL-UNIQUE");
+});
+
+test("mobile complete transcript can collapse long goal messages", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const session = makeSession({
+    id: "mobile-fold-transcript",
+    displayName: "Mobile Fold Transcript",
+  });
+  const longGoalText = [
+    "/goal 手机端长输入折叠验证",
+    ...Array.from(
+      { length: 56 },
+      (_, index) =>
+        `mobile-goal-line-${String(index + 1).padStart(2, "0")} 这段输入模拟手机端查看很长的 goal 指令。`,
+    ),
+    "MOBILE-GOAL-END-SENTINEL",
+  ].join("\n");
+
+  await mockSessions(page, [session]);
+  await mockGoalTranscript(page, session.id, { longGoalText });
+
+  await page.goto("/?view=mobile");
+  const logo = page.locator(".kanban-brand-logo");
+  await expect(logo).toBeVisible();
+  await expect
+    .poll(() =>
+      logo.evaluate((element) => (element as HTMLImageElement).naturalWidth),
+    )
+    .toBe(258);
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.scrollWidth))
+    .toBe(390);
+  await page.screenshot({
+    path: testInfo.outputPath("mobile-brand.png"),
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "完整记录" }).click();
+
+  const dialog = page.locator(".agent-transcript-dialog");
+  const entry = dialog.locator('[data-transcript-entry-id="long-goal-input"]');
+  const foldToggle = entry.locator(".agent-transcript-fold-toggle");
+  await expect(dialog).toBeVisible();
+  await expect(entry).toContainText("MOBILE-GOAL-END-SENTINEL");
+
+  await foldToggle.scrollIntoViewIfNeeded();
+  await expect(foldToggle).toHaveAttribute("aria-label", "折叠消息：你");
+  await expect(foldToggle).toHaveAttribute("aria-expanded", "true");
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath("mobile-expanded-bottom.png"),
+  });
+
+  await foldToggle.click();
+  await expect(foldToggle).toHaveAttribute("aria-label", "展开消息：你");
+  await expect(foldToggle).toHaveAttribute("aria-expanded", "false");
+  await expect(
+    entry.locator(".agent-transcript-collapsed-preview"),
+  ).toBeVisible();
+  await expect(entry).not.toContainText("MOBILE-GOAL-END-SENTINEL");
+  await expect(
+    entry.locator('[data-testid="agent-transcript-markdown"]'),
+  ).toHaveCount(0);
+
+  await page.screenshot({
+    fullPage: false,
+    path: testInfo.outputPath("mobile-collapsed.png"),
+  });
+
+  await foldToggle.focus();
+  await page.keyboard.press("Enter");
+  await expect(foldToggle).toHaveAttribute("aria-label", "折叠消息：你");
+  await expect(foldToggle).toHaveAttribute("aria-expanded", "true");
+  await expect(entry).toContainText("MOBILE-GOAL-END-SENTINEL");
 });
 
 test("fullscreen transcript scrolls with the wheel above the underlying terminal", async ({

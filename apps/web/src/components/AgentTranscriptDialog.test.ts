@@ -156,6 +156,8 @@ test("transcript entries hide exec calls and keep the newest visible record at t
 
   const markup = renderToStaticMarkup(
     createElement(AgentTranscriptEntries, {
+      expandedEntries: new Map([["visible-tool-output", true]]),
+      onToggleEntry: () => {},
       terminalFontSize: 18,
       transcript,
     }),
@@ -174,7 +176,7 @@ test("transcript entries hide exec calls and keep the newest visible record at t
   assert.doesNotMatch(markup, /hidden command/);
   assert.doesNotMatch(markup, /middle-1/);
   assert.match(markup, /按工作目录匹配/);
-  assert.match(markup, /<details/);
+  assert.match(markup, /agent-transcript-fold-toggle/);
   assert.equal(
     (markup.match(/data-transcript-rendering="markdown"/g) ?? []).length,
     3,
@@ -210,7 +212,11 @@ test("transcript entries render one server page and offer upward continuation", 
   };
 
   const markup = renderToStaticMarkup(
-    createElement(AgentTranscriptEntries, { transcript }),
+    createElement(AgentTranscriptEntries, {
+      transcript,
+      expandedEntries: new Map(),
+      onToggleEntry: () => {},
+    }),
   );
 
   assert.match(markup, /data-transcript-entry-id="message-30"/);
@@ -222,6 +228,54 @@ test("transcript entries render one server page and offer upward continuation", 
     markup.indexOf("加载更早记录") <
       markup.indexOf('data-transcript-entry-id="message-1"'),
   );
+});
+
+test("every transcript message can collapse without rendering its full body", () => {
+  const transcript: AgentTranscriptResponse = {
+    available: true,
+    agentKind: "codex",
+    sessionId: "fold-test",
+    matchedBy: "session-id",
+    updatedAt: null,
+    hasMore: false,
+    nextCursor: null,
+    entries: [
+      {
+        id: "goal-input",
+        kind: "user",
+        title: "你",
+        timestamp: "",
+        text: "/goal " + "long input ".repeat(200) + "END-OF-GOAL",
+        collapsedByDefault: false,
+      },
+    ],
+  };
+  const collapsed = renderToStaticMarkup(
+    createElement(AgentTranscriptEntries, {
+      transcript,
+      expandedEntries: new Map([["goal-input", false]]),
+      onToggleEntry: () => {},
+    }),
+  );
+  assert.match(collapsed, /展开消息：你/);
+  assert.match(collapsed, /agent-transcript-collapsed-preview/);
+  assert.doesNotMatch(collapsed, /END-OF-GOAL|data-transcript-rendering/);
+  const expanded = renderToStaticMarkup(
+    createElement(AgentTranscriptEntries, {
+      transcript,
+      expandedEntries: new Map(),
+      onToggleEntry: () => {},
+    }),
+  );
+  assert.match(expanded, /折叠消息：你/);
+  assert.match(expanded, /aria-expanded="true"/);
+  assert.match(expanded, /data-transcript-rendering="markdown"/);
+  assert.ok(
+    expanded.indexOf('class="agent-transcript-fold-toggle"') <
+      expanded.indexOf("</header>"),
+  );
+  assert.match(expanded, /<time>[^<]*<\/time><button/);
+  assert.doesNotMatch(expanded, /<summary/);
 });
 
 test("renders every Markdown message in the loaded page without per-entry visibility gating", () => {

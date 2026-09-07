@@ -99,6 +99,7 @@ describe("TopBar", () => {
     const markup = renderTopBar();
 
     assert.match(markup, /电脑端 Coding Kanban/);
+    assert.match(markup, /src="\/houmo-logo.png"/);
     assert.match(markup, /手机端 Coding Kanban/);
     assert.match(markup, /共 <strong>2<\/strong> 个会话/);
     assert.match(markup, /data-testid="new-session-toggle"/);

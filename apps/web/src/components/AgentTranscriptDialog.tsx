@@ -24,6 +24,8 @@ import {
 import { LazyMarkdownContent } from "./LazyMarkdownRenderedContent";
 
 interface AgentTranscriptEntriesProps {
+  expandedEntries: ReadonlyMap<string, boolean>;
+  onToggleEntry: (id: string, expanded: boolean) => void;
   loadingMore?: boolean;
   onLoadMore?: () => void;
   terminalFontSize?: number;
@@ -110,6 +112,8 @@ function formatTimestamp(timestamp: string): string {
 }
 
 export function AgentTranscriptEntries({
+  expandedEntries,
+  onToggleEntry,
   loadingMore = false,
   onLoadMore,
   terminalFontSize = DEFAULT_TERMINAL_FONT_SIZE,
@@ -175,6 +179,8 @@ export function AgentTranscriptEntries({
           </div>
         ) : (
           orderedEntries.map((entry) => {
+            const expanded =
+              expandedEntries.get(entry.id) ?? !entry.collapsedByDefault;
             const content =
               entry.kind === "tool" ? (
                 <pre
@@ -200,22 +206,40 @@ export function AgentTranscriptEntries({
                 data-transcript-entry-id={entry.id}
                 key={entry.id}
               >
-                {entry.collapsedByDefault ? (
-                  <details>
-                    <summary>
-                      <span>{entry.title}</span>
-                      <time>{formatTimestamp(entry.timestamp)}</time>
-                    </summary>
-                    {content}
-                  </details>
+                <header>
+                  <strong>{entry.title}</strong>
+                  <div className="agent-transcript-entry-meta">
+                    <time>{formatTimestamp(entry.timestamp)}</time>
+                    <button
+                      aria-label={`${expanded ? "折叠" : "展开"}消息：${entry.title}`}
+                      aria-expanded={expanded}
+                      className="agent-transcript-fold-toggle"
+                      onClick={(event) => {
+                        const anchor = expanded
+                          ? event.currentTarget
+                          : event.currentTarget.closest("article");
+                        onToggleEntry(entry.id, !expanded);
+                        // Keep the collapsed message reachable; expansion starts at its beginning.
+                        window.requestAnimationFrame(() => {
+                          if (anchor?.isConnected)
+                            anchor.scrollIntoView({
+                              block: expanded ? "nearest" : "start",
+                            });
+                        });
+                      }}
+                      type="button"
+                    >
+                      {expanded ? "折叠" : "展开"}
+                    </button>
+                  </div>
+                </header>
+                {expanded ? (
+                  content
                 ) : (
-                  <>
-                    <header>
-                      <strong>{entry.title}</strong>
-                      <time>{formatTimestamp(entry.timestamp)}</time>
-                    </header>
-                    {content}
-                  </>
+                  <p className="agent-transcript-collapsed-preview">
+                    {entry.text.slice(0, 120).replace(/\s+/g, " ")}
+                    {entry.text.length > 120 ? "…" : ""}
+                  </p>
                 )}
               </article>
             );
@@ -242,6 +266,22 @@ export function AgentTranscriptDialog({
   const [error, setError] = useState<string | null>(null);
   const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
   const [windowTrimmed, setWindowTrimmed] = useState(false);
+  const [expandedEntries, setExpandedEntries] = useState<Map<string, boolean>>(
+    () => new Map(),
+  );
+  // Keep choices through refresh/fullscreen, but never carry them to another conversation.
+  useEffect(() => {
+    setExpandedEntries(new Map());
+  }, [agentSessionId, transcript?.sessionId]);
+  useEffect(() => {
+    const retainedIds = new Set(transcript?.entries.map((entry) => entry.id));
+    setExpandedEntries((current) => {
+      const retained = new Map(
+        [...current].filter(([id]) => retainedIds.has(id)),
+      );
+      return retained.size === current.size ? current : retained;
+    });
+  }, [transcript?.entries]);
   const requestIdRef = useRef(0);
   const sessionProbeIdRef = useRef(0);
   const transcriptSessionIdRef = useRef<string | null>(null);
@@ -680,6 +720,13 @@ export function AgentTranscriptDialog({
                 </div>
               ) : null}
               <AgentTranscriptEntries
+                expandedEntries={expandedEntries}
+                onToggleEntry={(id, expanded) => {
+                  cancelInitialBottomPin();
+                  setExpandedEntries((current) =>
+                    new Map(current).set(id, expanded),
+                  );
+                }}
                 loadingMore={loadingMore}
                 onLoadMore={loadMore}
                 terminalFontSize={terminalFontSize}

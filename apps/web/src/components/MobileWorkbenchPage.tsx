@@ -589,6 +589,13 @@ export function MobileWorkbenchPage({
       <header className="mobile-workbench-header">
         <div className="mobile-workbench-mode-switch" aria-label="端切换">
           <div className="mobile-workbench-title">
+            <img
+              className="kanban-brand-logo"
+              src="/houmo-logo.png"
+              alt="后摩智能 HOUMO.AI"
+              width={258}
+              height={56}
+            />
             <strong>手机端 Coding Kanban</strong>
             <span>
               {activeSession

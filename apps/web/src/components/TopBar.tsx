@@ -453,6 +453,13 @@ export function TopBar({
   return (
     <header className="top-bar">
       <div className="top-bar-brand">
+        <img
+          className="kanban-brand-logo"
+          src="/houmo-logo.png"
+          alt="后摩智能 HOUMO.AI"
+          width={258}
+          height={56}
+        />
         <div className="top-bar-mode-switch" aria-label="端切换">
           <h1 className="top-bar-title">电脑端 Coding Kanban</h1>
           <a

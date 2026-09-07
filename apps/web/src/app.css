@@ -137,6 +137,18 @@ input {
   min-width: 0;
 }
 
+.kanban-brand-logo {
+  display: block;
+  width: 92px;
+  height: auto;
+  flex: none;
+}
+
+.mobile-workbench-title .kanban-brand-logo {
+  width: 74px;
+  margin-bottom: 4px;
+}
+
 .top-bar-actions {
   position: relative;
   display: flex;
@@ -9545,8 +9557,7 @@ input {
   background: rgba(255, 255, 255, 0.02);
 }
 
-.agent-transcript-entry header,
-.agent-transcript-entry summary {
+.agent-transcript-entry header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -9554,13 +9565,55 @@ input {
   margin-bottom: 8px;
 }
 
-.agent-transcript-entry summary {
-  margin-bottom: 0;
-  cursor: pointer;
+.agent-transcript-entry-meta {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 12px;
+  white-space: nowrap;
+  line-height: 16px;
 }
 
-.agent-transcript-entry details[open] summary {
-  margin-bottom: 8px;
+.agent-transcript-fold-toggle {
+  position: relative;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
+  min-height: 0;
+  border-radius: 2px;
+}
+
+.agent-transcript-fold-toggle::after {
+  position: absolute;
+  inset: -4px -6px;
+  content: "";
+}
+
+.agent-transcript-fold-toggle:hover {
+  text-decoration: underline;
+}
+
+.agent-transcript-fold-toggle:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+
+.agent-transcript-entry header strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.agent-transcript-collapsed-preview {
+  margin: 4px 0 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--agent-transcript-font-size, 14px);
 }
 
 .agent-transcript-entry time {

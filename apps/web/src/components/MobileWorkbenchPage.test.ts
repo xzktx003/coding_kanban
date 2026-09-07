@@ -274,6 +274,7 @@ describe("MobileWorkbenchPage", () => {
     );
 
     assert.match(markup, /手机端 Coding Kanban/);
+    assert.match(markup, /src="\/houmo-logo.png"/);
     assert.match(markup, /电脑端 Coding Kanban/);
     assert.match(markup, /href="\/"/);
     assert.match(markup, /执行中的任务/);
