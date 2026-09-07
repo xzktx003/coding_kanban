@@ -7,6 +7,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { config as loadDotenv } from "dotenv";
+import { findFormulas, replaceFormulas } from "./feishu-math.mjs";
 
 const EVENT_TYPE = "agent-turn-complete";
 const DEFAULT_MESSAGE_CHUNK_CHARS = 12_000;
@@ -254,6 +255,23 @@ function splitOutputText(value, maxChunkCharacters) {
           break;
         }
       }
+      // Do not cut an uploaded formula image reference between cards.
+      const tail = characters.slice(index, end).join("");
+      const remaining = characters.slice(index, end + 2000).join("");
+      for (const image of remaining.matchAll(
+        /!\[[^\]]*\]\(img_[A-Za-z0-9_-]+\)/g,
+      )) {
+        if (
+          image.index < tail.length &&
+          image.index + image[0].length > tail.length
+        ) {
+          end =
+            index +
+            Array.from(remaining.slice(0, image.index || image[0].length))
+              .length;
+          break;
+        }
+      }
     }
     chunks.push(characters.slice(index, end).join(""));
     index = end;
@@ -319,10 +337,7 @@ function buildCardMetadataColumn(label, content) {
   };
 }
 
-export function buildCompletionCards(
-  notification,
-  maxChunkCharacters = DEFAULT_MESSAGE_CHUNK_CHARS,
-) {
+function completionOutput(notification) {
   const cwd = typeof notification.cwd === "string" ? notification.cwd : "";
   const rawOutput =
     typeof notification["last-assistant-message"] === "string" &&
@@ -330,11 +345,21 @@ export function buildCompletionCards(
       ? notification["last-assistant-message"]
       : "Codex 已完成本轮任务，请打开 Coding Kanban 查看结果。";
   const projectName = projectNameFromCwd(cwd);
-  const output = redactCurrentWorkingDirectory(
+  return redactCurrentWorkingDirectory(
     sanitizeOutputText(rawOutput),
     cwd,
     projectName,
   );
+}
+
+export function buildCompletionCards(
+  notification,
+  maxChunkCharacters = DEFAULT_MESSAGE_CHUNK_CHARS,
+  formulaImages = new Map(),
+) {
+  const cwd = typeof notification.cwd === "string" ? notification.cwd : "";
+  const projectName = projectNameFromCwd(cwd);
+  const output = replaceFormulas(completionOutput(notification), formulaImages);
   const agentKind =
     typeof notification["agent-kind"] === "string"
       ? formatAgentKind(notification["agent-kind"])
@@ -349,7 +374,7 @@ export function buildCompletionCards(
     schema: "2.0",
     config: {
       update_multi: true,
-      width_mode: "compact",
+      width_mode: formulaImages.size ? "default" : "compact",
       enable_forward: true,
       summary: {
         content: `${agentKind || "Agent"} 任务完成 · ${projectName}`,
@@ -544,6 +569,10 @@ export async function runCodexFeishuNotification({
   enforceRepositoryScope = true,
   runCommand = execFileCommand,
   sleep = delay,
+  renderMath = async (...args) => {
+    const { renderFormulaImages } = await import("./feishu-math-renderer.mjs");
+    return renderFormulaImages(...args);
+  },
 }) {
   const notification = parseNotification(rawNotification);
   if (notification.type !== EVENT_TYPE) {
@@ -581,13 +610,38 @@ export async function runCodexFeishuNotification({
     1,
     3,
   );
-  const cards = buildCompletionCards(notification, messageChunkCharacters);
   const commandEnv = {
     ...process.env,
     ...env,
     LARKSUITE_CLI_NO_UPDATE_NOTIFIER: "1",
     LARKSUITE_CLI_NO_SKILLS_NOTIFIER: "1",
   };
+  const formulas = findFormulas(completionOutput(notification));
+  let formulaImages = new Map();
+  if (formulas.length) {
+    try {
+      formulaImages = await renderMath(formulas, {
+        runCommand,
+        env: commandEnv,
+        timeout,
+      });
+      if (formulaImages.size < formulas.length) {
+        process.stderr.write(
+          "Some Feishu formulas were not rendered; preserving their source.\n",
+        );
+      }
+    } catch {
+      // Formula rendering is optional: never suppress the completion notification.
+      process.stderr.write(
+        "Feishu formula rendering unavailable; sending original Markdown.\n",
+      );
+    }
+  }
+  const cards = buildCompletionCards(
+    notification,
+    messageChunkCharacters,
+    formulaImages,
+  );
 
   const messageIds = [];
   const sentMessages = [];

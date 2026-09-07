@@ -24,6 +24,79 @@ const completion = {
   "last-assistant-message": "Implemented the requested notification bridge.",
 };
 
+test("renders math before chunking, preserves reply bindings and falls back on renderer failure", async () => {
+  const event = {
+    ...completion,
+    "last-assistant-message": "Before $x^2$ after.",
+  };
+  for (const fail of [false, true]) {
+    const calls = [];
+    const result = await runCodexFeishuNotification({
+      rawNotification: JSON.stringify(event),
+      env: { FEISHU_NOTIFY_USER_ID: "ou_user123" },
+      renderMath: async (formulas) => {
+        assert.deepEqual(formulas, ["x^2"]);
+        if (fail) throw new Error("browser unavailable");
+        return new Map([["x^2", "img_test"]]);
+      },
+      runCommand: async (_binary, args) => {
+        calls.push(JSON.parse(args[args.indexOf("--content") + 1]));
+        return {
+          stdout: JSON.stringify({
+            ok: true,
+            data: { message_id: "om_test", chat_id: "oc_test" },
+          }),
+        };
+      },
+    });
+    assert.equal(calls.length, 1);
+    assert.match(JSON.stringify(calls[0]), fail ? /\$x\^2\$/ : /img_test/);
+    assert.deepEqual(result.messages, [
+      { messageId: "om_test", chatId: "oc_test" },
+    ]);
+  }
+});
+
+test("formula image references stay intact at Unicode chunk boundaries", () => {
+  for (const prefixLength of [995, 999, 1000]) {
+    const cards = buildCompletionCards(
+      {
+        ...completion,
+        "last-assistant-message":
+          "中".repeat(prefixLength) + "$x^2$" + "尾".repeat(20),
+      },
+      1000,
+      new Map([["x^2", "img_test"]]),
+    );
+    const chunks = cards.map(
+      (card) => card.body.elements[1].elements[0].content,
+    );
+    assert.equal(
+      chunks.join(""),
+      "中".repeat(prefixLength) + "![x^2](img_test)" + "尾".repeat(20),
+    );
+    assert.equal(
+      chunks.filter((chunk) => chunk.includes("![x^2](img_test)")).length,
+      1,
+    );
+  }
+});
+
+test("formulas are redacted before being handed to the image renderer", async () => {
+  await runCodexFeishuNotification({
+    rawNotification: JSON.stringify({
+      ...completion,
+      "last-assistant-message": "$\\text{" + repositoryRoot + "}$",
+    }),
+    env: { FEISHU_NOTIFY_USER_ID: "ou_user123" },
+    renderMath: async (formulas) => {
+      assert.ok(!formulas.join("").includes(repositoryRoot));
+      return new Map();
+    },
+    runCommand: async () => ({ stdout: '{"ok":true}' }),
+  });
+});
+
 test("reads the persisted Feishu switch with backward-compatible defaults", () => {
   const directory = mkdtempSync(resolve(tmpdir(), "codex-feishu-switch-"));
   const statePath = resolve(directory, "settings.json");

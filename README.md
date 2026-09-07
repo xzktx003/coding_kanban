@@ -84,6 +84,7 @@ Coding Kanban 将这些问题收敛为一条主流程：
 
 ### 功能更新时间线（新 → 旧）
 
+- `2026-09-07` — 飞书完成通知支持“Markdown 文字 + 公式图片”：本地排版 LaTeX 公式，保留普通文字格式；渲染或上传失败回退源码，不阻断通知。
 - `2026-09-07` — 文件浏览器支持点击 PDF 直接预览，覆盖电脑端、手机端及 SSH 文件；电脑端支持全屏阅读，内嵌不可用时可在新标签打开。
 
 > 这里只记录新增能力和已有工作流的功能扩展，不收录 Bug 修复、测试、文档、重构或合并提交。链接为该功能的代表性提交，并非完整提交清单。
@@ -370,7 +371,7 @@ https://<局域网地址>:<WEB_PORT>/?view=mobile
 - `mkcert`：为局域网生成浏览器可信任的本地 HTTPS 证书，强烈推荐与 VS Code Web 一起使用。
 - `code-server` 或 `openvscode-server`：内嵌 VS Code Web；未安装时应用可尝试通过网络安装 `code-server`。
 - Codex、Copilot 或 Claude CLI：只需安装并登录实际要从看板启动的 Agent；纯 shell 会话不需要。
-- `lark-cli`：仅发送飞书提醒或从飞书回复继续 Codex 时需要。
+- `lark-cli`：仅发送飞书提醒或从飞书回复继续 Codex 时需要。公式图片还需要机器人图片上传权限（`im:resource:upload` 或接口允许的 `im:resource`）和本机 Chromium，可用 `pnpm exec playwright install --with-deps chromium` 准备；缺少条件时保留公式源码，不影响通知发送。
 - Playwright 浏览器和系统依赖：仅运行 E2E 或生成 README 截图时需要。
 
 ```bash

@@ -1,5 +1,7 @@
 # Coding Kanban Project Overview
 
+飞书完成卡片在发送端增加可选公式排版层：隐私裁剪后的正文 → 本机 KaTeX/Chromium 生成公式图片 → 同一机器人上传 → Markdown 图片与普通正文一起分片发送。浏览器不联网；失败保留公式源码，不改变任务完成判定与回复绑定。详见 [公式图片](codex-feishu-notifications.md#公式图片)。
+
 本文档按当前源码梳理仓库功能、模块边界、运行方式和注意事项。历史计划文档只作为背景，本页以 `apps/`、`packages/`、`scripts/` 和 `tests/` 中的实现为准。
 
 ## 产品定位
