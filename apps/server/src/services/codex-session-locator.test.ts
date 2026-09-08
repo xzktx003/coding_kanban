@@ -82,6 +82,47 @@ function exposeLinuxProcessStartTime(
   );
 }
 
+test("CodexSessionLocator trusts a Codex-owned rollout after cwd rename or deletion, but not an unrelated reader", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-renamed-cwd-"));
+  const sessionsRoot = join(root, "sessions");
+  const procRoot = join(root, "proc");
+  mkdirSync(sessionsRoot, { recursive: true });
+  try {
+    const main = writeSession(sessionsRoot, "main", "session-main-123", "cli");
+    const child = writeSession(sessionsRoot, "child", "session-child-123", {
+      subagent: {},
+    });
+    exposeOpenFile(procRoot, 100, main);
+    symlinkSync(child, join(procRoot, "100", "fd", "8"));
+    exposeProcessWorkingDirectory(
+      procRoot,
+      100,
+      "/workspace/shared.backup (deleted)",
+    );
+    const locator = new CodexSessionLocator({
+      sessionsRoot,
+      procRoot,
+      resolveTmuxPanePid: async () => 100,
+      resolveTmuxActivePanePid: async () => 100,
+    });
+    const input = {
+      tmuxTarget: "test",
+      tmuxSession: "test",
+      workingDirectory: "/workspace/shared",
+    };
+    assert.equal(await locator.resolve(input), undefined);
+    exposeCodexCommand(procRoot, 100);
+    assert.equal(await locator.resolve(input), "session-main-123");
+    writeFileSync(
+      join(procRoot, "100", "cmdline"),
+      "/usr/local/bin/codex\0resume\0session-main-123\0",
+    );
+    assert.equal(await locator.resolve(input), "session-main-123");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("CodexSessionLocator keeps same-directory tmux panes bound to their own top-level Codex sessions", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-session-locator-"));
   const sessionsRoot = join(root, "sessions");

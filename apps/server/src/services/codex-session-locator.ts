@@ -518,6 +518,10 @@ export class CodexSessionLocator {
           !candidate ||
           candidate.subagent ||
           (normalizedDirectory &&
+            // A rollout held by Codex identifies the conversation even when
+            // its original cwd has since been renamed or deleted. Other
+            // readers in the pane tree still need directory validation.
+            !codexProcessIds.includes(processId) &&
             resolve(candidate.cwd) !== normalizedDirectory)
         ) {
           continue;
@@ -556,7 +560,10 @@ export class CodexSessionLocator {
     // in the pane process tree. Prefer that exact identity over file recency or
     // shell-snapshot timing, while still validating the rollout and cwd.
     for (const sessionId of explicitResumeSessionIds) {
-      if (sessionCandidates.some((candidate) => candidate.id === sessionId)) {
+      if (
+        openCandidates.some((candidate) => candidate.id === sessionId) ||
+        sessionCandidates.some((candidate) => candidate.id === sessionId)
+      ) {
         return sessionId;
       }
     }
