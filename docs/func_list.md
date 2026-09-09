@@ -1,5 +1,6 @@
 # Coding Kanban 功能清单
 
+- 飞书机器人固定菜单「任务总览」：统计全部可见会话的运行、等待输入、空闲和不可用状态，分页展示最近输出摘要，支持刷新并向本页可控 Codex 发送指令；复用原面板安全校验。菜单 Key 为 `kanban_task_overview`，配置见 [控制面板](feishu-codex-control-panel.md)。
 - 飞书机器人固定菜单「Codex 对话」：独立面板选择在线可控 Codex 对话并提交指令，发送前核对实际对话身份；不改变原通知卡片回复绑定。配置与安全边界见 [控制面板](feishu-codex-control-panel.md)。
 
 - 品牌标识：电脑端展开顶栏与手机端页头使用本地 Houmo Logo，保留 Coding Kanban 产品名称，不依赖外部网页在线加载。

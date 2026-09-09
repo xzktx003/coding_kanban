@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { stripVTControlCharacters } from "node:util";
 
 import {
   isCodexSessionCandidate,
@@ -7,19 +8,24 @@ import {
   type ListAgentSessionsResponse,
 } from "@agent-orchestrator/shared";
 
-const MENU_EVENT_KEY = "kanban_codex_sessions";
+const CONTROL_MENU_EVENT_KEY = "kanban_codex_sessions";
+const OVERVIEW_MENU_EVENT_KEY = "kanban_task_overview";
 const SUBMIT_ACTION_PREFIX = "kanban_submit_";
 const MAX_PANEL_AGE_MS = 15 * 60 * 1_000;
 const MAX_PANELS = 100;
 const MAX_PROCESSED_EVENTS = 1_000;
-const PAGE_SIZE = 50;
+const CONTROL_PAGE_SIZE = 50;
+const OVERVIEW_PAGE_SIZE = 10;
 const MAX_PROMPT_CHARACTERS = 1_000;
 const MAX_LABEL_CHARACTERS = 120;
+const MAX_SUMMARY_CHARACTERS = 300;
 const USER_ID_PATTERN = /^ou_[A-Za-z0-9_-]+$/;
 const MESSAGE_ID_PATTERN = /^om_[A-Za-z0-9_-]+$/;
 const CHAT_ID_PATTERN = /^oc_[A-Za-z0-9_-]+$/;
 const UNSAFE_CONTROL_CHARACTER_PATTERN =
   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u;
+const CONTROL_CHARACTER_PATTERN =
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu;
 
 export interface FeishuMenuEvent {
   type?: string;
@@ -48,6 +54,15 @@ export interface FeishuControlPanelCardInput {
   pageCount: number;
   hasPreviousPage: boolean;
   hasNextPage: boolean;
+  overview?: {
+    updatedAt: string;
+    total: number;
+    running: number;
+    awaitingInput: number;
+    idle: number;
+    unavailable: number;
+    entries: Array<{ label: string; status: string; summary: string }>;
+  };
 }
 
 export type FeishuControlPanelOutcome =
@@ -71,6 +86,7 @@ interface FeishuControlPanelTarget {
 
 interface FeishuControlPanelBinding {
   panelId: string;
+  mode: "control" | "overview";
   operatorId: string;
   chatId: string;
   messageId: string;
@@ -141,6 +157,16 @@ function isAvailableCodexSession(session: AgentSessionRecord): boolean {
   );
 }
 
+function isAvailablePanelTarget(
+  panel: FeishuControlPanelBinding,
+  session: AgentSessionRecord,
+): boolean {
+  return (
+    isAvailableCodexSession(session) &&
+    (panel.mode !== "overview" || !session.hidden)
+  );
+}
+
 function normalizePrompt(input: unknown): string | null {
   if (typeof input !== "string") {
     return null;
@@ -154,6 +180,12 @@ function normalizePrompt(input: unknown): string | null {
     return null;
   }
   return normalized;
+}
+
+function sanitizeCardText(input: string): string {
+  return stripVTControlCharacters(input)
+    .replace(CONTROL_CHARACTER_PATTERN, "")
+    .trim();
 }
 
 function parseJsonObject(input: string | undefined): Record<string, unknown> {
@@ -176,23 +208,98 @@ function buildSessionLabel(session: AgentSessionRecord): string {
     session.repositoryRoot ??
     session.workingDirectory ??
     session.transportRef?.tmuxSession;
-  const label = path
-    ? `${session.displayName} [${session.id.slice(0, 8)}] · ${path}`
-    : `${session.displayName} [${session.id.slice(0, 8)}]`;
-  if (Array.from(label).length <= MAX_LABEL_CHARACTERS) {
-    return label;
-  }
-  return `${Array.from(label)
-    .slice(0, MAX_LABEL_CHARACTERS - 3)
-    .join("")}...`;
+  const label = sanitizeCardText(
+    path
+      ? `${session.displayName} [${session.id.slice(0, 8)}] · ${path}`
+      : `${session.displayName} [${session.id.slice(0, 8)}]`,
+  );
+  return truncateUnicode(label, MAX_LABEL_CHARACTERS);
 }
 
-function pageCountFor(total: number): number {
-  return Math.max(1, Math.ceil(total / PAGE_SIZE));
+function truncateUnicode(input: string, maxCharacters: number): string {
+  const characters = Array.from(input);
+  if (characters.length <= maxCharacters) {
+    return input;
+  }
+  return `${characters.slice(0, Math.max(0, maxCharacters - 3)).join("")}...`;
+}
+
+function pageCountFor(total: number, pageSize: number): number {
+  return Math.max(1, Math.ceil(total / pageSize));
 }
 
 function buildIdempotencyKey(value: string): string {
   return `kc:${createHash("sha256").update(value).digest("hex").slice(0, 32)}`;
+}
+
+function isUnavailableForOverview(session: AgentSessionRecord): boolean {
+  return (
+    session.connectionState !== "online" ||
+    session.interactionState === "exited" ||
+    session.interactionState === "detached"
+  );
+}
+
+function getOverviewStatus(session: AgentSessionRecord): string {
+  let status: string;
+  if (isUnavailableForOverview(session)) {
+    status = "不可用";
+  } else if (session.interactionState === "running") {
+    status = "运行中";
+  } else if (session.interactionState === "awaiting_input") {
+    status = "等待输入";
+  } else if (session.interactionState === "idle") {
+    status = "空闲";
+  } else {
+    status = session.interactionState;
+  }
+  if (session.stateConfidence === "low") {
+    status = `${status}（状态不确定）`;
+  }
+  const agentKind = session.agentKind.trim().toLowerCase();
+  if (agentKind && agentKind !== "codex") {
+    status = `${status} · ${truncateUnicode(sanitizeCardText(agentKind), 32)}`;
+  }
+  return status;
+}
+
+function buildOverviewSummary(session: AgentSessionRecord): string {
+  const summary = sanitizeCardText(session.lastAgentMessageSummary ?? "");
+  const raw = summary || sanitizeCardText(session.outputPreview ?? "");
+  return truncateUnicode(raw, MAX_SUMMARY_CHARACTERS);
+}
+
+function buildOverview(
+  sessions: AgentSessionRecord[],
+  pageSessions: AgentSessionRecord[],
+  updatedAt: string,
+): FeishuControlPanelCardInput["overview"] {
+  const visible = sessions.filter((session) => !session.hidden);
+  return {
+    updatedAt,
+    total: visible.length,
+    running: visible.filter(
+      (session) =>
+        !isUnavailableForOverview(session) &&
+        session.interactionState === "running",
+    ).length,
+    awaitingInput: visible.filter(
+      (session) =>
+        !isUnavailableForOverview(session) &&
+        session.interactionState === "awaiting_input",
+    ).length,
+    idle: visible.filter(
+      (session) =>
+        !isUnavailableForOverview(session) &&
+        session.interactionState === "idle",
+    ).length,
+    unavailable: visible.filter(isUnavailableForOverview).length,
+    entries: pageSessions.map((session) => ({
+      label: buildSessionLabel(session),
+      status: getOverviewStatus(session),
+      summary: buildOverviewSummary(session),
+    })),
+  };
 }
 
 export class FeishuControlPanelService {
@@ -244,7 +351,8 @@ export class FeishuControlPanelService {
     if (
       !this.#allowedUserId ||
       typeof event.event_id !== "string" ||
-      event.event_key !== MENU_EVENT_KEY ||
+      (event.event_key !== CONTROL_MENU_EVENT_KEY &&
+        event.event_key !== OVERVIEW_MENU_EVENT_KEY) ||
       event.operator_id !== this.#allowedUserId
     ) {
       return "ignored_untrusted";
@@ -258,6 +366,8 @@ export class FeishuControlPanelService {
         operatorId: event.operator_id,
         userId: event.operator_id,
         page: 1,
+        mode:
+          event.event_key === OVERVIEW_MENU_EVENT_KEY ? "overview" : "control",
         idempotencyKey: buildIdempotencyKey(event.event_id),
       });
       this.#rememberProcessedEvent(event.event_id);
@@ -301,6 +411,7 @@ export class FeishuControlPanelService {
         operatorId: event.operator_id,
         chatId,
         page: 1,
+        mode: panel.mode,
       });
     }
 
@@ -323,6 +434,7 @@ export class FeishuControlPanelService {
         operatorId: event.operator_id,
         chatId,
         page,
+        mode: panel.mode,
       });
     }
 
@@ -362,7 +474,7 @@ export class FeishuControlPanelService {
       await this.#notify(chatId, "目标 Codex 对话已不可用。", eventId);
       return "ignored_unavailable";
     }
-    if (!isAvailableCodexSession(session)) {
+    if (!isAvailablePanelTarget(panel, session)) {
       await this.#notify(chatId, "目标 Codex 对话当前不可控。", eventId);
       return "ignored_unavailable";
     }
@@ -389,7 +501,7 @@ export class FeishuControlPanelService {
         await this.#notify(chatId, "目标 Codex 对话已不可用。", eventId);
         return "ignored_unavailable";
       }
-      if (!isAvailableCodexSession(latestSession)) {
+      if (!isAvailablePanelTarget(panel, latestSession)) {
         await this.#notify(chatId, "目标 Codex 对话当前不可控。", eventId);
         return "ignored_unavailable";
       }
@@ -432,17 +544,30 @@ export class FeishuControlPanelService {
     userId?: string;
     chatId?: string;
     page: number;
+    mode: "control" | "overview";
     idempotencyKey: string;
   }): Promise<FeishuControlPanelOutcome> {
-    const allSessions = this.#registry
-      .list()
-      .items.filter((session) => isAvailableCodexSession(session));
-    const totalPages = pageCountFor(allSessions.length);
+    const snapshotTime = new Date(this.#now()).toISOString();
+    const snapshot = this.#registry.list();
+    const allSessions =
+      input.mode === "overview"
+        ? snapshot.items.filter((session) => !session.hidden)
+        : snapshot.items.filter((session) => isAvailableCodexSession(session));
+    const pageSize =
+      input.mode === "overview" ? OVERVIEW_PAGE_SIZE : CONTROL_PAGE_SIZE;
+    const totalPages = pageCountFor(allSessions.length, pageSize);
     const page = Math.min(Math.max(1, input.page), totalPages);
-    const start = (page - 1) * PAGE_SIZE;
+    const start = (page - 1) * pageSize;
+    const pageSessions = allSessions.slice(start, start + pageSize);
     const pageTargets = await this.#collectTargets(
-      allSessions.slice(start, start + PAGE_SIZE),
+      input.mode === "overview"
+        ? pageSessions.filter((session) => isAvailableCodexSession(session))
+        : pageSessions,
+      { tolerateResolveErrors: input.mode === "overview" },
     );
+    if (!isEnabled(this.#settings.get())) {
+      return "ignored_disabled";
+    }
     const panelId = this.#createId();
     const targets = new Map<string, FeishuControlPanelTarget>();
     const options = pageTargets.map((target) => {
@@ -462,6 +587,11 @@ export class FeishuControlPanelService {
       pageCount: totalPages,
       hasPreviousPage: page > 1,
       hasNextPage: page < totalPages,
+      ...(input.mode === "overview"
+        ? {
+            overview: buildOverview(snapshot.items, pageSessions, snapshotTime),
+          }
+        : {}),
     });
     const sent = await this.#messenger.sendCard({
       userId: input.userId,
@@ -471,6 +601,7 @@ export class FeishuControlPanelService {
     });
     this.#rememberPanel({
       panelId,
+      mode: input.mode,
       operatorId: input.operatorId,
       chatId: sent.chatId,
       messageId: sent.messageId,
@@ -486,6 +617,7 @@ export class FeishuControlPanelService {
       operatorId: string;
       chatId: string;
       page: number;
+      mode: "control" | "overview";
     },
   ): Promise<FeishuControlPanelOutcome> {
     if (this.#isDuplicateEvent(eventId)) {
@@ -506,6 +638,7 @@ export class FeishuControlPanelService {
 
   async #collectTargets(
     sessions: AgentSessionRecord[],
+    options: { tolerateResolveErrors?: boolean } = {},
   ): Promise<Array<{ sessionId: string; threadId: string; label: string }>> {
     const targets: Array<{
       sessionId: string;
@@ -513,7 +646,15 @@ export class FeishuControlPanelService {
       label: string;
     }> = [];
     for (const session of sessions) {
-      const threadId = await this.#codex.resolveSessionId(session);
+      let threadId: string | undefined;
+      try {
+        threadId = await this.#codex.resolveSessionId(session);
+      } catch (error) {
+        if (!options.tolerateResolveErrors) {
+          throw error;
+        }
+        continue;
+      }
       if (!threadId) {
         continue;
       }

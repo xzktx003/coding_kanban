@@ -48,6 +48,12 @@ const menuEvent: FeishuMenuEvent = {
   operator_id: "ou_owner",
 };
 
+const overviewMenuEvent: FeishuMenuEvent = {
+  ...menuEvent,
+  event_id: "evt_overview_menu",
+  event_key: "kanban_task_overview",
+};
+
 const submitEvent: FeishuCardActionEvent = {
   type: "card.action.trigger",
   event_id: "evt_submit",
@@ -187,6 +193,227 @@ test("menu click sends a fresh private control card with only live controllable 
     hasPreviousPage: false,
     hasNextPage: false,
   });
+});
+
+test("overview menu sends paged visible task summary while binding only current page Codex targets", async () => {
+  const hiddenSession: AgentSessionRecord = {
+    ...codexSession,
+    id: "session-hidden",
+    displayName: "hidden",
+    hidden: true,
+  };
+  const runningSession: AgentSessionRecord = {
+    ...codexSession,
+    interactionState: "running",
+    stateConfidence: "low",
+    lastAgentMessageSummary: "\u001b[31m正在执行长任务\u001b[0m",
+  };
+  const awaitingSession: AgentSessionRecord = {
+    ...codexSession,
+    id: "session-awaiting",
+    displayName: "needs-input",
+    interactionState: "awaiting_input",
+    lastAgentMessageSummary: "请选择下一步",
+  };
+  const idleNodeSession: AgentSessionRecord = {
+    ...codexSession,
+    id: "session-node",
+    displayName: "node-shell",
+    agentKind: "node-shell-agent-kind-name-that-is-too-long",
+    interactionState: "idle",
+    agentSessionId: undefined,
+    lastAgentMessageSummary: " \t",
+    outputPreview: `完成${"好".repeat(400)}`,
+  };
+  const offlineSession: AgentSessionRecord = {
+    ...codexSession,
+    id: "session-offline",
+    displayName: "offline",
+    connectionState: "offline",
+    interactionState: "running",
+    outputPreview: "连接断开",
+  };
+  const exitedSession: AgentSessionRecord = {
+    ...codexSession,
+    id: "session-exited",
+    displayName: "done",
+    interactionState: "exited",
+    outputPreview: "已退出",
+  };
+  const fixture = createFixture({
+    sessions: [
+      runningSession,
+      awaitingSession,
+      idleNodeSession,
+      offlineSession,
+      exitedSession,
+      hiddenSession,
+    ],
+    nowMs: Date.parse("2026-09-09T03:04:05.000Z"),
+    resolveSessionId: async (session) => {
+      if (session.id === "session-awaiting") {
+        throw new Error("transcript unavailable");
+      }
+      if (session.id === "session-node") {
+        return "";
+      }
+      return `thread-${session.id}`;
+    },
+  });
+
+  assert.equal(await fixture.service.handle(overviewMenuEvent), "panel_sent");
+  assert.equal(fixture.cards.length, 1);
+  assert.deepEqual(fixture.cards[0]?.options, [
+    {
+      value: "target-1",
+      label: "coding-kanban [session-] · /repo/coding-kanban",
+    },
+  ]);
+  assert.deepEqual(fixture.cards[0]?.overview, {
+    updatedAt: "2026-09-09T03:04:05.000Z",
+    total: 5,
+    running: 1,
+    awaitingInput: 1,
+    idle: 1,
+    unavailable: 2,
+    entries: [
+      {
+        label: "coding-kanban [session-] · /repo/coding-kanban",
+        status: "运行中（状态不确定）",
+        summary: "正在执行长任务",
+      },
+      {
+        label: "needs-input [session-] · /repo/coding-kanban",
+        status: "等待输入",
+        summary: "请选择下一步",
+      },
+      {
+        label: "node-shell [session-] · /repo/coding-kanban",
+        status: "空闲 · node-shell-agent-kind-name-th...",
+        summary: `完成${"好".repeat(295)}...`,
+      },
+      {
+        label: "offline [session-] · /repo/coding-kanban",
+        status: "不可用",
+        summary: "连接断开",
+      },
+      {
+        label: "done [session-] · /repo/coding-kanban",
+        status: "不可用",
+        summary: "已退出",
+      },
+    ],
+  });
+});
+
+test("overview pagination and refresh preserve overview mode from server-side panel state", async () => {
+  const sessions = Array.from({ length: 12 }, (_, index) => ({
+    ...codexSession,
+    id: `session-${index + 1}`,
+    displayName: `codex-${index + 1}`,
+  }));
+  const fixture = createFixture({ sessions });
+
+  assert.equal(await fixture.service.handle(overviewMenuEvent), "panel_sent");
+  assert.equal(fixture.cards[0]?.overview?.entries.length, 10);
+  assert.equal(fixture.cards[0]?.page, 1);
+  assert.equal(fixture.cards[0]?.pageCount, 2);
+
+  assert.equal(
+    await fixture.service.handle({
+      ...submitEvent,
+      event_id: "evt_overview_page_2",
+      action_name: "kanban_page",
+      form_value: "",
+      action_value: JSON.stringify({
+        action: "kanban_page",
+        panelId: "panel-1",
+        page: 2,
+        mode: "control",
+      }),
+    }),
+    "panel_sent",
+  );
+  assert.equal(fixture.cards[1]?.overview?.entries.length, 2);
+  assert.equal(fixture.cards[1]?.options.length, 2);
+  assert.equal(fixture.cards[1]?.page, 2);
+  assert.equal(fixture.cards[1]?.hasPreviousPage, true);
+
+  const pageTwoPanelId = fixture.cards[1]?.panelId;
+  assert.equal(typeof pageTwoPanelId, "string");
+  assert.equal(
+    await fixture.service.handle({
+      ...submitEvent,
+      event_id: "evt_overview_refresh",
+      action_name: "kanban_refresh",
+      form_value: "",
+      action_value: JSON.stringify({
+        action: "kanban_refresh",
+        panelId: pageTwoPanelId,
+        mode: "control",
+      }),
+      message_id: "om_panel",
+      chat_id: "oc_private",
+    }),
+    "panel_sent",
+  );
+  assert.ok(fixture.cards[2]?.overview);
+  assert.equal(fixture.cards[2]?.page, 1);
+});
+
+test("overview submit keeps the same forged callback and exact thread protections", async () => {
+  const fixture = createFixture();
+  await fixture.service.handle(overviewMenuEvent);
+
+  assert.equal(
+    await fixture.service.handle({
+      ...submitEvent,
+      event_id: "evt_overview_wrong_user",
+      operator_id: "ou_other",
+    }),
+    "ignored_untrusted",
+  );
+  assert.deepEqual(fixture.deliveries, []);
+
+  fixture.setCurrentThreadId("codex-thread-2");
+  assert.equal(
+    await fixture.service.handle({
+      ...submitEvent,
+      event_id: "evt_overview_changed_thread",
+    }),
+    "ignored_changed_thread",
+  );
+  assert.deepEqual(fixture.deliveries, []);
+});
+
+test("overview submit refuses a target that became hidden after the panel was sent", async () => {
+  const fixture = createFixture();
+  await fixture.service.handle(overviewMenuEvent);
+  fixture.setSessions([{ ...codexSession, hidden: true }]);
+
+  assert.equal(
+    await fixture.service.handle({
+      ...submitEvent,
+      event_id: "evt_overview_hidden",
+    }),
+    "ignored_unavailable",
+  );
+  assert.deepEqual(fixture.deliveries, []);
+});
+
+test("overview send rechecks enabled settings after resolving card targets", async () => {
+  let fixture = createFixture({
+    resolveSessionId: async () => {
+      fixture.setSettings({ ...baseSettings, replyEnabled: false });
+      return "codex-thread-1";
+    },
+  });
+
+  assert.equal(
+    await fixture.service.handle(overviewMenuEvent),
+    "ignored_disabled",
+  );
+  assert.equal(fixture.sentCards.length, 0);
 });
 
 test("deduplicates repeated menu callbacks without creating a second panel", async () => {
