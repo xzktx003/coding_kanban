@@ -5,10 +5,15 @@ import type { FeishuNotificationSettingsResponse } from "@agent-orchestrator/sha
 
 import type { FeishuInboundMessageEvent } from "./feishu-reply-command-service.js";
 
-const EVENT_KEY = "im.message.receive_v1";
-const READY_MARKER = `[event] ready event_key=${EVENT_KEY}`;
+const FEISHU_REPLY_EVENT_KEYS = [
+  "im.message.receive_v1",
+  "application.bot.menu_v6",
+  "card.action.trigger",
+] as const;
 const MAX_STREAM_BUFFER_CHARACTERS = 1024 * 1024;
 const MAX_RESTART_DELAY_MS = 30_000;
+
+export type FeishuReplyEventKey = (typeof FEISHU_REPLY_EVENT_KEYS)[number];
 
 interface FeishuEventChildProcess {
   stdin: Pick<Writable, "end">;
@@ -31,14 +36,17 @@ type SpawnFeishuEventProcess = (
   },
 ) => FeishuEventChildProcess;
 
-interface FeishuReplyEventListenerOptions {
+interface FeishuReplyEventListenerOptions<
+  TEvent extends object = FeishuInboundMessageEvent,
+> {
+  eventKey?: FeishuReplyEventKey;
   settings: {
     get(): FeishuNotificationSettingsResponse;
     subscribe?(
       listener: (settings: FeishuNotificationSettingsResponse) => void,
     ): () => void;
   };
-  handleEvent(event: FeishuInboundMessageEvent): Promise<unknown>;
+  handleEvent(event: TEvent): Promise<unknown>;
   spawnProcess?: SpawnFeishuEventProcess;
   logError?: (error: unknown) => void;
 }
@@ -59,9 +67,21 @@ function shouldListen(settings: FeishuNotificationSettingsResponse): boolean {
   );
 }
 
-export class FeishuReplyEventListener {
-  readonly #settings: FeishuReplyEventListenerOptions["settings"];
-  readonly #handleEvent: FeishuReplyEventListenerOptions["handleEvent"];
+function assertAllowedEventKey(
+  eventKey: string,
+): asserts eventKey is FeishuReplyEventKey {
+  if (!(FEISHU_REPLY_EVENT_KEYS as readonly string[]).includes(eventKey)) {
+    throw new Error("unsupported Feishu reply event key");
+  }
+}
+
+export class FeishuReplyEventListener<
+  TEvent extends object = FeishuInboundMessageEvent,
+> {
+  readonly #eventKey: FeishuReplyEventKey;
+  readonly #readyMarker: string;
+  readonly #settings: FeishuReplyEventListenerOptions<TEvent>["settings"];
+  readonly #handleEvent: FeishuReplyEventListenerOptions<TEvent>["handleEvent"];
   readonly #spawnProcess: SpawnFeishuEventProcess;
   readonly #logError: (error: unknown) => void;
   #child: FeishuEventChildProcess | null = null;
@@ -72,7 +92,11 @@ export class FeishuReplyEventListener {
   #started = false;
   #eventQueue = Promise.resolve();
 
-  constructor(options: FeishuReplyEventListenerOptions) {
+  constructor(options: FeishuReplyEventListenerOptions<TEvent>) {
+    const eventKey = options.eventKey ?? "im.message.receive_v1";
+    assertAllowedEventKey(eventKey);
+    this.#eventKey = eventKey;
+    this.#readyMarker = `[event] ready event_key=${eventKey}`;
     this.#settings = options.settings;
     this.#handleEvent = options.handleEvent;
     this.#spawnProcess = options.spawnProcess ?? defaultSpawnProcess;
@@ -126,7 +150,7 @@ export class FeishuReplyEventListener {
     try {
       child = this.#spawnProcess(
         "lark-cli",
-        ["event", "consume", EVENT_KEY, "--as", "bot"],
+        ["event", "consume", this.#eventKey, "--as", "bot"],
         {
           env: {
             ...process.env,
@@ -150,9 +174,9 @@ export class FeishuReplyEventListener {
     const pendingLines: string[] = [];
 
     const enqueueLine = (line: string) => {
-      let parsed: FeishuInboundMessageEvent;
+      let parsed: TEvent;
       try {
-        parsed = JSON.parse(line) as FeishuInboundMessageEvent;
+        parsed = JSON.parse(line) as TEvent;
       } catch {
         this.#logError(new Error("Feishu event consumer emitted invalid JSON"));
         return;
@@ -193,7 +217,7 @@ export class FeishuReplyEventListener {
       while (newlineIndex >= 0) {
         const line = stderrBuffer.slice(0, newlineIndex).trim();
         stderrBuffer = stderrBuffer.slice(newlineIndex + 1);
-        if (line === READY_MARKER) {
+        if (line === this.#readyMarker) {
           ready = true;
           this.#restartDelayMs = 1_000;
           for (const pendingLine of pendingLines.splice(0)) {

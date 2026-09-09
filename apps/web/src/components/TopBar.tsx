@@ -867,13 +867,14 @@ export function TopBar({
                             ? "正在保存…"
                             : feishuNotificationSettingsError ||
                               (feishuNotificationSettings?.replyConfigured
-                                ? "仅接受对通知消息的本人私聊回复"
+                                ? "本人私聊：通知回复与 Codex 菜单控制"
                                 : "需要配置私聊接收者")}
                         </small>
                       </button>
                       <p className="top-bar-settings-note">
-                        完成通知与回复控制相互独立。回复控制只接受本人对已绑定通知的私聊文字，并发送到仍在线且可控制的
-                        Codex 卡片；接收者和凭证只保存在本机。
+                        完成通知与回复控制相互独立。回复已绑定通知仍发送到原会话；配置机器人菜单后，也可通过独立面板选择在线可控的
+                        Codex
+                        对话。两种入口仅限本人私聊，接收者和凭证只保存在本机。
                       </p>
                     </>
                   )}

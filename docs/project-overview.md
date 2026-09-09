@@ -1,5 +1,7 @@
 # Coding Kanban Project Overview
 
+飞书固定菜单通过 `application.bot.menu_v6` 打开独立 Codex 控制面板，表单经 `card.action.trigger` 原子提交目标与指令，复用 Codex 原生队列。该入口不改变原有通知回复绑定、不设置全局默认目标，服务端短期快照验证所选会话身份。详见 [控制面板](feishu-codex-control-panel.md)。
+
 完整记录提供逐条消息折叠与一行摘要。展开状态仅存于当前记录视图的 React 状态中，按消息 ID 管理，随窗口裁剪清理；全屏 Portal 切换保留状态，不写入后端或原始对话文件。折叠时卸载正文 Markdown 渲染以降低长记录的页面负担。
 
 飞书完成卡片在发送端增加可选公式排版层：隐私裁剪后的正文 → 本机 KaTeX/Chromium 生成公式图片 → 同一机器人上传 → Markdown 图片与普通正文一起分片发送。浏览器不联网；失败保留公式源码，不改变任务完成判定与回复绑定。详见 [公式图片](codex-feishu-notifications.md#公式图片)。

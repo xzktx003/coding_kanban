@@ -85,3 +85,81 @@ test("starts the bot event consumer only when reply control is enabled and waits
     stop();
   }
 });
+
+test("starts an allowlisted bot menu event consumer with a matching ready marker", async () => {
+  const settings: FeishuNotificationSettingsResponse = {
+    configured: true,
+    destinationType: "user",
+    enabled: true,
+    replyConfigured: true,
+    replyEnabled: true,
+  };
+  const child = new FakeChildProcess();
+  const spawnCalls: Array<{ binary: string; args: string[] }> = [];
+  const handled: unknown[] = [];
+  const listener = new FeishuReplyEventListener({
+    eventKey: "application.bot.menu_v6",
+    settings: { get: () => settings },
+    spawnProcess: (binary, args) => {
+      spawnCalls.push({ binary, args });
+      return child;
+    },
+    handleEvent: async (event) => {
+      handled.push(event);
+    },
+  });
+  const stop = listener.start();
+
+  try {
+    assert.deepEqual(spawnCalls, [
+      {
+        binary: "lark-cli",
+        args: ["event", "consume", "application.bot.menu_v6", "--as", "bot"],
+      },
+    ]);
+
+    child.stdout.write(`${JSON.stringify({ event_key: "kanban_codex" })}\n`);
+    child.stderr.write("[event] ready event_key=im.message.receive_v1\n");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(handled.length, 0);
+
+    child.stderr.write("[event] ready event_key=application.bot.menu_v6\n");
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(handled, [{ event_key: "kanban_codex" }]);
+  } finally {
+    stop();
+  }
+});
+
+test("starts an allowlisted card action event consumer", () => {
+  const settings: FeishuNotificationSettingsResponse = {
+    configured: true,
+    destinationType: "user",
+    enabled: true,
+    replyConfigured: true,
+    replyEnabled: true,
+  };
+  const child = new FakeChildProcess();
+  const spawnCalls: Array<{ binary: string; args: string[] }> = [];
+  const listener = new FeishuReplyEventListener({
+    eventKey: "card.action.trigger",
+    settings: { get: () => settings },
+    spawnProcess: (binary, args) => {
+      spawnCalls.push({ binary, args });
+      return child;
+    },
+    handleEvent: async () => undefined,
+  });
+  const stop = listener.start();
+
+  try {
+    assert.deepEqual(spawnCalls, [
+      {
+        binary: "lark-cli",
+        args: ["event", "consume", "card.action.trigger", "--as", "bot"],
+      },
+    ]);
+  } finally {
+    stop();
+  }
+});

@@ -49,6 +49,9 @@ import {
 import { FeishuReplyBindingStore } from "./services/feishu-reply-binding-store.js";
 import { FeishuReplyCommandService } from "./services/feishu-reply-command-service.js";
 import { FeishuReplyEventListener } from "./services/feishu-reply-event-listener.js";
+import { FeishuControlPanelService } from "./services/feishu-control-panel-service.js";
+import { FeishuControlMessenger } from "./services/feishu-control-messenger.js";
+import { buildFeishuControlPanelCard } from "./services/feishu-control-panel-card.js";
 import { LocalFsService } from "./services/local-fs-service.js";
 import { LocalProcessRuntimeManager } from "./services/local-process-runtime-manager.js";
 import { LocalTmuxAdapter } from "./services/local-tmux-adapter.js";
@@ -299,15 +302,78 @@ export function buildServer(options: BuildServerOptions = {}): {
         },
       }).start()
     : null;
+  const controlMessenger = options.feishuReplyAllowedUserId
+    ? new FeishuControlMessenger({
+        allowedUserId: options.feishuReplyAllowedUserId,
+      })
+    : null;
+  const feishuControlPanelService =
+    options.feishuReplyAllowedUserId && controlMessenger
+      ? new FeishuControlPanelService({
+          allowedUserId: options.feishuReplyAllowedUserId,
+          settings: feishuNotificationSettingsService,
+          registry,
+          codex: {
+            resolveSessionId: (session) =>
+              resolveActiveCodexSessionId(session, {
+                registry,
+                codexSessionLocator,
+              }),
+            sendText: (input) => codexImageMessageService.sendText(input),
+          },
+          cards: { buildControlPanelCard: buildFeishuControlPanelCard },
+          messenger: {
+            // Delivery always targets the configured private user, never a chat
+            // supplied by a callback. The service separately verifies card/chat ownership.
+            sendCard: (input) =>
+              controlMessenger.sendCard(
+                options.feishuReplyAllowedUserId!,
+                input.card as Record<string, unknown>,
+                input.idempotencyKey,
+              ),
+            sendText: (input) =>
+              controlMessenger.sendText(
+                options.feishuReplyAllowedUserId!,
+                input.text,
+                input.idempotencyKey,
+              ),
+          },
+        })
+      : null;
+  const stopFeishuControlListeners = feishuControlPanelService
+    ? (["application.bot.menu_v6", "card.action.trigger"] as const).map(
+        (eventKey) =>
+          new FeishuReplyEventListener({
+            eventKey,
+            settings: feishuNotificationSettingsService,
+            handleEvent: async (event) => {
+              const outcome = await feishuControlPanelService.handle(event);
+              app.log.info(
+                { eventKey, outcome },
+                "Feishu Codex control panel event processed",
+              );
+            },
+            logError() {
+              // Do not log native queue/CLI errors that may contain user prompts.
+              app.log.error(
+                { eventKey },
+                "Feishu Codex control panel listener failed",
+              );
+            },
+          }).start(),
+      )
+    : [];
   if (
     stopSessionStatePersistence ||
     stopFeishuCompletionNotifier ||
-    stopFeishuReplyListener
+    stopFeishuReplyListener ||
+    stopFeishuControlListeners.length
   ) {
     app.addHook("onClose", async () => {
       stopSessionStatePersistence?.();
       stopFeishuCompletionNotifier?.();
       stopFeishuReplyListener?.();
+      for (const stop of stopFeishuControlListeners) stop();
     });
   }
 
