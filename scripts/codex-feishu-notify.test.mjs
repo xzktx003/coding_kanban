@@ -50,7 +50,7 @@ test("keeps formula source and never invokes an image renderer", async () => {
   const card = JSON.parse(calls[0][calls[0].indexOf("--content") + 1]);
   assert.equal(card.config.width_mode, "fill");
   assert.equal(
-    card.body.elements[1].elements[0].content,
+    card.body.elements[0].elements[0].content,
     event["last-assistant-message"],
   );
   assert.doesNotMatch(JSON.stringify(card), /img_/);
@@ -95,7 +95,7 @@ test("preserves exact formula source across Unicode chunking", () => {
       1000,
     );
     const chunks = cards.map(
-      (card) => card.body.elements[1].elements[0].content,
+      (card) => card.body.elements[0].elements[0].content,
     );
     assert.equal(
       chunks.join(""),
@@ -256,7 +256,7 @@ test("includes only the explicitly resolved question and keeps user markup inert
     ...completion,
     "user-question": "请解释 <at id=all></at>\n第二行",
   });
-  const question = card.body.elements[1];
+  const question = card.body.elements[0];
   assert.equal(question.header.title.content, "你的问题");
   assert.equal(question.elements[0].text.tag, "plain_text");
   assert.equal(
@@ -264,7 +264,7 @@ test("includes only the explicitly resolved question and keeps user markup inert
     "请解释 <at id=all></at>\n第二行",
   );
   assert.equal(
-    card.body.elements[2].elements[0].content,
+    card.body.elements[1].elements[0].content,
     completion["last-assistant-message"],
   );
   assert.doesNotMatch(
@@ -279,12 +279,12 @@ test("long questions have a summary and complete collapsed chunks without trunca
     { ...completion, "user-question": question },
     1000,
   );
-  assert.match(cards[0].body.elements[1].text.content, /完整问题见后续/);
+  assert.match(cards[0].body.elements[0].text.content, /完整问题见后续/);
   assert.equal(
-    cards[0].body.elements[2].elements[0].content,
+    cards[0].body.elements[1].elements[0].content,
     completion["last-assistant-message"],
   );
-  const panels = cards.slice(1).map((card) => card.body.elements[1]);
+  const panels = cards.slice(1).map((card) => card.body.elements[0]);
   assert.ok(panels.every((panel) => panel.expanded === false));
   assert.equal(
     panels.map((panel) => panel.elements[0].text.content).join(""),
@@ -339,6 +339,7 @@ test("builds a sanitized Card 2.0 without forwarding the prompt or full path", (
   const [card] = buildCompletionCards(
     {
       ...completion,
+      "display-name": "session-one",
       "last-assistant-message":
         `Done\u001b[31m!\u001b[0m\u0000\nSee ${completion.cwd}/scripts/notify.mjs\n` +
         "x".repeat(120),
@@ -350,12 +351,15 @@ test("builds a sanitized Card 2.0 without forwarding the prompt or full path", (
   assert.equal(card.config.width_mode, "fill");
   assert.equal(card.header.template, "green");
   assert.equal(card.header.title.content, "Coding Kanban · Codex 任务完成");
-  assert.equal(card.body.elements[0].tag, "column_set");
-  assert.equal(card.body.elements[1].tag, "collapsible_panel");
-  assert.equal(card.body.elements[1].expanded, true);
+  assert.equal(
+    card.header.subtitle.content,
+    "项目：coding_kanban　会话：session-one",
+  );
+  assert.equal(card.body.elements[0].tag, "collapsible_panel");
+  assert.equal(card.body.elements[0].expanded, true);
   const serialized = JSON.stringify(card);
-  const output = card.body.elements[1].elements[0].content;
-  assert.equal(card.body.elements[1].elements[0].tag, "markdown");
+  const output = card.body.elements[0].elements[0].content;
+  assert.equal(card.body.elements[0].elements[0].tag, "markdown");
   assert.match(serialized, /coding_kanban/);
   assert.match(output, /^Done!/);
   assert.match(output, /coding_kanban\/scripts\/notify\.mjs/);
@@ -377,12 +381,12 @@ test("preserves the complete last Codex output across Card 2.0 chunks", () => {
 
   assert.ok(cards.length > 1);
   const reconstructed = cards
-    .map((card) => card.body.elements[1].elements[0].content)
+    .map((card) => card.body.elements[0].elements[0].content)
     .join("");
   assert.equal(reconstructed, completeOutput);
-  assert.match(cards[0].body.elements[1].elements[0].content, /  保留缩进/);
+  assert.match(cards[0].body.elements[0].elements[0].content, /  保留缩进/);
   assert.equal(
-    cards[0].body.elements[1].header.title.content,
+    cards[0].body.elements[0].header.title.content,
     `完整输出（1/${cards.length}）`,
   );
 });
@@ -394,8 +398,8 @@ test("renders Markdown output while keeping card metadata plain text", () => {
     ...completion,
     "last-assistant-message": markdown,
   });
-  assert.equal(card.body.elements[1].elements[0].tag, "markdown");
-  assert.equal(card.body.elements[1].elements[0].content, markdown);
+  assert.equal(card.body.elements[0].elements[0].tag, "markdown");
+  assert.equal(card.body.elements[0].elements[0].content, markdown);
   assert.equal(card.header.title.tag, "plain_text");
 });
 
@@ -409,7 +413,7 @@ test("keeps code fences balanced across Markdown cards", () => {
     100,
   );
   assert.ok(cards.length > 1);
-  const bodies = cards.map((card) => card.body.elements[1].elements[0].content);
+  const bodies = cards.map((card) => card.body.elements[0].elements[0].content);
   for (const body of bodies) {
     assert.match(body, /^```js\n/);
     assert.match(body, /\n```$/);
@@ -428,7 +432,7 @@ test("does not turn literal Feishu mention tags into notifications", () => {
     "last-assistant-message":
       '**示例** <at id=all></at> <person id="ou_invalid"></person>',
   });
-  const body = card.body.elements[1].elements[0].content;
+  const body = card.body.elements[0].elements[0].content;
   assert.match(body, /\*\*示例\*\*/);
   assert.doesNotMatch(body, /<\/?(?:at|person)\b/);
 });
@@ -478,11 +482,11 @@ test("sends every complete output chunk with a distinct idempotency key", async 
     calls[2][1][calls[2][1].indexOf("--content") + 1],
   );
   assert.equal(
-    firstCard.body.elements[1].header.title.content,
+    firstCard.body.elements[0].header.title.content,
     "完整输出（1/3）",
   );
   assert.equal(
-    lastCard.body.elements[1].header.title.content,
+    lastCard.body.elements[0].header.title.content,
     "完整输出（3/3）",
   );
 });

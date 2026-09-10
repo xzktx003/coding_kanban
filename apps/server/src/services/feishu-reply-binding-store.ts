@@ -42,6 +42,12 @@ export interface RecordFeishuReplyBindingsInput {
   messages: Array<{ messageId: string; chatId: string }>;
 }
 
+export interface RecordProcessedFeishuReplyInput {
+  messageId: string;
+  parent: FeishuReplyBinding;
+  codexThreadId: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -163,13 +169,25 @@ export class FeishuReplyBindingStore {
     return this.#processed.has(messageId);
   }
 
-  markProcessed(messageId: string): void {
-    if (!MESSAGE_ID_PATTERN.test(messageId)) {
+  recordProcessedReply(input: RecordProcessedFeishuReplyInput): void {
+    if (
+      !MESSAGE_ID_PATTERN.test(input.messageId) ||
+      !CODEX_THREAD_ID_PATTERN.test(input.codexThreadId)
+    ) {
       return;
     }
-    this.#processed.set(messageId, {
-      messageId,
-      processedAt: this.#now().toISOString(),
+    const processedAt = this.#now().toISOString();
+    this.#bindings.set(input.messageId, {
+      messageId: input.messageId,
+      chatId: input.parent.chatId,
+      sessionId: input.parent.sessionId,
+      completionId: input.parent.completionId,
+      codexThreadId: input.codexThreadId,
+      createdAt: processedAt,
+    });
+    this.#processed.set(input.messageId, {
+      messageId: input.messageId,
+      processedAt,
     });
     this.#prune();
     this.#persist();

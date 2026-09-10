@@ -70,8 +70,14 @@ test("expires old bindings and persists processed inbound message ids", () => {
       completionId: "turn-1",
       messages: [{ messageId: "om_notice", chatId: "oc_private" }],
     });
+    const parent = store.resolve("om_notice");
+    assert.ok(parent);
     assert.equal(store.hasProcessed("om_reply"), false);
-    store.markProcessed("om_reply");
+    store.recordProcessedReply({
+      messageId: "om_reply",
+      parent,
+      codexThreadId: "codex-thread-12345678",
+    });
     assert.equal(store.hasProcessed("om_reply"), true);
 
     const reloaded = new FeishuReplyBindingStore({
@@ -84,6 +90,51 @@ test("expires old bindings and persists processed inbound message ids", () => {
     now = new Date("2026-09-01T12:00:02.000Z");
     assert.equal(reloaded.resolve("om_notice"), null);
     assert.equal(reloaded.hasProcessed("om_reply"), false);
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("atomically persists a delivered reply as the next reply binding", () => {
+  const directory = mkdtempSync(join(tmpdir(), "kanban-feishu-replies-"));
+  const statePath = join(directory, "reply-bindings.json");
+  const now = new Date("2026-09-01T12:00:00.000Z");
+
+  try {
+    const store = new FeishuReplyBindingStore({
+      statePath,
+      now: () => now,
+    });
+    store.record({
+      sessionId: "session-1",
+      completionId: "turn-1",
+      messages: [{ messageId: "om_notice", chatId: "oc_private" }],
+    });
+    const parent = store.resolve("om_notice");
+    assert.ok(parent);
+
+    store.recordProcessedReply({
+      messageId: "om_reply",
+      parent,
+      codexThreadId: "codex-thread-12345678",
+    });
+
+    assert.equal(store.hasProcessed("om_reply"), true);
+    assert.deepEqual(store.resolve("om_reply"), {
+      messageId: "om_reply",
+      chatId: "oc_private",
+      sessionId: "session-1",
+      completionId: "turn-1",
+      codexThreadId: "codex-thread-12345678",
+      createdAt: now.toISOString(),
+    });
+
+    const reloaded = new FeishuReplyBindingStore({
+      statePath,
+      now: () => now,
+    });
+    assert.equal(reloaded.hasProcessed("om_reply"), true);
+    assert.equal(reloaded.resolve("om_reply")?.sessionId, "session-1");
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }

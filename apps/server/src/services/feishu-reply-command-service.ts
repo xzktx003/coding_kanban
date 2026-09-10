@@ -41,7 +41,11 @@ interface FeishuReplyCommandServiceOptions {
   bindings: {
     resolve(messageId: string): FeishuReplyBinding | null;
     hasProcessed(messageId: string): boolean;
-    markProcessed(messageId: string): void;
+    recordProcessedReply(input: {
+      messageId: string;
+      parent: FeishuReplyBinding;
+      codexThreadId: string;
+    }): void;
   };
   registry: { get(sessionId: string): AgentSessionRecord };
   codex: {
@@ -120,7 +124,14 @@ export class FeishuReplyCommandService {
       return "ignored_untrusted";
     }
 
-    const binding = this.#bindings.resolve(event.reply_to);
+    let binding = this.#bindings.resolve(event.reply_to);
+    if (
+      (!binding || binding.chatId !== event.chat_id) &&
+      typeof event.root_id === "string" &&
+      MESSAGE_ID_PATTERN.test(event.root_id)
+    ) {
+      binding = this.#bindings.resolve(event.root_id);
+    }
     if (!binding || binding.chatId !== event.chat_id) {
       return "ignored_unbound";
     }
@@ -164,7 +175,11 @@ export class FeishuReplyCommandService {
         workingDirectory: session.workingDirectory,
         sshTarget: session.sshTarget,
       });
-      this.#bindings.markProcessed(event.message_id);
+      this.#bindings.recordProcessedReply({
+        messageId: event.message_id,
+        parent: binding,
+        codexThreadId: threadId,
+      });
       return "delivered";
     } finally {
       this.#inFlightMessageIds.delete(event.message_id);

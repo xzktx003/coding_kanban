@@ -307,35 +307,6 @@ function splitMarkdownOutput(value, maxChunkCharacters) {
   });
 }
 
-function buildCardMetadataColumn(label, content) {
-  return {
-    tag: "column",
-    width: "weighted",
-    weight: 1,
-    padding: "12px",
-    vertical_spacing: "4px",
-    elements: [
-      {
-        tag: "div",
-        text: {
-          tag: "plain_text",
-          content: label,
-          text_size: "notation",
-          text_color: "grey",
-        },
-      },
-      {
-        tag: "div",
-        text: {
-          tag: "plain_text",
-          content,
-          lines: 2,
-        },
-      },
-    ],
-  };
-}
-
 function completionOutput(notification) {
   const cwd = typeof notification.cwd === "string" ? notification.cwd : "";
   const rawOutput =
@@ -420,7 +391,7 @@ export function buildCompletionCards(
       },
       subtitle: {
         tag: "plain_text",
-        content: displayName ? `${projectName} · ${displayName}` : projectName,
+        content: `项目：${projectName}${displayName ? `　会话：${displayName}` : ""}`,
       },
       template: "green",
       icon: {
@@ -440,18 +411,6 @@ export function buildCompletionCards(
       padding: "12px 12px 20px 12px",
       vertical_spacing: "12px",
       elements: [
-        {
-          tag: "column_set",
-          flex_mode: "none",
-          horizontal_spacing: "12px",
-          background_style: "green-50",
-          columns: [
-            buildCardMetadataColumn("项目", projectName),
-            ...(displayName
-              ? [buildCardMetadataColumn("会话", displayName)]
-              : []),
-          ],
-        },
         ...(!questionPart && index === 0 && question.trim()
           ? [
               longQuestion

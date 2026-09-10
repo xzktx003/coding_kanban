@@ -7,8 +7,9 @@ import {
   FeishuReplyCommandService,
   type FeishuInboundMessageEvent,
 } from "./feishu-reply-command-service.js";
+import type { FeishuReplyBinding } from "./feishu-reply-binding-store.js";
 
-const binding = {
+const binding: FeishuReplyBinding = {
   messageId: "om_notice",
   chatId: "oc_private",
   sessionId: "session-1",
@@ -43,7 +44,7 @@ const validEvent: FeishuInboundMessageEvent = {
 function createFixture(
   overrides: {
     replyEnabled?: boolean;
-    resolvedBinding?: typeof binding | null;
+    resolvedBinding?: FeishuReplyBinding | null;
     targetSession?: AgentSessionRecord;
     threadId?: string | null;
     sendText?: () => Promise<void>;
@@ -51,6 +52,11 @@ function createFixture(
 ) {
   const writes: Array<{ sessionId: string; prompt: string }> = [];
   const processed = new Set<string>();
+  const replyBindings = new Map<string, FeishuReplyBinding>();
+  const initialBinding = overrides.resolvedBinding ?? binding;
+  if (overrides.resolvedBinding !== null) {
+    replyBindings.set(initialBinding.messageId, initialBinding);
+  }
   const service = new FeishuReplyCommandService({
     allowedUserId: "ou_owner",
     settings: {
@@ -63,10 +69,16 @@ function createFixture(
       }),
     },
     bindings: {
-      resolve: () => overrides.resolvedBinding ?? binding,
+      resolve: (messageId) => replyBindings.get(messageId) ?? null,
       hasProcessed: (messageId) => processed.has(messageId),
-      markProcessed: (messageId) => {
+      recordProcessedReply: ({ messageId, parent, codexThreadId }) => {
         processed.add(messageId);
+        replyBindings.set(messageId, {
+          ...parent,
+          messageId,
+          codexThreadId,
+          createdAt: "2026-09-01T12:00:01.000Z",
+        });
       },
     },
     registry: {
@@ -84,7 +96,7 @@ function createFixture(
     },
   });
 
-  return { service, writes, processed };
+  return { service, writes, processed, replyBindings };
 }
 
 test("routes a trusted direct reply to the bound Codex terminal exactly once", async () => {
@@ -98,6 +110,43 @@ test("routes a trusted direct reply to the bound Codex terminal exactly once", a
 
   assert.equal(await fixture.service.handle(validEvent), "ignored_duplicate");
   assert.equal(fixture.writes.length, 1);
+});
+
+test("keeps a delivered reply bound for a follow-up reply in the same thread", async () => {
+  const fixture = createFixture();
+
+  assert.equal(await fixture.service.handle(validEvent), "delivered");
+  assert.equal(
+    await fixture.service.handle({
+      ...validEvent,
+      message_id: "om_follow_up",
+      reply_to: "om_reply",
+      content: "继续下一步",
+    }),
+    "delivered",
+  );
+  assert.deepEqual(fixture.writes, [
+    { sessionId: "codex-thread-1", prompt: "继续运行测试" },
+    { sessionId: "codex-thread-1", prompt: "继续下一步" },
+  ]);
+});
+
+test("uses the bound thread root when the direct parent predates reply inheritance", async () => {
+  const fixture = createFixture();
+
+  assert.equal(
+    await fixture.service.handle({
+      ...validEvent,
+      message_id: "om_legacy_follow_up",
+      reply_to: "om_legacy_user_reply",
+      root_id: "om_notice",
+      content: "继续旧回复链",
+    }),
+    "delivered",
+  );
+  assert.deepEqual(fixture.writes, [
+    { sessionId: "codex-thread-1", prompt: "继续旧回复链" },
+  ]);
 });
 
 test("passes multiline Feishu replies to prompt input handling", async () => {
@@ -231,7 +280,7 @@ test("does not mark an inbound message processed when terminal delivery fails", 
     bindings: {
       resolve: () => binding,
       hasProcessed: (messageId) => processed.has(messageId),
-      markProcessed: (messageId) => processed.add(messageId),
+      recordProcessedReply: ({ messageId }) => processed.add(messageId),
     },
     registry: { get: () => session },
     codex: {
