@@ -153,6 +153,65 @@ test("completion questions stay turn-bound and skip Goal continuation context", 
   }
 });
 
+test("completion question recovery looks behind a noisy final-megabyte window", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-completion-question-window-"));
+  try {
+    writeFileSync(
+      join(root, "rollout-thread-question-window.jsonl"),
+      [
+        line({
+          type: "session_meta",
+          payload: { id: "thread-question-window", cwd: "/project" },
+        }),
+        line({
+          type: "event_msg",
+          payload: { type: "task_started", turn_id: "turn-long" },
+        }),
+        line({
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_text", text: "keep this question" }],
+            internal_chat_message_metadata_passthrough: {
+              turn_id: "turn-long",
+              content_item_kinds: ["user.text"],
+            },
+          },
+        }),
+        line({
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [
+              { type: "output_text", text: "x".repeat(2 * 1024 * 1024) },
+            ],
+          },
+        }),
+        line({
+          timestamp: "2026-09-10T08:00:00Z",
+          type: "event_msg",
+          payload: {
+            type: "task_complete",
+            turn_id: "turn-long",
+            last_agent_message: "final answer",
+          },
+        }),
+      ].join(""),
+    );
+
+    const result = new CodexTranscriptService({
+      sessionsRoot: root,
+    }).readLatestCompletion({ sessionId: "thread-question-window" });
+
+    assert.equal(result?.userQuestion, "keep this question");
+    assert.equal(result?.content, "final answer");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("transcript marks internal continuation and analysis messages for safe external export", () => {
   const root = mkdtempSync(join(tmpdir(), "codex-public-transcript-"));
   try {
@@ -739,6 +798,11 @@ test("CodexTranscriptService reads a remote Codex JSONL session by working direc
           turn_id: "remote-turn",
           message: "远程用户问题",
         },
+      }),
+      line({
+        timestamp: "2026-08-25T02:00:02.500Z",
+        type: "event_msg",
+        payload: { type: "token_count", data: "x".repeat(2 * 1024 * 1024) },
       }),
       line({
         timestamp: "2026-08-25T02:00:02.000Z",

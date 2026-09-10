@@ -19,6 +19,7 @@ const SESSION_HEADER_BYTES = 64 * 1024;
 const TRANSCRIPT_READ_BLOCK_BYTES = 64 * 1024;
 const REMOTE_TRANSCRIPT_READ_BLOCK_BYTES = 4 * 1024 * 1024;
 const LATEST_COMPLETION_SCAN_BYTES = 1024 * 1024;
+const COMPLETION_QUESTION_RECOVERY_SCAN_BYTES = 8 * 1024 * 1024;
 const DEFAULT_TRANSCRIPT_PAGE_LIMIT = 30;
 const MAX_TRANSCRIPT_PAGE_LIMIT = 100;
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
@@ -484,15 +485,31 @@ function readLatestCompletionFromFile(
   path: string,
 ): CodexTurnCompletion | null {
   const fileSize = statSync(path).size;
-  const offset = Math.max(0, fileSize - LATEST_COMPLETION_SCAN_BYTES);
   const descriptor = openSync(path, "r");
   try {
-    const buffer = Buffer.allocUnsafe(fileSize - offset);
-    const bytesRead = readSync(descriptor, buffer, 0, buffer.length, offset);
-    return findLatestCompletionInTail(
-      buffer.subarray(0, bytesRead),
-      offset > 0,
+    const readFromOffset = (offset: number) => {
+      const buffer = Buffer.allocUnsafe(fileSize - offset);
+      const bytesRead = readSync(descriptor, buffer, 0, buffer.length, offset);
+      return findLatestCompletionInTail(
+        buffer.subarray(0, bytesRead),
+        offset > 0,
+      );
+    };
+    const fastOffset = Math.max(0, fileSize - LATEST_COMPLETION_SCAN_BYTES);
+    const completion = readFromOffset(fastOffset);
+    if (!completion || completion.userQuestion || fastOffset === 0) {
+      return completion;
+    }
+
+    const recoveryOffset = Math.max(
+      0,
+      fileSize - COMPLETION_QUESTION_RECOVERY_SCAN_BYTES,
     );
+    const recovered = readFromOffset(recoveryOffset);
+    return recovered?.completionId === completion.completionId &&
+      recovered.userQuestion
+      ? recovered
+      : completion;
   } finally {
     closeSync(descriptor);
   }
@@ -1048,7 +1065,29 @@ export class CodexTranscriptService {
       offset,
       match.file.size - offset,
     );
-    return findLatestCompletionInTail(result.buffer, offset > 0);
+    const completion = findLatestCompletionInTail(result.buffer, offset > 0);
+    if (!completion || completion.userQuestion || offset === 0) {
+      return completion;
+    }
+
+    const recoveryOffset = Math.max(
+      0,
+      match.file.size - COMPLETION_QUESTION_RECOVERY_SCAN_BYTES,
+    );
+    const recovered = await this.remoteFileAccess.readRange(
+      input.sshTarget,
+      match.file.path,
+      recoveryOffset,
+      match.file.size - recoveryOffset,
+    );
+    const recoveredCompletion = findLatestCompletionInTail(
+      recovered.buffer,
+      recoveryOffset > 0,
+    );
+    return recoveredCompletion?.completionId === completion.completionId &&
+      recoveredCompletion.userQuestion
+      ? recoveredCompletion
+      : completion;
   }
 
   private findSession(input: ReadTranscriptInput): {
