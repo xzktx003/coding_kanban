@@ -407,7 +407,7 @@ export function buildCompletionCards(
     schema: "2.0",
     config: {
       update_multi: true,
-      width_mode: "compact",
+      width_mode: "fill",
       enable_forward: true,
       summary: {
         content: `${agentKind || "Agent"} 任务完成 · ${projectName}`,

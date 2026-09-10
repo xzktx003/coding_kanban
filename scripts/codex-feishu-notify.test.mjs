@@ -48,7 +48,7 @@ test("keeps formula source and never invokes an image renderer", async () => {
   });
   assert.equal(calls.length, 1);
   const card = JSON.parse(calls[0][calls[0].indexOf("--content") + 1]);
-  assert.equal(card.config.width_mode, "compact");
+  assert.equal(card.config.width_mode, "fill");
   assert.equal(
     card.body.elements[1].elements[0].content,
     event["last-assistant-message"],
@@ -347,7 +347,7 @@ test("builds a sanitized Card 2.0 without forwarding the prompt or full path", (
   );
 
   assert.equal(card.schema, "2.0");
-  assert.equal(card.config.width_mode, "compact");
+  assert.equal(card.config.width_mode, "fill");
   assert.equal(card.header.template, "green");
   assert.equal(card.header.title.content, "Coding Kanban · Codex 任务完成");
   assert.equal(card.body.elements[0].tag, "column_set");
