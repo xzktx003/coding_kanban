@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -117,6 +118,17 @@ describe("TopBar", () => {
     assert.doesNotMatch(markup, /释放 VS Code 缓存/);
     assert.doesNotMatch(markup, />资源诊断</);
     assert.doesNotMatch(markup, />轻量预览：开</);
+  });
+
+  it("hides the total session count at mobile widths", () => {
+    const markup = renderTopBar();
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+    assert.match(markup, /class="stat-item top-bar-session-count"/);
+    assert.match(
+      css,
+      /@media \(max-width: 900px\)[\s\S]*?\.top-bar-session-count\s*\{\s*display:\s*none;/,
+    );
   });
 
   it("does not render an awaiting-input stat even if stale session data contains that state", () => {

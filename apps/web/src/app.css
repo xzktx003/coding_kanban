@@ -6750,6 +6750,10 @@ input {
     width: 100%;
   }
 
+  .top-bar-session-count {
+    display: none;
+  }
+
   .top-bar-actions {
     width: 100%;
     justify-content: flex-start;

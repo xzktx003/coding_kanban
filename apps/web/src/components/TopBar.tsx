@@ -488,7 +488,7 @@ export function TopBar({
               {connectionStatus === "disconnected" && "✗ 连接断开"}
             </span>
           )}
-          <span className="stat-item">
+          <span className="stat-item top-bar-session-count">
             共 <strong>{totalCount}</strong> 个会话
           </span>
         </div>
