@@ -111,7 +111,7 @@ export class FeishuReplyCommandService {
       event.chat_type !== "p2p" ||
       event.sender_type !== "user" ||
       event.sender_id !== this.#allowedUserId ||
-      event.message_type !== "text" ||
+      (event.message_type !== "text" && event.message_type !== "post") ||
       typeof event.message_id !== "string" ||
       !MESSAGE_ID_PATTERN.test(event.message_id) ||
       typeof event.reply_to !== "string" ||

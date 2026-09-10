@@ -114,6 +114,25 @@ test("passes multiline Feishu replies to prompt input handling", async () => {
   ]);
 });
 
+test("extracts rendered text from a trusted Feishu post reply", async () => {
+  const fixture = createFixture();
+  const event = {
+    ...validEvent,
+    message_id: "om_post_reply",
+    message_type: "post",
+    content: "第一项\n\n继续执行后续检查",
+  };
+
+  assert.equal(await fixture.service.handle(event), "delivered");
+  assert.deepEqual(fixture.writes, [
+    {
+      sessionId: "codex-thread-1",
+      prompt: "第一项\n\n继续执行后续检查",
+    },
+  ]);
+  assert.equal(fixture.processed.has("om_post_reply"), true);
+});
+
 test("does not queue a reply when the active Codex thread cannot be resolved", async () => {
   const fixture = createFixture({ threadId: null });
   assert.equal(await fixture.service.handle(validEvent), "ignored_unavailable");
@@ -153,12 +172,13 @@ test("waits for native queue acknowledgement and deduplicates in-flight events",
   assert.equal(fixture.writes.length, 1);
 });
 
-test("rejects messages that are not a trusted private text reply", async () => {
+test("rejects messages that are not a trusted private textual reply", async () => {
   const cases: Array<Partial<FeishuInboundMessageEvent>> = [
     { sender_id: "ou_other" },
     { sender_type: "bot" },
     { chat_type: "group" },
     { message_type: "image" },
+    { message_type: "post", content: "bad\x1b[31m" },
     { reply_to: undefined },
     { chat_id: "oc_other" },
     { content: "bad\x1b[31m" },
