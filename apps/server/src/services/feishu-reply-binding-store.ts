@@ -13,12 +13,14 @@ const DEFAULT_BINDING_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 const MAX_BINDINGS = 10_000;
 const MESSAGE_ID_PATTERN = /^om_[A-Za-z0-9_-]+$/;
 const CHAT_ID_PATTERN = /^oc_[A-Za-z0-9_-]+$/;
+const CODEX_THREAD_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
 
 export interface FeishuReplyBinding {
   messageId: string;
   chatId: string;
   sessionId: string;
   completionId: string;
+  codexThreadId?: string;
   createdAt: string;
 }
 
@@ -36,6 +38,7 @@ interface PersistedFeishuReplyState {
 export interface RecordFeishuReplyBindingsInput {
   sessionId: string;
   completionId: string;
+  codexThreadId?: string;
   messages: Array<{ messageId: string; chatId: string }>;
 }
 
@@ -51,7 +54,14 @@ function parseBinding(value: unknown): FeishuReplyBinding | null {
   if (!isRecord(value)) {
     return null;
   }
-  const { messageId, chatId, sessionId, completionId, createdAt } = value;
+  const {
+    messageId,
+    chatId,
+    sessionId,
+    completionId,
+    codexThreadId,
+    createdAt,
+  } = value;
   if (
     typeof messageId !== "string" ||
     !MESSAGE_ID_PATTERN.test(messageId) ||
@@ -61,12 +71,22 @@ function parseBinding(value: unknown): FeishuReplyBinding | null {
     !sessionId.trim() ||
     typeof completionId !== "string" ||
     !completionId.trim() ||
+    (codexThreadId !== undefined &&
+      (typeof codexThreadId !== "string" ||
+        !CODEX_THREAD_ID_PATTERN.test(codexThreadId))) ||
     !isValidTimestamp(createdAt)
   ) {
     return null;
   }
 
-  return { messageId, chatId, sessionId, completionId, createdAt };
+  return {
+    messageId,
+    chatId,
+    sessionId,
+    completionId,
+    ...(typeof codexThreadId === "string" ? { codexThreadId } : {}),
+    createdAt,
+  };
 }
 
 function parseProcessed(value: unknown): ProcessedFeishuReply | null {
@@ -116,6 +136,10 @@ export class FeishuReplyBindingStore {
         chatId: message.chatId,
         sessionId: input.sessionId,
         completionId: input.completionId,
+        ...(input.codexThreadId &&
+        CODEX_THREAD_ID_PATTERN.test(input.codexThreadId)
+          ? { codexThreadId: input.codexThreadId }
+          : {}),
         createdAt,
       });
     }

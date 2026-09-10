@@ -7,7 +7,6 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { config as loadDotenv } from "dotenv";
-import { findFormulas, replaceFormulas } from "./feishu-math.mjs";
 
 const EVENT_TYPE = "agent-turn-complete";
 const DEFAULT_MESSAGE_CHUNK_CHARS = 12_000;
@@ -355,11 +354,10 @@ function completionOutput(notification) {
 export function buildCompletionCards(
   notification,
   maxChunkCharacters = DEFAULT_MESSAGE_CHUNK_CHARS,
-  formulaImages = new Map(),
 ) {
   const cwd = typeof notification.cwd === "string" ? notification.cwd : "";
   const projectName = projectNameFromCwd(cwd);
-  const output = replaceFormulas(completionOutput(notification), formulaImages);
+  const output = completionOutput(notification);
   const agentKind =
     typeof notification["agent-kind"] === "string"
       ? formatAgentKind(notification["agent-kind"])
@@ -369,12 +367,47 @@ export function buildCompletionCards(
       ? truncateText(sanitizeText(notification["display-name"]), 160)
       : "";
 
-  const chunks = splitMarkdownOutput(output, maxChunkCharacters);
-  return chunks.map((chunk, index) => ({
+  // Only the turn-bound field supplied by Kanban is eligible. Legacy hook
+  // input-messages may contain unrelated/private context and must stay ignored.
+  const question =
+    typeof notification["user-question"] === "string"
+      ? redactCurrentWorkingDirectory(
+          sanitizeOutputText(notification["user-question"]),
+          cwd,
+          projectName,
+        )
+      : "";
+  // Leave JSON/metadata headroom when a question accompanies the answer,
+  // including four-byte Unicode characters. Keep legacy cards unchanged.
+  const chunkLimit = question.trim()
+    ? Math.min(maxChunkCharacters, 4000)
+    : maxChunkCharacters;
+  const chunks = splitMarkdownOutput(output, chunkLimit);
+  const longQuestion = Array.from(question).length > Math.min(500, chunkLimit);
+  const questionChunks = longQuestion
+    ? splitOutputText(question, chunkLimit)
+    : [];
+  const parts = [
+    ...chunks.map((chunk, index) => ({ chunk, index, questionPart: false })),
+    ...questionChunks.map((chunk, index) => ({
+      chunk,
+      index,
+      questionPart: true,
+    })),
+  ];
+  const questionPanel = (content, title, expanded) => ({
+    tag: "collapsible_panel",
+    expanded,
+    background_color: "grey-50",
+    header: { title: { tag: "plain_text", content: title }, width: "fill" },
+    elements: [{ tag: "div", text: { tag: "plain_text", content } }],
+  });
+  const recordsAvailable = notification["records-available"] === true;
+  return parts.map(({ chunk, index, questionPart }) => ({
     schema: "2.0",
     config: {
       update_multi: true,
-      width_mode: formulaImages.size ? "default" : "compact",
+      width_mode: "compact",
       enable_forward: true,
       summary: {
         content: `${agentKind || "Agent"} 任务完成 · ${projectName}`,
@@ -419,30 +452,70 @@ export function buildCompletionCards(
               : []),
           ],
         },
-        {
-          tag: "collapsible_panel",
-          expanded: true,
-          background_color: "grey-50",
-          border: { color: "grey-100", corner_radius: "8px" },
-          padding: "0px 12px 12px 12px",
-          vertical_spacing: "8px",
-          header: {
-            title: {
-              tag: "plain_text",
-              content:
-                chunks.length === 1
-                  ? "完整输出"
-                  : `完整输出（${index + 1}/${chunks.length}）`,
-            },
-            width: "fill",
-          },
-          elements: [
-            {
-              tag: "markdown",
-              content: chunk,
-            },
-          ],
-        },
+        ...(!questionPart && index === 0 && question.trim()
+          ? [
+              longQuestion
+                ? {
+                    tag: "div",
+                    text: {
+                      tag: "plain_text",
+                      content: `你的问题：${truncateText(question, 200)}\n完整问题见后续“你的问题”卡片，点击标题展开。`,
+                    },
+                  }
+                : questionPanel(question, "你的问题", true),
+            ]
+          : []),
+        ...(questionPart
+          ? [
+              questionPanel(
+                chunk,
+                `你的问题（${index + 1}/${questionChunks.length}）`,
+                false,
+              ),
+            ]
+          : [
+              {
+                tag: "collapsible_panel",
+                expanded: true,
+                background_color: "grey-50",
+                border: { color: "grey-100", corner_radius: "8px" },
+                padding: "0px 12px 12px 12px",
+                vertical_spacing: "8px",
+                header: {
+                  title: {
+                    tag: "plain_text",
+                    content:
+                      chunks.length === 1
+                        ? "完整输出"
+                        : `完整输出（${index + 1}/${chunks.length}）`,
+                  },
+                  width: "fill",
+                },
+                elements: [
+                  {
+                    tag: "markdown",
+                    content: chunk,
+                  },
+                ],
+              },
+            ]),
+        ...(recordsAvailable
+          ? [
+              {
+                tag: "button",
+                text: { tag: "plain_text", content: "查看完整记录" },
+                type: "primary",
+                size: "tiny",
+                width: "default",
+                behaviors: [
+                  {
+                    type: "callback",
+                    value: { action: "kanban_completion_records" },
+                  },
+                ],
+              },
+            ]
+          : []),
       ],
     },
   }));
@@ -569,10 +642,6 @@ export async function runCodexFeishuNotification({
   enforceRepositoryScope = true,
   runCommand = execFileCommand,
   sleep = delay,
-  renderMath = async (...args) => {
-    const { renderFormulaImages } = await import("./feishu-math-renderer.mjs");
-    return renderFormulaImages(...args);
-  },
 }) {
   const notification = parseNotification(rawNotification);
   if (notification.type !== EVENT_TYPE) {
@@ -616,32 +685,7 @@ export async function runCodexFeishuNotification({
     LARKSUITE_CLI_NO_UPDATE_NOTIFIER: "1",
     LARKSUITE_CLI_NO_SKILLS_NOTIFIER: "1",
   };
-  const formulas = findFormulas(completionOutput(notification));
-  let formulaImages = new Map();
-  if (formulas.length) {
-    try {
-      formulaImages = await renderMath(formulas, {
-        runCommand,
-        env: commandEnv,
-        timeout,
-      });
-      if (formulaImages.size < formulas.length) {
-        process.stderr.write(
-          "Some Feishu formulas were not rendered; preserving their source.\n",
-        );
-      }
-    } catch {
-      // Formula rendering is optional: never suppress the completion notification.
-      process.stderr.write(
-        "Feishu formula rendering unavailable; sending original Markdown.\n",
-      );
-    }
-  }
-  const cards = buildCompletionCards(
-    notification,
-    messageChunkCharacters,
-    formulaImages,
-  );
+  const cards = buildCompletionCards(notification, messageChunkCharacters);
 
   const messageIds = [];
   const sentMessages = [];

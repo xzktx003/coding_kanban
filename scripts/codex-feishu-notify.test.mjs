@@ -24,40 +24,67 @@ const completion = {
   "last-assistant-message": "Implemented the requested notification bridge.",
 };
 
-test("renders math before chunking, preserves reply bindings and falls back on renderer failure", async () => {
+test("keeps formula source and never invokes an image renderer", async () => {
   const event = {
     ...completion,
-    "last-assistant-message": "Before $x^2$ after.",
+    "last-assistant-message": "Before $x^2$ and \\[y^2\\] after.",
   };
-  for (const fail of [false, true]) {
-    const calls = [];
-    const result = await runCodexFeishuNotification({
-      rawNotification: JSON.stringify(event),
-      env: { FEISHU_NOTIFY_USER_ID: "ou_user123" },
-      renderMath: async (formulas) => {
-        assert.deepEqual(formulas, ["x^2"]);
-        if (fail) throw new Error("browser unavailable");
-        return new Map([["x^2", "img_test"]]);
+  const calls = [];
+  const result = await runCodexFeishuNotification({
+    rawNotification: JSON.stringify(event),
+    env: { FEISHU_NOTIFY_USER_ID: "ou_user123" },
+    renderMath: async () => {
+      throw new Error("formula renderer must not run");
+    },
+    runCommand: async (_binary, args) => {
+      calls.push(args);
+      return {
+        stdout: JSON.stringify({
+          ok: true,
+          data: { message_id: "om_test", chat_id: "oc_test" },
+        }),
+      };
+    },
+  });
+  assert.equal(calls.length, 1);
+  const card = JSON.parse(calls[0][calls[0].indexOf("--content") + 1]);
+  assert.equal(card.config.width_mode, "compact");
+  assert.equal(
+    card.body.elements[1].elements[0].content,
+    event["last-assistant-message"],
+  );
+  assert.doesNotMatch(JSON.stringify(card), /img_/);
+  assert.deepEqual(result.messages, [
+    { messageId: "om_test", chatId: "oc_test" },
+  ]);
+});
+
+test("adds a tiny records callback without exposing session identity", () => {
+  const cards = buildCompletionCards(
+    {
+      ...completion,
+      "user-question": "question".repeat(1000),
+      "records-available": true,
+    },
+    1_000,
+  );
+  for (const card of cards) {
+    const button = card.body.elements.at(-1);
+    assert.equal(button.tag, "button");
+    assert.equal(button.size, "tiny");
+    assert.equal(button.width, "default");
+    assert.equal(button.type, "primary");
+    assert.deepEqual(button.behaviors, [
+      {
+        type: "callback",
+        value: { action: "kanban_completion_records" },
       },
-      runCommand: async (_binary, args) => {
-        calls.push(JSON.parse(args[args.indexOf("--content") + 1]));
-        return {
-          stdout: JSON.stringify({
-            ok: true,
-            data: { message_id: "om_test", chat_id: "oc_test" },
-          }),
-        };
-      },
-    });
-    assert.equal(calls.length, 1);
-    assert.match(JSON.stringify(calls[0]), fail ? /\$x\^2\$/ : /img_test/);
-    assert.deepEqual(result.messages, [
-      { messageId: "om_test", chatId: "oc_test" },
     ]);
+    assert.deepEqual(Object.keys(button.behaviors[0].value), ["action"]);
   }
 });
 
-test("formula image references stay intact at Unicode chunk boundaries", () => {
+test("preserves exact formula source across Unicode chunking", () => {
   for (const prefixLength of [995, 999, 1000]) {
     const cards = buildCompletionCards(
       {
@@ -66,35 +93,15 @@ test("formula image references stay intact at Unicode chunk boundaries", () => {
           "中".repeat(prefixLength) + "$x^2$" + "尾".repeat(20),
       },
       1000,
-      new Map([["x^2", "img_test"]]),
     );
     const chunks = cards.map(
       (card) => card.body.elements[1].elements[0].content,
     );
     assert.equal(
       chunks.join(""),
-      "中".repeat(prefixLength) + "![x^2](img_test)" + "尾".repeat(20),
-    );
-    assert.equal(
-      chunks.filter((chunk) => chunk.includes("![x^2](img_test)")).length,
-      1,
+      "中".repeat(prefixLength) + "$x^2$" + "尾".repeat(20),
     );
   }
-});
-
-test("formulas are redacted before being handed to the image renderer", async () => {
-  await runCodexFeishuNotification({
-    rawNotification: JSON.stringify({
-      ...completion,
-      "last-assistant-message": "$\\text{" + repositoryRoot + "}$",
-    }),
-    env: { FEISHU_NOTIFY_USER_ID: "ou_user123" },
-    renderMath: async (formulas) => {
-      assert.ok(!formulas.join("").includes(repositoryRoot));
-      return new Map();
-    },
-    runCommand: async () => ({ stdout: '{"ok":true}' }),
-  });
 });
 
 test("reads the persisted Feishu switch with backward-compatible defaults", () => {
@@ -241,6 +248,90 @@ test("requires exactly one validated Feishu destination", async () => {
       },
     }),
     /exactly one of FEISHU_NOTIFY_CHAT_ID or FEISHU_NOTIFY_USER_ID/i,
+  );
+});
+
+test("includes only the explicitly resolved question and keeps user markup inert", () => {
+  const [card] = buildCompletionCards({
+    ...completion,
+    "user-question": "请解释 <at id=all></at>\n第二行",
+  });
+  const question = card.body.elements[1];
+  assert.equal(question.header.title.content, "你的问题");
+  assert.equal(question.elements[0].text.tag, "plain_text");
+  assert.equal(
+    question.elements[0].text.content,
+    "请解释 <at id=all></at>\n第二行",
+  );
+  assert.equal(
+    card.body.elements[2].elements[0].content,
+    completion["last-assistant-message"],
+  );
+  assert.doesNotMatch(
+    JSON.stringify(card),
+    /do not forward this private prompt/,
+  );
+});
+
+test("long questions have a summary and complete collapsed chunks without truncating the answer", () => {
+  const question = "问题😀\n".repeat(800).trim();
+  const cards = buildCompletionCards(
+    { ...completion, "user-question": question },
+    1000,
+  );
+  assert.match(cards[0].body.elements[1].text.content, /完整问题见后续/);
+  assert.equal(
+    cards[0].body.elements[2].elements[0].content,
+    completion["last-assistant-message"],
+  );
+  const panels = cards.slice(1).map((card) => card.body.elements[1]);
+  assert.ok(panels.every((panel) => panel.expanded === false));
+  assert.equal(
+    panels.map((panel) => panel.elements[0].text.content).join(""),
+    question,
+  );
+  assert.ok(
+    panels.every(
+      (panel) => Array.from(panel.elements[0].text.content).length <= 1000,
+    ),
+  );
+});
+
+test("question cards retain delivery bindings and distinct stable retry keys", async () => {
+  const event = { ...completion, "user-question": "用户问题".repeat(1000) };
+  const calls = [];
+  const result = await runCodexFeishuNotification({
+    rawNotification: JSON.stringify(event),
+    env: {
+      FEISHU_NOTIFY_USER_ID: "ou_user123",
+      FEISHU_NOTIFY_MESSAGE_CHUNK_CHARS: "1000",
+    },
+    runCommand: async (_binary, args) => {
+      calls.push(args);
+      return {
+        stdout: JSON.stringify({
+          ok: true,
+          data: { message_id: `om_${calls.length}`, chat_id: "oc_test" },
+        }),
+      };
+    },
+  });
+  assert.ok(calls.length > 1);
+  assert.equal(result.messages.length, calls.length);
+  assert.deepEqual(
+    calls.map((args) => args[args.indexOf("--idempotency-key") + 1]),
+    calls.map((_, index) => createIdempotencyKey(event, index)),
+  );
+});
+
+test("question and answer cards leave room for metadata with multibyte content", () => {
+  const cards = buildCompletionCards({
+    ...completion,
+    "user-question": "问题😀".repeat(5000),
+    "last-assistant-message": "回答😀".repeat(5000),
+  });
+  assert.ok(
+    cards.every((card) => Buffer.byteLength(JSON.stringify(card)) < 30 * 1024),
   );
 });
 

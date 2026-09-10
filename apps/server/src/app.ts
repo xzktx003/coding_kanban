@@ -52,6 +52,9 @@ import { FeishuReplyEventListener } from "./services/feishu-reply-event-listener
 import { FeishuControlPanelService } from "./services/feishu-control-panel-service.js";
 import { FeishuControlMessenger } from "./services/feishu-control-messenger.js";
 import { buildFeishuControlPanelCard } from "./services/feishu-control-panel-card.js";
+import { FeishuSessionWorkspace } from "./services/feishu-session-workspace.js";
+import { FeishuWorkspaceFiles } from "./services/feishu-workspace-files.js";
+import { FeishuWorkspaceTranscript } from "./services/feishu-workspace-transcript.js";
 import { LocalFsService } from "./services/local-fs-service.js";
 import { LocalProcessRuntimeManager } from "./services/local-process-runtime-manager.js";
 import { LocalTmuxAdapter } from "./services/local-tmux-adapter.js";
@@ -248,6 +251,9 @@ export function buildServer(options: BuildServerOptions = {}): {
                   options.feishuReplyBindingStore?.record({
                     sessionId: event.sessionId,
                     completionId: event.completionId ?? event.completedAt,
+                    ...(event.codexThreadId
+                      ? { codexThreadId: event.codexThreadId }
+                      : {}),
                     messages: delivery.messages,
                   });
                 },
@@ -307,9 +313,57 @@ export function buildServer(options: BuildServerOptions = {}): {
         allowedUserId: options.feishuReplyAllowedUserId,
       })
     : null;
+  const workspaceTranscript = new FeishuWorkspaceTranscript(
+    codexTranscriptService,
+  );
+  const feishuSessionWorkspace =
+    options.feishuReplyAllowedUserId && controlMessenger
+      ? new FeishuSessionWorkspace({
+          allowedUserId: options.feishuReplyAllowedUserId,
+          settings: feishuNotificationSettingsService,
+          registry,
+          resolveSessionId: (session) =>
+            resolveActiveCodexSessionId(session, {
+              registry,
+              codexSessionLocator,
+            }),
+          ...(options.feishuReplyBindingStore
+            ? { notificationBindings: options.feishuReplyBindingStore }
+            : {}),
+          files: new FeishuWorkspaceFiles(),
+          transcript: (session, threadId, cursor) =>
+            workspaceTranscript.read(session, threadId, cursor),
+          exportTranscript: (session, threadId) =>
+            workspaceTranscript.export(session, threadId),
+          messenger: {
+            sendCard: (input) =>
+              controlMessenger.sendCard(
+                options.feishuReplyAllowedUserId!,
+                input.card as Record<string, unknown>,
+                input.idempotencyKey,
+              ),
+            sendText: (input) =>
+              controlMessenger.sendText(
+                options.feishuReplyAllowedUserId!,
+                input.text,
+                input.idempotencyKey,
+              ),
+            sendFile: (input) =>
+              controlMessenger.sendFile(
+                options.feishuReplyAllowedUserId!,
+                input.name,
+                input.data,
+                input.idempotencyKey,
+              ),
+          },
+        })
+      : null;
   const feishuControlPanelService =
     options.feishuReplyAllowedUserId && controlMessenger
       ? new FeishuControlPanelService({
+          ...(feishuSessionWorkspace
+            ? { workspace: feishuSessionWorkspace }
+            : {}),
           allowedUserId: options.feishuReplyAllowedUserId,
           settings: feishuNotificationSettingsService,
           registry,
@@ -347,7 +401,9 @@ export function buildServer(options: BuildServerOptions = {}): {
             eventKey,
             settings: feishuNotificationSettingsService,
             handleEvent: async (event) => {
-              const outcome = await feishuControlPanelService.handle(event);
+              const outcome = feishuSessionWorkspace?.accepts(event)
+                ? await feishuSessionWorkspace.handle(event)
+                : await feishuControlPanelService.handle(event);
               app.log.info(
                 { eventKey, outcome },
                 "Feishu Codex control panel event processed",

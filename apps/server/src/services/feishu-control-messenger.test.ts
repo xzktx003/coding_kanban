@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFile, stat } from "node:fs/promises";
+import path from "node:path";
 
 import { FeishuControlMessenger } from "./feishu-control-messenger.js";
 
@@ -138,4 +140,71 @@ test("requires ok true and message identifiers in lark-cli JSON output", async (
       /Feishu control message delivery failed/,
     );
   }
+});
+
+test("file delivery stages a private local file, uses bot identity and removes it afterwards", async () => {
+  let directory = "";
+  const messenger = new FeishuControlMessenger({
+    allowedUserId: "ou_owner",
+    runCommand: async (_binary, args, options) => {
+      directory = options.cwd!;
+      assert.ok(directory);
+      assert.equal(args[args.indexOf("--file") + 1], "./记录.md");
+      assert.equal(args[args.indexOf("--as") + 1], "bot");
+      assert.equal(args[args.indexOf("--user-id") + 1], "ou_owner");
+      assert.equal(
+        await readFile(path.join(directory, "记录.md"), "utf8"),
+        "内容",
+      );
+      assert.equal(
+        (await stat(path.join(directory, "记录.md"))).mode & 0o777,
+        0o600,
+      );
+      return {
+        stdout: JSON.stringify({
+          ok: true,
+          data: { message_id: "om_file", chat_id: "oc_private" },
+        }),
+      };
+    },
+  });
+  await messenger.sendFile(
+    "ou_owner",
+    "记录.md",
+    Buffer.from("内容"),
+    "file-1",
+  );
+  await assert.rejects(stat(directory), { code: "ENOENT" });
+});
+
+test("file delivery rejects unsafe targets and cleans up after CLI failure", async () => {
+  let directory = "";
+  const messenger = new FeishuControlMessenger({
+    allowedUserId: "ou_owner",
+    runCommand: async (_binary, _args, options) => {
+      directory = options.cwd!;
+      throw new Error("sensitive CLI output");
+    },
+  });
+  for (const name of [
+    "../secret",
+    "/tmp/file",
+    "a\\b",
+    ".env",
+    "--flag",
+    "a\nfile",
+  ]) {
+    await assert.rejects(
+      messenger.sendFile("ou_owner", name, Buffer.from("a"), "file-2"),
+    );
+  }
+  await assert.rejects(
+    messenger.sendFile("ou_other", "a.txt", Buffer.from("a"), "file-2"),
+  );
+  assert.equal(directory, "");
+  await assert.rejects(
+    messenger.sendFile("ou_owner", "a.txt", Buffer.from("a"), "file-2"),
+    /Feishu control message delivery failed/,
+  );
+  await assert.rejects(stat(directory), { code: "ENOENT" });
 });

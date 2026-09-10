@@ -70,6 +70,27 @@ const overview = {
   ],
 };
 
+test("workspace entry shares the target selector but does not require a Codex instruction", () => {
+  const card = buildFeishuControlPanelCard({
+    panelId: "inspect1",
+    options: [{ value: "t1", label: "project" }],
+    workspaceEnabled: true,
+  });
+  const form = card.body.elements.find(
+    (element: any) => element.tag === "form",
+  ) as any;
+  assert.ok(form);
+  assert.equal(
+    form.elements.find((element: any) => element.name === "prompt").required,
+    false,
+  );
+  assert.ok(
+    form.elements.some(
+      (element: any) => element.name === "kanban_inspect_inspect1",
+    ),
+  );
+});
+
 test("overview groups status counts and safely displays recent output with the original submit form", () => {
   const card = buildFeishuControlPanelCard({
     panelId: "overview1",

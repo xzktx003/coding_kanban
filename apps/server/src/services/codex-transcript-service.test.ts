@@ -19,6 +19,199 @@ function line(value: unknown): string {
   return `${JSON.stringify(value)}\n`;
 }
 
+test("completion questions stay turn-bound and skip Goal continuation context", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-completion-question-"));
+  const start = (id: string) => ({
+    type: "event_msg",
+    payload: { type: "task_started", turn_id: id },
+  });
+  const prompt = (text: string) => ({
+    type: "event_msg",
+    payload: { type: "user_message", message: text },
+  });
+  const goal = (id: string) => ({
+    type: "response_item",
+    payload: {
+      type: "message",
+      role: "user",
+      content: [{ type: "input_text", text: "private continuation" }],
+      internal_chat_message_metadata_passthrough: {
+        turn_id: id,
+        content_item_kinds: ["goal.internal_context"],
+      },
+    },
+  });
+  const done = (id: string) => ({
+    timestamp: "2026-09-10T08:00:00Z",
+    type: "event_msg",
+    payload: {
+      type: "task_complete",
+      turn_id: id,
+      last_agent_message: "final answer",
+    },
+  });
+  try {
+    const cases = [
+      {
+        records: [
+          start("one"),
+          prompt("old question"),
+          done("one"),
+          start("two"),
+          prompt("current question"),
+          done("two"),
+          start("three"),
+          prompt("next question"),
+        ],
+        expected: "current question",
+      },
+      {
+        records: [
+          start("one"),
+          prompt("original goal"),
+          done("one"),
+          start("two"),
+          prompt("private continuation"),
+          goal("two"),
+          done("two"),
+          start("three"),
+          goal("three"),
+          done("three"),
+        ],
+        expected: "original goal",
+      },
+      {
+        records: [
+          start("one"),
+          prompt("unrelated old question"),
+          done("one"),
+          start("two"),
+          done("two"),
+        ],
+        expected: undefined,
+      },
+      { records: [goal("two"), done("two")], expected: undefined },
+      {
+        records: [
+          start("one"),
+          {
+            type: "response_item",
+            payload: {
+              type: "message",
+              role: "user",
+              content: [
+                {
+                  type: "input_text",
+                  text: "<environment_context>private</environment_context>",
+                },
+              ],
+            },
+          },
+          done("one"),
+        ],
+        expected: undefined,
+      },
+      {
+        records: [
+          start("one"),
+          {
+            type: "response_item",
+            payload: {
+              type: "message",
+              role: "user",
+              content: [{ type: "input_text", text: "response item question" }],
+              internal_chat_message_metadata_passthrough: {
+                turn_id: "one",
+                content_item_kinds: ["input_text"],
+              },
+            },
+          },
+          done("one"),
+        ],
+        expected: "response item question",
+      },
+    ];
+    for (const { records, expected } of cases) {
+      writeFileSync(
+        join(root, "rollout-thread-question.jsonl"),
+        [
+          line({
+            type: "session_meta",
+            payload: { id: "thread-question", cwd: "/project" },
+          }),
+          ...records.map(line),
+        ].join(""),
+      );
+      const result = new CodexTranscriptService({
+        sessionsRoot: root,
+      }).readLatestCompletion({ sessionId: "thread-question" });
+      assert.equal(result?.userQuestion, expected);
+      assert.equal(result?.content, "final answer");
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("transcript marks internal continuation and analysis messages for safe external export", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-public-transcript-"));
+  try {
+    writeFileSync(
+      join(root, "rollout-thread-123.jsonl"),
+      [
+        line({
+          type: "session_meta",
+          payload: { id: "thread-123", cwd: "/project" },
+        }),
+        line({
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [
+              { type: "goal.internal_context", text: "internal context" },
+            ],
+          },
+        }),
+        line({
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            channel: "analysis",
+            content: [{ type: "output_text", text: "internal analysis" }],
+          },
+        }),
+        line({
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            channel: "final",
+            content: [{ type: "output_text", text: "public final" }],
+          },
+        }),
+      ].join(""),
+    );
+    const result = new CodexTranscriptService({ sessionsRoot: root }).read({
+      sessionId: "thread-123",
+    });
+    assert.deepEqual(
+      result.entries.map((entry) => [entry.text, Boolean(entry.internal)]),
+      [
+        ["internal context", true],
+        ["internal analysis", true],
+        ["public final", false],
+      ],
+    );
+    assert.deepEqual(summarizeCodexTranscript(result.entries), {
+      lastAgentMessageSummary: "public final",
+    });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("summarizeCodexTranscript extracts the latest user and assistant messages without an LLM", () => {
   const summary = summarizeCodexTranscript([
     {
@@ -542,6 +735,15 @@ test("CodexTranscriptService reads a remote Codex JSONL session by working direc
         timestamp: "2026-08-25T02:00:02.000Z",
         type: "event_msg",
         payload: {
+          type: "user_message",
+          turn_id: "remote-turn",
+          message: "远程用户问题",
+        },
+      }),
+      line({
+        timestamp: "2026-08-25T02:00:02.000Z",
+        type: "event_msg",
+        payload: {
           type: "task_complete",
           turn_id: "remote-turn",
           last_agent_message: "remote history",
@@ -612,6 +814,7 @@ test("CodexTranscriptService reads a remote Codex JSONL session by working direc
   assert.deepEqual(completion, {
     completionId: "remote-turn",
     content: "remote history",
+    userQuestion: "远程用户问题",
     completedAt: "2026-08-25T02:00:02.000Z",
   });
 });

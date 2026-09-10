@@ -98,6 +98,7 @@ test("resolves the complete last assistant entry from the active tmux Codex conv
       completedAt: "2026-09-01T11:30:00.000Z",
     }),
     {
+      codexThreadId: "codex-session-12345678",
       completionId: "turn-local",
       content: completeOutput,
       completedAt: "2026-09-01T11:30:00.000Z",
@@ -279,6 +280,7 @@ test("reads the complete last assistant entry from a registered SSH Codex sessio
       completedAt: "2026-09-01T11:35:00.000Z",
     }),
     {
+      codexThreadId: "remote-codex-session-12345678",
       completionId: "turn-remote",
       content: "远端完整最终输出",
       completedAt: "2026-09-01T11:35:00.000Z",

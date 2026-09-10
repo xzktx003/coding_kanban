@@ -44,24 +44,24 @@ Coding Kanban 将这些问题收敛为一条主流程：
 
 ## 核心能力一览
 
-| 能力 | 当前行为 |
-| --- | --- |
-| 注意力看板 | 自动分为“需响应 / 执行中 / 待验收 / 可继续”，列头显示数量 |
-| 卡片上下文 | 展示最后用户任务、最后 Agent 回复、项目、分支/worktree、文件数及增删行 |
-| 已读管理 | 完成态可主动标记已读/未读，状态由服务端持久化 |
-| 排序与分组 | 按最近活动、项目、名称排序；用户分组在四列内独立折叠 |
-| 真实终端 | xterm.js + WebSocket，支持 replay、resize、stdin、控制键和 OSC 52 |
-| 多屏监控 | 1/2/3/4/6/8 屏；多个终端同时观察，但只有一个输入窗格 |
-| tmux | 本地/SSH 扫描、创建、attach、接管、释放、刷新、终止 |
-| Agent 扫描 | 扫描本地或 SSH 工作目录，识别结构化 Agent 会话并与 tmux 合并 |
-| 完整记录 | 本机 Codex JSONL 结构化记录，隐藏 exec 噪声，Markdown/GFM/KaTeX 渲染 |
-| 变更审查 | “本次任务”与“当前工作区”双 Diff，文件筛选、全屏查看、复制和引用 |
-| 文件浏览器 | 本地/SSH 浏览、预览、编辑、上传、下载、拖拽、chmod、Markdown/LaTeX |
-| VS Code Web | 本地与 SSH 远端 code-server，通过 `/vscode/` 内嵌并限制 iframe 缓存 |
-| 手机工作区 | 注意力看板、活动、项目/文件、终端快捷键、完整记录和手机 Diff |
+| 能力           | 当前行为                                                                                                                                           |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 注意力看板     | 自动分为“需响应 / 执行中 / 待验收 / 可继续”，列头显示数量                                                                                          |
+| 卡片上下文     | 展示最后用户任务、最后 Agent 回复、项目、分支/worktree、文件数及增删行                                                                             |
+| 已读管理       | 完成态可主动标记已读/未读，状态由服务端持久化                                                                                                      |
+| 排序与分组     | 按最近活动、项目、名称排序；用户分组在四列内独立折叠                                                                                               |
+| 真实终端       | xterm.js + WebSocket，支持 replay、resize、stdin、控制键和 OSC 52                                                                                  |
+| 多屏监控       | 1/2/3/4/6/8 屏；多个终端同时观察，但只有一个输入窗格                                                                                               |
+| tmux           | 本地/SSH 扫描、创建、attach、接管、释放、刷新、终止                                                                                                |
+| Agent 扫描     | 扫描本地或 SSH 工作目录，识别结构化 Agent 会话并与 tmux 合并                                                                                       |
+| 完整记录       | 本机 Codex JSONL 结构化记录，隐藏 exec 噪声，Markdown/GFM/KaTeX 渲染                                                                               |
+| 变更审查       | “本次任务”与“当前工作区”双 Diff，文件筛选、全屏查看、复制和引用                                                                                    |
+| 文件浏览器     | 本地/SSH 浏览、预览、编辑、上传、下载、拖拽、chmod、Markdown/LaTeX                                                                                 |
+| VS Code Web    | 本地与 SSH 远端 code-server，通过 `/vscode/` 内嵌并限制 iframe 缓存                                                                                |
+| 手机工作区     | 注意力看板、活动、项目/文件、终端快捷键、完整记录和手机 Diff                                                                                       |
 | 飞书通知与续跑 | 所有已登记看板任务结束后可通过本地 `lark-cli` 机器人发送 Card 2.0 私聊/群聊完成卡片；私聊用户还可回复某张卡片，把文字安全送回对应的在线 Codex 终端 |
-| 更新与恢复 | 用户确认后 fast-forward 更新；重启后恢复 managed tmux 和布局 |
-| 资源诊断 | xterm、WebSocket、快照吞吐、终端流、VS Code iframe、long task、heap |
+| 更新与恢复     | 用户确认后 fast-forward 更新；重启后恢复 managed tmux 和布局                                                                                       |
+| 资源诊断       | xterm、WebSocket、快照吞吐、终端流、VS Code iframe、long task、heap                                                                                |
 
 ## 更新日志
 
@@ -72,17 +72,21 @@ Coding Kanban 将这些问题收敛为一条主流程：
 
 ### 重要里程碑
 
-| 时间 | 更新内容 |
-| --- | --- |
+| 时间    | 更新内容                                                                        |
+| ------- | ------------------------------------------------------------------------------- |
 | 2026-09 | 接入 Codex ↔ 飞书双向工作流：完成提醒、完整回复分片，以及从私聊回复继续对应会话 |
-| 2026-08 | 新增结构化会话摘要、完整记录、双 Diff Review、Markdown 阅读和手机工作区 |
-| 2026-07 | 加入用户分组、应用热更新、managed tmux 会话恢复及监控窗格联动 |
-| 2026-06 | 上线手机终端、浏览器资源诊断、完成通知、常驻开发服务和多终端布局 |
-| 2026-05 | 文件上传新增相对路径支持和上传状态反馈 |
-| 2026-04 | 上线文件浏览器、VS Code Web、SSH 远端文件与远端 VS Code 工作流 |
-| 2026-03 | 建立四列看板、真实终端、tmux 会话管理、快速连接和局域网访问基础 |
+| 2026-08 | 新增结构化会话摘要、完整记录、双 Diff Review、Markdown 阅读和手机工作区         |
+| 2026-07 | 加入用户分组、应用热更新、managed tmux 会话恢复及监控窗格联动                   |
+| 2026-06 | 上线手机终端、浏览器资源诊断、完成通知、常驻开发服务和多终端布局                |
+| 2026-05 | 文件上传新增相对路径支持和上传状态反馈                                          |
+| 2026-04 | 上线文件浏览器、VS Code Web、SSH 远端文件与远端 VS Code 工作流                  |
+| 2026-03 | 建立四列看板、真实终端、tmux 会话管理、快速连接和局域网访问基础                 |
 
 ### 功能更新时间线（新 → 旧）
+
+- `2026-09-10` — Codex 飞书完成通知同时展示用户问题与完整回复；长问题提供摘要及后续可展开的全文卡片，Goal 内部续轮提示不作为用户问题发送；每张精确绑定 Codex thread 的通知分片新增小号「查看完整记录」按钮，可分页查看公开对话或导出完整 Markdown；公式改为保留源码，不再生成或上传图片。
+
+- `2026-09-09` — 飞书菜单支持打开会话工作区：查看状态、公开对话记录及导出文件，浏览本机项目文件并二次确认新建/编辑小文本；手机无需直连内网。范围与安全限制见 [使用说明](docs/feishu-session-workspace.md)。
 
 - `2026-09-09` — 飞书新增「任务总览」菜单：查看会话状态统计、最近输出摘要，支持分页刷新并选择本页 Codex 发送指令。复用现有事件订阅，只需新增菜单 Key `kanban_task_overview`，见 [配置说明](docs/feishu-codex-control-panel.md)。
 
@@ -313,8 +317,8 @@ https://<局域网地址>:<WEB_PORT>/?view=mobile
 
 手机变更视图使用下拉框选择文件，避免完整文件列表占满屏幕；Diff 可以全屏查看，并支持复制路径或引用到输入框。
 
-| 手机注意力看板 | 当前会话终端 | 手机 Changes |
-| --- | --- | --- |
+| 手机注意力看板                                             | 当前会话终端                                                | 手机 Changes                                           |
+| ---------------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------ |
 | ![手机注意力看板](docs/readme-assets/mobile-workspace.png) | ![手机当前会话终端](docs/readme-assets/mobile-terminal.png) | ![手机文件变更](docs/readme-assets/mobile-changes.png) |
 
 ### 10. 隐藏会话与安全操作
@@ -376,7 +380,7 @@ https://<局域网地址>:<WEB_PORT>/?view=mobile
 - `mkcert`：为局域网生成浏览器可信任的本地 HTTPS 证书，强烈推荐与 VS Code Web 一起使用。
 - `code-server` 或 `openvscode-server`：内嵌 VS Code Web；未安装时应用可尝试通过网络安装 `code-server`。
 - Codex、Copilot 或 Claude CLI：只需安装并登录实际要从看板启动的 Agent；纯 shell 会话不需要。
-- `lark-cli`：仅发送飞书提醒或从飞书回复继续 Codex 时需要。公式图片还需要机器人图片上传权限（`im:resource:upload` 或接口允许的 `im:resource`）和本机 Chromium，可用 `pnpm exec playwright install --with-deps chromium` 准备；缺少条件时保留公式源码，不影响通知发送。
+- `lark-cli`：仅发送飞书提醒或从飞书回复继续 Codex 时需要。飞书完成通知中的公式保留源码，不需要图片上传权限或 Chromium。
 - Playwright 浏览器和系统依赖：仅运行 E2E 或生成 README 截图时需要。
 
 ```bash
@@ -421,6 +425,7 @@ corepack prepare pnpm@10.13.1 --activate
 - [ ] **飞书提醒**：`lark-cli` 已配置机器人身份和 `im:message:send_as_bot` 权限，`.env` 中只设置 `FEISHU_NOTIFY_CHAT_ID` 或 `FEISHU_NOTIFY_USER_ID` 其中一个；Kanban 后端会统一发送 Codex 最后一条完整回复，无需为新安装单独配置 Codex 用户级 notify hook。确认目标会话允许接收可能包含代码和日志的完整正文。
 - [ ] **飞书回复续跑（可选）**：仅使用私聊 `FEISHU_NOTIFY_USER_ID`；应用已开通 `im:message.p2p_msg:readonly`，并在飞书开放平台订阅 `im.message.receive_v1` 长连接事件。群聊目标只能接收通知，不能启用回复控制。
 - [ ] **飞书开关**：启动后进入“设置 → 飞书通知”，确认目标类型，再分别按需开启“任务完成通知”和默认关闭的“飞书回复继续执行”。
+- [ ] **飞书会话工作区（可选）**：已启用机器人菜单与卡片回调；发送文件需开通 `im:resource`。从菜单选择会话后点击“查看所选会话 / 记录 / 文件”，可查看记录、下载文件及确认保存小文本。文件读写暂限本机 Linux 项目，内容会传入飞书，详见 [使用与安全边界](docs/feishu-session-workspace.md)。
 - [ ] **E2E/截图**：只有需要运行 Playwright 时才执行 `npx playwright install`；Linux 缺少 Chromium 动态库时再执行 `sudo npx playwright install-deps`。
 
 可以先运行下面的命令快速核对基础命令；带“可选”的项目没有输出时，只会影响对应功能：
@@ -493,38 +498,38 @@ curl http://127.0.0.1:4000/api/health
 
 ### 服务与 HTTPS
 
-| 变量 | 默认示例 | 说明 |
-| --- | --- | --- |
-| `SERVER_BIND_HOST` | `0.0.0.0` | 后端监听地址 |
-| `PORT` | `4000` | REST + WebSocket 端口 |
-| `WEB_HOST` | `0.0.0.0` | Vite 监听地址，局域网联调必须可见 |
-| `WEB_PORT` | `8484` | 前端端口 |
-| `WEB_BACKEND_HOST` | `localhost` | Vite 代理目标主机 |
-| `WEB_BACKEND_PORT` | `4000` | Vite 代理目标端口 |
-| `WEB_HTTPS` | `1` | 默认 HTTPS；局域网 Notification 需要安全上下文 |
-| `VITE_DEV_HTTPS_CA_CERT` | 可选 | 可公开下载并用于信任前端证书的 CA 公钥证书 |
+| 变量                     | 默认示例    | 说明                                           |
+| ------------------------ | ----------- | ---------------------------------------------- |
+| `SERVER_BIND_HOST`       | `0.0.0.0`   | 后端监听地址                                   |
+| `PORT`                   | `4000`      | REST + WebSocket 端口                          |
+| `WEB_HOST`               | `0.0.0.0`   | Vite 监听地址，局域网联调必须可见              |
+| `WEB_PORT`               | `8484`      | 前端端口                                       |
+| `WEB_BACKEND_HOST`       | `localhost` | Vite 代理目标主机                              |
+| `WEB_BACKEND_PORT`       | `4000`      | Vite 代理目标端口                              |
+| `WEB_HTTPS`              | `1`         | 默认 HTTPS；局域网 Notification 需要安全上下文 |
+| `VITE_DEV_HTTPS_CA_CERT` | 可选        | 可公开下载并用于信任前端证书的 CA 公钥证书     |
 
 ### 终端与持久化
 
-| 变量 | 默认示例 | 说明 |
-| --- | --- | --- |
-| `TERMINAL_SCROLLBACK_BYTES` | `4194304` | 每个活跃 PTY 的后端 replay 字节上限 |
-| `TERMINAL_TMUX_CAPTURE_LINES` | `20000` | tmux observe/refresh 捕获行数 |
-| `TERMINAL_REGISTRY_OUTPUT_ENTRIES` | `5000` | 无 live PTY 时的 registry 回放条目 |
-| `VITE_TERMINAL_SCROLLBACK_LINES` | `20000` | 浏览器 xterm scrollback 行数 |
-| `SESSION_STATE_PATH` | `.dev-runtime/agent-sessions.json` | 可恢复会话元数据；不保存终端正文和凭证 |
-| `GIT_AUTO_PULL_INTERVAL_MINUTES` | `10`、`30` 或 `0` | 后台只 fetch/check，绝不自动 pull |
+| 变量                               | 默认示例                           | 说明                                   |
+| ---------------------------------- | ---------------------------------- | -------------------------------------- |
+| `TERMINAL_SCROLLBACK_BYTES`        | `4194304`                          | 每个活跃 PTY 的后端 replay 字节上限    |
+| `TERMINAL_TMUX_CAPTURE_LINES`      | `20000`                            | tmux observe/refresh 捕获行数          |
+| `TERMINAL_REGISTRY_OUTPUT_ENTRIES` | `5000`                             | 无 live PTY 时的 registry 回放条目     |
+| `VITE_TERMINAL_SCROLLBACK_LINES`   | `20000`                            | 浏览器 xterm scrollback 行数           |
+| `SESSION_STATE_PATH`               | `.dev-runtime/agent-sessions.json` | 可恢复会话元数据；不保存终端正文和凭证 |
+| `GIT_AUTO_PULL_INTERVAL_MINUTES`   | `10`、`30` 或 `0`                  | 后台只 fetch/check，绝不自动 pull      |
 
 ### 文件与 VS Code Web
 
-| 变量 | 说明 |
-| --- | --- |
-| `FILE_BROWSER_DEFAULT_LOCAL_PATH` | 文件浏览器首次打开目录 |
-| `VSCODE_WEB_EXTENSIONS_DIR` | code-server 共用扩展目录 |
-| `VSCODE_WEB_PUBLIC_HOST` | 浏览器访问 `/vscode/` 的公共主机 |
-| `VSCODE_WEB_BIND_HOST` | 本地 code-server 内部监听地址 |
-| `VSCODE_WEB_REMOTE_BIND_HOST` | SSH 远端 code-server 监听地址，默认 `127.0.0.1` |
-| `VSCODE_WEB_REMOTE_PORT` | 远端 code-server 首选端口，默认 `13338` |
+| 变量                              | 说明                                            |
+| --------------------------------- | ----------------------------------------------- |
+| `FILE_BROWSER_DEFAULT_LOCAL_PATH` | 文件浏览器首次打开目录                          |
+| `VSCODE_WEB_EXTENSIONS_DIR`       | code-server 共用扩展目录                        |
+| `VSCODE_WEB_PUBLIC_HOST`          | 浏览器访问 `/vscode/` 的公共主机                |
+| `VSCODE_WEB_BIND_HOST`            | 本地 code-server 内部监听地址                   |
+| `VSCODE_WEB_REMOTE_BIND_HOST`     | SSH 远端 code-server 监听地址，默认 `127.0.0.1` |
+| `VSCODE_WEB_REMOTE_PORT`          | 远端 code-server 首选端口，默认 `13338`         |
 
 ### 飞书完成提醒与回复续跑
 
@@ -635,14 +640,14 @@ curl http://127.0.0.1:4000/api/health
 
 ## 快捷键
 
-| 快捷键 | 作用 |
-| --- | --- |
-| `Ctrl/⌘+E` | 快速连接本机或 SSH tmux |
-| `Ctrl/⌘+Shift+S` | 打开本地 tmux 扫描 |
-| `Alt+Q` | 从聚焦视图返回看板 |
-| `Tab` | 常规焦点切换 |
-| `Esc` | 关闭支持 Escape 的弹窗、菜单或全屏 Diff |
-| `Shift+Enter` | 跨平台终端换行，避免系统抢占 `Alt+Space` |
+| 快捷键           | 作用                                     |
+| ---------------- | ---------------------------------------- |
+| `Ctrl/⌘+E`       | 快速连接本机或 SSH tmux                  |
+| `Ctrl/⌘+Shift+S` | 打开本地 tmux 扫描                       |
+| `Alt+Q`          | 从聚焦视图返回看板                       |
+| `Tab`            | 常规焦点切换                             |
+| `Esc`            | 关闭支持 Escape 的弹窗、菜单或全屏 Diff  |
+| `Shift+Enter`    | 跨平台终端换行，避免系统抢占 `Alt+Space` |
 
 ## 仓库结构
 

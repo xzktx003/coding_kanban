@@ -80,6 +80,14 @@ function createFixture(
       message: string;
       workingDirectory?: string;
     }) => Promise<void>;
+    workspace?: {
+      open(input: {
+        sessionId: string;
+        threadId: string;
+        operatorId: string;
+        chatId: string;
+      }): Promise<unknown>;
+    };
   } = {},
 ) {
   let sessions = overrides.sessions ?? [codexSession, unavailableSession];
@@ -106,6 +114,7 @@ function createFixture(
   const ids = ["panel-1", "target-1", "panel-2", "target-2"];
   const service = new FeishuControlPanelService({
     allowedUserId: "ou_owner",
+    workspace: overrides.workspace,
     now: () => nowMs,
     createId: () => {
       return ids.shift() ?? `id-${cards.length}`;
@@ -172,6 +181,49 @@ function createFixture(
     },
   };
 }
+
+test("inspect opens only the verified target without requiring or submitting a prompt", async () => {
+  const opened: unknown[] = [];
+  const fixture = createFixture({
+    workspace: {
+      open: async (input) => {
+        opened.push(input);
+      },
+    },
+  });
+  await fixture.service.handle(menuEvent);
+  const event = {
+    ...submitEvent,
+    action_name: "kanban_inspect_panel-1",
+    form_value: JSON.stringify({ target: "target-1" }),
+  };
+  assert.equal(await fixture.service.handle(event), "workspace_opened");
+  assert.equal(opened.length, 1);
+  assert.equal(fixture.deliveries.length, 0);
+  assert.equal(await fixture.service.handle(event), "ignored_duplicate");
+  assert.equal(fixture.cards[0].workspaceEnabled, true);
+});
+
+test("inspect refuses forged source and a switched Codex thread", async () => {
+  let opens = 0;
+  const fixture = createFixture({
+    workspace: {
+      open: async () => {
+        opens++;
+      },
+    },
+  });
+  await fixture.service.handle(menuEvent);
+  const event = {
+    ...submitEvent,
+    action_name: "kanban_inspect_panel-1",
+    form_value: JSON.stringify({ target: "target-1" }),
+  };
+  await fixture.service.handle({ ...event, message_id: "om_forged" });
+  fixture.setCurrentThreadId("new-thread");
+  assert.equal(await fixture.service.handle(event), "ignored_changed_thread");
+  assert.equal(opens, 0);
+});
 
 test("menu click sends a fresh private control card with only live controllable Codex targets", async () => {
   const fixture = createFixture();

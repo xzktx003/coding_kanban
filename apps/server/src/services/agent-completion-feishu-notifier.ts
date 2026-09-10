@@ -7,6 +7,8 @@ import type {
 } from "@agent-orchestrator/shared";
 
 export interface FeishuCompletionEvent {
+  userQuestion?: string;
+  codexThreadId?: string;
   sessionId: string;
   displayName: string;
   agentKind: string;
@@ -17,6 +19,8 @@ export interface FeishuCompletionEvent {
 }
 
 export interface FeishuCompletionObservation {
+  userQuestion?: string;
+  codexThreadId?: string;
   completionId: string;
   content: string;
   completedAt: string;
@@ -450,6 +454,12 @@ export class AgentCompletionFeishuNotifier {
       ...event,
       agentKind: "codex",
       summary: observation.content,
+      ...(observation.userQuestion
+        ? { userQuestion: observation.userQuestion }
+        : {}),
+      ...(observation.codexThreadId
+        ? { codexThreadId: observation.codexThreadId }
+        : {}),
       completedAt: observation.completedAt,
       completionId: observation.completionId,
     };
@@ -596,6 +606,8 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
       "agent-kind": event.agentKind,
       "display-name": event.displayName,
       "last-assistant-message": event.summary,
+      ...(event.userQuestion ? { "user-question": event.userQuestion } : {}),
+      ...(event.codexThreadId ? { "records-available": true } : {}),
     };
 
     try {

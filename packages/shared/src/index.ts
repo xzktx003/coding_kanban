@@ -208,6 +208,8 @@ export interface AgentTranscriptEntry {
   title: string;
   text: string;
   collapsedByDefault: boolean;
+  /** Internal continuation or reasoning metadata; excluded from external exports. */
+  internal?: boolean;
 }
 
 export interface AgentTranscriptResponse {

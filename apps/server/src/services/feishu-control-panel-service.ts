@@ -47,6 +47,7 @@ export interface FeishuCardActionEvent {
 }
 
 export interface FeishuControlPanelCardInput {
+  workspaceEnabled?: boolean;
   panelId: string;
   options: Array<{ value: string; label: string }>;
   truncated: boolean;
@@ -66,6 +67,7 @@ export interface FeishuControlPanelCardInput {
 }
 
 export type FeishuControlPanelOutcome =
+  | "workspace_opened"
   | "panel_sent"
   | "delivered"
   | "ignored_disabled"
@@ -103,6 +105,14 @@ export interface FeishuControlPanelSendCardInput {
 }
 
 export interface FeishuControlPanelServiceOptions {
+  workspace?: {
+    open(input: {
+      sessionId: string;
+      threadId: string;
+      operatorId: string;
+      chatId: string;
+    }): Promise<unknown>;
+  };
   allowedUserId: string;
   now?: () => number;
   createId?: () => string;
@@ -303,6 +313,7 @@ function buildOverview(
 }
 
 export class FeishuControlPanelService {
+  readonly #workspace: FeishuControlPanelServiceOptions["workspace"];
   readonly #allowedUserId: string;
   readonly #settings: FeishuControlPanelServiceOptions["settings"];
   readonly #registry: FeishuControlPanelServiceOptions["registry"];
@@ -317,6 +328,7 @@ export class FeishuControlPanelService {
   readonly #processedEventOrder: string[] = [];
 
   constructor(options: FeishuControlPanelServiceOptions) {
+    this.#workspace = options.workspace;
     this.#allowedUserId = USER_ID_PATTERN.test(options.allowedUserId)
       ? options.allowedUserId
       : "";
@@ -438,7 +450,11 @@ export class FeishuControlPanelService {
       });
     }
 
-    const panelId = this.#parseSubmitPanelId(event.action_name);
+    const inspect = event.action_name?.startsWith("kanban_inspect_") === true;
+    if (inspect && !this.#workspace) return "ignored_unavailable";
+    const panelId = inspect
+      ? event.action_name!.slice("kanban_inspect_".length)
+      : this.#parseSubmitPanelId(event.action_name);
     if (!panelId) {
       return "ignored_untrusted";
     }
@@ -458,11 +474,12 @@ export class FeishuControlPanelService {
       return "ignored_expired";
     }
     const formValue = parseJsonObject(event.form_value);
+    const selectedTarget = formValue.target;
     const targetToken =
-      typeof formValue.target === "string" ? formValue.target : "";
+      typeof selectedTarget === "string" ? selectedTarget : "";
     const target = panel.targets.get(targetToken);
     const prompt = normalizePrompt(formValue.prompt);
-    if (!target || !prompt) {
+    if (!target || (!inspect && !prompt)) {
       await this.#notify(chatId, "请选择一个 Codex 对话并填写指示。", eventId);
       return "ignored_invalid_input";
     }
@@ -483,8 +500,10 @@ export class FeishuControlPanelService {
     this.#rememberProcessedEvent(eventId);
     // Consume the submit synchronously, but retain provenance so refresh still
     // works after sending. A second event cannot enter the queue await twice.
-    panel.submitted = true;
-    panel.targets.clear();
+    if (!inspect) {
+      panel.submitted = true;
+      panel.targets.clear();
+    }
     try {
       const currentThreadId = await this.#codex.resolveSessionId(session);
       if (!currentThreadId) {
@@ -513,10 +532,20 @@ export class FeishuControlPanelService {
         );
         return "ignored_changed_thread";
       }
+      if (inspect) {
+        if (latestSession.hidden) return "ignored_unavailable";
+        await this.#workspace!.open({
+          sessionId: target.sessionId,
+          threadId: currentThreadId,
+          operatorId: event.operator_id!,
+          chatId,
+        });
+        return "workspace_opened";
+      }
       try {
         await this.#codex.sendText({
           threadId: currentThreadId,
-          message: prompt,
+          message: prompt!,
           workingDirectory: latestSession.workingDirectory,
           sshTarget: latestSession.sshTarget,
         });
@@ -580,6 +609,7 @@ export class FeishuControlPanelService {
       };
     });
     const card = this.#cards.buildControlPanelCard({
+      ...(this.#workspace ? { workspaceEnabled: true } : {}),
       panelId,
       options,
       truncated: totalPages > 1,

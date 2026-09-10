@@ -158,7 +158,11 @@ export class CodexCompletionContentResolver {
           ? { workingDirectory: session.workingDirectory }
           : {}),
       };
-      return this.#codexTranscriptService.readLatestRemoteCompletion(input);
+      const completion =
+        await this.#codexTranscriptService.readLatestRemoteCompletion(input);
+      return completion && sessionId
+        ? { ...completion, codexThreadId: sessionId }
+        : completion;
     }
 
     if (!this.#codexTranscriptService.readLatestCompletion) {
@@ -170,7 +174,10 @@ export class CodexCompletionContentResolver {
         ? { workingDirectory: session.workingDirectory }
         : {}),
     };
-    return this.#codexTranscriptService.readLatestCompletion(input);
+    const completion = this.#codexTranscriptService.readLatestCompletion(input);
+    return completion && sessionId
+      ? { ...completion, codexThreadId: sessionId }
+      : completion;
   }
 
   async #resolveSessionId(

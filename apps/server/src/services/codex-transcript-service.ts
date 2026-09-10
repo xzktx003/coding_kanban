@@ -72,6 +72,7 @@ export interface CodexTurnCompletion {
   completionId: string;
   content: string;
   completedAt: string;
+  userQuestion?: string;
   shouldNotify?: boolean;
   pendingContinuationSource?: boolean;
 }
@@ -97,6 +98,13 @@ interface TranscriptPage {
 
 interface PendingToolOutput {
   entry: AgentTranscriptEntry;
+}
+
+interface UserQuestionSource {
+  turnId: string;
+  rootTurnId?: string;
+  text: string;
+  internal: boolean;
 }
 
 function stringValue(value: unknown): string {
@@ -174,7 +182,11 @@ function findLatestCompletionInTail(
   for (let index = records.length - 1; index >= 0; index -= 1) {
     const completion = parseTurnCompletion(records[index] ?? null);
     if (completion) {
-      return classifyCompletionContinuation(records, index, completion);
+      return classifyCompletionContinuation(
+        records,
+        index,
+        withUserQuestion(records, index, completion),
+      );
     }
   }
   return null;
@@ -182,6 +194,218 @@ function findLatestCompletionInTail(
 
 function recordPayloadType(record: JsonRecord | null): string {
   return stringValue(record?.payload?.type);
+}
+
+function contentItemKindsFromMetadata(value: unknown): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+  const kinds = (value as Record<string, unknown>).content_item_kinds;
+  return Array.isArray(kinds)
+    ? kinds.filter((kind): kind is string => typeof kind === "string")
+    : [];
+}
+
+function isInternalContentKind(kind: string): boolean {
+  return (
+    kind.startsWith("goal.") ||
+    kind.startsWith("environments.") ||
+    kind.startsWith("environment.") ||
+    kind.startsWith("plugins.") ||
+    kind.startsWith("agents_md.") ||
+    kind.startsWith("system.") ||
+    kind.startsWith("developer.")
+  );
+}
+
+function isHumanContentKind(kind: string): boolean {
+  return (
+    kind === "user.text" || kind === "user_message" || kind === "input_text"
+  );
+}
+
+function isInternalUserSource(payload: Record<string, unknown>): boolean {
+  if (
+    /goal\.internal_context|<environment_context>|<INSTRUCTIONS>|# AGENTS\.md instructions/.test(
+      collectText(payload.content ?? payload.message),
+    )
+  )
+    return true;
+  const metadata = payload.internal_chat_message_metadata_passthrough;
+  const contentItemKinds = contentItemKindsFromMetadata(metadata);
+  const hasInternalKind = contentItemKinds.some(isInternalContentKind);
+  const hasHumanKind = contentItemKinds.some(isHumanContentKind);
+  if (hasInternalKind || (contentItemKinds.length > 0 && !hasHumanKind)) {
+    return true;
+  }
+  if (payload.channel === "analysis") {
+    return true;
+  }
+  return (
+    Array.isArray(payload.content) &&
+    payload.content.some(
+      (item) =>
+        item &&
+        typeof item === "object" &&
+        (item as Record<string, unknown>).type === "goal.internal_context",
+    )
+  );
+}
+
+function parseResponseItemUserQuestionSource(
+  record: JsonRecord | null,
+): UserQuestionSource | null {
+  if (
+    record?.type !== "response_item" ||
+    !record.payload ||
+    recordPayloadType(record) !== "message" ||
+    stringValue(record.payload.role) !== "user"
+  ) {
+    return null;
+  }
+  const metadata = record.payload.internal_chat_message_metadata_passthrough;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    return null;
+  }
+  const metadataRecord = metadata as Record<string, unknown>;
+  const turnId = stringValue(metadataRecord.turn_id);
+  const text = collectText(record.payload.content).trim();
+  if (!turnId || !text) {
+    return null;
+  }
+  const rootTurnId = stringValue(metadataRecord.root_turn_id);
+  return {
+    turnId,
+    ...(rootTurnId ? { rootTurnId } : {}),
+    text,
+    internal: isInternalUserSource(record.payload),
+  };
+}
+
+function parseEventMsgUserQuestionSource(
+  record: JsonRecord | null,
+  activeTurnId = "",
+): UserQuestionSource | null {
+  if (
+    record?.type !== "event_msg" ||
+    !record.payload ||
+    recordPayloadType(record) !== "user_message"
+  ) {
+    return null;
+  }
+  const turnId = stringValue(record.payload.turn_id) || activeTurnId;
+  const text = collectText(
+    record.payload.message ??
+      record.payload.text ??
+      record.payload.content ??
+      record.payload.input,
+  ).trim();
+  if (!turnId || !text) {
+    return null;
+  }
+  const rootTurnId = stringValue(record.payload.root_turn_id);
+  return {
+    turnId,
+    ...(rootTurnId ? { rootTurnId } : {}),
+    text,
+    internal: isInternalUserSource(record.payload),
+  };
+}
+
+function parseUserQuestionSource(
+  record: JsonRecord | null,
+  activeTurnId = "",
+): UserQuestionSource | null {
+  return (
+    parseResponseItemUserQuestionSource(record) ??
+    parseEventMsgUserQuestionSource(record, activeTurnId)
+  );
+}
+
+function rootTurnIdForCompletion(
+  records: Array<JsonRecord | null>,
+  completionIndex: number,
+  completionId: string,
+): string {
+  const rootByTurnId = new Map<string, string>();
+  for (let index = 0; index < completionIndex; index += 1) {
+    const record = records[index] ?? null;
+    if (record?.type === "turn_context" && record.payload) {
+      const turnId = stringValue(record.payload.turn_id);
+      const rootTurnId = stringValue(record.payload.root_turn_id);
+      if (turnId && rootTurnId) {
+        rootByTurnId.set(turnId, rootTurnId);
+      }
+      continue;
+    }
+    const source = parseUserQuestionSource(record);
+    if (source?.rootTurnId) {
+      rootByTurnId.set(source.turnId, source.rootTurnId);
+    }
+  }
+  return rootByTurnId.get(completionId) ?? completionId;
+}
+
+function withUserQuestion(
+  records: Array<JsonRecord | null>,
+  completionIndex: number,
+  completion: CodexTurnCompletion,
+): CodexTurnCompletion {
+  const rootTurnId = rootTurnIdForCompletion(
+    records,
+    completionIndex,
+    completion.completionId,
+  );
+  const questions = new Map<string, string>();
+  const goalParents = new Map<string, string>();
+  let activeTurnId = "";
+  let previousTurnId = "";
+  for (let index = 0; index < completionIndex; index++) {
+    const record = records[index] ?? null;
+    if (
+      record?.type === "event_msg" &&
+      recordPayloadType(record) === "task_started"
+    ) {
+      previousTurnId = activeTurnId;
+      activeTurnId = stringValue(record.payload?.turn_id);
+      continue;
+    }
+    const source = parseUserQuestionSource(record, activeTurnId);
+    const payload = record?.payload;
+    const kinds = contentItemKindsFromMetadata(
+      payload?.internal_chat_message_metadata_passthrough,
+    );
+    const contentGoal =
+      Array.isArray(payload?.content) &&
+      payload.content.some(
+        (item) =>
+          item &&
+          typeof item === "object" &&
+          (item as Record<string, unknown>).type === "goal.internal_context",
+      );
+    if (kinds.includes("goal.internal_context") || contentGoal) {
+      const turnId = source?.turnId || activeTurnId;
+      if (turnId) {
+        goalParents.set(turnId, turnId === activeTurnId ? previousTurnId : "");
+        questions.delete(turnId);
+      }
+      continue;
+    }
+    if (source && !source.internal && !goalParents.has(source.turnId))
+      questions.set(source.turnId, source.text);
+  }
+  let sourceTurnId = rootTurnId;
+  const visited = new Set<string>();
+  while (
+    sourceTurnId &&
+    goalParents.has(sourceTurnId) &&
+    !visited.has(sourceTurnId)
+  ) {
+    visited.add(sourceTurnId);
+    sourceTurnId = goalParents.get(sourceTurnId) ?? "";
+  }
+  const userQuestion = questions.get(sourceTurnId);
+  return userQuestion ? { ...completion, userQuestion } : completion;
 }
 
 function isUserMessageForTurn(
@@ -428,6 +652,17 @@ function parseTranscriptGroup(
           title: role === "user" ? "你" : "Codex",
           text,
           collapsedByDefault: false,
+          ...(payload.channel === "analysis" ||
+          (Array.isArray(payload.content) &&
+            payload.content.some(
+              (item) =>
+                item &&
+                typeof item === "object" &&
+                (item as Record<string, unknown>).type ===
+                  "goal.internal_context",
+            ))
+            ? { internal: true }
+            : {}),
         },
       ];
     }
@@ -623,10 +858,10 @@ export function summarizeCodexTranscript(
 ): AgentMessageSummaries {
   const lastUser = [...entries]
     .reverse()
-    .find((entry) => entry.kind === "user");
+    .find((entry) => entry.kind === "user" && !entry.internal);
   const lastAssistant = [...entries]
     .reverse()
-    .find((entry) => entry.kind === "assistant");
+    .find((entry) => entry.kind === "assistant" && !entry.internal);
   const summary: AgentMessageSummaries = {};
   if (lastUser) {
     summary.lastUserMessageSummary = summarizeMessageText(lastUser.text);

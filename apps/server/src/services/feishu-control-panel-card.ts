@@ -1,6 +1,7 @@
 import type { FeishuControlPanelCardInput } from "./feishu-control-panel-service.js";
 
 interface ControlPanelCardInput {
+  workspaceEnabled?: boolean;
   panelId: string;
   options: Array<{ value: string; label: string }>;
   truncated?: boolean;
@@ -100,7 +101,7 @@ export function buildFeishuControlPanelCard(input: ControlPanelCardInput) {
         {
           tag: "input",
           name: "prompt",
-          required: true,
+          required: !input.workspaceEnabled,
           label: plain("发送指令"),
           placeholder: plain(
             "输入指令，最多 1000 字；长指令可继续回复原通知卡片。",
@@ -118,6 +119,18 @@ export function buildFeishuControlPanelCard(input: ControlPanelCardInput) {
           type: "primary_filled",
           width: "fill",
         },
+        ...(input.workspaceEnabled
+          ? [
+              {
+                tag: "button",
+                name: `kanban_inspect_${input.panelId}`,
+                form_action_type: "submit",
+                text: plain("查看所选会话 / 记录 / 文件"),
+                type: "default",
+                width: "fill",
+              },
+            ]
+          : []),
       ],
     });
   } else {

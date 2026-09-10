@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const USER_ID_PATTERN = /^ou_[A-Za-z0-9_-]+$/;
 const MESSAGE_ID_PATTERN = /^om_[A-Za-z0-9_-]+$/;
@@ -14,6 +17,7 @@ export interface FeishuControlDelivery {
 }
 
 interface CommandOptions {
+  cwd?: string;
   encoding: "utf8";
   maxBuffer: number;
   timeout: number;
@@ -132,6 +136,68 @@ export class FeishuControlMessenger {
       throw new Error("Feishu control message delivery failed");
     }
     await this.#send(userId, "text", { text }, idempotencyKey);
+  }
+
+  async sendFile(
+    userId: string,
+    name: string,
+    data: Buffer,
+    idempotencyKey: string,
+  ): Promise<void> {
+    assertAllowedUserId(userId, this.#allowedUserId);
+    assertIdempotencyKey(idempotencyKey);
+    if (
+      !name ||
+      /^[.\-]/u.test(name) ||
+      /[/\\\u0000-\u001f\u007f]/u.test(name) ||
+      Buffer.byteLength(name) > 200 ||
+      data.length > 10 * 1024 * 1024
+    ) {
+      throw new Error("Feishu control message delivery failed");
+    }
+    const directory = await mkdtemp(
+      path.join(tmpdir(), "kanban-feishu-export-"),
+    );
+    try {
+      await writeFile(path.join(directory, name), data, {
+        mode: 0o600,
+        flag: "wx",
+      });
+      const { stdout } = await this.#runCommand(
+        this.#binary,
+        [
+          "im",
+          "+messages-send",
+          "--as",
+          "bot",
+          "--format",
+          "json",
+          "--user-id",
+          userId,
+          "--file",
+          `./${name}`,
+          "--idempotency-key",
+          idempotencyKey,
+        ],
+        {
+          cwd: directory,
+          encoding: "utf8",
+          maxBuffer: MAX_OUTPUT_BUFFER_BYTES,
+          timeout: COMMAND_TIMEOUT_MS,
+          windowsHide: true,
+          env: {
+            ...process.env,
+            LARKSUITE_CLI_NO_UPDATE_NOTIFIER: "1",
+            LARKSUITE_CLI_NO_SKILLS_NOTIFIER: "1",
+          },
+        },
+      );
+      normalizeDelivery(stdout);
+    } catch {
+      throw new Error("Feishu control message delivery failed");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   }
 
   async #send(

@@ -245,9 +245,10 @@ test("notifies every structured node-labelled Codex turn even when the terminal 
     activeAgentSessionId: "session-1",
     updatedAt: "2026-09-01T10:00:00.000Z",
   });
-  let completion = {
+  let completion: FeishuCompletionObservation = {
     completionId: "turn-existing",
     content: "服务启动前已经完成的回答",
+    userQuestion: "旧的问题",
     completedAt: new Date(Date.now() - 60_000).toISOString(),
   };
   const sent: FeishuCompletionEvent[] = [];
@@ -280,6 +281,7 @@ test("notifies every structured node-labelled Codex turn even when the terminal 
     completion = {
       completionId: "turn-one",
       content: "第一条完整回答",
+      userQuestion: "第一条用户问题",
       completedAt: "2026-09-01T10:00:05.000Z",
     };
     source.emitSession({
@@ -291,6 +293,7 @@ test("notifies every structured node-labelled Codex turn even when the terminal 
     completion = {
       completionId: "turn-two",
       content: "第二条完整回答",
+      userQuestion: "第二条用户问题",
       completedAt: "2026-09-01T10:00:08.000Z",
     };
     source.emitSession({
@@ -319,6 +322,10 @@ test("notifies every structured node-labelled Codex turn even when the terminal 
       ],
     );
 
+    assert.deepEqual(
+      sent.map((event) => event.userQuestion),
+      ["第一条用户问题", "第二条用户问题"],
+    );
     source.emitSession(makeNodeTmuxSession("idle"));
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
     assert.equal(sent.length, 2);
@@ -338,7 +345,7 @@ test("suppresses Goal continuation completions until the Goal reaches its final 
     activeAgentSessionId: "session-1",
     updatedAt: "2026-09-01T10:00:00.000Z",
   });
-  let completion = {
+  let completion: FeishuCompletionObservation = {
     completionId: "turn-existing",
     content: "启动前的回答",
     completedAt: "2026-09-01T09:59:00.000Z",
@@ -386,6 +393,7 @@ test("suppresses Goal continuation completions until the Goal reaches its final 
     assert.equal(sent.length, 0);
 
     completion = {
+      codexThreadId: "codex-thread-goal-12345678",
       completionId: "turn-goal-final",
       content: "Goal 最终结果",
       completedAt: "2026-09-01T10:00:10.000Z",
@@ -399,10 +407,17 @@ test("suppresses Goal continuation completions until the Goal reaches its final 
 
     assert.deepEqual(
       sent.map((event) => ({
+        codexThreadId: event.codexThreadId,
         completionId: event.completionId,
         summary: event.summary,
       })),
-      [{ completionId: "turn-goal-final", summary: "Goal 最终结果" }],
+      [
+        {
+          codexThreadId: "codex-thread-goal-12345678",
+          completionId: "turn-goal-final",
+          summary: "Goal 最终结果",
+        },
+      ],
     );
   } finally {
     stop();
@@ -634,6 +649,8 @@ test("script sender uses a fixed executable and Kanban delivery mode without a s
     summary: "已经完成",
     completedAt: "2026-09-01T10:30:00.000Z",
     completionId: "turn-structured-1",
+    codexThreadId: "codex-thread-12345678",
+    userQuestion: "帮我完成这个功能",
   });
 
   assert.equal(calls.length, 1);
@@ -648,7 +665,10 @@ test("script sender uses a fixed executable and Kanban delivery mode without a s
     "agent-kind": "codex",
     "display-name": "现有任务",
     "last-assistant-message": "已经完成",
+    "user-question": "帮我完成这个功能",
+    "records-available": true,
   });
+  assert.doesNotMatch(calls[0]?.args[2] ?? "", /codex-thread-12345678/);
   assert.equal(calls[0]?.options.timeout, 300_000);
   assert.deepEqual(delivery, {
     messages: [{ messageId: "om_notice", chatId: "oc_private" }],
