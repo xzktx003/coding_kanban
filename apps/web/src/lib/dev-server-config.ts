@@ -25,6 +25,21 @@ function parsePort(
   return parsed;
 }
 
+function formatRedirectHostname(localAddress: string | undefined): string {
+  const normalized = (localAddress || "127.0.0.1").replace(/^::ffff:/, "");
+  return normalized.includes(":") ? `[${normalized}]` : normalized;
+}
+
+export function resolveHttpsFallbackRedirectLocation(
+  requestUrl: string | undefined,
+  localAddress: string | undefined,
+  httpsPort: number,
+): string {
+  const parsedPath = new URL(requestUrl || "/", "http://fallback.local");
+  const hostname = formatRedirectHostname(localAddress);
+  return `https://${hostname}:${httpsPort}${parsedPath.pathname}${parsedPath.search}`;
+}
+
 function resolveBackendPort(env: Record<string, string | undefined>): number {
   if (env.WEB_BACKEND_PORT?.trim()) {
     return parsePort(env.WEB_BACKEND_PORT, 4000, "WEB_BACKEND_PORT");

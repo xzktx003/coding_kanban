@@ -1,13 +1,15 @@
 import { X509Certificate } from "node:crypto";
 import { readFileSync } from "node:fs";
 import http from "node:http";
-import https from "node:https";
 import { resolve } from "node:path";
 
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
-import { resolveWebDevConfig } from "./src/lib/dev-server-config";
+import {
+  resolveHttpsFallbackRedirectLocation,
+  resolveWebDevConfig,
+} from "./src/lib/dev-server-config";
 import {
   VSCODE_HTTPS_CA_DOWNLOAD_PATH,
   VSCODE_SERVICE_WORKER_PROBE_PATH,
@@ -105,10 +107,9 @@ function vscodeWebviewHttpsSupportPlugin(caCertificate: Buffer | null): Plugin {
   };
 }
 
-// Vite does not natively support listening on both HTTP and HTTPS simultaneously.
-// This plugin adds a second HTTP server when HTTPS is enabled, so both protocols
-// are available (required for browser notifications on a secure origin while
-// keeping the old HTTP URL as a fallback).
+// Vite does not natively listen on HTTP and HTTPS simultaneously. Keep the
+// adjacent HTTP port as a redirect-only convenience; terminal connectivity on
+// the HTTPS origin has its own same-origin stream fallback when WSS cannot open.
 function httpFallbackPlugin(): Plugin {
   return {
     name: "http-fallback",
@@ -118,11 +119,8 @@ function httpFallbackPlugin(): Plugin {
         return;
       }
 
-      // Return a post hook that runs after all middlewares are set up
       return () => {
-        // Wait for server to be fully ready before starting HTTP fallback
         setTimeout(() => {
-          // Get the actual port from the server's address
           const serverAddress = server.httpServer?.address?.();
           if (!serverAddress || typeof serverAddress === "string") {
             server.config.logger.error("HTTP fallback: server not ready");
@@ -130,34 +128,21 @@ function httpFallbackPlugin(): Plugin {
           }
 
           const httpsPort = serverAddress.port;
-          const httpPort = httpsPort - 1; // HTTP uses port - 1
+          const httpPort = httpsPort - 1;
           const host = httpConfig.host;
 
-          const httpServer = http.createServer((req, res) => {
-            // Forward HTTP requests to the HTTPS server using https.request
-            const options = {
-              hostname: "127.0.0.1",
-              port: httpsPort,
-              path: req.url,
-              method: req.method,
-              headers: req.headers,
-              rejectUnauthorized: false, // Allow self-signed certs
-            };
-
-            const proxyReq = https.request(options, (proxyRes) => {
-              res.writeHead(proxyRes.statusCode ?? 200, proxyRes.headers);
-              proxyRes.pipe(res, { end: true });
-            });
-
-            proxyReq.on("error", (err) => {
-              server.config.logger.error(
-                `HTTP fallback proxy error: ${err.message}`,
-              );
-              res.writeHead(502);
-              res.end("Bad Gateway");
-            });
-
-            req.pipe(proxyReq, { end: true });
+          const httpServer = http.createServer((request, response) => {
+            response.statusCode = 308;
+            response.setHeader("cache-control", "no-store");
+            response.setHeader(
+              "location",
+              resolveHttpsFallbackRedirectLocation(
+                request.url,
+                request.socket.localAddress,
+                httpsPort,
+              ),
+            );
+            response.end();
           });
 
           httpServer.on("error", (err: Error) => {

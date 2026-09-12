@@ -47,8 +47,8 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 状态数量由四列列头统一展示；筛选行保留已隐藏会话入口，不重复显示状态统计。
 - 已隐藏会话进入隐藏抽屉，可以恢复或删除。
 - 双击卡片进入聚焦视图。
-- 默认轻量预览模式下，卡片和聚焦右侧栏显示轻量文本预览；用户可从顶栏切换回完整小终端预览。
-- 四列在桌面端并排、窄屏纵向排列；大规模且未启用用户分组时继续虚拟化卡片，默认轻量预览不会为每张卡片创建真实终端 WebSocket。
+- 卡片和聚焦右侧栏固定显示轻量文本预览，不再提供批量恢复完整小终端的入口。
+- 四列在桌面端并排、窄屏纵向排列；大规模且未启用用户分组时继续虚拟化卡片，卡片不会为每张会话创建真实终端 WebSocket。
 - 聚焦视图可以直接输入主终端，并在侧栏保留其它会话上下文。
 - 聚焦视图支持单屏、左右双屏、上下双屏、左中右三屏、四屏、六屏、八屏终端监控；多窗格可以同时观察多个真实终端，但输入所有权始终只有一个“输入中”窗格，不做广播输入。
 - 每个监控窗格通过分组会话切换器选择内容：弹层复用看板现有分组顺序和稳定分类色，显示组内数量、会话状态、当前项及其他窗格占用编号；分组标题可独立折叠/展开并持久化，且不受主页看板或聚焦侧栏折叠状态影响。已占用项不可重复选择，未分组会话自动归入独立分区，长列表由弹层内部滚动。
@@ -60,11 +60,11 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 顶栏分组展示：左侧是“电脑端 Coding Kanban”、会话数量徽标和“手机端 Coding Kanban”切换入口，中间保留新建会话、扫描、文件、VS Code 等高频入口，右侧提供统一“设置”、全屏和折叠入口。
 - 顶栏右侧常驻“终端字号”滑杆，可在 10px 到 24px 之间拖动调整所有内置 xterm 终端及“完整记录”正文的字号。
 - 手机端页面标题区对应显示“手机端 Coding Kanban”，并提供“电脑端 Coding Kanban”切换入口和 Agent 完成通知开关。
-- `扫描` 菜单收纳扫描 tmux 和扫描会话；`设置` 面板以侧栏分类收纳“工具 / 资源调节 / 飞书通知”。工具包含操作提示和当前浏览器完成通知，资源调节包含终端预览模式、VS Code 省内存/保持状态、释放 VS Code 缓存和资源诊断，飞书通知分别控制所有已登记看板任务的后端完成提醒与私聊回复续跑。顶栏总会话数只在桌面宽度展示，900px 及以下隐藏该统计以给“电脑端 / 手机端 Coding Kanban”切换标题留出空间，连接异常提示不受影响。
+- `扫描` 菜单收纳扫描 tmux 和扫描会话；`设置` 面板以侧栏分类收纳“工具 / 资源调节 / 飞书通知”。工具包含操作提示和当前浏览器完成通知，资源调节包含完整记录缓存、VS Code 省内存/保持状态、释放 VS Code 缓存和资源诊断，飞书通知分别控制所有已登记看板任务的后端完成提醒与私聊回复续跑。顶栏总会话数只在桌面宽度展示，900px 及以下隐藏该统计以给“电脑端 / 手机端 Coding Kanban”切换标题留出空间，连接异常提示不受影响。
 - 顶栏可折叠；折叠状态保存在 `localStorage` 的 `agent-console-layout`。
 - 会话分组配置保存在 `localStorage` 的 `coding-kanban-session-groups-v1`，两处桌面看板视图共享，当前不做跨浏览器同步；分组颜色按配置顺序稳定分配，前 12 个使用醒目分类色，更多分组继续生成不同的高对比 HSL 色值；assignment 同时保存稳定会话和安全运行身份别名，以便重启后恢复归属。
-- 设置的“资源调节”分类提供终端预览模式按钮：`轻量预览：开` 为默认省资源模式，`完整预览` 恢复旧版小终端模式。
-- 设置的“资源调节”分类提供 `资源诊断` 面板，打开时每秒刷新浏览器侧资源指标与后端诊断：xterm/终端视图数量、终端 WebSocket 数、会话快照吞吐、终端实时流吞吐、终端历史缓冲裁剪状态、VS Code iframe 当前/隐藏数量、主线程长任务、VS Code 代理 HTTP/WS 吞吐和 Chromium JS heap；面板会给出当前压力源判读，用于区分完整预览、多终端 WebSocket、快照频率、活跃终端输出、终端 replay 裁剪、隐藏 VS Code iframe、code-server 代理流量和真实 retained-object 泄漏。
+- 设置的“资源调节”分类提供完整记录缓存按钮：节省内存时最多保留 90 条已加载消息，保留更多时最多保留 300 条；两种模式都不会让看板卡片或聚焦侧栏挂载真实终端。
+- 设置的“资源调节”分类提供 `资源诊断` 面板，打开时每秒刷新浏览器侧资源指标与后端诊断：xterm/终端视图数量、终端 WebSocket 数、会话快照吞吐、终端实时流吞吐、终端历史缓冲裁剪状态、VS Code iframe 当前/隐藏数量、主线程长任务、VS Code 代理 HTTP/WS 吞吐和 Chromium JS heap；面板会给出当前压力源判读，用于区分卡片区域意外挂载的 xterm、多终端 WebSocket、快照频率、活跃终端输出、终端 replay 裁剪、隐藏 VS Code iframe、code-server 代理流量和真实 retained-object 泄漏。
 - 设置的“工具”分类中的“操作提示”弹出以下提示：
   - 双击卡片放大
   - `Alt+Q` 返回宫格
@@ -136,7 +136,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 ### 终端和 WebSocket
 
-聚焦主终端由 xterm.js 渲染，后端通过 `node-pty` 和 WebSocket 驱动。终端预览模式默认使用轻量文本预览，宫格卡片和聚焦右侧栏不创建真实 xterm 实例，也不打开 `/terminal` WebSocket；用户可从顶栏切换到完整预览模式，恢复旧版小终端行为。聚焦视图通过一个 `屏幕布局` 菜单提供单屏、左右双屏、上下双屏、左中右三屏、四屏、六屏和八屏监控布局，用于显式打开最多 8 个实时终端窗格。响应式重排以主终端容器而非浏览器视口为基准，多列结构保持到容器小于 `720px` 才切换单列，避免六屏在仍可用的桌面宽度下过早变成六行。单列模式不按窗格数继续均分高度：双屏/三屏窗格保持容器全高，四/六/八屏窗格保持容器半高，超出部分由终端布局自己的纵向滚动条浏览。
+聚焦主终端由 xterm.js 渲染，后端通过 `node-pty` 和 WebSocket 驱动。宫格卡片和聚焦右侧栏固定使用轻量文本预览，不创建真实 xterm 实例，也不打开 `/terminal` WebSocket；只有用户进入聚焦会话、显式打开多屏监控或进入手机“当前会话”时才按需建立终端连接。聚焦视图通过一个 `屏幕布局` 菜单提供单屏、左右双屏、上下双屏、左中右三屏、四屏、六屏和八屏监控布局，用于显式打开最多 8 个实时终端窗格。响应式重排以主终端容器而非浏览器视口为基准，多列结构保持到容器小于 `720px` 才切换单列，避免六屏在仍可用的桌面宽度下过早变成六行。单列模式不按窗格数继续均分高度：双屏/三屏窗格保持容器全高，四/六/八屏窗格保持容器半高，超出部分由终端布局自己的纵向滚动条浏览。
 
 除自由槽位排列外，`屏幕布局` 菜单还支持选择一个会话分组进行分组排列。分组排列由当前 `SessionGroupState` 投影出稳定的组窗格 ID，一次显示该组全部会话；单屏选项在该模式下禁用，超过所选列数的窗格以连续网格行向下扩展。自由排列的窄屏单列和分组排列共用滚轮路由：只要监控布局存在纵向溢出，普通滚轮就由外层监控容器在 `requestAnimationFrame` 中合并 delta 后滚动布局，避免每个触控板事件重复触发滚动动画；按住 Shift/⇧ 滚轮则保留给当前 xterm 的内部历史，Ctrl/⌘ 组合不被布局捕获。分组模式下标题栏不允许拖拽换位，窗格会话切换器只接收当前组候选；选择已显示会话后显式提供“跳到对应位置”和“与当前位置交换”，前者保持排列并平滑滚动到目标，后者交换源/目标的视觉位置并让目标取得唯一输入权。窗格 key 始终绑定稳定 session ID，因此换位只移动既有终端节点，不重建 xterm。自由排列槽位、分组排列选择和各组自定义顺序独立持久化，刷新后保留交换结果，切回自由排列时保留原有手动工作区。
 
@@ -150,20 +150,20 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 每个仍挂载的实时 `TerminalView` 在终端 WebSocket 异常关闭后使用 250ms 起步、最大 5 秒的指数退避重建连接；连接在 3 秒内未完成握手也会主动关闭并进入同一恢复链。新连接完成 replay 后才重新开放 stdin，并重新同步 resize 和焦点。组件卸载会取消待执行的重连，避免隐藏终端或旧会话产生后台连接。
 - 手机终端继续由输入框和快捷键通过既有 stdin 接口驱动，不让 xterm 的隐藏输入框长期抢占软键盘焦点。由于 tmux replay 只有屏幕内容和最终坐标、不一定包含 xterm 用来初始化光标的控制序列，触控监控终端在 `open` 后通过一次同步 `focus → blur` 初始化 xterm 光标，再归还挂载前仍有效的页面焦点；活动与失焦光标都使用高对比度下划线，因此用户用方向键调整已粘贴文字时仍能看到 TUI 当前编辑位置。桌面终端保持块状活动光标和轮廓失焦光标。
 - Codex 图片消息接口：`POST /api/agent-sessions/:id/image-message` 使用 `multipart/form-data` 接收一张图片和说明文字。浏览器只提交 Kanban session ID，不提交主机、线程 ID、执行路径或临时路径；后端从 registry 读取可信会话元数据，本地 tmux 复用完整记录的活动 pane 定位逻辑得到精确 Codex thread，远端会话使用已登记的 Codex session ID。接口将单张图片限制为 10 MB，并按文件头只接受 PNG、JPEG、WebP。电脑端终端通过 xterm 自定义按键处理器把 `Ctrl/Cmd+V` 交还浏览器：浏览器捕获阶段同时从 `DataTransfer.files` 和 `DataTransfer.items` 提取图片并打开确认窗口，文本剪贴板则继续由 xterm 的原生 paste 事件发送，因此不会把图片粘贴快捷键作为控制字符交给远端 Codex、触发不可达的服务端 X11 剪贴板。`CodexImageMessageService` 在本机创建权限为 `0600` 的系统临时文件，或经已登记 SFTP 通道写入远端用户缓存目录，随后优先以参数数组执行本机 `codex queue --thread <id> --message <text> -i <path>`，远端则通过经过 shell 引号保护的 SSH 命令执行；多行说明先编码后在远端还原，避免换行进入 SSH command。部分 Codex CLI 版本虽在帮助中声明 `queue -i`、运行时却拒绝图片附件；服务会识别该明确错误并自动改投包含可信绝对路径的文字消息，使同一 Codex 通过图片查看工具读取，按本机或 SSH 目标缓存能力结果，避免每次重复失败探测。原生附件投递后立即清理；路径回退投递后延迟最多 24 小时清理，让异步对话有时间读取；失败则立即清理。附件不写入项目目录、会话快照或完整记录接口。第一版只接入电脑端聚焦页，粘贴图片和文件选择共用同一预览/确认窗口，并提供显式取消入口。
-- 完整记录 HTTP 接口：`GET /api/agent-sessions/:id/transcript?limit=30&cursor=<byte-offset>`。本机会话根据 registry 中可信元数据访问本机 `~/.codex/sessions`，远端会话则根据 registry 中的 `sshTarget` 通过 SFTP 访问目标主机对应目录；两者都不接受客户端文件路径，也不会在远端失败时回退到本机历史。服务端从 JSONL 尾部按有界字节窗口向前扫描，只解析足够组成当前页的 user/assistant message 与非 `exec` 工具记录，并返回下一页字节游标，不再全量读取大型历史。本地 tmux 会先校验 Kanban PTY 对应的 tmux client PID；client 存在或 Kanban 正在重连时，都读取该 tmux session 当前活动 pane 的 PID，并以该 pane 的 `/proc/<pane_pid>/cwd` 覆盖卡片首次发现时可能过期的工作目录；只有 tmux 查询失败才使用固定 pane、既有 `agentSessionId` 或工作目录兜底。随后只读遍历该 pane 的 `/proc` 子进程和已打开文件，从对应 Codex 进程持有的 JSONL 中选择当前目录一致、非 subagent 的顶层 session。新 Codex 短时关闭 rollout 文件句柄时，仅在进程树明确包含 Codex 的前提下按当前 pane 目录回退到最新 rollout。解析成功后把精确 ID 回写会话绑定，Codex 在同一 tmux 内重启时也会重新识别。活动 pane 没有 Codex 时不回退到上一个 pane 或同目录最近记录。多屏聚焦页不再保存打开瞬间的会话对象，只保存当前打开的全局侧栏工具；电脑端完整记录作为一种 `SidePanelTool` 复用 `.file-browser-shell` 和 `SidePanelView`，会话始终由当前活动窗格派生并以会话 ID 作为 React key，活动窗格变化会卸载旧请求视图、重新读取新会话。记录内容组件支持 `panel`、`dialog` 和独立 `fullscreen` 呈现：桌面使用可调宽、可折叠的左侧面板，也可通过应用级 Portal 进入独立全屏阅读层；全屏层锁定页面滚动、把键盘焦点限制在记录操作内，支持 `Esc` 退出并将焦点还给原入口。面板和全屏正文都设置终端键盘隔离边界，指针进入正文时让阅读面持有非输入焦点；`TerminalView` 将该边界视为受保护外部焦点，并在浏览器存在非折叠文字选区时停止被动焦点修复。退出记录时把全局侧栏工具切回当前会话的文件系统；手机继续使用 Portal 模态弹窗。记录打开期间还会低频探测返回的 session ID，实际切换 tmux pane 后自动替换历史。xterm helper textarea 被视为终端内容而非外部编辑器，点击它同样更新 `activeSlotId`。解析层忽略 developer/system/reasoning，并在倒序扫描时把工具调用与输出作为不可拆分记录组，因此跨页仍能同时过滤 `exec` 调用和对应输出；前端按时间正序展示，最新记录位于底部，首次定位到底部，向上滚动接近顶部自动加载更早页并在加载后保持滚动锚点。用户与 Codex 消息复用按需加载、memo 化的安全 Markdown/GFM/KaTeX 渲染器；渲染器代码块首次按需加载后，当前服务端分页中的全部消息会一次性渲染，不再为每条记录创建 IntersectionObserver 或等待其接近视口。轻量预览最多保留连续 90 条、完整预览最多保留 300 条；继续向前浏览时释放窗口外较新记录，刷新可回到最新。工具输出仍为等宽原文，两类记录正文共享全局终端字号。终端继续承担实时交互；电脑端完整记录侧栏适合与右侧终端并行阅读，手机端完整记录弹窗承担小屏集中浏览。
+- 完整记录 HTTP 接口：`GET /api/agent-sessions/:id/transcript?limit=30&cursor=<byte-offset>`。本机会话根据 registry 中可信元数据访问本机 `~/.codex/sessions`，远端会话则根据 registry 中的 `sshTarget` 通过 SFTP 访问目标主机对应目录；两者都不接受客户端文件路径，也不会在远端失败时回退到本机历史。服务端从 JSONL 尾部按有界字节窗口向前扫描，只解析足够组成当前页的 user/assistant message 与非 `exec` 工具记录，并返回下一页字节游标，不再全量读取大型历史。本地 tmux 会先校验 Kanban PTY 对应的 tmux client PID；client 存在或 Kanban 正在重连时，都读取该 tmux session 当前活动 pane 的 PID，并以该 pane 的 `/proc/<pane_pid>/cwd` 覆盖卡片首次发现时可能过期的工作目录；只有 tmux 查询失败才使用固定 pane、既有 `agentSessionId` 或工作目录兜底。随后只读遍历该 pane 的 `/proc` 子进程和已打开文件，从对应 Codex 进程持有的 JSONL 中选择当前目录一致、非 subagent 的顶层 session。新 Codex 短时关闭 rollout 文件句柄时，仅在进程树明确包含 Codex 的前提下按当前 pane 目录回退到最新 rollout。解析成功后把精确 ID 回写会话绑定，Codex 在同一 tmux 内重启时也会重新识别。活动 pane 没有 Codex 时不回退到上一个 pane 或同目录最近记录。多屏聚焦页不再保存打开瞬间的会话对象，只保存当前打开的全局侧栏工具；电脑端完整记录作为一种 `SidePanelTool` 复用 `.file-browser-shell` 和 `SidePanelView`，会话始终由当前活动窗格派生并以会话 ID 作为 React key，活动窗格变化会卸载旧请求视图、重新读取新会话。记录内容组件支持 `panel`、`dialog` 和独立 `fullscreen` 呈现：桌面使用可调宽、可折叠的左侧面板，也可通过应用级 Portal 进入独立全屏阅读层；全屏层锁定页面滚动、把键盘焦点限制在记录操作内，支持 `Esc` 退出并将焦点还给原入口。面板和全屏正文都设置终端键盘隔离边界，指针进入正文时让阅读面持有非输入焦点；`TerminalView` 将该边界视为受保护外部焦点，并在浏览器存在非折叠文字选区时停止被动焦点修复。退出记录时把全局侧栏工具切回当前会话的文件系统；手机继续使用 Portal 模态弹窗。记录打开期间还会低频探测返回的 session ID，实际切换 tmux pane 后自动替换历史。xterm helper textarea 被视为终端内容而非外部编辑器，点击它同样更新 `activeSlotId`。解析层忽略 developer/system/reasoning，并在倒序扫描时把工具调用与输出作为不可拆分记录组，因此跨页仍能同时过滤 `exec` 调用和对应输出；前端按时间正序展示，最新记录位于底部，首次定位到底部，向上滚动接近顶部自动加载更早页并在加载后保持滚动锚点。用户与 Codex 消息复用按需加载、memo 化的安全 Markdown/GFM/KaTeX 渲染器；渲染器代码块首次按需加载后，当前服务端分页中的全部消息会一次性渲染，不再为每条记录创建 IntersectionObserver 或等待其接近视口。记录缓存的“节省内存”模式最多保留连续 90 条，“保留更多”模式最多保留 300 条；继续向前浏览时释放窗口外较新记录，刷新可回到最新。工具输出仍为等宽原文，两类记录正文共享全局终端字号。终端继续承担实时交互；电脑端完整记录侧栏适合与右侧终端并行阅读，手机端完整记录弹窗承担小屏集中浏览。
 - 远端完整记录是同一 transcript 接口的目标主机适配：后端只使用 registry 中的 `sshTarget`，通过 `SftpService` 读取远端 Codex JSONL 的元数据和尾部窗口；不把远端路径作为浏览器参数执行，也不在远端失败时回退到本机历史。
 - 终端字号由 `terminal-font-size` 本地存储项持久化，默认 14px；滑杆拖动过程中只更新控件显示，鼠标松开、键盘调整结束或失焦提交后才更新已有 `TerminalView` 的 `fontSize` 并触发 fit/resize，不需要重建 WebSocket。
-- 会先发送 scrollback replay，再发送 `replay-complete`；手机终端连接携带服务端校验的 `replayBytes=262144`，只回放最近 256 KiB，桌面端保持配置允许的完整回放。
+- 会先发送 scrollback replay，再发送 `replay-complete`；手机终端连接携带服务端校验的 `replayBytes=262144`，只回放最近 256 KiB，桌面端请求并由服务端强制限制为最近 512 KiB。
 - PTY 重连沿用稳定 session ID，但每次生成独立 runtime handle；只有当前 handle 可以追加输出、删除运行时或把会话标记为退出。被替换 PTY 的迟到 data/exit 回调必须忽略，避免并发恢复或手动重连后新 PTY 被旧回调误下线。
-- live PTY replay 上限默认 4 MiB，可通过 `TERMINAL_SCROLLBACK_BYTES` 调整；tmux observe/refresh 默认捕获最近 20000 行，可通过 `TERMINAL_TMUX_CAPTURE_LINES` 调整；registry fallback 默认保留 5000 条，可通过 `TERMINAL_REGISTRY_OUTPUT_ENTRIES` 调整；浏览器 xterm 默认保留 20000 行，可通过 `VITE_TERMINAL_SCROLLBACK_LINES` 调整。
+- live PTY 在服务端的历史保留上限默认 4 MiB，可通过 `TERMINAL_SCROLLBACK_BYTES` 调整，但单次新连接最多传输其中最近 512 KiB；tmux observe/refresh 默认捕获最近 20000 行，可通过 `TERMINAL_TMUX_CAPTURE_LINES` 调整；registry fallback 默认保留 5000 条，可通过 `TERMINAL_REGISTRY_OUTPUT_ENTRIES` 调整；浏览器 xterm 默认保留 20000 行，可通过 `VITE_TERMINAL_SCROLLBACK_LINES` 调整。
 - replay 阶段会缓冲 live frame，避免新输出和历史输出乱序。
 - 前端会在 replay complete 后解锁 stdin；8 秒兜底避免永久无法输入。
 - 后端只清理会污染提示符的 Secondary DA 与 OSC 色彩回复；其余 live DA/DSR/CPR 按终端输出查询类型匹配后写回 PTY。输出 `CSI c`、`CSI 5n`、`CSI 6n` 后，普通 stdin 会在 250ms 上限内等待对应回复，陈旧或类型不符的回复直接丢弃，避免 `5Rnode` 这类协议残片进入 shell。
 - 支持 resize 消息和 binary 消息，binary 用于 tmux 鼠标等二进制事件。
 - 前端 `TerminalView` 支持 OSC 52 剪贴板写入，允许 tmux copy-mode、SSH 会话或 CLI 工具把当前终端 pane 内复制内容写入浏览器剪贴板；该能力只消费终端输出中的 clipboard target 请求，不改变 stdin、resize 或 tmux 鼠标事件转发。
-- 轻量预览模式下，默认只有当前聚焦主终端发送 resize 和 stdin；非活跃区域依赖会话 `outputPreview` 展示轻量文本预览。服务端只用包含足够可读字母、数字或中日韩字符的输出块更新预览，并对受管 tmux 使用更严格的碎片阈值；纯光标、擦除和边框绘制块仍参与活动检测但不会覆盖已有可读文本。前端继续清理 ANSI 与终端字符集切换序列。
+- 默认只有当前聚焦主终端发送 resize 和 stdin；非活跃卡片区域固定依赖会话 `outputPreview` 展示轻量文本预览。服务端只用包含足够可读字母、数字或中日韩字符的输出块更新预览，并对受管 tmux 使用更严格的碎片阈值；纯光标、擦除和边框绘制块仍参与活动检测但不会覆盖已有可读文本。前端继续清理 ANSI 与终端字符集切换序列。
 - 多终端监控模式会按所选屏幕布局显式挂载 1、2、3、4、6 或 8 个实时 `TerminalView`；所有窗格都能接收后端输出并保持实时观察，但只有当前“输入中”窗格开启 stdin、焦点修复和终端输入所有权，避免广播输入。`activeSlotId` 是当前输入目标，任何会改变它的窗格点击、会话替换、拖放、关闭补位或侧栏切换都会同步 App 级 `focusedId`，保证标题和文件/VS Code 工具不会继续引用旧会话；重复选择非活动窗格中已经显示的当前项仍是无操作。
-- 完整预览模式下，非活跃卡片和右侧栏会恢复只读 `TerminalView`，因此会重新建立终端 WebSocket，适合需要实时小窗预览的场景。
+- 终端连接的初始回放由客户端和服务端双重限制：桌面聚焦/监控终端最多读取最近 512 KiB，手机终端最多读取最近 256 KiB；连接超时后终端保留明确的自动重连状态和“立即重试”入口，而不是被加载遮罩永久覆盖。
 - 前端资源诊断会记录 `/ws/agent-sessions` 会话状态消息速率和大小、`/ws/agent-sessions/:id/terminal` 实时流速率、终端 WebSocket 生命周期、DOM 中的 xterm/预览/监控窗格/VS Code iframe 数量，以及浏览器暴露的 JS heap；同时每秒按需调用 `/api/diagnostics/terminal-history` 和 `/api/diagnostics/vscode-web-proxy` 读取后端终端历史与 VS Code 代理吞吐。诊断只在面板打开时刷新，不保存历史。
 - `/ws/agent-sessions` 每次连接先发送完整 `snapshot`，此后发送仅含变化会话、删除 ID、焦点与时间戳的 `delta`；前端合并后继续向应用暴露完整列表，断线重连后重新以全量快照建立基线。后端仍对终端输出导致的状态更新做约 1 秒 trailing 合并，新建、删除、聚焦、重命名等结构性变化即时广播。
 - 本地 tmux 先用 `tmux list-clients` 将 attached client PID 与 PTY PID 精确匹配；回放可见但 attach 尚未完成时，首个输入不会误写入启动 shell，而是短暂等待或安全回退 pane adapter。确认后 attached tmux client PTY 是普通文本、快捷键、bracketed paste、鼠标协议及 `Ctrl+A` / `Ctrl+B` 前缀的唯一实时输入通道，确保输入始终跟随可见的当前 pane；tmux client 不支持 extended keys 的 CSI-u 修饰键例外用 `send-keys -l` 保留原始字节。路由器仍查询当前 `prefix` key table，记录 `command-prompt` / `confirm-before` 状态以便连接关闭、重连和恢复时用 Ctrl+C 清理残留 prompt；`status-keys vi` 的 Escape 仅切换编辑模式。
@@ -201,7 +201,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 ### 手机端终端控制页
 
-手机端入口是面向手机浏览器的专用 Agent 工作区，不复用桌面分屏和侧栏布局。默认入口为 `/?view=mobile`，并兼容 `/mobile`、`/m` 和 `#/mobile`；这样即使部署入口不支持 SPA history fallback，手机也能通过根页面 query 进入。进入后默认直接打开“当前会话”并按需挂载一个真实终端，已选终端名称和状态使用与桌面聚焦窗格一致的强调层级；底部主导航继续提供看板、活动、当前会话和项目/文件入口。看板按“需响应 / 待验收 / 执行中 / 可继续”的注意力顺序展示会话，每个状态标题是带 `aria-expanded` 的整行折叠按钮，可独立隐藏所属终端卡片而保留状态、说明、数量及展开方向；折叠集合保存在手机工作台组件状态中，底部模块切换期间保持不变。分组和卡片用稳定状态色、强调条及数量徽标形成视觉锚点；每张卡片紧凑显示结构化任务/回复、已有 Git 摘要和末尾三行轻量终端内容。所有卡片信息均来自已有 `AgentSessionRecord` 快照，不会按卡片创建 xterm、终端 WebSocket 或额外轮询。当前真实终端继续复用 `/ws/agent-sessions/:id/terminal` 输出通道和 `/api/agent-sessions/:id/stdin` 输入通道，并为手机连接增加有界回放参数。
+手机端入口是面向手机浏览器的专用 Agent 工作区，不复用桌面分屏和侧栏布局。默认入口为 `/?view=mobile`，并兼容 `/mobile`、`/m` 和 `#/mobile`；这样即使部署入口不支持 SPA history fallback，手机也能通过根页面 query 进入。进入后默认直接打开“当前会话”并按需挂载一个真实终端，已选终端名称和状态使用与桌面聚焦窗格一致的强调层级；底部主导航继续提供看板、活动、当前会话和项目/文件入口。看板按“需响应 / 待验收 / 执行中 / 可继续”的注意力顺序展示会话，每个状态标题是带 `aria-expanded` 的整行折叠按钮，可独立隐藏所属终端卡片而保留状态、说明、数量及展开方向；折叠集合保存在手机端工作台组件状态中，底部模块切换期间保持不变。分组和卡片用稳定状态色、强调条及数量徽标形成视觉锚点；每张卡片紧凑显示结构化任务/回复、已有 Git 摘要和末尾三行轻量终端内容。所有卡片信息均来自已有 `AgentSessionRecord` 快照，不会按卡片创建 xterm、终端 WebSocket 或额外轮询。当前真实终端优先复用 `/ws/agent-sessions/:id/terminal` 输出通道，并为手机连接增加有界回放参数；首次 WSS 在 3 秒内始终未能打开时，自动改用同一 HTTPS 源的 `/api/agent-sessions/:id/terminal-stream` 接收 replay 与实时输出，输入和尺寸调整继续走既有 REST 接口，不另开端口、不直连后端，也不绕过会话边界。
 
 - 当前会话页面采用单会话全屏终端：顶部显示桌面入口、当前会话状态和单实例页面内会话选择器，“完整记录 / 变更 / 文件”在同一行操作组；“文件”就地切换到当前会话的文件系统并提供“返回终端”，中间终端仅在返回后重新展示。会话列表不使用浏览器原生选择层，实时快照更新时不会重复堆叠，支持点外部或 Escape 关闭。
 - 快捷键条是单行横向滑动选择器，所有快捷键常驻而不增加二级“更多”菜单；高频的 `Esc`、`Ctrl+C`、`Enter`、`Tab`、方向键和退格前置，一次性 `Shift` 与其余组合键继续保留。方向键和退格支持短按一次，只有静止按住满 3 秒才开始串行重复；从重复键上横向滑动会先取消按键计时并交由原生滚动处理。上一笔 stdin 请求完成后才安排下一笔，避免慢网络产生松手后继续执行的积压；用户可点击末尾“说明”查看每个快捷键的作用。
@@ -384,7 +384,7 @@ memories/        仓库记忆，不是产品运行依赖
 - `TerminalPreview.tsx`：宫格卡片和聚焦右侧栏的轻量文本预览，不建立终端 WebSocket。
 - `resource-diagnostics.ts`：浏览器资源诊断采样、WebSocket 吞吐统计和压力源分类。
 - `terminal-font-size.ts`：终端字号范围、持久化和归一化逻辑。
-- `terminal-preview-mode.ts`：终端预览模式持久化，默认轻量模式，可切换完整预览。
+- `terminal-preview-mode.ts`：保留历史存储键，现用于完整记录 90/300 条缓存窗口偏好。
 - `app-update.ts`：已接受 revision、用户确认拉取基线和一次性 reload 恢复意图。
 - `terminal-workspace-state.ts`：多屏 slot、输入 slot 和关闭 slot 的版本化持久化。
 - `NewSessionDialog.tsx`：新建本地/SSH/direct/tmux 会话。
@@ -405,7 +405,7 @@ memories/        仓库记忆，不是产品运行依赖
 - `terminal-monitor-workspace-v1`：分屏模式、slot 会话、当前输入 slot 和关闭 slot。
 - `coding-kanban-accepted-revision-v1`：浏览器已接受的 source revision。
 - `terminal-font-size`：所有内置 xterm 终端共用字号，默认 `14`，范围 `10` 到 `24`。
-- `terminal-preview-mode`：终端预览模式，`lightweight` 为默认轻量预览，`full` 为旧版完整小终端预览。
+- `terminal-preview-mode`：历史兼容存储键，`lightweight` 对应记录节省内存窗口，`full` 对应保留更多记录窗口；终端卡片始终使用轻量预览。
 - `vscode-iframe-cache-mode`：VS Code iframe 缓存模式，`memory-saving` 为默认省内存模式，`preserve-state` 为最多保留最近 3 个 iframe 的保持状态模式。
 - `file-browser-preview-height`：文件浏览器内部预览高度。
 
@@ -455,9 +455,9 @@ pnpm --dir apps/server dev
 
 - 前端默认端口 8484，后端默认端口 4000。
 - 手动启动前端默认是 HTTP，访问 `http://10.30.0.22:8484/`。
-- `scripts/restart-dev.sh` 默认使用 HTTPS，地址形如 `https://10.30.0.22:8484/`；局域网内其他设备首次访问时必须信任启动日志给出的开发 CA，否则 VS Code WebView 的 Service Worker 会被浏览器拒绝。
+- `scripts/restart-dev.sh` 默认使用 HTTPS，地址形如 `https://10.30.0.22:8484/`；局域网内其他设备首次访问时应信任启动日志给出的开发 CA，否则 VS Code WebView 的 Service Worker 会被浏览器拒绝。手机终端统一保留该 HTTPS 地址；首次 WSS 无法打开时会自动切换同源 HTTPS 流。
 - 如果只启动前端，页面会打开，但 API、WebSocket、tmux、文件浏览器、VS Code Web 都不可用。
-- Vite 前端代理 `/api` 到 `http://localhost:4000`，代理 `/ws` 到 `ws://localhost:4000`。
+- Vite HTTPS 前端代理 `/api` 到 `http://localhost:4000`，代理 `/ws` 到 `ws://localhost:4000`；相邻 HTTP 端口只保留 308 跳转。终端的 HTTPS 流回退经 `/api` 同源代理访问后端，不新增公网或局域网监听端口。
 
 ### 健康检查
 

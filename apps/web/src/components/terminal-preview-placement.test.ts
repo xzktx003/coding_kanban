@@ -54,31 +54,6 @@ function collectElementTypes(
   return types;
 }
 
-function findElementByType(
-  node: ReactNode,
-  type: unknown,
-): ReactElement<Record<string, unknown>> | null {
-  if (Array.isArray(node)) {
-    for (const child of node) {
-      const match = findElementByType(child, type);
-      if (match) {
-        return match;
-      }
-    }
-    return null;
-  }
-
-  if (!isReactElement(node)) {
-    return null;
-  }
-
-  if (node.type === type) {
-    return node as ReactElement<Record<string, unknown>>;
-  }
-
-  return findElementByType(node.props.children, type);
-}
-
 describe("terminal preview placement", () => {
   it("uses lightweight preview by default in grid cards", () => {
     const element = AgentGridCard({
@@ -93,20 +68,6 @@ describe("terminal preview placement", () => {
     assert.equal(types.includes(LazyTerminalView), false);
   });
 
-  it("restores lazy terminal previews in grid cards when lightweight mode is disabled", () => {
-    const element = AgentGridCard({
-      session: makeSession(),
-      onDoubleClick: () => {},
-      onDelete: () => {},
-      onReconnect: () => {},
-      useLightweightTerminalPreview: false,
-    });
-    const types = collectElementTypes(element);
-
-    assert.equal(types.includes(TerminalPreview), false);
-    assert.equal(types.includes(LazyTerminalView), true);
-  });
-
   it("uses lightweight preview by default in focus sidebars", () => {
     const element = FocusSidebarSessionCard({
       session: makeSession({ id: "sidebar-session" }),
@@ -116,21 +77,5 @@ describe("terminal preview placement", () => {
 
     assert.equal(types.includes(TerminalPreview), true);
     assert.equal(types.includes(LazyTerminalView), false);
-  });
-
-  it("restores lazy terminal previews in focus sidebars when lightweight mode is disabled", () => {
-    const element = FocusSidebarSessionCard({
-      session: makeSession({ id: "sidebar-session" }),
-      onSwitchFocus: () => {},
-      useLightweightTerminalPreview: false,
-    });
-    const types = collectElementTypes(element);
-
-    assert.equal(types.includes(TerminalPreview), false);
-    assert.equal(types.includes(LazyTerminalView), true);
-    assert.equal(
-      findElementByType(element, LazyTerminalView)?.props.wheelPassthrough,
-      true,
-    );
   });
 });

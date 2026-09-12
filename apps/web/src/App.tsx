@@ -2004,7 +2004,6 @@ export default function App() {
               onMoveSessionToGroup={handleMoveSessionToGroup}
               onRenameSessionGroup={handleRenameSessionGroup}
               onToggleSessionGroup={handleToggleSessionGroup}
-              useLightweightTerminalPreview={useLightweightTerminalPreview}
               mobileTerminalTouchMode={mobileTerminalTouchMode}
               terminalFontSize={terminalFontSize}
               onTerminalFontSizeChange={handleTerminalFontSizeChange}
@@ -2043,9 +2042,6 @@ export default function App() {
               }
               hiddenCount={hiddenSessions.length}
               onShowHidden={() => setShowHiddenDrawer(true)}
-              useLightweightTerminalPreview={useLightweightTerminalPreview}
-              terminalFontSize={terminalFontSize}
-              onTerminalFontSizeChange={handleTerminalFontSizeChange}
             />
           )}
         </div>

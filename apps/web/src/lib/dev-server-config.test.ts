@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { resolveWebDevConfig } from "./dev-server-config";
+import {
+  resolveHttpsFallbackRedirectLocation,
+  resolveWebDevConfig,
+} from "./dev-server-config";
 
 test("uses repo port defaults when env is empty", () => {
   assert.deepEqual(resolveWebDevConfig({}), {
@@ -78,5 +81,23 @@ test("rejects ports above 65535", () => {
   assert.throws(
     () => resolveWebDevConfig({ SERVER_PORT: "70000" }),
     /SERVER_PORT must be a positive integer between 1 and 65535/,
+  );
+});
+
+test("builds an HTTPS redirect that preserves the request path and query", () => {
+  assert.equal(
+    resolveHttpsFallbackRedirectLocation(
+      "/?view=mobile&session=s-1",
+      "10.30.0.22",
+      8484,
+    ),
+    "https://10.30.0.22:8484/?view=mobile&session=s-1",
+  );
+});
+
+test("formats IPv6 redirect hosts safely", () => {
+  assert.equal(
+    resolveHttpsFallbackRedirectLocation("/health", "::1", 8484),
+    "https://[::1]:8484/health",
   );
 });

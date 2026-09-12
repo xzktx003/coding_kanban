@@ -109,6 +109,83 @@ interface LocalTmuxSocketInputStateDependencies {
   localTmuxInputRouter: Pick<LocalTmuxInputRouter, "clear">;
 }
 
+type TerminalOutputSender = (frame: string) => void;
+
+function buildTerminalControlFrame(
+  event: "replay" | "replay-complete",
+  data?: string,
+): string {
+  return JSON.stringify({
+    __agentOrchestrator: "terminal-control",
+    event,
+    data,
+  });
+}
+
+function subscribeTerminalOutput(
+  agentSessionId: string,
+  replayByteLimit: number,
+  dependencies: {
+    registry: AgentSessionRegistry;
+    ptyRuntimeManager: PtyRuntimeManager;
+  },
+  send: TerminalOutputSender,
+): (() => void) | null {
+  const { registry, ptyRuntimeManager } = dependencies;
+  let replaying = true;
+  const bufferedLiveFrames: string[] = [];
+  let unsubscribe = () => {};
+
+  if (ptyRuntimeManager.has(agentSessionId)) {
+    unsubscribe = ptyRuntimeManager.subscribe(
+      agentSessionId,
+      (data) => {
+        if (replaying) {
+          bufferedLiveFrames.push(data);
+          return;
+        }
+
+        send(data);
+      },
+      { replay: false },
+    );
+
+    const replay = takeUtf8Tail(
+      sanitizeReplayForTerminal(
+        ptyRuntimeManager.getScrollback(agentSessionId),
+      ),
+      replayByteLimit,
+    );
+    if (replay) {
+      send(buildTerminalControlFrame("replay", replay));
+    }
+  } else if (registry.has(agentSessionId)) {
+    const replay = takeUtf8Tail(
+      sanitizeReplayForTerminal(
+        registry
+          .getDetail(agentSessionId)
+          .outputEntries.map((entry) => entry.text)
+          .join(""),
+      ),
+      replayByteLimit,
+    );
+    if (replay) {
+      send(buildTerminalControlFrame("replay", replay));
+    }
+  } else {
+    return null;
+  }
+
+  send(buildTerminalControlFrame("replay-complete"));
+  replaying = false;
+  for (const frame of bufferedLiveFrames) {
+    send(frame);
+  }
+  bufferedLiveFrames.length = 0;
+
+  return unsubscribe;
+}
+
 export function createLocalTmuxSocketInputState(
   agentSessionId: string,
   dependencies: LocalTmuxSocketInputStateDependencies,
@@ -512,6 +589,86 @@ export function buildServer(options: BuildServerOptions = {}): {
     instance.get<{
       Params: { id: string };
       Querystring: { replayBytes?: string };
+    }>("/api/agent-sessions/:id/terminal-stream", (request, reply) => {
+      const { id } = request.params;
+      if (!ptyRuntimeManager.has(id) && !registry.has(id)) {
+        reply.code(404);
+        return { error: "没有找到 PTY 会话" };
+      }
+
+      const replayByteLimit = resolveTerminalReplayByteLimit(
+        request.query.replayBytes,
+        terminalHistoryConfig.terminalScrollbackBytes,
+      );
+      const response = reply.raw;
+      let closed = false;
+      let heartbeat: NodeJS.Timeout | null = null;
+      let unsubscribe = () => {};
+
+      const close = () => {
+        if (closed) {
+          return;
+        }
+        closed = true;
+        if (heartbeat) {
+          clearInterval(heartbeat);
+          heartbeat = null;
+        }
+        unsubscribe();
+      };
+
+      reply.hijack();
+      response.writeHead(200, {
+        "cache-control": "no-cache, no-transform",
+        "content-type": "application/x-ndjson; charset=utf-8",
+        "x-accel-buffering": "no",
+        "x-content-type-options": "nosniff",
+      });
+      response.flushHeaders();
+      response.once("close", close);
+
+      const send = (frame: string) => {
+        if (closed || response.destroyed) {
+          return;
+        }
+
+        // A slow or suspended browser reconnects from bounded replay instead
+        // of letting one HTTP stream retain an unbounded output queue.
+        if (response.writableLength > 1024 * 1024) {
+          response.destroy();
+          close();
+          return;
+        }
+
+        response.write(`${JSON.stringify(frame)}\n`);
+      };
+
+      const outputSubscription = subscribeTerminalOutput(
+        id,
+        replayByteLimit,
+        { registry, ptyRuntimeManager },
+        send,
+      );
+      if (!outputSubscription) {
+        response.end();
+        close();
+        return;
+      }
+      unsubscribe = outputSubscription;
+      if (closed) {
+        unsubscribe();
+        return;
+      }
+      heartbeat = setInterval(() => {
+        if (!closed && !response.destroyed) {
+          response.write("\n");
+        }
+      }, 15_000);
+    });
+
+    instance.get<{
+      Params: { id: string };
+      Querystring: { replayBytes?: string };
     }>(
       "/ws/agent-sessions/:id/terminal",
       { websocket: true },
@@ -525,64 +682,16 @@ export function buildServer(options: BuildServerOptions = {}): {
           localTmuxInputRouter,
         });
 
-        const buildTerminalControlFrame = (
-          event: "replay" | "replay-complete",
-          data?: string,
-        ) =>
-          JSON.stringify({
-            __agentOrchestrator: "terminal-control",
-            event,
-            data,
-          });
-
-        let replaying = true;
-        const bufferedLiveFrames: string[] = [];
-        let unsubscribe = () => {};
-        if (ptyRuntimeManager.has(id)) {
-          unsubscribe = ptyRuntimeManager.subscribe(
-            id,
-            (data) => {
-              if (replaying) {
-                bufferedLiveFrames.push(data);
-                return;
-              }
-
-              socket.send(data);
-            },
-            { replay: false },
-          );
-
-          const replay = takeUtf8Tail(
-            sanitizeReplayForTerminal(ptyRuntimeManager.getScrollback(id)),
-            replayByteLimit,
-          );
-          if (replay) {
-            socket.send(buildTerminalControlFrame("replay", replay));
-          }
-        } else if (registry.has(id)) {
-          const replay = takeUtf8Tail(
-            sanitizeReplayForTerminal(
-              registry
-                .getDetail(id)
-                .outputEntries.map((entry) => entry.text)
-                .join(""),
-            ),
-            replayByteLimit,
-          );
-          if (replay) {
-            socket.send(buildTerminalControlFrame("replay", replay));
-          }
-        } else {
+        const unsubscribe = subscribeTerminalOutput(
+          id,
+          replayByteLimit,
+          { registry, ptyRuntimeManager },
+          (frame) => socket.send(frame),
+        );
+        if (!unsubscribe) {
           socket.close(4004, "没有找到 PTY 会话");
           return;
         }
-        socket.send(buildTerminalControlFrame("replay-complete"));
-        replaying = false;
-
-        for (const frame of bufferedLiveFrames) {
-          socket.send(frame);
-        }
-        bufferedLiveFrames.length = 0;
 
         socket.on("message", (message: Buffer | string) => {
           const writeToRuntime = (payload: string) => {

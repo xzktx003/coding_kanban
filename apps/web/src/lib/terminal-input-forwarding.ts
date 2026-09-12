@@ -24,6 +24,22 @@ export function computeTerminalReconnectDelay(attempt: number): number {
   );
 }
 
+export type TerminalTransport = "websocket" | "http-stream";
+
+export function resolveTerminalTransportAfterDisconnect({
+  transport,
+  webSocketOpened,
+}: {
+  transport: TerminalTransport;
+  webSocketOpened: boolean;
+}): TerminalTransport {
+  if (transport === "websocket" && !webSocketOpened) {
+    return "http-stream";
+  }
+
+  return transport;
+}
+
 export function shouldAttemptTerminalInputForward({
   inputEnabled,
   terminalInputReady = true,

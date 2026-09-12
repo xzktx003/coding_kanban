@@ -877,6 +877,27 @@
 - **修复**: Codex 原生队列确认接收后，将当前用户消息原子记录为继承原卡片会话和真实 thread 的新绑定，并同时保存去重状态；直接父消息尚无继承绑定时，仅尝试飞书事件中仍有本地绑定的精确 `root_id`，让升级前已经形成的回复链也能恢复。投递失败不建立绑定，普通无绑定消息仍拒绝。
 - **测试**: `feishu-reply-command-service.test.ts` 红绿灯覆盖连续两层回复进入同一 Codex，以及直接父消息未绑定时精确回溯已绑定根消息；`feishu-reply-binding-store.test.ts` 覆盖继承绑定与去重状态原子持久化及重载恢复。
 
+### 多终端卡片拖慢代理并导致手机终端加载失败
+
+- **现象**: 会话较多时终端卡片加载越来越慢，手机“当前会话”可能长期空白或停留在加载状态。
+- **根因**: 旧的完整预览选项会让每张看板和侧栏卡片各自建立 xterm/WebSocket；桌面连接未声明回放窗口时还会一次发送最多 4 MiB 原始历史，JSON 编码后单帧更大，长期运行的 Vite 代理因此积累多 MiB 队列、`CLOSE_WAIT` 和 `EPIPE`。
+- **修复**: 看板和聚焦侧栏固定改用已有轻量文本预览，真实终端仅在聚焦、监控和手机当前会话中按需挂载；客户端默认请求最近 512 KiB、手机请求 256 KiB，服务端对缺省、非法和过大参数同样强制 512 KiB 硬上限。连接失败会退出永久加载遮罩，显示自动重连状态和“立即重试”。
+- **测试**: `terminal-preview-placement.test.ts`、`api.test.ts`、`terminal-replay-window.test.ts`、`agent-sessions.terminal-replay.test.ts`、`TerminalConnectionFeedback.test.ts` 与资源诊断测试覆盖卡片放置、客户端/服务端双重窗口、UTF-8 尾部、失败反馈和旧预览检测。
+
+### 手机当前会话已连接但终端区域不可见
+
+- **现象**: 手机端能打开“当前会话”，API 与终端 WSS 也正常，但页面看不到终端内容。
+- **根因**: 终端区域使用了 `flex: 1`，其父级 `.mobile-session-view` 却不是 flex 容器且没有可计算高度，导致真实 xterm 已挂载、回放也已到达时，承载终端的高度仍可能折叠为零。
+- **修复**: 当前会话内容区改为纵向 flex 高度链，限制外层滚动并让 session view 和 terminal surface 逐级占用剩余可视高度；看板、活动和项目页面继续保持原来的滚动布局。
+- **测试**: `MobileWorkbenchPage.test.ts` 新增手机真实终端必须具有完整 flex 高度链的红绿灯测试。
+
+### 手机能打开 HTTPS 页面但终端 WSS 持续失败
+
+- **现象**: 手机浏览器可以手动放行并打开看板 HTTPS 页面，普通 API 也正常，但当前会话一直提示“终端连接失败，正在重试”，后端看不到对应 `/ws/.../terminal` 请求。
+- **根因**: 部分手机浏览器允许用户临时放行不受系统信任的开发证书页面，却不会让同证书的 WSS 握手通过；原相邻 HTTP 端口只做 308 跳转，最终仍回到失败的 WSS 路径。
+- **修复**: 保留原 `https://<host>:8484` 入口并以 WSS 为主通道；首次 WSS 从未成功打开时，前端自动切到同源 HTTPS NDJSON 流接收受限 replay 与实时 PTY 输出，stdin/resize 复用已有 REST 接口。相邻 HTTP 端口恢复为 308 跳转，不新增后端暴露面。
+- **测试**: `api.test.ts` 覆盖同源 URL、分块和末尾无换行 NDJSON 解码；`terminal-input-forwarding.test.ts` 锁定仅“从未打开”的 WSS 才回退；`agent-sessions.terminal-replay.test.ts` 覆盖受限 replay 与实时 PTY 输出；运行态用手机视口阻断 WSS 后验证同端口 HTTPS stream 自动接管。
+
 ## 2026-08-26
 
 - 文件浏览器 SSH chmod 面板提交三位权限时返回 500 并保持弹窗：前端生成 `600`，后端校验却只接受带前导 `0` 的格式；放宽为标准三位或四位八进制权限并补充服务层测试。

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DEFAULT_INITIAL_TERMINAL_REPLAY_BYTES,
   resolveTerminalReplayByteLimit,
   takeUtf8Tail,
 } from "./terminal-replay-window.js";
@@ -10,12 +11,25 @@ test("terminal replay byte limit accepts only bounded positive integers", () => 
   assert.equal(resolveTerminalReplayByteLimit("262144", 4_194_304), 262_144);
   assert.equal(
     resolveTerminalReplayByteLimit("99999999", 4_194_304),
-    4_194_304,
+    DEFAULT_INITIAL_TERMINAL_REPLAY_BYTES,
   );
-  assert.equal(resolveTerminalReplayByteLimit("0", 4_194_304), 4_194_304);
-  assert.equal(resolveTerminalReplayByteLimit("nope", 4_194_304), 4_194_304);
-  assert.equal(resolveTerminalReplayByteLimit("1e3", 4_194_304), 4_194_304);
-  assert.equal(resolveTerminalReplayByteLimit(undefined, 4_194_304), 4_194_304);
+  assert.equal(
+    resolveTerminalReplayByteLimit("0", 4_194_304),
+    DEFAULT_INITIAL_TERMINAL_REPLAY_BYTES,
+  );
+  assert.equal(
+    resolveTerminalReplayByteLimit("nope", 4_194_304),
+    DEFAULT_INITIAL_TERMINAL_REPLAY_BYTES,
+  );
+  assert.equal(
+    resolveTerminalReplayByteLimit("1e3", 4_194_304),
+    DEFAULT_INITIAL_TERMINAL_REPLAY_BYTES,
+  );
+  assert.equal(
+    resolveTerminalReplayByteLimit(undefined, 4_194_304),
+    DEFAULT_INITIAL_TERMINAL_REPLAY_BYTES,
+  );
+  assert.equal(resolveTerminalReplayByteLimit(undefined, 65_536), 65_536);
 });
 
 test("UTF-8 replay window keeps the newest complete characters within the byte cap", () => {

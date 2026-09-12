@@ -91,7 +91,6 @@ interface AgentFocusViewProps {
   transcriptOpen?: boolean;
   onToggleTranscript?: (sessionId: string) => void;
   mobileTerminalTouchMode?: boolean;
-  useLightweightTerminalPreview?: boolean;
   terminalFontSize?: number;
   onTerminalFontSizeChange?: (fontSize: number) => void;
   sessionGroups?: SessionGroupState;
@@ -240,7 +239,6 @@ export function AgentFocusView({
   transcriptOpen = false,
   onToggleTranscript,
   mobileTerminalTouchMode = false,
-  useLightweightTerminalPreview = true,
   terminalFontSize,
   onTerminalFontSizeChange,
   sessionGroups = { groups: [], assignments: {}, collapsedGroupIds: [] },
@@ -2150,13 +2148,6 @@ export function AgentFocusView({
                               onContextMenu={handleSidebarContextMenu}
                               onRename={onRename}
                               onSwitchFocus={handleSidebarSwitchFocus}
-                              useLightweightTerminalPreview={
-                                useLightweightTerminalPreview
-                              }
-                              terminalFontSize={terminalFontSize}
-                              onTerminalFontSizeChange={
-                                onTerminalFontSizeChange
-                              }
                             />
                           );
                         })}

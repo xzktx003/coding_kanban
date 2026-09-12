@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   computeTerminalReconnectDelay,
   getTerminalInputModeRestoreSequence,
+  resolveTerminalTransportAfterDisconnect,
   shouldLetBrowserHandleTerminalPaste,
   shouldAttemptTerminalInputForward,
 } from "./terminal-input-forwarding.js";
@@ -94,6 +95,30 @@ describe("terminal input forwarding", () => {
     );
     assert.equal(computeTerminalReconnectDelay(-1), 250);
     assert.equal(computeTerminalReconnectDelay(Number.NaN), 250);
+  });
+
+  it("falls back to the HTTPS stream only when WebSocket never opened", () => {
+    assert.equal(
+      resolveTerminalTransportAfterDisconnect({
+        transport: "websocket",
+        webSocketOpened: false,
+      }),
+      "http-stream",
+    );
+    assert.equal(
+      resolveTerminalTransportAfterDisconnect({
+        transport: "websocket",
+        webSocketOpened: true,
+      }),
+      "websocket",
+    );
+    assert.equal(
+      resolveTerminalTransportAfterDisconnect({
+        transport: "http-stream",
+        webSocketOpened: false,
+      }),
+      "http-stream",
+    );
   });
 
   it("restores bracketed paste after sanitized OpenCode replay", () => {

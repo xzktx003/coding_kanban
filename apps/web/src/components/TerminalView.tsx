@@ -1,11 +1,16 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { createCoalescedTrailingScheduler } from "../lib/frame-schedulers";
 import "@xterm/xterm/css/xterm.css";
 
-import { buildTerminalWebSocketUrl } from "../lib/api";
+import {
+  buildTerminalWebSocketUrl,
+  resizeAgentTerminal,
+  sendAgentInput,
+  streamTerminalOutput,
+} from "../lib/api";
 import {
   computeMobilePinchFontSize,
   computeMobileTerminalScrollLines,
@@ -34,8 +39,10 @@ import {
 import {
   computeTerminalReconnectDelay,
   getTerminalInputModeRestoreSequence,
+  resolveTerminalTransportAfterDisconnect,
   shouldLetBrowserHandleTerminalPaste,
   shouldAttemptTerminalInputForward,
+  type TerminalTransport,
 } from "../lib/terminal-input-forwarding";
 import { isTerminalViewportMeasurable } from "../lib/terminal-resize";
 import {
@@ -56,6 +63,10 @@ import {
   shouldCaptureTerminalWheel,
   shouldForwardTerminalWheelToApplication,
 } from "../lib/terminal-wheel";
+import {
+  TerminalConnectionFeedback,
+  type TerminalConnectionPhase,
+} from "./TerminalConnectionFeedback";
 
 interface TerminalViewProps {
   agentSessionId: string;
@@ -135,7 +146,6 @@ export const TerminalView = memo(function TerminalView({
   const containerRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const terminalFontSizeRef = useRef(terminalFontSize);
   const onFontSizeChangeRef = useRef(onFontSizeChange);
@@ -144,6 +154,9 @@ export const TerminalView = memo(function TerminalView({
   const inputEnabledRef = useRef(inputEnabled);
   const terminalInputReadyRef = useRef(false);
   const userScrollLockedRef = useRef(false);
+  const retryConnectionRef = useRef<(() => void) | null>(null);
+  const [connectionPhase, setConnectionPhase] =
+    useState<TerminalConnectionPhase>("connecting");
 
   useEffect(() => {
     terminalFontSizeRef.current = terminalFontSize;
@@ -206,6 +219,7 @@ export const TerminalView = memo(function TerminalView({
       : (stageRef.current as HTMLDivElement | null);
     if (!container || !stage) return;
 
+    setConnectionPhase("connecting");
     terminalInputReadyRef.current = false;
     userScrollLockedRef.current = false;
 
@@ -964,6 +978,10 @@ export const TerminalView = memo(function TerminalView({
       replayBytes: mobileTouchMode ? MOBILE_TERMINAL_REPLAY_BYTES : undefined,
     });
     let ws: WebSocket | null = null;
+    let transport: TerminalTransport = "websocket";
+    let httpStreamOpen = false;
+    let httpStreamAbortController: AbortController | null = null;
+    let httpTransportTail = Promise.resolve();
     let activeTerminalSocketTracker: ReturnType<
       typeof registerTerminalWebSocket
     > | null = null;
@@ -979,6 +997,38 @@ export const TerminalView = memo(function TerminalView({
       recordForSafariRecovery: boolean;
     }> = [];
     let flushPendingInput = () => {};
+
+    const enqueueHttpTransportRequest = (
+      request: () => Promise<unknown>,
+    ): void => {
+      httpTransportTail = httpTransportTail
+        .catch(() => undefined)
+        .then(request)
+        .then(
+          () => undefined,
+          () => undefined,
+        );
+    };
+
+    const isTerminalTransportOpen = () =>
+      ws?.readyState === WebSocket.OPEN ||
+      (transport === "http-stream" && httpStreamOpen);
+
+    const sendTerminalTransportPayload = (payload: string): boolean => {
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(payload);
+        return true;
+      }
+
+      if (transport === "http-stream" && httpStreamOpen) {
+        enqueueHttpTransportRequest(() =>
+          sendAgentInput(agentSessionId, { input: payload }),
+        );
+        return true;
+      }
+
+      return false;
+    };
 
     const terminalWantsFocusReports = () => {
       return (
@@ -1000,7 +1050,7 @@ export const TerminalView = memo(function TerminalView({
         return;
       }
 
-      if (ws?.readyState !== WebSocket.OPEN) {
+      if (!isTerminalTransportOpen()) {
         return;
       }
 
@@ -1017,7 +1067,7 @@ export const TerminalView = memo(function TerminalView({
         if (!ensureInputOwner()) {
           return;
         }
-        ws.send("\u001b[I");
+        sendTerminalTransportPayload("\u001b[I");
         lastReportedTerminalFocus = "in";
         return;
       }
@@ -1032,7 +1082,9 @@ export const TerminalView = memo(function TerminalView({
         return;
       }
 
-      ws.send(nextFocusState === "in" ? "\u001b[I" : "\u001b[O");
+      sendTerminalTransportPayload(
+        nextFocusState === "in" ? "\u001b[I" : "\u001b[O",
+      );
       lastReportedTerminalFocus = nextFocusState;
     };
 
@@ -1065,7 +1117,7 @@ export const TerminalView = memo(function TerminalView({
       clearReplaySafetyTimer();
       replaySafetyTimerId = window.setTimeout(() => {
         replaySafetyTimerId = null;
-        if (!disposed && ws?.readyState === WebSocket.OPEN) {
+        if (!disposed && isTerminalTransportOpen()) {
           replayCompletionObserved = true;
           enableTerminalInput();
           reportInitialReadyIfSettled();
@@ -1104,6 +1156,28 @@ export const TerminalView = memo(function TerminalView({
       }, TERMINAL_CONNECT_TIMEOUT_MS);
     };
 
+    let connectTerminalTransport = () => {};
+
+    const markTerminalDisconnected = () => {
+      setConnectionPhase("reconnecting");
+      clearReplaySafetyTimer();
+      replayComplete = false;
+      terminalInputReadyRef.current = false;
+      term.options.disableStdin = false;
+      lastReportedTerminalFocus = null;
+      if (!disconnectNoticeShown) {
+        disconnectNoticeShown = true;
+        writeTerminalOutput(
+          "\r\n\x1b[33m[连接已断开，正在自动重连]\x1b[0m\r\n",
+        );
+      }
+      if (!initialReadyReported) {
+        initialReadyReported = true;
+        onReadyRef.current?.();
+      }
+      scheduleTerminalReconnect();
+    };
+
     const scheduleTerminalReconnect = () => {
       if (disposed || reconnectTimerId !== null) {
         return;
@@ -1113,15 +1187,11 @@ export const TerminalView = memo(function TerminalView({
       reconnectAttempt += 1;
       reconnectTimerId = window.setTimeout(() => {
         reconnectTimerId = null;
-        connectTerminalWebSocket();
+        connectTerminalTransport();
       }, delay);
     };
 
-    const connectTerminalWebSocket = () => {
-      if (disposed) {
-        return;
-      }
-
+    const prepareTerminalConnection = () => {
       replayComplete = false;
       if (!initialReadyReported) {
         replayCompletionObserved = false;
@@ -1129,12 +1199,71 @@ export const TerminalView = memo(function TerminalView({
       terminalInputReadyRef.current = false;
       term.options.disableStdin = false;
       lastReportedTerminalFocus = null;
+    };
+
+    const connectTerminalHttpStream = () => {
+      if (disposed) {
+        return;
+      }
+
+      prepareTerminalConnection();
+      transport = "http-stream";
+      httpStreamOpen = false;
+      const controller = new AbortController();
+      httpStreamAbortController = controller;
+
+      const finish = () => {
+        if (disposed || controller !== httpStreamAbortController) {
+          return;
+        }
+        httpStreamAbortController = null;
+        httpStreamOpen = false;
+        markTerminalDisconnected();
+      };
+
+      void streamTerminalOutput(agentSessionId, {
+        replayBytes: mobileTouchMode ? MOBILE_TERMINAL_REPLAY_BYTES : undefined,
+        signal: controller.signal,
+        onOpen: () => {
+          if (disposed || controller !== httpStreamAbortController) {
+            return;
+          }
+          httpStreamOpen = true;
+          setConnectionPhase("connecting");
+          armReplaySafetyTimer();
+          flushResize();
+          scheduleFit();
+          scheduleFocusInteractiveTerminal();
+          scheduleTerminalFocusReport();
+        },
+        onFrame: (frame) => {
+          if (disposed || controller !== httpStreamAbortController) {
+            return;
+          }
+          reconnectAttempt = 0;
+          handleTerminalFrame(frame);
+        },
+      }).then(finish, (error: unknown) => {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        finish();
+      });
+    };
+
+    const connectTerminalWebSocket = () => {
+      if (disposed) {
+        return;
+      }
+
+      prepareTerminalConnection();
+      transport = "websocket";
+      let opened = false;
 
       const tracker = registerTerminalWebSocket(agentSessionId);
       const socket = new WebSocket(wsUrl);
       activeTerminalSocketTracker = tracker;
       ws = socket;
-      wsRef.current = socket;
 
       socket.onmessage = (event) => {
         if (disposed || socket !== ws) {
@@ -1161,6 +1290,8 @@ export const TerminalView = memo(function TerminalView({
           return;
         }
 
+        opened = true;
+        setConnectionPhase("connecting");
         armReplaySafetyTimer();
         flushResize();
         scheduleFit();
@@ -1178,26 +1309,62 @@ export const TerminalView = memo(function TerminalView({
           return;
         }
 
-        clearReplaySafetyTimer();
         ws = null;
-        wsRef.current = null;
-        replayComplete = false;
-        terminalInputReadyRef.current = false;
-        term.options.disableStdin = false;
-        lastReportedTerminalFocus = null;
-        if (!disconnectNoticeShown) {
-          disconnectNoticeShown = true;
-          writeTerminalOutput(
-            "\r\n\x1b[33m[连接已断开，正在自动重连]\x1b[0m\r\n",
-          );
-        }
-        scheduleTerminalReconnect();
+        transport = resolveTerminalTransportAfterDisconnect({
+          transport,
+          webSocketOpened: opened,
+        });
+        markTerminalDisconnected();
       };
 
       armTerminalConnectionTimeout(socket);
     };
 
-    const connectTimeoutId = window.setTimeout(connectTerminalWebSocket, 0);
+    connectTerminalTransport = () => {
+      if (transport === "http-stream") {
+        connectTerminalHttpStream();
+      } else {
+        connectTerminalWebSocket();
+      }
+    };
+
+    retryConnectionRef.current = () => {
+      if (disposed) {
+        return;
+      }
+
+      if (reconnectTimerId !== null) {
+        window.clearTimeout(reconnectTimerId);
+        reconnectTimerId = null;
+      }
+
+      const staleHttpStream = httpStreamAbortController;
+      httpStreamAbortController = null;
+      httpStreamOpen = false;
+      staleHttpStream?.abort();
+
+      const staleSocket = ws;
+      if (staleSocket) {
+        clearTerminalConnectionTimeout(staleSocket);
+        staleSocket.onopen = null;
+        staleSocket.onmessage = null;
+        staleSocket.onclose = null;
+        activeTerminalSocketTracker?.markClosed();
+        activeTerminalSocketTracker = null;
+        if (
+          staleSocket.readyState === WebSocket.CONNECTING ||
+          staleSocket.readyState === WebSocket.OPEN
+        ) {
+          staleSocket.close();
+        }
+      }
+
+      ws = null;
+      setConnectionPhase("connecting");
+      connectTerminalTransport();
+    };
+
+    const connectTimeoutId = window.setTimeout(connectTerminalTransport, 0);
 
     const flushResize = () => {
       if (isPreview) {
@@ -1205,17 +1372,26 @@ export const TerminalView = memo(function TerminalView({
       }
 
       const size = pendingResizeRef.current;
-      if (!size || ws?.readyState !== WebSocket.OPEN) {
+      if (!size || !isTerminalTransportOpen()) {
         return;
       }
 
-      ws.send(
-        JSON.stringify({
-          type: "resize",
-          cols: size.cols,
-          rows: size.rows,
-        }),
-      );
+      if (ws?.readyState === WebSocket.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: "resize",
+            cols: size.cols,
+            rows: size.rows,
+          }),
+        );
+      } else if (transport === "http-stream" && httpStreamOpen) {
+        enqueueHttpTransportRequest(() =>
+          resizeAgentTerminal(agentSessionId, {
+            cols: size.cols,
+            rows: size.rows,
+          }),
+        );
+      }
     };
 
     const fitTerminal = () => {
@@ -1406,6 +1582,7 @@ export const TerminalView = memo(function TerminalView({
 
       clearReplaySafetyTimer();
       replayComplete = true;
+      setConnectionPhase("connected");
       reconnectAttempt = 0;
       disconnectNoticeShown = false;
       terminalInputReadyRef.current = true;
@@ -1475,7 +1652,7 @@ export const TerminalView = memo(function TerminalView({
         return true;
       }
 
-      const socketOpen = ws?.readyState === WebSocket.OPEN;
+      const socketOpen = isTerminalTransportOpen();
       if (
         !shouldAttemptTerminalInputForward({
           inputEnabled: inputEnabledRef.current,
@@ -1487,9 +1664,11 @@ export const TerminalView = memo(function TerminalView({
         return false;
       }
 
-      if (ws && (!inputEnabledRef.current || ensureInputOwner())) {
+      if (!inputEnabledRef.current || ensureInputOwner()) {
         reportFocusedTerminalBeforeInput();
-        ws.send(sanitized);
+        if (!sendTerminalTransportPayload(sanitized)) {
+          return false;
+        }
         if (recoverSafariNativeInput && recordForSafariRecovery) {
           recordTerminalTextForSafariRecovery(
             safariInputRecoveryState,
@@ -1568,7 +1747,7 @@ export const TerminalView = memo(function TerminalView({
         return;
       }
 
-      const socketOpen = ws?.readyState === WebSocket.OPEN;
+      const socketOpen = isTerminalTransportOpen();
       if (
         !shouldAttemptTerminalInputForward({
           inputEnabled: inputEnabledRef.current,
@@ -1580,14 +1759,18 @@ export const TerminalView = memo(function TerminalView({
         return;
       }
 
-      if (ws && (!inputEnabledRef.current || ensureInputOwner())) {
+      if (!inputEnabledRef.current || ensureInputOwner()) {
         reportFocusedTerminalBeforeInput();
-        ws.send(
-          JSON.stringify({
-            type: "binary",
-            data: btoa(sanitized),
-          }),
-        );
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(
+            JSON.stringify({
+              type: "binary",
+              data: btoa(sanitized),
+            }),
+          );
+        } else {
+          sendTerminalTransportPayload(sanitized);
+        }
       }
     });
 
@@ -2043,13 +2226,16 @@ export const TerminalView = memo(function TerminalView({
       } else if (ws?.readyState === WebSocket.OPEN) {
         ws.close();
       }
+      httpStreamAbortController?.abort();
+      httpStreamAbortController = null;
+      httpStreamOpen = false;
       activeTerminalSocketTracker?.markClosed();
       activeTerminalSocketTracker = null;
+      retryConnectionRef.current = null;
 
       term.dispose();
       delete container.__xterm;
       termRef.current = null;
-      wsRef.current = null;
       fitRef.current = null;
       pendingResizeRef.current = null;
       terminalInputReadyRef.current = false;
@@ -2108,6 +2294,12 @@ export const TerminalView = memo(function TerminalView({
         >
           底部
         </button>
+      )}
+      {interactive && (
+        <TerminalConnectionFeedback
+          phase={connectionPhase}
+          onRetry={() => retryConnectionRef.current?.()}
+        />
       )}
     </div>
   );

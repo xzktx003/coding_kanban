@@ -1,8 +1,5 @@
-import { Suspense } from "react";
-
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
-import { LazyTerminalView } from "./LazyTerminalView";
 import { SessionGroupMenu } from "./SessionGroupControls";
 import { TerminalPreview } from "./TerminalPreview";
 import type { SessionGroupState } from "../lib/session-groups";
@@ -25,9 +22,6 @@ interface FocusSidebarSessionCardProps {
   sessionGroups?: SessionGroupState;
   onCreateSessionGroup?: (sessionId?: string) => void;
   onMoveSessionToGroup?: (sessionId: string, groupId: string | null) => void;
-  useLightweightTerminalPreview?: boolean;
-  terminalFontSize?: number;
-  onTerminalFontSizeChange?: (fontSize: number) => void;
 }
 
 const stateLabels: Record<string, string> = {
@@ -50,9 +44,6 @@ export function FocusSidebarSessionCard({
   sessionGroups = { groups: [], assignments: {}, collapsedGroupIds: [] },
   onCreateSessionGroup,
   onMoveSessionToGroup,
-  useLightweightTerminalPreview = true,
-  terminalFontSize,
-  onTerminalFontSizeChange,
 }: FocusSidebarSessionCardProps) {
   const isTmuxManaged = Boolean(session.transportRef?.tmuxSession);
 
@@ -125,21 +116,7 @@ export function FocusSidebarSessionCard({
         </div>
       </div>
       <div className="focus-sidebar-terminal">
-        {useLightweightTerminalPreview ? (
-          <TerminalPreview session={session} variant="sidebar" />
-        ) : (
-          <Suspense
-            fallback={<TerminalPreview session={session} variant="sidebar" />}
-          >
-            <LazyTerminalView
-              agentSessionId={session.id}
-              fontSize={terminalFontSize}
-              interactive={false}
-              onFontSizeChange={onTerminalFontSizeChange}
-              wheelPassthrough
-            />
-          </Suspense>
-        )}
+        <TerminalPreview session={session} variant="sidebar" />
       </div>
     </div>
   );

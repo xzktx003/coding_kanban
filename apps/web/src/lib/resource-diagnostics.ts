@@ -351,7 +351,6 @@ export function getResourceDiagnosticsSnapshot(
 export function classifyResourcePressure({
   snapshot,
   terminalHistoryDiagnostics,
-  useLightweightTerminalPreview,
   vscodeProxyDiagnostics,
 }: {
   snapshot: ResourceDiagnosticsSnapshot;
@@ -388,12 +387,9 @@ export function classifyResourcePressure({
     );
   }
 
-  if (
-    !useLightweightTerminalPreview &&
-    snapshot.dom.xtermCount > intentionalLiveTerminalBudget
-  ) {
+  if (snapshot.dom.previewTerminalViewCount > 0) {
     findings.push(
-      "完整预览正在挂载多个 xterm，这是无 VS Code 场景下内存增长的首要嫌疑。",
+      "看板或侧栏卡片区域仍挂载真实 xterm，需要检查是否有旧页面或隐藏预览未释放。",
     );
   }
 
@@ -418,15 +414,6 @@ export function classifyResourcePressure({
   ) {
     findings.push(
       "终端实时输出吞吐偏高，活跃终端本身会持续推高网络、xterm scrollback 和渲染压力。",
-    );
-  }
-
-  if (
-    useLightweightTerminalPreview &&
-    snapshot.dom.xtermCount > intentionalLiveTerminalBudget
-  ) {
-    findings.push(
-      "轻量预览下仍出现多个 xterm，需要检查是否有隐藏完整终端未释放。",
     );
   }
 

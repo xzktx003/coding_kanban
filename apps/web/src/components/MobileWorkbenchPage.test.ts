@@ -278,6 +278,10 @@ describe("MobileWorkbenchPage", () => {
     assert.match(markup, /电脑端 Coding Kanban/);
     assert.match(markup, /href="\/"/);
     assert.match(markup, /执行中的任务/);
+    assert.match(
+      markup,
+      /mobile-workbench-content mobile-workbench-content--session/,
+    );
     assert.match(markup, /mobile-terminal-surface/);
     assert.match(markup, /手机终端快捷键/);
     assert.match(markup, /aria-label="当前会话" class="active"/);
@@ -287,6 +291,23 @@ describe("MobileWorkbenchPage", () => {
       /data-testid="mobile-agent-completion-notification-toggle"/,
     );
     assert.match(markup, /通知关/);
+  });
+
+  it("gives the live terminal a bounded flexible viewport on mobile", () => {
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+    assert.match(
+      css,
+      /\.mobile-workbench-content--session\s*{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*overflow-y:\s*hidden;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-session-view\s*{[^}]*display:\s*flex;[^}]*flex:\s*1;[^}]*flex-direction:\s*column;[^}]*min-height:\s*0;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-terminal-surface\s*{[^}]*flex:\s*1;[^}]*min-height:\s*0;/s,
+    );
   });
 
   it("renders the four mobile primary navigation destinations", () => {

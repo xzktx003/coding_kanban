@@ -46,9 +46,6 @@ interface AgentGridProps {
   suspendedSessionId?: string | null;
   hiddenCount?: number;
   onShowHidden?: () => void;
-  useLightweightTerminalPreview?: boolean;
-  terminalFontSize?: number;
-  onTerminalFontSizeChange?: (fontSize: number) => void;
   sessionGroups?: SessionGroupState;
   onCreateSessionGroup?: (sessionId?: string) => void;
   onDeleteSessionGroup?: (groupId: string) => void;
@@ -197,9 +194,6 @@ export function AgentGrid({
   suspendedSessionId,
   hiddenCount = 0,
   onShowHidden,
-  useLightweightTerminalPreview = true,
-  terminalFontSize,
-  onTerminalFontSizeChange,
   sessionGroups = { groups: [], assignments: {}, collapsedGroupIds: [] },
   onCreateSessionGroup,
   onDeleteSessionGroup,
@@ -317,9 +311,6 @@ export function AgentGrid({
         onCreateSessionGroup={onCreateSessionGroup}
         onMoveSessionToGroup={onMoveSessionToGroup}
         terminalSuspended={session.id === suspendedSessionId}
-        useLightweightTerminalPreview={useLightweightTerminalPreview}
-        terminalFontSize={terminalFontSize}
-        onTerminalFontSizeChange={onTerminalFontSizeChange}
       />
     );
   }

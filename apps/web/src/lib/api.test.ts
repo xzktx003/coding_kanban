@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildTerminalStreamUrl,
   buildTerminalWebSocketUrl,
   fetchMarkdownImage,
   focusAgentSession,
   getFeishuNotificationSettings,
+  resizeAgentTerminal,
   sendCodexImageMessage,
+  streamTerminalOutput,
   updateFeishuNotificationSettings,
 } from "./api.js";
 
@@ -28,7 +31,7 @@ test("buildTerminalWebSocketUrl uses wss on the default HTTPS dev frontend", () 
 
   assert.equal(
     buildTerminalWebSocketUrl("agent-1"),
-    "wss://10.30.0.24:3100/ws/agent-sessions/agent-1/terminal",
+    "wss://10.30.0.24:3100/ws/agent-sessions/agent-1/terminal?replayBytes=524288",
   );
 });
 
@@ -37,7 +40,7 @@ test("buildTerminalWebSocketUrl keeps ws on an HTTP frontend", () => {
 
   assert.equal(
     buildTerminalWebSocketUrl("agent-1"),
-    "ws://127.0.0.1:3100/ws/agent-sessions/agent-1/terminal",
+    "ws://127.0.0.1:3100/ws/agent-sessions/agent-1/terminal?replayBytes=524288",
   );
 });
 
@@ -48,6 +51,112 @@ test("buildTerminalWebSocketUrl requests a bounded replay for mobile terminals",
     buildTerminalWebSocketUrl("agent-1", { replayBytes: 256 * 1024 }),
     "wss://10.30.0.24:3100/ws/agent-sessions/agent-1/terminal?replayBytes=262144",
   );
+});
+
+test("terminal HTTP fallback stays on the current HTTPS origin", () => {
+  setWindowLocation("https:", "10.30.0.24:3100");
+
+  assert.equal(
+    buildTerminalStreamUrl("agent-1", { replayBytes: 256 * 1024 }),
+    "/api/agent-sessions/agent-1/terminal-stream?replayBytes=262144",
+  );
+});
+
+test("terminal HTTP fallback incrementally decodes split NDJSON frames", async () => {
+  const encoder = new TextEncoder();
+  const replayFrame = JSON.stringify(
+    JSON.stringify({
+      __agentOrchestrator: "terminal-control",
+      event: "replay",
+      data: "first line\nsecond line",
+    }),
+  );
+  const completeFrame = JSON.stringify(
+    JSON.stringify({
+      __agentOrchestrator: "terminal-control",
+      event: "replay-complete",
+    }),
+  );
+  const source = `${replayFrame}\n${completeFrame}\n`;
+  const splitAt = Math.floor(source.length / 2);
+  let requestedUrl = "";
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async (input: string | URL | Request) => {
+      requestedUrl = String(input);
+      return new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(encoder.encode(source.slice(0, splitAt)));
+            controller.enqueue(encoder.encode(source.slice(splitAt)));
+            controller.close();
+          },
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/x-ndjson" },
+        },
+      );
+    },
+  });
+
+  const received: string[] = [];
+  await streamTerminalOutput("agent-1", {
+    replayBytes: 256 * 1024,
+    onFrame: (frame) => received.push(frame),
+  });
+
+  assert.equal(
+    requestedUrl,
+    "/api/agent-sessions/agent-1/terminal-stream?replayBytes=262144",
+  );
+  assert.deepEqual(received, [
+    JSON.parse(replayFrame) as string,
+    JSON.parse(completeFrame) as string,
+  ]);
+});
+
+test("terminal HTTP fallback accepts a final NDJSON frame without a newline", async () => {
+  const expectedFrame = JSON.stringify({
+    __agentOrchestrator: "terminal-control",
+    event: "replay-complete",
+  });
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async () =>
+      new Response(JSON.stringify(expectedFrame), {
+        status: 200,
+        headers: { "content-type": "application/x-ndjson" },
+      }),
+  });
+
+  const received: string[] = [];
+  await streamTerminalOutput("agent-1", {
+    onFrame: (frame) => received.push(frame),
+  });
+
+  assert.deepEqual(received, [expectedFrame]);
+});
+
+test("terminal HTTP fallback sends resize through the existing REST endpoint", async () => {
+  let requestedUrl = "";
+  let requestBody: unknown;
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async (input: string | URL | Request, init?: RequestInit) => {
+      requestedUrl = String(input);
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  await resizeAgentTerminal("agent-1", { cols: 96, rows: 28 });
+
+  assert.equal(requestedUrl, "/api/agent-sessions/agent-1/resize");
+  assert.deepEqual(requestBody, { cols: 96, rows: 28 });
 });
 
 test("focus requests stay ordered and use lightweight empty responses", async () => {

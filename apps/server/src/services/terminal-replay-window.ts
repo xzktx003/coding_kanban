@@ -1,13 +1,21 @@
+export const DEFAULT_INITIAL_TERMINAL_REPLAY_BYTES = 512 * 1024;
+
 export function resolveTerminalReplayByteLimit(
   requestedValue: string | undefined,
   maximumBytes: number,
 ): number {
-  if (!requestedValue || !/^\d+$/.test(requestedValue)) return maximumBytes;
+  const boundedMaximum = Math.min(
+    maximumBytes,
+    DEFAULT_INITIAL_TERMINAL_REPLAY_BYTES,
+  );
+  if (!requestedValue || !/^\d+$/.test(requestedValue)) {
+    return boundedMaximum;
+  }
   const requestedBytes = Number(requestedValue);
   if (!Number.isSafeInteger(requestedBytes) || requestedBytes < 1) {
-    return maximumBytes;
+    return boundedMaximum;
   }
-  return Math.min(requestedBytes, maximumBytes);
+  return Math.min(requestedBytes, boundedMaximum);
 }
 
 export function takeUtf8Tail(value: string, maximumBytes: number): string {

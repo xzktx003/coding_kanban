@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { buildServer } from "../app.js";
+import { DEFAULT_INITIAL_TERMINAL_REPLAY_BYTES } from "../services/terminal-replay-window.js";
 
 async function waitForReplayFrame(
   terminalUrl: string,
@@ -213,6 +214,178 @@ test("terminal websocket honors a bounded mobile replay window", async () => {
     assert.ok(Buffer.byteLength(replayFrame.data ?? "", "utf8") <= 1024);
     assert.doesNotMatch(replayFrame.data ?? "", /�/);
   } finally {
+    await app.close();
+  }
+});
+
+test("terminal websocket bounds replay even when the client omits a limit", async () => {
+  const { app, registry } = buildServer();
+  const session = registry.register({
+    workspaceId: "default",
+    sourceType: "local",
+    agentKind: "codex",
+    displayName: "bounded default replay",
+    workingDirectory: process.cwd(),
+  });
+  registry.appendOutput(
+    session.id,
+    `${"旧".repeat(400_000)}-newest-tail`,
+    "stdout",
+  );
+
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const address = app.server.address();
+  assert.ok(address && typeof address === "object");
+
+  try {
+    const replayFrame = await waitForReplayFrame(
+      `ws://127.0.0.1:${address.port}/ws/agent-sessions/${session.id}/terminal`,
+    );
+    assert.match(replayFrame.data ?? "", /-newest-tail$/);
+    assert.ok(
+      Buffer.byteLength(replayFrame.data ?? "", "utf8") <=
+        DEFAULT_INITIAL_TERMINAL_REPLAY_BYTES,
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test("terminal HTTP stream replays bounded output on the same API origin", async () => {
+  const { app, registry } = buildServer();
+  const session = registry.register({
+    workspaceId: "default",
+    sourceType: "local",
+    agentKind: "codex",
+    displayName: "HTTPS terminal stream fallback",
+    workingDirectory: process.cwd(),
+  });
+  registry.appendOutput(
+    session.id,
+    `${"旧".repeat(2_000)}-https-stream-tail`,
+    "stdout",
+  );
+
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const address = app.server.address();
+  assert.ok(address && typeof address === "object");
+
+  try {
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/api/agent-sessions/${session.id}/terminal-stream?replayBytes=1024`,
+    );
+    assert.equal(response.status, 200);
+    assert.match(
+      response.headers.get("content-type") ?? "",
+      /^application\/x-ndjson/,
+    );
+    assert.ok(response.body);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = "";
+    const frames: string[] = [];
+
+    while (frames.length < 2) {
+      const { done, value } = await reader.read();
+      assert.equal(done, false);
+      pending += decoder.decode(value, { stream: true });
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line) frames.push(JSON.parse(line) as string);
+      }
+    }
+    await reader.cancel();
+
+    const replay = JSON.parse(frames[0] ?? "") as {
+      __agentOrchestrator?: string;
+      event?: string;
+      data?: string;
+    };
+    const replayComplete = JSON.parse(frames[1] ?? "") as {
+      __agentOrchestrator?: string;
+      event?: string;
+    };
+    assert.equal(replay.__agentOrchestrator, "terminal-control");
+    assert.equal(replay.event, "replay");
+    assert.match(replay.data ?? "", /-https-stream-tail$/);
+    assert.ok(Buffer.byteLength(replay.data ?? "", "utf8") <= 1024);
+    assert.equal(replayComplete.event, "replay-complete");
+  } finally {
+    await app.close();
+  }
+});
+
+test("terminal HTTP stream forwards live PTY output after replay", async () => {
+  const { app } = buildServer();
+  let agentSessionId: string | undefined;
+  const streamController = new AbortController();
+
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const address = app.server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const launchResponse = await fetch(`${baseUrl}/api/agent-launch/pty`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workspaceId: "default",
+        displayName: `terminal-stream-live-${Date.now()}`,
+        agentKind: "shell",
+        command:
+          "printf 'stream-replay-start\\n'; sleep 0.4; printf 'stream-live-marker\\n'; sleep 5",
+        workingDirectory: process.cwd(),
+      }),
+    });
+    assert.equal(launchResponse.status, 201);
+    agentSessionId = ((await launchResponse.json()) as { id: string }).id;
+
+    const response = await fetch(
+      `${baseUrl}/api/agent-sessions/${agentSessionId}/terminal-stream?replayBytes=4096`,
+      { signal: streamController.signal },
+    );
+    assert.equal(response.status, 200);
+    assert.ok(response.body);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let pending = "";
+    let observedOutput = "";
+    const deadline = Date.now() + 3_000;
+
+    while (!observedOutput.includes("stream-live-marker")) {
+      assert.ok(Date.now() < deadline, "live terminal output was not streamed");
+      const { done, value } = await reader.read();
+      assert.equal(done, false);
+      pending += decoder.decode(value, { stream: true });
+      const lines = pending.split("\n");
+      pending = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line) continue;
+        const frame = JSON.parse(line) as string;
+        try {
+          const control = JSON.parse(frame) as { data?: string };
+          observedOutput += control.data ?? "";
+        } catch {
+          observedOutput += frame;
+        }
+      }
+    }
+    streamController.abort();
+    void reader.cancel().catch(() => {});
+
+    assert.match(observedOutput, /stream-live-marker/);
+  } finally {
+    streamController.abort();
+    if (agentSessionId) {
+      await fetch(`${baseUrl}/api/agent-sessions/${agentSessionId}`, {
+        method: "DELETE",
+      }).catch(() => {});
+    }
+    app.server.closeAllConnections();
     await app.close();
   }
 });

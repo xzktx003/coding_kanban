@@ -734,7 +734,7 @@ export function TopBar({
                     <>
                       <div className="top-bar-settings-heading">
                         <strong>资源调节</strong>
-                        <span>控制终端预览、VS Code 缓存并查看诊断</span>
+                        <span>控制记录缓存、VS Code 缓存并查看诊断</span>
                       </div>
                       <button
                         className={`top-bar-menu-item${useLightweightTerminalPreview ? " top-bar-menu-item--active" : ""}`}
@@ -742,17 +742,17 @@ export function TopBar({
                         onClick={onToggleTerminalPreviewMode}
                         title={
                           useLightweightTerminalPreview
-                            ? "当前为轻量化预览：非活跃会话不打开终端 WebSocket"
-                            : "当前为完整终端预览：恢复旧版小终端模式"
+                            ? "当前为节省内存：完整记录最多保留 90 条已加载消息"
+                            : "当前为保留更多：完整记录最多保留 300 条已加载消息"
                         }
                         type="button"
                       >
                         <span>
                           {useLightweightTerminalPreview
-                            ? "轻量预览：开"
-                            : "完整预览"}
+                            ? "记录缓存：节省内存"
+                            : "记录缓存：保留更多"}
                         </span>
-                        <small>终端卡片预览模式</small>
+                        <small>终端卡片始终使用轻量预览</small>
                       </button>
                       <button
                         className={`top-bar-menu-item${vscodeIframeCacheMode === "memory-saving" ? " top-bar-menu-item--active" : ""}`}
@@ -943,9 +943,9 @@ export function TopBar({
               <span>打开时每秒刷新，不保存历史</span>
             </div>
             <div className="resource-diagnostics-grid">
-              <span>预览模式</span>
+              <span>记录缓存</span>
               <strong>
-                {useLightweightTerminalPreview ? "轻量预览" : "完整预览"}
+                {useLightweightTerminalPreview ? "最多 90 条" : "最多 300 条"}
               </strong>
               <span>xterm 实例</span>
               <strong>{diagnosticsSnapshot.dom.xtermCount}</strong>

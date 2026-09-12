@@ -1,5 +1,3 @@
-import { Suspense } from "react";
-
 import {
   isLocalCodexSessionCandidate,
   type AgentSessionRecord,
@@ -8,7 +6,6 @@ import {
 import { CardMoreMenu } from "./CardMoreMenu";
 import { AgentGridTaskSummary } from "./AgentGridTaskSummary";
 import { AgentGridGitSummary } from "./AgentGridGitSummary";
-import { LazyTerminalView } from "./LazyTerminalView";
 import { SessionGroupMenu } from "./SessionGroupControls";
 import { TerminalPreview } from "./TerminalPreview";
 import type { SessionGroupState } from "../lib/session-groups";
@@ -27,9 +24,6 @@ interface AgentGridCardProps {
   onCreateSessionGroup?: (sessionId?: string) => void;
   onMoveSessionToGroup?: (sessionId: string, groupId: string | null) => void;
   terminalSuspended?: boolean;
-  useLightweightTerminalPreview?: boolean;
-  terminalFontSize?: number;
-  onTerminalFontSizeChange?: (fontSize: number) => void;
 }
 
 const stateLabels: Record<string, string> = {
@@ -149,9 +143,6 @@ export function AgentGridCard({
   onCreateSessionGroup,
   onMoveSessionToGroup,
   terminalSuspended = false,
-  useLightweightTerminalPreview = true,
-  terminalFontSize,
-  onTerminalFontSizeChange,
 }: AgentGridCardProps) {
   const taskSummaryRefreshKey = getAgentCardTaskSummaryRefreshKey(session);
   const gitSummaryRefreshKey = getAgentCardGitSummaryRefreshKey(session);
@@ -306,26 +297,7 @@ export function AgentGridCard({
         session={session}
       />
       <div className="grid-card-terminal">
-        {useLightweightTerminalPreview ? (
-          <TerminalPreview session={session} suspended={terminalSuspended} />
-        ) : (
-          <Suspense
-            fallback={
-              <TerminalPreview
-                session={session}
-                suspended={terminalSuspended}
-              />
-            }
-          >
-            <LazyTerminalView
-              agentSessionId={session.id}
-              interactive={false}
-              fontSize={terminalFontSize}
-              onFontSizeChange={onTerminalFontSizeChange}
-              suspended={terminalSuspended}
-            />
-          </Suspense>
-        )}
+        <TerminalPreview session={session} suspended={terminalSuspended} />
         {canReconnect && (
           <button className="grid-card-reconnect" onClick={handleReconnect}>
             🔄 重新连接

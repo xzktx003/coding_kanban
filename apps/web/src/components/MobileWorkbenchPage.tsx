@@ -627,7 +627,9 @@ export function MobileWorkbenchPage({
         </div>
       </header>
 
-      <section className="mobile-workbench-content">
+      <section
+        className={`mobile-workbench-content${view === "session" ? " mobile-workbench-content--session" : ""}`}
+      >
         {view === "board" && (
           <div className="mobile-workspace-view">
             <div className="mobile-view-heading">

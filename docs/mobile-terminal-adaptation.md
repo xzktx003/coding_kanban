@@ -1,7 +1,7 @@
 # 手机端终端适配方案
 
-状态：Phase 1 已实现
-最后更新：2026-06-07
+状态：已实现并持续维护
+最后更新：2026-09-12
 
 ## 背景
 
@@ -76,7 +76,7 @@ Coding Kanban 当前以桌面浏览器为主要使用场景，核心交互依赖
 - 可以支持“粘贴执行”和“仅粘贴到输入框”两种操作；“粘贴执行”同样使用 bracketed paste + 独立 Enter。
 - 对 shell 会话可以默认收起输入框，对 `codex`、`copilot`、`claude` 等 agent 会话默认展开。
 
-第一版复用已有 `/api/agent-sessions/:id/stdin` 路由发送手机端快捷键和输入框内容，不新增后端接口。终端画面仍通过 WebSocket 接收 scrollback replay 和实时输出。
+手机端复用已有 `/api/agent-sessions/:id/stdin` 路由发送快捷键和输入框内容。终端画面优先通过 WSS 接收 scrollback replay 和实时输出；首次 WSS 在 3 秒内无法打开时，自动切换同源 `/api/agent-sessions/:id/terminal-stream` HTTPS 流，不要求用户更换端口。
 
 ### 3. 上下滑动浏览终端历史
 
@@ -151,7 +151,7 @@ Coding Kanban 当前以桌面浏览器为主要使用场景，核心交互依赖
 
 ## 是否需要改后端
 
-第一版不需要新增后端接口或端口。
+当前适配不新增监听端口；HTTPS 流回退与 stdin、resize 都复用现有前端同源 `/api` 代理。
 
 当前手机端快捷键和输入框通过已有 stdin 路由进入当前会话，滑动滚动、回到底部、双指缩放都在前端完成。后端 stdin 路径必须保证 Tab、Esc、Ctrl、方向键等控制字符原样转发，不得给这类控制键自动追加 Enter；终端 resize 已有通道，双指缩放后只需要复用现有 resize 逻辑。
 

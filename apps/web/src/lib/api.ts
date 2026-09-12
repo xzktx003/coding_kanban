@@ -29,6 +29,7 @@ import type {
   LaunchSshPtyInput,
   ListAgentSessionsResponse,
   OpenVsCodeWebResponse,
+  PtyResizeInput,
   RegisterAgentSessionInput,
   RestoreManagedSessionsResponse,
   ScanDirectoryInput,
@@ -103,16 +104,104 @@ function buildWebSocketUrl(): string {
   return `${wsBase()}/ws/agent-sessions`;
 }
 
+export const DEFAULT_TERMINAL_REPLAY_BYTES = 512 * 1024;
+const MAX_TERMINAL_STREAM_LINE_BYTES = 2 * 1024 * 1024;
+
+function resolveTerminalReplayBytes(replayBytes?: number): number {
+  return replayBytes && Number.isSafeInteger(replayBytes) && replayBytes > 0
+    ? replayBytes
+    : DEFAULT_TERMINAL_REPLAY_BYTES;
+}
+
+function buildTerminalReplayQuery(replayBytes?: number): string {
+  return new URLSearchParams({
+    replayBytes: String(resolveTerminalReplayBytes(replayBytes)),
+  }).toString();
+}
+
 export function buildTerminalWebSocketUrl(
   agentSessionId: string,
   options: { replayBytes?: number } = {},
 ): string {
   const baseUrl = `${wsBase()}/ws/agent-sessions/${agentSessionId}/terminal`;
-  if (!options.replayBytes) return baseUrl;
-  const query = new URLSearchParams({
-    replayBytes: String(options.replayBytes),
-  });
-  return `${baseUrl}?${query.toString()}`;
+  return `${baseUrl}?${buildTerminalReplayQuery(options.replayBytes)}`;
+}
+
+export function buildTerminalStreamUrl(
+  agentSessionId: string,
+  options: { replayBytes?: number } = {},
+): string {
+  return `/api/agent-sessions/${agentSessionId}/terminal-stream?${buildTerminalReplayQuery(options.replayBytes)}`;
+}
+
+export async function streamTerminalOutput(
+  agentSessionId: string,
+  options: {
+    replayBytes?: number;
+    signal?: AbortSignal;
+    onOpen?: () => void;
+    onFrame: (frame: string) => void;
+  },
+): Promise<void> {
+  const response = await fetch(
+    buildTerminalStreamUrl(agentSessionId, options),
+    {
+      headers: { Accept: "application/x-ndjson" },
+      signal: options.signal,
+    },
+  );
+  if (!response.ok) {
+    throw new Error(await parseFailedResponseMessage(response));
+  }
+  if (!response.body) {
+    throw new Error("浏览器不支持终端流式响应");
+  }
+
+  options.onOpen?.();
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let pending = "";
+
+  const consumeLines = (final = false) => {
+    const lines = pending.split("\n");
+    const trailing = lines.pop() ?? "";
+    pending = final ? "" : trailing;
+    if (final && trailing) {
+      lines.push(trailing);
+    }
+    for (const line of lines) {
+      if (!line) {
+        continue;
+      }
+      const frame = JSON.parse(line) as unknown;
+      if (typeof frame !== "string") {
+        throw new Error("终端流返回了无效数据");
+      }
+      options.onFrame(frame);
+    }
+  };
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        pending += decoder.decode();
+        consumeLines(true);
+        return;
+      }
+
+      pending += decoder.decode(value, { stream: true });
+      consumeLines();
+      if (pending.length > MAX_TERMINAL_STREAM_LINE_BYTES) {
+        throw new Error("终端流单帧超过安全上限");
+      }
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export function getAgentTranscript(
@@ -323,6 +412,16 @@ export function sendAgentInput(
       body: JSON.stringify(body),
     },
   );
+}
+
+export function resizeAgentTerminal(
+  agentSessionId: string,
+  body: PtyResizeInput,
+): Promise<{ ok: true }> {
+  return request<{ ok: true }>(`/api/agent-sessions/${agentSessionId}/resize`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 export function launchLocalAgent(

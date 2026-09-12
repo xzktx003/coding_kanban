@@ -170,7 +170,7 @@ describe("resource diagnostics", () => {
     assert.equal(snapshot.memory.jsHeapLimitMegabytes, 1024);
   });
 
-  it("classifies full terminal preview as the primary no-vscode pressure source", () => {
+  it("classifies unexpected card terminals as the primary no-vscode pressure source", () => {
     const findings = classifyResourcePressure({
       snapshot: makeSnapshot({
         dom: {
@@ -195,9 +195,7 @@ describe("resource diagnostics", () => {
     });
 
     assert.equal(
-      findings.some((finding) =>
-        finding.includes("完整预览正在挂载多个 xterm"),
-      ),
+      findings.some((finding) => finding.includes("卡片区域仍挂载真实 xterm")),
       true,
     );
     assert.equal(
@@ -273,7 +271,7 @@ describe("resource diagnostics", () => {
     );
   });
 
-  it("flags hidden full terminals even when lightweight preview is selected", () => {
+  it("flags hidden card terminals regardless of the record cache preference", () => {
     const findings = classifyResourcePressure({
       snapshot: makeSnapshot({
         dom: {
@@ -293,9 +291,7 @@ describe("resource diagnostics", () => {
     });
 
     assert.equal(
-      findings.some((finding) =>
-        finding.includes("轻量预览下仍出现多个 xterm"),
-      ),
+      findings.some((finding) => finding.includes("卡片区域仍挂载真实 xterm")),
       true,
     );
   });
