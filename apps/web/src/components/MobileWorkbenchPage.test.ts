@@ -310,6 +310,47 @@ describe("MobileWorkbenchPage", () => {
     );
   });
 
+  it("keeps terminal controls flush with the software keyboard", () => {
+    installDocumentStub();
+    const markup = renderToStaticMarkup(
+      createElement(MobileWorkbenchPage, {
+        activeSessionId: "mobile-session",
+        isLoading: false,
+        sessions: [
+          {
+            id: "mobile-session",
+            workspaceId: "default",
+            sourceType: "local",
+            agentKind: "codex",
+            displayName: "Mobile Codex",
+            connectionState: "online",
+            interactionState: "idle",
+          },
+        ],
+        onSwitchSession: () => {},
+      }),
+    );
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+    assert.match(markup, /class="mobile-terminal-controls"/);
+    assert.match(
+      css,
+      /\.mobile-terminal-controls\s*{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*flex-shrink:\s*0;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-workbench-page:has\(\.mobile-agent-composer-input:focus\)\s+\.mobile-workbench-content--session\s*{[^}]*padding-bottom:\s*0;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-workbench-page:has\(\.mobile-agent-composer-input:focus\)\s+\.mobile-primary-nav\s*{[^}]*display:\s*none;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-workbench-page:has\(\.mobile-agent-composer-input:focus\)\s+\.mobile-agent-composer\s*{[^}]*padding-bottom:\s*8px;/s,
+    );
+  });
+
   it("renders the four mobile primary navigation destinations", () => {
     installDocumentStub();
 

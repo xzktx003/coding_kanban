@@ -14,6 +14,14 @@ function normalizeViewportHeight(value: number | null | undefined) {
   return value;
 }
 
+export function resolveAppViewportOffsetTop(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return 0;
+  }
+
+  return Math.round(value);
+}
+
 export function resolveAppViewportHeight({
   innerHeight,
   visualViewportHeight,
@@ -55,4 +63,8 @@ export function measureAppViewportHeight(win = window, doc = document) {
     fullscreenElementClientHeight,
     screenAvailHeight: win.screen?.availHeight,
   });
+}
+
+export function measureAppViewportOffsetTop(win = window) {
+  return resolveAppViewportOffsetTop(win.visualViewport?.offsetTop);
 }

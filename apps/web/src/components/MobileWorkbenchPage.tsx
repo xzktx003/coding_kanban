@@ -834,14 +834,16 @@ export function MobileWorkbenchPage({
                     )}
                   </div>
                 </section>
-                <MobileTerminalToolbar
-                  disabled={!activeSession}
-                  onSendInput={handleSendInput}
-                />
-                <MobileAgentComposer
-                  disabled={!activeSession}
-                  onSendInput={handleSendInput}
-                />
+                <div className="mobile-terminal-controls">
+                  <MobileTerminalToolbar
+                    disabled={!activeSession}
+                    onSendInput={handleSendInput}
+                  />
+                  <MobileAgentComposer
+                    disabled={!activeSession}
+                    onSendInput={handleSendInput}
+                  />
+                </div>
               </>
             )}
           </div>

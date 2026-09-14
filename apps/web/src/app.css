@@ -1,5 +1,6 @@
 :root {
   --app-height: 100vh;
+  --app-viewport-offset-top: 0px;
   --motion-fast: 140ms;
   --motion-standard: 220ms;
   --motion-slow: 320ms;
@@ -4400,7 +4401,10 @@ input {
 /* ===== Mobile Workbench ===== */
 .mobile-workbench-page {
   position: fixed;
-  inset: 0;
+  top: var(--app-viewport-offset-top);
+  right: 0;
+  bottom: auto;
+  left: 0;
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -4456,6 +4460,28 @@ input {
   flex: 1;
   flex-direction: column;
   min-height: 0;
+}
+
+.mobile-terminal-controls {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.mobile-workbench-page:has(.mobile-agent-composer-input:focus)
+  .mobile-workbench-content--session {
+  padding-bottom: 0;
+}
+
+.mobile-workbench-page:has(.mobile-agent-composer-input:focus)
+  .mobile-primary-nav {
+  display: none;
+}
+
+.mobile-workbench-page:has(.mobile-agent-composer-input:focus)
+  .mobile-agent-composer {
+  padding-bottom: 8px;
 }
 
 .mobile-view-heading {

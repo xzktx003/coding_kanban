@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import { resolveAppViewportHeight } from "./viewport-height.js";
+import {
+  resolveAppViewportHeight,
+  resolveAppViewportOffsetTop,
+} from "./viewport-height.js";
 
 describe("resolveAppViewportHeight", () => {
   it("falls back to innerHeight when no narrower viewport height exists", () => {
@@ -51,5 +55,28 @@ describe("resolveAppViewportHeight", () => {
       }),
       802,
     );
+  });
+});
+
+describe("resolveAppViewportOffsetTop", () => {
+  it("tracks the visual viewport when the software keyboard pans the page", () => {
+    assert.equal(resolveAppViewportOffsetTop(184.6), 185);
+  });
+
+  it("never moves the app above the layout viewport", () => {
+    assert.equal(resolveAppViewportOffsetTop(-12), 0);
+    assert.equal(resolveAppViewportOffsetTop(Number.NaN), 0);
+  });
+});
+
+describe("mobile viewport declaration", () => {
+  it("lets the browser resize content around the software keyboard and safe areas", () => {
+    const html = readFileSync(
+      new URL("../../index.html", import.meta.url),
+      "utf8",
+    );
+
+    assert.match(html, /viewport-fit=cover/);
+    assert.match(html, /interactive-widget=resizes-content/);
   });
 });
