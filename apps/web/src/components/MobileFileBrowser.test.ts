@@ -102,6 +102,16 @@ describe("MobileFileBrowser", () => {
       "text",
     );
     assert.equal(resolveMobileMarkdownDisplayKind("image", "source"), "image");
+    assert.equal(
+      classifyMobileFilePreview(
+        { ...markdownEntry, name: "diagram.svg" },
+        {
+          ...textPreview,
+          mimeType: "image/svg+xml",
+        },
+      ),
+      "image",
+    );
 
     const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
     assert.match(
@@ -154,6 +164,19 @@ describe("MobileFileBrowser", () => {
 
     const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
     assert.match(css, /\.mobile-file-preview-pagination\s*{/);
+  });
+
+  it("loads image previews from the complete image stream instead of a bounded data URL", () => {
+    const source = readFileSync(
+      new URL("./MobileFileBrowser.tsx", import.meta.url),
+      "utf8",
+    );
+
+    assert.match(source, /<FileImagePreview/);
+    assert.doesNotMatch(
+      source,
+      /src={`data:\$\{preview\.mimeType\};base64,\$\{preview\.content\}`}/,
+    );
   });
 
   it("collapses secondary file controls by default so the document keeps the available height", () => {

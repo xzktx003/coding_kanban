@@ -125,3 +125,8 @@ This Playwright flow exercises:
 
 The full Playwright suite must stay green so the file browser does not regress
 existing terminal, discovery, tmux, and window-capture flows.
+
+图片预览使用独立的 `POST /api/fs/image` 流式接口，不把 `/api/fs/preview`
+返回的有界二进制前缀拼成 Data URL。本地文件通过受校验路径读取，远端文件
+通过已登记的 SSH/SFTP 目标读取；接口仅接受已知图片 MIME，单张限制 16 MiB。
+桌面和手机端共享 `FileImagePreview`，以 Blob URL 展示完整图片并在卸载时释放。

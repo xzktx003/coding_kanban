@@ -668,19 +668,7 @@ export function previewFile(
   });
 }
 
-export async function fetchMarkdownImage(
-  body: MarkdownImageInput,
-  signal?: AbortSignal,
-): Promise<Blob> {
-  const response = await fetch(`${apiBaseUrl}/api/fs/markdown-image`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
-
+async function readImageBlob(response: Response): Promise<Blob> {
   if (!response.ok) {
     let message = `图片读取失败 (${response.status})`;
     try {
@@ -697,6 +685,38 @@ export async function fetchMarkdownImage(
     throw new Error("服务器返回了非图片内容");
   }
   return response.blob();
+}
+
+export async function fetchMarkdownImage(
+  body: MarkdownImageInput,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const response = await fetch(`${apiBaseUrl}/api/fs/markdown-image`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  return readImageBlob(response);
+}
+
+export async function fetchFileImage(
+  body: Pick<FilePreviewInput, "path" | "sshTarget">,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const response = await fetch(`${apiBaseUrl}/api/fs/image`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  return readImageBlob(response);
 }
 
 export function fetchFileDownload(

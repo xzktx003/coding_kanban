@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildTerminalStreamUrl,
   buildTerminalWebSocketUrl,
+  fetchFileImage,
   fetchMarkdownImage,
   focusAgentSession,
   getFeishuNotificationSettings,
@@ -215,6 +216,28 @@ test("fetchMarkdownImage posts path context and returns an image Blob", async ()
     rootPath: "/workspace",
     source: "../assets/diagram.png",
   });
+});
+
+test("fetchFileImage requests a complete image stream for the selected file", async () => {
+  let requestUrl = "";
+  let requestBody: unknown;
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async (input: string | URL | Request, init?: RequestInit) => {
+      requestUrl = String(input);
+      requestBody = JSON.parse(String(init?.body));
+      return new Response(new Uint8Array([1, 2, 3, 4]), {
+        headers: { "Content-Type": "image/webp" },
+      });
+    },
+  });
+
+  const blob = await fetchFileImage({ path: "/workspace/large.webp" });
+
+  assert.equal(requestUrl, "/api/fs/image");
+  assert.equal(blob.type, "image/webp");
+  assert.equal(blob.size, 4);
+  assert.deepEqual(requestBody, { path: "/workspace/large.webp" });
 });
 
 test("sendCodexImageMessage uploads the image and prompt to the selected Kanban session", async () => {

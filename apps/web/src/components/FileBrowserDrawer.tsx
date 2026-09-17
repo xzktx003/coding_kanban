@@ -21,6 +21,7 @@ import { copyTextToClipboard } from "../lib/clipboard";
 import { isMarkdownFileName } from "../lib/file-types";
 import { isPdfFile } from "../lib/pdf-preview";
 import { PdfFilePreview } from "./PdfFilePreview";
+import { FileImagePreview } from "./FileImagePreview";
 import {
   loadMarkdownPreviewWindow,
   type MarkdownPreviewWindow,
@@ -233,7 +234,11 @@ function updateModeDigit(
 function isTextPreview(
   preview: FilePreviewResponse | null,
 ): preview is FilePreviewResponse {
-  return Boolean(preview && preview.encoding === "utf8");
+  return Boolean(
+    preview &&
+    preview.encoding === "utf8" &&
+    !preview.mimeType?.startsWith("image/"),
+  );
 }
 
 function clampFileBrowserColumnWidth(
@@ -541,11 +546,7 @@ export function FileBrowserDrawer({
       ? preview
       : null;
   const imagePreview =
-    preview &&
-    preview.encoding === "binary" &&
-    preview.mimeType?.startsWith("image/")
-      ? preview
-      : null;
+    preview && preview.mimeType?.startsWith("image/") ? preview : null;
   const dragActive = dragDepth > 0;
   const fileTableStyle = useMemo(
     () =>
@@ -1096,10 +1097,11 @@ export function FileBrowserDrawer({
                 )}
               </>
             ) : imagePreview ? (
-              <img
+              <FileImagePreview
                 alt={selectedFile.name}
-                className="file-browser-preview-image"
-                src={`data:${imagePreview.mimeType};base64,${imagePreview.content}`}
+                key={`${selectedFile.path}:${fullscreen ? "fullscreen" : "inline"}`}
+                path={selectedFile.path}
+                sshTarget={sshTarget}
               />
             ) : (
               <div className="file-browser-preview-meta">

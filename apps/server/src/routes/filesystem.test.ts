@@ -185,6 +185,107 @@ test("filesystem Markdown image route streams the complete contained image", asy
   }
 });
 
+test("filesystem image preview route streams the whole image beyond the bounded preview window", async () => {
+  const rootDir = createTempRoot();
+  const imagePath = path.join(rootDir, "large-preview.png");
+  const image = Buffer.alloc(300 * 1024, 0x5a);
+  writeFileSync(imagePath, image);
+
+  const { app } = buildServer();
+  await app.ready();
+
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/fs/image",
+      payload: { path: imagePath },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers["content-type"], "image/png");
+    assert.equal(response.headers["x-content-type-options"], "nosniff");
+    assert.equal(response.rawPayload.length, image.length);
+    assert.deepEqual(response.rawPayload, image);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+    await app.close();
+  }
+});
+
+test("filesystem image preview route rejects non-images and oversized resources", async () => {
+  const rootDir = createTempRoot();
+  const textPath = path.join(rootDir, "notes.txt");
+  const hugeImagePath = path.join(rootDir, "huge.png");
+  writeFileSync(textPath, "not an image");
+  writeFileSync(hugeImagePath, "");
+  truncateSync(hugeImagePath, 16 * 1024 * 1024 + 1);
+
+  const { app } = buildServer();
+  await app.ready();
+
+  try {
+    const nonImage = await app.inject({
+      method: "POST",
+      url: "/api/fs/image",
+      payload: { path: textPath },
+    });
+    assert.equal(nonImage.statusCode, 415);
+
+    const oversized = await app.inject({
+      method: "POST",
+      url: "/api/fs/image",
+      payload: { path: hugeImagePath },
+    });
+    assert.equal(oversized.statusCode, 413);
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+    await app.close();
+  }
+});
+
+test("filesystem image preview route streams SSH images through SFTP", async () => {
+  const calls: string[] = [];
+  const target = {
+    host: "example.com",
+    port: 22,
+    username: "demo",
+  };
+  const fakeSftpService = {
+    resolveRemotePath: async (_target: unknown, inputPath: string) => inputPath,
+    getFileMetadata: async (_target: unknown, inputPath: string) => {
+      calls.push(`stat:${inputPath}`);
+      return { isDirectory: false, size: 4 };
+    },
+    createReadStream: async (_target: unknown, inputPath: string) => {
+      calls.push(`read:${inputPath}`);
+      return Readable.from(Buffer.from([1, 2, 3, 4]));
+    },
+  };
+  const { app } = buildServer({ sftpService: fakeSftpService as never });
+  await app.ready();
+
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/fs/image",
+      payload: {
+        path: "/home/demo/project/preview.webp",
+        sshTarget: target,
+      },
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.headers["content-type"], "image/webp");
+    assert.deepEqual(calls, [
+      "stat:/home/demo/project/preview.webp",
+      "read:/home/demo/project/preview.webp",
+    ]);
+    assert.deepEqual(response.rawPayload, Buffer.from([1, 2, 3, 4]));
+  } finally {
+    await app.close();
+  }
+});
+
 test("filesystem Markdown image route rejects traversal and non-images", async () => {
   const rootDir = createTempRoot();
   const docsDir = path.join(rootDir, "docs");

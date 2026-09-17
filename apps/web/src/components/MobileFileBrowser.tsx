@@ -18,6 +18,7 @@ import { copyTextToClipboard } from "../lib/clipboard";
 import { isMarkdownFileName } from "../lib/file-types";
 import { isPdfFile } from "../lib/pdf-preview";
 import { PdfFilePreview } from "./PdfFilePreview";
+import { FileImagePreview } from "./FileImagePreview";
 import {
   useFileBrowser,
   type UseFileBrowserHost,
@@ -76,10 +77,11 @@ export function classifyMobileFilePreview(
   preview: FilePreviewResponse,
 ): MobileFilePreviewKind {
   if (isPdfFile(entry.name, preview.mimeType)) return "pdf";
+  if (preview.mimeType?.startsWith("image/")) return "image";
   if (preview.encoding === "utf8") {
     return isMarkdownFileName(entry.name) ? "markdown" : "text";
   }
-  return preview.mimeType?.startsWith("image/") ? "image" : "binary";
+  return "binary";
 }
 
 export function resolveMobileMarkdownDisplayKind(
@@ -482,11 +484,13 @@ export function MobileFileBrowser({
                   </button>
                 </nav>
               )}
-            {preview?.truncated && preview.encoding === "binary" && (
-              <div className="mobile-file-preview-truncated">
-                二进制文件较大，预览已按资源上限截断。
-              </div>
-            )}
+            {preview?.truncated &&
+              preview.encoding === "binary" &&
+              displayKind !== "image" && (
+                <div className="mobile-file-preview-truncated">
+                  二进制文件较大，预览已按资源上限截断。
+                </div>
+              )}
             <div className="mobile-file-preview-path-row">
               <code className="mobile-file-preview-path">{entry.path}</code>
               <button
@@ -538,9 +542,11 @@ export function MobileFileBrowser({
           ) : preview && displayKind === "text" ? (
             <pre>{preview.content}</pre>
           ) : preview && displayKind === "image" ? (
-            <img
+            <FileImagePreview
               alt={entry.name}
-              src={`data:${preview.mimeType};base64,${preview.content}`}
+              key={entry.path}
+              path={entry.path}
+              sshTarget={sshTarget}
             />
           ) : (
             <div className="mobile-file-browser-state">

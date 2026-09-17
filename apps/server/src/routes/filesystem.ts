@@ -40,7 +40,7 @@ const { ZipArchive } = archiverModule as unknown as {
   ZipArchive: ZipArchiveConstructor;
 };
 
-const MAX_MARKDOWN_IMAGE_BYTES = 16 * 1024 * 1024;
+const MAX_STREAMED_IMAGE_BYTES = 16 * 1024 * 1024;
 
 /**
  * Build a Content-Disposition header that handles non-ASCII filenames.
@@ -111,11 +111,17 @@ function getErrorStatusCode(error: unknown): number {
     return 400;
   }
 
-  if (message.includes("Unsupported Markdown image type")) {
+  if (
+    message.includes("Unsupported Markdown image type") ||
+    message.includes("Unsupported image preview type")
+  ) {
     return 415;
   }
 
-  if (message.includes("Markdown image exceeds")) {
+  if (
+    message.includes("Markdown image exceeds") ||
+    message.includes("Image preview exceeds")
+  ) {
     return 413;
   }
 
@@ -244,6 +250,46 @@ export async function registerFilesystemRoutes(
     },
   );
 
+  fastify.post<{
+    Body: Pick<FilePreviewInput, "path" | "sshTarget">;
+  }>("/api/fs/image", async (request, reply) => {
+    try {
+      const targetPath = request.body.path;
+      const sshTarget = request.body.sshTarget;
+      const resolvedPath = sshTarget
+        ? await sftpService.resolveRemotePath(sshTarget, targetPath)
+        : localFsService.resolvePath(targetPath);
+      const metadata = sshTarget
+        ? await sftpService.getFileMetadata(sshTarget, resolvedPath)
+        : await localFsService.getFileMetadata(resolvedPath);
+      const mimeType = guessMimeType(resolvedPath);
+
+      if (metadata.isDirectory || !mimeType?.startsWith("image/")) {
+        throw new Error("Unsupported image preview type");
+      }
+      if (metadata.size > MAX_STREAMED_IMAGE_BYTES) {
+        throw new Error(
+          `Image preview exceeds ${MAX_STREAMED_IMAGE_BYTES} bytes`,
+        );
+      }
+
+      const imageStream = sshTarget
+        ? await sftpService.createReadStream(sshTarget, resolvedPath)
+        : localFsService.createReadStream(resolvedPath);
+
+      reply.header("Cache-Control", "private, max-age=60");
+      reply.header("Content-Length", metadata.size);
+      reply.header("Content-Type", mimeType);
+      reply.header("X-Content-Type-Options", "nosniff");
+      return reply.send(imageStream);
+    } catch (error) {
+      reply.code(getErrorStatusCode(error));
+      return {
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  });
+
   fastify.post<{ Body: MarkdownImageInput }>(
     "/api/fs/markdown-image",
     async (request, reply) => {
@@ -310,9 +356,9 @@ export async function registerFilesystemRoutes(
         if (!mimeType?.startsWith("image/")) {
           throw new Error("Unsupported Markdown image type");
         }
-        if (imageSize > MAX_MARKDOWN_IMAGE_BYTES) {
+        if (imageSize > MAX_STREAMED_IMAGE_BYTES) {
           throw new Error(
-            `Markdown image exceeds ${MAX_MARKDOWN_IMAGE_BYTES} bytes`,
+            `Markdown image exceeds ${MAX_STREAMED_IMAGE_BYTES} bytes`,
           );
         }
 

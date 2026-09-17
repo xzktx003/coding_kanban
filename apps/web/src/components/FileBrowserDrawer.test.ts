@@ -153,4 +153,26 @@ describe("FileBrowserDrawer", () => {
       /\.file-browser-fullscreen-preview\s*{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*z-index:\s*5200;/s,
     );
   });
+
+  it("loads image previews from the complete image stream instead of a bounded data URL", () => {
+    const source = readFileSync(
+      new URL("./FileBrowserDrawer.tsx", import.meta.url),
+      "utf8",
+    );
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+    assert.match(source, /<FileImagePreview/);
+    assert.doesNotMatch(
+      source,
+      /src={`data:\$\{imagePreview\.mimeType\};base64,\$\{imagePreview\.content\}`}/,
+    );
+    assert.match(
+      css,
+      /\.file-image-preview\s*{[^}]*display:\s*grid;[^}]*place-items:\s*center;[^}]*overflow:\s*auto;/s,
+    );
+    assert.match(
+      css,
+      /\.file-image-preview \.file-browser-preview-image\s*{[^}]*max-width:\s*100%;[^}]*max-height:\s*100%;[^}]*object-fit:\s*contain;/s,
+    );
+  });
 });
