@@ -882,3 +882,101 @@ test("CodexTranscriptService reads a remote Codex JSONL session by working direc
     completedAt: "2026-08-25T02:00:02.000Z",
   });
 });
+
+test("CodexTranscriptService stops remote metadata scanning after the newest matching batch", async () => {
+  const matchingPath = "/home/demo/.codex/sessions/newest.jsonl";
+  const matchingContent = Buffer.from(
+    [
+      line({
+        type: "session_meta",
+        payload: { id: "remote-batched", cwd: "/home/demo/project" },
+      }),
+      line({
+        timestamp: "2026-09-17T01:00:00.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "batched remote history" }],
+        },
+      }),
+    ].join(""),
+  );
+  const files = [
+    {
+      path: matchingPath,
+      size: matchingContent.length,
+      modifiedAt: "2026-09-17T01:00:00.000Z",
+    },
+    ...Array.from({ length: 63 }, (_, index) => ({
+      path: `/home/demo/.codex/sessions/older-${index}.jsonl`,
+      size: 128,
+      modifiedAt: new Date(
+        Date.parse("2026-09-16T00:00:00.000Z") - index * 1_000,
+      ).toISOString(),
+    })),
+  ];
+  const metadataBatchSizes: number[] = [];
+  const remoteAccess = {
+    async resolveRemotePath(_target: unknown, inputPath: string) {
+      return inputPath === "~/project"
+        ? "/home/demo/project"
+        : "/home/demo/.codex/sessions";
+    },
+    async listRecursive() {
+      return files;
+    },
+    async readRanges(
+      _target: unknown,
+      requests: Array<{ path: string; offset: number; length: number }>,
+    ) {
+      metadataBatchSizes.push(requests.length);
+      return requests.map((request) => {
+        const content =
+          request.path === matchingPath
+            ? matchingContent
+            : Buffer.from(
+                line({
+                  type: "session_meta",
+                  payload: {
+                    id: `other-${request.path}`,
+                    cwd: "/home/demo/other",
+                  },
+                }),
+              );
+        return {
+          path: request.path,
+          size: content.length,
+          buffer: content.subarray(
+            request.offset,
+            request.offset + request.length,
+          ),
+        };
+      });
+    },
+    async readRange(
+      _target: unknown,
+      path: string,
+      offset: number,
+      length: number,
+    ) {
+      const content = path === matchingPath ? matchingContent : Buffer.alloc(0);
+      return {
+        path,
+        size: content.length,
+        buffer: content.subarray(offset, offset + length),
+      };
+    },
+  };
+
+  const response = await new CodexTranscriptService({
+    remoteFileAccess: remoteAccess as never,
+  }).readRemote({
+    sshTarget: { host: "remote.example", username: "demo" },
+    workingDirectory: "~/project",
+  });
+
+  assert.equal(response.available, true);
+  assert.equal(response.sessionId, "remote-batched");
+  assert.deepEqual(metadataBatchSizes, [8]);
+});

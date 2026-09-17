@@ -657,6 +657,88 @@ test("GET transcript reads remote Codex history through the remote reader", asyn
   await app.close();
 });
 
+test("GET transcript follows the live remote tmux pane when the registered card is stale", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const sshTarget = {
+    host: "remote.example",
+    port: 22,
+    username: "demo",
+  };
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "remote.example",
+    sourceType: "remote-connect",
+    agentKind: "bash",
+    displayName: "remote tmux Codex",
+    workingDirectory: "/workspace/stale-pane",
+    connectionState: "online",
+    interactionState: "running",
+    transportRef: { tmuxSession: "remote-tmux", tmuxPane: "%1" },
+    sshTarget,
+  });
+  let receivedInput: unknown;
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {
+      async discoverRemote() {
+        return {
+          unavailable: false,
+          items: [
+            {
+              ...session,
+              agentKind: "node",
+              workingDirectory: "/workspace/live-codex",
+              transportRef: {
+                ...session.transportRef,
+                tmuxPane: "%9",
+              },
+            },
+          ],
+        };
+      },
+    } as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    codexTranscriptService: {
+      read() {
+        throw new Error("remote sessions must not use the local reader");
+      },
+      async readRemote(input) {
+        receivedInput = input;
+        return {
+          available: true,
+          agentKind: "codex" as const,
+          sessionId: "remote-session",
+          matchedBy: "working-directory" as const,
+          updatedAt: "2026-09-17T00:00:00.000Z",
+          entries: [],
+          hasMore: false,
+          nextCursor: null,
+        };
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/agent-sessions/${session.id}/transcript`,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal((response.json() as AgentTranscriptResponse).available, true);
+  assert.deepEqual(receivedInput, {
+    sshTarget,
+    workingDirectory: "/workspace/live-codex",
+  });
+  await app.close();
+});
+
 test("GET task summary extracts the latest structured Codex messages", async () => {
   const app = Fastify();
   const registry = new AgentSessionRegistry();

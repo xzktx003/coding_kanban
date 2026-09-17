@@ -264,3 +264,73 @@ test("readRanges reuses one SFTP channel for multiple metadata windows", async (
   );
   assert.equal(client.connectCalls, 1);
 });
+
+test("listRecursive overlaps independent remote directory reads", async () => {
+  let activeReads = 0;
+  let maxActiveReads = 0;
+  const directoryEntry = (name: string) => ({
+    filename: name,
+    longname: `drwxr-xr-x 2 demo staff 0 Sep 17 12:00 ${name}`,
+    attrs: { mode: 0o040755, size: 0, mtime: 1_789_600_000 },
+  });
+  const fileEntry = (name: string) => ({
+    filename: name,
+    longname: `-rw-r--r-- 1 demo staff 10 Sep 17 12:00 ${name}`,
+    attrs: { mode: 0o100644, size: 10, mtime: 1_789_600_000 },
+  });
+  const sftp = {
+    end() {},
+    realpath(
+      remotePath: string,
+      callback: (error: Error | undefined, resolvedPath?: string) => void,
+    ) {
+      callback(undefined, remotePath === "." ? "/home/demo" : remotePath);
+    },
+    readdir(
+      remotePath: string,
+      callback: (
+        error: Error | undefined,
+        items?: ReturnType<typeof directoryEntry>[],
+      ) => void,
+    ) {
+      activeReads += 1;
+      maxActiveReads = Math.max(maxActiveReads, activeReads);
+      setTimeout(() => {
+        activeReads -= 1;
+        if (remotePath === "/sessions") {
+          callback(
+            undefined,
+            Array.from({ length: 12 }, (_, index) =>
+              directoryEntry(`day-${index}`),
+            ),
+          );
+          return;
+        }
+        callback(undefined, [fileEntry("rollout.jsonl")]);
+      }, 2);
+    },
+  };
+  class RecursiveClient extends EventEmitter {
+    connect(): this {
+      setImmediate(() => this.emit("ready"));
+      return this;
+    }
+
+    sftp(callback: (error: Error | undefined, value?: unknown) => void): void {
+      callback(undefined, sftp);
+    }
+
+    end(): this {
+      return this;
+    }
+  }
+  const service = new SftpService(() => new RecursiveClient() as never);
+
+  const files = await service.listRecursive(
+    { host: "example.com", username: "demo" },
+    "/sessions",
+  );
+
+  assert.equal(files.length, 12);
+  assert.ok(maxActiveReads > 1);
+});

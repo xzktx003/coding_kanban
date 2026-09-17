@@ -481,29 +481,38 @@ export class SftpService {
   ): Promise<SftpRecursiveFileEntry[]> {
     const remotePath = await this.resolveRemotePath(target, inputPath);
     const results: SftpRecursiveFileEntry[] = [];
+    const maxConcurrentReads = 8;
 
     await this.withConnection(target, async (client) =>
       withSftp(client, async (sftp) => {
-        const walk = async (dir: string) => {
-          const items = await sftpReaddir(sftp, dir);
-          for (const item of items) {
-            if (item.filename === "." || item.filename === "..") continue;
-            const fullPath = `${dir}/${item.filename}`;
-            const isDir = (item.attrs.mode & 0o40000) !== 0;
-            if (isDir) {
-              await walk(fullPath);
-            } else {
-              results.push({
-                path: fullPath,
-                size: item.attrs.size ?? 0,
-                modifiedAt: new Date(
-                  (item.attrs.mtime ?? 0) * 1000,
-                ).toISOString(),
-              });
+        const pending = [remotePath];
+        while (pending.length > 0) {
+          const directories = pending.splice(0, maxConcurrentReads);
+          const listings = await Promise.all(
+            directories.map(async (directory) => ({
+              directory,
+              items: await sftpReaddir(sftp, directory),
+            })),
+          );
+          for (const { directory, items } of listings) {
+            for (const item of items) {
+              if (item.filename === "." || item.filename === "..") continue;
+              const fullPath = `${directory}/${item.filename}`;
+              const isDir = (item.attrs.mode & 0o40000) !== 0;
+              if (isDir) {
+                pending.push(fullPath);
+              } else {
+                results.push({
+                  path: fullPath,
+                  size: item.attrs.size ?? 0,
+                  modifiedAt: new Date(
+                    (item.attrs.mtime ?? 0) * 1000,
+                  ).toISOString(),
+                });
+              }
             }
           }
-        };
-        await walk(remotePath);
+        }
       }),
     );
 

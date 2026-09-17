@@ -16,6 +16,7 @@ import type {
 } from "@agent-orchestrator/shared";
 
 const SESSION_HEADER_BYTES = 64 * 1024;
+const REMOTE_METADATA_BATCH_SIZE = 8;
 const TRANSCRIPT_READ_BLOCK_BYTES = 64 * 1024;
 const REMOTE_TRANSCRIPT_READ_BLOCK_BYTES = 4 * 1024 * 1024;
 const LATEST_COMPLETION_SCAN_BYTES = 1024 * 1024;
@@ -1190,14 +1191,21 @@ export class CodexTranscriptService {
         requestedDirectory,
       ),
     );
-    const metadataByPath = await this.readRemoteSessionMetadataMap(
-      input.sshTarget,
-      files,
-    );
-    for (const file of files) {
-      const metadata = metadataByPath.get(file.path);
-      if (metadata && resolve(metadata.cwd) === normalizedDirectory) {
-        return { file, metadata, matchedBy: "working-directory" };
+    for (
+      let offset = 0;
+      offset < files.length;
+      offset += REMOTE_METADATA_BATCH_SIZE
+    ) {
+      const batch = files.slice(offset, offset + REMOTE_METADATA_BATCH_SIZE);
+      const metadataByPath = await this.readRemoteSessionMetadataMap(
+        input.sshTarget,
+        batch,
+      );
+      for (const file of batch) {
+        const metadata = metadataByPath.get(file.path);
+        if (metadata && resolve(metadata.cwd) === normalizedDirectory) {
+          return { file, metadata, matchedBy: "working-directory" };
+        }
       }
     }
     return null;

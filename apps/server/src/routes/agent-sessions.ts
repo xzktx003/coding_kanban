@@ -76,13 +76,13 @@ interface TimedCacheEntry<T> {
   expiresAt: number;
 }
 
-function canProbeLocalTmuxForCodex(
+function canProbeTmuxForCodex(
   session: Pick<
     AgentSessionRecord,
     "agentKind" | "hostId" | "sshTarget" | "transportRef"
   >,
 ): boolean {
-  if (isRemoteAgentSession(session) || !session.transportRef?.tmuxSession) {
+  if (!session.transportRef?.tmuxSession) {
     return false;
   }
 
@@ -90,6 +90,13 @@ function canProbeLocalTmuxForCodex(
   // one tmux session. Explicit non-Codex agent cards retain their own reader.
   const agentKind = session.agentKind.trim().toLowerCase();
   return !["claude", "copilot", "opencode"].includes(agentKind);
+}
+
+function isLiveRemoteCodexCommand(agentKind: string): boolean {
+  const command = agentKind.trim().toLowerCase().split("/").at(-1) ?? "";
+  return (
+    command === "node" || command === "codex" || command.startsWith("codex-")
+  );
 }
 
 function buildAgentInvocation(
@@ -558,7 +565,7 @@ export async function registerAgentSessionRoutes(
     const agentSession = registry.get(request.params.id);
     if (
       !isCodexSessionCandidate(agentSession) &&
-      !canProbeLocalTmuxForCodex(agentSession)
+      !canProbeTmuxForCodex(agentSession)
     ) {
       return {
         available: false,
@@ -573,7 +580,6 @@ export async function registerAgentSessionRoutes(
       };
     }
 
-    const sessionId = await resolveCodexSessionId(agentSession);
     const requestedLimit = Number(request.query.limit);
     if (isRemoteAgentSession(agentSession)) {
       if (!agentSession.sshTarget || !codexTranscriptService.readRemote) {
@@ -590,17 +596,49 @@ export async function registerAgentSessionRoutes(
         };
       }
 
+      let workingDirectory = agentSession.workingDirectory;
+      const tmuxSession = agentSession.transportRef?.tmuxSession;
+      if (tmuxSession && typeof tmuxAdapter.discoverRemote === "function") {
+        try {
+          const discovery = await tmuxAdapter.discoverRemote(
+            agentSession.sshTarget,
+          );
+          const liveSession = discovery.items.find(
+            (item) => item.transportRef?.tmuxSession === tmuxSession,
+          );
+          if (liveSession) {
+            if (!isLiveRemoteCodexCommand(liveSession.agentKind)) {
+              return {
+                available: false,
+                agentKind: "codex" as const,
+                sessionId: null,
+                matchedBy: null,
+                updatedAt: null,
+                entries: [],
+                hasMore: false,
+                nextCursor: null,
+                message: "当前远端 tmux 窗格未在运行 Codex。",
+              };
+            }
+            workingDirectory = liveSession.workingDirectory;
+          }
+        } catch {
+          // Keep the registered directory as a fallback when the live tmux
+          // probe races with a reconnect or the remote host is briefly busy.
+        }
+      }
+
+      // A registered remote tmux card can switch windows after it was added.
+      // Its persisted session ID would then point at the previous pane, so
+      // resolve the live pane by its freshly discovered working directory.
+      const sessionId = tmuxSession
+        ? undefined
+        : await resolveCodexSessionId(agentSession);
+
       return codexTranscriptService.readRemote({
         sshTarget: agentSession.sshTarget,
         ...(sessionId ? { sessionId } : {}),
-        ...(resolveCodexWorkingDirectory(agentSession, sessionId)
-          ? {
-              workingDirectory: resolveCodexWorkingDirectory(
-                agentSession,
-                sessionId,
-              ),
-            }
-          : {}),
+        ...(workingDirectory ? { workingDirectory } : {}),
         ...(request.query.cursor ? { cursor: request.query.cursor } : {}),
         ...(Number.isSafeInteger(requestedLimit)
           ? { limit: requestedLimit }
@@ -608,6 +646,7 @@ export async function registerAgentSessionRoutes(
       });
     }
 
+    const sessionId = await resolveCodexSessionId(agentSession);
     return codexTranscriptService.read({
       sessionId,
       workingDirectory: resolveCodexWorkingDirectory(agentSession, sessionId),
