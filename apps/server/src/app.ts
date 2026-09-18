@@ -51,6 +51,7 @@ import { FeishuReplyCommandService } from "./services/feishu-reply-command-servi
 import { FeishuReplyEventListener } from "./services/feishu-reply-event-listener.js";
 import { FeishuControlPanelService } from "./services/feishu-control-panel-service.js";
 import { FeishuControlMessenger } from "./services/feishu-control-messenger.js";
+import { FeishuImageResourceService } from "./services/feishu-image-resource-service.js";
 import { buildFeishuControlPanelCard } from "./services/feishu-control-panel-card.js";
 import { FeishuSessionWorkspace } from "./services/feishu-session-workspace.js";
 import { FeishuWorkspaceFiles } from "./services/feishu-workspace-files.js";
@@ -103,6 +104,7 @@ interface BuildServerOptions {
   feishuCompletionContentResolver?: FeishuCompletionContentResolverLike;
   feishuReplyBindingStore?: FeishuReplyBindingStore;
   feishuReplyAllowedUserId?: string;
+  feishuImageResourceService?: Pick<FeishuImageResourceService, "download">;
 }
 
 interface LocalTmuxSocketInputStateDependencies {
@@ -269,6 +271,8 @@ export function buildServer(options: BuildServerOptions = {}): {
     new CodexImageMessageService({
       remoteFileAccess: createCodexImageRemoteFileAccess(sftpService),
     });
+  const feishuImageResourceService =
+    options.feishuImageResourceService ?? new FeishuImageResourceService();
   const vsCodeWebManager = options.vsCodeWebManager ?? new VsCodeWebManager();
   const remoteLaunchPreflight =
     options.remoteLaunchPreflight ?? new RemoteLaunchPreflight();
@@ -359,6 +363,7 @@ export function buildServer(options: BuildServerOptions = {}): {
           settings: feishuNotificationSettingsService,
           bindings: options.feishuReplyBindingStore,
           registry,
+          images: feishuImageResourceService,
           codex: {
             resolveSessionId: (session) =>
               resolveActiveCodexSessionId(session, {
@@ -366,6 +371,7 @@ export function buildServer(options: BuildServerOptions = {}): {
                 codexSessionLocator,
               }),
             sendText: (input) => codexImageMessageService.sendText(input),
+            sendImage: (input) => codexImageMessageService.send(input),
           },
         })
       : null;

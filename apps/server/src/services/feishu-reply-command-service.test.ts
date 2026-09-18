@@ -48,9 +48,21 @@ function createFixture(
     targetSession?: AgentSessionRecord;
     threadId?: string | null;
     sendText?: () => Promise<void>;
+    downloadImage?: () => Promise<{
+      image: Buffer;
+      imageExtension: "jpg" | "png" | "webp";
+    }>;
+    sendImage?: () => Promise<void>;
   } = {},
 ) {
   const writes: Array<{ sessionId: string; prompt: string }> = [];
+  const imageWrites: Array<{
+    sessionId: string;
+    prompt: string;
+    image: Buffer;
+    imageExtension: "jpg" | "png" | "webp";
+  }> = [];
+  const imageDownloads: Array<{ messageId: string; imageKey: string }> = [];
   const processed = new Set<string>();
   const replyBindings = new Map<string, FeishuReplyBinding>();
   const initialBinding = overrides.resolvedBinding ?? binding;
@@ -84,6 +96,19 @@ function createFixture(
     registry: {
       get: () => overrides.targetSession ?? session,
     },
+    images: {
+      download: async (input) => {
+        imageDownloads.push(input);
+        return (
+          (await overrides.downloadImage?.()) ?? {
+            image: Buffer.from([
+              0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+            ]),
+            imageExtension: "png",
+          }
+        );
+      },
+    },
     codex: {
       resolveSessionId: async () =>
         overrides.threadId === null
@@ -93,10 +118,26 @@ function createFixture(
         writes.push({ sessionId: input.threadId, prompt: input.message });
         await overrides.sendText?.();
       },
+      sendImage: async (input) => {
+        imageWrites.push({
+          sessionId: input.threadId,
+          prompt: input.message,
+          image: input.image,
+          imageExtension: input.imageExtension,
+        });
+        await overrides.sendImage?.();
+      },
     },
   });
 
-  return { service, writes, processed, replyBindings };
+  return {
+    service,
+    writes,
+    imageWrites,
+    imageDownloads,
+    processed,
+    replyBindings,
+  };
 }
 
 test("routes a trusted direct reply to the bound Codex terminal exactly once", async () => {
@@ -182,6 +223,32 @@ test("extracts rendered text from a trusted Feishu post reply", async () => {
   assert.equal(fixture.processed.has("om_post_reply"), true);
 });
 
+test("downloads a trusted Feishu image reply and queues it to the bound Codex thread", async () => {
+  const fixture = createFixture();
+  const event = {
+    ...validEvent,
+    message_id: "om_image_reply",
+    message_type: "image",
+    content: "![Image](img_v3_safe_image_key)",
+  };
+
+  assert.equal(await fixture.service.handle(event), "delivered");
+  assert.deepEqual(fixture.imageDownloads, [
+    {
+      messageId: "om_image_reply",
+      imageKey: "img_v3_safe_image_key",
+    },
+  ]);
+  assert.equal(fixture.imageWrites.length, 1);
+  assert.deepEqual(fixture.imageWrites[0], {
+    sessionId: "codex-thread-1",
+    prompt: "请查看这张从飞书回复发送的图片。",
+    image: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    imageExtension: "png",
+  });
+  assert.equal(fixture.processed.has("om_image_reply"), true);
+});
+
 test("does not queue a reply when the active Codex thread cannot be resolved", async () => {
   const fixture = createFixture({ threadId: null });
   assert.equal(await fixture.service.handle(validEvent), "ignored_unavailable");
@@ -221,7 +288,7 @@ test("waits for native queue acknowledgement and deduplicates in-flight events",
   assert.equal(fixture.writes.length, 1);
 });
 
-test("rejects messages that are not a trusted private textual reply", async () => {
+test("rejects messages that are not a trusted supported private reply", async () => {
   const cases: Array<Partial<FeishuInboundMessageEvent>> = [
     { sender_id: "ou_other" },
     { sender_type: "bot" },
@@ -240,6 +307,24 @@ test("rejects messages that are not a trusted private textual reply", async () =
     assert.notEqual(await fixture.service.handle(event), "delivered");
     assert.equal(fixture.writes.length, 0);
   }
+});
+
+test("does not mark an image reply processed when downloading it fails", async () => {
+  const fixture = createFixture({
+    downloadImage: async () => {
+      throw new Error("download failed");
+    },
+  });
+  const event = {
+    ...validEvent,
+    message_id: "om_failed_image",
+    message_type: "image",
+    content: "![Image](img_v3_safe_image_key)",
+  };
+
+  await assert.rejects(fixture.service.handle(event), /download failed/);
+  assert.equal(fixture.processed.has("om_failed_image"), false);
+  assert.deepEqual(fixture.imageWrites, []);
 });
 
 test("requires an enabled reply switch and a live controllable Codex session", async () => {
@@ -283,9 +368,18 @@ test("does not mark an inbound message processed when terminal delivery fails", 
       recordProcessedReply: ({ messageId }) => processed.add(messageId),
     },
     registry: { get: () => session },
+    images: {
+      download: async () => ({
+        image: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+        imageExtension: "png",
+      }),
+    },
     codex: {
       resolveSessionId: async () => "codex-thread-1",
       sendText: async () => {
+        throw new Error("terminal unavailable");
+      },
+      sendImage: async () => {
         throw new Error("terminal unavailable");
       },
     },

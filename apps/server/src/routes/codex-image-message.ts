@@ -8,11 +8,12 @@ import { resolveActiveCodexSessionId } from "../services/active-codex-session-re
 import type { CodexSessionLocator } from "../services/codex-session-locator.js";
 import {
   CodexImageMessageUnavailableError,
+  detectCodexImageExtension,
+  MAX_CODEX_IMAGE_BYTES,
   type CodexImageExtension,
   type CodexImageMessageService,
 } from "../services/codex-image-message-service.js";
 
-export const MAX_CODEX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_CODEX_IMAGE_MESSAGE_CHARACTERS = 8_000;
 const DEFAULT_CODEX_IMAGE_MESSAGE = "请查看这张图片。";
 
@@ -29,33 +30,6 @@ class CodexImageRequestError extends Error {
   ) {
     super(message);
   }
-}
-
-function detectImageExtension(image: Buffer): CodexImageExtension | null {
-  if (
-    image.length >= 8 &&
-    image
-      .subarray(0, 8)
-      .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
-  ) {
-    return "png";
-  }
-  if (
-    image.length >= 3 &&
-    image[0] === 0xff &&
-    image[1] === 0xd8 &&
-    image[2] === 0xff
-  ) {
-    return "jpg";
-  }
-  if (
-    image.length >= 12 &&
-    image.subarray(0, 4).toString("ascii") === "RIFF" &&
-    image.subarray(8, 12).toString("ascii") === "WEBP"
-  ) {
-    return "webp";
-  }
-  return null;
 }
 
 async function readImageParts(request: Pick<FastifyRequest, "parts">): Promise<{
@@ -110,7 +84,7 @@ async function readImageParts(request: Pick<FastifyRequest, "parts">): Promise<{
   if (!image || image.length === 0) {
     throw new CodexImageRequestError("请选择要发送的图片", 400);
   }
-  const imageExtension = detectImageExtension(image);
+  const imageExtension = detectCodexImageExtension(image);
   if (!imageExtension) {
     throw new CodexImageRequestError(
       "当前只支持真实的 PNG、JPEG 或 WebP 图片",

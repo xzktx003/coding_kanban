@@ -6,6 +6,11 @@ import {
 
 import type { FeishuReplyBinding } from "./feishu-reply-binding-store.js";
 import type { CodexImageMessageService } from "./codex-image-message-service.js";
+import {
+  DEFAULT_FEISHU_IMAGE_PROMPT,
+  extractFeishuImageKey,
+  type FeishuImageResourceService,
+} from "./feishu-image-resource-service.js";
 
 const USER_ID_PATTERN = /^ou_[A-Za-z0-9_-]+$/;
 const MESSAGE_ID_PATTERN = /^om_[A-Za-z0-9_-]+$/;
@@ -33,6 +38,7 @@ export type FeishuReplyCommandOutcome =
   | "ignored_unbound"
   | "ignored_duplicate"
   | "ignored_invalid_text"
+  | "ignored_invalid_image"
   | "ignored_unavailable";
 
 interface FeishuReplyCommandServiceOptions {
@@ -48,9 +54,11 @@ interface FeishuReplyCommandServiceOptions {
     }): void;
   };
   registry: { get(sessionId: string): AgentSessionRecord };
+  images: Pick<FeishuImageResourceService, "download">;
   codex: {
     resolveSessionId(session: AgentSessionRecord): Promise<string | undefined>;
     sendText: CodexImageMessageService["sendText"];
+    sendImage: CodexImageMessageService["send"];
   };
 }
 
@@ -84,6 +92,7 @@ export class FeishuReplyCommandService {
   readonly #settings: FeishuReplyCommandServiceOptions["settings"];
   readonly #bindings: FeishuReplyCommandServiceOptions["bindings"];
   readonly #registry: FeishuReplyCommandServiceOptions["registry"];
+  readonly #images: FeishuReplyCommandServiceOptions["images"];
   readonly #codex: FeishuReplyCommandServiceOptions["codex"];
   readonly #inFlightMessageIds = new Set<string>();
 
@@ -94,6 +103,7 @@ export class FeishuReplyCommandService {
     this.#settings = options.settings;
     this.#bindings = options.bindings;
     this.#registry = options.registry;
+    this.#images = options.images;
     this.#codex = options.codex;
   }
 
@@ -115,7 +125,9 @@ export class FeishuReplyCommandService {
       event.chat_type !== "p2p" ||
       event.sender_type !== "user" ||
       event.sender_id !== this.#allowedUserId ||
-      (event.message_type !== "text" && event.message_type !== "post") ||
+      (event.message_type !== "text" &&
+        event.message_type !== "post" &&
+        event.message_type !== "image") ||
       typeof event.message_id !== "string" ||
       !MESSAGE_ID_PATTERN.test(event.message_id) ||
       typeof event.reply_to !== "string" ||
@@ -142,10 +154,18 @@ export class FeishuReplyCommandService {
       return "ignored_duplicate";
     }
 
+    const imageKey =
+      event.message_type === "image" && typeof event.content === "string"
+        ? extractFeishuImageKey(event.content)
+        : null;
     const prompt =
-      typeof event.content === "string" ? normalizePrompt(event.content) : null;
-    if (!prompt) {
-      return "ignored_invalid_text";
+      event.message_type !== "image" && typeof event.content === "string"
+        ? normalizePrompt(event.content)
+        : null;
+    if (event.message_type === "image" ? !imageKey : !prompt) {
+      return event.message_type === "image"
+        ? "ignored_invalid_image"
+        : "ignored_invalid_text";
     }
 
     let session: AgentSessionRecord;
@@ -167,14 +187,29 @@ export class FeishuReplyCommandService {
       ) {
         return "ignored_unavailable";
       }
-      // The native queue acknowledges receipt without relying on TUI paste,
-      // focus, Enter timing, or an idle composer. Busy threads keep the message.
-      await this.#codex.sendText({
-        threadId,
-        message: prompt,
-        workingDirectory: session.workingDirectory,
-        sshTarget: session.sshTarget,
-      });
+      if (imageKey) {
+        const image = await this.#images.download({
+          messageId: event.message_id,
+          imageKey,
+        });
+        await this.#codex.sendImage({
+          threadId,
+          message: DEFAULT_FEISHU_IMAGE_PROMPT,
+          image: image.image,
+          imageExtension: image.imageExtension,
+          workingDirectory: session.workingDirectory,
+          sshTarget: session.sshTarget,
+        });
+      } else {
+        // The native queue acknowledges receipt without relying on TUI paste,
+        // focus, Enter timing, or an idle composer. Busy threads keep the message.
+        await this.#codex.sendText({
+          threadId,
+          message: prompt!,
+          workingDirectory: session.workingDirectory,
+          sshTarget: session.sshTarget,
+        });
+      }
       this.#bindings.recordProcessedReply({
         messageId: event.message_id,
         parent: binding,

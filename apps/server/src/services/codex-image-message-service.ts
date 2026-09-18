@@ -22,6 +22,7 @@ const CODEX_THREAD_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
 const CODEX_IMAGE_COMMAND_TIMEOUT_MS = 30_000;
 const CODEX_IMAGE_COMMAND_MAX_BUFFER_BYTES = 1024 * 1024;
 const REMOTE_IMAGE_DIRECTORY = "~/.cache/coding-kanban/codex-images";
+export const MAX_CODEX_IMAGE_BYTES = 10 * 1024 * 1024;
 export const CODEX_IMAGE_FALLBACK_TTL_MS = 24 * 60 * 60 * 1000;
 
 export type CodexImageExtension = "jpg" | "png" | "webp";
@@ -92,6 +93,35 @@ export interface SendCodexTextMessageInput {
 }
 
 export class CodexImageMessageUnavailableError extends Error {}
+
+export function detectCodexImageExtension(
+  image: Buffer,
+): CodexImageExtension | null {
+  if (
+    image.length >= 8 &&
+    image
+      .subarray(0, 8)
+      .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+  ) {
+    return "png";
+  }
+  if (
+    image.length >= 3 &&
+    image[0] === 0xff &&
+    image[1] === 0xd8 &&
+    image[2] === 0xff
+  ) {
+    return "jpg";
+  }
+  if (
+    image.length >= 12 &&
+    image.subarray(0, 4).toString("ascii") === "RIFF" &&
+    image.subarray(8, 12).toString("ascii") === "WEBP"
+  ) {
+    return "webp";
+  }
+  return null;
+}
 
 function resolveLocalWorkingDirectory(
   workingDirectory: string | undefined,

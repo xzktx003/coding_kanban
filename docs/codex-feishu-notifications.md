@@ -60,7 +60,7 @@ AgentSessionRegistry
 
 如果还要使用“飞书回复继续执行”，必须使用私聊目标，并额外完成：
 
-1. 为机器人应用开通 `im:message.p2p_msg:readonly` 权限。
+1. 为机器人应用开通 `im:message.p2p_msg:readonly` 权限；如果要从回复中下载图片，还需开通 `im:message:readonly`。
 2. 在飞书开放平台为应用订阅 `im.message.receive_v1` 事件，并使用长连接接收事件。
 3. `.env` 只配置 `FEISHU_NOTIFY_USER_ID=ou_xxx`；群聊目标不能开启回复控制。
 
@@ -132,7 +132,7 @@ Codex 会话输出变化后，后端会先从当前看板会话定位真实 Code
 
 另提供独立的机器人固定菜单 [Codex 对话控制面板](feishu-codex-control-panel.md)，可选择其他会话发送指令；它不会改变下述通知卡片回复规则。
 
-开启“飞书回复继续执行”后，机器人通过 `lark-cli` 长连接监听私聊消息。用户可以使用飞书的“回复”动作回复某一条 Coding Kanban 完成通知，也可以继续回复一条已经成功送入 Codex 的用户回复；普通 `text` 与飞书已解码为可读文本的富文本 `post` 回复都复用同一套内容清洗后提交。回复的直接父消息没有绑定时，服务仅按飞书事件提供且仍有本地绑定的精确 `root_id` 回溯原通知，因此升级前已经形成的回复链也能继续；不会查询历史消息或猜测目标。普通新消息、群聊消息、图片等非文本消息、其他用户消息，以及回复无法映射的历史消息都会被忽略。若一次完整输出被拆成多条，每一片都绑定到同一个看板会话，回复任意一片均可继续该会话。
+开启“飞书回复继续执行”后，机器人通过 `lark-cli` 长连接监听私聊消息。用户可以使用飞书的“回复”动作回复某一条 Coding Kanban 完成通知，也可以继续回复一条已经成功送入 Codex 的用户回复；普通 `text` 与飞书已解码为可读文本的富文本 `post` 回复都复用同一套内容清洗后提交。单张 `image` 回复会按该消息的 `message_id + image_key` 以 bot 身份下载到系统临时目录，确认文件不超过 10 MB 且真实文件头属于 PNG、JPEG 或 WebP 后，复用现有本机/SSH Codex 图片投递链路，并附带“请查看这张从飞书回复发送的图片。”说明。下载文件读取后立即清理；若目标 Codex CLI 不接受原生图片附件，仍沿用既有可信路径回退与最多 24 小时清理策略。回复的直接父消息没有绑定时，服务仅按飞书事件提供且仍有本地绑定的精确 `root_id` 回溯原通知，因此升级前已经形成的回复链也能继续；不会查询历史消息或猜测目标。普通新消息、群聊消息、其他用户消息、多图或其他文件类型，以及回复无法映射的历史消息都会被忽略。若一次完整输出被拆成多条，每一片都绑定到同一个看板会话，回复任意一片均可继续该会话。
 
 后端仅保存通知卡片和成功投递回复的 `message_id`、`chat_id`、看板 `sessionId`、完成标识和时间，不保存通知正文或用户回复文本。Codex 队列确认接收后，该条用户回复会原子继承原消息绑定并同时记入事件去重信息，因此后续回复它仍会路由到同一对话；投递失败则两者都不写入。状态保存在被 Git 忽略的 `.dev-runtime/feishu-reply-bindings.json`，文件权限限制为当前用户；绑定默认保留 30 天并限制总量。相同飞书事件重复投递只会处理一次。
 
@@ -142,6 +142,7 @@ Codex 会话输出变化后，后端会先从当前看板会话定位真实 Code
 - 被回复消息必须是本次 Kanban 实例成功发送的通知、此前已成功送入 Codex 并继承绑定的回复，或其飞书 `root_id` 精确指向仍有效的本地通知绑定。
 - 目标会话必须仍在线、可输入且实际是 Codex；已退出、已脱离、只读观察或不可控会话拒绝写入。
 - 普通文本与富文本 `post` 的可读文本最多 8000 个 Unicode 字符；NUL、ESC 和其他危险控制字符会被拒绝。
+- 图片事件必须只包含一个合法飞书 `image_key`，下载资源必须与事件 `message_id` 匹配，且真实内容是最大 10 MB 的 PNG、JPEG 或 WebP；临时文件无论成功或失败都会清理。
 - 回复通过 Codex 原生 `codex queue --thread <真实会话ID> --message <完整正文>` 提交，本地复用活动 tmux 窗格的会话定位，SSH 在目标主机执行。目标主机需要支持 `codex queue`；定位失败或队列命令失败会记录错误，不回退模拟键盘，也不自动重复发送。
 - `delivered` 表示 Codex 原生队列已接受消息，不表示任务执行完毕；运行中的会话由 Codex 排队处理。只有队列命令成功才原子保存已处理事件 ID 和回复链绑定。日志记录消息 ID 和处理结果，不记录回复正文。
 - `/goal ...` 与多行回复作为完整消息正文交给 Codex，不操作 TUI 的斜杠菜单；是否启用原生 Goal 状态取决于 Codex 对指示的处理。不能把消息送达等同于已切换 Goal 模式。
@@ -171,6 +172,7 @@ pnpm --filter server exec tsx --test \
   src/services/codex-transcript-service.test.ts \
   src/services/feishu-notification-settings-service.test.ts \
   src/services/feishu-reply-binding-store.test.ts \
+  src/services/feishu-image-resource-service.test.ts \
   src/services/feishu-reply-command-service.test.ts \
   src/services/feishu-reply-event-listener.test.ts
 node --test scripts/codex-feishu-notify.test.mjs

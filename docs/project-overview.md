@@ -75,6 +75,8 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
   桌面设置的“飞书通知”分类通过 `GET/PUT /api/settings/feishu-notifications` 控制两个仓库本地开关，不要求重启 Agent，也不要求页面保持打开。后端只返回 `enabled/configured/destinationType/replyEnabled/replyConfigured`，不返回 ID；状态原子保存为权限受限、被 Git 忽略的 `.dev-runtime/feishu-notification-settings.json`。发送器从仓库根目录 `.env` 读取唯一目标，以固定参数、无 shell 的方式调用 `scripts/codex-feishu-notify.mjs --kanban` 和 `lark-cli`，发送随会话可用宽度自适应的 Card 2.0 完成卡片；标题下方以单行纯文本副标题展示 `项目：xxx　会话：xxx`，正文不再重复元数据块并直接进入默认展开的完整输出，正文使用 `markdown` 渲染，跨片代码围栏自动补齐，完整输出过长时按序拆成多张卡片，每张使用独立幂等键，并且只接受 `ok: true` 成功信封。发送成功的每个 `message_id` 都会短期绑定到看板 session；私聊回复开关开启后，`FeishuReplyEventListener` 以长连接消费 `im.message.receive_v1`，`FeishuReplyCommandService` 校验配置用户、私聊、回复关系、事件去重和可控 Codex 状态，允许普通 `text` 与飞书已解码为可读文本的富文本 `post` 通过同一套内容清洗，再定位活动 Codex thread，复用 `CodexImageMessageService.sendText` 经原生 `codex queue` 提交完整消息；运行中的线程由 Codex 排队。命令成功后，回复消息 ID 与原会话绑定、去重状态由 `FeishuReplyBindingStore` 一次原子落盘，使后续回复该用户消息仍精确进入同一对话；直接父消息没有绑定时只回退到飞书事件中仍有本地绑定的精确 `root_id`，兼容升级前的回复链但不查询历史或猜测目标。失败不自动重发、不建立继承绑定，也不回退键盘。状态迁移到 `deliveryMode=kanban` 后，旧用户级 Codex `notify` 即使仍被运行中的 Codex 调用也会静默跳过，避免后端与原生 hook 重复发送。完整配置和安全边界见 [`docs/codex-feishu-notifications.md`](./codex-feishu-notifications.md)。
 
+  飞书图片回复在上述文字链路之外由 `FeishuImageResourceService` 处理：只对已通过发送者、私聊和本地绑定校验的单张 `image` 事件，使用固定参数以 bot 身份按 `message_id + image_key` 下载到系统临时目录；确认不超过 10 MB 且文件头属于 PNG、JPEG 或 WebP 后，再通过 `CodexImageMessageService.send` 投递到相同的本机或 SSH Codex thread。下载文件在内存复制后立即清理；Codex 路径回退仍沿用既有 24 小时上限。下载或投递失败时不保存去重和继承绑定。
+
 - 额外快捷键：
   - `Ctrl/⌘+E` 打开快速连接 tmux。
   - `Ctrl/⌘+Shift+S` 打开本地 tmux 扫描弹窗。
@@ -315,12 +317,13 @@ memories/        仓库记忆，不是产品运行依赖
 - `ScriptFeishuCompletionSender`：以固定 Node 可执行文件和参数数组调用本仓库飞书桥接脚本，不经过 shell。
 - `FeishuReplyBindingStore`：原子持久化通知、成功投递的回复与看板会话的短期绑定和已处理事件 ID，使回复链保持同一目标；不保存正文或回复文本。
 - `FeishuReplyEventListener`：按独立回复开关启动或停止 `lark-cli` 飞书事件长连接，并对 NDJSON 事件做有界、串行消费和退避重连。
-- `FeishuReplyCommandService`：执行私聊发送者、回复关系、消息类型、文本和会话可控状态的白名单校验。
+- `FeishuReplyCommandService`：执行私聊发送者、回复关系、文字/图片消息和会话可控状态的白名单校验。
+- `FeishuImageResourceService`：用固定 `lark-cli` 参数下载已绑定回复的飞书图片，在系统临时目录校验大小与真实格式并保证清理。
 - `AgentSessionInputService`：统一 HTTP 终端输入的本地/SSH、tmux/PTY 路由；飞书回复改走 Codex 原生队列。
 - `restoreManagedSessions`：分类并恢复仍存在的受管 tmux，会话缺失时保持显式失败边界。
 - `LocalFsService`：本地文件系统。
 - `SftpService`：远端 SFTP 文件系统。
-- `CodexImageMessageService`：把浏览器图片转换为本机或 SSH 目标主机上的短生命周期附件，并投递到后端解析出的精确 Codex thread。
+- `CodexImageMessageService`：把浏览器或飞书图片转换为本机或 SSH 目标主机上的短生命周期附件，并投递到后端解析出的精确 Codex thread。
 - 本地与 SFTP 预览共用有界窗口协议：`offset` 和 `maxBytes` 控制读取范围，响应返回 `previousOffset` / `nextOffset`、实际字节数和文件总长度。服务端将单次请求硬限制为 256 KiB，并在 UTF-8 字符边界分段，避免分页乱码。
 - `VsCodeWebManager`：code-server/openvscode-server 生命周期。
 
