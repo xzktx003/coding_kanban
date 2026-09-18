@@ -14,7 +14,11 @@ const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 5_000;
 const MAX_OUTPUT_BYTES = 1 * 1024 * 1024;
 
-async function runGit(cwd: string, args: string[], allowFailure = false): Promise<string> {
+async function runGit(
+  cwd: string,
+  args: string[],
+  allowFailure = false,
+): Promise<string> {
   try {
     const result = await execFileAsync("git", args, {
       cwd,
@@ -24,7 +28,12 @@ async function runGit(cwd: string, args: string[], allowFailure = false): Promis
     });
     return result.stdout;
   } catch (error) {
-    if (allowFailure && error && typeof error === "object" && "stdout" in error) {
+    if (
+      allowFailure &&
+      error &&
+      typeof error === "object" &&
+      "stdout" in error
+    ) {
       return String(error.stdout ?? "");
     }
     throw error;
@@ -54,20 +63,24 @@ function parseStatus(status: string): Map<string, ParsedStatus> {
             : code.includes("D")
               ? "deleted"
               : "modified";
-    const previousPath = code.includes("R") || code.includes("C")
-      ? entries[index + 1]
-      : undefined;
+    const previousPath =
+      code.includes("R") || code.includes("C") ? entries[index + 1] : undefined;
     if (previousPath) index += 1;
     files.set(path, { status: statusCode, previousPath });
   }
   return files;
 }
 
-function countPatchLines(patch: string): { addedLines: number; deletedLines: number } {
+function countPatchLines(patch: string): {
+  addedLines: number;
+  deletedLines: number;
+} {
   return patch.split("\n").reduce(
     (totals, line) => {
-      if (line.startsWith("+") && !line.startsWith("+++")) totals.addedLines += 1;
-      if (line.startsWith("-") && !line.startsWith("---")) totals.deletedLines += 1;
+      if (line.startsWith("+") && !line.startsWith("+++"))
+        totals.addedLines += 1;
+      if (line.startsWith("-") && !line.startsWith("---"))
+        totals.deletedLines += 1;
       return totals;
     },
     { addedLines: 0, deletedLines: 0 },
@@ -77,7 +90,11 @@ function countPatchLines(patch: string): { addedLines: number; deletedLines: num
 function filePatchPath(directory: string, path: string): string {
   const absolute = resolve(directory, path);
   const relativePath = relative(directory, absolute);
-  if (!relativePath || relativePath.startsWith("..") || isAbsolute(relativePath)) {
+  if (
+    !relativePath ||
+    relativePath.startsWith("..") ||
+    isAbsolute(relativePath)
+  ) {
     throw new Error("Git 文件路径越界");
   }
   return relativePath;
@@ -100,7 +117,9 @@ const hunkHeaderPattern = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 
 function parseGitPatch(patch: string): ParsedGitPatch {
   const lines = patch.replaceAll("\r\n", "\n").split("\n");
-  const firstHunkIndex = lines.findIndex((line) => hunkHeaderPattern.test(line));
+  const firstHunkIndex = lines.findIndex((line) =>
+    hunkHeaderPattern.test(line),
+  );
   if (firstHunkIndex < 0) {
     return { hunks: [], prelude: lines.filter(Boolean) };
   }
@@ -251,16 +270,16 @@ export class GitChangesService {
 
     const change = current.files.find((file) => file.path === path);
     if (!change) {
-      throw new GitHunkRevertError("该文件已不在当前变更列表中，请刷新后重试", 409);
+      throw new GitHunkRevertError(
+        "该文件已不在当前变更列表中，请刷新后重试",
+        409,
+      );
     }
 
     const parsedPatch = parseGitPatch(change.patch);
     const targetHunk = parsedPatch.hunks[hunkIndex];
     if (!targetHunk || targetHunk.header !== hunkHeader) {
-      throw new GitHunkRevertError(
-        "改动块已发生变化，请刷新 Diff 后重试",
-        409,
-      );
+      throw new GitHunkRevertError("改动块已发生变化，请刷新 Diff 后重试", 409);
     }
 
     const normalizeRenamedPath = change.status === "renamed";
@@ -298,13 +317,7 @@ export class GitChangesService {
       if (cachedPatch) {
         await runGitPatch(
           directory,
-          [
-            "apply",
-            "--reverse",
-            "--cached",
-            "--check",
-            "--whitespace=nowarn",
-          ],
+          ["apply", "--reverse", "--cached", "--check", "--whitespace=nowarn"],
           cachedPatch,
         );
         await runGitPatch(
@@ -350,7 +363,9 @@ export class GitChangesService {
     const directory = resolve(requestedDirectory);
     try {
       await access(directory);
-      const repositoryRoot = (await runGit(directory, ["rev-parse", "--show-toplevel"])).trim();
+      const repositoryRoot = (
+        await runGit(directory, ["rev-parse", "--show-toplevel"])
+      ).trim();
       const [branch, head, status] = await Promise.all([
         runGit(directory, ["branch", "--show-current"]),
         runGit(directory, ["rev-parse", "--short", "HEAD"]),
@@ -369,29 +384,48 @@ export class GitChangesService {
         const safePreviousPath = previousPath
           ? filePatchPath(directory, previousPath)
           : undefined;
-        const patch = statusValue === "untracked"
-          ? await runGit(directory, [
-              "diff",
-              "--no-index",
-              "--no-ext-diff",
-              "--binary",
-              "--",
-              "/dev/null",
-              safePath,
-            ], true)
-          : await runGit(directory, [
-              "diff",
-              "HEAD",
-              "--no-ext-diff",
-              "--binary",
-              "--",
-              ...(safePreviousPath ? [safePreviousPath, safePath] : [safePath]),
-            ], true);
-        const binary = patch.includes("Binary files") || patch.includes("GIT binary patch");
+        const patch =
+          statusValue === "untracked"
+            ? await runGit(
+                directory,
+                [
+                  "diff",
+                  "--no-index",
+                  "--no-ext-diff",
+                  "--binary",
+                  "--",
+                  "/dev/null",
+                  safePath,
+                ],
+                true,
+              )
+            : await runGit(
+                directory,
+                [
+                  "diff",
+                  "HEAD",
+                  "--no-ext-diff",
+                  "--binary",
+                  "--",
+                  ...(safePreviousPath
+                    ? [safePreviousPath, safePath]
+                    : [safePath]),
+                ],
+                true,
+              );
+        const binary =
+          patch.includes("Binary files") || patch.includes("GIT binary patch");
         const counts = binary
           ? { addedLines: 0, deletedLines: 0 }
           : countPatchLines(patch);
-        files.push({ path, previousPath, status: statusValue, patch, binary, ...counts });
+        files.push({
+          path,
+          previousPath,
+          status: statusValue,
+          patch,
+          binary,
+          ...counts,
+        });
       }
 
       return {
@@ -412,7 +446,10 @@ export class GitChangesService {
     }
   }
 
-  private unavailable(generatedAt: string, unavailableReason: string): CheckoutDiffResponse {
+  private unavailable(
+    generatedAt: string,
+    unavailableReason: string,
+  ): CheckoutDiffResponse {
     return {
       available: false,
       scope: "checkout",

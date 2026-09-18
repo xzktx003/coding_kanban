@@ -18,7 +18,9 @@ test("GitChangesService returns tracked modifications and untracked file diffs",
   const root = mkdtempSync(join(tmpdir(), "git-changes-"));
   try {
     execFileSync("git", ["init", "-q"], { cwd: root });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: root,
+    });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
     writeFileSync(join(root, "tracked.txt"), "before\n");
     writeFileSync(join(root, ".gitignore"), "ignored.txt\n");
@@ -61,7 +63,9 @@ test("GitChangesService expands untracked directories into individual file diffs
   const root = mkdtempSync(join(tmpdir(), "git-changes-directory-"));
   try {
     execFileSync("git", ["init", "-q"], { cwd: root });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: root,
+    });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
     writeFileSync(join(root, "tracked.txt"), "initial\n");
     execFileSync("git", ["add", "tracked.txt"], { cwd: root });
@@ -88,7 +92,9 @@ test("GitChangesService includes empty and non-empty untracked files", async () 
   const root = mkdtempSync(join(tmpdir(), "git-changes-empty-file-"));
   try {
     execFileSync("git", ["init", "-q"], { cwd: root });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: root,
+    });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
     writeFileSync(join(root, "tracked.txt"), "initial\n");
     execFileSync("git", ["add", "tracked.txt"], { cwd: root });
@@ -119,7 +125,9 @@ test("GitChangesService keeps untracked outputs visible after tracked changes ar
   const root = mkdtempSync(join(tmpdir(), "git-changes-after-commit-"));
   try {
     execFileSync("git", ["init", "-q"], { cwd: root });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: root,
+    });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
     writeFileSync(join(root, "tracked.txt"), "initial\n");
     execFileSync("git", ["add", "tracked.txt"], { cwd: root });
@@ -148,7 +156,9 @@ test("GitChangesService returns staged additions and tracked deletions with full
   const root = mkdtempSync(join(tmpdir(), "git-changes-statuses-"));
   try {
     execFileSync("git", ["init", "-q"], { cwd: root });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: root,
+    });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
     writeFileSync(join(root, "removed.txt"), "first\nsecond\n");
     execFileSync("git", ["add", "removed.txt"], { cwd: root });
@@ -181,9 +191,14 @@ test("GitChangesService reverts only the selected hunk and preserves another hun
   const root = mkdtempSync(join(tmpdir(), "git-revert-hunk-"));
   try {
     execFileSync("git", ["init", "-q"], { cwd: root });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: root,
+    });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
-    const originalLines = Array.from({ length: 24 }, (_, index) => `line ${index + 1}`);
+    const originalLines = Array.from(
+      { length: 24 },
+      (_, index) => `line ${index + 1}`,
+    );
     writeFileSync(join(root, "tracked.txt"), `${originalLines.join("\n")}\n`);
     execFileSync("git", ["add", "tracked.txt"], { cwd: root });
     execFileSync("git", ["commit", "-qm", "initial"], { cwd: root });
@@ -216,9 +231,14 @@ test("GitChangesService reverts a staged hunk from both index and worktree", asy
   const root = mkdtempSync(join(tmpdir(), "git-revert-staged-hunk-"));
   try {
     execFileSync("git", ["init", "-q"], { cwd: root });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: root,
+    });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
-    const originalLines = Array.from({ length: 24 }, (_, index) => `line ${index + 1}`);
+    const originalLines = Array.from(
+      { length: 24 },
+      (_, index) => `line ${index + 1}`,
+    );
     writeFileSync(join(root, "tracked.txt"), `${originalLines.join("\n")}\n`);
     execFileSync("git", ["add", "tracked.txt"], { cwd: root });
     execFileSync("git", ["commit", "-qm", "initial"], { cwd: root });
@@ -254,9 +274,14 @@ test("GitChangesService reverts a hunk containing both staged and unstaged edits
   const root = mkdtempSync(join(tmpdir(), "git-revert-mixed-hunk-"));
   try {
     execFileSync("git", ["init", "-q"], { cwd: root });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: root,
+    });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
-    const originalLines = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`);
+    const originalLines = Array.from(
+      { length: 12 },
+      (_, index) => `line ${index + 1}`,
+    );
     writeFileSync(join(root, "tracked.txt"), `${originalLines.join("\n")}\n`);
     execFileSync("git", ["add", "tracked.txt"], { cwd: root });
     execFileSync("git", ["commit", "-qm", "initial"], { cwd: root });
@@ -296,7 +321,9 @@ test("GitChangesService removes an untracked file when reverting its only hunk",
   const root = mkdtempSync(join(tmpdir(), "git-revert-untracked-hunk-"));
   try {
     execFileSync("git", ["init", "-q"], { cwd: root });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: root,
+    });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
     writeFileSync(join(root, "tracked.txt"), "original\n");
     execFileSync("git", ["add", "tracked.txt"], { cwd: root });
@@ -322,9 +349,14 @@ test("GitChangesService reverts text inside a rename without undoing the rename"
   const root = mkdtempSync(join(tmpdir(), "git-revert-renamed-hunk-"));
   try {
     execFileSync("git", ["init", "-q"], { cwd: root });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: root,
+    });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
-    const originalLines = Array.from({ length: 12 }, (_, index) => `line ${index + 1}`);
+    const originalLines = Array.from(
+      { length: 12 },
+      (_, index) => `line ${index + 1}`,
+    );
     writeFileSync(join(root, "before.txt"), `${originalLines.join("\n")}\n`);
     execFileSync("git", ["add", "before.txt"], { cwd: root });
     execFileSync("git", ["commit", "-qm", "initial"], { cwd: root });
@@ -358,7 +390,9 @@ test("GitChangesService rejects stale hunk identities and paths outside the chec
   const root = mkdtempSync(join(tmpdir(), "git-revert-hunk-boundary-"));
   try {
     execFileSync("git", ["init", "-q"], { cwd: root });
-    execFileSync("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: root,
+    });
     execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
     writeFileSync(join(root, "tracked.txt"), "initial\n");
     execFileSync("git", ["add", "tracked.txt"], { cwd: root });
@@ -366,7 +400,9 @@ test("GitChangesService rejects stale hunk identities and paths outside the chec
     writeFileSync(join(root, "tracked.txt"), "changed\n");
 
     const service = new GitChangesService();
-    const header = (await service.read(root)).files[0]!.patch.match(/^@@.*@@.*$/m)?.[0];
+    const header = (await service.read(root)).files[0]!.patch.match(
+      /^@@.*@@.*$/m,
+    )?.[0];
     assert.ok(header);
 
     await assert.rejects(
