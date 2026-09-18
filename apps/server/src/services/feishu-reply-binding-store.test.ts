@@ -20,6 +20,7 @@ test("persists every notification part as a private reply binding", () => {
       sessionId: "session-1",
       completionId: "turn-1",
       codexThreadId: "codex-thread-12345678",
+      referencedFiles: [{ path: "src/app.ts", line: 12 }],
       messages: [
         { messageId: "om_part1", chatId: "oc_private" },
         { messageId: "om_part2", chatId: "oc_private" },
@@ -32,6 +33,7 @@ test("persists every notification part as a private reply binding", () => {
       sessionId: "session-1",
       completionId: "turn-1",
       codexThreadId: "codex-thread-12345678",
+      referencedFiles: [{ path: "src/app.ts", line: 12 }],
       createdAt: now.toISOString(),
     });
     assert.equal(statSync(statePath).mode & 0o777, 0o600);
@@ -45,6 +47,9 @@ test("persists every notification part as a private reply binding", () => {
       reloaded.resolve("om_part1")?.codexThreadId,
       "codex-thread-12345678",
     );
+    assert.deepEqual(reloaded.resolve("om_part1")?.referencedFiles, [
+      { path: "src/app.ts", line: 12 },
+    ]);
     assert.equal(
       JSON.parse(readFileSync(statePath, "utf8")).bindings.length,
       2,

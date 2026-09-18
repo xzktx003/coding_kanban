@@ -1,6 +1,6 @@
 # Coding Kanban Project Overview
 
-Codex 完成通知沿结构化 `task_complete` 关联本轮真实用户问题，通过可选 `userQuestion` 字段传入发送脚本；不从会话摘要或任意历史输入猜测。Goal 自动续轮跳过内部提示；记录扫描窗口内来源不明时仅发送结果。问题与回复分区展示，长问题另用折叠卡片发送，仍共享原会话回复绑定。完成卡片使用 Card 2.0 `fill` 宽度随飞书会话可用区域自适应；每张能精确定位 Codex thread 的通知卡片带一个 `tiny`「查看完整记录」按钮，复用现有 `card.action.trigger` 与会话工作区展示公开记录、分页和完整导出，不新增事件订阅或完成判定状态。
+Codex 完成通知沿结构化 `task_complete` 关联本轮真实用户问题，通过可选 `userQuestion` 字段传入发送脚本；不从会话摘要或任意历史输入猜测。Goal 自动续轮跳过内部提示；记录扫描窗口内来源不明时仅发送结果。问题与回复分区展示，长问题另用折叠卡片发送，仍共享原会话回复绑定。完成卡片使用 Card 2.0 `fill` 宽度随飞书会话可用区域自适应；每张能精确定位 Codex thread 的通知卡片带一个 `tiny`「查看完整记录」按钮，复用现有 `card.action.trigger` 与会话工作区展示公开记录、分页和完整导出，不新增事件订阅或完成判定状态。本机会话回复中的明确 Markdown 文件/图片链接由后端限制到当前项目真实普通文件，改为非 URL 的相对路径，并在首张私聊结果卡片提供最多 5 个受消息绑定保护的直接查看按钮；安全图片由发送脚本再次校验后上传为飞书资源，并通过 Card 2.0 `img` 原生展示，上传失败只取消内嵌图而不影响完成通知。
 
 飞书会话工作区从现有菜单选定精确 Codex thread，使用独立短期卡片动作绑定提供状态、公开对话分页/导出、本机项目文件浏览和二次确认写入。文件访问限制为所选工作目录，采用版本摘要防误覆盖；SSH 文件写入保持拒绝。文件与记录通过机器人传输，不要求手机直连内网，详见 [工作区设计与边界](feishu-session-workspace.md)。
 
@@ -314,8 +314,9 @@ memories/        仓库记忆，不是产品运行依赖
 - `FileSessionStateStore`：校验、投影并原子持久化稳定会话目录。
 - `AgentCompletionFeishuNotifier`：观察所有已登记会话的新完成点，并在共享开关开启时异步交给飞书发送器；Codex 候选只接受结构化完成，初始空闲会话和重复快照不会补发。
 - `CodexCompletionContentResolver`：从看板会话定位当前 Codex session，并读取最后一条完整 assistant 输出作为飞书正文；Goal 内部自动续轮先抑制，未解析 session 不做负缓存，Codex 结构化记录为空或读取失败时不触发摘要降级。
-- `ScriptFeishuCompletionSender`：以固定 Node 可执行文件和参数数组调用本仓库飞书桥接脚本，不经过 shell。
-- `FeishuReplyBindingStore`：原子持久化通知、成功投递的回复与看板会话的短期绑定和已处理事件 ID，使回复链保持同一目标；不保存正文或回复文本。
+- `ScriptFeishuCompletionSender`：以固定 Node 可执行文件和参数数组调用本仓库飞书桥接脚本，不经过 shell；私聊图片引用由脚本按项目边界、普通文件、扩展名、真实签名和大小再次校验，再以机器人身份上传并生成原生图片组件。
+- `FeishuCompletionFileReferenceService`：只解析本机 Codex 输出中明确的 Markdown 文件链接，校验真实路径、项目边界、普通文件和敏感路径限制，并把可预览引用限制为 5 个相对路径。
+- `FeishuReplyBindingStore`：原子持久化通知、成功投递的回复、受限文件引用与看板会话的短期绑定和已处理事件 ID，使回复链和文件按钮保持同一目标；不保存正文或回复文本。
 - `FeishuReplyEventListener`：按独立回复开关启动或停止 `lark-cli` 飞书事件长连接，并对 NDJSON 事件做有界、串行消费和退避重连。
 - `FeishuReplyCommandService`：执行私聊发送者、回复关系、文字/图片消息和会话可控状态的白名单校验。
 - `FeishuImageResourceService`：用固定 `lark-cli` 参数下载已绑定回复的飞书图片，在系统临时目录校验大小与真实格式并保证清理。

@@ -8,12 +8,15 @@ import {
 import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 
+import type { FeishuCompletionFileReference } from "./feishu-completion-file-reference-service.js";
+
 const STATE_VERSION = 1;
 const DEFAULT_BINDING_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 const MAX_BINDINGS = 10_000;
 const MESSAGE_ID_PATTERN = /^om_[A-Za-z0-9_-]+$/;
 const CHAT_ID_PATTERN = /^oc_[A-Za-z0-9_-]+$/;
 const CODEX_THREAD_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
+const MAX_REFERENCED_FILES = 5;
 
 export interface FeishuReplyBinding {
   messageId: string;
@@ -21,6 +24,7 @@ export interface FeishuReplyBinding {
   sessionId: string;
   completionId: string;
   codexThreadId?: string;
+  referencedFiles?: FeishuCompletionFileReference[];
   createdAt: string;
 }
 
@@ -39,6 +43,7 @@ export interface RecordFeishuReplyBindingsInput {
   sessionId: string;
   completionId: string;
   codexThreadId?: string;
+  referencedFiles?: FeishuCompletionFileReference[];
   messages: Array<{ messageId: string; chatId: string }>;
 }
 
@@ -56,6 +61,48 @@ function isValidTimestamp(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
 
+function parseReferencedFiles(
+  value: unknown,
+): FeishuCompletionFileReference[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const references: FeishuCompletionFileReference[] = [];
+  const seen = new Set<string>();
+  for (const candidate of value.slice(0, MAX_REFERENCED_FILES)) {
+    if (!isRecord(candidate)) continue;
+    const { path, line } = candidate;
+    if (
+      typeof path !== "string" ||
+      path.length === 0 ||
+      path.length > 2_048 ||
+      path.startsWith("/") ||
+      path.includes("\\") ||
+      /[\u0000-\u001f\u007f]/u.test(path) ||
+      path
+        .split("/")
+        .some((segment) => !segment || segment === "." || segment === "..") ||
+      (line !== undefined &&
+        (typeof line !== "number" ||
+          !Number.isSafeInteger(line) ||
+          line < 1 ||
+          line > 10_000_000))
+    ) {
+      continue;
+    }
+    const reference = {
+      path,
+      ...(typeof line === "number" ? { line } : {}),
+    };
+    const key = `${reference.path}:${reference.line ?? ""}`;
+    if (!seen.has(key)) {
+      seen.add(key);
+      references.push(reference);
+    }
+  }
+  return references.length > 0 ? references : undefined;
+}
+
 function parseBinding(value: unknown): FeishuReplyBinding | null {
   if (!isRecord(value)) {
     return null;
@@ -66,6 +113,7 @@ function parseBinding(value: unknown): FeishuReplyBinding | null {
     sessionId,
     completionId,
     codexThreadId,
+    referencedFiles,
     createdAt,
   } = value;
   if (
@@ -84,6 +132,7 @@ function parseBinding(value: unknown): FeishuReplyBinding | null {
   ) {
     return null;
   }
+  const parsedReferencedFiles = parseReferencedFiles(referencedFiles);
 
   return {
     messageId,
@@ -91,6 +140,9 @@ function parseBinding(value: unknown): FeishuReplyBinding | null {
     sessionId,
     completionId,
     ...(typeof codexThreadId === "string" ? { codexThreadId } : {}),
+    ...(parsedReferencedFiles
+      ? { referencedFiles: parsedReferencedFiles }
+      : {}),
     createdAt,
   };
 }
@@ -130,6 +182,7 @@ export class FeishuReplyBindingStore {
 
   record(input: RecordFeishuReplyBindingsInput): void {
     const createdAt = this.#now().toISOString();
+    const referencedFiles = parseReferencedFiles(input.referencedFiles);
     for (const message of input.messages) {
       if (
         !MESSAGE_ID_PATTERN.test(message.messageId) ||
@@ -146,6 +199,7 @@ export class FeishuReplyBindingStore {
         CODEX_THREAD_ID_PATTERN.test(input.codexThreadId)
           ? { codexThreadId: input.codexThreadId }
           : {}),
+        ...(referencedFiles ? { referencedFiles } : {}),
         createdAt,
       });
     }
@@ -183,6 +237,9 @@ export class FeishuReplyBindingStore {
       sessionId: input.parent.sessionId,
       completionId: input.parent.completionId,
       codexThreadId: input.codexThreadId,
+      ...(input.parent.referencedFiles
+        ? { referencedFiles: input.parent.referencedFiles }
+        : {}),
       createdAt: processedAt,
     });
     this.#processed.set(input.messageId, {

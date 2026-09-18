@@ -403,6 +403,201 @@ test("renders Markdown output while keeping card metadata plain text", () => {
   assert.equal(card.header.title.tag, "plain_text");
 });
 
+test("adds tiny callback buttons for trusted referenced files", () => {
+  const [card] = buildCompletionCards({
+    ...completion,
+    "records-available": true,
+    "referenced-files": [
+      { path: "apps/server/src/app.ts", line: 120 },
+      { path: "README.md" },
+    ],
+  });
+  const serialized = JSON.stringify(card);
+  assert.match(serialized, /查看 app\.ts:120/);
+  assert.match(serialized, /查看 README\.md/);
+  assert.match(serialized, /kanban_completion_file/);
+  assert.match(serialized, /"reference":0/);
+  assert.match(serialized, /"reference":1/);
+});
+
+test("uploads a safe local image and embeds it in the private completion card", async () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "codex-feishu-image-"));
+  const imagePath = resolve(directory, "preview.png");
+  writeFileSync(
+    imagePath,
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00]),
+  );
+  const calls = [];
+  try {
+    await runCodexFeishuNotification({
+      rawNotification: JSON.stringify({
+        ...completion,
+        cwd: directory,
+        "records-available": true,
+        "referenced-files": [{ path: "preview.png" }],
+      }),
+      env: {
+        FEISHU_NOTIFY_USER_ID: "ou_user123",
+        FEISHU_NOTIFY_MAX_ATTEMPTS: "1",
+      },
+      enforceRepositoryScope: false,
+      runCommand: async (_binary, args, options) => {
+        calls.push({ args, options });
+        return args[1] === "images"
+          ? {
+              stdout: '{"ok":true,"data":{"image_key":"img_v3_uploaded123"}}',
+              stderr: "",
+            }
+          : { stdout: '{"ok":true}', stderr: "" };
+      },
+    });
+
+    assert.equal(calls.length, 2);
+    assert.deepEqual(calls[0].args.slice(0, 8), [
+      "im",
+      "images",
+      "create",
+      "--format",
+      "json",
+      "--as",
+      "bot",
+      "--data",
+    ]);
+    assert.equal(calls[0].args[8], '{"image_type":"message"}');
+    assert.deepEqual(calls[0].args.slice(9), ["--file", "preview.png"]);
+    assert.equal(calls[0].options.cwd, directory);
+    const card = JSON.parse(
+      calls[1].args[calls[1].args.indexOf("--content") + 1],
+    );
+    const image = card.body.elements.find((element) => element.tag === "img");
+    assert.deepEqual(image, {
+      tag: "img",
+      img_key: "img_v3_uploaded123",
+      alt: { tag: "plain_text", content: "preview.png" },
+      title: { tag: "plain_text", content: "preview.png" },
+      scale_type: "fit_horizontal",
+      corner_radius: "8px",
+      preview: true,
+    });
+    assert.match(JSON.stringify(card), /kanban_completion_file/);
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("keeps the completion notification when a referenced image upload fails", async () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "codex-feishu-image-"));
+  writeFileSync(
+    resolve(directory, "preview.png"),
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  );
+  const calls = [];
+  try {
+    await runCodexFeishuNotification({
+      rawNotification: JSON.stringify({
+        ...completion,
+        cwd: directory,
+        "records-available": true,
+        "referenced-files": [{ path: "preview.png" }],
+      }),
+      env: {
+        FEISHU_NOTIFY_USER_ID: "ou_user123",
+        FEISHU_NOTIFY_MAX_ATTEMPTS: "1",
+      },
+      enforceRepositoryScope: false,
+      runCommand: async (_binary, args) => {
+        calls.push(args);
+        if (args[1] === "images") {
+          throw new Error("upload unavailable");
+        }
+        return { stdout: '{"ok":true}', stderr: "" };
+      },
+    });
+
+    assert.equal(calls.length, 2);
+    const card = JSON.parse(calls[1][calls[1].indexOf("--content") + 1]);
+    assert.equal(
+      card.body.elements.some((element) => element.tag === "img"),
+      false,
+    );
+    assert.match(JSON.stringify(card), /kanban_completion_file/);
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("does not upload referenced images for group notifications", async () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "codex-feishu-image-"));
+  writeFileSync(
+    resolve(directory, "preview.png"),
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  );
+  const calls = [];
+  try {
+    await runCodexFeishuNotification({
+      rawNotification: JSON.stringify({
+        ...completion,
+        cwd: directory,
+        "records-available": true,
+        "referenced-files": [{ path: "preview.png" }],
+      }),
+      env: {
+        FEISHU_NOTIFY_CHAT_ID: "oc_group123",
+        FEISHU_NOTIFY_MAX_ATTEMPTS: "1",
+      },
+      enforceRepositoryScope: false,
+      runCommand: async (_binary, args) => {
+        calls.push(args);
+        return { stdout: '{"ok":true}', stderr: "" };
+      },
+    });
+
+    assert.equal(calls.length, 1);
+    const card = JSON.parse(calls[0][calls[0].indexOf("--content") + 1]);
+    assert.equal(
+      card.body.elements.some((element) => element.tag === "img"),
+      false,
+    );
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("does not upload a file that only has an image extension", async () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "codex-feishu-image-"));
+  writeFileSync(resolve(directory, "preview.png"), "not-an-image", "utf8");
+  const calls = [];
+  try {
+    await runCodexFeishuNotification({
+      rawNotification: JSON.stringify({
+        ...completion,
+        cwd: directory,
+        "records-available": true,
+        "referenced-files": [{ path: "preview.png" }],
+      }),
+      env: {
+        FEISHU_NOTIFY_USER_ID: "ou_user123",
+        FEISHU_NOTIFY_MAX_ATTEMPTS: "1",
+      },
+      enforceRepositoryScope: false,
+      runCommand: async (_binary, args) => {
+        calls.push(args);
+        return { stdout: '{"ok":true}', stderr: "" };
+      },
+    });
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][1], "+messages-send");
+    const card = JSON.parse(calls[0][calls[0].indexOf("--content") + 1]);
+    assert.equal(
+      card.body.elements.some((element) => element.tag === "img"),
+      false,
+    );
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
 test("keeps code fences balanced across Markdown cards", () => {
   const code = Array.from(
     { length: 18 },
@@ -507,7 +702,11 @@ test("sends through lark-cli with fixed bot identity and a group target", async 
   const calls = [];
 
   const result = await runCodexFeishuNotification({
-    rawNotification: JSON.stringify(completion),
+    rawNotification: JSON.stringify({
+      ...completion,
+      "records-available": true,
+      "referenced-files": [{ path: "src/app.ts", line: 12 }],
+    }),
     env: {
       FEISHU_NOTIFY_CHAT_ID: "oc_group123",
       FEISHU_NOTIFY_MAX_ATTEMPTS: "1",
@@ -548,6 +747,7 @@ test("sends through lark-cli with fixed bot identity and a group target", async 
   const card = JSON.parse(args[11]);
   assert.equal(card.schema, "2.0");
   assert.equal(card.header.title.content, "Coding Kanban · Codex 任务完成");
+  assert.doesNotMatch(JSON.stringify(card), /kanban_completion_file/);
   assert.equal(args[12], "--idempotency-key");
   assert.match(args[13], /^codex-[a-f0-9]+$/);
   assert.equal(options.timeout, 10_000);
@@ -559,7 +759,11 @@ test("supports direct messages through a validated user open_id", async () => {
   let sentArgs;
 
   await runCodexFeishuNotification({
-    rawNotification: JSON.stringify(completion),
+    rawNotification: JSON.stringify({
+      ...completion,
+      "records-available": true,
+      "referenced-files": [{ path: "src/app.ts", line: 12 }],
+    }),
     env: {
       FEISHU_NOTIFY_USER_ID: "ou_user123",
       FEISHU_NOTIFY_MAX_ATTEMPTS: "1",
@@ -571,6 +775,8 @@ test("supports direct messages through a validated user open_id", async () => {
   });
 
   assert.deepEqual(sentArgs.slice(6, 8), ["--user-id", "ou_user123"]);
+  const card = JSON.parse(sentArgs[sentArgs.indexOf("--content") + 1]);
+  assert.match(JSON.stringify(card), /kanban_completion_file/);
 });
 
 test("retries with the same idempotency key after a transient command failure", async () => {

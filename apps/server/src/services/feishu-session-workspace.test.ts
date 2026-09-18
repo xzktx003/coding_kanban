@@ -178,6 +178,7 @@ function createFixture(
       chatId: string;
       sessionId: string;
       codexThreadId?: string;
+      referencedFiles?: Array<{ path: string; line?: number }>;
     } | null;
     sendCard?: (
       input: {
@@ -352,6 +353,51 @@ test("notification records callback opens only its bound current Codex transcrip
       ...event,
       event_id: "evt_notice_forged",
       chat_id: "oc_forged",
+    }),
+    "ignored_untrusted",
+  );
+});
+
+test("notification file callback previews only its bound referenced file", async () => {
+  const requestedPaths: string[] = [];
+  const fixture = createFixture({
+    notificationBinding: {
+      messageId: "om_notice",
+      chatId: "oc_private",
+      sessionId: "session-1",
+      codexThreadId: "thread-1",
+      referencedFiles: [{ path: "src/app.ts", line: 12 }],
+    },
+    read: async (path) => {
+      requestedPaths.push(path);
+      return { content: "line 12", revision: "rev-1", editable: true };
+    },
+  });
+  const event = {
+    type: "card.action.trigger",
+    event_id: "evt_notice_file",
+    operator_id: "ou_owner",
+    message_id: "om_notice",
+    chat_id: "oc_private",
+    action_tag: "button",
+    action_value: JSON.stringify({
+      action: "kanban_completion_file",
+      reference: 0,
+    }),
+  };
+
+  assert.equal(fixture.service.accepts(event), true);
+  assert.equal(await fixture.service.handle(event), "file_sent");
+  assert.deepEqual(requestedPaths, ["src/app.ts"]);
+  assert.match(JSON.stringify(fixture.lastCard()), /src\/app\.ts:12/);
+  assert.equal(
+    await fixture.service.handle({
+      ...event,
+      event_id: "evt_notice_file_forged",
+      action_value: JSON.stringify({
+        action: "kanban_completion_file",
+        reference: 99,
+      }),
     }),
     "ignored_untrusted",
   );

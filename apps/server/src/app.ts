@@ -335,6 +335,9 @@ export function buildServer(options: BuildServerOptions = {}): {
                     ...(event.codexThreadId
                       ? { codexThreadId: event.codexThreadId }
                       : {}),
+                    ...(delivery.referencedFiles
+                      ? { referencedFiles: delivery.referencedFiles }
+                      : {}),
                     messages: delivery.messages,
                   });
                 },

@@ -90,6 +90,7 @@ export interface FeishuSessionWorkspaceOptions {
       chatId: string;
       sessionId: string;
       codexThreadId?: string;
+      referencedFiles?: Array<{ path: string; line?: number }>;
     } | null;
   };
   messenger: {
@@ -150,6 +151,7 @@ interface WorkspaceBinding {
 const ACTION_PREFIX = "kanban_workspace_";
 const FORM_PREFIX = "kanban_workspace_form_";
 const COMPLETION_RECORDS_ACTION = "kanban_completion_records";
+const COMPLETION_FILE_ACTION = "kanban_completion_file";
 const MAX_WORKSPACE_AGE_MS = 15 * 60 * 1_000;
 const MAX_WORKSPACES = 100;
 const MAX_PROCESSED_EVENTS = 1_000;
@@ -420,6 +422,8 @@ export class FeishuSessionWorkspace {
     return (
       (action.action === COMPLETION_RECORDS_ACTION &&
         event.action_tag === "button") ||
+      (action.action === COMPLETION_FILE_ACTION &&
+        event.action_tag === "button") ||
       (typeof action.token === "string" &&
         action.action === ACTION_PREFIX &&
         event.action_tag === "button") ||
@@ -503,6 +507,60 @@ export class FeishuSessionWorkspace {
     }
 
     const actionValue = parseJsonObject(event.action_value);
+    if (actionValue.action === COMPLETION_FILE_ACTION) {
+      const referenceIndex = actionValue.reference;
+      const notificationBinding = this.#notificationBindings?.resolve(
+        event.message_id,
+      );
+      const reference =
+        typeof referenceIndex === "number" &&
+        Number.isSafeInteger(referenceIndex) &&
+        referenceIndex >= 0
+          ? notificationBinding?.referencedFiles?.[referenceIndex]
+          : undefined;
+      if (
+        !notificationBinding ||
+        notificationBinding.messageId !== event.message_id ||
+        notificationBinding.chatId !== event.chat_id ||
+        !notificationBinding.codexThreadId ||
+        !CODEX_THREAD_ID_PATTERN.test(notificationBinding.codexThreadId) ||
+        !reference
+      ) {
+        return "ignored_untrusted";
+      }
+
+      const trustedEvent = {
+        ...event,
+        event_id: event.event_id,
+        chat_id: event.chat_id,
+      };
+      this.#inFlightEventIds.add(trustedEvent.event_id);
+      this.#rememberProcessedEvent(trustedEvent.event_id);
+      try {
+        const outcome = await this.#openReferencedFile({
+          event: trustedEvent,
+          sessionId: notificationBinding.sessionId,
+          threadId: notificationBinding.codexThreadId,
+          operatorId: event.operator_id,
+          reference,
+        });
+        if (
+          outcome === "ignored_unavailable" ||
+          outcome === "ignored_changed_thread"
+        ) {
+          await this.#notify(
+            trustedEvent.chat_id,
+            outcome === "ignored_changed_thread"
+              ? "该通知对应的 Codex 对话已经切换，无法再查看原文件。"
+              : "该通知引用的文件当前不可用。",
+            trustedEvent.event_id,
+          );
+        }
+        return outcome;
+      } finally {
+        this.#inFlightEventIds.delete(trustedEvent.event_id);
+      }
+    }
     if (actionValue.action === COMPLETION_RECORDS_ACTION) {
       const notificationBinding = this.#notificationBindings?.resolve(
         event.message_id,
@@ -663,6 +721,73 @@ export class FeishuSessionWorkspace {
     );
     this.#rememberWorkspace(binding);
     return "records_sent";
+  }
+
+  async #openReferencedFile(input: {
+    event: FeishuWorkspaceCardActionEvent & {
+      event_id: string;
+      chat_id: string;
+    };
+    sessionId: string;
+    threadId: string;
+    operatorId: string;
+    reference: { path: string; line?: number };
+  }): Promise<FeishuSessionWorkspaceOutcome> {
+    const checked = await this.#resolveLiveSession(
+      input.sessionId,
+      input.threadId,
+    );
+    if (!checked.ok) {
+      return checked.outcome;
+    }
+    if (!supportsLocalFileWorkspace(checked.session)) {
+      return "ignored_unavailable";
+    }
+
+    const panelId = this.#createId();
+    const binding: WorkspaceBinding = {
+      panelId,
+      operatorId: input.operatorId,
+      chatId: input.event.chat_id,
+      messageId: "",
+      sessionId: input.sessionId,
+      threadId: input.threadId,
+      signature: buildSessionSignature(checked.session),
+      expiresAtMs: this.#now() + MAX_WORKSPACE_AGE_MS,
+      actions: new Map(),
+    };
+    let file: { content: string; revision: string; editable: boolean };
+    try {
+      file = await this.#files.read(checked.session, input.reference.path);
+    } catch {
+      const rechecked = await this.#validateBinding(binding);
+      if (!rechecked.ok) {
+        return rechecked.outcome;
+      }
+      await this.#sendFilePreviewUnavailable(
+        input.event,
+        binding,
+        rechecked.session,
+        input.reference.path,
+      );
+      this.#rememberWorkspace(binding);
+      return "file_sent";
+    }
+    const rechecked = await this.#validateBinding(binding);
+    if (!rechecked.ok) {
+      return rechecked.outcome;
+    }
+    const displayPath = `${input.reference.path}${input.reference.line ? `:${input.reference.line}` : ""}`;
+    await this.#sendFileView(
+      input.event,
+      binding,
+      rechecked.session,
+      input.reference.path,
+      file,
+      displayPath,
+    );
+    this.#rememberWorkspace(binding);
+    return "file_sent";
   }
 
   async #executeAction(
@@ -1190,6 +1315,7 @@ export class FeishuSessionWorkspace {
     session: AgentSessionRecord,
     path: string,
     file: { content: string; revision: string; editable: boolean },
+    displayPath = path,
   ): Promise<void> {
     const actions = new Map<string, WorkspaceAction>();
     const contentLength = Array.from(file.content).length;
@@ -1226,10 +1352,10 @@ export class FeishuSessionWorkspace {
       binding,
       buildCard({
         title: "Coding Kanban · 文件预览",
-        subtitle: `${session.displayName} · ${path}`,
+        subtitle: `${session.displayName} · ${displayPath}`,
         elements: [
           infoBlock(
-            `路径：${path}\n大小：${contentLength} 字符\n${editable ? "可在飞书内编辑" : "仅预览，超过飞书内编辑上限或不可编辑"}`,
+            `路径：${displayPath}\n大小：${contentLength} 字符\n${editable ? "可在飞书内编辑" : "仅预览，超过飞书内编辑上限或不可编辑"}`,
           ),
           { tag: "div", text: plain(preview || "空文件") },
           actionRow(buttons),

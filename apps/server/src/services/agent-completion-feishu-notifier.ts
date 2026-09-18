@@ -6,6 +6,11 @@ import type {
   ListAgentSessionsResponse,
 } from "@agent-orchestrator/shared";
 
+import {
+  FeishuCompletionFileReferenceService,
+  type FeishuCompletionFileReference,
+} from "./feishu-completion-file-reference-service.js";
+
 export interface FeishuCompletionEvent {
   userQuestion?: string;
   codexThreadId?: string;
@@ -16,6 +21,7 @@ export interface FeishuCompletionEvent {
   summary: string;
   completedAt: string;
   completionId?: string;
+  allowLocalFileReferences?: boolean;
 }
 
 export interface FeishuCompletionObservation {
@@ -35,6 +41,7 @@ export interface FeishuCompletionDeliveryMessage {
 
 export interface FeishuCompletionDelivery {
   messages: FeishuCompletionDeliveryMessage[];
+  referencedFiles?: FeishuCompletionFileReference[];
 }
 
 export interface FeishuCompletionSenderLike {
@@ -113,6 +120,12 @@ function completionEventForSession(
       session.outputPreview ??
       "任务已经完成，请打开 Coding Kanban 查看结果。",
     completedAt,
+    ...(canObserveStructuredCompletion(session) &&
+    !session.sshTarget &&
+    (!session.hostId || session.hostId === "local") &&
+    session.workingDirectory
+      ? { allowLocalFileReferences: true }
+      : {}),
   };
 }
 
@@ -584,20 +597,45 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
   readonly #scriptPath: string;
   readonly #fallbackWorkingDirectory: string;
   readonly #runCommand: ScriptCommandRunner;
+  readonly #fileReferences: Pick<
+    FeishuCompletionFileReferenceService,
+    "prepare"
+  >;
 
   constructor(options: {
     nodeBinary?: string;
     scriptPath: string;
     fallbackWorkingDirectory: string;
     runCommand?: ScriptCommandRunner;
+    fileReferences?: Pick<FeishuCompletionFileReferenceService, "prepare">;
   }) {
     this.#nodeBinary = options.nodeBinary ?? process.execPath;
     this.#scriptPath = options.scriptPath;
     this.#fallbackWorkingDirectory = options.fallbackWorkingDirectory;
     this.#runCommand = options.runCommand ?? runScriptCommand;
+    this.#fileReferences =
+      options.fileReferences ?? new FeishuCompletionFileReferenceService();
   }
 
   async send(event: FeishuCompletionEvent): Promise<FeishuCompletionDelivery> {
+    let summary = event.summary;
+    let referencedFiles: FeishuCompletionFileReference[] = [];
+    if (
+      event.allowLocalFileReferences &&
+      event.codexThreadId &&
+      event.workingDirectory
+    ) {
+      try {
+        const prepared = await this.#fileReferences.prepare({
+          content: event.summary,
+          workingDirectory: event.workingDirectory,
+        });
+        summary = prepared.content;
+        referencedFiles = prepared.references;
+      } catch {
+        // File affordances must never block the completion notification.
+      }
+    }
     const notification = {
       type: "agent-turn-complete",
       "thread-id": `kanban-${event.sessionId}`,
@@ -605,9 +643,12 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
       cwd: event.workingDirectory ?? this.#fallbackWorkingDirectory,
       "agent-kind": event.agentKind,
       "display-name": event.displayName,
-      "last-assistant-message": event.summary,
+      "last-assistant-message": summary,
       ...(event.userQuestion ? { "user-question": event.userQuestion } : {}),
       ...(event.codexThreadId ? { "records-available": true } : {}),
+      ...(referencedFiles.length > 0
+        ? { "referenced-files": referencedFiles }
+        : {}),
     };
 
     try {
@@ -643,7 +684,10 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
             ]
           : [];
       });
-      return { messages };
+      return {
+        messages,
+        ...(referencedFiles.length > 0 ? { referencedFiles } : {}),
+      };
     } catch {
       // execFile errors may repeat argv, which contains the task summary and cwd.
       throw new Error("Feishu notification delivery failed");

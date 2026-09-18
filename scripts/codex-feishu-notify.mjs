@@ -2,8 +2,15 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import {
+  dirname,
+  extname,
+  isAbsolute,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { config as loadDotenv } from "dotenv";
@@ -22,6 +29,15 @@ const USER_ID_PATTERN = /^ou_[A-Za-z0-9_-]+$/;
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 const CONTROL_CHARACTER_PATTERN =
   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
+const IMAGE_KEY_PATTERN = /^img_[A-Za-z0-9_-]{8,}$/;
+const MAX_COMPLETION_IMAGE_BYTES = 10 * 1024 * 1024;
+const COMPLETION_IMAGE_EXTENSIONS = new Set([
+  ".gif",
+  ".jpeg",
+  ".jpg",
+  ".png",
+  ".webp",
+]);
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, "..");
 const notificationSettingsPath = resolve(
@@ -322,9 +338,177 @@ function completionOutput(notification) {
   );
 }
 
+function completionReferencedFiles(notification) {
+  if (!Array.isArray(notification["referenced-files"])) {
+    return [];
+  }
+  const references = [];
+  for (const candidate of notification["referenced-files"].slice(0, 5)) {
+    if (!isRecord(candidate) || typeof candidate.path !== "string") {
+      continue;
+    }
+    const filePath = candidate.path;
+    const segments = filePath.split("/");
+    if (
+      !filePath ||
+      filePath.length > 2_048 ||
+      filePath.startsWith("/") ||
+      filePath.includes("\\") ||
+      segments.some(
+        (segment) => !segment || segment === "." || segment === "..",
+      )
+    ) {
+      continue;
+    }
+    const line =
+      Number.isSafeInteger(candidate.line) &&
+      candidate.line >= 1 &&
+      candidate.line <= 10_000_000
+        ? candidate.line
+        : undefined;
+    references.push({ path: filePath, ...(line ? { line } : {}) });
+  }
+  return references;
+}
+
+function isContainedPath(root, candidate) {
+  const relativePath = relative(root, candidate);
+  return (
+    relativePath.length > 0 &&
+    relativePath !== ".." &&
+    !relativePath.startsWith(`..${sep}`) &&
+    !isAbsolute(relativePath)
+  );
+}
+
+function hasMatchingImageSignature(buffer, extension) {
+  if (extension === ".png") {
+    return (
+      buffer.length >= 8 &&
+      buffer
+        .subarray(0, 8)
+        .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    );
+  }
+  if (extension === ".jpg" || extension === ".jpeg") {
+    return (
+      buffer.length >= 3 &&
+      buffer[0] === 0xff &&
+      buffer[1] === 0xd8 &&
+      buffer[2] === 0xff
+    );
+  }
+  if (extension === ".gif") {
+    const signature = buffer.subarray(0, 6).toString("ascii");
+    return signature === "GIF87a" || signature === "GIF89a";
+  }
+  if (extension === ".webp") {
+    return (
+      buffer.length >= 12 &&
+      buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
+      buffer.subarray(8, 12).toString("ascii") === "WEBP"
+    );
+  }
+  return false;
+}
+
+function completionImageFiles(notification) {
+  const cwd = typeof notification.cwd === "string" ? notification.cwd : "";
+  if (!cwd || !isAbsolute(cwd)) {
+    return [];
+  }
+
+  let root;
+  try {
+    const rootStats = lstatSync(cwd);
+    if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
+      return [];
+    }
+    root = realpathSync(cwd);
+    if (root !== resolve(cwd)) {
+      return [];
+    }
+  } catch {
+    return [];
+  }
+
+  return completionReferencedFiles(notification).flatMap((reference) => {
+    const extension = extname(reference.path).toLowerCase();
+    if (
+      !COMPLETION_IMAGE_EXTENSIONS.has(extension) ||
+      reference.path.split("/").some((segment) => segment.startsWith("."))
+    ) {
+      return [];
+    }
+    const candidate = resolve(root, reference.path);
+    if (!isContainedPath(root, candidate)) {
+      return [];
+    }
+    try {
+      const stats = lstatSync(candidate);
+      if (
+        !stats.isFile() ||
+        stats.isSymbolicLink() ||
+        stats.size <= 0 ||
+        stats.size > MAX_COMPLETION_IMAGE_BYTES ||
+        realpathSync(candidate) !== candidate
+      ) {
+        return [];
+      }
+      const content = readFileSync(candidate);
+      return hasMatchingImageSignature(content, extension)
+        ? [{ path: reference.path, cwd: root }]
+        : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+async function uploadCompletionImages({
+  notification,
+  runCommand,
+  commandEnv,
+  timeout,
+}) {
+  const imageKeys = new Map();
+  for (const image of completionImageFiles(notification)) {
+    try {
+      const { stdout } = await runCommand(
+        "lark-cli",
+        [
+          "im",
+          "images",
+          "create",
+          "--format",
+          "json",
+          "--as",
+          "bot",
+          "--data",
+          JSON.stringify({ image_type: "message" }),
+          "--file",
+          image.path,
+        ],
+        { env: commandEnv, timeout, cwd: image.cwd },
+      );
+      const response = parseLarkCliResponse(stdout);
+      const imageKey = isRecord(response.data)
+        ? response.data.image_key
+        : undefined;
+      if (typeof imageKey === "string" && IMAGE_KEY_PATTERN.test(imageKey)) {
+        imageKeys.set(image.path, imageKey);
+      }
+    } catch {
+      // Image presentation is best-effort; the file callback remains available.
+    }
+  }
+  return imageKeys;
+}
+
 export function buildCompletionCards(
   notification,
   maxChunkCharacters = DEFAULT_MESSAGE_CHUNK_CHARS,
+  referencedImageKeys = new Map(),
 ) {
   const cwd = typeof notification.cwd === "string" ? notification.cwd : "";
   const projectName = projectNameFromCwd(cwd);
@@ -374,6 +558,13 @@ export function buildCompletionCards(
     elements: [{ tag: "div", text: { tag: "plain_text", content } }],
   });
   const recordsAvailable = notification["records-available"] === true;
+  const referencedFiles = completionReferencedFiles(notification);
+  const referencedImages = referencedFiles.flatMap((reference) => {
+    const imageKey = referencedImageKeys.get(reference.path);
+    return typeof imageKey === "string" && IMAGE_KEY_PATTERN.test(imageKey)
+      ? [{ reference, imageKey }]
+      : [];
+  });
   return parts.map(({ chunk, index, questionPart }) => ({
     schema: "2.0",
     config: {
@@ -458,6 +649,50 @@ export function buildCompletionCards(
                 ],
               },
             ]),
+        ...(!questionPart && index === 0
+          ? referencedImages.map(({ reference, imageKey }) => {
+              const basename = reference.path.split("/").at(-1);
+              return {
+                tag: "img",
+                img_key: imageKey,
+                alt: { tag: "plain_text", content: basename },
+                title: { tag: "plain_text", content: basename },
+                scale_type: "fit_horizontal",
+                corner_radius: "8px",
+                preview: true,
+              };
+            })
+          : []),
+        ...(!questionPart &&
+        index === 0 &&
+        recordsAvailable &&
+        referencedFiles.length > 0
+          ? referencedFiles.map((reference, referenceIndex) => {
+              const basename = reference.path.split("/").at(-1);
+              return {
+                tag: "button",
+                text: {
+                  tag: "plain_text",
+                  content: truncateText(
+                    `查看 ${basename}${reference.line ? `:${reference.line}` : ""}`,
+                    100,
+                  ),
+                },
+                type: "default",
+                size: "tiny",
+                width: "default",
+                behaviors: [
+                  {
+                    type: "callback",
+                    value: {
+                      action: "kanban_completion_file",
+                      reference: referenceIndex,
+                    },
+                  },
+                ],
+              };
+            })
+          : []),
         ...(recordsAvailable
           ? [
               {
@@ -644,7 +879,24 @@ export async function runCodexFeishuNotification({
     LARKSUITE_CLI_NO_UPDATE_NOTIFIER: "1",
     LARKSUITE_CLI_NO_SKILLS_NOTIFIER: "1",
   };
-  const cards = buildCompletionCards(notification, messageChunkCharacters);
+  const directNotification =
+    destination.flag === "--user-id"
+      ? notification
+      : { ...notification, "referenced-files": [] };
+  const referencedImageKeys =
+    destination.flag === "--user-id"
+      ? await uploadCompletionImages({
+          notification: directNotification,
+          runCommand,
+          commandEnv,
+          timeout,
+        })
+      : new Map();
+  const cards = buildCompletionCards(
+    directNotification,
+    messageChunkCharacters,
+    referencedImageKeys,
+  );
 
   const messageIds = [];
   const sentMessages = [];

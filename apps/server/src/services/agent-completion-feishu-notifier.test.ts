@@ -675,6 +675,53 @@ test("script sender uses a fixed executable and Kanban delivery mode without a s
   });
 });
 
+test("script sender carries only prepared local file references into the card binding", async () => {
+  let notification: Record<string, unknown> | null = null;
+  const sender = new ScriptFeishuCompletionSender({
+    scriptPath: "/workspace/scripts/codex-feishu-notify.mjs",
+    fallbackWorkingDirectory: "/workspace/coding_kanban",
+    fileReferences: {
+      prepare: async () => ({
+        content: "查看 `src/app.ts:12`",
+        references: [{ path: "src/app.ts", line: 12 }],
+      }),
+    },
+    runCommand: async (_binary, args) => {
+      notification = JSON.parse(args[2] ?? "") as Record<string, unknown>;
+      return {
+        stdout: JSON.stringify({
+          status: "sent",
+          messages: [{ messageId: "om_notice", chatId: "oc_private" }],
+        }),
+      };
+    },
+  });
+
+  const delivery = await sender.send({
+    sessionId: "session-1",
+    displayName: "现有任务",
+    agentKind: "codex",
+    workingDirectory: "/workspace/project-a",
+    summary: "[app.ts](/workspace/project-a/src/app.ts:12)",
+    completedAt: "2026-09-18T10:30:00.000Z",
+    completionId: "turn-structured-file",
+    codexThreadId: "codex-thread-12345678",
+    allowLocalFileReferences: true,
+  });
+
+  assert.equal(
+    notification?.["last-assistant-message"],
+    "查看 `src/app.ts:12`",
+  );
+  assert.deepEqual(notification?.["referenced-files"], [
+    { path: "src/app.ts", line: 12 },
+  ]);
+  assert.deepEqual(delivery, {
+    messages: [{ messageId: "om_notice", chatId: "oc_private" }],
+    referencedFiles: [{ path: "src/app.ts", line: 12 }],
+  });
+});
+
 test("script sender hides notification content when the child process fails", async () => {
   const sender = new ScriptFeishuCompletionSender({
     nodeBinary: "/usr/bin/node",
