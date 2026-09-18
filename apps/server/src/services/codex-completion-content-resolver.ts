@@ -21,7 +21,8 @@ import type { CodexSessionLocator } from "./codex-session-locator.js";
 
 interface CodexCompletionContentResolverOptions {
   registry: Pick<AgentSessionRegistry, "get" | "updateSession">;
-  codexSessionLocator: Pick<CodexSessionLocator, "resolve">;
+  codexSessionLocator: Pick<CodexSessionLocator, "resolve"> &
+    Partial<Pick<CodexSessionLocator, "resolveTmuxPanes">>;
   codexTranscriptService: Pick<CodexTranscriptService, "read"> &
     Partial<
       Pick<
@@ -68,7 +69,8 @@ function lastAssistantOutput(
 
 export class CodexCompletionContentResolver {
   readonly #registry: Pick<AgentSessionRegistry, "get" | "updateSession">;
-  readonly #codexSessionLocator: Pick<CodexSessionLocator, "resolve">;
+  readonly #codexSessionLocator: Pick<CodexSessionLocator, "resolve"> &
+    Partial<Pick<CodexSessionLocator, "resolveTmuxPanes">>;
   readonly #codexTranscriptService: Pick<CodexTranscriptService, "read"> &
     Partial<
       Pick<
@@ -178,6 +180,50 @@ export class CodexCompletionContentResolver {
     return completion && sessionId
       ? { ...completion, codexThreadId: sessionId }
       : completion;
+  }
+
+  async inspectLatestCompletions(
+    event: FeishuCompletionEvent,
+  ): Promise<FeishuCompletionObservation[]> {
+    const session = this.#registry.get(event.sessionId);
+    if (!canResolveCodexTranscript(session)) {
+      return [];
+    }
+
+    const tmuxSession = session.transportRef?.tmuxSession;
+    if (
+      isRemoteAgentSession(session) ||
+      !tmuxSession ||
+      !this.#codexSessionLocator.resolveTmuxPanes ||
+      !this.#codexTranscriptService.readLatestCompletion
+    ) {
+      const completion = await this.inspectLatestCompletion(event);
+      return completion ? [completion] : [];
+    }
+
+    const panes = await this.#codexSessionLocator.resolveTmuxPanes(tmuxSession);
+    if (panes.length === 0) {
+      const completion = await this.inspectLatestCompletion(event);
+      return completion ? [completion] : [];
+    }
+
+    return panes.flatMap((pane) => {
+      try {
+        const completion = this.#codexTranscriptService.readLatestCompletion!({
+          sessionId: pane.sessionId,
+          ...(pane.workingDirectory
+            ? { workingDirectory: pane.workingDirectory }
+            : session.workingDirectory
+              ? { workingDirectory: session.workingDirectory }
+              : {}),
+        });
+        return completion
+          ? [{ ...completion, codexThreadId: pane.sessionId }]
+          : [];
+      } catch {
+        return [];
+      }
+    });
   }
 
   async #resolveSessionId(

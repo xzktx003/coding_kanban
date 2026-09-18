@@ -25,7 +25,10 @@ import { registerFeishuNotificationSettingsRoutes } from "./routes/feishu-notifi
 import { registerSshHostsRoutes } from "./routes/ssh-hosts.js";
 import { registerVsCodeWebProxyRoutes } from "./routes/vscode-web-proxy.js";
 import { AgentSessionRegistry } from "./services/agent-session-registry.js";
-import { resolveActiveCodexSessionId } from "./services/active-codex-session-resolver.js";
+import {
+  resolveActiveCodexSessionId,
+  resolveCodexSessionIds,
+} from "./services/active-codex-session-resolver.js";
 import { AgentSessionInputService } from "./services/agent-session-input-service.js";
 import { createAgentSessionStreamEvent } from "./services/agent-session-stream.js";
 import {
@@ -373,6 +376,11 @@ export function buildServer(options: BuildServerOptions = {}): {
                 registry,
                 codexSessionLocator,
               }),
+            resolveSessionIds: (session) =>
+              resolveCodexSessionIds(session, {
+                registry,
+                codexSessionLocator,
+              }),
             sendText: (input) => codexImageMessageService.sendText(input),
             sendImage: (input) => codexImageMessageService.send(input),
           },
@@ -410,6 +418,11 @@ export function buildServer(options: BuildServerOptions = {}): {
           registry,
           resolveSessionId: (session) =>
             resolveActiveCodexSessionId(session, {
+              registry,
+              codexSessionLocator,
+            }),
+          resolveSessionIds: (session) =>
+            resolveCodexSessionIds(session, {
               registry,
               codexSessionLocator,
             }),

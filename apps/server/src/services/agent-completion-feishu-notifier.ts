@@ -50,6 +50,9 @@ export interface FeishuCompletionSenderLike {
 
 export interface FeishuCompletionContentResolverLike {
   resolve(event: FeishuCompletionEvent): Promise<string | null>;
+  inspectLatestCompletions?(
+    event: FeishuCompletionEvent,
+  ): Promise<FeishuCompletionObservation[]>;
   inspectLatestCompletion?(
     event: FeishuCompletionEvent,
   ): Promise<FeishuCompletionObservation | null>;
@@ -161,6 +164,7 @@ export class AgentCompletionFeishuNotifier {
   readonly #pendingRestoreSessionIds = new Set<string>();
   readonly #observedCompletionIds = new Map<string, string | null>();
   readonly #deliveredCompletionIds = new Map<string, string>();
+  readonly #baselinedSessionIds = new Set<string>();
   readonly #observedSessionIds = new Set<string>();
   readonly #completionProbeTimers = new Map<string, NodeJS.Timeout>();
   readonly #lastCompletionProbeAt = new Map<string, number>();
@@ -265,6 +269,7 @@ export class AgentCompletionFeishuNotifier {
       this.#pendingRestoreSessionIds.clear();
       this.#observedCompletionIds.clear();
       this.#deliveredCompletionIds.clear();
+      this.#baselinedSessionIds.clear();
       this.#observedSessionIds.clear();
       for (const timer of this.#completionProbeTimers.values()) {
         clearTimeout(timer);
@@ -282,7 +287,10 @@ export class AgentCompletionFeishuNotifier {
     previous: ListAgentSessionsResponse | null,
     current: ListAgentSessionsResponse,
   ): void {
-    if (!this.#contentResolver?.inspectLatestCompletion) {
+    if (
+      !this.#contentResolver?.inspectLatestCompletions &&
+      !this.#contentResolver?.inspectLatestCompletion
+    ) {
       return;
     }
 
@@ -310,7 +318,7 @@ export class AgentCompletionFeishuNotifier {
 
       this.#scheduleCompletionProbe(
         completionEventForSession(session, current.updatedAt),
-        !this.#observedCompletionIds.has(session.id),
+        !this.#baselinedSessionIds.has(session.id),
         earlier ? this.#structuredCompletionProbeDelayMs : 0,
       );
     }
@@ -325,8 +333,8 @@ export class AgentCompletionFeishuNotifier {
       }
       this.#completionProbeTimers.delete(sessionId);
       this.#lastCompletionProbeAt.delete(sessionId);
-      this.#observedCompletionIds.delete(sessionId);
-      this.#deliveredCompletionIds.delete(sessionId);
+      this.#clearCompletionState(sessionId);
+      this.#baselinedSessionIds.delete(sessionId);
       this.#observedSessionIds.delete(sessionId);
       this.#pendingCompletionProbes.delete(sessionId);
     }
@@ -389,14 +397,9 @@ export class AgentCompletionFeishuNotifier {
   }
 
   async #runCompletionProbe(probe: PendingCompletionProbe): Promise<void> {
-    const inspect = this.#contentResolver?.inspectLatestCompletion;
-    if (!inspect) {
-      return;
-    }
-
-    let observation: FeishuCompletionObservation | null;
+    let observations: FeishuCompletionObservation[];
     try {
-      observation = await inspect.call(this.#contentResolver, probe.event);
+      observations = await this.#inspectLatestCompletions(probe.event);
     } catch {
       this.#logError(
         new Error("Codex structured completion inspection failed"),
@@ -408,43 +411,42 @@ export class AgentCompletionFeishuNotifier {
       return;
     }
 
-    if (observation?.pendingContinuationSource) {
-      return;
-    }
-
     const sessionId = probe.event.sessionId;
-    const hadBaseline = this.#observedCompletionIds.has(sessionId);
-    const previousCompletionId = this.#observedCompletionIds.get(sessionId);
-    this.#observedCompletionIds.set(
-      sessionId,
-      observation?.completionId ?? null,
-    );
-    if (!observation || previousCompletionId === observation.completionId) {
-      return;
+    const establishBaseline =
+      probe.baselineOnly && !this.#baselinedSessionIds.has(sessionId);
+    this.#baselinedSessionIds.add(sessionId);
+    for (const observation of observations) {
+      if (observation.pendingContinuationSource) {
+        continue;
+      }
+      const streamKey = this.#completionStreamKey(sessionId, observation);
+      const hadBaseline = this.#observedCompletionIds.has(streamKey);
+      const previousCompletionId = this.#observedCompletionIds.get(streamKey);
+      this.#observedCompletionIds.set(streamKey, observation.completionId);
+      if (previousCompletionId === observation.completionId) {
+        continue;
+      }
+      if (!hadBaseline && establishBaseline) {
+        continue;
+      }
+      if (observation.shouldNotify === false) {
+        continue;
+      }
+      await this.#deliverObservation(probe.event, observation);
     }
-
-    if (!hadBaseline && probe.baselineOnly) {
-      return;
-    }
-
-    if (observation.shouldNotify === false) {
-      return;
-    }
-
-    await this.#deliverObservation(probe.event, observation);
   }
 
   async #deliverObservation(
     event: FeishuCompletionEvent,
     observation: FeishuCompletionObservation,
   ): Promise<void> {
+    const streamKey = this.#completionStreamKey(event.sessionId, observation);
     if (
-      this.#deliveredCompletionIds.get(event.sessionId) ===
-      observation.completionId
+      this.#deliveredCompletionIds.get(streamKey) === observation.completionId
     ) {
       return;
     }
-    const deliveryKey = `${event.sessionId}:${observation.completionId}`;
+    const deliveryKey = `${streamKey}:${observation.completionId}`;
     if (this.#completionDeliveryInFlight.has(deliveryKey)) {
       return;
     }
@@ -480,10 +482,7 @@ export class AgentCompletionFeishuNotifier {
     try {
       const delivery = await this.#sender.send(deliveryEvent);
       this.#recordDelivery(deliveryEvent, delivery);
-      this.#deliveredCompletionIds.set(
-        event.sessionId,
-        observation.completionId,
-      );
+      this.#deliveredCompletionIds.set(streamKey, observation.completionId);
     } catch (error) {
       this.#logError(error, deliveryEvent);
     } finally {
@@ -495,22 +494,41 @@ export class AgentCompletionFeishuNotifier {
     event: FeishuCompletionEvent,
     requiresStructuredCompletion: boolean,
   ): Promise<void> {
-    if (this.#contentResolver?.inspectLatestCompletion) {
+    if (
+      this.#contentResolver?.inspectLatestCompletions ||
+      this.#contentResolver?.inspectLatestCompletion
+    ) {
       try {
-        const observation =
-          await this.#contentResolver.inspectLatestCompletion(event);
-        if (observation) {
-          if (observation.pendingContinuationSource) {
-            return;
+        const observations = await this.#inspectLatestCompletions(event);
+        if (observations.length > 0) {
+          this.#baselinedSessionIds.add(event.sessionId);
+          for (const observation of observations) {
+            if (observation.pendingContinuationSource) {
+              continue;
+            }
+            const streamKey = this.#completionStreamKey(
+              event.sessionId,
+              observation,
+            );
+            const previousCompletionId =
+              this.#observedCompletionIds.get(streamKey);
+            const wasObserved = this.#observedCompletionIds.has(streamKey);
+            this.#observedCompletionIds.set(
+              streamKey,
+              observation.completionId,
+            );
+            if (
+              this.#contentResolver.inspectLatestCompletions &&
+              wasObserved &&
+              previousCompletionId === observation.completionId
+            ) {
+              continue;
+            }
+            if (observation.shouldNotify === false) {
+              continue;
+            }
+            await this.#deliverObservation(event, observation);
           }
-          this.#observedCompletionIds.set(
-            event.sessionId,
-            observation.completionId,
-          );
-          if (observation.shouldNotify === false) {
-            return;
-          }
-          await this.#deliverObservation(event, observation);
           return;
         }
       } catch {
@@ -559,6 +577,40 @@ export class AgentCompletionFeishuNotifier {
       this.#deliveryRecorder?.record(event, delivery);
     } catch (error) {
       this.#logError(error, event);
+    }
+  }
+
+  async #inspectLatestCompletions(
+    event: FeishuCompletionEvent,
+  ): Promise<FeishuCompletionObservation[]> {
+    if (this.#contentResolver?.inspectLatestCompletions) {
+      return this.#contentResolver.inspectLatestCompletions(event);
+    }
+    const observation =
+      await this.#contentResolver?.inspectLatestCompletion?.(event);
+    return observation ? [observation] : [];
+  }
+
+  #completionStreamKey(
+    sessionId: string,
+    observation: FeishuCompletionObservation,
+  ): string {
+    return observation.codexThreadId
+      ? `${sessionId}\u0000${observation.codexThreadId}`
+      : sessionId;
+  }
+
+  #clearCompletionState(sessionId: string): void {
+    const prefix = `${sessionId}\u0000`;
+    for (const key of this.#observedCompletionIds.keys()) {
+      if (key === sessionId || key.startsWith(prefix)) {
+        this.#observedCompletionIds.delete(key);
+      }
+    }
+    for (const key of this.#deliveredCompletionIds.keys()) {
+      if (key === sessionId || key.startsWith(prefix)) {
+        this.#deliveredCompletionIds.delete(key);
+      }
     }
   }
 }

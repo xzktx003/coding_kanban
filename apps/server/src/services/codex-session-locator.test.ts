@@ -172,6 +172,60 @@ test("CodexSessionLocator keeps same-directory tmux panes bound to their own top
   }
 });
 
+test("CodexSessionLocator enumerates every Codex thread in one tmux session", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-session-panes-"));
+  const sessionsRoot = join(root, "sessions");
+  const procRoot = join(root, "proc");
+  mkdirSync(sessionsRoot, { recursive: true });
+  mkdirSync(procRoot, { recursive: true });
+
+  try {
+    const sessionA = writeSession(
+      sessionsRoot,
+      "session-a",
+      "codex-session-a",
+      "cli",
+      "/workspace/a",
+    );
+    const sessionB = writeSession(
+      sessionsRoot,
+      "session-b",
+      "codex-session-b",
+      "cli",
+      "/workspace/b",
+    );
+    exposeOpenFile(procRoot, 101, sessionA);
+    exposeOpenFile(procRoot, 201, sessionB);
+
+    const locator = new CodexSessionLocator({
+      procRoot,
+      sessionsRoot,
+      listTmuxPanes: async (sessionName) => {
+        assert.equal(sessionName, "shared");
+        return [
+          { paneId: "%1", processId: 101, workingDirectory: "/workspace/a" },
+          { paneId: "%2", processId: 201, workingDirectory: "/workspace/b" },
+        ];
+      },
+    });
+
+    assert.deepEqual(await locator.resolveTmuxPanes("shared"), [
+      {
+        paneId: "%1",
+        sessionId: "codex-session-a",
+        workingDirectory: "/workspace/a",
+      },
+      {
+        paneId: "%2",
+        sessionId: "codex-session-b",
+        workingDirectory: "/workspace/b",
+      },
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("CodexSessionLocator follows the active pane of the attached Kanban tmux client", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-session-active-pane-"));
   const sessionsRoot = join(root, "sessions");

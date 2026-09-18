@@ -1,3 +1,4 @@
+- 同一个 tmux session 分屏运行多个 Codex 时，完成通知过去只解析活动 pane，其他分屏完成会漏报；通知卡片回复又在收到消息时重新解析活动 pane，可能串到另一个 Codex。现用 `tmux list-panes -s` 枚举全部 pane，沿各自 PID 定位顶层 Codex thread，按看板 session + thread 分别维护完成基线/去重；通知绑定的回复、记录和文件动作先验证原 thread 仍属于该 tmux session，再精确投递，绝不因切换活动 pane 改目标。
 - 2026-09-07：飞书回复从 PTY 粘贴加 Enter 改为复用原生 codex queue，精确定位活动 thread，完整保留 /goal 与多行正文。队列接受才标记 processed，忙碌线程交给 Codex 排队，失败不回退键盘或盲目补发。
 - 飞书回复通知卡片后少数 Codex 会话仍只填入文字：单行回复会触发新版 Codex paste-burst 识别，且 node-pty Promise 不代表底层字节已写稳，紧随的 Enter 仍可能被合并。所有交互回复现统一使用 bracketed paste，活跃 PTY 再等待 50 ms 后单独发送 Enter；普通键盘输入和旧直连 pipe 不变。
 - 飞书回复通知卡片后文字会进入 Codex 编辑区但不自动执行：prompt 和 Enter 同批写入时，部分 Codex TUI 忽略同批次回车。输入服务现对交互 PTY/tmux 先写 prompt（多行 bracketed paste）再单独写 Enter，旧版直连 process/SSH 使用一个末尾换行提交，避免重复空命令。

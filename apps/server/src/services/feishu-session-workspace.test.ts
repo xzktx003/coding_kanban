@@ -173,6 +173,7 @@ function createFixture(
       path: string,
     ) => Promise<{ content: string; revision: string; editable: boolean }>;
     resolveSessionId?: () => Promise<string | undefined>;
+    resolveSessionIds?: () => Promise<string[]>;
     notificationBinding?: {
       messageId: string;
       chatId: string;
@@ -243,6 +244,9 @@ function createFixture(
       },
     },
     resolveSessionId: async () => overrides.resolveSessionId?.() ?? threadId,
+    ...(overrides.resolveSessionIds
+      ? { resolveSessionIds: async () => overrides.resolveSessionIds!() }
+      : {}),
     notificationBindings: {
       resolve: () => overrides.notificationBinding ?? null,
     },
@@ -356,6 +360,60 @@ test("notification records callback opens only its bound current Codex transcrip
     }),
     "ignored_untrusted",
   );
+});
+
+test("notification records callback keeps its bound inactive tmux pane transcript", async () => {
+  const fixture = createFixture({
+    resolveSessionId: async () => "thread-active",
+    resolveSessionIds: async () => ["thread-active", "thread-notified"],
+    notificationBinding: {
+      messageId: "om_notice_inactive",
+      chatId: "oc_private",
+      sessionId: "session-1",
+      codexThreadId: "thread-notified",
+    },
+  });
+
+  assert.equal(
+    await fixture.service.handle({
+      type: "card.action.trigger",
+      event_id: "evt_notice_inactive_records",
+      operator_id: "ou_owner",
+      message_id: "om_notice_inactive",
+      chat_id: "oc_private",
+      action_tag: "button",
+      action_value: JSON.stringify({ action: "kanban_completion_records" }),
+    }),
+    "records_sent",
+  );
+  assert.deepEqual(fixture.transcriptCalls, [{ cursor: undefined }]);
+});
+
+test("notification records callback rejects a bound tmux pane that no longer exists", async () => {
+  const fixture = createFixture({
+    resolveSessionId: async () => "thread-active",
+    resolveSessionIds: async () => ["thread-active"],
+    notificationBinding: {
+      messageId: "om_notice_gone",
+      chatId: "oc_private",
+      sessionId: "session-1",
+      codexThreadId: "thread-gone",
+    },
+  });
+
+  assert.equal(
+    await fixture.service.handle({
+      type: "card.action.trigger",
+      event_id: "evt_notice_gone_records",
+      operator_id: "ou_owner",
+      message_id: "om_notice_gone",
+      chat_id: "oc_private",
+      action_tag: "button",
+      action_value: JSON.stringify({ action: "kanban_completion_records" }),
+    }),
+    "ignored_changed_thread",
+  );
+  assert.deepEqual(fixture.transcriptCalls, []);
 });
 
 test("notification file callback previews only its bound referenced file", async () => {

@@ -55,6 +55,7 @@ export interface FeishuSessionWorkspaceOptions {
   settings: { get(): FeishuNotificationSettingsResponse };
   registry: { get(sessionId: string): AgentSessionRecord };
   resolveSessionId(session: AgentSessionRecord): Promise<string | undefined>;
+  resolveSessionIds?(session: AgentSessionRecord): Promise<string[]>;
   files: {
     list(
       session: AgentSessionRecord,
@@ -386,6 +387,7 @@ export class FeishuSessionWorkspace {
   readonly #settings: FeishuSessionWorkspaceOptions["settings"];
   readonly #registry: FeishuSessionWorkspaceOptions["registry"];
   readonly #resolveSessionId: FeishuSessionWorkspaceOptions["resolveSessionId"];
+  readonly #resolveSessionIds: FeishuSessionWorkspaceOptions["resolveSessionIds"];
   readonly #files: FeishuSessionWorkspaceOptions["files"];
   readonly #transcript: FeishuSessionWorkspaceOptions["transcript"];
   readonly #exportTranscript: FeishuSessionWorkspaceOptions["exportTranscript"];
@@ -405,6 +407,7 @@ export class FeishuSessionWorkspace {
     this.#settings = options.settings;
     this.#registry = options.registry;
     this.#resolveSessionId = options.resolveSessionId;
+    this.#resolveSessionIds = options.resolveSessionIds;
     this.#files = options.files;
     this.#transcript = options.transcript;
     this.#exportTranscript = options.exportTranscript;
@@ -1652,11 +1655,15 @@ export class FeishuSessionWorkspace {
     if (!isAvailableCodexSession(session)) {
       return { ok: false, outcome: "ignored_unavailable" };
     }
-    const currentThreadId = await this.#resolveSessionId(session);
-    if (!currentThreadId) {
+    const currentThreadIds = this.#resolveSessionIds
+      ? await this.#resolveSessionIds(session)
+      : [await this.#resolveSessionId(session)].filter(
+          (candidate): candidate is string => Boolean(candidate),
+        );
+    if (currentThreadIds.length === 0) {
       return { ok: false, outcome: "ignored_unavailable" };
     }
-    if (currentThreadId !== threadId) {
+    if (!currentThreadIds.includes(threadId)) {
       return { ok: false, outcome: "ignored_changed_thread" };
     }
     try {

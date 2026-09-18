@@ -33,12 +33,26 @@ interface CodexSessionLocatorOptions {
     sessionName: string,
     clientProcessId?: number,
   ) => Promise<number | null>;
+  listTmuxPanes?: (sessionName: string) => Promise<TmuxPaneProcess[]>;
 }
 
 interface ResolveCodexSessionInput {
   tmuxTarget: string;
   tmuxSession?: string;
   tmuxClientProcessId?: number;
+  tmuxPaneProcessId?: number;
+  workingDirectory?: string;
+}
+
+interface TmuxPaneProcess {
+  paneId: string;
+  processId: number;
+  workingDirectory?: string;
+}
+
+export interface ResolvedTmuxCodexPane {
+  paneId: string;
+  sessionId: string;
   workingDirectory?: string;
 }
 
@@ -431,6 +445,57 @@ async function defaultResolveTmuxActivePanePid(
   return null;
 }
 
+async function defaultListTmuxPanes(
+  sessionName: string,
+): Promise<TmuxPaneProcess[]> {
+  if (!isValidTmuxTarget(sessionName)) {
+    return [];
+  }
+
+  try {
+    const result = await execFileAsync(
+      "tmux",
+      [
+        "list-panes",
+        "-s",
+        "-t",
+        `=${sessionName}`,
+        "-F",
+        "#{pane_id}\t#{pane_pid}\t#{pane_current_path}",
+      ],
+      {
+        encoding: "utf8",
+        timeout: TMUX_TIMEOUT_MS,
+        maxBuffer: 64 * 1024,
+      },
+    );
+    return String(result.stdout)
+      .split("\n")
+      .flatMap((line) => {
+        const [paneId, rawProcessId, ...pathParts] = line.split("\t");
+        const processId = Number(rawProcessId);
+        if (
+          !paneId ||
+          !/^%\d+$/u.test(paneId) ||
+          !Number.isSafeInteger(processId) ||
+          processId <= 0
+        ) {
+          return [];
+        }
+        const workingDirectory = pathParts.join("\t");
+        return [
+          {
+            paneId,
+            processId,
+            ...(workingDirectory ? { workingDirectory } : {}),
+          },
+        ];
+      });
+  } catch {
+    return [];
+  }
+}
+
 export class CodexSessionLocator {
   private readonly clockTicksPerSecond: number;
   private readonly procRoot: string;
@@ -443,6 +508,9 @@ export class CodexSessionLocator {
     sessionName: string,
     clientProcessId?: number,
   ) => Promise<number | null>;
+  private readonly listTmuxPanes: (
+    sessionName: string,
+  ) => Promise<TmuxPaneProcess[]>;
 
   constructor(options: CodexSessionLocatorOptions = {}) {
     this.clockTicksPerSecond =
@@ -461,6 +529,41 @@ export class CodexSessionLocator {
       options.resolveTmuxPanePid ?? defaultResolveTmuxPanePid;
     this.resolveTmuxActivePanePid =
       options.resolveTmuxActivePanePid ?? defaultResolveTmuxActivePanePid;
+    this.listTmuxPanes = options.listTmuxPanes ?? defaultListTmuxPanes;
+  }
+
+  async resolveTmuxPanes(
+    sessionName: string,
+  ): Promise<ResolvedTmuxCodexPane[]> {
+    const panes = await this.listTmuxPanes(sessionName);
+    const resolved = await Promise.all(
+      panes.map(async (pane) => {
+        const sessionId = await this.resolve({
+          tmuxTarget: pane.paneId,
+          tmuxPaneProcessId: pane.processId,
+          ...(pane.workingDirectory
+            ? { workingDirectory: pane.workingDirectory }
+            : {}),
+        });
+        return sessionId
+          ? {
+              paneId: pane.paneId,
+              sessionId,
+              ...(pane.workingDirectory
+                ? { workingDirectory: pane.workingDirectory }
+                : {}),
+            }
+          : null;
+      }),
+    );
+    const seen = new Set<string>();
+    return resolved.filter((pane): pane is ResolvedTmuxCodexPane => {
+      if (!pane || seen.has(pane.sessionId)) {
+        return false;
+      }
+      seen.add(pane.sessionId);
+      return true;
+    });
   }
 
   async resolve(input: ResolveCodexSessionInput): Promise<string | undefined> {
@@ -470,8 +573,14 @@ export class CodexSessionLocator {
           input.tmuxClientProcessId,
         )
       : null;
+    const explicitPanePid = input.tmuxPaneProcessId;
     const panePid =
-      activePanePid ?? (await this.resolveTmuxPanePid(input.tmuxTarget));
+      activePanePid ??
+      (typeof explicitPanePid === "number" &&
+      Number.isSafeInteger(explicitPanePid) &&
+      explicitPanePid > 0
+        ? explicitPanePid
+        : await this.resolveTmuxPanePid(input.tmuxTarget));
     if (!panePid) return undefined;
 
     // A managed card keeps the directory from the pane it was first

@@ -5,7 +5,8 @@ import type { CodexSessionLocator } from "./codex-session-locator.js";
 
 interface ActiveCodexSessionResolverDependencies {
   registry: Pick<AgentSessionRegistry, "updateSession">;
-  codexSessionLocator: Pick<CodexSessionLocator, "resolve">;
+  codexSessionLocator: Pick<CodexSessionLocator, "resolve"> &
+    Partial<Pick<CodexSessionLocator, "resolveTmuxPanes">>;
 }
 
 export function isRemoteAgentSession(
@@ -55,4 +56,28 @@ export async function resolveActiveCodexSessionId(
     });
   }
   return activeSessionId;
+}
+
+export async function resolveCodexSessionIds(
+  agentSession: AgentSessionRecord,
+  dependencies: ActiveCodexSessionResolverDependencies,
+): Promise<string[]> {
+  if (isRemoteAgentSession(agentSession)) {
+    return agentSession.agentSessionId ? [agentSession.agentSessionId] : [];
+  }
+
+  const tmuxSession = agentSession.transportRef?.tmuxSession;
+  if (tmuxSession && dependencies.codexSessionLocator.resolveTmuxPanes) {
+    const panes =
+      await dependencies.codexSessionLocator.resolveTmuxPanes(tmuxSession);
+    if (panes.length > 0) {
+      return panes.map((pane) => pane.sessionId);
+    }
+  }
+
+  const activeSessionId = await resolveActiveCodexSessionId(
+    agentSession,
+    dependencies,
+  );
+  return activeSessionId ? [activeSessionId] : [];
 }

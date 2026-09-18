@@ -334,6 +334,194 @@ test("notifies every structured node-labelled Codex turn even when the terminal 
   }
 });
 
+test("notifies each Codex pane independently without waiting for it to become active", async () => {
+  const source = new SnapshotSource({
+    items: [
+      {
+        ...makeNodeTmuxSession("running"),
+        lastOutputAt: "2026-09-18T10:00:00.000Z",
+      },
+    ],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-09-18T10:00:00.000Z",
+  });
+  let observations: FeishuCompletionObservation[] = [
+    {
+      codexThreadId: "codex-thread-pane-one",
+      completionId: "pane-one-existing",
+      content: "pane one existing",
+      completedAt: "2026-09-18T09:59:00.000Z",
+    },
+    {
+      codexThreadId: "codex-thread-pane-two",
+      completionId: "pane-two-existing",
+      content: "pane two existing",
+      completedAt: "2026-09-18T09:59:00.000Z",
+    },
+  ];
+  const sent: FeishuCompletionEvent[] = [];
+  const stop = new AgentCompletionFeishuNotifier({
+    source,
+    settings: {
+      get: () => ({
+        configured: true,
+        destinationType: "user",
+        enabled: true,
+      }),
+    },
+    contentResolver: {
+      resolve: async () => null,
+      inspectLatestCompletions: async () => observations,
+    },
+    structuredCompletionProbeDelayMs: 0,
+    structuredCompletionProbeIntervalMs: 0,
+    sender: {
+      send: async (event) => {
+        sent.push(event);
+      },
+    },
+  }).start();
+
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(sent.length, 0);
+
+    observations = [
+      observations[0]!,
+      {
+        codexThreadId: "codex-thread-pane-two",
+        completionId: "pane-two-new",
+        content: "inactive pane finished",
+        completedAt: "2026-09-18T10:00:05.000Z",
+      },
+    ];
+    source.emitSession({
+      ...makeNodeTmuxSession("running"),
+      lastOutputAt: "2026-09-18T10:00:05.000Z",
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+    observations = [
+      {
+        codexThreadId: "codex-thread-pane-one",
+        completionId: "pane-one-new",
+        content: "other pane finished",
+        completedAt: "2026-09-18T10:00:08.000Z",
+      },
+      observations[1]!,
+    ];
+    source.emitSession({
+      ...makeNodeTmuxSession("running"),
+      agentSessionId: "codex-thread-pane-two",
+      lastOutputAt: "2026-09-18T10:00:08.000Z",
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+    source.emitSession({
+      ...makeNodeTmuxSession("running"),
+      agentSessionId: "codex-thread-pane-one",
+      lastOutputAt: "2026-09-18T10:00:09.000Z",
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+    assert.deepEqual(
+      sent.map((event) => ({
+        codexThreadId: event.codexThreadId,
+        completionId: event.completionId,
+        summary: event.summary,
+      })),
+      [
+        {
+          codexThreadId: "codex-thread-pane-two",
+          completionId: "pane-two-new",
+          summary: "inactive pane finished",
+        },
+        {
+          codexThreadId: "codex-thread-pane-one",
+          completionId: "pane-one-new",
+          summary: "other pane finished",
+        },
+      ],
+    );
+  } finally {
+    stop();
+  }
+});
+
+test("a tmux card state transition does not resend unchanged pane completions", async () => {
+  const source = new SnapshotSource({
+    items: [
+      {
+        ...makeNodeTmuxSession("running"),
+        lastOutputAt: "2026-09-18T10:00:00.000Z",
+      },
+    ],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-09-18T10:00:00.000Z",
+  });
+  let observations: FeishuCompletionObservation[] = [
+    {
+      codexThreadId: "codex-thread-pane-one",
+      completionId: "pane-one-existing",
+      content: "pane one existing",
+      completedAt: "2026-09-18T09:58:00.000Z",
+    },
+    {
+      codexThreadId: "codex-thread-pane-two",
+      completionId: "pane-two-existing",
+      content: "pane two existing",
+      completedAt: "2026-09-18T09:59:00.000Z",
+    },
+  ];
+  const sent: FeishuCompletionEvent[] = [];
+  const stop = new AgentCompletionFeishuNotifier({
+    source,
+    settings: {
+      get: () => ({
+        configured: true,
+        destinationType: "user",
+        enabled: true,
+      }),
+    },
+    contentResolver: {
+      resolve: async () => null,
+      inspectLatestCompletions: async () => observations,
+    },
+    structuredCompletionProbeDelayMs: 0,
+    structuredCompletionProbeIntervalMs: 0,
+    sender: {
+      send: async (event) => {
+        sent.push(event);
+      },
+    },
+  }).start();
+
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    observations = [
+      observations[0]!,
+      {
+        codexThreadId: "codex-thread-pane-two",
+        completionId: "pane-two-new",
+        content: "pane two completed",
+        completedAt: "2026-09-18T10:00:05.000Z",
+      },
+    ];
+    source.emitSession({
+      ...makeNodeTmuxSession("idle"),
+      lastOutputAt: "2026-09-18T10:00:05.000Z",
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+    assert.deepEqual(
+      sent.map((event) => event.completionId),
+      ["pane-two-new"],
+    );
+  } finally {
+    stop();
+  }
+});
+
 test("suppresses Goal continuation completions until the Goal reaches its final turn", async () => {
   const source = new SnapshotSource({
     items: [

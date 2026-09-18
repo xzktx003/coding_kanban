@@ -47,6 +47,7 @@ function createFixture(
     resolvedBinding?: FeishuReplyBinding | null;
     targetSession?: AgentSessionRecord;
     threadId?: string | null;
+    threadIds?: string[];
     sendText?: () => Promise<void>;
     downloadImage?: () => Promise<{
       image: Buffer;
@@ -114,6 +115,8 @@ function createFixture(
         overrides.threadId === null
           ? undefined
           : (overrides.threadId ?? "codex-thread-1"),
+      resolveSessionIds: async () =>
+        overrides.threadIds ?? [overrides.threadId ?? "codex-thread-1"],
       sendText: async (input) => {
         writes.push({ sessionId: input.threadId, prompt: input.message });
         await overrides.sendText?.();
@@ -151,6 +154,36 @@ test("routes a trusted direct reply to the bound Codex terminal exactly once", a
 
   assert.equal(await fixture.service.handle(validEvent), "ignored_duplicate");
   assert.equal(fixture.writes.length, 1);
+});
+
+test("routes a bound pane notification reply to its original inactive Codex thread", async () => {
+  const fixture = createFixture({
+    resolvedBinding: {
+      ...binding,
+      codexThreadId: "codex-thread-inactive-pane",
+    },
+    threadId: "codex-thread-active-pane",
+    threadIds: ["codex-thread-active-pane", "codex-thread-inactive-pane"],
+  });
+
+  assert.equal(await fixture.service.handle(validEvent), "delivered");
+  assert.deepEqual(fixture.writes, [
+    { sessionId: "codex-thread-inactive-pane", prompt: "继续运行测试" },
+  ]);
+});
+
+test("rejects a bound thread that no longer belongs to the tmux session", async () => {
+  const fixture = createFixture({
+    resolvedBinding: {
+      ...binding,
+      codexThreadId: "codex-thread-closed-pane",
+    },
+    threadId: "codex-thread-active-pane",
+    threadIds: ["codex-thread-active-pane"],
+  });
+
+  assert.equal(await fixture.service.handle(validEvent), "ignored_unavailable");
+  assert.deepEqual(fixture.writes, []);
 });
 
 test("keeps a delivered reply bound for a follow-up reply in the same thread", async () => {

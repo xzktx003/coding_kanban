@@ -57,6 +57,7 @@ interface FeishuReplyCommandServiceOptions {
   images: Pick<FeishuImageResourceService, "download">;
   codex: {
     resolveSessionId(session: AgentSessionRecord): Promise<string | undefined>;
+    resolveSessionIds?(session: AgentSessionRecord): Promise<string[]>;
     sendText: CodexImageMessageService["sendText"];
     sendImage: CodexImageMessageService["send"];
   };
@@ -180,7 +181,15 @@ export class FeishuReplyCommandService {
 
     this.#inFlightMessageIds.add(event.message_id);
     try {
-      const threadId = await this.#codex.resolveSessionId(session);
+      let threadId: string | undefined;
+      if (binding.codexThreadId && this.#codex.resolveSessionIds) {
+        const availableThreadIds = await this.#codex.resolveSessionIds(session);
+        threadId = availableThreadIds.includes(binding.codexThreadId)
+          ? binding.codexThreadId
+          : undefined;
+      } else {
+        threadId = await this.#codex.resolveSessionId(session);
+      }
       if (
         !threadId ||
         !isAvailableCodexSession(this.#registry.get(binding.sessionId))

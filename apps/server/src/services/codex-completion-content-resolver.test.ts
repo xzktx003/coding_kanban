@@ -112,6 +112,78 @@ test("resolves the complete last assistant entry from the active tmux Codex conv
   ]);
 });
 
+test("inspects every Codex pane in one local tmux session", async () => {
+  const session = makeShellSession();
+  const inputs: unknown[] = [];
+  const resolver = new CodexCompletionContentResolver({
+    registry: {
+      get: () => session,
+      updateSession: () => session,
+    },
+    codexSessionLocator: {
+      resolve: async () => "active-thread",
+      resolveTmuxPanes: async () => [
+        {
+          paneId: "%1",
+          sessionId: "codex-thread-one",
+          workingDirectory: "/workspace/project/one",
+        },
+        {
+          paneId: "%2",
+          sessionId: "codex-thread-two",
+          workingDirectory: "/workspace/project/two",
+        },
+      ],
+    },
+    codexTranscriptService: {
+      read: () => {
+        throw new Error("not used");
+      },
+      readLatestCompletion: (input) => {
+        inputs.push(input);
+        return {
+          completionId: `${input.sessionId}-turn`,
+          content: `${input.sessionId}-answer`,
+          completedAt: "2026-09-18T10:00:00.000Z",
+        };
+      },
+    },
+  });
+
+  const event = {
+    sessionId: session.id,
+    displayName: session.displayName,
+    agentKind: session.agentKind,
+    workingDirectory: session.workingDirectory,
+    summary: "summary",
+    completedAt: "2026-09-18T10:00:00.000Z",
+  };
+  assert.deepEqual(await resolver.inspectLatestCompletions(event), [
+    {
+      codexThreadId: "codex-thread-one",
+      completionId: "codex-thread-one-turn",
+      content: "codex-thread-one-answer",
+      completedAt: "2026-09-18T10:00:00.000Z",
+    },
+    {
+      codexThreadId: "codex-thread-two",
+      completionId: "codex-thread-two-turn",
+      content: "codex-thread-two-answer",
+      completedAt: "2026-09-18T10:00:00.000Z",
+    },
+  ]);
+  assert.deepEqual(inputs, [
+    {
+      sessionId: "codex-thread-one",
+      workingDirectory: "/workspace/project/one",
+    },
+    {
+      sessionId: "codex-thread-two",
+      workingDirectory: "/workspace/project/two",
+    },
+  ]);
+});
+
 test("does not read a Codex transcript for an explicit non-Codex agent", async () => {
   const session = { ...makeShellSession(), agentKind: "claude" };
   let reads = 0;
