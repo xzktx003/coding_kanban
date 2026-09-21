@@ -7,6 +7,7 @@ import { TerminalPreview } from "./TerminalPreview";
 import {
   resolveRecentTerminalSessionIds,
   shouldMountTerminalPane,
+  shouldSuspendTerminalLayer,
 } from "../lib/terminal-pane-render-policy";
 import {
   focusTerminalPaneLoadScheduler,
@@ -23,6 +24,7 @@ interface TerminalPaneContentProps {
   onFontSizeChange?: (fontSize: number) => void;
   session: AgentSessionRecord;
   sessions: AgentSessionRecord[];
+  suspended?: boolean;
 }
 
 const ACTIVE_TERMINAL_LOAD_PRIORITY = 100;
@@ -38,6 +40,7 @@ export function TerminalPaneContent({
   onFontSizeChange,
   session,
   sessions,
+  suspended = false,
 }: TerminalPaneContentProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [visible, setVisible] = useState(!groupArrangement && active);
@@ -213,6 +216,10 @@ export function TerminalPaneContent({
             }
 
             const current = mountedSession.id === session.id;
+            const terminalSuspended = shouldSuspendTerminalLayer({
+              current,
+              paneVisible: !suspended,
+            });
             return [
               <div
                 aria-hidden={current ? undefined : "true"}
@@ -241,6 +248,7 @@ export function TerminalPaneContent({
                     restoreBracketedPasteMode={
                       mountedSession.agentKind.toLowerCase() === "opencode"
                     }
+                    suspended={terminalSuspended}
                     wheelPassthrough={groupArrangement}
                   />
                 </Suspense>

@@ -13,6 +13,8 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 
+import { ensureInheritedTmuxControlSocket } from "./tmux-control-socket.js";
+
 const execFileAsync = promisify(execFile);
 const SESSION_HEADER_BYTES = 64 * 1024;
 const MAX_PROCESS_TREE_SIZE = 512;
@@ -372,6 +374,7 @@ async function defaultResolveTmuxPanePid(
 ): Promise<number | null> {
   if (!isValidTmuxTarget(target)) return null;
   try {
+    await ensureInheritedTmuxControlSocket();
     const result = await execFileAsync(
       "tmux",
       ["display-message", "-p", "-t", target, "#{pane_pid}"],
@@ -397,6 +400,7 @@ async function defaultResolveTmuxActivePanePid(
   }
 
   try {
+    await ensureInheritedTmuxControlSocket();
     if (clientProcessId !== undefined) {
       if (!Number.isSafeInteger(clientProcessId) || clientProcessId <= 0) {
         return null;
@@ -453,6 +457,7 @@ async function defaultListTmuxPanes(
   }
 
   try {
+    await ensureInheritedTmuxControlSocket();
     const result = await execFileAsync(
       "tmux",
       [

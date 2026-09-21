@@ -56,3 +56,13 @@ export function shouldMountTerminalPane({
 }): boolean {
   return !groupArrangement || active || visible;
 }
+
+export function shouldSuspendTerminalLayer({
+  current,
+  paneVisible,
+}: {
+  current: boolean;
+  paneVisible: boolean;
+}): boolean {
+  return !paneVisible || !current;
+}

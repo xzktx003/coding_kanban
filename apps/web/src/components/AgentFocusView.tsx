@@ -2043,6 +2043,7 @@ export function AgentFocusView({
                       onFontSizeChange={onTerminalFontSizeChange}
                       session={session}
                       sessions={sessions}
+                      suspended={!isVisibleManualPane}
                     />
                   ) : (
                     <div className="focus-terminal-pane-terminal">

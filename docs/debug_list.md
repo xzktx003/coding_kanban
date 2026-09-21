@@ -1,5 +1,7 @@
 # Coding Kanban Bug 修复记录
 
+- 2026-09-20：所有本机 Codex 的“完整记录”同时显示未找到记录，但 JSONL 文件和 registry 中的 thread ID 都仍存在。根因是长时间运行期间 `/tmp/tmux-<uid>` 被系统清理，tmux server 与 pane 继续存活但控制 socket 及父目录消失，Kanban 无法解析活动 pane，因而把全部记录误判为不可用。运行态已恢复 `0700` socket 目录并通过 `SIGUSR1` 让原 tmux server 重建 socket，没有重启 tmux、Codex 或 Hermes；服务端新增受限自愈，仅在 PID 确认为当前用户的 tmux server 时重建父目录并发信号，Codex 定位和本地 tmux 操作共用该入口。红绿灯测试覆盖安全恢复、非 tmux/非当前用户进程拒绝及畸形环境值拒绝。
+
 - 2026-09-18：一个 tmux 会话分屏运行多个 Codex 时，完成通知只跟随当前活动 pane，其他分屏即使任务完成也不会发飞书；卡片回复还会在处理时重新定位活动 pane，可能投递到错误对话。根因是看板把 tmux session 聚合为一张卡片，而完成游标和会话定位都只保存单个活动 thread。现在定位器枚举 session 全部 pane，通知器按 `看板 session + Codex thread` 独立建立基线、完成去重和投递；卡片回复、完整记录和文件入口固定验证并使用原始 thread，关闭的分屏安全拒绝。回归覆盖非活动分屏完成、活动 pane 切换不重发、状态边沿不补发其他分屏旧结果、精确回复及记录按钮路由。
 
 - 2026-09-18：飞书完成卡片中的本地图片引用只能进入“无法文本预览 → 下载文件”链路，不能在卡片里直接看到图片。根因是通知发送器只生成文件回调按钮，没有把已验证图片上传为飞书资源。现在私聊通知会再次校验项目边界、普通文件、非符号链接、PNG/JPEG/WebP/GIF 扩展名与真实签名及 10 MB 上限，上传成功后用 Card 2.0 `img` 组件直接展示并支持点按放大；上传失败、伪装图片和群聊通知自动降级，不阻断原完成消息或文件按钮。回归覆盖普通链接与 Markdown 图片链接、成功内嵌、失败降级、伪装文件拒绝和群聊不上传。
@@ -907,6 +909,13 @@
 - **根因**: 部分手机浏览器允许用户临时放行不受系统信任的开发证书页面，却不会让同证书的 WSS 握手通过；原相邻 HTTP 端口只做 308 跳转，最终仍回到失败的 WSS 路径。
 - **修复**: 保留原 `https://<host>:8484` 入口并以 WSS 为主通道；首次 WSS 从未成功打开时，前端自动切到同源 HTTPS NDJSON 流接收受限 replay 与实时 PTY 输出，stdin/resize 复用已有 REST 接口。相邻 HTTP 端口恢复为 308 跳转，不新增后端暴露面。
 - **测试**: `api.test.ts` 覆盖同源 URL、分块和末尾无换行 NDJSON 解码；`terminal-input-forwarding.test.ts` 锁定仅“从未打开”的 WSS 才回退；`agent-sessions.terminal-replay.test.ts` 覆盖受限 replay 与实时 PTY 输出；运行态用手机视口阻断 WSS 后验证同端口 HTTPS stream 自动接管。
+
+### 隐藏的缓存终端持续占用连接和内存
+
+- **现象**: 桌面聚焦页切换单窗格会话或从多屏收缩布局后，不可见终端仍持续接收输出；页面长时间运行时，隐藏 xterm 的历史和 WebSocket 会继续消耗浏览器内存与代理连接。
+- **根因**: 单窗格最近会话和收缩布局后的手动窗格仅通过 `hidden`/CSS 移出界面，内部 `TerminalView` 仍保持完整挂载和实时数据连接。
+- **修复**: 保留缓存层和窗格选择状态，但对非当前会话层及布局隐藏窗格传入 `suspended`；复用终端既有清理链关闭 WebSocket、终止 HTTP 流并释放 xterm，重新显示时再连接并从受限回放恢复。
+- **测试**: `terminal-pane-render-policy.test.ts` 覆盖当前、缓存和布局隐藏三种暂停决策；`AgentFocusView.test.ts` 锁定隐藏窗格与缓存终端的 suspended 接线；`terminal-preview.spec.ts` 在浏览器中切换单窗格会话并验证旧终端 WebSocket 已关闭。
 
 ## 2026-08-26
 

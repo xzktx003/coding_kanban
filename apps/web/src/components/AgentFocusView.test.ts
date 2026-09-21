@@ -77,9 +77,13 @@ describe("AgentFocusView", () => {
     );
   });
 
-  it("keeps mounted manual terminals alive while their layout panes are hidden", () => {
+  it("keeps hidden terminal components mounted but suspends their transports", () => {
     const source = readFileSync(
       new URL("./AgentFocusView.tsx", import.meta.url),
+      "utf8",
+    );
+    const paneSource = readFileSync(
+      new URL("./TerminalPaneContent.tsx", import.meta.url),
       "utf8",
     );
     const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
@@ -87,7 +91,9 @@ describe("AgentFocusView", () => {
     assert.match(source, /resolveRetainedTerminalMonitorSlots/);
     assert.match(source, /retainedTerminalSlotsRef/);
     assert.match(source, /hidden={!isVisibleManualPane}/);
+    assert.match(source, /suspended={!isVisibleManualPane}/);
     assert.match(source, /previousSlots:\s*retainedTerminalSlotsRef\.current/);
+    assert.match(paneSource, /suspended={terminalSuspended}/);
     assert.match(
       css,
       /\.focus-terminal-pane\[hidden\]\s*{[^}]*display:\s*none;/s,

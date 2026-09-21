@@ -5,6 +5,7 @@ import {
   resolveRetainedTerminalMonitorSlots,
   resolveRecentTerminalSessionIds,
   shouldMountTerminalPane,
+  shouldSuspendTerminalLayer,
 } from "./terminal-pane-render-policy.js";
 
 describe("terminal pane render policy", () => {
@@ -61,6 +62,21 @@ describe("terminal pane render policy", () => {
         groupArrangement: true,
         visible: true,
       }),
+      true,
+    );
+  });
+
+  it("suspends cached session layers and panes hidden by layout contraction", () => {
+    assert.equal(
+      shouldSuspendTerminalLayer({ current: true, paneVisible: true }),
+      false,
+    );
+    assert.equal(
+      shouldSuspendTerminalLayer({ current: false, paneVisible: true }),
+      true,
+    );
+    assert.equal(
+      shouldSuspendTerminalLayer({ current: true, paneVisible: false }),
       true,
     );
   });

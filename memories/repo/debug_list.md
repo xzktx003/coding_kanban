@@ -1,3 +1,4 @@
+- 2026-09-20：长时间运行期间 `/tmp/tmux-<uid>` 连同控制 socket 被清理，tmux server/pane 仍存活，但完整记录的活动 pane 定位全部失败并误报无记录。运行态通过恢复 `0700` 目录及向已验证的当前用户 tmux server 发送 `SIGUSR1` 无损重建 socket；服务端在 Codex 定位与本地 tmux 命令前复用同一受限自愈逻辑，拒绝畸形 TMUX 值、非 tmux 或非当前用户 PID。
 - 同一个 tmux session 分屏运行多个 Codex 时，完成通知过去只解析活动 pane，其他分屏完成会漏报；通知卡片回复又在收到消息时重新解析活动 pane，可能串到另一个 Codex。现用 `tmux list-panes -s` 枚举全部 pane，沿各自 PID 定位顶层 Codex thread，按看板 session + thread 分别维护完成基线/去重；通知绑定的回复、记录和文件动作先验证原 thread 仍属于该 tmux session，再精确投递，绝不因切换活动 pane 改目标。
 - 2026-09-07：飞书回复从 PTY 粘贴加 Enter 改为复用原生 codex queue，精确定位活动 thread，完整保留 /goal 与多行正文。队列接受才标记 processed，忙碌线程交给 Codex 排队，失败不回退键盘或盲目补发。
 - 飞书回复通知卡片后少数 Codex 会话仍只填入文字：单行回复会触发新版 Codex paste-burst 识别，且 node-pty Promise 不代表底层字节已写稳，紧随的 Enter 仍可能被合并。所有交互回复现统一使用 bracketed paste，活跃 PTY 再等待 50 ms 后单独发送 Enter；普通键盘输入和旧直连 pipe 不变。
@@ -254,3 +255,4 @@
 - 2026-09-13：手机端输入框唤起软键盘后仍保留底部主导航的 88px 占位和安全区 padding，且页面未跟随 VisualViewport 的顶部平移，表现为内容上跳、快捷键与发送/粘贴区离键盘很远。修复为把快捷键和输入区组合成不可压缩控制区，聚焦时隐藏主导航并清除底部空白，同时同步可视视口高度和 offsetTop；键盘 viewport 声明、偏移归一化及聚焦布局均有回归覆盖。
 - 2026-09-17：文件系统图片预览把 `/api/fs/preview` 的 64–256 KiB 二进制前缀直接拼成 Data URL，较大 JPEG 会只解码出上半部分。桌面/手机现共享完整图片流组件，经 `/api/fs/image` 读取本机或 SSH/SFTP 完整资源、创建并释放 Blob URL、按比例完整缩放；后端校验图片 MIME、拒绝非图片并限制 16 MiB。
 - 2026-09-17：远端 tmux Codex 的完整记录曾受注册时遗留的 `agentKind`/工作目录影响，切换活动窗格后会误报无记录；SFTP 还会串行遍历全部日期目录并读取所有会话头，历史较多时请求超时。现请求记录前探测远端活动窗格并用其实时工作目录，仅接受当前 `node/codex` 窗格；远端目录最多 8 路并发读取，会话头每批 8 条且命中即停。`dvs-0` 的 701 份历史现场验证可在约 7 秒返回正确会话。
+- 2026-09-21：桌面聚焦页的最近会话缓存和收缩布局后的隐藏手动窗格过去只做 CSS 隐藏，内部 xterm/WebSocket 仍持续处理输出并累积内存。现保留 React 缓存层和窗格状态，但非当前缓存层及布局隐藏窗格进入 `suspended`，复用既有 cleanup 关闭 WebSocket/HTTP 流并释放 xterm；重新显示时通过受限 replay 恢复。

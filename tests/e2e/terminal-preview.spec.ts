@@ -52,6 +52,7 @@ async function installTrackingWebSocket(
       __disableTerminalMonitorDragImageForTest?: boolean;
       __terminalWebSocketMaxPendingReplayCount?: number;
       __terminalWebSocketPendingReplayCount?: number;
+      __terminalWebSocketClosedUrls?: string[];
       __terminalWebSocketSends?: string[];
       __terminalWebSocketUrls?: string[];
     };
@@ -59,6 +60,7 @@ async function installTrackingWebSocket(
     trackedWindow.__disableTerminalMonitorDragImageForTest = true;
     trackedWindow.__terminalWebSocketMaxPendingReplayCount = 0;
     trackedWindow.__terminalWebSocketPendingReplayCount = 0;
+    trackedWindow.__terminalWebSocketClosedUrls = [];
     trackedWindow.__terminalWebSocketSends = [];
     trackedWindow.__terminalWebSocketUrls = [];
     const terminalSockets: MockWebSocket[] = [];
@@ -154,8 +156,14 @@ async function installTrackingWebSocket(
       }
 
       close() {
+        if (this.readyState === MockWebSocket.CLOSED) {
+          return;
+        }
         this.settleTerminalReplay();
         this.readyState = MockWebSocket.CLOSED;
+        if (this.url.includes("/terminal")) {
+          trackedWindow.__terminalWebSocketClosedUrls?.push(this.url);
+        }
         const event = new Event("close");
         this.dispatchEvent(event);
         this.onclose?.(event);
@@ -327,6 +335,15 @@ async function terminalWebSocketSends(page: Page): Promise<string[]> {
     return [
       ...((window as Window & { __terminalWebSocketSends?: string[] })
         .__terminalWebSocketSends ?? []),
+    ];
+  });
+}
+
+async function closedTerminalWebSocketUrls(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    return [
+      ...((window as Window & { __terminalWebSocketClosedUrls?: string[] })
+        .__terminalWebSocketClosedUrls ?? []),
     ];
   });
 }
@@ -2392,6 +2409,36 @@ test("focus view keeps every sidebar card lightweight while only the main pane o
   expect(await terminalWebSocketUrls(page)).not.toContainEqual(
     expect.stringContaining("/sidebar-session/terminal"),
   );
+});
+
+test("switching the single terminal pane closes the hidden cached session transport", async ({
+  page,
+}) => {
+  await mockSessions(page, [
+    makeSession({ id: "alpha-session", displayName: "Alpha Session" }),
+    makeSession({ id: "beta-session", displayName: "Beta Session" }),
+  ]);
+
+  await page.goto("/");
+  await page.locator(".grid-card", { hasText: "Alpha Session" }).dblclick();
+  await expect
+    .poll(() => terminalWebSocketUrls(page))
+    .toContainEqual(expect.stringContaining("/alpha-session/terminal"));
+
+  const pane = page.locator(
+    '[data-terminal-pane-slot="terminal-monitor-slot-1"]',
+  );
+  await pane.getByRole("combobox").click();
+  await page
+    .locator('[data-terminal-switch-session-id="beta-session"]')
+    .click();
+
+  await expect
+    .poll(() => terminalWebSocketUrls(page))
+    .toContainEqual(expect.stringContaining("/beta-session/terminal"));
+  await expect
+    .poll(() => closedTerminalWebSocketUrls(page))
+    .toContainEqual(expect.stringContaining("/alpha-session/terminal"));
 });
 
 test("top font-size slider adjusts the focused terminal font size", async ({

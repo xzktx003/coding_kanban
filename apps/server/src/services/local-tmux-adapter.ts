@@ -18,6 +18,7 @@ import {
   canonicalTmuxDisplayName,
   normalizeTmuxSessionName,
 } from "./tmux-display-name.js";
+import { ensureInheritedTmuxControlSocket } from "./tmux-control-socket.js";
 
 const TMUX_BINARY = resolveTmuxBinary();
 
@@ -951,7 +952,10 @@ export class LocalTmuxAdapter {
     });
   }
 
-  private runTmux(args: string[]): Promise<{ stdout: string; stderr: string }> {
+  private async runTmux(
+    args: string[],
+  ): Promise<{ stdout: string; stderr: string }> {
+    await ensureInheritedTmuxControlSocket();
     return new Promise((resolve, reject) => {
       const env = {
         ...(process.env as Record<string, string | undefined>),
