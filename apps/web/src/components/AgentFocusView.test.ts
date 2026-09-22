@@ -12,11 +12,15 @@ function installLocalStorageStub(
   layoutMode = "dual",
   workspaceState?: Record<string, unknown>,
   sidebarCollapsed: boolean | null = false,
+  pagesState?: Record<string, unknown>,
 ) {
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
     value: {
       getItem(key: string) {
+        if (key === "terminal-monitor-pages-v1" && pagesState) {
+          return JSON.stringify(pagesState);
+        }
         if (key === "terminal-monitor-workspace-v1" && workspaceState) {
           return JSON.stringify(workspaceState);
         }
@@ -643,5 +647,112 @@ describe("AgentFocusView", () => {
 
     assert.match(markup, /focus-sidebar--scrollable/);
     assert.match(markup, /data-sidebar-scroll-mode="enabled"/);
+  });
+
+  it("shows only the add control when a single default page is stored", () => {
+    installLocalStorageStub("dual");
+    const sessions = [makeSession("session-1", "Alpha")];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: sessions[0],
+        sessions,
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    assert.match(markup, /data-testid="focus-page-add"/);
+    assert.doesNotMatch(markup, /data-testid="focus-page-tab-/);
+    assert.doesNotMatch(markup, /data-testid="focus-page-delete-/);
+  });
+
+  it("highlights the active named page and keeps the default page undeletable", () => {
+    installLocalStorageStub("dual", undefined, false, {
+      activePageId: "terminal-monitor-page-2",
+      pages: [
+        {
+          id: "terminal-monitor-page-1",
+          name: "默认",
+          state: {
+            mode: "dual",
+            arrangementMode: "manual",
+            arrangementGroupId: null,
+            groupSessionOrderByGroupId: {},
+            slots: [
+              { id: "terminal-monitor-slot-1", sessionId: "session-1" },
+              { id: "terminal-monitor-slot-2", sessionId: "session-2" },
+            ],
+            activeSlotId: "terminal-monitor-slot-1",
+            closedSlotIds: [],
+          },
+        },
+        {
+          id: "terminal-monitor-page-2",
+          name: "页面 2",
+          state: {
+            mode: "single",
+            arrangementMode: "manual",
+            arrangementGroupId: null,
+            groupSessionOrderByGroupId: {},
+            slots: [{ id: "terminal-monitor-slot-1", sessionId: "session-1" }],
+            activeSlotId: "terminal-monitor-slot-1",
+            closedSlotIds: [],
+          },
+        },
+      ],
+    });
+    const sessions = [
+      makeSession("session-1", "Alpha"),
+      makeSession("session-2", "Beta"),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: sessions[0],
+        sessions,
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    assert.match(
+      markup,
+      /aria-pressed="true"[^>]*data-testid="focus-page-tab-terminal-monitor-page-2"/,
+    );
+    assert.match(
+      markup,
+      /aria-pressed="false"[^>]*data-testid="focus-page-tab-terminal-monitor-page-1"/,
+    );
+    assert.match(markup, /data-testid="focus-page-delete-terminal-monitor-page-2"/);
+    assert.doesNotMatch(
+      markup,
+      /data-testid="focus-page-delete-terminal-monitor-page-1"/,
+    );
+    assert.match(markup, /focus-terminal-layout--single/);
+    assert.doesNotMatch(markup, /focus-terminal-layout--dual/);
+  });
+
+  it("keeps inactive monitor pages off the terminal mount path", () => {
+    const source = readFileSync(
+      new URL("./AgentFocusView.tsx", import.meta.url),
+      "utf8",
+    );
+
+    assert.match(source, /loadTerminalMonitorPages/);
+    assert.match(source, /saveTerminalMonitorPages/);
+    assert.match(source, /updateActiveTerminalMonitorPage/);
+    assert.match(source, /data-testid=\{`focus-page-rename-\$\{page\.id\}`\}/);
+    assert.match(source, /event\.key === "Enter"/);
+    assert.match(source, /event\.key === "Escape"/);
+    assert.match(source, /if \(isDefaultPage\) \{\s*return;\s*\}/);
+    assert.match(source, /suspended=\{!isVisibleManualPane\}/);
+    assert.doesNotMatch(source, /pages\.map\([\s\S]{0,240}TerminalPaneContent/);
   });
 });

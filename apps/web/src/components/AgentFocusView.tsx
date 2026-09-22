@@ -62,9 +62,17 @@ import {
   type TerminalMonitorSlot,
 } from "../lib/terminal-layout";
 import {
-  loadTerminalWorkspaceState,
+  createTerminalMonitorPage,
+  deleteTerminalMonitorPage,
+  loadTerminalMonitorPages,
+  renameTerminalMonitorPage,
+  saveTerminalMonitorPages,
+  updateActiveTerminalMonitorPage,
+  type TerminalMonitorPagesState,
+} from "../lib/terminal-monitor-pages";
+import {
   resolveTerminalWorkspaceStateForFocus,
-  saveTerminalWorkspaceState,
+  type TerminalWorkspaceState,
 } from "../lib/terminal-workspace-state";
 import {
   normalizeTerminalWheelDeltaY,
@@ -110,6 +118,7 @@ const stateLabels: Record<string, string> = {
 };
 
 const DEFAULT_TERMINAL_MONITOR_SLOT_ID = "terminal-monitor-slot-1";
+const DEFAULT_TERMINAL_MONITOR_PAGE_ID = "terminal-monitor-page-1";
 const DEFAULT_GROUP_TERMINAL_LAYOUT_MODE: TerminalMonitorLayoutMode = "triple";
 const FOCUS_HEADER_COLLAPSED_STORAGE_KEY = "focus-header-collapsed";
 const FOCUS_SIDEBAR_COLLAPSED_STORAGE_KEY = "focus-sidebar-collapsed";
@@ -284,10 +293,15 @@ export function AgentFocusView({
       ...visibleSessions.filter((session) => session.id !== focusedSession.id),
     ];
   }, [focusedSession, visibleSessions]);
+  const initialTerminalPagesState = useMemo(() => loadTerminalMonitorPages(), []);
+  const initialActiveTerminalPage =
+    initialTerminalPagesState.pages.find(
+      (page) => page.id === initialTerminalPagesState.activePageId,
+    ) ?? initialTerminalPagesState.pages[0]!;
   const initialTerminalWorkspaceState = useMemo(
     () =>
       resolveTerminalWorkspaceStateForFocus(
-        loadTerminalWorkspaceState(),
+        initialActiveTerminalPage.state,
         displayableSessions,
         focusedSession.id,
       ),
@@ -321,6 +335,12 @@ export function AgentFocusView({
   const [headerCollapsed, setHeaderCollapsed] = useState(
     loadFocusHeaderCollapsed,
   );
+  const [terminalMonitorPages, setTerminalMonitorPages] =
+    useState<TerminalMonitorPagesState>(initialTerminalPagesState);
+  const [renamingTerminalPageId, setRenamingTerminalPageId] = useState<
+    string | null
+  >(null);
+  const [terminalPageNameDraft, setTerminalPageNameDraft] = useState("");
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [imageDraft, setImageDraft] = useState<CodexImageDraft | null>(null);
   const [imageMessage, setImageMessage] = useState(DEFAULT_CODEX_IMAGE_MESSAGE);
@@ -355,6 +375,8 @@ export function AgentFocusView({
     id: string;
     name: string;
   } | null>(null);
+  const terminalMonitorPagesRef = useRef(terminalMonitorPages);
+  terminalMonitorPagesRef.current = terminalMonitorPages;
   const previousFocusedSessionIdRef = useRef(focusedSession.id);
 
   useEffect(() => {
@@ -755,18 +777,37 @@ export function AgentFocusView({
   const primaryContextMenuActionLabel = groupArrangementEnabled
     ? "退出分组排列"
     : getTerminalPaneContextPrimaryActionLabel(canRestoreMultiPaneLayout);
+  const activeTerminalPage =
+    terminalMonitorPages.pages.find(
+      (page) => page.id === terminalMonitorPages.activePageId,
+    ) ?? terminalMonitorPages.pages[0];
+  const orderedTerminalPages = activeTerminalPage
+    ? [
+        activeTerminalPage,
+        ...terminalMonitorPages.pages.filter(
+          (page) => page.id !== activeTerminalPage.id,
+        ),
+      ]
+    : terminalMonitorPages.pages;
+  const showTerminalPageTabs = terminalMonitorPages.pages.length > 1;
 
   useEffect(() => {
-    saveTerminalWorkspaceState({
-      mode: terminalLayoutMode,
-      arrangementMode: terminalArrangementMode,
-      arrangementGroupId:
-        terminalArrangementMode === "group" ? terminalArrangementGroupId : null,
-      groupSessionOrderByGroupId: normalizedGroupSessionOrderByGroupId,
-      slots: terminalSlots,
-      activeSlotId: safeActiveSlotId,
-      closedSlotIds: Array.from(closedSlotIds),
-    });
+    const nextPages = updateActiveTerminalMonitorPage(
+      terminalMonitorPagesRef.current,
+      {
+        mode: terminalLayoutMode,
+        arrangementMode: terminalArrangementMode,
+        arrangementGroupId:
+          terminalArrangementMode === "group" ? terminalArrangementGroupId : null,
+        groupSessionOrderByGroupId: normalizedGroupSessionOrderByGroupId,
+        slots: terminalSlots,
+        activeSlotId: safeActiveSlotId,
+        closedSlotIds: Array.from(closedSlotIds),
+      },
+    );
+    terminalMonitorPagesRef.current = nextPages;
+    setTerminalMonitorPages(nextPages);
+    saveTerminalMonitorPages(nextPages);
   }, [
     closedSlotIds,
     normalizedGroupSessionOrderByGroupId,
@@ -1579,6 +1620,116 @@ export function AgentFocusView({
     });
   }
 
+  function applyTerminalWorkspace(workspace: TerminalWorkspaceState): void {
+    setTerminalLayoutMode(workspace.mode);
+    setTerminalArrangementMode(workspace.arrangementMode);
+    setTerminalArrangementGroupId(workspace.arrangementGroupId);
+    setActiveSlotId(workspace.activeSlotId);
+    setTerminalSlots(workspace.slots);
+    setGroupSessionOrderByGroupId(workspace.groupSessionOrderByGroupId);
+    setClosedSlotIds(new Set(workspace.closedSlotIds));
+  }
+
+  function currentTerminalWorkspace(): TerminalWorkspaceState {
+    return {
+      mode: terminalLayoutMode,
+      arrangementMode: terminalArrangementMode,
+      arrangementGroupId:
+        terminalArrangementMode === "group" ? terminalArrangementGroupId : null,
+      groupSessionOrderByGroupId: normalizedGroupSessionOrderByGroupId,
+      slots: terminalSlots,
+      activeSlotId: safeActiveSlotId,
+      closedSlotIds: Array.from(closedSlotIds),
+    };
+  }
+
+  function activateTerminalMonitorPage(pageId: string): void {
+    const page = terminalMonitorPages.pages.find(
+      (candidate) => candidate.id === pageId,
+    );
+    if (!page || page.id === terminalMonitorPages.activePageId) {
+      return;
+    }
+
+    const persisted = updateActiveTerminalMonitorPage(
+      terminalMonitorPages,
+      currentTerminalWorkspace(),
+    );
+    const switched = { ...persisted, activePageId: page.id };
+    setTerminalMonitorPages(switched);
+    saveTerminalMonitorPages(switched);
+    setRenamingTerminalPageId(null);
+    applyTerminalWorkspace(
+      resolveTerminalWorkspaceStateForFocus(
+        page.state,
+        displayableSessions,
+        focusedSession.id,
+      ),
+    );
+  }
+
+  function addTerminalMonitorPage(): void {
+    const nextPages = createTerminalMonitorPage(
+      updateActiveTerminalMonitorPage(
+        terminalMonitorPages,
+        currentTerminalWorkspace(),
+      ),
+    );
+    const created = nextPages.pages.find(
+      (page) => page.id === nextPages.activePageId,
+    );
+    setTerminalMonitorPages(nextPages);
+    saveTerminalMonitorPages(nextPages);
+    setRenamingTerminalPageId(null);
+    if (created) {
+      applyTerminalWorkspace(
+        resolveTerminalWorkspaceStateForFocus(
+          created.state,
+          displayableSessions,
+          focusedSession.id,
+        ),
+      );
+    }
+  }
+
+  function commitTerminalPageRename(pageId: string): void {
+    const nextPages = renameTerminalMonitorPage(
+      terminalMonitorPages,
+      pageId,
+      terminalPageNameDraft,
+    );
+    if (nextPages !== terminalMonitorPages) {
+      setTerminalMonitorPages(nextPages);
+      saveTerminalMonitorPages(nextPages);
+    }
+    setRenamingTerminalPageId(null);
+  }
+
+  function removeTerminalMonitorPage(pageId: string): void {
+    const nextPages = deleteTerminalMonitorPage(terminalMonitorPages, pageId);
+    if (nextPages === terminalMonitorPages) {
+      return;
+    }
+
+    setTerminalMonitorPages(nextPages);
+    saveTerminalMonitorPages(nextPages);
+    setRenamingTerminalPageId(null);
+    if (nextPages.activePageId !== terminalMonitorPages.activePageId) {
+      const page = nextPages.pages.find(
+        (candidate) => candidate.id === nextPages.activePageId,
+      );
+      if (page) {
+        applyTerminalWorkspace(
+          resolveTerminalWorkspaceStateForFocus(
+            page.state,
+            displayableSessions,
+            focusedSession.id,
+          ),
+        );
+      }
+    }
+  }
+
   function handleManualArrangementMode() {
     setTerminalArrangementMode("manual");
     setTerminalArrangementGroupId(null);
@@ -1923,6 +2074,84 @@ export function AgentFocusView({
                     ))}
                   </div>
                 )}
+              </div>
+              <div
+                aria-label="显示页面"
+                className="focus-page-bar"
+                data-testid="focus-page-bar"
+              >
+                {showTerminalPageTabs &&
+                  orderedTerminalPages.map((page) => {
+                    const isActive = page.id === terminalMonitorPages.activePageId;
+                    const isDefaultPage =
+                      page.id === DEFAULT_TERMINAL_MONITOR_PAGE_ID;
+                    const isRenaming = renamingTerminalPageId === page.id;
+
+                    return (
+                      <div className="focus-page-tab" key={page.id}>
+                        {isRenaming ? (
+                          <input
+                            aria-label={`重命名${page.name}`}
+                            className="focus-page-rename-input"
+                            data-testid={`focus-page-rename-${page.id}`}
+                            onBlur={() => commitTerminalPageRename(page.id)}
+                            onChange={(event) =>
+                              setTerminalPageNameDraft(event.target.value)
+                            }
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                commitTerminalPageRename(page.id);
+                              }
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                setRenamingTerminalPageId(null);
+                              }
+                            }}
+                            value={terminalPageNameDraft}
+                          />
+                        ) : (
+                          <button
+                            aria-pressed={isActive}
+                            className={`focus-page-tab-button${isActive ? " focus-page-tab-button--active" : ""}`}
+                            data-testid={`focus-page-tab-${page.id}`}
+                            onClick={() => activateTerminalMonitorPage(page.id)}
+                            onDoubleClick={() => {
+                              if (isDefaultPage) {
+                                return;
+                              }
+                              setRenamingTerminalPageId(page.id);
+                              setTerminalPageNameDraft(page.name);
+                            }}
+                            type="button"
+                          >
+                            {page.name}
+                          </button>
+                        )}
+                        {!isDefaultPage && !isRenaming && (
+                          <button
+                            aria-label={`关闭${page.name}`}
+                            className="focus-page-delete"
+                            data-testid={`focus-page-delete-${page.id}`}
+                            onClick={() => removeTerminalMonitorPage(page.id)}
+                            type="button"
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                <button
+                  aria-label="新建显示页面"
+                  className="focus-page-add"
+                  data-testid="focus-page-add"
+                  onClick={addTerminalMonitorPage}
+                  title="新建显示页面"
+                  type="button"
+                >
+                  ＋
+                </button>
               </div>
               <button className="focus-exit-btn" onClick={onExit} title="Alt+Q">
                 返回宫格

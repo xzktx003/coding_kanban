@@ -2917,6 +2917,69 @@ input {
   align-items: center;
 }
 
+.focus-page-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.focus-page-tab {
+  display: inline-flex;
+  align-items: center;
+  max-width: 140px;
+}
+
+.focus-page-tab-button,
+.focus-page-add,
+.focus-page-rename-input {
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(244, 241, 234, 0.72);
+  font-size: 12px;
+}
+
+.focus-page-tab-button,
+.focus-page-add,
+.focus-page-delete {
+  cursor: pointer;
+}
+
+.focus-page-tab-button {
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.focus-page-tab-button--active,
+.focus-page-tab-button[aria-pressed="true"] {
+  border-color: rgba(255, 152, 0, 0.4);
+  background: rgba(255, 152, 0, 0.16);
+  color: #ffe0ad;
+}
+
+.focus-page-rename-input {
+  width: 88px;
+  color: #f4f1ea;
+}
+
+.focus-page-delete {
+  margin-left: 2px;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  color: rgba(244, 241, 234, 0.48);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.focus-page-add {
+  min-width: 28px;
+}
+
 .focus-layout-menu-trigger {
   display: inline-flex;
   align-items: center;
