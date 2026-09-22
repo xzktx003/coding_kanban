@@ -9,7 +9,8 @@ import {
   type TerminalMonitorSlot,
 } from "./terminal-layout";
 
-const STORAGE_KEY = "terminal-monitor-workspace-v1";
+export const TERMINAL_WORKSPACE_STORAGE_KEY = "terminal-monitor-workspace-v1";
+const STORAGE_KEY = TERMINAL_WORKSPACE_STORAGE_KEY;
 const LEGACY_LAYOUT_STORAGE_KEY = "terminal-monitor-layout-mode";
 const DEFAULT_SLOT_ID = "terminal-monitor-slot-1";
 
