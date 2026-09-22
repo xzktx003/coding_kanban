@@ -11,6 +11,7 @@ import { AgentFocusView } from "./AgentFocusView.js";
 function installLocalStorageStub(
   layoutMode = "dual",
   workspaceState?: Record<string, unknown>,
+  sidebarCollapsed: boolean | null = false,
 ) {
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
@@ -18,6 +19,9 @@ function installLocalStorageStub(
       getItem(key: string) {
         if (key === "terminal-monitor-workspace-v1" && workspaceState) {
           return JSON.stringify(workspaceState);
+        }
+        if (key === "focus-sidebar-collapsed") {
+          return sidebarCollapsed === null ? null : String(sidebarCollapsed);
         }
         return key === "terminal-monitor-layout-mode" ? layoutMode : null;
       },
@@ -121,6 +125,32 @@ describe("AgentFocusView", () => {
     assert.match(paneSource, /visible={current}/);
     assert.match(terminalSource, /new IntersectionObserver/);
     assert.match(css, /\.terminal-pane-unavailable-status\s*{/);
+  });
+
+  it("collapses the all-session sidebar by default in multi-pane layouts", () => {
+    installLocalStorageStub("dual", undefined, null);
+    const sessions = [
+      makeSession("session-1", "Alpha"),
+      makeSession("session-2", "Beta"),
+      makeSession("session-3", "Gamma"),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: sessions[0],
+        sessions,
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    assert.match(markup, /focus-view--sidebar-collapsed/);
+    assert.match(markup, /title="展开右侧其他会话"/);
+    assert.doesNotMatch(markup, />全部会话</);
+    assert.doesNotMatch(markup, /data-testid="focus-sidebar-scroll"/);
   });
 
   it("collapses an individual group in the other-session sidebar", () => {

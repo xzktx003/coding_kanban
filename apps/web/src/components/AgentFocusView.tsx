@@ -112,6 +112,7 @@ const stateLabels: Record<string, string> = {
 const DEFAULT_TERMINAL_MONITOR_SLOT_ID = "terminal-monitor-slot-1";
 const DEFAULT_GROUP_TERMINAL_LAYOUT_MODE: TerminalMonitorLayoutMode = "triple";
 const FOCUS_HEADER_COLLAPSED_STORAGE_KEY = "focus-header-collapsed";
+const FOCUS_SIDEBAR_COLLAPSED_STORAGE_KEY = "focus-sidebar-collapsed";
 const TERMINAL_MONITOR_DRAG_MIME =
   "application/x-coding-kanban-terminal-session";
 const FOCUS_SIDEBAR_SCROLL_THRESHOLD = 4;
@@ -193,6 +194,26 @@ function loadFocusHeaderCollapsed(): boolean {
 function saveFocusHeaderHeaderCollapsed(collapsed: boolean): void {
   try {
     localStorage.setItem(FOCUS_HEADER_COLLAPSED_STORAGE_KEY, String(collapsed));
+  } catch {
+    // ignore storage failures
+  }
+}
+
+function loadFocusSidebarCollapsed(): boolean {
+  try {
+    const stored = localStorage.getItem(FOCUS_SIDEBAR_COLLAPSED_STORAGE_KEY);
+    return stored === null ? true : stored === "true";
+  } catch {
+    return true;
+  }
+}
+
+function saveFocusSidebarCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(
+      FOCUS_SIDEBAR_COLLAPSED_STORAGE_KEY,
+      String(collapsed),
+    );
   } catch {
     // ignore storage failures
   }
@@ -293,7 +314,9 @@ export function AgentFocusView({
   const retainedTerminalSlotsRef = useRef<TerminalMonitorSlot[]>(
     initialTerminalWorkspaceState.slots,
   );
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    loadFocusSidebarCollapsed,
+  );
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   const [headerCollapsed, setHeaderCollapsed] = useState(
     loadFocusHeaderCollapsed,
@@ -757,6 +780,10 @@ export function AgentFocusView({
   useEffect(() => {
     saveFocusHeaderHeaderCollapsed(headerCollapsed);
   }, [headerCollapsed]);
+
+  useEffect(() => {
+    saveFocusSidebarCollapsed(sidebarCollapsed);
+  }, [sidebarCollapsed]);
 
   useEffect(() => {
     onActiveTerminalSessionChange?.(activeSlotSessionId);
