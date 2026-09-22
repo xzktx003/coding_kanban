@@ -11,6 +11,7 @@ const FEISHU_REPLY_EVENT_KEYS = [
   "card.action.trigger",
 ] as const;
 const MAX_STREAM_BUFFER_CHARACTERS = 1024 * 1024;
+const MAX_STARTUP_DIAGNOSTIC_CHARACTERS = 1_000;
 const MAX_RESTART_DELAY_MS = 30_000;
 
 export type FeishuReplyEventKey = (typeof FEISHU_REPLY_EVENT_KEYS)[number];
@@ -59,12 +60,22 @@ function defaultSpawnProcess(
   return spawn(binary, args, options);
 }
 
-function shouldListen(settings: FeishuNotificationSettingsResponse): boolean {
-  return (
-    settings.replyConfigured &&
-    settings.replyEnabled &&
-    settings.destinationType === "user"
-  );
+function shouldListen(
+  settings: FeishuNotificationSettingsResponse,
+  eventKey: FeishuReplyEventKey,
+): boolean {
+  if (!settings.replyConfigured || settings.destinationType !== "user") {
+    return false;
+  }
+
+  if (eventKey === "im.message.receive_v1") {
+    return settings.replyEnabled;
+  }
+
+  // Read-only task overviews remain available while remote prompt/file
+  // control is disabled. A reply-enabled user can also keep control panels
+  // working when completion notifications are switched off.
+  return settings.enabled || settings.replyEnabled;
 }
 
 function assertAllowedEventKey(
@@ -131,7 +142,7 @@ export class FeishuReplyEventListener<
   }
 
   #reconcile(settings: FeishuNotificationSettingsResponse): void {
-    this.#desired = this.#started && shouldListen(settings);
+    this.#desired = this.#started && shouldListen(settings, this.#eventKey);
     if (!this.#desired) {
       if (this.#restartTimer) {
         clearTimeout(this.#restartTimer);
@@ -171,6 +182,7 @@ export class FeishuReplyEventListener<
     let ready = false;
     let stdoutBuffer = "";
     let stderrBuffer = "";
+    const startupDiagnosticLines: string[] = [];
     const pendingLines: string[] = [];
 
     const enqueueLine = (line: string) => {
@@ -223,6 +235,12 @@ export class FeishuReplyEventListener<
           for (const pendingLine of pendingLines.splice(0)) {
             enqueueLine(pendingLine);
           }
+        } else if (
+          !ready &&
+          startupDiagnosticLines.join(" ").length <
+            MAX_STARTUP_DIAGNOSTIC_CHARACTERS
+        ) {
+          startupDiagnosticLines.push(line);
         }
         newlineIndex = stderrBuffer.indexOf("\n");
       }
@@ -233,6 +251,27 @@ export class FeishuReplyEventListener<
     });
 
     let terminated = false;
+    const reportStartupFailure = (
+      code: number | null,
+      signal: NodeJS.Signals | null,
+    ) => {
+      if (terminated || ready || !this.#desired) {
+        return;
+      }
+
+      const diagnostic = [...startupDiagnosticLines, stderrBuffer.trim()]
+        .filter(Boolean)
+        .join(" ")
+        .slice(0, MAX_STARTUP_DIAGNOSTIC_CHARACTERS);
+      const exitStatus = signal
+        ? `signal ${signal}`
+        : `code ${code ?? "unknown"}`;
+      this.#logError(
+        new Error(
+          `Feishu event consumer ${this.#eventKey} exited before ready (${exitStatus})${diagnostic ? `: ${diagnostic}` : ""}`,
+        ),
+      );
+    };
     const handleTermination = (error?: unknown) => {
       if (terminated) {
         return;
@@ -247,7 +286,10 @@ export class FeishuReplyEventListener<
       this.#scheduleRestart();
     };
     child.once("error", (error) => handleTermination(error));
-    child.once("exit", () => handleTermination());
+    child.once("exit", (code, signal) => {
+      reportStartupFailure(code, signal);
+      handleTermination();
+    });
   }
 
   #stopChild(): void {

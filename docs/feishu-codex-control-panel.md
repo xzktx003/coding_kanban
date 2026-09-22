@@ -6,12 +6,14 @@
 
 两个菜单现在均可选择会话并点击「查看所选会话 / 记录 / 文件」，打开状态、公开对话记录和本机项目文件读写面板。无需填写指令、无需新增菜单。操作方式与安全限制见 [飞书会话工作区](feishu-session-workspace.md)。
 
+其中「任务总览」是默认可用的只读入口：只要本地已配置私聊接收者并开启飞书通知，即可查看全部未隐藏 session 的状态、最近摘要、分页和刷新，不会因此获得向 Codex 发送指令的权限。完成通知底部的「查看完整记录」同样按只读入口处理。「Codex 对话」、通知回复续跑和文件工作区仍需要在 Kanban 中显式开启「飞书回复控制」。
+
 ## 与原回复功能的关系
 
 - 直接回复完成通知：仍走原有 `message_id → Kanban 会话` 绑定，继续原会话。
 - 控制面板：目标与文字在同一次表单提交中回传，不保存全局默认目标，不影响通知绑定。
 - 普通私聊文字不会因为选择过目标就自动执行。
-- 通知回复、Codex 对话和任务总览共用设置中的「飞书回复继续执行」开关和本地 `FEISHU_NOTIFY_USER_ID` 白名单，仅支持私聊本人操作。
+- 通知回复、Codex 对话和可编辑会话工作区共用设置中的「飞书回复继续执行」开关和本地 `FEISHU_NOTIFY_USER_ID` 白名单；只读任务总览只要求已配置私聊接收者并保持飞书能力开启。所有入口仅支持私聊本人操作。
 
 ## 飞书应用后台配置
 
@@ -34,7 +36,15 @@
 
 保存并按后台要求发布版本，重新进入机器人私聊，点击「任务总览」。它复用已经订阅的 `application.bot.menu_v6` 和 `card.action.trigger`，无需新增事件类型、权限或 `.env` 配置。注意菜单 Key 不是订阅事件名。
 
-菜单外观与所在位置由飞书客户端控制。本仓库不自动修改应用后台菜单或权限；仅启动这两个新增事件的消费者，复用 CLI 事件总线，不停止全局 daemon。不需要改动 Codex、Hermes 或开放公网 webhook。
+菜单外观与所在位置由飞书客户端控制。本仓库不自动修改应用后台菜单或权限；仅启动这两个新增事件的消费者，复用 CLI 事件总线，不停止全局 daemon。任务总览消费者在回复控制关闭时仍提供只读列表；不需要改动 Codex、Hermes 或开放公网 webhook。
+
+### 启动失败时的联调检查
+
+后端日志会记录 `Feishu Codex control panel listener failed` 及具体原因：
+
+- `application.bot.menu_v6 requires event types not subscribed in console`：在当前飞书应用的事件订阅中增加并发布 `application.bot.menu_v6`，再重新打开机器人私聊。`lark-cli event consume application.bot.menu_v6 --as bot` 也会返回官方配置引导链接。
+- `another consumer ... is already running for this subscription`：同一 `lark-cli` profile 的一个事件订阅只能有一个消费者。先用 `lark-cli event status --current --json` 确认占用者，停止或迁移不再使用的其他项目消费者，或者为 Kanban 配置独立的飞书应用/profile；不要让多个项目共享同一订阅并互相抢占。
+- 菜单入口还需要在机器人自定义菜单中发布事件 Key `kanban_codex_sessions` 或 `kanban_task_overview`；事件订阅成功不等于菜单已经创建。
 
 ## 交互与安全边界
 

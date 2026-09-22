@@ -461,6 +461,82 @@ test("notification file callback previews only its bound referenced file", async
   );
 });
 
+test("notification records callback accepts object action values from lark-cli", async () => {
+  const fixture = createFixture({
+    notificationBinding: {
+      messageId: "om_notice",
+      chatId: "oc_private",
+      sessionId: "session-1",
+      codexThreadId: "thread-1",
+    },
+  });
+  const event = {
+    type: "card.action.trigger" as const,
+    event_id: "evt_notice_records_object",
+    operator_id: "ou_owner",
+    message_id: "om_notice",
+    chat_id: "oc_private",
+    action_tag: "button",
+    action_value: { action: "kanban_completion_records" },
+  };
+  assert.equal(fixture.service.accepts(event), true);
+  assert.equal(await fixture.service.handle(event), "records_sent");
+  assert.match(JSON.stringify(fixture.lastCard()), /帮我看文件/);
+});
+
+test("notification records remain readable while reply control is disabled", async () => {
+  const fixture = createFixture({
+    settings: { ...baseSettings, replyEnabled: false },
+    notificationBinding: {
+      messageId: "om_notice",
+      chatId: "oc_private",
+      sessionId: "session-1",
+      codexThreadId: "thread-1",
+    },
+  });
+  const event = {
+    type: "card.action.trigger" as const,
+    event_id: "evt_notice_records_readonly",
+    operator_id: "ou_owner",
+    message_id: "om_notice",
+    chat_id: "oc_private",
+    action_tag: "button",
+    action_value: { action: "kanban_completion_records" },
+  };
+
+  assert.equal(await fixture.service.handle(event), "records_sent");
+  assert.match(JSON.stringify(fixture.lastCard()), /帮我看文件/);
+  assert.equal(
+    await fixture.service.handle(
+      createEvent(
+        fixture,
+        tokenFor(fixture.lastCard(), "更早记录"),
+        "evt_notice_records_older",
+      ),
+    ),
+    "records_sent",
+  );
+  assert.equal(
+    await fixture.service.handle(
+      createEvent(
+        fixture,
+        tokenFor(fixture.lastCard(), "导出完整记录"),
+        "evt_notice_records_export",
+      ),
+    ),
+    "export_sent",
+  );
+  assert.equal(
+    await fixture.service.open({
+      sessionId: "session-1",
+      threadId: "thread-1",
+      operatorId: "ou_owner",
+      chatId: "oc_private",
+    }),
+    "ignored_disabled",
+  );
+});
+
 test("opens a trusted per-session workspace card with records files and refresh actions", async () => {
   const fixture = createFixture();
 

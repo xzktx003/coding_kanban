@@ -131,6 +131,39 @@ test("starts an allowlisted bot menu event consumer with a matching ready marker
   }
 });
 
+test("starts the overview menu consumer while reply control is disabled", () => {
+  const settings: FeishuNotificationSettingsResponse = {
+    configured: true,
+    destinationType: "user",
+    enabled: true,
+    replyConfigured: true,
+    replyEnabled: false,
+  };
+  const child = new FakeChildProcess();
+  const spawnCalls: Array<{ binary: string; args: string[] }> = [];
+  const listener = new FeishuReplyEventListener({
+    eventKey: "application.bot.menu_v6",
+    settings: { get: () => settings },
+    spawnProcess: (binary, args) => {
+      spawnCalls.push({ binary, args });
+      return child;
+    },
+    handleEvent: async () => undefined,
+  });
+  const stop = listener.start();
+
+  try {
+    assert.deepEqual(spawnCalls, [
+      {
+        binary: "lark-cli",
+        args: ["event", "consume", "application.bot.menu_v6", "--as", "bot"],
+      },
+    ]);
+  } finally {
+    stop();
+  }
+});
+
 test("starts an allowlisted card action event consumer", () => {
   const settings: FeishuNotificationSettingsResponse = {
     configured: true,
@@ -159,6 +192,73 @@ test("starts an allowlisted card action event consumer", () => {
         args: ["event", "consume", "card.action.trigger", "--as", "bot"],
       },
     ]);
+  } finally {
+    stop();
+  }
+});
+
+test("starts card actions for a read-only overview while reply control is disabled", () => {
+  const settings: FeishuNotificationSettingsResponse = {
+    configured: true,
+    destinationType: "user",
+    enabled: true,
+    replyConfigured: true,
+    replyEnabled: false,
+  };
+  const child = new FakeChildProcess();
+  const spawnCalls: Array<{ binary: string; args: string[] }> = [];
+  const listener = new FeishuReplyEventListener({
+    eventKey: "card.action.trigger",
+    settings: { get: () => settings },
+    spawnProcess: (binary, args) => {
+      spawnCalls.push({ binary, args });
+      return child;
+    },
+    handleEvent: async () => undefined,
+  });
+  const stop = listener.start();
+
+  try {
+    assert.equal(spawnCalls.length, 1);
+    assert.equal(spawnCalls[0]?.args[2], "card.action.trigger");
+  } finally {
+    stop();
+  }
+});
+
+test("reports bounded startup diagnostics when a consumer exits before ready", async () => {
+  const settings: FeishuNotificationSettingsResponse = {
+    configured: true,
+    destinationType: "user",
+    enabled: true,
+    replyConfigured: true,
+    replyEnabled: false,
+  };
+  const child = new FakeChildProcess();
+  const errors: unknown[] = [];
+  const listener = new FeishuReplyEventListener({
+    eventKey: "application.bot.menu_v6",
+    settings: { get: () => settings },
+    spawnProcess: () => child,
+    handleEvent: async () => undefined,
+    logError: (error) => errors.push(error),
+  });
+  const stop = listener.start();
+
+  try {
+    child.stderr.write(
+      "requires event subscription: application.bot.menu_v6\n",
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    child.emit("exit", 1, null);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    assert.equal(errors.length, 1);
+    assert.match(
+      String((errors[0] as Error).message),
+      /application\.bot\.menu_v6/,
+    );
+    assert.match(String((errors[0] as Error).message), /exited before ready/);
   } finally {
     stop();
   }

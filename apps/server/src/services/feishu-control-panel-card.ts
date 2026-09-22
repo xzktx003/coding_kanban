@@ -2,6 +2,7 @@ import type { FeishuControlPanelCardInput } from "./feishu-control-panel-service
 
 interface ControlPanelCardInput {
   workspaceEnabled?: boolean;
+  controlEnabled?: boolean;
   panelId: string;
   options: Array<{ value: string; label: string }>;
   truncated?: boolean;
@@ -16,6 +17,7 @@ const plain = (content: string) => ({ tag: "plain_text", content });
 
 export function buildFeishuControlPanelCard(input: ControlPanelCardInput) {
   const overview = input.overview;
+  const controlEnabled = input.controlEnabled ?? true;
   const elements: Array<Record<string, unknown>> = [
     {
       tag: "markdown",
@@ -81,7 +83,7 @@ export function buildFeishuControlPanelCard(input: ControlPanelCardInput) {
       ],
     });
   }
-  if (input.options.length) {
+  if (input.options.length && controlEnabled) {
     elements.push({
       tag: "form",
       name: "kanban_control",
@@ -133,6 +135,12 @@ export function buildFeishuControlPanelCard(input: ControlPanelCardInput) {
           : []),
       ],
     });
+  } else if (overview && !controlEnabled) {
+    elements.push({
+      tag: "markdown",
+      content:
+        "当前为只读任务总览：可以查看全部可见 session 的状态和最近摘要。若要发送指令、查看完整记录或浏览文件，请在 Kanban 中显式开启“飞书回复控制”。",
+    });
   } else {
     elements.push({
       tag: "markdown",
@@ -146,8 +154,9 @@ export function buildFeishuControlPanelCard(input: ControlPanelCardInput) {
     navigation.push({
       tag: "markdown",
       text_size: "notation",
-      content:
-        "仅向本页所选 Codex 发送指令，直接回复原通知仍发送给原会话。面板有效期 15 分钟，每张仅提交一次；刷新会打开新面板。",
+      content: controlEnabled
+        ? "仅向本页所选 Codex 发送指令，直接回复原通知仍发送给原会话。面板有效期 15 分钟，每张仅提交一次；刷新会打开新面板。"
+        : "这是只读任务总览。刷新会重新读取当前 session 注册表，面板有效期 15 分钟。",
     });
   }
   if (input.truncated) {

@@ -17,8 +17,8 @@ export interface FeishuWorkspaceCardActionEvent {
   chat_id?: string;
   action_tag?: string;
   action_name?: string;
-  action_value?: string;
-  form_value?: string;
+  action_value?: string | Record<string, unknown>;
+  form_value?: string | Record<string, unknown>;
 }
 
 export type FeishuSessionWorkspaceOutcome =
@@ -180,6 +180,16 @@ function isEnabled(settings: FeishuNotificationSettingsResponse): boolean {
   );
 }
 
+function isRecordsEnabled(
+  settings: FeishuNotificationSettingsResponse,
+): boolean {
+  return (
+    settings.replyConfigured &&
+    settings.destinationType === "user" &&
+    (settings.enabled || settings.replyEnabled)
+  );
+}
+
 function isAvailableCodexSession(session: AgentSessionRecord): boolean {
   return (
     isCodexSessionCandidate(session) &&
@@ -197,8 +207,16 @@ function supportsLocalFileWorkspace(session: AgentSessionRecord): boolean {
   return !session.sshTarget && (!session.hostId || session.hostId === "local");
 }
 
-function parseJsonObject(input: string | undefined): Record<string, unknown> {
+function parseJsonObject(
+  input: string | Record<string, unknown> | undefined,
+): Record<string, unknown> {
   if (!input) {
+    return {};
+  }
+  if (typeof input === "object" && !Array.isArray(input)) {
+    return input;
+  }
+  if (typeof input !== "string") {
     return {};
   }
   try {
@@ -488,9 +506,6 @@ export class FeishuSessionWorkspace {
   async handle(
     event: FeishuWorkspaceCardActionEvent,
   ): Promise<FeishuSessionWorkspaceOutcome> {
-    if (!isEnabled(this.#settings.get())) {
-      return "ignored_disabled";
-    }
     if (!this.accepts(event)) {
       return "ignored_untrusted";
     }
@@ -564,6 +579,20 @@ export class FeishuSessionWorkspace {
         this.#inFlightEventIds.delete(trustedEvent.event_id);
       }
     }
+    if (
+      !isRecordsEnabled(this.#settings.get()) &&
+      actionValue.action === COMPLETION_RECORDS_ACTION
+    ) {
+      await this.#notify(
+        event.chat_id,
+        "飞书记录查看当前不可用。",
+        event.event_id,
+      );
+      return "ignored_disabled";
+    }
+    if (!isRecordsEnabled(this.#settings.get())) {
+      return "ignored_disabled";
+    }
     if (actionValue.action === COMPLETION_RECORDS_ACTION) {
       const notificationBinding = this.#notificationBindings?.resolve(
         event.message_id,
@@ -575,6 +604,11 @@ export class FeishuSessionWorkspace {
         !notificationBinding.codexThreadId ||
         !CODEX_THREAD_ID_PATTERN.test(notificationBinding.codexThreadId)
       ) {
+        await this.#notify(
+          event.chat_id,
+          "无法打开完整记录：原通知绑定已失效或不匹配。",
+          event.event_id,
+        );
         return "ignored_untrusted";
       }
 
@@ -594,13 +628,16 @@ export class FeishuSessionWorkspace {
         });
         if (
           outcome === "ignored_unavailable" ||
-          outcome === "ignored_changed_thread"
+          outcome === "ignored_changed_thread" ||
+          outcome === "ignored_disabled"
         ) {
           await this.#notify(
             trustedEvent.chat_id,
             outcome === "ignored_changed_thread"
               ? "该通知对应的 Codex 对话已经切换，无法再打开原记录。"
-              : "该通知对应的 Codex 对话当前不可用。",
+              : outcome === "ignored_disabled"
+                ? "飞书记录查看当前不可用。"
+                : "该通知对应的 Codex 对话当前不可用。",
             trustedEvent.event_id,
           );
         }
@@ -631,6 +668,14 @@ export class FeishuSessionWorkspace {
     if (!action) {
       return "ignored_stale_workspace";
     }
+    if (!isEnabled(this.#settings.get()) && !this.#isRecordsAction(action)) {
+      await this.#notify(
+        event.chat_id,
+        "飞书回复控制已关闭，无法打开文件工作区。",
+        event.event_id,
+      );
+      return "ignored_disabled";
+    }
 
     const trustedEvent = {
       ...event,
@@ -649,7 +694,9 @@ export class FeishuSessionWorkspace {
       return "ignored_duplicate";
     }
     try {
-      const checked = await this.#validateBinding(binding);
+      const checked = await this.#validateBinding(binding, {
+        requireReplyControl: !this.#isRecordsAction(action),
+      });
       if (!checked.ok) {
         await this.#notify(
           trustedEvent.chat_id,
@@ -712,7 +759,9 @@ export class FeishuSessionWorkspace {
       actions: new Map(),
     };
     const transcript = await this.#transcript(checked.session, input.threadId);
-    const rechecked = await this.#validateBinding(binding);
+    const rechecked = await this.#validateBinding(binding, {
+      requireReplyControl: false,
+    });
     if (!rechecked.ok) {
       return rechecked.outcome;
     }
@@ -814,7 +863,9 @@ export class FeishuSessionWorkspace {
         binding.threadId,
         action.cursor,
       );
-      const rechecked = await this.#validateBinding(binding);
+      const rechecked = await this.#validateBinding(binding, {
+        requireReplyControl: false,
+      });
       if (!rechecked.ok) {
         await this.#notify(event.chat_id, rechecked.message, event.event_id);
         return rechecked.outcome;
@@ -824,7 +875,9 @@ export class FeishuSessionWorkspace {
     }
     if (action.kind === "records_export") {
       const exported = await this.#exportTranscript(session, binding.threadId);
-      const rechecked = await this.#validateBinding(binding);
+      const rechecked = await this.#validateBinding(binding, {
+        requireReplyControl: false,
+      });
       if (!rechecked.ok) {
         await this.#notify(event.chat_id, rechecked.message, event.event_id);
         return rechecked.outcome;
@@ -1147,11 +1200,15 @@ export class FeishuSessionWorkspace {
         this.#storeAction(actions, { kind: "records_export" }),
         { type: "primary_filled" },
       ),
-      callbackButton(
-        "返回工作区",
-        this.#storeAction(actions, { kind: "home" }),
-      ),
     ];
+    if (isEnabled(this.#settings.get())) {
+      buttons.push(
+        callbackButton(
+          "返回工作区",
+          this.#storeAction(actions, { kind: "home" }),
+        ),
+      );
+    }
     if (transcript.hasMore && transcript.nextCursor) {
       buttons.splice(
         1,
@@ -1677,7 +1734,10 @@ export class FeishuSessionWorkspace {
     return { ok: true, session };
   }
 
-  async #validateBinding(binding: WorkspaceBinding): Promise<
+  async #validateBinding(
+    binding: WorkspaceBinding,
+    options: { requireReplyControl?: boolean } = {},
+  ): Promise<
     | { ok: true; session: AgentSessionRecord }
     | {
         ok: false;
@@ -1688,22 +1748,35 @@ export class FeishuSessionWorkspace {
         message: string;
       }
   > {
-    if (!isEnabled(this.#settings.get())) {
+    const requireReplyControl = options.requireReplyControl !== false;
+    const settings = this.#settings.get();
+    if (
+      requireReplyControl ? !isEnabled(settings) : !isRecordsEnabled(settings)
+    ) {
       return {
         ok: false,
         outcome: "ignored_disabled",
-        message: "飞书回复控制已关闭。",
+        message: requireReplyControl
+          ? "飞书回复控制已关闭。"
+          : "飞书记录查看当前不可用。",
       };
     }
     const checked = await this.#resolveLiveSession(
       binding.sessionId,
       binding.threadId,
     );
-    if (!isEnabled(this.#settings.get())) {
+    const settingsAfter = this.#settings.get();
+    if (
+      requireReplyControl
+        ? !isEnabled(settingsAfter)
+        : !isRecordsEnabled(settingsAfter)
+    ) {
       return {
         ok: false,
         outcome: "ignored_disabled",
-        message: "飞书回复控制已关闭。",
+        message: requireReplyControl
+          ? "飞书回复控制已关闭。"
+          : "飞书记录查看当前不可用。",
       };
     }
     if (!checked.ok) {
@@ -1765,6 +1838,10 @@ export class FeishuSessionWorkspace {
       action.kind === "write_confirm" ||
       action.kind === "write_cancel"
     );
+  }
+
+  #isRecordsAction(action: WorkspaceAction): boolean {
+    return action.kind === "records" || action.kind === "records_export";
   }
 
   #rememberWorkspace(binding: WorkspaceBinding): void {

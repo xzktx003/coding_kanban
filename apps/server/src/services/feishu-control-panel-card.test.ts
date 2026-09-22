@@ -120,6 +120,19 @@ test("overview groups status counts and safely displays recent output with the o
   assert.equal(textNodes[0].tag, "plain_text");
 });
 
+test("overview can stay read-only while reply control is disabled", () => {
+  const card = buildFeishuControlPanelCard({
+    panelId: "readonly-overview",
+    options: [{ value: "opaque-target", label: "project" }],
+    controlEnabled: false,
+    overview,
+  });
+  const json = JSON.stringify(card);
+  assert.doesNotMatch(json, /kanban_submit_readonly-overview/);
+  assert.match(json, /当前为只读任务总览/);
+  assert.match(json, /刷新任务总览/);
+});
+
 test("empty overview distinguishes no sessions from a page with no controllable Codex", () => {
   const empty = buildFeishuControlPanelCard({
     panelId: "empty",

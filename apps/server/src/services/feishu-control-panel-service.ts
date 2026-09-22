@@ -42,12 +42,13 @@ export interface FeishuCardActionEvent {
   chat_id?: string;
   action_tag?: string;
   action_name?: string;
-  action_value?: string;
-  form_value?: string;
+  action_value?: string | Record<string, unknown>;
+  form_value?: string | Record<string, unknown>;
 }
 
 export interface FeishuControlPanelCardInput {
   workspaceEnabled?: boolean;
+  controlEnabled?: boolean;
   panelId: string;
   options: Array<{ value: string; label: string }>;
   truncated: boolean;
@@ -154,6 +155,25 @@ function isEnabled(settings: FeishuNotificationSettingsResponse): boolean {
   );
 }
 
+function isOverviewEnabled(
+  settings: FeishuNotificationSettingsResponse,
+): boolean {
+  return (
+    settings.replyConfigured &&
+    settings.destinationType === "user" &&
+    (settings.enabled || settings.replyEnabled)
+  );
+}
+
+function isPanelEnabled(
+  mode: FeishuControlPanelBinding["mode"],
+  settings: FeishuNotificationSettingsResponse,
+): boolean {
+  return mode === "overview"
+    ? isOverviewEnabled(settings)
+    : isEnabled(settings);
+}
+
 function isAvailableCodexSession(session: AgentSessionRecord): boolean {
   return (
     isCodexSessionCandidate(session) &&
@@ -198,8 +218,16 @@ function sanitizeCardText(input: string): string {
     .trim();
 }
 
-function parseJsonObject(input: string | undefined): Record<string, unknown> {
+function parseJsonObject(
+  input: string | Record<string, unknown> | undefined,
+): Record<string, unknown> {
   if (!input) {
+    return {};
+  }
+  if (typeof input === "object" && !Array.isArray(input)) {
+    return input;
+  }
+  if (typeof input !== "string") {
     return {};
   }
   try {
@@ -344,11 +372,14 @@ export class FeishuControlPanelService {
   async handle(
     event: FeishuMenuEvent | FeishuCardActionEvent,
   ): Promise<FeishuControlPanelOutcome> {
-    if (!isEnabled(this.#settings.get())) {
-      return "ignored_disabled";
-    }
-
     if (event.type === "application.bot.menu_v6") {
+      const overview =
+        (event as FeishuMenuEvent).event_key === OVERVIEW_MENU_EVENT_KEY;
+      if (
+        !isPanelEnabled(overview ? "overview" : "control", this.#settings.get())
+      ) {
+        return "ignored_disabled";
+      }
       return this.#handleMenu(event);
     }
     if (event.type === "card.action.trigger") {
@@ -414,6 +445,9 @@ export class FeishuControlPanelService {
       if (!panel) {
         return "ignored_stale_panel";
       }
+      if (!isPanelEnabled(panel.mode, this.#settings.get())) {
+        return "ignored_disabled";
+      }
       if (this.#isExpired(panel)) {
         this.#panels.delete(panel.panelId);
         await this.#notify(chatId, "这个控制面板已过期，请重新打开。", eventId);
@@ -431,6 +465,9 @@ export class FeishuControlPanelService {
       const panel = this.#resolvePanel(event, actionValue.panelId);
       if (!panel) {
         return "ignored_stale_panel";
+      }
+      if (!isPanelEnabled(panel.mode, this.#settings.get())) {
+        return "ignored_disabled";
       }
       if (this.#isExpired(panel)) {
         this.#panels.delete(panel.panelId);
@@ -467,6 +504,9 @@ export class FeishuControlPanelService {
     const panel = this.#resolvePanel(event, panelId);
     if (!panel || panel.submitted) {
       return "ignored_stale_panel";
+    }
+    if (!isEnabled(this.#settings.get())) {
+      return "ignored_disabled";
     }
     if (this.#isExpired(panel)) {
       this.#panels.delete(panel.panelId);
@@ -576,6 +616,10 @@ export class FeishuControlPanelService {
     mode: "control" | "overview";
     idempotencyKey: string;
   }): Promise<FeishuControlPanelOutcome> {
+    const initialSettings = this.#settings.get();
+    if (!isPanelEnabled(input.mode, initialSettings)) {
+      return "ignored_disabled";
+    }
     const snapshotTime = new Date(this.#now()).toISOString();
     const snapshot = this.#registry.list();
     const allSessions =
@@ -588,13 +632,16 @@ export class FeishuControlPanelService {
     const page = Math.min(Math.max(1, input.page), totalPages);
     const start = (page - 1) * pageSize;
     const pageSessions = allSessions.slice(start, start + pageSize);
-    const pageTargets = await this.#collectTargets(
-      input.mode === "overview"
-        ? pageSessions.filter((session) => isAvailableCodexSession(session))
-        : pageSessions,
-      { tolerateResolveErrors: input.mode === "overview" },
-    );
-    if (!isEnabled(this.#settings.get())) {
+    const controlEnabled = isEnabled(initialSettings);
+    const pageTargets = controlEnabled
+      ? await this.#collectTargets(
+          input.mode === "overview"
+            ? pageSessions.filter((session) => isAvailableCodexSession(session))
+            : pageSessions,
+          { tolerateResolveErrors: input.mode === "overview" },
+        )
+      : [];
+    if (!isPanelEnabled(input.mode, this.#settings.get())) {
       return "ignored_disabled";
     }
     const panelId = this.#createId();
@@ -610,6 +657,9 @@ export class FeishuControlPanelService {
     });
     const card = this.#cards.buildControlPanelCard({
       ...(this.#workspace ? { workspaceEnabled: true } : {}),
+      ...(input.mode === "overview" && !controlEnabled
+        ? { controlEnabled: false }
+        : {}),
       panelId,
       options,
       truncated: totalPages > 1,

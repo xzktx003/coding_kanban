@@ -508,10 +508,10 @@ export function buildServer(options: BuildServerOptions = {}): {
                 "Feishu Codex control panel event processed",
               );
             },
-            logError() {
+            logError(error) {
               // Do not log native queue/CLI errors that may contain user prompts.
               app.log.error(
-                { eventKey },
+                { eventKey, err: error },
                 "Feishu Codex control panel listener failed",
               );
             },

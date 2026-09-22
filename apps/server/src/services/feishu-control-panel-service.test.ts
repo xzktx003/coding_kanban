@@ -358,6 +358,18 @@ test("overview menu sends paged visible task summary while binding only current 
   });
 });
 
+test("overview menu lists visible sessions while reply control is disabled", async () => {
+  const fixture = createFixture({
+    settings: { ...baseSettings, replyEnabled: false },
+  });
+
+  assert.equal(await fixture.service.handle(overviewMenuEvent), "panel_sent");
+  assert.equal(fixture.cards[0]?.controlEnabled, false);
+  assert.equal(fixture.cards[0]?.overview?.total, 2);
+  assert.deepEqual(fixture.cards[0]?.options, []);
+  assert.equal(fixture.deliveries.length, 0);
+});
+
 test("overview pagination and refresh preserve overview mode from server-side panel state", async () => {
   const sessions = Array.from({ length: 12 }, (_, index) => ({
     ...codexSession,
@@ -456,7 +468,11 @@ test("overview submit refuses a target that became hidden after the panel was se
 test("overview send rechecks enabled settings after resolving card targets", async () => {
   let fixture = createFixture({
     resolveSessionId: async () => {
-      fixture.setSettings({ ...baseSettings, replyEnabled: false });
+      fixture.setSettings({
+        ...baseSettings,
+        enabled: false,
+        replyEnabled: false,
+      });
       return "codex-thread-1";
     },
   });
