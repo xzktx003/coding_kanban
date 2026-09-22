@@ -3207,7 +3207,7 @@ input {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   color: rgba(244, 241, 234, 0.76);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -3227,7 +3227,7 @@ input {
   border-radius: 999px;
   background: #ff9800;
   color: #1b1205;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.03em;
   box-shadow: 0 0 8px rgba(255, 152, 0, 0.28);
@@ -3260,7 +3260,7 @@ input {
   color: rgba(255, 251, 244, 0.94);
   cursor: pointer;
   font-family: "IBM Plex Mono", monospace;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   line-height: 1.2;
   text-align: center;
@@ -3932,7 +3932,7 @@ input {
   background: rgba(255, 255, 255, 0.05);
   color: rgba(244, 241, 234, 0.72);
   cursor: pointer;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1;
 }
 

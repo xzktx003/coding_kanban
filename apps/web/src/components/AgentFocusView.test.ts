@@ -256,11 +256,19 @@ describe("AgentFocusView", () => {
       css,
       /\.focus-terminal-pane-header\s*{[^}]*min-height:\s*22px;[^}]*padding:\s*2px 4px;/s,
     );
-    assert.match(css, /\.focus-terminal-active-badge\s*{[^}]*height:\s*16px;/s);
     assert.match(
       css,
-      /\.terminal-session-switcher-trigger\s*{[^}]*min-height:\s*22px;/s,
+      /\.focus-terminal-pane-index\s*{[^}]*font-size:\s*11px;/s,
     );
+    assert.match(
+      css,
+      /\.focus-terminal-active-badge\s*{[^}]*height:\s*16px;[^}]*font-size:\s*12px;/s,
+    );
+    assert.match(
+      css,
+      /\.terminal-session-switcher-trigger\s*{[^}]*min-height:\s*22px;[^}]*font-size:\s*13px;/s,
+    );
+    assert.match(css, /\.focus-terminal-input-btn\s*{[^}]*font-size:\s*13px;/s);
   });
 
   it("keeps multi-screen grids intact until the terminal area is truly narrow", () => {
