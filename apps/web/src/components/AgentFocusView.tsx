@@ -83,6 +83,13 @@ import {
   resolveRetainedTerminalMonitorSlots,
 } from "../lib/terminal-pane-render-policy";
 import { sendCodexImageMessage } from "../lib/api";
+import {
+  beginPageRename,
+  markPageRenameCancelled,
+  pageRenameKeyAction,
+  shouldCommitPageRename,
+  type PageRenameGesture,
+} from "../lib/page-rename-gesture";
 
 interface AgentFocusViewProps {
   focusedSession: AgentSessionRecord;
@@ -341,6 +348,7 @@ export function AgentFocusView({
     string | null
   >(null);
   const [terminalPageNameDraft, setTerminalPageNameDraft] = useState("");
+  const pageRenameGestureRef = useRef<PageRenameGesture>(beginPageRename());
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [imageDraft, setImageDraft] = useState<CodexImageDraft | null>(null);
   const [imageMessage, setImageMessage] = useState(DEFAULT_CODEX_IMAGE_MESSAGE);
@@ -1693,6 +1701,13 @@ export function AgentFocusView({
   }
 
   function commitTerminalPageRename(pageId: string): void {
+    if (!shouldCommitPageRename(pageRenameGestureRef.current)) {
+      setRenamingTerminalPageId(null);
+      return;
+    }
+    pageRenameGestureRef.current = markPageRenameCancelled(
+      pageRenameGestureRef.current,
+    );
     const nextPages = renameTerminalMonitorPage(
       terminalMonitorPages,
       pageId,
@@ -2092,6 +2107,7 @@ export function AgentFocusView({
                         {isRenaming ? (
                           <input
                             aria-label={`重命名${page.name}`}
+                            autoFocus
                             className="focus-page-rename-input"
                             data-testid={`focus-page-rename-${page.id}`}
                             onBlur={() => commitTerminalPageRename(page.id)}
@@ -2099,12 +2115,17 @@ export function AgentFocusView({
                               setTerminalPageNameDraft(event.target.value)
                             }
                             onKeyDown={(event) => {
-                              if (event.key === "Enter") {
+                              const action = pageRenameKeyAction(event.key);
+                              if (action === "commit") {
                                 event.preventDefault();
                                 commitTerminalPageRename(page.id);
                               }
-                              if (event.key === "Escape") {
+                              if (action === "cancel") {
                                 event.preventDefault();
+                                pageRenameGestureRef.current =
+                                  markPageRenameCancelled(
+                                    pageRenameGestureRef.current,
+                                  );
                                 setRenamingTerminalPageId(null);
                               }
                             }}
@@ -2120,6 +2141,7 @@ export function AgentFocusView({
                               if (isDefaultPage) {
                                 return;
                               }
+                              pageRenameGestureRef.current = beginPageRename();
                               setRenamingTerminalPageId(page.id);
                               setTerminalPageNameDraft(page.name);
                             }}

@@ -749,8 +749,9 @@ describe("AgentFocusView", () => {
     assert.match(source, /saveTerminalMonitorPages/);
     assert.match(source, /updateActiveTerminalMonitorPage/);
     assert.match(source, /data-testid=\{`focus-page-rename-\$\{page\.id\}`\}/);
-    assert.match(source, /event\.key === "Enter"/);
-    assert.match(source, /event\.key === "Escape"/);
+    assert.match(source, /autoFocus/);
+    assert.match(source, /pageRenameKeyAction\(event\.key\)/);
+    assert.match(source, /shouldCommitPageRename\(pageRenameGestureRef\.current\)/);
     assert.match(source, /if \(isDefaultPage\) \{\s*return;\s*\}/);
     assert.match(source, /suspended=\{!isVisibleManualPane\}/);
     assert.doesNotMatch(source, /pages\.map\([\s\S]{0,240}TerminalPaneContent/);
