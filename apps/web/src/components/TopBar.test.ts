@@ -131,6 +131,24 @@ describe("TopBar", () => {
     );
   });
 
+  it("keeps desktop chrome compact so split terminals can use more space", () => {
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+    assert.match(
+      css,
+      /\.top-bar\s*{[^}]*gap:\s*8px;[^}]*padding:\s*6px 10px;/s,
+    );
+    assert.match(
+      css,
+      /\.kanban-brand-logo\s*{[^}]*height:\s*24px;[^}]*width:\s*auto;/s,
+    );
+    assert.match(
+      css,
+      /\.top-bar-title\s*{[^}]*font-size:\s*14px;[^}]*line-height:\s*24px;/s,
+    );
+    assert.match(css, /\.main-content\s*{[^}]*padding:\s*6px;/s);
+  });
+
   it("does not render an awaiting-input stat even if stale session data contains that state", () => {
     const markup = renderTopBar({
       sessions: [makeSession("session-1", "awaiting_input")],

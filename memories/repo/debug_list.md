@@ -1,3 +1,4 @@
+- 2026-09-22：电脑端聚焦分屏被顶栏、主内容 18px 内边距和 34px 窗格标题栏挤占。现收紧桌面 chrome 与分屏缝，「当前输入」只保留徽章；回归覆盖密度 CSS 与标题栏结构。Logo 收紧后与「电脑端 Coding Kanban」字号/中线不齐，改为按 24px 高度对齐标题行。
 - 2026-09-20：长时间运行期间 `/tmp/tmux-<uid>` 连同控制 socket 被清理，tmux server/pane 仍存活，但完整记录的活动 pane 定位全部失败并误报无记录。运行态通过恢复 `0700` 目录及向已验证的当前用户 tmux server 发送 `SIGUSR1` 无损重建 socket；服务端在 Codex 定位与本地 tmux 命令前复用同一受限自愈逻辑，拒绝畸形 TMUX 值、非 tmux 或非当前用户 PID。
 - 同一个 tmux session 分屏运行多个 Codex 时，完成通知过去只解析活动 pane，其他分屏完成会漏报；通知卡片回复又在收到消息时重新解析活动 pane，可能串到另一个 Codex。现用 `tmux list-panes -s` 枚举全部 pane，沿各自 PID 定位顶层 Codex thread，按看板 session + thread 分别维护完成基线/去重；通知绑定的回复、记录和文件动作先验证原 thread 仍属于该 tmux session，再精确投递，绝不因切换活动 pane 改目标。
 - 2026-09-17：远程 `research_26` 的 tmux 已开启 `mouse on`，但 `terminal-features` 缺少 `mouse`，导致浏览器 xterm 不产生点击报告。连接命令现在补齐远程 tmux 鼠标能力，前端对 tmux 终端回放完成后主动启用 SGR 鼠标报告，兼容存量会话和不完整能力协商；新增端到端回归。

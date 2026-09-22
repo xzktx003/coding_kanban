@@ -120,8 +120,8 @@ input {
   align-items: center;
   position: relative;
   z-index: 300;
-  gap: 12px;
-  padding: 10px 16px;
+  gap: 8px;
+  padding: 6px 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   background:
     linear-gradient(180deg, rgba(20, 25, 31, 0.96), rgba(12, 16, 21, 0.92)),
@@ -140,9 +140,10 @@ input {
 
 .kanban-brand-logo {
   display: block;
-  width: 92px;
-  height: auto;
+  height: 24px;
+  width: auto;
   flex: none;
+  object-fit: contain;
 }
 
 .mobile-workbench-title .kanban-brand-logo {
@@ -155,7 +156,7 @@ input {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -164,7 +165,7 @@ input {
 .top-bar-secondary-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -184,9 +185,9 @@ input {
   display: inline-grid;
   grid-template-columns: auto minmax(76px, 112px) auto;
   align-items: center;
-  gap: 7px;
-  min-height: 30px;
-  padding: 5px 8px;
+  gap: 6px;
+  min-height: 26px;
+  padding: 3px 7px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.045);
@@ -338,8 +339,9 @@ input {
 
 .top-bar-title {
   margin: 0;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
+  line-height: 24px;
   color: #f6b26b;
   white-space: nowrap;
 }
@@ -347,15 +349,15 @@ input {
 .top-bar-mode-switch {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
 .top-bar-mode-link {
   display: inline-flex;
   align-items: center;
-  min-height: 26px;
-  padding: 4px 8px;
+  min-height: 24px;
+  padding: 3px 7px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.04);
@@ -1507,7 +1509,7 @@ input {
 .main-content {
   flex: 1;
   overflow: auto;
-  padding: 18px;
+  padding: 6px;
   min-width: 0;
   background:
     radial-gradient(
@@ -2803,7 +2805,7 @@ input {
 .focus-view {
   display: flex;
   height: 100%;
-  gap: 8px;
+  gap: 4px;
   min-height: 0;
 }
 
@@ -2823,18 +2825,18 @@ input {
   display: flex;
   align-items: center;
   flex-wrap: nowrap;
-  gap: 6px;
+  gap: 4px;
   min-width: 0;
-  padding: 6px 10px;
+  padding: 4px 8px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px 12px 0 0;
+  border-radius: 8px 8px 0 0;
   background: rgba(14, 18, 23, 0.9);
   transition: padding 0.2s ease;
 }
 
 .focus-main-header--collapsed {
-  gap: 6px;
-  padding: 4px 8px;
+  gap: 4px;
+  padding: 3px 6px;
 }
 
 .focus-main-header button {
@@ -3046,10 +3048,10 @@ input {
   flex: 1;
   display: flex;
   min-height: 0;
-  padding: 8px;
+  padding: 4px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-top: none;
-  border-radius: 0 0 12px 12px;
+  border-radius: 0 0 8px 8px;
   background: rgba(4, 7, 11, 0.72);
   container: focus-terminal / inline-size;
   overflow: hidden;
@@ -3058,7 +3060,7 @@ input {
 .focus-terminal-layout {
   flex: 1;
   display: grid;
-  gap: 8px;
+  gap: 3px;
   min-height: 0;
   min-width: 0;
 }
@@ -3140,7 +3142,7 @@ input {
   min-width: 0;
   min-height: 0;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
+  border-radius: 6px;
   background: rgba(14, 18, 23, 0.86);
   overflow: hidden;
   transition:
@@ -3155,9 +3157,9 @@ input {
 .focus-terminal-pane--active {
   border-color: rgba(255, 152, 0, 0.95);
   box-shadow:
-    0 0 0 2px rgba(255, 152, 0, 0.38),
-    0 16px 38px rgba(255, 111, 0, 0.2),
-    inset 0 0 0 1px rgba(255, 213, 128, 0.22);
+    0 0 0 1px rgba(255, 152, 0, 0.42),
+    0 8px 22px rgba(255, 111, 0, 0.16),
+    inset 0 0 0 1px rgba(255, 213, 128, 0.18);
 }
 
 .focus-terminal-pane--drag-over {
@@ -3170,9 +3172,9 @@ input {
 .focus-terminal-pane-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: 30px;
-  padding: 4px 6px;
+  gap: 4px;
+  min-height: 22px;
+  padding: 2px 4px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(255, 255, 255, 0.035);
 }
@@ -3199,13 +3201,13 @@ input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   color: rgba(244, 241, 234, 0.76);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
 }
 
@@ -3218,17 +3220,17 @@ input {
 .focus-terminal-active-badge {
   display: inline-flex;
   align-items: center;
-  height: 22px;
+  height: 16px;
   flex-shrink: 0;
-  padding: 0 8px;
+  padding: 0 6px;
   border: 1px solid rgba(255, 214, 128, 0.8);
   border-radius: 999px;
   background: #ff9800;
   color: #1b1205;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
-  letter-spacing: 0.04em;
-  box-shadow: 0 0 18px rgba(255, 152, 0, 0.34);
+  letter-spacing: 0.03em;
+  box-shadow: 0 0 8px rgba(255, 152, 0, 0.28);
 }
 
 .terminal-session-switcher {
@@ -3242,13 +3244,13 @@ input {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 6px;
   width: 100%;
   min-width: 0;
-  min-height: 34px;
-  padding: 5px 10px;
+  min-height: 22px;
+  padding: 2px 8px;
   border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 8px;
+  border-radius: 6px;
   background: linear-gradient(
     90deg,
     rgba(255, 255, 255, 0.08),
@@ -3258,7 +3260,7 @@ input {
   color: rgba(255, 251, 244, 0.94);
   cursor: pointer;
   font-family: "IBM Plex Mono", monospace;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   line-height: 1.2;
   text-align: center;
@@ -3290,9 +3292,8 @@ input {
     rgba(4, 7, 11, 0.72)
   );
   box-shadow:
-    0 0 0 2px rgba(255, 152, 0, 0.14),
-    inset 0 1px 0 rgba(255, 231, 183, 0.22),
-    0 0 18px rgba(255, 152, 0, 0.12);
+    0 0 0 1px rgba(255, 152, 0, 0.16),
+    inset 0 1px 0 rgba(255, 231, 183, 0.22);
   color: #fff0d2;
   font-weight: 800;
 }
@@ -3924,10 +3925,10 @@ input {
 
 .focus-terminal-input-btn {
   flex-shrink: 0;
-  height: 24px;
-  padding: 2px 8px;
+  height: 20px;
+  padding: 0 7px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 7px;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.05);
   color: rgba(244, 241, 234, 0.72);
   cursor: pointer;
@@ -3939,35 +3940,6 @@ input {
   border-color: rgba(255, 152, 0, 0.45);
   background: rgba(255, 152, 0, 0.12);
   color: #ffe0ad;
-}
-
-.focus-terminal-input-btn--active,
-.focus-terminal-input-btn[aria-disabled="true"].focus-terminal-input-btn--active,
-.focus-terminal-input-btn:disabled.focus-terminal-input-btn--active {
-  border-color: rgba(255, 214, 128, 0.72);
-  background: rgba(255, 152, 0, 0.26);
-  color: #ffe0ad;
-  cursor: default;
-  font-weight: 700;
-}
-
-.terminal-pane-unavailable {
-  position: relative;
-}
-
-.terminal-pane-unavailable-status {
-  position: absolute;
-  right: 10px;
-  bottom: 10px;
-  z-index: 6;
-  max-width: min(360px, calc(100% - 20px));
-  padding: 6px 8px;
-  border: 1px solid rgba(255, 183, 77, 0.28);
-  border-radius: 8px;
-  background: rgba(14, 18, 23, 0.92);
-  color: rgba(255, 224, 173, 0.88);
-  font-size: 11px;
-  line-height: 1.4;
 }
 
 .focus-terminal-pane-context-menu {
@@ -4022,7 +3994,8 @@ input {
 }
 
 .terminal-pane-session-layer,
-.terminal-pane-loading-preview {
+.terminal-pane-loading-preview,
+.terminal-pane-unavailable {
   position: relative;
 }
 
@@ -4048,6 +4021,22 @@ input {
   font-size: 11px;
   line-height: 1;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24);
+}
+
+.terminal-pane-unavailable-status {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 2;
+  max-width: calc(100% - 20px);
+  padding: 6px 9px;
+  border: 1px solid rgba(255, 174, 92, 0.34);
+  border-radius: 8px;
+  background: rgba(14, 18, 23, 0.94);
+  color: #ffd2a4;
+  font-size: 11px;
+  line-height: 1.35;
+  box-shadow: 0 7px 20px rgba(0, 0, 0, 0.28);
 }
 
 .terminal-pane-session-layer[hidden] {

@@ -215,6 +215,8 @@ describe("AgentFocusView", () => {
     assert.equal(badgeMatches.length, 1);
     assert.match(markup, /aria-label="当前输入终端"/);
     assert.match(markup, />当前输入<\/span>/);
+    assert.doesNotMatch(markup, />输入中</);
+    assert.match(markup, />设为输入</);
     assert.match(markup, />完整记录<\/button>/);
     assert.match(markup, />变更<\/button>/);
     assert.match(markup, /aria-label="向 Alpha 的 Codex 对话发送图片"/);
@@ -232,7 +234,7 @@ describe("AgentFocusView", () => {
 
     assert.match(
       css,
-      /\.focus-main-header\s*{[^}]*flex-wrap:\s*nowrap;[^}]*gap:\s*6px;[^}]*padding:\s*6px 10px;/s,
+      /\.focus-main-header\s*{[^}]*flex-wrap:\s*nowrap;[^}]*gap:\s*4px;[^}]*padding:\s*4px 8px;/s,
     );
     assert.match(
       css,
@@ -241,6 +243,23 @@ describe("AgentFocusView", () => {
     assert.match(
       css,
       /\.focus-main-header button\s*{[^}]*flex:\s*0 0 auto;[^}]*white-space:\s*nowrap;/s,
+    );
+  });
+
+  it("keeps split terminal panes dense without collapsing chrome", () => {
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+    assert.match(css, /\.focus-view\s*{[^}]*gap:\s*4px;/s);
+    assert.match(css, /\.focus-main-terminal\s*{[^}]*padding:\s*4px;/s);
+    assert.match(css, /\.focus-terminal-layout\s*{[^}]*gap:\s*3px;/s);
+    assert.match(
+      css,
+      /\.focus-terminal-pane-header\s*{[^}]*min-height:\s*22px;[^}]*padding:\s*2px 4px;/s,
+    );
+    assert.match(css, /\.focus-terminal-active-badge\s*{[^}]*height:\s*16px;/s);
+    assert.match(
+      css,
+      /\.terminal-session-switcher-trigger\s*{[^}]*min-height:\s*22px;/s,
     );
   });
 

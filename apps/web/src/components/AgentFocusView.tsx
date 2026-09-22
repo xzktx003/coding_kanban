@@ -2023,15 +2023,16 @@ export function AgentFocusView({
                       }
                       onToggleGroup={onToggleSessionGroup}
                     />
-                    <button
-                      className={`focus-terminal-input-btn${isActiveInputPane ? " focus-terminal-input-btn--active" : ""}`}
-                      aria-disabled={isActiveInputPane ? "true" : undefined}
-                      disabled={!session}
-                      onClick={() => activateSlot(slot)}
-                      type="button"
-                    >
-                      {isActiveInputPane ? "输入中" : "设为输入"}
-                    </button>
+                    {!isActiveInputPane && (
+                      <button
+                        className="focus-terminal-input-btn"
+                        disabled={!session}
+                        onClick={() => activateSlot(slot)}
+                        type="button"
+                      >
+                        设为输入
+                      </button>
+                    )}
                   </div>
                   {session ? (
                     <TerminalPaneContent
