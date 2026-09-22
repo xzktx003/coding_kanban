@@ -171,4 +171,22 @@ describe("TopBar", () => {
       /data-testid="agent-completion-notification-toggle"/,
     );
   });
+
+  it("omits return-last-focus when no callback is provided", () => {
+    const markup = renderTopBar();
+
+    assert.doesNotMatch(markup, /data-testid="return-last-focus"/);
+    assert.doesNotMatch(markup, /返回上次/);
+  });
+
+  it("renders 返回上次 immediately before the fullscreen toggle when a callback is provided", () => {
+    const markup = renderTopBar({
+      onReturnToLastFocus: () => {},
+    });
+
+    assert.match(
+      markup,
+      /data-testid="return-last-focus"[^>]*>返回上次<\/button>\s*<button[^>]*data-testid="fullscreen-toggle"/,
+    );
+  });
 });

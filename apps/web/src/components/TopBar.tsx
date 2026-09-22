@@ -207,6 +207,7 @@ interface TopBarProps {
   onOpenNewSession: (host: NewSessionHost) => void;
   onScanTmux: (host: SelectedHost) => void;
   onScanApps: (host: SelectedHost) => void;
+  onReturnToLastFocus?: () => void;
 }
 
 export function TopBar({
@@ -240,6 +241,7 @@ export function TopBar({
   onOpenNewSession,
   onScanTmux,
   onScanApps,
+  onReturnToLastFocus,
 }: TopBarProps) {
   const quickTmuxShortcutLabel = getQuickTmuxShortcutLabel();
   const [showHints, setShowHints] = useState(false);
@@ -882,6 +884,16 @@ export function TopBar({
               </div>
             )}
           </div>
+          {onReturnToLastFocus ? (
+            <button
+              className="top-bar-action top-bar-action--ghost"
+              data-testid="return-last-focus"
+              onClick={onReturnToLastFocus}
+              type="button"
+            >
+              返回上次
+            </button>
+          ) : null}
           <button
             className={`top-bar-action top-bar-action--ghost top-bar-icon-action${isFullscreen ? " top-bar-action--active" : ""}`}
             data-testid="fullscreen-toggle"

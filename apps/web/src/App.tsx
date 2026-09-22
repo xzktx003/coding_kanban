@@ -343,6 +343,7 @@ export default function App() {
   const [focusedId, setFocusedId] = useState<string | null>(
     initialFocusViewState.focusedId,
   );
+  const [lastFocusedId, setLastFocusedId] = useState<string | null>(null);
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<
     string | null
   >(initialFocusViewState.focusedId);
@@ -904,8 +905,11 @@ export default function App() {
   );
 
   const handleExitFocus = useCallback(() => {
+    setFocusedId((current) => {
+      setLastFocusedId(current);
+      return null;
+    });
     setViewMode("grid");
-    setFocusedId(null);
     setActiveTerminalSessionId(null);
     setOpenSidePanelTool(null);
   }, []);
@@ -1721,6 +1725,13 @@ export default function App() {
       .catch(() => {});
   }
 
+  const handleReturnToLastFocus = useCallback(() => {
+    if (!lastFocusedId) {
+      return;
+    }
+    handleFocusSession(lastFocusedId);
+  }, [lastFocusedId]);
+
   if (isMobileWorkbenchLocation(window.location)) {
     return (
       <MobileWorkbenchPage
@@ -1834,6 +1845,11 @@ export default function App() {
         onOpenNewSession={setNewSessionHost}
         onScanTmux={handleScanTmux}
         onScanApps={handleScanApps}
+        {...(viewMode === "grid" &&
+        lastFocusedId &&
+        sessions.some((session) => session.id === lastFocusedId)
+          ? { onReturnToLastFocus: handleReturnToLastFocus }
+          : {})}
       />
 
       <div className="main-layout" ref={mainLayoutRef}>
