@@ -49,7 +49,10 @@ import {
   isTerminalProtocolResponsePayload,
   stripTerminalResponsePayload,
 } from "../lib/terminal-input";
-import { resolveTerminalMouseGestureAction } from "../lib/terminal-mouse-selection";
+import {
+  resolveTerminalMouseGestureAction,
+  TMUX_MOUSE_REPORTING_ENABLE_SEQUENCE,
+} from "../lib/terminal-mouse-selection";
 import {
   createSafariTextInputRecoveryState,
   isSafariTerminalInputRecoveryRequired,
@@ -57,6 +60,7 @@ import {
   recoverSafariNativeTextInput,
 } from "../lib/terminal-safari-input";
 import {
+  buildTerminalWheelReport,
   computeTerminalWheelScrollLines,
   isTerminalWheelBlockedByOverlayTarget,
   shouldAllowTerminalWheelToBubble,
@@ -77,6 +81,8 @@ interface TerminalViewProps {
   onFontSizeChange?: (fontSize: number) => void;
   onReady?: () => void;
   suspended?: boolean;
+  tmuxMouseReporting?: boolean;
+  visible?: boolean;
   wheelPassthrough?: boolean;
   preferLocalMouseSelection?: boolean;
   restoreBracketedPasteMode?: boolean;
@@ -132,6 +138,8 @@ export const TerminalView = memo(function TerminalView({
   onFontSizeChange,
   onReady,
   suspended = false,
+  tmuxMouseReporting = false,
+  visible = true,
   wheelPassthrough = false,
   preferLocalMouseSelection = false,
   restoreBracketedPasteMode = false,
@@ -152,6 +160,7 @@ export const TerminalView = memo(function TerminalView({
   const onReadyRef = useRef(onReady);
   const pendingResizeRef = useRef<{ cols: number; rows: number } | null>(null);
   const inputEnabledRef = useRef(inputEnabled);
+  const tmuxMouseReportingRef = useRef(tmuxMouseReporting);
   const terminalInputReadyRef = useRef(false);
   const userScrollLockedRef = useRef(false);
   const retryConnectionRef = useRef<(() => void) | null>(null);
@@ -188,6 +197,49 @@ export const TerminalView = memo(function TerminalView({
   }, [terminalFontSize]);
 
   useEffect(() => {
+    if (!visible) {
+      return;
+    }
+
+    const terminal = termRef.current;
+    const container = containerRef.current;
+    if (
+      !terminal ||
+      !container ||
+      !isTerminalViewportMeasurable(
+        container.clientWidth,
+        container.clientHeight,
+      )
+    ) {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      const fitAddon = fitRef.current;
+      const currentContainer = containerRef.current;
+      if (
+        !fitAddon ||
+        !currentContainer ||
+        !isTerminalViewportMeasurable(
+          currentContainer.clientWidth,
+          currentContainer.clientHeight,
+        )
+      ) {
+        return;
+      }
+
+      try {
+        fitAddon.fit();
+        terminal.refresh(0, Math.max(terminal.rows - 1, 0));
+      } catch {
+        // The pane can become hidden again before this frame is painted.
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [visible]);
+
+  useEffect(() => {
     onFontSizeChangeRef.current = onFontSizeChange;
   }, [onFontSizeChange]);
 
@@ -207,6 +259,10 @@ export const TerminalView = memo(function TerminalView({
     // replay-complete frame arrives.
     term.options.disableStdin = false;
   }, [inputEnabled]);
+
+  useEffect(() => {
+    tmuxMouseReportingRef.current = tmuxMouseReporting;
+  }, [tmuxMouseReporting]);
 
   useEffect(() => {
     if (suspended) {
@@ -241,6 +297,8 @@ export const TerminalView = memo(function TerminalView({
     let handleMobileTouchEnd: ((event: TouchEvent) => void) | null = null;
     let handleTerminalWheelCapture: ((event: WheelEvent) => void) | null = null;
     let handleDocumentWheelCapture: ((event: WheelEvent) => void) | null = null;
+    let sendTmuxWheelFallback: ((event: WheelEvent) => boolean) | null = null;
+    const manuallyForwardedWheelEvents = new WeakSet<WheelEvent>();
     let handleDocumentPointerDownCapture:
       | ((event: PointerEvent) => void)
       | null = null;
@@ -765,13 +823,33 @@ export const TerminalView = memo(function TerminalView({
       }
     };
 
-    const shouldForwardWheelToApplication = (event: WheelEvent): boolean =>
-      shouldForwardTerminalWheelToApplication({
+    const shouldForwardWheelToApplication = (event: WheelEvent): boolean => {
+      const tmuxMouseReporting = tmuxMouseReportingRef.current;
+      const routing = {
         inputEnabled: inputEnabledRef.current,
         interactive,
         mouseTrackingMode: term.modes.mouseTrackingMode,
         shiftKey: event.shiftKey,
+      };
+      const hasCurrentMouseTracking =
+        shouldForwardTerminalWheelToApplication(routing);
+      const shouldForward = shouldForwardTerminalWheelToApplication({
+        ...routing,
+        tmuxMouseReporting,
       });
+
+      if (shouldForward && tmuxMouseReporting && !hasCurrentMouseTracking) {
+        // A TUI can turn xterm mouse modes off after the initial handshake.
+        // Repair the browser-side mode before letting this wheel event reach
+        // xterm, otherwise the first scroll after that reset is lost.
+        term.write(TMUX_MOUSE_REPORTING_ENABLE_SEQUENCE);
+        if (sendTmuxWheelFallback?.(event)) {
+          manuallyForwardedWheelEvents.add(event);
+        }
+      }
+
+      return shouldForward;
+    };
 
     const eventPointIsInsideContainer = (event: WheelEvent): boolean => {
       const rect = container.getBoundingClientRect();
@@ -1118,6 +1196,17 @@ export const TerminalView = memo(function TerminalView({
       replaySafetyTimerId = window.setTimeout(() => {
         replaySafetyTimerId = null;
         if (!disposed && isTerminalTransportOpen()) {
+          if (transport === "websocket" && ws?.readyState === WebSocket.OPEN) {
+            // An upgraded socket that never delivers replay-complete is a
+            // half-open proxy connection. Reconnect instead of enabling stdin
+            // against a terminal that may still be blank.
+            ws.close(4000, "terminal replay timeout");
+            return;
+          }
+
+          // The HTTPS stream has no socket close event to trigger here. Its
+          // stream parser is already the recovery path, so unblock input
+          // after the bounded safety window rather than leaving it locked.
           replayCompletionObserved = true;
           enableTerminalInput();
           reportInitialReadyIfSettled();
@@ -1590,6 +1679,12 @@ export const TerminalView = memo(function TerminalView({
       // protocol replies such as CPR/DA can be generated and forwarded. Normal
       // user input from monitor panes is still filtered in term.onData.
       term.options.disableStdin = false;
+      if (tmuxMouseReportingRef.current) {
+        // Replay deliberately strips stale terminal modes. Re-assert the
+        // browser-side tmux mouse mode after replay so remote hosts whose
+        // tmux feature list omits mouse support still receive clicks.
+        term.write(TMUX_MOUSE_REPORTING_ENABLE_SEQUENCE);
+      }
       flushPendingInput();
       if (inputEnabledRef.current) {
         scheduleFocusInteractiveTerminal();
@@ -1680,6 +1775,33 @@ export const TerminalView = memo(function TerminalView({
       }
 
       return false;
+    };
+
+    sendTmuxWheelFallback = (event) => {
+      const screen = container.querySelector(
+        ".xterm-screen",
+      ) as HTMLElement | null;
+      const rect = screen?.getBoundingClientRect();
+      if (!rect) {
+        return false;
+      }
+
+      const report = buildTerminalWheelReport({
+        altKey: event.altKey,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        ctrlKey: event.ctrlKey,
+        deltaY: event.deltaY,
+        metaKey: event.metaKey,
+        screenHeight: rect.height,
+        screenLeft: rect.left,
+        screenTop: rect.top,
+        screenWidth: rect.width,
+        cols: term.cols,
+        rows: term.rows,
+        shiftKey: event.shiftKey,
+      });
+      return report ? forwardTerminalInput(report, false) : false;
     };
 
     flushPendingInput = () => {
@@ -2011,6 +2133,13 @@ export const TerminalView = memo(function TerminalView({
 
       if (shouldForwardWheelToApplication(event)) {
         rememberTerminalIntent();
+        if (manuallyForwardedWheelEvents.has(event)) {
+          if (event.cancelable) {
+            event.preventDefault();
+          }
+          event.stopPropagation();
+          event.stopImmediatePropagation();
+        }
         focusInteractiveTerminal(true);
         return;
       }
@@ -2101,10 +2230,21 @@ export const TerminalView = memo(function TerminalView({
     });
     resizeObserver.observe(container);
 
+    const visibilityObserver =
+      typeof IntersectionObserver === "undefined"
+        ? null
+        : new IntersectionObserver(([entry]) => {
+            if (entry?.isIntersecting) {
+              scheduleFit();
+            }
+          });
+    visibilityObserver?.observe(container);
+
     return () => {
       disposed = true;
       window.removeEventListener("resize", handleWindowResize);
       resizeObserver.disconnect();
+      visibilityObserver?.disconnect();
       osc52ClipboardDisposable.dispose();
       stage.removeEventListener("mouseup", handleStageMouseUp);
       stage.removeEventListener("keydown", handleStageCopyKey);
@@ -2250,6 +2390,19 @@ export const TerminalView = memo(function TerminalView({
     suspended,
     wheelPassthrough,
   ]);
+
+  useEffect(() => {
+    if (!tmuxMouseReporting || suspended) {
+      return;
+    }
+
+    const terminal = termRef.current;
+    if (!terminal) {
+      return;
+    }
+
+    terminal.write(TMUX_MOUSE_REPORTING_ENABLE_SEQUENCE);
+  }, [agentSessionId, suspended, tmuxMouseReporting]);
 
   return (
     <div

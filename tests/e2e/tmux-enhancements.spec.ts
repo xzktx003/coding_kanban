@@ -497,6 +497,7 @@ test("browser: tmux attach 终端预灌 pane 历史后可用鼠标滚轮浏览�
         ) as
           | (HTMLDivElement & {
               __xterm?: {
+                rows?: number;
                 buffer?: {
                   active?: {
                     baseY?: number;
@@ -519,9 +520,23 @@ test("browser: tmux attach 终端预灌 pane 历史后可用鼠标滚轮浏览�
           lines.push(active?.getLine?.(index)?.translateToString?.(true) ?? "");
         }
 
+        const viewportStart = active?.viewportY ?? 0;
+        const viewportRows = terminalElement?.__xterm?.rows ?? 30;
+        const viewportLines: string[] = [];
+        for (
+          let index = viewportStart;
+          index < Math.min(active?.length ?? 0, viewportStart + viewportRows);
+          index += 1
+        ) {
+          viewportLines.push(
+            active?.getLine?.(index)?.translateToString?.(true) ?? "",
+          );
+        }
+
         return {
           baseY: active?.baseY ?? 0,
           text: lines.join("\n"),
+          viewportText: viewportLines.join("\n"),
           viewportY: active?.viewportY ?? 0,
         };
       });
@@ -543,15 +558,27 @@ test("browser: tmux attach 终端预灌 pane 历史后可用鼠标滚轮浏览�
     const before = await bufferState();
     expect(before.baseY).toBeGreaterThan(0);
 
+    const tmuxCopyState = () => {
+      try {
+        return runTmux([
+          "display-message",
+          "-p",
+          "-t",
+          sessionName,
+          "#{pane_in_mode}",
+        ]);
+      } catch {
+        return "";
+      }
+    };
+
     await terminal.hover();
     await page.mouse.wheel(0, -1200);
 
+    await expect.poll(tmuxCopyState).toBe("1");
     await expect
-      .poll(async () => {
-        const state = await bufferState();
-        return state.viewportY;
-      })
-      .toBeLessThan(before.viewportY);
+      .poll(async () => (await bufferState()).viewportText)
+      .not.toBe(before.viewportText);
   } finally {
     if (sessionId) {
       await request.delete(backendPath(`/api/agent-sessions/${sessionId}`));
@@ -1347,6 +1374,154 @@ test("browser: tmux 终端会转发鼠标二进制事件", async ({ page, reques
             /\u001b\[<(?:64|65);\d+;\d+M/.test(payload) ||
             /\u001b\[M[\x60\x61][\s\S]{2}/.test(payload)
           );
+        });
+      })
+      .toBeTruthy();
+  } finally {
+    if (launchedSessionId) {
+      await request.delete(
+        backendPath(`/api/agent-sessions/${launchedSessionId}`),
+      );
+    }
+    killTmuxSession(sessionName);
+  }
+});
+
+test("browser: tmux 滚轮会修复被终端关闭的浏览器鼠标模式", async ({
+  page,
+  request,
+}) => {
+  const sessionName = `e2e-mouse-repair-${Date.now()}`;
+  const displayName = `E2E Mouse Repair ${Date.now()}`;
+  let launchedSessionId: string | undefined;
+
+  killTmuxSession(sessionName);
+
+  try {
+    runTmux([
+      "new-session",
+      "-d",
+      "-s",
+      sessionName,
+      "-c",
+      process.cwd(),
+      "node ./scripts/mock-terminal-agent.mjs mouse",
+    ]);
+
+    const launchResponse = await request.post(
+      backendPath("/api/agent-launch/pty"),
+      {
+        data: {
+          workspaceId: "default",
+          displayName,
+          agentKind: "copilot",
+          command: `tmux attach -t '${sessionName}'`,
+          workingDirectory: process.cwd(),
+          tmuxSessionName: sessionName,
+        },
+      },
+    );
+
+    expect(launchResponse.ok()).toBeTruthy();
+    launchedSessionId = (await launchResponse.json()).id;
+
+    await installWebSocketSpy(page);
+    await page.goto("/");
+
+    const card = page.locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: displayName }),
+    });
+    await expect(card).toBeVisible({ timeout: 15000 });
+    await card.dblclick();
+
+    const terminal = page.locator(".focus-main .terminal-view");
+    const screen = terminal.locator(".xterm-screen");
+    await expect(screen).toBeVisible({ timeout: 15000 });
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const terminal = document.querySelector(
+            ".focus-main .terminal-view",
+          ) as
+            | (HTMLDivElement & {
+                __xterm?: {
+                  modes?: { mouseTrackingMode?: string };
+                  write?: (data: string) => void;
+                };
+              })
+            | null;
+
+          return terminal?.__xterm?.modes?.mouseTrackingMode ?? "none";
+        }),
+      )
+      .not.toBe("none");
+
+    await page.evaluate(() => {
+      const terminal = document.querySelector(".focus-main .terminal-view") as
+        | (HTMLDivElement & {
+            __xterm?: {
+              modes?: { mouseTrackingMode?: string };
+              write?: (data: string) => void;
+            };
+          })
+        | null;
+
+      terminal?.__xterm?.write?.("\u001b[?1000l\u001b[?1002l\u001b[?1003l");
+    });
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const terminal = document.querySelector(
+            ".focus-main .terminal-view",
+          ) as
+            | (HTMLDivElement & {
+                __xterm?: { modes?: { mouseTrackingMode?: string } };
+              })
+            | null;
+
+          return terminal?.__xterm?.modes?.mouseTrackingMode ?? "none";
+        }),
+      )
+      .toBe("none");
+
+    await terminal.hover();
+    const beforeWheel = (await terminalSentFrames(page)).length;
+    await page.mouse.wheel(0, -300);
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const terminal = document.querySelector(
+            ".focus-main .terminal-view",
+          ) as
+            | (HTMLDivElement & {
+                __xterm?: { modes?: { mouseTrackingMode?: string } };
+              })
+            | null;
+
+          return terminal?.__xterm?.modes?.mouseTrackingMode ?? "none";
+        }),
+      )
+      .not.toBe("none");
+
+    await expect
+      .poll(async () => {
+        const wheelFrames = (await terminalSentFrames(page)).slice(beforeWheel);
+        return wheelFrames.some((frame) => {
+          let payload = frame;
+          try {
+            const parsed = JSON.parse(frame) as {
+              type?: string;
+              data?: string;
+            };
+            if (parsed.type === "binary" && parsed.data) {
+              payload = Buffer.from(parsed.data, "base64").toString("latin1");
+            }
+          } catch {
+            // Raw terminal mouse reports are expected to be non-JSON.
+          }
+
+          return /\u001b\[<(?:64|65);\d+;\d+M/.test(payload);
         });
       })
       .toBeTruthy();

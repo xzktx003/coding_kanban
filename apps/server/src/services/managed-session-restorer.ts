@@ -19,6 +19,7 @@ export interface RestoreManagedSessionsOptions {
     session: AgentSessionRecord,
     target: ResolvedTmuxTarget,
   ): Promise<void>;
+  markFailure?(session: AgentSessionRecord, message: string): void;
 }
 
 export interface ManagedSessionRestorer {
@@ -37,6 +38,7 @@ export async function restoreManagedSessions({
   resolveTmuxTarget,
   clearInputState,
   reconnect,
+  markFailure,
 }: RestoreManagedSessionsOptions): Promise<RestoreManagedSessionsResponse> {
   const result: RestoreManagedSessionsResponse = {
     restoredIds: [],
@@ -59,11 +61,13 @@ export async function restoreManagedSessions({
     try {
       const target = await resolveTmuxTarget(session);
       if (!target) {
+        const message = "tmux 会话不存在或当前不可访问";
         result.failed.push({
           agentSessionId: session.id,
           displayName: session.displayName,
-          error: "tmux 会话不存在或当前不可访问",
+          error: message,
         });
+        markFailure?.(session, message);
         continue;
       }
 
@@ -71,11 +75,13 @@ export async function restoreManagedSessions({
       await reconnect(session, target);
       result.restoredIds.push(session.id);
     } catch (error) {
+      const message = failureMessage(error);
       result.failed.push({
         agentSessionId: session.id,
         displayName: session.displayName,
-        error: failureMessage(error),
+        error: message,
       });
+      markFailure?.(session, message);
     }
   }
 

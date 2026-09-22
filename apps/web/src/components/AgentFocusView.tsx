@@ -48,6 +48,7 @@ import {
   normalizeTerminalMonitorGroupOrder,
   normalizeTerminalMonitorSlots,
   orderTerminalMonitorGroupSessions,
+  prioritizeTerminalMonitorSessions,
   placeTerminalMonitorSlotSession,
   restoreTerminalMonitorLayoutSnapshot,
   resolveFocusedTerminalMonitorSlotId,
@@ -456,6 +457,10 @@ export function AgentFocusView({
   }, [sessions]);
   const displayableSessionIds = useMemo(
     () => new Set(displayableSessions.map((session) => session.id)),
+    [displayableSessions],
+  );
+  const monitorSessions = useMemo(
+    () => prioritizeTerminalMonitorSessions(displayableSessions),
     [displayableSessions],
   );
   const visibleManualSlotIds = useMemo(
@@ -890,7 +895,7 @@ export function AgentFocusView({
     setTerminalSlots((current) => {
       const normalized = normalizeTerminalMonitorSlots({
         mode: terminalLayoutMode,
-        sessions: displayableSessions,
+        sessions: monitorSessions,
         preferredSessionId: shouldSyncInput ? focusedSession.id : null,
         preferredSlotId: nextActiveSlotId,
         previousSlots: retainedTerminalSlotsRef.current,
@@ -907,6 +912,7 @@ export function AgentFocusView({
     displayableSessions,
     focusedSession.id,
     groupArrangementSessions,
+    monitorSessions,
     syncActiveTerminalWithFocus,
     terminalArrangementMode,
     terminalLayoutMode,

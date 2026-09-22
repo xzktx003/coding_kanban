@@ -3,6 +3,7 @@ export type TerminalMonitorLayoutMode =
   | "dual"
   | "dual-vertical"
   | "triple"
+  | "triple-vertical"
   | "quad"
   | "six"
   | "eight";
@@ -11,6 +12,10 @@ export type TerminalMonitorArrangementMode = "manual" | "group";
 
 export interface TerminalMonitorSession {
   id: string;
+}
+
+export interface TerminalMonitorSessionAvailability {
+  connectionState?: string;
 }
 
 export interface TerminalMonitorSlot {
@@ -71,6 +76,7 @@ export const TERMINAL_MONITOR_LAYOUT_OPTIONS: ReadonlyArray<{
   { mode: "dual", label: "左右双屏", capacity: 2 },
   { mode: "dual-vertical", label: "上下双屏", capacity: 2 },
   { mode: "triple", label: "左中右三屏", capacity: 3 },
+  { mode: "triple-vertical", label: "上中下三屏", capacity: 3 },
   { mode: "quad", label: "四屏", capacity: 4 },
   { mode: "six", label: "六屏", capacity: 6 },
   { mode: "eight", label: "八屏", capacity: 8 },
@@ -84,6 +90,7 @@ export function getTerminalMonitorLayoutCapacity(
     case "dual-vertical":
       return 2;
     case "triple":
+    case "triple-vertical":
       return 3;
     case "quad":
       return 4;
@@ -105,6 +112,7 @@ export function isTerminalMonitorLayoutMode(
     value === "dual" ||
     value === "dual-vertical" ||
     value === "triple" ||
+    value === "triple-vertical" ||
     value === "quad" ||
     value === "six" ||
     value === "eight"
@@ -205,6 +213,17 @@ export function getTerminalMonitorSlotIds(
   return TERMINAL_MONITOR_SLOT_IDS.slice(
     0,
     getTerminalMonitorLayoutCapacity(mode),
+  );
+}
+
+/** Keep sessions with no live transport out of automatically filled panes. */
+export function prioritizeTerminalMonitorSessions<
+  Session extends TerminalMonitorSession & TerminalMonitorSessionAvailability,
+>(sessions: readonly Session[]): Session[] {
+  return [...sessions].sort(
+    (left, right) =>
+      Number(left.connectionState === "offline") -
+      Number(right.connectionState === "offline"),
   );
 }
 

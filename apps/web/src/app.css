@@ -3083,6 +3083,11 @@ input {
   grid-template-rows: minmax(0, 1fr);
 }
 
+.focus-terminal-layout--triple-vertical {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+}
+
 .focus-terminal-layout--quad {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-rows: repeat(2, minmax(0, 1fr));
@@ -3113,6 +3118,11 @@ input {
 .focus-terminal-layout--group.focus-terminal-layout--triple {
   grid-template-rows: none;
   grid-auto-rows: 100%;
+}
+
+.focus-terminal-layout--group.focus-terminal-layout--triple-vertical {
+  grid-template-rows: none;
+  grid-auto-rows: 33.3333%;
 }
 
 .focus-terminal-layout--group.focus-terminal-layout--dual-vertical,
@@ -3941,6 +3951,25 @@ input {
   font-weight: 700;
 }
 
+.terminal-pane-unavailable {
+  position: relative;
+}
+
+.terminal-pane-unavailable-status {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 6;
+  max-width: min(360px, calc(100% - 20px));
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 183, 77, 0.28);
+  border-radius: 8px;
+  background: rgba(14, 18, 23, 0.92);
+  color: rgba(255, 224, 173, 0.88);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .focus-terminal-pane-context-menu {
   position: fixed;
   z-index: 2100;
@@ -4037,6 +4066,7 @@ input {
 @container focus-terminal (max-width: 720px) {
   .focus-terminal-layout--dual,
   .focus-terminal-layout--triple,
+  .focus-terminal-layout--triple-vertical,
   .focus-terminal-layout--six,
   .focus-terminal-layout--eight,
   .focus-terminal-layout--quad {
@@ -4053,6 +4083,10 @@ input {
   .focus-terminal-layout--dual,
   .focus-terminal-layout--triple {
     grid-auto-rows: 100%;
+  }
+
+  .focus-terminal-layout--triple-vertical {
+    grid-auto-rows: 33.3333%;
   }
 
   .focus-terminal-layout--quad,

@@ -27,6 +27,10 @@ test("desktop complete records reuse the resizable side-panel workspace", () => 
   );
   assert.match(
     appSource,
-    /if \(transcriptOpen && sessionId === focusedSession\.id\) \{\s*returnToFileBrowser\(focusedSession\);/,
+    /function revealSidePanel\(\)[\s\S]*?sideCollapsed: false, mainCollapsed: false/,
+  );
+  assert.match(
+    appSource,
+    /if \(transcriptOpen && sessionId === focusedSession\.id\) \{\s*if \(fileBrowserUiState\.sideCollapsed\) \{\s*revealSidePanel\(\);\s*return;\s*\}\s*returnToFileBrowser\(focusedSession\);/,
   );
 });

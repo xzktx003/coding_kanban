@@ -1029,6 +1029,160 @@ test("complete transcript follows the selected monitor pane", async ({
   ).toHaveCount(1);
 });
 
+test("selects a top-middle-bottom three-pane monitor layout", async ({
+  page,
+}) => {
+  await mockSessions(page, [
+    makeSession({ id: "top-session", displayName: "Top Session" }),
+    makeSession({ id: "middle-session", displayName: "Middle Session" }),
+    makeSession({ id: "bottom-session", displayName: "Bottom Session" }),
+  ]);
+
+  await page.goto("/");
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: "Top Session" }),
+    })
+    .dblclick();
+  await expect(page.locator(".focus-main")).toBeVisible();
+
+  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await expect(
+    page.getByRole("menuitemradio", { name: /上中下三屏/ }),
+  ).toBeVisible();
+  await page.getByRole("menuitemradio", { name: /上中下三屏/ }).click();
+
+  const layout = page.locator(".focus-terminal-layout--triple-vertical");
+  await expect(layout).toBeVisible();
+  const panes = layout.locator(".focus-terminal-pane:visible");
+  await expect(panes).toHaveCount(3);
+  const boxes = await panes.evaluateAll((elements) =>
+    elements.map((element) => {
+      const box = element.getBoundingClientRect();
+      return { x: box.x, y: box.y, width: box.width, height: box.height };
+    }),
+  );
+  expect(boxes[0]?.width).toBeGreaterThan(0);
+  expect(boxes[0]?.height).toBeGreaterThan(0);
+  expect(boxes[1]?.x).toBeCloseTo(boxes[0]?.x ?? -1, 0);
+  expect(boxes[2]?.x).toBeCloseTo(boxes[0]?.x ?? -1, 0);
+  expect(boxes[1]?.y).toBeGreaterThan(boxes[0]?.y ?? Number.POSITIVE_INFINITY);
+  expect(boxes[2]?.y).toBeGreaterThan(boxes[1]?.y ?? Number.POSITIVE_INFINITY);
+});
+
+test("group arrangement reveals a collapsed transcript panel for the active pane", async ({
+  page,
+}) => {
+  const sessions = [
+    makeSession({ id: "group-left-session", displayName: "CodeCharon Left" }),
+    makeSession({ id: "group-right-session", displayName: "CodeCharon" }),
+  ];
+  const transcriptRequests: string[] = [];
+  await mockSessions(page, sessions);
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "coding-kanban-session-groups-v1",
+      JSON.stringify({
+        groups: [{ id: "group-codecharon", name: "CodeCharon" }],
+        assignments: {
+          "session:group-left-session": "group-codecharon",
+          "session:group-right-session": "group-codecharon",
+        },
+        collapsedGroupIds: [],
+      }),
+    );
+    localStorage.setItem(
+      "terminal-monitor-workspace-v1",
+      JSON.stringify({
+        mode: "dual",
+        arrangementMode: "group",
+        arrangementGroupId: "group-codecharon",
+        groupSessionOrderByGroupId: {},
+        slots: [],
+        activeSlotId: "terminal-monitor-slot-1",
+        closedSlotIds: [],
+      }),
+    );
+    localStorage.setItem(
+      "file-browser-ui-state",
+      JSON.stringify({
+        width: 520,
+        sideCollapsed: true,
+        mainCollapsed: false,
+      }),
+    );
+  });
+  await page.route("**/api/agent-sessions/*/transcript**", async (route) => {
+    const match = new URL(route.request().url()).pathname.match(
+      /\/api\/agent-sessions\/([^/]+)\/transcript$/,
+    );
+    const sessionId = match?.[1] ?? "unknown-session";
+    transcriptRequests.push(sessionId);
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        available: true,
+        agentKind: "codex",
+        sessionId: `codex-${sessionId}`,
+        matchedBy: "session-id",
+        updatedAt: "2026-09-04T00:00:00.000Z",
+        hasMore: false,
+        nextCursor: null,
+        entries: [],
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: "CodeCharon Left" }),
+    })
+    .dblclick();
+
+  const layout = page.locator(
+    '.focus-terminal-layout[data-terminal-arrangement="group"]',
+  );
+  const rightPane = layout.locator(
+    '[data-terminal-pane-session="group-right-session"]',
+  );
+  await expect(rightPane).toBeVisible();
+  await rightPane.getByRole("button", { name: "设为输入" }).click();
+  await expect(
+    page.getByRole("button", { name: "查看 CodeCharon 的完整记录" }),
+  ).toBeVisible();
+
+  await page
+    .getByRole("button", { name: "查看 CodeCharon 的完整记录" })
+    .click();
+
+  await expect(page.locator(".file-browser-shell")).not.toHaveClass(
+    /file-browser-shell--collapsed/,
+  );
+  await expect(page.locator(".agent-transcript-panel")).toHaveAttribute(
+    "aria-label",
+    "CodeCharon 完整记录",
+  );
+  await expect
+    .poll(() => transcriptRequests.at(-1))
+    .toBe("group-right-session");
+
+  await page.getByTestId("side-panel-collapse-toggle").click();
+  await expect(page.locator(".file-browser-shell")).toHaveClass(
+    /file-browser-shell--collapsed/,
+  );
+  await page
+    .getByRole("button", { name: "查看 CodeCharon 的完整记录" })
+    .click();
+  await expect(page.locator(".file-browser-shell")).not.toHaveClass(
+    /file-browser-shell--collapsed/,
+  );
+  await expect(page.locator(".agent-transcript-panel")).toHaveAttribute(
+    "aria-label",
+    "CodeCharon 完整记录",
+  );
+});
+
 test("focused terminal reconnects after an unexpected WebSocket close and accepts input", async ({
   page,
 }) => {
@@ -1065,6 +1219,67 @@ test("focused terminal reconnects after an unexpected WebSocket close and accept
   await expect
     .poll(async () => (await terminalWebSocketSends(page)).join(""))
     .toContain("reconnected-input");
+});
+
+test("remote tmux panes enable browser mouse reports when the remote handshake omits them", async ({
+  page,
+}) => {
+  const session = makeSession({
+    id: "remote-tmux-mouse-session",
+    displayName: "research_26",
+    sourceType: "remote-connect",
+    sshTarget: { host: "remote.test", port: 22, username: "developer" },
+    transportRef: {
+      runtimeId: "ssh-pty:remote-tmux-mouse",
+      tmuxSession: "research_26",
+    },
+    outputPreview: "remote tmux ready",
+  });
+  await mockSessions(page, [session]);
+  await page.goto("/");
+
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: session.displayName }),
+    })
+    .dblclick();
+
+  const terminal = page.locator(".focus-main .terminal-view-live");
+  const screen = terminal.locator(".xterm-screen");
+  await expect(terminal).toBeVisible();
+  await expect(screen).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const terminalElement = document.querySelector(
+          ".focus-main .terminal-view-live",
+        ) as
+          | (HTMLElement & {
+              __xterm?: { modes?: { mouseTrackingMode?: string } };
+            })
+          | null;
+        return terminalElement?.__xterm?.modes?.mouseTrackingMode ?? "none";
+      }),
+    )
+    .not.toBe("none");
+
+  const box = await screen.boundingBox();
+  if (!box) {
+    throw new Error("remote tmux terminal screen has no bounding box");
+  }
+  await screen.click({
+    position: {
+      x: Math.min(90, box.width / 2),
+      y: Math.min(50, box.height / 2),
+    },
+  });
+
+  await expect
+    .poll(async () => {
+      const sends = await terminalWebSocketSends(page);
+      return sends.some((frame) => /\u001b\[<0;\d+;\d+[mM]/.test(frame));
+    })
+    .toBeTruthy();
 });
 
 test("activating the other monitor pane keeps both terminal instances mounted", async ({
@@ -1229,6 +1444,83 @@ test("activating the other monitor pane keeps both terminal instances mounted", 
       ),
     ]),
   ).toEqual(refreshCountsBeforePaneActivation);
+});
+
+test("split layouts do not render unavailable sessions as black live panes", async ({
+  page,
+}) => {
+  await mockSessions(page, [
+    makeSession({
+      id: "offline-session",
+      displayName: "Offline Session",
+      connectionState: "offline",
+      interactionState: "detached",
+      outputPreview: "恢复失败：tmux 会话不存在或当前不可访问",
+    }),
+    makeSession({
+      id: "focused-session",
+      displayName: "Focused Session",
+      outputPreview: "focused ready",
+    }),
+  ]);
+  await page.goto("/");
+
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: "Focused Session" }),
+    })
+    .dblclick();
+  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
+
+  const unavailablePane = page.locator(
+    '[data-terminal-pane-session="offline-session"]',
+  );
+  await expect(unavailablePane).toBeVisible();
+  await expect(unavailablePane.locator(".terminal-view-live")).toHaveCount(0);
+  await expect(unavailablePane.locator(".terminal-preview")).toBeVisible();
+  await expect(unavailablePane).toContainText("恢复失败");
+  await expect.poll(() => terminalWebSocketUrls(page)).toHaveLength(1);
+});
+
+test("split layouts fill available sessions before stale sessions", async ({
+  page,
+}) => {
+  await mockSessions(page, [
+    makeSession({
+      id: "offline-session",
+      displayName: "Offline Session",
+      connectionState: "offline",
+      interactionState: "detached",
+      outputPreview: "恢复失败：tmux 会话不存在或当前不可访问",
+    }),
+    makeSession({
+      id: "focused-session",
+      displayName: "Focused Session",
+    }),
+    makeSession({
+      id: "available-session",
+      displayName: "Available Session",
+    }),
+  ]);
+  await page.goto("/");
+
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: "Focused Session" }),
+    })
+    .dblclick();
+  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
+
+  const layout = page.locator(".focus-terminal-layout--dual");
+  await expect(
+    layout.locator('[data-terminal-pane-session="available-session"]'),
+  ).toBeVisible();
+  await expect(
+    layout.locator('[data-terminal-pane-session="offline-session"]'),
+  ).toHaveCount(0);
+  await expect.poll(() => terminalWebSocketUrls(page)).toHaveLength(2);
 });
 
 test("focused terminal retries a WebSocket that never finishes connecting", async ({

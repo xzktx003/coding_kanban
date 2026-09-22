@@ -2,9 +2,19 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import { resolveTerminalMouseGestureAction } from "./terminal-mouse-selection.js";
+import {
+  resolveTerminalMouseGestureAction,
+  TMUX_MOUSE_REPORTING_ENABLE_SEQUENCE,
+} from "./terminal-mouse-selection.js";
 
 describe("terminal mouse selection", () => {
+  it("uses SGR button tracking for tmux mouse reports", () => {
+    assert.equal(
+      TMUX_MOUSE_REPORTING_ENABLE_SEQUENCE,
+      "\u001b[?1002h\u001b[?1006h",
+    );
+  });
+
   it("keeps the browser context menu available for terminal copy and paste", () => {
     const source = readFileSync(
       new URL("../components/TerminalView.tsx", import.meta.url),

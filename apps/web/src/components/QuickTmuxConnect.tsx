@@ -25,7 +25,7 @@ function buildQuickTmuxCommand(
   tmuxSessionName: string,
   workingDirectory: string,
 ): string {
-  return `exec tmux set-option -g history-limit ${DEFAULT_TMUX_HISTORY_LIMIT_LINES} \\; new-session -A -s ${shellQuote(tmuxSessionName)} -c ${formatWorkingDirectory(workingDirectory)}`;
+  return `exec tmux set-option -ga terminal-features ',xterm*:mouse' \\; set-option -g history-limit ${DEFAULT_TMUX_HISTORY_LIMIT_LINES} \\; new-session -A -s ${shellQuote(tmuxSessionName)} -c ${formatWorkingDirectory(workingDirectory)} \\; set-option -t ${shellQuote(tmuxSessionName)} mouse on`;
 }
 
 function buildDefaultQuickTmuxName(hostName: string): string {

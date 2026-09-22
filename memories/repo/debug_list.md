@@ -1,5 +1,8 @@
 - 2026-09-20：长时间运行期间 `/tmp/tmux-<uid>` 连同控制 socket 被清理，tmux server/pane 仍存活，但完整记录的活动 pane 定位全部失败并误报无记录。运行态通过恢复 `0700` 目录及向已验证的当前用户 tmux server 发送 `SIGUSR1` 无损重建 socket；服务端在 Codex 定位与本地 tmux 命令前复用同一受限自愈逻辑，拒绝畸形 TMUX 值、非 tmux 或非当前用户 PID。
 - 同一个 tmux session 分屏运行多个 Codex 时，完成通知过去只解析活动 pane，其他分屏完成会漏报；通知卡片回复又在收到消息时重新解析活动 pane，可能串到另一个 Codex。现用 `tmux list-panes -s` 枚举全部 pane，沿各自 PID 定位顶层 Codex thread，按看板 session + thread 分别维护完成基线/去重；通知绑定的回复、记录和文件动作先验证原 thread 仍属于该 tmux session，再精确投递，绝不因切换活动 pane 改目标。
+- 2026-09-17：远程 `research_26` 的 tmux 已开启 `mouse on`，但 `terminal-features` 缺少 `mouse`，导致浏览器 xterm 不产生点击报告。连接命令现在补齐远程 tmux 鼠标能力，前端对 tmux 终端回放完成后主动启用 SGR 鼠标报告，兼容存量会话和不完整能力协商；新增端到端回归。
+- 2026-09-17：`research` 的 TUI 启动后可能关闭 xterm mouse tracking，使滚轮无法进入 tmux。登记为 tmux 的交互终端现在在滚轮捕获时检测并恢复 `1002/1006`，并直接补发当前坐标的 SGR `64/65` 滚轮报告；因此恢复动作不会吞掉第一下滚轮，Shift+滚轮仍走本地 scrollback。
+- 2026-09-16：桌面聚焦页切换分屏后可能出现整块黑色窗格：自动补位把离线且没有 PTY 回放的历史 tmux 会话交给了 xterm。现自动排布优先在线/降级会话，离线会话只显示带恢复提示的轻量预览；缓存终端从 hidden 层重新显示时由可见性与 IntersectionObserver 触发 fit/refresh，回归覆盖不可用窗格、在线优先和分屏回放。
 - 2026-09-07：飞书回复从 PTY 粘贴加 Enter 改为复用原生 codex queue，精确定位活动 thread，完整保留 /goal 与多行正文。队列接受才标记 processed，忙碌线程交给 Codex 排队，失败不回退键盘或盲目补发。
 - 飞书回复通知卡片后少数 Codex 会话仍只填入文字：单行回复会触发新版 Codex paste-burst 识别，且 node-pty Promise 不代表底层字节已写稳，紧随的 Enter 仍可能被合并。所有交互回复现统一使用 bracketed paste，活跃 PTY 再等待 50 ms 后单独发送 Enter；普通键盘输入和旧直连 pipe 不变。
 - 飞书回复通知卡片后文字会进入 Codex 编辑区但不自动执行：prompt 和 Enter 同批写入时，部分 Codex TUI 忽略同批次回车。输入服务现对交互 PTY/tmux 先写 prompt（多行 bracketed paste）再单独写 Enter，旧版直连 process/SSH 使用一个末尾换行提交，避免重复空命令。

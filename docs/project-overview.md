@@ -50,9 +50,10 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 卡片和聚焦右侧栏固定显示轻量文本预览，不再提供批量恢复完整小终端的入口。
 - 四列在桌面端并排、窄屏纵向排列；大规模且未启用用户分组时继续虚拟化卡片，卡片不会为每张会话创建真实终端 WebSocket。
 - 聚焦视图可以直接输入主终端，并在侧栏保留其它会话上下文。
-- 聚焦视图支持单屏、左右双屏、上下双屏、左中右三屏、四屏、六屏、八屏终端监控；多窗格可以同时观察多个真实终端，但输入所有权始终只有一个“输入中”窗格，不做广播输入。
+- 聚焦视图支持单屏、左右双屏、上下双屏、左中右三屏、上中下三屏、四屏、六屏、八屏终端监控；多窗格可以同时观察多个真实终端，但输入所有权始终只有一个“输入中”窗格，不做广播输入。
 - 每个监控窗格通过分组会话切换器选择内容：弹层复用看板现有分组顺序和稳定分类色，显示组内数量、会话状态、当前项及其他窗格占用编号；分组标题可独立折叠/展开并持久化，且不受主页看板或聚焦侧栏折叠状态影响。已占用项不可重复选择，未分组会话自动归入独立分区，长列表由弹层内部滚动。
 - 聚焦视图支持一键折叠右侧“其他会话”侧栏，方便在主终端和其它会话上下文之间切换。
+- 自动补位优先选择 `online`/`degraded` 会话；已知 `offline` 的历史 tmux 会话不创建没有回放内容的空白 xterm，而是在手动选择时显示轻量预览和恢复提示。缓存终端从隐藏窗格重新显示或进入可视区域时会重新 fit/refresh，避免先在零尺寸容器中初始化导致黑屏。
 - 前端交互使用轻量 CSS 动效增强观感：菜单、诊断面板、主机下拉、卡片、抽屉和弹窗只动画 `opacity` 与 `transform`，并通过 `prefers-reduced-motion` 对低运动偏好用户降级。
 
 ### 顶栏和快捷入口
@@ -169,11 +170,12 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 前端资源诊断会记录 `/ws/agent-sessions` 会话状态消息速率和大小、`/ws/agent-sessions/:id/terminal` 实时流速率、终端 WebSocket 生命周期、DOM 中的 xterm/预览/监控窗格/VS Code iframe 数量，以及浏览器暴露的 JS heap；同时每秒按需调用 `/api/diagnostics/terminal-history` 和 `/api/diagnostics/vscode-web-proxy` 读取后端终端历史与 VS Code 代理吞吐。诊断只在面板打开时刷新，不保存历史。
 - `/ws/agent-sessions` 每次连接先发送完整 `snapshot`，此后发送仅含变化会话、删除 ID、焦点与时间戳的 `delta`；前端合并后继续向应用暴露完整列表，断线重连后重新以全量快照建立基线。后端仍对终端输出导致的状态更新做约 1 秒 trailing 合并，新建、删除、聚焦、重命名等结构性变化即时广播。
 - 本地 tmux 先用 `tmux list-clients` 将 attached client PID 与 PTY PID 精确匹配；回放可见但 attach 尚未完成时，首个输入不会误写入启动 shell，而是短暂等待或安全回退 pane adapter。确认后 attached tmux client PTY 是普通文本、快捷键、bracketed paste、鼠标协议及 `Ctrl+A` / `Ctrl+B` 前缀的唯一实时输入通道，确保输入始终跟随可见的当前 pane；tmux client 不支持 extended keys 的 CSI-u 修饰键例外用 `send-keys -l` 保留原始字节。路由器仍查询当前 `prefix` key table，记录 `command-prompt` / `confirm-before` 状态以便连接关闭、重连和恢复时用 Ctrl+C 清理残留 prompt；`status-keys vi` 的 Escape 仅切换编辑模式。
-- tmux 鼠标路由只过滤无按钮的 hover motion（SGR `35` 及其修饰键变体），按下按钮的拖动 motion（SGR `32/33/34` 及其修饰键变体）与按下/释放事件继续经同一个有序 attached PTY 进入 tmux，因此 `MouseDrag1Pane`、copy-mode 选择和复制不会因 Kanban 的 hover 防抖被截断；当前可控的大屏 xterm 还会在捕获阶段屏蔽浏览器右键菜单，避免 tmux 的右键报告被浏览器菜单抢占。
+- tmux 鼠标路由只过滤无按钮的 hover motion（SGR `35` 及其修饰键变体），按下按钮的拖动 motion（SGR `32/33/34` 及其修饰键变体）与按下/释放事件继续经同一个有序 attached PTY 进入 tmux，因此 `MouseDrag1Pane`、copy-mode 选择和复制不会因 Kanban 的 hover 防抖被截断；本地 PTY 启动/重连及受控附着会补齐 tmux 鼠标能力和会话级 `mouse on`，当前可控的大屏 xterm 还会在捕获阶段屏蔽浏览器右键菜单，避免 tmux 的右键报告被浏览器菜单抢占。
+- 远程 tmux 的连接命令会补齐 `xterm*:mouse` 和会话级 `mouse on`；前端对登记为 tmux 的实时终端在回放完成后主动开启 SGR 鼠标报告，兼容远端 `.tmux.conf` 未声明鼠标能力的存量会话。
 - 服务生命周期把 Fastify 关闭与 PTY 关闭绑定：SIGTERM/SIGINT 先执行 `app.close()`，`onClose` 再统一 dispose 本进程创建的 PTY，最后退出。这样 `tsx watch` 与脚本重启不会把旧 `tmux attach` 进程留给 PID 1，也不会持续增加 session 的 attached client 数量。
 - `TerminalView` 开启 xterm 的 `macOptionIsMeta`，因此 macOS Option 与 Windows/Linux Alt 在浏览器能够接收事件时使用相同的 Meta 编码。adapter 在完整 CSI 键序列之后识别 `ESC+Space` 及常用 `ESC+字母/数字`，并原子映射为 tmux `M-*` 键，避免 Codex 把两个分离事件解释为 Escape 和普通输入；Windows 窗口管理器若截获 `Alt+Space`，使用已支持的 `Shift+Enter` 作为换行备用键。
 - Safari 的快速文本输入额外经过短时恢复状态机：`TerminalView` 记录已经通过 xterm `onData` 发出的普通文本，并在原生 `insertText` 冒泡时按顺序抵消已发送部分，仅把缺失后缀送入原有 WebSocket 输入链路。状态按 100ms 过期，控制序列会清空状态，IME composition 不参与恢复，避免重复输入或跨按键误匹配。
-- 滚轮按终端能力动态路由：当前交互终端启用 xterm mouse tracking 时，普通 wheel 事件放行给 xterm 并经 terminal WebSocket/attached PTY 到达 tmux 当前 pane；按住 `Shift` 时强制浏览本地 xterm scrollback。未启用 mouse tracking 或不具备输入所有权的大屏监控窗格继续只滚动自己的 scrollback；聚焦页右侧小卡即使启用完整 xterm 预览也使用 `wheelPassthrough` 被动命中面，滚轮只滚外层会话侧栏。
+- 滚轮按终端能力动态路由：当前交互终端启用 xterm mouse tracking 时，普通 wheel 事件放行给 xterm 并经 terminal WebSocket/attached PTY 到达 tmux 当前 pane；登记为 tmux 但被 TUI 关闭 mouse tracking 时，捕获层恢复 `1002/1006` 并直接补发当前 SGR 滚轮报告。按住 `Shift` 时强制浏览本地 xterm scrollback。未启用 mouse tracking 或不具备输入所有权的大屏监控窗格继续只滚动自己的 scrollback；聚焦页右侧小卡即使启用完整 xterm 预览也使用 `wheelPassthrough` 被动命中面，滚轮只滚外层会话侧栏。
 - 文件/VS Code 侧面板分隔条使用 pointer capture 跨越 iframe 保持拖动；宽度通过 latest-value animation-frame scheduler 直接写入面板 DOM，React 状态和 localStorage 只在松手时提交一次。`TerminalView` 的 fit 使用 frame + trailing 合并调度，并在侧面板拖动期间只保留 trailing fit，避免 xterm、VS Code iframe 和整个 App 同时高频重排。
 
 ### 应用更新与会话恢复

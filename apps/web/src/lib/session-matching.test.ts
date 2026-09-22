@@ -116,9 +116,12 @@ describe("buildDirectLaunchCommand", () => {
 describe("buildTmuxLaunchCommand", () => {
   it("builds tmux new-session for shell", () => {
     const cmd = buildTmuxLaunchCommand("shell", "~/code", "test", "my-session");
-    assert.ok(cmd.startsWith("tmux set-option -g history-limit 20000"));
+    assert.ok(
+      cmd.startsWith("tmux set-option -ga terminal-features ',xterm*:mouse'"),
+    );
     assert.ok(cmd.includes("\\; new-session -s"));
     assert.ok(cmd.includes("'my-session'"));
+    assert.ok(cmd.includes("set-option -t 'my-session' mouse on"));
   });
 
   it("keeps non-shell tmux panes open after the agent command exits", () => {
@@ -129,9 +132,12 @@ describe("buildTmuxLaunchCommand", () => {
       "my-session",
     );
 
-    assert.ok(cmd.startsWith("tmux set-option -g history-limit 20000"));
+    assert.ok(
+      cmd.startsWith("tmux set-option -ga terminal-features ',xterm*:mouse'"),
+    );
     assert.ok(cmd.includes("\\; new-session -s"));
     assert.ok(cmd.includes("'my-session'"));
+    assert.ok(cmd.includes("set-option -t 'my-session' mouse on"));
     assert.ok(cmd.includes('exec "$SHELL_BIN" -i'));
     assert.ok(cmd.includes("copilot"));
     assert.ok(cmd.includes("@github/copilot/npm-loader.js"));
@@ -152,13 +158,16 @@ describe("buildTmuxAttachCommand", () => {
     const cmd = buildTmuxAttachCommand("dev");
     assert.equal(
       cmd,
-      "tmux set-option -t 'dev' history-limit 20000 \\; attach -t 'dev'",
+      "tmux set-option -ga terminal-features ',xterm*:mouse' \\; set-option -t 'dev' mouse on \\; set-option -t 'dev' history-limit 20000 \\; attach -t 'dev'",
     );
   });
 
   it("selects pane then attaches", () => {
     const cmd = buildTmuxAttachCommand("dev", "%5");
-    assert.ok(cmd.startsWith("tmux set-option -t 'dev' history-limit 20000"));
+    assert.ok(
+      cmd.startsWith("tmux set-option -ga terminal-features ',xterm*:mouse'"),
+    );
+    assert.ok(cmd.includes("\\; set-option -t 'dev' mouse on"));
     assert.ok(cmd.includes("\\; select-pane -t '%5'"));
     assert.ok(cmd.includes("\\; attach -t 'dev'"));
   });

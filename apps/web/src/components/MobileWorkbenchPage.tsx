@@ -825,6 +825,9 @@ export function MobileWorkbenchPage({
                           interactive
                           mobileTouchMode
                           onFontSizeChange={onTerminalFontSizeChange}
+                          tmuxMouseReporting={Boolean(
+                            activeSession.transportRef?.tmuxSession,
+                          )}
                         />
                       </Suspense>
                     ) : (

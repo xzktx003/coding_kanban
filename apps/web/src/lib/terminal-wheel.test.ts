@@ -5,6 +5,7 @@ import {
   TERMINAL_WHEEL_DELTA_LINE,
   TERMINAL_WHEEL_DELTA_PAGE,
   TERMINAL_WHEEL_DELTA_PIXEL,
+  buildTerminalWheelReport,
   computeTerminalWheelScrollLines,
   isTerminalWheelBlockedByOverlayTarget,
   shouldAllowTerminalWheelToBubble,
@@ -149,6 +150,91 @@ describe("shouldForwardTerminalWheelToApplication", () => {
         shiftKey: false,
       }),
       false,
+    );
+  });
+
+  it("forwards tmux wheel gestures after the browser mouse mode was reset", () => {
+    assert.equal(
+      shouldForwardTerminalWheelToApplication({
+        inputEnabled: true,
+        interactive: true,
+        mouseTrackingMode: "none",
+        shiftKey: false,
+        tmuxMouseReporting: true,
+      }),
+      true,
+    );
+    assert.equal(
+      shouldForwardTerminalWheelToApplication({
+        inputEnabled: true,
+        interactive: true,
+        mouseTrackingMode: "none",
+        shiftKey: true,
+        tmuxMouseReporting: true,
+      }),
+      false,
+    );
+  });
+});
+
+describe("buildTerminalWheelReport", () => {
+  it("encodes the wheel direction and clamps the terminal cell", () => {
+    assert.equal(
+      buildTerminalWheelReport({
+        altKey: false,
+        clientX: 240,
+        clientY: 120,
+        ctrlKey: false,
+        deltaY: -1,
+        metaKey: false,
+        screenHeight: 200,
+        screenLeft: 40,
+        screenTop: 20,
+        screenWidth: 400,
+        cols: 40,
+        rows: 20,
+        shiftKey: false,
+      }),
+      "\u001b[<64;21;11M",
+    );
+    assert.equal(
+      buildTerminalWheelReport({
+        altKey: true,
+        clientX: 999,
+        clientY: -20,
+        ctrlKey: true,
+        deltaY: 1,
+        metaKey: false,
+        screenHeight: 200,
+        screenLeft: 40,
+        screenTop: 20,
+        screenWidth: 400,
+        cols: 40,
+        rows: 20,
+        shiftKey: true,
+      }),
+      "\u001b[<93;40;1M",
+    );
+  });
+
+  it("rejects zero or unusable geometry", () => {
+    assert.equal(
+      buildTerminalWheelReport({
+        altKey: false,
+        clientX: 1,
+        clientY: 1,
+        ctrlKey: false,
+        deltaY: 1,
+        metaKey: false,
+        screenHeight: 0,
+        screenLeft: 0,
+        screenTop: 0,
+        screenWidth: 100,
+        cols: 10,
+        rows: 10,
+        shiftKey: false,
+      }),
+      null,
     );
   });
 });

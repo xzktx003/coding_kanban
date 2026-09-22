@@ -20,10 +20,27 @@ interface TerminalWheelApplicationRoutingOptions {
   interactive: boolean;
   mouseTrackingMode: string;
   shiftKey: boolean;
+  tmuxMouseReporting?: boolean;
 }
 
 interface TerminalWheelCaptureOptions {
   wheelPassthrough: boolean;
+}
+
+interface TerminalWheelReportOptions {
+  altKey: boolean;
+  clientX: number;
+  clientY: number;
+  ctrlKey: boolean;
+  deltaY: number;
+  metaKey: boolean;
+  screenHeight: number;
+  screenLeft: number;
+  screenTop: number;
+  screenWidth: number;
+  cols: number;
+  rows: number;
+  shiftKey: boolean;
 }
 
 const TERMINAL_WHEEL_MOUSE_TRACKING_MODES = new Set(["vt200", "drag", "any"]);
@@ -63,12 +80,14 @@ export function shouldForwardTerminalWheelToApplication({
   interactive,
   mouseTrackingMode,
   shiftKey,
+  tmuxMouseReporting = false,
 }: TerminalWheelApplicationRoutingOptions): boolean {
   return (
     interactive &&
     inputEnabled &&
-    TERMINAL_WHEEL_MOUSE_TRACKING_MODES.has(mouseTrackingMode) &&
-    !shiftKey
+    !shiftKey &&
+    (TERMINAL_WHEEL_MOUSE_TRACKING_MODES.has(mouseTrackingMode) ||
+      tmuxMouseReporting)
   );
 }
 
@@ -82,6 +101,52 @@ export function shouldAllowTerminalWheelToBubble({
   wheelPassthrough,
 }: TerminalWheelCaptureOptions): boolean {
   return wheelPassthrough;
+}
+
+export function buildTerminalWheelReport({
+  altKey,
+  clientX,
+  clientY,
+  ctrlKey,
+  deltaY,
+  metaKey,
+  screenHeight,
+  screenLeft,
+  screenTop,
+  screenWidth,
+  cols,
+  rows,
+  shiftKey,
+}: TerminalWheelReportOptions): string | null {
+  if (
+    !Number.isFinite(deltaY) ||
+    deltaY === 0 ||
+    !Number.isFinite(clientX) ||
+    !Number.isFinite(clientY) ||
+    screenWidth <= 0 ||
+    screenHeight <= 0 ||
+    cols <= 0 ||
+    rows <= 0
+  ) {
+    return null;
+  }
+
+  const cellWidth = screenWidth / cols;
+  const cellHeight = screenHeight / rows;
+  const column = Math.max(
+    1,
+    Math.min(cols, Math.floor((clientX - screenLeft) / cellWidth) + 1),
+  );
+  const row = Math.max(
+    1,
+    Math.min(rows, Math.floor((clientY - screenTop) / cellHeight) + 1),
+  );
+  let button = deltaY < 0 ? 64 : 65;
+  if (shiftKey) button |= 4;
+  if (metaKey || altKey) button |= 8;
+  if (ctrlKey) button |= 16;
+
+  return `\u001b[<${button};${column};${row}M`;
 }
 
 export function shouldScrollTerminalLayoutWheel({

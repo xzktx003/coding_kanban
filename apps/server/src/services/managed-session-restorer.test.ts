@@ -29,6 +29,7 @@ test("restores existing managed tmux sessions and classifies all other outcomes"
     session("direct"),
   ];
   const reconnected: string[] = [];
+  const failures: string[] = [];
 
   const result = await restoreManagedSessions({
     sessions,
@@ -44,6 +45,9 @@ test("restores existing managed tmux sessions and classifies all other outcomes"
     reconnect: async (candidate, target) => {
       reconnected.push(`${candidate.id}:${target.tmuxPane}`);
     },
+    markFailure: (candidate, message) => {
+      failures.push(`${candidate.id}:${message}`);
+    },
   });
 
   assert.deepEqual(result.restoredIds, ["restored"]);
@@ -57,6 +61,9 @@ test("restores existing managed tmux sessions and classifies all other outcomes"
     },
   ]);
   assert.deepEqual(reconnected, ["restored:%restored"]);
+  assert.deepEqual(failures, [
+    "missing:tmux 会话不存在或当前不可访问",
+  ]);
 });
 
 test("reports reconnect failures without aborting the remaining restore queue", async () => {
@@ -74,6 +81,10 @@ test("reports reconnect failures without aborting the remaining restore queue", 
       if (candidate.id === "broken") {
         throw new Error("attach failed");
       }
+    },
+    markFailure: (candidate, message) => {
+      assert.equal(candidate.id, "broken");
+      assert.equal(message, "attach failed");
     },
   });
 

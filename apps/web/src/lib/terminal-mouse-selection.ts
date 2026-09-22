@@ -5,6 +5,12 @@ export type TerminalMouseGestureAction =
   | "finish-selection"
   | "replay-click";
 
+// Some remote tmux configurations omit the mouse capability during the
+// terminal handshake. Keep the browser-side report mode explicit so clicks
+// still reach tmux instead of being treated as inert canvas events.
+export const TMUX_MOUSE_REPORTING_ENABLE_SEQUENCE =
+  "\u001b[?1002h\u001b[?1006h";
+
 interface TerminalMouseGestureInput {
   phase: "move" | "up";
   startX: number;

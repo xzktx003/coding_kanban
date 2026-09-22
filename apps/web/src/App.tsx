@@ -913,6 +913,14 @@ export default function App() {
     setOpenSidePanelTool("files");
   }
 
+  function revealSidePanel() {
+    setFileBrowserUiState((current) =>
+      current.sideCollapsed || current.mainCollapsed
+        ? { ...current, sideCollapsed: false, mainCollapsed: false }
+        : current,
+    );
+  }
+
   function closeSidePanelTool() {
     setOpenSidePanelTool(null);
   }
@@ -1982,6 +1990,10 @@ export default function App() {
               transcriptOpen={transcriptOpen}
               onToggleTranscript={(sessionId) => {
                 if (transcriptOpen && sessionId === focusedSession.id) {
+                  if (fileBrowserUiState.sideCollapsed) {
+                    revealSidePanel();
+                    return;
+                  }
                   returnToFileBrowser(focusedSession);
                   return;
                 }
@@ -1995,6 +2007,7 @@ export default function App() {
                   setFocusedId(targetSession.id);
                 }
                 setActiveTerminalSessionId(targetSession.id);
+                revealSidePanel();
                 setOpenSidePanelTool("transcript");
                 ensureSidePanelStateForSession(targetSession);
               }}

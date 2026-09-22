@@ -875,6 +875,17 @@ function createManagedSessionRestorer({
       },
       clearInputState: (agentSessionId) =>
         localTmuxInputRouter.clear(agentSessionId),
+      markFailure: (session, message) => {
+        const now = new Date().toISOString();
+        registry.updateSession(session.id, {
+          connectionState: "offline",
+          interactionState: "detached",
+          stateConfidence: "high",
+          outputPreview: `恢复失败：${message}`,
+          lastHeartbeatAt: now,
+          lastRefreshedAt: now,
+        });
+      },
       reconnect: async (session, target) => {
         registry.updateSession(session.id, {
           transportRef: {

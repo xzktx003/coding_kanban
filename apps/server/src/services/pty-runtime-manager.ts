@@ -41,6 +41,7 @@ const TMUX_CLIENT_READY_POLL_MS = 20;
 const TERMINAL_PROTOCOL_REPLY_TIMEOUT_MS = 250;
 const SCROLLBACK_COMPACTION_BYTES = 64 * 1024;
 const SCROLLBACK_COMPACTION_CHUNKS = 128;
+const TMUX_MOUSE_FEATURE = ",xterm*:mouse";
 
 export interface PtyRuntimeManagerOptions {
   maxScrollbackBytes?: number;
@@ -481,6 +482,7 @@ export class PtyRuntimeManager {
     );
     const spawnPlan = buildLocalSpawnPlan(shell, normalizedInput);
     this.configureLocalTmuxHistory(tmuxSessionName);
+    this.configureLocalTmuxMouse(tmuxSessionName);
     const tmuxScrollback = this.captureLocalTmuxScrollback(normalizedInput);
 
     const ptyProcess = pty.spawn(spawnPlan.file, spawnPlan.args, {
@@ -914,6 +916,7 @@ export class PtyRuntimeManager {
     );
     const spawnPlan = buildLocalSpawnPlan(shell, normalizedInput);
     this.configureLocalTmuxHistory(tmuxSessionName);
+    this.configureLocalTmuxMouse(tmuxSessionName);
     const tmuxScrollback = this.captureLocalTmuxScrollback(normalizedInput);
     const ptyProcess = pty.spawn(spawnPlan.file, spawnPlan.args, {
       name: "xterm-256color",
@@ -1260,6 +1263,34 @@ export class PtyRuntimeManager {
           stdio: "ignore",
           env: buildPtyEnv(),
         },
+      );
+    } catch {}
+  }
+
+  private configureLocalTmuxMouse(tmuxSessionName?: string): void {
+    if (!tmuxSessionName) {
+      return;
+    }
+
+    const tmuxBinary = resolveTmuxBinary();
+    const options = {
+      stdio: "ignore" as const,
+      env: buildPtyEnv(),
+    };
+
+    try {
+      execFileSync(
+        tmuxBinary,
+        ["set-option", "-ga", "terminal-features", TMUX_MOUSE_FEATURE],
+        options,
+      );
+    } catch {}
+
+    try {
+      execFileSync(
+        tmuxBinary,
+        ["set-option", "-t", tmuxSessionName, "mouse", "on"],
+        options,
       );
     } catch {}
   }

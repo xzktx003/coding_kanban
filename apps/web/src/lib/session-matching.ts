@@ -15,6 +15,15 @@ export { shellQuote, formatWorkingDirectory };
 export type LaunchMode = "direct" | "tmux";
 
 export const DEFAULT_TMUX_HISTORY_LIMIT_LINES = 20_000;
+const TMUX_MOUSE_FEATURE = ",xterm*:mouse";
+
+function buildTmuxMouseFeatureCommand(): string {
+  return `set-option -ga terminal-features ${shellQuote(TMUX_MOUSE_FEATURE)}`;
+}
+
+function buildTmuxSessionMouseCommand(tmuxSessionName: string): string {
+  return `set-option -t ${shellQuote(tmuxSessionName)} mouse on`;
+}
 
 export function sortScanResults(results: ScanResult[]): ScanResult[] {
   return [...results].sort((a, b) => {
@@ -83,17 +92,18 @@ export function buildTmuxLaunchCommand(
   tmuxSessionName: string,
   sessionId?: string,
 ): string {
-  const tmuxPrefix = `tmux set-option -g history-limit ${DEFAULT_TMUX_HISTORY_LIMIT_LINES} \\; new-session`;
+  const tmuxPrefix = `tmux ${buildTmuxMouseFeatureCommand()} \\; set-option -g history-limit ${DEFAULT_TMUX_HISTORY_LIMIT_LINES} \\; new-session`;
+  const enableSessionMouse = `\\; ${buildTmuxSessionMouseCommand(tmuxSessionName)}`;
 
   if (agentKind === "shell") {
-    return `${tmuxPrefix} -s ${shellQuote(tmuxSessionName)} -c ${formatWorkingDirectory(workingDirectory)}`;
+    return `${tmuxPrefix} -s ${shellQuote(tmuxSessionName)} -c ${formatWorkingDirectory(workingDirectory)}${enableSessionMouse}`;
   }
 
   if (agentKind === "copilot") {
-    return `${tmuxPrefix} -s ${shellQuote(tmuxSessionName)} ${buildRemoteTmuxCommand(`cd ${formatWorkingDirectory(workingDirectory)} && ${buildRemoteAgentInvocation(agentKind, displayName, sessionId)}`, true)}`;
+    return `${tmuxPrefix} -s ${shellQuote(tmuxSessionName)} ${buildRemoteTmuxCommand(`cd ${formatWorkingDirectory(workingDirectory)} && ${buildRemoteAgentInvocation(agentKind, displayName, sessionId)}`, true)}${enableSessionMouse}`;
   }
 
-  return `${tmuxPrefix} -s ${shellQuote(tmuxSessionName)} ${buildRemoteTmuxCommand(buildDirectLaunchCommand(agentKind, workingDirectory, displayName, sessionId), true)}`;
+  return `${tmuxPrefix} -s ${shellQuote(tmuxSessionName)} ${buildRemoteTmuxCommand(buildDirectLaunchCommand(agentKind, workingDirectory, displayName, sessionId), true)}${enableSessionMouse}`;
 }
 
 export function buildRemoteDirectLaunchCommand(
@@ -113,7 +123,7 @@ export function buildTmuxAttachCommand(
   tmuxSessionName: string,
   tmuxPaneId?: string,
 ): string {
-  const tmuxPrefix = `tmux set-option -t ${shellQuote(tmuxSessionName)} history-limit ${DEFAULT_TMUX_HISTORY_LIMIT_LINES}`;
+  const tmuxPrefix = `tmux ${buildTmuxMouseFeatureCommand()} \\; ${buildTmuxSessionMouseCommand(tmuxSessionName)} \\; set-option -t ${shellQuote(tmuxSessionName)} history-limit ${DEFAULT_TMUX_HISTORY_LIMIT_LINES}`;
 
   if (tmuxPaneId) {
     return `${tmuxPrefix} \\; select-pane -t ${shellQuote(tmuxPaneId)} \\; attach -t ${shellQuote(tmuxSessionName)}`;

@@ -66,11 +66,15 @@ export function TerminalPaneContent({
     () => new Map(sessions.map((item) => [item.id, item])),
     [sessions],
   );
-  const mountCurrentTerminal = shouldMountTerminalPane({
-    active,
-    groupArrangement,
-    visible,
-  });
+  const mountCurrentTerminal =
+    shouldMountTerminalPane({
+      active,
+      groupArrangement,
+      visible,
+    }) && session.connectionState !== "offline";
+  const liveMountedSessionIds = mountedSessionIds.filter(
+    (sessionId) => sessionById.get(sessionId)?.connectionState !== "offline",
+  );
   const serializeInitialLoad = cacheCapacity <= 1;
   const loadAllowed =
     !serializeInitialLoad || permittedSessionId === session.id;
@@ -205,11 +209,25 @@ export function TerminalPaneContent({
     </div>
   );
 
+  const unavailablePreview = (
+    <div
+      className="terminal-pane-stack terminal-pane-unavailable"
+      data-terminal-render-mode="unavailable"
+    >
+      <TerminalPreview session={session} />
+      <div className="terminal-pane-unavailable-status" role="status">
+        终端当前不可用，已保留轻量预览；请重新连接或恢复 tmux
+      </div>
+    </div>
+  );
+
   return (
     <div className="focus-terminal-pane-terminal" ref={containerRef}>
-      {mountCurrentTerminal && loadAllowed ? (
+      {session.connectionState === "offline" ? (
+        unavailablePreview
+      ) : mountCurrentTerminal && loadAllowed ? (
         <div data-terminal-render-mode="live" className="terminal-pane-stack">
-          {mountedSessionIds.flatMap((sessionId) => {
+          {liveMountedSessionIds.flatMap((sessionId) => {
             const mountedSession = sessionById.get(sessionId);
             if (!mountedSession) {
               return [];
@@ -242,6 +260,10 @@ export function TerminalPaneContent({
                     mobileTouchMode={mobileTouchMode}
                     onFontSizeChange={onFontSizeChange}
                     onReady={() => markTerminalReady(mountedSession.id)}
+                    tmuxMouseReporting={Boolean(
+                      mountedSession.transportRef?.tmuxSession,
+                    )}
+                    visible={current}
                     preferLocalMouseSelection={
                       mountedSession.agentKind.toLowerCase() === "opencode"
                     }

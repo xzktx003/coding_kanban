@@ -15,6 +15,7 @@ import {
   normalizeTerminalMonitorSlots,
   normalizeTerminalMonitorGroupOrder,
   orderTerminalMonitorGroupSessions,
+  prioritizeTerminalMonitorSessions,
   placeTerminalMonitorSlotSession,
   resolveFocusedTerminalMonitorSlotId,
   restoreTerminalMonitorLayoutSnapshot,
@@ -35,6 +36,19 @@ const sessions = [
 ];
 
 describe("terminal monitor layout", () => {
+  it("fills new monitor panes with live sessions before offline sessions", () => {
+    const sessions = [
+      { id: "offline", connectionState: "offline" },
+      { id: "live", connectionState: "online" },
+      { id: "degraded", connectionState: "degraded" },
+    ];
+
+    assert.deepEqual(
+      prioritizeTerminalMonitorSessions(sessions).map((session) => session.id),
+      ["live", "degraded", "offline"],
+    );
+  });
+
   it("activates the pane that already contains the newly focused session", () => {
     assert.equal(
       resolveFocusedTerminalMonitorSlotId({
@@ -82,6 +96,7 @@ describe("terminal monitor layout", () => {
     assert.equal(getTerminalMonitorLayoutCapacity("dual"), 2);
     assert.equal(getTerminalMonitorLayoutCapacity("dual-vertical"), 2);
     assert.equal(getTerminalMonitorLayoutCapacity("triple"), 3);
+    assert.equal(getTerminalMonitorLayoutCapacity("triple-vertical"), 3);
     assert.equal(getTerminalMonitorLayoutCapacity("quad"), 4);
     assert.equal(getTerminalMonitorLayoutCapacity("six"), 6);
     assert.equal(getTerminalMonitorLayoutCapacity("eight"), 8);
@@ -219,6 +234,32 @@ describe("terminal monitor layout", () => {
     assert.deepEqual(
       slots.map((slot) => slot.sessionId),
       ["agent-1", "agent-3"],
+    );
+  });
+
+  it("supports an independent top-middle-bottom three-pane layout", () => {
+    assert.equal(isTerminalMonitorLayoutMode("triple-vertical"), true);
+    assert.equal(
+      TERMINAL_MONITOR_LAYOUT_OPTIONS.some(
+        (option) => option.mode === "triple-vertical",
+      ),
+      true,
+    );
+
+    const slots = normalizeTerminalMonitorSlots({
+      mode: "triple-vertical",
+      sessions,
+      preferredSessionId: "agent-3",
+      previousSlots: [
+        { id: "terminal-monitor-slot-1", sessionId: "agent-1" },
+        { id: "terminal-monitor-slot-2", sessionId: "agent-2" },
+        { id: "terminal-monitor-slot-3", sessionId: "agent-3" },
+      ],
+    });
+
+    assert.deepEqual(
+      slots.map((slot) => slot.sessionId),
+      ["agent-1", "agent-2", "agent-3"],
     );
   });
 

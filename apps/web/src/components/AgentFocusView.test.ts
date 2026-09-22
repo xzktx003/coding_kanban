@@ -100,6 +100,29 @@ describe("AgentFocusView", () => {
     );
   });
 
+  it("keeps unavailable monitor sessions out of blank xterm panes", () => {
+    const focusSource = readFileSync(
+      new URL("./AgentFocusView.tsx", import.meta.url),
+      "utf8",
+    );
+    const paneSource = readFileSync(
+      new URL("./TerminalPaneContent.tsx", import.meta.url),
+      "utf8",
+    );
+    const terminalSource = readFileSync(
+      new URL("./TerminalView.tsx", import.meta.url),
+      "utf8",
+    );
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+    assert.match(focusSource, /prioritizeTerminalMonitorSessions/);
+    assert.match(paneSource, /session\.connectionState === "offline"/);
+    assert.match(paneSource, /data-terminal-render-mode="unavailable"/);
+    assert.match(paneSource, /visible={current}/);
+    assert.match(terminalSource, /new IntersectionObserver/);
+    assert.match(css, /\.terminal-pane-unavailable-status\s*{/);
+  });
+
   it("collapses an individual group in the other-session sidebar", () => {
     installLocalStorageStub("single");
     const sessions = [
@@ -252,6 +275,19 @@ describe("AgentFocusView", () => {
     assert.match(
       css,
       /@container\s+focus-terminal\s*\(max-width:\s*720px\)\s*{[\s\S]*?\.focus-terminal-layout--quad,[\s\S]*?\.focus-terminal-layout--eight\s*{[^}]*grid-auto-rows:\s*50%;/s,
+    );
+  });
+
+  it("supports a top-middle-bottom three-pane monitor layout", () => {
+    const css = readFileSync(new URL("../app.css", import.meta.url), "utf8");
+
+    assert.match(
+      css,
+      /\.focus-terminal-layout--triple-vertical\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[^}]*grid-template-rows:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/s,
+    );
+    assert.match(
+      css,
+      /@container\s+focus-terminal\s+\(max-width:\s*720px\)\s*{[\s\S]*?\.focus-terminal-layout--triple-vertical\s*{[^}]*grid-auto-rows:\s*33\.3333%;/s,
     );
   });
 
