@@ -33,6 +33,7 @@ function buildRouter(
       input: string,
     ) => Promise<"command-prompt" | "confirm-before" | null>;
     waitForTmuxClientReady?: () => Promise<boolean>;
+    isTmuxClientReady?: () => boolean;
   } = {},
 ) {
   const session = buildSession();
@@ -74,6 +75,9 @@ function buildRouter(
             : {}),
         });
       },
+      ...(options.isTmuxClientReady
+        ? { isTmuxClientReady: options.isTmuxClientReady }
+        : {}),
       ...(options.waitForTmuxClientReady
         ? { waitForTmuxClientReady: options.waitForTmuxClientReady }
         : {}),
@@ -97,6 +101,56 @@ test("LocalTmuxInputRouter sends ordinary input through the attached tmux client
   await router.write(session, { input: "hello\r" });
 
   assert.deepEqual(writes, [{ target: "pty", input: "hello\r" }]);
+});
+
+test("LocalTmuxInputRouter never blocks typing on attach readiness", async () => {
+  let ready = false;
+  let release: (value: boolean) => void = () => {};
+  const probe = new Promise<boolean>((resolve) => {
+    release = resolve;
+  });
+  const { router, session, writes } = buildRouter({
+    isTmuxClientReady: () => ready,
+    waitForTmuxClientReady: () => probe,
+  });
+  const reply = router.write(session, { input: "\x1b[12;34R" });
+  await router.write(session, { input: "a" });
+  await router.write(session, { input: "b" });
+  assert.deepEqual(writes, [
+    { target: "adapter", input: "a" },
+    { target: "adapter", input: "b" },
+  ]);
+  ready = true;
+  release(true);
+  await reply;
+  await router.write(session, { input: "c" });
+  assert.deepEqual(writes.slice(2), [
+    { target: "pty", input: "\x1b[12;34R", terminalProtocolResponse: true },
+    { target: "pty", input: "c" },
+  ]);
+  // A replacement runtime with the same session ID is not considered ready.
+  ready = false;
+  await router.write(session, { input: "d" });
+  assert.deepEqual(writes.at(-1), { target: "adapter", input: "d" });
+});
+
+test("LocalTmuxInputRouter waits for attach before sending a tmux prefix", async () => {
+  let ready = false;
+  const { router, session, writes } = buildRouter({
+    isTmuxClientReady: () => ready,
+    waitForTmuxClientReady: async () => {
+      ready = true;
+      return true;
+    },
+  });
+
+  await router.write(session, { input: "\x02" });
+  await router.write(session, { input: "," });
+
+  assert.deepEqual(writes, [
+    { target: "pty", input: "\x02" },
+    { target: "pty", input: "," },
+  ]);
 });
 
 test("LocalTmuxInputRouter drops hover motion reports so hover does not reach the TUI", async () => {
@@ -179,6 +233,7 @@ test("LocalTmuxInputRouter lets terminal protocol replies bypass a blocked ordin
 
 test("LocalTmuxInputRouter keeps early input out of a tmux client that is still attaching", async () => {
   const { router, session, writes } = buildRouter({
+    isTmuxClientReady: () => false,
     waitForTmuxClientReady: async () => false,
   });
 

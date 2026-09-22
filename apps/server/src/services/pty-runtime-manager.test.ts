@@ -140,6 +140,32 @@ test("launch does not leak npm config env vars into local PTY sessions", async (
   }
 });
 
+test("ordinary PTY writes are not delayed by pending terminal protocol queries", async () => {
+  const registry = new AgentSessionRegistry();
+  const runtimeManager = new PtyRuntimeManager(registry);
+  const session = runtimeManager.launch({
+    workspaceId: "default",
+    displayName: "protocol-query-input-latency",
+    agentKind: "shell",
+    workingDirectory: process.cwd(),
+    command: "printf '\\033[6n'; exec cat",
+  });
+
+  try {
+    await waitForOutputMatch(registry, session.id, /\u001b\[6n/, 2000);
+    const startedAt = Date.now();
+    await runtimeManager.write(session.id, "hello");
+    const elapsedMs = Date.now() - startedAt;
+    assert.ok(
+      elapsedMs < 80,
+      `ordinary input waited ${elapsedMs}ms behind a protocol query`,
+    );
+  } finally {
+    runtimeManager.kill(session.id);
+    registry.remove(session.id);
+  }
+});
+
 test("launch stores the resolved local working directory when input is omitted", async () => {
   const registry = new AgentSessionRegistry();
   const runtimeManager = new PtyRuntimeManager(registry);
@@ -591,7 +617,7 @@ test("keep normal styling escapes in replay", () => {
   assert.equal(sanitized, replay);
 });
 
-test("holds ordinary input until all terminal capability replies have reached the PTY", async () => {
+test("keeps ordinary input independent from terminal capability replies", async () => {
   const registry = new AgentSessionRegistry();
   const runtimeManager = new PtyRuntimeManager(registry);
   const session = runtimeManager.launch({
@@ -599,37 +625,17 @@ test("holds ordinary input until all terminal capability replies have reached th
     displayName: "terminal-protocol-ordering",
     agentKind: "shell",
     workingDirectory: process.cwd(),
-    command:
-      "stty raw -echo; printf '\\033['; sleep 0.05; printf '6n'; head -c 8 | od -An -t x1; stty sane; IFS= read -r command; printf '__COMMAND__%s\\n' \"$command\"; exit",
+    command: "printf '\\033[6n'; exec cat",
   });
 
   try {
-    await waitForOutputMatch(registry, session.id, /6n/);
-
-    let ordinaryInputCompleted = false;
-    const ordinaryInput = runtimeManager
-      .write(session.id, "node\n")
-      .then(() => {
-        ordinaryInputCompleted = true;
-      });
-
-    await sleep(25);
-    assert.equal(ordinaryInputCompleted, false);
-
-    await runtimeManager.write(session.id, "\u001b[?1;2c");
-    await sleep(25);
-    assert.equal(ordinaryInputCompleted, false);
-
-    await runtimeManager.write(session.id, "\u001b[12;34R");
-    await ordinaryInput;
-
-    const outputText = await waitForOutputMatch(
-      registry,
-      session.id,
-      /__COMMAND__node/,
+    await waitForOutputMatch(registry, session.id, /\u001b\[6n/, 2000);
+    const startedAt = Date.now();
+    await runtimeManager.write(session.id, "node\n");
+    assert.ok(
+      Date.now() - startedAt < 80,
+      "ordinary input must not wait for a capability reply",
     );
-
-    assert.match(outputText, /1b 5b 31 32 3b 33 34 52/);
   } finally {
     runtimeManager.kill(session.id);
     registry.remove(session.id);

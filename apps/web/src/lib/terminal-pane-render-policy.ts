@@ -59,10 +59,12 @@ export function shouldMountTerminalPane({
 
 export function shouldSuspendTerminalLayer({
   current,
+  keepWarm = false,
   paneVisible,
 }: {
   current: boolean;
+  keepWarm?: boolean;
   paneVisible: boolean;
 }): boolean {
-  return !paneVisible || !current;
+  return !paneVisible || (!current && !keepWarm);
 }

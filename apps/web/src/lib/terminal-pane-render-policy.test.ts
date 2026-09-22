@@ -81,6 +81,25 @@ describe("terminal pane render policy", () => {
     );
   });
 
+  it("keeps bounded recent sessions warm but still suspends hidden layouts", () => {
+    assert.equal(
+      shouldSuspendTerminalLayer({
+        current: false,
+        paneVisible: true,
+        keepWarm: true,
+      }),
+      false,
+    );
+    assert.equal(
+      shouldSuspendTerminalLayer({
+        current: false,
+        paneVisible: false,
+        keepWarm: true,
+      }),
+      true,
+    );
+  });
+
   it("retains previously mounted manual panes across layout contraction", () => {
     const retained = resolveRetainedTerminalMonitorSlots({
       currentSlots: [{ id: "terminal-monitor-slot-1", sessionId: "session-1" }],

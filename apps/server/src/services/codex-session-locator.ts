@@ -36,6 +36,7 @@ interface CodexSessionLocatorOptions {
     clientProcessId?: number,
   ) => Promise<number | null>;
   listTmuxPanes?: (sessionName: string) => Promise<TmuxPaneProcess[]>;
+  readSessionCandidate?: (path: string) => OpenSessionCandidate | null;
 }
 
 interface ResolveCodexSessionInput {
@@ -64,6 +65,13 @@ interface OpenSessionCandidate {
   mtimeMs: number;
   path: string;
   subagent: boolean;
+}
+
+interface CachedSessionCandidate {
+  candidate: OpenSessionCandidate | null;
+  ctimeMs: number;
+  mtimeMs: number;
+  size: number;
 }
 
 function isPathInside(root: string, path: string): boolean {
@@ -516,6 +524,13 @@ export class CodexSessionLocator {
   private readonly listTmuxPanes: (
     sessionName: string,
   ) => Promise<TmuxPaneProcess[]>;
+  private readonly readSessionCandidate: (
+    path: string,
+  ) => OpenSessionCandidate | null;
+  private readonly sessionCandidateCache = new Map<
+    string,
+    CachedSessionCandidate
+  >();
 
   constructor(options: CodexSessionLocatorOptions = {}) {
     this.clockTicksPerSecond =
@@ -535,6 +550,38 @@ export class CodexSessionLocator {
     this.resolveTmuxActivePanePid =
       options.resolveTmuxActivePanePid ?? defaultResolveTmuxActivePanePid;
     this.listTmuxPanes = options.listTmuxPanes ?? defaultListTmuxPanes;
+    this.readSessionCandidate = options.readSessionCandidate ?? readOpenSession;
+  }
+
+  private readCachedSessionCandidate(
+    path: string,
+  ): OpenSessionCandidate | null {
+    let stats: ReturnType<typeof statSync>;
+    try {
+      stats = statSync(path);
+    } catch {
+      this.sessionCandidateCache.delete(path);
+      return null;
+    }
+
+    const cached = this.sessionCandidateCache.get(path);
+    if (
+      cached &&
+      cached.ctimeMs === stats.ctimeMs &&
+      cached.mtimeMs === stats.mtimeMs &&
+      cached.size === stats.size
+    ) {
+      return cached.candidate;
+    }
+
+    const candidate = this.readSessionCandidate(path);
+    this.sessionCandidateCache.set(path, {
+      candidate,
+      ctimeMs: stats.ctimeMs,
+      mtimeMs: stats.mtimeMs,
+      size: stats.size,
+    });
+    return candidate;
   }
 
   async resolveTmuxPanes(
@@ -627,7 +674,7 @@ export class CodexSessionLocator {
         ) {
           continue;
         }
-        const candidate = readOpenSession(target);
+        const candidate = this.readCachedSessionCandidate(target);
         if (
           !candidate ||
           candidate.subagent ||
@@ -658,9 +705,35 @@ export class CodexSessionLocator {
       )[0]?.id;
     }
 
+    for (const sessionId of explicitResumeSessionIds) {
+      const openCandidate = openCandidates.find(
+        (candidate) => candidate.id === sessionId,
+      );
+      if (openCandidate) {
+        return openCandidate.id;
+      }
+    }
+
     const sessionFiles = listSessionFiles(this.sessionsRoot);
+    for (const sessionId of explicitResumeSessionIds) {
+      for (const path of sessionFiles) {
+        if (!path.includes(sessionId)) {
+          continue;
+        }
+        const candidate = this.readCachedSessionCandidate(path);
+        if (
+          candidate?.id === sessionId &&
+          !candidate.subagent &&
+          (!normalizedDirectory ||
+            resolve(candidate.cwd) === normalizedDirectory)
+        ) {
+          return candidate.id;
+        }
+      }
+    }
+
     const sessionCandidates = sessionFiles
-      .map((path) => readOpenSession(path))
+      .map((path) => this.readCachedSessionCandidate(path))
       .filter((candidate): candidate is OpenSessionCandidate =>
         Boolean(
           candidate &&

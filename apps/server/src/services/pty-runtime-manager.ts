@@ -681,11 +681,6 @@ export class PtyRuntimeManager {
           throw new Error(`没有找到 PTY 运行时: ${agentSessionId}`);
         }
 
-        // A terminal query must receive its full reply before a competing REST
-        // request or keypress reaches the line discipline. Otherwise a CPR can
-        // be split around text, yielding input such as "5Rnode".
-        await this.waitForTerminalProtocolReplies(agentSessionId);
-
         if (!isTerminalControlPayload(data)) {
           this.registry.noteUserInput(agentSessionId, data);
         }
@@ -764,6 +759,17 @@ export class PtyRuntimeManager {
     return this.handles.has(agentSessionId);
   }
 
+  isTmuxClientReady(agentSessionId: string): boolean {
+    const handle = this.handles.get(agentSessionId);
+    if (!handle) return false;
+    if (!handle.localTmuxSessionName || handle.localTmuxClientReady)
+      return true;
+    // Readiness belongs to this PTY handle, never to a session-ID cache that
+    // can outlive reconnect. The shared probe is retried after a timeout.
+    void this.waitForTmuxClientReady(agentSessionId).catch(() => {});
+    return false;
+  }
+
   async waitForTmuxClientReady(agentSessionId: string): Promise<boolean> {
     const handle = this.handles.get(agentSessionId);
 
@@ -789,7 +795,8 @@ export class PtyRuntimeManager {
       });
     }
 
-    return handle.localTmuxClientReadyWait;
+    const ready = await handle.localTmuxClientReadyWait;
+    return ready && this.handles.get(agentSessionId) === handle;
   }
 
   kill(agentSessionId: string): void {
@@ -1105,15 +1112,6 @@ export class PtyRuntimeManager {
       resolve,
       timeout,
     });
-  }
-
-  private waitForTerminalProtocolReplies(
-    agentSessionId: string,
-  ): Promise<void> {
-    return (
-      this.pendingTerminalProtocolReplies.get(agentSessionId)?.completion ??
-      Promise.resolve()
-    );
   }
 
   private writeTerminalProtocolResponse(

@@ -620,13 +620,20 @@ export class AgentSessionRegistry {
       return this.get(agentSessionId);
     }
 
-    return this.updateSession(agentSessionId, {
+    const current = this.get(agentSessionId);
+    const nextSession: AgentSessionRecord = {
+      ...current,
       connectionState: "online",
       interactionState: "running",
       hasUnreadCompletion: false,
       stateConfidence: "medium",
       lastHeartbeatAt: new Date().toISOString(),
-    });
+    };
+    this.sessions.set(agentSessionId, nextSession);
+    // Keystrokes arrive faster than the board can reconcile a full snapshot.
+    // Coalesce them with terminal output instead of broadcasting every glyph.
+    this.emitSnapshotSoon();
+    return nextSession;
   }
 
   private shouldKeepRunningState(agentSession: AgentSessionRecord): boolean {

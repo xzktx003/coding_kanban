@@ -118,6 +118,7 @@ import {
   parseSidePanelSessionStates,
   type FileBrowserSessionState,
 } from "./lib/side-panel-session-state";
+import { stabilizeSessionList } from "./lib/session-list-stability";
 import { updateSessionUnreadCompletion } from "./lib/session-snapshot-updates";
 import {
   buildDirectLaunchCommand,
@@ -778,9 +779,23 @@ export default function App() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const sessions = snapshot?.items ?? [];
-  const visibleSessions = sessions.filter((s) => !s.hidden);
-  const hiddenSessions = sessions.filter((s) => s.hidden);
+  const rawSessions = snapshot?.items ?? [];
+  const rawSessionsRef = useRef(rawSessions);
+  const sessions = useMemo(
+    () => stabilizeSessionList(rawSessionsRef.current, rawSessions),
+    [rawSessions],
+  );
+  useEffect(() => {
+    rawSessionsRef.current = sessions;
+  }, [sessions]);
+  const visibleSessions = useMemo(
+    () => sessions.filter((s) => !s.hidden),
+    [sessions],
+  );
+  const hiddenSessions = useMemo(
+    () => sessions.filter((s) => s.hidden),
+    [sessions],
+  );
   const [showHiddenDrawer, setShowHiddenDrawer] = useState(false);
 
   useEffect(() => {

@@ -1,4 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
+
+import { terminalViewPropsAreEqual } from "../lib/terminal-view-props.js";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -67,6 +69,7 @@ import {
   shouldCaptureTerminalWheel,
   shouldForwardTerminalWheelToApplication,
 } from "../lib/terminal-wheel";
+import { splitTerminalReplayWrite } from "../lib/terminal-replay-chunks";
 import {
   TerminalConnectionFeedback,
   type TerminalConnectionPhase,
@@ -121,6 +124,7 @@ const EXTERNAL_FOCUS_GRACE_MS = 750;
 const PASSIVE_FOCUS_REPAIR_INTERVAL_MS = 500;
 const TERMINAL_CONNECT_TIMEOUT_MS = 3_000;
 const MOBILE_TERMINAL_REPLAY_BYTES = 256 * 1024;
+const TERMINAL_REPLAY_WRITE_BATCH_CHUNKS = 4;
 const MOBILE_TOUCH_LISTENER_OPTIONS = {
   capture: true,
   passive: false,
@@ -767,30 +771,96 @@ export const TerminalView = memo(function TerminalView({
       onReadyRef.current?.();
     };
 
+    const terminalWriteQueue: Array<{
+      blocksInitialReady: boolean;
+      chunk: string;
+      preserveViewport: boolean;
+      viewportYBeforeWrite: number;
+    }> = [];
+    let terminalWriteActive = false;
+
+    const drainTerminalWriteQueue = () => {
+      if (disposed || terminalWriteActive) {
+        return;
+      }
+      const first = terminalWriteQueue.shift();
+      if (!first) {
+        return;
+      }
+
+      terminalWriteActive = true;
+      const batch = [first];
+      while (
+        first.blocksInitialReady &&
+        batch.length < TERMINAL_REPLAY_WRITE_BATCH_CHUNKS &&
+        terminalWriteQueue[0]?.blocksInitialReady
+      ) {
+        batch.push(terminalWriteQueue.shift()!);
+      }
+
+      let remainingCallbacks = batch.length;
+      for (const next of batch) {
+        term.write(next.chunk, () => {
+          if (next.blocksInitialReady) {
+            pendingInitialReplayWrites = Math.max(
+              0,
+              pendingInitialReplayWrites - 1,
+            );
+          }
+          if (
+            !disposed &&
+            next.preserveViewport &&
+            userScrollLockedRef.current
+          ) {
+            term.scrollToLine(
+              Math.min(next.viewportYBeforeWrite, term.buffer.active.baseY),
+            );
+          }
+
+          reportInitialReadyIfSettled();
+          remainingCallbacks -= 1;
+          if (remainingCallbacks > 0) {
+            return;
+          }
+
+          terminalWriteActive = false;
+          if (disposed || terminalWriteQueue.length === 0) {
+            return;
+          }
+          if (first.blocksInitialReady) {
+            timeoutIds.push(window.setTimeout(drainTerminalWriteQueue, 0));
+          } else {
+            drainTerminalWriteQueue();
+          }
+        });
+      }
+    };
+
     const writeTerminalOutput = (data: string, blocksInitialReady = false) => {
       const preserveViewport =
         userScrollLockedRef.current &&
         term.buffer.active.viewportY < term.buffer.active.baseY;
       const viewportYBeforeWrite = term.buffer.active.viewportY;
 
+      const chunks = blocksInitialReady
+        ? splitTerminalReplayWrite(data)
+        : [data];
       if (blocksInitialReady) {
-        pendingInitialReplayWrites += 1;
+        pendingInitialReplayWrites += chunks.length;
       }
-      term.write(data, () => {
-        if (blocksInitialReady) {
-          pendingInitialReplayWrites = Math.max(
-            0,
-            pendingInitialReplayWrites - 1,
-          );
-        }
-        if (!disposed && preserveViewport && userScrollLockedRef.current) {
-          term.scrollToLine(
-            Math.min(viewportYBeforeWrite, term.buffer.active.baseY),
-          );
-        }
-
+      for (const chunk of chunks) {
+        terminalWriteQueue.push({
+          blocksInitialReady,
+          chunk,
+          preserveViewport,
+          viewportYBeforeWrite,
+        });
+      }
+      if (chunks.length === 0) {
         reportInitialReadyIfSettled();
-      });
+        return;
+      }
+      drainTerminalWriteQueue();
     };
 
     const scrollTerminalWithWheel = (event: WheelEvent) => {
@@ -2373,6 +2443,7 @@ export const TerminalView = memo(function TerminalView({
       activeTerminalSocketTracker = null;
       retryConnectionRef.current = null;
 
+      terminalWriteQueue.length = 0;
       term.dispose();
       delete container.__xterm;
       termRef.current = null;
@@ -2456,4 +2527,4 @@ export const TerminalView = memo(function TerminalView({
       )}
     </div>
   );
-});
+}, terminalViewPropsAreEqual);

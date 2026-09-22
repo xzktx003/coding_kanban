@@ -1,4 +1,11 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
@@ -30,6 +37,7 @@ interface TerminalPaneContentProps {
 const ACTIVE_TERMINAL_LOAD_PRIORITY = 100;
 const MONITOR_TERMINAL_LOAD_PRIORITY = 0;
 const TERMINAL_LOAD_PERMIT_SAFETY_MS = 12_000;
+const WARM_TERMINAL_IDLE_MS = 8_000;
 
 export function TerminalPaneContent({
   active,
@@ -53,15 +61,31 @@ export function TerminalPaneContent({
   const [readySessionIds, setReadySessionIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const previousSessionIdRef = useRef(session.id);
+  const lastRenderedSessionIdRef = useRef(session.id);
+  const mountedSessionOrderRef = useRef([session.id]);
+  const warmExpiryTimersRef = useRef<Map<string, number>>(new Map());
   const loadPermitRef = useRef<TerminalPaneLoadPermit | null>(null);
   const loadRequestRef = useRef<TerminalPaneLoadRequest | null>(null);
   const loadPermitSafetyTimerRef = useRef<number | null>(null);
 
-  const mountedSessionIds = resolveRecentTerminalSessionIds(
+  const immediatelyPreviousSessionId = lastRenderedSessionIdRef.current;
+  lastRenderedSessionIdRef.current = session.id;
+  const candidateSessionIds = resolveRecentTerminalSessionIds(
     session.id,
-    recentSessionIds,
+    [immediatelyPreviousSessionId, ...recentSessionIds],
     groupArrangement ? 1 : cacheCapacity,
   );
+  const candidateSessionIdSet = new Set(candidateSessionIds);
+  const mountedSessionIds = [
+    ...mountedSessionOrderRef.current.filter((sessionId) =>
+      candidateSessionIdSet.has(sessionId),
+    ),
+    ...candidateSessionIds.filter(
+      (sessionId) => !mountedSessionOrderRef.current.includes(sessionId),
+    ),
+  ];
+  mountedSessionOrderRef.current = mountedSessionIds;
   const sessionById = useMemo(
     () => new Map(sessions.map((item) => [item.id, item])),
     [sessions],
@@ -79,30 +103,86 @@ export function TerminalPaneContent({
   const loadAllowed =
     !serializeInitialLoad || permittedSessionId === session.id;
 
-  const releaseLoadPermit = () => {
+  const releaseLoadPermit = useCallback(() => {
     if (loadPermitSafetyTimerRef.current !== null) {
       window.clearTimeout(loadPermitSafetyTimerRef.current);
       loadPermitSafetyTimerRef.current = null;
     }
     loadPermitRef.current?.release();
     loadPermitRef.current = null;
-  };
+  }, []);
 
-  const markTerminalReady = (sessionId: string) => {
-    setReadySessionIds((current) => {
-      if (current.has(sessionId)) {
-        return current;
+  const markTerminalReady = useCallback(
+    (sessionId: string) => {
+      setReadySessionIds((current) => {
+        if (current.has(sessionId)) {
+          return current;
+        }
+
+        const next = new Set(current);
+        next.add(sessionId);
+        return next;
+      });
+
+      if (sessionId === session.id) {
+        releaseLoadPermit();
       }
+    },
+    [session.id, releaseLoadPermit],
+  );
 
-      const next = new Set(current);
-      next.add(sessionId);
-      return next;
-    });
+  const readyCallbacks = useMemo(
+    () =>
+      new Map(mountedSessionIds.map((id) => [id, () => markTerminalReady(id)])),
+    [mountedSessionIds.join("\u0000"), markTerminalReady],
+  );
 
-    if (sessionId === session.id) {
-      releaseLoadPermit();
+  useEffect(() => {
+    const previousSessionId = previousSessionIdRef.current;
+    previousSessionIdRef.current = session.id;
+
+    const currentTimer = warmExpiryTimersRef.current.get(session.id);
+    if (currentTimer !== undefined) {
+      window.clearTimeout(currentTimer);
+      warmExpiryTimersRef.current.delete(session.id);
     }
-  };
+
+    if (groupArrangement || cacheCapacity <= 1) {
+      for (const timer of warmExpiryTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      warmExpiryTimersRef.current.clear();
+      return;
+    }
+
+    if (previousSessionId !== session.id) {
+      const previousTimer = warmExpiryTimersRef.current.get(previousSessionId);
+      if (previousTimer !== undefined) {
+        window.clearTimeout(previousTimer);
+      }
+      warmExpiryTimersRef.current.set(
+        previousSessionId,
+        window.setTimeout(() => {
+          warmExpiryTimersRef.current.delete(previousSessionId);
+          setRecentSessionIds((current) =>
+            previousSessionIdRef.current === previousSessionId
+              ? current
+              : current.filter((sessionId) => sessionId !== previousSessionId),
+          );
+        }, WARM_TERMINAL_IDLE_MS),
+      );
+    }
+  }, [cacheCapacity, groupArrangement, session.id]);
+
+  useEffect(
+    () => () => {
+      for (const timer of warmExpiryTimersRef.current.values()) {
+        window.clearTimeout(timer);
+      }
+      warmExpiryTimersRef.current.clear();
+    },
+    [],
+  );
 
   useEffect(() => {
     setRecentSessionIds((current) => {
@@ -236,6 +316,7 @@ export function TerminalPaneContent({
             const current = mountedSession.id === session.id;
             const terminalSuspended = shouldSuspendTerminalLayer({
               current,
+              keepWarm: !groupArrangement && cacheCapacity > 1,
               paneVisible: !suspended,
             });
             return [
@@ -259,7 +340,7 @@ export function TerminalPaneContent({
                     inputEnabled={active && current}
                     mobileTouchMode={mobileTouchMode}
                     onFontSizeChange={onFontSizeChange}
-                    onReady={() => markTerminalReady(mountedSession.id)}
+                    onReady={readyCallbacks.get(mountedSession.id)}
                     tmuxMouseReporting={Boolean(
                       mountedSession.transportRef?.tmuxSession,
                     )}

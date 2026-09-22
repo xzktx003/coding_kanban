@@ -25,7 +25,9 @@ interface LocalTmuxInputRouterDependencies {
       input: string,
       options?: PtyRuntimeWriteOptions,
     ): void | Promise<void>;
-  } & Partial<Pick<PtyRuntimeManager, "waitForTmuxClientReady">>;
+  } & Partial<
+      Pick<PtyRuntimeManager, "waitForTmuxClientReady" | "isTmuxClientReady">
+    >;
 }
 
 interface LocalTmuxInputOptions {
@@ -159,24 +161,46 @@ export class LocalTmuxInputRouter {
   ): Promise<AgentSessionRecord> {
     const { registry, ptyRuntimeManager } = this.dependencies;
     const ptyAvailable = ptyRuntimeManager.has(agentSession.id);
-    const ptyReady = await this.isAttachedTmuxClientReady(
-      agentSession.id,
-      ptyAvailable,
-    );
-
-    // Scrollback replay can reach the browser before `tmux attach` has
-    // finished. Do not send early bytes to the shell that is about to exec
-    // tmux; the pane adapter preserves them until the client is available.
-    if (ptyAvailable && !ptyReady) {
-      return this.writeThroughAdapter(agentSession, input);
-    }
-
     const clientPrompt = this.clientPromptBySessionId.get(agentSession.id);
     const hadClientPrompt = clientPrompt !== undefined;
     const hadPendingPrefix = this.pendingPrefixSessionIds.has(agentSession.id);
     const isPrefixInput = isTmuxPrefixInput(input.input);
     const isClientEscapeInput = isTmuxClientEscapeInput(input.input);
     const isClientCancelInput = isTmuxClientCancelInput(input.input);
+    const requiresAttachedClient =
+      options.forcePty === true ||
+      hadClientPrompt ||
+      hadPendingPrefix ||
+      isPrefixInput ||
+      isClientEscapeInput ||
+      isClientCancelInput;
+    let ptyReady =
+      ptyAvailable &&
+      (ptyRuntimeManager.isTmuxClientReady?.(agentSession.id) ?? true);
+
+    if (
+      ptyAvailable &&
+      !ptyReady &&
+      requiresAttachedClient &&
+      ptyRuntimeManager.waitForTmuxClientReady
+    ) {
+      try {
+        ptyReady = await ptyRuntimeManager.waitForTmuxClientReady(
+          agentSession.id,
+        );
+      } catch {
+        ptyReady = false;
+      }
+    }
+
+    // Scrollback replay can reach the browser before `tmux attach` has
+    // finished. Ordinary text goes straight to the active pane without
+    // waiting. Prefix/prompt control still waits for the attached client,
+    // because send-keys would deliver those bytes to the pane application.
+    if (ptyAvailable && !ptyReady && !requiresAttachedClient) {
+      return this.writeThroughAdapter(agentSession, input);
+    }
+
     const prefixCommandInput = input.input.slice(0, 1);
     const openedClientPrompt =
       hadPendingPrefix &&
@@ -241,21 +265,17 @@ export class LocalTmuxInputRouter {
   ): Promise<AgentSessionRecord> {
     const { ptyRuntimeManager, registry } = this.dependencies;
     const ptyAvailable = ptyRuntimeManager.has(agentSession.id);
-    const ptyReady = await this.isAttachedTmuxClientReady(
-      agentSession.id,
-      ptyAvailable,
-    );
-
-    // Before `tmux attach` owns the client PTY, a terminal response would be
-    // interpreted by the launch shell. Dropping it is safer than falling back
-    // to send-keys; the runtime's pending query will release on its timeout.
-    if (!ptyReady) {
-      return registry.get(agentSession.id);
+    // Only protocol replies await attach. Ordinary input uses the pane adapter
+    // during startup, so a slow probe cannot stall the user's input queue.
+    const ptyReady =
+      ptyAvailable &&
+      ((await ptyRuntimeManager.waitForTmuxClientReady?.(agentSession.id)) ??
+        true);
+    if (ptyReady && ptyRuntimeManager.has(agentSession.id)) {
+      await ptyRuntimeManager.write(agentSession.id, input.input, {
+        terminalProtocolResponse: true,
+      });
     }
-
-    await ptyRuntimeManager.write(agentSession.id, input.input, {
-      terminalProtocolResponse: true,
-    });
     return registry.get(agentSession.id);
   }
 
@@ -279,29 +299,6 @@ export class LocalTmuxInputRouter {
       return DEFAULT_TMUX_CLIENT_PROMPT_INPUTS.has(input)
         ? "command-prompt"
         : null;
-    }
-  }
-
-  private async isAttachedTmuxClientReady(
-    agentSessionId: string,
-    ptyAvailable: boolean,
-  ): Promise<boolean> {
-    if (!ptyAvailable) {
-      return false;
-    }
-
-    const waiter = this.dependencies.ptyRuntimeManager.waitForTmuxClientReady;
-    if (!waiter) {
-      return true;
-    }
-
-    try {
-      return await waiter.call(
-        this.dependencies.ptyRuntimeManager,
-        agentSessionId,
-      );
-    } catch {
-      return false;
     }
   }
 

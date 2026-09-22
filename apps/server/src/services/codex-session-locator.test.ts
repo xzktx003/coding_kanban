@@ -569,6 +569,98 @@ test("CodexSessionLocator uses the explicit resume session id before same-direct
   }
 });
 
+test("CodexSessionLocator reads only the explicitly resumed rollout among unrelated history", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-session-targeted-resume-"));
+  const sessionsRoot = join(root, "sessions");
+  const procRoot = join(root, "proc");
+  mkdirSync(sessionsRoot, { recursive: true });
+  mkdirSync(procRoot, { recursive: true });
+
+  try {
+    const selectedId = "codex-target-session";
+    const selectedPath = writeSession(
+      sessionsRoot,
+      `rollout-${selectedId}`,
+      selectedId,
+      "cli",
+    );
+    const unrelatedPaths = Array.from({ length: 200 }, (_, index) =>
+      writeSession(
+        sessionsRoot,
+        `rollout-unrelated-${index}`,
+        `unrelated-session-${index}`,
+        "cli",
+      ),
+    );
+
+    const paneRoot = join(procRoot, "901");
+    mkdirSync(join(paneRoot, "task", "901"), { recursive: true });
+    writeFileSync(join(paneRoot, "task", "901", "children"), "902\n");
+    const codexRoot = join(procRoot, "902");
+    mkdirSync(join(codexRoot, "task", "902"), { recursive: true });
+    writeFileSync(join(codexRoot, "task", "902", "children"), "");
+    writeFileSync(
+      join(codexRoot, "cmdline"),
+      `/usr/local/bin/codex\0resume\0${selectedId}\0`,
+    );
+    exposeProcessWorkingDirectory(procRoot, 902, "/workspace/shared");
+
+    const readPaths: string[] = [];
+    const locator = new CodexSessionLocator({
+      procRoot,
+      sessionsRoot,
+      resolveTmuxPanePid: async () => 901,
+      readSessionCandidate: (path) => {
+        readPaths.push(path);
+        if (path === selectedPath) {
+          return {
+            id: selectedId,
+            cwd: "/workspace/shared",
+            mtimeMs: 1,
+            path,
+            subagent: false,
+          };
+        }
+        return {
+          id: "unrelated",
+          cwd: "/workspace/shared",
+          mtimeMs: 1,
+          path,
+          subagent: false,
+        };
+      },
+    });
+
+    assert.equal(
+      await locator.resolve({
+        tmuxTarget: "tmux-targeted-resume",
+        workingDirectory: "/workspace/shared",
+      }),
+      selectedId,
+    );
+    assert.equal(
+      await locator.resolve({
+        tmuxTarget: "tmux-targeted-resume",
+        workingDirectory: "/workspace/shared",
+      }),
+      selectedId,
+    );
+    assert.deepEqual(readPaths, [selectedPath]);
+    writeFileSync(selectedPath, "\n", { flag: "a" });
+    assert.equal(
+      await locator.resolve({
+        tmuxTarget: "tmux-targeted-resume",
+        workingDirectory: "/workspace/shared",
+      }),
+      selectedId,
+    );
+    assert.deepEqual(readPaths, [selectedPath, selectedPath]);
+    assert.ok(unrelatedPaths.every((path) => !readPaths.includes(path)));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("CodexSessionLocator ignores newer subagent JSONL files held by the same Codex process", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-session-subagent-"));
   const sessionsRoot = join(root, "sessions");

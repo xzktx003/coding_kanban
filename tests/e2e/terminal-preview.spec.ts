@@ -2703,7 +2703,7 @@ test("focus view keeps every sidebar card lightweight while only the main pane o
   );
 });
 
-test("switching the single terminal pane closes the hidden cached session transport", async ({
+test("single pane reuses a warm terminal and closes its transport after idle expiry", async ({
   page,
 }) => {
   await mockSessions(page, [
@@ -2720,6 +2720,14 @@ test("switching the single terminal pane closes the hidden cached session transp
   const pane = page.locator(
     '[data-terminal-pane-slot="terminal-monitor-slot-1"]',
   );
+  await expect(
+    pane.locator('[data-terminal-cache-active="true"] .terminal-view-live'),
+  ).toBeVisible();
+  await pane
+    .locator('[data-terminal-cache-active="true"] .terminal-view-live')
+    .evaluate((element) => {
+      (window as any).__warmTerminal = (element as any).__xterm;
+    });
   await pane.getByRole("combobox").click();
   await page
     .locator('[data-terminal-switch-session-id="beta-session"]')
@@ -2728,9 +2736,68 @@ test("switching the single terminal pane closes the hidden cached session transp
   await expect
     .poll(() => terminalWebSocketUrls(page))
     .toContainEqual(expect.stringContaining("/beta-session/terminal"));
+  await expect(
+    pane.locator('[data-terminal-cache-active="true"]'),
+  ).toHaveAttribute("data-terminal-ready", "true");
   await expect
-    .poll(() => closedTerminalWebSocketUrls(page))
-    .toContainEqual(expect.stringContaining("/alpha-session/terminal"));
+    .poll(
+      async () =>
+        (await terminalWebSocketUrls(page)).filter((url) =>
+          url.includes("/beta-session/terminal"),
+        ).length,
+    )
+    .toBe(1);
+  await pane
+    .locator('[data-terminal-cache-active="true"] .terminal-view-live')
+    .evaluate((element) => {
+      (window as any).__warmBetaTerminal = (element as any).__xterm;
+    });
+  expect(await closedTerminalWebSocketUrls(page)).not.toContainEqual(
+    expect.stringContaining("/alpha-session/terminal"),
+  );
+  await pane.getByRole("combobox").click();
+  await page
+    .locator('[data-terminal-switch-session-id="alpha-session"]')
+    .click();
+  await expect(
+    pane.locator('[data-terminal-cache-active="true"] .terminal-view-live'),
+  ).toBeVisible();
+  expect(
+    await pane
+      .locator('[data-terminal-cache-active="true"] .terminal-view-live')
+      .evaluate(
+        (element) =>
+          Boolean((window as any).__warmTerminal) &&
+          (element as any).__xterm === (window as any).__warmTerminal,
+      ),
+  ).toBe(true);
+  expect(
+    (await terminalWebSocketUrls(page)).filter((url) =>
+      url.includes("/alpha-session/terminal"),
+    ),
+  ).toHaveLength(1);
+  await expect(
+    pane.locator('[data-terminal-cache-active="false"] .terminal-view-live'),
+  ).toHaveCount(1);
+  expect(
+    await pane
+      .locator('[data-terminal-cache-active="false"] .terminal-view-live')
+      .evaluate(
+        (element) =>
+          (element as any).__xterm === (window as any).__warmBetaTerminal,
+      ),
+  ).toBe(true);
+  expect(
+    (await terminalWebSocketUrls(page)).filter((url) =>
+      url.includes("/beta-session/terminal"),
+    ),
+  ).toHaveLength(1);
+  expect(await closedTerminalWebSocketUrls(page)).not.toContainEqual(
+    expect.stringContaining("/beta-session/terminal"),
+  );
+  await expect
+    .poll(() => closedTerminalWebSocketUrls(page), { timeout: 20_000 })
+    .toContainEqual(expect.stringContaining("/beta-session/terminal"));
 });
 
 test("top font-size slider adjusts the focused terminal font size", async ({

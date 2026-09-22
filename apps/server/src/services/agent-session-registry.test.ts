@@ -153,6 +153,33 @@ test("uses configured output entry retention limit for fallback replay", () => {
   );
 });
 
+test("a burst of ordinary keystrokes emits one coalesced snapshot instead of one per character", async () => {
+  const registry = new AgentSessionRegistry(50);
+  const session = registry.register({
+    workspaceId: "test",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "codex",
+    displayName: "Grok composer",
+    interactionState: "idle",
+  });
+  const snapshots: number[] = [];
+  registry.subscribe((snapshot) => {
+    snapshots.push(snapshot.items.length);
+  });
+  const baseline = snapshots.length;
+
+  for (const character of ["h", "e", "l", "l", "o"]) {
+    registry.noteUserInput(session.id, character);
+  }
+
+  assert.equal(registry.get(session.id).interactionState, "running");
+  assert.equal(snapshots.length, baseline);
+
+  await wait(80);
+  assert.equal(snapshots.length, baseline + 1);
+});
+
 test("user input keeps direct sessions running after inactivity", async () => {
   const registry = new AgentSessionRegistry();
   const session = createSession(registry);
