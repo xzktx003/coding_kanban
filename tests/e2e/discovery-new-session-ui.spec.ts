@@ -105,11 +105,21 @@ test("new session: 点击后先打开 host 下拉，选中后直接进入会话�
   await expect(page.getByTestId("new-session-details-step")).toBeVisible();
   await expect(page.getByTestId("new-session-name")).toBeVisible();
   await expect(page.getByTestId("new-session-kind")).toBeVisible();
-  await expect(page.getByTestId("new-session-kind-copilot")).toHaveClass(
+  await expect(page.getByTestId("new-session-kind-shell")).toHaveClass(
     /is-active/,
   );
-  await page.getByTestId("new-session-kind-shell").click();
-  await expect(page.getByTestId("new-session-kind-shell")).toHaveClass(
+  const kindOrder = await page
+    .getByTestId("new-session-kind")
+    .locator("[data-testid^='new-session-kind-']")
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("data-testid")),
+    );
+  expect(kindOrder.slice(0, 2)).toEqual([
+    "new-session-kind-shell",
+    "new-session-kind-codex",
+  ]);
+  await page.getByTestId("new-session-kind-codex").click();
+  await expect(page.getByTestId("new-session-kind-codex")).toHaveClass(
     /is-active/,
   );
 });

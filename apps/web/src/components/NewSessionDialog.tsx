@@ -113,7 +113,7 @@ export function NewSessionDialog({
   onLaunched,
 }: NewSessionDialogProps) {
   const [newName, setNewName] = useState("");
-  const [newKind, setNewKind] = useState("copilot");
+  const [newKind, setNewKind] = useState("shell");
   const [newDir, setNewDir] = useState("");
   const [manualSshHost, setManualSshHost] = useState("");
   const [manualSshPort, setManualSshPort] = useState("22");
@@ -150,7 +150,7 @@ export function NewSessionDialog({
   useEffect(() => {
     if (!open) {
       setNewName("");
-      setNewKind("copilot");
+      setNewKind("shell");
       setNewDir("");
       setManualSshHost("");
       setManualSshPort("22");
@@ -173,7 +173,7 @@ export function NewSessionDialog({
     }
 
     setNewName("");
-    setNewKind("copilot");
+    setNewKind("shell");
     setNewDir(
       host?.type === "ssh"
         ? host.preset.defaultPath || "~/"
@@ -709,7 +709,7 @@ export function NewSessionDialog({
           >
             <legend className="new-session-label">Agent</legend>
             <div className="new-session-mode-toggle new-session-agent-toggle">
-              {["copilot", "codex", "claude", "shell"].map((kind) => (
+              {["shell", "codex", "claude", "copilot"].map((kind) => (
                 <label
                   key={kind}
                   className={`new-session-mode-btn new-session-agent-btn${newKind === kind ? " is-active" : ""}`}
