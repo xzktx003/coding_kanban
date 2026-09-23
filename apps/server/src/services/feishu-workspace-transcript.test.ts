@@ -10,10 +10,15 @@ const session = {
   id: "s1",
   workingDirectory: "/project",
 } as AgentSessionRecord;
-const page = (text: string, more = false): AgentTranscriptResponse => ({
+const page = (
+  text: string,
+  more = false,
+  agentKind: "codex" | "claude" = "codex",
+  sessionId = "thread-123",
+): AgentTranscriptResponse => ({
   available: true,
-  agentKind: "codex",
-  sessionId: "thread-123",
+  agentKind,
+  sessionId,
   matchedBy: "session-id",
   updatedAt: null,
   entries: [
@@ -79,6 +84,69 @@ test("exports complete human conversation in chronological page order without to
   const text = result.data.toString();
   assert.ok(text.indexOf("old") < text.indexOf("new"));
   assert.doesNotMatch(text, /private tool|hidden continuation/);
+});
+
+test("reads and exports Claude records from the optional Claude source", async () => {
+  const claudeSessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const codexCalls: unknown[] = [];
+  const claudeCalls: unknown[] = [];
+  const service = new FeishuWorkspaceTranscript(
+    {
+      read: (input) => {
+        codexCalls.push(input);
+        return page("codex");
+      },
+      readRemote: async () => page("remote-codex"),
+    },
+    {
+      read: (input) => {
+        claudeCalls.push(input);
+        return page("claude", false, "claude", claudeSessionId);
+      },
+      readRemote: async () =>
+        page("remote-claude", false, "claude", claudeSessionId),
+    },
+  );
+
+  const result = await service.read(
+    session,
+    claudeSessionId,
+    undefined,
+    "claude",
+  );
+  assert.deepEqual(codexCalls, []);
+  assert.deepEqual(claudeCalls, [{ sessionId: claudeSessionId, limit: 5 }]);
+  assert.equal(result.entries[0].text, "claude");
+
+  const exported = await service.export(session, claudeSessionId, "claude");
+  assert.equal(exported.name, `claude-${claudeSessionId}.md`);
+  assert.match(exported.data.toString(), /Claude/);
+});
+
+test("rejects stale Claude records that do not match the requested UUID", async () => {
+  const claudeSessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const service = new FeishuWorkspaceTranscript(
+    {
+      read: () => page("codex"),
+      readRemote: async () => page("remote-codex"),
+    },
+    {
+      read: () =>
+        page(
+          "wrong claude",
+          false,
+          "claude",
+          "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        ),
+      readRemote: async () =>
+        page("remote-claude", false, "claude", claudeSessionId),
+    },
+  );
+
+  await assert.rejects(
+    service.read(session, claudeSessionId, undefined, "claude"),
+    /Claude/,
+  );
 });
 
 test("rejects mismatched identity, stalled cursors and oversize exports rather than silently truncate", async () => {

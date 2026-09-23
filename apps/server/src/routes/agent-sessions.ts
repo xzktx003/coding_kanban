@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
 
 import {
+  isClaudeAgentKind,
+  isClaudeSessionCandidate,
   isCodexSessionCandidate,
   isLocalCodexSessionCandidate,
   type AgentTaskDiffResponse,
@@ -32,6 +34,8 @@ import {
   isRemoteAgentSession,
   resolveActiveCodexSessionId,
 } from "../services/active-codex-session-resolver.js";
+import { ClaudeTranscriptService } from "../services/claude-transcript-service.js";
+import type { ReadClaudeTranscriptInput } from "../services/claude-transcript-service.js";
 import { CodexTranscriptService } from "../services/codex-transcript-service.js";
 import { summarizeCodexTranscript } from "../services/codex-transcript-service.js";
 import { CodexSessionLocator } from "../services/codex-session-locator.js";
@@ -97,8 +101,11 @@ function canProbeTmuxForCodex(
 
   // Process-shaped kinds can become stale when the user switches windows in
   // one tmux session. Explicit non-Codex agent cards retain their own reader.
+  if (isClaudeAgentKind(session.agentKind)) {
+    return false;
+  }
   const agentKind = session.agentKind.trim().toLowerCase();
-  return !["claude", "copilot", "opencode"].includes(agentKind);
+  return !["copilot", "opencode"].includes(agentKind);
 }
 
 function isLiveRemoteCodexCommand(agentKind: string): boolean {
@@ -170,6 +177,10 @@ interface AgentSessionRoutesOptions {
   vsCodeWebManager: VsCodeWebManager;
   codexTranscriptService?: Pick<CodexTranscriptService, "read"> &
     Partial<Pick<CodexTranscriptService, "readRemote">>;
+  claudeTranscriptService?: Pick<
+    ClaudeTranscriptService,
+    "read" | "readRemote"
+  >;
   codexSessionLocator?: Pick<CodexSessionLocator, "resolve">;
   sftpService?: Pick<
     SftpService,
@@ -291,6 +302,9 @@ export async function registerAgentSessionRoutes(
     codexTranscriptService = new CodexTranscriptService({
       remoteFileAccess: sftpService,
     }),
+    claudeTranscriptService = new ClaudeTranscriptService({
+      remoteFileAccess: sftpService,
+    }),
     codexSessionLocator = new CodexSessionLocator(),
     gitProjectSummaryService = new GitProjectSummaryService(),
     codexChangeService = new CodexChangeService(),
@@ -333,6 +347,78 @@ export async function registerAgentSessionRoutes(
     return hasTmuxSession && !sessionId && !isRemoteAgentSession(agentSession)
       ? undefined
       : agentSession.workingDirectory;
+  };
+
+  const unavailableClaudeTranscript = (message: string) => ({
+    available: false,
+    agentKind: "claude" as const,
+    sessionId: null,
+    matchedBy: null,
+    updatedAt: null,
+    entries: [],
+    hasMore: false,
+    nextCursor: null,
+    message,
+  });
+
+  const readClaudeTranscript = async (
+    agentSession: AgentSessionRecord,
+    cursor: string | undefined,
+    limit: number | undefined,
+  ) => {
+    const input: ReadClaudeTranscriptInput = {
+      ...(agentSession.agentSessionId
+        ? { sessionId: agentSession.agentSessionId }
+        : {}),
+      ...(agentSession.workingDirectory
+        ? { workingDirectory: agentSession.workingDirectory }
+        : {}),
+      ...(agentSession.transportRef?.tmuxSession
+        ? { tmuxSession: agentSession.transportRef.tmuxSession }
+        : {}),
+      ...(agentSession.transportRef?.tmuxPane
+        ? { tmuxPane: agentSession.transportRef.tmuxPane }
+        : {}),
+      ...(cursor ? { cursor } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    };
+    if (!isRemoteAgentSession(agentSession)) {
+      return claudeTranscriptService.read(input);
+    }
+    if (!agentSession.sshTarget) {
+      return unavailableClaudeTranscript(
+        "当前远端会话没有可用的 Claude 历史读取通道。",
+      );
+    }
+
+    let workingDirectory = agentSession.workingDirectory;
+    const tmuxSession = agentSession.transportRef?.tmuxSession;
+    if (tmuxSession && typeof tmuxAdapter.discoverRemote === "function") {
+      try {
+        const discovery = await tmuxAdapter.discoverRemote(
+          agentSession.sshTarget,
+        );
+        const liveSession = discovery.items.find(
+          (item) => item.transportRef?.tmuxSession === tmuxSession,
+        );
+        if (liveSession) {
+          if (!isClaudeAgentKind(liveSession.agentKind)) {
+            return unavailableClaudeTranscript(
+              "当前远端 tmux 窗格未在运行 Claude。",
+            );
+          }
+          workingDirectory = liveSession.workingDirectory;
+        }
+      } catch {
+        // Keep the registered directory when the live tmux probe is briefly busy.
+      }
+    }
+
+    return claudeTranscriptService.readRemote({
+      ...input,
+      sshTarget: agentSession.sshTarget,
+      ...(workingDirectory ? { workingDirectory } : {}),
+    });
   };
 
   fastify.get("/api/health", async () => ({ status: "ok" }));
@@ -572,6 +658,17 @@ export async function registerAgentSessionRoutes(
     Querystring: { cursor?: string; limit?: string };
   }>("/api/agent-sessions/:id/transcript", async (request) => {
     const agentSession = registry.get(request.params.id);
+    const requestedLimit = Number(request.query.limit);
+    const boundedLimit = Number.isSafeInteger(requestedLimit)
+      ? requestedLimit
+      : undefined;
+    if (isClaudeSessionCandidate(agentSession)) {
+      return readClaudeTranscript(
+        agentSession,
+        request.query.cursor,
+        boundedLimit,
+      );
+    }
     if (
       !isCodexSessionCandidate(agentSession) &&
       !canProbeTmuxForCodex(agentSession)
@@ -589,7 +686,6 @@ export async function registerAgentSessionRoutes(
       };
     }
 
-    const requestedLimit = Number(request.query.limit);
     if (isRemoteAgentSession(agentSession)) {
       if (!agentSession.sshTarget || !codexTranscriptService.readRemote) {
         return {

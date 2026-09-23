@@ -94,6 +94,50 @@ test("local tmux discovery exposes the real session name", async () => {
   assert.equal(result.items[0]?.transportRef?.runtimeId, "tmux:dev");
 });
 
+test("registered local session follows the live tmux command for Claude records", async () => {
+  const registry = new AgentSessionRegistry();
+  const registered = registry.register({
+    workspaceId: "session_agent",
+    sourceType: "local",
+    agentKind: "node",
+    displayName: "session_agent",
+    workingDirectory: "/work/session_agent",
+    transportRef: { tmuxSession: "session_agent", tmuxPane: "%9" },
+  });
+  const remote = registry.register({
+    workspaceId: "remote",
+    sourceType: "remote-connect",
+    agentKind: "codex",
+    displayName: "remote",
+    workingDirectory: "/work/remote",
+    sshTarget: { host: "remote.example" },
+    transportRef: { tmuxSession: "session_agent", tmuxPane: "%9" },
+  });
+  const adapter = new LocalTmuxAdapter(registry);
+  let command = "claude.exe";
+  (
+    adapter as unknown as {
+      runTmux(args: string[]): Promise<{ stdout: string; stderr: string }>;
+    }
+  ).runTmux = async () => ({
+    stdout: `session_agent\t1\t1\t1\t%9\t${command}\t/work/session_agent`,
+    stderr: "",
+  });
+
+  await adapter.syncRegisteredAgentKinds();
+  assert.equal(registry.get(registered.id).agentKind, "claude.exe");
+  assert.equal(registry.get(remote.id).agentKind, "codex");
+  command = "node";
+  await adapter.syncRegisteredAgentKinds();
+  assert.equal(registry.get(registered.id).agentKind, "node");
+  command = "claude.exe";
+  registry.updateSession(registered.id, {
+    transportRef: { tmuxSession: "renamed-session" },
+  });
+  await adapter.syncRegisteredAgentKinds();
+  assert.equal(registry.get(registered.id).agentKind, "node");
+});
+
 test("remote tmux discovery exposes the real session name", async () => {
   const adapter = new LocalTmuxAdapter(new AgentSessionRegistry());
   (

@@ -142,6 +142,106 @@ test("requires ok true and message identifiers in lark-cli JSON output", async (
   }
 });
 
+test("updates an existing Card 2.0 through the delayed update API", async () => {
+  const calls: Array<{ binary: string; args: string[] }> = [];
+  const messenger = new FeishuControlMessenger({
+    allowedUserId: "ou_owner",
+    runCommand: async (binary, args) => {
+      calls.push({ binary, args });
+      return { stdout: JSON.stringify({ ok: true }) };
+    },
+  });
+  const card = { schema: "2.0", body: { elements: [] } };
+
+  await messenger.updateCard("ou_owner", "opaque_update_token", card);
+
+  assert.equal(calls[0]?.binary, "lark-cli");
+  assert.deepEqual(calls[0]?.args, [
+    "api",
+    "POST",
+    "/open-apis/interactive/v1/card/update",
+    "--as",
+    "bot",
+    "--format",
+    "json",
+    "--data",
+    JSON.stringify({ token: "opaque_update_token", card }),
+  ]);
+});
+
+test("rejects malformed update inputs before invoking lark-cli", async () => {
+  const calls: string[][] = [];
+  const messenger = new FeishuControlMessenger({
+    allowedUserId: "ou_owner",
+    runCommand: async (_binary, args) => {
+      calls.push(args);
+      return { stdout: JSON.stringify({ ok: true }) };
+    },
+  });
+
+  await assert.rejects(
+    messenger.updateCard("ou_other", "opaque_update_token", {
+      schema: "2.0",
+    }),
+    /Feishu control message delivery failed/,
+  );
+  await assert.rejects(
+    messenger.updateCard("ou_owner", "", { schema: "2.0" }),
+    /Feishu control message delivery failed/,
+  );
+  await assert.rejects(
+    messenger.updateCard("ou_owner", "x".repeat(4097), { schema: "2.0" }),
+    /Feishu control message delivery failed/,
+  );
+  await assert.rejects(
+    messenger.updateCard("ou_owner", "opaque_update_token", { schema: "1.0" }),
+    /Feishu control message delivery failed/,
+  );
+  await assert.rejects(
+    messenger.updateCard("ou_owner", "opaque_update_token", null as any),
+    /Feishu control message delivery failed/,
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("requires ok true for delayed card update output", async () => {
+  for (const stdout of [
+    "{",
+    JSON.stringify({ ok: false, error: { message: "bad token" } }),
+    JSON.stringify({ data: {} }),
+  ]) {
+    const messenger = new FeishuControlMessenger({
+      allowedUserId: "ou_owner",
+      runCommand: async () => ({ stdout }),
+    });
+    await assert.rejects(
+      messenger.updateCard("ou_owner", "opaque_update_token", {
+        schema: "2.0",
+      }),
+      /Feishu control message delivery failed/,
+    );
+  }
+});
+
+test("normalizes update failures without leaking token, card, or argv", async () => {
+  const messenger = new FeishuControlMessenger({
+    allowedUserId: "ou_owner",
+    runCommand: async () => {
+      throw new Error("opaque_update_token secret card argv");
+    },
+  });
+
+  await assert.rejects(
+    messenger.updateCard("ou_owner", "opaque_update_token", {
+      schema: "2.0",
+      body: { elements: [{ secret: "card" }] },
+    }),
+    (error) =>
+      error instanceof Error &&
+      error.message === "Feishu control message delivery failed",
+  );
+});
+
 test("file delivery stages a private local file, uses bot identity and removes it afterwards", async () => {
   let directory = "";
   const messenger = new FeishuControlMessenger({

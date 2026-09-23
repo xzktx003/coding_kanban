@@ -7,6 +7,7 @@ const USER_ID_PATTERN = /^ou_[A-Za-z0-9_-]+$/;
 const MESSAGE_ID_PATTERN = /^om_[A-Za-z0-9_-]+$/;
 const CHAT_ID_PATTERN = /^oc_[A-Za-z0-9_-]+$/;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{1,50}$/;
+const MAX_UPDATE_TOKEN_CHARACTERS = 4_096;
 const MAX_TEXT_CHARACTERS = 8_000;
 const MAX_OUTPUT_BUFFER_BYTES = 256 * 1024;
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -69,6 +70,23 @@ function assertIdempotencyKey(idempotencyKey: string): void {
   }
 }
 
+function assertUpdateToken(token: string): void {
+  if (
+    typeof token !== "string" ||
+    !token ||
+    token.length > MAX_UPDATE_TOKEN_CHARACTERS ||
+    /[\u0000-\u001f\u007f]/u.test(token)
+  ) {
+    throw new Error("Feishu control message delivery failed");
+  }
+}
+
+function assertCard2(card: Record<string, unknown>): void {
+  if (!card || typeof card !== "object" || card.schema !== "2.0") {
+    throw new Error("Feishu control message delivery failed");
+  }
+}
+
 function normalizeDelivery(stdout: string): FeishuControlDelivery {
   let parsed: unknown;
   try {
@@ -105,6 +123,24 @@ function normalizeDelivery(stdout: string): FeishuControlDelivery {
   return { messageId, chatId };
 }
 
+function normalizeUpdate(stdout: string): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new Error("Feishu control message delivery failed");
+  }
+
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Feishu control message delivery failed");
+  }
+
+  const envelope = parsed as Record<string, unknown>;
+  if (envelope.ok !== true) {
+    throw new Error("Feishu control message delivery failed");
+  }
+}
+
 export class FeishuControlMessenger {
   readonly #binary: string;
   readonly #allowedUserId: string;
@@ -136,6 +172,47 @@ export class FeishuControlMessenger {
       throw new Error("Feishu control message delivery failed");
     }
     await this.#send(userId, "text", { text }, idempotencyKey);
+  }
+
+  async updateCard(
+    userId: string,
+    token: string,
+    card: Record<string, unknown>,
+  ): Promise<void> {
+    assertAllowedUserId(userId, this.#allowedUserId);
+    assertUpdateToken(token);
+    assertCard2(card);
+
+    try {
+      const { stdout } = await this.#runCommand(
+        this.#binary,
+        [
+          "api",
+          "POST",
+          "/open-apis/interactive/v1/card/update",
+          "--as",
+          "bot",
+          "--format",
+          "json",
+          "--data",
+          JSON.stringify({ token, card }),
+        ],
+        {
+          encoding: "utf8",
+          maxBuffer: MAX_OUTPUT_BUFFER_BYTES,
+          timeout: COMMAND_TIMEOUT_MS,
+          windowsHide: true,
+          env: {
+            ...process.env,
+            LARKSUITE_CLI_NO_UPDATE_NOTIFIER: "1",
+            LARKSUITE_CLI_NO_SKILLS_NOTIFIER: "1",
+          },
+        },
+      );
+      normalizeUpdate(stdout);
+    } catch {
+      throw new Error("Feishu control message delivery failed");
+    }
   }
 
   async sendFile(

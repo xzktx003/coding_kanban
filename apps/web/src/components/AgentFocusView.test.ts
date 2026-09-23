@@ -391,6 +391,31 @@ describe("AgentFocusView", () => {
     assert.match(markup, /focus-transcript-btn--active/);
   });
 
+  it("offers the complete transcript action for Claude sessions", () => {
+    const session = {
+      ...makeSession("claude-session", "Claude Agent"),
+      agentKind: "claude",
+    };
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: session,
+        sessions: [session],
+        onToggleTranscript: () => {},
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    assert.match(markup, /aria-label="查看 Claude Agent 的完整记录"/);
+    assert.match(markup, /data-transcript-session-id="claude-session"/);
+    assert.match(markup, /title="查看不受终端重绘影响的完整智能体记录"/);
+    assert.doesNotMatch(markup, /完整 Codex 记录/);
+  });
+
   it("renders every session from the selected group in group arrangement mode", () => {
     installLocalStorageStub("triple", {
       mode: "triple",

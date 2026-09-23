@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { stripVTControlCharacters } from "node:util";
 
 import {
+  isClaudeSessionCandidate,
   isCodexSessionCandidate,
   type AgentSessionRecord,
   type AgentTranscriptEntry,
@@ -56,6 +57,9 @@ export interface FeishuSessionWorkspaceOptions {
   registry: { get(sessionId: string): AgentSessionRecord };
   resolveSessionId(session: AgentSessionRecord): Promise<string | undefined>;
   resolveSessionIds?(session: AgentSessionRecord): Promise<string[]>;
+  resolveClaudeSessionId?(
+    session: AgentSessionRecord,
+  ): Promise<string | undefined>;
   files: {
     list(
       session: AgentSessionRecord,
@@ -80,10 +84,12 @@ export interface FeishuSessionWorkspaceOptions {
     session: AgentSessionRecord,
     threadId: string,
     cursor?: string,
+    agentKind?: TranscriptAgentKind,
   ): Promise<AgentTranscriptResponse>;
   exportTranscript(
     session: AgentSessionRecord,
     threadId: string,
+    agentKind?: TranscriptAgentKind,
   ): Promise<{ name: string; data: Buffer }>;
   notificationBindings?: {
     resolve(messageId: string): {
@@ -91,6 +97,8 @@ export interface FeishuSessionWorkspaceOptions {
       chatId: string;
       sessionId: string;
       codexThreadId?: string;
+      transcriptAgentKind?: string;
+      transcriptSessionId?: string;
       referencedFiles?: Array<{ path: string; line?: number }>;
     } | null;
   };
@@ -136,6 +144,7 @@ type WorkspaceAction =
   | { kind: "write_cancel"; confirmToken?: string; consumed?: boolean };
 
 type WorkspaceActionMap = Map<string, WorkspaceAction>;
+type TranscriptAgentKind = "codex" | "claude";
 
 interface WorkspaceBinding {
   panelId: string;
@@ -144,6 +153,7 @@ interface WorkspaceBinding {
   messageId: string;
   sessionId: string;
   threadId: string;
+  transcriptAgentKind: TranscriptAgentKind;
   signature: string;
   expiresAtMs: number;
   actions: WorkspaceActionMap;
@@ -165,6 +175,8 @@ const USER_ID_PATTERN = /^ou_[A-Za-z0-9_-]+$/;
 const MESSAGE_ID_PATTERN = /^om_[A-Za-z0-9_-]+$/;
 const CHAT_ID_PATTERN = /^oc_[A-Za-z0-9_-]+$/;
 const CODEX_THREAD_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
+const CLAUDE_SESSION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const UNSAFE_CONTROL_CHARACTER_PATTERN =
   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u;
 const CONTROL_CHARACTER_PATTERN =
@@ -203,6 +215,19 @@ function isAvailableCodexSession(session: AgentSessionRecord): boolean {
   );
 }
 
+function isAvailableClaudeSession(session: AgentSessionRecord): boolean {
+  return (
+    isClaudeSessionCandidate(session) &&
+    session.connectionState === "online" &&
+    session.interactionState !== "exited" &&
+    session.interactionState !== "detached" &&
+    session.controlMode !== "observe" &&
+    (!session.hostId ||
+      session.hostId === "local" ||
+      Boolean(session.sshTarget))
+  );
+}
+
 function supportsLocalFileWorkspace(session: AgentSessionRecord): boolean {
   return !session.sshTarget && (!session.hostId || session.hostId === "local");
 }
@@ -227,6 +252,52 @@ function parseJsonObject(
   } catch {
     return {};
   }
+}
+
+function parseTranscriptAgentKind(
+  value: unknown,
+): TranscriptAgentKind | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized === "codex" || normalized === "claude"
+    ? normalized
+    : undefined;
+}
+
+function isValidTranscriptSessionId(
+  agentKind: TranscriptAgentKind,
+  sessionId: unknown,
+): sessionId is string {
+  if (typeof sessionId !== "string") {
+    return false;
+  }
+  return agentKind === "claude"
+    ? CLAUDE_SESSION_ID_PATTERN.test(sessionId)
+    : CODEX_THREAD_ID_PATTERN.test(sessionId);
+}
+
+function notificationTranscriptTarget(binding: {
+  codexThreadId?: string;
+  transcriptAgentKind?: string;
+  transcriptSessionId?: string;
+}): { agentKind: TranscriptAgentKind; threadId: string } | null {
+  const transcriptAgentKind = parseTranscriptAgentKind(
+    binding.transcriptAgentKind,
+  );
+  if (
+    transcriptAgentKind &&
+    isValidTranscriptSessionId(transcriptAgentKind, binding.transcriptSessionId)
+  ) {
+    return {
+      agentKind: transcriptAgentKind,
+      threadId: binding.transcriptSessionId,
+    };
+  }
+  return CODEX_THREAD_ID_PATTERN.test(binding.codexThreadId ?? "")
+    ? { agentKind: "codex", threadId: binding.codexThreadId! }
+    : null;
 }
 
 function sanitizeCardText(input: string): string {
@@ -406,6 +477,7 @@ export class FeishuSessionWorkspace {
   readonly #registry: FeishuSessionWorkspaceOptions["registry"];
   readonly #resolveSessionId: FeishuSessionWorkspaceOptions["resolveSessionId"];
   readonly #resolveSessionIds: FeishuSessionWorkspaceOptions["resolveSessionIds"];
+  readonly #resolveClaudeSessionId: FeishuSessionWorkspaceOptions["resolveClaudeSessionId"];
   readonly #files: FeishuSessionWorkspaceOptions["files"];
   readonly #transcript: FeishuSessionWorkspaceOptions["transcript"];
   readonly #exportTranscript: FeishuSessionWorkspaceOptions["exportTranscript"];
@@ -426,6 +498,7 @@ export class FeishuSessionWorkspace {
     this.#registry = options.registry;
     this.#resolveSessionId = options.resolveSessionId;
     this.#resolveSessionIds = options.resolveSessionIds;
+    this.#resolveClaudeSessionId = options.resolveClaudeSessionId;
     this.#files = options.files;
     this.#transcript = options.transcript;
     this.#exportTranscript = options.exportTranscript;
@@ -486,6 +559,7 @@ export class FeishuSessionWorkspace {
       messageId: "",
       sessionId: input.sessionId,
       threadId: input.threadId,
+      transcriptAgentKind: "codex",
       signature: buildSessionSignature(checked.session),
       expiresAtMs: this.#now() + MAX_WORKSPACE_AGE_MS,
       actions,
@@ -597,12 +671,14 @@ export class FeishuSessionWorkspace {
       const notificationBinding = this.#notificationBindings?.resolve(
         event.message_id,
       );
+      const transcriptTarget = notificationBinding
+        ? notificationTranscriptTarget(notificationBinding)
+        : null;
       if (
         !notificationBinding ||
         notificationBinding.messageId !== event.message_id ||
         notificationBinding.chatId !== event.chat_id ||
-        !notificationBinding.codexThreadId ||
-        !CODEX_THREAD_ID_PATTERN.test(notificationBinding.codexThreadId)
+        !transcriptTarget
       ) {
         await this.#notify(
           event.chat_id,
@@ -611,6 +687,8 @@ export class FeishuSessionWorkspace {
         );
         return "ignored_untrusted";
       }
+      const transcriptAgentLabel =
+        transcriptTarget.agentKind === "claude" ? "Claude" : "Codex";
 
       const trustedEvent = {
         ...event,
@@ -623,7 +701,8 @@ export class FeishuSessionWorkspace {
         const outcome = await this.#openRecords({
           event: trustedEvent,
           sessionId: notificationBinding.sessionId,
-          threadId: notificationBinding.codexThreadId,
+          threadId: transcriptTarget.threadId,
+          transcriptAgentKind: transcriptTarget.agentKind,
           operatorId: event.operator_id,
         });
         if (
@@ -634,10 +713,10 @@ export class FeishuSessionWorkspace {
           await this.#notify(
             trustedEvent.chat_id,
             outcome === "ignored_changed_thread"
-              ? "该通知对应的 Codex 对话已经切换，无法再打开原记录。"
+              ? `该通知对应的 ${transcriptAgentLabel} 对话已经切换，无法再打开原记录。`
               : outcome === "ignored_disabled"
                 ? "飞书记录查看当前不可用。"
-                : "该通知对应的 Codex 对话当前不可用。",
+                : `该通知对应的 ${transcriptAgentLabel} 对话当前不可用。`,
             trustedEvent.event_id,
           );
         }
@@ -736,11 +815,13 @@ export class FeishuSessionWorkspace {
     };
     sessionId: string;
     threadId: string;
+    transcriptAgentKind: TranscriptAgentKind;
     operatorId: string;
   }): Promise<FeishuSessionWorkspaceOutcome> {
     const checked = await this.#resolveLiveSession(
       input.sessionId,
       input.threadId,
+      input.transcriptAgentKind,
     );
     if (!checked.ok) {
       return checked.outcome;
@@ -754,11 +835,17 @@ export class FeishuSessionWorkspace {
       messageId: "",
       sessionId: input.sessionId,
       threadId: input.threadId,
+      transcriptAgentKind: input.transcriptAgentKind,
       signature: buildSessionSignature(checked.session),
       expiresAtMs: this.#now() + MAX_WORKSPACE_AGE_MS,
       actions: new Map(),
     };
-    const transcript = await this.#transcript(checked.session, input.threadId);
+    const transcript = await this.#transcript(
+      checked.session,
+      input.threadId,
+      undefined,
+      input.transcriptAgentKind,
+    );
     const rechecked = await this.#validateBinding(binding, {
       requireReplyControl: false,
     });
@@ -804,6 +891,7 @@ export class FeishuSessionWorkspace {
       messageId: "",
       sessionId: input.sessionId,
       threadId: input.threadId,
+      transcriptAgentKind: "codex",
       signature: buildSessionSignature(checked.session),
       expiresAtMs: this.#now() + MAX_WORKSPACE_AGE_MS,
       actions: new Map(),
@@ -862,6 +950,7 @@ export class FeishuSessionWorkspace {
         session,
         binding.threadId,
         action.cursor,
+        binding.transcriptAgentKind,
       );
       const rechecked = await this.#validateBinding(binding, {
         requireReplyControl: false,
@@ -874,7 +963,11 @@ export class FeishuSessionWorkspace {
       return "records_sent";
     }
     if (action.kind === "records_export") {
-      const exported = await this.#exportTranscript(session, binding.threadId);
+      const exported = await this.#exportTranscript(
+        session,
+        binding.threadId,
+        binding.transcriptAgentKind,
+      );
       const rechecked = await this.#validateBinding(binding, {
         requireReplyControl: false,
       });
@@ -1699,6 +1792,7 @@ export class FeishuSessionWorkspace {
   async #resolveLiveSession(
     sessionId: string,
     threadId: string,
+    agentKind: TranscriptAgentKind = "codex",
   ): Promise<
     | { ok: true; session: AgentSessionRecord }
     | { ok: false; outcome: "ignored_unavailable" | "ignored_changed_thread" }
@@ -1709,14 +1803,25 @@ export class FeishuSessionWorkspace {
     } catch {
       return { ok: false, outcome: "ignored_unavailable" };
     }
-    if (!isAvailableCodexSession(session)) {
+    if (
+      agentKind === "claude"
+        ? !isAvailableClaudeSession(session)
+        : !isAvailableCodexSession(session)
+    ) {
       return { ok: false, outcome: "ignored_unavailable" };
     }
-    const currentThreadIds = this.#resolveSessionIds
-      ? await this.#resolveSessionIds(session)
-      : [await this.#resolveSessionId(session)].filter(
-          (candidate): candidate is string => Boolean(candidate),
-        );
+    const currentThreadIds =
+      agentKind === "claude"
+        ? [
+            this.#resolveClaudeSessionId
+              ? await this.#resolveClaudeSessionId(session)
+              : undefined,
+          ].filter((candidate): candidate is string => Boolean(candidate))
+        : this.#resolveSessionIds
+          ? await this.#resolveSessionIds(session)
+          : [await this.#resolveSessionId(session)].filter(
+              (candidate): candidate is string => Boolean(candidate),
+            );
     if (currentThreadIds.length === 0) {
       return { ok: false, outcome: "ignored_unavailable" };
     }
@@ -1728,7 +1833,11 @@ export class FeishuSessionWorkspace {
     } catch {
       return { ok: false, outcome: "ignored_unavailable" };
     }
-    if (!isAvailableCodexSession(session)) {
+    if (
+      agentKind === "claude"
+        ? !isAvailableClaudeSession(session)
+        : !isAvailableCodexSession(session)
+    ) {
       return { ok: false, outcome: "ignored_unavailable" };
     }
     return { ok: true, session };
@@ -1764,6 +1873,7 @@ export class FeishuSessionWorkspace {
     const checked = await this.#resolveLiveSession(
       binding.sessionId,
       binding.threadId,
+      binding.transcriptAgentKind,
     );
     const settingsAfter = this.#settings.get();
     if (
@@ -1785,8 +1895,8 @@ export class FeishuSessionWorkspace {
         outcome: checked.outcome,
         message:
           checked.outcome === "ignored_changed_thread"
-            ? "目标 Codex 对话已变化，请重新打开工作区。"
-            : "目标 Codex 对话当前不可用。",
+            ? `目标 ${binding.transcriptAgentKind === "claude" ? "Claude" : "Codex"} 对话已变化，请重新打开工作区。`
+            : `目标 ${binding.transcriptAgentKind === "claude" ? "Claude" : "Codex"} 对话当前不可用。`,
       };
     }
     if (buildSessionSignature(checked.session) !== binding.signature) {

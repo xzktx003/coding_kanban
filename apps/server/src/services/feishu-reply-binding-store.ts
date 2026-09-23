@@ -16,7 +16,11 @@ const MAX_BINDINGS = 10_000;
 const MESSAGE_ID_PATTERN = /^om_[A-Za-z0-9_-]+$/;
 const CHAT_ID_PATTERN = /^oc_[A-Za-z0-9_-]+$/;
 const CODEX_THREAD_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
+const CLAUDE_SESSION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_REFERENCED_FILES = 5;
+
+export type FeishuTranscriptAgentKind = "codex" | "claude";
 
 export interface FeishuReplyBinding {
   messageId: string;
@@ -24,6 +28,8 @@ export interface FeishuReplyBinding {
   sessionId: string;
   completionId: string;
   codexThreadId?: string;
+  transcriptAgentKind?: FeishuTranscriptAgentKind;
+  transcriptSessionId?: string;
   referencedFiles?: FeishuCompletionFileReference[];
   createdAt: string;
 }
@@ -43,6 +49,8 @@ export interface RecordFeishuReplyBindingsInput {
   sessionId: string;
   completionId: string;
   codexThreadId?: string;
+  transcriptAgentKind?: string;
+  transcriptSessionId?: string;
   referencedFiles?: FeishuCompletionFileReference[];
   messages: Array<{ messageId: string; chatId: string }>;
 }
@@ -103,6 +111,52 @@ function parseReferencedFiles(
   return references.length > 0 ? references : undefined;
 }
 
+function parseTranscriptAgentKind(
+  value: unknown,
+): FeishuTranscriptAgentKind | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized === "codex" || normalized === "claude"
+    ? normalized
+    : undefined;
+}
+
+function isValidTranscriptSessionId(
+  agentKind: FeishuTranscriptAgentKind,
+  sessionId: unknown,
+): sessionId is string {
+  if (typeof sessionId !== "string") {
+    return false;
+  }
+  return agentKind === "claude"
+    ? CLAUDE_SESSION_ID_PATTERN.test(sessionId)
+    : CODEX_THREAD_ID_PATTERN.test(sessionId);
+}
+
+function parseTranscriptTarget(value: {
+  transcriptAgentKind?: unknown;
+  transcriptSessionId?: unknown;
+}): {
+  transcriptAgentKind: FeishuTranscriptAgentKind;
+  transcriptSessionId: string;
+} | null {
+  const transcriptAgentKind = parseTranscriptAgentKind(
+    value.transcriptAgentKind,
+  );
+  if (
+    !transcriptAgentKind ||
+    !isValidTranscriptSessionId(transcriptAgentKind, value.transcriptSessionId)
+  ) {
+    return null;
+  }
+  return {
+    transcriptAgentKind,
+    transcriptSessionId: value.transcriptSessionId,
+  };
+}
+
 function parseBinding(value: unknown): FeishuReplyBinding | null {
   if (!isRecord(value)) {
     return null;
@@ -113,6 +167,8 @@ function parseBinding(value: unknown): FeishuReplyBinding | null {
     sessionId,
     completionId,
     codexThreadId,
+    transcriptAgentKind,
+    transcriptSessionId,
     referencedFiles,
     createdAt,
   } = value;
@@ -133,13 +189,21 @@ function parseBinding(value: unknown): FeishuReplyBinding | null {
     return null;
   }
   const parsedReferencedFiles = parseReferencedFiles(referencedFiles);
+  const parsedTranscriptTarget = parseTranscriptTarget({
+    transcriptAgentKind,
+    transcriptSessionId,
+  });
 
   return {
     messageId,
     chatId,
     sessionId,
     completionId,
-    ...(typeof codexThreadId === "string" ? { codexThreadId } : {}),
+    ...(typeof codexThreadId === "string" &&
+    parsedTranscriptTarget?.transcriptAgentKind !== "claude"
+      ? { codexThreadId }
+      : {}),
+    ...(parsedTranscriptTarget ?? {}),
     ...(parsedReferencedFiles
       ? { referencedFiles: parsedReferencedFiles }
       : {}),
@@ -183,6 +247,7 @@ export class FeishuReplyBindingStore {
   record(input: RecordFeishuReplyBindingsInput): void {
     const createdAt = this.#now().toISOString();
     const referencedFiles = parseReferencedFiles(input.referencedFiles);
+    const transcriptTarget = parseTranscriptTarget(input);
     for (const message of input.messages) {
       if (
         !MESSAGE_ID_PATTERN.test(message.messageId) ||
@@ -195,10 +260,12 @@ export class FeishuReplyBindingStore {
         chatId: message.chatId,
         sessionId: input.sessionId,
         completionId: input.completionId,
-        ...(input.codexThreadId &&
+        ...(transcriptTarget?.transcriptAgentKind !== "claude" &&
+        input.codexThreadId &&
         CODEX_THREAD_ID_PATTERN.test(input.codexThreadId)
           ? { codexThreadId: input.codexThreadId }
           : {}),
+        ...(transcriptTarget ?? {}),
         ...(referencedFiles ? { referencedFiles } : {}),
         createdAt,
       });
@@ -237,6 +304,13 @@ export class FeishuReplyBindingStore {
       sessionId: input.parent.sessionId,
       completionId: input.parent.completionId,
       codexThreadId: input.codexThreadId,
+      ...(input.parent.transcriptAgentKind === "codex" &&
+      input.parent.transcriptSessionId
+        ? {
+            transcriptAgentKind: input.parent.transcriptAgentKind,
+            transcriptSessionId: input.codexThreadId,
+          }
+        : {}),
       ...(input.parent.referencedFiles
         ? { referencedFiles: input.parent.referencedFiles }
         : {}),

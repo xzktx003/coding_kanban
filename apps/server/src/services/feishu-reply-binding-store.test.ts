@@ -100,6 +100,50 @@ test("expires old bindings and persists processed inbound message ids", () => {
   }
 });
 
+test("persists Claude transcript targets without using codex reply routing ids", () => {
+  const directory = mkdtempSync(join(tmpdir(), "kanban-feishu-replies-"));
+  const statePath = join(directory, "reply-bindings.json");
+  const now = new Date("2026-09-01T12:00:00.000Z");
+  const claudeSessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+  try {
+    const store = new FeishuReplyBindingStore({
+      statePath,
+      now: () => now,
+    });
+    store.record({
+      sessionId: "session-claude",
+      completionId: "claude-turn-1",
+      codexThreadId: claudeSessionId,
+      transcriptAgentKind: "claude",
+      transcriptSessionId: claudeSessionId,
+      messages: [{ messageId: "om_claude", chatId: "oc_private" }],
+    });
+
+    assert.deepEqual(store.resolve("om_claude"), {
+      messageId: "om_claude",
+      chatId: "oc_private",
+      sessionId: "session-claude",
+      completionId: "claude-turn-1",
+      transcriptAgentKind: "claude",
+      transcriptSessionId: claudeSessionId,
+      createdAt: now.toISOString(),
+    });
+
+    const reloaded = new FeishuReplyBindingStore({
+      statePath,
+      now: () => now,
+    });
+    assert.equal(reloaded.resolve("om_claude")?.codexThreadId, undefined);
+    assert.equal(
+      reloaded.resolve("om_claude")?.transcriptSessionId,
+      claudeSessionId,
+    );
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
 test("atomically persists a delivered reply as the next reply binding", () => {
   const directory = mkdtempSync(join(tmpdir(), "kanban-feishu-replies-"));
   const statePath = join(directory, "reply-bindings.json");

@@ -35,6 +35,14 @@ const codexSession: AgentSessionRecord = {
   transportRef: { tmuxSession: "coding-kanban", tmuxPane: "%1" },
 };
 
+const claudeSession: AgentSessionRecord = {
+  ...codexSession,
+  id: "session-claude",
+  agentKind: "claude",
+  displayName: "Claude 任务",
+  transportRef: { tmuxSession: "claude-task", tmuxPane: "%9" },
+};
+
 const transcriptPage: AgentTranscriptResponse = {
   available: true,
   agentKind: "codex",
@@ -174,11 +182,14 @@ function createFixture(
     ) => Promise<{ content: string; revision: string; editable: boolean }>;
     resolveSessionId?: () => Promise<string | undefined>;
     resolveSessionIds?: () => Promise<string[]>;
+    resolveClaudeSessionId?: () => Promise<string | undefined>;
     notificationBinding?: {
       messageId: string;
       chatId: string;
       sessionId: string;
       codexThreadId?: string;
+      transcriptAgentKind?: string;
+      transcriptSessionId?: string;
       referencedFiles?: Array<{ path: string; line?: number }>;
     } | null;
     sendCard?: (
@@ -229,7 +240,11 @@ function createFixture(
     content: string;
     expectedRevision: string | null;
   }> = [];
-  const transcriptCalls: Array<{ cursor?: string }> = [];
+  const transcriptCalls: Array<{
+    cursor?: string;
+    threadId: string;
+    agentKind?: "codex" | "claude";
+  }> = [];
   const service = new FeishuSessionWorkspace({
     allowedUserId: "ou_owner",
     now: () => nowMs,
@@ -247,6 +262,8 @@ function createFixture(
     ...(overrides.resolveSessionIds
       ? { resolveSessionIds: async () => overrides.resolveSessionIds!() }
       : {}),
+    resolveClaudeSessionId: async () =>
+      overrides.resolveClaudeSessionId?.() ?? threadId,
     notificationBindings: {
       resolve: () => overrides.notificationBinding ?? null,
     },
@@ -273,8 +290,8 @@ function createFixture(
         data: Buffer.from(`download:${path}`),
       }),
     },
-    transcript: async (_session, _threadId, cursor) => {
-      transcriptCalls.push({ cursor });
+    transcript: async (_session, threadId, cursor, agentKind) => {
+      transcriptCalls.push({ cursor, threadId, agentKind });
       return overrides.transcript ?? transcriptPage;
     },
     exportTranscript: async () => ({
@@ -349,7 +366,9 @@ test("notification records callback opens only its bound current Codex transcrip
   };
   assert.equal(fixture.service.accepts(event), true);
   assert.equal(await fixture.service.handle(event), "records_sent");
-  assert.deepEqual(fixture.transcriptCalls, [{ cursor: undefined }]);
+  assert.deepEqual(fixture.transcriptCalls, [
+    { cursor: undefined, threadId: "thread-1", agentKind: "codex" },
+  ]);
   assert.match(JSON.stringify(fixture.lastCard()), /帮我看文件/);
 
   assert.equal(
@@ -386,7 +405,9 @@ test("notification records callback keeps its bound inactive tmux pane transcrip
     }),
     "records_sent",
   );
-  assert.deepEqual(fixture.transcriptCalls, [{ cursor: undefined }]);
+  assert.deepEqual(fixture.transcriptCalls, [
+    { cursor: undefined, threadId: "thread-notified", agentKind: "codex" },
+  ]);
 });
 
 test("notification records callback rejects a bound tmux pane that no longer exists", async () => {
@@ -414,6 +435,71 @@ test("notification records callback rejects a bound tmux pane that no longer exi
     "ignored_changed_thread",
   );
   assert.deepEqual(fixture.transcriptCalls, []);
+});
+
+test("notification records callback opens only the current Claude transcript target", async () => {
+  const claudeSessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const fixture = createFixture({
+    session: claudeSession,
+    threadId: claudeSessionId,
+    resolveSessionId: async () => {
+      throw new Error("Claude records must use the Claude session resolver");
+    },
+    notificationBinding: {
+      messageId: "om_claude_notice",
+      chatId: "oc_private",
+      sessionId: "session-claude",
+      transcriptAgentKind: "claude",
+      transcriptSessionId: claudeSessionId,
+    },
+    transcript: {
+      ...transcriptPage,
+      agentKind: "claude",
+      sessionId: claudeSessionId,
+      entries: [
+        {
+          id: "assistant-claude",
+          timestamp: "2026-09-09T08:01:00.000Z",
+          kind: "assistant",
+          title: "Claude",
+          text: "Claude 完整完成内容",
+          collapsedByDefault: false,
+        },
+      ],
+    },
+  });
+
+  assert.equal(
+    await fixture.service.handle({
+      type: "card.action.trigger",
+      event_id: "evt_claude_records",
+      operator_id: "ou_owner",
+      message_id: "om_claude_notice",
+      chat_id: "oc_private",
+      action_tag: "button",
+      action_value: JSON.stringify({ action: "kanban_completion_records" }),
+    }),
+    "records_sent",
+  );
+  assert.deepEqual(fixture.transcriptCalls, [
+    { cursor: undefined, threadId: claudeSessionId, agentKind: "claude" },
+  ]);
+  assert.match(JSON.stringify(fixture.lastCard()), /Claude 完整完成内容/);
+
+  fixture.setThreadId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
+  assert.equal(
+    await fixture.service.handle({
+      type: "card.action.trigger",
+      event_id: "evt_claude_records_stale",
+      operator_id: "ou_owner",
+      message_id: "om_claude_notice",
+      chat_id: "oc_private",
+      action_tag: "button",
+      action_value: JSON.stringify({ action: "kanban_completion_records" }),
+    }),
+    "ignored_changed_thread",
+  );
+  assert.match(fixture.sentTexts.at(-1)?.text ?? "", /Claude 对话已经切换/);
 });
 
 test("notification file callback previews only its bound referenced file", async () => {

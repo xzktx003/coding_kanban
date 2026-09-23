@@ -111,6 +111,12 @@ function formatTimestamp(timestamp: string): string {
   return Number.isNaN(value.getTime()) ? timestamp : value.toLocaleTimeString();
 }
 
+function getTranscriptAgentLabel(
+  agentKind: AgentTranscriptResponse["agentKind"],
+): string {
+  return agentKind === "claude" ? "Claude" : "Codex";
+}
+
 export function AgentTranscriptEntries({
   expandedEntries,
   onToggleEntry,
@@ -141,8 +147,8 @@ export function AgentTranscriptEntries({
     <>
       <div className="agent-transcript-match">
         {transcript.matchedBy === "session-id"
-          ? "按 Codex 会话 ID 精确匹配"
-          : "按工作目录匹配最近的 Codex 会话"}
+          ? `按 ${getTranscriptAgentLabel(transcript.agentKind)} 会话 ID 精确匹配`
+          : `按工作目录匹配最近的 ${getTranscriptAgentLabel(transcript.agentKind)} 会话`}
         {transcript.updatedAt
           ? ` · 更新于 ${formatTimestamp(transcript.updatedAt)}`
           : ""}
@@ -735,7 +741,7 @@ export function AgentTranscriptDialog({
               />
             </>
           ) : (
-            <div className="agent-transcript-empty">正在读取 Codex 记录…</div>
+            <div className="agent-transcript-empty">正在读取智能体记录…</div>
           )}
         </div>
       </div>

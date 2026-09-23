@@ -558,6 +558,9 @@ export function buildCompletionCards(
     elements: [{ tag: "div", text: { tag: "plain_text", content } }],
   });
   const recordsAvailable = notification["records-available"] === true;
+  const quickRepliesAvailable =
+    notification["quick-replies-available"] === true &&
+    sanitizeText(notification["agent-kind"]).toLowerCase() === "codex";
   const referencedFiles = completionReferencedFiles(notification);
   const referencedImages = referencedFiles.flatMap((reference) => {
     const imageKey = referencedImageKeys.get(reference.path);
@@ -565,6 +568,79 @@ export function buildCompletionCards(
       ? [{ reference, imageKey }]
       : [];
   });
+  const footerActions = (index, questionPart) => {
+    const buttons = [];
+    if (quickRepliesAvailable) {
+      buttons.push({
+        tag: "button",
+        text: { tag: "plain_text", content: "快捷回复" },
+        type: "default",
+        size: "tiny",
+        width: "default",
+        behaviors: [
+          {
+            type: "callback",
+            value: { action: "kanban_completion_quick_reply" },
+          },
+        ],
+      });
+    }
+    if (recordsAvailable) {
+      buttons.push({
+        tag: "button",
+        text: { tag: "plain_text", content: "查看完整记录" },
+        type: "primary",
+        size: "tiny",
+        width: "default",
+        behaviors: [
+          {
+            type: "callback",
+            value: { action: "kanban_completion_records" },
+          },
+        ],
+      });
+    }
+    if (!questionPart && index === 0 && recordsAvailable) {
+      referencedFiles.forEach((reference, referenceIndex) => {
+        const basename = reference.path.split("/").at(-1);
+        buttons.push({
+          tag: "button",
+          text: {
+            tag: "plain_text",
+            content: truncateText(
+              `查看 ${basename}${reference.line ? `:${reference.line}` : ""}`,
+              100,
+            ),
+          },
+          type: "default",
+          size: "tiny",
+          width: "default",
+          behaviors: [
+            {
+              type: "callback",
+              value: {
+                action: "kanban_completion_file",
+                reference: referenceIndex,
+              },
+            },
+          ],
+        });
+      });
+    }
+    return buttons.length
+      ? [
+          {
+            tag: "column_set",
+            flex_mode: "flow",
+            horizontal_spacing: "8px",
+            columns: buttons.map((button) => ({
+              tag: "column",
+              elements: [button],
+            })),
+          },
+        ]
+      : [];
+  };
   return parts.map(({ chunk, index, questionPart }) => ({
     schema: "2.0",
     config: {
@@ -663,53 +739,7 @@ export function buildCompletionCards(
               };
             })
           : []),
-        ...(!questionPart &&
-        index === 0 &&
-        recordsAvailable &&
-        referencedFiles.length > 0
-          ? referencedFiles.map((reference, referenceIndex) => {
-              const basename = reference.path.split("/").at(-1);
-              return {
-                tag: "button",
-                text: {
-                  tag: "plain_text",
-                  content: truncateText(
-                    `查看 ${basename}${reference.line ? `:${reference.line}` : ""}`,
-                    100,
-                  ),
-                },
-                type: "default",
-                size: "tiny",
-                width: "default",
-                behaviors: [
-                  {
-                    type: "callback",
-                    value: {
-                      action: "kanban_completion_file",
-                      reference: referenceIndex,
-                    },
-                  },
-                ],
-              };
-            })
-          : []),
-        ...(recordsAvailable
-          ? [
-              {
-                tag: "button",
-                text: { tag: "plain_text", content: "查看完整记录" },
-                type: "primary",
-                size: "tiny",
-                width: "default",
-                behaviors: [
-                  {
-                    type: "callback",
-                    value: { action: "kanban_completion_records" },
-                  },
-                ],
-              },
-            ]
-          : []),
+        ...footerActions(index, questionPart),
       ],
     },
   }));

@@ -528,6 +528,52 @@ export class LocalTmuxAdapter {
       options.captureLines ?? DEFAULT_TERMINAL_TMUX_CAPTURE_LINES;
   }
 
+  async syncRegisteredAgentKinds(): Promise<void> {
+    const sessionsByPane = new Map(
+      this.registry
+        .list()
+        .items.filter(
+          (session) =>
+            session.sourceType === "local" &&
+            !session.sshTarget &&
+            session.transportRef?.tmuxPane &&
+            session.transportRef.tmuxSession,
+        )
+        .map((session) => [session.transportRef!.tmuxPane!, session]),
+    );
+    if (sessionsByPane.size === 0) {
+      return;
+    }
+
+    let stdout: string;
+    try {
+      ({ stdout } = await this.runTmux([
+        "list-panes",
+        "-a",
+        "-F",
+        "#{session_name}\t#{session_attached}\t#{window_active}\t#{pane_active}\t#{pane_id}\t#{pane_current_command}\t#{pane_current_path}",
+      ]));
+    } catch (error) {
+      if (isNoTmuxServerError(error)) {
+        return;
+      }
+      throw error;
+    }
+
+    for (const pane of parsePaneInfo(stdout)) {
+      const registered = sessionsByPane.get(pane.paneId);
+      if (
+        registered?.transportRef?.tmuxSession === pane.sessionName &&
+        pane.currentCommand &&
+        registered.agentKind !== pane.currentCommand
+      ) {
+        this.registry.updateSession(registered.id, {
+          agentKind: pane.currentCommand,
+        });
+      }
+    }
+  }
+
   async renameSession(
     agentSession: AgentSessionRecord,
     nextName: string,

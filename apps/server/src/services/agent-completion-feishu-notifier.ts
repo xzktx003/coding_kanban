@@ -5,6 +5,7 @@ import type {
   FeishuNotificationSettingsResponse,
   ListAgentSessionsResponse,
 } from "@agent-orchestrator/shared";
+import { isClaudeAgentKind } from "@agent-orchestrator/shared";
 
 import {
   FeishuCompletionFileReferenceService,
@@ -14,6 +15,8 @@ import {
 export interface FeishuCompletionEvent {
   userQuestion?: string;
   codexThreadId?: string;
+  transcriptAgentKind?: string;
+  transcriptSessionId?: string;
   sessionId: string;
   displayName: string;
   agentKind: string;
@@ -27,6 +30,8 @@ export interface FeishuCompletionEvent {
 export interface FeishuCompletionObservation {
   userQuestion?: string;
   codexThreadId?: string;
+  transcriptAgentKind?: string;
+  transcriptSessionId?: string;
   completionId: string;
   content: string;
   completedAt: string;
@@ -102,9 +107,24 @@ function canObserveStructuredCompletion(session: AgentSessionRecord): boolean {
   const agentKind = session.agentKind.trim().toLowerCase();
   return (
     agentKind === "codex" ||
+    isClaudeAgentKind(agentKind) ||
     Boolean(session.agentSessionId) ||
     (agentKind === "node" && Boolean(session.transportRef?.tmuxSession))
   );
+}
+
+function canPrepareCodexLocalFileReferences(
+  session: AgentSessionRecord,
+): boolean {
+  const agentKind = session.agentKind.trim().toLowerCase();
+  return (
+    (agentKind === "codex" || agentKind === "node") &&
+    canObserveStructuredCompletion(session)
+  );
+}
+
+function structuredDeliveryAgentKind(event: FeishuCompletionEvent): string {
+  return isClaudeAgentKind(event.agentKind) ? "claude" : "codex";
 }
 
 function completionEventForSession(
@@ -123,7 +143,7 @@ function completionEventForSession(
       session.outputPreview ??
       "任务已经完成，请打开 Coding Kanban 查看结果。",
     completedAt,
-    ...(canObserveStructuredCompletion(session) &&
+    ...(canPrepareCodexLocalFileReferences(session) &&
     !session.sshTarget &&
     (!session.hostId || session.hostId === "local") &&
     session.workingDirectory
@@ -402,7 +422,7 @@ export class AgentCompletionFeishuNotifier {
       observations = await this.#inspectLatestCompletions(probe.event);
     } catch {
       this.#logError(
-        new Error("Codex structured completion inspection failed"),
+        new Error("Agent structured completion inspection failed"),
         probe.event,
       );
       return;
@@ -467,13 +487,19 @@ export class AgentCompletionFeishuNotifier {
 
     const deliveryEvent: FeishuCompletionEvent = {
       ...event,
-      agentKind: "codex",
+      agentKind: structuredDeliveryAgentKind(event),
       summary: observation.content,
       ...(observation.userQuestion
         ? { userQuestion: observation.userQuestion }
         : {}),
       ...(observation.codexThreadId
         ? { codexThreadId: observation.codexThreadId }
+        : {}),
+      ...(observation.transcriptAgentKind
+        ? { transcriptAgentKind: observation.transcriptAgentKind }
+        : {}),
+      ...(observation.transcriptSessionId
+        ? { transcriptSessionId: observation.transcriptSessionId }
         : {}),
       completedAt: observation.completedAt,
       completionId: observation.completionId,
@@ -533,7 +559,7 @@ export class AgentCompletionFeishuNotifier {
         }
       } catch {
         this.#logError(
-          new Error("Codex structured completion inspection failed"),
+          new Error("Agent structured completion inspection failed"),
           event,
         );
       }
@@ -549,14 +575,18 @@ export class AgentCompletionFeishuNotifier {
         resolvedContent = await this.#contentResolver.resolve(event);
       } catch {
         this.#logError(
-          new Error("Codex completion content resolution failed"),
+          new Error("Agent completion content resolution failed"),
           event,
         );
       }
     }
 
     const deliveryEvent = resolvedContent?.trim()
-      ? { ...event, agentKind: "codex", summary: resolvedContent }
+      ? {
+          ...event,
+          agentKind: structuredDeliveryAgentKind(event),
+          summary: resolvedContent,
+        }
       : event;
     try {
       const delivery = await this.#sender.send(deliveryEvent);
@@ -595,6 +625,9 @@ export class AgentCompletionFeishuNotifier {
     sessionId: string,
     observation: FeishuCompletionObservation,
   ): string {
+    if (observation.transcriptSessionId) {
+      return `${sessionId}\u0000${observation.transcriptAgentKind ?? "agent"}\u0000${observation.transcriptSessionId}`;
+    }
     return observation.codexThreadId
       ? `${sessionId}\u0000${observation.codexThreadId}`
       : sessionId;
@@ -649,6 +682,7 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
   readonly #scriptPath: string;
   readonly #fallbackWorkingDirectory: string;
   readonly #runCommand: ScriptCommandRunner;
+  readonly #quickRepliesAvailable: () => boolean;
   readonly #fileReferences: Pick<
     FeishuCompletionFileReferenceService,
     "prepare"
@@ -659,12 +693,15 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
     scriptPath: string;
     fallbackWorkingDirectory: string;
     runCommand?: ScriptCommandRunner;
+    quickRepliesAvailable?: () => boolean;
     fileReferences?: Pick<FeishuCompletionFileReferenceService, "prepare">;
   }) {
     this.#nodeBinary = options.nodeBinary ?? process.execPath;
     this.#scriptPath = options.scriptPath;
     this.#fallbackWorkingDirectory = options.fallbackWorkingDirectory;
     this.#runCommand = options.runCommand ?? runScriptCommand;
+    this.#quickRepliesAvailable =
+      options.quickRepliesAvailable ?? (() => false);
     this.#fileReferences =
       options.fileReferences ?? new FeishuCompletionFileReferenceService();
   }
@@ -697,7 +734,18 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
       "display-name": event.displayName,
       "last-assistant-message": summary,
       ...(event.userQuestion ? { "user-question": event.userQuestion } : {}),
-      ...(event.codexThreadId ? { "records-available": true } : {}),
+      ...(event.codexThreadId || event.transcriptSessionId
+        ? { "records-available": true }
+        : {}),
+      ...(this.#canOfferQuickReplies(event)
+        ? { "quick-replies-available": true }
+        : {}),
+      ...(event.transcriptAgentKind
+        ? { "transcript-agent-kind": event.transcriptAgentKind }
+        : {}),
+      ...(event.transcriptSessionId
+        ? { "transcript-session-id": event.transcriptSessionId }
+        : {}),
       ...(referencedFiles.length > 0
         ? { "referenced-files": referencedFiles }
         : {}),
@@ -743,6 +791,20 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
     } catch {
       // execFile errors may repeat argv, which contains the task summary and cwd.
       throw new Error("Feishu notification delivery failed");
+    }
+  }
+
+  #canOfferQuickReplies(event: FeishuCompletionEvent): boolean {
+    if (
+      event.agentKind.trim().toLowerCase() !== "codex" ||
+      !event.codexThreadId?.trim()
+    ) {
+      return false;
+    }
+    try {
+      return this.#quickRepliesAvailable();
+    } catch {
+      return false;
     }
   }
 }

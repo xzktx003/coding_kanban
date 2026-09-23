@@ -2,6 +2,7 @@ import type {
   AgentSessionRecord,
   AgentTranscriptResponse,
 } from "@agent-orchestrator/shared";
+import { isClaudeAgentKind } from "@agent-orchestrator/shared";
 
 import type {
   FeishuCompletionEvent,
@@ -12,6 +13,11 @@ import {
   resolveActiveCodexSessionId,
 } from "./active-codex-session-resolver.js";
 import type { AgentSessionRegistry } from "./agent-session-registry.js";
+import type {
+  ClaudeTranscriptService,
+  ClaudeTurnCompletion,
+  ReadClaudeTranscriptInput,
+} from "./claude-transcript-service.js";
 import type {
   CodexTranscriptService,
   ReadRemoteTranscriptInput,
@@ -30,6 +36,17 @@ interface CodexCompletionContentResolverOptions {
         "readRemote" | "readLatestCompletion" | "readLatestRemoteCompletion"
       >
     >;
+  claudeTranscriptService?: Partial<
+    Pick<
+      ClaudeTranscriptService,
+      | "read"
+      | "readRemote"
+      | "readLatestCompletion"
+      | "readLatestRemoteCompletion"
+      | "readLatestCompletionForSession"
+      | "resolveSessionId"
+    >
+  >;
 }
 
 interface CachedSessionResolution {
@@ -51,7 +68,14 @@ function canResolveCodexTranscript(session: AgentSessionRecord): boolean {
   }
 
   // Shell-labelled tmux cards can currently be displaying a Codex pane.
-  return !["claude", "copilot", "opencode"].includes(agentKind);
+  return (
+    !isClaudeAgentKind(agentKind) &&
+    !["copilot", "opencode"].includes(agentKind)
+  );
+}
+
+function canResolveClaudeTranscript(session: AgentSessionRecord): boolean {
+  return isClaudeAgentKind(session.agentKind);
 }
 
 function lastAssistantOutput(
@@ -67,6 +91,23 @@ function lastAssistantOutput(
   return entry?.text.trim() ? entry.text : null;
 }
 
+function claudeInputForSession(
+  session: AgentSessionRecord,
+): ReadClaudeTranscriptInput {
+  return {
+    ...(session.agentSessionId ? { sessionId: session.agentSessionId } : {}),
+    ...(session.workingDirectory
+      ? { workingDirectory: session.workingDirectory }
+      : {}),
+    ...(session.transportRef?.tmuxSession
+      ? { tmuxSession: session.transportRef.tmuxSession }
+      : {}),
+    ...(session.transportRef?.tmuxPane
+      ? { tmuxPane: session.transportRef.tmuxPane }
+      : {}),
+  };
+}
+
 export class CodexCompletionContentResolver {
   readonly #registry: Pick<AgentSessionRegistry, "get" | "updateSession">;
   readonly #codexSessionLocator: Pick<CodexSessionLocator, "resolve"> &
@@ -78,16 +119,31 @@ export class CodexCompletionContentResolver {
         "readRemote" | "readLatestCompletion" | "readLatestRemoteCompletion"
       >
     >;
+  readonly #claudeTranscriptService?: Partial<
+    Pick<
+      ClaudeTranscriptService,
+      | "read"
+      | "readRemote"
+      | "readLatestCompletion"
+      | "readLatestRemoteCompletion"
+      | "readLatestCompletionForSession"
+      | "resolveSessionId"
+    >
+  >;
   readonly #sessionResolutionCache = new Map<string, CachedSessionResolution>();
 
   constructor(options: CodexCompletionContentResolverOptions) {
     this.#registry = options.registry;
     this.#codexSessionLocator = options.codexSessionLocator;
     this.#codexTranscriptService = options.codexTranscriptService;
+    this.#claudeTranscriptService = options.claudeTranscriptService;
   }
 
   async resolve(event: FeishuCompletionEvent): Promise<string | null> {
     const session = this.#registry.get(event.sessionId);
+    if (canResolveClaudeTranscript(session)) {
+      return this.#resolveClaude(session);
+    }
     if (!canResolveCodexTranscript(session)) {
       return null;
     }
@@ -133,6 +189,9 @@ export class CodexCompletionContentResolver {
     event: FeishuCompletionEvent,
   ): Promise<FeishuCompletionObservation | null> {
     const session = this.#registry.get(event.sessionId);
+    if (canResolveClaudeTranscript(session)) {
+      return this.#inspectLatestClaudeCompletion(session);
+    }
     if (!canResolveCodexTranscript(session)) {
       return null;
     }
@@ -163,7 +222,12 @@ export class CodexCompletionContentResolver {
       const completion =
         await this.#codexTranscriptService.readLatestRemoteCompletion(input);
       return completion && sessionId
-        ? { ...completion, codexThreadId: sessionId }
+        ? {
+            ...completion,
+            codexThreadId: sessionId,
+            transcriptAgentKind: "codex",
+            transcriptSessionId: sessionId,
+          }
         : completion;
     }
 
@@ -178,7 +242,12 @@ export class CodexCompletionContentResolver {
     };
     const completion = this.#codexTranscriptService.readLatestCompletion(input);
     return completion && sessionId
-      ? { ...completion, codexThreadId: sessionId }
+      ? {
+          ...completion,
+          codexThreadId: sessionId,
+          transcriptAgentKind: "codex",
+          transcriptSessionId: sessionId,
+        }
       : completion;
   }
 
@@ -186,6 +255,10 @@ export class CodexCompletionContentResolver {
     event: FeishuCompletionEvent,
   ): Promise<FeishuCompletionObservation[]> {
     const session = this.#registry.get(event.sessionId);
+    if (canResolveClaudeTranscript(session)) {
+      const completion = await this.#inspectLatestClaudeCompletion(session);
+      return completion ? [completion] : [];
+    }
     if (!canResolveCodexTranscript(session)) {
       return [];
     }
@@ -218,7 +291,14 @@ export class CodexCompletionContentResolver {
               : {}),
         });
         return completion
-          ? [{ ...completion, codexThreadId: pane.sessionId }]
+          ? [
+              {
+                ...completion,
+                codexThreadId: pane.sessionId,
+                transcriptAgentKind: "codex",
+                transcriptSessionId: pane.sessionId,
+              },
+            ]
           : [];
       } catch {
         return [];
@@ -256,5 +336,79 @@ export class CodexCompletionContentResolver {
       this.#sessionResolutionCache.delete(session.id);
     }
     return sessionId;
+  }
+
+  async #resolveClaude(session: AgentSessionRecord): Promise<string | null> {
+    if (!this.#claudeTranscriptService?.read) {
+      return null;
+    }
+    if (isRemoteAgentSession(session)) {
+      if (!session.sshTarget || !this.#claudeTranscriptService.readRemote) {
+        return null;
+      }
+      const transcript = await this.#claudeTranscriptService.readRemote({
+        ...claudeInputForSession(session),
+        sshTarget: session.sshTarget,
+        limit: 30,
+      });
+      return lastAssistantOutput(transcript);
+    }
+    const transcript = await this.#claudeTranscriptService.read({
+      ...claudeInputForSession(session),
+      limit: 30,
+    });
+    return lastAssistantOutput(transcript);
+  }
+
+  async #inspectLatestClaudeCompletion(
+    session: AgentSessionRecord,
+  ): Promise<FeishuCompletionObservation | null> {
+    const completion = await this.#readLatestClaudeCompletion(session);
+    if (!completion) {
+      return null;
+    }
+    const resolvedSessionId =
+      completion.sessionId ||
+      (await this.#claudeTranscriptService?.resolveSessionId?.(session));
+    return {
+      completionId: completion.completionId,
+      content: completion.content,
+      completedAt: completion.completedAt,
+      ...(completion.userQuestion
+        ? { userQuestion: completion.userQuestion }
+        : {}),
+      ...(resolvedSessionId
+        ? {
+            transcriptAgentKind: "claude",
+            transcriptSessionId: resolvedSessionId,
+          }
+        : {}),
+    };
+  }
+
+  async #readLatestClaudeCompletion(
+    session: AgentSessionRecord,
+  ): Promise<ClaudeTurnCompletion | null> {
+    const service = this.#claudeTranscriptService;
+    if (!service) {
+      return null;
+    }
+    if (service.readLatestCompletionForSession) {
+      return service.readLatestCompletionForSession(session);
+    }
+    const input = claudeInputForSession(session);
+    if (isRemoteAgentSession(session)) {
+      if (!session.sshTarget || !service.readLatestRemoteCompletion) {
+        return null;
+      }
+      return service.readLatestRemoteCompletion({
+        ...input,
+        sshTarget: session.sshTarget,
+      });
+    }
+    if (!service.readLatestCompletion) {
+      return null;
+    }
+    return service.readLatestCompletion(input);
   }
 }

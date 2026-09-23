@@ -230,6 +230,40 @@ test("transcript entries render one server page and offer upward continuation", 
   );
 });
 
+test("transcript entries label Claude matches without Codex-only copy", () => {
+  const transcript: AgentTranscriptResponse = {
+    available: true,
+    agentKind: "claude",
+    sessionId: "claude-1",
+    matchedBy: "working-directory",
+    updatedAt: "2026-09-23T09:30:00.000Z",
+    hasMore: false,
+    nextCursor: null,
+    entries: [
+      {
+        id: "assistant-reply",
+        timestamp: "2026-09-23T09:30:00.000Z",
+        kind: "assistant",
+        title: "Claude",
+        text: "已完成任务。",
+        collapsedByDefault: false,
+      },
+    ],
+  };
+
+  const markup = renderToStaticMarkup(
+    createElement(AgentTranscriptEntries, {
+      transcript,
+      expandedEntries: new Map(),
+      onToggleEntry: () => {},
+    }),
+  );
+
+  assert.match(markup, /按工作目录匹配最近的 Claude 会话/);
+  assert.match(markup, /data-transcript-entry-id="assistant-reply"/);
+  assert.doesNotMatch(markup, /Codex 会话/);
+});
+
 test("every transcript message can collapse without rendering its full body", () => {
   const transcript: AgentTranscriptResponse = {
     available: true,

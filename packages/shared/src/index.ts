@@ -83,6 +83,19 @@ export interface AgentSessionRecord {
   tags?: string[];
 }
 
+export function isClaudeAgentKind(agentKind: string): boolean {
+  const command = agentKind.trim().toLowerCase().split(/\s+/)[0] ?? "";
+  const base = command.split(/[/\\]/).at(-1) ?? "";
+  const executable = base.endsWith(".exe") ? base.slice(0, -4) : base;
+  return executable === "claude" || executable.startsWith("claude-");
+}
+
+export function isClaudeSessionCandidate(
+  session: Pick<AgentSessionRecord, "agentKind">,
+): boolean {
+  return isClaudeAgentKind(session.agentKind);
+}
+
 export function isCodexSessionCandidate(
   session: Pick<
     AgentSessionRecord,
@@ -214,7 +227,7 @@ export interface AgentTranscriptEntry {
 
 export interface AgentTranscriptResponse {
   available: boolean;
-  agentKind: "codex";
+  agentKind: "codex" | "claude";
   sessionId: string | null;
   matchedBy: "session-id" | "working-directory" | null;
   updatedAt: string | null;

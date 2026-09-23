@@ -2,26 +2,43 @@ import { setImmediate } from "node:timers/promises";
 import type {
   AgentSessionRecord,
   AgentTranscriptResponse,
+  SshTarget,
 } from "@agent-orchestrator/shared";
-import type { CodexTranscriptService } from "./codex-transcript-service.js";
 
 const MAX_EXPORT_BYTES = 10 * 1024 * 1024;
+const CODEX_SESSION_ID_PATTERN = /^[a-zA-Z0-9_-]{8,128}$/;
+const CLAUDE_SESSION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+type TranscriptAgentKind = "codex" | "claude";
+type TranscriptReadInput = {
+  sessionId: string;
+  limit: number;
+  cursor?: string;
+};
+type TranscriptSource = {
+  read(
+    input: TranscriptReadInput,
+  ): AgentTranscriptResponse | Promise<AgentTranscriptResponse>;
+  readRemote(
+    input: TranscriptReadInput & { sshTarget: SshTarget },
+  ): Promise<AgentTranscriptResponse>;
+};
 
 /** Exports the human conversation, never raw rollout/tool/internal records. */
 export class FeishuWorkspaceTranscript {
   constructor(
-    private readonly source: Pick<
-      CodexTranscriptService,
-      "read" | "readRemote"
-    >,
+    private readonly codexSource: TranscriptSource,
+    private readonly claudeSource?: TranscriptSource,
   ) {}
 
   async read(
     session: AgentSessionRecord,
     threadId: string,
     cursor?: string,
+    agentKind: TranscriptAgentKind = "codex",
   ): Promise<AgentTranscriptResponse> {
-    return this.readPage(session, threadId, cursor, 5);
+    return this.readPage(session, threadId, cursor, 5, agentKind);
   }
 
   private async readPage(
@@ -29,21 +46,26 @@ export class FeishuWorkspaceTranscript {
     threadId: string,
     cursor: string | undefined,
     limit: number,
+    agentKind: TranscriptAgentKind,
   ): Promise<AgentTranscriptResponse> {
-    if (!/^[a-zA-Z0-9_-]{8,128}$/.test(threadId))
+    if (!this.isValidSessionId(agentKind, threadId))
       throw new Error("无法确认对话记录身份。");
     if (session.hostId && session.hostId !== "local" && !session.sshTarget)
       throw new Error("远端记录通道不可用。");
+    const source = this.sourceFor(agentKind);
     const input = { sessionId: threadId, limit, ...(cursor ? { cursor } : {}) };
     const page = session.sshTarget
-      ? await this.source.readRemote({ ...input, sshTarget: session.sshTarget })
-      : this.source.read(input);
+      ? await source.readRemote({ ...input, sshTarget: session.sshTarget })
+      : await source.read(input);
     if (
       !page.available ||
+      page.agentKind !== agentKind ||
       page.sessionId !== threadId ||
       page.matchedBy !== "session-id"
     ) {
-      throw new Error("未找到当前 Codex 对话的记录，请刷新后重试。");
+      throw new Error(
+        `未找到当前 ${agentKind === "claude" ? "Claude" : "Codex"} 对话的记录，请刷新后重试。`,
+      );
     }
     return {
       ...page,
@@ -59,6 +81,7 @@ export class FeishuWorkspaceTranscript {
   async export(
     session: AgentSessionRecord,
     threadId: string,
+    agentKind: TranscriptAgentKind = "codex",
   ): Promise<{ name: string; data: Buffer }> {
     const pages: string[] = [];
     const cursors = new Set<string>();
@@ -66,7 +89,13 @@ export class FeishuWorkspaceTranscript {
     let cursor: string | undefined;
     let bytes = 0;
     for (let count = 0; count < 500; count++) {
-      const page = await this.readPage(session, threadId, cursor, 100);
+      const page = await this.readPage(
+        session,
+        threadId,
+        cursor,
+        100,
+        agentKind,
+      );
       const text = page.entries
         .filter((entry) => {
           if (ids.has(entry.id)) return false;
@@ -75,7 +104,7 @@ export class FeishuWorkspaceTranscript {
         })
         .map(
           (entry) =>
-            `## ${entry.kind === "user" ? "用户" : "Codex"} · ${entry.timestamp}\n\n${entry.text}\n\n`,
+            `## ${entry.kind === "user" ? "用户" : agentKind === "claude" ? "Claude" : "Codex"} · ${entry.timestamp}\n\n${entry.text}\n\n`,
         )
         .join("");
       bytes += Buffer.byteLength(text);
@@ -84,7 +113,7 @@ export class FeishuWorkspaceTranscript {
       pages.unshift(text);
       if (!page.hasMore)
         return {
-          name: `codex-${threadId}.md`,
+          name: `${agentKind}-${threadId}.md`,
           data: Buffer.from(pages.join("")),
         };
       if (!page.nextCursor || cursors.has(page.nextCursor))
@@ -94,5 +123,24 @@ export class FeishuWorkspaceTranscript {
       await setImmediate();
     }
     throw new Error("记录过长，请分段查看；没有发送不完整的导出文件。");
+  }
+
+  private sourceFor(agentKind: TranscriptAgentKind): TranscriptSource {
+    if (agentKind === "claude") {
+      if (!this.claudeSource) {
+        throw new Error("Claude 记录通道不可用。");
+      }
+      return this.claudeSource;
+    }
+    return this.codexSource;
+  }
+
+  private isValidSessionId(
+    agentKind: TranscriptAgentKind,
+    sessionId: string,
+  ): boolean {
+    return agentKind === "claude"
+      ? CLAUDE_SESSION_ID_PATTERN.test(sessionId)
+      : CODEX_SESSION_ID_PATTERN.test(sessionId);
   }
 }

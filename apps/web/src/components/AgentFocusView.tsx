@@ -2031,7 +2031,7 @@ export function AgentFocusView({
             className={`focus-transcript-btn${transcriptOpen ? " focus-transcript-btn--active" : ""}`}
             data-transcript-session-id={activeHeaderSession.id}
             onClick={() => onToggleTranscript?.(activeHeaderSession.id)}
-            title="查看不受终端重绘影响的完整 Codex 记录"
+            title="查看不受终端重绘影响的完整智能体记录"
             type="button"
           >
             完整记录

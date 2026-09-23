@@ -69,7 +69,10 @@ test("adds a tiny records callback without exposing session identity", () => {
     1_000,
   );
   for (const card of cards) {
-    const button = card.body.elements.at(-1);
+    const row = card.body.elements.at(-1);
+    assert.equal(row.tag, "column_set");
+    assert.equal(row.flex_mode, "flow");
+    const button = row.columns[0].elements[0];
     assert.equal(button.tag, "button");
     assert.equal(button.size, "tiny");
     assert.equal(button.width, "default");
@@ -82,6 +85,66 @@ test("adds a tiny records callback without exposing session identity", () => {
     ]);
     assert.deepEqual(Object.keys(button.behaviors[0].value), ["action"]);
   }
+});
+
+test("adds quick reply before records with a fixed callback payload", () => {
+  const [card] = buildCompletionCards({
+    ...completion,
+    "agent-kind": "codex",
+    "records-available": true,
+    "quick-replies-available": true,
+  });
+  const row = card.body.elements.at(-1);
+  assert.equal(row.tag, "column_set");
+  assert.equal(row.flex_mode, "flow");
+  const buttons = row.columns.map((column) => column.elements[0]);
+  assert.equal(buttons[0].text.content, "快捷回复");
+  assert.equal(buttons[0].size, "tiny");
+  assert.equal(buttons[0].width, "default");
+  assert.deepEqual(buttons[0].behaviors, [
+    {
+      type: "callback",
+      value: { action: "kanban_completion_quick_reply" },
+    },
+  ]);
+  assert.deepEqual(Object.keys(buttons[0].behaviors[0].value), ["action"]);
+  assert.equal(buttons[1].text.content, "查看完整记录");
+});
+
+test("places quick reply, records and referenced file actions in one footer group", () => {
+  const [card] = buildCompletionCards({
+    ...completion,
+    "agent-kind": "codex",
+    "records-available": true,
+    "quick-replies-available": true,
+    "referenced-files": [{ path: "src/app.ts", line: 12 }],
+  });
+  const rows = card.body.elements.filter(
+    (element) =>
+      element.tag === "column_set" &&
+      element.columns?.some((column) =>
+        column.elements.some((child) => child.tag === "button"),
+      ),
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].flex_mode, "flow");
+  assert.deepEqual(
+    rows[0].columns.map((column) => column.elements[0].text.content),
+    ["快捷回复", "查看完整记录", "查看 app.ts:12"],
+  );
+});
+
+test("does not render quick replies for non-Codex notifications", () => {
+  const [card] = buildCompletionCards({
+    ...completion,
+    "agent-kind": "claude",
+    "records-available": true,
+    "quick-replies-available": true,
+  });
+  const serialized = JSON.stringify(card);
+  assert.doesNotMatch(serialized, /快捷回复/);
+  assert.doesNotMatch(serialized, /kanban_completion_quick_reply/);
+  assert.match(serialized, /查看完整记录/);
 });
 
 test("preserves exact formula source across Unicode chunking", () => {
@@ -418,6 +481,20 @@ test("adds tiny callback buttons for trusted referenced files", () => {
   assert.match(serialized, /kanban_completion_file/);
   assert.match(serialized, /"reference":0/);
   assert.match(serialized, /"reference":1/);
+});
+
+test("shows the read-only transcript button for a bound Claude completion", () => {
+  const [card] = buildCompletionCards({
+    ...completion,
+    "agent-kind": "claude",
+    "records-available": true,
+    "transcript-agent-kind": "claude",
+    "transcript-session-id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  });
+  const serialized = JSON.stringify(card);
+  assert.match(serialized, /Claude 任务完成/);
+  assert.match(serialized, /查看完整记录/);
+  assert.match(serialized, /kanban_completion_records/);
 });
 
 test("uploads a safe local image and embeds it in the private completion card", async () => {

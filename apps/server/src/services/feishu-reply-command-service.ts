@@ -132,22 +132,36 @@ export class FeishuReplyCommandService {
       typeof event.message_id !== "string" ||
       !MESSAGE_ID_PATTERN.test(event.message_id) ||
       typeof event.reply_to !== "string" ||
-      !MESSAGE_ID_PATTERN.test(event.reply_to)
+      !MESSAGE_ID_PATTERN.test(event.reply_to) ||
+      typeof event.root_id !== "string" ||
+      !MESSAGE_ID_PATTERN.test(event.root_id)
     ) {
       return "ignored_untrusted";
     }
 
-    let binding = this.#bindings.resolve(event.reply_to);
-    if (
-      (!binding || binding.chatId !== event.chat_id) &&
-      typeof event.root_id === "string" &&
-      MESSAGE_ID_PATTERN.test(event.root_id)
-    ) {
-      binding = this.#bindings.resolve(event.root_id);
-    }
-    if (!binding || binding.chatId !== event.chat_id) {
+    const rootBinding = this.#bindings.resolve(event.root_id);
+    if (!rootBinding || rootBinding.chatId !== event.chat_id) {
       return "ignored_unbound";
     }
+
+    const parentBinding = this.#bindings.resolve(event.reply_to);
+    if (
+      parentBinding &&
+      (parentBinding.chatId !== event.chat_id ||
+        parentBinding.sessionId !== rootBinding.sessionId ||
+        (parentBinding.codexThreadId &&
+          rootBinding.codexThreadId &&
+          parentBinding.codexThreadId !== rootBinding.codexThreadId))
+    ) {
+      return "ignored_unbound";
+    }
+    const binding = parentBinding
+      ? {
+          ...parentBinding,
+          codexThreadId:
+            parentBinding.codexThreadId ?? rootBinding.codexThreadId,
+        }
+      : rootBinding;
     if (
       this.#bindings.hasProcessed(event.message_id) ||
       this.#inFlightMessageIds.has(event.message_id)

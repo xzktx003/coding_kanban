@@ -27,6 +27,226 @@ test("control panel submits target and prompt together without changing notifica
   assert.match(JSON.stringify(card), /原会话/);
 });
 
+test("control panel exposes quick reply entry when enabled", () => {
+  const card = buildFeishuControlPanelCard({
+    panelId: "abc",
+    options: [{ value: "target1", label: "project · Codex" }],
+    quickRepliesEnabled: true,
+  });
+  const json = JSON.stringify(card);
+  assert.match(json, /快捷回复/);
+  assert.match(json, /kanban_quick_replies/);
+  assert.doesNotMatch(json, /kanban_quick_send_abc/);
+});
+
+test("quick reply panel first selects a target through a standalone callback", () => {
+  const card = buildFeishuControlPanelCard({
+    panelId: "quick1",
+    options: [
+      { value: "codex-target", label: "repo · Codex" },
+      { value: "claude-target", label: "repo · Claude" },
+    ],
+    quickReplies: {
+      message: "选择快捷回复发送到目标会话。",
+      options: [
+        { value: "tpl-1", label: "继续" },
+        { value: "tpl-2", label: "总结" },
+      ],
+    },
+  });
+  assert.equal(card.schema, "2.0");
+  assert.equal(card.header.title.content, "Coding Kanban · 快捷回复");
+  assert.equal(card.config.enable_forward, false);
+  const form = card.body.elements.find(
+    (element: any) => element.tag === "form",
+  );
+  assert.equal(form, undefined);
+  const selects = card.body.elements.filter(
+    (element: any) => element.tag === "select_static",
+  ) as any[];
+  assert.equal(selects.length, 1);
+  const target = selects[0];
+  assert.equal(target.name, "target");
+  assert.equal(target.required, undefined);
+  assert.equal(target.initial_option, undefined);
+  assert.deepEqual(
+    target.options.map((option: any) => option.value),
+    ["codex-target", "claude-target"],
+  );
+  assert.deepEqual(target.behaviors, [
+    {
+      type: "callback",
+      value: { action: "kanban_quick_target", panelId: "quick1" },
+    },
+  ]);
+  const json = JSON.stringify(card);
+  assert.doesNotMatch(json, /kanban_quick_send_quick1/);
+  assert.doesNotMatch(json, /kanban_quick_edit_quick1/);
+  assert.doesNotMatch(json, /请选择快捷回复/);
+});
+
+test("bound quick reply panel selects a template through a standalone preview callback", () => {
+  const card = buildFeishuControlPanelCard({
+    panelId: "bound1",
+    options: [{ value: "must-not-leak", label: "hidden option" }],
+    quickReplies: {
+      boundTargetLabel: "原会话 · Claude",
+      options: [{ value: "tpl-1", label: "继续执行" }],
+    },
+  });
+  const json = JSON.stringify(card);
+  assert.match(json, /原会话 · Claude/);
+  assert.doesNotMatch(json, /must-not-leak/);
+  const form = card.body.elements.find(
+    (element: any) => element.tag === "form",
+  );
+  assert.equal(form, undefined);
+  const selects = card.body.elements.filter(
+    (element: any) => element.tag === "select_static",
+  ) as any[];
+  assert.equal(selects.length, 1);
+  const quickReply = selects[0];
+  assert.equal(quickReply.name, "quickReply");
+  assert.equal(quickReply.required, undefined);
+  assert.deepEqual(
+    quickReply.options.map((option: any) => option.value),
+    ["tpl-1"],
+  );
+  assert.deepEqual(quickReply.behaviors, [
+    {
+      type: "callback",
+      value: { action: "kanban_quick_preview", panelId: "bound1" },
+    },
+  ]);
+  assert.doesNotMatch(json, /kanban_quick_send_bound1/);
+  assert.doesNotMatch(json, /kanban_quick_edit_bound1/);
+});
+
+test("quick reply editor preserves multiline prompt as input value without markdown injection", () => {
+  const prompt = "第一行\n**不要当 Markdown**\n<at id=all></at>";
+  const card = buildFeishuControlPanelCard({
+    panelId: "edit1",
+    options: [{ value: "hidden", label: "hidden" }],
+    quickReplies: {
+      boundTargetLabel: "原会话",
+      options: [{ value: "tpl-1", label: "模板一" }],
+      editor: { label: "模板一", text: prompt },
+    },
+  });
+  const form = card.body.elements.find(
+    (element: any) => element.tag === "form",
+  ) as any;
+  const input = form.elements.find((element: any) => element.name === "prompt");
+  assert.equal(input.default_value, prompt);
+  assert.equal(input.input_type, "multiline_text");
+  assert.equal(input.max_length, 1000);
+  assert.equal(
+    form.elements.some((element: any) => element.name === "prompt_0"),
+    false,
+  );
+  assert.ok(
+    form.elements.some(
+      (element: any) => element.name === "kanban_quick_confirm_edit1",
+    ),
+  );
+  const backButton = card.body.elements.find(
+    (element: any) =>
+      element.tag === "button" && element.text?.content === "换一条快捷回复",
+  ) as any;
+  assert.deepEqual(backButton.behaviors, [
+    {
+      type: "callback",
+      value: { action: "kanban_quick_back", panelId: "edit1" },
+    },
+  ]);
+  assert.equal(
+    form.elements.some((element: any) => element.name === "quickReply"),
+    false,
+  );
+  const injectedMarkdownNodes: any[] = [];
+  function visit(value: any) {
+    if (!value || typeof value !== "object") return;
+    if (value.tag === "markdown" && value.content?.includes("<at id=all>")) {
+      injectedMarkdownNodes.push(value);
+    }
+    Object.values(value).forEach(visit);
+  }
+  visit(card);
+  assert.equal(injectedMarkdownNodes.length, 0);
+  assert.match(JSON.stringify(card), /方括号占位符/);
+});
+
+test("quick reply editor splits long text by unicode codepoints without truncation", () => {
+  const prompt = `${"a".repeat(999)}😀b`;
+  const card = buildFeishuControlPanelCard({
+    panelId: "long-edit",
+    options: [{ value: "hidden", label: "hidden" }],
+    quickReplies: {
+      boundTargetLabel: "原会话",
+      options: [{ value: "tpl-1", label: "长模板" }],
+      editor: { label: "长模板", text: prompt },
+    },
+  });
+  const form = card.body.elements.find(
+    (element: any) => element.tag === "form",
+  ) as any;
+  const inputs = form.elements.filter(
+    (element: any) => element.tag === "input",
+  );
+  assert.deepEqual(
+    inputs.map((input: any) => input.name),
+    ["prompt_0", "prompt_1"],
+  );
+  assert.deepEqual(
+    inputs.map((input: any) => input.max_length),
+    [1000, 1000],
+  );
+  assert.deepEqual(
+    inputs.map((input: any) => input.default_value),
+    [`${"a".repeat(999)}😀`, "b"],
+  );
+  assert.equal(
+    inputs.map((input: any) => input.default_value).join(""),
+    prompt,
+  );
+  assert.match(inputs[0].label.content, /第 1\/2 段/);
+  assert.match(inputs[1].label.content, /第 2\/2 段/);
+  assert.match(JSON.stringify(card), /按顺序拼接/);
+  assert.match(JSON.stringify(card), /保留换行/);
+});
+
+test("quick reply panel without catalog or target renders a bounded empty state", () => {
+  const noCatalog = buildFeishuControlPanelCard({
+    panelId: "empty-quick",
+    options: [{ value: "target", label: "target" }],
+    quickReplies: { options: [] },
+  });
+  assert.equal(
+    noCatalog.body.elements.some((element: any) => element.tag === "form"),
+    false,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(noCatalog),
+    /kanban_quick_send_empty-quick/,
+  );
+  assert.match(JSON.stringify(noCatalog), /暂无可用快捷回复/);
+
+  const noTarget = buildFeishuControlPanelCard({
+    panelId: "empty-target",
+    options: [],
+    quickReplies: { options: [{ value: "tpl-1", label: "继续" }] },
+  });
+  assert.equal(
+    noTarget.body.elements.some((element: any) => element.tag === "form"),
+    false,
+  );
+  assert.doesNotMatch(
+    JSON.stringify(noTarget),
+    /kanban_quick_send_empty-target/,
+  );
+  assert.match(JSON.stringify(noTarget), /暂无可发送目标/);
+});
+
 test("empty control panel offers refresh without an invalid empty selector", () => {
   const card = buildFeishuControlPanelCard({ panelId: "abc", options: [] });
   assert.equal(

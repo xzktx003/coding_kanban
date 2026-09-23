@@ -52,6 +52,18 @@ function makeNodeTmuxSession(
   };
 }
 
+function makeClaudeSession(
+  interactionState: AgentSessionRecord["interactionState"],
+): AgentSessionRecord {
+  return {
+    ...makeSession(interactionState),
+    agentKind: "claude",
+    displayName: "Claude 任务",
+    agentSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    transportRef: { tmuxSession: "claude-task", tmuxPane: "%9" },
+  };
+}
+
 class SnapshotSource {
   #listener: ((snapshot: ListAgentSessionsResponse) => void) | null = null;
 
@@ -329,6 +341,146 @@ test("notifies every structured node-labelled Codex turn even when the terminal 
     source.emitSession(makeNodeTmuxSession("idle"));
     await new Promise<void>((resolve) => setTimeout(resolve, 10));
     assert.equal(sent.length, 2);
+  } finally {
+    stop();
+  }
+});
+
+test("notifies new Claude transcript completions after the restored baseline", async () => {
+  const source = new SnapshotSource({
+    items: [
+      {
+        ...makeClaudeSession("running"),
+        agentKind: "claude.exe",
+        agentSessionId: undefined,
+        lastOutputAt: "2026-09-23T10:00:00.000Z",
+      },
+    ],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-09-23T10:00:00.000Z",
+  });
+  let completion: FeishuCompletionObservation = {
+    transcriptAgentKind: "claude",
+    transcriptSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    completionId: "claude-existing",
+    content: "启动前已经完成的 Claude 回复",
+    userQuestion: "旧问题",
+    completedAt: "2026-09-23T09:59:00.000Z",
+  };
+  const sent: FeishuCompletionEvent[] = [];
+  const stop = new AgentCompletionFeishuNotifier({
+    source,
+    settings: {
+      get: () => ({
+        configured: true,
+        destinationType: "user",
+        enabled: true,
+      }),
+    },
+    contentResolver: {
+      resolve: async () => {
+        throw new Error("Claude completion should use structured content");
+      },
+      inspectLatestCompletion: async () => completion,
+    },
+    structuredCompletionProbeDelayMs: 0,
+    structuredCompletionProbeIntervalMs: 0,
+    sender: {
+      send: async (event) => {
+        sent.push(event);
+      },
+    },
+  }).start();
+
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(sent.length, 0);
+
+    completion = {
+      transcriptAgentKind: "claude",
+      transcriptSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      completionId: "claude-new",
+      content: "Claude 完整完成内容",
+      userQuestion: "新的问题",
+      completedAt: "2026-09-23T10:00:05.000Z",
+    };
+    source.emitSession({
+      ...makeClaudeSession("running"),
+      agentKind: "claude.exe",
+      agentSessionId: undefined,
+      lastOutputAt: "2026-09-23T10:00:05.000Z",
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+    assert.deepEqual(
+      sent.map((event) => ({
+        agentKind: event.agentKind,
+        completionId: event.completionId,
+        summary: event.summary,
+        userQuestion: event.userQuestion,
+        codexThreadId: event.codexThreadId,
+        transcriptAgentKind: event.transcriptAgentKind,
+        transcriptSessionId: event.transcriptSessionId,
+        allowLocalFileReferences: event.allowLocalFileReferences,
+      })),
+      [
+        {
+          agentKind: "claude",
+          completionId: "claude-new",
+          summary: "Claude 完整完成内容",
+          userQuestion: "新的问题",
+          codexThreadId: undefined,
+          transcriptAgentKind: "claude",
+          transcriptSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          allowLocalFileReferences: undefined,
+        },
+      ],
+    );
+  } finally {
+    stop();
+  }
+});
+
+test("does not send a fallback card when Claude is idle without a completed transcript turn", async () => {
+  const source = new SnapshotSource({
+    items: [makeClaudeSession("running")],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-09-23T11:00:00.000Z",
+  });
+  const sent: FeishuCompletionEvent[] = [];
+  let fallbackReads = 0;
+  const stop = new AgentCompletionFeishuNotifier({
+    source,
+    settings: {
+      get: () => ({
+        configured: true,
+        destinationType: "user",
+        enabled: true,
+      }),
+    },
+    contentResolver: {
+      inspectLatestCompletion: async () => null,
+      resolve: async () => {
+        fallbackReads += 1;
+        return "不应发送的 Claude 终端摘要";
+      },
+    },
+    structuredCompletionProbeDelayMs: 0,
+    structuredCompletionProbeIntervalMs: 0,
+    sender: {
+      send: async (event) => {
+        sent.push(event);
+      },
+    },
+  }).start();
+
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    source.emitSession(makeClaudeSession("idle"));
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+
+    assert.equal(sent.length, 0);
+    assert.equal(fallbackReads, 0);
   } finally {
     stop();
   }
@@ -863,6 +1015,92 @@ test("script sender uses a fixed executable and Kanban delivery mode without a s
   });
 });
 
+test("script sender only exposes quick replies for eligible Codex thread notifications", async () => {
+  const notifications: Record<string, unknown>[] = [];
+  const sender = new ScriptFeishuCompletionSender({
+    scriptPath: "/workspace/scripts/codex-feishu-notify.mjs",
+    fallbackWorkingDirectory: "/workspace/coding_kanban",
+    quickRepliesAvailable: () => true,
+    runCommand: async (_binary, args) => {
+      notifications.push(JSON.parse(args[2] ?? "") as Record<string, unknown>);
+      return {
+        stdout: JSON.stringify({
+          status: "sent",
+          messages: [{ messageId: "om_notice", chatId: "oc_private" }],
+        }),
+      };
+    },
+  });
+
+  await sender.send({
+    sessionId: "session-codex",
+    displayName: "Codex 任务",
+    agentKind: "codex",
+    workingDirectory: "/workspace/project-a",
+    summary: "Codex 已完成",
+    completedAt: "2026-09-23T10:30:00.000Z",
+    completionId: "codex-turn-1",
+    codexThreadId: "codex-thread-12345678",
+  });
+  await sender.send({
+    sessionId: "session-claude",
+    displayName: "Claude 任务",
+    agentKind: "claude",
+    workingDirectory: "/workspace/project-a",
+    summary: "Claude 已完成",
+    completedAt: "2026-09-23T10:31:00.000Z",
+    completionId: "claude-turn-1",
+    transcriptAgentKind: "claude",
+    transcriptSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  });
+  await sender.send({
+    sessionId: "session-fallback",
+    displayName: "Codex fallback",
+    agentKind: "codex",
+    workingDirectory: "/workspace/project-a",
+    summary: "Fallback 已完成",
+    completedAt: "2026-09-23T10:32:00.000Z",
+  });
+
+  assert.equal(notifications[0]?.["quick-replies-available"], true);
+  assert.equal(notifications[1]?.["quick-replies-available"], undefined);
+  assert.equal(notifications[2]?.["quick-replies-available"], undefined);
+  assert.doesNotMatch(
+    JSON.stringify(notifications[0]),
+    /codex-thread-12345678/,
+  );
+});
+
+test("script sender defaults quick replies to unavailable", async () => {
+  let notification: Record<string, unknown> | null = null;
+  const sender = new ScriptFeishuCompletionSender({
+    scriptPath: "/workspace/scripts/codex-feishu-notify.mjs",
+    fallbackWorkingDirectory: "/workspace/coding_kanban",
+    runCommand: async (_binary, args) => {
+      notification = JSON.parse(args[2] ?? "") as Record<string, unknown>;
+      return {
+        stdout: JSON.stringify({
+          status: "sent",
+          messages: [{ messageId: "om_notice", chatId: "oc_private" }],
+        }),
+      };
+    },
+  });
+
+  await sender.send({
+    sessionId: "session-1",
+    displayName: "Codex 任务",
+    agentKind: "codex",
+    workingDirectory: "/workspace/project-a",
+    summary: "Codex 已完成",
+    completedAt: "2026-09-23T10:30:00.000Z",
+    completionId: "codex-turn-1",
+    codexThreadId: "codex-thread-12345678",
+  });
+
+  assert.equal(notification?.["quick-replies-available"], undefined);
+});
+
 test("script sender carries only prepared local file references into the card binding", async () => {
   let notification: Record<string, unknown> | null = null;
   const sender = new ScriptFeishuCompletionSender({
@@ -908,6 +1146,50 @@ test("script sender carries only prepared local file references into the card bi
     messages: [{ messageId: "om_notice", chatId: "oc_private" }],
     referencedFiles: [{ path: "src/app.ts", line: 12 }],
   });
+});
+
+test("script sender exposes generic transcript identity for non-Codex records", async () => {
+  let notification: Record<string, unknown> | null = null;
+  const sender = new ScriptFeishuCompletionSender({
+    scriptPath: "/workspace/scripts/codex-feishu-notify.mjs",
+    fallbackWorkingDirectory: "/workspace/coding_kanban",
+    runCommand: async (_binary, args) => {
+      notification = JSON.parse(args[2] ?? "") as Record<string, unknown>;
+      return {
+        stdout: JSON.stringify({
+          status: "sent",
+          messages: [{ messageId: "om_notice", chatId: "oc_private" }],
+        }),
+      };
+    },
+  });
+
+  await sender.send({
+    sessionId: "session-1",
+    displayName: "Claude 任务",
+    agentKind: "claude",
+    workingDirectory: "/workspace/project-a",
+    summary: "Claude 已完成",
+    completedAt: "2026-09-23T10:30:00.000Z",
+    completionId: "claude-turn-1",
+    transcriptAgentKind: "claude",
+    transcriptSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  });
+
+  assert.deepEqual(
+    {
+      recordsAvailable: notification?.["records-available"],
+      transcriptAgentKind: notification?.["transcript-agent-kind"],
+      transcriptSessionId: notification?.["transcript-session-id"],
+      agentKind: notification?.["agent-kind"],
+    },
+    {
+      recordsAvailable: true,
+      transcriptAgentKind: "claude",
+      transcriptSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      agentKind: "claude",
+    },
+  );
 });
 
 test("script sender hides notification content when the child process fails", async () => {
