@@ -144,7 +144,7 @@ export function AgentImageMessageDialog({
       >
         <header className="agent-image-message-header">
           <div>
-            <h2 id="agent-image-message-title">发送图片到 Codex</h2>
+            <h2 id="agent-image-message-title">发送图片到当前对话</h2>
             <p id="agent-image-message-destination">
               将投递到 <strong>{targetName}</strong> 当前对应的对话
             </p>

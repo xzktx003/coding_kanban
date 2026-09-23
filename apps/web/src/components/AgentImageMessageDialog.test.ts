@@ -29,7 +29,7 @@ describe("AgentImageMessageDialog", () => {
       }),
     );
 
-    assert.match(markup, /发送图片到 Codex/);
+    assert.match(markup, /发送图片到当前对话/);
     assert.match(markup, /实验终端/);
     assert.match(markup, /src="blob:screen-preview"/);
     assert.match(markup, /alt="待发送图片预览"/);

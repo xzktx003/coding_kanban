@@ -2,9 +2,15 @@ import multipart from "@fastify/multipart";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import { isCodexSessionCandidate } from "@agent-orchestrator/shared";
+import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
 import type { AgentSessionRegistry } from "../services/agent-session-registry.js";
 import { resolveActiveCodexSessionId } from "../services/active-codex-session-resolver.js";
+import {
+  ClaudeImageMessageUnavailableError,
+  type ClaudeImageMessageService,
+} from "../services/claude-image-message-service.js";
+import type { ClaudeSessionLocator } from "../services/claude-session-locator.js";
 import type { CodexSessionLocator } from "../services/codex-session-locator.js";
 import {
   CodexImageMessageUnavailableError,
@@ -21,6 +27,8 @@ interface CodexImageMessageRoutesOptions {
   registry: Pick<AgentSessionRegistry, "get" | "has" | "updateSession">;
   codexSessionLocator: Pick<CodexSessionLocator, "resolve">;
   codexImageMessageService: Pick<CodexImageMessageService, "send">;
+  claudeSessionLocator: Pick<ClaudeSessionLocator, "resolve">;
+  claudeImageMessageService: Pick<ClaudeImageMessageService, "send">;
 }
 
 class CodexImageRequestError extends Error {
@@ -94,6 +102,12 @@ async function readImageParts(request: Pick<FastifyRequest, "parts">): Promise<{
   return { image, imageExtension, message };
 }
 
+function isClaudeSession(
+  session: Pick<AgentSessionRecord, "agentKind">,
+): boolean {
+  return session.agentKind.trim().toLowerCase() === "claude";
+}
+
 export async function registerCodexImageMessageRoutes(
   fastify: FastifyInstance,
   options: CodexImageMessageRoutesOptions,
@@ -115,15 +129,54 @@ export async function registerCodexImageMessageRoutes(
           throw new CodexImageRequestError("当前终端会话不存在", 404);
         }
         const agentSession = options.registry.get(request.params.id);
-        if (!isCodexSessionCandidate(agentSession)) {
+        const claudeTarget = isClaudeSession(agentSession);
+        if (!claudeTarget && !isCodexSessionCandidate(agentSession)) {
           throw new CodexImageRequestError(
-            "当前终端不是可识别的 Codex 会话",
+            "当前终端不是可识别的 Codex 或 Claude 会话",
             409,
           );
         }
 
         const { image, imageExtension, message } =
           await readImageParts(request);
+
+        if (claudeTarget) {
+          const sessionId = await options.claudeSessionLocator.resolve({
+            ...(agentSession.transportRef?.tmuxPane
+              ? { tmuxTarget: agentSession.transportRef.tmuxPane }
+              : {}),
+            ...(agentSession.workingDirectory
+              ? { workingDirectory: agentSession.workingDirectory }
+              : {}),
+            ...(agentSession.sshTarget
+              ? { sshTarget: agentSession.sshTarget }
+              : {}),
+          });
+          if (!sessionId) {
+            throw new CodexImageRequestError(
+              "当前终端无法唯一确定 Claude 会话，未发送图片",
+              409,
+            );
+          }
+          if (sessionId !== agentSession.agentSessionId) {
+            options.registry.updateSession(agentSession.id, {
+              agentSessionId: sessionId,
+            });
+          }
+          await options.claudeImageMessageService.send({
+            sessionId,
+            message,
+            image,
+            imageExtension,
+            workingDirectory: agentSession.workingDirectory,
+            ...(agentSession.sshTarget
+              ? { sshTarget: agentSession.sshTarget }
+              : {}),
+          });
+          reply.code(202);
+          return { ok: true, threadId: sessionId };
+        }
+
         const threadId = await resolveActiveCodexSessionId(agentSession, {
           registry: options.registry,
           codexSessionLocator: options.codexSessionLocator,
@@ -170,13 +223,17 @@ export async function registerCodexImageMessageRoutes(
           reply.code(400);
           return { error: "图片请求包含过多字段" };
         }
+        if (error instanceof ClaudeImageMessageUnavailableError) {
+          reply.code(503);
+          return { error: error.message };
+        }
         if (error instanceof CodexImageMessageUnavailableError) {
           reply.code(503);
           return { error: error.message };
         }
-        request.log.error({ err: error }, "Failed to send image to Codex");
+        request.log.error({ err: error }, "Failed to send image to agent");
         reply.code(500);
-        return { error: "Codex 图片发送失败" };
+        return { error: "图片发送失败" };
       }
     },
   );

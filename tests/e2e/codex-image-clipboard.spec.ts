@@ -142,7 +142,7 @@ test("pasting a browser clipboard image opens the Kanban image confirmation inst
   await terminalInput.focus();
   await page.keyboard.press("Control+V");
 
-  const dialog = page.getByRole("dialog", { name: "发送图片到 Codex" });
+  const dialog = page.getByRole("dialog", { name: "发送图片到当前对话" });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByAltText("待发送图片预览")).toBeVisible();
   await expect(dialog).toContainText("Clipboard Image Session");

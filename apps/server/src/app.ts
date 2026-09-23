@@ -37,6 +37,8 @@ import {
   type FeishuCompletionSenderLike,
 } from "./services/agent-completion-feishu-notifier.js";
 import { AppVersionService } from "./services/app-version-service.js";
+import { ClaudeImageMessageService } from "./services/claude-image-message-service.js";
+import { ClaudeSessionLocator } from "./services/claude-session-locator.js";
 import {
   CodexImageMessageService,
   createCodexImageRemoteFileAccess,
@@ -102,6 +104,7 @@ interface BuildServerOptions {
     CodexImageMessageService,
     "send" | "sendText"
   >;
+  claudeImageMessageService?: Pick<ClaudeImageMessageService, "send">;
   feishuNotificationSettingsService?: FeishuNotificationSettingsServiceLike;
   feishuCompletionSender?: FeishuCompletionSenderLike;
   feishuCompletionContentResolver?: FeishuCompletionContentResolverLike;
@@ -266,6 +269,7 @@ export function buildServer(options: BuildServerOptions = {}): {
   const localFsService = options.localFsService ?? new LocalFsService();
   const sftpService = options.sftpService ?? new SftpService();
   const codexSessionLocator = new CodexSessionLocator();
+  const claudeSessionLocator = new ClaudeSessionLocator();
   const codexTranscriptService = new CodexTranscriptService({
     remoteFileAccess: sftpService,
   });
@@ -274,6 +278,8 @@ export function buildServer(options: BuildServerOptions = {}): {
     new CodexImageMessageService({
       remoteFileAccess: createCodexImageRemoteFileAccess(sftpService),
     });
+  const claudeImageMessageService =
+    options.claudeImageMessageService ?? new ClaudeImageMessageService();
   const feishuImageResourceService =
     options.feishuImageResourceService ?? new FeishuImageResourceService();
   const vsCodeWebManager = options.vsCodeWebManager ?? new VsCodeWebManager();
@@ -558,6 +564,8 @@ export function buildServer(options: BuildServerOptions = {}): {
         registry,
         codexSessionLocator,
         codexImageMessageService,
+        claudeSessionLocator,
+        claudeImageMessageService,
       });
     });
     await registerAppUpdateRoutes(instance, {

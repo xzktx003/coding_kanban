@@ -56,6 +56,8 @@ test("POST image-message resolves the active tmux Codex thread before queueing",
         queued.push(input);
       },
     },
+    claudeSessionLocator: { resolve: async () => undefined },
+    claudeImageMessageService: { send: async () => {} },
   });
 
   const boundary = "coding-kanban-image-boundary";
@@ -120,6 +122,8 @@ test("POST image-message rejects a file whose bytes do not match an allowed imag
         queued = true;
       },
     },
+    claudeSessionLocator: { resolve: async () => undefined },
+    claudeImageMessageService: { send: async () => {} },
   });
 
   const boundary = "coding-kanban-invalid-image-boundary";
@@ -141,5 +145,66 @@ test("POST image-message rejects a file whose bytes do not match an allowed imag
   assert.equal(response.statusCode, 400);
   assert.match(response.json().error, /PNG、JPEG 或 WebP/);
   assert.equal(queued, false);
+  await app.close();
+});
+
+test("POST image-message resumes the resolved Claude session instead of Codex", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "claude",
+    displayName: "claude",
+    workingDirectory: "/workspace/project",
+    connectionState: "online",
+    interactionState: "running",
+    transportRef: { tmuxPane: "%9" },
+  });
+  const claudeSessionId = "ca0048f4-ef6d-4a5b-9c8c-0477a9b9b1be";
+  const sent: unknown[] = [];
+
+  await registerCodexImageMessageRoutes(app, {
+    registry,
+    codexSessionLocator: { resolve: async () => undefined },
+    codexImageMessageService: { send: async () => {} },
+    claudeSessionLocator: {
+      async resolve(input) {
+        assert.equal(input.tmuxTarget, "%9");
+        return claudeSessionId;
+      },
+    },
+    claudeImageMessageService: {
+      async send(input) {
+        sent.push(input);
+      },
+    },
+  });
+
+  const boundary = "coding-kanban-claude-image-boundary";
+  const image = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from("preview"),
+  ]);
+  const response = await app.inject({
+    method: "POST",
+    url: `/api/agent-sessions/${session.id}/image-message`,
+    headers: {
+      "content-type": `multipart/form-data; boundary=${boundary}`,
+    },
+    payload: buildMultipartBody({
+      boundary,
+      message: "请看截图",
+      filename: "screen.png",
+      contentType: "image/png",
+      file: image,
+    }),
+  });
+
+  assert.equal(response.statusCode, 202);
+  assert.deepEqual(response.json(), { ok: true, threadId: claudeSessionId });
+  assert.equal(sent.length, 1);
+  assert.equal(registry.get(session.id).agentSessionId, claudeSessionId);
   await app.close();
 });
