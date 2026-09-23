@@ -15,6 +15,9 @@ type TranscriptReadInput = {
   sessionId: string;
   limit: number;
   cursor?: string;
+  workingDirectory?: string;
+  tmuxSession?: string;
+  tmuxPane?: string;
 };
 type TranscriptSource = {
   read(
@@ -54,8 +57,26 @@ export class FeishuWorkspaceTranscript {
       throw new Error("远端记录通道不可用。");
     const source = this.sourceFor(agentKind);
     const input = { sessionId: threadId, limit, ...(cursor ? { cursor } : {}) };
+    const remoteClaudeContext =
+      agentKind === "claude"
+        ? {
+            ...(session.workingDirectory
+              ? { workingDirectory: session.workingDirectory }
+              : {}),
+            ...(session.transportRef?.tmuxSession
+              ? { tmuxSession: session.transportRef.tmuxSession }
+              : {}),
+            ...(session.transportRef?.tmuxPane
+              ? { tmuxPane: session.transportRef.tmuxPane }
+              : {}),
+          }
+        : {};
     const page = session.sshTarget
-      ? await source.readRemote({ ...input, sshTarget: session.sshTarget })
+      ? await source.readRemote({
+          ...input,
+          ...remoteClaudeContext,
+          sshTarget: session.sshTarget,
+        })
       : await source.read(input);
     if (
       !page.available ||

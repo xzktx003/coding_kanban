@@ -976,3 +976,4 @@
 - 2026-09-23：完成通知卡片把「快捷回复」「查看完整记录」及引用文件操作作为独立顶层按钮，客户端顺序换行，操作区显得分散。现在统一放进横向 `column_set`，窄屏和文件较多时自动换行；回调值与单个按钮尺寸保持不变。
 - 2026-09-23：`session_agent` 的 tmux pane 实际运行 `claude.exe`，但已登记会话仍保留启动时的 `node` 类型；看板完整记录因此走 Codex 读取，新的 Claude 完成通知也无法保存 Claude 记录绑定。服务启动时及每 5 秒按本机 tmux pane ID 和 session 名同步真实命令，仅更新匹配的本机会话；回归覆盖切换 Claude、切回 Node、远端隔离及重命名隔离。运行态验证该会话的完整记录接口返回 `agentKind: claude` 和实际条目。升级前未绑定的旧飞书通知无法凭固定动作值恢复原 UUID。
 - 2026-09-23：看板已经把本机 Claude 会话更新为 `claude.exe`，但飞书完成通知仍只接受精确的 `claude`，导致新完成不进入 Claude 结构化探测、内容解析误走 Codex，也就没有带 Claude 记录绑定的通知。统一使用共享的 Claude 命令识别函数，回归覆盖无预设 Claude session ID 的 `claude.exe` 会话、最终内容和 UUID 绑定；现场确认 Claude JSONL 能解析出最终完成记录。
+- 2026-09-23：远端 Claude 完成通知已绑定精确 UUID，但飞书工作区读取记录时只传 UUID 和 SSH 目标，漏掉远端 Claude 定位所需的工作目录与 tmux pane，点击记录可能找不到 JSONL。远端 Claude 读取和导出现在传递已校验会话的位置上下文，仍要求返回 UUID 精确匹配；红绿灯测试覆盖两种操作的参数。

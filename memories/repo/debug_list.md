@@ -280,3 +280,4 @@
 - 2026-09-23：飞书 Card 2.0 独立 `select_static` 不接受 `required`，且实际独立下拉回调可省略 `action_name`。快捷回复入口因此先发送失败，后续选择又被拒绝。独立下拉不设 `required`，处理选择时以回调动作值、消息绑定和选项 token 为准，容忍缺失的 `action_name`；表单内 `input.required` 保留。
 - 2026-09-23：本机 tmux pane 已切至 `claude.exe` 时，注册表仍可能保留 `node`，导致 Claude 完整记录被错路由到 Codex，后续飞书通知也缺少 Claude UUID 绑定。现启动时及每 5 秒用 pane ID 与 tmux session 名核对实时命令，只同步匹配的本机会话；运行态确认 `/api/agent-sessions/:id/transcript` 对 `session_agent` 返回 Claude 记录。旧通知无原 UUID 绑定时无法从固定按钮动作安全重建。
 - 2026-09-23：Claude 类型同步为 `claude.exe` 后，飞书完成探测和内容 resolver 的精确 `=== "claude"` 判断仍漏掉它；完成通知统一用共享 `isClaudeAgentKind`，避免误走 Codex，回归覆盖没有预设 Claude session ID 时的完成与 UUID 绑定。
+- 2026-09-23：远端 Claude 飞书记录按钮读页/导出只传 UUID 与 SSH 目标，Claude reader 没有工作目录就无法定位项目 JSONL。现在仅对远端 Claude 传入注册会话的工作目录与 tmux 标识，读取结果继续要求精确 UUID 匹配。

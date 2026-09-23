@@ -123,6 +123,50 @@ test("reads and exports Claude records from the optional Claude source", async (
   assert.match(exported.data.toString(), /Claude/);
 });
 
+test("remote Claude records retain the bound session location", async () => {
+  const claudeSessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const remoteSession = {
+    ...session,
+    sshTarget: { host: "remote.example" },
+    transportRef: { tmuxSession: "claude-work", tmuxPane: "%9" },
+  } as AgentSessionRecord;
+  const remoteInputs: unknown[] = [];
+  const service = new FeishuWorkspaceTranscript(
+    {
+      read: () => page("codex"),
+      readRemote: async () => page("remote-codex"),
+    },
+    {
+      read: () => page("local-claude", false, "claude", claudeSessionId),
+      readRemote: async (input) => {
+        remoteInputs.push(input);
+        return page("remote-claude", false, "claude", claudeSessionId);
+      },
+    },
+  );
+
+  await service.read(remoteSession, claudeSessionId, undefined, "claude");
+  await service.export(remoteSession, claudeSessionId, "claude");
+  assert.deepEqual(remoteInputs, [
+    {
+      sessionId: claudeSessionId,
+      limit: 5,
+      workingDirectory: "/project",
+      tmuxSession: "claude-work",
+      tmuxPane: "%9",
+      sshTarget: remoteSession.sshTarget,
+    },
+    {
+      sessionId: claudeSessionId,
+      limit: 100,
+      workingDirectory: "/project",
+      tmuxSession: "claude-work",
+      tmuxPane: "%9",
+      sshTarget: remoteSession.sshTarget,
+    },
+  ]);
+});
+
 test("rejects stale Claude records that do not match the requested UUID", async () => {
   const claudeSessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   const service = new FeishuWorkspaceTranscript(
