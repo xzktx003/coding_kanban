@@ -343,7 +343,11 @@ export default function App() {
   const [focusedId, setFocusedId] = useState<string | null>(
     initialFocusViewState.focusedId,
   );
-  const [lastFocusedId, setLastFocusedId] = useState<string | null>(null);
+  const [lastFocusedId, setLastFocusedId] = useState<string | null>(
+    initialFocusViewState.viewMode === "grid"
+      ? initialFocusViewState.focusedId
+      : null,
+  );
   const [activeTerminalSessionId, setActiveTerminalSessionId] = useState<
     string | null
   >(initialFocusViewState.focusedId);
@@ -674,8 +678,11 @@ export default function App() {
   }, [fileBrowserSessionStates]);
 
   useEffect(() => {
-    saveFocusViewState({ viewMode, focusedId });
-  }, [focusedId, viewMode]);
+    saveFocusViewState({
+      viewMode,
+      focusedId: viewMode === "focus" ? focusedId : lastFocusedId,
+    });
+  }, [focusedId, lastFocusedId, viewMode]);
 
   useEffect(() => {
     saveTerminalPreviewLightweightMode(useLightweightTerminalPreview);
