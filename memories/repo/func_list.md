@@ -5,7 +5,7 @@
 - 其他会话：聚焦视图右侧其他会话卡片支持右键菜单，可关闭看板展示该窗口或彻底删除终端；关闭看板展示会隐藏会话但不终止底层终端。
 - 终端交互：鼠标滚轮固定滚动终端 scrollback 上下文，不转发为 Codex CLI 的输入历史翻页；输入历史翻页保留给键盘上下箭头。
 - 顶栏入口：文件浏览器、VS Code Web、新建会话、扫描 tmux、扫描会话、快速连接 tmux、操作提示、菜单栏折叠。
-- 新建会话：支持本机/SSH，支持 `copilot`、`codex`、`claude`、`shell`，支持 `direct` / `tmux` 两种启动方式。
+- 新建会话：支持本机/SSH，支持 `shell`、`codex`、`claude`、`copilot`（默认 `shell`），支持 `direct` / `tmux` 两种启动方式。
 - 快速连接 tmux：支持本机和 SSH 远端，通过 `tmux new-session -A -s <session> -c <dir>` 直接创建或接入。
 - tmux 管理：支持本地/远端扫描、接管 live pane、refresh、takeover、release、kill。
 - Agent 目录扫描：支持本地/SSH 扫描、Copilot session-state 识别、tmux 合并、direct/tmux 两种加入方式。

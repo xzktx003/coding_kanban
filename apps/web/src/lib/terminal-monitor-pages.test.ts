@@ -6,6 +6,7 @@ import {
   deleteTerminalMonitorPage,
   loadTerminalMonitorPages,
   renameTerminalMonitorPage,
+  nextTerminalMonitorPageName,
   saveTerminalMonitorPages,
   updateActiveTerminalMonitorPage,
 } from "./terminal-monitor-pages.js";
@@ -70,25 +71,41 @@ test("migrates the legacy workspace into the default page", () => {
   assert.deepEqual(pages.pages[0]?.state, legacy);
 });
 
-test("creates page 2 and makes it active", () => {
+test("the first added page is named page 1 and becomes active", () => {
   const created = createTerminalMonitorPage(
     loadTerminalMonitorPages(createStorage()),
   );
 
   assert.equal(created.pages.length, 2);
-  assert.equal(created.pages[1]?.name, "页面 2");
+  assert.equal(created.pages[1]?.name, "页面 1");
   assert.equal(created.pages[1]?.id, "terminal-monitor-page-2");
   assert.equal(created.activePageId, "terminal-monitor-page-2");
   assert.deepEqual(created.pages[1]?.state, emptyWorkspace());
 });
 
-test("renaming or deleting the default page leaves state unchanged", () => {
+test("the default page can be renamed and can be deleted once another page exists", () => {
+  const created = createTerminalMonitorPage(
+    loadTerminalMonitorPages(createStorage()),
+  );
+
+  const renamed = renameTerminalMonitorPage(
+    created,
+    "terminal-monitor-page-1",
+    "工作台",
+  );
+  assert.equal(renamed.pages[0]?.name, "工作台");
+
+  const deleted = deleteTerminalMonitorPage(renamed, "terminal-monitor-page-1");
+  assert.deepEqual(
+    deleted.pages.map((page) => page.id),
+    ["terminal-monitor-page-2"],
+  );
+  assert.equal(deleted.activePageId, "terminal-monitor-page-2");
+});
+
+test("the last remaining page cannot be deleted", () => {
   const initial = loadTerminalMonitorPages(createStorage());
 
-  assert.deepEqual(
-    renameTerminalMonitorPage(initial, "terminal-monitor-page-1", "工作台"),
-    initial,
-  );
   assert.deepEqual(
     deleteTerminalMonitorPage(initial, "terminal-monitor-page-1"),
     initial,
@@ -106,12 +123,36 @@ test("rejects duplicate or blank names and keeps the original state", () => {
     created,
   );
   assert.deepEqual(
+    renameTerminalMonitorPage(created, secondPageId, "页面 1"),
+    created,
+  );
+  assert.deepEqual(
     renameTerminalMonitorPage(created, secondPageId, "   "),
     created,
   );
   assert.deepEqual(
     renameTerminalMonitorPage(created, secondPageId, ""),
     created,
+  );
+});
+
+test("a group switch name skips names other pages already use", () => {
+  const created = createTerminalMonitorPage(
+    loadTerminalMonitorPages(createStorage()),
+  );
+  const taken = renameTerminalMonitorPage(
+    created,
+    created.pages[1]?.id ?? "",
+    "研究",
+  );
+
+  assert.equal(
+    nextTerminalMonitorPageName(taken.pages, "研究", taken.pages[0]?.id ?? ""),
+    "研究 2",
+  );
+  assert.equal(
+    nextTerminalMonitorPageName(taken.pages, "实验", taken.pages[0]?.id ?? ""),
+    "实验",
   );
 });
 
@@ -134,9 +175,7 @@ test("deleting the active non-default page activates the previous page", () => {
 
 test("saved pages load back unchanged", () => {
   const storage = createStorage();
-  const created = createTerminalMonitorPage(
-    loadTerminalMonitorPages(storage),
-  );
+  const created = createTerminalMonitorPage(loadTerminalMonitorPages(storage));
   const updated = updateActiveTerminalMonitorPage(
     created,
     emptyWorkspace({ mode: "quad", activeSlotId: "terminal-monitor-slot-1" }),

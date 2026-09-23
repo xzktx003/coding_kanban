@@ -44,7 +44,9 @@ function emptyStorage(): StorageLike {
   };
 }
 
-function defaultPage(state: TerminalWorkspaceState = defaultWorkspace()): TerminalMonitorPage {
+function defaultPage(
+  state: TerminalWorkspaceState = defaultWorkspace(),
+): TerminalMonitorPage {
   return {
     id: DEFAULT_PAGE_ID,
     name: DEFAULT_PAGE_NAME,
@@ -78,15 +80,39 @@ function nextPageId(pages: TerminalMonitorPage[]): string {
 
 function nextPageName(pages: TerminalMonitorPage[]): string {
   const taken = new Set(pages.map((page) => page.name.trim()));
-  let number = 2;
+  let number = 1;
   while (taken.has(`页面 ${number}`)) {
     number += 1;
   }
   return `页面 ${number}`;
 }
 
+export function nextTerminalMonitorPageName(
+  pages: readonly TerminalMonitorPage[],
+  baseName: string,
+  currentPageId: string,
+): string {
+  const trimmed = baseName.trim();
+  const taken = new Set(
+    pages
+      .filter((page) => page.id !== currentPageId)
+      .map((page) => page.name.trim()),
+  );
+  if (!taken.has(trimmed)) {
+    return trimmed;
+  }
+
+  let number = 2;
+  while (taken.has(`${trimmed} ${number}`)) {
+    number += 1;
+  }
+  return `${trimmed} ${number}`;
+}
+
 function isDefaultPage(page: TerminalMonitorPage | undefined): boolean {
-  return page?.id === DEFAULT_PAGE_ID || page?.name.trim() === DEFAULT_PAGE_NAME;
+  return (
+    page?.id === DEFAULT_PAGE_ID || page?.name.trim() === DEFAULT_PAGE_NAME
+  );
 }
 
 function parsePage(value: unknown): TerminalMonitorPage | null {
@@ -124,7 +150,9 @@ function parsePage(value: unknown): TerminalMonitorPage | null {
   };
 }
 
-function normalizePages(parsed: Record<string, unknown>): TerminalMonitorPagesState | null {
+function normalizePages(
+  parsed: Record<string, unknown>,
+): TerminalMonitorPagesState | null {
   if (!Array.isArray(parsed.pages) || parsed.pages.length === 0) {
     return null;
   }
@@ -153,7 +181,9 @@ function normalizePages(parsed: Record<string, unknown>): TerminalMonitorPagesSt
   return {
     activePageId,
     pages: uniquePages.map((page, index) =>
-      index === 0 ? { ...page, id: DEFAULT_PAGE_ID, name: DEFAULT_PAGE_NAME } : page,
+      index === 0
+        ? { ...page, id: DEFAULT_PAGE_ID, name: DEFAULT_PAGE_NAME }
+        : page,
     ),
   };
 }
@@ -215,12 +245,13 @@ export function renameTerminalMonitorPage(
 ): TerminalMonitorPagesState {
   const trimmed = name.trim();
   const page = state.pages.find((candidate) => candidate.id === pageId);
-  if (!page || isDefaultPage(page) || !trimmed) {
+  if (!page || !trimmed) {
     return state;
   }
   if (
     state.pages.some(
-      (candidate) => candidate.id !== pageId && candidate.name.trim() === trimmed,
+      (candidate) =>
+        candidate.id !== pageId && candidate.name.trim() === trimmed,
     )
   ) {
     return state;
@@ -240,7 +271,7 @@ export function deleteTerminalMonitorPage(
 ): TerminalMonitorPagesState {
   const index = state.pages.findIndex((page) => page.id === pageId);
   const page = index >= 0 ? state.pages[index] : undefined;
-  if (!page || isDefaultPage(page) || state.pages.length < 2) {
+  if (!page || state.pages.length < 2) {
     return state;
   }
 

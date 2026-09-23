@@ -65,6 +65,7 @@ import {
   createTerminalMonitorPage,
   deleteTerminalMonitorPage,
   loadTerminalMonitorPages,
+  nextTerminalMonitorPageName,
   renameTerminalMonitorPage,
   saveTerminalMonitorPages,
   updateActiveTerminalMonitorPage,
@@ -83,13 +84,7 @@ import {
   resolveRetainedTerminalMonitorSlots,
 } from "../lib/terminal-pane-render-policy";
 import { sendCodexImageMessage } from "../lib/api";
-import {
-  beginPageRename,
-  markPageRenameCancelled,
-  pageRenameKeyAction,
-  shouldCommitPageRename,
-  type PageRenameGesture,
-} from "../lib/page-rename-gesture";
+import { pageRenameKeyAction } from "../lib/page-rename-gesture";
 
 interface AgentFocusViewProps {
   focusedSession: AgentSessionRecord;
@@ -125,7 +120,6 @@ const stateLabels: Record<string, string> = {
 };
 
 const DEFAULT_TERMINAL_MONITOR_SLOT_ID = "terminal-monitor-slot-1";
-const DEFAULT_TERMINAL_MONITOR_PAGE_ID = "terminal-monitor-page-1";
 const DEFAULT_GROUP_TERMINAL_LAYOUT_MODE: TerminalMonitorLayoutMode = "triple";
 const FOCUS_HEADER_COLLAPSED_STORAGE_KEY = "focus-header-collapsed";
 const FOCUS_SIDEBAR_COLLAPSED_STORAGE_KEY = "focus-sidebar-collapsed";
@@ -133,6 +127,18 @@ const TERMINAL_MONITOR_DRAG_MIME =
   "application/x-coding-kanban-terminal-session";
 const FOCUS_SIDEBAR_SCROLL_THRESHOLD = 4;
 const DEFAULT_CODEX_IMAGE_MESSAGE = "请查看这张图片并根据图片内容回答。";
+
+function canSendImageToSession(
+  session: Pick<
+    AgentSessionRecord,
+    "agentKind" | "agentSessionId" | "hostId" | "sshTarget" | "transportRef"
+  >,
+): boolean {
+  return (
+    isCodexSessionCandidate(session) ||
+    session.agentKind.trim().toLowerCase() === "claude"
+  );
+}
 
 interface CodexImageDraft {
   file: File;
@@ -300,7 +306,10 @@ export function AgentFocusView({
       ...visibleSessions.filter((session) => session.id !== focusedSession.id),
     ];
   }, [focusedSession, visibleSessions]);
-  const initialTerminalPagesState = useMemo(() => loadTerminalMonitorPages(), []);
+  const initialTerminalPagesState = useMemo(
+    () => loadTerminalMonitorPages(),
+    [],
+  );
   const initialActiveTerminalPage =
     initialTerminalPagesState.pages.find(
       (page) => page.id === initialTerminalPagesState.activePageId,
@@ -344,11 +353,14 @@ export function AgentFocusView({
   );
   const [terminalMonitorPages, setTerminalMonitorPages] =
     useState<TerminalMonitorPagesState>(initialTerminalPagesState);
-  const [renamingTerminalPageId, setRenamingTerminalPageId] = useState<
+  const [terminalPageNameDraft, setTerminalPageNameDraft] = useState("");
+  const [terminalPageNameError, setTerminalPageNameError] = useState<
     string | null
   >(null);
-  const [terminalPageNameDraft, setTerminalPageNameDraft] = useState("");
-  const pageRenameGestureRef = useRef<PageRenameGesture>(beginPageRename());
+  const [pageSettingsPageId, setPageSettingsPageId] = useState<string | null>(
+    null,
+  );
+  const pageSettingsRef = useRef<HTMLDivElement | null>(null);
   const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [imageDraft, setImageDraft] = useState<CodexImageDraft | null>(null);
   const [imageMessage, setImageMessage] = useState(DEFAULT_CODEX_IMAGE_MESSAGE);
@@ -615,7 +627,7 @@ export function AgentFocusView({
     (activeSlotSessionId ? sessionById.get(activeSlotSessionId) : undefined) ??
     focusedSession;
   const canSendImageToActiveSession =
-    isCodexSessionCandidate(activeHeaderSession);
+    canSendImageToSession(activeHeaderSession);
 
   function openImageDraft(
     file: File,
@@ -667,10 +679,10 @@ export function AgentFocusView({
     const targetSession = imageDraft
       ? sessionById.get(imageDraft.targetSessionId)
       : activeHeaderSession;
-    if (!targetSession || !isCodexSessionCandidate(targetSession)) {
+    if (!targetSession || !canSendImageToSession(targetSession)) {
       setImageSendNotice({
         kind: "error",
-        message: "当前终端不是可识别的 Codex 会话",
+        message: "当前终端不是可识别的 Codex 或 Claude 会话",
       });
       return;
     }
@@ -785,20 +797,6 @@ export function AgentFocusView({
   const primaryContextMenuActionLabel = groupArrangementEnabled
     ? "退出分组排列"
     : getTerminalPaneContextPrimaryActionLabel(canRestoreMultiPaneLayout);
-  const activeTerminalPage =
-    terminalMonitorPages.pages.find(
-      (page) => page.id === terminalMonitorPages.activePageId,
-    ) ?? terminalMonitorPages.pages[0];
-  const orderedTerminalPages = activeTerminalPage
-    ? [
-        activeTerminalPage,
-        ...terminalMonitorPages.pages.filter(
-          (page) => page.id !== activeTerminalPage.id,
-        ),
-      ]
-    : terminalMonitorPages.pages;
-  const showTerminalPageTabs = terminalMonitorPages.pages.length > 1;
-
   useEffect(() => {
     const nextPages = updateActiveTerminalMonitorPage(
       terminalMonitorPagesRef.current,
@@ -806,7 +804,9 @@ export function AgentFocusView({
         mode: terminalLayoutMode,
         arrangementMode: terminalArrangementMode,
         arrangementGroupId:
-          terminalArrangementMode === "group" ? terminalArrangementGroupId : null,
+          terminalArrangementMode === "group"
+            ? terminalArrangementGroupId
+            : null,
         groupSessionOrderByGroupId: normalizedGroupSessionOrderByGroupId,
         slots: terminalSlots,
         activeSlotId: safeActiveSlotId,
@@ -873,7 +873,7 @@ export function AgentFocusView({
   }, []);
 
   useEffect(() => {
-    if (!layoutMenuOpen) {
+    if (!layoutMenuOpen && !pageSettingsPageId) {
       return;
     }
 
@@ -886,11 +886,19 @@ export function AgentFocusView({
       ) {
         setLayoutMenuOpen(false);
       }
+      if (
+        target &&
+        pageSettingsRef.current &&
+        !pageSettingsRef.current.contains(target)
+      ) {
+        setPageSettingsPageId(null);
+      }
     }
 
     function handleDocumentKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         setLayoutMenuOpen(false);
+        setPageSettingsPageId(null);
       }
     }
 
@@ -900,7 +908,7 @@ export function AgentFocusView({
       document.removeEventListener("mousedown", handleDocumentMouseDown);
       document.removeEventListener("keydown", handleDocumentKeyDown);
     };
-  }, [layoutMenuOpen]);
+  }, [layoutMenuOpen, pageSettingsPageId]);
 
   useEffect(() => {
     if (!paneContextMenu) {
@@ -1168,7 +1176,32 @@ export function AgentFocusView({
     sessionId: string,
     sourceSlotId?: string,
   ) {
-    if (groupArrangementEnabled || !sessionById.has(sessionId)) {
+    if (!sessionById.has(sessionId)) {
+      return;
+    }
+
+    if (groupArrangementEnabled && selectedArrangementGroup) {
+      const order =
+        normalizedGroupSessionOrderByGroupId[selectedArrangementGroup.id] ?? [];
+      const targetSessionId = groupTerminalSlots.find(
+        (slot) => slot.id === slotId,
+      )?.sessionId;
+      if (!targetSessionId || !order.includes(sessionId)) {
+        return;
+      }
+
+      setGroupSessionOrderByGroupId((current) => ({
+        ...current,
+        [selectedArrangementGroup.id]: swapTerminalMonitorGroupOrder(
+          order,
+          sessionId,
+          targetSessionId,
+        ),
+      }));
+      return;
+    }
+
+    if (groupArrangementEnabled) {
       return;
     }
 
@@ -1666,7 +1699,7 @@ export function AgentFocusView({
     const switched = { ...persisted, activePageId: page.id };
     setTerminalMonitorPages(switched);
     saveTerminalMonitorPages(switched);
-    setRenamingTerminalPageId(null);
+    setPageSettingsPageId(null);
     applyTerminalWorkspace(
       resolveTerminalWorkspaceStateForFocus(
         page.state,
@@ -1688,7 +1721,7 @@ export function AgentFocusView({
     );
     setTerminalMonitorPages(nextPages);
     saveTerminalMonitorPages(nextPages);
-    setRenamingTerminalPageId(null);
+    setPageSettingsPageId(null);
     if (created) {
       applyTerminalWorkspace(
         resolveTerminalWorkspaceStateForFocus(
@@ -1701,23 +1734,58 @@ export function AgentFocusView({
   }
 
   function commitTerminalPageRename(pageId: string): void {
-    if (!shouldCommitPageRename(pageRenameGestureRef.current)) {
-      setRenamingTerminalPageId(null);
+    const trimmed = terminalPageNameDraft.trim();
+    const page = terminalMonitorPages.pages.find(
+      (candidate) => candidate.id === pageId,
+    );
+    if (!page) {
       return;
     }
-    pageRenameGestureRef.current = markPageRenameCancelled(
-      pageRenameGestureRef.current,
-    );
+    if (!trimmed) {
+      setTerminalPageNameError("名称不能为空");
+      return;
+    }
+    if (
+      terminalMonitorPages.pages.some(
+        (candidate) =>
+          candidate.id !== pageId && candidate.name.trim() === trimmed,
+      )
+    ) {
+      setTerminalPageNameError("已有同名页面");
+      return;
+    }
+
     const nextPages = renameTerminalMonitorPage(
       terminalMonitorPages,
       pageId,
-      terminalPageNameDraft,
+      trimmed,
     );
     if (nextPages !== terminalMonitorPages) {
       setTerminalMonitorPages(nextPages);
       saveTerminalMonitorPages(nextPages);
     }
-    setRenamingTerminalPageId(null);
+    setTerminalPageNameError(null);
+  }
+
+  function handlePageTabClick(pageId: string): void {
+    if (pageId !== terminalMonitorPages.activePageId) {
+      setPageSettingsPageId(null);
+      activateTerminalMonitorPage(pageId);
+      return;
+    }
+
+    if (pageSettingsPageId === pageId) {
+      setPageSettingsPageId(null);
+      return;
+    }
+
+    const page = terminalMonitorPages.pages.find(
+      (candidate) => candidate.id === pageId,
+    );
+    setTerminalPageNameDraft(page?.name ?? "");
+    setTerminalPageNameError(null);
+    setLayoutMenuOpen(false);
+    setPageSettingsPageId(pageId);
   }
 
   function removeTerminalMonitorPage(pageId: string): void {
@@ -1728,7 +1796,7 @@ export function AgentFocusView({
 
     setTerminalMonitorPages(nextPages);
     saveTerminalMonitorPages(nextPages);
-    setRenamingTerminalPageId(null);
+    setPageSettingsPageId(null);
     if (nextPages.activePageId !== terminalMonitorPages.activePageId) {
       const page = nextPages.pages.find(
         (candidate) => candidate.id === nextPages.activePageId,
@@ -1757,6 +1825,21 @@ export function AgentFocusView({
       return;
     }
 
+    setTerminalMonitorPages((current) => {
+      const renamed = renameTerminalMonitorPage(
+        current,
+        current.activePageId,
+        nextTerminalMonitorPageName(
+          current.pages,
+          group.name,
+          current.activePageId,
+        ),
+      );
+      if (renamed !== current) {
+        saveTerminalMonitorPages(renamed);
+      }
+      return renamed;
+    });
     setTerminalArrangementMode("group");
     setTerminalArrangementGroupId(group.id);
     setActiveGroupSessionId(
@@ -1964,7 +2047,7 @@ export function AgentFocusView({
           </button>
           {canSendImageToActiveSession && (
             <button
-              aria-label={`向 ${activeHeaderSession.displayName} 的 Codex 对话发送图片`}
+              aria-label={`向 ${activeHeaderSession.displayName} 发送图片`}
               className="focus-transcript-btn focus-image-message-btn"
               onClick={() =>
                 openImageFilePicker({
@@ -2095,75 +2178,138 @@ export function AgentFocusView({
                 className="focus-page-bar"
                 data-testid="focus-page-bar"
               >
-                {showTerminalPageTabs &&
-                  orderedTerminalPages.map((page) => {
-                    const isActive = page.id === terminalMonitorPages.activePageId;
-                    const isDefaultPage =
-                      page.id === DEFAULT_TERMINAL_MONITOR_PAGE_ID;
-                    const isRenaming = renamingTerminalPageId === page.id;
+                {terminalMonitorPages.pages.map((page) => {
+                  const isActive =
+                    page.id === terminalMonitorPages.activePageId;
+                  const settingsOpen = pageSettingsPageId === page.id;
 
-                    return (
-                      <div className="focus-page-tab" key={page.id}>
-                        {isRenaming ? (
-                          <input
-                            aria-label={`重命名${page.name}`}
-                            autoFocus
-                            className="focus-page-rename-input"
-                            data-testid={`focus-page-rename-${page.id}`}
-                            onBlur={() => commitTerminalPageRename(page.id)}
-                            onChange={(event) =>
-                              setTerminalPageNameDraft(event.target.value)
-                            }
-                            onKeyDown={(event) => {
-                              const action = pageRenameKeyAction(event.key);
-                              if (action === "commit") {
-                                event.preventDefault();
-                                commitTerminalPageRename(page.id);
-                              }
-                              if (action === "cancel") {
-                                event.preventDefault();
-                                pageRenameGestureRef.current =
-                                  markPageRenameCancelled(
-                                    pageRenameGestureRef.current,
-                                  );
-                                setRenamingTerminalPageId(null);
-                              }
-                            }}
-                            value={terminalPageNameDraft}
-                          />
-                        ) : (
+                  return (
+                    <div
+                      className="focus-page-tab"
+                      key={page.id}
+                      ref={settingsOpen ? pageSettingsRef : undefined}
+                    >
+                      <button
+                        aria-expanded={settingsOpen}
+                        aria-pressed={isActive}
+                        className={`focus-page-tab-button${isActive ? " focus-page-tab-button--active" : ""}`}
+                        data-testid={`focus-page-tab-${page.id}`}
+                        onClick={() => handlePageTabClick(page.id)}
+                        title={isActive ? "再次点击调整此页" : page.name}
+                        type="button"
+                      >
+                        {page.name}
+                      </button>
+                      {settingsOpen && (
+                        <div
+                          className="focus-page-settings"
+                          data-testid={`focus-page-settings-${page.id}`}
+                          role="dialog"
+                          aria-label={`${page.name}设置`}
+                        >
+                          <label className="focus-page-settings-name">
+                            <span>页面名称</span>
+                            <input
+                              aria-label={`重命名${page.name}`}
+                              autoFocus
+                              data-testid={`focus-page-rename-${page.id}`}
+                              onChange={(event) => {
+                                setTerminalPageNameDraft(event.target.value);
+                                setTerminalPageNameError(null);
+                              }}
+                              onKeyDown={(event) => {
+                                if (
+                                  pageRenameKeyAction(event.key) === "commit"
+                                ) {
+                                  event.preventDefault();
+                                  commitTerminalPageRename(page.id);
+                                }
+                              }}
+                              onBlur={() => commitTerminalPageRename(page.id)}
+                              value={terminalPageNameDraft}
+                            />
+                          </label>
+                          {terminalPageNameError && (
+                            <p
+                              className="focus-page-settings-error"
+                              role="alert"
+                            >
+                              {terminalPageNameError}
+                            </p>
+                          )}
+                          <div className="focus-layout-menu-section-label">
+                            窗口排列
+                          </div>
                           <button
-                            aria-pressed={isActive}
-                            className={`focus-page-tab-button${isActive ? " focus-page-tab-button--active" : ""}`}
-                            data-testid={`focus-page-tab-${page.id}`}
-                            onClick={() => activateTerminalMonitorPage(page.id)}
-                            onDoubleClick={() => {
-                              if (isDefaultPage) {
-                                return;
-                              }
-                              pageRenameGestureRef.current = beginPageRename();
-                              setRenamingTerminalPageId(page.id);
-                              setTerminalPageNameDraft(page.name);
-                            }}
+                            aria-checked={!groupArrangementEnabled}
+                            className={`focus-layout-option${!groupArrangementEnabled ? " focus-layout-option--active" : ""}`}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={handleManualArrangementMode}
+                            role="menuitemradio"
                             type="button"
                           >
-                            {page.name}
+                            <span>自由排列</span>
+                            <small>按槽位选择</small>
                           </button>
-                        )}
-                        {!isDefaultPage && !isRenaming && (
-                          <button
-                            aria-label={`关闭${page.name}`}
-                            className="focus-page-delete"
-                            data-testid={`focus-page-delete-${page.id}`}
-                            onClick={() => removeTerminalMonitorPage(page.id)}
-                            type="button"
-                          >
-                            ×
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
+                          {arrangementGroups.map((group) => (
+                            <button
+                              key={group.id}
+                              aria-checked={
+                                groupArrangementEnabled &&
+                                terminalArrangementGroupId === group.id
+                              }
+                              data-testid={`focus-page-arrangement-${group.id}`}
+                              className={`focus-layout-option${groupArrangementEnabled && terminalArrangementGroupId === group.id ? " focus-layout-option--active" : ""}`}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() =>
+                                handleGroupArrangementMode(group.id)
+                              }
+                              role="menuitemradio"
+                              type="button"
+                            >
+                              <span>分组：{group.name}</span>
+                              <strong>{group.sessions.length}</strong>
+                            </button>
+                          ))}
+                          <div className="focus-layout-menu-section-label">
+                            屏幕布局
+                          </div>
+                          {TERMINAL_MONITOR_LAYOUT_OPTIONS.map((option) => (
+                            <button
+                              key={option.mode}
+                              aria-checked={terminalLayoutMode === option.mode}
+                              className={`focus-layout-option${terminalLayoutMode === option.mode ? " focus-layout-option--active" : ""}`}
+                              disabled={
+                                groupArrangementEnabled &&
+                                option.mode === "single"
+                              }
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() =>
+                                handleLayoutModeChange(option.mode)
+                              }
+                              role="menuitemradio"
+                              type="button"
+                            >
+                              <span>{option.label}</span>
+                              <strong>{option.capacity}</strong>
+                            </button>
+                          ))}
+                          {terminalMonitorPages.pages.length > 1 && (
+                            <button
+                              className="focus-page-settings-delete"
+                              data-testid={`focus-page-delete-${page.id}`}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => removeTerminalMonitorPage(page.id)}
+                              type="button"
+                            >
+                              关闭此页
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
                 <button
                   aria-label="新建显示页面"
                   className="focus-page-add"
@@ -2258,7 +2404,7 @@ export function AgentFocusView({
                     data-terminal-pane-menu-scope={
                       isActiveInputPane ? "active-titlebar" : undefined
                     }
-                    draggable={Boolean(session) && !groupArrangementEnabled}
+                    draggable={Boolean(session)}
                     onContextMenuCapture={(event) =>
                       handlePaneTitleContextMenu(
                         slot,

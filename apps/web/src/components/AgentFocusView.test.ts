@@ -253,7 +253,7 @@ describe("AgentFocusView", () => {
     assert.match(markup, />设为输入</);
     assert.match(markup, />完整记录<\/button>/);
     assert.match(markup, />变更<\/button>/);
-    assert.match(markup, /aria-label="向 Alpha 的 Codex 对话发送图片"/);
+    assert.match(markup, /aria-label="向 Alpha 发送图片"/);
     assert.match(markup, />图片<\/button>/);
     assert.equal(
       (markup.match(/data-terminal-pane-menu-scope="active-titlebar"/g) ?? [])
@@ -460,6 +460,14 @@ describe("AgentFocusView", () => {
       5,
     );
     assert.doesNotMatch(markup, /data-terminal-pane-session="outside-session"/);
+    assert.equal(
+      (
+        markup.match(
+          /class="focus-terminal-pane-header"[^>]*draggable="true"/g,
+        ) ?? []
+      ).length,
+      6,
+    );
   });
 
   it("links every monitored pane to the matching card in the existing sidebar groups", () => {
@@ -666,8 +674,13 @@ describe("AgentFocusView", () => {
     );
 
     assert.match(markup, /data-testid="focus-page-add"/);
-    assert.doesNotMatch(markup, /data-testid="focus-page-tab-/);
+    assert.match(
+      markup,
+      /data-testid="focus-page-tab-terminal-monitor-page-1"/,
+    );
+    assert.match(markup, />默认</);
     assert.doesNotMatch(markup, /data-testid="focus-page-delete-/);
+    assert.doesNotMatch(markup, /data-testid="focus-page-settings-/);
   });
 
   it("highlights the active named page and keeps the default page undeletable", () => {
@@ -730,11 +743,15 @@ describe("AgentFocusView", () => {
       markup,
       /aria-pressed="false"[^>]*data-testid="focus-page-tab-terminal-monitor-page-1"/,
     );
-    assert.match(markup, /data-testid="focus-page-delete-terminal-monitor-page-2"/);
-    assert.doesNotMatch(
-      markup,
-      /data-testid="focus-page-delete-terminal-monitor-page-1"/,
+    const defaultTab = markup.indexOf(
+      'data-testid="focus-page-tab-terminal-monitor-page-1"',
     );
+    const secondTab = markup.indexOf(
+      'data-testid="focus-page-tab-terminal-monitor-page-2"',
+    );
+    assert.ok(defaultTab >= 0 && secondTab > defaultTab);
+    assert.doesNotMatch(markup, /data-testid="focus-page-delete-/);
+    assert.doesNotMatch(markup, /data-testid="focus-page-settings-/);
     assert.match(markup, /focus-terminal-layout--single/);
     assert.doesNotMatch(markup, /focus-terminal-layout--dual/);
   });
@@ -749,10 +766,13 @@ describe("AgentFocusView", () => {
     assert.match(source, /saveTerminalMonitorPages/);
     assert.match(source, /updateActiveTerminalMonitorPage/);
     assert.match(source, /data-testid=\{`focus-page-rename-\$\{page\.id\}`\}/);
-    assert.match(source, /autoFocus/);
+    assert.match(
+      source,
+      /data-testid=\{`focus-page-settings-\$\{page\.id\}`\}/,
+    );
+    assert.match(source, /handlePageTabClick\(page\.id\)/);
     assert.match(source, /pageRenameKeyAction\(event\.key\)/);
-    assert.match(source, /shouldCommitPageRename\(pageRenameGestureRef\.current\)/);
-    assert.match(source, /if \(isDefaultPage\) \{\s*return;\s*\}/);
+    assert.doesNotMatch(source, /onDoubleClick/);
     assert.match(source, /suspended=\{!isVisibleManualPane\}/);
     assert.doesNotMatch(source, /pages\.map\([\s\S]{0,240}TerminalPaneContent/);
   });
