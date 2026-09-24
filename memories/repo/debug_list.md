@@ -283,3 +283,4 @@
 - 2026-09-23：Claude 类型同步为 `claude.exe` 后，飞书完成探测和内容 resolver 的精确 `=== "claude"` 判断仍漏掉它；完成通知统一用共享 `isClaudeAgentKind`，避免误走 Codex，回归覆盖没有预设 Claude session ID 时的完成与 UUID 绑定。
 - 2026-09-23：远端 Claude 飞书记录按钮读页/导出只传 UUID 与 SSH 目标，Claude reader 没有工作目录就无法定位项目 JSONL。现在仅对远端 Claude 传入注册会话的工作目录与 tmux 标识，读取结果继续要求精确 UUID 匹配。
 - 2026-09-24：多显示页面的已有窗格会话在切页时被 `focusedSession.id` 强制替换，之后自动保存使覆盖持久化；分组当前输入会话未包含在页面状态里。页面恢复现在保留有效的已存窗格，仅空白页注入聚焦会话，并在外层聚焦未变化时抑制恢复后的二次同步；`activeGroupSessionId` 随页面状态读写。相关红绿灯测试见终端工作区、布局和聚焦视图测试。
+- 2026-09-24：本机 tmux 卡片无 pane ID 时 Agent 类型长期停留 `shell`，即使唯一 pane 已运行 Claude；Shell 静默完成通知会把终端底部状态/警告当正文。唯一卡片与唯一合法 pane 才自动补绑并同步实际命令，未绑定卡片不走终端预览完成兜底；多窗格、重复登记、非法 pane ID 均保持不绑定。`tmp` 运行态已变为 Claude，当前没有可读 JSONL（Claude 显示 transcript 写入失败），不能声称真实完成通知已恢复。

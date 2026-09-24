@@ -37,7 +37,7 @@ function makeFallbackSession(
     ...makeSession(interactionState),
     agentKind: "shell",
     displayName: "普通 Shell 任务",
-    transportRef: { tmuxSession: "existing-task" },
+    transportRef: { tmuxSession: "existing-task", tmuxPane: "%7" },
   };
 }
 
@@ -141,6 +141,42 @@ test("notifies when an already-running non-Codex session completes after the swi
     source.emitSession(makeFallbackSession("exited"));
     await new Promise<void>((resolve) => setImmediate(resolve));
     assert.equal(sent.length, 2);
+  } finally {
+    stop();
+  }
+});
+
+test("does not send a terminal-preview fallback for an unbound local tmux card", async () => {
+  const unboundSession = (
+    interactionState: AgentSessionRecord["interactionState"],
+  ): AgentSessionRecord => ({
+    ...makeFallbackSession(interactionState),
+    lastAgentMessageSummary: undefined,
+    outputPreview: "⚠ Transcript writes are failing…",
+    transportRef: { tmuxSession: "tmp" },
+  });
+  const source = new SnapshotSource({
+    items: [unboundSession("running")],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-09-24T07:29:00.000Z",
+  });
+  const sent: FeishuCompletionEvent[] = [];
+  const stop = new AgentCompletionFeishuNotifier({
+    source,
+    settings: {
+      get: () => ({ configured: true, enabled: true }),
+    },
+    sender: {
+      send: async (event) => {
+        sent.push(event);
+      },
+    },
+  }).start();
+
+  try {
+    source.emitSession(unboundSession("idle"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(sent.length, 0);
   } finally {
     stop();
   }

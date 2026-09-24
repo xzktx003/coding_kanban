@@ -113,6 +113,18 @@ function canObserveStructuredCompletion(session: AgentSessionRecord): boolean {
   );
 }
 
+function shouldRequireStructuredCompletion(
+  session: AgentSessionRecord,
+): boolean {
+  return (
+    canObserveStructuredCompletion(session) ||
+    (session.sourceType === "local" &&
+      !session.sshTarget &&
+      Boolean(session.transportRef?.tmuxSession) &&
+      !session.transportRef?.tmuxPane)
+  );
+}
+
 function canPrepareCodexLocalFileReferences(
   session: AgentSessionRecord,
 ): boolean {
@@ -272,7 +284,7 @@ export class AgentCompletionFeishuNotifier {
           );
           void this.#deliver(
             event,
-            session ? canObserveStructuredCompletion(session) : false,
+            session ? shouldRequireStructuredCompletion(session) : false,
           );
         } catch (error) {
           this.#logError(error, event);
