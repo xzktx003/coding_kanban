@@ -1,6 +1,6 @@
 # Coding Kanban 功能清单
 
-- 飞书个人快捷回复：底部菜单在同一张卡片中选择 Codex 目标和模板，选中后原位进入可编辑预览，明确点击发送才进入现有文字队列；完成通知按钮锁定原 thread，并与「查看完整记录」及引用文件按钮共用横向操作组。模板从 Git 忽略的 `.dev-runtime/feishu-quick-replies.json` 读取，支持分类、热更新和占位符补全；旧面板在内容更新后拒绝发送，每张仅提交一次。仓库仅含通用示例，部署者各用自己的文件。菜单 Key 为 `kanban_quick_replies`，详见 [快捷回复](feishu-quick-replies.md)。
+- 飞书个人快捷回复：底部菜单在同一张卡片中选择 Codex 目标和模板，选中后原位进入可编辑预览，明确点击发送才进入现有文字队列；完成通知按钮锁定原 thread，和「查看完整记录」固定在卡片最后一行，每个引用文件的「查看 文件名」按钮各占上方一行。模板从 Git 忽略的 `.dev-runtime/feishu-quick-replies.json` 读取，支持分类、热更新和占位符补全；旧面板在内容更新后拒绝发送，每张仅提交一次。仓库仅含通用示例，部署者各用自己的文件。菜单 Key 为 `kanban_quick_replies`，详见 [快捷回复](feishu-quick-replies.md)。
 
 - 本地 tmux 的一张看板卡片可对应多个分屏 Codex：后端枚举该 tmux session 的全部 pane，按真实 Codex thread 独立读取 `task_complete`、建立启动基线并去重通知。某个分屏完成时无需先切成活动 pane；飞书卡片回复、完整记录和安全文件按钮都固定回到发出通知的原始 thread，活动 pane 切换不会改变目标，分屏关闭后则安全拒绝。
 - Claude 会话可从聚焦页和手机端打开完整记录；已登记的本机 tmux 会话启动时及运行期间同步当前 pane 的真实命令，避免从 `node` 切到 `claude.exe` 后仍走 Codex 记录入口。后端按 Claude JSONL 会话 ID、当前 tmux pane 或已校验工作目录读取本机与 SSH 历史，按字节游标分页并隐藏 thinking、sidechain 内容，工具调用和结果保持折叠。

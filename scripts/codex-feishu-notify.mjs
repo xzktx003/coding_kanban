@@ -568,10 +568,22 @@ export function buildCompletionCards(
       ? [{ reference, imageKey }]
       : [];
   });
+  const buttonRow = (buttons) => ({
+    tag: "column_set",
+    flex_mode: "none",
+    horizontal_spacing: "8px",
+    columns: buttons.map((button) => ({
+      tag: "column",
+      width: "weighted",
+      weight: 1,
+      elements: [button],
+    })),
+  });
   const footerActions = (index, questionPart) => {
-    const buttons = [];
+    const primaryButtons = [];
+    const fileButtons = [];
     if (quickRepliesAvailable) {
-      buttons.push({
+      primaryButtons.push({
         tag: "button",
         text: { tag: "plain_text", content: "快捷回复" },
         type: "default",
@@ -586,7 +598,7 @@ export function buildCompletionCards(
       });
     }
     if (recordsAvailable) {
-      buttons.push({
+      primaryButtons.push({
         tag: "button",
         text: { tag: "plain_text", content: "查看完整记录" },
         type: "primary",
@@ -603,7 +615,7 @@ export function buildCompletionCards(
     if (!questionPart && index === 0 && recordsAvailable) {
       referencedFiles.forEach((reference, referenceIndex) => {
         const basename = reference.path.split("/").at(-1);
-        buttons.push({
+        fileButtons.push({
           tag: "button",
           text: {
             tag: "plain_text",
@@ -627,19 +639,10 @@ export function buildCompletionCards(
         });
       });
     }
-    return buttons.length
-      ? [
-          {
-            tag: "column_set",
-            flex_mode: "flow",
-            horizontal_spacing: "8px",
-            columns: buttons.map((button) => ({
-              tag: "column",
-              elements: [button],
-            })),
-          },
-        ]
-      : [];
+    return [
+      ...fileButtons.map((button) => buttonRow([button])),
+      ...(primaryButtons.length ? [buttonRow(primaryButtons)] : []),
+    ];
   };
   return parts.map(({ chunk, index, questionPart }) => ({
     schema: "2.0",

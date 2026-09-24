@@ -71,7 +71,7 @@ test("adds a tiny records callback without exposing session identity", () => {
   for (const card of cards) {
     const row = card.body.elements.at(-1);
     assert.equal(row.tag, "column_set");
-    assert.equal(row.flex_mode, "flow");
+    assert.equal(row.flex_mode, "none");
     const button = row.columns[0].elements[0];
     assert.equal(button.tag, "button");
     assert.equal(button.size, "tiny");
@@ -96,7 +96,7 @@ test("adds quick reply before records with a fixed callback payload", () => {
   });
   const row = card.body.elements.at(-1);
   assert.equal(row.tag, "column_set");
-  assert.equal(row.flex_mode, "flow");
+  assert.equal(row.flex_mode, "none");
   const buttons = row.columns.map((column) => column.elements[0]);
   assert.equal(buttons[0].text.content, "快捷回复");
   assert.equal(buttons[0].size, "tiny");
@@ -111,13 +111,16 @@ test("adds quick reply before records with a fixed callback payload", () => {
   assert.equal(buttons[1].text.content, "查看完整记录");
 });
 
-test("places quick reply, records and referenced file actions in one footer group", () => {
+test("keeps quick reply and records together in the final footer row", () => {
   const [card] = buildCompletionCards({
     ...completion,
     "agent-kind": "codex",
     "records-available": true,
     "quick-replies-available": true,
-    "referenced-files": [{ path: "src/app.ts", line: 12 }],
+    "referenced-files": [
+      { path: "src/app.ts", line: 12 },
+      { path: "docs/usage.md" },
+    ],
   });
   const rows = card.body.elements.filter(
     (element) =>
@@ -126,12 +129,23 @@ test("places quick reply, records and referenced file actions in one footer grou
         column.elements.some((child) => child.tag === "button"),
       ),
   );
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].flex_mode, "flow");
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].flex_mode, "none");
   assert.deepEqual(
     rows[0].columns.map((column) => column.elements[0].text.content),
-    ["快捷回复", "查看完整记录", "查看 app.ts:12"],
+    ["查看 app.ts:12"],
   );
+  assert.equal(rows[1].flex_mode, "none");
+  assert.deepEqual(
+    rows[1].columns.map((column) => column.elements[0].text.content),
+    ["查看 usage.md"],
+  );
+  assert.equal(rows[2].flex_mode, "none");
+  assert.deepEqual(
+    rows[2].columns.map((column) => column.elements[0].text.content),
+    ["快捷回复", "查看完整记录"],
+  );
+  assert.equal(card.body.elements.at(-1), rows[2]);
 });
 
 test("does not render quick replies for non-Codex notifications", () => {
