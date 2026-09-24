@@ -261,13 +261,17 @@ export function shouldSyncTerminalInputWithFocusedSession({
   focusedSessionId,
   previousFocusedSessionId,
   syncActiveTerminalWithFocus,
+  pageRestoredAtFocusId,
 }: {
   focusedSessionId: string;
   previousFocusedSessionId: string;
   syncActiveTerminalWithFocus: boolean;
+  pageRestoredAtFocusId?: string | null;
 }): boolean {
   return (
-    syncActiveTerminalWithFocus || focusedSessionId !== previousFocusedSessionId
+    focusedSessionId !== pageRestoredAtFocusId &&
+    (syncActiveTerminalWithFocus ||
+      focusedSessionId !== previousFocusedSessionId)
   );
 }
 

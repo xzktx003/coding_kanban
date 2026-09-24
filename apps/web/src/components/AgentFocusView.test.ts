@@ -495,6 +495,59 @@ describe("AgentFocusView", () => {
     );
   });
 
+  it("restores the active group terminal saved by the selected display page", () => {
+    const groupId = "group-research";
+    const pageState = {
+      mode: "dual",
+      arrangementMode: "group",
+      arrangementGroupId: groupId,
+      activeGroupSessionId: "group-session-2",
+      groupSessionOrderByGroupId: {},
+      slots: [],
+      activeSlotId: "terminal-monitor-slot-1",
+      closedSlotIds: [],
+    };
+    installLocalStorageStub("dual", undefined, false, {
+      activePageId: "terminal-monitor-page-2",
+      pages: [
+        {
+          id: "terminal-monitor-page-1",
+          name: "默认",
+          state: { ...pageState, activeGroupSessionId: "group-session-1" },
+        },
+        { id: "terminal-monitor-page-2", name: "页面 1", state: pageState },
+      ],
+    });
+    const sessions = [
+      makeSession("group-session-1", "Research 1"),
+      makeSession("group-session-2", "Research 2"),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: sessions[0],
+        sessions,
+        sessionGroups: {
+          groups: [{ id: groupId, name: "研究" }],
+          assignments: Object.fromEntries(
+            sessions.map((session) => [`session:${session.id}`, groupId]),
+          ),
+          collapsedGroupIds: [],
+        },
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    assert.match(
+      markup,
+      /data-active-terminal-pane="true"[^>]*data-terminal-pane-session="group-session-2"/,
+    );
+  });
+
   it("links every monitored pane to the matching card in the existing sidebar groups", () => {
     installLocalStorageStub("dual");
     const sessions = [

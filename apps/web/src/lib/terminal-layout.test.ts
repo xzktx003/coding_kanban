@@ -89,6 +89,24 @@ describe("terminal monitor layout", () => {
       }),
       true,
     );
+    assert.equal(
+      shouldSyncTerminalInputWithFocusedSession({
+        focusedSessionId: "agent-2",
+        previousFocusedSessionId: "agent-2",
+        syncActiveTerminalWithFocus: true,
+        pageRestoredAtFocusId: "agent-2",
+      }),
+      false,
+    );
+    assert.equal(
+      shouldSyncTerminalInputWithFocusedSession({
+        focusedSessionId: "agent-3",
+        previousFocusedSessionId: "agent-2",
+        syncActiveTerminalWithFocus: true,
+        pageRestoredAtFocusId: "agent-2",
+      }),
+      true,
+    );
   });
 
   it("caps monitor panes to the selected layout size", () => {

@@ -33,6 +33,7 @@ function emptyWorkspace(
     mode: "single",
     arrangementMode: "manual",
     arrangementGroupId: null,
+    activeGroupSessionId: null,
     groupSessionOrderByGroupId: {},
     slots: [],
     activeSlotId: "terminal-monitor-slot-1",
@@ -184,4 +185,33 @@ test("saved pages load back unchanged", () => {
   saveTerminalMonitorPages(updated, storage);
 
   assert.deepEqual(loadTerminalMonitorPages(storage), updated);
+});
+
+test("each page keeps its own selected group terminal", () => {
+  const storage = createStorage();
+  const firstPage = updateActiveTerminalMonitorPage(
+    loadTerminalMonitorPages(storage),
+    emptyWorkspace({
+      arrangementMode: "group",
+      arrangementGroupId: "group-research",
+      activeGroupSessionId: "session-a",
+    }),
+  );
+  const secondPage = updateActiveTerminalMonitorPage(
+    createTerminalMonitorPage(firstPage),
+    emptyWorkspace({
+      arrangementMode: "group",
+      arrangementGroupId: "group-research",
+      activeGroupSessionId: "session-b",
+    }),
+  );
+
+  saveTerminalMonitorPages(secondPage, storage);
+
+  assert.deepEqual(
+    loadTerminalMonitorPages(storage).pages.map(
+      (page) => page.state.activeGroupSessionId,
+    ),
+    ["session-a", "session-b"],
+  );
 });

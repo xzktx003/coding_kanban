@@ -377,7 +377,7 @@ export function AgentFocusView({
   );
   const [activeGroupSessionId, setActiveGroupSessionId] = useState<
     string | null
-  >(null);
+  >(initialTerminalWorkspaceState.activeGroupSessionId);
   const terminalLayoutScrollElementRef = useRef<HTMLDivElement | null>(null);
   const terminalLayoutScrollDeltaRef = useRef(0);
   const terminalLayoutScrollFrameRef = useRef<number | null>(null);
@@ -398,6 +398,7 @@ export function AgentFocusView({
   const terminalMonitorPagesRef = useRef(terminalMonitorPages);
   terminalMonitorPagesRef.current = terminalMonitorPages;
   const previousFocusedSessionIdRef = useRef(focusedSession.id);
+  const pageRestoredAtFocusIdRef = useRef<string | null>(focusedSession.id);
 
   useEffect(() => {
     if (!imageDraft) {
@@ -807,6 +808,7 @@ export function AgentFocusView({
           terminalArrangementMode === "group"
             ? terminalArrangementGroupId
             : null,
+        activeGroupSessionId,
         groupSessionOrderByGroupId: normalizedGroupSessionOrderByGroupId,
         slots: terminalSlots,
         activeSlotId: safeActiveSlotId,
@@ -817,6 +819,7 @@ export function AgentFocusView({
     setTerminalMonitorPages(nextPages);
     saveTerminalMonitorPages(nextPages);
   }, [
+    activeGroupSessionId,
     closedSlotIds,
     normalizedGroupSessionOrderByGroupId,
     safeActiveSlotId,
@@ -943,10 +946,17 @@ export function AgentFocusView({
   }, [paneContextMenu]);
 
   useEffect(() => {
+    if (
+      pageRestoredAtFocusIdRef.current !== null &&
+      pageRestoredAtFocusIdRef.current !== focusedSession.id
+    ) {
+      pageRestoredAtFocusIdRef.current = null;
+    }
     const shouldSyncInput = shouldSyncTerminalInputWithFocusedSession({
       focusedSessionId: focusedSession.id,
       previousFocusedSessionId: previousFocusedSessionIdRef.current,
       syncActiveTerminalWithFocus,
+      pageRestoredAtFocusId: pageRestoredAtFocusIdRef.current,
     });
     previousFocusedSessionIdRef.current = focusedSession.id;
 
@@ -1662,9 +1672,11 @@ export function AgentFocusView({
   }
 
   function applyTerminalWorkspace(workspace: TerminalWorkspaceState): void {
+    pageRestoredAtFocusIdRef.current = focusedSession.id;
     setTerminalLayoutMode(workspace.mode);
     setTerminalArrangementMode(workspace.arrangementMode);
     setTerminalArrangementGroupId(workspace.arrangementGroupId);
+    setActiveGroupSessionId(workspace.activeGroupSessionId);
     setActiveSlotId(workspace.activeSlotId);
     setTerminalSlots(workspace.slots);
     setGroupSessionOrderByGroupId(workspace.groupSessionOrderByGroupId);
@@ -1677,6 +1689,7 @@ export function AgentFocusView({
       arrangementMode: terminalArrangementMode,
       arrangementGroupId:
         terminalArrangementMode === "group" ? terminalArrangementGroupId : null,
+      activeGroupSessionId,
       groupSessionOrderByGroupId: normalizedGroupSessionOrderByGroupId,
       slots: terminalSlots,
       activeSlotId: safeActiveSlotId,

@@ -30,6 +30,7 @@ test("persists monitor layout, slot assignments, active input slot, and closed s
       mode: "quad",
       arrangementMode: "manual",
       arrangementGroupId: null,
+      activeGroupSessionId: null,
       groupSessionOrderByGroupId: {},
       slots: [
         { id: "terminal-monitor-slot-1", sessionId: "session-a" },
@@ -47,6 +48,7 @@ test("persists monitor layout, slot assignments, active input slot, and closed s
     mode: "quad",
     arrangementMode: "manual",
     arrangementGroupId: null,
+    activeGroupSessionId: null,
     groupSessionOrderByGroupId: {},
     slots: [
       { id: "terminal-monitor-slot-1", sessionId: "session-a" },
@@ -67,6 +69,7 @@ test("persists the selected group arrangement without replacing manual slots", (
       mode: "triple",
       arrangementMode: "group",
       arrangementGroupId: "group-research",
+      activeGroupSessionId: null,
       groupSessionOrderByGroupId: {
         "group-research": ["session-b", "session-a"],
       },
@@ -81,6 +84,7 @@ test("persists the selected group arrangement without replacing manual slots", (
     mode: "triple",
     arrangementMode: "group",
     arrangementGroupId: "group-research",
+    activeGroupSessionId: null,
     groupSessionOrderByGroupId: {
       "group-research": ["session-b", "session-a"],
     },
@@ -99,6 +103,7 @@ test("migrates the previous layout-mode-only storage and rejects malformed slots
     mode: "dual",
     arrangementMode: "manual",
     arrangementGroupId: null,
+    activeGroupSessionId: null,
     groupSessionOrderByGroupId: {},
     slots: [],
     activeSlotId: "terminal-monitor-slot-1",
@@ -119,6 +124,7 @@ test("migrates the previous layout-mode-only storage and rejects malformed slots
     mode: "quad",
     arrangementMode: "manual",
     arrangementGroupId: null,
+    activeGroupSessionId: null,
     groupSessionOrderByGroupId: {},
     slots: [],
     activeSlotId: "terminal-monitor-slot-1",
@@ -133,6 +139,7 @@ test("reopens a stale closed active slot for a newly focused session", () => {
         mode: "single",
         arrangementMode: "manual",
         arrangementGroupId: null,
+        activeGroupSessionId: null,
         groupSessionOrderByGroupId: {},
         slots: [
           { id: "terminal-monitor-slot-1", sessionId: "deleted-session" },
@@ -147,6 +154,7 @@ test("reopens a stale closed active slot for a newly focused session", () => {
       mode: "single",
       arrangementMode: "manual",
       arrangementGroupId: null,
+      activeGroupSessionId: null,
       groupSessionOrderByGroupId: {},
       slots: [
         {
@@ -157,6 +165,49 @@ test("reopens a stale closed active slot for a newly focused session", () => {
       activeSlotId: "terminal-monitor-slot-1",
       closedSlotIds: [],
     },
+  );
+});
+
+test("restores an existing page's terminal instead of the focused terminal from another page", () => {
+  const restored = resolveTerminalWorkspaceStateForFocus(
+    {
+      mode: "single",
+      arrangementMode: "manual",
+      arrangementGroupId: null,
+      activeGroupSessionId: null,
+      groupSessionOrderByGroupId: {},
+      slots: [{ id: "terminal-monitor-slot-1", sessionId: "page-a-session" }],
+      activeSlotId: "terminal-monitor-slot-1",
+      closedSlotIds: [],
+    },
+    [{ id: "page-a-session" }, { id: "page-b-session" }],
+    "page-b-session",
+  );
+
+  assert.equal(restored.slots[0]?.sessionId, "page-a-session");
+});
+
+test("round-trips the selected group terminal in workspace state", () => {
+  const storage = createStorage();
+  saveTerminalWorkspaceState(
+    {
+      mode: "dual",
+      arrangementMode: "group",
+      arrangementGroupId: "group-research",
+      activeGroupSessionId: "group-session-2",
+      groupSessionOrderByGroupId: {
+        "group-research": ["group-session-1", "group-session-2"],
+      },
+      slots: [],
+      activeSlotId: "terminal-monitor-slot-1",
+      closedSlotIds: [],
+    },
+    storage,
+  );
+
+  assert.equal(
+    loadTerminalWorkspaceState(storage).activeGroupSessionId,
+    "group-session-2",
   );
 });
 
