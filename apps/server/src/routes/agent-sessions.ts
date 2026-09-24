@@ -74,12 +74,6 @@ import { resolveVsCodeWebRequestTarget } from "./vscode-web-request-target.js";
 
 const TASK_SUMMARY_CACHE_TTL_MS = 15_000;
 const GIT_SUMMARY_CACHE_TTL_MS = 60_000;
-const TMUX_MOUSE_FEATURE = ",xterm*:mouse";
-
-function buildTmuxMouseFeatureCommand(): string {
-  return `set-option -ga terminal-features ${shellQuote(TMUX_MOUSE_FEATURE)}`;
-}
-
 function buildTmuxSessionMouseCommand(tmuxSessionName: string): string {
   return `set-option -t ${shellQuote(tmuxSessionName)} mouse on`;
 }
@@ -156,7 +150,7 @@ function buildTmuxAttachCommand(
   tmuxHistoryLimit = DEFAULT_TERMINAL_TMUX_CAPTURE_LINES,
 ): string {
   const normalizedTmuxSessionName = normalizeTmuxSessionName(tmuxSessionName)!;
-  const tmuxPrefix = `tmux ${buildTmuxMouseFeatureCommand()} \\; ${buildTmuxSessionMouseCommand(normalizedTmuxSessionName)} \\; set-option -t ${shellQuote(normalizedTmuxSessionName)} history-limit ${tmuxHistoryLimit}`;
+  const tmuxPrefix = `tmux ${buildTmuxSessionMouseCommand(normalizedTmuxSessionName)} \\; set-option -t ${shellQuote(normalizedTmuxSessionName)} history-limit ${tmuxHistoryLimit}`;
 
   if (tmuxPaneId) {
     return `${tmuxPrefix} \\; select-pane -t ${shellQuote(tmuxPaneId)} \\; attach -t ${shellQuote(normalizedTmuxSessionName)}`;
