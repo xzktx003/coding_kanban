@@ -4595,6 +4595,20 @@ input {
   min-height: 0;
 }
 
+.mobile-workbench-content:has(.mobile-file-browser) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mobile-workbench-content:has(.mobile-file-browser) > .mobile-workspace-view,
+.mobile-workbench-content:has(.mobile-file-browser) > .mobile-session-view {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .mobile-workspace-view,
 .mobile-session-view {
   width: min(100%, 680px);
@@ -5240,6 +5254,18 @@ input {
   min-width: 0;
 }
 
+.mobile-file-browser {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mobile-file-browser > :not(.mobile-file-list) {
+  flex: none;
+}
+
 .mobile-file-preview {
   grid-template-areas:
     "header"
@@ -5442,10 +5468,17 @@ input {
 
 .mobile-file-list {
   display: grid;
-  overflow: hidden;
+  flex: 1 1 auto;
+  align-content: start;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   background: rgba(5, 9, 13, 0.54);
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
 }
 
 .mobile-file-entry {

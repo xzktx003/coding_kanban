@@ -79,6 +79,18 @@ describe("MobileFileBrowser", () => {
       /\.mobile-project-card-controls button,\s*\.mobile-file-browser-control,\s*\.mobile-file-browser-state button\s*{[^}]*min-height:\s*44px;/s,
     );
     assert.match(css, /\.mobile-file-entry\s*{[^}]*min-height:\s*56px;/s);
+    assert.match(
+      css,
+      /\.mobile-workbench-content:has\(\.mobile-file-browser\)\s*{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;[^}]*overflow:\s*hidden;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-file-browser\s*{[^}]*display:\s*flex;[^}]*flex:\s*1 1 auto;[^}]*min-height:\s*0;/s,
+    );
+    assert.match(
+      css,
+      /\.mobile-file-list\s*{[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;[^}]*touch-action:\s*pan-y;/s,
+    );
   });
 
   it("routes Markdown through the rendered preview and keeps documents vertically scrollable", () => {
@@ -216,6 +228,7 @@ describe("MobileFileBrowser", () => {
     assert.match(source, /onPointerDown=.*startFileLongPress/s);
     assert.match(source, /onPointerMove={moveFileLongPress}/);
     assert.match(source, /onPointerCancel={cancelFileLongPress}/);
+    assert.match(source, /onScroll={cancelFileLongPress}/);
     assert.match(source, /onContextMenu=/);
     assert.match(source, /aria-label="文件操作菜单"/);
     assert.match(source, />\s*复制路径\s*</);
