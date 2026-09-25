@@ -342,6 +342,10 @@ function dirnameOf(relativePath: string): string {
   return index <= 0 ? "." : relativePath.slice(0, index);
 }
 
+function isExternalReferencedPath(filePath: string): boolean {
+  return filePath.startsWith("/");
+}
+
 function joinRelative(directory: string, basename: string): string {
   return directory === "." ? basename : `${directory}/${basename}`;
 }
@@ -1472,8 +1476,11 @@ export class FeishuSessionWorkspace {
   ): Promise<void> {
     const actions = new Map<string, WorkspaceAction>();
     const contentLength = Array.from(file.content).length;
+    const externalFile = isExternalReferencedPath(path);
     const editable =
-      file.editable && contentLength <= MAX_FORM_CONTENT_CHARACTERS;
+      !externalFile &&
+      file.editable &&
+      contentLength <= MAX_FORM_CONTENT_CHARACTERS;
     const preview = truncateUnicode(file.content, MAX_FILE_PREVIEW_CHARACTERS);
     const buttons = [
       callbackButton(
@@ -1481,22 +1488,24 @@ export class FeishuSessionWorkspace {
         this.#storeAction(actions, { kind: "file_download", path }),
         { type: "primary_filled" },
       ),
-      callbackButton(
-        "返回目录",
-        this.#storeAction(actions, {
-          kind: "files",
-          path: dirnameOf(path),
-          page: 1,
-        }),
-      ),
     ];
-    if (editable) {
-      buttons.splice(
-        1,
-        0,
+    if (!externalFile) {
+      if (editable) {
+        buttons.push(
+          callbackButton(
+            "编辑文件",
+            this.#storeAction(actions, { kind: "file_edit_form", path }),
+          ),
+        );
+      }
+      buttons.push(
         callbackButton(
-          "编辑文件",
-          this.#storeAction(actions, { kind: "file_edit_form", path }),
+          "返回目录",
+          this.#storeAction(actions, {
+            kind: "files",
+            path: dirnameOf(path),
+            page: 1,
+          }),
         ),
       );
     }
@@ -1538,21 +1547,31 @@ export class FeishuSessionWorkspace {
           infoBlock(
             `路径：${path}\n该文件无法作为 128KiB 内 UTF-8 文本预览，可直接下载。`,
           ),
-          actionRow([
-            callbackButton(
-              "下载文件",
-              this.#storeAction(actions, { kind: "file_download", path }),
-              { type: "primary_filled" },
-            ),
-            callbackButton(
-              "返回目录",
-              this.#storeAction(actions, {
-                kind: "files",
-                path: dirnameOf(path),
-                page: 1,
-              }),
-            ),
-          ]),
+          actionRow(
+            isExternalReferencedPath(path)
+              ? [
+                  callbackButton(
+                    "下载文件",
+                    this.#storeAction(actions, { kind: "file_download", path }),
+                    { type: "primary_filled" },
+                  ),
+                ]
+              : [
+                  callbackButton(
+                    "下载文件",
+                    this.#storeAction(actions, { kind: "file_download", path }),
+                    { type: "primary_filled" },
+                  ),
+                  callbackButton(
+                    "返回目录",
+                    this.#storeAction(actions, {
+                      kind: "files",
+                      path: dirnameOf(path),
+                      page: 1,
+                    }),
+                  ),
+                ],
+          ),
         ],
       }),
       actions,

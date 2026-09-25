@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { dirname } from "node:path";
 
 import type { FeishuCompletionFileReference } from "./feishu-completion-file-reference-service.js";
+import { isSafeAbsolutePath } from "./feishu-trusted-local-file.js";
 
 const STATE_VERSION = 1;
 const DEFAULT_BINDING_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
@@ -65,6 +66,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function isAcceptableReferencedPath(filePath: string): boolean {
+  if (filePath.startsWith("/")) {
+    return isSafeAbsolutePath(filePath);
+  }
+  return (
+    !filePath.includes("\\") &&
+    !/[\u0000-\u001f\u007f]/u.test(filePath) &&
+    filePath
+      .split("/")
+      .every((segment) => segment && segment !== "." && segment !== "..")
+  );
+}
+
 function isValidTimestamp(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
 }
@@ -84,12 +98,7 @@ function parseReferencedFiles(
       typeof path !== "string" ||
       path.length === 0 ||
       path.length > 2_048 ||
-      path.startsWith("/") ||
-      path.includes("\\") ||
-      /[\u0000-\u001f\u007f]/u.test(path) ||
-      path
-        .split("/")
-        .some((segment) => !segment || segment === "." || segment === "..") ||
+      !isAcceptableReferencedPath(path) ||
       (line !== undefined &&
         (typeof line !== "number" ||
           !Number.isSafeInteger(line) ||

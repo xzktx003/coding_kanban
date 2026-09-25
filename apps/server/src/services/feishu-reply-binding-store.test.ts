@@ -188,3 +188,44 @@ test("atomically persists a delivered reply as the next reply binding", () => {
     rmSync(directory, { force: true, recursive: true });
   }
 });
+
+test("persists trusted absolute references and drops unsafe absolute paths", () => {
+  const directory = mkdtempSync(join(tmpdir(), "kanban-feishu-replies-"));
+  const statePath = join(directory, "reply-bindings.json");
+  const now = new Date("2026-09-01T12:00:00.000Z");
+
+  try {
+    const store = new FeishuReplyBindingStore({
+      statePath,
+      now: () => now,
+    });
+    store.record({
+      sessionId: "session-1",
+      completionId: "turn-absolute",
+      codexThreadId: "codex-thread-12345678",
+      referencedFiles: [
+        { path: "/data/work/out.pdf", line: 4 },
+        { path: "/data/work/../../etc/passwd" },
+        { path: "/data/work/.env" },
+        { path: "/data/work/id_rsa" },
+        { path: "src/app.ts" },
+      ],
+      messages: [{ messageId: "om_absolute", chatId: "oc_private" }],
+    });
+
+    assert.deepEqual(store.resolve("om_absolute")?.referencedFiles, [
+      { path: "/data/work/out.pdf", line: 4 },
+      { path: "src/app.ts" },
+    ]);
+    const reloaded = new FeishuReplyBindingStore({
+      statePath,
+      now: () => now,
+    });
+    assert.deepEqual(reloaded.resolve("om_absolute")?.referencedFiles, [
+      { path: "/data/work/out.pdf", line: 4 },
+      { path: "src/app.ts" },
+    ]);
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});

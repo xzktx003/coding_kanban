@@ -533,7 +533,11 @@ test("notification file callback previews only its bound referenced file", async
   assert.equal(fixture.service.accepts(event), true);
   assert.equal(await fixture.service.handle(event), "file_sent");
   assert.deepEqual(requestedPaths, ["src/app.ts"]);
-  assert.match(JSON.stringify(fixture.lastCard()), /src\/app\.ts:12/);
+  const card = JSON.stringify(fixture.lastCard());
+  assert.match(card, /src\/app\.ts:12/);
+  assert.match(card, /编辑文件/);
+  assert.match(card, /返回目录/);
+
   assert.equal(
     await fixture.service.handle({
       ...event,
@@ -545,6 +549,76 @@ test("notification file callback previews only its bound referenced file", async
     }),
     "ignored_untrusted",
   );
+});
+
+test("notification file callback opens a bound file outside the session directory", async () => {
+  const absolutePath =
+    "/data/home/demo/papers/Promotion_Aware_Multi_Fidelity_9page.pdf";
+  const requestedPaths: string[] = [];
+  const fixture = createFixture({
+    notificationBinding: {
+      messageId: "om_notice",
+      chatId: "oc_private",
+      sessionId: "session-1",
+      codexThreadId: "thread-1",
+      referencedFiles: [{ path: absolutePath }],
+    },
+    read: async (path) => {
+      requestedPaths.push(path);
+      throw new Error("binary");
+    },
+  });
+  const event = {
+    type: "card.action.trigger",
+    event_id: "evt_notice_external_file",
+    operator_id: "ou_owner",
+    message_id: "om_notice",
+    chat_id: "oc_private",
+    action_tag: "button",
+    action_value: JSON.stringify({
+      action: "kanban_completion_file",
+      reference: 0,
+    }),
+  };
+
+  assert.equal(await fixture.service.handle(event), "file_sent");
+  assert.deepEqual(requestedPaths, [absolutePath]);
+  const card = JSON.stringify(fixture.lastCard());
+  assert.match(card, /Promotion_Aware_Multi_Fidelity_9page\.pdf/);
+  assert.match(card, /下载文件/);
+  assert.doesNotMatch(card, /返回目录/);
+  assert.doesNotMatch(card, /编辑文件/);
+  assert.equal(
+    await fixture.service.handle(
+      createEvent(
+        fixture,
+        tokenFor(fixture.lastCard(), "下载文件"),
+        "evt_notice_external_download",
+      ),
+    ),
+    "download_sent",
+  );
+  assert.equal(
+    fixture.sentFiles.at(-1)?.name,
+    "Promotion_Aware_Multi_Fidelity_9page.pdf",
+  );
+  assert.equal(
+    fixture.sentFiles.at(-1)?.data.toString("utf8"),
+    `download:${absolutePath}`,
+  );
+  assert.equal(
+    await fixture.service.handle({
+      ...event,
+      event_id: "evt_notice_external_forged",
+      action_value: JSON.stringify({
+        action: "kanban_completion_file",
+        reference: 1,
+        path: "/etc/passwd",
+      }),
+    }),
+    "ignored_untrusted",
+  );
+  assert.deepEqual(requestedPaths, [absolutePath]);
 });
 
 test("notification records callback accepts object action values from lark-cli", async () => {

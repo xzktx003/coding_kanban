@@ -16,6 +16,13 @@ import { TextDecoder } from "node:util";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
+import {
+  isContainedPath,
+  isSafeAbsolutePath,
+  isSensitiveFileName,
+  resolveTrustedFileRoot,
+} from "./feishu-trusted-local-file.js";
+
 export interface FeishuWorkspaceEntry {
   name: string;
   path: string;
@@ -41,6 +48,7 @@ export interface FeishuWorkspaceDownloadResult {
 
 export interface FeishuWorkspaceFilesOptions {
   beforeExistingReplace?: () => Promise<void> | void;
+  homeDirectory?: string;
 }
 
 const MAX_LIST_ENTRIES = 200;
@@ -49,29 +57,6 @@ const MAX_READ_BYTES = 128 * 1024;
 const MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024;
 const MAX_EDITABLE_UNICODE_CHARS = 1000;
 const PROC_SELF_FD = "/proc/self/fd";
-const SENSITIVE_SUFFIXES = new Set([
-  ".key",
-  ".pem",
-  ".p12",
-  ".pfx",
-  ".crt",
-  ".cer",
-]);
-const SENSITIVE_FILENAMES = new Set([
-  "authorized_keys",
-  "credentials",
-  "credentials.json",
-  "id_dsa",
-  "id_ecdsa",
-  "id_ecdsa_sk",
-  "id_ed25519",
-  "id_rsa",
-  "id_xmss",
-  "known_hosts",
-  "netrc",
-  "npmrc",
-]);
-
 const utf8Decoder = new TextDecoder("utf-8", { fatal: true });
 
 function isRemoteSession(session: AgentSessionRecord): boolean {
@@ -142,19 +127,11 @@ function assertSafeRelativePath(relativePath: string): string[] {
 }
 
 function assertNotSensitiveName(name: string): void {
-  if (isSensitiveName(name)) {
+  if (isSensitiveFileName(name)) {
     throw new Error(
       "Access denied: credential-like files are not exposed to Feishu",
     );
   }
-}
-
-function isSensitiveName(name: string): boolean {
-  const lower = name.toLowerCase();
-  return (
-    SENSITIVE_FILENAMES.has(lower) ||
-    SENSITIVE_SUFFIXES.has(path.extname(lower))
-  );
 }
 
 function toRelativeOutputPath(segments: string[]): string {
@@ -501,7 +478,7 @@ export class FeishuWorkspaceFiles {
           if (name === "." || name === ".." || name.startsWith(".")) {
             continue;
           }
-          if (isSensitiveName(name)) {
+          if (isSensitiveFileName(name)) {
             continue;
           }
           if (entries.length >= MAX_LIST_ENTRIES) {
@@ -544,6 +521,25 @@ export class FeishuWorkspaceFiles {
     session: AgentSessionRecord,
     relativePath: string,
   ): Promise<FeishuWorkspaceReadResult> {
+    if (path.isAbsolute(relativePath)) {
+      const buffer = await this.#readTrustedAbsolute(
+        session,
+        relativePath,
+        MAX_READ_BYTES,
+        "File is too large to read through Feishu",
+      );
+      let content: string;
+      try {
+        content = utf8Decoder.decode(buffer);
+      } catch {
+        throw new Error("File must be valid UTF-8 to read through Feishu");
+      }
+      return {
+        content,
+        revision: sha256(buffer),
+        editable: false,
+      };
+    }
     const root = await resolveRoot(session);
     const segments = assertSafeRelativePath(relativePath);
     const { parent, name } = await openParentDirectory({ root, segments });
@@ -637,6 +633,15 @@ export class FeishuWorkspaceFiles {
     session: AgentSessionRecord,
     relativePath: string,
   ): Promise<FeishuWorkspaceDownloadResult> {
+    if (path.isAbsolute(relativePath)) {
+      const data = await this.#readTrustedAbsolute(
+        session,
+        relativePath,
+        MAX_DOWNLOAD_BYTES,
+        "File is too large to download through Feishu",
+      );
+      return { name: path.basename(relativePath), data };
+    }
     const root = await resolveRoot(session);
     const segments = assertSafeRelativePath(relativePath);
     const { parent, name } = await openParentDirectory({ root, segments });
@@ -660,6 +665,61 @@ export class FeishuWorkspaceFiles {
         name,
         data,
       };
+    } finally {
+      await closeVerifiedDirectoryChain(parent);
+    }
+  }
+
+  async #readTrustedAbsolute(
+    session: AgentSessionRecord,
+    absolutePath: string,
+    maxBytes: number,
+    tooLargeMessage: string,
+  ): Promise<Buffer> {
+    assertLocalSession(session);
+    if (!isSafeAbsolutePath(absolutePath)) {
+      throw new Error("Invalid path: must be a safe absolute path");
+    }
+    const trustRoot = await resolveTrustedFileRoot({
+      workingDirectory: session.workingDirectory ?? "",
+      ...(this.options.homeDirectory
+        ? { homeDirectory: this.options.homeDirectory }
+        : {}),
+    });
+    if (!trustRoot || !isContainedPath(trustRoot, absolutePath)) {
+      throw new Error("Invalid path: file is outside the trusted directory");
+    }
+    const relativePath = path
+      .relative(trustRoot, absolutePath)
+      .split(path.sep)
+      .join("/");
+    const segments = assertSafeRelativePath(relativePath);
+    const { parent, name } = await openParentDirectory({
+      root: trustRoot,
+      segments,
+    });
+    try {
+      await revalidateDirectoryChain({
+        rootPath: trustRoot,
+        directoryPath: parent.directoryPath,
+        root: parent.root,
+        rootStats: parent.rootStats,
+        directory: parent.directory,
+        directoryStats: parent.directoryStats,
+      });
+      const data = await readFileBoundedNoFollow({
+        directory: parent.directory,
+        name,
+        maxBytes,
+        tooLargeMessage,
+      });
+      const resolved = await realpath(absolutePath);
+      if (resolved !== absolutePath || !isContainedPath(trustRoot, resolved)) {
+        throw new Error(
+          "Access denied: symlink paths are not exposed to Feishu",
+        );
+      }
+      return data;
     } finally {
       await closeVerifiedDirectoryChain(parent);
     }

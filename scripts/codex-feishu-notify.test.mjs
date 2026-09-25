@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -947,4 +947,61 @@ test("accepts only the lark-cli ok=true success envelope", () => {
   assert.throws(() => parseLarkCliResponse("not-json"), {
     message: /valid JSON/i,
   });
+});
+
+test("adds view buttons for trusted files outside the session directory", () => {
+  const parent = mkdtempSync(join(tmpdir(), "kanban-notify-trust-"));
+  const session = join(parent, "session");
+  const paper = join(parent, "paper.pdf");
+  try {
+    mkdirSync(session);
+    writeFileSync(paper, "pdf");
+    const [card] = buildCompletionCards({
+      ...completion,
+      cwd: session,
+      "records-available": true,
+      "referenced-files": [
+        { path: paper },
+        { path: "/etc/passwd" },
+        { path: join(parent, ".env") },
+        { path: "src/app.ts", line: 3 },
+      ],
+    });
+    const serialized = JSON.stringify(card);
+    assert.match(serialized, /查看 paper\.pdf/);
+    assert.match(serialized, /查看 app\.ts:3/);
+    assert.doesNotMatch(serialized, /passwd/);
+    assert.doesNotMatch(serialized, /查看 \.env/);
+    assert.deepEqual(
+      [...serialized.matchAll(/"reference":(\d+)/g)].map((match) =>
+        Number(match[1]),
+      ),
+      [0, 1],
+    );
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("adds a view button for a home file outside the session directory", () => {
+  const homeRoot = mkdtempSync(join(homedir(), "kanban-notify-home-"));
+  const session = join(homeRoot, "session");
+  const paper = join(homeRoot, "papers", "result.pdf");
+  try {
+    mkdirSync(join(homeRoot, "papers"), { recursive: true });
+    mkdirSync(session);
+    writeFileSync(paper, "pdf");
+    const [card] = buildCompletionCards({
+      ...completion,
+      cwd: session,
+      "records-available": true,
+      "referenced-files": [{ path: paper }, { path: "/etc/passwd" }],
+    });
+    const serialized = JSON.stringify(card);
+    assert.match(serialized, /查看 result\.pdf/);
+    assert.doesNotMatch(serialized, /passwd/);
+    assert.match(serialized, /"reference":0/);
+  } finally {
+    rmSync(homeRoot, { recursive: true, force: true });
+  }
 });
