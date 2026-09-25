@@ -12,6 +12,7 @@ import { AppVersionService } from "./services/app-version-service.js";
 import { ScriptFeishuCompletionSender } from "./services/agent-completion-feishu-notifier.js";
 import { GitAutoUpdateService } from "./services/git-auto-update-service.js";
 import { FeishuNotificationSettingsService } from "./services/feishu-notification-settings-service.js";
+import { FeishuQuickReplyStore } from "./services/feishu-quick-reply-store.js";
 import { FeishuReplyBindingStore } from "./services/feishu-reply-binding-store.js";
 import { installGracefulShutdown } from "./services/server-lifecycle.js";
 import { FileSessionStateStore } from "./services/session-state-store.js";
@@ -51,6 +52,13 @@ async function main(): Promise<void> {
       ".dev-runtime/feishu-reply-bindings.json",
     ),
   });
+  const feishuQuickReplyStore = new FeishuQuickReplyStore({
+    filePath: resolve(
+      appSourceRoot,
+      process.env.FEISHU_QUICK_REPLIES_FILE?.trim() ||
+        ".dev-runtime/feishu-quick-replies.json",
+    ),
+  });
   const { app } = buildServer({
     appVersionService: new AppVersionService({
       sourceRoot: appSourceRoot,
@@ -62,12 +70,22 @@ async function main(): Promise<void> {
     sessionStateStore: new FileSessionStateStore(sessionStatePath),
     feishuNotificationSettingsService,
     feishuReplyBindingStore,
+    feishuQuickReplyStore,
     ...(process.env.FEISHU_NOTIFY_USER_ID?.trim()
       ? { feishuReplyAllowedUserId: process.env.FEISHU_NOTIFY_USER_ID.trim() }
       : {}),
     feishuCompletionSender: new ScriptFeishuCompletionSender({
       scriptPath: resolve(repositoryRoot, "scripts/codex-feishu-notify.mjs"),
       fallbackWorkingDirectory: repositoryRoot,
+      quickRepliesAvailable: () => {
+        const settings = feishuNotificationSettingsService.get();
+        return (
+          settings.destinationType === "user" &&
+          settings.replyConfigured &&
+          settings.replyEnabled &&
+          feishuQuickReplyStore.read().items.length > 0
+        );
+      },
     }),
   });
 

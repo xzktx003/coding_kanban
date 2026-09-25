@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "replies": [
+    {
+      "id": "continue",
+      "label": "Continue",
+      "category": "Common",
+      "text": "Continue the current task and verify the result."
+    },
+    {
+      "id": "review_changes",
+      "label": "Review Changes",
+      "category": "Review",
+      "text": "Review the latest changes, summarize risks, and suggest fixes.",
+      "requiresEditing": true
+    },
+    {
+      "id": "disabled_sample",
+      "label": "Disabled Sample",
+      "text": "This entry is hidden because enabled is false.",
+      "enabled": false
+    }
+  ]
+}

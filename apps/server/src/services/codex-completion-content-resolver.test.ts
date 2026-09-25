@@ -23,6 +23,25 @@ function makeShellSession(): AgentSessionRecord {
   };
 }
 
+function makeClaudeSession(): AgentSessionRecord {
+  return {
+    id: "claude-session-1",
+    workspaceId: "default",
+    sourceType: "local",
+    agentKind: "claude",
+    displayName: "project-claude",
+    workingDirectory: "/workspace/project",
+    connectionState: "online",
+    interactionState: "idle",
+    agentSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    transportRef: {
+      tmuxSession: "project-claude",
+      tmuxPane: "%9",
+      processId: 9876,
+    },
+  };
+}
+
 test("resolves the complete last assistant entry from the active tmux Codex conversation", async () => {
   const session = makeShellSession();
   const readInputs: unknown[] = [];
@@ -99,6 +118,8 @@ test("resolves the complete last assistant entry from the active tmux Codex conv
     }),
     {
       codexThreadId: "codex-session-12345678",
+      transcriptAgentKind: "codex",
+      transcriptSessionId: "codex-session-12345678",
       completionId: "turn-local",
       content: completeOutput,
       completedAt: "2026-09-01T11:30:00.000Z",
@@ -161,12 +182,16 @@ test("inspects every Codex pane in one local tmux session", async () => {
   assert.deepEqual(await resolver.inspectLatestCompletions(event), [
     {
       codexThreadId: "codex-thread-one",
+      transcriptAgentKind: "codex",
+      transcriptSessionId: "codex-thread-one",
       completionId: "codex-thread-one-turn",
       content: "codex-thread-one-answer",
       completedAt: "2026-09-18T10:00:00.000Z",
     },
     {
       codexThreadId: "codex-thread-two",
+      transcriptAgentKind: "codex",
+      transcriptSessionId: "codex-thread-two",
       completionId: "codex-thread-two-turn",
       content: "codex-thread-two-answer",
       completedAt: "2026-09-18T10:00:00.000Z",
@@ -184,8 +209,8 @@ test("inspects every Codex pane in one local tmux session", async () => {
   ]);
 });
 
-test("does not read a Codex transcript for an explicit non-Codex agent", async () => {
-  const session = { ...makeShellSession(), agentKind: "claude" };
+test("does not read a Codex transcript for a Claude executable", async () => {
+  const session = { ...makeShellSession(), agentKind: "claude.exe" };
   let reads = 0;
   const resolver = new CodexCompletionContentResolver({
     registry: {
@@ -212,6 +237,155 @@ test("does not read a Codex transcript for an explicit non-Codex agent", async (
     null,
   );
   assert.equal(reads, 0);
+});
+
+test("resolves Claude completions with a generic transcript identity", async () => {
+  const session = { ...makeClaudeSession(), agentKind: "claude.exe" };
+  const latestInputs: AgentSessionRecord[] = [];
+  const readInputs: unknown[] = [];
+  const resolver = new CodexCompletionContentResolver({
+    registry: {
+      get: () => session,
+      updateSession: () => session,
+    },
+    codexSessionLocator: {
+      resolve: async () => {
+        throw new Error("Claude must not use Codex session discovery");
+      },
+    },
+    codexTranscriptService: {
+      read: () => {
+        throw new Error("Claude must not use Codex transcript reads");
+      },
+    },
+    claudeTranscriptService: {
+      read: async (input) => {
+        readInputs.push(input);
+        return {
+          available: true,
+          agentKind: "claude",
+          sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          matchedBy: "session-id",
+          updatedAt: "2026-09-23T10:00:00.000Z",
+          entries: [
+            {
+              id: "assistant-claude",
+              timestamp: "2026-09-23T10:00:00.000Z",
+              kind: "assistant",
+              title: "Claude",
+              text: "Claude 完整最终输出",
+              collapsedByDefault: false,
+            },
+          ],
+          hasMore: false,
+          nextCursor: null,
+        };
+      },
+      readLatestCompletionForSession: async (inputSession) => {
+        latestInputs.push(inputSession);
+        return {
+          sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          completionId: "claude-turn-1",
+          content: "Claude 完整最终输出",
+          userQuestion: "请完成任务",
+          completedAt: "2026-09-23T10:00:00.000Z",
+        };
+      },
+    },
+  });
+
+  const event = {
+    sessionId: session.id,
+    displayName: session.displayName,
+    agentKind: session.agentKind,
+    workingDirectory: session.workingDirectory,
+    summary: "Claude 摘要",
+    completedAt: "2026-09-23T10:00:00.000Z",
+  };
+
+  assert.equal(await resolver.resolve(event), "Claude 完整最终输出");
+  assert.deepEqual(readInputs, [
+    {
+      sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      workingDirectory: "/workspace/project",
+      tmuxSession: "project-claude",
+      tmuxPane: "%9",
+      limit: 30,
+    },
+  ]);
+  assert.deepEqual(await resolver.inspectLatestCompletion(event), {
+    transcriptAgentKind: "claude",
+    transcriptSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    completionId: "claude-turn-1",
+    content: "Claude 完整最终输出",
+    userQuestion: "请完成任务",
+    completedAt: "2026-09-23T10:00:00.000Z",
+  });
+  assert.deepEqual(latestInputs, [session]);
+});
+
+test("reads the latest remote Claude completion through the Claude transcript reader", async () => {
+  const session: AgentSessionRecord = {
+    ...makeClaudeSession(),
+    sourceType: "remote-connect",
+    agentSessionId: undefined,
+    hostId: "remote-host",
+    sshTarget: {
+      host: "gpu.example.test",
+      port: 22,
+      username: "developer",
+    },
+  };
+  const remoteInputs: unknown[] = [];
+  const resolver = new CodexCompletionContentResolver({
+    registry: {
+      get: () => session,
+      updateSession: () => session,
+    },
+    codexSessionLocator: { resolve: async () => undefined },
+    codexTranscriptService: {
+      read: () => {
+        throw new Error("Codex transcript should not be read");
+      },
+    },
+    claudeTranscriptService: {
+      readLatestRemoteCompletion: async (input) => {
+        remoteInputs.push(input);
+        return {
+          sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          completionId: "claude-remote-turn",
+          content: "远端 Claude 完整输出",
+          completedAt: "2026-09-23T10:05:00.000Z",
+        };
+      },
+    },
+  });
+
+  assert.deepEqual(
+    await resolver.inspectLatestCompletion({
+      sessionId: session.id,
+      displayName: session.displayName,
+      agentKind: session.agentKind,
+      workingDirectory: session.workingDirectory,
+      summary: "远端 Claude 摘要",
+      completedAt: "2026-09-23T10:05:00.000Z",
+    }),
+    {
+      transcriptAgentKind: "claude",
+      transcriptSessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+      completionId: "claude-remote-turn",
+      content: "远端 Claude 完整输出",
+      completedAt: "2026-09-23T10:05:00.000Z",
+    },
+  );
+  assert.deepEqual(remoteInputs, [
+    {
+      sshTarget: session.sshTarget,
+      workingDirectory: "/workspace/project",
+      tmuxSession: "project-claude",
+      tmuxPane: "%9",
+    },
+  ]);
 });
 
 test("retries local Codex session discovery after an unresolved result", async () => {
@@ -353,6 +527,8 @@ test("reads the complete last assistant entry from a registered SSH Codex sessio
     }),
     {
       codexThreadId: "remote-codex-session-12345678",
+      transcriptAgentKind: "codex",
+      transcriptSessionId: "remote-codex-session-12345678",
       completionId: "turn-remote",
       content: "远端完整最终输出",
       completedAt: "2026-09-01T11:35:00.000Z",

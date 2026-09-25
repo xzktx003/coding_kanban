@@ -3,7 +3,10 @@ import websocket from "@fastify/websocket";
 import Fastify from "fastify";
 import { resolve } from "node:path";
 
-import type { TerminalHistoryDiagnosticsResponse } from "@agent-orchestrator/shared";
+import type {
+  AgentSessionRecord,
+  TerminalHistoryDiagnosticsResponse,
+} from "@agent-orchestrator/shared";
 
 import {
   resolveTerminalHistoryRuntimeConfig,
@@ -39,6 +42,7 @@ import {
 import { AppVersionService } from "./services/app-version-service.js";
 import { ClaudeImageMessageService } from "./services/claude-image-message-service.js";
 import { ClaudeSessionLocator } from "./services/claude-session-locator.js";
+import { ClaudeTranscriptService } from "./services/claude-transcript-service.js";
 import {
   CodexImageMessageService,
   createCodexImageRemoteFileAccess,
@@ -51,10 +55,14 @@ import {
   FeishuNotificationSettingsService,
   type FeishuNotificationSettingsServiceLike,
 } from "./services/feishu-notification-settings-service.js";
+import type { FeishuQuickReplyStore } from "./services/feishu-quick-reply-store.js";
 import { FeishuReplyBindingStore } from "./services/feishu-reply-binding-store.js";
 import { FeishuReplyCommandService } from "./services/feishu-reply-command-service.js";
 import { FeishuReplyEventListener } from "./services/feishu-reply-event-listener.js";
-import { FeishuControlPanelService } from "./services/feishu-control-panel-service.js";
+import {
+  FeishuControlPanelService,
+  type FeishuControlPanelSendCardInput,
+} from "./services/feishu-control-panel-service.js";
 import { FeishuControlMessenger } from "./services/feishu-control-messenger.js";
 import { FeishuImageResourceService } from "./services/feishu-image-resource-service.js";
 import { buildFeishuControlPanelCard } from "./services/feishu-control-panel-card.js";
@@ -105,10 +113,20 @@ interface BuildServerOptions {
     "send" | "sendText"
   >;
   claudeImageMessageService?: Pick<ClaudeImageMessageService, "send">;
+  claudeTranscriptService?: Pick<
+    ClaudeTranscriptService,
+    | "read"
+    | "readRemote"
+    | "readLatestCompletion"
+    | "readLatestRemoteCompletion"
+    | "readLatestCompletionForSession"
+    | "resolveSessionId"
+  >;
   feishuNotificationSettingsService?: FeishuNotificationSettingsServiceLike;
   feishuCompletionSender?: FeishuCompletionSenderLike;
   feishuCompletionContentResolver?: FeishuCompletionContentResolverLike;
   feishuReplyBindingStore?: FeishuReplyBindingStore;
+  feishuQuickReplyStore?: Pick<FeishuQuickReplyStore, "read">;
   feishuReplyAllowedUserId?: string;
   feishuImageResourceService?: Pick<FeishuImageResourceService, "download">;
 }
@@ -273,6 +291,9 @@ export function buildServer(options: BuildServerOptions = {}): {
   const codexTranscriptService = new CodexTranscriptService({
     remoteFileAccess: sftpService,
   });
+  const claudeTranscriptService =
+    options.claudeTranscriptService ??
+    new ClaudeTranscriptService({ remoteFileAccess: sftpService });
   const codexImageMessageService =
     options.codexImageMessageService ??
     new CodexImageMessageService({
@@ -335,7 +356,15 @@ export function buildServer(options: BuildServerOptions = {}): {
           ? {
               deliveryRecorder: {
                 record(event, delivery) {
-                  if (event.agentKind.trim().toLowerCase() !== "codex") {
+                  const agentKind = event.agentKind.trim().toLowerCase();
+                  const transcriptAgentKind = event.transcriptAgentKind
+                    ?.trim()
+                    .toLowerCase();
+                  const hasTranscriptTarget =
+                    (transcriptAgentKind === "codex" ||
+                      transcriptAgentKind === "claude") &&
+                    Boolean(event.transcriptSessionId);
+                  if (agentKind !== "codex" && !hasTranscriptTarget) {
                     return;
                   }
                   options.feishuReplyBindingStore?.record({
@@ -343,6 +372,12 @@ export function buildServer(options: BuildServerOptions = {}): {
                     completionId: event.completionId ?? event.completedAt,
                     ...(event.codexThreadId
                       ? { codexThreadId: event.codexThreadId }
+                      : {}),
+                    ...(event.transcriptAgentKind
+                      ? { transcriptAgentKind: event.transcriptAgentKind }
+                      : {}),
+                    ...(event.transcriptSessionId
+                      ? { transcriptSessionId: event.transcriptSessionId }
                       : {}),
                     ...(delivery.referencedFiles
                       ? { referencedFiles: delivery.referencedFiles }
@@ -359,6 +394,7 @@ export function buildServer(options: BuildServerOptions = {}): {
             registry,
             codexSessionLocator,
             codexTranscriptService,
+            claudeTranscriptService,
           }),
         logError(error, event) {
           app.log.error(
@@ -415,6 +451,7 @@ export function buildServer(options: BuildServerOptions = {}): {
     : null;
   const workspaceTranscript = new FeishuWorkspaceTranscript(
     codexTranscriptService,
+    claudeTranscriptService,
   );
   const feishuSessionWorkspace =
     options.feishuReplyAllowedUserId && controlMessenger
@@ -432,14 +469,16 @@ export function buildServer(options: BuildServerOptions = {}): {
               registry,
               codexSessionLocator,
             }),
+          resolveClaudeSessionId: (session) =>
+            claudeTranscriptService.resolveSessionId(session),
           ...(options.feishuReplyBindingStore
             ? { notificationBindings: options.feishuReplyBindingStore }
             : {}),
           files: new FeishuWorkspaceFiles(),
-          transcript: (session, threadId, cursor) =>
-            workspaceTranscript.read(session, threadId, cursor),
-          exportTranscript: (session, threadId) =>
-            workspaceTranscript.export(session, threadId),
+          transcript: (session, threadId, cursor, agentKind) =>
+            workspaceTranscript.read(session, threadId, cursor, agentKind),
+          exportTranscript: (session, threadId, agentKind) =>
+            workspaceTranscript.export(session, threadId, agentKind),
           messenger: {
             sendCard: (input) =>
               controlMessenger.sendCard(
@@ -465,39 +504,69 @@ export function buildServer(options: BuildServerOptions = {}): {
       : null;
   const feishuControlPanelService =
     options.feishuReplyAllowedUserId && controlMessenger
-      ? new FeishuControlPanelService({
-          ...(feishuSessionWorkspace
-            ? { workspace: feishuSessionWorkspace }
-            : {}),
-          allowedUserId: options.feishuReplyAllowedUserId,
-          settings: feishuNotificationSettingsService,
-          registry,
-          codex: {
-            resolveSessionId: (session) =>
-              resolveActiveCodexSessionId(session, {
-                registry,
-                codexSessionLocator,
-              }),
-            sendText: (input) => codexImageMessageService.sendText(input),
-          },
-          cards: { buildControlPanelCard: buildFeishuControlPanelCard },
-          messenger: {
-            // Delivery always targets the configured private user, never a chat
-            // supplied by a callback. The service separately verifies card/chat ownership.
-            sendCard: (input) =>
-              controlMessenger.sendCard(
-                options.feishuReplyAllowedUserId!,
-                input.card as Record<string, unknown>,
-                input.idempotencyKey,
-              ),
-            sendText: (input) =>
-              controlMessenger.sendText(
-                options.feishuReplyAllowedUserId!,
-                input.text,
-                input.idempotencyKey,
-              ),
-          },
-        })
+      ? (() => {
+          const controlPanelOptions = {
+            ...(feishuSessionWorkspace
+              ? { workspace: feishuSessionWorkspace }
+              : {}),
+            allowedUserId: options.feishuReplyAllowedUserId!,
+            settings: feishuNotificationSettingsService,
+            registry,
+            ...(options.feishuQuickReplyStore
+              ? { quickReplies: options.feishuQuickReplyStore }
+              : {}),
+            ...(options.feishuReplyBindingStore
+              ? { notificationBindings: options.feishuReplyBindingStore }
+              : {}),
+            codex: {
+              resolveSessionId: (session: AgentSessionRecord) =>
+                resolveActiveCodexSessionId(session, {
+                  registry,
+                  codexSessionLocator,
+                }),
+              resolveSessionIds: (session: AgentSessionRecord) =>
+                resolveCodexSessionIds(session, {
+                  registry,
+                  codexSessionLocator,
+                }),
+              sendText: (
+                input: Parameters<CodexImageMessageService["sendText"]>[0],
+              ) => codexImageMessageService.sendText(input),
+            },
+            cards: { buildControlPanelCard: buildFeishuControlPanelCard },
+            messenger: {
+              // Delivery always targets the configured private user, never a chat
+              // supplied by a callback. The service separately verifies card/chat ownership.
+              sendCard: (input: FeishuControlPanelSendCardInput) =>
+                controlMessenger.sendCard(
+                  options.feishuReplyAllowedUserId!,
+                  input.card as Record<string, unknown>,
+                  input.idempotencyKey,
+                ),
+              sendText: (input: {
+                chatId: string;
+                text: string;
+                idempotencyKey: string;
+              }) =>
+                controlMessenger.sendText(
+                  options.feishuReplyAllowedUserId!,
+                  input.text,
+                  input.idempotencyKey,
+                ),
+              updateCard: (input: {
+                userId: string;
+                token: string;
+                card: unknown;
+              }) =>
+                controlMessenger.updateCard(
+                  input.userId,
+                  input.token,
+                  input.card as Record<string, unknown>,
+                ),
+            },
+          };
+          return new FeishuControlPanelService(controlPanelOptions);
+        })()
       : null;
   const stopFeishuControlListeners = feishuControlPanelService
     ? (["application.bot.menu_v6", "card.action.trigger"] as const).map(
@@ -558,6 +627,7 @@ export function buildServer(options: BuildServerOptions = {}): {
       sftpService,
       codexSessionLocator,
       codexTranscriptService,
+      claudeTranscriptService,
     });
     await instance.register(async (imageMessageRoutes) => {
       await registerCodexImageMessageRoutes(imageMessageRoutes, {
@@ -818,6 +888,31 @@ export function buildServer(options: BuildServerOptions = {}): {
   });
   app.addHook("onClose", () => {
     return vsCodeWebManager.dispose();
+  });
+  let agentKindSyncTimer: NodeJS.Timeout | undefined;
+  let agentKindSyncInProgress = false;
+  const syncRegisteredAgentKinds = async () => {
+    if (agentKindSyncInProgress) {
+      return;
+    }
+    agentKindSyncInProgress = true;
+    try {
+      await tmuxAdapter.syncRegisteredAgentKinds();
+    } catch (error) {
+      app.log.warn({ err: error }, "Failed to sync local tmux agent kinds");
+    } finally {
+      agentKindSyncInProgress = false;
+    }
+  };
+  app.addHook("onReady", async () => {
+    await syncRegisteredAgentKinds();
+    agentKindSyncTimer = setInterval(() => {
+      void syncRegisteredAgentKinds();
+    }, 5_000);
+    agentKindSyncTimer.unref();
+  });
+  app.addHook("onClose", () => {
+    clearInterval(agentKindSyncTimer);
   });
   app.addHook("onReady", () => {
     gitAutoUpdateService.start();

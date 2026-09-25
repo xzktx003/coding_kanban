@@ -528,6 +528,82 @@ export class LocalTmuxAdapter {
       options.captureLines ?? DEFAULT_TERMINAL_TMUX_CAPTURE_LINES;
   }
 
+  async syncRegisteredAgentKinds(): Promise<void> {
+    const localTmuxSessions = this.registry
+      .list()
+      .items.filter(
+        (session) =>
+          session.sourceType === "local" &&
+          !session.sshTarget &&
+          session.transportRef?.tmuxSession,
+      );
+    const sessionsByPane = new Map(
+      localTmuxSessions
+        .filter((session) => session.transportRef?.tmuxPane)
+        .map((session) => [session.transportRef!.tmuxPane!, session]),
+    );
+    if (localTmuxSessions.length === 0) {
+      return;
+    }
+
+    let stdout: string;
+    try {
+      ({ stdout } = await this.runTmux([
+        "list-panes",
+        "-a",
+        "-F",
+        "#{session_name}\t#{session_attached}\t#{window_active}\t#{pane_active}\t#{pane_id}\t#{pane_current_command}\t#{pane_current_path}",
+      ]));
+    } catch (error) {
+      if (isNoTmuxServerError(error)) {
+        return;
+      }
+      throw error;
+    }
+
+    const panes = parsePaneInfo(stdout);
+    for (const pane of panes) {
+      const registered = sessionsByPane.get(pane.paneId);
+      if (
+        registered?.transportRef?.tmuxSession === pane.sessionName &&
+        pane.currentCommand &&
+        registered.agentKind !== pane.currentCommand
+      ) {
+        this.registry.updateSession(registered.id, {
+          agentKind: pane.currentCommand,
+        });
+      }
+    }
+
+    for (const session of localTmuxSessions) {
+      const tmuxSession = session.transportRef?.tmuxSession;
+      if (!tmuxSession || session.transportRef?.tmuxPane) {
+        continue;
+      }
+      if (
+        localTmuxSessions.filter(
+          (candidate) => candidate.transportRef?.tmuxSession === tmuxSession,
+        ).length !== 1
+      ) {
+        continue;
+      }
+      const matchingPanes = panes.filter(
+        (pane) => pane.sessionName === tmuxSession,
+      );
+      if (
+        matchingPanes.length !== 1 ||
+        !/^%[0-9]+$/.test(matchingPanes[0].paneId) ||
+        !matchingPanes[0].currentCommand
+      ) {
+        continue;
+      }
+      this.registry.updateSession(session.id, {
+        agentKind: matchingPanes[0].currentCommand,
+        transportRef: { tmuxPane: matchingPanes[0].paneId },
+      });
+    }
+  }
+
   async renameSession(
     agentSession: AgentSessionRecord,
     nextName: string,

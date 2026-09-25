@@ -478,4 +478,86 @@ test("rejects remote SSH sessions until a safe SFTP implementation is available"
     () => service.write(session, "note.txt", "x", null),
     /remote workspace files/i,
   );
+  await assert.rejects(
+    () => service.read(session, "/data/work/out.pdf"),
+    /remote workspace files/i,
+  );
+});
+
+test("reads and downloads a regular file outside the session but inside the trusted home", async () => {
+  const home = makeRoot();
+  const sessionDir = path.join(home, "workspace", "session");
+  const textFile = path.join(home, "notes", "readme.md");
+  const binaryFile = path.join(home, "notes", "paper.pdf");
+  const hiddenKey = path.join(home, ".ssh", "id_rsa");
+  try {
+    mkdirSync(sessionDir, { recursive: true });
+    mkdirSync(path.dirname(textFile), { recursive: true });
+    mkdirSync(path.dirname(hiddenKey), { recursive: true });
+    writeFileSync(path.join(sessionDir, "inside.txt"), "inside");
+    writeFileSync(textFile, "hello outside");
+    writeFileSync(binaryFile, Buffer.from([0xff, 0xfe, 0x00, 0x01]));
+    writeFileSync(hiddenKey, "private");
+    symlinkSync(textFile, path.join(home, "notes", "link.md"));
+
+    const service = new FeishuWorkspaceFiles({ homeDirectory: home });
+    const session = makeSession(sessionDir);
+    const text = await service.read(session, textFile);
+    assert.equal(text.content, "hello outside");
+    assert.equal(text.editable, false);
+    assert.equal((await service.read(session, "inside.txt")).content, "inside");
+    const downloaded = await service.download(session, binaryFile);
+    assert.equal(downloaded.name, "paper.pdf");
+    assert.deepEqual(downloaded.data, Buffer.from([0xff, 0xfe, 0x00, 0x01]));
+
+    await assert.rejects(
+      () => service.read(session, "/etc/passwd"),
+      /invalid path/i,
+    );
+    await assert.rejects(
+      () => service.read(session, hiddenKey),
+      /invalid path|access denied/i,
+    );
+    await assert.rejects(
+      () => service.read(session, path.join(home, "notes", "link.md")),
+      /symlink|invalid path/i,
+    );
+    await assert.rejects(
+      () => service.read(session, `${home}/notes/../../etc/passwd`),
+      /invalid path/i,
+    );
+    await assert.rejects(
+      () => service.write(session, textFile, "nope", null),
+      /invalid path/i,
+    );
+    await assert.rejects(() => service.list(session, home), /invalid path/i);
+  } finally {
+    cleanup(home);
+  }
+});
+
+test("trusts only the session parent when the session is outside home", async () => {
+  const parent = makeRoot();
+  const home = makeRoot();
+  const sessionDir = path.join(parent, "session");
+  const sibling = path.join(parent, "sibling.txt");
+  const elsewhere = path.join(home, "elsewhere.txt");
+  try {
+    mkdirSync(sessionDir);
+    writeFileSync(sibling, "sibling");
+    writeFileSync(elsewhere, "elsewhere");
+    const service = new FeishuWorkspaceFiles({ homeDirectory: home });
+
+    assert.equal(
+      (await service.read(makeSession(sessionDir), sibling)).content,
+      "sibling",
+    );
+    await assert.rejects(
+      () => service.read(makeSession(sessionDir), elsewhere),
+      /invalid path/i,
+    );
+  } finally {
+    cleanup(parent);
+    cleanup(home);
+  }
 });

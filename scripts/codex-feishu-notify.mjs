@@ -3,10 +3,12 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import {
   dirname,
   extname,
   isAbsolute,
+  parse,
   relative,
   resolve,
   sep,
@@ -37,6 +39,28 @@ const COMPLETION_IMAGE_EXTENSIONS = new Set([
   ".jpg",
   ".png",
   ".webp",
+]);
+const SENSITIVE_SUFFIXES = new Set([
+  ".key",
+  ".pem",
+  ".p12",
+  ".pfx",
+  ".crt",
+  ".cer",
+]);
+const SENSITIVE_FILENAMES = new Set([
+  "authorized_keys",
+  "credentials",
+  "credentials.json",
+  "id_dsa",
+  "id_ecdsa",
+  "id_ecdsa_sk",
+  "id_ed25519",
+  "id_rsa",
+  "id_xmss",
+  "known_hosts",
+  "netrc",
+  "npmrc",
 ]);
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(scriptDirectory, "..");
@@ -338,27 +362,111 @@ function completionOutput(notification) {
   );
 }
 
+function isSensitiveFileName(name) {
+  const lower = name.toLowerCase();
+  return (
+    SENSITIVE_FILENAMES.has(lower) ||
+    SENSITIVE_SUFFIXES.has(extname(lower).toLowerCase())
+  );
+}
+
+function isSafeAbsolutePath(filePath) {
+  if (
+    !isAbsolute(filePath) ||
+    filePath.length > 2_048 ||
+    filePath.includes("\\") ||
+    /[\u0000-\u001f\u007f]/.test(filePath)
+  ) {
+    return false;
+  }
+  const segments = filePath.split("/");
+  if (segments[0] !== "" || segments.length < 2) {
+    return false;
+  }
+  const body = segments.slice(1);
+  if (
+    body.some((segment) => !segment || segment === "." || segment === "..") ||
+    body.some(
+      (segment) => segment.startsWith(".") || isSensitiveFileName(segment),
+    )
+  ) {
+    return false;
+  }
+  return resolve(filePath) === filePath;
+}
+
+function externalTrustRootSync(workingDirectory) {
+  if (!workingDirectory || !isAbsolute(workingDirectory)) {
+    return null;
+  }
+  const workspace = resolve(workingDirectory);
+  const filesystemRoot = parse(workspace).root;
+  const home = resolve(homedir());
+  if (workspace === filesystemRoot || workspace === home) {
+    return null;
+  }
+  try {
+    const workspaceStats = lstatSync(workspace);
+    if (!workspaceStats.isDirectory() || workspaceStats.isSymbolicLink()) {
+      return null;
+    }
+    const workspaceReal = realpathSync(workspace);
+    if (workspaceReal !== workspace) {
+      return null;
+    }
+    const lexicalTrust = isContainedPath(home, workspaceReal)
+      ? home
+      : dirname(workspaceReal);
+    if (lexicalTrust === filesystemRoot || lexicalTrust === workspaceReal) {
+      return null;
+    }
+    const trustStats = lstatSync(lexicalTrust);
+    if (!trustStats.isDirectory() || trustStats.isSymbolicLink()) {
+      return null;
+    }
+    const trustReal = realpathSync(lexicalTrust);
+    if (trustReal !== resolve(lexicalTrust) || trustReal === filesystemRoot) {
+      return null;
+    }
+    return trustReal;
+  } catch {
+    return null;
+  }
+}
+
 function completionReferencedFiles(notification) {
   if (!Array.isArray(notification["referenced-files"])) {
     return [];
   }
+  const trustRoot = externalTrustRootSync(
+    typeof notification.cwd === "string" ? notification.cwd : "",
+  );
   const references = [];
   for (const candidate of notification["referenced-files"].slice(0, 5)) {
     if (!isRecord(candidate) || typeof candidate.path !== "string") {
       continue;
     }
     const filePath = candidate.path;
-    const segments = filePath.split("/");
-    if (
-      !filePath ||
-      filePath.length > 2_048 ||
-      filePath.startsWith("/") ||
-      filePath.includes("\\") ||
-      segments.some(
-        (segment) => !segment || segment === "." || segment === "..",
-      )
-    ) {
-      continue;
+    if (filePath.startsWith("/")) {
+      if (
+        !trustRoot ||
+        !isSafeAbsolutePath(filePath) ||
+        !isContainedPath(trustRoot, filePath)
+      ) {
+        continue;
+      }
+    } else {
+      const segments = filePath.split("/");
+      if (
+        !filePath ||
+        filePath.length > 2_048 ||
+        filePath.includes("\\") ||
+        segments.some(
+          (segment) => !segment || segment === "." || segment === "..",
+        )
+      ) {
+        continue;
+      }
     }
     const line =
       Number.isSafeInteger(candidate.line) &&
@@ -440,8 +548,13 @@ function completionImageFiles(notification) {
     ) {
       return [];
     }
-    const candidate = resolve(root, reference.path);
-    if (!isContainedPath(root, candidate)) {
+    const candidate = isAbsolute(reference.path)
+      ? resolve(reference.path)
+      : resolve(root, reference.path);
+    const container = isAbsolute(reference.path)
+      ? externalTrustRootSync(root)
+      : root;
+    if (!container || !isContainedPath(container, candidate)) {
       return [];
     }
     try {
@@ -457,7 +570,12 @@ function completionImageFiles(notification) {
       }
       const content = readFileSync(candidate);
       return hasMatchingImageSignature(content, extension)
-        ? [{ path: reference.path, cwd: root }]
+        ? [
+            {
+              path: reference.path,
+              cwd: isAbsolute(reference.path) ? dirname(candidate) : root,
+            },
+          ]
         : [];
     } catch {
       return [];
@@ -558,6 +676,9 @@ export function buildCompletionCards(
     elements: [{ tag: "div", text: { tag: "plain_text", content } }],
   });
   const recordsAvailable = notification["records-available"] === true;
+  const quickRepliesAvailable =
+    notification["quick-replies-available"] === true &&
+    sanitizeText(notification["agent-kind"]).toLowerCase() === "codex";
   const referencedFiles = completionReferencedFiles(notification);
   const referencedImages = referencedFiles.flatMap((reference) => {
     const imageKey = referencedImageKeys.get(reference.path);
@@ -565,6 +686,82 @@ export function buildCompletionCards(
       ? [{ reference, imageKey }]
       : [];
   });
+  const buttonRow = (buttons) => ({
+    tag: "column_set",
+    flex_mode: "none",
+    horizontal_spacing: "8px",
+    columns: buttons.map((button) => ({
+      tag: "column",
+      width: "weighted",
+      weight: 1,
+      elements: [button],
+    })),
+  });
+  const footerActions = (index, questionPart) => {
+    const primaryButtons = [];
+    const fileButtons = [];
+    if (quickRepliesAvailable) {
+      primaryButtons.push({
+        tag: "button",
+        text: { tag: "plain_text", content: "快捷回复" },
+        type: "default",
+        size: "tiny",
+        width: "default",
+        behaviors: [
+          {
+            type: "callback",
+            value: { action: "kanban_completion_quick_reply" },
+          },
+        ],
+      });
+    }
+    if (recordsAvailable) {
+      primaryButtons.push({
+        tag: "button",
+        text: { tag: "plain_text", content: "查看完整记录" },
+        type: "primary",
+        size: "tiny",
+        width: "default",
+        behaviors: [
+          {
+            type: "callback",
+            value: { action: "kanban_completion_records" },
+          },
+        ],
+      });
+    }
+    if (!questionPart && index === 0 && recordsAvailable) {
+      referencedFiles.forEach((reference, referenceIndex) => {
+        const basename = reference.path.split("/").at(-1);
+        fileButtons.push({
+          tag: "button",
+          text: {
+            tag: "plain_text",
+            content: truncateText(
+              `查看 ${basename}${reference.line ? `:${reference.line}` : ""}`,
+              100,
+            ),
+          },
+          type: "default",
+          size: "tiny",
+          width: "default",
+          behaviors: [
+            {
+              type: "callback",
+              value: {
+                action: "kanban_completion_file",
+                reference: referenceIndex,
+              },
+            },
+          ],
+        });
+      });
+    }
+    return [
+      ...fileButtons.map((button) => buttonRow([button])),
+      ...(primaryButtons.length ? [buttonRow(primaryButtons)] : []),
+    ];
+  };
   return parts.map(({ chunk, index, questionPart }) => ({
     schema: "2.0",
     config: {
@@ -663,53 +860,7 @@ export function buildCompletionCards(
               };
             })
           : []),
-        ...(!questionPart &&
-        index === 0 &&
-        recordsAvailable &&
-        referencedFiles.length > 0
-          ? referencedFiles.map((reference, referenceIndex) => {
-              const basename = reference.path.split("/").at(-1);
-              return {
-                tag: "button",
-                text: {
-                  tag: "plain_text",
-                  content: truncateText(
-                    `查看 ${basename}${reference.line ? `:${reference.line}` : ""}`,
-                    100,
-                  ),
-                },
-                type: "default",
-                size: "tiny",
-                width: "default",
-                behaviors: [
-                  {
-                    type: "callback",
-                    value: {
-                      action: "kanban_completion_file",
-                      reference: referenceIndex,
-                    },
-                  },
-                ],
-              };
-            })
-          : []),
-        ...(recordsAvailable
-          ? [
-              {
-                tag: "button",
-                text: { tag: "plain_text", content: "查看完整记录" },
-                type: "primary",
-                size: "tiny",
-                width: "default",
-                behaviors: [
-                  {
-                    type: "callback",
-                    value: { action: "kanban_completion_records" },
-                  },
-                ],
-              },
-            ]
-          : []),
+        ...footerActions(index, questionPart),
       ],
     },
   }));

@@ -70,6 +70,165 @@ test("GET transcript resolves a local Codex record from the registered session",
   await app.close();
 });
 
+test("GET transcript reads a local Claude record from the registered pane", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "local",
+    sourceType: "local",
+    agentKind: "claude",
+    displayName: "claude pane",
+    workingDirectory: "/workspace/project",
+    connectionState: "online",
+    interactionState: "running",
+    agentSessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    transportRef: { tmuxSession: "claude-session", tmuxPane: "%4" },
+  });
+  let receivedInput: unknown;
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {} as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    codexTranscriptService: {
+      read() {
+        throw new Error(
+          "Claude sessions must use the Claude transcript reader",
+        );
+      },
+    },
+    claudeTranscriptService: {
+      async read(input) {
+        receivedInput = input;
+        return {
+          available: true,
+          agentKind: "claude",
+          sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          matchedBy: "session-id",
+          updatedAt: "2026-09-23T01:00:00.000Z",
+          entries: [],
+          hasMore: false,
+          nextCursor: null,
+        };
+      },
+      async readRemote() {
+        throw new Error("local Claude session must use the local reader");
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/agent-sessions/${session.id}/transcript?cursor=2048&limit=30`,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(receivedInput, {
+    sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    workingDirectory: "/workspace/project",
+    tmuxSession: "claude-session",
+    tmuxPane: "%4",
+    cursor: "2048",
+    limit: 30,
+  });
+  assert.equal(
+    (response.json() as AgentTranscriptResponse).agentKind,
+    "claude",
+  );
+  await app.close();
+});
+
+test("GET transcript follows the live remote Claude pane without reading local files", async () => {
+  const app = Fastify();
+  const registry = new AgentSessionRegistry();
+  const sshTarget = {
+    host: "remote.example",
+    port: 22,
+    username: "demo",
+  };
+  const session = registry.register({
+    workspaceId: "workspace-1",
+    hostId: "remote.example",
+    sourceType: "remote-connect",
+    agentKind: "claude",
+    displayName: "remote Claude",
+    workingDirectory: "/workspace/stale",
+    connectionState: "online",
+    interactionState: "running",
+    agentSessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    transportRef: { tmuxSession: "remote-claude", tmuxPane: "%3" },
+    sshTarget,
+  });
+  let receivedInput: unknown;
+
+  await registerAgentSessionRoutes(app, {
+    registry,
+    processRuntimeManager: {} as never,
+    tmuxAdapter: {
+      async discoverRemote(target: typeof sshTarget) {
+        assert.deepEqual(target, sshTarget);
+        return {
+          unavailable: false,
+          items: [
+            {
+              ...session,
+              agentKind: "claude",
+              workingDirectory: "/workspace/live-claude",
+            },
+          ],
+        };
+      },
+    } as never,
+    localTmuxInputRouter: {} as never,
+    sshRuntimeManager: {} as never,
+    ptyRuntimeManager: {} as never,
+    remoteLaunchPreflight: {} as never,
+    vsCodeWebManager: {} as never,
+    claudeTranscriptService: {
+      read() {
+        throw new Error("remote Claude sessions must not read local files");
+      },
+      async readRemote(input) {
+        receivedInput = input;
+        return {
+          available: true,
+          agentKind: "claude",
+          sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          matchedBy: "session-id",
+          updatedAt: "2026-09-23T04:00:00.000Z",
+          entries: [],
+          hasMore: false,
+          nextCursor: null,
+        };
+      },
+    },
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: `/api/agent-sessions/${session.id}/transcript?cursor=4096&limit=50`,
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(receivedInput, {
+    sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    workingDirectory: "/workspace/live-claude",
+    tmuxSession: "remote-claude",
+    tmuxPane: "%3",
+    cursor: "4096",
+    limit: 50,
+    sshTarget,
+  });
+  assert.equal((response.json() as AgentTranscriptResponse).available, true);
+  await app.close();
+});
+
 test("GET transcript forwards the server page cursor and bounded page size", async () => {
   const app = Fastify();
   const registry = new AgentSessionRegistry();

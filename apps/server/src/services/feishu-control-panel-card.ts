@@ -5,6 +5,13 @@ interface ControlPanelCardInput {
   controlEnabled?: boolean;
   panelId: string;
   options: Array<{ value: string; label: string }>;
+  quickRepliesEnabled?: boolean;
+  quickReplies?: {
+    options: Array<{ value: string; label: string }>;
+    message?: string;
+    boundTargetLabel?: string;
+    editor?: { label: string; text: string };
+  };
   truncated?: boolean;
   page?: number;
   pageCount?: number;
@@ -14,8 +21,224 @@ interface ControlPanelCardInput {
 }
 
 const plain = (content: string) => ({ tag: "plain_text", content });
+const QUICK_REPLY_EDITOR_PART_LIMIT = 1000;
+const quickReplyCallback = (action: string, panelId: string) => [
+  { type: "callback", value: { action, panelId } },
+];
+
+function splitByCodepoints(text: string, size: number) {
+  const codepoints = Array.from(text);
+  const parts: string[] = [];
+  for (let index = 0; index < codepoints.length; index += size) {
+    parts.push(codepoints.slice(index, index + size).join(""));
+  }
+  return parts.length ? parts : [""];
+}
+
+function buildNavigation(input: ControlPanelCardInput, refreshText: string) {
+  const navigation: Array<Record<string, unknown>> = [];
+  if (input.truncated) {
+    navigation.push({
+      tag: "markdown",
+      content: `第 ${input.page ?? 1} / ${input.pageCount ?? 1} 页，请翻页查看其他对话。`,
+      text_size: "notation",
+    });
+  }
+  for (const [enabled, page, label] of [
+    [input.hasPreviousPage, (input.page ?? 1) - 1, "上一页"],
+    [input.hasNextPage, (input.page ?? 1) + 1, "下一页"],
+  ] as const) {
+    if (enabled)
+      navigation.push({
+        tag: "button",
+        text: plain(label),
+        type: "default",
+        behaviors: [
+          {
+            type: "callback",
+            value: { action: "kanban_page", panelId: input.panelId, page },
+          },
+        ],
+      });
+  }
+  navigation.push({
+    tag: "button",
+    text: plain(refreshText),
+    type: input.options.length ? "default" : "primary_filled",
+    width: "fill",
+    behaviors: [
+      {
+        type: "callback",
+        value: { action: "kanban_refresh", panelId: input.panelId },
+      },
+    ],
+  });
+  return navigation;
+}
+
+function buildQuickReplyPanelCard(input: ControlPanelCardInput) {
+  const quickReplies = input.quickReplies;
+  const quickReplyOptions = quickReplies?.options ?? [];
+  const hasCatalog = Boolean(quickReplyOptions.length);
+  const hasBoundTarget = Boolean(quickReplies?.boundTargetLabel);
+  const hasSelectableTarget = input.options.length > 0;
+  const editor = quickReplies?.editor;
+  const editorAvailable = Boolean(hasBoundTarget && editor);
+  const elements: Array<Record<string, unknown>> = [
+    {
+      tag: "markdown",
+      content:
+        quickReplies?.message ??
+        "选择快捷回复发送到目标会话；快捷回复内容来自本机本地配置。",
+      text_size: "notation",
+    },
+  ];
+
+  if (!hasCatalog) {
+    elements.push({
+      tag: "div",
+      text: plain("暂无可用快捷回复，请检查本机快捷回复配置文件。"),
+    });
+  } else if (!hasBoundTarget && !hasSelectableTarget) {
+    elements.push({
+      tag: "div",
+      text: plain("暂无可发送目标，请先创建或连接可回复的会话。"),
+    });
+  } else if (editorAvailable && editor) {
+    const editorParts = splitByCodepoints(
+      editor.text,
+      QUICK_REPLY_EDITOR_PART_LIMIT,
+    );
+    const editorInputs = editorParts.map((part, index) => ({
+      tag: "input",
+      name: editorParts.length === 1 ? "prompt" : `prompt_${index}`,
+      required: true,
+      label: plain(
+        editorParts.length === 1
+          ? editor.label
+          : `${editor.label}（第 ${index + 1}/${editorParts.length} 段）`,
+      ),
+      default_value: part,
+      placeholder: plain(
+        editorParts.length === 1
+          ? "编辑后发送，最多 1000 字。"
+          : "编辑后发送；服务端会按字段顺序拼接，总计最多 8000 字。",
+      ),
+      input_type: "multiline_text",
+      rows: editorParts.length === 1 ? 8 : 4,
+      max_length: QUICK_REPLY_EDITOR_PART_LIMIT,
+      width: "fill",
+    }));
+    elements.push({
+      tag: "form",
+      name: "kanban_quick_reply_editor",
+      vertical_spacing: "12px",
+      elements: [
+        {
+          tag: "div",
+          text: plain(`发送目标：${quickReplies?.boundTargetLabel}`),
+        },
+        ...editorInputs,
+        ...(editorInputs.length > 1
+          ? [
+              {
+                tag: "markdown",
+                content:
+                  "多段内容会按顺序拼接后发送，并保留换行；总计最多 8000 字。",
+                text_size: "notation",
+              },
+            ]
+          : []),
+        {
+          tag: "markdown",
+          content: "发送前请补全方括号占位符，例如 [项目名]、[结论]。",
+          text_size: "notation",
+        },
+        {
+          tag: "button",
+          name: `kanban_quick_confirm_${input.panelId}`,
+          form_action_type: "submit",
+          text: plain("发送快捷回复"),
+          type: "primary_filled",
+          width: "fill",
+        },
+      ],
+    });
+    elements.push({
+      tag: "button",
+      text: plain("换一条快捷回复"),
+      type: "default",
+      width: "fill",
+      behaviors: quickReplyCallback("kanban_quick_back", input.panelId),
+    });
+  } else if (editor) {
+    elements.push({
+      tag: "div",
+      text: plain(
+        "编辑发送需要先锁定原会话，请从完成通知上的快捷回复按钮进入。",
+      ),
+    });
+  } else if (!hasBoundTarget) {
+    elements.push({
+      tag: "select_static",
+      name: "target",
+      width: "fill",
+      placeholder: plain("请选择目标会话"),
+      options: input.options.map((option) => ({
+        text: plain(option.label),
+        value: option.value,
+      })),
+      behaviors: quickReplyCallback("kanban_quick_target", input.panelId),
+    });
+  } else {
+    elements.push({
+      tag: "div",
+      text: plain(`发送目标：${quickReplies?.boundTargetLabel}`),
+    });
+    elements.push({
+      tag: "select_static",
+      name: "quickReply",
+      width: "fill",
+      placeholder: plain("请选择快捷回复"),
+      options: quickReplyOptions.map((option) => ({
+        text: plain(option.label),
+        value: option.value,
+      })),
+      behaviors: quickReplyCallback("kanban_quick_preview", input.panelId),
+    });
+    elements.push({
+      tag: "markdown",
+      content:
+        "选择模板后会在本卡片内进入可编辑预览，补全方括号占位符后再发送。",
+      text_size: "notation",
+    });
+  }
+
+  elements.push(...buildNavigation(input, "刷新快捷回复 / 打开新面板"));
+  return {
+    schema: "2.0",
+    config: {
+      width_mode: "default",
+      enable_forward: false,
+      update_multi: true,
+    },
+    header: {
+      title: plain("Coding Kanban · 快捷回复"),
+      subtitle: plain(
+        hasBoundTarget
+          ? "目标已确认，选择或编辑快捷回复"
+          : "选择目标会话与快捷回复",
+      ),
+      template: "wathet",
+    },
+    body: { direction: "vertical", vertical_spacing: "12px", elements },
+  };
+}
 
 export function buildFeishuControlPanelCard(input: ControlPanelCardInput) {
+  if (input.quickReplies) {
+    return buildQuickReplyPanelCard(input);
+  }
   const overview = input.overview;
   const controlEnabled = input.controlEnabled ?? true;
   const elements: Array<Record<string, unknown>> = [
@@ -159,42 +382,26 @@ export function buildFeishuControlPanelCard(input: ControlPanelCardInput) {
         : "这是只读任务总览。刷新会重新读取当前 session 注册表，面板有效期 15 分钟。",
     });
   }
-  if (input.truncated) {
+  if (input.quickRepliesEnabled && controlEnabled) {
     navigation.push({
-      tag: "markdown",
-      content: `第 ${input.page ?? 1} / ${input.pageCount ?? 1} 页，请翻页查看其他对话。`,
-      text_size: "notation",
+      tag: "button",
+      text: plain("快捷回复"),
+      type: "default",
+      width: "fill",
+      behaviors: [
+        {
+          type: "callback",
+          value: { action: "kanban_quick_replies", panelId: input.panelId },
+        },
+      ],
     });
   }
-  for (const [enabled, page, label] of [
-    [input.hasPreviousPage, (input.page ?? 1) - 1, "上一页"],
-    [input.hasNextPage, (input.page ?? 1) + 1, "下一页"],
-  ] as const) {
-    if (enabled)
-      navigation.push({
-        tag: "button",
-        text: plain(label),
-        type: "default",
-        behaviors: [
-          {
-            type: "callback",
-            value: { action: "kanban_page", panelId: input.panelId, page },
-          },
-        ],
-      });
-  }
-  navigation.push({
-    tag: "button",
-    text: plain(overview ? "刷新任务总览" : "刷新对话列表 / 打开新面板"),
-    type: input.options.length ? "default" : "primary_filled",
-    width: "fill",
-    behaviors: [
-      {
-        type: "callback",
-        value: { action: "kanban_refresh", panelId: input.panelId },
-      },
-    ],
-  });
+  navigation.push(
+    ...buildNavigation(
+      input,
+      overview ? "刷新任务总览" : "刷新对话列表 / 打开新面板",
+    ),
+  );
   if (overview) {
     elements.push({
       tag: "column_set",

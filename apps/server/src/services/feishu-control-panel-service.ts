@@ -7,9 +7,15 @@ import {
   type FeishuNotificationSettingsResponse,
   type ListAgentSessionsResponse,
 } from "@agent-orchestrator/shared";
+import type { FeishuReplyBindingStore } from "./feishu-reply-binding-store.js";
+import type {
+  FeishuQuickReply,
+  FeishuQuickReplyCatalog,
+} from "./feishu-quick-reply-store.js";
 
 const CONTROL_MENU_EVENT_KEY = "kanban_codex_sessions";
 const OVERVIEW_MENU_EVENT_KEY = "kanban_task_overview";
+const QUICK_REPLIES_MENU_EVENT_KEY = "kanban_quick_replies";
 const SUBMIT_ACTION_PREFIX = "kanban_submit_";
 const MAX_PANEL_AGE_MS = 15 * 60 * 1_000;
 const MAX_PANELS = 100;
@@ -42,6 +48,8 @@ export interface FeishuCardActionEvent {
   chat_id?: string;
   action_tag?: string;
   action_name?: string;
+  option?: string;
+  token?: string;
   action_value?: string | Record<string, unknown>;
   form_value?: string | Record<string, unknown>;
 }
@@ -49,6 +57,13 @@ export interface FeishuCardActionEvent {
 export interface FeishuControlPanelCardInput {
   workspaceEnabled?: boolean;
   controlEnabled?: boolean;
+  quickRepliesEnabled?: boolean;
+  quickReplies?: {
+    options: Array<{ value: string; label: string }>;
+    message?: string;
+    boundTargetLabel?: string;
+    editor?: { label: string; text: string };
+  };
   panelId: string;
   options: Array<{ value: string; label: string }>;
   truncated: boolean;
@@ -70,6 +85,7 @@ export interface FeishuControlPanelCardInput {
 export type FeishuControlPanelOutcome =
   | "workspace_opened"
   | "panel_sent"
+  | "panel_updated"
   | "delivered"
   | "ignored_disabled"
   | "ignored_untrusted"
@@ -85,17 +101,23 @@ interface FeishuControlPanelTarget {
   token: string;
   sessionId: string;
   threadId: string;
+  label: string;
+  signature: string;
 }
 
 interface FeishuControlPanelBinding {
   panelId: string;
-  mode: "control" | "overview";
+  mode: "control" | "overview" | "quick_replies";
   operatorId: string;
   chatId: string;
   messageId: string;
   expiresAtMs: number;
   targets: Map<string, FeishuControlPanelTarget>;
   submitted?: boolean;
+  quickReplies?: Map<string, FeishuQuickReply>;
+  quickRepliesRevision?: string;
+  boundTarget?: FeishuControlPanelTarget;
+  editorReply?: FeishuQuickReply;
 }
 
 export interface FeishuControlPanelSendCardInput {
@@ -106,6 +128,8 @@ export interface FeishuControlPanelSendCardInput {
 }
 
 export interface FeishuControlPanelServiceOptions {
+  quickReplies?: { read(): FeishuQuickReplyCatalog };
+  notificationBindings?: Pick<FeishuReplyBindingStore, "resolve">;
   workspace?: {
     open(input: {
       sessionId: string;
@@ -124,6 +148,7 @@ export interface FeishuControlPanelServiceOptions {
   };
   codex: {
     resolveSessionId(session: AgentSessionRecord): Promise<string | undefined>;
+    resolveSessionIds?(session: AgentSessionRecord): Promise<string[]>;
     sendText(input: {
       threadId: string;
       message: string;
@@ -143,6 +168,11 @@ export interface FeishuControlPanelServiceOptions {
       chatId: string;
       text: string;
       idempotencyKey: string;
+    }): Promise<void>;
+    updateCard?(input: {
+      userId: string;
+      token: string;
+      card: unknown;
     }): Promise<void>;
   };
 }
@@ -193,23 +223,64 @@ function isAvailablePanelTarget(
 ): boolean {
   return (
     isAvailableCodexSession(session) &&
-    (panel.mode !== "overview" || !session.hidden)
+    (panel.mode === "control" || !session.hidden)
   );
 }
 
-function normalizePrompt(input: unknown): string | null {
+function normalizePrompt(
+  input: unknown,
+  maxCharacters = MAX_PROMPT_CHARACTERS,
+): string | null {
   if (typeof input !== "string") {
     return null;
   }
   const normalized = input.replace(/\r\n?/g, "\n").trim();
   if (
     !normalized ||
-    Array.from(normalized).length > MAX_PROMPT_CHARACTERS ||
+    Array.from(normalized).length > maxCharacters ||
     UNSAFE_CONTROL_CHARACTER_PATTERN.test(normalized)
   ) {
     return null;
   }
   return normalized;
+}
+
+function targetSignature(session: AgentSessionRecord): string {
+  return JSON.stringify([
+    session.workingDirectory,
+    session.hostId,
+    session.sshTarget,
+    session.transportRef,
+  ]);
+}
+
+function hasUnfilledPlaceholders(
+  reply: FeishuQuickReply,
+  prompt: string,
+): boolean {
+  return (
+    Boolean(reply.requiresEditing) &&
+    [...reply.text.matchAll(/\[[^\]\r\n]{1,80}\](?!\()/gu)].some(
+      ([placeholder]) => prompt.includes(placeholder),
+    )
+  );
+}
+
+function normalizeQuickReplyEditor(
+  form: Record<string, unknown>,
+  reply: FeishuQuickReply,
+): string | null {
+  // Feishu limits each input component to 1000 Unicode characters. Match the
+  // fields rendered from the server-held template, never a client part count.
+  const count = Math.max(1, Math.ceil(Array.from(reply.text).length / 1_000));
+  const parts: string[] = [];
+  for (let index = 0; index < count; index++) {
+    const value = form[count === 1 ? "prompt" : `prompt_${index}`];
+    if (typeof value !== "string" || Array.from(value).length > 1_000)
+      return null;
+    parts.push(value);
+  }
+  return normalizePrompt(parts.join(""), 8_000);
 }
 
 function sanitizeCardText(input: string): string {
@@ -341,6 +412,8 @@ function buildOverview(
 }
 
 export class FeishuControlPanelService {
+  readonly #quickReplies: FeishuControlPanelServiceOptions["quickReplies"];
+  readonly #notificationBindings: FeishuControlPanelServiceOptions["notificationBindings"];
   readonly #workspace: FeishuControlPanelServiceOptions["workspace"];
   readonly #allowedUserId: string;
   readonly #settings: FeishuControlPanelServiceOptions["settings"];
@@ -352,10 +425,13 @@ export class FeishuControlPanelService {
   readonly #createId: () => string;
   readonly #panels = new Map<string, FeishuControlPanelBinding>();
   readonly #inFlightEventIds = new Set<string>();
+  readonly #updatingPanels = new Set<string>();
   readonly #processedEventIds = new Set<string>();
   readonly #processedEventOrder: string[] = [];
 
   constructor(options: FeishuControlPanelServiceOptions) {
+    this.#quickReplies = options.quickReplies;
+    this.#notificationBindings = options.notificationBindings;
     this.#workspace = options.workspace;
     this.#allowedUserId = USER_ID_PATTERN.test(options.allowedUserId)
       ? options.allowedUserId
@@ -395,7 +471,8 @@ export class FeishuControlPanelService {
       !this.#allowedUserId ||
       typeof event.event_id !== "string" ||
       (event.event_key !== CONTROL_MENU_EVENT_KEY &&
-        event.event_key !== OVERVIEW_MENU_EVENT_KEY) ||
+        event.event_key !== OVERVIEW_MENU_EVENT_KEY &&
+        event.event_key !== QUICK_REPLIES_MENU_EVENT_KEY) ||
       event.operator_id !== this.#allowedUserId
     ) {
       return "ignored_untrusted";
@@ -410,7 +487,11 @@ export class FeishuControlPanelService {
         userId: event.operator_id,
         page: 1,
         mode:
-          event.event_key === OVERVIEW_MENU_EVENT_KEY ? "overview" : "control",
+          event.event_key === OVERVIEW_MENU_EVENT_KEY
+            ? "overview"
+            : event.event_key === QUICK_REPLIES_MENU_EVENT_KEY
+              ? "quick_replies"
+              : "control",
         idempotencyKey: buildIdempotencyKey(event.event_id),
       });
       this.#rememberProcessedEvent(event.event_id);
@@ -429,7 +510,7 @@ export class FeishuControlPanelService {
     if (
       !this.#allowedUserId ||
       event.operator_id !== this.#allowedUserId ||
-      event.action_tag !== "button" ||
+      (event.action_tag !== "button" && event.action_tag !== "select_static") ||
       typeof eventId !== "string" ||
       typeof messageId !== "string" ||
       typeof chatId !== "string" ||
@@ -440,7 +521,19 @@ export class FeishuControlPanelService {
     }
 
     const actionValue = parseJsonObject(event.action_value);
-    if (actionValue.action === "kanban_refresh") {
+    if (event.action_tag === "select_static") {
+      return this.#handleQuickSelection(event, actionValue);
+    }
+    if (actionValue.action === "kanban_completion_quick_reply") {
+      return this.#openCompletionQuickReplies(event);
+    }
+    if (actionValue.action === "kanban_quick_back") {
+      return this.#handleQuickBack(event, actionValue);
+    }
+    if (
+      actionValue.action === "kanban_refresh" ||
+      actionValue.action === QUICK_REPLIES_MENU_EVENT_KEY
+    ) {
       const panel = this.#resolvePanel(event, actionValue.panelId);
       if (!panel) {
         return "ignored_stale_panel";
@@ -457,7 +550,11 @@ export class FeishuControlPanelService {
         operatorId: event.operator_id,
         chatId,
         page: 1,
-        mode: panel.mode,
+        mode:
+          actionValue.action === QUICK_REPLIES_MENU_EVENT_KEY
+            ? "quick_replies"
+            : panel.mode,
+        boundTarget: panel.boundTarget,
       });
     }
 
@@ -484,14 +581,20 @@ export class FeishuControlPanelService {
         chatId,
         page,
         mode: panel.mode,
+        boundTarget: panel.boundTarget,
       });
     }
 
     const inspect = event.action_name?.startsWith("kanban_inspect_") === true;
     if (inspect && !this.#workspace) return "ignored_unavailable";
-    const panelId = inspect
-      ? event.action_name!.slice("kanban_inspect_".length)
-      : this.#parseSubmitPanelId(event.action_name);
+    const quickAction = /^kanban_quick_(send|edit|confirm)_(.+)$/.exec(
+      event.action_name ?? "",
+    );
+    const panelId = quickAction
+      ? quickAction[2]
+      : inspect
+        ? event.action_name!.slice("kanban_inspect_".length)
+        : this.#parseSubmitPanelId(event.action_name);
     if (!panelId) {
       return "ignored_untrusted";
     }
@@ -505,6 +608,24 @@ export class FeishuControlPanelService {
     if (!panel || panel.submitted) {
       return "ignored_stale_panel";
     }
+    if (this.#updatingPanels.has(panelId)) return "ignored_duplicate";
+    if (
+      (panel.mode === "quick_replies") !== Boolean(quickAction) ||
+      (quickAction &&
+        Boolean(panel.editorReply) !== (quickAction[1] === "confirm"))
+    ) {
+      return "ignored_invalid_input";
+    }
+    if (quickAction && quickAction[1] !== "confirm") {
+      // Cards sent before this interaction change still contain direct-send
+      // buttons. They must not deliver a template without an editable preview.
+      await this.#notify(
+        chatId,
+        "快捷回复面板已更新，请重新打开后选择模板预览。",
+        eventId,
+      );
+      return "ignored_invalid_input";
+    }
     if (!isEnabled(this.#settings.get())) {
       return "ignored_disabled";
     }
@@ -517,8 +638,35 @@ export class FeishuControlPanelService {
     const selectedTarget = formValue.target;
     const targetToken =
       typeof selectedTarget === "string" ? selectedTarget : "";
-    const target = panel.targets.get(targetToken);
-    const prompt = normalizePrompt(formValue.prompt);
+    const target = panel.boundTarget ?? panel.targets.get(targetToken);
+    const reply = quickAction ? panel.editorReply : undefined;
+    const prompt = quickAction
+      ? reply
+        ? normalizeQuickReplyEditor(formValue, reply)
+        : null
+      : normalizePrompt(formValue.prompt);
+    if (
+      quickAction &&
+      (!reply ||
+        !prompt ||
+        (quickAction[1] === "confirm" &&
+          hasUnfilledPlaceholders(reply, prompt)))
+    ) {
+      await this.#notify(
+        chatId,
+        "请选择快捷回复，并补全模板占位符；每个编辑框最多 1000 字，总计最多 8000 字。",
+        eventId,
+      );
+      return "ignored_invalid_input";
+    }
+    if (quickAction && !this.#isCurrentCatalog(panel)) {
+      await this.#notify(
+        chatId,
+        "快捷回复内容已更新，请刷新面板后重新选择。",
+        eventId,
+      );
+      return "ignored_stale_panel";
+    }
     if (!target || (!inspect && !prompt)) {
       await this.#notify(chatId, "请选择一个 Codex 对话并填写指示。", eventId);
       return "ignored_invalid_input";
@@ -535,6 +683,14 @@ export class FeishuControlPanelService {
       await this.#notify(chatId, "目标 Codex 对话当前不可控。", eventId);
       return "ignored_unavailable";
     }
+    if (quickAction && target.signature !== targetSignature(session)) {
+      await this.#notify(
+        chatId,
+        "目标 Codex 对话已变化，请刷新后重试。",
+        eventId,
+      );
+      return "ignored_changed_thread";
+    }
 
     this.#inFlightEventIds.add(eventId);
     this.#rememberProcessedEvent(eventId);
@@ -545,8 +701,13 @@ export class FeishuControlPanelService {
       panel.targets.clear();
     }
     try {
-      const currentThreadId = await this.#codex.resolveSessionId(session);
-      if (!currentThreadId) {
+      const currentThreadIds =
+        panel.boundTarget && this.#codex.resolveSessionIds
+          ? await this.#codex.resolveSessionIds(session)
+          : [await this.#codex.resolveSessionId(session)].filter(
+              (id): id is string => Boolean(id),
+            );
+      if (!currentThreadIds.length) {
         await this.#notify(chatId, "目标 Codex 对话标识不可用。", eventId);
         return "ignored_unavailable";
       }
@@ -564,7 +725,10 @@ export class FeishuControlPanelService {
         await this.#notify(chatId, "目标 Codex 对话当前不可控。", eventId);
         return "ignored_unavailable";
       }
-      if (currentThreadId !== target.threadId) {
+      if (
+        !currentThreadIds.includes(target.threadId) ||
+        (quickAction && target.signature !== targetSignature(latestSession))
+      ) {
         await this.#notify(
           chatId,
           "目标 Codex 对话已变化，请刷新后重试。",
@@ -572,11 +736,19 @@ export class FeishuControlPanelService {
         );
         return "ignored_changed_thread";
       }
+      if (quickAction && !this.#isCurrentCatalog(panel)) {
+        await this.#notify(
+          chatId,
+          "快捷回复内容已更新，请刷新面板后重新选择。",
+          eventId,
+        );
+        return "ignored_stale_panel";
+      }
       if (inspect) {
         if (latestSession.hidden) return "ignored_unavailable";
         await this.#workspace!.open({
           sessionId: target.sessionId,
-          threadId: currentThreadId,
+          threadId: target.threadId,
           operatorId: event.operator_id!,
           chatId,
         });
@@ -584,7 +756,7 @@ export class FeishuControlPanelService {
       }
       try {
         await this.#codex.sendText({
-          threadId: currentThreadId,
+          threadId: target.threadId,
           message: prompt!,
           workingDirectory: latestSession.workingDirectory,
           sshTarget: latestSession.sshTarget,
@@ -608,24 +780,281 @@ export class FeishuControlPanelService {
     }
   }
 
+  async #handleQuickSelection(
+    event: FeishuCardActionEvent,
+    actionValue: Record<string, unknown>,
+  ): Promise<FeishuControlPanelOutcome> {
+    const selectingTarget =
+      actionValue.action === "kanban_quick_target" &&
+      (event.action_name === undefined || event.action_name === "target");
+    const selectingReply =
+      actionValue.action === "kanban_quick_preview" &&
+      (event.action_name === undefined || event.action_name === "quickReply");
+    if (!selectingTarget && !selectingReply) return "ignored_untrusted";
+    const panel = this.#resolvePanel(event, actionValue.panelId);
+    if (!panel || panel.mode !== "quick_replies" || panel.submitted) {
+      return "ignored_stale_panel";
+    }
+    if (!isEnabled(this.#settings.get())) return "ignored_disabled";
+    if (this.#isExpired(panel)) return "ignored_expired";
+    if (
+      this.#isDuplicateEvent(event.event_id!) ||
+      this.#updatingPanels.has(panel.panelId)
+    )
+      return "ignored_duplicate";
+    if (!this.#isCurrentCatalog(panel)) return "ignored_stale_panel";
+    const option =
+      event.option ??
+      parseJsonObject(event.form_value)[
+        selectingTarget ? "target" : "quickReply"
+      ];
+    if (typeof option !== "string") return "ignored_invalid_input";
+
+    const target = selectingTarget
+      ? panel.targets.get(option)
+      : panel.boundTarget;
+    const reply = selectingReply ? panel.quickReplies?.get(option) : undefined;
+    if (
+      !target ||
+      (selectingTarget && panel.boundTarget) ||
+      (selectingReply && (!reply || panel.editorReply))
+    ) {
+      return "ignored_invalid_input";
+    }
+
+    this.#inFlightEventIds.add(event.event_id!);
+    this.#updatingPanels.add(panel.panelId);
+    try {
+      const unavailable = await this.#checkBoundTarget(target);
+      if (unavailable) return unavailable;
+      if (!isEnabled(this.#settings.get())) return "ignored_disabled";
+      if (!this.#isCurrentCatalog(panel)) return "ignored_stale_panel";
+      const updated = await this.#updateQuickPanel(event, panel, target, reply);
+      if (updated !== "panel_updated") return updated;
+      panel.boundTarget = target;
+      if (reply) panel.editorReply = reply;
+      this.#rememberProcessedEvent(event.event_id!);
+      return "panel_updated";
+    } finally {
+      this.#updatingPanels.delete(panel.panelId);
+      this.#inFlightEventIds.delete(event.event_id!);
+    }
+  }
+
+  async #handleQuickBack(
+    event: FeishuCardActionEvent,
+    actionValue: Record<string, unknown>,
+  ): Promise<FeishuControlPanelOutcome> {
+    const panel = this.#resolvePanel(event, actionValue.panelId);
+    if (
+      !panel ||
+      panel.mode !== "quick_replies" ||
+      panel.submitted ||
+      !panel.boundTarget ||
+      !panel.editorReply
+    )
+      return "ignored_stale_panel";
+    if (!isEnabled(this.#settings.get())) return "ignored_disabled";
+    if (this.#isExpired(panel)) return "ignored_expired";
+    if (
+      this.#isDuplicateEvent(event.event_id!) ||
+      this.#updatingPanels.has(panel.panelId)
+    )
+      return "ignored_duplicate";
+    if (!this.#isCurrentCatalog(panel)) return "ignored_stale_panel";
+    this.#inFlightEventIds.add(event.event_id!);
+    this.#updatingPanels.add(panel.panelId);
+    try {
+      const unavailable = await this.#checkBoundTarget(panel.boundTarget);
+      if (unavailable) return unavailable;
+      const updated = await this.#updateQuickPanel(
+        event,
+        panel,
+        panel.boundTarget,
+      );
+      if (updated !== "panel_updated") return updated;
+      panel.editorReply = undefined;
+      this.#rememberProcessedEvent(event.event_id!);
+      return "panel_updated";
+    } finally {
+      this.#updatingPanels.delete(panel.panelId);
+      this.#inFlightEventIds.delete(event.event_id!);
+    }
+  }
+
+  async #updateQuickPanel(
+    event: FeishuCardActionEvent,
+    panel: FeishuControlPanelBinding,
+    target: FeishuControlPanelTarget,
+    editorReply?: FeishuQuickReply,
+  ): Promise<FeishuControlPanelOutcome> {
+    if (
+      !this.#messenger.updateCard ||
+      typeof event.token !== "string" ||
+      event.token.length === 0 ||
+      event.token.length > 4_096
+    ) {
+      return "ignored_unavailable";
+    }
+    const card = this.#cards.buildControlPanelCard({
+      panelId: panel.panelId,
+      options: [...panel.targets.values()].map((item) => ({
+        value: item.token,
+        label: item.label,
+      })),
+      truncated: false,
+      page: 1,
+      pageCount: 1,
+      hasPreviousPage: false,
+      hasNextPage: false,
+      quickReplies: {
+        options: [...(panel.quickReplies ?? new Map())].map(
+          ([token, reply]) => ({
+            value: token,
+            label: truncateUnicode(
+              `${reply.category ? `${reply.category} · ` : ""}${reply.label}`,
+              MAX_LABEL_CHARACTERS,
+            ),
+          }),
+        ),
+        boundTargetLabel: target.label,
+        ...(editorReply
+          ? { editor: { label: editorReply.label, text: editorReply.text } }
+          : {}),
+      },
+    });
+    try {
+      await this.#messenger.updateCard({
+        userId: this.#allowedUserId,
+        token: event.token,
+        card,
+      });
+      return "panel_updated";
+    } catch {
+      return "delivery_uncertain";
+    }
+  }
+
+  #isCurrentCatalog(panel: FeishuControlPanelBinding): boolean {
+    return (
+      Boolean(this.#quickReplies) &&
+      this.#quickReplies!.read().revision === panel.quickRepliesRevision
+    );
+  }
+
+  async #openCompletionQuickReplies(
+    event: FeishuCardActionEvent,
+  ): Promise<FeishuControlPanelOutcome> {
+    if (!isEnabled(this.#settings.get())) return "ignored_disabled";
+    if (this.#isDuplicateEvent(event.event_id!)) return "ignored_duplicate";
+    const binding = this.#notificationBindings?.resolve(event.message_id!);
+    if (
+      !binding ||
+      binding.messageId !== event.message_id ||
+      binding.chatId !== event.chat_id ||
+      binding.transcriptAgentKind === "claude" ||
+      !binding.codexThreadId
+    ) {
+      return "ignored_untrusted";
+    }
+    let session: AgentSessionRecord;
+    try {
+      session = this.#registry.get(binding.sessionId);
+    } catch {
+      return "ignored_unavailable";
+    }
+    if (!isAvailableCodexSession(session) || session.hidden)
+      return "ignored_unavailable";
+    return this.#sendNavigationPanel(event.event_id!, {
+      operatorId: event.operator_id!,
+      chatId: event.chat_id!,
+      page: 1,
+      mode: "quick_replies",
+      boundTarget: {
+        token: this.#createId(),
+        sessionId: session.id,
+        threadId: binding.codexThreadId,
+        label: buildSessionLabel(session),
+        signature: targetSignature(session),
+      },
+    });
+  }
+
+  async #checkBoundTarget(
+    target: FeishuControlPanelTarget,
+  ): Promise<FeishuControlPanelOutcome | null> {
+    try {
+      const session = this.#registry.get(target.sessionId);
+      if (!isAvailableCodexSession(session) || session.hidden)
+        return "ignored_unavailable";
+      if (target.signature !== targetSignature(session))
+        return "ignored_changed_thread";
+      const ids = this.#codex.resolveSessionIds
+        ? await this.#codex.resolveSessionIds(session)
+        : [await this.#codex.resolveSessionId(session)];
+      const latest = this.#registry.get(target.sessionId);
+      if (!isAvailableCodexSession(latest) || latest.hidden)
+        return "ignored_unavailable";
+      if (
+        !ids.includes(target.threadId) ||
+        target.signature !== targetSignature(latest)
+      ) {
+        return "ignored_changed_thread";
+      }
+      return null;
+    } catch {
+      return "ignored_unavailable";
+    }
+  }
+
   async #sendPanel(input: {
     operatorId: string;
     userId?: string;
     chatId?: string;
     page: number;
-    mode: "control" | "overview";
+    mode: FeishuControlPanelBinding["mode"];
+    boundTarget?: FeishuControlPanelTarget;
+    editorReply?: FeishuQuickReply;
+    editorRevision?: string;
     idempotencyKey: string;
   }): Promise<FeishuControlPanelOutcome> {
     const initialSettings = this.#settings.get();
     if (!isPanelEnabled(input.mode, initialSettings)) {
       return "ignored_disabled";
     }
+    const catalog =
+      input.mode === "quick_replies"
+        ? (this.#quickReplies?.read() ?? {
+            items: [],
+            revision: "",
+            message: "尚未配置本地快捷回复文件。",
+          })
+        : undefined;
+    if (input.editorReply && input.editorRevision !== catalog?.revision)
+      return "ignored_stale_panel";
+    if (input.boundTarget) {
+      const unavailable = await this.#checkBoundTarget(input.boundTarget);
+      if (unavailable) {
+        if (input.chatId)
+          await this.#notify(
+            input.chatId,
+            "原 Codex 对话已变化或不可用，请从新的完成通知打开。",
+            input.idempotencyKey,
+          );
+        return unavailable;
+      }
+    }
     const snapshotTime = new Date(this.#now()).toISOString();
     const snapshot = this.#registry.list();
-    const allSessions =
-      input.mode === "overview"
+    const allSessions = input.boundTarget
+      ? []
+      : input.mode === "overview"
         ? snapshot.items.filter((session) => !session.hidden)
-        : snapshot.items.filter((session) => isAvailableCodexSession(session));
+        : snapshot.items.filter(
+            (session) =>
+              isAvailableCodexSession(session) &&
+              (input.mode !== "quick_replies" || !session.hidden),
+          );
     const pageSize =
       input.mode === "overview" ? OVERVIEW_PAGE_SIZE : CONTROL_PAGE_SIZE;
     const totalPages = pageCountFor(allSessions.length, pageSize);
@@ -633,14 +1062,18 @@ export class FeishuControlPanelService {
     const start = (page - 1) * pageSize;
     const pageSessions = allSessions.slice(start, start + pageSize);
     const controlEnabled = isEnabled(initialSettings);
-    const pageTargets = controlEnabled
-      ? await this.#collectTargets(
-          input.mode === "overview"
-            ? pageSessions.filter((session) => isAvailableCodexSession(session))
-            : pageSessions,
-          { tolerateResolveErrors: input.mode === "overview" },
-        )
-      : [];
+    const pageTargets = input.boundTarget
+      ? [input.boundTarget]
+      : controlEnabled
+        ? await this.#collectTargets(
+            input.mode === "overview"
+              ? pageSessions.filter((session) =>
+                  isAvailableCodexSession(session),
+                )
+              : pageSessions,
+            { tolerateResolveErrors: input.mode !== "control" },
+          )
+        : [];
     if (!isPanelEnabled(input.mode, this.#settings.get())) {
       return "ignored_disabled";
     }
@@ -655,8 +1088,36 @@ export class FeishuControlPanelService {
         label: target.label,
       };
     });
+    const quickReplies = new Map<string, FeishuQuickReply>();
+    const quickOptions = (catalog?.items ?? []).map((reply) => {
+      const token = this.#createId();
+      quickReplies.set(token, { ...reply });
+      return {
+        value: token,
+        label: truncateUnicode(
+          `${reply.category ? `${reply.category} · ` : ""}${reply.label}`,
+          MAX_LABEL_CHARACTERS,
+        ),
+      };
+    });
     const card = this.#cards.buildControlPanelCard({
       ...(this.#workspace ? { workspaceEnabled: true } : {}),
+      ...(this.#quickReplies ? { quickRepliesEnabled: true } : {}),
+      ...(catalog
+        ? {
+            quickReplies: {
+              options: quickOptions,
+              message: catalog.message,
+              boundTargetLabel: input.boundTarget?.label,
+              editor: input.editorReply
+                ? {
+                    label: input.editorReply.label,
+                    text: input.editorReply.text,
+                  }
+                : undefined,
+            },
+          }
+        : {}),
       ...(input.mode === "overview" && !controlEnabled
         ? { controlEnabled: false }
         : {}),
@@ -687,6 +1148,14 @@ export class FeishuControlPanelService {
       messageId: sent.messageId,
       expiresAtMs: this.#now() + MAX_PANEL_AGE_MS,
       targets,
+      ...(catalog
+        ? {
+            quickReplies,
+            quickRepliesRevision: catalog.revision,
+            boundTarget: input.boundTarget,
+            editorReply: input.editorReply,
+          }
+        : {}),
     });
     return "panel_sent";
   }
@@ -697,7 +1166,8 @@ export class FeishuControlPanelService {
       operatorId: string;
       chatId: string;
       page: number;
-      mode: "control" | "overview";
+      mode: FeishuControlPanelBinding["mode"];
+      boundTarget?: FeishuControlPanelTarget;
     },
   ): Promise<FeishuControlPanelOutcome> {
     if (this.#isDuplicateEvent(eventId)) {
@@ -719,11 +1189,12 @@ export class FeishuControlPanelService {
   async #collectTargets(
     sessions: AgentSessionRecord[],
     options: { tolerateResolveErrors?: boolean } = {},
-  ): Promise<Array<{ sessionId: string; threadId: string; label: string }>> {
+  ): Promise<Array<Omit<FeishuControlPanelTarget, "token">>> {
     const targets: Array<{
       sessionId: string;
       threadId: string;
       label: string;
+      signature: string;
     }> = [];
     for (const session of sessions) {
       let threadId: string | undefined;
@@ -742,6 +1213,7 @@ export class FeishuControlPanelService {
         sessionId: session.id,
         threadId,
         label: buildSessionLabel(session),
+        signature: targetSignature(session),
       });
     }
     return targets;

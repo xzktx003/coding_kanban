@@ -94,6 +94,167 @@ test("local tmux discovery exposes the real session name", async () => {
   assert.equal(result.items[0]?.transportRef?.runtimeId, "tmux:dev");
 });
 
+test("registered local session follows the live tmux command for Claude records", async () => {
+  const registry = new AgentSessionRegistry();
+  const registered = registry.register({
+    workspaceId: "session_agent",
+    sourceType: "local",
+    agentKind: "node",
+    displayName: "session_agent",
+    workingDirectory: "/work/session_agent",
+    transportRef: { tmuxSession: "session_agent", tmuxPane: "%9" },
+  });
+  const remote = registry.register({
+    workspaceId: "remote",
+    sourceType: "remote-connect",
+    agentKind: "codex",
+    displayName: "remote",
+    workingDirectory: "/work/remote",
+    sshTarget: { host: "remote.example" },
+    transportRef: { tmuxSession: "session_agent", tmuxPane: "%9" },
+  });
+  const adapter = new LocalTmuxAdapter(registry);
+  let command = "claude.exe";
+  (
+    adapter as unknown as {
+      runTmux(args: string[]): Promise<{ stdout: string; stderr: string }>;
+    }
+  ).runTmux = async () => ({
+    stdout: `session_agent\t1\t1\t1\t%9\t${command}\t/work/session_agent`,
+    stderr: "",
+  });
+
+  await adapter.syncRegisteredAgentKinds();
+  assert.equal(registry.get(registered.id).agentKind, "claude.exe");
+  assert.equal(registry.get(remote.id).agentKind, "codex");
+  command = "node";
+  await adapter.syncRegisteredAgentKinds();
+  assert.equal(registry.get(registered.id).agentKind, "node");
+  command = "claude.exe";
+  registry.updateSession(registered.id, {
+    transportRef: { tmuxSession: "renamed-session" },
+  });
+  await adapter.syncRegisteredAgentKinds();
+  assert.equal(registry.get(registered.id).agentKind, "node");
+});
+
+test("a local tmux session without a pane binding adopts its sole live Claude pane", async () => {
+  const registry = new AgentSessionRegistry();
+  const registered = registry.register({
+    workspaceId: "default",
+    sourceType: "local",
+    agentKind: "shell",
+    displayName: "tmp",
+    workingDirectory: "/work/tmp",
+    transportRef: { tmuxSession: "tmp" },
+  });
+  const adapter = new LocalTmuxAdapter(registry);
+  (
+    adapter as unknown as {
+      runTmux(args: string[]): Promise<{ stdout: string; stderr: string }>;
+    }
+  ).runTmux = async () => ({
+    stdout: "tmp\t1\t1\t1\t%31\tclaude\t/work/tmp",
+    stderr: "",
+  });
+
+  await adapter.syncRegisteredAgentKinds();
+
+  assert.equal(registry.get(registered.id).agentKind, "claude");
+  assert.equal(registry.get(registered.id).transportRef?.tmuxPane, "%31");
+});
+
+test("an unbound local tmux session stays unchanged when its pane is ambiguous", async () => {
+  const registry = new AgentSessionRegistry();
+  const registered = registry.register({
+    workspaceId: "default",
+    sourceType: "local",
+    agentKind: "shell",
+    displayName: "tmp",
+    workingDirectory: "/work/tmp",
+    transportRef: { tmuxSession: "tmp" },
+  });
+  const adapter = new LocalTmuxAdapter(registry);
+  (
+    adapter as unknown as {
+      runTmux(args: string[]): Promise<{ stdout: string; stderr: string }>;
+    }
+  ).runTmux = async () => ({
+    stdout: [
+      "tmp\t1\t1\t1\t%31\tclaude\t/work/tmp",
+      "tmp\t1\t1\t0\t%32\tbash\t/work/tmp",
+    ].join("\n"),
+    stderr: "",
+  });
+
+  await adapter.syncRegisteredAgentKinds();
+
+  assert.equal(registry.get(registered.id).agentKind, "shell");
+  assert.equal(registry.get(registered.id).transportRef?.tmuxPane, undefined);
+});
+
+test("a shared tmux session name does not bind either unbound local card", async () => {
+  const registry = new AgentSessionRegistry();
+  const first = registry.register({
+    workspaceId: "first",
+    sourceType: "local",
+    agentKind: "shell",
+    displayName: "first",
+    workingDirectory: "/work/first",
+    transportRef: { tmuxSession: "shared" },
+  });
+  const second = registry.register({
+    workspaceId: "second",
+    sourceType: "local",
+    agentKind: "shell",
+    displayName: "second",
+    workingDirectory: "/work/second",
+    transportRef: { tmuxSession: "shared" },
+  });
+  const adapter = new LocalTmuxAdapter(registry);
+  (
+    adapter as unknown as {
+      runTmux(args: string[]): Promise<{ stdout: string; stderr: string }>;
+    }
+  ).runTmux = async () => ({
+    stdout: "shared\t1\t1\t1\t%31\tclaude\t/work/shared",
+    stderr: "",
+  });
+
+  await adapter.syncRegisteredAgentKinds();
+
+  assert.equal(registry.get(first.id).agentKind, "shell");
+  assert.equal(registry.get(second.id).agentKind, "shell");
+  assert.equal(registry.get(first.id).transportRef?.tmuxPane, undefined);
+  assert.equal(registry.get(second.id).transportRef?.tmuxPane, undefined);
+});
+
+test("an unbound tmux card rejects a malformed pane identifier", async () => {
+  const registry = new AgentSessionRegistry();
+  const registered = registry.register({
+    workspaceId: "default",
+    sourceType: "local",
+    agentKind: "shell",
+    displayName: "tmp",
+    workingDirectory: "/work/tmp",
+    transportRef: { tmuxSession: "tmp" },
+  });
+  const adapter = new LocalTmuxAdapter(registry);
+  (
+    adapter as unknown as {
+      runTmux(args: string[]): Promise<{ stdout: string; stderr: string }>;
+    }
+  ).runTmux = async () => ({
+    stdout: "tmp\t1\t1\t1\t--help\tclaude\t/work/tmp",
+    stderr: "",
+  });
+
+  await adapter.syncRegisteredAgentKinds();
+
+  assert.equal(registry.get(registered.id).agentKind, "shell");
+  assert.equal(registry.get(registered.id).transportRef?.tmuxPane, undefined);
+});
+
 test("remote tmux discovery exposes the real session name", async () => {
   const adapter = new LocalTmuxAdapter(new AgentSessionRegistry());
   (

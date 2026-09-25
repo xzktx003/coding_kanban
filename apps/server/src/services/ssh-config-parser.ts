@@ -21,6 +21,10 @@ export function parseSshConfig(): SshHostPreset[] {
     return [];
   }
 
+  return parseSshConfigContent(content);
+}
+
+export function parseSshConfigContent(content: string): SshHostPreset[] {
   const hosts: ParsedHost[] = [];
   let current: ParsedHost | null = null;
 
@@ -35,12 +39,11 @@ export function parseSshConfig(): SshHostPreset[] {
     const keyLower = key.toLowerCase();
 
     if (keyLower === "host") {
-      if (value.includes("*") || value.includes("?")) {
-        current = null;
-        continue;
-      }
-      current = { name: value };
-      hosts.push(current);
+      const name = value
+        .split(/\s+/)
+        .find((name) => !name.includes("*") && !name.includes("?"));
+      current = name ? { name } : null;
+      if (current) hosts.push(current);
     } else if (current) {
       if (keyLower === "hostname") current.hostname = value;
       else if (keyLower === "port") current.port = value;

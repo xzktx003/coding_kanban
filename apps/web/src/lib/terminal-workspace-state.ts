@@ -23,6 +23,7 @@ export interface TerminalWorkspaceState {
   mode: TerminalMonitorLayoutMode;
   arrangementMode: TerminalMonitorArrangementMode;
   arrangementGroupId: string | null;
+  activeGroupSessionId: string | null;
   groupSessionOrderByGroupId: Record<string, string[]>;
   slots: TerminalMonitorSlot[];
   activeSlotId: string;
@@ -36,6 +37,7 @@ function defaultState(
     mode,
     arrangementMode: "manual",
     arrangementGroupId: null,
+    activeGroupSessionId: null,
     groupSessionOrderByGroupId: {},
     slots: [],
     activeSlotId: DEFAULT_SLOT_ID,
@@ -130,6 +132,11 @@ export function loadTerminalWorkspaceState(
       typeof parsed.arrangementGroupId === "string"
         ? parsed.arrangementGroupId
         : null;
+    const activeGroupSessionId =
+      typeof parsed.activeGroupSessionId === "string" &&
+      parsed.activeGroupSessionId.trim()
+        ? parsed.activeGroupSessionId
+        : null;
     const groupSessionOrderByGroupId = parseGroupSessionOrderByGroupId(
       parsed.groupSessionOrderByGroupId,
     );
@@ -151,6 +158,7 @@ export function loadTerminalWorkspaceState(
       mode,
       arrangementMode,
       arrangementGroupId,
+      activeGroupSessionId,
       groupSessionOrderByGroupId,
       slots,
       activeSlotId,
@@ -174,10 +182,17 @@ export function resolveTerminalWorkspaceStateForFocus(
     (slotId) => slotId !== activeSlotId,
   );
   const closedSlotIdSet = new Set(closedSlotIds);
+  const availableSessionIds = new Set(sessions.map((session) => session.id));
+  const hasSavedSession = state.slots.some(
+    (slot) =>
+      slotIds.includes(slot.id) &&
+      slot.sessionId !== null &&
+      availableSessionIds.has(slot.sessionId),
+  );
   const slots = normalizeTerminalMonitorSlots({
     mode: state.mode,
     sessions,
-    preferredSessionId: focusedSessionId,
+    preferredSessionId: hasSavedSession ? null : focusedSessionId,
     preferredSlotId: activeSlotId,
     previousSlots: state.slots,
   }).map((slot) =>
@@ -188,6 +203,7 @@ export function resolveTerminalWorkspaceStateForFocus(
     mode: state.mode,
     arrangementMode: state.arrangementMode,
     arrangementGroupId: state.arrangementGroupId,
+    activeGroupSessionId: state.activeGroupSessionId,
     groupSessionOrderByGroupId: state.groupSessionOrderByGroupId,
     slots,
     activeSlotId,

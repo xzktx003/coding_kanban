@@ -33,6 +33,7 @@ const validEvent: FeishuInboundMessageEvent = {
   type: "im.message.receive_v1",
   message_id: "om_reply",
   reply_to: "om_notice",
+  root_id: "om_notice",
   chat_id: "oc_private",
   chat_type: "p2p",
   sender_id: "ou_owner",
@@ -64,6 +65,7 @@ function createFixture(
     imageExtension: "jpg" | "png" | "webp";
   }> = [];
   const imageDownloads: Array<{ messageId: string; imageKey: string }> = [];
+  const sessionLookups: string[] = [];
   const processed = new Set<string>();
   const replyBindings = new Map<string, FeishuReplyBinding>();
   const initialBinding = overrides.resolvedBinding ?? binding;
@@ -95,7 +97,10 @@ function createFixture(
       },
     },
     registry: {
-      get: () => overrides.targetSession ?? session,
+      get: (sessionId) => {
+        sessionLookups.push(sessionId);
+        return overrides.targetSession ?? session;
+      },
     },
     images: {
       download: async (input) => {
@@ -138,6 +143,7 @@ function createFixture(
     writes,
     imageWrites,
     imageDownloads,
+    sessionLookups,
     processed,
     replyBindings,
   };
@@ -154,6 +160,24 @@ test("routes a trusted direct reply to the bound Codex terminal exactly once", a
 
   assert.equal(await fixture.service.handle(validEvent), "ignored_duplicate");
   assert.equal(fixture.writes.length, 1);
+});
+
+test("rejects a direct message even when an adapter supplies a stale bound reply target", async () => {
+  const fixture = createFixture();
+
+  assert.equal(
+    await fixture.service.handle({
+      ...validEvent,
+      message_id: "om_direct_message",
+      reply_to: "om_notice",
+      root_id: undefined,
+      content: "这是一条没有回复任何卡片的新消息",
+    }),
+    "ignored_untrusted",
+  );
+  assert.deepEqual(fixture.writes, []);
+  assert.deepEqual(fixture.sessionLookups, []);
+  assert.equal(fixture.processed.size, 0);
 });
 
 test("routes a bound pane notification reply to its original inactive Codex thread", async () => {
@@ -329,6 +353,7 @@ test("rejects messages that are not a trusted supported private reply", async ()
     { message_type: "image" },
     { message_type: "post", content: "bad\x1b[31m" },
     { reply_to: undefined },
+    { root_id: undefined },
     { chat_id: "oc_other" },
     { content: "bad\x1b[31m" },
     { content: "" },

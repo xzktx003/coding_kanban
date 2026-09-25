@@ -714,7 +714,11 @@ export function MobileFileBrowser({
         </label>
       </div>
 
-      <div aria-busy={loading} className="mobile-file-list">
+      <div
+        aria-busy={loading}
+        className="mobile-file-list"
+        onScroll={cancelFileLongPress}
+      >
         {loading && entries.length === 0 ? (
           <div className="mobile-file-browser-state">正在读取目录...</div>
         ) : error ? (

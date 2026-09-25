@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -69,7 +69,10 @@ test("adds a tiny records callback without exposing session identity", () => {
     1_000,
   );
   for (const card of cards) {
-    const button = card.body.elements.at(-1);
+    const row = card.body.elements.at(-1);
+    assert.equal(row.tag, "column_set");
+    assert.equal(row.flex_mode, "none");
+    const button = row.columns[0].elements[0];
     assert.equal(button.tag, "button");
     assert.equal(button.size, "tiny");
     assert.equal(button.width, "default");
@@ -82,6 +85,80 @@ test("adds a tiny records callback without exposing session identity", () => {
     ]);
     assert.deepEqual(Object.keys(button.behaviors[0].value), ["action"]);
   }
+});
+
+test("adds quick reply before records with a fixed callback payload", () => {
+  const [card] = buildCompletionCards({
+    ...completion,
+    "agent-kind": "codex",
+    "records-available": true,
+    "quick-replies-available": true,
+  });
+  const row = card.body.elements.at(-1);
+  assert.equal(row.tag, "column_set");
+  assert.equal(row.flex_mode, "none");
+  const buttons = row.columns.map((column) => column.elements[0]);
+  assert.equal(buttons[0].text.content, "快捷回复");
+  assert.equal(buttons[0].size, "tiny");
+  assert.equal(buttons[0].width, "default");
+  assert.deepEqual(buttons[0].behaviors, [
+    {
+      type: "callback",
+      value: { action: "kanban_completion_quick_reply" },
+    },
+  ]);
+  assert.deepEqual(Object.keys(buttons[0].behaviors[0].value), ["action"]);
+  assert.equal(buttons[1].text.content, "查看完整记录");
+});
+
+test("keeps quick reply and records together in the final footer row", () => {
+  const [card] = buildCompletionCards({
+    ...completion,
+    "agent-kind": "codex",
+    "records-available": true,
+    "quick-replies-available": true,
+    "referenced-files": [
+      { path: "src/app.ts", line: 12 },
+      { path: "docs/usage.md" },
+    ],
+  });
+  const rows = card.body.elements.filter(
+    (element) =>
+      element.tag === "column_set" &&
+      element.columns?.some((column) =>
+        column.elements.some((child) => child.tag === "button"),
+      ),
+  );
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].flex_mode, "none");
+  assert.deepEqual(
+    rows[0].columns.map((column) => column.elements[0].text.content),
+    ["查看 app.ts:12"],
+  );
+  assert.equal(rows[1].flex_mode, "none");
+  assert.deepEqual(
+    rows[1].columns.map((column) => column.elements[0].text.content),
+    ["查看 usage.md"],
+  );
+  assert.equal(rows[2].flex_mode, "none");
+  assert.deepEqual(
+    rows[2].columns.map((column) => column.elements[0].text.content),
+    ["快捷回复", "查看完整记录"],
+  );
+  assert.equal(card.body.elements.at(-1), rows[2]);
+});
+
+test("does not render quick replies for non-Codex notifications", () => {
+  const [card] = buildCompletionCards({
+    ...completion,
+    "agent-kind": "claude",
+    "records-available": true,
+    "quick-replies-available": true,
+  });
+  const serialized = JSON.stringify(card);
+  assert.doesNotMatch(serialized, /快捷回复/);
+  assert.doesNotMatch(serialized, /kanban_completion_quick_reply/);
+  assert.match(serialized, /查看完整记录/);
 });
 
 test("preserves exact formula source across Unicode chunking", () => {
@@ -418,6 +495,20 @@ test("adds tiny callback buttons for trusted referenced files", () => {
   assert.match(serialized, /kanban_completion_file/);
   assert.match(serialized, /"reference":0/);
   assert.match(serialized, /"reference":1/);
+});
+
+test("shows the read-only transcript button for a bound Claude completion", () => {
+  const [card] = buildCompletionCards({
+    ...completion,
+    "agent-kind": "claude",
+    "records-available": true,
+    "transcript-agent-kind": "claude",
+    "transcript-session-id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  });
+  const serialized = JSON.stringify(card);
+  assert.match(serialized, /Claude 任务完成/);
+  assert.match(serialized, /查看完整记录/);
+  assert.match(serialized, /kanban_completion_records/);
 });
 
 test("uploads a safe local image and embeds it in the private completion card", async () => {
@@ -856,4 +947,61 @@ test("accepts only the lark-cli ok=true success envelope", () => {
   assert.throws(() => parseLarkCliResponse("not-json"), {
     message: /valid JSON/i,
   });
+});
+
+test("adds view buttons for trusted files outside the session directory", () => {
+  const parent = mkdtempSync(join(tmpdir(), "kanban-notify-trust-"));
+  const session = join(parent, "session");
+  const paper = join(parent, "paper.pdf");
+  try {
+    mkdirSync(session);
+    writeFileSync(paper, "pdf");
+    const [card] = buildCompletionCards({
+      ...completion,
+      cwd: session,
+      "records-available": true,
+      "referenced-files": [
+        { path: paper },
+        { path: "/etc/passwd" },
+        { path: join(parent, ".env") },
+        { path: "src/app.ts", line: 3 },
+      ],
+    });
+    const serialized = JSON.stringify(card);
+    assert.match(serialized, /查看 paper\.pdf/);
+    assert.match(serialized, /查看 app\.ts:3/);
+    assert.doesNotMatch(serialized, /passwd/);
+    assert.doesNotMatch(serialized, /查看 \.env/);
+    assert.deepEqual(
+      [...serialized.matchAll(/"reference":(\d+)/g)].map((match) =>
+        Number(match[1]),
+      ),
+      [0, 1],
+    );
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test("adds a view button for a home file outside the session directory", () => {
+  const homeRoot = mkdtempSync(join(homedir(), "kanban-notify-home-"));
+  const session = join(homeRoot, "session");
+  const paper = join(homeRoot, "papers", "result.pdf");
+  try {
+    mkdirSync(join(homeRoot, "papers"), { recursive: true });
+    mkdirSync(session);
+    writeFileSync(paper, "pdf");
+    const [card] = buildCompletionCards({
+      ...completion,
+      cwd: session,
+      "records-available": true,
+      "referenced-files": [{ path: paper }, { path: "/etc/passwd" }],
+    });
+    const serialized = JSON.stringify(card);
+    assert.match(serialized, /查看 result\.pdf/);
+    assert.doesNotMatch(serialized, /passwd/);
+    assert.match(serialized, /"reference":0/);
+  } finally {
+    rmSync(homeRoot, { recursive: true, force: true });
+  }
 });

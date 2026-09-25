@@ -1,4 +1,14 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import Fastify from "fastify";
@@ -73,6 +83,57 @@ test("manual reconnect clears local tmux input state before replacing the PTY", 
     `cleanup-end:${session.id}`,
     `reconnect-local:${session.id}`,
   ]);
+});
+
+test("remote reconnect still attaches when tmux lacks terminal-features", async () => {
+  const registry = new AgentSessionRegistry();
+  const session = registry.register({
+    workspaceId: "remote",
+    sourceType: "remote-connect",
+    agentKind: "node",
+    displayName: "24_hermes",
+    sshTarget: { host: "remote.example.test", username: "developer" },
+    transportRef: { tmuxSession: "24_hermes", tmuxPane: "%0" },
+  });
+  let remoteCommand = "";
+  await reconnectRegisteredAgentSession(session.id, {
+    registry,
+    tmuxAdapter: { getCaptureLines: () => 5_000 },
+    localTmuxInputRouter: { clear: async () => {} },
+    ptyRuntimeManager: {
+      reconnectLocal: () => {
+        throw new Error("unexpected local reconnect");
+      },
+      reconnectRemote: (_id, input) => {
+        remoteCommand = input.remoteCommand;
+        return registry.get(session.id);
+      },
+    },
+  });
+
+  const directory = mkdtempSync(join(tmpdir(), "kanban-old-tmux-"));
+  try {
+    const fakeTmux = join(directory, "tmux");
+    const callLog = join(directory, "calls.log");
+    writeFileSync(
+      fakeTmux,
+      '#!/bin/sh\nprintf "%s\\n" "$*" >> "$TMUX_CALL_LOG"\ncase "$*" in *terminal-features*) exit 1;; esac\n',
+    );
+    chmodSync(fakeTmux, 0o755);
+    const result = spawnSync("sh", ["-c", remoteCommand], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${directory}:${process.env.PATH ?? ""}`,
+        TMUX_CALL_LOG: callLog,
+      },
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(readFileSync(callLog, "utf8"), /attach -t 24_hermes/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 async function buildRouteApp(events: string[]) {
