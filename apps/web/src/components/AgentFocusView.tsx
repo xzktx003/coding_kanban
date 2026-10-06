@@ -43,6 +43,7 @@ import {
   closeTerminalMonitorSlotWithReplacement,
   findFirstTerminalMonitorReplacementSession,
   findNextOccupiedTerminalMonitorSlot,
+  getTerminalMonitorLayoutCapacity,
   getTerminalMonitorSlotIds,
   getTerminalPaneContextPrimaryActionLabel,
   normalizeTerminalMonitorGroupOrder,
@@ -361,7 +362,6 @@ export function AgentFocusView({
     null,
   );
   const pageSettingsRef = useRef<HTMLDivElement | null>(null);
-  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
   const [imageDraft, setImageDraft] = useState<CodexImageDraft | null>(null);
   const [imageMessage, setImageMessage] = useState(DEFAULT_CODEX_IMAGE_MESSAGE);
   const [imagePreviewUrl, setImagePreviewUrl] = useState("");
@@ -385,7 +385,6 @@ export function AgentFocusView({
     useState<TerminalPaneContextMenuState | null>(null);
   const [restorableTerminalMonitorLayout, setRestorableTerminalMonitorLayout] =
     useState<TerminalMonitorLayoutSnapshot | null>(null);
-  const layoutMenuRef = useRef<HTMLDivElement | null>(null);
   const paneContextMenuRef = useRef<HTMLDivElement | null>(null);
   const dragPreviewElementRef = useRef<HTMLElement | null>(null);
   const pendingTerminalKeysRef = useRef<PendingTerminalKeyEvent[]>([]);
@@ -781,16 +780,6 @@ export function AgentFocusView({
     : filteredSidebarSessions.length;
   const sidebarScrollMode =
     sidebarRenderedUnitCount > FOCUS_SIDEBAR_SCROLL_THRESHOLD;
-  const activeLayoutOption =
-    TERMINAL_MONITOR_LAYOUT_OPTIONS.find(
-      (option) => option.mode === terminalLayoutMode,
-    ) ?? TERMINAL_MONITOR_LAYOUT_OPTIONS[0]!;
-  const activeArrangementLabel = groupArrangementEnabled
-    ? `分组：${selectedArrangementGroup.name}`
-    : "自由排列";
-  const activeArrangementCount = groupArrangementEnabled
-    ? groupArrangementSessions.length
-    : activeLayoutOption.capacity;
   const canRestoreMultiPaneLayout =
     !groupArrangementEnabled &&
     terminalLayoutMode === "single" &&
@@ -876,19 +865,12 @@ export function AgentFocusView({
   }, []);
 
   useEffect(() => {
-    if (!layoutMenuOpen && !pageSettingsPageId) {
+    if (!pageSettingsPageId) {
       return;
     }
 
     function handleDocumentMouseDown(event: MouseEvent) {
       const target = event.target as Node | null;
-      if (
-        target &&
-        layoutMenuRef.current &&
-        !layoutMenuRef.current.contains(target)
-      ) {
-        setLayoutMenuOpen(false);
-      }
       if (
         target &&
         pageSettingsRef.current &&
@@ -900,7 +882,6 @@ export function AgentFocusView({
 
     function handleDocumentKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setLayoutMenuOpen(false);
         setPageSettingsPageId(null);
       }
     }
@@ -911,7 +892,7 @@ export function AgentFocusView({
       document.removeEventListener("mousedown", handleDocumentMouseDown);
       document.removeEventListener("keydown", handleDocumentKeyDown);
     };
-  }, [layoutMenuOpen, pageSettingsPageId]);
+  }, [pageSettingsPageId]);
 
   useEffect(() => {
     if (!paneContextMenu) {
@@ -1612,7 +1593,6 @@ export function AgentFocusView({
     setTerminalLayoutMode(mode);
     setRestorableTerminalMonitorLayout(null);
     setClosedSlotIds(new Set());
-    setLayoutMenuOpen(false);
     const slotIds = getTerminalMonitorSlotIds(mode);
     if (!slotIds.includes(activeSlotId)) {
       setActiveSlotId(slotIds[0] ?? DEFAULT_TERMINAL_MONITOR_SLOT_ID);
@@ -1797,7 +1777,6 @@ export function AgentFocusView({
     );
     setTerminalPageNameDraft(page?.name ?? "");
     setTerminalPageNameError(null);
-    setLayoutMenuOpen(false);
     setPageSettingsPageId(pageId);
   }
 
@@ -1829,7 +1808,6 @@ export function AgentFocusView({
   function handleManualArrangementMode() {
     setTerminalArrangementMode("manual");
     setTerminalArrangementGroupId(null);
-    setLayoutMenuOpen(false);
   }
 
   function handleGroupArrangementMode(groupId: string) {
@@ -1867,7 +1845,6 @@ export function AgentFocusView({
       setTerminalLayoutMode(DEFAULT_GROUP_TERMINAL_LAYOUT_MODE);
     }
     setClosedSlotIds(new Set());
-    setLayoutMenuOpen(false);
   }
 
   function handleFocusViewPointerDownCapture(
@@ -2099,94 +2076,6 @@ export function AgentFocusView({
                 ✎ 改名
               </button>
               <div
-                aria-label="终端监控布局"
-                className="focus-layout-menu"
-                ref={layoutMenuRef}
-              >
-                <button
-                  aria-expanded={layoutMenuOpen}
-                  aria-haspopup="menu"
-                  className="focus-layout-menu-trigger"
-                  onClick={() => setLayoutMenuOpen((current) => !current)}
-                  title="选择终端监控屏幕布局"
-                  type="button"
-                >
-                  屏幕布局
-                  <span className="focus-layout-menu-current">
-                    {activeArrangementLabel} · {activeLayoutOption.label}
-                  </span>
-                  <span className="focus-layout-menu-count">
-                    {activeArrangementCount}
-                  </span>
-                  <span
-                    aria-hidden="true"
-                    className="focus-layout-menu-chevron"
-                  >
-                    ▾
-                  </span>
-                </button>
-                {layoutMenuOpen && (
-                  <div className="focus-layout-menu-options" role="menu">
-                    <div className="focus-layout-menu-section-label">
-                      窗口排列
-                    </div>
-                    <button
-                      aria-checked={!groupArrangementEnabled}
-                      className={`focus-layout-option${!groupArrangementEnabled ? " focus-layout-option--active" : ""}`}
-                      onClick={handleManualArrangementMode}
-                      role="menuitemradio"
-                      type="button"
-                    >
-                      <span>自由排列</span>
-                      <small>按槽位选择</small>
-                    </button>
-                    {arrangementGroups.length > 0 && (
-                      <>
-                        <div className="focus-layout-menu-section-label">
-                          分组排列
-                        </div>
-                        {arrangementGroups.map((group) => (
-                          <button
-                            key={group.id}
-                            aria-checked={
-                              groupArrangementEnabled &&
-                              terminalArrangementGroupId === group.id
-                            }
-                            className={`focus-layout-option${groupArrangementEnabled && terminalArrangementGroupId === group.id ? " focus-layout-option--active" : ""}`}
-                            onClick={() => handleGroupArrangementMode(group.id)}
-                            role="menuitemradio"
-                            type="button"
-                          >
-                            <span>分组：{group.name}</span>
-                            <strong>{group.sessions.length}</strong>
-                          </button>
-                        ))}
-                      </>
-                    )}
-                    <div className="focus-layout-menu-section-label">
-                      屏幕布局
-                    </div>
-                    {TERMINAL_MONITOR_LAYOUT_OPTIONS.map((option) => (
-                      <button
-                        key={option.mode}
-                        aria-checked={terminalLayoutMode === option.mode}
-                        className={`focus-layout-option${terminalLayoutMode === option.mode ? " focus-layout-option--active" : ""}`}
-                        disabled={
-                          groupArrangementEnabled && option.mode === "single"
-                        }
-                        onClick={() => handleLayoutModeChange(option.mode)}
-                        role="menuitemradio"
-                        title={`${option.label}监控 ${option.capacity} 个终端`}
-                        type="button"
-                      >
-                        <span>{option.label}</span>
-                        <strong>{option.capacity}</strong>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div
                 aria-label="显示页面"
                 className="focus-page-bar"
                 data-testid="focus-page-bar"
@@ -2211,7 +2100,10 @@ export function AgentFocusView({
                         title={isActive ? "再次点击调整此页" : page.name}
                         type="button"
                       >
-                        {page.name}
+                        <span className="focus-page-tab-name">{page.name}</span>
+                        <span className="focus-page-tab-count">
+                          {getTerminalMonitorLayoutCapacity(page.state.mode)}
+                        </span>
                       </button>
                       {settingsOpen && (
                         <div

@@ -430,16 +430,16 @@ test("builds a sanitized Card 2.0 without forwarding the prompt or full path", (
   assert.equal(card.header.title.content, "Coding Kanban · Codex 任务完成");
   assert.equal(
     card.header.subtitle.content,
-    "项目：coding_kanban　会话：session-one",
+    `项目：${repositoryRoot.split("/").at(-1)}　会话：session-one`,
   );
   assert.equal(card.body.elements[0].tag, "collapsible_panel");
   assert.equal(card.body.elements[0].expanded, true);
   const serialized = JSON.stringify(card);
   const output = card.body.elements[0].elements[0].content;
   assert.equal(card.body.elements[0].elements[0].tag, "markdown");
-  assert.match(serialized, /coding_kanban/);
+  assert.ok(serialized.includes(repositoryRoot.split("/").at(-1)));
   assert.match(output, /^Done!/);
-  assert.match(output, /coding_kanban\/scripts\/notify\.mjs/);
+  assert.ok(output.includes(`${repositoryRoot.split("/").at(-1)}/scripts/notify.mjs`));
   assert.doesNotMatch(serialized, /do not forward this private prompt/);
   assert.doesNotMatch(serialized, /data01\/home/);
   assert.doesNotMatch(serialized, /\u001b|\u0000/);

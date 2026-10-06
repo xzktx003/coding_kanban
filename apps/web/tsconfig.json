@@ -2,7 +2,19 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "types": ["vite/client"]
+    "types": [
+      "vite/client",
+      "node"
+    ],
+    "paths": {
+      "@session/*": [
+        "apps/web/src/session-mode/*"
+      ]
+    }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "vite.config.ts"
+  ]
 }

@@ -1,3 +1,4 @@
+import { SessionRuntimeManager } from "./services/session-runtime-manager.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -59,7 +60,14 @@ async function main(): Promise<void> {
         ".dev-runtime/feishu-quick-replies.json",
     ),
   });
+  const sessionRuntime = new SessionRuntimeManager(repositoryRoot);
+  let sessionRuntimeOrigin: string | undefined;
+  try { sessionRuntimeOrigin = await sessionRuntime.start(); }
+  catch (error) { console.error("[session-mode]", error instanceof Error ? error.message : error); }
   const { app } = buildServer({
+    sessionRuntimeOrigin,
+    ensureSessionRuntime: () => sessionRuntime.start(),
+    sessionAttachmentRoot: resolve(process.env.SESSION_DATA_HOME || resolve(repositoryRoot, ".dev-runtime/session-mode"), "uploads"),
     appVersionService: new AppVersionService({
       sourceRoot: appSourceRoot,
     }),

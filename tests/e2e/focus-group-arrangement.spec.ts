@@ -72,7 +72,7 @@ test("group arrangement reorders by dragging titles and renames the page", async
   await card.dblclick();
   await expect(page.locator(".focus-main-name")).toContainText(firstName);
 
-  const pageTab = page.getByTestId("focus-page-tab-terminal-monitor-page-1");
+  const pageTab = page.locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]');
   await pageTab.click();
   const arrangement = page.getByTestId("focus-page-arrangement-group-drag");
   await expect(arrangement).toBeVisible();

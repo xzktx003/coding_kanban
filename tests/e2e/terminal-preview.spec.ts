@@ -999,7 +999,9 @@ test("complete transcript follows the selected monitor pane", async ({
     })
     .dblclick();
   await expect(page.locator(".focus-main")).toBeVisible();
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
   const rightPane = page.locator(
@@ -1046,7 +1048,9 @@ test("selects a top-middle-bottom three-pane monitor layout", async ({
     .dblclick();
   await expect(page.locator(".focus-main")).toBeVisible();
 
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await expect(
     page.getByRole("menuitemradio", { name: /上中下三屏/ }),
   ).toBeVisible();
@@ -1316,7 +1320,9 @@ test("activating the other monitor pane keeps both terminal instances mounted", 
     })
     .dblclick();
   await expect.poll(() => focusRequestSessionIds).toHaveLength(1);
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
   const leftPane = page.locator(
@@ -1470,7 +1476,9 @@ test("split layouts do not render unavailable sessions as black live panes", asy
       has: page.locator(".grid-card-name", { hasText: "Focused Session" }),
     })
     .dblclick();
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
   const unavailablePane = page.locator(
@@ -1510,7 +1518,9 @@ test("split layouts fill available sessions before stale sessions", async ({
       has: page.locator(".grid-card-name", { hasText: "Focused Session" }),
     })
     .dblclick();
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
   const layout = page.locator(".focus-terminal-layout--dual");
@@ -1572,7 +1582,9 @@ test("multi-pane layout bounds initial replays and keeps queued panes visible", 
       has: page.locator(".grid-card-name", { hasText: "Multi Load 1" }),
     })
     .dblclick();
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /八屏/ }).click();
 
   const layout = page.locator(".focus-terminal-layout--eight");
@@ -1619,7 +1631,9 @@ test("manual layout switches reuse terminal sockets already opened on this page"
       has: page.locator(".grid-card-name", { hasText: "Retained Layout 1" }),
     })
     .dblclick();
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /六屏/ }).click();
 
   const layout = page.locator(".focus-terminal-layout");
@@ -1628,12 +1642,16 @@ test("manual layout switches reuse terminal sockets already opened on this page"
     .poll(() => terminalWebSocketUrls(page), { timeout: 8_000 })
     .toHaveLength(6);
 
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /单屏/ }).click();
   await expect(layout.locator("[data-terminal-pane-session]")).toHaveCount(1);
   await expect(layout.locator(".focus-terminal-pane:visible")).toHaveCount(1);
 
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /六屏/ }).click();
   await expect(layout.locator("[data-terminal-pane-session]")).toHaveCount(6);
   await expect(layout.locator(".focus-terminal-pane:visible")).toHaveCount(6);
@@ -1659,7 +1677,9 @@ test("narrow multi-pane layouts preserve terminal height and scroll the pane lis
       has: page.locator(".grid-card-name", { hasText: "Narrow Layout 1" }),
     })
     .dblclick();
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /六屏/ }).click();
 
   const layout = page.locator(".focus-terminal-layout--six");
@@ -2156,7 +2176,9 @@ test("group arrangement renders only one group and scrolls through overflow", as
     })
     .dblclick();
 
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /分组：研究/ }).click();
 
   const layout = page.locator(
@@ -2192,7 +2214,9 @@ test("group arrangement renders only one group and scrolls through overflow", as
   }));
   expect(scrollState.scrollTop).toBeLessThan(scrollState.maxScrollTop);
 
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await expect(
     page.getByRole("menuitemradio", { name: /分组：研究/ }),
   ).toHaveAttribute("aria-checked", "true");
@@ -2918,7 +2942,9 @@ test("focus monitor panes accept dragged sidebar sessions and swap dragged panes
       has: page.locator(".grid-card-name", { hasText: "Alpha Session" }),
     })
     .dblclick();
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
   const firstPane = page.locator(
@@ -3002,7 +3028,9 @@ test("links sidebar cards to monitor panes without moving monitored sessions", a
       has: page.locator(".grid-card-name", { hasText: "alpha" }),
     })
     .dblclick();
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
   const firstPane = page.locator(
@@ -3105,7 +3133,9 @@ test("focus sidebar double-click replaces the active monitor pane only once", as
       has: page.locator(".grid-card-name", { hasText: "Alpha Session" }),
     })
     .dblclick();
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
   const firstPane = page.locator(
@@ -3223,7 +3253,9 @@ test("focus header follows the active monitor terminal session", async ({
       has: page.locator(".grid-card-name", { hasText: "Alpha Session" }),
     })
     .dblclick();
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
   await expect(page.locator(".focus-main-name")).toHaveText("Alpha Session");
@@ -3272,7 +3304,9 @@ test("focus sidebar drag uses a single preview for the dragged session", async (
       has: page.locator(".grid-card-name", { hasText: "Alpha Session" }),
     })
     .dblclick();
-  await page.getByRole("button", { name: /屏幕布局/ }).click();
+  await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
   await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
   await page.evaluate(() => {

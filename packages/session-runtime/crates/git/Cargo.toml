@@ -1,0 +1,23 @@
+[package]
+name = "codexia-git"
+version.workspace = true
+edition.workspace = true
+
+workspace = "../../"
+
+[lib]
+name = "codexia_git"
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+log = { workspace = true }
+dirs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+gix = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

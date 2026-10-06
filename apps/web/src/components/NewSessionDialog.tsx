@@ -10,6 +10,7 @@ import type {
 import {
   fileOperation,
   getDirectorySuggestions,
+  getWorkbenchProjects,
   launchPtyAgent,
   launchSshPtyAgent,
   listFiles,
@@ -112,6 +113,13 @@ export function NewSessionDialog({
   onClose,
   onLaunched,
 }: NewSessionDialogProps) {
+  const [sharedProjects, setSharedProjects] = useState<string[]>([]);
+  useEffect(() => {
+    if (!open || host?.type !== "local") return;
+    let active = true;
+    getWorkbenchProjects().then(result => { if (active) setSharedProjects(result.projects); }).catch(() => {});
+    return () => { active = false; };
+  }, [open, host]);
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState("shell");
   const [newDir, setNewDir] = useState("");
@@ -773,6 +781,7 @@ export function NewSessionDialog({
 
           <label className="new-session-field new-session-field--wide">
             <span className="new-session-label">工作目录</span>
+            {host.type === "local" && sharedProjects.length > 0 && <select aria-label="共享项目" className="drawer-input" value="" onChange={event => setNewDir(event.target.value)}><option value="">从已有项目选择…</option>{sharedProjects.map(path => <option key={path} value={path}>{path}</option>)}</select>}
             <div className="new-session-dir-wrap">
               <div className="new-session-dir-input-row">
                 <input

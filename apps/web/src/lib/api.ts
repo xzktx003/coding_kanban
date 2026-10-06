@@ -1093,3 +1093,5 @@ export function addDiscoveredTmux(
     body: JSON.stringify(input),
   });
 }
+
+export function getWorkbenchProjects(): Promise<{ projects: string[] }> { return request('/api/workbench/projects'); }

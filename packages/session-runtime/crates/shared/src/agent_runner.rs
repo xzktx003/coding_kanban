@@ -1,0 +1,38 @@
+use std::sync::Arc;
+
+/// Reports the agent-side run key (codex thread id / cc session id) as soon as it
+/// exists, so the caller can record the run before it finishes.
+pub type RunStartedHook = Arc<dyn Fn(&str) + Send + Sync>;
+
+/// One agent invocation for one working directory.
+pub struct AgentRunSpec {
+    pub task_id: String,
+    pub task_name: String,
+    pub prompt: String,
+    pub model: String,
+    pub model_provider: String,
+    pub cwd: Option<String>,
+    /// The bot to run as, for the `bot` agent. Other agents ignore it.
+    pub bot_id: Option<String>,
+    pub on_started: RunStartedHook,
+}
+
+/// Whether the final status is known once `start_run` returns.
+pub enum AgentRunOutcome {
+    /// The agent finished the work; the caller may mark the run completed.
+    Finished,
+    /// The work was only handed off; completion arrives out of band.
+    Detached,
+}
+
+/// An agent that automation can drive. Implementations live in the agent crates:
+/// - `CodexAgentRunner` in `codexia-codex`
+/// - `CcAgentRunner` in `codexia-cc`
+pub trait AgentRunner: Send + Sync {
+    /// Identifier stored on the task (e.g. "codex", "cc").
+    fn agent(&self) -> &'static str;
+
+    fn start_run<'life, 'run>(&'life self, spec: AgentRunSpec)
+        -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<AgentRunOutcome, String>> + Send + 'run>>
+    where 'life: 'run, Self: 'run;
+}

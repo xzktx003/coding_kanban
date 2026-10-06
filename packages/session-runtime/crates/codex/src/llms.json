@@ -1,0 +1,112 @@
+{
+  "object": "list",
+  "data": [
+    {
+      "model_provider": "atlascloud",
+      "base_url": "https://api.atlascloud.ai/v1",
+      "api_key_url": "https://www.atlascloud.ai/console/api-keys",
+      "signup_url": "https://www.atlascloud.ai?ref=FRZY3G",
+      "auto_discover": false,
+      "env_key": "ATLASCLOUD_API_KEY",
+      "models": [
+        {
+          "id": "openai/gpt-5.5",
+          "context_length": 1050000
+        },
+        {
+          "id": "openai/gpt-5.4",
+          "context_length": 1050000
+        }
+      ]
+    },
+    {
+      "model_provider": "ollama",
+      "base_url": "http://localhost:11434/v1",
+      "signup_url": "https://ollama.com/signup",
+      "env_key": "",
+      "auto_discover": true
+    },
+    {
+      "model_provider": "openrouter",
+      "base_url": "https://openrouter.ai/api/v1",
+      "api_key_url": "https://openrouter.ai/workspaces/default/keys",
+      "signup_url": "https://openrouter.ai",
+      "env_key": "OPENROUTER_API_KEY",
+      "auto_discover": false,
+      "models": [
+        {
+          "id": "openai/gpt-5.5",
+          "context_length": 1050000
+        },
+        {
+          "id": "openai/gpt-5.4",
+          "context_length": 1050000
+        }
+      ]
+    },
+    {
+      "model_provider": "nvidia",
+      "base_url": "https://integrate.api.nvidia.com/v1",
+      "api_key_url": "https://build.nvidia.com/openai/gpt-oss-20b",
+      "signup_url": "https://build.nvidia.com",
+      "env_key": "NVIDIA_API_KEY",
+      "auto_discover": false,
+      "models": [
+        {
+          "id": "nvidia/nemotron-3-ultra-550b-a55b",
+          "context_length": 1000000
+        }
+      ]
+    },
+    {
+      "model_provider": "minimax",
+      "base_url": "https://api.minimax.io/v1",
+      "api_key_url": "https://platform.minimax.io",
+      "signup_url": "https://platform.minimax.io",
+      "env_key": "MINIMAX_API_KEY",
+      "auto_discover": false,
+      "models": [
+        {
+          "id": "MiniMax-M3",
+          "context_length": 1000000
+        },
+        {
+          "id": "MiniMax-M2.7",
+          "context_length": 204800
+        }
+      ]
+    },
+    {
+      "model_provider": "minimax_cn",
+      "base_url": "https://api.minimaxi.com/v1",
+      "api_key_url": "https://platform.minimaxi.com",
+      "signup_url": "https://platform.minimaxi.com",
+      "env_key": "MINIMAX_API_KEY",
+      "auto_discover": false,
+      "models": [
+        {
+          "id": "MiniMax-M3",
+          "context_length": 1000000
+        },
+        {
+          "id": "MiniMax-M2.7",
+          "context_length": 204800
+        }
+      ]
+    },
+    {
+      "model_provider": "lmstudio",
+      "base_url": "http://localhost:1234/v1",
+      "signup_url": "https://lmstudio.ai",
+      "env_key": "",
+      "auto_discover": true
+    },
+    {
+      "model_provider": "custom",
+      "base_url": "http://localhost:8000/v1",
+      "signup_url": "",
+      "env_key": "CUSTOM_API_KEY",
+      "auto_discover": true
+    }
+  ]
+}

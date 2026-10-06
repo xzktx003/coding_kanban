@@ -8,6 +8,7 @@ dist
 certs/
 test-results/
 .worktrees/
+.claude/worktrees/
 coverage
 *.log
 .dev-runtime

@@ -10,7 +10,11 @@
     "check": "pnpm --filter shared build && pnpm --filter server build && pnpm --filter web build",
     "e2e": "playwright test",
     "test": "pnpm --recursive test && node --test scripts/*.test.mjs",
-    "format": "pnpm --recursive format"
+    "format": "pnpm --recursive format",
+    "session:build": "node scripts/build-session-runtime.mjs build",
+    "session:check": "node scripts/build-session-runtime.mjs check",
+    "session:test": "node scripts/build-session-runtime.mjs test",
+    "session:clippy": "node scripts/build-session-runtime.mjs clippy"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",

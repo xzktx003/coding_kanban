@@ -113,12 +113,12 @@ kill_from_pid_file() {
   local pid
   pid="$(cat "$pid_file")"
 
-  if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -0 -- "$pid" 2>/dev/null; then
+  if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && pid_belongs_to_repo "$pid" && kill -0 -- "$pid" 2>/dev/null; then
     log "Stopping ${name} process ${pid}"
     kill -- "$pid" 2>/dev/null || true
     sleep 0.3
 
-    if kill -0 -- "$pid" 2>/dev/null; then
+    if pid_belongs_to_repo "$pid" && kill -0 -- "$pid" 2>/dev/null; then
       kill -9 -- "$pid" 2>/dev/null || true
     fi
   fi
@@ -140,7 +140,7 @@ kill_repo_dev_server_process_groups() {
     fi
 
     full_cmdline="$cmdline $rest"
-    if [[ "$full_cmdline" == *"$ROOT_DIR"* &&
+    if pid_belongs_to_repo "$pid" && [[ "$full_cmdline" == *"$ROOT_DIR"* &&
       ( ( "$full_cmdline" == *"tsx"* &&
           "$full_cmdline" == *"watch"* &&
           "$full_cmdline" == *"src/index.ts"* ) ||
@@ -173,12 +173,8 @@ pid_belongs_to_repo() {
   local cmdline
 
   cwd="$(readlink "/proc/${pid}/cwd" 2>/dev/null || true)"
-  if [[ "$cwd" == "$ROOT_DIR" || "$cwd" == "$ROOT_DIR/"* ]]; then
-    return 0
-  fi
-
-  cmdline="$(tr '\0' ' ' <"/proc/${pid}/cmdline" 2>/dev/null || true)"
-  if [[ "$cmdline" == *"$ROOT_DIR"* ]]; then
+  # A child worktree is an independent service, even when nested in ROOT_DIR.
+  if [[ "$cwd" == "$ROOT_DIR" || "$cwd" == "$SERVER_APP_DIR" || "$cwd" == "$WEB_APP_DIR" ]]; then
     return 0
   fi
 
@@ -232,13 +228,11 @@ kill_listeners_on_port() {
     fi
   done
 
-  if (( ${#repo_pids[@]} > 0 && ${#foreign_pids[@]} > 0 )); then
-    log "Freeing ${name} port ${port}: repo listeners ${repo_pids[*]}, foreign listeners ${foreign_pids[*]}"
-  elif (( ${#foreign_pids[@]} > 0 )); then
-    log "Freeing ${name} port ${port}: foreign listeners ${foreign_pids[*]}"
-  else
-    log "Freeing ${name} port ${port}: ${repo_pids[*]}"
+  if (( ${#foreign_pids[@]} > 0 )); then
+    log "Refusing to free ${name} port ${port}: foreign listeners ${foreign_pids[*]}"
+    return 1
   fi
+  log "Freeing ${name} port ${port}: ${repo_pids[*]}"
 
   kill -- "${pids[@]}" 2>/dev/null || true
   sleep 0.3
@@ -251,6 +245,9 @@ kill_listeners_on_port() {
   done < <(lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)
 
   if (( ${#pids[@]} > 0 )); then
+    for pid in "${pids[@]}"; do
+      if ! pid_belongs_to_repo "$pid"; then log "Refusing to free ${name} port ${port}: foreign listener ${pid}"; return 1; fi
+    done
     printf -v force_pid_list '%s, ' "${pids[@]}"
     force_pid_list="${force_pid_list%, }"
     log "Force killing ${name} port ${port}: ${force_pid_list}"

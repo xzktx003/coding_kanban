@@ -328,7 +328,7 @@ test("listener ownership ignores malformed lsof PID lines", () => {
   assert.equal(result.marker, "pid:101\n");
 });
 
-test("port reclaim ignores malformed lsof PID lines before kill", () => {
+test("port reclaim ignores malformed PIDs and refuses the foreign valid PID", () => {
   const result = runSourcedScript(String.raw`
     LSOF_STATE="$FAKE_REPO/lsof-state"
 
@@ -353,12 +353,9 @@ test("port reclaim ignores malformed lsof PID lines before kill", () => {
     kill_listeners_on_port backend 45678
   `);
 
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(
-    result.stdout,
-    /Freeing backend port 45678: foreign listeners 101/,
-  );
-  assert.equal(result.marker, "pid:101\nkill:-- 101\n");
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stdout, /Refusing to free backend port 45678: foreign listeners 101/);
+  assert.equal(result.marker, "pid:101\n");
 });
 
 test("restart-dev guards main from sourced execution", () => {
@@ -421,27 +418,10 @@ test("restart-dev does not fall back to HOST env var for server bind address", (
   );
 });
 
-test("restart-dev force reclaims listeners outside this repository", () => {
+test("restart-dev refuses listeners outside this repository", () => {
   assert.match(script, /pid_belongs_to_repo\(\)/);
-  assert.match(
-    script,
-    /Freeing \$\{name\} port \$\{port\}: foreign listeners \$\{foreign_pids\[\*\]\}/,
-  );
-  assert.match(script, /Force killing \$\{name\} port \$\{port\}/);
-  assert.doesNotMatch(script, /Refusing to free/);
-  assert.equal(script.match(/local pids=\(\)/g)?.length, 2);
-  assert.match(script, /for pid in "\$\{pids\[@\]\}"/);
-  assert.match(script, /kill -- "\$\{pids\[@\]\}"/);
-  assert.match(script, /kill -9 -- "\$\{pids\[@\]\}"/);
-});
-
-test("restart-dev signals only strictly positive pid-file values", () => {
-  assert.match(
-    script,
-    /\[\[ "\$pid" =~ \^\[1-9\]\[0-9\]\*\$ \]\] && kill -0 -- "\$pid"/,
-  );
-  assert.match(script, /kill -- "\$pid"/);
-  assert.match(script, /kill -9 -- "\$pid"/);
+  assert.match(script, /Refusing to free/);
+  assert.match(script, /pid_belongs_to_repo "\$pid" && kill -0/);
 });
 
 test("restart-dev checks target ports before stopping pid-file processes", () => {
@@ -504,4 +484,33 @@ test("restart-dev passes the session state and source root to the isolated backe
     script,
     /SESSION_STATE_PATH="\$SESSION_STATE_PATH" APP_SOURCE_ROOT="\$APP_SOURCE_ROOT"/,
   );
+});
+
+test('restart refuses foreign listeners without sending signals', () => {
+ const result = runSourcedScript(String.raw`
+   lsof() { printf '101\n'; }
+   pid_belongs_to_repo() { return 1; }
+   kill_listeners_on_port frontend 45678
+ `);
+ assert.notEqual(result.status, 0);
+ assert.doesNotMatch(result.marker, /kill/);
+ assert.match(result.stdout, /Refusing to free/);
+});
+
+test('worktree processes do not belong to the parent repository', () => {
+ const result = runSourcedScript(String.raw`
+   readlink() { printf '%s/.worktrees/session-mode/apps/server\n' "$ROOT_DIR"; }
+   pid_belongs_to_repo 101
+ `);
+ assert.equal(result.status, 1);
+});
+
+test('stale pid files cannot signal an unrelated process', () => {
+ const result = runSourcedScript(String.raw`
+   printf '101\n' >"$FAKE_REPO/stale.pid"
+   pid_belongs_to_repo() { return 1; }
+   kill_from_pid_file backend "$FAKE_REPO/stale.pid"
+ `);
+ assert.equal(result.status, 0);
+ assert.doesNotMatch(result.marker, /safety-kill/);
 });

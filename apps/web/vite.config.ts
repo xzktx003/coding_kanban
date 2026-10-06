@@ -5,6 +5,8 @@ import { resolve } from "node:path";
 
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
+import { sessionCssScope } from "../../scripts/session-css-scope.mjs";
 
 import {
   resolveHttpsFallbackRedirectLocation,
@@ -178,9 +180,12 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       react(),
+      tailwindcss(),
       vscodeWebviewHttpsSupportPlugin(httpsCaCertificate),
       httpFallbackPlugin(),
     ],
+    resolve: { alias: { "@session": resolve(__dirname, "src/session-mode") } },
+    css: { postcss: { plugins: [sessionCssScope()] } },
     server: {
       host: WEB_HOST,
       port: webConfig.webPort,

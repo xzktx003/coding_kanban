@@ -2,13 +2,30 @@
 
 ## 构建、测试与开发命令
 
+- `pnpm install`；首次启用会话模式先运行 `pnpm session:build`（需要 Rust stable 与 C/C++ 编译工具、CMake）。
+- `pnpm dev:restart`：按 `.env` 启动/恢复前后端；前端绑定 `0.0.0.0`。会话运行服务绑定 loopback，随后端热更新复用。
+- `pnpm check`：共享包、后端和前端类型检查及生产构建；`pnpm session:check`：Rust 运行层检查。
+- `pnpm test`：终端单测、迁移的会话 Vitest 单测及脚本测试；后端测试并发限制为 4，避免共享主机上的 tmux 测试争用。
+- `pnpm session:test`、`pnpm session:clippy`：运行层测试与严格 lint，测试使用独立的应用/CLI 数据目录。
+- `pnpm e2e`：浏览器测试；会话模式联调使用独立 `.env`、端口和 `SESSION_DATA_HOME`，详情见 `docs/session-mode-architecture.md`。
+
+
 ## 任务完成前的最低要求
 
 ## 编码风格与命名约定
 
 ## 前端约定
 
+- 终端模式位于原有 `apps/web/src`；迁移会话模式位于 `apps/web/src/session-mode`，别名 `@session`。
+- 两种模式保留各自挂载状态；迁移样式和 Portal 必须限定在 `.session-mode`，隐藏模式不得处理全局快捷键。
+
+
 ## 后端约定
+
+- Node 网关与运行服务管理位于 `apps/server/src`；独立 Rust 会话运行层位于 `packages/session-runtime`。
+- 应用数据由 `SESSION_DATA_HOME` 隔离；原生 CLI 登录目录沿用，禁止静默导入用户 Codexia 数据。
+- 不得因端口占用、过期 PID 或热更新而停止其他工作树/仓库的进程；运行服务重启不得重复创建仍存活的 Agent 服务。
+
 
 ## 测试约定
 

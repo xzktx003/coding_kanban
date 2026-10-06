@@ -1,3 +1,9 @@
 packages:
   - 'apps/*'
   - 'packages/*'
+onlyBuiltDependencies:
+  - node-pty
+  - esbuild
+  - "@swc/core"
+  - ssh2
+  - cpu-features

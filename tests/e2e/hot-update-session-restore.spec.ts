@@ -676,7 +676,9 @@ test("hot update restores stable managed sessions and the dual-pane workspace", 
     await expect(firstCard).toBeVisible({ timeout: 20_000 });
     await firstCard.dblclick();
 
-    await page.getByRole("button", { name: /屏幕布局/ }).click();
+    await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
     await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
     const firstPane = page.locator(

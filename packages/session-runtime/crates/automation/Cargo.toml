@@ -1,0 +1,21 @@
+[package]
+name = "codexia-automation"
+version.workspace = true
+edition.workspace = true
+
+workspace = "../../"
+
+[dependencies]
+log = { workspace = true }
+dirs = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+uuid = { workspace = true }
+dashmap = { workspace = true }
+chrono = { workspace = true }
+tokio-cron-scheduler = { workspace = true }
+codexia-shared = { workspace = true }
+codexia-db = { workspace = true }
+codexia-git = { workspace = true }

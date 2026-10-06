@@ -1,0 +1,236 @@
+.composer-suggestions {
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+  --composer-suggestion-height: 420px;
+  max-height: var(--composer-suggestion-height);
+  border: 1px solid
+    color-mix(in oklch, var(--foreground) 15%, var(--background));
+  border-radius: 14px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow:
+    0 16px 48px oklch(0.08 0.01 250 / 32%),
+    0 2px 8px oklch(0.08 0.01 250 / 15%);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.composer-suggestions-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  padding: 13px 15px 11px;
+  border-bottom: 1px solid var(--border);
+}
+.composer-suggestions-symbol {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 9px;
+  background: color-mix(in oklch, var(--primary) 12%, var(--popover));
+  color: var(--primary);
+  font:
+    600 19px ui-monospace,
+    monospace;
+}
+.composer-suggestions-heading strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+}
+.composer-suggestions-heading div > span {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.composer-suggestions-count {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font:
+    12px ui-monospace,
+    monospace;
+}
+.composer-suggestions-list {
+  padding: 5px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.composer-suggestion-option {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 57px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  background: transparent;
+  transition:
+    background-color 140ms ease-out,
+    border-color 140ms ease-out;
+}
+.composer-suggestion-option[data-selected="true"] {
+  background: color-mix(in oklch, var(--primary) 9%, var(--popover));
+  border-color: color-mix(in oklch, var(--primary) 23%, transparent);
+}
+.composer-suggestion-option:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.composer-suggestion-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--foreground) 5%, var(--popover));
+}
+.composer-suggestion-icon svg,
+.composer-suggestion-icon img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+.composer-suggestion-option[data-selected="true"] .composer-suggestion-icon {
+  color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 13%, var(--popover));
+}
+.composer-suggestion-text {
+  flex: 1;
+  min-width: 0;
+}
+.composer-suggestion-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+.composer-suggestion-command {
+  font-family: ui-monospace, monospace;
+}
+.composer-suggestion-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.composer-suggestion-tag {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 2px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 5px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+.composer-suggestions-footer {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+  padding: 9px 15px;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.composer-suggestions-footer span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.composer-suggestions-footer span:last-child {
+  margin-left: auto;
+}
+.composer-suggestions-footer kbd {
+  min-width: 17px;
+  padding: 1px 3px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  text-align: center;
+  font:
+    10px ui-monospace,
+    monospace;
+}
+.composer-suggestions-empty {
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+@media (max-width: 480px) {
+  .composer-suggestions-heading {
+    padding: 11px 12px;
+  }
+  .composer-suggestion-option {
+    gap: 9px;
+    padding: 9px 8px;
+  }
+  .composer-suggestions-footer {
+    padding: 9px 12px;
+    gap: 12px;
+  }
+}
+@media (max-height: 440px) {
+  .composer-suggestions-heading {
+    padding: 7px 12px;
+  }
+  .composer-suggestions-heading div > span {
+    display: none;
+  }
+  .composer-suggestions-symbol {
+    width: 24px;
+    height: 24px;
+    font-size: 16px;
+  }
+  .composer-suggestions-footer {
+    padding: 6px 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .composer-suggestion-option {
+    transition: none;
+  }
+}
+
+.composer-suggestion-option:hover:not([data-selected="true"]) {
+  background: color-mix(in oklch, var(--foreground) 4%, var(--popover));
+}
+.composer-suggestion-option[data-selected="true"] .composer-suggestion-name {
+  color: var(--primary);
+}
+
+@media (min-width: 481px) {
+  .composer-suggestion-description {
+    -webkit-line-clamp: 1;
+  }
+}
+
+@media (max-width: 480px) {
+  .composer-suggestions {
+    --composer-suggestion-height: 360px;
+  }
+}
+.composer-suggestions[data-compact="true"] .composer-suggestions-heading,
+.composer-suggestions[data-compact="true"] .composer-suggestions-footer {
+  display: none;
+}

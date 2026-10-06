@@ -847,7 +847,9 @@ test("file browser follows the active monitor terminal when the side panel is op
     );
 
     await focusSession(page, sessionAName);
-    await page.getByRole("button", { name: /屏幕布局/ }).click();
+    await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
     await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
     const drawerA = await openFileBrowserForFocusedSession(page);
@@ -905,7 +907,9 @@ test("open file browser retargets to a monitor terminal that never opened files 
     );
 
     await focusSession(page, sessionAName);
-    await page.getByRole("button", { name: /屏幕布局/ }).click();
+    await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
     await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
     const firstPane = page.locator(
@@ -965,7 +969,9 @@ test("file browser collapse state is controlled only by collapse buttons during 
     );
 
     await focusSession(page, sessionAName);
-    await page.getByRole("button", { name: /屏幕布局/ }).click();
+    await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
     await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
     const firstPane = page.locator(
@@ -1032,7 +1038,9 @@ test("file browser stays mounted and retargets during repeated monitor terminal 
     );
 
     await focusSession(page, sessionAName);
-    await page.getByRole("button", { name: /屏幕布局/ }).click();
+    await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
     await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
     const drawerA = await openFileBrowserForFocusedSession(page);
@@ -1120,7 +1128,9 @@ test("file browser final target remains stable after rapid monitor terminal swit
     );
 
     await focusSession(page, sessionAName);
-    await page.getByRole("button", { name: /屏幕布局/ }).click();
+    await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
     await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
     await openFileBrowserForFocusedSession(page);
@@ -1179,7 +1189,9 @@ test("monitor terminal switching updates the active header without opening a sid
     );
 
     await focusSession(page, sessionAName);
-    await page.getByRole("button", { name: /屏幕布局/ }).click();
+    await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
     await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
     await expect(page.getByTestId("file-browser-drawer")).toHaveCount(0);

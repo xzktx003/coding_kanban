@@ -834,6 +834,52 @@ describe("AgentFocusView", () => {
     assert.doesNotMatch(markup, /focus-terminal-layout--dual/);
   });
 
+  it("shows each page's screen count on its tab instead of a layout menu", () => {
+    installLocalStorageStub("dual", undefined, false, {
+      activePageId: "terminal-monitor-page-1",
+      pages: [
+        {
+          id: "terminal-monitor-page-1",
+          name: "默认",
+          state: {
+            mode: "dual",
+            arrangementMode: "manual",
+            arrangementGroupId: null,
+            groupSessionOrderByGroupId: {},
+            slots: [
+              { id: "terminal-monitor-slot-1", sessionId: "session-1" },
+              { id: "terminal-monitor-slot-2", sessionId: "session-2" },
+            ],
+            activeSlotId: "terminal-monitor-slot-1",
+            closedSlotIds: [],
+          },
+        },
+      ],
+    });
+    const sessions = [
+      makeSession("session-1", "Alpha"),
+      makeSession("session-2", "Beta"),
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(AgentFocusView, {
+        focusedSession: sessions[0],
+        sessions,
+        onExit: () => {},
+        onDeleteSession: () => {},
+        onHideSession: () => {},
+        onReconnect: () => {},
+        onSwitchFocus: () => {},
+      }),
+    );
+
+    assert.match(
+      markup,
+      /data-testid="focus-page-tab-terminal-monitor-page-1"[\s\S]*?<span class="focus-page-tab-count">2<\/span>/,
+    );
+    assert.doesNotMatch(markup, /class="focus-layout-menu"/);
+  });
+
   it("keeps inactive monitor pages off the terminal mount path", () => {
     const source = readFileSync(
       new URL("./AgentFocusView.tsx", import.meta.url),

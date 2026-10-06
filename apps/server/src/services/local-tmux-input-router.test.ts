@@ -668,3 +668,20 @@ test("LocalTmuxInputRouter orders native client input around cleanup", async () 
     "pty:plain",
   ]);
 });
+
+test("LocalTmuxInputRouter keeps every bracketed paste frame on the pane adapter across attach readiness changes", async () => {
+  let ready = false;
+  const { router, session, writes } = buildRouter({
+    isTmuxClientReady: () => ready,
+  });
+  await router.write(session, { input: "\x1b[200~first\r" });
+  ready = true;
+  await router.write(session, { input: "second\r" });
+  await router.write(session, { input: "third\x1b[201~" });
+  assert.deepEqual(
+    writes.map((write) => write.target),
+    ["adapter", "adapter", "adapter"],
+  );
+  await router.write(session, { input: "normal" });
+  assert.equal(writes.at(-1)?.target, "pty");
+});

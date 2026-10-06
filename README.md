@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>面向 CLI Coding Agent 的本地 / 内网多会话工作台</strong><br />
-  把看板、真实终端、tmux、SSH、结构化会话记录、Git Diff、文件浏览器、VS Code Web 和手机接管整合为一个连续工作流。
+  终端模式管理看板、tmux、SSH 和手机接管；会话模式管理结构化 Agent 对话。两种工作流并行，共用项目、文件与 Git。
 </p>
 
 <p align="center">
@@ -16,7 +16,7 @@
 </p>
 
 > [!WARNING]
-> Coding Kanban 的后端可以执行终端、SSH、tmux、Git 只读查询和文件系统操作。它面向可信本机或内网环境，**不要直接暴露到公网**。
+> Coding Kanban 的后端可以执行终端、SSH、tmux、Git 和文件系统操作。它面向可信本机或内网环境，**不要直接暴露到公网**。
 
 ## 为什么需要 Coding Kanban
 
@@ -28,7 +28,7 @@
 - 如何让桌面和手机使用同一套会话，不在移动端重新建立一套工作流？
 - 如何控制大量终端 WebSocket、xterm 和 VS Code iframe 带来的浏览器资源开销？
 
-Coding Kanban 将这些问题收敛为一条主流程：
+终端模式通过下面的流程组织任务；会话模式可直接从项目开始结构化对话：
 
 ```text
 扫描 / 新建会话
@@ -46,6 +46,7 @@ Coding Kanban 将这些问题收敛为一条主流程：
 
 | 能力           | 当前行为                                                                                                                                                 |
 | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 并行会话模式   | 迁移 Codexia 0.54.2 的 Codex / Claude / ACP / Bots、工具与技能、定时任务、用量及设置；模式切换保留草稿与连接，共用项目 / 文件 / Git |
 | 注意力看板     | 自动分为“需响应 / 执行中 / 待验收 / 可继续”，列头显示数量                                                                                                |
 | 卡片上下文     | 展示最后用户任务、最后 Agent 回复、项目、分支/worktree、文件数及增删行                                                                                   |
 | 已读管理       | 完成态可主动标记已读/未读，状态由服务端持久化                                                                                                            |
@@ -64,6 +65,8 @@ Coding Kanban 将这些问题收敛为一条主流程：
 | 资源诊断       | xterm、WebSocket、快照吞吐、终端流、VS Code iframe、long task、heap                                                                                      |
 
 ## 更新日志
+
+**2026-10-06 · 双模式工作台**：顶部切换终端与结构化会话，适配当前主题和手机布局。截图、语音、通知、登录等桌面能力采用浏览器等价方案；旧 Codexia 数据通过“导入”预览后明确合并。完整功能、差异和验收见 [会话模式架构](docs/session-mode-architecture.md)。
 
 > [!IMPORTANT]
 > **2026-09-01 · 飞书通知支持直接回复并继续对应 Codex**
@@ -386,6 +389,7 @@ https://<局域网地址>:<WEB_PORT>/?view=mobile
 - `mkcert`：为局域网生成浏览器可信任的本地 HTTPS 证书，强烈推荐与 VS Code Web 一起使用。
 - `code-server` 或 `openvscode-server`：内嵌 VS Code Web；未安装时应用可尝试通过网络安装 `code-server`。
 - Codex、Copilot 或 Claude CLI：只需安装并登录实际要从看板启动的 Agent；纯 shell 会话不需要。
+- Rust stable、C/C++ 编译工具及 CMake：构建结构化会话运行层时需要。
 - `lark-cli`：仅发送飞书提醒或从飞书回复继续 Codex 时需要。飞书完成通知中的公式保留源码，不需要图片上传权限或 Chromium。
 - Playwright 浏览器和系统依赖：仅运行 E2E 或生成 README 截图时需要。
 
@@ -458,7 +462,10 @@ git clone <your-repo-url>
 cd coding_kanban
 pnpm install
 cp .env.example .env
+pnpm session:build  # 首次启用结构化会话模式
 ```
+
+只使用终端模式时，可在 `.env` 中设置 `SESSION_MODE_ENABLED=0`。会话运行层与原 Codexia 数据隔离，沿用原生 CLI 登录；旧应用记录由用户通过会话模式的“导入”入口明确迁移。
 
 ### 推荐启动
 

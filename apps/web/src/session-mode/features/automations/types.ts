@@ -1,0 +1,37 @@
+import type {
+  AutomationCwdMode,
+  AutomationSchedule,
+  AutomationTask,
+  AutomationWeekday,
+} from '@session/services/apiAdapt';
+import type { Provider } from '@session/stores/settings';
+
+export type FormState = {
+  name: string;
+  agent: 'codex' | 'cc' | 'bot';
+  /** Set when `agent` is `bot`; carried through edits untouched. */
+  botId?: string;
+  modelProvider: Provider;
+  model: string;
+  selectedProjects: string[];
+  prompt: string;
+  scheduleMode: 'daily' | 'interval';
+  dailyTime: string;
+  intervalHours: number;
+  weekdays: AutomationWeekday[];
+  cwdMode: AutomationCwdMode;
+};
+
+export type TemplateTask = {
+  id: string;
+  name: string;
+  description: string;
+  prompt: string;
+  schedule: AutomationSchedule;
+};
+
+/** Unified dialog mode — replaces the old createOpen + managedTask pair */
+export type DialogMode =
+  | { type: 'create'; initialForm?: Partial<FormState> }
+  | { type: 'edit'; task: AutomationTask }
+  | null;

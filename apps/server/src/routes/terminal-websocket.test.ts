@@ -368,6 +368,9 @@ test("terminal websocket keeps split bracketed paste text intact for local tmux 
   const sessionName = `tmux-split-bracketed-paste-${Date.now()}`;
   const readyMarker = `TMUX_SPLIT_PASTE_READY_${Date.now()}`;
   const pasteMarker = `__SPLIT_PASTE_END_${Date.now()}__`;
+  const expectedPasteLength = Buffer.byteLength(
+    `\u001b[200~first pasted line\rsecond pasted line\rthird pasted line ${pasteMarker}\u001b[201~`,
+  );
   const capturePath = join(
     tmpdir(),
     `coding-kanban-split-paste-${Date.now()}.hex`,
@@ -397,7 +400,7 @@ test("terminal websocket keeps split bracketed paste text intact for local tmux 
           "process.stdin.on('data', (chunk) => {",
           "chunks.push(chunk);",
           "const input = Buffer.concat(chunks);",
-          `if (input.includes(Buffer.from(${JSON.stringify(pasteMarker)}))) {`,
+          `if (input.length >= ${expectedPasteLength}) {`,
           `fs.writeFileSync(${JSON.stringify(capturePath)}, input.toString('hex'));`,
           "}",
           "});",

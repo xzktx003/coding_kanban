@@ -757,6 +757,7 @@ export default function App() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (document.querySelector<HTMLElement>(".workbench-terminal")?.hidden) return;
       if (!(event.metaKey || event.ctrlKey)) {
         return;
       }

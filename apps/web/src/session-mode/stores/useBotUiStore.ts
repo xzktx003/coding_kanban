@@ -1,0 +1,123 @@
+import { create } from 'zustand';
+import { type Bot, parseBotList } from '@session/services/apiAdapt/bots';
+
+/**
+ * Client state for the Bot tab. The bots themselves live in the database, so
+ * nothing here is persisted: this is the cache the sidebar renders from, plus
+ * the live connections that must survive switching between bots.
+ */
+export type BotActivityStatus = 'working' | 'done' | 'blocked' | 'failed';
+
+interface BotUiStore {
+  bots: Bot[];
+  setBots: (bots: Bot[]) => void;
+  /** Replace one bot in place, after an update round-trip. */
+  upsertBot: (bot: Bot) => void;
+  removeBot: (id: string) => void;
+  selectedBotId: string | null;
+  setSelectedBotId: (id: string | null) => void;
+  /**
+   * The keke process each bot is talking to. Kept so switching back to a bot
+   * reuses its process instead of paying for a spawn and a fresh session.
+   */
+  connectionByBot: Record<string, string>;
+  mcpChangedByBot: Record<string, boolean>;
+  markMcpChanged: (name: string) => void;
+  setBotConnection: (botId: string, connectionId: string) => void;
+  clearBotConnection: (botId: string) => void;
+  /**
+   * Which bots have a turn in flight. The ACP store's `running` is a single
+   * flag for the one visible conversation, so it cannot answer this while the
+   * user is looking at another bot.
+   */
+  runningByBot: Record<string, boolean>;
+  savingSettingsByBot: Record<string, boolean>;
+  setSavingSettings: (botId: string, saving: boolean) => void;
+  setBotRunning: (botId: string, running: boolean) => void;
+  /**
+   * The latest unattended-run status the backend reported for each bot, so the
+   * sidebar can flag one that is blocked or failed until the user opens it.
+   */
+  statusByBot: Record<string, BotActivityStatus>;
+  setBotStatus: (botId: string, status: BotActivityStatus | null) => void;
+  /** The ACP session currently open for each bot, so a return restores it. */
+  sessionByBot: Record<string, string>;
+  setBotSession: (botId: string, sessionId: string) => void;
+  /**
+   * `keke` (or its `npx` fallback) resolved on PATH but actually spawning it
+   * failed anyway — e.g. a packaged app's PATH doesn't match the shell's.
+   * Once this happens the composer treats keke as unusable, the same as the
+   * preset never resolving, rather than retrying and toasting on every send.
+   */
+  kekeSpawnFailed: boolean;
+  setKekeSpawnFailed: (failed: boolean) => void;
+}
+
+export const useBotUiStore = create<BotUiStore>((set) => ({
+  bots: [],
+  setBots: (bots) => set({ bots }),
+  upsertBot: (bot) =>
+    set((state) => ({
+      bots: state.bots.some((b) => b.id === bot.id)
+        ? state.bots.map((b) => (b.id === bot.id ? bot : b))
+        : [...state.bots, bot],
+    })),
+  removeBot: (id) =>
+    set((state) => {
+      const { [id]: _connection, ...connectionByBot } = state.connectionByBot;
+      const { [id]: _session, ...sessionByBot } = state.sessionByBot;
+      return {
+        bots: state.bots.filter((bot) => bot.id !== id),
+        connectionByBot,
+        sessionByBot,
+        selectedBotId: state.selectedBotId === id ? null : state.selectedBotId,
+      };
+    }),
+  selectedBotId: null,
+  setSelectedBotId: (selectedBotId) => set({ selectedBotId }),
+  connectionByBot: {},
+  mcpChangedByBot: {},
+  markMcpChanged: (name) =>
+    set((state) => ({
+      mcpChangedByBot: {
+        ...state.mcpChangedByBot,
+        ...Object.fromEntries(
+          state.bots
+            .filter(
+              (bot) =>
+                state.connectionByBot[bot.id] &&
+                parseBotList(bot.mcpServers).includes(`keke:${name}`)
+            )
+            .map((bot) => [bot.id, true])
+        ),
+      },
+    })),
+  setBotConnection: (botId, connectionId) =>
+    set((state) => ({ connectionByBot: { ...state.connectionByBot, [botId]: connectionId } })),
+  clearBotConnection: (botId) =>
+    set((state) => {
+      const { [botId]: _removed, ...connectionByBot } = state.connectionByBot;
+      const { [botId]: _session, ...sessionByBot } = state.sessionByBot;
+      const { [botId]: _changed, ...mcpChangedByBot } = state.mcpChangedByBot;
+      return { connectionByBot, sessionByBot, mcpChangedByBot };
+    }),
+  runningByBot: {},
+  savingSettingsByBot: {},
+  setSavingSettings: (botId, saving) =>
+    set((state) => ({
+      savingSettingsByBot: { ...state.savingSettingsByBot, [botId]: saving },
+    })),
+  setBotRunning: (botId, running) =>
+    set((state) => ({ runningByBot: { ...state.runningByBot, [botId]: running } })),
+  statusByBot: {},
+  setBotStatus: (botId, status) =>
+    set((state) => {
+      const { [botId]: _removed, ...rest } = state.statusByBot;
+      return { statusByBot: status ? { ...rest, [botId]: status } : rest };
+    }),
+  sessionByBot: {},
+  setBotSession: (botId, sessionId) =>
+    set((state) => ({ sessionByBot: { ...state.sessionByBot, [botId]: sessionId } })),
+  kekeSpawnFailed: false,
+  setKekeSpawnFailed: (kekeSpawnFailed) => set({ kekeSpawnFailed }),
+}));

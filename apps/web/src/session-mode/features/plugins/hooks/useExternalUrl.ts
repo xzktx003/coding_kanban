@@ -1,0 +1,24 @@
+// Hook to provide a unified way to open external URLs, handling Tauri vs browser environments.
+
+import { useCallback } from 'react';
+import { isTauri } from '@session/hooks/runtime';
+
+/**
+ * Returns a function that opens a URL in a new tab or via the Tauri opener plugin.
+ *
+ * Usage:
+ *   const { openExternalUrl } = useExternalUrl();
+ *   await openExternalUrl('https://example.com');
+ */
+export function useExternalUrl() {
+  const openExternalUrl = useCallback(async (url: string) => {
+    if (isTauri()) {
+      const { openUrl } = await import('@session/browser-opener');
+      await openUrl(url);
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }, []);
+
+  return { openExternalUrl };
+}

@@ -1,0 +1,208 @@
+import { listen } from '@tauri-apps/api/event';
+import { open } from '@session/browser-opener';
+import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import type { ServerNotification } from '@session/bindings/ServerNotification';
+import type {
+  AccountLoginCompletedNotification,
+  GetAccountResponse,
+  LoginAccountParams,
+} from '@session/bindings/v2';
+import { Button } from '@session/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@session/components/ui/card';
+import { Input } from '@session/components/ui/input';
+import { Label } from '@session/components/ui/label';
+import { Separator } from '@session/components/ui/separator';
+import { openEventStream } from '@session/lib/eventStream';
+import { isTauri } from '@session/hooks/runtime';
+import { getAccountWithParams, loginAccount, saveAccountSnapshot } from '@session/services';
+
+interface CodexAuthProps {
+  onAuthenticated?: () => void;
+}
+
+export function CodexAuth({ onAuthenticated }: CodexAuthProps = {}) {
+  const isTauriRuntime = isTauri();
+  const [accountResponse, setAccountResponse] = useState<GetAccountResponse | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [lastStatus, setLastStatus] = useState<string | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
+  const [apiKey, setApiKey] = useState('');
+  const [loginLink, setLoginLink] = useState('');
+  const [deviceCode, setDeviceCode] = useState('');
+
+  const refreshAccount = useCallback(async (force: boolean) => {
+    try {
+      const response = await getAccountWithParams({
+        refreshToken: force,
+      });
+      setAccountResponse(response);
+    } catch (error) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : String(error ?? 'Unknown');
+      setLastError(message);
+    }
+  }, []);
+
+  const handleLogin = useCallback(
+    async (params: LoginAccountParams) => {
+      setIsLoggingIn(true);
+      setLastStatus(`Starting ${params.type === 'chatgpt' ? 'ChatGPT' : 'API Key'} login...`);
+      setLastError(null);
+      try {
+        const response = await loginAccount(params);
+
+        if (response.type === 'chatgptDeviceCode') {
+          setDeviceCode(response.userCode); setLoginLink(response.verificationUrl);
+          setLastStatus('输入授权码完成登录；登录结果会自动更新。');
+        } else if (response.type === 'chatgpt') {
+          setLoginLink(response.authUrl);
+          await open(response.authUrl);
+          setLastStatus('ChatGPT login started - please complete in browser');
+        } else if (response.type === 'apiKey') {
+          setLastStatus('Login successful');
+          setApiKey('');
+          refreshAccount(true);
+          onAuthenticated?.();
+        }
+      } catch (error) {
+        console.error(error);
+        const message = error instanceof Error ? error.message : String(error ?? 'Unknown');
+        setLastStatus(null);
+        setLastError(message);
+      } finally {
+        setIsLoggingIn(false);
+      }
+    },
+    [refreshAccount, onAuthenticated]
+  );
+
+  const startChatGptLogin = useCallback(() => {
+    handleLogin({ type: isTauriRuntime ? 'chatgpt' : 'chatgptDeviceCode' });
+  }, [handleLogin, isTauriRuntime]);
+
+  const startApiKeyLogin = useCallback(
+    (e?: React.FormEvent) => {
+      if (e) e.preventDefault();
+      if (!apiKey.trim()) {
+        setLastError('Please enter an API key');
+        return;
+      }
+      handleLogin({ type: 'apiKey', apiKey: apiKey.trim() });
+    },
+    [handleLogin, apiKey]
+  );
+
+  useEffect(() => {
+    refreshAccount(false);
+  }, [refreshAccount]);
+
+  // Keep a local snapshot of every ChatGPT account the user signs into, so
+  // it can be switched back to later without logging out.
+  useEffect(() => {
+    const account = accountResponse?.account;
+    if (account?.type === 'chatgpt' && account.email) {
+      saveAccountSnapshot(account.email, account.email, account.planType).catch(console.error);
+    }
+  }, [accountResponse]);
+
+  useEffect(() => {
+    if (!isTauriRuntime) {
+      return openEventStream({ agents: ['codex'], onEvent: event => {
+        if (event.event !== 'codex:notification') return;
+        const payload = event.payload as ServerNotification;
+        if (payload.method === 'account/updated') void refreshAccount(true);
+        if (payload.method === 'account/login/completed') {
+          const result = payload.params as AccountLoginCompletedNotification;
+          if (result.success) { setDeviceCode(''); setLoginLink(''); setLastStatus('登录成功'); void refreshAccount(true); onAuthenticated?.(); }
+          else setLastError(result.error ?? '登录未完成，请重试');
+        }
+      } });
+    }
+
+    const unlistenPromise = listen<ServerNotification>('codex:notification', (event) => {
+      const { method, params } = event.payload;
+      if (method === 'account/updated') {
+        refreshAccount(true);
+        return;
+      }
+      if (method === 'account/login/completed') {
+        const payload = params as AccountLoginCompletedNotification;
+        if (payload.success) {
+          refreshAccount(true);
+          onAuthenticated?.();
+        }
+      }
+    });
+
+    return () => {
+      unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [isTauriRuntime, refreshAccount, onAuthenticated]);
+
+  return (
+    <Card className="w-full max-w-md mx-auto border border-border/50 shadow-sm">
+      <CardHeader>
+        <CardTitle className="text-center">Codex 登录</CardTitle>
+      </CardHeader>
+
+      <CardContent className="space-y-4">
+        {accountResponse?.account?.type === 'chatgpt' && (
+          <div className="space-y-1">
+            <p>Email: {accountResponse.account.email}</p>
+          </div>
+        )}
+        <div className="space-y-4">
+          <Button onClick={startChatGptLogin} disabled={isLoggingIn} className="w-full" size="lg">
+            {isLoggingIn && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {isLoggingIn ? 'Starting ChatGPT login…' : '登录 ChatGPT'}
+          </Button>
+
+          <div className="relative my-2 text-center text-xs uppercase text-muted-foreground">
+            <div className="absolute inset-0 flex items-center">
+              <Separator className="w-full" />
+            </div>
+            <span className="relative bg-background px-2">或使用 API Key</span>
+          </div>
+
+          <form onSubmit={startApiKeyLogin} className="space-y-3 p-3 border rounded-lg bg-muted/30">
+            <div className="space-y-2">
+              <Label htmlFor="apiKey">OpenAI API Key</Label>
+              <Input
+                id="apiKey"
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="sk-..."
+                disabled={isLoggingIn}
+                autoComplete="off"
+              />
+            </div>
+            <Button type="submit" disabled={isLoggingIn || !apiKey.trim()} className="w-full">
+              {isLoggingIn && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {isLoggingIn ? 'Verifying…' : '验证 API Key'}
+            </Button>
+          </form>
+        </div>
+
+        {loginLink && <div className="rounded border p-3 space-y-2 text-sm">
+          {deviceCode && <p>授权码：<strong className="font-mono select-all">{deviceCode}</strong></p>}
+          <a className="underline text-primary" href={loginLink} target="_blank" rel="noopener noreferrer">打开登录页面</a>
+        </div>}
+        {lastStatus && !lastError && (
+          <p className="text-xs text-emerald-600 flex items-center gap-1.5">
+            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+            <span>{lastStatus}</span>
+          </p>
+        )}
+
+        {lastError && (
+          <p className="text-xs text-destructive flex items-center gap-1.5">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            <span>{lastError}</span>
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

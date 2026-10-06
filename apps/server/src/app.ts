@@ -1,3 +1,5 @@
+import { registerSessionPreviewRoutes } from './routes/session-preview.js';
+import { registerSessionModeRoutes } from "./routes/session-mode.js";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
@@ -99,6 +101,9 @@ import {
 import { VsCodeWebManager } from "./services/vscode-web-manager.js";
 
 interface BuildServerOptions {
+  sessionRuntimeOrigin?: string;
+  ensureSessionRuntime?: () => Promise<string | undefined>;
+  sessionAttachmentRoot?: string;
   localFsService?: LocalFsService;
   sftpService?: SftpService;
   terminalHistoryConfig?: TerminalHistoryRuntimeConfig;
@@ -612,6 +617,10 @@ export function buildServer(options: BuildServerOptions = {}): {
   });
 
   app.register(websocket);
+  app.register(async function sessionModeGateway(instance) {
+    registerSessionPreviewRoutes(instance);
+    registerSessionModeRoutes(instance, { origin: options.sessionRuntimeOrigin, ensureRuntime: options.ensureSessionRuntime, attachmentRoot: options.sessionAttachmentRoot, projects: () => registry.list().items.filter(session => !session.sshTarget).map(session => session.repositoryRoot || session.workingDirectory || "") });
+  });
 
   app.register(async (instance) => {
     await registerAgentSessionRoutes(instance, {

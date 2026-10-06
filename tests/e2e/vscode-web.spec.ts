@@ -296,7 +296,9 @@ test("vscode web follows the active monitor terminal only when opened or explici
 
     await page.goto("/");
     await focusSession(page, sessionAName);
-    await page.getByRole("button", { name: /屏幕布局/ }).click();
+    await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
     await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
     const secondPane = page.locator(
@@ -373,7 +375,9 @@ test("vscode side collapse state is controlled only by collapse buttons during m
 
     await page.goto("/");
     await focusSession(page, sessionAName);
-    await page.getByRole("button", { name: /屏幕布局/ }).click();
+    await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
     await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
     const firstPane = page.locator(

@@ -1,0 +1,71 @@
+[package]
+name = "codexia-web"
+version.workspace = true
+edition.workspace = true
+
+workspace = ".."
+
+[[bin]]
+name = "codexia-web"
+path = "src/main.rs"
+
+[lib]
+name = "codexia_web"
+path = "src/lib.rs"
+
+[features]
+default = []
+
+[dependencies]
+# --- external deps ---
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+http-body-util = { workspace = true }
+httparse = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+open = { workspace = true }
+thiserror = { workspace = true }
+regex = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+dirs = { workspace = true }
+dashmap = { workspace = true }
+moka = { workspace = true }
+indexmap = { workspace = true }
+tempfile = { workspace = true }
+serde_yaml = { workspace = true }
+toml = { workspace = true }
+toml_edit = { workspace = true }
+base64 = { workspace = true }
+whisper-rs = "0.12.0"
+rusqlite = { workspace = true }
+glob = { workspace = true }
+async-trait = { workspace = true }
+notify = { workspace = true }
+notify-debouncer-full = { workspace = true }
+portable-pty = { workspace = true }
+zip = { workspace = true }
+
+# --- codex / claude related deps ---
+claude-agent-sdk-rs = { workspace = true }
+codex-finder = { workspace = true }
+
+codexia-git = { workspace = true }
+codexia-shared = { path = "../crates/shared" }
+codexia-acp = { path = "../crates/acp" }
+codexia-automation = { path = "../crates/automation" }
+codexia-cc = { path = "../crates/cc" }
+codexia-db = { path = "../crates/db" }
+codexia-telemetry = { path = "../crates/telemetry" }
+codexia-codex = { path = "../crates/codex" }
+[dev-dependencies]
+# WebSocket client used by the /ws integration tests.
+tokio-tungstenite = "0.24"

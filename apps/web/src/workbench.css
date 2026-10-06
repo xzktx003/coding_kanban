@@ -1,0 +1,133 @@
+.workbench-shell {
+  height: var(--app-height);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  --workspace-height: calc(var(--app-height) - 48px);
+}
+.workbench-header {
+  height: 48px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 0 18px;
+  background: #13191f;
+  border-bottom: 1px solid #ffffff12;
+  color: #f4f1ea;
+}
+.workbench-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.workbench-brand img {
+  height: 21px;
+  width: auto;
+}
+.workbench-modes {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid #ffffff12;
+  background: #0f1419;
+  border-radius: 8px;
+}
+.workbench-modes button {
+  border: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #a8b2bd;
+  background: transparent;
+  padding: 5px 13px;
+  font-size: 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition:
+    background 140ms,
+    color 140ms;
+  white-space: nowrap;
+}
+.workbench-modes button:hover {
+  background: #ffffff0c;
+  color: #f4f1ea;
+}
+.workbench-modes button[aria-pressed="true"] {
+  background: #29343f;
+  color: #f4f1ea;
+  box-shadow: 0 1px 3px #0003;
+}
+.workbench-modes button:focus-visible {
+  outline: 2px solid #d8b77b;
+  outline-offset: 2px;
+}
+.workbench-context {
+  margin-left: auto;
+  color: #87929d;
+  font-size: 12px;
+}
+.workbench-terminal {
+  flex: 1;
+  min-height: 0;
+  --app-height: var(--workspace-height);
+}
+.session-mode {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: #f4f1ea;
+  background: #151b21;
+}
+.workbench-terminal[hidden],
+.session-mode[hidden] {
+  display: none !important;
+}
+.workbench-state {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #a8b2bd;
+}
+.workbench-state h2 {
+  color: #f4f1ea;
+  font-size: 18px;
+}
+.workbench-state button {
+  border: 1px solid #ffffff26;
+  border-radius: 6px;
+  padding: 8px 16px;
+  background: #29343f;
+  color: #f4f1ea;
+  cursor: pointer;
+}
+@media (max-width: 640px) {
+  .workbench-header {
+    gap: 12px;
+    padding: 0 10px;
+  }
+  .workbench-brand span,
+  .workbench-context {
+    display: none;
+  }
+  .workbench-modes {
+    margin-left: auto;
+  }
+  .workbench-modes button {
+    padding: 5px 11px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workbench-modes button {
+    transition: none;
+  }
+}

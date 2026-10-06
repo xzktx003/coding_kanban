@@ -67,6 +67,7 @@ const DEFAULT_TMUX_CLIENT_PROMPT_INPUTS = new Set([
   "f",
 ]);
 export class LocalTmuxInputRouter {
+  private readonly bracketedPasteSessions = new Set<string>();
   private readonly clientPromptBySessionId = new Map<
     string,
     TmuxClientPromptBinding
@@ -98,6 +99,7 @@ export class LocalTmuxInputRouter {
 
   clear(agentSessionId: string): Promise<void> {
     return this.enqueue(agentSessionId, async () => {
+      this.bracketedPasteSessions.delete(agentSessionId);
       const hadPendingPrefix =
         this.pendingPrefixSessionIds.delete(agentSessionId);
       const hadClientPrompt =
@@ -191,6 +193,19 @@ export class LocalTmuxInputRouter {
       } catch {
         ptyReady = false;
       }
+    }
+
+    // A tmux client may consume paste delimiters. Keep the full paste on the
+    // pane adapter even if attachment becomes ready between input frames.
+    if (
+      !requiresAttachedClient &&
+      (this.bracketedPasteSessions.has(agentSession.id) ||
+        input.input.includes("\x1b[200~"))
+    ) {
+      if (input.input.includes("\x1b[201~"))
+        this.bracketedPasteSessions.delete(agentSession.id);
+      else this.bracketedPasteSessions.add(agentSession.id);
+      return this.writeThroughAdapter(agentSession, input);
     }
 
     // Scrollback replay can reach the browser before `tmux attach` has

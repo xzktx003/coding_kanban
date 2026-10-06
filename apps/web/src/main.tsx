@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 
-import App from "./App";
+import { WorkbenchShell } from "./components/WorkbenchShell";
 import {
   measureAppViewportHeight,
   measureAppViewportOffsetTop,
@@ -38,6 +38,6 @@ window.visualViewport?.addEventListener("scroll", syncAppViewportMetrics);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <WorkbenchShell />
   </React.StrictMode>,
 );

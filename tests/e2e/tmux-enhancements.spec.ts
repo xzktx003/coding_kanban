@@ -1048,7 +1048,9 @@ test("browser: 多屏非输入终端也可以用鼠标滚轮浏览自己的历�
     await expect(card).toBeVisible({ timeout: 15000 });
     await card.dblclick();
 
-    await page.getByRole("button", { name: /屏幕布局/ }).click();
+    await page
+    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+    .click();
     await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
     const secondPane = page.locator(

@@ -7,7 +7,7 @@
     "dev": "pnpm --filter @agent-orchestrator/shared build && pnpm run dev:app",
     "dev:app": "tsx watch --exclude '../../packages/shared/dist/**' --include '../../packages/shared/src/**' src/index.ts",
     "build": "pnpm --filter @agent-orchestrator/shared build && tsc -p tsconfig.json",
-    "test": "tsx --test src/**/*.test.ts",
+    "test": "tsx --test --test-concurrency=4 src/**/*.test.ts",
     "format": "prettier --write 'src/**/*.ts'"
   },
   "dependencies": {
@@ -19,7 +19,8 @@
     "dotenv": "^17.4.2",
     "fastify": "^5.6.0",
     "node-pty": "1.2.0-beta.12",
-    "ssh2": "^1.17.0"
+    "ssh2": "^1.17.0",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/archiver": "^7.0.0",
@@ -27,6 +28,7 @@
     "@types/ssh2": "^1.15.5",
     "prettier": "^3.6.2",
     "tsx": "^4.20.5",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "@types/ws": "^8.18.1"
   }
 }

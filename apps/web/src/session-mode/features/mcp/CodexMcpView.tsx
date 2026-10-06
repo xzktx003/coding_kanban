@@ -1,0 +1,183 @@
+import { Save, X } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import type { McpServerConfig } from '@session/components/codex/types';
+import { Button } from '@session/components/ui/button';
+import { getServerProtocol, McpServerCard, McpServerForm } from '@session/features/mcp';
+import { unifiedAddMcpServer, unifiedReadMcpConfig, unifiedRemoveMcpServer } from '@session/services';
+import { useMcpAuthStatus } from './useMcpAuthStatus';
+
+interface CodexMcpViewProps {
+  refreshKey?: number;
+}
+
+export function CodexMcpView({ refreshKey }: CodexMcpViewProps) {
+  const [servers, setServers] = useState<Record<string, McpServerConfig>>({});
+  const { authStatuses, refreshAuthStatuses } = useMcpAuthStatus();
+  const [editingServer, setEditingServer] = useState<string | null>(null);
+  const [editConfig, setEditConfig] = useState<{
+    name: string;
+    protocol: 'stdio' | 'http' | 'sse';
+    command: { command: string; args: string; env: string };
+    http: { url: string };
+  } | null>(null);
+
+  const loadServers = useCallback(async () => {
+    try {
+      const config = await unifiedReadMcpConfig('codex');
+      setServers((config.mcpServers as Record<string, McpServerConfig> | undefined) ?? {});
+    } catch (error) {
+      console.error('Failed to load MCP servers:', error);
+    }
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is the reload trigger
+  useEffect(() => {
+    loadServers();
+  }, [refreshKey, loadServers]);
+
+  const handleEditServer = (name: string, config: McpServerConfig) => {
+    const protocol = getServerProtocol(config);
+    const httpUrl = protocol === 'stdio' ? '' : 'url' in config ? config.url : '';
+    setEditingServer(name);
+    setEditConfig({
+      name,
+      protocol,
+      command: {
+        command: protocol === 'stdio' && 'command' in config ? config.command : '',
+        args: protocol === 'stdio' && 'args' in config ? config.args.join(' ') : '',
+        env:
+          protocol === 'stdio' && 'env' in config && config.env
+            ? JSON.stringify(config.env, null, 2)
+            : '',
+      },
+      http: {
+        url: httpUrl,
+      },
+    });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editConfig || !editingServer) return;
+
+    try {
+      let config: McpServerConfig;
+
+      if (editConfig.protocol === 'stdio') {
+        config = {
+          type: 'stdio',
+          command: editConfig.command.command,
+          args: editConfig.command.args.split(' ').filter((arg) => arg.trim()),
+        };
+
+        if (editConfig.command.env?.trim()) {
+          try {
+            config.env = JSON.parse(editConfig.command.env);
+          } catch {
+            toast.error('Invalid JSON format for environment variables');
+            return;
+          }
+        }
+      } else {
+        config = {
+          type: editConfig.protocol,
+          url: editConfig.http.url,
+        };
+      }
+
+      // Add overwrites an existing entry, so write the new config first and only
+      // drop the old name after a rename succeeded; a failure never loses the server.
+      await unifiedAddMcpServer({
+        clientName: 'codex',
+        serverName: editConfig.name,
+        serverConfig: config,
+      });
+      if (editConfig.name !== editingServer) {
+        await unifiedRemoveMcpServer({
+          clientName: 'codex',
+          serverName: editingServer,
+        });
+      }
+
+      setEditingServer(null);
+      setEditConfig(null);
+      loadServers();
+    } catch (error) {
+      console.error('Failed to update MCP server:', error);
+      toast.error(`Failed to update MCP server: ${error}`);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingServer(null);
+    setEditConfig(null);
+  };
+
+  return (
+    <div className="container mx-auto">
+      <div className="space-y-6">
+        <div className="space-y-2">
+          {Object.entries(servers).map(([name, config]) => (
+            <div key={name}>
+              {editingServer === name ? (
+                <div className="px-4">
+                  <div className="space-y-4">
+                    <McpServerForm
+                      serverName={editConfig?.name ?? ''}
+                      onServerNameChange={(name) =>
+                        setEditConfig((prev) => (prev ? { ...prev, name } : null))
+                      }
+                      protocol={editConfig?.protocol ?? 'stdio'}
+                      onProtocolChange={(protocol) =>
+                        setEditConfig((prev) => (prev ? { ...prev, protocol } : null))
+                      }
+                      commandConfig={
+                        editConfig?.command ?? {
+                          command: '',
+                          args: '',
+                          env: '',
+                        }
+                      }
+                      onCommandConfigChange={(command) =>
+                        setEditConfig((prev) => (prev ? { ...prev, command } : null))
+                      }
+                      httpConfig={editConfig?.http ?? { url: '' }}
+                      onHttpConfigChange={(http) =>
+                        setEditConfig((prev) => (prev ? { ...prev, http } : null))
+                      }
+                      isEditMode={true}
+                    />
+
+                    <div className="flex gap-2">
+                      <Button size="sm" onClick={handleSaveEdit}>
+                        <Save className="h-4 w-4 mr-1" />
+                        Save
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={handleCancelEdit}>
+                        <X className="h-4 w-4 mr-1" />
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <McpServerCard
+                  name={name}
+                  config={config}
+                  loadServers={loadServers}
+                  setServers={setServers}
+                  onEdit={handleEditServer}
+                  authStatus={authStatuses[name]}
+                  onAuthChanged={refreshAuthStatuses}
+                />
+              )}
+            </div>
+          ))}
+          {Object.keys(servers).length === 0 && (
+            <div className="text-gray-500 text-center py-8">No MCP servers configured</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

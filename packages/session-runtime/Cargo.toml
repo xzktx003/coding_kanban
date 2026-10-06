@@ -1,0 +1,95 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/acp",
+  "crates/automation",
+  "crates/cc",
+  "crates/codex",
+  "crates/db",
+  "crates/shared",
+  "crates/telemetry",
+  "crates/git",
+  "web",
+]
+
+[workspace.package]
+version = "0.54.2"
+edition = "2024"
+
+[workspace.dependencies]
+# async runtime
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# web framework
+axum = { version = "0.8", features = ["ws", "json"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+http-body-util = "0.1"
+httparse = "1"
+
+# serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+toml = "0.9.5"
+toml_edit = "0.20"
+base64 = "0.22.1"
+indexmap = { version = "2.0", features = ["serde"] }
+
+# error handling / logging
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.11"
+thiserror = "2.0"
+
+# utilities
+regex = "1.12.2"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.0", features = ["v4"] }
+sha2 = "0.10"
+dirs = "6.0"
+dashmap = "6.2.1"
+moka = { version = "0.12", features = ["future"] }
+glob = "0.3.3"
+tempfile = "3.10"
+zip = "2.1"
+open = "5"
+
+# file watching
+notify = { version = "8", features = ["serde", "serialization-compat-6"] }
+notify-debouncer-full = "0.6"
+
+# terminal
+portable-pty = "0.9"
+
+# codex / claude deps
+claude-agent-sdk-rs = { git = "https://github.com/milisp/claude-agent-sdk-rs", tag = "v0.8.0" }
+codex-finder = { git = "https://github.com/milisp/codex-finder.git" }
+codexia-git = { path = "crates/git" }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+gix = { version = "0.88.0", features = ["blocking-network-client", "blocking-http-transport-curl"] }
+walkdir = "2.3"
+nucleo = "0.5.0"
+ignore = "0.4.25"
+tokio-cron-scheduler = "0.13"
+agent-insights = { git = "https://github.com/milisp/agent-insights", default-features = false }
+codexia-acp = { path = "crates/acp" }
+codexia-automation = { path = "crates/automation" }
+codexia-cc = { path = "crates/cc" }
+codexia-codex = { path = "crates/codex" }
+codexia-db = { path = "crates/db" }
+codexia-shared = { path = "crates/shared" }
+codexia-telemetry = { path = "crates/telemetry" }
+codexia-web = { path = "web" }
+
+rusqlite = { version = "0.38.0", features = ["bundled"] }
+
+# Keep dev builds small: line tables for workspace crates (usable backtraces),
+# no debug info for dependencies.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false

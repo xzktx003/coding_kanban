@@ -2953,7 +2953,7 @@ input {
   left: 0;
   z-index: 40;
   display: grid;
-  width: 220px;
+  width: 300px;
   max-height: 70vh;
   overflow-y: auto;
   padding: 8px;
@@ -3008,10 +3008,26 @@ input {
 }
 
 .focus-page-tab-button {
-  max-width: 112px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 150px;
+}
+
+.focus-page-tab-name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.focus-page-tab-count {
+  flex: 0 0 auto;
+  min-width: 15px;
+  padding: 1px 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 10px;
 }
 
 .focus-page-tab-button--active,
@@ -3125,6 +3141,13 @@ input {
 .focus-layout-option:disabled {
   cursor: not-allowed;
   opacity: 0.38;
+}
+
+.focus-layout-option span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .focus-layout-option small {
