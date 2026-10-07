@@ -7,8 +7,8 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@session/components/ui/alert-dialog';
-import { Button } from '@session/components/ui/button';
+} from "@session/components/ui/alert-dialog";
+import { Button } from "@session/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +16,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@session/components/ui/dialog';
+} from "@session/components/ui/dialog";
 
 interface GitDiffDialogsProps {
   bulkStageDialogOpen: boolean;
@@ -43,14 +43,17 @@ export function GitDiffDialogs({
 }: GitDiffDialogsProps) {
   return (
     <>
-      <Dialog open={bulkStageDialogOpen} onOpenChange={onBulkStageDialogOpenChange}>
+      <Dialog
+        open={bulkStageDialogOpen}
+        onOpenChange={onBulkStageDialogOpenChange}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Stage all files?</DialogTitle>
+            <DialogTitle>暂存当前列表中的全部文件？</DialogTitle>
             <DialogDescription>
               {bulkStagePathsCount === 0
-                ? 'No unstaged files are available in the current list.'
-                : `This will stage ${bulkStagePathsCount} file${bulkStagePathsCount > 1 ? 's' : ''} from the current file tree.`}
+                ? "当前列表没有可暂存的文件。"
+                : `将暂存当前文件树中的 ${bulkStagePathsCount} 个文件。`}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -59,29 +62,35 @@ export function GitDiffDialogs({
               onClick={() => onBulkStageDialogOpenChange(false)}
               disabled={bulkStageLoading}
             >
-              Cancel
+              取消
             </Button>
             <Button
               onClick={onBulkStageConfirm}
               disabled={bulkStagePathsCount === 0 || bulkStageLoading}
             >
-              {bulkStageLoading ? 'Staging...' : 'Stage all'}
+              {bulkStageLoading ? "正在暂存…" : "全部暂存"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <AlertDialog open={revertConfirmOpen} onOpenChange={onRevertConfirmOpenChange}>
+      <AlertDialog
+        open={revertConfirmOpen}
+        onOpenChange={onRevertConfirmOpenChange}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Revert file changes?</AlertDialogTitle>
+            <AlertDialogTitle>确认丢弃文件变更？</AlertDialogTitle>
             <AlertDialogDescription>
-              This will discard current changes for this file. You can not undo this action.
+              这会丢弃该文件的所选变更，此操作无法撤销。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={revertLoading}>Cancel</AlertDialogCancel>
-            <AlertDialogAction disabled={revertLoading} onClick={onRevertConfirm}>
-              {revertLoading ? 'Reverting...' : 'Revert'}
+            <AlertDialogCancel disabled={revertLoading}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={revertLoading}
+              onClick={onRevertConfirm}
+            >
+              {revertLoading ? "正在还原…" : "确认还原"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

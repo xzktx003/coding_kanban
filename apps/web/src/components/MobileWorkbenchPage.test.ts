@@ -488,3 +488,21 @@ describe("MobileWorkbenchPage", () => {
     );
   });
 });
+
+describe("embedded mobile branding", () => {
+  it("keeps the desktop switch without repeating the workbench logo", () => {
+    installDocumentStub();
+    const markup = renderToStaticMarkup(
+      createElement(MobileWorkbenchPage, {
+        showBrand: false,
+        activeSessionId: null,
+        isLoading: false,
+        sessions: [],
+        onSwitchSession: () => {},
+      }),
+    );
+    assert.doesNotMatch(markup, /src="\/houmo-logo.png"/);
+    assert.doesNotMatch(markup, /手机端 Coding Kanban/);
+    assert.match(markup, /mobile-workbench-desktop-link/);
+  });
+});

@@ -48,3 +48,13 @@ it("indexes rollback counts and scopes file-summary context to its turn", () => 
   expect(summary?.context?.eventIndex).toBe(2);
   expect(rows.some((row) => row.key === "event-5")).toBe(false);
 });
+it("does not turn a rename notification into a chat message", () => {
+  expect(
+    buildThreadRows([
+      event("thread/name/updated", {
+        threadId: "thread",
+        threadName: "New title",
+      }),
+    ]),
+  ).toEqual([]);
+});

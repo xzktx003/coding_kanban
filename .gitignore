@@ -29,4 +29,5 @@ apps/server/.codex
 apps/server/.codex/
 .agents/skills/sun_yu_chen/
 .omx/
+third_party/
 .worktrees/

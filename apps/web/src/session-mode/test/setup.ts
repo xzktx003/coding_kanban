@@ -1,5 +1,6 @@
-import { cleanup } from '@testing-library/react';
-import { afterEach } from 'vitest';
+import "fake-indexeddb/auto";
+import { cleanup } from "@testing-library/react";
+import { afterEach } from "vitest";
 
 // vitest runs with `globals: false`, so RTL cannot register its own auto-cleanup and
 // mounted trees would leak into the next test's queries.

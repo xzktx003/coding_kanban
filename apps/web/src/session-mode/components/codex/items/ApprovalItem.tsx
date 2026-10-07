@@ -1,24 +1,37 @@
-import { AlertTriangle, ChevronDown, ChevronUp } from 'lucide-react';
-import { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { useApprovalStore } from '@session/components/codex/stores';
-import { Badge } from '@session/components/ui/badge';
-import { Button } from '@session/components/ui/button';
+import { AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { useApprovalStore } from "@session/components/codex/stores";
+import { Badge } from "@session/components/ui/badge";
+import { Button } from "@session/components/ui/button";
 
-export function ApprovalItem() {
-  const { currentApproval, pendingApprovals, respondToApproval } = useApprovalStore();
+export function ApprovalItem({
+  currentThreadId,
+}: { currentThreadId?: string } = {}) {
+  const {
+    currentApproval: firstApproval,
+    pendingApprovals,
+    respondToApproval,
+  } = useApprovalStore();
+  const matchingApprovals = currentThreadId
+    ? pendingApprovals.filter((request) => request.threadId === currentThreadId)
+    : pendingApprovals;
+  const currentApproval = currentThreadId
+    ? (matchingApprovals[0] ??
+      (firstApproval?.threadId === currentThreadId ? firstApproval : null))
+    : firstApproval;
   const [showDetails, setShowDetails] = useState(false);
-  const { t } = useTranslation('thread');
+  const { t } = useTranslation("thread");
 
   if (!currentApproval) return null;
 
-  const isCommandExecution = currentApproval.type === 'commandExecution';
+  const isCommandExecution = currentApproval.type === "commandExecution";
 
   const handleApprove = async () => {
     try {
-      let decision: any = 'accept';
+      let decision: any = "accept";
       if (
-        currentApproval.type === 'commandExecution' &&
+        currentApproval.type === "commandExecution" &&
         currentApproval.proposedExecpolicyAmendment
       ) {
         decision = {
@@ -27,25 +40,37 @@ export function ApprovalItem() {
           },
         };
       }
-      await respondToApproval(currentApproval.requestId, isCommandExecution, decision);
+      await respondToApproval(
+        currentApproval.requestId,
+        isCommandExecution,
+        decision,
+      );
     } catch (error) {
-      console.error('Failed to approve:', error);
+      console.error("Failed to approve:", error);
     }
   };
 
   const handleApproveForSession = async () => {
     try {
-      await respondToApproval(currentApproval.requestId, isCommandExecution, 'acceptForSession');
+      await respondToApproval(
+        currentApproval.requestId,
+        isCommandExecution,
+        "acceptForSession",
+      );
     } catch (error) {
-      console.error('Failed to approve for session:', error);
+      console.error("Failed to approve for session:", error);
     }
   };
 
   const handleDecline = async () => {
     try {
-      await respondToApproval(currentApproval.requestId, isCommandExecution, 'decline');
+      await respondToApproval(
+        currentApproval.requestId,
+        isCommandExecution,
+        "decline",
+      );
     } catch (error) {
-      console.error('Failed to decline:', error);
+      console.error("Failed to decline:", error);
     }
   };
 
@@ -54,10 +79,10 @@ export function ApprovalItem() {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 text-warning" />
-          <span className="font-medium">{t('approval.title')}</span>
-          {pendingApprovals.length > 1 && (
+          <span className="font-medium">{t("approval.title")}</span>
+          {matchingApprovals.length > 1 && (
             <Badge variant="secondary">
-              {t('common.pending', { count: pendingApprovals.length })}
+              {t("common.pending", { count: matchingApprovals.length })}
             </Badge>
           )}
         </div>
@@ -71,12 +96,12 @@ export function ApprovalItem() {
             {showDetails ? (
               <>
                 <ChevronUp className="w-4 h-4 mr-1" />
-                {t('approval.hideDetails')}
+                {t("approval.hideDetails")}
               </>
             ) : (
               <>
                 <ChevronDown className="w-4 h-4 mr-1" />
-                {t('approval.showDetails')}
+                {t("approval.showDetails")}
               </>
             )}
           </Button>
@@ -85,36 +110,42 @@ export function ApprovalItem() {
 
       {/* Main info - always visible */}
       <div className="grid gap-3 text-sm">
-        {currentApproval.type === 'commandExecution' && (
+        {currentApproval.type === "commandExecution" && (
           <div>
-            <div className="font-medium mb-1">{t('approval.commandRequest')}</div>
+            <div className="font-medium mb-1">
+              {t("approval.commandRequest")}
+            </div>
             <div className="text-muted-foreground p-2 bg-muted rounded font-mono text-xs break-all">
               itemId: {currentApproval.itemId}
             </div>
           </div>
         )}
 
-        {currentApproval.type === 'fileChange' && currentApproval.grantRoot && (
+        {currentApproval.type === "fileChange" && currentApproval.grantRoot && (
           <div>
-            <div className="font-medium mb-1">{t('approval.fileRequest')}</div>
+            <div className="font-medium mb-1">{t("approval.fileRequest")}</div>
             <div className="text-muted-foreground p-2 bg-muted rounded">
-              <div className="text-xs mb-1">{t('approval.allowWritesUnder')}</div>
-              <div className="font-mono text-xs break-all">{currentApproval.grantRoot}</div>
+              <div className="text-xs mb-1">
+                {t("approval.allowWritesUnder")}
+              </div>
+              <div className="font-mono text-xs break-all">
+                {currentApproval.grantRoot}
+              </div>
             </div>
           </div>
         )}
 
-        {currentApproval.type === 'commandExecution' &&
+        {currentApproval.type === "commandExecution" &&
           currentApproval.proposedExecpolicyAmendment && (
             <div>
               <div className="font-medium mb-1 flex items-center gap-2">
-                <span>{t('approval.policyAmendment')}</span>
+                <span>{t("approval.policyAmendment")}</span>
                 <Badge variant="secondary" className="text-xs">
-                  {t('approval.skipFutureApprovals')}
+                  {t("approval.skipFutureApprovals")}
                 </Badge>
               </div>
               <div className="text-muted-foreground p-2 bg-muted rounded font-mono text-xs break-all">
-                {currentApproval.proposedExecpolicyAmendment.join(' ')}
+                {currentApproval.proposedExecpolicyAmendment.join(" ")}
               </div>
             </div>
           )}
@@ -125,7 +156,7 @@ export function ApprovalItem() {
         <div className="grid gap-3 text-sm pt-2 border-t">
           {currentApproval.reason && (
             <div>
-              <div className="font-medium mb-1">{t('approval.reason')}</div>
+              <div className="font-medium mb-1">{t("approval.reason")}</div>
               <div className="text-muted-foreground p-2 bg-muted rounded text-xs">
                 {currentApproval.reason}
               </div>
@@ -137,13 +168,17 @@ export function ApprovalItem() {
       {/* Action buttons */}
       <div className="flex flex-col sm:flex-row gap-2 pt-2">
         <Button variant="outline" onClick={handleDecline} className="flex-1">
-          {t('common.decline')}
+          {t("common.decline")}
         </Button>
-        <Button variant="secondary" onClick={handleApproveForSession} className="flex-1">
-          {t('approval.approveForSession')}
+        <Button
+          variant="secondary"
+          onClick={handleApproveForSession}
+          className="flex-1"
+        >
+          {t("approval.approveForSession")}
         </Button>
         <Button onClick={handleApprove} className="flex-1">
-          {t('approval.approveOnce')}
+          {t("approval.approveOnce")}
         </Button>
       </div>
     </div>

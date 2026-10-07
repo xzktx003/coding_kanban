@@ -1,13 +1,24 @@
-import { toast } from 'sonner';
-import { useCallback, useRef } from 'react';
-import { fromSdkMessages } from '@session/components/cc/utils/fromSdkMessages';
-import { ccGetSessionMessages, ccNewSession, ccResumeSession, ccSendMessage } from '@session/services';
-import { gitCreateWorktree } from '@session/services/apiAdapt/git';
-import { type CCOptions, useCCStore } from '@session/stores/cc';
-import { useAgentCenterStore } from '@session/stores/useAgentCenterStore';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
-import type { CcAgentOptionsPayload } from '@session/types/cc/agentOptions';
-import { CC_LISTENER_READY_EVENT, CC_PERMISSION_LISTENER_READY_EVENT, isCCListenerReady } from '@session/lib/ccListenerReadiness';
+import { toast } from "sonner";
+import { useCallback, useRef } from "react";
+import { fromSdkMessages } from "@session/components/cc/utils/fromSdkMessages";
+import {
+  ccGetSessionMessages,
+  ccNewSession,
+  ccResumeSession,
+  ccSendMessage,
+} from "@session/services";
+import { gitCreateWorktree } from "@session/services/apiAdapt/git";
+import { type CCOptions, useCCStore } from "@session/stores/cc";
+import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
+import { useAcpStore } from "@session/stores/useAcpStore";
+import type { CcAgentOptionsPayload } from "@session/types/cc/agentOptions";
+import {
+  CC_LISTENER_READY_EVENT,
+  CC_PERMISSION_LISTENER_READY_EVENT,
+  isCCListenerReady,
+} from "@session/lib/ccListenerReadiness";
 
 const LISTENER_READY_TIMEOUT_MS = 5000;
 
@@ -18,10 +29,13 @@ const LISTENER_READY_TIMEOUT_MS = 5000;
 function waitForListenerReady(
   eventName: string,
   sessionId: string,
-  timeoutMs = LISTENER_READY_TIMEOUT_MS
+  timeoutMs = LISTENER_READY_TIMEOUT_MS,
 ): Promise<boolean> {
   return new Promise((resolve) => {
-    if (typeof window === 'undefined' || isCCListenerReady(eventName, sessionId)) {
+    if (
+      typeof window === "undefined" ||
+      isCCListenerReady(eventName, sessionId)
+    ) {
       resolve(true);
       return;
     }
@@ -58,24 +72,24 @@ async function waitForListeners(sessionId: string): Promise<void> {
   ]);
 
   if (!messageReady || !permissionReady) {
-    throw new Error('消息连接尚未就绪，输入已保留，请重试');
+    throw new Error("消息连接尚未就绪，输入已保留，请重试");
   }
 }
 
 const OPTIONAL_OPTION_KEYS = [
-  'fallbackModel',
-  'maxTurns',
-  'maxBudgetUsd',
-  'maxThinkingTokens',
-  'allowedTools',
-  'disallowedTools',
+  "fallbackModel",
+  "maxTurns",
+  "maxBudgetUsd",
+  "maxThinkingTokens",
+  "allowedTools",
+  "disallowedTools",
 ] as const;
 
 /** Builds the payload shared by `cc_new_session` and `cc_resume_session`. */
 function buildAgentOptions(
   options: CCOptions,
   cwd: string,
-  extra?: Partial<CcAgentOptionsPayload>
+  extra?: Partial<CcAgentOptionsPayload>,
 ): CcAgentOptionsPayload {
   const payload: CcAgentOptionsPayload = {
     cwd,
@@ -117,15 +131,27 @@ export function useCCSessionManager() {
   const setPendingNewSession = useCCStore((s) => s.setPendingNewSession);
   const removeActiveSessionId = useCCStore((s) => s.removeActiveSessionId);
   const addAgentCard = useAgentCenterStore((s) => s.addAgentCard);
-  const setCurrentAgentCardId = useAgentCenterStore((s) => s.setCurrentAgentCardId);
+  const setCurrentAgentCardId = useAgentCenterStore(
+    (s) => s.setCurrentAgentCardId,
+  );
 
   // Guards against concurrent resume/select calls clobbering each other's state.
   const inFlightRef = useRef<string | null>(null);
 
   const handleNewSession = useCallback(
-    async (initialMessage?: string, initialImages: string[] = []) => {
+    async (
+      initialMessage?: string,
+      initialImages: string[] = [],
+      onCreated?: (id: string) => Promise<void>,
+    ) => {
       const cwd = useWorkspaceStore.getState().cwd;
       let createdSessionId: string | null = null;
+      const originalSessionId = useCCStore.getState().activeSessionId;
+      const stillSelected = () =>
+        useAgentSettingsStore.getState().selectedAgent === "cc" &&
+        !useAcpStore.getState().active &&
+        useWorkspaceStore.getState().cwd === cwd &&
+        useCCStore.getState().activeSessionId === originalSessionId;
       try {
         setCurrentAgentCardId(null);
         setLoading(true);
@@ -137,13 +163,14 @@ export function useCCSessionManager() {
           setMessages([]);
           setConnected(false);
           setShowExamples(false);
+          setLoading(false);
           return;
         }
 
         // Prepare worktree if enabled
         let sessionCwd = cwd;
         let sessionWorktreePath: string | undefined;
-        if (options.worktreeMode === 'worktree' && cwd?.trim()) {
+        if (options.worktreeMode === "worktree" && cwd?.trim()) {
           const worktreeKey = `cc-${crypto.randomUUID()}`;
           const prepared = await gitCreateWorktree(cwd, worktreeKey);
           sessionCwd = prepared.worktree_path;
@@ -151,34 +178,44 @@ export function useCCSessionManager() {
         }
 
         if (!sessionCwd?.trim()) {
-          throw new Error('请先选择项目目录');
+          throw new Error("请先选择项目目录");
         }
 
         const claudeAgentOptions = buildAgentOptions(options, sessionCwd);
-        console.debug('ClaudeAgentOptions', claudeAgentOptions);
+        console.debug("ClaudeAgentOptions", claudeAgentOptions);
 
         // Backend creates the session and returns a UUID. Set up all state first so
         // the listener is ready before the first message arrives.
         const sessionId = await ccNewSession(claudeAgentOptions);
         createdSessionId = sessionId;
 
-        setActiveSessionId(sessionId);
-        setMessages([]);
-        setShowExamples(false);
-        addMessage({ type: 'user', text: initialMessage ?? '' });
-        setConnected(true);
-        setSessionLoading(sessionId, true);
-        addAgentCard({
-          kind: 'cc',
-          id: sessionId,
-          preview: initialMessage,
-          worktreePath: sessionWorktreePath,
-          cwd: sessionCwd,
+        const activate = stillSelected();
+        if (activate) {
+          setActiveSessionId(sessionId);
+          setMessages([]);
+          setShowExamples(false);
+          setConnected(true);
+        } else useCCStore.getState().addActiveSessionId(sessionId);
+        useCCStore.getState().addMessageToSession(sessionId, {
+          type: "user",
+          text: initialMessage ?? "",
         });
-        setCurrentAgentCardId(sessionId);
+        setSessionLoading(sessionId, true);
+        addAgentCard(
+          {
+            kind: "cc",
+            id: sessionId,
+            preview: initialMessage,
+            worktreePath: sessionWorktreePath,
+            cwd: sessionCwd,
+          },
+          { activate },
+        );
+        if (activate) setCurrentAgentCardId(sessionId, "cc");
+        await onCreated?.(sessionId);
         setPendingNewSession({
           session_id: sessionId,
-          summary: initialMessage ?? '',
+          summary: initialMessage ?? "",
           last_modified: Date.now(),
           cwd: sessionCwd,
         });
@@ -186,20 +223,32 @@ export function useCCSessionManager() {
         // Send the initial message only once the listeners are actually bound,
         // otherwise the first streamed events are dropped.
         await waitForListeners(sessionId);
-        await ccSendMessage(sessionId, initialMessage ?? '', initialImages);
+        await ccSendMessage(sessionId, initialMessage ?? "", initialImages);
         return true;
 
-        console.info('[useCCSessionManager] New session created', {
+        console.info("[useCCSessionManager] New session created", {
           sessionId,
           permissionMode: options.permissionMode,
         });
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : '创建 Claude 会话失败');
-        setConnected(false);
+        toast.error(
+          error instanceof Error ? error.message : "创建 Claude 会话失败",
+        );
+        if (
+          [originalSessionId, createdSessionId].includes(
+            useCCStore.getState().activeSessionId,
+          )
+        )
+          setConnected(false);
         if (createdSessionId) setSessionLoading(createdSessionId, false);
         return false;
       } finally {
-        setLoading(false);
+        if (
+          [originalSessionId, createdSessionId].includes(
+            useCCStore.getState().activeSessionId,
+          )
+        )
+          setLoading(false);
       }
     },
     [
@@ -214,28 +263,34 @@ export function useCCSessionManager() {
       setPendingNewSession,
       setSessionLoading,
       setShowExamples,
-    ]
+    ],
   );
 
   const handleResumeSession = useCallback(
     async (sessionId: string, projectPath?: string) => {
       if (inFlightRef.current === sessionId) {
-        console.info('[useCCSessionManager] Resume already in flight, ignoring', { sessionId });
+        console.info(
+          "[useCCSessionManager] Resume already in flight, ignoring",
+          { sessionId },
+        );
         return;
       }
       inFlightRef.current = sessionId;
 
       const effectiveCwd = projectPath ?? useWorkspaceStore.getState().cwd;
       try {
-        console.info('[useCCSessionManager] Resume session start', {
+        console.info("[useCCSessionManager] Resume session start", {
           sessionId,
           cwd: effectiveCwd,
         });
 
         if (!effectiveCwd?.trim()) {
-          console.error('[useCCSessionManager] Cannot resume session without a working directory', {
-            sessionId,
-          });
+          console.error(
+            "[useCCSessionManager] Cannot resume session without a working directory",
+            {
+              sessionId,
+            },
+          );
           return;
         }
 
@@ -258,7 +313,10 @@ export function useCCSessionManager() {
           const history = await ccGetSessionMessages(sessionId);
           setMessages(fromSdkMessages(history, sessionId));
         } catch (err) {
-          console.warn('[useCCSessionManager] Failed to load session history', { sessionId, err });
+          console.warn("[useCCSessionManager] Failed to load session history", {
+            sessionId,
+            err,
+          });
         }
 
         // Wait for CC view listener readiness before replaying historical messages.
@@ -269,9 +327,9 @@ export function useCCSessionManager() {
           buildAgentOptions(options, effectiveCwd, {
             resume: sessionId,
             continueConversation: true,
-          })
+          }),
         );
-        console.info('[useCCSessionManager] Resume session success', {
+        console.info("[useCCSessionManager] Resume session success", {
           sessionId,
           cwd: effectiveCwd,
         });
@@ -280,7 +338,7 @@ export function useCCSessionManager() {
         // Connection will happen when user sends first message
         setConnected(false);
       } catch (error) {
-        console.error('[useCCSessionManager] Failed to resume session', {
+        console.error("[useCCSessionManager] Failed to resume session", {
           sessionId,
           cwd: effectiveCwd,
           error,
@@ -304,19 +362,25 @@ export function useCCSessionManager() {
       setSessionLoading,
       setShowExamples,
       removeActiveSessionId,
-    ]
+    ],
   );
 
   const handleSessionSelect = useCallback(
     async (sessionId: string, projectPath?: string) => {
-      console.info('[useCCSessionManager] Session selected', { sessionId, cwd: projectPath });
+      console.info("[useCCSessionManager] Session selected", {
+        sessionId,
+        cwd: projectPath,
+      });
 
       // If session is already active (in activeSessionIds), just switch to it — no backend resume needed
       const currentActiveSessionIds = useCCStore.getState().activeSessionIds;
       if (currentActiveSessionIds.includes(sessionId)) {
-        console.info('[useCCSessionManager] Session already active, switching without resume', {
-          sessionId,
-        });
+        console.info(
+          "[useCCSessionManager] Session already active, switching without resume",
+          {
+            sessionId,
+          },
+        );
         if (projectPath && useWorkspaceStore.getState().cwd !== projectPath) {
           useWorkspaceStore.getState().setCwd(projectPath);
         }
@@ -326,7 +390,7 @@ export function useCCSessionManager() {
 
       await handleResumeSession(sessionId, projectPath);
     },
-    [handleResumeSession, switchToSession]
+    [handleResumeSession, switchToSession],
   );
 
   return {

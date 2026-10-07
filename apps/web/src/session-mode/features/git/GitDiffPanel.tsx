@@ -1,26 +1,31 @@
-import type { ServerNotification } from '@session/bindings';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import '@git-diff-view/react/styles/diff-view-pure.css';
+import type { ServerNotification } from "@session/bindings";
+import { Button } from "@session/components/ui/button";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import "@git-diff-view/react/styles/diff-view-pure.css";
 import {
   type AggregatedFileChange,
   aggregateTurnChangesFromContext,
   getDiffViewerProps,
   type RenderEventContext,
-} from '@session/components/codex/items/fileChangeLogic';
-import { SummaryFileChanges } from '@session/components/codex/items/SummaryFileChanges';
-import { useCodexStore } from '@session/components/codex/stores/useCodexStore';
-import { useGitWatch } from '@session/hooks/useGitWatch';
-import { gitStageFiles, gitStatus, gitUnstageFiles } from '@session/services/apiAdapt';
-import { isGitRepo } from '@session/services/apiAdapt/git';
-import { useEditorStore, useLayoutStore } from '@session/stores';
-import { useGitDiffStore } from '@session/stores/useGitDiffStore';
-import { GitDiffDialogs } from './GitDiffDialogs';
-import { GitDiffFileList, isDiffAutoExpanded } from './GitDiffFileList';
-import { GitDiffTopBar } from './GitDiffTopBar';
-import { GitFileTreePanel } from './GitFileTreePanel';
-import type { DiffSection, GitDiffPanelProps } from './types';
+} from "@session/components/codex/items/fileChangeLogic";
+import { SummaryFileChanges } from "@session/components/codex/items/SummaryFileChanges";
+import { useCodexStore } from "@session/components/codex/stores/useCodexStore";
+import { useGitWatch } from "@session/hooks/useGitWatch";
+import {
+  gitStageFiles,
+  gitStatus,
+  gitUnstageFiles,
+} from "@session/services/apiAdapt";
+import { isGitRepo } from "@session/services/apiAdapt/git";
+import { useEditorStore, useLayoutStore } from "@session/stores";
+import { useGitDiffStore } from "@session/stores/useGitDiffStore";
+import { GitDiffDialogs } from "./GitDiffDialogs";
+import { GitDiffFileList, isDiffAutoExpanded } from "./GitDiffFileList";
+import { GitDiffTopBar } from "./GitDiffTopBar";
+import { GitFileTreePanel } from "./GitFileTreePanel";
+import type { DiffSection, GitDiffPanelProps } from "./types";
 const EMPTY_EVENTS: ServerNotification[] = [];
-import { buildFileTree } from './utils';
+import { buildFileTree } from "./utils";
 
 export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
   const { activeFile, openFile } = useEditorStore();
@@ -61,10 +66,10 @@ export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
 
   const [cwdTrigger, setCwdTrigger] = useState(0);
 
-  const toPosix = useCallback((value: string) => value.replace(/\\/g, '/'), []);
+  const toPosix = useCallback((value: string) => value.replace(/\\/g, "/"), []);
   const normalizeRelativePath = useCallback(
-    (value: string) => toPosix(value).replace(/^\/+/, ''),
-    [toPosix]
+    (value: string) => toPosix(value).replace(/^\/+/, ""),
+    [toPosix],
   );
 
   const prevCwdRef = useRef(cwd);
@@ -80,13 +85,16 @@ export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
   }, [cwd, syncCwd]);
 
   // Get codex events for the current thread
-  const currentThreadEvents = useCodexStore(state => diffSource === 'latest-turn' && state.currentThreadId
-    ? state.events[state.currentThreadId] ?? EMPTY_EVENTS : EMPTY_EVENTS);
+  const currentThreadEvents = useCodexStore((state) =>
+    diffSource === "latest-turn" && state.currentThreadId
+      ? (state.events[state.currentThreadId] ?? EMPTY_EVENTS)
+      : EMPTY_EVENTS,
+  );
   const latestTurnId = useMemo(() => {
     let lastTurnId: string | null = null;
     for (let i = currentThreadEvents.length - 1; i >= 0; i -= 1) {
       const event = currentThreadEvents[i];
-      if (event.method === 'turn/completed') {
+      if (event.method === "turn/completed") {
         lastTurnId = event.params.turn.id;
         break;
       }
@@ -98,7 +106,7 @@ export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
   const renderContext = useMemo((): RenderEventContext | undefined => {
     if (!latestTurnId) return undefined;
     const eventIndex = currentThreadEvents.findIndex(
-      (e) => e.method === 'turn/completed' && e.params.turn.id === latestTurnId
+      (e) => e.method === "turn/completed" && e.params.turn.id === latestTurnId,
     );
     if (eventIndex < 0) return undefined;
     return { events: currentThreadEvents, eventIndex };
@@ -106,6 +114,7 @@ export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
 
   const refreshGitStatus = useCallback(async () => {
     if (!cwd) return;
+    setGitLoading(true);
     if (!(await isGitRepo(cwd))) {
       setGitData(null);
       setGitError(null);
@@ -146,17 +155,22 @@ export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
   const stagedEntries = useMemo(
     () =>
       (gitData?.entries ?? [])
-        .filter((entry) => entry.index_status !== ' ' && entry.index_status !== '?')
+        .filter(
+          (entry) => entry.index_status !== " " && entry.index_status !== "?",
+        )
         .sort((a, b) => a.path.localeCompare(b.path)),
-    [gitData]
+    [gitData],
   );
 
   const unstagedEntries = useMemo(
     () =>
       (gitData?.entries ?? [])
-        .filter((entry) => entry.worktree_status !== ' ' || entry.index_status === '?')
+        .filter(
+          (entry) =>
+            entry.worktree_status !== " " || entry.index_status === "?",
+        )
         .sort((a, b) => a.path.localeCompare(b.path)),
-    [gitData]
+    [gitData],
   );
 
   // Derive active section based on priority: explicit user interaction > active tab context
@@ -176,22 +190,28 @@ export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
     }
 
     // Infer section automatically only when a tab is selected independently outside git view
-    const cwdPosix = toPosix(cwd).replace(/\/+$/, '');
+    const cwdPosix = toPosix(cwd).replace(/\/+$/, "");
     const activePosix = toPosix(activeFile);
     if (!activePosix.startsWith(`${cwdPosix}/`)) {
       return userSelectedDiffSection;
     }
 
-    const relativePath = normalizeRelativePath(activePosix.slice(cwdPosix.length + 1));
+    const relativePath = normalizeRelativePath(
+      activePosix.slice(cwdPosix.length + 1),
+    );
     const unstagedMap = new Map(
-      unstagedEntries.map((e) => [normalizeRelativePath(e.path), e.path] as const)
+      unstagedEntries.map(
+        (e) => [normalizeRelativePath(e.path), e.path] as const,
+      ),
     );
     const stagedMap = new Map(
-      stagedEntries.map((e) => [normalizeRelativePath(e.path), e.path] as const)
+      stagedEntries.map(
+        (e) => [normalizeRelativePath(e.path), e.path] as const,
+      ),
     );
 
-    if (unstagedMap.has(relativePath)) return 'unstaged';
-    if (stagedMap.has(relativePath)) return 'staged';
+    if (unstagedMap.has(relativePath)) return "unstaged";
+    if (stagedMap.has(relativePath)) return "staged";
 
     return userSelectedDiffSection;
   }, [
@@ -208,17 +228,22 @@ export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
   ]);
 
   const activeEntries = useMemo(
-    () => (selectedDiffSection === 'staged' ? stagedEntries : unstagedEntries),
-    [selectedDiffSection, stagedEntries, unstagedEntries]
+    () => (selectedDiffSection === "staged" ? stagedEntries : unstagedEntries),
+    [selectedDiffSection, stagedEntries, unstagedEntries],
   );
 
   const filteredEntries = useMemo(() => {
     const keyword = filterText.trim().toLowerCase();
     if (!keyword) return activeEntries;
-    return activeEntries.filter((entry) => entry.path.toLowerCase().includes(keyword));
+    return activeEntries.filter((entry) =>
+      entry.path.toLowerCase().includes(keyword),
+    );
   }, [activeEntries, filterText]);
 
-  const fileTree = useMemo(() => buildFileTree(filteredEntries), [filteredEntries]);
+  const fileTree = useMemo(
+    () => buildFileTree(filteredEntries),
+    [filteredEntries],
+  );
 
   // Fold/expand state is tracked per section so switching staged/unstaged
   // restores what that side looked like instead of inheriting the other's.
@@ -230,30 +255,39 @@ export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
       filteredEntries.length > 0 &&
       filteredEntries.every(
         (entry, index) =>
-          !(sectionExpandedDiffs[entry.path] ?? isDiffAutoExpanded(index, filteredEntries.length))
+          !(
+            sectionExpandedDiffs[entry.path] ??
+            isDiffAutoExpanded(index, filteredEntries.length)
+          ),
       ),
-    [filteredEntries, sectionExpandedDiffs]
+    [filteredEntries, sectionExpandedDiffs],
   );
   const toggleAllDiffs = useCallback(() => {
     setAllDiffsExpanded(
       selectedDiffSection,
       filteredEntries.map((entry) => entry.path),
-      allDiffsCollapsed
+      allDiffsCollapsed,
     );
-  }, [selectedDiffSection, filteredEntries, allDiffsCollapsed, setAllDiffsExpanded]);
+  }, [
+    selectedDiffSection,
+    filteredEntries,
+    allDiffsCollapsed,
+    setAllDiffsExpanded,
+  ]);
 
   const handleFolderToggle = useCallback(
     (path: string) => toggleFolder(selectedDiffSection, path),
-    [selectedDiffSection, toggleFolder]
+    [selectedDiffSection, toggleFolder],
   );
 
   const handleDiffExpandedChange = useCallback(
-    (path: string, expanded: boolean) => setDiffExpanded(selectedDiffSection, path, expanded),
-    [selectedDiffSection, setDiffExpanded]
+    (path: string, expanded: boolean) =>
+      setDiffExpanded(selectedDiffSection, path, expanded),
+    [selectedDiffSection, setDiffExpanded],
   );
 
   const bulkStagePaths = useMemo(() => {
-    if (selectedDiffSection !== 'unstaged') return [];
+    if (selectedDiffSection !== "unstaged") return [];
     return [...new Set(filteredEntries.map((entry) => entry.path))];
   }, [filteredEntries, selectedDiffSection]);
 
@@ -263,31 +297,47 @@ export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
 
     if (userSelectedDiffPath) {
       const normUserPath = normalizeRelativePath(userSelectedDiffPath);
-      const hasMatch = filteredEntries.some((e) => normalizeRelativePath(e.path) === normUserPath);
+      const hasMatch = filteredEntries.some(
+        (e) => normalizeRelativePath(e.path) === normUserPath,
+      );
       if (hasMatch) return userSelectedDiffPath;
     }
 
     if (activeFile && cwd) {
-      const cwdPosix = toPosix(cwd).replace(/\/+$/, '');
+      const cwdPosix = toPosix(cwd).replace(/\/+$/, "");
       const activePosix = toPosix(activeFile);
       if (activePosix.startsWith(`${cwdPosix}/`)) {
-        const relativePath = normalizeRelativePath(activePosix.slice(cwdPosix.length + 1));
-        const match = filteredEntries.find((e) => normalizeRelativePath(e.path) === relativePath);
+        const relativePath = normalizeRelativePath(
+          activePosix.slice(cwdPosix.length + 1),
+        );
+        const match = filteredEntries.find(
+          (e) => normalizeRelativePath(e.path) === relativePath,
+        );
         if (match) return match.path;
       }
     }
 
     return filteredEntries[0].path;
-  }, [filteredEntries, userSelectedDiffPath, activeFile, cwd, toPosix, normalizeRelativePath]);
+  }, [
+    filteredEntries,
+    userSelectedDiffPath,
+    activeFile,
+    cwd,
+    toPosix,
+    normalizeRelativePath,
+  ]);
 
   const resolveDiffPath = useCallback(
     (relativePath: string) => {
       if (!cwd) return relativePath;
-      if (relativePath.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(relativePath)) return relativePath;
-      const sep = cwd.includes('\\') ? '\\' : '/';
-      return cwd.endsWith(sep) ? `${cwd}${relativePath}` : `${cwd}${sep}${relativePath}`;
+      if (relativePath.startsWith("/") || /^[a-zA-Z]:[\\/]/.test(relativePath))
+        return relativePath;
+      const sep = cwd.includes("\\") ? "\\" : "/";
+      return cwd.endsWith(sep)
+        ? `${cwd}${relativePath}`
+        : `${cwd}${sep}${relativePath}`;
     },
-    [cwd]
+    [cwd],
   );
 
   // Keep the selected file visible in the tree when the selection moves into a collapsed folder
@@ -320,7 +370,7 @@ export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
       setLastInternallyOpenedFile(resolved);
       openFile(resolved);
     },
-    [resolveDiffPath, openFile, selectDiffPath, setLastInternallyOpenedFile]
+    [resolveDiffPath, openFile, selectDiffPath, setLastInternallyOpenedFile],
   );
 
   const runStage = async (paths: string[]) => {
@@ -364,7 +414,7 @@ export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
   }, [latestTurnId, renderContext]);
 
   // When diffSource is 'latest-turn', show the aggregated changes from the latest turn
-  if (diffSource === 'latest-turn') {
+  if (diffSource === "latest-turn") {
     return (
       <div className="h-full min-h-0 flex flex-col overflow-hidden relative">
         <GitDiffTopBar
@@ -385,7 +435,7 @@ export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
           <div className="flex-1 min-w-0 min-h-0 overflow-y-auto p-4">
             {latestTurnChanges.length === 0 ? (
               <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-                No file changes in latest turn
+                最近一轮没有文件变更
               </div>
             ) : (
               <SummaryFileChanges
@@ -418,6 +468,30 @@ export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
         onToggleAllDiffs={toggleAllDiffs}
       />
 
+      {gitError && (
+        <div
+          role="alert"
+          className="m-2 rounded border border-destructive/30 p-3 text-sm"
+        >
+          <p className="break-words text-destructive">
+            无法读取变更：{gitError}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            disabled={gitLoading}
+            onClick={() => void refreshGitStatus()}
+          >
+            重新加载变更
+          </Button>
+        </div>
+      )}
+      {gitLoading && (
+        <div role="status" className="px-3 py-2 text-xs text-muted-foreground">
+          正在读取变更…
+        </div>
+      )}
       <div className="flex-1 min-h-0 flex overflow-hidden">
         <GitDiffFileList
           cwd={cwd}
@@ -441,7 +515,7 @@ export default function GitDiffPanel({ cwd, isActive }: GitDiffPanelProps) {
               bulkStagePaths={bulkStagePaths}
               bulkStageLoading={bulkStageLoading}
               filterText={filterText}
-              gitError={gitError}
+              gitError={null}
               filteredEntriesCount={filteredEntries.length}
               fileTree={fileTree}
               selectedDiffPath={effectiveSelectedDiffPath}

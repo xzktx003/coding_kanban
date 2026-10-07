@@ -1,17 +1,26 @@
+import { useAcpStore } from "@session/stores/useAcpStore";
+import { SessionAgentBadge } from "../common/SessionAgentBadge";
+import { UnreadDot } from "../common/SessionStatus";
+import { useSessionNameStore } from "../../stores/useSessionNameStore";
 // Pinned threads/sessions across all projects, shown as a collapsible sidebar section.
-import { ChevronDown, ChevronRight, Pin, PinOff } from 'lucide-react';
-import { useCallback } from 'react';
-import { Button } from '@session/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@session/components/ui/collapsible';
-import { useCCSessionManager } from '@session/hooks/useCCSessionManager';
-import { codexService } from '@session/services/codexService';
-import { useAgentCenterStore, useLayoutStore } from '@session/stores';
-import { useAgentSettingsStore } from '@session/stores/useAgentSettingsStore';
-import { type PinnedItem, usePinStore } from '@session/stores/usePinStore';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
-import { getFilename } from '@session/utils/getFilename';
+import { ChevronDown, ChevronRight, Pin, PinOff } from "lucide-react";
+import { useCallback } from "react";
+import { Button } from "@session/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@session/components/ui/collapsible";
+import { useCCSessionManager } from "@session/hooks/useCCSessionManager";
+import { codexService } from "@session/services/codexService";
+import { useAgentCenterStore, useLayoutStore } from "@session/stores";
+import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
+import { type PinnedItem, usePinStore } from "@session/stores/usePinStore";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { getFilename } from "@session/utils/getFilename";
 
 export function SideBarPinnedList() {
+  const names = useSessionNameStore((s) => s.names);
   const pinned = usePinStore((s) => s.pinned);
   const unpin = usePinStore((s) => s.unpin);
   const { setCwd } = useWorkspaceStore();
@@ -25,12 +34,18 @@ export function SideBarPinnedList() {
   const handleOpen = useCallback(
     async (item: PinnedItem) => {
       setCwd(item.cwd);
-      addAgentCard({ kind: item.kind, id: item.id, preview: item.title, cwd: item.cwd });
+      addAgentCard({
+        kind: item.kind,
+        id: item.id,
+        preview: item.title,
+        cwd: item.cwd,
+      });
       setCurrentAgentCardId(item.id);
+      useAcpStore.getState().setActive(false);
       setSelectedAgent(item.kind);
       setActiveSidebarTab(item.kind);
-      setView('agent');
-      if (item.kind === 'codex') {
+      setView("agent");
+      if (item.kind === "codex") {
         await codexService.setCurrentThread(item.id);
       } else {
         await handleSessionSelect(item.id, item.cwd);
@@ -44,7 +59,7 @@ export function SideBarPinnedList() {
       setCwd,
       setSelectedAgent,
       setView,
-    ]
+    ],
   );
 
   if (pinned.length === 0) return null;
@@ -53,8 +68,12 @@ export function SideBarPinnedList() {
     <Collapsible open={open} onOpenChange={setOpen}>
       <CollapsibleTrigger className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-sm hover:bg-accent/50">
         <Pin className="h-4 w-4" />
-        <span className="flex-1 text-left">Pinned</span>
-        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        <span className="flex-1 text-left">置顶会话</span>
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5" />
+        )}
       </CollapsibleTrigger>
       <CollapsibleContent>
         {pinned.map((item) => (
@@ -63,18 +82,30 @@ export function SideBarPinnedList() {
             role="button"
             tabIndex={0}
             onClick={() => void handleOpen(item)}
-            title={`${item.title}\n${item.cwd}`}
-            className="group flex w-full items-center gap-2 rounded-md px-2.5 py-1 text-left hover:bg-accent/50"
+            onKeyDown={(event) => {
+              if (event.target !== event.currentTarget) return;
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                void handleOpen(item);
+              }
+            }}
+            title={`${names[`${item.kind}:${item.id}`] ?? item.title}\n${item.cwd}`}
+            className="group/session-row session-nav-row flex w-full items-center gap-2 rounded-md px-2.5 py-1 text-left hover:bg-accent/50"
           >
-            <span className="min-w-0 flex-1 truncate text-xs">{item.title || 'Untitled'}</span>
-            <span className="shrink-0 text-[10px] text-muted-foreground group-hover:hidden">
+            <SessionAgentBadge kind={item.kind} />
+            <span className="session-row-title min-w-0 flex-1 text-xs">
+              {names[`${item.kind}:${item.id}`] ?? (item.title || "Untitled")}
+            </span>
+            <UnreadDot kind={item.kind} id={item.id} />
+            <span className="shrink-0 text-[10px] text-muted-foreground group-hover/session-row:hidden group-focus-within/session-row:hidden">
               {getFilename(item.cwd)}
             </span>
             <Button
               variant="ghost"
               size="icon-xs"
-              title="Unpin"
-              className="hidden shrink-0 group-hover:inline-flex"
+              title="取消置顶"
+              aria-label={`取消置顶${names[`${item.kind}:${item.id}`] ?? item.title}`}
+              className="shrink-0 opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 max-sm:opacity-100"
               onClick={(e) => {
                 e.stopPropagation();
                 unpin(item.id);

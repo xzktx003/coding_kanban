@@ -1,3 +1,4 @@
+import { useSessionReadReceipt } from "@session/hooks/useSessionReadReceipt";
 import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { codexService } from "@session/services/codexService";
@@ -34,8 +35,6 @@ const EMPTY_EVENTS: ServerNotification[] = [];
 const positions = new Map<
   string,
   {
-    offset: number;
-    atBottom: boolean;
     measurements: VirtualItem[];
     width: number;
     disclosure: Map<string, Map<string, unknown>>;
@@ -47,8 +46,7 @@ const ThreadMessage = memo(
     return item.kind === "cmdGroup" ? (
       <CommandActionSummaryItem
         actions={item.actions}
-        commandItemId={item.commandItemId}
-        aggregatedOutput={item.aggregatedOutput}
+        actionSources={item.actionSources}
         completed={item.completed}
       />
     ) : (
@@ -82,13 +80,16 @@ const CodexTranscript = memo(function CodexTranscript({
   const retryNotice = useCodexStore((s) => s.retryNoticeMap[activeThreadId]);
   const rows = useMemo(() => buildThreadRows(events), [events]);
   const rootRef = useRef<HTMLDivElement>(null);
+  const latestRef = useRef<HTMLDivElement>(null);
+  useSessionReadReceipt("codex", activeThreadId, latestRef);
   const contentRef = useRef<HTMLDivElement>(null);
   const saved = useRef(positions.get(activeThreadId));
   const userScrolling = useRef(false);
   const disclosure = useRef(
     saved.current?.disclosure ?? new Map<string, Map<string, unknown>>(),
   );
-  const pinned = useRef(saved.current?.atBottom ?? true);
+  // Each opening starts at the latest reply; retain only measurement/disclosure caches.
+  const pinned = useRef(true);
   const [isAtBottom, setAtBottom] = useState(pinned.current);
   const viewport = useCallback(
     () =>
@@ -124,10 +125,7 @@ const CodexTranscript = memo(function CodexTranscript({
     getItemKey: (index) => rows[index].key,
     overscan: 2,
     initialRect: { width: 768, height: 600 },
-    initialOffset: () =>
-      saved.current && !saved.current.atBottom
-        ? saved.current.offset
-        : Math.max(0, rows.length * 160 - 600),
+    initialOffset: () => Math.max(0, rows.length * 160 - 600),
   });
   // Preserve the reading anchor when an earlier row changes height (images/code/resize).
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) =>
@@ -137,8 +135,25 @@ const CodexTranscript = memo(function CodexTranscript({
     userScrolling.current = false;
     setAtBottom(true);
     const element = viewport();
-    if (element) element.scrollTop = Number.MAX_SAFE_INTEGER;
+    // WebKit binds scrollTop to a signed integer: huge sentinel values can wrap
+    // negative and land at the top. Always use the actual, bounded scroll range.
+    if (element)
+      element.scrollTop = Math.max(
+        0,
+        element.scrollHeight - element.clientHeight,
+      );
   }, [viewport]);
+
+  useEffect(() => {
+    const locate = (event: Event) => {
+      const target = (event as CustomEvent<{ kind: string; id: string }>)
+        .detail;
+      if (target?.kind === "codex" && target.id === activeThreadId)
+        jumpToBottom();
+    };
+    window.addEventListener("session-locate-request", locate);
+    return () => window.removeEventListener("session-locate-request", locate);
+  }, [activeThreadId, jumpToBottom]);
 
   const totalSize = virtualizer.getTotalSize();
   useEffect(() => {
@@ -151,17 +166,47 @@ const CodexTranscript = memo(function CodexTranscript({
   useLayoutEffect(() => {
     const element = viewport();
     if (!element) return;
+    let followFrame = 0;
+    let touchStart: { x: number; y: number } | null = null;
     const onScroll = () => {
       if (element.clientHeight === 0) return;
       // Layout/measurement scroll events must not cancel following the latest message.
-      if (pinned.current && !userScrolling.current) return;
+      if (pinned.current && !userScrolling.current) {
+        // Mobile focus/keyboard and virtual-list layout can move the viewport.
+        // A tap is not permission to abandon following the latest reply.
+        if (
+          element.scrollHeight - element.scrollTop - element.clientHeight >
+          4
+        ) {
+          cancelAnimationFrame(followFrame);
+          followFrame = requestAnimationFrame(() => {
+            if (pinned.current && !userScrolling.current) jumpToBottom();
+          });
+        }
+        return;
+      }
       const atBottom =
-        element.scrollHeight - element.scrollTop - element.clientHeight <= 80;
+        element.scrollHeight - element.scrollTop - element.clientHeight <= 4;
       pinned.current = atBottom;
+      if (atBottom) userScrolling.current = false;
       setAtBottom(atBottom);
     };
     const markUserScroll = () => {
       userScrolling.current = true;
+    };
+    const onTouchStart = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      touchStart = touch ? { x: touch.clientX, y: touch.clientY } : null;
+    };
+    const onTouchMove = (event: TouchEvent) => {
+      const touch = event.touches[0];
+      if (!touch || !touchStart) return;
+      const dy = Math.abs(touch.clientY - touchStart.y);
+      if (dy > 8 && dy > Math.abs(touch.clientX - touchStart.x))
+        markUserScroll();
+    };
+    const onTouchEnd = () => {
+      touchStart = null;
     };
     const onKey = (event: KeyboardEvent) => {
       if (
@@ -178,24 +223,36 @@ const CodexTranscript = memo(function CodexTranscript({
         markUserScroll();
     };
     const onPointer = (event: PointerEvent) => {
-      if (event.target instanceof Element) markUserScroll();
+      // Only a mouse scrollbar drag counts; clicking text/buttons and touch taps do not.
+      if (
+        event.pointerType === "mouse" &&
+        event.target === element &&
+        event.clientX >=
+          element.getBoundingClientRect().left + element.clientWidth
+      )
+        markUserScroll();
     };
     element.addEventListener("scroll", onScroll, { passive: true });
     element.addEventListener("wheel", markUserScroll, { passive: true });
-    element.addEventListener("touchstart", markUserScroll, { passive: true });
+    element.addEventListener("touchstart", onTouchStart, { passive: true });
+    element.addEventListener("touchmove", onTouchMove, { passive: true });
+    element.addEventListener("touchend", onTouchEnd, { passive: true });
+    element.addEventListener("touchcancel", onTouchEnd, { passive: true });
     element.addEventListener("keydown", onKey);
     rootRef.current?.addEventListener("pointerdown", onPointer);
     const root = rootRef.current;
     return () => {
       element.removeEventListener("scroll", onScroll);
       element.removeEventListener("wheel", markUserScroll);
-      element.removeEventListener("touchstart", markUserScroll);
+      cancelAnimationFrame(followFrame);
+      element.removeEventListener("touchstart", onTouchStart);
+      element.removeEventListener("touchmove", onTouchMove);
+      element.removeEventListener("touchend", onTouchEnd);
+      element.removeEventListener("touchcancel", onTouchEnd);
       element.removeEventListener("keydown", onKey);
       root?.removeEventListener("pointerdown", onPointer);
       positions.delete(activeThreadId);
       positions.set(activeThreadId, {
-        offset: element.scrollTop,
-        atBottom: pinned.current,
         measurements:
           virtualizer.measurementsCache.length <= 10000
             ? [...virtualizer.measurementsCache]
@@ -205,7 +262,7 @@ const CodexTranscript = memo(function CodexTranscript({
       });
       if (positions.size > 50) positions.delete(positions.keys().next().value!);
     };
-  }, [activeThreadId, viewport, virtualizer]);
+  }, [activeThreadId, viewport, virtualizer, jumpToBottom]);
   useEffect(() => {
     let frame = 0;
     const observer = new ResizeObserver(() => {
@@ -299,7 +356,7 @@ const CodexTranscript = memo(function CodexTranscript({
                   </button>
                 </div>
               )}
-              <ApprovalItem />
+              <ApprovalItem currentThreadId={activeThreadId} />
               <WorkingIndicator
                 turnTiming={turnTiming}
                 retryNotice={retryNotice}
@@ -307,6 +364,7 @@ const CodexTranscript = memo(function CodexTranscript({
               <RequestUserInputItem currentThreadId={activeThreadId} />
               <ElicitationItem currentThreadId={activeThreadId} />
               <PermissionsItem currentThreadId={activeThreadId} />
+              <div ref={latestRef} data-session-latest style={{ height: 1 }} />
             </div>
           </div>
         </ScrollArea>

@@ -1,16 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { type FsChangeEvent, useDirWatch } from '@session/hooks/useDirWatch';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type FsChangeEvent, useDirWatch } from "@session/hooks/useDirWatch";
 import {
   canonicalizePath,
   readDirectory,
   searchFilesByName,
   type TauriFileEntry,
-} from '@session/services/apiAdapt';
-import { useEditorStore } from '@session/stores';
-import { useSettingsStore } from '@session/stores/settings';
-import { getFilename } from '@session/utils/getFilename';
-import type { FileNode } from './types';
-import { buildSearchTree, normalizeName, shouldSkipEntry, sortNodes } from './utils';
+} from "@session/services/apiAdapt";
+import { useEditorStore } from "@session/stores";
+import { useSettingsStore } from "@session/stores/settings";
+import { getFilename } from "@session/utils/getFilename";
+import type { FileNode } from "./types";
+import {
+  buildSearchTree,
+  normalizeName,
+  shouldSkipEntry,
+  sortNodes,
+} from "./utils";
 
 export type UseFileTreeReturn = {
   treeContainerRef: React.RefObject<HTMLDivElement | null>;
@@ -33,13 +38,23 @@ export type UseFileTreeReturn = {
   selectedFilePath: string | null;
 };
 
-const updateChildren = (node: FileNode, targetPath: string, children: FileNode[]): FileNode => {
+const updateChildren = (
+  node: FileNode,
+  targetPath: string,
+  children: FileNode[],
+): FileNode => {
   if (node.path === targetPath) return { ...node, children };
   if (!node.children) return node;
-  return { ...node, children: node.children.map((c) => updateChildren(c, targetPath, children)) };
+  return {
+    ...node,
+    children: node.children.map((c) => updateChildren(c, targetPath, children)),
+  };
 };
 
-const findNodeByPath = (node: FileNode, targetPath: string): FileNode | null => {
+const findNodeByPath = (
+  node: FileNode,
+  targetPath: string,
+): FileNode | null => {
   if (node.path === targetPath) return node;
   if (!node.children) return null;
   for (const child of node.children) {
@@ -57,7 +72,7 @@ export function useFileTree(folder: string): UseFileTreeReturn {
   const [loading, setLoading] = useState(false);
   const [loadingNodes, setLoadingNodes] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
-  const [filterText, setFilterText] = useState('');
+  const [filterText, setFilterText] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchMatches, setSearchMatches] = useState<TauriFileEntry[]>([]);
@@ -76,7 +91,10 @@ export function useFileTree(folder: string): UseFileTreeReturn {
     setFolderTrigger((prev) => prev + 1);
   }
 
-  const hiddenSet = useMemo(() => new Set(hiddenNames.map(normalizeName)), [hiddenNames]);
+  const hiddenSet = useMemo(
+    () => new Set(hiddenNames.map(normalizeName)),
+    [hiddenNames],
+  );
 
   const listDir = useCallback(
     async (dir: string): Promise<FileNode[]> => {
@@ -88,12 +106,21 @@ export function useFileTree(folder: string): UseFileTreeReturn {
           .map((e) => ({
             name: e.name,
             path: e.path,
-            kind: e.is_dir ? ('dir' as const) : ('file' as const),
-          }))
+            kind: e.is_dir ? ("dir" as const) : ("file" as const),
+          })),
       );
     },
-    [hiddenSet]
+    [hiddenSet],
   );
+
+  useEffect(() => {
+    const refresh = (event: Event) => {
+      if ((event as CustomEvent<{ root: string }>).detail?.root === folder)
+        setRefreshKey((key) => key + 1);
+    };
+    window.addEventListener("workspace-files-changed", refresh);
+    return () => window.removeEventListener("workspace-files-changed", refresh);
+  }, [folder]);
 
   // Load root directory
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a manual refresh trigger, used for its identity change alone
@@ -114,12 +141,21 @@ export function useFileTree(folder: string): UseFileTreeReturn {
         const label = getFilename(resolved);
         const children = await listDir(resolved);
         if (isActive) {
-          setRoot({ name: label || folder, path: resolved, kind: 'dir', children });
+          setRoot({
+            name: label || folder,
+            path: resolved,
+            kind: "dir",
+            children,
+          });
           setExpanded(new Set([resolved]));
         }
       } catch (err) {
         if (isActive) {
-          setError(err instanceof Error ? err.message : String(err) || 'Failed to read folder.');
+          setError(
+            err instanceof Error
+              ? err.message
+              : String(err) || "Failed to read folder.",
+          );
           setRoot(null);
         }
       } finally {
@@ -193,7 +229,11 @@ export function useFileTree(folder: string): UseFileTreeReturn {
         if (isActive) setSearchMatches(matches);
       } catch (err) {
         if (isActive) {
-          setSearchError(err instanceof Error ? err.message : String(err) || 'Search failed.');
+          setSearchError(
+            err instanceof Error
+              ? err.message
+              : String(err) || "Search failed.",
+          );
           setSearchMatches([]);
         }
       } finally {
@@ -213,7 +253,7 @@ export function useFileTree(folder: string): UseFileTreeReturn {
   }, [isSearching, root, searchMatches]);
 
   const collectDirPaths = useCallback((node: FileNode): string[] => {
-    if (node.kind !== 'dir') return [];
+    if (node.kind !== "dir") return [];
     return [node.path, ...(node.children?.flatMap(collectDirPaths) ?? [])];
   }, []);
 
@@ -241,13 +281,15 @@ export function useFileTree(folder: string): UseFileTreeReturn {
   };
 
   const loadChildren = async (node: FileNode) => {
-    if (node.kind !== 'dir' || node.children) return;
+    if (node.kind !== "dir" || node.children) return;
     setLoadingNodes((prev) => new Set(prev).add(node.path));
     try {
       const children = await listDir(node.path);
-      setRoot((prev) => (prev ? updateChildren(prev, node.path, children) : prev));
+      setRoot((prev) =>
+        prev ? updateChildren(prev, node.path, children) : prev,
+      );
     } catch (err) {
-      console.warn('Failed to read subdirectory', node.path, err);
+      console.warn("Failed to read subdirectory", node.path, err);
     } finally {
       setLoadingNodes((prev) => {
         const next = new Set(prev);
@@ -270,10 +312,14 @@ export function useFileTree(folder: string): UseFileTreeReturn {
       }
       if (cancelled) return;
 
-      const toPosix = (v: string) => v.replace(/\\/g, '/');
-      const rootPosix = toPosix(root.path).replace(/\/+$/, '');
+      const toPosix = (v: string) => v.replace(/\\/g, "/");
+      const rootPosix = toPosix(root.path).replace(/\/+$/, "");
       const selectedPosix = toPosix(canonicalSelected);
-      if (selectedPosix === rootPosix || !selectedPosix.startsWith(`${rootPosix}/`)) return;
+      if (
+        selectedPosix === rootPosix ||
+        !selectedPosix.startsWith(`${rootPosix}/`)
+      )
+        return;
 
       const targetKey = `${root.path}::${selectedPosix}`;
       if (autoExpandedTargetRef.current === targetKey) return;
@@ -281,15 +327,15 @@ export function useFileTree(folder: string): UseFileTreeReturn {
 
       const parts = selectedPosix
         .slice(rootPosix.length + 1)
-        .split('/')
+        .split("/")
         .filter(Boolean);
       if (parts.length <= 1) return;
 
-      const sep = root.path.includes('\\') ? '\\' : '/';
+      const sep = root.path.includes("\\") ? "\\" : "/";
       const ancestorDirs: string[] = [root.path];
       let cur = root.path;
       for (let i = 0; i < parts.length - 1; i += 1) {
-        cur = `${cur}${cur.endsWith(sep) ? '' : sep}${parts[i]}`;
+        cur = `${cur}${cur.endsWith(sep) ? "" : sep}${parts[i]}`;
         ancestorDirs.push(cur);
       }
 
@@ -323,9 +369,9 @@ export function useFileTree(folder: string): UseFileTreeReturn {
   useEffect(() => {
     if (!selectedFilePath || !treeContainerRef.current) return;
     const row = treeContainerRef.current.querySelector<HTMLElement>(
-      `[data-file-path="${CSS.escape(selectedFilePath)}"]`
+      `[data-file-path="${CSS.escape(selectedFilePath)}"]`,
     );
-    row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    row?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [selectedFilePath]);
 
   // Watch the root folder for fs_change events so we can auto-refresh on deletions/creations.
@@ -347,12 +393,12 @@ export function useFileTree(folder: string): UseFileTreeReturn {
       }
 
       // Handle file/folder removal or creation - trigger refresh
-      if (kind === 'remove' || kind === 'create') {
+      if (kind === "remove" || kind === "create") {
         // Increment refreshKey to trigger a full reload of the tree
         setRefreshKey((prev) => prev + 1);
       }
     },
-    [root, isSearching]
+    [root, isSearching],
   );
 
   useDirWatch(folder || null, handleFsChange);

@@ -96,7 +96,8 @@ impl AcpState {
             self.sink.clone(),
         )
         .await?;
-        self.connections.insert(connection_id.clone(), client.clone());
+        self.connections
+            .insert(connection_id.clone(), client.clone());
 
         if let Some(bot) = &bot {
             crate::bots::select_provider(&client, bot).await;
@@ -147,6 +148,18 @@ impl AcpState {
         self.get(connection_id)?.cancel(session_id).await
     }
 
+    pub async fn prompt_with_images(
+        &self,
+        connection_id: &str,
+        session_id: Option<&str>,
+        text: &str,
+        images: &[crate::images::AcpImage],
+    ) -> Result<Value, String> {
+        self.get(connection_id)?
+            .prompt_with_images(session_id, text, images)
+            .await
+    }
+
     pub async fn authenticate(&self, connection_id: &str, method_id: &str) -> Result<(), String> {
         let client = self.get(connection_id)?;
         client.authenticate(method_id).await
@@ -165,7 +178,9 @@ impl AcpState {
     /// A bot's settings belong on every session its process opens or resumes,
     /// not only the first one.
     async fn apply_bot_settings(&self, client: &AcpClient, session_id: &str) {
-        let Some(bot_id) = client.bot_id.as_deref() else { return };
+        let Some(bot_id) = client.bot_id.as_deref() else {
+            return;
+        };
         match codexia_db::bots::get_bot(bot_id) {
             Ok(Some(bot)) => crate::bots::apply_settings(client, session_id, &bot).await,
             Ok(None) => {}

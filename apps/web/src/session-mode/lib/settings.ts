@@ -1,18 +1,18 @@
+import {
+  normalizeSessionNames,
+  useSessionNameStore,
+} from "../stores/useSessionNameStore";
 /**
- * Persistent settings backed by ~/.codexia/settings.json
- *
- * Usage:
- *   - Call loadSettings() before rendering the app (hydrates all stores from file)
- *   - Call initSettingsSync() once to subscribe stores → debounced file write
- *   - Both are called in App.tsx AppShell
+ * Legacy server settings retain backend-owned configuration and session display names.
+ * Shared project/tab membership uses operation APIs; device navigation/preferences
+ * persist in browser stores and must never be written back as a workspace snapshot.
  */
 
-import { getJsonWithOptions, postNoContentWithOptions } from '@session/services/apiAdapt/shared';
-import { fetchRemoteSettings } from '@session/services/apiAdapt/settings';
-import { useAgentSettingsStore } from '@session/stores/useAgentSettingsStore';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
-
-const SETTINGS_VERSION = 1;
+import {
+  getJsonWithOptions,
+  postNoContentWithOptions,
+} from "@session/services/apiAdapt/shared";
+import { fetchRemoteSettings } from "@session/services/apiAdapt/settings";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,7 +36,9 @@ interface SettingsFile {
 
 async function readSettingsFile(): Promise<SettingsFile | null> {
   try {
-    return await getJsonWithOptions<SettingsFile>("/api/settings", { suppressToast: true });
+    return await getJsonWithOptions<SettingsFile>("/api/settings", {
+      suppressToast: true,
+    });
   } catch {
     return null;
   }
@@ -45,19 +47,12 @@ async function readSettingsFile(): Promise<SettingsFile | null> {
 // ── Hydration ─────────────────────────────────────────────────────────────────
 
 function applySettings(data: SettingsFile): void {
-  if (data.workspace) {
-    const ws = data.workspace;
-    useWorkspaceStore.setState({
-      ...(ws.projects !== undefined && { projects: ws.projects }),
-      ...(ws.historyProjects !== undefined && { historyProjects: ws.historyProjects }),
-      ...(ws.cwd !== undefined && { cwd: ws.cwd }),
-      ...(ws.projectSort !== undefined && { projectSort: ws.projectSort as never }),
-    });
-    useAgentSettingsStore.setState({
-      ...(ws.selectedAgent !== undefined && { selectedAgent: ws.selectedAgent as never }),
-      ...(ws.instructionType !== undefined && { instructionType: ws.instructionType }),
-    });
-  }
+  useSessionNameStore.setState((s) => ({
+    names: { ...s.names, ...normalizeSessionNames(data.sessionNames) },
+  }));
+  // Workspace membership is now managed by /api/session/projects.
+  // cwd, history, selected Agent and layout belong to this browser; remote settings
+  // must never hydrate them over a restored local workspace.
 }
 
 export async function loadSettings(): Promise<void> {
@@ -79,64 +74,46 @@ export const remoteSettingsError = (): string | null => lastRemoteError;
 export async function loadRemoteSettings(): Promise<boolean> {
   try {
     const data = (await fetchRemoteSettings()) as SettingsFile;
-    lastRemoteError = data.workspace ? null : 'The desktop returned no workspace settings.';
+    lastRemoteError = data.workspace
+      ? null
+      : "The desktop returned no workspace settings.";
     if (!data.workspace) return false;
     applySettings(data);
     return true;
   } catch (err) {
     lastRemoteError = String(err);
-    console.error('[settings] loadRemoteSettings failed:', err);
+    console.error("[settings] loadRemoteSettings failed:", err);
     return false;
   }
 }
 
-// ── Snapshot ──────────────────────────────────────────────────────────────────
-
-function snapshot(): SettingsFile {
-  const ws = useWorkspaceStore.getState();
-  const as = useAgentSettingsStore.getState();
-
-  return {
-    version: SETTINGS_VERSION,
-    workspace: {
-      projects: ws.projects,
-      historyProjects: ws.historyProjects,
-      selectedAgent: as.selectedAgent,
-      cwd: ws.cwd ?? undefined,
-      projectSort: ws.projectSort,
-      instructionType: as.instructionType,
-    },
-  };
-}
-
 // ── Write ─────────────────────────────────────────────────────────────────────
 
-let writeTimer: ReturnType<typeof setTimeout> | null = null;
-
-function scheduleWrite(): void {
-  if (writeTimer !== null) clearTimeout(writeTimer);
-  writeTimer = setTimeout(async () => {
-    writeTimer = null;
-    try {
-      // Merge rather than replace: the backend keeps its own keys in this file
-      // (`remote.enabled`), and a blind overwrite would drop them.
-      const existing = (await readSettingsFile()) ?? {};
-      await postNoContentWithOptions("/api/settings", { ...existing, ...snapshot() });
-    } catch (err) {
-      console.error('[settings] write failed:', err);
-    }
-  }, 300);
+let writeQueue: Promise<unknown> = Promise.resolve();
+function enqueueWrite<T>(work: () => Promise<T>): Promise<T> {
+  const pending = writeQueue.catch(() => {}).then(work);
+  writeQueue = pending;
+  return pending;
 }
 
-// ── Sync ──────────────────────────────────────────────────────────────────────
+/** Persist a display name alongside workspace settings; never edit native agent history. */
+export function saveSessionName(key: string, name: string): Promise<void> {
+  return enqueueWrite(async () => {
+    const existing = await getJsonWithOptions<SettingsFile>("/api/settings", {
+      suppressToast: true,
+    });
+    const sessionNames = {
+      ...normalizeSessionNames(existing.sessionNames),
+      [key]: name,
+    };
+    await postNoContentWithOptions("/api/settings", {
+      ...existing,
+      sessionNames,
+    });
+  });
+}
 
-/** Subscribe all tracked stores. Returns an unsubscribe function. */
+/** Workspace/Agent stores persist locally; shared collections use operation queues. */
 export function initSettingsSync(): () => void {
-  const unsubs = [
-    useWorkspaceStore.subscribe(scheduleWrite),
-    useAgentSettingsStore.subscribe(scheduleWrite),
-  ];
-  return () => {
-    for (const fn of unsubs) fn();
-  };
+  return () => {};
 }

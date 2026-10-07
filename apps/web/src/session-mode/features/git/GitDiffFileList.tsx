@@ -1,6 +1,6 @@
-import type { GitStatusEntry } from '@session/services/apiAdapt';
-import { GitDiffFileItem } from './GitDiffFileItem';
-import type { DiffSection, DiffSource } from './types';
+import type { GitStatusEntry } from "@session/services/apiAdapt";
+import { GitDiffFileItem } from "./GitDiffFileItem";
+import type { DiffSection, DiffSource } from "./types";
 
 interface GitDiffFileListProps {
   cwd: string | null;
@@ -37,7 +37,7 @@ export function GitDiffFileList({
   if (!cwd) {
     return (
       <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-        No workspace open
+        先选择项目以查看变更
       </div>
     );
   }
@@ -45,7 +45,7 @@ export function GitDiffFileList({
   if (entries.length === 0) {
     return (
       <div className="flex-1 flex items-center justify-center text-sm text-muted-foreground">
-        No changed files
+        {section === "staged" ? "暂无已暂存的变更" : "暂无未暂存的变更"}
       </div>
     );
   }
@@ -60,7 +60,10 @@ export function GitDiffFileList({
           section={section}
           diffSource={diffSource}
           wordWrapEnabled={wordWrapEnabled}
-          expanded={expandedDiffs[entry.path] ?? isDiffAutoExpanded(index, entries.length)}
+          expanded={
+            expandedDiffs[entry.path] ??
+            isDiffAutoExpanded(index, entries.length)
+          }
           isSelected={selectedDiffPath === entry.path}
           refreshKey={refreshKey}
           onExpandedChange={(value) => onExpandedChange(entry.path, value)}

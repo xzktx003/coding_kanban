@@ -1,13 +1,14 @@
-import { useEffect, useRef } from 'react';
-import type { ServerNotification } from '@session/bindings/ServerNotification';
+import { useEffect, useRef } from "react";
+import type { ServerNotification } from "@session/bindings/ServerNotification";
 import type {
   ApprovalRequest,
   ElicitationRequest,
   PermissionsRequest,
   RequestUserInputRequest,
-} from '@session/components/codex/stores';
-import { isDesktopTauri } from '@session/hooks/runtime';
-import { openEventStream } from '@session/lib/eventStream';
+} from "@session/components/codex/stores";
+import { isDesktopTauri } from "@session/hooks/runtime";
+import { openEventStream } from "@session/lib/eventStream";
+import { useRequestUserInputStore } from "../stores/useRequestUserInputStore";
 
 interface SseEventHandlers {
   enabled: boolean;
@@ -55,42 +56,69 @@ export function useSseEventBridge({
       return;
     }
 
-    console.log('[useSseEventBridge] Setting up SSE event bridge...');
+    const resetQuestions = () =>
+      useRequestUserInputStore.getState().replaceRequests([]);
+    window.addEventListener("session-runtime-restarted", resetQuestions);
+
+    console.log("[useSseEventBridge] Setting up SSE event bridge...");
 
     // Reconnects carry a `?since=` cursor so events emitted while disconnected
     // are replayed rather than lost. See openEventStream.
-    return openEventStream({
-      label: '[useSseEventBridge]',
+    const close = openEventStream({
+      label: "[useSseEventBridge]",
       onEvent: (envelope) => {
         if (!envelope.event) return;
 
-        if (envelope.event === 'fs_change') {
-          window.dispatchEvent(new CustomEvent('fs_change', { detail: envelope.payload }));
+        if (envelope.event === "fs_change") {
+          window.dispatchEvent(
+            new CustomEvent("fs_change", { detail: envelope.payload }),
+          );
           return;
         }
         // Everything below reaches the desktop over the Tauri bus already;
         // handling it here too would deliver it twice.
         if (isDesktopTauri()) return;
-        if (envelope.event === 'codex/approval-request') {
+        if (envelope.event === "codex/user-input-snapshot") {
+          const snapshot = envelope.payload as {
+            requests: RequestUserInputRequest[];
+          };
+          useRequestUserInputStore
+            .getState()
+            .replaceRequests(snapshot.requests);
+          return;
+        }
+        if (envelope.event === "codex/approval-request") {
           handlersRef.current.onApproval(envelope.payload as ApprovalRequest);
           return;
         }
-        if (envelope.event === 'codex/request-user-input') {
-          handlersRef.current.onUserInputRequest(envelope.payload as RequestUserInputRequest);
+        if (envelope.event === "codex/request-user-input") {
+          handlersRef.current.onUserInputRequest(
+            envelope.payload as RequestUserInputRequest,
+          );
           return;
         }
-        if (envelope.event === 'codex/elicitation-request') {
-          handlersRef.current.onElicitationRequest(envelope.payload as ElicitationRequest);
+        if (envelope.event === "codex/elicitation-request") {
+          handlersRef.current.onElicitationRequest(
+            envelope.payload as ElicitationRequest,
+          );
           return;
         }
-        if (envelope.event === 'codex/permissions-request') {
-          handlersRef.current.onPermissionsRequest(envelope.payload as PermissionsRequest);
+        if (envelope.event === "codex/permissions-request") {
+          handlersRef.current.onPermissionsRequest(
+            envelope.payload as PermissionsRequest,
+          );
           return;
         }
-        if (envelope.event === 'codex:notification') {
-          handlersRef.current.onNotification(envelope.payload as ServerNotification);
+        if (envelope.event === "codex:notification") {
+          handlersRef.current.onNotification(
+            envelope.payload as ServerNotification,
+          );
         }
       },
     });
+    return () => {
+      close();
+      window.removeEventListener("session-runtime-restarted", resetQuestions);
+    };
   }, [enabled]);
 }

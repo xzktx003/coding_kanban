@@ -311,11 +311,351 @@
   }
 }
 
-.session-workspace-switcher { min-width: 0; max-width: 100%; }
-.session-workspace-switcher > button:first-of-type { min-width: 0; max-width: calc(100% - 100px); }
-.session-workspace-switcher > button:first-of-type span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-workspace-switcher {
+  min-width: 0;
+  max-width: 100%;
+}
+.session-workspace-switcher > button:first-of-type {
+  min-width: 0;
+  max-width: calc(100% - 100px);
+}
+.session-workspace-switcher > button:first-of-type span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
-.session-mode .session-insights { background: var(--background); color: var(--foreground); }
-.session-mode .session-insights h1 { background: none; color: var(--foreground); font-size: 22px; }
-.session-mode .session-insights [class*="bg-slate-900"] { background-color: var(--card); }
-.session-mode .session-insights [class*="border-slate-800"] { border-color: var(--border); }
+.session-mode .session-insights {
+  background: var(--background);
+  color: var(--foreground);
+}
+.session-mode .session-insights h1 {
+  background: none;
+  color: var(--foreground);
+  font-size: 22px;
+}
+.session-mode .session-insights [class*="bg-slate-900"] {
+  background-color: var(--card);
+}
+.session-mode .session-insights [class*="border-slate-800"] {
+  border-color: var(--border);
+}
+
+/* A consistent work surface; terminal and transcript children keep their keys. */
+.session-mode {
+  font-family:
+    "IBM Plex Sans",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "PingFang SC",
+    "Microsoft YaHei",
+    sans-serif;
+}
+.session-mode .session-agent-header {
+  padding: 0 12px;
+  gap: 12px;
+  min-height: 48px;
+  background: var(--background);
+}
+.session-mode .session-agent-header-title {
+  flex: 1;
+  min-width: 0;
+}
+.session-mode .session-current-agent {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+.session-mode .session-current-title {
+  flex: 1;
+}
+.session-mode .session-agent-header-actions {
+  flex-shrink: 0;
+  padding-right: 0;
+}
+.session-mode .session-layout-switch button {
+  height: 30px;
+  width: 30px;
+}
+.session-mode .session-search-trigger {
+  width: 100%;
+  justify-content: flex-start;
+  height: 36px;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border: 1px solid var(--border);
+}
+.session-mode .session-search-trigger:hover {
+  color: var(--foreground);
+}
+.session-mode .session-card-title {
+  font-weight: 550;
+}
+.session-mode .session-card-header {
+  min-height: 42px;
+}
+.session-mode .session-workspace-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 4px;
+  padding: 6px 2px;
+  max-width: 100%;
+}
+.session-mode .session-workspace-switcher > button {
+  min-width: 0;
+  max-width: 100%;
+}
+.session-mode .session-workspace-switcher > .session-project-trigger {
+  flex: 1 1 140px;
+  min-width: 0;
+  max-width: 100%;
+  justify-content: flex-start;
+}
+.session-mode .session-project-trigger > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-mode .session-workspace-switcher button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.session-mode .session-welcome {
+  padding-bottom: 20px;
+}
+.session-mode .session-welcome h1 {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.session-mode .session-welcome-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+}
+.session-mode .session-welcome-hints {
+  gap: 12px;
+}
+@media (max-width: 1000px) and (min-width: 641px) {
+  .session-mode .session-agent-header {
+    gap: 6px;
+    padding: 0 8px;
+  }
+  .session-mode .session-agent-header-actions {
+    gap: 3px;
+  }
+  .session-mode .session-current-agent {
+    padding: 3px 5px;
+  }
+}
+@media (max-width: 640px) {
+  .session-mode .session-agent-header {
+    padding: 4px 8px;
+    gap: 4px;
+  }
+  .session-mode .session-agent-header-title {
+    flex-basis: 100%;
+    gap: 6px;
+    min-height: 40px;
+  }
+  .session-mode .session-agent-header-actions {
+    width: 100%;
+    min-height: 44px;
+    gap: 4px;
+  }
+  .session-mode .session-agent-header-actions button,
+  .session-mode .session-agent-header-title > button,
+  .session-mode .session-layout-switch button,
+  .session-mode .session-search-trigger,
+  .session-mode .session-card-close {
+    min-height: 40px;
+    min-width: 40px;
+  }
+  .session-mode .session-workspace-switcher button {
+    min-height: 40px;
+  }
+  .session-mode .session-workspace-switcher > .session-project-trigger {
+    flex-basis: 140px;
+    max-width: none;
+  }
+  .session-mode .session-current-agent {
+    font-size: 10px;
+    padding: 3px 5px;
+  }
+}
+.session-mode .session-layout-mobile {
+  display: none;
+}
+.session-mode [data-slot="dialog-content"] {
+  max-height: calc(var(--app-height) - 32px);
+}
+.session-mode [data-slot="dialog-content"].session-manager-dialog {
+  width: min(672px, calc(100% - 32px));
+  max-width: calc(100% - 32px);
+}
+.session-mode .session-manager-agent-tabs button {
+  min-width: 80px;
+  height: 34px;
+}
+@media (max-width: 640px) {
+  .session-mode .session-layout-switch {
+    display: none;
+  }
+  .session-mode .session-layout-mobile {
+    display: inline-flex;
+  }
+  .session-mode .session-agent-header-actions button,
+  .session-mode .session-agent-header-title > button,
+  .session-mode .session-search-trigger {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .session-mode .session-workspace-switcher button {
+    min-height: 44px;
+  }
+  .session-mode [data-slot="dialog-close"] {
+    min-width: 36px;
+    min-height: 36px;
+    top: 8px;
+    right: 8px;
+    display: grid;
+    place-items: center;
+  }
+}
+.session-mode .session-agent-view {
+  container-type: inline-size;
+  container-name: session-chat;
+}
+.session-mode .session-composer-toolbar {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.session-mode .session-composer-policy {
+  flex-shrink: 0;
+  max-width: 100%;
+}
+.session-mode .session-composer-actions {
+  flex: 1 1 200px;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.session-mode .session-model-trigger {
+  min-width: 0;
+  max-width: 210px;
+}
+.session-mode .session-agent-model-panel [data-agent-active="true"] {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.session-mode .session-agent-model-panel [cmdk-item] {
+  min-height: 34px;
+}
+@container session-chat (max-width: 520px) {
+  .session-mode .session-agent-header {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 4px 8px;
+    gap: 4px;
+  }
+  .session-mode .session-agent-header-title {
+    flex-basis: 100%;
+    min-height: 40px;
+  }
+  .session-mode .session-agent-header-actions {
+    width: 100%;
+    justify-content: space-between;
+    gap: 4px;
+  }
+  .session-mode .session-layout-switch {
+    display: none;
+  }
+  .session-mode .session-layout-mobile {
+    display: inline-flex;
+  }
+}
+@container session-chat (max-width: 360px) {
+  .session-mode .session-agent-header-actions {
+    flex-wrap: wrap;
+  }
+  .session-mode .session-model-trigger {
+    max-width: 110px;
+    padding-left: 4px;
+    padding-right: 4px;
+    gap: 4px;
+  }
+  .session-mode .session-composer-toolbar {
+    gap: 4px;
+  }
+  .session-mode .session-composer-actions {
+    flex-basis: 180px;
+  }
+  .session-mode .session-welcome-hints {
+    flex-wrap: wrap;
+  }
+}
+.session-mode .session-search-trigger {
+  width: auto;
+  min-width: 0;
+  flex: 1 1 0%;
+}
+.session-mode .session-nav-row {
+  min-height: 44px;
+  gap: 6px;
+}
+.session-mode .session-row-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-agent-model-panel [role="slider"]:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.session-mode .session-agent-model-panel button {
+  max-width: 100%;
+}
+
+.session-mode .session-insight-controls {
+  max-width: 100%;
+}
+@media (max-width: 640px) {
+  .session-mode .session-insights {
+    padding: 12px;
+  }
+  .session-mode .session-insight-controls {
+    gap: 4px;
+  }
+  .session-mode .session-insight-controls button {
+    min-height: 40px;
+  }
+}
+
+.session-mode .session-pricing-dialog [class*="bg-slate"] {
+  background-color: var(--card);
+}
+.session-mode .session-pricing-dialog [class*="border-slate"] {
+  border-color: var(--border);
+}
+.session-mode .session-pricing-dialog [class*="text-slate"] {
+  color: var(--muted-foreground);
+}
+.session-mode .session-pricing-dialog input {
+  color: var(--foreground);
+  background: var(--background);
+}
+.session-mode .session-pricing-dialog button[class*="bg-violet"] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}

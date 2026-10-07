@@ -1,6 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useId, useRef } from "react";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
+
+import { useModalFocusBoundary } from "./modal-focus-boundary";
 
 const stateLabels: Record<string, string> = {
   running: "运行中",
@@ -33,6 +35,9 @@ export function HiddenSessionsDrawer({
   onUnhide,
   onDelete,
 }: HiddenSessionsDrawerProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useModalFocusBoundary(open, dialogRef);
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
@@ -54,8 +59,24 @@ export function HiddenSessionsDrawer({
 
   return (
     <div className="hidden-drawer-overlay" onClick={onClose}>
-      <div className="hidden-drawer" onClick={(e) => e.stopPropagation()}>
-        <h3>已隐藏的会话 ({sessions.length})</h3>
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="hidden-drawer"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          type="button"
+          className="hidden-drawer-close"
+          aria-label="关闭隐藏会话列表"
+          onClick={onClose}
+        >
+          关闭
+        </button>
+        <h3 id={titleId}>已隐藏的会话 ({sessions.length})</h3>
         {sorted.length === 0 ? (
           <div className="hidden-drawer-empty">没有隐藏的会话</div>
         ) : (
@@ -68,14 +89,18 @@ export function HiddenSessionsDrawer({
               </span>
               <div className="hidden-drawer-actions">
                 <button type="button" onClick={() => onUnhide(s.id)}>
-                  恢复
+                  取消隐藏
                 </button>
                 <button
                   type="button"
                   className="btn-danger"
                   onClick={() => handleDelete(s)}
                 >
-                  关闭
+                  {s.interactionState === "exited"
+                    ? "清除记录"
+                    : s.transportRef?.tmuxSession
+                      ? "脱离会话"
+                      : "关闭会话"}
                 </button>
               </div>
             </div>

@@ -1,48 +1,49 @@
+mod codex_rollback;
 use axum::{Json, extract::State as AxumState, http::StatusCode, response::IntoResponse};
-use serde::{Deserialize};
-use serde_json::{json, Value};
 use codexia_codex::env::set_env;
-use codexia_codex::providers::{load_env_keys, load_and_fetch_models};
+use codexia_codex::providers::{load_and_fetch_models, load_env_keys};
+use serde::Deserialize;
+use serde_json::{Value, json};
 
 use super::types::{ErrorResponse, WebServerState};
 
 mod acp;
+mod automation;
+mod bots;
+mod bots_mcp;
 mod cc;
 mod claude_usage;
 mod codex;
 mod file;
 mod git;
+mod insights;
+mod keke_mcp;
 mod openapp;
 mod publish;
-mod automation;
-mod bots;
-mod bots_mcp;
-mod keke_mcp;
-mod telemetry;
-mod insights;
-mod skills;
 mod settings;
+mod skills;
 mod skillssh;
+mod telemetry;
 mod terminal;
 mod types;
 
 pub(super) use acp::*;
+pub(super) use automation::*;
 pub(super) use bots::*;
 pub(super) use bots_mcp::*;
-pub(super) use keke_mcp::*;
-pub(super) use telemetry::*;
 pub(super) use cc::*;
 pub(super) use claude_usage::*;
 pub(super) use codex::*;
 pub(super) use file::*;
 pub(super) use git::*;
+pub(super) use insights::*;
+pub(super) use keke_mcp::*;
 pub(super) use openapp::*;
 pub(super) use publish::*;
-pub(super) use automation::*;
-pub(super) use insights::*;
-pub(super) use skills::*;
 pub(super) use settings::*;
+pub(super) use skills::*;
 pub(super) use skillssh::*;
+pub(super) use telemetry::*;
 pub(super) use terminal::*;
 pub(super) use types::*;
 
@@ -73,6 +74,7 @@ pub(super) async fn api_allow_sleep(
 pub(super) async fn health_check() -> impl IntoResponse {
     Json(json!({
         "status": "ok", "instance": std::env::var("SESSION_RUNTIME_INSTANCE").ok(),
+        "capabilities": { "acpImages": true },
         "timezone": chrono::Local::now().format("%Z %:z").to_string()
     }))
 }
@@ -165,8 +167,7 @@ pub(super) async fn api_set_env(
     Json(payload): Json<SetEnvPayload>,
 ) -> Result<StatusCode, ErrorResponse> {
     // Delegate to the same implementation used by the Tauri command
-    set_env(payload.key, payload.value)
-        .map_err(|e| ErrorResponse { error: e })?;
+    set_env(payload.key, payload.value).map_err(|e| ErrorResponse { error: e })?;
     Ok(StatusCode::OK)
 }
 
@@ -175,9 +176,7 @@ pub(super) async fn api_set_env(
 ///
 /// Sits behind the auth layer, so it is readable from the local settings UI
 /// (loopback is exempt) but not by an unauthenticated remote caller.
-pub(super) async fn api_pairing_info(
-    AxumState(state): AxumState<WebServerState>,
-) -> Json<Value> {
+pub(super) async fn api_pairing_info(AxumState(state): AxumState<WebServerState>) -> Json<Value> {
     Json(json!({
         "token": state.device_token.value(),
         "port": state.port,

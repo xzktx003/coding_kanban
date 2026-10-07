@@ -190,3 +190,33 @@ describe("TopBar", () => {
     );
   });
 });
+
+describe("embedded workbench branding", () => {
+  it("keeps terminal actions and statistics without repeating the shell brand", () => {
+    const markup = renderTopBar({ showBrand: false });
+    assert.doesNotMatch(markup, /src="\/houmo-logo.png"/);
+    assert.doesNotMatch(markup, /电脑端 Coding Kanban/);
+    assert.match(markup, /data-testid="new-session-toggle"/);
+    assert.match(markup, /共 <strong>2<\/strong> 个会话/);
+  });
+});
+
+describe("toolbar update status", () => {
+  for (const collapsed of [false, true]) {
+    it(`keeps update feedback in the ${collapsed ? "collapsed" : "expanded"} toolbar`, () => {
+      const markup = renderTopBar({
+        collapsed,
+        updateIndicator: createElement(
+          "button",
+          { className: "app-update-indicator" },
+          "更新",
+        ),
+      });
+      assert.match(
+        markup,
+        /<header[^>]*>[\s\S]*class="top-bar-update-status"[\s\S]*class="app-update-indicator"/,
+      );
+      assert.match(markup, /更新/);
+    });
+  }
+});

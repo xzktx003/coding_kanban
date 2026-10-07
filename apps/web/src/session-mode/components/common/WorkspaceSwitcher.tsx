@@ -1,22 +1,25 @@
-import { codexService } from '@session/services/codexService';
-import { open } from '@session/browser-dialog';
-import { Check, ChevronDown, FolderOpen, FolderPlus } from 'lucide-react';
-import { useCallback, useState } from 'react';
-import { type ThreadCwdMode, useConfigStore } from '@session/components/codex/stores';
-import { Button } from '@session/components/ui/button';
+import { codexService } from "@session/services/codexService";
+import { open } from "@session/browser-dialog";
+import { Check, ChevronDown, FolderOpen, FolderPlus } from "lucide-react";
+import { useCallback, useState } from "react";
+import {
+  type ThreadCwdMode,
+  useConfigStore,
+} from "@session/components/codex/stores";
+import { Button } from "@session/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@session/components/ui/dropdown-menu';
-import { BrowserProjects } from '@session/features/ProjectSelector';
-import { isDesktopTauri } from '@session/hooks/runtime';
-import { useCCStore } from '@session/stores';
-import { useAgentSettingsStore } from '@session/stores/useAgentSettingsStore';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
-import { BranchSwitcher } from '../../features/branch';
-import { AgentWorkspaceSelect } from './AgentWorkspaceSelect';
+} from "@session/components/ui/dropdown-menu";
+import { BrowserProjects } from "@session/features/ProjectSelector";
+import { isDesktopTauri } from "@session/hooks/runtime";
+import { useCCStore } from "@session/stores";
+import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { BranchSwitcher } from "../../features/branch";
+import { AgentWorkspaceSelect } from "./AgentWorkspaceSelect";
 
 export function WorkspaceSwitcher() {
   const [projectOpen, setProjectOpen] = useState(false);
@@ -32,7 +35,7 @@ export function WorkspaceSwitcher() {
       setCwd(project);
       setProjectOpen(false);
     },
-    [setCwd]
+    [setCwd],
   );
 
   async function handleSelectBrowseProject(path: string) {
@@ -55,10 +58,12 @@ export function WorkspaceSwitcher() {
     }
   }, [addProject, setCwd]);
 
-  const repoLabel = cwd ? (cwd.split('/').filter(Boolean).pop() ?? cwd) : '选择项目';
+  const repoLabel = cwd
+    ? (cwd.split("/").filter(Boolean).pop() ?? cwd)
+    : "选择项目";
 
   return (
-    <div className="session-workspace-switcher flex items-center gap-1 font-mono py-2">
+    <div className="session-workspace-switcher flex items-center gap-1 py-2">
       {/* Left: Project selector */}
       <DropdownMenu
         open={projectOpen}
@@ -71,7 +76,9 @@ export function WorkspaceSwitcher() {
           <Button
             variant="ghost"
             size="sm"
-            className="h-auto gap-1 px-1.5 py-0.5 text-xs text-muted-foreground"
+            className="session-project-trigger h-auto gap-1 px-1.5 py-0.5 text-xs text-muted-foreground"
+            title={cwd ?? "选择项目"}
+            aria-label={`项目：${repoLabel}`}
           >
             <FolderOpen className="h-3 w-3 shrink-0" />
             <span>{repoLabel}</span>
@@ -80,13 +87,17 @@ export function WorkspaceSwitcher() {
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="start" className="w-fix">
           {browseMode ? (
-            <BrowserProjects cwd={cwd} onAddProject={handleSelectBrowseProject} />
+            <BrowserProjects
+              cwd={cwd}
+              onAddProject={handleSelectBrowseProject}
+            />
           ) : (
             <>
               <div className="max-h-60 overflow-y-auto p-1">
                 {projects.map((project) => {
                   const isCurrent = project === cwd;
-                  const folderName = project.split('/').filter(Boolean).pop() ?? project;
+                  const folderName =
+                    project.split("/").filter(Boolean).pop() ?? project;
                   return (
                     <DropdownMenuItem
                       key={project}
@@ -137,10 +148,12 @@ export function WorkspaceSwitcher() {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {selectedAgent === 'cc' ? (
+      {selectedAgent === "cc" ? (
         <AgentWorkspaceSelect
-          value={options.worktreeMode ?? 'local'}
-          onValueChange={(v: ThreadCwdMode) => updateOptions({ worktreeMode: v })}
+          value={options.worktreeMode ?? "local"}
+          onValueChange={(v: ThreadCwdMode) =>
+            updateOptions({ worktreeMode: v })
+          }
         />
       ) : (
         <AgentWorkspaceSelect

@@ -612,8 +612,8 @@ describe("AgentFocusView", () => {
 
     const tmuxCard = getSidebarCardTag(markup, "session-1");
 
-    assert.match(markup, /focus-sidebar-card-name">dev<\/span>/);
-    assert.doesNotMatch(markup, /focus-sidebar-card-name">tmux:dev/);
+    assert.match(markup, /aria-label="切换到会话 dev"[^>]*>dev<\/button>/);
+    assert.doesNotMatch(markup, /aria-label="切换到会话 tmux:dev"/);
     assert.match(markup, /aria-label="tmux 会话"/);
     assert.equal(
       (markup.match(/class="focus-sidebar-transport-tag"/g) ?? []).length,

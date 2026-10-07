@@ -6,13 +6,13 @@ import {
   HelpCircle,
   Loader2,
   XCircle,
-} from 'lucide-react';
-import { useTranscriptState } from '../thread/rowState';
-import { useTranslation } from 'react-i18next';
-import { fmtElapsed } from '@session/components/agent/utils';
-import { useCodexStore } from '@session/components/codex/stores';
-import { CopyButton } from '@session/components/common';
-import { Badge } from '@session/components/ui/badge';
+} from "lucide-react";
+import { useTranscriptState } from "../thread/rowState";
+import { useTranslation } from "react-i18next";
+import { fmtElapsed } from "@session/components/agent/utils";
+import { useCodexStore } from "@session/components/codex/stores";
+import { CopyButton } from "@session/components/common";
+import { Badge } from "@session/components/ui/badge";
 
 interface ShellCommandProps {
   command: string;
@@ -21,41 +21,58 @@ interface ShellCommandProps {
 }
 
 type StatusConfig = {
-  variant: 'default' | 'destructive' | 'outline' | 'secondary';
+  variant: "default" | "destructive" | "outline" | "secondary";
   icon: React.ComponentType<{ className?: string }>;
 };
 
 const STATUS_STYLE_MAP: Record<string, StatusConfig> = {
-  completed: { variant: 'default', icon: CheckCircle2 },
-  failed: { variant: 'destructive', icon: XCircle },
-  declined: { variant: 'destructive', icon: AlertCircle },
-  inProgress: { variant: 'secondary', icon: Loader2 },
+  completed: { variant: "default", icon: CheckCircle2 },
+  failed: { variant: "destructive", icon: XCircle },
+  declined: { variant: "destructive", icon: AlertCircle },
+  inProgress: { variant: "secondary", icon: Loader2 },
 };
 
-const DEFAULT_STYLE: StatusConfig = { variant: 'secondary', icon: HelpCircle };
+const DEFAULT_STYLE: StatusConfig = { variant: "secondary", icon: HelpCircle };
 
-export const ShellCommand = ({ command, commandItemId, aggregatedOutput }: ShellCommandProps) => {
-  const [isExpanded, setIsExpanded] = useTranscriptState(`shell-${commandItemId}-${command}`, false);
+export const ShellCommand = ({
+  command,
+  commandItemId,
+  aggregatedOutput,
+}: ShellCommandProps) => {
+  const [isExpanded, setIsExpanded] = useTranscriptState(
+    `shell-${commandItemId}-${command}`,
+    false,
+  );
   const { t } = useTranslation();
 
-  const status = useCodexStore(s => commandItemId ? s.commandStatusMap[commandItemId] : undefined);
-  const durationMs = useCodexStore(s => commandItemId ? s.commandDurationMap[commandItemId] : undefined);
-  const { variant, icon: Icon } = STATUS_STYLE_MAP[status ?? ''] ?? DEFAULT_STYLE;
+  const status = useCodexStore((s) =>
+    commandItemId ? s.commandStatusMap[commandItemId] : undefined,
+  );
+  const durationMs = useCodexStore((s) =>
+    commandItemId ? s.commandDurationMap[commandItemId] : undefined,
+  );
+  const { variant, icon: Icon } =
+    STATUS_STYLE_MAP[status ?? ""] ?? DEFAULT_STYLE;
 
   return (
     <div className="flex flex-col gap-2 w-full min-w-0">
       <button
+        aria-expanded={isExpanded}
         onClick={() => setIsExpanded(!isExpanded)}
         className="group flex gap-2 items-center text-sm font-mono text-muted-foreground hover:text-foreground transition-colors text-left w-full cursor-pointer"
       >
-        <span className="shrink-0">Ran</span>
+        <span className="shrink-0">执行</span>
 
         <code className="bg-muted/40 px-1.5 py-0.5 rounded border border-transparent group-hover:border-border w-0 flex-1 block truncate">
           {command}
         </code>
 
         <div className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity duration-150 ml-auto">
-          {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+          {isExpanded ? (
+            <ChevronDown className="w-4 h-4" />
+          ) : (
+            <ChevronRight className="w-4 h-4" />
+          )}
         </div>
       </button>
 
@@ -91,14 +108,19 @@ export const ShellCommand = ({ command, commandItemId, aggregatedOutput }: Shell
           )}
 
           <div className="flex items-center justify-end gap-2 p-2">
-            {typeof durationMs === 'number' && (
+            {typeof durationMs === "number" && (
               <span className="text-xs text-muted-foreground/60 font-mono">
                 {fmtElapsed(durationMs)}
               </span>
             )}
-            <Badge variant={variant} className="flex items-center gap-1.5 px-2.5 py-1 w-fit">
-              <Icon className={`h-3.5 w-3.5 ${status === 'inProgress' ? 'animate-spin' : ''}`} />
-              <span>{t(status ?? '')}</span>
+            <Badge
+              variant={variant}
+              className="flex items-center gap-1.5 px-2.5 py-1 w-fit"
+            >
+              <Icon
+                className={`h-3.5 w-3.5 ${status === "inProgress" ? "animate-spin" : ""}`}
+              />
+              <span>{t(status ?? "")}</span>
             </Badge>
           </div>
         </div>

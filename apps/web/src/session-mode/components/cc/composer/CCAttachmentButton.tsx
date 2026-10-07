@@ -1,26 +1,34 @@
-import { open } from '@session/browser-dialog';
-import { Image as ImageIcon, Plus } from 'lucide-react';
-import { useState } from 'react';
-import { SelectFilesMenuItem } from '@session/components/codex/composer/ComposerMenu';
-import { Button } from '@session/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@session/components/ui/popover';
-import { cn } from '@session/lib/utils';
-import { useInputStore } from '@session/stores/useInputStore';
+import { open } from "@session/browser-dialog";
+import { Image as ImageIcon, Plus } from "lucide-react";
+import { useState } from "react";
+import { SelectFilesMenuItem } from "@session/components/codex/composer/ComposerMenu";
+import { Button } from "@session/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@session/components/ui/popover";
+import { cn } from "@session/lib/utils";
+import { useInputStore } from "@session/stores/useInputStore";
 
 interface CCAttachmentButtonProps {
   onImagesSelected?: (paths: string[]) => void;
+  onFilesSelected?: (paths: string[]) => void;
 }
 
-export function CCAttachmentButton({ onImagesSelected }: CCAttachmentButtonProps) {
+export function CCAttachmentButton({
+  onImagesSelected,
+  onFilesSelected,
+}: CCAttachmentButtonProps) {
   const [openState, setOpen] = useState(false);
   const { appendFileLinks } = useInputStore();
 
   const handleSelectFiles = (paths: string[]) => {
     try {
-      appendFileLinks(paths);
+      (onFilesSelected ?? appendFileLinks)(paths);
       setOpen(false);
     } catch (error) {
-      console.error('Failed to select files:', error);
+      console.error("Failed to select files:", error);
     }
   };
 
@@ -30,8 +38,8 @@ export function CCAttachmentButton({ onImagesSelected }: CCAttachmentButtonProps
         multiple: true,
         filters: [
           {
-            name: 'Images',
-            extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'],
+            name: "Images",
+            extensions: ["jpg", "jpeg", "png", "gif", "webp"],
           },
         ],
       });
@@ -41,7 +49,7 @@ export function CCAttachmentButton({ onImagesSelected }: CCAttachmentButtonProps
         setOpen(false);
       }
     } catch (error) {
-      console.error('Failed to select images:', error);
+      console.error("Failed to select images:", error);
     }
   };
 
@@ -52,9 +60,10 @@ export function CCAttachmentButton({ onImagesSelected }: CCAttachmentButtonProps
           size="icon"
           variant="ghost"
           className="h-8 w-8 text-muted-foreground hover:text-foreground"
-          title="Add Files"
+          title="添加附件与上下文"
+          aria-label="添加附件与上下文"
         >
-          <Plus className={`h-4 w-4 ${openState ? 'text-primary' : ''}`} />
+          <Plus className={`h-4 w-4 ${openState ? "text-primary" : ""}`} />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" side="top" className="w-44 p-1">
@@ -62,12 +71,12 @@ export function CCAttachmentButton({ onImagesSelected }: CCAttachmentButtonProps
           <Button
             variant="ghost"
             className={cn(
-              'justify-start gap-2 px-2 h-8 w-full text-xs hover:bg-blue-500 hover:text-white transition-colors'
+              "justify-start gap-2 px-2 h-8 w-full text-xs hover:bg-accent hover:text-accent-foreground transition-colors",
             )}
             onClick={handleSelectImages}
           >
             <ImageIcon className="w-4 h-4" />
-            <span>Add images</span>
+            <span>添加图片</span>
           </Button>
           <SelectFilesMenuItem
             onFilesSelected={handleSelectFiles}

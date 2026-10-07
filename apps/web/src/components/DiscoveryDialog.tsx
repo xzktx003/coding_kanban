@@ -1,9 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useId } from "react";
 
 import type {
   AgentSessionRecord,
   ScanResult,
 } from "@agent-orchestrator/shared";
+
+import { useModalFocusBoundary } from "./modal-focus-boundary";
 
 import type { SelectedHost } from "./HostDropdown";
 import { TmuxDiscoveryPanel } from "./TmuxDiscoveryPanel";
@@ -41,6 +43,9 @@ export function DiscoveryDialog({
   onAddToGrid,
   onFocusSession,
 }: DiscoveryDialogProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useModalFocusBoundary(open, dialogRef);
   const overlayRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -70,9 +75,18 @@ export function DiscoveryDialog({
         if (e.target === overlayRef.current) onClose();
       }}
     >
-      <div className="discovery-dialog" role="dialog" aria-modal="true">
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        className="discovery-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
         <div className="discovery-dialog-header">
-          <h2 className="discovery-dialog-title">{title}</h2>
+          <h2 id={titleId} className="discovery-dialog-title">
+            {title}
+          </h2>
           <button
             className="discovery-dialog-close"
             onClick={onClose}

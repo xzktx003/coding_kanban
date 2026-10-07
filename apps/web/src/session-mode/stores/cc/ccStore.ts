@@ -1,22 +1,28 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import type { CCMessage } from '@session/components/cc/types/messages';
-import type { ThreadCwdMode } from '@session/components/codex/stores/useConfigStore';
-import type { SdkSessionInfo } from '@session/lib/sessions';
-import type { CCMcpServers } from '@session/types/cc/cc-mcp';
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import type { CCMessage } from "@session/components/cc/types/messages";
+import type { ThreadCwdMode } from "@session/components/codex/stores/useConfigStore";
+import type { SdkSessionInfo } from "@session/lib/sessions";
+import type { CCMcpServers } from "@session/types/cc/cc-mcp";
 
 export type PermissionMode =
-  | 'default'
-  | 'acceptEdits'
-  | 'plan'
-  | 'bypassPermissions'
-  | 'auto'
-  | 'dontAsk'
-  | 'manual';
-export type ModelType = 'sonnet' | 'haiku' | 'opus' | 'fable';
-export type EffortLevel = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  | "default"
+  | "acceptEdits"
+  | "plan"
+  | "bypassPermissions"
+  | "auto"
+  | "dontAsk"
+  | "manual";
+export type ModelType = "sonnet" | "haiku" | "opus" | "fable";
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
-export const CC_EFFORT_LEVELS: EffortLevel[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+export const CC_EFFORT_LEVELS: EffortLevel[] = [
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+];
 
 export interface CCPluginConfig {
   path: string;
@@ -68,7 +74,11 @@ interface CCStoreState {
   addMessageToSession: (sessionId: string, message: CCMessage) => void;
   setSessionLoading: (sessionId: string, loading: boolean) => void;
   updateMessage: (index: number, message: Partial<CCMessage>) => void;
-  updateSessionMessage: (sessionId: string, index: number, message: Partial<CCMessage>) => void;
+  updateSessionMessage: (
+    sessionId: string,
+    index: number,
+    message: Partial<CCMessage>,
+  ) => void;
   setMessages: (messages: CCMessage[]) => void;
   updateOptions: (options: Partial<CCOptions>) => void;
   setConnected: (connected: boolean) => void;
@@ -89,8 +99,8 @@ export const useCCStore = create<CCStoreState>()(
       sessionLoadingMap: {},
       sessionStartTimeMap: {},
       options: {
-        model: 'sonnet',
-        permissionMode: 'default',
+        model: "sonnet",
+        permissionMode: "default",
       },
       isConnected: false,
       isLoading: false,
@@ -115,7 +125,8 @@ export const useCCStore = create<CCStoreState>()(
       removeActiveSessionId: (id) =>
         set((state) => ({
           activeSessionIds: state.activeSessionIds.filter((sid) => sid !== id),
-          activeSessionId: state.activeSessionId === id ? null : state.activeSessionId,
+          activeSessionId:
+            state.activeSessionId === id ? null : state.activeSessionId,
         })),
       // Save current session's messages to the map, then switch to target session and restore its messages
       switchToSession: (id) =>
@@ -130,7 +141,7 @@ export const useCCStore = create<CCStoreState>()(
             activeSessionId: id,
             sessionMessagesMap: updatedMap,
             messages: restoredMessages,
-            isLoading: false,
+            isLoading: state.sessionLoadingMap[id] ?? false,
             isConnected: true,
           };
         }),
@@ -149,21 +160,31 @@ export const useCCStore = create<CCStoreState>()(
         set((state) => {
           const sid = state.activeSessionId;
           const newMessages = [...state.messages, message];
-          const isDone = message.type === 'result';
+          const isDone = message.type === "result";
           const updatedMap = sid
             ? { ...state.sessionMessagesMap, [sid]: newMessages }
             : state.sessionMessagesMap;
           const loadingUpdate = sid
-            ? { sessionLoadingMap: { ...state.sessionLoadingMap, [sid]: !isDone } }
+            ? {
+                sessionLoadingMap: {
+                  ...state.sessionLoadingMap,
+                  [sid]: !isDone,
+                },
+              }
             : {};
-          let startTimeUpdate: { sessionStartTimeMap?: Record<string, number> } = {};
+          let startTimeUpdate: {
+            sessionStartTimeMap?: Record<string, number>;
+          } = {};
           if (sid) {
             if (isDone) {
               const { [sid]: _, ...rest } = state.sessionStartTimeMap;
               startTimeUpdate = { sessionStartTimeMap: rest };
             } else if (!state.sessionStartTimeMap[sid]) {
               startTimeUpdate = {
-                sessionStartTimeMap: { ...state.sessionStartTimeMap, [sid]: Date.now() },
+                sessionStartTimeMap: {
+                  ...state.sessionStartTimeMap,
+                  [sid]: Date.now(),
+                },
               };
             }
           }
@@ -179,39 +200,58 @@ export const useCCStore = create<CCStoreState>()(
         set((state) => {
           const prev = state.sessionMessagesMap[sessionId] ?? [];
           const updated = [...prev, message];
-          const isDone = message.type === 'result';
+          const isDone = message.type === "result";
           const isActive = state.activeSessionId === sessionId;
           // Track the start of each processing cycle:
           // - Clear on result so the next cycle gets a fresh timestamp.
           // - Set on the first non-result message when no start is recorded.
-          let startTimeUpdate: { sessionStartTimeMap?: Record<string, number> } = {};
+          let startTimeUpdate: {
+            sessionStartTimeMap?: Record<string, number>;
+          } = {};
           if (isDone) {
             const { [sessionId]: _, ...rest } = state.sessionStartTimeMap;
             startTimeUpdate = { sessionStartTimeMap: rest };
           } else if (!state.sessionStartTimeMap[sessionId]) {
             startTimeUpdate = {
-              sessionStartTimeMap: { ...state.sessionStartTimeMap, [sessionId]: Date.now() },
+              sessionStartTimeMap: {
+                ...state.sessionStartTimeMap,
+                [sessionId]: Date.now(),
+              },
             };
           }
           return {
-            sessionMessagesMap: { ...state.sessionMessagesMap, [sessionId]: updated },
-            sessionLoadingMap: { ...state.sessionLoadingMap, [sessionId]: !isDone },
+            sessionMessagesMap: {
+              ...state.sessionMessagesMap,
+              [sessionId]: updated,
+            },
+            sessionLoadingMap: {
+              ...state.sessionLoadingMap,
+              [sessionId]: !isDone,
+            },
             ...startTimeUpdate,
             ...(isActive ? { messages: updated, isLoading: !isDone } : {}),
           };
         }),
       setSessionLoading: (sessionId, loading) =>
         set((state) => ({
-          sessionLoadingMap: { ...state.sessionLoadingMap, [sessionId]: loading },
-          ...(state.activeSessionId === sessionId ? { isLoading: loading } : {}),
+          sessionLoadingMap: {
+            ...state.sessionLoadingMap,
+            [sessionId]: loading,
+          },
+          ...(state.activeSessionId === sessionId
+            ? { isLoading: loading }
+            : {}),
         })),
       updateMessage: (index, message) =>
         set((state) => {
           const updatedMessages = state.messages.map((m, i) =>
-            i === index ? ({ ...m, ...message } as CCMessage) : m
+            i === index ? ({ ...m, ...message } as CCMessage) : m,
           );
           const updatedMap = state.activeSessionId
-            ? { ...state.sessionMessagesMap, [state.activeSessionId]: updatedMessages }
+            ? {
+                ...state.sessionMessagesMap,
+                [state.activeSessionId]: updatedMessages,
+              }
             : state.sessionMessagesMap;
           return { messages: updatedMessages, sessionMessagesMap: updatedMap };
         }),
@@ -219,12 +259,18 @@ export const useCCStore = create<CCStoreState>()(
         set((state) => {
           const sessionMsgs = state.sessionMessagesMap[sessionId] ?? [];
           const updated = sessionMsgs.map((m, i) =>
-            i === index ? ({ ...m, ...message } as CCMessage) : m
+            i === index ? ({ ...m, ...message } as CCMessage) : m,
           );
-          const updatedMap = { ...state.sessionMessagesMap, [sessionId]: updated };
+          const updatedMap = {
+            ...state.sessionMessagesMap,
+            [sessionId]: updated,
+          };
           // Also sync global messages if this session is active.
           const isActive = state.activeSessionId === sessionId;
-          return { sessionMessagesMap: updatedMap, ...(isActive ? { messages: updated } : {}) };
+          return {
+            sessionMessagesMap: updatedMap,
+            ...(isActive ? { messages: updated } : {}),
+          };
         }),
       setMessages: (messages) => set({ messages }),
       updateOptions: (newOptions) =>
@@ -239,12 +285,12 @@ export const useCCStore = create<CCStoreState>()(
       setPendingNewSession: (session) => set({ pendingNewSession: session }),
     }),
     {
-      name: 'kanban.session.cc-store',
+      name: "kanban.session.cc-store",
       version: 2,
       partialize: (state) => ({
         options: state.options,
         slashCommands: state.slashCommands,
       }),
-    }
-  )
+    },
+  ),
 );

@@ -1,4 +1,4 @@
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -63,6 +63,43 @@ pub fn event_matches(filter: Option<&HashSet<String>>, event: &str) -> bool {
 struct Inner {
     buffer: VecDeque<SeqEvent>,
     next_seq: u64,
+    // Waiting RPCs outlive the bounded token/event replay buffer. Memory only:
+    // they are invalid once this runtime/app-server instance goes away.
+    user_inputs: HashMap<String, SeqEvent>,
+}
+
+fn input_key(payload: &Value) -> Option<String> {
+    let thread = payload.get("threadId")?.as_str()?;
+    let id = payload.get("requestId")?;
+    if !id.is_string() && !id.is_i64() {
+        return None;
+    }
+    Some(serde_json::json!([thread, id]).to_string())
+}
+
+fn update_user_inputs(inner: &mut Inner, event: &SeqEvent) {
+    if event.event == "codex/request-user-input" {
+        if let Some(key) = input_key(&event.payload) {
+            inner.user_inputs.insert(key, event.clone());
+        }
+    } else if event.event == "codex:notification" {
+        let params = &event.payload["params"];
+        match event.payload["method"].as_str() {
+            Some("serverRequest/resolved") => {
+                if let Some(key) = input_key(params) {
+                    inner.user_inputs.remove(&key);
+                }
+            }
+            Some("turn/completed") => inner.user_inputs.retain(|_, request| {
+                request.payload["threadId"] != params["threadId"]
+                    || request.payload["turnId"] != params["turn"]["id"]
+            }),
+            Some("thread/closed" | "thread/deleted") => inner
+                .user_inputs
+                .retain(|_, request| request.payload["threadId"] != params["threadId"]),
+            _ => {}
+        }
+    }
 }
 
 /// Stamps every emitted event with a sequence number, keeps a bounded replay
@@ -80,6 +117,7 @@ impl EventHub {
             inner: Arc::new(Mutex::new(Inner {
                 buffer: VecDeque::with_capacity(REPLAY_BUFFER_CAPACITY),
                 next_seq: 1,
+                user_inputs: HashMap::new(),
             })),
             tx,
         }
@@ -100,7 +138,9 @@ impl EventHub {
                         // Events were dropped before they could be stamped, so
                         // they are unrecoverable — no seq was ever assigned.
                         // Log loudly: this means the source channel is undersized.
-                        log::error!("[events] event hub lagged, {skipped} events lost before sequencing");
+                        log::error!(
+                            "[events] event hub lagged, {skipped} events lost before sequencing"
+                        );
                     }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
@@ -116,7 +156,12 @@ impl EventHub {
             let seq = inner.next_seq;
             inner.next_seq += 1;
 
-            let stamped = SeqEvent { seq, event, payload };
+            let stamped = SeqEvent {
+                seq,
+                event,
+                payload,
+            };
+            update_user_inputs(&mut inner, &stamped);
             inner.buffer.push_back(stamped.clone());
             while inner.buffer.len() > REPLAY_BUFFER_CAPACITY {
                 inner.buffer.pop_front();
@@ -138,10 +183,29 @@ impl EventHub {
         since: Option<u64>,
         filter: Option<&HashSet<String>>,
     ) -> (Vec<SeqEvent>, broadcast::Receiver<SeqEvent>) {
+        self.subscribe_inner(since, filter, false)
+    }
+
+    /// Replay first, then reconcile pending questions at the same atomic cursor.
+    /// A snapshot can share the replay's last sequence; clients must process it.
+    pub fn subscribe_with_questions(
+        &self,
+        since: Option<u64>,
+        filter: Option<&HashSet<String>>,
+    ) -> (Vec<SeqEvent>, broadcast::Receiver<SeqEvent>) {
+        self.subscribe_inner(since, filter, true)
+    }
+
+    fn subscribe_inner(
+        &self,
+        since: Option<u64>,
+        filter: Option<&HashSet<String>>,
+        questions: bool,
+    ) -> (Vec<SeqEvent>, broadcast::Receiver<SeqEvent>) {
         let inner = self.inner.lock().expect("event hub mutex poisoned");
         let rx = self.tx.subscribe();
 
-        let backlog = match since {
+        let mut backlog: Vec<SeqEvent> = match since {
             Some(since) => inner
                 .buffer
                 .iter()
@@ -151,6 +215,20 @@ impl EventHub {
             // A fresh client has no cursor and does not want history replayed.
             None => Vec::new(),
         };
+
+        if questions && event_matches(filter, "codex/user-input-snapshot") {
+            let mut requests: Vec<&SeqEvent> = inner.user_inputs.values().collect();
+            requests.sort_by_key(|e| e.seq);
+            // Empty fresh connections already start with empty client stores.
+            // Reconnect always sends an empty snapshot to clear stale prompts.
+            if since.is_some() || !requests.is_empty() {
+                backlog.push(SeqEvent {
+                    seq: inner.next_seq - 1,
+                    event: "codex/user-input-snapshot".into(),
+                    payload: serde_json::json!({"requests": requests.iter().map(|e| &e.payload).collect::<Vec<_>>()}),
+                });
+            }
+        }
 
         (backlog, rx)
     }
@@ -214,7 +292,10 @@ mod tests {
         hub.publish("codex:notification".into(), json!({ "n": 2 }));
 
         let (backlog, _rx) = hub.subscribe(Some(0), None);
-        assert_eq!(backlog.iter().map(|e| e.seq).collect::<Vec<_>>(), vec![1, 2]);
+        assert_eq!(
+            backlog.iter().map(|e| e.seq).collect::<Vec<_>>(),
+            vec![1, 2]
+        );
     }
 
     #[test]
@@ -225,7 +306,10 @@ mod tests {
         }
 
         let (backlog, _rx) = hub.subscribe(Some(3), None);
-        assert_eq!(backlog.iter().map(|e| e.seq).collect::<Vec<_>>(), vec![4, 5]);
+        assert_eq!(
+            backlog.iter().map(|e| e.seq).collect::<Vec<_>>(),
+            vec![4, 5]
+        );
     }
 
     #[test]
@@ -246,7 +330,10 @@ mod tests {
 
         let codex_only = filter("codex");
         let (backlog, _rx) = hub.subscribe(Some(0), codex_only.as_ref());
-        assert_eq!(backlog.iter().map(|e| e.seq).collect::<Vec<_>>(), vec![1, 3]);
+        assert_eq!(
+            backlog.iter().map(|e| e.seq).collect::<Vec<_>>(),
+            vec![1, 3]
+        );
     }
 
     #[test]
@@ -276,7 +363,10 @@ mod tests {
 
         // Client reconnects with its cursor.
         let (backlog, mut rx) = hub.subscribe(Some(last_seen), None);
-        assert_eq!(backlog.iter().map(|e| e.seq).collect::<Vec<_>>(), vec![2, 3]);
+        assert_eq!(
+            backlog.iter().map(|e| e.seq).collect::<Vec<_>>(),
+            vec![2, 3]
+        );
 
         // Live events continue from where the backlog ended, with no overlap.
         hub.publish("codex:notification".into(), json!({ "n": 4 }));
@@ -301,5 +391,51 @@ mod tests {
         assert_eq!(received.seq, 1);
         assert_eq!(received.event, "codex:notification");
         assert_eq!(received.payload, json!({ "ok": true }));
+    }
+
+    #[test]
+    fn pending_questions_survive_buffer_eviction_and_fresh_browser_connections() {
+        let hub = EventHub::new();
+        let question = json!({"threadId":"a","turnId":"turn","requestId":"rpc","questions":[]});
+        hub.publish("codex/request-user-input".into(), question.clone());
+        for _ in 0..REPLAY_BUFFER_CAPACITY + 1 {
+            hub.publish("cc-message".into(), json!({}));
+        }
+        let (backlog, _) = hub.subscribe_with_questions(None, None);
+        let snapshot = backlog
+            .iter()
+            .find(|e| e.event == "codex/user-input-snapshot")
+            .expect("pending snapshot");
+        assert_eq!(snapshot.payload["requests"], json!([question]));
+        hub.publish(
+            "codex:notification".into(),
+            json!({"method":"serverRequest/resolved","params":{"threadId":"a","requestId":"rpc"}}),
+        );
+        let (backlog, _) = hub.subscribe_with_questions(Some(1), None);
+        assert_eq!(
+            backlog.last().expect("snapshot").payload["requests"],
+            json!([])
+        );
+    }
+
+    #[test]
+    fn completion_clears_only_its_turn_and_snapshot_respects_namespace() {
+        let hub = EventHub::new();
+        hub.publish(
+            "codex/request-user-input".into(),
+            json!({"threadId":"a","turnId":"old","requestId":1}),
+        );
+        hub.publish(
+            "codex/request-user-input".into(),
+            json!({"threadId":"a","turnId":"new","requestId":"1"}),
+        );
+        hub.publish(
+            "codex:notification".into(),
+            json!({"method":"turn/completed","params":{"threadId":"a","turn":{"id":"old"}}}),
+        );
+        let (backlog, _) = hub.subscribe_with_questions(None, None);
+        assert_eq!(backlog[0].payload["requests"][0]["turnId"], "new");
+        let (cc, _) = hub.subscribe_with_questions(None, filter("cc").as_ref());
+        assert!(cc.is_empty());
     }
 }

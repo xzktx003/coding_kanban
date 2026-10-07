@@ -113,6 +113,7 @@
     "jsdom": "30.0.1",
     "@vitejs/plugin-react-swc": "4.3.0",
     "@types/markdown-it": "^14.1.2",
-    "@types/react-file-icon": "^1.0.4"
+    "@types/react-file-icon": "^1.0.4",
+    "fake-indexeddb": "^6.2.5"
   }
 }

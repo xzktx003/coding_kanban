@@ -91,6 +91,9 @@ function AppUpdateIndicator({
       type="button"
     >
       <span aria-hidden="true" className="app-update-indicator__light" />
+      <span aria-hidden="true" className="app-update-indicator__caption">
+        {warning ? "更新异常" : "更新"}
+      </span>
     </button>
   );
 }

@@ -1,15 +1,19 @@
-import { notifyDesktop } from '@session/lib/notify';
-import { isSessionModeActive } from '@session/session-dom';
-import { toast } from 'sonner';
-import { type RefObject, useCallback } from 'react';
-import type { ServerNotification } from '@session/bindings/ServerNotification';
-import type { AccountLoginCompletedNotification } from '@session/bindings/v2';
-import { useCodexStore } from '@session/components/codex/stores';
-import { allowSleep, preventSleep } from '@session/services/apiAdapt';
-import { playBeep } from '@session/utils/beep';
-import { shouldPlayCompletionBeep } from './beepOnCompletion';
+import { useSessionAttentionStore } from "@session/stores/useSessionAttentionStore";
+import { useSessionNameStore } from "../../../stores/useSessionNameStore";
+import { notifyDesktop } from "@session/lib/notify";
+import { isSessionModeActive } from "@session/session-dom";
+import { toast } from "sonner";
+import { type RefObject, useCallback } from "react";
+import type { ServerNotification } from "@session/bindings/ServerNotification";
+import type { AccountLoginCompletedNotification } from "@session/bindings/v2";
+import { useCodexStore } from "@session/components/codex/stores";
+import { allowSleep, preventSleep } from "@session/services/apiAdapt";
+import { playBeep } from "@session/utils/beep";
+import { shouldPlayCompletionBeep } from "./beepOnCompletion";
+import { resolveCodexServerRequest } from "./serverRequests";
+import { useRequestUserInputStore } from "../stores/useRequestUserInputStore";
 
-export type BeepMode = 'never' | 'unfocused' | 'always';
+export type BeepMode = "never" | "unfocused" | "always";
 
 interface NotificationHandlerRefs {
   isCodexThreadActiveRef: RefObject<boolean>;
@@ -22,24 +26,32 @@ interface NotificationHandlerRefs {
 // both the Tauri listener path and the SSE bridge path.
 export function useServerNotificationHandler(
   refs: NotificationHandlerRefs,
-  syncAccountState: (refreshToken: boolean) => Promise<void>
+  syncAccountState: (refreshToken: boolean) => Promise<void>,
 ) {
   return useCallback(
     (payload: ServerNotification) => {
       const method = payload.method;
+      if (method === "serverRequest/resolved") {
+        resolveCodexServerRequest(
+          payload.params.threadId,
+          payload.params.requestId,
+        );
+        return;
+      }
       let threadId = null;
-      if (method === 'thread/started') {
+      if (method === "thread/started") {
         threadId = payload.params.thread.id;
-      } else if ('threadId' in payload.params) {
+      } else if ("threadId" in payload.params) {
         threadId = payload.params.threadId;
       }
 
-      if (method === 'account/updated') {
+      if (method === "account/updated") {
         void syncAccountState(true);
       }
 
-      if (method === 'account/login/completed') {
-        const loginCompleted = payload.params as AccountLoginCompletedNotification;
+      if (method === "account/login/completed") {
+        const loginCompleted =
+          payload.params as AccountLoginCompletedNotification;
         if (loginCompleted.success) {
           void syncAccountState(true);
         }
@@ -48,68 +60,101 @@ export function useServerNotificationHandler(
       if (threadId) {
         if (
           [
-            'thread/settings/updated',
-            'serverRequest/resolved',
-            'mcpServer/startupStatus/updated',
+            "thread/settings/updated",
+            "mcpServer/startupStatus/updated",
           ].includes(method)
         ) {
           return;
         }
 
-        if (method === 'thread/started') {
+        if (method === "thread/started") {
           const { cwd } = payload.params.thread;
           if (threadId && cwd) {
             useCodexStore.setState((state) => ({
               threads: state.threads.map((thread) =>
-                thread.id === threadId ? { ...thread, cwd: cwd } : thread
+                thread.id === threadId ? { ...thread, cwd: cwd } : thread,
               ),
             }));
           }
         }
 
-        if (method === 'thread/name/updated') {
+        if (method === "thread/name/updated") {
           const { threadName } = payload.params;
+          if (threadName)
+            useSessionNameStore
+              .getState()
+              .initializeName("codex", threadId, threadName);
           useCodexStore.setState((state) => ({
             threads: state.threads.map((thread) =>
-              thread.id === threadId ? { ...thread, preview: threadName ?? thread.preview } : thread
+              thread.id === threadId
+                ? { ...thread, name: threadName ?? null }
+                : thread,
             ),
           }));
         }
 
-        if (method === 'thread/tokenUsage/updated') {
+        if (method === "thread/tokenUsage/updated") {
           const { tokenUsage } = payload.params;
           useCodexStore.getState().setTokenUsage(threadId, tokenUsage);
         }
 
-        if (refs.preventSleepDuringTasksRef.current && method === 'turn/started') {
+        if (
+          refs.preventSleepDuringTasksRef.current &&
+          method === "turn/started"
+        ) {
           void preventSleep(threadId).catch((error) => {
-            console.warn('[useServerNotificationHandler] preventSleep failed:', error);
+            console.warn(
+              "[useServerNotificationHandler] preventSleep failed:",
+              error,
+            );
           });
         }
 
-        if (method === 'turn/completed') {
+        if (method === "turn/completed") {
+          useRequestUserInputStore
+            .getState()
+            .clearThread(threadId, payload.params.turn.id);
           void allowSleep(threadId).catch((error) => {
-            console.warn('[useServerNotificationHandler] allowSleep failed:', error);
+            console.warn(
+              "[useServerNotificationHandler] allowSleep failed:",
+              error,
+            );
           });
 
           const turnStatus = payload.params.turn.status;
-          if (turnStatus === 'completed' && (document.hidden || !document.hasFocus() || !isSessionModeActive())) {
-            void notifyDesktop('Codex 任务已完成', undefined, () => toast.success('Codex 任务已完成'));
+          if (turnStatus === "completed")
+            useSessionAttentionStore
+              .getState()
+              .complete("codex", threadId, payload.params.turn.id);
+          if (
+            turnStatus === "completed" &&
+            (document.hidden || !document.hasFocus() || !isSessionModeActive())
+          ) {
+            void notifyDesktop("Codex 任务已完成", undefined, () =>
+              toast.success("Codex 任务已完成"),
+            );
           }
           if (
-            turnStatus === 'completed' &&
+            turnStatus === "completed" &&
             shouldPlayCompletionBeep(
               refs.taskCompleteBeepModeRef.current,
-              refs.isCodexThreadActiveRef.current
+              refs.isCodexThreadActiveRef.current,
             )
           ) {
             playBeep();
           }
         }
 
-        if (method === 'error') {
+        if (method === "thread/closed" || method === "thread/deleted") {
+          useRequestUserInputStore.getState().clearThread(threadId);
+        }
+
+        if (method === "error") {
           void allowSleep(threadId).catch((error) => {
-            console.warn('[useServerNotificationHandler] allowSleep failed:', error);
+            console.warn(
+              "[useServerNotificationHandler] allowSleep failed:",
+              error,
+            );
           });
         }
 
@@ -121,6 +166,6 @@ export function useServerNotificationHandler(
     },
     // syncAccountState and refs are stable across renders (refs by identity,
     // syncAccountState is defined once per useCodexEvents call).
-    [syncAccountState, refs]
+    [syncAccountState, refs],
   );
 }

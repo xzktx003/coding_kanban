@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "./components/ui/button";
@@ -20,21 +20,39 @@ interface Summary {
   tasks: number;
   records: Record<string, number>;
 }
-export function DataImportDialog() {
-  const [opened, setOpened] = useState(false);
+export function DataImportDialog({
+  open: controlledOpen,
+  onOpenChange,
+  hideTrigger = false,
+}: {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  hideTrigger?: boolean;
+} = {}) {
+  const [localOpened, setLocalOpened] = useState(false);
+  const opened = controlledOpen ?? localOpened;
+  const setOpened = (open: boolean) => {
+    setLocalOpened(open);
+    onOpenChange?.(open);
+  };
   const [source, setSource] = useState("");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  async function begin() {
+  useEffect(() => {
+    if (!opened || source) return;
+    let active = true;
+    void getHomeDirectory()
+      .then((home) => {
+        if (active) setSource(`${home}/.codexia`);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [opened, source]);
+  function begin() {
     setOpened(true);
-    if (!source) {
-      try {
-        setSource(`${await getHomeDirectory()}/.codexia`);
-      } catch {
-        /* The source remains editable. */
-      }
-    }
   }
   async function preview() {
     setBusy(true);
@@ -78,14 +96,16 @@ export function DataImportDialog() {
   }
   return (
     <>
-      <button
-        className="session-import-trigger"
-        onClick={begin}
-        title="从 Codexia 导入应用数据"
-      >
-        <Download size={14} />
-        <span>导入</span>
-      </button>
+      {!hideTrigger && (
+        <button
+          className="session-import-trigger"
+          onClick={begin}
+          title="从 Codexia 导入应用数据"
+        >
+          <Download size={14} />
+          <span>导入</span>
+        </button>
+      )}
       <Dialog
         open={opened}
         onOpenChange={(value) => {

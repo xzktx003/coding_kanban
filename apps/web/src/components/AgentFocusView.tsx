@@ -14,6 +14,11 @@ import {
 } from "@agent-orchestrator/shared";
 
 import {
+  shouldPreserveSessionControlKey,
+  isSidebarGroupCollapsed,
+} from "../lib/session-navigation";
+
+import {
   AgentImageMessageDialog,
   extractClipboardImage,
   validateCodexImageFile,
@@ -387,6 +392,7 @@ export function AgentFocusView({
     useState<TerminalMonitorLayoutSnapshot | null>(null);
   const paneContextMenuRef = useRef<HTMLDivElement | null>(null);
   const dragPreviewElementRef = useRef<HTMLElement | null>(null);
+  const focusViewRef = useRef<HTMLDivElement | null>(null);
   const pendingTerminalKeysRef = useRef<PendingTerminalKeyEvent[]>([]);
   const pendingTerminalKeyTimerRef = useRef<number | null>(null);
   const imageFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -417,6 +423,11 @@ export function AgentFocusView({
     const timeout = window.setTimeout(() => setImageSendNotice(null), 4_000);
     return () => window.clearTimeout(timeout);
   }, [imageSendNotice]);
+  function isFocusViewVisible(): boolean {
+    const view = focusViewRef.current;
+    return Boolean(view && !view.closest("[hidden]"));
+  }
+
   function dispatchPendingTerminalKey(event: PendingTerminalKeyEvent): boolean {
     const textarea = getActiveTerminalTextarea();
     if (!textarea) {
@@ -445,6 +456,10 @@ export function AgentFocusView({
   }
 
   function flushPendingTerminalKeys(): boolean {
+    if (!isFocusViewVisible()) {
+      pendingTerminalKeysRef.current.length = 0;
+      return true;
+    }
     if (pendingTerminalKeysRef.current.length === 0) {
       return true;
     }
@@ -881,6 +896,7 @@ export function AgentFocusView({
     }
 
     function handleDocumentKeyDown(event: KeyboardEvent) {
+      if (!isFocusViewVisible()) return;
       if (event.key === "Escape") {
         setPageSettingsPageId(null);
       }
@@ -913,6 +929,7 @@ export function AgentFocusView({
     }
 
     function handleDocumentKeyDown(event: KeyboardEvent) {
+      if (!isFocusViewVisible()) return;
       if (event.key === "Escape") {
         setPaneContextMenu(null);
       }
@@ -1886,6 +1903,9 @@ export function AgentFocusView({
     }
 
     function handleKeyDown(e: KeyboardEvent) {
+      // Both workbench modes stay mounted. Hidden terminals must not consume
+      // session shortcuts or prevent the browser from copying selected text.
+      if (!isFocusViewVisible()) return;
       const target = e.target as HTMLElement | null;
       const active = document.activeElement as HTMLElement | null;
 
@@ -1916,6 +1936,14 @@ export function AgentFocusView({
         onExit();
         return;
       }
+
+      // Preserve standard control navigation and activation; these keys must
+      // never become terminal input while a workbench control owns focus.
+      if (
+        shouldPreserveSessionControlKey(e.key, target) ||
+        shouldPreserveSessionControlKey(e.key, active)
+      )
+        return;
 
       // Buttons and anchors are not text-entry surfaces. If they keep focus,
       // printable keys must be redirected back into the active terminal
@@ -1982,6 +2010,7 @@ export function AgentFocusView({
 
   return (
     <div
+      ref={focusViewRef}
       className={`focus-view${sidebarCollapsed ? " focus-view--sidebar-collapsed" : ""}`}
       onPasteCapture={handleFocusPasteCapture}
       onPointerDownCapture={handleFocusViewPointerDownCapture}
@@ -2444,9 +2473,12 @@ export function AgentFocusView({
                       },
                     ]
                 ).map((group) => {
-                  const collapsed =
-                    groupingEnabled &&
-                    isSessionGroupCollapsed(sessionGroups, group.id);
+                  const collapsed = isSidebarGroupCollapsed(
+                    groupingEnabled,
+                    group.id,
+                    sessionGroups,
+                    sidebarSearchQuery,
+                  );
                   return (
                     <div className="focus-sidebar-group" key={group.id}>
                       {groupingEnabled && (

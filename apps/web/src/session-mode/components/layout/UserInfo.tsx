@@ -1,30 +1,42 @@
-import { BarChart2, CheckCircle2, KeyRound, Plus, Settings, User, Users } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import OpenAIIcon from '@session/assets/openai.svg';
-import type { Account } from '@session/bindings/v2';
-import { CodexAuthDialog } from '@session/components/codex/CodexAuthDialog';
-import { useCodexStore } from '@session/components/codex/stores';
-import { Button } from '@session/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@session/components/ui/popover';
-import { Separator } from '@session/components/ui/separator';
+import {
+  BarChart2,
+  CheckCircle2,
+  KeyRound,
+  Plus,
+  Settings,
+  User,
+  Users,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import OpenAIIcon from "@session/assets/openai.svg";
+import type { Account } from "@session/bindings/v2";
+import { CodexAuthDialog } from "@session/components/codex/CodexAuthDialog";
+import { useCodexStore } from "@session/components/codex/stores";
+import { Button } from "@session/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@session/components/ui/popover";
+import { Separator } from "@session/components/ui/separator";
 import {
   type AccountSnapshotSummary,
   listAccountSnapshots,
   switchAccountSnapshot,
-} from '@session/services';
-import { useLayoutStore } from '@session/stores';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
+} from "@session/services";
+import { useLayoutStore } from "@session/stores";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 
 function accountLabel(account: Account | null): string | null {
   if (!account) return null;
   switch (account.type) {
-    case 'chatgpt':
-      return account.email ?? 'ChatGPT';
-    case 'apiKey':
-      return 'API Key';
-    case 'amazonBedrock':
-      return 'Amazon Bedrock';
+    case "chatgpt":
+      return account.email ?? "ChatGPT";
+    case "apiKey":
+      return "API Key";
+    case "amazonBedrock":
+      return "Amazon Bedrock";
     default:
       return null;
   }
@@ -32,13 +44,15 @@ function accountLabel(account: Account | null): string | null {
 
 export function UserInfo() {
   const { setView } = useLayoutStore();
-  const { t } = useTranslation('sidebar');
+  const { t } = useTranslation("sidebar");
   const hasAccount = useCodexStore((s) => s.hasAccount);
   const account = useCodexStore((s) => s.account);
   const hasProject = useWorkspaceStore((s) => s.projects.length > 0);
   const [codexAuthOpen, setCodexAuthOpen] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
-  const [savedAccounts, setSavedAccounts] = useState<AccountSnapshotSummary[]>([]);
+  const [savedAccounts, setSavedAccounts] = useState<AccountSnapshotSummary[]>(
+    [],
+  );
   const [switchingLabel, setSwitchingLabel] = useState<string | null>(null);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const hasAutoPrompted = useRef(false);
@@ -69,13 +83,13 @@ export function UserInfo() {
   // Snapshots are (re)written whenever a ChatGPT login completes; pick that
   // up so a freshly added account shows in the list without reopening.
   useEffect(() => {
-    if (account?.type === 'chatgpt') {
+    if (account?.type === "chatgpt") {
       refreshSavedAccounts();
     }
   }, [account, refreshSavedAccounts]);
 
   const handleOpenSettings = () => {
-    setView('settings');
+    setView("settings");
     setPopoverOpen(false);
   };
 
@@ -88,9 +102,9 @@ export function UserInfo() {
       refreshSavedAccounts();
       setPopoverOpen(false);
     } catch (error) {
-      console.error('Failed to switch account:', error);
+      console.error("Failed to switch account:", error);
       setSwitchError(
-        `${error instanceof Error ? error.message : String(error)} — sign in to this account again.`
+        `${error instanceof Error ? error.message : String(error)} — sign in to this account again.`,
       );
     } finally {
       setSwitchingLabel(null);
@@ -98,10 +112,10 @@ export function UserInfo() {
   };
 
   const label = accountLabel(account);
-  const plan = account?.type === 'chatgpt' ? account.planType : null;
+  const plan = account?.type === "chatgpt" ? account.planType : null;
   // The backend matches on auth.json's account_id; fall back to the live
   // account's email so older snapshots still get the current marker.
-  const activeEmail = account?.type === 'chatgpt' ? account.email : null;
+  const activeEmail = account?.type === "chatgpt" ? account.email : null;
   const isCurrentAccount = (acc: AccountSnapshotSummary) =>
     acc.isCurrent || (!!activeEmail && acc.email === activeEmail);
   const activeLabel = savedAccounts.find(isCurrentAccount)?.label ?? label;
@@ -110,19 +124,31 @@ export function UserInfo() {
     <div className="w-full border-t px-2 py-2">
       <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
         <PopoverTrigger asChild>
-          <Button variant="ghost" className="w-full justify-start gap-2 px-2 h-8">
+          <Button
+            variant="ghost"
+            aria-label="账户与登录"
+            title="账户与登录"
+            className="w-full justify-start gap-2 px-2 h-9 max-sm:h-11"
+          >
             <User className="h-4 w-4 shrink-0" />
+            <span className="truncate text-xs">账户与登录</span>
           </Button>
         </PopoverTrigger>
         <PopoverContent align="start" side="top" className="w-64 p-1">
           <div className="flex flex-col gap-1">
             {label && (
               <div className="flex items-center gap-2 px-2 py-1.5">
-                <img src={OpenAIIcon} alt="OpenAI" className="h-6 w-6 shrink-0 object-contain" />
+                <img
+                  src={OpenAIIcon}
+                  alt="OpenAI"
+                  className="h-6 w-6 shrink-0 object-contain"
+                />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{label}</p>
-                  {plan && plan !== 'unknown' && (
-                    <p className="text-xs text-muted-foreground capitalize">{plan}</p>
+                  {plan && plan !== "unknown" && (
+                    <p className="text-xs text-muted-foreground capitalize">
+                      {plan}
+                    </p>
                   )}
                 </div>
               </div>
@@ -154,7 +180,11 @@ export function UserInfo() {
               </>
             )}
 
-            {switchError && <p className="px-2 py-1 text-xs text-destructive">{switchError}</p>}
+            {switchError && (
+              <p className="px-2 py-1 text-xs text-destructive">
+                {switchError}
+              </p>
+            )}
 
             <Button
               variant="ghost"
@@ -164,8 +194,12 @@ export function UserInfo() {
                 setPopoverOpen(false);
               }}
             >
-              {label ? <Plus className="h-4 w-4" /> : <KeyRound className="h-4 w-4" />}
-              {label ? 'Add Account' : 'ChatGPT Login'}
+              {label ? (
+                <Plus className="h-4 w-4" />
+              ) : (
+                <KeyRound className="h-4 w-4" />
+              )}
+              {label ? "Add Account" : "ChatGPT Login"}
             </Button>
             <Separator className="my-1" />
             <Button
@@ -174,18 +208,18 @@ export function UserInfo() {
               onClick={handleOpenSettings}
             >
               <Settings className="h-4 w-4" />
-              {t('settings')}
+              {t("settings")}
             </Button>
             <Button
               variant="ghost"
               className="w-full justify-start gap-2"
               onClick={() => {
-                setView('insights');
+                setView("insights");
                 setPopoverOpen(false);
               }}
             >
               <BarChart2 className="h-4 w-4" />
-              {t('insights')}
+              {t("insights")}
             </Button>
           </div>
         </PopoverContent>

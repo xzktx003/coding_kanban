@@ -4,6 +4,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::types::{ErrorResponse, WebServerState};
+#[path = "acp_images.rs"]
+mod acp_images;
 
 #[derive(Deserialize)]
 pub(crate) struct AcpStartParams {
@@ -23,6 +25,8 @@ pub(crate) struct AcpPromptParams {
     #[serde(default)]
     pub session_id: Option<String>,
     pub text: String,
+    #[serde(default)]
+    pub image_paths: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -140,12 +144,25 @@ pub(crate) async fn api_acp_prompt(
     AxumState(state): AxumState<WebServerState>,
     Json(params): Json<AcpPromptParams>,
 ) -> Result<Json<Value>, ErrorResponse> {
+    let images = if params.image_paths.is_empty() {
+        vec![]
+    } else {
+        let home = std::env::var_os("SESSION_DATA_HOME")
+            .ok_or_else(|| err("会话附件目录未配置".into()))?;
+        acp_images::read_images(
+            &params.image_paths,
+            &std::path::PathBuf::from(home).join("uploads"),
+        )
+        .await
+        .map_err(err)?
+    };
     state
         .acp_state
-        .prompt(
+        .prompt_with_images(
             &params.connection_id,
             params.session_id.as_deref(),
             &params.text,
+            &images,
         )
         .await
         .map(Json)

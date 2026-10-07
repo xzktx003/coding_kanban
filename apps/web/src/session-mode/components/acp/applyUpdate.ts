@@ -1,34 +1,53 @@
-import { useAcpStore } from '@session/stores/useAcpStore';
+import { useAcpStore } from "@session/stores/useAcpStore";
 
 /**
  * Fold one `session/update` payload into the store. Shared by the live event
  * bridge and the replay of a stored transcript, so both render identically.
  */
-export function applyAcpUpdate(update: Record<string, any>, store = useAcpStore.getState()) {
+export function applyAcpUpdate(
+  update: Record<string, any>,
+  store = useAcpStore.getState(),
+) {
   switch (update.sessionUpdate) {
-    case 'user_message_chunk':
+    case "user_message_chunk":
       // Only stored transcripts carry this: live turns are added by the composer.
-      if (update.content?.type === 'text')
+      if (update.content?.type === "text")
         store.addEntry({
           id: `u-${Math.random().toString(36).slice(2)}`,
-          role: 'user',
+          role: "user",
           text: update.content.text,
         });
+      if (
+        update.content?.type === "image" &&
+        ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(
+          update.content.mimeType,
+        )
+      )
+        store.addEntry({
+          id: `u-image-${Math.random().toString(36).slice(2)}`,
+          role: "user",
+          text: "",
+          images: [
+            `data:${update.content.mimeType};base64,${update.content.data}`,
+          ],
+        });
       break;
-    case 'agent_message_chunk':
-      if (update.content?.type === 'text') store.appendChunk('agent', update.content.text);
+    case "agent_message_chunk":
+      if (update.content?.type === "text")
+        store.appendChunk("agent", update.content.text);
       break;
-    case 'agent_thought_chunk':
-      if (update.content?.type === 'text') store.appendChunk('thought', update.content.text);
+    case "agent_thought_chunk":
+      if (update.content?.type === "text")
+        store.appendChunk("thought", update.content.text);
       break;
-    case 'current_mode_update':
+    case "current_mode_update":
       store.setCurrentMode(update.currentModeId);
       break;
-    case 'config_option_update':
+    case "config_option_update":
       store.setConfigOptions(update.configOptions ?? []);
       break;
-    case 'tool_call':
-    case 'tool_call_update':
+    case "tool_call":
+    case "tool_call_update":
       store.upsertToolCall({
         toolCallId: update.toolCallId,
         title: update.title,

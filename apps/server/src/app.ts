@@ -1,4 +1,5 @@
-import { registerSessionPreviewRoutes } from './routes/session-preview.js';
+import { registerWorkbenchVsCodeWebRoutes } from "./routes/workbench-vscode-web.js";
+import { registerSessionPreviewRoutes } from "./routes/session-preview.js";
 import { registerSessionModeRoutes } from "./routes/session-mode.js";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
@@ -619,7 +620,20 @@ export function buildServer(options: BuildServerOptions = {}): {
   app.register(websocket);
   app.register(async function sessionModeGateway(instance) {
     registerSessionPreviewRoutes(instance);
-    registerSessionModeRoutes(instance, { origin: options.sessionRuntimeOrigin, ensureRuntime: options.ensureSessionRuntime, attachmentRoot: options.sessionAttachmentRoot, projects: () => registry.list().items.filter(session => !session.sshTarget).map(session => session.repositoryRoot || session.workingDirectory || "") });
+    registerWorkbenchVsCodeWebRoutes(instance, vsCodeWebManager);
+    registerSessionModeRoutes(instance, {
+      origin: options.sessionRuntimeOrigin,
+      ensureRuntime: options.ensureSessionRuntime,
+      attachmentRoot: options.sessionAttachmentRoot,
+      projects: () =>
+        registry
+          .list()
+          .items.filter((session) => !session.sshTarget)
+          .map(
+            (session) =>
+              session.repositoryRoot || session.workingDirectory || "",
+          ),
+    });
   });
 
   app.register(async (instance) => {

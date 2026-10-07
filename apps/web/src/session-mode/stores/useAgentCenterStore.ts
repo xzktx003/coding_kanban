@@ -1,12 +1,51 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
 
-export type AgentCenterCard =
-  | { kind: 'codex'; id: string; preview?: string; worktreePath?: string; cwd?: string | null }
-  | { kind: 'cc'; id: string; preview?: string; worktreePath?: string; cwd?: string | null };
+import {
+  applySessionTabAction,
+  type FollowedSession,
+  type SessionTabAction,
+  type SessionTabOperation,
+  type SharedSessionTabs,
+} from "@agent-orchestrator/shared";
+
+export type AgentCenterCard = FollowedSession;
+export const sharedCardMetadata = (card: AgentCenterCard): AgentCenterCard => ({
+  kind: card.kind,
+  id: card.id,
+  ...(card.cwd !== undefined ? { cwd: card.cwd } : {}),
+  ...(card.worktreePath !== undefined
+    ? { worktreePath: card.worktreePath }
+    : {}),
+  ...(card.preview !== undefined
+    ? { preview: card.preview.slice(0, 512) }
+    : {}),
+});
+
+export const agentCardKey = (card: Pick<AgentCenterCard, "kind" | "id">) =>
+  `${card.kind}:${card.id}`;
+export function selectedAgentCard(
+  state: Pick<
+    AgentCenterState,
+    "cards" | "currentAgentCardId" | "currentAgentCardKind"
+  > & { detachedCard?: AgentCenterCard | null },
+) {
+  return (
+    state.cards.find(
+      (card) =>
+        card.id === state.currentAgentCardId &&
+        (!state.currentAgentCardKind ||
+          card.kind === state.currentAgentCardKind),
+    ) ??
+    (state.detachedCard?.id === state.currentAgentCardId &&
+    state.detachedCard?.kind === state.currentAgentCardKind
+      ? state.detachedCard
+      : undefined)
+  );
+}
 
 // Multi-agent view layout mode: grid of cards, compact list (header only), or solo active card.
-export type AgentCardsViewMode = 'grid' | 'list' | 'solo';
+export type AgentCardsViewMode = "grid" | "list" | "solo";
 
 // User-adjusted size for a solo card in grid mode (Ghostty-style manual resize).
 // width is omitted until the user drags the right edge, letting the card fall back
@@ -17,80 +56,270 @@ export interface AgentCardSize {
 }
 
 interface AgentCenterState {
+  detachedCard: AgentCenterCard | null;
+  syncClientId: string;
+  nextTabSequence: number;
+  pendingTabOperations: SessionTabOperation[];
+  sharedTabsInitialized: boolean;
+  tabSyncError: string | null;
+  acceptSharedTabs: (
+    snapshot: SharedSessionTabs,
+    acknowledgedSequence?: number,
+  ) => void;
   cards: AgentCenterCard[];
-  addAgentCard: (card: AgentCenterCard) => boolean;
+  addAgentCard: (
+    card: AgentCenterCard,
+    options?: { activate?: boolean },
+  ) => boolean;
   removeCard: (card: AgentCenterCard) => void;
+  moveCard: (card: AgentCenterCard, target: AgentCenterCard) => void;
   updateCard: (card: AgentCenterCard) => void;
   currentAgentCardId: string | null;
-  setCurrentAgentCardId: (id: string | null) => void;
+  currentAgentCardKind: AgentCenterCard["kind"] | null;
+  setCurrentAgentCardId: (
+    id: string | null,
+    kind?: AgentCenterCard["kind"],
+  ) => void;
   cardsViewMode: AgentCardsViewMode;
   setCardsViewMode: (mode: AgentCardsViewMode) => void;
   cardSizeMap: Record<string, AgentCardSize>;
   setCardSize: (cardId: string, size: AgentCardSize) => void;
 }
 
+function enqueue(state: AgentCenterState, action: SessionTabAction) {
+  if (action.type === "add" || action.type === "update")
+    action = { ...action, card: sharedCardMetadata(action.card) };
+  return {
+    nextTabSequence: state.nextTabSequence + 1,
+    pendingTabOperations: [
+      ...state.pendingTabOperations,
+      { seq: state.nextTabSequence, action },
+    ],
+  };
+}
+
 export const useAgentCenterStore = create<AgentCenterState>()(
   persist(
     (set) => ({
       cards: [],
+      detachedCard: null,
+      syncClientId: crypto.randomUUID(),
+      nextTabSequence: 1,
+      pendingTabOperations: [],
+      sharedTabsInitialized: false,
+      tabSyncError: null,
+      acceptSharedTabs: (snapshot, acknowledgedSequence = 0) =>
+        set((state) => {
+          const pending = state.pendingTabOperations.filter(
+            (op) => op.seq > acknowledgedSequence,
+          );
+          const cards = pending.reduce(
+            (current, op) => applySessionTabAction(current, op.action),
+            snapshot.cards,
+          );
+          const active = selectedAgentCard(state);
+          const detachedCard =
+            active &&
+            !cards.some((c) => agentCardKey(c) === agentCardKey(active))
+              ? active
+              : null;
+          return {
+            cards:
+              JSON.stringify(cards) === JSON.stringify(state.cards)
+                ? state.cards
+                : cards,
+            pendingTabOperations:
+              pending.length === state.pendingTabOperations.length
+                ? state.pendingTabOperations
+                : pending,
+            sharedTabsInitialized: snapshot.initialized,
+            detachedCard,
+            tabSyncError: null,
+          };
+        }),
 
       // Returns true if the card was added/updated.
-      addAgentCard: (card) => {
+      addAgentCard: (card, { activate = true } = {}) => {
         let added = false;
         set((state) => {
-          const idx = state.cards.findIndex((c) => c.kind === card.kind && c.id === card.id);
+          const idx = state.cards.findIndex(
+            (c) => c.kind === card.kind && c.id === card.id,
+          );
           // Update existing card metadata without dropping a saved worktree path.
           if (idx !== -1) {
             const next = [...state.cards];
-            next[idx] = { ...next[idx], ...card } as AgentCenterCard;
+            next[idx] = {
+              ...next[idx],
+              ...card,
+              worktreePath: card.worktreePath ?? next[idx].worktreePath,
+            } as AgentCenterCard;
             added = true;
-            return { cards: next };
+            return {
+              ...(JSON.stringify(next[idx]) !== JSON.stringify(state.cards[idx])
+                ? enqueue(state, { type: "add", card: next[idx] })
+                : {}),
+              cards: next,
+              ...(activate
+                ? {
+                    detachedCard: null,
+                    currentAgentCardId: card.id,
+                    currentAgentCardKind: card.kind,
+                  }
+                : {}),
+            };
           }
           added = true;
-          return { cards: [card, ...state.cards] };
+          return {
+            ...enqueue(state, { type: "add", card }),
+            cards: [...state.cards, card],
+            ...(activate
+              ? {
+                  detachedCard: null,
+                  currentAgentCardId: card.id,
+                  currentAgentCardKind: card.kind,
+                }
+              : {}),
+          };
         });
         return added;
       },
 
       removeCard: (card) =>
-        set((state) => ({
-          cards: state.cards.filter((c) => !(c.kind === card.kind && c.id === card.id)),
-        })),
+        set((state) => {
+          const index = state.cards.findIndex(
+            (c) => agentCardKey(c) === agentCardKey(card),
+          );
+          if (index < 0) {
+            if (
+              state.detachedCard &&
+              agentCardKey(state.detachedCard) === agentCardKey(card)
+            )
+              return {
+                detachedCard: null,
+                currentAgentCardId: null,
+                currentAgentCardKind: null,
+              };
+            return state;
+          }
+          const active = selectedAgentCard(state);
+          const cards = state.cards.filter(
+            (c) => agentCardKey(c) !== agentCardKey(card),
+          );
+          if (!active || agentCardKey(active) !== agentCardKey(card))
+            return {
+              cards,
+              ...enqueue(state, { type: "remove", key: agentCardKey(card) }),
+            };
+          const next = cards[index] ?? cards[index - 1];
+          return {
+            ...enqueue(state, { type: "remove", key: agentCardKey(card) }),
+            detachedCard: null,
+            cards,
+            currentAgentCardId: next?.id ?? null,
+            currentAgentCardKind: next?.kind ?? null,
+          };
+        }),
+
+      moveCard: (card, target) =>
+        set((state) => {
+          const from = state.cards.findIndex(
+            (c) => agentCardKey(c) === agentCardKey(card),
+          );
+          const to = state.cards.findIndex(
+            (c) => agentCardKey(c) === agentCardKey(target),
+          );
+          if (from < 0 || to < 0 || from === to) return state;
+          const cards = [...state.cards];
+          const [moved] = cards.splice(from, 1);
+          cards.splice(to, 0, moved);
+          return {
+            cards,
+            ...enqueue(state, {
+              type: "move",
+              key: agentCardKey(card),
+              beforeKey: cards[to + 1] ? agentCardKey(cards[to + 1]) : null,
+            }),
+          };
+        }),
 
       updateCard: (card) =>
         set((state) => ({
+          ...enqueue(state, { type: "update", card }),
           cards: state.cards.map((existing) =>
             existing.kind === card.kind && existing.id === card.id
               ? ({ ...existing, ...card } as AgentCenterCard)
-              : existing
+              : existing,
           ),
         })),
 
       currentAgentCardId: null,
-      setCurrentAgentCardId: (id) => set({ currentAgentCardId: id }),
+      currentAgentCardKind: null,
+      setCurrentAgentCardId: (id, kind) =>
+        set((state) => ({
+          detachedCard:
+            state.detachedCard?.id === id &&
+            (!kind || state.detachedCard.kind === kind)
+              ? state.detachedCard
+              : null,
+          currentAgentCardId: id,
+          currentAgentCardKind: id
+            ? (kind ??
+              state.cards.find(
+                (c) => c.id === id && c.kind === state.currentAgentCardKind,
+              )?.kind ??
+              state.cards.find((c) => c.id === id)?.kind ??
+              null)
+            : null,
+        })),
 
-      cardsViewMode: 'solo',
+      cardsViewMode: "solo",
       setCardsViewMode: (mode) => set({ cardsViewMode: mode }),
 
       cardSizeMap: {},
       setCardSize: (cardId, size) =>
-        set((state) => ({ cardSizeMap: { ...state.cardSizeMap, [cardId]: size } })),
+        set((state) => ({
+          cardSizeMap: { ...state.cardSizeMap, [cardId]: size },
+        })),
     }),
     {
-      name: 'kanban.session.agent-center-store',
-      version: 4,
-      migrate: (persistedState: any, version: number) => {
-        if (version === 3 && persistedState?.cardsViewMode === 'single') {
-          persistedState.cardsViewMode = 'solo';
-        }
-        return persistedState;
+      name: "kanban.session.agent-center-store",
+      version: 5,
+      migrate: (
+        persistedState: unknown,
+      ): Pick<
+        AgentCenterState,
+        | "cards"
+        | "currentAgentCardId"
+        | "currentAgentCardKind"
+        | "cardsViewMode"
+        | "cardSizeMap"
+      > => {
+        const old = persistedState as Partial<AgentCenterState> | undefined;
+        // Legacy cards accumulated through browsing. Start an intentional tab set;
+        // the mounted workspace retains its current conversation during migration.
+        return {
+          cards: [],
+          currentAgentCardId: null,
+          currentAgentCardKind: null,
+          cardsViewMode:
+            old?.cardsViewMode === "grid" || old?.cardsViewMode === "list"
+              ? old.cardsViewMode
+              : "solo",
+          cardSizeMap: old?.cardSizeMap ?? {},
+        };
       },
-      // currentAgentCardId is runtime-only — not persisted
       partialize: (state) => ({
         cards: state.cards,
+        currentAgentCardId: state.currentAgentCardId,
+        currentAgentCardKind: state.currentAgentCardKind,
         cardsViewMode: state.cardsViewMode,
         cardSizeMap: state.cardSizeMap,
+        detachedCard: state.detachedCard,
+        syncClientId: state.syncClientId,
+        nextTabSequence: state.nextTabSequence,
+        pendingTabOperations: state.pendingTabOperations,
+        sharedTabsInitialized: state.sharedTabsInitialized,
       }),
-    }
-  )
+    },
+  ),
 );

@@ -1,22 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   MarketplaceLoadErrorInfo,
   PluginDetail,
   PluginMarketplaceEntry,
   PluginSummary,
-} from '@session/bindings/v2';
-import { toast } from '@session/components/ui/use-toast';
-import { pluginInstall, pluginList, pluginRead } from '@session/services';
-import { useAgentSettingsStore, useLayoutStore } from '@session/stores';
-import { useInputStore } from '@session/stores/useInputStore';
-import { usePluginsViewContext } from '../hooks';
+} from "@session/bindings/v2";
+import { toast } from "@session/components/ui/use-toast";
+import { pluginInstall, pluginList, pluginRead } from "@session/services";
+import { useAgentSettingsStore, useLayoutStore } from "@session/stores";
+import { useInputStore } from "@session/stores/useInputStore";
+import { usePluginsViewContext } from "../hooks";
 import {
   dedupePluginEntries,
   type PluginEntry,
   pluginRequestTarget,
   preferredLocalSources,
-} from './pluginTargets';
-import { useExternalUrl } from './useExternalUrl';
+} from "./pluginTargets";
+import { useExternalUrl } from "./useExternalUrl";
 
 /**
  * Process-wide cache of the last plugin/list result, so re-entering the view
@@ -29,7 +29,10 @@ let listCache: {
 } | null = null;
 
 /** Build a placeholder detail from a list summary so the detail page can render immediately. */
-function summaryToDetail(marketplace: PluginMarketplaceEntry, plugin: PluginSummary): PluginDetail {
+function summaryToDetail(
+  marketplace: PluginMarketplaceEntry,
+  plugin: PluginSummary,
+): PluginDetail {
   return {
     marketplaceName: marketplace.name,
     marketplacePath: marketplace.path,
@@ -52,12 +55,24 @@ function summaryToDetail(marketplace: PluginMarketplaceEntry, plugin: PluginSumm
  */
 export function usePluginsMarketplace(refreshTrigger = 0) {
   const [marketplaces, setMarketplaces] = useState<PluginMarketplaceEntry[]>(
-    listCache?.marketplaces ?? []
+    listCache?.marketplaces ?? [],
   );
-  const [errors, setErrors] = useState<MarketplaceLoadErrorInfo[]>(listCache?.errors ?? []);
-  const [isLoading, setIsLoading] = useState(false);
-  const [installingPluginId, setInstallingPluginId] = useState<string | null>(null);
-  const [query, setQuery] = useState('');
+  const [errors, setErrors] = useState<MarketplaceLoadErrorInfo[]>(
+    listCache?.errors ?? [],
+  );
+  const [isLoading, setIsLoading] = useState(!listCache);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const requestVersion = useRef(0);
+  useEffect(
+    () => () => {
+      requestVersion.current++;
+    },
+    [],
+  );
+  const [installingPluginId, setInstallingPluginId] = useState<string | null>(
+    null,
+  );
+  const [query, setQuery] = useState("");
 
   const { setSelectedAgent } = useAgentSettingsStore();
   const { setView } = useLayoutStore();
@@ -66,23 +81,30 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
   const { openExternalUrl } = useExternalUrl();
 
   const loadPlugins = useCallback(async (forceRefetch = false) => {
+    const request = ++requestVersion.current;
     setIsLoading(true);
+    setLoadError(null);
     try {
       // forceRefetch also makes the app-server re-sync the curated marketplace
       // checkout under ~/.codex/.tmp instead of serving its in-memory catalog.
       const response = await pluginList({ forceRefetch });
+      if (request !== requestVersion.current) return;
+      if (!Array.isArray(response?.marketplaces))
+        throw new Error("服务返回的插件列表无效");
+      const marketplaceErrors = Array.isArray(response.marketplaceLoadErrors)
+        ? response.marketplaceLoadErrors
+        : [];
       listCache = {
         marketplaces: response.marketplaces,
-        errors: response.marketplaceLoadErrors,
+        errors: marketplaceErrors,
       };
       setMarketplaces(response.marketplaces);
-      setErrors(response.marketplaceLoadErrors);
+      setErrors(marketplaceErrors);
     } catch (error) {
-      console.error('Failed to load plugins:', error);
-      setMarketplaces([]);
-      setErrors([]);
+      if (request === requestVersion.current)
+        setLoadError(error instanceof Error ? error.message : String(error));
     } finally {
-      setIsLoading(false);
+      if (request === requestVersion.current) setIsLoading(false);
     }
   }, []);
 
@@ -91,14 +113,19 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
     setMarketplaces((prev) => {
       const next = prev.map((m) => ({
         ...m,
-        plugins: m.plugins.map((p) => (p.id === pluginId ? { ...p, installed } : p)),
+        plugins: m.plugins.map((p) =>
+          p.id === pluginId ? { ...p, installed } : p,
+        ),
       }));
       if (listCache) listCache = { ...listCache, marketplaces: next };
       return next;
     });
   }, []);
 
-  const preferred = useMemo(() => preferredLocalSources(marketplaces), [marketplaces]);
+  const preferred = useMemo(
+    () => preferredLocalSources(marketplaces),
+    [marketplaces],
+  );
 
   /** One entry per plugin, with duplicates across marketplaces collapsed. */
   const entries = useMemo(() => {
@@ -116,9 +143,10 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
       const target = pluginRequestTarget(marketplace, plugin, preferred);
       if (!target) {
         toast({
-          title: 'Install unavailable',
-          description: 'This plugin cannot be addressed by the current marketplace.',
-          variant: 'destructive',
+          title: "Install unavailable",
+          description:
+            "This plugin cannot be addressed by the current marketplace.",
+          variant: "destructive",
         });
         return;
       }
@@ -127,43 +155,48 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
       try {
         const response = await pluginInstall(target);
 
-        const authTargets = response.appsNeedingAuth.filter((app) => app.installUrl);
+        const authTargets = response.appsNeedingAuth.filter(
+          (app) => app.installUrl,
+        );
         if (authTargets.length > 0) {
           await openExternalUrl(authTargets[0].installUrl!);
         }
 
         markInstalled(plugin.id, true);
         toast({
-          title: authTargets.length > 0 ? 'Plugin installed, auth required' : 'Plugin installed',
+          title:
+            authTargets.length > 0
+              ? "Plugin installed, auth required"
+              : "Plugin installed",
           description:
             authTargets.length > 0
               ? `${plugin.interface?.displayName ?? plugin.name} needs ${authTargets
                   .map((app) => app.name)
-                  .join(', ')} authentication.`
+                  .join(", ")} authentication.`
               : `${plugin.interface?.displayName ?? plugin.name} is ready in the composer.`,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         toast({
-          title: 'Install failed',
+          title: "Install failed",
           description: message,
-          variant: 'destructive',
+          variant: "destructive",
         });
       } finally {
         setInstallingPluginId(null);
       }
     },
-    [markInstalled, openExternalUrl, preferred]
+    [markInstalled, openExternalUrl, preferred],
   );
 
   const handleUsePlugin = useCallback(
     (plugin: PluginSummary) => {
       const pluginName = plugin.interface?.displayName ?? plugin.name;
-      setSelectedAgent('codex');
-      setView('agent');
+      setSelectedAgent("codex");
+      setView("agent");
       appendInputValue(`@${pluginName}`);
     },
-    [appendInputValue, setSelectedAgent, setView]
+    [appendInputValue, setSelectedAgent, setView],
   );
 
   const handleShowDetail = useCallback(
@@ -178,10 +211,10 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
       } catch (error) {
         // The detail page already shows what the list knows; a failed enrich
         // (e.g. the remote catalog 404s on this plugin) is not worth a toast.
-        console.warn('Failed to load plugin details:', error);
+        console.warn("Failed to load plugin details:", error);
       }
     },
-    [handlePluginDetail, preferred]
+    [handlePluginDetail, preferred],
   );
 
   const lastTrigger = useRef(refreshTrigger);
@@ -201,22 +234,22 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
       if (needle) {
         const haystack = [
           p.name,
-          p.interface?.displayName ?? '',
-          p.interface?.shortDescription ?? '',
+          p.interface?.displayName ?? "",
+          p.interface?.shortDescription ?? "",
         ]
-          .join(' ')
+          .join(" ")
           .toLowerCase();
         if (!haystack.includes(needle)) return;
       }
-      const category = p.interface?.category || 'Others';
+      const category = p.interface?.category || "Others";
       if (!groupsMap.has(category)) {
         groupsMap.set(category, []);
       }
       groupsMap.get(category)!.push({ marketplace: m, plugin: p });
     });
     return Array.from(groupsMap.entries()).sort(([a], [b]) => {
-      if (a === 'Others') return 1;
-      if (b === 'Others') return -1;
+      if (a === "Others") return 1;
+      if (b === "Others") return -1;
       return a.localeCompare(b);
     });
   }, [entries, query]);
@@ -224,6 +257,7 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
   return {
     marketplaces,
     errors,
+    loadError,
     isLoading,
     installingPluginId,
     query,

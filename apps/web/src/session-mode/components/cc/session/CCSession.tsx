@@ -1,16 +1,20 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { CCMessage } from '@session/components/cc/session/messages';
-import { PermissionRequestCard } from '@session/components/cc/session/messages/PermissionRequestCard';
-import { ccGetSessionMessages, ccResumeSession } from '@session/services/apiAdapt/cc';
-import { useCCStore } from '@session/stores/cc';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
-import { useCCPermissionListener, useCCSessionListener } from '../hooks';
-import type { PermissionRequestMessage } from '../types/messages';
-import type { PermissionDecision } from '../types/permission';
-import { fromSdkMessages } from '../utils/fromSdkMessages';
-import { CCScrollControls } from './CCScrollControls';
-import { buildMessageGroups, CCExploredMessageGroup } from './messages/group';
-import { buildInlineErrorsMap } from './messages/inlineErrors';
+import { useSessionReadReceipt } from "@session/hooks/useSessionReadReceipt";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { CCMessage } from "@session/components/cc/session/messages";
+import { PermissionRequestCard } from "@session/components/cc/session/messages/PermissionRequestCard";
+import {
+  ccGetSessionMessages,
+  ccResumeSession,
+} from "@session/services/apiAdapt/cc";
+import { useCCStore } from "@session/stores/cc";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { useCCPermissionListener, useCCSessionListener } from "../hooks";
+import type { PermissionRequestMessage } from "../types/messages";
+import type { PermissionDecision } from "../types/permission";
+import { fromSdkMessages } from "../utils/fromSdkMessages";
+import { CCScrollControls } from "./CCScrollControls";
+import { buildMessageGroups, CCExploredMessageGroup } from "./messages/group";
+import { buildInlineErrorsMap } from "./messages/inlineErrors";
 
 interface CCSessionProps {
   /** When provided, renders in embedded (grid-card) mode for this specific session. */
@@ -22,7 +26,10 @@ interface CCSessionProps {
   disableListener?: boolean;
 }
 
-export default function CCSession({ sessionId, disableListener = false }: CCSessionProps = {}) {
+export default function CCSession({
+  sessionId,
+  disableListener = false,
+}: CCSessionProps = {}) {
   const isEmbedded = !!sessionId;
 
   const {
@@ -45,10 +52,16 @@ export default function CCSession({ sessionId, disableListener = false }: CCSess
   const { cwd } = useWorkspaceStore();
 
   // In embedded mode use per-session data; otherwise use the global active-session data.
-  const messages = sessionId ? (sessionMessagesMap[sessionId] ?? []) : globalMessages;
-  const isLoading = sessionId ? (sessionLoadingMap[sessionId] ?? false) : globalIsLoading;
+  const messages = sessionId
+    ? (sessionMessagesMap[sessionId] ?? [])
+    : globalMessages;
+  const isLoading = sessionId
+    ? (sessionLoadingMap[sessionId] ?? false)
+    : globalIsLoading;
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const latestRef = useRef<HTMLDivElement>(null);
+  useSessionReadReceipt("cc", sessionId ?? activeSessionId, latestRef);
   const shouldAutoScrollRef = useRef(true);
   const isProgrammaticScrollRef = useRef(false);
 
@@ -58,7 +71,14 @@ export default function CCSession({ sessionId, disableListener = false }: CCSess
     clearMessages();
     setConnected(false);
     setLoading(false);
-  }, [cwd, activeSessionId, clearMessages, setConnected, setLoading, isEmbedded]);
+  }, [
+    cwd,
+    activeSessionId,
+    clearMessages,
+    setConnected,
+    setLoading,
+    isEmbedded,
+  ]);
 
   // Load JSONL history for the active session (always, independent of resume).
   // Review-first: spawning the agent is gated behind an explicit Resume button
@@ -87,7 +107,10 @@ export default function CCSession({ sessionId, disableListener = false }: CCSess
         });
         addActiveSessionId(sid);
       } catch (err) {
-        console.error('[CCSession] Failed to load/resume session', { sessionId: sid, err });
+        console.error("[CCSession] Failed to load/resume session", {
+          sessionId: sid,
+          err,
+        });
         setSessionLoading(sid, false);
       }
     })();
@@ -99,43 +122,58 @@ export default function CCSession({ sessionId, disableListener = false }: CCSess
     if (!el) return;
     const onScroll = () => {
       if (isProgrammaticScrollRef.current) return;
-      shouldAutoScrollRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+      shouldAutoScrollRef.current =
+        el.scrollHeight - el.scrollTop - el.clientHeight <= 4;
     };
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  // Smooth-scroll to bottom when messages update.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: re-run on messages/isLoading updates to trigger auto-scroll, body only reads refs
+  // Opening another conversation resets the reading position before paint.
+  const openedSessionId = sessionId ?? activeSessionId;
+  useLayoutEffect(() => {
+    shouldAutoScrollRef.current = true;
+    isProgrammaticScrollRef.current = false;
+    const el = scrollContainerRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
+  }, [openedSessionId]);
+
+  // Instant scrolling also handles asynchronously loaded history on mobile.
   useEffect(() => {
     if (!shouldAutoScrollRef.current) return;
     const el = scrollContainerRef.current;
     if (!el) return;
     isProgrammaticScrollRef.current = true;
-    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
-    const timer = setTimeout(() => {
+    el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
+    const frame = requestAnimationFrame(() => {
       isProgrammaticScrollRef.current = false;
-      if (el) {
-        shouldAutoScrollRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-      }
-    }, 600);
-    return () => clearTimeout(timer);
-  }, [messages, isLoading]);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      isProgrammaticScrollRef.current = false;
+    };
+  }, [messages, isLoading, openedSessionId]);
 
-  const inlineErrorsMap = useMemo(() => buildInlineErrorsMap(messages), [messages]);
+  const inlineErrorsMap = useMemo(
+    () => buildInlineErrorsMap(messages),
+    [messages],
+  );
 
   const messageGroups = useMemo(() => buildMessageGroups(messages), [messages]);
 
   const pendingPermissionIdx = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
-      if (m.type === 'permission_request' && !m.resolved) return i;
+      if (m.type === "permission_request" && !m.resolved) return i;
     }
     return -1;
   }, [messages]);
 
-  const handleResolvePermission = async (requestId: string, decision: PermissionDecision) => {
-    const { ccResolvePermission } = await import('@session/services');
+  const handleResolvePermission = async (
+    requestId: string,
+    decision: PermissionDecision,
+  ) => {
+    const { ccResolvePermission } = await import("@session/services");
     try {
       await ccResolvePermission(requestId, decision);
       const patch: Partial<PermissionRequestMessage> = { resolved: decision };
@@ -145,7 +183,7 @@ export default function CCSession({ sessionId, disableListener = false }: CCSess
         updateMessage(pendingPermissionIdx, patch);
       }
     } catch (err) {
-      console.error('Failed to resolve permission:', err);
+      console.error("Failed to resolve permission:", err);
     }
   };
 
@@ -163,7 +201,7 @@ export default function CCSession({ sessionId, disableListener = false }: CCSess
           <div className="thread-surface flex flex-col gap-2 p-4">
             {/* Message list */}
             {messageGroups.map((group) =>
-              group.kind === 'explored' ? (
+              group.kind === "explored" ? (
                 <CCExploredMessageGroup
                   key={`explored-${group.msgIndices[0]}`}
                   msgIndices={group.msgIndices}
@@ -177,12 +215,15 @@ export default function CCSession({ sessionId, disableListener = false }: CCSess
                   index={group.msgIdx}
                   inlineErrors={inlineErrorsMap[group.msgIdx]}
                 />
-              )
+              ),
             )}
 
+            <div ref={latestRef} data-session-latest style={{ height: 1 }} />
             {/* Loading indicator */}
             {isLoading && (
-              <div className="text-xs text-muted-foreground animate-pulse">Thinking</div>
+              <div className="text-xs text-muted-foreground animate-pulse">
+                Thinking
+              </div>
             )}
           </div>
         </div>

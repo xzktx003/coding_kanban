@@ -1,30 +1,30 @@
-import { create } from 'zustand';
+import { create } from "zustand";
 import type {
   AcpAuthMethod,
   AcpConfigOption,
   AcpModelState,
   AcpModeState,
   AcpSessionResult,
-} from '@session/services/apiAdapt/acp';
+} from "@session/services/apiAdapt/acp";
 
 /** A `toolCall.content` item, as sent by `tool_call` / `tool_call_update`. */
 export type AcpToolContent =
-  | { type: 'content'; content: { type: string; text?: string; uri?: string } }
-  | { type: 'diff'; path: string; oldText: string | null; newText: string }
-  | { type: 'terminal'; terminalId: string };
+  | { type: "content"; content: { type: string; text?: string; uri?: string } }
+  | { type: "diff"; path: string; oldText: string | null; newText: string }
+  | { type: "terminal"; terminalId: string };
 
 /** A file location a tool call touched, used to render `file:line` links. */
 export type AcpToolLocation = { path: string; line?: number };
 
 /** A rendered line in the ACP transcript. */
 export type AcpEntry =
-  | { id: string; role: 'user'; text: string }
-  | { id: string; role: 'agent'; text: string }
-  | { id: string; role: 'thought'; text: string }
-  | { id: string; role: 'error'; text: string }
+  | { id: string; role: "user"; text: string; images?: string[] }
+  | { id: string; role: "agent"; text: string }
+  | { id: string; role: "thought"; text: string }
+  | { id: string; role: "error"; text: string }
   | {
       id: string;
-      role: 'tool';
+      role: "tool";
       toolCallId: string;
       title: string;
       status: string;
@@ -35,7 +35,11 @@ export type AcpEntry =
       rawOutput?: unknown;
     };
 
-export type AcpPermissionOption = { optionId: string; name: string; kind?: string };
+export type AcpPermissionOption = {
+  optionId: string;
+  name: string;
+  kind?: string;
+};
 
 export type AcpPermissionRequest = {
   requestId: string;
@@ -63,6 +67,7 @@ interface AcpStore {
   authMethods: AcpAuthMethod[];
   /** `agentCapabilities.loadSession`: whether stored sessions can be resumed. */
   canLoadSession: boolean;
+  canInputImages: boolean;
   connecting: boolean;
   running: boolean;
   entries: AcpEntry[];
@@ -102,6 +107,7 @@ interface AcpStore {
     agentTitle: string | null;
     authMethods: AcpAuthMethod[];
     canLoadSession?: boolean;
+    canInputImages?: boolean;
   }) => void;
   setSessionId: (id: string | null) => void;
   /** Apply the `session/new` result: session id plus the available controls. */
@@ -121,7 +127,7 @@ interface AcpStore {
   addEntry: (entry: AcpEntry) => void;
   setEntries: (entries: AcpEntry[]) => void;
   /** Append to the last entry when it has the same streaming role, else push. */
-  appendChunk: (role: 'agent' | 'thought', text: string) => void;
+  appendChunk: (role: "agent" | "thought", text: string) => void;
   /**
    * Keep the next chunk from merging into the last entry. Used at the seam
    * between two replayed transcripts, whose chunks are separate turns even
@@ -153,6 +159,7 @@ const cleared = {
   agentTitle: null,
   authMethods: [],
   canLoadSession: false,
+  canInputImages: false,
   connecting: false,
   running: false,
   entries: [],
@@ -170,12 +177,13 @@ const cleared = {
 export const createAcpStore = () =>
   create<AcpStore>((set) => ({
     active: false,
-    agentId: 'gemini',
+    agentId: "gemini",
     connectionId: null,
     sessionId: null,
     agentTitle: null,
     authMethods: [],
     canLoadSession: false,
+    canInputImages: false,
     connecting: false,
     running: false,
     entries: [],
@@ -192,13 +200,21 @@ export const createAcpStore = () =>
 
     setActive: (active) => set({ active }),
     setAgentId: (agentId) => set({ agentId }),
-    setConnection: ({ connectionId, sessionId, agentTitle, authMethods, canLoadSession }) =>
+    setConnection: ({
+      connectionId,
+      sessionId,
+      agentTitle,
+      authMethods,
+      canLoadSession,
+      canInputImages,
+    }) =>
       set({
         connectionId,
         sessionId,
         agentTitle,
         authMethods,
         canLoadSession: canLoadSession ?? false,
+        canInputImages: canInputImages ?? false,
         connecting: false,
       }),
     setSessionId: (sessionId) => set({ sessionId }),
@@ -228,13 +244,16 @@ export const createAcpStore = () =>
     setConfigOptionValue: (configId, value) =>
       set((s) => ({
         configOptions: s.configOptions.map((o) =>
-          o.id === configId ? { ...o, currentValue: value } : o
+          o.id === configId ? { ...o, currentValue: value } : o,
         ),
       })),
-    setAuthenticating: (authenticating) => set({ authenticating, authNotice: null }),
+    setAuthenticating: (authenticating) =>
+      set({ authenticating, authNotice: null }),
     setAuthNotice: (authNotice) => set({ authNotice }),
     appendAuthNotice: (text) =>
-      set((s) => ({ authNotice: s.authNotice ? `${s.authNotice}\n${text}` : text })),
+      set((s) => ({
+        authNotice: s.authNotice ? `${s.authNotice}\n${text}` : text,
+      })),
     setSelectedAuthMethod: (selectedAuthMethod) => set({ selectedAuthMethod }),
     setConnecting: (connecting) => set({ connecting }),
     setRunning: (running) => set({ running }),
@@ -249,9 +268,15 @@ export const createAcpStore = () =>
         const last = s.entries[s.entries.length - 1];
         if (last && last.role === role && !s.chunkSealed) {
           const updated = { ...last, text: last.text + text };
-          return { entries: [...s.entries.slice(0, -1), updated], chunkSealed: false };
+          return {
+            entries: [...s.entries.slice(0, -1), updated],
+            chunkSealed: false,
+          };
         }
-        return { entries: [...s.entries, { id: newId(), role, text }], chunkSealed: false };
+        return {
+          entries: [...s.entries, { id: newId(), role, text }],
+          chunkSealed: false,
+        };
       }),
 
     upsertToolCall: ({
@@ -265,17 +290,19 @@ export const createAcpStore = () =>
       rawOutput,
     }) =>
       set((s) => {
-        const idx = s.entries.findIndex((e) => e.role === 'tool' && e.toolCallId === toolCallId);
+        const idx = s.entries.findIndex(
+          (e) => e.role === "tool" && e.toolCallId === toolCallId,
+        );
         if (idx === -1) {
           return {
             entries: [
               ...s.entries,
               {
                 id: newId(),
-                role: 'tool',
+                role: "tool",
                 toolCallId,
                 title: title ?? toolCallId,
-                status: status ?? 'pending',
+                status: status ?? "pending",
                 kind,
                 content,
                 locations,
@@ -285,7 +312,7 @@ export const createAcpStore = () =>
             ],
           };
         }
-        const prev = s.entries[idx] as Extract<AcpEntry, { role: 'tool' }>;
+        const prev = s.entries[idx] as Extract<AcpEntry, { role: "tool" }>;
         const next = [...s.entries];
         next[idx] = {
           ...prev,
@@ -302,7 +329,8 @@ export const createAcpStore = () =>
 
     reset: () => set(cleared),
 
-    restart: () => set((s) => ({ ...cleared, restartNonce: s.restartNonce + 1 })),
+    restart: () =>
+      set((s) => ({ ...cleared, restartNonce: s.restartNonce + 1 })),
   }));
 
 export const useAcpStore = createAcpStore();

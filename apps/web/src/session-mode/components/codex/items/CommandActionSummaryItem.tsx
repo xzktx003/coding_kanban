@@ -1,42 +1,52 @@
-import type { TFunction } from 'i18next';
-import { ChevronDown, ChevronRight, SquareTerminal } from 'lucide-react';
-import { useTranscriptState } from '../thread/rowState';
-import { useTranslation } from 'react-i18next';
-import type { CommandAction } from '@session/bindings/v2';
-import { CommandActionItem } from './CommandActionItem';
+import type { CommandActionSource } from "../thread/deriveRenderItems";
+import type { TFunction } from "i18next";
+import { ChevronDown, ChevronRight, SquareTerminal } from "lucide-react";
+import { useTranscriptState } from "../thread/rowState";
+import { useTranslation } from "react-i18next";
+import type { CommandAction } from "@session/bindings/v2";
+import { CommandActionItem } from "./CommandActionItem";
 
 type Props = {
   actions: CommandAction[];
-  commandItemId?: string | null;
-  aggregatedOutput?: string | null;
+  actionSources: CommandActionSource[];
   /** True when this group has been followed by an agentMessage — show fully collapsed. */
   completed: boolean;
 };
 
 // Count actions by type and build a summary label.
-function buildSummaryParts(actions: CommandAction[], t: TFunction<'thread'>): string[] {
-  const counts: Record<string, number> = { read: 0, unknown: 0, listFiles: 0, search: 0 };
+function buildSummaryParts(
+  actions: CommandAction[],
+  t: TFunction<"thread">,
+): string[] {
+  const counts: Record<string, number> = {
+    read: 0,
+    unknown: 0,
+    listFiles: 0,
+    search: 0,
+  };
   for (const a of actions) counts[a.type] = (counts[a.type] ?? 0) + 1;
 
   const parts: string[] = [];
-  const p = (n: number, key: string) => (n > 0 ? parts.push(t(key, { count: n })) : undefined);
+  const p = (n: number, key: string) =>
+    n > 0 ? parts.push(t(key, { count: n })) : undefined;
 
-  p(counts.read, 'readFiles');
-  p(counts.unknown, 'ranCommands');
-  p(counts.listFiles, 'listedFolders');
-  p(counts.search, 'searched');
+  p(counts.read, "readFiles");
+  p(counts.unknown, "ranCommands");
+  p(counts.listFiles, "listedFolders");
+  p(counts.search, "searched");
 
   return parts;
 }
 
 export const CommandActionSummaryItem = ({
   actions,
-  commandItemId,
-  aggregatedOutput,
+  actionSources,
   completed,
 }: Props) => {
-  const { t } = useTranslation('thread');
-  const [expanded, setExpanded] = useTranscriptState('summary', false);
+  const { t } = useTranslation("thread");
+  const sourceFor = (index: number) =>
+    actionSources[index] ?? { commandItemId: null, aggregatedOutput: null };
+  const [expanded, setExpanded] = useTranscriptState("summary", false);
 
   if (actions.length === 0) return null;
 
@@ -47,11 +57,12 @@ export const CommandActionSummaryItem = ({
     return (
       <div className="text-xs text-muted-foreground">
         <button
+          aria-expanded={expanded}
           onClick={() => setExpanded((v) => !v)}
           className="flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer py-0.5"
         >
           <SquareTerminal className="h-3 w-3" />
-          {parts.join(', ')}
+          {parts.join(", ")}
           {expanded ? (
             <ChevronDown className="w-3 h-3 shrink-0" />
           ) : (
@@ -65,8 +76,7 @@ export const CommandActionSummaryItem = ({
                 // biome-ignore lint/suspicious/noArrayIndexKey: append-only action list, no stable id
                 key={i}
                 action={action}
-                commandItemId={commandItemId}
-                aggregatedOutput={aggregatedOutput}
+                {...sourceFor(i)}
               />
             ))}
           </div>
@@ -85,11 +95,12 @@ export const CommandActionSummaryItem = ({
       {hiddenActions.length > 0 && (
         <>
           <button
+            aria-expanded={expanded}
             onClick={() => setExpanded((v) => !v)}
             className="flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer py-0.5"
           >
             <SquareTerminal className="h-3 w-3" />
-            {hiddenParts.join(', ')}
+            {hiddenParts.join(", ")}
             {expanded ? (
               <ChevronDown className="w-3 h-3 shrink-0" />
             ) : (
@@ -103,8 +114,7 @@ export const CommandActionSummaryItem = ({
                   // biome-ignore lint/suspicious/noArrayIndexKey: append-only action list, no stable id
                   key={i}
                   action={action}
-                  commandItemId={commandItemId}
-                  aggregatedOutput={aggregatedOutput}
+                  {...sourceFor(i)}
                 />
               ))}
             </div>
@@ -116,8 +126,7 @@ export const CommandActionSummaryItem = ({
         <SquareTerminal className="h-3 w-3 shrink-0" />
         <CommandActionItem
           action={lastAction}
-          commandItemId={commandItemId}
-          aggregatedOutput={aggregatedOutput}
+          {...sourceFor(actions.length - 1)}
         />
       </div>
     </div>

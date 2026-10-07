@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import type {
   AgentSessionRecord,
@@ -173,6 +179,8 @@ function getTerminalHistorySummary(
 }
 
 interface TopBarProps {
+  updateIndicator?: ReactNode;
+  showBrand?: boolean;
   sessions: AgentSessionRecord[];
   collapsed: boolean;
   sshHosts: SshHostPreset[];
@@ -211,6 +219,8 @@ interface TopBarProps {
 }
 
 export function TopBar({
+  updateIndicator,
+  showBrand = true,
   sessions,
   collapsed,
   sshHosts,
@@ -438,7 +448,12 @@ export function TopBar({
   if (collapsed) {
     return (
       <header className="top-bar top-bar--collapsed">
-        <span className="top-bar-collapsed-title">电脑端 Coding Kanban</span>
+        {updateIndicator && (
+          <span className="top-bar-update-status">{updateIndicator}</span>
+        )}
+        {showBrand && (
+          <span className="top-bar-collapsed-title">电脑端 Coding Kanban</span>
+        )}
         <button
           className="top-bar-expand-btn"
           data-testid="top-bar-expand"
@@ -455,24 +470,29 @@ export function TopBar({
   return (
     <header className="top-bar">
       <div className="top-bar-brand">
-        <img
-          className="kanban-brand-logo"
-          src="/houmo-logo.png"
-          alt="后摩智能 HOUMO.AI"
-          width={258}
-          height={56}
-        />
+        {showBrand && (
+          <img
+            className="kanban-brand-logo"
+            src="/houmo-logo.png"
+            alt="后摩智能 HOUMO.AI"
+            width={258}
+            height={56}
+          />
+        )}
         <div className="top-bar-mode-switch" aria-label="端切换">
-          <h1 className="top-bar-title">电脑端 Coding Kanban</h1>
+          {showBrand && <h1 className="top-bar-title">电脑端 Coding Kanban</h1>}
           <a
             className="top-bar-mode-link"
             href="/?view=mobile"
             title="切换到手机端终端控制页"
           >
-            手机端 Coding Kanban
+            {showBrand ? "手机端 Coding Kanban" : "手机端"}
           </a>
         </div>
         <div className="top-bar-stats">
+          {updateIndicator && (
+            <span className="top-bar-update-status">{updateIndicator}</span>
+          )}
           {connectionStatus && connectionStatus !== "connected" && (
             <span
               className={`stat-item connection-status connection-status--${connectionStatus}`}

@@ -7,21 +7,25 @@ import {
   ScrollText,
   SquarePen,
   X,
-} from 'lucide-react';
-import { useState } from 'react';
-import { Button } from '@session/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@session/components/ui/collapsible';
+} from "lucide-react";
+import { useState } from "react";
+import { Button } from "@session/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@session/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@session/components/ui/dropdown-menu';
-import { isPhone } from '@session/hooks/runtime';
-import { useLayoutStore } from '@session/stores';
-import { useAgentSettingsStore } from '@session/stores/useAgentSettingsStore';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
-import { getFilename } from '@session/utils/getFilename';
+} from "@session/components/ui/dropdown-menu";
+import { isPhone } from "@session/hooks/runtime";
+import { useLayoutStore } from "@session/stores";
+import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { getFilename } from "@session/utils/getFilename";
 
 type Props = {
   onNewAction: (project: string) => void;
@@ -29,23 +33,38 @@ type Props = {
   renderList: (project: string) => React.ReactNode;
 };
 
-export function SideBarProjectList({ onNewAction, newActionTitle, renderList }: Props) {
-  const { projects, removeProject, setCwd } = useWorkspaceStore();
+export function SideBarProjectList({
+  onNewAction,
+  newActionTitle,
+  renderList,
+}: Props) {
+  const { projects, removeProject, setCwd, projectSyncError } =
+    useWorkspaceStore();
   const { setInstructionType } = useAgentSettingsStore();
   const { setView, expandedProjects, setProjectExpanded } = useLayoutStore();
   const [hoveredProject, setHoveredProject] = useState<string | null>(null);
 
   const isOpen = (project: string) => expandedProjects[project] ?? true;
-  const toggleProject = (project: string, open: boolean) => setProjectExpanded(project, open);
+  const toggleProject = (project: string, open: boolean) =>
+    setProjectExpanded(project, open);
 
   const openAgentInstructions = (project: string) => {
     setCwd(project);
-    setView('agents-md');
-    setInstructionType('project');
+    setView("agents-md");
+    setInstructionType("project");
   };
 
   return (
     <div className="flex min-h-0 w-full flex-col gap-2 px-2 pb-2">
+      {projectSyncError && (
+        <p
+          role="status"
+          className="px-1 text-xs text-muted-foreground"
+          title={projectSyncError}
+        >
+          项目同步待重试
+        </p>
+      )}
       {projects.map((project) => (
         <Collapsible
           key={project}
@@ -62,18 +81,24 @@ export function SideBarProjectList({ onNewAction, newActionTitle, renderList }: 
           >
             <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 text-left">
               {isOpen(project) ? (
-                <FolderOpen className={`h-3.5 w-3.5 shrink-0 transition-transform`} />
+                <FolderOpen
+                  className={`h-3.5 w-3.5 shrink-0 transition-transform`}
+                />
               ) : (
-                <FolderClosed className={`h-3.5 w-3.5 shrink-0 transition-transform`} />
+                <FolderClosed
+                  className={`h-3.5 w-3.5 shrink-0 transition-transform`}
+                />
               )}
-              <span className="truncate font-medium">{getFilename(project) || project}</span>
+              <span className="truncate font-medium">
+                {getFilename(project) || project}
+              </span>
               {isOpen(project) ? (
                 <ChevronDown
-                  className={`h-3.5 w-3.5 shrink-0 transition-opacity ${hoveredProject === project ? 'opacity-100' : 'opacity-0'}`}
+                  className={`h-3.5 w-3.5 shrink-0 transition-opacity ${hoveredProject === project ? "opacity-100" : "opacity-0"}`}
                 />
               ) : (
                 <ChevronRight
-                  className={`h-3.5 w-3.5 shrink-0 transition-opacity ${hoveredProject === project ? 'opacity-100' : 'opacity-0'}`}
+                  className={`h-3.5 w-3.5 shrink-0 transition-opacity ${hoveredProject === project ? "opacity-100" : "opacity-0"}`}
                 />
               )}
             </CollapsibleTrigger>
@@ -86,7 +111,8 @@ export function SideBarProjectList({ onNewAction, newActionTitle, renderList }: 
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    title={`Project actions for ${getFilename(project) || project}`}
+                    title={`项目操作：${getFilename(project) || project}`}
+                    aria-label={`项目操作：${getFilename(project) || project}`}
                     className="shrink-0"
                   >
                     <Ellipsis />
@@ -94,10 +120,12 @@ export function SideBarProjectList({ onNewAction, newActionTitle, renderList }: 
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={() => removeProject(project)}>
-                    <X /> Remove
+                    <X /> 从项目列表移除
                   </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => openAgentInstructions(project)}>
-                    <ScrollText /> Instructions
+                  <DropdownMenuItem
+                    onClick={() => openAgentInstructions(project)}
+                  >
+                    <ScrollText /> 项目指令
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

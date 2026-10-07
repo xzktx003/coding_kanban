@@ -1,13 +1,28 @@
-import { Bug, ChevronDown, ChevronRight, Monitor, Plus, Search } from 'lucide-react';
-import { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { SideBarBotPane } from '@session/components/bot';
-import { BotNotifications } from '@session/components/bot/BotNotifications';
-import { BotSettingsDialog } from '@session/components/bot/BotSettingsDialog';
-import { useCreateBot } from '@session/components/bot/useCreateBot';
-import { DesktopDrawer } from '@session/components/pairing/DesktopDrawer';
-import { Button } from '@session/components/ui/button';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@session/components/ui/collapsible';
+import { OpenAppMenu } from "../agent/openApp/OpenAppMenu";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { UnreadCount } from "../common/SessionStatus";
+import { PROJECT_ISSUES_URL } from "../../../lib/product-links";
+import {
+  Bug,
+  ChevronDown,
+  ChevronRight,
+  Monitor,
+  Plus,
+  Search,
+} from "lucide-react";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { SideBarBotPane } from "@session/components/bot";
+import { BotNotifications } from "@session/components/bot/BotNotifications";
+import { BotSettingsDialog } from "@session/components/bot/BotSettingsDialog";
+import { useCreateBot } from "@session/components/bot/useCreateBot";
+import { DesktopDrawer } from "@session/components/pairing/DesktopDrawer";
+import { Button } from "@session/components/ui/button";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@session/components/ui/collapsible";
 import {
   Sidebar,
   SidebarContent,
@@ -15,24 +30,29 @@ import {
   SidebarHeader,
   SidebarTrigger,
   useSidebar,
-} from '@session/components/ui/sidebar';
-import { useTrafficLightConfig } from '@session/hooks';
-import { isPhone } from '@session/hooks/runtime';
-import { useLayoutStore } from '@session/stores';
-import { UpdateIndicator } from '../../features/UpdateIndicator';
-import { SessionManagerDialog } from '../common/SessionManagerDialog';
-import { SideBarAgentHeader, SideBarAgentList, SideBarProjectActions } from './SideBarAgentPane';
-import { SideBarPinnedList } from './SideBarPinnedList';
-import { UserInfo } from './UserInfo';
+} from "@session/components/ui/sidebar";
+import { useTrafficLightConfig } from "@session/hooks";
+import { isPhone } from "@session/hooks/runtime";
+import { useLayoutStore } from "@session/stores";
+import { UpdateIndicator } from "../../features/UpdateIndicator";
+import { SessionManagerDialog } from "../common/SessionManagerDialog";
+import {
+  SideBarAgentHeader,
+  SideBarAgentList,
+  SideBarProjectActions,
+} from "./SideBarAgentPane";
+import { SideBarPinnedList } from "./SideBarPinnedList";
+import { UserInfo } from "./UserInfo";
 
 export function AppSideBar() {
-  const { t } = useTranslation('sidebar');
+  const { t } = useTranslation("sidebar");
+  const cwd = useWorkspaceStore((s) => s.cwd);
   const { activeSidebarTab, sidebarMode, setHasSeenBotTab } = useLayoutStore();
   const { open: isSidebarOpen } = useSidebar();
   const { isMacos } = useTrafficLightConfig(isSidebarOpen);
   const [sessionManagerOpen, setSessionManagerOpen] = useState(false);
-  const [botsOpen, setBotsOpen] = useState(sidebarMode === 'bot');
-  const [projectsOpen, setProjectsOpen] = useState(sidebarMode === 'agent');
+  const [botsOpen, setBotsOpen] = useState(sidebarMode === "bot");
+  const [projectsOpen, setProjectsOpen] = useState(sidebarMode === "agent");
   // Only a phone drives a remote machine; a desktop is its own backend and has
   // nothing to switch between.
   const [desktopDrawerOpen, setDesktopDrawerOpen] = useState(false);
@@ -45,18 +65,20 @@ export function AppSideBar() {
         <SidebarHeader className="gap-1 p-1">
           {/* Header row: toggle */}
           <div
-            className={`flex items-center gap-2 ${isMacos ? 'pl-20' : 'pl-2'}`}
+            className={`flex items-center gap-2 ${isMacos ? "pl-20" : "pl-2"}`}
             data-tauri-drag-region
           >
             <SidebarTrigger className="h-7 w-7" />
             <Button
               variant="ghost"
-              size="icon"
-              className="h-8 w-8"
-              title="Manage sessions & threads"
+              size="sm"
+              className="session-search-trigger gap-2"
+              title="搜索和管理会话"
+              aria-label="搜索和管理会话"
               onClick={() => setSessionManagerOpen(true)}
             >
               <Search className="h-4 w-4" />
+              <span>搜索会话</span>
             </Button>
             {isPhone() && (
               <Button
@@ -90,20 +112,20 @@ export function AppSideBar() {
                 onClick={() => {
                   setBotsOpen(true);
                   setHasSeenBotTab(true);
-                  setView('bot');
+                  setView("bot");
                 }}
               >
-                Bots
+                机器人
               </Button>
               <CollapsibleTrigger asChild>
                 <Button
                   variant="ghost"
                   size="icon"
                   className="h-8 w-8"
-                  aria-label={botsOpen ? 'Collapse bots' : 'Expand bots'}
+                  aria-label={botsOpen ? "折叠机器人" : "展开机器人"}
                 >
                   <ChevronRight
-                    className={`h-4 w-4 text-muted-foreground/60 transition-transform ${botsOpen ? 'rotate-90' : ''}`}
+                    className={`h-4 w-4 text-muted-foreground/60 transition-transform ${botsOpen ? "rotate-90" : ""}`}
                   />
                 </Button>
               </CollapsibleTrigger>
@@ -112,8 +134,8 @@ export function AppSideBar() {
                 variant="ghost"
                 size="icon"
                 className="h-8 w-8 shrink-0"
-                title={t('newBot')}
-                aria-label={t('newBot')}
+                title={t("newBot")}
+                aria-label={t("newBot")}
                 onClick={handleCreateBot}
                 disabled={creating}
               >
@@ -130,14 +152,21 @@ export function AppSideBar() {
           <Collapsible open={projectsOpen} onOpenChange={setProjectsOpen}>
             <div className="flex items-center px-1">
               <CollapsibleTrigger asChild>
-                <Button variant="ghost" size="sm" className="flex-1 justify-start gap-2">
-                  <span>项目</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="flex-1 justify-start gap-2"
+                  aria-label="项目列表"
+                >
+                  <span>项目与会话</span>
+                  <UnreadCount />
                   <ChevronDown
-                    className={`h-4 w-4 text-muted-foreground/60 transition-transform ${projectsOpen ? '' : '-rotate-90'}`}
+                    className={`h-4 w-4 text-muted-foreground/60 transition-transform ${projectsOpen ? "" : "-rotate-90"}`}
                   />
                 </Button>
               </CollapsibleTrigger>
               <SideBarProjectActions />
+              {cwd && <OpenAppMenu path={cwd} />}
             </div>
             <CollapsibleContent>
               <SideBarAgentList />
@@ -153,7 +182,9 @@ export function AppSideBar() {
             <UpdateIndicator
               fallback={
                 <a
-                  href="https://github.com/milisp/codexia/issues"
+                  href={PROJECT_ISSUES_URL}
+                  aria-label="Issues"
+                  title="反馈问题"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -168,7 +199,7 @@ export function AppSideBar() {
       <SessionManagerDialog
         open={sessionManagerOpen}
         onOpenChange={setSessionManagerOpen}
-        defaultTab={activeSidebarTab === 'cc' ? 'cc' : 'codex'}
+        defaultTab={activeSidebarTab === "cc" ? "cc" : "codex"}
       />
 
       {newBot && (
@@ -181,7 +212,12 @@ export function AppSideBar() {
         />
       )}
 
-      {isPhone() && <DesktopDrawer open={desktopDrawerOpen} onOpenChange={setDesktopDrawerOpen} />}
+      {isPhone() && (
+        <DesktopDrawer
+          open={desktopDrawerOpen}
+          onOpenChange={setDesktopDrawerOpen}
+        />
+      )}
     </>
   );
 }

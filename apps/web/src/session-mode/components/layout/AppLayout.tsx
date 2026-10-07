@@ -1,27 +1,44 @@
 import { listenInSessionMode } from "@session/session-dom";
-import { lazy, Suspense, useEffect, useRef } from 'react';
-import type { ImperativePanelHandle } from 'react-resizable-panels';
-import { AppSideBar, RightPanel } from '@session/components/layout';
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@session/components/ui/resizable';
-import { SidebarInset, SidebarProvider, useSidebar } from '@session/components/ui/sidebar';
-import { useIsMobile } from '@session/hooks/use-mobile';
-import { useEdgeSwipe } from '@session/hooks/useEdgeSwipe';
-import { useLayoutStore } from '@session/stores';
+import { lazy, Suspense, useEffect, useRef } from "react";
+import type { ImperativePanelHandle } from "react-resizable-panels";
+import { AppSideBar, RightPanel } from "@session/components/layout";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@session/components/ui/resizable";
+import {
+  SidebarInset,
+  SidebarProvider,
+  useSidebar,
+} from "@session/components/ui/sidebar";
+import { useIsMobile } from "@session/hooks/use-mobile";
+import { useEdgeSwipe } from "@session/hooks/useEdgeSwipe";
+import { useLayoutStore } from "@session/stores";
 
-const SettingsView = lazy(() => import('@session/components/settings/SettingsView'));
-const PluginsView = lazy(() => import('@session/features/plugins/components/PluginsView'));
-const AgentsMdView = lazy(() => import('@session/views/AgentsMdView'));
-const AgentView = lazy(() => import('@session/components/agent/AgentView'));
-const AutoMationsView = lazy(() =>
-  import('../../features/automations').then((module) => ({ default: module.AutoMationsView }))
+const SettingsView = lazy(
+  () => import("@session/components/settings/SettingsView"),
 );
-const InsightsView = lazy(() => import('@session/features/insight/InsightsView'));
-const BotChatView = lazy(() => import('@session/components/bot/BotChatView'));
+const PluginsView = lazy(
+  () => import("@session/features/plugins/components/PluginsView"),
+);
+const AgentsMdView = lazy(() => import("@session/views/AgentsMdView"));
+const AgentView = lazy(() => import("@session/components/agent/AgentView"));
+const AutoMationsView = lazy(() =>
+  import("../../features/automations").then((module) => ({
+    default: module.AutoMationsView,
+  })),
+);
+const InsightsView = lazy(
+  () => import("@session/features/insight/InsightsView"),
+);
+const BotChatView = lazy(() => import("@session/components/bot/BotChatView"));
 
 // Inner component so it can call useSidebar() inside SidebarProvider
 const MIN_RIGHT_PANEL_SIZE = 22;
 const MAX_RIGHT_PANEL_SIZE = 75;
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
+const clamp = (value: number, min: number, max: number) =>
+  Math.min(Math.max(value, min), max);
 
 function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
   const {
@@ -36,7 +53,7 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
   } = useLayoutStore();
   // Right panel (diff/tasks/notes/files/preview) only makes sense alongside the
   // agent thread — other views (history, automations, settings, ...) hide it.
-  const canShowRightPanel = view === 'agent';
+  const canShowRightPanel = view === "agent";
   const isRightPanelVisible = canShowRightPanel && isRightPanelOpen;
   const rightPanelRef = useRef<ImperativePanelHandle>(null);
   const mainPanelRef = useRef<ImperativePanelHandle>(null);
@@ -45,7 +62,10 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
   // can take the full width — useful when reviewing a diff or reading notes
   // without the agent chat competing for attention.
   const isFocusModeActive =
-    canShowRightPanel && isRightPanelVisible && isRightPanelFocused && !isMobile;
+    canShowRightPanel &&
+    isRightPanelVisible &&
+    isRightPanelFocused &&
+    !isMobile;
   const hasInitializedMobileLayoutRef = useRef(false);
   const { setOpenMobile } = useSidebar();
 
@@ -63,14 +83,24 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
       return;
     }
     if (isRightPanelVisible) {
-      const nextSize = clamp(rightPanelSize, MIN_RIGHT_PANEL_SIZE, MAX_RIGHT_PANEL_SIZE);
+      const nextSize = clamp(
+        rightPanelSize,
+        MIN_RIGHT_PANEL_SIZE,
+        MAX_RIGHT_PANEL_SIZE,
+      );
       panel.resize(nextSize);
       panel.expand();
       if (nextSize !== rightPanelSize) setRightPanelSize(nextSize);
     } else {
       panel.collapse();
     }
-  }, [isFocusModeActive, isMobile, isRightPanelVisible, rightPanelSize, setRightPanelSize]);
+  }, [
+    isFocusModeActive,
+    isMobile,
+    isRightPanelVisible,
+    rightPanelSize,
+    setRightPanelSize,
+  ]);
 
   useEffect(() => {
     if (!isMobile) {
@@ -81,7 +111,13 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
     hasInitializedMobileLayoutRef.current = true;
     if (isSidebarOpen) setSidebarOpen(false);
     if (isRightPanelOpen) setRightPanelOpen(false);
-  }, [isMobile, isRightPanelOpen, isSidebarOpen, setRightPanelOpen, setSidebarOpen]);
+  }, [
+    isMobile,
+    isRightPanelOpen,
+    isSidebarOpen,
+    setRightPanelOpen,
+    setSidebarOpen,
+  ]);
 
   const handleRightPanelResize = (size: number) => {
     if (!isRightPanelVisible || isFocusModeActive || size <= 0) return;
@@ -101,7 +137,10 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
   return (
     <SidebarInset className="app-main-bg min-w-0 overflow-hidden h-full">
       <div className="relative flex flex-1 flex-col min-h-0 h-full">
-        <ResizablePanelGroup direction="horizontal" className="flex min-h-0 min-w-0 w-full flex-1">
+        <ResizablePanelGroup
+          direction="horizontal"
+          className="flex min-h-0 min-w-0 w-full flex-1"
+        >
           <ResizablePanel
             ref={mainPanelRef}
             defaultSize={isRightPanelVisible && !isMobile ? 32 : 100}
@@ -109,48 +148,66 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
             collapsible
             collapsedSize={0}
           >
-            {mainContent}
+            <div
+              className="h-full min-h-0"
+              hidden={isFocusModeActive}
+              inert={isFocusModeActive}
+            >
+              {mainContent}
+            </div>
           </ResizablePanel>
-          {canShowRightPanel && (
-            <>
-              <ResizableHandle
-                withHandle
-                className={isMobile || isFocusModeActive ? 'hidden' : ''}
-              />
-              <ResizablePanel
-                ref={rightPanelRef}
-                defaultSize={isRightPanelVisible && !isMobile ? rightPanelSize : 0}
-                minSize={MIN_RIGHT_PANEL_SIZE}
-                // Focus mode collapses the main panel, so the right panel must
-                // be allowed to take the whole width.
-                maxSize={isFocusModeActive ? 100 : MAX_RIGHT_PANEL_SIZE}
-                onResize={handleRightPanelResize}
-                collapsible
-                collapsedSize={0}
-                onCollapse={() => setRightPanelOpen(false)}
-                onExpand={() => setRightPanelOpen(true)}
-                // On mobile the right panel is rendered as an overlay below.
-                className={isMobile ? 'hidden' : ''}
+          <>
+            <ResizableHandle
+              withHandle
+              className={
+                isMobile || !isRightPanelVisible || isFocusModeActive
+                  ? "hidden"
+                  : ""
+              }
+            />
+            <ResizablePanel
+              ref={rightPanelRef}
+              defaultSize={
+                isRightPanelVisible && !isMobile ? rightPanelSize : 0
+              }
+              minSize={MIN_RIGHT_PANEL_SIZE}
+              // Focus mode collapses the main panel, so the right panel must
+              // be allowed to take the whole width.
+              maxSize={isFocusModeActive ? 100 : MAX_RIGHT_PANEL_SIZE}
+              onResize={handleRightPanelResize}
+              collapsible
+              collapsedSize={0}
+              onCollapse={() => {
+                if (!isMobile && canShowRightPanel) setRightPanelOpen(false);
+              }}
+              onExpand={() => {
+                if (!isMobile && canShowRightPanel) setRightPanelOpen(true);
+              }}
+              // On mobile the right panel is rendered as an overlay below.
+              style={{ overflow: isMobile ? "visible" : "hidden" }}
+            >
+              <div
+                className={
+                  isMobile
+                    ? "absolute inset-y-0 right-0 z-40 w-[min(92vw,420px)]"
+                    : "h-full"
+                }
+                hidden={!isRightPanelVisible}
+                inert={!isRightPanelVisible}
               >
-                {!isMobile && <div className="h-full" hidden={!isRightPanelVisible}><RightPanel /></div>}
-              </ResizablePanel>
-            </>
-          )}
+                <RightPanel visible={isRightPanelVisible} />
+              </div>
+            </ResizablePanel>
+          </>
         </ResizablePanelGroup>
 
-        {isMobile && canShowRightPanel && isRightPanelOpen && (
-          <>
-            <button
-              type="button"
-              className="absolute inset-0 z-30 bg-black/40"
-              aria-label="Close right panel"
-              onClick={() => setRightPanelOpen(false)}
-            />
-            <div className="absolute inset-y-0 right-0 z-40 w-[min(92vw,420px)]">
-              <RightPanel />
-            </div>
-          </>
-        )}
+        <button
+          type="button"
+          hidden={!isMobile || !isRightPanelVisible}
+          className="absolute inset-0 z-30 bg-black/40"
+          aria-label="关闭工具面板"
+          onClick={() => setRightPanelOpen(false)}
+        />
       </div>
     </SidebarInset>
   );
@@ -158,21 +215,39 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
 
 const ViewLoadingFallback = () => (
   <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
-    Loading view...
+    正在加载界面…
   </div>
 );
 
 export function AppLayout() {
   const { view, setView, isSidebarOpen, setSidebarOpen } = useLayoutStore();
+  const hasOpenedAgent = useRef(false);
+  if (view === "agent") hasOpenedAgent.current = true;
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === ',') {
+      if (
+        event.defaultPrevented ||
+        (event.target instanceof Element &&
+          event.target.closest('[role="dialog"], [role="alertdialog"]'))
+      )
+        return;
+      if (
+        document.querySelector(
+          '.session-mode [data-slot="dialog-content"][data-state="open"], .session-mode [data-slot="alert-dialog-content"][data-state="open"]',
+        )
+      )
+        return;
+      if ((event.metaKey || event.ctrlKey) && event.key === ",") {
         event.preventDefault();
-        setView('settings');
+        setView("settings");
       }
     };
-    const stopHandleKeyDownForSession = listenInSessionMode(window, 'keydown', handleKeyDown);
+    const stopHandleKeyDownForSession = listenInSessionMode(
+      window,
+      "keydown",
+      handleKeyDown,
+    );
     return () => stopHandleKeyDownForSession();
   }, [setView]);
 
@@ -180,24 +255,32 @@ export function AppLayout() {
     <div className="flex flex-col min-w-0 h-full">
       <div className="min-h-0 flex-1">
         <Suspense fallback={<ViewLoadingFallback />}>
-          {view === 'agents-md' && <AgentsMdView />}
-          {view === 'agent' && <AgentView />}
-          {view === 'automations' && <AutoMationsView />}
-          {view === 'plugins' && <PluginsView />}
-          {view === 'insights' && <InsightsView />}
-          {view === 'bot' && <BotChatView />}
+          {view === "agents-md" && <AgentsMdView />}
+          {hasOpenedAgent.current && (
+            <div
+              className="h-full min-h-0"
+              hidden={view !== "agent"}
+              inert={view !== "agent"}
+            >
+              <AgentView />
+            </div>
+          )}
+          {view === "automations" && <AutoMationsView />}
+          {view === "plugins" && <PluginsView />}
+          {view === "insights" && <InsightsView />}
+          {view === "bot" && <BotChatView />}
         </Suspense>
       </div>
     </div>
   );
 
   return (
-    <div className="h-full min-h-0 w-full overflow-hidden">
-      {view === 'settings' ? (
-        <Suspense fallback={<ViewLoadingFallback />}>
-          <SettingsView />
-        </Suspense>
-      ) : (
+    <div className="relative h-full min-h-0 w-full overflow-hidden">
+      <div
+        className="h-full min-h-0"
+        hidden={view === "settings"}
+        inert={view === "settings"}
+      >
         <SidebarProvider
           open={isSidebarOpen}
           onOpenChange={setSidebarOpen}
@@ -209,6 +292,13 @@ export function AppLayout() {
               from unmounting/remounting when the viewport crosses the mobile breakpoint. */}
           <LayoutContent mainContent={mainContent} />
         </SidebarProvider>
+      </div>
+      {view === "settings" && (
+        <div className="absolute inset-0">
+          <Suspense fallback={<ViewLoadingFallback />}>
+            <SettingsView />
+          </Suspense>
+        </div>
       )}
     </div>
   );

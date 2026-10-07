@@ -18,6 +18,9 @@
 
 - 终端模式位于原有 `apps/web/src`；迁移会话模式位于 `apps/web/src/session-mode`，别名 `@session`。
 - 两种模式保留各自挂载状态；迁移样式和 Portal 必须限定在 `.session-mode`，隐藏模式不得处理全局快捷键。
+- 会话／终端模式切换共用 `apps/web/src/components/WorkbenchModeSwitch.tsx`；项目列表入口共用会话模式的 `ProjectNavigationButton`，样式、焦点与响应式约定见 `docs/workbench-ui-polish.md`。
+- 会话模式的标签、网格、列表共用 `useAgentCenterStore.cards` 关注集合；切换和关闭通过 `useSessionTabActions` 同步输入目标与项目。关闭标签只移出关注集合，不得中断 Agent 或清理 worktree；交互与恢复规则见 `docs/session-tabs.md`。
+- 公共输入区的文字和附件以 Agent/session 隔离并在本设备持久保存；异步发送、上传、回滚使用捕获的原会话与提交版本，不得在返回时修改另一个会话的草稿。会话名称与聊天预览独立，规则与验收见 `docs/session-drafts.md`。
 
 
 ## 后端约定
@@ -108,3 +111,8 @@
 
 - 在文档、注释和 PR 描述中明确写出“局域网访问地址 + 端口 + 协议（HTTP）”。
 - 任何需要协作联调的前端改动，默认附上可复现的访问方式，包括示例地址、启动命令和验证步骤。
+
+### 会话导航边界
+
+- 会话模式的合并顶栏由 `SessionTopNavigation` 管理；`WorkbenchShell` 通过回调切换模式并保留两种模式的挂载状态。
+- 关注状态汇总与窗口组选择必须复用现有关注集合，未知状态不得显示成确定的零；导航不得隐式审批、停止或启动 Agent。

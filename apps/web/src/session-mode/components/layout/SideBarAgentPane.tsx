@@ -1,36 +1,42 @@
-import { ListFilter, Package2, Timer } from 'lucide-react';
-import { useCallback } from 'react';
-import { useTranslation } from 'react-i18next';
-import { useNewThread, useThreadList } from '@session/components/codex/hooks';
-import { NewAgentButton } from '@session/components/common/NewAgentButton';
-import { Button } from '@session/components/ui/button';
+import { History, ListFilter, Package2, Timer } from "lucide-react";
+import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
+import { useNewThread, useThreadList } from "@session/components/codex/hooks";
+import { NewAgentButton } from "@session/components/common/NewAgentButton";
+import { Button } from "@session/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
-} from '@session/components/ui/dropdown-menu';
-import { useSidebar } from '@session/components/ui/sidebar';
-import { useCCSessionManager } from '@session/hooks/useCCSessionManager';
-import { useLayoutStore } from '@session/stores';
-import { useAcpStore } from '@session/stores/useAcpStore';
-import { useAgentSettingsStore } from '@session/stores/useAgentSettingsStore';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
-import { SideBarAddProjectButton } from './SideBarAddProjectButton';
-import { SideBarAcpTab, SideBarClaudeTab, SideBarCodexTab } from './SideBarTab';
+} from "@session/components/ui/dropdown-menu";
+import { useSidebar } from "@session/components/ui/sidebar";
+import { useCCSessionManager } from "@session/hooks/useCCSessionManager";
+import { useLayoutStore } from "@session/stores";
+import { useAcpStore } from "@session/stores/useAcpStore";
+import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { SideBarAddProjectButton } from "./SideBarAddProjectButton";
+import { SideBarAcpTab, SideBarClaudeTab, SideBarCodexTab } from "./SideBarTab";
 
-const focusCCInput = () => window.dispatchEvent(new Event('cc-input-focus-request'));
+const focusCCInput = () =>
+  window.dispatchEvent(new Event("cc-input-focus-request"));
 
 // Shared class for nav buttons (Automations / Marketplace)
-const navBtnBase = 'justify-start gap-2 rounded-md border px-2.5';
-const navBtnActive = 'border-border bg-accent/70 text-accent-foreground';
-const navBtnInactive = 'border-transparent hover:border-border/60';
-const navBtnCls = (active: boolean) => `${navBtnBase} ${active ? navBtnActive : navBtnInactive}`;
+const navBtnBase = "justify-start gap-2 rounded-md border px-2.5";
+const navBtnActive = "border-border bg-accent/70 text-accent-foreground";
+const navBtnInactive = "border-transparent hover:border-border/60";
+const navBtnCls = (active: boolean) =>
+  `${navBtnBase} ${active ? navBtnActive : navBtnInactive}`;
 
 /** New conversation action; section navigation belongs to the mode toolbar. */
 export function SideBarAgentHeader() {
-  return <div className="px-1 pb-2"><NewAgentButton showLabel /></div>;
+  return (
+    <div className="px-1 pb-2">
+      <NewAgentButton showLabel />
+    </div>
+  );
 }
 
 /** Project-specific sorting and creation actions. */
@@ -38,9 +44,8 @@ export function SideBarProjectActions() {
   const { selectedAgent } = useAgentSettingsStore();
   const { open: isSidebarOpen } = useSidebar();
   const { sortKey, setSortKey } = useThreadList({
-    enabled: isSidebarOpen && selectedAgent === 'codex',
+    enabled: isSidebarOpen && selectedAgent === "codex",
   });
-  const currentThreadSortLabel = sortKey === 'created_at' ? 'Created' : 'Updated';
 
   return (
     <div className="flex items-center justify-end gap-1">
@@ -50,7 +55,8 @@ export function SideBarProjectActions() {
             variant="ghost"
             size="icon"
             className="h-8 w-8"
-            title={`Filter threads (current: ${currentThreadSortLabel})`}
+            title={`会话排序：${sortKey === "created_at" ? "创建时间" : "更新时间"}`}
+            aria-label="会话排序"
           >
             <ListFilter className="h-4 w-4" />
           </Button>
@@ -58,14 +64,29 @@ export function SideBarProjectActions() {
         <DropdownMenuContent align="end">
           <DropdownMenuRadioGroup
             value={sortKey}
-            onValueChange={(v) => setSortKey(v as 'created_at' | 'updated_at')}
+            onValueChange={(v) => setSortKey(v as "created_at" | "updated_at")}
           >
-            <DropdownMenuRadioItem value="created_at">Sort by Created</DropdownMenuRadioItem>
-            <DropdownMenuRadioItem value="updated_at">Sort by Updated</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="created_at">
+              按创建时间
+            </DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="updated_at">
+              按更新时间
+            </DropdownMenuRadioItem>
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
       </DropdownMenu>
-      <button className="text-xs text-muted-foreground px-2" title="打开历史项目" onClick={() => window.dispatchEvent(new Event("session-project-history"))}>历史</button>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8"
+        title="打开历史项目"
+        aria-label="历史项目"
+        onClick={() =>
+          window.dispatchEvent(new Event("session-project-history"))
+        }
+      >
+        <History size={16} />
+      </Button>
       <SideBarAddProjectButton />
     </div>
   );
@@ -85,37 +106,43 @@ export function SideBarAgentList() {
       if (project !== cwd) setCwd(project);
       void handleNewThread();
     },
-    [cwd, handleNewThread, setCwd]
+    [cwd, handleNewThread, setCwd],
   );
 
   const handleStartNewAcpSessionForProject = useCallback(
     (directory: string) => {
-      setView('agent');
+      setView("agent");
       setCwd(directory);
       // `restart` tears down the connection and asks the composer to reconnect
       // in the new workspace.
       useAcpStore.getState().restart();
     },
-    [setCwd, setView]
+    [setCwd, setView],
   );
 
   const handleStartNewCcSessionForProject = useCallback(
     async (directory: string) => {
-      setSelectedAgent('cc');
-      setActiveSidebarTab('cc');
-      setView('agent');
+      setSelectedAgent("cc");
+      setActiveSidebarTab("cc");
+      setView("agent");
       setCwd(directory);
       await handleNewSession();
       focusCCInput();
     },
-    [handleNewSession, setActiveSidebarTab, setCwd, setSelectedAgent, setView]
+    [handleNewSession, setActiveSidebarTab, setCwd, setSelectedAgent, setView],
   );
 
   if (acpActive) {
-    return <SideBarAcpTab onStartNewSession={handleStartNewAcpSessionForProject} />;
+    return (
+      <SideBarAcpTab onStartNewSession={handleStartNewAcpSessionForProject} />
+    );
   }
-  if (selectedAgent === 'codex') {
-    return <SideBarCodexTab onCreateNewThread={handleCreateNewThreadForProject} />;
+  if (selectedAgent === "codex") {
+    return (
+      <SideBarCodexTab onCreateNewThread={handleCreateNewThreadForProject} />
+    );
   }
-  return <SideBarClaudeTab onStartNewSession={handleStartNewCcSessionForProject} />;
+  return (
+    <SideBarClaudeTab onStartNewSession={handleStartNewCcSessionForProject} />
+  );
 }

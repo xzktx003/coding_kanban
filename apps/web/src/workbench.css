@@ -29,43 +29,6 @@
   height: 21px;
   width: auto;
 }
-.workbench-modes {
-  display: flex;
-  gap: 3px;
-  padding: 3px;
-  border: 1px solid #ffffff12;
-  background: #0f1419;
-  border-radius: 8px;
-}
-.workbench-modes button {
-  border: 0;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: #a8b2bd;
-  background: transparent;
-  padding: 5px 13px;
-  font-size: 12px;
-  border-radius: 5px;
-  cursor: pointer;
-  transition:
-    background 140ms,
-    color 140ms;
-  white-space: nowrap;
-}
-.workbench-modes button:hover {
-  background: #ffffff0c;
-  color: #f4f1ea;
-}
-.workbench-modes button[aria-pressed="true"] {
-  background: #29343f;
-  color: #f4f1ea;
-  box-shadow: 0 1px 3px #0003;
-}
-.workbench-modes button:focus-visible {
-  outline: 2px solid #d8b77b;
-  outline-offset: 2px;
-}
 .workbench-context {
   margin-left: auto;
   color: #87929d;
@@ -119,15 +82,11 @@
   .workbench-context {
     display: none;
   }
-  .workbench-modes {
+  .workbench-header .workbench-mode-switch {
     margin-left: auto;
   }
-  .workbench-modes button {
-    padding: 5px 11px;
-  }
 }
-@media (prefers-reduced-motion: reduce) {
-  .workbench-modes button {
-    transition: none;
-  }
+
+.workbench-shell[data-mode="session"] {
+  --workspace-height: var(--app-height);
 }

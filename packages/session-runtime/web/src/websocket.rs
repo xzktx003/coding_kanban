@@ -4,8 +4,8 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     response::{
-        sse::{Event, KeepAlive, Sse},
         IntoResponse,
+        sse::{Event, KeepAlive, Sse},
     },
 };
 use futures::{sink::SinkExt, stream::StreamExt};
@@ -52,7 +52,7 @@ pub(super) async fn ws_handler(
 
 async fn handle_socket(socket: WebSocket, hub: EventHub, query: EventStreamQuery) {
     let filter = query.filter();
-    let (backlog, mut event_rx) = hub.subscribe(query.since, filter.as_ref());
+    let (backlog, mut event_rx) = hub.subscribe_with_questions(query.since, filter.as_ref());
 
     let (mut sender, mut receiver) = socket.split();
 
@@ -85,7 +85,9 @@ async fn handle_socket(socket: WebSocket, hub: EventHub, query: EventStreamQuery
                 // channel. Close so it reconnects with `?since=` and is served
                 // from the replay buffer instead of silently missing events.
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    log::warn!("[events] websocket client lagged by {skipped}, closing to force resume");
+                    log::warn!(
+                        "[events] websocket client lagged by {skipped}, closing to force resume"
+                    );
                     break;
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
@@ -117,7 +119,7 @@ pub(super) async fn sse_handler(
     AxumState(hub): AxumState<EventHub>,
 ) -> Sse<impl futures::Stream<Item = Result<Event, Infallible>>> {
     let filter = query.filter();
-    let (backlog, rx) = hub.subscribe(query.since, filter.as_ref());
+    let (backlog, rx) = hub.subscribe_with_questions(query.since, filter.as_ref());
 
     let replay = futures::stream::iter(
         backlog
@@ -138,7 +140,9 @@ pub(super) async fn sse_handler(
                 // and the client's `?since=` cursor closes the gap. Previously
                 // this kept the stream open and silently dropped the events.
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    log::warn!("[events] sse client lagged by {skipped}, ending stream to force resume");
+                    log::warn!(
+                        "[events] sse client lagged by {skipped}, ending stream to force resume"
+                    );
                     return None;
                 }
                 Err(broadcast::error::RecvError::Closed) => return None,
@@ -253,6 +257,9 @@ mod tests {
         let mut socket = connect(&addr, "?since=1").await;
         assert_eq!(next_json(&mut socket).await["payload"], json!({ "n": 2 }));
         assert_eq!(next_json(&mut socket).await["payload"], json!({ "n": 3 }));
+        let snapshot = next_json(&mut socket).await;
+        assert_eq!(snapshot["event"], "codex/user-input-snapshot");
+        assert_eq!(snapshot["payload"], json!({"requests": []}));
 
         // Live events continue seamlessly after the replay.
         event_tx

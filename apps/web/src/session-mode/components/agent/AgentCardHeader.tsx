@@ -1,8 +1,12 @@
-import { X } from 'lucide-react';
-import { AgentIcon } from '@session/components/common/AgentIcon';
-import type { AgentCenterCard } from '@session/stores/useAgentCenterStore';
+import { SessionStatus, UnreadDot } from "../common/SessionStatus";
+import { useCodexStore } from "../codex/stores";
+import { RenameSessionButton } from "../common/RenameSessionButton";
+import { useSessionName } from "../../stores/useSessionNameStore";
+import { X } from "lucide-react";
+import { SessionAgentBadge } from "@session/components/common/SessionAgentBadge";
+import type { AgentCenterCard } from "@session/stores/useAgentCenterStore";
 
-type AgentStatus = 'running' | 'pending' | 'idle';
+type AgentStatus = "running" | "pending" | "idle";
 
 interface AgentCardHeaderProps {
   card: AgentCenterCard;
@@ -14,53 +18,62 @@ export function AgentCardHeader({
   card,
   onClose,
   onSelect,
-  status = 'idle',
+  status = "idle",
 }: AgentCardHeaderProps) {
-  const title = card.preview?.slice(0, 60) || card.id.slice(0, 12);
-
-  const dotColor =
-    status === 'running'
-      ? 'bg-green-500'
-      : status === 'pending'
-        ? 'bg-amber-500'
-        : 'bg-muted-foreground/40';
-
-  const dotAnimate = status !== 'idle' ? 'animate-pulse' : '';
+  const nativeName = useCodexStore((s) => {
+    const thread =
+      card.kind === "codex"
+        ? s.threads.find((thread) => thread.id === card.id)
+        : undefined;
+    return thread?.name || thread?.preview;
+  });
+  const title = useSessionName(
+    card.kind,
+    card.id,
+    nativeName || card.preview || card.id.slice(0, 12),
+    nativeName || undefined,
+  );
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: role and tabIndex are applied together with the handler, both gated on onSelect
     <div
-      className="flex items-center gap-2 px-2 py-1.5 border-b bg-muted/30 shrink-0"
-      role={onSelect ? 'button' : undefined}
+      className="session-card-header flex items-center gap-2 px-3 py-2 border-b bg-muted/30 shrink-0"
+      role={onSelect ? "button" : undefined}
       tabIndex={onSelect ? 0 : undefined}
       onClick={onSelect}
       onKeyDown={(e) => {
-        if (onSelect && (e.key === 'Enter' || e.key === ' ')) {
+        if (
+          e.target === e.currentTarget &&
+          onSelect &&
+          (e.key === "Enter" || e.key === " ")
+        ) {
           e.preventDefault();
           onSelect();
         }
       }}
-      style={onSelect ? { cursor: 'pointer' } : undefined}
+      style={onSelect ? { cursor: "pointer" } : undefined}
     >
+      <SessionAgentBadge kind={card.kind} />
+      <span className="session-card-title text-sm text-foreground truncate flex-1 min-w-0">
+        {title}
+      </span>
+      <UnreadDot kind={card.kind} id={card.id} />
+      <SessionStatus kind={card.kind} id={card.id} />
+      <RenameSessionButton kind={card.kind} id={card.id} title={title} />
       {onClose && (
-        // Shows a status dot by default; reveals the X button on hover.
         <button
           type="button"
-          onClick={(e) => {
-            e.stopPropagation();
+          className="session-card-close"
+          aria-label="关闭标签"
+          title="关闭标签，后台任务继续运行"
+          onClick={(event) => {
+            event.stopPropagation();
             onClose();
           }}
-          className="group relative h-3.5 w-3.5 flex items-center justify-center shrink-0"
-          aria-label="Remove"
         >
-          <span
-            className={`absolute h-2 w-2 rounded-full transition-opacity duration-150 group-hover:opacity-0 ${dotColor} ${dotAnimate}`}
-          />
-          <X className="h-3.5 w-3.5 text-destructive/60 hover:text-destructive absolute opacity-0 group-hover:opacity-100 transition-opacity duration-150" />
+          <X size={14} />
         </button>
       )}
-      <AgentIcon agent={card.kind} />
-      <span className="text-xs text-muted-foreground truncate flex-1 min-w-0">{title}</span>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { resolveSessionDataHome } from "./services/session-data-home.js";
 import { SessionRuntimeManager } from "./services/session-runtime-manager.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -62,12 +63,21 @@ async function main(): Promise<void> {
   });
   const sessionRuntime = new SessionRuntimeManager(repositoryRoot);
   let sessionRuntimeOrigin: string | undefined;
-  try { sessionRuntimeOrigin = await sessionRuntime.start(); }
-  catch (error) { console.error("[session-mode]", error instanceof Error ? error.message : error); }
+  try {
+    sessionRuntimeOrigin = await sessionRuntime.start();
+  } catch (error) {
+    console.error(
+      "[session-mode]",
+      error instanceof Error ? error.message : error,
+    );
+  }
   const { app } = buildServer({
     sessionRuntimeOrigin,
     ensureSessionRuntime: () => sessionRuntime.start(),
-    sessionAttachmentRoot: resolve(process.env.SESSION_DATA_HOME || resolve(repositoryRoot, ".dev-runtime/session-mode"), "uploads"),
+    sessionAttachmentRoot: resolve(
+      resolveSessionDataHome(repositoryRoot, process.env.SESSION_DATA_HOME),
+      "uploads",
+    ),
     appVersionService: new AppVersionService({
       sourceRoot: appSourceRoot,
     }),

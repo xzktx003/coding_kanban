@@ -5,7 +5,37 @@ export interface FilterState {
   kind: string | null;
   transport: string | null;
   dirQuery: string;
+  /** Unified overview search, independent of the existing directory filter. */
+  query?: string;
   tag: string | null;
+}
+
+export function matchesSessionFilters(
+  session: AgentSessionRecord,
+  filters: FilterState,
+): boolean {
+  if (filters.host && (session.hostId ?? "local") !== filters.host)
+    return false;
+  if (filters.kind && session.agentKind !== filters.kind) return false;
+  if (filters.transport === "tmux" && !session.transportRef?.tmuxSession)
+    return false;
+  if (
+    filters.dirQuery &&
+    !(session.workingDirectory ?? "")
+      .toLocaleLowerCase()
+      .includes(filters.dirQuery.toLocaleLowerCase())
+  )
+    return false;
+  if (filters.tag && !(session.tags ?? []).includes(filters.tag)) return false;
+  const query = filters.query?.trim().toLocaleLowerCase();
+  if (!query) return true;
+  return [
+    session.displayName,
+    session.agentKind,
+    session.workingDirectory,
+    session.hostId,
+    ...(session.tags ?? []),
+  ].some((value) => value?.toLocaleLowerCase().includes(query));
 }
 
 interface FilterBarProps {
@@ -28,10 +58,27 @@ export function FilterBar({
     new Set(sessions.flatMap((s) => s.tags ?? [])),
   ).sort();
   const hasFilters =
-    filters.host || filters.kind || filters.transport || filters.dirQuery || filters.tag;
+    filters.host ||
+    filters.kind ||
+    filters.transport ||
+    filters.dirQuery ||
+    filters.query?.trim() ||
+    filters.tag;
 
   return (
-    <div className="filter-bar">
+    <div className="filter-bar" role="search" aria-label="查找会话">
+      <label className="filter-item filter-item--search">
+        <span className="filter-label">搜索</span>
+        <input
+          className="filter-input"
+          type="search"
+          placeholder="会话名称、类型或路径"
+          value={filters.query ?? ""}
+          onChange={(event) =>
+            onFiltersChange({ ...filters, query: event.target.value })
+          }
+        />
+      </label>
       <label className="filter-item">
         <span className="filter-label">服务器</span>
         <select
@@ -127,6 +174,7 @@ export function FilterBar({
               kind: null,
               transport: null,
               dirQuery: "",
+              query: "",
               tag: null,
             })
           }

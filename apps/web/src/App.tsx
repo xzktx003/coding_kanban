@@ -29,7 +29,10 @@ import { DiscoveryDialog } from "./components/DiscoveryDialog";
 import type { AddToGridItem } from "./components/DiscoveryDialog";
 import { FileBrowserDrawer } from "./components/FileBrowserDrawer";
 import { ChangesPanel } from "./components/ChangesPanel";
-import type { FilterState } from "./components/FilterBar";
+import {
+  matchesSessionFilters,
+  type FilterState,
+} from "./components/FilterBar";
 import { HiddenSessionsDrawer } from "./components/HiddenSessionsDrawer";
 import type { NewSessionHost, SelectedHost } from "./components/HostDropdown";
 import { MobileWorkbenchPage } from "./components/MobileWorkbenchPage";
@@ -309,7 +312,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
-export default function App() {
+export default function App({ embedded = false }: { embedded?: boolean } = {}) {
   const initialFocusViewState = useMemo(() => loadFocusViewState(), []);
   const initialSidePanelSessionStates = useMemo(
     () => loadSidePanelSessionStates(),
@@ -757,7 +760,8 @@ export default function App() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (document.querySelector<HTMLElement>(".workbench-terminal")?.hidden) return;
+      if (document.querySelector<HTMLElement>(".workbench-terminal")?.hidden)
+        return;
       if (!(event.metaKey || event.ctrlKey)) {
         return;
       }
@@ -842,22 +846,9 @@ export default function App() {
     }
   }, [activeTerminalSessionId, focusedId, isLoading, sessions]);
 
-  const filteredSessions = visibleSessions.filter((s) => {
-    if (filters.host && (s.hostId ?? "local") !== filters.host) return false;
-    if (filters.kind && s.agentKind !== filters.kind) return false;
-    if (filters.transport === "tmux" && !s.transportRef?.tmuxSession) {
-      return false;
-    }
-    if (
-      filters.dirQuery &&
-      !(s.workingDirectory ?? "")
-        .toLowerCase()
-        .includes(filters.dirQuery.toLowerCase())
-    )
-      return false;
-    if (filters.tag && !(s.tags ?? []).includes(filters.tag)) return false;
-    return true;
-  });
+  const filteredSessions = visibleSessions.filter((session) =>
+    matchesSessionFilters(session, filters),
+  );
 
   const handleAgentGridSortModeChange = useCallback(
     (mode: AgentGridSortMode) => {
@@ -1743,6 +1734,7 @@ export default function App() {
   if (isMobileWorkbenchLocation(window.location)) {
     return (
       <MobileWorkbenchPage
+        showBrand={!embedded}
         activeSessionId={mobileActiveSessionId}
         isLoading={isLoading}
         sessions={sessions}
@@ -1763,16 +1755,29 @@ export default function App() {
     );
   }
 
+  const updateIndicatorInToolbar = [
+    "update-available",
+    "remote-update-available",
+    "update-conflict",
+    "update-error",
+  ].includes(appUpdateBannerState.kind);
+  const updateNotification = (
+    <AppUpdateBanner
+      state={appUpdateBannerState}
+      onApplyUpdate={handleApplyAppUpdate}
+      onDismiss={handleDismissAppUpdateBanner}
+      onPullUpdate={beginPullAndHotUpdate}
+      onRetryUpdate={handleRetryAppUpdate}
+    />
+  );
   return (
     <main className={`app-shell-v2 layout-${layoutMode}`}>
-      <AppUpdateBanner
-        state={appUpdateBannerState}
-        onApplyUpdate={handleApplyAppUpdate}
-        onDismiss={handleDismissAppUpdateBanner}
-        onPullUpdate={beginPullAndHotUpdate}
-        onRetryUpdate={handleRetryAppUpdate}
-      />
+      {!updateIndicatorInToolbar && updateNotification}
       <TopBar
+        updateIndicator={
+          updateIndicatorInToolbar ? updateNotification : undefined
+        }
+        showBrand={!embedded}
         sessions={sessions}
         collapsed={layoutState.topbarCollapsed}
         sshHosts={sshHosts}

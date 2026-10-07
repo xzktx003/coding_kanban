@@ -1,20 +1,34 @@
-import { CircleStop, Send, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { AgentModelPanel } from '@session/components/agent/AgentModelPanel';
-import { AgentModelTrigger } from '@session/components/agent/AgentModelTrigger';
-import { CCPermissionModeSelect } from '@session/components/cc/composer';
-import { FileMentionPopover } from '@session/components/common';
-import { Button } from '@session/components/ui/button';
-import { fileSrc } from '@session/hooks/runtime';
-import { useCCSessionManager } from '@session/hooks/useCCSessionManager';
-import { ccInterrupt, ccSendMessage } from '@session/services';
-import { useAgentCenterStore, useCCInputStore } from '@session/stores';
-import { useCCStore } from '@session/stores/cc';
-import { CCAttachmentButton } from './CCAttachmentButton';
-import { CCSkillsPopover } from './CCSkillsPopover';
-import { CCSlashCommandPopover } from './CCSlashCommandPopover';
+import { useStopAction } from "../../common/useStopAction";
+import {
+  moveImageDraft,
+  useImageAttachments,
+} from "../../common/useImageAttachments";
+import { ImageAttachmentStrip } from "../../common/ImageAttachmentStrip";
+import { CircleStop, Send, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AgentModelPanel } from "@session/components/agent/AgentModelPanel";
+import { AgentModelTrigger } from "@session/components/agent/AgentModelTrigger";
+import { CCPermissionModeSelect } from "@session/components/cc/composer";
+import { FileMentionPopover } from "@session/components/common";
+import { Button } from "@session/components/ui/button";
+import { fileSrc } from "@session/hooks/runtime";
+import { useCCSessionManager } from "@session/hooks/useCCSessionManager";
+import { ccInterrupt, ccSendMessage } from "@session/services";
+import { useAgentCenterStore, useWorkspaceStore } from "@session/stores";
+import {
+  appendDraft,
+  fileLinks,
+  readDraft,
+  sessionDraftKey,
+  useSessionDraftStore,
+  useSessionTextDraft,
+} from "@session/stores/useSessionDraftStore";
+import { useCCStore } from "@session/stores/cc";
+import { CCAttachmentButton } from "./CCAttachmentButton";
+import { CCSkillsPopover } from "./CCSkillsPopover";
+import { CCSlashCommandPopover } from "./CCSlashCommandPopover";
 
-const CC_INPUT_FOCUS_EVENT = 'cc-input-focus-request';
+const CC_INPUT_FOCUS_EVENT = "cc-input-focus-request";
 
 interface ComposerProps {
   /** When provided, overrides the normal send — called instead of creating a session. */
@@ -23,15 +37,30 @@ interface ComposerProps {
 }
 
 export function Composer({ overrideSend, onAfterSend }: ComposerProps = {}) {
-  const { activeSessionId, isConnected, isLoading, addMessage, setLoading, setConnected } =
-    useCCStore();
-  const { inputValue: input, setInputValue: setInput } = useCCInputStore();
+  const {
+    activeSessionId,
+    isConnected,
+    isLoading: loading,
+    sessionLoadingMap,
+    addMessage,
+    setLoading,
+    setConnected,
+  } = useCCStore();
+  const isLoading =
+    loading || !!(activeSessionId && sessionLoadingMap[activeSessionId]);
+  const cwd = useWorkspaceStore((s) => s.cwd);
+  const owner = sessionDraftKey("cc", activeSessionId, cwd);
+  const { inputValue: input, setInputValue: setInput } = useSessionTextDraft(
+    owner,
+    "cc",
+  );
   const { setCurrentAgentCardId } = useAgentCenterStore();
   const { handleNewSession } = useCCSessionManager();
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isComposing = useRef(false);
-  const [images, setImages] = useState<string[]>([]);
+  const attachments = useImageAttachments(owner);
+  const images = attachments.paths;
 
   // Callback ref captures the wrapper element as soon as it mounts,
   // avoiding an extra render caused by state+effect.
@@ -47,7 +76,8 @@ export function Composer({ overrideSend, onAfterSend }: ComposerProps = {}) {
       });
     };
     window.addEventListener(CC_INPUT_FOCUS_EVENT, handleFocusRequest);
-    return () => window.removeEventListener(CC_INPUT_FOCUS_EVENT, handleFocusRequest);
+    return () =>
+      window.removeEventListener(CC_INPUT_FOCUS_EVENT, handleFocusRequest);
   }, []);
 
   // Auto-resize textarea height to fit content
@@ -55,55 +85,74 @@ export function Composer({ overrideSend, onAfterSend }: ComposerProps = {}) {
   useEffect(() => {
     const ta = textareaRef.current;
     if (!ta) return;
-    ta.style.height = 'auto';
+    ta.style.height = "auto";
     ta.style.height = `${ta.scrollHeight}px`;
   }, [input]);
 
   const handleSendMessage = useCallback(
     async (messageText?: string) => {
       const text = (messageText ?? input).trim();
-      if (!text || isLoading) return;
+      if ((!text && images.length === 0) || isLoading || attachments.blocked)
+        return;
+      const submittedIds = attachments.attachments.map((a) => a.id);
+      const snapshot = readDraft(owner);
 
       if (overrideSend) {
-        setInput('');
+        useSessionDraftStore.getState().clearSubmitted(owner, snapshot);
         overrideSend(text);
         return;
       }
 
-      setInput('');
       const pendingImages = images;
-      setImages([]);
 
       if (!activeSessionId) {
-        const accepted = await handleNewSession(text, pendingImages);
-        if (!accepted) { setInput(text); setImages(pendingImages); return; }
-        const newSessionId = useCCStore.getState().activeSessionId;
-        if (newSessionId) onAfterSend?.(newSessionId, text);
+        let createdOwner = owner;
+        let createdId: string | null = null;
+        const accepted = await handleNewSession(
+          text,
+          pendingImages,
+          async (id) => {
+            createdId = id;
+            createdOwner = sessionDraftKey("cc", id);
+            useSessionDraftStore.getState().move(owner, createdOwner);
+            await moveImageDraft(owner, createdOwner);
+          },
+        );
+        if (!accepted) return;
+        useSessionDraftStore.getState().clearSubmitted(createdOwner, snapshot);
+        attachments.clear(submittedIds);
+        if (createdId) onAfterSend?.(createdId, text);
         return;
       }
 
       setCurrentAgentCardId(activeSessionId);
-      addMessage({ type: 'user', text });
+      addMessage({ type: "user", text });
       setLoading(true);
       onAfterSend?.(activeSessionId, text);
 
       try {
         await ccSendMessage(activeSessionId, text, pendingImages);
-        if (!isConnected) setConnected(true);
+        useSessionDraftStore.getState().clearSubmitted(owner, snapshot);
+        attachments.clear(submittedIds);
+        if (
+          !isConnected &&
+          useCCStore.getState().activeSessionId === activeSessionId
+        )
+          setConnected(true);
       } catch (error) {
-        if (!useCCInputStore.getState().inputValue) setInput(text);
-        setImages(pendingImages);
-        console.error('[CCInput] Failed to send message:', error);
-        setLoading(false);
-        addMessage({
-          type: 'assistant',
-          message: { content: [{ type: 'text', text: `Error: ${error}` }] },
-        });
+        console.error("[CCInput] Failed to send message:", error);
+        useCCStore.getState().setSessionLoading(activeSessionId, false);
+        if (useCCStore.getState().activeSessionId === activeSessionId)
+          addMessage({
+            type: "assistant",
+            message: { content: [{ type: "text", text: `Error: ${error}` }] },
+          });
       }
     },
     [
       input,
       images,
+      attachments,
       isLoading,
       activeSessionId,
       isConnected,
@@ -115,32 +164,33 @@ export function Composer({ overrideSend, onAfterSend }: ComposerProps = {}) {
       setCurrentAgentCardId,
       onAfterSend,
       overrideSend,
-    ]
+    ],
   );
 
-  const handleInterrupt = useCallback(async () => {
-    if (!activeSessionId) return;
-    try {
+  const { stopping, requestStop } = useStopAction(
+    activeSessionId,
+    isLoading,
+    async () => {
+      if (!activeSessionId) throw new Error("尚未获取当前会话");
       await ccInterrupt(activeSessionId);
-    } catch (error) {
-      console.error('[CCInput] Failed to interrupt:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [activeSessionId, setLoading]);
+      // Update the captured session only; failures keep the task running and retryable.
+      useCCStore.getState().setSessionLoading(activeSessionId, false);
+    },
+  );
 
   const handleSend = useCallback(() => {
-    if (!isLoading && input.trim()) {
+    if (!isLoading) {
       handleSendMessage();
     }
   }, [isLoading, input, handleSendMessage]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === 'Enter' && !e.shiftKey) {
+      if (e.key === "Enter" && !e.shiftKey) {
         if (
           isComposing.current ||
-          (e.nativeEvent as KeyboardEvent & { isComposing?: boolean }).isComposing
+          (e.nativeEvent as KeyboardEvent & { isComposing?: boolean })
+            .isComposing
         ) {
           return;
         }
@@ -148,15 +198,17 @@ export function Composer({ overrideSend, onAfterSend }: ComposerProps = {}) {
         handleSend();
       }
     },
-    [handleSend]
+    [handleSend],
   );
 
   return (
     <>
       <div className="shrink-0">
         <div className="relative group">
+          <ImageAttachmentStrip draft={attachments} />
           <div
             ref={wrapperRef}
+            onPasteCapture={attachments.onPaste}
             className="min-h-16 max-h-48 border border-input rounded-md bg-transparent focus-within:ring-[3px] focus-within:ring-ring/50 focus-within:border-ring transition-[color,box-shadow]"
           >
             <textarea
@@ -178,30 +230,12 @@ export function Composer({ overrideSend, onAfterSend }: ComposerProps = {}) {
             />
           </div>
 
-          {images.length > 0 && (
-            <div className="absolute left-10 bottom-11 flex items-center gap-1 px-1">
-              {images.map((path, i) => (
-                <div key={path} className="relative group/img">
-                  <img
-                    src={fileSrc(path)}
-                    alt=""
-                    className="h-10 w-10 object-cover rounded border border-border"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setImages((prev) => prev.filter((_, idx) => idx !== i))}
-                    className="absolute -top-1 -right-1 hidden group-hover/img:flex h-4 w-4 items-center justify-center rounded-full bg-destructive text-destructive-foreground"
-                  >
-                    <X className="h-2.5 w-2.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
           <div className="absolute left-1 bottom-1 flex items-center gap-0.5">
             <CCAttachmentButton
-              onImagesSelected={(paths) => setImages((prev) => [...prev, ...paths])}
+              onFilesSelected={(paths) => {
+                if (paths.length) appendDraft(owner, fileLinks(paths, cwd));
+              }}
+              onImagesSelected={attachments.addPaths}
             />
             <CCPermissionModeSelect />
           </div>
@@ -209,11 +243,22 @@ export function Composer({ overrideSend, onAfterSend }: ComposerProps = {}) {
           <div className="absolute right-1 bottom-1 flex items-center gap-1.5 px-1 bg-background/50 backdrop-blur-sm rounded-md">
             <AgentModelPanel trigger={<AgentModelTrigger />} />
             <Button
-              onClick={isLoading ? handleInterrupt : handleSend}
+              onClick={isLoading ? requestStop : handleSend}
+              aria-label={
+                isLoading ? (stopping ? "正在停止" : "停止生成") : "发送消息"
+              }
+              title={
+                isLoading ? (stopping ? "正在停止…" : "停止生成") : "发送消息"
+              }
               size="icon"
               className="h-7 w-7"
-              variant={isLoading ? 'destructive' : 'default'}
-              disabled={!input.trim() && images.length === 0 && !isLoading}
+              variant={isLoading ? "destructive" : "default"}
+              disabled={
+                isLoading
+                  ? stopping
+                  : attachments.blocked ||
+                    (!input.trim() && images.length === 0)
+              }
             >
               {isLoading ? (
                 <CircleStop className="h-3.5 w-3.5" />

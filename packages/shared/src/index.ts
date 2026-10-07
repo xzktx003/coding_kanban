@@ -625,3 +625,8 @@ export interface FileUploadResponse {
 
 // --- Shell Utilities ---
 export { shellQuote, formatWorkingDirectory } from "./shell-utils.js";
+
+export * from "./session-tabs.js";
+export * from "./session-projects.js";
+
+export * from "./session-followups.js";

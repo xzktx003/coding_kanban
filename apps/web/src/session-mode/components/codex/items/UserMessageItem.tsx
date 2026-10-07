@@ -1,18 +1,22 @@
-import { Pencil } from 'lucide-react';
-import { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import type { UserInput } from '@session/bindings/v2';
-import { useEventPreferencesStore } from '@session/components/codex/stores';
-import { AddToTodo, CopyButton } from '@session/components/common';
-import { Markdown } from '@session/components/Markdown';
-import { Button } from '@session/components/ui/button';
-import { toast } from '@session/components/ui/use-toast';
-import { fileSrc } from '@session/hooks/runtime';
-import { useWindowFocus } from '@session/hooks/useWindowFocus';
-import { codexService } from '@session/services/codexService';
-import { useInputStore } from '@session/stores';
-import { getErrorMessage } from '@session/utils/errorUtils';
-import { EditRollbackConfirmDialog } from './EditRollbackConfirmDialog';
+import { Pencil } from "lucide-react";
+import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { UserInput } from "@session/bindings/v2";
+import { useCodexStore } from "@session/components/codex/stores";
+import { AddToTodo, CopyButton } from "@session/components/common";
+import { Markdown } from "@session/components/Markdown";
+import { Button } from "@session/components/ui/button";
+import { toast } from "@session/components/ui/use-toast";
+import { fileSrc } from "@session/hooks/runtime";
+import { useWindowFocus } from "@session/hooks/useWindowFocus";
+import { codexService } from "@session/services/codexService";
+import {
+  sessionDraftKey,
+  useSessionDraftStore,
+} from "@session/stores/useSessionDraftStore";
+import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
+import { getErrorMessage } from "@session/utils/errorUtils";
+import { EditRollbackConfirmDialog } from "./EditRollbackConfirmDialog";
 
 type UserMessageItemProps = {
   content: Array<UserInput>;
@@ -25,14 +29,16 @@ export const UserMessageItem = ({
   onEdit,
   editDisabled = false,
 }: UserMessageItemProps) => {
-  const { t } = useTranslation('thread');
+  const { t } = useTranslation("thread");
   const isWindowFocused = useWindowFocus();
-  const images = content.filter((m) => m.type === 'image').map((m) => m.url);
-  const localImages = content.filter((m) => m.type === 'localImage').map((m) => fileSrc(m.path));
+  const images = content.filter((m) => m.type === "image").map((m) => m.url);
+  const localImages = content
+    .filter((m) => m.type === "localImage")
+    .map((m) => fileSrc(m.path));
   const text = content
-    .filter((m) => m.type === 'text')
+    .filter((m) => m.type === "text")
     .map((m) => m.text)
-    .join('');
+    .join("");
   const canEdit = !!onEdit && text.length > 0 && !editDisabled;
 
   const handleEdit = async () => {
@@ -66,13 +72,15 @@ export const UserMessageItem = ({
               ))}
             </div>
           )}
-          {text.length > 0 && <Markdown className="min-w-0 max-w-full" value={text} />}
+          {text.length > 0 && (
+            <Markdown className="min-w-0 max-w-full" value={text} />
+          )}
         </div>
         <div
           className={`flex min-w-0 items-center gap-1 px-1 ${
             isWindowFocused
-              ? 'invisible group-hover:visible group-focus-within:visible'
-              : 'invisible'
+              ? "invisible group-hover:visible group-focus-within:visible"
+              : "invisible"
           }`}
         >
           {onEdit && (
@@ -81,7 +89,7 @@ export const UserMessageItem = ({
               size="icon"
               onClick={handleEdit}
               disabled={!canEdit}
-              aria-label={t('userMessage.edit')}
+              aria-label={t("userMessage.edit")}
               className="h-6 w-6 text-muted-foreground"
             >
               <Pencil className="h-4 w-4" />
@@ -98,64 +106,84 @@ export const UserMessageItem = ({
 type EditableUserMessageItemProps = {
   content: Array<UserInput>;
   threadId: string;
+  turnId: string;
   rollbackTurns: number;
 };
 
 export const EditableUserMessageItem = ({
   content,
   threadId,
+  turnId,
   rollbackTurns,
 }: EditableUserMessageItemProps) => {
-  const { t } = useTranslation('thread');
+  const { t } = useTranslation("thread");
   const [pendingText, setPendingText] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const { hasConfirmedEditRollback, setHasConfirmedEditRollback } = useEventPreferencesStore();
+  const submittingRef = useRef(false);
+  const running = useCodexStore(
+    (s) =>
+      s.threadStatusMap[threadId]?.type === "active" ||
+      s.turnTimingMap[threadId]?.status === "inProgress",
+  );
 
   const applyEdit = async (text: string) => {
     if (rollbackTurns > 0) {
-      await codexService.threadRollback(threadId, rollbackTurns);
+      await codexService.threadRollback(threadId, rollbackTurns, turnId);
     }
-    useInputStore.getState().setInputValue(text);
+    useSessionDraftStore
+      .getState()
+      .setText(sessionDraftKey("codex", threadId), text);
+    if (
+      useCodexStore.getState().currentThreadId === threadId &&
+      useAgentSettingsStore.getState().selectedAgent === "codex"
+    ) {
+      useCodexStore.getState().triggerInputFocus();
+    }
   };
 
   const handleEdit = async (text: string) => {
+    if (submittingRef.current || running) return;
     try {
-      if (hasConfirmedEditRollback) {
-        await applyEdit(text);
-        return;
-      }
       setPendingText(text);
     } catch (error) {
-      console.error('Failed to edit from user message:', error);
-      toast.error(t('userMessage.editFailed'), {
+      console.error("Failed to edit from user message:", error);
+      toast.error(t("userMessage.editFailed"), {
         description: getErrorMessage(error),
       });
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   };
 
   const handleConfirmEdit = async () => {
-    if (!pendingText) return;
+    if (!pendingText || submittingRef.current || running) return;
+    submittingRef.current = true;
     try {
       setSubmitting(true);
       await applyEdit(pendingText);
-      setHasConfirmedEditRollback(true);
       setPendingText(null);
     } catch (error) {
-      console.error('Failed to edit from user message:', error);
-      toast.error(t('userMessage.editFailed'), {
+      console.error("Failed to edit from user message:", error);
+      toast.error(t("userMessage.editFailed"), {
         description: getErrorMessage(error),
       });
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };
 
   return (
     <>
-      <UserMessageItem content={content} editDisabled={false} onEdit={handleEdit} />
+      <UserMessageItem
+        content={content}
+        editDisabled={submitting || running}
+        onEdit={handleEdit}
+      />
       <EditRollbackConfirmDialog
         open={pendingText !== null}
-        submitting={submitting}
+        submitting={submitting || running}
         onOpenChange={(open) => {
           if (!open && !submitting) {
             setPendingText(null);

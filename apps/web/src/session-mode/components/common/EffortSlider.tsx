@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
-import { cn } from '@session/lib/utils';
+import { useCallback, useRef, useState } from "react";
+import { cn } from "@session/lib/utils";
 
 type EffortSliderProps<T extends string> = {
   label: string;
@@ -37,7 +37,7 @@ export function EffortSlider<T extends string>({
       const ratio = rect.width > 0 ? (clientX - rect.left) / rect.width : 0;
       return Math.round(Math.min(1, Math.max(0, ratio)) * last);
     },
-    [last]
+    [last],
   );
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -57,20 +57,20 @@ export function EffortSlider<T extends string>({
     const onUp = (ev: PointerEvent) => {
       ev.preventDefault();
       ev.stopPropagation();
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp, true);
-      window.removeEventListener('pointercancel', onUp, true);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp, true);
+      window.removeEventListener("pointercancel", onUp, true);
       setDragIndex(null);
       const picked = options[current];
       if (picked && picked !== value) onChange(picked);
     };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp, true);
-    window.addEventListener('pointercancel', onUp, true);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, true);
+    window.addEventListener("pointercancel", onUp, true);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const delta = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : 0;
+    const delta = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
     if (!delta) return;
     e.preventDefault();
     const next = options[Math.min(last, Math.max(0, index + delta))];
@@ -78,7 +78,12 @@ export function EffortSlider<T extends string>({
   };
 
   return (
-    <div className={cn('border-t p-2 space-y-2', !enabled && 'opacity-40 pointer-events-none')}>
+    <div
+      className={cn(
+        "border-t p-2 space-y-2",
+        !enabled && "opacity-40 pointer-events-none",
+      )}
+    >
       <div className="flex justify-between items-center px-1">
         <span className="text-[10px] font-bold text-muted-foreground/70 tracking-wider">
           {label}
@@ -100,16 +105,16 @@ export function EffortSlider<T extends string>({
         onPointerDown={handlePointerDown}
         onKeyDown={handleKeyDown}
         className={cn(
-          'relative h-7 mx-2 touch-none select-none outline-none rounded-full',
-          'focus-visible:ring-2 focus-visible:ring-ring/50',
-          dragging ? 'cursor-grabbing' : 'cursor-grab'
+          "relative h-7 mx-2 touch-none select-none outline-none rounded-full",
+          "focus-visible:ring-2 focus-visible:ring-ring/50",
+          dragging ? "cursor-grabbing" : "cursor-grab",
         )}
       >
         {/* tube */}
         <div className="absolute inset-x-0 top-1/2 -translate-y-1/2 h-3.5 rounded-full bg-muted border border-input/60 shadow-inner overflow-hidden">
           {/* filled portion */}
           <div
-            className="h-full rounded-full bg-gradient-to-r from-indigo-400 to-indigo-600 transition-[width] duration-150"
+            className="h-full rounded-full bg-primary"
             style={{ width: `${percent}%` }}
           />
         </div>
@@ -118,8 +123,10 @@ export function EffortSlider<T extends string>({
           <span
             key={option}
             className={cn(
-              'absolute top-1/2 -translate-y-1/2 -translate-x-1/2 size-1 rounded-full transition-colors',
-              i <= index ? 'bg-white/70' : 'bg-muted-foreground/40'
+              "absolute top-1/2 -translate-y-1/2 -translate-x-1/2 size-1 rounded-full transition-colors",
+              i <= index
+                ? "bg-primary-foreground/70"
+                : "bg-muted-foreground/40",
             )}
             style={{ left: `${(i / last) * 100}%` }}
           />
@@ -127,9 +134,9 @@ export function EffortSlider<T extends string>({
         {/* thumb */}
         <div
           className={cn(
-            'absolute top-1/2 -translate-y-1/2 -translate-x-1/2 size-5 rounded-full',
-            'bg-background border-2 border-indigo-500 shadow transition-[left,transform] duration-150',
-            dragging && 'scale-110 shadow-md'
+            "absolute top-1/2 -translate-y-1/2 -translate-x-1/2 size-5 rounded-full",
+            "bg-background border-2 border-primary shadow transition-transform duration-150",
+            dragging && "scale-110 shadow-md",
           )}
           style={{ left: `${percent}%` }}
         />

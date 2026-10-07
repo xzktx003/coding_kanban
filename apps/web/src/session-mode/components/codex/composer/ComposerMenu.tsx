@@ -1,5 +1,5 @@
-import { useShallow } from 'zustand/react/shallow';
-import { open } from '@session/browser-dialog';
+import { useShallow } from "zustand/react/shallow";
+import { open } from "@session/browser-dialog";
 import {
   Check,
   ChevronRight,
@@ -8,16 +8,27 @@ import {
   Image as ImageIcon,
   PlusIcon,
   Target,
-} from 'lucide-react';
-import { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { ScreenshotPopover } from '@session/components/codex/composer/ScreenshotPopover';
-import { useCodexStore, useConfigStore } from '@session/components/codex/stores';
-import { Button } from '@session/components/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@session/components/ui/popover';
-import { Separator } from '@session/components/ui/separator';
-import { cn } from '@session/lib/utils';
-import { type MentionItem, mentionsWithIcon, useMentionItems } from './mentions';
+} from "lucide-react";
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { ScreenshotPopover } from "@session/components/codex/composer/ScreenshotPopover";
+import {
+  useCodexStore,
+  useConfigStore,
+} from "@session/components/codex/stores";
+import { Button } from "@session/components/ui/button";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@session/components/ui/popover";
+import { Separator } from "@session/components/ui/separator";
+import { cn } from "@session/lib/utils";
+import {
+  type MentionItem,
+  mentionsWithIcon,
+  useMentionItems,
+} from "./mentions";
 
 interface SelectFilesMenuItemProps {
   onFilesSelected?: (paths: string[]) => void;
@@ -45,7 +56,7 @@ export function SelectFilesMenuItem({
       onFilesSelected?.(paths);
       onAfterSelect?.();
     } catch (error) {
-      console.error('Failed to select files:', error);
+      console.error("Failed to select files:", error);
     }
   };
 
@@ -53,8 +64,8 @@ export function SelectFilesMenuItem({
     <Button
       variant="ghost"
       className={cn(
-        'justify-start gap-2 px-2 hover:bg-blue-500 hover:text-white transition-colors',
-        className
+        "justify-start gap-2 px-2 hover:bg-blue-500 hover:text-white transition-colors",
+        className,
       )}
       onClick={handleSelectFiles}
     >
@@ -133,8 +144,13 @@ export function ComposerMenu({
   onInsertMention,
 }: ComposerMenuProps) {
   const { webSearchRequest, setWebSearch } = useConfigStore();
-  const { goalEnabled, setGoalEnabled } = useCodexStore(useShallow(s => ({ goalEnabled: s.goalEnabled, setGoalEnabled: s.setGoalEnabled })));
-  const { t } = useTranslation('composer');
+  const { goalEnabled, setGoalEnabled } = useCodexStore(
+    useShallow((s) => ({
+      goalEnabled: s.goalEnabled,
+      setGoalEnabled: s.setGoalEnabled,
+    })),
+  );
+  const { t } = useTranslation("composer");
   const [openState, setOpenState] = useState(false);
   const { items } = useMentionItems();
   const mentionItems = mentionsWithIcon(items);
@@ -145,8 +161,8 @@ export function ComposerMenu({
         multiple: true,
         filters: [
           {
-            name: 'Images',
-            extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'],
+            name: "Images",
+            extensions: ["jpg", "jpeg", "png", "gif", "bmp", "webp", "svg"],
           },
         ],
       });
@@ -159,24 +175,32 @@ export function ComposerMenu({
         setOpenState(false);
       }
     } catch (error) {
-      console.error('Failed to select image:', error);
+      console.error("Failed to select image:", error);
     }
   };
 
   return (
     <Popover open={openState} onOpenChange={setOpenState}>
       <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon">
+        <Button
+          variant="ghost"
+          size="icon"
+          aria-label="添加附件与上下文"
+          title="添加附件与上下文"
+        >
           <PlusIcon className="w-4 h-4" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-48 max-h-[45vh] overflow-y-auto p-1" align="start">
+      <PopoverContent
+        className="w-48 max-h-[45vh] overflow-y-auto p-1"
+        align="start"
+      >
         <div className="flex flex-col gap-1">
           <Button
             variant="ghost"
             className={cn(
-              'justify-start gap-2 px-2 hover:bg-blue-500 hover:text-white transition-colors',
-              webSearchRequest && 'bg-blue-100 text-blue-900'
+              "justify-start gap-2 px-2 hover:bg-blue-500 hover:text-white transition-colors",
+              webSearchRequest && "bg-blue-100 text-blue-900",
             )}
             onClick={() => {
               setWebSearch(!webSearchRequest);
@@ -212,8 +236,8 @@ export function ComposerMenu({
           <Button
             variant="ghost"
             className={cn(
-              'justify-start gap-2 px-2 hover:bg-blue-500 hover:text-white transition-colors',
-              goalEnabled && 'bg-blue-50 text-blue-700'
+              "justify-start gap-2 px-2 hover:bg-blue-500 hover:text-white transition-colors",
+              goalEnabled && "bg-blue-50 text-blue-700",
             )}
             onClick={() => {
               setGoalEnabled(!goalEnabled);
@@ -221,7 +245,7 @@ export function ComposerMenu({
             }}
           >
             <Target className="w-4 h-4" />
-            <span className="flex-1 text-left">{t('goal')}</span>
+            <span className="flex-1 text-left">{t("goal")}</span>
           </Button>
           {mentionItems.length > 0 && (
             <>

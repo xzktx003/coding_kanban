@@ -202,7 +202,18 @@ export function AgentGridCard({
     >
       <div className="grid-card-header">
         <div className="grid-card-title-group">
-          <span className="grid-card-name">{session.displayName}</span>
+          <button
+            aria-label={`打开会话 ${session.displayName}`}
+            className="grid-card-name session-entry-button"
+            title={session.displayName}
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onDoubleClick(session.id);
+            }}
+          >
+            {session.displayName}
+          </button>
         </div>
         <div className="grid-card-header-actions">
           <SessionGroupMenu

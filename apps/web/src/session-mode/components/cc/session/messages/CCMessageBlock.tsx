@@ -1,11 +1,12 @@
-import { ChevronDown, ChevronRight } from 'lucide-react';
-import { useState } from 'react';
-import { Streamdown } from 'streamdown';
-import { Badge } from '@session/components/ui/badge';
-import { Button } from '@session/components/ui/button';
-import { useCCSettingsStore } from '@session/stores/settings';
-import type { ContentBlock, ToolResultBlock } from '../../types/messages';
-import { NO_RAW_INPUT_TOOLS } from '.';
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { useState } from "react";
+import { Streamdown } from "streamdown";
+import { VisualizationContent } from "@session/features/visualizations/VisualizationContent";
+import { Badge } from "@session/components/ui/badge";
+import { Button } from "@session/components/ui/button";
+import { useCCSettingsStore } from "@session/stores/settings";
+import type { ContentBlock, ToolResultBlock } from "../../types/messages";
+import { NO_RAW_INPUT_TOOLS } from ".";
 import {
   AskUserQuestionTool,
   BashTool,
@@ -15,10 +16,10 @@ import {
   ReadTool,
   TodoWriteTool,
   WriteTool,
-} from './tool-use';
-import { safeStringify } from './utils';
+} from "./tool-use";
+import { safeStringify } from "./utils";
 
-const SILENT_RESULT_TOOLS = ['Read', 'Glob', 'Grep'];
+const SILENT_RESULT_TOOLS = ["Read", "Glob", "Grep"];
 
 interface Props {
   block: ContentBlock;
@@ -28,7 +29,9 @@ interface Props {
 }
 
 function stripErrorTags(s: string) {
-  return s.replace(/^<tool_use_error>\s*/, '').replace(/\s*<\/tool_use_error>$/, '');
+  return s
+    .replace(/^<tool_use_error>\s*/, "")
+    .replace(/\s*<\/tool_use_error>$/, "");
 }
 
 export function CCMessageBlock({ block, index, toolName, inlineError }: Props) {
@@ -38,14 +41,17 @@ export function CCMessageBlock({ block, index, toolName, inlineError }: Props) {
   const { enabledThinking } = useCCSettingsStore();
 
   switch (block.type) {
-    case 'text':
+    case "text":
       return (
         <div key={blockKey} className="text-sm">
-          <Streamdown>{block.text}</Streamdown>
+          <VisualizationContent
+            text={block.text}
+            renderMarkdown={(value) => <Streamdown>{value}</Streamdown>}
+          />
         </div>
       );
 
-    case 'thinking':
+    case "thinking":
       if (!enabledThinking) return null;
       return (
         <div
@@ -58,25 +64,29 @@ export function CCMessageBlock({ block, index, toolName, inlineError }: Props) {
         </div>
       );
 
-    case 'tool_use': {
-      const errorProps = { inlineError, showError, onToggleError: () => setShowError((p) => !p) };
+    case "tool_use": {
+      const errorProps = {
+        inlineError,
+        showError,
+        onToggleError: () => setShowError((p) => !p),
+      };
       const toolComponent = (() => {
         switch (block.name) {
-          case 'Read':
+          case "Read":
             return <ReadTool block={block} {...errorProps} />;
-          case 'Edit':
+          case "Edit":
             return <EditTool block={block} {...errorProps} />;
-          case 'Write':
+          case "Write":
             return <WriteTool block={block} {...errorProps} />;
-          case 'Bash':
+          case "Bash":
             return <BashTool block={block} {...errorProps} />;
-          case 'Glob':
+          case "Glob":
             return <GlobTool block={block} {...errorProps} />;
-          case 'Grep':
+          case "Grep":
             return <GrepTool block={block} {...errorProps} />;
-          case 'TodoWrite':
+          case "TodoWrite":
             return <TodoWriteTool block={block} {...errorProps} />;
-          case 'AskUserQuestion':
+          case "AskUserQuestion":
             return <AskUserQuestionTool block={block} {...errorProps} />;
           default:
             return (
@@ -121,7 +131,7 @@ export function CCMessageBlock({ block, index, toolName, inlineError }: Props) {
               )}
               {inlineError && showError && (
                 <div className="mt-1 text-xs whitespace-pre-wrap break-words text-red-600 dark:text-red-400 border-t border-red-500/20 pt-1">
-                  {typeof inlineError.content === 'string'
+                  {typeof inlineError.content === "string"
                     ? stripErrorTags(inlineError.content)
                     : JSON.stringify(inlineError.content)}
                 </div>
@@ -132,25 +142,34 @@ export function CCMessageBlock({ block, index, toolName, inlineError }: Props) {
       );
     }
 
-    case 'tool_result': {
-      const isString = typeof block.content === 'string';
+    case "tool_result": {
+      const isString = typeof block.content === "string";
       const content = block.content;
 
-      if (content == null || (isString && (content as string).trim().length === 0)) return null;
+      if (
+        content == null ||
+        (isString && (content as string).trim().length === 0)
+      )
+        return null;
       if (
         (toolName && SILENT_RESULT_TOOLS.includes(toolName)) ||
-        (!toolName && !block.is_error && isString && (content as string).length > 200)
+        (!toolName &&
+          !block.is_error &&
+          isString &&
+          (content as string).length > 200)
       )
         return null;
 
-      const isWriteTool = toolName === 'Write';
+      const isWriteTool = toolName === "Write";
       const isLongText = isString && (content as string).length > 500;
-      const displayContent = isString ? stripErrorTags(content as string) : content;
+      const displayContent = isString
+        ? stripErrorTags(content as string)
+        : content;
 
       return (
         <div
           key={blockKey}
-          className={`rounded-lg border p-3 max-w-full overflow-hidden ${block.is_error ? 'border-red-500/20 bg-red-500/5' : 'border-emerald-500/20 bg-emerald-500/5'}`}
+          className={`rounded-lg border p-3 max-w-full overflow-hidden ${block.is_error ? "border-red-500/20 bg-red-500/5" : "border-emerald-500/20 bg-emerald-500/5"}`}
         >
           {isWriteTool && (
             <div className="flex justify-end mb-2">
@@ -165,14 +184,14 @@ export function CCMessageBlock({ block, index, toolName, inlineError }: Props) {
                 ) : (
                   <ChevronRight className="h-3 w-3" />
                 )}
-                {showWriteResult ? 'Hide' : 'Output'}
+                {showWriteResult ? "Hide" : "Output"}
               </Button>
             </div>
           )}
           {(!isWriteTool || showWriteResult) &&
             (isString ? (
               <div
-                className={`text-xs whitespace-pre-wrap break-words overflow-auto text-foreground/80 ${isLongText ? 'max-h-60' : ''}`}
+                className={`text-xs whitespace-pre-wrap break-words overflow-auto text-foreground/80 ${isLongText ? "max-h-60" : ""}`}
               >
                 {displayContent as string}
               </div>

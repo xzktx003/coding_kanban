@@ -1,35 +1,39 @@
-import type { ServerNotification } from '@session/bindings';
-import { Check, RotateCcw, Square } from 'lucide-react';
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { toast } from 'sonner';
+import { useSessionTabActions } from "@session/hooks/useSessionTabs";
+import { useSessionState } from "../common/SessionStatus";
+import type { ServerNotification } from "@session/bindings";
+import { Check, RotateCcw, Square } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 import {
   useApprovalStore,
   useCodexStore,
   useRequestUserInputStore,
-} from '@session/components/codex/stores';
-import { Button } from '@session/components/ui/button';
+} from "@session/components/codex/stores";
+import { Button } from "@session/components/ui/button";
 import {
   gitApplyWorktreeChanges,
   gitHasWorktreeChanges,
   gitRemoveWorktree,
-} from '@session/services/apiAdapt/git';
-import { codexService } from '@session/services/codexService';
-import type { AgentCenterCard } from '@session/stores/useAgentCenterStore';
-import { useAgentCenterStore } from '@session/stores/useAgentCenterStore';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
-import { getFilename } from '@session/utils/getFilename';
-import { CardResizeHandles } from './CardResizeHandles';
-import { useCardResize } from './useCardResize';
+} from "@session/services/apiAdapt/git";
+import { codexService } from "@session/services/codexService";
+import type { AgentCenterCard } from "@session/stores/useAgentCenterStore";
+import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { getFilename } from "@session/utils/getFilename";
+import { CardResizeHandles } from "./CardResizeHandles";
+import { useCardResize } from "./useCardResize";
 import {
   fmtElapsed,
   fmtTokens,
   getCodexActiveTurnId,
   getCodexContextWindow,
   getCodexTokens,
-} from './utils';
+} from "./utils";
 
 const CodexThread = lazy(() =>
-  import('@session/components/codex/thread/CodexThread').then((m) => ({ default: m.CodexThread }))
+  import("@session/components/codex/thread/CodexThread").then((m) => ({
+    default: m.CodexThread,
+  })),
 );
 
 // ─── ContextWindowBar ────────────────────────────────────────────────────────
@@ -41,7 +45,8 @@ interface ContextWindowBarProps {
 
 export function ContextWindowBar({ used, window }: ContextWindowBarProps) {
   const pct = Math.min(used / window, 1);
-  const color = pct > 0.85 ? 'bg-red-500' : pct > 0.65 ? 'bg-amber-400' : 'bg-emerald-500';
+  const color =
+    pct > 0.85 ? "bg-red-500" : pct > 0.65 ? "bg-amber-400" : "bg-emerald-500";
   return (
     <div className="h-0.5 w-full bg-muted/30 shrink-0">
       <div
@@ -57,7 +62,7 @@ export function ContextWindowBar({ used, window }: ContextWindowBarProps) {
 const EMPTY_EVENTS: ServerNotification[] = [];
 
 interface CodexAgentCardProps {
-  card: AgentCenterCard & { kind: 'codex' };
+  card: AgentCenterCard & { kind: "codex" };
   onRemove: () => void;
   header: React.ReactNode;
   isSelected?: boolean;
@@ -69,36 +74,53 @@ export function CodexAgentCard({
   header,
   isSelected,
 }: CodexAgentCardProps) {
-  const threadEvents = useCodexStore(s => s.events[card.id] ?? EMPTY_EVENTS);
-  const processing = useCodexStore(s => s.threadStatusMap[card.id]?.type === 'active');
-  const turnTiming = useCodexStore(s => s.turnTimingMap[card.id]);
-  const resumed = useCodexStore(s => s.activeThreadIds.includes(card.id));
+  const threadEvents = useCodexStore((s) => s.events[card.id] ?? EMPTY_EVENTS);
+  const processing = useCodexStore(
+    (s) => s.threadStatusMap[card.id]?.type === "active",
+  );
+  const turnTiming = useCodexStore((s) => s.turnTimingMap[card.id]);
+  const resumed = useCodexStore((s) => s.activeThreadIds.includes(card.id));
   const { pendingApprovals } = useApprovalStore();
   const { pendingRequests } = useRequestUserInputStore();
-  const { setCurrentAgentCardId, updateCard } = useAgentCenterStore();
+  const { updateCard } = useAgentCenterStore();
+  const { selectTab } = useSessionTabActions();
   const { cwd } = useWorkspaceStore();
   const [resuming, setResuming] = useState(false);
   const [isApplyingWorktree, setIsApplyingWorktree] = useState(false);
   const [worktreeHasChanges, setWorktreeHasChanges] = useState(false);
   const { size, startDrag, onDragMove, endDrag } = useCardResize(card.id);
 
-  const needsResume =
-    !resumed && threadEvents.length === 0 && !processing;
+  const needsResume = !resumed && threadEvents.length === 0 && !processing;
+
+  useEffect(() => {
+    // Reload a restored grid's transcripts without selecting every window in turn.
+    const state = useCodexStore.getState();
+    if (!state.events[card.id] && !state.historyLoadingMap[card.id]) {
+      void codexService.threadResume(card.id).catch(() => {});
+    }
+  }, [card.id]);
 
   const hasPending =
     pendingApprovals.some((a: any) => a.threadId === card.id) ||
     pendingRequests.some((r: any) => r.threadId === card.id);
 
   const tokens = useMemo(() => getCodexTokens(threadEvents), [threadEvents]);
-  const ctxWindow = useMemo(() => getCodexContextWindow(threadEvents), [threadEvents]);
+  const ctxWindow = useMemo(
+    () => getCodexContextWindow(threadEvents),
+    [threadEvents],
+  );
   const canApplyWorktree =
-    !!card.worktreePath && !!cwd && !processing && !hasPending && worktreeHasChanges;
+    !!card.worktreePath &&
+    !!cwd &&
+    !processing &&
+    !hasPending &&
+    worktreeHasChanges;
 
   // turnTimingMap is the single source of truth for turn timing (see TurnTiming
   // in useCodexStore) — driven directly by turn/started + turn/completed + error,
   // so it stays correct even when a turn ends via error/interrupt, unlike scanning
   // raw events which could disagree with threadStatusMap's active/idle flip.
-  const turnInProgress = turnTiming?.status === 'inProgress';
+  const turnInProgress = turnTiming?.status === "inProgress";
   // `tick` only forces a re-render every 200ms; elapsed time itself is
   // derived from turnTiming.startedAtMs, not synced into state.
   const [, setTick] = useState(0);
@@ -113,7 +135,8 @@ export function CodexAgentCard({
     return () => clearInterval(intervalId);
   }, [turnInProgress]);
 
-  const elapsed = turnInProgress && turnTiming ? Date.now() - turnTiming.startedAtMs : 0;
+  const elapsed =
+    turnInProgress && turnTiming ? Date.now() - turnTiming.startedAtMs : 0;
 
   useEffect(() => {
     const checkWorktreeChanges = async () => {
@@ -122,7 +145,7 @@ export function CodexAgentCard({
         return;
       }
       try {
-        const worktreeKey = card.worktreePath.split('/').pop();
+        const worktreeKey = card.worktreePath.split("/").pop();
         if (!worktreeKey) {
           setWorktreeHasChanges(false);
           return;
@@ -145,15 +168,14 @@ export function CodexAgentCard({
   const handleResume = async () => {
     setResuming(true);
     try {
-      await codexService.threadResume(card.id);
-      setCurrentAgentCardId(card.id);
+      await selectTab(card);
     } finally {
       setResuming(false);
     }
   };
 
   const handleApplyWorktree = async () => {
-    const worktreeKey = card.worktreePath?.split('/').pop();
+    const worktreeKey = card.worktreePath?.split("/").pop();
     if (!cwd || !worktreeKey) return;
 
     setIsApplyingWorktree(true);
@@ -161,27 +183,40 @@ export function CodexAgentCard({
       const result = await gitApplyWorktreeChanges(cwd, worktreeKey);
       await gitRemoveWorktree(cwd, worktreeKey);
       updateCard({ ...card, worktreePath: undefined });
-      toast.success('Applied worktree changes', {
-        description: `${result.changed_files} file${result.changed_files === 1 ? '' : 's'} merged into the main checkout`,
+      toast.success("Applied worktree changes", {
+        description: `${result.changed_files} file${result.changed_files === 1 ? "" : "s"} merged into the main checkout`,
       });
     } catch (error) {
-      toast.error('Failed to apply worktree changes', { description: String(error) });
+      toast.error("Failed to apply worktree changes", {
+        description: String(error),
+      });
     } finally {
       setIsApplyingWorktree(false);
     }
   };
 
+  const visualState = useSessionState(card.kind, card.id);
   const attentionBorder = hasPending
-    ? 'ring-2 ring-amber-500/70 border-amber-500/30'
+    ? "ring-2 ring-amber-500/70 border-amber-500/30"
     : isSelected
-      ? 'ring-2 ring-primary/60 border-primary/30'
-      : 'border';
+      ? "ring-2 ring-primary/60 border-primary/30"
+      : "border";
 
   return (
     <div
       data-card-root
+      data-session-card={card.id}
+      data-attention={visualState}
+      data-selected={Boolean(isSelected)}
+      onClickCapture={(event) => {
+        if (window.getSelection() && !window.getSelection()!.isCollapsed)
+          return;
+        if ((event.target as Element).closest("button, a, input, textarea"))
+          return;
+        if (!isSelected) void selectTab(card);
+      }}
       style={{ width: size.width, height: size.height }}
-      className={`relative flex flex-col ${size.width ? 'flex-none' : 'flex-1 basis-72'} min-w-[260px] ${attentionBorder} rounded-lg bg-background overflow-hidden transition-shadow`}
+      className={`relative flex flex-col ${size.width ? "flex-none" : "flex-1 basis-72"} min-w-[260px] ${attentionBorder} rounded-lg bg-background overflow-hidden transition-shadow`}
     >
       {header}
 
@@ -191,30 +226,43 @@ export function CodexAgentCard({
         </Suspense>
       </div>
 
-      {ctxWindow && <ContextWindowBar used={ctxWindow.used} window={ctxWindow.window} />}
+      {ctxWindow && (
+        <ContextWindowBar used={ctxWindow.used} window={ctxWindow.window} />
+      )}
 
-      <div className="flex items-center justify-between px-2 py-1 border-t bg-muted/20 shrink-0">
+      <div className="session-card-footer flex items-center justify-between px-2 py-1 border-t bg-muted/20 shrink-0">
         <div className="flex items-center gap-2">
           <span
-            className={`text-[10px] font-mono tabular-nums ${turnInProgress ? 'text-green-500' : 'text-muted-foreground/50'}`}
+            className={`text-[10px] font-mono tabular-nums ${turnInProgress ? "text-green-500" : "text-muted-foreground/50"}`}
           >
             {turnInProgress && fmtElapsed(elapsed)}
           </span>
           {tokens !== null && (
-            <span className="text-[10px] text-muted-foreground/40">{fmtTokens(tokens)} tok</span>
+            <span className="text-[10px] text-muted-foreground/40">
+              {fmtTokens(tokens)} tok
+            </span>
           )}
           {hasPending && !processing && (
-            <span className="text-[10px] text-amber-500 animate-pulse">needs input</span>
+            <span className="session-card-waiting text-[10px] text-amber-500">
+              等待回复
+            </span>
           )}
           <span
             className="text-[10px] text-muted-foreground/60 truncate max-w-[80px]"
-            title={card.cwd ?? ''}
+            title={card.cwd ?? ""}
           >
             {getFilename(card.cwd)}
           </span>
         </div>
         {processing && (
-          <Button size="icon" variant="destructive" className="h-6 w-6" onClick={handleStop}>
+          <Button
+            size="icon"
+            variant="destructive"
+            className="h-6 w-6"
+            aria-label="停止会话"
+            title="停止当前会话任务"
+            onClick={handleStop}
+          >
             <Square className="h-3 w-3" />
           </Button>
         )}
@@ -229,8 +277,10 @@ export function CodexAgentCard({
               void handleApplyWorktree();
             }}
           >
-            <Check className={`h-3 w-3 ${isApplyingWorktree ? 'animate-pulse' : ''}`} />
-            {isApplyingWorktree ? 'Applying…' : 'Apply'}
+            <Check
+              className={`h-3 w-3 ${isApplyingWorktree ? "animate-pulse" : ""}`}
+            />
+            {isApplyingWorktree ? "Applying…" : "Apply"}
           </Button>
         )}
         {needsResume && (
@@ -244,13 +294,19 @@ export function CodexAgentCard({
               void handleResume();
             }}
           >
-            <RotateCcw className={`h-3 w-3 ${resuming ? 'animate-spin' : ''}`} />
-            {resuming ? 'Loading…' : 'Resume'}
+            <RotateCcw
+              className={`h-3 w-3 ${resuming ? "animate-spin" : ""}`}
+            />
+            {resuming ? "Loading…" : "Resume"}
           </Button>
         )}
       </div>
 
-      <CardResizeHandles startDrag={startDrag} onDragMove={onDragMove} endDrag={endDrag} />
+      <CardResizeHandles
+        startDrag={startDrag}
+        onDragMove={onDragMove}
+        endDrag={endDrag}
+      />
     </div>
   );
 }

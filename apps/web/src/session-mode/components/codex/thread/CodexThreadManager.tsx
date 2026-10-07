@@ -1,20 +1,27 @@
-import { useShallow } from 'zustand/react/shallow';
-import { Loader2, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Thread, ThreadListParams } from '@session/bindings/v2';
-import { useCodexStore, useThreadListStore } from '@session/components/codex/stores';
-import { DeleteConfirmDialog, Toolbar } from '@session/components/common/SessionManagerShared';
-import { Button } from '@session/components/ui/button';
-import { Checkbox } from '@session/components/ui/checkbox';
-import { ScrollArea } from '@session/components/ui/scroll-area';
-import { useToast } from '@session/components/ui/use-toast';
-import { deleteFile, listThreads } from '@session/services/apiAdapt';
-import { codexService } from '@session/services/codexService';
-import { useAgentCenterStore, useLayoutStore } from '@session/stores';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
-import { formatThreadAge } from '@session/utils/formatThreadAge';
-import { getFilename } from '@session/utils/getFilename';
-import { modelProviders } from '../constants';
+import { useSessionNameStore } from "../../../stores/useSessionNameStore";
+import { useShallow } from "zustand/react/shallow";
+import { Loader2, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Thread, ThreadListParams } from "@session/bindings/v2";
+import {
+  useCodexStore,
+  useThreadListStore,
+} from "@session/components/codex/stores";
+import {
+  DeleteConfirmDialog,
+  Toolbar,
+} from "@session/components/common/SessionManagerShared";
+import { Button } from "@session/components/ui/button";
+import { Checkbox } from "@session/components/ui/checkbox";
+import { ScrollArea } from "@session/components/ui/scroll-area";
+import { useToast } from "@session/components/ui/use-toast";
+import { deleteFile, listThreads } from "@session/services/apiAdapt";
+import { codexService } from "@session/services/codexService";
+import { useAgentCenterStore, useLayoutStore } from "@session/stores";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { formatThreadAge } from "@session/utils/formatThreadAge";
+import { getFilename } from "@session/utils/getFilename";
+import { modelProviders } from "../constants";
 
 interface CodexThreadManagerProps {
   onClose: () => void;
@@ -27,14 +34,26 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
   // instead of reading from useCodexStore, since that store only tracks the
   // globally-loaded/active thread set. currentThreadId is still read from the
   // store since it's needed to know which thread to reset when deleting.
-  const { currentThreadId } = useCodexStore(useShallow(s => ({ currentThreadId: s.currentThreadId })));
+  const { currentThreadId } = useCodexStore(
+    useShallow((s) => ({ currentThreadId: s.currentThreadId })),
+  );
   const { sortKey } = useThreadListStore();
   const { cwd, setCwd } = useWorkspaceStore();
   const { setView } = useLayoutStore();
   const { addAgentCard, setCurrentAgentCardId } = useAgentCenterStore();
-  const [search, setSearch] = useState('');
+  const names = useSessionNameStore((s) => s.names);
+  const nameOf = (thread: Thread) =>
+    names[`codex:${thread.id}`] ?? thread.name ?? thread.preview ?? thread.id;
+  const [error, setError] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const deletingRef = useRef(false);
+  const requestRef = useRef(0);
+  const [search, setSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [pendingDeleteItems, setPendingDeleteItems] = useState<Thread[] | null>(null);
+  const [pendingDeleteItems, setPendingDeleteItems] = useState<Thread[] | null>(
+    null,
+  );
   const { toast } = useToast();
 
   // Local pagination state, independent from the global store.
@@ -55,9 +74,14 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
     if (targetCwd && targetCwd !== cwd) {
       setCwd(targetCwd);
     }
-    addAgentCard({ kind: 'codex', id: thread.id, preview: thread.preview, cwd: targetCwd });
+    addAgentCard({
+      kind: "codex",
+      id: thread.id,
+      preview: thread.preview,
+      cwd: targetCwd,
+    });
     setCurrentAgentCardId(thread.id);
-    setView('agent');
+    setView("agent");
     onClose();
     await codexService.setCurrentThread(thread.id);
   };
@@ -66,7 +90,13 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
   // scoped to the current workspace cwd. Resets the list unless appending.
   const fetchThreads = useCallback(
     async (cursor: string | null, append: boolean) => {
-      append ? setLoadingMore(true) : setLoading(true);
+      const request = append ? requestRef.current : ++requestRef.current;
+      if (append) setLoadingMore(true);
+      else {
+        setLoading(true);
+        setLoadingMore(false);
+      }
+      append ? setPageError(null) : setError(null);
       try {
         const params: ThreadListParams = {
           cursor,
@@ -78,22 +108,38 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
           useStateDbOnly: true,
         };
         const response = await listThreads(params);
-        setThreads((prev) => (append ? [...prev, ...response.data] : response.data));
+        if (request !== requestRef.current) return;
+        setThreads((prev) =>
+          append
+            ? [
+                ...prev,
+                ...response.data.filter(
+                  (thread) =>
+                    !prev.some((existing) => existing.id === thread.id),
+                ),
+              ]
+            : response.data,
+        );
         setNextCursor(response.nextCursor ?? null);
       } catch (error) {
-        console.error('[CodexThreadManager] Failed to load threads:', error);
-        if (!append) setThreads([]);
-        setNextCursor(null);
+        if (request !== requestRef.current) return;
+        const message = error instanceof Error ? error.message : String(error);
+        append ? setPageError(message) : setError(message);
       } finally {
-        append ? setLoadingMore(false) : setLoading(false);
+        if (request === requestRef.current) {
+          append ? setLoadingMore(false) : setLoading(false);
+        }
       }
     },
-    [cwd, sortKey, scopeToCwd]
+    [cwd, sortKey, scopeToCwd],
   );
 
   // Reload from the first page whenever cwd scope or sort changes.
   useEffect(() => {
     void fetchThreads(null, false);
+    return () => {
+      requestRef.current++;
+    };
   }, [fetchThreads]);
 
   // Infinite scroll: observe a sentinel at the bottom of the list and load
@@ -102,29 +148,43 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
   // "Load more" click followed by more scrolling.
   useEffect(() => {
     const sentinel = sentinelRef.current;
-    if (!sentinel || !nextCursor) return;
+    if (!sentinel || !nextCursor || pageError) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && nextCursor && !loading && !loadingMore) {
+        if (
+          entries[0]?.isIntersecting &&
+          nextCursor &&
+          !loading &&
+          !loadingMore
+        ) {
           void fetchThreads(nextCursor, true);
         }
       },
-      { root: sentinel.closest('[data-radix-scroll-area-viewport]'), rootMargin: '80px' }
+      {
+        root: sentinel.closest("[data-radix-scroll-area-viewport]"),
+        rootMargin: "80px",
+      },
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [nextCursor, loading, loadingMore, fetchThreads]);
+  }, [nextCursor, loading, loadingMore, pageError, fetchThreads]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return threads;
     return threads.filter(
-      (t) => (t.preview ?? '').toLowerCase().includes(q) || (t.cwd ?? '').toLowerCase().includes(q)
+      (t) =>
+        (names[`codex:${t.id}`] ?? t.name ?? t.preview ?? t.id)
+          .toLowerCase()
+          .includes(q) ||
+        (t.preview ?? "").toLowerCase().includes(q) ||
+        (t.cwd ?? "").toLowerCase().includes(q),
     );
-  }, [threads, search]);
+  }, [threads, search, names]);
 
-  const allSelected = filtered.length > 0 && filtered.every((t) => selectedIds.has(t.id));
+  const allSelected =
+    filtered.length > 0 && filtered.every((t) => selectedIds.has(t.id));
 
   const toggleAll = () => {
     if (allSelected) {
@@ -143,6 +203,10 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
   };
 
   const doDelete = async (items: Thread[]) => {
+    if (deletingRef.current) return;
+    deletingRef.current = true;
+    setDeleting(true);
+    const deletedIds = new Set<string>();
     let failed = 0;
     for (const item of items) {
       if (!item.path) {
@@ -151,6 +215,7 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
       }
       try {
         await deleteFile(item.path);
+        deletedIds.add(item.id);
         if (currentThreadId === item.id) {
           await codexService.setCurrentThread(null);
         }
@@ -158,7 +223,6 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
         failed++;
       }
     }
-    const deletedIds = new Set(items.map((t) => t.id));
     setSelectedIds((prev) => {
       const next = new Set(prev);
       for (const id of deletedIds) next.delete(id);
@@ -166,9 +230,21 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
     });
     setThreads((prev) => prev.filter((t) => !deletedIds.has(t.id)));
     // Refresh global thread list so sidebar (which still reads useCodexStore) updates.
-    await codexService.loadThreads(cwd, false, sortKey);
+    try {
+      await codexService.loadThreads(cwd, false, sortKey);
+    } catch {
+      toast({
+        description: "会话列表刷新失败，请重新加载",
+        variant: "destructive",
+      });
+    }
+    deletingRef.current = false;
+    setDeleting(false);
     if (failed > 0) {
-      toast({ description: `Failed to delete ${failed} thread(s)`, variant: 'destructive' });
+      toast({
+        description: `有 ${failed} 个会话未能删除，已保留，可重试`,
+        variant: "destructive",
+      });
     }
   };
 
@@ -186,34 +262,51 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
         }}
       />
 
+      {deleting && (
+        <p role="status" className="text-xs text-muted-foreground py-1">
+          正在删除会话记录…
+        </p>
+      )}
       <div className="flex items-center gap-2 px-1 py-1 text-xs">
         <Button
-          variant={scopeToCwd ? 'secondary' : 'ghost'}
+          variant={scopeToCwd ? "secondary" : "ghost"}
           size="sm"
           className="h-6 px-2 text-xs"
           onClick={() => setScopeToCwd(true)}
         >
-          Current folder
+          当前项目
         </Button>
         <Button
-          variant={!scopeToCwd ? 'secondary' : 'ghost'}
+          variant={!scopeToCwd ? "secondary" : "ghost"}
           size="sm"
           className="h-6 px-2 text-xs"
           onClick={() => setScopeToCwd(false)}
         >
-          All folders
+          所有项目
         </Button>
       </div>
 
       <ScrollArea className="flex-1 min-h-0 mt-2">
+        {error && (
+          <div role="alert" className="p-3 text-sm text-destructive">
+            <p>会话加载失败：{error}</p>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void fetchThreads(null, false)}
+            >
+              重试
+            </Button>
+          </div>
+        )}
         {loading ? (
           <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground py-8 animate-in fade-in duration-150">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Loading threads…
+            正在加载会话…
           </div>
-        ) : filtered.length === 0 ? (
+        ) : filtered.length === 0 && !error ? (
           <div className="text-sm text-muted-foreground py-8 text-center animate-in fade-in duration-200">
-            No threads found
+            {search.trim() ? "没有匹配的会话" : "该范围还没有会话"}
           </div>
         ) : (
           filtered.map((thread) => (
@@ -221,10 +314,13 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
               key={thread.id}
               role="button"
               tabIndex={0}
-              className="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-accent/40 group cursor-pointer animate-in fade-in slide-in-from-top-1 duration-200 transition-colors"
+              className="flex items-center gap-3 px-2 py-1.5 rounded-md hover:bg-accent/40 group/session-row cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-colors"
               onClick={() => void handleOpenThread(thread)}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
+                if (
+                  e.target === e.currentTarget &&
+                  (e.key === "Enter" || e.key === " ")
+                ) {
                   e.preventDefault();
                   void handleOpenThread(thread);
                 }
@@ -233,19 +329,24 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
               {/* biome-ignore lint/a11y/noStaticElementInteractions: not a control — it only stops the row's click from reaching the parent */}
               <div onClick={(e) => e.stopPropagation()} className="shrink-0">
                 <Checkbox
+                  aria-label={`选择 ${nameOf(thread)}`}
                   checked={selectedIds.has(thread.id)}
                   onCheckedChange={() => toggle(thread.id)}
                 />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium truncate">{thread.preview || thread.id}</div>
+                <div className="text-sm font-medium truncate">
+                  {nameOf(thread)}
+                </div>
                 <div className="flex gap-2 text-xs text-muted-foreground truncate">
                   <span>{getFilename(thread.cwd) || thread.cwd}</span>
                   {formatThreadAge(thread.createdAt ?? 0)}
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive shrink-0 transition-opacity duration-150"
+                    aria-label={`删除 ${nameOf(thread)}`}
+                    disabled={deleting}
+                    className="h-8 w-8 opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 max-md:opacity-100 text-muted-foreground hover:text-destructive shrink-0 transition-opacity duration-150"
                     onClick={(e) => {
                       e.stopPropagation();
                       setPendingDeleteItems([thread]);
@@ -261,6 +362,18 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
         {/* Sentinel for infinite scroll — triggers loading the next page when
             it scrolls into view. Shows an inline spinner while fetching so
             new rows appear right where the user is looking. */}
+        {pageError && (
+          <div role="alert" className="p-2 text-xs text-destructive">
+            更多会话加载失败：{pageError}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => void fetchThreads(nextCursor, true)}
+            >
+              重试加载更多
+            </Button>
+          </div>
+        )}
         {!loading && nextCursor && (
           <div
             ref={sentinelRef}
@@ -269,7 +382,7 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
             {loadingMore && (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Loading more…
+                正在加载更多…
               </>
             )}
           </div>
@@ -281,7 +394,7 @@ export function CodexThreadManager({ onClose }: CodexThreadManagerProps) {
         count={pendingDeleteItems?.length ?? 0}
         onCancel={() => setPendingDeleteItems(null)}
         onConfirm={() => {
-          if (pendingDeleteItems) {
+          if (pendingDeleteItems && !deletingRef.current) {
             void doDelete(pendingDeleteItems);
             setPendingDeleteItems(null);
           }

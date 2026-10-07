@@ -1,5 +1,9 @@
-import { listenInSessionMode } from "@session/session-dom";
-import { useEffect, useRef, useState } from 'react';
+import {
+  isAgentInteractionVisible,
+  useAgentInteractionVisible,
+  listenInSessionMode,
+} from "@session/session-dom";
+import { useEffect, useRef, useState } from "react";
 
 // ---------------------------------------------------------------------------
 // Detection helpers
@@ -16,10 +20,11 @@ export interface DetectResult {
  * Closes if there is a space or newline after the `@`.
  */
 export function detectAtMention(input: string): DetectResult {
-  const pos = input.lastIndexOf('@');
-  if (pos === -1) return { open: false, query: '' };
+  const pos = input.lastIndexOf("@");
+  if (pos === -1) return { open: false, query: "" };
   const after = input.slice(pos + 1);
-  if (after.includes(' ') || after.includes('\n')) return { open: false, query: '' };
+  if (after.includes(" ") || after.includes("\n"))
+    return { open: false, query: "" };
   return { open: true, query: after };
 }
 
@@ -30,11 +35,13 @@ export function detectAtMention(input: string): DetectResult {
 export function detectWordBoundaryTrigger(trigger: string) {
   return (input: string): DetectResult => {
     const pos = input.lastIndexOf(trigger);
-    if (pos === -1) return { open: false, query: '' };
-    const charBefore = pos > 0 ? input[pos - 1] : '';
-    if (charBefore && charBefore !== ' ' && charBefore !== '\n') return { open: false, query: '' };
+    if (pos === -1) return { open: false, query: "" };
+    const charBefore = pos > 0 ? input[pos - 1] : "";
+    if (charBefore && charBefore !== " " && charBefore !== "\n")
+      return { open: false, query: "" };
     const after = input.slice(pos + 1);
-    if (after.includes(' ') || after.includes('\n')) return { open: false, query: '' };
+    if (after.includes(" ") || after.includes("\n"))
+      return { open: false, query: "" };
     return { open: true, query: after };
   };
 }
@@ -54,7 +61,7 @@ export function detectWordBoundaryTrigger(trigger: string) {
 export function replaceAtTrigger(
   input: string,
   trigger: string,
-  replacement: string
+  replacement: string,
 ): string | null {
   const pos = input.lastIndexOf(trigger);
   if (pos === -1) return null;
@@ -106,20 +113,27 @@ export function useComposerPopover<T>({
   detect,
   onKeySelect,
 }: useComposerPopoverOptions<T>): useComposerPopoverReturn<T> {
+  const interactionVisible = useAgentInteractionVisible();
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const itemRefs = useRef<(HTMLElement | null)[]>([]);
 
-  const filteredItems = filter ? items.filter((item) => filter(item, query)) : items;
+  const filteredItems = filter
+    ? items.filter((item) => filter(item, query))
+    : items;
 
   // Run detect on every input change
   // biome-ignore lint/correctness/useExhaustiveDependencies: query and open are the triggers for recomputing the popover selection
   useEffect(() => {
+    if (!interactionVisible) {
+      setOpen(false);
+      return;
+    }
     const result = detect(input);
     setOpen(result.open);
     setQuery(result.query);
-  }, [input, detect]);
+  }, [input, detect, interactionVisible]);
 
   // Reset selection when visible list changes
   // biome-ignore lint/correctness/useExhaustiveDependencies: query and open are the triggers for recomputing the popover selection
@@ -129,7 +143,7 @@ export function useComposerPopover<T>({
 
   // Scroll focused item into view
   useEffect(() => {
-    itemRefs.current[selectedIndex]?.scrollIntoView({ block: 'nearest' });
+    itemRefs.current[selectedIndex]?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex]);
 
   // Keyboard navigation (capture phase so it runs before the editor handles keys)
@@ -137,36 +151,61 @@ export function useComposerPopover<T>({
   stableOnKeySelect.current = onKeySelect;
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !interactionVisible) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.preventDefault(); e.stopPropagation(); setOpen(false); return;
+      if (!isAgentInteractionVisible()) return;
+      // Dialog inputs own their keys even when a composer suggestion remains open behind them.
+      if (
+        e.target instanceof Element &&
+        e.target.closest('[role="dialog"], [role="alertdialog"]')
+      )
+        return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(false);
+        return;
       }
       if (filteredItems.length === 0) return;
-      if (e.key === 'ArrowDown') {
+      if (e.key === "ArrowDown") {
         e.preventDefault();
         e.stopPropagation();
         setSelectedIndex((p) => (p + 1) % filteredItems.length);
-      } else if (e.key === 'ArrowUp') {
+      } else if (e.key === "ArrowUp") {
         e.preventDefault();
         e.stopPropagation();
-        setSelectedIndex((p) => (p - 1 + filteredItems.length) % filteredItems.length);
-      } else if (e.key === 'Enter' || e.key === 'Tab') {
+        setSelectedIndex(
+          (p) => (p - 1 + filteredItems.length) % filteredItems.length,
+        );
+      } else if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
         e.stopPropagation();
         const item = filteredItems[selectedIndex];
         if (item !== undefined) stableOnKeySelect.current(item);
-      } else if (e.key === 'Escape') {
+      } else if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
         setOpen(false);
       }
     };
-    const stopHandlerForSession = listenInSessionMode(document, 'keydown', handler, true);
+    const stopHandlerForSession = listenInSessionMode(
+      document,
+      "keydown",
+      handler,
+      true,
+    );
     return () => stopHandlerForSession();
   }, [open, selectedIndex, filteredItems]);
 
-  return { open, setOpen, query, filteredItems, selectedIndex, setSelectedIndex, itemRefs };
+  return {
+    open: interactionVisible && open,
+    setOpen,
+    query,
+    filteredItems,
+    selectedIndex,
+    setSelectedIndex,
+    itemRefs,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -191,7 +230,7 @@ export type ComposerEditorRef = React.RefObject<ComposerEditorTarget | null>;
 export function applyEditorReplacement(
   newValue: string,
   setInput: (v: string) => void,
-  editorRef: ComposerEditorRef
+  editorRef: ComposerEditorRef,
 ) {
   setInput(newValue);
   const target = editorRef.current;

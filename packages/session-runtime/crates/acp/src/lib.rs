@@ -7,16 +7,15 @@ pub mod agents;
 pub mod bots;
 pub mod client;
 pub mod delegation;
+pub mod images;
 pub mod mcp;
 pub mod runner;
 pub mod state;
 
 pub use agents::{AcpAgentDef, find_preset, install_preset, list_agents};
-/// Persisted session list and transcripts, stored by the client as it runs.
-pub use codexia_db::acp_sessions::{
-    AcpSessionRecord, delete_session, get_updates, list_sessions,
-};
 pub use bots::{BOT_EVENT, RunReport};
-pub use runner::BotAgentRunner;
 pub use client::{ACP_EVENT, AcpClient, ConnectionPolicy, UnattendedApprovals};
+/// Persisted session list and transcripts, stored by the client as it runs.
+pub use codexia_db::acp_sessions::{AcpSessionRecord, delete_session, get_updates, list_sessions};
+pub use runner::BotAgentRunner;
 pub use state::{AcpStartResult, AcpState};

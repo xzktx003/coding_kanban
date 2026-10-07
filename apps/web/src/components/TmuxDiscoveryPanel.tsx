@@ -5,6 +5,11 @@ import type {
   DiscoverTmuxInput,
 } from "@agent-orchestrator/shared";
 
+import {
+  tmuxSelectionKey,
+  selectedDiscoveryItems,
+} from "../lib/discovery-selection";
+
 import { discoverTmuxSessions } from "../lib/api";
 import {
   buildTmuxDiscoveryHostKey,
@@ -30,7 +35,7 @@ export function TmuxDiscoveryPanel({
   const [discoveredSessions, setDiscoveredSessions] = useState<
     AgentSessionRecord[]
   >([]);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [showOnlyNew, setShowOnlyNew] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -115,30 +120,30 @@ export function TmuxDiscoveryPanel({
 
   const newCount = filtered.filter((i) => !i.existingId).length;
 
-  function toggleSelect(idx: number) {
+  function toggleSelect(key: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx);
-      else next.add(idx);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
 
   function toggleSelectAll() {
-    const newIndices = filtered
-      .map((item, i) => (!item.existingId ? i : -1))
-      .filter((i) => i >= 0);
-    const allSelected = newIndices.every((i) => selected.has(i));
+    const newKeys = filtered
+      .filter((item) => !item.existingId)
+      .map((item) => tmuxSelectionKey(item.session));
+    const allSelected = newKeys.every((i) => selected.has(i));
     if (allSelected) {
       setSelected((prev) => {
         const next = new Set(prev);
-        for (const i of newIndices) next.delete(i);
+        for (const i of newKeys) next.delete(i);
         return next;
       });
     } else {
       setSelected((prev) => {
         const next = new Set(prev);
-        for (const i of newIndices) next.add(i);
+        for (const i of newKeys) next.add(i);
         return next;
       });
     }
@@ -146,8 +151,9 @@ export function TmuxDiscoveryPanel({
 
   function handleAddSelected() {
     const toAdd: AddToGridItem[] = [];
-    for (const idx of selected) {
-      const item = filtered[idx];
+    for (const item of selectedDiscoveryItems(items, selected, (item) =>
+      tmuxSelectionKey(item.session),
+    )) {
       if (item && !item.existingId) {
         toAdd.push({
           scanResult: {
@@ -209,11 +215,12 @@ export function TmuxDiscoveryPanel({
       )}
 
       <div className="discovery-list">
-        {filtered.map((item, idx) => {
+        {filtered.map((item) => {
           const tmuxName =
             item.session.transportRef?.tmuxSession ?? item.session.displayName;
           const isAlready = !!item.existingId;
-          const isChecked = selected.has(idx);
+          const key = tmuxSelectionKey(item.session);
+          const isChecked = selected.has(key);
           const stateLabel =
             item.session.interactionState === "running" ? "连接中" : "detached";
           const stateClass =
@@ -223,14 +230,14 @@ export function TmuxDiscoveryPanel({
 
           return (
             <div
-              key={tmuxName}
+              key={key}
               className={`discovery-item${isChecked ? " discovery-item--selected" : ""}${isAlready ? " discovery-item--existing" : ""}`}
             >
               {!isAlready && (
                 <input
                   type="checkbox"
                   checked={isChecked}
-                  onChange={() => toggleSelect(idx)}
+                  onChange={() => toggleSelect(key)}
                 />
               )}
               <div className="discovery-item-info">

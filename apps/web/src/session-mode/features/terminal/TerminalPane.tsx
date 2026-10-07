@@ -1,15 +1,21 @@
-import { useCallback, useEffect, useRef } from 'react';
-import { Terminal } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
-import 'xterm/css/xterm.css';
-import { buildWsUrl } from '@session/hooks/runtime';
-import { terminalResize, terminalStart, terminalStop, terminalWrite } from '@session/services/apiAdapt';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
+import { Button } from "@session/components/ui/button";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Terminal } from "xterm";
+import { FitAddon } from "xterm-addon-fit";
+import "xterm/css/xterm.css";
+import { buildWsUrl } from "@session/hooks/runtime";
+import {
+  terminalResize,
+  terminalStart,
+  terminalStop,
+  terminalWrite,
+} from "@session/services/apiAdapt";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 
 const TERMINAL_THEME = {
-  fontFamily: 'Menlo, Monaco, Consolas, monospace',
+  fontFamily: "Menlo, Monaco, Consolas, monospace",
   fontSize: 12,
-  background: '#0a0a0a',
+  background: "#0a0a0a",
 } as const;
 
 type TerminalDataPayload = { session_id: string; data: string };
@@ -24,9 +30,9 @@ type TerminalExitPayload = { session_id: string; message: string };
 // as an uncaught error outside our call stack — it cannot be caught with a
 // normal try/catch around fit()/open(). Suppress just this known, benign
 // error globally so it doesn't crash the app or show the dev error overlay.
-if (typeof window !== 'undefined') {
-  window.addEventListener('error', (event) => {
-    if (event.message?.includes('_renderer.value.dimensions')) {
+if (typeof window !== "undefined") {
+  window.addEventListener("error", (event) => {
+    if (event.message?.includes("_renderer.value.dimensions")) {
       event.preventDefault();
     }
   });
@@ -39,8 +45,17 @@ interface TerminalPaneProps {
   command?: string;
 }
 
-export function TerminalPane({ active, panelOpen, command }: TerminalPaneProps) {
+export function TerminalPane({
+  active,
+  panelOpen,
+  command,
+}: TerminalPaneProps) {
   const { cwd } = useWorkspaceStore();
+  const [connectionState, setConnectionState] = useState<
+    "connecting" | "ready" | "offline"
+  >("connecting");
+  const [startError, setStartError] = useState<string | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -96,17 +111,22 @@ export function TerminalPane({ active, panelOpen, command }: TerminalPaneProps) 
     const container = containerRef.current;
     if (!term || !fitAddon || !container) return;
 
-    if (!isAttachedRef.current) {
-      term.open(container);
-      isAttachedRef.current = true;
-    }
-
-    requestAnimationFrame(() => {
-      // Fitting a collapsed container shrinks the buffer to its minimum and
-      // loses the rendered output, so only fit once it has real size.
-      if (container.clientWidth > 1 && container.clientHeight > 1) fitAddon.fit();
-      term.focus();
+    // Defer attachment until layout settles. React StrictMode disposes its
+    // first effect pass immediately; opening that discarded instance starts
+    // xterm's uncancellable viewport timer against a disposed renderer.
+    const frame = requestAnimationFrame(() => {
+      if (terminalRef.current !== term || !container.isConnected) return;
+      if (!isAttachedRef.current) {
+        term.open(container);
+        isAttachedRef.current = true;
+      }
+      // Never refit a collapsed container or focus a pane after it was hidden.
+      if (container.clientWidth > 1 && container.clientHeight > 1) {
+        fitAddon.fit();
+        term.focus();
+      }
     });
+    return () => cancelAnimationFrame(frame);
   }, [active, panelOpen]);
 
   // Start backend session once attached
@@ -115,14 +135,17 @@ export function TerminalPane({ active, panelOpen, command }: TerminalPaneProps) 
     const fitAddon = fitAddonRef.current;
     // Allow both desktop Tauri and web (HTTP API) mode —
     // service layer routes to invokeTauri or postJson accordingly.
-    if (!term || !fitAddon || sessionIdRef.current || isStartingRef.current) return;
+    if (!term || !fitAddon || sessionIdRef.current || isStartingRef.current)
+      return;
 
     isStartingRef.current = true;
+    setIsStarting(true);
+    setStartError(null);
     try {
       const { session_id } = await terminalStart(
         cwd,
         Math.max(term.cols, 2),
-        Math.max(term.rows, 2)
+        Math.max(term.rows, 2),
       );
       setSession(session_id);
       if (command && !hasRunCommandRef.current) {
@@ -130,9 +153,11 @@ export function TerminalPane({ active, panelOpen, command }: TerminalPaneProps) 
         void terminalWrite(session_id, `${command}\r`);
       }
     } catch (err) {
+      setStartError(err instanceof Error ? err.message : String(err));
       terminalRef.current?.writeln(`\r\n[session start failed] ${String(err)}`);
     } finally {
       isStartingRef.current = false;
+      setIsStarting(false);
     }
   }, [cwd, command, setSession]);
 
@@ -154,7 +179,7 @@ export function TerminalPane({ active, panelOpen, command }: TerminalPaneProps) 
       terminalRef.current?.writeln(`\r\n[${payload.message}]`);
       setSession(null);
     },
-    [setSession]
+    [setSession],
   );
 
   // The pty lives in the web server on every platform — the desktop reaches
@@ -166,7 +191,10 @@ export function TerminalPane({ active, panelOpen, command }: TerminalPaneProps) 
     let closedByCleanup = false;
 
     const connect = () => {
-      ws = new WebSocket(buildWsUrl('/ws'));
+      ws = new WebSocket(buildWsUrl("/ws"));
+      ws.onopen = () => {
+        if (!closedByCleanup) setConnectionState("ready");
+      };
 
       ws.onmessage = (messageEvent) => {
         try {
@@ -175,18 +203,22 @@ export function TerminalPane({ active, panelOpen, command }: TerminalPaneProps) 
             payload?: unknown;
           };
 
-          if (envelope.event === 'terminal:data' && envelope.payload) {
+          if (envelope.event === "terminal:data" && envelope.payload) {
             handleTerminalData(envelope.payload as TerminalDataPayload);
-          } else if (envelope.event === 'terminal:exit' && envelope.payload) {
+          } else if (envelope.event === "terminal:exit" && envelope.payload) {
             handleTerminalExit(envelope.payload as TerminalExitPayload);
           }
         } catch (error) {
-          console.warn('[TerminalPane] Failed to parse websocket message:', error);
+          console.warn(
+            "[TerminalPane] Failed to parse websocket message:",
+            error,
+          );
         }
       };
 
       ws.onclose = () => {
         if (closedByCleanup) return;
+        setConnectionState("offline");
         reconnectTimer = setTimeout(connect, 2000);
       };
 
@@ -211,12 +243,16 @@ export function TerminalPane({ active, panelOpen, command }: TerminalPaneProps) 
       const term = terminalRef.current;
       const fitAddon = fitAddonRef.current;
       const container = containerRef.current;
-      if (!term || !fitAddon || !container) return;
+      if (!term || !fitAddon || !container || !isAttachedRef.current) return;
       if (container.clientWidth < 2 || container.clientHeight < 2) return;
       fitAddon.fit();
       const sid = sessionIdRef.current;
       if (sid) {
-        void terminalResize(sid, Math.max(term.cols, 2), Math.max(term.rows, 2));
+        void terminalResize(
+          sid,
+          Math.max(term.cols, 2),
+          Math.max(term.rows, 2),
+        );
       }
     };
 
@@ -236,11 +272,44 @@ export function TerminalPane({ active, panelOpen, command }: TerminalPaneProps) 
   }, []);
 
   return (
-    <div className="absolute inset-0" style={{ visibility: active ? 'visible' : 'hidden' }}>
+    <div
+      className="absolute inset-0"
+      style={{ visibility: active ? "visible" : "hidden" }}
+    >
+      {startError ? (
+        <div
+          role="alert"
+          className="absolute inset-x-2 top-2 z-10 rounded border border-destructive/40 bg-background p-2 text-xs text-destructive"
+        >
+          <p className="break-words">终端启动失败：{startError}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            disabled={isStarting || !active || !panelOpen}
+            onClick={() => void startSession()}
+          >
+            重试启动终端
+          </Button>
+        </div>
+      ) : (
+        (connectionState !== "ready" || isStarting) && (
+          <div
+            role={connectionState === "offline" ? "alert" : "status"}
+            className="pointer-events-none absolute right-2 top-2 z-10 max-w-[calc(100%-1rem)] rounded border border-border bg-background/95 px-2 py-1 text-xs text-muted-foreground"
+          >
+            {connectionState === "offline"
+              ? "终端输出连接已断开，正在重连…"
+              : isStarting
+                ? "正在启动终端…"
+                : "正在连接终端输出…"}
+          </div>
+        )
+      )}
       <div
         ref={containerRef}
         role="application"
-        aria-label="Terminal"
+        aria-label="终端输入与输出"
         className="h-full w-full px-2 py-2"
         onMouseDown={() => terminalRef.current?.focus()}
       />

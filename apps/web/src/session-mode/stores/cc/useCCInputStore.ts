@@ -1,53 +1,83 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { useEffect } from "react";
+import { create } from "zustand";
+import { useCCStore } from "./ccStore";
+import { useWorkspaceStore } from "../useWorkspaceStore";
+import {
+  appendDraft,
+  fileLinks,
+  readDraft,
+  sessionDraftKey,
+  useSessionDraftStore,
+} from "../useSessionDraftStore";
 
-interface CCInputStore {
+export const ccDraftOwner = () =>
+  sessionDraftKey(
+    "cc",
+    useCCStore.getState().activeSessionId,
+    useWorkspaceStore.getState().cwd,
+  );
+/** Compatibility facade for file/skill actions; composers capture an explicit owner. */
+interface InputFacadeState {
   inputValue: string;
   setInputValue: (value: string) => void;
   appendInputValue: (value: string) => void;
   appendFileLinks: (paths: string[], cwd?: string) => void;
   clearInputValue: () => void;
 }
+const facade = create<InputFacadeState>(() => ({
+  inputValue: "",
+  setInputValue: (value) => {
+    useSessionDraftStore.getState().setText(ccDraftOwner(), value);
+    sync();
+  },
+  appendInputValue: (value) => {
+    appendDraft(ccDraftOwner(), value);
+    sync();
+  },
+  appendFileLinks: (paths, cwd) => {
+    if (paths.length)
+      appendDraft(
+        ccDraftOwner(),
+        fileLinks(paths, cwd ?? useWorkspaceStore.getState().cwd),
+      );
+  },
+  clearInputValue: () => {
+    useSessionDraftStore.getState().setText(ccDraftOwner(), "");
+    sync();
+  },
+}));
+function useFacade(): InputFacadeState;
+function useFacade<T>(selector: (state: InputFacadeState) => T): T;
+function useFacade<T = InputFacadeState>(
+  selector?: (state: InputFacadeState) => T,
+) {
+  useEffect(() => startCCInputFacadeSync(), []);
+  return facade(selector ?? ((state) => state as T));
+}
+export const useCCInputStore = Object.assign(useFacade, facade);
 
-export const useCCInputStore = create<CCInputStore>()(
-  persist(
-    (set) => ({
-      inputValue: '',
-      setInputValue: (value) => set({ inputValue: value }),
-      appendInputValue: (value) =>
-        set((state) => {
-          const separator =
-            state.inputValue.length === 0 || state.inputValue.endsWith(' ') ? '' : ' ';
-          return { inputValue: `${state.inputValue}${separator}${value}` };
-        }),
-      appendFileLinks: (paths, cwd = '') =>
-        set((state) => {
-          const toPosix = (value: string) => value.replace(/\\/g, '/');
-          const normalizedCwd = toPosix(cwd).replace(/\/+$/, '');
-          const links = paths.map((path) => {
-            const normalizedPath = toPosix(path);
-            const relativePath =
-              normalizedCwd && normalizedPath.startsWith(`${normalizedCwd}/`)
-                ? normalizedPath.slice(normalizedCwd.length + 1)
-                : normalizedPath;
-            const fileName = normalizedPath.split('/').filter(Boolean).pop() ?? normalizedPath;
-            return `[${fileName}](${relativePath})`;
-          });
-
-          if (links.length === 0) {
-            return state;
-          }
-
-          const appended = links.join(' ');
-          const separator =
-            state.inputValue.length === 0 || state.inputValue.endsWith(' ') ? '' : ' ';
-          return { inputValue: `${state.inputValue}${separator}${appended}` };
-        }),
-      clearInputValue: () => set({ inputValue: '' }),
-    }),
-    {
-      name: 'kanban.session.cc-input-storage',
-      version: 2,
+const sync = () => {
+  const inputValue = readDraft(ccDraftOwner()).text;
+  if (useCCInputStore.getState().inputValue !== inputValue)
+    useCCInputStore.setState({ inputValue });
+};
+let consumers = 0;
+let stops: Array<() => void> = [];
+/** Bind only after module initialization; multiple consumers share subscriptions. */
+export function startCCInputFacadeSync() {
+  if (consumers++ === 0) {
+    sync();
+    stops = [useCCStore, useWorkspaceStore, useSessionDraftStore].map((store) =>
+      store.subscribe(sync),
+    );
+  }
+  let active = true;
+  return () => {
+    if (!active) return;
+    active = false;
+    if (--consumers === 0) {
+      stops.forEach((stop) => stop());
+      stops = [];
     }
-  )
-);
+  };
+}

@@ -1,14 +1,22 @@
-import { Search } from 'lucide-react';
-import { useState } from 'react';
-import type { PluginMarketplaceEntry, PluginSummary } from '@session/bindings/v2';
-import { Button } from '@session/components/ui/button';
-import { Card, CardDescription, CardHeader, CardTitle } from '@session/components/ui/card';
-import { Input } from '@session/components/ui/input';
-import type { PluginEntry } from '../hooks/pluginTargets';
-import { usePluginsMarketplace } from '../hooks/usePluginsMarketplace';
-import { hideBrokenImage } from './imageFallback';
-import { MarketplaceErrorCard, PluginCard } from './PluginCard';
-import { pluginIconSrc } from './pluginIcon';
+import { Search } from "lucide-react";
+import { useState } from "react";
+import type {
+  PluginMarketplaceEntry,
+  PluginSummary,
+} from "@session/bindings/v2";
+import { Button } from "@session/components/ui/button";
+import {
+  Card,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@session/components/ui/card";
+import { Input } from "@session/components/ui/input";
+import type { PluginEntry } from "../hooks/pluginTargets";
+import { usePluginsMarketplace } from "../hooks/usePluginsMarketplace";
+import { hideBrokenImage } from "./imageFallback";
+import { MarketplaceErrorCard, PluginCard } from "./PluginCard";
+import { pluginIconSrc } from "./pluginIcon";
 
 /** How many cards a category shows before collapsing the rest behind "See all". */
 const CATEGORY_PREVIEW_COUNT = 6;
@@ -21,9 +29,15 @@ interface CategorySectionProps {
   /** Force every card visible, e.g. while searching. */
   expanded: boolean;
   installingPluginId: string | null;
-  onInstall: (marketplace: PluginMarketplaceEntry, plugin: PluginSummary) => void;
+  onInstall: (
+    marketplace: PluginMarketplaceEntry,
+    plugin: PluginSummary,
+  ) => void;
   onUse: (plugin: PluginSummary) => void;
-  onDetail: (marketplace: PluginMarketplaceEntry, plugin: PluginSummary) => void;
+  onDetail: (
+    marketplace: PluginMarketplaceEntry,
+    plugin: PluginSummary,
+  ) => void;
 }
 
 /** One category: a few cards, with the remainder behind a "See all" row of icons. */
@@ -60,7 +74,11 @@ function CategorySection({
       </div>
 
       {hidden.length > 0 && (
-        <Button variant="ghost" className="w-full justify-between" onClick={() => setShowAll(true)}>
+        <Button
+          variant="ghost"
+          className="w-full justify-between"
+          onClick={() => setShowAll(true)}
+        >
           <span className="text-sm">See all {items.length}</span>
           <span className="flex items-center -space-x-2">
             {hidden.slice(0, SEE_ALL_ICON_COUNT).map(({ plugin }) => {
@@ -91,10 +109,14 @@ interface PluginsMarketplaceViewProps {
   refreshTrigger?: number;
 }
 
-export function PluginsMarketplaceView({ refreshTrigger = 0 }: PluginsMarketplaceViewProps) {
+export function PluginsMarketplaceView({
+  refreshTrigger = 0,
+}: PluginsMarketplaceViewProps) {
   const {
     marketplaces,
     errors,
+    loadError,
+    loadPlugins,
     isLoading,
     installingPluginId,
     query,
@@ -106,22 +128,44 @@ export function PluginsMarketplaceView({ refreshTrigger = 0 }: PluginsMarketplac
   } = usePluginsMarketplace(refreshTrigger);
 
   if (isLoading && marketplaces.length === 0) {
-    return <div className="p-4 text-sm text-muted-foreground">Loading plugins...</div>;
+    return (
+      <div role="status" className="p-4 text-sm text-muted-foreground">
+        正在加载插件…
+      </div>
+    );
   }
+
+  const errorFeedback = loadError ? (
+    <div role="alert" className="space-y-2 rounded-md border border-border p-3">
+      <p className="text-sm font-medium">无法加载插件</p>
+      <p className="break-words text-sm text-destructive">{loadError}</p>
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={isLoading}
+        onClick={() => void loadPlugins()}
+      >
+        重新加载插件
+      </Button>
+    </div>
+  ) : null;
+  if (loadError && marketplaces.length === 0)
+    return <div className="p-4">{errorFeedback}</div>;
 
   if (marketplaces.length === 0) {
     return (
       <div className="space-y-3 p-4">
         <Card className="py-0">
           <CardHeader className="px-5 py-4">
-            <CardTitle>No plugins found</CardTitle>
-            <CardDescription>
-              No plugin marketplaces were returned by Codex app-server.
-            </CardDescription>
+            <CardTitle>暂无插件</CardTitle>
+            <CardDescription>服务尚未提供可用的插件市场。</CardDescription>
           </CardHeader>
         </Card>
         {errors.map((error) => (
-          <MarketplaceErrorCard key={`${error.marketplacePath}-${error.message}`} error={error} />
+          <MarketplaceErrorCard
+            key={`${error.marketplacePath}-${error.message}`}
+            error={error}
+          />
         ))}
       </div>
     );
@@ -130,18 +174,27 @@ export function PluginsMarketplaceView({ refreshTrigger = 0 }: PluginsMarketplac
   return (
     <div className="h-full overflow-y-auto p-4">
       <div className="space-y-6">
+        {errorFeedback}
+        {isLoading && (
+          <p role="status" className="text-sm text-muted-foreground">
+            正在刷新插件，已有列表仍可浏览…
+          </p>
+        )}
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search plugins..."
+            aria-label="搜索插件"
+            placeholder="搜索插件…"
             className="pl-8"
           />
         </div>
 
         {browseGroups.length === 0 && (
-          <p className="text-sm text-muted-foreground">No plugins match "{query}".</p>
+          <p className="text-sm text-muted-foreground">
+            {query.trim() ? `没有匹配“${query}”的插件。` : "暂无可浏览的插件。"}
+          </p>
         )}
 
         {browseGroups.map(([category, items]) => (
@@ -158,7 +211,10 @@ export function PluginsMarketplaceView({ refreshTrigger = 0 }: PluginsMarketplac
         ))}
 
         {errors.map((error) => (
-          <MarketplaceErrorCard key={`${error.marketplacePath}-${error.message}`} error={error} />
+          <MarketplaceErrorCard
+            key={`${error.marketplacePath}-${error.message}`}
+            error={error}
+          />
         ))}
       </div>
     </div>

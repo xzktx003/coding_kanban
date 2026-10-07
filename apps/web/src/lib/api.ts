@@ -1027,6 +1027,15 @@ export function openVsCodeWeb(
   );
 }
 
+export function openProjectVsCodeWeb(
+  path: string,
+): Promise<OpenVsCodeWebResponse> {
+  return request<OpenVsCodeWebResponse>("/api/workbench/vscode-web", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
+
 export function getVsCodeWebProxyDiagnostics(): Promise<VsCodeWebProxyDiagnosticsResponse> {
   return request<VsCodeWebProxyDiagnosticsResponse>(
     "/api/diagnostics/vscode-web-proxy",
@@ -1094,4 +1103,6 @@ export function addDiscoveredTmux(
   });
 }
 
-export function getWorkbenchProjects(): Promise<{ projects: string[] }> { return request('/api/workbench/projects'); }
+export function getWorkbenchProjects(): Promise<{ projects: string[] }> {
+  return request("/api/workbench/projects");
+}

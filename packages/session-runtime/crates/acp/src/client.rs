@@ -10,6 +10,7 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{Mutex, oneshot};
 
 use crate::agents::AcpAgentDef;
+use crate::images::{AcpImage, prompt_blocks};
 
 /// Single event channel for everything an ACP connection produces.
 /// Payloads always carry `connectionId` plus a `kind` discriminator.
@@ -116,6 +117,7 @@ pub struct AcpClient {
     /// bot's conversations out of the per-project session lists.
     pub bot_id: Option<String>,
     policy: ConnectionPolicy,
+    supports_images: AtomicBool,
     delegation_tokens: DashMap<String, ()>,
     /// Sessions opened on this connection, keyed by ACP session id. One agent
     /// process can host several sessions at once.
@@ -176,6 +178,7 @@ impl AcpClient {
             agent_name: agent.name.clone(),
             bot_id,
             policy,
+            supports_images: AtomicBool::new(false),
             delegation_tokens: DashMap::new(),
             sessions: Arc::new(DashMap::new()),
             last_session: Mutex::new(None),
@@ -255,11 +258,21 @@ impl AcpClient {
             Err(error) => {
                 client.kill().await;
                 return Err(if client.policy.strict_mcp {
-                    format!("Bot requires keke strict MCP isolation (--mcp-policy client-only): {error}. Use a runtime that confirms the active policy during ACP initialize.")
-                } else { error });
+                    format!(
+                        "Bot requires keke strict MCP isolation (--mcp-policy client-only): {error}. Use a runtime that confirms the active policy during ACP initialize."
+                    )
+                } else {
+                    error
+                });
             }
         };
 
+        client.supports_images.store(
+            init.pointer("/agentCapabilities/promptCapabilities/image")
+                .and_then(Value::as_bool)
+                == Some(true),
+            Ordering::Relaxed,
+        );
         Ok((client, init))
     }
 
@@ -268,10 +281,7 @@ impl AcpClient {
     pub async fn new_session(&self, cwd: &str) -> Result<Value, String> {
         let servers = self.session_mcp_servers();
         let res = self
-            .request(
-                "session/new",
-                json!({ "cwd": cwd, "mcpServers": servers }),
-            )
+            .request("session/new", json!({ "cwd": cwd, "mcpServers": servers }))
             .await?;
         let session_id = res
             .get("sessionId")
@@ -414,6 +424,16 @@ impl AcpClient {
     /// Send a user turn. Resolves when the agent finishes the turn; streamed
     /// output arrives meanwhile as `session/update` events.
     pub async fn prompt(&self, session_id: Option<&str>, text: &str) -> Result<Value, String> {
+        self.prompt_with_images(session_id, text, &[]).await
+    }
+
+    pub async fn prompt_with_images(
+        &self,
+        session_id: Option<&str>,
+        text: &str,
+        images: &[AcpImage],
+    ) -> Result<Value, String> {
+        let blocks = prompt_blocks(text, images, self.supports_images.load(Ordering::Relaxed))?;
         let session_id = self.resolve_session(session_id).await?;
         // The agent never echoes the user's turn back, so record it here to
         // keep the persisted transcript complete.
@@ -424,13 +444,16 @@ impl AcpClient {
                 "content": { "type": "text", "text": text }
             }),
         );
+        for image in images {
+            self.persist(&session_id, &json!({ "sessionUpdate": "user_message_chunk", "content": { "type": "image", "mimeType": image.mime_type, "data": image.data } }));
+        }
         if let Err(e) = codexia_db::acp_sessions::set_title_if_empty(&session_id, text) {
             log::warn!("acp: failed to set session title: {e}");
         }
         self.session_request(
             Some(&session_id),
             "session/prompt",
-            json!({ "prompt": [{ "type": "text", "text": text }] }),
+            json!({ "prompt": blocks }),
         )
         .await
     }
@@ -445,7 +468,11 @@ impl AcpClient {
 
     /// Answer a `session/request_permission` the agent is blocked on.
     /// `option_id == None` means the user dismissed the request.
-    pub fn respond_permission(&self, request_id: &str, option_id: Option<String>) -> Result<(), String> {
+    pub fn respond_permission(
+        &self,
+        request_id: &str,
+        option_id: Option<String>,
+    ) -> Result<(), String> {
         let (_, tx) = self
             .pending_permissions
             .remove(request_id)
@@ -469,8 +496,12 @@ impl AcpClient {
             if server["name"] != "codexia-bots" {
                 continue;
             }
-            let Some(caller) = self.bot_id.as_deref() else { continue };
-            let Some(headers) = server["headers"].as_array_mut() else { continue };
+            let Some(caller) = self.bot_id.as_deref() else {
+                continue;
+            };
+            let Some(headers) = server["headers"].as_array_mut() else {
+                continue;
+            };
             for header in headers {
                 if header["name"] == "X-Codexia-Delegation" {
                     let template = header["value"].as_str().unwrap_or_default();
@@ -505,7 +536,8 @@ impl AcpClient {
             self.pending.remove(&id);
             return Err(e);
         }
-        rx.await.map_err(|_| "agent connection closed".to_string())?
+        rx.await
+            .map_err(|_| "agent connection closed".to_string())?
     }
 
     async fn notify(&self, method: &str, params: Value) -> Result<(), String> {
@@ -592,7 +624,9 @@ impl AcpClient {
                         "update": params.get("update"),
                     }));
                 } else {
-                    self.emit(json!({ "kind": "notification", "method": method, "params": params }));
+                    self.emit(
+                        json!({ "kind": "notification", "method": method, "params": params }),
+                    );
                 }
             }
             // Request from the agent — must be answered.
@@ -711,10 +745,15 @@ impl AcpClient {
 
 fn validate_mcp_policy(policy: &ConnectionPolicy, init: &Value) -> Result<(), String> {
     if policy.strict_mcp
-        && init.get("_meta").and_then(|meta| meta.get("keke.dev/mcp-policy"))
-            .and_then(Value::as_str) != Some("client-only")
+        && init
+            .get("_meta")
+            .and_then(|meta| meta.get("keke.dev/mcp-policy"))
+            .and_then(Value::as_str)
+            != Some("client-only")
     {
-        return Err("runtime did not confirm client-only MCP policy; refusing to open a Bot session".into());
+        return Err(
+            "runtime did not confirm client-only MCP policy; refusing to open a Bot session".into(),
+        );
     }
     Ok(())
 }
@@ -730,40 +769,108 @@ mod tests {
 
     #[test]
     fn strict_policy_requires_active_confirmation_not_version_or_support_claim() {
-        let strict = ConnectionPolicy { strict_mcp: true, ..Default::default() };
-        for init in [json!({}), json!({"agentInfo":{"version":"999.0"}}),
+        let strict = ConnectionPolicy {
+            strict_mcp: true,
+            ..Default::default()
+        };
+        for init in [
+            json!({}),
+            json!({"agentInfo":{"version":"999.0"}}),
             json!({"_meta":{"keke.dev/mcp-policy":"merge"}}),
-            json!({"_meta":{"keke.dev/mcp-policy":true}})] {
+            json!({"_meta":{"keke.dev/mcp-policy":true}}),
+        ] {
             assert!(validate_mcp_policy(&strict, &init).is_err());
             assert!(validate_mcp_policy(&ConnectionPolicy::default(), &init).is_ok());
         }
-        assert!(validate_mcp_policy(&strict,
-            &json!({"_meta":{"keke.dev/mcp-policy":"client-only"}})).is_ok());
+        assert!(
+            validate_mcp_policy(
+                &strict,
+                &json!({"_meta":{"keke.dev/mcp-policy":"client-only"}})
+            )
+            .is_ok()
+        );
     }
 
     // The fixture only speaks ACP and inspects launcher arguments. No real
     // agent, credentials, MCP server or database is touched by these tests.
     #[cfg(unix)]
-    async fn fixture(policy: ConnectionPolicy, advertised: &str) -> Result<(Arc<AcpClient>, Value), String> {
+    async fn fixture(
+        policy: ConnectionPolicy,
+        advertised: &str,
+    ) -> Result<(Arc<AcpClient>, Value), String> {
         let agent = AcpAgentDef {
-            id: "fixture".into(), name: "Fixture".into(), command: "python3".into(),
-            args: vec!["-u".into(), "-c".into(), r#"
+            id: "fixture".into(),
+            name: "Fixture".into(),
+            command: "python3".into(),
+            args: vec![
+                "-u".into(),
+                "-c".into(),
+                r#"
 import json, os, sys
 for line in sys.stdin:
     msg = json.loads(line)
     if msg['method'] == 'initialize':
         result = {'arguments': sys.argv[1:]}
+        if os.environ['POLICY'] == 'images':
+            result['agentCapabilities'] = {'promptCapabilities': {'image': True}}
         if os.environ['POLICY'] != 'absent':
             result['_meta'] = {'keke.dev/mcp-policy': os.environ['POLICY']}
         reply = {'result': result}
     else:
         reply = {'error': {'code': -32603, 'message': json.dumps(msg['params'])}}
     print(json.dumps(dict(jsonrpc='2.0', id=msg['id'], **reply)), flush=True)
-"#.into()],
+"#
+                .into(),
+            ],
             env: [("POLICY".into(), advertised.into())].into(),
-            available: true, local: true,
+            available: true,
+            local: true,
         };
-        AcpClient::spawn("fixture".into(), &agent, None, Some("caller".into()), policy, Arc::new(QuietSink)).await
+        AcpClient::spawn(
+            "fixture".into(),
+            &agent,
+            None,
+            Some("caller".into()),
+            policy,
+            Arc::new(QuietSink),
+        )
+        .await
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn negotiated_images_reach_the_exact_session_over_json_rpc() {
+        let (client, _) = fixture(ConnectionPolicy::default(), "images")
+            .await
+            .unwrap();
+        client.sessions.insert("image-fixture".into(), ());
+        let images = [AcpImage {
+            mime_type: "image/png".into(),
+            data: "aGVsbG8=".into(),
+        }];
+        let captured: Value = serde_json::from_str(
+            &client
+                .prompt_with_images(Some("image-fixture"), "describe", &images)
+                .await
+                .unwrap_err(),
+        )
+        .unwrap();
+        assert_eq!(captured["sessionId"], "image-fixture");
+        assert_eq!(captured["prompt"][0]["text"], "describe");
+        assert_eq!(captured["prompt"][1]["type"], "image");
+        assert_eq!(captured["prompt"][1]["mimeType"], "image/png");
+        client.kill().await;
+        let (client, _) = fixture(ConnectionPolicy::default(), "absent")
+            .await
+            .unwrap();
+        assert!(
+            client
+                .prompt_with_images(Some("image-fixture"), "describe", &images)
+                .await
+                .unwrap_err()
+                .contains("不支持图片")
+        );
+        client.kill().await;
     }
 
     #[cfg(unix)]
@@ -771,17 +878,26 @@ for line in sys.stdin:
     async fn older_and_nonisolating_runtimes_fail_before_bot_session_creation() {
         for advertised in ["absent", "merge"] {
             let template = crate::delegation::issue("caller");
-            let policy = ConnectionPolicy { strict_mcp: true, mcp_servers: vec![json!({
-                "name":"codexia-bots", "headers":[{"name":"X-Codexia-Delegation","value":template}]
-            })], ..Default::default() };
+            let policy = ConnectionPolicy {
+                strict_mcp: true,
+                mcp_servers: vec![json!({
+                    "name":"codexia-bots", "headers":[{"name":"X-Codexia-Delegation","value":template}]
+                })],
+                ..Default::default()
+            };
             let error = match fixture(policy, advertised).await {
-                Ok((client, _)) => { client.kill().await; panic!("unsafe runtime accepted"); }
+                Ok((client, _)) => {
+                    client.kill().await;
+                    panic!("unsafe runtime accepted");
+                }
                 Err(error) => error,
             };
             assert!(error.contains("Bot requires keke strict MCP isolation"));
             assert!(!crate::delegation::verify(&template, "caller"));
         }
-        let (client, init) = fixture(ConnectionPolicy::default(), "absent").await.unwrap();
+        let (client, init) = fixture(ConnectionPolicy::default(), "absent")
+            .await
+            .unwrap();
         assert_eq!(init["arguments"], json!([]));
         client.kill().await;
     }
@@ -789,18 +905,36 @@ for line in sys.stdin:
     #[cfg(unix)]
     #[tokio::test]
     async fn strict_new_and_load_forward_identical_original_names_and_headers() {
-        let servers = vec![json!({"name":"native", "type":"sse", "url":"https://example.test/mcp",
-            "headers":[{"name":"X-Test","value":"${TEST_HEADER}"}]})];
-        let policy = ConnectionPolicy { strict_mcp: true, mcp_servers: servers.clone(), ..Default::default() };
+        let servers = vec![
+            json!({"name":"native", "type":"sse", "url":"https://example.test/mcp",
+            "headers":[{"name":"X-Test","value":"${TEST_HEADER}"}]}),
+        ];
+        let policy = ConnectionPolicy {
+            strict_mcp: true,
+            mcp_servers: servers.clone(),
+            ..Default::default()
+        };
         let (client, init) = fixture(policy, "client-only").await.unwrap();
         assert_eq!(init["arguments"], json!(["--mcp-policy", "client-only"]));
-        let new: Value = serde_json::from_str(&client.new_session("/tmp").await.unwrap_err()).unwrap();
-        let load: Value = serde_json::from_str(&client.load_session("stored", "/tmp").await.unwrap_err()).unwrap();
+        let new: Value =
+            serde_json::from_str(&client.new_session("/tmp").await.unwrap_err()).unwrap();
+        let load: Value =
+            serde_json::from_str(&client.load_session("stored", "/tmp").await.unwrap_err())
+                .unwrap();
         assert_eq!(new["mcpServers"], json!(servers));
         assert_eq!(new["mcpServers"], load["mcpServers"]);
         client.kill().await;
-        let (client, _) = fixture(ConnectionPolicy { strict_mcp: true, ..Default::default() }, "client-only").await.unwrap();
-        let new: Value = serde_json::from_str(&client.new_session("/tmp").await.unwrap_err()).unwrap();
+        let (client, _) = fixture(
+            ConnectionPolicy {
+                strict_mcp: true,
+                ..Default::default()
+            },
+            "client-only",
+        )
+        .await
+        .unwrap();
+        let new: Value =
+            serde_json::from_str(&client.new_session("/tmp").await.unwrap_err()).unwrap();
         assert_eq!(new["mcpServers"], json!([]));
         client.kill().await;
     }
@@ -809,15 +943,26 @@ for line in sys.stdin:
     #[tokio::test]
     async fn strict_sessions_bind_rotate_and_revoke_collaboration_capabilities() {
         let template = crate::delegation::issue("caller");
-        let policy = ConnectionPolicy { strict_mcp: true, mcp_servers: vec![json!({
-            "name":"codexia-bots", "type":"http", "url":"http://127.0.0.1/mcp/bots?from=caller",
-            "headers":[{"name":"X-Codexia-Delegation","value":template}]
-        })], ..Default::default() };
+        let policy = ConnectionPolicy {
+            strict_mcp: true,
+            mcp_servers: vec![json!({
+                "name":"codexia-bots", "type":"http", "url":"http://127.0.0.1/mcp/bots?from=caller",
+                "headers":[{"name":"X-Codexia-Delegation","value":template}]
+            })],
+            ..Default::default()
+        };
         let (client, _) = fixture(policy, "client-only").await.unwrap();
-        let new: Value = serde_json::from_str(&client.new_session("/tmp").await.unwrap_err()).unwrap();
-        let load: Value = serde_json::from_str(&client.load_session("stored", "/tmp").await.unwrap_err()).unwrap();
-        let first = new["mcpServers"][0]["headers"][0]["value"].as_str().unwrap();
-        let second = load["mcpServers"][0]["headers"][0]["value"].as_str().unwrap();
+        let new: Value =
+            serde_json::from_str(&client.new_session("/tmp").await.unwrap_err()).unwrap();
+        let load: Value =
+            serde_json::from_str(&client.load_session("stored", "/tmp").await.unwrap_err())
+                .unwrap();
+        let first = new["mcpServers"][0]["headers"][0]["value"]
+            .as_str()
+            .unwrap();
+        let second = load["mcpServers"][0]["headers"][0]["value"]
+            .as_str()
+            .unwrap();
         assert_ne!(first, second);
         assert_ne!(first, template);
         assert!(crate::delegation::verify(first, "caller"));
@@ -857,8 +1002,14 @@ for line in sys.stdin:
 
     #[test]
     fn unattended_allow_all_never_blocks() {
-        let approvals = UnattendedApprovals { allow_all: true, ..Default::default() };
-        assert_eq!(picked(&approvals.answer(&request("execute"))), Some("allow"));
+        let approvals = UnattendedApprovals {
+            allow_all: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            picked(&approvals.answer(&request("execute"))),
+            Some("allow")
+        );
         assert!(!approvals.blocked.load(Ordering::Relaxed));
     }
 

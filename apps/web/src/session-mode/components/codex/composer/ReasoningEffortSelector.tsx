@@ -1,13 +1,13 @@
-import type { ReasoningEffort } from '@session/bindings';
-import type { Model } from '@session/bindings/v2';
-import { EffortSlider } from '@session/components/common/EffortSlider';
+import type { ReasoningEffort } from "@session/bindings";
+import type { Model } from "@session/bindings/v2";
+import { EffortSlider } from "@session/components/common/EffortSlider";
 
 export const GENERIC_REASONING_OPTIONS: ReasoningEffort[] = [
-  'none',
-  'low',
-  'medium',
-  'high',
-  'xhigh',
+  "none",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
 ];
 
 // Returns the reasoning effort to apply, or undefined when the current one stays valid.
@@ -15,12 +15,14 @@ export function nextReasoningEffort(
   provider: string,
   modelId: string | undefined,
   current: ReasoningEffort | undefined,
-  openAiModels: Model[]
+  openAiModels: Model[],
 ): ReasoningEffort | undefined {
-  if (provider === 'openai') {
+  if (provider === "openai") {
     return openAiModels.find((m) => m.id === modelId)?.defaultReasoningEffort;
   }
-  return current && GENERIC_REASONING_OPTIONS.includes(current) ? undefined : 'medium';
+  return current && GENERIC_REASONING_OPTIONS.includes(current)
+    ? undefined
+    : "medium";
 }
 
 type ReasoningEffortSelectorProps = {
@@ -40,13 +42,14 @@ export function ReasoningEffortSelector({
   disabled = false,
 }: ReasoningEffortSelectorProps) {
   const options =
-    provider === 'openai'
-      ? (openAiModel?.supportedReasoningEfforts.map((o) => o.reasoningEffort) ?? [])
+    provider === "openai"
+      ? (openAiModel?.supportedReasoningEfforts.map((o) => o.reasoningEffort) ??
+        [])
       : GENERIC_REASONING_OPTIONS;
 
   return (
     <EffortSlider
-      label="Reasoning Effort"
+      label="推理强度"
       options={options}
       value={value}
       onChange={onChange}

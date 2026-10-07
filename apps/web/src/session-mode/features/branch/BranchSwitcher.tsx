@@ -1,23 +1,23 @@
-import { Check, ChevronDown, GitBranch, Loader2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { Button } from '@session/components/ui/button';
+import { Check, ChevronDown, GitBranch, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Button } from "@session/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@session/components/ui/dropdown-menu';
-import { cn } from '@session/lib/utils';
+} from "@session/components/ui/dropdown-menu";
+import { cn } from "@session/lib/utils";
 import {
   type GitBranchInfoResponse,
   gitBranchInfo,
   gitCheckoutBranch,
   gitListBranches,
   gitStatus,
-} from '@session/services/apiAdapt/git';
-import { DirtyBranchAlertDialog } from './DirtyBranchAlertDialog';
-import { NewBranchSubMenu } from './NewBranchSubMenu';
+} from "@session/services/apiAdapt/git";
+import { DirtyBranchAlertDialog } from "./DirtyBranchAlertDialog";
+import { NewBranchSubMenu } from "./NewBranchSubMenu";
 
 export function BranchSwitcher({ cwd }: { cwd: string | null }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -26,7 +26,9 @@ export function BranchSwitcher({ cwd }: { cwd: string | null }) {
   const [switching, setSwitching] = useState<string | null>(null);
   const [dirtyBranch, setDirtyBranch] = useState<string | null>(null);
   const [dirtyCount, setDirtyCount] = useState(0);
-  const [branchInfo, setBranchInfo] = useState<GitBranchInfoResponse | null>(null);
+  const [branchInfo, setBranchInfo] = useState<GitBranchInfoResponse | null>(
+    null,
+  );
   const [prevCwd, setPrevCwd] = useState<string | null>(null);
   const [prevMenuOpen, setPrevMenuOpen] = useState(false);
 
@@ -128,12 +130,16 @@ export function BranchSwitcher({ cwd }: { cwd: string | null }) {
       >
         <DropdownMenuTrigger asChild>
           <Button
+            aria-label={`Git 分支：${branchInfo.branch ?? "未选择"}`}
+            title={`Git 分支：${branchInfo.branch ?? "未选择"}`}
             variant="ghost"
             size="sm"
             className="h-auto gap-1 px-1.5 py-0.5 text-xs text-muted-foreground"
           >
             <GitBranch className="h-3 w-3 shrink-0" />
-            <span>{branchInfo.branch}</span>
+            <span className="min-w-0 truncate max-w-40">
+              {branchInfo.branch}
+            </span>
             <ChevronDown className="h-3 w-3 shrink-0 opacity-50" />
           </Button>
         </DropdownMenuTrigger>
@@ -157,9 +163,9 @@ export function BranchSwitcher({ cwd }: { cwd: string | null }) {
                         handleSelectBranch(branch);
                       }}
                       className={cn(
-                        'flex justify-between items-center gap-2 px-2 py-1.5 text-xs font-mono cursor-pointer',
-                        isCurrent ? 'text-foreground' : 'text-muted-foreground',
-                        switching && !isSwitching && 'opacity-50'
+                        "flex justify-between items-center gap-2 px-2 py-1.5 text-xs font-mono cursor-pointer",
+                        isCurrent ? "text-foreground" : "text-muted-foreground",
+                        switching && !isSwitching && "opacity-50",
                       )}
                     >
                       <span className="truncate">{branch}</span>

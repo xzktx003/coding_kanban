@@ -234,3 +234,10 @@
 .composer-suggestions[data-compact="true"] .composer-suggestions-footer {
   display: none;
 }
+/* Dialog fields own focus and keys; composer suggestions remain behind the modal. */
+.session-mode:has([data-slot="dialog-content"][data-state="open"])
+  .composer-suggestions,
+.session-mode:has([data-slot="alert-dialog-content"][data-state="open"])
+  .composer-suggestions {
+  display: none;
+}

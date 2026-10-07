@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useId } from "react";
 
 import type {
   AgentSessionRecord,
@@ -15,6 +15,8 @@ import {
   launchSshPtyAgent,
   listFiles,
 } from "../lib/api";
+import { useModalFocusBoundary } from "./modal-focus-boundary";
+
 import type { LaunchMode } from "../lib/session-matching";
 import {
   buildDirectLaunchCommand,
@@ -117,8 +119,14 @@ export function NewSessionDialog({
   useEffect(() => {
     if (!open || host?.type !== "local") return;
     let active = true;
-    getWorkbenchProjects().then(result => { if (active) setSharedProjects(result.projects); }).catch(() => {});
-    return () => { active = false; };
+    getWorkbenchProjects()
+      .then((result) => {
+        if (active) setSharedProjects(result.projects);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, [open, host]);
   const [newName, setNewName] = useState("");
   const [newKind, setNewKind] = useState("shell");
@@ -149,6 +157,9 @@ export function NewSessionDialog({
   >(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useModalFocusBoundary(open, dialogRef);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const manualSshHostInputRef = useRef<HTMLInputElement>(null);
   const suggestionRequestRef = useRef(0);
@@ -596,6 +607,9 @@ export function NewSessionDialog({
       }}
     >
       <div
+        ref={dialogRef}
+        tabIndex={-1}
+        aria-labelledby={titleId}
         aria-modal="true"
         className="new-session-dialog"
         data-testid="new-session-dialog"
@@ -605,7 +619,9 @@ export function NewSessionDialog({
         <div className="new-session-header">
           <div>
             <p className="new-session-kicker">创建</p>
-            <h2 className="new-session-title">新建会话</h2>
+            <h2 id={titleId} className="new-session-title">
+              新建会话
+            </h2>
           </div>
           <button
             className="new-session-close"
@@ -781,7 +797,21 @@ export function NewSessionDialog({
 
           <label className="new-session-field new-session-field--wide">
             <span className="new-session-label">工作目录</span>
-            {host.type === "local" && sharedProjects.length > 0 && <select aria-label="共享项目" className="drawer-input" value="" onChange={event => setNewDir(event.target.value)}><option value="">从已有项目选择…</option>{sharedProjects.map(path => <option key={path} value={path}>{path}</option>)}</select>}
+            {host.type === "local" && sharedProjects.length > 0 && (
+              <select
+                aria-label="共享项目"
+                className="drawer-input"
+                value=""
+                onChange={(event) => setNewDir(event.target.value)}
+              >
+                <option value="">从已有项目选择…</option>
+                {sharedProjects.map((path) => (
+                  <option key={path} value={path}>
+                    {path}
+                  </option>
+                ))}
+              </select>
+            )}
             <div className="new-session-dir-wrap">
               <div className="new-session-dir-input-row">
                 <input

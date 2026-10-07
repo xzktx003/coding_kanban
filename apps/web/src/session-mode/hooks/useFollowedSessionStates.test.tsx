@@ -1,0 +1,130 @@
+import { act, renderHook } from "@testing-library/react";
+import { beforeEach, expect, it } from "vitest";
+import { useFollowedSessionStates } from "./useFollowedSessionStates";
+import { useAgentCenterStore } from "../stores/useAgentCenterStore";
+import {
+  useCodexStore,
+  useApprovalStore,
+  usePermissionsStore,
+  useRequestUserInputStore,
+  useElicitationStore,
+} from "../components/codex/stores";
+import { useCCStore } from "../stores/cc";
+import { useSessionAttentionStore } from "../stores/useSessionAttentionStore";
+beforeEach(() => {
+  useAgentCenterStore.setState({
+    cards: [
+      { kind: "codex", id: "a" },
+      { kind: "codex", id: "b" },
+      { kind: "cc", id: "c" },
+    ],
+    sharedTabsInitialized: true,
+  });
+  useCodexStore.setState({
+    threads: [],
+    threadStatusMap: {
+      a: { type: "active", activeFlags: [] },
+      b: { type: "idle" },
+    },
+    turnTimingMap: {},
+  });
+  useCCStore.setState({
+    sessionLoadingMap: { c: false },
+    sessionMessagesMap: { c: [] },
+  });
+  useApprovalStore.setState({ pendingApprovals: [], currentApproval: null });
+  usePermissionsStore.setState({ pendingRequests: [] });
+  useRequestUserInputStore.setState({
+    pendingRequests: [],
+    currentRequest: null,
+  });
+  useElicitationStore.setState({ pendingRequests: [] });
+  useSessionAttentionStore.setState({ receipts: {} });
+});
+it("counts only followed sessions and gives pending requests priority over running", () => {
+  const { result } = renderHook(() => useFollowedSessionStates("ready"));
+  expect(result.current.counts.running).toBe(1);
+  act(() =>
+    useApprovalStore.setState({
+      pendingApprovals: [
+        {
+          type: "fileChange",
+          requestId: 1,
+          threadId: "b",
+          turnId: "t",
+          itemId: "i",
+          reason: null,
+          grantRoot: null,
+          startedAtMs: 0,
+        },
+        {
+          type: "fileChange",
+          requestId: 2,
+          threadId: "outside",
+          turnId: "t",
+          itemId: "i",
+          reason: null,
+          grantRoot: null,
+          startedAtMs: 0,
+        },
+      ],
+    }),
+  );
+  expect(result.current.counts.pending).toBe(1);
+  expect(result.current.rows.map((r) => r.state)).toEqual([
+    "running",
+    "pending",
+    "idle",
+  ]);
+  act(() =>
+    usePermissionsStore.setState({
+      pendingRequests: [
+        {
+          requestId: 3,
+          threadId: "a",
+          turnId: "t",
+          itemId: "i",
+          permissions: { network: null, fileSystem: null },
+          reason: null,
+          environmentId: null,
+          startedAtMs: 0,
+          cwd: "/a",
+        },
+      ],
+    }),
+  );
+  expect(result.current.counts.running).toBe(0);
+  expect(result.current.counts.pending).toBe(2);
+});
+it("keeps unknown and offline separate from a confirmed empty pending set", () => {
+  useCodexStore.setState({ threadStatusMap: {}, threads: [] });
+  const { result, rerender } = renderHook(
+    ({ status }) => useFollowedSessionStates(status),
+    { initialProps: { status: "ready" as "ready" | "offline" } },
+  );
+  expect(result.current.counts.unknown).toBe(2);
+  expect(result.current.complete).toBe(false);
+  rerender({ status: "offline" });
+  expect(result.current.counts.unknown).toBe(3);
+  expect(result.current.counts.idle).toBe(0);
+});
+it("updates unread and Claude permission state without opening or adding sessions", () => {
+  const { result } = renderHook(() => useFollowedSessionStates("ready"));
+  act(() =>
+    useSessionAttentionStore.getState().complete("codex", "b", "reply"),
+  );
+  expect(result.current.rows.find((r) => r.card.id === "b")?.state).toBe(
+    "unread",
+  );
+  act(() =>
+    useCCStore.setState({
+      sessionMessagesMap: {
+        c: [{ type: "permission_request", resolved: false } as any],
+      },
+    }),
+  );
+  expect(result.current.rows.find((r) => r.card.id === "c")?.state).toBe(
+    "pending",
+  );
+  expect(useAgentCenterStore.getState().cards).toHaveLength(3);
+});

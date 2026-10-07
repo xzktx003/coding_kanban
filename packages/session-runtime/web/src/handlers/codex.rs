@@ -1,16 +1,16 @@
 use super::to_error_response;
 use super::types::{
     ApprovalDecisionParams, McpElicitationResponseParams, PermissionsApprovalParams,
-    UnifiedMcpAddParams, UnifiedMcpReadParams, UnifiedMcpRemoveParams,
-    UnifiedMcpToggleParams, UserInputResponseParams,
+    UnifiedMcpAddParams, UnifiedMcpReadParams, UnifiedMcpRemoveParams, UnifiedMcpToggleParams,
+    UserInputResponseParams,
 };
+use crate::types::{ErrorResponse, WebServerState};
 use axum::{Json, extract::State as AxumState, http::StatusCode};
 use serde_json::{Value, json};
-use crate::types::{ErrorResponse, WebServerState};
 
+use codexia_cc::mcp_unified as mcp;
 use codexia_codex::AppState;
 use codexia_codex::accounts;
-use codexia_cc::mcp_unified as mcp;
 
 fn require_codex(state: &WebServerState) -> Result<&AppState, ErrorResponse> {
     state.codex_state.as_deref().ok_or_else(|| ErrorResponse {
@@ -58,11 +58,12 @@ pub(crate) async fn api_rollback_thread(
     AxumState(state): AxumState<WebServerState>,
     Json(params): Json<Value>,
 ) -> Result<Json<Value>, ErrorResponse> {
-    let result = require_codex(&state)?
-        .codex
-        .send_request("thread/rollback", params)
-        .await
-        .map_err(to_error_response)?;
+    let codex = &require_codex(&state)?.codex;
+    let result = super::codex_rollback::rollback_thread(params, |method, params| {
+        codex.send_request(method, params)
+    })
+    .await
+    .map_err(to_error_response)?;
     Ok(Json(result))
 }
 

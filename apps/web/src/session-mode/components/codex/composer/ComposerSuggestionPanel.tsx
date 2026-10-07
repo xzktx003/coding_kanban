@@ -6,7 +6,10 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { sessionPortalContainer } from "@session/session-dom";
+import {
+  useAgentInteractionVisible,
+  sessionPortalContainer,
+} from "@session/session-dom";
 import { suggestionPosition } from "./suggestionPosition";
 import "./composer-suggestions.css";
 
@@ -22,6 +25,8 @@ export function ComposerSuggestionPanel({
   style?: CSSProperties;
 }) {
   const { t } = useTranslation("thread");
+  const interactionVisible = useAgentInteractionVisible();
+  if (!interactionVisible) return null;
   return (
     <div
       className="composer-suggestions"

@@ -1,26 +1,26 @@
-import { useMemo } from 'react';
-import { useTranscriptState } from '../thread/rowState';
-import { useTranslation } from 'react-i18next';
-import type { ServerNotification } from '@session/bindings';
-import type { FileUpdateChange } from '@session/bindings/v2';
-import { Badge } from '@session/components/ui/badge';
-import { AgentMessageItem } from './AgentMessageItem';
+import { useMemo } from "react";
+import { useTranscriptState } from "../thread/rowState";
+import { useTranslation } from "react-i18next";
+import type { ServerNotification } from "@session/bindings";
+import type { FileUpdateChange } from "@session/bindings/v2";
+import { Badge } from "@session/components/ui/badge";
+import { AgentMessageItem } from "./AgentMessageItem";
 import {
   CollabAgentToolCallItem,
   type CollabAgentToolCallItemData,
-} from './CollabAgentToolCallItem';
+} from "./CollabAgentToolCallItem";
 import {
   aggregateFileChanges,
   aggregateTurnChangesFromContext,
   getChangeCounts,
   getDiffViewerProps,
   type RenderEventContext,
-} from './fileChangeLogic';
-import { IndividualFileChanges } from './IndividualFileChanges';
-import { McpToolCallItem } from './McpToolCallItem';
-import { ThreadFileChangesSummary } from './ThreadFileChangesSummary';
-import { TurnPlan } from './TurnPlan';
-import { EditableUserMessageItem } from './UserMessageItem';
+} from "./fileChangeLogic";
+import { IndividualFileChanges } from "./IndividualFileChanges";
+import { McpToolCallItem } from "./McpToolCallItem";
+import { ThreadFileChangesSummary } from "./ThreadFileChangesSummary";
+import { TurnPlan } from "./TurnPlan";
+import { EditableUserMessageItem } from "./UserMessageItem";
 
 type CollapsedJsonItemProps = {
   label: string;
@@ -28,23 +28,32 @@ type CollapsedJsonItemProps = {
 };
 
 const CollapsedJsonItem = ({ label, value }: CollapsedJsonItemProps) => {
-  const [expanded, setExpanded] = useTranscriptState('json', false);
-  const text = useMemo(() => expanded ? JSON.stringify(value, null, 2) : '', [expanded, value]);
+  const [expanded, setExpanded] = useTranscriptState("json", false);
+  const text = useMemo(
+    () => (expanded ? JSON.stringify(value, null, 2) : ""),
+    [expanded, value],
+  );
   return (
-    <details open={expanded} onToggle={event => setExpanded(event.currentTarget.open)} className="overflow-hidden rounded-md border bg-muted/20">
+    <details
+      open={expanded}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+      className="overflow-hidden rounded-md border bg-muted/20"
+    >
       <summary className="cursor-pointer px-2 py-1 text-xs font-medium text-muted-foreground">
         {label}
       </summary>
-      {expanded && <pre className="max-h-64 overflow-auto border-t bg-background/80 p-2">
-        <code>{text}</code>
-      </pre>}
+      {expanded && (
+        <pre className="max-h-64 overflow-auto border-t bg-background/80 p-2">
+          <code>{text}</code>
+        </pre>
+      )}
     </details>
   );
 };
 
 const getRollbackTurnsForTurn = (
   context: RenderEventContext | undefined,
-  turnId: string
+  turnId: string,
 ): number => {
   if (context?.rollbackTurns !== undefined) return context.rollbackTurns;
   const events = context?.events;
@@ -57,11 +66,12 @@ const getRollbackTurnsForTurn = (
     let candidateTurnId: string | undefined;
 
     if (
-      (candidate.method === 'item/started' || candidate.method === 'item/completed') &&
+      (candidate.method === "item/started" ||
+        candidate.method === "item/completed") &&
       candidate.params?.turnId
     ) {
       candidateTurnId = candidate.params.turnId;
-    } else if (candidate.method === 'turn/completed') {
+    } else if (candidate.method === "turn/completed") {
       candidateTurnId = candidate.params?.turn?.id;
     }
 
@@ -79,11 +89,11 @@ type EventItemProps = {
 };
 
 export const EventItem = ({ event, context }: EventItemProps) => {
-  const { t } = useTranslation('thread');
+  const { t } = useTranslation("thread");
   const fileChangeMap = {
-    add: t('fileChanges.created'),
-    delete: t('fileChanges.deleted'),
-    update: t('fileChanges.edited'),
+    add: t("fileChanges.created"),
+    delete: t("fileChanges.deleted"),
+    update: t("fileChanges.edited"),
   };
 
   const renderFileChanges = (changes: FileUpdateChange[]) => (
@@ -95,18 +105,22 @@ export const EventItem = ({ event, context }: EventItemProps) => {
     />
   );
   switch (event.method) {
-    case 'error':
+    case "error":
       return (
-        <p className="text-red-600 dark:text-red-400 font-medium">{event.params.error.message}</p>
+        <p className="text-red-600 dark:text-red-400 font-medium">
+          {event.params.error.message}
+        </p>
       );
-    case 'warning':
+    case "warning":
       return (
-        <p className="text-yellow-600 dark:text-yellow-400 font-medium">{event.params.message}</p>
+        <p className="text-yellow-600 dark:text-yellow-400 font-medium">
+          {event.params.message}
+        </p>
       );
-    case 'item/started': {
+    case "item/started": {
       const { item: startedItem } = event.params;
       switch (startedItem.type) {
-        case 'userMessage': {
+        case "userMessage": {
           const threadId = event.params.threadId;
           const turnId = event.params.turnId;
           const rollbackTurns = getRollbackTurnsForTurn(context, turnId);
@@ -115,46 +129,56 @@ export const EventItem = ({ event, context }: EventItemProps) => {
             <EditableUserMessageItem
               content={startedItem.content}
               threadId={threadId}
+              turnId={turnId}
               rollbackTurns={rollbackTurns}
             />
           );
         }
-        case 'commandExecution':
+        case "commandExecution":
           return null;
-        case 'reasoning':
-        case 'agentMessage':
-        case 'enteredReviewMode':
-        case 'fileChange':
+        case "reasoning":
+        case "agentMessage":
+        case "enteredReviewMode":
+        case "fileChange":
           return null;
         default:
           return null;
       }
     }
-    case 'item/completed': {
+    case "item/completed": {
       const { item } = event.params;
       switch (item.type) {
-        case 'agentMessage':
-          return item.text.trim() ? <AgentMessageItem text={item.text} /> : null;
-        case 'userMessage':
-        case 'commandExecution':
+        case "agentMessage":
+          return item.text.trim() ? (
+            <AgentMessageItem
+              text={item.text}
+              threadId={event.params.threadId}
+            />
+          ) : null;
+        case "userMessage":
+        case "commandExecution":
           return null;
-        case 'fileChange':
+        case "fileChange":
           return renderFileChanges(item.changes);
-        case 'enteredReviewMode':
-        case 'exitedReviewMode':
-        case 'reasoning':
+        case "enteredReviewMode":
+        case "exitedReviewMode":
+        case "reasoning":
           return null;
-        case 'collabAgentToolCall':
+        case "collabAgentToolCall":
           // Render the multi-agent sub-agent operation card.
-          return <CollabAgentToolCallItem item={item as unknown as CollabAgentToolCallItemData} />;
-        case 'mcpToolCall':
+          return (
+            <CollabAgentToolCallItem
+              item={item as unknown as CollabAgentToolCallItemData}
+            />
+          );
+        case "mcpToolCall":
           return <McpToolCallItem item={item} />;
         default:
           return <CollapsedJsonItem label={item.type} value={item} />;
       }
     }
-    case 'turn/completed': {
-      if (event.params.turn.status === 'interrupted') {
+    case "turn/completed": {
+      if (event.params.turn.status === "interrupted") {
         return (
           <div>
             <Badge variant="destructive">{event.params.turn.status}</Badge>
@@ -163,8 +187,10 @@ export const EventItem = ({ event, context }: EventItemProps) => {
       }
 
       const fileChangeItems = event.params.turn.items.filter(
-        (turnItem): turnItem is Extract<typeof turnItem, { type: 'fileChange' }> =>
-          turnItem.type === 'fileChange' && turnItem.changes.length > 0
+        (
+          turnItem,
+        ): turnItem is Extract<typeof turnItem, { type: "fileChange" }> =>
+          turnItem.type === "fileChange" && turnItem.changes.length > 0,
       );
 
       const aggregatedChanges =
@@ -180,29 +206,42 @@ export const EventItem = ({ event, context }: EventItemProps) => {
         </div>
       );
     }
-    case 'turn/plan/updated':
-      return <TurnPlan plan={event.params.plan} explanation={event.params.explanation} />;
-    case 'item/agentMessage/delta':
-      return event.params.delta.trim() ? <AgentMessageItem text={event.params.delta} /> : null;
-    case 'item/fileChange/outputDelta':
+    case "turn/plan/updated":
+      return (
+        <TurnPlan
+          plan={event.params.plan}
+          explanation={event.params.explanation}
+        />
+      );
+    case "item/agentMessage/delta":
+      return event.params.delta.trim() ? (
+        <AgentMessageItem
+          text={event.params.delta}
+          threadId={event.params.threadId}
+        />
+      ) : null;
+    case "item/fileChange/outputDelta":
       return null;
-    case 'item/commandExecution/terminalInteraction':
+    case "item/commandExecution/terminalInteraction":
       return (
         <div className="rounded-md border border-slate-300/80 bg-slate-100/40 px-2 py-1 text-xs text-slate-700">
           <span className="mr-2 font-medium">terminal input</span>
-          <code className="whitespace-pre-wrap break-all">{event.params.stdin}</code>
+          <code className="whitespace-pre-wrap break-all">
+            {event.params.stdin}
+          </code>
         </div>
       );
-    case 'thread/started':
-    case 'thread/tokenUsage/updated':
-    case 'thread/status/changed':
-    case 'thread/goal/updated':
-    case 'thread/goal/cleared':
-    case 'turn/diff/updated':
-    case 'rawResponseItem/completed':
-    case 'item/commandExecution/outputDelta':
-    case 'turn/started':
-    case 'mcpServer/startupStatus/updated':
+    case "thread/name/updated":
+    case "thread/started":
+    case "thread/tokenUsage/updated":
+    case "thread/status/changed":
+    case "thread/goal/updated":
+    case "thread/goal/cleared":
+    case "turn/diff/updated":
+    case "rawResponseItem/completed":
+    case "item/commandExecution/outputDelta":
+    case "turn/started":
+    case "mcpServer/startupStatus/updated":
       return null;
 
     default:

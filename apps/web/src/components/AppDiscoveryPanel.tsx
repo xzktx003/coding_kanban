@@ -5,6 +5,11 @@ import type {
   ScanResult,
 } from "@agent-orchestrator/shared";
 
+import {
+  scanResultSelectionKey,
+  selectedDiscoveryItems,
+} from "../lib/discovery-selection";
+
 import { scanDirectory } from "../lib/api";
 import { sortScanResults } from "../lib/session-matching";
 import type { AddToGridItem } from "./DiscoveryDialog";
@@ -83,7 +88,7 @@ export function AppDiscoveryPanel({
 }: AppDiscoveryPanelProps) {
   const [scanPath, setScanPath] = useState("~");
   const [results, setResults] = useState<ScanResult[]>([]);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [kindFilter, setKindFilter] = useState<string | null>(null);
   const [showOnlyNew, setShowOnlyNew] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -135,24 +140,22 @@ export function AppDiscoveryPanel({
   const kinds = [...new Set(results.map((r) => r.agentKind))];
   const groups = groupByDirectory(filtered);
 
-  function globalIndex(result: ScanResult): number {
-    return filtered.indexOf(result);
-  }
-
-  function toggleSelect(idx: number) {
+  function toggleSelect(key: string) {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx);
-      else next.add(idx);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   }
 
   function handleAddSelected() {
     const toAdd: AddToGridItem[] = [];
-    for (const idx of selected) {
-      const r = filtered[idx];
-      if (!r) continue;
+    for (const r of selectedDiscoveryItems(
+      results,
+      selected,
+      scanResultSelectionKey,
+    )) {
       const directExisting = findDirectExistingSession(r, sessions);
       if (directExisting) continue;
       toAdd.push(buildAddItem(r, "direct"));
@@ -219,7 +222,7 @@ export function AppDiscoveryPanel({
           <div key={dir} className="discovery-group">
             <div className="discovery-group-title">{dir}</div>
             {items.map((result) => {
-              const idx = globalIndex(result);
+              const key = scanResultSelectionKey(result);
               const directExisting = findDirectExistingSession(
                 result,
                 sessions,
@@ -231,20 +234,20 @@ export function AppDiscoveryPanel({
                   ? directExisting && tmuxExisting
                   : directExisting,
               );
-              const isChecked = selected.has(idx);
+              const isChecked = selected.has(key);
               const hasTmux = !!result.tmuxSession;
               const canSelect = !directExisting;
 
               return (
                 <div
-                  key={`${result.agentKind}-${result.displayName}-${idx}`}
+                  key={key}
                   className={`discovery-item${isChecked ? " discovery-item--selected" : ""}${isAlready ? " discovery-item--existing" : ""}`}
                 >
                   {canSelect && (
                     <input
                       type="checkbox"
                       checked={isChecked}
-                      onChange={() => toggleSelect(idx)}
+                      onChange={() => toggleSelect(key)}
                     />
                   )}
                   <div className="discovery-item-info">

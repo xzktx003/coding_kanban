@@ -1,21 +1,18 @@
-import { useShallow } from 'zustand/react/shallow';
-import { useCallback, useMemo } from 'react';
-import { useCodexStore } from '@session/components/codex/stores';
-import { gitRemoveWorktree } from '@session/services/apiAdapt/git';
-import { codexService } from '@session/services/codexService';
-import { useAgentCenterStore } from '@session/stores';
-import { useCCStore } from '@session/stores/cc';
-import type { AgentCenterCard } from '@session/stores/useAgentCenterStore';
-import { useAgentSettingsStore } from '@session/stores/useAgentSettingsStore';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
-import { AgentCard } from './AgentCard';
+import { useShallow } from "zustand/react/shallow";
+import { useCallback, useMemo } from "react";
+import { useCodexStore } from "@session/components/codex/stores";
+import { useSessionTabActions } from "@session/hooks/useSessionTabs";
+import { useAgentCenterStore } from "@session/stores";
+import { useCCStore } from "@session/stores/cc";
+import type { AgentCenterCard } from "@session/stores/useAgentCenterStore";
+import { AgentCard } from "./AgentCard";
 
 function ColumnLabel({
   dot,
   label,
   count,
 }: {
-  dot?: 'green' | 'muted';
+  dot?: "green" | "muted";
   label: string;
   count: number;
 }) {
@@ -23,64 +20,53 @@ function ColumnLabel({
     <div className="flex items-center gap-1.5 px-2 py-1 border-b shrink-0 bg-muted/20">
       {dot && (
         <span
-          className={`h-1.5 w-1.5 rounded-full shrink-0 ${dot === 'green' ? 'bg-green-500' : 'bg-muted-foreground/40'}`}
+          className={`h-1.5 w-1.5 rounded-full shrink-0 ${dot === "green" ? "bg-green-500" : "bg-muted-foreground/40"}`}
         />
       )}
       <span className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
         {label}
       </span>
-      <span className="text-[10px] text-muted-foreground/50 ml-auto">{count}</span>
+      <span className="text-[10px] text-muted-foreground/50 ml-auto">
+        {count}
+      </span>
     </div>
   );
 }
 
 export default function TasksPanel() {
-  const { cards, removeCard, setCurrentAgentCardId, currentAgentCardId } = useAgentCenterStore();
-  const { switchToSession, sessionLoadingMap, activeSessionId, setActiveSessionId } = useCCStore();
-  const { threadStatusMap, currentThreadId } = useCodexStore(useShallow(s => ({ threadStatusMap: s.threadStatusMap, currentThreadId: s.currentThreadId })));
-  const { setSelectedAgent } = useAgentSettingsStore();
+  const { cards, currentAgentCardId, currentAgentCardKind } =
+    useAgentCenterStore();
+  const { sessionLoadingMap } = useCCStore();
+  const { threadStatusMap } = useCodexStore(
+    useShallow((s) => ({ threadStatusMap: s.threadStatusMap })),
+  );
+  const { selectTab, closeTab } = useSessionTabActions();
 
   const isRunning = useCallback(
     (card: AgentCenterCard) =>
-      card.kind === 'codex'
-        ? threadStatusMap[card.id]?.type === 'active'
+      card.kind === "codex"
+        ? threadStatusMap[card.id]?.type === "active"
         : !!sessionLoadingMap[card.id],
-    [threadStatusMap, sessionLoadingMap]
+    [threadStatusMap, sessionLoadingMap],
   );
 
   const handleRemove = (card: AgentCenterCard) => {
-    removeCard(card);
-    if (card.id === currentAgentCardId) {
-      setCurrentAgentCardId(null);
-    }
-    if (card.kind === 'codex') {
-      if (card.id === currentThreadId) {
-        void codexService.setCurrentThread(null);
-      }
-    } else {
-      if (card.id === activeSessionId) {
-        setActiveSessionId(null);
-      }
-    }
-    if (card.worktreePath) {
-      const { cwd } = useWorkspaceStore.getState();
-      const worktreeKey = card.worktreePath.split('/').pop() ?? '';
-      if (cwd && worktreeKey) {
-        void gitRemoveWorktree(cwd, worktreeKey);
-      }
-    }
+    void closeTab(card);
   };
 
   const selectCard = (card: AgentCenterCard) => {
-    setCurrentAgentCardId(card.id);
-    setSelectedAgent(card.kind);
-    if (card.kind === 'codex') void codexService.setCurrentThread(card.id);
-    else switchToSession(card.id);
+    void selectTab(card);
   };
 
-  const runningCards = useMemo(() => cards.filter((c) => isRunning(c)), [cards, isRunning]);
+  const runningCards = useMemo(
+    () => cards.filter((c) => isRunning(c)),
+    [cards, isRunning],
+  );
 
-  const idleCards = useMemo(() => cards.filter((c) => !isRunning(c)), [cards, isRunning]);
+  const idleCards = useMemo(
+    () => cards.filter((c) => !isRunning(c)),
+    [cards, isRunning],
+  );
 
   return (
     <div className="flex flex-row h-full w-full min-w-0 overflow-hidden">
@@ -100,7 +86,7 @@ export default function TasksPanel() {
                 tabIndex={0}
                 onClick={() => selectCard(card)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
+                  if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     selectCard(card);
                   }
@@ -110,7 +96,11 @@ export default function TasksPanel() {
                 <AgentCard
                   card={card}
                   onRemove={() => handleRemove(card)}
-                  isSelected={card.id === currentAgentCardId}
+                  isSelected={
+                    card.id === currentAgentCardId &&
+                    (!currentAgentCardKind ||
+                      card.kind === currentAgentCardKind)
+                  }
                 />
               </div>
             ))
@@ -134,7 +124,7 @@ export default function TasksPanel() {
                 tabIndex={0}
                 onClick={() => selectCard(card)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
+                  if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     selectCard(card);
                   }
@@ -144,7 +134,11 @@ export default function TasksPanel() {
                 <AgentCard
                   card={card}
                   onRemove={() => handleRemove(card)}
-                  isSelected={card.id === currentAgentCardId}
+                  isSelected={
+                    card.id === currentAgentCardId &&
+                    (!currentAgentCardKind ||
+                      card.kind === currentAgentCardKind)
+                  }
                 />
               </div>
             ))

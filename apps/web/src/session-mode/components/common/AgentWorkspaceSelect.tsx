@@ -1,12 +1,12 @@
-import { Check, ChevronDown, Monitor, Split } from 'lucide-react';
-import type { ThreadCwdMode } from '@session/components/codex/stores';
-import { Button } from '@session/components/ui/button';
+import { Check, ChevronDown, Monitor, Split } from "lucide-react";
+import type { ThreadCwdMode } from "@session/components/codex/stores";
+import { Button } from "@session/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@session/components/ui/dropdown-menu';
+} from "@session/components/ui/dropdown-menu";
 
 interface AgentWorkspaceSelectProps {
   value: ThreadCwdMode;
@@ -19,37 +19,48 @@ const MODE_ICONS: Record<ThreadCwdMode, React.ReactNode> = {
 };
 
 const MODE_LABELS: Record<ThreadCwdMode, string> = {
-  local: 'Local',
-  worktree: 'Worktree',
+  local: "本地目录",
+  worktree: "独立工作树",
 };
 
-export function AgentWorkspaceSelect({ value, onValueChange }: AgentWorkspaceSelectProps) {
+export function AgentWorkspaceSelect({
+  value,
+  onValueChange,
+}: AgentWorkspaceSelectProps) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="h-7 text-xs px-2 gap-1">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 text-xs px-2 gap-1"
+          aria-label={`工作目录模式：${MODE_LABELS[value]}`}
+        >
           {MODE_ICONS[value]}
           <span>{MODE_LABELS[value]}</span>
           <ChevronDown size={10} className="opacity-60" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
-        <DropdownMenuItem onClick={() => onValueChange('local')} className="flex justify-between">
+        <DropdownMenuItem
+          onClick={() => onValueChange("local")}
+          className="flex justify-between"
+        >
           <span className="flex gap-2">
             <Monitor className="h-4 w-4" />
-            <span>Local</span>
+            <span>本地目录</span>
           </span>
-          {value === 'local' && <Check />}
+          {value === "local" && <Check />}
         </DropdownMenuItem>
         <DropdownMenuItem
-          onClick={() => onValueChange('worktree')}
+          onClick={() => onValueChange("worktree")}
           className="flex justify-between item-center"
         >
           <span className="flex gap-2">
             <Split className="h-4 w-4" />
-            <span>Worktree</span>
+            <span>独立工作树</span>
           </span>
-          {value === 'worktree' && <Check />}
+          {value === "worktree" && <Check />}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

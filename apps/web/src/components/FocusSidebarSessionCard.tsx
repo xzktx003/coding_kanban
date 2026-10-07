@@ -81,7 +81,18 @@ export function FocusSidebarSessionCard({
               {monitorIndex}
             </span>
           )}
-          <span className="focus-sidebar-card-name">{session.displayName}</span>
+          <button
+            aria-label={`切换到会话 ${session.displayName}`}
+            className="focus-sidebar-card-name session-entry-button"
+            title={session.displayName}
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onSwitchFocus(session.id);
+            }}
+          >
+            {session.displayName}
+          </button>
           {isTmuxManaged && (
             <span
               aria-label="tmux 会话"

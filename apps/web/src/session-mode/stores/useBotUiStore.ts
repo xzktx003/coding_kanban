@@ -1,15 +1,23 @@
-import { create } from 'zustand';
-import { type Bot, parseBotList } from '@session/services/apiAdapt/bots';
+import { create } from "zustand";
+import { type Bot, parseBotList } from "@session/services/apiAdapt/bots";
 
 /**
  * Client state for the Bot tab. The bots themselves live in the database, so
  * nothing here is persisted: this is the cache the sidebar renders from, plus
  * the live connections that must survive switching between bots.
  */
-export type BotActivityStatus = 'working' | 'done' | 'blocked' | 'failed';
+export type BotActivityStatus = "working" | "done" | "blocked" | "failed";
 
 interface BotUiStore {
   bots: Bot[];
+  draftByBot: Record<string, string>;
+  composerErrorByBot: Record<string, string>;
+  sendingByBot: Record<string, boolean>;
+  stoppingByBot: Record<string, boolean>;
+  setDraft: (botId: string, text: string) => void;
+  setComposerError: (botId: string, error: string | null) => void;
+  setSending: (botId: string, pending: boolean) => void;
+  setStopping: (botId: string, pending: boolean) => void;
   setBots: (bots: Bot[]) => void;
   /** Replace one bot in place, after an update round-trip. */
   upsertBot: (bot: Bot) => void;
@@ -55,6 +63,25 @@ interface BotUiStore {
 
 export const useBotUiStore = create<BotUiStore>((set) => ({
   bots: [],
+  draftByBot: {},
+  composerErrorByBot: {},
+  sendingByBot: {},
+  stoppingByBot: {},
+  setDraft: (id, text) =>
+    set((state) => ({ draftByBot: { ...state.draftByBot, [id]: text } })),
+  setComposerError: (id, error) =>
+    set((state) => {
+      const { [id]: _old, ...rest } = state.composerErrorByBot;
+      return { composerErrorByBot: error ? { ...rest, [id]: error } : rest };
+    }),
+  setSending: (id, pending) =>
+    set((state) => ({
+      sendingByBot: { ...state.sendingByBot, [id]: pending },
+    })),
+  setStopping: (id, pending) =>
+    set((state) => ({
+      stoppingByBot: { ...state.stoppingByBot, [id]: pending },
+    })),
   setBots: (bots) => set({ bots }),
   upsertBot: (bot) =>
     set((state) => ({
@@ -66,7 +93,15 @@ export const useBotUiStore = create<BotUiStore>((set) => ({
     set((state) => {
       const { [id]: _connection, ...connectionByBot } = state.connectionByBot;
       const { [id]: _session, ...sessionByBot } = state.sessionByBot;
+      const { [id]: _draft, ...draftByBot } = state.draftByBot;
+      const { [id]: _error, ...composerErrorByBot } = state.composerErrorByBot;
+      const { [id]: _sending, ...sendingByBot } = state.sendingByBot;
+      const { [id]: _stopping, ...stoppingByBot } = state.stoppingByBot;
       return {
+        draftByBot,
+        composerErrorByBot,
+        sendingByBot,
+        stoppingByBot,
         bots: state.bots.filter((bot) => bot.id !== id),
         connectionByBot,
         sessionByBot,
@@ -86,14 +121,16 @@ export const useBotUiStore = create<BotUiStore>((set) => ({
             .filter(
               (bot) =>
                 state.connectionByBot[bot.id] &&
-                parseBotList(bot.mcpServers).includes(`keke:${name}`)
+                parseBotList(bot.mcpServers).includes(`keke:${name}`),
             )
-            .map((bot) => [bot.id, true])
+            .map((bot) => [bot.id, true]),
         ),
       },
     })),
   setBotConnection: (botId, connectionId) =>
-    set((state) => ({ connectionByBot: { ...state.connectionByBot, [botId]: connectionId } })),
+    set((state) => ({
+      connectionByBot: { ...state.connectionByBot, [botId]: connectionId },
+    })),
   clearBotConnection: (botId) =>
     set((state) => {
       const { [botId]: _removed, ...connectionByBot } = state.connectionByBot;
@@ -108,7 +145,9 @@ export const useBotUiStore = create<BotUiStore>((set) => ({
       savingSettingsByBot: { ...state.savingSettingsByBot, [botId]: saving },
     })),
   setBotRunning: (botId, running) =>
-    set((state) => ({ runningByBot: { ...state.runningByBot, [botId]: running } })),
+    set((state) => ({
+      runningByBot: { ...state.runningByBot, [botId]: running },
+    })),
   statusByBot: {},
   setBotStatus: (botId, status) =>
     set((state) => {
@@ -117,7 +156,9 @@ export const useBotUiStore = create<BotUiStore>((set) => ({
     }),
   sessionByBot: {},
   setBotSession: (botId, sessionId) =>
-    set((state) => ({ sessionByBot: { ...state.sessionByBot, [botId]: sessionId } })),
+    set((state) => ({
+      sessionByBot: { ...state.sessionByBot, [botId]: sessionId },
+    })),
   kekeSpawnFailed: false,
   setKekeSpawnFailed: (kekeSpawnFailed) => set({ kekeSpawnFailed }),
 }));

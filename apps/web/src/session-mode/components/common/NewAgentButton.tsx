@@ -1,44 +1,57 @@
 import { listenInSessionMode } from "@session/session-dom";
-import { SquarePen } from 'lucide-react';
-import { useCallback, useEffect } from 'react';
-import { useTranslation } from 'react-i18next';
-import { acpFreshSession } from '@session/components/acp/newSession';
-import { useNewThread } from '@session/components/codex/hooks';
-import { Button } from '@session/components/ui/button';
-import { useCCSessionManager } from '@session/hooks/useCCSessionManager';
-import { acpStop } from '@session/services/apiAdapt/acp';
-import { useAgentCenterStore, useLayoutStore } from '@session/stores';
-import { useAcpStore } from '@session/stores/useAcpStore';
-import { useAgentSettingsStore } from '@session/stores/useAgentSettingsStore';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
+import { SquarePen, type LucideIcon } from "lucide-react";
+import { useCallback, useEffect } from "react";
+import { useTranslation } from "react-i18next";
+import { acpFreshSession } from "@session/components/acp/newSession";
+import { useNewThread } from "@session/components/codex/hooks";
+import { Button } from "@session/components/ui/button";
+import { useCCSessionManager } from "@session/hooks/useCCSessionManager";
+import { acpStop } from "@session/services/apiAdapt/acp";
+import { useAgentCenterStore, useLayoutStore } from "@session/stores";
+import { useAcpStore } from "@session/stores/useAcpStore";
+import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 
-const focusCCInput = () => window.dispatchEvent(new Event('cc-input-focus-request'));
+const focusCCInput = () =>
+  window.dispatchEvent(new Event("cc-input-focus-request"));
 
 type Props = {
   showLabel?: boolean;
+  icon?: LucideIcon;
 };
 
-export function NewAgentButton({ showLabel = false }: Props) {
-  const { t } = useTranslation('sidebar');
+export function NewAgentButton({
+  showLabel = false,
+  icon: Icon = SquarePen,
+}: Props) {
+  const { t } = useTranslation("sidebar");
   const { cwd, setCwd } = useWorkspaceStore();
   const { selectedAgent } = useAgentSettingsStore();
   const { setCurrentAgentCardId } = useAgentCenterStore();
   const { view, setView, setActiveSidebarTab } = useLayoutStore();
   const { handleNewSession } = useCCSessionManager();
   const { handleNewThread } = useNewThread();
-  const { active: acpActive, connectionId: acpConnectionId, restart: acpRestart } = useAcpStore();
+  const {
+    active: acpActive,
+    connectionId: acpConnectionId,
+    restart: acpRestart,
+  } = useAcpStore();
 
   const handleCreateNew = useCallback(
     async (project?: string) => {
       if (project && project !== cwd) setCwd(project);
 
       if (acpActive) {
-        setView('agent');
+        setView("agent");
         // One agent process hosts many sessions, and `session/new` carries its
         // own cwd, so a new chat — in this project or another — is a single
         // JSON-RPC round trip. Respawning the CLI costs seconds.
         const target = project ?? cwd;
-        if (acpConnectionId && target && (await acpFreshSession(acpConnectionId, target))) {
+        if (
+          acpConnectionId &&
+          target &&
+          (await acpFreshSession(acpConnectionId, target))
+        ) {
           return;
         }
         // The old process may already be gone; a fresh session works regardless.
@@ -47,10 +60,10 @@ export function NewAgentButton({ showLabel = false }: Props) {
         return;
       }
 
-      if (selectedAgent === 'cc') {
-        setActiveSidebarTab('cc');
+      if (selectedAgent === "cc") {
+        setActiveSidebarTab("cc");
         setCurrentAgentCardId(null);
-        setView('agent');
+        setView("agent");
         await handleNewSession();
         focusCCInput();
         return;
@@ -69,7 +82,7 @@ export function NewAgentButton({ showLabel = false }: Props) {
       setCwd,
       setCurrentAgentCardId,
       setView,
-    ]
+    ],
   );
 
   // Keyboard shortcut: Cmd/Ctrl+N → new thread / session
@@ -78,31 +91,50 @@ export function NewAgentButton({ showLabel = false }: Props) {
   // editable targets like other shortcuts do.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isNew = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n';
-      if (!isNew || e.shiftKey || e.altKey || e.repeat) return;
-      if (view !== 'agent') return;
+      const isNew = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "n";
+      if (!isNew || e.defaultPrevented || e.shiftKey || e.altKey || e.repeat)
+        return;
+      if (
+        e.target instanceof Element &&
+        e.target.closest('[role="dialog"], [role="alertdialog"]')
+      )
+        return;
+      if (
+        document.querySelector(
+          '.session-mode [data-slot="dialog-content"][data-state="open"], .session-mode [data-slot="alert-dialog-content"][data-state="open"]',
+        )
+      )
+        return;
+      if (view !== "agent") return;
       e.preventDefault();
       e.stopPropagation();
       void handleCreateNew();
     };
 
-    const stopHandleKeyDownForSession = listenInSessionMode(window, 'keydown', handleKeyDown);
+    const stopHandleKeyDownForSession = listenInSessionMode(
+      window,
+      "keydown",
+      handleKeyDown,
+    );
     return () => stopHandleKeyDownForSession();
   }, [handleCreateNew, view]);
 
   return (
     <Button
       onClick={() => void handleCreateNew()}
-      size={showLabel ? 'default' : 'icon'}
+      size={showLabel ? "default" : "icon"}
       variant="ghost"
-      className={`group ${showLabel ? 'justify-start' : ''} relative flex items-center gap-2`}
-      title={`${t('newChat')} (⌘N)`}
+      className={`group ${showLabel ? "justify-start" : ""} relative flex items-center gap-2`}
+      aria-label={t("newChat")}
+      title={`${t("newChat")} (⌘N)`}
     >
-      <SquarePen size={16} />
+      <Icon size={16} />
       {showLabel && (
         <div className="flex items-center justify-between w-full">
-          <span>{t('newChat')}</span>
-          <span className="hidden group-hover:inline text-xs text-muted-foreground ml-2">⌘N</span>
+          <span>{t("newChat")}</span>
+          <span className="hidden group-hover:inline text-xs text-muted-foreground ml-2">
+            ⌘N
+          </span>
         </div>
       )}
     </Button>

@@ -1,3 +1,4 @@
+import { resolveSessionDataHome } from "./session-data-home.js";
 import { resolveShellStartupEnv } from "./runtime-compat.js";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -65,9 +66,9 @@ export class SessionRuntimeManager {
           "packages/session-runtime/target/debug/codexia-web",
         ),
     );
-    const dataHome = resolve(
-      this.env.SESSION_DATA_HOME ||
-        resolve(this.sourceRoot, ".dev-runtime/session-mode"),
+    const dataHome = resolveSessionDataHome(
+      this.sourceRoot,
+      this.env.SESSION_DATA_HOME,
     );
     if (
       !isAbsolute(binary) ||

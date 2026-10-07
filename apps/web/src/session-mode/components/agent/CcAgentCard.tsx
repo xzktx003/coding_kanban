@@ -1,27 +1,38 @@
-import { Check, RotateCcw, Square } from 'lucide-react';
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { fromSdkMessages } from '@session/components/cc/utils/fromSdkMessages';
-import { Button } from '@session/components/ui/button';
-import { ccGetSessionMessages, ccInterrupt, ccResumeSession } from '@session/services/apiAdapt/cc';
-import { gitApplyWorktreeChanges, gitRemoveWorktree } from '@session/services/apiAdapt/git';
-import { useCCStore } from '@session/stores/cc';
-import type { AgentCenterCard } from '@session/stores/useAgentCenterStore';
-import { useAgentCenterStore } from '@session/stores/useAgentCenterStore';
-import { useAgentSettingsStore } from '@session/stores/useAgentSettingsStore';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
-import { getFilename } from '@session/utils/getFilename';
-import { CardResizeHandles } from './CardResizeHandles';
-import { useCardResize } from './useCardResize';
+import { useSessionState } from "../common/SessionStatus";
+import { useSessionTabActions } from "@session/hooks/useSessionTabs";
+import { Check, RotateCcw, Square } from "lucide-react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { fromSdkMessages } from "@session/components/cc/utils/fromSdkMessages";
+import { Button } from "@session/components/ui/button";
+import {
+  ccGetSessionMessages,
+  ccInterrupt,
+  ccResumeSession,
+} from "@session/services/apiAdapt/cc";
+import {
+  gitApplyWorktreeChanges,
+  gitRemoveWorktree,
+} from "@session/services/apiAdapt/git";
+import { useCCStore } from "@session/stores/cc";
+import type { AgentCenterCard } from "@session/stores/useAgentCenterStore";
+import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
+import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { getFilename } from "@session/utils/getFilename";
+import { CardResizeHandles } from "./CardResizeHandles";
+import { useCardResize } from "./useCardResize";
 
-const CCSession = lazy(() => import('@session/components/cc/session/CCSession'));
+const CCSession = lazy(
+  () => import("@session/components/cc/session/CCSession"),
+);
 
-import { toast } from 'sonner';
-import type { ResultMessage } from '@session/components/cc/types/messages';
+import { toast } from "sonner";
+import type { ResultMessage } from "@session/components/cc/types/messages";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 function fmtCost(usd: number): string {
-  if (usd < 0.001) return '<$0.001';
+  if (usd < 0.001) return "<$0.001";
   return `$${usd.toFixed(3)}`;
 }
 
@@ -32,19 +43,26 @@ function fmtTokens(n: number): string {
 function fmtElapsed(s: number): string {
   const m = Math.floor(s / 60);
   const sec = s % 60;
-  return m > 0 ? `${m}:${String(sec).padStart(2, '0')}` : `0:${String(sec).padStart(2, '0')}`;
+  return m > 0
+    ? `${m}:${String(sec).padStart(2, "0")}`
+    : `0:${String(sec).padStart(2, "0")}`;
 }
 
 // ─── CCAgentCard ──────────────────────────────────────────────────────────────────
 
 interface CCAgentCardProps {
-  card: AgentCenterCard & { kind: 'cc' };
+  card: AgentCenterCard & { kind: "cc" };
   onRemove: () => void;
   header: React.ReactNode;
   isSelected?: boolean;
 }
 
-export function CCAgentCard({ card, onRemove: _onRemove, header, isSelected }: CCAgentCardProps) {
+export function CCAgentCard({
+  card,
+  onRemove: _onRemove,
+  header,
+  isSelected,
+}: CCAgentCardProps) {
   const {
     sessionMessagesMap,
     sessionLoadingMap,
@@ -58,7 +76,8 @@ export function CCAgentCard({ card, onRemove: _onRemove, header, isSelected }: C
   } = useCCStore();
   const { cwd } = useWorkspaceStore();
   const { selectedAgent } = useAgentSettingsStore();
-  const { setCurrentAgentCardId, updateCard } = useAgentCenterStore();
+  const { updateCard } = useAgentCenterStore();
+  const { selectTab } = useSessionTabActions();
   const [isResumingSession, setIsResumingSession] = useState(false);
   const [isApplyingWorktree, setIsApplyingWorktree] = useState(false);
   const { size, startDrag, onDragMove, endDrag } = useCardResize(card.id);
@@ -69,12 +88,15 @@ export function CCAgentCard({ card, onRemove: _onRemove, header, isSelected }: C
   const processing = isActive && (sessionLoadingMap[card.id] ?? false);
   const needsResume = !isActive && messages.length === 0;
 
-  const hasPending = messages.some((m) => m.type === 'permission_request' && !m.resolved);
-  const canApplyWorktree = !!card.worktreePath && !!cwd && !processing && !hasPending;
+  const hasPending = messages.some(
+    (m) => m.type === "permission_request" && !m.resolved,
+  );
+  const canApplyWorktree =
+    !!card.worktreePath && !!cwd && !processing && !hasPending;
 
   const resultMsg = useMemo<ResultMessage | null>(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].type === 'result') return messages[i] as ResultMessage;
+      if (messages[i].type === "result") return messages[i] as ResultMessage;
     }
     return null;
   }, [messages]);
@@ -84,7 +106,9 @@ export function CCAgentCard({ card, onRemove: _onRemove, header, isSelected }: C
     : null;
 
   const cost: number | null =
-    typeof resultMsg?.total_cost_usd === 'number' ? resultMsg.total_cost_usd : null;
+    typeof resultMsg?.total_cost_usd === "number"
+      ? resultMsg.total_cost_usd
+      : null;
 
   // Live elapsed counter — derived from store start time so it survives remounts.
   const startTime = sessionStartTimeMap[card.id] ?? null;
@@ -92,7 +116,8 @@ export function CCAgentCard({ card, onRemove: _onRemove, header, isSelected }: C
 
   useEffect(() => {
     if (!processing || !startTime) return;
-    const update = () => setElapsed(Math.floor((Date.now() - startTime) / 1000));
+    const update = () =>
+      setElapsed(Math.floor((Date.now() - startTime) / 1000));
     update();
     const id = setInterval(update, 1000);
     return () => clearInterval(id);
@@ -111,7 +136,9 @@ export function CCAgentCard({ card, onRemove: _onRemove, header, isSelected }: C
 
   const handleResume = async () => {
     if (!cwd?.trim()) {
-      toast.error('Cannot resume session', { description: 'No working directory selected' });
+      toast.error("Cannot resume session", {
+        description: "No working directory selected",
+      });
       return;
     }
     setIsResumingSession(true);
@@ -129,17 +156,17 @@ export function CCAgentCard({ card, onRemove: _onRemove, header, isSelected }: C
         ...(options.effort ? { effort: options.effort } : {}),
       });
       addActiveSessionId(card.id);
-      setCurrentAgentCardId(card.id);
+      await selectTab(card);
       setSessionLoading(card.id, false);
     } catch (error) {
-      toast.error('Failed to resume session', { description: String(error) });
+      toast.error("Failed to resume session", { description: String(error) });
     } finally {
       setIsResumingSession(false);
     }
   };
 
   const handleApplyWorktree = async () => {
-    const worktreeKey = card.worktreePath?.split('/').pop();
+    const worktreeKey = card.worktreePath?.split("/").pop();
     if (!cwd || !worktreeKey) return;
 
     setIsApplyingWorktree(true);
@@ -147,27 +174,40 @@ export function CCAgentCard({ card, onRemove: _onRemove, header, isSelected }: C
       const result = await gitApplyWorktreeChanges(cwd, worktreeKey);
       await gitRemoveWorktree(cwd, worktreeKey);
       updateCard({ ...card, worktreePath: undefined });
-      toast.success('Applied worktree changes', {
-        description: `${result.changed_files} file${result.changed_files === 1 ? '' : 's'} merged into the main checkout`,
+      toast.success("Applied worktree changes", {
+        description: `${result.changed_files} file${result.changed_files === 1 ? "" : "s"} merged into the main checkout`,
       });
     } catch (error) {
-      toast.error('Failed to apply worktree changes', { description: String(error) });
+      toast.error("Failed to apply worktree changes", {
+        description: String(error),
+      });
     } finally {
       setIsApplyingWorktree(false);
     }
   };
 
+  const visualState = useSessionState(card.kind, card.id);
   const attentionBorder = hasPending
-    ? 'ring-2 ring-amber-500/70 border-amber-500/30'
+    ? "ring-2 ring-amber-500/70 border-amber-500/30"
     : isSelected
-      ? 'ring-2 ring-primary/60 border-primary/30'
-      : 'border';
+      ? "ring-2 ring-primary/60 border-primary/30"
+      : "border";
 
   return (
     <div
       data-card-root
+      data-session-card={card.id}
+      data-attention={visualState}
+      data-selected={Boolean(isSelected)}
+      onClickCapture={(event) => {
+        if (window.getSelection() && !window.getSelection()!.isCollapsed)
+          return;
+        if ((event.target as Element).closest("button, a, input, textarea"))
+          return;
+        if (!isSelected) void selectTab(card);
+      }}
       style={{ width: size.width, height: size.height }}
-      className={`relative flex flex-col ${size.width ? 'flex-none' : 'flex-1 basis-72'} min-w-[260px] ${attentionBorder} rounded-lg bg-background overflow-hidden transition-shadow`}
+      className={`relative flex flex-col ${size.width ? "flex-none" : "flex-1 basis-72"} min-w-[260px] ${attentionBorder} rounded-lg bg-background overflow-hidden transition-shadow`}
     >
       {header}
 
@@ -177,39 +217,54 @@ export function CCAgentCard({ card, onRemove: _onRemove, header, isSelected }: C
         <Suspense fallback={null}>
           <CCSession
             sessionId={card.id}
-            disableListener={selectedAgent === 'cc' && activeSessionId === card.id}
+            disableListener={
+              selectedAgent === "cc" && activeSessionId === card.id
+            }
           />
         </Suspense>
       </div>
 
-      <div className="flex items-center justify-between px-2 py-1 border-t bg-muted/20 shrink-0">
+      <div className="session-card-footer flex items-center justify-between px-2 py-1 border-t bg-muted/20 shrink-0">
         <div className="flex items-center gap-2">
           {displaySecs !== null && !isResumingSession && (
             <span
-              className={`text-[10px] font-mono tabular-nums ${processing ? 'text-green-500' : 'text-muted-foreground/60'}`}
+              className={`text-[10px] font-mono tabular-nums ${processing ? "text-green-500" : "text-muted-foreground/60"}`}
             >
               {fmtElapsed(displaySecs)}
             </span>
           )}
           {tokens !== null && (
-            <span className="text-[10px] text-muted-foreground/40">{fmtTokens(tokens)} tok</span>
+            <span className="text-[10px] text-muted-foreground/40">
+              {fmtTokens(tokens)} tok
+            </span>
           )}
           {cost !== null && (
-            <span className="text-[10px] text-muted-foreground/40">{fmtCost(cost)}</span>
+            <span className="text-[10px] text-muted-foreground/40">
+              {fmtCost(cost)}
+            </span>
           )}
           {hasPending && !processing && (
-            <span className="text-[10px] text-amber-500">needs input</span>
+            <span className="session-card-waiting text-[10px] text-amber-500">
+              等待回复
+            </span>
           )}
           <span
             className="text-[10px] text-muted-foreground/60 truncate max-w-[80px]"
-            title={card.cwd ?? ''}
+            title={card.cwd ?? ""}
           >
             {getFilename(card.cwd)}
           </span>
         </div>
         <div className="flex items-center gap-1">
           {processing && !isResumingSession && (
-            <Button size="icon" variant="destructive" className="h-6 w-6" onClick={handleStop}>
+            <Button
+              size="icon"
+              variant="destructive"
+              className="h-6 w-6"
+              aria-label="停止会话"
+              title="停止当前会话任务"
+              onClick={handleStop}
+            >
               <Square className="h-3 w-3" />
             </Button>
           )}
@@ -224,8 +279,10 @@ export function CCAgentCard({ card, onRemove: _onRemove, header, isSelected }: C
                 handleApplyWorktree();
               }}
             >
-              <Check className={`h-3 w-3 ${isApplyingWorktree ? 'animate-pulse' : ''}`} />
-              {isApplyingWorktree ? 'Applying…' : 'Apply'}
+              <Check
+                className={`h-3 w-3 ${isApplyingWorktree ? "animate-pulse" : ""}`}
+              />
+              {isApplyingWorktree ? "Applying…" : "Apply"}
             </Button>
           )}
           {needsResume && (
@@ -239,14 +296,20 @@ export function CCAgentCard({ card, onRemove: _onRemove, header, isSelected }: C
                 handleResume();
               }}
             >
-              <RotateCcw className={`h-3 w-3 ${isResumingSession ? 'animate-spin' : ''}`} />
-              {isResumingSession ? 'Loading…' : 'Resume'}
+              <RotateCcw
+                className={`h-3 w-3 ${isResumingSession ? "animate-spin" : ""}`}
+              />
+              {isResumingSession ? "Loading…" : "Resume"}
             </Button>
           )}
         </div>
       </div>
 
-      <CardResizeHandles startDrag={startDrag} onDragMove={onDragMove} endDrag={endDrag} />
+      <CardResizeHandles
+        startDrag={startDrag}
+        onDragMove={onDragMove}
+        endDrag={endDrag}
+      />
     </div>
   );
 }

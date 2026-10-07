@@ -1,8 +1,8 @@
-import { Plus } from 'lucide-react';
-import { Button } from '@session/components/ui/button';
-import { Input } from '@session/components/ui/input';
-import { GitFileTree } from './GitFileTree';
-import type { DiffSection, TreeNode } from './types';
+import { Plus } from "lucide-react";
+import { Button } from "@session/components/ui/button";
+import { Input } from "@session/components/ui/input";
+import { GitFileTree } from "./GitFileTree";
+import type { DiffSection, TreeNode } from "./types";
 
 interface GitFileTreePanelProps {
   cwd: string | null;
@@ -42,10 +42,10 @@ export function GitFileTreePanel({
   onUnstage,
 }: GitFileTreePanelProps) {
   return (
-    <div className="w-64 min-w-[220px] min-h-0 border-l border-white/10 flex flex-col">
-      <div className="px-3 border-b border-white/10 space-y-2">
+    <div className="w-64 min-w-[220px] min-h-0 border-l border-border flex flex-col">
+      <div className="px-3 border-b border-border space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">File tree</span>
+          <span className="text-xs text-muted-foreground">文件树</span>
           <Button
             variant="ghost"
             size="sm"
@@ -53,32 +53,36 @@ export function GitFileTreePanel({
             onClick={onOpenBulkStageDialog}
             disabled={bulkStagePaths.length === 0 || bulkStageLoading}
             title={
-              selectedDiffSection === 'staged'
-                ? 'Switch to Unstaged to use one-key stage'
-                : 'Stage all files in current list'
+              selectedDiffSection === "staged"
+                ? "切换到未暂存变更以批量暂存"
+                : "暂存当前列表中的全部文件"
             }
           >
             <Plus className="h-3.5 w-3.5 mr-1" />
-            Stage all
+            全部暂存
           </Button>
         </div>
         <Input
           value={filterText}
           onChange={(event) => onFilterTextChange(event.target.value)}
-          placeholder="Filter filename or folder..."
+          aria-label="筛选变更文件"
+          placeholder="筛选文件名或文件夹…"
           className="h-8 text-xs"
         />
       </div>
       <div className="flex-1 min-h-0 overflow-auto">
         <div className="p-2 space-y-1">
           {gitError && (
-            <div className="text-xs text-destructive rounded border border-destructive/30 p-2">
+            <div
+              role="alert"
+              className="text-xs text-destructive rounded border border-destructive/30 p-2"
+            >
               {gitError}
             </div>
           )}
           {filteredEntriesCount === 0 && (
             <div className="px-2 py-3 text-xs text-muted-foreground">
-              No files matched current filter.
+              没有符合筛选条件的文件。
             </div>
           )}
           {cwd ? (

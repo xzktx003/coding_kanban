@@ -1,43 +1,57 @@
-import { useCCBackgroundEvents } from '@session/hooks/useCCBackgroundEvents';
-import { useCodexStore } from '@session/components/codex/stores';
-import { codexService } from '@session/services/codexService';
-import { useAcpStore } from '@session/stores/useAcpStore';
-import { toast } from 'sonner';
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
-import { lazy, Suspense, useEffect, useState } from 'react';
-import { I18nextProvider } from 'react-i18next';
+import { startInputFacadeSync } from "./stores/useInputStore";
+import { startCCInputFacadeSync } from "./stores/cc/useCCInputStore";
+import { useCCBackgroundEvents } from "@session/hooks/useCCBackgroundEvents";
+import { useCodexStore } from "@session/components/codex/stores";
+import { codexService } from "@session/services/codexService";
+import { useAcpStore } from "@session/stores/useAcpStore";
+import { toast } from "sonner";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { I18nextProvider } from "react-i18next";
 
-import './App.css';
+import "./App.css";
 
-import { useBotActivity } from '@session/components/bot/useBotActivity';
-import { useCodexEvents } from '@session/components/codex/hooks';
-import { QuitDialog } from '@session/components/dialogs';
-import { AppLayout } from '@session/components/layout';
-import { MobileShell } from '@session/components/mobile/MobileShell';
-import { PairingView } from '@session/components/pairing/PairingView';
-import { TelemetryConsentDialog } from '@session/components/settings/TelemetryConsentDialog';
-import { Toaster } from '@session/components/ui/toaster';
-import { TooltipProvider } from '@session/components/ui/tooltip';
-import { ThemeProvider } from '@session/contexts/ThemeContext';
-import { HistoryProjectsDialog } from '@session/features/ProjectSelector';
-import { TodoCaptureHint } from '@session/features/todos/TodoCaptureHint';
-import { isDesktopTauri, isPhone } from '@session/hooks/runtime';
-import { useAppDeepLink } from '@session/hooks/useAppDeepLink';
-import { useDoubleShiftCapture } from '@session/hooks/useDoubleShiftCapture';
-import { useUrlParamThread } from '@session/hooks/useUrlParamThread';
-import { hasActiveWork } from '@session/lib/hasActiveWork';
-import { i18n } from '@session/lib/i18n';
-import { initSettingsSync, loadRemoteSettings, loadSettings } from '@session/lib/settings';
-import { reportAppActive } from '@session/lib/telemetry';
-import { initializeCodexAsync } from '@session/services/apiAdapt';
-import { usePairingStore } from '@session/stores/usePairingStore';
-import type { InitializeResponse } from './bindings';
+import { useBotActivity } from "@session/components/bot/useBotActivity";
+import { useCodexEvents } from "@session/components/codex/hooks";
+import { QuitDialog } from "@session/components/dialogs";
+import { AppLayout } from "@session/components/layout";
+import { MobileShell } from "@session/components/mobile/MobileShell";
+import { PairingView } from "@session/components/pairing/PairingView";
+import { TelemetryConsentDialog } from "@session/components/settings/TelemetryConsentDialog";
+import { Toaster } from "@session/components/ui/toaster";
+import { TooltipProvider } from "@session/components/ui/tooltip";
+import { ThemeProvider } from "@session/contexts/ThemeContext";
+import { HistoryProjectsDialog } from "@session/features/ProjectSelector";
+import { TodoCaptureHint } from "@session/features/todos/TodoCaptureHint";
+import { isDesktopTauri, isPhone } from "@session/hooks/runtime";
+import { useAppDeepLink } from "@session/hooks/useAppDeepLink";
+import { useDoubleShiftCapture } from "@session/hooks/useDoubleShiftCapture";
+import { useUrlParamThread } from "@session/hooks/useUrlParamThread";
+import { hasActiveWork } from "@session/lib/hasActiveWork";
+import { i18n } from "@session/lib/i18n";
+import {
+  initSettingsSync,
+  loadRemoteSettings,
+  loadSettings,
+} from "@session/lib/settings";
+import { reportAppActive } from "@session/lib/telemetry";
+import { initializeCodexAsync } from "@session/services/apiAdapt";
+import { usePairingStore } from "@session/stores/usePairingStore";
+import type { InitializeResponse } from "./bindings";
 
-const AboutView = lazy(() => import('@session/views/AboutView'));
-const UsagePanel = lazy(() => import('@session/views/UsagePanel'));
+const AboutView = lazy(() => import("@session/views/AboutView"));
+const UsagePanel = lazy(() => import("@session/views/UsagePanel"));
 
 function AppShell() {
+  useEffect(() => {
+    const stopInput = startInputFacadeSync(),
+      stopCC = startCCInputFacadeSync();
+    return () => {
+      stopInput();
+      stopCC();
+    };
+  }, []);
   useCCBackgroundEvents();
   const [quitDialogOpen, setQuitDialogOpen] = useState(false);
   const [settingsReady, setSettingsReady] = useState(false);
@@ -52,10 +66,12 @@ function AppShell() {
     const load = isPhone()
       ? loadRemoteSettings().then((ok) => (ok ? undefined : loadSettings()))
       : loadSettings();
-    load.catch(error => console.warn("Unable to load session settings", error)).finally(() => {
-      setSettingsReady(true);
-      reportAppActive();
-    });
+    load
+      .catch((error) => console.warn("Unable to load session settings", error))
+      .finally(() => {
+        setSettingsReady(true);
+        reportAppActive();
+      });
   }, []);
   useEffect(() => {
     // Only the machine that owns the settings file writes it back — a phone
@@ -70,22 +86,28 @@ function AppShell() {
     }
 
     initializeCodexAsync().catch((error) => {
-      console.warn('Failed to initialize codex asynchronously', error);
+      console.warn("Failed to initialize codex asynchronously", error);
     });
 
     // Listen for codex initialized event
-    const unlisten = listen<InitializeResponse>('codex:initialized', (event) => {
-      console.log('[App] Codex initialized, userAgent:', event.payload.userAgent);
-      setCodexReady(true);
-    });
+    const unlisten = listen<InitializeResponse>(
+      "codex:initialized",
+      (event) => {
+        console.log(
+          "[App] Codex initialized, userAgent:",
+          event.payload.userAgent,
+        );
+        setCodexReady(true);
+      },
+    );
 
     // Cmd+Q quits immediately when nothing is running, otherwise confirms first
-    const unlistenQuit = listen('quit-requested', () => {
+    const unlistenQuit = listen("quit-requested", () => {
       hasActiveWork().then((active) => {
         if (active) {
           setQuitDialogOpen(true);
         } else {
-          invoke('quit_app');
+          invoke("quit_app");
         }
       });
     });
@@ -105,11 +127,15 @@ function AppShell() {
       const thread = useCodexStore.getState().currentThreadId;
       useCodexStore.setState({ activeThreadIds: [], currentTurnId: null });
       useAcpStore.getState().setActive(false);
-      toast.info('会话服务已重启，正在恢复历史。');
-      if (thread) void codexService.threadResume(thread).catch(() => toast.error('会话历史恢复失败，请从项目列表重新打开。'));
+      toast.info("会话服务已重启，正在恢复历史。");
+      if (thread)
+        void codexService
+          .threadResume(thread)
+          .catch(() => toast.error("会话历史恢复失败，请从项目列表重新打开。"));
     };
-    window.addEventListener('session-runtime-restarted', recover);
-    return () => window.removeEventListener('session-runtime-restarted', recover);
+    window.addEventListener("session-runtime-restarted", recover);
+    return () =>
+      window.removeEventListener("session-runtime-restarted", recover);
   }, []);
   // Shift-Shift on a text selection captures it as a todo
   useDoubleShiftCapture();
@@ -152,8 +178,8 @@ function AppEntry() {
 }
 
 export default function App() {
-  const isAboutWindow = window.location.pathname === '/about';
-  const isUsageWindow = window.location.pathname === '/usage';
+  const isAboutWindow = window.location.pathname === "/about";
+  const isUsageWindow = window.location.pathname === "/usage";
 
   return (
     <ThemeProvider>

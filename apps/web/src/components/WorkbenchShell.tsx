@@ -3,10 +3,11 @@ import {
   lazy,
   Suspense,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
-import { MessageSquare, TerminalSquare } from "lucide-react";
+import { WorkbenchModeSwitch } from "./WorkbenchModeSwitch";
 import TerminalApp from "../App";
 import {
   readWorkbenchMode,
@@ -19,7 +20,7 @@ import "../workbench.css";
 const SessionApp = lazy(() => import("../session-mode/SessionWorkbench"));
 
 class SessionBoundary extends Component<
-  { children: ReactNode },
+  { children: ReactNode; onTerminal: () => void },
   { failed: boolean }
 > {
   state = { failed: false };
@@ -32,6 +33,7 @@ class SessionBoundary extends Component<
         <div className="workbench-state" role="alert">
           <h2>会话界面加载失败</h2>
           <p>终端模式仍然可用。</p>
+          <button onClick={this.props.onTerminal}>切换到终端模式</button>
           <button onClick={() => this.setState({ failed: false })}>
             重新加载界面
           </button>
@@ -44,19 +46,50 @@ class SessionBoundary extends Component<
 export function WorkbenchShell() {
   const [mode, setMode] = useState<WorkbenchMode>(readWorkbenchMode);
   const [sessionVisited, setSessionVisited] = useState(mode === "session");
+  const restoreModeFocus = useRef(false);
+  useEffect(() => {
+    if (!restoreModeFocus.current) return;
+    const focusSwitch = () => {
+      const selector =
+        mode === "terminal"
+          ? ".workbench-header .mode-switch-rail"
+          : ".session-mode:not([hidden]) .mode-switch-rail";
+      const target = document.querySelector<HTMLButtonElement>(selector);
+      if (!target) return false;
+      target.focus({ preventScroll: true });
+      restoreModeFocus.current = false;
+      return true;
+    };
+    if (focusSwitch()) return;
+    const observer = new MutationObserver(() => {
+      if (focusSwitch()) observer.disconnect();
+    });
+    observer.observe(
+      document.querySelector(".workbench-shell") ?? document.body,
+      { childList: true, subtree: true },
+    );
+    return () => observer.disconnect();
+  }, [mode]);
   useEffect(() => {
     const sync = () => {
       const next = readWorkbenchMode();
       setMode(next);
-    window.dispatchEvent(new CustomEvent("workbench-mode-changed", { detail: next }));
+      window.dispatchEvent(
+        new CustomEvent("workbench-mode-changed", { detail: next }),
+      );
       if (next === "session") setSessionVisited(true);
     };
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, []);
   function select(next: WorkbenchMode) {
+    restoreModeFocus.current =
+      next !== mode &&
+      Boolean(document.activeElement?.closest(".workbench-mode-switch"));
     setMode(next);
-    window.dispatchEvent(new CustomEvent("workbench-mode-changed", { detail: next }));
+    window.dispatchEvent(
+      new CustomEvent("workbench-mode-changed", { detail: next }),
+    );
     if (next === "session") setSessionVisited(true);
     try {
       localStorage.setItem(WORKBENCH_MODE_KEY, next);
@@ -73,46 +106,34 @@ export function WorkbenchShell() {
     );
   }
   return (
-    <div className="workbench-shell">
-      <header className="workbench-header">
-        <div className="workbench-brand">
-          <img src="/houmo-logo.png" alt="Houmo" />
-          <span>Coding Kanban</span>
-        </div>
-        <nav className="workbench-modes" aria-label="工作模式">
-          <button
-            aria-pressed={mode === "terminal"}
-            onClick={() => select("terminal")}
-          >
-            <TerminalSquare size={16} />
-            <span>终端模式</span>
-          </button>
-          <button
-            aria-pressed={mode === "session"}
-            onClick={() => select("session")}
-          >
-            <MessageSquare size={16} />
-            <span>会话模式</span>
-          </button>
-        </nav>
-        <span className="workbench-context">
-          {mode === "terminal" ? "多终端工作台" : "Agent 会话工作台"}
-        </span>
-      </header>
+    <div className="workbench-shell" data-mode={mode}>
+      {mode === "terminal" && (
+        <header className="workbench-header">
+          <div className="workbench-brand">
+            <img src="/houmo-logo.png" alt="Houmo" />
+            <span>Coding Kanban</span>
+          </div>
+          <WorkbenchModeSwitch mode="terminal" onChange={select} />
+          <span className="workbench-context">多终端工作台</span>
+        </header>
+      )}
       <div className="workbench-terminal" hidden={mode !== "terminal"}>
-        <TerminalApp />
+        <TerminalApp embedded />
       </div>
       {sessionVisited && (
         <div className="session-mode dark" hidden={mode !== "session"}>
-          <SessionBoundary>
+          <SessionBoundary onTerminal={() => select("terminal")}>
             <Suspense
               fallback={
                 <div className="workbench-state" role="status">
                   正在加载会话工作台…
+                  <button onClick={() => select("terminal")}>
+                    切换到终端模式
+                  </button>
                 </div>
               }
             >
-              <SessionApp />
+              <SessionApp onModeChange={select} />
             </Suspense>
           </SessionBoundary>
         </div>

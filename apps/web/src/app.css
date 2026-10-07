@@ -10041,3 +10041,99 @@ input {
     min-height: 36px;
   }
 }
+
+/* Session workflow: shared readable entrances and compact, stable controls. */
+.session-entry-button {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0;
+  padding: 2px 0;
+  color: inherit;
+  background: transparent;
+  font-weight: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.session-entry-button:hover {
+  color: #e7cfab;
+}
+.session-entry-button:focus-visible,
+.hidden-drawer-close:focus-visible {
+  outline: 2px solid #d8b77b;
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.hidden-drawer-close {
+  display: grid;
+  place-items: center;
+  height: 32px;
+  width: 32px;
+  flex-shrink: 0;
+  border: 1px solid #ffffff20;
+  border-radius: 6px;
+  color: #f4f1ea;
+  background: #29343f;
+  cursor: pointer;
+}
+.filter-item--search {
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+.filter-item--search .filter-input {
+  width: 100%;
+}
+.agent-grid-toolbar {
+  align-items: start;
+}
+.agent-grid-toolbar .filter-bar {
+  flex: 1 1 600px;
+  flex-wrap: wrap;
+}
+.grid-card-header {
+  min-height: 44px;
+}
+.grid-card-title .session-entry-button {
+  width: 100%;
+  min-height: 28px;
+}
+.focus-sidebar-card .session-entry-button {
+  min-height: 28px;
+}
+@media (max-width: 640px) {
+  .filter-item--search {
+    flex-basis: 100%;
+  }
+  .hidden-drawer-close {
+    width: 44px;
+    height: 44px;
+  }
+  .session-entry-button {
+    min-height: 40px;
+  }
+}
+
+/* Update feedback participates in the toolbar layout instead of covering branding. */
+.top-bar-update-status {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.top-bar-update-status .app-update-indicator {
+  position: static;
+  z-index: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  box-shadow: none;
+  color: var(--text-primary, oklch(93% 0.01 80));
+  font-size: 12px;
+  white-space: nowrap;
+}

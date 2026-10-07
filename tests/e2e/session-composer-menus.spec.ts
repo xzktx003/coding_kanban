@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { installSessionUxFixture } from "./session-ux-fixture";
 
 test("composer command and mention menus inherit the theme and fit desktop and mobile viewports", async ({
   page,
@@ -6,11 +7,7 @@ test("composer command and mention menus inherit the theme and fit desktop and m
   test.setTimeout(60000);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.route("**/api/session/api/settings", (r) =>
-    r.request().method() === "POST"
-      ? r.fulfill({ status: 200, body: "" })
-      : r.continue(),
-  );
+  await installSessionUxFixture(page, 0);
   await page.route("**/api/session/api/codex/plugin/installed", (r) =>
     r.fulfill({ json: { marketplaces: [] } }),
   );
@@ -40,12 +37,43 @@ test("composer command and mention menus inherit the theme and fit desktop and m
   const editor = page.locator(".session-mode [contenteditable=true]").first();
   await editor.waitFor();
   await page.evaluate(async () => {
-    const { useAgentSettingsStore } =
-      await import("/src/session-mode/stores/useAgentSettingsStore.ts");
-    const { useLayoutStore } =
-      await import("/src/session-mode/stores/useLayoutStore.ts");
-    const { useAgentCenterStore } =
-      await import("/src/session-mode/stores/useAgentCenterStore.ts");
+    const { useWorkspaceStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/stores/useWorkspaceStore.ts",
+        )?.name ?? "/src/session-mode/stores/useWorkspaceStore.ts"
+    );
+    useWorkspaceStore.setState({ cwd: "/fixture", projects: ["/fixture"] });
+    const { useAgentSettingsStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/stores/useAgentSettingsStore.ts",
+        )?.name ?? "/src/session-mode/stores/useAgentSettingsStore.ts"
+    );
+    const { useLayoutStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/stores/useLayoutStore.ts",
+        )?.name ?? "/src/session-mode/stores/useLayoutStore.ts"
+    );
+    const { useAgentCenterStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/stores/useAgentCenterStore.ts",
+        )?.name ?? "/src/session-mode/stores/useAgentCenterStore.ts"
+    );
     useAgentSettingsStore.setState({ selectedAgent: "codex" });
     useLayoutStore.setState({
       view: "agent",
@@ -124,21 +152,45 @@ test("composer command and mention menus inherit the theme and fit desktop and m
 test("Claude slash menu keeps the editor focused while selecting a command", async ({
   page,
 }) => {
-  await page.route("**/api/session/api/settings", (r) =>
-    r.request().method() === "POST"
-      ? r.fulfill({ status: 200, body: "" })
-      : r.continue(),
-  );
+  await installSessionUxFixture(page, 0);
   await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
   await page.locator(".session-mode [contenteditable=true]").first().waitFor();
   await page.evaluate(async () => {
-    const { useCCStore } = await import("/src/session-mode/stores/cc/index.ts");
-    const { useAgentSettingsStore } =
-      await import("/src/session-mode/stores/useAgentSettingsStore.ts");
-    const { useLayoutStore } =
-      await import("/src/session-mode/stores/useLayoutStore.ts");
-    const { useAgentCenterStore } =
-      await import("/src/session-mode/stores/useAgentCenterStore.ts");
+    const { useCCStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname === "/src/session-mode/stores/cc/index.ts",
+        )?.name ?? "/src/session-mode/stores/cc/index.ts"
+    );
+    const { useAgentSettingsStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/stores/useAgentSettingsStore.ts",
+        )?.name ?? "/src/session-mode/stores/useAgentSettingsStore.ts"
+    );
+    const { useLayoutStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/stores/useLayoutStore.ts",
+        )?.name ?? "/src/session-mode/stores/useLayoutStore.ts"
+    );
+    const { useAgentCenterStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/stores/useAgentCenterStore.ts",
+        )?.name ?? "/src/session-mode/stores/useAgentCenterStore.ts"
+    );
     useCCStore.setState({
       slashCommands: ["help", "compact", "review"],
       activeSessionId: null,

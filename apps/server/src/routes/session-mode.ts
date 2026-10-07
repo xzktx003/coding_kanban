@@ -1,3 +1,6 @@
+import { registerSessionProjectsRoutes } from "./session-projects.js";
+import { registerWorkspaceFileRoutes } from "./workspace-files.js";
+import { registerSessionTabsRoutes } from "./session-tabs.js";
 import { saveSessionAttachment } from "../services/session-attachments.js";
 import { resolve } from "node:path";
 import { Readable } from "node:stream";
@@ -34,11 +37,61 @@ export function registerSessionModeRoutes(
   app: FastifyInstance,
   options: SessionModeRouteOptions = {},
 ): void {
+  registerSessionTabsRoutes(app, {
+    file: options.attachmentRoot
+      ? resolve(options.attachmentRoot, "..", "followed-sessions.json")
+      : undefined,
+  });
+  const sharedProjects = registerSessionProjectsRoutes(app, {
+    file: options.attachmentRoot
+      ? resolve(options.attachmentRoot, "..", "projects.json")
+      : undefined,
+    legacyFile: options.attachmentRoot
+      ? resolve(options.attachmentRoot, "..", ".codexia", "settings.json")
+      : undefined,
+  });
   let origin = options.origin ? validateOrigin(options.origin).origin : null;
   const fetchUpstream = options.fetch ?? globalThis.fetch;
+  registerWorkspaceFileRoutes(app, {
+    trashHome: options.attachmentRoot
+      ? resolve(options.attachmentRoot, "..", "file-trash")
+      : undefined,
+    roots: async () => {
+      let projects: string[] = [...(options.projects?.() ?? [])];
+      if (options.attachmentRoot) {
+        return [...projects, ...(await sharedProjects.getProjects())];
+      }
+      if (origin) {
+        try {
+          const response = await fetchUpstream(`${origin}/api/settings`, {
+            signal: AbortSignal.timeout(2000),
+          });
+          if (response.ok) {
+            const settings = (await response.json()) as {
+              workspace?: { projects?: unknown[] };
+            };
+            projects = [
+              ...projects,
+              ...(settings.workspace?.projects ?? []).filter(
+                (p): p is string =>
+                  typeof p === "string" &&
+                  p.startsWith("/") &&
+                  !/[\\\x00-\x1f]/.test(p),
+              ),
+            ];
+          }
+        } catch {
+          /* Registered terminal projects remain accessible during outages. */
+        }
+      }
+      return projects;
+    },
+  });
   app.get("/api/workbench/projects", async () => {
     let sessionProjects: unknown[] = [];
-    if (origin) {
+    if (options.attachmentRoot)
+      sessionProjects = await sharedProjects.getProjects();
+    else if (origin) {
       try {
         const response = await fetchUpstream(`${origin}/api/settings`, {
           signal: AbortSignal.timeout(2000),
@@ -80,12 +133,9 @@ export function registerSessionModeRoutes(
           ),
         };
       } catch (error) {
-        return reply
-          .code(400)
-          .send({
-            error:
-              error instanceof Error ? error.message : "Invalid attachment",
-          });
+        return reply.code(400).send({
+          error: error instanceof Error ? error.message : "Invalid attachment",
+        });
       }
     },
   );
@@ -108,11 +158,9 @@ export function registerSessionModeRoutes(
         }
       }
       if (!origin)
-        return reply
-          .code(503)
-          .send({
-            error: "会话服务尚未启动，请检查 session:build 和服务日志。",
-          });
+        return reply.code(503).send({
+          error: "会话服务尚未启动，请检查 session:build 和服务日志。",
+        });
       const suffix = request.raw.url!.slice("/api/session".length);
       const pathname = suffix.split("?")[0];
       if (

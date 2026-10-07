@@ -24,6 +24,7 @@ import { MobileFileBrowser } from "./MobileFileBrowser";
 import { MobileTerminalToolbar } from "./MobileTerminalToolbar";
 
 interface MobileWorkbenchPageProps {
+  showBrand?: boolean;
   activeSessionId: string | null;
   isLoading: boolean;
   sessions: AgentSessionRecord[];
@@ -434,6 +435,7 @@ export function MobileSessionSwitcher({
 }
 
 export function MobileWorkbenchPage({
+  showBrand = true,
   activeSessionId,
   isLoading,
   sessions,
@@ -589,14 +591,18 @@ export function MobileWorkbenchPage({
       <header className="mobile-workbench-header">
         <div className="mobile-workbench-mode-switch" aria-label="端切换">
           <div className="mobile-workbench-title">
-            <img
-              className="kanban-brand-logo"
-              src="/houmo-logo.png"
-              alt="后摩智能 HOUMO.AI"
-              width={258}
-              height={56}
-            />
-            <strong>手机端 Coding Kanban</strong>
+            {showBrand && (
+              <>
+                <img
+                  className="kanban-brand-logo"
+                  src="/houmo-logo.png"
+                  alt="后摩智能 HOUMO.AI"
+                  width={258}
+                  height={56}
+                />
+                <strong>手机端 Coding Kanban</strong>
+              </>
+            )}
             <span>
               {activeSession
                 ? `${activeSession.projectName ?? activeSession.hostId ?? "默认工作区"} · ${connectionLabels[activeSession.connectionState] ?? activeSession.connectionState}`
@@ -604,7 +610,7 @@ export function MobileWorkbenchPage({
             </span>
           </div>
           <a className="mobile-workbench-desktop-link" href="/">
-            电脑端 Coding Kanban
+            {showBrand ? "电脑端 Coding Kanban" : "电脑端"}
           </a>
           {onToggleAgentCompletionNotifications && (
             <button

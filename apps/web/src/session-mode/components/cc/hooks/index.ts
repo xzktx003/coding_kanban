@@ -1,11 +1,16 @@
-import { hasCCGlobalBridge } from '@session/hooks/useCCBackgroundEvents';
-import { listen } from '@tauri-apps/api/event';
-import { useEffect } from 'react';
-import { isDesktopTauri } from '@session/hooks/runtime';
-import { openEventStream } from '@session/lib/eventStream';
-import { CC_LISTENER_READY_EVENT, CC_PERMISSION_LISTENER_READY_EVENT, registerCCListener } from '@session/lib/ccListenerReadiness';
-import { useCCStore } from '@session/stores/cc';
-import type { CCMessage, SystemMessage } from '../types/messages';
+import { useSessionAttentionStore } from "@session/stores/useSessionAttentionStore";
+import { hasCCGlobalBridge } from "@session/hooks/useCCBackgroundEvents";
+import { listen } from "@tauri-apps/api/event";
+import { useEffect } from "react";
+import { isDesktopTauri } from "@session/hooks/runtime";
+import { openEventStream } from "@session/lib/eventStream";
+import {
+  CC_LISTENER_READY_EVENT,
+  CC_PERMISSION_LISTENER_READY_EVENT,
+  registerCCListener,
+} from "@session/lib/ccListenerReadiness";
+import { useCCStore } from "@session/stores/cc";
+import type { CCMessage, SystemMessage } from "../types/messages";
 
 interface CCListenerOptions {
   /** Disable the listener entirely. */
@@ -28,7 +33,7 @@ function subscribe<T>(
   readyEvent: string,
   sessionId: string,
   embedded: boolean,
-  onPayload: (payload: T) => void
+  onPayload: (payload: T) => void,
 ): () => void {
   const readiness = embedded ? null : registerCCListener(readyEvent, sessionId);
   if (isDesktopTauri()) {
@@ -57,7 +62,10 @@ function subscribe<T>(
  * Hook to listen for message stream events from the Tauri backend.
  * Supports both standalone (global active session) and embedded (per-session) modes.
  */
-export function useCCSessionListener({ disabled = false, sessionId }: CCListenerOptions = {}) {
+export function useCCSessionListener({
+  disabled = false,
+  sessionId,
+}: CCListenerOptions = {}) {
   const activeSessionId = useCCStore((s) => s.activeSessionId);
   const addMessage = useCCStore((s) => s.addMessage);
   const addMessageToSession = useCCStore((s) => s.addMessageToSession);
@@ -72,13 +80,25 @@ export function useCCSessionListener({ disabled = false, sessionId }: CCListener
     const handleMessage = (message: CCMessage) => {
       const msgSessionId = (message as { session_id?: string }).session_id;
       if (msgSessionId && msgSessionId !== targetSessionId) return;
+      if (message.type === "result" && !message.is_error)
+        useSessionAttentionStore
+          .getState()
+          .complete(
+            "cc",
+            targetSessionId,
+            message.uuid || `${message.duration_ms}:${message.num_turns}`,
+          );
 
       if (sessionId) {
-        if (isDesktopTauri() || !hasCCGlobalBridge()) addMessageToSession(sessionId, message);
+        if (isDesktopTauri() || !hasCCGlobalBridge())
+          addMessageToSession(sessionId, message);
         return;
       }
 
-      if (message.type === 'system' && (message as SystemMessage).subtype === 'init') {
+      if (
+        message.type === "system" &&
+        (message as SystemMessage).subtype === "init"
+      ) {
         const cmds = (message as SystemMessage).slash_commands;
         if (Array.isArray(cmds)) setSlashCommands(cmds);
       }
@@ -86,13 +106,20 @@ export function useCCSessionListener({ disabled = false, sessionId }: CCListener
     };
 
     return subscribe<CCMessage>(
-      'cc-message',
+      "cc-message",
       CC_LISTENER_READY_EVENT,
       targetSessionId,
       Boolean(sessionId),
-      handleMessage
+      handleMessage,
     );
-  }, [disabled, targetSessionId, sessionId, addMessage, addMessageToSession, setSlashCommands]);
+  }, [
+    disabled,
+    targetSessionId,
+    sessionId,
+    addMessage,
+    addMessageToSession,
+    setSlashCommands,
+  ]);
 }
 
 type PermPayload = {
@@ -100,14 +127,17 @@ type PermPayload = {
   sessionId: string;
   toolName: string;
   toolInput: Record<string, unknown>;
-  alwaysAllowTarget?: 'project' | 'session';
+  alwaysAllowTarget?: "project" | "session";
 };
 
 /**
  * Hook to listen for permission requests from the Tauri backend.
  * Supports both standalone (global active session) and embedded (per-session) modes.
  */
-export function useCCPermissionListener({ disabled = false, sessionId }: CCListenerOptions = {}) {
+export function useCCPermissionListener({
+  disabled = false,
+  sessionId,
+}: CCListenerOptions = {}) {
   const activeSessionId = useCCStore((s) => s.activeSessionId);
   const addMessage = useCCStore((s) => s.addMessage);
   const addMessageToSession = useCCStore((s) => s.addMessageToSession);
@@ -127,17 +157,20 @@ export function useCCPermissionListener({ disabled = false, sessionId }: CCListe
       } = payload;
       if (evtSessionId !== targetSessionId) {
         if (!sessionId) {
-          console.warn('[CCSession] Ignoring permission request for inactive session', {
-            targetSessionId,
-            requestId,
-            evtSessionId,
-          });
+          console.warn(
+            "[CCSession] Ignoring permission request for inactive session",
+            {
+              targetSessionId,
+              requestId,
+              evtSessionId,
+            },
+          );
         }
         return;
       }
 
       const permissionMessage = {
-        type: 'permission_request',
+        type: "permission_request",
         requestId,
         sessionId: evtSessionId,
         toolName,
@@ -154,11 +187,11 @@ export function useCCPermissionListener({ disabled = false, sessionId }: CCListe
     };
 
     return subscribe<PermPayload>(
-      'cc-permission-request',
+      "cc-permission-request",
       CC_PERMISSION_LISTENER_READY_EVENT,
       targetSessionId,
       Boolean(sessionId),
-      handlePermission
+      handlePermission,
     );
   }, [disabled, targetSessionId, sessionId, addMessage, addMessageToSession]);
 }

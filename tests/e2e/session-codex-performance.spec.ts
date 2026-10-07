@@ -86,17 +86,22 @@ test("long Codex history stays bounded, scrollable and isolated from background 
     // Measure until the latest row is actually in the viewport, including React scheduling.
     let ready = false;
     while (performance.now() - start < 10000) {
-      await new Promise(resolve => requestAnimationFrame(resolve));
+      await new Promise((resolve) => requestAnimationFrame(resolve));
       const row = document.querySelector('[data-codex-row="event-1499"]');
       const viewport = row?.closest('[data-slot="scroll-area-viewport"]');
       if (row && viewport) {
         const message = row.getBoundingClientRect();
         const area = viewport.getBoundingClientRect();
-        if (message.top < area.bottom && message.bottom > area.top) { ready = true; break; }
+        if (message.top < area.bottom && message.bottom > area.top) {
+          ready = true;
+          break;
+        }
       }
     }
-    if (!ready) throw new Error('Latest history row did not become visible');
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    if (!ready) throw new Error("Latest history row did not become visible");
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)),
+    );
     return performance.now() - start;
   });
   await expect(page.getByText("性能消息 1499", { exact: true })).toBeAttached();
@@ -224,9 +229,13 @@ test("long Codex history stays bounded, scrollable and isolated from background 
       surface.locator("[data-codex-row]").first().getAttribute("data-index"),
     )
     .toBe(anchor);
-  await page.getByRole("button", { name: "终端模式", exact: true }).click();
-  await page.getByRole("button", { name: "会话模式", exact: true }).click();
-  await expect.poll(() => surface.locator("[data-codex-row]").first().getAttribute("data-index")).toBe(anchor);
+  await page.getByRole("switch", { name: "工作模式", exact: true }).click();
+  await page.getByRole("button", { name: "会话", exact: true }).click();
+  await expect
+    .poll(() =>
+      surface.locator("[data-codex-row]").first().getAttribute("data-index"),
+    )
+    .toBe(anchor);
   await page
     .getByRole("button", { name: "Scroll to bottom", exact: true })
     .click();
