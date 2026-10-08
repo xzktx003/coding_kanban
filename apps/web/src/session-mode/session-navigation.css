@@ -1,4 +1,19 @@
 /* Navigation A: restrained, single-line lists and one toolbar for a single group. */
+.session-mode .session-top-nav .session-remote-update-notice {
+  gap: 6px;
+  border: 1px solid color-mix(in srgb, var(--session-pending) 45%, var(--border));
+  color: var(--session-pending);
+  background: color-mix(in srgb, var(--session-pending) 10%, var(--sidebar));
+}
+.session-mode .session-top-nav .session-remote-update-notice:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+@media (max-width: 767px) {
+  .session-mode .session-top-nav .session-remote-update-notice span {
+    display: none;
+  }
+}
 .session-mode.dark.accent-default {
   --background: #20252c;
   --foreground: #e5e9ee;

@@ -40,7 +40,7 @@ interface GitUpdateOperation {
 
 export interface GitAutoUpdateServiceOptions {
   sourceRoot: string;
-  intervalMinutes: 10 | 30 | null;
+  intervalMinutes: 10 | 15 | 30 | null;
   checkRunner?: (sourceRoot: string) => Promise<GitUpdateRunResult>;
   applyRunner?: (sourceRoot: string) => Promise<GitUpdateRunResult>;
   now?: () => Date;

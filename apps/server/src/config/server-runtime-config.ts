@@ -20,7 +20,7 @@ export type ServerStorageRuntimeConfig = {
   sessionStatePath: string;
 };
 
-export type GitAutoPullIntervalMinutes = 10 | 30 | null;
+export type GitAutoPullIntervalMinutes = 10 | 15 | 30 | null;
 
 export const DEFAULT_TERMINAL_SCROLLBACK_BYTES = 4 * 1024 * 1024;
 export const DEFAULT_TERMINAL_TMUX_CAPTURE_LINES = 20_000;
@@ -76,11 +76,11 @@ export function resolveGitAutoPullIntervalMinutes(
   if (!normalized || normalized === "0") {
     return null;
   }
-  if (normalized === "10" || normalized === "30") {
-    return Number(normalized) as 10 | 30;
+  if (normalized === "10" || normalized === "15" || normalized === "30") {
+    return Number(normalized) as 10 | 15 | 30;
   }
 
-  throw new Error("GIT_AUTO_PULL_INTERVAL_MINUTES must be 0, 10, or 30");
+  throw new Error("GIT_AUTO_PULL_INTERVAL_MINUTES must be 0, 10, 15, or 30");
 }
 
 export function resolveTerminalHistoryRuntimeConfig(

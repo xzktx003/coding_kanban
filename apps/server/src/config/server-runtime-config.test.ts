@@ -11,7 +11,7 @@ import {
   resolveTerminalHistoryRuntimeConfig,
 } from "./server-runtime-config.js";
 
-test("accepts only disabled, 10-minute, or 30-minute Git auto-pull intervals", () => {
+test("accepts only disabled, 10-minute, 15-minute, or 30-minute Git auto-pull intervals", () => {
   assert.equal(resolveGitAutoPullIntervalMinutes({}), null);
   assert.equal(
     resolveGitAutoPullIntervalMinutes({
@@ -27,6 +27,12 @@ test("accepts only disabled, 10-minute, or 30-minute Git auto-pull intervals", (
   );
   assert.equal(
     resolveGitAutoPullIntervalMinutes({
+      GIT_AUTO_PULL_INTERVAL_MINUTES: "15",
+    }),
+    15,
+  );
+  assert.equal(
+    resolveGitAutoPullIntervalMinutes({
       GIT_AUTO_PULL_INTERVAL_MINUTES: "30",
     }),
     30,
@@ -34,9 +40,9 @@ test("accepts only disabled, 10-minute, or 30-minute Git auto-pull intervals", (
   assert.throws(
     () =>
       resolveGitAutoPullIntervalMinutes({
-        GIT_AUTO_PULL_INTERVAL_MINUTES: "15",
+        GIT_AUTO_PULL_INTERVAL_MINUTES: "20",
       }),
-    /GIT_AUTO_PULL_INTERVAL_MINUTES must be 0, 10, or 30/,
+    /GIT_AUTO_PULL_INTERVAL_MINUTES must be 0, 10, 15, or 30/,
   );
 });
 

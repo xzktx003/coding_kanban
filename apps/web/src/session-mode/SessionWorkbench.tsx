@@ -30,7 +30,8 @@ import type { WorkbenchMode } from "../lib/workbench-mode";
 
 function SessionWorkbenchContent({
   onModeChange,
-}: { onModeChange?: (mode: WorkbenchMode) => void } = {}) {
+  active = true,
+}: { onModeChange?: (mode: WorkbenchMode) => void; active?: boolean } = {}) {
   useComposerViewport();
   useAttentionStorageSync();
   useEffect(() => startSessionTranscriptCache(), []);
@@ -161,7 +162,11 @@ function SessionWorkbenchContent({
   )
     return (
       <div className="session-workbench">
-        <SessionTopNavigation status={status} onModeChange={onModeChange} />
+        <SessionTopNavigation
+          status={status}
+          onModeChange={onModeChange}
+          active={active}
+        />
         <div className="flex-1 min-h-0">
           <OfflineWorkspace retry={retry} />
         </div>
@@ -170,7 +175,11 @@ function SessionWorkbenchContent({
   if (!loaded && !hasCachedTranscript && status !== "ready")
     return (
       <div className="session-workbench">
-        <SessionTopNavigation status={status} onModeChange={onModeChange} />
+        <SessionTopNavigation
+          status={status}
+          onModeChange={onModeChange}
+          active={active}
+        />
         <div
           className="session-connection-state"
           role={status === "offline" ? "alert" : "status"}
@@ -199,7 +208,11 @@ function SessionWorkbenchContent({
     );
   return (
     <div className="session-workbench">
-      <SessionTopNavigation status={status} onModeChange={onModeChange} />
+      <SessionTopNavigation
+        status={status}
+        onModeChange={onModeChange}
+        active={active}
+      />
       {(loaded || hasCachedTranscript) && status === "offline" && (
         <div className="session-outage" role="alert">
           <span>会话服务连接中断，正在自动重连。草稿已保留。</span>
@@ -222,7 +235,10 @@ function SessionWorkbenchContent({
 }
 
 export default function SessionWorkbench(
-  props: { onModeChange?: (mode: WorkbenchMode) => void } = {},
+  props: {
+    onModeChange?: (mode: WorkbenchMode) => void;
+    active?: boolean;
+  } = {},
 ) {
   return (
     <ThemeProvider>

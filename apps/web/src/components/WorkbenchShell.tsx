@@ -148,7 +148,7 @@ export function WorkbenchShell() {
                 </div>
               }
             >
-              <SessionApp onModeChange={select} />
+              <SessionApp active={mode === "session"} onModeChange={select} />
             </Suspense>
           </SessionBoundary>
         </div>

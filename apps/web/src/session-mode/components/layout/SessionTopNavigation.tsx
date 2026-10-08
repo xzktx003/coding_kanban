@@ -44,6 +44,7 @@ import type { SessionConnectionState } from "../../hooks/useFollowedSessionState
 import { DataImportDialog } from "../../DataImportDialog";
 import type { WorkbenchMode } from "../../../lib/workbench-mode";
 import { WorkbenchModeSwitch } from "../../../components/WorkbenchModeSwitch";
+import { SessionRemoteUpdateNotice } from "./SessionRemoteUpdateNotice";
 
 const secondary = [
   { view: "plugins", label: "工具与技能", Icon: Plug },
@@ -53,9 +54,11 @@ const secondary = [
 export function SessionTopNavigation({
   status,
   onModeChange,
+  active = true,
 }: {
   status: SessionConnectionState;
   onModeChange?: (mode: WorkbenchMode) => void;
+  active?: boolean;
 }) {
   const layout = useLayoutStore();
   const mobile = useIsMobile();
@@ -111,6 +114,10 @@ export function SessionTopNavigation({
           </button>
         ))}
         <span className="session-top-spacer" />
+        <SessionRemoteUpdateNotice
+          active={active}
+          onOpenUpdate={() => onModeChange?.("terminal")}
+        />
         <RunningSessionsSummary status={status} />
         <FollowedSessionsMenu summary status={status} />
         {layout.view === "agent" && (

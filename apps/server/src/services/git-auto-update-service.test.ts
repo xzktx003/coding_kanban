@@ -78,6 +78,45 @@ test("only reports an available update until the user confirms the pull", async 
   }
 });
 
+test("checks the configured GitLab upstream even when origin remains unchanged", async () => {
+  const fixture = await createRemoteFixture();
+  try {
+    const gitlab = join(fixture.local, "..", "gitlab.git");
+    git(fixture.local, [
+      "clone",
+      "--bare",
+      "-q",
+      git(fixture.local, ["remote", "get-url", "origin"]),
+      gitlab,
+    ]);
+    git(fixture.local, ["remote", "add", "gitlab", gitlab]);
+    git(fixture.local, ["fetch", "gitlab"]);
+    git(fixture.local, ["branch", "--set-upstream-to=gitlab/main", "main"]);
+    git(fixture.peer, ["remote", "add", "gitlab", gitlab]);
+
+    await writeFile(join(fixture.peer, "tracked.txt"), "gitlab update\n");
+    git(fixture.peer, ["add", "tracked.txt"]);
+    git(fixture.peer, ["commit", "-m", "gitlab update"]);
+    git(fixture.peer, ["push", "gitlab", "main"]);
+    const gitlabHead = git(fixture.peer, ["rev-parse", "HEAD"]);
+
+    const service = new GitAutoUpdateService({
+      sourceRoot: fixture.local,
+      intervalMinutes: 10,
+    });
+    const available = await service.checkNow();
+
+    assert.equal(available.phase, "available");
+    assert.equal(available.remoteHead, gitlabHead);
+    assert.notEqual(
+      git(fixture.local, ["rev-parse", "origin/main"]),
+      gitlabHead,
+    );
+  } finally {
+    await fixture.cleanup();
+  }
+});
+
 test("reports local worktree conflicts only after the user confirms the pull", async () => {
   const fixture = await createRemoteFixture();
   try {
@@ -258,7 +297,7 @@ test("distinguishes a confirmed pull failure from a background check failure", a
   assert.doesNotMatch(status.message ?? "", /sensitive|machine/);
 });
 
-test("starts an immediate check and an unref-ed interval at the configured cadence", async () => {
+test("starts an immediate check and an unref-ed 15-minute interval", async () => {
   const originalSetInterval = globalThis.setInterval;
   const originalClearInterval = globalThis.clearInterval;
   let scheduledDelay = 0;
@@ -285,7 +324,7 @@ test("starts an immediate check and an unref-ed interval at the configured caden
   try {
     const service = new GitAutoUpdateService({
       sourceRoot: "/repo",
-      intervalMinutes: 30,
+      intervalMinutes: 15,
       checkRunner: async () => {
         checks += 1;
         return {
@@ -308,7 +347,7 @@ test("starts an immediate check and an unref-ed interval at the configured caden
 
     assert.equal(checks, 1);
     assert.equal(applies, 0);
-    assert.equal(scheduledDelay, 30 * 60_000);
+    assert.equal(scheduledDelay, 15 * 60_000);
     assert.equal(unrefCalled, true);
     service.stop();
     assert.equal(cleared, true);

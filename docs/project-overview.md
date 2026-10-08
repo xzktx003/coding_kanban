@@ -207,7 +207,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 后端 `AppVersionService` 对配置的 `APP_SOURCE_ROOT` 计算本地 Git 指纹，`GET /api/app-version` 返回 process runtime id、Git branch/head、source revision 和独立的 Git 自动更新状态。指纹计算本身仍只读取本地仓库：tracked `git diff --binary` 直接流入 SHA-256，不把大 diff 缓冲进内存；未跟踪文件使用有界 `FileHandle.read`。并发请求共享同一个进行中的计算和短期缓存。
 
-`GitAutoUpdateService` 由 `GIT_AUTO_PULL_INTERVAL_MINUTES=10|30` 显式启用，`0` 或未设置时关闭。它在后端启动时检查一次，之后按周期执行固定参数的 `git fetch --prune`，解析当前分支的既有 upstream，并只维护远程版本提醒；后台定时器绝不执行 pull 或 merge。Git ref 会经过严格格式校验，命令使用 `execFile`、禁用终端凭证提示、限制输出和超时；HTTP 只能触发无参数 `POST /api/app-update/check` 与 `POST /api/app-update/apply`，不能传入路径、remote、branch 或命令。
+`GitAutoUpdateService` 由 `GIT_AUTO_PULL_INTERVAL_MINUTES=10|15|30` 显式启用，`0` 或未设置时关闭。它在后端启动时检查一次，之后按周期执行固定参数的 `git fetch --prune`，解析当前分支的既有 upstream，并只维护远程版本提醒；后台定时器绝不执行 pull 或 merge。Git ref 会经过严格格式校验，命令使用 `execFile`、禁用终端凭证提示、限制输出和超时；HTTP 只能触发无参数 `POST /api/app-update/check` 与 `POST /api/app-update/apply`，不能传入路径、remote、branch 或命令。终端模式提供确认拉取入口；会话模式独立显示轻量提醒，点击后切换至终端模式处理更新，不需要预先加载终端应用。
 
 更新状态机为 `disabled / idle / checking / available / updated / conflict / error`。定时器与手动操作共享 single-flight；发现上游领先时只进入 `available` 并提醒用户。只有用户点击“拉取并更新”后，apply 端点才允许 `merge --ff-only <remote-head>`。HEAD 与 upstream 分叉时不创建 merge commit；本地修改或未跟踪文件阻止 fast-forward 时保留原 HEAD 和工作区；Git 错误只返回有界、去机器路径的用户消息。
 

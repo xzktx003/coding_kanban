@@ -159,7 +159,7 @@ export type GitAutoUpdateConflictReason =
 
 export interface GitAutoUpdateStatus {
   enabled: boolean;
-  intervalMinutes: 10 | 30 | null;
+  intervalMinutes: 10 | 15 | 30 | null;
   phase: GitAutoUpdatePhase;
   branch: string | null;
   remoteHead: string | null;

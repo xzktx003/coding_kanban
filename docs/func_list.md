@@ -203,8 +203,9 @@
 ## 11. 应用更新检测与历史会话恢复
 
 - 后端通过 `GET /api/app-version` 暴露当前进程 runtime id、启动时间、Git branch/head、本地源码指纹和自动更新状态；指纹覆盖 tracked 修改、未跟踪文件、commit、checkout 和 pull 后的 HEAD 变化。tracked diff 使用流式哈希，未跟踪文件按总预算有界读取；并发版本查询会复用同一次指纹计算和短期缓存。
-- `GIT_AUTO_PULL_INTERVAL_MINUTES` 可设置为 `10`、`30` 或 `0`。启用后，独立 `GitAutoUpdateService` 在启动时立即检查并按配置周期固定执行 `fetch --prune`，只更新 `available` 提醒状态，绝不由定时器执行 pull 或 merge；定时器和手动操作通过 single-flight 串行化。
+- `GIT_AUTO_PULL_INTERVAL_MINUTES` 可设置为 `10`、`15`、`30` 或 `0`。启用后，独立 `GitAutoUpdateService` 在启动时立即检查并按配置周期固定执行 `fetch --prune`，只更新 `available` 提醒状态，绝不由定时器执行 pull 或 merge；定时器和手动操作通过 single-flight 串行化。
 - 检测到远程新版本时，前端显示可关闭的“拉取并更新”提示。提示是非模态的，只有更新和关闭按钮接收指针事件，不会遮挡底下终端或顶栏控件。只有用户点击确认后，后端才通过 `POST /api/app-update/apply` 尝试 `merge --ff-only <remote-head>`；成功后自动保存恢复意图、reload 并恢复受管 tmux，不再要求第二次确认。
+- 会话模式首次打开时无需加载终端工作台，也会轮询现有的应用版本状态；当前分支的 GitLab upstream 有新提交时，顶栏显示更新提示。点击提示切换到终端模式，由现有的确认拉取流程处理；隐藏的会话模式暂停这项轮询。
 - 用户确认拉取后，如本地未提交修改会被覆盖、存在未跟踪同名文件、分支已经分叉或 fast-forward 被 Git 拒绝，后端保持 HEAD 和工作区不变，前端显示“检测到新版本，但存在冲突”，仅允许再次显式确认重试拉取。网络、上游或凭证错误显示独立检查失败提示。
 - 前端每 3 秒检查版本。源码 revision 变化时只显示“检测到新版本 / 更新并恢复”，不会在用户输入终端时自动刷新；提示可主动关闭，同一 revision 在后续轮询和 reload 后保持隐藏，新的 revision 会重新提示。
 - 点击“更新并恢复”会接受当前 revision、记录一次性恢复意图并 reload；同一 revision 不会形成刷新循环。

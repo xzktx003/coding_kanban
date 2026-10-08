@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 const statusSync = vi.hoisted(() => ({ stop: vi.fn(), start: vi.fn() }));
 const historySync = vi.hoisted(() => ({ stop: vi.fn(), start: vi.fn() }));
 vi.mock("./services/followedSessionHistorySync", () => ({
@@ -108,5 +108,38 @@ it("rechecks immediately when the network reconnects and retains the draft", asy
   });
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.getByLabelText("会话草稿")).toBe(draft);
+  unmount();
+});
+
+it("shows the remote update in session navigation and switches only when clicked", async () => {
+  const onModeChange = vi.fn();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      url === "/api/app-version"
+        ? {
+            ok: true,
+            status: 200,
+            text: async () =>
+              JSON.stringify({
+                autoUpdate: {
+                  enabled: true,
+                  phase: "available",
+                  branch: "v1.3.0",
+                  remoteHead: "abcdef123456",
+                },
+              }),
+          }
+        : { ok: true, json: async () => ({ status: "ok" }) },
+    ),
+  );
+  const { unmount } = render(<SessionWorkbench onModeChange={onModeChange} />);
+
+  const button = await screen.findByRole("button", {
+    name: /远程有新版本，切换到终端模式处理/,
+  });
+  expect(onModeChange).not.toHaveBeenCalled();
+  fireEvent.click(button);
+  expect(onModeChange).toHaveBeenCalledWith("terminal");
   unmount();
 });
