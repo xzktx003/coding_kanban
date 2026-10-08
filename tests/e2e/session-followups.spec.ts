@@ -592,6 +592,9 @@ test("composer matches the approved layout at desktop, narrow and phone widths",
         reasoningEffort: "high",
         sandbox: "danger-full-access",
       });
+      const path = '/src/session-mode/stores/useThreadModelStore.ts';
+      const {changeThreadModel} = await import(performance.getEntriesByType('resource').findLast(e=>new URL(e.name).pathname===path)?.name ?? path);
+      changeThreadModel('ux-0', {model:'gpt-6-astra',modelProvider:'openai',reasoningEffort:'high'});
     }, f.storeUrl());
     const editor = page
       .locator(".session-agent-view [contenteditable=true]")

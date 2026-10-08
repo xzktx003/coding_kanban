@@ -57,7 +57,8 @@ test("running ACP tasks require explicit interruption and cancel remains usable 
   for (const width of [1440, 320]) {
     await page.setViewportSize({ width, height: 1000 });
     if (width < 768) {
-      await page.locator(".session-mobile-header").getByRole("button", { name: "新聊天", exact: true }).click();
+      await page.getByRole("button", { name: "更多功能", exact: true }).click();
+      await page.getByRole("menuitem", { name: "新聊天", exact: true }).click();
     } else {
       await page.keyboard.press("Control+n");
     }
@@ -81,7 +82,8 @@ test("running ACP tasks require explicit interruption and cancel remains usable 
     await dialog.getByRole("button", { name: "取消", exact: true }).click();
     await expect(dialog).toHaveCount(0);
   }
-  await page.locator(".session-mobile-header").getByRole("button", { name: "新聊天", exact: true }).click();
+  await page.getByRole("button", { name: "更多功能", exact: true }).click();
+      await page.getByRole("menuitem", { name: "新聊天", exact: true }).click();
   await page.getByRole("button", { name: "中断并新建", exact: true }).click();
   await expect
     .poll(
@@ -114,74 +116,24 @@ test("workbench controls remain coherent, readable and usable through responsive
       updatedAt: Math.floor(Date.now() / 1000) - index * 60,
     }),
   );
+  // Return transcript content through the native history fixture so later
+  // hydration cannot replace synthetic store-only events with an empty history.
+  fixture.threads.forEach((thread, index) => Object.assign(thread, {
+    status: index === 1 ? {type:'active',activeFlags:['waitingOnApproval']} : {type:'idle'},
+    turns:[{id:`turn-${thread.id}`,status:index===1?'inProgress':'completed',startedAt:1,durationMs:index===1?null:1,error:null,items:[{id:`message-${thread.id}`,type:'agentMessage',text:"## 项目进展\n\n统一项目、会话与工具的入口，保持明确的发送目标。\n\n- 长中文名称保持可读\n- 项目列表和标签使用一致的样式\n- 窄分屏也能阅读和操作\n\n```typescript\nconst result = \"long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_long_value_\";\n```"}]}],
+  }));
   await page.route("**/api/session/api/automation/list", (route) =>
     route.fulfill({ json: [] }),
   );
   await page.goto("/?mode=session");
   await page.locator(".session-mode [contenteditable=true]").first().waitFor();
   await seedSessionUx(page, 6);
-  await page.evaluate(async () => {
-    const { useCodexStore } = await import(
-      performance
-        .getEntriesByType("resource")
-        .findLast(
-          (e) =>
-            new URL(e.name).pathname ===
-            "/src/session-mode/components/codex/stores/index.ts",
-        )?.name ?? "/src/session-mode/components/codex/stores/index.ts"
-    );
-    useCodexStore.setState({
-      events: Object.fromEntries(
-        useCodexStore.getState().threads.map((thread) => [thread.id, []]),
-      ),
-    });
-  });
   for (const index of [0, 1, 2, 3, 4, 5, 0])
     await page
       .locator(".session-nav-row[role=button]")
       .filter({ hasText: `中文会话 ${index} ` })
       .first()
       .click();
-  await page.evaluate(async () => {
-    const load = (path: string) =>
-      import(
-        performance
-          .getEntriesByType("resource")
-          .findLast((e) => new URL(e.name).pathname === path)?.name ?? path
-      );
-    const { useCodexStore } = await load(
-      "/src/session-mode/components/codex/stores/index.ts",
-    );
-    const threads = useCodexStore.getState().threads;
-    useCodexStore.setState({
-      events: Object.fromEntries(
-        threads.map((thread) => [
-          thread.id,
-          [
-            {
-              method: "item/completed",
-              params: {
-                threadId: thread.id,
-                turnId: `turn-${thread.id}`,
-                item: {
-                  id: `message-${thread.id}`,
-                  type: "agentMessage",
-                  text:
-                    '## 项目进展\n\n统一项目、会话与工具的入口，保持明确的发送目标。\n\n- 长中文名称保持可读\n- 项目列表和标签使用一致的样式\n- 窄分屏也能阅读和操作\n\n```typescript\nconst result = "' +
-                    "long_value_".repeat(25) +
-                    '";\n```',
-                },
-              },
-            },
-          ],
-        ]),
-      ),
-      threadStatusMap: {
-        "ux-0": { type: "idle" },
-        "ux-1": { type: "active", activeFlags: ["waitingOnApproval"] },
-      },
-    });
-  });
   const nav = page.getByRole("navigation", { name: "会话工作台导航" });
   const editor = page
     .locator(".session-agent-view [contenteditable=true]")
@@ -229,7 +181,7 @@ test("workbench controls remain coherent, readable and usable through responsive
       path: `.dev-runtime/ui-ux-audit-20261007/verified-session-${width}.png`,
     });
   }
-  await page.getByRole("button", { name: "项目与会话", exact: true }).click();
+  await page.getByRole("button", { name: "展开项目列表", exact: true }).click();
   const drawer = page.getByRole("dialog", { name: "项目与会话列表" });
   await expect(drawer).toBeVisible();
   await expect
@@ -245,7 +197,7 @@ test("workbench controls remain coherent, readable and usable through responsive
   await page.keyboard.press("Escape");
   await expect(drawer).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "项目与会话", exact: true }),
+    page.getByRole("button", { name: "展开项目列表", exact: true }),
   ).toBeFocused();
   await nav.getByRole("button", { name: "更多功能", exact: true }).click();
   await page.getByRole("menuitem", { name: "定时任务", exact: true }).click();

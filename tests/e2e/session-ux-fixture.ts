@@ -6,6 +6,9 @@ import { applyProjectAction } from "../../packages/shared/src/session-projects";
 import type { Page } from "@playwright/test";
 
 export async function installSessionUxFixture(page: Page, count = 40) {
+  // Vite loads more than 250 modules. Retain their actual HMR URLs so test-side
+  // imports use the mounted stores instead of creating a second module instance.
+  await page.addInitScript(() => performance.setResourceTimingBufferSize(10_000));
   const calls: Array<{ path: string; body: any }> = [];
   let followed: FollowedSession[] = [];
   let projects = ["/fixture/项目/very-long-project-path-for-ui-regression"];

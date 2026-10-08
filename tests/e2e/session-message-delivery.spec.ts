@@ -8,7 +8,7 @@ async function selectFirst(page: Page) {
     .filter({ hasText: "中文会话 0 " })
     .first();
   if (!(await row.isVisible()))
-    await page.getByRole("button", { name: "项目与会话", exact: true }).click();
+    await page.getByRole("button", { name: "展开项目列表", exact: true }).click();
   await row.click();
   await page.keyboard.press("Escape");
   await expect(

@@ -4,10 +4,11 @@ import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
 test("network recovery clears connection and sync warnings without losing the draft", async ({ page }) => {
   await installSessionUxFixture(page, 1);
   let offline = false;
-  await page.route("**/api/session/health", route => route.fulfill({
+  let failures = 0;
+  await page.route("**/api/session/health", route => { if (offline) failures++; return route.fulfill({
     status: offline ? 503 : 200,
     json: offline ? { error: "isolated outage" } : { status: "ok", instance: "fixture" },
-  }));
+  }); });
   await page.route(/\/api\/session\/(tabs|projects)$/, async route => {
     if (offline) await route.fulfill({ status: 503, json: { error: "isolated outage" } });
     else await route.fallback();
@@ -20,7 +21,13 @@ test("network recovery clears connection and sync warnings without losing the dr
   await page.clock.install();
   offline = true;
   await page.evaluate(() => window.dispatchEvent(new Event("online")));
-  await page.clock.runFor(8_000);
+  // Let routed HTTP responses settle between timer advances; one large jump
+  // can fire request deadlines before the browser processes the mock response.
+  await expect.poll(async () => {
+    await page.clock.runFor(1_600);
+    return page.getByRole("button", { name: "立即重试", exact: true }).isVisible();
+  }, { timeout: 15_000 }).toBe(true);
+  expect(failures).toBeGreaterThanOrEqual(5);
   await expect(page.getByText("会话服务连接中断，正在自动重连。草稿已保留。", { exact: false })).toBeVisible();
   await expect(page.getByText("同步待重试", { exact: true })).toBeVisible();
   await expect(editor).toContainText("断线期间保留的草稿");

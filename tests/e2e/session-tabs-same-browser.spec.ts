@@ -149,6 +149,10 @@ test("same-browser pages preserve closes through stale cache writes, offline rel
     });
     expect(await ids()).toEqual(["ux-0"]);
     await pages[0].reload({ waitUntil: "domcontentloaded" });
+    // The intentionally stale cache above also persisted grid layout. Inspect
+    // shared membership before explicitly returning to tabs for the UI checks.
+    await expect.poll(async () => (await local(pages[0])).ids).toEqual(["ux-0"]);
+    await local(pages[0], "solo");
     await expect(tab(pages[0], "ux-0")).toBeVisible();
     await expect(tab(pages[0], "ux-2")).toHaveCount(0);
     await pages[0]

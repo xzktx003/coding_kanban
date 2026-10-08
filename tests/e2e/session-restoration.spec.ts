@@ -20,10 +20,12 @@ const threads = cards.map((card, i) => ({
       : { type: "active", activeFlags: i === 2 ? ["waitingOnUserInput"] : [] },
   turns: Array.from({ length: 24 }, (_, n) => ({
     id: `${card.id}-turn-${n}`,
-    status: "completed",
+    // An active native thread has an in-progress turn. A stale active flag
+    // cannot revive a completed turn under the current state contract.
+    status: i > 0 && n === 23 ? "inProgress" : "completed",
     startedAt: 1,
-    completedAt: 2,
-    durationMs: 1000,
+    completedAt: i > 0 && n === 23 ? null : 2,
+    durationMs: i > 0 && n === 23 ? null : 1000,
     error: null,
     items: [
       {

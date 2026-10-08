@@ -7,16 +7,12 @@ test("approved navigation A aligns project and session surfaces and preserves in
   page.on("pageerror", e => errors.push(e.message));
   const fixture = await installSessionUxFixture(page, 5);
   fixture.threads.forEach((thread, i) => Object.assign(thread, { createdAt: Math.floor(Date.now()/1000)-3600, updatedAt: Math.floor(Date.now()/1000)-i*60 }));
+  Object.assign(fixture.threads[0], {turns:[{id:'reply-0',status:'completed',startedAt:1,durationMs:1,error:null,items:[{id:'reply-item',type:'agentMessage',text:'## 项目导航与布局优化\n\n每个会话显示自己的项目，布局和工具位于全局顶栏。'}]}]});
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/?mode=session");
   await page.locator(".session-mode [contenteditable=true]").first().waitFor();
   await seedSessionUx(page, 5);
   await page.locator('.session-nav-row[role="button"]').filter({ hasText: "中文会话 0 " }).first().click();
-  await page.evaluate(async () => {
-    const path='/src/session-mode/components/codex/stores/index.ts';
-    const {useCodexStore}=await import(performance.getEntriesByType('resource').findLast(e=>new URL(e.name).pathname===path)?.name ?? path);
-    useCodexStore.setState(s=>({events:{...s.events,'ux-0':[{method:'item/completed',params:{threadId:'ux-0',turnId:'reply-0',item:{id:'reply-item',type:'agentMessage',text:'## 项目导航与布局优化\n\n项目列表与会话工作区现在从同一条水平线开始。\n\n- 项目名称作为上下文标题\n- 侧栏开关独立显示\n- 会话标题、Agent 和时间分层呈现'}}}]}}));
-  });
   await expect(page.getByText('项目导航与布局优化',{exact:true})).toBeVisible();
   const sidebar = page.locator('[data-slot="sidebar-container"]');
   const header = page.locator('.session-window-group > .session-tabs');
