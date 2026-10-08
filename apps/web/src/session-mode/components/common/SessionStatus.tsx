@@ -1,12 +1,6 @@
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { useShallow } from "zustand/react/shallow";
-import {
-  Circle,
-  CircleAlert,
-  CircleCheck,
-  Clock3,
-  Loader2,
-} from "lucide-react";
+import { SessionStatusIndicator } from "./SessionStatusIndicator";
 import { useCodexStore } from "../codex/stores";
 import { useCCStore } from "../../stores/cc";
 import { useAcpStore } from "../../stores/useAcpStore";
@@ -72,14 +66,6 @@ export function useSessionState(
     return "failed";
   return unread ? "unread" : completed ? "completed" : "idle";
 }
-const STATES = {
-  running: { label: "运行中", Icon: Loader2 },
-  pending: { label: "待处理", Icon: Clock3 },
-  unread: { label: "新回复", Icon: CircleCheck },
-  failed: { label: "失败", Icon: CircleAlert },
-  completed: { label: "已读", Icon: CircleCheck },
-  idle: { label: "空闲", Icon: Circle },
-};
 export function SessionStatus({
   kind,
   id,
@@ -90,50 +76,7 @@ export function SessionStatus({
   compact?: boolean;
 }) {
   const state = useSessionState(kind, id);
-  const { label, Icon } = STATES[state];
-  if (
-    state === "idle" ||
-    state === "completed" ||
-    (!compact && state === "unread")
-  )
-    return null;
-  if (compact && state === "running")
-    return (
-      <span
-        className="session-status"
-        data-state="running"
-        data-compact="true"
-        aria-label="运行中"
-        title="运行中"
-      >
-        <Loader2 size={15} className="session-status-spin" />
-      </span>
-    );
-  if (compact)
-    return ["unread", "pending", "failed"].includes(state) ? (
-      <span
-        className="session-status-dot"
-        data-state={state}
-        role="img"
-        aria-label={state === "unread" ? "有新的回复未读" : label}
-        title={state === "unread" ? "有新的回复未读" : label}
-      />
-    ) : null;
-  return (
-    <span
-      className="session-status"
-      data-state={state}
-      data-compact={compact}
-      title={label}
-      aria-label={label}
-    >
-      <Icon
-        size={compact ? 14 : 13}
-        className={state === "running" ? "session-status-spin" : ""}
-      />
-      {!compact && <span>{label}</span>}
-    </span>
-  );
+  return <SessionStatusIndicator state={state} compact={compact} />;
 }
 export function UnreadDot({
   kind,

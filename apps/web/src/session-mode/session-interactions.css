@@ -750,38 +750,53 @@
   background: var(--muted);
 }
 .session-mode .session-followed-menu {
-  width: 320px;
+  width: 360px;
   max-width: calc(100vw - 16px);
-  max-height: min(70dvh, 560px);
+  max-height: min(76dvh, 620px, var(--radix-dropdown-menu-content-available-height));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 10px;
+  background: var(--popover);
+  box-shadow: 0 12px 36px rgb(0 0 0 / .18);
 }
+.session-mode .session-followed-header { flex: none; padding: 11px 12px 9px; border-bottom: 1px solid var(--border); }
+.session-mode .session-followed-heading { display: flex; align-items: center; gap: 8px; padding: 0 2px 4px; font-size: 12px; font-weight: 600; }
+.session-mode .session-followed-count { color: var(--muted-foreground); font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.session-mode .session-followed-header .session-menu-note { margin: 0; padding: 2px; font-size: 11px; line-height: 1.5; }
+.session-mode .session-followed-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: 5px; }
 .session-mode .session-followed-row {
   display: flex;
   align-items: flex-start;
-  flex-direction: column;
-  gap: 2px;
-  min-height: 56px;
+  gap: 9px;
+  min-height: 58px;
+  padding: 9px 9px;
+  border-radius: 6px;
+  cursor: pointer;
 }
-.session-mode .session-followed-title {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-}
-.session-mode .session-followed-detail,
-.session-mode .session-followed-path {
-  color: var(--muted-foreground);
-  font-size: 11px;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.session-mode
-  .session-followed-row[data-state="pending"]
-  .session-followed-detail {
-  color: var(--primary);
-}
+.session-mode .session-followed-row[data-selected="true"] { background: color-mix(in oklch, var(--primary) 8%, var(--popover)); }
+.session-mode .session-followed-row[data-highlighted] { background: var(--accent); color: var(--accent-foreground); }
+.session-mode .session-followed-agent { display: grid; place-items: center; flex: none; width: 16px; padding-top: 2px; color: var(--muted-foreground); }
+.session-mode .session-followed-content { display: flex; flex: 1; flex-direction: column; min-width: 0; gap: 5px; }
+.session-mode .session-followed-main { display: flex; align-items: center; min-width: 0; gap: 10px; }
+.session-mode .session-followed-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; line-height: 1.4; }
+.session-mode .session-followed-status { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; flex: none; min-width: 61px; font-size: 11px; line-height: 1.4; color: var(--muted-foreground); }
+.session-mode .session-followed-status > .session-status { color: inherit; width: 15px; height: 15px; padding: 0; justify-content: center; }
+.session-mode .session-followed-status .session-status > svg { width: 15px; height: 15px; color: inherit; }
+.session-mode .session-followed-status[data-state="running"] { color: var(--session-running); }
+.session-mode .session-followed-status[data-state="pending"] { color: var(--session-pending); }
+.session-mode .session-followed-status[data-state="unread"] { color: var(--session-unread); }
+.session-mode .session-followed-status[data-state="failed"] { color: var(--session-failed); }
+.session-mode .session-followed-meta { display: flex; align-items: center; min-width: 0; gap: 8px; color: var(--muted-foreground); font-size: 11px; line-height: 1.4; }
+.session-mode .session-followed-path { display: flex; align-items: center; min-width: 0; gap: 5px; flex: 1; }
+.session-mode .session-followed-path > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-mode .session-followed-group { flex: none; white-space: nowrap; }
+.session-mode .session-followed-selected { flex: none; color: var(--primary); }
+.session-mode .session-followed-question { color: var(--session-pending); font-size: 11px; }
+.session-mode .session-followed-menu > [data-slot="dropdown-menu-label"],
+.session-mode .session-followed-menu > [data-slot="dropdown-menu-item"] { flex: none; margin-inline: 5px; }
+.session-mode .session-followed-menu > [data-slot="dropdown-menu-item"] { margin-bottom: 5px; }
 .session-mode .session-menu-note {
   padding: 4px 8px;
   color: var(--muted-foreground);

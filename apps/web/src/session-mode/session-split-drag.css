@@ -1,0 +1,71 @@
+/* Only the visible session workspace owns tab gestures. Transcript text stays selectable. */
+.session-mode .session-tab-drag-preview {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 80;
+  pointer-events: none;
+  user-select: none;
+  opacity: 0.96;
+  will-change: transform;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.35));
+}
+.session-mode .session-tab-drag-preview * {
+  pointer-events: none !important;
+}
+.session-mode .session-tab-drag-preview > .session-tab {
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border-radius: 4px;
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+.session-mode .session-tab-drag-preview .session-tab-select {
+  height: 100%;
+}
+.session-mode .session-tab-drag-preview .session-tab-actions,
+.session-mode .session-tab-drag-preview .session-tab-mobile-menu {
+  display: none;
+}
+.session-mode .session-tab[data-pointer-source="true"] {
+  opacity: 0.45;
+}
+.session-mode .session-empty-group-close {
+  display: block;
+  margin-left: auto;
+  min-height: 44px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  border-radius: 4px;
+}
+.session-mode .session-empty-group-close:hover {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.session-mode .session-empty-group-close:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+@media (min-width: 768px) {
+  .session-mode .session-tab {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .session-mode .session-tab-select {
+    cursor: grab;
+  }
+  .session-mode [data-session-dragging="true"],
+  .session-mode [data-session-dragging="true"] * {
+    cursor: grabbing !important;
+  }
+  .session-mode [data-session-dragging="true"] {
+    user-select: none;
+  }
+  .session-mode .session-tab[data-pointer-drop="true"] {
+    box-shadow: inset 3px 0 var(--primary);
+  }
+}

@@ -8,6 +8,7 @@ for (const viewport of [
   test(`mode header releases hidden Session dialog and restores draft at ${viewport.width}px`, async ({
     page,
   }) => {
+    await page.addInitScript(() => performance.setResourceTimingBufferSize(10_000));
     await page.setViewportSize(viewport);
     const errors: string[] = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -47,10 +48,11 @@ for (const viewport of [
     await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
     await page.locator(".session-workbench").waitFor();
     await page.evaluate(async () => {
-      const reactModule = await import("/node_modules/.vite/deps/react.js");
+      const loadedDependency = (name: string) => performance.getEntriesByType("resource").findLast(entry => new URL(entry.name).pathname.endsWith(`/deps/${name}.js`))?.name ?? `/node_modules/.vite/deps/${name}.js`;
+      const reactModule = await import(loadedDependency("react"));
       const React = reactModule.default ?? reactModule;
       const domModule =
-        await import("/node_modules/.vite/deps/react-dom_client.js");
+        await import(loadedDependency("react-dom_client"));
       const { createRoot } = domModule.default ?? domModule;
       const { Dialog, DialogContent, DialogTitle, DialogDescription } =
         await import("/src/session-mode/components/ui/dialog.tsx");

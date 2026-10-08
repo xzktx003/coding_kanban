@@ -24,7 +24,7 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { FollowedSessionsMenu } from "./FollowedSessionsMenu";
-export const sessionTabDrag: { key: string | null } = { key: null };
+import { sessionTabDrag, sessionDragKey, sessionDragCard, SESSION_TAB_MIME } from "./sessionTabDrag";
 
 function SessionTab({
   card,
@@ -33,6 +33,7 @@ function SessionTab({
   onSelect,
   onClose,
   onKeyDown,
+  draggableProject,
 }: {
   card: AgentCenterCard;
   selected: boolean;
@@ -40,6 +41,7 @@ function SessionTab({
   onSelect: () => void;
   onClose: () => void;
   onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+  draggableProject: boolean;
 }) {
   const project = useSessionProject(card);
   const renameRef = useRef<HTMLSpanElement>(null);
@@ -70,14 +72,17 @@ function SessionTab({
         tabIndex={tabbable ? 0 : -1}
         className="session-tab-select"
         data-tab-key={agentCardKey(card)}
-        title={`${card.kind === "codex" ? "Codex" : "Claude"} · ${title}\n${card.cwd ?? ""}\n拖动排序；Alt+Shift+左右键移动标签`}
-        onClick={onSelect}
+        title={`${card.kind === "codex" ? "Codex" : "Claude"} · ${title}\n${card.cwd ?? ""}\n拖动到正文边缘分屏；拖到标签排序；Alt+Shift+左右键移动标签`}
+        onClick={(event) => {
+          event.currentTarget.focus();
+          onSelect();
+        }}
         onKeyDown={onKeyDown}
       >
         <SessionIdentityTitle kind={card.kind} title={title} />
         <SessionStatus kind={card.kind} id={card.id} compact />
       </button>
-      <SessionProjectLabel card={card} id={`tab-project-${agentCardKey(card)}`} />
+      <SessionProjectLabel card={card} id={`tab-project-${agentCardKey(card)}`} draggableTab={draggableProject} />
       <span className="session-tab-actions" ref={renameRef}>
         <RenameSessionButton kind={card.kind} id={card.id} title={title} />
         <button
@@ -270,12 +275,13 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
               className="session-tab"
               data-active={key === activeKey}
               data-drop={key === dropKey}
-              draggable
+              data-session-drag-key={key}
+              draggable={!groupId || typeof PointerEvent === 'undefined'}
               onDragStart={(event) => {
                 dragKey.current = key;
                 sessionTabDrag.key = key;
                 event.dataTransfer.effectAllowed = "move";
-                event.dataTransfer.setData("application/x-session-tab", key);
+                event.dataTransfer.setData(SESSION_TAB_MIME, key);
               }}
               onDragOver={(event) => {
                 if (!sessionTabDrag.key) return;
@@ -284,9 +290,8 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
               }}
               onDrop={(event) => {
                 event.preventDefault();
-                const source = tabs.cards.find(
-                  (c) => agentCardKey(c) === sessionTabDrag.key,
-                );
+                const draggedKey = sessionDragKey(event.dataTransfer);
+                const source = draggedKey ? sessionDragCard(draggedKey) : undefined;
                 if (source) {
                   tabs.moveCard(source, card);
                   if (groupId) {
@@ -314,6 +319,7 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
                 }}
                 onClose={() => close(card)}
                 onKeyDown={(event) => keyDown(event, card, index)}
+                draggableProject={Boolean(groupId)}
               />
             </div>
           );

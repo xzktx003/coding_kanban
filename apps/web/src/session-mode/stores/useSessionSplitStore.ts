@@ -7,6 +7,8 @@ export type SessionGroup = {
   id: string;
   keys: string[];
   selected: string | null;
+  /** An explicit split of the only tab leaves a usable new-chat window. */
+  keepEmpty?: true;
 };
 export type SessionSplit = {
   type: "split";
@@ -39,7 +41,7 @@ const mapGroups = (
         second: mapGroups(node.second, fn),
       };
 function prune(node: SessionSplitNode): SessionSplitNode | null {
-  if (node.type === "group") return node.keys.length ? node : null;
+  if (node.type === "group") return node.keys.length || node.keepEmpty ? node : null;
   const first = prune(node.first),
     second = prune(node.second);
   return first && second ? { ...node, first, second } : (first ?? second);
@@ -65,6 +67,7 @@ interface State {
   reorderWithinGroups: (keys: string[]) => void;
   focusGroup: (id: string) => void;
   focusKey: (key: string) => void;
+  closeEmptyGroup: (id: string) => void;
   place: (
     key: string,
     targetId: string,
@@ -83,6 +86,17 @@ export const useSessionSplitStore = create<State>()(
     (set) => ({
       ...initial(),
       reset: () => set(initial()),
+      closeEmptyGroup: (id) => set((state) => {
+        const target = splitGroups(state.tree).find(g => g.id === id);
+        if (!target || target.keys.length) return state;
+        const tree = prune(mapGroups(state.tree, g => {
+          if (g.id !== id) return g;
+          const { keepEmpty: _keepEmpty, ...empty } = g;
+          return empty;
+        })) ?? group();
+        const groups = splitGroups(tree);
+        return { tree, activeGroupId: groups.some(g => g.id === state.activeGroupId) ? state.activeGroupId : groups[0].id };
+      }),
       reorderWithinGroups: (keys) => set(state => ({tree: mapGroups(state.tree, g => ({...g, keys: [...g.keys].sort((a,b)=>keys.indexOf(a)-keys.indexOf(b))}))})),
       reconcile: (keys) =>
         set((state) => {
@@ -92,8 +106,10 @@ export const useSessionSplitStore = create<State>()(
             const remaining = g.keys.filter(
               (k) => allowed.has(k) && !seen.has(k) && Boolean(seen.add(k)),
             );
+            const { keepEmpty, ...identity } = g;
             return {
-              ...g,
+              ...identity,
+              ...(!remaining.length && keepEmpty ? { keepEmpty } : {}),
               keys: remaining,
               selected: remaining.includes(g.selected ?? "")
                 ? g.selected
@@ -109,6 +125,7 @@ export const useSessionSplitStore = create<State>()(
               g.id === target.id
                 ? {
                     ...g,
+                    keepEmpty: undefined,
                     keys: [...g.keys, ...added],
                     selected: g.selected ?? added[0],
                   }
@@ -150,14 +167,7 @@ export const useSessionSplitStore = create<State>()(
           const groups = splitGroups(state.tree),
             owner = groups.find((g) => g.keys.includes(key)),
             target = groups.find((g) => g.id === targetId);
-          if (
-            !owner ||
-            !target ||
-            (owner.id === targetId &&
-              owner.keys.length === 1 &&
-              edge !== "center")
-          )
-            return state;
+          if (!owner || !target) return state;
           let tree = mapGroups(state.tree, (g) => {
             const keys = g.keys.filter((k) => k !== key);
             return {
@@ -172,10 +182,15 @@ export const useSessionSplitStore = create<State>()(
             const keys = [...current.keys],
               index = beforeKey ? keys.indexOf(beforeKey) : -1;
             keys.splice(index < 0 ? keys.length : index, 0, key);
-            focused = { ...current, keys, selected: key };
+            const { keepEmpty: _keepEmpty, ...filled } = current;
+            focused = { ...filled, keys, selected: key };
             tree = replace(tree, targetId, focused);
           } else {
             focused = group([key]);
+            // Keep a new-chat window when splitting the only tab, never duplicate an Agent.
+            const original = owner.id === targetId && !current.keys.length
+              ? { ...current, keepEmpty: true as const }
+              : current;
             const leading = edge === "left" || edge === "top";
             tree = replace(tree, targetId, {
               type: "split",
@@ -183,8 +198,8 @@ export const useSessionSplitStore = create<State>()(
               direction:
                 edge === "left" || edge === "right" ? "horizontal" : "vertical",
               ratio: 50,
-              first: leading ? focused : current,
-              second: leading ? current : focused,
+              first: leading ? focused : original,
+              second: leading ? original : focused,
             });
           }
           return { tree: prune(tree) ?? focused, activeGroupId: focused.id };

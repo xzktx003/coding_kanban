@@ -13,6 +13,7 @@ import { MessageSquare, RefreshCw } from "lucide-react";
 import App from "./App";
 import "./session-theme.css";
 import "./session-interactions.css";
+import "./session-split-drag.css";
 import "./session-composer.css";
 import "./session-composer-v2.css";
 import "./session-navigation.css";

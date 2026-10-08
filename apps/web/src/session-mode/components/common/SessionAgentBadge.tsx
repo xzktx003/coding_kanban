@@ -30,6 +30,7 @@ export function SessionAgentBadge({
         <Plug size={14} aria-hidden="true" />
       ) : (
         <img
+          draggable={false}
           src={kind === "codex" ? openai : claude}
           alt=""
           aria-hidden="true"

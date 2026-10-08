@@ -41,14 +41,14 @@ it("assigns new sessions to the focused group and focuses existing sessions wher
   s.focusKey("a");
   expect(useSessionSplitStore.getState().activeGroupId).toBe(root);
 });
-it("rejects self splitting the sole tab and preserves ratios and group selection on reload", async () => {
+it("splits the sole tab into a saved empty group and preserves ratios and group selection on reload", async () => {
   const s = useSessionSplitStore.getState();
   s.reconcile(["a"]);
   const root = splitGroups(useSessionSplitStore.getState().tree)[0].id;
   s.place("a", root, "right");
-  expect(splitGroups(useSessionSplitStore.getState().tree)).toHaveLength(1);
-  s.reconcile(["a", "b"]);
-  s.place("b", root, "right");
+  expect(splitGroups(useSessionSplitStore.getState().tree).map(g => g.keys)).toEqual([[], ["a"]]);
+  s.reconcile(["a"]);
+  expect(splitGroups(useSessionSplitStore.getState().tree)).toHaveLength(2);
   const tree = useSessionSplitStore.getState().tree;
   s.resize(tree.id, 35);
   const saved = localStorage.getItem("kanban.session.split-layout")!;
@@ -59,6 +59,43 @@ it("rejects self splitting the sole tab and preserves ratios and group selection
     type: "split",
     ratio: 35,
   });
+  expect(splitGroups(useSessionSplitStore.getState().tree).map(g => g.keys)).toEqual([[], ["a"]]);
+});
+
+it("an explicitly empty group accepts a new session and later closes normally", () => {
+  const s = useSessionSplitStore.getState();
+  s.reconcile(["a"]);
+  const root = splitGroups(useSessionSplitStore.getState().tree)[0].id;
+  s.place("a", root, "right");
+  s.focusGroup(root);
+  s.reconcile(["a", "b"]);
+  expect(splitGroups(useSessionSplitStore.getState().tree).map(g => g.keys)).toEqual([["b"], ["a"]]);
+  s.reconcile(["a"]);
+  expect(splitGroups(useSessionSplitStore.getState().tree).map(g => g.keys)).toEqual([["a"]]);
+});
+
+it("closes only an empty window group and leaves the existing Agent and layout intact", () => {
+  const s = useSessionSplitStore.getState();
+  s.reconcile(["a"]);
+  const groupId = useSessionSplitStore.getState().tree.id;
+  s.place("a", groupId, "right");
+  const filled = splitGroups(useSessionSplitStore.getState().tree).find(group => group.keys.length)!;
+  s.closeEmptyGroup(filled.id);
+  expect(splitGroups(useSessionSplitStore.getState().tree)).toHaveLength(2);
+  s.closeEmptyGroup(groupId);
+  expect(splitGroups(useSessionSplitStore.getState().tree).map(group => group.keys)).toEqual([["a"]]);
+  expect(useSessionSplitStore.getState().activeGroupId).toBe(filled.id);
+});
+
+it("clears the empty-window marker when an existing tab moves into that window", () => {
+  const s = useSessionSplitStore.getState();
+  s.reconcile(["a"]);
+  const root = useSessionSplitStore.getState().tree.id;
+  s.place("a", root, "right");
+  s.reconcile(["a", "b"]);
+  s.place("a", root, "center");
+  s.reconcile(["b"]);
+  expect(splitGroups(useSessionSplitStore.getState().tree).map(group => group.keys)).toEqual([["b"]]);
 });
 it("remote removals prune groups but do not add sessions back", () => {
   const s = useSessionSplitStore.getState();

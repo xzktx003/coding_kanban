@@ -162,3 +162,19 @@ test("split layout, selected session, reading position and mode position survive
   expect(await identity!.evaluate(el => el.isConnected)).toBe(true);
   await expect.poll(() => viewport.evaluate(el => el.scrollTop)).toBe(before);
 });
+
+test("a direct mobile feature link can switch pages and return to an empty workspace without starting a session", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const fixture = await installSessionUxFixture(page, 0);
+  await page.goto("/?mode=session&view=settings", { waitUntil: "domcontentloaded" });
+  const select = page.getByRole("combobox", { name: "切换功能页" });
+  await expect(select).toBeVisible();
+  for (const [view, label] of [["plugins", "工具与技能"], ["insights", "用量"], ["automations", "定时任务"], ["settings", "设置"]]) {
+    await select.selectOption(view);
+    await expect(page.locator('[data-session-page-heading]')).toHaveText(label);
+    await expect(page.getByRole("button", { name: "返回会话", exact: true })).toBeInViewport();
+  }
+  await page.getByRole("button", { name: "返回会话", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "开始一个会话", exact: true })).toBeVisible();
+  expect(fixture.calls.filter(call => /\/(thread\/start|turn\/start|cc\/send|acp\/start)$/.test(call.path))).toEqual([]);
+});

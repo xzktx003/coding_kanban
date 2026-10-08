@@ -1,7 +1,11 @@
-import { ChevronDown, Loader2 } from "lucide-react";
+import { SessionAgentBadge } from "../common/SessionAgentBadge";
+import { SessionStatusIndicator } from "../common/SessionStatusIndicator";
+import { useSessionProject } from "./SessionIdentity";
+import { Check, ChevronDown, Folder, Loader2 } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -47,11 +51,20 @@ function SessionMenuRow({
     native || card.preview || card.id.slice(0, 12),
   );
   const { selectTab } = useSessionTabActions();
+  const project = useSessionProject(card);
+  const selected = useAgentCenterStore(
+    (s) =>
+      s.currentAgentCardId === card.id && s.currentAgentCardKind === card.kind,
+  );
   return (
     <DropdownMenuItem
       className="session-followed-row"
       disabled={disabled}
       data-state={state}
+      data-session-key={agentCardKey(card)}
+      data-selected={selected}
+      aria-current={selected ? "page" : undefined}
+      textValue={title}
       onSelect={() => {
         useLayoutStore.getState().setView("agent");
         void selectTab(card).then(() => {
@@ -64,18 +77,44 @@ function SessionMenuRow({
         });
       }}
     >
-      <span className="session-followed-title">{title}</span>
-      <span className="session-followed-detail">
-        {card.kind === "codex" ? "Codex" : "Claude"} ·{" "}
-        {SESSION_STATE_LABELS[state]}
-        {row.questions ? ` · 有 ${row.questions} 个问题待答` : ""}
-        {groupNumber ? ` · 窗口组 ${groupNumber}` : ""}
+      <span className="session-followed-agent">
+        <SessionAgentBadge kind={card.kind} />
       </span>
-      {card.cwd && (
-        <span className="session-followed-path" title={card.cwd}>
-          {card.cwd.split("/").filter(Boolean).at(-1)}
+      <span className="session-followed-content">
+        <span className="session-followed-main">
+          <span className="session-followed-title" title={title}>
+            {title}
+          </span>
+          <span className="session-followed-status" data-state={state}>
+            <SessionStatusIndicator state={state} compact showInactive />
+            <span>{SESSION_STATE_LABELS[state]}</span>
+          </span>
         </span>
-      )}
+        <span className="session-followed-meta">
+          <span
+            className="session-followed-path"
+            title={project.path || "这条会话尚无项目目录"}
+          >
+            <Folder size={12} aria-hidden="true" />
+            <span>{project.label}</span>
+          </span>
+          {groupNumber ? (
+            <span className="session-followed-group">窗口组 {groupNumber}</span>
+          ) : null}
+          {selected && (
+            <Check
+              className="session-followed-selected"
+              size={13}
+              aria-label="当前会话"
+            />
+          )}
+        </span>
+        {row.questions ? (
+          <span className="session-followed-question">
+            {row.questions} 个问题待答
+          </span>
+        ) : null}
+      </span>
     </DropdownMenuItem>
   );
 }
@@ -86,7 +125,8 @@ export function FollowedSessionsMenu({
   status?: SessionConnectionState;
   summary?: boolean;
 }) {
-  const { rows, counts, complete, questionCount } = useFollowedSessionStates(status);
+  const { rows, counts, complete, questionCount } =
+    useFollowedSessionStates(status);
   const { selectTab } = useSessionTabActions();
   const tree = useSessionSplitStore((s) => s.tree);
   const groups = splitGroups(tree);
@@ -121,9 +161,9 @@ export function FollowedSessionsMenu({
         ? `待确认 ${counts.pending}`
         : questionCount
           ? `待答 ${questionCount}`
-        : !complete
-          ? "状态待同步"
-          : `关注 ${rows.length}`;
+          : !complete
+            ? "状态待同步"
+            : `关注 ${rows.length}`;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -146,9 +186,9 @@ export function FollowedSessionsMenu({
                     ? `待${counts.pending}`
                     : questionCount
                       ? `答${questionCount}`
-                    : !complete
-                      ? "同步"
-                      : `关注${rows.length}`}
+                      : !complete
+                        ? "同步"
+                        : `关注${rows.length}`}
               </span>
             </>
           ) : (
@@ -156,48 +196,59 @@ export function FollowedSessionsMenu({
           )}
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="session-followed-menu">
-        <DropdownMenuLabel>
-          {summary ? "关注会话状态" : "全部关注会话"} · {rows.length}
-        </DropdownMenuLabel>
-        <p className="session-menu-note">
-          {questionCount > 0 && <>问题待答 {questionCount} · </>}
-          仅统计关注会话 · 运行中 {status === "ready" ? counts.running : "未知"}{" "}
-          · 待确认{" "}
-          {status === "ready" && (complete || counts.pending)
-            ? counts.pending
-            : "未知"}
-        </p>
-        {(!complete || syncError) && (
-          <p className="session-menu-note" role="status">
-            {status !== "ready"
-              ? "连接恢复后更新状态"
-              : syncError
-                ? "关注列表同步待重试"
-                : "部分状态尚未同步"}
-          </p>
-        )}
-        <DropdownMenuSeparator />
-        {ordered.length ? (
-          ordered.map((row) => (
-            <SessionMenuRow
-              key={agentCardKey(row.card)}
-              row={row}
-              disabled={status !== "ready"}
-              groupNumber={
-                groups.length > 1
-                  ? groups.findIndex((g) =>
-                      g.keys.includes(agentCardKey(row.card)),
-                    ) + 1
-                  : undefined
-              }
-            />
-          ))
-        ) : (
+      <DropdownMenuContent
+        align="end"
+        sideOffset={6}
+        className="session-followed-menu"
+      >
+        <div className="session-followed-header">
+          <DropdownMenuLabel className="session-followed-heading">
+            {summary ? "关注会话状态" : "全部关注会话"}
+            <span className="session-followed-count">{rows.length}</span>
+          </DropdownMenuLabel>
           <p className="session-menu-note">
-            还没有关注会话；打开会话后会加入标签。
+            {questionCount > 0 && <>问题待答 {questionCount} · </>}
+            仅统计关注会话 · 运行中{" "}
+            {status === "ready" ? counts.running : "未知"} · 待确认{" "}
+            {status === "ready" && (complete || counts.pending)
+              ? counts.pending
+              : "未知"}
           </p>
-        )}
+          {(!complete || syncError) && (
+            <p className="session-menu-note" role="status">
+              {status !== "ready"
+                ? "连接恢复后更新状态"
+                : syncError
+                  ? "关注列表同步待重试"
+                  : "部分状态尚未同步"}
+            </p>
+          )}
+        </div>
+        <DropdownMenuGroup
+          className="session-followed-list"
+          aria-label="关注会话列表"
+        >
+          {ordered.length ? (
+            ordered.map((row) => (
+              <SessionMenuRow
+                key={agentCardKey(row.card)}
+                row={row}
+                disabled={status !== "ready"}
+                groupNumber={
+                  groups.length > 1
+                    ? groups.findIndex((g) =>
+                        g.keys.includes(agentCardKey(row.card)),
+                      ) + 1
+                    : undefined
+                }
+              />
+            ))
+          ) : (
+            <p className="session-menu-note">
+              还没有关注会话；打开会话后会加入标签。
+            </p>
+          )}
+        </DropdownMenuGroup>
         {!summary && groups.length > 1 && (
           <>
             <DropdownMenuSeparator />

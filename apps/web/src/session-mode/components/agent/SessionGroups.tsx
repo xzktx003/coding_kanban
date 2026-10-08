@@ -20,7 +20,9 @@ import {
   ResizableHandle,
 } from "../ui/resizable";
 import { SessionWelcome } from "@session/SessionWelcome";
-import { SessionTabs, sessionTabDrag } from "./SessionTabs";
+import { SessionTabs } from "./SessionTabs";
+import { useSessionSplitDrag } from "./useSessionSplitDrag";
+import { sessionDragKey, sessionDragCard, sessionTabDrag, splitEdgeAt, placeSessionDrag, type SessionDropTarget } from "./sessionTabDrag";
 const CodexThread = lazy(() =>
   import("../codex/thread/CodexThread").then((m) => ({
     default: m.CodexThread,
@@ -28,11 +30,17 @@ const CodexThread = lazy(() =>
 );
 const CCSession = lazy(() => import("../cc/session/CCSession"));
 
-function GroupView({ group }: { group: SessionGroup }) {
+function GroupView({ group, preview }: { group: SessionGroup; preview: SessionDropTarget | null }) {
   const tabs = useAgentCenterStore();
   const layout = useSessionSplitStore();
   const { selectTab } = useSessionTabActions();
   const [edge, setEdge] = useState<SplitEdge | null>(null);
+  const shownEdge = preview?.groupId === group.id ? preview.edge : edge;
+  useEffect(() => {
+    const clear = () => setEdge(null);
+    window.addEventListener('dragend', clear);
+    return () => window.removeEventListener('dragend', clear);
+  }, []);
   const focused = group.id === layout.activeGroupId;
   const key = focused && !tabs.currentAgentCardId ? null : group.selected;
   const card =
@@ -67,33 +75,21 @@ function GroupView({ group }: { group: SessionGroup }) {
           if (!sessionTabDrag.key) return;
           e.preventDefault();
           e.stopPropagation();
-          const b = e.currentTarget.getBoundingClientRect(),
-            x = (e.clientX - b.x) / b.width,
-            y = (e.clientY - b.y) / b.height;
-          setEdge(
-            x < 0.22
-              ? "left"
-              : x > 0.78
-                ? "right"
-                : y < 0.22
-                  ? "top"
-                  : y > 0.78
-                    ? "bottom"
-                    : "center",
-          );
+          setEdge(splitEdgeAt(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY));
         }}
         onDragLeave={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node)) setEdge(null);
         }}
         onDrop={(e) => {
-          if (!sessionTabDrag.key) return;
+          const draggedKey = sessionDragKey(e.dataTransfer);
+          if (!draggedKey) return;
           e.preventDefault();
           e.stopPropagation();
-          const source = tabs.cards.find(
-            (c) => agentCardKey(c) === sessionTabDrag.key,
-          );
+          const source = placeSessionDrag(draggedKey, {
+            groupId: group.id,
+            edge: splitEdgeAt(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY),
+          });
           if (source) {
-            layout.place(agentCardKey(source), group.id, edge ?? "center");
             void selectTab(source);
           }
           sessionTabDrag.key = null;
@@ -121,21 +117,35 @@ function GroupView({ group }: { group: SessionGroup }) {
           </Suspense>
         ) : (
           <div className="p-4">
+            {!group.keys.length && group.keepEmpty && (
+              <button
+                type="button"
+                className="session-empty-group-close"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  layout.closeEmptyGroup(group.id);
+                  const current = useSessionSplitStore.getState();
+                  const next = splitGroups(current.tree).find(g => g.id === current.activeGroupId)?.selected;
+                  const nextCard = next ? sessionDragCard(next) : undefined;
+                  if (focused && nextCard) void selectTab(nextCard);
+                }}
+              >关闭空窗口组</button>
+            )}
             <SessionWelcome />
           </div>
         )}
-        {edge && (
-          <div className="session-split-drop" data-edge={edge}>
-            松开以{edge === "center" ? "移动到此窗口组" : "分屏"}
+        {shownEdge && (
+          <div className="session-split-drop" data-edge={shownEdge}>
+            松开以{shownEdge === "center" ? "移动到此窗口组" : "分屏"}
           </div>
         )}
       </div>
     </section>
   );
 }
-function SplitNode({ node }: { node: SessionSplitNode }) {
+function SplitNode({ node, preview }: { node: SessionSplitNode; preview: SessionDropTarget | null }) {
   const resize = useSessionSplitStore((s) => s.resize);
-  if (node.type === "group") return <GroupView group={node} />;
+  if (node.type === "group") return <GroupView group={node} preview={preview} />;
   return (
     <ResizablePanelGroup
       direction={node.direction}
@@ -150,7 +160,7 @@ function SplitNode({ node }: { node: SessionSplitNode }) {
         defaultSize={node.ratio}
         minSize={15}
       >
-        <SplitNode node={node.first} />
+        <SplitNode node={node.first} preview={preview} />
       </ResizablePanel>
       <ResizableHandle withHandle />
       <ResizablePanel
@@ -159,12 +169,13 @@ function SplitNode({ node }: { node: SessionSplitNode }) {
         defaultSize={100 - node.ratio}
         minSize={15}
       >
-        <SplitNode node={node.second} />
+        <SplitNode node={node.second} preview={preview} />
       </ResizablePanel>
     </ResizablePanelGroup>
   );
 }
 export function SessionGroups() {
+  const drag = useSessionSplitDrag();
   const tabs = useAgentCenterStore();
   const layout = useSessionSplitStore();
   const mobile = useIsMobile();
@@ -187,14 +198,14 @@ export function SessionGroups() {
   const groups = splitGroups(layout.tree),
     current = groups.find((g) => g.id === layout.activeGroupId) ?? groups[0];
   return (
-    <div className="session-split-workspace">
+    <div className="session-split-workspace" ref={drag.root} onPointerDownCapture={drag.start}>
       <div className="flex-1 min-h-0 overflow-hidden">
         {mobile ? (
-          <GroupView group={current} />
+          <GroupView group={current} preview={drag.preview} />
         ) : layout.tree.type === "group" ? (
-          <GroupView group={layout.tree} />
+          <GroupView group={layout.tree} preview={drag.preview} />
         ) : (
-          <SplitNode node={layout.tree} />
+          <SplitNode node={layout.tree} preview={drag.preview} />
         )}
       </div>
     </div>

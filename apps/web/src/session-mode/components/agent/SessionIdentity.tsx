@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Copy, Folder, LocateFixed } from "lucide-react";
 import { SessionAgentBadge } from "../common/SessionAgentBadge";
 import {
@@ -41,12 +41,15 @@ export function SessionIdentityTitle({
 export function SessionProjectLabel({
   card,
   id,
+  draggableTab = false,
 }: {
   card: Pick<AgentCenterCard, "cwd" | "worktreePath">;
   id?: string;
+  draggableTab?: boolean;
 }) {
   const project = useSessionProject(card);
   const revealOnClose = useRef(false);
+  const [open, setOpen] = useState(false);
   return (
     <span
       className="session-project-detail"
@@ -54,11 +57,12 @@ export function SessionProjectLabel({
       onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
       onDragStart={(e) => {
+        if (draggableTab) return;
         e.preventDefault();
         e.stopPropagation();
       }}
     >
-      <DropdownMenu>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
         <DropdownMenuTrigger asChild>
           <button
             type="button"
@@ -66,6 +70,10 @@ export function SessionProjectLabel({
             className="session-identity-project"
             aria-label={`项目详情：${project.label}`}
             title={project.path || "这条会话尚无项目目录"}
+            onPointerDown={(event) => {
+              if (draggableTab) event.preventDefault();
+            }}
+            onClick={draggableTab ? () => setOpen(value => !value) : undefined}
           >
             <Folder size={11} aria-hidden="true" />
             <span>{project.label}</span>
