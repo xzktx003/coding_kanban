@@ -1,6 +1,6 @@
 # Codex 子 Agent 支持方案（已批准并实现）
 
-日期：2026-10-08。状态：用户已批准，功能与隔离验收已实现；运行层新二进制在活跃 Agent 的安全窗口启用。实际操作、原生兼容性和验收结果见 [使用与架构](../../session-subagents.md) 和 [验收记录](acceptance.md)。
+日期：2026-10-08。状态：用户已批准，功能与隔离验收已实现；随后按用户明确的中断授权完成正式运行层新二进制激活。实际操作、原生兼容性和验收结果见 [使用与架构](../../session-subagents.md) 和 [验收记录](acceptance.md)。
 
 目标：对齐仓库内 Codex 桌面应用实际提供的本地子 Agent 能力，同时补齐本项目的状态恢复、审批路由与会话资源边界。这里的“桌面应用”指 `third_party/ChatGPT.app`，其 bundle ID 是 `com.openai.codex`，不是对通用 ChatGPT 客户端的推测。
 

@@ -4,7 +4,6 @@ import { Monitor, Moon, Sun, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import githubIcon from "@session/assets/github.svg";
-import xIcon from "@session/assets/x.svg";
 import { Button } from "@session/components/ui/button";
 import { Card, CardContent } from "@session/components/ui/card";
 import { Input } from "@session/components/ui/input";
@@ -37,12 +36,6 @@ const ACCENT_OPTIONS: Array<{
   { value: "purple", label: "Purple", colorClass: "bg-purple-500" },
   { value: "orange", label: "Orange", colorClass: "bg-orange-500" },
 ];
-
-const LINKS = {
-  GITHUB: PROJECT_REPOSITORY_URL,
-  DISCORD: "https://discord.gg/zAjtD4kf5K",
-  TWITTER: "https://x.com/lisp_mi",
-} as const;
 
 export function GeneralSettings() {
   const followup = useFollowupSettingsStore();
@@ -252,40 +245,17 @@ export function GeneralSettings() {
         </section>
       )}
       <section className="space-y-3">
-        <h3 className="text-sm font-medium px-1">项目与上游</h3>
+        <h3 className="text-sm font-medium px-1">当前项目</h3>
         <div className="flex flex-wrap gap-2 text-balance">
           <a
             aria-label="GitHub 项目"
-            href={LINKS.GITHUB}
+            href={PROJECT_REPOSITORY_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className={cn(buttonClassName, "flex-1 min-w-[100px]")}
+            className={buttonClassName}
           >
             <img src={githubIcon} alt="" className="h-4 w-4" />
             <span>GitHub 项目</span>
-          </a>
-          <a
-            href={LINKS.DISCORD}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={cn(buttonClassName, "flex-shrink-0")}
-          >
-            <img
-              src="/session-assets/discord.svg"
-              height={16}
-              width={16}
-              alt="Discord"
-            />
-            <span>上游 Discord</span>
-          </a>
-          <a
-            href={LINKS.TWITTER}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={cn(buttonClassName, "flex-1 min-w-[100px]")}
-          >
-            <img src={xIcon} alt="" className="h-4 w-4" />
-            <span>上游作者 lisp_mi</span>
           </a>
         </div>
       </section>

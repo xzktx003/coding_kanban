@@ -7,7 +7,6 @@ import { McpAddPanel } from '@session/features/mcp/McpAddPanel';
 import { Clone } from '@session/features/skills/Clone';
 import { InstalledTab } from '@session/features/skills/InstalledTab';
 import SkillsViewContent from '@session/features/skills/SkillsView';
-import { RecommendToolsView } from '@session/features/tools/RecommendToolsView';
 import { unifiedReadMcpConfig } from '@session/services';
 import { readKekeMcpServers } from '@session/services/apiAdapt/kekeMcp';
 import { useAgentSettingsStore, useWorkspaceStore } from '@session/stores';
@@ -16,7 +15,7 @@ import { PluginDetailView } from './PluginDetailView';
 import { PluginsMarketplaceView } from './PluginsMarketplaceView';
 import { TabSwitcher } from './TabSwitcher';
 
-/** Main content area: switches between Tools / Connectors / Skills, or a manage / add overlay. */
+/** Main content area: switches between Plugins / Connectors / Skills, or a manage / add overlay. */
 export function PluginsViewContent() {
   const { selectedAgent } = useAgentSettingsStore();
   const { cwd } = useWorkspaceStore();
@@ -79,7 +78,6 @@ export function PluginsViewContent() {
         </div>
       )}
       {!overlay && mainTab === 'Skills' && <SkillsViewContent />}
-      {!overlay && mainTab === 'Tools' && <RecommendToolsView />}
 
       {!overlay && mainTab === 'Connectors' && (
         <div className="h-full overflow-y-auto p-4">

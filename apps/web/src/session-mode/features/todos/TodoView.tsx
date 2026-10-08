@@ -3,7 +3,6 @@ import { Button } from '@session/components/ui/button';
 import { useTodoStore } from '@session/stores/useTodoStore';
 import { CategorySection } from './CategorySection';
 import { countTodosByCategory, filterTodos, findCategoryByName } from './filters';
-import { PluxUpsellLine } from './PluxUpsellLine';
 import { TodoInputBar } from './TodoInputBar';
 import { TodoList } from './TodoList';
 
@@ -82,7 +81,6 @@ export default function TodoView() {
           onAddCategory={addCategory}
           onSearchChange={setSearch}
         />
-        <PluxUpsellLine />
       </div>
     </div>
   );

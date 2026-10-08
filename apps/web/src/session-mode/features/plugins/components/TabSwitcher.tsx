@@ -1,4 +1,4 @@
-import { Blocks, Package2 } from 'lucide-react';
+import { Package2 } from 'lucide-react';
 import { MCP } from '@session/components/icons';
 import { Button } from '@session/components/ui/button';
 
@@ -27,8 +27,6 @@ export function TabSwitcher<T extends string>({
         >
           {t.startsWith('Connector') ? (
             <MCP className="h-3.5 w-3.5" />
-          ) : t === 'Tools' ? (
-            <Blocks className="h-4 w-4" />
           ) : (
             <Package2 className="h-4 w-4" />
           )}

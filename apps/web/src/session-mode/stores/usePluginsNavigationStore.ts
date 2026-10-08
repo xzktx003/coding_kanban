@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type PluginsTab = 'Plugins' | 'Tools' | 'Skills' | 'Connectors';
+export type PluginsTab = 'Plugins' | 'Skills' | 'Connectors';
 
 /** Navigation only; connector definitions remain owned by their runtime. */
 export const usePluginsNavigationStore = create<{

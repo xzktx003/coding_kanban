@@ -16,8 +16,8 @@ import { usePluginsNavigationStore } from '@session/stores/usePluginsNavigationS
 import { pluginDetailRequestTarget, pluginUninstallId } from './pluginTargets';
 import { useExternalUrl } from './useExternalUrl';
 
-/** The four primary views shown by the left-side TabSwitcher. */
-export type MainTab = 'Plugins' | 'Tools' | 'Skills' | 'Connectors';
+/** The primary views shown by the left-side TabSwitcher. */
+export type MainTab = 'Plugins' | 'Skills' | 'Connectors';
 /** A full-screen overlay that replaces the main content; null means "no overlay". */
 export type Overlay = 'manage' | 'add' | 'detail' | null;
 export type ManageTab = 'Skills' | 'Connectors';
