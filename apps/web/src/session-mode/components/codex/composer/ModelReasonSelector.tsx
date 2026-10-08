@@ -642,7 +642,13 @@ export function ModelReasonSelector({
       const defaultModel = defaultOpenAiModel(openAiModels);
       if (defaultModel) {
         setModel(defaultModel.id);
-        setReasoningEffort(defaultModel.defaultReasoningEffort);
+        const nextEffort = nextReasoningEffort(
+          "openai",
+          defaultModel.id,
+          reasoningEffort ?? undefined,
+          openAiModels,
+        );
+        if (nextEffort) setReasoningEffort(nextEffort);
       }
     }
   }, [
@@ -650,6 +656,7 @@ export function ModelReasonSelector({
     currentThreadId,
     modelProvider,
     providerModels.openai,
+    reasoningEffort,
     setModel,
     setReasoningEffort,
   ]);

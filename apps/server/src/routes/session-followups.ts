@@ -320,6 +320,8 @@ export function registerSessionFollowupRoutes(
       if (response.status !== 404 && !response.ok)
         throw new Error("无法确认会话执行占用");
     },
+    readThread: (threadId: string) =>
+      upstream("/api/codex/thread/read", { threadId }),
     call: (method: string, params: Record<string, unknown>) =>
       upstream("/api/codex/" + method, params),
     statuses: async (ids: string[]) => {

@@ -429,3 +429,7 @@
 - 2026-10-08 Codex 写锁交接：历史导航/补拉必须使用只读 API，不能 resume；unsubscribe ACK 不等于释放，需核对 loaded/list。卸载会结束 unified exec 后台进程，必须保护队列、待审批/回答、活动目标和子 Agent，未知资源保留。实现与隔离原生验收见 docs/session-ownership.md、scripts/session-ownership-acceptance.py；正式服务须安全切换。
 
 - 2026-10-08：会话历史/执行权 API 同时返回 405 时，先检查运行二进制与磁盘产物是否一致。常驻 Rust 服务跨 Node 热更新复用，构建成功不代表路由已激活；使用 session:status 核对。隔离验证新程序后，只有获得明确任务中断授权才升级真实运行服务，再复核 health/read/access、会话 ID 与历史。此次已授权升级并验证接口恢复 200。
+
+- 2026-10-08：续发队列在完成事件丢失且会话已释放/网关重连后，不能只依据 idle/notLoaded 清除 awaitingTurnId。使用只读完整历史证明原等待轮次及后续轮次均已终止；失败/中断保持暂停，未知或事件竞态不投递，5 秒限频。保留消息 ID、附件、人工暂停与送达不明保护；不使用 resume 补读。对应服务和 HTTP 适配器回归见 docs/debug_list.md。
+
+- 2026-10-08：Codex 切换模型不要无条件应用 defaultReasoningEffort。`nextReasoningEffort` 应先检查目标 supportedReasoningEfforts，兼容偏好保留、不兼容/未指定才回退；未知模型不覆盖，新聊天自动选择也复用此判断。回归覆盖提供商切换、会话隔离、刷新和发送参数，见 `docs/session-model-selection.md`。

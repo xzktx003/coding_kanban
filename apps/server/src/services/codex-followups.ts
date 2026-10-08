@@ -12,6 +12,8 @@ import { writeDurableJson } from "./durable-json.js";
 
 export interface FollowupRuntime {
   statuses(ids: string[]): Promise<Record<string, string>>;
+  /** Full, read-only history; never resume just to check a completion receipt. */
+  readThread?(id: string): Promise<any>;
   syncHolds?(snapshot: { busy: boolean; threadIds: string[] }): Promise<void>;
   call(method: string, params: Record<string, unknown>): Promise<any>;
 }
@@ -30,6 +32,7 @@ export class CodexFollowups {
   private statuses: Record<string, string> = {};
   private errorRecoveryAllowed = new Set<string>();
   private activeTurns: Record<string, string> = {};
+  private historyChecks = new Map<string, { turnId: string; at: number }>();
   private epochs: Record<string, number> = {};
   constructor(
     private runtime: FollowupRuntime,
@@ -286,6 +289,9 @@ export class CodexFollowups {
     revision: number,
     action: FollowupAction,
   ): Promise<FollowupThread> {
+    // A pending edit/pause must invalidate an in-flight history/status snapshot
+    // before it can dispatch the old queue ahead of this user's operation.
+    this.epochs[id] = (this.epochs[id] ?? 0) + 1;
     return this.run(async () => {
       const thread = this.thread(id);
       if (thread.revision !== revision)
@@ -422,6 +428,7 @@ export class CodexFollowups {
     });
   }
   stop(id: string, turnId: string): Promise<void> {
+    this.epochs[id] = (this.epochs[id] ?? 0) + 1;
     return this.run(async () => {
       const thread = this.thread(id);
       await this.transaction(() => {
@@ -540,6 +547,65 @@ export class CodexFollowups {
       });
     });
   }
+  private async reconcileCompletion(id: string, epoch: number | undefined) {
+    const thread = this.thread(id),
+      turnId = thread.awaitingTurnId;
+    if (
+      !turnId ||
+      !this.runtime.readThread ||
+      thread.stopTurnId ||
+      thread.review?.status === "inProgress" ||
+      (thread.paused && thread.paused !== "重新连接后等待任务完成确认") ||
+      thread.items.some((m) =>
+        ["sending", "uncertain", "failed"].includes(m.status),
+      )
+    )
+      return;
+    const last = this.historyChecks.get(id);
+    if (last?.turnId === turnId && Date.now() - last.at < 5000) return;
+    this.historyChecks.set(id, { turnId, at: Date.now() });
+    let history: any;
+    try {
+      history = (await this.runtime.readThread(id))?.thread;
+    } catch {
+      return;
+    } // No proof means no dispatch, including on older runtimes.
+    if (
+      this.epochs[id] !== epoch ||
+      thread.awaitingTurnId !== turnId ||
+      history?.id !== id ||
+      !["idle", "notLoaded", "systemError"].includes(history?.status?.type) ||
+      !Array.isArray(history.turns)
+    )
+      return;
+    const index = history.turns.findIndex((turn: any) => turn?.id === turnId);
+    if (index < 0) return;
+    const subsequent = history.turns.slice(index);
+    if (
+      !subsequent.every((turn: any) =>
+        ["completed", "failed", "interrupted"].includes(turn?.status),
+      )
+    )
+      return;
+    const failed = subsequent.some((turn: any) => turn.status === "failed");
+    const interrupted = subsequent.some(
+      (turn: any) => turn.status === "interrupted",
+    );
+    await this.transaction(() => {
+      delete thread.awaitingTurnId;
+      if (failed || interrupted)
+        thread.paused = failed
+          ? "上一轮执行失败，请检查后继续"
+          : "当前任务已中断，队列已暂停";
+      else if (thread.paused === "重新连接后等待任务完成确认")
+        thread.paused = null;
+      thread.revision++;
+    });
+    delete this.activeTurns[id];
+    if (failed) this.statuses[id] = "systemError";
+    this.historyChecks.delete(id);
+  }
+
   tick(): Promise<void> {
     return this.run(async () => {
       const ids = Object.keys(this.state).filter((id) =>
@@ -557,6 +623,11 @@ export class CodexFollowups {
         if (epochs[id] !== this.epochs[id]) continue;
         this.statuses[id] = fresh[id] ?? this.statuses[id] ?? "unknown";
         const thread = this.thread(id);
+        if (["idle", "systemError", "notLoaded"].includes(this.statuses[id])) {
+          await this.reconcileCompletion(id, epochs[id]);
+          // Notifications invalidate the history read before entering the serial queue.
+          if (epochs[id] !== this.epochs[id]) continue;
+        }
         if (
           this.statuses[id] === "systemError" &&
           !this.errorRecoveryAllowed.has(id)

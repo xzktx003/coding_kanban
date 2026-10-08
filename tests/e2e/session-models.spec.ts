@@ -2,19 +2,30 @@ import { expect, test, type Page } from "@playwright/test";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
 
 async function selectThread(page: Page, id: string) {
-  await page.evaluate(async (id) => {
-    const path = (name: string) =>
-      performance
-        .getEntriesByType("resource")
-        .findLast((e) => e.name.includes(`/src/session-mode/${name}.ts`))
-        ?.name ?? `/src/session-mode/${name}.ts`;
-    const { useAgentCenterStore } = await import(
-      path("stores/useAgentCenterStore")
-    );
-    const { codexService } = await import(path("services/codexService"));
-    useAgentCenterStore.getState().setCurrentAgentCardId(id, "codex");
-    await codexService.setCurrentThread(id);
-  }, id);
+  // Use the mounted navigation after reload; mutating selection before sidebar
+  // and shared-tab hydration finishes can be overwritten by initialization.
+  const row = page
+    .locator(".session-nav-row[role=button]")
+    .filter({ hasText: `中文会话 ${id.slice(3)} ` })
+    .first();
+  if (!(await row.isVisible()))
+    await page
+      .getByRole("button", { name: "展开项目列表", exact: true })
+      .click();
+  await row.click();
+  const projects = page.getByRole("dialog", {
+    name: "项目与会话列表",
+    exact: true,
+  });
+  if (await projects.isVisible()) {
+    await projects
+      .getByRole("button", { name: "收起项目列表", exact: true })
+      .click();
+    await expect(projects).not.toBeVisible();
+  }
+  await expect(
+    page.locator(`[role=tab][data-tab-key="codex:${id}"]`),
+  ).toHaveAttribute("aria-selected", "true");
 }
 for (const width of [375, 1440]) {
   test(`model selection, notices, actual sends and reload stay isolated between threads (${width}px)`, async ({
@@ -110,11 +121,16 @@ for (const width of [375, 1440]) {
     await expect(page.locator(".session-model-change-notice")).toHaveCount(0);
     await editor.fill("A 的未发送草稿");
     await label("gpt-6-astra", "high").click();
+    // Sol defaults to low but also supports high: switching must retain A's preference.
+    await page.getByRole("option").filter({ hasText: "隔离模型 Sol" }).click();
+    await editor.click();
+    await expect(label("gpt-6-sol", "high")).toBeVisible();
+    await label("gpt-6-sol", "high").click();
     await page.getByRole("option").filter({ hasText: "隔离模型 Luna" }).click();
     await editor.click();
-    await expect(label("gpt-6-luna", "medium")).toBeVisible();
+    await expect(label("gpt-6-luna", "high")).toBeVisible();
     const notice = page.locator(".session-model-change-notice");
-    await expect(notice).toContainText("gpt-6-astra → gpt-6-luna");
+    await expect(notice).toContainText("gpt-6-sol → gpt-6-luna");
     await expect(notice).toContainText("下次发送生效");
     await expect(editor).toContainText("A 的未发送草稿");
     expect(
@@ -143,12 +159,12 @@ for (const width of [375, 1440]) {
       effort: "low",
     });
     await selectThread(page, "ux-0");
-    await expect(label("gpt-6-luna", "medium")).toBeVisible();
+    await expect(label("gpt-6-luna", "high")).toBeVisible();
     await expect(editor).toContainText("A 的未发送草稿");
     await page.reload();
     await selectThread(page, "ux-0");
-    await expect(label("gpt-6-luna", "medium")).toBeVisible();
-    await expect(notice).toContainText("gpt-6-astra → gpt-6-luna");
+    await expect(label("gpt-6-luna", "high")).toBeVisible();
+    await expect(notice).toContainText("gpt-6-sol → gpt-6-luna");
     await expect(editor).toContainText("A 的未发送草稿");
     const bounds = await notice.evaluate((el) => {
       const r = el.getBoundingClientRect();
@@ -181,7 +197,7 @@ for (const width of [375, 1440]) {
     await page.reload();
     await selectThread(page, "ux-0");
     await expect(notice).toHaveCount(0);
-    await expect(label("gpt-6-luna", "medium")).toBeVisible();
+    await expect(label("gpt-6-luna", "high")).toBeVisible();
     const beforeA = f.calls.length;
     await page.getByRole("button", { name: "发送消息", exact: true }).click();
     await expect
@@ -195,7 +211,7 @@ for (const width of [375, 1440]) {
     expect(
       f.calls.slice(beforeA).find((c) => c.path.endsWith("/followups/submit"))!
         .body.parameters,
-    ).toMatchObject({ model: "gpt-6-luna", effort: "medium" });
+    ).toMatchObject({ model: "gpt-6-luna", effort: "high" });
     await selectThread(page, "ux-1");
     await expect(label("gpt-6-sol", "low")).toBeVisible();
     expect(errors).toEqual([]);

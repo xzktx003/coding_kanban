@@ -1,5 +1,26 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
+// These cases inject notifications explicitly. Keep their isolated stream open;
+// the generic finite SSE fixture otherwise creates unrelated reconnect/history races.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    class Stream {
+      onopen: (() => void) | null = null;
+      onmessage = null;
+      onerror = null;
+      closed = false;
+      constructor() {
+        setTimeout(() => {
+          if (!this.closed) this.onopen?.();
+        }, 30);
+      }
+      close() {
+        this.closed = true;
+      }
+    }
+    (window as any).EventSource = Stream;
+  });
+});
 const editor = (page: Page) =>
   page.locator(".session-agent-view [contenteditable=true]");
 async function selectFirst(page: Page) {
@@ -8,7 +29,9 @@ async function selectFirst(page: Page) {
     .filter({ hasText: "中文会话 0 " })
     .first();
   if (!(await row.isVisible()))
-    await page.getByRole("button", { name: "展开项目列表", exact: true }).click();
+    await page
+      .getByRole("button", { name: "展开项目列表", exact: true })
+      .click();
   await row.click();
   await page.keyboard.press("Escape");
   await expect(
@@ -86,12 +109,10 @@ for (const width of [375, 1440])
         method: "item/completed",
         params: { threadId: "ux-0", turnId, item },
       };
-      await push(page, [completed]);
-      await expect(page.locator("[data-delivery-echo]")).toHaveCount(0);
-      await push(page, [{ ...completed, method: "item/started" }, completed]);
-      await expect(
-        page.locator("[data-codex-row]").filter({ hasText: text }),
-      ).toHaveCount(i + 1);
+      // Native history already contains an item before its event reaches the
+      // browser; background reads must see the same authoritative transcript.
+
+      // Native history is durable before its notification is emitted.
       (fixture.threads[0].turns as any[]).push({
         id: turnId,
         status: "completed",
@@ -100,6 +121,12 @@ for (const width of [375, 1440])
         durationMs: 1,
         error: null,
       });
+      await push(page, [completed]);
+      await expect(page.locator("[data-delivery-echo]")).toHaveCount(0);
+      await push(page, [{ ...completed, method: "item/started" }, completed]);
+      await expect(
+        page.locator("[data-codex-row]").filter({ hasText: text }),
+      ).toHaveCount(i + 1);
     }
     await page.reload({ waitUntil: "domcontentloaded" });
     await editor(page).waitFor();
@@ -152,7 +179,7 @@ test("sending from an older reading position reveals the submitted message, and 
     )
     .toBeLessThan(8);
   let pending: any = null;
-  await page.route("**/api/codex/thread/resume", async (route) => {
+  await page.route("**/api/codex/thread/read", async (route) => {
     pending = route;
   });
   await page.evaluate(async () => {
@@ -165,7 +192,7 @@ test("sending from an older reading position reveals the submitted message, and 
             "/src/session-mode/services/codexService.ts",
         )?.name ?? "/src/session-mode/services/codexService.ts";
     const { codexService } = await import(url);
-    (window as any).diagnosticResume = codexService.threadResume("ux-0");
+    (window as any).diagnosticRead = codexService.loadThreadHistory("ux-0");
   });
   await expect.poll(() => !!pending).toBe(true);
   const message = {
@@ -187,7 +214,7 @@ test("sending from an older reading position reveals the submitted message, and 
   await pending.fulfill({
     json: { thread: { id: "ux-0", status: { type: "idle" }, turns: [] } },
   });
-  await page.evaluate(async () => await (window as any).diagnosticResume);
+  await page.evaluate(async () => await (window as any).diagnosticRead);
   await expect(
     page
       .locator("[data-codex-row]")

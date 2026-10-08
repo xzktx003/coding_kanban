@@ -18,7 +18,16 @@ export function nextReasoningEffort(
   openAiModels: Model[],
 ): ReasoningEffort | undefined {
   if (provider === "openai") {
-    return openAiModels.find((m) => m.id === modelId)?.defaultReasoningEffort;
+    const model = openAiModels.find((m) => m.id === modelId);
+    // An unknown/typed model has no catalog evidence to override a preference.
+    if (!model) return undefined;
+    if (
+      current &&
+      model.supportedReasoningEfforts.some((o) => o.reasoningEffort === current)
+    ) {
+      return undefined;
+    }
+    return model.defaultReasoningEffort;
   }
   return current && GENERIC_REASONING_OPTIONS.includes(current)
     ? undefined

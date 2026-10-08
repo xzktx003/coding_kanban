@@ -46,3 +46,15 @@ HTTP 新增：
 - `python3 scripts/session-ownership-acceptance.py --codex /path/to/codex`：构建 Rust 后，在临时数据目录启动真实运行层和独立 Codex app-server，使用本地 Responses 测试服务。验证同 ID 写锁交替、外部占用读历史、拒绝发送无模型调用、自动释放、释放/发送竞态、历史保留。只清理脚本自己创建的进程组，不使用真实凭证或远端模型。
 
 完整执行结果见 [验收记录](designs/session-ownership-acceptance.md)。
+
+## 完成通知缺失时的队列恢复（2026-10-08）
+
+`notLoaded` / `readonly` 不是完成凭据。若队列已有明确接收回执并保存 `awaitingTurnId`，但新的状态快照显示 idle、notLoaded 或 systemError，网关用完整只读 `thread/read` 核对原会话与等待轮次。仅在该轮及后续历史均为确定终态时解除等待；失败或中断继续暂停，成功只解除由网关恢复产生的“等待任务完成确认”。手动暂停、送达不明、停止等待、未结束审查不会被这条路径解除。
+
+查询不调用 resume；只有后续投递仍由既有 turn/start 执行权流程恢复原 ID。读期间收到更新事件、队列修改或停止请求会作废核对结果，历史缺失、格式不完整、旧运行层不支持或网络失败均不推进队列。同一等待轮次的失败核对最多每 5 秒尝试一次。已送达消息不会重发，排队消息保持原 clientUserMessageId、正文、附件与模型快照。
+
+红绿灯覆盖漏完成回执、网关重建、失败/中断、错误会话、历史缺失、进行中轮次、手动暂停、网络异常和读期间新轮开始；HTTP 适配器集成测试确认只调用 thread/read 并且后一条消息只发送一次。现场只读核验确认原会话从 23 轮增至 24 轮，队列中的原消息仅对应一个 clientId，新增轮次 completed。没有发送额外测试正文，没有强制接管或重启 Rust。
+
+补充验收：队列及 HTTP 适配器 33 项通过；`pnpm check` 通过；最终 `pnpm test` 共 1,860 项通过（server 649、终端 web 526、会话 web 590、脚本 95），另有 1 项平台条件跳过。浏览器交接/队列 15 项与发送回显 4 项分批通过。首轮 tmux 改名单测曾超时，完整复跑通过；旧发送回归先因拦截 resume 失败，改为 read 后发现有限 SSE fixture 的人工断线与历史写入时序竞态，测试改用持续的隔离流并先持久化模拟历史再发布事件，4 项复跑全部通过。未以重试掩盖产品错误或移除断言。
+
+本地证据（Git 忽略）：`.dev-runtime/queue-history-{red,pause-red,green,check,tests-final,e2e,delivery-final}.log`；真实接收/完成与唯一消息 ID 核验为 `.dev-runtime/queue-history-live-verification.json`。

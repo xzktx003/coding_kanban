@@ -441,3 +441,259 @@ test("external writer conflict preserves submission identity and attachments; ex
     path: message.images[0],
   });
 });
+
+test("a released thread resumes its queued message after read-only history confirms the missed completion", async () => {
+  const f = fixture();
+  let reads = 0;
+  Object.assign(f.runtime, {
+    readThread: async (id: string) => {
+      reads++;
+      return {
+        thread: {
+          id,
+          status: { type: "notLoaded" },
+          turns: [{ id: "turn-one", status: "completed" }],
+        },
+      };
+    },
+  });
+  const q = new CodexFollowups(f.runtime);
+  f.states.a = "idle";
+  await q.submit(input());
+  await q.tick();
+  await q.submit({ ...input("two"), images: ["/original.png"] });
+  f.states.a = "notLoaded";
+  await q.tick();
+  await q.tick();
+  assert.equal(reads, 1);
+  assert.deepEqual(
+    f.calls.map((c) => c.method),
+    ["turn/start", "turn/start"],
+  );
+  assert.equal(f.calls[1].params.clientUserMessageId, "two");
+  assert.deepEqual((f.calls[1].params.input as any[])[1], {
+    type: "localImage",
+    path: "/original.png",
+  });
+  assert.equal((await q.get("a")).items[1].status, "sent");
+});
+
+test("gateway restart reconciles its automatic completion wait from history without resending accepted input", async () => {
+  const root = await mkdtemp(join(tmpdir(), "followup-history-"));
+  try {
+    const f = fixture(),
+      file = join(root, "queue.json"),
+      q = new CodexFollowups(f.runtime, file);
+    Object.assign(f.runtime, {
+      readThread: async () => ({
+        thread: {
+          id: "a",
+          status: { type: "notLoaded" },
+          turns: [{ id: "turn-one", status: "completed" }],
+        },
+      }),
+    });
+    f.states.a = "idle";
+    await q.submit(input());
+    await q.tick();
+    await q.submit(input("two"));
+    const restored = new CodexFollowups(f.runtime, file);
+    f.states.a = "notLoaded";
+    await restored.tick();
+    assert.deepEqual(
+      f.calls.map((c) => c.params.clientUserMessageId),
+      ["one", "two"],
+    );
+    assert.equal((await restored.get("a")).paused, null);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+for (const status of ["failed", "interrupted"])
+  test(`history reconciliation preserves ${status} protection`, async () => {
+    const f = fixture(),
+      q = new CodexFollowups(f.runtime);
+    Object.assign(f.runtime, {
+      readThread: async () => ({
+        thread: {
+          id: "a",
+          status: { type: "notLoaded" },
+          turns: [{ id: "turn-one", status }],
+        },
+      }),
+    });
+    f.states.a = "idle";
+    await q.submit(input());
+    await q.tick();
+    await q.submit(input("two"));
+    f.states.a = "notLoaded";
+    await q.tick();
+    assert.equal(f.calls.length, 1);
+    assert.ok((await q.get("a")).paused);
+    assert.equal((await q.get("a")).awaitingTurnId, undefined);
+  });
+
+for (const scenario of [
+  "missing",
+  "inProgress",
+  "wrong-thread",
+  "newer-failed",
+  "unavailable",
+  "paused",
+])
+  test(`history reconciliation cannot release a queue on ${scenario}`, async () => {
+    const f = fixture(),
+      q = new CodexFollowups(f.runtime);
+    Object.assign(f.runtime, {
+      readThread: async () => {
+        if (scenario === "unavailable") throw new Error("offline");
+        return {
+          thread: {
+            id: scenario === "wrong-thread" ? "b" : "a",
+            status: { type: "notLoaded" },
+            turns: [
+              {
+                id: scenario === "missing" ? "another" : "turn-one",
+                status: scenario === "inProgress" ? "inProgress" : "completed",
+              },
+              ...(scenario === "newer-failed"
+                ? [{ id: "external", status: "failed" }]
+                : []),
+            ],
+          },
+        };
+      },
+    });
+    f.states.a = "idle";
+    await q.submit(input());
+    await q.tick();
+    await q.submit(input("two"));
+    if (scenario === "paused")
+      await q.change("a", (await q.get("a")).revision, { type: "pause" });
+    f.states.a = "notLoaded";
+    await q.tick();
+    assert.equal(f.calls.length, 1);
+    assert.equal((await q.get("a")).items[1].status, "queued");
+  });
+
+test("a turn event arriving during history reconciliation invalidates the read and prevents dispatch", async () => {
+  const f = fixture(),
+    q = new CodexFollowups(f.runtime);
+  let resolve!: (value: unknown) => void;
+  let reading!: () => void;
+  const started = new Promise<void>((r) => {
+    reading = r;
+  });
+  Object.assign(f.runtime, {
+    readThread: async () => {
+      reading();
+      return new Promise((r) => {
+        resolve = r;
+      });
+    },
+  });
+  f.states.a = "idle";
+  await q.submit(input());
+  await q.tick();
+  await q.submit(input("two"));
+  f.states.a = "notLoaded";
+  const tick = q.tick();
+  await started;
+  const observed = q.observe({
+    method: "turn/started",
+    params: { threadId: "a", turn: { id: "new-active" } },
+  });
+  resolve({
+    thread: {
+      id: "a",
+      status: { type: "notLoaded" },
+      turns: [{ id: "turn-one", status: "completed" }],
+    },
+  });
+  await tick;
+  await observed;
+  assert.equal(f.calls.length, 1);
+  assert.equal((await q.get("a")).awaitingTurnId, "turn-one");
+});
+
+test("pause requested during a slow history read wins before the next message is dispatched", async () => {
+  const f = fixture(),
+    q = new CodexFollowups(f.runtime);
+  let resolve!: (value: unknown) => void, reading!: () => void;
+  const started = new Promise<void>((r) => {
+    reading = r;
+  });
+  Object.assign(f.runtime, {
+    readThread: async () => {
+      reading();
+      return new Promise((r) => {
+        resolve = r;
+      });
+    },
+  });
+  f.states.a = "idle";
+  await q.submit(input());
+  await q.tick();
+  await q.submit(input("two"));
+  const revision = (await q.get("a")).revision;
+  f.states.a = "notLoaded";
+  const tick = q.tick();
+  await started;
+  const pause = q.change("a", revision, { type: "pause" });
+  // Attach a handler before releasing the read, so revision rejection is observed.
+  const outcome = pause.then(
+    (value) => ({ value }),
+    (error) => ({ error }),
+  );
+  resolve({
+    thread: {
+      id: "a",
+      status: { type: "notLoaded" },
+      turns: [{ id: "turn-one", status: "completed" }],
+    },
+  });
+  await tick;
+  const result = await outcome;
+  assert.equal(f.calls.length, 1);
+  assert.ok("value" in result);
+  assert.equal((await q.get("a")).paused, "队列已暂停");
+});
+
+test("unavailable completion history is rate limited and retried without resubmitting accepted input", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: 100000 });
+  const f = fixture(),
+    q = new CodexFollowups(f.runtime);
+  let reads = 0;
+  Object.assign(f.runtime, {
+    readThread: async () => {
+      reads++;
+      if (reads === 1) throw new Error("offline");
+      return {
+        thread: {
+          id: "a",
+          status: { type: "notLoaded" },
+          turns: [{ id: "turn-one", status: "completed" }],
+        },
+      };
+    },
+  });
+  f.states.a = "idle";
+  await q.submit(input());
+  await q.tick();
+  await q.submit(input("two"));
+  f.states.a = "notLoaded";
+  await q.tick();
+  await q.tick();
+  t.mock.timers.tick(4999);
+  await q.tick();
+  assert.equal(reads, 1);
+  assert.equal(f.calls.length, 1);
+  t.mock.timers.tick(1);
+  await q.tick();
+  assert.equal(reads, 2);
+  assert.deepEqual(
+    f.calls.map((c) => c.params.clientUserMessageId),
+    ["one", "two"],
+  );
+});
