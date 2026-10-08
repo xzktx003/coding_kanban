@@ -117,3 +117,99 @@ it("does not extend the split target into distant tools or empty space", () => {
   });
   expect(sessionDropTarget(root, 495, 250)).toBeNull();
 });
+
+function headerFixture(hitIndex: number | null = 0) {
+  const root = document.createElement("div");
+  root.innerHTML =
+    '<section data-session-group="target"><div class="session-tabs"><div class="session-tab-strip"><div data-session-drag-key="codex:a"></div><div data-session-drag-key="codex:b"></div></div></div></section>';
+  const strip = root.querySelector<HTMLElement>(".session-tab-strip")!;
+  const tabs = Array.from(strip.children) as HTMLElement[];
+  vi.spyOn(strip, "getBoundingClientRect").mockReturnValue({
+    x: 100,
+    y: 40,
+    left: 100,
+    top: 40,
+    right: 500,
+    bottom: 88,
+    width: 400,
+    height: 48,
+  } as DOMRect);
+  tabs.forEach((tab, index) =>
+    vi.spyOn(tab, "getBoundingClientRect").mockReturnValue({
+      x: 100 + index * 120,
+      y: 40,
+      left: 100 + index * 120,
+      top: 40,
+      right: 210 + index * 120,
+      bottom: 88,
+      width: 110,
+      height: 48,
+    } as DOMRect),
+  );
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: () => (hitIndex === null ? strip : tabs[hitIndex]),
+  });
+  return { root, strip, tabs };
+}
+
+it.each([
+  [120, 0, "codex:a"],
+  [190, 0, "codex:b"],
+  [215, null, "codex:b"],
+  [300, 1, undefined],
+  [450, null, undefined],
+] as const)(
+  "header drop at %s chooses the exact following tab %s",
+  (x, hit, beforeKey) => {
+    const { root, strip } = headerFixture(hit);
+    const result = sessionDropTarget(root, x, 55);
+    expect(result).toMatchObject({ groupId: "target", edge: "center", strip });
+    expect(result?.beforeKey).toBe(beforeKey);
+    expect(result?.insertion).toMatchObject({ y: 44, height: 40 });
+  },
+);
+
+it("an empty header accepts a tab without converting its drop into a top split", () => {
+  const { root, strip } = headerFixture(null);
+  strip.replaceChildren();
+  expect(sessionDropTarget(root, 250, 55)).toMatchObject({
+    groupId: "target",
+    edge: "center",
+    strip,
+  });
+});
+
+it("an expired target group cannot reorder shared cards or report a successful move", () => {
+  const before = useAgentCenterStore.getState().cards;
+  expect(
+    placeSessionDrag("codex:b", {
+      groupId: "removed-group",
+      edge: "center",
+      beforeKey: "codex:a",
+    }),
+  ).toBeUndefined();
+  expect(useAgentCenterStore.getState().cards).toBe(before);
+});
+
+it("forward insertion uses the same precise ordering in the group and shared collection", () => {
+  const third = { kind: "codex" as const, id: "c", preview: "第三条" };
+  useAgentCenterStore.setState({ cards: [...cards, third] });
+  const layout = useSessionSplitStore.getState();
+  layout.reconcile(["codex:a", "codex:b", "codex:c"]);
+  placeSessionDrag("codex:a", {
+    groupId: layout.tree.id,
+    edge: "center",
+    beforeKey: "codex:c",
+  });
+  expect(splitGroups(useSessionSplitStore.getState().tree)[0].keys).toEqual([
+    "codex:b",
+    "codex:a",
+    "codex:c",
+  ]);
+  expect(useAgentCenterStore.getState().cards.map((card) => card.id)).toEqual([
+    "b",
+    "a",
+    "c",
+  ]);
+});

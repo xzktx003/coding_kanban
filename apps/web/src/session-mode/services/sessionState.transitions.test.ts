@@ -1,6 +1,6 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-const api = vi.hoisted(() => ({ allowSleep: vi.fn().mockResolvedValue(undefined), preventSleep: vi.fn().mockResolvedValue(undefined), threadRollback: vi.fn(), threadResume: vi.fn(), turnStart: vi.fn(), respondToPermissionsApproval: vi.fn(), respondToMcpElicitation: vi.fn(), respondToCommandExecutionApproval: vi.fn() }));
+const api = vi.hoisted(() => ({ allowSleep: vi.fn().mockResolvedValue(undefined), preventSleep: vi.fn().mockResolvedValue(undefined), threadRollback: vi.fn(), threadRead: vi.fn(), turnStart: vi.fn(), respondToPermissionsApproval: vi.fn(), respondToMcpElicitation: vi.fn(), respondToCommandExecutionApproval: vi.fn() }));
 vi.mock('@session/services', () => api);
 vi.mock('@session/services/apiAdapt', () => api);
 import { useCodexStore as store } from '@session/components/codex/stores/useCodexStore';
@@ -108,10 +108,10 @@ import { resetRpcLifecycle, useRpcDeliveryStore } from '@session/components/code
 import { SessionApiError } from '@session/services/apiAdapt/shared';
 test('restart invalidates old history requests and permits a new request for the same thread',async()=>{
  let resolve!:(v:any)=>void;
- api.threadResume.mockImplementationOnce(()=>new Promise(r=>resolve=r));
+ api.threadRead.mockImplementationOnce(()=>new Promise(r=>resolve=r));
  const old=codexService.threadResume('a');
  resetCodexRuntimeState();
- api.threadResume.mockResolvedValueOnce({thread:{id:'a',turns:[turn('new')],status:{type:'active',activeFlags:[]}}});
+ api.threadRead.mockResolvedValueOnce({thread:{id:'a',turns:[turn('new')],status:{type:'active',activeFlags:[]}}});
  await codexService.threadResume('a');
  resolve({thread:{id:'a',turns:[turn('old','failed')],status:{type:'systemError'}}});await old;
  expect(store.getState().turnTimingMap.a.turnId).toBe('new');
@@ -119,7 +119,7 @@ test('restart invalidates old history requests and permits a new request for the
 });
 test('a historical inProgress snapshot cannot resurrect the same completed turn',async()=>{
  event('turn/started',{turn:turn()});event('turn/completed',{turn:turn('t','completed')});
- api.threadResume.mockResolvedValueOnce({thread:{id:'a',turns:[turn()],status:{type:'active',activeFlags:[]}}});
+ api.threadRead.mockResolvedValueOnce({thread:{id:'a',turns:[turn()],status:{type:'active',activeFlags:[]}}});
  await codexService.threadResume('a');
  expect(store.getState().turnTimingMap.a.status).toBe('completed');
  expect(renderHook(()=>useTurnControl()).result.current.running).toBe(false);

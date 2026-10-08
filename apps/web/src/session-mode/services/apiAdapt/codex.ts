@@ -36,6 +36,7 @@ import type {
   ThreadGoalSetResponse,
   ThreadListParams,
   ThreadListResponse,
+  ThreadReadResponse,
   ThreadResumeParams,
   ThreadResumeResponse,
   ThreadRollbackParams,
@@ -55,6 +56,7 @@ import type {
   ProviderPreset,
 } from "@session/components/codex/types";
 import {
+  SessionApiError,
   getJson,
   postJson,
   postJsonWithOptions,
@@ -84,6 +86,42 @@ export async function threadResume(
     "/api/codex/thread/resume",
     params,
     options,
+  );
+}
+
+/** Viewing history must never load a writer, including on older runtimes. */
+export async function threadRead(
+  params: { threadId: string },
+  options?: { suppressToast?: boolean },
+) {
+  try {
+    return await postJsonWithOptions<
+      ThreadReadResponse & Partial<ThreadResumeResponse>
+    >("/api/codex/thread/read", params, { ...options, suppressToast: true });
+  } catch (error) {
+    if (error instanceof SessionApiError && error.status === 404)
+      throw new Error(
+        "当前运行服务尚未支持只读历史，请在后台任务结束后的安全窗口更新会话服务",
+      );
+    throw error;
+  }
+}
+export interface CodexAccess {
+  state:
+    | "readonly"
+    | "acquiring"
+    | "owned"
+    | "releasing"
+    | "external"
+    | "unknown";
+  reason: string;
+  generation: number;
+}
+export function threadAccess(threadId: string, release = false) {
+  return postJsonWithOptions<CodexAccess>(
+    "/api/codex/thread/access",
+    { threadId, release },
+    { suppressToast: true },
   );
 }
 

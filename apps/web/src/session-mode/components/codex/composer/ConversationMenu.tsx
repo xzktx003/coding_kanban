@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { MoreHorizontal, MessagesSquare } from "lucide-react";
 import { toast } from "sonner";
+import { threadAccess } from "@session/services/apiAdapt/codex";
 import { createSideChat } from "@session/services/conversationActions";
 import { Button } from "../../ui/button";
 import {
@@ -49,6 +50,26 @@ export function ConversationMenu({
         >
           <MessagesSquare size={16} />
           侧边聊天
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId || busy}
+          onSelect={() => {
+            if (!threadId) return;
+            setBusy(true);
+            void threadAccess(threadId, true)
+              .then((access) => {
+                toast.message(
+                  access.state === "readonly"
+                    ? "本项目已释放执行权"
+                    : access.reason || "正在检查释放条件",
+                );
+                window.dispatchEvent(new Event("codex-access-changed"));
+              })
+              .catch((e) => toast.error(String(e)))
+              .finally(() => setBusy(false));
+          }}
+        >
+          释放给其他客户端
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

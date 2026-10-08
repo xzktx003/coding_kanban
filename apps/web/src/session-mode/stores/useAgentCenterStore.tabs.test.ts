@@ -49,6 +49,26 @@ it("moves tabs without switching the active session", () => {
   ]);
   expect(useAgentCenterStore.getState().currentAgentCardId).toBe("c");
 });
+
+it('precise insertion preserves identity, selection and the shared move operation', () => {
+  const store = useAgentCenterStore.getState();
+  [a, b, c].forEach(card => store.addAgentCard(card));
+  store.setCurrentAgentCardId('c', 'cc');
+  store.reorderCard('codex:a', 'cc:c');
+  let state = useAgentCenterStore.getState();
+  expect(state.cards).toEqual([b, a, c]);
+  expect(state.currentAgentCardId).toBe('c');
+  expect(state.pendingTabOperations.at(-1)?.action).toEqual({ type: 'move', key: 'codex:a', beforeKey: 'cc:c' });
+  const pending = state.pendingTabOperations.length;
+  store.reorderCard('codex:a', 'cc:c');
+  expect(useAgentCenterStore.getState().pendingTabOperations).toHaveLength(pending);
+  store.reorderCard('codex:a', null);
+  state = useAgentCenterStore.getState();
+  expect(state.cards).toEqual([b, c, a]);
+  expect(state.cards[2].worktreePath).toBe(a.worktreePath);
+  store.reorderCard('codex:a', 'missing:target');
+  expect(useAgentCenterStore.getState().cards).toBe(state.cards);
+});
 it("closing selects the right neighbor, then the left, then a new chat", () => {
   const store = useAgentCenterStore.getState();
   [a, b, c].forEach((card) => store.addAgentCard(card));

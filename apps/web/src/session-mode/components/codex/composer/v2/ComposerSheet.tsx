@@ -16,6 +16,7 @@ export function ComposerSheet({
   children,
   footer,
   full = false,
+  returnFocus,
 }: {
   title: string;
   description?: string;
@@ -23,6 +24,7 @@ export function ComposerSheet({
   children: ReactNode;
   footer?: ReactNode;
   full?: boolean;
+  returnFocus?: () => void;
 }) {
   const close = useRef(onClose);
   close.current = onClose;
@@ -62,6 +64,14 @@ export function ComposerSheet({
       <DialogContent
         showCloseButton={false}
         className={`session-composer-sheet ${full ? "is-full" : ""}`}
+        onCloseAutoFocus={
+          returnFocus
+            ? (e) => {
+                e.preventDefault();
+                returnFocus();
+              }
+            : undefined
+        }
         onPointerDownOutside={(e) => {
           if (full) e.preventDefault();
         }}

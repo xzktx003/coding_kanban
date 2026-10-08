@@ -6,6 +6,7 @@ pub mod env;
 pub mod protocol;
 pub mod providers;
 mod server_request;
+pub mod ownership;
 pub mod utils;
 
 pub use app_server::*;

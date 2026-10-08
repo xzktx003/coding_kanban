@@ -1,7 +1,7 @@
 use super::server_request::handle_server_request;
-use codexia_shared::event_sink::EventSink;
-use codexia_db::automation_runs::sync_automation_run_status;
 use crate::protocol::{RequestId, ServerMessage, classify};
+use codexia_db::automation_runs::sync_automation_run_status;
+use codexia_shared::event_sink::EventSink;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,6 +32,7 @@ pub struct CodexAppServer {
     stdin: Mutex<ChildStdin>,
     pending: Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>,
     next_id: AtomicU64,
+    pub ownership: crate::ownership::Ownership,
 }
 
 impl CodexAppServer {
@@ -46,23 +47,43 @@ impl CodexAppServer {
     }
 
     pub async fn send_request(&self, method: &str, params: Value) -> Result<Value, String> {
+        self.ownership.call(self, method, params).await
+    }
+
+    async fn raw_request(&self, method: &str, params: Value) -> Result<Value, String> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().await.insert(id, tx);
 
-        self.write_message(serde_json::json!({
-            "id": id,
-            "method": method,
-            "params": params
-        }))
-        .await?;
+        if let Err(error) = self
+            .write_message(serde_json::json!({
+                "id": id,
+                "method": method,
+                "params": params
+            }))
+            .await
+        {
+            self.pending.lock().await.remove(&id);
+            return Err(format!("DELIVERY_UNKNOWN: {error}"));
+        }
 
-        rx.await.map_err(|_| "request canceled".to_string())?
+        match tokio::time::timeout(std::time::Duration::from_secs(30), rx).await {
+            Ok(Ok(result)) => result,
+            _ => {
+                self.pending.lock().await.remove(&id);
+                Err("DELIVERY_UNKNOWN: Codex response unavailable".into())
+            }
+        }
     }
 
     pub async fn send_response(&self, id: RequestId, result: Value) -> Result<(), String> {
+        let key = serde_json::to_value(&id)
+            .map_err(|e| e.to_string())?
+            .to_string();
         self.write_message(serde_json::json!({ "id": id, "result": result }))
-            .await
+            .await?;
+        self.ownership.resolve_request(&key);
+        Ok(())
     }
 
     pub async fn send_notification(
@@ -76,6 +97,13 @@ impl CodexAppServer {
             serde_json::json!({ "method": method })
         };
         self.write_message(value).await
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ownership::Rpc for CodexAppServer {
+    async fn raw(&self, method: &str, params: Value) -> Result<Value, String> {
+        self.raw_request(method, params).await
     }
 }
 
@@ -107,7 +135,7 @@ pub async fn connect_codex(event_sink: Arc<dyn EventSink>) -> Result<Arc<CodexAp
 
     let mut command = {
         let mut cmd = Command::new(codex_bin);
-        cmd.arg("app-server");
+        cmd.args(["app-server", "-c", "thread_unload_delay_secs=2"]);
         cmd
     };
 
@@ -133,6 +161,7 @@ pub async fn connect_codex(event_sink: Arc<dyn EventSink>) -> Result<Arc<CodexAp
         stdin: Mutex::new(stdin),
         pending: Mutex::new(HashMap::new()),
         next_id: AtomicU64::new(1),
+        ownership: crate::ownership::Ownership::default(),
     });
     log::info!("Connected to codex app-server");
 
@@ -161,28 +190,52 @@ pub async fn connect_codex(event_sink: Arc<dyn EventSink>) -> Result<Arc<CodexAp
             // Classify message type
             match classify(&value) {
                 Some(ServerMessage::Response { id, result }) => {
-                    let Some(id) = id.as_pending_key() else { continue };
+                    let Some(id) = id.as_pending_key() else {
+                        continue;
+                    };
                     if let Some(tx) = client_clone.pending.lock().await.remove(&id) {
                         let _ = tx.send(Ok(result));
                     }
                 }
                 Some(ServerMessage::Error { id, error }) => {
-                    let Some(id) = id.as_pending_key() else { continue };
+                    let Some(id) = id.as_pending_key() else {
+                        continue;
+                    };
                     if let Some(tx) = client_clone.pending.lock().await.remove(&id) {
                         let _ = tx.send(Err(format!("Request failed: {}", error)));
                     }
                 }
                 Some(ServerMessage::Request { id, method, params }) => {
+                    if let Some(thread) = params.get("threadId").and_then(Value::as_str)
+                        && let Ok(request) = serde_json::to_value(&id)
+                    {
+                        client_clone
+                            .ownership
+                            .pending_request(request.to_string(), thread.into());
+                    }
                     handle_server_request(&event_sink_clone, id, &method, params).await;
                 }
                 Some(ServerMessage::Notification { method, raw }) => {
                     if is_reasoning_notification(&method, &raw) {
                         continue;
                     }
+                    client_clone.ownership.observe(&method, &raw["params"]);
                     sync_automation_run_status(&raw);
                     event_sink_clone.emit("codex:notification", raw);
                 }
                 None => {}
+            }
+        }
+    });
+
+    // Reclaim only sessions this client acquired. Browser lifetime is irrelevant.
+    let weak = Arc::downgrade(&client);
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            let Some(client) = weak.upgrade() else { break };
+            for id in client.ownership.ids() {
+                client.ownership.sweep(client.as_ref(), &id).await;
             }
         }
     });
@@ -196,10 +249,7 @@ pub async fn connect_codex(event_sink: Arc<dyn EventSink>) -> Result<Arc<CodexAp
                 continue;
             }
             log::warn!("codex:stderr: {}", line);
-            event_sink_clone.emit(
-                "codex:stderr",
-                serde_json::json!({ "message": line }),
-            );
+            event_sink_clone.emit("codex:stderr", serde_json::json!({ "message": line }));
         }
     });
 

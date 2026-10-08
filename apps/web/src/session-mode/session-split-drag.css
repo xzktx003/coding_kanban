@@ -1,4 +1,15 @@
 /* Only the visible session workspace owns tab gestures. Transcript text stays selectable. */
+.session-mode .session-tab-insertion-marker {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 90;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--primary);
+  box-shadow: 0 0 0 1px var(--background);
+  pointer-events: none;
+}
 .session-mode .session-tab-drag-preview {
   position: fixed;
   top: 0;

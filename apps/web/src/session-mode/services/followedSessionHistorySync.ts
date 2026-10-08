@@ -67,7 +67,7 @@ export function startFollowedSessionHistorySync() {
       if (loading.size >= 2) continue;
       loading.add(id);
       void codexService
-        .threadResume(id, undefined, { background: true })
+        .loadThreadHistory(id, undefined, { background: true })
         .then(
           () => {
             if (!stopped && wanted.has(id)) {
@@ -102,6 +102,7 @@ export function startFollowedSessionHistorySync() {
     if (document.visibilityState !== "hidden") enqueue(true);
   };
   window.addEventListener("online", wake);
+  window.addEventListener("focus", wake);
   document.addEventListener("visibilitychange", wake);
   enqueue(true);
   return () => {
@@ -110,6 +111,7 @@ export function startFollowedSessionHistorySync() {
     unsubscribe();
     closeStream();
     window.removeEventListener("online", wake);
+    window.removeEventListener("focus", wake);
     document.removeEventListener("visibilitychange", wake);
   };
 }

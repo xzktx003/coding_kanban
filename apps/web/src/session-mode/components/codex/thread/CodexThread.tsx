@@ -1,3 +1,4 @@
+import { CodexAccessNotice } from "./CodexAccessNotice";
 import { useSessionReadReceipt } from "@session/hooks/useSessionReadReceipt";
 import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -341,6 +342,7 @@ const CodexTranscript = memo(function CodexTranscript({
             </div>
             <div className="space-y-2">
               <CodexDeliveryEchoes threadId={activeThreadId} events={events} />
+              <CodexAccessNotice key={activeThreadId} threadId={activeThreadId} />
               {loading && (
                 <div
                   role="status"
@@ -362,7 +364,7 @@ const CodexTranscript = memo(function CodexTranscript({
                     className="text-primary underline underline-offset-4"
                     onClick={() => {
                       void codexService
-                        .threadResume(activeThreadId)
+                        .loadThreadHistory(activeThreadId)
                         .catch(() => {});
                     }}
                   >

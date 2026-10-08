@@ -179,6 +179,8 @@ export function registerSessionModeRoutes(
       ) {
         return reply.code(400).send({ error: "Invalid session API path" });
       }
+      if (decodeURIComponent(pathname).startsWith("/api/internal/"))
+        return reply.code(403).send({ error: "Internal session API" });
       const controller = new AbortController();
       // ACP prompts and local inference can legitimately run for several minutes.
       const longRunning = [

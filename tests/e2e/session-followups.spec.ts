@@ -1,3 +1,4 @@
+import { openComposerStatus } from "./session-composer-actions";
 import { test, expect, type Page } from "@playwright/test";
 import Fastify from "fastify";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -592,9 +593,17 @@ test("composer matches the approved layout at desktop, narrow and phone widths",
         reasoningEffort: "high",
         sandbox: "danger-full-access",
       });
-      const path = '/src/session-mode/stores/useThreadModelStore.ts';
-      const {changeThreadModel} = await import(performance.getEntriesByType('resource').findLast(e=>new URL(e.name).pathname===path)?.name ?? path);
-      changeThreadModel('ux-0', {model:'gpt-6-astra',modelProvider:'openai',reasoningEffort:'high'});
+      const path = "/src/session-mode/stores/useThreadModelStore.ts";
+      const { changeThreadModel } = await import(
+        performance
+          .getEntriesByType("resource")
+          .findLast((e) => new URL(e.name).pathname === path)?.name ?? path
+      );
+      changeThreadModel("ux-0", {
+        model: "gpt-6-astra",
+        modelProvider: "openai",
+        reasoningEffort: "high",
+      });
     }, f.storeUrl());
     const editor = page
       .locator(".session-agent-view [contenteditable=true]")
@@ -862,6 +871,7 @@ test("idle composer and planning mode preserve explicit permissions and never su
     await expect(
       page.getByRole("button", { name: "执行权限：完全访问", exact: true }),
     ).toBeVisible();
+    await openComposerStatus(page);
     await expect(
       page.getByRole("button", { name: "取消规划模式", exact: true }),
     ).toBeVisible();
@@ -869,6 +879,7 @@ test("idle composer and planning mode preserve explicit permissions and never su
     await page
       .getByRole("button", { name: "取消规划模式", exact: true })
       .click();
+    await page.getByRole("button", { name: "关闭面板", exact: true }).click();
     await expect(editor).toHaveText("保留未提交的问题");
     expect((await f.queue.get("ux-0")).items).toHaveLength(0);
     await page.screenshot({
@@ -887,7 +898,9 @@ test("idle composer and planning mode preserve explicit permissions and never su
 });
 
 for (const reload of [false, true]) {
-  test(`failed Codex sends a new turn with steer preference after ${reload ? "reload" : "live error"}`, async ({ page }) => {
+  test(`failed Codex sends a new turn with steer preference after ${reload ? "reload" : "live error"}`, async ({
+    page,
+  }) => {
     const f = await setup(page);
     try {
       await page.evaluate(async (url) => {
@@ -908,16 +921,22 @@ for (const reload of [false, true]) {
           });
         }, f.storeUrl());
       }
-      const editor = page.locator(".session-agent-view [contenteditable=true]").first();
+      const editor = page
+        .locator(".session-agent-view [contenteditable=true]")
+        .first();
       await editor.fill("报错后继续验证");
-      await expect(page.getByRole("button", { name: "发送消息", exact: true })).toBeEnabled();
+      await expect(
+        page.getByRole("button", { name: "发送消息", exact: true }),
+      ).toBeEnabled();
       await editor.press("Enter");
-      await expect.poll(async () => (await f.queue.get("ux-0")).items.length).toBe(1);
+      await expect
+        .poll(async () => (await f.queue.get("ux-0")).items.length)
+        .toBe(1);
       const item = (await f.queue.get("ux-0")).items[0];
       expect(item.mode).toBe("queue");
       expect(item.expectedTurnId).toBeUndefined();
       await f.queue.tick();
-      expect(f.calls.map(c => c.method)).toEqual(["turn/start"]);
+      expect(f.calls.map((c) => c.method)).toEqual(["turn/start"]);
       expect(f.calls[0].params.input[0].text).toBe("报错后继续验证");
       expect(f.errors).toEqual([]);
     } finally {

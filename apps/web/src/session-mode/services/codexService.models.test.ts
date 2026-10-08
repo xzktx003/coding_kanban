@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
   threadStart: vi.fn(),
-  threadResume: vi.fn(),
+  threadRead: vi.fn(),
   turnStart: vi.fn(),
 }));
 vi.mock("./apiAdapt", () => api);
@@ -34,7 +34,7 @@ beforeEach(() => {
     threadCwdMode: "local",
     collaborationMode: "plan",
   });
-  api.threadResume.mockImplementation(async ({ threadId }) => ({
+  api.threadRead.mockImplementation(async ({ threadId }) => ({
     thread: { id: threadId, cwd: "/project", preview: "", turns: [] },
     model: threadId === "model-a" ? "gpt-6-astra" : "gpt-6-sol",
     modelProvider: "openai",
@@ -70,7 +70,7 @@ it("a selected model remains local to A and old runtime/history settings cannot 
 it("a late history request cannot undo a new selection or a newer native settings event", async () => {
   await codexService.threadResume("model-a");
   let resolve!: (r: unknown) => void;
-  api.threadResume.mockImplementation(
+  api.threadRead.mockImplementation(
     () =>
       new Promise((r) => {
         resolve = r;
@@ -174,4 +174,13 @@ it("a late new-thread response binds the default to its own thread without chang
     model: "server-default",
     effort: "high",
   });
+});
+
+it("hydrates fresh CLI settings from the read-only thread and preserves them when fields are absent", async () => {
+  api.threadRead.mockResolvedValueOnce({thread:{id:"from-cli",turns:[],model:"cli-model",modelProvider:"openai",reasoningEffort:"high"}});
+  await codexService.loadThreadHistory("from-cli");
+  expect(useThreadModelStore.getState().threads["from-cli"].model).toBe("cli-model");
+  api.threadRead.mockResolvedValueOnce({thread:{id:"from-cli",turns:[]}});
+  await codexService.loadThreadHistory("from-cli");
+  expect(useThreadModelStore.getState().threads["from-cli"].reasoningEffort).toBe("high");
 });

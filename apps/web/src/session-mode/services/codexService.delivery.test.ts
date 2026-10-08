@@ -1,6 +1,6 @@
 import { beforeEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
-  threadResume: vi.fn(),
+  threadRead: vi.fn(),
   threadRollback: vi.fn(),
 }));
 vi.mock("./apiAdapt", () => api);
@@ -40,7 +40,7 @@ beforeEach(() => {
 });
 it("preserves messages and active status arriving while an older history snapshot loads", async () => {
   let resolve!: (value: any) => void;
-  api.threadResume.mockImplementation(
+  api.threadRead.mockImplementation(
     () =>
       new Promise((r) => {
         resolve = r;
@@ -69,7 +69,7 @@ it("preserves messages and active status arriving while an older history snapsho
 it("rollback still removes discarded messages and invalidates older history loads", async () => {
   useCodexStore.setState({ events: { "delivery-thread": [user("removed")] } });
   let resolve!: (v: any) => void;
-  api.threadResume.mockImplementation(
+  api.threadRead.mockImplementation(
     () =>
       new Promise((r) => {
         resolve = r;

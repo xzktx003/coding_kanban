@@ -17,6 +17,8 @@ import "./session-split-drag.css";
 import "./session-composer.css";
 import "./session-composer-v2.css";
 import "./session-navigation.css";
+import "./session-selection.css";
+import "./session-composer-compact.css";
 import { useComposerViewport } from "./components/codex/composer/v2/useComposerViewport";
 
 import { SessionTopNavigation } from "./components/layout/SessionTopNavigation";

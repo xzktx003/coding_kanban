@@ -12,6 +12,7 @@ import { writeDurableJson } from "./durable-json.js";
 
 export interface FollowupRuntime {
   statuses(ids: string[]): Promise<Record<string, string>>;
+  syncHolds?(snapshot: { busy: boolean; threadIds: string[] }): Promise<void>;
   call(method: string, params: Record<string, unknown>): Promise<any>;
 }
 export class FollowupRejected extends Error {}
@@ -37,10 +38,37 @@ export class CodexFollowups {
   private run<T>(work: () => Promise<T>): Promise<T> {
     const task = this.serial.then(async () => {
       await this.load();
-      return work();
+      // Fail closed before changing the durable outbox. A gateway outage cannot
+      // leave the runtime believing an old empty queue snapshot is authoritative.
+      await this.runtime.syncHolds?.({ busy: true, threadIds: [] });
+      try {
+        return await work();
+      } finally {
+        await this.runtime.syncHolds?.({
+          busy: false,
+          threadIds: this.holdIds(),
+        });
+      }
     });
     this.serial = task.catch(() => {});
     return task;
+  }
+  private holdIds(): string[] {
+    return Object.entries(this.state)
+      .filter(
+        ([, t]) =>
+          t.awaitingTurnId ||
+          t.stopTurnId ||
+          t.replacementId ||
+          t.review?.status === "inProgress" ||
+          t.items.some(
+            (m) =>
+              m.status === "sending" ||
+              m.status === "uncertain" ||
+              (!t.paused && m.status === "queued"),
+          ),
+      )
+      .map(([id]) => id);
   }
   private async load() {
     if (this.loaded) return;
@@ -135,7 +163,7 @@ export class CodexFollowups {
       if (delivery === "inline") {
         const status = await this.runtime.statuses([id]);
         if (
-          !["idle", "systemError"].includes(status[id]) ||
+          !["idle", "systemError", "notLoaded"].includes(status[id]) ||
           (!thread.paused && thread.items.some(pending))
         )
           conflict("请等待当前任务结束并暂停队列，或选择独立审查");
@@ -206,7 +234,13 @@ export class CodexFollowups {
         conflict("正在等待当前任务停止");
       // This is explicit new input after a visible error, not permission to drain
       // messages queued before the failure. Persisted paused queues still require Resume.
-      if (data.recoverAfterError && data.mode === "queue" && !thread.paused && !thread.awaitingTurnId && !thread.items.some(pending)) {
+      if (
+        data.recoverAfterError &&
+        data.mode === "queue" &&
+        !thread.paused &&
+        !thread.awaitingTurnId &&
+        !thread.items.some(pending)
+      ) {
         this.statuses[data.threadId] = "systemError";
         this.errorRecoveryAllowed.add(data.threadId);
       }
@@ -272,19 +306,34 @@ export class CodexFollowups {
       )
         conflict("请先确认这条消息未送达，再重试");
       await this.transaction(() => {
-        const before = item && (action.type === "delete" || action.type === "edit")
-          && ["queued", "failed"].includes(item.status) && item.mode === "queue"
-          ? structuredClone(item) : undefined;
+        const before =
+          item &&
+          (action.type === "delete" || action.type === "edit") &&
+          ["queued", "failed"].includes(item.status) &&
+          item.mode === "queue"
+            ? structuredClone(item)
+            : undefined;
         switch (action.type) {
           case "undo": {
             const saved = thread.undo;
-            if (!saved || saved.token !== action.token || saved.expiresAt < Date.now())
+            if (
+              !saved ||
+              saved.token !== action.token ||
+              saved.expiresAt < Date.now()
+            )
               return conflict("此操作已无法撤销，请查看当前队列");
-            const current = thread.items.find(m => m.id === saved.before.id);
-            if (!current || JSON.stringify(current) !== JSON.stringify(saved.after))
+            const current = thread.items.find((m) => m.id === saved.before.id);
+            if (
+              !current ||
+              JSON.stringify(current) !== JSON.stringify(saved.after)
+            )
               conflict("消息已发送或发生变化，无法撤销；请勿重复发送");
-            thread.items = thread.items.filter(m => m.id !== saved.before.id);
-            thread.items.splice(Math.min(saved.index, thread.items.length), 0, structuredClone(saved.before));
+            thread.items = thread.items.filter((m) => m.id !== saved.before.id);
+            thread.items.splice(
+              Math.min(saved.index, thread.items.length),
+              0,
+              structuredClone(saved.before),
+            );
             delete thread.undo;
             break;
           }
@@ -318,9 +367,15 @@ export class CodexFollowups {
             if (thread.replacementId === item!.id) delete thread.replacementId;
             break;
           case "edit":
-            if (composeContextText(action.text, item!.contexts).length > 200_000)
+            if (
+              composeContextText(action.text, item!.contexts).length > 200_000
+            )
               conflict("正文与上下文合计不能超过 200,000 字符");
-            if (!action.text.trim() && !item!.images.length && !item!.contexts?.length)
+            if (
+              !action.text.trim() &&
+              !item!.images.length &&
+              !item!.contexts?.length
+            )
               conflict("消息不能为空");
             item!.text = action.text;
             item!.error = undefined;
@@ -351,11 +406,15 @@ export class CodexFollowups {
             break;
           }
         }
-        if (before) thread.undo = {
-          token: randomUUID(), kind: action.type as "edit" | "delete",
-          before, after: structuredClone(item!), index: thread.items.findIndex(m => m.id === before.id),
-          expiresAt: Date.now() + 10 * 60_000,
-        };
+        if (before)
+          thread.undo = {
+            token: randomUUID(),
+            kind: action.type as "edit" | "delete",
+            before,
+            after: structuredClone(item!),
+            index: thread.items.findIndex((m) => m.id === before.id),
+            expiresAt: Date.now() + 10 * 60_000,
+          };
         thread.revision++;
       });
       if (action.type === "steer") await this.deliver(id, item!, true);
@@ -402,10 +461,11 @@ export class CodexFollowups {
         this.statuses[id] = p.status?.type;
         if (p.status?.type === "systemError" && previous !== "systemError") {
           this.errorRecoveryAllowed.delete(id);
-          if (this.state[id]) await this.transaction(() => {
-            this.state[id].paused ??= "上一轮执行失败，请检查后继续";
-            this.state[id].revision++;
-          });
+          if (this.state[id])
+            await this.transaction(() => {
+              this.state[id].paused ??= "上一轮执行失败，请检查后继续";
+              this.state[id].revision++;
+            });
         }
         return;
       }
@@ -497,14 +557,21 @@ export class CodexFollowups {
         if (epochs[id] !== this.epochs[id]) continue;
         this.statuses[id] = fresh[id] ?? this.statuses[id] ?? "unknown";
         const thread = this.thread(id);
-        if (this.statuses[id] === "systemError" && !this.errorRecoveryAllowed.has(id)) {
-          if (!thread.paused) await this.transaction(() => { thread.paused = "上一轮执行失败，请检查后继续"; thread.revision++; });
+        if (
+          this.statuses[id] === "systemError" &&
+          !this.errorRecoveryAllowed.has(id)
+        ) {
+          if (!thread.paused)
+            await this.transaction(() => {
+              thread.paused = "上一轮执行失败，请检查后继续";
+              thread.revision++;
+            });
           continue;
         }
         if (
           // systemError is a finished turn too. The pause below still requires
           // explicit recovery; a resumed queue must be able to start a new turn.
-          !["idle", "systemError"].includes(this.statuses[id]) ||
+          !["idle", "systemError", "notLoaded"].includes(this.statuses[id]) ||
           thread.stopTurnId ||
           thread.awaitingTurnId
         )
@@ -528,9 +595,7 @@ export class CodexFollowups {
     });
     const text = composeContextText(item.text, item.contexts);
     const input = [
-      ...(text.trim()
-        ? [{ type: "text", text, text_elements: [] }]
-        : []),
+      ...(text.trim() ? [{ type: "text", text, text_elements: [] }] : []),
       ...item.images.map((path) => ({ type: "localImage", path })),
     ];
     let response: any;

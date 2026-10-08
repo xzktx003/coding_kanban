@@ -607,15 +607,20 @@ function BaseModelSelector({
 
 export function ModelReasonSelector({
   mode = "popover",
+  threadId,
+  onClose,
 }: {
   mode?: "popover" | "panel";
+  threadId?: string | null;
+  onClose?: () => void;
 }) {
-  const { currentThreadId, triggerInputFocus } = useCodexStore(
+  const { activeThreadId, triggerInputFocus } = useCodexStore(
     useShallow((s) => ({
-      currentThreadId: s.currentThreadId,
+      activeThreadId: s.currentThreadId,
       triggerInputFocus: s.triggerInputFocus,
     })),
   );
+  const currentThreadId = threadId === undefined ? activeThreadId : threadId;
   const { openAiModels } = useModels();
 
   const {
@@ -679,7 +684,7 @@ export function ModelReasonSelector({
         onValueChange={setModel}
         reasoningEffort={reasoningEffort ?? undefined}
         onReasoningEffortChange={setReasoningEffort}
-        onClose={triggerInputFocus}
+        onClose={onClose ?? triggerInputFocus}
         mode="panel"
       />
     );
@@ -693,7 +698,7 @@ export function ModelReasonSelector({
       onValueChange={setModel}
       reasoningEffort={reasoningEffort ?? undefined}
       onReasoningEffortChange={setReasoningEffort}
-      onClose={triggerInputFocus}
+      onClose={onClose ?? triggerInputFocus}
     />
   );
 }

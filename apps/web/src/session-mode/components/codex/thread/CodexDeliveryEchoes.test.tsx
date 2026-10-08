@@ -16,7 +16,7 @@ const api = vi.hoisted(() => ({
 }));
 const resume = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@session/services/codexService", () => ({
-  codexService: { threadResume: resume },
+  codexService: { loadThreadHistory: resume },
 }));
 vi.mock("@session/services/apiAdapt/shared", () => api);
 import { CodexDeliveryEchoes } from "./CodexDeliveryEchoes";

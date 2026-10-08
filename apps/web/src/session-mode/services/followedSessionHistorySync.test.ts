@@ -4,7 +4,7 @@ const mock = vi.hoisted(() => ({
   open: undefined as (() => void) | undefined,
 }));
 vi.mock("./codexService", () => ({
-  codexService: { threadResume: mock.resume },
+  codexService: { loadThreadHistory: mock.resume },
 }));
 vi.mock("../lib/eventStream", () => ({
   openEventStream: (s: { onOpen: () => void }) => {
@@ -105,4 +105,17 @@ it("loads late membership and retries an in-flight refresh after another reconne
   release();
   await vi.advanceTimersByTimeAsync(1);
   expect(mock.resume).toHaveBeenCalledTimes(2);
+});
+it("returning from an external client refreshes history without selecting a session", async () => {
+  stop = startFollowedSessionHistorySync();
+  await vi.advanceTimersByTimeAsync(1);
+  const initial = mock.resume.mock.calls.length;
+  window.dispatchEvent(new Event("focus"));
+  await vi.advanceTimersByTimeAsync(1);
+  expect(mock.resume.mock.calls.length).toBe(initial + 2);
+  expect(mock.resume.mock.calls.slice(initial).every(call => call[2].background)).toBe(true);
+  stop();
+  window.dispatchEvent(new Event("focus"));
+  await vi.advanceTimersByTimeAsync(1);
+  expect(mock.resume.mock.calls.length).toBe(initial + 2);
 });

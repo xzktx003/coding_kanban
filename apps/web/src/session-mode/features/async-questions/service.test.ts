@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
   turnSteer: vi.fn(),
   turnStart: vi.fn(),
-  threadResume: vi.fn(),
+  loadThreadHistory: vi.fn(),
 }));
 vi.mock("../../services/codexService", () => ({ codexService: api }));
 import { useCodexStore } from "../../components/codex/stores/useCodexStore";
@@ -77,7 +77,7 @@ it("does not retry an unknown delivery; reconciles its actual echo before unlock
   await sendAnswers("a", "q", "t");
   expect(api.turnSteer).toHaveBeenCalledTimes(1);
   expect(useAsyncQuestionStore.getState().sessions.a.uncertain).toHaveLength(1);
-  api.threadResume.mockImplementation(async () => {
+  api.loadThreadHistory.mockImplementation(async () => {
     useCodexStore.getState().addEvent("a", {
       method: "item/completed",
       params: {

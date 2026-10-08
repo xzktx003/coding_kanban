@@ -138,3 +138,28 @@ test("WebSocket gateway retains replay cursors and namespace filters", async () 
     await new Promise<void>((resolve) => upstream.close(() => resolve()));
   }
 });
+
+test("browsers cannot forge queue ownership holds through the session proxy", async () => {
+  const app = Fastify();
+  let calls = 0;
+  registerSessionModeRoutes(app, {
+    origin: "http://127.0.0.1:12345",
+    fetch: async () => {
+      calls++;
+      return new Response("{}");
+    },
+  });
+  try {
+    for (const prefix of ["internal", "%69nternal"]) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/session/api/${prefix}/codex/queue-holds`,
+        payload: { busy: false, threadIds: [] },
+      });
+      assert.equal(response.statusCode, 403);
+    }
+    assert.equal(calls, 0);
+  } finally {
+    await app.close();
+  }
+});

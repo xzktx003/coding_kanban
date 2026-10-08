@@ -54,7 +54,7 @@ async function pasteImage(
   await target.evaluate((element, name) => {
     const bytes = Uint8Array.from(
       atob(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1XkAAAAASUVORK5CYII=",
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
       ),
       (c) => c.charCodeAt(0),
     );
@@ -84,20 +84,34 @@ test("draft text and files survive switching, close/reopen, reload, layouts and 
   await editor(page).fill("A 写到一半");
   await pasteImage(page);
   await expect(
-    page.locator(".session-attachment[data-state=ready]"),
+    page.locator(
+      ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
+    ),
   ).toHaveCount(1);
   await open(page, 1);
   await expect(editor(page)).toHaveText("");
-  await expect(page.locator(".session-attachment")).toHaveCount(0);
+  await expect(
+    page.locator(".session-context-chip.is-image, .session-attachment"),
+  ).toHaveCount(0);
   await editor(page).fill("B 的独立草稿");
   for (const mode of ["多会话网格", "会话列表", "自由分屏"]) {
     await page.getByRole("button", { name: mode, exact: true }).click();
-    await tab(page, 0).click();
+    if (mode === "自由分屏") await tab(page, 0).click();
+    else
+      await page
+        .locator('[data-session-card="ux-0"] .session-identity-title')
+        .click();
     await expect(editor(page)).toHaveText("A 写到一半");
     await expect(
-      page.locator(".session-attachment[data-state=ready]"),
+      page.locator(
+        ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
+      ),
     ).toHaveCount(1);
-    await tab(page, 1).click();
+    if (mode === "自由分屏") await tab(page, 1).click();
+    else
+      await page
+        .locator('[data-session-card="ux-1"] .session-identity-title')
+        .click();
     await expect(editor(page)).toHaveText("B 的独立草稿");
   }
   await editor(page).press("Control+z");
@@ -111,12 +125,13 @@ test("draft text and files survive switching, close/reopen, reload, layouts and 
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(editor(page)).toHaveText("A 写到一半");
   await expect(
-    page.locator(".session-attachment[data-state=ready]"),
+    page.locator(
+      ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
+    ),
   ).toHaveCount(1);
-  await expect(page.locator(".session-attachment img")).toHaveJSProperty(
-    "naturalWidth",
-    1,
-  );
+  await expect(
+    page.locator(".session-context-chip.is-image img, .session-attachment img"),
+  ).toHaveJSProperty("naturalWidth", 1);
   await tab(page, 1).click();
   await expect(editor(page)).toHaveText("B 的独立草稿");
   expect(
@@ -192,11 +207,15 @@ test("Claude sessions keep separate text and images across switches and reload; 
   await input.fill("Claude A unfinished");
   await pasteImage(page, "claude.png", input);
   await expect(
-    page.locator(".session-attachment[data-state=ready]"),
+    page.locator(
+      ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
+    ),
   ).toHaveCount(1);
   await b.click();
   await expect(input).toHaveValue("");
-  await expect(page.locator(".session-attachment")).toHaveCount(0);
+  await expect(
+    page.locator(".session-context-chip.is-image, .session-attachment"),
+  ).toHaveCount(0);
   await input.fill("Claude B unfinished");
   await a.click();
   await expect(input).toHaveValue("Claude A unfinished");
@@ -208,12 +227,16 @@ test("Claude sessions keep separate text and images across switches and reload; 
   await a.click();
   await expect(input).toHaveValue("Claude A unfinished");
   await expect(
-    page.locator(".session-attachment[data-state=ready]"),
+    page.locator(
+      ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
+    ),
   ).toHaveCount(1);
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(input).toHaveValue("Claude A unfinished");
   await expect(
-    page.locator(".session-attachment[data-state=ready]"),
+    page.locator(
+      ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
+    ),
   ).toHaveCount(1);
   await b.click();
   await expect(input).toHaveValue("Claude B unfinished");
@@ -224,7 +247,9 @@ test("Claude sessions keep separate text and images across switches and reload; 
   await expect.poll(() => !!finish).toBe(true);
   await finish!();
   await expect(
-    page.locator(".session-attachment[data-state=ready]"),
+    page.locator(
+      ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
+    ),
   ).toHaveCount(1);
   expect(errors).toEqual([]);
 });
@@ -240,14 +265,14 @@ test("only the first message names a new session; a manual rename survives sends
   await editor(page).fill("新会话首条任务名称");
   await editor(page).press("Enter");
   const created = page.locator('[role=tab][data-tab-key="codex:ux-created"]');
-  await expect(created.locator(".session-tab-title")).toHaveText(
+  await expect(created.locator(".session-identity-title")).toHaveText(
     "新会话首条任务名称",
   );
   await expect(editor(page)).toHaveText("");
   await editor(page).fill("第二条不应改名");
   await editor(page).press("Enter");
   await expect(editor(page)).toHaveText("");
-  await expect(created.locator(".session-tab-title")).toHaveText(
+  await expect(created.locator(".session-identity-title")).toHaveText(
     "新会话首条任务名称",
   );
   await created.locator("..").hover();
@@ -258,14 +283,14 @@ test("only the first message names a new session; a manual rename survives sends
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("textbox").fill("手动固定名称");
   await dialog.getByRole("button", { name: "保存", exact: true }).click();
-  await expect(created.locator(".session-tab-title")).toHaveText(
+  await expect(created.locator(".session-identity-title")).toHaveText(
     "手动固定名称",
   );
   await editor(page).fill("改名之后的聊天内容");
   await editor(page).press("Enter");
   await expect(editor(page)).toHaveText("");
   await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(created.locator(".session-tab-title")).toHaveText(
+  await expect(created.locator(".session-identity-title")).toHaveText(
     "手动固定名称",
   );
 });
@@ -311,14 +336,18 @@ test("creating a new session in the background transfers later draft edits and a
   await editor(page).fill("首次提交的名称");
   await pasteImage(page, "submitted.png");
   await expect(
-    page.locator(".session-attachment[data-state=ready]"),
+    page.locator(
+      ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
+    ),
   ).toHaveCount(1);
   await editor(page).press("Enter");
   await expect.poll(() => !!release).toBe(true);
   await editor(page).fill("创建期间写的未发送内容");
   await pasteImage(page, "later.png");
   await expect(
-    page.locator(".session-attachment[data-state=ready]"),
+    page.locator(
+      ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
+    ),
   ).toHaveCount(2);
   await tab(page, 0).click();
   await editor(page).fill("原会话仍在编辑");
@@ -326,7 +355,7 @@ test("creating a new session in the background transfers later draft edits and a
   const created = page.locator(
     '[role=tab][data-tab-key="codex:created-in-background"]',
   );
-  await expect(created.locator(".session-tab-title")).toHaveText(
+  await expect(created.locator(".session-identity-title")).toHaveText(
     "首次提交的名称",
   );
   await expect(tab(page, 0)).toHaveAttribute("aria-selected", "true");
@@ -334,11 +363,13 @@ test("creating a new session in the background transfers later draft edits and a
   await created.click();
   await expect(editor(page)).toHaveText("创建期间写的未发送内容");
   await expect(
-    page.locator(".session-attachment[data-state=ready]"),
+    page.locator(
+      ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
+    ),
   ).toHaveCount(1);
-  await expect(page.locator(".session-attachment-caption")).toHaveText(
-    "later.png",
-  );
+  await expect(
+    page.getByRole("button", { name: "预览 later.png", exact: true }),
+  ).toBeVisible();
 });
 
 test("late success and failure belong to the submitted session and never erase newer text or change its title", async ({
@@ -348,7 +379,8 @@ test("late success and failure belong to the submitted session and never erase n
   await installSessionUxFixture(page, 2);
   await sharedTabs()(page);
   let finish: ((fail: boolean) => Promise<void>) | undefined;
-  await page.route("**/api/**/turn/start", async (route) => {
+  await page.route("**/api/session/followups/submit", async (route) => {
+    const message = route.request().postDataJSON();
     await new Promise<void>((resolve) => {
       finish = async (fail) => {
         await route.fulfill(
@@ -356,13 +388,16 @@ test("late success and failure belong to the submitted session and never erase n
             ? { status: 500, json: { error: "fixture rejected" } }
             : {
                 json: {
-                  turn: {
-                    id: "completed",
-                    status: "completed",
-                    items: [],
-                    startedAt: 1,
-                    durationMs: 1,
-                  },
+                  revision: 1,
+                  paused: null,
+                  items: [
+                    {
+                      ...message,
+                      status: "sent",
+                      createdAt: Date.now(),
+                      turnId: "completed",
+                    },
+                  ],
                 },
               },
         );
@@ -375,7 +410,9 @@ test("late success and failure belong to the submitted session and never erase n
   await open(page, 0);
   await open(page, 1);
   await tab(page, 0).click();
-  const title = await tab(page, 0).locator(".session-tab-title").innerText();
+  const title = await tab(page, 0)
+    .locator(".session-identity-title")
+    .innerText();
   await editor(page).fill("A 提交消息");
   await editor(page).press("Enter");
   await expect.poll(() => !!finish).toBe(true);
@@ -385,7 +422,9 @@ test("late success and failure belong to the submitted session and never erase n
   await expect(editor(page)).toHaveText("B 未发送草稿");
   await tab(page, 0).click();
   await expect(editor(page)).toHaveText("");
-  await expect(tab(page, 0).locator(".session-tab-title")).toHaveText(title);
+  await expect(tab(page, 0).locator(".session-identity-title")).toHaveText(
+    title,
+  );
   finish = undefined;
   await editor(page).fill("A 第二次提交");
   await editor(page).press("Enter");
@@ -402,7 +441,9 @@ test("late success and failure belong to the submitted session and never erase n
   await expect(editor(page)).toHaveText("B 未发送草稿");
   await tab(page, 0).click();
   await expect(editor(page)).toHaveText("A 发送失败应保留");
-  await expect(tab(page, 0).locator(".session-tab-title")).toHaveText(title);
+  await expect(tab(page, 0).locator(".session-identity-title")).toHaveText(
+    title,
+  );
 });
 
 test("an interrupted image upload survives reload with file bytes and can retry", async ({
@@ -435,14 +476,17 @@ test("an interrupted image upload survives reload with file bytes and can retry"
   release!();
   await expect(editor(page)).toHaveText("带未上传完附件的草稿");
   await expect(
-    page.locator(".session-attachment[data-state=error]"),
+    page.locator(
+      ".session-context-chip.is-image[data-state=error], .session-attachment[data-state=error]",
+    ),
   ).toHaveCount(1);
-  await page
-    .locator(".session-attachment")
-    .getByRole("button", { name: "重试" })
-    .click();
+  await page.getByRole("button", { name: /预览 .*上传失败/ }).click();
+  await page.getByRole("button", { name: "重试上传", exact: true }).click();
+  await page.getByRole("button", { name: "关闭面板", exact: true }).click();
   await expect(
-    page.locator(".session-attachment[data-state=ready]"),
+    page.locator(
+      ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
+    ),
   ).toHaveCount(1);
   expect(recoveredName).toBe("interrupted.png");
 });
@@ -469,7 +513,9 @@ test("closing and restarting the browser restores text and attachment bytes from
     await editor(page).fill("浏览器重开仍保留");
     await pasteImage(page, "persistent.png");
     await expect(
-      page.locator(".session-attachment[data-state=ready]"),
+      page.locator(
+        ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
+      ),
     ).toHaveCount(1);
     await page.evaluate(async () => {
       const url = performance
@@ -495,12 +541,15 @@ test("closing and restarting the browser restores text and attachment bytes from
     await ready(page);
     await expect(editor(page)).toHaveText("浏览器重开仍保留");
     await expect(
-      page.locator(".session-attachment[data-state=ready]"),
+      page.locator(
+        ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
+      ),
     ).toHaveCount(1);
-    await expect(page.locator(".session-attachment img")).toHaveJSProperty(
-      "naturalWidth",
-      1,
-    );
+    await expect(
+      page.locator(
+        ".session-context-chip.is-image img, .session-attachment img",
+      ),
+    ).toHaveJSProperty("naturalWidth", 1);
   } finally {
     await context.close();
     await rm(profile, { recursive: true, force: true });

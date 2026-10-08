@@ -1,4 +1,28 @@
 /** A visual snapshot only: it never participates in hit testing or navigation. */
+import type { SessionDropTarget } from "./sessionTabDrag";
+
+export function createSessionTabInsertionMarker(source: HTMLElement) {
+  const scope = source.closest<HTMLElement>(".session-mode");
+  if (!scope) return undefined;
+  const element = document.createElement("div");
+  element.className = "session-tab-insertion-marker";
+  element.setAttribute("aria-hidden", "true");
+  element.setAttribute("inert", "");
+  scope.appendChild(element);
+  return {
+    show(target: SessionDropTarget) {
+      if (!target.insertion) return;
+      element.dataset.groupId = target.groupId;
+      element.dataset.position = target.insertion.side;
+      element.style.transform = `translate3d(${target.insertion.x - 1.5}px, ${target.insertion.y}px, 0)`;
+      element.style.height = `${target.insertion.height}px`;
+    },
+    destroy() {
+      element.remove();
+    },
+  };
+}
+
 export function createSessionTabPreview(
   source: HTMLElement,
   startX: number,

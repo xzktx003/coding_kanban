@@ -8,7 +8,9 @@ import "./questions.css";
 export function QuestionComposer({
   threadId,
   children,
+  compact = false,
 }: {
+  compact?: boolean;
   threadId: string;
   children: ReactNode;
 }) {
@@ -55,6 +57,12 @@ export function QuestionComposer({
         first.id,
       );
   };
+  if (!current && compact)
+    return (
+      <div className="session-async-composer session-compact-question-container">
+        <div>{children}</div>
+      </div>
+    );
   if (!current)
     return (
       <div className="session-async-composer">
@@ -95,7 +103,7 @@ export function QuestionComposer({
     if (!last) patch(threadId, { openId: group[index + 1].id });
     else if (submittedCount <= (draft?.text.trim() ? 1 : 0)) close();
   };
-  return (
+  const panel = (
     <div
       ref={root}
       className="session-async-panel"
@@ -221,5 +229,13 @@ export function QuestionComposer({
         </button>
       </footer>
     </div>
+  );
+  return compact ? (
+    <div className="session-async-composer session-compact-question-container">
+      <div inert>{children}</div>
+      <div className="session-async-question-overlay">{panel}</div>
+    </div>
+  ) : (
+    panel
   );
 }

@@ -53,7 +53,7 @@ function GroupView({ group, preview }: { group: SessionGroup; preview: SessionDr
       const state = useCodexStore.getState();
       if (!state.historyLoadedMap[card.id] && !state.historyLoadingMap[card.id])
         void codexService
-          .threadResume(card.id, undefined, { background: true })
+          .loadThreadHistory(card.id, undefined, { background: true })
           .catch(() => {});
     }
   }, [card?.kind, card?.id]);
@@ -78,7 +78,7 @@ function GroupView({ group, preview }: { group: SessionGroup; preview: SessionDr
           setEdge(splitEdgeAt(e.currentTarget.getBoundingClientRect(), e.clientX, e.clientY));
         }}
         onDragLeave={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node)) setEdge(null);
+          if (!(e.relatedTarget instanceof Node) || !e.currentTarget.contains(e.relatedTarget)) setEdge(null);
         }}
         onDrop={(e) => {
           const draggedKey = sessionDragKey(e.dataTransfer);

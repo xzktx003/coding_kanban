@@ -355,13 +355,21 @@ test("an event gap invalidates an in-flight idle snapshot before dispatch", asyn
 });
 
 test("an explicitly resumed queue starts a new turn after systemError instead of remaining stuck", async () => {
-  const f = fixture(), q = new CodexFollowups(f.runtime);
+  const f = fixture(),
+    q = new CodexFollowups(f.runtime);
   await q.submit(input("before"));
-  await q.observe({ method: "turn/completed", params: { threadId: "a", turn: { id: "old", status: "failed" } } });
+  await q.observe({
+    method: "turn/completed",
+    params: { threadId: "a", turn: { id: "old", status: "failed" } },
+  });
   f.states.a = "systemError";
   await q.submit(input("retry"));
   await q.tick();
-  assert.equal(f.calls.length, 0, "failure still requires explicit queue resume");
+  assert.equal(
+    f.calls.length,
+    0,
+    "failure still requires explicit queue resume",
+  );
   const state = await q.get("a");
   await q.change("a", state.revision, { type: "resume" });
   await q.tick();
@@ -370,4 +378,66 @@ test("an explicitly resumed queue starts a new turn after systemError instead of
   assert.equal(f.calls[0]?.params.expectedTurnId, undefined);
   await q.tick();
   assert.equal(f.calls.length, 1);
+});
+
+test("an unloaded thread is acquired by the runtime before dispatch; queue holds bracket the operation", async () => {
+  const f = fixture();
+  f.states.a = "notLoaded";
+  const holds: Array<{ busy: boolean; threadIds: string[] }> = [];
+  const q = new CodexFollowups({
+    ...f.runtime,
+    syncHolds: async (snapshot: { busy: boolean; threadIds: string[] }) => {
+      holds.push(snapshot);
+    },
+  });
+  await q.submit(input());
+  assert.deepEqual(holds.at(-1), { busy: false, threadIds: ["a"] });
+  await q.tick();
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].params.clientUserMessageId, "one");
+  assert.equal(holds.at(-2)?.busy, true);
+  assert.deepEqual(holds.at(-1)?.threadIds, ["a"]);
+  await q.observe({
+    method: "turn/completed",
+    params: { threadId: "a", turn: { id: "turn-one", status: "completed" } },
+  });
+  assert.deepEqual(holds.at(-1)?.threadIds, []);
+});
+
+test("queue ownership handshake failure prevents submission and dispatch", async () => {
+  const f = fixture();
+  const q = new CodexFollowups({
+    ...f.runtime,
+    syncHolds: async () => {
+      throw new Error("handoff unavailable");
+    },
+  });
+  await assert.rejects(q.submit(input()), /handoff unavailable/);
+  assert.equal(f.calls.length, 0);
+});
+
+test("external writer conflict preserves submission identity and attachments; explicit retry sends once", async () => {
+  const { FollowupRejected } = await import("./codex-followups.js");
+  const f = fixture();
+  f.states.a = "notLoaded";
+  const q = new CodexFollowups(f.runtime);
+  const message = { ...input(), images: ["/fixture/preserved.png"] };
+  await q.submit(message);
+  f.fail(new FollowupRejected("SESSION_OWNED_ELSEWHERE: occupied"));
+  await q.tick();
+  const failed = await q.get("a");
+  assert.equal(failed.items[0].status, "failed");
+  assert.deepEqual(failed.items[0].images, message.images);
+  await q.tick();
+  assert.equal(f.calls.length, 1);
+  f.fail();
+  await q.change("a", failed.revision, { type: "retry", id: message.id });
+  await q.tick();
+  await q.tick();
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls[1].params.clientUserMessageId, message.id);
+  assert.deepEqual((f.calls[1].params.input as any[]).at(-1), {
+    type: "localImage",
+    path: message.images[0],
+  });
 });

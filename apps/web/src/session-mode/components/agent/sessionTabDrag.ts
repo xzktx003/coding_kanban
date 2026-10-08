@@ -4,6 +4,7 @@ import {
 } from "@session/stores/useAgentCenterStore";
 import {
   useSessionSplitStore,
+  splitGroups,
   type SplitEdge,
 } from "@session/stores/useSessionSplitStore";
 
@@ -48,7 +49,61 @@ export type SessionDropTarget = {
   edge: SplitEdge;
   beforeKey?: string;
   tab?: HTMLElement;
+  strip?: HTMLElement;
+  insertion?: {
+    x: number;
+    y: number;
+    height: number;
+    side: "before" | "after" | "append";
+  };
 };
+
+/** Header geometry defines one insertion point, even in gaps and empty groups. */
+export function sessionHeaderDropTarget(
+  strip: HTMLElement,
+  x: number,
+): SessionDropTarget | null {
+  const groupId = strip.closest<HTMLElement>("[data-session-group]")?.dataset
+    .sessionGroup;
+  if (!groupId) return null;
+  const bounds = strip.getBoundingClientRect();
+  const tabs = Array.from(
+    strip.querySelectorAll<HTMLElement>("[data-session-drag-key]"),
+  )
+    .map((tab) => ({ tab, bounds: tab.getBoundingClientRect() }))
+    .filter((entry) => entry.bounds.width > 0);
+  const index = tabs.findIndex(
+    (entry) => x < entry.bounds.left + entry.bounds.width / 2,
+  );
+  const before = index >= 0 ? tabs[index] : undefined;
+  const anchor = before ?? tabs.at(-1);
+  const insertionX = before
+    ? before.bounds.left
+    : (anchor?.bounds.right ?? bounds.left + 8);
+  const hovered = tabs.find(
+    (entry) => x >= entry.bounds.left && x <= entry.bounds.right,
+  );
+  const side = hovered
+    ? x < hovered.bounds.left + hovered.bounds.width / 2
+      ? "before"
+      : "after"
+    : before
+      ? "before"
+      : "append";
+  return {
+    groupId,
+    edge: "center",
+    beforeKey: before?.tab.dataset.sessionDragKey,
+    tab: anchor?.tab,
+    strip,
+    insertion: {
+      x: Math.max(bounds.left + 2, Math.min(bounds.right - 2, insertionX)),
+      y: bounds.top + 4,
+      height: Math.max(0, bounds.height - 8),
+      side,
+    },
+  };
+}
 
 /** A small border tolerance also covers the one-pixel group/resize borders. */
 export function sessionDropTarget(
@@ -57,25 +112,16 @@ export function sessionDropTarget(
   y: number,
 ): SessionDropTarget | null {
   const hit = document.elementFromPoint(x, y);
-  const tab = hit?.closest<HTMLElement>("[data-session-drag-key]");
-  if (tab && root.contains(tab)) {
-    const groupId = tab.closest<HTMLElement>("[data-session-group]")?.dataset
-      .sessionGroup;
-    if (groupId)
-      return {
-        groupId,
-        edge: "center",
-        beforeKey: tab.dataset.sessionDragKey,
-        tab,
-      };
-  }
   // Do not turn clicks or drops over tools, inputs or tab actions into a split.
   if (
     hit?.closest(
-      ".session-desktop-tool-dock, .session-tab-actions, .session-tab-mobile-menu",
+      ".session-desktop-tool-dock, .session-tab-actions, .session-tab-mobile-menu, .session-new-tab, .session-followed-trigger, .session-attention-trigger",
     )
   )
     return null;
+  const header = hit?.closest<HTMLElement>(".session-tabs");
+  const strip = header?.querySelector<HTMLElement>(".session-tab-strip");
+  if (strip && root.contains(strip)) return sessionHeaderDropTarget(strip, x);
   const bodies = Array.from(
     root.querySelectorAll<HTMLElement>("[data-session-group-body]"),
   );
@@ -107,12 +153,42 @@ export function placeSessionDrag(key: string, target: SessionDropTarget) {
       agentCardKey,
     ),
   );
-  if (target.beforeKey) {
-    const before = tabs.cards.find(
-      (card) => agentCardKey(card) === target.beforeKey,
-    );
-    if (before && tabs.cards.some((card) => agentCardKey(card) === key))
-      tabs.moveCard(source, before);
+  const destination = splitGroups(useSessionSplitStore.getState().tree).find(
+    (group) => group.id === target.groupId,
+  );
+  if (
+    !destination ||
+    (target.beforeKey && !destination.keys.includes(target.beforeKey))
+  )
+    return undefined;
+  if (tabs.cards.some((card) => agentCardKey(card) === key)) {
+    if (
+      target.beforeKey &&
+      tabs.cards.some((card) => agentCardKey(card) === target.beforeKey)
+    ) {
+      tabs.reorderCard(key, target.beforeKey);
+    } else if (target.strip && !target.beforeKey) {
+      // Append after this group's final followed card, keeping other groups' order.
+      const last = destination.keys
+        .filter(
+          (item) =>
+            item !== key &&
+            tabs.cards.some((card) => agentCardKey(card) === item),
+        )
+        .at(-1);
+      if (last) {
+        const remaining = tabs.cards.filter(
+          (card) => agentCardKey(card) !== key,
+        );
+        const index = remaining.findIndex(
+          (card) => agentCardKey(card) === last,
+        );
+        tabs.reorderCard(
+          key,
+          remaining[index + 1] ? agentCardKey(remaining[index + 1]) : null,
+        );
+      }
+    }
   }
   layout.place(key, target.groupId, target.edge, target.beforeKey);
   return source;

@@ -255,7 +255,7 @@ export async function setup(page: Page, active = true) {
     settingsUrl: () => settingsUrl,
     storeUrl: () => storeUrl,
     close: async () => {
-      await page.unroute("**/api/session/followups**").catch(()=>{});
+      await page.unroute("**/api/session/followups**").catch(() => {});
       await app.close();
       await rm(root, { recursive: true, force: true });
     },

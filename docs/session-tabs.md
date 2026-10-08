@@ -149,3 +149,9 @@ Codex 历史由 `followedSessionHistorySync` 独立调度：首次就绪、SSE �
 红绿灯：`FollowedSessionsMenu.test.tsx` 在实现前有 3 项失败，实现后与 `SessionStatus.test.tsx`、`useFollowedSessionStates.test.tsx` 共 9 项通过。浏览器 `session-followed-menu.spec.ts` 在 390/1440px 检查实时状态、深浅色、与标签相同的绿圈颜色、固定汇总/内部滚动、Esc 焦点与键盘选择；API 全部使用隔离 fixture，入口为当前配置的局域网 HTTPS 页面。生成截图与日志位于被忽略的 `.dev-runtime/followed-menu/`，未进行物理手机验收。
 
 拖动时浮动标签保留会话名和项目名，并跟随鼠标；原标签降低透明度。浮动副本不接收鼠标事件，不复制真实会话标签的 ID，分屏仍按正文落点判断。松手或取消后立即移除副本并恢复原标签。
+
+### 标签栏中的跨组插入
+
+整条目标标签栏接受拖放：标签左半插到它前面，右半插到它后面，间隙插在相邻标签之间，尾部空白追加，空组同样接收。插入线明确目标位置；正文四边继续负责分屏。溢出时左右边缘支持静止悬停连续滚动，松手重新计算位置，取消后停止滚动。新聊天、全部关注及工具按钮不作为落点。
+
+移动只调整标签顺序与组归属，关注成员不增加或删除；目标组激活原会话，草稿以原身份恢复。共享排序继续使用已有 move 操作，按 beforeKey 精确插入，避免前端顺序与同步回执不一致。普通源组移走最后一个标签后收拢；暂留标签仍不会重新关注。见 [验收](designs/session-split-drag/transfer-acceptance.md)。

@@ -8,7 +8,9 @@ import type { Page } from "@playwright/test";
 export async function installSessionUxFixture(page: Page, count = 40) {
   // Vite loads more than 250 modules. Retain their actual HMR URLs so test-side
   // imports use the mounted stores instead of creating a second module instance.
-  await page.addInitScript(() => performance.setResourceTimingBufferSize(10_000));
+  await page.addInitScript(() =>
+    performance.setResourceTimingBufferSize(10_000),
+  );
   const calls: Array<{ path: string; body: any }> = [];
   let followed: FollowedSession[] = [];
   let projects = ["/fixture/项目/very-long-project-path-for-ui-regression"];
@@ -147,7 +149,7 @@ export async function installSessionUxFixture(page: Page, count = 40) {
       const thread = makeThread("ux-created", "新的中文任务");
       threads.unshift(thread);
       json = { thread, model: "fixture-model", modelProvider: "openai" };
-    } else if (path.endsWith("/thread/resume"))
+    } else if (path.endsWith("/thread/read"))
       json = {
         thread:
           threads.find((t) => t.id === body?.threadId) ??
@@ -323,10 +325,17 @@ export async function seedSessionUx(page: Page, count = 1) {
 
 /** Compact single-group navigation keeps layout choices in the layout menu. */
 export async function chooseSessionLayout(page: Page, name: string) {
-  const direct = page.getByRole('button', { name, exact: true });
-  if (await direct.isVisible()) { await direct.click(); return; }
-  const layout = page.getByRole('button', { name: '选择会话布局', exact: true });
+  const direct = page.getByRole("button", { name, exact: true });
+  if (await direct.isVisible()) {
+    await direct.click();
+    return;
+  }
+  const layout = page.getByRole("button", {
+    name: "选择会话布局",
+    exact: true,
+  });
   if (await layout.isVisible()) await layout.click();
-  else await page.getByRole('button', { name: '更多功能', exact: true }).click();
-  await page.getByRole('menuitemradio', { name, exact: true }).click();
+  else
+    await page.getByRole("button", { name: "更多功能", exact: true }).click();
+  await page.getByRole("menuitemradio", { name, exact: true }).click();
 }

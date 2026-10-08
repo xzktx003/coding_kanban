@@ -6,10 +6,29 @@ test.use({
   isMobile: true,
   hasTouch: true,
 });
-test("mobile composition preserves middle-history reading through focus, keyboard and streaming", async ({
+test("mobile focus and streaming preserve historical reading; explicit sends follow the latest message", async ({
   page,
 }) => {
-  await installSessionUxFixture(page, 2);
+  const fixture = await installSessionUxFixture(page, 2);
+  // Load through the authoritative history endpoint so all turn timing/phase
+  // events are identical during background reconciliation and row measurement.
+  Object.assign(fixture.threads[0], {
+    turns: Array.from({ length: 70 }, (_, i) => ({
+      id: `t-${i}`,
+      status: "completed",
+      startedAt: i + 1,
+      durationMs: 1,
+      error: null,
+      items: [
+        {
+          type: "agentMessage",
+          id: `r-${i}`,
+          text: `对话 ${i} ${"手机点击输入框验证。".repeat(20)}`,
+          phase: "final",
+        },
+      ],
+    })),
+  });
   await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
   const editor = page.locator(".session-mode [contenteditable=true]").first();
   await editor.waitFor();
@@ -28,31 +47,13 @@ test("mobile composition preserves middle-history reading through focus, keyboar
     });
   });
   await page.evaluate(async () => {
-    const { useCodexStore } = await import(
+    const path = "/src/session-mode/services/codexService.ts";
+    const { codexService } = await import(
       performance
         .getEntriesByType("resource")
-        .findLast(
-          (e) =>
-            new URL(e.name).pathname ===
-            "/src/session-mode/components/codex/stores/index.ts",
-        )?.name ?? "/src/session-mode/components/codex/stores/index.ts"
+        .findLast((e) => new URL(e.name).pathname === path)?.name ?? path
     );
-    useCodexStore.setState({
-      events: {
-        "ux-0": Array.from({ length: 70 }, (_, i) => ({
-          method: "item/completed",
-          params: {
-            threadId: "ux-0",
-            turnId: `t-${i}`,
-            item: {
-              id: `r-${i}`,
-              type: "agentMessage",
-              text: `对话 ${i} ${"手机点击输入框验证。".repeat(20)}`,
-            },
-          },
-        })),
-      },
-    });
+    await codexService.loadThreadHistory("ux-0");
   });
   const transcript = page
     .locator('.session-mode [data-slot="scroll-area-viewport"]')
@@ -111,10 +112,9 @@ test("mobile composition preserves middle-history reading through focus, keyboar
     .poll(() => transcript.evaluate((el) => el.scrollTop))
     .toBeCloseTo(readingTop, 0);
   await page.getByRole("button", { name: "发送消息", exact: true }).click();
-  await page.waitForTimeout(150);
-  await expect
-    .poll(() => transcript.evaluate((el) => el.scrollTop))
-    .toBeCloseTo(readingTop, 0);
+  // The established delivery contract intentionally follows the newly submitted
+  // message. Focus, uploads and incoming streaming alone must preserve reading.
+  await expect.poll(remaining).toBeLessThan(5);
   // Returning manually to bottom resumes following subsequent output.
   await transcript.evaluate((el) => {
     el.dispatchEvent(new WheelEvent("wheel", { deltaY: 500, bubbles: true }));

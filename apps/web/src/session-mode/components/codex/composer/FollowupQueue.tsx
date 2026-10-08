@@ -39,16 +39,28 @@ import {
 } from "../../ui/dialog";
 import { fileSrc } from "@session/hooks/runtime";
 
-export function FollowupQueue({
-  threadId,
-  turnId,
-  onSideChat,
-}: {
+type QueueProps = {
   threadId: string | null;
   turnId: string | null;
   onSideChat?: (message: FollowupMessage) => void;
+};
+export function FollowupQueue(props: QueueProps) {
+  const snapshot = useFollowups(props.threadId);
+  return <FollowupQueueContent {...props} snapshot={snapshot} />;
+}
+export function FollowupQueueContent({
+  threadId,
+  turnId,
+  onSideChat,
+  snapshot,
+  inlineDetails = false,
+  compactShelf = false,
+}: QueueProps & {
+  snapshot: ReturnType<typeof useFollowups>;
+  inlineDetails?: boolean;
+  compactShelf?: boolean;
 }) {
-  const { state, error } = useFollowups(threadId);
+  const { state, error } = snapshot;
   const [busy, setBusy] = useState(false),
     [expanded, setExpanded] = useState(false),
     [editing, setEditing] = useState<string | null>(null),
@@ -111,7 +123,7 @@ export function FollowupQueue({
     void change({ type: "reorder", ids });
   };
   if (!threadId || (!items.length && !state.paused && !error)) return null;
-  const visible = expanded ? items : items.slice(0, 1);
+  const visible = expanded || inlineDetails ? items : items.slice(0, 1);
   const queueList = (
     <ol className="session-queue-list">
       {visible.map((m, index) => (
@@ -140,9 +152,25 @@ export function FollowupQueue({
               size={16}
               aria-hidden="true"
             />
-            <p className="session-followup-text" title={m.text || "图片消息"}>
-              {m.text || "图片消息"}
-            </p>
+            {compactShelf && !expanded && !inlineDetails ? (
+              <button
+                type="button"
+                className="session-followup-text session-queue-preview"
+                title={m.text || "图片消息"}
+                aria-label={
+                  items.length > 1
+                    ? `还有 ${items.length - 1} 条待发送`
+                    : "查看发送配置与上下文"
+                }
+                onClick={() => setExpanded(true)}
+              >
+                {m.text || "图片消息"}
+              </button>
+            ) : (
+              <p className="session-followup-text" title={m.text || "图片消息"}>
+                {m.text || "图片消息"}
+              </p>
+            )}
             {!!m.images.length && (
               <span className="session-queue-attachment-count">
                 图片 {m.images.length}
@@ -215,9 +243,11 @@ export function FollowupQueue({
                   <Pencil />
                   编辑消息
                 </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setExpanded(true)}>
-                  查看发送配置与上下文
-                </DropdownMenuItem>
+                {!inlineDetails && (
+                  <DropdownMenuItem onSelect={() => setExpanded(true)}>
+                    查看发送配置与上下文
+                  </DropdownMenuItem>
+                )}
                 {onSideChat && (
                   <DropdownMenuItem onSelect={() => onSideChat(m)}>
                     <Plus />
@@ -270,7 +300,7 @@ export function FollowupQueue({
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          {expanded && <FollowupSnapshot message={m} />}
+          {(expanded || inlineDetails) && <FollowupSnapshot message={m} />}
           {editing === m.id && (
             <div className="session-queue-edit">
               <textarea
@@ -356,7 +386,7 @@ export function FollowupQueue({
                       : void change({ type: "retry", id: m.id })
                   }
                 >
-                  重试发送
+                  {m.error?.startsWith("SESSION_OWNED_ELSEWHERE") ? "重新连接并发送" : "重试发送"}
                 </Button>
               )}
             </div>
@@ -367,7 +397,7 @@ export function FollowupQueue({
   );
   return (
     <section
-      className="session-followup-queue session-queue-shelf"
+      className={`session-followup-queue ${inlineDetails ? "session-queue-detail" : "session-queue-shelf"}`}
       aria-label="消息队列"
     >
       {error && (
@@ -401,8 +431,8 @@ export function FollowupQueue({
           </Button>
         </div>
       )}
-      {!expanded && items.length > 0 && queueList}
-      {expanded && (
+      {(inlineDetails || !expanded) && items.length > 0 && queueList}
+      {expanded && !inlineDetails && (
         <ComposerSheet
           title={`待发送消息 · ${items.length}`}
           description="按顺序发送；配置来自入队时的快照。"
@@ -425,7 +455,7 @@ export function FollowupQueue({
           </section>
         </ComposerSheet>
       )}
-      {items.length === 1 && (
+      {!compactShelf && !inlineDetails && items.length === 1 && (
         <button
           type="button"
           className="session-queue-expand"
@@ -434,7 +464,7 @@ export function FollowupQueue({
           查看发送配置与上下文 <ChevronDown size={14} />
         </button>
       )}
-      {items.length > 1 && (
+      {!compactShelf && !inlineDetails && items.length > 1 && (
         <button
           type="button"
           className="session-queue-expand"

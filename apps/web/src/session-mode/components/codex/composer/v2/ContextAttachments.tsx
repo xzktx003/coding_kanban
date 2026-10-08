@@ -33,7 +33,9 @@ export function ContextAttachments({
   images,
   onAnnotate,
   onRestore,
+  compact = false,
 }: {
+  compact?: boolean;
   owner: string;
   images: ReturnType<typeof useImageAttachments>;
   onAnnotate: (item: ImageAttachment) => void;
@@ -135,7 +137,7 @@ export function ContextAttachments({
   );
   return (
     <>
-      {images.storageError && (
+      {images.storageError && !compact && (
         <div role="alert">
           附件草稿保存失败：{images.storageError}
           <button type="button" onClick={images.retryStorage}>
@@ -145,12 +147,16 @@ export function ContextAttachments({
       )}
       {!!count && (
         <div
-          className="session-context-strip"
+          className={`session-context-strip ${compact ? "is-compact" : ""}`}
           aria-label="本次消息的附件与上下文"
         >
           {contexts.map((c) => (
             <div className="session-context-chip" key={c.id}>
-              <button type="button" onClick={() => setPanel(c.id)}>
+              <button
+                type="button"
+                aria-label={`查看上下文 ${c.name} ${c.range ? `L${c.range.start}–${c.range.end}` : c.kind === "paste" ? `${c.text.split(/\r?\n/).length} 行 · 完整内容` : c.kind === "quote" ? "回答引用" : "文件快照"}`}
+                onClick={() => setPanel(c.id)}
+              >
                 {c.kind === "quote" ? <Quote /> : <FileText />}
                 <span>
                   <strong>{c.name}</strong>
@@ -176,11 +182,15 @@ export function ContextAttachments({
           ))}
           {images.attachments.map((a) => (
             <div
-              className="session-context-chip"
+              className="session-context-chip is-image"
               key={a.id}
               data-state={a.status}
             >
-              <button type="button" onClick={() => setPanel(a.id)}>
+              <button
+                type="button"
+                aria-label={`预览 ${a.name}${a.status === "uploading" ? "，上传中" : a.status === "error" ? "，上传失败" : ""}`}
+                onClick={() => setPanel(a.id)}
+              >
                 <img
                   src={a.preview || (a.path ? fileSrc(a.path) : undefined)}
                   alt=""
@@ -207,13 +217,15 @@ export function ContextAttachments({
               </button>
             </div>
           ))}
-          <button
-            type="button"
-            className="session-context-all"
-            onClick={() => setPanel("all")}
-          >
-            查看全部 {count} 项
-          </button>
+          {(!compact || count > 1) && (
+            <button
+              type="button"
+              className="session-context-all"
+              onClick={() => setPanel("all")}
+            >
+              {compact ? `${count} 项` : `查看全部 ${count} 项`}
+            </button>
+          )}
         </div>
       )}
       {panel && (
@@ -222,13 +234,25 @@ export function ContextAttachments({
           description="内容快照会随本次消息提交，切换会话时独立保留。"
           onClose={() => setPanel(null)}
         >
+          {images.storageError && (
+            <p role="alert">
+              附件草稿保存失败：{images.storageError}
+              <button type="button" onClick={images.retryStorage}>
+                重试保存附件草稿
+              </button>
+            </p>
+          )}
           {selected ? (
             details(selected)
           ) : (
             <div className="session-context-list">
               {contexts.map((c) => (
                 <section key={c.id}>
-                  <button type="button" onClick={() => setPanel(c.id)}>
+                  <button
+                    type="button"
+                    aria-label={`查看上下文 ${c.name} ${c.range ? `L${c.range.start}–${c.range.end}` : c.kind === "paste" ? `${c.text.split(/\r?\n/).length} 行 · 完整内容` : c.kind === "quote" ? "回答引用" : "文件快照"}`}
+                    onClick={() => setPanel(c.id)}
+                  >
                     <FileText />
                     {c.name}
                   </button>

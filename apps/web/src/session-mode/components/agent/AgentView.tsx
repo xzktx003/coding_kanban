@@ -68,7 +68,7 @@ export default function AgentView() {
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
           <SessionGroups />
           <div className="shrink-0 flex justify-center border-t">
-            <div className="w-full px-2 md:max-w-3xl md:px-0">
+            <div className="session-composer-width w-full">
               <AgentComposer />
             </div>
           </div>
@@ -124,7 +124,7 @@ export default function AgentView() {
           </div>
 
           <div className="shrink-0 flex justify-center border-t">
-            <div className="w-full px-2 md:max-w-3xl md:px-0">
+            <div className="session-composer-width w-full">
               <AgentComposer />
             </div>
           </div>
@@ -132,7 +132,7 @@ export default function AgentView() {
       ) : noActiveSession ? (
         <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden items-center justify-center">
-            <div className="flex flex-col gap-4 w-full px-4 md:max-w-3xl md:px-0">
+            <div className="session-composer-width flex flex-col gap-4 w-full">
               <AgentComposer />
               <SessionWelcome />
             </div>
@@ -148,7 +148,7 @@ export default function AgentView() {
           </div>
 
           <div className="shrink-0 flex justify-center">
-            <div className="w-full px-2 md:max-w-3xl md:px-0">
+            <div className="session-composer-width w-full">
               <AgentComposer />
             </div>
           </div>

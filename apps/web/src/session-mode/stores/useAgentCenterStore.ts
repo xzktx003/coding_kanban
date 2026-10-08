@@ -83,6 +83,8 @@ interface AgentCenterState {
   ) => boolean;
   removeCard: (card: AgentCenterCard) => void;
   moveCard: (card: AgentCenterCard, target: AgentCenterCard) => void;
+  /** Precise insertion, unlike moveCard's historical move-to-index behavior. */
+  reorderCard: (key: string, beforeKey: string | null) => void;
   updateCard: (card: AgentCenterCard) => void;
   currentAgentCardId: string | null;
   currentAgentCardKind: AgentCenterCard["kind"] | null;
@@ -292,6 +294,15 @@ export const useAgentCenterStore = create<AgentCenterState>()(
             }),
           };
         }),
+
+      reorderCard: (key, beforeKey) => set((state) => {
+        if (!state.cards.some(card => agentCardKey(card) === key) ||
+            (beforeKey !== null && !state.cards.some(card => agentCardKey(card) === beforeKey))) return state;
+        const action: SessionTabAction = { type: 'move', key, beforeKey };
+        const cards = applySessionTabAction(state.cards, action);
+        if (cards.every((card, index) => card === state.cards[index])) return state;
+        return { cards, ...enqueue(state, action) };
+      }),
 
       updateCard: (card) =>
         set((state) => ({

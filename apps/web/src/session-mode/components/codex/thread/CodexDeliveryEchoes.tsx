@@ -56,7 +56,7 @@ export function CodexDeliveryEchoes({
     if (!missing.length) return;
     for (const e of missing) refreshed.current.add(`${threadId}:${e.turnId}`);
     void codexService
-      .threadResume(threadId, undefined, { background: true })
+      .loadThreadHistory(threadId, undefined, { background: true })
       .catch(() => {
         // Keep the message and accurate terminal status visible if refresh fails.
       });

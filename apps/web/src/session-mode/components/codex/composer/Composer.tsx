@@ -18,7 +18,13 @@ import {
 } from "@session/services/followupService";
 import { createSideChat } from "@session/services/conversationActions";
 import { useFollowupSettingsStore } from "@session/stores/useFollowupSettingsStore";
-import { FollowupQueue } from "./FollowupQueue";
+import { FollowupQueueContent } from "./FollowupQueue";
+import { useFollowups } from "@session/hooks/useFollowups";
+import { ModelChangeNotice } from "./ModelChangeNotice";
+import { ConversationMenu } from "./ConversationMenu";
+import { useThreadModelStore } from "@session/stores/useThreadModelStore";
+import { useQuestions } from "@session/features/async-questions/useQuestions";
+import { useAsyncQuestionStore } from "@session/features/async-questions/store";
 import { SideChatPanel } from "./SideChatPanel";
 import { ReviewDialog } from "./ReviewDialog";
 import type { FollowupMode } from "@agent-orchestrator/shared";
@@ -28,7 +34,6 @@ import {
   moveImageDraft,
   useImageAttachments,
 } from "../../common/useImageAttachments";
-import { ImageAttachmentStrip } from "../../common/ImageAttachmentStrip";
 import { useShallow } from "zustand/react/shallow";
 import { toast } from "sonner";
 import {
@@ -104,10 +109,15 @@ function goalStatusLabel(status: ThreadGoal["status"]): string {
   }
 }
 
-export function Composer({ overrideSend, onAfterSend, targetLabel }: ComposerProps) {
+export function Composer({
+  overrideSend,
+  onAfterSend,
+  targetLabel,
+}: ComposerProps) {
   const preferences = useFollowupSettingsStore();
   const { collaborationMode, setCollaborationMode } = useConfigStore();
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [detailsOwner, setDetailsOwner] = useState<string | null>(null);
 
   const submitMode = useRef<FollowupMode | null>(null);
   const [deliveryNotice, setDeliveryNotice] = useState<{
@@ -137,6 +147,7 @@ export function Composer({ overrideSend, onAfterSend, targetLabel }: ComposerPro
   useEffect(() => {
     setSlashDialog(null);
     setReviewOpen(false);
+    setDetailsOwner(null);
   }, [owner]);
   const appendFileLinks = useCallback(
     (paths: string[]) => {
@@ -401,21 +412,97 @@ export function Composer({ overrideSend, onAfterSend, targetLabel }: ComposerPro
     }
   };
 
+  const queueSnapshot = useFollowups(currentThreadId);
+  const queued = queueSnapshot.state.items.filter(
+    (m) => m.status !== "sent" && m.status !== "cancelled",
+  );
+  const modelEntry = useThreadModelStore((s) =>
+    currentThreadId ? s.threads[currentThreadId] : undefined,
+  );
+  const { questions, pending: pendingQuestions } = useQuestions(
+    currentThreadId ?? "",
+  );
+  const failedImage = attachments.attachments.find((a) => a.status === "error");
+  const uploading = attachments.attachments.filter(
+    (a) => a.status === "uploading",
+  ).length;
+  const statusText = contextStorageError
+    ? "上下文保存失败，打开状态面板重试"
+    : attachments.storageError
+      ? "附件草稿保存失败，打开状态面板重试"
+      : failedImage
+        ? "图片上传失败，点击缩略图重试"
+        : pendingFiles[owner]
+          ? "正在读取文件快照…"
+          : uploading
+            ? `正在上传 ${uploading} 张图片…`
+            : pendingQuestions.length
+              ? `有 ${pendingQuestions.length} 个问题待回答`
+              : queued.some(
+                    (m) => m.status === "failed" || m.status === "uncertain",
+                  )
+                ? "队列有消息需要处理"
+                : queueSnapshot.error
+                  ? "队列连接暂不可用，正在重试"
+                  : queued.length || queueSnapshot.state.paused
+                    ? `待发送 ${queued.length} 条${queueSnapshot.state.paused ? " · 已暂停" : ""}`
+                    : modelEntry?.notice && !modelEntry.notice.dismissed
+                      ? `模型已切换：${modelEntry.notice.from} → ${modelEntry.notice.to}`
+                      : collaborationMode === "plan"
+                        ? "规划模式"
+                        : goalEnabled
+                          ? "目标草稿"
+                          : threadGoal
+                            ? goalStatusLabel(threadGoal.status)
+                            : running
+                              ? hasContent
+                                ? preferences.mode === "queue"
+                                  ? "本轮结束后发送"
+                                  : "发送将引导当前任务"
+                                : "运行中"
+                              : "";
   return (
-    <div className="session-codex-composer">
-      <FollowupQueue
-        key={currentThreadId ?? "new"}
-        threadId={currentThreadId}
-        turnId={currentTurnId}
-        onSideChat={(message) => {
-          if (currentThreadId)
-            void createSideChat(
-              currentThreadId,
-              composeContextText(message.text, message.contexts),
-              message.images,
-            ).catch((e) => toast.error(String(e)));
-        }}
-      />
+    <div className="session-codex-composer session-compact-composer">
+      <div
+        className="session-composer-floating"
+        aria-label="会话提示与待发送消息"
+      >
+        {pendingQuestions.length > 0 && (
+          <button
+            type="button"
+            className="session-async-notice"
+            aria-label={`回答问题 · ${pendingQuestions.length}`}
+            onClick={() => {
+              const first = pendingQuestions[0];
+              useAsyncQuestionStore.getState().open(
+                currentThreadId!,
+                questions.filter((q) => q.sourceId === first.sourceId),
+                first.id,
+              );
+            }}
+          >
+            <span>有 {pendingQuestions.length} 个问题待回答</span>
+            <span>回答</span>
+          </button>
+        )}
+
+        {currentThreadId && <ModelChangeNotice threadId={currentThreadId} />}
+        <FollowupQueueContent
+          compactShelf
+          snapshot={queueSnapshot}
+          key={currentThreadId ?? "new"}
+          threadId={currentThreadId}
+          turnId={currentTurnId}
+          onSideChat={(message) => {
+            if (currentThreadId)
+              void createSideChat(
+                currentThreadId,
+                composeContextText(message.text, message.contexts),
+                message.images,
+              ).catch((e) => toast.error(String(e)));
+          }}
+        />
+      </div>
       {deliveryNotice?.owner === owner && (
         <p role="status" className="sr-only">
           {deliveryNotice.text}
@@ -451,127 +538,35 @@ export function Composer({ overrideSend, onAfterSend, targetLabel }: ComposerPro
 
         <div
           data-composer-suggestion-anchor
-          className="session-composer-surface"
+          className="session-composer-surface session-compact-frame"
         >
-          {targetLabel}
-          <ContextAttachments
-            key={owner}
-            owner={owner}
-            images={attachments}
-            onAnnotate={(item) => setDrawing({ owner, id: item.id })}
-            onRestore={(text) => editorRef.current?.insertText(text)}
-          />
-          {contextStorageError && (
-            <p role="alert" className="session-context-warning">
-              {contextStorageError}
-              <button type="button" onClick={composerDrafts.retryStorage}>
-                重试保存上下文
-              </button>
-            </p>
-          )}
-          {!!pendingFiles[owner] && <p role="status">正在读取文件快照…</p>}
-          {collaborationMode === "plan" && (
-            <div className="session-composer-mode">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => setCollaborationMode("default")}
-                aria-label="取消规划模式"
-              >
-                规划模式
-                <X size={12} />
-              </Button>
+          <div className="session-compact-body">
+            <div ref={wrapperRef} className="session-composer-editor">
+              <ComposerEditor
+                key={owner}
+                ref={editorRef}
+                value={inputValue}
+                onChange={setInputValue}
+                onSubmit={handleEditorSubmit}
+                placeholder={
+                  goalEnabled
+                    ? "输入目标…"
+                    : running
+                      ? "继续补充…"
+                      : "描述你想完成的任务…"
+                }
+              />
             </div>
-          )}
 
-          <div ref={wrapperRef} className="session-composer-editor">
-            <ComposerEditor
+            <ContextAttachments
+              compact
               key={owner}
-              ref={editorRef}
-              value={inputValue}
-              onChange={setInputValue}
-              onSubmit={handleEditorSubmit}
-              placeholder={
-                goalEnabled
-                  ? "输入目标…"
-                  : running
-                    ? "继续补充…"
-                    : "描述你想完成的任务…"
-              }
+              owner={owner}
+              images={attachments}
+              onAnnotate={(item) => setDrawing({ owner, id: item.id })}
+              onRestore={(text) => editorRef.current?.insertText(text)}
             />
           </div>
-
-          {threadGoal && (
-            <div className="flex items-center gap-1.5 px-3 pb-1 text-xs text-muted-foreground">
-              <Target className="h-3 w-3 shrink-0" />
-              <span className="truncate">
-                {goalStatusLabel(threadGoal.status)}
-              </span>
-              {threadGoal.status !== "complete" && (
-                <span className="truncate text-muted-foreground/70">
-                  · {threadGoal.objective}
-                </span>
-              )}
-            </div>
-          )}
-
-          {(goalEnabled || threadGoal) && (
-            <div className="session-composer-goal-tools">
-              {/* Draft mode: entering a new goal, not yet set on the thread. */}
-              {goalEnabled && !threadGoal && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setGoalEnabled(false)}
-                  aria-label="取消目标草稿"
-                  title="取消目标草稿"
-                  className="group relative h-8 px-2 text-muted-foreground"
-                >
-                  <span>目标草稿</span>
-                  <X className="h-3 w-3" />
-                </Button>
-              )}
-              {/* A goal is actually set on the thread: allow pause/resume and clear
-                    based on its real status, matching /goal pause|resume|clear in the TUI. */}
-              {threadGoal && (
-                <>
-                  {(threadGoal.status === "active" ||
-                    threadGoal.status === "paused") && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={handleToggleGoalPause}
-                      title={
-                        threadGoal.status === "active"
-                          ? "Pause goal"
-                          : "Resume goal"
-                      }
-                      className="ml-1 h-8 w-8 text-blue-600 hover:bg-blue-50"
-                    >
-                      {threadGoal.status === "active" ? (
-                        <Pause className="h-4 w-4" />
-                      ) : (
-                        <Play className="h-4 w-4" />
-                      )}
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleClearGoal}
-                    title="Clear goal"
-                    className="h-8 w-8 text-blue-600 hover:bg-blue-50"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </>
-              )}
-            </div>
-          )}
           <div className="session-composer-bottom">
             <ComposerToolbarProvider className="session-composer-toolbar flex items-center justify-between w-full">
               <div className="session-composer-policy flex items-center">
@@ -708,28 +703,58 @@ export function Composer({ overrideSend, onAfterSend, targetLabel }: ComposerPro
                   )}
                 />
                 <AccessModePopover compact />
+              </div>
+              <div className="session-compact-meta">
+                {targetLabel}
+                <span
+                  className="session-compact-status"
+                  role={
+                    contextStorageError ||
+                    attachments.storageError ||
+                    failedImage
+                      ? "alert"
+                      : "status"
+                  }
+                  title={statusText}
+                >
+                  {statusText}
+                </span>
+              </div>
+              <div className="session-composer-utilities" aria-label="输入工具">
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
                   className="session-composer-expand"
                   aria-label="展开编辑"
+                  title="展开编辑"
                   onClick={() => composerDrafts.setExpanded(owner, true)}
                 >
                   <Maximize2 size={18} />
                 </Button>
+                <DictationButton
+                  key={owner}
+                  onTranscript={(text) => {
+                    const value = readDraft(owner).text;
+                    useSessionDraftStore
+                      .getState()
+                      .setText(owner, value ? `${value} ${text}` : text);
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label="输入状态与消息队列"
+                  title="输入状态与消息队列"
+                  onClick={() => setDetailsOwner(owner)}
+                >
+                  <ListPlus size={18} />
+                </Button>
+                <ConversationMenu threadId={currentThreadId} title="当前会话" />
               </div>
               <div className="session-composer-actions flex items-center gap-2">
                 <AgentModelPanel trigger={<AgentModelTrigger compact />} />
-                <span className="session-composer-desktop-voice">
-                  <DictationButton
-                    onTranscript={(text) => {
-                      setInputValue(
-                        inputValue ? `${inputValue} ${text}` : text,
-                      );
-                    }}
-                  />
-                </span>
                 {running && (
                   <Button
                     type="button"
@@ -784,15 +809,146 @@ export function Composer({ overrideSend, onAfterSend, targetLabel }: ComposerPro
           </div>
         </div>
       </form>
-      {running && hasContent && (
-        <p className="session-composer-hint">
-          {preferences.mode === "queue"
-            ? "本轮结束后发送"
-            : "发送将引导当前任务"}
-          <span>
-            Ctrl/⌘ Shift Enter {preferences.mode === "queue" ? "引导" : "排队"}
-          </span>
-        </p>
+      {detailsOwner === owner && (
+        <ComposerSheet
+          title="输入状态与消息队列"
+          description="查看本会话的发送配置、状态及待发送消息。"
+          onClose={() => {
+            setDetailsOwner(null);
+            editorRef.current?.focus();
+          }}
+        >
+          {attachments.storageError && (
+            <p role="alert">
+              附件草稿保存失败：{attachments.storageError}
+              <button type="button" onClick={attachments.retryStorage}>
+                重试保存附件草稿
+              </button>
+            </p>
+          )}
+          {contextStorageError && (
+            <p role="alert" className="session-context-warning">
+              {contextStorageError}
+              <button type="button" onClick={composerDrafts.retryStorage}>
+                重试保存上下文
+              </button>
+            </p>
+          )}
+          {!!pendingFiles[owner] && <p role="status">正在读取文件快照…</p>}
+          {collaborationMode === "plan" && (
+            <div className="session-composer-mode">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setCollaborationMode("default")}
+                aria-label="取消规划模式"
+              >
+                规划模式
+                <X size={12} />
+              </Button>
+            </div>
+          )}
+
+          {threadGoal && (
+            <div className="flex items-center gap-1.5 px-3 pb-1 text-xs text-muted-foreground">
+              <Target className="h-3 w-3 shrink-0" />
+              <span className="truncate">
+                {goalStatusLabel(threadGoal.status)}
+              </span>
+              {threadGoal.status !== "complete" && (
+                <span className="truncate text-muted-foreground/70">
+                  · {threadGoal.objective}
+                </span>
+              )}
+            </div>
+          )}
+
+          {(goalEnabled || threadGoal) && (
+            <div className="session-composer-goal-tools">
+              {/* Draft mode: entering a new goal, not yet set on the thread. */}
+              {goalEnabled && !threadGoal && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setGoalEnabled(false)}
+                  aria-label="取消目标草稿"
+                  title="取消目标草稿"
+                  className="group relative h-8 px-2 text-muted-foreground"
+                >
+                  <span>目标草稿</span>
+                  <X className="h-3 w-3" />
+                </Button>
+              )}
+              {/* A goal is actually set on the thread: allow pause/resume and clear
+                    based on its real status, matching /goal pause|resume|clear in the TUI. */}
+              {threadGoal && (
+                <>
+                  {(threadGoal.status === "active" ||
+                    threadGoal.status === "paused") && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={handleToggleGoalPause}
+                      title={
+                        threadGoal.status === "active"
+                          ? "Pause goal"
+                          : "Resume goal"
+                      }
+                      className="ml-1 h-8 w-8 text-blue-600 hover:bg-blue-50"
+                    >
+                      {threadGoal.status === "active" ? (
+                        <Pause className="h-4 w-4" />
+                      ) : (
+                        <Play className="h-4 w-4" />
+                      )}
+                    </Button>
+                  )}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleClearGoal}
+                    title="Clear goal"
+                    className="h-8 w-8 text-blue-600 hover:bg-blue-50"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+          {running && hasContent && (
+            <p className="session-composer-hint">
+              {preferences.mode === "queue"
+                ? "本轮结束后发送"
+                : "发送将引导当前任务"}
+              <span>
+                Ctrl/⌘ Shift Enter{" "}
+                {preferences.mode === "queue" ? "引导" : "排队"}
+              </span>
+            </p>
+          )}
+          <FollowupQueueContent
+            inlineDetails
+            snapshot={queueSnapshot}
+            key={currentThreadId ?? "new"}
+            threadId={currentThreadId}
+            turnId={currentTurnId}
+            onSideChat={(message) => {
+              if (currentThreadId)
+                void createSideChat(
+                  currentThreadId,
+                  composeContextText(message.text, message.contexts),
+                  message.images,
+                ).catch((e) => toast.error(String(e)));
+            }}
+          />
+
+          {!statusText && <p>暂无待处理状态。</p>}
+        </ComposerSheet>
       )}
       {richDraft.expanded && (
         <ComposerSheet
@@ -800,6 +956,7 @@ export function Composer({ overrideSend, onAfterSend, targetLabel }: ComposerPro
           title="展开编辑"
           description="返回会保留正文、上下文与代码；发送方式沿用当前设置。"
           onClose={() => composerDrafts.setExpanded(owner, false)}
+          returnFocus={() => editorRef.current?.focus()}
           footer={
             <>
               <AccessModePopover compact />

@@ -99,7 +99,7 @@ export function CodexAgentCard({
     const state = useCodexStore.getState();
     if (!state.historyLoadedMap[card.id] && !state.historyLoadingMap[card.id]) {
       void codexService
-        .threadResume(card.id, undefined, { background: true })
+        .loadThreadHistory(card.id, undefined, { background: true })
         .catch(() => {});
     }
   }, [card.id]);

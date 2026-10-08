@@ -421,3 +421,11 @@
 - 2026-10-08：经用户授权，保留异常原会话并创建完整历史的修复副本；分配新身份、同步展示事件归属，仅去除一条失败调用的异常尾部空白。原文件哈希不变，28 轮与 1,504 个可见条目逐项一致，模型配置保留，副本加入标签。分页历史经 legacy fork 会丢失展示事件，恢复验收必须比较原生 API 的 items；详见 `docs/session-message-delivery.md`。
 
 - 2026-10-08：关注会话下拉补齐标签的状态图形；复用 SessionStatusIndicator，并使用 useFollowedSessionStates 的解析结果，避免离线仍显示旧运行圈。两行身份信息、项目消歧、内部滚动与键盘/主题浏览器回归已补充。
+
+- 2026-10-08：浅色选中窗口提示改为 `session-selection.css` 的蓝色内侧 outline 与淡蓝标题栏，在导航样式之后加载，覆盖普通分隔线的激活边框回退；固定边框宽度、无过渡，复用既有选择状态。验收用动画帧检查几何与滚动位置。
+
+- 2026-10-08：Session composer 高度跳变：外层限宽与条件信息/附件参与流式布局，手机最多约 327px。改为固定框体、左侧预览、悬浮队列/直接工具入口；回归包含长文/8 图/错误/模型提示，避免撤销提示被通知层挡住，并在完整编辑器关闭时显式恢复正文焦点。证据：`docs/designs/compact-composer/acceptance.md`。
+
+- 2026-10-08 Codex 写锁交接：历史导航/补拉必须使用只读 API，不能 resume；unsubscribe ACK 不等于释放，需核对 loaded/list。卸载会结束 unified exec 后台进程，必须保护队列、待审批/回答、活动目标和子 Agent，未知资源保留。实现与隔离原生验收见 docs/session-ownership.md、scripts/session-ownership-acceptance.py；正式服务须安全切换。
+
+- 2026-10-08：会话历史/执行权 API 同时返回 405 时，先检查运行二进制与磁盘产物是否一致。常驻 Rust 服务跨 Node 热更新复用，构建成功不代表路由已激活；使用 session:status 核对。隔离验证新程序后，只有获得明确任务中断授权才升级真实运行服务，再复核 health/read/access、会话 ID 与历史。此次已授权升级并验证接口恢复 200。

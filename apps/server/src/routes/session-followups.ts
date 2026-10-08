@@ -55,7 +55,11 @@ function submit(value: unknown): FollowupSubmit {
   message(v.text);
   if (!["queue", "steer", "replace"].includes(v.mode)) invalid();
   if (v.expectedTurnId !== undefined) id(v.expectedTurnId);
-  if (v.recoverAfterError !== undefined && typeof v.recoverAfterError !== "boolean") invalid();
+  if (
+    v.recoverAfterError !== undefined &&
+    typeof v.recoverAfterError !== "boolean"
+  )
+    invalid();
   if (
     !Array.isArray(v.images) ||
     v.images.length > 8 ||
@@ -73,23 +77,53 @@ function submit(value: unknown): FollowupSubmit {
     const seen = new Set<string>();
     for (const entry of v.contexts) {
       const c = object(entry);
-      keys(c, ["id", "kind", "name", "text", "path", "range", "sourceThreadId", "sourceItemId"]);
+      keys(c, [
+        "id",
+        "kind",
+        "name",
+        "text",
+        "path",
+        "range",
+        "sourceThreadId",
+        "sourceItemId",
+      ]);
       id(c.id);
       if (seen.has(c.id)) invalid();
       seen.add(c.id);
       if (!["file", "paste", "quote"].includes(c.kind)) invalid();
-      if (typeof c.name !== "string" || c.name.length > 512 || /[\x00-\x1f]/.test(c.name)) invalid();
+      if (
+        typeof c.name !== "string" ||
+        c.name.length > 512 ||
+        /[\x00-\x1f]/.test(c.name)
+      )
+        invalid();
       message(c.text);
-      if (c.path !== undefined && (typeof c.path !== "string" || !c.path.startsWith("/") || c.path.length > 4096 || /[\x00-\x1f]/.test(c.path))) invalid();
-      for (const field of ["sourceThreadId", "sourceItemId"]) if (c[field] !== undefined) id(c[field]);
+      if (
+        c.path !== undefined &&
+        (typeof c.path !== "string" ||
+          !c.path.startsWith("/") ||
+          c.path.length > 4096 ||
+          /[\x00-\x1f]/.test(c.path))
+      )
+        invalid();
+      for (const field of ["sourceThreadId", "sourceItemId"])
+        if (c[field] !== undefined) id(c[field]);
       if (c.range !== undefined) {
-        const range = object(c.range); keys(range, ["start", "end"]);
-        if (!Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || range.start < 1 || range.end < range.start) invalid();
+        const range = object(c.range);
+        keys(range, ["start", "end"]);
+        if (
+          !Number.isSafeInteger(range.start) ||
+          !Number.isSafeInteger(range.end) ||
+          range.start < 1 ||
+          range.end < range.start
+        )
+          invalid();
       }
     }
     message(composeContextText(v.text, v.contexts));
   }
-  if (!v.text.trim() && !v.images.length && !v.contexts?.length) invalid("消息不能为空");
+  if (!v.text.trim() && !v.images.length && !v.contexts?.length)
+    invalid("消息不能为空");
   const p = object(v.parameters);
   keys(p, [
     "cwd",
@@ -167,7 +201,9 @@ function submit(value: unknown): FollowupSubmit {
 function action(value: unknown): FollowupAction {
   const a = object(value);
   if (a.type === "undo") {
-    keys(a, ["type", "token"]); id(a.token); return a as FollowupAction;
+    keys(a, ["type", "token"]);
+    id(a.token);
+    return a as FollowupAction;
   }
   if (["clear", "pause", "resume"].includes(a.type)) {
     keys(a, ["type"]);
@@ -264,6 +300,26 @@ export function registerSessionFollowupRoutes(
     return response.json() as Promise<any>;
   }
   const runtime = options.runtime ?? {
+    syncHolds: async (snapshot: { busy: boolean; threadIds: string[] }) => {
+      const origin = options.origin();
+      if (!origin) throw new Error("会话服务尚未连接");
+      const response = await fetcher(
+        origin + "/api/internal/codex/queue-holds",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            ...snapshot,
+            sequence: process.hrtime.bigint().toString(),
+          }),
+          signal: AbortSignal.any([lifetime.signal, AbortSignal.timeout(5000)]),
+        },
+      );
+      // A still-running older runtime has no ownership manager; preserve its
+      // existing queue semantics until the runtime can be safely upgraded.
+      if (response.status !== 404 && !response.ok)
+        throw new Error("无法确认会话执行占用");
+    },
     call: (method: string, params: Record<string, unknown>) =>
       upstream("/api/codex/" + method, params),
     statuses: async (ids: string[]) => {

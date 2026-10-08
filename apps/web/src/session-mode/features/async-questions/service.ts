@@ -137,7 +137,7 @@ export async function sendAnswers(
       // A turn may have ended before its stream notification arrived. Refresh
       // its status, but never convert the rejected steer into a new turn.
       try {
-        await codexService.threadResume(threadId);
+        await codexService.loadThreadHistory(threadId);
       } catch {
         /* retain the original actionable error */
       }
@@ -154,7 +154,7 @@ export async function reconcileAnswers(threadId: string) {
   store.patch(threadId, { sending: true });
   try {
     // Existing rejoin reconciles history without creating a turn or interrupting it.
-    await codexService.threadResume(threadId);
+    await codexService.loadThreadHistory(threadId);
     const questions = questionsNow(threadId);
     const matched =
       !!session.uncertainClientId &&

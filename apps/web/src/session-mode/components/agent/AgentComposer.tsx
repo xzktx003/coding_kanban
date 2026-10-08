@@ -1,5 +1,4 @@
 import { useActiveSessionProject } from "../../hooks/useActiveSessionProject";
-import { ConversationMenu } from "../codex/composer/ConversationMenu";
 import { QuestionComposer } from "@session/features/async-questions/QuestionComposer";
 import { useEffect } from "react";
 import { AcpComposer } from "@session/components/acp/AcpComposer";
@@ -12,7 +11,6 @@ import { WorkspaceSwitcher } from "../common";
 import { selectedAgentCard } from "@session/stores/useAgentCenterStore";
 import { useSessionName } from "@session/stores/useSessionNameStore";
 import { useCodexStore } from "@session/components/codex/stores";
-import { ModelChangeNotice } from "../codex/composer/ModelChangeNotice";
 
 const focusCCInput = () =>
   window.dispatchEvent(new Event("cc-input-focus-request"));
@@ -20,6 +18,7 @@ const focusCCInput = () =>
 export function AgentComposer() {
   const { selectedAgent } = useAgentSettingsStore();
   const acpActive = useAcpStore((s) => s.active);
+  const acpTitle = useAcpStore((s) => s.agentTitle || s.agentId || "ACP");
   const project = useActiveSessionProject();
   const tabs = useAgentCenterStore();
   const { currentAgentCardId } = tabs;
@@ -57,24 +56,25 @@ export function AgentComposer() {
         <span aria-hidden="true"> · </span>
         <span className="session-target-project">{project.label}</span>
       </strong>
-      {selectedAgent === "codex" && (
-        <ConversationMenu threadId={currentThreadId} title={targetTitle} />
-      )}
+      <span className="session-target-agent">
+        {acpActive ? acpTitle : selectedAgent === "cc" ? "Claude" : "Codex"}
+      </span>
     </div>
   );
   return (
     <div className="flex flex-col session-composer-target-container">
       {/* Input area */}
-      {!acpActive && selectedAgent === "codex" && currentThreadId && (
-        <ModelChangeNotice threadId={currentThreadId} />
-      )}
-      <div className={`shrink-0 ${currentAgentCardId && "pb-2"}`}>
+      <div className="shrink-0">
         {acpActive ? (
-          <AcpComposer />
+          <AcpComposer targetLabel={targetLabel} />
         ) : selectedAgent === "cc" ? (
           <CCComposer targetLabel={targetLabel} />
         ) : currentThreadId ? (
-          <QuestionComposer key={currentThreadId} threadId={currentThreadId}>
+          <QuestionComposer
+            compact
+            key={currentThreadId}
+            threadId={currentThreadId}
+          >
             <CodexComposer targetLabel={targetLabel} />
           </QuestionComposer>
         ) : (

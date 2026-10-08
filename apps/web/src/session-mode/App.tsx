@@ -131,7 +131,7 @@ function AppShell() {
       toast.info("会话服务已重启，正在恢复历史。");
       if (thread)
         void codexService
-          .threadResume(thread)
+          .loadThreadHistory(thread)
           .catch(() => toast.error("会话历史恢复失败，请从项目列表重新打开。"));
     };
     window.addEventListener("session-runtime-restarted", recover);

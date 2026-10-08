@@ -74,7 +74,7 @@ pub(super) async fn api_allow_sleep(
 pub(super) async fn health_check() -> impl IntoResponse {
     Json(json!({
         "status": "ok", "instance": std::env::var("SESSION_RUNTIME_INSTANCE").ok(),
-        "capabilities": { "acpImages": true },
+        "capabilities": { "acpImages": true, "codexOwnership": true },
         "timezone": chrono::Local::now().format("%Z %:z").to_string()
     }))
 }

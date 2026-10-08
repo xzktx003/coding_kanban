@@ -18,25 +18,66 @@ test("isolated create/send/stream/tools, mode isolation and preserved drafts/att
   await page.getByRole("button", { name: "发送消息", exact: true }).click();
   await expect
     .poll(
-      () => fixture.calls.filter((c) => c.path.endsWith("/turn/start")).length,
+      () =>
+        fixture.calls.filter((c) => c.path.endsWith("/followups/submit"))
+          .length,
     )
     .toBe(1);
+  // The durable outbox owns native turn dispatch; this fixture verifies the
+  // submitted intent while followup tests exercise the runtime adapter itself.
   expect(
-    fixture.calls.find((c) => c.path.endsWith("/turn/start"))?.body.input,
-  ).toContainEqual({
-    type: "text",
-    text: "实现一个测试任务",
-    text_elements: [],
+    fixture.calls.find((c) => c.path.endsWith("/followups/submit"))?.body,
+  ).toMatchObject({ threadId: "ux-created", text: "实现一个测试任务" });
+  // Background reads are authoritative. Persist the same synthetic reply/tools
+  // in the API fixture so read reconciliation cannot erase the streamed rows.
+  Object.assign(fixture.threads.find((thread) => thread.id === "ux-created")!, {
+    turns: [
+      {
+        id: "ux-turn-ux-created",
+        status: "completed",
+        startedAt: 1,
+        durationMs: 2,
+        error: null,
+        items: [
+          {
+            id: "reply",
+            type: "agentMessage",
+            text: "回复验证成功\n\n```ts\nconst value = 42;\n```",
+          },
+          ...["isolated_tool_result", "second_tool_result"].map(
+            (output, i) => ({
+              id: i ? "second-command" : "command",
+              type: "commandExecution",
+              command: `echo ${output}`,
+              cwd: "/fixture",
+              processId: null,
+              status: "completed",
+              exitCode: 0,
+              durationMs: i ? 3 : 2,
+              aggregatedOutput: output,
+              commandActions: [],
+            }),
+          ),
+        ],
+      },
+    ],
   });
   await page.evaluate(async () => {
-    const { useCodexStore } =
-      await import("/src/session-mode/components/codex/stores/index.ts");
+    const { useCodexStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/components/codex/stores/index.ts",
+        )?.name ?? "/src/session-mode/components/codex/stores/index.ts"
+    );
     const store = useCodexStore.getState();
     store.addEvent("ux-created", {
       method: "item/completed",
       params: {
         threadId: "ux-created",
-        turnId: "ux-turn",
+        turnId: "ux-turn-ux-created",
         item: {
           id: "reply",
           type: "agentMessage",
@@ -48,7 +89,7 @@ test("isolated create/send/stream/tools, mode isolation and preserved drafts/att
       method: "item/started",
       params: {
         threadId: "ux-created",
-        turnId: "ux-turn",
+        turnId: "ux-turn-ux-created",
         item: {
           id: "command",
           type: "commandExecution",
@@ -64,7 +105,7 @@ test("isolated create/send/stream/tools, mode isolation and preserved drafts/att
       method: "item/completed",
       params: {
         threadId: "ux-created",
-        turnId: "ux-turn",
+        turnId: "ux-turn-ux-created",
         item: {
           id: "command",
           type: "commandExecution",
@@ -83,7 +124,7 @@ test("isolated create/send/stream/tools, mode isolation and preserved drafts/att
       method: "item/started",
       params: {
         threadId: "ux-created",
-        turnId: "ux-turn",
+        turnId: "ux-turn-ux-created",
         item: {
           id: "second-command",
           type: "commandExecution",
@@ -99,7 +140,7 @@ test("isolated create/send/stream/tools, mode isolation and preserved drafts/att
       method: "item/completed",
       params: {
         threadId: "ux-created",
-        turnId: "ux-turn",
+        turnId: "ux-turn-ux-created",
         item: {
           id: "second-command",
           type: "commandExecution",
@@ -119,7 +160,7 @@ test("isolated create/send/stream/tools, mode isolation and preserved drafts/att
       params: {
         threadId: "ux-created",
         turn: {
-          id: "ux-turn",
+          id: "ux-turn-ux-created",
           status: "completed",
           durationMs: 2,
           startedAt: 1,
@@ -175,8 +216,13 @@ test("isolated create/send/stream/tools, mode isolation and preserved drafts/att
       }),
     );
   });
-  await expect(page.getByText("fixture.png", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "终端", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "预览 fixture.png", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("group", { name: "工作模式", exact: true })
+    .getByRole("button", { name: "终端", exact: true })
+    .click();
   await page.evaluate(() =>
     window.dispatchEvent(
       new KeyboardEvent("keydown", {
@@ -190,15 +236,28 @@ test("isolated create/send/stream/tools, mode isolation and preserved drafts/att
   const active = await page.evaluate(
     async () =>
       (
-        await import("/src/session-mode/components/codex/stores/index.ts")
+        await import(
+          performance
+            .getEntriesByType("resource")
+            .findLast(
+              (e) =>
+                new URL(e.name).pathname ===
+                "/src/session-mode/components/codex/stores/index.ts",
+            )?.name ?? "/src/session-mode/components/codex/stores/index.ts"
+        )
       ).useCodexStore.getState().currentThreadId,
   );
   expect(active).toBe("ux-created");
-  await page.getByRole("button", { name: "会话", exact: true }).click();
+  await page
+    .getByRole("group", { name: "工作模式", exact: true })
+    .getByRole("button", { name: "会话", exact: true })
+    .click();
   await expect(editor).toContainText("保留输入草稿");
-  await expect(page.getByText("fixture.png", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "预览 fixture.png", exact: true }),
+  ).toBeVisible();
   expect(
-    fixture.calls.filter((c) => c.path.endsWith("/turn/start")),
+    fixture.calls.filter((c) => c.path.endsWith("/followups/submit")),
   ).toHaveLength(1);
   expect(errors).toEqual([]);
 });
@@ -256,11 +315,11 @@ test("many sessions, search, model menu, responsive controls and error recovery"
     ).toBeLessThanOrEqual(viewport.width);
   }
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.evaluate(async () => {
-    const { useLayoutStore } =
-      await import("/src/session-mode/stores/useLayoutStore.ts");
-    useLayoutStore.setState({ isSidebarOpen: true });
+  const projects = page.getByRole("button", {
+    name: "展开项目列表",
+    exact: true,
   });
+  if (await projects.isVisible()) await projects.click();
   await page.getByRole("button", { name: "搜索和管理会话" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
@@ -275,8 +334,15 @@ test("many sessions, search, model menu, responsive controls and error recovery"
   ).toBeFocused();
   fixture.setListError(true);
   await page.evaluate(async () => {
-    const { useWorkspaceStore } =
-      await import("/src/session-mode/stores/useWorkspaceStore.ts");
+    const { useWorkspaceStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/stores/useWorkspaceStore.ts",
+        )?.name ?? "/src/session-mode/stores/useWorkspaceStore.ts"
+    );
     useWorkspaceStore.setState({
       projects: ["/fixture/new-project"],
       cwd: "/fixture/new-project",

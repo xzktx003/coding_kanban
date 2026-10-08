@@ -12,7 +12,7 @@ import {
   useSessionTextDraft,
 } from "@session/stores/useSessionDraftStore";
 import { ImageAttachmentStrip } from "../common/ImageAttachmentStrip";
-import { ArrowUp, Download, Loader2, Square } from "lucide-react";
+import { ArrowUp, Download, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@session/components/ui/button";
 import { toast } from "@session/components/ui/use-toast";
@@ -22,10 +22,16 @@ import { useAcpStore } from "@session/stores/useAcpStore";
 import { AgentModelPanel } from "@session/components/agent/AgentModelPanel";
 import { AgentModelTrigger } from "@session/components/agent/AgentModelTrigger";
 import { captureBotOptions } from "@session/stores/useBotOptionsStore";
+import { ComposerSheet } from "../codex/composer/v2/ComposerSheet";
 import { AcpSessionControls } from "./AcpSessionControls";
 import { useAcpAgents } from "./useAcpAgents";
 
-export function AcpComposer() {
+export function AcpComposer({
+  targetLabel,
+}: {
+  targetLabel?: React.ReactNode;
+}) {
+  const [installInfoOpen, setInstallInfoOpen] = useState(false);
   const {
     agentId,
     connectionId,
@@ -232,7 +238,7 @@ export function AcpComposer() {
 
   return (
     <div
-      className="rounded-xl border bg-background overflow-hidden"
+      className="session-acp-composer session-compact-composer"
       onPasteCapture={(event) => {
         const hasImage =
           Array.from(event.clipboardData.items).some((item) =>
@@ -249,89 +255,127 @@ export function AcpComposer() {
         attachments.onPaste(event);
       }}
     >
-      <ImageAttachmentStrip draft={attachments} />
-      <div className="px-3 pt-2">
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (
-              e.key === "Enter" &&
-              !e.shiftKey &&
-              !e.nativeEvent.isComposing
-            ) {
-              e.preventDefault();
-              send();
-            }
-          }}
-          placeholder="描述你想完成的任务…"
-          rows={2}
-          className="w-full min-h-[44px] resize-none bg-transparent text-base md:text-sm outline-none placeholder:text-muted-foreground"
-        />
-      </div>
-
-      {/* Uninstalled agents run through an npx download — never do that implicitly. */}
-      {agent && !agent.available && !connectionId && (
-        <div className="flex items-center gap-2 px-3 py-2 border-t bg-muted/30 text-xs">
-          <span className="min-w-0 flex-1 text-muted-foreground">
-            {agent.name} is not installed — starting it downloads{" "}
-            <span className="font-mono">{commandLine}</span>
-          </span>
-          <Button
-            size="sm"
-            className="h-6 gap-1"
-            disabled={connecting}
-            onClick={() => connect()}
-          >
-            <Download className="h-3 w-3" />
-            Download &amp; run
-          </Button>
-        </div>
-      )}
-
-      <div className="flex items-center justify-between gap-2 px-1 py-1 bg-muted/20 border-t">
-        <div className="flex items-center gap-1 min-w-0">
-          <AcpSessionControls />
-          {connecting && (
-            <span className="flex items-center gap-1 px-1 text-[10px] text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Starting {agent?.name ?? "agent"}...
-            </span>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <AgentModelPanel trigger={<AgentModelTrigger />} />
-          {running ? (
-            <Button
-              onClick={requestStop}
-              disabled={stopping || !connectionId || !sessionId}
-              aria-label={stopping ? "正在停止" : "停止生成"}
-              variant="destructive"
-              size="icon"
-              className="h-8 w-8 rounded-full"
-              title={stopping ? "正在停止…" : "停止生成"}
-            >
-              <Square className="h-4 w-4" />
-            </Button>
-          ) : (
-            <Button
-              onClick={() => send()}
-              size="icon"
-              className="h-8 w-8 rounded-full"
-              disabled={
-                connecting ||
-                attachments.blocked ||
-                (!text.trim() && attachments.paths.length === 0)
+      <div className="session-composer-surface session-compact-frame">
+        <div className="session-compact-body">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (
+                e.key === "Enter" &&
+                !e.shiftKey &&
+                !e.nativeEvent.isComposing
+              ) {
+                e.preventDefault();
+                send();
               }
-              title="发送消息"
-              aria-label="发送消息"
+            }}
+            placeholder="描述你想完成的任务…"
+            rows={2}
+            className="w-full min-h-[44px] resize-none bg-transparent text-base md:text-sm outline-none placeholder:text-muted-foreground"
+          />
+          <ImageAttachmentStrip key={owner} compact draft={attachments} />
+        </div>
+
+        <div className="session-composer-toolbar">
+          <div className="session-composer-policy">
+            <AcpSessionControls />
+            {agent && !agent.available && !connectionId && (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setInstallInfoOpen(true)}
+                aria-label="Agent 安装说明"
+              >
+                <Download size={16} />
+              </Button>
+            )}
+          </div>
+
+          <div className="session-compact-meta">
+            {targetLabel}
+            <span
+              className="session-compact-status"
+              role={
+                attachments.storageError ||
+                attachments.attachments.some((a) => a.status === "error")
+                  ? "alert"
+                  : "status"
+              }
             >
-              <ArrowUp className="h-4 w-4" />
-            </Button>
-          )}
+              {attachments.storageError
+                ? "附件草稿保存失败，点击附件重试"
+                : attachments.attachments.some((a) => a.status === "error")
+                  ? "图片上传失败，点击缩略图重试"
+                  : attachments.blocked
+                    ? "正在上传图片…"
+                    : connecting
+                      ? "正在启动 Agent…"
+                      : agent && !agent.available && !connectionId
+                        ? "Agent 尚未安装"
+                        : running
+                          ? "运行中"
+                          : ""}
+            </span>
+          </div>
+          <div className="session-composer-actions">
+            <AgentModelPanel trigger={<AgentModelTrigger compact />} />
+            {running ? (
+              <Button
+                onClick={requestStop}
+                disabled={stopping || !connectionId || !sessionId}
+                aria-label={stopping ? "正在停止" : "停止生成"}
+                variant="destructive"
+                size="icon"
+                className="session-composer-stop"
+                title={stopping ? "正在停止…" : "停止生成"}
+              >
+                <Square className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                onClick={() => send()}
+                size="icon"
+                className="session-composer-send"
+                disabled={
+                  connecting ||
+                  attachments.blocked ||
+                  (!text.trim() && attachments.paths.length === 0)
+                }
+                title="发送消息"
+                aria-label="发送消息"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
+      {installInfoOpen && (
+        <ComposerSheet
+          title="Agent 安装说明"
+          onClose={() => setInstallInfoOpen(false)}
+        >
+          {/* Uninstalled agents run through an npx download — never do that implicitly. */}
+          {agent && !agent.available && !connectionId && (
+            <div className="flex items-center gap-2 px-3 py-2 border-t bg-muted/30 text-xs">
+              <span className="min-w-0 flex-1 text-muted-foreground">
+                {agent.name} is not installed — starting it downloads{" "}
+                <span className="font-mono">{commandLine}</span>
+              </span>
+              <Button
+                size="sm"
+                className="h-6 gap-1"
+                disabled={connecting}
+                onClick={() => connect()}
+              >
+                <Download className="h-3 w-3" />
+                Download &amp; run
+              </Button>
+            </div>
+          )}
+        </ComposerSheet>
+      )}
     </div>
   );
 }

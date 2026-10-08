@@ -176,3 +176,7 @@ Bot 草稿和发送/停止反馈按 Bot 存储在非持久化 UI 缓存；捕获
 `SessionWorkbench` 在服务 ready 时同时启动关注状态快照与 `followedSessionHistorySync`，离线/卸载时清理调度。历史成功标记与流式 `events` 分离；启动和连接恢复按关注 ID 补齐，队列并发上限为 2，失败后重试，后台 `threadResume` 禁止选择会话或递增输入聚焦计数。恢复订阅共享成员到达，但只恢复一次设备端选中项，后续同步不导航。状态查询的轮次冲突触发补查而非静默遗失。详见 `docs/session-tabs.md`。
 
 状态派生统一由 `codexRuntimeState` 承担；轮次事件、历史和 HTTP 回执遵守终态与轮次新旧规则。运行实例替换会作废在途历史请求。待处理交互增加内存级 `codex/pending-requests-snapshot`，覆盖原生问题、命令/文件审批、权限和 MCP 交互，允许与补发事件共享游标。详情与兼容边界见 [状态转换](session-state-transitions.md)。
+
+## Codex 执行权交接
+
+只读历史不调用 resume；`ownership::Ownership` 在原生传输入口统一串行化每会话的执行、恢复和安全释放。Node 队列通过内部 holds 接口报告执行需求与不确定投递，浏览器代理禁止调用该内部接口。原生取消订阅后必须核对 loaded/list，后台终端、目标、子 Agent、待交互或未知资源禁止自动卸载。见 [协议与发布边界](session-ownership.md)。

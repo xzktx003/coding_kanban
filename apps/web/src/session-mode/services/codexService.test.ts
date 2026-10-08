@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
   threadStart: vi.fn(),
   gitCreateWorktree: vi.fn(),
-  threadResume: vi.fn(),
+  threadRead: vi.fn(),
   threadRollback: vi.fn(),
   turnInterrupt: vi.fn(),
   turnStart: vi.fn(),
@@ -49,7 +49,7 @@ it("sends the selected collaboration mode on each actual turn, including an exis
     "default",
   );
 });
-it("enables native questions for new and resumed Session threads without rewriting global CLI config", async () => {
+it("enables questions for new threads and reads existing history without applying execution config", async () => {
   useConfigStore.setState({ threadCwdMode: "local" });
   api.threadStart.mockResolvedValueOnce({
     thread: { id: "questions", turns: [] },
@@ -61,16 +61,13 @@ it("enables native questions for new and resumed Session threads without rewriti
       "features.default_mode_request_user_input"
     ],
   ).toBe(true);
-  api.threadResume.mockResolvedValueOnce({
+  api.threadRead.mockResolvedValueOnce({
     thread: { id: "questions-old", turns: [] },
   });
   await codexService.threadResume("questions-old", {
     config: { "features.example": true },
   });
-  expect(api.threadResume.mock.calls.at(-1)?.[0].config).toEqual({
-    "features.default_mode_request_user_input": true,
-    "features.example": true,
-  });
+  expect(api.threadRead.mock.calls.at(-1)?.[0]).toEqual({threadId:"questions-old"});
 });
 it("does not silently run in the shared project if preparing an isolated worktree fails", async () => {
   api.gitCreateWorktree.mockRejectedValue(new Error("worktree failed"));
@@ -80,7 +77,7 @@ it("does not silently run in the shared project if preparing an isolated worktre
 
 it("a late resume caches its history without stealing focus from a newer selection", async () => {
   let resolve!: (value: unknown) => void;
-  api.threadResume.mockImplementation(
+  api.threadRead.mockImplementation(
     () =>
       new Promise((r) => {
         resolve = r;
@@ -102,7 +99,7 @@ it("a late resume caches its history without stealing focus from a newer selecti
 });
 it("concurrent selections coalesce a pending resume", async () => {
   let resolve!: (value: unknown) => void;
-  api.threadResume.mockImplementation(
+  api.threadRead.mockImplementation(
     () =>
       new Promise((r) => {
         resolve = r;
@@ -116,12 +113,12 @@ it("concurrent selections coalesce a pending resume", async () => {
   });
   const first = codexService.setCurrentThread("shared");
   const second = codexService.setCurrentThread("shared");
-  expect(api.threadResume).toHaveBeenCalledTimes(1);
+  expect(api.threadRead).toHaveBeenCalledTimes(1);
   resolve({ thread: { id: "shared", turns: [] } });
   await Promise.all([first, second]);
 });
 it("shows loading and a retryable history error, then clears it after success", async () => {
-  api.threadResume.mockRejectedValueOnce(new Error("history unavailable"));
+  api.threadRead.mockRejectedValueOnce(new Error("history unavailable"));
   useCodexStore.setState({
     currentThreadId: "failed",
     activeThreadIds: [],
@@ -135,7 +132,7 @@ it("shows loading and a retryable history error, then clears it after success", 
   expect(useCodexStore.getState().historyErrorMap.failed).toBe(
     "history unavailable",
   );
-  api.threadResume.mockResolvedValueOnce({
+  api.threadRead.mockResolvedValueOnce({
     thread: { id: "failed", turns: [] },
   });
   await codexService.threadResume("failed");
@@ -205,7 +202,7 @@ it("refuses to rollback a running conversation and coalesces a repeated rollback
 
 it("an old pending resume cannot restore turns removed by rollback", async () => {
   let resolveResume!: (value: unknown) => void;
-  api.threadResume.mockImplementation(
+  api.threadRead.mockImplementation(
     () =>
       new Promise((r) => {
         resolveResume = r;
@@ -243,7 +240,7 @@ it("resume restores the active turn and thread status for stop controls", async 
     events: {},
     threads: [],
   });
-  api.threadResume.mockResolvedValueOnce({
+  api.threadRead.mockResolvedValueOnce({
     thread: {
       id: "restored",
       status: { type: "active", activeFlags: [] },
@@ -356,11 +353,11 @@ it("does not mistake streamed events for fully hydrated history", async () => {
     events: { partial: [] },
     threads: [],
   });
-  api.threadResume.mockResolvedValueOnce({
+  api.threadRead.mockResolvedValueOnce({
     thread: { id: "partial", turns: [] },
   });
   await codexService.setCurrentThread("partial");
-  expect(api.threadResume).toHaveBeenCalledOnce();
+  expect(api.threadRead).toHaveBeenCalledOnce();
   expect(useCodexStore.getState().historyLoadedMap.partial).toBe(true);
 });
 it("background history refresh preserves input focus, selection and fills the hydration marker", async () => {
@@ -371,7 +368,7 @@ it("background history refresh preserves input focus, selection and fills the hy
     events: {},
     threads: [],
   });
-  api.threadResume.mockResolvedValueOnce({
+  api.threadRead.mockResolvedValueOnce({
     thread: { id: "visible", turns: [] },
   });
   await codexService.threadResume("visible", undefined, { background: true });

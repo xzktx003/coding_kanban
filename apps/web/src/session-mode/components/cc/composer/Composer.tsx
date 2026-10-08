@@ -4,14 +4,13 @@ import {
   useImageAttachments,
 } from "../../common/useImageAttachments";
 import { ImageAttachmentStrip } from "../../common/ImageAttachmentStrip";
-import { CircleStop, Send, X } from "lucide-react";
+import { CircleStop, Send } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AgentModelPanel } from "@session/components/agent/AgentModelPanel";
 import { AgentModelTrigger } from "@session/components/agent/AgentModelTrigger";
 import { CCPermissionModeSelect } from "@session/components/cc/composer";
 import { FileMentionPopover } from "@session/components/common";
 import { Button } from "@session/components/ui/button";
-import { fileSrc } from "@session/hooks/runtime";
 import { useCCSessionManager } from "@session/hooks/useCCSessionManager";
 import { ccInterrupt, ccSendMessage } from "@session/services";
 import { useAgentCenterStore, useWorkspaceStore } from "@session/stores";
@@ -37,7 +36,11 @@ interface ComposerProps {
   onAfterSend?: (sessionId: string, text: string) => void;
 }
 
-export function Composer({ overrideSend, onAfterSend, targetLabel }: ComposerProps = {}) {
+export function Composer({
+  overrideSend,
+  onAfterSend,
+  targetLabel,
+}: ComposerProps = {}) {
   const {
     activeSessionId,
     isConnected,
@@ -80,15 +83,6 @@ export function Composer({ overrideSend, onAfterSend, targetLabel }: ComposerPro
     return () =>
       window.removeEventListener(CC_INPUT_FOCUS_EVENT, handleFocusRequest);
   }, []);
-
-  // Auto-resize textarea height to fit content
-  // biome-ignore lint/correctness/useExhaustiveDependencies: input is the trigger — the effect measures the textarea after it re-renders with the new value
-  useEffect(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${ta.scrollHeight}px`;
-  }, [input]);
 
   const handleSendMessage = useCallback(
     async (messageText?: string) => {
@@ -205,69 +199,101 @@ export function Composer({ overrideSend, onAfterSend, targetLabel }: ComposerPro
   return (
     <>
       <div className="shrink-0">
-        <div className="relative group">
-          <ImageAttachmentStrip draft={attachments} />
+        <div className="relative group session-cc-composer session-compact-composer">
           <div
             ref={wrapperRef}
             onPasteCapture={attachments.onPaste}
-            className="session-composer-surface min-h-16 max-h-48 border border-input rounded-md bg-transparent focus-within:ring-[3px] focus-within:ring-ring/50 focus-within:border-ring transition-[color,box-shadow]"
+            className="session-composer-surface session-compact-frame"
           >
-            {targetLabel}
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              onCompositionStart={() => {
-                isComposing.current = true;
-              }}
-              onCompositionEnd={() => {
-                setTimeout(() => {
-                  isComposing.current = false;
-                }, 50);
-              }}
-              placeholder="Ask Claude to do anything..."
-              rows={1}
-              className="w-full resize-none overflow-y-auto bg-transparent px-3 pt-3 pb-11 text-base md:text-sm outline-none placeholder:text-muted-foreground min-h-16 max-h-48"
-            />
-          </div>
+            <div className="session-compact-body">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                onCompositionStart={() => {
+                  isComposing.current = true;
+                }}
+                onCompositionEnd={() => {
+                  setTimeout(() => {
+                    isComposing.current = false;
+                  }, 50);
+                }}
+                placeholder="Ask Claude to do anything..."
+                rows={1}
+                className="w-full resize-none overflow-y-auto bg-transparent px-3 pt-3 pb-11 text-base md:text-sm outline-none placeholder:text-muted-foreground min-h-16 max-h-48"
+              />
+              <ImageAttachmentStrip key={owner} compact draft={attachments} />
+            </div>
+            <div className="session-composer-toolbar">
+              <div className="session-composer-policy">
+                <CCAttachmentButton
+                  onFilesSelected={(paths) => {
+                    if (paths.length) appendDraft(owner, fileLinks(paths, cwd));
+                  }}
+                  onImagesSelected={attachments.addPaths}
+                />
+                <CCPermissionModeSelect />
+              </div>
 
-          <div className="absolute left-1 bottom-1 flex items-center gap-0.5">
-            <CCAttachmentButton
-              onFilesSelected={(paths) => {
-                if (paths.length) appendDraft(owner, fileLinks(paths, cwd));
-              }}
-              onImagesSelected={attachments.addPaths}
-            />
-            <CCPermissionModeSelect />
-          </div>
-
-          <div className="absolute right-1 bottom-1 flex items-center gap-1.5 px-1 bg-background/50 backdrop-blur-sm rounded-md">
-            <AgentModelPanel trigger={<AgentModelTrigger />} />
-            <Button
-              onClick={isLoading ? requestStop : handleSend}
-              aria-label={
-                isLoading ? (stopping ? "正在停止" : "停止生成") : "发送消息"
-              }
-              title={
-                isLoading ? (stopping ? "正在停止…" : "停止生成") : "发送消息"
-              }
-              size="icon"
-              className="h-7 w-7"
-              variant={isLoading ? "destructive" : "default"}
-              disabled={
-                isLoading
-                  ? stopping
-                  : attachments.blocked ||
-                    (!input.trim() && images.length === 0)
-              }
-            >
-              {isLoading ? (
-                <CircleStop className="h-3.5 w-3.5" />
-              ) : (
-                <Send className="h-3.5 w-3.5" />
-              )}
-            </Button>
+              <div className="session-compact-meta">
+                {targetLabel}
+                <span
+                  className="session-compact-status"
+                  role={
+                    attachments.storageError ||
+                    attachments.attachments.some((a) => a.status === "error")
+                      ? "alert"
+                      : "status"
+                  }
+                >
+                  {attachments.storageError
+                    ? "附件草稿保存失败，点击附件重试"
+                    : attachments.attachments.some((a) => a.status === "error")
+                      ? "图片上传失败，点击缩略图重试"
+                      : attachments.blocked
+                        ? "正在上传图片…"
+                        : isLoading
+                          ? "运行中"
+                          : ""}
+                </span>
+              </div>
+              <div className="session-composer-actions">
+                <AgentModelPanel trigger={<AgentModelTrigger compact />} />
+                <Button
+                  onClick={isLoading ? requestStop : handleSend}
+                  aria-label={
+                    isLoading
+                      ? stopping
+                        ? "正在停止"
+                        : "停止生成"
+                      : "发送消息"
+                  }
+                  title={
+                    isLoading
+                      ? stopping
+                        ? "正在停止…"
+                        : "停止生成"
+                      : "发送消息"
+                  }
+                  size="icon"
+                  className="session-composer-send"
+                  variant={isLoading ? "destructive" : "default"}
+                  disabled={
+                    isLoading
+                      ? stopping
+                      : attachments.blocked ||
+                        (!input.trim() && images.length === 0)
+                  }
+                >
+                  {isLoading ? (
+                    <CircleStop className="h-3.5 w-3.5" />
+                  ) : (
+                    <Send className="h-3.5 w-3.5" />
+                  )}
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

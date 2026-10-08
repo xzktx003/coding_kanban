@@ -32,7 +32,7 @@ import {
   threadFork,
   threadGoalClear,
   threadGoalSet,
-  threadResume,
+  threadRead,
   threadRollback,
   turnInterrupt,
   turnStart,
@@ -248,9 +248,8 @@ export const codexService = {
     }
   },
   async setCurrentThread(threadId: string | null) {
-    // Live threads (already in activeThreadIds with cached events) just
-    // switch view + derive activeTurnId. Dormant threads are resumed
-    // automatically so the agent process is ready for the next message.
+    // Cached histories switch immediately. Missing histories load read-only;
+    // only execution operations acquire a native thread instance.
     const set = useCodexStore.setState;
     try {
       if (!threadId) {
@@ -288,13 +287,13 @@ export const codexService = {
           inputFocusTrigger: state.inputFocusTrigger + 1,
         }));
       } else {
-        // Dormant — switch view and resume the agent process immediately.
+        // Uncached — select the view and read history without acquiring execution.
         set((state) => ({
           currentThreadId: threadId,
           currentTurnId: null,
           inputFocusTrigger: state.inputFocusTrigger + 1,
         }));
-        await codexService.threadResume(threadId);
+        await codexService.loadThreadHistory(threadId);
       }
     } catch (error: unknown) {
       console.error("[CodexService] setCurrentThread error:", error);
@@ -361,7 +360,11 @@ export const codexService = {
       throw error;
     }
   },
-  async threadResume(
+  /** @deprecated Use loadThreadHistory. This alias is read-only too. */
+  async threadResume(threadId: string, overrides?: Omit<ThreadResumeParams, "threadId">, options?: {background?:boolean}) {
+    return codexService.loadThreadHistory(threadId, overrides, options);
+  },
+  async loadThreadHistory(
     threadId: string,
     overrides?: Omit<ThreadResumeParams, "threadId">,
     options?: { background?: boolean },
@@ -377,19 +380,19 @@ export const codexService = {
     const pending = (async () => {
       const baseline = useCodexStore.getState();
       const modelRevision = useThreadModelStore.getState().threads[threadId]?.revision ?? 0;
-      const response = await threadResume(
-        {
-          threadId,
-          ...overrides,
-          config: {
-            "features.default_mode_request_user_input": true,
-            ...overrides?.config,
-          },
-        },
-        { suppressToast: options?.background },
-      );
+      const response = await threadRead({ threadId }, { suppressToast: options?.background });
       if (resumeVersions.get(threadId) !== version) return;
-      hydrateThreadModel(threadId, response, {
+      // Recent native versions expose settings on the read-only Thread object.
+      // Missing fields keep the existing per-thread choice; CLI changes hydrate
+      // only if the user has not changed their selection during this request.
+      const settings = response.thread as typeof response.thread & {
+        model?: string; reasoningEffort?: typeof response.reasoningEffort;
+      };
+      hydrateThreadModel(threadId, {
+        model: response.model ?? settings.model,
+        modelProvider: response.modelProvider ?? settings.modelProvider,
+        reasoningEffort: response.reasoningEffort !== undefined ? response.reasoningEffort : settings.reasoningEffort,
+      }, {
         revision: modelRevision,
         notify: !!baseline.historyLoadedMap[threadId],
       });

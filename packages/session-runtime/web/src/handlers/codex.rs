@@ -402,6 +402,10 @@ macro_rules! codex_passthrough {
 }
 
 codex_passthrough! {
+    api_loaded_threads => "thread/loaded/list",
+    api_thread_turns => "thread/turns/list",
+    api_thread_items => "thread/items/list",
+    api_unsubscribe_thread => "thread/unsubscribe",
     api_delete_thread => "thread/delete",
     api_rename_thread => "thread/name/set",
     api_turn_steer => "turn/steer",
@@ -467,4 +471,35 @@ pub(crate) async fn api_switch_account_snapshot(
         .await
         .map_err(to_error_response)?;
     Ok(Json(result))
+}
+
+// These endpoints never implicitly resume a thread.
+pub(crate) async fn api_read_thread(
+    AxumState(state): AxumState<WebServerState>, Json(params): Json<Value>,
+) -> Result<Json<Value>, ErrorResponse> {
+    let id = params["threadId"].as_str().ok_or_else(|| to_error_response("threadId required"))?;
+    let result = codexia_codex::ownership::read_history(require_codex(&state)?.codex.as_ref(), id).await.map_err(to_error_response)?;
+    Ok(Json(result))
+}
+pub(crate) async fn api_session_access(
+    AxumState(state): AxumState<WebServerState>, Json(params): Json<Value>,
+) -> Result<Json<Value>, ErrorResponse> {
+    let id = params["threadId"].as_str().ok_or_else(|| to_error_response("threadId required"))?;
+    let codex = &require_codex(&state)?.codex;
+    let result = if params["release"].as_bool() == Some(true) {
+        codex.ownership.release(codex.as_ref(), id).await.map_err(to_error_response)?
+    } else { codex.ownership.access(id).await };
+    Ok(Json(result))
+}
+pub(crate) async fn api_queue_holds(
+    AxumState(state): AxumState<WebServerState>, Json(params): Json<Value>,
+) -> Result<Json<Value>, ErrorResponse> {
+    let ids: Vec<String> = serde_json::from_value(params["threadIds"].clone()).map_err(to_error_response)?;
+    let busy = params["busy"].as_bool().ok_or_else(|| to_error_response("busy required"))?;
+    let sequence = params["sequence"].as_str().ok_or_else(|| to_error_response("sequence required"))?
+        .parse::<u128>().map_err(to_error_response)?;
+    if !require_codex(&state)?.codex.ownership.queue_update_ordered(sequence, busy, ids) {
+        return Err(to_error_response("Stale queue ownership snapshot"));
+    }
+    Ok(Json(json!({"ok":true})))
 }

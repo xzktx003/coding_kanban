@@ -100,7 +100,10 @@ impl IntoResponse for ErrorResponse {
         // log the reason — without it, a failing handler is invisible in the
         // log file, only visible as a bare "Internal Server Error" in the
         // browser console.
-        log::error!("[api] 500: {}", self.error);
-        (StatusCode::INTERNAL_SERVER_ERROR, Json(self)).into_response()
+        let status = if self.error.starts_with("SESSION_") { StatusCode::CONFLICT }
+            else if self.error.starts_with("DELIVERY_UNKNOWN") { StatusCode::BAD_GATEWAY }
+            else { StatusCode::INTERNAL_SERVER_ERROR };
+        log::error!("[api] {}: {}", status.as_u16(), self.error);
+        (status, Json(self)).into_response()
     }
 }

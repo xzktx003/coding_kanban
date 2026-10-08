@@ -24,7 +24,8 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { FollowedSessionsMenu } from "./FollowedSessionsMenu";
-import { sessionTabDrag, sessionDragKey, sessionDragCard, SESSION_TAB_MIME } from "./sessionTabDrag";
+import { sessionTabDrag, sessionDragKey, sessionDragCard, sessionDropTarget, placeSessionDrag, SESSION_TAB_MIME } from "./sessionTabDrag";
+import { createSessionTabInsertionMarker } from './sessionTabPreview';
 
 function SessionTab({
   card,
@@ -170,6 +171,15 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
   const strip = useRef<HTMLDivElement>(null);
   const dragKey = useRef<string | null>(null);
   const [dropKey, setDropKey] = useState<string | null>(null);
+  const nativeMarker = useRef<ReturnType<typeof createSessionTabInsertionMarker>>(undefined);
+  useEffect(() => {
+    const clear = () => {
+      nativeMarker.current?.destroy();
+      nativeMarker.current = undefined;
+    };
+    window.addEventListener('dragend', clear);
+    return () => { window.removeEventListener('dragend', clear); clear(); };
+  }, []);
   const focusTab = (key: string | null) =>
     requestAnimationFrame(() => {
       const button = Array.from(
@@ -259,12 +269,43 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
         aria-label="关注会话"
         ref={strip}
         onDragOver={(event) => {
-          if (!sessionTabDrag.key) return;
+          if (!sessionTabDrag.key && !Array.from(event.dataTransfer.types ?? []).includes(SESSION_TAB_MIME)) return;
+          event.preventDefault();
+          if (groupId) {
+            const root = event.currentTarget.closest<HTMLElement>('.session-split-workspace');
+            const target = root ? sessionDropTarget(root, event.clientX, event.clientY) : null;
+            if (target?.strip) {
+              nativeMarker.current ??= createSessionTabInsertionMarker(event.currentTarget);
+              nativeMarker.current?.show(target);
+            }
+          }
           const bounds = event.currentTarget.getBoundingClientRect();
           if (event.clientX < bounds.left + 28)
             event.currentTarget.scrollLeft -= 18;
           else if (event.clientX > bounds.right - 28)
             event.currentTarget.scrollLeft += 18;
+        }}
+        onDragLeave={(event) => {
+          if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+            nativeMarker.current?.destroy();
+            nativeMarker.current = undefined;
+          }
+        }}
+        onDrop={(event) => {
+          if (!groupId) return;
+          const key = sessionDragKey(event.dataTransfer);
+          if (!key) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const root = event.currentTarget.closest<HTMLElement>('.session-split-workspace');
+          const target = root ? sessionDropTarget(root, event.clientX, event.clientY) : null;
+          const source = target?.strip ? placeSessionDrag(key, target) : undefined;
+          if (source) void selectTab(source);
+          nativeMarker.current?.destroy();
+          nativeMarker.current = undefined;
+          dragKey.current = null;
+          sessionTabDrag.key = null;
+          setDropKey(null);
         }}
       >
         {visibleCards.map((card, index) => {
@@ -284,11 +325,13 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
                 event.dataTransfer.setData(SESSION_TAB_MIME, key);
               }}
               onDragOver={(event) => {
+                if (groupId) return;
                 if (!sessionTabDrag.key) return;
                 event.preventDefault();
                 setDropKey(key);
               }}
               onDrop={(event) => {
+                if (groupId) return; // The strip handles precise insertion and empty space.
                 event.preventDefault();
                 const draggedKey = sessionDragKey(event.dataTransfer);
                 const source = draggedKey ? sessionDragCard(draggedKey) : undefined;

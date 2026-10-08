@@ -18,7 +18,10 @@ import {
   sessionTabDrag,
   type SessionDropTarget,
 } from "./sessionTabDrag";
-import { createSessionTabPreview } from "./sessionTabPreview";
+import {
+  createSessionTabPreview,
+  createSessionTabInsertionMarker,
+} from "./sessionTabPreview";
 
 type Gesture = {
   key: string;
@@ -27,6 +30,8 @@ type Gesture = {
   startY: number;
   source: HTMLElement;
   dragging: boolean;
+  x: number;
+  y: number;
 };
 
 /** Pointer capture keeps a tab drag alive across text, scrollbars and browser edges. */
@@ -35,6 +40,9 @@ export function useSessionSplitDrag() {
   const gesture = useRef<Gesture | null>(null);
   const floatingTab =
     useRef<ReturnType<typeof createSessionTabPreview>>(undefined);
+  const insertionMarker =
+    useRef<ReturnType<typeof createSessionTabInsertionMarker>>(undefined);
+  const scrollFrame = useRef<number | null>(null);
   const cancelledPointer = useRef<number | null>(null);
   const suppressedClick = useRef<{ x: number; y: number; time: number } | null>(
     null,
@@ -48,6 +56,10 @@ export function useSessionSplitDrag() {
     gesture.current = null;
     floatingTab.current?.destroy();
     floatingTab.current = undefined;
+    insertionMarker.current?.destroy();
+    insertionMarker.current = undefined;
+    if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+    scrollFrame.current = null;
     if (current) delete current.source.dataset.pointerSource;
     if (current?.source.hasPointerCapture?.(current.pointerId))
       current.source.releasePointerCapture(current.pointerId);
@@ -67,6 +79,65 @@ export function useSessionSplitDrag() {
       cancel();
       return;
     }
+    const abort = () => {
+      if (gesture.current?.dragging)
+        cancelledPointer.current = gesture.current.pointerId;
+      cancel();
+    };
+    const showTarget = (current: Gesture) => {
+      if (!root.current) return null;
+      const hit = sessionDropTarget(root.current, current.x, current.y);
+      if (hit?.strip && hit.insertion) {
+        insertionMarker.current ??= createSessionTabInsertionMarker(
+          root.current,
+        );
+        insertionMarker.current?.show(hit);
+      } else {
+        insertionMarker.current?.destroy();
+        insertionMarker.current = undefined;
+      }
+      const next = hit?.strip ? null : hit;
+      setPreview((previous) =>
+        previous?.groupId === next?.groupId && previous?.edge === next?.edge
+          ? previous
+          : next,
+      );
+      return hit;
+    };
+    const scrollDirection = (strip: HTMLElement, x: number) => {
+      if (strip.scrollWidth <= strip.clientWidth) return 0;
+      const bounds = strip.getBoundingClientRect();
+      const left = x - bounds.left;
+      const right = bounds.right - x;
+      if (left < 28 && strip.scrollLeft > 0)
+        return -Math.max(2, Math.round(12 * (1 - left / 28)));
+      if (
+        right < 28 &&
+        strip.scrollLeft < strip.scrollWidth - strip.clientWidth
+      )
+        return Math.max(2, Math.round(12 * (1 - right / 28)));
+      return 0;
+    };
+    const scroll = () => {
+      scrollFrame.current = null;
+      const current = gesture.current;
+      if (!current?.dragging || !root.current) return;
+      if (
+        !isAgentInteractionVisible() ||
+        !current.source.isConnected ||
+        !sessionDragCard(current.key)
+      ) {
+        abort();
+        return;
+      }
+      const target = sessionDropTarget(root.current, current.x, current.y);
+      const strip = target?.strip;
+      const delta = strip ? scrollDirection(strip, current.x) : 0;
+      if (!strip || !delta) return;
+      strip.scrollLeft += delta;
+      showTarget(current);
+      scrollFrame.current = requestAnimationFrame(scroll);
+    };
     const move = (event: PointerEvent) => {
       const current = gesture.current;
       if (!current || event.pointerId !== current.pointerId || !root.current)
@@ -101,27 +172,16 @@ export function useSessionSplitDrag() {
         window.getSelection()?.removeAllRanges();
       }
       event.preventDefault();
+      current.x = event.clientX;
+      current.y = event.clientY;
       floatingTab.current?.move(event.clientX, event.clientY);
-      const hit = sessionDropTarget(root.current, event.clientX, event.clientY);
-      for (const tab of root.current.querySelectorAll<HTMLElement>(
-        "[data-pointer-drop]",
-      ))
-        delete tab.dataset.pointerDrop;
-      if (hit?.tab && hit.beforeKey !== current.key)
-        hit.tab.dataset.pointerDrop = "true";
-      const next = hit?.tab ? null : hit;
-      setPreview((previous) =>
-        previous?.groupId === next?.groupId && previous?.edge === next?.edge
-          ? previous
-          : next,
-      );
-      const strip = document
-        .elementFromPoint(event.clientX, event.clientY)
-        ?.closest<HTMLElement>(".session-tab-strip");
-      if (strip && root.current.contains(strip)) {
-        const bounds = strip.getBoundingClientRect();
-        if (event.clientX < bounds.left + 28) strip.scrollLeft -= 18;
-        else if (event.clientX > bounds.right - 28) strip.scrollLeft += 18;
+      const hit = showTarget(current);
+      if (hit?.strip && scrollDirection(hit.strip, current.x)) {
+        if (scrollFrame.current === null)
+          scrollFrame.current = requestAnimationFrame(scroll);
+      } else if (scrollFrame.current !== null) {
+        cancelAnimationFrame(scrollFrame.current);
+        scrollFrame.current = null;
       }
     };
     const finish = (event: PointerEvent) => {
@@ -154,11 +214,6 @@ export function useSessionSplitDrag() {
         const source = placeSessionDrag(current.key, target);
         if (source) void selectTab(source);
       }
-    };
-    const abort = () => {
-      if (gesture.current?.dragging)
-        cancelledPointer.current = gesture.current.pointerId;
-      cancel();
     };
     const cancelPointer = (event: PointerEvent) => {
       if (gesture.current?.pointerId === event.pointerId) abort();
@@ -226,6 +281,8 @@ export function useSessionSplitDrag() {
         startX: event.clientX,
         startY: event.clientY,
         dragging: false,
+        x: event.clientX,
+        y: event.clientY,
       };
       // Suppress native text/image dragging without capturing ordinary clicks.
       event.preventDefault();

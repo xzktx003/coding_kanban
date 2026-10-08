@@ -56,7 +56,7 @@ for (const width of [375, 1440]) {
     await page.route("**/api/codex/model/list", (r) =>
       r.fulfill({ json: { data: models, nextCursor: null } }),
     );
-    await page.route("**/api/codex/thread/resume", (r) => {
+    await page.route("**/api/codex/thread/read", (r) => {
       const id = r.request().postDataJSON().threadId;
       return r.fulfill({
         json: {
@@ -85,17 +85,15 @@ for (const width of [375, 1440]) {
       const { codexService } = await import(path("services/codexService"));
       const cwd = "/fixture/项目/very-long-project-path-for-ui-regression";
       for (const id of ["ux-1", "ux-0"]) {
-        useAgentCenterStore
-          .getState()
-          .addAgentCard(
-            {
-              kind: "codex",
-              id,
-              cwd,
-              preview: id === "ux-0" ? "隔离会话 A" : "隔离会话 B",
-            },
-            { activate: false },
-          );
+        useAgentCenterStore.getState().addAgentCard(
+          {
+            kind: "codex",
+            id,
+            cwd,
+            preview: id === "ux-0" ? "隔离会话 A" : "隔离会话 B",
+          },
+          { activate: false },
+        );
         await codexService.threadResume(id, undefined, { background: true });
       }
     });

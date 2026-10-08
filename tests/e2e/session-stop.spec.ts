@@ -139,6 +139,10 @@ for (const kind of ["codex", "cc", "acp"]) {
       kind === "codex"
         ? page.locator(".session-mode [contenteditable=true]").first()
         : page.locator(".session-mode textarea:visible").first();
+    if (kind === "acp")
+      await expect(page.locator(".session-target-agent")).toContainText(
+        "test-agent",
+      );
     if (kind !== "codex") await editor.fill("   ");
     // An invalid image blocks Send but must not block Stop.
     if (kind === "cc") {
@@ -157,9 +161,11 @@ for (const kind of ["codex", "cc", "acp"]) {
           }),
         );
       });
+      await page.getByRole("button", { name: /预览 too-large.png/ }).click();
       await expect(
         page.getByText("图片不能超过 10 MB", { exact: true }),
       ).toBeVisible();
+      await page.getByRole("button", { name: "关闭面板", exact: true }).click();
       await expect(stop).toBeEnabled();
     }
     await stop.click();
