@@ -1,3 +1,4 @@
+import { useSessionLeaveGuard } from "@session/hooks/useSessionLeaveGuard";
 import MarkdownIt from 'markdown-it';
 import { useEffect, useRef, useState } from 'react';
 import MdEditor from 'react-markdown-editor-lite';
@@ -24,9 +25,12 @@ export function PersonalizationSettings() {
   const { resolvedTheme } = useThemeContext();
   const mdParser = useRef(new MarkdownIt());
   const [instructions, setInstructions] = useState<string>('');
+  const [savedInstructions, setSavedInstructions] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  useSessionLeaveGuard(instructions !== savedInstructions, isSaving);
 
   useEffect(() => {
     let isActive = true;
@@ -39,6 +43,7 @@ export function PersonalizationSettings() {
         });
         if (isActive) {
           setInstructions(result.content);
+          setSavedInstructions(result.content);
         }
       } catch (err) {
         if (isActive) {
@@ -64,6 +69,7 @@ export function PersonalizationSettings() {
         path: CUSTOM_INSTRUCTIONS_PATH,
         content: instructions,
       });
+      setSavedInstructions(instructions);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setSaveError(message || 'Failed to save custom instructions.');

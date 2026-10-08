@@ -22,7 +22,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@session/components/ui/select";
-import { SidebarTrigger } from "@session/components/ui/sidebar";
 import { useTrafficLightConfig } from "@session/hooks";
 import { useIsMobile } from "@session/hooks/use-mobile";
 import { useLayoutStore } from "@session/stores";
@@ -63,7 +62,6 @@ export function PluginsViewHeader() {
       className={`flex items-center gap-1.5 p-1 ${needsTrafficLightOffset && "pl-20"}`}
       data-tauri-drag-region
     >
-      {!isSidebarOpen && <SidebarTrigger className="h-7 w-7" />}
       {overlay === "add" && (
         <Button
           variant="ghost"

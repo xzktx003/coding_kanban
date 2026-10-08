@@ -1,7 +1,6 @@
-import { ChevronDown, ChevronLeft } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@session/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@session/components/ui/collapsible';
 import { ScrollArea } from '@session/components/ui/scroll-area';
 import {
@@ -14,13 +13,11 @@ import {
 import {
   Sidebar,
   SidebarContent,
-  SidebarHeader,
   SidebarInset,
   SidebarProvider,
 } from '@session/components/ui/sidebar';
-import { isTauri } from '@session/hooks/runtime';
 import { useIsMobile } from '@session/hooks/use-mobile';
-import { useLayoutStore } from '@session/stores';
+import { requestSessionNavigation } from '@session/services/sessionNavigationGuard';
 import { ClaudeSettings } from './ClaudeSettings';
 import {
   ArchivedThreadSettings,
@@ -60,7 +57,6 @@ const topLevelSections = [
 
 export default function SettingsView() {
   const { t } = useTranslation('settings');
-  const { setView } = useLayoutStore();
   const isMobile = useIsMobile();
   const [activeSection, setActiveSection] = useState<SettingsSection>('general');
   const [codexOpen, setCodexOpen] = useState(true);
@@ -85,18 +81,9 @@ export default function SettingsView() {
     return (
       <div className="flex h-full w-full flex-col bg-background">
         <div className="flex items-center gap-2 border-b px-2 py-2" data-tauri-drag-region>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-9 gap-1 px-2"
-            onClick={() => setView('agent')}
-          >
-            <ChevronLeft className="h-4 w-4" />
-            <span className="text-xs">Back</span>
-          </Button>
           <Select
             value={activeSection}
-            onValueChange={(value) => setActiveSection(value as SettingsSection)}
+            onValueChange={(value) => requestSessionNavigation(() => setActiveSection(value as SettingsSection))}
           >
             <SelectTrigger className="h-9 flex-1">
               <SelectValue />
@@ -134,22 +121,6 @@ export default function SettingsView() {
       }
     >
       <Sidebar collapsible="none">
-        <SidebarHeader className="gap-2 p-2">
-          <div
-            className={`flex items-center ${isTauri() && !isMobile ? 'pl-20' : 'pl-2'}`}
-            data-tauri-drag-region
-          >
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1 px-2"
-              onClick={() => setView('agent')}
-            >
-              <ChevronLeft className="h-4 w-4" />
-              <span className="text-xs">{t('backToApp')}</span>
-            </Button>
-          </div>
-        </SidebarHeader>
         <SidebarContent className="min-h-0 min-w-0 max-w-full overflow-x-hidden">
           <ScrollArea className="flex-1 min-h-0 min-w-0 max-w-full overflow-x-hidden">
             <ul className="space-y-1 px-2 text-sm">
@@ -157,7 +128,7 @@ export default function SettingsView() {
                 <li key={section}>
                   <button
                     type="button"
-                    onClick={() => setActiveSection(section)}
+                    onClick={() => requestSessionNavigation(() => setActiveSection(section))}
                     className={`w-full rounded-lg px-3 py-2 text-left transition-colors ${
                       activeSection === section
                         ? 'bg-accent text-accent-foreground'
@@ -186,7 +157,7 @@ export default function SettingsView() {
                       <button
                         key={section}
                         type="button"
-                        onClick={() => setActiveSection(section)}
+                        onClick={() => requestSessionNavigation(() => setActiveSection(section))}
                         className={`w-full rounded-lg px-6 py-2 text-left transition-colors ${
                           activeSection === section
                             ? 'bg-accent text-accent-foreground'

@@ -14,6 +14,10 @@ const api = vi.hoisted(() => ({
   postJsonWithOptions: vi.fn(),
   getJsonWithOptions: vi.fn(),
 }));
+const resume = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock("@session/services/codexService", () => ({
+  codexService: { threadResume: resume },
+}));
 vi.mock("@session/services/apiAdapt/shared", () => api);
 import { CodexDeliveryEchoes } from "./CodexDeliveryEchoes";
 import {
@@ -163,4 +167,95 @@ it("an event before the HTTP response cannot be reinserted by that response", as
     await pending;
   });
   expect(screen.queryByText("hello")).toBeNull();
+});
+it("an accepted message reports execution failure instead of waiting forever for its native echo", () => {
+  beginDeliveryEcho(message);
+  reconcileDeliveryEchoes("a", receipt("sent"));
+  const failed: any = {
+    method: "turn/completed",
+    params: {
+      threadId: "a",
+      turn: {
+        id: "turn",
+        status: "failed",
+        items: [],
+        error: { message: "at capacity" },
+      },
+    },
+  };
+  render(<CodexDeliveryEchoes threadId="a" events={[failed]} />);
+  expect(screen.getByRole("status").textContent).toContain("本轮执行失败");
+  expect(screen.queryByText("已接收，等待消息同步")).toBeNull();
+  expect(screen.getByText("hello")).toBeTruthy();
+  expect(resume).toHaveBeenCalledExactlyOnceWith("a", undefined, {
+    background: true,
+  });
+});
+it("does not treat retrying, other-thread, or older-turn errors as failure of this submission", () => {
+  beginDeliveryEcho(message);
+  reconcileDeliveryEchoes("a", receipt("sent"));
+  const error = (
+    threadId: string,
+    turnId: string,
+    willRetry: boolean,
+  ): any => ({
+    method: "error",
+    params: { threadId, turnId, willRetry, error: { message: "busy" } },
+  });
+  render(
+    <CodexDeliveryEchoes
+      threadId="a"
+      events={[
+        error("a", "old", false),
+        error("b", "turn", false),
+        error("a", "turn", true),
+      ]}
+    />,
+  );
+  expect(screen.getByText("已接收，等待消息同步")).toBeTruthy();
+  expect(resume).not.toHaveBeenCalled();
+});
+it("refreshes once on terminal error and reconciles the persisted userMessage by clientId", async () => {
+  beginDeliveryEcho(message);
+  reconcileDeliveryEchoes("a", receipt("sent"));
+  const error: any = {
+    method: "error",
+    params: {
+      threadId: "a",
+      turnId: "turn",
+      willRetry: false,
+      error: { message: "invalid input" },
+    },
+  };
+  resume.mockRejectedValueOnce(new Error("offline"));
+  const view = render(<CodexDeliveryEchoes threadId="a" events={[error]} />);
+  await act(async () => {});
+  view.rerender(<CodexDeliveryEchoes threadId="a" events={[error, error]} />);
+  expect(resume).toHaveBeenCalledTimes(1);
+  expect(screen.getByText("hello")).toBeTruthy();
+  const completed: any = {
+    method: "turn/completed",
+    params: {
+      threadId: "a",
+      turn: { id: "turn", status: "failed", items: [event().params.item] },
+    },
+  };
+  view.rerender(
+    <CodexDeliveryEchoes threadId="a" events={[error, completed]} />,
+  );
+  expect(screen.queryByText("hello")).toBeNull();
+  expect(resume).toHaveBeenCalledTimes(1);
+});
+it.each([
+  ["completed", "本轮已结束"],
+  ["interrupted", "本轮已停止"],
+])("shows %s receipts without an endless syncing label", (status, label) => {
+  beginDeliveryEcho(message);
+  reconcileDeliveryEchoes("a", receipt("sent"));
+  const completed: any = {
+    method: "turn/completed",
+    params: { threadId: "a", turn: { id: "turn", status, items: [] } },
+  };
+  render(<CodexDeliveryEchoes threadId="a" events={[completed]} />);
+  expect(screen.getByRole("status").textContent).toContain(label);
 });

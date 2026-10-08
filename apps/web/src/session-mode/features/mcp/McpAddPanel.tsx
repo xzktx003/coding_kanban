@@ -1,3 +1,4 @@
+import { useSessionLeaveGuard } from "@session/hooks/useSessionLeaveGuard";
 import { Plus } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -32,6 +33,7 @@ export function McpAddPanel({ onAdded, target }: McpAddPanelProps) {
   const [commandConfig, setCommandConfig] = useState({ command: '', args: '', env: '' });
   const [httpConfig, setHttpConfig] = useState({ url: '', headers: '' });
   const [adding, setAdding] = useState(false);
+  useSessionLeaveGuard(Boolean(serverName || commandConfig.command || commandConfig.args || commandConfig.env || httpConfig.url || httpConfig.headers), adding);
 
   const resetForm = () => {
     setServerName('');

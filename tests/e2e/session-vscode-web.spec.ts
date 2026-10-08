@@ -20,6 +20,8 @@ async function cwd(page: Page, path: string) {
   }, path);
 }
 async function openEditor(page: Page) {
+  const dock = page.getByRole("group", { name: "常驻工作工具" }).getByRole("button", { name: "VS Code", exact: true });
+  if (await dock.isVisible()) { await dock.click(); return; }
   if (!(await page.getByRole("button", { name: "打开 VS Code", exact: true }).isVisible())) {
     await page.getByRole("button", { name: "更多功能", exact: true }).click();
     await page.getByRole("menuitem", { name: "VS Code", exact: true }).click();
@@ -40,6 +42,7 @@ for (const width of [375, 1440])
     page.on("pageerror", (e) => errors.push(e.message));
     await page.setViewportSize({ width, height: 900 });
     await installSessionUxFixture(page, 1);
+    await page.route("**/api/session/api/automation/list", route => route.fulfill({ json: [] }));
     await context.route(
       (url) => url.pathname.startsWith("/vscode/"),
       (route) =>
@@ -87,6 +90,21 @@ for (const width of [375, 1440])
       (el: HTMLIFrameElement) => (el.contentWindow as any).frameIdentity,
     );
     expect(context.pages()).toHaveLength(1);
+    // Secondary pages hide the original tool tree; the iframe must never reload.
+    const nav = page.getByRole("navigation", { name: "会话工作台导航" });
+    for (const name of ["定时任务", "工具与技能", "用量", "设置"]) {
+      const direct = nav.getByRole("button", { name, exact: true });
+      if (await direct.isVisible()) await direct.click();
+      else {
+        await nav.getByRole("button", { name: "更多功能", exact: true }).click();
+        await page.getByRole("menuitem", { name, exact: true }).click();
+      }
+      await expect(frame).toBeHidden();
+      await page.getByRole("button", { name: "返回会话", exact: true }).click();
+      await expect(editor).toHaveValue("未保存内容保持在项目 A");
+      expect(await frame.evaluate((el: HTMLIFrameElement) => (el.contentWindow as any).frameIdentity)).toBe(identity);
+    }
+
     if (width === 1440) {
       await openEditor(page);
       expect(calls).toEqual(["/fixture/project-a"]);
@@ -136,7 +154,7 @@ for (const width of [375, 1440])
       await page.getByRole("button", { name: "返回会话", exact: true }).click();
     } else {
       await page
-        .getByRole("button", { name: "隐藏工具面板", exact: true })
+        .getByRole("button", { name: "收起右侧面板", exact: true })
         .last()
         .click();
     }
@@ -189,5 +207,6 @@ for (const width of [375, 1440])
       await page.screenshot({ path: ".dev-runtime/vscode-panel-900.png" });
     }
     expect(context.pages()).toHaveLength(1);
+
     expect(errors).toEqual([]);
   });

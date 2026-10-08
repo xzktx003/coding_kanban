@@ -56,7 +56,7 @@ test("secondary pages provide responsive controls, project links and recoverable
   await expect(
     page.getByRole("link", { name: "GitHub 项目", exact: true }),
   ).toHaveAttribute("href", "https://github.com/BrotherHappy/coding-kanban");
-  await nav.getByRole("button", { name: "会话", exact: true }).click();
+  await page.getByRole("button", { name: "返回会话", exact: true }).click();
   await expect(
     page.locator(".session-mode [contenteditable=true]").first(),
   ).toBeVisible();

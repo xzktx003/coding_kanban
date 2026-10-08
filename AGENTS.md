@@ -2,8 +2,10 @@
 
 ## 构建、测试与开发命令
 
-- `pnpm install`；首次启用会话模式先运行 `pnpm session:build`（需要 Rust stable 与 C/C++ 编译工具、CMake）。
-- `pnpm dev:restart`：按 `.env` 启动/恢复前后端；前端绑定 `0.0.0.0`。会话运行服务绑定 loopback，随后端热更新复用。
+- `pnpm install --frozen-lockfile`；Node.js 要求 `^20.19.0 || >=22.12.0`。默认会话模式需要 Rust stable、C/C++ 编译工具和 CMake。
+- `pnpm dev:prepare`：编译 shared 与默认 Rust 运行层；`SESSION_MODE_ENABLED=0` 跳过 Rust，显式 `SESSION_RUNTIME_BIN` 只校验已有可执行文件。`pnpm dev` 与 `pnpm dev:restart` 自动执行准备。
+- `pnpm session:status`：检查会话服务和运行二进制；编译不替换已有 Rust 进程或停止 Agent，详细流程见 `docs/startup.md`。
+- `pnpm dev:restart`：先检查两个端口的归属并完成编译，再按 `.env` 启动/恢复前后端；前端绑定 `0.0.0.0`。会话运行服务绑定 loopback，随后端热更新复用。
 - `pnpm check`：共享包、后端和前端类型检查及生产构建；`pnpm session:check`：Rust 运行层检查。
 - `pnpm test`：终端单测、迁移的会话 Vitest 单测及脚本测试；后端测试并发限制为 4，避免共享主机上的 tmux 测试争用。
 - `pnpm session:test`、`pnpm session:clippy`：运行层测试与严格 lint，测试使用独立的应用/CLI 数据目录。
@@ -116,6 +118,7 @@
 
 - 会话模式的合并顶栏由 `SessionTopNavigation` 管理；`WorkbenchShell` 通过回调切换模式并保留两种模式的挂载状态。
 - 关注状态汇总与窗口组选择必须复用现有关注集合，未知状态不得显示成确定的零；导航不得隐式审批、停止或启动 Agent。
+- 四个功能页复用 `SessionSecondaryHeader`；页面跳转通过 `useLayoutStore.setView` 接入历史与离开保护。显式保存表单使用 `useSessionLeaveGuard`，返回行为与验收见 `docs/session-page-navigation.md`。
 
 ### Session VS Code 编辑工作区
 

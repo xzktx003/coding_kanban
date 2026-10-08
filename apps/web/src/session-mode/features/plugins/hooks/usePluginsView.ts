@@ -1,3 +1,4 @@
+import { requestSessionNavigation } from "@session/services/sessionNavigationGuard";
 import { useCallback, useEffect, useState } from 'react';
 import type { PluginDetail } from '@session/bindings/v2';
 import { toast } from '@session/components/ui/use-toast';
@@ -184,15 +185,15 @@ export function usePluginsView() {
 
   return {
     mainTab,
-    setMainTab,
+    setMainTab: (next: MainTab) => requestSessionNavigation(() => setMainTab(next)),
     connectorTarget,
-    setConnectorTarget,
+    setConnectorTarget: (next: 'agent' | 'bots') => requestSessionNavigation(() => setConnectorTarget(next)),
     overlay,
-    setOverlay,
+    setOverlay: (next: Overlay) => requestSessionNavigation(() => setOverlay(next)),
     manageTab,
-    setManageTab,
+    setManageTab: (next: ManageTab) => requestSessionNavigation(() => setManageTab(next)),
     addTab,
-    setAddTab,
+    setAddTab: (next: AddTab) => requestSessionNavigation(() => setAddTab(next)),
     refreshTrigger,
     setRefreshTrigger,
     manageRefreshKey,

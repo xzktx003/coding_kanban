@@ -1,3 +1,4 @@
+import { useSessionLeaveGuard } from "@session/hooks/useSessionLeaveGuard";
 import { useId, useState } from 'react';
 import { Button } from '@session/components/ui/button';
 import { Input } from '@session/components/ui/input';
@@ -14,6 +15,8 @@ export function KekeMcpJsonEditor({ busy, onAdd }: KekeMcpJsonEditorProps) {
   const [name, setName] = useState('');
   const [json, setJson] = useState('{\n  "command": "",\n  "args": [],\n  "env": {}\n}');
   const [error, setError] = useState('');
+  const [savedJson, setSavedJson] = useState(json);
+  useSessionLeaveGuard(Boolean(name) || json !== savedJson, busy);
 
   const add = async () => {
     setError('');
@@ -23,7 +26,7 @@ export function KekeMcpJsonEditor({ busy, onAdd }: KekeMcpJsonEditorProps) {
       if (!config || typeof config !== 'object' || Array.isArray(config)) {
         throw new Error('Enter one server configuration object, not the entire MCP file.');
       }
-      if (await onAdd(name.trim(), config as Record<string, unknown>)) setName('');
+      if (await onAdd(name.trim(), config as Record<string, unknown>)) { setName(''); setSavedJson(json); }
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     }

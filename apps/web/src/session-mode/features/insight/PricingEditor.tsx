@@ -1,3 +1,5 @@
+import { useSessionLeaveGuard } from "@session/hooks/useSessionLeaveGuard";
+import { requestSessionNavigation } from "@session/services/sessionNavigationGuard";
 import { Check, Settings2, X } from "lucide-react";
 import { useState } from "react";
 import {
@@ -28,6 +30,11 @@ export function PricingEditor({
   );
   const [newKey, setNewKey] = useState("");
   const [resetVersion, setResetVersion] = useState(0);
+
+  const [initial] = useState(() => JSON.stringify(local));
+  const [editedInputs, setEditedInputs] = useState(false);
+  useSessionLeaveGuard(editedInputs || JSON.stringify(local) !== initial || Boolean(newKey));
+  const requestClose = () => requestSessionNavigation(onClose);
 
   function setField(key: string, field: keyof ModelPricing, raw: string) {
     const val = parseFloat(raw);
@@ -85,7 +92,7 @@ export function PricingEditor({
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) onClose();
+        if (!open) requestClose();
       }}
     >
       <DialogContent
@@ -103,7 +110,7 @@ export function PricingEditor({
             </DialogDescription>
           </div>
           <button
-            onClick={onClose}
+            onClick={requestClose}
             aria-label="关闭模型计价"
             className="text-slate-500 hover:text-slate-200 transition-colors"
           >
@@ -145,7 +152,7 @@ export function PricingEditor({
                         step="0.001"
                         min="0"
                         defaultValue={p[c]}
-                        onBlur={(e) => setField(key, c, e.target.value)}
+                        onChange={(e) => { setEditedInputs(true); setField(key, c, e.target.value); }}
                         className="w-full min-w-[80px] rounded-md bg-slate-800 px-2 py-1 font-mono text-xs text-slate-200 border border-slate-700 focus:outline-none focus:border-slate-500"
                       />
                     </td>
@@ -195,7 +202,7 @@ export function PricingEditor({
             <Button
               size="sm"
               variant="ghost"
-              onClick={onClose}
+              onClick={requestClose}
               className="h-7 text-xs text-slate-400"
             >
               取消

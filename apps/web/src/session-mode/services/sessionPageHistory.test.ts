@@ -1,0 +1,61 @@
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { startSessionPageHistory } from "./sessionPageHistory";
+import { useLayoutStore } from "../stores/useLayoutStore";
+import { registerSessionLeaveGuard, cancelSessionNavigation, confirmSessionNavigation, useSessionNavigationGuard } from "./sessionNavigationGuard";
+let stop: (() => void) | undefined;
+let unregister: (() => void) | undefined;
+beforeEach(() => {
+  history.replaceState(null, "", "/?mode=session&keep=1#anchor");
+  useLayoutStore.setState({ view: "agent" });
+});
+afterEach(() => { stop?.(); unregister?.(); useSessionNavigationGuard.setState({ pending: null }); });
+it("tracks page navigation, browser back/forward and direct links while preserving mode/query/hash", async () => {
+  stop = startSessionPageHistory();
+  useLayoutStore.getState().setView("settings");
+  useLayoutStore.getState().setView("plugins");
+  expect(location.search).toContain("view=plugins");
+  expect(location.search).toContain("mode=session&keep=1");
+  expect(location.hash).toBe("#anchor");
+  history.back();
+  await vi.waitFor(() => expect(useLayoutStore.getState().view).toBe("settings"));
+  history.forward();
+  await vi.waitFor(() => expect(useLayoutStore.getState().view).toBe("plugins"));
+  stop();
+  useLayoutStore.setState({ view: "agent" });
+  stop = startSessionPageHistory();
+  expect(useLayoutStore.getState().view).toBe("plugins");
+});
+it("invalid page parameters safely select chat", () => {
+  history.replaceState(null, "", "/?mode=session&view=unknown");
+  stop = startSessionPageHistory();
+  expect(useLayoutStore.getState().view).toBe("agent");
+  expect(location.search).toContain("view=agent");
+});
+it("cancelling a dirty browser-back restores URL and preserves forward history; confirming actually leaves", async () => {
+  stop = startSessionPageHistory();
+  useLayoutStore.getState().setView("settings");
+  unregister = registerSessionLeaveGuard(() => ({ dirty: true, saving: false }));
+  history.back();
+  await vi.waitFor(() => expect(useSessionNavigationGuard.getState().pending).toBeTruthy());
+  expect(useLayoutStore.getState().view).toBe("settings");
+  cancelSessionNavigation();
+  await vi.waitFor(() => expect(location.search).toContain("view=settings"));
+  history.back();
+  await vi.waitFor(() => expect(useSessionNavigationGuard.getState().pending).toBeTruthy());
+  confirmSessionNavigation();
+  expect(useLayoutStore.getState().view).toBe("agent");
+  unregister();
+  history.forward();
+  await vi.waitFor(() => expect(useLayoutStore.getState().view).toBe("settings"));
+});
+it("saving blocks navigation and failed save preserves the dirty form until explicit discard", () => {
+  let saving = true;
+  unregister = registerSessionLeaveGuard(() => ({ dirty: true, saving }));
+  useLayoutStore.setState({ view: "settings" });
+  useLayoutStore.getState().setView("agent");
+  confirmSessionNavigation();
+  expect(useLayoutStore.getState().view).toBe("settings");
+  saving = false;
+  confirmSessionNavigation();
+  expect(useLayoutStore.getState().view).toBe("agent");
+});

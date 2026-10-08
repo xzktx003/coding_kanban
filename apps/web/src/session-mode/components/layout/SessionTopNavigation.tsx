@@ -9,6 +9,7 @@ import { SessionThemeToggle } from "../common/SessionThemeToggle";
 import { VsCodeIcon } from "@session/features/vscode/VsCodeIcon";
 import { openVsCodePanel } from "@session/stores/useVsCodePanelStore";
 import { useState } from "react";
+import { useIsMobile } from "@session/hooks/use-mobile";
 import {
   MoreHorizontal,
   Plug,
@@ -57,6 +58,7 @@ export function SessionTopNavigation({
   onModeChange?: (mode: WorkbenchMode) => void;
 }) {
   const layout = useLayoutStore();
+  const mobile = useIsMobile();
   const project = useActiveSessionProject();
   const pinned = useVsCodePanelStore((s) => s.pinnedPath);
   const prepareProject = () => {
@@ -82,11 +84,11 @@ export function SessionTopNavigation({
           mode="session"
           disabled={!onModeChange}
           onChange={(mode) => {
-            if (mode === "session") setView("agent");
             onModeChange?.(mode);
           }}
         />
         <span className="session-navigation-divider" aria-hidden="true" />
+        <button type="button" className="session-top-chat" aria-current={layout.view === "agent" ? "page" : undefined} aria-pressed={layout.view === "agent"} onClick={() => setView("agent")}>聊天</button>
         <button
           type="button"
           className="session-top-schedule"
@@ -227,7 +229,7 @@ export function SessionTopNavigation({
                 VS Code 已固定：{pinned}
               </DropdownMenuLabel>
             )}
-            {(
+            {(mobile || layout.view !== "agent") && (
               [
                 ["files", "文件浏览器", FolderOpen],
                 ["vscode", "VS Code", VsCodeIcon],

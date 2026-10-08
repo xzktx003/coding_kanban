@@ -1,3 +1,4 @@
+import { requestSessionNavigation } from "../services/sessionNavigationGuard";
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { AgentType } from './useAgentSettingsStore';
@@ -76,7 +77,7 @@ interface LayoutStore {
 
 export const useLayoutStore = create<LayoutStore>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       isSidebarOpen: true,
       toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
       setSidebarOpen: (open) => set({ isSidebarOpen: open }),
@@ -86,7 +87,9 @@ export const useLayoutStore = create<LayoutStore>()(
       rightPanelSize: 45,
       setRightPanelSize: (size) => set({ rightPanelSize: size }),
       view: 'agent',
-      setView: (view) => set({ view }),
+      setView: (view) => {
+        if (get().view !== view) requestSessionNavigation(() => set({ view }));
+      },
       isRightPanelFocused: false,
       setIsRightPanelFocused: (focused: boolean) => set({ isRightPanelFocused: focused }),
       toggleRightPanelFocused: () =>

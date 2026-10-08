@@ -46,3 +46,6 @@ third_party/
 /docs/designs/**/*.local.md
 /docs/designs/**/*.draft.md
 /docs/designs/**/tmp/
+
+# Local one-off browser diagnostics; keep regression specs versioned.
+/tests/e2e/*.tmp.spec.ts

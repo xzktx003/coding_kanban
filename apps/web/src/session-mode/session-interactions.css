@@ -1565,3 +1565,56 @@
     min-width: 44px;
   }
 }
+
+/* Independent desktop tools; existing tab cards, subtitles and actions stay untouched. */
+.session-mode .session-tool-layout { --session-dock-height: 44px; }
+.session-mode .session-desktop-tool-dock {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 20;
+  width: 190px;
+  height: var(--session-dock-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 0 4px;
+  background: var(--sidebar);
+  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.session-mode .session-desktop-tool-dock > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  color: var(--muted-foreground);
+}
+.session-mode .session-desktop-tool-dock > button:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.session-mode .session-desktop-tool-dock > button[aria-pressed="true"] {
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+.session-mode .session-desktop-tool-dock > button:disabled { opacity: .35; cursor: not-allowed; }
+.session-mode .session-desktop-tool-dock > button:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.session-mode .session-tool-dock-divider { width: 1px; height: 18px; margin: 0 3px; background: var(--border); }
+.session-mode [data-tool-dock="true"] [data-tool-dock-reserve="true"] {
+  padding-right: var(--session-dock-reserve) !important;
+}
+.session-mode [data-tool-dock="true"] .session-dock-panel {
+  box-sizing: border-box;
+  padding-top: var(--session-dock-height);
+}
+.session-mode [data-tool-dock="true"][data-tool-dock-fallback="true"] .session-dock-main {
+  box-sizing: border-box;
+  padding-top: var(--session-dock-height);
+}
+@media(max-width:767px) { .session-mode .session-desktop-tool-dock { display: none; } }
+.session-mode [data-tool-dock="true"] [data-panel-global-controls] { display: none; }

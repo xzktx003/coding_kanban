@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.13.1",
   "scripts": {
-    "dev": "pnpm --filter shared build && concurrently \"pnpm --filter server run dev:app\" \"pnpm --filter web run dev:app\"",
+    "dev": "pnpm dev:prepare && concurrently \"pnpm --filter server run dev:app\" \"pnpm --filter web run dev:app\"",
     "dev:restart": "./scripts/restart-dev.sh",
     "build": "pnpm --filter shared build && pnpm --filter server build && pnpm --filter web build",
     "check": "pnpm --filter shared build && pnpm --filter server build && pnpm --filter web build",
@@ -14,12 +14,17 @@
     "session:build": "node scripts/build-session-runtime.mjs build",
     "session:check": "node scripts/build-session-runtime.mjs check",
     "session:test": "node scripts/build-session-runtime.mjs test",
-    "session:clippy": "node scripts/build-session-runtime.mjs clippy"
+    "session:clippy": "node scripts/build-session-runtime.mjs clippy",
+    "dev:prepare": "node scripts/prepare-dev.mjs",
+    "session:status": "node scripts/session-runtime-status.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",
     "concurrently": "^9.2.1",
     "dotenv": "^17.4.2",
     "playwright": "1.58.2"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
   }
 }

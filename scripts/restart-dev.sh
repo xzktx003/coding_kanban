@@ -201,6 +201,43 @@ has_repo_listener_on_port() {
   return 1
 }
 
+check_listeners_on_port() {
+  local name="$1" port="$2" pid
+  while IFS= read -r pid; do
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || continue
+    if ! pid_belongs_to_repo "$pid"; then
+      log "Refusing to free ${name} port ${port}: foreign listener ${pid}"
+      return 1
+    fi
+  done < <(lsof -tiTCP:"${port}" -sTCP:LISTEN 2>/dev/null || true)
+}
+
+validate_startup() {
+  local command_name port
+  for command_name in node pnpm curl lsof setsid ps readlink; do
+    if ! command -v "$command_name" >/dev/null 2>&1; then
+      log "Missing required command: ${command_name}. See README startup prerequisites."
+      return 1
+    fi
+  done
+  for port in "$SERVER_PORT" "$WEB_PORT" "$WEB_BACKEND_PORT"; do
+    if [[ ! "$port" =~ ^[0-9]{1,5}$ ]] || (( 10#$port < 1 || 10#$port > 65535 )); then
+      log 'Ports must be integers between 1 and 65535'
+      return 1
+    fi
+  done
+  if (( 10#$SERVER_PORT == 10#$WEB_PORT )); then
+    log 'Backend and frontend must use different ports'
+    return 1
+  fi
+  if [[ "$WEB_HOST" != '0.0.0.0' ]]; then
+    log 'WEB_HOST must be 0.0.0.0 for LAN access'
+    return 1
+  fi
+  check_listeners_on_port backend "$SERVER_PORT" || return 1
+  check_listeners_on_port frontend "$WEB_PORT" || return 1
+}
+
 kill_listeners_on_port() {
   local name="$1"
   local port="$2"
@@ -259,10 +296,10 @@ wait_for_http() {
   local name="$1"
   local url="$2"
   local attempts="${3:-60}"
-  local curl_args=(--noproxy '*' -fsS)
+  local curl_args=(--noproxy '*' --connect-timeout 2 --max-time 3 -fsS)
 
   if [[ "$url" == https://* ]]; then
-    curl_args=(--noproxy '*' -k -fsS)
+    curl_args=(--noproxy '*' --connect-timeout 2 --max-time 3 -k -fsS)
   fi
 
   for ((i = 1; i <= attempts; i += 1)); do
@@ -395,6 +432,14 @@ resolve_mkcert_ca_cert() {
 }
 
 main() {
+  if [[ "${1:-}" == '--help' || "${1:-}" == '-h' ]]; then
+    printf '%s\n' 'Usage: pnpm dev:restart' 'Build shared and the enabled session runtime, then restart only this repository frontend/backend.' 'Existing session runtime and Agents are preserved. Use pnpm session:status to inspect readiness.'
+    return 0
+  fi
+  if (( $# > 0 )); then log "Unknown argument: $1"; return 1; fi
+  validate_startup || return 1
+  # Fail before touching existing listeners if installation or compilation fails.
+  node "${ROOT_DIR}/scripts/prepare-dev.mjs" || return 1
   if [[ -z "$WEB_HTTPS_SAN" ]]; then
     WEB_HTTPS_SAN="$(build_default_https_san)"
   fi
@@ -439,7 +484,7 @@ main() {
     SESSION_STATE_PATH="$SESSION_STATE_PATH" APP_SOURCE_ROOT="$APP_SOURCE_ROOT" \
     CHOKIDAR_USEPOLLING=1 \
     TERMINAL_SCROLLBACK_BYTES="$TERMINAL_SCROLLBACK_BYTES" TERMINAL_TMUX_CAPTURE_LINES="$TERMINAL_TMUX_CAPTURE_LINES" TERMINAL_REGISTRY_OUTPUT_ENTRIES="$TERMINAL_REGISTRY_OUTPUT_ENTRIES" \
-    pnpm --dir "$SERVER_APP_DIR" dev >"$SERVER_LOG" 2>&1 < /dev/null &
+    pnpm --dir "$SERVER_APP_DIR" dev:app >"$SERVER_LOG" 2>&1 < /dev/null &
   echo $! >"$SERVER_PID_FILE"
 
   SERVER_URL="http://${SERVER_PUBLIC_HOST}:${SERVER_PORT}"
@@ -459,12 +504,12 @@ main() {
       CHOKIDAR_USEPOLLING=1 \
       VITE_DEV_HTTPS=1 VITE_DEV_HTTPS_CERT="$WEB_HTTPS_CERT" VITE_DEV_HTTPS_KEY="$WEB_HTTPS_KEY" VITE_DEV_HTTPS_CA_CERT="$WEB_HTTPS_CA_CERT" \
       VITE_TERMINAL_SCROLLBACK_LINES="$VITE_TERMINAL_SCROLLBACK_LINES" \
-      pnpm --dir "$WEB_APP_DIR" exec vite --host "$WEB_HOST" --port "$WEB_PORT" \
+      pnpm --dir "$WEB_APP_DIR" exec vite --host "$WEB_HOST" --port "$WEB_PORT" --strictPort \
       >"$WEB_LOG" 2>&1 < /dev/null &
   else
     setsid env -u VSCODE_IPC_HOOK_CLI PATH="$RUNTIME_PATH" WEB_BACKEND_HOST="$WEB_BACKEND_HOST" WEB_BACKEND_PORT="$WEB_BACKEND_PORT" SERVER_PORT="$SERVER_PORT" PORT="$SERVER_PORT" \
       CHOKIDAR_USEPOLLING=1 \
-      VITE_TERMINAL_SCROLLBACK_LINES="$VITE_TERMINAL_SCROLLBACK_LINES" pnpm --dir "$WEB_APP_DIR" exec vite --host "$WEB_HOST" --port "$WEB_PORT" \
+      VITE_TERMINAL_SCROLLBACK_LINES="$VITE_TERMINAL_SCROLLBACK_LINES" pnpm --dir "$WEB_APP_DIR" exec vite --host "$WEB_HOST" --port "$WEB_PORT" --strictPort \
       >"$WEB_LOG" 2>&1 < /dev/null &
   fi
   echo $! >"$WEB_PID_FILE"
@@ -489,12 +534,18 @@ main() {
   # Re-extract URLs after parallel wait (subshell can't export)
   wait_for_frontend_urls "$WEB_LOG" 5
 
-  FRONTEND_PORT="$(extract_url_port "$FRONTEND_LOCAL_URL")"
-  if [[ -n "$FRONTEND_PORT" && "$FRONTEND_PORT" != "$WEB_PORT" ]]; then
-    log "Requested frontend port ${WEB_PORT} was busy; Vite selected ${FRONTEND_PORT}"
+  # Check the structured runtime separately: gateway health alone is insufficient.
+  local session_result=0
+  node "${ROOT_DIR}/scripts/session-runtime-status.mjs" || session_result=$?
+
+  if [[ "$WEB_HTTPS" != '1' && "${SESSION_MODE_ENABLED:-1}" != '0' ]]; then
+    log 'Session UI requires a secure browser context. For LAN access set WEB_HTTPS=1 and trust the certificate; HTTP is only suitable for localhost debugging.'
   fi
 
-  printf '\nBackend  : %s\n' "$SERVER_URL"
+  local workbench_mode=session
+  if [[ "${SESSION_MODE_ENABLED:-1}" == '0' ]]; then workbench_mode=terminal; fi
+  printf '\nOpen     : %s/?mode=%s\n' "${FRONTEND_NETWORK_URL:-$FRONTEND_LOCAL_URL}" "$workbench_mode"
+  printf 'Backend  : %s\n' "$SERVER_URL"
   printf 'Health   : %s\n' "$SERVER_HEALTH_URL"
   printf 'Frontend : %s\n' "$FRONTEND_LOCAL_URL"
   if [[ -n "$FRONTEND_NETWORK_URL" ]]; then
@@ -504,6 +555,7 @@ main() {
     printf 'HTTPS CA : %s%s\n' "${FRONTEND_NETWORK_URL:-$FRONTEND_LOCAL_URL}" "/__coding-kanban/https-ca.crt"
   fi
   printf 'Logs     : %s | %s\n' "$SERVER_LOG" "$WEB_LOG"
+  return "$session_result"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

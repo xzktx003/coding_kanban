@@ -53,12 +53,13 @@ Codex/Claude 的单会话、网格和列表统一由 Node 网关持久化并跨�
 ## 启动与配置
 
 ```sh
-pnpm install
-pnpm session:build
-pnpm dev:restart
+pnpm install --frozen-lockfile
+# 首次复制 .env.example 为 .env，再按需编辑
+pnpm dev:restart  # 自动编译 shared 与默认 Rust 运行层
+pnpm session:status
 ```
 
-需要 Node/pnpm、Rust stable、C/C++ 编译工具与 CMake。Linux 构建使用 vendored OpenSSL/DBus，Whisper 使用预生成绑定，减少对系统开发头文件的依赖。默认以 debug 二进制启动；生产环境可通过 `SESSION_RUNTIME_BIN` 指定构建产物。
+需要 Node/pnpm、Rust stable、C/C++ 编译工具与 CMake。Linux 构建使用 vendored OpenSSL/DBus，Whisper 使用预生成绑定，减少对系统开发头文件的依赖。默认以 debug 二进制启动；可通过 `SESSION_RUNTIME_BIN` 指定已构建的可执行文件（相对路径从仓库根目录解析），这时启动准备跳过 Rust 构建。准备或编译失败不会停止现有服务；已有 Rust 进程仍然复用，磁盘产物更新不会隐式激活。详见 [启动与更新指南](startup.md)。
 
 `SESSION_MODE_ENABLED`、`SESSION_RUNTIME_BIN`、`SESSION_DATA_HOME`、`SESSION_RUNTIME_PORT`、`SESSION_CARGO_BIN`、`SESSION_CLAUDE_CONNECT_TIMEOUT_MS` 和 `SESSION_FS_WATCH_MAX_DIRS` 均在 `.env.example` 中说明。前端/后端/HTTPS 端口仍由原有 `.env` 配置；运行层仅绑定 loopback，不把参考项目的固定端口暴露给浏览器。定时任务 UI 明确显示服务器时区。
 

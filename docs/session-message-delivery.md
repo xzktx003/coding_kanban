@@ -19,7 +19,19 @@
 
 测试位于 `threadRows.delivery.test.ts`、`CodexDeliveryEchoes.test.tsx`、`codexService.delivery.test.ts`、`mergeThreadHistory.test.ts` 和 `tests/e2e/session-message-delivery.spec.ts`。浏览器使用当前局域网前端与隔离 API，不向真实 Agent 发送消息；当前入口为 `https://10.30.0.24:8484/?mode=session`（HTTPS 8484、监听 0.0.0.0，实际配置仍由 .env 决定）。
 
-## 2026-10-08 验证结果
+## 已送达但执行失败（2026-10-08 补充）
+
+补充：`sent` 只证明消息被运行层接收，不证明模型执行成功。回显按 threadId + turnId 显示失败、停止或结束；自动重试、其他会话和旧轮错误不能改变该提交的终态。完整 `turn/completed` 的终态优先于独立错误事件。
+
+对应轮次已经结束但缺少原生 userMessage.clientId 时，在该显示实例中每轮只后台 `thread/resume` 一次。恢复的正式消息按 clientId 替换占位，不重复发送、引导或释放队列；读取失败保留正文、附件和终态提示。历史恢复不保证重放独立 `error`，所以聊天行必须保留失败的结束事件，即使没有文件改动，并显示 `turn.error`。同轮已展示终止错误时不重复展示；自动重试提示不能遮掉最终失败。
+
+新增回归：`TurnFailureNotice.test.tsx`、`threadRows.failure.test.ts`、`CodexDeliveryEchoes.test.tsx` 和 `session-failed-delivery.spec.ts`。浏览器覆盖实际点击提交、遗漏用户消息事件、后台历史核对、刷新后错误仍可见，以及只提交一次且不产生额外 turn/start 或 turn/steer。
+
+数据恢复边界：历史工具参数超限属于原生上下文错误，修复显示不能替代修复上下文。历史存在超长无意义空白时，应先完整备份、生成仅去除该空白的副本并逐字段验证。不得自动截断有意义的参数、改写历史失败调用、归档关联子会话或重启共享运行服务；需要改变会话身份时先明确告知用户并确认恢复方式。
+
+本次补充验收：先复现失败提示与回显两项失败，再复现列表过滤一项失败；修复后全量会话 Vitest 170 个文件、556 项通过，新增浏览器场景与发送/状态回归共 9 项通过，前端 TypeScript 检查和 Vite 生产打包通过。日志与截图在 `.dev-runtime/failed-resume-*.log` 和 `.dev-runtime/failed-session-recovery/`；测试使用隔离 API，原生会话恢复尚待用户选择是否接受修复副本的新 ID。
+
+## 2026-10-08 发送回显与历史合并验证结果
 
 - 首轮针对性复现：4 项失败、1 项回滚对照通过；实现后转绿。
 - 完整会话 Vitest：137 个文件、372 项通过；最后补充冷恢复增量边界后，相关 9 个文件、34 项回归通过。

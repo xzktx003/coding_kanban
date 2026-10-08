@@ -22,6 +22,7 @@ import { IndividualFileChanges } from "./IndividualFileChanges";
 import { McpToolCallItem } from "./McpToolCallItem";
 import { ThreadFileChangesSummary } from "./ThreadFileChangesSummary";
 import { TurnPlan } from "./TurnPlan";
+import { TurnFailureNotice } from "./TurnFailureNotice";
 import { EditableUserMessageItem } from "./UserMessageItem";
 
 type CollapsedJsonItemProps = {
@@ -109,9 +110,10 @@ export const EventItem = ({ event, context }: EventItemProps) => {
   switch (event.method) {
     case "error":
       return (
-        <p className="text-red-600 dark:text-red-400 font-medium">
-          {event.params.error.message}
-        </p>
+        <TurnFailureNotice
+          message={event.params.error.message}
+          willRetry={event.params.willRetry}
+        />
       );
     case "warning":
       return (
@@ -204,11 +206,26 @@ export const EventItem = ({ event, context }: EventItemProps) => {
           ? aggregateFileChanges(fileChangeItems.flatMap((it) => it.changes))
           : aggregateTurnChangesFromContext(event.params.turn.id, context);
 
-      if (aggregatedChanges.length === 0) return null;
+      const alreadyShown = context?.events
+        ?.slice(0, context.eventIndex)
+        .some(
+          (candidate) =>
+            candidate.method === "error" &&
+            candidate.params.threadId === event.params.threadId &&
+            candidate.params.turnId === event.params.turn.id &&
+            !candidate.params.willRetry,
+        );
+      const failed = event.params.turn.status === "failed" && !alreadyShown;
+      if (aggregatedChanges.length === 0 && !failed) return null;
 
       return (
         <div className="space-y-2">
-          <ThreadFileChangesSummary changes={aggregatedChanges} />
+          {failed && (
+            <TurnFailureNotice message={event.params.turn.error?.message} />
+          )}
+          {aggregatedChanges.length > 0 && (
+            <ThreadFileChangesSummary changes={aggregatedChanges} />
+          )}
         </div>
       );
     }

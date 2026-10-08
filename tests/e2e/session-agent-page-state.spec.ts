@@ -53,12 +53,14 @@ test("ACP text and image drafts survive secondary pages while hidden composer me
   await expect(
     page.getByRole("button", { name: "移除 草稿图片.png" }),
   ).toBeVisible();
-  const changeView = async (view: string) =>
-    page.evaluate(async (view) => {
-      const { useLayoutStore } =
-        await import("/src/session-mode/stores/useLayoutStore.ts");
-      useLayoutStore.getState().setView(view);
-    }, view);
+  const changeView = async (view: string) => {
+    if (view === "agent") {
+      await page.getByRole("button", { name: "返回会话", exact: true }).click();
+      return;
+    }
+    const labels: Record<string, string> = { plugins: "工具与技能", insights: "用量", settings: "设置" };
+    await page.getByRole("navigation", { name: "会话工作台导航" }).getByRole("button", { name: labels[view], exact: true }).click();
+  };
   for (const view of ["plugins", "insights", "settings"]) {
     await changeView(view);
     await expect(input).toBeHidden();
@@ -84,9 +86,9 @@ test("ACP text and image drafts survive secondary pages while hidden composer me
         entry ?? "/src/session-mode/stores/useAcpStore.ts"
       );
       const { useAgentSettingsStore } =
-        await import("/src/session-mode/stores/useAgentSettingsStore.ts");
+        await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === "/src/session-mode/stores/useAgentSettingsStore.ts")?.name ?? "/src/session-mode/stores/useAgentSettingsStore.ts");
       const { useCCStore } =
-        await import("/src/session-mode/stores/cc/index.ts");
+        await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === "/src/session-mode/stores/cc/index.ts")?.name ?? "/src/session-mode/stores/cc/index.ts");
       useAcpStore.setState({ active: false });
       useAgentSettingsStore.setState({ selectedAgent: kind });
       useCCStore.setState({

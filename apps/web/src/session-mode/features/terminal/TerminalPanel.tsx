@@ -33,7 +33,8 @@ export function TerminalPanel({ isActive }: TerminalPanelProps) {
   // reopen a fresh terminal the moment the user closes the last one.
   // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only by design, see above
   useEffect(() => {
-    if (terminals.length === 0) addTerminal();
+    // StrictMode replays this effect with the original render snapshot.
+    if (useLayoutStore.getState().terminals.length === 0) addTerminal();
   }, []);
 
   return (

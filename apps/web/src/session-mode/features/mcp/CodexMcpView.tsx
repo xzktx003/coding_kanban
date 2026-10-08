@@ -1,3 +1,5 @@
+import { useSessionLeaveGuard } from "@session/hooks/useSessionLeaveGuard";
+import { requestSessionNavigation } from "@session/services/sessionNavigationGuard";
 import { Save, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -22,6 +24,10 @@ export function CodexMcpView({ refreshKey }: CodexMcpViewProps) {
     http: { url: string };
   } | null>(null);
 
+  const [savedEdit, setSavedEdit] = useState('');
+  const [saving, setSaving] = useState(false);
+  useSessionLeaveGuard(editConfig !== null && JSON.stringify(editConfig) !== savedEdit, saving);
+
   const loadServers = useCallback(async () => {
     try {
       const config = await unifiedReadMcpConfig('codex');
@@ -40,7 +46,7 @@ export function CodexMcpView({ refreshKey }: CodexMcpViewProps) {
     const protocol = getServerProtocol(config);
     const httpUrl = protocol === 'stdio' ? '' : 'url' in config ? config.url : '';
     setEditingServer(name);
-    setEditConfig({
+    const initial = {
       name,
       protocol,
       command: {
@@ -54,11 +60,14 @@ export function CodexMcpView({ refreshKey }: CodexMcpViewProps) {
       http: {
         url: httpUrl,
       },
-    });
+    };
+    setEditConfig(initial);
+    setSavedEdit(JSON.stringify(initial));
   };
 
   const handleSaveEdit = async () => {
-    if (!editConfig || !editingServer) return;
+    if (!editConfig || !editingServer || saving) return;
+    setSaving(true);
 
     try {
       let config: McpServerConfig;
@@ -105,13 +114,13 @@ export function CodexMcpView({ refreshKey }: CodexMcpViewProps) {
     } catch (error) {
       console.error('Failed to update MCP server:', error);
       toast.error(`Failed to update MCP server: ${error}`);
-    }
+    } finally { setSaving(false); }
   };
 
-  const handleCancelEdit = () => {
+  const handleCancelEdit = () => requestSessionNavigation(() => {
     setEditingServer(null);
     setEditConfig(null);
-  };
+  });
 
   return (
     <div className="container mx-auto">

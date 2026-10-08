@@ -377,7 +377,7 @@ https://<局域网地址>:<WEB_PORT>/?view=mobile
 必需：
 
 - Git。
-- Node.js 20 或更高版本。
+- Node.js `^20.19.0 || >=22.12.0`；建议使用 Node.js 24。
 - pnpm；仓库声明使用 `pnpm@10.13.1`。
 - `curl`、`lsof` 和 OpenSSL；推荐启动脚本使用它们检查服务、端口和生成 HTTPS 证书。
 - Linux 使用推荐启动脚本时需要 `setsid`，通常由 `util-linux` 提供。
@@ -396,15 +396,15 @@ https://<局域网地址>:<WEB_PORT>/?view=mobile
 ```bash
 # Ubuntu / Debian
 sudo apt update
-sudo apt install -y git curl lsof openssl util-linux tmux openssh-client
+sudo apt install -y git curl lsof openssl util-linux tmux openssh-client python3 build-essential cmake
 
 # Fedora / RHEL
-sudo dnf install -y git curl lsof openssl util-linux tmux openssh-clients
+sudo dnf install -y git curl lsof openssl util-linux tmux openssh-clients python3 gcc gcc-c++ make cmake
 
 # macOS
-brew install git node tmux openssl mkcert
+brew install git node tmux openssl mkcert cmake
 
-# 安装 Node.js 20+ 后，启用仓库声明的 pnpm 版本
+# 安装符合上述版本要求的 Node.js 后，启用仓库声明的 pnpm 版本
 corepack enable
 corepack prepare pnpm@10.13.1 --activate
 ```
@@ -417,9 +417,10 @@ corepack prepare pnpm@10.13.1 --activate
 
 基础启动：
 
-- [ ] `git --version`、`node --version` 和 `pnpm --version` 均可执行；Node.js 至少为 20，pnpm 建议为 `10.13.1`。
+- [ ] `git --version`、`node --version` 和 `pnpm --version` 均可执行；Node.js 满足 `^20.19.0 || >=22.12.0`，pnpm 为 `10.13.1`。
 - [ ] `curl`、`lsof`、`openssl` 可执行；Linux 使用 `restart-dev.sh` 时，`setsid` 也可执行。
-- [ ] 已运行 `pnpm install`，且 `node-pty` 没有原生编译错误。
+- [ ] 已运行 `pnpm install --frozen-lockfile`，且 `node-pty` 没有原生编译错误。
+- [ ] 默认启用会话模式，已安装 Rust stable、C/C++ 编译工具与 CMake；首次构建会花费较长时间。
 - [ ] 已执行 `cp .env.example .env`，并只在 `.env` 中填写本机路径、端口和通知接收者。
 - [ ] `.env` 仍被 Git 忽略，没有把 Token、SSH 私钥、App Secret 或个人飞书 ID 加入暂存区。
 - [ ] 后端端口和前端端口未被其他服务占用；默认分别为 `4000` 和 `8484`。
@@ -460,9 +461,9 @@ command -v lark-cli || true     # 可选：飞书完成提醒
 ```bash
 git clone <your-repo-url>
 cd coding_kanban
-pnpm install
+pnpm install --frozen-lockfile
 cp .env.example .env
-pnpm session:build  # 首次启用结构化会话模式
+# 按需编辑 .env；启动命令会自动编译 shared 和会话运行层
 ```
 
 只使用终端模式时，可在 `.env` 中设置 `SESSION_MODE_ENABLED=0`。会话运行层与原 Codexia 数据隔离，沿用原生 CLI 登录；旧应用记录由用户通过会话模式的“导入”入口明确迁移。
@@ -470,16 +471,19 @@ pnpm session:build  # 首次启用结构化会话模式
 ### 推荐启动
 
 ```bash
-./scripts/restart-dev.sh
+pnpm dev:restart
+# 等价于 ./scripts/restart-dev.sh
 ```
 
 脚本会：
 
-1. 在停止旧后端前捕获可迁移会话状态。
-2. 校验并释放目标端口。
-3. 启动 Fastify 后端和 Vite 前端。
-4. 默认启用 HTTPS，并准备开发证书。
-5. 绑定前端到 `0.0.0.0`，输出 Local、Network、健康检查和日志地址。
+1. 校验依赖、配置和两个端口的进程归属；端口被其他仓库占用时直接退出。
+2. 在停止现有前后端之前编译 shared，并增量编译默认 Rust 会话运行层；失败时保留现有服务。
+3. 捕获可迁移会话状态，重启本仓库的 Node 后端和 Vite 前端。
+4. 默认准备 HTTPS 开发证书；前端绑定 `0.0.0.0`，固定使用配置的端口。
+5. 检查前端、Node 网关和会话运行层，优先输出局域网地址、运行层状态及日志路径。
+
+已有 Rust 运行服务和 Agent 会继续复用。**编译成功不表示运行中的 Rust 已更新**：脚本会提示运行文件是否与磁盘产物不同，也可以单独运行 `pnpm session:status` 检查。更新流程及排错见 [启动与更新指南](docs/startup.md)。
 
 局域网访问示例：
 
@@ -492,17 +496,21 @@ https://10.30.0.22:8484
 ### 其他启动方式
 
 ```bash
-pnpm dev
+pnpm dev  # 先编译 shared / 默认 Rust，再在前台启动前后端
 
-# 或分别启动
+# 或先准备，再在两个终端分别启动
+pnpm dev:prepare
 pnpm --filter server run dev:app
 pnpm --filter web run dev:app
 ```
 
-健康检查：
+前台 `pnpm dev` 默认使用 HTTP，适合本机 localhost 调试；局域网会话依赖浏览器安全上下文，请使用 `pnpm dev:restart` 的 HTTPS 主入口并信任证书。前台启动不会清理已占用的端口，启动前请确认没有另一套前后端。
+
+健康检查（后端端口以 `.env` 为准）：
 
 ```bash
 curl http://127.0.0.1:4000/api/health
+pnpm session:status
 ```
 
 ## 配置说明
@@ -688,8 +696,11 @@ memories/repo/            仓库级排障记忆，不参与产品运行
 ## 开发与验证
 
 ```bash
-pnpm dev          # 并发启动前后端
-pnpm dev:restart  # 安全重启开发服务
+pnpm dev          # 自动编译 shared / 默认 Rust，前台启动前后端
+pnpm dev:restart  # 编译成功后安全重启前后端，复用 Rust 运行服务
+pnpm dev:prepare  # 只准备构建，不重启服务
+pnpm session:status # 检查会话健康与本地运行文件版本
+pnpm session:build  # 单独构建 Rust；不激活已有运行进程
 pnpm build        # 构建 shared / server / web
 pnpm check        # 类型检查并构建
 pnpm test         # workspace 单元/集成测试 + scripts 测试

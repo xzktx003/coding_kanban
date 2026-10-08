@@ -125,6 +125,7 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
       const turn = event.params.turn;
       if (
         turn.status !== "interrupted" &&
+        turn.status !== "failed" &&
         !turnsWithChanges.has(turn.id) &&
         !turn.items.some(
           (item) => item.type === "fileChange" && item.changes.length > 0,

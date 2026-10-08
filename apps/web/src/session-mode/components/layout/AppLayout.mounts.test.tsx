@@ -16,6 +16,7 @@ vi.mock("@session/session-dom", () => ({
 vi.mock("@session/hooks/use-mobile", () => ({
   useIsMobile: () => state.mobile,
 }));
+vi.mock("@session/hooks/useActiveSessionProject", () => ({ useActiveSessionProject: () => ({ path: "/test", label: "test" }) }));
 vi.mock("@session/hooks/useEdgeSwipe", () => ({ useEdgeSwipe: () => {} }));
 vi.mock("@session/stores", async () => ({
   useLayoutStore: (await import("@session/stores/useLayoutStore"))
@@ -86,6 +87,7 @@ vi.mock("@session/features/insight/InsightsView", () => ({
   default: () => null,
 }));
 beforeEach(() => {
+  history.replaceState(null, "", "/?mode=session");
   state.mobile = false;
   state.mounts = 0;
   state.agentMounts = 0;
@@ -137,4 +139,23 @@ test("agent local drafts persist in the same hidden inert tree across secondary 
     (screen.getByLabelText("局部Agent草稿") as HTMLInputElement).value,
   ).toBe("ACP局部草稿");
   expect(state.agentUnmounts).toBe(0);
+});
+
+vi.mock("@session/features/automations", () => ({ AutoMationsView: () => <div>任务界面</div> }));
+test("all four secondary pages have one explicit return path while the original draft and tools survive", async () => {
+  render(<AppLayout />);
+  const input = await screen.findByRole("textbox", { name: "局部Agent草稿" });
+  fireEvent.change(input, { target: { value: "未发送草稿" } });
+  const tools = screen.getByLabelText("持久工具树");
+  for (const view of ["automations", "plugins", "insights", "settings"] as const) {
+    act(() => useLayoutStore.getState().setView(view));
+    const back = await screen.findByRole("button", { name: "返回会话" });
+    fireEvent.click(back);
+    expect(useLayoutStore.getState().view).toBe("agent");
+    expect(screen.getByLabelText("局部Agent草稿")).toBe(input);
+    expect((input as HTMLInputElement).value).toBe("未发送草稿");
+    expect(screen.getByLabelText("持久工具树")).toBe(tools);
+  }
+  expect(state.agentUnmounts).toBe(0);
+  expect(state.unmounts).toBe(0);
 });

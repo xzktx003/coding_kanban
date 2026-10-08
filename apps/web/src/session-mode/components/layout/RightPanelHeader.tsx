@@ -94,7 +94,7 @@ export function RightPanelHeader() {
   if (openRightPanelTabs.length === 0) {
     return (
       <div ref={headerRef} className="flex-1 min-h-0 flex flex-col">
-        <div className="flex items-center justify-end gap-0.5 p-1 shrink-0">
+        <div data-panel-global-controls className="flex items-center justify-end gap-0.5 p-1 shrink-0">
           {!isMobile && isRightPanelOpen && (
             <Button
               variant={isRightPanelFocused ? "secondary" : "ghost"}
@@ -248,7 +248,7 @@ export function RightPanelHeader() {
           </DropdownMenu>
         )}
       </div>
-      <div className="flex items-center gap-0.5 shrink-0">
+      <div data-panel-global-controls className="flex items-center gap-0.5 shrink-0">
         {!isMobile && isRightPanelOpen && (
           <Button
             variant={isRightPanelFocused ? "secondary" : "ghost"}

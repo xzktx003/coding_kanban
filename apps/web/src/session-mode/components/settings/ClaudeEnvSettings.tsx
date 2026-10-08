@@ -1,3 +1,4 @@
+import { useSessionLeaveGuard } from "@session/hooks/useSessionLeaveGuard";
 import { Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@session/components/ui/button';
@@ -23,6 +24,10 @@ const GATEWAY_KEYS = [
 export function ClaudeEnvSettings() {
   const [settings, setSettings] = useState<Record<string, unknown> | null>(null);
   const [rows, setRows] = useState<EnvRow[]>([]);
+  const [savedRows, setSavedRows] = useState('[]');
+  const [saving, setSaving] = useState(false);
+  const rowValue = (value: EnvRow[]) => JSON.stringify(value.map(({ key, value }) => ({ key, value })));
+  useSessionLeaveGuard(rowValue(rows) !== savedRows, saving);
   const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
@@ -30,7 +35,9 @@ export function ClaudeEnvSettings() {
       .then((data) => {
         setSettings(data ?? {});
         const env = (data?.env ?? {}) as Record<string, unknown>;
-        setRows(Object.entries(env).map(([key, value]) => newRow(key, String(value ?? ''))));
+        const loaded = Object.entries(env).map(([key, value]) => newRow(key, String(value ?? '')));
+        setRows(loaded);
+        setSavedRows(rowValue(loaded));
       })
       .catch((e) => setStatus(String(e)));
   }, []);
@@ -54,13 +61,15 @@ export function ClaudeEnvSettings() {
       const key = row.key.trim();
       if (key) env[key] = row.value;
     }
+    setSaving(true);
     try {
       await ccUpdateSettings({ ...settings, env });
       setSettings({ ...settings, env });
+      setSavedRows(rowValue(rows));
       setStatus('Saved to ~/.claude/settings.json');
     } catch (e) {
       setStatus(String(e));
-    }
+    } finally { setSaving(false); }
   };
 
   return (
@@ -109,7 +118,7 @@ export function ClaudeEnvSettings() {
             <Button variant="outline" size="sm" onClick={addGatewayKeys}>
               Add gateway keys
             </Button>
-            <Button size="sm" onClick={save} disabled={!settings}>
+            <Button size="sm" onClick={save} disabled={!settings || saving}>
               Save
             </Button>
             {status && <span className="text-xs text-muted-foreground">{status}</span>}

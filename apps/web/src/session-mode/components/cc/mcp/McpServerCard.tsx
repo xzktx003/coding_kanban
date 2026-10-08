@@ -1,3 +1,5 @@
+import { useSessionLeaveGuard } from "@session/hooks/useSessionLeaveGuard";
+import { requestSessionNavigation } from "@session/services/sessionNavigationGuard";
 import { Edit, Power, PowerOff, Save, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
@@ -25,10 +27,14 @@ export function McpServerCard({ server, workingDir, onServerUpdated }: McpServer
   const [editUrl, setEditUrl] = useState(server.url || '');
   const [editEnv, setEditEnv] = useState(server.env ? JSON.stringify(server.env, null, 2) : '');
 
+  const [saving, setSaving] = useState(false);
+  const [baseline, setBaseline] = useState('');
+  useSessionLeaveGuard(isEditing && JSON.stringify([editName, editType, editCommand, editArgs, editUrl, editEnv]) !== baseline, saving);
   const handleEditClick = () => {
     setIsEditing(true);
     setEditName(server.name);
     const type = server.type || 'stdio';
+    setBaseline(JSON.stringify([server.name, type, type === 'stdio' ? server.command || '' : '', type === 'stdio' && server.args ? server.args.join(' ') : '', type === 'stdio' ? '' : server.url || '', type === 'stdio' && server.env ? JSON.stringify(server.env, null, 2) : '']));
     setEditType(type as ServerType);
 
     if (type === 'stdio') {
@@ -50,6 +56,8 @@ export function McpServerCard({ server, workingDir, onServerUpdated }: McpServer
       return;
     }
 
+    if (saving) return;
+    setSaving(true);
     const request: any = {
       name: editName,
       type: editType,
@@ -90,12 +98,12 @@ export function McpServerCard({ server, workingDir, onServerUpdated }: McpServer
       toast.success(`Server "${editName}" updated successfully`);
     } catch {
       toast.error('Failed to update server or invalid environment JSON format');
-    }
+    } finally { setSaving(false); }
   };
 
-  const handleCancelEdit = () => {
+  const handleCancelEdit = () => requestSessionNavigation(() => {
     setIsEditing(false);
-  };
+  });
 
   const handleDeleteServer = async () => {
     try {

@@ -1,3 +1,5 @@
+import { useSessionLeaveGuard } from "@session/hooks/useSessionLeaveGuard";
+import { requestSessionNavigation } from "@session/services/sessionNavigationGuard";
 import { Check, ChevronDown, Trash2 } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { CodexModelSelector } from '@session/components/codex/composer/index';
@@ -91,6 +93,9 @@ export function ManageDialog({
   const target =
     mode === null ? 'closed' : mode.type === 'edit' ? `edit:${mode.task.id}` : 'create';
   const prevTargetRef = useRef('closed');
+  const baseline = useRef('');
+  useSessionLeaveGuard(open && JSON.stringify(form) !== baseline.current, open && isMutating);
+  const requestClose = () => requestSessionNavigation(onClose);
 
   if (target !== prevTargetRef.current) {
     prevTargetRef.current = target;
@@ -106,12 +111,15 @@ export function ManageDialog({
       if (isCreate) {
         const initial = { ...DEFAULT_FORM, ...(mode.initialForm ?? {}) };
         const modelProvider = initial.modelProvider ?? 'openai';
-        setForm({
+        const next = {
           ...initial,
           modelProvider,
           model: initial.model || getDefaultModel(initial.agent, modelProvider),
-        });
+        };
+        baseline.current = JSON.stringify(next);
+        setForm(next);
       } else if (existingTask) {
+        baseline.current = JSON.stringify(formFromTask(existingTask));
         setForm(formFromTask(existingTask));
       }
     }
@@ -185,6 +193,7 @@ export function ManageDialog({
         model: form.model,
         cwd_mode: form.cwdMode,
       });
+      baseline.current = JSON.stringify(form);
       onUpdated(updated);
       toast({ title: 'Automation updated' });
     } catch (error) {
@@ -214,6 +223,7 @@ export function ManageDialog({
         cwd_mode: form.cwdMode,
       });
       const resumed = updated.paused ? await setAutomationPaused(updated.id, false) : updated;
+      baseline.current = JSON.stringify(form);
       onUpdated(resumed);
       toast({ title: 'Automation updated and resumed' });
     } catch (error) {
@@ -265,7 +275,7 @@ export function ManageDialog({
     .join(', ');
 
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && onClose()}>
+    <Dialog open={open} onOpenChange={(nextOpen) => !nextOpen && requestClose()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -466,7 +476,7 @@ export function ManageDialog({
         {/* Footer varies by mode + sub-state */}
         {isCreate ? (
           <DialogFooter>
-            <Button variant="ghost" disabled={isMutating} onClick={onClose}>
+            <Button variant="ghost" disabled={isMutating} onClick={requestClose}>
               Cancel
             </Button>
             <Button onClick={() => void handleCreate()} disabled={!canSubmit || isMutating}>

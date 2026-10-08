@@ -480,3 +480,23 @@
  .session-mode .session-global-new { display: none; }
  .session-mode .session-menu-new { display: block; }
 }
+
+/* Shared secondary-page navigation stays outside content scrolling/loading. */
+.session-mode .session-secondary-shell { position:absolute; inset:0; display:flex; flex-direction:column; min-width:0; background:var(--background); }
+.session-mode .session-secondary-header { flex:none; display:flex; align-items:center; gap:18px; min-height:64px; padding:9px 20px; border-bottom:1px solid var(--border); background:var(--background); }
+.session-mode .session-return-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:44px; flex:none; padding:8px 14px; border:1px solid var(--border); border-radius:6px; background:var(--accent); color:var(--accent-foreground); font-size:13px; font-weight:600; cursor:pointer; }
+.session-mode .session-return-button:hover { filter:brightness(1.12); }
+.session-mode .session-secondary-header h1 { margin:0; min-width:0; font-size:16px; font-weight:600; }
+.session-mode .session-secondary-header select { display:none; min-width:0; min-height:44px; max-width:180px; border:1px solid var(--border); background:var(--background); color:var(--foreground); border-radius:6px; padding:8px; font-size:13px; }
+.session-mode .session-return-context { margin-left:auto; min-width:0; max-width:40%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; color:var(--muted-foreground); }
+.session-mode .session-secondary-content { flex:1; min-height:0; min-width:0; overflow:hidden; }
+.session-mode .session-page-error { padding:24px; display:flex; flex-direction:column; align-items:flex-start; gap:16px; }
+.session-mode .session-page-error button { min-height:44px; border:1px solid var(--border); border-radius:6px; padding:8px 14px; }
+.session-mode .session-secondary-header :is(button,select,h1):focus-visible { outline:2px solid var(--ring); outline-offset:3px; }
+@media (max-width:767px) {
+  .session-mode .session-top-nav .session-top-chat { display:none; }
+  .session-mode .session-secondary-header { min-height:62px; gap:12px; padding:8px 12px; }
+  .session-mode .session-secondary-header h1 { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+  .session-mode .session-secondary-header select { display:block; flex:1; }
+  .session-mode .session-return-context { display:none; }
+}

@@ -1,3 +1,4 @@
+import { loadStartupEnv } from "./startup-env.mjs";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
@@ -5,6 +6,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+loadStartupEnv(root);
 const cargo =
   process.env.SESSION_CARGO_BIN ||
   (existsSync(resolve(homedir(), ".cargo/bin/cargo"))
@@ -41,7 +43,9 @@ const child = spawn(cargo, args, {
   },
 });
 child.on("error", (error) => {
-  console.error(error.message);
+  console.error(
+    `无法运行 Cargo：${error.message}。请安装 Rust stable、C/C++ 编译工具和 CMake，或配置 SESSION_CARGO_BIN。`,
+  );
   process.exitCode = 1;
 });
 child.on("exit", (code) => {

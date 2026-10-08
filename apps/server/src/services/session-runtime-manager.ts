@@ -60,6 +60,7 @@ export class SessionRuntimeManager {
   private async startOwned(): Promise<string | undefined> {
     if (this.env.SESSION_MODE_ENABLED === "0") return undefined;
     const binary = resolve(
+      this.sourceRoot,
       this.env.SESSION_RUNTIME_BIN ||
         resolve(
           this.sourceRoot,

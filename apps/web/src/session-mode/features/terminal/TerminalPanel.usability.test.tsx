@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { TerminalPanel } from "./TerminalPanel";
@@ -54,4 +55,10 @@ test("after explicitly closing the last terminal, show an empty state without cr
   expect(screen.getByText("暂无终端")).toBeTruthy();
   expect(useLayoutStore.getState().terminals).toEqual([]);
   expect(screen.getByRole("button", { name: "新建终端" })).toBeTruthy();
+});
+
+test("first open creates only one terminal under StrictMode effect replay", () => {
+  useLayoutStore.setState({terminals: [], activeTerminalId: null});
+  render(<StrictMode><TerminalPanel isActive /></StrictMode>);
+  expect(useLayoutStore.getState().terminals).toHaveLength(1);
 });

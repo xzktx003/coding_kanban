@@ -1,3 +1,4 @@
+import { useSessionLeaveGuard } from "@session/hooks/useSessionLeaveGuard";
 import { useEffect, useState } from 'react';
 import { CodeEditor } from '@session/features/files';
 import { getCodexHome, readTextFile, writeFile } from '@session/services/apiAdapt';
@@ -8,9 +9,13 @@ const CONFIG_FILE_NAME = 'config.toml';
 export function ConfigSettings() {
   const [configPath, setConfigPath] = useState('');
   const [content, setContent] = useState('');
+  const [savedContent, setSavedContent] = useState('');
+  const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+
+  useSessionLeaveGuard(!loading && content !== savedContent, saving);
 
   useEffect(() => {
     let active = true;
@@ -32,6 +37,7 @@ export function ConfigSettings() {
         }
 
         setContent(fileContent);
+        setSavedContent(fileContent);
       } catch (err) {
         if (!active) {
           return;
@@ -67,15 +73,16 @@ export function ConfigSettings() {
     setError(null);
     setStatusMessage(null);
 
+    setSaving(true);
     try {
       await writeFile(configPath, newContent);
-      setContent(newContent);
+      setSavedContent(newContent);
       setStatusMessage('Configuration saved.');
     } catch (err) {
       const errorMessage = getErrorMessage(err);
       setError(errorMessage);
       throw err;
-    }
+    } finally { setSaving(false); }
   };
 
   return (

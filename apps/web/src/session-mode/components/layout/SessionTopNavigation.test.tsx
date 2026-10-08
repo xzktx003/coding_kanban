@@ -3,8 +3,11 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { SessionTopNavigation } from "./SessionTopNavigation";
 import { useAgentCenterStore } from "../../stores/useAgentCenterStore";
 import { useLayoutStore } from "../../stores/useLayoutStore";
+const viewport = vi.hoisted(() => ({ mobile: false }));
+vi.mock("@session/hooks/use-mobile", () => ({ useIsMobile: () => viewport.mobile }));
 vi.mock("../../DataImportDialog", () => ({ DataImportDialog: () => null }));
 beforeEach(() => {
+  viewport.mobile = false;
   useLayoutStore.setState({ view: "agent" });
   useAgentCenterStore.setState({ cards: [], sharedTabsInitialized: true });
 });
@@ -17,7 +20,7 @@ it("combines brand, primary page navigation and followed status in one row", () 
   expect(screen.getByRole("button", { name: "关注 0" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "定时任务" }));
   expect(useLayoutStore.getState().view).toBe("automations");
-  fireEvent.click(screen.getByRole("button", { name: "会话" }));
+  fireEvent.click(screen.getByRole("button", { name: "聊天" }));
   expect(useLayoutStore.getState().view).toBe("agent");
 });
 it("announces reconnection instead of claiming no pending requests", () => {
@@ -46,7 +49,8 @@ it("toggles the persisted session theme in one click without changing navigation
   expect(useLayoutStore.getState().view).toBe("agent");
 });
 
-it("changes layout globally and shows the selected session tool target", async () => {
+it("mobile menu shows the selected session tool target", async () => {
+  viewport.mobile = true;
   const { useAcpStore } = await import("../../stores/useAcpStore");
   const { useWorkspaceStore } = await import("../../stores/useWorkspaceStore");
   useAcpStore.setState({ active: false });
@@ -68,7 +72,8 @@ it("changes layout globally and shows the selected session tool target", async (
   expect(useWorkspaceStore.getState().cwd).toBe("/work/own-project");
   expect(useLayoutStore.getState().activeRightPanelTab).toBe("terminal");
 });
-it("disables project tools for an unknown session instead of reusing the last cwd", async () => {
+it("mobile disables tools for an unknown session instead of reusing the last cwd", async () => {
+  viewport.mobile = true;
   const { useWorkspaceStore } = await import("../../stores/useWorkspaceStore");
   useWorkspaceStore.setState({ cwd: "/unrelated/stale" });
   useAgentCenterStore.setState({
@@ -95,6 +100,7 @@ it("disables project tools for an unknown session instead of reusing the last cw
 });
 
 it("keeps an explicitly pinned editor available for a session with unknown project", async () => {
+  viewport.mobile = true;
   const { useVsCodePanelStore } =
     await import("../../stores/useVsCodePanelStore");
   useVsCodePanelStore.setState({ pinnedPath: "/pinned/project" });
@@ -118,4 +124,20 @@ it("keeps an explicitly pinned editor available for a session with unknown proje
   expect(useVsCodePanelStore.getState().pinnedPath).toBe("/pinned/project");
   expect(useLayoutStore.getState().activeRightPanelTab).toBe("vscode");
   useVsCodePanelStore.setState({ pinnedPath: null });
+});
+
+it("mode selection preserves the current secondary page instead of acting as a hidden back button", () => {
+  useLayoutStore.setState({ view: "plugins" });
+  const onModeChange = vi.fn();
+  render(<SessionTopNavigation status="ready" onModeChange={onModeChange} />);
+  fireEvent.click(screen.getByRole("button", { name: "会话" }));
+  expect(useLayoutStore.getState().view).toBe("plugins");
+  fireEvent.click(screen.getByRole("button", { name: "聊天" }));
+  expect(useLayoutStore.getState().view).toBe("agent");
+});
+
+it("desktop agent view uses the persistent dock instead of duplicate hidden tool entries", () => {
+ render(<SessionTopNavigation status="ready" />);
+ fireEvent.keyDown(screen.getByRole("button", {name:"更多功能"}), {key:"Enter"});
+ for (const name of ["文件浏览器","VS Code","终端"]) expect(screen.queryByRole("menuitem", {name})).toBeNull();
 });
