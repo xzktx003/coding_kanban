@@ -85,6 +85,26 @@ function renderTopBar(overrides: Partial<Parameters<typeof TopBar>[0]> = {}) {
 }
 
 describe("TopBar", () => {
+  it("keeps workbench navigation inside the toolbar when expanded or collapsed", () => {
+    for (const collapsed of [false, true]) {
+      const markup = renderTopBar({
+        showBrand: false,
+        collapsed,
+        navigation: createElement(
+          "div",
+          { className: "workbench-header" },
+          "模式切换",
+        ),
+      });
+      assert.match(
+        markup,
+        /<header[^>]*>.*<div class="workbench-header">模式切换<\/div>/,
+      );
+      assert.equal((markup.match(/<header/g) ?? []).length, 1);
+      assert.match(markup, collapsed ? /top-bar-expand/ : /new-session-toggle/);
+    }
+  });
+
   it("groups tools, resource tuning, and Feishu notifications under settings", () => {
     assert.deepEqual(
       TOP_BAR_SETTINGS_SECTIONS.map(({ id, label }) => ({ id, label })),

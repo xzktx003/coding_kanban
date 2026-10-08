@@ -55,3 +55,7 @@ pnpm exec playwright test tests/e2e/session-ui-polish.spec.ts \
 ## 2026-10-08 导航 A 与主题切换
 
 最新侧栏、项目菜单与标签栏规则以 [导航 A 与深浅色](session-navigation-a.md) 为准：单窗口组合并项目/标签栏，标题、Agent 和时间压成一行，项目有明确分隔；右上角太阳/月亮切换并持久保存深浅色。此前“两行会话条目”和静态“项目 / 会话”上下文的描述由本规则替代。
+
+## 2026-10-08 终端单行顶栏
+
+终端模式的品牌、模式切换、状态统计和操作共用 `TopBar`，由 `WorkbenchShell` 通过 `App.navigation` 传入导航。桌面顶栏保持单行，900px 及以下沿用工具栏的响应式换行；收起操作栏时仍显示品牌与模式切换。外壳不再扣减独立导航的 48px 高度。浏览器验收：`tests/e2e/terminal-header.spec.ts`，覆盖 1902、1440、1024 和 375px。本地前端绑定 `0.0.0.0`，通过 `.env` 的 `WEB_HTTPS` 与 `WEB_PORT` 配置访问协议和端口。

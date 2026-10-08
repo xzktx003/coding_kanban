@@ -58,7 +58,21 @@ test("isNoTmuxServerError classifies missing server errors", () => {
     true,
   );
   assert.equal(
+    isNoTmuxServerError(
+      new Error(
+        "error connecting to /tmp/tmux-101282/default (No such file or directory)",
+      ),
+    ),
+    true,
+  );
+  assert.equal(
     isNoTmuxServerError(new Error("command not found: tmux")),
+    false,
+  );
+  assert.equal(
+    isNoTmuxServerError(
+      new Error("error connecting to /tmp/tmux-101282/default (Permission denied)"),
+    ),
     false,
   );
 });
