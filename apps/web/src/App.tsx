@@ -314,9 +314,10 @@ function isEditableTarget(target: EventTarget | null): boolean {
 }
 
 export default function App({
+  active = true,
   embedded = false,
   navigation,
-}: { embedded?: boolean; navigation?: ReactNode } = {}) {
+}: { active?: boolean; embedded?: boolean; navigation?: ReactNode } = {}) {
   const initialFocusViewState = useMemo(() => loadFocusViewState(), []);
   const initialSidePanelSessionStates = useMemo(
     () => loadSidePanelSessionStates(),
@@ -2017,6 +2018,7 @@ export default function App({
             </div>
           ) : viewMode === "focus" && focusedSession ? (
             <AgentFocusView
+              workbenchActive={active}
               focusedSession={focusedSession}
               sessions={sessions}
               syncActiveTerminalWithFocus={sidePanelOpen}

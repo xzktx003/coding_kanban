@@ -93,6 +93,7 @@ import { sendCodexImageMessage } from "../lib/api";
 import { pageRenameKeyAction } from "../lib/page-rename-gesture";
 
 interface AgentFocusViewProps {
+  workbenchActive?: boolean;
   focusedSession: AgentSessionRecord;
   sessions: AgentSessionRecord[];
   syncActiveTerminalWithFocus?: boolean;
@@ -274,6 +275,7 @@ function readTerminalMonitorDragPayload(
 }
 
 export function AgentFocusView({
+  workbenchActive = true,
   focusedSession,
   sessions,
   syncActiveTerminalWithFocus = false,
@@ -2408,7 +2410,7 @@ export function AgentFocusView({
                       onFontSizeChange={onTerminalFontSizeChange}
                       session={session}
                       sessions={sessions}
-                      suspended={!isVisibleManualPane}
+                      suspended={!workbenchActive || !isVisibleManualPane}
                     />
                   ) : (
                     <div className="focus-terminal-pane-terminal">

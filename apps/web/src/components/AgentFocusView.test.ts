@@ -99,7 +99,7 @@ describe("AgentFocusView", () => {
     assert.match(source, /resolveRetainedTerminalMonitorSlots/);
     assert.match(source, /retainedTerminalSlotsRef/);
     assert.match(source, /hidden={!isVisibleManualPane}/);
-    assert.match(source, /suspended={!isVisibleManualPane}/);
+    assert.match(source, /suspended={!workbenchActive \|\| !isVisibleManualPane}/);
     assert.match(source, /previousSlots:\s*retainedTerminalSlotsRef\.current/);
     assert.match(paneSource, /suspended={terminalSuspended}/);
     assert.match(
@@ -897,7 +897,7 @@ describe("AgentFocusView", () => {
     assert.match(source, /handlePageTabClick\(page\.id\)/);
     assert.match(source, /pageRenameKeyAction\(event\.key\)/);
     assert.doesNotMatch(source, /onDoubleClick/);
-    assert.match(source, /suspended=\{!isVisibleManualPane\}/);
+    assert.match(source, /suspended=\{!workbenchActive \|\| !isVisibleManualPane\}/);
     assert.doesNotMatch(source, /pages\.map\([\s\S]{0,240}TerminalPaneContent/);
   });
 });

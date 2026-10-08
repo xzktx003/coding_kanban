@@ -8,7 +8,6 @@ import {
   type ReactNode,
 } from "react";
 import { WorkbenchModeSwitch } from "./WorkbenchModeSwitch";
-import TerminalApp from "../App";
 import {
   readWorkbenchMode,
   WORKBENCH_MODE_KEY,
@@ -17,6 +16,7 @@ import {
 } from "../lib/workbench-mode";
 import "../workbench.css";
 
+const TerminalApp = lazy(() => import("../App"));
 const SessionApp = lazy(() => import("../session-mode/SessionWorkbench"));
 
 class SessionBoundary extends Component<
@@ -45,6 +45,7 @@ class SessionBoundary extends Component<
 
 export function WorkbenchShell() {
   const [mode, setMode] = useState<WorkbenchMode>(readWorkbenchMode);
+  const [terminalVisited, setTerminalVisited] = useState(mode === "terminal");
   const [sessionVisited, setSessionVisited] = useState(mode === "session");
   const restoreModeFocus = useRef(false);
   useEffect(() => {
@@ -78,6 +79,7 @@ export function WorkbenchShell() {
         new CustomEvent("workbench-mode-changed", { detail: next }),
       );
       if (next === "session") setSessionVisited(true);
+      if (next === "terminal") setTerminalVisited(true);
     };
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
@@ -91,6 +93,7 @@ export function WorkbenchShell() {
       new CustomEvent("workbench-mode-changed", { detail: next }),
     );
     if (next === "session") setSessionVisited(true);
+    if (next === "terminal") setTerminalVisited(true);
     try {
       localStorage.setItem(WORKBENCH_MODE_KEY, next);
     } catch {
@@ -108,18 +111,29 @@ export function WorkbenchShell() {
   return (
     <div className="workbench-shell" data-mode={mode}>
       <div className="workbench-terminal" hidden={mode !== "terminal"}>
-        <TerminalApp
-          embedded
-          navigation={
-            <div className="workbench-header">
-              <div className="workbench-brand">
-                <img src="/houmo-logo.png" alt="Houmo" />
-                <span>Coding Kanban</span>
+        {terminalVisited && (
+          <Suspense
+            fallback={
+              <div className="workbench-state" role="status">
+                正在加载终端工作台…
               </div>
-              <WorkbenchModeSwitch mode="terminal" onChange={select} />
-            </div>
-          }
-        />
+            }
+          >
+            <TerminalApp
+              active={mode === "terminal"}
+              embedded
+              navigation={
+                <div className="workbench-header">
+                  <div className="workbench-brand">
+                    <img src="/houmo-logo.png" alt="Houmo" />
+                    <span>Coding Kanban</span>
+                  </div>
+                  <WorkbenchModeSwitch mode="terminal" onChange={select} />
+                </div>
+              }
+            />
+          </Suspense>
+        )}
       </div>
       {sessionVisited && (
         <div className="session-mode dark" hidden={mode !== "session"}>
