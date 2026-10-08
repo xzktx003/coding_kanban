@@ -539,7 +539,7 @@ pnpm session:status
 | `TERMINAL_REGISTRY_OUTPUT_ENTRIES` | `5000`                             | 无 live PTY 时的 registry 回放条目     |
 | `VITE_TERMINAL_SCROLLBACK_LINES`   | `20000`                            | 浏览器 xterm scrollback 行数           |
 | `SESSION_STATE_PATH`               | `.dev-runtime/agent-sessions.json` | 可恢复会话元数据；不保存终端正文和凭证 |
-| `GIT_AUTO_PULL_INTERVAL_MINUTES`   | `10`、`30` 或 `0`                  | 后台只 fetch/check，绝不自动 pull      |
+| `GIT_AUTO_PULL_INTERVAL_MINUTES`   | `10`、`15`、`30` 或 `0`            | 后台只 fetch/check，绝不自动 pull      |
 
 ### 文件与 VS Code Web
 

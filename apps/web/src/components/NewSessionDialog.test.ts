@@ -127,14 +127,14 @@ describe("NewSessionDialog manual SSH connection", () => {
       buildManualSshTarget({
         host: " 10.30.0.24 ",
         port: "",
-        username: " xuzk ",
-        identityFile: " /data01/home/xuzk/.ssh/id_ed25519 ",
+        username: " zukang.xu ",
+        identityFile: " /data01/home/zukang.xu/.ssh/id_ed25519 ",
       }),
       {
         host: "10.30.0.24",
         port: 22,
-        username: "xuzk",
-        identityFile: "/data01/home/xuzk/.ssh/id_ed25519",
+        username: "zukang.xu",
+        identityFile: "/data01/home/zukang.xu/.ssh/id_ed25519",
       },
     );
   });

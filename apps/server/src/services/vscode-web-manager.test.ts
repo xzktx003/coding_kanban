@@ -80,7 +80,7 @@ test("ensureSession starts remote code-server targets for SSH sessions", async (
     buildSession("session-1", {
       displayName: "Remote Shell session-1",
       sourceType: "remote-connect",
-      sshTarget: { host: "10.30.0.24", username: "xuzk" },
+      sshTarget: { host: "10.30.0.24", username: "zukang.xu" },
       workingDirectory: "~/remote-project",
     }),
     {
@@ -125,7 +125,7 @@ test("ensureSession starts remote code-server targets for SSH sessions", async (
         "-L",
         "127.0.0.1:43131:127.0.0.1:13338",
         "-N",
-        "xuzk@10.30.0.24",
+        "zukang.xu@10.30.0.24",
       ],
     },
   ]);
@@ -147,7 +147,7 @@ test("ensureSession resolves ssh aliases before launching configless remote vsco
         return [
           "state=reused",
           "port=13338",
-          "workingDirectory=/data01/home/xuzk",
+          "workingDirectory=/data01/home/zukang.xu",
           "pid=",
           "",
         ].join("\n");
@@ -163,7 +163,7 @@ test("ensureSession resolves ssh aliases before launching configless remote vsco
     resolveTunnelTarget: async () => ({
       host: "10.30.0.21",
       port: 22,
-      username: "xuzk",
+      username: "zukang.xu",
     }),
   } as never);
 
@@ -171,8 +171,8 @@ test("ensureSession resolves ssh aliases before launching configless remote vsco
     buildSession("session-alias", {
       displayName: "Remote Alias",
       sourceType: "remote-connect",
-      sshTarget: { host: "10.30.0.21_host", username: "xuzk" },
-      workingDirectory: "/data01/home/xuzk",
+      sshTarget: { host: "10.30.0.21_host", username: "zukang.xu" },
+      workingDirectory: "/data01/home/zukang.xu",
     }),
     {
       requestHost: "10.30.0.22",
@@ -181,15 +181,15 @@ test("ensureSession resolves ssh aliases before launching configless remote vsco
   );
 
   assert.equal(tunnelLaunches.length, 1);
-  assert.equal(tunnelLaunches[0]?.args.at(-1), "xuzk@10.30.0.21");
+  assert.equal(tunnelLaunches[0]?.args.at(-1), "zukang.xu@10.30.0.21");
 });
 
 test("resolveSshTunnelTarget keeps numeric hosts but still applies ssh config port and identity", async () => {
   const resolved = await resolveSshTunnelTarget(
-    { host: "10.30.0.23", username: "xuzk" },
+    { host: "10.30.0.23", username: "zukang.xu" },
     async () =>
       [
-        "user xuzk",
+        "user zukang.xu",
         "hostname 10.30.0.23",
         "port 10022",
         "identityfile /tmp/test-key",
@@ -200,7 +200,7 @@ test("resolveSshTunnelTarget keeps numeric hosts but still applies ssh config po
   assert.deepEqual(resolved, {
     host: "10.30.0.23",
     port: 10022,
-    username: "xuzk",
+    username: "zukang.xu",
     identityFile: "/tmp/test-key",
   });
 });
@@ -342,7 +342,7 @@ test("ensureSession auto-installs code-server when no provider is initially avai
       }
 
       findCount += 1;
-      return findCount >= 2 ? "/data01/home/xuzk/.local/bin/code-server" : null;
+      return findCount >= 2 ? "/data01/home/zukang.xu/.local/bin/code-server" : null;
     },
     installCodeServer: async () => {
       installCount += 1;

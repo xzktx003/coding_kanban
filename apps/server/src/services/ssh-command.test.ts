@@ -8,7 +8,7 @@ test("buildSshArgs leaves ssh config forwards enabled by default", () => {
     {
       host: "117.89.254.22",
       port: 10022,
-      username: "xuzk",
+      username: "zukang.xu",
       identityFile: "/tmp/id_test",
     },
     {
@@ -23,7 +23,7 @@ test("buildSshArgs leaves ssh config forwards enabled by default", () => {
     "10022",
     "-i",
     "/tmp/id_test",
-    "xuzk@117.89.254.22",
+    "zukang.xu@117.89.254.22",
     "exec tmux new-session -A -s test",
   ]);
 });
@@ -85,7 +85,7 @@ test("buildSshArgs supports local port forwarding tunnels", () => {
     {
       host: "10.30.0.24",
       port: 22,
-      username: "xuzk",
+      username: "zukang.xu",
     },
     {
       batchMode: true,
@@ -115,7 +115,7 @@ test("buildSshArgs supports local port forwarding tunnels", () => {
     "-N",
     "-p",
     "22",
-    "xuzk@10.30.0.24",
+    "zukang.xu@10.30.0.24",
   ]);
 });
 

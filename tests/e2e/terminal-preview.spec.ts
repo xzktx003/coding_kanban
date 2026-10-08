@@ -18,7 +18,7 @@ function makeSession(
     sourceType: "local",
     agentKind: "codex",
     displayName: "Default Session",
-    workingDirectory: "/data01/home/xuzk/workspace/coding_kanban",
+    workingDirectory: "/data01/home/zukang.xu/workspace/coding_kanban",
     connectionState: "online",
     interactionState: "running",
     outputPreview: "ready",

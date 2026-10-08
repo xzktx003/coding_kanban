@@ -12,7 +12,7 @@ describe("isVsCodeAvailable", () => {
           sshTarget: {
             host: "10.30.0.24",
             port: 10022,
-            username: "xuzk",
+            username: "zukang.xu",
           },
         },
       }),

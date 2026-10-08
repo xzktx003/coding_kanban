@@ -30,7 +30,7 @@ describe("buildTmuxDiscoveryHostKey", () => {
         name: "devbox",
         host: "10.30.0.21",
         port: 2222,
-        username: "xuzk",
+        username: "zukang.xu",
         identityFile: "~/.ssh/id_ed25519",
       },
     });
@@ -40,7 +40,7 @@ describe("buildTmuxDiscoveryHostKey", () => {
         name: "devbox",
         host: "10.30.0.21",
         port: 2222,
-        username: "xuzk",
+        username: "zukang.xu",
         identityFile: "~/.ssh/id_ed25519",
       },
     });
