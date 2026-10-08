@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 
 import type {
@@ -312,7 +313,10 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
-export default function App({ embedded = false }: { embedded?: boolean } = {}) {
+export default function App({
+  embedded = false,
+  navigation,
+}: { embedded?: boolean; navigation?: ReactNode } = {}) {
   const initialFocusViewState = useMemo(() => loadFocusViewState(), []);
   const initialSidePanelSessionStates = useMemo(
     () => loadSidePanelSessionStates(),
@@ -1774,6 +1778,7 @@ export default function App({ embedded = false }: { embedded?: boolean } = {}) {
     <main className={`app-shell-v2 layout-${layoutMode}`}>
       {!updateIndicatorInToolbar && updateNotification}
       <TopBar
+        navigation={navigation}
         updateIndicator={
           updateIndicatorInToolbar ? updateNotification : undefined
         }

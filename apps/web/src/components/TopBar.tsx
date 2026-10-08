@@ -179,6 +179,7 @@ function getTerminalHistorySummary(
 }
 
 interface TopBarProps {
+  navigation?: ReactNode;
   updateIndicator?: ReactNode;
   showBrand?: boolean;
   sessions: AgentSessionRecord[];
@@ -219,6 +220,7 @@ interface TopBarProps {
 }
 
 export function TopBar({
+  navigation,
   updateIndicator,
   showBrand = true,
   sessions,
@@ -448,6 +450,7 @@ export function TopBar({
   if (collapsed) {
     return (
       <header className="top-bar top-bar--collapsed">
+        {navigation}
         {updateIndicator && (
           <span className="top-bar-update-status">{updateIndicator}</span>
         )}
@@ -470,6 +473,7 @@ export function TopBar({
   return (
     <header className="top-bar">
       <div className="top-bar-brand">
+        {navigation}
         {showBrand && (
           <img
             className="kanban-brand-logo"

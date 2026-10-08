@@ -3,17 +3,13 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  --workspace-height: calc(var(--app-height) - 48px);
+  --workspace-height: var(--app-height);
 }
 .workbench-header {
-  height: 48px;
-  min-height: 48px;
   display: flex;
   align-items: center;
-  gap: 24px;
-  padding: 0 18px;
-  background: #13191f;
-  border-bottom: 1px solid #ffffff12;
+  flex: none;
+  gap: 16px;
   color: #f4f1ea;
 }
 .workbench-brand {
@@ -28,11 +24,6 @@
 .workbench-brand img {
   height: 21px;
   width: auto;
-}
-.workbench-context {
-  margin-left: auto;
-  color: #87929d;
-  font-size: 12px;
 }
 .workbench-terminal {
   flex: 1;
@@ -76,17 +67,11 @@
 @media (max-width: 640px) {
   .workbench-header {
     gap: 12px;
-    padding: 0 10px;
   }
-  .workbench-brand span,
-  .workbench-context {
+  .workbench-brand span {
     display: none;
   }
   .workbench-header .workbench-mode-switch {
     margin-left: auto;
   }
-}
-
-.workbench-shell[data-mode="session"] {
-  --workspace-height: var(--app-height);
 }

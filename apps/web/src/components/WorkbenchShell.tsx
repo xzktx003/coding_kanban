@@ -107,18 +107,19 @@ export function WorkbenchShell() {
   }
   return (
     <div className="workbench-shell" data-mode={mode}>
-      {mode === "terminal" && (
-        <header className="workbench-header">
-          <div className="workbench-brand">
-            <img src="/houmo-logo.png" alt="Houmo" />
-            <span>Coding Kanban</span>
-          </div>
-          <WorkbenchModeSwitch mode="terminal" onChange={select} />
-          <span className="workbench-context">多终端工作台</span>
-        </header>
-      )}
       <div className="workbench-terminal" hidden={mode !== "terminal"}>
-        <TerminalApp embedded />
+        <TerminalApp
+          embedded
+          navigation={
+            <div className="workbench-header">
+              <div className="workbench-brand">
+                <img src="/houmo-logo.png" alt="Houmo" />
+                <span>Coding Kanban</span>
+              </div>
+              <WorkbenchModeSwitch mode="terminal" onChange={select} />
+            </div>
+          }
+        />
       </div>
       {sessionVisited && (
         <div className="session-mode dark" hidden={mode !== "session"}>

@@ -491,7 +491,7 @@ export function summarizeTmuxSessions(
 
 export function isNoTmuxServerError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? "");
-  return /no server running|failed to connect to server/i.test(message);
+  return /no server running|failed to connect to server|error connecting to .*\/tmux-\d+\/\S+ \(No such file or directory\)/i.test(message);
 }
 
 export function buildTmuxCapturePaneArgs(
