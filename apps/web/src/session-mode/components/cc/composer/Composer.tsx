@@ -59,7 +59,7 @@ export function Composer({
     "cc",
   );
   const { setCurrentAgentCardId } = useAgentCenterStore();
-  const { handleNewSession } = useCCSessionManager();
+  const { handleNewSession, ensureSessionForSend } = useCCSessionManager();
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const isComposing = useRef(false);
@@ -126,6 +126,7 @@ export function Composer({
       onAfterSend?.(activeSessionId, text);
 
       try {
+        await ensureSessionForSend(activeSessionId, cwd ?? undefined);
         await ccSendMessage(activeSessionId, text, pendingImages);
         useSessionDraftStore.getState().clearSubmitted(owner, snapshot);
         attachments.clear(submittedIds);
@@ -145,6 +146,7 @@ export function Composer({
       }
     },
     [
+      ensureSessionForSend,
       input,
       images,
       attachments,
@@ -228,6 +230,7 @@ export function Composer({
             <div className="session-composer-toolbar">
               <div className="session-composer-policy">
                 <CCAttachmentButton
+                  onImageFilesSelected={attachments.addFiles}
                   onFilesSelected={(paths) => {
                     if (paths.length) appendDraft(owner, fileLinks(paths, cwd));
                   }}

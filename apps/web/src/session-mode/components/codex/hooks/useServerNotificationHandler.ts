@@ -1,3 +1,4 @@
+import { observeSubagents, useSubagentStore } from "@session/features/subagents/store";
 import { useSessionAttentionStore } from "@session/stores/useSessionAttentionStore";
 import { revealNewQuestion } from "@session/features/async-questions/arrival";
 import { useSessionNameStore } from "../../../stores/useSessionNameStore";
@@ -32,6 +33,7 @@ export function useServerNotificationHandler(
 ) {
   return useCallback(
     (payload: ServerNotification) => {
+      observeSubagents(payload);
       const method = payload.method;
       if (method === "serverRequest/resolved") {
         resolveCodexServerRequest(
@@ -136,6 +138,7 @@ export function useServerNotificationHandler(
               .complete("codex", threadId, payload.params.turn.id);
           if (
             turnStatus === "completed" &&
+            !useSubagentStore.getState().nodes[threadId] &&
             (document.hidden || !document.hasFocus() || !isSessionModeActive())
           ) {
             void notifyDesktop("Codex 任务已完成", undefined, () =>
@@ -144,6 +147,7 @@ export function useServerNotificationHandler(
           }
           if (
             turnStatus === "completed" &&
+            !useSubagentStore.getState().nodes[threadId] &&
             shouldPlayCompletionBeep(
               refs.taskCompleteBeepModeRef.current,
               refs.isCodexThreadActiveRef.current,

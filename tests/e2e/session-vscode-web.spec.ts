@@ -15,7 +15,8 @@ async function cwd(page: Page, path: string) {
     const {useAgentCenterStore}=await module('/src/session-mode/stores/useAgentCenterStore.ts');
     const {useCodexStore}=await module('/src/session-mode/components/codex/stores/index.ts');
     useAgentCenterStore.setState({currentAgentCardId:null,currentAgentCardKind:null,detachedCard:null});
-    useCodexStore.setState({currentThreadId:null});
+    const {codexService}=await module('/src/session-mode/services/codexService.ts');
+    await codexService.setCurrentThread(null);
     useWorkspaceStore.getState().setCwd(path);
   }, path);
 }

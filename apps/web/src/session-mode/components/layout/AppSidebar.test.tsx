@@ -70,7 +70,7 @@ describe("AppSideBar", () => {
     const bots = screen.getByRole("button", { name: /^机器人$/ });
     expect(screen.getByRole("button", { name: "搜索和管理会话" })).toBeTruthy();
     expect(projects.compareDocumentPosition(bots) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByRole("button", { name: "收起项目列表" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "收起项目列表" })).toBeNull();
   });
   it("opens the Bots view without creating a bot", () => {
     useLayoutStore.setState({ view: "agent" });

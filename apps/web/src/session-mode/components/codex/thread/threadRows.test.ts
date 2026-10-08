@@ -2,17 +2,51 @@ import { expect, it } from "vitest";
 import type { ServerNotification } from "@session/bindings";
 import { buildThreadRows } from "./threadRows";
 it("keeps one structured question instead of its streamed text or duplicate snapshot", () => {
-  const item = {type:"agentMessage",id:"q",text:"",questions:[{title:"选择",options:["A"]}]};
+  const item = {
+    type: "agentMessage",
+    id: "q",
+    text: "",
+    questions: [{ title: "选择", options: ["A"] }],
+  };
   const rows = buildThreadRows([
-    {method:"item/agentMessage/delta",params:{threadId:"t",turnId:"turn",itemId:"q",delta:"选择"}},
-    {method:"item/completed",params:{threadId:"t",turnId:"turn",item}},
-    {method:"turn/completed",params:{threadId:"t",turn:{id:"turn",status:"completed",items:[item]}}},
+    {
+      method: "item/agentMessage/delta",
+      params: { threadId: "t", turnId: "turn", itemId: "q", delta: "选择" },
+    },
+    {
+      method: "item/completed",
+      params: { threadId: "t", turnId: "turn", item },
+    },
+    {
+      method: "turn/completed",
+      params: {
+        threadId: "t",
+        turn: { id: "turn", status: "completed", items: [item] },
+      },
+    },
   ] as any);
   expect(rows).toHaveLength(1);
-  expect(rows[0].item.kind === "event" && rows[0].item.event.method).toBe("item/completed");
+  expect(rows[0].item.kind === "event" && rows[0].item.event.method).toBe(
+    "item/completed",
+  );
 });
 const event = (method: string, params: unknown) =>
   ({ method, params }) as ServerNotification;
+it("keeps a message reading anchor stable when older history is prepended", () => {
+  const message = event("item/completed", {
+    threadId: "t",
+    turnId: "last",
+    item: { type: "agentMessage", id: "a", text: "answer" },
+  });
+  const old = event("item/completed", {
+    threadId: "t",
+    turnId: "old",
+    item: { type: "agentMessage", id: "old", text: "older" },
+  });
+  expect(buildThreadRows([old, message]).at(-1)?.key).toBe(
+    buildThreadRows([message])[0].key,
+  );
+});
 it("keeps one streaming message, commands and warnings while excluding protocol-only events", () => {
   const rows = buildThreadRows([
     event("thread/status/changed", {}),
@@ -58,10 +92,18 @@ it("indexes rollback counts and scopes file-summary context to its turn", () => 
         row.item.event.params.turnId === "b",
     )?.context?.rollbackTurns,
   ).toBe(1);
-  const summary = rows.find((row) => row.key === "event-2");
+  const summary = rows.find(
+    (row) =>
+      row.item.kind === "event" && row.item.event.method === "turn/completed",
+  );
   expect(summary?.context?.events).toHaveLength(3);
   expect(summary?.context?.eventIndex).toBe(2);
-  expect(rows.some((row) => row.key === "event-5")).toBe(false);
+  expect(
+    rows.filter(
+      (row) =>
+        row.item.kind === "event" && row.item.event.method === "turn/completed",
+    ),
+  ).toHaveLength(1);
 });
 it("does not turn a rename notification into a chat message", () => {
   expect(

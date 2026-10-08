@@ -1,4 +1,5 @@
 import {
+  GitBranch,
   Diff,
   Files,
   Globe,
@@ -38,6 +39,7 @@ interface TabConfig {
 
 // Order tabs the way users scan them: work-in-progress first, reference last.
 const TAB_BUTTONS: TabConfig[] = [
+  { tab: "subagents", icon: GitBranch, label: "子任务" },
   { tab: "diff", icon: Diff, label: "变更" },
   { tab: "todo", icon: ListTodo, label: "待办" },
   { tab: "vscode", icon: VsCodeIcon, label: "VS Code" },

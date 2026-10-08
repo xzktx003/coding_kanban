@@ -10,7 +10,7 @@ export function codexRuntimeState(state: Source, id: string | null | undefined) 
   const running = !!id && !failed && !finished &&
     (timing?.status === 'inProgress' || status?.type === 'active' || (state.currentThreadId === id && !!state.currentTurnId));
   const turnId = running ? timing?.turnId ?? (state.currentThreadId === id ? state.currentTurnId : null) : null;
-  const pending = running && status?.type === 'active' && status.activeFlags.length > 0;
+  const pending = running && status?.type === 'active' && (status.activeFlags?.length ?? 0) > 0;
   const known = !!timing || (!!status && status.type !== 'notLoaded');
   return { running, turnId, failed, finished, pending, known, canSteer: running && !!turnId, canStop: running && !!turnId };
 }

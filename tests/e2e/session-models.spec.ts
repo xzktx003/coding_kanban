@@ -8,10 +8,18 @@ async function selectThread(page: Page, id: string) {
     .locator(".session-nav-row[role=button]")
     .filter({ hasText: `中文会话 ${id.slice(3)} ` })
     .first();
-  if (!(await row.isVisible()))
-    await page
-      .getByRole("button", { name: "展开项目列表", exact: true })
-      .click();
+  await expect(
+    page.getByRole("button", { name: /^(展开|收起)项目列表$/ }).first(),
+  ).toBeVisible();
+  if (!(await row.isVisible())) {
+    const expand = page.getByRole("button", {
+      name: "展开项目列表",
+      exact: true,
+    });
+    if (await expand.isVisible()) await expand.click();
+    // Cached transcripts mount before a fresh sidebar list after reload.
+    await expect(row).toBeVisible();
+  }
   await row.click();
   const projects = page.getByRole("dialog", {
     name: "项目与会话列表",

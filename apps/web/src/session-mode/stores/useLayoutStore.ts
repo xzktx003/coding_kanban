@@ -25,7 +25,7 @@ export type viewType =
 
 export type SidebarMode = 'agent' | 'bot';
 
-export type RightPanelTab = 'diff' | 'tasks' | 'todo' | 'terminal' | 'webpreview' | 'files' | 'vscode';
+export type RightPanelTab = 'diff' | 'tasks' | 'todo' | 'terminal' | 'webpreview' | 'files' | 'vscode' | 'subagents';
 
 interface LayoutStore {
   isSidebarOpen: boolean;

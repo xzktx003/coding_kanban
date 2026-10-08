@@ -1,3 +1,6 @@
+import { pendingIdentity } from "@session/features/subagents/pending";
+import { childState, descendants } from "@session/features/subagents/model";
+import { useSubagentStore } from "@session/features/subagents/store";
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { useShallow } from "zustand/react/shallow";
 import { collectQuestions, latestQuestionTurn } from "../features/async-questions/model";
@@ -69,6 +72,8 @@ export function useFollowedSessionStates(
   const permissions = usePermissionsStore((s) => s.pendingRequests);
   const questions = useRequestUserInputStore((s) => s.pendingRequests);
   const elicitations = useElicitationStore((s) => s.pendingRequests);
+  const subagents = useSubagentStore(s => s.nodes);
+  const families = useSubagentStore(s => s.families);
   const pendingIds = new Set(
     [...approvals, ...permissions, ...questions, ...elicitations].map(
       (r) => r.threadId,
@@ -82,9 +87,15 @@ export function useFollowedSessionStates(
       const finished = Boolean(receipt?.completed.length);
       if (card.kind === "codex") {
         const runtime = codexRuntimeState({ ...codex, threadStatusMap: codex.statuses, turnTimingMap: codex.timing }, card.id);
-        if (runtime.failed) state = "failed";
+        const children = descendants(subagents, card.id);
+        const familyPending = children.some(n => pendingIds.has(n.thread.id));
+        const familyRunning = children.some(n => childState({ ...n, thread: { ...n.thread, status: codex.statuses[n.thread.id] ?? n.thread.status } }, codex.timing[n.thread.id], 0) === "running");
+        const familyUnknown = children.some(n => n.unavailable) || (children.length > 0 && families[card.id]?.complete === false);
+        if (familyPending) state = "pending";
+        else if (runtime.failed) state = "failed";
         else if (runtime.pending || (!runtime.finished && pendingIds.has(card.id))) state = "pending";
-        else if (runtime.running) state = "running";
+        else if (runtime.running || familyRunning) state = "running";
+        else if (familyUnknown) state = "unknown";
         else if (unread) state = "unread";
         else if (finished) state = "completed";
         else if (runtime.known) state = "idle";
@@ -109,8 +120,10 @@ export function useFollowedSessionStates(
     const latestTurnId = latestQuestionTurn(codex.events[card.id] ?? [], card.id,
       codex.timing[card.id]?.turnId ?? (codex.currentThreadId === card.id ? codex.currentTurnId : null) ??
       codex.threads.find(t => t.id === card.id)?.turns?.at(-1)?.id);
+    const familyIds = new Set([card.id, ...descendants(subagents, card.id).map(n => n.thread.id)]);
+    const nativeQuestions = [...new Map(questions.filter(r => familyIds.has(r.threadId)).map(r => [pendingIdentity(r), r])).values()].reduce((count, r) => count + r.questions.length, 0);
     const questionCount = connection === "ready" && card.kind === "codex"
-      ? pendingQuestions(withConfirmed(collectQuestions(codex.events[card.id] ?? [], card.id), session), session, latestTurnId).length : 0;
+      ? pendingQuestions(withConfirmed(collectQuestions(codex.events[card.id] ?? [], card.id), session), session, latestTurnId).length + nativeQuestions : 0;
     return { card, state, questions: questionCount };
   });
   const counts: Record<FollowedSessionState, number> = {
@@ -128,6 +141,7 @@ export function useFollowedSessionStates(
     counts,
     questionCount: rows.reduce((sum, row) => sum + (row.questions ?? 0), 0),
     complete:
-      connection === "ready" && sharedTabsInitialized && counts.unknown === 0,
+      connection === "ready" && sharedTabsInitialized && counts.unknown === 0 &&
+      cards.every(card => card.kind !== "codex" || families[card.id]?.complete !== false),
   };
 }

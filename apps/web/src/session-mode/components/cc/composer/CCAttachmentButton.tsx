@@ -1,4 +1,4 @@
-import { open } from "@session/browser-dialog";
+import { pickBrowserFiles, uploadBrowserFile } from "@session/browser-dialog";
 import { Image as ImageIcon, Plus } from "lucide-react";
 import { useState } from "react";
 import { SelectFilesMenuItem } from "@session/components/codex/composer/ComposerMenu";
@@ -12,11 +12,13 @@ import { cn } from "@session/lib/utils";
 import { useInputStore } from "@session/stores/useInputStore";
 
 interface CCAttachmentButtonProps {
+  onImageFilesSelected?: (files: File[]) => void;
   onImagesSelected?: (paths: string[]) => void;
   onFilesSelected?: (paths: string[]) => void;
 }
 
 export function CCAttachmentButton({
+  onImageFilesSelected,
   onImagesSelected,
   onFilesSelected,
 }: CCAttachmentButtonProps) {
@@ -34,8 +36,9 @@ export function CCAttachmentButton({
 
   const handleSelectImages = async () => {
     try {
-      const selected = await open({
+      const selected = await pickBrowserFiles({
         multiple: true,
+        accept: "image/*",
         filters: [
           {
             name: "Images",
@@ -44,8 +47,11 @@ export function CCAttachmentButton({
         ],
       });
       if (selected) {
-        const paths = Array.isArray(selected) ? selected : [selected];
-        onImagesSelected?.(paths);
+        if (onImageFilesSelected) onImageFilesSelected(selected);
+        else
+          onImagesSelected?.(
+            await Promise.all(selected.map(uploadBrowserFile)),
+          );
         setOpen(false);
       }
     } catch (error) {
@@ -71,12 +77,12 @@ export function CCAttachmentButton({
           <Button
             variant="ghost"
             className={cn(
-              "justify-start gap-2 px-2 h-8 w-full text-xs hover:bg-accent hover:text-accent-foreground transition-colors",
+              "min-h-11 justify-start gap-2 px-2 h-8 w-full text-xs hover:bg-accent hover:text-accent-foreground transition-colors",
             )}
             onClick={handleSelectImages}
           >
             <ImageIcon className="w-4 h-4" />
-            <span>添加图片</span>
+            <span>上传图片</span>
           </Button>
           <SelectFilesMenuItem
             onFilesSelected={handleSelectFiles}

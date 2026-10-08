@@ -1,3 +1,4 @@
+import { SubagentEvent } from "@session/features/subagents/SubagentEvent";
 import { useMemo } from "react";
 import { readQuestions, repliesFromContent } from "@session/features/async-questions/model";
 import { QuestionMessage, AnswerMessage } from "@session/features/async-questions/QuestionMessage";
@@ -7,10 +8,6 @@ import type { ServerNotification } from "@session/bindings";
 import type { FileUpdateChange } from "@session/bindings/v2";
 import { Badge } from "@session/components/ui/badge";
 import { AgentMessageItem } from "./AgentMessageItem";
-import {
-  CollabAgentToolCallItem,
-  type CollabAgentToolCallItemData,
-} from "./CollabAgentToolCallItem";
 import {
   aggregateFileChanges,
   aggregateTurnChangesFromContext,
@@ -140,6 +137,9 @@ export const EventItem = ({ event, context }: EventItemProps) => {
             />
           );
         }
+        case "collabAgentToolCall":
+        case "subAgentActivity":
+          return <SubagentEvent root={event.params.threadId} item={startedItem} />;
         case "commandExecution":
           return null;
         case "reasoning":
@@ -173,12 +173,8 @@ export const EventItem = ({ event, context }: EventItemProps) => {
         case "reasoning":
           return null;
         case "collabAgentToolCall":
-          // Render the multi-agent sub-agent operation card.
-          return (
-            <CollabAgentToolCallItem
-              item={item as unknown as CollabAgentToolCallItemData}
-            />
-          );
+        case "subAgentActivity":
+          return <SubagentEvent root={event.params.threadId} item={item} />;
         case "mcpToolCall":
           return <McpToolCallItem item={item} />;
         default:

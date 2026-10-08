@@ -1,4 +1,4 @@
-use crate::handlers::{api_read_thread, api_session_access, api_queue_holds, api_loaded_threads, api_thread_turns, api_thread_items, api_unsubscribe_thread};
+use crate::handlers::{api_read_thread, api_thread_metadata, api_agent_roles, api_session_access, api_queue_holds, api_loaded_threads, api_thread_turns, api_thread_items, api_unsubscribe_thread};
 use axum::{
     Router, middleware,
     http::{Method, header},
@@ -194,6 +194,8 @@ pub fn create_router(state: WebServerState) -> Router {
         .route("/api/codex/start-thread", post(api_start_thread))
         .route("/api/codex/thread/resume", post(api_resume_thread))
         .route("/api/codex/thread/read", post(api_read_thread))
+        .route("/api/codex/thread/metadata", post(api_thread_metadata))
+        .route("/api/codex/agents/roles", post(api_agent_roles))
         .route("/api/codex/thread/loaded/list", post(api_loaded_threads))
         .route("/api/codex/thread/turns/list", post(api_thread_turns))
         .route("/api/codex/thread/items/list", post(api_thread_items))

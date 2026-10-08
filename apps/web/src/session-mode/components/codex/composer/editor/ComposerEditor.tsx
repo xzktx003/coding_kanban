@@ -15,6 +15,7 @@ import {
   type RangeSelection,
   COMMAND_PRIORITY_HIGH,
   KEY_ENTER_COMMAND,
+  SKIP_DOM_SELECTION_TAG,
 } from "lexical";
 import {
   forwardRef,
@@ -28,6 +29,7 @@ import { MentionChipDeletePlugin } from "./MentionChipDeletePlugin";
 import { MentionChipNode } from "./MentionChipNode";
 import { MentionTypeaheadPlugin } from "./MentionTypeaheadPlugin";
 import { $setEditorFromString } from "./useExternalValueSync";
+import { shouldAutoFocusComposer } from "../composerFocus";
 
 export interface ComposerEditorHandle {
   focus: () => void;
@@ -138,16 +140,25 @@ function ExternalValuePlugin({
 
   // Focus on mount, matching the previous textarea behaviour.
   useEffect(() => {
+    if (!shouldAutoFocusComposer()) return;
     editor.focus();
   }, [editor]);
 
   useEffect(() => {
-    editor.update(() => {
-      if ($getRoot().getTextContent() === value) {
-        return;
-      }
-      $setEditorFromString(value, items);
-    });
+    const root = editor.getRootElement();
+    // Restoring another draft must not move the DOM selection into this editor:
+    // WebKit/Chromium can focus contenteditable through selection alone.
+    const passive = !root?.contains(document.activeElement);
+    editor.update(
+      () => {
+        if ($getRoot().getTextContent() === value) {
+          return;
+        }
+        $setEditorFromString(value, items);
+        if (passive) $setSelection(null);
+      },
+      { tag: passive ? SKIP_DOM_SELECTION_TAG : undefined },
+    );
   }, [value, items, editor]);
 
   const handleChange = useCallback(

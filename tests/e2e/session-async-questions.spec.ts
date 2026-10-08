@@ -1,6 +1,7 @@
 import { openQuestions } from "./session-composer-actions";
 import { expect, test, type Page } from "@playwright/test";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
+import { liveStream } from "./session-sse-fixture";
 
 const item = {
   type: "agentMessage",
@@ -19,6 +20,14 @@ const item = {
   ],
 };
 async function load(page: Page, count = 2) {
+  // This suite's question payloads use the legacy full-read fixture. Exercise
+  // the explicit capability fallback; paginated history has its own SSE suite.
+  await page.route("**/api/codex/thread/turns/list", (route) =>
+    route.fulfill({
+      status: 404,
+      json: { error: "fixture: paginated history unavailable" },
+    }),
+  );
   await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
   await page
     .locator('.session-mode [contenteditable="true"]')
@@ -59,13 +68,12 @@ async function resume(page: Page) {
 for (const width of [375, 1440]) {
   test(`live async questions automatically open once in the active session (${width}px)`, async ({
     page,
+    baseURL,
   }) => {
     test.setTimeout(60_000);
     await page.setViewportSize({ width, height: 900 });
     const fixture = await installSessionUxFixture(page, 1);
-    let stage = 0,
-      seq = 0,
-      requests = 0;
+    let stage = 0;
     const question = (id: string, threadId = "ux-0", turnId = "auto-turn") => ({
       method: "item/completed",
       params: {
@@ -104,77 +112,56 @@ for (const width of [375, 1440]) {
         },
       }),
     );
-    await page.route("**/api/events**", (route) => {
-      requests++;
-      const notifications =
-        stage === 1
-          ? [
-              {
-                method: "turn/started",
-                params: {
-                  threadId: "ux-0",
-                  turn: {
-                    id: "auto-turn",
-                    status: "inProgress",
-                    items: [],
-                    startedAt: Date.now() / 1000,
-                  },
-                },
-              },
-              question("live"),
-            ]
-          : stage === 2
-            ? [question("old", "ux-0", "old-turn")]
-            : stage === 3
-              ? [question("other", "ux-1")]
-              : stage === 4
-                ? [question("next")]
-                : [];
-      return route.fulfill({
-        contentType: "text/event-stream",
-        body: notifications.length
-          ? notifications
-              .map(
-                (payload) =>
-                  `data: ${JSON.stringify({ seq: ++seq, event: "codex:notification", payload })}\n\n`,
-              )
-              .join("")
-          : ": fixture\n\n",
+    const stream = await liveStream(page, baseURL!);
+    try {
+      await load(page, 1);
+      await expect.poll(stream.opens).toBeGreaterThan(0);
+      const editor = page
+        .locator(".session-mode [contenteditable=true]")
+        .first();
+      await editor.fill("自动展开时保留这条草稿");
+      const panel = page.locator("[data-session-async-panel]");
+      stage = 1;
+      stream.emit(1, {
+        method: "turn/started",
+        params: {
+          threadId: "ux-0",
+          turn: {
+            id: "auto-turn",
+            status: "inProgress",
+            items: [],
+            startedAt: Date.now() / 1000,
+          },
+        },
       });
-    });
-    await load(page, 1);
-    const editor = page.locator(".session-mode [contenteditable=true]").first();
-    await editor.fill("自动展开时保留这条草稿");
-    const panel = page.locator("[data-session-async-panel]");
-    stage = 1;
-    await expect(panel).toBeVisible({ timeout: 15_000 });
-    await expect(panel).toContainText("自动展开测试 live");
-    await expect(panel.locator("input:checked")).toHaveCount(0);
-    await panel.getByRole("button", { name: "收起", exact: true }).click();
-    await expect(editor).toContainText("自动展开时保留这条草稿");
-    let before = requests;
-    await expect
-      .poll(() => requests, { timeout: 15_000 })
-      .toBeGreaterThan(before);
-    await expect(panel).toHaveCount(0);
-    stage = 2;
-    before = requests;
-    await expect
-      .poll(() => requests, { timeout: 15_000 })
-      .toBeGreaterThan(before);
-    await expect(panel).toHaveCount(0);
-    stage = 3;
-    before = requests;
-    await expect
-      .poll(() => requests, { timeout: 15_000 })
-      .toBeGreaterThan(before);
-    await expect(panel).toHaveCount(0);
-    stage = 4;
-    await expect(panel).toBeVisible({ timeout: 15_000 });
-    await expect(panel).toContainText("自动展开测试 next");
-    expect(
-      fixture.calls.some((c) => /\/turn\/(start|steer)$/.test(c.path)),
-    ).toBe(false);
+      stream.emit(2, question("live"));
+      await expect(panel).toBeVisible({ timeout: 15_000 });
+      await expect(panel).toContainText("自动展开测试 live");
+      await expect(panel.locator("input:checked")).toHaveCount(0);
+      await panel.getByRole("button", { name: "收起", exact: true }).click();
+      await expect(editor).toContainText("自动展开时保留这条草稿");
+      stream.emit(3, question("live"));
+      await page.waitForTimeout(250);
+      await expect(panel).toHaveCount(0);
+      stage = 2;
+      stream.emit(4, question("old", "ux-0", "old-turn"));
+      await page.waitForTimeout(250);
+      await expect(panel).toHaveCount(0);
+      stage = 3;
+      stream.emit(5, question("other", "ux-1"));
+      await page.waitForTimeout(250);
+      await expect(panel).toHaveCount(0);
+      stage = 4;
+      stream.emit(6, question("next"));
+      await expect(panel).toBeVisible({ timeout: 15_000 });
+      await expect(panel).toContainText("自动展开测试 next");
+      expect(
+        fixture.calls.some((c) => /\/turn\/(start|steer)$/.test(c.path)),
+      ).toBe(false);
+    } finally {
+      await page.close();
+      await stream.close();
+    }
   });
 }
 for (const width of [375, 1440]) {
@@ -391,6 +378,7 @@ test("async answer rejection retries, uncertain delivery reconciles, and complet
   const fixture = await installSessionUxFixture(page, 2);
   let phase = "inProgress",
     mode = "reject",
+    allowAnswerHistory = false,
     answer: string | undefined,
     clientId: string | undefined;
   const submissions: string[] = [],
@@ -412,7 +400,7 @@ test("async answer rejection retries, uncertain delivery reconciles, and complet
               durationMs: null,
               items: [
                 item,
-                ...(answer
+                ...(answer && allowAnswerHistory
                   ? [
                       {
                         type: "userMessage",
@@ -461,6 +449,9 @@ test("async answer rejection retries, uncertain delivery reconciles, and complet
   await expect(
     panel.getByRole("button", { name: "提交回答", exact: true }),
   ).toBeDisabled();
+  // Delay the durable echo until the uncertain state is inspected. Automatic
+  // background reconciliation can legitimately close it as soon as it exists.
+  allowAnswerHistory = true;
   // A reconnect history refresh may have already confirmed this exact clientId
   // and removed the panel. Both automatic echo and manual reconciliation are valid.
   await page.evaluate(() => {

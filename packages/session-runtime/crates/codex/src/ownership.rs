@@ -66,6 +66,16 @@ fn mutation(method: &str) -> bool {
             | "thread/memoryMode/set"
     )
 }
+fn direct_input(method: &str) -> bool {
+    matches!(method, "turn/start" | "turn/steer" | "review/start" | "thread/rollback" | "thread/revert" | "thread/goal/set" | "thread/goal/clear" | "thread/settings/update")
+}
+fn child_input_allowed(thread: &Value) -> bool {
+    let child = thread["parentThreadId"].is_string()
+        || thread.pointer("/source/subAgent/thread_spawn/parent_thread_id").is_some()
+        || thread.pointer("/source/subAgent/threadSpawn/parentThreadId").is_some()
+        || thread.pointer("/source/subagent/thread_spawn/parent_thread_id").is_some();
+    !child || thread["canAcceptDirectInput"].as_bool() == Some(true)
+}
 fn writer_conflict(error: &str) -> bool {
     let lower = error.to_lowercase();
     lower.contains("active writer")
@@ -159,6 +169,18 @@ impl Ownership {
             return Ok(result);
         }
         let id = id.unwrap().to_owned();
+        if direct_input(method) {
+            // Check before acquiring: an inspection must not become a writer just
+            // to discover that native V2 forbids app-server input to this child.
+            let metadata = rpc.raw("thread/read", json!({"threadId":id,"includeTurns":false})).await
+                .map_err(|error| format!("SESSION_ACQUIRE_FAILED: 尚未发送，无法确认输入权限：{error}"))?;
+            if metadata.pointer("/thread/id").and_then(Value::as_str) != Some(id.as_str()) {
+                return Err("SESSION_ACQUIRE_FAILED: 尚未发送，线程身份未确认".into());
+            }
+            if !child_input_allowed(&metadata["thread"]) {
+                return Err("SUBAGENT_DIRECT_INPUT_DISABLED: 子线程由主 Agent 调度，消息尚未发送；请在主会话中跟进".into());
+            }
+        }
         let entry = self.entry(&id);
         let mut entry = entry.lock().await;
         // Keep operations serialized across delayed unload. Never retry the mutation itself.
@@ -482,6 +504,40 @@ mod tests {
                 "turn/start" => Ok(json!({"turn":{"id":"turn","status":"inProgress"}})),
                 _ => Err(format!("unexpected {method}")),
             }
+        }
+    }
+    #[test]
+    fn restricted_or_unknown_child_cannot_acquire_for_input_but_interrupt_is_separate() {
+        assert!(!child_input_allowed(&json!({"parentThreadId":"parent","canAcceptDirectInput":false})));
+        assert!(!child_input_allowed(&json!({"source":{"subAgent":{"thread_spawn":{"parent_thread_id":"parent"}}}})));
+        assert!(child_input_allowed(&json!({"parentThreadId":"parent","canAcceptDirectInput":true})));
+        assert!(child_input_allowed(&json!({"source":"cli"})));
+        assert!(direct_input("turn/start"));
+        assert!(!direct_input("turn/interrupt"));
+    }
+    struct ChildGuard {
+        thread: Value,
+        calls: SyncMutex<Vec<String>>,
+    }
+    #[async_trait::async_trait]
+    impl Rpc for ChildGuard {
+        async fn raw(&self, method: &str, _params: Value) -> Result<Value, String> {
+            self.calls.lock().unwrap().push(method.into());
+            if method == "thread/read" { Ok(json!({"thread": self.thread})) }
+            else { Err(format!("unexpected mutation {method}")) }
+        }
+    }
+    #[tokio::test]
+    async fn child_gate_and_identity_failure_never_resume_or_send() {
+        for metadata in [
+            json!({"id":"child","parentThreadId":"parent","canAcceptDirectInput":false}),
+            json!({"id":"child","parentThreadId":"parent"}),
+            json!({"id":"other","canAcceptDirectInput":true}),
+        ] {
+            let rpc = ChildGuard { thread: metadata, calls: SyncMutex::new(vec![]) };
+            let err = ready().call(&rpc, "turn/start", json!({"threadId":"child"})).await.unwrap_err();
+            assert!(err.contains("尚未发送"));
+            assert_eq!(*rpc.calls.lock().unwrap(), ["thread/read"]);
         }
     }
     fn ready() -> Ownership {

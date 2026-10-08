@@ -1,4 +1,4 @@
-import { deliverRpc, sameRpc } from './rpcLifecycle';
+import { deliverRpc, sameRpc, rpcRequestContext } from './rpcLifecycle';
 import { create } from 'zustand';
 import type { RequestId } from '@session/bindings';
 import type { PermissionGrantScope, PermissionsRequestApprovalParams } from '@session/bindings/v2';
@@ -35,7 +35,7 @@ export const usePermissionsStore = create<PermissionsStore>((set, get) => ({
         request.requestId,
         permissions,
         scope,
-        decision.kind === 'grantTurnStrict'
+        decision.kind === 'grantTurnStrict', rpcRequestContext(request)
       ), () => {
       set((state) => ({
         pendingRequests: state.pendingRequests.filter((r) => r !== request),

@@ -1,5 +1,9 @@
 import { useShallow } from "zustand/react/shallow";
-import { open } from "@session/browser-dialog";
+import {
+  open,
+  pickBrowserFiles,
+  uploadBrowserFile,
+} from "@session/browser-dialog";
 import {
   Check,
   ChevronRight,
@@ -137,6 +141,7 @@ function MentionMenuItem({ item, onInsert }: MentionMenuItemProps) {
 }
 
 export interface ComposerMenuProps {
+  onImageFilesSelected?: (files: File[]) => void;
   onImagesSelected?: (paths: string[]) => void;
   onFilesSelected?: (paths: string[]) => void;
   onInsertMention?: (text: string) => void;
@@ -144,6 +149,7 @@ export interface ComposerMenuProps {
 }
 
 export function ComposerMenu({
+  onImageFilesSelected,
   onImagesSelected,
   onFilesSelected,
   onInsertMention,
@@ -163,8 +169,9 @@ export function ComposerMenu({
 
   const handleSelectImage = async () => {
     try {
-      const selected = await open({
+      const selected = await pickBrowserFiles({
         multiple: true,
+        accept: "image/*",
         filters: [
           {
             name: "Images",
@@ -174,10 +181,11 @@ export function ComposerMenu({
       });
 
       if (selected) {
-        const paths = Array.isArray(selected) ? selected : [selected];
-        if (onImagesSelected) {
-          onImagesSelected(paths);
-        }
+        if (onImageFilesSelected) onImageFilesSelected(selected);
+        else
+          onImagesSelected?.(
+            await Promise.all(selected.map(uploadBrowserFile)),
+          );
         setOpenState(false);
       }
     } catch (error) {
@@ -205,6 +213,15 @@ export function ComposerMenu({
         align="start"
       >
         <div className="flex flex-col gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            className="min-h-11 justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors"
+            onClick={handleSelectImage}
+          >
+            <ImageIcon className="w-4 h-4" />
+            <span>上传图片</span>
+          </Button>
           {actions?.(() => setOpenState(false))}
           <Button
             type="button"
@@ -223,15 +240,6 @@ export function ComposerMenu({
             {webSearchRequest && <Check className="w-4 h-4" />}
           </Button>
 
-          <Button
-            type="button"
-            variant="ghost"
-            className="justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors"
-            onClick={handleSelectImage}
-          >
-            <ImageIcon className="w-4 h-4" />
-            <span>添加图片</span>
-          </Button>
           <SelectFilesMenuItem
             onFilesSelected={onFilesSelected}
             onAfterSelect={() => setOpenState(false)}

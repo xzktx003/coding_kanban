@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
+import { useLayoutStore } from "@session/stores/useLayoutStore";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 const sidebar = vi.hoisted(() => ({
   isMobile: false,
@@ -15,6 +16,7 @@ beforeEach(() => {
   sidebar.open = false;
   sidebar.openMobile = false;
   vi.clearAllMocks();
+  useLayoutStore.setState({isSidebarOpen:false,view:"agent"});
   useWorkspaceStore.setState({ cwd: "/work/中文项目" });
 });
 it("separates the project breadcrumb from the desktop sidebar control", () => {
@@ -62,4 +64,27 @@ it("opens the shared global entry without exposing a standalone project title", 
   expect(screen.queryByText("中文项目")).toBeNull();
   expect(useWorkspaceStore.getState().cwd).toBe("/work/中文项目");
   window.removeEventListener("session-open-projects", open);
+});
+
+it("uses the same fixed global button to collapse and expand the sidebar", () => {
+  useLayoutStore.setState({isSidebarOpen:true,view:"agent"});
+  const open = vi.fn();
+  window.addEventListener("session-open-projects",open);
+  render(<ProjectNavigationButton global />);
+  const button = screen.getByRole("button",{name:"收起项目列表"});
+  expect(button.getAttribute("aria-expanded")).toBe("true");
+  fireEvent.click(button);
+  expect(useLayoutStore.getState().isSidebarOpen).toBe(false);
+  expect(useLayoutStore.getState().view).toBe("agent");
+  expect(screen.getByRole("button",{name:"展开项目列表"})).toBe(button);
+  expect(button.getAttribute("aria-expanded")).toBe("false");
+  expect(open).not.toHaveBeenCalled();
+  fireEvent.click(button);
+  expect(open).toHaveBeenCalledTimes(1);
+  window.removeEventListener("session-open-projects",open);
+});
+it("offers opening the projects from a secondary page even if the hidden sidebar is expanded", () => {
+  useLayoutStore.setState({isSidebarOpen:true,view:"settings"});
+  render(<ProjectNavigationButton global />);
+  expect(screen.getByRole("button",{name:"展开项目列表"}).getAttribute("aria-expanded")).toBe("false");
 });

@@ -697,3 +697,44 @@ test("unavailable completion history is rate limited and retried without resubmi
     ["one", "two"],
   );
 });
+
+test("a missed completion releases the queue hold even when there is no next queued message", async () => {
+  const f = fixture(),
+    q = new CodexFollowups(f.runtime);
+  const holds: any[] = [];
+  Object.assign(f.runtime, {
+    syncHolds: async (s: any) => {
+      holds.push(s);
+    },
+    readThread: async () => ({
+      thread: {
+        id: "a",
+        status: { type: "idle" },
+        turns: [{ id: "turn-one", status: "completed" }],
+      },
+    }),
+  });
+  f.states.a = "idle";
+  await q.submit(input());
+  await q.tick();
+  assert.equal((await q.get("a")).awaitingTurnId, "turn-one");
+  f.states.a = "idle";
+  await q.tick();
+  assert.equal((await q.get("a")).awaitingTurnId, undefined);
+  assert.deepEqual(holds.at(-1), { busy: false, threadIds: [] });
+  assert.equal(f.calls.length, 1);
+});
+
+test("completion reconciliation is bounded and pending messages take priority over old holds",async()=>{
+  const f=fixture(),q=new CodexFollowups(f.runtime);const reads:string[]=[];
+  Object.assign(f.runtime,{readThread:async(id:string)=>{reads.push(id);return {thread:{id,status:{type:"idle"},turns:[{id:`turn-first-${id}`,status:"completed"}]}};}});
+  for(const id of ["a","b","c"]){f.states[id]="idle";await q.submit(input(`first-${id}`,id));}
+  await q.tick();
+  for(const id of ["a","b","c"])f.states[id]="idle";
+  await q.submit(input("next-c","c"));await q.tick();
+  assert.equal(reads.length,2);assert.equal(reads[0],"c");
+  assert.equal((await q.get("c")).items[1].status,"sent");
+  await q.tick();assert.equal(reads.length,3);
+  assert.equal((await q.get("a")).awaitingTurnId,undefined);
+  assert.equal((await q.get("b")).awaitingTurnId,undefined);
+});

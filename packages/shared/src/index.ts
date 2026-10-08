@@ -631,3 +631,4 @@ export * from "./session-projects.js";
 
 export * from "./session-followups.js";
 export * from "./composer-context.js";
+export * from "./session-subagents.js";

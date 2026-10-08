@@ -1,6 +1,11 @@
-import { invoke } from '@tauri-apps/api/core';
-import { toast } from '@session/components/ui/use-toast';
-import { authHeaders, buildUrl, isDesktopTauri, isTauri } from '@session/hooks/runtime';
+import { invoke } from "@tauri-apps/api/core";
+import { toast } from "@session/components/ui/use-toast";
+import {
+  authHeaders,
+  buildUrl,
+  isDesktopTauri,
+  isTauri,
+} from "@session/hooks/runtime";
 
 export type MarketplaceSkillItem = {
   name: string;
@@ -18,14 +23,19 @@ export type InstalledSkillItem = {
   description?: string | null;
 };
 
-export type SkillScope = 'user' | 'project';
+export type SkillScope = "user" | "project";
 
 /** Preserve HTTP certainty for callers that must not blindly resend mutations. */
 export class SessionApiError extends Error {
-  constructor(message: string, public readonly status: number) { super(message); }
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+  }
 }
-export type SkillAgent = 'codex' | 'cc';
-export type UnifiedMcpClientName = 'codex' | 'cc';
+export type SkillAgent = "codex" | "cc";
+export type UnifiedMcpClientName = "codex" | "cc";
 
 export type UnifiedMcpConfig = {
   mcpServers?: Record<string, unknown>;
@@ -46,8 +56,12 @@ export type TerminalStartResponse = {
 
 async function extractErrorMessage(response: Response) {
   try {
-    const payload = (await response.clone().json()) as { error?: string; message?: string };
-    if (typeof payload?.message === "string" && payload.message) return payload.message;
+    const payload = (await response.clone().json()) as {
+      error?: string;
+      message?: string;
+    };
+    if (typeof payload?.message === "string" && payload.message)
+      return payload.message;
     if (payload?.error) {
       return payload.error;
     }
@@ -57,7 +71,7 @@ async function extractErrorMessage(response: Response) {
 
 export async function invokeTauri<T>(
   command: string,
-  payload?: Record<string, unknown>
+  payload?: Record<string, unknown>,
 ): Promise<T> {
   return invoke<T>(command, payload);
 }
@@ -66,7 +80,7 @@ export async function invokeTauri<T>(
 // `Request failed: {"code":-32600,"message":"..."}`. Show the inner message.
 function formatInvokeError(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
-  const start = raw.indexOf('{');
+  const start = raw.indexOf("{");
   if (start !== -1) {
     try {
       const payload = JSON.parse(raw.slice(start)) as { message?: string };
@@ -80,7 +94,7 @@ function formatInvokeError(error: unknown): string {
 async function invokeTauriWithToast<T>(
   command: string,
   payload: Record<string, unknown> | undefined,
-  options?: { suppressToast?: boolean }
+  options?: { suppressToast?: boolean },
 ): Promise<T> {
   try {
     return await invoke<T>(command, payload);
@@ -88,9 +102,9 @@ async function invokeTauriWithToast<T>(
     const message = formatInvokeError(error);
     if (!options?.suppressToast) {
       toast({
-        title: 'Request failed',
+        title: "Request failed",
         description: message,
-        variant: 'destructive',
+        variant: "destructive",
         id: message,
       });
     }
@@ -104,20 +118,21 @@ export async function getJson<T>(path: string): Promise<T> {
 
 export async function getJsonWithOptions<T>(
   path: string,
-  options?: { suppressToast?: boolean }
+  options?: { suppressToast?: boolean; signal?: AbortSignal },
 ): Promise<T> {
   const response = await fetch(buildUrl(path), {
-    method: 'GET',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    method: "GET",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    signal: options?.signal,
   });
 
   if (!response.ok) {
     const message = await extractErrorMessage(response);
     if (!options?.suppressToast) {
       toast({
-        title: 'Request failed',
+        title: "Request failed",
         description: message,
-        variant: 'destructive',
+        variant: "destructive",
         id: message,
       });
     }
@@ -134,21 +149,22 @@ export async function postJson<T>(path: string, body?: unknown): Promise<T> {
 export async function postJsonWithOptions<T>(
   path: string,
   body?: unknown,
-  options?: { suppressToast?: boolean }
+  options?: { suppressToast?: boolean; signal?: AbortSignal },
 ): Promise<T> {
   const response = await fetch(buildUrl(path), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body ?? {}),
+    signal: options?.signal,
   });
 
   if (!response.ok) {
     const message = await extractErrorMessage(response);
     if (!options?.suppressToast) {
       toast({
-        title: 'Request failed',
+        title: "Request failed",
         description: message,
-        variant: 'destructive',
+        variant: "destructive",
         id: message,
       });
     }
@@ -158,18 +174,21 @@ export async function postJsonWithOptions<T>(
   return (await response.json()) as T;
 }
 
-export async function postNoContent(path: string, body?: unknown): Promise<void> {
+export async function postNoContent(
+  path: string,
+  body?: unknown,
+): Promise<void> {
   return postNoContentWithOptions(path, body);
 }
 
 export async function postNoContentWithOptions(
   path: string,
   body?: unknown,
-  options?: { suppressToast?: boolean }
+  options?: { suppressToast?: boolean },
 ): Promise<void> {
   const response = await fetch(buildUrl(path), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(body ?? {}),
   });
 
@@ -177,13 +196,13 @@ export async function postNoContentWithOptions(
     const message = await extractErrorMessage(response);
     if (!options?.suppressToast) {
       toast({
-        title: 'Request failed',
+        title: "Request failed",
         description: message,
-        variant: 'destructive',
+        variant: "destructive",
         id: message,
       });
     }
-    return Promise.reject(new Error(message));
+    return Promise.reject(new SessionApiError(message, response.status));
   }
 }
 
@@ -192,7 +211,7 @@ export async function dual<T>(
   tauriArgs: Record<string, unknown> | undefined,
   path: string,
   body?: unknown,
-  options?: { suppressToast?: boolean }
+  options?: { suppressToast?: boolean },
 ): Promise<T> {
   if (isDesktopTauri()) {
     return await invokeTauriWithToast<T>(command, tauriArgs, options);
@@ -204,7 +223,7 @@ export async function dualGet<T>(
   command: string,
   tauriArgs: Record<string, unknown> | undefined,
   path: string,
-  options?: { suppressToast?: boolean }
+  options?: { suppressToast?: boolean },
 ): Promise<T> {
   if (isDesktopTauri()) {
     return await invokeTauriWithToast<T>(command, tauriArgs, options);
@@ -216,7 +235,7 @@ export async function dualVoid(
   command: string,
   tauriArgs: Record<string, unknown> | undefined,
   path: string,
-  body?: unknown
+  body?: unknown,
 ): Promise<void> {
   if (isDesktopTauri()) {
     await invokeTauriWithToast(command, tauriArgs);

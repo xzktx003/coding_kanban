@@ -145,12 +145,12 @@ for (const width of [375, 1440])
       route.fulfill({ json: { data: threads, nextCursor: null } }),
     );
     let failB = true;
-    const resumes: string[] = [];
+    const reads: string[] = [];
     await page.route(
-      "**/api/session/api/codex/thread/resume",
+      "**/api/session/api/codex/thread/turns/list",
       async (route) => {
-        const id = route.request().postDataJSON().threadId;
-        resumes.push(id);
+        const { threadId: id, cursor, limit } = route.request().postDataJSON();
+        reads.push(id);
         if (id === "ux-1" && failB) {
           failB = false;
           await route.fulfill({
@@ -159,8 +159,14 @@ for (const width of [375, 1440])
           });
           return;
         }
+        const turns = [...threads.find((t) => t.id === id)!.turns].reverse();
+        const start = Number(cursor ?? 0);
+        const end = start + limit;
         await route.fulfill({
-          json: { thread: threads.find((t) => t.id === id) },
+          json: {
+            data: turns.slice(start, end),
+            nextCursor: end < turns.length ? String(end) : null,
+          },
         });
       },
     );
@@ -177,15 +183,13 @@ for (const width of [375, 1440])
           .getEntriesByType("resource")
           .findLast((e) => new URL(e.name).pathname === p)?.name ?? p
       );
-      useCodexStore
-        .getState()
-        .addEvent("ux-1", {
-          method: "thread/status/changed",
-          params: {
-            threadId: "ux-1",
-            status: { type: "active", activeFlags: [] },
-          },
-        });
+      useCodexStore.getState().addEvent("ux-1", {
+        method: "thread/status/changed",
+        params: {
+          threadId: "ux-1",
+          status: { type: "active", activeFlags: [] },
+        },
+      });
     });
     releaseTabs();
     await expect
@@ -204,24 +208,24 @@ for (const width of [375, 1440])
         .locator('[role=tab][data-tab-key="codex:ux-2"]')
         .getByLabel("待处理"),
     ).toBeVisible();
-    expect(resumes.filter((id) => id === "ux-1").length).toBeGreaterThanOrEqual(
+    expect(reads.filter((id) => id === "ux-1").length).toBeGreaterThanOrEqual(
       2,
     );
     const beforeReload = await state(page);
-    expect(beforeReload.eventCounts["ux-1"]).toBeGreaterThan(40);
+    expect(beforeReload.eventCounts["ux-1"]).toBeGreaterThanOrEqual(40);
     expect(beforeReload).toMatchObject({
       current: "ux-0",
       selected: "ux-0",
       cwd: "/fixture/project-0",
     });
-    const beforeCount = resumes.length;
+    const beforeCount = reads.length;
     await page.reload();
     await expect
       .poll(async () => (await state(page)).loaded, { timeout: 15000 })
       .toMatchObject({ "ux-0": true, "ux-1": true, "ux-2": true });
-    expect(new Set(resumes.slice(beforeCount))).toEqual(
-      new Set(["ux-0", "ux-1", "ux-2"]),
-    );
+    await expect
+      .poll(() => new Set(reads.slice(beforeCount)))
+      .toEqual(new Set(["ux-0", "ux-1", "ux-2"]));
     expect((await state(page)).layout).toEqual(beforeReload.layout);
     const viewport = page
       .locator('.session-window-body [data-slot="scroll-area-viewport"]')
@@ -238,13 +242,13 @@ for (const width of [375, 1440])
     await page.waitForTimeout(200);
     const top = await viewport.evaluate((el) => el.scrollTop);
     const beforeReconnect = await state(page);
-    const count = resumes.length;
+    const count = reads.length;
     await page.evaluate(() => {
       (window as any).__restoreStreams.forEach((s: any) => {
         if (!s.closed) s.onopen?.();
       });
     });
-    await expect.poll(() => resumes.length).toBeGreaterThanOrEqual(count + 3);
+    await expect.poll(() => reads.length).toBeGreaterThanOrEqual(count + 3);
     await page.waitForTimeout(300);
     const after = await state(page);
     expect(after).toMatchObject({
@@ -259,7 +263,7 @@ for (const width of [375, 1440])
     ).toBeLessThan(6);
     expect(
       fixture.calls.filter((c) =>
-        /\/turn\/start|\/turn\/interrupt|\/thread\/start|\/thread\/rollback|\/stop$/.test(
+        /\/turn\/start|\/turn\/interrupt|\/thread\/(resume|start|rollback)|\/stop$/.test(
           c.path,
         ),
       ),

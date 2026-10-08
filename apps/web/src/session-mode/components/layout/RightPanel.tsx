@@ -18,6 +18,7 @@ const VsCodePanel = lazy(() =>
     default: m.VsCodePanel,
   })),
 );
+const SubagentPanel = lazy(() => import("@session/features/subagents/SubagentPanel").then(m => ({ default: m.SubagentPanel })));
 const TodoView = lazy(() => import("@session/features/todos/TodoView"));
 const FilesPanel = lazy(() => import("@session/features/files/FilesPanel"));
 const GitDiffPanel = lazy(() => import("@session/features/git/GitDiffPanel"));
@@ -136,6 +137,7 @@ export function RightPanel({ visible = true }: { visible?: boolean }) {
             </div>
           </Suspense>
 
+          {activeRightPanelTab === "subagents" && <Suspense fallback={<ToolLoading label="子任务" />}><SubagentPanel /></Suspense>}
           {activeRightPanelTab === "tasks" && (
             <div className="h-full min-h-0 overflow-hidden">
               <Suspense fallback={<ToolLoading label="看板" />}>

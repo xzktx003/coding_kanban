@@ -24,19 +24,29 @@ test.beforeEach(async ({ page }) => {
 const editor = (page: Page) =>
   page.locator(".session-agent-view [contenteditable=true]");
 async function selectFirst(page: Page) {
-  const row = page
-    .locator(".session-nav-row[role=button]")
-    .filter({ hasText: "中文会话 0 " })
-    .first();
-  if (!(await row.isVisible()))
-    await page
-      .getByRole("button", { name: "展开项目列表", exact: true })
-      .click();
-  await row.click();
+  // seedSessionUx creates history, not followed tabs. Follow through the normal
+  // action so concurrent shared-tab restore cannot overwrite the fixture.
+  await page.evaluate(async () => {
+    const url =
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (entry) =>
+            new URL(entry.name).pathname ===
+            "/src/session-mode/stores/useAgentCenterStore.ts",
+        )?.name ?? "/src/session-mode/stores/useAgentCenterStore.ts";
+    const { useAgentCenterStore } = await import(url);
+    useAgentCenterStore.getState().addAgentCard({
+      kind: "codex",
+      id: "ux-0",
+      cwd: "/fixture/项目/very-long-project-path-for-ui-regression",
+      preview: "中文会话 0",
+    });
+  });
+  const tab = page.locator('[role=tab][data-tab-key="codex:ux-0"]');
+  await tab.click({ position: { x: 24, y: 10 } });
   await page.keyboard.press("Escape");
-  await expect(
-    page.locator('[role=tab][data-tab-key="codex:ux-0"]'),
-  ).toHaveAttribute("aria-selected", "true");
+  await expect(tab).toHaveAttribute("aria-selected", "true");
 }
 async function push(page: Page, events: any[]) {
   await page.evaluate(async (events) => {

@@ -1,9 +1,10 @@
 import { create } from 'zustand';
 import { SessionApiError } from '@session/services/apiAdapt/shared';
 
-export type RpcIdentity = { threadId: string; requestId: string | number; turnId?: string | null; itemId?: string | null };
+export type RpcIdentity = { threadId: string; requestId: string | number; turnId?: string | null; itemId?: string | null; requestToken?: string };
 let generation = 0;
-export const rpcKey = (r: RpcIdentity) => JSON.stringify([generation, r.threadId, r.requestId, r.turnId, r.itemId]);
+export const rpcKey = (r: RpcIdentity) => JSON.stringify([generation, r.threadId, r.requestId, r.turnId, r.itemId, r.requestToken]);
+export const rpcRequestContext = (r: RpcIdentity) => ({ threadId: r.threadId, requestId: r.requestId, turnId: r.turnId ?? null, itemId: r.itemId ?? null, ...(r.requestToken ? { requestToken: r.requestToken } : {}) });
 export const sameRpc = (a: RpcIdentity, b: RpcIdentity) => rpcKey(a) === rpcKey(b);
 export const useRpcDeliveryStore = create<{ states: Record<string, { phase: 'submitting' | 'uncertain' | 'failed'; message: string }> }>(() => ({ states: {} }));
 export function resetRpcLifecycle() { generation++; useRpcDeliveryStore.setState({ states: {} }); }

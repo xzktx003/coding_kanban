@@ -1,13 +1,22 @@
-import type { CcAgentOptionsPayload } from '@session/types/cc/agentOptions';
-import { getJson, postJson, postNoContent } from './shared';
+import type { CcAgentOptionsPayload } from "@session/types/cc/agentOptions";
+import {
+  getJson,
+  postJson,
+  postJsonWithOptions,
+  postNoContent,
+} from "./shared";
 
 export async function ccNewSession(options: CcAgentOptionsPayload) {
-  return await postJson<string>('/api/cc/new-session', { options });
+  return await postJson<string>("/api/cc/new-session", { options });
 }
 
-export async function ccSendMessage(sessionId: string, message: string, imagePaths: string[] = []) {
+export async function ccSendMessage(
+  sessionId: string,
+  message: string,
+  imagePaths: string[] = [],
+) {
   const trimmed = message.trim();
-  await postNoContent('/api/cc/send-message', {
+  await postNoContent("/api/cc/send-message", {
     session_id: sessionId,
     message: trimmed,
     image_paths: imagePaths,
@@ -15,22 +24,25 @@ export async function ccSendMessage(sessionId: string, message: string, imagePat
 }
 
 export async function ccInterrupt(sessionId: string) {
-  await postNoContent('/api/cc/interrupt', { session_id: sessionId });
+  await postNoContent("/api/cc/interrupt", { session_id: sessionId });
 }
 
-export async function ccResumeSession(sessionId: string, options: CcAgentOptionsPayload) {
-  await postNoContent('/api/cc/resume-session', {
+export async function ccResumeSession(
+  sessionId: string,
+  options: CcAgentOptionsPayload,
+) {
+  await postNoContent("/api/cc/resume-session", {
     session_id: sessionId,
     options,
   });
 }
 
 export async function ccGetInstalledSkills() {
-  return await getJson<string[]>('/api/cc/installed-skills');
+  return await getJson<string[]>("/api/cc/installed-skills");
 }
 
 export async function ccGetSlashCommands(cwd?: string) {
-  const qs = cwd ? `?cwd=${encodeURIComponent(cwd)}` : '';
+  const qs = cwd ? `?cwd=${encodeURIComponent(cwd)}` : "";
   return await getJson<string[]>(`/api/cc/slash-commands${qs}`);
 }
 
@@ -44,7 +56,7 @@ export type CcSessionListResult<T> = { sessions: T[]; total: number };
 
 export async function ccListSessions<T = unknown>(
   directory?: string | null,
-  options: CcListSessionsOptions = {}
+  options: CcListSessionsOptions = {},
 ) {
   const { offset = 0, includeWorktrees = true, limit } = options;
 
@@ -53,48 +65,54 @@ export async function ccListSessions<T = unknown>(
     includeWorktrees: String(includeWorktrees),
   });
   if (directory) {
-    params.set('directory', directory);
+    params.set("directory", directory);
   }
   if (limit !== undefined) {
-    params.set('limit', String(limit));
+    params.set("limit", String(limit));
   }
-  return await getJson<CcSessionListResult<T>>(`/api/cc/sessions?${params.toString()}`);
+  return await getJson<CcSessionListResult<T>>(
+    `/api/cc/sessions?${params.toString()}`,
+  );
 }
 
 export async function ccGetSettings<T = unknown>() {
-  return await getJson<T>('/api/cc/settings');
+  return await getJson<T>("/api/cc/settings");
 }
 
 export async function ccUpdateSettings(settings: unknown) {
-  await postNoContent('/api/cc/settings', { settings });
+  await postNoContent("/api/cc/settings", { settings });
 }
 
 export async function ccMcpAdd(request: unknown, workingDir: string) {
-  await postJson('/api/cc/mcp/add', {
+  await postJson("/api/cc/mcp/add", {
     request,
     working_dir: workingDir,
   });
 }
 
 export async function ccMcpList<T = unknown>(workingDir: string) {
-  return await postJson<T>('/api/cc/mcp/list', {
+  return await postJson<T>("/api/cc/mcp/list", {
     working_dir: workingDir,
   });
 }
 
 export async function ccMcpGet<T = unknown>(name: string, workingDir: string) {
-  return await postJson<T>('/api/cc/mcp/get', {
+  return await postJson<T>("/api/cc/mcp/get", {
     name,
     working_dir: workingDir,
   });
 }
 
 export async function ccListProjects() {
-  return await getJson<string[]>('/api/cc/mcp/projects');
+  return await getJson<string[]>("/api/cc/mcp/projects");
 }
 
-export async function ccMcpRemove(name: string, workingDir: string, scope = 'local') {
-  await postJson('/api/cc/mcp/remove', {
+export async function ccMcpRemove(
+  name: string,
+  workingDir: string,
+  scope = "local",
+) {
+  await postJson("/api/cc/mcp/remove", {
     name,
     working_dir: workingDir,
     scope,
@@ -102,46 +120,56 @@ export async function ccMcpRemove(name: string, workingDir: string, scope = 'loc
 }
 
 export async function ccMcpEnable(name: string, workingDir: string) {
-  await postJson('/api/cc/mcp/enable', {
+  await postJson("/api/cc/mcp/enable", {
     name,
     working_dir: workingDir,
   });
 }
 
 export async function ccMcpDisable(name: string, workingDir: string) {
-  await postJson('/api/cc/mcp/disable', {
+  await postJson("/api/cc/mcp/disable", {
     name,
     working_dir: workingDir,
   });
 }
 
 export async function ccDeleteSession(sessionId: string): Promise<void> {
-  await postNoContent('/api/cc/delete-session', {
+  await postNoContent("/api/cc/delete-session", {
     session_id: sessionId,
   });
 }
 
 export interface SdkSessionMessage {
-  type: 'user' | 'assistant';
+  type: "user" | "assistant";
   uuid: string;
   session_id: string;
   message?: Record<string, unknown> | null;
   parent_tool_use_id?: string | null;
 }
 
-export async function ccGetSessionMessages(sessionId: string): Promise<SdkSessionMessage[]> {
-  return await postJson<SdkSessionMessage[]>('/api/cc/session-messages', { session_id: sessionId });
+export async function ccGetSessionMessages(
+  sessionId: string,
+  options?: { signal?: AbortSignal; suppressToast?: boolean },
+): Promise<SdkSessionMessage[]> {
+  return await postJsonWithOptions<SdkSessionMessage[]>(
+    "/api/cc/session-messages",
+    { session_id: sessionId },
+    options,
+  );
 }
 
-export async function ccResolvePermission(requestId: string, decision: string): Promise<void> {
-  await postNoContent('/api/cc/resolve-permission', {
+export async function ccResolvePermission(
+  requestId: string,
+  decision: string,
+): Promise<void> {
+  await postNoContent("/api/cc/resolve-permission", {
     request_id: requestId,
     decision,
   });
 }
 
 export async function ccSetPermissionMode(sessionId: string, mode: string) {
-  await postNoContent('/api/cc/set-permission-mode', {
+  await postNoContent("/api/cc/set-permission-mode", {
     session_id: sessionId,
     mode,
   });

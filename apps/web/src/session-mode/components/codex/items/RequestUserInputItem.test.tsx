@@ -90,9 +90,16 @@ it("shows numbered options, navigates without submitting, then submits only the 
   fireEvent.click(screen.getByRole("button", { name: "下一步" }));
   fireEvent.click(screen.getByRole("button", { name: "提交回答" }));
   await waitFor(() =>
-    expect(api.respond).toHaveBeenCalledWith(1, {
-      answers: { q1: { answers: ["出门逛逛"] }, q2: { answers: ["安静一点"] } },
-    }),
+    expect(api.respond).toHaveBeenCalledWith(
+      1,
+      {
+        answers: {
+          q1: { answers: ["出门逛逛"] },
+          q2: { answers: ["安静一点"] },
+        },
+      },
+      { threadId: "a", requestId: 1, turnId: "turn", itemId: "item" },
+    ),
   );
   expect(api.turnStart).not.toHaveBeenCalled();
 });
@@ -130,15 +137,20 @@ it("supports custom answers and explicit skips; confirmed rejection retains the 
   fireEvent.click(screen.getByRole("button", { name: "跳过此题" }));
   expect(api.respond).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "提交回答" }));
+  await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
   await screen.findByRole("alert");
   expect(useRequestUserInputStore.getState().pendingRequests).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "提交回答" }));
   await waitFor(() =>
     expect(useRequestUserInputStore.getState().pendingRequests).toHaveLength(0),
   );
-  expect(api.respond).toHaveBeenLastCalledWith("rpc", {
-    answers: { q1: { answers: ["散步"] }, q2: { answers: [] } },
-  });
+  expect(api.respond).toHaveBeenLastCalledWith(
+    "rpc",
+    {
+      answers: { q1: { answers: ["散步"] }, q2: { answers: [] } },
+    },
+    { threadId: "a", requestId: "rpc", turnId: "turn", itemId: "item" },
+  );
 });
 it("deduplicates replay, distinguishes numeric ids from strings, and clears resolved requests only in the owning thread", () => {
   const store = useRequestUserInputStore.getState();
@@ -154,16 +166,16 @@ it("deduplicates replay, distinguishes numeric ids from strings, and clears reso
   ).toEqual(["1"]);
 });
 
-it("an ambiguous network failure keeps answers and does not blindly repeat the RPC",async()=>{
+it("an ambiguous network failure keeps answers and does not blindly repeat the RPC", async () => {
   api.respond.mockRejectedValueOnce(new Error("offline"));
   useRequestUserInputStore.getState().addRequest(request("uncertain"));
-  render(<RequestUserInputItem currentThreadId="a"/>);
-  fireEvent.click(screen.getByRole("button",{name:"跳过此题"}));
-  fireEvent.click(screen.getByRole("button",{name:"跳过此题"}));
-  fireEvent.click(screen.getByRole("button",{name:"提交回答"}));
+  render(<RequestUserInputItem currentThreadId="a" />);
+  fireEvent.click(screen.getByRole("button", { name: "跳过此题" }));
+  fireEvent.click(screen.getByRole("button", { name: "跳过此题" }));
+  fireEvent.click(screen.getByRole("button", { name: "提交回答" }));
   await screen.findByRole("alert");
-  fireEvent.click(screen.getByRole("button",{name:"提交回答"}));
-  await waitFor(()=>expect(api.respond).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("button", { name: "提交回答" }));
+  await waitFor(() => expect(api.respond).toHaveBeenCalledTimes(1));
   expect(useRequestUserInputStore.getState().pendingRequests).toHaveLength(1);
 });
 it("masks secret text and does not put answers into browser persistent storage", () => {

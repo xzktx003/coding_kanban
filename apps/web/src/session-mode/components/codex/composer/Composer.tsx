@@ -1,3 +1,9 @@
+import { subagentParent } from "@agent-orchestrator/shared";
+import { sessionDraftSubmissions } from "@session/features/subagents/submissions";
+import { SubagentSummary } from "@session/features/subagents/SubagentSummary";
+import { AgentMentionPicker } from "@session/features/subagents/AgentMentionPicker";
+import { mentionDrafts } from "@session/features/subagents/mentions";
+import { useSubagentStore } from "@session/features/subagents/store";
 import { composeContextText } from "@agent-orchestrator/shared";
 import {
   composerDrafts,
@@ -80,6 +86,7 @@ import {
   ComposerEditor,
   type ComposerEditorHandle,
 } from "./editor/ComposerEditor";
+import { shouldAutoFocusComposer } from "./composerFocus";
 import { SlashCommandDialogs } from "./SlashCommandDialogs";
 import { SlashCommandPopover } from "./SlashCommandsSelector";
 import type { SlashDialog } from "./slashCommands";
@@ -166,8 +173,11 @@ export function Composer({
   const { addAgentCard, setCurrentAgentCardId } = useAgentCenterStore();
   const attachments = useImageAttachments(owner);
   const images = attachments.paths;
+  const child = useSubagentStore(s => currentThreadId ? s.nodes[currentThreadId] : undefined);
+  const nativeChild = useCodexStore(s => s.threads.find(t => t.id === currentThreadId));
+  const directInputBlocked = child ? child.thread.canAcceptDirectInput !== true : !!nativeChild && !!subagentParent(nativeChild) && nativeChild.canAcceptDirectInput !== true;
   const blocked =
-    attachments.blocked || !!contextStorageError || !!pendingFiles[owner];
+    directInputBlocked || attachments.blocked || !!contextStorageError || !!pendingFiles[owner];
   const hasContent = !!(
     inputValue.trim() ||
     images.length ||
@@ -194,7 +204,7 @@ export function Composer({
   const [sendingOwners, setSendingOwners] = useState<Record<string, boolean>>(
     {},
   );
-  const sendingRef = useRef(new Set<string>());
+  const sendingRef = useRef(sessionDraftSubmissions);
   const sending = sendingOwners[owner] ?? false;
   const { running, turnId: currentTurnId } = useTurnControl();
   const { stopping, requestStop } = useStopAction(
@@ -222,8 +232,11 @@ export function Composer({
   const wrapperRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: refocus the composer whenever the thread switches or a focus request is raised
+  // Desktop keeps the previous refocus behaviour. On touch devices, changing
+  // tabs must not summon the soft keyboard; the user can focus the editor by
+  // tapping it explicitly.
   useEffect(() => {
+    if (!shouldAutoFocusComposer()) return;
     editorRef.current?.focus();
   }, [currentThreadId, inputFocusTrigger]);
 
@@ -246,6 +259,7 @@ export function Composer({
     const parameters = followupParameters(currentThreadId ?? "");
     const text = inputValue.trim();
     const submittedContexts = richDraft.contexts;
+    const submittedMentions = mentionDrafts.read(owner);
     const completeText = composeContextText(text, submittedContexts);
     if (
       blocked ||
@@ -273,6 +287,7 @@ export function Composer({
         current.text === snapshot.text;
       useSessionDraftStore.getState().clearSubmitted(submittedOwner, snapshot);
       composerDrafts.clearSubmitted(submittedOwner, submittedContexts);
+      mentionDrafts.clear(submittedOwner, submittedMentions);
       if (unchanged) composerDrafts.setExpanded(submittedOwner, false);
     };
     const markSending = (key: string, value: boolean) => {
@@ -302,6 +317,7 @@ export function Composer({
         markSending(submittedOwner, true);
         useSessionDraftStore.getState().move(owner, submittedOwner);
         composerDrafts.move(owner, submittedOwner);
+        mentionDrafts.move(owner, submittedOwner);
         // Follow the newly created identity before moving attachments, so a storage failure
         // leaves a visible retry destination instead of creating a second session.
         useSessionNameStore.getState().initializeName("codex", thread.id, text);
@@ -346,6 +362,7 @@ export function Composer({
         running ? (currentTurnId ?? undefined) : undefined,
         parameters,
         submittedContexts,
+        submittedMentions,
       );
       setDeliveryNotice({
         owner: submittedOwner,
@@ -487,6 +504,7 @@ export function Composer({
         )}
 
         {currentThreadId && <ModelChangeNotice threadId={currentThreadId} />}
+        <SubagentSummary root={currentThreadId} />
         <FollowupQueueContent
           compactShelf
           snapshot={queueSnapshot}
@@ -508,6 +526,7 @@ export function Composer({
           {deliveryNotice.text}
         </p>
       )}
+      {directInputBlocked && <p role="status">当前子线程由主 Agent 调度，不能直接发送消息。</p>}
       <SideChatPanel />
       {reviewOpen && (
         <ReviewDialog
@@ -570,7 +589,9 @@ export function Composer({
           <div className="session-composer-bottom">
             <ComposerToolbarProvider className="session-composer-toolbar flex items-center justify-between w-full">
               <div className="session-composer-policy flex items-center">
+                <AgentMentionPicker root={currentThreadId} owner={owner} />
                 <ComposerMenu
+                  onImageFilesSelected={attachments.addFiles}
                   onImagesSelected={attachments.addPaths}
                   onFilesSelected={appendFileLinks}
                   onInsertMention={handleInsertMention}
@@ -761,7 +782,7 @@ export function Composer({
                     aria-label={stopping ? "正在停止" : "停止生成"}
                     onClick={requestStop}
                     disabled={stopping}
-                    title={stopping ? "正在停止…" : "停止生成并暂停队列"}
+                    title={stopping ? "正在停止…" : "停止主 Agent 并暂停主会话队列；子任务继续运行，可在子任务面板停止"}
                     variant="ghost"
                     size="icon"
                     className={`session-composer-stop ${hasContent ? "" : "is-primary"}`}

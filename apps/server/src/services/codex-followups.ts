@@ -560,15 +560,15 @@ export class CodexFollowups {
         ["sending", "uncertain", "failed"].includes(m.status),
       )
     )
-      return;
+      return false;
     const last = this.historyChecks.get(id);
-    if (last?.turnId === turnId && Date.now() - last.at < 5000) return;
+    if (last?.turnId === turnId && Date.now() - last.at < 5000) return false;
     this.historyChecks.set(id, { turnId, at: Date.now() });
     let history: any;
     try {
       history = (await this.runtime.readThread(id))?.thread;
     } catch {
-      return;
+      return true;
     } // No proof means no dispatch, including on older runtimes.
     if (
       this.epochs[id] !== epoch ||
@@ -577,16 +577,16 @@ export class CodexFollowups {
       !["idle", "notLoaded", "systemError"].includes(history?.status?.type) ||
       !Array.isArray(history.turns)
     )
-      return;
+      return true;
     const index = history.turns.findIndex((turn: any) => turn?.id === turnId);
-    if (index < 0) return;
+    if (index < 0) return true;
     const subsequent = history.turns.slice(index);
     if (
       !subsequent.every((turn: any) =>
         ["completed", "failed", "interrupted"].includes(turn?.status),
       )
     )
-      return;
+      return true;
     const failed = subsequent.some((turn: any) => turn.status === "failed");
     const interrupted = subsequent.some(
       (turn: any) => turn.status === "interrupted",
@@ -604,14 +604,27 @@ export class CodexFollowups {
     delete this.activeTurns[id];
     if (failed) this.statuses[id] = "systemError";
     this.historyChecks.delete(id);
+    return true;
   }
 
   tick(): Promise<void> {
     return this.run(async () => {
-      const ids = Object.keys(this.state).filter((id) =>
-        this.state[id].items.some((m) => m.status === "queued"),
+      const ids = Object.keys(this.state).filter(
+        (id) =>
+          this.state[id].items.some((m) => m.status === "queued") ||
+          !!this.state[id].awaitingTurnId,
       );
       if (!ids.length) return;
+      // Bound slow full-history work and prefer actual waiting messages. Old
+      // accepted turns without a following message are repaired fairly too.
+      ids.sort(
+        (a, b) =>
+          Number(this.state[b].items.some((m) => m.status === "queued")) -
+            Number(this.state[a].items.some((m) => m.status === "queued")) ||
+          (this.historyChecks.get(a)?.at ?? 0) -
+            (this.historyChecks.get(b)?.at ?? 0),
+      );
+      let historyBudget = 2;
       const epochs = { ...this.epochs };
       let fresh: Record<string, string>;
       try {
@@ -624,7 +637,11 @@ export class CodexFollowups {
         this.statuses[id] = fresh[id] ?? this.statuses[id] ?? "unknown";
         const thread = this.thread(id);
         if (["idle", "systemError", "notLoaded"].includes(this.statuses[id])) {
-          await this.reconcileCompletion(id, epochs[id]);
+          if (
+            historyBudget > 0 &&
+            (await this.reconcileCompletion(id, epochs[id]))
+          )
+            historyBudget--;
           // Notifications invalidate the history read before entering the serial queue.
           if (epochs[id] !== this.epochs[id]) continue;
         }
@@ -666,6 +683,7 @@ export class CodexFollowups {
     });
     const text = composeContextText(item.text, item.contexts);
     const input = [
+      ...(item.mentions ?? []).map(m => ({ type: "mention", name: m.name, path: m.path })),
       ...(text.trim() ? [{ type: "text", text, text_elements: [] }] : []),
       ...item.images.map((path) => ({ type: "localImage", path })),
     ];

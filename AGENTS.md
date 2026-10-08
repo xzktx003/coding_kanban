@@ -123,3 +123,9 @@
 ### Session VS Code 编辑工作区
 
 - VS Code 在右侧工具标签内打开，入口与终端相邻；遵循 `docs/session-vscode-panel.md` 的项目跟随、固定和目录唯一规则。隐藏或关闭工具标签不得卸载已打开的 VS Code iframe；编辑工作区按项目真实目录去重，本地编辑服务的并发启动必须合并。
+
+### Codex 子 Agent 边界
+
+- 子 Agent 位于 `features/subagents`，独立观察集合不得自动加入关注标签或改变主输入/项目。打开原生历史只读，不 resume 或获取写入权。
+- 普通输入只有原生明确 `canAcceptDirectInput === true` 才开放；审批按实际 thread/request/turn/item/实例标记回复，中断权限独立。批量停止须显式确认范围与轮次，默认本轮不包含旧轮或未知创建轮次。
+- 协议、恢复规则和原生隔离验收脚本见 `docs/session-subagents.md`；两份原生测试版本的问题由主线程发起，不绕过限制。启用新 Rust 二进制仍遵守活跃 Agent 安全窗口。

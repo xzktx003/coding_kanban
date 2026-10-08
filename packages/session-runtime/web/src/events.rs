@@ -67,6 +67,7 @@ struct Inner {
     // they are invalid once this runtime/app-server instance goes away.
     user_inputs: HashMap<String, SeqEvent>,
     pending_requests: HashMap<String, SeqEvent>,
+    claimed_replies: HashSet<String>,
 }
 
 fn input_key(payload: &Value) -> Option<String> {
@@ -154,6 +155,19 @@ pub struct EventHub {
 }
 
 impl EventHub {
+    /// Bind a reply to its live RPC and instance marker. An unknown delivery
+    /// outcome stays claimed until resolution, preventing an automatic resend.
+    pub fn claim_reply(&self, request: &Value, id: &Value, event: &str, kind: &str) -> bool {
+        let Some(key) = input_key(request) else { return false };
+        let mut inner = self.inner.lock().expect("event hub mutex poisoned");
+        let Some(live) = inner.pending_requests.get(&key) else { return false };
+        if request["requestId"] != *id || live.event != event || live.payload["type"] != kind { return false }
+        for field in ["turnId", "itemId", "requestToken"] {
+            if request[field] != live.payload[field] { return false }
+        }
+        let claim = serde_json::json!([key, live.payload["requestToken"]]).to_string();
+        inner.claimed_replies.insert(claim)
+    }
     pub fn new() -> Self {
         let (tx, _) = broadcast::channel(SUBSCRIBER_CHANNEL_CAPACITY);
         Self {
@@ -162,6 +176,7 @@ impl EventHub {
                 next_seq: 1,
                 user_inputs: HashMap::new(),
                 pending_requests: HashMap::new(),
+                claimed_replies: HashSet::new(),
             })),
             tx,
         }
@@ -207,6 +222,10 @@ impl EventHub {
             };
             update_user_inputs(&mut inner, &stamped);
             update_pending_requests(&mut inner, &stamped);
+            if !inner.claimed_replies.is_empty() {
+                let live: HashSet<String> = inner.pending_requests.values().filter_map(|r| input_key(&r.payload).map(|key| serde_json::json!([key, r.payload["requestToken"]]).to_string())).collect();
+                inner.claimed_replies.retain(|claim| live.contains(claim));
+            }
             inner.buffer.push_back(stamped.clone());
             while inner.buffer.len() > REPLAY_BUFFER_CAPACITY {
                 inner.buffer.pop_front();
@@ -303,6 +322,21 @@ mod tests {
         parse_namespace_filter(Some(spec))
     }
 
+    #[test]
+    fn replies_match_full_request_identity_and_are_claimed_once() {
+        let hub = EventHub::new();
+        let request = json!({"threadId":"child","turnId":"turn","itemId":"item","requestId":1,"type":"commandExecution","requestToken":"instance-one"});
+        hub.publish("codex/approval-request".into(), request.clone());
+        for (field, value) in [("threadId", "parent"), ("turnId", "old"), ("itemId", "other"), ("requestToken", "instance-two")] {
+            let mut wrong = request.clone(); wrong[field] = json!(value);
+            assert!(!hub.claim_reply(&wrong, &json!(1), "codex/approval-request", "commandExecution"));
+        }
+        assert!(!hub.claim_reply(&request, &json!(1), "codex/approval-request", "fileChange"));
+        assert!(hub.claim_reply(&request, &json!(1), "codex/approval-request", "commandExecution"));
+        assert!(!hub.claim_reply(&request, &json!(1), "codex/approval-request", "commandExecution"));
+        hub.publish("codex:notification".into(), json!({"method":"serverRequest/resolved","params":{"threadId":"child","requestId":1}}));
+        assert!(!hub.claim_reply(&request, &json!(1), "codex/approval-request", "commandExecution"));
+    }
     #[test]
     fn namespace_handles_every_naming_style_in_use() {
         assert_eq!(namespace_of("codex:notification"), "codex");

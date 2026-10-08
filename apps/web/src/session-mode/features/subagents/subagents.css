@@ -1,0 +1,201 @@
+.session-mode .session-subagent-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--foreground);
+}
+.session-mode .session-subagent-panel header,
+.session-mode .session-subagent-panel footer,
+.session-mode .session-subagent-detail-meta {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.session-mode .session-subagent-panel footer {
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+  max-height: 45%;
+  overflow: auto;
+}
+.session-mode .session-subagent-panel h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.session-mode .session-subagent-panel h3 {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  margin: 14px 0 6px;
+}
+.session-mode .session-subagent-panel button,
+.session-mode .session-subagent-summary button,
+.session-mode .session-agent-mentions button {
+  min-height: 44px;
+  border-radius: 6px;
+  padding: 5px 9px;
+  text-align: left;
+}
+.session-mode .session-subagent-panel button:hover,
+.session-mode .session-subagent-summary button:hover,
+.session-mode .session-agent-mentions button:hover {
+  background: var(--muted);
+}
+.session-mode .session-subagent-panel button:focus-visible,
+.session-mode .session-agent-mentions button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.session-mode .session-subagent-panel button:disabled {
+  opacity: 0.5;
+}
+.session-mode .session-subagent-panel small {
+  display: block;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.session-mode .session-subagent-filters {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.session-mode .session-subagent-filters [aria-pressed="true"] {
+  background: var(--muted);
+}
+.session-mode .session-subagent-notice {
+  font-size: 12px;
+  background: var(--muted);
+  border-radius: 7px;
+  padding: 8px;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-subagent-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px;
+}
+.session-mode .session-subagent-task {
+  display: block;
+  width: 100%;
+  border-bottom: 1px solid var(--border);
+}
+.session-mode .session-subagent-task strong {
+  font-weight: 600;
+}
+.session-mode .session-subagent-task span {
+  float: right;
+  font-size: 12px;
+}
+.session-mode .session-subagent-task p {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-subagent-transcript {
+  display: flex;
+  flex: 1;
+  min-height: 120px;
+  overflow: hidden;
+}
+.session-mode .session-subagent-panel textarea,
+.session-mode .session-subagent-panel input:not([type="file"]) {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--background);
+}
+.session-mode .session-subagent-upload {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  cursor: pointer;
+}
+.session-mode .session-subagent-upload input {
+  max-width: 180px;
+  font-size: 12px;
+}
+.session-mode .session-subagent-summary {
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.session-mode .session-subagent-summary-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+}
+.session-mode .session-agent-mentions {
+  position: relative;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.session-mode .session-mention-chip {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding-left: 8px;
+}
+.session-mode .session-agent-mention-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  min-width: 250px;
+  max-height: 320px;
+  overflow: auto;
+  z-index: 40;
+  padding: 12px;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: 0 8px 20px #0003;
+}
+.session-mode .session-agent-mention-menu button,
+.session-mode .session-agent-mention-menu small,
+.session-mode .session-agent-mention-menu strong {
+  display: block;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-agent-mention-menu strong {
+  margin-top: 8px;
+}
+.session-mode .session-subagent-confirm {
+  background: var(--background);
+  color: var(--foreground);
+  padding: 24px;
+  max-width: min(480px, 95vw);
+  max-height: 80dvh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.session-mode .session-subagent-confirm::backdrop {
+  background: #0008;
+}
+.session-mode .session-subagent-stop-result {
+  padding: 6px 16px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-subagent-results {
+  flex-shrink: 0;
+  max-height: 25%;
+  overflow: auto;
+}
+.session-mode .session-subagent-detail-meta {
+  max-height: 35%;
+  overflow: auto;
+}
+.session-mode .session-subagent-pending {
+  padding: 12px 16px;
+  max-height: 45%;
+  overflow: auto;
+  flex-shrink: 0;
+}
+.session-mode .session-agent-mentions > button {
+  min-width: 44px;
+}

@@ -6,7 +6,7 @@ import { useAcpStore } from "../../stores/useAcpStore";
 import { collectQuestions, latestQuestionTurn, readQuestions } from "./model";
 import { useAsyncQuestionStore } from "./store";
 
-/** Only the live notification path opens a panel. History hydration is passive.
+/** Live events and newly discovered warm updates can open a panel; cold hydration is passive.
  * The prior transcript deduplicates started/completed/reconnect replay, including
  * after the user has explicitly collapsed the panel. */
 export function revealNewQuestion(

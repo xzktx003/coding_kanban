@@ -2,8 +2,40 @@ import { afterEach, expect, it, vi } from "vitest";
 vi.mock("@session/hooks/runtime", () => ({
   buildEventUrl: (path: string) => path,
 }));
-import { openEventStream } from "./eventStream";
+import { openEventStream, reconcileEventStream } from "./eventStream";
 afterEach(() => vi.unstubAllGlobals());
+it("recovers when a reconnect snapshot proves the runtime sequence restarted", () => {
+  const instances: any[] = [];
+  class FakeSource {
+    onmessage: any;
+    close = vi.fn();
+    constructor(public url: string) {
+      instances.push(this);
+    }
+  }
+  vi.stubGlobal("EventSource", FakeSource);
+  const receive = vi.fn();
+  const restart = vi.fn();
+  window.addEventListener("session-runtime-restarted", restart);
+  const close = openEventStream({ onEvent: receive });
+  const emit = (seq: number, event = "codex:notification") =>
+    instances
+      .at(-1)
+      .onmessage({ data: JSON.stringify({ seq, event, payload: {} }) });
+  try {
+    emit(900);
+    reconcileEventStream();
+    expect(instances.at(-1).url).toContain("since=900");
+    emit(2, "codex/pending-requests-snapshot");
+    expect(restart).toHaveBeenCalledOnce();
+    expect(instances.at(-1).url).not.toContain("since=");
+    emit(3);
+    expect(receive.mock.calls.at(-1)?.[0].seq).toBe(3);
+  } finally {
+    close();
+    window.removeEventListener("session-runtime-restarted", restart);
+  }
+});
 it("shares one browser connection across agent subscribers and releases it only after all unsubscribe", () => {
   const instances: FakeSource[] = [];
   class FakeSource {
@@ -63,5 +95,79 @@ it("delivers reconciliation at the same sequence as replay without redelivering 
     ]);
   } finally {
     close();
+  }
+});
+
+it("reports gaps and failed delivery while still delivering healthy subscribers", async () => {
+  vi.useFakeTimers();
+  let source: any;
+  class FakeSource {
+    onopen: any;
+    onmessage: any;
+    onerror: any;
+    close() {}
+    constructor() {
+      source = this;
+    }
+  }
+  vi.stubGlobal("EventSource", FakeSource);
+  const resync = vi.fn(),
+    healthy = vi.fn();
+  const closeA = openEventStream({
+    onEvent: () => {
+      throw new Error("broken renderer");
+    },
+    onResync: resync,
+  });
+  const closeB = openEventStream({ onEvent: healthy });
+  try {
+    source.onopen();
+    for (const seq of [1, 3])
+      source.onmessage({
+        data: JSON.stringify({ seq, event: "codex:notification", payload: {} }),
+      });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(healthy).toHaveBeenCalledTimes(2);
+    expect(resync).toHaveBeenCalledOnce();
+  } finally {
+    closeA();
+    closeB();
+    vi.useRealTimers();
+  }
+});
+it("invalid frames request reconciliation and stale connections cannot deliver after replacement", async () => {
+  vi.useFakeTimers();
+  const instances: any[] = [];
+  class FakeSource {
+    onopen: any;
+    onmessage: any;
+    onerror: any;
+    close() {}
+    constructor() {
+      instances.push(this);
+    }
+  }
+  vi.stubGlobal("EventSource", FakeSource);
+  const receive = vi.fn(),
+    resync = vi.fn();
+  const close = openEventStream({ onEvent: receive, onResync: resync });
+  try {
+    instances[0].onopen();
+    instances[0].onmessage({ data: "{bad" });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(resync).toHaveBeenCalledOnce();
+    instances[0].onerror();
+    await vi.advanceTimersByTimeAsync(500);
+    instances[0].onmessage({
+      data: JSON.stringify({
+        seq: 9,
+        event: "codex:notification",
+        payload: {},
+      }),
+    });
+    expect(receive).not.toHaveBeenCalled();
+  } finally {
+    close();
+    vi.useRealTimers();
   }
 });

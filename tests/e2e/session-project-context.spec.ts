@@ -138,17 +138,13 @@ test("every layout owns its project, details never select, order and drafts surv
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(width);
-    for (const label of ["展开项目列表", "切换为深色模式", "更多功能"]) {
-      const bounds = (await page
-        .getByRole("button", { name: label, exact: true })
-        .boundingBox())!;
+    for (const control of [page.locator(".session-global-projects"), page.getByRole("button", {name:"切换为深色模式",exact:true}), page.getByRole("button", {name:"更多功能",exact:true})]) {
+      const bounds = (await control.boundingBox())!;
       expect(bounds.x).toBeGreaterThanOrEqual(0);
       expect(bounds.x + bounds.width).toBeLessThanOrEqual(width);
     }
-    await page
-      .getByRole("button", { name: "展开项目列表", exact: true })
-      .click();
     if (width < 768) {
+      await page.getByRole("button", { name: "展开项目列表", exact: true }).click();
       await expect(
         page.getByRole("dialog", { name: "项目与会话列表" }),
       ).toBeVisible();

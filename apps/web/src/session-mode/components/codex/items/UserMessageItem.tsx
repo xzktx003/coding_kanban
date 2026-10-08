@@ -1,3 +1,4 @@
+import { useTranscriptInspection } from "../thread/inspection";
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { Pencil } from "lucide-react";
 import { useRef, useState } from "react";
@@ -40,7 +41,8 @@ export const UserMessageItem = ({
     .filter((m) => m.type === "text")
     .map((m) => m.text)
     .join("");
-  const canEdit = !!onEdit && text.length > 0 && !editDisabled;
+  const inspection = useTranscriptInspection();
+  const canEdit = !inspection && !!onEdit && text.length > 0 && !editDisabled;
 
   const handleEdit = async () => {
     if (!canEdit || !onEdit) return;

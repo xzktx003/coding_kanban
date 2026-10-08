@@ -1,5 +1,8 @@
 import type { ServerNotification } from "@session/bindings";
-import { normalizeQuestionEvents, readQuestions } from "@session/features/async-questions/model";
+import {
+  normalizeQuestionEvents,
+  readQuestions,
+} from "@session/features/async-questions/model";
 import type { RenderEventContext } from "../items/fileChangeLogic";
 import { deriveRenderItems, type RenderItem } from "./deriveRenderItems";
 import {
@@ -77,6 +80,19 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
     )
       turnsWithChanges.add(id);
   });
+  const collabCompleted = new Set(
+    events.flatMap((event) =>
+      event.method === "item/completed" &&
+      ["collabAgentToolCall", "subAgentActivity"].includes(
+        event.params.item.type,
+      )
+        ? [
+            `${event.params.threadId}:${event.params.turnId}:${event.params.item.id}`,
+          ]
+        : [],
+    ),
+  );
+  const seenCollab = new Set<string>();
   const seenDeltaIds = new Set<string>();
   const rows: ThreadRow[] = [];
   for (const item of deriveRenderItems(events)) {
@@ -88,9 +104,25 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
     if (hiddenMethods.has(event.method)) continue;
     if (
       event.method === "item/started" &&
-      event.params.item.type !== "userMessage"
+      !["userMessage", "collabAgentToolCall", "subAgentActivity"].includes(
+        event.params.item.type,
+      )
     )
       continue;
+    if (
+      (event.method === "item/started" || event.method === "item/completed") &&
+      ["collabAgentToolCall", "subAgentActivity"].includes(
+        event.params.item.type,
+      )
+    ) {
+      const key = `${event.params.threadId}:${event.params.turnId}:${event.params.item.id}`;
+      if (
+        (event.method === "item/started" && collabCompleted.has(key)) ||
+        seenCollab.has(key)
+      )
+        continue;
+      seenCollab.add(key);
+    }
     if (event.method === "item/agentMessage/delta") {
       seenDeltaIds.add(event.params.itemId);
       if (!event.params.delta.trim()) continue;
@@ -138,8 +170,20 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
       };
     }
     const userKey = userMessageKey(event);
+    const itemId =
+      event.method === "item/started" || event.method === "item/completed"
+        ? event.params.item.id
+        : "itemId" in event.params
+          ? event.params.itemId
+          : event.method === "turn/completed"
+            ? event.params.turn.id
+            : undefined;
     rows.push({
-      key: userKey ? `user-${userKey}` : `event-${index}`,
+      key: userKey
+        ? `user-${userKey}`
+        : itemId
+          ? `event-${turnIdOf(event) ?? ""}-${itemId}`
+          : `event-${index}`,
       item,
       context,
     });

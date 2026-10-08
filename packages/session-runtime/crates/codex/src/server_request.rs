@@ -2,6 +2,8 @@ use crate::protocol::RequestId;
 use codexia_shared::event_sink::EventSink;
 use serde_json::Value;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+static REQUEST_MARKER_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 // Handle server requests (approval requests)
 pub async fn handle_server_request(
@@ -34,6 +36,9 @@ pub async fn handle_server_request(
         serde_json::to_value(request_id).unwrap_or(Value::Null),
     );
     map.insert("type".to_string(), Value::String(kind.to_string()));
+    // Correlation marker, never an authentication secret. It distinguishes IDs
+    // reused after an app-server/runtime restart.
+    map.insert("requestToken".into(), Value::String(format!("{}-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos(), REQUEST_MARKER_SEQUENCE.fetch_add(1, Ordering::Relaxed))));
 
     event_sink.emit(event, payload);
 }

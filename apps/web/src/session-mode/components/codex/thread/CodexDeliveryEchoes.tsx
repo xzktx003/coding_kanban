@@ -1,3 +1,4 @@
+import { useSessionSyncStore } from "@session/stores/useSessionSyncStore";
 import { useEffect, useMemo, useRef } from "react";
 import type { ServerNotification } from "@session/bindings";
 import { codexService } from "@session/services/codexService";
@@ -15,6 +16,7 @@ export function CodexDeliveryEchoes({
   threadId: string;
   events: ServerNotification[];
 }) {
+  const recovering = useSessionSyncStore((s) => s.recovering[threadId]);
   const entries = useCodexDeliveryStore((s) => s.entries);
   const acknowledged = useMemo(() => deliveredClientIds(events), [events]);
   const terminalTurns = useMemo(() => {
@@ -97,7 +99,9 @@ export function CodexDeliveryEchoes({
                   ? "消息已送达，本轮已停止"
                   : e.turnId && terminalTurns.get(e.turnId) === "completed"
                     ? "消息已送达，本轮已结束"
-                    : "已接收，等待消息同步"
+                    : recovering
+                      ? "消息已送达，正在同步回复…"
+                      : "已接收，等待消息同步"
               : e.status === "submitting"
                 ? "正在提交"
                 : e.status === "sending"

@@ -1,4 +1,4 @@
-import type { ServerNotification } from '@session/bindings';
+import type { ServerNotification } from "@session/bindings";
 import type {
   Account,
   CommandExecutionStatus,
@@ -6,7 +6,7 @@ import type {
   ThreadGoal,
   ThreadStatus,
   ThreadTokenUsage,
-} from '@session/bindings/v2';
+} from "@session/bindings/v2";
 
 /**
  * Per-thread turn timing, fed by turn/started + turn/completed + error.
@@ -20,7 +20,7 @@ export interface TurnTiming {
   /** Set once the turn completes/fails/is interrupted (turn/completed). */
   durationMs: number | null;
   /** Last known turn status; 'inProgress' while active. */
-  status: 'inProgress' | 'completed' | 'interrupted' | 'failed';
+  status: "inProgress" | "completed" | "interrupted" | "failed";
 }
 
 export interface ThreadsSlice {
@@ -46,7 +46,7 @@ export interface ThreadsSlice {
 }
 
 export interface EventsSlice {
-  /** True only after a full history response, never from a streamed event. */
+  /** A validated history window or device cache exists; never set by a streamed event. */
   historyLoadedMap: Record<string, boolean>;
   historyLoadingMap: Record<string, boolean>;
   historyErrorMap: Record<string, string | undefined>;

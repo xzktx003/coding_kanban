@@ -48,7 +48,7 @@ export function deriveRenderItems(events: ServerNotification[]): RenderItem[] {
       event.params.item.type === "commandExecution"
     ) {
       if (cmdBuffer.length === 0) {
-        cmdBufferKey = `cmd-${i}`;
+        cmdBufferKey = `cmd-${event.params.turnId}-${event.params.item.id}`;
       }
       const actions = event.params.item.commandActions as CommandAction[];
       const visibleActions = actions.length

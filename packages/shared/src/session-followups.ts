@@ -1,3 +1,4 @@
+import type { AgentMention } from "./session-subagents.js";
 import type { ComposerContext } from "./composer-context.js";
 export type FollowupMode = "queue" | "steer" | "replace";
 export type FollowupStatus =
@@ -13,6 +14,7 @@ export interface FollowupMessage {
   text: string;
   images: string[];
   contexts?: ComposerContext[];
+  mentions?: AgentMention[];
   parameters: Record<string, unknown>;
   mode: FollowupMode;
   expectedTurnId?: string;
@@ -52,6 +54,7 @@ export interface FollowupSubmit {
   text: string;
   images: string[];
   contexts?: ComposerContext[];
+  mentions?: AgentMention[];
   parameters: Record<string, unknown>;
   mode: FollowupMode;
   expectedTurnId?: string;

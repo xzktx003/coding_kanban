@@ -1,3 +1,4 @@
+import { useTranscriptInspection } from "../thread/inspection";
 import { Diff, Undo2 } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useIsMobile } from "@session/hooks/use-mobile";
@@ -28,6 +29,7 @@ type PendingUndo = { kind: "all" } | { kind: "file"; path: string };
 export const ThreadFileChangesSummary = ({
   changes,
 }: ThreadFileChangesSummaryProps) => {
+  const inspection = useTranscriptInspection();
   const { t } = useTranslation("thread");
   const { cwd } = useWorkspaceStore();
   const { hasConfirmedGitRevert, setHasConfirmedGitRevert } = useEditorStore();
@@ -57,6 +59,7 @@ export const ThreadFileChangesSummary = ({
 
   if (changes.length === 0) return null;
 
+  if (inspection) return <div className="session-file-changes space-y-2">{changes.map(change => <details key={change.path}><summary className="cursor-pointer text-sm">{change.path} +{change.addedCount} −{change.removedCount}</summary><DiffViewer {...getDiffViewerProps(change)} displayPath={change.path} isCollapsed={false} /></details>)}</div>;
   const totals = changes.reduce(
     (acc, change) => {
       acc.added += change.addedCount;
@@ -101,7 +104,7 @@ export const ThreadFileChangesSummary = ({
             size="sm"
             className="h-6 px-2 gap-1.5"
             onClick={() => requestUndo({ kind: "all" })}
-            disabled={undoing}
+            disabled={undoing || inspection}
             title={t("fileChanges.undoAllTitle")}
           >
             <Undo2 className="h-3 w-3" />
@@ -207,7 +210,7 @@ export const ThreadFileChangesSummary = ({
               size="icon"
               className="h-5 w-5 shrink-0"
               onClick={() => requestUndo({ kind: "file", path: change.path })}
-              disabled={undoing}
+              disabled={undoing || inspection}
               title={t("fileChanges.undoFileTitle")}
             >
               <Undo2 className="h-3 w-3" />

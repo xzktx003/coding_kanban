@@ -59,8 +59,8 @@ for (const width of [375, 1440]) {
           if (fail) {
             fail = false;
             await route.fulfill({
-              status: 503,
-              json: { error: "temporary offline" },
+              status: 400,
+              json: { error: "isolated definitive rejection" },
             });
             return;
           }
@@ -140,7 +140,7 @@ for (const width of [375, 1440]) {
       ).toBe(true);
       await form.getByRole("button", { name: "下一步" }).click();
       await form.getByRole("button", { name: "提交回答" }).click();
-      await expect(form.getByRole("alert")).toContainText("提交失败");
+      await expect(form.getByRole("alert")).toContainText("回答发送失败");
       await expect(form.getByPlaceholder("请输入你的回答")).toHaveValue(
         "喜欢安静，也想走走",
       );
@@ -152,6 +152,12 @@ for (const width of [375, 1440]) {
       expect(responses).toEqual([
         {
           request_id: "question-rpc",
+          request: {
+            threadId: "ux-0",
+            requestId: "question-rpc",
+            turnId: "question-turn",
+            itemId: "question-item",
+          },
           response: {
             answers: {
               weekend: { answers: ["出门逛逛"] },

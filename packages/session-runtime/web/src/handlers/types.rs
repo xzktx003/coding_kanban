@@ -8,18 +8,24 @@ use codexia_automation::{AutomationSchedule, CwdMode};
 
 #[derive(Deserialize)]
 pub(crate) struct ApprovalDecisionParams {
+    #[serde(default)]
+    pub(crate) request: Option<Value>,
     pub(crate) request_id: RequestId,
     pub(crate) decision: Value,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct UserInputResponseParams {
+    #[serde(default)]
+    pub(crate) request: Option<Value>,
     pub(crate) request_id: RequestId,
     pub(crate) response: Value,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct McpElicitationResponseParams {
+    #[serde(default)]
+    pub(crate) request: Option<Value>,
     pub(crate) request_id: RequestId,
     pub(crate) action: String,
     #[serde(default)]
@@ -30,6 +36,8 @@ pub(crate) struct McpElicitationResponseParams {
 
 #[derive(Deserialize)]
 pub(crate) struct PermissionsApprovalParams {
+    #[serde(default)]
+    pub(crate) request: Option<Value>,
     pub(crate) request_id: RequestId,
     pub(crate) permissions: Value,
     pub(crate) scope: String,

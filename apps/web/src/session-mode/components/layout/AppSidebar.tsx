@@ -29,6 +29,7 @@ import {
   SidebarHeader,
   SidebarTrigger,
 } from "@session/components/ui/sidebar";
+import { useIsMobile } from "@session/hooks/use-mobile";
 import { isPhone } from "@session/hooks/runtime";
 import { useLayoutStore } from "@session/stores";
 import { UpdateIndicator } from "../../features/UpdateIndicator";
@@ -41,6 +42,7 @@ import { SideBarPinnedList } from "./SideBarPinnedList";
 import { UserInfo } from "./UserInfo";
 
 export function AppSideBar() {
+  const mobile = useIsMobile();
   const { t } = useTranslation("sidebar");
   const { activeSidebarTab, sidebarMode, setHasSeenBotTab } = useLayoutStore();
   const [sessionManagerOpen, setSessionManagerOpen] = useState(false);
@@ -73,12 +75,12 @@ export function AppSideBar() {
     <>
       <Sidebar className="border-r border-sidebar-border bg-zinc-100/95 dark:bg-zinc-900/95">
         <SidebarHeader className="session-sidebar-header">
-          {/* Header row: toggle */}
+          {/* Desktop uses the fixed top navigation toggle; the modal drawer needs its own close action. */}
           <div
             className="session-sidebar-search-row"
             data-tauri-drag-region
           >
-            <SidebarTrigger aria-label="收起项目列表" title="收起项目列表" />
+            {mobile && <SidebarTrigger aria-label="收起项目列表" title="收起项目列表" />}
             <Button
               variant="ghost"
               size="sm"

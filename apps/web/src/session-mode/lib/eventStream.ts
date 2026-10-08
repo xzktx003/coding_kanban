@@ -1,4 +1,5 @@
 import { buildEventUrl } from "@session/hooks/runtime";
+import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 export interface EventEnvelope {
   seq: number;
   event: string;
@@ -7,6 +8,7 @@ export interface EventEnvelope {
 interface Subscriber {
   agents?: string[];
   onOpen?: () => void;
+  onResync?: () => void;
   onEvent: (event: EventEnvelope) => void;
   label?: string;
 }
@@ -16,6 +18,25 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let sequence: number | null = null;
 let retry = 500;
 let connected = false;
+let repairReconnectAt = -Infinity;
+let repairTimer: ReturnType<typeof setTimeout> | null = null;
+function requestRepair() {
+  if (repairTimer || !subscribers.size) return;
+  repairTimer = setTimeout(() => {
+    repairTimer = null;
+    for (const subscriber of [...subscribers]) {
+      try {
+        subscriber.onResync?.();
+      } catch (error) {
+        console.warn("Session recovery failed", error);
+      }
+    }
+    if (Date.now() - repairReconnectAt >= 15000) {
+      repairReconnectAt = Date.now();
+      connect();
+    }
+  }, 250);
+}
 export const isEventStreamConnected = () => connected;
 function namespace(event: string) {
   return event === "fs_change"
@@ -29,10 +50,13 @@ function invoke(callback: (() => void) | undefined) {
     callback?.();
   } catch (error) {
     console.warn("Session event subscriber failed", error);
+    requestRepair();
   }
 }
 function connect() {
   if (!subscribers.size) return;
+  if (timer) clearTimeout(timer);
+  timer = null;
   source?.close();
   connected = false;
   const next = new EventSource(
@@ -44,6 +68,7 @@ function connect() {
   next.onopen = () => {
     if (source !== next) return;
     connected = true;
+    useSessionSyncStore.setState({ connection: "connected" });
     retry = 500;
     for (const subscriber of [...subscribers]) invoke(subscriber.onOpen);
   };
@@ -52,10 +77,25 @@ function connect() {
     try {
       const envelope = JSON.parse(event.data) as EventEnvelope;
       if (
-        typeof envelope.seq !== "number" ||
+        !Number.isSafeInteger(envelope.seq) ||
+        envelope.seq < 0 ||
         typeof envelope.event !== "string"
-      )
+      ) {
+        requestRepair();
         return;
+      }
+      const snapshot =
+        envelope.event === "codex/user-input-snapshot" ||
+        envelope.event === "codex/pending-requests-snapshot";
+      // Snapshots carry the server's current cursor after all replay. A lower
+      // cursor proves that this stream belongs to a new runtime. Keeping the
+      // old maximum would discard every new event until it caught up, even
+      // though EventSource looks connected and HTTP requests succeed.
+      if (snapshot && sequence !== null && envelope.seq < sequence) {
+        window.dispatchEvent(new Event("session-runtime-restarted"));
+        requestRepair();
+        return;
+      }
       // The atomic pending-question snapshot follows replay at the current
       // cursor. It may share the last replayed sequence; it is reconciliation,
       // not a duplicate historical event.
@@ -66,6 +106,8 @@ function connect() {
         envelope.seq <= sequence
       )
         return;
+      if (!snapshot && sequence !== null && envelope.seq > sequence + 1)
+        requestRepair();
       sequence = Math.max(sequence ?? 0, envelope.seq);
       for (const subscriber of [...subscribers]) {
         if (
@@ -76,13 +118,16 @@ function connect() {
         invoke(() => subscriber.onEvent(envelope));
       }
     } catch (error) {
+      requestRepair();
       console.warn("Invalid session event frame", error);
     }
   };
   next.onerror = () => {
     if (source !== next) return;
     next.close();
+    requestRepair();
     connected = false;
+    useSessionSyncStore.setState({ connection: "reconnecting" });
     source = null;
     if (!subscribers.size) return;
     timer = setTimeout(connect, retry);
@@ -117,6 +162,9 @@ export function openEventStream(subscriber: Subscriber): () => void {
     source?.close();
     source = null;
     sequence = null;
+    if (repairTimer) clearTimeout(repairTimer);
+    repairTimer = null;
+    repairReconnectAt = -Infinity;
     connected = false;
     retry = 500;
   };

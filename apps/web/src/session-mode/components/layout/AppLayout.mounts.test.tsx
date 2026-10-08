@@ -12,7 +12,9 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock("@session/session-dom", () => ({
   listenInSessionMode: () => () => {},
+  isSessionModeActive: () => true,
 }));
+vi.mock("@session/features/subagents/hooks", () => ({ useSubagentFamilySync: () => {} }));
 vi.mock("@session/hooks/use-mobile", () => ({
   useIsMobile: () => state.mobile,
 }));

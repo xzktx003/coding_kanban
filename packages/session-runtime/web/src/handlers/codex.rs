@@ -18,6 +18,14 @@ fn require_codex(state: &WebServerState) -> Result<&AppState, ErrorResponse> {
     })
 }
 
+fn claim_response(state: &WebServerState, request: Option<&Value>, id: &codexia_codex::protocol::RequestId, event: &str, kind: &str) -> Result<(), ErrorResponse> {
+    if let Some(request) = request
+        && !state.event_hub.claim_reply(request, &json!(id), event, kind) {
+        return Err(ErrorResponse { error: "SESSION_RPC_EXPIRED: 请求身份、运行实例已改变或正在提交，回复尚未发送".into() });
+    }
+    Ok(())
+}
+
 pub(crate) async fn api_start_thread(
     AxumState(state): AxumState<WebServerState>,
     Json(params): Json<Value>,
@@ -213,6 +221,7 @@ pub(crate) async fn api_respond_command_execution_approval(
     AxumState(state): AxumState<WebServerState>,
     Json(params): Json<ApprovalDecisionParams>,
 ) -> Result<StatusCode, ErrorResponse> {
+    claim_response(&state, params.request.as_ref(), &params.request_id, "codex/approval-request", "commandExecution")?;
     require_codex(&state)?
         .codex
         .send_response(params.request_id, json!({ "decision": params.decision }))
@@ -226,6 +235,7 @@ pub(crate) async fn api_respond_file_change_approval(
     AxumState(state): AxumState<WebServerState>,
     Json(params): Json<ApprovalDecisionParams>,
 ) -> Result<StatusCode, ErrorResponse> {
+    claim_response(&state, params.request.as_ref(), &params.request_id, "codex/approval-request", "fileChange")?;
     require_codex(&state)?
         .codex
         .send_response(params.request_id, json!({ "decision": params.decision }))
@@ -239,6 +249,7 @@ pub(crate) async fn api_respond_user_input(
     AxumState(state): AxumState<WebServerState>,
     Json(params): Json<UserInputResponseParams>,
 ) -> Result<StatusCode, ErrorResponse> {
+    claim_response(&state, params.request.as_ref(), &params.request_id, "codex/request-user-input", "requestUserInput")?;
     require_codex(&state)?
         .codex
         .send_response(params.request_id, params.response)
@@ -252,6 +263,7 @@ pub(crate) async fn api_respond_mcp_elicitation(
     AxumState(state): AxumState<WebServerState>,
     Json(params): Json<McpElicitationResponseParams>,
 ) -> Result<StatusCode, ErrorResponse> {
+    claim_response(&state, params.request.as_ref(), &params.request_id, "codex/elicitation-request", "mcpServerElicitation")?;
     require_codex(&state)?
         .codex
         .send_response(
@@ -272,6 +284,7 @@ pub(crate) async fn api_respond_permissions_approval(
     AxumState(state): AxumState<WebServerState>,
     Json(params): Json<PermissionsApprovalParams>,
 ) -> Result<StatusCode, ErrorResponse> {
+    claim_response(&state, params.request.as_ref(), &params.request_id, "codex/permissions-request", "permissionsApproval")?;
     require_codex(&state)?
         .codex
         .send_response(
@@ -474,6 +487,23 @@ pub(crate) async fn api_switch_account_snapshot(
 }
 
 // These endpoints never implicitly resume a thread.
+pub(crate) async fn api_thread_metadata(
+    AxumState(state): AxumState<WebServerState>, Json(params): Json<Value>,
+) -> Result<Json<Value>, ErrorResponse> {
+    let id = params["threadId"].as_str().ok_or_else(|| to_error_response("threadId required"))?;
+    Ok(Json(require_codex(&state)?.codex.send_request("thread/read", json!({"threadId":id,"includeTurns":false})).await.map_err(to_error_response)?))
+}
+pub(crate) async fn api_agent_roles(
+    AxumState(state): AxumState<WebServerState>, Json(params): Json<Value>,
+) -> Result<Json<Value>, ErrorResponse> {
+    let cwd = params["cwd"].as_str();
+    let response = require_codex(&state)?.codex.send_request("config/read", json!({"cwd":cwd,"includeLayers":false})).await.map_err(to_error_response)?;
+    let roles: Vec<Value> = response.pointer("/config/agents").and_then(Value::as_object).map(|agents| agents.iter().filter_map(|(name, config)| {
+        if !config.is_object() || name.len() > 160 || !name.chars().all(|c| c.is_ascii_alphanumeric() || "-_:".contains(c)) { return None; }
+        Some(json!({"name":name,"description":config.get("description").and_then(Value::as_str).unwrap_or("")}))
+    }).collect()).unwrap_or_default();
+    Ok(Json(json!({"roles":roles})))
+}
 pub(crate) async fn api_read_thread(
     AxumState(state): AxumState<WebServerState>, Json(params): Json<Value>,
 ) -> Result<Json<Value>, ErrorResponse> {

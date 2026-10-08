@@ -1,17 +1,19 @@
 import { requestTimeout } from "../lib/requestTimeout";
 import type { ThreadStatus } from "../bindings/v2";
-import { useCodexStore } from "../components/codex/stores";
+import {
+  useCodexStore,
+  useApprovalStore,
+  useRequestUserInputStore,
+  usePermissionsStore,
+  useElicitationStore,
+} from "../components/codex/stores";
 import { authHeaders, buildUrl } from "../hooks/runtime";
-import { openEventStream } from "../lib/eventStream";
+import { openEventStream, reconcileEventStream } from "../lib/eventStream";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
+import { openedCodexIds } from "./openedSessions";
 
 function followedIds() {
-  return new Set(
-    useAgentCenterStore
-      .getState()
-      .cards.filter((card) => card.kind === "codex")
-      .map((card) => card.id),
-  );
+  return new Set(openedCodexIds());
 }
 
 function membershipKey() {
@@ -39,6 +41,29 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let controller: AbortController | undefined;
   let members = membershipKey();
+  let checkedAt = -Infinity;
+  let repairedAt = -Infinity;
+  let requestRepairTimer: ReturnType<typeof setTimeout>;
+  const missingRequests = () =>
+    [...followedIds()].some((id) => {
+      const status = useCodexStore.getState().threadStatusMap[id];
+      if (status?.type !== "active") return false;
+      const waitingInput =
+        status.activeFlags.includes("waitingOnUserInput") &&
+        !useRequestUserInputStore
+          .getState()
+          .pendingRequests.some((r) => r.threadId === id);
+      const approvals = [
+        ...useApprovalStore.getState().pendingApprovals,
+        ...usePermissionsStore.getState().pendingRequests,
+        ...useElicitationStore.getState().pendingRequests,
+      ];
+      return (
+        waitingInput ||
+        (status.activeFlags.includes("waitingOnApproval") &&
+          !approvals.some((r) => r.threadId === id))
+      );
+    });
 
   function schedule(delay = 0) {
     if (stopped) return;
@@ -108,6 +133,10 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
             const threadStatusMap = { ...state.threadStatusMap };
             let changed = false;
             for (const [id, status] of Object.entries(statuses)) {
+              if (
+                JSON.stringify(threadStatusMap[id]) === JSON.stringify(status)
+              )
+                continue;
               if (state.threadStatusMap[id] !== baseline.threadStatusMap[id])
                 continue;
               if (state.turnTimingMap[id] !== baseline.turnTimingMap[id]) {
@@ -133,6 +162,21 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
       failed = true;
     } finally {
       deadline.dispose();
+      checkedAt = Date.now();
+      if (
+        !stopped &&
+        !failed &&
+        missingRequests() &&
+        Date.now() - repairedAt >= 15000
+      ) {
+        clearTimeout(requestRepairTimer);
+        requestRepairTimer = setTimeout(() => {
+          if (!stopped && missingRequests()) {
+            repairedAt = Date.now();
+            reconcileEventStream();
+          }
+        }, 500);
+      }
       busy = false;
       if (requested || failed) schedule(requested ? 0 : 5000);
     }
@@ -147,18 +191,35 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
   const closeStream = openEventStream({
     agents: ["codex"],
     onOpen: () => schedule(),
+    onResync: () => schedule(),
     onEvent: () => {},
   });
   const wake = () => {
-    if (document.visibilityState !== "hidden") schedule();
+    if (document.visibilityState !== "hidden" && Date.now() - checkedAt >= 5000)
+      schedule();
   };
   window.addEventListener("online", wake);
   document.addEventListener("visibilitychange", wake);
+  const watchdog = setInterval(() => {
+    const state = useCodexStore.getState();
+    const active = [...followedIds()].some(
+      (id) =>
+        state.threadStatusMap[id]?.type === "active" ||
+        state.turnTimingMap[id]?.status === "inProgress",
+    );
+    if (
+      document.visibilityState !== "hidden" &&
+      Date.now() - checkedAt >= (active ? 5000 : 30000)
+    )
+      schedule();
+  }, 1000);
   schedule();
   return () => {
     if (stopped) return;
     stopped = true;
     clearTimeout(timer);
+    clearTimeout(requestRepairTimer);
+    clearInterval(watchdog);
     controller?.abort();
     unsubscribe();
     closeStream();

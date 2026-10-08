@@ -1,4 +1,5 @@
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
+import { enqueueSessionRead, readWithDeadline } from "./sessionReadQueue";
 import { create } from "zustand";
 import {
   beginDeliveryEcho,
@@ -11,6 +12,7 @@ import type {
   FollowupSubmit,
   FollowupThread,
   ComposerContext,
+  AgentMention,
 } from "@agent-orchestrator/shared";
 import { useConfigStore, useCodexStore } from "../components/codex/stores";
 import { getThreadModelSettings } from "../stores/useThreadModelStore";
@@ -131,14 +133,14 @@ export async function submissionId(
   return id;
 }
 export const followupService = {
-  async load(id: string) {
+  async load(id: string, options?: { signal?: AbortSignal }) {
     try {
       return accept(
         id,
-        await getJsonWithOptions<FollowupThread>(
+        await enqueueSessionRead("recent", `queue:${id}`, () => readWithDeadline(signal => getJsonWithOptions<FollowupThread>(
           "/followups?threadId=" + encodeURIComponent(id),
-          { suppressToast: true },
-        ),
+          { suppressToast: true, signal },
+        ), 5000, options?.signal)),
       );
     } catch (e) {
       useFollowupStore.setState((s) => ({
@@ -157,6 +159,7 @@ export const followupService = {
     expectedTurnId?: string,
     parameters?: Record<string, unknown>,
     contexts?: ComposerContext[],
+    mentions?: AgentMention[],
   ) {
     const data = {
       ...(mode === "queue" && codexRuntimeState(useCodexStore.getState(), threadId).failed ? { recoverAfterError: true } : {}),
@@ -167,6 +170,7 @@ export const followupService = {
       parameters: parameters ?? followupParameters(threadId),
       ...(expectedTurnId ? { expectedTurnId } : {}),
       ...(contexts?.length ? { contexts: structuredClone(contexts) } : {}),
+      ...(mentions?.length ? { mentions: structuredClone(mentions) } : {}),
     };
     const id = await submissionId(owner, revision, data);
     beginDeliveryEcho({ ...data, id });

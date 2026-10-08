@@ -22,7 +22,22 @@ import { useSettingsStore } from "@session/stores/settings";
 import { convertThreadHistoryToEvents } from "@session/utils/threadHistoryConverter";
 import { mergeThreadHistory } from "@session/utils/mergeThreadHistory";
 import { clearDeliveryEchoes } from "@session/stores/useCodexDeliveryStore";
-import { getThreadModelSettings, hydrateThreadModel, useThreadModelStore } from "@session/stores/useThreadModelStore";
+import { revealNewQuestion } from "@session/features/async-questions/arrival";
+import { enqueueSessionRead, readWithDeadline } from "./sessionReadQueue";
+import { mergeHistoryPage } from "./sessionHistoryPages";
+import {
+  setSessionChecking,
+  useSessionSyncStore,
+} from "../stores/useSessionSyncStore";
+import {
+  cachedTranscriptBaselines,
+  invalidateTranscriptCache,
+} from "./sessionCacheState";
+import {
+  getThreadModelSettings,
+  hydrateThreadModel,
+  useThreadModelStore,
+} from "@session/stores/useThreadModelStore";
 import {
   threadStart as apiThreadStart,
   gitCreateWorktree,
@@ -144,14 +159,31 @@ const syncThreadToStore = (
   } = useCodexStore.getState();
   const lastTurn = thread.turns.at(-1);
   const previous = turnTimingMap[threadId];
-  const preserve = !options.force && previous && lastTurn && (
-    (previous.turnId === lastTurn.id && previous.status !== "inProgress" && lastTurn.status === "inProgress") ||
-    (previous.turnId !== lastTurn.id && typeof lastTurn.startedAt === "number" && previous.startedAtMs > lastTurn.startedAt * 1000)
-  );
-  const timing = preserve ? previous : lastTurn ? {
-    turnId: lastTurn.id, startedAtMs: (lastTurn.startedAt ?? 0) * 1000,
-    durationMs: lastTurn.durationMs, status: lastTurn.status,
-  } : undefined;
+  const preserve =
+    !options.force &&
+    previous &&
+    lastTurn &&
+    ((previous.turnId === lastTurn.id &&
+      previous.status !== "inProgress" &&
+      lastTurn.status === "inProgress") ||
+      (previous.turnId !== lastTurn.id &&
+        typeof lastTurn.startedAt === "number" &&
+        previous.startedAtMs > lastTurn.startedAt * 1000));
+  const timing = preserve
+    ? previous
+    : lastTurn
+      ? {
+          turnId: lastTurn.id,
+          startedAtMs:
+            typeof lastTurn.startedAt === "number"
+              ? lastTurn.startedAt * 1000
+              : previous?.turnId === lastTurn.id
+                ? previous.startedAtMs
+                : 0,
+          durationMs: lastTurn.durationMs,
+          status: lastTurn.status,
+        }
+      : undefined;
 
   return {
     ...(activate
@@ -174,7 +206,9 @@ const syncThreadToStore = (
     ...(!preserve && thread.status
       ? { threadStatusMap: { ...threadStatusMap, [threadId]: thread.status } }
       : {}),
-    ...(timing ? { turnTimingMap: { ...turnTimingMap, [threadId]: timing } } : {}),
+    ...(timing
+      ? { turnTimingMap: { ...turnTimingMap, [threadId]: timing } }
+      : {}),
     ...(activate
       ? {
           currentTurnId:
@@ -208,16 +242,99 @@ const pendingThreadRollbacks = new Map<
 let runtimeEpoch = 0;
 const pendingThreadResumes = new Map<string, Promise<void>>();
 const resumeVersions = new Map<string, symbol>();
+const historyControllers = new Map<string, AbortController>();
+const metadataReads = new Set<string>();
+function readInitialThreadMetadata(threadId: string) {
+  if (getThreadModelSettings(threadId).model || metadataReads.has(threadId))
+    return;
+  metadataReads.add(threadId);
+  const epoch = runtimeEpoch,
+    revision = useThreadModelStore.getState().threads[threadId]?.revision ?? 0;
+  // The runtime's metadata read currently includes full turns. Read it once in
+  // the separate history lane; it must never delay recent messages or show a loader.
+  void enqueueSessionRead("history", `metadata:${epoch}:${threadId}`, () =>
+    readWithDeadline(
+      (signal) => threadRead({ threadId }, { signal, suppressToast: true }),
+      15000,
+    ),
+  )
+    .then((response) => {
+      if (runtimeEpoch !== epoch) return;
+      const settings = response.thread as Thread & {
+        model?: string;
+        reasoningEffort?: ReturnType<
+          typeof getThreadModelSettings
+        >["reasoningEffort"];
+      };
+      hydrateThreadModel(
+        threadId,
+        {
+          model:
+            ("model" in response ? response.model : undefined) ??
+            settings.model,
+          modelProvider:
+            ("modelProvider" in response
+              ? response.modelProvider
+              : undefined) ?? settings.modelProvider,
+          reasoningEffort:
+            "reasoningEffort" in response
+              ? response.reasoningEffort
+              : settings.reasoningEffort,
+        },
+        { revision },
+      );
+      useCodexStore.setState((s) => {
+        const existing = s.threads.find((t) => t.id === threadId);
+        if (!existing) return s;
+        const merged = {
+          ...existing,
+          ...settings,
+          turns: existing.turns,
+          status: existing.status,
+        };
+        const changed = Object.keys(settings).some(
+          (key) =>
+            !["turns", "status"].includes(key) &&
+            JSON.stringify(existing[key as keyof Thread]) !==
+              JSON.stringify(settings[key as keyof Thread]),
+        );
+        return changed
+          ? { threads: s.threads.map((t) => (t.id === threadId ? merged : t)) }
+          : s;
+      });
+    })
+    .catch(() => {
+      metadataReads.delete(threadId);
+    });
+}
 /** Invalidate responses from the previous runtime without touching drafts or history. */
 export function resetCodexRuntimeState() {
   runtimeEpoch++;
   pendingThreadResumes.clear();
   resumeVersions.clear();
-  useCodexStore.setState(state => ({ activeThreadIds: [], currentTurnId: null, threadStatusMap: {}, turnTimingMap: {},
-    threads: state.threads.map(thread => ({ ...thread, status: { type: "notLoaded" as const } })),
-    historyLoadedMap: {}, historyLoadingMap: {}, historyErrorMap: {}, retryNoticeMap: {} }));
+  for (const controller of historyControllers.values()) controller.abort();
+  historyControllers.clear();
+  metadataReads.clear();
+  useSessionSyncStore.setState({
+    checking: {},
+    recovering: {},
+    earlierLoading: {},
+  });
+  useCodexStore.setState((state) => ({
+    activeThreadIds: [],
+    currentTurnId: null,
+    threadStatusMap: {},
+    turnTimingMap: {},
+    threads: state.threads.map((thread) => ({
+      ...thread,
+      status: { type: "notLoaded" as const },
+    })),
+    historyLoadedMap: {},
+    historyLoadingMap: {},
+    historyErrorMap: {},
+    retryNoticeMap: {},
+  }));
 }
-
 
 export const codexService = {
   async loadThreads(
@@ -293,7 +410,9 @@ export const codexService = {
           currentTurnId: null,
           inputFocusTrigger: state.inputFocusTrigger + 1,
         }));
-        await codexService.loadThreadHistory(threadId);
+        await codexService.loadThreadHistory(threadId, undefined, {
+          recent: true,
+        });
       }
     } catch (error: unknown) {
       console.error("[CodexService] setCurrentThread error:", error);
@@ -344,7 +463,10 @@ export const codexService = {
       hydrateThreadModel(thread.id, {
         model: response.model || model,
         modelProvider: response.modelProvider ?? modelProvider,
-        reasoningEffort: response.reasoningEffort === undefined ? reasoningEffort : response.reasoningEffort,
+        reasoningEffort:
+          response.reasoningEffort === undefined
+            ? reasoningEffort
+            : response.reasoningEffort,
       });
 
       set({
@@ -361,80 +483,215 @@ export const codexService = {
     }
   },
   /** @deprecated Use loadThreadHistory. This alias is read-only too. */
-  async threadResume(threadId: string, overrides?: Omit<ThreadResumeParams, "threadId">, options?: {background?:boolean}) {
+  async threadResume(
+    threadId: string,
+    overrides?: Omit<ThreadResumeParams, "threadId">,
+    options?: { background?: boolean },
+  ) {
     return codexService.loadThreadHistory(threadId, overrides, options);
   },
   async loadThreadHistory(
     threadId: string,
     overrides?: Omit<ThreadResumeParams, "threadId">,
-    options?: { background?: boolean },
+    options?: {
+      background?: boolean;
+      recent?: boolean;
+      signal?: AbortSignal;
+      cursor?: string;
+    },
   ) {
     if (!overrides && pendingThreadResumes.has(threadId))
       return pendingThreadResumes.get(threadId);
     const version = Symbol(threadId);
     resumeVersions.set(threadId, version);
-    useCodexStore.setState((state) => ({
-      historyLoadingMap: { ...state.historyLoadingMap, [threadId]: true },
-      historyErrorMap: { ...state.historyErrorMap, [threadId]: undefined },
-    }));
+    const controller = new AbortController();
+    historyControllers.set(threadId, controller);
+    const cancel = () => controller.abort(options?.signal?.reason);
+    if (options?.signal?.aborted) cancel();
+    else options?.signal?.addEventListener("abort", cancel, { once: true });
+    const cached =
+      useCodexStore.getState().historyLoadedMap[threadId] ||
+      (useCodexStore.getState().events[threadId]?.length ?? 0) > 0;
+    useCodexStore.setState((state) =>
+      state.historyLoadingMap[threadId] === !cached &&
+      !state.historyErrorMap[threadId]
+        ? state
+        : {
+            historyLoadingMap: {
+              ...state.historyLoadingMap,
+              [threadId]: !cached,
+            },
+            historyErrorMap: {
+              ...state.historyErrorMap,
+              [threadId]: undefined,
+            },
+          },
+    );
+    setSessionChecking(threadId, true);
     const pending = (async () => {
       const baseline = useCodexStore.getState();
-      const modelRevision = useThreadModelStore.getState().threads[threadId]?.revision ?? 0;
-      const response = await threadRead({ threadId }, { suppressToast: options?.background });
+      const modelRevision =
+        useThreadModelStore.getState().threads[threadId]?.revision ?? 0;
+      const response = await enqueueSessionRead(
+        options?.recent ? "recent" : "history",
+        `${runtimeEpoch}:${threadId}`,
+        () =>
+          readWithDeadline(
+            (signal) =>
+              threadRead(
+                {
+                  threadId,
+                  ...(options?.recent
+                    ? {
+                        recent: true,
+                        ...(options.cursor
+                          ? { cursor: options.cursor }
+                          : baseline.turnTimingMap[threadId]?.turnId
+                            ? {
+                                afterTurnId:
+                                  baseline.turnTimingMap[threadId].turnId,
+                              }
+                            : {}),
+                      }
+                    : {}),
+                },
+                { suppressToast: options?.background, signal },
+              ),
+            options?.recent ? 5000 : 15000,
+            controller.signal,
+          ),
+      );
       if (resumeVersions.get(threadId) !== version) return;
+      const page = "historyPage" in response ? response.historyPage : undefined;
+      const existingThread = useCodexStore
+        .getState()
+        .threads.find((t) => t.id === threadId);
+      const thread = {
+        ...(existingThread ?? {
+          preview: "",
+          cwd: "",
+          createdAt: 0,
+          updatedAt: 0,
+          name: null,
+          modelProvider: "",
+          status: { type: "notLoaded" },
+        }),
+        ...response.thread,
+      } as Thread;
       // Recent native versions expose settings on the read-only Thread object.
       // Missing fields keep the existing per-thread choice; CLI changes hydrate
       // only if the user has not changed their selection during this request.
-      const settings = response.thread as typeof response.thread & {
-        model?: string; reasoningEffort?: typeof response.reasoningEffort;
+      const settings = thread as typeof thread & {
+        model?: string;
+        reasoningEffort?: ReturnType<
+          typeof getThreadModelSettings
+        >["reasoningEffort"];
       };
-      hydrateThreadModel(threadId, {
-        model: response.model ?? settings.model,
-        modelProvider: response.modelProvider ?? settings.modelProvider,
-        reasoningEffort: response.reasoningEffort !== undefined ? response.reasoningEffort : settings.reasoningEffort,
-      }, {
-        revision: modelRevision,
-        notify: !!baseline.historyLoadedMap[threadId],
-      });
-      const historicalEvents = convertThreadHistoryToEvents(response.thread);
-      const current = useCodexStore.getState();
-      const reconciledEvents = mergeThreadHistory(
-        historicalEvents,
-        baseline.events[threadId] ?? [],
-        current.events[threadId] ?? [],
+      hydrateThreadModel(
+        threadId,
+        {
+          model:
+            ("model" in response ? response.model : undefined) ??
+            settings.model,
+          modelProvider:
+            ("modelProvider" in response
+              ? response.modelProvider
+              : undefined) ??
+            (settings.modelProvider || undefined),
+          reasoningEffort:
+            "reasoningEffort" in response &&
+            response.reasoningEffort !== undefined
+              ? response.reasoningEffort
+              : settings.reasoningEffort,
+        },
+        {
+          revision: modelRevision,
+          notify: !!baseline.historyLoadedMap[threadId],
+        },
       );
+      const historicalEvents = convertThreadHistoryToEvents(thread);
+      const current = useCodexStore.getState();
+      const beforeEvents =
+        baseline.events[threadId] ??
+        cachedTranscriptBaselines.get(threadId) ??
+        [];
+      const reconciledEvents = page
+        ? mergeHistoryPage(
+            historicalEvents,
+            beforeEvents,
+            current.events[threadId] ?? [],
+            thread.turns.map((t) => t.id),
+            page.earlier,
+          )
+        : mergeThreadHistory(
+            historicalEvents,
+            beforeEvents,
+            current.events[threadId] ?? [],
+          );
       // A response belongs to its thread even if the user has since selected another.
-      const restored = syncThreadToStore(threadId, response.thread, reconciledEvents, {
+      const restored = syncThreadToStore(threadId, thread, reconciledEvents, {
         activate: !options?.background && current.currentThreadId === threadId,
       });
-      useCodexStore.setState({
-        ...restored,
-        ...(options?.background && current.currentThreadId === threadId
-          ? {
-              currentTurnId:
-                restored.turnTimingMap?.[threadId]?.status === "inProgress"
-                  ? restored.turnTimingMap[threadId].turnId
-                  : null,
-            }
-          : {}),
-        ...(current.threadStatusMap[threadId] !==
-        baseline.threadStatusMap[threadId]
-          ? { threadStatusMap: current.threadStatusMap }
-          : {}),
-        ...(current.turnTimingMap[threadId] !== baseline.turnTimingMap[threadId]
-          ? {
-              turnTimingMap: current.turnTimingMap,
-              ...(current.currentThreadId === threadId
-                ? { currentTurnId: current.currentTurnId }
-                : {}),
-            }
-          : {}),
-      });
+      useSessionSyncStore.setState((s) =>
+        page &&
+        baseline.historyLoadedMap[threadId] &&
+        !options?.cursor &&
+        s.cursors[threadId] !== undefined
+          ? s
+          : { cursors: { ...s.cursors, [threadId]: page?.nextCursor ?? null } },
+      );
+      const unchanged =
+        page &&
+        current.historyLoadedMap[threadId] &&
+        reconciledEvents === current.events[threadId] &&
+        JSON.stringify(restored.turnTimingMap?.[threadId]) ===
+          JSON.stringify(current.turnTimingMap[threadId]);
+      if (!unchanged)
+        useCodexStore.setState({
+          ...restored,
+          ...(page ? { threadStatusMap: current.threadStatusMap } : {}),
+          ...(options?.background && current.currentThreadId === threadId
+            ? {
+                currentTurnId:
+                  restored.turnTimingMap?.[threadId]?.status === "inProgress"
+                    ? restored.turnTimingMap[threadId].turnId
+                    : null,
+              }
+            : {}),
+          ...(current.threadStatusMap[threadId] !==
+          baseline.threadStatusMap[threadId]
+            ? { threadStatusMap: current.threadStatusMap }
+            : {}),
+          ...(current.turnTimingMap[threadId] !==
+          baseline.turnTimingMap[threadId]
+            ? {
+                turnTimingMap: current.turnTimingMap,
+                ...(current.currentThreadId === threadId
+                  ? { currentTurnId: current.currentTurnId }
+                  : {}),
+              }
+            : {}),
+        });
+      // A warm read can discover a question before its delayed SSE event.
+      // Cold history and earlier pages stay passive; source IDs and presentation
+      // state retain collapse/replay protection in the shared arrival handler.
+      if (
+        options?.background &&
+        options.recent &&
+        baseline.historyLoadedMap[threadId] &&
+        !options.cursor &&
+        !unchanged
+      )
+        for (const event of historicalEvents)
+          revealNewQuestion(event, beforeEvents);
+      cachedTranscriptBaselines.delete(threadId);
+      if (page) readInitialThreadMetadata(threadId);
     })();
     if (!overrides) pendingThreadResumes.set(threadId, pending);
     try {
       await pending;
     } catch (error: unknown) {
+      if (resumeVersions.get(threadId) !== version) return;
       if (resumeVersions.get(threadId) === version)
         useCodexStore.setState((state) => ({
           historyErrorMap: {
@@ -445,14 +702,54 @@ export const codexService = {
       console.error("[CodexService] threadResume error:", error);
       throw error;
     } finally {
+      options?.signal?.removeEventListener("abort", cancel);
+      if (historyControllers.get(threadId) === controller)
+        historyControllers.delete(threadId);
       if (resumeVersions.get(threadId) === version) {
         resumeVersions.delete(threadId);
-        useCodexStore.setState((state) => ({
-          historyLoadingMap: { ...state.historyLoadingMap, [threadId]: false },
-        }));
+        useCodexStore.setState((state) =>
+          state.historyLoadingMap[threadId] === false
+            ? state
+            : {
+                historyLoadingMap: {
+                  ...state.historyLoadingMap,
+                  [threadId]: false,
+                },
+              },
+        );
+        setSessionChecking(threadId, false);
       }
       if (pendingThreadResumes.get(threadId) === pending)
         pendingThreadResumes.delete(threadId);
+    }
+  },
+  async loadEarlierHistory(threadId: string) {
+    const state = useSessionSyncStore.getState();
+    const cursor = state.cursors[threadId];
+    if (
+      !cursor ||
+      state.earlierLoading[threadId] ||
+      pendingThreadResumes.has(threadId)
+    )
+      return;
+    useSessionSyncStore.setState((s) => ({
+      earlierLoading: { ...s.earlierLoading, [threadId]: true },
+      earlierErrors: { ...s.earlierErrors, [threadId]: "" },
+    }));
+    try {
+      await codexService.loadThreadHistory(threadId, undefined, {
+        background: true,
+        recent: true,
+        cursor,
+      });
+    } catch (error) {
+      useSessionSyncStore.setState((s) => ({
+        earlierErrors: { ...s.earlierErrors, [threadId]: String(error) },
+      }));
+    } finally {
+      useSessionSyncStore.setState((s) => ({
+        earlierLoading: { ...s.earlierLoading, [threadId]: false },
+      }));
     }
   },
   async threadFork(threadId: string) {
@@ -481,9 +778,7 @@ export const codexService = {
       throw new Error("回滚正在进行，请等待完成后再编辑。");
     }
     const state = useCodexStore.getState();
-    if (
-      codexRuntimeState(state, threadId).running
-    ) {
+    if (codexRuntimeState(state, threadId).running) {
       throw new Error("请先停止当前任务，再回滚编辑消息。");
     }
     if (!Number.isInteger(numTurns) || numTurns < 1)
@@ -498,7 +793,13 @@ export const codexService = {
       clearAsyncQuestions(threadId);
       clearDeliveryEchoes(threadId);
       // A pre-rollback history request must not restore discarded turns later.
+      invalidateTranscriptCache(`codex:${threadId}`);
       resumeVersions.delete(threadId);
+      cachedTranscriptBaselines.delete(threadId);
+      setSessionChecking(threadId, false);
+      useSessionSyncStore.setState((s) => ({
+        cursors: { ...s.cursors, [threadId]: null },
+      }));
       const active = useCodexStore.getState().currentThreadId === threadId;
       useCodexStore.setState(
         syncThreadToStore(
@@ -558,12 +859,8 @@ export const codexService = {
     try {
       const userInputs = buildUserInputs(input, images);
 
-      const {
-        approvalPolicy,
-        sandbox,
-        webSearchRequest,
-        collaborationMode,
-      } = useConfigStore.getState();
+      const { approvalPolicy, sandbox, webSearchRequest, collaborationMode } =
+        useConfigStore.getState();
       const { model, reasoningEffort } = getThreadModelSettings(threadId);
 
       const response = await turnStart({
@@ -591,7 +888,8 @@ export const codexService = {
           : {}),
       });
 
-      if (epoch !== runtimeEpoch) throw new Error("会话服务已重启，请核对消息结果");
+      if (epoch !== runtimeEpoch)
+        throw new Error("会话服务已重启，请核对消息结果");
       const preview = getThreadPreviewFromInput(userInputs);
       set((state) => {
         const latest = state.turnTimingMap[threadId];
@@ -611,8 +909,15 @@ export const codexService = {
             : {}),
           ...(accept
             ? {
-                threadStatusMap: { ...state.threadStatusMap, [threadId]: response.turn.status === "inProgress"
-                  ? { type: "active" as const, activeFlags: [] } : response.turn.status === "failed" ? { type: "systemError" as const } : { type: "idle" as const } },
+                threadStatusMap: {
+                  ...state.threadStatusMap,
+                  [threadId]:
+                    response.turn.status === "inProgress"
+                      ? { type: "active" as const, activeFlags: [] }
+                      : response.turn.status === "failed"
+                        ? { type: "systemError" as const }
+                        : { type: "idle" as const },
+                },
                 turnTimingMap: {
                   ...state.turnTimingMap,
                   [threadId]: {

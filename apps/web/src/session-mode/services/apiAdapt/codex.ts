@@ -1,3 +1,4 @@
+import type { RpcIdentity } from "@session/components/codex/stores/rpcLifecycle";
 import { isDesktopTauri } from "@session/hooks/runtime";
 import { preventBrowserSleep, allowBrowserSleep } from "@session/browser-sleep";
 import type { RequestId, ThreadId } from "@session/bindings";
@@ -91,13 +92,87 @@ export async function threadResume(
 
 /** Viewing history must never load a writer, including on older runtimes. */
 export async function threadRead(
-  params: { threadId: string },
-  options?: { suppressToast?: boolean },
+  params: {
+    threadId: string;
+    recent?: boolean;
+    cursor?: string | null;
+    afterTurnId?: string;
+  },
+  options?: { suppressToast?: boolean; signal?: AbortSignal },
 ) {
+  if (params.recent) {
+    try {
+      let cursor = params.cursor ?? null;
+      const seen = new Set<string>();
+      const turns: ThreadReadResponse["thread"]["turns"] = [];
+      let page: {
+        data: ThreadReadResponse["thread"]["turns"];
+        nextCursor: string | null;
+      };
+      do {
+        page = await postJsonWithOptions<{
+          data: ThreadReadResponse["thread"]["turns"];
+          nextCursor: string | null;
+        }>(
+          "/api/codex/thread/turns/list",
+          {
+            threadId: params.threadId,
+            cursor,
+            limit: params.afterTurnId && !cursor ? 2 : 10,
+            sortDirection: "desc",
+            itemsView: "full",
+          },
+          { ...options, suppressToast: true },
+        );
+        if (
+          !Array.isArray(page.data) ||
+          page.data.some(
+            (turn) =>
+              !turn ||
+              typeof turn.id !== "string" ||
+              !Array.isArray(turn.items),
+          ) ||
+          (page.nextCursor != null && typeof page.nextCursor !== "string")
+        )
+          throw new Error("Invalid recent history page");
+        turns.push(...page.data);
+        cursor = page.nextCursor;
+        if (
+          !params.afterTurnId ||
+          turns.some((turn) => turn.id === params.afterTurnId) ||
+          !cursor
+        )
+          break;
+        if (seen.has(cursor)) throw new Error("Repeated recent history cursor");
+        seen.add(cursor);
+      } while (cursor);
+      return {
+        thread: {
+          id: params.threadId,
+          turns: turns.reverse(),
+        } as ThreadReadResponse["thread"],
+        historyPage: {
+          nextCursor: page.nextCursor ?? null,
+          earlier: !!params.cursor,
+        },
+      };
+    } catch (error) {
+      // Capability fallback only. Business errors/timeouts never trigger a larger read.
+      if (
+        !(error instanceof SessionApiError) ||
+        ![404, 405, 501].includes(error.status)
+      )
+        throw error;
+    }
+  }
   try {
     return await postJsonWithOptions<
       ThreadReadResponse & Partial<ThreadResumeResponse>
-    >("/api/codex/thread/read", params, { ...options, suppressToast: true });
+    >(
+      "/api/codex/thread/read",
+      { threadId: params.threadId },
+      { ...options, suppressToast: true },
+    );
   } catch (error) {
     if (error instanceof SessionApiError && error.status === 404)
       throw new Error(
@@ -238,9 +313,11 @@ export async function getAccountRateLimits() {
 export async function respondToRequestUserInput(
   requestId: RequestId,
   response: unknown,
+  request?: RpcIdentity,
 ) {
   return await postNoContent("/api/codex/approval/user-input", {
     request_id: requestId,
+    ...(request ? { request } : {}),
     response,
   });
 }
@@ -248,9 +325,11 @@ export async function respondToRequestUserInput(
 export async function respondToCommandExecutionApproval(
   requestId: RequestId,
   decision: CommandExecutionApprovalDecision,
+  request?: RpcIdentity,
 ) {
   return await postNoContent("/api/codex/approval/command-execution", {
     request_id: requestId,
+    ...(request ? { request } : {}),
     decision,
   });
 }
@@ -258,9 +337,11 @@ export async function respondToCommandExecutionApproval(
 export async function respondToFileChangeApproval(
   requestId: RequestId,
   decision: FileChangeApprovalDecision,
+  request?: RpcIdentity,
 ) {
   return await postNoContent("/api/codex/approval/file-change", {
     request_id: requestId,
+    ...(request ? { request } : {}),
     decision,
   });
 }
@@ -270,9 +351,11 @@ export async function respondToMcpElicitation(
   action: McpServerElicitationAction,
   content: unknown = null,
   meta: unknown = null,
+  request?: RpcIdentity,
 ) {
   return await postNoContent("/api/codex/approval/mcp-elicitation", {
     request_id: requestId,
+    ...(request ? { request } : {}),
     action,
     content,
     meta,
@@ -284,9 +367,11 @@ export async function respondToPermissionsApproval(
   permissions: GrantedPermissionProfile,
   scope: PermissionGrantScope,
   strictAutoReview = false,
+  request?: RpcIdentity,
 ) {
   return await postNoContent("/api/codex/approval/permissions", {
     request_id: requestId,
+    ...(request ? { request } : {}),
     permissions,
     scope,
     strict_auto_review: strictAutoReview,

@@ -58,3 +58,7 @@ HTTP 新增：
 补充验收：队列及 HTTP 适配器 33 项通过；`pnpm check` 通过；最终 `pnpm test` 共 1,860 项通过（server 649、终端 web 526、会话 web 590、脚本 95），另有 1 项平台条件跳过。浏览器交接/队列 15 项与发送回显 4 项分批通过。首轮 tmux 改名单测曾超时，完整复跑通过；旧发送回归先因拦截 resume 失败，改为 read 后发现有限 SSE fixture 的人工断线与历史写入时序竞态，测试改用持续的隔离流并先持久化模拟历史再发布事件，4 项复跑全部通过。未以重试掩盖产品错误或移除断言。
 
 本地证据（Git 忽略）：`.dev-runtime/queue-history-{red,pause-red,green,check,tests-final,e2e,delivery-final}.log`；真实接收/完成与唯一消息 ID 核验为 `.dev-runtime/queue-history-live-verification.json`。
+
+## 子线程能力与回复身份
+
+普通子输入权限须在获取写入权前通过原生只读元数据确认；false 或缺失时不 resume，不以试发消息探测。子中断与普通输入权限分开判断，实际停止复用既有暂停/中断接口。查看后代不产生关注标签或新的写入实例。新网页回复绑定 thread/request/turn/item 与 requestToken，运行层原子匹配待处理请求，拒绝旧实例和重复回复。完整保护需新网页及新 Rust 二进制同时启用，旧接口仍兼容。见 [子 Agent](session-subagents.md)。

@@ -22,7 +22,7 @@ async function setup(page: Page) {
   return {fixture,access,requests,errors,editor};
 }
 
-test("navigation and refresh read history without acquiring; draft survives", async ({page}) => {
+test("navigation, refresh and explicit synchronization remain read-only; draft survives", async ({page}) => {
   const f=await setup(page);
   await expect(page.locator("[data-codex-access=readonly]")).toBeVisible();
   await f.editor.fill("交接前保留的草稿");
@@ -33,8 +33,9 @@ test("navigation and refresh read history without acquiring; draft survives", as
   await expect(f.editor).toHaveText("交接前保留的草稿");
   const reads = f.fixture.calls.filter(c=>c.path.endsWith("/thread/read")).length;
   expect(reads).toBeGreaterThan(1);
-  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect.poll(() => f.fixture.calls.filter(c=>c.path.endsWith("/thread/read")).length).toBeGreaterThan(reads);
+  const recentReads = f.fixture.calls.filter(c => /thread\/(read|turns\/list)$/.test(c.path)).length;
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("session-history-reconcile", { detail: "ux-0" })));
+  await expect.poll(() => f.fixture.calls.filter(c => /thread\/(read|turns\/list)$/.test(c.path)).length).toBeGreaterThan(recentReads);
   expect(f.fixture.calls.filter(c=>c.path.endsWith("/thread/resume") || c.path.endsWith("/turn/start"))).toEqual([]);
   expect(f.errors).toEqual([]);
 });
@@ -61,7 +62,7 @@ test("background resource holds and external ownership remain explanatory, prese
   await page.getByRole("menuitem",{name:"释放给其他客户端",exact:true}).click();
   await expect(page.locator("[data-codex-access=owned]")).toContainText("后台终端");
   f.access.state="external";
-  await expect(page.locator("[data-codex-access=external]")).toContainText("其他客户端正在使用");
+  await expect(page.locator("[data-codex-access=external]")).toContainText("其他客户端占用");
   await expect(f.editor).toHaveText("尚未发送的完整内容");
   expect(f.fixture.calls.filter(c=>/turn\/(interrupt|start)|thread\/resume/.test(c.path))).toEqual([]);
   expect(f.errors).toEqual([]);

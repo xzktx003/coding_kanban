@@ -1,3 +1,5 @@
+import { subagentParent } from "@agent-orchestrator/shared";
+import { useSubagentStore } from "@session/features/subagents/store";
 import { SessionRowMenu } from "../../common/SessionRowMenu";
 import { SessionRowTitle } from "../../common/SessionRowTitle";
 import { SessionLoadMore } from "../../common/SessionLoadMore";
@@ -85,6 +87,7 @@ const EMPTY_LIST: ThreadListResponse = {
 const PAGE_SIZE = 3;
 
 export function ThreadList({ cwd }: ThreadListProps) {
+  const childNodes = useSubagentStore(s => s.nodes);
   const names = useSessionNameStore((s) => s.names);
   const { cwd: workspaceCwd, setCwd } = useWorkspaceStore();
   const { setView } = useLayoutStore();
@@ -135,12 +138,12 @@ export function ThreadList({ cwd }: ThreadListProps) {
     const seen = new Set(response.data.map((t) => t.id));
     const live = storeThreads.filter(
       (t) =>
-        t.cwd === cwd && t.modelProvider === modelProvider && !seen.has(t.id),
+        !childNodes[t.id] && !subagentParent(t) && t.cwd === cwd && t.modelProvider === modelProvider && !seen.has(t.id),
     );
     if (live.length === 0) return response.data;
     const key = sortKey === "created_at" ? "createdAt" : "updatedAt";
     return [...live, ...response.data].sort((a, b) => b[key] - a[key]);
-  }, [response.data, storeThreads, cwd, modelProvider, sortKey]);
+  }, [response.data, storeThreads, cwd, modelProvider, sortKey, childNodes]);
 
   // --- Thread loading (search + sort delegated to backend) ---
 
@@ -197,7 +200,7 @@ export function ThreadList({ cwd }: ThreadListProps) {
     const newIds = storeThreads
       .filter(
         (t) =>
-          t.cwd === cwd &&
+          !childNodes[t.id] && !subagentParent(t) && t.cwd === cwd &&
           !localIds.has(t.id) &&
           !seenStoreIdsRef.current.has(t.id),
       )
@@ -205,7 +208,7 @@ export function ThreadList({ cwd }: ThreadListProps) {
     if (newIds.length === 0) return;
     for (const id of newIds) seenStoreIdsRef.current.add(id);
     refresh();
-  }, [storeThreads, response.data, cwd, refresh]);
+  }, [storeThreads, response.data, cwd, refresh, childNodes]);
 
   useEffect(() => {
     if (!isDesktopTauri()) return;

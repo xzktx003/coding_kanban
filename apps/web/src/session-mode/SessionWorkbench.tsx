@@ -7,6 +7,10 @@ import { startSessionProjectsSync } from "./services/sessionProjectsSync";
 import { startSessionTabsSync } from "./services/sessionTabsSync";
 import { startFollowedSessionStatusSync } from "./services/followedSessionStatusSync";
 import { startFollowedSessionHistorySync } from "./services/followedSessionHistorySync";
+import { startSessionTranscriptCache } from "./services/sessionTranscriptCache";
+import { startFollowedSessionAuxSync } from "./services/followedSessionAuxSync";
+import { useCodexStore } from "./components/codex/stores";
+import { useCCStore } from "./stores/cc";
 import { useAttentionStorageSync } from "./hooks/useSessionReadReceipt";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageSquare, RefreshCw } from "lucide-react";
@@ -29,6 +33,7 @@ function SessionWorkbenchContent({
 }: { onModeChange?: (mode: WorkbenchMode) => void } = {}) {
   useComposerViewport();
   useAttentionStorageSync();
+  useEffect(() => startSessionTranscriptCache(), []);
   useEffect(() => {
     const tabs = startSessionTabsSync(),
       projects = startSessionProjectsSync();
@@ -40,17 +45,22 @@ function SessionWorkbenchContent({
   const [status, setStatus] = useState<"checking" | "ready" | "offline">(
     "checking",
   );
+  const [loaded, setLoaded] = useState(false);
   useEffect(() => {
-    if (status !== "ready") return;
+    // Health is only a probe, not the lifetime of an established session.
+    // A failed probe must not remove the workers needed to recover lost events;
+    // the read-only workers own their deadlines, retries and visibility gates.
+    if (!loaded) return;
     const statuses = startFollowedSessionStatusSync();
     const histories = startFollowedSessionHistorySync();
+    const auxiliary = startFollowedSessionAuxSync();
     return () => {
       statuses();
       histories();
+      auxiliary();
     };
-  }, [status]);
+  }, [loaded]);
   const instance = useRef<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const hasProjects = useWorkspaceStore(
     (s) =>
@@ -65,11 +75,17 @@ function SessionWorkbenchContent({
       s.cards.length > 0,
   );
   const tabsSyncError = useAgentCenterStore((s) => s.tabSyncError);
+  const cachedCodex = useCodexStore((s) =>
+    Object.keys(s.events).some((id) => !!s.historyLoadedMap[id]),
+  );
+  const cachedClaude = useCCStore((s) =>
+    Object.values(s.sessionMessagesMap).some((messages) => messages.length > 0),
+  );
+  const hasCachedTranscript = cachedCodex || cachedClaude;
   const projectsSyncError = useWorkspaceStore((s) => s.projectSyncError);
   const [attempt, setAttempt] = useState(0);
   const retry = useCallback(() => {
     window.dispatchEvent(new Event("session-connection-retry"));
-    setStatus("checking");
     setAttempt((value) => value + 1);
   }, []);
   useEffect(() => {
@@ -137,7 +153,12 @@ function SessionWorkbenchContent({
       clearTimeout(timer);
     };
   }, [attempt]);
-  if (!loaded && status !== "ready" && (hasProjects || hasTabs))
+  if (
+    !loaded &&
+    !hasCachedTranscript &&
+    status !== "ready" &&
+    (hasProjects || hasTabs)
+  )
     return (
       <div className="session-workbench">
         <SessionTopNavigation status={status} onModeChange={onModeChange} />
@@ -146,7 +167,7 @@ function SessionWorkbenchContent({
         </div>
       </div>
     );
-  if (!loaded && status !== "ready")
+  if (!loaded && !hasCachedTranscript && status !== "ready")
     return (
       <div className="session-workbench">
         <SessionTopNavigation status={status} onModeChange={onModeChange} />
@@ -179,7 +200,7 @@ function SessionWorkbenchContent({
   return (
     <div className="session-workbench">
       <SessionTopNavigation status={status} onModeChange={onModeChange} />
-      {loaded && status === "offline" && (
+      {(loaded || hasCachedTranscript) && status === "offline" && (
         <div className="session-outage" role="alert">
           <span>会话服务连接中断，正在自动重连。草稿已保留。</span>
           {connectionError && <span>{connectionError}</span>}

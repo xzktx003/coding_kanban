@@ -1,4 +1,4 @@
-import { deliverRpc } from './rpcLifecycle';
+import { deliverRpc, rpcRequestContext } from './rpcLifecycle';
 import { create } from "zustand";
 import type { RequestId } from "@session/bindings";
 import type { ToolRequestUserInputResponse } from "@session/bindings/v2";
@@ -15,6 +15,7 @@ type Question = {
   isSecret?: boolean;
 };
 export type RequestUserInputRequest = {
+  requestToken?: string;
   requestId: RequestId;
   threadId: string;
   turnId: string;
@@ -34,6 +35,7 @@ export const requestUserInputKey = (request: RequestUserInputRequest) =>
     request.requestId,
     request.turnId,
     request.itemId,
+    request.requestToken,
   ]);
 const emptyDraft = (): UserInputDraft => ({
   index: 0,
@@ -138,7 +140,7 @@ export const useRequestUserInputStore = create<RequestUserInputStore>(
       if (submittingRequests.has(key)) return;
       submittingRequests.add(key);
       try {
-        await deliverRpc(request, () => respondToRequestUserInput(requestId, response), () => {
+        await deliverRpc(request, () => respondToRequestUserInput(requestId, response, rpcRequestContext(request)), () => {
           get().replaceRequests(get().pendingRequests.filter(r => r !== request));
         });
       } finally {

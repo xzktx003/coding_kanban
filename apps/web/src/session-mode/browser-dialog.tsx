@@ -9,11 +9,13 @@ import {
   DialogTitle,
 } from "./components/ui/dialog";
 
-interface DialogOptions {
+export interface DialogOptions {
   directory?: boolean;
   multiple?: boolean;
   defaultPath?: string;
   title?: string;
+  /** Native browser accept value, useful for mobile photo pickers. */
+  accept?: string;
   filters?: Array<{ name: string; extensions: string[] }>;
 }
 
@@ -56,6 +58,35 @@ export async function uploadBrowserFile(file: File): Promise<string> {
   return result.path;
 }
 
+/** Open synchronously in the user gesture; uploading belongs to the captured draft. */
+export function pickBrowserFiles(
+  options: DialogOptions = {},
+): Promise<File[] | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = Boolean(options.multiple);
+    input.accept =
+      options.accept ??
+      options.filters
+        ?.flatMap((filter) =>
+          filter.extensions.map((extension) => `.${extension}`),
+        )
+        .join(",") ??
+      "";
+    input.hidden = true;
+    input.tabIndex = -1;
+    const finish = (files: File[] | null) => {
+      input.remove();
+      resolve(files);
+    };
+    input.oncancel = () => finish(null);
+    input.onchange = () => finish(Array.from(input.files ?? []));
+    (document.querySelector(".session-mode") ?? document.body).append(input);
+    input.click();
+  });
+}
+
 export async function open(
   options: DialogOptions = {},
 ): Promise<string | string[] | null> {
@@ -78,27 +109,10 @@ export async function open(
         </DialogContent>
       </Dialog>
     ));
-  return new Promise((resolve, reject) => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.multiple = Boolean(options.multiple);
-    if (options.filters)
-      input.accept = options.filters
-        .flatMap((f) => f.extensions.map((ext) => `.${ext}`))
-        .join(",");
-    input.oncancel = () => resolve(null);
-    input.onchange = async () => {
-      try {
-        const paths = await Promise.all(
-          Array.from(input.files ?? []).map(uploadBrowserFile),
-        );
-        resolve(options.multiple ? paths : (paths[0] ?? null));
-      } catch (error) {
-        reject(error);
-      }
-    };
-    input.click();
-  });
+  const files = await pickBrowserFiles(options);
+  if (!files) return null;
+  const paths = await Promise.all(files.map(uploadBrowserFile));
+  return options.multiple ? paths : (paths[0] ?? null);
 }
 
 function SaveDialog({

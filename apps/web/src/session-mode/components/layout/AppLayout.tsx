@@ -1,3 +1,4 @@
+import { useSubagentFamilySync } from "@session/features/subagents/hooks";
 import { requestSessionNavigation } from "../../services/sessionNavigationGuard";
 import { SessionSecondaryHeader } from "./SessionSecondaryHeader";
 import { SessionPageNavigation } from "./SessionPageNavigation";
@@ -46,6 +47,7 @@ const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
 
 function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
+  useSubagentFamilySync();
   const toolLayoutRef = useRef<HTMLDivElement>(null);
   const {
     isSidebarOpen,

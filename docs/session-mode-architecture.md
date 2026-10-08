@@ -151,7 +151,7 @@ Claude 的 `sessionLoadingMap` 保存各会话运行状态，切换读取该会�
 
 ### 会话提示、悬浮侧栏与图片（2026-10-07）
 
-详见 [session-interactions.md](session-interactions.md)。完成回执是浏览器侧独立状态，仅实时成功完成事件创建，不从历史加载或运行中断推断；阅读按前台、选择归属和最新内容的交集确认。Sidebar 浮出状态不写入持久布局，只在桌面可见模式响应悬浮；临时浮出不增加布局占位。图片草稿按 Agent/会话隔离，Codex/Claude 复用既有图片路径，ACP 新增可选 image_paths，并转为协商过的原生图片块；健康接口声明 acpImages 能力，使旧运行服务不能静默忽略新参数。运行服务升级会中断它拥有的 Agent，构建新二进制不自动重启当前实例。
+详见 [session-interactions.md](session-interactions.md)。完成回执是浏览器侧独立状态，由实时成功完成或已观察轮次的只读终态核对创建；初次旧历史与运行中断不生成完成未读。阅读按前台、选择归属和最新内容的交集确认。Sidebar 浮出状态不写入持久布局，只在桌面可见模式响应悬浮；临时浮出不增加布局占位。图片草稿按 Agent/会话隔离，Codex/Claude 复用既有图片路径，ACP 新增可选 image_paths，并转为协商过的原生图片块；健康接口声明 acpImages 能力，使旧运行服务不能静默忽略新参数。运行服务升级会中断它拥有的 Agent，构建新二进制不自动重启当前实例。
 
 ## 会话工作台 UI 状态边界
 
@@ -173,10 +173,18 @@ Bot 草稿和发送/停止反馈按 Bot 存储在非持久化 UI 缓存；捕获
 
 ### Codex 关注历史恢复队列（2026-10-08）
 
-`SessionWorkbench` 在服务 ready 时同时启动关注状态快照与 `followedSessionHistorySync`，离线/卸载时清理调度。历史成功标记与流式 `events` 分离；启动和连接恢复按关注 ID 补齐，队列并发上限为 2，失败后重试，后台 `threadResume` 禁止选择会话或递增输入聚焦计数。恢复订阅共享成员到达，但只恢复一次设备端选中项，后续同步不导航。状态查询的轮次冲突触发补查而非静默遗失。详见 `docs/session-tabs.md`。
+`SessionWorkbench` 独立启动设备正文缓存，服务 ready 后启动历史、状态和队列／Claude 核对。关注集合与 detached 阅读目标共用打开成员清单；`historyLoadedMap` 表示可读窗口，不代表读完全部历史。最近只读分页与慢历史分别最多 4／2 个请求，期限与退避释放慢请求；后台不 resume、不导航、不聚焦。周期按成功完成时间计算，健康页面返回不拆建同步器。已缓存正文的核对静默进行，异常提示悬浮；阅读锚点与未读保留。协议、预算和验收见 [自动更新与阅读恢复](session-background-sync.md)。
 
 状态派生统一由 `codexRuntimeState` 承担；轮次事件、历史和 HTTP 回执遵守终态与轮次新旧规则。运行实例替换会作废在途历史请求。待处理交互增加内存级 `codex/pending-requests-snapshot`，覆盖原生问题、命令/文件审批、权限和 MCP 交互，允许与补发事件共享游标。详情与兼容边界见 [状态转换](session-state-transitions.md)。
 
 ## Codex 执行权交接
 
 只读历史不调用 resume；`ownership::Ownership` 在原生传输入口统一串行化每会话的执行、恢复和安全释放。Node 队列通过内部 holds 接口报告执行需求与不确定投递，浏览器代理禁止调用该内部接口。原生取消订阅后必须核对 loaded/list，后台终端、目标、子 Agent、待交互或未知资源禁止自动卸载。见 [协议与发布边界](session-ownership.md)。
+
+## 实时状态核对
+
+共享 SSE 提供异常核对通知，历史同步器统一承担限并发、退避和静默状态巡检。显示恢复状态独立于发送和执行权；Node 对无后续消息的已接收轮次也做受限终态核对。只读历史合并继续保留新事件、用户选择与阅读位置。见 [状态恢复与回归](session-state-recovery.md)。
+
+## Codex 子 Agent 家族
+
+`features/subagents` 维护按运行端隔离的关系索引、发现完整性与每个主会话的详情选择；执行状态复用 `codexRuntimeState`，不替代关注集合或队列状态。网关提供 family snapshot/verify/roles/stop，原生运行层提供只读 metadata/有效 roles，并在获取写入权前校验子输入能力。新旧协作 item 同 ID 幂等更新；缺失 DB 节点只读修复完整祖先链。新网页的 RPC 回复包含原请求身份与非凭证实例标记，运行层核对待处理集合后原子认领，迟到、重复或换实例的回执不能误作用于另一请求。队列仅扩展 mentions 负载，不重写调度。见 [完整规则](session-subagents.md)。

@@ -1,4 +1,4 @@
-import { deliverRpc, sameRpc } from './rpcLifecycle';
+import { deliverRpc, sameRpc, rpcRequestContext } from './rpcLifecycle';
 import { create } from 'zustand';
 import type { RequestId } from '@session/bindings';
 import type {
@@ -52,8 +52,8 @@ export const useApprovalStore = create<ApprovalStore>((set, get) => ({
     const request = target ?? get().pendingApprovals.find(r => r.requestId === requestId);
     if (!request || !get().pendingApprovals.includes(request)) throw new Error('审批已过期，请核对当前请求');
     await deliverRpc(request, () => isCommandExecution
-      ? respondToCommandExecutionApproval(requestId, decision as CommandExecutionApprovalDecision)
-      : respondToFileChangeApproval(requestId, decision as FileChangeApprovalDecision), () => {
+      ? respondToCommandExecutionApproval(requestId, decision as CommandExecutionApprovalDecision, rpcRequestContext(request))
+      : respondToFileChangeApproval(requestId, decision as FileChangeApprovalDecision, rpcRequestContext(request)), () => {
         set(state => {
           const pending = state.pendingApprovals.filter(r => r !== request);
           return { pendingApprovals: pending, currentApproval: pending[0] ?? null };

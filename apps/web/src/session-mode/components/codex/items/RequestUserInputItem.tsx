@@ -35,7 +35,7 @@ export function RequestUserInputItem({
 function QuestionForm({ request }: { request: RequestUserInputRequest }) {
   const { t } = useTranslation("thread");
   const key = requestUserInputKey(request);
-  const delivery = useRpcDeliveryStore(s => s.states[rpcKey(request)]);
+  const delivery = useRpcDeliveryStore((s) => s.states[rpcKey(request)]);
   const draft = useRequestUserInputStore((state) => state.drafts[key]);
   const updateDraft = useRequestUserInputStore((state) => state.updateDraft);
   const respond = useRequestUserInputStore((state) => state.respondToRequest);
@@ -270,7 +270,7 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
         )}
       </fieldset>
       <RpcDeliveryNotice request={request} />
-      {error && delivery?.phase !== "uncertain" && (
+      {error && !delivery && (
         <p role="alert" className="mt-3 text-sm text-destructive">
           {t("userInput.failed")}
         </p>

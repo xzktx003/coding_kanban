@@ -130,6 +130,8 @@ export async function installSessionUxFixture(page: Page, count = 40) {
         requiresOpenaiAuth: false,
       };
     else if (path.endsWith("/config/read")) json = { config: {} };
+    else if (path.endsWith("/subagents/snapshot")) json = { threads: [], complete: true, errors: [], checkedAt: Date.now() };
+    else if (path.endsWith("/subagents/roles")) json = { roles: [] };
     else if (path.endsWith("/thread/list")) {
       if (listError) {
         await route.fulfill({
@@ -149,7 +151,21 @@ export async function installSessionUxFixture(page: Page, count = 40) {
       const thread = makeThread("ux-created", "新的中文任务");
       threads.unshift(thread);
       json = { thread, model: "fixture-model", modelProvider: "openai" };
-    } else if (path.endsWith("/thread/read"))
+    } else if (path.endsWith("/thread/turns/list")) {
+      const thread = threads.find((t) => t.id === body?.threadId);
+      const turns = [...(thread?.turns ?? [])];
+      if (body?.sortDirection === "desc") turns.reverse();
+      const offset = Number(body?.cursor ?? 0),
+        limit = body?.limit ?? 10;
+      json = {
+        data: turns.slice(offset, offset + limit),
+        nextCursor:
+          offset + limit < turns.length ? String(offset + limit) : null,
+        backwardsCursor: String(offset),
+      };
+    } else if (path.endsWith("/thread/access"))
+      json = { state: "owned", reason: "", generation: 1 };
+    else if (path.endsWith("/thread/read"))
       json = {
         thread:
           threads.find((t) => t.id === body?.threadId) ??
@@ -311,6 +327,9 @@ export async function seedSessionUx(page: Page, count = 1) {
       currentThreadId: count ? "ux-0" : null,
       currentTurnId: null,
       events: { "ux-0": [] },
+      historyLoadedMap: {},
+      historyLoadingMap: {},
+      historyErrorMap: {},
       threadStatusMap: {},
       turnTimingMap: {},
       activeThreadIds: threads.map((t) => t.id),

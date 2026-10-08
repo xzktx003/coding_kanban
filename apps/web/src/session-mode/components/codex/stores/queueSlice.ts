@@ -1,8 +1,10 @@
-import type { StateCreator } from 'zustand';
-import { codexService } from '@session/services/codexService';
-import type { CodexStore, QueueSlice } from './types';
+import type { StateCreator } from "zustand";
+import type { CodexStore, QueueSlice } from "./types";
 
-export const createQueueSlice: StateCreator<CodexStore, [], [], QueueSlice> = (set, get) => ({
+export const createQueueSlice: StateCreator<CodexStore, [], [], QueueSlice> = (
+  set,
+  get,
+) => ({
   queuedMessages: [],
   isProcessingQueued: false,
 
@@ -37,6 +39,9 @@ export const createQueueSlice: StateCreator<CodexStore, [], [], QueueSlice> = (s
     set({ isProcessingQueued: true });
 
     try {
+      // Import only when execution is explicitly requested. Eagerly importing
+      // the service here creates a store/service initialization cycle in browsers.
+      const { codexService } = await import("@session/services/codexService");
       // Process all queued messages
       while (get().queuedMessages.length > 0) {
         const { text, images } = get().queuedMessages[0];
@@ -68,7 +73,7 @@ export const createQueueSlice: StateCreator<CodexStore, [], [], QueueSlice> = (s
         await new Promise((resolve) => setTimeout(resolve, 100));
       }
     } catch (error) {
-      console.error('Error processing queued messages:', error);
+      console.error("Error processing queued messages:", error);
     } finally {
       set({ isProcessingQueued: false });
     }

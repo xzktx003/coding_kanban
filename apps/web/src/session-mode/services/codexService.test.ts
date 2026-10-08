@@ -9,15 +9,100 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("./apiAdapt", () => api);
 import { codexService } from "./codexService";
+import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 import { useConfigStore } from "../components/codex/stores/useConfigStore";
 import { useCodexStore } from "../components/codex/stores/useCodexStore";
 import { useWorkspaceStore } from "../stores/useWorkspaceStore";
-import { hydrateThreadModel, useThreadModelStore } from "../stores/useThreadModelStore";
+import { useAgentSettingsStore } from "../stores/useAgentSettingsStore";
+import { useAcpStore } from "../stores/useAcpStore";
+import { useAsyncQuestionStore } from "../features/async-questions/store";
+import {
+  hydrateThreadModel,
+  useThreadModelStore,
+} from "../stores/useThreadModelStore";
 beforeEach(() => {
   vi.clearAllMocks();
   useThreadModelStore.setState({ threads: {} });
   useWorkspaceStore.setState({ cwd: "/project" });
   useConfigStore.setState({ threadCwdMode: "worktree", model: "" });
+});
+it("a background check keeps existing content interactive without the initial history loader", async () => {
+  let resolve!: (value: unknown) => void;
+  api.threadRead.mockImplementationOnce(
+    () =>
+      new Promise((r) => {
+        resolve = r;
+      }),
+  );
+  useCodexStore.setState({
+    historyLoadedMap: { cached: true },
+    events: { cached: [] },
+    historyLoadingMap: {},
+    threads: [],
+    currentThreadId: "cached",
+  });
+  const pending = codexService.loadThreadHistory("cached", undefined, {
+    background: true,
+  });
+  expect(useCodexStore.getState().historyLoadingMap.cached).not.toBe(true);
+  expect(useSessionSyncStore.getState().checking.cached).toBe(true);
+  resolve({ thread: { id: "cached", turns: [] } });
+  await pending;
+  expect(useSessionSyncStore.getState().checking.cached).toBeUndefined();
+});
+it("warm history reveals a newly discovered active question once, while cold hydration remains passive", async () => {
+  const id = "warm-question";
+  const question = {
+    type: "agentMessage",
+    id: "missed-question",
+    text: "选择环境",
+    questions: [{ title: "选择环境", options: ["隔离", "真实"] }],
+  };
+  const thread = {
+    id,
+    turns: [
+      {
+        id: "warm-turn",
+        status: "inProgress",
+        startedAt: 1,
+        durationMs: null,
+        items: [question],
+      },
+    ],
+  };
+  useAsyncQuestionStore.setState({ sessions: {} });
+  useAgentSettingsStore.setState({ selectedAgent: "codex" });
+  useAcpStore.setState({ active: false });
+  useCodexStore.setState({
+    currentThreadId: id,
+    currentTurnId: null,
+    events: {},
+    turnTimingMap: {},
+    historyLoadedMap: {},
+    threads: [],
+    threadStatusMap: {},
+  });
+  api.threadRead.mockResolvedValue({ thread });
+  await codexService.loadThreadHistory(id, undefined, {
+    background: true,
+    recent: true,
+  });
+  expect(useAsyncQuestionStore.getState().sessions[id]?.openId).toBeUndefined();
+  useCodexStore.setState({ events: { [id]: [] } });
+  await codexService.loadThreadHistory(id, undefined, { background: true });
+  expect(useAsyncQuestionStore.getState().sessions[id]?.openId).toBeUndefined();
+  useCodexStore.setState({ events: { [id]: [] } });
+  await codexService.loadThreadHistory(id, undefined, {
+    background: true,
+    recent: true,
+  });
+  expect(useAsyncQuestionStore.getState().sessions[id]?.openId).toBeTruthy();
+  useAsyncQuestionStore.getState().patch(id, { openId: undefined });
+  await codexService.loadThreadHistory(id, undefined, {
+    background: true,
+    recent: true,
+  });
+  expect(useAsyncQuestionStore.getState().sessions[id]?.openId).toBeUndefined();
 });
 it("sends the selected collaboration mode on each actual turn, including an existing thread", async () => {
   api.turnStart.mockResolvedValue({
@@ -33,7 +118,11 @@ it("sends the selected collaboration mode on each actual turn, including an exis
     reasoningEffort: "medium",
     collaborationMode: "plan",
   });
-  hydrateThreadModel("mode", { model: "test-model", modelProvider: "openai", reasoningEffort: "medium" });
+  hydrateThreadModel("mode", {
+    model: "test-model",
+    modelProvider: "openai",
+    reasoningEffort: "medium",
+  });
   await codexService.turnStart("mode", "Ask me a choice");
   expect(api.turnStart.mock.calls.at(-1)?.[0].collaborationMode).toEqual({
     mode: "plan",
@@ -67,7 +156,9 @@ it("enables questions for new threads and reads existing history without applyin
   await codexService.threadResume("questions-old", {
     config: { "features.example": true },
   });
-  expect(api.threadRead.mock.calls.at(-1)?.[0]).toEqual({threadId:"questions-old"});
+  expect(api.threadRead.mock.calls.at(-1)?.[0]).toEqual({
+    threadId: "questions-old",
+  });
 });
 it("does not silently run in the shared project if preparing an isolated worktree fails", async () => {
   api.gitCreateWorktree.mockRejectedValue(new Error("worktree failed"));
@@ -375,4 +466,45 @@ it("background history refresh preserves input focus, selection and fills the hy
   expect(useCodexStore.getState().currentThreadId).toBe("visible");
   expect(useCodexStore.getState().inputFocusTrigger).toBe(42);
   expect(useCodexStore.getState().historyLoadedMap.visible).toBe(true);
+});
+
+it("a same-turn history reconciliation preserves the observed start time when native metadata omits it", async () => {
+  useCodexStore.setState({
+    currentThreadId: "sparse",
+    events: {},
+    threads: [],
+    threadStatusMap: {},
+    turnTimingMap: {
+      sparse: {
+        turnId: "same",
+        status: "inProgress",
+        startedAtMs: 123000,
+        durationMs: null,
+      },
+    },
+  });
+  api.threadRead.mockResolvedValue({
+    thread: {
+      id: "sparse",
+      status: { type: "idle" },
+      turns: [
+        {
+          id: "same",
+          status: "completed",
+          startedAt: null,
+          durationMs: 2000,
+          items: [],
+          error: null,
+        },
+      ],
+    },
+  });
+  await codexService.loadThreadHistory("sparse", undefined, {
+    background: true,
+  });
+  expect(useCodexStore.getState().turnTimingMap.sparse).toMatchObject({
+    status: "completed",
+    startedAtMs: 123000,
+    durationMs: 2000,
+  });
 });

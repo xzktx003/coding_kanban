@@ -1,6 +1,7 @@
 import { toast } from "sonner";
 import { useCallback, useRef } from "react";
 import { fromSdkMessages } from "@session/components/cc/utils/fromSdkMessages";
+import { refreshClaudeHistory } from "@session/services/followedSessionAuxSync";
 import {
   ccGetSessionMessages,
   ccNewSession,
@@ -388,15 +389,38 @@ export function useCCSessionManager() {
         return;
       }
 
-      await handleResumeSession(sessionId, projectPath);
+      if (projectPath && useWorkspaceStore.getState().cwd !== projectPath)
+        useWorkspaceStore.getState().setCwd(projectPath);
+      switchToSession(sessionId);
+      if (!useCCStore.getState().sessionMessagesMap[sessionId]?.length)
+        await refreshClaudeHistory(sessionId);
     },
-    [handleResumeSession, switchToSession],
+    [switchToSession],
+  );
+
+  const ensureSessionForSend = useCallback(
+    async (sessionId: string, projectPath?: string) => {
+      if (useCCStore.getState().activeSessionIds.includes(sessionId)) return;
+      const directory = projectPath ?? useWorkspaceStore.getState().cwd;
+      if (!directory?.trim()) throw new Error("请选择会话的项目目录");
+      const capturedOptions = useCCStore.getState().options;
+      await ccResumeSession(
+        sessionId,
+        buildAgentOptions(capturedOptions, directory, {
+          resume: sessionId,
+          continueConversation: true,
+        }),
+      );
+      useCCStore.getState().addActiveSessionId(sessionId);
+    },
+    [],
   );
 
   return {
     handleNewSession,
     handleResumeSession,
     handleSessionSelect,
+    ensureSessionForSend,
     isLoading,
   };
 }

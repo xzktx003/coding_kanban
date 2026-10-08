@@ -1,4 +1,4 @@
-import { deliverRpc, sameRpc } from './rpcLifecycle';
+import { deliverRpc, sameRpc, rpcRequestContext } from './rpcLifecycle';
 import { create } from 'zustand';
 import type { RequestId } from '@session/bindings';
 import type {
@@ -138,7 +138,7 @@ export const useElicitationStore = create<ElicitationStore>((set, get) => ({
   respond: async (requestId, action, content = null, meta = null, target) => {
     const request = target ?? get().pendingRequests.find(r => r.requestId === requestId);
     if (!request || !get().pendingRequests.includes(request)) throw new Error('请求已过期');
-    await deliverRpc(request, () => respondToMcpElicitation(requestId, action, content, meta), () => {
+    await deliverRpc(request, () => respondToMcpElicitation(requestId, action, content, meta, rpcRequestContext(request)), () => {
       set(state => ({ pendingRequests: state.pendingRequests.filter(r => r !== request) }));
     });
   },

@@ -1,3 +1,7 @@
+import {
+  useSessionSyncStore,
+  requestSessionHistorySync,
+} from "@session/stores/useSessionSyncStore";
 import { useEffect, useState } from "react";
 import {
   threadAccess,
@@ -7,6 +11,17 @@ import { SessionApiError } from "@session/services/apiAdapt/shared";
 
 /** Informational only: reading/polling never attempts to acquire execution. */
 export function CodexAccessNotice({ threadId }: { threadId: string }) {
+  const recovery = useSessionSyncStore((s) => s.recovering[threadId]);
+  const connection = useSessionSyncStore((s) => s.connection);
+  const [showReconnect, setShowReconnect] = useState(false);
+  useEffect(() => {
+    if (connection !== "reconnecting") {
+      setShowReconnect(false);
+      return;
+    }
+    const timer = setTimeout(() => setShowReconnect(true), 1000);
+    return () => clearTimeout(timer);
+  }, [connection]);
   const [access, setAccess] = useState<CodexAccess | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -46,16 +61,39 @@ export function CodexAccessNotice({ threadId }: { threadId: string }) {
   const text =
     error ||
     (access?.state === "readonly"
-      ? "本项目未占用执行权，发送时会恢复原会话"
+      ? "只读查看，发送时恢复原会话"
       : access?.state === "external"
-        ? "其他客户端正在使用，可查看历史。待发送内容和附件已保留；对方释放后可重试。"
+        ? "其他客户端占用 · 历史可读，草稿已保留"
         : access?.reason);
+  if (recovery || showReconnect)
+    return (
+      <div
+        role="status"
+        data-session-recovery={recovery ?? "reconnecting"}
+        className="session-sync-notice"
+      >
+        <span>
+          {showReconnect
+            ? "连接中断，正在重连"
+            : recovery === "retrying"
+              ? "同步延迟，正在重试"
+              : "正在恢复会话同步…"}
+        </span>
+        <button
+          type="button"
+          className="underline underline-offset-2"
+          onClick={() => requestSessionHistorySync(threadId)}
+        >
+          重试
+        </button>
+      </div>
+    );
   if (!text) return null;
   return (
     <p
       role="status"
       data-codex-access={access?.state ?? "unknown"}
-      className="py-1 text-xs text-muted-foreground"
+      className="session-sync-notice session-access-notice"
     >
       {text}
     </p>

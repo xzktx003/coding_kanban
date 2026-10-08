@@ -1,39 +1,31 @@
-/* Selection is a paint-only layer: keep border widths and content geometry fixed. */
+/* Selection only paints the frame: existing headers and tab fills remain intact. */
 .session-mode.light {
   --session-selection-border: #3b82f6;
-  --session-selection-header: #eff6ff;
-  --session-selection-tab: #dbeafe;
+  --session-selection-underline: #94713d;
+}
+.session-mode.dark {
+  --session-selection-border: #60a5fa;
+  --session-selection-underline: #d6b77a;
 }
 
-.session-mode.light .session-window-group[data-group-active="true"],
-.session-mode.light [data-card-root][data-session-card][data-selected="true"] {
+.session-mode .session-window-group[data-group-active="true"],
+.session-mode [data-card-root][data-session-card][data-selected="true"] {
   border-color: var(--session-selection-border);
   outline: 2px solid var(--session-selection-border);
   outline-offset: -2px;
 }
 
-.session-mode.light
-  .session-window-group[data-group-active="true"]
-  > .session-tabs,
-.session-mode.light
-  [data-card-root][data-session-card][data-selected="true"]
-  > .session-card-header {
-  background: var(--session-selection-header);
-}
-
-.session-mode.light
-  .session-window-group[data-group-active="true"]
-  .session-tab[data-active="true"] {
-  background: var(--session-selection-tab);
-  box-shadow: inset 0 -2px var(--session-selection-border);
+/* Warm bronze in light mode, champagne in dark mode; leave the tab background alone. */
+.session-mode .session-tab[data-active="true"] {
+  box-shadow: inset 0 -2px var(--session-selection-underline);
 }
 
 /* The frame replaces the selected card's decorative ring; attention icons remain. */
-.session-mode.light [data-card-root][data-session-card][data-selected="true"] {
+.session-mode [data-card-root][data-session-card][data-selected="true"] {
   box-shadow: none;
 }
 
-.session-mode.light .session-window-group,
-.session-mode.light [data-card-root][data-session-card] {
+.session-mode .session-window-group,
+.session-mode [data-card-root][data-session-card] {
   transition: none;
 }

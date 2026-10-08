@@ -151,7 +151,7 @@
 .session-mode
   .session-compact-composer
   .session-composer-policy
-  > button:first-child,
+  > button:first-of-type,
 .session-mode .session-compact-composer .session-composer-send,
 .session-mode .session-compact-composer .session-composer-stop {
   width: 36px;
@@ -225,7 +225,7 @@
 .session-mode
   .session-context-strip.is-compact
   .session-context-chip
-  > button:first-child,
+  > button:first-of-type,
 .session-mode
   .session-attachment-strip.is-compact
   .session-attachment
@@ -295,7 +295,7 @@
   .session-mode
     .session-compact-composer
     .session-composer-policy
-    > button:first-child,
+    > button:first-of-type,
   .session-mode .session-compact-composer .session-composer-send,
   .session-mode .session-compact-composer .session-composer-stop {
     width: 44px;

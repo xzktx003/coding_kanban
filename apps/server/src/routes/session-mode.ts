@@ -1,4 +1,5 @@
 import { registerSessionFollowupRoutes } from "./session-followups.js";
+import { registerSessionSubagentRoutes } from "./session-subagents.js";
 import { registerSessionProjectsRoutes } from "./session-projects.js";
 import { registerWorkspaceFileRoutes } from "./workspace-files.js";
 import { registerSessionTabsRoutes } from "./session-tabs.js";
@@ -61,6 +62,7 @@ export function registerSessionModeRoutes(
       : undefined,
     autoStart: Boolean(options.attachmentRoot),
   });
+  registerSessionSubagentRoutes(app, { origin: () => origin, fetch: fetchUpstream, stop: (id, turn) => followups.stop(id, turn) });
   registerWorkspaceFileRoutes(app, {
     trashHome: options.attachmentRoot
       ? resolve(options.attachmentRoot, "..", "file-trash")

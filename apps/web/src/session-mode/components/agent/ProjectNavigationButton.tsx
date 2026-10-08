@@ -4,7 +4,11 @@ import {
   FolderOpen,
   LocateFixed,
   PanelLeftOpen,
+  PanelLeftClose,
 } from "lucide-react";
+import { useLayoutStore } from "@session/stores/useLayoutStore";
+import { useIsMobile } from "@session/hooks/use-mobile";
+import { isSecondaryPage } from "@session/services/sessionPageHistory";
 import { useEffect, useRef } from "react";
 import { useSidebar } from "../ui/sidebar";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
@@ -26,19 +30,32 @@ export function ProjectNavigationButton({
   compact?: boolean;
   global?: boolean;
 }) {
-  if (global)
-    return (
-      <button
-        type="button"
-        className="session-top-icon session-global-projects"
-        aria-label="展开项目列表"
-        title="项目与会话"
-        onClick={() => window.dispatchEvent(new Event("session-open-projects"))}
-      >
-        <PanelLeftOpen size={17} />
-      </button>
-    );
+  if (global) return <GlobalProjectNavigationButton />;
   return <LocalProjectNavigationButton compact={compact} />;
+}
+
+function GlobalProjectNavigationButton() {
+  const mobile = useIsMobile();
+  const open = useLayoutStore((s) => s.isSidebarOpen);
+  const view = useLayoutStore((s) => s.view);
+  const expanded = !mobile && open && !isSecondaryPage(view);
+  const label = expanded ? "收起项目列表" : "展开项目列表";
+  const Icon = expanded ? PanelLeftClose : PanelLeftOpen;
+  return (
+    <button
+      type="button"
+      className="session-top-icon session-global-projects"
+      aria-label={label}
+      aria-expanded={expanded}
+      title={label}
+      onClick={() => {
+        if (expanded) useLayoutStore.getState().setSidebarOpen(false);
+        else window.dispatchEvent(new Event("session-open-projects"));
+      }}
+    >
+      <Icon size={17} aria-hidden="true" />
+    </button>
+  );
 }
 
 function LocalProjectNavigationButton({

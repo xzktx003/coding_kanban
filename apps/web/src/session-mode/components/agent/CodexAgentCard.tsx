@@ -99,7 +99,10 @@ export function CodexAgentCard({
     const state = useCodexStore.getState();
     if (!state.historyLoadedMap[card.id] && !state.historyLoadingMap[card.id]) {
       void codexService
-        .loadThreadHistory(card.id, undefined, { background: true })
+        .loadThreadHistory(card.id, undefined, {
+          background: true,
+          recent: true,
+        })
         .catch(() => {});
     }
   }, [card.id]);
@@ -251,7 +254,6 @@ export function CodexAgentCard({
               等待回复
             </span>
           )}
-
         </div>
         {processing && (
           <Button

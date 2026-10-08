@@ -12,6 +12,11 @@ import { useCCPermissionListener, useCCSessionListener } from "../hooks";
 import type { PermissionRequestMessage } from "../types/messages";
 import type { PermissionDecision } from "../types/permission";
 import { fromSdkMessages } from "../utils/fromSdkMessages";
+import { refreshClaudeHistory } from "@session/services/followedSessionAuxSync";
+import {
+  getReadingPosition,
+  saveReadingPosition,
+} from "@session/services/sessionTranscriptCache";
 import { CCScrollControls } from "./CCScrollControls";
 import { buildMessageGroups, CCExploredMessageGroup } from "./messages/group";
 import { buildInlineErrorsMap } from "./messages/inlineErrors";
@@ -86,35 +91,24 @@ export default function CCSession({
   // biome-ignore lint/correctness/useExhaustiveDependencies: this effect runs once per activeSessionId to load history and resume; it must not re-run on other value changes
   useEffect(() => {
     if (isEmbedded) return;
-    if (!activeSessionId || activeSessionIds.includes(activeSessionId)) return;
+    if (!activeSessionId || sessionMessagesMap[activeSessionId]?.length) return;
     const sid = activeSessionId;
     const sessionCwd = cwd;
     if (!sessionCwd?.trim()) return;
     void (async () => {
       try {
-        const sdkMessages = await ccGetSessionMessages(sid);
-        for (const msg of fromSdkMessages(sdkMessages, sid)) {
-          addMessageToSession(sid, msg);
-        }
-        setSessionLoading(sid, false);
-        await ccResumeSession(sid, {
-          cwd: sessionCwd,
-          permissionMode: options.permissionMode,
-          resume: sid,
-          continueConversation: true,
-          ...(options.model ? { model: options.model } : {}),
-          ...(options.effort ? { effort: options.effort } : {}),
-        });
-        addActiveSessionId(sid);
+        await refreshClaudeHistory(sid);
       } catch (err) {
         console.error("[CCSession] Failed to load/resume session", {
           sessionId: sid,
           err,
         });
-        setSessionLoading(sid, false);
       }
     })();
   }, [activeSessionId, isEmbedded]);
+
+  const openedSessionId = sessionId ?? activeSessionId;
+  const reading = useRef(getReadingPosition(`cc:${openedSessionId}`));
 
   // Track user scroll intent.
   useEffect(() => {
@@ -124,19 +118,52 @@ export default function CCSession({
       if (isProgrammaticScrollRef.current) return;
       shouldAutoScrollRef.current =
         el.scrollHeight - el.scrollTop - el.clientHeight <= 4;
+      const anchor = [
+        ...el.querySelectorAll<HTMLElement>("[data-cc-message]"),
+      ].find(
+        (node) =>
+          node.getBoundingClientRect().bottom > el.getBoundingClientRect().top,
+      );
+      reading.current = {
+        atBottom: shouldAutoScrollRef.current,
+        anchor: anchor?.dataset.ccMessage,
+        offset: anchor
+          ? el.getBoundingClientRect().top - anchor.getBoundingClientRect().top
+          : 0,
+        scrollTop: el.scrollTop,
+      };
+      saveReadingPosition(`cc:${openedSessionId}`, reading.current);
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, []);
+  }, [openedSessionId]);
 
   // Opening another conversation resets the reading position before paint.
-  const openedSessionId = sessionId ?? activeSessionId;
   useLayoutEffect(() => {
-    shouldAutoScrollRef.current = true;
+    reading.current = getReadingPosition(`cc:${openedSessionId}`);
+    shouldAutoScrollRef.current = reading.current?.atBottom ?? true;
     isProgrammaticScrollRef.current = false;
     const el = scrollContainerRef.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "auto" });
+    if (el)
+      el.scrollTo({
+        top: shouldAutoScrollRef.current
+          ? el.scrollHeight
+          : (reading.current?.scrollTop ?? 0),
+        behavior: "auto",
+      });
   }, [openedSessionId]);
+  useLayoutEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el || shouldAutoScrollRef.current || !reading.current?.anchor) return;
+    const anchor = [
+      ...el.querySelectorAll<HTMLElement>("[data-cc-message]"),
+    ].find((node) => node.dataset.ccMessage === reading.current?.anchor);
+    if (anchor)
+      el.scrollTop +=
+        anchor.getBoundingClientRect().top -
+        el.getBoundingClientRect().top +
+        reading.current.offset;
+  }, [messages, openedSessionId]);
 
   // Instant scrolling also handles asynchronously loaded history on mobile.
   useEffect(() => {
@@ -200,23 +227,47 @@ export default function CCSession({
         >
           <div className="thread-surface flex flex-col gap-2 p-4">
             {/* Message list */}
-            {messageGroups.map((group) =>
-              group.kind === "explored" ? (
-                <CCExploredMessageGroup
-                  key={`explored-${group.msgIndices[0]}`}
-                  msgIndices={group.msgIndices}
-                  messages={messages}
-                  inlineErrorsMap={inlineErrorsMap}
-                />
-              ) : (
-                <CCMessage
-                  key={group.msgIdx}
-                  message={messages[group.msgIdx]}
-                  index={group.msgIdx}
-                  inlineErrors={inlineErrorsMap[group.msgIdx]}
-                />
-              ),
-            )}
+            {messageGroups.map((group) => (
+              <div
+                key={
+                  (
+                    messages[
+                      group.kind === "explored"
+                        ? group.msgIndices[0]
+                        : group.msgIdx
+                    ] as { uuid?: string }
+                  ).uuid ??
+                  (group.kind === "explored"
+                    ? group.msgIndices[0]
+                    : group.msgIdx)
+                }
+                data-cc-message={
+                  (
+                    messages[
+                      group.kind === "explored"
+                        ? group.msgIndices[0]
+                        : group.msgIdx
+                    ] as { uuid?: string }
+                  ).uuid
+                }
+              >
+                {group.kind === "explored" ? (
+                  <CCExploredMessageGroup
+                    key={`explored-${group.msgIndices[0]}`}
+                    msgIndices={group.msgIndices}
+                    messages={messages}
+                    inlineErrorsMap={inlineErrorsMap}
+                  />
+                ) : (
+                  <CCMessage
+                    key={group.msgIdx}
+                    message={messages[group.msgIdx]}
+                    index={group.msgIdx}
+                    inlineErrors={inlineErrorsMap[group.msgIdx]}
+                  />
+                )}
+              </div>
+            ))}
 
             <div ref={latestRef} data-session-latest style={{ height: 1 }} />
             {/* Loading indicator */}

@@ -1,3 +1,4 @@
+import { TranscriptInspectionContext } from "./inspection";
 import { CodexAccessNotice } from "./CodexAccessNotice";
 import { useSessionReadReceipt } from "@session/hooks/useSessionReadReceipt";
 import { Loader2 } from "lucide-react";
@@ -27,9 +28,16 @@ import { WorkingIndicator } from "../widget/WorkingIndicator";
 import { RowStateContext } from "./rowState";
 import { buildThreadRows, type ThreadRow } from "./threadRows";
 import { CodexDeliveryEchoes } from "./CodexDeliveryEchoes";
+import {
+  getReadingPosition,
+  saveReadingPosition,
+  type ReadingPosition,
+} from "@session/services/sessionTranscriptCache";
+import { useSessionSyncStore } from "@session/stores/useSessionSyncStore";
 
 interface CodexThreadProps {
   threadId?: string;
+  inspection?: boolean;
   /** Fixed-height cards resolve their height through flex rather than h-full. */
   fillHeight?: boolean;
 }
@@ -76,6 +84,14 @@ const CodexTranscript = memo(function CodexTranscript({
 }) {
   const { t } = useTranslation("thread");
   const loading = useCodexStore((s) => s.historyLoadingMap[activeThreadId]);
+  const loaded = useCodexStore((s) => s.historyLoadedMap[activeThreadId]);
+  const earlierCursor = useSessionSyncStore((s) => s.cursors[activeThreadId]);
+  const earlierLoading = useSessionSyncStore(
+    (s) => s.earlierLoading[activeThreadId],
+  );
+  const earlierError = useSessionSyncStore(
+    (s) => s.earlierErrors[activeThreadId],
+  );
   const historyError = useCodexStore((s) => s.historyErrorMap[activeThreadId]);
   const events = useCodexStore((s) => s.events[activeThreadId] ?? EMPTY_EVENTS);
   const turnTiming = useCodexStore((s) => s.turnTimingMap[activeThreadId]);
@@ -86,13 +102,29 @@ const CodexTranscript = memo(function CodexTranscript({
   useSessionReadReceipt("codex", activeThreadId, latestRef);
   const contentRef = useRef<HTMLDivElement>(null);
   const saved = useRef(positions.get(activeThreadId));
+  const reading = useRef<ReadingPosition | undefined>(
+    getReadingPosition(`codex:${activeThreadId}`),
+  );
   const userScrolling = useRef(false);
   const disclosure = useRef(
     saved.current?.disclosure ?? new Map<string, Map<string, unknown>>(),
   );
-  // Each opening starts at the latest reply; retain only measurement/disclosure caches.
-  const pinned = useRef(true);
+  const pinned = useRef(reading.current?.atBottom ?? true);
+  const restoringAnchor = useRef(!pinned.current && !!reading.current?.anchor);
   const [isAtBottom, setAtBottom] = useState(pinned.current);
+  const [hasNewMessages, setHasNewMessages] = useState(false);
+  const newest = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const last = rows.at(-1);
+    const signature = last
+      ? JSON.stringify(
+          last.item.kind === "event" ? last.item.event : last.item.actions,
+        )
+      : undefined;
+    if (newest.current && signature !== newest.current && !pinned.current)
+      setHasNewMessages(true);
+    newest.current = signature;
+  }, [rows]);
   const viewport = useCallback(
     () =>
       rootRef.current?.querySelector<HTMLDivElement>(
@@ -127,15 +159,20 @@ const CodexTranscript = memo(function CodexTranscript({
     getItemKey: (index) => rows[index].key,
     overscan: 2,
     initialRect: { width: 768, height: 600 },
-    initialOffset: () => Math.max(0, rows.length * 160 - 600),
+    initialOffset: () =>
+      pinned.current
+        ? Math.max(0, rows.length * 160 - 600)
+        : (reading.current?.scrollTop ?? 0),
   });
   // Preserve the reading anchor when an earlier row changes height (images/code/resize).
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) =>
     !pinned.current && item.start < (virtualizer.scrollOffset ?? 0);
   const jumpToBottom = useCallback(() => {
     pinned.current = true;
+    restoringAnchor.current = false;
     userScrolling.current = false;
     setAtBottom(true);
+    setHasNewMessages(false);
     const element = viewport();
     // WebKit binds scrollTop to a signed integer: huge sentinel values can wrap
     // negative and land at the top. Always use the actual, bounded scroll range.
@@ -170,6 +207,73 @@ const CodexTranscript = memo(function CodexTranscript({
   }, [activeThreadId, jumpToBottom]);
 
   const totalSize = virtualizer.getTotalSize();
+  useLayoutEffect(() => {
+    if (pinned.current || userScrolling.current || !reading.current?.anchor)
+      return;
+    const index = rows.findIndex((row) => row.key === reading.current?.anchor);
+    const element = viewport();
+    if (index < 0 || !element) {
+      if (rows.length && earlierCursor && !earlierLoading && !earlierError)
+        void codexService.loadEarlierHistory(activeThreadId);
+      return;
+    }
+    const measurement = virtualizer.measurementsCache[index];
+    const anchor = reading.current.anchor;
+    let frame = 0,
+      attempts = 0;
+    restoringAnchor.current = true;
+    const align = () => {
+      if (pinned.current || reading.current?.anchor !== anchor) return;
+      const node = [
+        ...element.querySelectorAll<HTMLElement>("[data-codex-row]"),
+      ].find((row) => row.dataset.codexRow === anchor);
+      if (node) {
+        if (reading.current.format === "row")
+          element.scrollTop +=
+            node.getBoundingClientRect().top -
+            element.getBoundingClientRect().top +
+            reading.current.offset;
+        else if (measurement)
+          element.scrollTop = Math.max(
+            0,
+            measurement.start + reading.current.offset,
+          );
+        reading.current = {
+          ...reading.current,
+          format: "row",
+          offset:
+            reading.current.format === "row"
+              ? reading.current.offset
+              : element.getBoundingClientRect().top -
+                node.getBoundingClientRect().top,
+          scrollTop: element.scrollTop,
+        };
+        frame = requestAnimationFrame(() => {
+          restoringAnchor.current = false;
+          if (reading.current)
+            saveReadingPosition(`codex:${activeThreadId}`, reading.current);
+        });
+      } else if (measurement && attempts++ < 4) {
+        restoringAnchor.current = true;
+        element.scrollTop = Math.max(
+          0,
+          measurement.start + reading.current.offset,
+        );
+        frame = requestAnimationFrame(align);
+      }
+    };
+    align();
+    return () => cancelAnimationFrame(frame);
+  }, [
+    rows,
+    totalSize,
+    viewport,
+    virtualizer,
+    earlierCursor,
+    earlierLoading,
+    earlierError,
+    activeThreadId,
+  ]);
   useEffect(() => {
     if (!pinned.current) return;
     const frame = requestAnimationFrame(() => {
@@ -181,9 +285,44 @@ const CodexTranscript = memo(function CodexTranscript({
     const element = viewport();
     if (!element) return;
     let followFrame = 0;
+    let saveTimer: ReturnType<typeof setTimeout>;
+    let rememberFrame = 0;
+    const remember = (persist = true) => {
+      if (restoringAnchor.current) return;
+      if (
+        !userScrolling.current &&
+        !pinned.current &&
+        reading.current?.anchor
+      ) {
+        if (persist)
+          saveReadingPosition(`codex:${activeThreadId}`, reading.current);
+        return;
+      }
+      const top = element.getBoundingClientRect().top;
+      const node = [
+        ...element.querySelectorAll<HTMLElement>("[data-codex-row]"),
+      ].find(
+        (row) =>
+          row.getBoundingClientRect().bottom > top &&
+          row.getBoundingClientRect().top < top + element.clientHeight,
+      );
+      if (!node) return;
+      reading.current = {
+        atBottom: pinned.current,
+        anchor: node?.dataset.codexRow ?? reading.current?.anchor,
+        offset: node
+          ? top - node.getBoundingClientRect().top
+          : (reading.current?.offset ?? 0),
+        scrollTop: element.scrollTop,
+        format: "row",
+      };
+      if (persist)
+        saveReadingPosition(`codex:${activeThreadId}`, reading.current);
+    };
     let touchStart: { x: number; y: number } | null = null;
     const onScroll = () => {
       if (element.clientHeight === 0) return;
+      if (restoringAnchor.current) return;
       // Layout/measurement scroll events must not cancel following the latest message.
       if (pinned.current && !userScrolling.current) {
         // Mobile focus/keyboard and virtual-list layout can move the viewport.
@@ -204,9 +343,18 @@ const CodexTranscript = memo(function CodexTranscript({
       pinned.current = atBottom;
       if (atBottom) userScrolling.current = false;
       setAtBottom(atBottom);
+      remember(false);
+      cancelAnimationFrame(rememberFrame);
+      rememberFrame = requestAnimationFrame(() => remember(false));
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        remember();
+        userScrolling.current = false;
+      }, 150);
     };
     const markUserScroll = () => {
       userScrolling.current = true;
+      restoringAnchor.current = false;
     };
     const onTouchStart = (event: TouchEvent) => {
       const touch = event.touches[0];
@@ -265,6 +413,9 @@ const CodexTranscript = memo(function CodexTranscript({
       element.removeEventListener("touchcancel", onTouchEnd);
       element.removeEventListener("keydown", onKey);
       root?.removeEventListener("pointerdown", onPointer);
+      clearTimeout(saveTimer);
+      remember();
+      cancelAnimationFrame(rememberFrame);
       positions.delete(activeThreadId);
       positions.set(activeThreadId, {
         measurements:
@@ -305,6 +456,20 @@ const CodexTranscript = memo(function CodexTranscript({
             ref={contentRef}
             className="thread-surface max-w-3xl mx-auto py-4"
           >
+            {earlierCursor && (
+              <div className="session-earlier-history">
+                <button
+                  type="button"
+                  disabled={earlierLoading}
+                  onClick={() =>
+                    void codexService.loadEarlierHistory(activeThreadId)
+                  }
+                >
+                  {earlierLoading ? "正在加载更早消息…" : "加载更早消息"}
+                </button>
+                {earlierError && <span role="status">加载失败，可重试</span>}
+              </div>
+            )}
             <div
               style={{
                 height: totalSize,
@@ -342,8 +507,7 @@ const CodexTranscript = memo(function CodexTranscript({
             </div>
             <div className="space-y-2">
               <CodexDeliveryEchoes threadId={activeThreadId} events={events} />
-              <CodexAccessNotice key={activeThreadId} threadId={activeThreadId} />
-              {loading && (
+              {loading && !loaded && events.length === 0 && (
                 <div
                   role="status"
                   className="flex items-center gap-2 py-2 text-sm text-muted-foreground"
@@ -352,7 +516,7 @@ const CodexTranscript = memo(function CodexTranscript({
                   {t("historyLoading")}
                 </div>
               )}
-              {historyError && !loading && (
+              {historyError && !loading && !loaded && events.length === 0 && (
                 <div
                   role="alert"
                   className="rounded-md border p-3 text-sm space-y-2"
@@ -385,10 +549,12 @@ const CodexTranscript = memo(function CodexTranscript({
           </div>
         </ScrollArea>
       </div>
+      <CodexAccessNotice key={activeThreadId} threadId={activeThreadId} />
       {!isAtBottom && (
         <ScrollToBottomButton
           onClick={jumpToBottom}
           bottomClassName="bottom-4"
+          label={hasNewMessages ? "有新消息" : "回到最新"}
         />
       )}
     </div>
@@ -398,13 +564,16 @@ const CodexTranscript = memo(function CodexTranscript({
 export const CodexThread = memo(function CodexThread({
   threadId,
   fillHeight = true,
+  inspection = false,
 }: CodexThreadProps = {}) {
   const activeThreadId = useCodexStore((s) => threadId ?? s.currentThreadId);
   return (
-    <CodexTranscript
-      key={activeThreadId ?? ""}
-      activeThreadId={activeThreadId ?? ""}
-      fillHeight={fillHeight}
-    />
+    <TranscriptInspectionContext.Provider value={inspection}>
+      <CodexTranscript
+        key={activeThreadId ?? ""}
+        activeThreadId={activeThreadId ?? ""}
+        fillHeight={fillHeight}
+      />
+    </TranscriptInspectionContext.Provider>
   );
 });

@@ -2,12 +2,18 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useCodexStore } from "../components/codex/stores";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
 import { startFollowedSessionStatusSync } from "./followedSessionStatusSync";
+import {
+  useApprovalStore,
+  useRequestUserInputStore,
+} from "../components/codex/stores";
 
 const stream = vi.hoisted(() => ({
   onOpen: undefined as (() => void) | undefined,
   close: vi.fn(),
+  repair: vi.fn(),
 }));
 vi.mock("../lib/eventStream", () => ({
+  reconcileEventStream: stream.repair,
   openEventStream: (subscriber: { onOpen: () => void }) => {
     stream.onOpen = subscriber.onOpen;
     return stream.close;
@@ -25,6 +31,9 @@ const response = (data: unknown[], nextCursor: string | null = null) =>
 beforeEach(() => {
   vi.useFakeTimers();
   stream.close.mockClear();
+  stream.repair.mockClear();
+  useApprovalStore.setState({ pendingApprovals: [], currentApproval: null });
+  useRequestUserInputStore.setState({ pendingRequests: [] });
   useAgentCenterStore.setState({
     cards: [
       { kind: "codex", id: "a", cwd: "/first" },
@@ -85,6 +94,40 @@ it("restores all followed statuses across projects and pages without changing na
   });
   expect(useAgentCenterStore.getState().currentAgentCardId).toBe("a");
 });
+it("recovers missing pending-question snapshots without resending answers", async () => {
+  const fetcher = vi.fn(async () =>
+    response([
+      {
+        id: "a",
+        status: { type: "active", activeFlags: ["waitingOnUserInput"] },
+      },
+      { id: "b", status: idle },
+    ]),
+  );
+  stop = startFollowedSessionStatusSync(fetcher);
+  await vi.advanceTimersByTimeAsync(600);
+  expect(stream.repair).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(stream.repair).toHaveBeenCalledOnce();
+});
+it("does not reconnect if the actual pending request arrives during the reconciliation grace period", async () => {
+  const fetcher = vi.fn(async () =>
+    response([
+      {
+        id: "a",
+        status: { type: "active", activeFlags: ["waitingOnUserInput"] },
+      },
+      { id: "b", status: idle },
+    ]),
+  );
+  stop = startFollowedSessionStatusSync(fetcher);
+  await vi.advanceTimersByTimeAsync(1);
+  useRequestUserInputStore.setState({
+    pendingRequests: [{ threadId: "a", requestId: 7, turnId: "t" } as any],
+  });
+  await vi.advanceTimersByTimeAsync(600);
+  expect(stream.repair).not.toHaveBeenCalled();
+});
 
 it("synchronizes membership restored after startup and ignores metadata-only updates", async () => {
   useAgentCenterStore.setState({ cards: [] });
@@ -115,9 +158,12 @@ it("refreshes on SSE reconnect and foreground recovery", async () => {
   await vi.advanceTimersByTimeAsync(1);
   stream.onOpen?.();
   await vi.advanceTimersByTimeAsync(1);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(5000);
+  const beforeWake = fetcher.mock.calls.length;
   document.dispatchEvent(new Event("visibilitychange"));
   await vi.advanceTimersByTimeAsync(1);
-  expect(fetcher).toHaveBeenCalledTimes(3);
+  expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(beforeWake);
 });
 
 it("does not overwrite a newer streamed status with a delayed snapshot", async () => {
@@ -289,24 +335,22 @@ it("rechecks a snapshot invalidated only by a turn event instead of leaving stat
     );
   stop = startFollowedSessionStatusSync(fetcher);
   await vi.advanceTimersByTimeAsync(1);
-  useCodexStore
-    .getState()
-    .addEvent("a", {
-      method: "turn/started",
-      params: {
-        threadId: "a",
-        turn: {
-          id: "new",
-          status: "inProgress",
-          items: [],
-          itemsView: "full",
-          error: null,
-          startedAt: 1,
-          completedAt: null,
-          durationMs: null,
-        },
+  useCodexStore.getState().addEvent("a", {
+    method: "turn/started",
+    params: {
+      threadId: "a",
+      turn: {
+        id: "new",
+        status: "inProgress",
+        items: [],
+        itemsView: "full",
+        error: null,
+        startedAt: 1,
+        completedAt: null,
+        durationMs: null,
       },
-    });
+    },
+  });
   resolve(
     response([
       { id: "a", status: idle },

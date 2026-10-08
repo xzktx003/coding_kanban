@@ -6,6 +6,7 @@ import type {
   FollowupAction,
   FollowupSubmit,
 } from "@agent-orchestrator/shared";
+import { validAgentMention } from "@agent-orchestrator/shared";
 import { composeContextText } from "@agent-orchestrator/shared";
 import {
   CodexFollowups,
@@ -45,6 +46,7 @@ function submit(value: unknown): FollowupSubmit {
     "text",
     "images",
     "contexts",
+    "mentions",
     "parameters",
     "mode",
     "expectedTurnId",
@@ -72,6 +74,7 @@ function submit(value: unknown): FollowupSubmit {
     )
   )
     invalid();
+  if (v.mentions !== undefined && (!Array.isArray(v.mentions) || v.mentions.length > 32 || v.mentions.some((m: unknown) => !validAgentMention(m)))) invalid("无效的 Agent 引用");
   if (v.contexts !== undefined) {
     if (!Array.isArray(v.contexts) || v.contexts.length > 32) invalid();
     const seen = new Set<string>();

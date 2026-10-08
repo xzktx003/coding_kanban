@@ -8,16 +8,45 @@ vi.mock("./services/followedSessionHistorySync", () => ({
 vi.mock("./services/followedSessionStatusSync", () => ({
   startFollowedSessionStatusSync: statusSync.start,
 }));
+vi.mock("./services/followedSessionAuxSync", () => ({
+  startFollowedSessionAuxSync: () => () => {},
+}));
+vi.mock("./services/sessionTranscriptCache", () => ({
+  startSessionTranscriptCache: () => () => {},
+}));
 vi.mock("./App", () => ({
   default: () => <textarea aria-label="会话草稿" defaultValue="keep draft" />,
 }));
 vi.mock("./DataImportDialog", () => ({ DataImportDialog: () => null }));
 import SessionWorkbench from "./SessionWorkbench";
+it("foreground and online wakes keep a healthy synchronization manager mounted", async () => {
+  vi.useFakeTimers();
+  statusSync.start.mockReset().mockReturnValue(statusSync.stop);
+  statusSync.stop.mockReset();
+  historySync.start.mockReset().mockReturnValue(historySync.stop);
+  historySync.stop.mockReset();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({ ok: true, json: async () => ({ status: "ok" }) })),
+  );
+  const { unmount } = render(<SessionWorkbench />);
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  await act(async () => {
+    window.dispatchEvent(new Event("online"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(10);
+  });
+  expect(historySync.start).toHaveBeenCalledOnce();
+  expect(historySync.stop).not.toHaveBeenCalled();
+  unmount();
+});
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
-it("checks connection continuously and retains the mounted draft during an outage", async () => {
+it("health probe failure keeps reconciliation alive alongside the mounted draft", async () => {
   statusSync.stop.mockClear();
   statusSync.start.mockReset().mockReturnValue(statusSync.stop);
   historySync.stop.mockClear();
@@ -40,18 +69,19 @@ it("checks connection continuously and retains the mounted draft during an outag
   expect(screen.getByRole("alert").textContent).toContain("连接中断");
   expect(screen.getByRole("alert").textContent).toContain("浏览器无法访问服务");
   expect(screen.getByLabelText("会话草稿")).toBe(draft);
-  expect(statusSync.stop).toHaveBeenCalledOnce();
+  expect(statusSync.stop).not.toHaveBeenCalled();
+  expect(historySync.stop).not.toHaveBeenCalled();
   fetch.mockResolvedValue({ ok: true, json: async () => ({ status: "ok" }) });
   await act(async () => {
     await vi.advanceTimersByTimeAsync(11_000);
   });
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.getByLabelText("会话草稿")).toBe(draft);
-  expect(statusSync.start).toHaveBeenCalledTimes(2);
+  expect(statusSync.start).toHaveBeenCalledOnce();
   unmount();
-  expect(statusSync.stop).toHaveBeenCalledTimes(2);
-  expect(historySync.start).toHaveBeenCalledTimes(2);
-  expect(historySync.stop).toHaveBeenCalledTimes(2);
+  expect(statusSync.stop).toHaveBeenCalledOnce();
+  expect(historySync.start).toHaveBeenCalledOnce();
+  expect(historySync.stop).toHaveBeenCalledOnce();
 });
 
 it("rechecks immediately when the network reconnects and retains the draft", async () => {
