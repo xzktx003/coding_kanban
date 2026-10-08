@@ -1,3 +1,4 @@
+import { RpcDeliveryNotice } from "./RpcDeliveryNotice";
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -51,11 +52,12 @@ export function PermissionsItem({ currentThreadId }: PermissionsItemProps) {
 
   const decide = (decision: PermissionsDecision) => {
     setSubmitting(true);
-    void respond(request, decision).finally(() => setSubmitting(false));
+    void respond(request, decision).catch(() => {}).finally(() => setSubmitting(false));
   };
 
   return (
     <div className="rounded-md border bg-background p-4 space-y-4">
+      <RpcDeliveryNotice request={request} />
       <div className="flex items-center gap-2">
         <Badge variant="secondary">permissions</Badge>
         <span className="font-medium">{t('permissions.title')}</span>

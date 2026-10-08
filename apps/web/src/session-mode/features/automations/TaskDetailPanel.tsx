@@ -1,3 +1,4 @@
+import { followupService } from "@session/services/followupService";
 import {
   Calendar,
   CheckCircle2,
@@ -223,7 +224,7 @@ function RunRow({
                   if (!activeTurnId) {
                     return;
                   }
-                  await turnInterrupt({ threadId: run.threadId, turnId: activeTurnId });
+                  await followupService.stop(run.threadId, activeTurnId);
                 } else {
                   await ccInterrupt(run.threadId);
                 }

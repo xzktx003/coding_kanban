@@ -1,3 +1,4 @@
+import { RpcDeliveryNotice } from "./RpcDeliveryNotice";
 import { AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -44,6 +45,7 @@ export function ApprovalItem({
         currentApproval.requestId,
         isCommandExecution,
         decision,
+        currentApproval,
       );
     } catch (error) {
       console.error("Failed to approve:", error);
@@ -56,6 +58,7 @@ export function ApprovalItem({
         currentApproval.requestId,
         isCommandExecution,
         "acceptForSession",
+        currentApproval,
       );
     } catch (error) {
       console.error("Failed to approve for session:", error);
@@ -68,6 +71,7 @@ export function ApprovalItem({
         currentApproval.requestId,
         isCommandExecution,
         "decline",
+        currentApproval,
       );
     } catch (error) {
       console.error("Failed to decline:", error);
@@ -76,6 +80,7 @@ export function ApprovalItem({
 
   return (
     <div className="rounded-md border bg-background p-4 space-y-4">
+      <RpcDeliveryNotice request={currentApproval} />
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 text-warning" />

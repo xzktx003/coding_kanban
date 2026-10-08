@@ -32,7 +32,7 @@ test("ACP rows support keyboard without activating from nested buttons", () => {
   fireEvent.keyDown(row, { key: "Enter" });
   fireEvent.keyDown(row, { key: " " });
   expect(state.open).toHaveBeenCalledTimes(2);
-  fireEvent.keyDown(screen.getByText("改名"), { key: "Enter" });
+  fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
   expect(state.open).toHaveBeenCalledTimes(2);
 });
 test("ACP list distinguishes failure and provides retry", () => {
@@ -45,7 +45,8 @@ test("ACP list distinguishes failure and provides retry", () => {
 test("ACP deletion is explicit and failure remains retryable", async () => {
   state.remove.mockRejectedValueOnce(new Error("denied"));
   render(<AcpSessionList directory="/fixture" />);
-  fireEvent.click(screen.getByRole("button", { name: "删除会话记录" }));
+  fireEvent.pointerDown(screen.getByRole("button", { name: "会话操作" }), { button: 0, ctrlKey: false });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "删除会话记录" }));
   expect(state.remove).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "删除记录" }));
   expect((await screen.findByRole("alert")).textContent).toContain("denied");

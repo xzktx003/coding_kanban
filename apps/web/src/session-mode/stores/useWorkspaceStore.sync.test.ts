@@ -49,7 +49,8 @@ it("offline mutations and device settings survive browser reload, and remote hyd
   expect(useWorkspaceStore.getState().pendingProjectOperations).toHaveLength(1);
   ws.acceptSharedProjects(
     { initialized: true, revision: 2, projects: ["/b", "/c"] },
-    1,
+    undefined,
+    useWorkspaceStore.getState().pendingProjectOperations.map((op) => op.id!),
   );
   expect(useWorkspaceStore.getState().pendingProjectOperations).toEqual([]);
 });

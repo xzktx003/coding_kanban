@@ -62,6 +62,7 @@ interface State {
   tree: SessionSplitNode;
   activeGroupId: string;
   reconcile: (keys: string[]) => void;
+  reorderWithinGroups: (keys: string[]) => void;
   focusGroup: (id: string) => void;
   focusKey: (key: string) => void;
   place: (
@@ -82,6 +83,7 @@ export const useSessionSplitStore = create<State>()(
     (set) => ({
       ...initial(),
       reset: () => set(initial()),
+      reorderWithinGroups: (keys) => set(state => ({tree: mapGroups(state.tree, g => ({...g, keys: [...g.keys].sort((a,b)=>keys.indexOf(a)-keys.indexOf(b))}))})),
       reconcile: (keys) =>
         set((state) => {
           const allowed = new Set(keys),

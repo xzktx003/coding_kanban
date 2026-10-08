@@ -116,3 +116,7 @@
 
 - 会话模式的合并顶栏由 `SessionTopNavigation` 管理；`WorkbenchShell` 通过回调切换模式并保留两种模式的挂载状态。
 - 关注状态汇总与窗口组选择必须复用现有关注集合，未知状态不得显示成确定的零；导航不得隐式审批、停止或启动 Agent。
+
+### Session VS Code 编辑工作区
+
+- VS Code 在右侧工具标签内打开，入口与终端相邻；遵循 `docs/session-vscode-panel.md` 的项目跟随、固定和目录唯一规则。隐藏或关闭工具标签不得卸载已打开的 VS Code iframe；编辑工作区按项目真实目录去重，本地编辑服务的并发启动必须合并。

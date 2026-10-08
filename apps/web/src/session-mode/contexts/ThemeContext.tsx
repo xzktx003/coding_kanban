@@ -19,6 +19,11 @@ export type { Accent, Theme };
 const ThemeContext = React.createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
+  const inherited = React.useContext(ThemeContext);
+  return inherited ? <>{children}</> : <ThemeRoot>{children}</ThemeRoot>;
+}
+
+export function ThemeRoot({ children }: { children: ReactNode }) {
   const {
     theme,
     accent,
@@ -30,7 +35,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setStarfield,
     setBackgroundImage,
   } = useThemeStore();
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>('dark');
+  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() => theme === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme);
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');

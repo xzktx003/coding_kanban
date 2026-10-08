@@ -46,6 +46,7 @@ vi.mock("./SideBarAgentPane", () => ({
 }));
 vi.mock("./SideBarPinnedList", () => ({ SideBarPinnedList: () => null }));
 vi.mock("./UserInfo", () => ({ UserInfo: () => null }));
+vi.mock("../common/NewAgentButton", () => ({ NewAgentButton: () => <button>新聊天</button> }));
 
 import { SidebarProvider } from "@session/components/ui/sidebar";
 import { AppSideBar } from "./AppSidebar";
@@ -62,6 +63,15 @@ beforeEach(() => {
 });
 
 describe("AppSideBar", () => {
+  it("places projects before bots and separates the title from search", () => {
+    render(<SidebarProvider><AppSideBar /></SidebarProvider>);
+    expect(screen.queryByRole("heading", { name: "项目与会话" })).toBeNull();
+    const projects = screen.getByRole("button", { name: "项目列表" });
+    const bots = screen.getByRole("button", { name: /^机器人$/ });
+    expect(screen.getByRole("button", { name: "搜索和管理会话" })).toBeTruthy();
+    expect(projects.compareDocumentPosition(bots) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByRole("button", { name: "收起项目列表" })).toBeTruthy();
+  });
   it("opens the Bots view without creating a bot", () => {
     useLayoutStore.setState({ view: "agent" });
     render(

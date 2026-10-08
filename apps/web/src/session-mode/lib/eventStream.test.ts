@@ -54,10 +54,12 @@ it("delivers reconciliation at the same sequence as replay without redelivering 
       });
     emit("codex/request-user-input");
     emit("codex/user-input-snapshot");
+    emit("codex/pending-requests-snapshot");
     emit("codex/request-user-input");
     expect(receive.mock.calls.map((call) => call[0].event)).toEqual([
       "codex/request-user-input",
       "codex/user-input-snapshot",
+      "codex/pending-requests-snapshot",
     ]);
   } finally {
     close();

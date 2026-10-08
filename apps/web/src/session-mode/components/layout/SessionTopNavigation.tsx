@@ -1,3 +1,13 @@
+import { ProjectNavigationButton } from "../agent/ProjectNavigationButton";
+import { LayoutGrid, List, Square } from "lucide-react";
+import { useActiveSessionProject } from "../../hooks/useActiveSessionProject";
+import { useWorkspaceStore } from "../../stores/useWorkspaceStore";
+import { useVsCodePanelStore } from "../../stores/useVsCodePanelStore";
+import { NewAgentButton } from "../common/NewAgentButton";
+import { GitActions } from "../../features/git";
+import { SessionThemeToggle } from "../common/SessionThemeToggle";
+import { VsCodeIcon } from "@session/features/vscode/VsCodeIcon";
+import { openVsCodePanel } from "@session/stores/useVsCodePanelStore";
 import { useState } from "react";
 import {
   MoreHorizontal,
@@ -47,6 +57,11 @@ export function SessionTopNavigation({
   onModeChange?: (mode: WorkbenchMode) => void;
 }) {
   const layout = useLayoutStore();
+  const project = useActiveSessionProject();
+  const pinned = useVsCodePanelStore((s) => s.pinnedPath);
+  const prepareProject = () => {
+    if (project.path) useWorkspaceStore.getState().setCwd(project.path);
+  };
   const { cardsViewMode, setCardsViewMode } = useAgentCenterStore();
   const acp = useAcpStore((s) => s.active);
   const [importOpen, setImportOpen] = useState(false);
@@ -59,6 +74,7 @@ export function SessionTopNavigation({
         aria-label="会话工作台导航"
         data-connection-state={status}
       >
+        <ProjectNavigationButton global />
         <span className="session-brand-mark" title="后摩智能">
           <img src="/houmo-logo.png" alt="Houmo" />
         </span>
@@ -95,6 +111,47 @@ export function SessionTopNavigation({
         <span className="session-top-spacer" />
         <RunningSessionsSummary status={status} />
         <FollowedSessionsMenu summary status={status} />
+        {layout.view === "agent" && (
+          <>
+            <span
+              className="session-global-layout"
+              role="group"
+              aria-label="会话布局"
+            >
+              {(
+                [
+                  { mode: "solo", label: "自由分屏", Icon: Square },
+                  { mode: "grid", label: "多会话网格", Icon: LayoutGrid },
+                  { mode: "list", label: "会话列表", Icon: List },
+                ] as const
+              ).map(({ mode, label, Icon }) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className="session-top-icon"
+                  aria-label={label}
+                  title={label}
+                  aria-pressed={(acp ? "solo" : cardsViewMode) === mode}
+                  disabled={acp && mode !== "solo"}
+                  onClick={() => setCardsViewMode(mode)}
+                >
+                  <Icon size={16} />
+                </button>
+              ))}
+            </span>
+            {(acp || cardsViewMode !== "solo") && (
+              <span className="session-global-new">
+                <NewAgentButton />
+              </span>
+            )}
+            {project.path && (
+              <span className="session-global-git">
+                <GitActions key={project.path} path={project.path} />
+              </span>
+            )}
+          </>
+        )}
+        <SessionThemeToggle />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -108,6 +165,20 @@ export function SessionTopNavigation({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="session-main-menu">
+            {(acp || cardsViewMode !== "solo") && (
+              <DropdownMenuItem
+                className="session-menu-new"
+                onSelect={() =>
+                  document
+                    .querySelector<HTMLButtonElement>(
+                      ".session-mode .session-global-new button",
+                    )
+                    ?.click()
+                }
+              >
+                新聊天
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem
               className="session-menu-schedule"
               onSelect={() => setView("automations")}
@@ -142,17 +213,37 @@ export function SessionTopNavigation({
               </DropdownMenuRadioItem>
             </DropdownMenuRadioGroup>
             <DropdownMenuSeparator />
+            <DropdownMenuLabel
+              className="session-tools-target"
+              title={project.path || undefined}
+            >
+              工具目标：{project.path ? project.label : "请先选择项目"}
+            </DropdownMenuLabel>
+            {pinned && (
+              <DropdownMenuLabel
+                className="session-tools-target"
+                title={pinned}
+              >
+                VS Code 已固定：{pinned}
+              </DropdownMenuLabel>
+            )}
             {(
               [
                 ["files", "文件浏览器", FolderOpen],
+                ["vscode", "VS Code", VsCodeIcon],
                 ["terminal", "终端", SquareTerminal],
               ] as const
             ).map(([tab, label, Icon]) => (
               <DropdownMenuItem
                 key={tab}
+                disabled={!project.path && !(tab === "vscode" && pinned)}
                 onSelect={() => {
-                  layout.setActiveRightPanelTab(tab);
-                  layout.setRightPanelOpen(true);
+                  prepareProject();
+                  if (tab === "vscode") openVsCodePanel();
+                  else {
+                    layout.setActiveRightPanelTab(tab);
+                    layout.setRightPanelOpen(true);
+                  }
                 }}
               >
                 <Icon size={15} />
@@ -160,13 +251,21 @@ export function SessionTopNavigation({
               </DropdownMenuItem>
             ))}
             <DropdownMenuItem
+              disabled={!project.path}
               onSelect={() => {
+                prepareProject();
                 layout.setActiveRightPanelTab("diff");
                 layout.setRightPanelOpen(true);
               }}
             >
               代码变更
             </DropdownMenuItem>
+            {project.path && (
+              <div className="session-menu-git">
+                <GitActions key={project.path} path={project.path} />
+                <span>Git 操作 · {project.label}</span>
+              </div>
+            )}
             {layout.isRightPanelOpen && (
               <DropdownMenuItem
                 onSelect={() => layout.setRightPanelOpen(false)}

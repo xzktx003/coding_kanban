@@ -12,8 +12,10 @@ import { codexService } from "./codexService";
 import { useConfigStore } from "../components/codex/stores/useConfigStore";
 import { useCodexStore } from "../components/codex/stores/useCodexStore";
 import { useWorkspaceStore } from "../stores/useWorkspaceStore";
+import { hydrateThreadModel, useThreadModelStore } from "../stores/useThreadModelStore";
 beforeEach(() => {
   vi.clearAllMocks();
+  useThreadModelStore.setState({ threads: {} });
   useWorkspaceStore.setState({ cwd: "/project" });
   useConfigStore.setState({ threadCwdMode: "worktree", model: "" });
 });
@@ -31,6 +33,7 @@ it("sends the selected collaboration mode on each actual turn, including an exis
     reasoningEffort: "medium",
     collaborationMode: "plan",
   });
+  hydrateThreadModel("mode", { model: "test-model", modelProvider: "openai", reasoningEffort: "medium" });
   await codexService.turnStart("mode", "Ask me a choice");
   expect(api.turnStart.mock.calls.at(-1)?.[0].collaborationMode).toEqual({
     mode: "plan",
@@ -343,4 +346,36 @@ it("a late stop response cannot clear a newer turn in the same session", async (
   resolve();
   await pending;
   expect(useCodexStore.getState().currentTurnId).toBe("new");
+});
+
+it("does not mistake streamed events for fully hydrated history", async () => {
+  useCodexStore.setState({
+    currentThreadId: null,
+    activeThreadIds: ["partial"],
+    historyLoadedMap: {},
+    events: { partial: [] },
+    threads: [],
+  });
+  api.threadResume.mockResolvedValueOnce({
+    thread: { id: "partial", turns: [] },
+  });
+  await codexService.setCurrentThread("partial");
+  expect(api.threadResume).toHaveBeenCalledOnce();
+  expect(useCodexStore.getState().historyLoadedMap.partial).toBe(true);
+});
+it("background history refresh preserves input focus, selection and fills the hydration marker", async () => {
+  useCodexStore.setState({
+    currentThreadId: "visible",
+    inputFocusTrigger: 42,
+    historyLoadedMap: {},
+    events: {},
+    threads: [],
+  });
+  api.threadResume.mockResolvedValueOnce({
+    thread: { id: "visible", turns: [] },
+  });
+  await codexService.threadResume("visible", undefined, { background: true });
+  expect(useCodexStore.getState().currentThreadId).toBe("visible");
+  expect(useCodexStore.getState().inputFocusTrigger).toBe(42);
+  expect(useCodexStore.getState().historyLoadedMap.visible).toBe(true);
 });

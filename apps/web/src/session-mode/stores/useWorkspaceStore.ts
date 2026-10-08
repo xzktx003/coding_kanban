@@ -4,10 +4,17 @@ import { v4 as uuid } from "uuid";
 import {
   applyProjectAction,
   type ProjectAction,
-  type ProjectOperation,
   type SharedProjects,
 } from "@agent-orchestrator/shared";
 import { useEditorStore } from "./useEditorStore";
+import {
+  acknowledgeProjectOperations,
+  latestProjectSnapshot,
+  observeProjectSnapshot,
+  readProjectOperations,
+  saveProjectOperation,
+  type PendingProjectOperation,
+} from "../services/sessionProjectJournal";
 
 export type ProjectSortKey =
   | "added_desc"
@@ -70,13 +77,15 @@ export function sortProjects(
 interface WorkspaceStore {
   projectSyncClientId: string;
   nextProjectSequence: number;
-  pendingProjectOperations: ProjectOperation[];
+  pendingProjectOperations: PendingProjectOperation[];
+  refreshProjectOperations: () => void;
   projectsInitialized: boolean;
   projectSyncError: string | null;
   acceptSharedProjects: (
     snapshot: SharedProjects,
     acknowledgedSequence?: number,
-  ) => void;
+    acknowledgedIds?: string[],
+  ) => boolean;
   projects: string[];
   setProjects: (projects: string[]) => void;
   addProject: (project: string) => void;
@@ -98,10 +107,9 @@ function enqueue(state: WorkspaceStore, actions: ProjectAction[]) {
     nextProjectSequence: state.nextProjectSequence + actions.length,
     pendingProjectOperations: [
       ...state.pendingProjectOperations,
-      ...actions.map((action, i) => ({
-        seq: state.nextProjectSequence + i,
-        action,
-      })),
+      ...actions.map((action, i) =>
+        saveProjectOperation(action, state.nextProjectSequence + i),
+      ),
     ],
   };
 }
@@ -113,14 +121,41 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
       pendingProjectOperations: [],
       projectsInitialized: false,
       projectSyncError: null,
-      acceptSharedProjects: (snapshot, sequence = 0) =>
+      refreshProjectOperations: () =>
         set((state) => {
-          const pending = state.pendingProjectOperations.filter(
-            (op) => op.seq > sequence,
-          );
+          const pending = [
+            ...state.pendingProjectOperations.filter((op) => !op.id),
+            ...readProjectOperations(),
+          ];
+          const snapshot = latestProjectSnapshot();
           const projects = pending.reduce(
             (current, op) => applyProjectAction(current, op.action),
-            snapshot.projects,
+            snapshot?.projects ?? state.projects,
+          );
+          if (
+            JSON.stringify(pending) ===
+              JSON.stringify(state.pendingProjectOperations) &&
+            JSON.stringify(projects) === JSON.stringify(state.projects)
+          )
+            return state;
+          return { pendingProjectOperations: pending, projects };
+        }),
+      acceptSharedProjects: (snapshot, sequence = 0, ids = []) => {
+        const latest = latestProjectSnapshot();
+        const fresh = snapshot.revision >= (latest?.revision ?? 0);
+        if (fresh) observeProjectSnapshot(snapshot);
+        acknowledgeProjectOperations(ids);
+        set((state) => {
+          const pending = [
+            ...state.pendingProjectOperations.filter(
+              (op) => !op.id && op.seq > sequence,
+            ),
+            ...readProjectOperations(),
+          ];
+          const accepted = fresh ? snapshot : latest!;
+          const projects = pending.reduce(
+            (current, op) => applyProjectAction(current, op.action),
+            accepted.projects,
           );
           return {
             projects:
@@ -128,13 +163,20 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
                 ? state.projects
                 : projects,
             pendingProjectOperations:
-              pending.length === state.pendingProjectOperations.length
+              JSON.stringify(pending) ===
+              JSON.stringify(state.pendingProjectOperations)
                 ? state.pendingProjectOperations
                 : pending,
-            projectsInitialized: snapshot.initialized,
+            projectsInitialized: accepted.initialized,
+            nextProjectSequence: Math.max(
+              state.nextProjectSequence,
+              sequence + 1,
+            ),
             projectSyncError: null,
           };
-        }),
+        });
+        return fresh;
+      },
       projects: [],
       setProjects: (projects) =>
         set((state) => {
@@ -237,9 +279,36 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
         projectSort: state.projectSort,
         projectSyncClientId: state.projectSyncClientId,
         nextProjectSequence: state.nextProjectSequence,
-        pendingProjectOperations: state.pendingProjectOperations,
+        pendingProjectOperations: state.pendingProjectOperations.filter(
+          (op) => !op.id,
+        ),
         projectsInitialized: state.projectsInitialized,
       }),
+      merge: (persisted, current) => {
+        const state = { ...current, ...(persisted as Partial<WorkspaceStore>) };
+        try {
+          const snapshot = latestProjectSnapshot();
+          const pending = [
+            ...state.pendingProjectOperations.filter((op) => !op.id),
+            ...readProjectOperations(),
+          ];
+          return {
+            ...state,
+            pendingProjectOperations: pending,
+            projects: pending.reduce(
+              (projects, op) => applyProjectAction(projects, op.action),
+              snapshot?.projects ?? state.projects,
+            ),
+            projectsInitialized:
+              snapshot?.initialized ?? state.projectsInitialized,
+          };
+        } catch {
+          return {
+            ...state,
+            projectSyncError: "本机项目同步记录无法读取，请检查浏览器存储",
+          };
+        }
+      },
     },
   ),
 );

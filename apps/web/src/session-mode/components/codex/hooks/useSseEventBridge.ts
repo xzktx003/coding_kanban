@@ -1,3 +1,5 @@
+import { clearCodexRequests, reconcileCodexRequests } from "./serverRequests";
+import { resetRpcLifecycle } from "../stores/rpcLifecycle";
 import { useEffect, useRef } from "react";
 import type { ServerNotification } from "@session/bindings/ServerNotification";
 import type {
@@ -56,8 +58,7 @@ export function useSseEventBridge({
       return;
     }
 
-    const resetQuestions = () =>
-      useRequestUserInputStore.getState().replaceRequests([]);
+    const resetQuestions = () => { resetRpcLifecycle(); clearCodexRequests(); };
     window.addEventListener("session-runtime-restarted", resetQuestions);
 
     console.log("[useSseEventBridge] Setting up SSE event bridge...");
@@ -78,6 +79,10 @@ export function useSseEventBridge({
         // Everything below reaches the desktop over the Tauri bus already;
         // handling it here too would deliver it twice.
         if (isDesktopTauri()) return;
+        if (envelope.event === "codex/pending-requests-snapshot") {
+          reconcileCodexRequests((envelope.payload as { requests: Array<{event: string; payload: unknown}> }).requests);
+          return;
+        }
         if (envelope.event === "codex/user-input-snapshot") {
           const snapshot = envelope.payload as {
             requests: RequestUserInputRequest[];

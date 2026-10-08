@@ -260,6 +260,9 @@ mod tests {
         let snapshot = next_json(&mut socket).await;
         assert_eq!(snapshot["event"], "codex/user-input-snapshot");
         assert_eq!(snapshot["payload"], json!({"requests": []}));
+        let approvals = next_json(&mut socket).await;
+        assert_eq!(approvals["event"], "codex/pending-requests-snapshot");
+        assert_eq!(approvals["payload"], json!({"requests": []}));
 
         // Live events continue seamlessly after the replay.
         event_tx
@@ -289,6 +292,20 @@ mod tests {
         // global, so a filtered client sees gaps and must not assume contiguity.
         assert_eq!(value["seq"], 2);
 
+        server_task.abort();
+    }
+    #[tokio::test]
+    async fn fresh_connection_restores_pending_permissions_without_replaying_history() {
+        let (event_tx, addr, server_task) = serve().await;
+        let request = json!({"threadId":"a","turnId":"t","requestId":91,"permissions":{}});
+        event_tx
+            .send(("codex/permissions-request".into(), request.clone()))
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut socket = connect(&addr, "").await;
+        let snapshot = next_json(&mut socket).await;
+        assert_eq!(snapshot["event"], "codex/pending-requests-snapshot");
+        assert_eq!(snapshot["payload"]["requests"][0]["payload"], request);
         server_task.abort();
     }
 }

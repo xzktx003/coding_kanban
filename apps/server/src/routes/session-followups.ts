@@ -6,6 +6,7 @@ import type {
   FollowupAction,
   FollowupSubmit,
 } from "@agent-orchestrator/shared";
+import { composeContextText } from "@agent-orchestrator/shared";
 import {
   CodexFollowups,
   FollowupRejected,
@@ -23,7 +24,12 @@ const keys = (v: Record<string, unknown>, names: string[]) => {
   if (Object.keys(v).some((k) => !names.includes(k))) invalid();
 };
 const id = (v: unknown): string => {
-  if (typeof v !== "string" || !/^[-a-zA-Z0-9_:]{1,160}$/.test(v)) invalid();
+  if (
+    typeof v !== "string" ||
+    !/^[-a-zA-Z0-9_:]{1,160}$/.test(v) ||
+    ["__proto__", "constructor", "prototype"].includes(v)
+  )
+    invalid();
   return v;
 };
 const message = (v: unknown): string => {
@@ -38,15 +44,18 @@ function submit(value: unknown): FollowupSubmit {
     "threadId",
     "text",
     "images",
+    "contexts",
     "parameters",
     "mode",
     "expectedTurnId",
+    "recoverAfterError",
   ]);
   id(v.id);
   id(v.threadId);
   message(v.text);
   if (!["queue", "steer", "replace"].includes(v.mode)) invalid();
   if (v.expectedTurnId !== undefined) id(v.expectedTurnId);
+  if (v.recoverAfterError !== undefined && typeof v.recoverAfterError !== "boolean") invalid();
   if (
     !Array.isArray(v.images) ||
     v.images.length > 8 ||
@@ -59,7 +68,28 @@ function submit(value: unknown): FollowupSubmit {
     )
   )
     invalid();
-  if (!v.text.trim() && !v.images.length) invalid("消息不能为空");
+  if (v.contexts !== undefined) {
+    if (!Array.isArray(v.contexts) || v.contexts.length > 32) invalid();
+    const seen = new Set<string>();
+    for (const entry of v.contexts) {
+      const c = object(entry);
+      keys(c, ["id", "kind", "name", "text", "path", "range", "sourceThreadId", "sourceItemId"]);
+      id(c.id);
+      if (seen.has(c.id)) invalid();
+      seen.add(c.id);
+      if (!["file", "paste", "quote"].includes(c.kind)) invalid();
+      if (typeof c.name !== "string" || c.name.length > 512 || /[\x00-\x1f]/.test(c.name)) invalid();
+      message(c.text);
+      if (c.path !== undefined && (typeof c.path !== "string" || !c.path.startsWith("/") || c.path.length > 4096 || /[\x00-\x1f]/.test(c.path))) invalid();
+      for (const field of ["sourceThreadId", "sourceItemId"]) if (c[field] !== undefined) id(c[field]);
+      if (c.range !== undefined) {
+        const range = object(c.range); keys(range, ["start", "end"]);
+        if (!Number.isSafeInteger(range.start) || !Number.isSafeInteger(range.end) || range.start < 1 || range.end < range.start) invalid();
+      }
+    }
+    message(composeContextText(v.text, v.contexts));
+  }
+  if (!v.text.trim() && !v.images.length && !v.contexts?.length) invalid("消息不能为空");
   const p = object(v.parameters);
   keys(p, [
     "cwd",
@@ -136,6 +166,9 @@ function submit(value: unknown): FollowupSubmit {
 }
 function action(value: unknown): FollowupAction {
   const a = object(value);
+  if (a.type === "undo") {
+    keys(a, ["type", "token"]); id(a.token); return a as FollowupAction;
+  }
   if (["clear", "pause", "resume"].includes(a.type)) {
     keys(a, ["type"]);
     return a as FollowupAction;
@@ -179,6 +212,8 @@ export function registerSessionFollowupRoutes(
   const fetcher = options.fetch ?? fetch,
     lifetime = new AbortController();
   let lease: ChildProcess | undefined, init: Promise<void> | undefined;
+  let streamConnected = false,
+    streamGeneration = 0;
   async function acquire() {
     if (!options.file) return;
     await mkdir(dirname(options.file), { recursive: true, mode: 0o700 });
@@ -197,9 +232,16 @@ export function registerSessionFollowupRoutes(
         ],
         { stdio: ["pipe", "pipe", "ignore"] },
       );
-      lease.stdout!.once("data", () => resolve());
+      let held = false;
+      lease.stdout!.once("data", () => {
+        held = true;
+        resolve();
+      });
       lease.once("error", reject);
-      lease.once("exit", () => reject(new Error("消息队列已由另一服务管理")));
+      lease.once("exit", () => {
+        if (held && !lifetime.signal.aborted) lifetime.abort();
+        reject(new Error("消息队列已由另一服务管理"));
+      });
     });
   }
   async function upstream(path: string, params?: unknown) {
@@ -216,6 +258,7 @@ export function registerSessionFollowupRoutes(
       try {
         error = ((await response.json()) as any).error ?? error;
       } catch {}
+      if (response.status >= 502) throw new Error(error);
       throw new FollowupRejected(error);
     }
     return response.json() as Promise<any>;
@@ -224,6 +267,8 @@ export function registerSessionFollowupRoutes(
     call: (method: string, params: Record<string, unknown>) =>
       upstream("/api/codex/" + method, params),
     statuses: async (ids: string[]) => {
+      if (!streamConnected) throw new Error("正在重新连接任务事件");
+      const connection = streamGeneration;
       const remaining = new Set(ids),
         result: Record<string, string> = {};
       let cursor: string | null = null;
@@ -247,16 +292,23 @@ export function registerSessionFollowupRoutes(
         if (cursor && seen.has(cursor)) throw new Error("会话分页重复");
         if (cursor) seen.add(cursor);
       } while (cursor && remaining.size);
+      if (!streamConnected || connection !== streamGeneration)
+        throw new Error("任务事件连接已变化");
       return result;
     },
   };
   const queue = new CodexFollowups(runtime, options.file);
-  const ready = () =>
-    init ??
-    (init = acquire().catch((e) => {
-      init = undefined;
-      throw e;
-    }));
+  const ready = () => {
+    if (lifetime.signal.aborted)
+      return Promise.reject(new Error("消息队列服务已停止"));
+    return (
+      init ??
+      (init = acquire().catch((e) => {
+        init = undefined;
+        throw e;
+      }))
+    );
+  };
   app.get<{ Querystring: { threadId: string } }>(
     "/api/session/followups",
     async (request) => {
@@ -292,6 +344,28 @@ export function registerSessionFollowupRoutes(
     await queue.stop(threadId, turnId);
     return queue.get(threadId);
   });
+  app.post("/api/session/followups/review", async (request) => {
+    const data = object(request.body);
+    keys(data, ["threadId", "delivery", "target"]);
+    const threadId = id(data.threadId);
+    if (!["inline", "detached"].includes(data.delivery)) invalid();
+    const target = object(data.target);
+    const fields: Record<string, string[]> = {
+      uncommittedChanges: ["type"],
+      baseBranch: ["type", "branch"],
+      commit: ["type", "sha", "title"],
+      custom: ["type", "instructions"],
+    };
+    if (!Object.hasOwn(fields, String(target.type))) invalid();
+    keys(target, fields[target.type]);
+    for (const field of fields[target.type].filter(
+      (f) => f !== "type" && f !== "title",
+    ))
+      if (!message(target[field]).trim()) invalid();
+    if (target.title != null) message(target.title);
+    await ready();
+    return queue.review(threadId, data.delivery, target);
+  });
   let timer: ReturnType<typeof setTimeout> | undefined,
     streamTimer: ReturnType<typeof setTimeout> | undefined;
   const poll = async () => {
@@ -315,6 +389,8 @@ export function registerSessionFollowupRoutes(
       if (!origin) throw new Error("Not ready");
       const health = await upstream("/health");
       if (health.instance !== instance) {
+        if (instance !== undefined)
+          await queue.recover("会话服务已重启，请确认任务状态后继续队列");
         sequence = undefined;
         instance = health.instance;
       }
@@ -325,6 +401,7 @@ export function registerSessionFollowupRoutes(
         { signal: lifetime.signal },
       );
       if (!response.ok || !response.body) throw new Error("Events unavailable");
+      streamConnected = true;
       let buffer = "";
       const decoder = new TextDecoder();
       for await (const chunk of response.body as any) {
@@ -346,6 +423,8 @@ export function registerSessionFollowupRoutes(
             (sequence !== undefined && event.seq <= sequence)
           )
             continue;
+          if (sequence !== undefined && event.seq > sequence + 1)
+            await queue.recover("连接期间有任务事件缺失，请检查后继续队列");
           sequence = event.seq;
           if (event.event === "codex:notification")
             void queue
@@ -359,6 +438,8 @@ export function registerSessionFollowupRoutes(
     } catch {
       /* Reconnect; durable sending records remain distinct from queued work. */
     } finally {
+      streamConnected = false;
+      streamGeneration++;
       if (!lifetime.signal.aborted) {
         streamTimer = setTimeout(() => void stream(), 1000);
         streamTimer.unref();
@@ -374,6 +455,7 @@ export function registerSessionFollowupRoutes(
     lifetime.abort();
     clearTimeout(timer);
     clearTimeout(streamTimer);
+    await queue.drain();
     lease?.stdin?.end();
   });
   return queue;

@@ -17,6 +17,11 @@ const TERMINAL_THEME = {
   fontSize: 12,
   background: "#0a0a0a",
 } as const;
+let refreshingModule = false;
+if (import.meta.hot)
+  import.meta.hot.dispose(() => {
+    refreshingModule = true;
+  });
 
 type TerminalDataPayload = { session_id: string; data: string };
 type TerminalExitPayload = { session_id: string; message: string };
@@ -56,6 +61,7 @@ export function TerminalPane({
   >("connecting");
   const [startError, setStartError] = useState<string | null>(null);
   const [isStarting, setIsStarting] = useState(false);
+  const [startRevision, setStartRevision] = useState(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -147,24 +153,33 @@ export function TerminalPane({
         Math.max(term.cols, 2),
         Math.max(term.rows, 2),
       );
+      if (terminalRef.current !== term) {
+        void terminalStop(session_id);
+        return;
+      }
       setSession(session_id);
       if (command && !hasRunCommandRef.current) {
         hasRunCommandRef.current = true;
         void terminalWrite(session_id, `${command}\r`);
       }
     } catch (err) {
+      if (terminalRef.current !== term) return;
       setStartError(err instanceof Error ? err.message : String(err));
       terminalRef.current?.writeln(`\r\n[session start failed] ${String(err)}`);
     } finally {
       isStartingRef.current = false;
-      setIsStarting(false);
+      if (terminalRef.current) {
+        setIsStarting(false);
+        if (terminalRef.current !== term)
+          setStartRevision((value) => value + 1);
+      }
     }
   }, [cwd, command, setSession]);
 
   useEffect(() => {
     if (!active || !panelOpen) return;
     void startSession();
-  }, [active, panelOpen, startSession]);
+  }, [active, panelOpen, startSession, startRevision]);
 
   // Shared handlers for terminal data/exit events, used by both
   // the Tauri event listener and the web WebSocket listener below.
@@ -267,7 +282,7 @@ export function TerminalPane({
   useEffect(() => {
     return () => {
       const sid = sessionIdRef.current;
-      if (sid) void terminalStop(sid);
+      if (sid && !refreshingModule) void terminalStop(sid);
     };
   }, []);
 

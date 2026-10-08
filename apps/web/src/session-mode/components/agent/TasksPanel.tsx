@@ -1,3 +1,4 @@
+import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { useShallow } from "zustand/react/shallow";
 import { useCallback, useMemo } from "react";
 import { useCodexStore } from "@session/components/codex/stores";
@@ -37,17 +38,17 @@ export default function TasksPanel() {
   const { cards, currentAgentCardId, currentAgentCardKind } =
     useAgentCenterStore();
   const { sessionLoadingMap } = useCCStore();
-  const { threadStatusMap } = useCodexStore(
-    useShallow((s) => ({ threadStatusMap: s.threadStatusMap })),
+  const { threadStatusMap, turnTimingMap } = useCodexStore(
+    useShallow((s) => ({ threadStatusMap: s.threadStatusMap, turnTimingMap: s.turnTimingMap })),
   );
   const { selectTab, closeTab } = useSessionTabActions();
 
   const isRunning = useCallback(
     (card: AgentCenterCard) =>
       card.kind === "codex"
-        ? threadStatusMap[card.id]?.type === "active"
+        ? codexRuntimeState(useCodexStore.getState(), card.id).running
         : !!sessionLoadingMap[card.id],
-    [threadStatusMap, sessionLoadingMap],
+    [threadStatusMap, turnTimingMap, sessionLoadingMap],
   );
 
   const handleRemove = (card: AgentCenterCard) => {

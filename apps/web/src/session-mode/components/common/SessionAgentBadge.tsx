@@ -1,4 +1,8 @@
-/** Always visible: distinguish agent ownership without relying on hover or color. */
+import { Plug } from "lucide-react";
+import openai from "@session/assets/openai.svg";
+import claude from "@session/assets/claudecode-color.svg";
+
+/** Agent identity stays visible by shape; full ownership is accessible without color. */
 export function SessionAgentBadge({
   kind,
   agentName,
@@ -17,11 +21,20 @@ export function SessionAgentBadge({
   return (
     <span
       data-session-agent={kind}
+      role="img"
       aria-label={`Agent: ${label}`}
       title={`Agent: ${label}`}
-      className="inline-flex max-w-32 shrink-0 truncate rounded border border-border bg-muted/40 px-1 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
+      className="session-agent-symbol"
     >
-      {label}
+      {kind === "acp" ? (
+        <Plug size={14} aria-hidden="true" />
+      ) : (
+        <img
+          src={kind === "codex" ? openai : claude}
+          alt=""
+          aria-hidden="true"
+        />
+      )}
     </span>
   );
 }

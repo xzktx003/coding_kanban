@@ -6,6 +6,7 @@ const b = { kind: "cc" as const, id: "b" };
 let stop: (() => void) | undefined;
 beforeEach(() => {
   vi.useFakeTimers();
+  localStorage.clear();
   useAgentCenterStore.setState({
     cards: [a],
     pendingTabOperations: [],
@@ -60,7 +61,7 @@ it("failed uploads retain operations and retry the same sequence without erasing
           initialized: true,
           revision: 2,
           cards: [b],
-          sequence: 2,
+          sequence: 1,
         }),
       ),
     );
@@ -88,6 +89,40 @@ it("failed uploads retain operations and retry the same sequence without erasing
   ).toEqual([2]);
   expect(JSON.parse(fetcher.mock.calls[0][1].body).operations[0].seq).toBe(1);
   expect(JSON.parse(fetcher.mock.calls[1][1].body).operations[0].seq).toBe(1);
+  expect(JSON.parse(fetcher.mock.calls[0][1].body).clientId).toBe(
+    JSON.parse(fetcher.mock.calls[1][1].body).clientId,
+  );
   await vi.advanceTimersByTimeAsync(60);
   expect(useAgentCenterStore.getState().pendingTabOperations).toEqual([]);
+});
+
+it("an explicit connection retry immediately retries failed sync without waiting for backoff", async () => {
+  const fetcher = vi.fn().mockRejectedValue(new Error("offline"));
+  stop = startSessionTabsSync(fetcher as typeof fetch);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(useAgentCenterStore.getState().tabSyncError).toBeTruthy();
+  const attempts = fetcher.mock.calls.length;
+  window.dispatchEvent(new Event("session-connection-retry"));
+  await vi.advanceTimersByTimeAsync(1);
+  expect(fetcher.mock.calls.length).toBe(attempts + 1);
+});
+
+it("a retry requested during an in-flight failure runs next without duplicate concurrent requests", async () => {
+  let reject!: (error: Error) => void;
+  const fetcher = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((_, fail) => {
+          reject = fail;
+        }),
+    )
+    .mockRejectedValue(new Error("offline"));
+  stop = startSessionTabsSync(fetcher as typeof fetch);
+  await vi.advanceTimersByTimeAsync(1);
+  window.dispatchEvent(new Event("session-connection-retry"));
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  reject(new Error("offline"));
+  await vi.advanceTimersByTimeAsync(1);
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });

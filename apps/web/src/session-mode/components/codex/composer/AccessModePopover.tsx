@@ -41,7 +41,7 @@ const ACCESS_MODE_OPTIONS: Array<{
   },
 ];
 
-export function AccessModePopover() {
+export function AccessModePopover({ compact = false }: { compact?: boolean }) {
   const { t } = useTranslation("composer");
   const { sandbox, setAccessMode, collaborationMode, setCollaborationMode } =
     useConfigStore();
@@ -56,8 +56,10 @@ export function AccessModePopover() {
   const selected =
     ACCESS_MODE_OPTIONS.find((item) => item.sandbox === sandbox) ??
     ACCESS_MODE_OPTIONS[0];
-  const displayLabel = collaborationMode === "plan" ? "plan" : selected.label;
-  const DisplayIcon = collaborationMode === "plan" ? ListChecks : selected.icon;
+  const displayLabel =
+    !compact && collaborationMode === "plan" ? "plan" : selected.label;
+  const DisplayIcon =
+    !compact && collaborationMode === "plan" ? ListChecks : selected.icon;
 
   return (
     <DropdownMenu>
@@ -65,12 +67,14 @@ export function AccessModePopover() {
         <Button
           variant="ghost"
           size="sm"
-          className={`h-8 gap-2 px-2 ${selected.textColor} hover:bg-accent`}
+          className={`session-access-trigger h-8 gap-2 px-2 ${selected.textColor} hover:bg-accent`}
           aria-label={`执行权限：${t(displayLabel)}`}
           title={t(displayLabel)}
         >
           <DisplayIcon className="h-4 w-4" />
-          {!isNarrow && <span className="text-xs">{t(displayLabel)}</span>}
+          {(compact || !isNarrow) && (
+            <span className="text-xs">{t(displayLabel)}</span>
+          )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent className="w-48" align="start">

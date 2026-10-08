@@ -9,7 +9,7 @@ import {
   PlusIcon,
   Target,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ScreenshotPopover } from "@session/components/codex/composer/ScreenshotPopover";
 import {
@@ -62,15 +62,16 @@ export function SelectFilesMenuItem({
 
   return (
     <Button
+      type="button"
       variant="ghost"
       className={cn(
-        "justify-start gap-2 px-2 hover:bg-blue-500 hover:text-white transition-colors",
+        "justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors",
         className,
       )}
       onClick={handleSelectFiles}
     >
       <File className="w-4 h-4" />
-      <span>Select files</span>
+      <span>选择文件</span>
     </Button>
   );
 }
@@ -87,8 +88,9 @@ function MentionMenuItem({ item, onInsert }: MentionMenuItemProps) {
   return (
     <div className="flex items-center">
       <Button
+        type="button"
         variant="ghost"
-        className="flex-1 justify-start gap-2 px-2 hover:bg-blue-500 hover:text-white transition-colors"
+        className="flex-1 justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors"
         onClick={() => onInsert(item.insertText)}
       >
         {item.iconSrc && <img src={item.iconSrc} alt="" className="w-4 h-4" />}
@@ -98,9 +100,10 @@ function MentionMenuItem({ item, onInsert }: MentionMenuItemProps) {
         <Popover open={promptsOpen} onOpenChange={setPromptsOpen}>
           <PopoverTrigger asChild>
             <Button
+              type="button"
               variant="ghost"
               size="icon"
-              className="shrink-0 hover:bg-blue-500 hover:text-white transition-colors"
+              className="shrink-0 hover:bg-accent hover:text-accent-foreground transition-colors"
             >
               <ChevronRight className="w-4 h-4" />
             </Button>
@@ -113,9 +116,10 @@ function MentionMenuItem({ item, onInsert }: MentionMenuItemProps) {
             <div className="flex flex-col gap-1">
               {item.defaultPrompts.map((prompt) => (
                 <Button
+                  type="button"
                   key={prompt}
                   variant="ghost"
-                  className="justify-start gap-2 px-2 h-auto py-1.5 whitespace-normal text-left hover:bg-blue-500 hover:text-white transition-colors"
+                  className="justify-start gap-2 px-2 h-auto py-1.5 whitespace-normal text-left hover:bg-accent hover:text-accent-foreground transition-colors"
                   onClick={() => {
                     setPromptsOpen(false);
                     onInsert(`${item.insertText} ${prompt}`);
@@ -136,12 +140,14 @@ export interface ComposerMenuProps {
   onImagesSelected?: (paths: string[]) => void;
   onFilesSelected?: (paths: string[]) => void;
   onInsertMention?: (text: string) => void;
+  actions?: (close: () => void) => ReactNode;
 }
 
 export function ComposerMenu({
   onImagesSelected,
   onFilesSelected,
   onInsertMention,
+  actions,
 }: ComposerMenuProps) {
   const { webSearchRequest, setWebSearch } = useConfigStore();
   const { goalEnabled, setGoalEnabled } = useCodexStore(
@@ -183,6 +189,7 @@ export function ComposerMenu({
     <Popover open={openState} onOpenChange={setOpenState}>
       <PopoverTrigger asChild>
         <Button
+          type="button"
           variant="ghost"
           size="icon"
           aria-label="添加附件与上下文"
@@ -192,14 +199,18 @@ export function ComposerMenu({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-48 max-h-[45vh] overflow-y-auto p-1"
+        className="session-composer-menu w-64 max-h-[min(65dvh,480px)] overflow-y-auto p-1"
+        side="top"
+        collisionPadding={12}
         align="start"
       >
         <div className="flex flex-col gap-1">
+          {actions?.(() => setOpenState(false))}
           <Button
+            type="button"
             variant="ghost"
             className={cn(
-              "justify-start gap-2 px-2 hover:bg-blue-500 hover:text-white transition-colors",
+              "justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors",
               webSearchRequest && "bg-blue-100 text-blue-900",
             )}
             onClick={() => {
@@ -208,17 +219,18 @@ export function ComposerMenu({
             }}
           >
             <Globe className="w-4 h-4" />
-            <span className="flex-1 text-left">Web search</span>
+            <span className="flex-1 text-left">网络搜索</span>
             {webSearchRequest && <Check className="w-4 h-4" />}
           </Button>
 
           <Button
+            type="button"
             variant="ghost"
-            className="justify-start gap-2 px-2 hover:bg-blue-500 hover:text-white transition-colors"
+            className="justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors"
             onClick={handleSelectImage}
           >
             <ImageIcon className="w-4 h-4" />
-            <span>Add images</span>
+            <span>添加图片</span>
           </Button>
           <SelectFilesMenuItem
             onFilesSelected={onFilesSelected}
@@ -234,9 +246,10 @@ export function ComposerMenu({
             }}
           />
           <Button
+            type="button"
             variant="ghost"
             className={cn(
-              "justify-start gap-2 px-2 hover:bg-blue-500 hover:text-white transition-colors",
+              "justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors",
               goalEnabled && "bg-blue-50 text-blue-700",
             )}
             onClick={() => {

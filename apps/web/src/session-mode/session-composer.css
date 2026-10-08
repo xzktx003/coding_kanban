@@ -1,0 +1,618 @@
+/* Approved ChatGPT-inspired composer. These rules stay inside Session mode. */
+.session-mode .session-codex-composer {
+  width: 100%;
+  max-width: 960px;
+  margin-inline: auto;
+  min-width: 0;
+  padding: 0 8px 4px;
+  container-type: inline-size;
+  container-name: composer;
+}
+.session-mode .session-input-target.session-input-target-compact {
+  max-width: 960px;
+  width: 100%;
+  margin-inline: auto;
+  padding: 2px 16px;
+  gap: 6px;
+  min-height: 28px;
+  font-size: 12px;
+}
+.session-mode .session-input-target-compact strong {
+  flex: 1;
+  min-width: 0;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.session-mode .session-input-target-compact > button {
+  height: 28px;
+  width: 32px;
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+.session-mode .session-composer-surface {
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: color-mix(in oklab, var(--background) 84%, var(--muted) 16%);
+  padding: 0 8px 8px;
+  transition: border-color 150ms ease-out;
+}
+.session-mode .session-composer-surface:focus-within {
+  border-color: color-mix(in oklab, var(--foreground) 32%, var(--border));
+}
+.session-mode .session-composer-editor {
+  padding: 16px 10px 8px;
+  max-height: 224px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.session-mode .session-composer-editor [contenteditable] {
+  min-height: 44px;
+  font-size: 15px;
+  line-height: 1.6;
+}
+.session-mode .session-composer-editor [contenteditable] + div {
+  font-size: 15px;
+  line-height: 1.6;
+}
+.session-mode .session-composer-bottom {
+  min-width: 0;
+}
+.session-mode .session-codex-composer .session-composer-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+.session-mode .session-codex-composer .session-composer-policy {
+  flex: 0 0 auto;
+  gap: 2px;
+}
+.session-mode .session-codex-composer .session-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+}
+.session-mode .session-codex-composer .session-composer-toolbar button {
+  min-height: 36px;
+  border-radius: 999px;
+}
+.session-mode
+  .session-codex-composer
+  .session-composer-policy
+  > button:first-child {
+  width: 36px;
+  height: 36px;
+}
+.session-mode .session-codex-composer .session-access-trigger {
+  gap: 5px;
+  padding: 0 6px;
+}
+.session-mode .session-codex-composer .session-access-trigger span {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.session-mode .session-model-trigger.session-model-compact {
+  display: flex;
+  gap: 4px;
+  max-width: 280px;
+  min-width: 0;
+  flex-shrink: 1;
+  padding: 0 8px;
+  color: var(--muted-foreground);
+  font-weight: 400;
+  font-size: 12px;
+}
+.session-mode .session-model-caption > span:first-child {
+  flex-shrink: 0;
+  color: var(--foreground);
+}
+.session-mode .session-model-compact > svg {
+  flex-shrink: 0;
+}
+.session-mode .session-model-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: capitalize;
+}
+.session-mode .session-codex-composer .session-composer-send,
+.session-mode .session-codex-composer .session-composer-stop {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: 50%;
+}
+.session-mode .session-composer-send,
+.session-mode .session-composer-stop.is-primary {
+  background: var(--foreground);
+  color: var(--background);
+}
+.session-mode .session-composer-send:hover,
+.session-mode .session-composer-stop.is-primary:hover {
+  background: color-mix(in oklab, var(--foreground) 86%, var(--background));
+}
+.session-mode .session-composer-send:disabled {
+  opacity: 0.32;
+}
+.session-mode .session-composer-stop:not(.is-primary) {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--foreground);
+}
+.session-mode .session-composer-stop svg {
+  fill: currentColor;
+  width: 13px;
+  height: 13px;
+}
+.session-mode .session-composer-hint {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 5px 14px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+.session-mode .session-composer-mode {
+  padding: 6px 8px 0;
+}
+.session-mode .session-composer-mode button {
+  font-size: 12px;
+  height: 26px;
+  gap: 4px;
+}
+.session-mode .session-composer-menu {
+  border-radius: 14px;
+  padding: 6px;
+  max-width: calc(100vw - 24px);
+}
+.session-mode .session-composer-menu button {
+  font-size: 13px;
+  min-height: 36px;
+  font-weight: 400;
+}
+.session-mode .session-composer-menu [role="menuitem"] {
+  min-height: 36px;
+  font-size: 13px;
+  border-radius: 7px;
+  gap: 10px;
+}
+.session-mode .session-composer-menu-label {
+  display: block;
+  padding: 10px 8px 4px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  border-top: 1px solid var(--border);
+}
+.session-mode .session-send-preference {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+.session-mode .session-send-preference select {
+  background: var(--background);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  padding: 5px 8px;
+  border-radius: 6px;
+}
+.session-mode .session-composer-context {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.session-mode .session-conversation-menu-title {
+  max-width: 280px;
+  padding: 6px 8px 10px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-composer-mobile-voice {
+  display: none;
+}
+/* A single shelf attached to the composer, without an independent toolbar. */
+.session-mode .session-followup-queue.session-queue-shelf {
+  max-height: none;
+  overflow: visible;
+  font-size: 13px;
+  margin: 0 12px -1px;
+  border: 1px solid var(--border);
+  border-radius: 16px 16px 0 0;
+  background: color-mix(in oklab, var(--muted) 60%, var(--background));
+}
+.session-mode .session-queue-shelf .session-queue-list {
+  max-height: 190px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.session-mode .session-queue-shelf li {
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  margin: 0;
+  padding: 2px 6px;
+  min-width: 0;
+}
+.session-mode .session-queue-shelf li:last-child {
+  border-bottom: 0;
+}
+.session-mode .session-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 38px;
+  min-width: 0;
+}
+.session-mode .session-queue-symbol {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+  margin: 0 6px;
+}
+.session-mode .session-queue-shelf .session-followup-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  max-height: none;
+  margin: 0;
+}
+.session-mode .session-queue-row button {
+  flex-shrink: 0;
+  height: 32px;
+  min-height: 32px;
+  gap: 4px;
+  padding-inline: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted-foreground);
+}
+.session-mode .session-queue-row button[data-size="icon"] {
+  width: 32px;
+}
+.session-mode .session-queue-row button:hover {
+  color: var(--foreground);
+}
+.session-mode .session-queue-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 5px 10px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-queue-status > span {
+  flex: 1;
+  min-width: 0;
+}
+.session-mode .session-queue-status button {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.session-mode .session-queue-attachment-count {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.session-mode .session-queue-expand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 28px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+.session-mode .session-queue-expand[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.session-mode .session-queue-edit {
+  padding: 4px 8px 8px;
+}
+.session-mode .session-queue-edit textarea {
+  min-height: 76px;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.session-mode .session-queue-edit > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding-top: 4px;
+}
+.session-mode .session-queue-shelf .session-followup-images {
+  padding: 2px 10px 6px;
+  gap: 6px;
+  max-width: 100%;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+.session-mode .session-queue-shelf .session-followup-images img {
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+}
+.session-mode .session-side-chat .session-queue-shelf {
+  margin: 4px 12px -1px;
+}
+.session-mode .session-side-chat form {
+  margin: 0 8px 8px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--background);
+}
+.session-mode .session-side-chat textarea {
+  border: 0;
+  resize: vertical;
+  min-height: 64px;
+  max-height: 140px;
+  font-size: 15px;
+}
+.session-mode .session-side-chat .session-followup-actions {
+  justify-content: flex-end;
+}
+.session-mode .session-side-chat .session-followup-actions button {
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+.session-mode
+  .session-side-chat
+  .session-followup-actions
+  button[type="submit"] {
+  background: var(--foreground);
+  color: var(--background);
+}
+@container composer (max-width:480px) {
+  .session-mode .session-codex-composer .session-access-trigger {
+    padding-inline: 0;
+    gap: 0;
+  }
+  .session-mode .session-codex-composer .session-access-trigger svg {
+    display: none;
+  }
+  .session-mode .session-model-trigger.session-model-compact {
+    max-width: 120px;
+    padding: 0 4px;
+    gap: 3px;
+  }
+  .session-mode .session-composer-hint > span {
+    display: none;
+  }
+  .session-mode .session-composer-policy > button {
+    padding-inline: 4px;
+  }
+}
+/* Portalled menus cannot inherit the composer container query. */
+@media (max-width: 767px) {
+  .session-mode .session-codex-composer {
+    padding-inline: 4px;
+  }
+  .session-mode .session-input-target.session-input-target-compact {
+    padding-inline: 12px;
+  }
+  .session-mode .session-codex-composer .session-composer-toolbar {
+    gap: 2px;
+  }
+  .session-mode .session-codex-composer .session-composer-toolbar button {
+    height: 44px;
+    min-height: 44px;
+  }
+  .session-mode
+    .session-codex-composer
+    .session-composer-policy
+    > button:first-child,
+  .session-mode .session-codex-composer .session-composer-send,
+  .session-mode .session-codex-composer .session-composer-stop {
+    width: 44px;
+    height: 44px;
+  }
+  .session-mode .session-codex-composer .session-composer-actions {
+    gap: 2px;
+  }
+  .session-mode .session-composer-surface {
+    padding: 0 6px 6px;
+    border-radius: 22px;
+  }
+  .session-mode .session-composer-editor {
+    padding: 12px 10px 4px;
+    max-height: 160px;
+  }
+  .session-mode .session-queue-shelf .session-queue-list {
+    max-height: min(190px, 28dvh);
+  }
+  .session-mode .session-queue-row button {
+    min-height: 44px;
+    height: 44px;
+  }
+  .session-mode .session-queue-row button[data-size="icon"] {
+    width: 44px;
+  }
+  .session-mode .session-queue-row .session-queue-delete {
+    display: none;
+  }
+  .session-mode .session-queue-expand {
+    min-height: 36px;
+  }
+  .session-mode .session-composer-menu [role="menuitem"],
+  .session-mode .session-composer-menu button {
+    min-height: 44px;
+  }
+  .session-mode .session-composer-mobile-voice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .session-mode .session-side-chat {
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 100%;
+    border-radius: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    z-index: 49;
+  }
+  .session-mode .session-side-chat > header {
+    min-height: 52px;
+  }
+  .session-mode .session-side-chat .session-followup-actions button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-mode .session-composer-surface {
+    transition: none;
+  }
+}
+/* Size changes at breakpoints must not animate through undersized touch targets. */
+.session-mode .session-codex-composer button {
+  transition-property: background-color, color, border-color, opacity;
+}
+
+.session-mode .session-composer-desktop-voice {
+  display: flex;
+  flex-shrink: 0;
+}
+@media (max-width: 767px) {
+  .session-mode .session-composer-desktop-voice button {
+    width: 44px;
+    min-width: 44px;
+  }
+}
+.session-mode .session-input-target-compact .session-input-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.session-mode .session-target-project {
+  max-width: min(35%, 200px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-mode .session-target-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 767px) {
+  .session-mode .session-codex-composer .session-composer-toolbar {
+    gap: 6px;
+  }
+}
+.session-mode .session-composer-goal-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 4px;
+}
+.session-mode .session-composer-goal-tools button {
+  font-size: 12px;
+}
+
+.session-mode .session-model-description {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.session-mode .session-model-caption {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.session-mode .session-model-effort {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+@container composer (max-width:480px) {
+  .session-mode .session-model-description {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0;
+    line-height: 16px;
+  }
+  .session-mode .session-model-caption {
+    max-width: 100%;
+    gap: 3px;
+  }
+  .session-mode .session-model-effort {
+    line-height: 15px;
+  }
+  .session-mode .session-model-effort-divider {
+    display: none;
+  }
+}
+@container composer (max-width:480px) {
+  .session-mode .session-model-trigger.session-model-compact {
+    position: relative;
+  }
+  .session-mode .session-model-compact > svg {
+    position: absolute;
+    right: 4px;
+    bottom: 7px;
+  }
+  .session-mode .session-model-effort {
+    padding-right: 16px;
+  }
+}
+
+/* A single dismissible notice; wraps inside narrow panes and mobile viewports. */
+.session-mode .session-model-change-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 4px;
+  padding: 2px 6px 2px 10px;
+  border-left: 2px solid var(--primary);
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border-radius: 6px;
+  font-size: 12px;
+  min-width: 0;
+}
+.session-mode .session-model-change-notice > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.session-mode .session-model-change-notice strong { color: var(--foreground); font-weight: 500; }
+.session-mode .session-model-change-notice small { display: block; font-size: 11px; }
+.session-mode .session-model-change-notice button { flex-shrink: 0; width: 32px; height: 32px; }
+@media (pointer: coarse), (max-width: 767px) {
+  .session-mode .session-model-change-notice { margin-inline: 8px; }
+  .session-mode .session-model-change-notice button { width: 44px; height: 44px; }
+}

@@ -47,6 +47,7 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
     isRightPanelOpen,
     setRightPanelOpen,
     rightPanelSize,
+    openRightPanelTabs,
     setRightPanelSize,
     view,
     isRightPanelFocused,
@@ -58,6 +59,8 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
   const rightPanelRef = useRef<ImperativePanelHandle>(null);
   const mainPanelRef = useRef<ImperativePanelHandle>(null);
   const isMobile = useIsMobile();
+  const mobileEditorOpen =
+    isMobile && isRightPanelVisible && openRightPanelTabs.includes("vscode");
   // Focus mode hides the main agent thread so the right panel (diff/tasks/etc.)
   // can take the full width — useful when reviewing a diff or reading notes
   // without the agent chat competing for attention.
@@ -67,7 +70,28 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
     isRightPanelFocused &&
     !isMobile;
   const hasInitializedMobileLayoutRef = useRef(false);
-  const { setOpenMobile } = useSidebar();
+  const { setOpenMobile, openMobile } = useSidebar();
+  const projectOpener = useRef<HTMLElement | null>(null);
+  const wasDrawerOpen = useRef(false);
+  const wasSidebarOpen = useRef(isSidebarOpen);
+  useEffect(() => {
+    if (wasSidebarOpen.current && !isSidebarOpen && !isMobile && document.activeElement?.closest('[data-sidebar="sidebar"]'))
+      document.querySelector<HTMLButtonElement>('.session-global-projects')?.focus();
+    wasSidebarOpen.current=isSidebarOpen;
+  }, [isSidebarOpen,isMobile]);
+  useEffect(() => listenInSessionMode(window, 'session-open-projects', () => {
+    projectOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (isMobile) setOpenMobile(true);
+    else setSidebarOpen(true);
+  }), [isMobile, setOpenMobile, setSidebarOpen]);
+  useEffect(() => {
+    if (wasDrawerOpen.current && !openMobile) requestAnimationFrame(()=>{
+      const target = projectOpener.current;
+      if (target?.isConnected) target.focus();
+      else document.querySelector<HTMLButtonElement>(".session-global-projects")?.focus();
+    });
+    wasDrawerOpen.current = openMobile;
+  }, [openMobile]);
 
   useEdgeSwipe({ onSwipeRight: () => setOpenMobile(true), enabled: isMobile });
 
@@ -110,11 +134,13 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
     if (hasInitializedMobileLayoutRef.current) return;
     hasInitializedMobileLayoutRef.current = true;
     if (isSidebarOpen) setSidebarOpen(false);
-    if (isRightPanelOpen) setRightPanelOpen(false);
+    if (isRightPanelOpen && !openRightPanelTabs.includes("vscode"))
+      setRightPanelOpen(false);
   }, [
     isMobile,
     isRightPanelOpen,
     isSidebarOpen,
+    openRightPanelTabs,
     setRightPanelOpen,
     setSidebarOpen,
   ]);
@@ -143,7 +169,9 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
         >
           <ResizablePanel
             ref={mainPanelRef}
-            defaultSize={isRightPanelVisible && !isMobile ? 32 : 100}
+            defaultSize={
+              isRightPanelVisible && !isMobile ? 100 - rightPanelSize : 100
+            }
             minSize={25}
             collapsible
             collapsedSize={0}
@@ -151,7 +179,7 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
             <div
               className="h-full min-h-0"
               hidden={isFocusModeActive}
-              inert={isFocusModeActive}
+              inert={isFocusModeActive || mobileEditorOpen}
             >
               {mainContent}
             </div>
@@ -189,7 +217,7 @@ function LayoutContent({ mainContent }: { mainContent: React.ReactNode }) {
               <div
                 className={
                   isMobile
-                    ? "absolute inset-y-0 right-0 z-40 w-[min(92vw,420px)]"
+                    ? `absolute inset-y-0 right-0 z-40 ${openRightPanelTabs.includes("vscode") ? "w-full" : "w-[min(92vw,420px)]"}`
                     : "h-full"
                 }
                 hidden={!isRightPanelVisible}

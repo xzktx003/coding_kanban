@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, normalize } from "node:path";
 import type { FastifyInstance } from "fastify";
 import {
@@ -25,8 +25,9 @@ export function registerWorkbenchVsCodeWebRoutes(
           .code(400)
           .send({ error: "请选择有效的服务器绝对目录路径。" });
       }
-      const workingDirectory = normalize(path);
+      let workingDirectory = normalize(path);
       try {
+        workingDirectory = await realpath(workingDirectory);
         if (!(await stat(workingDirectory)).isDirectory())
           throw new Error("not a directory");
       } catch {

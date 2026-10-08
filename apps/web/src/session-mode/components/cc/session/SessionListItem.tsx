@@ -1,6 +1,7 @@
+import { SessionRowMenu } from "../../common/SessionRowMenu";
+import { SessionRowTitle } from "../../common/SessionRowTitle";
 import { SessionAgentBadge } from "../../common/SessionAgentBadge";
 import { SessionStatus, UnreadDot } from "../../common/SessionStatus";
-import { RenameSessionButton } from "../../common/RenameSessionButton";
 import { useSessionName } from "../../../stores/useSessionNameStore";
 // Single row in the SessionList, including the action dropdown menu.
 import {
@@ -69,39 +70,17 @@ export function SessionListItem({
       }}
       aria-current={isSelected ? "true" : undefined}
     >
-      <div
-        className={`flex items-center gap-1.5 text-sm font-medium min-w-0 ${isSelected ? "text-primary" : "text-inherit"}`}
-      >
+      <div className="session-nav-title">
         <SessionAgentBadge kind="cc" />
-        <span className="session-row-title min-w-0 truncate" title={name}>
-          {name}
-        </span>
+        <SessionRowTitle title={name} detail={`Claude Code · ${formatThreadAge(Math.floor(session.last_modified / 1000))}`} />
+        <SessionStatus kind="cc" id={session.session_id} compact />
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-muted-foreground whitespace-nowrap">
-        <SessionStatus kind="cc" id={session.session_id} compact />
-        <span className="group-hover/session-row:hidden max-md:hidden">
+      <div className="session-nav-meta">
+        <span className="session-nav-age">
           {formatThreadAge(Math.floor(session.last_modified / 1000))}
         </span>
-        <RenameSessionButton
-          kind="cc"
-          id={session.session_id}
-          title={name}
-          className="opacity-0 group-hover/session-row:opacity-100 focus-visible:opacity-100 max-md:opacity-100"
-        />
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 rounded hover:bg-accent/50 transition-colors text-muted-foreground opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 max-md:opacity-100"
-              aria-label="会话操作"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <MoreVertical className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+        <SessionRowMenu rename={{ kind: "cc", id: session.session_id, title: name }}>
             <DropdownMenuItem onClick={(e) => onCopyId(e, session.session_id)}>
               <Copy className="h-3 w-3" />
               <span>复制会话 ID</span>
@@ -145,8 +124,7 @@ export function SessionListItem({
               <Trash2 className="h-3 w-3" />
               <span>删除记录</span>
             </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        </SessionRowMenu>
       </div>
     </div>
   );

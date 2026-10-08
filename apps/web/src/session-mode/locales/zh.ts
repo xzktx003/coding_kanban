@@ -252,6 +252,9 @@ export const zh = {
       expandPlan: "展开计划",
     },
     fileChanges: {
+      listLabel: "已修改文件列表",
+      scrollMore: "向下滚动查看其余文件",
+      scrollEnd: "已到列表底部",
       changed_other: "{{count}} 个文件已更改",
       expandAll: "全部展开",
       collapseAll: "全部收起",
@@ -266,6 +269,8 @@ export const zh = {
     },
     editRollback: {
       title: "确认回滚编辑",
+      runtimeUpdateRequired: "当前会话服务仍在运行旧版回退接口。请在运行中的任务结束后更新并重启会话服务，再重试；刷新网页无法生效。本次回退未执行，草稿已保留。",
+      errorDetails: "技术详情",
       description:
         "将撤回本轮及之后的对话历史，并把这条消息放回输入框。代码文件不会恢复，也不会自动重新发送消息。是否继续？",
     },

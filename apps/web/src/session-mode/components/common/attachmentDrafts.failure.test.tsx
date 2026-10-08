@@ -61,3 +61,13 @@ test("a quota failure keeps local file bytes, blocks upload, and permits retry a
   await act(async () => result.current.retry(result.current.attachments[0].id));
   expect(result.current.paths).toEqual(["/saved-after-recovery.png"]);
 });
+
+test("a persistence failure blocks ready path attachments until storage is saved",async()=>{
+  const owner=`ready-quota:${crypto.randomUUID()}`;
+  const {result}=renderHook(()=>useImageAttachments(owner));
+  await waitFor(()=>expect(result.current.blocked).toBe(false));
+  storage.saveAttachmentDraft.mockRejectedValue(new Error("quota"));
+  act(()=>result.current.addPaths(["/ready.png"]));
+  await waitFor(()=>expect(result.current.storageError).toBe("quota"));
+  expect(result.current.blocked).toBe(true);
+});

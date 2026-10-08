@@ -1,3 +1,4 @@
+import { resetCodexRuntimeState } from "@session/services/codexService";
 import { startInputFacadeSync } from "./stores/useInputStore";
 import { startCCInputFacadeSync } from "./stores/cc/useCCInputStore";
 import { useCCBackgroundEvents } from "@session/hooks/useCCBackgroundEvents";
@@ -125,7 +126,7 @@ function AppShell() {
   useEffect(() => {
     const recover = () => {
       const thread = useCodexStore.getState().currentThreadId;
-      useCodexStore.setState({ activeThreadIds: [], currentTurnId: null });
+      resetCodexRuntimeState();
       useAcpStore.getState().setActive(false);
       toast.info("会话服务已重启，正在恢复历史。");
       if (thread)

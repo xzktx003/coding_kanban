@@ -1,3 +1,5 @@
+import { codexRuntimeState } from "@session/utils/codexRuntimeState";
+import { useShallow } from "zustand/react/shallow";
 import {
   Circle,
   CircleAlert,
@@ -32,12 +34,7 @@ export function useSessionState(
   const completed = useSessionAttentionStore((s) =>
     Boolean(id && s.receipts[sessionKey(kind, id)]?.completed.length),
   );
-  const codex = useCodexStore((s) =>
-    kind === "codex" && id ? s.threadStatusMap[id] : undefined,
-  );
-  const failed = useCodexStore((s) =>
-    kind === "codex" && id ? s.turnTimingMap[id]?.status === "failed" : false,
-  );
+  const runtime = useCodexStore(useShallow(s => codexRuntimeState(s, kind === "codex" ? id : null)));
   const loading = useCCStore((s) =>
     kind === "cc" && id ? s.sessionLoadingMap[id] : false,
   );
@@ -60,14 +57,14 @@ export function useSessionState(
       s.entries.at(-1)?.role === "error",
   );
   if (
-    (codex?.type === "active" && codex.activeFlags.length) ||
+    runtime.pending ||
     messages?.some((m) => m.type === "permission_request" && !m.resolved) ||
     acpPending
   )
     return "pending";
-  if (codex?.type === "active" || loading || acpRunning) return "running";
+  if (runtime.running || loading || acpRunning) return "running";
   if (
-    failed ||
+    runtime.failed ||
     acpFailed ||
     (messages?.at(-1)?.type === "result" &&
       (messages.at(-1) as { is_error?: boolean }).is_error)

@@ -19,7 +19,7 @@ export function ComposerSuggestionPanel({
   children,
   style,
 }: {
-  kind: "commands" | "mentions";
+  kind: "commands" | "mentions" | "files";
   count: number;
   children: ReactNode;
   style?: CSSProperties;
@@ -38,18 +38,18 @@ export function ComposerSuggestionPanel({
     >
       <header className="composer-suggestions-heading">
         <span className="composer-suggestions-symbol" aria-hidden="true">
-          {kind === "commands" ? "/" : "$"}
+          {kind === "commands" ? "/" : kind === "files" ? "@" : "$"}
         </span>
         <div>
-          <strong>{t(`suggestions.${kind}`)}</strong>
-          <span>{t(`suggestions.${kind}Hint`)}</span>
+          <strong>{kind === "files" ? "文件上下文" : t(`suggestions.${kind}`)}</strong>
+          <span>{kind === "files" ? "选择文件后保存内容快照" : t(`suggestions.${kind}Hint`)}</span>
         </div>
         <span className="composer-suggestions-count">{count}</span>
       </header>
       <div
         className="composer-suggestions-list"
         role="listbox"
-        aria-label={t(`suggestions.${kind}`)}
+        aria-label={kind === "files" ? "文件上下文" : t(`suggestions.${kind}`)}
       >
         {count > 0 ? (
           children
@@ -80,7 +80,7 @@ export function ComposerSuggestionPopover({
   ...props
 }: {
   anchor: HTMLElement | null;
-  kind: "commands" | "mentions";
+  kind: "commands" | "mentions" | "files";
   count: number;
   children: ReactNode;
 }) {

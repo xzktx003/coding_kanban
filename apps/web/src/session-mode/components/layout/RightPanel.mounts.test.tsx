@@ -71,8 +71,7 @@ test("lazy tool switching names the loading state instead of showing a blank pan
   expect(screen.getByRole("status").textContent).toContain("正在加载看板");
 });
 
-// Deliberately red until the user approves hiding the terminal tool tab
-// separately from explicitly ending a terminal process.
+// Hiding a tool is distinct from explicitly ending its terminal process.
 test("closing the terminal tool tab preserves its process-owning tree until explicit terminal close", async () => {
   render(<RightPanel />);
   const terminal = await screen.findByRole("textbox", { name: "测试终端输入" });

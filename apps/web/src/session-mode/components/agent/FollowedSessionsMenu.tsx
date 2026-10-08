@@ -55,7 +55,7 @@ function SessionMenuRow({
       onSelect={() => {
         useLayoutStore.getState().setView("agent");
         void selectTab(card).then(() => {
-          if (state === "pending")
+          if (state === "pending" || row.questions)
             window.dispatchEvent(
               new CustomEvent("session-locate-request", {
                 detail: { kind: card.kind, id: card.id },
@@ -68,6 +68,7 @@ function SessionMenuRow({
       <span className="session-followed-detail">
         {card.kind === "codex" ? "Codex" : "Claude"} ·{" "}
         {SESSION_STATE_LABELS[state]}
+        {row.questions ? ` · 有 ${row.questions} 个问题待答` : ""}
         {groupNumber ? ` · 窗口组 ${groupNumber}` : ""}
       </span>
       {card.cwd && (
@@ -85,7 +86,7 @@ export function FollowedSessionsMenu({
   status?: SessionConnectionState;
   summary?: boolean;
 }) {
-  const { rows, counts, complete } = useFollowedSessionStates(status);
+  const { rows, counts, complete, questionCount } = useFollowedSessionStates(status);
   const { selectTab } = useSessionTabActions();
   const tree = useSessionSplitStore((s) => s.tree);
   const groups = splitGroups(tree);
@@ -118,6 +119,8 @@ export function FollowedSessionsMenu({
       ? "正在重连"
       : counts.pending
         ? `待确认 ${counts.pending}`
+        : questionCount
+          ? `待答 ${questionCount}`
         : !complete
           ? "状态待同步"
           : `关注 ${rows.length}`;
@@ -141,6 +144,8 @@ export function FollowedSessionsMenu({
                   ? "重连"
                   : counts.pending
                     ? `待${counts.pending}`
+                    : questionCount
+                      ? `答${questionCount}`
                     : !complete
                       ? "同步"
                       : `关注${rows.length}`}
@@ -156,6 +161,7 @@ export function FollowedSessionsMenu({
           {summary ? "关注会话状态" : "全部关注会话"} · {rows.length}
         </DropdownMenuLabel>
         <p className="session-menu-note">
+          {questionCount > 0 && <>问题待答 {questionCount} · </>}
           仅统计关注会话 · 运行中 {status === "ready" ? counts.running : "未知"}{" "}
           · 待确认{" "}
           {status === "ready" && (complete || counts.pending)

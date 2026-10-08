@@ -1,62 +1,42 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import * as runtime from "../../hooks/runtime";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
-const viewport = vi.hoisted(() => ({ mobile: false }));
-vi.mock("@session/components/ui/sidebar", () => ({
-  useSidebar: () => ({
-    open: true,
-    openMobile: false,
-    isMobile: viewport.mobile,
-  }),
-  SidebarTrigger: () => null,
-}));
-vi.mock("@session/components/common/NewAgentButton", () => ({
-  NewAgentButton: () => null,
-}));
-vi.mock("@session/features/git", () => ({ GitActions: () => null }));
-vi.mock("./openApp/OpenAppMenu", () => ({ OpenAppMenu: () => null }));
-vi.mock("@session/hooks", () => ({
-  useTrafficLightConfig: () => ({ needsTrafficLightOffset: false }),
-}));
-vi.mock("@session/hooks/runtime", () => ({ isPhone: () => false }));
 import { AgentViewHeader } from "./AgentViewHeader";
 import { useAgentCenterStore } from "../../stores/useAgentCenterStore";
-import { useLayoutStore } from "../../stores/useLayoutStore";
 import { useAcpStore } from "../../stores/useAcpStore";
+import { useWorkspaceStore } from "../../stores/useWorkspaceStore";
 beforeEach(() => {
-  viewport.mobile = false;
   useAcpStore.setState({ active: false });
   useAgentCenterStore.setState({ cards: [], cardsViewMode: "solo" });
-  useLayoutStore.setState({ isRightPanelOpen: false });
 });
-it("names the selected layout and distinguishes opening tools from hiding them", () => {
-  render(<AgentViewHeader />);
-  const single = screen.getByRole("button", { name: "自由分屏" });
-  expect(single.getAttribute("aria-pressed")).toBe("true");
-  const grid = screen.getByRole("button", { name: "多会话网格" });
-  fireEvent.click(grid);
-  expect(grid.getAttribute("aria-pressed")).toBe("true");
-  fireEvent.click(screen.getByRole("button", { name: "打开工具面板" }));
-  expect(useLayoutStore.getState().isRightPanelOpen).toBe(true);
-});
-
-it("ACP displays its single conversation without changing saved card layout", () => {
+it.each(["solo", "grid", "list"] as const)(
+  "does not create a separate project/tool row in %s",
+  (mode) => {
+    useAgentCenterStore.setState({ cardsViewMode: mode });
+    const { container } = render(<AgentViewHeader />);
+    expect(container.textContent).toBe("");
+    expect(container.querySelector(".session-agent-header")).toBeNull();
+  },
+);
+it("keeps ACP identity local while retaining the saved card layout", () => {
+  useAcpStore.setState({
+    active: true,
+    agentId: "fixture-agent",
+    sessionId: null,
+    agentTitle: "ACP 会话",
+  });
+  useWorkspaceStore.setState({ cwd: "/fixture/acp-project" });
   useAgentCenterStore.setState({ cardsViewMode: "grid" });
-  useAcpStore.setState({ active: true, agentId: "fixture-agent" });
   render(<AgentViewHeader />);
-  expect(
-    screen
-      .getByRole("button", { name: "自由分屏" })
-      .getAttribute("aria-pressed"),
-  ).toBe("true");
-  expect(
-    screen.getByRole("button", { name: "多会话网格" }).hasAttribute("disabled"),
-  ).toBe(true);
+  expect(screen.getByText("ACP 会话")).toBeTruthy();
+  expect(screen.getByText("acp-project")).toBeTruthy();
   expect(useAgentCenterStore.getState().cardsViewMode).toBe("grid");
 });
 
-it("mobile free split removes the redundant desktop tool row", () => {
-  viewport.mobile = true;
-  const { container } = render(<AgentViewHeader />);
-  expect(container.querySelector(".session-agent-header")).toBeNull();
-  expect(container.textContent).toBe("");
+it('leaves the native phone header to its existing shell', () => {
+  const phone = vi.spyOn(runtime, 'isPhone').mockReturnValue(true);
+  useAcpStore.setState({active:true,agentId:'fixture-agent'});
+  const {container}=render(<AgentViewHeader/>);
+  expect(container.textContent).toBe('');
+  phone.mockRestore();
 });

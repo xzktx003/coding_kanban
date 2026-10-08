@@ -1,3 +1,4 @@
+import type { ComposerContext } from "./composer-context.js";
 export type FollowupMode = "queue" | "steer" | "replace";
 export type FollowupStatus =
   | "queued"
@@ -11,6 +12,7 @@ export interface FollowupMessage {
   threadId: string;
   text: string;
   images: string[];
+  contexts?: ComposerContext[];
   parameters: Record<string, unknown>;
   mode: FollowupMode;
   expectedTurnId?: string;
@@ -21,22 +23,41 @@ export interface FollowupMessage {
   fingerprint: string;
 }
 export interface FollowupThread {
+  undo?: {
+    token: string;
+    kind: "delete" | "edit";
+    before: FollowupMessage;
+    after: FollowupMessage;
+    index: number;
+    expiresAt: number;
+  };
   revision: number;
   paused: string | null;
   items: FollowupMessage[];
   replacementId?: string;
   stopTurnId?: string;
+  awaitingTurnId?: string;
+  review?: {
+    turnId: string;
+    executionTurnId?: string;
+    status: "inProgress" | "completed" | "failed" | "interrupted";
+    durationMs?: number | null;
+  };
 }
 export interface FollowupSubmit {
+  /** Explicit new input after a displayed failure; never resumes older queued work. */
+  recoverAfterError?: boolean;
   id: string;
   threadId: string;
   text: string;
   images: string[];
+  contexts?: ComposerContext[];
   parameters: Record<string, unknown>;
   mode: FollowupMode;
   expectedTurnId?: string;
 }
 export type FollowupAction =
+  | { type: "undo"; token: string }
   | {
       type: "delete" | "retry" | "steer";
       id: string;

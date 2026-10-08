@@ -1,0 +1,160 @@
+.session-mode .session-async-message {
+  border-left: 2px solid var(--primary);
+  padding: 4px 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-async-message p,
+.session-mode .session-async-reply p {
+  margin: 0 0 8px;
+  white-space: pre-wrap;
+}
+.session-mode .session-async-caption {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.session-mode .session-async-answer {
+  color: var(--primary);
+}
+.session-mode .session-async-reply {
+  margin-left: auto;
+  max-width: 100%;
+  width: fit-content;
+  padding: 10px 12px;
+  background: var(--muted);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-async-message button,
+.session-mode .session-async-composer button,
+.session-mode .session-async-panel button {
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  min-height: 32px;
+}
+.session-mode .session-async-message button {
+  color: var(--primary);
+}
+.session-mode .session-async-panel button:hover,
+.session-mode .session-async-message button:hover {
+  background: var(--accent);
+}
+.session-mode .session-async-panel button:disabled {
+  opacity: 0.45;
+}
+.session-mode .session-async-notice {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  text-align: left;
+}
+.session-mode .session-async-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--background);
+  border-top: 1px solid var(--border);
+}
+.session-mode .session-async-panel header,
+.session-mode .session-async-panel footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  flex-shrink: 0;
+}
+.session-mode .session-async-panel header {
+  border-bottom: 1px solid var(--border);
+}
+.session-mode .session-async-panel footer {
+  border-top: 1px solid var(--border);
+  gap: 4px;
+}
+.session-mode .session-async-spacer {
+  flex: 1;
+}
+.session-mode .session-async-body {
+  padding: 12px;
+  overflow-y: auto;
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+.session-mode .session-async-title {
+  font-weight: 500;
+  margin-bottom: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-async-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.session-mode .session-async-option:has(input:checked) {
+  border-color: var(--primary);
+  background: var(--accent);
+}
+.session-mode .session-async-option input {
+  flex-shrink: 0;
+  margin-top: 4px;
+  accent-color: var(--primary);
+}
+.session-mode .session-async-option span {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-async-custom {
+  display: block;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  margin-top: 12px;
+}
+.session-mode .session-async-custom textarea {
+  display: block;
+  color: var(--foreground);
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 100%;
+  padding: 8px;
+  margin-top: 6px;
+  resize: vertical;
+  max-height: 140px;
+  font-size: 14px;
+}
+.session-mode .session-async-panel .session-async-submit {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.session-mode .session-async-warning {
+  color: var(--foreground);
+  border-left: 2px solid var(--primary);
+  padding-left: 8px;
+  margin: 10px 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 767px), (pointer: coarse) {
+  .session-mode .session-async-panel button,
+  .session-mode .session-async-message button,
+  .session-mode .session-async-composer .session-async-notice {
+    min-height: 44px;
+  }
+  .session-mode .session-async-custom textarea {
+    font-size: 16px;
+  }
+  .session-mode .session-async-panel header,
+  .session-mode .session-async-panel footer {
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+}

@@ -1,9 +1,11 @@
+import { readProjectOperations } from "@session/services/sessionProjectJournal";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { OfflineWorkspace } from "./OfflineWorkspace";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
 beforeEach(() => {
+  localStorage.clear();
   useWorkspaceStore.setState({
     projects: ["/a", "/b"],
     cwd: "/a",
@@ -34,8 +36,5 @@ it("cached projects/tabs can be reordered or removed with durable pending operat
   expect(useAgentCenterStore.getState().pendingTabOperations[0].action).toEqual(
     { type: "remove", key: "cc:b" },
   );
-  expect(
-    JSON.parse(localStorage.getItem("kanban.session.workspace")!).state
-      .pendingProjectOperations.length,
-  ).toBeGreaterThan(0);
+  expect(readProjectOperations().length).toBeGreaterThan(0);
 });

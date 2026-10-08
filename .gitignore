@@ -30,4 +30,19 @@ apps/server/.codex/
 .agents/skills/sun_yu_chen/
 .omx/
 third_party/
-.worktrees/
+
+# Local design previews and generated evidence; keep Markdown decisions/reports.
+# Product icons and published README screenshots remain versioned.
+/docs/designs/**/*.png
+/docs/designs/**/*.jpg
+/docs/designs/**/*.jpeg
+/docs/designs/**/*.webp
+/docs/designs/**/*.gif
+/docs/designs/**/*.html
+/docs/designs/**/*.js
+/docs/designs/**/*.css
+/docs/designs/**/*.cjs
+/docs/designs/**/*.json
+/docs/designs/**/*.local.md
+/docs/designs/**/*.draft.md
+/docs/designs/**/tmp/

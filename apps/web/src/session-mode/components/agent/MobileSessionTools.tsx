@@ -16,8 +16,7 @@ import {
 import { useLayoutStore } from "@session/stores/useLayoutStore";
 import { useAcpStore } from "@session/stores/useAcpStore";
 
-import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
-import { OpenAppMenu } from "./openApp/OpenAppMenu";
+import { openVsCodePanel } from "@session/stores/useVsCodePanelStore";
 import { ProjectNavigationButton } from "./ProjectNavigationButton";
 
 export function MobileProjectButton() {
@@ -27,7 +26,6 @@ export function MobileProjectButton() {
 /** Mobile keeps the transcript tall; secondary tools remain one tap away. */
 export function MobileSessionTools() {
   const sidebar = useSidebar();
-  const cwd = useWorkspaceStore((s) => s.cwd);
   const layout = useLayoutStore();
   const tabs = useAgentCenterStore();
   const acp = useAcpStore((s) => s.active);
@@ -63,6 +61,7 @@ export function MobileSessionTools() {
         {(
           [
             ["files", "文件浏览器"],
+            ["vscode", "VS Code"],
             ["terminal", "终端"],
             ["diff", "代码变更"],
           ] as const
@@ -70,21 +69,16 @@ export function MobileSessionTools() {
           <DropdownMenuItem
             key={tab}
             onSelect={() => {
-              layout.setActiveRightPanelTab(tab);
-              layout.setRightPanelOpen(true);
+              if (tab === "vscode") openVsCodePanel();
+              else {
+                layout.setActiveRightPanelTab(tab);
+                layout.setRightPanelOpen(true);
+              }
             }}
           >
             {label}
           </DropdownMenuItem>
         ))}
-        {cwd && (
-          <>
-            <DropdownMenuSeparator />
-            <div className="px-2 py-1">
-              <OpenAppMenu path={cwd} />
-            </div>
-          </>
-        )}
         {layout.isRightPanelOpen && (
           <DropdownMenuItem onSelect={() => layout.setRightPanelOpen(false)}>
             收起工具面板

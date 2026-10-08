@@ -1,6 +1,11 @@
 import type { ServerNotification } from "@session/bindings";
+import { normalizeQuestionEvents, readQuestions } from "@session/features/async-questions/model";
 import type { RenderEventContext } from "../items/fileChangeLogic";
 import { deriveRenderItems, type RenderItem } from "./deriveRenderItems";
+import {
+  normalizeUserMessageEvents,
+  userMessageKey,
+} from "@session/utils/userMessageEvents";
 
 export interface ThreadRow {
   key: string;
@@ -28,6 +33,7 @@ function turnIdOf(event: ServerNotification): string | undefined {
 
 /** Index once per history update; row renderers never scan the entire transcript. */
 export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
+  events = normalizeQuestionEvents(normalizeUserMessageEvents(events));
   const laterTurns = new Set<string>();
   const rollbackCounts = new Map<number, number>();
   for (let i = events.length - 1; i >= 0; i--) {
@@ -103,6 +109,7 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
         continue;
       if (
         completed.type === "agentMessage" &&
+        !readQuestions(completed).length &&
         (!completed.text.trim() || seenDeltaIds.has(completed.id))
       )
         continue;
@@ -129,7 +136,12 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
         eventIndex: localIndices.get(index),
       };
     }
-    rows.push({ key: `event-${index}`, item, context });
+    const userKey = userMessageKey(event);
+    rows.push({
+      key: userKey ? `user-${userKey}` : `event-${index}`,
+      item,
+      context,
+    });
   }
   return rows;
 }

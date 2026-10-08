@@ -1,3 +1,4 @@
+import { deliverRpc, sameRpc } from './rpcLifecycle';
 import { create } from 'zustand';
 import type { RequestId } from '@session/bindings';
 import type {
@@ -124,24 +125,21 @@ interface ElicitationStore {
     requestId: RequestId,
     action: McpServerElicitationAction,
     content?: unknown,
-    meta?: unknown
+    meta?: unknown,
+    target?: ElicitationRequest
   ) => Promise<void>;
 }
 
-export const useElicitationStore = create<ElicitationStore>((set) => ({
+export const useElicitationStore = create<ElicitationStore>((set, get) => ({
   pendingRequests: [],
   addRequest: (request) => {
-    set((state) => ({ pendingRequests: [...state.pendingRequests, request] }));
+    set((state) => ({ pendingRequests: state.pendingRequests.some(r => sameRpc(r, request)) ? state.pendingRequests : [...state.pendingRequests, request] }));
   },
-  respond: async (requestId, action, content = null, meta = null) => {
-    try {
-      await respondToMcpElicitation(requestId, action, content, meta);
-    } finally {
-      // Drop it either way: a failed send leaves nothing the user can retry,
-      // and a stuck card would block every later elicitation.
-      set((state) => ({
-        pendingRequests: state.pendingRequests.filter((r) => r.requestId !== requestId),
-      }));
-    }
+  respond: async (requestId, action, content = null, meta = null, target) => {
+    const request = target ?? get().pendingRequests.find(r => r.requestId === requestId);
+    if (!request || !get().pendingRequests.includes(request)) throw new Error('请求已过期');
+    await deliverRpc(request, () => respondToMcpElicitation(requestId, action, content, meta), () => {
+      set(state => ({ pendingRequests: state.pendingRequests.filter(r => r !== request) }));
+    });
   },
 }));

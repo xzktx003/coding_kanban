@@ -15,8 +15,9 @@ import { useGitStatsStore } from "@session/stores/useGitStatsStore";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { GitCommitDialog } from "./GitCommitDialog";
 
-export function GitActions() {
-  const { cwd } = useWorkspaceStore();
+export function GitActions({ path }: { path?: string } = {}) {
+  const workspace = useWorkspaceStore(s => s.cwd);
+  const cwd = path ?? workspace;
   const { refreshStats } = useGitStatsStore();
   const { toast } = useToast();
 
@@ -71,7 +72,7 @@ export function GitActions() {
 
         <DropdownMenuContent align="end" className="w-44 p-1">
           <DropdownMenuLabel className="text-xs font-normal text-muted-foreground px-2 py-1.5">
-            Git 操作
+            Git 操作 · {cwd}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
 

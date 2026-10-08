@@ -115,9 +115,9 @@ E2E 使用独立数据目录与服务，不在用户正在工作的目录执行�
 
 ### 会话项目编辑入口（2026-10-07）
 
-移除会话项目工具栏的 Run、Publish 和桌面 Open in 入口，改为 VS Code Web。`POST /api/workbench/vscode-web` 接受当前服务器项目的绝对目录路径；拒绝控制字符、非绝对路径、文件、不存在或不可访问的目录。它复用 Node 的 `VsCodeWebManager`，按规范化路径生成稳定编辑工作区 ID，保留当前局域网访问的 host/协议并通过现有 `/vscode/` 代理打开。无需创建终端记录或启动 AI 会话，重复打开复用现有编辑服务。迁移后端的上游发布接口仍保留以维持来源端点清单，但会话工具栏不再提供发布 UI。
+移除会话项目工具栏的 Run、Publish 和桌面 Open in 入口，改为 VS Code Web。`POST /api/workbench/vscode-web` 接受当前服务器项目的绝对目录路径；拒绝控制字符、非绝对路径、文件、不存在或不可访问的目录。它复用 Node 的 `VsCodeWebManager`，按 realpath 解析后的真实目录生成稳定编辑工作区 ID，保留当前局域网访问的 host/协议并通过现有 `/vscode/` 代理打开。无需创建终端记录或启动 AI 会话，重复打开复用现有编辑服务。迁移后端的上游发布接口仍保留以维持来源端点清单，但会话工具栏不再提供发布 UI。
 
-浏览器在点击时预先创建标签页并清除 opener，随后异步启动服务并导航，避免启动耗时导致弹窗被拦截；启动失败关闭空标签页并显示可重试错误。阻止弹窗时不启动服务。回归覆盖目录验证、服务复用、局域网 Origin、前端失败/弹窗路径及 `session-vscode-web.spec.ts` 的真实浏览器交互。
+浏览器使用右侧工具标签中的 VS Code iframe。按真实目录维护唯一容器，隐藏、关闭工具和切换项目保留编辑现场；通过本设备固定项目设置控制跟随行为。服务端合并并发本地服务启动。详见 [右侧 VS Code 工作区](session-vscode-panel.md)。
 
 ### 会话名称与品牌（2026-10-07）
 
@@ -130,6 +130,8 @@ E2E 使用独立数据目录与服务，不在用户正在工作的目录执行�
 回归包括 TopBar/MobileWorkbenchPage 单测、名称校验/失败/持久化/配置保留测试，以及 `tests/e2e/session-identity.spec.ts` 的单品牌、Issues 链接、三类名称保存与刷新恢复、键盘、失败重试和手机弹窗边界。
 
 ### Codex 回滚协议与会话归属（2026-10-07）
+
+运行版本与源码版本必须分开验证：Node 网关热更新会复用 detached Rust 服务，替换磁盘二进制也不会更新已运行的进程。2026-10-08 复现的旧 `thread/rollback` 错误来自仍在运行的旧实例；用户要求保留时不得自动重启。回退错误在确认框内显示，旧接口拒绝给出重启说明，技术详情折叠且限高，不再将完整协议列表放入 toast。浏览器回归见 `tests/e2e/session-rollback-errors.spec.ts`；只有隔离验证通过并经授权完成服务替换后，才能宣称正式实例已生效。
 
 本机 Codex 0.159.2 的生成协议不再包含 `thread/rollback`，使用 `thread/revert { threadId, beforeTurnId }`。新接口保留会话 ID，只返回线程元数据及保留历史的倒序游标，`thread.turns` 为空。现有 `POST /api/codex/thread/rollback` 路径继续保留：先尝试旧接口，仅在 JSON-RPC 明确报告方法不存在时转用新接口，业务失败（例如任务运行中）不得重新执行另一种回滚。新接口成功后通过 `thread/turns/list`、`itemsView: full` 和连续倒序游标加载所有保留轮次，再恢复正序给前端；回滚成功但加载失败须明确提示重新打开会话，不能伪装成未执行。
 
@@ -167,3 +169,9 @@ Bot 草稿和发送/停止反馈按 Bot 存储在非持久化 UI 缓存；捕获
 ### Codex 待答请求对账
 
 `codex/request-user-input` 经事件桥进入按 thread/request/turn/item 隔离的内存状态。EventHub 为待答问题独立保存集合，在 SSE/WS 连接时按 replay、`codex/user-input-snapshot`、live 顺序传输；snapshot 可与最后 replay 共用 seq，前端按对账帧处理。响应仅回传原 JSON-RPC，resolved/turn 完成清理，runtime 实例变化废弃旧请求。详见 [协议与验收](session-codex-user-input.md)。
+
+### Codex 关注历史恢复队列（2026-10-08）
+
+`SessionWorkbench` 在服务 ready 时同时启动关注状态快照与 `followedSessionHistorySync`，离线/卸载时清理调度。历史成功标记与流式 `events` 分离；启动和连接恢复按关注 ID 补齐，队列并发上限为 2，失败后重试，后台 `threadResume` 禁止选择会话或递增输入聚焦计数。恢复订阅共享成员到达，但只恢复一次设备端选中项，后续同步不导航。状态查询的轮次冲突触发补查而非静默遗失。详见 `docs/session-tabs.md`。
+
+状态派生统一由 `codexRuntimeState` 承担；轮次事件、历史和 HTTP 回执遵守终态与轮次新旧规则。运行实例替换会作废在途历史请求。待处理交互增加内存级 `codex/pending-requests-snapshot`，覆盖原生问题、命令/文件审批、权限和 MCP 交互，允许与补发事件共享游标。详情与兼容边界见 [状态转换](session-state-transitions.md)。

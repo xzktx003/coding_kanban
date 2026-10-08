@@ -1,3 +1,4 @@
+import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import type { ThreadStatus } from '@session/bindings/v2/ThreadStatus';
 import { useCodexStore } from '@session/components/codex/stores';
 
@@ -11,5 +12,5 @@ export function useThreadStatus(threadId?: string | null): ThreadStatus | undefi
 
 /** True when the thread is active (thinking, waiting for approval, or waiting for input). */
 export function useIsProcessing(threadId?: string | null): boolean {
-  return useThreadStatus(threadId)?.type === 'active';
+  return useCodexStore(s => codexRuntimeState(s, threadId === undefined ? s.currentThreadId : threadId).running);
 }

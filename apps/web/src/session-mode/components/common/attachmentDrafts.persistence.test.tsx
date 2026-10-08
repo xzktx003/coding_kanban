@@ -16,6 +16,21 @@ beforeEach(() => {
   useAttachmentDraftStore.setState({ drafts: {}, hydrated: {}, errors: {} });
 });
 
+test("image removal undo restores drawing metadata and persists to the original owner", async()=>{
+  const owner=`undo:${crypto.randomUUID()}`;
+  const {result}=renderHook(()=>useImageAttachments(owner));
+  await act(async()=>ensureAttachmentDraft(owner));
+  act(()=>result.current.addPaths(["/original.png"]));
+  const id=result.current.attachments[0].id;
+  const drawing={document:{version:1 as const,width:100,height:100,marks:[]},originalPath:"/original.png"};
+  useAttachmentDraftStore.setState(s=>({drafts:{...s.drafts,[owner]:s.drafts[owner].map(item=>({...item,drawing}))}}));
+  let undo!:()=>void;act(()=>{undo=result.current.removeUndoable(id);});
+  expect(result.current.attachments).toHaveLength(0);
+  act(()=>undo());await act(async()=>flushAttachmentDraft(owner));
+  expect((await loadAttachmentDraft(owner))[0].drawing).toEqual(drawing);
+  expect(result.current.paths).toEqual(["/original.png"]);
+});
+
 test("uploaded metadata survives memory reset and reload, with no stale blob URL", async () => {
   const owner = `persist:${crypto.randomUUID()}`;
   const { result, unmount } = renderHook(() => useImageAttachments(owner));

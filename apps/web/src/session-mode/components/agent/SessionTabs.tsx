@@ -1,3 +1,4 @@
+import { SessionIdentityTitle, SessionProjectLabel, useSessionProject } from "./SessionIdentity";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { MoreHorizontal, Plus, X } from "lucide-react";
 import { useCodexStore } from "@session/components/codex/stores";
@@ -8,10 +9,10 @@ import {
   useAgentCenterStore,
   type AgentCenterCard,
 } from "@session/stores/useAgentCenterStore";
-import { useSessionName } from "@session/stores/useSessionNameStore";
+import { useSessionNameStore, useSessionName } from "@session/stores/useSessionNameStore";
 import { NewAgentButton } from "../common/NewAgentButton";
 import { RenameSessionButton } from "../common/RenameSessionButton";
-import { SessionStatus, UnreadDot } from "../common/SessionStatus";
+import { SessionStatus } from "../common/SessionStatus";
 import {
   splitGroups,
   useSessionSplitStore,
@@ -22,8 +23,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
-import { useIsMobile } from "@session/hooks/use-mobile";
-import { MobileProjectButton } from "./MobileSessionTools";
 import { FollowedSessionsMenu } from "./FollowedSessionsMenu";
 export const sessionTabDrag: { key: string | null } = { key: null };
 
@@ -42,27 +41,31 @@ function SessionTab({
   onClose: () => void;
   onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
 }) {
+  const project = useSessionProject(card);
   const renameRef = useRef<HTMLSpanElement>(null);
   const groups = splitGroups(useSessionSplitStore((s) => s.tree));
-  const nativeTitle = useCodexStore((s) =>
-    card.kind === "codex"
-      ? (() => {
-          const thread = s.threads.find((t) => t.id === card.id);
-          return thread?.name || thread?.preview;
-        })()
-      : undefined,
-  );
+  const threads = useCodexStore(s => s.threads);
+  const names = useSessionNameStore(s => s.names);
+  const cards = useAgentCenterStore(s => s.cards);
+  const nativeTitle = card.kind === "codex" ? (() => { const thread = threads.find(t => t.id === card.id); return thread?.name || thread?.preview; })() : undefined;
   const title = useSessionName(
     card.kind,
     card.id,
     nativeTitle || card.preview || card.id.slice(0, 12),
     nativeTitle || undefined,
   );
+  const duplicate = cards.some(other => {
+    if (other.cwd === card.cwd || agentCardKey(other) === agentCardKey(card)) return false;
+    const native = other.kind === "codex" ? threads.find(t => t.id === other.id) : undefined;
+    return (names[agentCardKey(other)] ?? native?.name ?? native?.preview ?? other.preview ?? other.id.slice(0, 12)) === title;
+  });
   return (
     <>
       <button
         type="button"
         role="tab"
+        aria-label={duplicate ? `${title} · ${project.label}` : title}
+        aria-describedby={`tab-project-${agentCardKey(card)}`}
         aria-selected={selected}
         tabIndex={tabbable ? 0 : -1}
         className="session-tab-select"
@@ -71,13 +74,10 @@ function SessionTab({
         onClick={onSelect}
         onKeyDown={onKeyDown}
       >
-        <span className="session-tab-agent">
-          {card.kind === "codex" ? "Codex" : "Claude"}
-        </span>
-        <span className="session-tab-title">{title}</span>
-        <UnreadDot kind={card.kind} id={card.id} />
+        <SessionIdentityTitle kind={card.kind} title={title} />
         <SessionStatus kind={card.kind} id={card.id} compact />
       </button>
+      <SessionProjectLabel card={card} id={`tab-project-${agentCardKey(card)}`} />
       <span className="session-tab-actions" ref={renameRef}>
         <RenameSessionButton kind={card.kind} id={card.id} title={title} />
         <button
@@ -137,7 +137,6 @@ function SessionTab({
 }
 
 export function SessionTabs({ groupId }: { groupId?: string } = {}) {
-  const mobile = useIsMobile();
   const tabs = useAgentCenterStore();
   const active = selectedAgentCard(tabs);
   const layout = useSessionSplitStore();
@@ -249,7 +248,6 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
   };
   return (
     <div className="session-tabs">
-      {mobile && <MobileProjectButton />}
       <div
         className="session-tab-strip"
         role="tablist"

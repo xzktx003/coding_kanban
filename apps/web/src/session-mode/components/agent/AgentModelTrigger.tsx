@@ -2,7 +2,8 @@ import { useComposerToolbarNarrow } from "@session/components/codex/composer/Com
 import { Bot, ChevronDown } from "lucide-react";
 import { forwardRef } from "react";
 import KekeIcon from "@session/assets/keke-agent.svg";
-import { useConfigStore } from "@session/components/codex/stores";
+import { useCodexStore } from "@session/components/codex/stores";
+import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
 import { AgentIcon } from "@session/components/common/AgentIcon";
 import { ClaudeCode } from "@session/components/icons";
 import { Button } from "@session/components/ui/button";
@@ -22,8 +23,8 @@ import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
  */
 export const AgentModelTrigger = forwardRef<
   HTMLButtonElement,
-  React.ComponentProps<typeof Button>
->(function AgentModelTrigger(props, ref) {
+  React.ComponentProps<typeof Button> & { compact?: boolean }
+>(function AgentModelTrigger({ compact = false, ...props }, ref) {
   const isNarrow = useComposerToolbarNarrow();
   const selectedAgent = useAgentSettingsStore((s) => s.selectedAgent);
   const active = useAcpStore((s) => s.active);
@@ -31,8 +32,9 @@ export const AgentModelTrigger = forwardRef<
   const acpModels = useAcpStore((s) => s.models);
   const acpReasoningEffort = useAcpStore((s) => s.reasoningEffort);
   const acpConfigOptions = useAcpStore((s) => s.configOptions);
-  const codexModel = useConfigStore((s) => s.model);
-  const codexReasoningEffort = useConfigStore((s) => s.reasoningEffort);
+  const threadId = useCodexStore((s) => s.currentThreadId);
+  const { model: codexModel, reasoningEffort: codexReasoningEffort } =
+    useThreadModelSettings(threadId);
   const ccOptions = useCCStore((s) => s.options);
 
   let label: string;
@@ -81,9 +83,59 @@ export const AgentModelTrigger = forwardRef<
   } else {
     icon = <AgentIcon agent="codex" />;
     label = codexModel || "选择模型";
-    effort = codexReasoningEffort !== "none" ? codexReasoningEffort : undefined;
+    effort =
+      codexReasoningEffort !== "none"
+        ? codexReasoningEffort ?? undefined
+        : undefined;
   }
 
+  const agentName = active
+    ? (agentId ?? "Agent")
+    : selectedAgent === "cc"
+      ? "Claude"
+      : "Codex";
+  const compactEffort =
+    effort ??
+    (!active && selectedAgent === "codex" && codexReasoningEffort === "none"
+      ? "none"
+      : "默认");
+  const effortLabel =
+    compactEffort.charAt(0).toUpperCase() + compactEffort.slice(1);
+  if (compact)
+    return (
+      <Button
+        ref={ref}
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="session-model-trigger session-model-compact"
+        aria-label={`Agent 与模型：${agentName}，${label}，${compactEffort}`}
+        title={`${agentName} · ${label} / ${compactEffort}`}
+        {...props}
+      >
+        <span className="session-model-description">
+          <span className="session-model-caption">
+            <span>{agentName}</span>
+            <span aria-hidden="true">·</span>
+            <span className="session-model-name">
+              {label === "选择模型"
+                ? "模型"
+                : label
+                    .replace(/^gpt-6-/i, "")
+                    .replace(/^gpt-/i, "")
+                    .replace(/-/g, " ")}
+            </span>
+          </span>
+          <span className="session-model-effort">
+            <span aria-hidden="true" className="session-model-effort-divider">
+              ·
+            </span>
+            <span>{effortLabel}</span>
+          </span>
+        </span>
+        <ChevronDown size={13} />
+      </Button>
+    );
   return (
     <Button
       ref={ref}

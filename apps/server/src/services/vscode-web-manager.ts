@@ -1137,6 +1137,10 @@ export class VsCodeWebManager {
   private readonly writeFile: (path: string, content: string) => Promise<void>;
   private dataRootPathsPromise: Promise<DataRootPaths> | null = null;
   private globalServer: RunningGlobalServer | null = null;
+  private localServerStart: Promise<{
+    reused: boolean;
+    server: RunningGlobalServer;
+  }> | null = null;
   private installPromise: Promise<void> | null = null;
   private launchEnvPromise: Promise<NodeJS.ProcessEnv> | null = null;
   private readonly activeSessionIds = new Set<string>();
@@ -1287,6 +1291,22 @@ export class VsCodeWebManager {
   }
 
   private async ensureGlobalServer(providerCommand: {
+    command: string;
+    provider: VsCodeWebProvider;
+  }): Promise<{ reused: boolean; server: RunningGlobalServer }> {
+    // Multiple projects/devices can arrive before discovery/spawn assigns the
+    // server. Serialize that entire startup, not just the final readyPromise.
+    if (this.localServerStart) return this.localServerStart;
+    const pending = this.startOrReuseGlobalServer(providerCommand);
+    this.localServerStart = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.localServerStart === pending) this.localServerStart = null;
+    }
+  }
+
+  private async startOrReuseGlobalServer(providerCommand: {
     command: string;
     provider: VsCodeWebProvider;
   }): Promise<{ reused: boolean; server: RunningGlobalServer }> {

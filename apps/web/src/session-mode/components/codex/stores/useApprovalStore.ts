@@ -1,3 +1,4 @@
+import { deliverRpc, sameRpc } from './rpcLifecycle';
 import { create } from 'zustand';
 import type { RequestId } from '@session/bindings';
 import type {
@@ -28,12 +29,13 @@ interface ApprovalStore {
   respondToApproval: (
     requestId: RequestId,
     isCommandExecution: boolean,
-    decision: CommandExecutionApprovalDecision | FileChangeApprovalDecision
+    decision: CommandExecutionApprovalDecision | FileChangeApprovalDecision,
+    target?: ApprovalRequest
   ) => Promise<void>;
   clearCurrent: () => void;
 }
 
-export const useApprovalStore = create<ApprovalStore>((set, _get) => ({
+export const useApprovalStore = create<ApprovalStore>((set, get) => ({
   // Initial state
   pendingApprovals: [],
   currentApproval: null,
@@ -41,40 +43,26 @@ export const useApprovalStore = create<ApprovalStore>((set, _get) => ({
   // Actions
   addApproval: (approval) => {
     set((state) => ({
-      pendingApprovals: [...state.pendingApprovals, approval],
+      pendingApprovals: state.pendingApprovals.some(r => sameRpc(r, approval)) ? state.pendingApprovals : [...state.pendingApprovals, approval],
       currentApproval: state.currentApproval || approval,
     }));
   },
 
-  respondToApproval: async (requestId, isCommandExecution, decision) => {
-    try {
-      if (isCommandExecution) {
-        await respondToCommandExecutionApproval(
-          requestId,
-          decision as CommandExecutionApprovalDecision
-        );
-      } else {
-        await respondToFileChangeApproval(requestId, decision as FileChangeApprovalDecision);
-      }
-
-      // Remove from pending
-      set((state) => {
-        const pending = state.pendingApprovals.filter((a) => a.requestId !== requestId);
-        return {
-          pendingApprovals: pending,
-          currentApproval: pending[0] || null,
-        };
+  respondToApproval: async (requestId, isCommandExecution, decision, target) => {
+    const request = target ?? get().pendingApprovals.find(r => r.requestId === requestId);
+    if (!request || !get().pendingApprovals.includes(request)) throw new Error('审批已过期，请核对当前请求');
+    await deliverRpc(request, () => isCommandExecution
+      ? respondToCommandExecutionApproval(requestId, decision as CommandExecutionApprovalDecision)
+      : respondToFileChangeApproval(requestId, decision as FileChangeApprovalDecision), () => {
+        set(state => {
+          const pending = state.pendingApprovals.filter(r => r !== request);
+          return { pendingApprovals: pending, currentApproval: pending[0] ?? null };
+        });
       });
-    } catch (error: any) {
-      console.error('Failed to respond to approval:', error);
-      throw error;
-    }
   },
 
   clearCurrent: () => {
-    set((state) => ({
-      currentApproval: state.pendingApprovals[1] || null,
-      pendingApprovals: state.pendingApprovals.slice(1),
-    }));
+    // Dismissing the view must not discard a live server request.
+    set({ currentApproval: null });
   },
 }));

@@ -98,3 +98,23 @@ it("switches to a Claude neighbor using its project and leaves the running sessi
     { type: "user", text: "keep working" },
   ]);
 });
+
+it("restores a saved selection when shared membership arrives after mount", async () => {
+  useAgentCenterStore.setState({
+    cards: [],
+    detachedCard: null,
+    currentAgentCardId: "b",
+    currentAgentCardKind: "codex",
+    sharedTabsInitialized: false,
+  });
+  const { rerender } = renderHook(useRestoreSessionTabs);
+  expect(selectCodex).not.toHaveBeenCalled();
+  await act(async () => {
+    useAgentCenterStore.setState({
+      cards: [a, b],
+      sharedTabsInitialized: true,
+    });
+  });
+  rerender();
+  expect(selectCodex).toHaveBeenCalledExactlyOnceWith("b");
+});

@@ -45,8 +45,8 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  color: #f4f1ea;
-  background: #151b21;
+  color: var(--foreground, #f4f1ea);
+  background: var(--background, #151b21);
 }
 .workbench-terminal[hidden],
 .session-mode[hidden] {

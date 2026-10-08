@@ -1,3 +1,4 @@
+import { deliverRpc } from './rpcLifecycle';
 import { create } from "zustand";
 import type { RequestId } from "@session/bindings";
 import type { ToolRequestUserInputResponse } from "@session/bindings/v2";
@@ -91,7 +92,7 @@ export const useRequestUserInputStore = create<RequestUserInputStore>(
       }),
     replaceRequests: (requests) =>
       set((state) => ({
-        pendingRequests: requests,
+        pendingRequests: requests.map(r => state.pendingRequests.find(old => requestUserInputKey(old) === requestUserInputKey(r) && JSON.stringify(old) === JSON.stringify(r)) ?? r),
         currentRequest: requests[0] ?? null,
         drafts: retainedDrafts(requests, state.drafts),
       })),
@@ -137,11 +138,9 @@ export const useRequestUserInputStore = create<RequestUserInputStore>(
       if (submittingRequests.has(key)) return;
       submittingRequests.add(key);
       try {
-        await respondToRequestUserInput(requestId, response);
-        // A delayed ACK must never clear a newer request with a reused id.
-        get().replaceRequests(
-          get().pendingRequests.filter((r) => requestUserInputKey(r) !== key),
-        );
+        await deliverRpc(request, () => respondToRequestUserInput(requestId, response), () => {
+          get().replaceRequests(get().pendingRequests.filter(r => r !== request));
+        });
       } finally {
         submittingRequests.delete(key);
       }

@@ -1,3 +1,5 @@
+import { SessionApiError } from "@session/services/apiAdapt/shared";
+import { resetRpcLifecycle } from "../stores/rpcLifecycle";
 import {
   act,
   fireEvent,
@@ -60,6 +62,7 @@ const request = (
   ],
 });
 beforeEach(() => {
+  resetRpcLifecycle();
   vi.clearAllMocks();
   api.respond.mockResolvedValue(undefined);
   useRequestUserInputStore.setState({
@@ -115,8 +118,8 @@ it("keeps separate drafts across conversation switches and a collapsed form neve
   fireEvent.click(screen.getByRole("button", { name: "继续回答" }));
   expect(api.respond).not.toHaveBeenCalled();
 });
-it("supports custom answers and explicit skips; failed submission retains the draft for retry", async () => {
-  api.respond.mockRejectedValueOnce(new Error("offline"));
+it("supports custom answers and explicit skips; confirmed rejection retains the draft for retry", async () => {
+  api.respond.mockRejectedValueOnce(new SessionApiError("rejected", 400));
   useRequestUserInputStore.getState().addRequest(request("rpc"));
   render(<RequestUserInputItem currentThreadId="a" />);
   fireEvent.click(screen.getByRole("radio", { name: "自行填写" }));
@@ -149,6 +152,19 @@ it("deduplicates replay, distinguishes numeric ids from strings, and clears reso
   expect(
     useRequestUserInputStore.getState().pendingRequests.map((r) => r.requestId),
   ).toEqual(["1"]);
+});
+
+it("an ambiguous network failure keeps answers and does not blindly repeat the RPC",async()=>{
+  api.respond.mockRejectedValueOnce(new Error("offline"));
+  useRequestUserInputStore.getState().addRequest(request("uncertain"));
+  render(<RequestUserInputItem currentThreadId="a"/>);
+  fireEvent.click(screen.getByRole("button",{name:"跳过此题"}));
+  fireEvent.click(screen.getByRole("button",{name:"跳过此题"}));
+  fireEvent.click(screen.getByRole("button",{name:"提交回答"}));
+  await screen.findByRole("alert");
+  fireEvent.click(screen.getByRole("button",{name:"提交回答"}));
+  await waitFor(()=>expect(api.respond).toHaveBeenCalledTimes(1));
+  expect(useRequestUserInputStore.getState().pendingRequests).toHaveLength(1);
 });
 it("masks secret text and does not put answers into browser persistent storage", () => {
   const secret = request(1);

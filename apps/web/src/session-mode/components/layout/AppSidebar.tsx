@@ -1,5 +1,3 @@
-import { OpenAppMenu } from "../agent/openApp/OpenAppMenu";
-import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { UnreadCount } from "../common/SessionStatus";
 import { PROJECT_ISSUES_URL } from "../../../lib/product-links";
 import {
@@ -10,7 +8,8 @@ import {
   Plus,
   Search,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { NewAgentButton } from "../common/NewAgentButton";
 import { useTranslation } from "react-i18next";
 import { SideBarBotPane } from "@session/components/bot";
 import { BotNotifications } from "@session/components/bot/BotNotifications";
@@ -29,15 +28,12 @@ import {
   SidebarFooter,
   SidebarHeader,
   SidebarTrigger,
-  useSidebar,
 } from "@session/components/ui/sidebar";
-import { useTrafficLightConfig } from "@session/hooks";
 import { isPhone } from "@session/hooks/runtime";
 import { useLayoutStore } from "@session/stores";
 import { UpdateIndicator } from "../../features/UpdateIndicator";
 import { SessionManagerDialog } from "../common/SessionManagerDialog";
 import {
-  SideBarAgentHeader,
   SideBarAgentList,
   SideBarProjectActions,
 } from "./SideBarAgentPane";
@@ -46,10 +42,7 @@ import { UserInfo } from "./UserInfo";
 
 export function AppSideBar() {
   const { t } = useTranslation("sidebar");
-  const cwd = useWorkspaceStore((s) => s.cwd);
   const { activeSidebarTab, sidebarMode, setHasSeenBotTab } = useLayoutStore();
-  const { open: isSidebarOpen } = useSidebar();
-  const { isMacos } = useTrafficLightConfig(isSidebarOpen);
   const [sessionManagerOpen, setSessionManagerOpen] = useState(false);
   const [botsOpen, setBotsOpen] = useState(sidebarMode === "bot");
   const [projectsOpen, setProjectsOpen] = useState(sidebarMode === "agent");
@@ -58,17 +51,34 @@ export function AppSideBar() {
   const [desktopDrawerOpen, setDesktopDrawerOpen] = useState(false);
   const { newBot, setNewBot, creating, handleCreateBot } = useCreateBot();
   const setView = useLayoutStore((s) => s.setView);
+  useEffect(() => {
+    let frame = 0;
+    const reveal = (event: Event) => {
+      const path = (event as CustomEvent<unknown>).detail;
+      if (typeof path !== "string") return;
+      setProjectsOpen(true);
+      useLayoutStore.getState().setProjectExpanded(path, true);
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const row = Array.from(document.querySelectorAll<HTMLElement>(".session-mode [data-project-path]"))
+          .find(element => element.dataset.projectPath === path);
+        row?.querySelector<HTMLButtonElement>("button")?.focus();
+      });
+    };
+    window.addEventListener("session-reveal-project", reveal);
+    return () => { cancelAnimationFrame(frame); window.removeEventListener("session-reveal-project", reveal); };
+  }, []);
 
   return (
     <>
       <Sidebar className="border-r border-sidebar-border bg-zinc-100/95 dark:bg-zinc-900/95">
-        <SidebarHeader className="gap-1 p-1">
+        <SidebarHeader className="session-sidebar-header">
           {/* Header row: toggle */}
           <div
-            className={`flex items-center gap-2 ${isMacos ? "pl-20" : "pl-2"}`}
+            className="session-sidebar-search-row"
             data-tauri-drag-region
           >
-            <SidebarTrigger className="h-7 w-7" />
+            <SidebarTrigger aria-label="收起项目列表" title="收起项目列表" />
             <Button
               variant="ghost"
               size="sm"
@@ -80,6 +90,7 @@ export function AppSideBar() {
               <Search className="h-4 w-4" />
               <span>搜索会话</span>
             </Button>
+            <NewAgentButton />
             {isPhone() && (
               <Button
                 variant="ghost"
@@ -95,9 +106,36 @@ export function AppSideBar() {
         </SidebarHeader>
 
         <SidebarContent className="min-w-0 max-w-full overflow-x-hidden gap-0 px-0">
-          <SideBarAgentHeader />
+
+
+          <SideBarPinnedList />
+
+          <Collapsible className="session-sidebar-projects" open={projectsOpen} onOpenChange={setProjectsOpen}>
+            <div className="flex items-center px-1">
+              <CollapsibleTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="flex-1 justify-start gap-2"
+                  aria-label="项目列表"
+                >
+                  <span>项目</span>
+                  <UnreadCount />
+                  <ChevronDown
+                    className={`h-4 w-4 text-muted-foreground/60 transition-transform ${projectsOpen ? "" : "-rotate-90"}`}
+                  />
+                </Button>
+              </CollapsibleTrigger>
+              <SideBarProjectActions />
+            </div>
+            <CollapsibleContent>
+              <SideBarAgentList />
+            </CollapsibleContent>
+          </Collapsible>
+        </SidebarContent>
 
           <Collapsible
+            className="session-sidebar-bots"
             open={botsOpen}
             onOpenChange={(open) => {
               setBotsOpen(open);
@@ -146,33 +184,6 @@ export function AppSideBar() {
               <SideBarBotPane />
             </CollapsibleContent>
           </Collapsible>
-
-          <SideBarPinnedList />
-
-          <Collapsible open={projectsOpen} onOpenChange={setProjectsOpen}>
-            <div className="flex items-center px-1">
-              <CollapsibleTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="flex-1 justify-start gap-2"
-                  aria-label="项目列表"
-                >
-                  <span>项目与会话</span>
-                  <UnreadCount />
-                  <ChevronDown
-                    className={`h-4 w-4 text-muted-foreground/60 transition-transform ${projectsOpen ? "" : "-rotate-90"}`}
-                  />
-                </Button>
-              </CollapsibleTrigger>
-              <SideBarProjectActions />
-              {cwd && <OpenAppMenu path={cwd} />}
-            </div>
-            <CollapsibleContent>
-              <SideBarAgentList />
-            </CollapsibleContent>
-          </Collapsible>
-        </SidebarContent>
 
         <SidebarFooter className="flex-row items-center p-0 min-w-0 max-w-full overflow-x-hidden">
           <div className="flex-1 min-w-0 overflow-hidden">

@@ -41,7 +41,7 @@ test("Codex row keyboard opens only its own target", async () => {
   fireEvent.keyDown(target, { key: "Enter" });
   fireEvent.keyDown(target, { key: " " });
   expect(api.select).toHaveBeenCalledTimes(2);
-  fireEvent.keyDown(screen.getByText("改名"), { key: "Enter" });
+  fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
   expect(api.select).toHaveBeenCalledTimes(2);
 });
 test("failed Codex listing has retry rather than empty history", async () => {
@@ -145,7 +145,8 @@ test("successful archive removes navigation cache without altering history or li
   render(<ThreadList cwd="/fixture" />);
   await screen.findByText("中文任务");
   api.list.mockResolvedValue({ data: [], nextCursor: null });
-  fireEvent.click(screen.getByRole("button", { name: "Archive thread" }));
+  fireEvent.pointerDown(screen.getByRole("button", { name: "会话操作" }), { button: 0, ctrlKey: false });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
   await waitFor(() => expect(screen.queryByText("中文任务")).toBeNull());
   expect(
     useCodexStore

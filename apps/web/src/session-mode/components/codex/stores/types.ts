@@ -10,8 +10,8 @@ import type {
 
 /**
  * Per-thread turn timing, fed by turn/started + turn/completed + error.
- * Deliberately independent of thread/status/changed, which carries no
- * timestamps and races with the turn events on error/interrupt.
+ * Ordinary thread/status/changed carries no timestamps and does not own timing.
+ * A terminal systemError can end cached progress if turn completion was missed.
  */
 export interface TurnTiming {
   turnId: string;
@@ -46,6 +46,8 @@ export interface ThreadsSlice {
 }
 
 export interface EventsSlice {
+  /** True only after a full history response, never from a streamed event. */
+  historyLoadedMap: Record<string, boolean>;
   historyLoadingMap: Record<string, boolean>;
   historyErrorMap: Record<string, string | undefined>;
   events: Record<string, ServerNotification[]>; // Events per thread

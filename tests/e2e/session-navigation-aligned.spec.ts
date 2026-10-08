@@ -1,0 +1,124 @@
+import { expect, test } from "@playwright/test";
+import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
+
+test("approved navigation A aligns project and session surfaces and preserves interaction across sizes", async ({ page }) => {
+  test.setTimeout(90000);
+  const errors: string[] = [];
+  page.on("pageerror", e => errors.push(e.message));
+  const fixture = await installSessionUxFixture(page, 5);
+  fixture.threads.forEach((thread, i) => Object.assign(thread, { createdAt: Math.floor(Date.now()/1000)-3600, updatedAt: Math.floor(Date.now()/1000)-i*60 }));
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/?mode=session");
+  await page.locator(".session-mode [contenteditable=true]").first().waitFor();
+  await seedSessionUx(page, 5);
+  await page.locator('.session-nav-row[role="button"]').filter({ hasText: "中文会话 0 " }).first().click();
+  await page.evaluate(async () => {
+    const path='/src/session-mode/components/codex/stores/index.ts';
+    const {useCodexStore}=await import(performance.getEntriesByType('resource').findLast(e=>new URL(e.name).pathname===path)?.name ?? path);
+    useCodexStore.setState(s=>({events:{...s.events,'ux-0':[{method:'item/completed',params:{threadId:'ux-0',turnId:'reply-0',item:{id:'reply-item',type:'agentMessage',text:'## 项目导航与布局优化\n\n项目列表与会话工作区现在从同一条水平线开始。\n\n- 项目名称作为上下文标题\n- 侧栏开关独立显示\n- 会话标题、Agent 和时间分层呈现'}}}]}}));
+  });
+  await expect(page.getByText('项目导航与布局优化',{exact:true})).toBeVisible();
+  const sidebar = page.locator('[data-slot="sidebar-container"]');
+  const header = page.locator('.session-window-group > .session-tabs');
+  const globalNav = page.getByRole('navigation', {name:'会话工作台导航'});
+  const editor = page.locator('.session-agent-view [contenteditable=true]').first();
+  await editor.fill("A 版布局验收草稿");
+  const align = async () => {
+    await expect.poll(async () => Math.abs((await sidebar.boundingBox())!.y - (await header.boundingBox())!.y)).toBeLessThanOrEqual(1);
+    expect((await header.boundingBox())!.height).toBe(48);
+  };
+  await align();
+  await expect(header.locator('.session-identity-project')).toContainText('very-long-project');
+  await expect(page.locator('.session-project-context')).toHaveCount(0);
+  await expect(header.getByRole("tablist")).toBeVisible();
+  await expect(page.locator(".session-window-group > .session-tabs")).toHaveCount(1);
+  const row = page.locator('.session-nav-row[role="button"]').first();
+  const title = (await row.locator('.session-row-title').boundingBox())!;
+  const agent = (await row.locator('[data-session-agent]').boundingBox())!;
+  expect(Math.abs(agent.y+agent.height/2-title.y-title.height/2)).toBeLessThanOrEqual(1);
+  expect((await row.boundingBox())!.height).toBeLessThanOrEqual(36);
+  expect(await sidebar.locator('.session-sidebar-projects').evaluate(el=>Boolean(el.compareDocumentPosition(document.querySelector('.session-sidebar-bots')!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+  await page.screenshot({ path: '.dev-runtime/navigation-a/desktop.png', animations:'disabled' });
+  await sidebar.getByRole('button',{name:'收起项目列表',exact:true}).click();
+  await expect(globalNav.getByRole('button',{name:'展开项目列表',exact:true})).toBeVisible();
+  await expect(editor).toContainText('A 版布局验收草稿');
+  await page.screenshot({ path: '.dev-runtime/navigation-a/collapsed.png', animations:'disabled' });
+  await globalNav.getByRole('button',{name:'展开项目列表',exact:true}).click();
+  await header.getByRole('button',{name:/^项目详情：/}).click();
+  await page.getByRole('menuitem',{name:'在侧栏定位项目',exact:true}).click();
+  await expect(sidebar.locator('[data-project-path] button').first()).toBeFocused();
+  await page.getByRole('button',{name:'切换为浅色模式',exact:true}).click();
+  await expect(page.locator('.session-mode')).toHaveClass(/light/);
+  await expect(editor).toContainText('A 版布局验收草稿');
+  await page.screenshot({path:'.dev-runtime/navigation-a/light.png',animations:'disabled'});
+  await page.reload();
+  await expect(page.locator('.session-mode')).toHaveClass(/light/);
+  await expect(editor).toContainText('A 版布局验收草稿');
+  await page.getByRole('button',{name:'切换为深色模式',exact:true}).click();
+  await expect(page.locator('.session-mode')).toHaveClass(/dark/);
+  for(const width of [1024,900,768]) {
+    await page.setViewportSize({width,height:1000});
+    await align();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  }
+  for(const width of [390,320]) {
+    await page.setViewportSize({width,height:900});
+    await page.getByRole('button',{name:'展开项目列表',exact:true}).click();
+    const drawer=page.getByRole('dialog',{name:'项目与会话列表'});
+    await expect(drawer.getByRole('button',{name:'收起项目列表',exact:true})).toBeVisible();
+    await expect(drawer.getByRole('button',{name:'搜索和管理会话'})).toBeVisible();
+    await page.screenshot({path:`.dev-runtime/navigation-a/drawer-${width}.png`,animations:'disabled'});
+    await page.keyboard.press('Escape');
+    await expect(drawer).toHaveCount(0);
+    await expect(page.getByRole('button',{name:'展开项目列表',exact:true})).toBeFocused();
+    await expect(editor).toContainText('A 版布局验收草稿');
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    await page.screenshot({path:`.dev-runtime/navigation-a/mobile-${width}.png`,animations:'disabled'});
+  }
+  expect(fixture.calls.filter(c=>/interrupt|\/stop$|\/turn\/start$|\/followups\/submit$|\/thread\/start$/.test(c.path))).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test('compact navigation exposes full titles, quiet actions, themed portals and cross-project context', async ({ page }) => {
+  const fixture = await installSessionUxFixture(page, 6);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto('/?mode=session');
+  await page.locator('.session-mode [contenteditable=true]').first().waitFor();
+  await seedSessionUx(page, 6);
+  const rows = page.locator('.session-nav-row[role=button]');
+  await rows.first().click();
+  const selected = page.locator('[role=tab][aria-selected=true]');
+  const key = await selected.getAttribute('data-tab-key');
+  await rows.nth(1).hover();
+  await rows.nth(1).getByRole('button', { name: '会话操作', exact: true }).click();
+  await expect(page.getByRole('menuitem', { name: 'Rename', exact: true })).toBeVisible();
+  expect(await selected.getAttribute('data-tab-key')).toBe(key);
+  await page.keyboard.press('Escape');
+  await rows.first().locator('.session-row-title').focus();
+  await expect(page.getByRole('tooltip')).toContainText('长标题长标题长标题长标题长标题长标题');
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: '切换为浅色模式' }).click();
+  await rows.first().hover();
+  await rows.first().getByRole('button', { name: '会话操作', exact: true }).click();
+  const menu = page.getByRole('menu');
+  expect(await menu.evaluate(el => Boolean(el.closest('.session-mode.light')))).toBe(true);
+  const colors = await menu.evaluate(el => ({ bg: getComputedStyle(el).backgroundColor, fg: getComputedStyle(el).color }));
+  expect(colors.bg).not.toBe(colors.fg);
+  await page.keyboard.press('Escape');
+  fixture.threads[1].cwd = '/fixture/other-project';
+  await page.evaluate(async () => {
+    const module = async (path: string) => import(performance.getEntriesByType('resource').findLast(e => new URL(e.name).pathname === path)?.name ?? path);
+    const { useAgentCenterStore } = await module('/src/session-mode/stores/useAgentCenterStore.ts');
+    useAgentCenterStore.getState().addAgentCard({kind:'codex',id:'ux-1',cwd:'/fixture/other-project',preview:'另一个项目'});
+  });
+  await page.locator('[role=tab][data-tab-key="codex:ux-1"]').click();
+  await expect(page.locator('[aria-selected=true]').locator('..').locator('.session-identity-project')).toHaveText('other-project');
+  await expect(page.locator('[role=tab]')).toHaveCount(2);
+  await page.locator(`[role=tab][data-tab-key="${key}"]`).click();
+  await expect(page.locator('[aria-selected=true]').locator('..').locator('.session-identity-project')).toContainText('very-long-project');
+  await page.setViewportSize({width:900,height:1000});
+  await page.getByRole('button',{name:'更多功能',exact:true}).click();
+  for (const name of ['终端', 'VS Code', '多会话网格', '会话列表']) await expect(page.getByRole('menuitem', { name, exact:true }).or(page.getByRole('menuitemradio',{name,exact:true}))).toBeVisible();
+  await page.keyboard.press('Escape');
+  expect(fixture.calls.filter(c => /interrupt|\/stop$|\/turn\/start$|\/followups\/submit$|\/thread\/start$/.test(c.path))).toEqual([]);
+});

@@ -49,7 +49,14 @@ export function useSessionTabActions() {
       const tabs = useAgentCenterStore.getState();
       const active = selectedAgentCard(tabs);
       const wasActive = active && agentCardKey(active) === agentCardKey(card);
-      tabs.removeCard(card);
+      try {
+        tabs.removeCard(card);
+      } catch (error) {
+        toast.error("关闭标签未能保存，请检查浏览器存储后重试", {
+          description: String(error),
+        });
+        return;
+      }
       if (!wasActive) return;
       const next = selectedAgentCard(useAgentCenterStore.getState());
       if (next) await selectTab(next);
@@ -73,39 +80,51 @@ export function useRestoreSessionTabs() {
   const restored = useRef(false);
   const { selectTab } = useSessionTabActions();
   useEffect(() => {
-    if (restored.current) return;
-    restored.current = true;
-    if (useAcpStore.getState().active) return;
-    const tabs = useAgentCenterStore.getState();
-    const kind = useAgentSettingsStore.getState().selectedAgent;
-    const codex = useCodexStore.getState();
-    const currentId =
-      kind === "cc"
-        ? useCCStore.getState().activeSessionId
-        : codex.currentThreadId;
-    // A live selection (e.g. a deep link or hot update) takes precedence.
-    if (currentId) {
-      const existing = tabs.cards.find(
-        (c) => c.id === currentId && c.kind === kind,
-      );
-      const thread =
-        kind === "codex"
-          ? codex.threads.find((t) => t.id === currentId)
-          : undefined;
-      if (existing) {
-        tabs.setCurrentAgentCardId(existing.id, existing.kind);
+    const restore = () => {
+      if (restored.current) return;
+      if (useAcpStore.getState().active) {
+        restored.current = true;
         return;
       }
-      if (tabs.sharedTabsInitialized) return;
-      tabs.addAgentCard({
-        kind,
-        id: currentId,
-        cwd: thread?.cwd ?? useWorkspaceStore.getState().cwd,
-        preview: thread?.name ?? thread?.preview,
-      });
-      return;
-    }
-    const saved = selectedAgentCard(tabs);
-    if (saved) void selectTab(saved);
+      const tabs = useAgentCenterStore.getState();
+      const kind = useAgentSettingsStore.getState().selectedAgent;
+      const codex = useCodexStore.getState();
+      const currentId =
+        kind === "cc"
+          ? useCCStore.getState().activeSessionId
+          : codex.currentThreadId;
+      // A selection made while shared membership was loading always wins.
+      if (currentId) {
+        restored.current = true;
+        const existing = tabs.cards.find(
+          (c) => c.id === currentId && c.kind === kind,
+        );
+        if (existing) {
+          tabs.setCurrentAgentCardId(existing.id, existing.kind);
+          return;
+        }
+        if (tabs.sharedTabsInitialized) return;
+        const thread =
+          kind === "codex"
+            ? codex.threads.find((t) => t.id === currentId)
+            : undefined;
+        tabs.addAgentCard({
+          kind,
+          id: currentId,
+          cwd: thread?.cwd ?? useWorkspaceStore.getState().cwd,
+          preview: thread?.name ?? thread?.preview,
+        });
+        return;
+      }
+      const saved = selectedAgentCard(tabs);
+      if (saved) {
+        restored.current = true;
+        void selectTab(saved);
+      } else if (tabs.sharedTabsInitialized && !tabs.currentAgentCardId)
+        restored.current = true;
+    };
+    const unsubscribe = useAgentCenterStore.subscribe(restore);
+    restore();
+    return unsubscribe;
   }, [selectTab]);
 }

@@ -1,4 +1,5 @@
 import { useSessionAttentionStore } from "@session/stores/useSessionAttentionStore";
+import { revealNewQuestion } from "@session/features/async-questions/arrival";
 import { useSessionNameStore } from "../../../stores/useSessionNameStore";
 import { notifyDesktop } from "@session/lib/notify";
 import { isSessionModeActive } from "@session/session-dom";
@@ -10,8 +11,9 @@ import { useCodexStore } from "@session/components/codex/stores";
 import { allowSleep, preventSleep } from "@session/services/apiAdapt";
 import { playBeep } from "@session/utils/beep";
 import { shouldPlayCompletionBeep } from "./beepOnCompletion";
-import { resolveCodexServerRequest } from "./serverRequests";
+import { clearCodexRequests, resolveCodexServerRequest } from "./serverRequests";
 import { useRequestUserInputStore } from "../stores/useRequestUserInputStore";
+import { hydrateThreadModel } from "@session/stores/useThreadModelStore";
 
 export type BeepMode = "never" | "unfocused" | "always";
 
@@ -58,9 +60,17 @@ export function useServerNotificationHandler(
       }
 
       if (threadId) {
+        if (method === "thread/settings/updated") {
+          const settings = payload.params.threadSettings;
+          hydrateThreadModel(threadId, {
+            model: settings.model,
+            modelProvider: settings.modelProvider,
+            reasoningEffort: settings.effort,
+          }, { notify: !!useCodexStore.getState().historyLoadedMap?.[threadId] });
+          return;
+        }
         if (
           [
-            "thread/settings/updated",
             "mcpServer/startupStatus/updated",
           ].includes(method)
         ) {
@@ -111,9 +121,7 @@ export function useServerNotificationHandler(
         }
 
         if (method === "turn/completed") {
-          useRequestUserInputStore
-            .getState()
-            .clearThread(threadId, payload.params.turn.id);
+          clearCodexRequests(threadId, payload.params.turn.id);
           void allowSleep(threadId).catch((error) => {
             console.warn(
               "[useServerNotificationHandler] allowSleep failed:",
@@ -146,10 +154,16 @@ export function useServerNotificationHandler(
         }
 
         if (method === "thread/closed" || method === "thread/deleted") {
-          useRequestUserInputStore.getState().clearThread(threadId);
+          clearCodexRequests(threadId);
         }
 
-        if (method === "error") {
+        if (method === "thread/status/changed" && payload.params.status.type === "systemError") {
+          const turn = useCodexStore.getState().turnTimingMap[threadId];
+          if (turn) clearCodexRequests(threadId, turn.turnId);
+        }
+
+        if (method === "error" && !payload.params.willRetry) {
+          clearCodexRequests(threadId, payload.params.turnId);
           void allowSleep(threadId).catch((error) => {
             console.warn(
               "[useServerNotificationHandler] allowSleep failed:",
@@ -161,7 +175,9 @@ export function useServerNotificationHandler(
         // Forward every non-noise notification to the events slice so
         // derived state (turnTimingMap, threadStatusMap, goalMap, etc.)
         // stays in sync. The noise events are already filtered out above.
+        const previousEvents = useCodexStore.getState().events[threadId] ?? [];
         useCodexStore.getState().addEvent(threadId, payload);
+        revealNewQuestion(payload, previousEvents);
       }
     },
     // syncAccountState and refs are stable across renders (refs by identity,

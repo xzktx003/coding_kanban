@@ -1,5 +1,13 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import {
+  acknowledgeTabOperations,
+  latestTabRevision,
+  latestTabSnapshot,
+  observeTabSnapshot,
+  readTabOperations,
+  saveTabOperation,
+} from "../services/sessionTabJournal";
 
 import {
   applySessionTabAction,
@@ -65,7 +73,9 @@ interface AgentCenterState {
   acceptSharedTabs: (
     snapshot: SharedSessionTabs,
     acknowledgedSequence?: number,
-  ) => void;
+    acknowledgedIds?: string[],
+  ) => boolean;
+  refreshTabOperations: () => void;
   cards: AgentCenterCard[];
   addAgentCard: (
     card: AgentCenterCard,
@@ -93,7 +103,7 @@ function enqueue(state: AgentCenterState, action: SessionTabAction) {
     nextTabSequence: state.nextTabSequence + 1,
     pendingTabOperations: [
       ...state.pendingTabOperations,
-      { seq: state.nextTabSequence, action },
+      saveTabOperation(action, state.nextTabSequence),
     ],
   };
 }
@@ -108,11 +118,45 @@ export const useAgentCenterStore = create<AgentCenterState>()(
       pendingTabOperations: [],
       sharedTabsInitialized: false,
       tabSyncError: null,
-      acceptSharedTabs: (snapshot, acknowledgedSequence = 0) =>
+      refreshTabOperations: () =>
         set((state) => {
-          const pending = state.pendingTabOperations.filter(
-            (op) => op.seq > acknowledgedSequence,
-          );
+          const pending = [
+            ...state.pendingTabOperations.filter((op) => !op.id),
+            ...readTabOperations(),
+          ];
+          if (
+            JSON.stringify(pending) ===
+            JSON.stringify(state.pendingTabOperations)
+          )
+            return state;
+          return {
+            pendingTabOperations: pending,
+            cards: pending.reduce(
+              (cards, op) => applySessionTabAction(cards, op.action),
+              state.cards,
+            ),
+          };
+        }),
+      acceptSharedTabs: (
+        snapshot,
+        acknowledgedSequence = 0,
+        acknowledgedIds = [],
+      ) => {
+        const fresh = snapshot.revision >= latestTabRevision();
+        if (fresh) observeTabSnapshot(snapshot);
+        set((state) => {
+          acknowledgeTabOperations(acknowledgedIds);
+          const pending = [
+            ...state.pendingTabOperations.filter(
+              (op) => !op.id && op.seq > acknowledgedSequence,
+            ),
+            ...readTabOperations(),
+          ];
+          if (!fresh)
+            return {
+              pendingTabOperations: pending,
+              tabSyncError: null,
+            };
           const cards = pending.reduce(
             (current, op) => applySessionTabAction(current, op.action),
             snapshot.cards,
@@ -129,14 +173,21 @@ export const useAgentCenterStore = create<AgentCenterState>()(
                 ? state.cards
                 : cards,
             pendingTabOperations:
-              pending.length === state.pendingTabOperations.length
+              JSON.stringify(pending) ===
+              JSON.stringify(state.pendingTabOperations)
                 ? state.pendingTabOperations
                 : pending,
             sharedTabsInitialized: snapshot.initialized,
+            nextTabSequence: Math.max(
+              state.nextTabSequence,
+              acknowledgedSequence + 1,
+            ),
             detachedCard,
             tabSyncError: null,
           };
-        }),
+        });
+        return fresh;
+      },
 
       // Returns true if the card was added/updated.
       addAgentCard: (card, { activate = true } = {}) => {
@@ -314,12 +365,42 @@ export const useAgentCenterStore = create<AgentCenterState>()(
         currentAgentCardKind: state.currentAgentCardKind,
         cardsViewMode: state.cardsViewMode,
         cardSizeMap: state.cardSizeMap,
-        detachedCard: state.detachedCard,
+        // A remotely closed reading target is temporary, never a restorable tab.
         syncClientId: state.syncClientId,
         nextTabSequence: state.nextTabSequence,
-        pendingTabOperations: state.pendingTabOperations,
+        // New actions live under independent keys, not this shared cache blob.
+        pendingTabOperations: state.pendingTabOperations.filter((op) => !op.id),
         sharedTabsInitialized: state.sharedTabsInitialized,
       }),
+      merge: (persisted, current) => {
+        const state = {
+          ...current,
+          ...(persisted as Partial<AgentCenterState>),
+          detachedCard: null,
+        };
+        try {
+          const snapshot = latestTabSnapshot();
+          const pending = [
+            ...state.pendingTabOperations.filter((op) => !op.id),
+            ...readTabOperations(),
+          ];
+          return {
+            ...state,
+            pendingTabOperations: pending,
+            cards: pending.reduce(
+              (cards, op) => applySessionTabAction(cards, op.action),
+              snapshot?.cards ?? state.cards,
+            ),
+            sharedTabsInitialized:
+              snapshot?.initialized ?? state.sharedTabsInitialized,
+          };
+        } catch {
+          return {
+            ...state,
+            tabSyncError: "本机标签同步记录无法读取，请检查浏览器存储",
+          };
+        }
+      },
     },
   ),
 );

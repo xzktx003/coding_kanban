@@ -28,7 +28,7 @@ it("shows and answers only the request for this pane while another thread waits"
   expect(screen.queryByText("/a")).toBeNull();
   expect(screen.queryByText("common.pending")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "common.decline" }));
-  expect(respond).toHaveBeenCalledWith(2, false, "decline");
+  expect(respond).toHaveBeenCalledWith(2, false, "decline", b);
 });
 it("does not show an approval belonging to another pane", () => {
   useApprovalStore.setState({

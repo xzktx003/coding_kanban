@@ -248,12 +248,7 @@ export function CCAgentCard({
               等待回复
             </span>
           )}
-          <span
-            className="text-[10px] text-muted-foreground/60 truncate max-w-[80px]"
-            title={card.cwd ?? ""}
-          >
-            {getFilename(card.cwd)}
-          </span>
+
         </div>
         <div className="flex items-center gap-1">
           {processing && !isResumingSession && (

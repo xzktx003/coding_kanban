@@ -23,7 +23,7 @@ vi.mock("../common/RenameSessionButton", () => ({
 test("ACP sidebar markers name the actual agent instead of only the protocol", () => {
   render(<AcpSessionList directory="/fixture" />);
   expect(screen.getByLabelText("Agent: ACP · Keke").textContent).toBe(
-    "ACP · Keke",
+    "",
   );
   expect(screen.getByText("ACP work")).toBeTruthy();
 });

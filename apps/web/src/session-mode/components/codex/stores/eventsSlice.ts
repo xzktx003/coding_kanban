@@ -1,3 +1,4 @@
+import { acceptTurnStart } from "@session/utils/codexRuntimeState";
 import type { StateCreator } from 'zustand';
 import type { ServerNotification } from '@session/bindings';
 import type { ThreadGoal, ThreadTokenUsage } from '@session/bindings/v2';
@@ -6,6 +7,7 @@ import type { CodexStore, EventsSlice, TurnTiming } from './types';
 
 export const createEventsSlice: StateCreator<CodexStore, [], [], EventsSlice> = (set) => ({
   events: {},
+  historyLoadedMap: {},
   historyLoadingMap: {},
   historyErrorMap: {},
   threadStatusMap: {},
@@ -57,16 +59,22 @@ export const createEventsSlice: StateCreator<CodexStore, [], [], EventsSlice> = 
         threadStatusMap = { ...threadStatusMap, [threadId]: event.params.status };
       }
 
-      // Update turn timing map: single source of truth for turn elapsed/duration,
-      // independent of thread/status/changed (see TurnTiming doc comment).
+      // Turn events own timing; systemError also ends progress when completion
+      // was lost. An ordinary thread status alone cannot revive a finished turn.
       let turnTimingMap = state.turnTimingMap;
+      let currentTurnId = state.currentTurnId;
       if (event.method === 'turn/started') {
         const { turn } = event.params;
+        if (!acceptTurnStart(turnTimingMap[threadId], turn)) return state;
+        if (threadStatusMap[threadId]?.type === 'systemError')
+          threadStatusMap = { ...threadStatusMap, [threadId]: { type: 'active', activeFlags: [] } };
+        if (state.currentThreadId === threadId) currentTurnId = turn.id;
         turnTimingMap = {
           ...turnTimingMap,
           [threadId]: {
             turnId: turn.id,
-            startedAtMs: typeof turn.startedAt === 'number' ? turn.startedAt * 1000 : Date.now(),
+            startedAtMs: typeof turn.startedAt === 'number' ? turn.startedAt * 1000 :
+              turnTimingMap[threadId]?.turnId === turn.id ? turnTimingMap[threadId].startedAtMs : Date.now(),
             durationMs: null,
             status: 'inProgress',
           } satisfies TurnTiming,
@@ -76,6 +84,7 @@ export const createEventsSlice: StateCreator<CodexStore, [], [], EventsSlice> = 
         const existing = turnTimingMap[threadId];
         // Only update if this completion matches the turn we're tracking (or we have none tracked).
         if (!existing || existing.turnId === turn.id) {
+          if (state.currentThreadId === threadId && currentTurnId === turn.id) currentTurnId = null;
           turnTimingMap = {
             ...turnTimingMap,
 
@@ -89,21 +98,31 @@ export const createEventsSlice: StateCreator<CodexStore, [], [], EventsSlice> = 
             },
           };
         }
+      } else if (event.method === 'thread/status/changed' && event.params.status.type === 'systemError') {
+        const existing = turnTimingMap[threadId];
+        if (existing?.status === 'inProgress') {
+          turnTimingMap = {
+            ...turnTimingMap,
+            [threadId]: { ...existing, durationMs: Date.now() - existing.startedAtMs, status: 'failed' },
+          };
+        }
+        if (state.currentThreadId === threadId) currentTurnId = null;
       } else if (event.method === 'error') {
         // A non-retryable error may arrive without any turn/completed, so mark
         // the turn failed here or the UI shows "Working..." forever.
         const existing = turnTimingMap[threadId];
         if (
-          existing &&
-          existing.turnId === event.params.turnId &&
-          existing.status === 'inProgress' &&
+          (!existing || (existing.turnId === event.params.turnId && existing.status === 'inProgress')) &&
           !event.params.willRetry
         ) {
+          threadStatusMap = { ...threadStatusMap, [threadId]: { type: 'systemError' } };
+          if (state.currentThreadId === threadId && currentTurnId === event.params.turnId) currentTurnId = null;
           turnTimingMap = {
             ...turnTimingMap,
             [threadId]: {
-              ...existing,
-              durationMs: Date.now() - existing.startedAtMs,
+              turnId: event.params.turnId,
+              startedAtMs: existing?.startedAtMs ?? Date.now(),
+              durationMs: existing ? Date.now() - existing.startedAtMs : null,
               status: 'failed',
             },
           };
@@ -144,6 +163,7 @@ export const createEventsSlice: StateCreator<CodexStore, [], [], EventsSlice> = 
         events: newEvents,
         threadStatusMap,
         turnTimingMap,
+        currentTurnId,
         commandStatusMap,
         commandDurationMap,
         retryNoticeMap,

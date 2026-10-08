@@ -1,3 +1,4 @@
+import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { Pencil } from "lucide-react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -119,11 +120,11 @@ export const EditableUserMessageItem = ({
   const { t } = useTranslation("thread");
   const [pendingText, setPendingText] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
   const submittingRef = useRef(false);
   const running = useCodexStore(
     (s) =>
-      s.threadStatusMap[threadId]?.type === "active" ||
-      s.turnTimingMap[threadId]?.status === "inProgress",
+      codexRuntimeState(s, threadId).running,
   );
 
   const applyEdit = async (text: string) => {
@@ -144,6 +145,7 @@ export const EditableUserMessageItem = ({
   const handleEdit = async (text: string) => {
     if (submittingRef.current || running) return;
     try {
+      setEditError(null);
       setPendingText(text);
     } catch (error) {
       console.error("Failed to edit from user message:", error);
@@ -161,13 +163,12 @@ export const EditableUserMessageItem = ({
     submittingRef.current = true;
     try {
       setSubmitting(true);
+      setEditError(null);
       await applyEdit(pendingText);
       setPendingText(null);
     } catch (error) {
       console.error("Failed to edit from user message:", error);
-      toast.error(t("userMessage.editFailed"), {
-        description: getErrorMessage(error),
-      });
+      setEditError(getErrorMessage(error));
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
@@ -183,6 +184,7 @@ export const EditableUserMessageItem = ({
       />
       <EditRollbackConfirmDialog
         open={pendingText !== null}
+        error={editError}
         submitting={submitting || running}
         onOpenChange={(open) => {
           if (!open && !submitting) {

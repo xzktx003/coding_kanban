@@ -248,6 +248,9 @@ export const en = {
       expandPlan: "Expand plan",
     },
     fileChanges: {
+      listLabel: "Changed files",
+      scrollMore: "Scroll down to see more files",
+      scrollEnd: "End of file list",
       changed_one: "{{count}} file changed",
       changed_other: "{{count}} files changed",
       expandAll: "Expand All",
@@ -264,6 +267,8 @@ export const en = {
     },
     editRollback: {
       title: "Confirm edit rollback",
+      runtimeUpdateRequired: "The running session service still uses the old rollback API. Update and restart it after active tasks finish, then retry. Refreshing the page is not sufficient. This rollback was not performed; your draft is preserved.",
+      errorDetails: "Technical details",
       description:
         "This removes this turn and all later conversation history and restores this message to the composer. Code files are not reverted, and the message is not sent automatically. Continue?",
     },

@@ -1,4 +1,6 @@
 import { useMemo } from "react";
+import { readQuestions, repliesFromContent } from "@session/features/async-questions/model";
+import { QuestionMessage, AnswerMessage } from "@session/features/async-questions/QuestionMessage";
 import { useTranscriptState } from "../thread/rowState";
 import { useTranslation } from "react-i18next";
 import type { ServerNotification } from "@session/bindings";
@@ -121,6 +123,8 @@ export const EventItem = ({ event, context }: EventItemProps) => {
       const { item: startedItem } = event.params;
       switch (startedItem.type) {
         case "userMessage": {
+          const replies = repliesFromContent(startedItem.content);
+          if (replies) return <AnswerMessage replies={replies} />;
           const threadId = event.params.threadId;
           const turnId = event.params.turnId;
           const rollbackTurns = getRollbackTurnsForTurn(context, turnId);
@@ -149,9 +153,11 @@ export const EventItem = ({ event, context }: EventItemProps) => {
       const { item } = event.params;
       switch (item.type) {
         case "agentMessage":
+          if (readQuestions(item).length) return <QuestionMessage threadId={event.params.threadId} sourceId={item.id} />;
           return item.text.trim() ? (
             <AgentMessageItem
               text={item.text}
+              itemId={item.id}
               threadId={event.params.threadId}
             />
           ) : null;

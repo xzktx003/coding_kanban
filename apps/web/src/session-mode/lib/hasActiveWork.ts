@@ -1,3 +1,4 @@
+import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { useCodexStore } from '@session/components/codex/stores';
 import { listAutomationRuns } from '@session/services/apiAdapt';
 import { useCCStore } from '@session/stores/cc';
@@ -10,7 +11,7 @@ import { useAcpStore } from '@session/stores/useAcpStore';
  */
 export async function hasActiveWork(): Promise<boolean> {
   const codex = useCodexStore.getState();
-  if (Object.values(codex.threadStatusMap).some((status) => status.type === 'active')) return true;
+  if ([...new Set([...Object.keys(codex.threadStatusMap), ...Object.keys(codex.turnTimingMap)])].some(id => codexRuntimeState(codex, id).running)) return true;
   if (codex.isProcessingQueued) return true;
 
   if (Object.values(useCCStore.getState().sessionLoadingMap).some(Boolean)) return true;

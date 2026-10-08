@@ -26,6 +26,6 @@ test("keyboard opens Claude row but nested controls do not open it", () => {
   fireEvent.keyDown(row, { key: "Enter" });
   fireEvent.keyDown(row, { key: " " });
   expect(select).toHaveBeenCalledTimes(2);
-  fireEvent.keyDown(screen.getByText("改名"), { key: "Enter" });
+  fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
   expect(select).toHaveBeenCalledTimes(2);
 });

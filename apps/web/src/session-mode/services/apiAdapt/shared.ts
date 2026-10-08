@@ -19,6 +19,11 @@ export type InstalledSkillItem = {
 };
 
 export type SkillScope = 'user' | 'project';
+
+/** Preserve HTTP certainty for callers that must not blindly resend mutations. */
+export class SessionApiError extends Error {
+  constructor(message: string, public readonly status: number) { super(message); }
+}
 export type SkillAgent = 'codex' | 'cc';
 export type UnifiedMcpClientName = 'codex' | 'cc';
 
@@ -41,7 +46,8 @@ export type TerminalStartResponse = {
 
 async function extractErrorMessage(response: Response) {
   try {
-    const payload = (await response.clone().json()) as { error?: string };
+    const payload = (await response.clone().json()) as { error?: string; message?: string };
+    if (typeof payload?.message === "string" && payload.message) return payload.message;
     if (payload?.error) {
       return payload.error;
     }
@@ -146,7 +152,7 @@ export async function postJsonWithOptions<T>(
         id: message,
       });
     }
-    return Promise.reject(new Error(message));
+    return Promise.reject(new SessionApiError(message, response.status));
   }
 
   return (await response.json()) as T;

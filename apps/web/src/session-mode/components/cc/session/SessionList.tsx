@@ -1,3 +1,4 @@
+import { SessionLoadMore } from "@session/components/common/SessionLoadMore";
 import { DeleteSessionDialog } from '@session/components/cc/session/DeleteSessionDialog';
 import { SessionListItem } from '@session/components/cc/session/SessionListItem';
 import { useSessionActions } from '@session/components/cc/session/useSessionActions';
@@ -20,6 +21,7 @@ export function SessionList({ directory, sessions, onSelectSession }: Props) {
     loadedSessions,
     loading,
     loadingMore,
+    pageError,
     error,
     expanded,
     setExpanded,
@@ -86,20 +88,9 @@ export function SessionList({ directory, sessions, onSelectSession }: Props) {
           />
         ))}
       </div>
+      {pageError && <p role="alert" className="px-2 text-xs text-destructive">更多会话加载失败：{pageError}</p>}
       {hasMore && (
-        <button
-          type="button"
-          className="w-full text-xs text-muted-foreground hover:text-foreground py-1 transition-colors"
-          onClick={() => {
-            if (expanded && allLoaded) {
-              setExpanded(false);
-              return;
-            }
-            void loadMoreSessions();
-          }}
-        >
-          {loadingMore ? 'Loading...' : expanded && allLoaded ? 'Show less' : `Load more`}
-        </button>
+        <SessionLoadMore loading={loadingMore} error={Boolean(pageError)} onClick={() => { void loadMoreSessions(); }} />
       )}
 
       <DeleteSessionDialog

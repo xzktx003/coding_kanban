@@ -1,6 +1,9 @@
+import { SessionRowMenu } from "../../common/SessionRowMenu";
+import { SessionRowTitle } from "../../common/SessionRowTitle";
+import { SessionLoadMore } from "../../common/SessionLoadMore";
+import { DropdownMenuItem, DropdownMenuSeparator } from "../../ui/dropdown-menu";
 import { SessionAgentBadge } from "../../common/SessionAgentBadge";
 import { SessionStatus, UnreadDot } from "../../common/SessionStatus";
-import { RenameSessionButton } from "../../common/RenameSessionButton";
 import { useSessionNameStore } from "../../../stores/useSessionNameStore";
 import { renameSession } from "../../../services/sessionNames";
 import { useShallow } from "zustand/react/shallow";
@@ -549,38 +552,21 @@ export function ThreadList({ cwd }: ThreadListProps) {
                     : "scale-100"
                 }`}
               >
-                <div className="text-sm font-medium truncate min-w-0 pr-2 flex items-center gap-1.5">
+                <div className="session-nav-title">
                   <SessionAgentBadge kind="codex" />
-                  <span className="session-row-title min-w-0 truncate">
-                    {names[`codex:${thread.id}`] ??
-                      thread.name ??
-                      (thread.preview || "New chat")}
-                  </span>
-                </div>
-                <div className="flex items-center justify-end gap-2 h-6 relative">
+                  <SessionRowTitle title={names[`codex:${thread.id}`] ?? thread.name ?? (thread.preview || "New chat")} detail={`Codex · ${formatThreadAge(thread.createdAt)}`} />
                   <SessionStatus kind="codex" id={thread.id} compact />
-                  <div className="relative flex items-center justify-end h-6 min-w-14">
-                    <RenameSessionButton
-                      kind="codex"
-                      id={thread.id}
-                      title={thread.name ?? thread.preview}
-                      className="absolute right-6 opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 focus-visible:opacity-100 max-md:opacity-100"
-                    />
-                    <span className="text-xs text-muted-foreground whitespace-nowrap group-hover/session-row:hidden group-focus-within/session-row:hidden max-md:hidden">
-                      {formatThreadAge(thread.createdAt)}
-                    </span>
-                    <button
-                      type="button"
-                      aria-label="Archive thread"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        void handleArchive(thread.id);
-                      }}
-                      className="absolute right-0 inline-flex items-center justify-center h-6 w-6 rounded hover:bg-accent/50 transition-colors text-muted-foreground opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 max-md:opacity-100"
-                    >
-                      <Archive className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
+                </div>
+                <div className="session-nav-meta">
+                  <span className="session-nav-age">{formatThreadAge(thread.createdAt)}</span>
+                  <SessionRowMenu>
+                    {threadActions(thread).map(action => <Fragment key={action.label}>
+                      {action.separatorBefore && <DropdownMenuSeparator />}
+                      <DropdownMenuItem variant={action.destructive ? "destructive" : "default"} onSelect={action.onSelect}>
+                        {action.icon && <action.icon className="size-3.5" />}{action.label}
+                      </DropdownMenuItem>
+                    </Fragment>)}
+                  </SessionRowMenu>
                 </div>
               </div>
             </ContextMenuTrigger>
@@ -612,19 +598,7 @@ export function ThreadList({ cwd }: ThreadListProps) {
         </p>
       )}
       {nextCursor && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleLoadMore}
-          disabled={isLoadingMore}
-          className="justify-start"
-        >
-          {isLoadingMore
-            ? "正在加载…"
-            : pageError
-              ? "重试加载更多"
-              : "加载更多"}
-        </Button>
+        <SessionLoadMore loading={isLoadingMore} error={Boolean(pageError)} onClick={handleLoadMore} />
       )}
       <AlertDialog
         open={!!pendingDelete}

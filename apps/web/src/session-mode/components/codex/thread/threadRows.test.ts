@@ -1,6 +1,16 @@
 import { expect, it } from "vitest";
 import type { ServerNotification } from "@session/bindings";
 import { buildThreadRows } from "./threadRows";
+it("keeps one structured question instead of its streamed text or duplicate snapshot", () => {
+  const item = {type:"agentMessage",id:"q",text:"",questions:[{title:"选择",options:["A"]}]};
+  const rows = buildThreadRows([
+    {method:"item/agentMessage/delta",params:{threadId:"t",turnId:"turn",itemId:"q",delta:"选择"}},
+    {method:"item/completed",params:{threadId:"t",turnId:"turn",item}},
+    {method:"turn/completed",params:{threadId:"t",turn:{id:"turn",status:"completed",items:[item]}}},
+  ] as any);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].item.kind === "event" && rows[0].item.event.method).toBe("item/completed");
+});
 const event = (method: string, params: unknown) =>
   ({ method, params }) as ServerNotification;
 it("keeps one streaming message, commands and warnings while excluding protocol-only events", () => {
@@ -41,7 +51,12 @@ it("indexes rollback counts and scopes file-summary context to its turn", () => 
   ]);
   expect(rows[0].context?.rollbackTurns).toBe(2);
   expect(
-    rows.find((row) => row.key === "event-3")?.context?.rollbackTurns,
+    rows.find(
+      (row) =>
+        row.item.kind === "event" &&
+        row.item.event.method === "item/started" &&
+        row.item.event.params.turnId === "b",
+    )?.context?.rollbackTurns,
   ).toBe(1);
   const summary = rows.find((row) => row.key === "event-2");
   expect(summary?.context?.events).toHaveLength(3);

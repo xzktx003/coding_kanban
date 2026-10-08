@@ -61,6 +61,7 @@ function connect() {
       // not a duplicate historical event.
       if (
         envelope.event !== "codex/user-input-snapshot" &&
+        envelope.event !== "codex/pending-requests-snapshot" &&
         sequence !== null &&
         envelope.seq <= sequence
       )
@@ -119,4 +120,11 @@ export function openEventStream(subscriber: Subscriber): () => void {
     connected = false;
     retry = 500;
   };
+}
+
+/** Reconcile pending RPCs without resending any user response. */
+export function reconcileEventStream() {
+  if (timer) clearTimeout(timer);
+  timer = null;
+  connect();
 }

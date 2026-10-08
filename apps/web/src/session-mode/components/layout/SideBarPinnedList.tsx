@@ -1,3 +1,4 @@
+import { SessionRowTitle } from "../common/SessionRowTitle";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { SessionAgentBadge } from "../common/SessionAgentBadge";
 import { UnreadDot } from "../common/SessionStatus";
@@ -92,12 +93,13 @@ export function SideBarPinnedList() {
             title={`${names[`${item.kind}:${item.id}`] ?? item.title}\n${item.cwd}`}
             className="group/session-row session-nav-row flex w-full items-center gap-2 rounded-md px-2.5 py-1 text-left hover:bg-accent/50"
           >
+            <div className="session-nav-title">
             <SessionAgentBadge kind={item.kind} />
-            <span className="session-row-title min-w-0 flex-1 text-xs">
-              {names[`${item.kind}:${item.id}`] ?? (item.title || "Untitled")}
-            </span>
+            <SessionRowTitle title={names[`${item.kind}:${item.id}`] ?? (item.title || "Untitled")} detail={item.cwd} />
             <UnreadDot kind={item.kind} id={item.id} />
-            <span className="shrink-0 text-[10px] text-muted-foreground group-hover/session-row:hidden group-focus-within/session-row:hidden">
+            </div>
+            <div className="session-nav-meta">
+            <span className="session-pinned-project shrink-0 text-[10px] text-muted-foreground group-hover/session-row:hidden group-focus-within/session-row:hidden">
               {getFilename(item.cwd)}
             </span>
             <Button
@@ -105,7 +107,7 @@ export function SideBarPinnedList() {
               size="icon-xs"
               title="取消置顶"
               aria-label={`取消置顶${names[`${item.kind}:${item.id}`] ?? item.title}`}
-              className="shrink-0 opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 max-sm:opacity-100"
+              className="session-row-menu"
               onClick={(e) => {
                 e.stopPropagation();
                 unpin(item.id);
@@ -113,6 +115,7 @@ export function SideBarPinnedList() {
             >
               <PinOff />
             </Button>
+            </div>
           </div>
         ))}
       </CollapsibleContent>

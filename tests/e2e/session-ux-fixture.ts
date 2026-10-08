@@ -11,6 +11,7 @@ export async function installSessionUxFixture(page: Page, count = 40) {
   let projects = ["/fixture/项目/very-long-project-path-for-ui-regression"];
   const tabSequences = new Map<string, number>(),
     projectSequences = new Map<string, number>();
+  const followups = new Map<string, any>();
   let listError = false;
   let healthError = false;
   const makeThread = (id: string, name: string) => ({
@@ -57,6 +58,34 @@ export async function installSessionUxFixture(page: Page, count = 40) {
       return;
     }
 
+    if (path.startsWith("/api/session/followups")) {
+      const threadId =
+        body?.threadId ?? new URL(request.url()).searchParams.get("threadId");
+      const state = followups.get(threadId) ?? {
+        revision: 0,
+        paused: null,
+        items: [],
+      };
+      if (
+        path.endsWith("/submit") &&
+        !state.items.some((item: any) => item.id === body.id)
+      ) {
+        state.items.push({
+          ...body,
+          status: "sent",
+          createdAt: Date.now(),
+          turnId: `ux-turn-${threadId}`,
+        });
+        state.revision++;
+      }
+      if (path.endsWith("/stop")) {
+        state.paused = "你已停止当前任务，队列已暂停";
+        state.revision++;
+      }
+      followups.set(threadId, state);
+      await route.fulfill({ json: state });
+      return;
+    }
     if (path.endsWith("/events")) {
       await route.fulfill({
         contentType: "text/event-stream",
@@ -287,4 +316,14 @@ export async function seedSessionUx(page: Page, count = 1) {
       cardsViewMode: "solo",
     });
   }, count);
+}
+
+/** Compact single-group navigation keeps layout choices in the layout menu. */
+export async function chooseSessionLayout(page: Page, name: string) {
+  const direct = page.getByRole('button', { name, exact: true });
+  if (await direct.isVisible()) { await direct.click(); return; }
+  const layout = page.getByRole('button', { name: '选择会话布局', exact: true });
+  if (await layout.isVisible()) await layout.click();
+  else await page.getByRole('button', { name: '更多功能', exact: true }).click();
+  await page.getByRole('menuitemradio', { name, exact: true }).click();
 }

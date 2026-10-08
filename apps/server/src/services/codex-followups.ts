@@ -1,7 +1,8 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   emptyFollowupThread,
+  composeContextText,
   type FollowupAction,
   type FollowupSubmit,
   type FollowupThread,
@@ -26,8 +27,9 @@ export class CodexFollowups {
   private loaded = false;
   private serial: Promise<unknown> = Promise.resolve();
   private statuses: Record<string, string> = {};
+  private errorRecoveryAllowed = new Set<string>();
   private activeTurns: Record<string, string> = {};
-  private epoch = 0;
+  private epochs: Record<string, number> = {};
   constructor(
     private runtime: FollowupRuntime,
     private file?: string,
@@ -58,11 +60,24 @@ export class CodexFollowups {
             !Number.isSafeInteger(thread.revision)
           )
             throw new Error("消息队列记录损坏");
+          if (
+            thread.awaitingTurnId &&
+            thread.items.some(pending) &&
+            !thread.paused
+          ) {
+            thread.paused = "重新连接后等待任务完成确认";
+            thread.revision++;
+          }
           for (const item of thread.items)
             if (item.status === "sending") {
               item.status = "uncertain";
               item.error = "服务重启前的发送结果尚未确认，请先查看对话";
               thread.paused = "送达结果待确认";
+              thread.revision++;
+            } else if (item.status === "queued" && item.mode === "steer") {
+              item.status = "failed";
+              item.error = "重启前的引导尚未提交，请确认目标轮次后操作";
+              thread.paused = "待重新确认引导";
               thread.revision++;
             }
         }
@@ -92,6 +107,81 @@ export class CodexFollowups {
       throw error;
     }
   }
+  async drain() {
+    await this.serial;
+  }
+  recover(reason: string) {
+    for (const id of Object.keys(this.state))
+      this.epochs[id] = (this.epochs[id] ?? 0) + 1;
+    return this.run(async () => {
+      this.statuses = {};
+      this.errorRecoveryAllowed.clear();
+      await this.transaction(() => {
+        for (const thread of Object.values(this.state))
+          if (thread.items.some(pending) && !thread.paused) {
+            thread.paused = reason;
+            thread.revision++;
+          }
+      });
+    });
+  }
+  review(
+    id: string,
+    delivery: "inline" | "detached",
+    target: Record<string, unknown>,
+  ) {
+    return this.run(async () => {
+      const thread = this.thread(id);
+      if (delivery === "inline") {
+        const status = await this.runtime.statuses([id]);
+        if (
+          !["idle", "systemError"].includes(status[id]) ||
+          (!thread.paused && thread.items.some(pending))
+        )
+          conflict("请等待当前任务结束并暂停队列，或选择独立审查");
+      }
+      let result: any;
+      try {
+        result = await this.runtime.call("review/start", {
+          threadId: id,
+          delivery,
+          target,
+        });
+      } catch (error) {
+        // Current Codex paginated history rejects detached review before starting it.
+        if (
+          delivery !== "detached" ||
+          !(error instanceof FollowupRejected) ||
+          !error.message.includes(
+            "paginated threads do not support detached review",
+          )
+        )
+          throw error;
+        const fork = await this.runtime.call("thread/fork", { threadId: id });
+        if (typeof fork?.thread?.id !== "string" || fork.thread.id === id)
+          throw new Error("服务未返回独立审查会话");
+        result = await this.runtime.call("review/start", {
+          threadId: fork.thread.id,
+          delivery: "inline",
+          target,
+        });
+      }
+      if (
+        typeof result?.reviewThreadId !== "string" ||
+        typeof result?.turn?.id !== "string"
+      )
+        throw new Error("审查启动结果尚未确认，请先查看会话");
+      const targetThread = this.thread(result.reviewThreadId);
+      await this.transaction(() => {
+        targetThread.awaitingTurnId = result.turn.id;
+        targetThread.review = { turnId: result.turn.id, status: "inProgress" };
+        targetThread.revision++;
+      });
+      this.activeTurns[result.reviewThreadId] = result.turn.id;
+      this.statuses[result.reviewThreadId] = "active";
+      return result;
+    });
+  }
   get(id: string) {
     return this.run(async () => this.snapshot(id));
   }
@@ -114,6 +204,12 @@ export class CodexFollowups {
         conflict("正在同步当前任务，请稍后重试");
       if (data.mode === "replace" && thread.stopTurnId)
         conflict("正在等待当前任务停止");
+      // This is explicit new input after a visible error, not permission to drain
+      // messages queued before the failure. Persisted paused queues still require Resume.
+      if (data.recoverAfterError && data.mode === "queue" && !thread.paused && !thread.awaitingTurnId && !thread.items.some(pending)) {
+        this.statuses[data.threadId] = "systemError";
+        this.errorRecoveryAllowed.add(data.threadId);
+      }
       const item: FollowupMessage = {
         ...data,
         fingerprint,
@@ -176,7 +272,22 @@ export class CodexFollowups {
       )
         conflict("请先确认这条消息未送达，再重试");
       await this.transaction(() => {
+        const before = item && (action.type === "delete" || action.type === "edit")
+          && ["queued", "failed"].includes(item.status) && item.mode === "queue"
+          ? structuredClone(item) : undefined;
         switch (action.type) {
+          case "undo": {
+            const saved = thread.undo;
+            if (!saved || saved.token !== action.token || saved.expiresAt < Date.now())
+              return conflict("此操作已无法撤销，请查看当前队列");
+            const current = thread.items.find(m => m.id === saved.before.id);
+            if (!current || JSON.stringify(current) !== JSON.stringify(saved.after))
+              conflict("消息已发送或发生变化，无法撤销；请勿重复发送");
+            thread.items = thread.items.filter(m => m.id !== saved.before.id);
+            thread.items.splice(Math.min(saved.index, thread.items.length), 0, structuredClone(saved.before));
+            delete thread.undo;
+            break;
+          }
           case "pause":
             thread.paused = "队列已暂停";
             break;
@@ -188,6 +299,8 @@ export class CodexFollowups {
             )
               conflict("请先处理失败或送达不明的消息");
             thread.paused = null;
+            this.errorRecoveryAllowed.add(id);
+            delete thread.awaitingTurnId;
             delete thread.stopTurnId;
             break;
           case "clear":
@@ -198,12 +311,17 @@ export class CodexFollowups {
             thread.paused = null;
             delete thread.replacementId;
             delete thread.stopTurnId;
+            delete thread.undo;
             break;
           case "delete":
             item!.status = "cancelled";
             if (thread.replacementId === item!.id) delete thread.replacementId;
             break;
           case "edit":
+            if (composeContextText(action.text, item!.contexts).length > 200_000)
+              conflict("正文与上下文合计不能超过 200,000 字符");
+            if (!action.text.trim() && !item!.images.length && !item!.contexts?.length)
+              conflict("消息不能为空");
             item!.text = action.text;
             item!.error = undefined;
             if (item!.status === "failed") item!.status = "queued";
@@ -233,6 +351,11 @@ export class CodexFollowups {
             break;
           }
         }
+        if (before) thread.undo = {
+          token: randomUUID(), kind: action.type as "edit" | "delete",
+          before, after: structuredClone(item!), index: thread.items.findIndex(m => m.id === before.id),
+          expiresAt: Date.now() + 10 * 60_000,
+        };
         thread.revision++;
       });
       if (action.type === "steer") await this.deliver(id, item!, true);
@@ -252,28 +375,102 @@ export class CodexFollowups {
   }
   observe(event: any): Promise<void> {
     // Advance before queueing behind a network request, so a stale snapshot cannot dispatch.
-    this.epoch++;
+    const eventId = event?.params?.threadId ?? event?.params?.thread?.id;
+    if (
+      typeof eventId !== "string" ||
+      ![
+        "thread/started",
+        "thread/status/changed",
+        "turn/started",
+        "turn/completed",
+        "error",
+      ].includes(event.method)
+    )
+      return Promise.resolve();
+    this.epochs[eventId] = (this.epochs[eventId] ?? 0) + 1;
     return this.run(async () => {
       const p = event?.params,
-        id = p?.threadId;
+        id = p?.threadId ?? p?.thread?.id;
       if (typeof id !== "string") return;
+      if (event.method === "thread/started") {
+        if (!this.statuses[id] || this.statuses[id] === "unknown")
+          this.statuses[id] = p.thread.status?.type;
+        return;
+      }
       if (event.method === "thread/status/changed") {
+        const previous = this.statuses[id];
         this.statuses[id] = p.status?.type;
+        if (p.status?.type === "systemError" && previous !== "systemError") {
+          this.errorRecoveryAllowed.delete(id);
+          if (this.state[id]) await this.transaction(() => {
+            this.state[id].paused ??= "上一轮执行失败，请检查后继续";
+            this.state[id].revision++;
+          });
+        }
         return;
       }
       if (event.method === "turn/started") {
+        this.errorRecoveryAllowed.delete(id);
         this.statuses[id] = "active";
         this.activeTurns[id] = p.turn.id;
+        const thread = this.state[id];
+        if (
+          thread?.review?.status === "inProgress" &&
+          !thread.review.executionTurnId
+        )
+          await this.transaction(() => {
+            thread.review!.executionTurnId = p.turn.id;
+            thread.revision++;
+          });
+        return;
+      }
+      if (event.method === "error") {
+        if (p.willRetry || !this.state[id]) return;
+        const active = this.activeTurns[id] ?? this.state[id].awaitingTurnId;
+        if (active && active !== p.turnId) return;
+        this.errorRecoveryAllowed.delete(id);
+        this.statuses[id] = "systemError";
+        await this.transaction(() => {
+          this.state[id].paused = "当前任务报告错误，请检查后继续";
+          this.state[id].revision++;
+        });
         return;
       }
       if (event.method !== "turn/completed") return;
-      if (this.activeTurns[id] && this.activeTurns[id] !== p.turn?.id) return;
+      if (
+        this.activeTurns[id] &&
+        this.activeTurns[id] !== p.turn?.id &&
+        this.state[id]?.review?.turnId !== p.turn?.id
+      )
+        return;
       delete this.activeTurns[id];
-      this.statuses[id] = "idle";
+      this.errorRecoveryAllowed.delete(id);
+      this.statuses[id] = p.turn.status === "failed" ? "systemError" : "idle";
       const thread = this.state[id];
       if (!thread) return;
       await this.transaction(() => {
+        if (
+          thread.review &&
+          [thread.review.turnId, thread.review.executionTurnId].includes(
+            p.turn.id,
+          )
+        ) {
+          thread.review.status = p.turn.status;
+          thread.review.durationMs = p.turn.durationMs ?? null;
+          if (thread.stopTurnId === thread.review.executionTurnId)
+            delete thread.stopTurnId;
+          if (thread.awaitingTurnId === thread.review.turnId)
+            delete thread.awaitingTurnId;
+        }
         if (thread.stopTurnId === p.turn.id) delete thread.stopTurnId;
+        if (thread.awaitingTurnId === p.turn.id) {
+          delete thread.awaitingTurnId;
+          if (
+            thread.paused === "重新连接后等待任务完成确认" &&
+            p.turn.status === "completed"
+          )
+            thread.paused = null;
+        }
         if (p.turn.status === "failed" || p.turn.status === "interrupted")
           thread.paused =
             p.turn.status === "failed"
@@ -289,18 +486,29 @@ export class CodexFollowups {
         this.state[id].items.some((m) => m.status === "queued"),
       );
       if (!ids.length) return;
-      const epoch = this.epoch;
+      const epochs = { ...this.epochs };
       let fresh: Record<string, string>;
       try {
         fresh = await this.runtime.statuses(ids);
       } catch {
         return;
       }
-      if (epoch !== this.epoch) return;
       for (const id of ids) {
-        this.statuses[id] = fresh[id] ?? "unknown";
+        if (epochs[id] !== this.epochs[id]) continue;
+        this.statuses[id] = fresh[id] ?? this.statuses[id] ?? "unknown";
         const thread = this.thread(id);
-        if (this.statuses[id] !== "idle" || thread.stopTurnId) continue;
+        if (this.statuses[id] === "systemError" && !this.errorRecoveryAllowed.has(id)) {
+          if (!thread.paused) await this.transaction(() => { thread.paused = "上一轮执行失败，请检查后继续"; thread.revision++; });
+          continue;
+        }
+        if (
+          // systemError is a finished turn too. The pause below still requires
+          // explicit recovery; a resumed queue must be able to start a new turn.
+          !["idle", "systemError"].includes(this.statuses[id]) ||
+          thread.stopTurnId ||
+          thread.awaitingTurnId
+        )
+          continue;
         const item = thread.replacementId
           ? thread.items.find((m) => m.id === thread.replacementId)
           : thread.paused
@@ -318,9 +526,10 @@ export class CodexFollowups {
       item.error = undefined;
       thread.revision++;
     });
+    const text = composeContextText(item.text, item.contexts);
     const input = [
-      ...(item.text.trim()
-        ? [{ type: "text", text: item.text, text_elements: [] }]
+      ...(text.trim()
+        ? [{ type: "text", text, text_elements: [] }]
         : []),
       ...item.images.map((path) => ({ type: "localImage", path })),
     ];
@@ -347,7 +556,9 @@ export class CodexFollowups {
       // Record accepted delivery before considering another message. Persistence failure must not retry it.
       item.status = "sent";
       item.turnId = turnId;
+      thread.awaitingTurnId = turnId;
       thread.revision++;
+      this.errorRecoveryAllowed.delete(id);
       this.activeTurns[id] = turnId;
       this.statuses[id] = "active";
       if (thread.replacementId === item.id) delete thread.replacementId;

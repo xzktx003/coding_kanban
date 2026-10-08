@@ -8,7 +8,6 @@ import {
   SquarePen,
   X,
 } from "lucide-react";
-import { useState } from "react";
 import { Button } from "@session/components/ui/button";
 import {
   Collapsible,
@@ -42,7 +41,6 @@ export function SideBarProjectList({
     useWorkspaceStore();
   const { setInstructionType } = useAgentSettingsStore();
   const { setView, expandedProjects, setProjectExpanded } = useLayoutStore();
-  const [hoveredProject, setHoveredProject] = useState<string | null>(null);
 
   const isOpen = (project: string) => expandedProjects[project] ?? true;
   const toggleProject = (project: string, open: boolean) =>
@@ -68,16 +66,14 @@ export function SideBarProjectList({
       {projects.map((project) => (
         <Collapsible
           key={project}
+          data-project-path={project}
           open={isOpen(project)}
           onOpenChange={(open) => toggleProject(project, open)}
-          className="bg-sidebar/30"
+          className="session-project-group"
         >
-          {/* biome-ignore lint/a11y/noStaticElementInteractions: hover-only affordance, keyboard users reach the controls inside directly */}
           <div
-            className="flex items-center gap-1 px-1 py-0.5 text-xs transition-colors hover:bg-foreground/10"
+            className="session-project-heading"
             title={project}
-            onMouseEnter={() => setHoveredProject(project)}
-            onMouseLeave={() => setHoveredProject(null)}
           >
             <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 text-left">
               {isOpen(project) ? (
@@ -94,11 +90,11 @@ export function SideBarProjectList({
               </span>
               {isOpen(project) ? (
                 <ChevronDown
-                  className={`h-3.5 w-3.5 shrink-0 transition-opacity ${hoveredProject === project ? "opacity-100" : "opacity-0"}`}
+                  className={`h-3.5 w-3.5 shrink-0 transition-opacity `}
                 />
               ) : (
                 <ChevronRight
-                  className={`h-3.5 w-3.5 shrink-0 transition-opacity ${hoveredProject === project ? "opacity-100" : "opacity-0"}`}
+                  className={`h-3.5 w-3.5 shrink-0 transition-opacity `}
                 />
               )}
             </CollapsibleTrigger>
@@ -113,7 +109,7 @@ export function SideBarProjectList({
                     size="icon-xs"
                     title={`项目操作：${getFilename(project) || project}`}
                     aria-label={`项目操作：${getFilename(project) || project}`}
-                    className="shrink-0"
+                    className="session-project-action shrink-0"
                   >
                     <Ellipsis />
                   </Button>
@@ -136,13 +132,13 @@ export function SideBarProjectList({
               size="icon-xs"
               title={newActionTitle(getFilename(project) || project)}
               onClick={() => onNewAction(project)}
-              className="shrink-0"
+              className="session-project-action shrink-0"
             >
               <SquarePen />
             </Button>
           </div>
 
-          <CollapsibleContent>{renderList(project)}</CollapsibleContent>
+          <CollapsibleContent className="session-project-sessions">{renderList(project)}</CollapsibleContent>
         </Collapsible>
       ))}
 

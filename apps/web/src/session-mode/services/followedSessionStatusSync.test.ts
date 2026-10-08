@@ -270,3 +270,50 @@ it("rejects malformed status and repeated pagination cursors without an infinite
   expect(fetcher).toHaveBeenCalledTimes(2);
   expect(useCodexStore.getState().threadStatusMap).toEqual({});
 });
+
+it("rechecks a snapshot invalidated only by a turn event instead of leaving status unknown", async () => {
+  let resolve!: (value: Response) => void;
+  const fetcher = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<Response>((r) => {
+          resolve = r;
+        }),
+    )
+    .mockResolvedValue(
+      response([
+        { id: "a", status: active },
+        { id: "b", status: idle },
+      ]),
+    );
+  stop = startFollowedSessionStatusSync(fetcher);
+  await vi.advanceTimersByTimeAsync(1);
+  useCodexStore
+    .getState()
+    .addEvent("a", {
+      method: "turn/started",
+      params: {
+        threadId: "a",
+        turn: {
+          id: "new",
+          status: "inProgress",
+          items: [],
+          itemsView: "full",
+          error: null,
+          startedAt: 1,
+          completedAt: null,
+          durationMs: null,
+        },
+      },
+    });
+  resolve(
+    response([
+      { id: "a", status: idle },
+      { id: "b", status: idle },
+    ]),
+  );
+  await vi.advanceTimersByTimeAsync(300);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(useCodexStore.getState().threadStatusMap.a).toEqual(active);
+});

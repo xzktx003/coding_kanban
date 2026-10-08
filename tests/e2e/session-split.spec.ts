@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
+import { chooseSessionLayout, installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
 
 test("dragging tabs creates nested groups; moving, closing and reload preserve one input destination", async ({
   page,
@@ -18,6 +18,16 @@ test("dragging tabs creates nested groups; moving, closing and reload preserve o
       .filter({ hasText: `中文会话 ${i} ` })
       .first()
       .click();
+  fixture.threads[1].cwd = '/fixture/research';
+  fixture.threads[2].cwd = '/fixture/kanban';
+  await page.evaluate(async () => {
+    const path='/src/session-mode/stores/useAgentCenterStore.ts';
+    const {useAgentCenterStore}=await import(performance.getEntriesByType('resource').findLast(e=>new URL(e.name).pathname===path)?.name??path);
+    for(const [id,cwd] of [['ux-1','/fixture/research'],['ux-2','/fixture/kanban']]) {
+      const card=useAgentCenterStore.getState().cards.find(c=>c.id===id);
+      useAgentCenterStore.getState().updateCard({...card,cwd});
+    }
+  });
   const groups = page.locator("[data-session-group]");
   await expect(groups).toHaveCount(1);
   const drop = async (
@@ -44,6 +54,13 @@ test("dragging tabs creates nested groups; moving, closing and reload preserve o
   await expect(groups).toHaveCount(2);
   await drop("codex:ux-1", 0, "bottom");
   await expect(groups).toHaveCount(3);
+  await expect(groups.nth(1).getByRole('button',{name:'项目详情：research',exact:true})).toBeVisible();
+  await expect(groups.nth(2).getByRole('button',{name:'项目详情：kanban',exact:true})).toBeVisible();
+  const destination = (await page.locator('.session-input-target').textContent())!;
+  await groups.nth(2).getByRole('button',{name:'项目详情：kanban',exact:true}).click();
+  await expect(page.locator('.session-input-target')).toHaveText(destination);
+  await page.keyboard.press('Escape');
+  await page.screenshot({path:'.dev-runtime/project-context-v2/split.png',animations:'disabled'});
   const rectangles = await groups.evaluateAll((els) =>
     els.map((el) => {
       const b = el.getBoundingClientRect();
@@ -69,7 +86,7 @@ test("dragging tabs creates nested groups; moving, closing and reload preserve o
   await expect
     .poll(
       () =>
-        fixture.calls.filter((c) => c.path.endsWith("/turn/start")).at(-1)?.body
+        fixture.calls.filter((c) => c.path.endsWith("/followups/submit")).at(-1)?.body
           ?.threadId,
     )
     .toBe("ux-0");
@@ -98,14 +115,14 @@ test("dragging tabs creates nested groups; moving, closing and reload preserve o
     page.getByRole("button", { name: "更多功能", exact: true }),
   ).toBeVisible();
   const projectBox = (await page
-    .getByRole("button", { name: "项目与会话", exact: true })
+    .getByRole("button", { name: "展开项目列表", exact: true })
     .boundingBox())!;
   const firstTabBox = (await page
     .locator(".session-tab-strip")
     .first()
     .boundingBox())!;
-  expect(projectBox.x + projectBox.width).toBeLessThanOrEqual(firstTabBox.x);
-  await page.getByRole("button", { name: "项目与会话", exact: true }).click();
+  expect(projectBox.y + projectBox.height).toBeLessThanOrEqual(firstTabBox.y);
+  await page.getByRole("button", { name: "展开项目列表", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(
     page
@@ -150,7 +167,7 @@ test("dragging tabs creates nested groups; moving, closing and reload preserve o
     page.getByRole("button", { name: "更多功能", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "项目与会话", exact: true }),
+    page.getByRole("button", { name: "展开项目列表", exact: true }),
   ).toBeVisible();
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth),
@@ -162,8 +179,8 @@ test("dragging tabs creates nested groups; moving, closing and reload preserve o
   await drop("codex:ux-1", 0, "center");
   await expect(groups).toHaveCount(2);
   await expect(page.locator('[data-tab-key="codex:ux-1"]')).toHaveCount(1);
-  await page.getByRole("button", { name: "多会话网格", exact: true }).click();
-  await page.getByRole("button", { name: "自由分屏", exact: true }).click();
+  await chooseSessionLayout(page, "多会话网格");
+  await chooseSessionLayout(page, "自由分屏");
   await expect(groups).toHaveCount(2);
   expect(errors).toEqual([]);
 });

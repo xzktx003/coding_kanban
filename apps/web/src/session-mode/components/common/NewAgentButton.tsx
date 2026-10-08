@@ -11,6 +11,8 @@ import { useAgentCenterStore, useLayoutStore } from "@session/stores";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { useSessionActionConfirmation } from "./useSessionActionConfirmation";
+import { toast } from "@session/components/ui/use-toast";
 
 const focusCCInput = () =>
   window.dispatchEvent(new Event("cc-input-focus-request"));
@@ -25,6 +27,7 @@ export function NewAgentButton({
   icon: Icon = SquarePen,
 }: Props) {
   const { t } = useTranslation("sidebar");
+  const { ask, confirmation } = useSessionActionConfirmation();
   const { cwd, setCwd } = useWorkspaceStore();
   const { selectedAgent } = useAgentSettingsStore();
   const { setCurrentAgentCardId } = useAgentCenterStore();
@@ -39,6 +42,24 @@ export function NewAgentButton({
 
   const handleCreateNew = useCallback(
     async (project?: string) => {
+      const original = useAcpStore.getState();
+      if (acpActive && original.running) {
+        const accepted = await ask({
+          title: "中断当前任务并新建会话？",
+          description:
+            "新建 ACP 会话会停止当前正在执行的任务。当前记录会保留，取消后继续原任务。",
+          confirmLabel: "中断并新建",
+        });
+        const current = useAcpStore.getState();
+        if (
+          !accepted ||
+          current.connectionId !== original.connectionId ||
+          current.sessionId !== original.sessionId ||
+          current.active !== original.active ||
+          current.agentId !== original.agentId
+        )
+          return;
+      }
       if (project && project !== cwd) setCwd(project);
 
       if (acpActive) {
@@ -55,7 +76,30 @@ export function NewAgentButton({
           return;
         }
         // The old process may already be gone; a fresh session works regardless.
-        if (acpConnectionId) await acpStop(acpConnectionId).catch(() => {});
+        if (acpConnectionId) {
+          const accepted = await ask({
+            title: "重新连接 Agent？",
+            description:
+              "当前连接无法新建会话，继续会关闭并重新启动此 Agent 服务。",
+            confirmLabel: "重新连接",
+          });
+          if (
+            !accepted ||
+            useAcpStore.getState().connectionId !== acpConnectionId
+          )
+            return;
+          try {
+            await acpStop(acpConnectionId);
+          } catch (error) {
+            toast({
+              title: "无法重新连接 Agent",
+              description: String(error),
+              variant: "destructive",
+            });
+            return;
+          }
+          if (useAcpStore.getState().connectionId !== acpConnectionId) return;
+        }
         acpRestart();
         return;
       }
@@ -72,6 +116,7 @@ export function NewAgentButton({
     },
     [
       acpActive,
+      ask,
       acpConnectionId,
       acpRestart,
       cwd,
@@ -120,23 +165,26 @@ export function NewAgentButton({
   }, [handleCreateNew, view]);
 
   return (
-    <Button
-      onClick={() => void handleCreateNew()}
-      size={showLabel ? "default" : "icon"}
-      variant="ghost"
-      className={`group ${showLabel ? "justify-start" : ""} relative flex items-center gap-2`}
-      aria-label={t("newChat")}
-      title={`${t("newChat")} (⌘N)`}
-    >
-      <Icon size={16} />
-      {showLabel && (
-        <div className="flex items-center justify-between w-full">
-          <span>{t("newChat")}</span>
-          <span className="hidden group-hover:inline text-xs text-muted-foreground ml-2">
-            ⌘N
-          </span>
-        </div>
-      )}
-    </Button>
+    <>
+      <Button
+        onClick={() => void handleCreateNew()}
+        size={showLabel ? "default" : "icon"}
+        variant="ghost"
+        className={`group ${showLabel ? "justify-start" : ""} relative flex items-center gap-2`}
+        aria-label={t("newChat")}
+        title={`${t("newChat")} (⌘N)`}
+      >
+        <Icon size={16} />
+        {showLabel && (
+          <div className="flex items-center justify-between w-full">
+            <span>{t("newChat")}</span>
+            <span className="hidden group-hover:inline text-xs text-muted-foreground ml-2">
+              ⌘N
+            </span>
+          </div>
+        )}
+      </Button>
+      {confirmation}
+    </>
   );
 }

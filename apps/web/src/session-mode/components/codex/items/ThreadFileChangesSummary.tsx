@@ -1,32 +1,59 @@
-import { Diff, Undo2 } from 'lucide-react';
-import { useState } from 'react';
-import { useTranslation } from 'react-i18next';
-import { Button } from '@session/components/ui/button';
-import { HoverCard, HoverCardContent, HoverCardTrigger } from '@session/components/ui/hover-card';
-import { DiffViewer } from '@session/features/DiffViewer';
-import { gitReverseFiles } from '@session/services/apiAdapt';
-import { useEditorStore, useWorkspaceStore } from '@session/stores';
-import type { AggregatedFileChange } from './fileChangeLogic';
-import { getDiffViewerProps } from './fileChangeLogic';
-import { toRelativePath, useOpenReviewTab } from './fileChangeUtils';
+import { Diff, Undo2 } from "lucide-react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { useIsMobile } from "@session/hooks/use-mobile";
+import { useTranslation } from "react-i18next";
+import { Button } from "@session/components/ui/button";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@session/components/ui/hover-card";
+import { DiffViewer } from "@session/features/DiffViewer";
+import { gitReverseFiles } from "@session/services/apiAdapt";
+import { useEditorStore, useWorkspaceStore } from "@session/stores";
+import type { AggregatedFileChange } from "./fileChangeLogic";
+import { getDiffViewerProps } from "./fileChangeLogic";
+import { toRelativePath, useOpenReviewTab } from "./fileChangeUtils";
 
 type ThreadFileChangesSummaryProps = {
   changes: AggregatedFileChange[];
 };
 
-type PendingUndo = { kind: 'all' } | { kind: 'file'; path: string };
+type PendingUndo = { kind: "all" } | { kind: "file"; path: string };
 
 /**
  * Compact turn-diff summary shown inline in CodexThread. Deliberately does
  * not render per-file diffs — that's the right panel's review tab's job.
  */
-export const ThreadFileChangesSummary = ({ changes }: ThreadFileChangesSummaryProps) => {
-  const { t } = useTranslation('thread');
+export const ThreadFileChangesSummary = ({
+  changes,
+}: ThreadFileChangesSummaryProps) => {
+  const { t } = useTranslation("thread");
   const { cwd } = useWorkspaceStore();
   const { hasConfirmedGitRevert, setHasConfirmedGitRevert } = useEditorStore();
   const openReviewTab = useOpenReviewTab();
   const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
   const [undoing, setUndoing] = useState(false);
+  const mobile = useIsMobile();
+  const scrollable = changes.length > (mobile ? 4 : 6);
+  const listRef = useRef<HTMLDivElement>(null);
+  const [atEnd, setAtEnd] = useState(false);
+  const updateScrollEnd = () => {
+    const list = listRef.current;
+    if (list)
+      setAtEnd(
+        list.clientHeight > 0 &&
+          list.scrollHeight - list.scrollTop - list.clientHeight <= 1,
+      );
+  };
+  useLayoutEffect(() => {
+    updateScrollEnd();
+    const list = listRef.current;
+    if (!list) return;
+    const observer = new ResizeObserver(updateScrollEnd);
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, [changes.length, mobile]);
 
   if (changes.length === 0) return null;
 
@@ -36,12 +63,15 @@ export const ThreadFileChangesSummary = ({ changes }: ThreadFileChangesSummaryPr
       acc.removed += change.removedCount;
       return acc;
     },
-    { added: 0, removed: 0 }
+    { added: 0, removed: 0 },
   );
 
   const doUndo = async (target: PendingUndo) => {
     if (!cwd) return;
-    const paths = target.kind === 'all' ? changes.map((change) => change.path) : [target.path];
+    const paths =
+      target.kind === "all"
+        ? changes.map((change) => change.path)
+        : [target.path];
     setUndoing(true);
     try {
       await gitReverseFiles(cwd, paths, false);
@@ -60,29 +90,38 @@ export const ThreadFileChangesSummary = ({ changes }: ThreadFileChangesSummaryPr
   };
 
   return (
-    <div className="space-y-1 border rounded-md p-3">
-      <div className="flex items-center justify-between gap-3">
+    <div className="session-file-changes space-y-1 border rounded-md p-3">
+      <div className="session-file-changes-header flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm font-medium text-muted-foreground">
-          {t('fileChanges.changed', { count: changes.length })}
+          {t("fileChanges.changed", { count: changes.length })}
         </div>
         <div className="flex items-center gap-1.5">
           <Button
             variant="outline"
             size="sm"
             className="h-6 px-2 gap-1.5"
-            onClick={() => requestUndo({ kind: 'all' })}
+            onClick={() => requestUndo({ kind: "all" })}
             disabled={undoing}
-            title={t('fileChanges.undoAllTitle')}
+            title={t("fileChanges.undoAllTitle")}
           >
             <Undo2 className="h-3 w-3" />
-            {t('fileChanges.undoAll')}
+            {t("fileChanges.undoAll")}
           </Button>
-          <Button variant="outline" size="sm" className="h-6 px-2 gap-1.5" onClick={openReviewTab}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 px-2 gap-1.5"
+            onClick={openReviewTab}
+          >
             <Diff className="h-3 w-3" />
-            {t('common.review')}
+            {t("common.review")}
             <span className="flex items-center gap-1.5 text-xs">
-              <span className="text-green-600 dark:text-green-400">+{totals.added}</span>
-              <span className="text-red-600 dark:text-red-400">-{totals.removed}</span>
+              <span className="text-green-600 dark:text-green-400">
+                +{totals.added}
+              </span>
+              <span className="text-red-600 dark:text-red-400">
+                -{totals.removed}
+              </span>
             </span>
           </Button>
         </div>
@@ -91,9 +130,9 @@ export const ThreadFileChangesSummary = ({ changes }: ThreadFileChangesSummaryPr
       {pendingUndo && (
         <div className="flex items-center gap-2 rounded-sm bg-destructive/10 px-2 py-1.5 text-xs">
           <span className="flex-1 text-destructive">
-            {pendingUndo.kind === 'all'
-              ? t('fileChanges.confirmUndoAll', { count: changes.length })
-              : t('fileChanges.confirmUndoFile', {
+            {pendingUndo.kind === "all"
+              ? t("fileChanges.confirmUndoAll", { count: changes.length })
+              : t("fileChanges.confirmUndoFile", {
                   path: toRelativePath(pendingUndo.path, cwd),
                 })}
           </span>
@@ -106,7 +145,7 @@ export const ThreadFileChangesSummary = ({ changes }: ThreadFileChangesSummaryPr
               void doUndo(pendingUndo);
             }}
           >
-            {t('common.undo')}
+            {t("common.undo")}
           </Button>
           <Button
             size="sm"
@@ -114,20 +153,33 @@ export const ThreadFileChangesSummary = ({ changes }: ThreadFileChangesSummaryPr
             className="h-6 px-2 text-xs"
             onClick={() => setPendingUndo(null)}
           >
-            {t('common.cancel')}
+            {t("common.cancel")}
           </Button>
         </div>
       )}
 
-      <div className="divide-y">
+      <div
+        ref={listRef}
+        role="region"
+        aria-label={t("fileChanges.listLabel")}
+        tabIndex={scrollable ? 0 : -1}
+        data-scrollable={scrollable}
+        className="session-file-changes-list divide-y"
+        onScroll={updateScrollEnd}
+      >
         {changes.map((change) => (
           <div
             key={change.path}
-            className="flex w-full items-center justify-between gap-3 py-1.5 text-sm hover:bg-muted/50 rounded-sm px-1 -mx-1"
+            className="session-file-change-row flex w-full items-center justify-between gap-3 text-sm hover:bg-muted/50 rounded-sm px-1"
           >
             <HoverCard openDelay={200}>
               <HoverCardTrigger asChild>
-                <button type="button" onClick={openReviewTab} className="flex-1 min-w-0 text-left">
+                <button
+                  type="button"
+                  onClick={openReviewTab}
+                  className="flex-1 min-w-0 text-left"
+                  title={toRelativePath(change.path, cwd)}
+                >
                   <span className="font-mono truncate block">
                     {toRelativePath(change.path, cwd)}
                   </span>
@@ -143,22 +195,31 @@ export const ThreadFileChangesSummary = ({ changes }: ThreadFileChangesSummaryPr
               </HoverCardContent>
             </HoverCard>
             <span className="flex items-center gap-2 text-xs shrink-0">
-              <span className="text-green-600 dark:text-green-400">+{change.addedCount}</span>
-              <span className="text-red-600 dark:text-red-400">-{change.removedCount}</span>
+              <span className="text-green-600 dark:text-green-400">
+                +{change.addedCount}
+              </span>
+              <span className="text-red-600 dark:text-red-400">
+                -{change.removedCount}
+              </span>
             </span>
             <Button
               variant="ghost"
               size="icon"
               className="h-5 w-5 shrink-0"
-              onClick={() => requestUndo({ kind: 'file', path: change.path })}
+              onClick={() => requestUndo({ kind: "file", path: change.path })}
               disabled={undoing}
-              title={t('fileChanges.undoFileTitle')}
+              title={t("fileChanges.undoFileTitle")}
             >
               <Undo2 className="h-3 w-3" />
             </Button>
           </div>
         ))}
       </div>
+      {scrollable && (
+        <div className="session-file-changes-hint" data-at-end={atEnd}>
+          {t(atEnd ? "fileChanges.scrollEnd" : "fileChanges.scrollMore")}
+        </div>
+      )}
     </div>
   );
 };

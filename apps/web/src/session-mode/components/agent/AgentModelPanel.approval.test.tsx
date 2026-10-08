@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { AgentModelPanel } from "./AgentModelPanel";
 import { useAcpStore } from "@session/stores/useAcpStore";
 
@@ -35,7 +35,30 @@ vi.mock("@session/components/codex/composer/ModelReasonSelector", () => ({
   ModelReasonSelector: () => null,
 }));
 
-// Deliberately red until the user approves explicit Agent-stop confirmation.
+beforeEach(() => {
+  vi.clearAllMocks();
+  Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value: vi.fn(),
+  });
+  useAcpStore.setState({
+    active: true,
+    agentId: "old-agent",
+    connectionId: "old-fixture-connection",
+    sessionId: "old-fixture-session",
+    running: true,
+  });
+});
+
+async function requestAgentChange() {
+  render(<AgentModelPanel trigger={<button>选择 Agent</button>} />);
+  fireEvent.click(screen.getByRole("button", { name: "选择 Agent" }));
+  await act(async () =>
+    fireEvent.click(await screen.findByRole("option", { name: "新的 Agent" })),
+  );
+}
+
+// An Agent service is stopped only after explicit confirmation.
 test("selecting another ACP Agent cannot implicitly stop the current process", async () => {
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
     configurable: true,
@@ -56,4 +79,36 @@ test("selecting another ACP Agent cannot implicitly stop the current process", a
   expect(api.stop).not.toHaveBeenCalled();
   expect(useAcpStore.getState().agentId).toBe("old-agent");
   expect(useAcpStore.getState().connectionId).toBe("old-fixture-connection");
+});
+
+test("cancel keeps the original Agent service and session", async () => {
+  await requestAgentChange();
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "取消" })),
+  );
+  expect(api.stop).not.toHaveBeenCalled();
+  expect(useAcpStore.getState().agentId).toBe("old-agent");
+  expect(useAcpStore.getState().sessionId).toBe("old-fixture-session");
+});
+
+test("confirmation stops exactly the old connection and selects the new Agent", async () => {
+  await requestAgentChange();
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "关闭服务并切换" })),
+  );
+  expect(api.stop).toHaveBeenCalledExactlyOnceWith("old-fixture-connection");
+  expect(useAcpStore.getState().agentId).toBe("new-agent");
+  expect(useAcpStore.getState().active).toBe(true);
+  expect(useAcpStore.getState().connectionId).toBeNull();
+});
+
+test("an obsolete confirmation cannot stop a newly selected session", async () => {
+  await requestAgentChange();
+  act(() => useAcpStore.setState({ sessionId: "another-session" }));
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "关闭服务并切换" })),
+  );
+  expect(api.stop).not.toHaveBeenCalled();
+  expect(useAcpStore.getState().sessionId).toBe("another-session");
+  expect(useAcpStore.getState().agentId).toBe("old-agent");
 });

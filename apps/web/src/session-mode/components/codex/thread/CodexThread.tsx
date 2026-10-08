@@ -25,6 +25,7 @@ import { ScrollToBottomButton } from "../widget/ScrollToBottomButton";
 import { WorkingIndicator } from "../widget/WorkingIndicator";
 import { RowStateContext } from "./rowState";
 import { buildThreadRows, type ThreadRow } from "./threadRows";
+import { CodexDeliveryEchoes } from "./CodexDeliveryEchoes";
 
 interface CodexThreadProps {
   threadId?: string;
@@ -152,7 +153,19 @@ const CodexTranscript = memo(function CodexTranscript({
         jumpToBottom();
     };
     window.addEventListener("session-locate-request", locate);
-    return () => window.removeEventListener("session-locate-request", locate);
+    const submitted = (event: Event) => {
+      if (
+        (event as CustomEvent<{ threadId: string }>).detail?.threadId ===
+          activeThreadId &&
+        useCodexStore.getState().currentThreadId === activeThreadId
+      )
+        jumpToBottom();
+    };
+    window.addEventListener("session-message-submitted", submitted);
+    return () => {
+      window.removeEventListener("session-locate-request", locate);
+      window.removeEventListener("session-message-submitted", submitted);
+    };
   }, [activeThreadId, jumpToBottom]);
 
   const totalSize = virtualizer.getTotalSize();
@@ -327,6 +340,7 @@ const CodexTranscript = memo(function CodexTranscript({
               })}
             </div>
             <div className="space-y-2">
+              <CodexDeliveryEchoes threadId={activeThreadId} events={events} />
               {loading && (
                 <div
                   role="status"

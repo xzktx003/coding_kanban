@@ -57,7 +57,10 @@ interface CodeEditorProps {
   onContentChange?: (content: string) => void;
   onSave?: (content: string) => Promise<void>;
   onSelectionChange?: (selectedText: string) => void;
-  onSendToAI?: (selectedText: string) => void;
+  onSendToAI?: (
+    selectedText: string,
+    range?: { start: number; end: number },
+  ) => void;
   onAddToTodo?: (selectedText: string) => void;
   className?: string;
 }
@@ -90,6 +93,7 @@ export function CodeEditor({
   const [selection, setSelection] = useState<{
     text: string;
     position: { x: number; y: number };
+    range?: { start: number; end: number };
   } | null>(null);
   const editorContainerRef = useRef<HTMLDivElement>(null);
   const searchMarkerRef = useRef<any>(null);
@@ -317,7 +321,18 @@ export function CodeEditor({
             y: Math.max(10, Math.min(y, maxY)),
           };
 
-          setSelection({ text: selectedText, position });
+          setSelection({
+            text: selectedText,
+            position,
+            range: {
+              start: range.start.row + 1,
+              end:
+                range.end.row +
+                (range.end.column === 0 && range.end.row > range.start.row
+                  ? 0
+                  : 1),
+            },
+          });
         }
       } catch (error) {
         console.warn("Could not calculate selection position:", error);
@@ -643,12 +658,12 @@ export function CodeEditor({
                   variant="ghost"
                   size="sm"
                   onClick={() => {
-                    onSendToAI(selection.text);
+                    onSendToAI(selection.text, selection.range);
                     setSelection(null);
                   }}
                   className="size-8 p-1"
-                  title="将选中文本放入会话输入框"
-                  aria-label="将选中文本放入会话输入框"
+                  title="将代码选区加入当前会话"
+                  aria-label="将代码选区加入当前会话"
                 >
                   <Send className="w-4 h-4" />
                 </Button>

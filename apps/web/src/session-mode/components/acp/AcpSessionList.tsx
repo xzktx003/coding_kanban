@@ -1,6 +1,8 @@
+import { SessionRowMenu } from "../common/SessionRowMenu";
+import { SessionRowTitle } from "../common/SessionRowTitle";
+import { DropdownMenuItem } from "../ui/dropdown-menu";
 import { SessionAgentBadge } from "../common/SessionAgentBadge";
 import { SessionStatus } from "../common/SessionStatus";
-import { RenameSessionButton } from "../common/RenameSessionButton";
 import { useSessionNameStore } from "../../stores/useSessionNameStore";
 import { Loader2, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
@@ -93,51 +95,22 @@ export function AcpSessionList({ directory }: { directory: string }) {
           aria-current={session.sessionId === sessionId ? "true" : undefined}
           className={`session-nav-row group/session-row relative flex items-center gap-2 w-full text-left p-2 rounded-lg cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${session.sessionId === sessionId ? "bg-accent" : "hover:bg-accent/50"}`}
         >
-          {opening === session.sessionId && (
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-          )}
-          <div className="min-w-0 flex-1">
-            <div
-              className="session-row-title truncate text-sm font-medium"
-              title={title(session)}
-            >
-              {title(session)}
-            </div>
-            <SessionAgentBadge
-              kind="acp"
-              agentName={session.agentTitle ?? session.agentId}
-            />
+          <div className="session-nav-title">
+            <SessionAgentBadge kind="acp" agentName={session.agentTitle ?? session.agentId} />
+            <SessionRowTitle title={title(session)} detail={`ACP · ${session.agentTitle ?? session.agentId}`} />
+            {opening === session.sessionId ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" /> :
+              <SessionStatus kind="acp" id={`${session.agentId}:${session.sessionId}`} compact />}
           </div>
-          <span className="shrink-0 text-xs text-muted-foreground group-hover/session-row:hidden group-focus-within/session-row:hidden max-md:hidden">
-            {formatThreadAge(
-              Math.floor(new Date(session.updatedAt).getTime() / 1000),
-            )}
-          </span>
-          <RenameSessionButton
-            kind="acp"
-            id={`${session.agentId}:${session.sessionId}`}
-            title={title(session)}
-            className="opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 max-md:opacity-100"
-          />
-          <SessionStatus
-            kind="acp"
-            id={`${session.agentId}:${session.sessionId}`}
-            compact
-          />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0 opacity-0 group-hover/session-row:opacity-100 group-focus-within/session-row:opacity-100 max-md:opacity-100 text-muted-foreground hover:text-destructive"
-            onClick={(event) => {
-              event.stopPropagation();
-              setPendingDelete(session);
-              setDeleteError(null);
-            }}
-            aria-label="删除会话记录"
-            title="删除会话记录"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+          <div className="session-nav-meta">
+            <span className="session-nav-age">
+              {formatThreadAge(Math.floor(new Date(session.updatedAt).getTime() / 1000))}
+            </span>
+          <SessionRowMenu rename={{ kind: "acp", id: `${session.agentId}:${session.sessionId}`, title: title(session) }}>
+            <DropdownMenuItem variant="destructive" onSelect={() => { setPendingDelete(session); setDeleteError(null); }}>
+              <Trash2 className="size-3.5" />删除会话记录
+            </DropdownMenuItem>
+          </SessionRowMenu>
+          </div>
         </div>
       ))}
       <AlertDialog

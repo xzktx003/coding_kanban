@@ -1,3 +1,4 @@
+import { RpcDeliveryNotice } from "./RpcDeliveryNotice";
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { McpElicitationConstOption } from '@session/bindings/v2';
@@ -64,6 +65,7 @@ export function ElicitationItem({ currentThreadId }: ElicitationItemProps) {
   if (request.mode === 'url') {
     return (
       <div className="rounded-md border bg-background p-4 space-y-3">
+      <RpcDeliveryNotice request={request} />
         <div className="flex items-center gap-2">
           <Badge variant="secondary">{request.serverName}</Badge>
           <span className="font-medium">{t('elicitation.authorizationRequired')}</span>
@@ -79,7 +81,7 @@ export function ElicitationItem({ currentThreadId }: ElicitationItemProps) {
             disabled={submitting}
             onClick={() => {
               setSubmitting(true);
-              void respond(request.requestId, 'accept').finally(() => setSubmitting(false));
+              void respond(request.requestId, 'accept', null, null, request).catch(() => {}).finally(() => setSubmitting(false));
             }}
           >
             {t('common.done')}
@@ -90,7 +92,7 @@ export function ElicitationItem({ currentThreadId }: ElicitationItemProps) {
             disabled={submitting}
             onClick={() => {
               setSubmitting(true);
-              void respond(request.requestId, 'cancel').finally(() => setSubmitting(false));
+              void respond(request.requestId, 'cancel', null, null, request).catch(() => {}).finally(() => setSubmitting(false));
             }}
           >
             {t('common.cancel')}
@@ -106,14 +108,14 @@ export function ElicitationItem({ currentThreadId }: ElicitationItemProps) {
 
   const submitChoice = (action: 'accept' | 'decline' | 'cancel', persist?: string) => {
     setSubmitting(true);
-    void respond(request.requestId, action, null, persist ? { persist } : null).finally(() =>
+    void respond(request.requestId, action, null, persist ? { persist } : null, request).catch(() => {}).finally(() =>
       setSubmitting(false)
     );
   };
 
   const submitForm = () => {
     setSubmitting(true);
-    void respond(request.requestId, 'accept', values).finally(() => {
+    void respond(request.requestId, 'accept', values, null, request).catch(() => {}).finally(() => {
       setSubmitting(false);
       setValues({});
     });
@@ -125,6 +127,7 @@ export function ElicitationItem({ currentThreadId }: ElicitationItemProps) {
 
   return (
     <div className="rounded-md border bg-background p-4 space-y-4">
+      <RpcDeliveryNotice request={request} />
       <div className="flex items-center gap-2">
         <Badge variant="secondary">{request.serverName}</Badge>
         <span className="font-medium">{t('elicitation.approvalRequired')}</span>

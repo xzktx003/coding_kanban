@@ -1,7 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { installSessionUxFixture } from "./session-ux-fixture";
 
-test("reload restores background tab status across projects and pages without selecting or resuming them", async ({
+test("reload restores background history and status across projects without selecting or sending to them", async ({
   page,
 }) => {
   const fixture = await installSessionUxFixture(page, 105);
@@ -62,11 +62,21 @@ test("reload restores background tab status across projects and pages without se
     "aria-selected",
     "true",
   );
-  expect(
-    fixture.calls.filter(
-      (c) => c.path.endsWith("/thread/resume") && c.body.threadId !== "ux-0",
-    ),
-  ).toEqual([]);
+  // Background history now joins the existing thread through resume. It must
+  // hydrate both offscreen tabs without starting a turn or changing selection.
+  await expect
+    .poll(
+      () =>
+        new Set(
+          fixture.calls
+            .filter(
+              (c) =>
+                c.path.endsWith("/thread/resume") && c.body.threadId !== "ux-0",
+            )
+            .map((c) => c.body.threadId),
+        ),
+    )
+    .toEqual(new Set(["ux-103", "ux-104"]));
   expect(
     fixture.calls.filter((c) =>
       /\/turn\/start$|interrupt|\/thread\/start$/.test(c.path),
@@ -93,5 +103,29 @@ test("reload restores background tab status across projects and pages without se
     "aria-selected",
     "true",
   );
+  // An idle background session with a completed reply gets exactly one marker.
+  await page.evaluate(async () => {
+    const path = "/src/session-mode/stores/useSessionAttentionStore.ts";
+    const { useSessionAttentionStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+        path
+    );
+    useSessionAttentionStore
+      .getState()
+      .complete("codex", "ux-104", "completed-reply");
+  });
+  await expect(
+    running.getByRole("img", { name: "有新的回复未读" }),
+  ).toHaveCount(1);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await running.screenshot({
+    path: ".dev-runtime/session-tabs-status/single-unread-dot.png",
+  });
+  await page.setViewportSize({ width: 390, height: 900 });
+  await expect(
+    running.getByRole("img", { name: "有新的回复未读" }),
+  ).toHaveCount(1);
   expect(errors).toEqual([]);
 });

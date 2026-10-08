@@ -1,0 +1,730 @@
+/* Composer V2: scoped surfaces, editor, contextual attachments and touch controls. */
+.session-mode .session-context-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 8px 0;
+  min-width: 0;
+}
+.session-mode .session-context-chip {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 230px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--muted);
+}
+.session-mode .session-context-chip button {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 44px;
+  padding: 8px;
+  min-width: 0;
+  text-align: left;
+}
+.session-mode .session-context-chip button:first-child {
+  flex: 1;
+}
+.session-mode .session-context-chip button:last-child:not(:first-child) {
+  flex: none;
+  padding: 4px;
+  width: 30px;
+}
+.session-mode .session-context-chip span {
+  min-width: 0;
+}
+.session-mode .session-context-chip strong,
+.session-mode .session-context-chip small {
+  display: block;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 400;
+  max-width: 150px;
+}
+.session-mode .session-context-chip small {
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.session-mode .session-context-chip img {
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 5px;
+}
+.session-mode .session-context-chip svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+.session-mode .session-context-chip[data-state="error"] {
+  border-color: var(--destructive);
+}
+.session-mode .session-context-all {
+  font-size: 12px;
+  min-height: 44px;
+  padding: 6px 12px;
+  color: var(--muted-foreground);
+  border-radius: 10px;
+}
+.session-mode .session-composer-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  width: min(720px, calc(100vw - 40px));
+  max-width: none;
+  max-height: calc(var(--session-visual-height, 100dvh) - 48px);
+  top: calc(
+    var(--session-visual-top, 0px) + var(--session-visual-height, 100dvh) / 2
+  );
+  border-radius: 20px;
+  overflow: hidden;
+  animation: none;
+}
+.session-mode .session-composer-sheet.is-full {
+  width: min(1080px, calc(100vw - 48px));
+  height: calc(var(--session-visual-height, 100dvh) - 48px);
+}
+.session-mode .session-composer-sheet > header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.session-mode .session-composer-sheet > header > div {
+  min-width: 0;
+}
+.session-mode .session-composer-sheet [data-slot="dialog-title"] {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.session-mode .session-composer-sheet [data-slot="dialog-description"] {
+  font-size: 12px;
+  margin-top: 3px;
+}
+.session-mode .session-composer-sheet button {
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.session-mode .session-composer-sheet button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.session-mode .session-composer-sheet button:hover:not(:disabled) {
+  background: var(--accent);
+}
+.session-mode .session-composer-sheet button:focus-visible,
+.session-mode .session-context-strip button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.session-mode .session-composer-sheet svg {
+  height: 18px;
+  width: 18px;
+  flex-shrink: 0;
+}
+.session-mode .session-composer-sheet-body {
+  padding: 18px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  flex: 1;
+}
+.session-mode .session-composer-sheet > footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.session-mode .session-composer-sheet > footer > span {
+  margin-right: auto;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.session-mode .session-v2-primary {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 500;
+}
+.session-mode .session-v2-primary:hover:not(:disabled) {
+  background: var(--primary) !important;
+  filter: brightness(1.1);
+}
+.session-mode .session-context-source {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.session-mode .session-context-preview,
+.session-mode .session-followup-snapshot pre {
+  background: var(--muted);
+  border: 1px solid var(--border);
+  padding: 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 14px 0;
+  max-height: 45dvh;
+  overflow: auto;
+}
+.session-mode .session-context-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+.session-mode .session-context-actions button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.session-mode .session-context-warning {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--primary);
+  overflow-wrap: anywhere;
+}
+.session-mode .session-context-warning button {
+  display: block;
+  text-decoration: underline;
+}
+.session-mode .session-context-list {
+  display: grid;
+  gap: 12px;
+}
+.session-mode .session-context-list > section {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  min-width: 0;
+}
+.session-mode .session-context-list > section > button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.session-mode .session-context-list small {
+  display: block;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.session-mode .session-context-image {
+  max-width: 100%;
+  max-height: 45dvh;
+  object-fit: contain;
+  border-radius: 10px;
+  margin: auto auto 12px;
+}
+.session-mode .session-rich-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 12px 0;
+}
+.session-mode .session-rich-draft textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 120px;
+  font-size: 16px;
+  line-height: 1.8;
+  padding: 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  outline-color: var(--ring);
+  color: var(--foreground);
+}
+.session-mode .session-rich-draft > textarea:only-of-type {
+  min-height: 260px;
+}
+.session-mode .session-draft-code {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 12px 0;
+}
+.session-mode .session-draft-code > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--muted);
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.session-mode .session-draft-code select {
+  min-height: 44px;
+  padding: 4px 10px;
+  color: var(--foreground);
+  background: var(--muted);
+  border-radius: 8px;
+}
+.session-mode .session-draft-code .ace_editor {
+  background: var(--background);
+}
+.session-mode .session-command-search {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 16px;
+  background: var(--muted);
+  margin-bottom: 12px;
+}
+.session-mode .session-command-row {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  flex-direction: column;
+  text-align: left;
+  gap: 2px;
+}
+.session-mode .session-command-row strong {
+  font-weight: 500;
+  font-family: monospace;
+}
+.session-mode .session-command-row span {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.session-mode .session-drawing-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.session-mode .session-drawing-tools > button {
+  border: 1px solid var(--border);
+  min-width: 44px;
+}
+.session-mode .session-drawing-tools > button[aria-pressed="true"] {
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+.session-mode .session-drawing-tools label {
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  gap: 6px;
+}
+.session-mode .session-drawing-tools input,
+.session-mode .session-drawing-tools select {
+  height: 44px;
+  width: 44px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.session-mode .session-drawing-zoom {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 8px;
+}
+.session-mode .session-drawing-canvas {
+  display: block;
+  width: 100% !important;
+  height: auto !important;
+  max-height: unset !important;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  touch-action: none;
+  user-select: none;
+  overflow: hidden;
+}
+.session-mode .session-drawing-comment {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-top: 12px;
+}
+.session-mode .session-drawing-comment label {
+  width: 100%;
+}
+.session-mode .session-drawing-comment textarea {
+  display: block;
+  min-height: 80px;
+  width: 100%;
+  padding: 8px;
+  font-size: 16px;
+  background: var(--muted);
+  border: 1px solid var(--border);
+}
+.session-mode .session-v2-help {
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--muted-foreground);
+  margin-top: 12px;
+}
+.session-mode .session-drawing-mark {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-drawing-mark button {
+  flex-shrink: 0;
+}
+.session-mode .session-undo-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(420px, calc(100vw - 24px));
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--foreground);
+  background: var(--popover);
+  box-shadow: 0 8px 24px #0004;
+  font-size: 13px;
+}
+.session-mode .session-undo-notice button {
+  min-height: 44px;
+  min-width: 44px;
+  flex-shrink: 0;
+  text-decoration: underline;
+}
+.session-mode .session-reference-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.session-mode .session-reference-actions button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  border-radius: 8px;
+}
+.session-mode .session-reference-actions button:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+.session-mode .session-message-actions:has([data-selection="true"]) {
+  visibility: visible;
+  background: var(--muted);
+  border-radius: 10px;
+}
+.session-mode .session-followup-snapshot {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--muted);
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-followup-snapshot p {
+  margin: 8px 0;
+}
+.session-mode .session-followup-badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.session-mode .session-followup-badges span {
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--foreground);
+}
+.session-mode .session-queue-detail .session-queue-list {
+  max-height: none;
+  overflow: visible;
+}
+.session-mode .session-queue-detail .session-followup-text {
+  white-space: pre-wrap;
+  max-height: none;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-queue-detail .session-queue-row {
+  flex-wrap: wrap;
+}
+.session-mode .session-queue-detail .session-queue-list > li {
+  padding-block: 10px;
+  border-bottom: 1px solid var(--border);
+}
+@container composer (max-width:660px) {
+  .session-mode .session-codex-composer .session-composer-toolbar {
+    display: grid;
+    grid-template-columns: 44px 44px minmax(0, 1fr) 44px 44px 44px;
+    grid-template-rows: 44px 44px;
+    gap: 6px;
+  }
+  .session-mode .session-codex-composer .session-composer-policy,
+  .session-mode .session-codex-composer .session-composer-actions {
+    display: contents;
+  }
+  .session-mode
+    .session-codex-composer
+    .session-composer-policy
+    > button:first-child {
+    grid-row: 2;
+    grid-column: 1;
+    width: 44px;
+    height: 44px;
+  }
+  .session-mode .session-codex-composer .session-access-trigger {
+    grid-row: 1;
+    grid-column: 1/3;
+    justify-self: start;
+    min-height: 44px;
+  }
+  .session-mode .session-codex-composer .session-composer-expand {
+    grid-row: 2;
+    grid-column: 2;
+    width: 44px;
+    height: 44px;
+  }
+  .session-mode .session-codex-composer .session-model-trigger {
+    grid-row: 1;
+    grid-column: 3/-1;
+    justify-self: end;
+    max-width: 100%;
+    height: 44px;
+  }
+  .session-mode .session-codex-composer .session-model-description {
+    display: flex;
+    flex-direction: row;
+    gap: 4px;
+    align-items: center;
+    min-width: 0;
+  }
+  .session-mode .session-codex-composer .session-model-caption {
+    min-width: 0;
+  }
+  .session-mode .session-codex-composer .session-model-effort {
+    flex-shrink: 0;
+    display: flex;
+  }
+  .session-mode .session-codex-composer .session-model-effort-divider {
+    display: inline;
+  }
+  .session-mode .session-codex-composer .session-composer-desktop-voice {
+    grid-row: 2;
+    grid-column: 4;
+    display: block;
+  }
+  .session-mode .session-codex-composer .session-composer-stop {
+    grid-row: 2;
+    grid-column: 5;
+    width: 44px;
+    height: 44px;
+  }
+  .session-mode .session-codex-composer .session-composer-send {
+    grid-row: 2;
+    grid-column: 6;
+    width: 44px;
+    height: 44px;
+  }
+  .session-mode .session-codex-composer .session-composer-toolbar button {
+    min-height: 44px;
+  }
+  .session-mode
+    .session-context-strip
+    > .session-context-chip:nth-child(n + 3) {
+    display: none;
+  }
+  .session-mode .session-context-chip {
+    max-width: calc(50% - 4px);
+    flex: 1 1 calc(50% - 4px);
+  }
+  .session-mode .session-context-chip button:last-child:not(:first-child) {
+    display: none;
+  }
+  .session-mode .session-context-strip {
+    gap: 6px;
+    padding-inline: 4px;
+  }
+  .session-mode .session-context-chip strong {
+    max-width: 100%;
+  }
+}
+@media (max-width: 767px) {
+  .session-mode:not([hidden]) {
+    height: var(--session-visual-height, 100dvh);
+    max-height: var(--session-visual-height, 100dvh);
+  }
+  .session-mode .session-composer-sheet {
+    top: auto;
+    bottom: var(--session-keyboard-inset, 0px);
+    left: 0;
+    transform: none;
+    translate: 0 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(var(--session-visual-height, 100dvh) - 16px);
+    border-radius: 20px 20px 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .session-mode .session-composer-sheet.is-full {
+    height: var(--session-visual-height, 100dvh);
+    max-height: var(--session-visual-height, 100dvh);
+    width: 100%;
+    border-radius: 0;
+  }
+  .session-mode .session-composer-sheet > header {
+    padding: 8px;
+  }
+  .session-mode .session-composer-sheet [data-slot="dialog-description"] {
+    font-size: 11px;
+  }
+  .session-mode .session-composer-sheet-body {
+    padding: 12px;
+  }
+  .session-mode .session-composer-sheet > footer {
+    padding: 8px;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .session-mode .session-composer-sheet > footer > .session-access-trigger {
+    margin-right: auto;
+  }
+  .session-mode .session-composer-sheet > footer > .session-model-trigger {
+    max-width: 65%;
+    margin-left: auto;
+  }
+  .session-mode .session-composer-sheet > footer > .session-v2-primary {
+    margin-left: auto;
+  }
+  .session-mode .session-composer-sheet input,
+  .session-mode .session-composer-sheet textarea,
+  .session-mode .session-composer-editor [contenteditable] {
+    font-size: 16px;
+  }
+  .session-mode .session-message-actions {
+    visibility: visible;
+    flex-wrap: wrap;
+    height: auto;
+  }
+  .session-mode .session-reference-actions button {
+    min-height: 44px;
+  }
+  .session-mode .session-codex-composer .session-composer-hint span {
+    display: none;
+  }
+  .session-mode.session-keyboard-open .session-context-strip {
+    flex-wrap: nowrap;
+  }
+  .session-mode.session-keyboard-open .session-context-chip {
+    min-width: 0;
+    flex: 1;
+    max-width: calc(50% - 50px);
+  }
+  .session-mode.session-keyboard-open .session-context-chip small {
+    display: none;
+  }
+  .session-mode.session-keyboard-open .session-context-all {
+    white-space: nowrap;
+    padding-inline: 5px;
+  }
+  .session-mode.session-keyboard-open .session-composer-editor {
+    max-height: 100px;
+    padding-top: 10px;
+  }
+  .session-mode.session-keyboard-open .session-input-target-compact,
+  .session-mode.session-keyboard-open .session-composer-hint {
+    display: none;
+  }
+  .session-mode [data-sonner-toaster] {
+    bottom: calc(var(--session-keyboard-inset, 0px) + 16px) !important;
+  }
+  .session-mode .session-composer-sheet .session-queue-edit textarea {
+    min-height: 100px;
+  }
+}
+@media (max-height: 500px) and (pointer: coarse) {
+  .session-mode .session-context-strip > .session-context-chip {
+    display: none;
+  }
+  .session-mode .session-composer-editor {
+    max-height: 68px;
+    padding-top: 8px;
+  }
+  .session-mode .session-queue-shelf .session-queue-list {
+    display: none;
+  }
+  .session-mode .session-input-target-compact,
+  .session-mode .session-composer-hint {
+    display: none;
+  }
+}
+/* Keep undo inside modal focus scopes; outside dialogs it stays clear of send controls. */
+.session-mode > .session-undo-notice {
+  position: fixed;
+  z-index: 200;
+  top: calc(var(--session-visual-top, 0px) + 96px);
+  left: 50%;
+  translate: -50% 0;
+}
+.session-mode [data-slot="dialog-content"] > .session-undo-notice {
+  flex-shrink: 0;
+  align-self: center;
+  margin: 8px;
+}
+@media (pointer: coarse) {
+  .session-mode:not([hidden]) {
+    height: var(--session-visual-height, 100dvh);
+    max-height: var(--session-visual-height, 100dvh);
+  }
+}
+@media (max-width: 767px) {
+  .session-mode .session-composer-sheet > footer:has(.session-expanded-submit) {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 44px auto;
+  }
+  .session-mode
+    .session-composer-sheet
+    > footer:has(.session-expanded-submit)
+    > .session-access-trigger {
+    grid-row: 1;
+    grid-column: 1;
+  }
+  .session-mode
+    .session-composer-sheet
+    > footer:has(.session-expanded-submit)
+    > .session-model-trigger {
+    grid-row: 1;
+    grid-column: 2 / 4;
+    max-width: 100%;
+  }
+  .session-mode .session-composer-sheet .session-expanded-stop {
+    grid-row: 2;
+    grid-column: 2;
+    border: 1px solid var(--border);
+  }
+  .session-mode .session-composer-sheet .session-expanded-submit {
+    grid-row: 2;
+    grid-column: 3;
+  }
+}
+.session-mode .session-drawing-canvas {
+  width: min(100%, calc(clamp(160px, calc(var(--session-visual-height, 100dvh) - 340px), 560px) * var(--drawing-ratio, 1.5))) !important;
+  margin-inline: auto;
+}

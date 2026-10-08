@@ -43,8 +43,10 @@ function GroupView({ group }: { group: SessionGroup }) {
   useEffect(() => {
     if (card?.kind === "codex") {
       const state = useCodexStore.getState();
-      if (!state.events[card.id] && !state.historyLoadingMap[card.id])
-        void codexService.threadResume(card.id).catch(() => {});
+      if (!state.historyLoadedMap[card.id] && !state.historyLoadingMap[card.id])
+        void codexService
+          .threadResume(card.id, undefined, { background: true })
+          .catch(() => {});
     }
   }, [card?.kind, card?.id]);
   return (
@@ -189,6 +191,8 @@ export function SessionGroups() {
       <div className="flex-1 min-h-0 overflow-hidden">
         {mobile ? (
           <GroupView group={current} />
+        ) : layout.tree.type === "group" ? (
+          <GroupView group={layout.tree} />
         ) : (
           <SplitNode node={layout.tree} />
         )}

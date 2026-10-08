@@ -1,3 +1,5 @@
+import { codexRuntimeState } from "@session/utils/codexRuntimeState";
+import { followupService } from "@session/services/followupService";
 import { useSessionTabActions } from "@session/hooks/useSessionTabs";
 import { useSessionState } from "../common/SessionStatus";
 import type { ServerNotification } from "@session/bindings";
@@ -76,7 +78,7 @@ export function CodexAgentCard({
 }: CodexAgentCardProps) {
   const threadEvents = useCodexStore((s) => s.events[card.id] ?? EMPTY_EVENTS);
   const processing = useCodexStore(
-    (s) => s.threadStatusMap[card.id]?.type === "active",
+    (s) => codexRuntimeState(s, card.id).running,
   );
   const turnTiming = useCodexStore((s) => s.turnTimingMap[card.id]);
   const resumed = useCodexStore((s) => s.activeThreadIds.includes(card.id));
@@ -95,8 +97,10 @@ export function CodexAgentCard({
   useEffect(() => {
     // Reload a restored grid's transcripts without selecting every window in turn.
     const state = useCodexStore.getState();
-    if (!state.events[card.id] && !state.historyLoadingMap[card.id]) {
-      void codexService.threadResume(card.id).catch(() => {});
+    if (!state.historyLoadedMap[card.id] && !state.historyLoadingMap[card.id]) {
+      void codexService
+        .threadResume(card.id, undefined, { background: true })
+        .catch(() => {});
     }
   }, [card.id]);
 
@@ -162,7 +166,7 @@ export function CodexAgentCard({
 
   const handleStop = async () => {
     const turnId = getCodexActiveTurnId(turnTiming);
-    if (turnId) await codexService.turnInterrupt(card.id, turnId);
+    if (turnId) await followupService.stop(card.id, turnId);
   };
 
   const handleResume = async () => {
@@ -247,12 +251,7 @@ export function CodexAgentCard({
               等待回复
             </span>
           )}
-          <span
-            className="text-[10px] text-muted-foreground/60 truncate max-w-[80px]"
-            title={card.cwd ?? ""}
-          >
-            {getFilename(card.cwd)}
-          </span>
+
         </div>
         {processing && (
           <Button

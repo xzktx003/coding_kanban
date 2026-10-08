@@ -1,3 +1,6 @@
+import { formatEditorContext } from "@session/services/editorContext";
+import { activeDraftOwner } from "@session/stores/useInputStore";
+import { composerDrafts } from "@session/components/codex/composer/v2/drafts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -310,7 +313,16 @@ export function FileViewer({ filePath }: { filePath: string }) {
                   isReadOnly={large && !full}
                   onContentChange={(value) => docs.edit(filePath, value)}
                   onSave={save}
-                  onSendToAI={setInput}
+                  onSendToAI={(text, range) => {
+                    const owner = activeDraftOwner();
+                    if(JSON.parse(owner)[0]==="codex") {
+                      composerDrafts.add(owner,{id:crypto.randomUUID(),kind:"file",name:filePath.split("/").pop()??filePath,path:filePath,text,...(range?{range}:{})});
+                    } else useInputStore
+                      .getState()
+                      .appendInputValue(
+                        formatEditorContext(filePath, text, range),
+                      );
+                  }}
                   onAddToTodo={addTodo}
                 />
               </div>

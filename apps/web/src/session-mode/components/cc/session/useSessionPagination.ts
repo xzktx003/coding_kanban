@@ -1,6 +1,6 @@
 // Handles fetching and paginating the session list for a directory.
 import { listen } from '@tauri-apps/api/event';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { isDesktopTauri } from '@session/hooks/runtime';
 import { listSessions, type SdkSessionInfo } from '@session/lib/sessions';
 
@@ -26,6 +26,15 @@ export function useSessionPagination({ directory, sessions }: UseSessionPaginati
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const controlled = sessions !== undefined;
+  const generation = useRef(0);
+  const pending = useRef<number | null>(null);
+  useEffect(() => {
+    generation.current++; pending.current = null;
+    setExpanded(false); setLoadingMore(false); setPageError(null);
+    return () => { generation.current++; pending.current = null; };
+  }, [directory, controlled]);
   const [totalCount, setTotalCount] = useState(0);
 
   // Sync loading/error state when sessions prop changes (controlled mode)
@@ -97,21 +106,28 @@ export function useSessionPagination({ directory, sessions }: UseSessionPaginati
   }, [directory, sessions]);
 
   const loadMoreSessions = useCallback(async () => {
-    if (!directory) return;
-    setLoadingMore(true);
+    // First reveal the rows already fetched (or supplied by the parent).
+    if (!expanded || sessions !== undefined) { setExpanded(true); return; }
+    if (!directory || pending.current === generation.current) return;
+    const request = generation.current;
+    pending.current = request;
+    setLoadingMore(true); setPageError(null);
     try {
       const { sessions: extra, total } = await listSessions(directory, {
-        limit: LOAD_MORE_SIZE,
-        offset: loadedSessions.length,
-        includeWorktrees: true,
+        limit: LOAD_MORE_SIZE, offset: loadedSessions.length, includeWorktrees: true,
       });
-      setLoadedSessions((prev) => [...prev, ...extra]);
+      if (generation.current !== request) return;
+      setLoadedSessions(prev => {
+        const ids = new Set(prev.map(s => s.session_id));
+        return [...prev, ...extra.filter(s => !ids.has(s.session_id))];
+      });
       setTotalCount(total);
-      setExpanded(true);
+    } catch (err) {
+      if (generation.current === request) setPageError(err instanceof Error ? err.message : '加载失败');
     } finally {
-      setLoadingMore(false);
+      if (generation.current === request) { pending.current = null; setLoadingMore(false); }
     }
-  }, [directory, loadedSessions.length]);
+  }, [directory, sessions, expanded, loadedSessions.length]);
 
   const removeSession = useCallback((sessionId: string) => {
     setLoadedSessions((prev) => prev.filter((s) => s.session_id !== sessionId));
@@ -121,6 +137,7 @@ export function useSessionPagination({ directory, sessions }: UseSessionPaginati
     loadedSessions,
     loading,
     loadingMore,
+    pageError,
     error,
     expanded,
     setExpanded,

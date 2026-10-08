@@ -12,6 +12,8 @@ export type SessionTabAction =
   | { type: "remove"; key: string }
   | { type: "move"; key: string; beforeKey: string | null };
 export interface SessionTabOperation {
+  /** Stable per-action retry identity; never shared with another page's action. */
+  id?: string;
   seq: number;
   action: SessionTabAction;
 }

@@ -1,3 +1,5 @@
+import { ReviewDialog } from "./ReviewDialog";
+import { useCodexStore } from "../stores";
 import { HooksDialog } from './dialogs/HooksDialog';
 import { ImportDialog } from './dialogs/ImportDialog';
 import { MemoriesDialog } from './dialogs/MemoriesDialog';
@@ -14,6 +16,8 @@ interface SlashCommandDialogsProps {
  * selected.
  */
 export function SlashCommandDialogs({ open, onClose }: SlashCommandDialogsProps) {
+  const threadId=useCodexStore(s=>s.currentThreadId);
+  if (open === "review") return <ReviewDialog threadId={threadId} onClose={onClose}/>;
   if (!open) {
     return null;
   }

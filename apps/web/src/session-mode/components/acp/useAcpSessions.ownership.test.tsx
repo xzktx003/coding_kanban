@@ -31,7 +31,7 @@ const record = (sessionId: string, cwd: string): AcpSessionRecord => ({
   updatedAt: "2026-01-01T00:00:00Z",
 });
 
-// Deliberately red until the user approves navigation ownership protection.
+// Late replies must retain the current project and session selection.
 // Two project hook instances share the real ACP store; all RPCs are mocked.
 test("a late history response cannot replace the newer selection from another project", async () => {
   let resolveOld!: (value: { sessionId: string }) => void;

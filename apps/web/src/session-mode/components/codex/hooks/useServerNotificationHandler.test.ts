@@ -5,7 +5,7 @@ import { useSessionNameStore } from "@session/stores/useSessionNameStore";
 import { useServerNotificationHandler } from "./useServerNotificationHandler";
 
 const mock = vi.hoisted(() => ({
-  state: { threads: [{ id: "thread", name: "old" as string | null }] },
+  state: { threads: [{ id: "thread", name: "old" as string | null }], events: {} },
   addEvent: vi.fn(),
 }));
 vi.mock("@session/components/codex/stores", () => ({
@@ -24,7 +24,7 @@ vi.mock("@session/services/apiAdapt", () => ({
 }));
 
 beforeEach(() => {
-  mock.state = { threads: [{ id: "thread", name: "old" }] };
+  mock.state = { threads: [{ id: "thread", name: "old" }], events: {} };
   useSessionNameStore.setState({ names: { "codex:thread": "old" } });
 });
 

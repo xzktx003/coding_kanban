@@ -13,6 +13,8 @@ import { useWorkspaceStore } from "@session/stores";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { applyAcpUpdate } from "./applyUpdate";
 import { acpFreshSession } from "./newSession";
+// Shared across project-list hook instances: the most recent navigation owns replies.
+let sessionOpenVersion = 0;
 
 /**
  * The persisted ACP sessions of one project directory, plus the actions the
@@ -27,6 +29,7 @@ export function useAcpSessions(directory: string) {
   const [error, setError] = useState<string | null>(null);
   const requestRef = useRef(0);
   const [opening, setOpening] = useState<string | null>(null);
+  const openingVersion = useRef(0);
 
   useEffect(() => {
     setSessions([]);
@@ -70,6 +73,11 @@ export function useAcpSessions(directory: string) {
    */
   const open = useCallback(
     async (record: AcpSessionRecord) => {
+      const version = ++sessionOpenVersion;
+      openingVersion.current = version;
+      const ownsSelection = () =>
+        version === sessionOpenVersion &&
+        useWorkspaceStore.getState().cwd === record.cwd;
       const store = useAcpStore.getState();
       setOpening(record.sessionId);
       setCwd(record.cwd);
@@ -85,6 +93,7 @@ export function useAcpSessions(directory: string) {
         // session in another project too.
         if (!connectionId || store.agentId !== record.agentId) {
           const res = await acpStart(record.agentId, record.cwd);
+          if (!ownsSelection()) return;
           connectionId = res.connectionId;
           canLoadSession =
             res.initialize.agentCapabilities?.loadSession === true;
@@ -121,6 +130,12 @@ export function useAcpSessions(directory: string) {
             record.sessionId,
             record.cwd,
           );
+          if (
+            !ownsSelection() ||
+            useAcpStore.getState().connectionId !== connectionId ||
+            useAcpStore.getState().sessionId !== record.sessionId
+          )
+            return;
           store.applySession({ ...session, sessionId: record.sessionId });
         } else {
           // The agent cannot resume this session, so the stored transcript is
@@ -128,20 +143,25 @@ export function useAcpSessions(directory: string) {
           // process actually knows — reuse the one it was just started with,
           // else open a new one, so prompts do not target the dead id.
           if (!startedFresh) {
-            store.applySession(await acpNewSession(connectionId, record.cwd));
+            const nextSession = await acpNewSession(connectionId, record.cwd);
+            if (!ownsSelection()) return;
+            store.applySession(nextSession);
           }
-          for (const update of await acpGetSession(record.sessionId)) {
+          const updates = await acpGetSession(record.sessionId);
+          if (!ownsSelection()) return;
+          for (const update of updates) {
             applyAcpUpdate(update as Record<string, any>);
           }
         }
       } catch (e) {
+        if (!ownsSelection()) return;
         toast({
           title: "Failed to open session",
           description: String(e),
           variant: "destructive",
         });
       } finally {
-        setOpening(null);
+        if (openingVersion.current === version) setOpening(null);
       }
     },
     [setCwd],

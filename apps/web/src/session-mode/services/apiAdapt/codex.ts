@@ -54,7 +54,12 @@ import type {
   FrontendProviderModels,
   ProviderPreset,
 } from "@session/components/codex/types";
-import { getJson, postJson, postNoContent } from "./shared";
+import {
+  getJson,
+  postJson,
+  postJsonWithOptions,
+  postNoContent,
+} from "./shared";
 
 export * from "./mcp";
 export * from "./skills";
@@ -71,10 +76,14 @@ export async function threadStart(params: ThreadStartParams) {
   return await postJson<ThreadStartResponse>("/api/codex/thread/start", params);
 }
 
-export async function threadResume(params: ThreadResumeParams) {
-  return await postJson<ThreadResumeResponse>(
+export async function threadResume(
+  params: ThreadResumeParams,
+  options?: { suppressToast?: boolean },
+) {
+  return await postJsonWithOptions<ThreadResumeResponse>(
     "/api/codex/thread/resume",
     params,
+    options,
   );
 }
 
@@ -85,9 +94,10 @@ export async function threadFork(params: ThreadForkParams) {
 export async function threadRollback(
   params: ThreadRollbackParams & { beforeTurnId?: string },
 ) {
-  return await postJson<ThreadRollbackResponse>(
+  return await postJsonWithOptions<ThreadRollbackResponse>(
     "/api/codex/thread/rollback",
     params,
+    { suppressToast: true },
   );
 }
 

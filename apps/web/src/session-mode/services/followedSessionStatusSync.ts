@@ -1,3 +1,4 @@
+import { requestTimeout } from "../lib/requestTimeout";
 import type { ThreadStatus } from "../bindings/v2";
 import { useCodexStore } from "../components/codex/stores";
 import { authHeaders, buildUrl } from "../hooks/runtime";
@@ -56,10 +57,8 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
     busy = true;
     requested = false;
     controller = new AbortController();
-    const signal = AbortSignal.any([
-      controller.signal,
-      AbortSignal.timeout(15_000),
-    ]);
+    const deadline = requestTimeout(controller.signal, 15_000);
+    const signal = deadline.signal;
     // Snapshot references let streamed status/turn changes win over a late response.
     const baseline = useCodexStore.getState();
     let failed = false;
@@ -109,11 +108,14 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
             const threadStatusMap = { ...state.threadStatusMap };
             let changed = false;
             for (const [id, status] of Object.entries(statuses)) {
-              if (
-                state.threadStatusMap[id] !== baseline.threadStatusMap[id] ||
-                state.turnTimingMap[id] !== baseline.turnTimingMap[id]
-              )
+              if (state.threadStatusMap[id] !== baseline.threadStatusMap[id])
                 continue;
+              if (state.turnTimingMap[id] !== baseline.turnTimingMap[id]) {
+                // A turn event invalidates this snapshot but does not supply an
+                // authoritative status. Recheck instead of leaving it unknown.
+                requested = true;
+                continue;
+              }
               threadStatusMap[id] = status;
               changed = true;
             }
@@ -130,6 +132,7 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
       // Keep existing state during outages; retry without repeated error toasts.
       failed = true;
     } finally {
+      deadline.dispose();
       busy = false;
       if (requested || failed) schedule(requested ? 0 : 5000);
     }

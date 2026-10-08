@@ -13,6 +13,11 @@ import { useGitStatsStore } from "@session/stores/useGitStatsStore";
 import { detectWebFramework } from "../../features/web-preview/webFrameworkDetection";
 import { RightPanelHeader } from "./RightPanelHeader";
 
+const VsCodePanel = lazy(() =>
+  import("@session/features/vscode/VsCodePanel").then((m) => ({
+    default: m.VsCodePanel,
+  })),
+);
 const TodoView = lazy(() => import("@session/features/todos/TodoView"));
 const FilesPanel = lazy(() => import("@session/features/files/FilesPanel"));
 const GitDiffPanel = lazy(() => import("@session/features/git/GitDiffPanel"));
@@ -46,6 +51,10 @@ export function RightPanel({ visible = true }: { visible?: boolean }) {
   const { refreshStats } = useGitStatsStore();
   const isMobile = useIsMobile();
   const hasOpenedFiles = useRef(false);
+  const hasOpenedVsCode = useRef(false);
+  if (openRightPanelTabs.includes("vscode")) hasOpenedVsCode.current = true;
+  const hasOpenedTerminal = useRef(false);
+  if (openRightPanelTabs.includes("terminal")) hasOpenedTerminal.current = true;
   if (activeRightPanelTab === "files") hasOpenedFiles.current = true;
   const [webPreviewUrl, setWebPreviewUrl] = useState("");
 
@@ -155,7 +164,7 @@ export function RightPanel({ visible = true }: { visible?: boolean }) {
             </div>
           )}
 
-          {openRightPanelTabs.includes("terminal") && (
+          {hasOpenedTerminal.current && (
             <div
               className={
                 activeRightPanelTab === "terminal"
@@ -166,6 +175,20 @@ export function RightPanel({ visible = true }: { visible?: boolean }) {
               <Suspense fallback={<ToolLoading label="终端" />}>
                 <TerminalPanel
                   isActive={visible && activeRightPanelTab === "terminal"}
+                />
+              </Suspense>
+            </div>
+          )}
+
+          {hasOpenedVsCode.current && (
+            <div
+              className="h-full min-h-0 overflow-hidden"
+              hidden={activeRightPanelTab !== "vscode"}
+              inert={!visible || activeRightPanelTab !== "vscode"}
+            >
+              <Suspense fallback={<ToolLoading label="VS Code" />}>
+                <VsCodePanel
+                  active={visible && activeRightPanelTab === "vscode"}
                 />
               </Suspense>
             </div>

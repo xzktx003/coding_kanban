@@ -1,5 +1,7 @@
 # Codex 结构化问题与协议功能审计
 
+2026-10-08 补充：`request_user_input_async` 通过 `agentMessage.questions` 提问，现已接入独立的轻提示、答题面板及回答回传，不能与本文的 `item/tool/requestUserInput` RPC 混用。异步提问及答案历史、明确继续和不确定送达核对见 [异步问题实现与验收](session-async-questions.md)。
+
 2026-10-07。会话模式网页入口：当前联调环境 `https://10.30.0.24:8484`（HTTPS、8484，前端绑定 `0.0.0.0`）；部署地址仍由 `.env` 决定。
 
 ## 实现范围和使用方法

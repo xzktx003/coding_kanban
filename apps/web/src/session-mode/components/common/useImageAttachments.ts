@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { toast } from "sonner";
 import type { ClipboardEvent } from "react";
+import type { ImageDrawing } from "../codex/composer/v2/drawing";
 import { uploadBrowserFile } from "@session/browser-dialog";
 import {
   loadAttachmentDraft,
@@ -16,6 +17,7 @@ export interface ImageAttachment {
   path?: string;
   status: "uploading" | "ready" | "error";
   error?: string;
+  drawing?: ImageDrawing;
 }
 const EMPTY: ImageAttachment[] = [];
 export const useAttachmentDraftStore = create<{
@@ -171,7 +173,7 @@ export function useImageAttachments(owner: string) {
       }));
     }
   }
-  function addFiles(files: File[]) {
+  function addFiles(files: File[], drawing?: ImageDrawing, replaceId?: string) {
     const items: ImageAttachment[] = files.map((file) => ({
       id: crypto.randomUUID(),
       name: file.name || "剪贴板图片",
@@ -182,8 +184,18 @@ export function useImageAttachments(owner: string) {
           : "",
       status: file.size > 10 * 1024 * 1024 ? "error" : "uploading",
       error: file.size > 10 * 1024 * 1024 ? "图片不能超过 10 MB" : undefined,
+      ...(drawing ? { drawing } : {}),
     }));
-    update(owner, (previous) => [...previous, ...items]);
+    update(owner, (previous) => {
+      const index = replaceId
+        ? previous.findIndex((item) => item.id === replaceId)
+        : -1;
+      if (index < 0) return [...previous, ...items];
+      const next = [...previous];
+      release(next[index]);
+      next.splice(index, 1, ...items);
+      return next;
+    });
     void ensureAttachmentDraft(owner)
       .then(async () => {
         await persist(owner);
@@ -199,6 +211,7 @@ export function useImageAttachments(owner: string) {
             error: String(error),
           }));
       });
+    return items.map((item) => item.id);
   }
   function onPaste(event: ClipboardEvent) {
     const files = Array.from(event.clipboardData.files).filter((file) =>
@@ -237,11 +250,41 @@ export function useImageAttachments(owner: string) {
     paths: attachments.flatMap((item) =>
       item.status === "ready" && item.path ? [item.path] : [],
     ),
-    blocked: !hydrated || attachments.some((item) => item.status !== "ready"),
+    blocked:
+      !hydrated ||
+      !!storageError ||
+      attachments.some((item) => item.status !== "ready"),
     onPaste,
     addFiles,
     clear,
     remove: (id: string) => clear([id]),
+    removeUndoable: (id: string) => {
+      const current = useAttachmentDraftStore.getState().drafts[owner] ?? EMPTY;
+      const index = current.findIndex((item) => item.id === id),
+        saved = current[index];
+      clear([id]);
+      let restored = false;
+      return () => {
+        if (!saved || restored) return;
+        restored = true;
+        const item = {
+          ...saved,
+          preview:
+            saved.file && typeof URL.createObjectURL === "function"
+              ? URL.createObjectURL(saved.file)
+              : "",
+          ...(saved.status === "uploading"
+            ? { status: "error" as const, error: "上传已中断，点击重试" }
+            : {}),
+        };
+        update(owner, (previous) => {
+          if (previous.some((a) => a.id === id)) return previous;
+          const next = [...previous];
+          next.splice(Math.min(index, next.length), 0, item);
+          return next;
+        });
+      };
+    },
     retry: async (id: string) => {
       try {
         await ensureAttachmentDraft(owner);

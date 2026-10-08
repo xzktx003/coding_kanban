@@ -1,3 +1,5 @@
+import { codexRuntimeState } from "@session/utils/codexRuntimeState";
+import { clearAsyncQuestions } from "../features/async-questions/store";
 import type {
   SandboxMode,
   SandboxPolicy,
@@ -18,6 +20,9 @@ import {
 import { useWorkspaceStore } from "@session/stores";
 import { useSettingsStore } from "@session/stores/settings";
 import { convertThreadHistoryToEvents } from "@session/utils/threadHistoryConverter";
+import { mergeThreadHistory } from "@session/utils/mergeThreadHistory";
+import { clearDeliveryEchoes } from "@session/stores/useCodexDeliveryStore";
+import { getThreadModelSettings, hydrateThreadModel, useThreadModelStore } from "@session/stores/useThreadModelStore";
 import {
   threadStart as apiThreadStart,
   gitCreateWorktree,
@@ -125,6 +130,7 @@ const syncThreadToStore = (
   options: {
     resetCurrentTurnId?: boolean;
     activate?: boolean;
+    force?: boolean;
   } = {},
 ) => {
   const { resetCurrentTurnId = false, activate = true } = options;
@@ -137,6 +143,15 @@ const syncThreadToStore = (
     turnTimingMap,
   } = useCodexStore.getState();
   const lastTurn = thread.turns.at(-1);
+  const previous = turnTimingMap[threadId];
+  const preserve = !options.force && previous && lastTurn && (
+    (previous.turnId === lastTurn.id && previous.status !== "inProgress" && lastTurn.status === "inProgress") ||
+    (previous.turnId !== lastTurn.id && typeof lastTurn.startedAt === "number" && previous.startedAtMs > lastTurn.startedAt * 1000)
+  );
+  const timing = preserve ? previous : lastTurn ? {
+    turnId: lastTurn.id, startedAtMs: (lastTurn.startedAt ?? 0) * 1000,
+    durationMs: lastTurn.durationMs, status: lastTurn.status,
+  } : undefined;
 
   return {
     ...(activate
@@ -152,27 +167,19 @@ const syncThreadToStore = (
       ...events,
       [threadId]: historicalEvents,
     },
-    ...(thread.status
+    historyLoadedMap: {
+      ...useCodexStore.getState().historyLoadedMap,
+      [threadId]: true,
+    },
+    ...(!preserve && thread.status
       ? { threadStatusMap: { ...threadStatusMap, [threadId]: thread.status } }
       : {}),
-    ...(lastTurn
-      ? {
-          turnTimingMap: {
-            ...turnTimingMap,
-            [threadId]: {
-              turnId: lastTurn.id,
-              startedAtMs: (lastTurn.startedAt ?? 0) * 1000,
-              durationMs: lastTurn.durationMs,
-              status: lastTurn.status,
-            },
-          },
-        }
-      : {}),
+    ...(timing ? { turnTimingMap: { ...turnTimingMap, [threadId]: timing } } : {}),
     ...(activate
       ? {
           currentTurnId:
-            !resetCurrentTurnId && lastTurn?.status === "inProgress"
-              ? lastTurn.id
+            !resetCurrentTurnId && timing?.status === "inProgress"
+              ? timing.turnId
               : null,
         }
       : {}),
@@ -198,8 +205,19 @@ const pendingThreadRollbacks = new Map<
   string,
   { boundary: string; promise: Promise<Thread> }
 >();
+let runtimeEpoch = 0;
 const pendingThreadResumes = new Map<string, Promise<void>>();
 const resumeVersions = new Map<string, symbol>();
+/** Invalidate responses from the previous runtime without touching drafts or history. */
+export function resetCodexRuntimeState() {
+  runtimeEpoch++;
+  pendingThreadResumes.clear();
+  resumeVersions.clear();
+  useCodexStore.setState(state => ({ activeThreadIds: [], currentTurnId: null, threadStatusMap: {}, turnTimingMap: {},
+    threads: state.threads.map(thread => ({ ...thread, status: { type: "notLoaded" as const } })),
+    historyLoadedMap: {}, historyLoadingMap: {}, historyErrorMap: {}, retryNoticeMap: {} }));
+}
+
 
 export const codexService = {
   async loadThreads(
@@ -246,7 +264,10 @@ export const codexService = {
 
       const state = useCodexStore.getState();
 
-      if (state.activeThreadIds.includes(threadId) && state.events[threadId]) {
+      if (
+        state.activeThreadIds.includes(threadId) &&
+        state.historyLoadedMap[threadId]
+      ) {
         // Live thread — derive the active turn id from streaming events so the
         // Stop button works correctly when a turn is in progress.
         const threadEvents = state.events[threadId] ?? [];
@@ -321,8 +342,11 @@ export const codexService = {
       };
       const response = await apiThreadStart(params);
       const thread = response.thread;
-      if (!model && response.model)
-        useConfigStore.getState().setModel(response.model);
+      hydrateThreadModel(thread.id, {
+        model: response.model || model,
+        modelProvider: response.modelProvider ?? modelProvider,
+        reasoningEffort: response.reasoningEffort === undefined ? reasoningEffort : response.reasoningEffort,
+      });
 
       set({
         ...syncThreadToStore(thread.id, thread, [], {
@@ -340,6 +364,7 @@ export const codexService = {
   async threadResume(
     threadId: string,
     overrides?: Omit<ThreadResumeParams, "threadId">,
+    options?: { background?: boolean },
   ) {
     if (!overrides && pendingThreadResumes.has(threadId))
       return pendingThreadResumes.get(threadId);
@@ -350,22 +375,58 @@ export const codexService = {
       historyErrorMap: { ...state.historyErrorMap, [threadId]: undefined },
     }));
     const pending = (async () => {
-      const response = await threadResume({
-        threadId,
-        ...overrides,
-        config: {
-          "features.default_mode_request_user_input": true,
-          ...overrides?.config,
+      const baseline = useCodexStore.getState();
+      const modelRevision = useThreadModelStore.getState().threads[threadId]?.revision ?? 0;
+      const response = await threadResume(
+        {
+          threadId,
+          ...overrides,
+          config: {
+            "features.default_mode_request_user_input": true,
+            ...overrides?.config,
+          },
         },
-      });
-      if (resumeVersions.get(threadId) !== version) return;
-      const historicalEvents = convertThreadHistoryToEvents(response.thread);
-      // A response belongs to its thread even if the user has since selected another.
-      useCodexStore.setState(
-        syncThreadToStore(threadId, response.thread, historicalEvents, {
-          activate: useCodexStore.getState().currentThreadId === threadId,
-        }),
+        { suppressToast: options?.background },
       );
+      if (resumeVersions.get(threadId) !== version) return;
+      hydrateThreadModel(threadId, response, {
+        revision: modelRevision,
+        notify: !!baseline.historyLoadedMap[threadId],
+      });
+      const historicalEvents = convertThreadHistoryToEvents(response.thread);
+      const current = useCodexStore.getState();
+      const reconciledEvents = mergeThreadHistory(
+        historicalEvents,
+        baseline.events[threadId] ?? [],
+        current.events[threadId] ?? [],
+      );
+      // A response belongs to its thread even if the user has since selected another.
+      const restored = syncThreadToStore(threadId, response.thread, reconciledEvents, {
+        activate: !options?.background && current.currentThreadId === threadId,
+      });
+      useCodexStore.setState({
+        ...restored,
+        ...(options?.background && current.currentThreadId === threadId
+          ? {
+              currentTurnId:
+                restored.turnTimingMap?.[threadId]?.status === "inProgress"
+                  ? restored.turnTimingMap[threadId].turnId
+                  : null,
+            }
+          : {}),
+        ...(current.threadStatusMap[threadId] !==
+        baseline.threadStatusMap[threadId]
+          ? { threadStatusMap: current.threadStatusMap }
+          : {}),
+        ...(current.turnTimingMap[threadId] !== baseline.turnTimingMap[threadId]
+          ? {
+              turnTimingMap: current.turnTimingMap,
+              ...(current.currentThreadId === threadId
+                ? { currentTurnId: current.currentTurnId }
+                : {}),
+            }
+          : {}),
+      });
     })();
     if (!overrides) pendingThreadResumes.set(threadId, pending);
     try {
@@ -398,6 +459,7 @@ export const codexService = {
         threadId,
       };
       const response = await threadFork(params);
+      hydrateThreadModel(response.thread.id, response);
       return applyThreadMutation(set, response.thread.id, response.thread);
     } catch (error: unknown) {
       console.error("[CodexService] threadFork error:", error);
@@ -417,8 +479,7 @@ export const codexService = {
     }
     const state = useCodexStore.getState();
     if (
-      state.threadStatusMap[threadId]?.type === "active" ||
-      state.turnTimingMap[threadId]?.status === "inProgress"
+      codexRuntimeState(state, threadId).running
     ) {
       throw new Error("请先停止当前任务，再回滚编辑消息。");
     }
@@ -431,6 +492,8 @@ export const codexService = {
         ...(beforeTurnId ? { beforeTurnId } : {}),
       };
       const response = await threadRollback(params);
+      clearAsyncQuestions(threadId);
+      clearDeliveryEchoes(threadId);
       // A pre-rollback history request must not restore discarded turns later.
       resumeVersions.delete(threadId);
       const active = useCodexStore.getState().currentThreadId === threadId;
@@ -439,7 +502,7 @@ export const codexService = {
           threadId,
           response.thread,
           convertThreadHistoryToEvents(response.thread),
-          { resetCurrentTurnId: active, activate: active },
+          { resetCurrentTurnId: active, activate: active, force: true },
         ),
       );
       useCodexStore.setState((state) => {
@@ -480,23 +543,29 @@ export const codexService = {
         pendingThreadRollbacks.delete(threadId);
     }
   },
-  async turnStart(threadId: string, input: string, images: string[] = []) {
+  async turnStart(
+    threadId: string,
+    input: string,
+    images: string[] = [],
+    clientUserMessageId?: string,
+  ) {
     const set = useCodexStore.setState;
+    const epoch = runtimeEpoch;
     const timingAtRequest = useCodexStore.getState().turnTimingMap[threadId];
     try {
       const userInputs = buildUserInputs(input, images);
 
       const {
-        model,
-        reasoningEffort,
         approvalPolicy,
         sandbox,
         webSearchRequest,
         collaborationMode,
       } = useConfigStore.getState();
+      const { model, reasoningEffort } = getThreadModelSettings(threadId);
 
       const response = await turnStart({
         threadId,
+        ...(clientUserMessageId ? { clientUserMessageId } : {}),
         input: userInputs,
         cwd: resolveThreadCwd(threadId),
         approvalPolicy,
@@ -519,6 +588,7 @@ export const codexService = {
           : {}),
       });
 
+      if (epoch !== runtimeEpoch) throw new Error("会话服务已重启，请核对消息结果");
       const preview = getThreadPreviewFromInput(userInputs);
       set((state) => {
         const latest = state.turnTimingMap[threadId];
@@ -538,6 +608,8 @@ export const codexService = {
             : {}),
           ...(accept
             ? {
+                threadStatusMap: { ...state.threadStatusMap, [threadId]: response.turn.status === "inProgress"
+                  ? { type: "active" as const, activeFlags: [] } : response.turn.status === "failed" ? { type: "systemError" as const } : { type: "idle" as const } },
                 turnTimingMap: {
                   ...state.turnTimingMap,
                   [threadId]: {
@@ -575,12 +647,14 @@ export const codexService = {
     expectedTurnId: string,
     input: string,
     images: string[] = [],
+    clientUserMessageId?: string,
   ) {
     try {
       const userInputs = buildUserInputs(input, images);
 
       const response = await turnSteer({
         threadId,
+        ...(clientUserMessageId ? { clientUserMessageId } : {}),
         expectedTurnId,
         input: userInputs,
       });

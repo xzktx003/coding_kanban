@@ -24,7 +24,7 @@ test("Claude sidebar sessions retain a visible agent marker even when inactive",
     />,
   );
   expect(screen.getByLabelText("Agent: Claude Code").textContent).toBe(
-    "Claude Code",
+    "",
   );
   expect(screen.getByText("Review changes")).toBeTruthy();
 });

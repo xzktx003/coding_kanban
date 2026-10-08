@@ -1,3 +1,4 @@
+import { registerSessionFollowupRoutes } from "./session-followups.js";
 import { registerSessionProjectsRoutes } from "./session-projects.js";
 import { registerWorkspaceFileRoutes } from "./workspace-files.js";
 import { registerSessionTabsRoutes } from "./session-tabs.js";
@@ -52,6 +53,14 @@ export function registerSessionModeRoutes(
   });
   let origin = options.origin ? validateOrigin(options.origin).origin : null;
   const fetchUpstream = options.fetch ?? globalThis.fetch;
+  const followups = registerSessionFollowupRoutes(app, {
+    origin: () => origin,
+    fetch: fetchUpstream,
+    file: options.attachmentRoot
+      ? resolve(options.attachmentRoot, "..", "codex-followups.json")
+      : undefined,
+    autoStart: Boolean(options.attachmentRoot),
+  });
   registerWorkspaceFileRoutes(app, {
     trashHome: options.attachmentRoot
       ? resolve(options.attachmentRoot, "..", "file-trash")
@@ -209,6 +218,27 @@ export function registerSessionModeRoutes(
           if (value) reply.header(name, value);
         }
         reply.header("x-content-type-options", "nosniff");
+        if (
+          response.ok &&
+          request.method === "POST" &&
+          [
+            "/api/codex/thread/start",
+            "/api/codex/start-thread",
+            "/api/codex/thread/resume",
+            "/api/codex/thread/fork",
+          ].includes(pathname)
+        ) {
+          const result = (await response.json()) as {
+            thread?: { id?: string };
+          };
+          // Empty native threads are not listed in the state DB until their first turn.
+          if (result.thread?.id)
+            await followups.observe({
+              method: "thread/started",
+              params: { thread: result.thread },
+            });
+          return reply.send(result);
+        }
         if (!response.body) return reply.send();
         const stream = Readable.fromWeb(
           response.body as Parameters<typeof Readable.fromWeb>[0],

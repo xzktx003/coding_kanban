@@ -31,12 +31,13 @@ import { CCSlashCommandPopover } from "./CCSlashCommandPopover";
 const CC_INPUT_FOCUS_EVENT = "cc-input-focus-request";
 
 interface ComposerProps {
+  targetLabel?: React.ReactNode;
   /** When provided, overrides the normal send — called instead of creating a session. */
   overrideSend?: (text: string) => void;
   onAfterSend?: (sessionId: string, text: string) => void;
 }
 
-export function Composer({ overrideSend, onAfterSend }: ComposerProps = {}) {
+export function Composer({ overrideSend, onAfterSend, targetLabel }: ComposerProps = {}) {
   const {
     activeSessionId,
     isConnected,
@@ -209,8 +210,9 @@ export function Composer({ overrideSend, onAfterSend }: ComposerProps = {}) {
           <div
             ref={wrapperRef}
             onPasteCapture={attachments.onPaste}
-            className="min-h-16 max-h-48 border border-input rounded-md bg-transparent focus-within:ring-[3px] focus-within:ring-ring/50 focus-within:border-ring transition-[color,box-shadow]"
+            className="session-composer-surface min-h-16 max-h-48 border border-input rounded-md bg-transparent focus-within:ring-[3px] focus-within:ring-ring/50 focus-within:border-ring transition-[color,box-shadow]"
           >
+            {targetLabel}
             <textarea
               ref={textareaRef}
               value={input}

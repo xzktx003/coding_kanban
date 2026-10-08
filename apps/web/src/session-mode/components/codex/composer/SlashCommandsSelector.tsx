@@ -10,7 +10,9 @@ import {
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ComposerSuggestionPopover } from "./ComposerSuggestionPanel";
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
+import { ConfirmDialog } from "@session/components/ui/ConfirmDialog";
+import { toast } from "sonner";
 import { useCodexStore } from "@session/components/codex/stores";
 import type { ComposerEditorRef } from "@session/components/common/useComposerPopover";
 import {
@@ -54,16 +56,22 @@ export function SlashCommandPopover({
   triggerElement,
   onOpenDialog,
 }: SlashCommandPopoverProps) {
+  const [pending, setPending] = useState<SlashCommand | null>(null);
   const { t } = useTranslation("thread");
   const { currentThreadId } = useCodexStore(
     useShallow((s) => ({ currentThreadId: s.currentThreadId })),
   );
 
   const handleSelect = useCallback(
-    async (cmd: SlashCommand) => {
+    async (cmd: SlashCommand, confirmed = false) => {
+      if (cmd.confirmation && !confirmed) {
+        setPending(cmd);
+        return;
+      }
+      setPending(null);
       // Drop the /command text before running it.
       const newValue = replaceAtTrigger(input, "/", "");
-      const cleaned = (newValue ?? input).replace(/^\s+/, "").trimEnd();
+      const cleaned = newValue ?? input;
       applyEditorReplacement(cleaned, setInputValue, editorRef);
 
       try {
@@ -79,7 +87,7 @@ export function SlashCommandPopover({
           },
         });
       } catch (error) {
-        console.error(`Failed to run /${cmd.id}:`, error);
+        toast.error(String(error));
       }
     },
     [input, setInputValue, editorRef, currentThreadId, onOpenDialog],
@@ -94,6 +102,17 @@ export function SlashCommandPopover({
       onKeySelect: handleSelect,
     });
 
+  if (pending)
+    return (
+      <ConfirmDialog
+        isOpen
+        title={`运行 /${pending.id}？`}
+        description={pending.confirmation!}
+        confirmLabel="确认运行"
+        onCancel={() => setPending(null)}
+        onConfirm={() => void handleSelect(pending, true)}
+      />
+    );
   if (!open) return null;
 
   return (

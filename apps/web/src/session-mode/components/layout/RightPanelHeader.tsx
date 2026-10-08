@@ -4,14 +4,15 @@ import {
   Globe,
   Kanban,
   ListTodo,
-  type LucideIcon,
+  ArrowLeft,
   Maximize2,
   Minimize2,
   PanelRight,
   SquareTerminal,
   X,
 } from "lucide-react";
-import { useRef } from "react";
+import { useRef, type ComponentType } from "react";
+import { VsCodeIcon } from "@session/features/vscode/VsCodeIcon";
 import { NewAgentButton } from "@session/components/common/NewAgentButton";
 import { Button } from "@session/components/ui/button";
 import {
@@ -31,7 +32,7 @@ export type { RightPanelTab };
 
 interface TabConfig {
   tab: RightPanelTab;
-  icon: LucideIcon;
+  icon: ComponentType<{ className?: string }>;
   label: string;
 }
 
@@ -39,6 +40,7 @@ interface TabConfig {
 const TAB_BUTTONS: TabConfig[] = [
   { tab: "diff", icon: Diff, label: "变更" },
   { tab: "todo", icon: ListTodo, label: "待办" },
+  { tab: "vscode", icon: VsCodeIcon, label: "VS Code" },
   { tab: "terminal", icon: SquareTerminal, label: "终端" },
   { tab: "webpreview", icon: Globe, label: "浏览器" },
   { tab: "files", icon: Files, label: "文件" },
@@ -148,6 +150,18 @@ export function RightPanelHeader() {
       className={`flex items-center justify-between gap-1 py-1 h-11 border-b border-border shrink-0 ${needsTrafficLightOffset && isRightPanelFocused && !isMobile ? "pl-20" : ""}`}
     >
       <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto">
+        {isMobile && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="shrink-0 size-11"
+            aria-label="返回会话"
+            title="返回会话"
+            onClick={() => setRightPanelOpen(false)}
+          >
+            <ArrowLeft className="size-4" />
+          </Button>
+        )}
         {isRightPanelFocused && !isMobile && !isSidebarOpen && (
           <>
             <SidebarTrigger />
@@ -171,7 +185,11 @@ export function RightPanelHeader() {
                 className="gap-1.5 pl-2 pr-9 h-9"
               >
                 <Icon className="size-4" />
-                <span className="text-xs hidden lg:block">{config.label}</span>
+                <span
+                  className={`text-xs ${tab === "vscode" || tab === "terminal" ? "" : "hidden lg:block"}`}
+                >
+                  {config.label}
+                </span>
                 {tab === "todo" &&
                   openTodoCount > 0 &&
                   activeRightPanelTab !== tab && (

@@ -39,8 +39,7 @@ vi.mock("@session/hooks/runtime", () => ({
   buildWsUrl: () => "ws://fixture.invalid/ws",
 }));
 afterEach(() => vi.unstubAllGlobals());
-// Deliberately red until the user approves cleanup of this component's newly
-// created resource when its start response arrives after the pane was closed.
+// A closed pane may clean its own late resource but must never execute commands.
 test("late terminal start after pane close cleans only its owned resource and never runs the command", async () => {
   vi.stubGlobal(
     "WebSocket",

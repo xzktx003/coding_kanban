@@ -63,7 +63,7 @@ export default function AgentView() {
 
   return (
     <div className="session-agent-view flex flex-col min-h-0 h-full">
-      <AgentViewHeader />
+      {acpActive && <AgentViewHeader />}
       {!acpActive && cardsViewMode === "solo" ? (
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
           <SessionGroups />

@@ -11,6 +11,16 @@ import {
 } from "../components/codex/stores";
 import { useCCStore } from "../stores/cc";
 import { useSessionAttentionStore } from "../stores/useSessionAttentionStore";
+it("counts asynchronous questions separately without making a running session blocked",()=>{
+  useCodexStore.setState({events:{a:[{method:"item/completed",params:{threadId:"a",turnId:"t",item:{type:"agentMessage",id:"q",text:"question",questions:[{title:"环境？"}]}}} as any]}});
+  const {result}=renderHook(()=>useFollowedSessionStates("ready"));
+  expect(result.current.counts.pending).toBe(0);
+  expect(result.current.counts.running).toBe(1);
+  expect(result.current.questionCount).toBe(1);
+  act(() => useCodexStore.getState().addEvent("a", {method:"turn/started",params:{threadId:"a",turn:{id:"next-turn",status:"inProgress",items:[]}}} as any));
+  expect(result.current.questionCount).toBe(0);
+  expect(result.current.counts.running).toBe(1);
+});
 beforeEach(() => {
   useAgentCenterStore.setState({
     cards: [

@@ -66,6 +66,7 @@ struct Inner {
     // Waiting RPCs outlive the bounded token/event replay buffer. Memory only:
     // they are invalid once this runtime/app-server instance goes away.
     user_inputs: HashMap<String, SeqEvent>,
+    pending_requests: HashMap<String, SeqEvent>,
 }
 
 fn input_key(payload: &Value) -> Option<String> {
@@ -90,6 +91,12 @@ fn update_user_inputs(inner: &mut Inner, event: &SeqEvent) {
                     inner.user_inputs.remove(&key);
                 }
             }
+            Some("error") if params["willRetry"] == false => {
+                inner.user_inputs.retain(|_, request| {
+                    request.payload["threadId"] != params["threadId"]
+                        || request.payload["turnId"] != params["turnId"]
+                })
+            }
             Some("turn/completed") => inner.user_inputs.retain(|_, request| {
                 request.payload["threadId"] != params["threadId"]
                     || request.payload["turnId"] != params["turn"]["id"]
@@ -99,6 +106,42 @@ fn update_user_inputs(inner: &mut Inner, event: &SeqEvent) {
                 .retain(|_, request| request.payload["threadId"] != params["threadId"]),
             _ => {}
         }
+    }
+}
+
+fn update_pending_requests(inner: &mut Inner, event: &SeqEvent) {
+    if matches!(
+        event.event.as_str(),
+        "codex/request-user-input"
+            | "codex/approval-request"
+            | "codex/permissions-request"
+            | "codex/elicitation-request"
+    ) {
+        if let Some(key) = input_key(&event.payload) {
+            inner.pending_requests.insert(key, event.clone());
+        }
+        return;
+    }
+    if event.event != "codex:notification" {
+        return;
+    }
+    let p = &event.payload["params"];
+    match event.payload["method"].as_str() {
+        Some("serverRequest/resolved") => {
+            if let Some(key) = input_key(p) {
+                inner.pending_requests.remove(&key);
+            }
+        }
+        Some("turn/completed") => inner.pending_requests.retain(|_, r| {
+            r.payload["threadId"] != p["threadId"] || r.payload["turnId"] != p["turn"]["id"]
+        }),
+        Some("error") if p["willRetry"] == false => inner.pending_requests.retain(|_, r| {
+            r.payload["threadId"] != p["threadId"] || r.payload["turnId"] != p["turnId"]
+        }),
+        Some("thread/closed" | "thread/deleted") => inner
+            .pending_requests
+            .retain(|_, r| r.payload["threadId"] != p["threadId"]),
+        _ => {}
     }
 }
 
@@ -118,6 +161,7 @@ impl EventHub {
                 buffer: VecDeque::with_capacity(REPLAY_BUFFER_CAPACITY),
                 next_seq: 1,
                 user_inputs: HashMap::new(),
+                pending_requests: HashMap::new(),
             })),
             tx,
         }
@@ -162,6 +206,7 @@ impl EventHub {
                 payload,
             };
             update_user_inputs(&mut inner, &stamped);
+            update_pending_requests(&mut inner, &stamped);
             inner.buffer.push_back(stamped.clone());
             while inner.buffer.len() > REPLAY_BUFFER_CAPACITY {
                 inner.buffer.pop_front();
@@ -230,6 +275,15 @@ impl EventHub {
             }
         }
 
+        if questions
+            && event_matches(filter, "codex/pending-requests-snapshot")
+            && (since.is_some() || !inner.pending_requests.is_empty())
+        {
+            let mut requests: Vec<&SeqEvent> = inner.pending_requests.values().collect();
+            requests.sort_by_key(|e| e.seq);
+            backlog.push(SeqEvent { seq: inner.next_seq - 1, event: "codex/pending-requests-snapshot".into(),
+                payload: serde_json::json!({"requests": requests.iter().map(|e| serde_json::json!({"event": e.event, "payload": e.payload})).collect::<Vec<_>>()}) });
+        }
         (backlog, rx)
     }
 }
@@ -437,5 +491,58 @@ mod tests {
         assert_eq!(backlog[0].payload["requests"][0]["turnId"], "new");
         let (cc, _) = hub.subscribe_with_questions(None, filter("cc").as_ref());
         assert!(cc.is_empty());
+    }
+    #[test]
+    fn all_pending_rpcs_survive_refresh_and_expire_only_for_their_owner() {
+        let hub = EventHub::new();
+        for (i, event) in [
+            "codex/approval-request",
+            "codex/permissions-request",
+            "codex/elicitation-request",
+            "codex/request-user-input",
+        ]
+        .iter()
+        .enumerate()
+        {
+            hub.publish(
+                (*event).into(),
+                json!({"threadId":"a","turnId":"old","requestId":i}),
+            );
+        }
+        hub.publish(
+            "codex/approval-request".into(),
+            json!({"threadId":"b","turnId":"other","requestId":10}),
+        );
+        for _ in 0..REPLAY_BUFFER_CAPACITY + 1 {
+            hub.publish("cc-message".into(), json!({}));
+        }
+        let (fresh, _) = hub.subscribe_with_questions(None, None);
+        let snapshot = fresh
+            .iter()
+            .find(|e| e.event == "codex/pending-requests-snapshot")
+            .unwrap();
+        assert_eq!(snapshot.payload["requests"].as_array().unwrap().len(), 5);
+        hub.publish(
+            "codex:notification".into(),
+            json!({"method":"error","params":{"threadId":"a","turnId":"old","willRetry":true}}),
+        );
+        assert_eq!(hub.inner.lock().unwrap().pending_requests.len(), 5);
+        hub.publish(
+            "codex:notification".into(),
+            json!({"method":"error","params":{"threadId":"a","turnId":"old","willRetry":false}}),
+        );
+        let (after, _) = hub.subscribe_with_questions(Some(0), None);
+        let snapshot = after
+            .iter()
+            .find(|e| e.event == "codex/pending-requests-snapshot")
+            .unwrap();
+        assert_eq!(snapshot.payload["requests"].as_array().unwrap().len(), 1);
+        assert_eq!(snapshot.payload["requests"][0]["payload"]["threadId"], "b");
+        hub.publish(
+            "codex:notification".into(),
+            json!({"method":"serverRequest/resolved","params":{"threadId":"b","requestId":10}}),
+        );
+        let (done, _) = hub.subscribe_with_questions(Some(0), None);
+        assert_eq!(done.last().unwrap().payload["requests"], json!([]));
     }
 }

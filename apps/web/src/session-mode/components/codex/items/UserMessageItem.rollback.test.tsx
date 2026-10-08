@@ -92,7 +92,10 @@ test("a rollback failure keeps the existing draft and dialog for retry", async (
   fireEvent.click(
     await screen.findByRole("button", { name: "common.continue" }),
   );
-  await waitFor(() => expect(mock.error).toHaveBeenCalled());
+  await waitFor(() =>
+    expect(screen.getByRole("alert").textContent).toContain("offline"),
+  );
+  expect(mock.error).not.toHaveBeenCalled();
   expect(readDraft(sessionDraftKey("codex", "thread")).text).toBe(
     "existing draft",
   );
@@ -101,6 +104,34 @@ test("a rollback failure keeps the existing draft and dialog for retry", async (
       .getByRole("button", { name: "common.continue" })
       .hasAttribute("disabled"),
   ).toBe(false);
+});
+
+test("unsupported rollback shows actionable inline feedback and collapses protocol details", async () => {
+  const protocol =
+    "Request failed: " +
+    JSON.stringify({
+      code: -32600,
+      message:
+        "Invalid request: unknown variant `thread/rollback`, expected one of `thread/revert`, " +
+        "otherMethod ".repeat(400),
+    });
+  mock.rollback.mockRejectedValue(new Error(protocol));
+  show();
+  fireEvent.click(screen.getByRole("button", { name: "userMessage.edit" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "common.continue" }),
+  );
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("editRollback.runtimeUpdateRequired");
+  expect(alert.textContent).not.toContain("otherMethod");
+  expect(screen.getByText(protocol).closest("details")?.open).toBe(false);
+  expect(mock.error).not.toHaveBeenCalled();
+  expect(readDraft(sessionDraftKey("codex", "thread")).text).toBe(
+    "existing draft",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "common.cancel" }));
+  fireEvent.click(screen.getByRole("button", { name: "userMessage.edit" }));
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 test("running turns cannot be silently rolled back", () => {

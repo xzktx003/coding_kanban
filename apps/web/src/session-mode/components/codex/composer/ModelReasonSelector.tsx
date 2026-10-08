@@ -11,10 +11,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import type { ReasoningEffort } from "@session/bindings";
 import type { Model } from "@session/bindings/v2";
-import {
-  useCodexStore,
-  useConfigStore,
-} from "@session/components/codex/stores";
+import { useCodexStore } from "@session/components/codex/stores";
 import type { ModelListItem } from "@session/components/codex/types";
 import { AgentIcon } from "@session/components/common/AgentIcon";
 import { ProviderIcons } from "@session/components/icons";
@@ -34,7 +31,7 @@ import {
   PopoverTrigger,
 } from "@session/components/ui/popover";
 import { cn } from "@session/lib/utils";
-import { codexService } from "@session/services/codexService";
+import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
 import type { Provider } from "@session/stores/settings";
 import { useModelSettingsStore } from "@session/stores/settings";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
@@ -628,10 +625,11 @@ export function ModelReasonSelector({
     setModelProvider,
     reasoningEffort,
     setReasoningEffort,
-  } = useConfigStore();
+  } = useThreadModelSettings(currentThreadId);
 
   useEffect(() => {
     if (
+      !currentThreadId &&
       modelProvider === "openai" &&
       !providerModels.openai &&
       openAiModels.length > 0
@@ -644,6 +642,7 @@ export function ModelReasonSelector({
     }
   }, [
     openAiModels,
+    currentThreadId,
     modelProvider,
     providerModels.openai,
     setModel,
@@ -665,14 +664,10 @@ export function ModelReasonSelector({
     const nextEffort = nextReasoningEffort(
       p,
       modelId,
-      reasoningEffort,
+      reasoningEffort ?? undefined,
       openAiModels,
     );
     if (nextEffort) setReasoningEffort(nextEffort);
-
-    if (currentThreadId) {
-      void codexService.threadResume(currentThreadId);
-    }
   };
 
   if (mode === "panel") {
@@ -682,7 +677,7 @@ export function ModelReasonSelector({
         onProviderChange={onProviderChange}
         value={providerModels[modelProvider] ?? ""}
         onValueChange={setModel}
-        reasoningEffort={reasoningEffort}
+        reasoningEffort={reasoningEffort ?? undefined}
         onReasoningEffortChange={setReasoningEffort}
         onClose={triggerInputFocus}
         mode="panel"
@@ -696,7 +691,7 @@ export function ModelReasonSelector({
       onProviderChange={onProviderChange}
       value={providerModels[modelProvider] ?? ""}
       onValueChange={setModel}
-      reasoningEffort={reasoningEffort}
+      reasoningEffort={reasoningEffort ?? undefined}
       onReasoningEffortChange={setReasoningEffort}
       onClose={triggerInputFocus}
     />

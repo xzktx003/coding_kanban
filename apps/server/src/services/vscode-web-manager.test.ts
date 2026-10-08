@@ -843,3 +843,32 @@ test("ensureSession registers an unref-ed idle timer so `node --test` can exit a
     await manager.dispose();
   }
 });
+
+test("simultaneous project opens share one local server startup", async () => {
+  let launches = 0;
+  const manager = new VsCodeWebManager({
+    createDataRoot: async () => TEST_DATA_ROOT,
+    findCommand: async (candidate) =>
+      candidate === "code-server" ? "/usr/bin/code-server" : null,
+    findRunningServer: async () => null,
+    resolveLaunchEnv: async () => ({ PATH: "/usr/bin", SHELL: "/bin/sh" }),
+    resolveExtensionsDir: resolveTestExtensionsDir,
+    allocatePort: async () => 43171,
+    writeFile: async () => {},
+    waitForUrlReady: async () => {},
+    spawnProcess: () => {
+      launches++;
+      return new FakeChildProcess() as never;
+    },
+  });
+  try {
+    await Promise.all(
+      Array.from({ length: 6 }, (_, i) =>
+        manager.ensureSession(buildSession(`concurrent-${i}`)),
+      ),
+    );
+    assert.equal(launches, 1);
+  } finally {
+    await manager.dispose();
+  }
+});

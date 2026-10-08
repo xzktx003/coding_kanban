@@ -114,3 +114,44 @@ test("workbench reports VS Code Web runtime failures explicitly", async () => {
     await app.close();
   }
 });
+
+test("directory aliases resolve to one stable project workspace", async () => {
+  const { symlink } = await import("node:fs/promises");
+  const directory = await mkdtemp(join(tmpdir(), "kanban-editor-alias-"));
+  const alias = directory + "-link";
+  const ids: string[] = [];
+  const { app } = buildServer({
+    vsCodeWebManager: {
+      ensureSession: async (session: {
+        id: string;
+        workingDirectory: string;
+      }) => {
+        ids.push(session.id);
+        return {
+          provider: "code-server",
+          url: "https://lan.example/vscode/",
+          reused: true,
+          workingDirectory: session.workingDirectory,
+        };
+      },
+      dispose: async () => {},
+    } as never,
+  });
+  try {
+    await symlink(directory, alias, "dir");
+    for (const path of [directory, alias]) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/workbench/vscode-web",
+        payload: { path },
+      });
+      assert.equal(response.statusCode, 200);
+      assert.equal(response.json().workingDirectory, directory);
+    }
+    assert.equal(ids[0], ids[1]);
+  } finally {
+    await app.close();
+    await rm(alias, { force: true });
+    await rm(directory, { recursive: true, force: true });
+  }
+});
