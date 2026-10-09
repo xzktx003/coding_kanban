@@ -2,6 +2,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import { webcrypto } from "node:crypto";
 import { submissionId, followupParameters } from "./followupService";
+import { useWorkspaceStore } from "../stores/useWorkspaceStore";
 import { useConfigStore, useCodexStore } from "../components/codex/stores";
 import { changeThreadModel, hydrateThreadModel, useThreadModelStore } from "../stores/useThreadModelStore";
 beforeEach(() => {
@@ -88,4 +89,14 @@ it("reconciles native review execution ids after completion or browser refresh w
   });
   reconcileReview("a", data);
   expect(useCodexStore.getState().turnTimingMap.a.status).toBe("inProgress");
+});
+
+it("does not send a blank restored thread directory or borrow another project's directory", () => {
+  useWorkspaceStore.setState({ cwd: "/another-project" });
+  for (const cwd of ["", "   ", undefined]) {
+    useCodexStore.setState({ threads: [{ id: "restored", cwd } as any] });
+    expect(followupParameters("restored").cwd).toBeNull();
+  }
+  useCodexStore.setState({ threads: [{ id: "restored", cwd: "/project with spaces" } as any] });
+  expect(followupParameters("restored").cwd).toBe("/project with spaces");
 });

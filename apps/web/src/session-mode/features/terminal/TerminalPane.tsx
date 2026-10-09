@@ -125,6 +125,8 @@ export function TerminalPane({
       if (!isAttachedRef.current) {
         term.open(container);
         isAttachedRef.current = true;
+        // Only an attached, surviving renderer may create its native PTY.
+        setStartRevision((value) => value + 1);
       }
       // Never refit a collapsed container or focus a pane after it was hidden.
       if (container.clientWidth > 1 && container.clientHeight > 1) {
@@ -141,7 +143,13 @@ export function TerminalPane({
     const fitAddon = fitAddonRef.current;
     // Allow both desktop Tauri and web (HTTP API) mode —
     // service layer routes to invokeTauri or postJson accordingly.
-    if (!term || !fitAddon || sessionIdRef.current || isStartingRef.current)
+    if (
+      !term ||
+      !fitAddon ||
+      !isAttachedRef.current ||
+      sessionIdRef.current ||
+      isStartingRef.current
+    )
       return;
 
     isStartingRef.current = true;
@@ -177,9 +185,9 @@ export function TerminalPane({
   }, [cwd, command, setSession]);
 
   useEffect(() => {
-    if (!active || !panelOpen) return;
+    if (!active || !panelOpen || startError) return;
     void startSession();
-  }, [active, panelOpen, startSession, startRevision]);
+  }, [active, panelOpen, startSession, startRevision, startError]);
 
   // Shared handlers for terminal data/exit events, used by both
   // the Tauri event listener and the web WebSocket listener below.

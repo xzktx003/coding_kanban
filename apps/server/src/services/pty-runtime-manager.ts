@@ -15,6 +15,7 @@ import { AgentSessionRegistry } from "./agent-session-registry.js";
 import {
   DEFAULT_TERMINAL_SCROLLBACK_BYTES,
   DEFAULT_TERMINAL_TMUX_CAPTURE_LINES,
+  DEFAULT_TMUX_COMMAND_TIMEOUT_MS,
 } from "../config/server-runtime-config.js";
 import { resolveCopilotBinary } from "./copilot-binary.js";
 import { resolveLocalWorkingDirectory } from "./resolve-local-working-directory.js";
@@ -1260,6 +1261,8 @@ export class PtyRuntimeManager {
         {
           stdio: "ignore",
           env: buildPtyEnv(),
+          timeout: DEFAULT_TMUX_COMMAND_TIMEOUT_MS,
+          killSignal: "SIGKILL",
         },
       );
     } catch {}
@@ -1274,6 +1277,8 @@ export class PtyRuntimeManager {
     const options = {
       stdio: "ignore" as const,
       env: buildPtyEnv(),
+      timeout: DEFAULT_TMUX_COMMAND_TIMEOUT_MS,
+      killSignal: "SIGKILL" as const,
     };
 
     try {
@@ -1307,6 +1312,8 @@ export class PtyRuntimeManager {
         {
           encoding: "utf8",
           env: buildPtyEnv(),
+          timeout: DEFAULT_TMUX_COMMAND_TIMEOUT_MS,
+          killSignal: "SIGKILL",
           maxBuffer: Math.max(
             this.maxScrollbackBytes,
             this.tmuxCaptureLines * 1024,
@@ -1338,6 +1345,8 @@ export class PtyRuntimeManager {
         {
           encoding: "utf8",
           env: buildPtyEnv(),
+          timeout: DEFAULT_TMUX_COMMAND_TIMEOUT_MS * 2,
+          killSignal: "SIGKILL",
           maxBuffer: Math.max(
             this.maxScrollbackBytes,
             this.tmuxCaptureLines * 1024,

@@ -24,6 +24,7 @@ export type GitAutoPullIntervalMinutes = 10 | 15 | 30 | null;
 
 export const DEFAULT_TERMINAL_SCROLLBACK_BYTES = 4 * 1024 * 1024;
 export const DEFAULT_TERMINAL_TMUX_CAPTURE_LINES = 20_000;
+export const DEFAULT_TMUX_COMMAND_TIMEOUT_MS = 5_000;
 export const DEFAULT_TERMINAL_REGISTRY_OUTPUT_ENTRIES = 5_000;
 
 function parsePort(value: string | undefined): number {

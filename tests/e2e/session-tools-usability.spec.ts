@@ -48,6 +48,19 @@ test("isolated tools expose keyboard controls and preserve terminal identity acr
   await page.route("**/api/session/api/codex/thread/list", (route) =>
     route.fulfill({ json: { data: [], nextCursor: null } }),
   );
+  await page.route("**/api/session/workspace-files/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const body = route.request().postDataJSON();
+    if (path.endsWith("/save")) writes.push(path);
+    await route.fulfill({
+      json: {
+        path: body.path,
+        content: "隔离文件内容\n无需真实文件读写",
+        version: "fixture-version",
+        size: 60,
+      },
+    });
+  });
   await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
   await page.locator(".session-mode").waitFor();
   await page.evaluate(async () => {

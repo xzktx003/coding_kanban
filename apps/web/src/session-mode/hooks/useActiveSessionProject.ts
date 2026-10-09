@@ -14,15 +14,17 @@ export function useActiveSessionProject() {
   const card = selectedAgentCard(state);
   const cwd = useWorkspaceStore((s) => s.cwd);
   const acp = useAcpStore((s) => s.active);
+  const acpSessionId = useAcpStore((s) => s.sessionId);
+  const acpCwd = useAcpStore((s) => s.sessionCwd);
   const kind = useAgentSettingsStore((s) => s.selectedAgent);
   const ccId = useCCStore((s) => s.activeSessionId);
   const threadId = useCodexStore((s) => s.currentThreadId);
   const thread = useCodexStore((s) =>
     s.threads.find((t) => t.id === s.currentThreadId),
   );
-  // ACP currently has one workspace, explicitly set by its session/new or load flow.
+  // Native ACP session cwd is independent of the workspace currently browsed.
   const metadata = acp
-    ? { cwd }
+    ? { cwd: acpSessionId ? (acpCwd ?? undefined) : cwd }
     : card ||
       (kind === "codex" && threadId
         ? { cwd: thread?.cwd }

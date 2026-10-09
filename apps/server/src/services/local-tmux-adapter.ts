@@ -11,7 +11,10 @@ import type {
 } from "@agent-orchestrator/shared";
 
 import { AgentSessionRegistry } from "./agent-session-registry.js";
-import { DEFAULT_TERMINAL_TMUX_CAPTURE_LINES } from "../config/server-runtime-config.js";
+import {
+  DEFAULT_TERMINAL_TMUX_CAPTURE_LINES,
+  DEFAULT_TMUX_COMMAND_TIMEOUT_MS,
+} from "../config/server-runtime-config.js";
 import { quoteForPosixShell, resolveTmuxBinary } from "./runtime-compat.js";
 import { buildSshArgs, formatSshDestination } from "./ssh-command.js";
 import {
@@ -37,6 +40,7 @@ export interface TmuxSendKeyPlanOptions {
 
 export interface LocalTmuxAdapterOptions {
   captureLines?: number;
+  commandTimeoutMs?: number;
 }
 
 interface TmuxPaneInfo {
@@ -491,7 +495,9 @@ export function summarizeTmuxSessions(
 
 export function isNoTmuxServerError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? "");
-  return /no server running|failed to connect to server|error connecting to .*\/tmux-\d+\/\S+ \(No such file or directory\)/i.test(message);
+  return /no server running|failed to connect to server|error connecting to .*\/tmux-\d+\/\S+ \(No such file or directory\)/i.test(
+    message,
+  );
 }
 
 export function buildTmuxCapturePaneArgs(
@@ -518,6 +524,7 @@ function buildTmuxStatusPreview(sessionInfo: TmuxSessionInfo): string {
 
 export class LocalTmuxAdapter {
   private readonly captureLines: number;
+  private readonly commandTimeoutMs: number;
   private readonly bracketedPasteSessionIds = new Set<string>();
 
   constructor(
@@ -526,6 +533,8 @@ export class LocalTmuxAdapter {
   ) {
     this.captureLines =
       options.captureLines ?? DEFAULT_TERMINAL_TMUX_CAPTURE_LINES;
+    this.commandTimeoutMs =
+      options.commandTimeoutMs ?? DEFAULT_TMUX_COMMAND_TIMEOUT_MS;
   }
 
   async syncRegisteredAgentKinds(): Promise<void> {
@@ -998,6 +1007,8 @@ export class LocalTmuxAdapter {
 
       const childProcess = spawn("ssh", args, {
         stdio: ["ignore", "pipe", "pipe"],
+        timeout: this.commandTimeoutMs * 2,
+        killSignal: "SIGKILL",
       });
 
       let stdout = "";
@@ -1015,10 +1026,12 @@ export class LocalTmuxAdapter {
         if (code !== 0) {
           reject(
             new Error(
-              stderr ||
-                `ssh exited with code ${code}: ${formatSshDestination(
-                  sshTarget,
-                )}`,
+              childProcess.killed
+                ? `远程 tmux 查询超时（${this.commandTimeoutMs * 2}ms）`
+                : stderr ||
+                    `ssh exited with code ${code}: ${formatSshDestination(
+                      sshTarget,
+                    )}`,
             ),
           );
           return;
@@ -1042,6 +1055,8 @@ export class LocalTmuxAdapter {
       const childProcess = spawn(TMUX_BINARY, args, {
         stdio: ["ignore", "pipe", "pipe"],
         env: env as Record<string, string>,
+        timeout: this.commandTimeoutMs,
+        killSignal: "SIGKILL",
       });
 
       let stdout = "";
@@ -1058,7 +1073,13 @@ export class LocalTmuxAdapter {
       childProcess.on("error", reject);
       childProcess.on("close", (code) => {
         if (code !== 0) {
-          reject(new Error(stderr || `tmux exited with code ${code}`));
+          reject(
+            new Error(
+              childProcess.killed
+                ? `tmux 查询超时（${this.commandTimeoutMs}ms）`
+                : stderr || `tmux exited with code ${code}`,
+            ),
+          );
           return;
         }
 

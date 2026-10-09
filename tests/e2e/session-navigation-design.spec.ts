@@ -103,7 +103,7 @@ test("merged navigation keeps projects, followed sessions and pending status rea
     ).toBeInViewport();
     if (width < 768) {
       await expect(
-        page.getByRole("button", { name: "项目与会话", exact: true }),
+        nav.getByRole("button", { name: /^(展开|收起)项目列表$/ }),
       ).toBeVisible();
       await expect(page.locator(".session-group-switch")).toHaveCount(0);
     }
@@ -130,15 +130,13 @@ test("merged navigation keeps projects, followed sessions and pending status rea
     .click();
   await expect(page.getByRole("menu")).toContainText("中文会话 0");
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "项目与会话", exact: true }).click();
+  await nav.getByRole("button", { name: /^(展开|收起)项目列表$/ }).click();
   const drawer = page.getByRole("dialog");
+  // Project navigation and the persistent editor tools have distinct surfaces.
   await expect(
-    drawer.getByRole("button", { name: "在 VS Code Web 中打开当前项目" }),
+    drawer.getByRole("button", { name: "添加项目", exact: true }),
   ).toBeVisible();
-  const vscodeBox = (await drawer
-    .getByRole("button", { name: "在 VS Code Web 中打开当前项目" })
-    .boundingBox())!;
-  expect(vscodeBox.width).toBeLessThanOrEqual(44);
+  await expect(drawer.locator(".session-nav-row").first()).toBeVisible();
   await page.keyboard.press("Escape");
   await nav.getByRole("button", { name: "更多功能", exact: true }).click();
   await expect(
@@ -150,15 +148,15 @@ test("merged navigation keeps projects, followed sessions and pending status rea
     path: ".dev-runtime/session-ui-review/implemented-mobile.png",
   });
   await page.setViewportSize({ width: 1440, height: 1000 });
-  const desktopCode = page
-    .locator(".session-agent-header-actions")
-    .getByRole("button", {
-      name: "在 VS Code Web 中打开当前项目",
-      exact: true,
-    });
+  const desktopCode = page.getByRole("button", {
+    name: "VS Code",
+    exact: true,
+  });
   expect((await desktopCode.boundingBox())!.width).toBeLessThanOrEqual(32);
-  await page.getByRole("button", { name: "项目与会话", exact: true }).click();
-  await expect(page.locator("[data-sidebar=sidebar]").first()).toBeVisible();
+  const sidebar = page.locator(".session-mode [data-sidebar=sidebar]").first();
+  if (!(await sidebar.isVisible()))
+    await nav.getByRole("button", { name: /^(展开|收起)项目列表$/ }).click();
+  await expect(sidebar).toBeVisible();
   await page.screenshot({
     path: ".dev-runtime/session-ui-review/implemented-desktop.png",
   });

@@ -2,15 +2,12 @@ import { fileSrc } from "@session/hooks/runtime";
 import { useSessionReadReceipt } from "@session/hooks/useSessionReadReceipt";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@session/components/ui/button";
-import {
-  acpAuthenticate,
-  acpNewSession,
-  acpRespondPermission,
-} from "@session/services/apiAdapt/acp";
+import { acpRespondPermission } from "@session/services/apiAdapt/acp";
 import { useWorkspaceStore } from "@session/stores";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { AcpToolCall } from "./AcpToolCall";
 import { useAcpEvents } from "./useAcpEvents";
+import { authenticateAcpSession } from "./authenticateSession";
 
 export default function AcpSession() {
   const {
@@ -18,12 +15,22 @@ export default function AcpSession() {
     sessionId,
     authMethods,
     entries,
-    permission,
-    setPermission,
-    applySession,
-    addEntry,
+    permission: storedPermission,
+    dismissPermission,
   } = useAcpStore();
   const cwd = useWorkspaceStore((s) => s.cwd);
+  const permission =
+    storedPermission &&
+    (!storedPermission.connectionId ||
+      storedPermission.connectionId === connectionId) &&
+    (!storedPermission.sessionId || storedPermission.sessionId === sessionId)
+      ? storedPermission
+      : null;
+  const permissionCount = useAcpStore(
+    (s) =>
+      s.pendingPermissions[JSON.stringify([s.connectionId, s.sessionId])]
+        ?.length ?? (s.permission ? 1 : 0),
+  );
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const following = useRef(true);
@@ -67,12 +74,7 @@ export default function AcpSession() {
 
   const authenticate = async (methodId: string) => {
     if (!connectionId || !cwd) return;
-    try {
-      await acpAuthenticate(connectionId, methodId);
-      applySession(await acpNewSession(connectionId, cwd));
-    } catch (e) {
-      addEntry({ id: `auth-${Date.now()}`, role: "error", text: String(e) });
-    }
+    await authenticateAcpSession(connectionId, methodId, cwd);
   };
 
   const respond = async (optionId: string | null) => {
@@ -92,13 +94,7 @@ export default function AcpSession() {
     setReplyError(null);
     try {
       await acpRespondPermission(targetConnection, requestId, optionId);
-      const state = useAcpStore.getState();
-      if (
-        state.connectionId === targetConnection &&
-        state.sessionId === targetSession &&
-        state.permission?.requestId === requestId
-      )
-        setPermission(null);
+      dismissPermission(targetConnection, targetSession, requestId);
     } catch (error) {
       const state = useAcpStore.getState();
       if (
@@ -211,6 +207,11 @@ export default function AcpSession() {
               {responding ? "正在提交…" : "等待确认"}
             </span>
             <span>{permission.title}</span>
+            {permissionCount > 1 && (
+              <span className="text-xs text-muted-foreground">
+                另有 {permissionCount - 1} 项待处理
+              </span>
+            )}
           </div>
           {replyError?.key === permissionKey && (
             <p role="alert" className="text-sm text-destructive">

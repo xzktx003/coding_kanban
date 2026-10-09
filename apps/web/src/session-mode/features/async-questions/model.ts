@@ -19,6 +19,12 @@ const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+// Event snapshots are immutable. Status summaries and composers share this
+// index, so selection/bookkeeping changes never rescan a long transcript.
+const latestTurnCache = new WeakMap<
+  readonly unknown[],
+  Map<string, string | null>
+>();
 
 /** Timing wins over late history; on cold reads use the ordered turn history.
  * A finished latest turn is still answerable, but starting the next turn retires
@@ -29,6 +35,8 @@ export function latestQuestionTurn(
   knownTurnId?: string | null,
 ): string | null {
   if (knownTurnId) return knownTurnId;
+  const cached = latestTurnCache.get(events);
+  if (cached?.has(threadId)) return cached.get(threadId)!;
   const seen = new Set<string>();
   let latest: string | null = null;
   for (const value of events) {
@@ -44,6 +52,9 @@ export function latestQuestionTurn(
       latest = id;
     }
   }
+  const byThread = cached ?? new Map<string, string | null>();
+  byThread.set(threadId, latest);
+  latestTurnCache.set(events, byThread);
   return latest;
 }
 export const questionId = (sourceId: string, index: number) =>

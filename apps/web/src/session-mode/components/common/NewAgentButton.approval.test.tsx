@@ -102,3 +102,37 @@ test("confirmation for an old task does not interrupt a newly selected session",
   expect(api.newSession).not.toHaveBeenCalled();
   expect(useAcpStore.getState().sessionId).toBe("another-session");
 });
+
+test("interruption failure preserves the running task without creating or restarting", async () => {
+  api.cancel.mockRejectedValueOnce(new Error("fixture interruption failure"));
+  render(<NewAgentButton />);
+  fireEvent.click(screen.getByRole("button", { name: /newChat/ }));
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "中断并新建" })),
+  );
+  expect(api.cancel).toHaveBeenCalledOnce();
+  expect(api.newSession).not.toHaveBeenCalled();
+  expect(api.stop).not.toHaveBeenCalled();
+  expect(useAcpStore.getState().running).toBe(true);
+  expect(useAcpStore.getState().sessionId).toBe("running-fixture-session");
+});
+
+test("repeated new-chat clicks cannot create duplicate native sessions", async () => {
+  useAcpStore.setState({ running: false });
+  let resolve!: (session: { sessionId: string }) => void;
+  api.newSession.mockReturnValueOnce(
+    new Promise((done) => {
+      resolve = done;
+    }),
+  );
+  render(<NewAgentButton />);
+  const button = screen.getByRole("button", { name: /newChat/ });
+  fireEvent.click(button);
+  fireEvent.click(button);
+  await act(async () => {});
+  expect(api.newSession).toHaveBeenCalledOnce();
+  expect(button.hasAttribute("disabled")).toBe(true);
+  await act(async () => resolve({ sessionId: "one-new-session" }));
+  expect(api.newSession).toHaveBeenCalledOnce();
+  expect(button.hasAttribute("disabled")).toBe(false);
+});

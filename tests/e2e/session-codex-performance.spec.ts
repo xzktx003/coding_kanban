@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
 
 test("long Codex history stays bounded, scrollable and isolated from background updates", async ({
   page,
@@ -6,10 +7,11 @@ test("long Codex history stays bounded, scrollable and isolated from background 
   test.setTimeout(90000);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  await installSessionUxFixture(page);
   await page.route("**/api/session/api/settings", (route) =>
     route.request().method() === "POST"
       ? route.fulfill({ status: 200, body: "" })
-      : route.continue(),
+      : route.fallback(),
   );
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
@@ -17,22 +19,24 @@ test("long Codex history stays bounded, scrollable and isolated from background 
     .locator(".session-mode [contenteditable=true]")
     .first()
     .waitFor({ timeout: 30000 });
+  await seedSessionUx(page, 0);
   await page.evaluate(async () => {
     const { useAgentSettingsStore } =
-      await import("/src/session-mode/stores/useAgentSettingsStore.ts");
+      await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/stores/useAgentSettingsStore.ts')?.name ?? '/src/session-mode/stores/useAgentSettingsStore.ts');
     const { useAgentCenterStore } =
-      await import("/src/session-mode/stores/useAgentCenterStore.ts");
+      await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/stores/useAgentCenterStore.ts')?.name ?? '/src/session-mode/stores/useAgentCenterStore.ts');
     const { useCodexStore } =
-      await import("/src/session-mode/components/codex/stores/index.ts");
+      await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/components/codex/stores/index.ts')?.name ?? '/src/session-mode/components/codex/stores/index.ts');
     const { useLayoutStore } =
-      await import("/src/session-mode/stores/useLayoutStore.ts");
+      await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/stores/useLayoutStore.ts')?.name ?? '/src/session-mode/stores/useLayoutStore.ts');
+    const { useSessionSplitStore } = await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/stores/useSessionSplitStore.ts')?.name ?? '/src/session-mode/stores/useSessionSplitStore.ts');
     useLayoutStore.setState({
       view: "agent",
       isRightPanelFocused: false,
       isRightPanelOpen: false,
     });
     const { useAcpStore } =
-      await import("/src/session-mode/stores/useAcpStore.ts");
+      await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/stores/useAcpStore.ts')?.name ?? '/src/session-mode/stores/useAcpStore.ts');
     useAgentCenterStore.setState({
       cards: [],
       currentAgentCardId: null,
@@ -54,6 +58,7 @@ test("long Codex history stays bounded, scrollable and isolated from background 
     }));
     useCodexStore.setState({
       currentThreadId: "perf-empty",
+      historyLoadedMap: { "perf-empty": true, "perf-history": true },
       events: {
         "perf-empty": [
           {
@@ -72,22 +77,30 @@ test("long Codex history stays bounded, scrollable and isolated from background 
         "perf-history": events,
       },
     });
+    for (const id of ["perf-empty", "perf-history"])
+      useAgentCenterStore.getState().addAgentCard({ kind: "codex", id, cwd: "/fixture/performance", preview: id });
+    (window as any).__selectPerfThread = (id: string) => {
+      useCodexStore.setState({ currentThreadId: id });
+      useAgentCenterStore.getState().setCurrentAgentCardId(id, "codex");
+      useSessionSplitStore.getState().focusKey(`codex:${id}`);
+    };
+    (window as any).__selectPerfThread("perf-empty");
   });
   await page.evaluate(
-    () => import("/src/session-mode/components/codex/thread/CodexThread.tsx"),
+    () => import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/components/codex/thread/CodexThread.tsx')?.name ?? '/src/session-mode/components/codex/thread/CodexThread.tsx'),
   );
   await expect(page.getByText("预热消息", { exact: true })).toBeAttached();
   await page.waitForTimeout(500);
   const switchMs = await page.evaluate(async () => {
     const { useCodexStore } =
-      await import("/src/session-mode/components/codex/stores/index.ts");
+      await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/components/codex/stores/index.ts')?.name ?? '/src/session-mode/components/codex/stores/index.ts');
     const start = performance.now();
-    useCodexStore.setState({ currentThreadId: "perf-history" });
+    (window as any).__selectPerfThread("perf-history");
     // Measure until the latest row is actually in the viewport, including React scheduling.
     let ready = false;
     while (performance.now() - start < 10000) {
       await new Promise((resolve) => requestAnimationFrame(resolve));
-      const row = document.querySelector('[data-codex-row="event-1499"]');
+      const row = document.querySelector('[data-codex-row="event-turn-1499-message-1499"]');
       const viewport = row?.closest('[data-slot="scroll-area-viewport"]');
       if (row && viewport) {
         const message = row.getBoundingClientRect();
@@ -132,7 +145,7 @@ test("long Codex history stays bounded, scrollable and isolated from background 
   // Reading history must survive new content and background activity.
   await page.evaluate(async () => {
     const { useCodexStore } =
-      await import("/src/session-mode/components/codex/stores/index.ts");
+      await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/components/codex/stores/index.ts')?.name ?? '/src/session-mode/components/codex/stores/index.ts');
     useCodexStore.getState().addEvent("perf-history", {
       method: "item/agentMessage/delta",
       params: {
@@ -147,14 +160,14 @@ test("long Codex history stays bounded, scrollable and isolated from background 
   const scrollTop = await viewport.evaluate((element) => element.scrollTop);
   await page.evaluate(async () => {
     const { useCodexStore } =
-      await import("/src/session-mode/components/codex/stores/index.ts");
-    useCodexStore.setState({ currentThreadId: "perf-empty" });
+      await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/components/codex/stores/index.ts')?.name ?? '/src/session-mode/components/codex/stores/index.ts');
+    (window as any).__selectPerfThread("perf-empty");
   });
   await expect(page.getByText("性能消息 0", { exact: true })).toHaveCount(0);
   await page.evaluate(async () => {
     const { useCodexStore } =
-      await import("/src/session-mode/components/codex/stores/index.ts");
-    useCodexStore.setState({ currentThreadId: "perf-history" });
+      await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/components/codex/stores/index.ts')?.name ?? '/src/session-mode/components/codex/stores/index.ts');
+    (window as any).__selectPerfThread("perf-history");
   });
   await expect(page.getByText("性能消息 0", { exact: true })).toBeVisible();
   expect(
@@ -166,7 +179,7 @@ test("long Codex history stays bounded, scrollable and isolated from background 
   await expect(page.getByText("流式更新", { exact: true })).toBeVisible();
   await page.evaluate(async () => {
     const { useCodexStore } =
-      await import("/src/session-mode/components/codex/stores/index.ts");
+      await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/components/codex/stores/index.ts')?.name ?? '/src/session-mode/components/codex/stores/index.ts');
     useCodexStore.getState().addEvent("perf-history", {
       method: "item/agentMessage/delta",
       params: {
@@ -182,7 +195,7 @@ test("long Codex history stays bounded, scrollable and isolated from background 
   expect(await surface.locator("*").count()).toBeLessThan(2000);
   const backgroundMs = await page.evaluate(async () => {
     const { useCodexStore } =
-      await import("/src/session-mode/components/codex/stores/index.ts");
+      await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/components/codex/stores/index.ts')?.name ?? '/src/session-mode/components/codex/stores/index.ts');
     const start = performance.now();
     for (let i = 0; i < 30; i++)
       useCodexStore.getState().addEvent("background", {
@@ -215,14 +228,14 @@ test("long Codex history stays bounded, scrollable and isolated from background 
   expect(Number(anchor)).toBeGreaterThan(10);
   await page.evaluate(async () => {
     const { useCodexStore } =
-      await import("/src/session-mode/components/codex/stores/index.ts");
-    useCodexStore.setState({ currentThreadId: "perf-empty" });
+      await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/components/codex/stores/index.ts')?.name ?? '/src/session-mode/components/codex/stores/index.ts');
+    (window as any).__selectPerfThread("perf-empty");
   });
   await expect(page.getByText("预热消息", { exact: true })).toBeVisible();
   await page.evaluate(async () => {
     const { useCodexStore } =
-      await import("/src/session-mode/components/codex/stores/index.ts");
-    useCodexStore.setState({ currentThreadId: "perf-history" });
+      await import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/components/codex/stores/index.ts')?.name ?? '/src/session-mode/components/codex/stores/index.ts');
+    (window as any).__selectPerfThread("perf-history");
   });
   await expect
     .poll(() =>

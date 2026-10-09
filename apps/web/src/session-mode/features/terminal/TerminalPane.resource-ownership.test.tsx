@@ -1,4 +1,4 @@
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { TerminalPane } from "./TerminalPane";
 const io = vi.hoisted(() => ({
@@ -56,6 +56,7 @@ test("late terminal start after pane close cleans only its owned resource and ne
   const view = render(
     <TerminalPane active panelOpen command="isolated-placeholder" />,
   );
+  await waitFor(() => expect(io.start).toHaveBeenCalledOnce());
   view.unmount();
   await act(async () => resolve({ session_id: "owned-late-start" }));
   expect(io.write).not.toHaveBeenCalled();

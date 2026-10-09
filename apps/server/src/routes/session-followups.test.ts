@@ -195,3 +195,39 @@ test("the HTTP runtime adapter reconciles a released queue through thread/read a
     await app.close();
   }
 });
+
+test("blank cwd from restored mobile clients inherits the native thread directory without weakening path checks", async () => {
+  const app = Fastify();
+  const calls: any[] = [];
+  const queue = registerSessionFollowupRoutes(app, {
+    origin: () => null,
+    autoStart: false,
+    runtime: {
+      statuses: async () => ({ thread: "idle" }),
+      call: async (method, params) => {
+        calls.push({ method, params });
+        return { turn: { id: "run" } };
+      },
+    },
+  });
+  try {
+    for (const cwd of ["", "   "]) {
+      const response = await app.inject({
+        method: "POST", url: "/api/session/followups/submit",
+        payload: { ...body, id: "blank-" + cwd.length, parameters: { cwd } },
+      });
+      assert.equal(response.statusCode, 200, response.body);
+      assert.equal(response.json().items.at(-1).parameters.cwd, null);
+    }
+    for (const cwd of ["relative/project", "../project", "/project\0", 123]) {
+      const response = await app.inject({
+        method: "POST", url: "/api/session/followups/submit",
+        payload: { ...body, id: "invalid", parameters: { cwd } },
+      });
+      assert.equal(response.statusCode, 400);
+    }
+    await queue.tick();
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].params.cwd, null);
+  } finally { await app.close(); }
+});

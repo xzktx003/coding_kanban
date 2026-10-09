@@ -49,3 +49,22 @@ it("keeps detached conversation project and actual worktree target", () => {
     projectPath: "/project",
   });
 });
+
+it("ACP retains its native session directory when another workspace is browsed", () => {
+  useAcpStore.setState({
+    active: true,
+    sessionId: "native-session",
+    sessionCwd: "/native-project",
+  } as any);
+  expect(renderHook(useActiveSessionProject).result.current.path).toBe(
+    "/native-project",
+  );
+});
+it("an existing ACP session with an unknown directory does not borrow the workspace", () => {
+  useAcpStore.setState({
+    active: true,
+    sessionId: "unknown-native",
+    sessionCwd: null,
+  } as any);
+  expect(renderHook(useActiveSessionProject).result.current.path).toBeNull();
+});

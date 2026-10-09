@@ -1,3 +1,12 @@
+import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
+import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
+import { useCodexStore } from "@session/components/codex/stores";
+import {
+  useSessionDraftStore,
+  readDraft,
+  sessionDraftKey,
+} from "@session/stores/useSessionDraftStore";
+import { useAcpStore } from "@session/stores/useAcpStore";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { usePluginsMarketplace } from "./usePluginsMarketplace";
@@ -37,4 +46,35 @@ test("failed refresh preserves previously loaded plugin navigation", async () =>
   await act(() => result.current.loadPlugins());
   expect(result.current.marketplaces).toEqual(existing);
   expect((result.current as any).loadError).toBe("503");
+});
+
+test("using a plugin focuses its Codex draft rather than leaving the Claude input selected", async () => {
+  useAcpStore.setState({ active: false });
+  useAgentSettingsStore.setState({ selectedAgent: "cc" });
+  useAgentCenterStore.setState({
+    cards: [
+      { kind: "codex", id: "plugin-code", cwd: "/fixture" },
+      { kind: "cc", id: "selected-claude", cwd: "/fixture" },
+    ],
+    currentAgentCardId: "selected-claude",
+    currentAgentCardKind: "cc",
+  });
+  useCodexStore.setState({
+    currentThreadId: "plugin-code",
+    historyLoadedMap: { "plugin-code": true },
+    events: { "plugin-code": [] },
+  });
+  useSessionDraftStore.setState({ drafts: {} });
+  const { result } = renderHook(() => usePluginsMarketplace());
+  await act(() =>
+    result.current.handleUsePlugin({
+      name: "fixture-plugin",
+      interface: { displayName: "Fixture Plugin" },
+    } as any),
+  );
+  expect(useAgentCenterStore.getState().currentAgentCardId).toBe("plugin-code");
+  expect(useAgentCenterStore.getState().currentAgentCardKind).toBe("codex");
+  expect(readDraft(sessionDraftKey("codex", "plugin-code")).text).toContain(
+    "@Fixture Plugin",
+  );
 });

@@ -38,6 +38,8 @@ test("late ACP permission failure preserves the current request feedback and ret
         );
         const { useAgentCenterStore } =
           await import("/src/session-mode/stores/useAgentCenterStore.ts");
+        const {useWorkspaceStore}=await import(performance.getEntriesByType("resource").findLast(e=>e.name.includes("stores/useWorkspaceStore.ts"))?.name??"/src/session-mode/stores/useWorkspaceStore.ts");
+        useWorkspaceStore.setState({cwd:"/fixture/permission-project"});
         useLayoutStore.setState({ view: "agent", isRightPanelOpen: false });
         useAgentCenterStore.setState({ cards: [], cardsViewMode: "solo" });
         useAcpStore.setState({
@@ -45,6 +47,7 @@ test("late ACP permission failure preserves the current request feedback and ret
           agentId: "fixture",
           connectionId: "fixture-conn",
           sessionId,
+          sessionCwd:"/fixture/permission-project",
           entries: [],
           running: false,
           connecting: false,

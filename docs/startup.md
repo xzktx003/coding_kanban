@@ -62,6 +62,18 @@ pnpm session:status
 4. 前端可打开但会话不可用：运行 `pnpm session:status`，检查输出中的运行层日志及 `.dev-runtime/server.log`；不要把 `/api/health` 成功当作会话验收。
 5. 在同网段设备打开输出的 `Open` 地址，确认页面加载和会话连接；服务器本机的 HTTP 检查不能代替其他设备连通性检查。
 
+### 终端一直显示“服务已更新，等待恢复 tmux 会话”
+
+这是网关从持久快照加载卡片后的待恢复状态，不代表 tmux 窗口已经消失。检查 `POST /api/agent-sessions/restore-managed` 是否完成，再检查 `tmux list-sessions` 能否在几秒内返回。只确认 `/api/health` 正常不足以验收终端恢复。
+
+如果查询卡住，可通过 tmux 服务进程的 `/proc/<pid>/limits` 与 `/proc/<pid>/fd` 数量检查文件描述符是否耗尽。确认 PID、用户和控制 socket 的归属后，可在现有硬上限内提高该进程的软上限；不要重启 tmux 服务、杀死 pane 或清理未知客户端。此次现场将软上限从 1024 提高到 8192 后恢复查询；这属于运行进程调整，不会自动持久到新 tmux 服务。
+
+网关现在在 `preClose` 阶段释放自己管理的 PTY 客户端，避免 HTTP/WebSocket 排空拖延清理；不结束 tmux pane 中的 Agent。tmux 本机查询默认最多等待 5 秒，远程 SSH 查询最多等待 10 秒，超时只回收该次查询子进程并报告失败。同步历史和选项查询也有对应上限。
+
+2026-10-09 验收：两项失败用例先红后绿；恢复、关闭与查询相关 36 项测试通过；隔离 tmux socket 连续三次创建/关闭网关，客户端数每次回到零，原 pane ID 与进程 PID 不变。PTY 既有回归首轮 21 项通过，1 项带点名称的客户端就绪测试触及其 1 秒时限，定点复测通过。共享包/后端构建和最终类型检查通过。
+
+通过实际局域网 HTTPS 页面 `https://10.30.0.24:8484/?mode=terminal` 验证恢复接口返回 200、33 个本机 tmux 卡片在线、等待提示清零、真实终端 WebSocket 历史回放完成，页面脚本无错误。2 个远程会话不可访问，10 个 direct PTY 保持手动恢复；未重新启动它们。现场数据、日志和浏览器记录保存在被忽略的 `.dev-runtime/tmux-recovery/`，未验证另一台物理设备访问。
+
 脚本回归：`node --test scripts/*.test.mjs`；运行层管理器回归：`pnpm --filter server exec tsx --test src/services/session-runtime-manager.test.ts`。联调应在隔离目录通过真实 `pnpm dev:restart` 验证首次启动、重复启动复用运行服务、准备失败保留原进程，再检查局域网页面及 API。
 
 

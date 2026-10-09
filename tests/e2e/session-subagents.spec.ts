@@ -1,9 +1,15 @@
 import { test, expect, type Page } from "@playwright/test";
 import { installSessionUxFixture } from "./session-ux-fixture";
 async function setup(page: Page, options: { oldRound?: boolean; approval?: boolean } = {}) {
-  const fixture = await installSessionUxFixture(page, 2), calls: any[] = [], errors: string[] = [];
-  page.on("pageerror", e => errors.push(e.message));
-  page.on("console", m => { if (m.type() === "error" && !m.text().startsWith("[vite]") && !m.text().includes("AbortError")) errors.push(m.text().slice(0, 1500)); });
+  const fixture = await installSessionUxFixture(page, 2), calls: any[] = [];
+  const errorEvents: Array<{text:string,at:number}> = [], navigationAborts:number[]=[];
+  const pendingReads=new Set<import("@playwright/test").Request>();
+  page.on("request",r=>{if(/\/thread\/(read|turns\/list)$/.test(new URL(r.url()).pathname))pendingReads.add(r);});
+  page.on("requestfinished",r=>pendingReads.delete(r));
+  page.on("requestfailed",r=>{if(pendingReads.has(r)&&r.failure()?.errorText==="net::ERR_ABORTED")navigationAborts.push(Date.now());pendingReads.delete(r);});
+  const errors=()=>errorEvents.filter(e=>!(e.text.includes("[CodexService] threadResume error: TypeError: Failed to fetch")&&navigationAborts.some(at=>Math.abs(at-e.at)<100))).map(e=>e.text);
+  page.on("pageerror", e => errorEvents.push({text:e.message,at:Date.now()}));
+  page.on("console", m => { if (m.type() === "error" && !m.text().startsWith("[vite]") && !m.text().includes("AbortError")) errorEvents.push({text:m.text().slice(0,1500),at:Date.now()}); });
   const now = Math.floor(Date.now() / 1000);
   const children: any[] = [
     { id: "child-atlas", parentThreadId: "ux-0", agentNickname: "Atlas", agentRole: "explorer", canAcceptDirectInput: true, status: { type: "active" }, preview: "检查状态同步", cwd: fixture.threads[0].cwd, createdAt: now - 5, updatedAt: now, turns: [{ id: "atlas-turn", status: "inProgress", startedAt: now - 5, durationMs: null, completedAt: null, items: [] }] },
@@ -39,14 +45,36 @@ async function setup(page: Page, options: { oldRound?: boolean; approval?: boole
   });
   await page.route("**/api/session/files/upload", r => r.fulfill({ json: { path: "/fixture/child-draft.png" } }));
   await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
-  const editor = page.locator(".session-agent-view [contenteditable=true]").first(); await editor.waitFor({ timeout: 8000 }).catch(e => { console.log(errors); throw e; });
+  const editor = page.locator(".session-agent-view [contenteditable=true]").first(); await editor.waitFor({ timeout: 8000 }).catch(e => { console.log(errors()); throw e; });
   await page.getByRole("button", { name: "查看子任务", exact: true }).click();
-  return { fixture, calls, errors, editor, children, discovery };
+  (page as any).sessionOptFixture = {calls,get errors(){return errors();},navigationAborts};
+  return { fixture, calls, get errors(){return errors();}, editor, children, discovery, pendingReads };
 }
+test.afterEach(async ({page},info) => {
+  if(info.status === info.expectedStatus) return;
+  const data = await page.evaluate(async () => {
+    const module = async (suffix:string) => import(performance.getEntriesByType("resource").findLast(e=>e.name.includes(suffix))?.name ?? `/src/session-mode/${suffix}`);
+    const {useSubagentStore}=await module("features/subagents/store.ts");
+    const {useCodexStore}=await module("components/codex/stores/index.ts");
+    const s=useSubagentStore.getState(),c=useCodexStore.getState();
+    return {selection:s.selection,families:s.families,scope:s.scope,nodes:s.nodes,epoch:s.runtimeEpoch,currentThread:c.currentThreadId,timing:c.turnTimingMap,events:c.events};
+  });
+  await info.attach("subagent-failure-state",{body:JSON.stringify({data,...(page as any).sessionOptFixture},null,2),contentType:"application/json"});
+});
 test("child inspection preserves parent input and project; native V2 child is read-only", async ({ page }) => {
   const f = await setup(page);
   await f.editor.fill("主会话草稿保留");
-  await page.locator('[data-subagent-id="child-iris"]').click();
+  await page.locator('[data-subagent-id="child-iris"]').click({timeout:10000}).catch(async error => {
+    const stores = await page.evaluate(async () => {
+      const module = async (suffix: string) => import(performance.getEntriesByType("resource").findLast(e => e.name.includes(suffix))?.name ?? `/src/session-mode/${suffix}`);
+      const {useSubagentStore} = await module("features/subagents/store.ts");
+      const {useCodexStore} = await module("components/codex/stores/index.ts");
+      const s=useSubagentStore.getState(), c=useCodexStore.getState();
+      return {selection:s.selection,families:s.families,scope:s.scope,nodes:s.nodes,currentThread:c.currentThreadId,timing:c.turnTimingMap,events:c.events};
+    });
+    await test.info().attach("subagent-first-open-state",{body:JSON.stringify({stores,calls:f.calls,errors:f.errors},null,2),contentType:"application/json"});
+    throw error;
+  });
   await expect(page.getByText("由主 Agent 调度 · 子线程只读")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "发送给 Iris" })).toHaveCount(0);
   await page.screenshot({ path: ".dev-runtime/subagent-tests/desktop-detail.png", fullPage: true });
@@ -67,8 +95,21 @@ test("interactive child draft and image restore after refresh without changing t
   await page.getByRole("button", { name: "收起子任务", exact: true }).click();
   await page.getByRole("button", { name: "查看子任务", exact: true }).click();
   await expect(childDraft).toHaveValue("子草稿输入一半");
+  // This case verifies durable drafts after completed reads; navigation-aborted
+  // background reads are exercised separately from page runtime errors.
+  await expect.poll(() => f.pendingReads.size).toBe(0);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(childDraft).toHaveValue("子草稿输入一半");
+  await expect(childDraft).toHaveValue("子草稿输入一半").catch(async error => {
+    const stores = await page.evaluate(async () => {
+      const module = async (suffix: string) => import(performance.getEntriesByType("resource").findLast(e => e.name.includes(suffix))?.name ?? `/src/session-mode/${suffix}`);
+      const {useSubagentStore} = await module("features/subagents/store.ts");
+      const {useCodexStore} = await module("components/codex/stores/useCodexStore.ts");
+      const s=useSubagentStore.getState(), c=useCodexStore.getState();
+      return {selection:s.selection, families:s.families, scope:s.scope, nodes:s.nodes, currentThread:c.currentThreadId, timing:c.turnTimingMap, storage:Object.keys(localStorage).filter(k=>k.includes("subagent")).map(k=>[k,localStorage.getItem(k)])};
+    });
+    await test.info().attach("subagent-reload-state", {body:JSON.stringify({stores,calls:f.calls,errors:f.errors},null,2),contentType:"application/json"});
+    throw error;
+  });
   await expect(page.locator('.session-subagent-input')).toContainText("draft.png");
   await expect(f.editor).toHaveText("主草稿");
   expect(f.errors).toEqual([]);

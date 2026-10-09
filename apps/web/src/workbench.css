@@ -1,3 +1,7 @@
+/* The shell can boot straight into Session mode before terminal CSS is loaded. */
+body:has(.workbench-shell) {
+  margin: 0;
+}
 .workbench-shell {
   height: var(--app-height);
   display: flex;
