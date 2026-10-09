@@ -28,12 +28,38 @@ beforeEach(() => {
     connectionId: "conn",
     sessionId: "session",
     entries: [],
+    pendingPermissions: {},
     permission: {
       requestId: "request",
       title: "执行测试操作",
       options: [{ optionId: "allow", name: "允许" }],
     },
   });
+});
+it("parallel permissions expose the next request only after the first response succeeds", async () => {
+  useAcpStore.getState().setPermission({
+    requestId: "first",
+    title: "第一项审批",
+    options: [{ optionId: "first-allow", name: "允许第一项" }],
+  });
+  useAcpStore.getState().setPermission({
+    requestId: "second",
+    title: "第二项审批",
+    options: [{ optionId: "second-allow", name: "允许第二项" }],
+  });
+  rpc.acpRespondPermission.mockResolvedValue(undefined);
+  render(<AcpSession />);
+  expect(screen.getByText("另有 1 项待处理")).toBeTruthy();
+  expect(screen.queryByText("第二项审批")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "允许第一项" }));
+  await screen.findByText("第二项审批");
+  expect(rpc.acpRespondPermission).toHaveBeenCalledExactlyOnceWith(
+    "conn",
+    "first",
+    "first-allow",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "允许第二项" }));
+  await waitFor(() => expect(useAcpStore.getState().permission).toBeNull());
 });
 it("failed approval remains visible and retryable, without duplicate requests", async () => {
   let reject!: (error: Error) => void;

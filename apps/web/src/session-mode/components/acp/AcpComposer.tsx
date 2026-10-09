@@ -16,7 +16,12 @@ import { ArrowUp, Download, Square } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@session/components/ui/button";
 import { toast } from "@session/components/ui/use-toast";
-import { acpCancel, acpPrompt, acpStart } from "@session/services/apiAdapt/acp";
+import {
+  acpCancel,
+  acpPrompt,
+  acpStart,
+  acpStop,
+} from "@session/services/apiAdapt/acp";
 import { useWorkspaceStore } from "@session/stores";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { AgentModelPanel } from "@session/components/agent/AgentModelPanel";
@@ -25,6 +30,8 @@ import { captureBotOptions } from "@session/stores/useBotOptionsStore";
 import { ComposerSheet } from "../codex/composer/v2/ComposerSheet";
 import { AcpSessionControls } from "./AcpSessionControls";
 import { useAcpAgents } from "./useAcpAgents";
+import { runAcpSessionOperation } from "./sessionOperations";
+import { hasPendingAcpSettings } from "./sessionSettings";
 
 export function AcpComposer({
   targetLabel,
@@ -36,7 +43,10 @@ export function AcpComposer({
     agentId,
     connectionId,
     sessionId,
+    sessionCwd,
     connecting,
+    sessionTransition,
+    sessionTransitionError,
     running,
     setConnecting,
     setConnection,
@@ -53,9 +63,21 @@ export function AcpComposer({
     useSessionTextDraft(owner);
   const attachments = useImageAttachments(owner);
   const canInputImages = useAcpStore((s) => s.canInputImages);
+  const settingsPending = useAcpStore(hasPendingAcpSettings);
+  const directoryMatches = (native: string | null, browsed: string | null) =>
+    !!native &&
+    !!browsed &&
+    native.replace(/\/+$/, "") === browsed.replace(/\/+$/, "");
+  const directoryError =
+    connectionId && sessionId && !directoryMatches(sessionCwd, cwd)
+      ? sessionCwd
+        ? `当前会话位于 ${sessionCwd}，请切回该项目或新建会话。`
+        : "会话目录尚未确认，请重新打开历史或新建会话。"
+      : null;
   // Agent we already tried to auto-connect, so a failed start does not spin in
   // a retry loop. Cleared on an explicit restart.
   const attempted = useRef<string | null>(null);
+  const preparingSends = useRef(new Set<string>());
   const seenRestart = useRef(restartNonce);
 
   const agent = agents.find((a) => a.id === agentId);
@@ -76,64 +98,88 @@ export function AcpComposer({
       return null;
     }
     attempted.current = agentId;
+    const original = useAcpStore.getState();
     setConnecting(true);
-    try {
-      const res = await acpStart(agentId, cwd);
-      if (res.sessionId) {
-        const connectedOwner = sessionDraftKey(
-          "acp",
-          res.sessionId,
-          cwd,
-          agentId,
-        );
-        useSessionDraftStore.getState().move(owner, connectedOwner);
-      }
-      setConnection({
-        connectionId: res.connectionId,
-        sessionId: res.sessionId,
-        agentTitle:
-          res.initialize.agentInfo?.title ??
-          res.initialize.agentInfo?.name ??
-          agentId,
-        authMethods: res.initialize.authMethods ?? [],
-        canLoadSession: res.initialize.agentCapabilities?.loadSession === true,
-        canInputImages:
-          (
-            res.initialize.agentCapabilities?.promptCapabilities as
-              | { image?: boolean }
-              | undefined
-          )?.image === true,
-      });
-      applySession(res.session);
-      if (res.sessionId)
-        await moveImageDraft(
-          owner,
-          sessionDraftKey("acp", res.sessionId, cwd, agentId),
-        );
-      // keke's own catalogue also configures bots, which are keke processes —
-      // so a bot can be set up from this session without opening its chat.
-      if (agentId === "keke")
-        captureBotOptions("", res.initialize, res.session);
-      if (res.sessionError) {
-        addEntry({
-          id: `start-${Date.now()}`,
-          role: "error",
-          text: res.sessionError,
-        });
-        return null;
-      }
-      return res.sessionId
-        ? { connectionId: res.connectionId, sessionId: res.sessionId }
-        : null;
-    } catch (e) {
-      setConnecting(false);
-      toast({
-        title: "Failed to start agent",
-        description: String(e),
-        variant: "destructive",
-      });
-      return null;
-    }
+    return (
+      (await runAcpSessionOperation("正在启动 Agent…", async (isLatest) => {
+        const ownsSource = () =>
+          isLatest() &&
+          useAcpStore.getState().active === original.active &&
+          useAcpStore.getState().agentId === agentId &&
+          useAcpStore.getState().restartNonce === original.restartNonce &&
+          useAcpStore.getState().connectionId === original.connectionId &&
+          useWorkspaceStore.getState().cwd === cwd;
+        try {
+          if (!ownsSource()) return null;
+          const res = await acpStart(agentId, cwd);
+          if (!ownsSource()) {
+            // This start created an undelivered resource. Never stop an adopted
+            // connection or any process discovered outside this request.
+            if (useAcpStore.getState().connectionId !== res.connectionId)
+              await acpStop(res.connectionId).catch(() => {});
+            return null;
+          }
+          if (res.sessionId) {
+            const connectedOwner = sessionDraftKey(
+              "acp",
+              res.sessionId,
+              cwd,
+              agentId,
+            );
+            useSessionDraftStore.getState().move(owner, connectedOwner);
+          }
+          setConnection({
+            connectionId: res.connectionId,
+            cwd,
+            sessionId: res.sessionId,
+            agentTitle:
+              res.initialize.agentInfo?.title ??
+              res.initialize.agentInfo?.name ??
+              agentId,
+            authMethods: res.initialize.authMethods ?? [],
+            canLoadSession:
+              res.initialize.agentCapabilities?.loadSession === true,
+            canInputImages:
+              (
+                res.initialize.agentCapabilities?.promptCapabilities as
+                  | { image?: boolean }
+                  | undefined
+              )?.image === true,
+          });
+          applySession(res.session);
+          if (res.sessionId)
+            await moveImageDraft(
+              owner,
+              sessionDraftKey("acp", res.sessionId, cwd, agentId),
+            );
+          // keke's own catalogue also configures bots, which are keke processes —
+          // so a bot can be set up from this session without opening its chat.
+          if (agentId === "keke")
+            captureBotOptions("", res.initialize, res.session);
+          if (res.sessionError) {
+            addEntry({
+              id: `start-${Date.now()}`,
+              role: "error",
+              text: res.sessionError,
+            });
+            return null;
+          }
+          return res.sessionId
+            ? { connectionId: res.connectionId, sessionId: res.sessionId }
+            : null;
+        } catch (e) {
+          if (!ownsSource()) return null;
+          toast({
+            title: "Failed to start agent",
+            description: String(e),
+            variant: "destructive",
+          });
+          return null;
+        } finally {
+          if (isLatest()) setConnecting(false);
+        }
+      })) ?? null
+    );
   }, [
     agentId,
     cwd,
@@ -155,6 +201,8 @@ export function AcpComposer({
       !interactionVisible ||
       connectionId ||
       connecting ||
+      sessionTransition ||
+      sessionTransitionError ||
       !cwd ||
       !agent?.available
     )
@@ -166,6 +214,8 @@ export function AcpComposer({
     cwd,
     connectionId,
     connecting,
+    sessionTransition,
+    sessionTransitionError,
     agent?.available,
     restartNonce,
     connect,
@@ -178,7 +228,11 @@ export function AcpComposer({
       (!trimmed && !attachments.paths.length) ||
       running ||
       connecting ||
-      attachments.blocked
+      sessionTransition ||
+      sessionTransitionError ||
+      hasPendingAcpSettings() ||
+      attachments.blocked ||
+      directoryError
     )
       return;
     if (attachments.paths.length && !canInputImages) {
@@ -188,32 +242,63 @@ export function AcpComposer({
     const submittedIds = attachments.attachments.map((a) => a.id);
     const snapshot = readDraft(owner);
 
+    if (preparingSends.current.has(owner)) return;
+    preparingSends.current.add(owner);
+    const original = useAcpStore.getState();
     let live = connectionId && sessionId ? { connectionId, sessionId } : null;
-    if (!live) {
-      if (agent && !agent.available) {
-        toast({
-          title: `${agent.name} is not installed`,
-          description: `Download it first.`,
-        });
-        return;
-      }
-      live = await connect();
-      if (!live) return;
-    }
-
-    const submittedOwner = sessionDraftKey("acp", live.sessionId, cwd, agentId);
-    if (submittedOwner !== owner) {
-      useSessionDraftStore.getState().move(owner, submittedOwner);
-      await moveImageDraft(owner, submittedOwner);
-    }
-    addEntry({
-      id: `u-${Date.now()}`,
-      role: "user",
-      text: trimmed,
-      images: attachments.paths,
-    });
-    setRunning(true);
+    const ownsTarget = () => {
+      const current = useAcpStore.getState();
+      return (
+        !!live &&
+        current.connectionId === live.connectionId &&
+        current.sessionId === live.sessionId &&
+        current.agentId === agentId
+      );
+    };
+    const canSubmit = () => {
+      const current = useAcpStore.getState();
+      return (
+        ownsTarget() &&
+        current.active === original.active &&
+        useWorkspaceStore.getState().cwd === cwd &&
+        directoryMatches(current.sessionCwd, cwd) &&
+        !current.running &&
+        !current.sessionTransition &&
+        !current.sessionTransitionError &&
+        !hasPendingAcpSettings(current)
+      );
+    };
+    let submittedOwner = owner;
+    let dispatched = false;
     try {
+      if (!live) {
+        if (agent && !agent.available) {
+          toast({
+            title: `${agent.name} is not installed`,
+            description: "Download it first.",
+          });
+          return;
+        }
+        live = await connect();
+        if (!live || !canSubmit()) return;
+      }
+      submittedOwner = sessionDraftKey("acp", live.sessionId, cwd, agentId);
+      if (submittedOwner !== owner) {
+        useSessionDraftStore.getState().move(owner, submittedOwner);
+        await moveImageDraft(owner, submittedOwner);
+      }
+      // Preparation may await a connection or attachment storage. Never insert
+      // a message or dispatch a prompt after the user has selected another target.
+      if (!canSubmit()) return;
+      addEntry({
+        id: `u-${Date.now()}`,
+        role: "user",
+        text: trimmed,
+        images: attachments.paths,
+      });
+      setRunning(true);
+      dispatched = true;
+      preparingSends.current.delete(owner);
       const result = await acpPrompt(
         live.connectionId,
         live.sessionId,
@@ -227,12 +312,18 @@ export function AcpComposer({
           .getState()
           .complete("acp", `${agentId}:${live.sessionId}`, crypto.randomUUID());
     } catch (e) {
-      if (useAcpStore.getState().sessionId === live.sessionId) {
+      if (ownsTarget()) {
         addEntry({ id: `e-${Date.now()}`, role: "error", text: String(e) });
+      } else if (!live && useAcpStore.getState().agentId === agentId) {
+        toast({
+          title: "无法发送消息",
+          description: String(e),
+          variant: "destructive",
+        });
       }
     } finally {
-      if (useAcpStore.getState().sessionId === live.sessionId)
-        setRunning(false);
+      preparingSends.current.delete(owner);
+      if (dispatched && ownsTarget()) setRunning(false);
     }
   };
 
@@ -259,6 +350,12 @@ export function AcpComposer({
         <div className="session-compact-body">
           <textarea
             value={text}
+            aria-label="ACP 消息输入"
+            aria-describedby={
+              sessionTransition || sessionTransitionError || directoryError
+                ? "acp-session-transition"
+                : undefined
+            }
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               if (
@@ -296,26 +393,38 @@ export function AcpComposer({
             {targetLabel}
             <span
               className="session-compact-status"
+              id="acp-session-transition"
               role={
+                sessionTransitionError ||
+                directoryError ||
                 attachments.storageError ||
                 attachments.attachments.some((a) => a.status === "error")
                   ? "alert"
                   : "status"
               }
             >
-              {attachments.storageError
-                ? "附件草稿保存失败，点击附件重试"
-                : attachments.attachments.some((a) => a.status === "error")
-                  ? "图片上传失败，点击缩略图重试"
-                  : attachments.blocked
-                    ? "正在上传图片…"
-                    : connecting
-                      ? "正在启动 Agent…"
-                      : agent && !agent.available && !connectionId
-                        ? "Agent 尚未安装"
-                        : running
-                          ? "运行中"
-                          : ""}
+              {directoryError
+                ? directoryError
+                : settingsPending
+                  ? "正在应用会话设置…"
+                  : sessionTransition
+                    ? sessionTransition.label
+                    : (sessionTransitionError ??
+                      (attachments.storageError
+                        ? "附件草稿保存失败，点击附件重试"
+                        : attachments.attachments.some(
+                              (a) => a.status === "error",
+                            )
+                          ? "图片上传失败，点击缩略图重试"
+                          : attachments.blocked
+                            ? "正在上传图片…"
+                            : connecting
+                              ? "正在启动 Agent…"
+                              : agent && !agent.available && !connectionId
+                                ? "Agent 尚未安装"
+                                : running
+                                  ? "运行中"
+                                  : ""))}
             </span>
           </div>
           <div className="session-composer-actions">
@@ -339,6 +448,10 @@ export function AcpComposer({
                 className="session-composer-send"
                 disabled={
                   connecting ||
+                  Boolean(sessionTransition) ||
+                  Boolean(sessionTransitionError) ||
+                  settingsPending ||
+                  Boolean(directoryError) ||
                   attachments.blocked ||
                   (!text.trim() && attachments.paths.length === 0)
                 }

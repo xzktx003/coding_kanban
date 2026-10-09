@@ -1,5 +1,16 @@
-import { SessionIdentityTitle, SessionProjectLabel, useSessionProject } from "./SessionIdentity";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import {
+  SessionIdentityTitle,
+  SessionProjectLabel,
+  useSessionProject,
+} from "./SessionIdentity";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { MoreHorizontal, Plus, X } from "lucide-react";
 import { useCodexStore } from "@session/components/codex/stores";
 import { useSessionTabActions } from "@session/hooks/useSessionTabs";
@@ -9,7 +20,10 @@ import {
   useAgentCenterStore,
   type AgentCenterCard,
 } from "@session/stores/useAgentCenterStore";
-import { useSessionNameStore, useSessionName } from "@session/stores/useSessionNameStore";
+import {
+  useSessionNameStore,
+  useSessionName,
+} from "@session/stores/useSessionNameStore";
 import { NewAgentButton } from "../common/NewAgentButton";
 import { RenameSessionButton } from "../common/RenameSessionButton";
 import { SessionStatus } from "../common/SessionStatus";
@@ -24,10 +38,17 @@ import {
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
 import { FollowedSessionsMenu } from "./FollowedSessionsMenu";
-import { sessionTabDrag, sessionDragKey, sessionDragCard, sessionDropTarget, placeSessionDrag, SESSION_TAB_MIME } from "./sessionTabDrag";
-import { createSessionTabInsertionMarker } from './sessionTabPreview';
+import {
+  sessionTabDrag,
+  sessionDragKey,
+  sessionDragCard,
+  sessionDropTarget,
+  placeSessionDrag,
+  SESSION_TAB_MIME,
+} from "./sessionTabDrag";
+import { createSessionTabInsertionMarker } from "./sessionTabPreview";
 
-function SessionTab({
+const SessionTab = memo(function SessionTab({
   card,
   selected,
   tabbable,
@@ -35,32 +56,55 @@ function SessionTab({
   onClose,
   onKeyDown,
   draggableProject,
+  index,
 }: {
   card: AgentCenterCard;
   selected: boolean;
   tabbable: boolean;
-  onSelect: () => void;
-  onClose: () => void;
-  onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => void;
+  onSelect: (card: AgentCenterCard) => void;
+  onClose: (card: AgentCenterCard) => void;
+  onKeyDown: (
+    event: KeyboardEvent<HTMLButtonElement>,
+    card: AgentCenterCard,
+    index: number,
+  ) => void;
   draggableProject: boolean;
+  index: number;
 }) {
   const project = useSessionProject(card);
   const renameRef = useRef<HTMLSpanElement>(null);
-  const groups = splitGroups(useSessionSplitStore((s) => s.tree));
-  const threads = useCodexStore(s => s.threads);
-  const names = useSessionNameStore(s => s.names);
-  const cards = useAgentCenterStore(s => s.cards);
-  const nativeTitle = card.kind === "codex" ? (() => { const thread = threads.find(t => t.id === card.id); return thread?.name || thread?.preview; })() : undefined;
+  const groupTree = useSessionSplitStore((s) => (selected ? s.tree : null));
+  const groups = groupTree ? splitGroups(groupTree) : [];
+  const threads = useCodexStore((s) => s.threads);
+  const names = useSessionNameStore((s) => s.names);
+  const cards = useAgentCenterStore((s) => s.cards);
+  const nativeTitle =
+    card.kind === "codex"
+      ? (() => {
+          const thread = threads.find((t) => t.id === card.id);
+          return thread?.name || thread?.preview;
+        })()
+      : undefined;
   const title = useSessionName(
     card.kind,
     card.id,
     nativeTitle || card.preview || card.id.slice(0, 12),
     nativeTitle || undefined,
   );
-  const duplicate = cards.some(other => {
-    if (other.cwd === card.cwd || agentCardKey(other) === agentCardKey(card)) return false;
-    const native = other.kind === "codex" ? threads.find(t => t.id === other.id) : undefined;
-    return (names[agentCardKey(other)] ?? native?.name ?? native?.preview ?? other.preview ?? other.id.slice(0, 12)) === title;
+  const duplicate = cards.some((other) => {
+    if (other.cwd === card.cwd || agentCardKey(other) === agentCardKey(card))
+      return false;
+    const native =
+      other.kind === "codex"
+        ? threads.find((t) => t.id === other.id)
+        : undefined;
+    return (
+      (names[agentCardKey(other)] ??
+        native?.name ??
+        native?.preview ??
+        other.preview ??
+        other.id.slice(0, 12)) === title
+    );
   });
   return (
     <>
@@ -76,14 +120,18 @@ function SessionTab({
         title={`${card.kind === "codex" ? "Codex" : "Claude"} · ${title}\n${card.cwd ?? ""}\n拖动到正文边缘分屏；拖到标签排序；Alt+Shift+左右键移动标签`}
         onClick={(event) => {
           event.currentTarget.focus();
-          onSelect();
+          onSelect(card);
         }}
-        onKeyDown={onKeyDown}
+        onKeyDown={(event) => onKeyDown(event, card, index)}
       >
         <SessionIdentityTitle kind={card.kind} title={title} />
         <SessionStatus kind={card.kind} id={card.id} compact />
       </button>
-      <SessionProjectLabel card={card} id={`tab-project-${agentCardKey(card)}`} draggableTab={draggableProject} />
+      <SessionProjectLabel
+        card={card}
+        id={`tab-project-${agentCardKey(card)}`}
+        draggableTab={draggableProject}
+      />
       <span className="session-tab-actions" ref={renameRef}>
         <RenameSessionButton kind={card.kind} id={card.id} title={title} />
         <button
@@ -91,7 +139,7 @@ function SessionTab({
           className="session-tab-close"
           title="关闭标签，后台任务继续运行"
           aria-label={`关闭标签：${title}`}
-          onClick={onClose}
+          onClick={() => onClose(card)}
         >
           <X size={13} />
         </button>
@@ -117,7 +165,9 @@ function SessionTab({
             >
               改名
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onClose}>关闭标签</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => onClose(card)}>
+              关闭标签
+            </DropdownMenuItem>
             {groups.length > 1 &&
               groups.map(
                 (g, i) =>
@@ -128,7 +178,7 @@ function SessionTab({
                         useSessionSplitStore
                           .getState()
                           .place(agentCardKey(card), g.id, "center");
-                        onSelect();
+                        onSelect(card);
                       }}
                     >
                       移动到窗口组 {i + 1}
@@ -140,7 +190,7 @@ function SessionTab({
       )}
     </>
   );
-}
+});
 
 export function SessionTabs({ groupId }: { groupId?: string } = {}) {
   const tabs = useAgentCenterStore();
@@ -171,14 +221,45 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
   const strip = useRef<HTMLDivElement>(null);
   const dragKey = useRef<string | null>(null);
   const [dropKey, setDropKey] = useState<string | null>(null);
-  const nativeMarker = useRef<ReturnType<typeof createSessionTabInsertionMarker>>(undefined);
+  const nativeMarker =
+    useRef<ReturnType<typeof createSessionTabInsertionMarker>>(undefined);
+  // Stable event functions read the latest group/order without changing every
+  // inactive tab's props when selection or sync bookkeeping changes.
+  const handlers = useRef({
+    select: (_card: AgentCenterCard) => {},
+    close: (_card: AgentCenterCard) => {},
+    keyDown: (
+      _event: KeyboardEvent<HTMLButtonElement>,
+      _card: AgentCenterCard,
+      _index: number,
+    ) => {},
+  });
+  const selectCard = useCallback(
+    (card: AgentCenterCard) => handlers.current.select(card),
+    [],
+  );
+  const closeCard = useCallback(
+    (card: AgentCenterCard) => handlers.current.close(card),
+    [],
+  );
+  const onTabKeyDown = useCallback(
+    (
+      event: KeyboardEvent<HTMLButtonElement>,
+      card: AgentCenterCard,
+      index: number,
+    ) => handlers.current.keyDown(event, card, index),
+    [],
+  );
   useEffect(() => {
     const clear = () => {
       nativeMarker.current?.destroy();
       nativeMarker.current = undefined;
     };
-    window.addEventListener('dragend', clear);
-    return () => { window.removeEventListener('dragend', clear); clear(); };
+    window.addEventListener("dragend", clear);
+    return () => {
+      window.removeEventListener("dragend", clear);
+      clear();
+    };
   }, []);
   const focusTab = (key: string | null) =>
     requestAnimationFrame(() => {
@@ -261,6 +342,14 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
       focusTab(agentCardKey(target));
     }
   };
+  handlers.current = {
+    select: (card) => {
+      if (groupId) useSessionSplitStore.getState().focusGroup(groupId);
+      void selectTab(card);
+    },
+    close,
+    keyDown,
+  };
   return (
     <div className="session-tabs">
       <div
@@ -269,13 +358,25 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
         aria-label="关注会话"
         ref={strip}
         onDragOver={(event) => {
-          if (!sessionTabDrag.key && !Array.from(event.dataTransfer.types ?? []).includes(SESSION_TAB_MIME)) return;
+          if (
+            !sessionTabDrag.key &&
+            !Array.from(event.dataTransfer.types ?? []).includes(
+              SESSION_TAB_MIME,
+            )
+          )
+            return;
           event.preventDefault();
           if (groupId) {
-            const root = event.currentTarget.closest<HTMLElement>('.session-split-workspace');
-            const target = root ? sessionDropTarget(root, event.clientX, event.clientY) : null;
+            const root = event.currentTarget.closest<HTMLElement>(
+              ".session-split-workspace",
+            );
+            const target = root
+              ? sessionDropTarget(root, event.clientX, event.clientY)
+              : null;
             if (target?.strip) {
-              nativeMarker.current ??= createSessionTabInsertionMarker(event.currentTarget);
+              nativeMarker.current ??= createSessionTabInsertionMarker(
+                event.currentTarget,
+              );
               nativeMarker.current?.show(target);
             }
           }
@@ -286,7 +387,10 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
             event.currentTarget.scrollLeft += 18;
         }}
         onDragLeave={(event) => {
-          if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+          if (
+            !(event.relatedTarget instanceof Node) ||
+            !event.currentTarget.contains(event.relatedTarget)
+          ) {
             nativeMarker.current?.destroy();
             nativeMarker.current = undefined;
           }
@@ -297,9 +401,15 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
           if (!key) return;
           event.preventDefault();
           event.stopPropagation();
-          const root = event.currentTarget.closest<HTMLElement>('.session-split-workspace');
-          const target = root ? sessionDropTarget(root, event.clientX, event.clientY) : null;
-          const source = target?.strip ? placeSessionDrag(key, target) : undefined;
+          const root = event.currentTarget.closest<HTMLElement>(
+            ".session-split-workspace",
+          );
+          const target = root
+            ? sessionDropTarget(root, event.clientX, event.clientY)
+            : null;
+          const source = target?.strip
+            ? placeSessionDrag(key, target)
+            : undefined;
           if (source) void selectTab(source);
           nativeMarker.current?.destroy();
           nativeMarker.current = undefined;
@@ -317,7 +427,7 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
               data-active={key === activeKey}
               data-drop={key === dropKey}
               data-session-drag-key={key}
-              draggable={!groupId || typeof PointerEvent === 'undefined'}
+              draggable={!groupId || typeof PointerEvent === "undefined"}
               onDragStart={(event) => {
                 dragKey.current = key;
                 sessionTabDrag.key = key;
@@ -334,7 +444,9 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
                 if (groupId) return; // The strip handles precise insertion and empty space.
                 event.preventDefault();
                 const draggedKey = sessionDragKey(event.dataTransfer);
-                const source = draggedKey ? sessionDragCard(draggedKey) : undefined;
+                const source = draggedKey
+                  ? sessionDragCard(draggedKey)
+                  : undefined;
                 if (source) {
                   tabs.moveCard(source, card);
                   if (groupId) {
@@ -356,12 +468,10 @@ export function SessionTabs({ groupId }: { groupId?: string } = {}) {
                 card={card}
                 selected={key === activeKey}
                 tabbable={key === activeKey || (!activeKey && index === 0)}
-                onSelect={() => {
-                  if (groupId) layout.focusGroup(groupId);
-                  void selectTab(card);
-                }}
-                onClose={() => close(card)}
-                onKeyDown={(event) => keyDown(event, card, index)}
+                index={index}
+                onSelect={selectCard}
+                onClose={closeCard}
+                onKeyDown={onTabKeyDown}
                 draggableProject={Boolean(groupId)}
               />
             </div>

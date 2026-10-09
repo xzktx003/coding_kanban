@@ -42,6 +42,8 @@ export type AcpPermissionOption = {
 };
 
 export type AcpPermissionRequest = {
+  connectionId?: string;
+  sessionId?: string;
   requestId: string;
   title: string;
   /** The tool call's category (`read`, `edit`, `execute`, ...) when the agent
@@ -63,17 +65,24 @@ interface AcpStore {
   agentId: string;
   connectionId: string | null;
   sessionId: string | null;
+  /** Directory acknowledged by the native session operation, independent of browsing. */
+  sessionCwd: string | null;
   agentTitle: string | null;
   authMethods: AcpAuthMethod[];
   /** `agentCapabilities.loadSession`: whether stored sessions can be resumed. */
   canLoadSession: boolean;
   canInputImages: boolean;
   connecting: boolean;
+  /** Native session context is changing; input must wait for its owner. */
+  sessionTransition: { version: number; label: string } | null;
+  sessionTransitionError: string | null;
+  pendingSettingChanges: Record<string, number>;
   running: boolean;
   entries: AcpEntry[];
   /** Set by `sealChunk`: the next chunk starts a new entry. */
   chunkSealed: boolean;
   permission: AcpPermissionRequest | null;
+  pendingPermissions: Record<string, AcpPermissionRequest[]>;
 
   /** Session controls advertised by the agent. */
   modes: AcpModeState | null;
@@ -104,6 +113,7 @@ interface AcpStore {
   setConnection: (v: {
     connectionId: string;
     sessionId: string | null;
+    cwd?: string;
     agentTitle: string | null;
     authMethods: AcpAuthMethod[];
     canLoadSession?: boolean;
@@ -124,6 +134,11 @@ interface AcpStore {
   setConnecting: (v: boolean) => void;
   setRunning: (v: boolean) => void;
   setPermission: (p: AcpPermissionRequest | null) => void;
+  dismissPermission: (
+    connectionId: string,
+    sessionId: string | null,
+    requestId: string,
+  ) => void;
   addEntry: (entry: AcpEntry) => void;
   setEntries: (entries: AcpEntry[]) => void;
   /** Append to the last entry when it has the same streaming role, else push. */
@@ -156,15 +171,20 @@ const newId = () => Math.random().toString(36).slice(2);
 const cleared = {
   connectionId: null,
   sessionId: null,
+  sessionCwd: null,
   agentTitle: null,
   authMethods: [],
   canLoadSession: false,
   canInputImages: false,
   connecting: false,
+  sessionTransition: null,
+  sessionTransitionError: null,
+  pendingSettingChanges: {},
   running: false,
   entries: [],
   chunkSealed: false,
   permission: null,
+  pendingPermissions: {},
   modes: null,
   models: null,
   configOptions: [],
@@ -180,15 +200,20 @@ export const createAcpStore = () =>
     agentId: "gemini",
     connectionId: null,
     sessionId: null,
+    sessionCwd: null,
     agentTitle: null,
     authMethods: [],
     canLoadSession: false,
     canInputImages: false,
     connecting: false,
+    sessionTransition: null,
+    sessionTransitionError: null,
+    pendingSettingChanges: {},
     running: false,
     entries: [],
     chunkSealed: false,
     permission: null,
+    pendingPermissions: {},
     modes: null,
     models: null,
     configOptions: [],
@@ -207,21 +232,40 @@ export const createAcpStore = () =>
       authMethods,
       canLoadSession,
       canInputImages,
+      cwd,
     }) =>
-      set({
+      set((s) => ({
         connectionId,
         sessionId,
+        sessionCwd: sessionId ? (cwd ?? null) : null,
+        permission:
+          s.pendingPermissions[
+            JSON.stringify([connectionId, sessionId])
+          ]?.[0] ?? null,
         agentTitle,
         authMethods,
         canLoadSession: canLoadSession ?? false,
         canInputImages: canInputImages ?? false,
         connecting: false,
-      }),
-    setSessionId: (sessionId) => set({ sessionId }),
+      })),
+    setSessionId: (sessionId) =>
+      set((s) => ({
+        sessionId,
+        sessionCwd: sessionId === s.sessionId ? s.sessionCwd : null,
+        permission:
+          s.pendingPermissions[
+            JSON.stringify([s.connectionId, sessionId])
+          ]?.[0] ?? null,
+      })),
 
     applySession: (session) =>
-      set({
+      set((s) => ({
         sessionId: session?.sessionId ?? null,
+        sessionCwd: session?.sessionId === s.sessionId ? s.sessionCwd : null,
+        permission:
+          s.pendingPermissions[
+            JSON.stringify([s.connectionId, session?.sessionId ?? null])
+          ]?.[0] ?? null,
         modes: session?.modes ?? null,
         models: session?.models ?? null,
         configOptions: session?.configOptions ?? [],
@@ -229,7 +273,7 @@ export const createAcpStore = () =>
           session?.models?.availableModels
             .find((m) => m.modelId === session.models?.currentModelId)
             ?._meta?.reasoningEfforts?.find((e) => e.default)?.id ?? null,
-      }),
+      })),
 
     setCurrentMode: (currentModeId) =>
       set((s) => (s.modes ? { modes: { ...s.modes, currentModeId } } : {})),
@@ -257,7 +301,53 @@ export const createAcpStore = () =>
     setSelectedAuthMethod: (selectedAuthMethod) => set({ selectedAuthMethod }),
     setConnecting: (connecting) => set({ connecting }),
     setRunning: (running) => set({ running }),
-    setPermission: (permission) => set({ permission }),
+    setPermission: (permission) =>
+      set((s) => {
+        const connectionId = permission?.connectionId ?? s.connectionId;
+        const sessionId = permission?.sessionId ?? s.sessionId;
+        const key = JSON.stringify([connectionId, sessionId]);
+        const pendingPermissions = { ...s.pendingPermissions };
+        if (!permission) {
+          delete pendingPermissions[key];
+          return { pendingPermissions, permission: null };
+        }
+        const scoped = {
+          ...permission,
+          connectionId: connectionId ?? undefined,
+          sessionId: sessionId ?? undefined,
+        };
+        const queue = [...(pendingPermissions[key] ?? [])];
+        const existing = queue.findIndex(
+          (request) => request.requestId === scoped.requestId,
+        );
+        if (existing < 0) queue.push(scoped);
+        else queue[existing] = scoped;
+        pendingPermissions[key] = queue;
+        return {
+          pendingPermissions,
+          ...(connectionId === s.connectionId && sessionId === s.sessionId
+            ? { permission: queue[0] }
+            : {}),
+        };
+      }),
+    dismissPermission: (connectionId, sessionId, requestId) =>
+      set((s) => {
+        const key = JSON.stringify([connectionId, sessionId]);
+        const pendingPermissions = { ...s.pendingPermissions };
+        const remaining = (pendingPermissions[key] ?? []).filter(
+          (request) => request.requestId !== requestId,
+        );
+        if (remaining.length) pendingPermissions[key] = remaining;
+        else delete pendingPermissions[key];
+        return {
+          pendingPermissions,
+          ...(s.connectionId === connectionId &&
+          s.sessionId === sessionId &&
+          s.permission?.requestId === requestId
+            ? { permission: remaining[0] ?? null }
+            : {}),
+        };
+      }),
     addEntry: (entry) => set((s) => ({ entries: [...s.entries, entry] })),
     setEntries: (entries) => set({ entries, chunkSealed: false }),
 

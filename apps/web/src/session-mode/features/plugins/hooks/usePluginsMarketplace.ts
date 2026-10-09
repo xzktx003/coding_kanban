@@ -1,3 +1,4 @@
+import { selectBuiltinInputTarget } from "@session/services/builtinInputNavigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   MarketplaceLoadErrorInfo,
@@ -7,7 +8,7 @@ import type {
 } from "@session/bindings/v2";
 import { toast } from "@session/components/ui/use-toast";
 import { pluginInstall, pluginList, pluginRead } from "@session/services";
-import { useAgentSettingsStore, useLayoutStore } from "@session/stores";
+import { useLayoutStore } from "@session/stores";
 import { useInputStore } from "@session/stores/useInputStore";
 import { usePluginsViewContext } from "../hooks";
 import {
@@ -74,7 +75,6 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
   );
   const [query, setQuery] = useState("");
 
-  const { setSelectedAgent } = useAgentSettingsStore();
   const { setView } = useLayoutStore();
   const { appendInputValue } = useInputStore();
   const { handlePluginDetail } = usePluginsViewContext();
@@ -192,11 +192,11 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
   const handleUsePlugin = useCallback(
     (plugin: PluginSummary) => {
       const pluginName = plugin.interface?.displayName ?? plugin.name;
-      setSelectedAgent("codex");
+      selectBuiltinInputTarget("codex");
       setView("agent");
       appendInputValue(`@${pluginName}`);
     },
-    [appendInputValue, setSelectedAgent, setView],
+    [appendInputValue, setView],
   );
 
   const handleShowDetail = useCallback(

@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import type { ServerNotification } from "../bindings";
 import { mergeHistoryPage } from "./sessionHistoryPages";
 const item = (turnId: string, text: string): ServerNotification => ({
@@ -60,4 +60,36 @@ it("a refresh of an older turn stays before a newer streamed turn", () => {
   expect(
     result.map((e) => e.method === "item/completed" && e.params.turnId),
   ).toEqual(["old", "live"]);
+});
+
+it("an empty history probe preserves live history without serializing its bodies", () => {
+  const before = [item("old", "older")],
+    current = [...before, item("live", "streaming")];
+  const serialize = vi.spyOn(JSON, "stringify");
+  try {
+    expect(mergeHistoryPage([], before, current, [])).toBe(current);
+    expect(serialize).not.toHaveBeenCalled();
+  } finally {
+    serialize.mockRestore();
+  }
+});
+
+it("unchanged recent pages compare only replacement items instead of serializing full history", () => {
+  const before = Array.from({ length: 10000 }, (_, i) =>
+    item(`turn-${i}`, `body-${i}`),
+  );
+  const serialize = vi.spyOn(JSON, "stringify");
+  try {
+    expect(
+      mergeHistoryPage([item("turn-9999", "body-9999")], before, before, [
+        "turn-9999",
+      ]),
+    ).toBe(before);
+    const serializedEvents = serialize.mock.calls.filter(
+      ([value]) => Array.isArray(value) && value.length > 100,
+    );
+    expect(serializedEvents).toHaveLength(0);
+  } finally {
+    serialize.mockRestore();
+  }
 });

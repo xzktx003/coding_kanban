@@ -20,28 +20,31 @@ import {
   PopoverTrigger,
 } from "@session/components/ui/popover";
 import { acpStop } from "@session/services/apiAdapt/acp";
-import { useLayoutStore } from "@session/stores";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
 import { useSessionActionConfirmation } from "../common/useSessionActionConfirmation";
 import { toast } from "@session/components/ui/use-toast";
+import {
+  useAgentCenterStore,
+  selectedAgentCard,
+} from "@session/stores/useAgentCenterStore";
+import { selectBuiltinInputTarget } from "@session/services/builtinInputNavigation";
+import { invalidateAcpSessionOperation } from "../acp/sessionOperations";
 
 type AgentModelPanelProps = { trigger: ReactNode };
 
 export function AgentModelPanel({ trigger }: AgentModelPanelProps) {
-  const selectedAgent = useAgentSettingsStore((s) => s.selectedAgent);
+  const preferredAgent = useAgentSettingsStore((s) => s.selectedAgent);
+  const card = useAgentCenterStore(selectedAgentCard);
+  const selectedAgent = card?.kind ?? preferredAgent;
   const active = useAcpStore((s) => s.active);
   const { agentId, connectionId, setActive, setAgentId, reset } = useAcpStore();
-  const { setSelectedAgent } = useAgentSettingsStore();
-  const { setActiveSidebarTab } = useLayoutStore();
   const agents = useAcpAgents() ?? [];
   const [open, setOpen] = useState(false);
   const { ask, confirmation } = useSessionActionConfirmation();
 
   const selectBuiltin = (id: "codex" | "cc") => {
-    setSelectedAgent(id);
-    setActiveSidebarTab(id);
-    setActive(false);
+    selectBuiltinInputTarget(id);
   };
 
   const selectAcp = async (id: string) => {
@@ -62,6 +65,7 @@ export function AgentModelPanel({ trigger }: AgentModelPanelProps) {
       )
         return;
       try {
+        invalidateAcpSessionOperation();
         await acpStop(connectionId);
       } catch (error) {
         toast({

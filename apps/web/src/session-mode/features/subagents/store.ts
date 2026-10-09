@@ -98,6 +98,13 @@ export const useSubagentStore = create<State>()(
   ),
 );
 const seenEvents = new WeakSet<object>();
+const seenHistory = new WeakSet<readonly ServerNotification[]>();
+/** Snapshots are immutable; unrelated session updates reuse the same array. */
+export function observeSubagentHistory(events: readonly ServerNotification[]) {
+  if (seenHistory.has(events)) return;
+  seenHistory.add(events);
+  for (const event of events) observeSubagents(event);
+}
 export function observeSubagents(event: ServerNotification) {
   if (seenEvents.has(event)) return;
   seenEvents.add(event);

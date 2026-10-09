@@ -145,7 +145,11 @@ function submit(value: unknown): FollowupSubmit {
         /[\x00-\x1f]/.test(p[name]))
     )
       invalid();
-  if (p.cwd != null && !p.cwd.startsWith("/")) invalid();
+  // Cached clients can submit the empty directory placeholder from thread restore.
+  // Null inherits the native thread directory rather than changing its project.
+  if (typeof p.cwd === "string" && !p.cwd.trim()) p.cwd = null;
+  if (p.cwd != null && !p.cwd.startsWith("/"))
+    invalid("消息工作目录必须是绝对路径");
   if (
     p.approvalPolicy != null &&
     !["untrusted", "on-failure", "on-request", "never"].includes(

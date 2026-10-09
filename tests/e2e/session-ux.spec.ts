@@ -307,7 +307,7 @@ test("many sessions, search, model menu, responsive controls and error recovery"
                 rect.bottom > innerHeight + 1)
             );
           })
-          .map((button) => button.getAttribute("aria-label")),
+          .map((button) => ({ name: button.getAttribute("aria-label"), rect: button.getBoundingClientRect().toJSON(), width: innerWidth, height: innerHeight })),
       );
     expect(clipped).toEqual([]);
     expect(

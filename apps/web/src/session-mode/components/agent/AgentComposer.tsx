@@ -1,5 +1,8 @@
 import { useActiveSessionProject } from "../../hooks/useActiveSessionProject";
 import { QuestionComposer } from "@session/features/async-questions/QuestionComposer";
+import { useAgentInteractionVisible } from "@session/session-dom";
+import { useCCStore } from "@session/stores/cc";
+import { synchronizeBuiltinInputTarget } from "@session/services/builtinInputNavigation";
 import { useEffect } from "react";
 import { AcpComposer } from "@session/components/acp/AcpComposer";
 import { Composer as CCComposer } from "@session/components/cc/composer";
@@ -19,23 +22,54 @@ export function AgentComposer() {
   const { selectedAgent } = useAgentSettingsStore();
   const acpActive = useAcpStore((s) => s.active);
   const acpTitle = useAcpStore((s) => s.agentTitle || s.agentId || "ACP");
+  const acpSessionId = useAcpStore((s) =>
+    s.sessionId ? `${s.agentId}:${s.sessionId}` : null,
+  );
   const project = useActiveSessionProject();
   const tabs = useAgentCenterStore();
   const { currentAgentCardId } = tabs;
   const card = selectedAgentCard(tabs);
+  const effectiveAgent = card?.kind ?? selectedAgent;
+  const ccSessionId = useCCStore((s) => s.activeSessionId);
+  const visible = useAgentInteractionVisible();
   const nativeTitle = useCodexStore((s) => {
-    const thread =
+    const id =
       card?.kind === "codex"
-        ? s.threads.find((t) => t.id === card.id)
-        : undefined;
+        ? card.id
+        : effectiveAgent === "codex"
+          ? s.currentThreadId
+          : null;
+    const thread = id ? s.threads.find((t) => t.id === id) : undefined;
     return thread?.name || thread?.preview;
   });
   const currentThreadId = useCodexStore((s) => s.currentThreadId);
+  const senderId = effectiveAgent === "cc" ? ccSessionId : currentThreadId;
+  const targetId = card?.id ?? senderId;
+  const mismatchedTarget = !acpActive && !!card && senderId !== card.id;
+  useEffect(() => {
+    if (!visible || acpActive || !card) return;
+    if (selectedAgent !== card.kind)
+      useAgentSettingsStore.getState().setSelectedAgent(card.kind);
+    if (mismatchedTarget) synchronizeBuiltinInputTarget(card);
+  }, [
+    visible,
+    acpActive,
+    card?.id,
+    card?.kind,
+    selectedAgent,
+    mismatchedTarget,
+  ]);
   const targetTitle = useSessionName(
-    card?.kind ?? "codex",
-    card?.id ?? null,
-    nativeTitle || card?.preview || card?.id.slice(0, 12) || "新聊天",
-    nativeTitle || undefined,
+    acpActive ? "acp" : effectiveAgent,
+    acpActive
+      ? acpSessionId
+      : effectiveAgent === "codex" && !card
+        ? null
+        : targetId,
+    acpActive
+      ? acpTitle
+      : nativeTitle || card?.preview || targetId?.slice(0, 12) || "新聊天",
+    acpActive ? undefined : nativeTitle || undefined,
   );
 
   // Auto-focus the CC composer input when switching to the cc agent
@@ -57,7 +91,7 @@ export function AgentComposer() {
         <span className="session-target-project">{project.label}</span>
       </strong>
       <span className="session-target-agent">
-        {acpActive ? acpTitle : selectedAgent === "cc" ? "Claude" : "Codex"}
+        {acpActive ? acpTitle : effectiveAgent === "cc" ? "Claude" : "Codex"}
       </span>
     </div>
   );
@@ -67,7 +101,11 @@ export function AgentComposer() {
       <div className="shrink-0">
         {acpActive ? (
           <AcpComposer targetLabel={targetLabel} />
-        ) : selectedAgent === "cc" ? (
+        ) : mismatchedTarget ? (
+          <div role="status" className="p-3 text-sm text-muted-foreground">
+            正在同步会话输入目标…
+          </div>
+        ) : effectiveAgent === "cc" ? (
           <CCComposer targetLabel={targetLabel} />
         ) : currentThreadId ? (
           <QuestionComposer

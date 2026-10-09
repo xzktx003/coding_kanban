@@ -9,6 +9,10 @@ import { ClaudeCode } from "@session/components/icons";
 import { Button } from "@session/components/ui/button";
 import { useCCStore } from "@session/stores/cc";
 import { useAcpStore } from "@session/stores/useAcpStore";
+import {
+  useAgentCenterStore,
+  selectedAgentCard,
+} from "@session/stores/useAgentCenterStore";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
 
 /**
@@ -26,7 +30,9 @@ export const AgentModelTrigger = forwardRef<
   React.ComponentProps<typeof Button> & { compact?: boolean }
 >(function AgentModelTrigger({ compact = false, ...props }, ref) {
   const isNarrow = useComposerToolbarNarrow();
-  const selectedAgent = useAgentSettingsStore((s) => s.selectedAgent);
+  const preferredAgent = useAgentSettingsStore((s) => s.selectedAgent);
+  const card = useAgentCenterStore(selectedAgentCard);
+  const selectedAgent = card?.kind ?? preferredAgent;
   const active = useAcpStore((s) => s.active);
   const agentId = useAcpStore((s) => s.agentId);
   const acpModels = useAcpStore((s) => s.models);
@@ -85,7 +91,7 @@ export const AgentModelTrigger = forwardRef<
     label = codexModel || "选择模型";
     effort =
       codexReasoningEffort !== "none"
-        ? codexReasoningEffort ?? undefined
+        ? (codexReasoningEffort ?? undefined)
         : undefined;
   }
 

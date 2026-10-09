@@ -15,7 +15,7 @@ import { openEventStream } from "@session/lib/eventStream";
 import { isSessionModeActive } from "@session/session-dom";
 import { usePairingStore } from "@session/stores/usePairingStore";
 import { childState, descendants, inParentTurn } from "./model";
-import { observeSubagents, useSubagentStore } from "./store";
+import { observeSubagentHistory, useSubagentStore } from "./store";
 import { subagentService, resetSubagentRuntime } from "./service";
 import { subagentScope, subagentStorageKey } from "./scope";
 export function useSubagentFamily(root: string | null) {
@@ -111,7 +111,7 @@ export function useSubagentFamilySync() {
         cards.some((c) => c.kind === "codex" && c.id === id) ||
         useSubagentStore.getState().nodes[id]
       )
-        for (const event of entries) observeSubagents(event);
+        observeSubagentHistory(entries);
     }
   }, [events, cards]);
   const roots = cards

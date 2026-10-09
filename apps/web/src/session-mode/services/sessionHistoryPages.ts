@@ -14,6 +14,9 @@ export function mergeHistoryPage(
   turns: string[],
   earlier = false,
 ) {
+  // An empty probe supplies no replacement turns. Preserve all concurrent
+  // stream updates directly, without scanning or serializing the transcript.
+  if (page.length === 0 && turns.length === 0) return current;
   const covered = new Set(turns);
   const retained = before.filter((event) => !covered.has(turnId(event) ?? ""));
   const firstCovered = before.findIndex((event) =>
@@ -33,5 +36,13 @@ export function mergeHistoryPage(
         : [...retained, ...page];
   const merged = mergeThreadHistory(snapshot, before, current);
   // Avoid rerendering every visible transcript on a successful unchanged probe.
-  return JSON.stringify(merged) === JSON.stringify(current) ? current : merged;
+  if (merged.length !== current.length) return merged;
+  for (let index = 0; index < merged.length; index++) {
+    if (
+      merged[index] !== current[index] &&
+      JSON.stringify(merged[index]) !== JSON.stringify(current[index])
+    )
+      return merged;
+  }
+  return current;
 }

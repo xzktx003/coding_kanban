@@ -25,12 +25,27 @@ import { useAcpSessions } from "./useAcpSessions";
 /** Sidebar list of persisted ACP sessions for one project. */
 export function AcpSessionList({ directory }: { directory: string }) {
   const names = useSessionNameStore((s) => s.names);
-  const { sessions, opening, loading, error, refresh, open, remove } =
-    useAcpSessions(directory);
+  const {
+    sessions,
+    opening,
+    loading,
+    error,
+    refresh,
+    open,
+    remove,
+    confirmation,
+  } = useAcpSessions(directory);
   const sessionId = useAcpStore((s) => s.sessionId);
+  const running = useAcpStore((s) => s.running);
+  const agentId = useAcpStore((s) => s.agentId);
   const [pendingDelete, setPendingDelete] = useState<AcpSessionRecord | null>(
     null,
   );
+  const deletingRunning =
+    !!pendingDelete &&
+    pendingDelete.sessionId === sessionId &&
+    pendingDelete.agentId === agentId &&
+    running;
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deletingRef = useRef(false);
@@ -55,6 +70,7 @@ export function AcpSessionList({ directory }: { directory: string }) {
   };
   return (
     <div className="px-2 py-1 space-y-0.5" aria-busy={loading || undefined}>
+      {confirmation}
       {loading && sessions.length === 0 && (
         <div
           role="status"
@@ -96,20 +112,48 @@ export function AcpSessionList({ directory }: { directory: string }) {
           className={`session-nav-row group/session-row relative flex items-center gap-2 w-full text-left p-2 rounded-lg cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${session.sessionId === sessionId ? "bg-accent" : "hover:bg-accent/50"}`}
         >
           <div className="session-nav-title">
-            <SessionAgentBadge kind="acp" agentName={session.agentTitle ?? session.agentId} />
-            <SessionRowTitle title={title(session)} detail={`ACP · ${session.agentTitle ?? session.agentId}`} />
-            {opening === session.sessionId ? <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" /> :
-              <SessionStatus kind="acp" id={`${session.agentId}:${session.sessionId}`} compact />}
+            <SessionAgentBadge
+              kind="acp"
+              agentName={session.agentTitle ?? session.agentId}
+            />
+            <SessionRowTitle
+              title={title(session)}
+              detail={`ACP · ${session.agentTitle ?? session.agentId}`}
+            />
+            {opening === session.sessionId ? (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+            ) : (
+              <SessionStatus
+                kind="acp"
+                id={`${session.agentId}:${session.sessionId}`}
+                compact
+              />
+            )}
           </div>
           <div className="session-nav-meta">
             <span className="session-nav-age">
-              {formatThreadAge(Math.floor(new Date(session.updatedAt).getTime() / 1000))}
+              {formatThreadAge(
+                Math.floor(new Date(session.updatedAt).getTime() / 1000),
+              )}
             </span>
-          <SessionRowMenu rename={{ kind: "acp", id: `${session.agentId}:${session.sessionId}`, title: title(session) }}>
-            <DropdownMenuItem variant="destructive" onSelect={() => { setPendingDelete(session); setDeleteError(null); }}>
-              <Trash2 className="size-3.5" />删除会话记录
-            </DropdownMenuItem>
-          </SessionRowMenu>
+            <SessionRowMenu
+              rename={{
+                kind: "acp",
+                id: `${session.agentId}:${session.sessionId}`,
+                title: title(session),
+              }}
+            >
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => {
+                  setPendingDelete(session);
+                  setDeleteError(null);
+                }}
+              >
+                <Trash2 className="size-3.5" />
+                删除会话记录
+              </DropdownMenuItem>
+            </SessionRowMenu>
           </div>
         </div>
       ))}
@@ -126,7 +170,9 @@ export function AcpSessionList({ directory }: { directory: string }) {
               将永久删除“{pendingDelete ? title(pendingDelete) : ""}
               ”的历史记录。
               {pendingDelete?.sessionId === sessionId
-                ? "这是当前会话，删除后会创建新会话，必要时重新连接 Agent。"
+                ? running
+                  ? "当前任务仍在运行，请先显式停止任务。记录会保留。"
+                  : "这是当前会话，成功创建替代会话后才会删除记录，Agent 服务不会重启。"
                 : "此操作无法撤销。"}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -138,7 +184,7 @@ export function AcpSessionList({ directory }: { directory: string }) {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
             <AlertDialogAction
-              disabled={deleting}
+              disabled={deleting || deletingRunning}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={(event) => {
                 event.preventDefault();

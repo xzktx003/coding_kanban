@@ -906,7 +906,9 @@ export function buildServer(options: BuildServerOptions = {}): {
     );
   });
 
-  app.addHook("onClose", () => {
+  // Release attached clients before HTTP/WebSocket draining can delay shutdown.
+  // This closes owned PTYs only; tmux panes and their Agents keep running.
+  app.addHook("preClose", async () => {
     ptyRuntimeManager.dispose();
   });
   app.addHook("onClose", () => {

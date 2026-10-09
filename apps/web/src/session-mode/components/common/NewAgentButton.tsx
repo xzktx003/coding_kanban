@@ -1,14 +1,14 @@
 import { listenInSessionMode } from "@session/session-dom";
 import { SquarePen, type LucideIcon } from "lucide-react";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { acpFreshSession } from "@session/components/acp/newSession";
 import { useNewThread } from "@session/components/codex/hooks";
 import { Button } from "@session/components/ui/button";
 import { useCCSessionManager } from "@session/hooks/useCCSessionManager";
-import { acpStop } from "@session/services/apiAdapt/acp";
 import { useAgentCenterStore, useLayoutStore } from "@session/stores";
 import { useAcpStore } from "@session/stores/useAcpStore";
+import { selectedAgentCard } from "@session/stores/useAgentCenterStore";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { useSessionActionConfirmation } from "./useSessionActionConfirmation";
@@ -28,8 +28,12 @@ export function NewAgentButton({
 }: Props) {
   const { t } = useTranslation("sidebar");
   const { ask, confirmation } = useSessionActionConfirmation();
+  const creatingRef = useRef(false);
+  const [creating, setCreating] = useState(false);
   const { cwd, setCwd } = useWorkspaceStore();
-  const { selectedAgent } = useAgentSettingsStore();
+  const preferredAgent = useAgentSettingsStore((s) => s.selectedAgent);
+  const focusedCard = useAgentCenterStore(selectedAgentCard);
+  const selectedAgent = focusedCard?.kind ?? preferredAgent;
   const { setCurrentAgentCardId } = useAgentCenterStore();
   const { view, setView, setActiveSidebarTab } = useLayoutStore();
   const { handleNewSession } = useCCSessionManager();
@@ -42,77 +46,72 @@ export function NewAgentButton({
 
   const handleCreateNew = useCallback(
     async (project?: string) => {
-      const original = useAcpStore.getState();
-      if (acpActive && original.running) {
-        const accepted = await ask({
-          title: "中断当前任务并新建会话？",
-          description:
-            "新建 ACP 会话会停止当前正在执行的任务。当前记录会保留，取消后继续原任务。",
-          confirmLabel: "中断并新建",
-        });
-        const current = useAcpStore.getState();
-        if (
-          !accepted ||
-          current.connectionId !== original.connectionId ||
-          current.sessionId !== original.sessionId ||
-          current.active !== original.active ||
-          current.agentId !== original.agentId
-        )
-          return;
-      }
-      if (project && project !== cwd) setCwd(project);
-
-      if (acpActive) {
-        setView("agent");
-        // One agent process hosts many sessions, and `session/new` carries its
-        // own cwd, so a new chat — in this project or another — is a single
-        // JSON-RPC round trip. Respawning the CLI costs seconds.
-        const target = project ?? cwd;
-        if (
-          acpConnectionId &&
-          target &&
-          (await acpFreshSession(acpConnectionId, target))
-        ) {
-          return;
-        }
-        // The old process may already be gone; a fresh session works regardless.
-        if (acpConnectionId) {
+      if (creatingRef.current) return;
+      creatingRef.current = true;
+      setCreating(true);
+      try {
+        const original = useAcpStore.getState();
+        if (acpActive && original.running) {
           const accepted = await ask({
-            title: "重新连接 Agent？",
+            title: "中断当前任务并新建会话？",
             description:
-              "当前连接无法新建会话，继续会关闭并重新启动此 Agent 服务。",
-            confirmLabel: "重新连接",
+              "新建 ACP 会话会停止当前正在执行的任务。当前记录会保留，取消后继续原任务。",
+            confirmLabel: "中断并新建",
           });
+          const current = useAcpStore.getState();
           if (
             !accepted ||
-            useAcpStore.getState().connectionId !== acpConnectionId
+            current.connectionId !== original.connectionId ||
+            current.sessionId !== original.sessionId ||
+            current.active !== original.active ||
+            current.agentId !== original.agentId ||
+            useWorkspaceStore.getState().cwd !== cwd
           )
             return;
-          try {
-            await acpStop(acpConnectionId);
-          } catch (error) {
+        }
+        if (project && project !== cwd) setCwd(project);
+
+        if (acpActive) {
+          setView("agent");
+          // One agent process hosts many sessions, and `session/new` carries its
+          // own cwd, so a new chat — in this project or another — is a single
+          // JSON-RPC round trip. Respawning the CLI costs seconds.
+          const target = project ?? cwd;
+          if (
+            acpConnectionId &&
+            target &&
+            (await acpFreshSession(acpConnectionId, target, {
+              allowInterrupt: original.running,
+            }))
+          ) {
+            return;
+          }
+          // The old process may already be gone; a fresh session works regardless.
+          if (acpConnectionId) {
             toast({
-              title: "无法重新连接 Agent",
-              description: String(error),
+              title: "新建会话失败",
+              description: "当前会话记录已保留，请重试或显式重新连接 Agent。",
               variant: "destructive",
             });
             return;
           }
-          if (useAcpStore.getState().connectionId !== acpConnectionId) return;
+          acpRestart();
+          return;
         }
-        acpRestart();
-        return;
-      }
 
-      if (selectedAgent === "cc") {
-        setActiveSidebarTab("cc");
-        setCurrentAgentCardId(null);
-        setView("agent");
-        await handleNewSession();
-        focusCCInput();
-        return;
+        if (selectedAgent === "cc") {
+          setActiveSidebarTab("cc");
+          setCurrentAgentCardId(null);
+          setView("agent");
+          await handleNewSession();
+          focusCCInput();
+          return;
+        }
+        await handleNewThread();
+      } finally {
+        creatingRef.current = false;
+        setCreating(false);
       }
-      await handleNewThread();
     },
     [
       acpActive,
@@ -172,6 +171,8 @@ export function NewAgentButton({
         variant="ghost"
         className={`group ${showLabel ? "justify-start" : ""} relative flex items-center gap-2`}
         aria-label={t("newChat")}
+        disabled={creating}
+        aria-busy={creating}
         title={`${t("newChat")} (⌘N)`}
       >
         <Icon size={16} />

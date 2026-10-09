@@ -1,7 +1,8 @@
+import { selectBuiltinInputTarget } from "@session/services/builtinInputNavigation";
 import { requestSessionNavigation } from "@session/services/sessionNavigationGuard";
-import { useCallback, useEffect, useState } from 'react';
-import type { PluginDetail } from '@session/bindings/v2';
-import { toast } from '@session/components/ui/use-toast';
+import { useCallback, useEffect, useState } from "react";
+import type { PluginDetail } from "@session/bindings/v2";
+import { toast } from "@session/components/ui/use-toast";
 import {
   pluginInstall,
   pluginRead,
@@ -9,20 +10,20 @@ import {
   readSkillGroups,
   type SkillGroupsConfig,
   writeSkillGroups,
-} from '@session/services';
-import { useAgentSettingsStore, useLayoutStore, usePluginStore } from '@session/stores';
-import { useInputStore } from '@session/stores/useInputStore';
-import { usePluginsNavigationStore } from '@session/stores/usePluginsNavigationStore';
-import { pluginDetailRequestTarget, pluginUninstallId } from './pluginTargets';
-import { useExternalUrl } from './useExternalUrl';
+} from "@session/services";
+import { useLayoutStore, usePluginStore } from "@session/stores";
+import { useInputStore } from "@session/stores/useInputStore";
+import { usePluginsNavigationStore } from "@session/stores/usePluginsNavigationStore";
+import { pluginDetailRequestTarget, pluginUninstallId } from "./pluginTargets";
+import { useExternalUrl } from "./useExternalUrl";
 
 /** The primary views shown by the left-side TabSwitcher. */
-export type MainTab = 'Plugins' | 'Skills' | 'Connectors';
+export type MainTab = "Plugins" | "Skills" | "Connectors";
 /** A full-screen overlay that replaces the main content; null means "no overlay". */
-export type Overlay = 'manage' | 'add' | 'detail' | null;
-export type ManageTab = 'Skills' | 'Connectors';
-export type AddTab = 'Connector' | 'Skill';
-export type SkillScope = 'user' | 'project';
+export type Overlay = "manage" | "add" | "detail" | null;
+export type ManageTab = "Skills" | "Connectors";
+export type AddTab = "Connector" | "Skill";
+export type SkillScope = "user" | "project";
 
 /**
  * Holds all state, effects, and handlers for PluginsView.
@@ -30,18 +31,25 @@ export type SkillScope = 'user' | 'project';
  */
 export function usePluginsView() {
   const { openExternalUrl } = useExternalUrl();
-  const { mainTab, setMainTab, connectorTarget, setConnectorTarget } = usePluginsNavigationStore();
+  const { mainTab, setMainTab, connectorTarget, setConnectorTarget } =
+    usePluginsNavigationStore();
   const [overlay, setOverlay] = useState<Overlay>(null);
-  const [manageTab, setManageTab] = useState<ManageTab>('Connectors');
-  const [addTab, setAddTab] = useState<AddTab>('Connector');
+  const [manageTab, setManageTab] = useState<ManageTab>("Connectors");
+  const [addTab, setAddTab] = useState<AddTab>("Connector");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [manageRefreshKey, setManageRefreshKey] = useState(0);
-  const [groupsConfig, setGroupsConfig] = useState<SkillGroupsConfig>({ groups: [] });
-  const [selectedPluginDetail, setSelectedPluginDetail] = useState<PluginDetail | null>(null);
-  const [installingPluginId, setInstallingPluginId] = useState<string | null>(null);
-  const [uninstallingPluginId, setUninstallingPluginId] = useState<string | null>(null);
+  const [groupsConfig, setGroupsConfig] = useState<SkillGroupsConfig>({
+    groups: [],
+  });
+  const [selectedPluginDetail, setSelectedPluginDetail] =
+    useState<PluginDetail | null>(null);
+  const [installingPluginId, setInstallingPluginId] = useState<string | null>(
+    null,
+  );
+  const [uninstallingPluginId, setUninstallingPluginId] = useState<
+    string | null
+  >(null);
 
-  const { setSelectedAgent } = useAgentSettingsStore();
   const { setView } = useLayoutStore();
   const { appendInputValue } = useInputStore();
 
@@ -60,14 +68,14 @@ export function usePluginsView() {
 
   const handleMcpAdded = useCallback(() => {
     setManageRefreshKey((k) => k + 1);
-    setOverlay('manage');
-    setManageTab('Connectors');
+    setOverlay("manage");
+    setManageTab("Connectors");
   }, []);
 
   const handlePluginDetail = useCallback((plugin: PluginDetail | null) => {
     setSelectedPluginDetail(plugin);
     if (plugin) {
-      setOverlay('detail');
+      setOverlay("detail");
     } else {
       setOverlay(null);
     }
@@ -76,20 +84,23 @@ export function usePluginsView() {
   /** Flip the installed flag on the open detail page without waiting for a re-read. */
   const setSelectedInstalled = useCallback((installed: boolean) => {
     setSelectedPluginDetail((prev) =>
-      prev ? { ...prev, summary: { ...prev.summary, installed } } : prev
+      prev ? { ...prev, summary: { ...prev.summary, installed } } : prev,
     );
   }, []);
 
-  const refreshSelectedPluginDetail = useCallback(async (plugin: PluginDetail) => {
-    const target = pluginDetailRequestTarget(plugin);
-    if (!target) return;
-    try {
-      const response = await pluginRead(target);
-      setSelectedPluginDetail(response.plugin);
-    } catch (error) {
-      console.error('Failed to refresh plugin detail:', error);
-    }
-  }, []);
+  const refreshSelectedPluginDetail = useCallback(
+    async (plugin: PluginDetail) => {
+      const target = pluginDetailRequestTarget(plugin);
+      if (!target) return;
+      try {
+        const response = await pluginRead(target);
+        setSelectedPluginDetail(response.plugin);
+      } catch (error) {
+        console.error("Failed to refresh plugin detail:", error);
+      }
+    },
+    [],
+  );
 
   const handlePluginInstall = useCallback(
     async (plugin: PluginDetail) => {
@@ -97,9 +108,10 @@ export function usePluginsView() {
       const target = pluginDetailRequestTarget(plugin);
       if (!target) {
         toast({
-          title: 'Install unavailable',
-          description: 'This plugin cannot be addressed by the current marketplace.',
-          variant: 'destructive',
+          title: "Install unavailable",
+          description:
+            "This plugin cannot be addressed by the current marketplace.",
+          variant: "destructive",
         });
         return;
       }
@@ -108,7 +120,9 @@ export function usePluginsView() {
       try {
         const response = await pluginInstall(target);
 
-        const authTargets = response.appsNeedingAuth.filter((app) => app.installUrl);
+        const authTargets = response.appsNeedingAuth.filter(
+          (app) => app.installUrl,
+        );
         if (authTargets.length > 0) {
           await openExternalUrl(authTargets[0].installUrl!);
         }
@@ -117,24 +131,27 @@ export function usePluginsView() {
         await refreshSelectedPluginDetail(plugin);
         setRefreshTrigger((t) => t + 1);
         toast({
-          title: authTargets.length > 0 ? 'Plugin installed, auth required' : 'Plugin installed',
+          title:
+            authTargets.length > 0
+              ? "Plugin installed, auth required"
+              : "Plugin installed",
           description:
             authTargets.length > 0
-              ? `${summary.interface?.displayName ?? summary.name} needs ${authTargets.map((app) => app.name).join(', ')} authentication.`
+              ? `${summary.interface?.displayName ?? summary.name} needs ${authTargets.map((app) => app.name).join(", ")} authentication.`
               : `${summary.interface?.displayName ?? summary.name} is ready in the composer.`,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         toast({
-          title: 'Install failed',
+          title: "Install failed",
           description: message,
-          variant: 'destructive',
+          variant: "destructive",
         });
       } finally {
         setInstallingPluginId(null);
       }
     },
-    [refreshSelectedPluginDetail, setSelectedInstalled, openExternalUrl]
+    [refreshSelectedPluginDetail, setSelectedInstalled, openExternalUrl],
   );
 
   const handlePluginUninstall = useCallback(
@@ -143,9 +160,9 @@ export function usePluginsView() {
       const pluginId = pluginUninstallId(summary);
       if (!pluginId) {
         toast({
-          title: 'Uninstall failed',
-          description: 'This plugin has no identifier to uninstall.',
-          variant: 'destructive',
+          title: "Uninstall failed",
+          description: "This plugin has no identifier to uninstall.",
+          variant: "destructive",
         });
         return;
       }
@@ -156,44 +173,50 @@ export function usePluginsView() {
         await refreshSelectedPluginDetail(plugin);
         setRefreshTrigger((t) => t + 1);
         toast({
-          title: 'Plugin removed',
+          title: "Plugin removed",
           description: `${summary.interface?.displayName ?? summary.name} was uninstalled.`,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         toast({
-          title: 'Uninstall failed',
+          title: "Uninstall failed",
           description: message,
-          variant: 'destructive',
+          variant: "destructive",
         });
       } finally {
         setUninstallingPluginId(null);
       }
     },
-    [refreshSelectedPluginDetail, setSelectedInstalled]
+    [refreshSelectedPluginDetail, setSelectedInstalled],
   );
 
   const handleUsePlugin = useCallback(
     (plugin: PluginDetail) => {
-      const pluginName = plugin.summary.interface?.displayName ?? plugin.summary.name;
-      setSelectedAgent('codex');
-      setView('agent');
+      const pluginName =
+        plugin.summary.interface?.displayName ?? plugin.summary.name;
+      selectBuiltinInputTarget("codex");
+      setView("agent");
       appendInputValue(`@${pluginName}`);
     },
-    [appendInputValue, setSelectedAgent, setView]
+    [appendInputValue, setView],
   );
 
   return {
     mainTab,
-    setMainTab: (next: MainTab) => requestSessionNavigation(() => setMainTab(next)),
+    setMainTab: (next: MainTab) =>
+      requestSessionNavigation(() => setMainTab(next)),
     connectorTarget,
-    setConnectorTarget: (next: 'agent' | 'bots') => requestSessionNavigation(() => setConnectorTarget(next)),
+    setConnectorTarget: (next: "agent" | "bots") =>
+      requestSessionNavigation(() => setConnectorTarget(next)),
     overlay,
-    setOverlay: (next: Overlay) => requestSessionNavigation(() => setOverlay(next)),
+    setOverlay: (next: Overlay) =>
+      requestSessionNavigation(() => setOverlay(next)),
     manageTab,
-    setManageTab: (next: ManageTab) => requestSessionNavigation(() => setManageTab(next)),
+    setManageTab: (next: ManageTab) =>
+      requestSessionNavigation(() => setManageTab(next)),
     addTab,
-    setAddTab: (next: AddTab) => requestSessionNavigation(() => setAddTab(next)),
+    setAddTab: (next: AddTab) =>
+      requestSessionNavigation(() => setAddTab(next)),
     refreshTrigger,
     setRefreshTrigger,
     manageRefreshKey,

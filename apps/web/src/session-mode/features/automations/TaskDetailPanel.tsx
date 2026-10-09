@@ -1,3 +1,5 @@
+import { openBuiltinInputTarget } from "@session/services/builtinInputNavigation";
+import { useCodexStore } from "@session/components/codex/stores";
 import { followupService } from "@session/services/followupService";
 import {
   Calendar,
@@ -9,31 +11,45 @@ import {
   Loader2,
   PlayCircle,
   XCircle,
-} from 'lucide-react';
-import { useEffect, useState } from 'react';
-import type { ServerNotification } from '@session/bindings';
-import type { Model } from '@session/bindings/v2';
-import { Badge } from '@session/components/ui/badge';
-import { Button } from '@session/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@session/components/ui/card';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@session/components/ui/collapsible';
-import { ScrollArea } from '@session/components/ui/scroll-area';
-import { toast } from '@session/components/ui/use-toast';
-import { useCCSessionManager } from '@session/hooks/useCCSessionManager';
-import { listSessions } from '@session/lib/sessions';
-import type { AutomationTask } from '@session/services/apiAdapt';
-import { ccInterrupt, listModels, runAutomationNow, turnInterrupt } from '@session/services/apiAdapt';
-import { codexService } from '@session/services/codexService';
-import { useLayoutStore } from '@session/stores';
-import { useCCStore } from '@session/stores/cc';
-import { useAgentSettingsStore } from '@session/stores/useAgentSettingsStore';
-import { useWorkspaceStore } from '@session/stores/useWorkspaceStore';
-import { getErrorMessage } from '@session/utils/errorUtils';
-import { getFilename } from '@session/utils/getFilename';
-import type { RunMeta } from './useAutomationRuns';
-import { useRunEvents } from './useAutomationRuns';
-import { useBotNames } from './useBotNames';
-import { describeSchedule, formatStartsIn, getNextRunAt } from './utils';
+} from "lucide-react";
+import { useEffect, useState } from "react";
+import type { ServerNotification } from "@session/bindings";
+import type { Model } from "@session/bindings/v2";
+import { Badge } from "@session/components/ui/badge";
+import { Button } from "@session/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@session/components/ui/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@session/components/ui/collapsible";
+import { ScrollArea } from "@session/components/ui/scroll-area";
+import { toast } from "@session/components/ui/use-toast";
+import { useCCSessionManager } from "@session/hooks/useCCSessionManager";
+import { listSessions } from "@session/lib/sessions";
+import type { AutomationTask } from "@session/services/apiAdapt";
+import {
+  ccInterrupt,
+  listModels,
+  runAutomationNow,
+  turnInterrupt,
+} from "@session/services/apiAdapt";
+import { codexService } from "@session/services/codexService";
+import { useLayoutStore } from "@session/stores";
+import { useCCStore } from "@session/stores/cc";
+import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { getErrorMessage } from "@session/utils/errorUtils";
+import { getFilename } from "@session/utils/getFilename";
+import type { RunMeta } from "./useAutomationRuns";
+import { useRunEvents } from "./useAutomationRuns";
+import { useBotNames } from "./useBotNames";
+import { describeSchedule, formatStartsIn, getNextRunAt } from "./utils";
 
 type TaskDetailPanelProps = {
   task: AutomationTask | null;
@@ -46,7 +62,7 @@ type OllamaModel = {
   id: string;
 };
 
-const OLLAMA_BASE_URL = 'http://localhost:11434/v1';
+const OLLAMA_BASE_URL = "http://localhost:11434/v1";
 
 async function listOllamaModels(): Promise<OllamaModel[]> {
   const response = await fetch(`${OLLAMA_BASE_URL}/models`);
@@ -54,86 +70,99 @@ async function listOllamaModels(): Promise<OllamaModel[]> {
     throw new Error(`Failed to load Ollama models: ${response.status}`);
   }
   const payload = (await response.json()) as { data?: Array<{ id?: string }> };
-  return (payload.data ?? []).filter((item): item is OllamaModel => typeof item.id === 'string');
+  return (payload.data ?? []).filter(
+    (item): item is OllamaModel => typeof item.id === "string",
+  );
 }
 
-function agentLabel(agent: AutomationTask['agent']) {
-  if (agent === 'bot') return 'Bot';
-  return agent === 'cc' ? 'Claude Agent' : 'Codex';
+function agentLabel(agent: AutomationTask["agent"]) {
+  if (agent === "bot") return "Bot";
+  return agent === "cc" ? "Claude Agent" : "Codex";
 }
 
-function providerLabel(provider: AutomationTask['model_provider']) {
-  return provider === 'ollama' ? 'Ollama' : 'OpenAI';
+function providerLabel(provider: AutomationTask["model_provider"]) {
+  return provider === "ollama" ? "Ollama" : "OpenAI";
 }
 
-function resolveModelProvider(task: AutomationTask): 'openai' | 'ollama' {
+function resolveModelProvider(task: AutomationTask): "openai" | "ollama" {
   const providerCandidate =
     (
       task as AutomationTask & {
         modelProvider?: string;
         model_provider?: string;
       }
-    ).model_provider ?? (task as AutomationTask & { modelProvider?: string }).modelProvider;
+    ).model_provider ??
+    (task as AutomationTask & { modelProvider?: string }).modelProvider;
 
-  return providerCandidate === 'ollama' ? 'ollama' : 'openai';
+  return providerCandidate === "ollama" ? "ollama" : "openai";
 }
 
 function findActiveTurnId(events: ServerNotification[]): string | null {
   for (let i = events.length - 1; i >= 0; i -= 1) {
     const event = events[i];
-    if (event.method === 'turn/started') {
+    if (event.method === "turn/started") {
       return event.params.turn.id;
     }
-    if (event.method === 'turn/completed' || event.method === 'error') {
+    if (event.method === "turn/completed" || event.method === "error") {
       return null;
     }
   }
   return null;
 }
 
-type RunStatus = 'running' | 'completed' | 'failed' | 'idle';
+type RunStatus = "running" | "completed" | "failed" | "idle";
 
 function normalizeStoredStatus(status?: string): RunStatus {
   const normalized = status?.trim().toLowerCase();
   if (
-    normalized === 'running' ||
-    normalized === 'completed' ||
-    normalized === 'failed' ||
-    normalized === 'success' ||
-    normalized === 'succeeded'
+    normalized === "running" ||
+    normalized === "completed" ||
+    normalized === "failed" ||
+    normalized === "success" ||
+    normalized === "succeeded"
   ) {
-    return normalized === 'success' || normalized === 'succeeded' ? 'completed' : normalized;
+    return normalized === "success" || normalized === "succeeded"
+      ? "completed"
+      : normalized;
   }
-  if (normalized === 'cancelled' || normalized === 'canceled' || normalized === 'interrupted') {
-    return 'failed';
+  if (
+    normalized === "cancelled" ||
+    normalized === "canceled" ||
+    normalized === "interrupted"
+  ) {
+    return "failed";
   }
-  if (normalized === 'queued' || normalized === 'pending') {
-    return 'idle';
+  if (normalized === "queued" || normalized === "pending") {
+    return "idle";
   }
-  if (normalized === 'error') return 'failed';
-  return 'idle';
+  if (normalized === "error") return "failed";
+  return "idle";
 }
 
 function deriveRunStatusFromEvents(events: ServerNotification[]): RunStatus {
-  if (events.length === 0) return 'idle';
+  if (events.length === 0) return "idle";
   for (let i = events.length - 1; i >= 0; i--) {
     const m = events[i].method;
-    if (m === 'turn/completed') {
-      const turn = (events[i] as Extract<ServerNotification, { method: 'turn/completed' }>).params
-        .turn;
-      if (turn.status === 'completed') return 'completed';
-      return 'failed';
+    if (m === "turn/completed") {
+      const turn = (
+        events[i] as Extract<ServerNotification, { method: "turn/completed" }>
+      ).params.turn;
+      if (turn.status === "completed") return "completed";
+      return "failed";
     }
-    if (m === 'error') return 'failed';
-    if (m === 'turn/started') return 'running';
+    if (m === "error") return "failed";
+    if (m === "turn/started") return "running";
   }
-  return 'idle';
+  return "idle";
 }
 
 function StatusIcon({ status }: { status: RunStatus }) {
-  if (status === 'running') return <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />;
-  if (status === 'completed') return <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />;
-  if (status === 'failed') return <XCircle className="h-3.5 w-3.5 text-destructive" />;
+  if (status === "running")
+    return <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />;
+  if (status === "completed")
+    return <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />;
+  if (status === "failed")
+    return <XCircle className="h-3.5 w-3.5 text-destructive" />;
   return null;
 }
 
@@ -143,27 +172,29 @@ function RunRow({
   onOpenRun,
 }: {
   run: RunMeta;
-  agent: AutomationTask['agent'];
+  agent: AutomationTask["agent"];
   onOpenRun: (run: RunMeta) => Promise<void>;
 }) {
   const events = useRunEvents(run.threadId);
-  const activeTurnId = agent === 'codex' ? findActiveTurnId(events) : null;
+  const activeTurnId = agent === "codex" ? findActiveTurnId(events) : null;
   const storedStatus = normalizeStoredStatus(run.status);
   const status =
-    agent === 'codex'
+    agent === "codex"
       ? (() => {
           const fromEvents = deriveRunStatusFromEvents(events);
-          return fromEvents === 'idle' ? storedStatus : fromEvents;
+          return fromEvents === "idle" ? storedStatus : fromEvents;
         })()
       : storedStatus;
   const [isCancelling, setIsCancelling] = useState(false);
-  const statusLabel = status === 'idle' ? 'queued' : status;
+  const statusLabel = status === "idle" ? "queued" : status;
   // A cc automation run is driven entirely in the backend, so it never shows up in the
   // UI's active session list; the runner aliases its client under the real session id,
   // which is enough for cc_interrupt to reach it.
   const canInterrupt =
-    agent === 'codex' ? status === 'running' && Boolean(activeTurnId) : status === 'running';
-  const idLabel = agent === 'cc' ? 'Session ID' : 'Thread ID';
+    agent === "codex"
+      ? status === "running" && Boolean(activeTurnId)
+      : status === "running";
+  const idLabel = agent === "cc" ? "Session ID" : "Thread ID";
 
   return (
     <div
@@ -174,7 +205,7 @@ function RunRow({
       role="button"
       tabIndex={0}
       onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
+        if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           void onOpenRun(run);
         }
@@ -189,7 +220,10 @@ function RunRow({
           <span className="text-xs font-medium capitalize">{statusLabel}</span>
         </div>
         {run.cwd && (
-          <span className="truncate text-[10px] text-muted-foreground" title={run.cwd}>
+          <span
+            className="truncate text-[10px] text-muted-foreground"
+            title={run.cwd}
+          >
             {run.cwd}
           </span>
         )}
@@ -209,7 +243,7 @@ function RunRow({
           <Copy className="mr-1 h-3 w-3" />
           Copy ID
         </Button>
-        {(agent === 'codex' || agent === 'cc') && canInterrupt && (
+        {(agent === "codex" || agent === "cc") && canInterrupt && (
           <Button
             type="button"
             variant="outline"
@@ -220,7 +254,7 @@ function RunRow({
               event.stopPropagation();
               setIsCancelling(true);
               try {
-                if (agent === 'codex') {
+                if (agent === "codex") {
                   if (!activeTurnId) {
                     return;
                   }
@@ -228,19 +262,19 @@ function RunRow({
                 } else {
                   await ccInterrupt(run.threadId);
                 }
-                toast({ title: 'Run interrupted' });
+                toast({ title: "Run interrupted" });
               } catch (error) {
                 toast({
-                  title: 'Interrupt failed',
+                  title: "Interrupt failed",
                   description: getErrorMessage(error),
-                  variant: 'destructive',
+                  variant: "destructive",
                 });
               } finally {
                 setIsCancelling(false);
               }
             }}
           >
-            {isCancelling ? 'Interrupting...' : 'Interrupt'}
+            {isCancelling ? "Interrupting..." : "Interrupt"}
           </Button>
         )}
       </div>
@@ -248,7 +282,12 @@ function RunRow({
   );
 }
 
-export function TaskDetailPanel({ task, now, runs, togglingPauseTaskId }: TaskDetailPanelProps) {
+export function TaskDetailPanel({
+  task,
+  now,
+  runs,
+  togglingPauseTaskId,
+}: TaskDetailPanelProps) {
   const [isRunningNow, setIsRunningNow] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [openAiModels, setOpenAiModels] = useState<Model[]>([]);
@@ -256,34 +295,58 @@ export function TaskDetailPanel({ task, now, runs, togglingPauseTaskId }: TaskDe
   const { setView, setActiveSidebarTab } = useLayoutStore();
   const { setCwd } = useWorkspaceStore();
   const { setSelectedAgent } = useAgentSettingsStore();
-  const { setActiveSessionId, activeSessionIds, switchToSession } = useCCStore();
+  const { setActiveSessionId, activeSessionIds, switchToSession } =
+    useCCStore();
   const { handleSessionSelect } = useCCSessionManager();
   const botNames = useBotNames();
-  const resolvedModelProvider = task ? resolveModelProvider(task) : 'openai';
+  const resolvedModelProvider = task ? resolveModelProvider(task) : "openai";
 
   const handleOpenRun = async (run: RunMeta) => {
     if (!task) return;
-    if (task.agent === 'bot') {
+    if (task.agent === "bot") {
       // Bot runs live in the bot's own conversation list, not in the Claude session store.
-      toast({ title: 'Bot run', description: "Open this run from the bot's conversations." });
+      toast({
+        title: "Bot run",
+        description: "Open this run from the bot's conversations.",
+      });
       return;
     }
-    if (task.agent === 'codex') {
-      console.info('[TaskDetailPanel] Open codex run', { threadId: run.threadId, taskId: task.id });
-      setSelectedAgent('codex');
-      setActiveSidebarTab('codex');
-      setView('agent');
+    if (task.agent === "codex") {
+      console.info("[TaskDetailPanel] Open codex run", {
+        threadId: run.threadId,
+        taskId: task.id,
+      });
+      const thread = useCodexStore
+        .getState()
+        .threads.find((t) => t.id === run.threadId);
+      openBuiltinInputTarget({
+        kind: "codex",
+        id: run.threadId,
+        cwd: thread?.cwd,
+        preview: thread?.name || thread?.preview || run.threadId,
+      });
+      setSelectedAgent("codex");
+      setActiveSidebarTab("codex");
+      setView("agent");
       await codexService.setCurrentThread(run.threadId);
       return;
     }
 
-    console.info('[TaskDetailPanel] Open cc run', { sessionId: run.threadId, taskId: task.id });
-    setSelectedAgent('cc');
-    setActiveSidebarTab('cc');
-    setView('agent');
+    console.info("[TaskDetailPanel] Open cc run", {
+      sessionId: run.threadId,
+      taskId: task.id,
+    });
+    openBuiltinInputTarget({
+      kind: "cc",
+      id: run.threadId,
+      preview: run.threadId,
+    });
+    setSelectedAgent("cc");
+    setActiveSidebarTab("cc");
+    setView("agent");
     // If the session is already active, just switch to it without a full reconnect
     if (activeSessionIds.includes(run.threadId)) {
-      console.info('[TaskDetailPanel] Switch to already-active cc session', {
+      console.info("[TaskDetailPanel] Switch to already-active cc session", {
         sessionId: run.threadId,
       });
       switchToSession(run.threadId);
@@ -294,8 +357,10 @@ export function TaskDetailPanel({ task, now, runs, togglingPauseTaskId }: TaskDe
       // Search all sessions — matching is done by session_id so directory filtering adds no value,
       // and would miss sessions from projects[1..n] when the task has multiple projects.
       const result = await listSessions(null, { limit: 100 });
-      const matched = result.sessions.find((session) => session.session_id === run.threadId);
-      console.info('[TaskDetailPanel] Match cc session before resume', {
+      const matched = result.sessions.find(
+        (session) => session.session_id === run.threadId,
+      );
+      console.info("[TaskDetailPanel] Match cc session before resume", {
         sessionId: run.threadId,
         matched: Boolean(matched),
         matchedProject: matched?.cwd ?? null,
@@ -304,24 +369,29 @@ export function TaskDetailPanel({ task, now, runs, togglingPauseTaskId }: TaskDe
         setCwd(matched.cwd);
       }
     } catch (error) {
-      console.warn('[TaskDetailPanel] Failed to load sessions before resume', error);
+      console.warn(
+        "[TaskDetailPanel] Failed to load sessions before resume",
+        error,
+      );
     }
 
     setActiveSessionId(run.threadId);
     await handleSessionSelect(run.threadId);
-    console.info('[TaskDetailPanel] cc session resume requested', { sessionId: run.threadId });
+    console.info("[TaskDetailPanel] cc session resume requested", {
+      sessionId: run.threadId,
+    });
   };
 
   useEffect(() => {
     async function loadProviderModels() {
-      if (!task || task.agent !== 'codex') {
+      if (!task || task.agent !== "codex") {
         setOpenAiModels([]);
         setOllamaModels([]);
         return;
       }
 
       try {
-        if (resolvedModelProvider === 'openai') {
+        if (resolvedModelProvider === "openai") {
           const response = await listModels();
           setOpenAiModels(response.data);
           setOllamaModels([]);
@@ -331,7 +401,7 @@ export function TaskDetailPanel({ task, now, runs, togglingPauseTaskId }: TaskDe
         setOllamaModels(models);
         setOpenAiModels([]);
       } catch (error) {
-        console.warn('[TaskDetailPanel] Failed to load provider models', error);
+        console.warn("[TaskDetailPanel] Failed to load provider models", error);
         setOpenAiModels([]);
         setOllamaModels([]);
       }
@@ -345,12 +415,15 @@ export function TaskDetailPanel({ task, now, runs, togglingPauseTaskId }: TaskDe
     setIsRunningNow(true);
     try {
       await runAutomationNow(task.id);
-      toast({ title: 'Automation triggered', description: `"${task.name}" is now running.` });
+      toast({
+        title: "Automation triggered",
+        description: `"${task.name}" is now running.`,
+      });
     } catch (error) {
       toast({
-        title: 'Failed to run',
+        title: "Failed to run",
         description: getErrorMessage(error),
-        variant: 'destructive',
+        variant: "destructive",
       });
     } finally {
       setIsRunningNow(false);
@@ -370,12 +443,16 @@ export function TaskDetailPanel({ task, now, runs, togglingPauseTaskId }: TaskDe
   const nextRun = getNextRunAt(task.schedule, now);
   const countdown = formatStartsIn(nextRun, now);
   const isToggling = togglingPauseTaskId === task.id;
-  const selectedOpenAiModel = openAiModels.find((candidate) => candidate.id === task.model);
-  const selectedOllamaModel = ollamaModels.find((candidate) => candidate.id === task.model);
+  const selectedOpenAiModel = openAiModels.find(
+    (candidate) => candidate.id === task.model,
+  );
+  const selectedOllamaModel = ollamaModels.find(
+    (candidate) => candidate.id === task.model,
+  );
   const displayModel =
-    task.agent === 'codex' && resolvedModelProvider === 'openai'
+    task.agent === "codex" && resolvedModelProvider === "openai"
       ? selectedOpenAiModel?.displayName || task.model
-      : task.agent === 'codex' && resolvedModelProvider === 'ollama'
+      : task.agent === "codex" && resolvedModelProvider === "ollama"
         ? selectedOllamaModel?.id || task.model
         : task.model;
 
@@ -391,7 +468,9 @@ export function TaskDetailPanel({ task, now, runs, togglingPauseTaskId }: TaskDe
               </span>
             )}
           </div>
-          <p className="mt-0.5 text-xs text-muted-foreground">{describeSchedule(task.schedule)}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {describeSchedule(task.schedule)}
+          </p>
         </div>
         <div className="flex shrink-0 gap-2">
           <Button
@@ -422,9 +501,11 @@ export function TaskDetailPanel({ task, now, runs, togglingPauseTaskId }: TaskDe
               type="button"
               className="flex w-full items-center justify-between rounded-md px-1 py-1 text-left hover:bg-muted/40"
             >
-              <p className="text-xs font-medium text-muted-foreground">Details</p>
+              <p className="text-xs font-medium text-muted-foreground">
+                Details
+              </p>
               <ChevronRight
-                className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${detailsOpen ? 'rotate-90' : ''}`}
+                className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${detailsOpen ? "rotate-90" : ""}`}
               />
             </button>
           </CollapsibleTrigger>
@@ -435,12 +516,20 @@ export function TaskDetailPanel({ task, now, runs, togglingPauseTaskId }: TaskDe
                   <Clock className="h-3.5 w-3.5" />
                   Next run
                 </div>
-                <p className="text-sm font-medium">{task.paused ? 'Paused' : `in ${countdown}`}</p>
+                <p className="text-sm font-medium">
+                  {task.paused ? "Paused" : `in ${countdown}`}
+                </p>
                 {!task.paused && (
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    {nextRun.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    {' · '}
-                    {nextRun.toLocaleDateString([], { month: 'short', day: 'numeric' })}
+                    {nextRun.toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                    {" · "}
+                    {nextRun.toLocaleDateString([], {
+                      month: "short",
+                      day: "numeric",
+                    })}
                   </p>
                 )}
               </div>
@@ -451,7 +540,9 @@ export function TaskDetailPanel({ task, now, runs, togglingPauseTaskId }: TaskDe
                   Runs
                 </div>
                 <p className="text-sm font-medium">{runs.length}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">this session</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  this session
+                </p>
               </div>
 
               <div className="rounded-lg border bg-muted/30 p-3">
@@ -461,9 +552,9 @@ export function TaskDetailPanel({ task, now, runs, togglingPauseTaskId }: TaskDe
                 </div>
                 <p className="text-sm font-medium">
                   {new Date(task.created_at).toLocaleDateString([], {
-                    month: 'short',
-                    day: 'numeric',
-                    year: 'numeric',
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
                   })}
                 </p>
               </div>
@@ -472,10 +563,16 @@ export function TaskDetailPanel({ task, now, runs, togglingPauseTaskId }: TaskDe
             {/* Projects */}
             {task.projects.length > 0 && (
               <div>
-                <p className="mb-1.5 text-xs font-medium text-muted-foreground">Projects</p>
+                <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+                  Projects
+                </p>
                 <div className="flex flex-wrap gap-1.5">
                   {task.projects.map((p) => (
-                    <Badge key={p} variant="secondary" className="max-w-[200px] truncate">
+                    <Badge
+                      key={p}
+                      variant="secondary"
+                      className="max-w-[200px] truncate"
+                    >
                       {getFilename(p) || p}
                     </Badge>
                   ))}
@@ -484,41 +581,51 @@ export function TaskDetailPanel({ task, now, runs, togglingPauseTaskId }: TaskDe
             )}
 
             <div>
-              <p className="mb-1.5 text-xs font-medium text-muted-foreground">Runtime</p>
+              <p className="mb-1.5 text-xs font-medium text-muted-foreground">
+                Runtime
+              </p>
               <div className="flex flex-wrap items-center gap-1.5">
                 <Badge variant="secondary" className="flex items-center gap-1">
                   <Cpu className="h-3 w-3" />
                   {agentLabel(task.agent)}
                 </Badge>
-                {task.agent === 'codex' && (
-                  <Badge variant="secondary">{providerLabel(resolvedModelProvider)}</Badge>
+                {task.agent === "codex" && (
+                  <Badge variant="secondary">
+                    {providerLabel(resolvedModelProvider)}
+                  </Badge>
                 )}
                 <Badge variant="secondary" className="max-w-[260px] truncate">
-                  {task.agent === 'bot'
-                    ? (task.bot_id && botNames[task.bot_id]) || 'Unknown bot'
+                  {task.agent === "bot"
+                    ? (task.bot_id && botNames[task.bot_id]) || "Unknown bot"
                     : displayModel}
                 </Badge>
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
-                {task.agent === 'bot'
-                  ? 'Runs as the bot, with its own model, project and trust.'
+                {task.agent === "bot"
+                  ? "Runs as the bot, with its own model, project and trust."
                   : task.projects.length === 0
-                    ? 'Runs in default workspace cwd.'
+                    ? "Runs in default workspace cwd."
                     : `Runs once per selected project (${task.projects.length}).`}
               </p>
             </div>
 
             {/* Prompt preview */}
             <div className="flex flex-wrap gap-1.5">
-              <p className="mb-1.5 w-full text-xs font-medium text-muted-foreground">Prompt</p>
-              <p className="line-clamp-3 text-sm text-foreground/80">{task.prompt}</p>
+              <p className="mb-1.5 w-full text-xs font-medium text-muted-foreground">
+                Prompt
+              </p>
+              <p className="line-clamp-3 text-sm text-foreground/80">
+                {task.prompt}
+              </p>
             </div>
           </CollapsibleContent>
         </Collapsible>
 
         {/* Run history using EventItem — same as CodexThread */}
         <div>
-          <p className="mb-2 text-xs font-medium text-muted-foreground">Recent runs</p>
+          <p className="mb-2 text-xs font-medium text-muted-foreground">
+            Recent runs
+          </p>
           {runs.length === 0 ? (
             <div className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">
               No runs yet this session

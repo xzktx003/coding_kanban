@@ -1,4 +1,8 @@
 import { expect, test } from "@playwright/test";
+import {
+  applySessionTabAction,
+  type FollowedSession,
+} from "../../packages/shared/src/session-tabs";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
 for (const width of [768, 1024, 1440])
   test(`persistent desktop tools preserve existing tabs and editor/terminal instances (${width}px)`, async ({
@@ -8,6 +12,25 @@ for (const width of [768, 1024, 1440])
     test.setTimeout(90000);
     await page.setViewportSize({ width, height: 900 });
     const fixture = await installSessionUxFixture(page, 8);
+    let sharedCards: FollowedSession[] = [];
+    await page.route("**/api/session/tabs", async (route) => {
+      const body =
+        route.request().method() === "POST"
+          ? route.request().postDataJSON()
+          : null;
+      if (!sharedCards.length && body?.seed) sharedCards = body.seed;
+      for (const op of body?.operations ?? [])
+        sharedCards = applySessionTabAction(sharedCards, op.action);
+      await route.fulfill({
+        json: {
+          cards: sharedCards,
+          initialized: true,
+          revision: 1,
+          sequence: body?.operations?.at(-1)?.seq ?? 0,
+        },
+      });
+    });
+
     await page.addInitScript(() => {
       class Stream {
         onopen: (() => void) | null = null;
@@ -75,17 +98,15 @@ for (const width of [768, 1024, 1440])
         url("/src/session-mode/stores/useLayoutStore.ts")
       );
       for (let i = 0; i < 8; i++)
-        useAgentCenterStore
-          .getState()
-          .addAgentCard(
-            {
-              id: `ux-${i}`,
-              kind: "codex",
-              cwd: "/fixture/project",
-              preview: `原有标签长标题 ${i} · 保留项目副标题`,
-            },
-            { activate: i === 0 },
-          );
+        useAgentCenterStore.getState().addAgentCard(
+          {
+            id: `ux-${i}`,
+            kind: "codex",
+            cwd: "/fixture/project",
+            preview: `原有标签长标题 ${i} · 保留项目副标题`,
+          },
+          { activate: i === 0 },
+        );
       useSessionSplitStore
         .getState()
         .place(
@@ -157,7 +178,9 @@ for (const width of [768, 1024, 1440])
     });
     await dock.getByRole("button", { name: "终端", exact: true }).click();
     await expect.poll(() => starts - stops).toBe(1);
-    await expect(page.getByRole("button", {name: /^切换到终端 /})).toHaveCount(1);
+    await expect(
+      page.getByRole("button", { name: /^切换到终端 / }),
+    ).toHaveCount(1);
     await expect.poll(() => page.locator(".xterm-screen").count()).toBe(1);
     const terminalStarts = starts,
       terminalStops = stops;

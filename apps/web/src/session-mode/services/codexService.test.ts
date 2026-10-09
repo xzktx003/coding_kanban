@@ -508,3 +508,42 @@ it("a same-turn history reconciliation preserves the observed start time when na
     durationMs: 2000,
   });
 });
+
+it("cached read-only selection resolves before native verification without taking writer ownership", async () => {
+  let resolve!: (value: unknown) => void;
+  api.threadRead.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  useCodexStore.setState({
+    currentThreadId: null,
+    currentTurnId: null,
+    activeThreadIds: [],
+    events: { "passive-cache": [] },
+    threads: [],
+    historyLoadedMap: { "passive-cache": true },
+    historyLoadingMap: {},
+    turnTimingMap: {},
+  });
+  let selected = false;
+  const selection = codexService.setCurrentThread("passive-cache").then(() => {
+    selected = true;
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  const resolvedWithoutNetwork = selected;
+  resolve({ thread: { id: "passive-cache", turns: [] } });
+  await selection;
+  expect(resolvedWithoutNetwork).toBe(true);
+  expect(useCodexStore.getState().activeThreadIds).toEqual([]);
+  expect(api.threadRead).toHaveBeenCalledExactlyOnceWith(
+    { threadId: "passive-cache", recent: true },
+    expect.objectContaining({ suppressToast: true }),
+  );
+  await codexService.loadThreadHistory("passive-cache", undefined, {
+    recent: true,
+    background: true,
+  });
+});

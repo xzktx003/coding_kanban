@@ -380,10 +380,7 @@ export const codexService = {
 
       const state = useCodexStore.getState();
 
-      if (
-        state.activeThreadIds.includes(threadId) &&
-        state.historyLoadedMap[threadId]
-      ) {
+      if (state.historyLoadedMap[threadId]) {
         // Live thread — derive the active turn id from streaming events so the
         // Stop button works correctly when a turn is in progress.
         const threadEvents = state.events[threadId] ?? [];
@@ -403,6 +400,16 @@ export const codexService = {
           currentTurnId: activeTurnId,
           inputFocusTrigger: state.inputFocusTrigger + 1,
         }));
+        if (!state.activeThreadIds.includes(threadId)) {
+          // A passive cached transcript is already usable. Verification must
+          // stay read-only and must not delay navigation or acquire a writer.
+          void codexService
+            .loadThreadHistory(threadId, undefined, {
+              recent: true,
+              background: true,
+            })
+            .catch(() => {}); // The owning history store retains the retryable error.
+        }
       } else {
         // Uncached — select the view and read history without acquiring execution.
         set((state) => ({

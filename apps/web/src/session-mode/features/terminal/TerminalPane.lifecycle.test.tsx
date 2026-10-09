@@ -71,12 +71,14 @@ test("StrictMode cancels the discarded terminal attachment before opening its re
     </StrictMode>,
   );
   expect(calls.open).not.toHaveBeenCalled();
+  expect(calls.start).not.toHaveBeenCalled();
   expect(calls.dispose).toHaveBeenCalledTimes(1);
   await act(async () => {
     for (const cb of frames.values()) cb(0);
     frames.clear();
   });
   expect(calls.open).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(calls.start).toHaveBeenCalledTimes(1));
   view.rerender(
     <StrictMode>
       <TerminalPane active={false} panelOpen={false} />
@@ -115,4 +117,23 @@ test("terminal start error offers one guarded retry in the same pane", async () 
   fireEvent.click(retry);
   fireEvent.click(retry);
   await waitFor(() => expect(calls.start).toHaveBeenCalledTimes(2));
+});
+
+test("a failed start remains explicit when the same pane is hidden and reopened", async () => {
+  vi.stubGlobal(
+    "WebSocket",
+    class {
+      close() {}
+    },
+  );
+  calls.start.mockRejectedValueOnce(new Error("显式重试"));
+  const view = render(<TerminalPane active panelOpen />);
+  await screen.findByRole("alert");
+  view.rerender(<TerminalPane active={false} panelOpen={false} />);
+  view.rerender(<TerminalPane active panelOpen />);
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  });
+  expect(calls.start).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("button", { name: "重试启动终端" })).toBeTruthy();
 });

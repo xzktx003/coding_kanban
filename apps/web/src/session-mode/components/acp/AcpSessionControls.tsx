@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState } from "react";
 import {
   Select,
   SelectContent,
@@ -7,16 +7,17 @@ import {
   SelectLabel,
   SelectTrigger,
   SelectValue,
-} from '@session/components/ui/select';
-import { Switch } from '@session/components/ui/switch';
-import { toast } from '@session/components/ui/use-toast';
+} from "@session/components/ui/select";
+import { Switch } from "@session/components/ui/switch";
+import { toast } from "@session/components/ui/use-toast";
 import {
   type AcpConfigOption,
   acpPrompt,
   acpSetConfigOption,
   acpSetMode,
-} from '@session/services/apiAdapt/acp';
-import { useAcpStore } from '@session/stores/useAcpStore';
+} from "@session/services/apiAdapt/acp";
+import { useAcpStore } from "@session/stores/useAcpStore";
+import { applyAcpSessionSetting } from "./sessionSettings";
 
 type ControlOption = { value: string; name: string; description?: string };
 
@@ -37,6 +38,7 @@ function ControlSelect({
     <Select value={value} onValueChange={onChange} disabled={disabled}>
       <SelectTrigger
         className="h-7 w-auto min-w-20 border-0 bg-transparent text-xs shadow-none gap-1"
+        aria-label={label}
         title={label}
       >
         <SelectValue />
@@ -72,7 +74,7 @@ function GrokApprovalSelect({
   sessionId: string;
 }) {
   const running = useAcpStore((s) => s.running);
-  const [value, setValue] = useState('ask');
+  const [value, setValue] = useState("ask");
 
   return (
     <ControlSelect
@@ -80,8 +82,16 @@ function GrokApprovalSelect({
       value={value}
       disabled={running}
       options={[
-        { value: 'ask', name: 'Ask', description: 'Prompt before each tool call' },
-        { value: 'yolo', name: 'Always approve', description: 'Skip all permission prompts' },
+        {
+          value: "ask",
+          name: "Ask",
+          description: "Prompt before each tool call",
+        },
+        {
+          value: "yolo",
+          name: "Always approve",
+          description: "Skip all permission prompts",
+        },
       ]}
       onChange={async (next) => {
         const previous = value;
@@ -90,14 +100,14 @@ function GrokApprovalSelect({
           await acpPrompt(
             connectionId,
             sessionId,
-            `/always-approve ${next === 'yolo' ? 'on' : 'off'}`
+            `/always-approve ${next === "yolo" ? "on" : "off"}`,
           );
         } catch (e) {
           setValue(previous);
           toast({
-            title: 'Agent rejected the change',
+            title: "Agent rejected the change",
             description: String(e),
-            variant: 'destructive',
+            variant: "destructive",
           });
         }
       }}
@@ -130,31 +140,27 @@ export function AcpSessionControls() {
 
   // Update optimistically, then roll back if the agent rejects the change
   // (e.g. Gemini refuses privileged modes in an untrusted folder).
-  const apply = async (revert: () => void, request: () => Promise<void>) => {
-    try {
-      await request();
-    } catch (e) {
-      revert();
-      toast({ title: 'Agent rejected the change', description: String(e), variant: 'destructive' });
-    }
-  };
-
-  const changeConfigOption = (option: AcpConfigOption, value: string | boolean) => {
+  const changeConfigOption = (
+    option: AcpConfigOption,
+    value: string | boolean,
+  ) => {
     const previous = option.currentValue;
-    setConfigOptionValue(option.id, value);
-    return apply(
+    return applyAcpSessionSetting(
+      `config:${option.id}`,
+      () => setConfigOptionValue(option.id, value),
       () => setConfigOptionValue(option.id, previous),
-      () => acpSetConfigOption(connectionId, sessionId, option.id, value)
+      (connection, session) =>
+        acpSetConfigOption(connection, session, option.id, value),
     );
   };
 
   if (configOptions.length) {
-    const modeOptions = configOptions.filter((o) => o.category === 'mode');
+    const modeOptions = configOptions.filter((o) => o.category === "mode");
     if (!modeOptions.length) return null;
     return (
       <div className="flex items-center gap-1">
         {modeOptions.map((option) =>
-          option.type === 'boolean' ? (
+          option.type === "boolean" ? (
             <label
               key={option.id}
               className="flex items-center gap-1 px-1 text-[11px] text-muted-foreground"
@@ -163,7 +169,9 @@ export function AcpSessionControls() {
               <span>{option.name}</span>
               <Switch
                 checked={option.currentValue === true}
-                onCheckedChange={(checked) => changeConfigOption(option, checked)}
+                onCheckedChange={(checked) =>
+                  changeConfigOption(option, checked)
+                }
               />
             </label>
           ) : (
@@ -174,15 +182,19 @@ export function AcpSessionControls() {
               options={option.options ?? []}
               onChange={(value) => changeConfigOption(option, value)}
             />
-          )
+          ),
         )}
       </div>
     );
   }
 
   if (!modes?.availableModes.length) {
-    return agentId === 'grok' ? (
-      <GrokApprovalSelect key={sessionId} connectionId={connectionId} sessionId={sessionId} />
+    return agentId === "grok" ? (
+      <GrokApprovalSelect
+        key={sessionId}
+        connectionId={connectionId}
+        sessionId={sessionId}
+      />
     ) : null;
   }
   return (
@@ -196,10 +208,11 @@ export function AcpSessionControls() {
       }))}
       onChange={(modeId) => {
         const previous = modes.currentModeId;
-        setCurrentMode(modeId);
-        return apply(
+        return applyAcpSessionSetting(
+          "mode",
+          () => setCurrentMode(modeId),
           () => setCurrentMode(previous),
-          () => acpSetMode(connectionId, sessionId, modeId)
+          (connection, session) => acpSetMode(connection, session, modeId),
         );
       }}
     />

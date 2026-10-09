@@ -69,7 +69,9 @@ export function followupParameters(threadId: string): Record<string, unknown> {
     thread = useCodexStore.getState().threads.find((t) => t.id === threadId);
   const { model, reasoningEffort } = getThreadModelSettings(threadId);
   return {
-    cwd: thread?.cwd ?? null,
+    // Restored metadata may use an empty placeholder until its directory loads.
+    // Leave the native thread's directory in effect; never borrow another project.
+    cwd: thread?.cwd?.trim() ? thread.cwd : null,
     model: model || null,
     effort: reasoningEffort ?? null,
     approvalPolicy: c.approvalPolicy,
