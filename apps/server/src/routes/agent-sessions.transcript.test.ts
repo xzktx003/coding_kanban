@@ -362,8 +362,8 @@ test("GET transcript keeps two tmux panes in the same directory on distinct Code
     (secondResponse.json() as AgentTranscriptResponse).sessionId,
     "codex-session-b",
   );
-  assert.equal(registry.get(first.id).agentSessionId, "codex-session-a");
-  assert.equal(registry.get(second.id).agentSessionId, "codex-session-b");
+  assert.equal(registry.get(first.id).agentSessionId, "stale-codex-session");
+  assert.equal(registry.get(second.id).agentSessionId, undefined);
   await app.close();
 });
 

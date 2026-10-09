@@ -19,14 +19,21 @@ function writeSession(
   id: string,
   source: unknown,
   cwd = "/workspace/shared",
+  timestamp = "2026-08-19T00:00:00.000Z",
+  metadataTimestamp?: string,
 ): string {
   const path = join(sessionsRoot, `${name}.jsonl`);
   writeFileSync(
     path,
     `${JSON.stringify({
-      timestamp: "2026-08-19T00:00:00.000Z",
+      timestamp,
       type: "session_meta",
-      payload: { id, cwd, source },
+      payload: {
+        id,
+        cwd,
+        source,
+        ...(metadataTimestamp ? { timestamp: metadataTimestamp } : {}),
+      },
     })}\n`,
   );
   return path;
@@ -704,3 +711,95 @@ test("CodexSessionLocator ignores newer subagent JSONL files held by the same Co
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+for (const ambiguous of [false, true]) {
+  test(`CodexSessionLocator ${ambiguous ? "rejects ambiguous creation times" : "recovers after a shell snapshot refresh"}`, async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-refreshed-snapshot-"));
+    const sessionsRoot = join(root, "sessions");
+    const shellSnapshotsRoot = join(root, "snapshots");
+    const procRoot = join(root, "proc");
+    mkdirSync(sessionsRoot, { recursive: true });
+    mkdirSync(shellSnapshotsRoot, { recursive: true });
+    mkdirSync(join(procRoot, "1201", "task", "1201"), { recursive: true });
+    try {
+      const start = Date.parse("2026-10-08T13:26:42.000Z");
+      exposeCodexCommand(procRoot, 1201);
+      exposeLinuxProcessStartTime(procRoot, 1201, start);
+      writeFileSync(join(procRoot, "1201", "task", "1201", "children"), "");
+      writeSession(
+        sessionsRoot,
+        "selected",
+        "codex-selected",
+        "cli",
+        "/workspace/shared",
+        new Date(start + 5 * 60000).toISOString(),
+        new Date(start + 1000).toISOString(),
+      );
+      writeSession(
+        sessionsRoot,
+        "other",
+        "codex-other",
+        "cli",
+        "/workspace/shared",
+        new Date(start + (ambiguous ? 2000 : 3600000)).toISOString(),
+      );
+      writeSession(
+        sessionsRoot,
+        "subagent",
+        "codex-subagent",
+        { subagent: {} },
+        "/workspace/shared",
+        new Date(start + 500).toISOString(),
+      );
+      writeSession(
+        sessionsRoot,
+        "other-cwd",
+        "codex-other-cwd",
+        "cli",
+        "/workspace/other",
+        new Date(start + 500).toISOString(),
+      );
+      writeFileSync(
+        join(
+          shellSnapshotsRoot,
+          `codex-selected.${BigInt(start + 6 * 3600000) * 1000000n}.sh`,
+        ),
+        "",
+      );
+      const locator = new CodexSessionLocator({
+        procRoot,
+        sessionsRoot,
+        shellSnapshotsRoot,
+        clockTicksPerSecond: 100,
+        resolveTmuxPanePid: async () => 1201,
+      });
+      assert.equal(
+        await locator.resolve({
+          tmuxTarget: "%1",
+          workingDirectory: "/workspace/shared",
+        }),
+        undefined,
+      );
+      assert.equal(
+        await locator.resolve({
+          tmuxTarget: "%1",
+          workingDirectory: "/workspace/shared",
+          historySessionId: "codex-selected",
+        }),
+        ambiguous ? undefined : "codex-selected",
+      );
+      // A shell must never inherit an old Codex history from matching dates.
+      writeFileSync(join(procRoot, "1201", "cmdline"), "/bin/bash\0");
+      assert.equal(
+        await locator.resolve({
+          tmuxTarget: "%1",
+          workingDirectory: "/workspace/shared",
+          historySessionId: "codex-selected",
+        }),
+        undefined,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}

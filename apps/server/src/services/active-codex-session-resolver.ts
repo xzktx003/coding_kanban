@@ -20,6 +20,7 @@ export function isRemoteAgentSession(
 export async function resolveActiveCodexSessionId(
   agentSession: AgentSessionRecord,
   dependencies: ActiveCodexSessionResolverDependencies,
+  options: { historyOnly?: boolean } = {},
 ): Promise<string | undefined> {
   if (isRemoteAgentSession(agentSession)) {
     return agentSession.agentSessionId;
@@ -39,18 +40,26 @@ export async function resolveActiveCodexSessionId(
     return agentSession.agentSessionId;
   }
 
-  const activeSessionId = await dependencies.codexSessionLocator.resolve({
+  const locatorInput = {
     tmuxTarget,
     ...(tmuxSession ? { tmuxSession } : {}),
     ...(tmuxClientProcessId !== undefined ? { tmuxClientProcessId } : {}),
     workingDirectory: agentSession.workingDirectory,
-  });
+  };
+  const activeSessionId =
+    await dependencies.codexSessionLocator.resolve(locatorInput);
+  if (!activeSessionId && options.historyOnly && agentSession.agentSessionId) {
+    return dependencies.codexSessionLocator.resolve({
+      ...locatorInput,
+      historySessionId: agentSession.agentSessionId,
+    });
+  }
   if (!activeSessionId) {
     // A live tmux card can be showing a non-Codex pane. Falling back to the
     // previous pane's ID would deliver the image to the wrong conversation.
     return tmuxSession ? undefined : agentSession.agentSessionId;
   }
-  if (activeSessionId !== agentSession.agentSessionId) {
+  if (!options.historyOnly && activeSessionId !== agentSession.agentSessionId) {
     dependencies.registry.updateSession(agentSession.id, {
       agentSessionId: activeSessionId,
     });

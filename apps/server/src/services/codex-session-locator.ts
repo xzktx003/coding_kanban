@@ -41,6 +41,7 @@ interface CodexSessionLocatorOptions {
 
 interface ResolveCodexSessionInput {
   tmuxTarget: string;
+  historySessionId?: string;
   tmuxSession?: string;
   tmuxClientProcessId?: number;
   tmuxPaneProcessId?: number;
@@ -65,6 +66,7 @@ interface OpenSessionCandidate {
   mtimeMs: number;
   path: string;
   subagent: boolean;
+  createdAtMs?: number;
 }
 
 interface CachedSessionCandidate {
@@ -91,6 +93,7 @@ function readOpenSession(path: string): OpenSessionCandidate | null {
       .split("\n", 1)[0];
     const record = JSON.parse(firstLine ?? "") as {
       type?: unknown;
+      timestamp?: unknown;
       payload?: Record<string, unknown>;
     };
     if (record.type !== "session_meta" || !record.payload) return null;
@@ -108,7 +111,17 @@ function readOpenSession(path: string): OpenSessionCandidate | null {
     const source = record.payload.source;
     const subagent =
       source !== null && typeof source === "object" && "subagent" in source;
-    return { id, cwd, mtimeMs: statSync(path).mtimeMs, path, subagent };
+    const timestamp = record.payload.timestamp ?? record.timestamp;
+    const createdAtMs =
+      typeof timestamp === "string" ? Date.parse(timestamp) : NaN;
+    return {
+      id,
+      cwd,
+      mtimeMs: statSync(path).mtimeMs,
+      path,
+      subagent,
+      ...(Number.isFinite(createdAtMs) ? { createdAtMs } : {}),
+    };
   } catch {
     return null;
   } finally {
@@ -787,6 +800,41 @@ export class CodexSessionLocator {
       if (matchingSession) {
         return matchingSession.id;
       }
+    }
+
+    // Shell snapshots can be regenerated hours into a conversation. For a
+    // newly created thread, immutable session metadata still records startup.
+    // Recover only an already registered history ID with a unique same-directory
+    // match across the whole process tree; this is not an input-routing identity.
+    // recency alone must never select another terminal's conversation.
+    if (
+      input.historySessionId &&
+      normalizedDirectory &&
+      codexProcessIds.length > 0
+    ) {
+      const startupMatches = new Set<string>();
+      for (const processId of codexProcessIds) {
+        const startedAt = readProcessStartTime(
+          this.procRoot,
+          processId,
+          this.clockTicksPerSecond,
+        );
+        if (startedAt === null) continue;
+        for (const candidate of sessionCandidates) {
+          if (
+            candidate.createdAtMs !== undefined &&
+            Math.abs(candidate.createdAtMs - startedAt) <=
+              SHELL_SNAPSHOT_MATCH_WINDOW_MS
+          ) {
+            startupMatches.add(candidate.id);
+          }
+        }
+      }
+      if (
+        startupMatches.size === 1 &&
+        startupMatches.has(input.historySessionId)
+      )
+        return input.historySessionId;
     }
 
     // Recent Codex builds append rollout JSONL through short-lived handles
