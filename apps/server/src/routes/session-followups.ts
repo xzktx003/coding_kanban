@@ -13,6 +13,7 @@ import {
   FollowupRejected,
   type FollowupRuntime,
 } from "../services/codex-followups.js";
+import type { SessionCodexFeishuNotifier } from "../services/session-codex-feishu-notifier.js";
 
 function invalid(message = "无效的消息队列请求"): never {
   throw Object.assign(new Error(message), { statusCode: 400 });
@@ -262,6 +263,10 @@ export function registerSessionFollowupRoutes(
     fetch?: typeof fetch;
     runtime?: FollowupRuntime;
     autoStart?: boolean;
+    completionNotifier?: Pick<
+      SessionCodexFeishuNotifier,
+      "cursor" | "observe" | "close"
+    >;
   },
 ) {
   const fetcher = options.fetch ?? fetch,
@@ -480,7 +485,7 @@ export function registerSessionFollowupRoutes(
       if (health.instance !== instance) {
         if (instance !== undefined)
           await queue.recover("会话服务已重启，请确认任务状态后继续队列");
-        sequence = undefined;
+        sequence = await options.completionNotifier?.cursor(health.instance);
         instance = health.instance;
       }
       const response = await fetcher(
@@ -514,6 +519,16 @@ export function registerSessionFollowupRoutes(
             continue;
           if (sequence !== undefined && event.seq > sequence + 1)
             await queue.recover("连接期间有任务事件缺失，请检查后继续队列");
+          try {
+            await options.completionNotifier?.observe(instance!, event);
+          } catch (error) {
+            // Notification storage must not disconnect the task dispatch stream.
+            // Its durable cursor stays unchanged so a restored notifier can replay.
+            app.log.warn(
+              { err: error },
+              "Session completion notification was not recorded",
+            );
+          }
           sequence = event.seq;
           if (event.event === "codex:notification")
             void queue
@@ -544,6 +559,7 @@ export function registerSessionFollowupRoutes(
     lifetime.abort();
     clearTimeout(timer);
     clearTimeout(streamTimer);
+    await options.completionNotifier?.close();
     await queue.drain();
     lease?.stdin?.end();
   });

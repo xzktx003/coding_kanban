@@ -4,6 +4,8 @@ import { registerSessionProjectsRoutes } from "./session-projects.js";
 import { registerWorkspaceFileRoutes } from "./workspace-files.js";
 import { registerSessionTabsRoutes } from "./session-tabs.js";
 import { saveSessionAttachment } from "../services/session-attachments.js";
+import { SessionCodexFeishuNotifier } from "../services/session-codex-feishu-notifier.js";
+import type { FeishuCompletionSenderLike } from "../services/agent-completion-feishu-notifier.js";
 import { resolve } from "node:path";
 import { Readable } from "node:stream";
 import type { FastifyInstance } from "fastify";
@@ -15,6 +17,10 @@ interface SessionModeRouteOptions {
   fetch?: typeof globalThis.fetch;
   projects?: () => string[];
   ensureRuntime?: () => Promise<string | undefined>;
+  completionNotifications?: {
+    settings: { get(): { configured: boolean; enabled: boolean } };
+    sender: FeishuCompletionSenderLike;
+  };
 }
 
 function validateOrigin(origin: string): URL {
@@ -54,6 +60,65 @@ export function registerSessionModeRoutes(
   });
   let origin = options.origin ? validateOrigin(options.origin).origin : null;
   const fetchUpstream = options.fetch ?? globalThis.fetch;
+  const completionNotifier = options.completionNotifications
+    ? new SessionCodexFeishuNotifier({
+        ...options.completionNotifications,
+        file: options.attachmentRoot
+          ? resolve(
+              options.attachmentRoot,
+              "..",
+              "codex-completion-notifications.json",
+            )
+          : undefined,
+        readThread: async (threadId, turnId) => {
+          if (!origin) throw new Error("会话服务尚未连接");
+          const request = async (path: string, body: unknown) => {
+            const response = await fetchUpstream(
+              `${origin}/api/codex/thread/${path}`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(15000),
+              },
+            );
+            if (!response.ok) throw new Error("无法读取任务完成记录");
+            return response.json() as Promise<any>;
+          };
+          const metadata = await request("metadata", { threadId });
+          const thread = metadata.thread;
+          if (!thread || thread.id !== threadId)
+            throw new Error("任务会话身份不匹配");
+          if (thread.parentThreadId || thread.source?.subAgent) return metadata;
+          let cursor: string | null = null;
+          const seen = new Set<string>();
+          do {
+            const page = await request("turns/list", {
+              threadId,
+              cursor,
+              limit: 20,
+              sortDirection: "desc",
+              itemsView: "full",
+            });
+            if (!Array.isArray(page.data)) throw new Error("任务历史格式无效");
+            const turn = page.data.find((turn: any) => turn.id === turnId);
+            if (turn) return { thread: { ...thread, turns: [turn] } };
+            cursor = page.nextCursor ?? null;
+            if (cursor !== null) {
+              if (typeof cursor !== "string" || seen.has(cursor))
+                throw new Error("任务历史游标无效");
+              seen.add(cursor);
+            }
+          } while (cursor !== null);
+          throw new Error("任务完成记录暂未写入");
+        },
+        logError: (error) =>
+          app.log.warn(
+            { err: error },
+            "Session Feishu notification unavailable",
+          ),
+      })
+    : undefined;
   const followups = registerSessionFollowupRoutes(app, {
     origin: () => origin,
     fetch: fetchUpstream,
@@ -61,8 +126,13 @@ export function registerSessionModeRoutes(
       ? resolve(options.attachmentRoot, "..", "codex-followups.json")
       : undefined,
     autoStart: Boolean(options.attachmentRoot),
+    completionNotifier,
   });
-  registerSessionSubagentRoutes(app, { origin: () => origin, fetch: fetchUpstream, stop: (id, turn) => followups.stop(id, turn) });
+  registerSessionSubagentRoutes(app, {
+    origin: () => origin,
+    fetch: fetchUpstream,
+    stop: (id, turn) => followups.stop(id, turn),
+  });
   registerWorkspaceFileRoutes(app, {
     trashHome: options.attachmentRoot
       ? resolve(options.attachmentRoot, "..", "file-trash")

@@ -1,4 +1,7 @@
-import { useFollowupSettingsStore, type EnterBehavior } from "@session/stores/useFollowupSettingsStore";
+import {
+  useFollowupSettingsStore,
+  type EnterBehavior,
+} from "@session/stores/useFollowupSettingsStore";
 import { PROJECT_REPOSITORY_URL } from "../../../lib/product-links";
 import { Monitor, Moon, Sun, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -21,6 +24,7 @@ import {
   useThemeStore,
 } from "@session/stores/settings";
 import { LanguageSelector } from "./LanguageSelector";
+import { FeishuNotificationSettings } from "./FeishuNotificationSettings";
 
 const ACCENT_OPTIONS: Array<{
   value: Accent;
@@ -82,12 +86,55 @@ export function GeneralSettings() {
 
   return (
     <div className="space-y-6">
-      <section className="session-followup-preferences"><h3>消息发送与审查</h3>
-        <label>运行中默认发送方式<select aria-label="默认追加消息方式" value={followup.mode} onChange={e=>followup.setMode(e.target.value as "queue"|"steer")}><option value="queue">排队，当前轮结束后发送</option><option value="steer">引导当前任务</option></select></label>
-        <label>Enter 行为<select aria-label="Enter 发送行为" value={followup.enterBehavior} onChange={e=>followup.setEnterBehavior(e.target.value as EnterBehavior)}><option value="enter">Enter 发送</option><option value="cmdIfMultiline">多行时 Ctrl/Cmd+Enter 发送</option><option value="cmdAlways">始终 Ctrl/Cmd+Enter 发送</option></select></label>
-        <p>Shift+Enter 换行；运行中 Ctrl/Cmd+Shift+Enter 临时切换排队与引导。</p>
-        <label>默认审查方式<select aria-label="默认审查方式" value={followup.reviewDelivery} onChange={e=>followup.setReviewDelivery(e.target.value as "inline"|"detached")}><option value="inline">当前会话</option><option value="detached">独立会话</option></select></label>
+      <section className="session-followup-preferences">
+        <h3>消息发送与审查</h3>
+        <label>
+          运行中默认发送方式
+          <select
+            aria-label="默认追加消息方式"
+            value={followup.mode}
+            onChange={(e) =>
+              followup.setMode(e.target.value as "queue" | "steer")
+            }
+          >
+            <option value="queue">排队，当前轮结束后发送</option>
+            <option value="steer">引导当前任务</option>
+          </select>
+        </label>
+        <label>
+          Enter 行为
+          <select
+            aria-label="Enter 发送行为"
+            value={followup.enterBehavior}
+            onChange={(e) =>
+              followup.setEnterBehavior(e.target.value as EnterBehavior)
+            }
+          >
+            <option value="enter">Enter 发送</option>
+            <option value="cmdIfMultiline">多行时 Ctrl/Cmd+Enter 发送</option>
+            <option value="cmdAlways">始终 Ctrl/Cmd+Enter 发送</option>
+          </select>
+        </label>
+        <p>
+          Shift+Enter 换行；运行中 Ctrl/Cmd+Shift+Enter 临时切换排队与引导。
+        </p>
+        <label>
+          默认审查方式
+          <select
+            aria-label="默认审查方式"
+            value={followup.reviewDelivery}
+            onChange={(e) =>
+              followup.setReviewDelivery(
+                e.target.value as "inline" | "detached",
+              )
+            }
+          >
+            <option value="inline">当前会话</option>
+            <option value="detached">独立会话</option>
+          </select>
+        </label>
       </section>
+      <FeishuNotificationSettings />
       <section className="space-y-3">
         <h3 className="text-sm font-medium px-1">{t("preferences")}</h3>
         <Card>

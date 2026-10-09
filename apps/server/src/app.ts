@@ -625,6 +625,14 @@ export function buildServer(options: BuildServerOptions = {}): {
       origin: options.sessionRuntimeOrigin,
       ensureRuntime: options.ensureSessionRuntime,
       attachmentRoot: options.sessionAttachmentRoot,
+      ...(options.feishuCompletionSender
+        ? {
+            completionNotifications: {
+              settings: feishuNotificationSettingsService,
+              sender: options.feishuCompletionSender,
+            },
+          }
+        : {}),
       projects: () =>
         registry
           .list()
