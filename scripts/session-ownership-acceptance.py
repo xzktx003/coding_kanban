@@ -207,6 +207,12 @@ stream_max_retries = 0
                     status, created = api('/api/codex/thread/start', {'cwd': directory, 'historyMode':'paginated'})
                     assert status == 200 and created['thread']['historyMode'] == 'paginated', (status, created)
                     paginated_id = created['thread']['id']
+                    # A user can wait while composing the first message. Sweeps
+                    # must keep the unmaterialized thread loaded in that time.
+                    time.sleep(3)
+                    assert paginated_id in api('/api/codex/thread/loaded/list', {'limit': 100})[1]['data']
+                    status, empty_history = api('/api/codex/thread/read', {'threadId': paginated_id})
+                    assert status == 200 and empty_history['thread']['turns'] == [], (status, empty_history)
                     status, paginated_turn = api('/api/codex/turn/start', dict(start,threadId=paginated_id,clientUserMessageId=str(uuid.uuid4())))
                     assert status == 200, (status,paginated_turn)
                     paginated_lock = cli / 'thread-writer-locks' / (paginated_id + '.lock')
@@ -216,7 +222,7 @@ stream_max_retries = 0
                     assert status == 200 and 'Ownership acceptance OK' in json.dumps(paginated_history), (status,paginated_history)
                     assert other.call('thread/resume', {'threadId':paginated_id})['result']['thread']['id'] == paginated_id
                     assert api('/api/codex/thread/read', {'threadId':paginated_id})[0] == 200
-                    report = {'passed': True, 'sameThreadId': tid, 'independentNativeProcesses': 2, 'localModelCalls': len(model_calls), 'remoteModelCalls': 0, 'readOnlyWhileExternalOwner': True, 'conflictBeforeDispatch': True, 'automaticReleaseConfirmedByKernelLock': True, 'releaseSendRace': True, 'originalHistoryPreserved': True, 'nativePaginatedHistoryReadWhileExternallyOwned': True}
+                    report = {'passed': True, 'sameThreadId': tid, 'independentNativeProcesses': 2, 'localModelCalls': len(model_calls), 'remoteModelCalls': 0, 'readOnlyWhileExternalOwner': True, 'conflictBeforeDispatch': True, 'automaticReleaseConfirmedByKernelLock': True, 'releaseSendRace': True, 'originalHistoryPreserved': True, 'nativePaginatedHistoryReadWhileExternallyOwned': True, 'emptyThreadSurvivesSweepAndFirstSend': True}
                     print(json.dumps(report, ensure_ascii=False, indent=2))
                     if args.output:
                         Path(args.output).write_text(json.dumps(report, ensure_ascii=False, indent=2))

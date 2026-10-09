@@ -62,3 +62,7 @@ HTTP 新增：
 ## 子线程能力与回复身份
 
 普通子输入权限须在获取写入权前通过原生只读元数据确认；false 或缺失时不 resume，不以试发消息探测。子中断与普通输入权限分开判断，实际停止复用既有暂停/中断接口。查看后代不产生关注标签或新的写入实例。新网页回复绑定 thread/request/turn/item 与 requestToken，运行层原子匹配待处理请求，拒绝旧实例和重复回复。完整保护需新网页及新 Rust 二进制同时启用，旧接口仍兼容。见 [子 Agent](session-subagents.md)。
+
+### 新线程的首条消息
+
+`thread/start` 创建的原生实例在首条用户消息之前可能尚未物化到磁盘。自动 sweep 与显式 release 均须保留这一实例，直到 `turn/start` 成功接纳；失败或未知送达不解除保护，不重试消息本身。接纳后恢复现有队列、活动轮次、后台终端、目标和子 Agent 安全释放检查。分页历史只对首屏明确的“not materialized yet / before first user message”返回空 turns，不吞掉其他原生错误，也不隐式 resume。隔离原生验收覆盖创建后等待多个 sweep 周期、读取空历史、首条消息只发送一次以及后续安全释放。
