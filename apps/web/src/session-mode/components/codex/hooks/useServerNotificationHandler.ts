@@ -10,7 +10,7 @@ import { useSessionNameStore } from "../../../stores/useSessionNameStore";
 import { notifyDesktop } from "@session/lib/notify";
 import { isSessionModeActive } from "@session/session-dom";
 import { toast } from "sonner";
-import { type RefObject, useCallback } from "react";
+import { type RefObject, useCallback, useEffect, useRef } from "react";
 import type { ServerNotification } from "@session/bindings/ServerNotification";
 import type { AccountLoginCompletedNotification } from "@session/bindings/v2";
 import { useCodexStore } from "@session/components/codex/stores";
@@ -23,6 +23,7 @@ import {
 } from "./serverRequests";
 import { useRequestUserInputStore } from "../stores/useRequestUserInputStore";
 import { hydrateThreadModel } from "@session/stores/useThreadModelStore";
+import { isDeltaEvent, type DeltaEvent } from "../stores/eventUtils";
 
 export type BeepMode = "never" | "unfocused" | "always";
 
@@ -39,6 +40,67 @@ export function useServerNotificationHandler(
   refs: NotificationHandlerRefs,
   syncAccountState: (refreshToken: boolean) => Promise<void>,
 ) {
+  const pendingDeltas = useRef(
+    new Map<string, { threadId: string; event: DeltaEvent }>(),
+  );
+  const deltaFrame = useRef<number | null>(null);
+
+  const flushPendingDeltas = useCallback((threadId?: string) => {
+    const batches = new Map<string, DeltaEvent[]>();
+    for (const [key, pending] of pendingDeltas.current) {
+      if (threadId && pending.threadId !== threadId) continue;
+      pendingDeltas.current.delete(key);
+      const batch = batches.get(pending.threadId);
+      if (batch) batch.push(pending.event);
+      else batches.set(pending.threadId, [pending.event]);
+    }
+    for (const [id, events] of batches)
+      useCodexStore.getState().addTranscriptDeltas(id, events);
+
+    if (!pendingDeltas.current.size && deltaFrame.current !== null) {
+      cancelAnimationFrame(deltaFrame.current);
+      deltaFrame.current = null;
+    }
+  }, []);
+
+  const queueDelta = useCallback(
+    (threadId: string, event: DeltaEvent) => {
+      const params = event.params as typeof event.params & {
+        summaryIndex?: number;
+        contentIndex?: number;
+      };
+      const key = JSON.stringify([
+        threadId,
+        event.method,
+        params.turnId,
+        params.itemId,
+        params.summaryIndex ?? null,
+        params.contentIndex ?? null,
+      ]);
+      const previous = pendingDeltas.current.get(key)?.event;
+      const merged = previous
+        ? ({
+            ...event,
+            params: {
+              ...event.params,
+              delta: `${previous.params.delta}${event.params.delta}`,
+            },
+          } as DeltaEvent)
+        : event;
+      pendingDeltas.current.set(key, { threadId, event: merged });
+
+      if (deltaFrame.current === null) {
+        deltaFrame.current = requestAnimationFrame(() => {
+          deltaFrame.current = null;
+          flushPendingDeltas();
+        });
+      }
+    },
+    [flushPendingDeltas],
+  );
+
+  useEffect(() => () => flushPendingDeltas(), [flushPendingDeltas]);
+
   return useCallback(
     (payload: ServerNotification) => {
       const method = payload.method;
@@ -55,6 +117,7 @@ export function useServerNotificationHandler(
       } else if ("threadId" in payload.params) {
         threadId = payload.params.threadId;
       }
+      if (threadId && !isDeltaEvent(payload)) flushPendingDeltas(threadId);
 
       if (method === "account/updated") {
         void syncAccountState(true);
@@ -209,6 +272,10 @@ export function useServerNotificationHandler(
         // Lifecycle cleanup also runs after a task leaves display membership.
         // Only observed tasks retain transcript bodies and derived execution state.
         if (!observed) return;
+        if (isDeltaEvent(payload)) {
+          queueDelta(threadId, payload);
+          return;
+        }
         const previousEvents = useCodexStore.getState().events[threadId] ?? [];
         useCodexStore.getState().addEvent(threadId, payload);
         revealNewQuestion(payload, previousEvents);
@@ -216,6 +283,6 @@ export function useServerNotificationHandler(
     },
     // syncAccountState and refs are stable across renders (refs by identity,
     // syncAccountState is defined once per useCodexEvents call).
-    [syncAccountState, refs],
+    [flushPendingDeltas, queueDelta, syncAccountState, refs],
   );
 }

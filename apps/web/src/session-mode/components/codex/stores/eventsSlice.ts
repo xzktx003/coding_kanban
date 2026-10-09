@@ -2,7 +2,7 @@ import { acceptTurnStart } from "@session/utils/codexRuntimeState";
 import type { StateCreator } from "zustand";
 import type { ServerNotification } from "@session/bindings";
 import type { ThreadGoal, ThreadTokenUsage } from "@session/bindings/v2";
-import { appendTranscriptEvent } from "./eventUtils";
+import { appendTranscriptEvent, type DeltaEvent } from "./eventUtils";
 import type { CodexStore, EventsSlice, TurnTiming } from "./types";
 
 export const createEventsSlice: StateCreator<
@@ -228,6 +228,33 @@ export const createEventsSlice: StateCreator<
         commandDurationMap,
         retryNoticeMap,
         goalMap,
+      };
+    });
+  },
+
+  addTranscriptDeltas: (threadId: string, events: DeltaEvent[]) => {
+    if (!events.length) return;
+    set((state: CodexStore) => {
+      const existingEvents = state.events[threadId] ?? [];
+      let nextEvents = existingEvents;
+      for (const event of events)
+        nextEvents = appendTranscriptEvent(nextEvents, event);
+
+      let retryNoticeMap = state.retryNoticeMap;
+      if (retryNoticeMap[threadId] !== undefined) {
+        const { [threadId]: _cleared, ...rest } = retryNoticeMap;
+        retryNoticeMap = rest;
+      }
+      if (
+        nextEvents === existingEvents &&
+        retryNoticeMap === state.retryNoticeMap
+      )
+        return state;
+      return {
+        ...(nextEvents !== existingEvents
+          ? { events: { ...state.events, [threadId]: nextEvents } }
+          : {}),
+        retryNoticeMap,
       };
     });
   },

@@ -1,4 +1,5 @@
 import type { ServerNotification } from "@session/bindings";
+import type { DeltaEvent } from "./eventUtils";
 import type {
   Account,
   CommandExecutionStatus,
@@ -69,6 +70,7 @@ export interface EventsSlice {
   goalEnabled: boolean;
 
   addEvent: (threadId: string, event: ServerNotification) => void;
+  addTranscriptDeltas: (threadId: string, events: DeltaEvent[]) => void;
   setTokenUsage: (threadId: string, data: ThreadTokenUsage) => void;
   setGoal: (threadId: string, goal: ThreadGoal) => void;
   clearGoal: (threadId: string) => void;

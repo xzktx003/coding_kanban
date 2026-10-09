@@ -35,7 +35,6 @@ import {
   type ReadingPosition,
 } from "@session/services/sessionTranscriptCache";
 import { useSessionSyncStore } from "@session/stores/useSessionSyncStore";
-import { useAnimationFrameValue } from "@session/hooks/useAnimationFrameValue";
 
 interface CodexThreadProps {
   threadId?: string;
@@ -95,10 +94,7 @@ const CodexTranscript = memo(function CodexTranscript({
     (s) => s.earlierErrors[activeThreadId],
   );
   const historyError = useCodexStore((s) => s.historyErrorMap[activeThreadId]);
-  const incomingEvents = useCodexStore(
-    (s) => s.events[activeThreadId] ?? EMPTY_EVENTS,
-  );
-  const events = useAnimationFrameValue(incomingEvents, activeThreadId);
+  const events = useCodexStore((s) => s.events[activeThreadId] ?? EMPTY_EVENTS);
   const turnTiming = useCodexStore((s) => s.turnTimingMap[activeThreadId]);
   const retryNotice = useCodexStore((s) => s.retryNoticeMap[activeThreadId]);
   const rows = useMemo(() => buildThreadRows(events), [events]);

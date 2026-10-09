@@ -12,7 +12,7 @@ type DeltaMethod =
   | "item/reasoning/summaryTextDelta"
   | "item/reasoning/textDelta";
 
-type DeltaEvent = Extract<ServerNotification, { method: DeltaMethod }>;
+export type DeltaEvent = Extract<ServerNotification, { method: DeltaMethod }>;
 type ItemCompletedEvent = Extract<
   ServerNotification,
   { method: "item/completed" }

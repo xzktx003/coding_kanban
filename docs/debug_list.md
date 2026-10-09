@@ -1392,4 +1392,4 @@
 
 - 2026-10-10：深入对照官方 VS Code Codex 扩展发现命令显示保留 started/completed 双份状态，原生历史转换又重新制造双份副本。实时完成改为按 thread/turn/item 同位置替换，历史命令仅生成一份当前快照，运行中的命令不伪造完成；助手最终回复继续分隔命令组。官方 room 刷新合并、可见性、逐 item 订阅和 React Compiler 缓存的实证与尚未迁移的差异见 docs/session-browser-memory.md；不把终端帧队列误称为聊天文本帧合并。
 
-- 2026-10-10：用户复测仍发现 Codex 工作时标签页内存急涨。对照 Open WebUI 的每帧列表/Markdown 刷新后，定位到本项目每条流式通知都重建整段 thread rows、JSON.stringify 正在增长的完整末条消息、重跑 Markdown/送达状态扫描；改为每动画帧只发布最新 transcript 和 Markdown 内容，并用稳定末行 key 判断新消息。具体上游模式与 Codex 运行时自身大 diff 内存问题边界见 docs/session-browser-memory.md。
+- 2026-10-10：用户复测仍发现 Codex 工作时标签页内存急涨。对照 Open WebUI 的每帧列表/Markdown 刷新后，定位到本项目每条流式通知都重建整段 thread rows、JSON.stringify 正在增长的完整末条消息、重跑 Markdown/送达状态扫描；现按 thread/turn/item/part 把 delta 在进入 Zustand 前合并为每帧最多一次提交，并用稳定末行 key 判断新消息。具体上游模式与 Codex 运行时自身大 diff 内存问题边界见 docs/session-browser-memory.md。

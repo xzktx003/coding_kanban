@@ -2,7 +2,6 @@ import { memo, useRef } from "react";
 import { Streamdown } from "streamdown";
 import { CopyButton } from "@session/components/common";
 import { useWindowFocus } from "@session/hooks/useWindowFocus";
-import { useAnimationFrameValue } from "@session/hooks/useAnimationFrameValue";
 import { VisualizationContent } from "@session/features/visualizations/VisualizationContent";
 import { useCodexStore } from "../stores/useCodexStore";
 import { MessageReferenceActions } from "../composer/v2/MessageReferenceActions";
@@ -61,16 +60,15 @@ export const AgentMessageItem = ({
   threadId,
   itemId,
 }: AgentMessageItemProps) => {
-  const frameText = useAnimationFrameValue(text);
   const projectRoot = useCodexStore(
     (state) => state.threads.find((thread) => thread.id === threadId)?.cwd,
   );
 
-  if (!frameText.trim()) return null;
+  if (!text.trim()) return null;
 
   return (
     <AgentMessageContent
-      text={frameText}
+      text={text}
       threadId={threadId}
       itemId={itemId}
       projectRoot={projectRoot}
