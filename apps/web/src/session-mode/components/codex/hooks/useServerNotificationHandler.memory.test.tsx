@@ -7,6 +7,10 @@ import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
 import { useSubagentStore } from "@session/features/subagents/store";
 import { useServerNotificationHandler } from "./useServerNotificationHandler";
 import { allowSleep } from "@session/services/apiAdapt";
+import {
+  materializeStreamingTextPreview,
+  STREAMING_TEXT_LIMIT,
+} from "@session/services/codexTranscriptMemoryBudget";
 
 vi.mock("@session/services/apiAdapt", () => ({
   allowSleep: vi.fn().mockResolvedValue(undefined),
@@ -20,6 +24,7 @@ beforeEach(() => {
   useSubagentStore.setState({ nodes: {}, families: {}, selection: {} });
   useCodexStore.setState({
     events: {},
+    streamingAgentMessages: {},
     threads: [],
     currentThreadId: null,
     currentTurnId: null,
@@ -126,12 +131,52 @@ it("bounds same-frame deltas before they leave the notification buffer", () => {
     } as ServerNotification);
   });
 
-  const text = (useCodexStore.getState().events.a[0] as any).params
-    .delta as string;
-  expect(text.length).toBeLessThanOrEqual(256 * 1024);
+  const state = useCodexStore.getState() as any;
+  const message = state.streamingAgentMessages.a;
+  const text = message.preview
+    ? materializeStreamingTextPreview(message.preview)
+    : `${message.segments.join("")}${message.current}`;
+  expect(text.length).toBeLessThanOrEqual(STREAMING_TEXT_LIMIT);
   expect(text).toContain("中间内容因会话内存限制已省略");
   expect(text.startsWith("a".repeat(100))).toBe(true);
   expect(text.endsWith("z".repeat(100))).toBe(true);
+  expect(state.events.a).toHaveLength(1);
+  expect(state.events.a[0].method).toBe("turn/plan/updated");
+});
+
+it("replaces a live stream with its final snapshot without retaining both copies", () => {
+  useAgentCenterStore.setState({ cards: [{ kind: "codex", id: "a" }] });
+  const h = handler();
+  act(() => {
+    h.current({
+      method: "item/agentMessage/delta",
+      params: {
+        threadId: "a",
+        turnId: "turn",
+        itemId: "reply",
+        delta: "**partial response**",
+      },
+    } as ServerNotification);
+    h.current({
+      method: "item/completed",
+      params: {
+        threadId: "a",
+        turnId: "turn",
+        item: {
+          id: "reply",
+          type: "agentMessage",
+          text: "**final response**",
+          phase: null,
+          memoryCitation: null,
+        },
+      },
+    } as ServerNotification);
+  });
+  const state = useCodexStore.getState() as any;
+  expect(state.streamingAgentMessages.a).toBeUndefined();
+  expect(state.events.a).toHaveLength(1);
+  expect(state.events.a[0].method).toBe("item/completed");
+  expect(state.events.a[0].params.item.text).toBe("**final response**");
 });
 
 it("discovers and observes children of a followed parent without adding them to tabs", () => {

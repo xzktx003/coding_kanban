@@ -15,7 +15,14 @@ import type { ServerNotification } from "@session/bindings/ServerNotification";
 import type { AccountLoginCompletedNotification } from "@session/bindings/v2";
 import { useCodexStore } from "@session/components/codex/stores";
 import { allowSleep, preventSleep } from "@session/services/apiAdapt";
-import { compactCodexEventPayload } from "@session/services/codexTranscriptMemoryBudget";
+import {
+  appendStreamingTextPreview,
+  compactCodexEventPayload,
+  createStreamingTextPreview,
+  materializeStreamingTextPreview,
+  STREAMING_TEXT_LIMIT,
+  type StreamingTextPreview,
+} from "@session/services/codexTranscriptMemoryBudget";
 import { playBeep } from "@session/utils/beep";
 import { shouldPlayCompletionBeep } from "./beepOnCompletion";
 import {
@@ -42,7 +49,10 @@ export function useServerNotificationHandler(
   syncAccountState: (refreshToken: boolean) => Promise<void>,
 ) {
   const pendingDeltas = useRef(
-    new Map<string, { threadId: string; event: DeltaEvent }>(),
+    new Map<
+      string,
+      { threadId: string; event: DeltaEvent; preview?: StreamingTextPreview }
+    >(),
   );
   const deltaFrame = useRef<number | null>(null);
 
@@ -52,11 +62,30 @@ export function useServerNotificationHandler(
       if (threadId && pending.threadId !== threadId) continue;
       pendingDeltas.current.delete(key);
       const batch = batches.get(pending.threadId);
-      if (batch) batch.push(pending.event);
-      else batches.set(pending.threadId, [pending.event]);
+      const event = pending.preview
+        ? ({
+            ...pending.event,
+            params: {
+              ...pending.event.params,
+              delta: materializeStreamingTextPreview(pending.preview),
+            },
+          } as DeltaEvent)
+        : pending.event;
+      if (batch) batch.push(event);
+      else batches.set(pending.threadId, [event]);
     }
-    for (const [id, events] of batches)
-      useCodexStore.getState().addTranscriptDeltas(id, events);
+    for (const [id, events] of batches) {
+      const liveMessages = events.filter(
+        (event) => event.method === "item/agentMessage/delta",
+      );
+      const transcriptDeltas = events.filter(
+        (event) => event.method !== "item/agentMessage/delta",
+      );
+      const store = useCodexStore.getState();
+      if (liveMessages.length) store.setStreamingAgentDeltas(id, liveMessages);
+      if (transcriptDeltas.length)
+        store.addTranscriptDeltas(id, transcriptDeltas);
+    }
 
     if (!pendingDeltas.current.size && deltaFrame.current !== null) {
       cancelAnimationFrame(deltaFrame.current);
@@ -79,20 +108,50 @@ export function useServerNotificationHandler(
         params.summaryIndex ?? null,
         params.contentIndex ?? null,
       ]);
-      const previous = pendingDeltas.current.get(key)?.event;
-      const merged = previous
-        ? ({
+      const existing = pendingDeltas.current.get(key);
+      if (boundedEvent.method === "item/agentMessage/delta") {
+        const delta = boundedEvent.params.delta;
+        const previousText =
+          existing?.event.method === "item/agentMessage/delta"
+            ? existing.event.params.delta
+            : "";
+        let preview = existing?.preview;
+        let mergedText = delta;
+        if (preview) {
+          preview = appendStreamingTextPreview(preview, delta);
+          mergedText = "";
+        } else {
+          const combined = `${previousText}${delta}`;
+          if (combined.length > STREAMING_TEXT_LIMIT) {
+            preview = createStreamingTextPreview(combined);
+            mergedText = "";
+          } else {
+            mergedText = combined;
+          }
+        }
+        pendingDeltas.current.set(key, {
+          threadId,
+          event: {
             ...boundedEvent,
-            params: {
-              ...boundedEvent.params,
-              delta: `${previous.params.delta}${boundedEvent.params.delta}`,
-            },
-          } as DeltaEvent)
-        : boundedEvent;
-      pendingDeltas.current.set(key, {
-        threadId,
-        event: compactCodexEventPayload(merged) as DeltaEvent,
-      });
+            params: { ...boundedEvent.params, delta: mergedText },
+          },
+          ...(preview ? { preview } : {}),
+        });
+      } else {
+        const merged = existing
+          ? ({
+              ...boundedEvent,
+              params: {
+                ...boundedEvent.params,
+                delta: `${existing.event.params.delta}${boundedEvent.params.delta}`,
+              },
+            } as DeltaEvent)
+          : boundedEvent;
+        pendingDeltas.current.set(key, {
+          threadId,
+          event: compactCodexEventPayload(merged) as DeltaEvent,
+        });
+      }
 
       if (deltaFrame.current === null) {
         deltaFrame.current = requestAnimationFrame(() => {

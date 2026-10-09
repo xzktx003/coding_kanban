@@ -19,6 +19,7 @@ import type { ServerNotification } from "@session/bindings";
 import { useCodexStore } from "@session/components/codex/stores";
 import { ScrollArea } from "@session/components/ui/scroll-area";
 import { EventItem } from "../items";
+import { AgentMessageItem } from "../items/AgentMessageItem";
 import { ApprovalItem } from "../items/ApprovalItem";
 import { CommandActionSummaryItem } from "../items/CommandActionSummaryItem";
 import { ElicitationItem } from "../items/ElicitationItem";
@@ -95,6 +96,9 @@ const CodexTranscript = memo(function CodexTranscript({
   );
   const historyError = useCodexStore((s) => s.historyErrorMap[activeThreadId]);
   const events = useCodexStore((s) => s.events[activeThreadId] ?? EMPTY_EVENTS);
+  const streamingMessage = useCodexStore(
+    (s) => s.streamingAgentMessages?.[activeThreadId],
+  );
   const turnTiming = useCodexStore((s) => s.turnTimingMap[activeThreadId]);
   const retryNotice = useCodexStore((s) => s.retryNoticeMap[activeThreadId]);
   const rows = useMemo(() => buildThreadRows(events), [events]);
@@ -515,6 +519,23 @@ const CodexTranscript = memo(function CodexTranscript({
                 );
               })}
             </div>
+            {streamingMessage && (
+              <div className="py-1" data-codex-live-message>
+                <AgentMessageItem
+                  text=""
+                  threadId={activeThreadId}
+                  itemId={streamingMessage.itemId}
+                  streaming
+                  streamingSegments={
+                    streamingMessage.preview
+                      ? undefined
+                      : streamingMessage.segments
+                  }
+                  streamingCurrent={streamingMessage.current}
+                  streamingPreview={streamingMessage.preview}
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <CodexDeliveryEchoes threadId={activeThreadId} events={events} />
               {loading && !loaded && events.length === 0 && (

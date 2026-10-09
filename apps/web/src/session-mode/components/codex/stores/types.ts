@@ -24,6 +24,20 @@ export interface TurnTiming {
   status: "inProgress" | "completed" | "interrupted" | "failed";
 }
 
+/** Mutable output for the currently streaming assistant item, separate from retained history. */
+export interface StreamingAgentMessage {
+  turnId: string;
+  itemId: string;
+  segments: string[];
+  current: string;
+  length: number;
+  preview?: {
+    head: string[];
+    tail: string[];
+    tailCurrent: string;
+  };
+}
+
 export interface ThreadsSlice {
   threads: Thread[];
   currentThreadId: string | null;
@@ -52,6 +66,8 @@ export interface EventsSlice {
   historyLoadingMap: Record<string, boolean>;
   historyErrorMap: Record<string, string | undefined>;
   events: Record<string, ServerNotification[]>; // Events per thread
+  /** Live assistant text is rendered independently and committed to events on completion. */
+  streamingAgentMessages: Record<string, StreamingAgentMessage>;
   /** Per-thread status derived from thread/status/changed (authoritative) and turn events (fallback) */
   threadStatusMap: Record<string, ThreadStatus>;
   /** Per-thread timing of the most recent turn, see TurnTiming for why this is separate from threadStatusMap. */
@@ -71,6 +87,7 @@ export interface EventsSlice {
 
   addEvent: (threadId: string, event: ServerNotification) => void;
   addTranscriptDeltas: (threadId: string, events: DeltaEvent[]) => void;
+  setStreamingAgentDeltas: (threadId: string, events: DeltaEvent[]) => void;
   setTokenUsage: (threadId: string, data: ThreadTokenUsage) => void;
   setGoal: (threadId: string, goal: ThreadGoal) => void;
   clearGoal: (threadId: string) => void;

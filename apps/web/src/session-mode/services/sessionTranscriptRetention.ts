@@ -39,6 +39,7 @@ function knownTranscriptIds() {
     ...Object.keys(state.historyLoadedMap),
     ...Object.keys(state.historyLoadingMap),
     ...Object.keys(state.historyErrorMap),
+    ...Object.keys(state.streamingAgentMessages ?? {}),
     ...state.threads
       .filter((thread) => thread.turns.length > 0)
       .map((thread) => thread.id),
@@ -55,6 +56,10 @@ function pruneThreadTranscript(id: string) {
 
   useCodexStore.setState((state) => {
     const events = deleteKey(state.events, id);
+    const streamingAgentMessages = deleteKey(
+      state.streamingAgentMessages ?? {},
+      id,
+    );
     const historyLoadedMap = deleteKey(state.historyLoadedMap, id);
     const historyLoadingMap = deleteKey(state.historyLoadingMap, id);
     const historyErrorMap = deleteKey(state.historyErrorMap, id);
@@ -69,6 +74,7 @@ function pruneThreadTranscript(id: string) {
     }
     if (
       events === state.events &&
+      streamingAgentMessages === state.streamingAgentMessages &&
       historyLoadedMap === state.historyLoadedMap &&
       historyLoadingMap === state.historyLoadingMap &&
       historyErrorMap === state.historyErrorMap &&
@@ -78,6 +84,7 @@ function pruneThreadTranscript(id: string) {
       return state;
     return {
       events,
+      streamingAgentMessages,
       historyLoadedMap,
       historyLoadingMap,
       historyErrorMap,

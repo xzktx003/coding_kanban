@@ -252,6 +252,7 @@ export const EventItem = ({ event, context }: EventItemProps) => {
         <AgentMessageItem
           text={event.params.delta}
           threadId={event.params.threadId}
+          streaming
         />
       ) : null;
     case "item/fileChange/outputDelta":

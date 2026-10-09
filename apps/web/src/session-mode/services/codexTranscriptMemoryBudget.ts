@@ -8,6 +8,20 @@ const TRUNCATION_MARKER = "\n...[truncated ";
 const DISPLAY_PREVIEW_MARKER = "\n\n...[中间内容因会话内存限制已省略]...\n\n";
 const DEFAULT_TOOL_TEXT_LIMIT = 64 * 1024;
 const DEFAULT_STREAM_TEXT_LIMIT = 256 * 1024;
+export const STREAMING_TEXT_LIMIT = DEFAULT_STREAM_TEXT_LIMIT;
+export const STREAMING_TEXT_PREVIEW_MARKER = DISPLAY_PREVIEW_MARKER;
+export const STREAMING_TEXT_SEGMENT_CHARS = 8 * 1024;
+const STREAMING_PREVIEW_CONTENT_LIMIT =
+  STREAMING_TEXT_LIMIT - STREAMING_TEXT_PREVIEW_MARKER.length;
+const STREAMING_PREVIEW_HEAD_LIMIT =
+  Math.floor(
+    (STREAMING_PREVIEW_CONTENT_LIMIT * 0.75) / STREAMING_TEXT_SEGMENT_CHARS,
+  ) * STREAMING_TEXT_SEGMENT_CHARS;
+const STREAMING_PREVIEW_TAIL_LIMIT =
+  Math.floor(
+    (STREAMING_PREVIEW_CONTENT_LIMIT - STREAMING_PREVIEW_HEAD_LIMIT) /
+      STREAMING_TEXT_SEGMENT_CHARS,
+  ) * STREAMING_TEXT_SEGMENT_CHARS;
 const DEFAULT_ACTIVE_TOOL_GROUPS = 256;
 const HIDDEN_TRANSCRIPT_METHODS = new Set<ServerNotification["method"]>([
   "thread/name/updated",
@@ -51,6 +65,84 @@ export interface CodexTranscriptBudgetResult {
 
 export function estimateTranscriptBytes(value: unknown): number {
   return estimateValue(value, new WeakSet());
+}
+
+export interface StreamingTextPreview {
+  head: string[];
+  tail: string[];
+  tailCurrent: string;
+}
+
+function splitStreamingText(text: string) {
+  const segments: string[] = [];
+  let offset = 0;
+  while (text.length - offset >= STREAMING_TEXT_SEGMENT_CHARS) {
+    segments.push(text.slice(offset, offset + STREAMING_TEXT_SEGMENT_CHARS));
+    offset += STREAMING_TEXT_SEGMENT_CHARS;
+  }
+  return { segments, current: text.slice(offset) };
+}
+
+export function createStreamingTextPreview(text: string): StreamingTextPreview {
+  const { segments: head } = splitStreamingText(
+    text.slice(0, STREAMING_PREVIEW_HEAD_LIMIT),
+  );
+  const tailText = text.slice(-STREAMING_PREVIEW_TAIL_LIMIT);
+  const { segments: tail, current: tailCurrent } = splitStreamingText(tailText);
+  return {
+    head,
+    tail,
+    tailCurrent,
+  };
+}
+
+export function appendStreamingTextPreview(
+  preview: StreamingTextPreview,
+  delta: string,
+): StreamingTextPreview {
+  const deltaSuffix =
+    delta.length > STREAMING_PREVIEW_TAIL_LIMIT + STREAMING_TEXT_SEGMENT_CHARS
+      ? delta.slice(
+          -(STREAMING_PREVIEW_TAIL_LIMIT + STREAMING_TEXT_SEGMENT_CHARS),
+        )
+      : delta;
+  const combined = `${preview.tailCurrent}${deltaSuffix}`;
+  const completeLength =
+    Math.floor(combined.length / STREAMING_TEXT_SEGMENT_CHARS) *
+    STREAMING_TEXT_SEGMENT_CHARS;
+  const tail = [...preview.tail];
+  for (
+    let offset = 0;
+    offset < completeLength;
+    offset += STREAMING_TEXT_SEGMENT_CHARS
+  )
+    tail.push(combined.slice(offset, offset + STREAMING_TEXT_SEGMENT_CHARS));
+  let tailCurrent = combined.slice(completeLength);
+  let excess =
+    tail.reduce((length, segment) => length + segment.length, 0) +
+    tailCurrent.length -
+    STREAMING_PREVIEW_TAIL_LIMIT;
+  while (excess > 0 && tail.length) {
+    if (tail[0].length <= excess) {
+      excess -= tail[0].length;
+      tail.shift();
+    } else {
+      tail[0] = tail[0].slice(excess);
+      excess = 0;
+    }
+  }
+  if (excess > 0) tailCurrent = tailCurrent.slice(excess);
+  return {
+    head: preview.head,
+    tail,
+    tailCurrent,
+  };
+}
+
+export function materializeStreamingTextPreview(
+  preview: StreamingTextPreview,
+): string {
+  return `${preview.head.join("")}${STREAMING_TEXT_PREVIEW_MARKER}${preview.tail.join("")}${preview.tailCurrent}`;
 }
 
 export const estimateTransientBytes = estimateTranscriptBytes;

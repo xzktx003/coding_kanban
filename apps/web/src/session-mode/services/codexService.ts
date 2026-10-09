@@ -358,6 +358,7 @@ export function resetCodexRuntimeState() {
   });
   useCodexStore.setState((state) => ({
     activeThreadIds: [],
+    streamingAgentMessages: {},
     currentTurnId: null,
     threadStatusMap: {},
     turnTimingMap: {},
