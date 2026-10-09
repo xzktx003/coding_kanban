@@ -168,6 +168,7 @@ test("transcript entries hide exec calls and keep the newest visible record at t
       `<time>${new Date("2026-08-13T00:59:59.000Z").toLocaleString()}</time>`,
     ),
   );
+  assert.ok(transcript.updatedAt);
   assert.ok(
     markup.includes(
       `更新于 ${new Date(transcript.updatedAt).toLocaleString()}`,
