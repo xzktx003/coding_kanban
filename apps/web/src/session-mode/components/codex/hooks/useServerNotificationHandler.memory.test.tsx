@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
+import type { ServerNotification } from "@session/bindings";
 import { useCodexStore } from "../stores/useCodexStore";
 import { useRequestUserInputStore } from "../stores/useRequestUserInputStore";
 import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
@@ -104,6 +105,34 @@ it.each(["followed", "detached", "current"])(
     expect(useCodexStore.getState().events.a).toContainEqual(reply("a"));
   },
 );
+
+it("bounds same-frame deltas before they leave the notification buffer", () => {
+  useAgentCenterStore.setState({ cards: [{ kind: "codex", id: "a" }] });
+  const h = handler();
+  act(() => {
+    for (let index = 0; index < 300; index++)
+      h.current({
+        method: "item/agentMessage/delta",
+        params: {
+          threadId: "a",
+          turnId: "turn",
+          itemId: "reply",
+          delta: index === 0 ? "a".repeat(1024) : "z".repeat(1024),
+        },
+      } as ServerNotification);
+    h.current({
+      method: "turn/plan/updated",
+      params: { threadId: "a", turnId: "turn", explanation: null, plan: [] },
+    } as ServerNotification);
+  });
+
+  const text = (useCodexStore.getState().events.a[0] as any).params
+    .delta as string;
+  expect(text.length).toBeLessThanOrEqual(256 * 1024);
+  expect(text).toContain("中间内容因会话内存限制已省略");
+  expect(text.startsWith("a".repeat(100))).toBe(true);
+  expect(text.endsWith("z".repeat(100))).toBe(true);
+});
 
 it("discovers and observes children of a followed parent without adding them to tabs", () => {
   useAgentCenterStore.setState({ cards: [{ kind: "codex", id: "parent" }] });

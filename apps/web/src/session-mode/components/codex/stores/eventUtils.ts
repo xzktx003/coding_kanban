@@ -81,6 +81,7 @@ export const compactDeltaEvents = (
   events: ServerNotification[],
   incoming: ServerNotification,
 ): ServerNotification[] => {
+  incoming = compactCodexEventPayload(incoming);
   if (!isDeltaEvent(incoming)) return [...events, incoming];
   const previousIndex = lastEventIndex(
     events,
@@ -99,7 +100,7 @@ export const compactDeltaEvents = (
   } as ServerNotification;
 
   const next = [...events];
-  next[previousIndex] = compacted;
+  next[previousIndex] = compactCodexEventPayload(compacted);
   return next;
 };
 

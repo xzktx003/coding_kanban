@@ -15,6 +15,7 @@ import type { ServerNotification } from "@session/bindings/ServerNotification";
 import type { AccountLoginCompletedNotification } from "@session/bindings/v2";
 import { useCodexStore } from "@session/components/codex/stores";
 import { allowSleep, preventSleep } from "@session/services/apiAdapt";
+import { compactCodexEventPayload } from "@session/services/codexTranscriptMemoryBudget";
 import { playBeep } from "@session/utils/beep";
 import { shouldPlayCompletionBeep } from "./beepOnCompletion";
 import {
@@ -65,13 +66,14 @@ export function useServerNotificationHandler(
 
   const queueDelta = useCallback(
     (threadId: string, event: DeltaEvent) => {
-      const params = event.params as typeof event.params & {
+      const boundedEvent = compactCodexEventPayload(event) as DeltaEvent;
+      const params = boundedEvent.params as typeof boundedEvent.params & {
         summaryIndex?: number;
         contentIndex?: number;
       };
       const key = JSON.stringify([
         threadId,
-        event.method,
+        boundedEvent.method,
         params.turnId,
         params.itemId,
         params.summaryIndex ?? null,
@@ -80,14 +82,17 @@ export function useServerNotificationHandler(
       const previous = pendingDeltas.current.get(key)?.event;
       const merged = previous
         ? ({
-            ...event,
+            ...boundedEvent,
             params: {
-              ...event.params,
-              delta: `${previous.params.delta}${event.params.delta}`,
+              ...boundedEvent.params,
+              delta: `${previous.params.delta}${boundedEvent.params.delta}`,
             },
           } as DeltaEvent)
-        : event;
-      pendingDeltas.current.set(key, { threadId, event: merged });
+        : boundedEvent;
+      pendingDeltas.current.set(key, {
+        threadId,
+        event: compactCodexEventPayload(merged) as DeltaEvent,
+      });
 
       if (deltaFrame.current === null) {
         deltaFrame.current = requestAnimationFrame(() => {

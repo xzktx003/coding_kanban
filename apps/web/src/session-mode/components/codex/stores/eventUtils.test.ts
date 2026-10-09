@@ -360,6 +360,19 @@ it("compacts reasoning streams by item and part rather than retaining every toke
   expect(events[0].params.delta).toBe("0".repeat(1000));
   expect(events[1].params.delta).toBe("1".repeat(1000));
 });
+it("keeps an active assistant stream bounded while preserving its start and latest tail", () => {
+  let events: ServerNotification[] = [];
+  for (let index = 0; index < 300; index++) {
+    const delta = index === 0 ? "a".repeat(1024) : "z".repeat(1024);
+    events = appendTranscriptEvent(events, agentDelta("reply", delta));
+  }
+
+  const text = (events[0] as any).params.delta as string;
+  expect(text.length).toBeLessThanOrEqual(256 * 1024);
+  expect(text).toContain("中间内容因会话内存限制已省略");
+  expect(text.startsWith("a".repeat(100))).toBe(true);
+  expect(text.endsWith("z".repeat(100))).toBe(true);
+});
 it("final items replace repeated snapshots and ignore stale deltas", () => {
   const finished = {
     method: "item/completed",

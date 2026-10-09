@@ -5,7 +5,9 @@ const estimateCache = new WeakMap<object, number>();
 const OBJECT_OVERHEAD = 32;
 const ARRAY_OVERHEAD = 24;
 const TRUNCATION_MARKER = "\n...[truncated ";
+const DISPLAY_PREVIEW_MARKER = "\n\n...[中间内容因会话内存限制已省略]...\n\n";
 const DEFAULT_TOOL_TEXT_LIMIT = 64 * 1024;
+const DEFAULT_STREAM_TEXT_LIMIT = 256 * 1024;
 const DEFAULT_ACTIVE_TOOL_GROUPS = 256;
 const HIDDEN_TRANSCRIPT_METHODS = new Set<ServerNotification["method"]>([
   "thread/name/updated",
@@ -76,6 +78,26 @@ const truncateText = (text: string, limit: number): string => {
   return `${text.slice(0, Math.max(0, limit - marker.length))}${marker}`;
 };
 
+const truncateDisplayText = (text: string, limit: number): string => {
+  const boundedLimit = Math.max(0, limit);
+  if (text.length <= boundedLimit) return text;
+  if (boundedLimit <= DISPLAY_PREVIEW_MARKER.length)
+    return DISPLAY_PREVIEW_MARKER.slice(0, boundedLimit);
+  const contentLimit = boundedLimit - DISPLAY_PREVIEW_MARKER.length;
+  const headLimit = Math.floor(contentLimit * 0.75);
+  const tailLimit = contentLimit - headLimit;
+  const firstMarker = text.indexOf(DISPLAY_PREVIEW_MARKER);
+  const lastMarker = text.lastIndexOf(DISPLAY_PREVIEW_MARKER);
+  const head = firstMarker >= 0 ? text.slice(0, firstMarker) : text;
+  const tail =
+    lastMarker > firstMarker
+      ? text.slice(lastMarker + DISPLAY_PREVIEW_MARKER.length)
+      : firstMarker >= 0
+        ? text.slice(firstMarker + DISPLAY_PREVIEW_MARKER.length)
+        : text;
+  return `${head.slice(0, headLimit)}${DISPLAY_PREVIEW_MARKER}${tail.slice(-tailLimit)}`;
+};
+
 type MutableRecord = Record<string, unknown>;
 type ItemGroup = {
   turnId: string;
@@ -130,7 +152,7 @@ const compactDiffChange = <T extends MutableRecord>(
   const next: MutableRecord = { ...change };
   for (const key of ["diff", "oldText", "newText"]) {
     if (typeof next[key] !== "string") continue;
-    const text = truncateText(next[key], limit);
+    const text = truncateDisplayText(next[key], limit);
     if (text !== next[key]) {
       next[key] = text;
       changed = true;
@@ -143,6 +165,22 @@ const compactItem = (
   item: ThreadItem,
   limit: number,
 ): [ThreadItem, boolean] => {
+  if (item?.type === "agentMessage" || item?.type === "plan") {
+    const text = truncateDisplayText(item.text, DEFAULT_STREAM_TEXT_LIMIT);
+    return text === item.text ? [item, false] : [{ ...item, text }, true];
+  }
+  if (item?.type === "reasoning") {
+    let changed = false;
+    const compactParts = (parts: string[]) =>
+      parts.map((part) => {
+        const text = truncateDisplayText(part, DEFAULT_STREAM_TEXT_LIMIT);
+        changed ||= text !== part;
+        return text;
+      });
+    const summary = compactParts(item.summary);
+    const content = compactParts(item.content);
+    return changed ? [{ ...item, summary, content }, true] : [item, false];
+  }
   if (
     item?.type === "commandExecution" &&
     typeof item.aggregatedOutput === "string"
@@ -256,6 +294,38 @@ const compactEvent = (
           true,
         ]
       : [event, false];
+  }
+  if (
+    event.method === "item/agentMessage/delta" ||
+    event.method === "item/plan/delta" ||
+    event.method === "item/reasoning/summaryTextDelta" ||
+    event.method === "item/reasoning/textDelta"
+  ) {
+    const delta = truncateDisplayText(
+      event.params.delta,
+      DEFAULT_STREAM_TEXT_LIMIT,
+    );
+    return delta === event.params.delta
+      ? [event, false]
+      : [
+          {
+            ...event,
+            params: { ...event.params, delta },
+          } as ServerNotification,
+          true,
+        ];
+  }
+  if (event.method === "turn/diff/updated") {
+    const diff = truncateDisplayText(
+      event.params.diff,
+      DEFAULT_STREAM_TEXT_LIMIT,
+    );
+    return diff === event.params.diff
+      ? [event, false]
+      : [
+          { ...event, params: { ...event.params, diff } } as ServerNotification,
+          true,
+        ];
   }
   return [event, false];
 };

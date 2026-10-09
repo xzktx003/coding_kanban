@@ -164,11 +164,17 @@ describe("codex transcript memory budget", () => {
     );
   });
 
-  it("does not trim user or assistant message payloads on ingress", () => {
+  it("preserves user text and bounds a long assistant reply as a marked preview", () => {
     const userEvent = user("t1", "u".repeat(128 * 1024));
-    const assistantEvent = agent("t1", "a".repeat(128 * 1024));
+    const assistantText = "a".repeat(300 * 1024);
+    const assistantEvent = agent("t1", assistantText);
     expect(compactCodexEventPayload(userEvent)).toBe(userEvent);
-    expect(compactCodexEventPayload(assistantEvent)).toBe(assistantEvent);
+    const compacted = compactCodexEventPayload(assistantEvent) as any;
+    const preview = compacted.params.item.text as string;
+    expect(preview.length).toBeLessThanOrEqual(256 * 1024);
+    expect(preview).toContain("中间内容因会话内存限制已省略");
+    expect(preview.startsWith("a".repeat(100))).toBe(true);
+    expect(preview.endsWith("a".repeat(100))).toBe(true);
   });
 
   it("estimates retained bytes without allocating JSON copies", () => {
@@ -491,5 +497,50 @@ describe("codex transcript memory budget", () => {
       result.events.some((event) => event.method.includes("reasoning")),
     ).toBe(false);
     expect(result.sameTurnTrimmedEventCount).toBeGreaterThan(0);
+  });
+
+  it("bounds plan, reasoning, and turn diff payloads on ingress", () => {
+    const huge = "x".repeat(300 * 1024);
+    const events = [
+      {
+        method: "item/completed",
+        params: {
+          threadId: "thread",
+          turnId: "t1",
+          completedAtMs: 1,
+          item: { type: "plan", id: "plan", text: huge },
+        },
+      },
+      {
+        method: "item/completed",
+        params: {
+          threadId: "thread",
+          turnId: "t1",
+          completedAtMs: 2,
+          item: {
+            type: "reasoning",
+            id: "reasoning",
+            summary: [huge],
+            content: [huge],
+          },
+        },
+      },
+      {
+        method: "turn/diff/updated",
+        params: { threadId: "thread", turnId: "t1", diff: huge },
+      },
+    ] as ServerNotification[];
+
+    const compacted = events.map((event) => compactCodexEventPayload(event));
+    const textFields = [
+      (compacted[0] as any).params.item.text,
+      (compacted[1] as any).params.item.summary[0],
+      (compacted[1] as any).params.item.content[0],
+      (compacted[2] as any).params.diff,
+    ] as string[];
+    for (const text of textFields) {
+      expect(text.length).toBeLessThanOrEqual(256 * 1024);
+      expect(text).toContain("中间内容因会话内存限制已省略");
+    }
   });
 });
