@@ -14,7 +14,11 @@ import type {
   ComposerContext,
   AgentMention,
 } from "@agent-orchestrator/shared";
-import { useConfigStore, useCodexStore } from "../components/codex/stores";
+import {
+  approvalsReviewerForSandbox,
+  useConfigStore,
+  useCodexStore,
+} from "../components/codex/stores";
 import { getThreadModelSettings } from "../stores/useThreadModelStore";
 import { getJsonWithOptions, postJsonWithOptions } from "./apiAdapt/shared";
 export const useFollowupStore = create<{
@@ -46,22 +50,44 @@ export function reconcileReview(id: string, data: FollowupThread) {
     };
   });
 }
+function sameJson(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== typeof b || !a || !b) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length)
+      return false;
+    return a.every((item, index) => sameJson(item, b[index]));
+  }
+  if (typeof a !== "object") return false;
+  const aRecord = a as Record<string, unknown>;
+  const bRecord = b as Record<string, unknown>;
+  const aKeys = Object.keys(aRecord);
+  const bKeys = Object.keys(bRecord);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every(
+    (key) =>
+      Object.prototype.hasOwnProperty.call(bRecord, key) &&
+      sameJson(aRecord[key], bRecord[key]),
+  );
+}
 function accept(id: string, data: FollowupThread) {
   if (!Array.isArray(data.items) || !Number.isInteger(data.revision))
     throw new Error("队列服务未返回有效状态");
-  if (
-    (useFollowupStore.getState().threads[id]?.revision ?? -1) <= data.revision
-  ) {
-    reconcileReview(id, data);
-    reconcileDeliveryEchoes(id, data);
-  }
-  useFollowupStore.setState((s) => ({
-    threads:
-      (s.threads[id]?.revision ?? -1) > data.revision
-        ? s.threads
-        : { ...s.threads, [id]: data },
-    errors: { ...s.errors, [id]: undefined },
-  }));
+  const current = useFollowupStore.getState().threads[id];
+  const currentRevision = current?.revision ?? -1;
+  if (currentRevision > data.revision) return data;
+  const unchanged =
+    currentRevision === data.revision && sameJson(current, data);
+  reconcileReview(id, data);
+  if (!unchanged) reconcileDeliveryEchoes(id, data);
+  useFollowupStore.setState((s) => {
+    const staleError = s.errors[id] !== undefined;
+    if (unchanged && !staleError) return s;
+    return {
+      threads: unchanged ? s.threads : { ...s.threads, [id]: data },
+      errors: staleError ? { ...s.errors, [id]: undefined } : s.errors,
+    };
+  });
   return data;
 }
 export function followupParameters(threadId: string): Record<string, unknown> {
@@ -75,6 +101,7 @@ export function followupParameters(threadId: string): Record<string, unknown> {
     model: model || null,
     effort: reasoningEffort ?? null,
     approvalPolicy: c.approvalPolicy,
+    approvalsReviewer: approvalsReviewerForSandbox(c.sandbox),
     sandboxPolicy:
       c.sandbox === "read-only"
         ? { type: "readOnly", networkAccess: c.webSearchRequest }
@@ -139,10 +166,17 @@ export const followupService = {
     try {
       return accept(
         id,
-        await enqueueSessionRead("recent", `queue:${id}`, () => readWithDeadline(signal => getJsonWithOptions<FollowupThread>(
-          "/followups?threadId=" + encodeURIComponent(id),
-          { suppressToast: true, signal },
-        ), 5000, options?.signal)),
+        await enqueueSessionRead("recent", `queue:${id}`, () =>
+          readWithDeadline(
+            (signal) =>
+              getJsonWithOptions<FollowupThread>(
+                "/followups?threadId=" + encodeURIComponent(id),
+                { suppressToast: true, signal },
+              ),
+            5000,
+            options?.signal,
+          ),
+        ),
       );
     } catch (e) {
       useFollowupStore.setState((s) => ({
@@ -164,7 +198,10 @@ export const followupService = {
     mentions?: AgentMention[],
   ) {
     const data = {
-      ...(mode === "queue" && codexRuntimeState(useCodexStore.getState(), threadId).failed ? { recoverAfterError: true } : {}),
+      ...(mode === "queue" &&
+      codexRuntimeState(useCodexStore.getState(), threadId).failed
+        ? { recoverAfterError: true }
+        : {}),
       threadId,
       text,
       images: [...images],

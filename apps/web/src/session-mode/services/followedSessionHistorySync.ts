@@ -248,7 +248,9 @@ export function startFollowedSessionHistorySync() {
         !loading.has(id) &&
         wanted.get(id) === done.get(id) &&
         ((waiting && quiet >= 3000) ||
-          (running && quiet >= 5000) ||
+          (running &&
+            quiet >= 5000 &&
+            Date.now() - (lastSignal.get(id) ?? -Infinity) >= 5000) ||
           (!running && quiet >= 30000))
       )
         repair(id);

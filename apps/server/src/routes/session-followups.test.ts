@@ -111,6 +111,52 @@ test("validates input before journaling, deduplicates requests and serializes re
   }
 });
 
+test("followup parameters allow only native approval reviewer values and forward them", async () => {
+  const app = Fastify();
+  const calls: any[] = [];
+  const queue = registerSessionFollowupRoutes(app, {
+    origin: () => null,
+    autoStart: false,
+    runtime: {
+      statuses: async () => ({ thread: "idle" }),
+      call: async (method, params) => {
+        calls.push({ method, params });
+        return { turn: { id: "run" } };
+      },
+    },
+  });
+  try {
+    const accepted = await app.inject({
+      method: "POST",
+      url: "/api/session/followups/submit",
+      payload: {
+        ...body,
+        id: "auto-review",
+        parameters: {
+          approvalPolicy: "on-request",
+          approvalsReviewer: "auto_review",
+        },
+      },
+    });
+    assert.equal(accepted.statusCode, 200, accepted.body);
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/api/session/followups/submit",
+      payload: {
+        ...body,
+        id: "bad-reviewer",
+        parameters: { approvalsReviewer: "browser_auto_approve" },
+      },
+    });
+    assert.equal(rejected.statusCode, 400);
+    await queue.tick();
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].params.approvalsReviewer, "auto_review");
+  } finally {
+    await app.close();
+  }
+});
+
 test("the HTTP runtime adapter reconciles a released queue through thread/read and never thread/resume", async () => {
   const app = Fastify();
   let state = "active",
@@ -213,7 +259,8 @@ test("blank cwd from restored mobile clients inherits the native thread director
   try {
     for (const cwd of ["", "   "]) {
       const response = await app.inject({
-        method: "POST", url: "/api/session/followups/submit",
+        method: "POST",
+        url: "/api/session/followups/submit",
         payload: { ...body, id: "blank-" + cwd.length, parameters: { cwd } },
       });
       assert.equal(response.statusCode, 200, response.body);
@@ -221,7 +268,8 @@ test("blank cwd from restored mobile clients inherits the native thread director
     }
     for (const cwd of ["relative/project", "../project", "/project\0", 123]) {
       const response = await app.inject({
-        method: "POST", url: "/api/session/followups/submit",
+        method: "POST",
+        url: "/api/session/followups/submit",
         payload: { ...body, id: "invalid", parameters: { cwd } },
       });
       assert.equal(response.statusCode, 400);
@@ -229,5 +277,39 @@ test("blank cwd from restored mobile clients inherits the native thread director
     await queue.tick();
     assert.equal(calls.length, 1);
     assert.equal(calls[0].params.cwd, null);
-  } finally { await app.close(); }
+  } finally {
+    await app.close();
+  }
+});
+
+test("newly submitted messages dispatch without waiting for the one-second poll", async () => {
+  const app = Fastify();
+  let accepted = 0;
+  registerSessionFollowupRoutes(app, {
+    origin: () => null,
+    runtime: {
+      statuses: async () => ({ thread: "idle" }),
+      call: async () => ({ turn: { id: `run-${++accepted}` } }),
+    },
+  });
+  try {
+    await app.ready();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await app.inject({
+      method: "POST",
+      url: "/api/session/followups/submit",
+      payload: body,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(accepted, 1);
+    await app.inject({
+      method: "POST",
+      url: "/api/session/followups/submit",
+      payload: body,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(accepted, 1, "duplicate submissions must not dispatch twice");
+  } finally {
+    await app.close();
+  }
 });

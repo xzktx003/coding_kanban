@@ -1,12 +1,16 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
-import type { ReasoningEffort } from '@session/bindings';
-import type { AskForApproval, SandboxMode } from '@session/bindings/v2';
-import type { Provider } from '@session/stores/settings';
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
+import type { ReasoningEffort } from "@session/bindings";
+import type {
+  ApprovalsReviewer,
+  AskForApproval,
+  SandboxMode,
+} from "@session/bindings/v2";
+import type { Provider } from "@session/stores/settings";
 
-export type Personality = 'friendly' | 'pragmatic';
-export type ModeKind = 'default' | 'plan';
-export type ThreadCwdMode = 'local' | 'worktree';
+export type Personality = "friendly" | "pragmatic";
+export type ModeKind = "default" | "plan";
+export type ThreadCwdMode = "local" | "worktree";
 
 export interface ConfigStore {
   sandbox: SandboxMode;
@@ -31,36 +35,52 @@ export interface ConfigStore {
 }
 
 export const SANDBOX_APPROVAL_MAP: Record<SandboxMode, AskForApproval> = {
-  'read-only': 'untrusted',
-  'workspace-write': 'on-request',
-  'danger-full-access': 'never',
+  "read-only": "untrusted",
+  "workspace-write": "on-request",
+  "danger-full-access": "never",
 };
+
+export const SANDBOX_APPROVALS_REVIEWER_MAP: Record<
+  SandboxMode,
+  ApprovalsReviewer
+> = {
+  "read-only": "user",
+  "workspace-write": "auto_review",
+  "danger-full-access": "user",
+};
+
+export const approvalsReviewerForSandbox = (
+  sandbox: SandboxMode,
+): ApprovalsReviewer => SANDBOX_APPROVALS_REVIEWER_MAP[sandbox];
 
 export const useConfigStore = create<ConfigStore>()(
   persist(
     (set) => ({
       webSearchRequest: false,
-      sandbox: 'workspace-write',
-      approvalPolicy: 'on-request',
-      reasoningEffort: 'medium',
-      modelProvider: 'openai',
-      model: '',
+      sandbox: "workspace-write",
+      approvalPolicy: "on-request",
+      reasoningEffort: "medium",
+      modelProvider: "openai",
+      model: "",
       providerModels: {},
-      personality: 'friendly',
-      collaborationMode: 'default',
-      threadCwdMode: 'local',
+      personality: "friendly",
+      collaborationMode: "default",
+      threadCwdMode: "local",
 
       setModel: (model: string) => {
         set((state) => ({
           model,
-          providerModels: { ...state.providerModels, [state.modelProvider]: model },
+          providerModels: {
+            ...state.providerModels,
+            [state.modelProvider]: model,
+          },
         }));
       },
 
       setModelProvider: (modelProvider: Provider) => {
         set((state) => ({
           modelProvider,
-          model: state.providerModels[modelProvider] ?? '',
+          model: state.providerModels[modelProvider] ?? "",
         }));
       },
 
@@ -90,7 +110,7 @@ export const useConfigStore = create<ConfigStore>()(
       },
     }),
     {
-      name: 'kanban.session.codex-config-storage',
-    }
-  )
+      name: "kanban.session.codex-config-storage",
+    },
+  ),
 );

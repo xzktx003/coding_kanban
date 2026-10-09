@@ -160,6 +160,51 @@ it("enables questions for new threads and reads existing history without applyin
     threadId: "questions-old",
   });
 });
+it("routes workspace-write approval requests to native auto review while preserving sandbox policy", async () => {
+  useConfigStore.setState({
+    threadCwdMode: "local",
+    sandbox: "workspace-write",
+    approvalPolicy: "on-request",
+  });
+  api.threadStart.mockResolvedValueOnce({
+    thread: { id: "auto-review", preview: "", turns: [] },
+    model: "test-model",
+  });
+  await codexService.threadStart();
+  expect(api.threadStart.mock.calls.at(-1)?.[0]).toMatchObject({
+    sandbox: "workspace-write",
+    approvalPolicy: "on-request",
+    approvalsReviewer: "auto_review",
+  });
+
+  api.turnStart.mockResolvedValueOnce({
+    turn: { id: "turn", status: "inProgress", items: [] },
+  });
+  await codexService.turnStart("auto-review", "continue");
+  expect(api.turnStart.mock.calls.at(-1)?.[0]).toMatchObject({
+    approvalPolicy: "on-request",
+    approvalsReviewer: "auto_review",
+    sandboxPolicy: { type: "workspaceWrite" },
+  });
+});
+it("keeps explicit user review for read-only and danger-full-access modes", async () => {
+  useConfigStore.setState({
+    threadCwdMode: "local",
+    sandbox: "read-only",
+    approvalPolicy: "untrusted",
+  });
+  api.threadStart.mockResolvedValueOnce({ thread: { id: "read", turns: [] } });
+  await codexService.threadStart();
+  expect(api.threadStart.mock.calls.at(-1)?.[0].approvalsReviewer).toBe("user");
+
+  useConfigStore.setState({
+    sandbox: "danger-full-access",
+    approvalPolicy: "never",
+  });
+  api.threadStart.mockResolvedValueOnce({ thread: { id: "full", turns: [] } });
+  await codexService.threadStart();
+  expect(api.threadStart.mock.calls.at(-1)?.[0].approvalsReviewer).toBe("user");
+});
 it("does not silently run in the shared project if preparing an isolated worktree fails", async () => {
   api.gitCreateWorktree.mockRejectedValue(new Error("worktree failed"));
   await expect(codexService.threadStart()).rejects.toThrow("worktree failed");

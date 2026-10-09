@@ -74,7 +74,13 @@ function submit(value: unknown): FollowupSubmit {
     )
   )
     invalid();
-  if (v.mentions !== undefined && (!Array.isArray(v.mentions) || v.mentions.length > 32 || v.mentions.some((m: unknown) => !validAgentMention(m)))) invalid("无效的 Agent 引用");
+  if (
+    v.mentions !== undefined &&
+    (!Array.isArray(v.mentions) ||
+      v.mentions.length > 32 ||
+      v.mentions.some((m: unknown) => !validAgentMention(m)))
+  )
+    invalid("无效的 Agent 引用");
   if (v.contexts !== undefined) {
     if (!Array.isArray(v.contexts) || v.contexts.length > 32) invalid();
     const seen = new Set<string>();
@@ -133,6 +139,7 @@ function submit(value: unknown): FollowupSubmit {
     "model",
     "effort",
     "approvalPolicy",
+    "approvalsReviewer",
     "sandboxPolicy",
     "collaborationMode",
   ]);
@@ -155,6 +162,11 @@ function submit(value: unknown): FollowupSubmit {
     !["untrusted", "on-failure", "on-request", "never"].includes(
       p.approvalPolicy,
     )
+  )
+    invalid();
+  if (
+    p.approvalsReviewer != null &&
+    !["user", "auto_review", "guardian_subagent"].includes(p.approvalsReviewer)
   )
     invalid();
   if (p.sandboxPolicy != null) {
@@ -363,6 +375,14 @@ export function registerSessionFollowupRoutes(
     },
   };
   const queue = new CodexFollowups(runtime, options.file);
+  const dispatchSoon = () => {
+    if (options.autoStart === false) return;
+    void queue
+      .tick()
+      .catch((error) =>
+        app.log.warn({ err: error }, "Follow-up dispatch unavailable"),
+      );
+  };
   const ready = () => {
     if (lifetime.signal.aborted)
       return Promise.reject(new Error("消息队列服务已停止"));
@@ -388,7 +408,9 @@ export function registerSessionFollowupRoutes(
     async (request) => {
       const data = submit(request.body);
       await ready();
-      return queue.submit(data);
+      const result = await queue.submit(data);
+      dispatchSoon();
+      return result;
     },
   );
   app.post("/api/session/followups/change", async (request) => {
@@ -398,7 +420,9 @@ export function registerSessionFollowupRoutes(
     if (!Number.isSafeInteger(data.revision) || data.revision < 0) invalid();
     const op = action(data.action);
     await ready();
-    return queue.change(threadId, data.revision, op);
+    const result = await queue.change(threadId, data.revision, op);
+    dispatchSoon();
+    return result;
   });
   app.post("/api/session/followups/stop", async (request) => {
     const data = object(request.body);

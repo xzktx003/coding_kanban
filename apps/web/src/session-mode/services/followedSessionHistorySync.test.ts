@@ -2,6 +2,7 @@ import { useCodexDeliveryStore } from "../stores/useCodexDeliveryStore";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
   resume: vi.fn(),
+  event: undefined as ((event: any) => void) | undefined,
   open: undefined as (() => void) | undefined,
   resync: undefined as (() => void) | undefined,
 }));
@@ -9,7 +10,12 @@ vi.mock("./codexService", () => ({
   codexService: { loadThreadHistory: mock.resume },
 }));
 vi.mock("../lib/eventStream", () => ({
-  openEventStream: (s: { onOpen: () => void; onResync?: () => void }) => {
+  openEventStream: (s: {
+    onOpen: () => void;
+    onResync?: () => void;
+    onEvent: (event: any) => void;
+  }) => {
+    mock.event = s.onEvent;
     mock.open = s.onOpen;
     mock.resync = s.onResync;
     return () => {};
@@ -314,4 +320,21 @@ it("measures freshness after a successful slow read completes", async () => {
   release();
   await vi.advanceTimersByTimeAsync(1000);
   expect(mock.resume.mock.calls.filter((c) => c[0] === "a")).toHaveLength(1);
+});
+
+it("healthy streaming does not refetch running history but silence still repairs", async () => {
+  useAgentCenterStore.setState({ cards: [{ kind: "codex", id: "a" }] });
+  stop = startFollowedSessionHistorySync();
+  await vi.advanceTimersByTimeAsync(1);
+  mock.resume.mockClear();
+  useCodexStore.setState({
+    threadStatusMap: { a: { type: "active", activeFlags: [] } },
+  });
+  for (let i = 0; i < 7; i++) {
+    mock.event?.({ payload: { params: { threadId: "a" } } });
+    await vi.advanceTimersByTimeAsync(1000);
+  }
+  expect(mock.resume).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(mock.resume).toHaveBeenCalledTimes(1);
 });

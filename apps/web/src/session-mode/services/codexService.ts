@@ -14,6 +14,7 @@ import type {
   UserInput,
 } from "@session/bindings/v2";
 import {
+  approvalsReviewerForSandbox,
   useCodexStore,
   useConfigStore,
 } from "@session/components/codex/stores";
@@ -449,6 +450,7 @@ export const codexService = {
         modelProvider,
         cwd: threadCwd,
         approvalPolicy,
+        approvalsReviewer: approvalsReviewerForSandbox(sandbox),
         sandbox,
         baseInstructions: null,
         developerInstructions: null,
@@ -876,6 +878,7 @@ export const codexService = {
         input: userInputs,
         cwd: resolveThreadCwd(threadId),
         approvalPolicy,
+        approvalsReviewer: approvalsReviewerForSandbox(sandbox),
         sandboxPolicy: sandboxModeToPolicy(sandbox, webSearchRequest),
         model: model || null,
         effort: reasoningEffort ?? null,
