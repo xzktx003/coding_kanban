@@ -526,3 +526,5 @@
 - 2026-10-10：用户复测仍发现 Codex 工作时标签页内存急涨。对照 Open WebUI 的每帧列表/Markdown 刷新后，定位到本项目每条流式通知都重建整段 thread rows、JSON.stringify 正在增长的完整末条消息、重跑 Markdown/送达状态扫描；现按 thread/turn/item/part 把 delta 在进入 Zustand 前合并为每帧最多一次提交，并用稳定末行 key 判断新消息。具体上游模式与 Codex 运行时自身大 diff 内存问题边界见 docs/session-browser-memory.md。
 
 - 2026-10-10：自动预算会保护最新回复，导致单条超长 Codex 回复、计划、推理文本和轮次 diff 可绕过会话预算；合并后的流式 delta 也会无限增长。会话缓存现在将这些正文限制为 256 KiB 首尾预览并标注省略中间内容，工具输出/文件变更沿用 64 KiB 限制，原生历史不修改。超限完成消息与持续 delta 的红绿灯覆盖见 docs/session-browser-memory.md；构建通过，未据此宣称标签页总 RSS 固定。
+
+- 2026-10-10：会话消息流把 `hook/started`、`hook/completed` 和 `sleep` item 当作普通事件显示成 JSON 折叠块，聊天记录被低价值状态噪声占据。现这些提示在行构建时隐藏，并在实时 transcript、历史缓存和预算压缩入口过滤；warning 与失败通知仍展示。回归覆盖 hook 与 sleep 被屏蔽、其他有用 warning 保留。

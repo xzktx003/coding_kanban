@@ -28,10 +28,14 @@ const ignoredTranscriptMethods = new Set<ServerNotification["method"]>([
   "rawResponseItem/completed",
   "item/commandExecution/outputDelta",
   "item/fileChange/outputDelta",
+  "hook/started",
+  "hook/completed",
 ]);
 
 export const isIgnoredTranscriptEvent = (event: ServerNotification): boolean =>
-  ignoredTranscriptMethods.has(event.method);
+  ignoredTranscriptMethods.has(event.method) ||
+  ((event.method === "item/started" || event.method === "item/completed") &&
+    event.params.item.type === "sleep");
 
 export const isDeltaEvent = (
   event: ServerNotification,

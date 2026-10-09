@@ -1,7 +1,13 @@
 import { SubagentEvent } from "@session/features/subagents/SubagentEvent";
 import { useMemo } from "react";
-import { readQuestions, repliesFromContent } from "@session/features/async-questions/model";
-import { QuestionMessage, AnswerMessage } from "@session/features/async-questions/QuestionMessage";
+import {
+  readQuestions,
+  repliesFromContent,
+} from "@session/features/async-questions/model";
+import {
+  QuestionMessage,
+  AnswerMessage,
+} from "@session/features/async-questions/QuestionMessage";
 import { useTranscriptState } from "../thread/rowState";
 import { useTranslation } from "react-i18next";
 import type { ServerNotification } from "@session/bindings";
@@ -139,7 +145,9 @@ export const EventItem = ({ event, context }: EventItemProps) => {
         }
         case "collabAgentToolCall":
         case "subAgentActivity":
-          return <SubagentEvent root={event.params.threadId} item={startedItem} />;
+          return (
+            <SubagentEvent root={event.params.threadId} item={startedItem} />
+          );
         case "commandExecution":
           return null;
         case "reasoning":
@@ -155,7 +163,13 @@ export const EventItem = ({ event, context }: EventItemProps) => {
       const { item } = event.params;
       switch (item.type) {
         case "agentMessage":
-          if (readQuestions(item).length) return <QuestionMessage threadId={event.params.threadId} sourceId={item.id} />;
+          if (readQuestions(item).length)
+            return (
+              <QuestionMessage
+                threadId={event.params.threadId}
+                sourceId={item.id}
+              />
+            );
           return item.text.trim() ? (
             <AgentMessageItem
               text={item.text}
@@ -171,6 +185,7 @@ export const EventItem = ({ event, context }: EventItemProps) => {
         case "enteredReviewMode":
         case "exitedReviewMode":
         case "reasoning":
+        case "sleep":
           return null;
         case "collabAgentToolCall":
         case "subAgentActivity":
@@ -261,6 +276,8 @@ export const EventItem = ({ event, context }: EventItemProps) => {
     case "item/commandExecution/outputDelta":
     case "turn/started":
     case "mcpServer/startupStatus/updated":
+    case "hook/started":
+    case "hook/completed":
       return null;
 
     default:

@@ -21,6 +21,8 @@ const HIDDEN_TRANSCRIPT_METHODS = new Set<ServerNotification["method"]>([
   "item/commandExecution/outputDelta",
   "item/fileChange/outputDelta",
   "mcpServer/startupStatus/updated",
+  "hook/started",
+  "hook/completed",
 ]);
 
 export interface CodexTranscriptBudgetOptions {
@@ -337,7 +339,9 @@ export function compactCodexEventPayload(
 }
 
 const isHiddenTranscriptEvent = (event: ServerNotification): boolean =>
-  HIDDEN_TRANSCRIPT_METHODS.has(event.method);
+  HIDDEN_TRANSCRIPT_METHODS.has(event.method) ||
+  ((event.method === "item/started" || event.method === "item/completed") &&
+    event.params.item.type === "sleep");
 
 function getTurnId(event: ServerNotification): string | null {
   const params = event.params as { turnId?: unknown; turn?: { id?: unknown } };

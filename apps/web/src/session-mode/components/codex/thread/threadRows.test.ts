@@ -115,3 +115,28 @@ it("does not turn a rename notification into a chat message", () => {
     ]),
   ).toEqual([]);
 });
+it("hides hook lifecycle notifications while keeping useful warnings", () => {
+  const rows = buildThreadRows([
+    event("hook/started", {
+      threadId: "thread",
+      turnId: "turn",
+      run: { id: "hook", entries: [] },
+    }),
+    event("hook/completed", {
+      threadId: "thread",
+      turnId: "turn",
+      run: { id: "hook", entries: [] },
+    }),
+    event("item/completed", {
+      threadId: "thread",
+      turnId: "turn",
+      item: { type: "sleep", id: "sleep", durationMs: 1000 },
+    }),
+    event("warning", { message: "A useful warning" }),
+  ]);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].item.kind).toBe("event");
+  expect(rows[0].item.kind === "event" && rows[0].item.event.method).toBe(
+    "warning",
+  );
+});

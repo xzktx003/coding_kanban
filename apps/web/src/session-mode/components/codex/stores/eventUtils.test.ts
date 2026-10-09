@@ -373,6 +373,31 @@ it("keeps an active assistant stream bounded while preserving its start and late
   expect(text.startsWith("a".repeat(100))).toBe(true);
   expect(text.endsWith("z".repeat(100))).toBe(true);
 });
+it.each(["hook/started", "hook/completed"])(
+  "does not add %s notifications to the chat transcript",
+  (method) => {
+    const events = appendTranscriptEvent(
+      [],
+      event(method, {
+        threadId: "thread",
+        turnId: "turn",
+        run: { id: "hook", entries: [] },
+      }),
+    );
+    expect(events).toEqual([]);
+  },
+);
+it("does not add sleep display items to the chat transcript", () => {
+  const events = appendTranscriptEvent(
+    [],
+    event("item/completed", {
+      threadId: "thread",
+      turnId: "turn",
+      item: { type: "sleep", id: "sleep", durationMs: 1000 },
+    }),
+  );
+  expect(events).toEqual([]);
+});
 it("final items replace repeated snapshots and ignore stale deltas", () => {
   const finished = {
     method: "item/completed",

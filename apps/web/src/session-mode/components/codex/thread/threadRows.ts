@@ -28,6 +28,8 @@ const hiddenMethods = new Set([
   "item/fileChange/outputDelta",
   "turn/started",
   "mcpServer/startupStatus/updated",
+  "hook/started",
+  "hook/completed",
 ]);
 function turnIdOf(event: ServerNotification): string | undefined {
   if (event.method === "turn/completed") return event.params.turn.id;
@@ -136,6 +138,7 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
           "enteredReviewMode",
           "exitedReviewMode",
           "reasoning",
+          "sleep",
         ].includes(completed.type)
       )
         continue;

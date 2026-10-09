@@ -288,13 +288,34 @@ describe("codex transcript memory budget", () => {
   });
 
   it("drops hidden transcript deltas before applying the budget", () => {
-    const events = [user("t1"), commandDelta("t1"), agent("t1")];
+    const events = [
+      user("t1"),
+      commandDelta("t1"),
+      {
+        method: "hook/started",
+        params: { threadId: "thread", turnId: "t1", run: { id: "hook" } },
+      },
+      {
+        method: "hook/completed",
+        params: { threadId: "thread", turnId: "t1", run: { id: "hook" } },
+      },
+      {
+        method: "item/completed",
+        params: {
+          threadId: "thread",
+          turnId: "t1",
+          completedAtMs: 3,
+          item: { type: "sleep", id: "sleep", durationMs: 1000 },
+        },
+      },
+      agent("t1"),
+    ] as ServerNotification[];
     const result = compactCodexTranscript(events, {
       maxBytes: 100_000,
       maxEvents: 20,
     });
-    expect(result.events).toEqual([events[0], events[2]]);
-    expect(result.hiddenEventCount).toBe(1);
+    expect(result.events).toEqual([events[0], events[5]]);
+    expect(result.hiddenEventCount).toBe(4);
     expect(result.evicted).toBe(false);
   });
 
