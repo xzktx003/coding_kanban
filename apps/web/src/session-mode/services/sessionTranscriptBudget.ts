@@ -1,4 +1,5 @@
 import { memoryHistoryWindows } from "./sessionMemoryHistory";
+import { estimateTranscriptBytes } from "./codexTranscriptMemoryBudget";
 import type { ServerNotification } from "../bindings";
 import { useCodexStore } from "../components/codex/stores";
 import { useSessionSyncStore } from "../stores/useSessionSyncStore";
@@ -35,11 +36,7 @@ function completedTurnIds(events: ServerNotification[]) {
 }
 
 function estimateEventBytes(event: ServerNotification) {
-  try {
-    return JSON.stringify(event).length * 2;
-  } catch {
-    return 1024;
-  }
+  return estimateTranscriptBytes(event);
 }
 
 function transcriptBytes(events: ServerNotification[]) {

@@ -1,6 +1,7 @@
 import { useCodexStore } from "../components/codex/stores";
 import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 import { cachedTranscriptBaselines } from "./sessionCacheState";
+import { hasTranscriptTrafficPressure } from "./sessionMemoryPressure";
 import {
   compactCodexTranscript,
   estimateTranscriptBytes,
@@ -33,7 +34,8 @@ export function releaseSessionMemory(options: { pressure?: boolean } = {}) {
   const entries = Object.entries(state.events);
   const sizes = entries.map(([, events]) => estimateTranscriptBytes(events));
   const beforeBytes = sizes.reduce((sum, size) => sum + size, 0);
-  const pressure = options.pressure ?? heapUnderPressure();
+  const pressure =
+    options.pressure ?? (heapUnderPressure() || hasTranscriptTrafficPressure());
   const globalPressure = beforeBytes > GLOBAL_HIGH_BYTES || pressure;
   const perThread = Math.min(
     pressure ? 4 * MB : THREAD_HIGH_BYTES,

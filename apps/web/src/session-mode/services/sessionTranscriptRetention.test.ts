@@ -17,11 +17,37 @@ import {
   pruneUnobservedCodexTranscripts,
   startSessionTranscriptRetention,
 } from "./sessionTranscriptRetention";
+import { pruneObservedCodexTranscriptBudget } from "./sessionTranscriptBudget";
 
 const flushRetention = async () => {
   await Promise.resolve();
   await Promise.resolve();
 };
+
+it("checks display budgets without serializing all retained payloads", () => {
+  useCodexStore.setState({
+    events: {
+      budget: [
+        {
+          method: "item/agentMessage/delta",
+          params: {
+            threadId: "budget",
+            turnId: "live",
+            itemId: "reply",
+            delta: "x".repeat(100000),
+          },
+        } as any,
+      ],
+    },
+  });
+  const stringify = vi.spyOn(JSON, "stringify");
+  try {
+    pruneObservedCodexTranscriptBudget("budget");
+    expect(stringify).not.toHaveBeenCalled();
+  } finally {
+    stringify.mockRestore();
+  }
+});
 
 const thread = (id: string): Thread =>
   ({

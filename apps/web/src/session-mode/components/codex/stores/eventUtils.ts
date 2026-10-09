@@ -1,5 +1,10 @@
 import type { ServerNotification } from "@session/bindings";
 import type { ThreadItem } from "@session/bindings/v2/ThreadItem";
+import {
+  compactCodexEventPayload,
+  estimateTranscriptBytes,
+} from "@session/services/codexTranscriptMemoryBudget";
+import { recordTranscriptTraffic } from "@session/services/sessionMemoryPressure";
 
 type DeltaMethod =
   | "item/agentMessage/delta"
@@ -258,6 +263,8 @@ export const appendTranscriptEvent = (
   incoming: ServerNotification,
 ): ServerNotification[] => {
   if (isIgnoredTranscriptEvent(incoming)) return events;
+  recordTranscriptTraffic(estimateTranscriptBytes(incoming));
+  incoming = compactCodexEventPayload(incoming);
   const incomingItemKey = keyOfItemEvent(incoming);
   if (
     isDeltaEvent(incoming) &&

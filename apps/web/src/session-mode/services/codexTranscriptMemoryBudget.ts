@@ -260,6 +260,12 @@ const compactEvent = (
   return [event, false];
 };
 
+export function compactCodexEventPayload(
+  event: ServerNotification,
+): ServerNotification {
+  return compactEvent(event, DEFAULT_TOOL_TEXT_LIMIT)[0];
+}
+
 const isHiddenTranscriptEvent = (event: ServerNotification): boolean =>
   HIDDEN_TRANSCRIPT_METHODS.has(event.method);
 
@@ -293,6 +299,12 @@ const itemInProgress = (item: ThreadItem | null): boolean => {
   return typeof item.status === "string" && !terminalStatuses.has(item.status);
 };
 
+const eventSizes = (events: ServerNotification[]): number[] =>
+  events.map((event) => estimateTranscriptBytes(event));
+
+const indexesSize = (indexes: number[], sizes: number[]): number =>
+  indexes.reduce((total, index) => total + sizes[index], 0);
+
 function trimActiveTurnGroups(
   events: ServerNotification[],
   activeTurnIds: ReadonlySet<string>,
@@ -320,7 +332,7 @@ function trimActiveTurnGroups(
     const item = getItem(event);
     group.started ||= event.method === "item/started";
     group.completed ||= event.method === "item/completed";
-    group.inProgress ||= itemInProgress(item);
+    if (item && "status" in item) group.inProgress = itemInProgress(item);
     group.keep ||=
       item?.type === "userMessage" ||
       item?.type === "collabAgentToolCall" ||
@@ -338,8 +350,14 @@ function trimActiveTurnGroups(
   }
   const remove = new Set<number>();
   const truncatedTurnIds = new Set<string>();
+  const sizes = eventSizes(events);
+  let retainedBytes = estimateTranscriptBytes(events);
+  let retainedEvents = events.length;
   const removeGroup = (group: ItemGroup) => {
+    if (group.indexes.every((index) => remove.has(index))) return;
     group.indexes.forEach((index) => remove.add(index));
+    retainedBytes -= indexesSize(group.indexes, sizes);
+    retainedEvents -= group.indexes.length;
     truncatedTurnIds.add(group.turnId);
   };
   for (const [turnId, list] of byTurn) {
@@ -365,12 +383,7 @@ function trimActiveTurnGroups(
     for (const group of trimmable.slice(
       Math.max(0, trimmable.length - keepGroups),
     )) {
-      const next = events.filter((_, index) => !remove.has(index));
-      if (
-        estimateTranscriptBytes(next) <= targetBytes &&
-        next.length <= targetEvents
-      )
-        break;
+      if (retainedBytes <= targetBytes && retainedEvents <= targetEvents) break;
       removeGroup(group);
     }
   }
@@ -451,6 +464,7 @@ export function compactCodexTranscript(
   const protectedIds = new Set(options.protectedTurnIds ?? []);
   if (liveTurnId) protectedIds.add(liveTurnId);
   const groups = new Map<string, number[]>();
+  const sizes = eventSizes(events);
   events.forEach((event, index) => {
     const turnId = getTurnId(event);
     if (!turnId || protectedIds.has(turnId)) return;
@@ -460,12 +474,18 @@ export function compactCodexTranscript(
   });
 
   const remove = new Set<number>();
+  let retainedBytes = bytes;
+  let retainedEvents = events.length;
   for (const indexes of groups.values()) {
-    for (const index of indexes) remove.add(index);
-    const next = events.filter((_, index) => !remove.has(index));
-    bytes = estimateTranscriptBytes(next);
-    if (bytes <= targetBytes && next.length <= targetEvents) {
-      events = next;
+    for (const index of indexes) {
+      if (remove.has(index)) continue;
+      remove.add(index);
+      retainedBytes -= sizes[index];
+      retainedEvents -= 1;
+    }
+    if (retainedBytes <= targetBytes && retainedEvents <= targetEvents) {
+      events = events.filter((_, index) => !remove.has(index));
+      bytes = estimateTranscriptBytes(events);
       return budgetResult(
         events,
         input.length,

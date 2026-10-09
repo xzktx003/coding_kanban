@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ServerNotification } from "@session/bindings";
 import {
+  compactCodexEventPayload,
   compactCodexTranscript,
   estimateTranscriptBytes,
   estimateTransientBytes,
@@ -118,13 +119,58 @@ const commandStarted = (
     },
   }) as ServerNotification;
 
+const commandStartedCompleted = (
+  turnId: string,
+  output: string,
+  id: string,
+): ServerNotification[] => [
+  commandStarted(turnId, id),
+  command(turnId, output, id),
+];
+
 const commandDelta = (turnId: string, itemId = "cmd"): ServerNotification =>
   ({
     method: "item/commandExecution/outputDelta",
     params: { threadId: "thread", turnId, itemId, delta: "x".repeat(100) },
   }) as ServerNotification;
 
+const reasoningDelta = (turnId: string, index: number): ServerNotification =>
+  ({
+    method: "item/reasoning/textDelta",
+    params: {
+      threadId: "thread",
+      turnId,
+      itemId: "reasoning",
+      contentIndex: index,
+      delta: "r".repeat(4096),
+    },
+  }) as ServerNotification;
+
 describe("codex transcript memory budget", () => {
+  it("keeps compact event payload references when no ingress trimming is needed", () => {
+    const event = command("t1", "small");
+    expect(compactCodexEventPayload(event)).toBe(event);
+  });
+
+  it("trims large tool payloads before they enter the transcript store", () => {
+    const event = command("t1", "x".repeat(2 * 1024 * 1024));
+    const compacted = compactCodexEventPayload(event);
+    expect(compacted).not.toBe(event);
+    expect(
+      (compacted as any).params.item.aggregatedOutput.length,
+    ).toBeLessThanOrEqual(64 * 1024);
+    expect((compacted as any).params.item.aggregatedOutput).toContain(
+      "...[truncated ",
+    );
+  });
+
+  it("does not trim user or assistant message payloads on ingress", () => {
+    const userEvent = user("t1", "u".repeat(128 * 1024));
+    const assistantEvent = agent("t1", "a".repeat(128 * 1024));
+    expect(compactCodexEventPayload(userEvent)).toBe(userEvent);
+    expect(compactCodexEventPayload(assistantEvent)).toBe(assistantEvent);
+  });
+
   it("estimates retained bytes without allocating JSON copies", () => {
     const event = agent("t1", "abc");
     expect(estimateTranscriptBytes([event])).toBeGreaterThan(6);
@@ -373,5 +419,77 @@ describe("codex transcript memory budget", () => {
     expect(retainedCommands.length).toBeLessThan(1000);
     expect(result.sameTurnTrimmedEventCount).toBeGreaterThan(0);
     expect(result.truncatedTurnIds).toEqual(["live"]);
+  });
+
+  it("does not protect tools forever after their started event is completed", () => {
+    const bigOutput = "x".repeat(64 * 1024);
+    const events = [
+      turnStarted("live"),
+      user("live", "keep user"),
+      ...Array.from({ length: 500 }, (_, index) =>
+        commandStartedCompleted("live", bigOutput, `cmd-${index}`),
+      ).flat(),
+      commandStarted("live", "running"),
+      agent("live", "new assistant", "agent-new"),
+    ];
+    const result = compactCodexTranscript(events, {
+      maxBytes: 8 * 1024 * 1024,
+      targetBytes: 4 * 1024 * 1024,
+      maxEvents: 3000,
+      targetEvents: 1500,
+      activeTurnId: "live",
+    });
+    const retainedItems = result.events
+      .map((event) => (event as any).params.item)
+      .filter(Boolean);
+    const retainedCommands = retainedItems.filter(
+      (item) => item.type === "commandExecution",
+    );
+    expect(result.estimatedBytes).toBeLessThanOrEqual(4 * 1024 * 1024);
+    expect(retainedCommands.some((item) => item.id === "running")).toBe(true);
+    expect(retainedCommands.length).toBeLessThan(500);
+    expect(retainedItems.some((item) => item.type === "userMessage")).toBe(
+      true,
+    );
+    expect(
+      retainedItems.some(
+        (item) => item.type === "agentMessage" && item.text === "new assistant",
+      ),
+    ).toBe(true);
+  });
+
+  it("bounds active-turn reasoning deltas that have an itemId but no item object", () => {
+    const events = [
+      turnStarted("live"),
+      user("live", "keep user"),
+      ...Array.from({ length: 2000 }, (_, index) =>
+        reasoningDelta("live", index),
+      ),
+      agent("live", "new assistant", "agent-new"),
+    ];
+    const result = compactCodexTranscript(events, {
+      maxBytes: 8 * 1024 * 1024,
+      targetBytes: 4 * 1024 * 1024,
+      maxEvents: 3000,
+      targetEvents: 1500,
+      activeTurnId: "live",
+    });
+    expect(result.estimatedBytes).toBeLessThanOrEqual(4 * 1024 * 1024);
+    expect(
+      result.events.some(
+        (event) => (event as any).params.item?.type === "userMessage",
+      ),
+    ).toBe(true);
+    expect(
+      result.events.some(
+        (event) =>
+          (event as any).params.item?.type === "agentMessage" &&
+          (event as any).params.item.text === "new assistant",
+      ),
+    ).toBe(true);
+    expect(
+      result.events.some((event) => event.method.includes("reasoning")),
+    ).toBe(false);
+    expect(result.sameTurnTrimmedEventCount).toBeGreaterThan(0);
   });
 });

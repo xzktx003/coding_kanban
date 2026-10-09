@@ -121,3 +121,19 @@ it("uses a smaller low-water budget under browser heap pressure without touching
   expect(useCodexStore.getState().currentThreadId).toBe("active");
   expect(useApprovalStore.getState().pendingApprovals).toBe(approvals);
 });
+it("shrinks display history on high ingress even when the browser heap sample stays low", async () => {
+  const { recordTranscriptTraffic } = await import("./sessionMemoryPressure");
+  vi.useFakeTimers();
+  vi.setSystemTime(Date.now() + 60000);
+  useCodexStore.setState({
+    events: {
+      active: Array.from({ length: 35 }, (_, i) =>
+        message(`burst-${i}`, "x".repeat(80000)),
+      ),
+    },
+  });
+  recordTranscriptTraffic(16 * 1024 * 1024);
+  const result = releaseSessionMemory();
+  expect(result.afterBytes).toBeLessThan(2 * 1024 * 1024);
+  expect(useCodexStore.getState().currentThreadId).toBe("active");
+});

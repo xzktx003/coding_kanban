@@ -212,42 +212,15 @@ test("one running turn can release old completed tools while keeping its live co
       },
     });
     for (let i = 0; i < 500; i++) {
-      useCodexStore
-        .getState()
-        .addEvent(
-          "ux-0",
-          JSON.parse(
-            JSON.stringify({
-              method: "item/completed",
-              params: {
-                threadId: "ux-0",
-                turnId: "running",
-                item: {
-                  id: `tool-${i}`,
-                  type: "commandExecution",
-                  command: "echo result",
-                  commandActions: [],
-                  status: "completed",
-                  aggregatedOutput: `${i}:` + "x".repeat(100000),
-                  exitCode: 0,
-                  durationMs: 1,
-                },
-              },
-            }),
-          ),
-        );
-    }
-    useCodexStore
-      .getState()
-      .addEvent("ux-0", {
+      useCodexStore.getState().addEvent("ux-0", {
         method: "item/started",
         params: {
           threadId: "ux-0",
           turnId: "running",
           item: {
-            id: "live-command",
+            id: `tool-${i}`,
             type: "commandExecution",
-            command: "current",
+            command: "echo result",
             commandActions: [],
             status: "inProgress",
             aggregatedOutput: null,
@@ -261,17 +234,60 @@ test("one running turn can release old completed tools while keeping its live co
           },
         },
       });
-    useCodexStore
-      .getState()
-      .addEvent("ux-0", {
-        method: "item/agentMessage/delta",
-        params: {
-          threadId: "ux-0",
-          turnId: "running",
-          itemId: "answer",
-          delta: "仍在处理当前任务",
+      useCodexStore.getState().addEvent(
+        "ux-0",
+        JSON.parse(
+          JSON.stringify({
+            method: "item/completed",
+            params: {
+              threadId: "ux-0",
+              turnId: "running",
+              item: {
+                id: `tool-${i}`,
+                type: "commandExecution",
+                command: "echo result",
+                commandActions: [],
+                status: "completed",
+                aggregatedOutput: `${i}:` + "x".repeat(100000),
+                exitCode: 0,
+                durationMs: 1,
+              },
+            },
+          }),
+        ),
+      );
+    }
+    useCodexStore.getState().addEvent("ux-0", {
+      method: "item/started",
+      params: {
+        threadId: "ux-0",
+        turnId: "running",
+        item: {
+          id: "live-command",
+          type: "commandExecution",
+          command: "current",
+          commandActions: [],
+          status: "inProgress",
+          aggregatedOutput: null,
+          exitCode: null,
+          durationMs: null,
+          cwd: "/fixture",
+          source: "agent",
+          processId: null,
+          pluginId: null,
+          scriptPath: null,
         },
-      });
+      },
+    });
+    useCodexStore.getState().addEvent("ux-0", {
+      method: "item/agentMessage/delta",
+      params: {
+        threadId: "ux-0",
+        turnId: "running",
+        itemId: "answer",
+        delta: "仍在处理当前任务",
+      },
+    });
     const memory = releaseSessionMemory();
     const state = useCodexStore.getState();
     return {
@@ -297,4 +313,125 @@ test("one running turn can release old completed tools while keeping its live co
     answer: true,
   });
   expect(result.cursor).toMatch(/^kanban-memory-items:/);
+});
+
+test("real tool lifecycles stay bounded through automatic recovery and cache writes without forced GC", async ({
+  page,
+  context,
+}) => {
+  test.setTimeout(90000);
+  await installSessionUxFixture(page, 1);
+  await page.goto("/?mode=session", { waitUntil: "networkidle" });
+  await page.evaluate(async () => {
+    const url = (path: string) =>
+      performance
+        .getEntriesByType("resource")
+        .findLast((e) => new URL(e.name).pathname === path)?.name ?? path;
+    const { useCodexStore } = await import(
+      url("/src/session-mode/components/codex/stores/index.ts")
+    );
+    const { useAgentCenterStore } = await import(
+      url("/src/session-mode/stores/useAgentCenterStore.ts")
+    );
+    const { estimateTranscriptBytes } = await import(
+      url("/src/session-mode/services/codexTranscriptMemoryBudget.ts")
+    );
+    Object.assign(window, {
+      __lifecycleStore: useCodexStore,
+      __lifecycleBytes: estimateTranscriptBytes,
+    });
+    useAgentCenterStore.setState({
+      cards: [{ kind: "codex", id: "ux-0" }],
+      detachedCard: null,
+    });
+    useCodexStore.setState({
+      currentThreadId: "ux-0",
+      currentTurnId: "lifecycle",
+      events: { "ux-0": [] },
+      historyLoadedMap: { "ux-0": true },
+      turnTimingMap: {
+        "ux-0": {
+          turnId: "lifecycle",
+          status: "inProgress",
+          startedAtMs: 1,
+          durationMs: null,
+        },
+      },
+    });
+  });
+  const cdp = await context.newCDPSession(page);
+  const before = (await cdp.send("Runtime.getHeapUsage")).usedSize;
+  const samples: number[] = [];
+  for (let batch = 0; batch < 24; batch++) {
+    await page.evaluate((batch) => {
+      const store = (window as any).__lifecycleStore;
+      for (let i = 0; i < 100; i++) {
+        const item = {
+          id: `real-${batch}-${i}`,
+          type: "commandExecution",
+          command: "echo result",
+          commandActions: [],
+          status: "inProgress",
+          aggregatedOutput: null,
+          exitCode: null,
+          durationMs: null,
+          cwd: "/fixture",
+          source: "agent",
+          processId: null,
+          pluginId: null,
+          scriptPath: null,
+        };
+        store
+          .getState()
+          .addEvent("ux-0", {
+            method: "item/started",
+            params: { threadId: "ux-0", turnId: "lifecycle", item },
+          });
+        store.getState().addEvent(
+          "ux-0",
+          JSON.parse(
+            JSON.stringify({
+              method: "item/completed",
+              params: {
+                threadId: "ux-0",
+                turnId: "lifecycle",
+                item: {
+                  ...item,
+                  status: "completed",
+                  aggregatedOutput: `${batch}:${i}:` + "x".repeat(100000),
+                  exitCode: 0,
+                  durationMs: 1,
+                },
+              },
+            }),
+          ),
+        );
+      }
+    }, batch);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const w = window as any;
+          return w.__lifecycleBytes(
+            w.__lifecycleStore.getState().events["ux-0"],
+          );
+        }),
+      )
+      .toBeLessThan(8 * 1024 * 1024);
+    // Let the normal 500ms cache writer run; do not call the governor or CDP GC.
+    await page.waitForTimeout(700);
+    samples.push((await cdp.send("Runtime.getHeapUsage")).usedSize);
+  }
+  console.log(
+    JSON.stringify({ mode: "automatic-no-forced-gc", before, samples }),
+  );
+  expect(Math.max(...samples)).toBeLessThan(before + 256 * 1024 * 1024);
+  expect(samples.at(-1)! - samples[2]).toBeLessThan(96 * 1024 * 1024);
+  expect(
+    await page.evaluate(
+      () =>
+        (window as any).__lifecycleStore.getState().turnTimingMap["ux-0"]
+          .status,
+    ),
+  ).toBe("inProgress");
 });

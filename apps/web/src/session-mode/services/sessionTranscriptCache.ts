@@ -8,6 +8,10 @@ import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
 import { openedSessions } from "./openedSessions";
 import {
+  compactCodexTranscript,
+  estimateTranscriptBytes,
+} from "./codexTranscriptMemoryBudget";
+import {
   cachedTranscriptBaselines,
   cachedTranscriptTimings,
   cacheInvalidatedAt,
@@ -32,7 +36,13 @@ export interface TranscriptCache {
 const DB = "kanban.session.transcripts.v1";
 const MAX_RECORD_BYTES = 2 * 1024 * 1024,
   MAX_TOTAL_BYTES = 30 * 1024 * 1024;
+const CACHE_RECORD_EVENT_LIMIT = 600;
+const CACHE_RECORD_MESSAGE_LIMIT = 200;
+const CACHE_RECORD_TOOL_TEXT_LIMIT = 16 * 1024;
+const CACHE_RECORD_ACTIVE_TOOL_GROUPS = 64;
+const CACHE_RECORD_ESTIMATE_RATIO = 0.85;
 let database: Promise<IDBDatabase | null> | undefined;
+const textEncoder = new TextEncoder();
 function open() {
   if (!database)
     database = new Promise((resolve) => {
@@ -93,72 +103,190 @@ export async function readTranscriptCache(
     /* Cache failure never blocks a live conversation. */
   }
 }
-export async function writeTranscriptCache(source: TranscriptCache) {
+
+type PendingWrite = {
+  record: TranscriptCache;
+  promise: Promise<void>;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+};
+type WriteState = {
+  running?: Promise<void>;
+  pending?: PendingWrite;
+};
+const transcriptWrites = new Map<string, WriteState>();
+
+function pendingWrite(record: TranscriptCache): PendingWrite {
+  let resolve!: () => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<void>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { record, promise, resolve, reject };
+}
+
+export function writeTranscriptCache(source: TranscriptCache): Promise<void> {
+  if (source.savedAt <= cacheInvalidatedAt(source.key))
+    return Promise.resolve();
+  const limit = cacheRecordLimit();
+  const record = buildCacheRecord(source, limit);
+  if (!record) return Promise.resolve();
+  const state = transcriptWrites.get(record.key) ?? {};
+  transcriptWrites.set(record.key, state);
+  if (state.running) {
+    if (state.pending) {
+      state.pending.record = record;
+      return state.pending.promise;
+    }
+    state.pending = pendingWrite(record);
+    return state.pending.promise;
+  }
+  state.running = drainTranscriptWrites(record.key, state, record);
+  return state.running;
+}
+
+async function drainTranscriptWrites(
+  key: string,
+  state: WriteState,
+  record: TranscriptCache,
+) {
+  let current = record;
+  let pending: PendingWrite | undefined;
+  for (;;) {
+    try {
+      await writeTranscriptCacheNow(current);
+      pending?.resolve();
+    } catch (error) {
+      pending?.reject(error);
+    }
+    pending = state.pending;
+    if (!pending) {
+      state.running = undefined;
+      transcriptWrites.delete(key);
+      return;
+    }
+    state.pending = undefined;
+    current = pending.record;
+    if (current.key !== key) return;
+  }
+}
+
+function cacheRecordLimit() {
+  return Math.min(
+    MAX_RECORD_BYTES,
+    Math.floor(MAX_TOTAL_BYTES / Math.max(1, openedSessions().length)),
+  );
+}
+
+function stripTurnItemBodies(events: ServerNotification[]) {
+  return events.map((event) =>
+    event.method === "turn/completed" || event.method === "turn/started"
+      ? ({
+          ...event,
+          params: {
+            ...event.params,
+            turn: { ...event.params.turn, items: [] },
+          },
+        } as ServerNotification)
+      : event,
+  );
+}
+
+function boundedEvents(
+  events: ServerNotification[] | undefined,
+  limit: number,
+): ServerNotification[] | undefined {
+  if (!events) return;
+  const window = stripTurnItemBodies(
+    events.filter((event) => !isIgnoredTranscriptEvent(event)),
+  ).slice(-CACHE_RECORD_EVENT_LIMIT);
+  const estimatedLimit = Math.max(
+    0,
+    Math.floor(limit * CACHE_RECORD_ESTIMATE_RATIO),
+  );
+  const compacted = compactCodexTranscript(window, {
+    maxBytes: estimatedLimit,
+    targetBytes: Math.floor(estimatedLimit * 0.8),
+    maxEvents: CACHE_RECORD_EVENT_LIMIT,
+    targetEvents: Math.floor(CACHE_RECORD_EVENT_LIMIT * 0.75),
+    activeTurnId: null,
+    toolTextLimit: CACHE_RECORD_TOOL_TEXT_LIMIT,
+    maxActiveToolGroups: CACHE_RECORD_ACTIVE_TOOL_GROUPS,
+  }).events;
+  return compacted.length ? compacted : undefined;
+}
+
+function boundedMessages(
+  messages: CCMessage[] | undefined,
+  limit: number,
+): CCMessage[] | undefined {
+  let bounded = messages
+    ?.filter((m) => ["user", "assistant", "result"].includes(m.type))
+    .slice(-CACHE_RECORD_MESSAGE_LIMIT);
+  while (
+    bounded?.length &&
+    estimateTranscriptBytes(bounded) > limit * CACHE_RECORD_ESTIMATE_RATIO
+  ) {
+    bounded = bounded.slice(Math.max(1, Math.floor(bounded.length / 4)));
+  }
+  return bounded?.length ? bounded : undefined;
+}
+
+function buildCacheRecord(source: TranscriptCache, limit: number) {
+  const base: TranscriptCache = {
+    ...source,
+    ...(source.thread
+      ? {
+          thread: {
+            ...source.thread,
+            turns: [],
+            status: { type: "notLoaded" },
+          },
+        }
+      : {}),
+  };
+  let events = boundedEvents(source.events, limit);
+  let messages = boundedMessages(source.messages, limit);
+  const candidate = (): TranscriptCache => ({
+    ...base,
+    ...(events?.length ? { events } : { events: undefined }),
+    ...(messages?.length ? { messages } : { messages: undefined }),
+  });
+  let record = candidate();
+  while (
+    estimateTranscriptBytes(record) > limit * CACHE_RECORD_ESTIMATE_RATIO &&
+    ((events?.length ?? 0) > 0 || (messages?.length ?? 0) > 0)
+  ) {
+    if ((events?.length ?? 0) >= (messages?.length ?? 0)) {
+      events = events?.slice(Math.max(1, Math.floor(events.length / 4)));
+    } else {
+      messages = messages?.slice(Math.max(1, Math.floor(messages.length / 4)));
+    }
+    record = candidate();
+  }
+  if (estimateTranscriptBytes(record) > limit * CACHE_RECORD_ESTIMATE_RATIO)
+    return;
+  return record;
+}
+
+async function writeTranscriptCacheNow(record: TranscriptCache) {
   try {
     const db = await open();
     if (!db) return;
-    if (source.savedAt <= cacheInvalidatedAt(source.key)) return;
-    // Keep a recent window, without duplicating full item bodies in turn boundaries.
-    const events = source.events
-      ?.filter((event) => !isIgnoredTranscriptEvent(event))
-      ?.slice(-600)
-      .map((event) =>
-        event.method === "turn/completed" || event.method === "turn/started"
-          ? ({
-              ...event,
-              params: {
-                ...event.params,
-                turn: { ...event.params.turn, items: [] },
-              },
-            } as ServerNotification)
-          : event,
-      );
-    const record: TranscriptCache = {
-      ...source,
-      events,
-      messages: source.messages
-        ?.filter((m) => ["user", "assistant", "result"].includes(m.type))
-        .slice(-200),
-      ...(source.thread
-        ? {
-            thread: {
-              ...source.thread,
-              turns: [],
-              status: { type: "notLoaded" },
-            },
-          }
-        : {}),
-    };
-    const size = () =>
-      new TextEncoder().encode(JSON.stringify(record)).byteLength;
-    const limit = Math.min(
-      MAX_RECORD_BYTES,
-      Math.floor(MAX_TOTAL_BYTES / Math.max(1, openedSessions().length)),
-    );
-    while (
-      size() > limit &&
-      (record.events?.length ?? 0) + (record.messages?.length ?? 0) > 1
-    ) {
-      if (record.events?.length)
-        record.events.splice(
-          0,
-          Math.max(1, Math.floor(record.events.length / 4)),
-        );
-      else if (record.messages?.length)
-        record.messages.splice(
-          0,
-          Math.max(1, Math.floor(record.messages.length / 4)),
-        );
-    }
-    record.bytes = size();
+    if (record.savedAt <= cacheInvalidatedAt(record.key)) return;
+    const limit = cacheRecordLimit();
+    const serialized = JSON.stringify(record);
+    record.bytes = textEncoder.encode(serialized).byteLength;
     if (record.bytes > limit) return;
     const tx = db.transaction(["transcripts", "budget"], "readwrite"),
       store = tx.objectStore("transcripts"),
       budget = tx.objectStore("budget");
-    const existing = (await requestResult(budget.get(source.key))) as
+    const existing = (await requestResult(budget.get(record.key))) as
       | TranscriptCache
       | undefined;
-    if (existing && existing.savedAt > source.savedAt) return;
+    if (existing && existing.savedAt > record.savedAt) return;
+    if (record.savedAt <= cacheInvalidatedAt(record.key)) return;
     store.put(record);
     budget.put({
       key: record.key,

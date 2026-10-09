@@ -357,3 +357,25 @@ it("final items replace repeated snapshots and ignore stale deltas", () => {
   expect(updated).toHaveLength(1);
   expect((updated[0] as any).params.item.aggregatedOutput).toBe("new");
 });
+it("bounds a large tool snapshot before it reaches the store or cache subscribers", () => {
+  const incoming = event("item/completed", {
+    threadId: "thread",
+    turnId: "turn",
+    item: {
+      id: "large-tool",
+      type: "commandExecution",
+      status: "completed",
+      aggregatedOutput: "x".repeat(2 * 1024 * 1024),
+    },
+  });
+  const events = appendTranscriptEvent([], incoming);
+  expect(
+    (events[0] as any).params.item.aggregatedOutput.length,
+  ).toBeLessThanOrEqual(64 * 1024);
+  expect((events[0] as any).params.item.aggregatedOutput).toContain(
+    "[truncated",
+  );
+  expect((incoming as any).params.item.aggregatedOutput.length).toBe(
+    2 * 1024 * 1024,
+  );
+});
