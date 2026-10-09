@@ -588,6 +588,8 @@ export interface FilePreviewInput {
 
 export interface FilePreviewResponse {
   path: string;
+  /** Nearest Git project containing this Markdown document, when detected. */
+  resourceRootPath?: string;
   content: string;
   encoding: "utf8" | "binary";
   truncated: boolean;

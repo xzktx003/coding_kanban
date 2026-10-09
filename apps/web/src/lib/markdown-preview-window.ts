@@ -15,7 +15,24 @@ export interface MarkdownPreviewWindow {
   nextOffset: number | null;
   offset: number;
   path: string;
+  resourceRootPath?: string;
   size: number;
+}
+
+export function getMarkdownResourceRoot(
+  documentPath: string,
+  projectRoot: string | undefined,
+  configuredRoot: string | undefined,
+): string {
+  for (const root of [projectRoot, configuredRoot]) {
+    if (!root) continue;
+    const normalized = root.replace(/\/+$/, "");
+    if (documentPath.startsWith(normalized + "/")) return root;
+  }
+  // A home shorthand is resolved by the backend, so preserve it when no
+  // concrete project was discovered. An unrelated absolute root is never used.
+  if (configuredRoot === "~" && !projectRoot) return configuredRoot;
+  return documentPath.slice(0, documentPath.lastIndexOf("/")) || "/";
 }
 
 type PreviewLoader = (input: FilePreviewInput) => Promise<FilePreviewResponse>;
@@ -30,6 +47,7 @@ export async function loadMarkdownPreviewWindow(
   let nextOffset: number | null = requestedOffset;
   let firstOffset = requestedOffset;
   let fileSize = 0;
+  let resourceRootPath: string | undefined;
 
   while (
     nextOffset !== null &&
@@ -50,6 +68,7 @@ export async function loadMarkdownPreviewWindow(
     if (chunks.length === 0) {
       firstOffset = response.offset;
       fileSize = response.size;
+      resourceRootPath = response.resourceRootPath;
     }
 
     chunks.push(response.content);
@@ -71,6 +90,7 @@ export async function loadMarkdownPreviewWindow(
     nextOffset,
     offset: firstOffset,
     path: input.path,
+    ...(resourceRootPath ? { resourceRootPath } : {}),
     size: fileSize,
   };
 }

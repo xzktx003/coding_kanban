@@ -21,10 +21,9 @@ import type {
 import { LocalFsService } from "../services/local-fs-service.js";
 import { SftpService } from "../services/sftp-service.js";
 import {
-  assertPathInside,
   assertSafeFilesystemPath,
   guessMimeType,
-  resolveMarkdownImagePath,
+  resolveMarkdownImageResourcePath,
 } from "../services/file-system-utils.js";
 
 interface FilesystemRouteOptions {
@@ -312,16 +311,14 @@ export async function registerFilesystemRoutes(
             sshTarget,
             documentPath,
           );
-          const candidate = resolveMarkdownImagePath({
-            documentPath: resolvedDocument,
-            rootPath: resolvedRoot,
-            source,
-          });
-          const [canonicalRoot, canonicalImage] = await Promise.all([
-            sftpService.realpath(sshTarget, resolvedRoot),
-            sftpService.realpath(sshTarget, candidate),
-          ]);
-          assertPathInside(canonicalRoot, canonicalImage);
+          const canonicalImage = await resolveMarkdownImageResourcePath(
+            {
+              documentPath: resolvedDocument,
+              rootPath: resolvedRoot,
+              source,
+            },
+            (candidate) => sftpService.realpath(sshTarget, candidate),
+          );
           const metadata = await sftpService.getFileMetadata(
             sshTarget,
             canonicalImage,
@@ -334,16 +331,14 @@ export async function registerFilesystemRoutes(
         } else {
           const resolvedRoot = localFsService.resolvePath(rootPath);
           const resolvedDocument = localFsService.resolvePath(documentPath);
-          const candidate = resolveMarkdownImagePath({
-            documentPath: resolvedDocument,
-            rootPath: resolvedRoot,
-            source,
-          });
-          const [canonicalRoot, canonicalImage] = await Promise.all([
-            realpath(resolvedRoot),
-            realpath(candidate),
-          ]);
-          assertPathInside(canonicalRoot, canonicalImage);
+          const canonicalImage = await resolveMarkdownImageResourcePath(
+            {
+              documentPath: resolvedDocument,
+              rootPath: resolvedRoot,
+              source,
+            },
+            realpath,
+          );
           const metadata = await localFsService.getFileMetadata(canonicalImage);
           if (metadata.isDirectory) {
             throw new Error("Unsupported Markdown image type");

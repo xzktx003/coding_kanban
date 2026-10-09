@@ -1,3 +1,7 @@
+- 2026-10-09：跨项目 Markdown 图片不能只验 API。终端文件浏览可以离开会话目录，图片 rootPath 仍绑定原会话会导致 400。FilePreviewResponse.resourceRootPath 按文档最近 .git 标记探测，桌面分段和手机保留/复用；不相关旧 root 不作为 fallback。浏览器需验证请求目录和 img.naturalWidth；真实五图场景已先红后绿。
+
+- 2026-10-09：终端 Markdown 图片 404 不一定缺依赖。飞书导出 `@./papers/figures/...` 相对导出工作区而非文档目录；显式 `@./` 可在 rootPath 内逐层向上找最近匹配，普通路径不回退。只对 ENOENT/ENOTDIR/SFTP 状态 2 继续；权限和真实路径越界即失败，保留 16 MiB 限制。补齐 AVIF/BMP/ICO MIME；系统依赖与排查统一见 README，架构见 docs/markdown-image-preview.md。
+
 - 2026-10-08：原生回答失败重复显示 RPC 与本地错误；优先保留 RPC 通知，本地错误仅作无 RPC 状态的兜底，保留重试和答案。见 RequestUserInputItem 测试与 docs/session-background-sync.md。
 
 - 2026-10-08：后台历史先于 SSE 补到问题时，也应对已加载的当前会话复用一次性展开；显式历史、初次加载、旧轮和已收起请求仍保持静默。postNoContent 必须保留 HTTP 状态码，明确 4xx 拒绝与 5xx／超时送达不明分别处理，禁止盲目重发；回归见 docs/session-background-sync.md。

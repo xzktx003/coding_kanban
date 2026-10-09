@@ -9,8 +9,56 @@ import type {
 import {
   DESKTOP_MARKDOWN_PREVIEW_PAGE_BYTES,
   DESKTOP_MARKDOWN_PREVIEW_WINDOW_BYTES,
+  getMarkdownResourceRoot,
   loadMarkdownPreviewWindow,
 } from "./markdown-preview-window.js";
+
+test("cross-project Markdown uses the opened file project and refuses the session's unrelated root", () => {
+  assert.equal(
+    getMarkdownResourceRoot(
+      "/papers/topic/docs/paper.md",
+      "/papers/topic",
+      "/coding-kanban",
+    ),
+    "/papers/topic",
+  );
+  assert.equal(
+    getMarkdownResourceRoot(
+      "/papers/topic/docs/paper.md",
+      undefined,
+      "/coding-kanban",
+    ),
+    "/papers/topic/docs",
+  );
+  assert.equal(
+    getMarkdownResourceRoot(
+      "/papers/topic/docs/paper.md",
+      undefined,
+      "/papers/topic",
+    ),
+    "/papers/topic",
+  );
+  assert.equal(
+    getMarkdownResourceRoot(
+      "/papers/topic-two/paper.md",
+      undefined,
+      "/papers/topic",
+    ),
+    "/papers/topic-two",
+  );
+});
+
+test("desktop preview windows preserve the document's own resource root across pages", async () => {
+  const pages = [
+    { ...response("first ", 0, 6), resourceRootPath: "/papers/topic" },
+    response("second", 6, null),
+  ];
+  const result = await loadMarkdownPreviewWindow(
+    { path: "/papers/topic/paper.md" },
+    async () => pages.shift()!,
+  );
+  assert.equal(result.resourceRootPath, "/papers/topic");
+});
 
 function response(
   content: string,

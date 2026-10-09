@@ -21,6 +21,7 @@ import {
   assertSafeFilesystemPath,
   formatLocalOwner,
   formatPermissions,
+  findMarkdownProjectRoot,
   normalizeLocalPath,
   validateChmodMode,
 } from "./file-system-utils.js";
@@ -164,13 +165,21 @@ export class LocalFsService {
         window.offset,
       );
 
-      return buildFilePreviewResponse({
+      const preview = buildFilePreviewResponse({
         path: resolvedPath,
         buffer: buffer.subarray(0, bytesRead),
         fileSize: fileStats.size,
         offset: window.offset,
         maxBytes: window.maxBytes,
       });
+      const resourceRootPath = await findMarkdownProjectRoot(
+        resolvedPath,
+        async (marker) => {
+          const info = await lstat(marker);
+          return info.isDirectory() || info.isFile();
+        },
+      );
+      return resourceRootPath ? { ...preview, resourceRootPath } : preview;
     } finally {
       await fileHandle.close();
     }

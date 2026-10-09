@@ -432,6 +432,77 @@ test("file browser supports real local browsing, edit, upload, download, and del
   }
 });
 
+test("Markdown images follow the opened project when browsing outside the focused session", async ({
+  page,
+  request,
+}) => {
+  const fixture = setupFixture();
+  const project = mkdtempSync(path.join(tmpdir(), "markdown-image-project-"));
+  const docs = path.join(project, "papers/v10");
+  mkdirSync(path.join(project, ".git"));
+  mkdirSync(docs, { recursive: true });
+  mkdirSync(path.join(project, "papers/figures"));
+  writeFileSync(
+    path.join(project, "papers/figures/a.png"),
+    Buffer.from(ONE_BY_ONE_PNG, "base64"),
+  );
+  writeFileSync(
+    path.join(docs, "paper.md"),
+    "# Paper\n\n![Export](@./papers/figures/a.png)\n\n![Standard](../figures/a.png)",
+  );
+  let sessionId: string | undefined;
+  try {
+    sessionId = await launchMockSession(
+      request,
+      `markdown-cross-project-${Date.now()}`,
+      fixture.rootDir,
+    );
+    await page.addInitScript(
+      ({ id, directory }) => {
+        localStorage.setItem(
+          "focus-view-state",
+          JSON.stringify({ viewMode: "focus", focusedId: id }),
+        );
+        localStorage.setItem(
+          `file-browser-scope-state:${id}:local`,
+          JSON.stringify({ currentPath: directory }),
+        );
+      },
+      { id: sessionId, directory: docs },
+    );
+    const imageRequests: Array<{ rootPath: string; source: string }> = [];
+    page.on("request", (req) => {
+      if (new URL(req.url()).pathname === "/api/fs/markdown-image")
+        imageRequests.push(req.postDataJSON());
+    });
+    await page.goto("/");
+    const drawer = await openFileBrowserForFocusedSession(page);
+    await drawer.getByTestId("file-entry-paper.md").dblclick();
+    await expect(drawer.getByTestId("markdown-rendered")).toBeVisible();
+    const images = drawer.locator(".markdown-resource-image img");
+    await expect(images).toHaveCount(2);
+    await expect
+      .poll(() =>
+        images.evaluateAll((nodes) =>
+          nodes.every((node) => (node as HTMLImageElement).naturalWidth > 0),
+        ),
+      )
+      .toBe(true);
+    expect(imageRequests.map((req) => req.rootPath)).toEqual([
+      project,
+      project,
+    ]);
+    expect(imageRequests.map((req) => req.source)).toEqual(
+      expect.arrayContaining(["@./papers/figures/a.png", "../figures/a.png"]),
+    );
+  } finally {
+    await deleteSessionIfPresent(request, sessionId);
+    rmSync(project, { recursive: true, force: true });
+    rmSync(fixture.rootDir, { recursive: true, force: true });
+    rmSync(fixture.uploadFilePath, { force: true });
+  }
+});
+
 test("Markdown files stay inline beside the terminal and render only one preview", async ({
   page,
   request,

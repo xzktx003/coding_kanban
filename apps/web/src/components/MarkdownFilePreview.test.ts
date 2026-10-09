@@ -102,6 +102,24 @@ test("passes the active document context into the lazy Markdown renderer", () =>
   assert.match(source, /resourceContext={resourceContext}/);
 });
 
+test("preserves Feishu export image references for the bounded resource loader", () => {
+  const markup = renderToStaticMarkup(
+    createElement(MarkdownRenderedContent, {
+      content: "![Figure](@./papers/figures/figure.png)",
+      resourceContext: {
+        documentPath: "/workspace/project/papers/v10/paper.md",
+        rootPath: "/workspace/project",
+      },
+    }),
+  );
+  assert.match(
+    markup,
+    /data-markdown-image-source="@\.\/papers\/figures\/figure\.png"/,
+  );
+  assert.match(markup, /图片将在滚动到附近时加载/);
+  assert.doesNotMatch(markup, /src="@\./);
+});
+
 test("keeps an equivalent Markdown image context mounted across parent refreshes", () => {
   const previous = {
     content: "![Diagram](../assets/diagram.png)",

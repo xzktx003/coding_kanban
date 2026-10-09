@@ -17,6 +17,78 @@ function createTempRoot(): string {
   return mkdtempSync(path.join(tmpdir(), "filesystem-routes-"));
 }
 
+test("Markdown preview resolves Feishu export images from the nearest contained ancestor", async () => {
+  const rootDir = createTempRoot();
+  const documentPath = path.join(rootDir, "subproject/papers/v10/paper.md");
+  const imagePath = path.join(rootDir, "subproject/papers/figures/figure.png");
+  mkdirSync(path.dirname(documentPath), { recursive: true });
+  mkdirSync(path.dirname(imagePath), { recursive: true });
+  writeFileSync(documentPath, "![Figure](@./papers/figures/figure.png)");
+  writeFileSync(imagePath, "nearest image");
+  mkdirSync(path.join(rootDir, "papers/figures"), { recursive: true });
+  writeFileSync(path.join(rootDir, "papers/figures/figure.png"), "outer image");
+  const { app } = buildServer();
+  await app.ready();
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/fs/markdown-image",
+      payload: {
+        documentPath,
+        rootPath: rootDir,
+        source: "@./papers/figures/figure.png",
+      },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body, "nearest image");
+    const escaped = await app.inject({
+      method: "POST",
+      url: "/api/fs/markdown-image",
+      payload: {
+        documentPath,
+        rootPath: rootDir,
+        source: "@./../../../../outside.png",
+      },
+    });
+    assert.equal(escaped.statusCode, 400);
+  } finally {
+    await app.close();
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("Markdown image streaming recognizes AVIF, BMP and ICO without conversion software", async () => {
+  const rootDir = createTempRoot();
+  const documentPath = path.join(rootDir, "README.md");
+  writeFileSync(documentPath, "# Images");
+  const { app } = buildServer();
+  await app.ready();
+  try {
+    for (const [extension, mime] of [
+      ["avif", "image/avif"],
+      ["bmp", "image/bmp"],
+      ["ico", "image/vnd.microsoft.icon"],
+    ]) {
+      writeFileSync(path.join(rootDir, `figure.${extension}`), "image bytes");
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/fs/markdown-image",
+        payload: {
+          documentPath,
+          rootPath: rootDir,
+          source: `figure.${extension}`,
+        },
+      });
+      assert.equal(response.statusCode, 200, extension);
+      assert.equal(response.headers["content-type"], mime);
+      assert.equal(response.body, "image bytes");
+    }
+  } finally {
+    await app.close();
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+});
+
 test("filesystem routes list, preview, rename, and delete local files", async () => {
   const rootDir = createTempRoot();
   const sourcePath = path.join(rootDir, "example.txt");

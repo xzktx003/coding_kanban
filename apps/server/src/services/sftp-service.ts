@@ -16,6 +16,7 @@ import {
   detectFileEntryType,
   formatRemoteOwner,
   formatPermissions,
+  findMarkdownProjectRoot,
   joinRemotePath,
   validateChmodMode,
 } from "./file-system-utils.js";
@@ -634,13 +635,22 @@ export class SftpService {
                 stream.on("end", () => resolve(Buffer.concat(chunks)));
               });
 
-        return buildFilePreviewResponse({
+        const preview = buildFilePreviewResponse({
           path: remotePath,
           buffer,
           fileSize,
           offset: window.offset,
           maxBytes: window.maxBytes,
         });
+        const resourceRootPath = await findMarkdownProjectRoot(
+          remotePath,
+          async (marker) => {
+            const info = await sftpStat(sftp, marker);
+            const type = detectFileEntryType(info.mode);
+            return type === "directory" || type === "file";
+          },
+        );
+        return resourceRootPath ? { ...preview, resourceRootPath } : preview;
       }),
     );
   }

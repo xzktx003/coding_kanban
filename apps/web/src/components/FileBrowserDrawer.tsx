@@ -23,6 +23,7 @@ import { isPdfFile } from "../lib/pdf-preview";
 import { PdfFilePreview } from "./PdfFilePreview";
 import { FileImagePreview } from "./FileImagePreview";
 import {
+  getMarkdownResourceRoot,
   loadMarkdownPreviewWindow,
   type MarkdownPreviewWindow,
 } from "../lib/markdown-preview-window";
@@ -603,6 +604,7 @@ export function FileBrowserDrawer({
         nextOffset: selectedMarkdownPreview.nextOffset,
         offset: selectedMarkdownPreview.offset,
         path: selectedMarkdownPreview.path,
+        resourceRootPath: selectedMarkdownPreview.resourceRootPath,
         size: selectedMarkdownPreview.size,
       };
     });
@@ -968,10 +970,13 @@ export function FileBrowserDrawer({
                       readOnly={!markdownPreviewWindow?.complete}
                       resourceContext={{
                         documentPath: markdownEditorState.path,
-                        rootPath:
+                        rootPath: getMarkdownResourceRoot(
+                          markdownEditorState.path,
+                          markdownPreviewWindow?.resourceRootPath,
                           selectedHost.type === "ssh"
                             ? selectedHost.preset.defaultPath
                             : (resourceRootPath ?? defaultPath ?? currentPath),
+                        ),
                         sshTarget,
                       }}
                       saving={savingMarkdown}

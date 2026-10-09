@@ -411,6 +411,67 @@ corepack prepare pnpm@10.13.1 --activate
 
 如果 `pnpm install` 在构建 `node-pty` 时报告 `node-gyp` 错误，再安装 Python 3、`make` 和 C/C++ 编译工具链。macOS 若没有可用的 `setsid`，可以使用下文的 `pnpm dev` 启动方式。
 
+### 各功能的依赖
+
+JavaScript 预览库随 `pnpm install --frozen-lockfile` 安装、随前端构建发布；访问看板的设备只需现代浏览器。系统命令安装在运行 Kanban 后端的主机上；使用 SSH 功能时，下表注明的远端命令还需安装在 SSH 目标主机。仅安装实际启用的可选功能依赖。
+
+| 功能 | 依赖与安装位置 | 验证方法 / 限制 |
+| --- | --- | --- |
+| 基础看板、前后端启动 | 本机 Git、Node.js、pnpm；推荐启动脚本还需 `curl`、`lsof`、OpenSSL，Linux 需 `setsid` | 上文版本检查；`pnpm check`、`pnpm dev:restart` |
+| 本地终端 / PTY | 本机 shell；`node-pty` 由 pnpm 安装，源码编译需 Python 3、make、C/C++ 工具链 | pnpm 安装无 `node-gyp` 错误，新建 shell 能输入输出 |
+| tmux 扫描、接管、恢复 | 执行会话的主机安装 tmux；远端 tmux 功能需远端也安装 | 本机及远端执行 `tmux -V` |
+| 结构化会话运行层 | 本机 Rust stable/Cargo、CMake、完整 C/C++ 工具链；Linux 包含 C++ 标准库开发链接文件 | `cargo --version`、`cmake --version`、`g++ --version`、`pnpm session:build`、`pnpm session:status`；只访问浏览器不需要 Rust |
+| Codex / Claude / Copilot Agent | 在执行 Agent 的本机或 SSH 目标安装相应 CLI，并完成该 CLI 的登录或模型配置 | 相应命令 `--version`；ACP Agent 还需其自身适配器和配置；纯 shell 不要求 Agent CLI |
+| Git Diff、版本检查和显式更新 | 操作仓库的主机安装 Git；远程 fetch/push 需该 remote 对应的 SSH 密钥或 HTTPS 登录 | `git status`、`git fetch`；本地 Diff 不需要外网，远程提醒需要能访问 upstream |
+| 本地文件浏览、Markdown 与图片预览 | 后端有文件读取权限；前端自带 `react-markdown`、GFM 插件；图片由浏览器原生解码 | 无需 ImageMagick、FFmpeg、LibreOffice 或服务器 Chromium；路径规则见下节 |
+| Markdown 数学公式 | 前端自带 `remark-math`、`rehype-katex`、KaTeX 和字体 | 不需要安装 TeX；支持 `$…$`、`$$…$$`，终端模式也兼容 `\(…\)` / `\[…\]` |
+| PDF 预览 | 终端模式使用浏览器 PDF 查看器；会话模式使用随前端打包的 `react-pdf` / `pdfjs-dist` worker | 不需要 Poppler；浏览器禁用内嵌 PDF 时使用“新标签页打开”或下载；扫描 PDF 不会自动 OCR |
+| Office 文件预览（会话模式） | 前端自带 `docx-preview`、`pptx-preview`、`xlsx`；后端可读取文件 | 支持 DOCX、PPTX、XLSX/XLS/CSV；不需要 Microsoft Office / LibreOffice。旧二进制 DOC 虽有入口，DOCX 解析器不能保证兼容；PPT、密码保护文件和复杂版式也不保证，建议转换或下载 |
+| HTML 交互可视化（会话模式） | 浏览器执行隔离 iframe；文档使用外部图表库/字体时，浏览器需能访问允许的 HTTPS CDN | 自包含 HTML 可离线；支持的 CDN 与沙箱边界见 [可视化约定](docs/session-visualizations.md)。普通 Markdown 图片不依赖 CDN，`mermaid` 代码块也不会因安装系统软件自动变成图 |
+| SSH 终端、远端文件 / 图片 | 本机 OpenSSH 客户端及 SSH 凭据；目标提供 SSH 服务、shell，文件功能还需可用的 SFTP 子系统 | 先用相同配置登录 SSH；远端无需安装图片转换器，文件权限与符号链接边界仍生效 |
+| VS Code Web | 编辑目录所在主机安装 `code-server` 或 `openvscode-server`；自动安装需该主机能下载 code-server | 运行对应命令 `--version`；浏览器需信任 HTTPS CA；远端编辑另需 SSH。见 [编辑工作区](docs/session-vscode-panel.md) |
+| 飞书通知、回复控制和文件工作区 | 本机 `lark-cli`、机器人身份、相应消息/资源权限及回调配置 | 见下方飞书检查清单及 [飞书工作区](docs/feishu-session-workspace.md)；通知保留公式源码，无需服务器 Chromium |
+| 语音输入（会话模式） | 已构建的 Rust 运行层、设置中下载的 Whisper 模型；浏览器麦克风权限与可信 HTTPS（localhost 例外） | 首次模型下载需后端能访问 Hugging Face，下载后可本地转写；模型越大，内存与 CPU 消耗越大；无需单独安装 Whisper CLI |
+| 浏览器通知、剪贴板和麦克风 | 访问设备上的现代浏览器、对应权限与安全上下文 | 局域网使用可信 HTTPS；不同浏览器支持范围不同；无需在服务器安装桌面环境 |
+| E2E、浏览器回归、README 截图 | 开发机上的 Playwright Chromium 及其系统动态库 | `pnpm exec playwright install chromium`；Linux 可执行 `pnpm exec playwright install-deps chromium`（安装系统包需管理员权限）。这些依赖用于测试与截图，不是普通文件预览的运行条件 |
+
+### Markdown 图片的路径规则与排查
+
+终端模式文件预览支持 PNG、JPEG、GIF、WebP、SVG、AVIF、BMP、ICO；最终能否解码也取决于浏览器和文件本身。图片按需加载，单张本地或 SSH 图片最多 **16 MiB**，滚动到图片附近时才读取。
+
+| Markdown 引用 | 终端模式的读取规则 |
+| --- | --- |
+| `![图](./images/a.png)` / `![图](../figures/a.png)` | 相对于当前 Markdown 文件目录；规范化后的路径必须在文件浏览器允许的根目录内 |
+| `![图](/assets/a.png)` | 当前允许根目录内的真实绝对路径优先；否则视为相对该根目录的路径 |
+| `![图](@./papers/figures/a.png)` | 兼容飞书导出引用：从文档目录逐层向上查找，直到允许根目录；使用最近的匹配文件，不搜索根目录之外 |
+| `![图](https://example.com/a.png)` | 浏览器直接请求外链，需访问设备能联网；证书、鉴权、防盗链和混合内容限制仍由浏览器/图片站点决定 |
+
+图片必须实际存在并可读；符号链接解析后也不能逃出允许根目录。预览接口按打开的 Markdown 文件查找最近的 `.git` 项目标记（含 worktree 的 `.git` 文件），桌面和手机图片都跟随该项目，浏览其他项目时不会继续使用原终端会话的目录。没有项目标记时，沿用包含文档的已有目录范围；原范围不包含文档时，以文档所在目录为边界，不自动扩大到全盘。`@./` 属于导出工具的扩展语法，普通 Markdown 编辑器未必支持；要在其他工具间通用，优先用相对于文档的标准路径。预览不会修改原文或在磁盘上复制图片。原始 HTML 的 `<img>` 当前不作为可信 HTML 执行，请使用 `![说明](路径)`。
+
+出现“图片加载失败”时，将鼠标移到“重试”上查看读取错误；也可在浏览器开发者工具 Network 中查看 `/api/fs/markdown-image` 请求：
+
+- **404 / ENOENT**：文件缺失或引用目录不正确，确认本地/SSH 图片存在，尤其注意导出文档的 `@./` 前缀。
+- **outside the file browser root**：图片超出文档的项目范围，或符号链接指向范围外。确认图片属于同一项目；无 Git 项目可使用包含文档和图片的文件浏览范围，不要通过关闭路径检查绕过限制。
+- **403 / permission denied**：后端运行用户或 SSH 用户无法读取文件。
+- **415 / Unsupported Markdown image type**：图片扩展名不受支持；改用上述格式。仅改扩展名不会转换文件内容。
+- **413 / exceeds 16777216 bytes**：图片超过 16 MiB，压缩、缩小分辨率或下载查看。
+- **接口返回正常但仍无图**：检查图片是否损坏、浏览器是否支持该格式；外链另查站点证书和登录。接口能读 PNG 时，安装服务器 Chromium 或 Office 软件不会解决路径问题。
+
+### C++ 标准库与会话构建失败
+
+`cannot find -lstdc++` 表示链接器缺少 **开发用的 `libstdc++.so`**。机器上即使已有运行库 `libstdc++.so.6`，仍可能缺少这个文件。Ubuntu/Debian 优先安装完整工具链：
+
+```bash
+sudo apt install -y build-essential cmake
+g++ --version
+g++ -print-file-name=libstdc++.so
+pnpm session:build
+```
+
+如果最后一个查询只返回 `libstdc++.so` 而不是完整存在的文件路径，检查所用 GCC 版本对应的 `g++` 和 `libstdc++-<版本>-dev` 包是否安装；例如 Ubuntu 24.04 的 GCC 13 对应 `g++-13`、`libstdc++-13-dev`。Fedora/RHEL 使用 `gcc-c++`；macOS 使用 Xcode Command Line Tools 的 Clang/libc++。推荐通过仓库脚本构建，脚本使用已有 Whisper bindings，普通构建无需另装 libclang 来重新生成 bindings。
+
+若启动时报 `libstdc++.so.6: cannot open shared object file`，则是**运行库**缺失；若报 `GLIBCXX_* not found`，则是编译与运行机器的 C++ 运行库版本不匹配。安装对应发行版的 C++ 运行库或在目标机器重新构建。不要提交系统库、主机路径或链接器临时配置；本机覆盖只能放入被忽略的 `.env` / `.dev-runtime`。
+
 ### 新用户安装检查清单
 
 首次启动前，建议从上到下逐项确认。

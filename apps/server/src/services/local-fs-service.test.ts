@@ -10,6 +10,22 @@ function createTempRoot(): string {
   return mkdtempSync(path.join(tmpdir(), "local-fs-service-"));
 }
 
+test("Markdown preview identifies its own nearest Git project instead of the focused session", async () => {
+  const root = createTempRoot();
+  const nested = path.join(root, "papers/topic");
+  const document = path.join(nested, "papers/v10/paper.md");
+  mkdirSync(path.join(root, ".git"));
+  mkdirSync(path.dirname(document), { recursive: true });
+  writeFileSync(path.join(nested, ".git"), "gitdir: /worktree-metadata");
+  writeFileSync(document, "![Figure](@./papers/figures/a.png)");
+  try {
+    const preview = await new LocalFsService().preview(document);
+    assert.equal(preview.resourceRootPath, nested);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("LocalFsService lists directories, filters hidden files, and previews text files", async () => {
   const rootDir = createTempRoot();
   const service = new LocalFsService();

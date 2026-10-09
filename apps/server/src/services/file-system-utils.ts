@@ -13,7 +13,10 @@ const READ_BITS = [0o400, 0o040, 0o004];
 let passwdOwnerCache: Map<number, string> | null = null;
 
 const MIME_TYPES = new Map<string, string>([
+  [".avif", "image/avif"],
+  [".bmp", "image/bmp"],
   [".gif", "image/gif"],
+  [".ico", "image/vnd.microsoft.icon"],
   [".jpeg", "image/jpeg"],
   [".jpg", "image/jpeg"],
   [".json", "application/json"],
@@ -129,6 +132,30 @@ export function guessMimeType(filePath: string): string | null {
   return MIME_TYPES.get(extension) ?? null;
 }
 
+export async function findMarkdownProjectRoot(
+  documentPath: string,
+  hasGitMarker: (marker: string) => Promise<boolean>,
+): Promise<string | undefined> {
+  if (
+    !path.posix.isAbsolute(documentPath) ||
+    !/\.(?:md|markdown)$/i.test(documentPath)
+  )
+    return undefined;
+  let directory = path.posix.dirname(documentPath);
+  while (directory !== "/") {
+    try {
+      if (await hasGitMarker(path.posix.join(directory, ".git")))
+        return directory;
+    } catch (error) {
+      const code = (error as { code?: string | number }).code;
+      if (code !== "ENOENT" && code !== "ENOTDIR" && code !== 2)
+        return undefined;
+    }
+    directory = path.posix.dirname(directory);
+  }
+  return undefined;
+}
+
 function isPathInside(rootPath: string, candidatePath: string): boolean {
   const relative = path.posix.relative(rootPath, candidatePath);
   return (
@@ -184,6 +211,48 @@ export function resolveMarkdownImagePath(input: {
       );
   assertPathInside(rootPath, resolvedPath);
   return resolvedPath;
+}
+
+/** Feishu exports use @./ relative to the export workspace, which may be an
+ * ancestor of the document. Only this explicit syntax searches ancestors. */
+export async function resolveMarkdownImageResourcePath(
+  input: Parameters<typeof resolveMarkdownImagePath>[0],
+  canonicalize: (candidate: string) => Promise<string>,
+): Promise<string> {
+  const root = path.posix.normalize(input.rootPath).replace(/\/+$/, "") || "/";
+  assertPathInside(root, path.posix.normalize(input.documentPath));
+  const canonicalRoot = await canonicalize(root);
+  const source = input.source.trim();
+  const exported = source.startsWith("@./");
+  let directory = path.posix.dirname(path.posix.normalize(input.documentPath));
+  for (;;) {
+    const candidate = resolveMarkdownImagePath(
+      exported
+        ? {
+            ...input,
+            documentPath: path.posix.join(directory, "_document.md"),
+            source: source.slice(1),
+          }
+        : input,
+    );
+    let canonicalImage: string;
+    try {
+      canonicalImage = await canonicalize(candidate);
+    } catch (error) {
+      const code = (error as { code?: string | number }).code;
+      // ssh2 SFTP uses status 2 for a missing file.
+      if (
+        !exported ||
+        directory === root ||
+        (code !== "ENOENT" && code !== "ENOTDIR" && code !== 2)
+      )
+        throw error;
+      directory = path.posix.dirname(directory);
+      continue;
+    }
+    assertPathInside(canonicalRoot, canonicalImage);
+    return canonicalImage;
+  }
 }
 
 export function isBinaryBuffer(buffer: Buffer): boolean {

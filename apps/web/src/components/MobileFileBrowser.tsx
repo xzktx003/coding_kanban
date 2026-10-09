@@ -16,6 +16,7 @@ import type {
 import { previewFile } from "../lib/api";
 import { copyTextToClipboard } from "../lib/clipboard";
 import { isMarkdownFileName } from "../lib/file-types";
+import { getMarkdownResourceRoot } from "../lib/markdown-preview-window";
 import { isPdfFile } from "../lib/pdf-preview";
 import { PdfFilePreview } from "./PdfFilePreview";
 import { FileImagePreview } from "./FileImagePreview";
@@ -534,7 +535,11 @@ export function MobileFileBrowser({
               fallbackText="正在渲染 Markdown..."
               resourceContext={{
                 documentPath: entry.path,
-                rootPath: defaultPath,
+                rootPath: getMarkdownResourceRoot(
+                  entry.path,
+                  preview.resourceRootPath,
+                  defaultPath,
+                ),
                 sshTarget,
               }}
               testId="mobile-markdown-preview"
