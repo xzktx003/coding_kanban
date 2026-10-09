@@ -1,9 +1,10 @@
+import { memo, useRef } from "react";
 import { Streamdown } from "streamdown";
 import { CopyButton } from "@session/components/common";
 import { useWindowFocus } from "@session/hooks/useWindowFocus";
+import { useAnimationFrameValue } from "@session/hooks/useAnimationFrameValue";
 import { VisualizationContent } from "@session/features/visualizations/VisualizationContent";
 import { useCodexStore } from "../stores/useCodexStore";
-import { useRef } from "react";
 import { MessageReferenceActions } from "../composer/v2/MessageReferenceActions";
 
 type AgentMessageItemProps = {
@@ -12,22 +13,23 @@ type AgentMessageItemProps = {
   itemId?: string;
 };
 
-export const AgentMessageItem = ({ text, threadId, itemId }: AgentMessageItemProps) => {
-  const contentRef=useRef<HTMLDivElement>(null);
+const AgentMessageContent = memo(function AgentMessageContent({
+  text,
+  threadId,
+  itemId,
+  projectRoot,
+}: AgentMessageItemProps & { projectRoot?: string }) {
+  const contentRef = useRef<HTMLDivElement>(null);
   const isWindowFocused = useWindowFocus();
-  const projectRoot = useCodexStore(
-    (state) => state.threads.find((thread) => thread.id === threadId)?.cwd,
-  );
-
-  if (!text.trim()) return null;
+  const hasVisualization = text.includes("visualize");
 
   return (
     <div
-      className={`group flex flex-col items-start gap-1 ${text.includes("visualize") ? "w-full" : ""}`}
+      className={`group flex flex-col items-start gap-1 ${hasVisualization ? "w-full" : ""}`}
     >
       <div
         ref={contentRef}
-        className={`${text.includes("visualize") ? "w-full" : "w-fit"} min-w-0 max-w-full overflow-x-auto rounded-md border p-2`}
+        className={`${hasVisualization ? "w-full" : "w-fit"} min-w-0 max-w-full overflow-x-auto rounded-md border p-2`}
       >
         <VisualizationContent
           text={text}
@@ -43,8 +45,35 @@ export const AgentMessageItem = ({ text, threadId, itemId }: AgentMessageItemPro
         }`}
       >
         <CopyButton text={text} className="h-7 w-7 text-muted-foreground" />
-        <MessageReferenceActions text={text} threadId={threadId} itemId={itemId} contentRef={contentRef}/>
+        <MessageReferenceActions
+          text={text}
+          threadId={threadId}
+          itemId={itemId}
+          contentRef={contentRef}
+        />
       </div>
     </div>
+  );
+});
+
+export const AgentMessageItem = ({
+  text,
+  threadId,
+  itemId,
+}: AgentMessageItemProps) => {
+  const frameText = useAnimationFrameValue(text);
+  const projectRoot = useCodexStore(
+    (state) => state.threads.find((thread) => thread.id === threadId)?.cwd,
+  );
+
+  if (!frameText.trim()) return null;
+
+  return (
+    <AgentMessageContent
+      text={frameText}
+      threadId={threadId}
+      itemId={itemId}
+      projectRoot={projectRoot}
+    />
   );
 };

@@ -91,3 +91,13 @@
 本轮落地的是证据明确、范围受控的命令快照归一：开始时显示运行状态，完成时同位置替换为最终快照；读取历史按原生状态生成一份快照，不把仍在执行的命令伪造为完成。用户输入、推理、审批和子 Agent 保留各自事件语义。最终助手消息仍分隔前后的命令组，避免去掉开始副本后把不相邻命令合成一组。
 
 本轮验证：`pnpm check` 与会话单测 217 文件 / 831 用例通过，浏览器 10 个不同用例通过（其中内存回收 3 项重新完整执行）。新增回归覆盖同一命令快照替换、迟到的 started 不回退完成状态、不同轮次同 ID 命令仍可运行，以及回复前后的命令组顺序。真实生命周期测试继续开启缓存、不调用回收器、不强制 GC；最少观察 2400、最多 4800 次执行，峰值和尾部增长限制不变，避免固定结束点恰好落在自然 GC 之前。本次 2400 次执行的 JS 堆峰值 242,227,220 字节（约 231 MiB），自然回收到 56,397,180 字节（约 54 MiB），最终 80,943,844 字节（约 77 MiB）。该结果验证自动回收路径，不能证明已解决用户设备上所有标签页内存来源，也没有对官方扩展进行同条件基准测试。
+
+## 2026-10-10 类似对话产品的流式渲染对照
+
+检查 GitHub 上 Open WebUI 的公开实现：[Messages.svelte](https://github.com/open-webui/open-webui/blob/main/src/lib/components/chat/Messages.svelte) 对流式消息的列表重建使用 `requestAnimationFrame` 合并到每帧一次，结构切换立即重建；[Markdown.svelte](https://github.com/open-webui/open-webui/blob/main/src/lib/components/chat/Messages/Markdown.svelte) 对未完成消息每帧最多重新切词一次，并在组件卸载时取消待执行帧。它默认分批显示最近 8 条消息，向上翻页时再增加 8 条。[Message.svelte](https://github.com/open-webui/open-webui/blob/main/src/lib/components/chat/Messages/Message.svelte) 还用 `content-visibility: auto` 跳过屏幕外消息的布局和绘制，明确注明 WebKit 的兼容问题并在该环境停用。
+
+Kanban 原先虽然有虚拟列表和原生历史分页，流式文本每个通知仍会触发 `buildThreadRows` 扫描整段事件；随后把最后一条完整消息 `JSON.stringify`，即使只是同一消息多一个 token；可见助手消息的 `Streamdown` 也随每次更新重建。长回复令这些全量操作反复处理不断变长的字符串，造成高频临时分配和解析，符合用户报告的“Codex 工作中内存快速上涨”时机。这是本轮定位到的前端放大路径，不把它混同为所有机器上的唯一原因。
+
+本轮按上述模式修复：会话行推导、送达回声扫描和 Markdown 子树最多每帧更新一次；帧间只保留最新事件/文本，卸载时取消尚未执行的帧。新消息提示现在只比较末行稳定 key，不再序列化正文。线程状态、审批以及 Codex 原生通知仍立即进入 store；显示快照延迟不超过一帧。历史仍沿用原生分页和既有内存预算。
+
+另一个重要对照是 OpenAI Codex 自身的公开 issue [#39231](https://github.com/openai/codex/issues/39231)：报告描述大文件 diff tracker 长期持有原文、每次变更重建/克隆完整 diff 并写入日志，最终 RSS 达数十 GB。它说明 Codex 任务期间的内存增长也可能来自运行时/工具和文件 diff，而不只来自聊天 UI；Kanban 的前端修复不能限制这些进程的 RSS。检查日为 2026-10-10；上游 issue 状态和实现会变化，引用用于说明已报告的问题类型，不推断所有用户或插件都会复现。

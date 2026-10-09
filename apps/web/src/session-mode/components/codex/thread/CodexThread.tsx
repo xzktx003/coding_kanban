@@ -35,6 +35,7 @@ import {
   type ReadingPosition,
 } from "@session/services/sessionTranscriptCache";
 import { useSessionSyncStore } from "@session/stores/useSessionSyncStore";
+import { useAnimationFrameValue } from "@session/hooks/useAnimationFrameValue";
 
 interface CodexThreadProps {
   threadId?: string;
@@ -94,7 +95,10 @@ const CodexTranscript = memo(function CodexTranscript({
     (s) => s.earlierErrors[activeThreadId],
   );
   const historyError = useCodexStore((s) => s.historyErrorMap[activeThreadId]);
-  const events = useCodexStore((s) => s.events[activeThreadId] ?? EMPTY_EVENTS);
+  const incomingEvents = useCodexStore(
+    (s) => s.events[activeThreadId] ?? EMPTY_EVENTS,
+  );
+  const events = useAnimationFrameValue(incomingEvents, activeThreadId);
   const turnTiming = useCodexStore((s) => s.turnTimingMap[activeThreadId]);
   const retryNotice = useCodexStore((s) => s.retryNoticeMap[activeThreadId]);
   const rows = useMemo(() => buildThreadRows(events), [events]);
@@ -117,11 +121,7 @@ const CodexTranscript = memo(function CodexTranscript({
   const newest = useRef<string | undefined>(undefined);
   useEffect(() => {
     const last = rows.at(-1);
-    const signature = last
-      ? JSON.stringify(
-          last.item.kind === "event" ? last.item.event : last.item.actions,
-        )
-      : undefined;
+    const signature = last?.key;
     if (newest.current && signature !== newest.current && !pinned.current)
       setHasNewMessages(true);
     newest.current = signature;
@@ -294,7 +294,7 @@ const CodexTranscript = memo(function CodexTranscript({
       if (pinned.current) jumpToBottom();
     });
     return () => cancelAnimationFrame(frame);
-  }, [events, totalSize, jumpToBottom]);
+  }, [rows, totalSize, jumpToBottom]);
   useLayoutEffect(() => {
     const element = viewport();
     if (!element) return;
