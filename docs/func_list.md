@@ -279,7 +279,8 @@
 
 ### 12.10 多 tmux pane 的 Codex 历史跟随
 
-- 完整记录根据 Kanban PTY 对应的 tmux client 和当前活动 pane 解析 Codex session，不再把注册时的固定 pane 当作永久历史来源。
+- 完整记录根据 Kanban PTY 对应的 tmux client 和当前活动 pane 解析 Codex session，不再把注册时的固定 pane 当作永久历史来源；活动进程明确执行 `codex resume <ID>` 时按该 thread 的精确 ID 读取，即使其原工作目录与当前 pane 不同。
+- 完整记录中的消息时间与记录更新时间均显示本地日期和时间，便于区分跨日历史。
 - 活动 pane 没有 Codex 时不回退到上一个 pane；后端重载、Kanban client 正在重连时仍按 tmux session 查询当前活动 pane，只有 tmux 查询失败时才使用固定 pane、已知 session ID 或工作目录匹配作为兼容回退。
 - 完整记录弹窗打开期间低频探测 session ID，切换 tmux pane 后自动替换历史；同一 session 的手动分页内容不会被无意义重置。
 

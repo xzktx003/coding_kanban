@@ -66,7 +66,6 @@ interface OpenSessionCandidate {
   mtimeMs: number;
   path: string;
   subagent: boolean;
-  createdAtMs?: number;
 }
 
 interface CachedSessionCandidate {
@@ -93,7 +92,6 @@ function readOpenSession(path: string): OpenSessionCandidate | null {
       .split("\n", 1)[0];
     const record = JSON.parse(firstLine ?? "") as {
       type?: unknown;
-      timestamp?: unknown;
       payload?: Record<string, unknown>;
     };
     if (record.type !== "session_meta" || !record.payload) return null;
@@ -111,16 +109,12 @@ function readOpenSession(path: string): OpenSessionCandidate | null {
     const source = record.payload.source;
     const subagent =
       source !== null && typeof source === "object" && "subagent" in source;
-    const timestamp = record.payload.timestamp ?? record.timestamp;
-    const createdAtMs =
-      typeof timestamp === "string" ? Date.parse(timestamp) : NaN;
     return {
       id,
       cwd,
       mtimeMs: statSync(path).mtimeMs,
       path,
       subagent,
-      ...(Number.isFinite(createdAtMs) ? { createdAtMs } : {}),
     };
   } catch {
     return null;
@@ -728,18 +722,17 @@ export class CodexSessionLocator {
     }
 
     const sessionFiles = listSessionFiles(this.sessionsRoot);
+    // A resumed thread retains the cwd stored when it was created. The active
+    // Codex command line is an exact, read-only history identity even when the
+    // shell pane has since changed directories; still require a matching
+    // session header and reject subagent rollouts.
     for (const sessionId of explicitResumeSessionIds) {
       for (const path of sessionFiles) {
         if (!path.includes(sessionId)) {
           continue;
         }
         const candidate = this.readCachedSessionCandidate(path);
-        if (
-          candidate?.id === sessionId &&
-          !candidate.subagent &&
-          (!normalizedDirectory ||
-            resolve(candidate.cwd) === normalizedDirectory)
-        ) {
+        if (candidate?.id === sessionId && !candidate.subagent) {
           return candidate.id;
         }
       }
@@ -756,9 +749,9 @@ export class CodexSessionLocator {
         ),
       );
 
-    // `codex resume <session-id>` exposes the selected conversation directly
-    // in the pane process tree. Prefer that exact identity over file recency or
-    // shell-snapshot timing, while still validating the rollout and cwd.
+    // Prefer an explicitly resumed identity over candidates matched by cwd or
+    // shell-snapshot timing. The exact file lookup above handles the common
+    // path; this also covers a rollout already open in the pane process tree.
     for (const sessionId of explicitResumeSessionIds) {
       if (
         openCandidates.some((candidate) => candidate.id === sessionId) ||
@@ -802,39 +795,20 @@ export class CodexSessionLocator {
       }
     }
 
-    // Shell snapshots can be regenerated hours into a conversation. For a
-    // newly created thread, immutable session metadata still records startup.
-    // Recover only an already registered history ID with a unique same-directory
-    // match across the whole process tree; this is not an input-routing identity.
-    // recency alone must never select another terminal's conversation.
+    // Shell snapshots can be regenerated and Codex can close rollout handles
+    // between writes. For history display only, an exact registered ID remains
+    // safe when the active pane still runs Codex and the rollout metadata
+    // matches that pane's current directory. Never use this fallback for input
+    // routing or when another pane/process kind is active.
     if (
       input.historySessionId &&
       normalizedDirectory &&
       codexProcessIds.length > 0
     ) {
-      const startupMatches = new Set<string>();
-      for (const processId of codexProcessIds) {
-        const startedAt = readProcessStartTime(
-          this.procRoot,
-          processId,
-          this.clockTicksPerSecond,
-        );
-        if (startedAt === null) continue;
-        for (const candidate of sessionCandidates) {
-          if (
-            candidate.createdAtMs !== undefined &&
-            Math.abs(candidate.createdAtMs - startedAt) <=
-              SHELL_SNAPSHOT_MATCH_WINDOW_MS
-          ) {
-            startupMatches.add(candidate.id);
-          }
-        }
-      }
-      if (
-        startupMatches.size === 1 &&
-        startupMatches.has(input.historySessionId)
-      )
-        return input.historySessionId;
+      const registeredHistory = sessionCandidates.find(
+        (candidate) => candidate.id === input.historySessionId,
+      );
+      if (registeredHistory) return registeredHistory.id;
     }
 
     // Recent Codex builds append rollout JSONL through short-lived handles

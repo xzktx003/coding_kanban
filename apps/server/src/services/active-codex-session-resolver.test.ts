@@ -61,7 +61,7 @@ test("resolveCodexSessionIds falls back to the active thread when pane enumerati
   assert.deepEqual(result, ["active-thread"]);
 });
 
-test("history startup matching cannot replace the registered input target", async () => {
+test("history-only resolution cannot replace the registered input target", async () => {
   const updates: unknown[] = [];
   const session = { ...makeSession(), agentSessionId: "registered-thread" };
   const dependencies = {
