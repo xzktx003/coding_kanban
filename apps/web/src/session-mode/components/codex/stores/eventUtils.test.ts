@@ -150,8 +150,8 @@ describe("appendTranscriptEvent", () => {
       commandCompleted("cmd", "final output"),
     );
 
-    expect(events).toHaveLength(2);
-    expect(events[1]).toMatchObject({
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
       method: "item/completed",
       params: {
         item: {
@@ -160,6 +160,41 @@ describe("appendTranscriptEvent", () => {
         },
       },
     });
+  });
+
+  it("replaces a running command snapshot with its completed snapshot in place", () => {
+    let events = appendTranscriptEvent([], commandStarted("cmd"));
+    const warning = event("warning", {
+      threadId: "thread",
+      turnId: "turn",
+      message: "between snapshots",
+    });
+    events = appendTranscriptEvent(events, warning);
+    events = appendTranscriptEvent(events, commandCompleted("cmd", "done"));
+
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      method: "item/completed",
+      params: {
+        item: {
+          type: "commandExecution",
+          id: "cmd",
+          status: "completed",
+          aggregatedOutput: "done",
+        },
+      },
+    });
+    expect(events[1]).toBe(warning);
+  });
+
+  it("keeps a completed command snapshot when a stale started replay arrives", () => {
+    const completed = commandCompleted("cmd", "done");
+    const events = appendTranscriptEvent([], completed);
+    const updated = appendTranscriptEvent(events, commandStarted("cmd"));
+
+    expect(updated).toBe(events);
+    expect(updated).toHaveLength(1);
+    expect(updated[0]).toBe(completed);
   });
 
   it("replaces interleaved assistant deltas with the completed item", () => {

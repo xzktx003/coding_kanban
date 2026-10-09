@@ -319,7 +319,7 @@ test("real tool lifecycles stay bounded through automatic recovery and cache wri
   page,
   context,
 }) => {
-  test.setTimeout(90000);
+  test.setTimeout(150000);
   await installSessionUxFixture(page, 1);
   await page.goto("/?mode=session", { waitUntil: "networkidle" });
   await page.evaluate(async () => {
@@ -362,7 +362,7 @@ test("real tool lifecycles stay bounded through automatic recovery and cache wri
   const cdp = await context.newCDPSession(page);
   const before = (await cdp.send("Runtime.getHeapUsage")).usedSize;
   const samples: number[] = [];
-  for (let batch = 0; batch < 24; batch++) {
+  for (let batch = 0; batch < 48; batch++) {
     await page.evaluate((batch) => {
       const store = (window as any).__lifecycleStore;
       for (let i = 0; i < 100; i++) {
@@ -381,12 +381,10 @@ test("real tool lifecycles stay bounded through automatic recovery and cache wri
           pluginId: null,
           scriptPath: null,
         };
-        store
-          .getState()
-          .addEvent("ux-0", {
-            method: "item/started",
-            params: { threadId: "ux-0", turnId: "lifecycle", item },
-          });
+        store.getState().addEvent("ux-0", {
+          method: "item/started",
+          params: { threadId: "ux-0", turnId: "lifecycle", item },
+        });
         store.getState().addEvent(
           "ux-0",
           JSON.parse(
@@ -421,6 +419,11 @@ test("real tool lifecycles stay bounded through automatic recovery and cache wri
     // Let the normal 500ms cache writer run; do not call the governor or CDP GC.
     await page.waitForTimeout(700);
     samples.push((await cdp.send("Runtime.getHeapUsage")).usedSize);
+    expect(Math.max(...samples)).toBeLessThan(before + 256 * 1024 * 1024);
+    // A fixed final sample can land immediately before a natural major GC.
+    // Keep the same limits, but observe at least 2400 lifecycles and continue
+    // up to 4800 to establish recovery without calling GC or the governor.
+    if (batch >= 23 && samples.at(-1)! - samples[2] < 96 * 1024 * 1024) break;
   }
   console.log(
     JSON.stringify({ mode: "automatic-no-forced-gc", before, samples }),

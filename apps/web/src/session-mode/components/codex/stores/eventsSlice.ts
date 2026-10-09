@@ -27,6 +27,21 @@ export const createEventsSlice: StateCreator<
   addEvent: (threadId: string, event: ServerNotification) => {
     set((state: CodexStore) => {
       const existingEvents = state.events[threadId] || [];
+      // Replayed starts cannot regress a finalized snapshot or its status maps.
+      // Item identity includes the turn so a later execution remains independent.
+      if (
+        event.method === "item/started" &&
+        event.params.item.type === "commandExecution" &&
+        existingEvents.some(
+          (previous) =>
+            previous.method === "item/completed" &&
+            previous.params.threadId === event.params.threadId &&
+            previous.params.turnId === event.params.turnId &&
+            previous.params.item.id === event.params.item.id &&
+            previous.params.item.type === "commandExecution",
+        )
+      )
+        return state;
 
       // Each retry emits another error, so keeping them out of the transcript
       // is what stops "Reconnecting... 1/5" from stacking up five lines.

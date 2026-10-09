@@ -105,11 +105,13 @@ export function deriveRenderItems(events: ServerNotification[]): RenderItem[] {
       continue;
     }
 
-    // agentMessage completed = just push (content rendered here).
+    // agentMessage completed = boundary; completed command-only snapshots do not
+    // carry a separate started event to force the command group before content.
     if (
       event.method === "item/completed" &&
       event.params.item.type === "agentMessage"
     ) {
+      flushCmdBuffer(true);
       items.push({ kind: "event", event, index: i });
       continue;
     }

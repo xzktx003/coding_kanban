@@ -17,6 +17,32 @@ export function convertThreadHistoryToEvents(
 
     // Process each item in the turn
     for (const item of turn.items) {
+      // Native command history already is the current item snapshot. Recreating
+      // both lifecycle events retains two display records for the same tool.
+      if (item.type === "commandExecution") {
+        events.push(
+          item.status === "inProgress"
+            ? {
+                method: "item/started",
+                params: {
+                  item,
+                  threadId: thread.id,
+                  turnId: turn.id,
+                  startedAtMs: 0,
+                },
+              }
+            : {
+                method: "item/completed",
+                params: {
+                  item,
+                  threadId: thread.id,
+                  turnId: turn.id,
+                  completedAtMs: 0,
+                },
+              },
+        );
+        continue;
+      }
       // Add item/started event. Completed agent messages render from their
       // final item/completed snapshot; keeping a started copy only retains a
       // redundant reference to the same text/questions.

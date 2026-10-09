@@ -73,3 +73,39 @@ it("renders a command recovered only from a completed turn item", () => {
     completed: true,
   });
 });
+
+it("keeps a completed command group before the completed assistant message that follows it", () => {
+  const command = {
+    id: "cmd",
+    type: "commandExecution",
+    command: "pnpm test",
+    commandActions: [],
+    aggregatedOutput: "passed",
+  };
+  const message = {
+    id: "reply",
+    type: "agentMessage",
+    text: "Tests passed.",
+  };
+  const events = [
+    { method: "item/completed", params: { item: command } },
+    { method: "item/completed", params: { item: message } },
+  ] as unknown as ServerNotification[];
+
+  const rows = deriveRenderItems(events);
+
+  expect(rows).toMatchObject([
+    {
+      kind: "cmdGroup",
+      actionSources: [{ commandItemId: "cmd", aggregatedOutput: "passed" }],
+      completed: true,
+    },
+    {
+      kind: "event",
+      event: {
+        method: "item/completed",
+        params: { item: { id: "reply", type: "agentMessage" } },
+      },
+    },
+  ]);
+});

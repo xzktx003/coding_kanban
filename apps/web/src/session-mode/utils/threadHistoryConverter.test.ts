@@ -77,7 +77,7 @@ it("materializes completed history without redundant agent starts or nested turn
       params: expect.objectContaining({ item: user }),
     }),
   );
-  expect(events).toContainEqual(
+  expect(events).not.toContainEqual(
     expect.objectContaining({
       method: "item/started",
       params: expect.objectContaining({ item: command }),
@@ -129,6 +129,37 @@ it("materializes completed history without redundant agent starts or nested turn
       row.item.kind === "event" && row.item.event.method === "turn/completed",
   );
   expect(fileSummary?.context?.events?.length).toBeGreaterThan(0);
+});
+
+it("represents each historical command by its current snapshot without inventing completion", () => {
+  const command = (id: string, status: string) => ({
+    id,
+    type: "commandExecution",
+    status,
+    command: id,
+    commandActions: [],
+    aggregatedOutput: status === "inProgress" ? null : "done",
+  });
+  const events = convertThreadHistoryToEvents(
+    thread([
+      {
+        ...baseTurn,
+        status: "inProgress",
+        items: [command("done", "completed"), command("live", "inProgress")],
+      },
+    ]),
+  );
+  const snapshots = events.filter(
+    (event) =>
+      event.method === "item/started" || event.method === "item/completed",
+  );
+  expect(snapshots).toHaveLength(2);
+  expect(
+    snapshots.map((event: any) => [event.method, event.params.item.id]),
+  ).toEqual([
+    ["item/completed", "done"],
+    ["item/started", "live"],
+  ]);
 });
 
 it("keeps question completions visible while stripping completed turn item payloads", () => {

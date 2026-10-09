@@ -17,6 +17,8 @@ type ItemCompletedEvent = Extract<
   ServerNotification,
   { method: "item/completed" }
 >;
+type ItemStartedEvent = Extract<ServerNotification, { method: "item/started" }>;
+type ItemLifecycleEvent = ItemStartedEvent | ItemCompletedEvent;
 type TurnCompletedEvent = Extract<
   ServerNotification,
   { method: "turn/completed" }
@@ -130,6 +132,47 @@ const isAgentMessageCompleted = (
 ): event is ItemCompletedEvent =>
   event.method === "item/completed" &&
   event.params.item.type === "agentMessage";
+
+const isCommandExecutionLifecycle = (event: ServerNotification): boolean =>
+  (event.method === "item/started" || event.method === "item/completed") &&
+  event.params.item.type === "commandExecution";
+
+const replaceCommandExecutionSnapshot = (
+  events: ServerNotification[],
+  incoming: ItemLifecycleEvent,
+): ServerNotification[] => {
+  const incomingKey = keyOfItemEvent(incoming);
+  if (!incomingKey) return [...events, incoming];
+
+  const completedIndex = lastEventIndex(
+    events,
+    (event) =>
+      event.method === "item/completed" &&
+      keyOfItemEvent(event) === incomingKey &&
+      event.params.item.type === "commandExecution",
+  );
+  if (completedIndex >= 0) {
+    if (incoming.method === "item/started") return events;
+    const next = [...events];
+    next[completedIndex] = incoming;
+    return next;
+  }
+
+  const startedIndex = lastEventIndex(
+    events,
+    (event) =>
+      event.method === "item/started" &&
+      keyOfItemEvent(event) === incomingKey &&
+      event.params.item.type === "commandExecution",
+  );
+  if (startedIndex >= 0) {
+    const next = [...events];
+    next[startedIndex] = incoming;
+    return next;
+  }
+
+  return [...events, incoming];
+};
 
 const replaceAgentStreamWithCompleted = (
   events: ServerNotification[],
@@ -276,6 +319,12 @@ export const appendTranscriptEvent = (
     )
   )
     return events;
+  if (isCommandExecutionLifecycle(incoming)) {
+    return replaceCommandExecutionSnapshot(
+      events,
+      incoming as ItemLifecycleEvent,
+    );
+  }
   if (
     (incoming.method === "item/started" ||
       incoming.method === "item/completed") &&
