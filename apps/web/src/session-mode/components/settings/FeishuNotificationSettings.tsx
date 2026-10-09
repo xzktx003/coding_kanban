@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FeishuNotificationSettingsResponse } from "@agent-orchestrator/shared";
+import type {
+  FeishuNotificationSettingsResponse,
+  UpdateFeishuNotificationSettingsInput,
+} from "@agent-orchestrator/shared";
 import { Button } from "@session/components/ui/button";
 import { Card, CardContent } from "@session/components/ui/card";
 import { Switch } from "@session/components/ui/switch";
@@ -8,7 +11,7 @@ import {
   updateFeishuNotificationSettings,
 } from "../../../lib/api";
 
-type UpdateIntent = boolean | null;
+type UpdateIntent = UpdateFeishuNotificationSettingsInput | null;
 
 function destinationLabel(
   settings: FeishuNotificationSettingsResponse | null,
@@ -53,32 +56,51 @@ export function FeishuNotificationSettings() {
     };
   }, [load]);
 
-  const updateEnabled = useCallback(async (enabled: boolean) => {
-    setUpdating(true);
-    setUpdateError(null);
-    setLastUpdateIntent(enabled);
-    try {
-      const next = await updateFeishuNotificationSettings({ enabled });
-      if (!mountedRef.current) return;
-      setSettings(next);
-      setLastUpdateIntent(null);
-    } catch {
-      if (!mountedRef.current) return;
-      setUpdateError("无法更新飞书完成通知设置");
-    } finally {
-      if (!mountedRef.current) return;
-      setUpdating(false);
-    }
-  }, []);
+  const updateSettings = useCallback(
+    async (input: UpdateFeishuNotificationSettingsInput) => {
+      setUpdating(true);
+      setUpdateError(null);
+      setLastUpdateIntent(input);
+      try {
+        const next = await updateFeishuNotificationSettings(input);
+        if (!mountedRef.current) return;
+        setSettings(next);
+        setLastUpdateIntent(null);
+      } catch {
+        if (!mountedRef.current) return;
+        setUpdateError("无法更新飞书完成通知设置");
+      } finally {
+        if (!mountedRef.current) return;
+        setUpdating(false);
+      }
+    },
+    [],
+  );
+
+  const updateEnabled = useCallback(
+    async (enabled: boolean) => {
+      await updateSettings({ enabled });
+    },
+    [updateSettings],
+  );
+
+  const updateReplyEnabled = useCallback(
+    async (replyEnabled: boolean) => {
+      await updateSettings({ replyEnabled });
+    },
+    [updateSettings],
+  );
 
   const retryUpdate = useCallback(() => {
     if (lastUpdateIntent !== null) {
-      void updateEnabled(lastUpdateIntent);
+      void updateSettings(lastUpdateIntent);
     }
-  }, [lastUpdateIntent, updateEnabled]);
+  }, [lastUpdateIntent, updateSettings]);
 
   const disabled = loading || updating || !settings?.configured;
   const checked = Boolean(settings?.enabled);
+  const replyDisabled = loading || updating || !settings?.replyConfigured;
+  const replyChecked = Boolean(settings?.replyEnabled);
 
   return (
     <section className="space-y-3">
@@ -131,6 +153,33 @@ export function FeishuNotificationSettings() {
               checked={checked}
               disabled={disabled}
               onCheckedChange={(enabled) => void updateEnabled(enabled)}
+            />
+          </div>
+          <div className="mt-4 flex items-center justify-between gap-4 border-t pt-4">
+            <div className="space-y-1">
+              <div className="text-sm font-medium">飞书回复继续任务</div>
+              <div className="text-xs text-muted-foreground">
+                仅个人接收目标可用；回复会话模式的完成卡片可继续原 Codex
+                会话，忙碌时会排队。
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span>{replyChecked ? "回复已开启" : "回复已关闭"}</span>
+                <span>
+                  {loading
+                    ? "读取中"
+                    : settings?.replyConfigured
+                      ? "个人回复已配置"
+                      : "个人回复未配置"}
+                </span>
+              </div>
+            </div>
+            <Switch
+              aria-label="飞书回复继续任务"
+              checked={replyChecked}
+              disabled={replyDisabled}
+              onCheckedChange={(replyEnabled) =>
+                void updateReplyEnabled(replyEnabled)
+              }
             />
           </div>
         </CardContent>

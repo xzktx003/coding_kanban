@@ -62,6 +62,28 @@ it("toggles only the enabled flag through the shared endpoint", async () => {
   expect(await screen.findByText("已关闭")).toBeTruthy();
 });
 
+it("toggles only the reply flag through the shared endpoint", async () => {
+  updateSettings.mockResolvedValue(settings({ replyEnabled: false }));
+  render(<FeishuNotificationSettings />);
+
+  const toggle = await screen.findByRole("switch", {
+    name: "飞书回复继续任务",
+  });
+  fireEvent.click(toggle);
+
+  await waitFor(() =>
+    expect(updateSettings).toHaveBeenCalledWith({ replyEnabled: false }),
+  );
+  expect(updateSettings).not.toHaveBeenCalledWith(
+    expect.objectContaining({ enabled: expect.any(Boolean) }),
+  );
+  expect(
+    screen.getByText(
+      "仅个人接收目标可用；回复会话模式的完成卡片可继续原 Codex 会话，忙碌时会排队。",
+    ),
+  ).toBeTruthy();
+});
+
 it("disables the switch when Feishu delivery is not configured", async () => {
   getSettings.mockResolvedValue(
     settings({ enabled: false, configured: false, destinationType: null }),
@@ -72,6 +94,23 @@ it("disables the switch when Feishu delivery is not configured", async () => {
   const toggle = await screen.findByRole("switch", { name: "飞书完成通知" });
   expect((toggle as HTMLButtonElement).disabled).toBe(true);
   expect(screen.getByText("未配置接收目标")).toBeTruthy();
+});
+
+it("disables the reply switch when private replies are not configured", async () => {
+  getSettings.mockResolvedValue(
+    settings({
+      destinationType: "chat",
+      replyConfigured: false,
+      replyEnabled: false,
+    }),
+  );
+
+  render(<FeishuNotificationSettings />);
+
+  const toggle = await screen.findByRole("switch", {
+    name: "飞书回复继续任务",
+  });
+  expect((toggle as HTMLButtonElement).disabled).toBe(true);
 });
 
 it("shows load and update failures with retry actions", async () => {

@@ -14,6 +14,7 @@ import {
 
 export interface FeishuCompletionEvent {
   userQuestion?: string;
+  sessionModeThreadId?: string;
   codexThreadId?: string;
   transcriptAgentKind?: string;
   transcriptSessionId?: string;
@@ -744,6 +745,9 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
       cwd: event.workingDirectory ?? this.#fallbackWorkingDirectory,
       "agent-kind": event.agentKind,
       "display-name": event.displayName,
+      ...(event.sessionModeThreadId
+        ? { "session-mode-thread-id": event.sessionModeThreadId }
+        : {}),
       "last-assistant-message": summary,
       ...(event.userQuestion ? { "user-question": event.userQuestion } : {}),
       ...(event.codexThreadId || event.transcriptSessionId

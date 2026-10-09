@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 
 import type {
   FeishuCompletionEvent,
+  FeishuCompletionDelivery,
   FeishuCompletionSenderLike,
 } from "./agent-completion-feishu-notifier.js";
 import { writeDurableJson } from "./durable-json.js";
@@ -14,6 +15,12 @@ interface SessionCodexFeishuNotifierOptions {
   file?: string;
   settings: SettingsLike;
   sender: FeishuCompletionSenderLike;
+  deliveryRecorder?: {
+    record(
+      event: FeishuCompletionEvent,
+      delivery: FeishuCompletionDelivery,
+    ): void;
+  };
   readThread(id: string, turnId?: string): Promise<any>;
   logError?: (error: unknown, event?: FeishuCompletionEvent) => void;
   retryIntervalMs?: number;
@@ -200,6 +207,7 @@ function validateState(value: any): PersistedSessionCodexFeishuNotifierState {
 export class SessionCodexFeishuNotifier {
   readonly #file?: string;
   readonly #settings: SettingsLike;
+  readonly #deliveryRecorder: SessionCodexFeishuNotifierOptions["deliveryRecorder"];
   readonly #sender: FeishuCompletionSenderLike;
   readonly #readThread: (id: string, turnId?: string) => Promise<any>;
   readonly #logError: (error: unknown, event?: FeishuCompletionEvent) => void;
@@ -216,6 +224,7 @@ export class SessionCodexFeishuNotifier {
     this.#file = options.file;
     this.#settings = options.settings;
     this.#sender = options.sender;
+    this.#deliveryRecorder = options.deliveryRecorder;
     this.#readThread = options.readThread;
     this.#logError = options.logError ?? (() => {});
     this.#retryIntervalMs =
@@ -374,6 +383,7 @@ export class SessionCodexFeishuNotifier {
       FALLBACK_SUMMARY;
     return {
       sessionId: `session-codex:${pending.threadId}`,
+      sessionModeThreadId: pending.threadId,
       displayName: displayName(thread, pending.threadId),
       agentKind: "codex",
       workingDirectory: workingDirectory(thread),
@@ -442,7 +452,9 @@ export class SessionCodexFeishuNotifier {
           continue;
         }
         try {
-          await this.#sender.send(event);
+          const delivery = await this.#sender.send(event);
+          if (this.#closed || this.#broken) return;
+          if (delivery) this.#deliveryRecorder?.record(event, delivery);
         } catch (error) {
           this.#logError(error, event);
           continue;

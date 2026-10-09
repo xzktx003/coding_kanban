@@ -1,7 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import Fastify from "fastify";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { registerSessionFollowupRoutes } from "./session-followups.js";
+
+const execFileAsync = promisify(execFile);
+
 const body = {
   id: "request",
   threadId: "thread",
@@ -10,6 +18,16 @@ const body = {
   parameters: { model: "saved" },
   mode: "queue",
 };
+
+async function flockProcessesFor(path: string): Promise<string[]> {
+  const { stdout } = await execFileAsync("ps", ["-eo", "pid=,args="], {
+    encoding: "utf8",
+  });
+  return stdout
+    .split("\n")
+    .filter((line) => line.includes("flock") && line.includes(path));
+}
+
 test("validates input before journaling, deduplicates requests and serializes revision conflicts", async () => {
   const app = Fastify();
   const calls: any[] = [];
@@ -311,5 +329,25 @@ test("newly submitted messages dispatch without waiting for the one-second poll"
     assert.equal(accepted, 1, "duplicate submissions must not dispatch twice");
   } finally {
     await app.close();
+  }
+});
+
+test("closing during queue lease startup does not leave a flock child", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kanban-native-reply-"));
+  const file = join(root, "codex-followups.json");
+  try {
+    const app = Fastify();
+    registerSessionFollowupRoutes(app, {
+      file,
+      origin: () => null,
+    });
+
+    await app.ready();
+    await app.close();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(await flockProcessesFor(file + ".lock"), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

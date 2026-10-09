@@ -660,6 +660,11 @@ export function buildCompletionCards(
   const questionChunks = longQuestion
     ? splitOutputText(question, chunkLimit)
     : [];
+  const sessionModeThreadId =
+    typeof notification["session-mode-thread-id"] === "string"
+      ? sanitizeText(notification["session-mode-thread-id"])
+      : "";
+  const isSessionModeNotification = sessionModeThreadId.length > 0;
   const parts = [
     ...chunks.map((chunk, index) => ({ chunk, index, questionPart: false })),
     ...questionChunks.map((chunk, index) => ({
@@ -677,6 +682,7 @@ export function buildCompletionCards(
   });
   const recordsAvailable = notification["records-available"] === true;
   const quickRepliesAvailable =
+    !isSessionModeNotification &&
     notification["quick-replies-available"] === true &&
     sanitizeText(notification["agent-kind"]).toLowerCase() === "codex";
   const referencedFiles = completionReferencedFiles(notification);
@@ -715,7 +721,7 @@ export function buildCompletionCards(
         ],
       });
     }
-    if (recordsAvailable) {
+    if (!isSessionModeNotification && recordsAvailable) {
       primaryButtons.push({
         tag: "button",
         text: { tag: "plain_text", content: "查看完整记录" },
@@ -730,7 +736,12 @@ export function buildCompletionCards(
         ],
       });
     }
-    if (!questionPart && index === 0 && recordsAvailable) {
+    if (
+      !questionPart &&
+      index === 0 &&
+      !isSessionModeNotification &&
+      recordsAvailable
+    ) {
       referencedFiles.forEach((reference, referenceIndex) => {
         const basename = reference.path.split("/").at(-1);
         fileButtons.push({
@@ -859,6 +870,18 @@ export function buildCompletionCards(
                 preview: true,
               };
             })
+          : []),
+        ...(!questionPart && index === 0 && isSessionModeNotification
+          ? [
+              {
+                tag: "div",
+                text: {
+                  tag: "plain_text",
+                  content:
+                    "开启「飞书回复继续任务」后，回复本卡片可继续原会话；如果会话正在运行，消息会排队，当前任务结束后继续处理。",
+                },
+              },
+            ]
           : []),
         ...footerActions(index, questionPart),
       ],

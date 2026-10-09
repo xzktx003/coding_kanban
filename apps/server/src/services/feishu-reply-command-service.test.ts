@@ -44,6 +44,7 @@ const validEvent: FeishuInboundMessageEvent = {
 
 function createFixture(
   overrides: {
+    sessionMode?: (input: any) => Promise<void>;
     replyEnabled?: boolean;
     resolvedBinding?: FeishuReplyBinding | null;
     targetSession?: AgentSessionRecord;
@@ -73,6 +74,9 @@ function createFixture(
     replyBindings.set(initialBinding.messageId, initialBinding);
   }
   const service = new FeishuReplyCommandService({
+    sessionMode: overrides.sessionMode
+      ? { send: overrides.sessionMode }
+      : undefined,
     allowedUserId: "ou_owner",
     settings: {
       get: () => ({
@@ -445,4 +449,98 @@ test("does not mark an inbound message processed when terminal delivery fails", 
 
   await assert.rejects(service.handle(validEvent), /terminal unavailable/);
   assert.equal(processed.has("om_reply"), false);
+});
+
+test("native completion replies bypass terminal registry and preserve target across chained replies", async () => {
+  const sent: any[] = [];
+  const fixture = createFixture({
+    resolvedBinding: {
+      ...binding,
+      sessionId: "session-codex:native-thread",
+      sessionModeThreadId: "native-thread",
+    },
+    sessionMode: async (input) => {
+      sent.push(input);
+    },
+  });
+  assert.equal(await fixture.service.handle(validEvent), "delivered");
+  assert.deepEqual(sent, [
+    { messageId: "om_reply", threadId: "native-thread", text: "继续运行测试" },
+  ]);
+  assert.deepEqual(fixture.sessionLookups, []);
+  assert.deepEqual(fixture.writes, []);
+  assert.equal(await fixture.service.handle(validEvent), "ignored_duplicate");
+  assert.equal(
+    await fixture.service.handle({
+      ...validEvent,
+      message_id: "om_next",
+      reply_to: "om_reply",
+    }),
+    "delivered",
+  );
+  assert.equal(sent[1].threadId, "native-thread");
+});
+
+test("native reply failure is retryable and never falls back to a terminal", async () => {
+  const fixture = createFixture({
+    resolvedBinding: { ...binding, sessionModeThreadId: "native-thread" },
+    sessionMode: async () => {
+      throw new Error("offline");
+    },
+  });
+  await assert.rejects(fixture.service.handle(validEvent), /offline/);
+  assert.equal(fixture.processed.size, 0);
+  assert.deepEqual(fixture.sessionLookups, []);
+});
+
+test("native image replies use the same target and download service", async () => {
+  const sent: any[] = [];
+  const fixture = createFixture({
+    resolvedBinding: { ...binding, sessionModeThreadId: "native-thread" },
+    sessionMode: async (input) => {
+      sent.push(input);
+    },
+  });
+  assert.equal(
+    await fixture.service.handle({
+      ...validEvent,
+      message_type: "image",
+      content: "![Image](img_abcdefgh)",
+    }),
+    "delivered",
+  );
+  assert.equal(sent[0].threadId, "native-thread");
+  assert.equal(sent[0].image.imageExtension, "png");
+  assert.deepEqual(fixture.sessionLookups, []);
+});
+
+test("rejects a parent reply belonging to a different native target and respects the shared reply switch", async () => {
+  const native = {
+    ...binding,
+    sessionId: "session-codex:native-thread",
+    sessionModeThreadId: "native-thread",
+  };
+  const fixture = createFixture({
+    resolvedBinding: native,
+    sessionMode: async () => {
+      assert.fail("untrusted target must not send");
+    },
+  });
+  fixture.replyBindings.set("om_parent", {
+    ...native,
+    messageId: "om_parent",
+    sessionModeThreadId: "other-thread",
+  });
+  assert.equal(
+    await fixture.service.handle({ ...validEvent, reply_to: "om_parent" }),
+    "ignored_unbound",
+  );
+  const disabled = createFixture({
+    replyEnabled: false,
+    resolvedBinding: native,
+    sessionMode: async () => {
+      assert.fail("disabled");
+    },
+  });
+  assert.equal(await disabled.service.handle(validEvent), "ignored_disabled");
 });

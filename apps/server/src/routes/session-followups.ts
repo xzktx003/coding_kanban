@@ -271,15 +271,22 @@ export function registerSessionFollowupRoutes(
 ) {
   const fetcher = options.fetch ?? fetch,
     lifetime = new AbortController();
-  let lease: ChildProcess | undefined, init: Promise<void> | undefined;
+  let lease: ChildProcess | undefined,
+    leaseExit: Promise<void> | undefined,
+    init: Promise<void> | undefined;
   let streamConnected = false,
     streamGeneration = 0;
   async function acquire() {
     if (!options.file) return;
     await mkdir(dirname(options.file), { recursive: true, mode: 0o700 });
+    if (lifetime.signal.aborted) throw new Error("消息队列服务已停止");
     // Kernel lease is released even if the gateway is killed; no PID cleanup or process termination.
     await new Promise<void>((resolve, reject) => {
-      lease = spawn(
+      if (lifetime.signal.aborted) {
+        reject(new Error("消息队列服务已停止"));
+        return;
+      }
+      const child = spawn(
         "flock",
         [
           "-n",
@@ -292,15 +299,39 @@ export function registerSessionFollowupRoutes(
         ],
         { stdio: ["pipe", "pipe", "ignore"] },
       );
-      let held = false;
-      lease.stdout!.once("data", () => {
-        held = true;
-        resolve();
+      lease = child;
+      leaseExit = new Promise<void>((done) => {
+        child.once("exit", () => done());
+        child.once("error", () => done());
       });
-      lease.once("error", reject);
-      lease.once("exit", () => {
+      let held = false;
+      let settled = false;
+      const cleanup = () =>
+        lifetime.signal.removeEventListener("abort", abortLease);
+      const done = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (error) reject(error);
+        else resolve();
+      };
+      const abortLease = () => {
+        child.stdin?.end();
+        if (!held) done(new Error("消息队列服务已停止"));
+      };
+      lifetime.signal.addEventListener("abort", abortLease, { once: true });
+      child.stdout!.once("data", () => {
+        held = true;
+        done();
+      });
+      child.once("error", (error) => done(error));
+      child.once("exit", () => {
         if (held && !lifetime.signal.aborted) lifetime.abort();
-        reject(new Error("消息队列已由另一服务管理"));
+        done(
+          lifetime.signal.aborted
+            ? new Error("消息队列服务已停止")
+            : new Error("消息队列已由另一服务管理"),
+        );
       });
     });
   }
@@ -399,6 +430,14 @@ export function registerSessionFollowupRoutes(
       }))
     );
   };
+  // HTTP and trusted bot replies share validation, ownership lease and dispatch.
+  async function enqueue(input: unknown) {
+    const data = submit(input);
+    await ready();
+    const result = await queue.submit(data);
+    dispatchSoon();
+    return result;
+  }
   app.get<{ Querystring: { threadId: string } }>(
     "/api/session/followups",
     async (request) => {
@@ -411,11 +450,7 @@ export function registerSessionFollowupRoutes(
     "/api/session/followups/submit",
     { bodyLimit: 1024 * 1024 },
     async (request) => {
-      const data = submit(request.body);
-      await ready();
-      const result = await queue.submit(data);
-      dispatchSoon();
-      return result;
+      return enqueue(request.body);
     },
   );
   app.post("/api/session/followups/change", async (request) => {
@@ -560,8 +595,10 @@ export function registerSessionFollowupRoutes(
     clearTimeout(timer);
     clearTimeout(streamTimer);
     await options.completionNotifier?.close();
+    await init?.catch(() => {});
     await queue.drain();
     lease?.stdin?.end();
+    await leaseExit?.catch(() => {});
   });
-  return queue;
+  return Object.assign(queue, { enqueue });
 }

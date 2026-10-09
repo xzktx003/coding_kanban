@@ -108,6 +108,7 @@ test("queues every completed Codex turn with exact final output and stable ids",
   assert.equal(f.sent.length, 1);
   assert.deepEqual(f.sent[0], {
     sessionId: "session-codex:thread-one",
+    sessionModeThreadId: "thread-one",
     displayName: "主会话",
     agentKind: "codex",
     workingDirectory: "/workspace/project",
@@ -579,3 +580,71 @@ for (const unsettled of ["missing", "inProgress"] as const) {
     }
   });
 }
+
+test("records all delivered card parts against the original native thread before marking sent", async () => {
+  const records: any[] = [];
+  const notifier = new SessionCodexFeishuNotifier({
+    settings: { get: () => ({ configured: true, enabled: true }) },
+    sender: {
+      send: async () => ({
+        messages: [
+          { messageId: "om_part1", chatId: "oc_private" },
+          { messageId: "om_part2", chatId: "oc_private" },
+        ],
+      }),
+    },
+    deliveryRecorder: {
+      record: (event, delivery) => {
+        records.push({ event, delivery });
+      },
+    },
+    readThread: async () => ({ thread: thread() }),
+  });
+  try {
+    await notifier.observe("runtime", completion(1));
+    await waitFor(() => records.length === 1);
+    assert.equal(records[0].event.sessionModeThreadId, "thread-one");
+    assert.equal(records[0].event.codexThreadId, undefined);
+    assert.equal(records[0].delivery.messages.length, 2);
+  } finally {
+    await notifier.close();
+  }
+});
+
+test("binding persistence failure keeps a delivered notification pending for retry", async () => {
+  let fail = true;
+  const delivered: any[] = [];
+  const records: any[] = [];
+  const notifier = new SessionCodexFeishuNotifier({
+    retryIntervalMs: 20,
+    settings: { get: () => ({ configured: true, enabled: true }) },
+    sender: {
+      send: async (event) => {
+        delivered.push(event);
+        return { messages: [{ messageId: "om_notice", chatId: "oc_private" }] };
+      },
+    },
+    deliveryRecorder: {
+      record: (event) => {
+        if (fail) throw new Error("disk unavailable");
+        records.push(event);
+      },
+    },
+    readThread: async () => ({ thread: thread() }),
+  });
+  try {
+    await notifier.observe("runtime", completion(1));
+    await waitFor(() => delivered.length >= 1);
+    assert.equal(records.length, 0);
+    fail = false;
+    await notifier.drain();
+    await waitFor(() => records.length === 1);
+    assert.equal(delivered[0].completionId, delivered.at(-1).completionId);
+    assert.equal(
+      delivered[0].sessionModeThreadId,
+      delivered.at(-1).sessionModeThreadId,
+    );
+  } finally {
+    await notifier.close();
+  }
+});

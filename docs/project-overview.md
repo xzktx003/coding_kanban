@@ -820,3 +820,5 @@ Codex 主会话可通过原生多 Agent 工具并行分工，子任务摘要与�
 会话模式 Codex 的每轮成功完成可复用现有飞书配置发送最终结果，由 Node 后端观察原生完成事件，无需浏览器保持打开；会话与终端共用通知开关。新增持久待发送记录、重放去重和只读目标轮次核对，不改变执行权；使用方式与边界见 [会话完成飞书通知](session-codex-feishu-notifications.md)。
 
 会话模式的浏览器显示历史实行容量预算和定时回收，长任务旧工具结果及旧轮次可从原生历史只读分页恢复，运行中的 Agent、草稿和审批继续保留。详见 [浏览器内存预算](session-browser-memory.md)。
+
+会话模式飞书回复由 `SessionCodexFeishuReplyService` 校验原生 metadata 并复用 Node `CodexFollowups` 入队；完成卡片分片记录独立的 `sessionModeThreadId`，共享私聊监听器按绑定区分终端和原生目标。原生队列承担持久化、任务串行执行和送达不确定保护，飞书入口不改变执行权、模型或审批规则。常规设置复用两个独立开关，详见 [会话飞书通知与回复](session-codex-feishu-notifications.md)。

@@ -4,6 +4,8 @@ import { registerSessionProjectsRoutes } from "./session-projects.js";
 import { registerWorkspaceFileRoutes } from "./workspace-files.js";
 import { registerSessionTabsRoutes } from "./session-tabs.js";
 import { saveSessionAttachment } from "../services/session-attachments.js";
+import { SessionCodexFeishuReplyService } from "../services/session-codex-feishu-reply-service.js";
+import type { FeishuReplyBindingStore } from "../services/feishu-reply-binding-store.js";
 import { SessionCodexFeishuNotifier } from "../services/session-codex-feishu-notifier.js";
 import type { FeishuCompletionSenderLike } from "../services/agent-completion-feishu-notifier.js";
 import { resolve } from "node:path";
@@ -20,6 +22,7 @@ interface SessionModeRouteOptions {
   completionNotifications?: {
     settings: { get(): { configured: boolean; enabled: boolean } };
     sender: FeishuCompletionSenderLike;
+    bindings?: Pick<FeishuReplyBindingStore, "record">;
   };
 }
 
@@ -44,7 +47,7 @@ function validateOrigin(origin: string): URL {
 export function registerSessionModeRoutes(
   app: FastifyInstance,
   options: SessionModeRouteOptions = {},
-): void {
+): SessionCodexFeishuReplyService {
   registerSessionTabsRoutes(app, {
     file: options.attachmentRoot
       ? resolve(options.attachmentRoot, "..", "followed-sessions.json")
@@ -63,6 +66,17 @@ export function registerSessionModeRoutes(
   const completionNotifier = options.completionNotifications
     ? new SessionCodexFeishuNotifier({
         ...options.completionNotifications,
+        deliveryRecorder: options.completionNotifications.bindings
+          ? {
+              record: (event, delivery) =>
+                options.completionNotifications!.bindings!.record({
+                  sessionId: event.sessionId,
+                  sessionModeThreadId: event.sessionModeThreadId,
+                  completionId: event.completionId ?? event.completedAt,
+                  messages: delivery.messages,
+                }),
+            }
+          : undefined,
         file: options.attachmentRoot
           ? resolve(
               options.attachmentRoot,
@@ -127,6 +141,24 @@ export function registerSessionModeRoutes(
       : undefined,
     autoStart: Boolean(options.attachmentRoot),
     completionNotifier,
+  });
+  const replyService = new SessionCodexFeishuReplyService({
+    attachmentRoot: options.attachmentRoot,
+    submit: (input) => followups.enqueue(input),
+    readThread: async (threadId) => {
+      if (!origin) throw new Error("会话服务尚未连接");
+      const response = await fetchUpstream(
+        `${origin}/api/codex/thread/metadata`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ threadId }),
+          signal: AbortSignal.timeout(15000),
+        },
+      );
+      if (!response.ok) throw new Error("无法读取原会话");
+      return response.json();
+    },
   });
   registerSessionSubagentRoutes(app, {
     origin: () => origin,
@@ -373,4 +405,5 @@ export function registerSessionModeRoutes(
       client.on("error", close);
     });
   }
+  return replyService;
 }
