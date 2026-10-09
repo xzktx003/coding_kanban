@@ -41,9 +41,11 @@ export const isEventStreamConnected = () => connected;
 function namespace(event: string) {
   return event === "fs_change"
     ? "fs"
-    : event.startsWith("cc-")
-      ? "cc"
-      : event.split(/[:/]/)[0];
+    : event === "acp-message"
+      ? "acp"
+      : event.startsWith("cc-")
+        ? "cc"
+        : event.split(/[:/]/)[0];
 }
 function invoke(callback: (() => void) | undefined) {
   try {

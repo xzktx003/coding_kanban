@@ -2,6 +2,7 @@ import type { ServerNotification } from "../bindings";
 import type { Thread } from "../bindings/v2";
 import type { CCMessage } from "../components/cc/types/messages";
 import { useCodexStore } from "../components/codex/stores";
+import { isIgnoredTranscriptEvent } from "../components/codex/stores/eventUtils";
 import { useCCStore } from "../stores/cc";
 import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
@@ -78,8 +79,16 @@ export async function readTranscriptCache(
       Number.isFinite(cached.savedAt) &&
       cached.savedAt > cacheInvalidatedAt(key) &&
       (Array.isArray(cached.events) || Array.isArray(cached.messages))
-    )
+    ) {
+      if (cached.events?.some(isIgnoredTranscriptEvent))
+        return {
+          ...cached,
+          events: cached.events.filter(
+            (event) => !isIgnoredTranscriptEvent(event),
+          ),
+        };
       return cached;
+    }
   } catch {
     /* Cache failure never blocks a live conversation. */
   }
@@ -91,6 +100,7 @@ export async function writeTranscriptCache(source: TranscriptCache) {
     if (source.savedAt <= cacheInvalidatedAt(source.key)) return;
     // Keep a recent window, without duplicating full item bodies in turn boundaries.
     const events = source.events
+      ?.filter((event) => !isIgnoredTranscriptEvent(event))
       ?.slice(-600)
       .map((event) =>
         event.method === "turn/completed" || event.method === "turn/started"

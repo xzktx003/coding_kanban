@@ -1,4 +1,9 @@
-import { observeSubagents, useSubagentStore } from "@session/features/subagents/store";
+import { subagentParent } from "@agent-orchestrator/shared";
+import { isObservedCodexThread } from "@session/services/observedCodexThreads";
+import {
+  observeSubagents,
+  useSubagentStore,
+} from "@session/features/subagents/store";
 import { useSessionAttentionStore } from "@session/stores/useSessionAttentionStore";
 import { revealNewQuestion } from "@session/features/async-questions/arrival";
 import { useSessionNameStore } from "../../../stores/useSessionNameStore";
@@ -12,7 +17,10 @@ import { useCodexStore } from "@session/components/codex/stores";
 import { allowSleep, preventSleep } from "@session/services/apiAdapt";
 import { playBeep } from "@session/utils/beep";
 import { shouldPlayCompletionBeep } from "./beepOnCompletion";
-import { clearCodexRequests, resolveCodexServerRequest } from "./serverRequests";
+import {
+  clearCodexRequests,
+  resolveCodexServerRequest,
+} from "./serverRequests";
 import { useRequestUserInputStore } from "../stores/useRequestUserInputStore";
 import { hydrateThreadModel } from "@session/stores/useThreadModelStore";
 
@@ -33,7 +41,6 @@ export function useServerNotificationHandler(
 ) {
   return useCallback(
     (payload: ServerNotification) => {
-      observeSubagents(payload);
       const method = payload.method;
       if (method === "serverRequest/resolved") {
         resolveCodexServerRequest(
@@ -62,24 +69,55 @@ export function useServerNotificationHandler(
       }
 
       if (threadId) {
-        if (method === "thread/settings/updated") {
+        const parent =
+          method === "thread/started"
+            ? subagentParent(payload.params.thread)
+            : null;
+        const observed =
+          isObservedCodexThread(threadId) ||
+          (parent !== null && isObservedCodexThread(parent));
+        if (observed) observeSubagents(payload);
+
+        // Pending RPCs have their own stores and may outlive display membership.
+        // Expiration must still follow the exact native thread/turn identity.
+        if (method === "turn/completed")
+          clearCodexRequests(threadId, payload.params.turn.id);
+        else if (method === "thread/closed" || method === "thread/deleted")
+          clearCodexRequests(threadId);
+        else if (method === "error" && !payload.params.willRetry)
+          clearCodexRequests(threadId, payload.params.turnId);
+        else if (
+          method === "thread/status/changed" &&
+          payload.params.status.type === "systemError"
+        ) {
+          const turn = useCodexStore.getState().turnTimingMap[threadId];
+          if (turn) clearCodexRequests(threadId, turn.turnId);
+        }
+
+        const known =
+          observed ||
+          !!useCodexStore.getState().historyLoadedMap?.[threadId] ||
+          useCodexStore
+            .getState()
+            .threads.some((thread) => thread.id === threadId);
+        if (method === "thread/settings/updated" && known) {
           const settings = payload.params.threadSettings;
-          hydrateThreadModel(threadId, {
-            model: settings.model,
-            modelProvider: settings.modelProvider,
-            reasoningEffort: settings.effort,
-          }, { notify: !!useCodexStore.getState().historyLoadedMap?.[threadId] });
+          hydrateThreadModel(
+            threadId,
+            {
+              model: settings.model,
+              modelProvider: settings.modelProvider,
+              reasoningEffort: settings.effort,
+            },
+            { notify: !!useCodexStore.getState().historyLoadedMap?.[threadId] },
+          );
           return;
         }
-        if (
-          [
-            "mcpServer/startupStatus/updated",
-          ].includes(method)
-        ) {
+        if (["mcpServer/startupStatus/updated"].includes(method)) {
           return;
         }
 
-        if (method === "thread/started") {
+        if (method === "thread/started" && known) {
           const { cwd } = payload.params.thread;
           if (threadId && cwd) {
             useCodexStore.setState((state) => ({
@@ -90,7 +128,7 @@ export function useServerNotificationHandler(
           }
         }
 
-        if (method === "thread/name/updated") {
+        if (method === "thread/name/updated" && known) {
           const { threadName } = payload.params;
           if (threadName)
             useSessionNameStore
@@ -105,12 +143,13 @@ export function useServerNotificationHandler(
           }));
         }
 
-        if (method === "thread/tokenUsage/updated") {
+        if (observed && method === "thread/tokenUsage/updated") {
           const { tokenUsage } = payload.params;
           useCodexStore.getState().setTokenUsage(threadId, tokenUsage);
         }
 
         if (
+          observed &&
           refs.preventSleepDuringTasksRef.current &&
           method === "turn/started"
         ) {
@@ -123,7 +162,6 @@ export function useServerNotificationHandler(
         }
 
         if (method === "turn/completed") {
-          clearCodexRequests(threadId, payload.params.turn.id);
           void allowSleep(threadId).catch((error) => {
             console.warn(
               "[useServerNotificationHandler] allowSleep failed:",
@@ -132,11 +170,12 @@ export function useServerNotificationHandler(
           });
 
           const turnStatus = payload.params.turn.status;
-          if (turnStatus === "completed")
+          if (known && turnStatus === "completed")
             useSessionAttentionStore
               .getState()
               .complete("codex", threadId, payload.params.turn.id);
           if (
+            known &&
             turnStatus === "completed" &&
             !useSubagentStore.getState().nodes[threadId] &&
             (document.hidden || !document.hasFocus() || !isSessionModeActive())
@@ -146,6 +185,7 @@ export function useServerNotificationHandler(
             );
           }
           if (
+            known &&
             turnStatus === "completed" &&
             !useSubagentStore.getState().nodes[threadId] &&
             shouldPlayCompletionBeep(
@@ -157,17 +197,7 @@ export function useServerNotificationHandler(
           }
         }
 
-        if (method === "thread/closed" || method === "thread/deleted") {
-          clearCodexRequests(threadId);
-        }
-
-        if (method === "thread/status/changed" && payload.params.status.type === "systemError") {
-          const turn = useCodexStore.getState().turnTimingMap[threadId];
-          if (turn) clearCodexRequests(threadId, turn.turnId);
-        }
-
         if (method === "error" && !payload.params.willRetry) {
-          clearCodexRequests(threadId, payload.params.turnId);
           void allowSleep(threadId).catch((error) => {
             console.warn(
               "[useServerNotificationHandler] allowSleep failed:",
@@ -176,9 +206,9 @@ export function useServerNotificationHandler(
           });
         }
 
-        // Forward every non-noise notification to the events slice so
-        // derived state (turnTimingMap, threadStatusMap, goalMap, etc.)
-        // stays in sync. The noise events are already filtered out above.
+        // Lifecycle cleanup also runs after a task leaves display membership.
+        // Only observed tasks retain transcript bodies and derived execution state.
+        if (!observed) return;
         const previousEvents = useCodexStore.getState().events[threadId] ?? [];
         useCodexStore.getState().addEvent(threadId, payload);
         revealNewQuestion(payload, previousEvents);

@@ -1,3 +1,4 @@
+import { pruneRowState } from "./pruneRowState";
 import { TranscriptInspectionContext } from "./inspection";
 import { CodexAccessNotice } from "./CodexAccessNotice";
 import { useSessionReadReceipt } from "@session/hooks/useSessionReadReceipt";
@@ -164,6 +165,19 @@ const CodexTranscript = memo(function CodexTranscript({
         ? Math.max(0, rows.length * 160 - 600)
         : (reading.current?.scrollTop ?? 0),
   });
+  useEffect(() => {
+    const visibleKeys = new Set(
+      virtualizer
+        .getVirtualItems()
+        .map((item) => rows[item.index]?.key)
+        .filter((key): key is string => !!key),
+    );
+    pruneRowState(
+      disclosure.current,
+      rows.map((row) => row.key),
+      visibleKeys,
+    );
+  }, [rows, virtualizer]);
   // Preserve the reading anchor when an earlier row changes height (images/code/resize).
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) =>
     !pinned.current && item.start < (virtualizer.scrollOffset ?? 0);
@@ -419,7 +433,7 @@ const CodexTranscript = memo(function CodexTranscript({
       positions.delete(activeThreadId);
       positions.set(activeThreadId, {
         measurements:
-          virtualizer.measurementsCache.length <= 10000
+          virtualizer.measurementsCache.length <= 3000
             ? [...virtualizer.measurementsCache]
             : [],
         width: window.innerWidth,

@@ -7,6 +7,104 @@ import {
   getReadingPosition,
 } from "./sessionTranscriptCache";
 import { invalidateTranscriptCache } from "./sessionCacheState";
+it("does not restore or persist hidden output payloads alongside the final result", async () => {
+  await writeTranscriptCache({
+    key: "codex:hidden-output",
+    savedAt: Date.now(),
+    events: [
+      {
+        method: "item/commandExecution/outputDelta",
+        params: {
+          threadId: "hidden-output",
+          turnId: "t",
+          itemId: "cmd",
+          delta: "old hidden output",
+        },
+      } as any,
+      {
+        method: "item/completed",
+        params: {
+          threadId: "hidden-output",
+          turnId: "t",
+          item: {
+            type: "commandExecution",
+            id: "cmd",
+            aggregatedOutput: "complete output",
+          },
+        },
+      } as any,
+    ],
+  });
+  const cached = await readTranscriptCache("codex:hidden-output");
+  expect(cached?.events?.map((event) => event.method)).toEqual([
+    "item/completed",
+  ]);
+  expect((cached?.events?.[0].params as any).item.aggregatedOutput).toBe(
+    "complete output",
+  );
+});
+it("filters hidden payloads from records written by an older client", async () => {
+  const events = [
+    ...[
+      "rawResponseItem/completed",
+      "item/fileChange/outputDelta",
+      "item/commandExecution/outputDelta",
+    ].map((method) => ({
+      method,
+      params: {
+        threadId: "legacy-output",
+        turnId: "t",
+        itemId: "cmd",
+        delta: "legacy hidden output",
+      },
+    })),
+    {
+      method: "item/completed",
+      params: {
+        threadId: "legacy-output",
+        turnId: "t",
+        item: {
+          type: "agentMessage",
+          id: "reply",
+          text: "complete visible reply",
+        },
+      },
+    },
+  ];
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open("kanban.session.transcripts.v1", 2);
+    request.onupgradeneeded = () => {
+      for (const name of ["transcripts", "budget"])
+        if (!request.result.objectStoreNames.contains(name))
+          request.result.createObjectStore(name, { keyPath: "key" });
+    };
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction("transcripts", "readwrite");
+      tx.objectStore("transcripts").put({
+        key: "codex:legacy-output",
+        savedAt: Date.now(),
+        events,
+      });
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        reject(tx.error);
+      };
+    };
+  });
+  const cached = await readTranscriptCache("codex:legacy-output");
+  expect(cached?.events?.map((event) => event.method)).toEqual([
+    "item/completed",
+  ]);
+  expect((cached?.events?.[0].params as any).item.text).toBe(
+    "complete visible reply",
+  );
+});
 it("restores recent content and a reading anchor without restoring executable requests", async () => {
   await writeTranscriptCache({
     key: "codex:cache-test",

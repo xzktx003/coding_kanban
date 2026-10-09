@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { notifyDesktop } from "@session/lib/notify";
 import { toast } from "@session/components/ui/use-toast";
 import { pendingFamilies, pendingIdentity } from "./pending";
 import { useShallow } from "zustand/react/shallow";
+import type { ServerNotification } from "@session/bindings";
 import {
   useCodexStore,
   useApprovalStore,
@@ -18,15 +19,36 @@ import { childState, descendants, inParentTurn } from "./model";
 import { observeSubagentHistory, useSubagentStore } from "./store";
 import { subagentService, resetSubagentRuntime } from "./service";
 import { subagentScope, subagentStorageKey } from "./scope";
+const EMPTY_EVENTS: readonly ServerNotification[] = [];
 export function useSubagentFamily(root: string | null) {
-  const state = useSubagentStore();
-  const codex = useCodexStore(
+  const rows = useSubagentStore(
+    useShallow((s) => (root ? descendants(s.nodes, root) : [])),
+  );
+  const familyState = useSubagentStore(
     useShallow((s) => ({
-      timing: s.turnTimingMap,
-      statuses: s.threadStatusMap,
-      events: s.events,
-      threads: s.threads,
+      family: root ? s.families[root] : undefined,
+      selection: root ? s.selection[root] : null,
+      stopResults: root ? s.stopResults[root] : undefined,
+      revision: s.revision,
+      runtimeEpoch: s.runtimeEpoch,
+      scope: s.scope,
+      apply: s.apply,
     })),
+  );
+  const scopedNodes = Object.fromEntries(
+    rows.map((node) => [node.thread.id, node]),
+  );
+  const familyIds = root ? [root, ...rows.map((node) => node.thread.id)] : [];
+  const codexTiming = useCodexStore(
+    useShallow((s) => familyIds.map((id) => s.turnTimingMap[id])),
+  );
+  const codexStatuses = useCodexStore(
+    useShallow((s) => familyIds.map((id) => s.threadStatusMap[id])),
+  );
+  const codexThreads = useCodexStore(
+    useShallow((s) =>
+      familyIds.map((id) => s.threads.find((thread) => thread.id === id)),
+    ),
   );
   const approvals = useApprovalStore((s) => s.pendingApprovals),
     questions = useRequestUserInputStore((s) => s.pendingRequests),
@@ -38,16 +60,33 @@ export function useSubagentFamily(root: string | null) {
     ...permissions,
     ...elicitations,
   ];
+  const timingById = Object.fromEntries(
+    familyIds.map((id, index) => [id, codexTiming[index]]),
+  );
+  const statusById = Object.fromEntries(
+    familyIds.map((id, index) => [id, codexStatuses[index]]),
+  );
+  const threadById = new Map(
+    familyIds.map((id, index) => [id, codexThreads[index]]),
+  );
   const turn = root
-    ? (codex.timing[root]?.turnId ??
-      codex.threads.find((t) => t.id === root)?.turns?.at(-1)?.id)
+    ? (timingById[root]?.turnId ?? threadById.get(root)?.turns?.at(-1)?.id)
     : undefined;
-  const nodes = root ? descendants(state.nodes, root) : [];
   return {
-    ...state,
+    nodes: scopedNodes,
+    families: root && familyState.family ? { [root]: familyState.family } : {},
+    selection: root ? { [root]: familyState.selection } : {},
+    stopResults:
+      root && familyState.stopResults
+        ? { [root]: familyState.stopResults }
+        : {},
+    revision: familyState.revision,
+    runtimeEpoch: familyState.runtimeEpoch,
+    scope: familyState.scope,
+    apply: familyState.apply,
     turn,
-    family: root ? state.families[root] : undefined,
-    rows: nodes.map((node) => {
+    family: familyState.family,
+    rows: rows.map((node) => {
       const pending = new Set(
         requests
           .filter((r) => r.threadId === node.thread.id)
@@ -57,10 +96,10 @@ export function useSubagentFamily(root: string | null) {
         ...node,
         thread: {
           ...node.thread,
-          status: codex.statuses[node.thread.id] ?? node.thread.status,
+          status: statusById[node.thread.id] ?? node.thread.status,
         },
       };
-      const timing = codex.timing[node.thread.id];
+      const timing = timingById[node.thread.id];
       return {
         node: live,
         pending,
@@ -71,7 +110,7 @@ export function useSubagentFamily(root: string | null) {
             : node.thread.turns?.at(-1)?.status === "inProgress"
               ? node.thread.turns.at(-1)!.id
               : undefined,
-        current: !!root && inParentTurn(state.nodes, root, node, turn),
+        current: !!root && inParentTurn(scopedNodes, root, node, turn),
       };
     }),
   };
@@ -104,21 +143,32 @@ export function useSubagentFamilySync() {
     };
   }, [scope, host]);
   const cards = useAgentCenterStore((s) => s.cards);
-  const events = useCodexStore((s) => s.events);
-  useEffect(() => {
-    for (const [id, entries] of Object.entries(events)) {
-      if (
-        cards.some((c) => c.kind === "codex" && c.id === id) ||
-        useSubagentStore.getState().nodes[id]
-      )
-        observeSubagentHistory(entries);
-    }
-  }, [events, cards]);
   const roots = cards
     .filter((c) => c.kind === "codex")
     .map((c) => c.id)
     .sort()
     .join("\n");
+  const historyIds = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...roots.split("\n").filter(Boolean),
+          ...roots
+            .split("\n")
+            .filter(Boolean)
+            .flatMap((root) =>
+              descendants(nodes, root).map((node) => node.thread.id),
+            ),
+        ]),
+      ].sort(),
+    [nodes, roots],
+  );
+  const historyEvents = useCodexStore(
+    useShallow((s) => historyIds.map((id) => s.events[id] ?? EMPTY_EVENTS)),
+  );
+  useEffect(() => {
+    for (const entries of historyEvents) observeSubagentHistory(entries);
+  }, [historyEvents]);
   useEffect(() => {
     const groups = pendingFamilies(nodes, roots.split("\n"), [
       ...approvals,

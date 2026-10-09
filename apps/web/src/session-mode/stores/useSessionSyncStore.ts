@@ -4,6 +4,7 @@ export const useSessionSyncStore = create<{
   recovering: Record<string, "syncing" | "retrying">;
   checking: Record<string, boolean>;
   cursors: Record<string, string | null>;
+  trimmedHistoryAnchors: Record<string, string>;
   earlierLoading: Record<string, boolean>;
   earlierErrors: Record<string, string>;
   connection: "connecting" | "connected" | "reconnecting";
@@ -11,6 +12,7 @@ export const useSessionSyncStore = create<{
   recovering: {},
   checking: {},
   cursors: {},
+  trimmedHistoryAnchors: {},
   earlierLoading: {},
   earlierErrors: {},
   connection: "connecting",

@@ -48,3 +48,28 @@ it("keeps each grouped command output attached to its own item identity", () => 
     ],
   });
 });
+
+it("renders a command recovered only from a completed turn item", () => {
+  const command = {
+    id: "cmd",
+    type: "commandExecution",
+    command: "pnpm test",
+    commandActions: [],
+    aggregatedOutput: "passed",
+  };
+  const events = [
+    { method: "item/completed", params: { item: command } },
+    { method: "turn/completed", params: { turn: { id: "t", items: [] } } },
+  ] as unknown as ServerNotification[];
+
+  const commandGroup = deriveRenderItems(events).find(
+    (row) => row.kind === "cmdGroup",
+  );
+
+  expect(commandGroup).toMatchObject({
+    kind: "cmdGroup",
+    actions: [{ type: "unknown", command: "pnpm test" }],
+    actionSources: [{ commandItemId: "cmd", aggregatedOutput: "passed" }],
+    completed: true,
+  });
+});

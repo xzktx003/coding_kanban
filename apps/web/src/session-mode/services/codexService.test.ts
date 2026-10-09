@@ -8,7 +8,7 @@ const api = vi.hoisted(() => ({
   turnStart: vi.fn(),
 }));
 vi.mock("./apiAdapt", () => api);
-import { codexService } from "./codexService";
+import { cancelCodexHistoryRead, codexService } from "./codexService";
 import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 import { useConfigStore } from "../components/codex/stores/useConfigStore";
 import { useCodexStore } from "../components/codex/stores/useCodexStore";
@@ -25,6 +25,15 @@ beforeEach(() => {
   useThreadModelStore.setState({ threads: {} });
   useWorkspaceStore.setState({ cwd: "/project" });
   useConfigStore.setState({ threadCwdMode: "worktree", model: "" });
+  useSessionSyncStore.setState({
+    recovering: {},
+    checking: {},
+    cursors: {},
+    trimmedHistoryAnchors: {},
+    earlierLoading: {},
+    earlierErrors: {},
+    connection: "connected",
+  });
 });
 it("a background check keeps existing content interactive without the initial history loader", async () => {
   let resolve!: (value: unknown) => void;
@@ -233,6 +242,122 @@ it("a late resume caches its history without stealing focus from a newer selecti
   expect(useCodexStore.getState().inputFocusTrigger).toBe(10);
   expect(useCodexStore.getState().events.older).toEqual([]);
 });
+
+it("stores lightweight thread metadata while preserving full history events", async () => {
+  const text = "full message body";
+  api.threadRead.mockResolvedValueOnce({
+    thread: {
+      id: "lightweight",
+      preview: "preview",
+      turns: [
+        {
+          id: "turn",
+          status: "completed",
+          startedAt: 1,
+          durationMs: 2,
+          error: null,
+          items: [{ id: "agent", type: "agentMessage", text }],
+        },
+      ],
+    },
+  });
+  useCodexStore.setState({
+    currentThreadId: "lightweight",
+    events: {},
+    threads: [],
+    historyLoadedMap: {},
+    turnTimingMap: {},
+    threadStatusMap: {},
+  });
+
+  await codexService.loadThreadHistory("lightweight");
+
+  const stored = useCodexStore
+    .getState()
+    .threads.find((thread) => thread.id === "lightweight");
+  expect(stored?.turns[0]).toMatchObject({
+    id: "turn",
+    status: "completed",
+    startedAt: 1,
+    durationMs: 2,
+    error: null,
+    items: [],
+  });
+  expect(useCodexStore.getState().events.lightweight).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        method: "item/completed",
+        params: expect.objectContaining({
+          item: expect.objectContaining({
+            id: "agent",
+            type: "agentMessage",
+            text,
+          }),
+        }),
+      }),
+    ]),
+  );
+});
+
+it("keeps live deltas added during a history read when storing lightweight metadata", async () => {
+  let resolve!: (value: unknown) => void;
+  api.threadRead.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  const liveDelta = {
+    method: "item/agentMessage/delta",
+    params: {
+      threadId: "streaming",
+      turnId: "live-turn",
+      itemId: "live-agent",
+      delta: "still streaming",
+    },
+  } as any;
+  useCodexStore.setState({
+    currentThreadId: "streaming",
+    events: { streaming: [] },
+    threads: [],
+    historyLoadedMap: {},
+    turnTimingMap: {},
+    threadStatusMap: {},
+  });
+
+  const pending = codexService.loadThreadHistory("streaming", undefined, {
+    background: true,
+  });
+  useCodexStore.setState({ events: { streaming: [liveDelta] } });
+  resolve({
+    thread: {
+      id: "streaming",
+      turns: [
+        {
+          id: "history-turn",
+          status: "completed",
+          startedAt: 1,
+          durationMs: 1,
+          items: [
+            {
+              id: "history-agent",
+              type: "agentMessage",
+              text: "historical body",
+            },
+          ],
+        },
+      ],
+    },
+  });
+  await pending;
+
+  const state = useCodexStore.getState();
+  expect(
+    state.threads.find((thread) => thread.id === "streaming")?.turns[0]?.items,
+  ).toEqual([]);
+  expect(state.events.streaming).toContain(liveDelta);
+});
+
 it("concurrent selections coalesce a pending resume", async () => {
   let resolve!: (value: unknown) => void;
   api.threadRead.mockImplementation(
@@ -591,4 +716,199 @@ it("cached read-only selection resolves before native verification without takin
     recent: true,
     background: true,
   });
+});
+
+it("cancels a read-only history request so a late response cannot restore pruned transcript content", async () => {
+  let resolve!: (value: unknown) => void;
+  api.threadRead.mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  useCodexStore.setState({
+    currentThreadId: null,
+    events: {},
+    threads: [],
+    historyLoadedMap: {},
+    historyLoadingMap: {},
+    historyErrorMap: {},
+    turnTimingMap: {},
+    threadStatusMap: {},
+  });
+
+  const pending = codexService.loadThreadHistory("closed-late", undefined, {
+    background: true,
+  });
+  expect(useSessionSyncStore.getState().checking["closed-late"]).toBe(true);
+
+  cancelCodexHistoryRead("closed-late");
+  resolve({
+    thread: {
+      id: "closed-late",
+      turns: [
+        {
+          id: "late-turn",
+          status: "completed",
+          startedAt: 1,
+          durationMs: 1,
+          items: [{ id: "late-item", type: "agentMessage", text: "late" }],
+        },
+      ],
+    },
+  });
+  await pending;
+
+  const state = useCodexStore.getState();
+  expect(state.events["closed-late"]).toBeUndefined();
+  expect(
+    state.threads.find((thread) => thread.id === "closed-late"),
+  ).toBeUndefined();
+  expect(state.historyLoadedMap["closed-late"]).toBeUndefined();
+  expect(state.historyLoadingMap["closed-late"]).toBe(false);
+  expect(
+    useSessionSyncStore.getState().checking["closed-late"],
+  ).toBeUndefined();
+});
+
+it("recovers a budget-trimmed transcript before using the opaque native cursor", async () => {
+  useCodexStore.setState({
+    currentThreadId: "budgeted",
+    events: {
+      budgeted: [
+        {
+          method: "item/completed",
+          params: {
+            threadId: "budgeted",
+            turnId: "turn-2",
+            item: {
+              id: "agent-2",
+              type: "agentMessage",
+              text: "newer",
+              phase: null,
+              memoryCitation: null,
+            },
+            completedAtMs: 2,
+          },
+        },
+      ] as any[],
+    },
+    threads: [],
+    historyLoadedMap: { budgeted: true },
+    turnTimingMap: {},
+    threadStatusMap: {},
+  });
+  useSessionSyncStore.setState({
+    cursors: { budgeted: "opaque-cursor" },
+    trimmedHistoryAnchors: { budgeted: "turn-0" },
+  });
+  api.threadRead.mockResolvedValueOnce({
+    thread: {
+      id: "budgeted",
+      turns: [
+        {
+          id: "turn-0",
+          status: "completed",
+          startedAt: 0,
+          durationMs: 1,
+          items: [{ id: "agent-0", type: "agentMessage", text: "older" }],
+        },
+        {
+          id: "turn-2",
+          status: "completed",
+          startedAt: 2,
+          durationMs: 1,
+          items: [{ id: "agent-2", type: "agentMessage", text: "newer" }],
+        },
+      ],
+    },
+    historyPage: { nextCursor: "older-cursor", earlier: false },
+  });
+
+  await codexService.loadEarlierHistory("budgeted");
+
+  expect(api.threadRead).toHaveBeenCalledWith(
+    { threadId: "budgeted", recent: true, afterTurnId: "turn-0" },
+    expect.objectContaining({ suppressToast: true }),
+  );
+  expect(
+    useSessionSyncStore.getState().trimmedHistoryAnchors.budgeted,
+  ).toBeUndefined();
+  expect(useSessionSyncStore.getState().cursors.budgeted).toBe("older-cursor");
+  expect(
+    useCodexStore
+      .getState()
+      .events.budgeted.some((event: any) => event.params?.turnId === "turn-0"),
+  ).toBe(true);
+});
+it("released tool item pages preserve a running turn and its existing messages", async () => {
+  const timing = {
+    live: {
+      turnId: "running",
+      status: "inProgress" as const,
+      startedAtMs: 1000,
+      durationMs: null,
+    },
+  };
+  const existing = [
+    {
+      method: "item/completed",
+      params: {
+        threadId: "live",
+        turnId: "running",
+        item: { id: "reply", type: "agentMessage", text: "正在回答" },
+      },
+    },
+  ] as any;
+  useCodexStore.setState({
+    threads: [],
+    events: { live: existing },
+    historyLoadedMap: { live: true },
+    currentThreadId: "live",
+    currentTurnId: "running",
+    turnTimingMap: timing,
+    threadStatusMap: { live: { type: "active", activeFlags: [] } },
+  });
+  api.threadRead.mockResolvedValueOnce({
+    thread: {
+      id: "live",
+      turns: [
+        {
+          id: "running",
+          status: "completed",
+          items: [
+            {
+              id: "older-tool",
+              type: "commandExecution",
+              command: "echo ok",
+              aggregatedOutput: "ok",
+              status: "completed",
+              commandActions: [],
+              durationMs: 1,
+              exitCode: 0,
+            },
+          ],
+          startedAt: null,
+          durationMs: null,
+          error: null,
+        },
+      ],
+    },
+    historyPage: { itemPage: true, earlier: true, nextCursor: "older" },
+  });
+  await codexService.loadThreadHistory("live", undefined, {
+    background: true,
+    recent: true,
+    cursor: "local-item-cursor",
+  });
+  expect(useCodexStore.getState().turnTimingMap).toBe(timing);
+  expect(useCodexStore.getState().currentTurnId).toBe("running");
+  expect(useCodexStore.getState().events.live).toContain(existing[0]);
+  expect(
+    useCodexStore
+      .getState()
+      .events.live.some((e: any) => e.params.item?.id === "older-tool"),
+  ).toBe(true);
+  expect(api.threadStart).not.toHaveBeenCalled();
+  expect(api.turnStart).not.toHaveBeenCalled();
 });

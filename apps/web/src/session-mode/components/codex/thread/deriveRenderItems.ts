@@ -74,7 +74,24 @@ export function deriveRenderItems(events: ServerNotification[]): RenderItem[] {
       // These references are local to this derivation. Updating once keeps all
       // actions of the command aligned, including completion after a flush.
       const source = sourcesById.get(commandId);
-      if (source) source.aggregatedOutput = commandOutput;
+      if (source) {
+        source.aggregatedOutput = commandOutput;
+      } else {
+        if (cmdBuffer.length === 0) {
+          cmdBufferKey = `cmd-${event.params.turnId}-${commandId}`;
+        }
+        const actions = event.params.item.commandActions as CommandAction[];
+        const visibleActions = actions.length
+          ? actions
+          : [{ type: "unknown" as const, command: event.params.item.command }];
+        cmdBuffer.push(...visibleActions);
+        const completedSource: CommandActionSource = {
+          commandItemId: commandId,
+          aggregatedOutput: commandOutput,
+        };
+        sourcesById.set(commandId, completedSource);
+        actionSources.push(...visibleActions.map(() => completedSource));
+      }
       continue;
     }
 

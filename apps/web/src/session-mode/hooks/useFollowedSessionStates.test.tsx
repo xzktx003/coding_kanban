@@ -12,15 +12,88 @@ import {
 import { useCCStore } from "../stores/cc";
 import { useSessionAttentionStore } from "../stores/useSessionAttentionStore";
 import { useSubagentStore } from "../features/subagents/store";
-it("counts asynchronous questions separately without making a running session blocked",()=>{
-  useCodexStore.setState({events:{a:[{method:"item/completed",params:{threadId:"a",turnId:"t",item:{type:"agentMessage",id:"q",text:"question",questions:[{title:"环境？"}]}}} as any]}});
-  const {result}=renderHook(()=>useFollowedSessionStates("ready"));
+it("counts asynchronous questions separately without making a running session blocked", () => {
+  useCodexStore.setState({
+    events: {
+      a: [
+        {
+          method: "item/completed",
+          params: {
+            threadId: "a",
+            turnId: "t",
+            item: {
+              type: "agentMessage",
+              id: "q",
+              text: "question",
+              questions: [{ title: "环境？" }],
+            },
+          },
+        } as any,
+      ],
+    },
+  });
+  const { result } = renderHook(() => useFollowedSessionStates("ready"));
   expect(result.current.counts.pending).toBe(0);
   expect(result.current.counts.running).toBe(1);
   expect(result.current.questionCount).toBe(1);
-  act(() => useCodexStore.getState().addEvent("a", {method:"turn/started",params:{threadId:"a",turn:{id:"next-turn",status:"inProgress",items:[]}}} as any));
+  act(() =>
+    useCodexStore.getState().addEvent("a", {
+      method: "turn/started",
+      params: {
+        threadId: "a",
+        turn: { id: "next-turn", status: "inProgress", items: [] },
+      },
+    } as any),
+  );
   expect(result.current.questionCount).toBe(0);
   expect(result.current.counts.running).toBe(1);
+});
+
+it("does not rerender or retain snapshots for unrelated Codex event threads", () => {
+  let renders = 0;
+  const { result } = renderHook(() => {
+    renders += 1;
+    return useFollowedSessionStates("ready");
+  });
+  const initial = result.current;
+  expect(renders).toBe(1);
+
+  act(() =>
+    useCodexStore.getState().addEvent("outside", {
+      method: "item/completed",
+      params: {
+        threadId: "outside",
+        turnId: "outside-turn",
+        item: {
+          type: "agentMessage",
+          id: "outside-item",
+          text: "x".repeat(10_000),
+        },
+      },
+    } as any),
+  );
+
+  expect(renders).toBe(1);
+  expect(result.current).toBe(initial);
+
+  act(() =>
+    useCodexStore.getState().addEvent("a", {
+      method: "item/completed",
+      params: {
+        threadId: "a",
+        turnId: "a-turn",
+        item: {
+          type: "agentMessage",
+          id: "question",
+          text: "question",
+          questions: [{ title: "继续？" }],
+        },
+      },
+    } as any),
+  );
+
+  expect(renders).toBe(2);
+  expect(result.current.questionCount).toBe(1);
 });
 beforeEach(() => {
   useSubagentStore.setState({ nodes: {}, families: {} });
@@ -33,6 +106,7 @@ beforeEach(() => {
     sharedTabsInitialized: true,
   });
   useCodexStore.setState({
+    events: {},
     threads: [],
     threadStatusMap: {
       a: { type: "active", activeFlags: [] },
@@ -54,20 +128,57 @@ beforeEach(() => {
   useSessionAttentionStore.setState({ receipts: {} });
 });
 it("aggregates child execution and requests once per followed family after parent completion", () => {
-  useSubagentStore.getState().apply("b", { threads: ["child", "grand"].map((id, index) => ({ id, parentThreadId: index ? "child" : "b", status: { type: "active" } })), complete: true, errors: [], checkedAt: 1 }, 0);
+  useSubagentStore.getState().apply(
+    "b",
+    {
+      threads: ["child", "grand"].map((id, index) => ({
+        id,
+        parentThreadId: index ? "child" : "b",
+        status: { type: "active" },
+      })),
+      complete: true,
+      errors: [],
+      checkedAt: 1,
+    },
+    0,
+  );
   const { result } = renderHook(() => useFollowedSessionStates("ready"));
   expect(result.current.counts.running).toBe(2);
-  act(() => useRequestUserInputStore.setState({ pendingRequests: [{ threadId: "grand", turnId: "child-turn", itemId: "q", requestId: "r", questions: [{ id: "one", question: "Continue?" }] }] }));
+  act(() =>
+    useRequestUserInputStore.setState({
+      pendingRequests: [
+        {
+          threadId: "grand",
+          turnId: "child-turn",
+          itemId: "q",
+          requestId: "r",
+          questions: [{ id: "one", question: "Continue?" }],
+        },
+      ],
+    }),
+  );
   expect(result.current.counts.running).toBe(1);
   expect(result.current.counts.pending).toBe(1);
   expect(result.current.questionCount).toBe(1);
-  act(() => useCodexStore.getState().addEvent("b", { method: "turn/completed", params: { threadId: "b", turn: { id: "parent", status: "completed", items: [] } } } as any));
+  act(() =>
+    useCodexStore.getState().addEvent("b", {
+      method: "turn/completed",
+      params: {
+        threadId: "b",
+        turn: { id: "parent", status: "completed", items: [] },
+      },
+    } as any),
+  );
   expect(result.current.counts.pending).toBe(1);
 });
 it("known parent states do not imply complete aggregate counts when family discovery failed", () => {
-  useSubagentStore.setState({ families: { b: { complete: false, checkedAt: 1, error: "offline" } } });
+  useSubagentStore.setState({
+    families: { b: { complete: false, checkedAt: 1, error: "offline" } },
+  });
   const { result } = renderHook(() => useFollowedSessionStates("ready"));
-  expect(result.current.rows.find(r => r.card.id === "b")?.state).toBe("idle");
+  expect(result.current.rows.find((r) => r.card.id === "b")?.state).toBe(
+    "idle",
+  );
   expect(result.current.complete).toBe(false);
 });
 it("counts only followed sessions and gives pending requests priority over running", () => {

@@ -1,33 +1,41 @@
-import type { ServerNotification } from '@session/bindings';
-import type { Thread } from '@session/bindings/v2';
+import type { ServerNotification } from "@session/bindings";
+import type { Thread } from "@session/bindings/v2";
 
 /**
  * Converts thread history (turns with items) to ChatEvents for display
- * For each item, we generate both item/started and item/completed events
- * to ensure proper rendering in the UI
+ * Keeps lifecycle events needed by user/tool rows, with one event for finalized
+ * agent messages and body-light boundaries for finalized turns.
  */
-export function convertThreadHistoryToEvents(thread: Thread): ServerNotification[] {
+export function convertThreadHistoryToEvents(
+  thread: Thread,
+): ServerNotification[] {
   const events: ServerNotification[] = [];
 
   // Process each turn in the thread
   for (const turn of thread.turns) {
+    const isCompletedTurn = turn.status !== "inProgress";
+
     // Process each item in the turn
     for (const item of turn.items) {
-      // Add item/started event
-      events.push({
-        method: 'item/started',
-        params: {
-          item: item,
-          threadId: thread.id,
-          turnId: turn.id,
-          startedAtMs: 0,
-        },
-      });
+      // Add item/started event. Completed agent messages render from their
+      // final item/completed snapshot; keeping a started copy only retains a
+      // redundant reference to the same text/questions.
+      if (!(isCompletedTurn && item.type === "agentMessage")) {
+        events.push({
+          method: "item/started",
+          params: {
+            item: item,
+            threadId: thread.id,
+            turnId: turn.id,
+            startedAtMs: 0,
+          },
+        });
+      }
 
       // Add item/completed event immediately after
       // This allows the UI to render both the start state and final state
       events.push({
-        method: 'item/completed',
+        method: "item/completed",
         params: {
           item: item,
           threadId: thread.id,
@@ -41,10 +49,13 @@ export function convertThreadHistoryToEvents(thread: Thread): ServerNotification
     // commandExecution groups in deriveRenderItems) instead of bleeding into
     // the next turn's items.
     events.push({
-      method: 'turn/completed',
+      method: "turn/completed",
       params: {
         threadId: thread.id,
-        turn,
+        turn: {
+          ...turn,
+          items: isCompletedTurn ? [] : turn.items,
+        },
       },
     });
   }

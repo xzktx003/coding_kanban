@@ -93,3 +93,42 @@ it("unchanged recent pages compare only replacement items instead of serializing
     serialize.mockRestore();
   }
 });
+it("partial item pages retain other items in the same turn", () => {
+  const before = [item("live", "keep")];
+  const older = [
+    {
+      ...item("live", "older"),
+      params: {
+        ...(item("live", "older") as any).params,
+        item: { id: "older-item", type: "agentMessage", text: "older" },
+      },
+    } as any,
+  ];
+  const merged = mergeHistoryPage(older, before, before, ["live"], true, true);
+  expect(merged).toHaveLength(2);
+  expect(merged[1]).toBe(before[0]);
+});
+it("restored live-turn tools stay after older turns and that turn's user input", () => {
+  const old = item("old", "older turn");
+  const user = {
+    method: "item/started",
+    params: {
+      threadId: "thread",
+      turnId: "live",
+      item: { id: "user", type: "userMessage", content: [] },
+    },
+  } as any;
+  const reply = item("live", "reply");
+  const restored = {
+    method: "item/completed",
+    params: {
+      threadId: "thread",
+      turnId: "live",
+      item: { id: "tool", type: "commandExecution", command: "echo result" },
+    },
+  } as any;
+  const before = [old, user, reply];
+  expect(
+    mergeHistoryPage([restored], before, before, ["live"], true, true),
+  ).toEqual([old, user, restored, reply]);
+});

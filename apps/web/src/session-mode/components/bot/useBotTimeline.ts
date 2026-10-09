@@ -1,10 +1,11 @@
-import { listen } from '@tauri-apps/api/event';
-import { useEffect, useState } from 'react';
-import { applyAcpUpdate } from '@session/components/acp/applyUpdate';
-import { buildEventUrl, isDesktopTauri } from '@session/hooks/runtime';
-import { acpGetSession } from '@session/services/apiAdapt/acp';
-import { listBotSessions } from '@session/services/apiAdapt/bots';
-import { type AcpEntry, createAcpStore } from '@session/stores/useAcpStore';
+import { listen } from "@tauri-apps/api/event";
+import { useEffect, useState } from "react";
+import { applyAcpUpdate } from "@session/components/acp/applyUpdate";
+import { isDesktopTauri } from "@session/hooks/runtime";
+import { openEventStream } from "@session/lib/eventStream";
+import { acpGetSession } from "@session/services/apiAdapt/acp";
+import { listBotSessions } from "@session/services/apiAdapt/bots";
+import { type AcpEntry, createAcpStore } from "@session/stores/useAcpStore";
 
 type TimelineSection = { sessionId: string; entries: AcpEntry[] };
 
@@ -14,33 +15,31 @@ export function useBotTimeline(botId: string, activeSessionId?: string) {
     botId: string;
     sections: TimelineSection[];
     error: string;
-  }>({ botId, sections: [], error: '' });
+  }>({ botId, sections: [], error: "" });
   const [revision, setRevision] = useState(0);
 
   useEffect(() => {
     const refresh = (payload: { botId?: string; status?: string }) => {
-      if (payload.botId === botId && payload.status !== 'working') {
+      if (payload.botId === botId && payload.status !== "working") {
         setRevision((value) => value + 1);
       }
     };
     if (isDesktopTauri()) {
-      const unlisten = listen<{ botId: string; status: string }>('bot:activity', (event) =>
-        refresh(event.payload)
+      const unlisten = listen<{ botId: string; status: string }>(
+        "bot:activity",
+        (event) => refresh(event.payload),
       );
       return () => {
         void unlisten.then((stop) => stop());
       };
     }
-    const events = new EventSource(buildEventUrl('/api/events'));
-    events.onmessage = (event) => {
-      try {
-        const envelope = JSON.parse(event.data);
-        if (envelope.event === 'bot:activity') refresh(envelope.payload);
-      } catch {
-        /* Ignore unrelated or malformed event envelopes. */
-      }
-    };
-    return () => events.close();
+    return openEventStream({
+      agents: ["bot"],
+      onEvent: (envelope) => {
+        if (envelope.event === "bot:activity")
+          refresh(envelope.payload as { botId?: string; status?: string });
+      },
+    });
   }, [botId]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Activity and retry revisions intentionally reload historical transcripts.
@@ -57,7 +56,8 @@ export function useBotTimeline(botId: string, activeSessionId?: string) {
             }
             const updates = await acpGetSession(session.sessionId);
             const transcript = createAcpStore();
-            for (const update of updates) applyAcpUpdate(update, transcript.getState());
+            for (const update of updates)
+              applyAcpUpdate(update, transcript.getState());
             return {
               sessionId: session.sessionId,
               entries: transcript.getState().entries.map((entry) => ({
@@ -65,9 +65,9 @@ export function useBotTimeline(botId: string, activeSessionId?: string) {
                 id: `${session.sessionId}:${entry.id}`,
               })),
             };
-          })
+          }),
         );
-        if (!cancelled) setTimeline({ botId, sections, error: '' });
+        if (!cancelled) setTimeline({ botId, sections, error: "" });
       } catch (failure) {
         if (!cancelled)
           setTimeline((previous) => ({
@@ -86,7 +86,7 @@ export function useBotTimeline(botId: string, activeSessionId?: string) {
   const sections = timeline.botId === botId ? timeline.sections : [];
   return {
     sections,
-    error: timeline.botId === botId ? timeline.error : '',
+    error: timeline.botId === botId ? timeline.error : "",
     retry: () => setRevision((value) => value + 1),
   };
 }
