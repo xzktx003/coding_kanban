@@ -6,10 +6,10 @@
   "scripts": {
     "dev": "pnpm dev:prepare && concurrently \"pnpm --filter server run dev:app\" \"pnpm --filter web run dev:app\"",
     "dev:restart": "./scripts/restart-dev.sh",
-    "build": "pnpm --filter shared build && pnpm --filter server build && pnpm --filter web build",
-    "check": "pnpm --filter shared build && pnpm --filter server build && pnpm --filter web build",
+    "build": "pnpm --filter shared build && pnpm --filter @agent-orchestrator/session-runtime build && pnpm --filter server build && pnpm --filter web build",
+    "check": "pnpm --filter shared build && pnpm --filter @agent-orchestrator/session-runtime build && pnpm --filter server build && pnpm --filter web build",
     "e2e": "playwright test",
-    "test": "pnpm --recursive test && node --test scripts/*.test.mjs",
+    "test": "pnpm --filter shared build && pnpm --recursive test && node --test scripts/*.test.mjs",
     "format": "pnpm --recursive format",
     "session:build": "node scripts/build-session-runtime.mjs build",
     "session:check": "node scripts/build-session-runtime.mjs check",

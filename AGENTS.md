@@ -2,13 +2,14 @@
 
 ## 构建、测试与开发命令
 
-- `pnpm install --frozen-lockfile`；Node.js 要求 `^20.19.0 || >=22.12.0`。默认会话模式需要 Rust stable、C/C++ 编译工具和 CMake。
-- `pnpm dev:prepare`：编译 shared 与默认 Rust 运行层；`SESSION_MODE_ENABLED=0` 跳过 Rust，显式 `SESSION_RUNTIME_BIN` 只校验已有可执行文件。`pnpm dev` 与 `pnpm dev:restart` 自动执行准备。
-- `pnpm session:status`：检查会话服务和运行二进制；编译不替换已有 Rust 进程或停止 Agent，详细流程见 `docs/startup.md`。
+- `pnpm install --frozen-lockfile`；Node.js 要求 `^20.19.0 || >=22.12.0`。默认会话运行层使用 TypeScript/Node；PTY、SQLite 无预编译包时需要本机编译工具。语音转写使用外部 whisper.cpp CLI。
+- `pnpm dev:prepare`：编译 shared 与默认 TypeScript 运行层；`SESSION_MODE_ENABLED=0` 跳过运行层，显式 `SESSION_RUNTIME_BIN` 只校验已有可执行文件。`pnpm dev` 与 `pnpm dev:restart` 自动执行准备。
+- `pnpm session:status`：检查会话服务和运行产物；编译不替换已有运行进程或停止 Agent，详细流程见 `docs/startup.md`。
 - `pnpm dev:restart`：先检查两个端口的归属并完成编译，再按 `.env` 启动/恢复前后端；前端绑定 `0.0.0.0`。会话运行服务绑定 loopback，随后端热更新复用。
-- `pnpm check`：共享包、后端和前端类型检查及生产构建；`pnpm session:check`：Rust 运行层检查。
+- `pnpm check`：共享包、TS 运行层、后端和前端类型检查及生产构建；`pnpm session:check`：TS 运行层检查。
 - `pnpm test`：终端单测、迁移的会话 Vitest 单测及脚本测试；后端测试并发限制为 4，避免共享主机上的 tmux 测试争用。
-- `pnpm session:test`、`pnpm session:clippy`：运行层测试与严格 lint，测试使用独立的应用/CLI 数据目录。
+- `pnpm session:test`、`pnpm session:clippy`：TS 运行层测试与类型检查（clippy 为兼容命令名），测试使用独立的应用/CLI 数据目录。
+- 会话运行层 TS 实现位于 `packages/session-runtime/src`，新启动默认使用独立 Node 进程。`pnpm --filter @agent-orchestrator/session-runtime audit` 核对全部 208 个方法/路径；注册通过不替代行为验收。已有 legacy 服务仍安全复用，禁止因新产物而隐式停止活跃 Agent，进度与验收见 `docs/session-typescript-migration.md`。
 - `pnpm e2e`：浏览器测试；会话模式联调使用独立 `.env`、端口和 `SESSION_DATA_HOME`，详情见 `docs/session-mode-architecture.md`。
 
 
@@ -27,7 +28,7 @@
 
 ## 后端约定
 
-- Node 网关与运行服务管理位于 `apps/server/src`；独立 Rust 会话运行层位于 `packages/session-runtime`。
+- Node 网关与运行服务管理位于 `apps/server/src`；独立 TS 会话运行层位于 `packages/session-runtime/src`。已替换的自有 Rust 源码与 Cargo 构建文件已移除；原生 Codex/Claude/ACP、PTY/SQLite/Whisper 属于外部依赖。
 - 应用数据由 `SESSION_DATA_HOME` 隔离；原生 CLI 登录目录沿用，禁止静默导入用户 Codexia 数据。
 - 不得因端口占用、过期 PID 或热更新而停止其他工作树/仓库的进程；运行服务重启不得重复创建仍存活的 Agent 服务。
 
@@ -128,7 +129,7 @@
 
 - 子 Agent 位于 `features/subagents`，独立观察集合不得自动加入关注标签或改变主输入/项目。打开原生历史只读，不 resume 或获取写入权。
 - 普通输入只有原生明确 `canAcceptDirectInput === true` 才开放；审批按实际 thread/request/turn/item/实例标记回复，中断权限独立。批量停止须显式确认范围与轮次，默认本轮不包含旧轮或未知创建轮次。
-- 协议、恢复规则和原生隔离验收脚本见 `docs/session-subagents.md`；两份原生测试版本的问题由主线程发起，不绕过限制。启用新 Rust 二进制仍遵守活跃 Agent 安全窗口。
+- 协议、恢复规则和原生隔离验收脚本见 `docs/session-subagents.md`；两份原生测试版本的问题由主线程发起，不绕过限制。启用新运行产物仍遵守活跃 Agent 安全窗口。
 
 ### 会话内存防回归（用户已确认有效）
 

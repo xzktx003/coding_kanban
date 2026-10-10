@@ -1,0 +1,1042 @@
+[
+  {
+    "method": "GET",
+    "path": "/api/acp/agents",
+    "legacyHandler": "api_acp_list_agents"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/authenticate",
+    "legacyHandler": "api_acp_authenticate"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/cancel",
+    "legacyHandler": "api_acp_cancel"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/delete-session",
+    "legacyHandler": "api_acp_delete_session"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/install-agent",
+    "legacyHandler": "api_acp_install_agent"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/load-session",
+    "legacyHandler": "api_acp_load_session"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/new-session",
+    "legacyHandler": "api_acp_new_session"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/prompt",
+    "legacyHandler": "api_acp_prompt"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/respond-permission",
+    "legacyHandler": "api_acp_respond_permission"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/session",
+    "legacyHandler": "api_acp_get_session"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/sessions",
+    "legacyHandler": "api_acp_list_sessions"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/set-config-option",
+    "legacyHandler": "api_acp_set_config_option"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/set-mode",
+    "legacyHandler": "api_acp_set_mode"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/set-model",
+    "legacyHandler": "api_acp_set_model"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/start",
+    "legacyHandler": "api_acp_start"
+  },
+  {
+    "method": "POST",
+    "path": "/api/acp/stop",
+    "legacyHandler": "api_acp_stop"
+  },
+  {
+    "method": "POST",
+    "path": "/api/automation/create",
+    "legacyHandler": "api_create_automation"
+  },
+  {
+    "method": "POST",
+    "path": "/api/automation/delete",
+    "legacyHandler": "api_delete_automation"
+  },
+  {
+    "method": "POST",
+    "path": "/api/automation/list",
+    "legacyHandler": "api_list_automations"
+  },
+  {
+    "method": "POST",
+    "path": "/api/automation/run-now",
+    "legacyHandler": "api_run_automation_now"
+  },
+  {
+    "method": "POST",
+    "path": "/api/automation/runs/list",
+    "legacyHandler": "api_list_automation_runs"
+  },
+  {
+    "method": "POST",
+    "path": "/api/automation/set-paused",
+    "legacyHandler": "api_set_automation_paused"
+  },
+  {
+    "method": "POST",
+    "path": "/api/automation/update",
+    "legacyHandler": "api_update_automation"
+  },
+  {
+    "method": "POST",
+    "path": "/api/bots/create",
+    "legacyHandler": "api_create_bot"
+  },
+  {
+    "method": "POST",
+    "path": "/api/bots/delete",
+    "legacyHandler": "api_delete_bot"
+  },
+  {
+    "method": "POST",
+    "path": "/api/bots/list",
+    "legacyHandler": "api_list_bots"
+  },
+  {
+    "method": "POST",
+    "path": "/api/bots/sessions",
+    "legacyHandler": "api_bot_sessions"
+  },
+  {
+    "method": "POST",
+    "path": "/api/bots/update",
+    "legacyHandler": "api_update_bot"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/connect",
+    "legacyHandler": "api_cc_connect"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/delete-session",
+    "legacyHandler": "api_cc_delete_session"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/disconnect",
+    "legacyHandler": "api_cc_disconnect"
+  },
+  {
+    "method": "GET",
+    "path": "/api/cc/installed-skills",
+    "legacyHandler": "api_cc_get_installed_skills"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/interrupt",
+    "legacyHandler": "api_cc_interrupt"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/mcp/add",
+    "legacyHandler": "api_cc_mcp_add"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/mcp/disable",
+    "legacyHandler": "api_cc_mcp_disable"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/mcp/enable",
+    "legacyHandler": "api_cc_mcp_enable"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/mcp/get",
+    "legacyHandler": "api_cc_mcp_get"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/mcp/list",
+    "legacyHandler": "api_cc_mcp_list"
+  },
+  {
+    "method": "GET",
+    "path": "/api/cc/mcp/projects",
+    "legacyHandler": "api_cc_list_projects"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/mcp/remove",
+    "legacyHandler": "api_cc_mcp_remove"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/new-session",
+    "legacyHandler": "api_cc_new_session"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/resolve-permission",
+    "legacyHandler": "api_cc_resolve_permission"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/resume-session",
+    "legacyHandler": "api_cc_resume_session"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/send-message",
+    "legacyHandler": "api_cc_send_message"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/session-messages",
+    "legacyHandler": "api_cc_get_session_messages"
+  },
+  {
+    "method": "GET",
+    "path": "/api/cc/sessions",
+    "legacyHandler": "api_cc_list_sessions"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/set-permission-mode",
+    "legacyHandler": "api_cc_set_permission_mode"
+  },
+  {
+    "method": "GET",
+    "path": "/api/cc/settings",
+    "legacyHandler": "api_cc_get_settings"
+  },
+  {
+    "method": "POST",
+    "path": "/api/cc/settings",
+    "legacyHandler": "api_cc_update_settings"
+  },
+  {
+    "method": "GET",
+    "path": "/api/cc/slash-commands",
+    "legacyHandler": "api_cc_get_slash_commands"
+  },
+  {
+    "method": "GET",
+    "path": "/api/claude/usage",
+    "legacyHandler": "api_claude_usage"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/account/get",
+    "legacyHandler": "api_get_account"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/account/login",
+    "legacyHandler": "api_login_account"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/account/login/cancel",
+    "legacyHandler": "api_cancel_account_login"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/account/logout",
+    "legacyHandler": "api_logout_account"
+  },
+  {
+    "method": "GET",
+    "path": "/api/codex/account/rate-limits",
+    "legacyHandler": "api_account_rate_limits"
+  },
+  {
+    "method": "GET",
+    "path": "/api/codex/account/snapshot/list",
+    "legacyHandler": "api_list_account_snapshots"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/account/snapshot/remove",
+    "legacyHandler": "api_remove_account_snapshot"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/account/snapshot/save",
+    "legacyHandler": "api_save_account_snapshot"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/account/snapshot/switch",
+    "legacyHandler": "api_switch_account_snapshot"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/agents/roles",
+    "legacyHandler": "api_agent_roles"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/approval/command-execution",
+    "legacyHandler": "api_respond_command_execution_approval"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/approval/file-change",
+    "legacyHandler": "api_respond_file_change_approval"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/approval/mcp-elicitation",
+    "legacyHandler": "api_respond_mcp_elicitation"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/approval/permissions",
+    "legacyHandler": "api_respond_permissions_approval"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/approval/user-input",
+    "legacyHandler": "api_respond_user_input"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/config/read",
+    "legacyHandler": "api_config_read"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/config/requirements/read",
+    "legacyHandler": "api_config_requirements_read"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/external-agent-config/detect",
+    "legacyHandler": "api_external_agent_config_detect"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/external-agent-config/import",
+    "legacyHandler": "api_external_agent_config_import"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/external-agent-config/import/read-histories",
+    "legacyHandler": "api_external_agent_config_import_read_histories"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/external-agent-config/import/record-history",
+    "legacyHandler": "api_external_agent_config_import_record_history"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/hooks/list",
+    "legacyHandler": "api_hooks_list"
+  },
+  {
+    "method": "GET",
+    "path": "/api/codex/load_env_keys",
+    "legacyHandler": "api_load_env_keys"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/mcp/add",
+    "legacyHandler": "api_unified_add_mcp_server"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/mcp/disable",
+    "legacyHandler": "api_unified_disable_mcp_server"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/mcp/enable",
+    "legacyHandler": "api_unified_enable_mcp_server"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/mcp/oauth/login",
+    "legacyHandler": "api_mcp_server_oauth_login"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/mcp/read",
+    "legacyHandler": "api_unified_read_mcp_config"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/mcp/remove",
+    "legacyHandler": "api_unified_remove_mcp_server"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/mcp/status/list",
+    "legacyHandler": "api_list_mcp_server_status"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/memory/reset",
+    "legacyHandler": "api_memory_reset"
+  },
+  {
+    "method": "GET",
+    "path": "/api/codex/model/list",
+    "legacyHandler": "api_model_list"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/model/list",
+    "legacyHandler": "api_model_list_post"
+  },
+  {
+    "method": "GET",
+    "path": "/api/codex/model/list-other",
+    "legacyHandler": "api_model_list_other"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/plugin/install",
+    "legacyHandler": "api_plugin_install"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/plugin/installed",
+    "legacyHandler": "api_plugin_installed"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/plugin/list",
+    "legacyHandler": "api_plugin_list"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/plugin/read",
+    "legacyHandler": "api_plugin_read"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/plugin/uninstall",
+    "legacyHandler": "api_plugin_uninstall"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/provider/add",
+    "legacyHandler": "api_add_model_provider"
+  },
+  {
+    "method": "GET",
+    "path": "/api/codex/provider/list",
+    "legacyHandler": "api_list_config_providers"
+  },
+  {
+    "method": "GET",
+    "path": "/api/codex/provider/presets",
+    "legacyHandler": "api_list_provider_presets"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/provider/remove",
+    "legacyHandler": "api_remove_model_provider"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/review/start",
+    "legacyHandler": "api_start_review"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/set_env",
+    "legacyHandler": "api_set_env"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/skills/config/write",
+    "legacyHandler": "api_skills_config_write"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/skills/list",
+    "legacyHandler": "api_skills_list"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/start-thread",
+    "legacyHandler": "api_start_thread"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/access",
+    "legacyHandler": "api_session_access"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/archive",
+    "legacyHandler": "api_archive_thread"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/compact/start",
+    "legacyHandler": "api_thread_compact_start"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/delete",
+    "legacyHandler": "api_delete_thread"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/fork",
+    "legacyHandler": "api_fork_thread"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/goal/clear",
+    "legacyHandler": "api_thread_goal_clear"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/goal/get",
+    "legacyHandler": "api_thread_goal_get"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/goal/set",
+    "legacyHandler": "api_thread_goal_set"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/items/list",
+    "legacyHandler": "api_thread_items"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/list",
+    "legacyHandler": "api_list_threads"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/loaded/list",
+    "legacyHandler": "api_loaded_threads"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/memory-mode/set",
+    "legacyHandler": "api_thread_memory_mode_set"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/metadata",
+    "legacyHandler": "api_thread_metadata"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/read",
+    "legacyHandler": "api_read_thread"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/rename",
+    "legacyHandler": "api_rename_thread"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/resume",
+    "legacyHandler": "api_resume_thread"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/rollback",
+    "legacyHandler": "api_rollback_thread"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/search-occurrences",
+    "legacyHandler": "api_thread_search_occurrences"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/start",
+    "legacyHandler": "api_start_thread"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/turns/list",
+    "legacyHandler": "api_thread_turns"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/unarchive",
+    "legacyHandler": "api_unarchive_thread"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/thread/unsubscribe",
+    "legacyHandler": "api_unsubscribe_thread"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/turn/interrupt",
+    "legacyHandler": "api_turn_interrupt"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/turn/start",
+    "legacyHandler": "api_turn_start"
+  },
+  {
+    "method": "POST",
+    "path": "/api/codex/turn/steer",
+    "legacyHandler": "api_turn_steer"
+  },
+  {
+    "method": "POST",
+    "path": "/api/dictation/models/cancel",
+    "legacyHandler": "crate::dictation::cancel"
+  },
+  {
+    "method": "POST",
+    "path": "/api/dictation/models/download",
+    "legacyHandler": "crate::dictation::download"
+  },
+  {
+    "method": "POST",
+    "path": "/api/dictation/models/remove",
+    "legacyHandler": "crate::dictation::remove"
+  },
+  {
+    "method": "GET",
+    "path": "/api/dictation/models/status",
+    "legacyHandler": "crate::dictation::get_status"
+  },
+  {
+    "method": "POST",
+    "path": "/api/dictation/transcribe",
+    "legacyHandler": "crate::dictation::transcribe"
+  },
+  {
+    "method": "GET",
+    "path": "/api/events",
+    "legacyHandler": "sse_handler"
+  },
+  {
+    "method": "GET",
+    "path": "/api/filesystem/asset",
+    "legacyHandler": "api_asset"
+  },
+  {
+    "method": "POST",
+    "path": "/api/filesystem/canonicalize-path",
+    "legacyHandler": "api_canonicalize_path"
+  },
+  {
+    "method": "GET",
+    "path": "/api/filesystem/codex-home",
+    "legacyHandler": "api_codex_home"
+  },
+  {
+    "method": "POST",
+    "path": "/api/filesystem/delete-file",
+    "legacyHandler": "api_delete_file"
+  },
+  {
+    "method": "GET",
+    "path": "/api/filesystem/home-directory",
+    "legacyHandler": "api_get_home_directory"
+  },
+  {
+    "method": "POST",
+    "path": "/api/filesystem/read-directory",
+    "legacyHandler": "api_read_directory"
+  },
+  {
+    "method": "POST",
+    "path": "/api/filesystem/read-file",
+    "legacyHandler": "api_read_file"
+  },
+  {
+    "method": "POST",
+    "path": "/api/filesystem/read-text-file",
+    "legacyHandler": "api_read_text_file"
+  },
+  {
+    "method": "POST",
+    "path": "/api/filesystem/read-text-file-lines",
+    "legacyHandler": "api_read_text_file_lines"
+  },
+  {
+    "method": "POST",
+    "path": "/api/filesystem/search-files",
+    "legacyHandler": "api_search_files"
+  },
+  {
+    "method": "POST",
+    "path": "/api/filesystem/search-files-by-name",
+    "legacyHandler": "api_search_files_by_name"
+  },
+  {
+    "method": "POST",
+    "path": "/api/filesystem/unwatch",
+    "legacyHandler": "api_unwatch_directory"
+  },
+  {
+    "method": "POST",
+    "path": "/api/filesystem/watch",
+    "legacyHandler": "api_watch_directory"
+  },
+  {
+    "method": "POST",
+    "path": "/api/filesystem/write-file",
+    "legacyHandler": "api_write_file"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/apply-worktree-changes",
+    "legacyHandler": "api_git_apply_worktree_changes"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/branch-info",
+    "legacyHandler": "api_git_branch_info"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/checkout-branch",
+    "legacyHandler": "api_git_checkout_branch"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/commit",
+    "legacyHandler": "api_git_commit"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/create-branch",
+    "legacyHandler": "api_git_create_branch"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/create-worktree",
+    "legacyHandler": "api_git_create_worktree"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/diff-stats",
+    "legacyHandler": "api_git_diff_stats"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/file-diff",
+    "legacyHandler": "api_git_file_diff"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/file-diff-meta",
+    "legacyHandler": "api_git_file_diff_meta"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/has-worktree-changes",
+    "legacyHandler": "api_git_has_worktree_changes"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/list-branches",
+    "legacyHandler": "api_git_list_branches"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/push",
+    "legacyHandler": "api_git_push"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/remove-worktree",
+    "legacyHandler": "api_git_remove_worktree"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/reverse-files",
+    "legacyHandler": "api_git_reverse_files"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/stage-files",
+    "legacyHandler": "api_git_stage_files"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/status",
+    "legacyHandler": "api_git_status"
+  },
+  {
+    "method": "POST",
+    "path": "/api/git/unstage-files",
+    "legacyHandler": "api_git_unstage_files"
+  },
+  {
+    "method": "POST",
+    "path": "/api/import/apply",
+    "legacyHandler": "crate::data_import::apply"
+  },
+  {
+    "method": "POST",
+    "path": "/api/import/preview",
+    "legacyHandler": "crate::data_import::preview"
+  },
+  {
+    "method": "POST",
+    "path": "/api/insights/filter-options",
+    "legacyHandler": "api_get_insight_filter_options"
+  },
+  {
+    "method": "POST",
+    "path": "/api/insights/heatmaps",
+    "legacyHandler": "api_get_agent_heatmaps"
+  },
+  {
+    "method": "POST",
+    "path": "/api/insights/rankings",
+    "legacyHandler": "api_get_insight_rankings"
+  },
+  {
+    "method": "POST",
+    "path": "/api/internal/codex/queue-holds",
+    "legacyHandler": "api_queue_holds"
+  },
+  {
+    "method": "POST",
+    "path": "/api/keke/mcp/add",
+    "legacyHandler": "crate::handlers::api_keke_add_mcp_server"
+  },
+  {
+    "method": "POST",
+    "path": "/api/keke/mcp/auth-statuses",
+    "legacyHandler": "crate::handlers::api_keke_mcp_auth_statuses"
+  },
+  {
+    "method": "POST",
+    "path": "/api/keke/mcp/authorize-github",
+    "legacyHandler": "crate::handlers::api_keke_mcp_authorize_github"
+  },
+  {
+    "method": "POST",
+    "path": "/api/keke/mcp/login",
+    "legacyHandler": "crate::handlers::api_keke_mcp_login"
+  },
+  {
+    "method": "POST",
+    "path": "/api/keke/mcp/read",
+    "legacyHandler": "crate::handlers::api_keke_read_mcp_servers"
+  },
+  {
+    "method": "POST",
+    "path": "/api/keke/mcp/remove",
+    "legacyHandler": "crate::handlers::api_keke_remove_mcp_server"
+  },
+  {
+    "method": "POST",
+    "path": "/api/openapp/check-app-installed",
+    "legacyHandler": "api_check_app_installed"
+  },
+  {
+    "method": "POST",
+    "path": "/api/openapp/open-workspace-in",
+    "legacyHandler": "api_open_workspace_in"
+  },
+  {
+    "method": "GET",
+    "path": "/api/pairing",
+    "legacyHandler": "api_pairing_info"
+  },
+  {
+    "method": "POST",
+    "path": "/api/publish/connect/poll",
+    "legacyHandler": "api_publish_connect_poll"
+  },
+  {
+    "method": "POST",
+    "path": "/api/publish/connect/start",
+    "legacyHandler": "api_publish_connect_start"
+  },
+  {
+    "method": "POST",
+    "path": "/api/publish/disconnect",
+    "legacyHandler": "api_publish_disconnect"
+  },
+  {
+    "method": "POST",
+    "path": "/api/publish/game",
+    "legacyHandler": "api_publish_game"
+  },
+  {
+    "method": "GET",
+    "path": "/api/publish/whoami",
+    "legacyHandler": "api_publish_whoami"
+  },
+  {
+    "method": "GET",
+    "path": "/api/settings",
+    "legacyHandler": "api_get_settings_file"
+  },
+  {
+    "method": "POST",
+    "path": "/api/settings",
+    "legacyHandler": "api_save_settings_file"
+  },
+  {
+    "method": "POST",
+    "path": "/api/skills/clone-repo",
+    "legacyHandler": "api_skills_clone_repo"
+  },
+  {
+    "method": "POST",
+    "path": "/api/skills/delete-central",
+    "legacyHandler": "api_skills_delete_central"
+  },
+  {
+    "method": "POST",
+    "path": "/api/skills/groups/read",
+    "legacyHandler": "api_skill_groups_read"
+  },
+  {
+    "method": "POST",
+    "path": "/api/skills/groups/write",
+    "legacyHandler": "api_skill_groups_write"
+  },
+  {
+    "method": "POST",
+    "path": "/api/skills/install-marketplace",
+    "legacyHandler": "api_skills_install_marketplace"
+  },
+  {
+    "method": "POST",
+    "path": "/api/skills/link-to-agent",
+    "legacyHandler": "api_skills_link_to_agent"
+  },
+  {
+    "method": "POST",
+    "path": "/api/skills/list-central",
+    "legacyHandler": "api_skills_list_central"
+  },
+  {
+    "method": "POST",
+    "path": "/api/skills/list-installed",
+    "legacyHandler": "api_skills_list_installed"
+  },
+  {
+    "method": "POST",
+    "path": "/api/skills/list-marketplace",
+    "legacyHandler": "api_skills_list_marketplace"
+  },
+  {
+    "method": "POST",
+    "path": "/api/skills/uninstall-installed",
+    "legacyHandler": "api_skills_uninstall_installed"
+  },
+  {
+    "method": "POST",
+    "path": "/api/skillssh/install",
+    "legacyHandler": "api_skillssh_install"
+  },
+  {
+    "method": "POST",
+    "path": "/api/skillssh/leaderboard",
+    "legacyHandler": "api_skillssh_leaderboard"
+  },
+  {
+    "method": "POST",
+    "path": "/api/skillssh/search",
+    "legacyHandler": "api_skillssh_search"
+  },
+  {
+    "method": "POST",
+    "path": "/api/sleep/allow",
+    "legacyHandler": "api_allow_sleep"
+  },
+  {
+    "method": "POST",
+    "path": "/api/sleep/prevent",
+    "legacyHandler": "api_prevent_sleep"
+  },
+  {
+    "method": "POST",
+    "path": "/api/telemetry/active",
+    "legacyHandler": "api_telemetry_active"
+  },
+  {
+    "method": "POST",
+    "path": "/api/telemetry/consent",
+    "legacyHandler": "api_telemetry_set_consent"
+  },
+  {
+    "method": "GET",
+    "path": "/api/telemetry/status",
+    "legacyHandler": "api_telemetry_status"
+  },
+  {
+    "method": "POST",
+    "path": "/api/terminal/resize",
+    "legacyHandler": "api_terminal_resize"
+  },
+  {
+    "method": "POST",
+    "path": "/api/terminal/start",
+    "legacyHandler": "api_terminal_start"
+  },
+  {
+    "method": "POST",
+    "path": "/api/terminal/stop",
+    "legacyHandler": "api_terminal_stop"
+  },
+  {
+    "method": "POST",
+    "path": "/api/terminal/write",
+    "legacyHandler": "api_terminal_write"
+  },
+  {
+    "method": "GET",
+    "path": "/health",
+    "legacyHandler": "health_check"
+  },
+  {
+    "method": "POST",
+    "path": "/mcp/bots",
+    "legacyHandler": "api_bots_mcp"
+  },
+  {
+    "method": "GET",
+    "path": "/ws",
+    "legacyHandler": "ws_handler"
+  }
+]

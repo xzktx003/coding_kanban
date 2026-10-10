@@ -17,20 +17,17 @@ function fixture(t) {
     "node_modules",
     "apps/server/node_modules",
     "apps/web/node_modules",
-    "packages/session-runtime/target/debug",
+    "packages/session-runtime/dist",
   ])
     mkdirSync(join(root, dir), { recursive: true });
-  const binary = join(
-    root,
-    "packages/session-runtime/target/debug/codexia-web",
-  );
+  const binary = join(root, "packages/session-runtime/dist/main.js");
   const executable = (p = binary) => {
     writeFileSync(p, "#!/bin/sh\n");
     chmodSync(p, 0o755);
   };
   return { root, binary, executable };
 }
-test("default startup builds shared and incrementally compiles the runtime before launch", (t) => {
+test("default startup builds shared and TypeScript runtime without Cargo", (t) => {
   const f = fixture(t),
     calls = [];
   prepareDev({

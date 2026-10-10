@@ -43,7 +43,7 @@ HTTP 新增：
 - Rust 生命周期测试：读写分离、外部锁、释放 ACK 与确认分离、后台命令、活动目标、审批、未知资源、迟到关闭、队列快照次序、过期心跳、送达不明、分页历史、取得执行权失败。
 - Node 测试：notLoaded 后继续发送、持久队列 hold、接口故障阻止投递、冲突后保留身份和附件、显式重试一次、浏览器不能伪造 hold。
 - 前端单测与浏览器：只读导航/刷新/回显、模型隔离、草稿/附件保留、手动释放与占用提示、未确认释放不显示成功。
-- `python3 scripts/session-ownership-acceptance.py --codex /path/to/codex`：构建 Rust 后，在临时数据目录启动真实运行层和独立 Codex app-server，使用本地 Responses 测试服务。验证同 ID 写锁交替、外部占用读历史、拒绝发送无模型调用、自动释放、释放/发送竞态、历史保留。只清理脚本自己创建的进程组，不使用真实凭证或远端模型。
+- `python3 scripts/session-ownership-acceptance.py --codex /path/to/codex`：执行 `pnpm session:build` 后，在临时数据目录启动真实运行层和独立 Codex app-server，使用本地 Responses 测试服务。验证同 ID 写锁交替、外部占用读历史、拒绝发送无模型调用、自动释放、释放/发送竞态、历史保留。只清理脚本自己创建的进程组，不使用真实凭证或远端模型。
 
 完整执行结果见 [验收记录](designs/session-ownership-acceptance.md)。
 

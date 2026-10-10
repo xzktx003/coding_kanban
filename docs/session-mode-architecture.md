@@ -4,14 +4,14 @@
 
 ## 来源与目录
 
-迁移来源为本地 Codexia 0.54.2，revision `4caaa26550814ba91bda9c221607366b558f1bc5`；保留 MIT 许可证、185 个原有 HTTP/WebSocket 路径及其 Rust 业务模块。来源清单在 `packages/session-runtime/UPSTREAM.json`、`UPSTREAM_ROUTES.json`，脚本测试检查端点覆盖。
+迁移来源为本地 Codexia 0.54.2，revision `4caaa26550814ba91bda9c221607366b558f1bc5`；保留 MIT 许可证；现有 208 个 HTTP/WebSocket 方法/路径及业务逻辑已迁移至 TypeScript。来源清单在 `packages/session-runtime/UPSTREAM.json`、`route-contract.json`，脚本测试检查实际方法/路径覆盖。
 
 - `apps/web/src/components/WorkbenchShell.tsx`：公共模式导航、懒加载与独立错误边界。
 - `apps/web/src/session-mode`：迁移 UI，别名 `@session`，原有 Zustand 持久化键统一加 `kanban.session.` 前缀。
 - `scripts/session-css-scope.mjs`：包含 Tailwind preflight 在内的迁移样式只作用于 `.session-mode`；Radix Portal 同样挂载在该容器。
 - `apps/server/src/routes/session-mode.ts`：同源 HTTP/SSE/二进制/WebSocket 网关，只连接已配置的 loopback 运行层。游标、过滤参数、状态码与二进制内容保留。
 - `apps/server/src/services/session-runtime-manager.ts`：启动、识别并复用应用拥有的运行服务。Node 热更新不终止 Agent；健康检查可以重新启动已退出的服务，仍存活但不可用的进程不会被重复启动或隐式终止。
-- `packages/session-runtime`：独立 Rust 工作空间，剔除 Tauri 打包依赖，保留 Codex、Claude、ACP、Bots、自动化、文件/Git、工具、用量等业务逻辑。
+- `packages/session-runtime`：独立 TypeScript/Node 服务，使用 Fastify 与原生 CLI/SDK，覆盖 Codex、Claude、ACP、Bots、自动化、文件/Git、工具、用量等业务逻辑。
 - `/api/workbench/projects`：合并会话项目和本机终端目录，远端 SSH 路径保持独立。
 - `/api/session-previews`：用户显式选择本机 HTTP 开发服务后注册短期预览地址；限制 loopback 与高端口，代理资源和 WebSocket，避免局域网浏览器把 localhost 误认为手机自身。
 
@@ -55,11 +55,11 @@ Codex/Claude 的单会话、网格和列表统一由 Node 网关持久化并跨�
 ```sh
 pnpm install --frozen-lockfile
 # 首次复制 .env.example 为 .env，再按需编辑
-pnpm dev:restart  # 自动编译 shared 与默认 Rust 运行层
+pnpm dev:restart  # 自动编译 shared 与默认 TypeScript 运行层
 pnpm session:status
 ```
 
-需要 Node/pnpm、Rust stable、C/C++ 编译工具与 CMake。Linux 构建使用 vendored OpenSSL/DBus，Whisper 使用预生成绑定，减少对系统开发头文件的依赖。默认以 debug 二进制启动；可通过 `SESSION_RUNTIME_BIN` 指定已构建的可执行文件（相对路径从仓库根目录解析），这时启动准备跳过 Rust 构建。准备或编译失败不会停止现有服务；已有 Rust 进程仍然复用，磁盘产物更新不会隐式激活。详见 [启动与更新指南](startup.md)。
+需要 Node/pnpm；PTY、SQLite 在缺少预编译包时需要本机编译工具。语音推理由外部 whisper.cpp CLI 执行，可通过 `SESSION_WHISPER_BIN` 指定。默认使用 `node packages/session-runtime/dist/main.js`，`SESSION_RUNTIME_BIN` 保留显式可执行文件覆盖。准备失败不停止现有服务；已有 legacy 进程复用，构建不会隐式激活新产物。详见 [启动与更新指南](startup.md)及 [TS 迁移](session-typescript-migration.md)。
 
 `SESSION_MODE_ENABLED`、`SESSION_RUNTIME_BIN`、`SESSION_DATA_HOME`、`SESSION_RUNTIME_PORT`、`SESSION_CARGO_BIN`、`SESSION_CLAUDE_CONNECT_TIMEOUT_MS` 和 `SESSION_FS_WATCH_MAX_DIRS` 均在 `.env.example` 中说明。前端/后端/HTTPS 端口仍由原有 `.env` 配置；运行层仅绑定 loopback，不把参考项目的固定端口暴露给浏览器。定时任务 UI 明确显示服务器时区。
 

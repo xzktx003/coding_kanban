@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Isolated real-runtime ownership acceptance; no credentials or remote model calls.
 Usage: python3 scripts/session-ownership-acceptance.py --codex /path/to/codex
-Build the Rust runtime first. Only processes started here are terminated.
+Build the TypeScript runtime first (pnpm session:build).
+--runtime accepts an explicit legacy executable or an alternative JS entrypoint.
+--smoke checks an isolated runtime without starting native agents or model calls.
+Only processes started here are terminated.
 """
 import argparse
 import datetime
@@ -12,6 +15,9 @@ import os
 from pathlib import Path
 import queue
 import signal
+import shutil
+import sys
+sys.dont_write_bytecode = True
 import socket
 import subprocess
 import tempfile
@@ -22,6 +28,85 @@ import urllib.request
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+
+def runtime_command(runtime=None, node=None):
+    """Never take launch overrides from the user's production SESSION_* env."""
+    entry = Path(runtime).expanduser().resolve() if runtime else ROOT / 'packages/session-runtime/dist/main.js'
+    if not entry.is_file():
+        raise ValueError(f'Runtime not built or missing: {entry}. Run pnpm session:build first.')
+    if entry.suffix in ('.js', '.mjs', '.cjs'):
+        executable = node or shutil.which('node')
+        if not executable:
+            raise ValueError('Node.js is required to run the TypeScript runtime')
+        return [executable, str(entry)]
+    if not os.access(entry, os.X_OK):
+        raise ValueError(f'Runtime is not executable: {entry}')
+    return [str(entry)]
+
+
+def isolated_environment(base, codex):
+    prefixes = ('SESSION_', 'CODEX_', 'CLAUDE_', 'ANTHROPIC_', 'OPENAI_', 'CODEXIA_', 'PRODUCTSHIP_', 'GEMINI_')
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith(prefixes)
+           and not key.endswith(('_KEY', '_TOKEN', '_PASSWORD', '_SECRET'))
+           and key not in ('SSH_AUTH_SOCK', 'GH_TOKEN', 'GITHUB_TOKEN')}
+    env.update(CODEX_HOME=str(base / 'cli'), CODEX_PATH=codex,
+               SESSION_DATA_HOME=str(base / 'app'), CLAUDE_CONFIG_DIR=str(base / 'claude'),
+               CODEXIA_NO_BROWSER='1', DO_NOT_TRACK='1', NO_PROXY='127.0.0.1,localhost,::1',
+               no_proxy='127.0.0.1,localhost,::1', SESSION_RUNTIME_INSTANCE=str(uuid.uuid4()))
+    return env
+
+
+def smoke(runtime=None, node=None, output=None):
+    """No native process is requested; the application/CLI directories are temporary."""
+    command = runtime_command(runtime, node)
+    process = None
+    with tempfile.TemporaryDirectory(prefix='kanban-runtime-smoke-') as directory:
+        base = Path(directory)
+        (base / 'cli').mkdir()
+        env = isolated_environment(base, str(base / 'unavailable-codex'))
+        with socket.socket() as sock:
+            sock.bind(('127.0.0.1', 0))
+            port = sock.getsockname()[1]
+        with (base / 'runtime.log').open('w') as log:
+            process = subprocess.Popen(command + ['--port', str(port)], env=env,
+                                       stdout=log, stderr=log, start_new_session=True)
+            def request(path, params=None):
+                req = urllib.request.Request(f'http://127.0.0.1:{port}' + path,
+                      data=None if params is None else json.dumps(params).encode(),
+                      headers={'content-type': 'application/json'})
+                with urllib.request.urlopen(req, timeout=3) as response:
+                    raw=response.read()
+                    return json.loads(raw) if raw else None
+            def ready():
+                if process.poll() is not None:
+                    raise AssertionError('Isolated runtime exited before readiness')
+                try:
+                    return request('/health').get('instance') == env['SESSION_RUNTIME_INSTANCE']
+                except (OSError, ValueError):
+                    return False
+            try:
+                wait_for(ready, 30)
+                health = request('/health')
+                before = request('/api/settings')
+                settings = dict(before, acceptanceFixture='isolated-typescript-smoke')
+                request('/api/settings', settings)
+                assert request('/api/settings') == settings
+                assert not (base / 'cli' / 'auth.json').exists()
+                report = {'passed': True, 'runtime': health.get('runtime', 'legacy'),
+                          'isolatedDataHome': True, 'settingsRoundTrip': True,
+                          'nativeAgentProcessesRequested': 0, 'remoteModelCalls': 0}
+                if output: Path(output).write_text(json.dumps(report, indent=2) + '\n')
+                print(json.dumps(report))
+                return report
+            except Exception:
+                log.flush()
+                print((base / 'runtime.log').read_text()[-5000:])
+                raise
+            finally:
+                stop(process)
 
 
 def wait_for(fn, seconds=15):
@@ -78,10 +163,17 @@ def stop(process):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--codex', required=True)
-    parser.add_argument('--runtime', default=str(ROOT / 'packages/session-runtime/target/debug/codexia-web'))
+    parser.add_argument('--codex', help='Explicit native binary, required unless --smoke')
+    parser.add_argument('--runtime', help='JS entrypoint or explicit legacy executable; defaults to TS dist/main.js')
+    parser.add_argument('--node', help='Node executable for JS runtime')
+    parser.add_argument('--smoke', action='store_true', help='Only isolated runtime/settings smoke; no native agents or model requests')
     parser.add_argument('--output')
     args = parser.parse_args()
+    if args.smoke:
+        return smoke(args.runtime, args.node, args.output)
+    if not args.codex:
+        parser.error('--codex is required for native acceptance')
+    command = runtime_command(args.runtime, args.node)
     model_calls = []
     class Model(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_):
@@ -137,7 +229,7 @@ stream_max_retries = 0
             history.write_text(''.join(json.dumps(dict(timestamp=stamp, **r)) + '\n' for r in records))
             with socket.socket() as sock:
                 sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]
-            env = dict(os.environ, CODEX_HOME=str(cli), CODEX_PATH=args.codex, SESSION_DATA_HOME=str(base / 'app'), CLAUDE_CONFIG_DIR=str(base / 'claude'), CODEXIA_NO_BROWSER='1', SESSION_RUNTIME_INSTANCE=str(uuid.uuid4()))
+            env = isolated_environment(base, args.codex)
             def api(path, params=None):
                 req = urllib.request.Request(f'http://127.0.0.1:{port}' + path,
                       data=None if params is None else json.dumps(params).encode(), headers={'content-type': 'application/json'})
@@ -155,7 +247,7 @@ stream_max_retries = 0
                 except (OSError, ValueError):
                     return False
             with (base / 'runtime.log').open('w') as log, (base / 'other.log').open('w') as other_log:
-                runtime = subprocess.Popen([args.runtime, '--port', str(port)], env=env, stdout=log, stderr=log, start_new_session=True)
+                runtime = subprocess.Popen(command + ['--port', str(port)], env=env, stdout=log, stderr=log, start_new_session=True)
                 try:
                     wait_for(ready, 30)
                     def heartbeat():

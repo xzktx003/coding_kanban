@@ -1,6 +1,7 @@
-import { readFileSync, statSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { readFileSync, statSync, readdirSync } from "node:fs";
+import { dirname, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import { loadStartupEnv } from "./startup-env.mjs";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 /** Inspect readiness and ownership; never signal a process or modify its identity. */
@@ -10,6 +11,7 @@ export async function sessionRuntimeStatus({
   fetcher = fetch,
   readFile = readFileSync,
   stat = statSync,
+  fingerprint = runtimeBuildFingerprint,
 } = {}) {
   if (env.SESSION_MODE_ENABLED === "0") return { state: "disabled" };
   const port = Number(env.SERVER_PORT || env.PORT || 4000);
@@ -36,11 +38,6 @@ export async function sessionRuntimeStatus({
     return { state: "unavailable", url, runtimeLog, error: error.message };
   }
   const result = { state: "ready", url, runtimeLog, binaryState: "unknown" };
-  const binary = resolve(
-    root,
-    env.SESSION_RUNTIME_BIN ||
-      "packages/session-runtime/target/debug/codexia-web",
-  );
   try {
     const identity = JSON.parse(
       readFile(resolve(dataHome, "runtime.json"), "utf8"),
@@ -48,22 +45,44 @@ export async function sessionRuntimeStatus({
     if (
       typeof identity.instance !== "string" ||
       !identity.instance ||
-      identity.binary !== binary ||
+      typeof identity.binary !== "string" ||
+      !isAbsolute(identity.binary) ||
       identity.instance !== health.instance ||
       !Number.isInteger(identity.pid) ||
       identity.pid <= 0
     )
       return result;
-    if (
-      readFile(`/proc/${identity.pid}/cmdline`, "utf8").split("\0")[0] !==
-      binary
-    )
-      return result;
+    const binary = identity.binary;
+    const cmdline = readFile(`/proc/${identity.pid}/cmdline`, "utf8").split(
+      "\0",
+    );
+    if (cmdline[0] !== binary) return result;
+    if (identity.entrypoint) {
+      if (
+        typeof identity.entrypoint !== "string" ||
+        !isAbsolute(identity.entrypoint) ||
+        cmdline[1] !== identity.entrypoint
+      )
+        return result;
+      return {
+        ...result,
+        pid: identity.pid,
+        runtime: "typescript",
+        binaryState:
+          typeof identity.buildFingerprint === "string"
+            ? fingerprint(dirname(identity.entrypoint)) ===
+              identity.buildFingerprint
+              ? "current"
+              : "older"
+            : "unknown",
+      };
+    }
     const disk = stat(binary),
       running = stat(`/proc/${identity.pid}/exe`);
     return {
       ...result,
       pid: identity.pid,
+      runtime: "legacy",
       binaryState:
         disk.dev === running.dev && disk.ino === running.ino
           ? "current"
@@ -87,9 +106,13 @@ export function printRuntimeStatus(result, log = console.log) {
     log(
       `[session-status] 会话服务就绪${result.pid ? `，PID ${result.pid}` : ""}：${result.url}`,
     );
+    if (result.runtime === "legacy")
+      log(
+        "[session-status] 当前仍复用原有运行服务；TypeScript 默认入口将在没有存活运行服务时启用，切换须安排 Agent 安全窗口。",
+      );
     if (result.binaryState === "older")
       log(
-        "[session-status] 注意：运行中的二进制与磁盘构建产物不同，新 Rust 代码尚未激活。保留现有任务，待会话结束后安排运行层更新；本命令不会停止 Agent。",
+        "[session-status] 注意：运行中的二进制与磁盘构建产物不同，新会话运行代码尚未激活。保留现有任务，待会话结束后安排运行层更新；本命令不会停止 Agent。",
       );
     else if (result.binaryState === "unknown")
       log(
@@ -111,4 +134,21 @@ if (
     console.error(`[session-status] ${error.message}`);
     process.exitCode = 1;
   }
+}
+
+export function runtimeBuildFingerprint(dist) {
+  const hash = createHash("sha256");
+  const visit = (directory, prefix) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true }).sort(
+      (a, b) => a.name.localeCompare(b.name),
+    )) {
+      const path = resolve(directory, entry.name),
+        name = `${prefix}${entry.name}`;
+      if (entry.isDirectory()) visit(path, `${name}/`);
+      else if (entry.isFile() && entry.name.endsWith(".js"))
+        hash.update(name).update("\0").update(readFileSync(path)).update("\0");
+    }
+  };
+  visit(dist, "");
+  return hash.digest("hex");
 }

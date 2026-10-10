@@ -1,5 +1,7 @@
 # Coding Kanban Project Overview
 
+会话运行层自有实现已迁移至 TypeScript，采用独立 Node 进程继续维护 Agent 生命周期。迁移实现位于 `packages/session-runtime/src`，目前 208 个接口及各领域服务已接入 TS，默认新启动使用 TS；已存活的旧运行服务继续复用，正式切换与完整验收分别记录。完整范围、208 个接口的审计和最终切换条件见 [TypeScript 迁移](session-typescript-migration.md)。
+
 Codex 聊天正文、输入区、命令与工具、请求、文件 review 和消息工作流按本地 VS Code 插件的实际启用组件适配。字体、段落间距、代码/表格/公式/Mermaid、原生图标与菜单分别有原包对照；手机保留紧凑固定输入高度、左侧附件/删除、触控热区和安全区。公共输入区与会话窗口分离、悬浮 Diff、多项目/关注标签/自由分屏、后台同步与持久草稿保持现有边界，Claude 沿用原 renderer。最新全量检查、桌面/手机两主题整页截图和外部能力限制见 [实施与验收记录](designs/session-render-alignment/implementation.md)；新 Rust 正式激活、原生未实现的历史搜索及实际云接口验收分别记录，不宣称全页面零像素差异。
 
 探索文件跳转固定原命令目录；工具折叠、生命周期计时、输出与阅读状态以真实 thread/turn/item 隔离，不改变输入目标或后台执行。保存的轮次变更通过独立目标与原生回执核对，与可变 Git 工作区分开；撤销/重新应用保留后续修改与 index，未知执行结果保持持久身份并只读核对。运行变更条沿用公共输入区上方浮层，协议与验收见 [保存的轮次变更](session-saved-patches.md)。
@@ -12,7 +14,7 @@ Codex 聊天以有界元数据保留原生工具活动和状态；命令输出�
 
 功能依赖统一列在 [README](../README.md#各功能的依赖)，区分后端系统工具、随前端打包的预览库和浏览器权限。终端 Markdown 图片无需系统转换器，支持受目录边界限制的飞书 `@./` 导出引用，详见 [图片解析约定](markdown-image-preview.md)。
 
-开发启动统一使用 `pnpm dev:restart`：停止前后端前完成依赖、端口归属检查及 shared / 默认 Rust 构建；保留运行中的会话服务与 Agent，分别报告网关和会话健康。前台 `pnpm dev` 共用构建准备。Rust 产物是否已激活可用 `pnpm session:status` 查看，详见 [启动与更新指南](startup.md)。
+开发启动统一使用 `pnpm dev:restart`：停止前后端前完成依赖、端口归属检查及 shared / 默认 TypeScript 构建；保留运行中的会话服务与 Agent，分别报告网关和会话健康。前台 `pnpm dev` 共用构建准备。运行产物是否已激活可用 `pnpm session:status` 查看，详见 [启动与更新指南](startup.md)。
 
 会话工作区的项目归属随每条会话显示：标签、自由分屏、网格、列表统一采用“会话名在上、项目名在下”的身份块；不再显示独立的当前项目栏。网格/列表以卡片头承担导航，布局入口位于全局顶栏，公共输入框内部显示发送目标。桌面工作区右上角常驻文件、VS Code、终端、放大和面板开关，与已有标签行对齐；手机保留工具菜单。详见 [会话项目归属](session-project-context.md)。
 
@@ -225,7 +227,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 更新状态机为 `disabled / idle / checking / available / updated / conflict / error`。定时器与手动操作共享 single-flight；发现上游领先时只进入 `available` 并提醒用户。只有用户点击“拉取并更新”后，apply 端点才允许 `merge --ff-only <remote-head>`。HEAD 与 upstream 分叉时不创建 merge commit；本地修改或未跟踪文件阻止 fast-forward 时保留原 HEAD 和工作区；Git 错误只返回有界、去机器路径的用户消息。
 
-用户确认后的安全 fast-forward 会先启动独立更新进程；该进程等待 HEAD 到达确认的 revision，执行 `pnpm install --frozen-lockfile`，再调用安全的 `pnpm dev:restart`。因此 watcher 因新版本依赖缺失退出时，更新进程仍能完成依赖安装并恢复前后端。重启保留运行中的 Rust 会话服务和 Agent；source revision 变化时，前端复用确认时记录的恢复意图，只 reload 一次并恢复受管 tmux，不再要求第二次确认。过程日志位于 `.dev-runtime/online-update.log`。后端开发入口在导入应用模块前重新构建 `@agent-orchestrator/shared`，并让 `tsx` 监听共享源码。未经“拉取并更新”确认，后台检查不会修改源码或刷新浏览器。版本和恢复提示是非模态的，只有其操作按钮接收指针事件，提示本身不会截获底下终端或顶栏控件的输入；恢复成功提示可主动关闭并在 5 秒内自动隐藏，恢复失败提示保持可见。
+用户确认后的安全 fast-forward 会先启动独立更新进程；该进程等待 HEAD 到达确认的 revision，执行 `pnpm install --frozen-lockfile`，再调用安全的 `pnpm dev:restart`。因此 watcher 因新版本依赖缺失退出时，更新进程仍能完成依赖安装并恢复前后端。重启保留运行中的会话服务和 Agent；source revision 变化时，前端复用确认时记录的恢复意图，只 reload 一次并恢复受管 tmux，不再要求第二次确认。过程日志位于 `.dev-runtime/online-update.log`。后端开发入口在导入应用模块前重新构建 `@agent-orchestrator/shared`，并让 `tsx` 监听共享源码。未经“拉取并更新”确认，后台检查不会修改源码或刷新浏览器。版本和恢复提示是非模态的，只有其操作按钮接收指针事件，提示本身不会截获底下终端或顶栏控件的输入；恢复成功提示可主动关闭并在 5 秒内自动隐藏，恢复失败提示保持可见。
 
 生产入口使用 `FileSessionStateStore` 把稳定会话目录保存到 `SESSION_STATE_PATH`，默认 `.dev-runtime/agent-sessions.json`：
 
@@ -792,7 +794,7 @@ pnpm --dir apps/web dev -- --host 0.0.0.0
 
 Codex 异步问题另外采用消息内入口与输入区答题面板：当前会话实时收到本轮新题时自动展开并保留原草稿，手动收起后保留轻提示，同一题不反复弹出；运行中提交引导当前任务，本轮结束后需要明确点击“发送回答并继续”。答案历史、远端更新和分屏目标隔离见 [异步问题](session-async-questions.md)。
 
-Codex 会话输入支持运行中排队、引导、停止并发送及独立侧边聊天/代码审查。Node 网关拥有按 thread 隔离的持久队列与单一调度锁，结合 Rust SSE 完成事件和状态查询串行投递；浏览器刷新或关闭不影响已接收队列。编辑器选区附带路径/行号追加到草稿，多浏览器以版本号防止相互覆盖。交互、恢复与验收见 [Codex 运行中输入](session-followups.md)。
+Codex 会话输入支持运行中排队、引导、停止并发送及独立侧边聊天/代码审查。Node 网关拥有按 thread 隔离的持久队列与单一调度锁，结合运行层 SSE 完成事件和状态查询串行投递；浏览器刷新或关闭不影响已接收队列。编辑器选区附带路径/行号追加到草稿，多浏览器以版本号防止相互覆盖。交互、恢复与验收见 [Codex 运行中输入](session-followups.md)。
 
 会话输入区采用统一圆角输入面与贴边队列薄条，以当前输入/运行状态决定主按钮。模型、思考强度和权限保持可见，审查与发送方式进入加号菜单，侧边聊天进入当前会话更多菜单。桌面、窄屏和手机共享交互语义，详见 [输入区设计与验收](designs/composer-v1/acceptance.md)。
 

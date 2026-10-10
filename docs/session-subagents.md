@@ -44,3 +44,5 @@ Rust 新增 `/api/codex/thread/metadata` 与 `/api/codex/agents/roles`。普通�
 - 前端：`pnpm --filter web test:session src/session-mode/features/subagents src/session-mode/hooks/useFollowedSessionStates.test.tsx src/session-mode/components/codex/hooks/serverRequests.test.ts src/session-mode/components/codex/items/RequestUserInputItem.test.tsx`。
 - 原生：编译运行层后，`python3 scripts/session-subagent-acceptance.py --codex <已验证的 Codex 可执行文件> --questions`，再单独执行 `--approvals`；V2 二进制加 `--v2`。脚本使用独立数据目录与本地确定性模型，只清理自己的进程，不接触用户登录或活动会话。
 - 浏览器：`tests/e2e/session-subagents.spec.ts`；同时回归固定高度输入、草稿、执行权交接和 VS Code 面板保活。
+
+TypeScript 运行层启动 smoke：`pnpm session:build` 后运行 `python3 scripts/session-subagent-acceptance.py --smoke`，使用独立目录，不启动原生 Agent、不请求模型。完整 `--questions` / `--approvals` 验收仍须主线程发起。

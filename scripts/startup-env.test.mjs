@@ -10,21 +10,21 @@ test("startup env preserves explicit overrides and reads configuration without e
   const marker = join(root, "executed");
   writeFileSync(
     join(root, ".env"),
-    `SESSION_MODE_ENABLED=0\nSESSION_CARGO_BIN="/some path/cargo"\nPAYLOAD=$(touch ${marker})\n`,
+    `SESSION_MODE_ENABLED=0\nSESSION_RUNTIME_BIN="/some path/runtime"\nPAYLOAD=$(touch ${marker})\n`,
   );
   const env = loadStartupEnv(root, { SESSION_MODE_ENABLED: "1" });
   assert.equal(env.SESSION_MODE_ENABLED, "1");
-  assert.equal(env.SESSION_CARGO_BIN, "/some path/cargo");
+  assert.equal(env.SESSION_RUNTIME_BIN, "/some path/runtime");
   assert.match(env.PAYLOAD, /^\$\(touch /);
   assert.equal(existsSync(marker), false);
 });
 
-test("session build helper reads the Cargo executable from repository .env", async (t) => {
+test("session TS build helper forwards repository configuration without invoking Cargo", async (t) => {
   const { copyFileSync, mkdirSync, symlinkSync, readFileSync } =
     await import("node:fs");
   const { spawnSync } = await import("node:child_process");
   const { fileURLToPath } = await import("node:url");
-  const root = mkdtempSync(join(tmpdir(), "startup-cargo-"));
+  const root = mkdtempSync(join(tmpdir(), "startup-ts-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, "scripts"));
   for (const name of ["build-session-runtime.mjs", "startup-env.mjs"])
@@ -37,16 +37,19 @@ test("session build helper reads the Cargo executable from repository .env", asy
     join(root, "node_modules"),
     "dir",
   );
-  const cargo = join(root, "cargo fixture");
+  const pnpm = join(root, "pnpm");
   const output = join(root, "args.json");
   writeFileSync(
-    cargo,
-    `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(output)},JSON.stringify({args:process.argv.slice(2),bindings:process.env.WHISPER_DONT_GENERATE_BINDINGS}));\n`,
+    pnpm,
+    `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(output)},JSON.stringify({args:process.argv.slice(2),setting:process.env.SESSION_FIXTURE_SETTING}));\n`,
     { mode: 0o700 },
   );
-  writeFileSync(join(root, ".env"), `SESSION_CARGO_BIN="${cargo}"\n`);
-  const env = { ...process.env };
-  delete env.SESSION_CARGO_BIN;
+  writeFileSync(
+    join(root, ".env"),
+    `SESSION_FIXTURE_SETTING="configured by dotenv"\n`,
+  );
+  const env = { ...process.env, PATH: root };
+  delete env.SESSION_FIXTURE_SETTING;
   const result = spawnSync(
     process.execPath,
     [join(root, "scripts/build-session-runtime.mjs"), "check"],
@@ -55,12 +58,9 @@ test("session build helper reads the Cargo executable from repository .env", asy
   assert.equal(result.status, 0, result.stderr);
   const actual = JSON.parse(readFileSync(output, "utf8"));
   assert.deepEqual(actual.args, [
+    "--filter",
+    "@agent-orchestrator/session-runtime",
     "check",
-    "--manifest-path",
-    join(root, "packages/session-runtime/Cargo.toml"),
-    "--locked",
-    "-p",
-    "codexia-web",
   ]);
-  assert.equal(actual.bindings, "1");
+  assert.equal(actual.setting, "configured by dotenv");
 });

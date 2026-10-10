@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Isolated native sub-agent acceptance. Only this script's processes are stopped.
-Requires a built runtime and an explicit --codex binary. No remote model/auth calls.
+Requires a built TypeScript runtime and an explicit --codex binary for native tests.
+--runtime retains explicit legacy executable support. --smoke runs no native tests.
+No remote model/auth calls; question tests are driven by the parent thread.
 """
 import argparse
 import http.server
@@ -26,14 +28,21 @@ spec.loader.exec_module(helper)
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--codex", required=True)
-    parser.add_argument("--runtime", default=str(ROOT / "packages/session-runtime/target/debug/codexia-web"))
+    parser.add_argument("--codex", help="Explicit native binary, required unless --smoke")
+    parser.add_argument("--runtime", help="JS entrypoint or explicit legacy executable; defaults to TS dist/main.js")
+    parser.add_argument("--node", help="Node executable for JS runtime")
+    parser.add_argument("--smoke", action="store_true", help="Only isolated runtime/settings smoke; no native agents or model requests")
     parser.add_argument("--v2", action="store_true")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--questions", action="store_true")
     mode.add_argument("--approvals", action="store_true")
     parser.add_argument("--output")
     args = parser.parse_args()
+    if args.smoke:
+        return helper.smoke(args.runtime, args.node, args.output)
+    if not args.codex:
+        parser.error('--codex is required for native acceptance')
+    command = helper.runtime_command(args.runtime, args.node)
     calls, notifications = [], []
     release = threading.Event()
     lock = threading.Lock()
@@ -96,7 +105,7 @@ request_max_retries = 0
 stream_max_retries = 0
 ''')
             with socket.socket() as sock: sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]
-            env = dict(os.environ, CODEX_HOME=str(cli), CODEX_PATH=args.codex, SESSION_DATA_HOME=str(base / "app"), CLAUDE_CONFIG_DIR=str(base / "claude"), CODEXIA_NO_BROWSER="1", SESSION_RUNTIME_INSTANCE=str(uuid.uuid4()))
+            env = helper.isolated_environment(base, args.codex)
             def api(path, params=None):
                 request = urllib.request.Request(f"http://127.0.0.1:{port}" + path, data=None if params is None else json.dumps(params).encode(), headers={"content-type": "application/json"})
                 try:
@@ -108,7 +117,7 @@ stream_max_retries = 0
                 try: return api("/health")[1].get("instance") == env["SESSION_RUNTIME_INSTANCE"] and api("/api/codex/thread/list", {"limit": 1})[0] == 200
                 except (OSError, ValueError): return False
             with (base / "runtime.log").open("w") as log:
-                runtime = subprocess.Popen([args.runtime, "--port", str(port)], env=env, stdout=log, stderr=log, start_new_session=True)
+                runtime = subprocess.Popen(command + ["--port", str(port)], env=env, stdout=log, stderr=log, start_new_session=True)
                 try:
                     helper.wait_for(ready, 30)
                     status, response = api("/api/codex/thread/start", {"cwd": directory, "model": "acceptance-model", "modelProvider": "acceptance"})

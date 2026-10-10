@@ -56,10 +56,10 @@ export function prepareDev({
       );
   const enabled = env.SESSION_MODE_ENABLED !== "0";
   const custom = env.SESSION_RUNTIME_BIN;
-  // Match SessionRuntimeManager: explicit binaries are not overwritten by Cargo.
+  // Match SessionRuntimeManager: explicit binaries are not overwritten by the TypeScript build.
   const binary = resolve(
     root,
-    custom || "packages/session-runtime/target/debug/codexia-web",
+    custom || "packages/session-runtime/dist/main.js",
   );
   if (/[\x00-\x1f]/.test(binary))
     throw new Error("SESSION_RUNTIME_BIN 包含无效字符。");
@@ -72,24 +72,22 @@ export function prepareDev({
   });
   if (!enabled)
     log(
-      "[dev-prepare] SESSION_MODE_ENABLED=0：仅启动终端模式，跳过 Rust 编译。",
+      "[dev-prepare] SESSION_MODE_ENABLED=0：仅启动终端模式，跳过会话运行层编译。",
     );
   else if (custom)
     log(
-      "[dev-prepare] 使用 SESSION_RUNTIME_BIN 指定的二进制，跳过本仓库 Rust 编译。",
+      "[dev-prepare] 使用 SESSION_RUNTIME_BIN 指定的二进制，跳过本仓库会话运行层编译。",
     );
   else {
-    log(
-      "[dev-prepare] 增量编译会话运行层（首次构建需要 Rust stable、C/C++ 编译器、CMake）…",
-    );
+    log("[dev-prepare] 编译 TypeScript 会话运行层…");
     run(
       process.execPath,
       [resolve(root, "scripts/build-session-runtime.mjs"), "build"],
       { cwd: root, env },
     );
-    if (!executable(binary))
+    if (!existsSync(binary) || !statSync(binary).isFile())
       throw new Error(
-        "未找到默认 Rust 构建产物；自定义 CARGO_TARGET_DIR 时请设置 SESSION_RUNTIME_BIN。",
+        "未找到 TypeScript 会话构建产物 packages/session-runtime/dist/main.js。",
       );
   }
   log(

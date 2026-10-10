@@ -389,27 +389,28 @@ https://<局域网地址>:<WEB_PORT>/?view=mobile
 - `mkcert`：为局域网生成浏览器可信任的本地 HTTPS 证书，强烈推荐与 VS Code Web 一起使用。
 - `code-server` 或 `openvscode-server`：内嵌 VS Code Web；未安装时应用可尝试通过网络安装 `code-server`。
 - Codex、Copilot 或 Claude CLI：只需安装并登录实际要从看板启动的 Agent；纯 shell 会话不需要。
-- Rust stable、C/C++ 编译工具及 CMake：构建结构化会话运行层时需要。
+- Python 3、`make` 和 C/C++ 编译工具：`node-pty`、`better-sqlite3` 缺少当前平台的预编译包时需要；自有会话运行层使用 TypeScript / Node.js，无需 Rust 工具链。
+- `whisper-cli`（whisper.cpp）：会话语音转写使用独立推理程序；可通过 `.env` 的 `SESSION_WHISPER_BIN` 指定路径。
 - `lark-cli`：仅发送飞书提醒或从飞书回复继续 Codex 时需要。飞书完成通知中的公式保留源码，不需要图片上传权限或 Chromium。
 - Playwright 浏览器和系统依赖：仅运行 E2E 或生成 README 截图时需要。
 
 ```bash
 # Ubuntu / Debian
 sudo apt update
-sudo apt install -y git curl lsof openssl util-linux tmux openssh-client python3 build-essential cmake
+sudo apt install -y git curl lsof openssl util-linux tmux openssh-client python3 build-essential
 
 # Fedora / RHEL
-sudo dnf install -y git curl lsof openssl util-linux tmux openssh-clients python3 gcc gcc-c++ make cmake
+sudo dnf install -y git curl lsof openssl util-linux tmux openssh-clients python3 gcc gcc-c++ make
 
 # macOS
-brew install git node tmux openssl mkcert cmake
+brew install git node tmux openssl mkcert
 
 # 安装符合上述版本要求的 Node.js 后，启用仓库声明的 pnpm 版本
 corepack enable
 corepack prepare pnpm@10.13.1 --activate
 ```
 
-如果 `pnpm install` 在构建 `node-pty` 时报告 `node-gyp` 错误，再安装 Python 3、`make` 和 C/C++ 编译工具链。macOS 若没有可用的 `setsid`，可以使用下文的 `pnpm dev` 启动方式。
+如果 `pnpm install` 在构建 `node-pty` 或 `better-sqlite3` 时报告 `node-gyp` 错误，再安装 Python 3、`make` 和 C/C++ 编译工具链。macOS 若没有可用的 `setsid`，可以使用下文的 `pnpm dev` 启动方式。
 
 ### 各功能的依赖
 
@@ -420,7 +421,7 @@ JavaScript 预览库随 `pnpm install --frozen-lockfile` 安装、随前端构�
 | 基础看板、前后端启动 | 本机 Git、Node.js、pnpm；推荐启动脚本还需 `curl`、`lsof`、OpenSSL，Linux 需 `setsid` | 上文版本检查；`pnpm check`、`pnpm dev:restart` |
 | 本地终端 / PTY | 本机 shell；`node-pty` 由 pnpm 安装，源码编译需 Python 3、make、C/C++ 工具链 | pnpm 安装无 `node-gyp` 错误，新建 shell 能输入输出 |
 | tmux 扫描、接管、恢复 | 执行会话的主机安装 tmux；远端 tmux 功能需远端也安装 | 本机及远端执行 `tmux -V` |
-| 结构化会话运行层 | 本机 Rust stable/Cargo、CMake、完整 C/C++ 工具链；Linux 包含 C++ 标准库开发链接文件 | `cargo --version`、`cmake --version`、`g++ --version`、`pnpm session:build`、`pnpm session:status`；只访问浏览器不需要 Rust |
+| 结构化会话运行层 | 本机 Node.js / pnpm；TS 服务独立运行，SQLite 与 PTY 原生组件由 pnpm 安装，必要时使用 C/C++ 工具链编译 | `pnpm session:check`、`pnpm session:build`、`pnpm session:status`；默认启动无需 Cargo / Rust |
 | Codex / Claude / Copilot Agent | 在执行 Agent 的本机或 SSH 目标安装相应 CLI，并完成该 CLI 的登录或模型配置 | 相应命令 `--version`；ACP Agent 还需其自身适配器和配置；纯 shell 不要求 Agent CLI |
 | Git Diff、版本检查和显式更新 | 操作仓库的主机安装 Git；远程 fetch/push 需该 remote 对应的 SSH 密钥或 HTTPS 登录 | `git status`、`git fetch`；本地 Diff 不需要外网，远程提醒需要能访问 upstream |
 | 本地文件浏览、Markdown 与图片预览 | 后端有文件读取权限；前端自带 `react-markdown`、GFM 插件；图片由浏览器原生解码 | 无需 ImageMagick、FFmpeg、LibreOffice 或服务器 Chromium；路径规则见下节 |
@@ -431,7 +432,7 @@ JavaScript 预览库随 `pnpm install --frozen-lockfile` 安装、随前端构�
 | SSH 终端、远端文件 / 图片 | 本机 OpenSSH 客户端及 SSH 凭据；目标提供 SSH 服务、shell，文件功能还需可用的 SFTP 子系统 | 先用相同配置登录 SSH；远端无需安装图片转换器，文件权限与符号链接边界仍生效 |
 | VS Code Web | 编辑目录所在主机安装 `code-server` 或 `openvscode-server`；自动安装需该主机能下载 code-server | 运行对应命令 `--version`；浏览器需信任 HTTPS CA；远端编辑另需 SSH。见 [编辑工作区](docs/session-vscode-panel.md) |
 | 飞书通知、回复控制和文件工作区 | 本机 `lark-cli`、机器人身份、相应消息/资源权限及回调配置 | 见下方飞书检查清单及 [飞书工作区](docs/feishu-session-workspace.md)；通知保留公式源码，无需服务器 Chromium |
-| 语音输入（会话模式） | 已构建的 Rust 运行层、设置中下载的 Whisper 模型；浏览器麦克风权限与可信 HTTPS（localhost 例外） | 首次模型下载需后端能访问 Hugging Face，下载后可本地转写；模型越大，内存与 CPU 消耗越大；无需单独安装 Whisper CLI |
+| 语音输入（会话模式） | 本机 whisper.cpp 的 `whisper-cli`（PATH 或 `SESSION_WHISPER_BIN`），设置中下载的 GGML Whisper 模型；浏览器麦克风权限与可信 HTTPS（localhost 例外） | 首次模型下载需后端能访问 Hugging Face，下载后由外部 CLI 本地转写；模型越大，内存与 CPU 消耗越大；运行层不再内嵌 Whisper Rust bindings |
 | 浏览器通知、剪贴板和麦克风 | 访问设备上的现代浏览器、对应权限与安全上下文 | 局域网使用可信 HTTPS；不同浏览器支持范围不同；无需在服务器安装桌面环境 |
 | E2E、浏览器回归、README 截图 | 开发机上的 Playwright Chromium 及其系统动态库 | `pnpm exec playwright install chromium`；Linux 可执行 `pnpm exec playwright install-deps chromium`（安装系统包需管理员权限）。这些依赖用于测试与截图，不是普通文件预览的运行条件 |
 
@@ -457,18 +458,19 @@ JavaScript 预览库随 `pnpm install --frozen-lockfile` 安装、随前端构�
 - **413 / exceeds 16777216 bytes**：图片超过 16 MiB，压缩、缩小分辨率或下载查看。
 - **接口返回正常但仍无图**：检查图片是否损坏、浏览器是否支持该格式；外链另查站点证书和登录。接口能读 PNG 时，安装服务器 Chromium 或 Office 软件不会解决路径问题。
 
-### C++ 标准库与会话构建失败
+### 原生 Node 依赖安装与 C++ 标准库问题
 
-`cannot find -lstdc++` 表示链接器缺少 **开发用的 `libstdc++.so`**。机器上即使已有运行库 `libstdc++.so.6`，仍可能缺少这个文件。Ubuntu/Debian 优先安装完整工具链：
+TS 会话层由 `tsc` 编译。若安装 `node-pty` 或 `better-sqlite3` 时出现 `cannot find -lstdc++`，表示原生组件的链接器缺少 **开发用的 `libstdc++.so`**。机器上即使已有运行库 `libstdc++.so.6`，仍可能缺少这个文件。Ubuntu/Debian 优先安装完整工具链：
 
 ```bash
-sudo apt install -y build-essential cmake
+sudo apt install -y python3 build-essential
 g++ --version
 g++ -print-file-name=libstdc++.so
+pnpm install --frozen-lockfile
 pnpm session:build
 ```
 
-如果最后一个查询只返回 `libstdc++.so` 而不是完整存在的文件路径，检查所用 GCC 版本对应的 `g++` 和 `libstdc++-<版本>-dev` 包是否安装；例如 Ubuntu 24.04 的 GCC 13 对应 `g++-13`、`libstdc++-13-dev`。Fedora/RHEL 使用 `gcc-c++`；macOS 使用 Xcode Command Line Tools 的 Clang/libc++。推荐通过仓库脚本构建，脚本使用已有 Whisper bindings，普通构建无需另装 libclang 来重新生成 bindings。
+如果最后一个查询只返回 `libstdc++.so` 而不是完整存在的文件路径，检查所用 GCC 版本对应的 `g++` 和 `libstdc++-<版本>-dev` 包是否安装；例如 Ubuntu 24.04 的 GCC 13 对应 `g++-13`、`libstdc++-13-dev`。Fedora/RHEL 使用 `gcc-c++`；macOS 使用 Xcode Command Line Tools 的 Clang/libc++。会话运行层不再编译 Rust、Whisper bindings，也不要求 CMake 或 libclang；如果自行从源码安装外部 whisper.cpp，请按该工具自身的构建要求准备环境。
 
 若启动时报 `libstdc++.so.6: cannot open shared object file`，则是**运行库**缺失；若报 `GLIBCXX_* not found`，则是编译与运行机器的 C++ 运行库版本不匹配。安装对应发行版的 C++ 运行库或在目标机器重新构建。不要提交系统库、主机路径或链接器临时配置；本机覆盖只能放入被忽略的 `.env` / `.dev-runtime`。
 
@@ -480,8 +482,8 @@ pnpm session:build
 
 - [ ] `git --version`、`node --version` 和 `pnpm --version` 均可执行；Node.js 满足 `^20.19.0 || >=22.12.0`，pnpm 为 `10.13.1`。
 - [ ] `curl`、`lsof`、`openssl` 可执行；Linux 使用 `restart-dev.sh` 时，`setsid` 也可执行。
-- [ ] 已运行 `pnpm install --frozen-lockfile`，且 `node-pty` 没有原生编译错误。
-- [ ] 默认启用会话模式，已安装 Rust stable、C/C++ 编译工具与 CMake；首次构建会花费较长时间。
+- [ ] 已运行 `pnpm install --frozen-lockfile`，且 `node-pty`、`better-sqlite3` 没有原生编译错误。
+- [ ] 默认启用会话模式，`pnpm session:check` / `pnpm session:build` 可完成 shared 与 TS 运行层构建。
 - [ ] 已执行 `cp .env.example .env`，并只在 `.env` 中填写本机路径、端口和通知接收者。
 - [ ] `.env` 仍被 Git 忽略，没有把 Token、SSH 私钥、App Secret 或个人飞书 ID 加入暂存区。
 - [ ] 后端端口和前端端口未被其他服务占用；默认分别为 `4000` 和 `8484`。
@@ -490,6 +492,7 @@ pnpm session:build
 按需功能：
 
 - [ ] **tmux 会话恢复**：`tmux -V` 可执行；本地和准备连接的 SSH 主机都已安装 tmux。
+- [ ] **语音输入**：已安装 whisper.cpp 的 `whisper-cli`，或在 `.env` 设置 `SESSION_WHISPER_BIN`；已下载模型并授予 HTTPS 页面麦克风权限。
 - [ ] **Coding Agent**：需要使用的 `codex`、`copilot` 或 `claude` 命令已加入 `PATH` 并完成登录；远端会话还需在远端主机安装。
 - [ ] **SSH 工作流**：`ssh -V` 可执行；可使用 `~/.ssh/config` 中的预设主机，也可在“新建会话 → 新增 SSH 连接”直接填写目标。请先确认本机 `ssh-agent`、SSH 配置或私钥能够免交互登录。
 - [ ] **可信 HTTPS**：已安装 `mkcert`，或配置自己的可信证书；手机和其他局域网设备已信任对应 CA。只接受 OpenSSL 自签警告可能导致 VS Code Web 的 Service Worker、图片或 webview 无法加载。
@@ -539,12 +542,12 @@ pnpm dev:restart
 脚本会：
 
 1. 校验依赖、配置和两个端口的进程归属；端口被其他仓库占用时直接退出。
-2. 在停止现有前后端之前编译 shared，并增量编译默认 Rust 会话运行层；失败时保留现有服务。
+2. 在停止现有前后端之前编译 shared 和默认 TypeScript 会话运行层；失败时保留现有服务。
 3. 捕获可迁移会话状态，重启本仓库的 Node 后端和 Vite 前端。
 4. 默认准备 HTTPS 开发证书；前端绑定 `0.0.0.0`，固定使用配置的端口。
 5. 检查前端、Node 网关和会话运行层，优先输出局域网地址、运行层状态及日志路径。
 
-已有 Rust 运行服务和 Agent 会继续复用。**编译成功不表示运行中的 Rust 已更新**：脚本会提示运行文件是否与磁盘产物不同，也可以单独运行 `pnpm session:status` 检查。更新流程及排错见 [启动与更新指南](docs/startup.md)。
+新建独立运行服务默认使用 `node packages/session-runtime/dist/main.js`。已有运行服务和 Agent 继续复用，包括迁移前的 legacy Rust 服务；**编译成功不表示正式运行服务已经切换**。`pnpm session:status` 会核对运行身份，TS 服务比较整套 JS 构建指纹，legacy 服务比较可执行文件身份。必须在 Agent 任务结束并确认安全窗口后安排显式切换；网关热更新不会自动替换存活运行层。需要自定义独立可执行程序时可设置 `SESSION_RUNTIME_BIN`，它不接受没有启动器的普通 JavaScript 文件。更新流程及排错见 [启动与更新指南](docs/startup.md)，完整迁移验收见 [迁移清单](docs/session-typescript-migration.md)。
 
 局域网访问示例：
 
@@ -557,7 +560,7 @@ https://10.30.0.22:8484
 ### 其他启动方式
 
 ```bash
-pnpm dev  # 先编译 shared / 默认 Rust，再在前台启动前后端
+pnpm dev  # 先编译 shared / 默认 TS 运行层，再在前台启动前后端
 
 # 或先准备，再在两个终端分别启动
 pnpm dev:prepare
@@ -747,7 +750,8 @@ memories/repo/            仓库级排障记忆，不参与产品运行
 ## 技术栈
 
 - **前端**：React 19、Vite、TypeScript、xterm.js。
-- **后端**：Fastify、`@fastify/websocket`、node-pty、ssh2。
+- **后端**：TypeScript / Node.js、Fastify、`@fastify/websocket`、node-pty、ssh2。
+- **会话运行层**：独立 TypeScript / Node.js 进程，better-sqlite3、Codex app-server、Claude SDK / CLI、ACP；语音由外部 whisper.cpp 执行。
 - **终端**：本地 PTY、SSH PTY、tmux attach/scan/control。
 - **文件**：Node.js 本地文件系统 + SSH/SFTP。
 - **编辑器**：code-server / openvscode-server + `/vscode/` 代理。
@@ -757,14 +761,16 @@ memories/repo/            仓库级排障记忆，不参与产品运行
 ## 开发与验证
 
 ```bash
-pnpm dev          # 自动编译 shared / 默认 Rust，前台启动前后端
-pnpm dev:restart  # 编译成功后安全重启前后端，复用 Rust 运行服务
+pnpm dev          # 自动编译 shared / 默认 TS 运行层，前台启动前后端
+pnpm dev:restart  # 编译成功后安全重启前后端，复用已有独立运行服务
 pnpm dev:prepare  # 只准备构建，不重启服务
 pnpm session:status # 检查会话健康与本地运行文件版本
-pnpm session:build  # 单独构建 Rust；不激活已有运行进程
-pnpm build        # 构建 shared / server / web
+pnpm session:build  # 构建 shared 和 TS 运行层；不替换已有运行进程
+pnpm session:check  # 构建 shared 后检查 TS 运行层类型
+pnpm session:test   # 构建 shared 后运行 TS 运行层测试
+pnpm build        # 依次构建 shared / session-runtime / server / web
 pnpm check        # 类型检查并构建
-pnpm test         # workspace 单元/集成测试 + scripts 测试
+pnpm test         # 先构建 shared，再运行 workspace 与 scripts 测试
 pnpm e2e          # Playwright E2E
 pnpm format       # 格式化 workspace
 ```

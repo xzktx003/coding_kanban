@@ -50,3 +50,46 @@ test("runtime failures remain distinct from gateway availability", async () => {
   assert.equal(result.state, "unavailable");
   assert.match(result.error, /503/);
 });
+
+test("legacy default remains visible as legacy during TypeScript migration", async () => {
+  const options = fake();
+  options.env = { SERVER_PORT: "45678" };
+  const result = await sessionRuntimeStatus(options);
+  assert.equal(result.pid, 123);
+  assert.equal(result.runtime, "legacy");
+  assert.equal(result.binaryState, "current");
+});
+
+test("TS status verifies executable plus entrypoint and compares the complete JS build", async () => {
+  const entrypoint = "/fixture/packages/session-runtime/dist/main.js";
+  const options = fake();
+  options.env = { SERVER_PORT: "45678" };
+  options.readFile = (path) =>
+    path.endsWith("runtime.json")
+      ? JSON.stringify({
+          pid: 123,
+          port: 45679,
+          instance: "owned",
+          binary: process.execPath,
+          entrypoint,
+          buildFingerprint: "same",
+        })
+      : `${process.execPath}\0${entrypoint}\0--port\0${45679}`;
+  options.fingerprint = () => "same";
+  assert.equal((await sessionRuntimeStatus(options)).binaryState, "current");
+  options.fingerprint = () => "changed";
+  const result = await sessionRuntimeStatus(options);
+  assert.equal(result.runtime, "typescript");
+  assert.equal(result.binaryState, "older");
+  options.readFile = (path) =>
+    path.endsWith("runtime.json")
+      ? JSON.stringify({
+          pid: 123,
+          instance: "owned",
+          binary: process.execPath,
+          entrypoint,
+          buildFingerprint: "same",
+        })
+      : `${process.execPath}\0/other/main.js\0`;
+  assert.equal((await sessionRuntimeStatus(options)).binaryState, "unknown");
+});
