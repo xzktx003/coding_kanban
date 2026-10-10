@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { useCodexStore } from "@session/components/codex/stores";
 import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
 import { useSubagentFamily, useSubagentFamilySync } from "./hooks";
-import { useSubagentStore } from "./store";
+import { observeSubagents, useSubagentStore } from "./store";
 
 vi.mock("@session/lib/eventStream", () => ({
   openEventStream: vi.fn(() => () => {}),
@@ -162,24 +162,26 @@ it("keeps family history sync isolated from unrelated thread events", async () =
   );
   expect(renders).toBe(1);
 
-  act(() =>
-    useCodexStore.getState().addEvent("root", {
-      method: "item/started",
-      params: {
-        threadId: "root",
-        turnId: "turn",
-        item: {
-          id: "spawn",
-          type: "collabAgentToolCall",
-          tool: "spawnAgent",
-          senderThreadId: "root",
-          receiverThreadIds: ["child"],
-          agentsStates: { child: { status: "running" } },
-          status: "inProgress",
-        },
+  const spawnEvent = {
+    method: "item/started",
+    params: {
+      threadId: "root",
+      turnId: "turn",
+      item: {
+        id: "spawn",
+        type: "collabAgentToolCall",
+        tool: "spawnAgent",
+        senderThreadId: "root",
+        receiverThreadIds: ["child"],
+        agentsStates: { child: { status: "running" } },
+        status: "inProgress",
       },
-    } as any),
-  );
+    },
+  } as any;
+  act(() => {
+    observeSubagents(spawnEvent);
+    useCodexStore.getState().addEvent("root", spawnEvent);
+  });
   await waitFor(() =>
     expect(useSubagentStore.getState().nodes.child?.parentId).toBe("root"),
   );

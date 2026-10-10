@@ -47,7 +47,7 @@ it("keeps a message reading anchor stable when older history is prepended", () =
     buildThreadRows([message])[0].key,
   );
 });
-it("keeps one streaming message, commands and warnings while excluding protocol-only events", () => {
+it("keeps one streaming message and warnings while excluding protocol-only events", () => {
   const rows = buildThreadRows([
     event("thread/status/changed", {}),
     event("item/started", { item: { type: "agentMessage", id: "a" } }),
@@ -61,7 +61,7 @@ it("keeps one streaming message, commands and warnings while excluding protocol-
   expect(rows[0].item.kind).toBe("event");
   expect(rows[1].key).toBe("event-4");
 });
-it("indexes rollback counts and scopes file-summary context to its turn", () => {
+it("indexes rollback counts while keeping tool-only diff summaries hidden", () => {
   const rows = buildThreadRows([
     event("item/started", {
       turnId: "a",
@@ -92,18 +92,19 @@ it("indexes rollback counts and scopes file-summary context to its turn", () => 
         row.item.event.params.turnId === "b",
     )?.context?.rollbackTurns,
   ).toBe(1);
-  const summary = rows.find(
-    (row) =>
-      row.item.kind === "event" && row.item.event.method === "turn/completed",
-  );
-  expect(summary?.context?.events).toHaveLength(3);
-  expect(summary?.context?.eventIndex).toBe(2);
   expect(
     rows.filter(
       (row) =>
         row.item.kind === "event" && row.item.event.method === "turn/completed",
     ),
-  ).toHaveLength(1);
+  ).toHaveLength(0);
+  expect(
+    rows.some(
+      (row) =>
+        row.item.kind === "event" &&
+        row.item.event.method === "turn/diff/updated",
+    ),
+  ).toBe(false);
 });
 it("does not turn a rename notification into a chat message", () => {
   expect(

@@ -1,3 +1,4 @@
+import { withoutToolTranscriptEvents } from "./codexTranscriptVisibility";
 import { useCodexStore } from "../components/codex/stores";
 import { isIgnoredTranscriptEvent } from "../components/codex/stores/eventUtils";
 import { useSubagentStore } from "../features/subagents/store";
@@ -125,12 +126,17 @@ function compactObservedHiddenTranscriptEvents() {
     let events = state.events;
     for (const [id, threadEvents] of Object.entries(state.events)) {
       if (!isObservedCodexThread(id)) continue;
-      const visibleEvents = threadEvents.filter(
+      const visibleEvents = withoutToolTranscriptEvents(threadEvents).filter(
         (event) => !isIgnoredTranscriptEvent(event),
       );
-      if (visibleEvents.length === threadEvents.length) continue;
+      if (
+        visibleEvents.length === threadEvents.length &&
+        visibleEvents.every((event, index) => event === threadEvents[index])
+      )
+        continue;
       if (events === state.events) events = { ...state.events };
       events[id] = visibleEvents;
+      cachedTranscriptBaselines.delete(id);
     }
     return events === state.events ? state : { events };
   });

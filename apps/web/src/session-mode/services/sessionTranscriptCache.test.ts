@@ -8,6 +8,14 @@ import {
 } from "./sessionTranscriptCache";
 import { invalidateTranscriptCache } from "./sessionCacheState";
 import type { ServerNotification } from "../bindings";
+const visibleReply = {
+  method: "item/completed",
+  params: {
+    threadId: "cache",
+    turnId: "t",
+    item: { type: "agentMessage", id: "final", text: "Final reply" },
+  },
+} as ServerNotification;
 it("does not restore or persist hidden output payloads alongside the final result", async () => {
   await writeTranscriptCache({
     key: "codex:hidden-output",
@@ -34,15 +42,14 @@ it("does not restore or persist hidden output payloads alongside the final resul
           },
         },
       } as any,
+      visibleReply,
     ],
   });
   const cached = await readTranscriptCache("codex:hidden-output");
   expect(cached?.events?.map((event) => event.method)).toEqual([
     "item/completed",
   ]);
-  expect((cached?.events?.[0].params as any).item.aggregatedOutput).toBe(
-    "complete output",
-  );
+  expect((cached?.events?.[0].params as any).item.text).toBe("Final reply");
 });
 it("filters hidden payloads from records written by an older client", async () => {
   const events = [
@@ -59,6 +66,18 @@ it("filters hidden payloads from records written by an older client", async () =
         delta: "legacy hidden output",
       },
     })),
+    {
+      method: "item/completed",
+      params: {
+        threadId: "legacy-output",
+        turnId: "t",
+        item: {
+          type: "commandExecution",
+          id: "legacy-tool",
+          aggregatedOutput: "old tool output",
+        },
+      },
+    },
     {
       method: "item/completed",
       params: {
@@ -180,7 +199,7 @@ it("bounds persisted event data and strips duplicated turn item bodies", async (
   expect((cached!.events!.at(-1)!.params as any).turn.items).toEqual([]);
 });
 
-it("precompacts oversized codex tool payloads before serializing cache records", async () => {
+it("drops oversized codex tool payloads before serializing cache records", async () => {
   const originalStringify = JSON.stringify;
   let stringifyCalls = 0;
   let largestSerialized = 0;
@@ -207,7 +226,7 @@ it("precompacts oversized codex tool payloads before serializing cache records",
     await writeTranscriptCache({
       key: "codex:oversized-tool-cache",
       savedAt: Date.now(),
-      events,
+      events: [...events, visibleReply],
     });
   } finally {
     JSON.stringify = originalStringify;
@@ -215,7 +234,7 @@ it("precompacts oversized codex tool payloads before serializing cache records",
   expect(stringifyCalls).toBeLessThanOrEqual(1);
   expect(largestSerialized).toBeLessThan(2 * 1024 * 1024);
   const cached = await readTranscriptCache("codex:oversized-tool-cache");
-  expect(cached?.events?.length).toBeGreaterThan(0);
+  expect(cached?.events).toEqual([visibleReply]);
   expect(cached?.bytes).toBeLessThanOrEqual(2 * 1024 * 1024);
 });
 
@@ -330,12 +349,12 @@ it("queues only bounded cache records for repeated oversized sources", async () 
     const first = writeTranscriptCache({
       key: "codex:blocked-cache",
       savedAt: 20,
-      events: hugeEvents("first"),
+      events: [...hugeEvents("first"), visibleReply],
     });
     const pending = writeTranscriptCache({
       key: "codex:blocked-cache",
       savedAt: 21,
-      events: hugeEvents("latest"),
+      events: [...hugeEvents("latest"), visibleReply],
     });
     await Promise.all([first, pending]);
   } finally {
@@ -345,6 +364,7 @@ it("queues only bounded cache records for repeated oversized sources", async () 
   expect(Math.max(...serializedLengths)).toBeLessThan(2 * 1024 * 1024);
   const cached = await readTranscriptCache("codex:blocked-cache");
   expect(cached?.savedAt).toBe(21);
+  expect(cached?.events).toEqual([visibleReply]);
   expect(cached?.bytes).toBeLessThanOrEqual(2 * 1024 * 1024);
 });
 

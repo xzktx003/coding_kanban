@@ -1,5 +1,7 @@
 # Coding Kanban Project Overview
 
+Codex 会话聊天只保留对话与必要交互，工具调用及命令/部署日志不进入聊天显示缓存；审批、问题回答、任务状态和独立子 Agent 面板仍正常工作。完整原生记录与终端模式不受此显示策略影响。
+
 功能依赖统一列在 [README](../README.md#各功能的依赖)，区分后端系统工具、随前端打包的预览库和浏览器权限。终端 Markdown 图片无需系统转换器，支持受目录边界限制的飞书 `@./` 导出引用，详见 [图片解析约定](markdown-image-preview.md)。
 
 开发启动统一使用 `pnpm dev:restart`：停止前后端前完成依赖、端口归属检查及 shared / 默认 Rust 构建；保留运行中的会话服务与 Agent，分别报告网关和会话健康。前台 `pnpm dev` 共用构建准备。Rust 产物是否已激活可用 `pnpm session:status` 查看，详见 [启动与更新指南](startup.md)。

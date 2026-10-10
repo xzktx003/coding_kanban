@@ -841,7 +841,7 @@ it("recovers a budget-trimmed transcript before using the opaque native cursor",
       .events.budgeted.some((event: any) => event.params?.turnId === "turn-0"),
   ).toBe(true);
 });
-it("released tool item pages preserve a running turn and its existing messages", async () => {
+it("released tool item pages remain hidden while preserving the running turn and messages", async () => {
   const timing = {
     live: {
       turnId: "running",
@@ -908,7 +908,52 @@ it("released tool item pages preserve a running turn and its existing messages",
     useCodexStore
       .getState()
       .events.live.some((e: any) => e.params.item?.id === "older-tool"),
-  ).toBe(true);
+  ).toBe(false);
   expect(api.threadStart).not.toHaveBeenCalled();
   expect(api.turnStart).not.toHaveBeenCalled();
+});
+
+it("keeps historical subagent discovery outside the tool-free chat transcript", async () => {
+  const { useSubagentStore } = await import("../features/subagents/store");
+  useSubagentStore.setState({ nodes: {}, families: {}, selection: {} });
+  const id = "tool-free-parent";
+  const tool = {
+    type: "collabAgentToolCall",
+    id: "spawn",
+    tool: "spawnAgent",
+    receiverThreadIds: ["tool-free-child"],
+    agentsStates: {},
+    prompt: "Check tests",
+  };
+  api.threadRead.mockResolvedValueOnce({
+    thread: {
+      id,
+      turns: [
+        {
+          id: "work",
+          status: "completed",
+          items: [tool, { type: "agentMessage", id: "reply", text: "Done" }],
+          startedAt: 1,
+          completedAt: 2,
+          durationMs: 1000,
+          error: null,
+        },
+      ],
+    },
+  });
+  useCodexStore.setState({
+    currentThreadId: id,
+    events: {},
+    threads: [],
+    historyLoadedMap: {},
+    turnTimingMap: {},
+  });
+  await codexService.loadThreadHistory(id);
+  expect(
+    useSubagentStore.getState().nodes["tool-free-child"]?.createdInTurn,
+  ).toBe("work");
+  expect(JSON.stringify(useCodexStore.getState().events[id])).not.toContain(
+    "collabAgentToolCall",
+  );
+  expect(JSON.stringify(useCodexStore.getState().events[id])).toContain("Done");
 });

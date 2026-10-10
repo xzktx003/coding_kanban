@@ -186,7 +186,6 @@ test("real event bridge discards unrelated bodies and hidden output bursts", asy
   ).toEqual([
     { method: "item/completed", text: "观察中的消息", output: undefined },
     { method: "item/completed", text: "最终完整回复", output: undefined },
-    { method: "item/completed", text: undefined, output: "完整命令结果" },
   ]);
   await page.evaluate(async () => {
     const path = "/src/session-mode/stores/useAgentCenterStore.ts";

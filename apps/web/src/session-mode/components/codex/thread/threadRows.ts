@@ -1,3 +1,4 @@
+import { withoutToolTranscriptEvents } from "@session/services/codexTranscriptVisibility";
 import type { ServerNotification } from "@session/bindings";
 import {
   normalizeQuestionEvents,
@@ -38,7 +39,9 @@ function turnIdOf(event: ServerNotification): string | undefined {
 
 /** Index once per history update; row renderers never scan the entire transcript. */
 export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
-  events = normalizeQuestionEvents(normalizeUserMessageEvents(events));
+  events = normalizeQuestionEvents(
+    normalizeUserMessageEvents(withoutToolTranscriptEvents(events)),
+  );
   const laterTurns = new Set<string>();
   const rollbackCounts = new Map<number, number>();
   for (let i = events.length - 1; i >= 0; i--) {

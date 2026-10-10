@@ -1,5 +1,7 @@
 # Coding Kanban 功能清单
 
+- Codex 会话对话窗口不展示工具调用、命令/部署输出、MCP 结果、文件 diff 和子 Agent 调用行；实时消息、历史恢复与浏览器缓存统一过滤，保留用户消息、助手回复、计划、提问、审批和任务状态。独立子 Agent 面板仍更新，原生历史和终端完整记录保持原有行为。见 [会话内存与工具消息过滤](session-browser-memory.md)。
+
 - 终端模式 Markdown 图片：兼容标准文档相对路径与飞书导出的 `@./` 引用，后者只在允许目录内按最近祖先查找；桌面/手机跨项目浏览时跟随所打开文档的 Git 项目目录，分段保留资源目录。本地和 SSH 共用路径约束、真实路径检查与 16 MiB 上限。补齐 AVIF/BMP/ICO MIME；无需图片转换软件。依赖表见 README，解析边界见 [Markdown 图片预览](markdown-image-preview.md)。
 
 - 启动准备：`pnpm dev` / `pnpm dev:restart` 自动编译 shared 与默认 Rust；停服务前检查端口归属和构建结果。`pnpm session:status` 单独核对会话健康和本地运行文件，旧进程复用时明确提示新产物尚未激活。见 [启动指南](startup.md)。

@@ -1,3 +1,4 @@
+import { withoutToolTranscriptEvents } from "./codexTranscriptVisibility";
 import type { ServerNotification } from "../bindings";
 import type { Thread } from "../bindings/v2";
 import type { CCMessage } from "../components/cc/types/messages";
@@ -90,10 +91,11 @@ export async function readTranscriptCache(
       cached.savedAt > cacheInvalidatedAt(key) &&
       (Array.isArray(cached.events) || Array.isArray(cached.messages))
     ) {
-      if (cached.events?.some(isIgnoredTranscriptEvent))
+      if (cached.events)
         return {
           ...cached,
-          events: cached.events.filter(
+          ...(cached.thread ? { thread: { ...cached.thread, turns: [] } } : {}),
+          events: withoutToolTranscriptEvents(cached.events).filter(
             (event) => !isIgnoredTranscriptEvent(event),
           ),
         };
@@ -199,7 +201,9 @@ function boundedEvents(
 ): ServerNotification[] | undefined {
   if (!events) return;
   const window = stripTurnItemBodies(
-    events.filter((event) => !isIgnoredTranscriptEvent(event)),
+    withoutToolTranscriptEvents(events).filter(
+      (event) => !isIgnoredTranscriptEvent(event),
+    ),
   ).slice(-CACHE_RECORD_EVENT_LIMIT);
   const estimatedLimit = Math.max(
     0,

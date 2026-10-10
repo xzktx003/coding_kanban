@@ -1,3 +1,4 @@
+import { withoutToolTranscriptEvent } from "@session/services/codexTranscriptVisibility";
 import { acceptTurnStart } from "@session/utils/codexRuntimeState";
 import type { StateCreator } from "zustand";
 import type { ServerNotification } from "@session/bindings";
@@ -5,6 +6,7 @@ import type { ThreadGoal, ThreadTokenUsage } from "@session/bindings/v2";
 import {
   appendStreamingTextPreview,
   createStreamingTextPreview,
+  copyTranscriptText,
   estimateTranscriptBytes,
   materializeStreamingTextPreview,
   STREAMING_TEXT_SEGMENT_CHARS,
@@ -32,11 +34,13 @@ function appendTextSegments(
     offset += STREAMING_TEXT_SEGMENT_CHARS
   )
     nextSegments.push(
-      combined.slice(offset, offset + STREAMING_TEXT_SEGMENT_CHARS),
+      copyTranscriptText(
+        combined.slice(offset, offset + STREAMING_TEXT_SEGMENT_CHARS),
+      ),
     );
   return {
     segments: nextSegments,
-    current: combined.slice(completeLength),
+    current: copyTranscriptText(combined.slice(completeLength)),
   };
 }
 
@@ -61,6 +65,9 @@ export const createEventsSlice: StateCreator<
   goalEnabled: false,
 
   addEvent: (threadId: string, event: ServerNotification) => {
+    const visibleEvent = withoutToolTranscriptEvent(event);
+    if (!visibleEvent) return;
+    event = visibleEvent;
     set((state: CodexStore) => {
       const existingEvents = state.events[threadId] || [];
       let filteredEvents = existingEvents;
@@ -129,22 +136,6 @@ export const createEventsSlice: StateCreator<
           } as ServerNotification);
         clearStreaming();
       }
-      // Replayed starts cannot regress a finalized snapshot or its status maps.
-      // Item identity includes the turn so a later execution remains independent.
-      if (
-        event.method === "item/started" &&
-        event.params.item.type === "commandExecution" &&
-        existingEvents.some(
-          (previous) =>
-            previous.method === "item/completed" &&
-            previous.params.threadId === event.params.threadId &&
-            previous.params.turnId === event.params.turnId &&
-            previous.params.item.id === event.params.item.id &&
-            previous.params.item.type === "commandExecution",
-        )
-      )
-        return state;
-
       // Each retry emits another error, so keeping them out of the transcript
       // is what stops "Reconnecting... 1/5" from stacking up five lines.
       let isRetryNotice = false;
@@ -287,9 +278,6 @@ export const createEventsSlice: StateCreator<
         }
       }
 
-      // Update command status map
-      let commandStatusMap = state.commandStatusMap;
-      let commandDurationMap = state.commandDurationMap;
       let goalMap = state.goalMap;
       if (event.method === "thread/goal/updated") {
         goalMap = { ...goalMap, [threadId]: event.params.goal };
@@ -297,27 +285,6 @@ export const createEventsSlice: StateCreator<
         const newGoalMap = { ...goalMap };
         delete newGoalMap[threadId];
         goalMap = newGoalMap;
-      }
-      if (
-        event.method === "item/started" &&
-        event.params.item?.type === "commandExecution"
-      ) {
-        commandStatusMap = {
-          ...commandStatusMap,
-          [event.params.item.id]: event.params.item.status,
-        };
-      } else if (
-        event.method === "item/completed" &&
-        event.params.item?.type === "commandExecution"
-      ) {
-        commandStatusMap = {
-          ...commandStatusMap,
-          [event.params.item.id]: event.params.item.status,
-        };
-        commandDurationMap = {
-          ...commandDurationMap,
-          [event.params.item.id]: event.params.item.durationMs,
-        };
       }
 
       return {
@@ -328,8 +295,6 @@ export const createEventsSlice: StateCreator<
         threadStatusMap,
         turnTimingMap,
         currentTurnId,
-        commandStatusMap,
-        commandDurationMap,
         retryNoticeMap,
         goalMap,
       };

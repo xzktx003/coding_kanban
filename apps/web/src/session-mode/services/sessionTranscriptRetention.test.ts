@@ -459,17 +459,9 @@ it("filters legacy hidden payloads from observed HMR caches without rewriting vi
   const events = useCodexStore.getState().events.legacy ?? [];
   expect(events.map((event) => event.method)).toEqual([
     "item/agentMessage/delta",
-    "item/completed",
   ]);
   expect(events[0]).toMatchObject({
     params: { delta: "visible body" },
   });
-  expect(events[1]).toMatchObject({
-    params: {
-      item: {
-        type: "commandExecution",
-        aggregatedOutput: "final output",
-      },
-    },
-  });
+  expect(JSON.stringify(events)).not.toContain("final output");
 });

@@ -206,4 +206,193 @@ test("renders live Codex text outside transcript history until final markdown ar
       };
     }),
   ).toEqual({ methods: ["item/completed"], streaming: undefined });
+
+  // Exercise the actual event bridge/store/visible transcript, not just the
+  // compaction helper: Codex work mixes large command results and thinking.
+  const mixedCdp = await page.context().newCDPSession(page);
+  await mixedCdp.send("HeapProfiler.collectGarbage");
+  const mixedBefore = (await mixedCdp.send("Runtime.getHeapUsage")).usedSize;
+  const samples: number[] = [];
+  for (let batch = 0; batch < 3; batch++) {
+    await page.evaluate(async (batchIndex) => {
+      const w = window as any;
+      for (let index = 0; index < 8; index++) {
+        const id = `mixed-${batchIndex}-${index}`;
+        const params = { threadId: "stream-memory", turnId: "stream-turn" };
+        w.__emitMemory({
+          method: "item/reasoning/summaryTextDelta",
+          params: {
+            ...params,
+            itemId: `${id}-reasoning`,
+            summaryIndex: 0,
+            delta: `Checking ${id}`,
+          },
+        });
+        w.__emitMemory({
+          method: "item/completed",
+          params: {
+            ...params,
+            item: {
+              type: "reasoning",
+              id: `${id}-reasoning`,
+              summary: [`Checked ${id}`],
+              content: [],
+            },
+          },
+        });
+        w.__emitMemory({
+          method: "item/plan/delta",
+          params: {
+            ...params,
+            itemId: "mixed-plan",
+            delta: `\n- Checked ${id}`,
+          },
+        });
+        const item = {
+          type: "commandExecution",
+          id,
+          command: `echo ${id}`,
+          cwd: "/fixture",
+          commandActions: [{ type: "unknown", command: `echo ${id}` }],
+          source: "agent",
+          processId: null,
+          status: "inProgress",
+          aggregatedOutput: null,
+          exitCode: null,
+          durationMs: null,
+        };
+        w.__emitMemory({ method: "item/started", params: { ...params, item } });
+        w.__emitMemory({
+          method: "item/completed",
+          params: {
+            ...params,
+            item: {
+              ...item,
+              status: "completed",
+              exitCode: 0,
+              durationMs: 1,
+              aggregatedOutput: `${id}\n${"x".repeat(4 * 1024 * 1024)}`,
+            },
+          },
+        });
+      }
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+    }, batch);
+    samples.push((await mixedCdp.send("Runtime.getHeapUsage")).usedSize);
+  }
+  await mixedCdp.send("HeapProfiler.collectGarbage");
+  const mixedAfter = (await mixedCdp.send("Runtime.getHeapUsage")).usedSize;
+  const outputs = await page.evaluate(() => {
+    const events = (window as any).__memoryStore.getState().events[
+      "stream-memory"
+    ];
+    return events
+      .filter(
+        (event: any) =>
+          event.method === "item/completed" &&
+          event.params.item.type === "commandExecution",
+      )
+      .map((event: any) => event.params.item.aggregatedOutput.length);
+  });
+  expect(outputs).toHaveLength(0);
+  await expect(page.getByText("echo mixed-2-7", { exact: true })).toHaveCount(
+    0,
+  );
+  expect(mixedAfter - mixedBefore).toBeLessThan(16 * 1024 * 1024);
+  console.info(
+    JSON.stringify({
+      kind: "mixed-notification-bridge",
+      mixedBefore,
+      samples,
+      mixedAfter,
+    }),
+  );
+  await mixedCdp.detach();
 });
+
+for (const kind of [
+  "commandExecution",
+  "agentMessage",
+  "mcpToolCall",
+  "streamingPreview",
+] as const) {
+  test(`compacted ${kind} outputs release their original oversized strings`, async ({
+    page,
+  }) => {
+    await installSessionUxFixture(page, 1);
+    await page.goto("/?mode=session", { waitUntil: "networkidle" });
+    await page.evaluate(async () => {
+      const budget =
+        await import("/src/session-mode/services/codexTranscriptMemoryBudget.ts");
+      (window as any).__compactMemoryPayload = budget.compactCodexEventPayload;
+      (window as any).__createMemoryPreview = budget.createStreamingTextPreview;
+    });
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("HeapProfiler.collectGarbage");
+    const before = (await cdp.send("Runtime.getHeapUsage")).usedSize;
+    const retainedChars = await page.evaluate((kind) => {
+      const w = window as any;
+      w.__boundedToolOutputs = [];
+      for (let index = 0; index < 16; index++) {
+        // JSON parsing models transport input and ensures a distinct flat source.
+        const output = JSON.parse(
+          JSON.stringify("x".repeat(4 * 1024 * 1024) + index),
+        );
+        const fields =
+          kind === "commandExecution"
+            ? { aggregatedOutput: output }
+            : kind === "agentMessage"
+              ? { text: output }
+              : {
+                  arguments: {},
+                  result: { content: [{ type: "text", text: output }] },
+                };
+        w.__boundedToolOutputs.push(
+          kind === "streamingPreview"
+            ? w.__createMemoryPreview(output)
+            : w.__compactMemoryPayload({
+                method: "item/completed",
+                params: {
+                  threadId: "memory-tools",
+                  turnId: "turn",
+                  item: { type: kind, id: `tool-${index}`, ...fields },
+                },
+              }),
+        );
+      }
+      return w.__boundedToolOutputs.reduce((total: number, event: any) => {
+        if (kind === "streamingPreview")
+          return (
+            total +
+            event.head.join("").length +
+            event.tail.join("").length +
+            event.tailCurrent.length
+          );
+        const item = event.params.item;
+        return (
+          total +
+          (item.aggregatedOutput ?? item.text ?? item.result.content[0].text)
+            .length
+        );
+      }, 0);
+    }, kind);
+    await cdp.send("HeapProfiler.collectGarbage");
+    const retainedBytes =
+      (await cdp.send("Runtime.getHeapUsage")).usedSize - before;
+    await test.info().attach("tool-output-retention.json", {
+      body: JSON.stringify({ kind, retainedChars, retainedBytes }),
+      contentType: "application/json",
+    });
+    expect(retainedChars).toBeLessThanOrEqual(
+      16 *
+        (kind === "commandExecution" || kind === "mcpToolCall" ? 64 : 256) *
+        1024,
+    );
+    // UTF-16 previews can need two bytes per character; leave 4 MiB for page bookkeeping.
+    expect(retainedBytes).toBeLessThan(retainedChars * 2 + 4 * 1024 * 1024);
+    console.info(JSON.stringify({ kind, retainedChars, retainedBytes }));
+    await cdp.detach();
+  });
+}

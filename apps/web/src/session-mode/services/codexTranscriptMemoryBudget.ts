@@ -73,14 +73,25 @@ export interface StreamingTextPreview {
   tailCurrent: string;
 }
 
+// V8 slices/concatenations can retain the entire source string. Copy only the
+// bounded display text; split/join preserves UTF-16 (including lone surrogates).
+// Do not replace this with slice(), substring(), or a prefix-and-slice trick.
+export function copyTranscriptText(text: string): string {
+  return text.split("").join("");
+}
+
 function splitStreamingText(text: string) {
   const segments: string[] = [];
   let offset = 0;
   while (text.length - offset >= STREAMING_TEXT_SEGMENT_CHARS) {
-    segments.push(text.slice(offset, offset + STREAMING_TEXT_SEGMENT_CHARS));
+    segments.push(
+      copyTranscriptText(
+        text.slice(offset, offset + STREAMING_TEXT_SEGMENT_CHARS),
+      ),
+    );
     offset += STREAMING_TEXT_SEGMENT_CHARS;
   }
-  return { segments, current: text.slice(offset) };
+  return { segments, current: copyTranscriptText(text.slice(offset)) };
 }
 
 export function createStreamingTextPreview(text: string): StreamingTextPreview {
@@ -116,8 +127,12 @@ export function appendStreamingTextPreview(
     offset < completeLength;
     offset += STREAMING_TEXT_SEGMENT_CHARS
   )
-    tail.push(combined.slice(offset, offset + STREAMING_TEXT_SEGMENT_CHARS));
-  let tailCurrent = combined.slice(completeLength);
+    tail.push(
+      copyTranscriptText(
+        combined.slice(offset, offset + STREAMING_TEXT_SEGMENT_CHARS),
+      ),
+    );
+  let tailCurrent = copyTranscriptText(combined.slice(completeLength));
   let excess =
     tail.reduce((length, segment) => length + segment.length, 0) +
     tailCurrent.length -
@@ -127,11 +142,11 @@ export function appendStreamingTextPreview(
       excess -= tail[0].length;
       tail.shift();
     } else {
-      tail[0] = tail[0].slice(excess);
+      tail[0] = copyTranscriptText(tail[0].slice(excess));
       excess = 0;
     }
   }
-  if (excess > 0) tailCurrent = tailCurrent.slice(excess);
+  if (excess > 0) tailCurrent = copyTranscriptText(tailCurrent.slice(excess));
   return {
     head: preview.head,
     tail,
@@ -169,7 +184,9 @@ function estimateValue(value: unknown, seen: WeakSet<object>): number {
 const truncateText = (text: string, limit: number): string => {
   if (text.length <= limit) return text;
   const marker = `${TRUNCATION_MARKER}${text.length - limit} chars]`;
-  return `${text.slice(0, Math.max(0, limit - marker.length))}${marker}`;
+  return copyTranscriptText(
+    `${text.slice(0, Math.max(0, limit - marker.length))}${marker}`,
+  );
 };
 
 const truncateDisplayText = (text: string, limit: number): string => {
@@ -189,7 +206,9 @@ const truncateDisplayText = (text: string, limit: number): string => {
       : firstMarker >= 0
         ? text.slice(firstMarker + DISPLAY_PREVIEW_MARKER.length)
         : text;
-  return `${head.slice(0, headLimit)}${DISPLAY_PREVIEW_MARKER}${tail.slice(-tailLimit)}`;
+  return copyTranscriptText(
+    `${head.slice(0, headLimit)}${DISPLAY_PREVIEW_MARKER}${tail.slice(-tailLimit)}`,
+  );
 };
 
 type MutableRecord = Record<string, unknown>;

@@ -1,9 +1,10 @@
+import { isToolTranscriptItem } from "@session/services/codexTranscriptVisibility";
 import type { ServerNotification } from "@session/bindings";
 import type { Thread } from "@session/bindings/v2";
 
 /**
  * Converts thread history (turns with items) to ChatEvents for display
- * Keeps lifecycle events needed by user/tool rows, with one event for finalized
+ * Keeps user conversation and turn lifecycle events, with one event for finalized
  * agent messages and body-light boundaries for finalized turns.
  */
 export function convertThreadHistoryToEvents(
@@ -17,32 +18,7 @@ export function convertThreadHistoryToEvents(
 
     // Process each item in the turn
     for (const item of turn.items) {
-      // Native command history already is the current item snapshot. Recreating
-      // both lifecycle events retains two display records for the same tool.
-      if (item.type === "commandExecution") {
-        events.push(
-          item.status === "inProgress"
-            ? {
-                method: "item/started",
-                params: {
-                  item,
-                  threadId: thread.id,
-                  turnId: turn.id,
-                  startedAtMs: 0,
-                },
-              }
-            : {
-                method: "item/completed",
-                params: {
-                  item,
-                  threadId: thread.id,
-                  turnId: turn.id,
-                  completedAtMs: 0,
-                },
-              },
-        );
-        continue;
-      }
+      if (isToolTranscriptItem(item)) continue;
       // Add item/started event. Completed agent messages render from their
       // final item/completed snapshot; keeping a started copy only retains a
       // redundant reference to the same text/questions.
@@ -80,7 +56,9 @@ export function convertThreadHistoryToEvents(
         threadId: thread.id,
         turn: {
           ...turn,
-          items: isCompletedTurn ? [] : turn.items,
+          items: isCompletedTurn
+            ? []
+            : turn.items.filter((item) => !isToolTranscriptItem(item)),
         },
       },
     });

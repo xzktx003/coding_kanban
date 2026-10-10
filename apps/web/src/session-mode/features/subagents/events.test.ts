@@ -1,7 +1,8 @@
 import { expect, it } from "vitest";
 import { buildThreadRows } from "@session/components/codex/thread/threadRows";
 import { observeSubagents, useSubagentStore } from "./store";
-it("one collab item progresses from started to completed without duplicate rows", () => {
+it("observes collab progress without rendering tool rows in the chat transcript", () => {
+  useSubagentStore.setState({ nodes: {}, revision: 0 });
   const item = {
     id: "spawn",
     type: "collabAgentToolCall",
@@ -20,8 +21,12 @@ it("one collab item progresses from started to completed without duplicate rows"
     method: "item/completed",
     params: { ...start.params, item: { ...item, status: "completed" } },
   };
-  expect(buildThreadRows([start]).length).toBe(1);
-  expect(buildThreadRows([start, done]).length).toBe(1);
+  observeSubagents(start);
+  observeSubagents(done);
+  expect(useSubagentStore.getState().nodes.child.parentId).toBe("root");
+  expect(useSubagentStore.getState().nodes.child.createdInTurn).toBe("turn");
+  expect(buildThreadRows([start]).length).toBe(0);
+  expect(buildThreadRows([start, done]).length).toBe(0);
 });
 it("activity reports do not grant direct input; native metadata confirms parent", () => {
   useSubagentStore.setState({ nodes: {}, revision: 0 });

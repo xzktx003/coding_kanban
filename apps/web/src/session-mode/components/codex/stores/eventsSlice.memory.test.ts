@@ -29,20 +29,97 @@ const command = (method: "item/started" | "item/completed", turnId = "turn") =>
       },
     },
   }) as any;
-it("a stale started replay cannot regress the completed command status maps", () => {
-  useCodexStore.getState().addEvent("thread", command("item/completed"));
+it("drops command events before they enter the retained transcript", () => {
   const before = useCodexStore.getState();
-  useCodexStore.getState().addEvent("thread", command("item/started"));
-  expect(useCodexStore.getState().commandStatusMap.cmd).toBe("completed");
-  expect(useCodexStore.getState().commandDurationMap.cmd).toBe(7);
-  expect(useCodexStore.getState()).toBe(before);
-});
-it("accepts a new turn even if its command reuses an older item id", () => {
+
   useCodexStore.getState().addEvent("thread", command("item/completed"));
-  useCodexStore
-    .getState()
-    .addEvent("thread", command("item/started", "new-turn"));
-  expect(useCodexStore.getState().commandStatusMap.cmd).toBe("inProgress");
+  useCodexStore.getState().addEvent("thread", command("item/started"));
+
+  expect(useCodexStore.getState()).toBe(before);
+  expect(useCodexStore.getState().events.thread).toBeUndefined();
+  expect(useCodexStore.getState().commandStatusMap).toEqual({});
+  expect(useCodexStore.getState().commandDurationMap).toEqual({});
+});
+
+it("strips nested tool payloads from completed turns while preserving final status", () => {
+  useCodexStore.getState().addEvent("thread", {
+    method: "turn/completed",
+    params: {
+      threadId: "thread",
+      turn: {
+        id: "turn",
+        status: "completed",
+        startedAt: 1,
+        completedAt: 2,
+        durationMs: 1000,
+        items: [
+          {
+            id: "cmd",
+            type: "commandExecution",
+            command: "test",
+            commandActions: [],
+            status: "completed",
+            aggregatedOutput: "x".repeat(1024 * 1024),
+            durationMs: 7,
+          },
+          {
+            id: "file",
+            type: "fileChange",
+            status: "applied",
+            changes: [
+              {
+                path: "/repo/a.ts",
+                type: "update",
+                oldText: "old",
+                newText: "y".repeat(1024 * 1024),
+              },
+            ],
+          },
+          {
+            id: "answer",
+            type: "agentMessage",
+            text: "done",
+            phase: null,
+            memoryCitation: null,
+          },
+        ],
+      },
+    },
+  } as any);
+
+  const state = useCodexStore.getState();
+  expect(state.events.thread).toHaveLength(2);
+  expect(state.events.thread[0]).toMatchObject({
+    method: "item/completed",
+    params: {
+      item: {
+        id: "answer",
+        type: "agentMessage",
+        text: "done",
+      },
+    },
+  });
+  expect((state.events.thread[1] as any).params.turn.items).toEqual([]);
+  expect(JSON.stringify(state.events.thread).includes("x".repeat(1024))).toBe(
+    false,
+  );
+  expect(JSON.stringify(state.events.thread).includes("y".repeat(1024))).toBe(
+    false,
+  );
+  expect((state.events.thread[0] as any).params.item).toEqual({
+    id: "answer",
+    type: "agentMessage",
+    text: "done",
+    phase: null,
+    memoryCitation: null,
+  });
+  expect(state.turnTimingMap.thread).toMatchObject({
+    turnId: "turn",
+    durationMs: 1000,
+    status: "completed",
+  });
+  expect(state.commandStatusMap).toEqual({});
+  expect(state.commandDurationMap).toEqual({});
 });
 
 it("keeps streaming assistant text outside the retained transcript and caps it", () => {

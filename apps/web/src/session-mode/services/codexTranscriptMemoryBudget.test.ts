@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ServerNotification } from "@session/bindings";
 import {
   compactCodexEventPayload,
+  copyTranscriptText,
   compactCodexTranscript,
   estimateTranscriptBytes,
   estimateTransientBytes,
@@ -565,3 +566,11 @@ describe("codex transcript memory budget", () => {
     }
   });
 });
+
+// Browser CDP tests cover physical retention; these guard exact UTF-16 fidelity.
+it.each(["", "中文😄e\u0301", "head\ud800middle\udc00tail", "a\u0000b"])(
+  "copies bounded transcript text without changing code units: %j",
+  (text) => {
+    expect(copyTranscriptText(text)).toBe(text);
+  },
+);

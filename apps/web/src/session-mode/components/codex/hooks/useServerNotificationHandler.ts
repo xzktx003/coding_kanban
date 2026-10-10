@@ -1,3 +1,4 @@
+import { isToolTranscriptEvent } from "@session/services/codexTranscriptVisibility";
 import { subagentParent } from "@agent-orchestrator/shared";
 import { isObservedCodexThread } from "@session/services/observedCodexThreads";
 import {
@@ -181,7 +182,8 @@ export function useServerNotificationHandler(
       } else if ("threadId" in payload.params) {
         threadId = payload.params.threadId;
       }
-      if (threadId && !isDeltaEvent(payload)) flushPendingDeltas(threadId);
+      if (threadId && !isDeltaEvent(payload) && !isToolTranscriptEvent(payload))
+        flushPendingDeltas(threadId);
 
       if (method === "account/updated") {
         void syncAccountState(true);
@@ -335,7 +337,7 @@ export function useServerNotificationHandler(
 
         // Lifecycle cleanup also runs after a task leaves display membership.
         // Only observed tasks retain transcript bodies and derived execution state.
-        if (!observed) return;
+        if (!observed || isToolTranscriptEvent(payload)) return;
         if (isDeltaEvent(payload)) {
           queueDelta(threadId, payload);
           return;

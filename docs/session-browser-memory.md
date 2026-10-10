@@ -119,3 +119,37 @@ Kanban 原先虽然有虚拟列表和原生历史分页，流式文本每个通�
 继续检查后发现，256 KiB 上限虽然限制了保留量，旧累积器仍在每次增量时拼接已生成全文；超限后还会反复复制整份首尾预览，产生与任务时长成正比的短命字符串分配。这会让堆/RSS 继续上行，尽管状态本身有上限。现改成 8 KiB 稳定文本段：预算内只追加当前小段；超出预算后首部段保持不变，只滚动维护尾部段。帧缓冲也只物化一次有界预览再交给 store，活动渲染不拼整段字符串。结束时需要保留中断回复才一次性合并段落。
 
 回归覆盖了 300 KiB 流式正文不进入历史数组、首段在尾部更新时保持引用、最终快照替换临时副本、活动期间绕过 Markdown parser，以及真实浏览器事件桥接。Chromium 页面接收 400 条、总计约 3.2 MiB 的 Codex delta；CDP 在五个批次边界采样的 V8 堆为：基线 30,588,972 字节、峰值 36,540,388 字节、强制 GC 后 32,983,980 字节。该隔离用例显示输入正文没有等量留存在 JS 堆里，但采样不等同连续峰值，也不测浏览器任务管理器的进程 RSS，用户真实长任务还需复测。会话单测 218 文件 / 845 项、`pnpm check` 与生产构建通过。流式回复完成前 Markdown 标记会暂时以纯文本显示，完成后恢复正常格式。
+
+## 2026-10-10 截断预览仍持有原始大字符串：物理留存回归
+
+此次定位到前几轮字符数预算遗漏的实际留存问题：V8 的 `SlicedString` 可以通过 parent 引用保留原始字符串，`ConsString` 拼接省略标记也不保证断开该引用。因此 `slice(0, 64 * 1024)` 得到的工具预览，逻辑上只有 64 Ki 字符，实际却可能牵住整份 4 MiB 输出；按 `length * 2` 计算的预算看不到 backing store。机制见 [V8 官方字符串说明](https://chromium.googlesource.com/v8/v8.git/+/refs/heads/main/docs/objects/strings.md)。这能够解释工具工作负载中“限容后仍涨”的一种明确原因，不代表已经取得用户现场的 heap snapshot。
+
+浏览器先红后绿：通过项目实际 `compactCodexEventPayload` 保留 16 份各 4 MiB 的工具输出预览，总字符数 1,048,576。修复前 Chromium 强制 GC 后堆增量为 **67,115,496 字节**；修复后同用例为 **1,047,600 字节**。此前只断言事件数量和字符串长度的测试无法发现这种引用保留。
+
+修复在截断结果和流式段落的持久化边界调用 `copyTranscriptText`，只复制有界预览，生成不引用原始大文本的字符串；保持已有预算、首尾预览和省略标记，不增加新的缓存/定时器/依赖。`split("").join("")` 保留 UTF-16 代码单元，包括单独代理项；不使用会替换非法代理项的 UTF-8 编解码。仅依靠 `slice`、`substring` 或拼前缀再切片不能代替这一步。复制有少量有界临时分配成本，收益是原始大输出可被 GC；普通未截断历史消息保持原引用。
+
+新增浏览器回归覆盖工具输出、MCP 结果、最终回复和流式首尾预览四条路径。最终回复的中文省略标记会使字符串使用双字节表示，因此物理预算按字符数的两倍加 4 MiB 页面余量判断，而不是把 4 Mi 字符错误地等同于 4 MiB。另通过真实通知桥接发送助手 delta，再混合 24 次命令 started/completed、推理和计划更新，命令原始输出共 96 MiB；3 个批次中不强制 GC，批次堆采样为 105,515,756 / 98,265,264 / 122,222,768 字节，最终诊断 GC 后由基线 32,401,072 到 34,988,060 字节（增加约 2.47 MiB）。这些是 V8 JS 堆指标，不是浏览器进程 RSS，也不是长期任务的连续峰值。应用没有调用强制 GC。
+
+### 上游源码对照与适用边界
+
+本次通过 GitHub API 实际读取以下源码并固定版本，区分已采用的机制与尚待量化的优化：
+
+| 产品 / 源码 | 已核查的机制 | Kanban 对应决策 |
+| --- | --- | --- |
+| [VS Code Chat renderer](https://github.com/microsoft/vscode/blob/8571e6fd2f04a40dc0341c05897b93ff132b06f8/src/vs/workbench/contrib/chat/browser/widget/chatListRenderer.ts) | 内容按 part 增量更新，未变化 part 复用；隐藏时停止 progressive render；清理时 dispose rendered parts，并清空 toolbar 的 viewmodel 引用 | 活动助手段已独立于历史；后续推理/计划仍可能全量重建 rows，这是分配开销待测点。引用释放本次优先落实到文本数据层。这里是 VS Code Chat，不冒充 Codex 扩展源码。 |
+| [Cline MessagesArea](https://github.com/cline/cline/blob/d20b337eb591d661b8927e288bb0034d53f1fabb/apps/vscode/webview-ui/src/components/chat/chat-view/components/layout/MessagesArea.tsx) | 使用 Virtuoso；消息派生 useMemo；为了自动跟随底部，`increaseViewportBy.bottom` 设为 `Number.MAX_SAFE_INTEGER` | 本项目已有 TanStack 虚拟列表，继续保留有界窗口；不照搬无限底部 overscan，也不据其使用虚拟列表就断言不会内存增长。 |
+| [Open WebUI Messages.svelte](https://github.com/open-webui/open-webui/blob/8bd8b4fac5e059578ac0c74b3c18d11139f88b7d/src/lib/components/chat/Messages.svelte) | 增量时每动画帧最多重建一次，结构变化立即重建，卸载取消待执行帧；历史逐次增加 8 条显示 | 现有 delta 帧合并与原生历史分页符合这一方向；帧合并和少渲染不能替代数据引用释放。 |
+
+剩余可优化点：reasoning/plan 更新仍会触发历史 rows 重建；多观察会话的 live 文本未计入 governor 的事件字节总预算（单条仍有界）；隐藏标签页的 rAF 缓冲需要持续多 item 压测。它们是源码审计风险，不是本轮已证实的现场主因，本次未附带重写状态结构。验证：会话单测 218 文件 / 851 项、浏览器四类留存回归和真实混合通知场景、`pnpm check` 均通过。
+
+## 2026-10-10 工具调用退出聊天显示缓存
+
+用户明确不需要在会话对话窗口看到工具调用，因此策略从“折叠并保留有界预览”改为“聊天不展示、不持有工具正文”。`codexTranscriptVisibility.ts` 统一识别命令执行、文件变更、MCP/dynamic 工具、搜索/图像工具和子 Agent 调用，以及输出 delta、进度、终端交互、patch、轮次 diff 与自动审批复核状态。实际审批请求走独立请求存储，不受此聊天过滤影响。
+
+过滤在实时 `addEvent` 前、历史 item 转换、最终历史合并入库、缓存读写与旧缓存清理处执行；`turn/started`、`turn/completed` 和 `thread/started` 内嵌工具项也被剥离。显示层对旧输入再次过滤，避免出现命令组和 diff 汇总。实时处理器先处理独立子 Agent 观察和请求生命周期；原生历史恢复在丢弃工具正文前同样提取子 Agent 父子关系，防止离线期间创建的子 Agent 消失。纯工具事件不会触发聊天 store 更新，也不再复制聊天命令状态/耗时映射。最终消息、结构化提问、计划、warning/error 和 turn 状态保留。
+
+此变更不修改原生 CLI 历史、工具实际执行和终端模式完整记录。网络上收到的工具 JSON 仍需要短暂解析，因此只能承诺不在聊天数据和 DOM 中累积，不能宣称网络解析的瞬时开销为零。旧页面已经持有的引用需要通过重新加载或现有清理路径释放。
+
+浏览器真实通知桥回归仍输入 24 次 started/completed 命令，共 96 MiB 输出，并混合推理/计划；现在断言 retained transcript 中命令数为 **0** 且页面不存在命令行。一次采样基线 32,136,092 字节、三批采样 55,678,508 / 81,942,024 / 105,579,952 字节、诊断 GC 后 32,735,648 字节（增加约 0.57 MiB）。原先有界预览实现的同类负载增量约 2.47 MiB，仅作隔离测试参考，非用户现场 RSS 对比。直接压缩 helper 的四类物理留存回归继续保留，防止以后其他入口复用时重新引入字符串父引用问题。
+
+侧边聊天 fork 的元数据也复用轻量线程快照，只保留 turn 状态而清空 items，避免在 `threads[].turns[].items` 中另存整份工具/回复正文。此路径新增先红后绿回归。验证：主会话套件 219 文件 / 857 项通过，补充侧边聊天后相关 3 文件 / 36 项通过；9 项浏览器回归通过，类型检查和生产构建通过。

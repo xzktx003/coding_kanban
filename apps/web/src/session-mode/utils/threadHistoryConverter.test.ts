@@ -19,7 +19,7 @@ const thread = (turns: unknown[]): Thread =>
     turns,
   }) as Thread;
 
-it("materializes completed history without redundant agent starts or nested turn items", () => {
+it("materializes completed chat history without tool payloads or nested turn items", () => {
   const user = {
     type: "userMessage",
     id: "user",
@@ -89,7 +89,7 @@ it("materializes completed history without redundant agent starts or nested turn
       params: expect.objectContaining({ item: agent }),
     }),
   );
-  expect(events).toContainEqual(
+  expect(events).not.toContainEqual(
     expect.objectContaining({
       method: "item/completed",
       params: expect.objectContaining({ item: file }),
@@ -109,13 +109,16 @@ it("materializes completed history without redundant agent starts or nested turn
   });
 
   const rows = buildThreadRows(events);
+  expect(rows.some((row) => row.item.kind === "cmdGroup")).toBe(false);
   expect(
     rows.some(
       (row) =>
-        row.item.kind === "cmdGroup" &&
-        row.item.actionSources[0]?.aggregatedOutput === "passed",
+        row.item.kind === "event" &&
+        (row.item.event.method === "item/started" ||
+          row.item.event.method === "item/completed") &&
+        row.item.event.params.item.type === "fileChange",
     ),
-  ).toBe(true);
+  ).toBe(false);
   expect(
     rows.some(
       (row) =>
@@ -124,14 +127,17 @@ it("materializes completed history without redundant agent starts or nested turn
         row.item.event.params.item.type === "userMessage",
     ),
   ).toBe(true);
-  const fileSummary = rows.find(
-    (row) =>
-      row.item.kind === "event" && row.item.event.method === "turn/completed",
-  );
-  expect(fileSummary?.context?.events?.length).toBeGreaterThan(0);
+  expect(
+    rows.some(
+      (row) =>
+        row.item.kind === "event" &&
+        row.item.event.method === "item/completed" &&
+        row.item.event.params.item.type === "agentMessage",
+    ),
+  ).toBe(true);
 });
 
-it("represents each historical command by its current snapshot without inventing completion", () => {
+it("omits historical command snapshots without inventing completion rows", () => {
   const command = (id: string, status: string) => ({
     id,
     type: "commandExecution",
@@ -149,16 +155,23 @@ it("represents each historical command by its current snapshot without inventing
       },
     ]),
   );
-  const snapshots = events.filter(
-    (event) =>
-      event.method === "item/started" || event.method === "item/completed",
-  );
-  expect(snapshots).toHaveLength(2);
   expect(
-    snapshots.map((event: any) => [event.method, event.params.item.id]),
-  ).toEqual([
-    ["item/completed", "done"],
-    ["item/started", "live"],
+    events.filter(
+      (event) =>
+        event.method === "item/started" || event.method === "item/completed",
+    ),
+  ).toEqual([]);
+  expect(events).toEqual([
+    expect.objectContaining({
+      method: "turn/completed",
+      params: expect.objectContaining({
+        turn: expect.objectContaining({
+          id: "turn",
+          status: "inProgress",
+          items: [],
+        }),
+      }),
+    }),
   ]);
 });
 

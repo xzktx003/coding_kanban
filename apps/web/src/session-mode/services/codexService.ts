@@ -1,3 +1,8 @@
+import { observeSubagents } from "@session/features/subagents/store";
+import {
+  withoutToolTranscriptEvents,
+  lightweightThreadForStore,
+} from "./codexTranscriptVisibility";
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { clearAsyncQuestions } from "../features/async-questions/store";
 import type {
@@ -139,16 +144,6 @@ const getThreadPreviewFromInput = (userInputs: UserInput[]): string => {
   return "";
 };
 
-const lightweightThreadForStore = (thread: Thread): Thread => {
-  if (thread.turns.every((turn) => turn.items.length === 0)) return thread;
-  return {
-    ...thread,
-    turns: thread.turns.map((turn) =>
-      turn.items.length === 0 ? turn : { ...turn, items: [] },
-    ),
-  };
-};
-
 /** Synchronizes thread data to the Zustand store with consistent logic */
 const syncThreadToStore = (
   threadId: string,
@@ -196,6 +191,23 @@ const syncThreadToStore = (
           status: lastTurn.status,
         }
       : undefined;
+  // Operational subagent discovery must precede the chat-only projection.
+  // Do not retain command/output events just to feed the independent panel.
+  for (const turn of thread.turns)
+    for (const item of turn.items)
+      if (
+        item.type === "collabAgentToolCall" ||
+        item.type === "subAgentActivity"
+      )
+        observeSubagents({
+          method: "item/completed",
+          params: {
+            threadId,
+            turnId: turn.id,
+            item,
+            completedAtMs: 0,
+          },
+        });
   const lightweightThread = lightweightThreadForStore(thread);
 
   return {
@@ -210,7 +222,7 @@ const syncThreadToStore = (
       : [lightweightThread, ...threads],
     events: {
       ...events,
-      [threadId]: historicalEvents,
+      [threadId]: withoutToolTranscriptEvents(historicalEvents),
     },
     historyLoadedMap: {
       ...useCodexStore.getState().historyLoadedMap,

@@ -170,7 +170,7 @@ test("active visible Codex history reaches a bounded plateau and older turns rem
   );
 });
 
-test("one running turn can release old completed tools while keeping its live command and answer", async ({
+test("one running turn can drop tool history while keeping its live answer", async ({
   page,
 }) => {
   test.setTimeout(90000);
@@ -309,10 +309,10 @@ test("one running turn can release old completed tools while keeping its live co
   expect(result).toMatchObject({
     current: "running",
     status: "inProgress",
-    command: true,
+    command: false,
     answer: true,
   });
-  expect(result.cursor).toMatch(/^kanban-memory-items:/);
+  expect(result.cursor).toBeUndefined();
 });
 
 test("real tool lifecycles stay bounded through automatic recovery and cache writes without forced GC", async ({

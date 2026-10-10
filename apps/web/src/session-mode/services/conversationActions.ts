@@ -1,3 +1,4 @@
+import { lightweightThreadForStore } from "./codexTranscriptVisibility";
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { postJsonWithOptions } from "./apiAdapt/shared";
 import type { ReviewStartResponse } from "../bindings/v2";
@@ -8,7 +9,10 @@ import { useAgentCenterStore } from "../stores/useAgentCenterStore";
 import { appendDraft, sessionDraftKey } from "../stores/useSessionDraftStore";
 import { useSideChatStore } from "../stores/useSideChatStore";
 import { convertThreadHistoryToEvents } from "../utils/threadHistoryConverter";
-import { getThreadModelSettings, hydrateThreadModel } from "../stores/useThreadModelStore";
+import {
+  getThreadModelSettings,
+  hydrateThreadModel,
+} from "../stores/useThreadModelStore";
 const pending = new Map<string, Promise<string>>();
 export function createSideChat(
   parentId: string,
@@ -27,10 +31,16 @@ export function createSideChat(
     hydrateThreadModel(thread.id, {
       model: response.model || parentModel.model,
       modelProvider: response.modelProvider ?? parentModel.modelProvider,
-      reasoningEffort: response.reasoningEffort === undefined ? parentModel.reasoningEffort : response.reasoningEffort,
+      reasoningEffort:
+        response.reasoningEffort === undefined
+          ? parentModel.reasoningEffort
+          : response.reasoningEffort,
     });
     useCodexStore.setState((s) => ({
-      threads: [thread, ...s.threads.filter((t) => t.id !== thread.id)],
+      threads: [
+        lightweightThreadForStore(thread),
+        ...s.threads.filter((t) => t.id !== thread.id),
+      ],
       events: { ...s.events, [thread.id]: events },
       activeThreadIds: [...new Set([...s.activeThreadIds, thread.id])],
       threadStatusMap: { ...s.threadStatusMap, [thread.id]: thread.status },
@@ -42,14 +52,12 @@ export function createSideChat(
         { activate: false },
       );
     if (text) appendDraft(sessionDraftKey("codex", thread.id), text);
-    useSideChatStore
-      .getState()
-      .open({
-        id: thread.id,
-        parentId,
-        title: "侧边聊天",
-        images: [...images],
-      });
+    useSideChatStore.getState().open({
+      id: thread.id,
+      parentId,
+      title: "侧边聊天",
+      images: [...images],
+    });
     return thread.id;
   })();
   pending.set(parentId, task);
@@ -62,10 +70,7 @@ export async function runConversationReview(
   target: ReviewTarget,
 ): Promise<string> {
   const s = useCodexStore.getState();
-  if (
-    delivery === "inline" &&
-    (codexRuntimeState(s, threadId).running)
-  )
+  if (delivery === "inline" && codexRuntimeState(s, threadId).running)
     throw new Error("当前任务运行中，请选择独立审查");
   const result = await postJsonWithOptions<ReviewStartResponse>(
     "/followups/review",
