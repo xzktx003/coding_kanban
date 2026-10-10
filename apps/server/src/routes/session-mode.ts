@@ -1,8 +1,19 @@
+import { projectCodexChatValue } from "@agent-orchestrator/shared";
 import { registerSessionFollowupRoutes } from "./session-followups.js";
 import { registerSessionSubagentRoutes } from "./session-subagents.js";
 import { registerSessionProjectsRoutes } from "./session-projects.js";
 import { registerWorkspaceFileRoutes } from "./workspace-files.js";
 import { registerSessionTabsRoutes } from "./session-tabs.js";
+import { registerSessionSavedPatchRoutes } from "./session-saved-patch.js";
+import { registerSessionGitHunkRoutes } from "./session-git-hunks.js";
+import { registerSessionGitReviewRoutes } from "./session-git-review.js";
+import { registerSessionGuardianDenialRoutes } from "./session-codex-guardian.js";
+import { registerCodexHostRoutes } from "./session-codex-host.js";
+import { registerCodexCloudRoutes } from "./session-codex-cloud.js";
+import { createCodexHostOwnerResolver } from "../services/codex-host-owner.js";
+import { projectCodexPriorConversation } from "../services/codex-cloud-history.js";
+import { CodexHostCompanionCredential, prepareCodexHostCompanion } from "../services/codex-host-companion.js";
+import type { VsCodeWebManager } from "../services/vscode-web-manager.js";
 import { saveSessionAttachment } from "../services/session-attachments.js";
 import { SessionCodexFeishuReplyService } from "../services/session-codex-feishu-reply-service.js";
 import type { FeishuReplyBindingStore } from "../services/feishu-reply-binding-store.js";
@@ -19,6 +30,7 @@ interface SessionModeRouteOptions {
   fetch?: typeof globalThis.fetch;
   projects?: () => string[];
   ensureRuntime?: () => Promise<string | undefined>;
+  vsCodeWebManager?: VsCodeWebManager;
   completionNotifications?: {
     settings: { get(): { configured: boolean; enabled: boolean } };
     sender: FeishuCompletionSenderLike;
@@ -47,116 +59,11 @@ function validateOrigin(origin: string): URL {
 const CHAT_PROJECTION_VIEW = "chat";
 const MAX_CHAT_SSE_FRAME_BYTES = 16 * 1024 * 1024;
 const CHAT_PROJECTION_ERROR_EVENT = "session-projection-error";
-const CHAT_TEXT_PREVIEW_CHARS = 1024;
 const chatHistoryPaths = new Set([
   "/api/codex/thread/read",
   "/api/codex/thread/turns/list",
   "/api/codex/thread/items/list",
   "/api/codex/thread/metadata",
-]);
-const toolItemTypes = new Set([
-  "commandExecution",
-  "fileChange",
-  "mcpToolCall",
-  "dynamicToolCall",
-  "collabAgentToolCall",
-  "subAgentActivity",
-  "webSearch",
-  "imageView",
-  "imageGeneration",
-]);
-const largeToolBodyFields = new Set([
-  "aggregatedOutput",
-  "content",
-  "delta",
-  "deltaBase64",
-  "diff",
-  "output",
-  "patch",
-  "prompt",
-  "stdin",
-  "result",
-  "stderr",
-  "stdout",
-  "text",
-]);
-const toolItemKeepFields = new Set([
-  "agentsStates",
-  "cwd",
-  "durationMs",
-  "exitCode",
-  "id",
-  "itemId",
-  "model",
-  "pluginId",
-  "processId",
-  "reasoningEffort",
-  "receiverThreadIds",
-  "scriptPath",
-  "senderThreadId",
-  "source",
-  "status",
-  "threadId",
-  "tool",
-  "turnId",
-  "type",
-]);
-const cursorOnlyNotificationMethods = new Set([
-  "command/exec/outputDelta",
-  "hook/completed",
-  "hook/started",
-  "item/autoApprovalReview/completed",
-  "item/autoApprovalReview/started",
-  "item/commandExecution/outputDelta",
-  "item/commandExecution/terminalInteraction",
-  "item/fileChange/outputDelta",
-  "item/fileChange/patchUpdated",
-  "item/mcpToolCall/progress",
-  "process/exited",
-  "process/outputDelta",
-  "rawResponseItem/completed",
-  "turn/diff/updated",
-]);
-const cursorParamKeepFields = new Set([
-  "capReached",
-  "exitCode",
-  "completedAtMs",
-  "decisionSource",
-  "itemId",
-  "processHandle",
-  "processId",
-  "requestId",
-  "reviewId",
-  "startedAtMs",
-  "status",
-  "targetItemId",
-  "stderrCapReached",
-  "stdoutCapReached",
-  "stream",
-  "threadId",
-  "turnId",
-  "type",
-]);
-const itemCursorKeepFields = new Set([
-  "call_id",
-  "id",
-  "name",
-  "namespace",
-  "status",
-  "type",
-]);
-const hookRunKeepFields = new Set([
-  "completedAt",
-  "durationMs",
-  "eventName",
-  "executionMode",
-  "handlerType",
-  "id",
-  "scope",
-  "source",
-  "startedAt",
-  "status",
-  "statusMessage",
 ]);
 
 function splitSessionSuffix(origin: string, suffix: string) {
@@ -167,172 +74,12 @@ function splitSessionSuffix(origin: string, suffix: string) {
   return { chatProjection, upstreamSuffix };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function isToolItem(value: Record<string, unknown>): boolean {
-  return typeof value.type === "string" && toolItemTypes.has(value.type);
-}
-
-function projectShortText(value: string): string {
-  return value.length > CHAT_TEXT_PREVIEW_CHARS
-    ? `${value.slice(0, CHAT_TEXT_PREVIEW_CHARS)}…`
-    : value;
-}
-
-function projectAgentsStates(value: unknown): unknown {
-  if (!isRecord(value)) return undefined;
-  const projected: Record<string, unknown> = {};
-  for (const [threadId, state] of Object.entries(value)) {
-    if (!isRecord(state)) continue;
-    projected[threadId] = {
-      ...(typeof state.status === "string" ? { status: state.status } : {}),
-      ...(typeof state.message === "string"
-        ? { message: projectShortText(state.message) }
-        : {}),
-    };
-  }
-  return projected;
-}
-
-function projectToolItem(
-  value: Record<string, unknown>,
-): Record<string, unknown> {
-  const projected: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (key === "agentsStates") {
-      projected.agentsStates = projectAgentsStates(entry);
-      continue;
-    }
-    if (key === "prompt") {
-      if (typeof entry === "string") projected.prompt = projectShortText(entry);
-      else if (entry === null) projected.prompt = null;
-      continue;
-    }
-    if (!toolItemKeepFields.has(key) || largeToolBodyFields.has(key)) continue;
-    projected[key] = projectChatValue(entry);
-  }
-  return projected;
-}
-
-function projectCursorItem(value: unknown): unknown {
-  if (!isRecord(value)) return undefined;
-  const projected: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (itemCursorKeepFields.has(key)) projected[key] = entry;
-  }
-  return projected;
-}
-
-function projectHookRun(value: unknown): unknown {
-  if (!isRecord(value)) return undefined;
-  const projected: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (hookRunKeepFields.has(key)) projected[key] = entry;
-  }
-  return projected;
-}
-
-function projectReview(value: unknown): unknown {
-  if (!isRecord(value)) return undefined;
-  return {
-    ...(typeof value.status === "string" ? { status: value.status } : {}),
-    ...(typeof value.riskLevel === "string"
-      ? { riskLevel: value.riskLevel }
-      : value.riskLevel === null
-        ? { riskLevel: null }
-        : {}),
-    ...(typeof value.userAuthorization === "string"
-      ? { userAuthorization: value.userAuthorization }
-      : value.userAuthorization === null
-        ? { userAuthorization: null }
-        : {}),
-    ...(typeof value.rationale === "string"
-      ? { rationale: projectShortText(value.rationale) }
-      : value.rationale === null
-        ? { rationale: null }
-        : {}),
-  };
-}
-
-function projectReviewAction(value: unknown): unknown {
-  if (!isRecord(value)) return undefined;
-  const projected: Record<string, unknown> = {};
-  for (const key of [
-    "type",
-    "source",
-    "cwd",
-    "server",
-    "toolName",
-    "connectorId",
-    "connectorName",
-    "toolTitle",
-    "target",
-    "host",
-    "protocol",
-    "port",
-  ]) {
-    if (key in value) projected[key] = value[key];
-  }
-  return projected;
-}
-
-function projectCursorParams(
-  params: Record<string, unknown>,
-): Record<string, unknown> {
-  const projected: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(params)) {
-    if (cursorParamKeepFields.has(key)) projected[key] = entry;
-  }
-  const item = projectCursorItem(params.item);
-  if (item) projected.item = item;
-  const run = projectHookRun(params.run);
-  if (run) projected.run = run;
-  const review = projectReview(params.review);
-  if (review) projected.review = review;
-  const action = projectReviewAction(params.action);
-  if (action) projected.action = action;
-  return projected;
-}
-
-function projectChatValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(projectChatValue);
-  if (!isRecord(value)) return value;
-  if (typeof value.method === "string" && isRecord(value.params))
-    return projectNotification(value);
-  if (isToolItem(value)) return projectToolItem(value);
-  const projected: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    projected[key] = projectChatValue(entry);
-  }
-  return projected;
-}
-
-function projectNotification(
-  value: Record<string, unknown>,
-): Record<string, unknown> {
-  const method = String(value.method);
-  const params = isRecord(value.params) ? value.params : {};
-  if (cursorOnlyNotificationMethods.has(method))
-    return { ...value, params: projectCursorParams(params) };
-  const projectedParams: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(params)) {
-    projectedParams[key] = projectChatValue(entry);
-  }
-  return { ...value, params: projectedParams };
-}
-
 function projectChatEnvelope(value: unknown): unknown {
-  if (!isRecord(value)) return value;
-  if (
-    value.event === "codex:notification" &&
-    isRecord(value.payload) &&
-    typeof value.payload.method === "string"
-  ) {
-    return { ...value, payload: projectChatValue(value.payload) };
-  }
-  return value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const envelope = value as Record<string, unknown>;
+  if (envelope.event !== "codex:notification") return value;
+  const payload = projectCodexChatValue(envelope.payload);
+  return payload === envelope.payload ? value : { ...envelope, payload };
 }
 
 function projectionErrorFrame(reason: string): string {
@@ -423,6 +170,11 @@ export function registerSessionModeRoutes(
   app: FastifyInstance,
   options: SessionModeRouteOptions = {},
 ): SessionCodexFeishuReplyService {
+  registerSessionGitHunkRoutes(app);
+  registerSessionGitReviewRoutes(app);
+  registerSessionGuardianDenialRoutes(app, {
+    file: options.attachmentRoot ? resolve(options.attachmentRoot, "..", "codex-guardian-denials.json") : undefined,
+  });
   registerSessionTabsRoutes(app, {
     file: options.attachmentRoot
       ? resolve(options.attachmentRoot, "..", "followed-sessions.json")
@@ -438,6 +190,42 @@ export function registerSessionModeRoutes(
   });
   let origin = options.origin ? validateOrigin(options.origin).origin : null;
   const fetchUpstream = options.fetch ?? globalThis.fetch;
+  if (options.attachmentRoot) {
+    const dataHome = resolve(options.attachmentRoot, "..");
+    const owners = createCodexHostOwnerResolver({
+      origin: () => origin,
+      fetch: fetchUpstream,
+      projects: async () => [...(options.projects?.() ?? []), ...(await sharedProjects.getProjects())],
+    });
+    const credential = new CodexHostCompanionCredential(dataHome);
+    let credentialReady: Promise<void> | undefined;
+    app.addHook("onListen", async () => {
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("编辑器宿主网关尚未绑定 HTTP 端口");
+      credentialReady = credential.write(`http://127.0.0.1:${address.port}`);
+      await credentialReady;
+    });
+    options.vsCodeWebManager?.setCodexHostPreparation(async (paths) => {
+      if (!credentialReady) throw new Error("编辑器宿主网关尚未监听，请稍后重新连接");
+      await credentialReady;
+      await prepareCodexHostCompanion({
+        ...paths,
+        packageRoot: resolve(import.meta.dirname, "../../../../packages/codex-host-bridge"),
+        credentialFile: credential.file,
+      });
+    });
+    registerCodexHostRoutes(app, { credential, resolveOwner: owners.resolve });
+    registerCodexCloudRoutes(app, {
+      dataHome,
+      resolveOwner: owners.resolve,
+      priorConversation: async (request) => projectCodexPriorConversation(await owners.readThread(request.owner.threadId!)),
+    });
+  }
+  registerSessionSavedPatchRoutes(app, {
+    origin: () => origin,
+    fetch: fetchUpstream,
+    file: options.attachmentRoot ? resolve(options.attachmentRoot, "..", "codex-saved-patches.json") : undefined,
+  });
   const completionNotifier = options.completionNotifications
     ? new SessionCodexFeishuNotifier({
         ...options.completionNotifications,
@@ -730,7 +518,7 @@ export function registerSessionModeRoutes(
           request.method === "POST" &&
           chatHistoryPaths.has(pathname)
         ) {
-          return reply.send(projectChatValue(await response.json()));
+          return reply.send(projectCodexChatValue(await response.json()));
         }
         if (!response.body) return reply.send();
         const stream =

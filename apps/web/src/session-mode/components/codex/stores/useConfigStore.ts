@@ -2,9 +2,9 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { ReasoningEffort } from "@session/bindings";
 import type {
-  ApprovalsReviewer,
   AskForApproval,
   SandboxMode,
+  ApprovalsReviewer,
 } from "@session/bindings/v2";
 import type { Provider } from "@session/stores/settings";
 
@@ -15,7 +15,9 @@ export type ThreadCwdMode = "local" | "worktree";
 export interface ConfigStore {
   sandbox: SandboxMode;
   approvalPolicy: AskForApproval;
+  approvalsReviewer: ApprovalsReviewer;
   reasoningEffort: ReasoningEffort;
+  serviceTier: string | null;
   webSearchRequest: boolean;
   modelProvider: Provider;
   model: string;
@@ -27,7 +29,9 @@ export interface ConfigStore {
   setModel: (model: string) => void;
   setModelProvider: (provider: Provider) => void;
   setAccessMode: (sandbox: SandboxMode) => void;
+  setApprovalsReviewer: (reviewer: ApprovalsReviewer) => void;
   setReasoningEffort: (effort: ReasoningEffort) => void;
+  setServiceTier: (serviceTier: string | null) => void;
   setWebSearch: (webSearchRequest: boolean) => void;
   setPersonality: (personality: Personality | null) => void;
   setCollaborationMode: (mode: ModeKind) => void;
@@ -57,9 +61,11 @@ export const useConfigStore = create<ConfigStore>()(
   persist(
     (set) => ({
       webSearchRequest: false,
-      sandbox: "workspace-write",
-      approvalPolicy: "on-request",
+      sandbox: "danger-full-access",
+      approvalPolicy: "never",
+      approvalsReviewer: "user",
       reasoningEffort: "medium",
+      serviceTier: null,
       modelProvider: "openai",
       model: "",
       providerModels: {},
@@ -88,10 +94,12 @@ export const useConfigStore = create<ConfigStore>()(
         const approvalPolicy = SANDBOX_APPROVAL_MAP[sandbox];
         set({ sandbox, approvalPolicy });
       },
+      setApprovalsReviewer: (approvalsReviewer) => set({ approvalsReviewer }),
 
       setReasoningEffort: (effort: ReasoningEffort) => {
         set({ reasoningEffort: effort });
       },
+      setServiceTier: (serviceTier) => set({ serviceTier }),
 
       setWebSearch: (webSearchRequest: boolean) => {
         set({ webSearchRequest });
@@ -111,6 +119,23 @@ export const useConfigStore = create<ConfigStore>()(
     }),
     {
       name: "kanban.session.codex-config-storage",
+      version: 1,
+      migrate: (persisted, version) => {
+        const saved = persisted as Partial<ConfigStore>;
+        // Update the legacy new-chat default once. Per-thread native settings
+        // live in a separate store; subsequent explicit choices stay saved.
+        if (
+          version === 0 &&
+          saved.sandbox === "workspace-write" &&
+          saved.approvalPolicy === "on-request"
+        )
+          return {
+            ...saved,
+            sandbox: "danger-full-access" as const,
+            approvalPolicy: "never" as const,
+          };
+        return saved;
+      },
     },
   ),
 );

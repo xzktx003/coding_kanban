@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -125,4 +125,19 @@ test("does not replace the state file when the old backend is unavailable or inv
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("restart capture refuses empty runtime data over existing history or corrupt evidence", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "kanban-capture-"));
+  const filePath = join(directory, "sessions.json");
+  try {
+    for (const existing of [JSON.stringify(snapshot), JSON.stringify({ version: 1, snapshot }), "broken history"]) {
+      writeFileSync(filePath, existing);
+      const captured = await captureSessionState({ apiUrl: "http://fixture.invalid", filePath,
+        fetchImpl: async () => Response.json({ ...snapshot, items: [], activeAgentSessionId: null }),
+      });
+      assert.equal(captured, false);
+      assert.equal(readFileSync(filePath, "utf8"), existing);
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

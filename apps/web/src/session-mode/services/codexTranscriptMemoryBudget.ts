@@ -1,5 +1,7 @@
 import type { ServerNotification } from "@session/bindings";
 import type { ThreadItem } from "@session/bindings/v2/ThreadItem";
+import { projectCodexChatValue } from "@agent-orchestrator/shared";
+import { withoutToolTranscriptEvent } from "./codexTranscriptVisibility";
 
 const estimateCache = new WeakMap<object, number>();
 const OBJECT_OVERHEAD = 32;
@@ -35,8 +37,6 @@ const HIDDEN_TRANSCRIPT_METHODS = new Set<ServerNotification["method"]>([
   "item/commandExecution/outputDelta",
   "item/fileChange/outputDelta",
   "mcpServer/startupStatus/updated",
-  "hook/started",
-  "hook/completed",
 ]);
 
 export interface CodexTranscriptBudgetOptions {
@@ -358,7 +358,7 @@ const compactItem = (
   return [item, false];
 };
 
-const compactEvent = (
+const compactVisibleEvent = (
   event: ServerNotification,
   limit: number,
 ): [ServerNotification, boolean] => {
@@ -443,6 +443,20 @@ const compactEvent = (
   return [event, false];
 };
 
+const compactEvent = (
+  event: ServerNotification,
+  limit: number,
+): [ServerNotification, boolean] => {
+  const projected = withoutToolTranscriptEvent(event);
+  if (projected === null) {
+    // Direct callers still receive a typed event, but never its private body.
+    const cursor = projectCodexChatValue(event) as ServerNotification;
+    return [cursor, cursor !== event];
+  }
+  const [next, changed] = compactVisibleEvent(projected, limit);
+  return [next, changed || projected !== event];
+};
+
 export function compactCodexEventPayload(
   event: ServerNotification,
 ): ServerNotification {
@@ -452,7 +466,8 @@ export function compactCodexEventPayload(
 const isHiddenTranscriptEvent = (event: ServerNotification): boolean =>
   HIDDEN_TRANSCRIPT_METHODS.has(event.method) ||
   ((event.method === "item/started" || event.method === "item/completed") &&
-    event.params.item.type === "sleep");
+    event.params.item.type === "sleep") ||
+  withoutToolTranscriptEvent(event) === null;
 
 function getTurnId(event: ServerNotification): string | null {
   const params = event.params as { turnId?: unknown; turn?: { id?: unknown } };

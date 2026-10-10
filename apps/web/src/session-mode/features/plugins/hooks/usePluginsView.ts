@@ -1,8 +1,7 @@
-import { selectBuiltinInputTarget } from "@session/services/builtinInputNavigation";
 import { requestSessionNavigation } from "@session/services/sessionNavigationGuard";
 import { useCallback, useEffect, useState } from "react";
 import type { PluginDetail } from "@session/bindings/v2";
-import { toast } from "@session/components/ui/use-toast";
+import { pluginNotice as toast } from "../pluginNotices";
 import {
   pluginInstall,
   pluginRead,
@@ -11,11 +10,12 @@ import {
   type SkillGroupsConfig,
   writeSkillGroups,
 } from "@session/services";
-import { useLayoutStore, usePluginStore } from "@session/stores";
-import { useInputStore } from "@session/stores/useInputStore";
+import { usePluginStore } from "@session/stores";
 import { usePluginsNavigationStore } from "@session/stores/usePluginsNavigationStore";
 import { pluginDetailRequestTarget, pluginUninstallId } from "./pluginTargets";
 import { useExternalUrl } from "./useExternalUrl";
+import { invalidatePluginCapabilities } from "../pluginInputs";
+import { tryPluginInComposer } from "../pluginNavigation";
 
 /** The primary views shown by the left-side TabSwitcher. */
 export type MainTab = "Plugins" | "Skills" | "Connectors";
@@ -49,9 +49,6 @@ export function usePluginsView() {
   const [uninstallingPluginId, setUninstallingPluginId] = useState<
     string | null
   >(null);
-
-  const { setView } = useLayoutStore();
-  const { appendInputValue } = useInputStore();
 
   const { skillScope: scope, setSkillScope: setScope } = usePluginStore();
 
@@ -119,6 +116,7 @@ export function usePluginsView() {
       setInstallingPluginId(summary.id);
       try {
         const response = await pluginInstall(target);
+        invalidatePluginCapabilities();
 
         const authTargets = response.appsNeedingAuth.filter(
           (app) => app.installUrl,
@@ -169,6 +167,7 @@ export function usePluginsView() {
       setUninstallingPluginId(summary.id);
       try {
         await pluginUninstall({ pluginId });
+        invalidatePluginCapabilities();
         setSelectedInstalled(false);
         await refreshSelectedPluginDetail(plugin);
         setRefreshTrigger((t) => t + 1);
@@ -190,16 +189,9 @@ export function usePluginsView() {
     [refreshSelectedPluginDetail, setSelectedInstalled],
   );
 
-  const handleUsePlugin = useCallback(
-    (plugin: PluginDetail) => {
-      const pluginName =
-        plugin.summary.interface?.displayName ?? plugin.summary.name;
-      selectBuiltinInputTarget("codex");
-      setView("agent");
-      appendInputValue(`@${pluginName}`);
-    },
-    [appendInputValue, setView],
-  );
+  const handleUsePlugin = useCallback((plugin: PluginDetail) => {
+    tryPluginInComposer(plugin.summary);
+  }, []);
 
   return {
     mainTab,

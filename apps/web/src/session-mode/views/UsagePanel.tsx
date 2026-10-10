@@ -1,12 +1,12 @@
-import { RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 
-import ClaudeCodeIcon from '@session/assets/claudecode-color.svg';
-import CodexIcon from '@session/assets/codex-color.svg';
-import type { GetAccountRateLimitsResponse, RateLimitWindow } from '@session/bindings/v2';
-import { Button } from '@session/components/ui/button';
-import { Progress } from '@session/components/ui/progress';
-import { getJsonWithOptions } from '@session/services/apiAdapt/shared';
+import ClaudeCodeIcon from "@session/assets/claudecode-color.svg";
+import { NativeCodexUsage } from "@session/features/codex-account/NativeCodexUsage";
+import { CodexAuthDialog } from "@session/components/codex/CodexAuthDialog";
+import { Button } from "@session/components/ui/button";
+import { Progress } from "@session/components/ui/progress";
+import { getJsonWithOptions } from "@session/services/apiAdapt/shared";
 
 type ClaudeWindow = { usedPercent: number; resetsAt: string | null } | null;
 type ClaudeUsage = {
@@ -16,14 +16,16 @@ type ClaudeUsage = {
 };
 
 function formatReset(value: number | string | null | undefined): string {
-  if (value == null) return 'Reset unavailable';
+  if (value == null) return "Reset unavailable";
   const date =
-    typeof value === 'number' ? new Date(value < 1e12 ? value * 1000 : value) : new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Reset unavailable';
+    typeof value === "number"
+      ? new Date(value < 1e12 ? value * 1000 : value)
+      : new Date(value);
+  if (Number.isNaN(date.getTime())) return "Reset unavailable";
   return `Resets ${new Intl.DateTimeFormat(undefined, {
-    weekday: 'short',
-    hour: 'numeric',
-    minute: '2-digit',
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
   }).format(date)}`;
 }
 
@@ -44,7 +46,7 @@ function UsageRow({
       <div className="flex items-baseline justify-between gap-2 text-sm">
         <span className="font-medium">{label}</span>
         <span className="tabular-nums font-semibold">
-          {available ? `${Math.round(usedPercent)}% used` : 'Unavailable'}
+          {available ? `${Math.round(usedPercent)}% used` : "Unavailable"}
         </span>
       </div>
       <Progress
@@ -53,7 +55,7 @@ function UsageRow({
         aria-label={`${label} usage`}
       />
       <span className="text-xs text-muted-foreground">
-        {available ? formatReset(resetsAt) : 'No subscription usage data'}
+        {available ? formatReset(resetsAt) : "No subscription usage data"}
       </span>
     </div>
   );
@@ -68,20 +70,20 @@ function ProviderSection({
 }: {
   name: string;
   icon: string;
-  color: 'claude' | 'codex';
+  color: "claude" | "codex";
   windows: {
     fiveHour: { usedPercent: number; resetsAt: number | string | null } | null;
     sevenDay: { usedPercent: number; resetsAt: number | string | null } | null;
   } | null;
   error: string | null;
 }) {
-  const isClaude = color === 'claude';
+  const isClaude = color === "claude";
   const progressClassName = isClaude
-    ? 'bg-[#d97757]/15 [&>div]:bg-[#d97757]'
-    : 'bg-[#7a9dff]/15 [&>div]:bg-[#6678ef]';
+    ? "bg-[#d97757]/15 [&>div]:bg-[#d97757]"
+    : "bg-[#7a9dff]/15 [&>div]:bg-[#6678ef]";
   return (
     <section
-      className={`flex flex-col gap-3 rounded-xl border p-3 ${isClaude ? 'border-[#d97757]/45 bg-[#d97757]/5' : 'border-[#7a9dff]/45 bg-[#7a9dff]/5'}`}
+      className={`flex flex-col gap-3 rounded-xl border p-3 ${isClaude ? "border-[#d97757]/45 bg-[#d97757]/5" : "border-[#7a9dff]/45 bg-[#7a9dff]/5"}`}
       aria-label={`${name} usage`}
     >
       <div className="flex items-center justify-between">
@@ -109,59 +111,46 @@ function ProviderSection({
           progressClassName={progressClassName}
         />
       </div>
-      {error && !windows && <p className="text-xs text-muted-foreground">{error}</p>}
+      {error && !windows && (
+        <p className="text-xs text-muted-foreground">{error}</p>
+      )}
     </section>
   );
 }
 
-function codexWindows(response: GetAccountRateLimitsResponse) {
-  const rateLimits = response.rateLimits;
-  const mapWindow = (window: RateLimitWindow | null) =>
-    window ? { usedPercent: window.usedPercent, resetsAt: window.resetsAt } : null;
-  return { fiveHour: mapWindow(rateLimits.primary), sevenDay: mapWindow(rateLimits.secondary) };
-}
-
 export default function UsagePanel() {
   const [claude, setClaude] = useState<ClaudeUsage | null>(null);
-  const [codex, setCodex] = useState<GetAccountRateLimitsResponse | null>(null);
+  const [codexRefresh, setCodexRefresh] = useState(0);
+  const [codexAuthOpen, setCodexAuthOpen] = useState(false);
   const [claudeError, setClaudeError] = useState<string | null>(null);
-  const [codexError, setCodexError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const refresh = useCallback(async (force = false) => {
+    if (force) setCodexRefresh((value) => value + 1);
     setLoading(true);
     try {
-      const [claudeResult, codexResult] = await Promise.allSettled([
-        getJsonWithOptions<ClaudeUsage>(`/api/claude/usage${force ? '?refresh=true' : ''}`, {
-          suppressToast: true,
-        }),
-        getJsonWithOptions<GetAccountRateLimitsResponse>('/api/codex/account/rate-limits', {
-          suppressToast: true,
-        }),
+      const [claudeResult] = await Promise.allSettled([
+        getJsonWithOptions<ClaudeUsage>(
+          `/api/claude/usage${force ? "?refresh=true" : ""}`,
+          {
+            suppressToast: true,
+          },
+        ),
       ]);
-      if (claudeResult.status === 'fulfilled') {
+      if (claudeResult.status === "fulfilled") {
         setClaude(claudeResult.value);
         setClaudeError(null);
       } else {
         setClaudeError(
           String(
-            claudeResult.reason instanceof Error ? claudeResult.reason.message : claudeResult.reason
-          )
+            claudeResult.reason instanceof Error
+              ? claudeResult.reason.message
+              : claudeResult.reason,
+          ),
         );
       }
-      if (codexResult.status === 'fulfilled') {
-        setCodex(codexResult.value);
-        setCodexError(null);
-      } else {
-        setCodexError(
-          String(
-            codexResult.reason instanceof Error ? codexResult.reason.message : codexResult.reason
-          )
-        );
-      }
-      if (claudeResult.status === 'fulfilled' || codexResult.status === 'fulfilled')
-        setLastUpdated(new Date());
+      if (claudeResult.status === "fulfilled") setLastUpdated(new Date());
     } finally {
       setLoading(false);
     }
@@ -175,10 +164,10 @@ export default function UsagePanel() {
     const onFocus = () => {
       refresh();
     };
-    window.addEventListener('focus', onFocus);
+    window.addEventListener("focus", onFocus);
     return () => {
       window.clearInterval(timer);
-      window.removeEventListener('focus', onFocus);
+      window.removeEventListener("focus", onFocus);
     };
   }, [refresh]);
 
@@ -190,7 +179,9 @@ export default function UsagePanel() {
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-base font-semibold">Usage limits</h1>
-          <p className="text-xs text-muted-foreground">Claude Code and Codex account usage</p>
+          <p className="text-xs text-muted-foreground">
+            Claude Code and Codex account usage
+          </p>
         </div>
         <Button
           variant="ghost"
@@ -201,7 +192,7 @@ export default function UsagePanel() {
           }}
           disabled={loading}
         >
-          <RefreshCw className={loading ? 'animate-spin' : undefined} />
+          <RefreshCw className={loading ? "animate-spin" : undefined} />
         </Button>
       </header>
       <ProviderSection
@@ -218,19 +209,18 @@ export default function UsagePanel() {
         }
         error={claudeError}
       />
-      <ProviderSection
-        name="Codex"
-        icon={CodexIcon}
-        color="codex"
-        windows={codex ? codexWindows(codex) : null}
-        error={codexError}
+      <NativeCodexUsage
+        refreshKey={codexRefresh}
+        onSignIn={() => setCodexAuthOpen(true)}
+        onUpdated={setLastUpdated}
       />
+      <CodexAuthDialog open={codexAuthOpen} onOpenChange={setCodexAuthOpen} />
       <p className="mt-auto text-xs text-muted-foreground">
         {lastUpdated
-          ? `Updated ${lastUpdated.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+          ? `Updated ${lastUpdated.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
           : loading
-            ? 'Loading usage…'
-            : 'No usage loaded'}
+            ? "Loading usage…"
+            : "No usage loaded"}
       </p>
     </main>
   );

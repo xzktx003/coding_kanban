@@ -1,6 +1,14 @@
 # Coding Kanban Project Overview
 
-Codex 会话聊天只保留对话与必要交互，工具调用及命令/部署日志不进入聊天显示缓存；审批、问题回答、任务状态和独立子 Agent 面板仍正常工作。完整原生记录与终端模式不受此显示策略影响。
+Codex 聊天正文、输入区、命令与工具、请求、文件 review 和消息工作流按本地 VS Code 插件的实际启用组件适配。字体、段落间距、代码/表格/公式/Mermaid、原生图标与菜单分别有原包对照；手机保留紧凑固定输入高度、左侧附件/删除、触控热区和安全区。公共输入区与会话窗口分离、悬浮 Diff、多项目/关注标签/自由分屏、后台同步与持久草稿保持现有边界，Claude 沿用原 renderer。最新全量检查、桌面/手机两主题整页截图和外部能力限制见 [实施与验收记录](designs/session-render-alignment/implementation.md)；新 Rust 正式激活、原生未实现的历史搜索及实际云接口验收分别记录，不宣称全页面零像素差异。
+
+探索文件跳转固定原命令目录；工具折叠、生命周期计时、输出与阅读状态以真实 thread/turn/item 隔离，不改变输入目标或后台执行。保存的轮次变更通过独立目标与原生回执核对，与可变 Git 工作区分开；撤销/重新应用保留后续修改与 index，未知执行结果保持持久身份并只读核对。运行变更条沿用公共输入区上方浮层，协议与验收见 [保存的轮次变更](session-saved-patches.md)。
+
+MCP 授权在网页复用 Codex 通知和只读状态恢复，操作以原服务器和授权实例隔离；手机管理卡片将身份/状态与操作分行，保持可读配色与44px触控区域，授权通知不挡返回。刷新状态不会重新启动授权。恢复边界与隔离验收见 [MCP 网页授权](session-mcp-auth.md)。
+
+Codex 输入区支持拖入图片与本机 UTF-8 文件快照，按原会话持久保存且不隐式发送。图片字节采用可移植存储格式，手机相册、失败重试和刷新恢复共用原入口；手机图片优先显示，浮层与拖放提示不挤占正文高度。范围和浏览器边界见 [草稿规则](session-drafts.md)。
+
+Codex 聊天以有界元数据保留原生工具活动和状态；命令输出、工具结果及 diff 正文在网关发送前裁剪，不进入后台显示缓存。裁剪后的卡片明确区分未加载详情与真实空结果。审批、问题回答、任务状态、子 Agent 身份和独立面板保留，完整原生记录及终端模式仍可使用。
 
 功能依赖统一列在 [README](../README.md#各功能的依赖)，区分后端系统工具、随前端打包的预览库和浏览器权限。终端 Markdown 图片无需系统转换器，支持受目录边界限制的飞书 `@./` 导出引用，详见 [图片解析约定](markdown-image-preview.md)。
 
@@ -217,7 +225,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 更新状态机为 `disabled / idle / checking / available / updated / conflict / error`。定时器与手动操作共享 single-flight；发现上游领先时只进入 `available` 并提醒用户。只有用户点击“拉取并更新”后，apply 端点才允许 `merge --ff-only <remote-head>`。HEAD 与 upstream 分叉时不创建 merge commit；本地修改或未跟踪文件阻止 fast-forward 时保留原 HEAD 和工作区；Git 错误只返回有界、去机器路径的用户消息。
 
-用户确认后的安全 fast-forward 成功后，source revision 变化会自动复用既有热更新链：前端记录恢复意图并 reload 一次，不再要求第二次确认，随后恢复受管 tmux。后端开发入口在导入应用模块前重新构建 `@agent-orchestrator/shared`，并让 `tsx` 监听共享源码，避免拉取后共享包 `dist` 落后于服务端 import 而退出。未经“拉取并更新”确认，后台检查不会修改源码或刷新浏览器。版本和恢复提示是非模态的，只有其操作按钮接收指针事件，提示本身不会截获底下终端或顶栏控件的输入；恢复成功提示可主动关闭并在 5 秒内自动隐藏，恢复失败提示保持可见。
+用户确认后的安全 fast-forward 会先启动独立更新进程；该进程等待 HEAD 到达确认的 revision，执行 `pnpm install --frozen-lockfile`，再调用安全的 `pnpm dev:restart`。因此 watcher 因新版本依赖缺失退出时，更新进程仍能完成依赖安装并恢复前后端。重启保留运行中的 Rust 会话服务和 Agent；source revision 变化时，前端复用确认时记录的恢复意图，只 reload 一次并恢复受管 tmux，不再要求第二次确认。过程日志位于 `.dev-runtime/online-update.log`。后端开发入口在导入应用模块前重新构建 `@agent-orchestrator/shared`，并让 `tsx` 监听共享源码。未经“拉取并更新”确认，后台检查不会修改源码或刷新浏览器。版本和恢复提示是非模态的，只有其操作按钮接收指针事件，提示本身不会截获底下终端或顶栏控件的输入；恢复成功提示可主动关闭并在 5 秒内自动隐藏，恢复失败提示保持可见。
 
 生产入口使用 `FileSessionStateStore` 把稳定会话目录保存到 `SESSION_STATE_PATH`，默认 `.dev-runtime/agent-sessions.json`：
 
@@ -344,6 +352,7 @@ memories/        仓库记忆，不是产品运行依赖
 - `LocalTmuxInputRouter`：统一 REST/WebSocket 的本地 tmux 输入队列，并区分 pane 输入、鼠标协议和 tmux 前缀命令。
 - `AppVersionService`：计算本地 Git source revision 和 backend runtime version。
 - `GitAutoUpdateService`：按配置周期只 fetch/check 当前 upstream；用户确认后才执行安全 fast-forward，并维护可用更新、冲突和错误状态。
+- `OnlineUpdateFinalizer`：在快进前启动独立进程，等待目标 revision 后安装 frozen lockfile 依赖并安全重启应用。
 - `FileSessionStateStore`：校验、投影并原子持久化稳定会话目录。
 - `AgentCompletionFeishuNotifier`：观察所有已登记会话的新完成点，并在共享开关开启时异步交给飞书发送器；本地 tmux 按每个 Codex thread 独立建立完成游标，Codex 候选只接受结构化完成，初始空闲会话和重复快照不会补发。
 - `CodexCompletionContentResolver`：从看板会话定位 Codex session；本地 tmux 枚举全部 pane 并逐 thread 读取最后一条完整 assistant 输出作为飞书正文，SSH 保持单会话定位。Goal 内部自动续轮先抑制，未解析 session 不做负缓存，Codex 结构化记录为空或读取失败时不触发摘要降级。
@@ -528,7 +537,7 @@ curl http://127.0.0.1:4000/api/health
 - `VSCODE_WEB_EXTENSIONS_DIR`：覆盖 VS Code Web 的扩展目录；默认优先使用 `~/.vscode-server/extensions`。
 - `VSCODE_WEB_REMOTE_BIND_HOST`：SSH 远端 code-server 的绑定地址，默认 `127.0.0.1`。
 - `VSCODE_WEB_REMOTE_PORT`：SSH 远端 code-server 的固定端口，默认 `13338`。
-- `APP_SOURCE_ROOT`：更新检测读取的本地源码根目录，默认仓库根目录。
+- `APP_SOURCE_ROOT`：在线更新检查、快进和依赖安装使用的本地源码根目录，默认仓库根目录。
 - `SESSION_STATE_PATH`：稳定会话目录文件，默认 `.dev-runtime/agent-sessions.json`。
 
 ### SSH
@@ -807,7 +816,7 @@ Codex 输入栏 V2 在原有排队、引导和停止能力上加入上下文卡�
 
 ### Session 固定高度输入区
 
-Session 底部输入使用当前窗口宽度，固定正文与发送工具栏，目标信息位于底部中间；图片在正文左侧显示，长文和多图各自在内部滚动。桌面整体约 132px、手机/窄分屏约 148px，系统安全区另计。常用编辑/语音/状态/会话操作保持直接入口，手机悬浮在输入栏上沿；队列、引导和模型提示覆盖聊天区，不推动布局。异步答题覆盖输入区，收起恢复草稿。详见 [尺寸和截图验收](designs/compact-composer/acceptance.md)。
+Session 底部输入使用当前窗口宽度，图片在正文左侧显示，长文和多图在内部滚动。Codex 桌面采用插件的输入框规则，初始最小高度 98px；手机及不超过 480px 的窄分屏固定 124px，系统安全区另计。Claude 保留此前约 132/148px 的布局。目标信息与常用编辑、语音、状态、会话和引用操作在窄栏上沿悬浮；已知上下文用量并入同一工具条，模型、权限、Agent 和发送入口避免互相遮挡。队列、引导和模型提示覆盖聊天区，不推动布局；异步答题收起后恢复草稿。当前 Codex 规则与逐项截图证据见 [原生呈现实施记录](designs/session-render-alignment/implementation.md)，此前布局的历史验收见 [紧凑输入区](designs/compact-composer/acceptance.md)。
 
 ### Codex 会话与执行权
 
@@ -818,6 +827,16 @@ Session 的关注标签和历史阅读不再代表拥有执行实例。Rust 运�
 ### 子 Agent 与主会话
 
 Codex 主会话可通过原生多 Agent 工具并行分工，子任务摘要与右侧工作台呈现家族、历史和待审批事项。子任务观察集合独立于关注标签；查看不会改变主输入或项目。实例和角色引用分别保留原生身份，普通输入遵循明确权限，停止按确认的子轮次执行。配置与历史缺失时显示待确认，查询与缓存不自动获得执行权。详见 [子 Agent](session-subagents.md)。
+
+### Codex 原生聊天适配与编辑器宿主
+
+Codex 聊天沿用本项目的多会话、独立输入和只读同步架构，原生呈现与流程逐项对齐；Claude 继续沿用既有组件。编辑器桥和云任务由 Node 网关承接，捕获原会话与真实目录，私有凭证不进入浏览器。状态和外部能力缺失时显式提示；完整验收进度见 [Session 渲染适配](designs/session-render-alignment/implementation.md)。
+
+手机保留原生内容和全部操作，通过局部 44px 热区、详情留白和随主题的底部通知适配触摸；长请求卡片在聊天区域正常滚动，不要求整个卡片同时装入短视口。模型菜单、原生模板图库及管理通知使用独立样式作用域，正式执行权和外部能力不因界面适配改变。
+
+Codex 新聊天默认采用完全访问与 never 审批策略；迁移仅更新旧版新聊天默认权限组合，已有线程继续使用各自原生权限，已入队参数保持原提交快照。权限控件仍可选择只读或工作区访问，新的选择随本设备缓存保留。
+
+Codex 聊天以轮次显示工作摘要：运行中实时计时，完成后收起过程并保留最终报告；搜索和导出仍包含已载入的完整内容。详见 [按轮工作摘要](session-turn-work.md)。
 
 会话模式 Codex 的每轮成功完成可复用现有飞书配置发送最终结果，由 Node 后端观察原生完成事件，无需浏览器保持打开；会话与终端共用通知开关。新增持久待发送记录、重放去重和只读目标轮次核对，不改变执行权；使用方式与边界见 [会话完成飞书通知](session-codex-feishu-notifications.md)。
 

@@ -68,6 +68,7 @@ test("using a plugin focuses its Codex draft rather than leaving the Claude inpu
   const { result } = renderHook(() => usePluginsMarketplace());
   await act(() =>
     result.current.handleUsePlugin({
+      id: "fixture-plugin@fixture",
       name: "fixture-plugin",
       interface: { displayName: "Fixture Plugin" },
     } as any),

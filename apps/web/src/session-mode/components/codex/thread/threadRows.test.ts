@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import type { ServerNotification } from "@session/bindings";
 import { buildThreadRows } from "./threadRows";
+import { withoutToolTranscriptEvents } from "@session/services/codexTranscriptVisibility";
 it("keeps one structured question instead of its streamed text or duplicate snapshot", () => {
   const item = {
     type: "agentMessage",
@@ -61,13 +62,16 @@ it("keeps one streaming message and warnings while excluding protocol-only event
   expect(rows[0].item.kind).toBe("event");
   expect(rows[1].key).toBe("event-4");
 });
-it("indexes rollback counts while keeping tool-only diff summaries hidden", () => {
+it("indexes rollback counts and scopes retained native diff summaries to their turn", () => {
   const rows = buildThreadRows([
     event("item/started", {
       turnId: "a",
       item: { type: "userMessage", content: [] },
     }),
-    event("turn/diff/updated", { turnId: "a", diff: "diff" }),
+    event("turn/diff/updated", {
+      turnId: "a",
+      diff: "diff --git a/file.ts b/file.ts\n@@ -1 +1 @@\n-old\n+new\n",
+    }),
     event("turn/completed", {
       turn: { id: "a", status: "completed", items: [] },
     }),
@@ -97,7 +101,13 @@ it("indexes rollback counts while keeping tool-only diff summaries hidden", () =
       (row) =>
         row.item.kind === "event" && row.item.event.method === "turn/completed",
     ),
-  ).toHaveLength(0);
+  ).toHaveLength(1);
+  const summary = rows.find(
+    (row) =>
+      row.item.kind === "event" && row.item.event.method === "turn/completed",
+  );
+  expect(summary?.context?.events).toHaveLength(3);
+  expect(summary?.context?.eventIndex).toBe(2);
   expect(
     rows.some(
       (row) =>
@@ -105,6 +115,35 @@ it("indexes rollback counts while keeping tool-only diff summaries hidden", () =
         row.item.event.method === "turn/diff/updated",
     ),
   ).toBe(false);
+});
+
+it("keeps projected tool-only diff cursors out of padded rows and empty file summaries", () => {
+  const events = withoutToolTranscriptEvents([
+    event("turn/diff/updated", {
+      threadId: "owner",
+      turnId: "turn",
+      diff: "private patch body",
+    }),
+    event("item/commandExecution/terminalInteraction", {
+      threadId: "owner",
+      turnId: "turn",
+      itemId: "cmd",
+      stdin: "private terminal input",
+    }),
+    event("turn/completed", {
+      threadId: "owner",
+      turn: { id: "turn", status: "completed", items: [] },
+    }),
+  ]);
+  expect(buildThreadRows(events)).toEqual([]);
+  expect(
+    buildThreadRows(events).filter(
+      (row) =>
+        row.item.kind === "event" && row.item.event.method === "turn/completed",
+    ),
+  ).toHaveLength(0);
+  expect(JSON.stringify(events)).not.toContain("private patch body");
+  expect(JSON.stringify(events)).not.toContain("private terminal input");
 });
 it("does not turn a rename notification into a chat message", () => {
   expect(

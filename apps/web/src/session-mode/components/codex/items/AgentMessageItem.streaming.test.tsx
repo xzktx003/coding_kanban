@@ -3,25 +3,13 @@ import { expect, it, vi } from "vitest";
 import { AgentMessageItem } from "./AgentMessageItem";
 import { STREAMING_TEXT_PREVIEW_MARKER } from "@session/services/codexTranscriptMemoryBudget";
 
-vi.mock("streamdown", () => ({
-  Streamdown: ({ children }: { children: string }) => (
-    <div data-testid="markdown-renderer">{children}</div>
+vi.mock("../presentation/CodexMarkdown", () => ({
+  CodexMarkdown: ({ value }: { value: string }) => (
+    <div data-testid="markdown-renderer">{value}</div>
   ),
-}));
-vi.mock("@session/components/common", () => ({
-  CopyButton: () => null,
 }));
 vi.mock("@session/hooks/useWindowFocus", () => ({
   useWindowFocus: () => true,
-}));
-vi.mock("@session/features/visualizations/VisualizationContent", () => ({
-  VisualizationContent: ({
-    text,
-    renderMarkdown,
-  }: {
-    text: string;
-    renderMarkdown: (value: string) => React.ReactNode;
-  }) => renderMarkdown(text),
 }));
 vi.mock("../composer/v2/MessageReferenceActions", () => ({
   MessageReferenceActions: () => null,

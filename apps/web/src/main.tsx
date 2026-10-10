@@ -4,6 +4,10 @@ import ReactDOM from "react-dom/client";
 import { installReactPerformanceRetention } from "./lib/react-performance-retention";
 
 import { WorkbenchShell } from "./components/WorkbenchShell";
+import { isPlanWindowRoute } from "./session-mode/features/thread-workflows/planSnapshot";
+const PlanWindowEntry = React.lazy(
+  () => import("./session-mode/features/thread-workflows/PlanWindowEntry"),
+);
 import {
   measureAppViewportHeight,
   measureAppViewportOffsetTop,
@@ -46,6 +50,12 @@ window.visualViewport?.addEventListener("scroll", syncAppViewportMetrics);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <WorkbenchShell />
+    {isPlanWindowRoute() ? (
+      <React.Suspense fallback={<div role="status">正在打开计划…</div>}>
+        <PlanWindowEntry />
+      </React.Suspense>
+    ) : (
+      <WorkbenchShell />
+    )}
   </React.StrictMode>,
 );

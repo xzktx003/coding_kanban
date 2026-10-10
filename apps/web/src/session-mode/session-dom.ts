@@ -1,10 +1,35 @@
 import { useLayoutStore } from "@session/stores/useLayoutStore";
-import { useSyncExternalStore } from "react";
+import {
+  createContext,
+  createElement,
+  useContext,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 
-export function sessionPortalContainer(): HTMLElement | undefined {
-  return typeof document === "undefined"
-    ? undefined
-    : (document.querySelector<HTMLElement>(".session-mode") ?? undefined);
+const SessionPortalDocument = createContext<Document | null>(null);
+export const useSessionPortalDocument = () => useContext(SessionPortalDocument);
+export function SessionPortalDocumentProvider({
+  ownerDocument,
+  children,
+}: {
+  ownerDocument: Document;
+  children: ReactNode;
+}) {
+  return createElement(
+    SessionPortalDocument.Provider,
+    { value: ownerDocument },
+    children,
+  );
+}
+export function sessionPortalContainer(
+  ownerDocument?: Document,
+): HTMLElement | undefined {
+  const activeDocument =
+    ownerDocument ?? (typeof document !== "undefined" ? document : undefined);
+  return (
+    activeDocument?.querySelector<HTMLElement>(".session-mode") ?? undefined
+  );
 }
 
 export function isSessionModeActive(): boolean {

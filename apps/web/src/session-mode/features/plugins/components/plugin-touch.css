@@ -1,0 +1,81 @@
+@media (pointer: coarse) {
+  .session-mode .session-plugin-view .session-plugin-touch-target {
+    min-width: 44px;
+    min-height: 44px;
+    flex-shrink: 0;
+  }
+
+  .session-mode .session-plugin-view .session-plugin-card-summary {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .session-mode .session-plugin-view .session-plugin-card-summary > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .session-mode .session-plugin-view .session-plugin-card-actions {
+    flex-shrink: 0;
+  }
+
+  .session-mode .session-plugin-view .session-plugin-detail-header {
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+
+  .session-mode .session-plugin-view .session-plugin-detail {
+    padding-inline: 16px;
+  }
+
+  .session-mode .session-plugin-view .session-plugin-detail-summary {
+    flex-basis: 100%;
+  }
+
+  .session-mode .session-plugin-view .session-plugin-detail-actions {
+    flex-wrap: wrap;
+  }
+}
+
+.session-mode [data-sonner-toast].session-plugin-notice {
+  --normal-bg: var(--background);
+  --normal-border: var(--border);
+  --normal-text: var(--foreground);
+}
+
+@media (max-width: 767px), (pointer: coarse) {
+  .session-mode
+    [data-sonner-toast].session-plugin-notice[data-styled="true"]
+    [data-close-button] {
+    width: 44px;
+    height: 44px;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    color: var(--normal-text);
+  }
+
+  .session-mode .session-plugin-notice [data-close-button]::before {
+    content: "";
+    position: absolute;
+    inset: 12px;
+    border: 1px solid var(--normal-border);
+    border-radius: 50%;
+    background: var(--normal-bg);
+    pointer-events: none;
+  }
+
+  .session-mode
+    .session-plugin-notice[data-type="error"]
+    [data-close-button]::before {
+    background: var(--error-bg);
+    border-color: var(--error-border);
+  }
+
+  .session-mode .session-plugin-notice [data-close-button] svg {
+    width: 12px;
+    height: 12px;
+    z-index: 1;
+    pointer-events: none;
+  }
+}

@@ -8,6 +8,18 @@ import {
   estimateTransientBytes,
 } from "./codexTranscriptMemoryBudget";
 
+const privateBodyMethods = [
+  "command/exec/outputDelta",
+  "process/outputDelta",
+  "rawResponseItem/completed",
+  "item/commandExecution/outputDelta",
+  "item/commandExecution/terminalInteraction",
+  "item/fileChange/outputDelta",
+  "turn/diff/updated",
+  "item/reasoning/textDelta",
+  "item/tool/textDelta",
+];
+
 const user = (turnId: string, text = "hello"): ServerNotification =>
   ({
     method: "item/completed",
@@ -148,20 +160,33 @@ const reasoningDelta = (turnId: string, index: number): ServerNotification =>
   }) as ServerNotification;
 
 describe("codex transcript memory budget", () => {
-  it("keeps compact event payload references when no ingress trimming is needed", () => {
+  it("keeps already projected tool metadata references without retaining tool text", () => {
     const event = command("t1", "small");
-    expect(compactCodexEventPayload(event)).toBe(event);
+    const compacted = compactCodexEventPayload(event);
+    expect(compacted).not.toBe(event);
+    expect(compacted).toMatchObject({
+      params: {
+        item: {
+          id: "t1-cmd",
+          status: "completed",
+          exitCode: 0,
+          aggregatedOutput: null,
+          transcriptMetadataOnly: true,
+        },
+      },
+    });
+    expect(compactCodexEventPayload(compacted)).toBe(compacted);
   });
 
-  it("trims large tool payloads before they enter the transcript store", () => {
+  it("removes large tool bodies before they enter the transcript store", () => {
     const event = command("t1", "x".repeat(2 * 1024 * 1024));
     const compacted = compactCodexEventPayload(event);
     expect(compacted).not.toBe(event);
-    expect(
-      (compacted as any).params.item.aggregatedOutput.length,
-    ).toBeLessThanOrEqual(64 * 1024);
-    expect((compacted as any).params.item.aggregatedOutput).toContain(
-      "...[truncated ",
+    expect((compacted as any).params.item.aggregatedOutput).toBeNull();
+    expect(JSON.stringify(compacted)).not.toContain("x".repeat(100));
+    expect(estimateTranscriptBytes(compacted)).toBeLessThanOrEqual(64 * 1024);
+    expect((event as any).params.item.aggregatedOutput).toHaveLength(
+      2 * 1024 * 1024,
     );
   });
 
@@ -201,7 +226,7 @@ describe("codex transcript memory budget", () => {
     });
   });
 
-  it("bounds oversized command output while preserving user and assistant text", () => {
+  it("keeps bounded command metadata while preserving user and assistant text", () => {
     const huge = "x".repeat(200);
     const events = [
       user("t1", "keep user"),
@@ -213,10 +238,11 @@ describe("codex transcript memory budget", () => {
       maxEvents: 20,
       toolTextLimit: 64,
     });
-    const cmd = (result.events[2] as any).params.item
-      .aggregatedOutput as string;
-    expect(cmd.length).toBeLessThanOrEqual(64);
-    expect(cmd).toContain("...[truncated ");
+    const cmd = (result.events[2] as any).params.item;
+    expect(cmd.aggregatedOutput).toBeNull();
+    expect(cmd.transcriptMetadataOnly).toBe(true);
+    expect(cmd).toMatchObject({ id: "t1-cmd", status: "completed", exitCode: 0 });
+    expect(JSON.stringify(cmd)).not.toContain(huge);
     expect((result.events[0] as any).params.item.content[0].text).toBe(
       "keep user",
     );
@@ -225,7 +251,7 @@ describe("codex transcript memory budget", () => {
     expect(result.evicted).toBe(false);
   });
 
-  it("bounds dynamic and mcp tool payload strings without stringifying JSON", () => {
+  it("removes dynamic and mcp bodies while retaining bounded lifecycle metadata", () => {
     const result = compactCodexTranscript(
       [
         {
@@ -282,23 +308,60 @@ describe("codex transcript memory budget", () => {
     );
     const dynamicItem = (result.events[0] as any).params.item;
     const mcpItem = (result.events[1] as any).params.item;
-    expect(dynamicItem.contentItems[0].imageUrl.length).toBeLessThanOrEqual(64);
-    expect(dynamicItem.arguments.prompt).toContain("...[truncated ");
-    expect(mcpItem.arguments.query.length).toBeLessThanOrEqual(64);
-    expect(mcpItem.result.content[0].text.length).toBeLessThanOrEqual(64);
+    expect(dynamicItem).toMatchObject({
+      id: "dyn",
+      status: "completed",
+      arguments: null,
+      contentItems: [],
+      success: true,
+      transcriptMetadataOnly: true,
+    });
+    expect(mcpItem).toMatchObject({
+      id: "mcp",
+      status: "completed",
+      arguments: null,
+      result: null,
+      transcriptMetadataOnly: true,
+    });
+    for (const item of [dynamicItem, mcpItem]) {
+      expect(JSON.stringify(item)).not.toContain("x".repeat(100));
+      expect(JSON.stringify(item)).not.toContain("p".repeat(100));
+      expect(JSON.stringify(item)).not.toContain("q".repeat(100));
+      expect(JSON.stringify(item)).not.toContain("r".repeat(100));
+      expect(estimateTranscriptBytes(item)).toBeLessThan(4096 * 2);
+    }
   });
 
-  it("drops hidden transcript deltas before applying the budget", () => {
+  it("drops hidden deltas while retaining safe hook lifecycle statistics", () => {
     const events = [
       user("t1"),
       commandDelta("t1"),
       {
         method: "hook/started",
-        params: { threadId: "thread", turnId: "t1", run: { id: "hook" } },
+        params: {
+          threadId: "thread",
+          turnId: "t1",
+          run: {
+            id: "hook",
+            status: "running",
+            sourcePath: "/private-hook",
+            entries: [{ kind: "context", text: "private context".repeat(1000) }],
+          },
+        },
       },
       {
         method: "hook/completed",
-        params: { threadId: "thread", turnId: "t1", run: { id: "hook" } },
+        params: {
+          threadId: "thread",
+          turnId: "t1",
+          run: {
+            id: "hook",
+            status: "completed",
+            durationMs: 23,
+            sourcePath: "/private-hook",
+            entries: [{ kind: "context", text: "private context".repeat(1000) }],
+          },
+        },
       },
       {
         method: "item/completed",
@@ -315,8 +378,29 @@ describe("codex transcript memory budget", () => {
       maxBytes: 100_000,
       maxEvents: 20,
     });
-    expect(result.events).toEqual([events[0], events[5]]);
-    expect(result.hiddenEventCount).toBe(4);
+    expect(result.events.map((event) => event.method)).toEqual([
+      "item/completed",
+      "hook/started",
+      "hook/completed",
+      "item/completed",
+    ]);
+    expect(result.events[0]).toBe(events[0]);
+    expect(result.events[3]).toBe(events[5]);
+    expect((result.events[1] as any).params.run).toMatchObject({
+      id: "hook",
+      status: "running",
+      sourcePath: "/private-hook",
+      entries: [],
+    });
+    expect((result.events[2] as any).params.run).toMatchObject({
+      id: "hook",
+      status: "completed",
+      durationMs: 23,
+      sourcePath: "/private-hook",
+      entries: [],
+    });
+    expect(result.hiddenEventCount).toBe(2);
+    expect(result.compactedPayloadCount).toBe(2);
     expect(result.evicted).toBe(false);
   });
 
@@ -420,8 +504,10 @@ describe("codex transcript memory budget", () => {
     const result = compactCodexTranscript(events, {
       maxBytes: 8 * 1024 * 1024,
       targetBytes: 4 * 1024 * 1024,
-      maxEvents: 3000,
-      targetEvents: 1500,
+      // Removed tool bodies no longer create byte pressure. Keep the original
+      // payload load and byte gates, with stricter event gates to exercise eviction.
+      maxEvents: 500,
+      targetEvents: 250,
       activeTurnId: "live",
     });
     const retainedItems = result.events
@@ -445,6 +531,8 @@ describe("codex transcript memory budget", () => {
       ),
     ).toBe(true);
     expect(retainedCommands.length).toBeLessThan(1000);
+    expect(retainedCommands.every((item) => item.aggregatedOutput === null)).toBe(true);
+    expect(result.compactedPayloadCount).toBe(1001);
     expect(result.sameTurnTrimmedEventCount).toBeGreaterThan(0);
     expect(result.truncatedTurnIds).toEqual(["live"]);
   });
@@ -463,8 +551,10 @@ describe("codex transcript memory budget", () => {
     const result = compactCodexTranscript(events, {
       maxBytes: 8 * 1024 * 1024,
       targetBytes: 4 * 1024 * 1024,
-      maxEvents: 3000,
-      targetEvents: 1500,
+      // Preserve the started/completed payload load while forcing event pressure
+      // after tool bodies are removed; the byte gates remain unchanged.
+      maxEvents: 500,
+      targetEvents: 250,
       activeTurnId: "live",
     });
     const retainedItems = result.events
@@ -476,6 +566,8 @@ describe("codex transcript memory budget", () => {
     expect(result.estimatedBytes).toBeLessThanOrEqual(4 * 1024 * 1024);
     expect(retainedCommands.some((item) => item.id === "running")).toBe(true);
     expect(retainedCommands.length).toBeLessThan(500);
+    expect(retainedCommands.every((item) => item.aggregatedOutput === null)).toBe(true);
+    expect(result.compactedPayloadCount).toBe(1001);
     expect(retainedItems.some((item) => item.type === "userMessage")).toBe(
       true,
     );
@@ -486,7 +578,7 @@ describe("codex transcript memory budget", () => {
     ).toBe(true);
   });
 
-  it("bounds active-turn reasoning deltas that have an itemId but no item object", () => {
+  it("drops private active-turn reasoning bodies before budgeting the same pressure load", () => {
     const events = [
       turnStarted("live"),
       user("live", "keep user"),
@@ -518,10 +610,10 @@ describe("codex transcript memory budget", () => {
     expect(
       result.events.some((event) => event.method.includes("reasoning")),
     ).toBe(false);
-    expect(result.sameTurnTrimmedEventCount).toBeGreaterThan(0);
+    expect(result.hiddenEventCount).toBe(2000);
   });
 
-  it("bounds plan, reasoning, and turn diff payloads on ingress", () => {
+  it("bounds public plan and reasoning summaries while removing private reasoning and diff bodies", () => {
     const huge = "x".repeat(300 * 1024);
     const events = [
       {
@@ -554,16 +646,86 @@ describe("codex transcript memory budget", () => {
     ] as ServerNotification[];
 
     const compacted = events.map((event) => compactCodexEventPayload(event));
-    const textFields = [
-      (compacted[0] as any).params.item.text,
-      (compacted[1] as any).params.item.summary[0],
-      (compacted[1] as any).params.item.content[0],
-      (compacted[2] as any).params.diff,
-    ] as string[];
-    for (const text of textFields) {
-      expect(text.length).toBeLessThanOrEqual(256 * 1024);
-      expect(text).toContain("中间内容因会话内存限制已省略");
+    const planText = (compacted[0] as any).params.item.text as string;
+    expect(planText.length).toBeLessThanOrEqual(256 * 1024);
+    expect(planText).toContain("中间内容因会话内存限制已省略");
+    const summary = (compacted[1] as any).params.item.summary as string[];
+    expect(summary.join("").length).toBeLessThanOrEqual(4096);
+    expect(summary.join("")).toContain("…");
+    expect((compacted[1] as any).params.item.content).toEqual([]);
+    const result = compactCodexTranscript(events, {
+      maxBytes: 8 * 1024 * 1024,
+      maxEvents: 20,
+    });
+    expect(result.events.some((event) => event.method === "turn/diff/updated")).toBe(false);
+    expect(result.hiddenEventCount).toBe(1);
+  });
+
+  it("projects tools embedded in a turn without losing user or assistant items", () => {
+    const commandItem = (command("t1", "private body".repeat(1000)) as any).params.item;
+    const event = {
+      method: "turn/completed",
+      params: {
+        threadId: "thread",
+        turn: {
+          id: "t1",
+          items: [
+            (user("t1", "keep user") as any).params.item,
+            commandItem,
+            (agent("t1", "keep assistant") as any).params.item,
+          ],
+          status: "completed",
+        },
+      },
+    } as ServerNotification;
+    const result = compactCodexTranscript([event], {
+      maxBytes: 100_000,
+      maxEvents: 20,
+    });
+    const items = (result.events[0] as any).params.turn.items;
+    expect(items.map((item: any) => item.id)).toEqual(["t1-user", "t1-cmd", "t1-agent"]);
+    expect(items[0].content[0].text).toBe("keep user");
+    expect(items[1]).toMatchObject({ aggregatedOutput: null, status: "completed" });
+    expect(items[2].text).toBe("keep assistant");
+    expect(result.compactedPayloadCount).toBe(1);
+    expect(compactCodexEventPayload(result.events[0])).toBe(result.events[0]);
+  });
+
+  it("rejects every private tool body method before retaining history", () => {
+    const events = [user("t1"), agent("t1")];
+    for (const method of privateBodyMethods) {
+      const result = compactCodexTranscript([
+        ...events,
+        { method, params: { threadId: "thread", turnId: "t1", itemId: "tool", delta: "private".repeat(1000) } } as ServerNotification,
+      ], { maxBytes: 100_000, maxEvents: 20 });
+      expect(result.events).toEqual(events);
+      expect(result.hiddenEventCount).toBe(1);
     }
+  });
+
+  it.each(privateBodyMethods)("returns only a safe cursor when %s is compacted directly", (method) => {
+    const body = "private body".repeat(100_000);
+    const event = {
+      method,
+      params: {
+        threadId: "thread",
+        turnId: "t1",
+        itemId: "tool",
+        delta: body,
+        diff: body,
+        stdin: body,
+        item: { content: body },
+      },
+    } as ServerNotification;
+    const compacted = compactCodexEventPayload(event);
+    expect(compacted).toMatchObject({
+      method,
+      params: { threadId: "thread", turnId: "t1", itemId: "tool" },
+    });
+    expect(JSON.stringify(compacted)).not.toContain("private body");
+    expect(estimateTranscriptBytes(compacted)).toBeLessThan(4096);
+    expect(compactCodexEventPayload(compacted)).toBe(compacted);
+    expect((event.params as any).delta).toBe(body);
   });
 });
 

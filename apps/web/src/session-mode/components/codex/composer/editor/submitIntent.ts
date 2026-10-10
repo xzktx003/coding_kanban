@@ -5,11 +5,13 @@ export function submitIntent(
     ctrlKey: boolean;
     metaKey: boolean;
     isComposing?: boolean;
+    keyCode?: number;
   },
   text: string,
   behavior: EnterBehavior,
 ): "default" | "opposite" | null {
-  if (event.isComposing) return null;
+  // Some browser/IME combinations only mark the final composing Enter as 229.
+  if (event.isComposing || event.keyCode === 229) return null;
   const modifier = event.ctrlKey || event.metaKey;
   if (modifier && event.shiftKey) return "opposite";
   if (event.shiftKey) return null;

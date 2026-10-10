@@ -1,87 +1,125 @@
-import { ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
-import { useTranscriptState } from '../thread/rowState';
-import type { ThreadItem } from '@session/bindings/v2';
-import { fmtElapsed } from '@session/components/agent/utils';
-import { Badge } from '@session/components/ui/badge';
-
-type Props = {
+import { useState } from "react";
+import type { ThreadItem, TurnStatus } from "@session/bindings/v2";
+import { useTranslation } from "react-i18next";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+} from "@session/components/ui/dialog";
+import { ToolContent } from "../presentation/ToolContent";
+import { NativeToolIcon } from "../presentation/NativeToolIcons";
+import {
+  nativeMcpToolLabel,
+  nativeToolJson,
+  nativeMcpResultPresentation,
+} from "../presentation/nativeToolSemantics";
+import { NativeToolDisclosure } from "./NativeToolDisclosure";
+import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
+import { TranscriptDetailsNotice } from "./TranscriptDetailsNotice";
+export function McpToolCallItem({
+  item,
+  termination,
+}: {
   item: ThreadItem;
-};
-
-export function McpToolCallItem({ item }: Props) {
-  const [isExpanded, setIsExpanded] = useTranscriptState('mcp', false);
-
-  if (item.type !== 'mcpToolCall') return null;
-  const status = item.status;
-
-  const hasDetails = item.result || item.error;
-
+  termination?: TurnStatus;
+}) {
+  const { t, i18n } = useTranslation("thread"),
+    [raw, setRaw] = useState(false);
+  if (item.type !== "mcpToolCall") return null;
+  const metadataOnly = isTranscriptMetadataOnly(item);
+  const running = item.status === "inProgress" && !termination,
+    language = i18n?.language ?? "zh",
+    chinese = language.startsWith("zh");
+  const label = nativeMcpToolLabel(item, language, !running),
+    progress = (item as typeof item & { progressMessage?: string })
+      .progressMessage;
+  const rawLabel = chinese
+    ? "显示原始工具调用输出"
+    : "Show raw tool call output";
+  const rawValue = {
+    callId: item.id,
+    invocation: {
+      server: item.server,
+      tool: item.tool,
+      arguments: item.arguments,
+    },
+    durationMs: item.durationMs,
+    result: item.result,
+    error: item.error,
+  };
+  const error = item.error?.message;
+  const presentation = metadataOnly
+    ? { content: [], structured: null }
+    : nativeMcpResultPresentation(
+        item.result?.content,
+        item.result?.structuredContent,
+      );
+  const hasContent = !!presentation.content.length,
+    structured = presentation.structured;
   return (
-    <div className="flex flex-col gap-1.5 w-full text-sm text-neutral-600 dark:text-neutral-300">
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: role and tabIndex are applied together with the handler, both gated on hasDetails */}
-      <div
-        className={`flex items-center gap-2 ${hasDetails ? 'cursor-pointer select-none' : ''}`}
-        role={hasDetails ? 'button' : undefined}
-        tabIndex={hasDetails ? 0 : undefined}
-        onClick={() => hasDetails && setIsExpanded(!isExpanded)}
-        onKeyDown={(e) => {
-          if (hasDetails && (e.key === 'Enter' || e.key === ' ')) {
-            e.preventDefault();
-            setIsExpanded(!isExpanded);
-          }
-        }}
+    <div className="codex-tool-call">
+      <NativeToolDisclosure
+        className="codex-native-mcp"
+        icon={<NativeToolIcon name="mcp" />}
+        summary={label}
+        running={running}
       >
-        <Badge>{item.server}</Badge>
-        <span className="font-mono font-medium">{item.tool}</span>
-
-        <div className="flex items-center shrink-0 ml-1">
-          {status === 'inProgress' && (
-            <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
-          )}
-          {status === 'failed' && <X className="h-3.5 w-3.5 text-red-500 stroke-[2.5]" />}
-          {status === 'completed' && <div className="h-1.5 w-1.5 rounded-full bg-green-500" />}
-        </div>
-
-        {hasDetails && (
-          <div className="text-neutral-400">
-            {isExpanded ? (
-              <ChevronDown className="h-3.5 w-3.5" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5" />
+        {running && !item.result && !item.error && !termination ? null : (
+          <>
+            {error && <p role="alert">{error}</p>}
+            {hasContent && <ToolContent content={presentation.content} />}
+            {structured != null && (
+              <pre className="codex-native-tool-json">
+                {nativeToolJson(structured)}
+              </pre>
             )}
-          </div>
+            {!metadataOnly && !hasContent && structured == null && !error && (
+              <p>
+                {chinese ? "工具未返回任何内容" : "Tool returned no content"}
+              </p>
+            )}
+            {termination && (
+              <p role="status">
+                {t(
+                  termination === "interrupted"
+                    ? "activity.interrupted"
+                    : termination === "failed"
+                      ? "activity.failed"
+                      : "activity.ended",
+                )}
+              </p>
+            )}
+            {!metadataOnly && (
+              <button
+                type="button"
+                className="codex-native-tool-raw-button"
+                aria-label={rawLabel}
+                onClick={() => setRaw(true)}
+              >
+                <NativeToolIcon name="raw" />
+              </button>
+            )}
+          </>
         )}
-
-        {item.mcpAppResourceUri && (
-          <div className="ml-auto text-xs text-neutral-400 max-w-[150px] truncate">
-            {item.mcpAppResourceUri}
-          </div>
-        )}
-
-        {status !== 'inProgress' && typeof item.durationMs === 'number' && (
-          <span className="ml-auto text-xs text-neutral-400 font-mono shrink-0">
-            {fmtElapsed(item.durationMs)}
-          </span>
-        )}
-      </div>
-
-      {isExpanded && hasDetails && (
-        <div className="pl-5 pr-2 pb-2">
-          {status === 'failed' && item.error && (
-            <div className="text-xs font-mono p-2 rounded bg-red-50/50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/30 text-red-600 dark:text-red-400">
-              {item.error.message}
-            </div>
-          )}
-
-          {status === 'completed' && item.result && (
-            <div className="text-xs font-mono p-2 rounded bg-neutral-50 dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 text-neutral-500 max-h-[200px] overflow-y-auto whitespace-pre-wrap">
-              {item.result.structuredContent
-                ? JSON.stringify(item.result.structuredContent, null, 2)
-                : JSON.stringify(item.result.content, null, 2)}
-            </div>
-          )}
-        </div>
+      </NativeToolDisclosure>
+      {metadataOnly && <TranscriptDetailsNotice />}
+      {progress && (
+        <p role="status" className="codex-tool-progress">
+          {progress}
+        </p>
       )}
+      <Dialog open={raw && !metadataOnly} onOpenChange={setRaw}>
+        <DialogContent className="codex-file-preview max-w-[90vw] max-h-[90dvh] overflow-auto">
+          <DialogTitle>
+            {chinese
+              ? `原始 ${item.server}.${item.tool} 工具调用输出`
+              : `Raw ${item.server}.${item.tool} tool call output`}
+          </DialogTitle>
+          <pre className="codex-native-tool-json">
+            {nativeToolJson(rawValue)}
+          </pre>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

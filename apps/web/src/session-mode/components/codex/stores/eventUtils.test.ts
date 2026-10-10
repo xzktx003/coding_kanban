@@ -129,12 +129,22 @@ describe("appendTranscriptEvent", () => {
           item: { type: "message", content: chunk },
         }),
       );
+      for (const method of ["item/reasoning/textDelta", "item/tool/textDelta"])
+        events = appendTranscriptEvent(
+          events,
+          event(method, {
+            threadId: "thread",
+            turnId: "turn",
+            itemId: "private",
+            delta: chunk,
+          }),
+        );
     }
 
     expect(events).toEqual([]);
   });
 
-  it("keeps command completion output while ignoring command output deltas", () => {
+  it("keeps command completion metadata while ignoring command output bodies", () => {
     let events = appendTranscriptEvent([], commandStarted());
     events = appendTranscriptEvent(
       events,
@@ -156,7 +166,10 @@ describe("appendTranscriptEvent", () => {
       params: {
         item: {
           type: "commandExecution",
-          aggregatedOutput: "final output",
+          aggregatedOutput: null,
+          status: "completed",
+          exitCode: 0,
+          transcriptMetadataOnly: true,
         },
       },
     });
@@ -180,7 +193,7 @@ describe("appendTranscriptEvent", () => {
           type: "commandExecution",
           id: "cmd",
           status: "completed",
-          aggregatedOutput: "done",
+          aggregatedOutput: null,
         },
       },
     });
@@ -194,7 +207,10 @@ describe("appendTranscriptEvent", () => {
 
     expect(updated).toBe(events);
     expect(updated).toHaveLength(1);
-    expect(updated[0]).toBe(completed);
+    expect(updated[0]).toBe(events[0]);
+    expect(updated[0]).toMatchObject({
+      params: { item: { status: "completed", aggregatedOutput: null } },
+    });
   });
 
   it("replaces interleaved assistant deltas with the completed item", () => {
@@ -293,7 +309,17 @@ describe("appendTranscriptEvent", () => {
 });
 
 describe("codex event store", () => {
-  it("does not notify event subscribers for ignored output bursts", () => {
+  it.each([
+    "command/exec/outputDelta",
+    "process/outputDelta",
+    "rawResponseItem/completed",
+    "item/commandExecution/outputDelta",
+    "item/commandExecution/terminalInteraction",
+    "item/fileChange/outputDelta",
+    "turn/diff/updated",
+    "item/reasoning/textDelta",
+    "item/tool/textDelta",
+  ])("does not notify event subscribers for ignored %s bursts", (method) => {
     useCodexStore.setState({ events: {}, retryNoticeMap: {} });
     let eventNotifications = 0;
     const unsubscribe = useCodexStore.subscribe((state, previousState) => {
@@ -302,7 +328,7 @@ describe("codex event store", () => {
 
     useCodexStore.getState().addEvent(
       "thread",
-      event("item/commandExecution/outputDelta", {
+      event(method, {
         threadId: "thread",
         turnId: "turn",
         itemId: "cmd",
@@ -374,19 +400,73 @@ it("keeps an active assistant stream bounded while preserving its start and late
   expect(text.endsWith("z".repeat(100))).toBe(true);
 });
 it.each(["hook/started", "hook/completed"])(
-  "does not add %s notifications to the chat transcript",
+  "keeps safe %s statistics without retaining private hook context",
   (method) => {
     const events = appendTranscriptEvent(
       [],
       event(method, {
         threadId: "thread",
         turnId: "turn",
-        run: { id: "hook", entries: [] },
+        run: {
+          id: "hook",
+          status: method === "hook/started" ? "running" : "completed",
+          startedAt: 10,
+          completedAt: method === "hook/completed" ? 20 : null,
+          durationMs: method === "hook/completed" ? 10 : null,
+          sourcePath: "/private-hook",
+          entries: [{ kind: "context", text: "private context".repeat(10_000) }],
+        },
       }),
     );
-    expect(events).toEqual([]);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      method,
+      params: {
+        run: {
+          id: "hook",
+          status: method === "hook/started" ? "running" : "completed",
+          startedAt: 10,
+          completedAt: method === "hook/completed" ? 20 : null,
+          durationMs: method === "hook/completed" ? 10 : null,
+          sourcePath: "/private-hook",
+          entries: [],
+        },
+      },
+    });
+    expect(JSON.stringify(events)).not.toContain("private context");
   },
 );
+it("merges repeated hook snapshots by run and method while retaining completion statistics", () => {
+  const hook = (method: string, id: string, durationMs: number, turnId = "turn", threadId = "thread") =>
+    event(method, {
+      threadId,
+      turnId,
+      run: {
+        id,
+        status: method === "hook/started" ? "running" : "completed",
+        durationMs,
+        sourcePath: "/private-hook",
+        entries: [],
+      },
+    });
+  let events: ServerNotification[] = [];
+  for (let index = 0; index < 100; index++) {
+    events = appendTranscriptEvent(events, hook("hook/started", "hook", index));
+    events = appendTranscriptEvent(events, hook("hook/completed", "hook", index));
+  }
+  expect(events).toHaveLength(2);
+  expect(events.map((event) => event.method)).toEqual(["hook/started", "hook/completed"]);
+  expect((events[1] as any).params.run).toMatchObject({
+    id: "hook",
+    status: "completed",
+    durationMs: 99,
+  });
+  events = appendTranscriptEvent(events, hook("hook/completed", "other-hook", 1));
+  events = appendTranscriptEvent(events, hook("hook/completed", "hook", 2, "other-turn"));
+  events = appendTranscriptEvent(events, hook("hook/completed", "hook", 3, "turn", "other-thread"));
+  expect(events).toHaveLength(5);
+  expect((events[1] as any).params.run.durationMs).toBe(99);
+});
 it("does not add sleep display items to the chat transcript", () => {
   const events = appendTranscriptEvent(
     [],
@@ -416,7 +496,7 @@ it("final items replace repeated snapshots and ignore stale deltas", () => {
     params: {
       threadId: "thread",
       turnId: "turn",
-      item: { id: "tool", type: "commandExecution", aggregatedOutput: "old" },
+      item: { id: "tool", type: "commandExecution", aggregatedOutput: "old", exitCode: 1 },
     },
   } as any;
   const first = appendTranscriptEvent([], tool);
@@ -424,11 +504,14 @@ it("final items replace repeated snapshots and ignore stale deltas", () => {
     ...tool,
     params: {
       ...tool.params,
-      item: { ...tool.params.item, aggregatedOutput: "new" },
+      item: { ...tool.params.item, aggregatedOutput: "new", exitCode: 0 },
     },
   });
   expect(updated).toHaveLength(1);
-  expect((updated[0] as any).params.item.aggregatedOutput).toBe("new");
+  expect((updated[0] as any).params.item).toMatchObject({
+    aggregatedOutput: null,
+    exitCode: 0,
+  });
 });
 it("bounds a large tool snapshot before it reaches the store or cache subscribers", () => {
   const incoming = event("item/completed", {
@@ -442,12 +525,14 @@ it("bounds a large tool snapshot before it reaches the store or cache subscriber
     },
   });
   const events = appendTranscriptEvent([], incoming);
-  expect(
-    (events[0] as any).params.item.aggregatedOutput.length,
-  ).toBeLessThanOrEqual(64 * 1024);
-  expect((events[0] as any).params.item.aggregatedOutput).toContain(
-    "[truncated",
-  );
+  expect((events[0] as any).params.item).toMatchObject({
+    id: "large-tool",
+    status: "completed",
+    aggregatedOutput: null,
+    transcriptMetadataOnly: true,
+  });
+  expect(JSON.stringify(events).length).toBeLessThanOrEqual(64 * 1024);
+  expect(JSON.stringify(events)).not.toContain("x".repeat(100));
   expect((incoming as any).params.item.aggregatedOutput.length).toBe(
     2 * 1024 * 1024,
   );

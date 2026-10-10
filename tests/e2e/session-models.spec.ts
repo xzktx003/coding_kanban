@@ -130,11 +130,21 @@ for (const width of [375, 1440]) {
     await editor.fill("A 的未发送草稿");
     await label("gpt-6-astra", "high").click();
     // Sol defaults to low but also supports high: switching must retain A's preference.
-    await page.getByRole("option").filter({ hasText: "隔离模型 Sol" }).click();
+    await page.getByRole("menuitem", { name: "选择模型", exact: true }).click();
+    await page
+      .getByRole("menuitemradio")
+      .filter({ hasText: "隔离模型 Sol" })
+      .click();
+    await page.locator(".session-native-model-menu").press("Escape");
     await editor.click();
     await expect(label("gpt-6-sol", "high")).toBeVisible();
     await label("gpt-6-sol", "high").click();
-    await page.getByRole("option").filter({ hasText: "隔离模型 Luna" }).click();
+    await page.getByRole("menuitem", { name: "选择模型", exact: true }).click();
+    await page
+      .getByRole("menuitemradio")
+      .filter({ hasText: "隔离模型 Luna" })
+      .click();
+    await page.locator(".session-native-model-menu").press("Escape");
     await editor.click();
     await expect(label("gpt-6-luna", "high")).toBeVisible();
     const notice = page.locator(".session-model-change-notice");

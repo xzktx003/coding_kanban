@@ -72,11 +72,12 @@ it("captures the target directory, model, permissions and plan mode at enqueue t
     effort: "high",
   });
 });
-it("captures native auto review for workspace-write queued followups", () => {
+it("captures explicit native auto review for workspace-write queued followups", () => {
   useCodexStore.setState({ threads: [{ id: "a", cwd: "/target" } as any] });
-  useConfigStore.setState({
+  changeThreadModel("a", {
     sandbox: "workspace-write",
     approvalPolicy: "on-request",
+    approvalsReviewer: "auto_review",
   });
   expect(followupParameters("a")).toMatchObject({
     approvalPolicy: "on-request",
@@ -178,6 +179,108 @@ it("does not send a blank restored thread directory or borrow another project's 
   });
   expect(followupParameters("restored").cwd).toBe("/project with spaces");
 });
+
+it("captures exact owner-scoped permissions and service tier before a queue, steer or edit operation can await", () => {
+  hydrateThreadModel("a", { model: "chosen", reasoningEffort: "high" });
+  hydrateThreadModel("b", { model: "other", reasoningEffort: "low" });
+  changeThreadModel("a", {
+    serviceTier: "fast",
+    sandbox: "read-only",
+    approvalPolicy: "untrusted",
+    webSearchRequest: true,
+    collaborationMode: "plan",
+  });
+  const captured = followupParameters("a");
+  changeThreadModel("a", {
+    serviceTier: null,
+    sandbox: "workspace-write",
+    approvalPolicy: "on-request",
+    webSearchRequest: false,
+    collaborationMode: "default",
+  });
+  changeThreadModel("b", {
+    serviceTier: "another-tier",
+    sandbox: "danger-full-access",
+    approvalPolicy: "never",
+  });
+  useConfigStore.setState({
+    sandbox: "danger-full-access",
+    approvalPolicy: "never",
+    collaborationMode: "default",
+  });
+  expect(captured).toMatchObject({
+    model: "chosen",
+    effort: "high",
+    serviceTier: "fast",
+    approvalPolicy: "untrusted",
+    sandboxPolicy: { type: "readOnly", networkAccess: true },
+    collaborationMode: { mode: "plan" },
+  });
+  expect(followupParameters("a")).toMatchObject({
+    serviceTier: null,
+    approvalPolicy: "on-request",
+    sandboxPolicy: { type: "workspaceWrite", networkAccess: false },
+  });
+  expect(followupParameters("b")).toMatchObject({
+    serviceTier: "another-tier",
+    approvalPolicy: "never",
+    sandboxPolicy: { type: "dangerFullAccess" },
+  });
+});
+
+it.each(["queue", "steer"] as const)(
+  "sends the exact captured owner config in the %s HTTP payload after selection changes",
+  async (mode) => {
+    useCodexStore.setState({ currentThreadId: "a" });
+    hydrateThreadModel("a", { model: "owner-model", reasoningEffort: "high" });
+    changeThreadModel("a", {
+      serviceTier: "fast",
+      sandbox: "read-only",
+      sandboxPolicy: null,
+      approvalPolicy: "untrusted",
+      webSearchRequest: true,
+      collaborationMode: "plan",
+    });
+    api.postJsonWithOptions.mockImplementation(async (_path, data) => ({
+      revision: 1,
+      paused: null,
+      items: [{ ...data, status: "queued" }],
+    }));
+    const operation = followupService.submit(
+      "codex:a",
+      7,
+      "a",
+      "captured",
+      [],
+      mode,
+      "owner-turn",
+    );
+    useCodexStore.setState({ currentThreadId: "b" });
+    changeThreadModel("a", {
+      serviceTier: null,
+      sandbox: "danger-full-access",
+      approvalPolicy: "never",
+    });
+    await operation;
+    expect(api.postJsonWithOptions).toHaveBeenLastCalledWith(
+      "/followups/submit",
+      expect.objectContaining({
+        threadId: "a",
+        mode,
+        expectedTurnId: "owner-turn",
+        parameters: expect.objectContaining({
+          model: "owner-model",
+          effort: "high",
+          serviceTier: "fast",
+          approvalPolicy: "untrusted",
+          sandboxPolicy: { type: "readOnly", networkAccess: true },
+          collaborationMode: expect.objectContaining({ mode: "plan" }),
+        }),
+      }),
+      { suppressToast: true },
+    );
+  },
+);
 
 it("keeps an unchanged same-revision queue snapshot stable while accepting real same-revision changes", async () => {
   const first = {

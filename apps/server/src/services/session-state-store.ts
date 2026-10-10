@@ -300,28 +300,40 @@ function projectSession(session: AgentSessionRecord): AgentSessionRecord {
 
 export class FileSessionStateStore implements SessionStateStore {
   private lastMetadataFingerprint: string | null = null;
+  private loadFailed = false;
 
   constructor(private readonly filePath: string) {}
 
   load(): ListAgentSessionsResponse | null {
     try {
       const parsed = JSON.parse(readFileSync(this.filePath, "utf8")) as unknown;
+      let snapshot: ListAgentSessionsResponse | null;
       if (
         isRecord(parsed) &&
         parsed.version === SESSION_STATE_VERSION &&
         "snapshot" in parsed
       ) {
-        return parseSnapshot(parsed.snapshot);
+        snapshot = parseSnapshot(parsed.snapshot);
+      } else {
+        // The restart migration helper writes the legacy raw API snapshot.
+        snapshot = parseSnapshot(parsed);
       }
-
-      // The restart migration helper writes the legacy raw API snapshot.
-      return parseSnapshot(parsed);
-    } catch {
-      return null;
+      if (!snapshot) throw new Error("Invalid session snapshot");
+      this.loadFailed = false;
+      return snapshot;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        this.loadFailed = false;
+        return null;
+      }
+      this.loadFailed = true;
+      throw new Error("会话历史读取失败，已阻止空状态覆盖；请检查或恢复历史文件", { cause: error });
     }
   }
 
   save(snapshot: ListAgentSessionsResponse): void {
+    if (this.loadFailed)
+      throw new Error("会话历史尚未成功恢复，禁止覆盖原文件");
     const items = snapshot.items.map(projectSession);
     const metadataFingerprint = JSON.stringify({
       items,

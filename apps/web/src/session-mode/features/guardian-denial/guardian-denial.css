@@ -1,0 +1,55 @@
+.session-mode .codex-guardian-denial-action {
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 16px;
+}
+.session-mode .codex-guardian-denial-heading {
+  margin: 0 0 4px;
+  color: var(
+    --app-color-text-secondary,
+    color-mix(
+      in srgb,
+      var(--vscode-foreground, var(--codex-text, var(--foreground))) 65%,
+      transparent
+    )
+  );
+  font-weight: 500;
+  user-select: none;
+}
+.session-mode .codex-guardian-denial-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.session-mode .codex-guardian-denial-row p {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  color: var(
+    --vscode-descriptionForeground,
+    var(--codex-muted, var(--muted-foreground))
+  );
+}
+.session-mode .codex-guardian-denial-action button {
+  min-height: 28px;
+  border: 1px solid var(--codex-border, var(--border));
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 16px;
+}
+.session-mode .codex-guardian-denial-action button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.session-mode .codex-guardian-denial-receipt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+@media (pointer: coarse), (max-width: 767px) {
+  .session-mode .codex-guardian-denial-action button {
+    min-height: 44px;
+  }
+}

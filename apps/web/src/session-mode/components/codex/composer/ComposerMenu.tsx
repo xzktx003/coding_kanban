@@ -1,4 +1,3 @@
-import { useShallow } from "zustand/react/shallow";
 import {
   open,
   pickBrowserFiles,
@@ -16,10 +15,9 @@ import {
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ScreenshotPopover } from "@session/components/codex/composer/ScreenshotPopover";
-import {
-  useCodexStore,
-  useConfigStore,
-} from "@session/components/codex/stores";
+import { useCodexStore } from "@session/components/codex/stores";
+import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
+import { useGoalDraft } from "./goalDrafts";
 import { Button } from "@session/components/ui/button";
 import {
   Popover,
@@ -27,6 +25,9 @@ import {
   PopoverTrigger,
 } from "@session/components/ui/popover";
 import { Separator } from "@session/components/ui/separator";
+import { NativeComposerIcon } from "./NativeComposerIcon";
+import type { NativeInputMention } from "@agent-orchestrator/shared";
+import { ComposerTooltip } from "./ComposerTooltip";
 import { cn } from "@session/lib/utils";
 import {
   type MentionItem,
@@ -82,7 +83,7 @@ export function SelectFilesMenuItem({
 
 interface MentionMenuItemProps {
   item: MentionItem;
-  onInsert: (text: string) => void;
+  onInsert: (text: string, mention?: NativeInputMention) => void;
 }
 
 function MentionMenuItem({ item, onInsert }: MentionMenuItemProps) {
@@ -95,7 +96,7 @@ function MentionMenuItem({ item, onInsert }: MentionMenuItemProps) {
         type="button"
         variant="ghost"
         className="flex-1 justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors"
-        onClick={() => onInsert(item.insertText)}
+        onClick={() => onInsert(item.insertText, item.inputMention)}
       >
         {item.iconSrc && <img src={item.iconSrc} alt="" className="w-4 h-4" />}
         <span className="flex-1 text-left truncate">{item.displayName}</span>
@@ -126,7 +127,7 @@ function MentionMenuItem({ item, onInsert }: MentionMenuItemProps) {
                   className="justify-start gap-2 px-2 h-auto py-1.5 whitespace-normal text-left hover:bg-accent hover:text-accent-foreground transition-colors"
                   onClick={() => {
                     setPromptsOpen(false);
-                    onInsert(`${item.insertText} ${prompt}`);
+                    onInsert(`${item.insertText} ${prompt}`, item.inputMention);
                   }}
                 >
                   {prompt}
@@ -141,27 +142,26 @@ function MentionMenuItem({ item, onInsert }: MentionMenuItemProps) {
 }
 
 export interface ComposerMenuProps {
+  owner: string;
   onImageFilesSelected?: (files: File[]) => void;
   onImagesSelected?: (paths: string[]) => void;
   onFilesSelected?: (paths: string[]) => void;
-  onInsertMention?: (text: string) => void;
+  onInsertMention?: (text: string, mention?: NativeInputMention) => void;
   actions?: (close: () => void) => ReactNode;
 }
 
 export function ComposerMenu({
+  owner,
   onImageFilesSelected,
   onImagesSelected,
   onFilesSelected,
   onInsertMention,
   actions,
 }: ComposerMenuProps) {
-  const { webSearchRequest, setWebSearch } = useConfigStore();
-  const { goalEnabled, setGoalEnabled } = useCodexStore(
-    useShallow((s) => ({
-      goalEnabled: s.goalEnabled,
-      setGoalEnabled: s.setGoalEnabled,
-    })),
-  );
+  const threadId = useCodexStore((state) => state.currentThreadId);
+  const { webSearchRequest, setWebSearch } = useThreadModelSettings(threadId);
+  const { enabled: goalEnabled, setEnabled: setGoalEnabled } =
+    useGoalDraft(owner);
   const { t } = useTranslation("composer");
   const [openState, setOpenState] = useState(false);
   const { items } = useMentionItems();
@@ -195,17 +195,19 @@ export function ComposerMenu({
 
   return (
     <Popover open={openState} onOpenChange={setOpenState}>
-      <PopoverTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="添加附件与上下文"
-          title="添加附件与上下文"
-        >
-          <PlusIcon className="w-4 h-4" />
-        </Button>
-      </PopoverTrigger>
+      <ComposerTooltip label="添加附件与上下文">
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="添加附件与上下文"
+            title="添加附件与上下文"
+          >
+            <NativeComposerIcon name="plus" />
+          </Button>
+        </PopoverTrigger>
+      </ComposerTooltip>
       <PopoverContent
         className="session-composer-menu w-64 max-h-[min(65dvh,480px)] overflow-y-auto p-1"
         side="top"
@@ -275,8 +277,8 @@ export function ComposerMenu({
                 <MentionMenuItem
                   key={item.key}
                   item={item}
-                  onInsert={(text) => {
-                    onInsertMention?.(text);
+                  onInsert={(text, mention) => {
+                    onInsertMention?.(text, mention);
                     setOpenState(false);
                   }}
                 />

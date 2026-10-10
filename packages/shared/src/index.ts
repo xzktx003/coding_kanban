@@ -634,3 +634,8 @@ export * from "./session-projects.js";
 export * from "./session-followups.js";
 export * from "./composer-context.js";
 export * from "./session-subagents.js";
+export * from "./session-saved-patch.js";
+export * from "./session-codex-host.js";
+export * from "./session-codex-cloud.js";
+export * from "./session-codex-guardian.js";
+export * from "./codex-chat-projection.js";

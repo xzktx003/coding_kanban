@@ -1,20 +1,20 @@
-import { Loader2, MessageCircleCode, Plus, Trash2 } from 'lucide-react';
-import { useMemo } from 'react';
-import type { PluginDetail } from '@session/bindings/v2';
-import { Badge } from '@session/components/ui/badge';
-import { Button } from '@session/components/ui/button';
-import { toast } from '@session/components/ui/use-toast';
-import { fileSrc } from '@session/hooks/runtime';
-import { useExternalUrl } from '../hooks/useExternalUrl';
-import { hideBrokenImage } from './imageFallback';
+import { Loader2, MessageCircleCode, Plus, Trash2 } from "lucide-react";
+import { useMemo } from "react";
+import type { PluginDetail } from "@session/bindings/v2";
+import { Badge } from "@session/components/ui/badge";
+import { Button } from "@session/components/ui/button";
+import { pluginNotice as toast } from "../pluginNotices";
+import { fileSrc } from "@session/hooks/runtime";
+import { useExternalUrl } from "../hooks/useExternalUrl";
+import { hideBrokenImage } from "./imageFallback";
 import {
   AppsSection,
   AppTemplatesSection,
   ExternalLinkRow,
   InfoRow,
   SkillsSection,
-} from './plugin-detail';
-import { pluginIconSrc } from './pluginIcon';
+} from "./plugin-detail";
+import { pluginIconSrc } from "./pluginIcon";
 
 interface PluginDetailViewProps {
   plugin: PluginDetail;
@@ -53,7 +53,12 @@ export function PluginDetailView({
   const { openExternalUrl } = useExternalUrl();
 
   const {
-    summary: { name, installed: isInstalled, localVersion = '', interface: iface },
+    summary: {
+      name,
+      installed: isInstalled,
+      localVersion = "",
+      interface: iface,
+    },
     skills = [],
     hooks = [],
     apps = [],
@@ -74,17 +79,17 @@ export function PluginDetailView({
       await openExternalUrl(url);
     } catch (error) {
       toast({
-        title: 'Failed to open link',
+        title: "Failed to open link",
         description: error instanceof Error ? error.message : String(error),
-        variant: 'destructive',
+        variant: "destructive",
       });
     }
   };
 
   return (
-    <div className="py-8">
-      <div className="flex items-start justify-between gap-3 w-full">
-        <div className="flex items-start gap-3 flex-1 min-w-0">
+    <div className="session-plugin-detail py-8">
+      <div className="session-plugin-detail-header flex items-start justify-between gap-3 w-full">
+        <div className="session-plugin-detail-summary flex items-start gap-3 flex-1 min-w-0">
           {iconSrc && (
             <img
               src={iconSrc}
@@ -94,19 +99,31 @@ export function PluginDetailView({
             />
           )}
           <div className="space-y-1 flex-1 min-w-0">
-            <h2 className="text-lg font-semibold leading-none">{displayName}</h2>
+            <h2 className="text-lg font-semibold leading-none">
+              {displayName}
+            </h2>
             <p className="text-sm text-muted-foreground">{description}</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="session-plugin-detail-actions flex items-center gap-2 flex-shrink-0">
           {isInstalled ? (
             <>
-              <Button size="sm" variant="destructive" onClick={onUninstall}>
+              <Button
+                size="sm"
+                className="session-plugin-touch-target"
+                variant="destructive"
+                onClick={onUninstall}
+              >
                 <Trash2 className="h-4 w-4" />
                 Uninstall
               </Button>
-              <Button size="sm" variant="default" onClick={onUse}>
+              <Button
+                size="sm"
+                className="session-plugin-touch-target"
+                variant="default"
+                onClick={onUse}
+              >
                 <MessageCircleCode className="h-4 w-4 mr-2" />
                 Try now
               </Button>
@@ -114,6 +131,7 @@ export function PluginDetailView({
           ) : (
             <Button
               size="sm"
+              className="session-plugin-touch-target"
               variant="default"
               disabled={!canInstall || isInstalling}
               onClick={onInstall}
@@ -160,7 +178,9 @@ export function PluginDetailView({
 
         {mcpServers.length > 0 && (
           <div className="space-y-1">
-            <h4 className="text-sm font-medium">MCP Servers ({mcpServers.length})</h4>
+            <h4 className="text-sm font-medium">
+              MCP Servers ({mcpServers.length})
+            </h4>
             <div className="flex flex-wrap gap-1">
               {mcpServers.map((server) => (
                 <div key={server} className="flex">
@@ -203,7 +223,7 @@ export function PluginDetailView({
             {localVersion && <InfoRow label="Version">v{localVersion}</InfoRow>}
 
             {capabilities.length > 0 && (
-              <InfoRow label="Capabilities">{capabilities.join(', ')}</InfoRow>
+              <InfoRow label="Capabilities">{capabilities.join(", ")}</InfoRow>
             )}
 
             {iface?.websiteUrl && (

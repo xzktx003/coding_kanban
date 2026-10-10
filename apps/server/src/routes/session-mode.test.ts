@@ -1,8 +1,54 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Fastify from "fastify";
+import { mkdtemp, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { registerSessionModeRoutes } from "./session-mode.js";
+import type { VsCodeWebManager } from "../services/vscode-web-manager.js";
+
+test("private editor companion uses the real listening gateway port and never waits during inject", async () => {
+  const dataHome=await mkdtemp(join(tmpdir(),"kanban-host-listen-"));
+  let prepare!: (paths:{extensionsDir:string;workspacesDir:string})=>Promise<void>;
+  const manager={setCodexHostPreparation(callback:typeof prepare){prepare=callback;}} as unknown as VsCodeWebManager;
+  const app=Fastify();
+  app.register(async instance=>registerSessionModeRoutes(instance,{attachmentRoot:join(dataHome,"uploads"),vsCodeWebManager:manager}));
+  try {
+    await app.ready();
+    const paths={extensionsDir:join(dataHome,"extensions"),workspacesDir:join(dataHome,"workspaces")};
+    await assert.rejects(prepare(paths),/尚未监听/);
+    await app.listen({host:"0.0.0.0",port:0});
+    await prepare(paths);
+    const address=app.server.address(); assert.ok(address && typeof address !== "string");
+    const credential=JSON.parse(await readFile(join(dataHome,"codex-host-companion.json"),"utf8"));
+    assert.equal(credential.origin,`http://127.0.0.1:${address.port}`);
+    assert.equal((await stat(join(dataHome,"codex-host-companion.json"))).mode & 0o777,0o600);
+    const companion=JSON.parse(await readFile(join(paths.workspacesDir,"codex-host-companion.json"),"utf8"));
+    assert.equal(credential.token===companion.token,true);
+    assert.equal((await stat(join(paths.extensionsDir,"coding-kanban.codex-host-bridge-0.1.0","extension.cjs"))).isFile(),true);
+  } finally {await app.close();await rm(dataHome,{recursive:true,force:true});}
+});
+
+test("session gateway mounts owner-verified host APIs without starting or resuming an Agent", async () => {
+  const dataHome = await mkdtemp(join(tmpdir(), "kanban-host-gateway-"));
+  const cwd = join(dataHome, "project"); await mkdir(cwd);
+  const app = Fastify();
+  const requests: string[] = [];
+  registerSessionModeRoutes(app, {
+    origin: "http://127.0.0.1:1", attachmentRoot: join(dataHome, "uploads"), projects: () => [cwd],
+    fetch: async (url) => { requests.push(String(url)); throw new Error("new draft does not need native runtime"); },
+  });
+  try {
+    const relay = await app.inject("/api/session/codex-host/relay.js");
+    assert.equal(relay.statusCode, 200); assert.match(relay.headers["content-type"]!, /javascript/);
+    const response = await app.inject({ method: "POST", url: "/api/session/codex-host/bind", payload: {
+      owner: { cwd, threadId: null, draftOwner: JSON.stringify(["codex", "", "new", cwd]) }, nonce: "nonce-a", editorKey: join(dataHome, "missing.code-workspace"),
+    } });
+    assert.equal(response.statusCode, 409); assert.match(response.json().message ?? response.json().error, /工作区/);
+    assert.deepEqual(requests, []);
+  } finally { await app.close(); await rm(dataHome, { recursive: true, force: true }); }
+});
 
 test("session gateway preserves JSON, query parameters and response status", async () => {
   const app = Fastify();
@@ -315,8 +361,8 @@ test("session gateway chat SSE projection strips tool bodies before browser deli
     assert.equal(frames[1].payload.reason, "needs approval");
     assert.equal(frames[2].payload.params.item.id, "cmd");
     assert.equal(frames[2].payload.params.item.status, "completed");
-    assert.equal(frames[2].payload.params.item.command, undefined);
-    assert.equal(frames[2].payload.params.item.aggregatedOutput, undefined);
+    assert.equal(frames[2].payload.params.item.command, "cat huge.log");
+    assert.equal(frames[2].payload.params.item.aggregatedOutput, null);
     assert.deepEqual(frames[3].payload.params.item, {
       type: "function_call",
       id: "raw",
@@ -333,8 +379,11 @@ test("session gateway chat SSE projection strips tool bodies before browser deli
       id: "hook",
       status: "completed",
       eventName: "Stop",
+      sourcePath: null,
+      statusMessage: null,
+      entries: [],
     });
-    assert.equal(frames[6].payload.params.review.rationale.length, 1025);
+    assert.equal(frames[6].payload.params.review.rationale.length, 1024);
     assert.equal(frames[6].payload.params.action.command, undefined);
     assert.equal(frames[6].payload.params.action.type, "command");
   } finally {
@@ -441,6 +490,10 @@ test("session gateway chat history projection strips tool bodies but keeps proto
       id: "cmd",
       type: "commandExecution",
       status: "completed",
+      command: `${big.slice(0, 1023)}…`,
+      commandActions: [],
+      aggregatedOutput: null,
+      transcriptMetadataOnly: true,
     });
     assert.deepEqual(items[2], {
       id: "spawn",
@@ -448,12 +501,56 @@ test("session gateway chat history projection strips tool bodies but keeps proto
       tool: "spawnAgent",
       status: "completed",
       receiverThreadIds: ["child"],
-      prompt: `${big.slice(0, 1024)}…`,
+      prompt: `${big.slice(0, 1023)}…`,
       agentsStates: {
-        child: { status: "completed", message: `${big.slice(0, 1024)}…` },
+        child: { status: "completed", message: `${big.slice(0, 1023)}…` },
       },
+      transcriptMetadataOnly: true,
     });
   } finally {
     await app.close();
   }
+});
+
+
+test("chat metadata preserves native tool and public Hook shapes without retaining tool bodies", async () => {
+  const app = Fastify();
+  const privateBody = "private-tool-body".repeat(100_000);
+  const items = [
+    { type: "commandExecution", id: "cmd", status: "completed", command: "pnpm test", cwd: "/repo", commandActions: [{ type: "read", command: "cat a.ts", name: "a.ts", path: "/repo/a.ts" }], aggregatedOutput: privateBody, exitCode: 0, durationMs: 15 },
+    { type: "fileChange", id: "files", status: "completed", changes: [{ path: "a.ts", kind: { type: "update", move_path: null }, diff: privateBody }] },
+    { type: "mcpToolCall", id: "mcp", status: "completed", server: "github", tool: "search", arguments: { secret: privateBody }, result: { content: privateBody }, error: null },
+    { type: "dynamicToolCall", id: "dynamic", namespace: "codex", tool: "read_thread", status: "completed", arguments: { threadId: "other", text: privateBody }, contentItems: [{ type: "inputText", text: privateBody }], success: true },
+    { type: "webSearch", id: "web", query: "bounded query", action: { type: "search", query: "bounded query", queries: ["bounded query"] }, results: privateBody },
+    { type: "reasoning", id: "thought", summary: ["public summary"], content: [privateBody] },
+  ];
+  const hook = { id: "hook", eventName: "Stop", source: "project", sourcePath: "/private/hook", status: "completed", displayOrder: "1", startedAt: "1", completedAt: "2", durationMs: "1", entries: [{ kind: "context", text: privateBody }, { kind: "warning", text: "public warning" }], statusMessage: null };
+  registerSessionModeRoutes(app, {
+    origin: "http://127.0.0.1:12345",
+    fetch: async () => Response.json({ thread: { id: "thread", turns: [{ id: "turn", status: "completed", items, hookRuns: [hook] }] } }),
+  });
+  try {
+    const response = await app.inject({ method: "POST", url: "/api/session/api/codex/thread/read?view=chat", payload: { threadId: "thread" } });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.includes(privateBody), false);
+    const turn = response.json().thread.turns[0];
+    assert.equal(turn.items[0].command, "pnpm test");
+    assert.deepEqual(turn.items[0].commandActions[0], { type: "read", command: "cat a.ts", name: "a.ts", path: "/repo/a.ts" });
+    assert.equal(turn.items[0].aggregatedOutput, null);
+    assert.equal(turn.items[0].transcriptMetadataOnly, true);
+    assert.equal(turn.items[1].changes[0].path, "a.ts");
+    assert.equal(turn.items[1].changes[0].diff, "");
+    assert.equal(turn.items[1].changes[0].transcriptMetadataOnly, true);
+    assert.equal(turn.items[2].server, "github");
+    assert.equal(turn.items[2].arguments, null);
+    assert.equal(turn.items[2].result, null);
+    assert.equal(turn.items[3].arguments, null);
+    assert.deepEqual(turn.items[3].contentItems, []);
+    assert.equal(turn.items[4].action.query, "bounded query");
+    assert.deepEqual(turn.items[5].content, []);
+    assert.equal(turn.hookRuns[0].id, "hook");
+    assert.equal(turn.hookRuns[0].sourcePath, "/private/hook");
+    assert.deepEqual(turn.hookRuns[0].entries, [{ kind: "warning", text: "public warning" }]);
+    assert.ok(response.body.length < 12_000);
+  } finally { await app.close(); }
 });

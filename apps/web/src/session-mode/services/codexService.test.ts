@@ -24,6 +24,7 @@ import {
   forgetCodexTranscript,
 } from "./codexTranscriptActivity";
 import {
+  changeThreadModel,
   hydrateThreadModel,
   useThreadModelStore,
 } from "../stores/useThreadModelStore";
@@ -31,7 +32,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   useThreadModelStore.setState({ threads: {} });
   useWorkspaceStore.setState({ cwd: "/project" });
-  useConfigStore.setState({ threadCwdMode: "worktree", model: "" });
+  useConfigStore.setState({
+    threadCwdMode: "worktree",
+    model: "",
+    approvalsReviewer: "user",
+  });
   useSessionSyncStore.setState({
     recovering: {},
     checking: {},
@@ -107,6 +112,88 @@ it("keeps dormant background reads metadata-only and restores a fresh recent pag
     release();
     forgetCodexTranscript(id);
   }
+});
+
+it("targeted cursor hydration preserves the contiguous pagination boundary until the intervening history is read", async () => {
+  const id = "cursor-gap";
+  useCodexStore.setState({
+    threads: [],
+    currentThreadId: id,
+    events: { [id]: [] },
+    historyLoadedMap: { [id]: true },
+    turnTimingMap: {},
+    threadStatusMap: {},
+  });
+  useSessionSyncStore.setState({ cursors: { [id]: "before-50" } });
+  api.threadRead.mockResolvedValue({
+    thread: { id, turns: [] },
+    historyPage: { earlier: true, nextCursor: null },
+  });
+  await codexService.loadThreadHistory(id, undefined, {
+    background: true,
+    recent: true,
+    cursor: "target-turn-0",
+    preserveEarlierCursor: true,
+  });
+  expect(useSessionSyncStore.getState().cursors[id]).toBe("before-50");
+  await codexService.loadThreadHistory(id, undefined, {
+    background: true,
+    recent: true,
+    cursor: "before-50",
+  });
+  expect(useSessionSyncStore.getState().cursors[id]).toBeNull();
+});
+
+it("a targeted cursor read waits for a running recent check instead of reusing its different page", async () => {
+  const id = "cursor-inflight";
+  let finish!: (value: unknown) => void;
+  api.threadRead.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  api.threadRead.mockImplementation((params) =>
+    Promise.resolve({
+      thread: { id, turns: [] },
+      ...(params.cursor
+        ? { historyPage: { earlier: true, nextCursor: null } }
+        : {}),
+    }),
+  );
+  useCodexStore.setState({
+    threads: [],
+    currentThreadId: id,
+    events: { [id]: [] },
+    historyLoadedMap: { [id]: true },
+    turnTimingMap: {},
+    threadStatusMap: {},
+  });
+  useSessionSyncStore.setState({ cursors: { [id]: "before-50" } });
+  const recent = codexService.loadThreadHistory(id, undefined, {
+    background: true,
+    recent: true,
+  });
+  const target = codexService.loadThreadHistory(id, undefined, {
+    background: true,
+    recent: true,
+    cursor: "target-turn-0",
+    preserveEarlierCursor: true,
+  });
+  expect(api.threadRead).toHaveBeenCalledTimes(1);
+  finish({
+    thread: { id, turns: [] },
+    historyPage: { earlier: false, nextCursor: "before-50" },
+  });
+  await Promise.all([recent, target]);
+  expect(
+    api.threadRead.mock.calls.filter((call) => call[0].recent),
+  ).toHaveLength(2);
+  expect(api.threadRead).toHaveBeenCalledWith(
+    { threadId: id, recent: true, cursor: "target-turn-0" },
+    expect.anything(),
+  );
+  expect(useSessionSyncStore.getState().cursors[id]).toBe("before-50");
 });
 it("a background check keeps existing content interactive without the initial history loader", async () => {
   let resolve!: (value: unknown) => void;
@@ -217,6 +304,11 @@ it("sends the selected collaboration mode on each actual turn, including an exis
   useConfigStore.setState({ collaborationMode: "default" });
   await codexService.turnStart("mode", "Continue");
   expect(api.turnStart.mock.calls.at(-1)?.[0].collaborationMode.mode).toBe(
+    "plan",
+  );
+  changeThreadModel("mode", { collaborationMode: "default" });
+  await codexService.turnStart("mode", "Use my changed thread setting");
+  expect(api.turnStart.mock.calls.at(-1)?.[0].collaborationMode.mode).toBe(
     "default",
   );
 });
@@ -242,11 +334,12 @@ it("enables questions for new threads and reads existing history without applyin
     threadId: "questions-old",
   });
 });
-it("routes workspace-write approval requests to native auto review while preserving sandbox policy", async () => {
+it("routes explicit native auto review while preserving owner sandbox policy", async () => {
   useConfigStore.setState({
     threadCwdMode: "local",
     sandbox: "workspace-write",
     approvalPolicy: "on-request",
+    approvalsReviewer: "auto_review",
   });
   api.threadStart.mockResolvedValueOnce({
     thread: { id: "auto-review", preview: "", turns: [] },
@@ -914,7 +1007,7 @@ it("recovers a budget-trimmed transcript before using the opaque native cursor",
       .events.budgeted.some((event: any) => event.params?.turnId === "turn-0"),
   ).toBe(true);
 });
-it("released tool item pages remain hidden while preserving the running turn and messages", async () => {
+it("released tool item pages retain bounded metadata while preserving the running turn and messages", async () => {
   const timing = {
     live: {
       turnId: "running",
@@ -954,7 +1047,8 @@ it("released tool item pages remain hidden while preserving the running turn and
               id: "older-tool",
               type: "commandExecution",
               command: "echo ok",
-              aggregatedOutput: "ok",
+              aggregatedOutput:
+                "hidden-output-marker" + "x".repeat(1024 * 1024),
               status: "completed",
               commandActions: [],
               durationMs: 1,
@@ -977,16 +1071,24 @@ it("released tool item pages remain hidden while preserving the running turn and
   expect(useCodexStore.getState().turnTimingMap).toBe(timing);
   expect(useCodexStore.getState().currentTurnId).toBe("running");
   expect(useCodexStore.getState().events.live).toContain(existing[0]);
-  expect(
-    useCodexStore
-      .getState()
-      .events.live.some((e: any) => e.params.item?.id === "older-tool"),
-  ).toBe(false);
+  const olderTool = useCodexStore
+    .getState()
+    .events.live.find((e: any) => e.params.item?.id === "older-tool") as any;
+  expect(olderTool.params.item).toMatchObject({
+    id: "older-tool",
+    command: "echo ok",
+    status: "completed",
+    aggregatedOutput: null,
+    transcriptMetadataOnly: true,
+  });
+  expect(JSON.stringify(useCodexStore.getState().events.live)).not.toContain(
+    "hidden-output-marker",
+  );
   expect(api.threadStart).not.toHaveBeenCalled();
   expect(api.turnStart).not.toHaveBeenCalled();
 });
 
-it("keeps historical subagent discovery outside the tool-free chat transcript", async () => {
+it("keeps historical subagent discovery and bounded metadata without retaining original tool bodies", async () => {
   const { useSubagentStore } = await import("../features/subagents/store");
   useSubagentStore.setState({ nodes: {}, families: {}, selection: {} });
   const id = "tool-free-parent";
@@ -996,7 +1098,7 @@ it("keeps historical subagent discovery outside the tool-free chat transcript", 
     tool: "spawnAgent",
     receiverThreadIds: ["tool-free-child"],
     agentsStates: {},
-    prompt: "Check tests",
+    prompt: "Check tests" + "x".repeat(1024 * 1024),
   };
   api.threadRead.mockResolvedValueOnce({
     thread: {
@@ -1025,8 +1127,16 @@ it("keeps historical subagent discovery outside the tool-free chat transcript", 
   expect(
     useSubagentStore.getState().nodes["tool-free-child"]?.createdInTurn,
   ).toBe("work");
+  const collab = useCodexStore
+    .getState()
+    .events[
+      id
+    ].find((e: any) => e.params.item?.type === "collabAgentToolCall") as any;
+  expect(collab.params.item.transcriptMetadataOnly).toBe(true);
+  expect(collab.params.item.receiverThreadIds).toEqual(["tool-free-child"]);
+  expect(collab.params.item.prompt.length).toBeLessThanOrEqual(1024);
   expect(JSON.stringify(useCodexStore.getState().events[id])).not.toContain(
-    "collabAgentToolCall",
+    tool.prompt,
   );
   expect(JSON.stringify(useCodexStore.getState().events[id])).toContain("Done");
 });

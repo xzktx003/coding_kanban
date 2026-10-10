@@ -34,6 +34,11 @@ import {
   type TerminalProtocolResponseKind,
 } from "./terminal-control-filter.js";
 import { normalizeTmuxSessionName } from "./tmux-display-name.js";
+import {
+  releaseTerminalConnection as widestRemainingTerminalSize,
+  rememberTerminalConnectionSize,
+  type TerminalGridSize,
+} from "./pty-terminal-size.js";
 
 type PtyDataListener = (data: string) => void;
 const execFileAsync = promisify(execFile);
@@ -461,6 +466,10 @@ export class PtyRuntimeManager {
   >();
   private readonly writeQueues = new Map<string, Promise<void>>();
   private readonly handles = new Map<string, PtyHandle>();
+  private readonly terminalConnectionSizes = new Map<
+    string,
+    Map<string, TerminalGridSize>
+  >();
   private readonly maxScrollbackBytes: number;
   private readonly tmuxCaptureLines: number;
 
@@ -702,13 +711,27 @@ export class PtyRuntimeManager {
     return operation;
   }
 
-  resize(agentSessionId: string, cols: number, rows: number): void {
+  resize(
+    agentSessionId: string,
+    cols: number,
+    rows: number,
+    connectionId?: string,
+  ): void {
     const handle = this.handles.get(agentSessionId);
 
     if (!handle) {
       return;
     }
 
+    if (connectionId) {
+      rememberTerminalConnectionSize(
+        this.terminalConnectionSizes,
+        agentSessionId,
+        connectionId,
+        cols,
+        rows,
+      );
+    }
     handle.ptyProcess.resize(cols, rows);
 
     try {
@@ -718,6 +741,22 @@ export class PtyRuntimeManager {
     } catch {
       /* ignore processes that have already exited */
     }
+  }
+
+  releaseTerminalConnection(
+    agentSessionId: string,
+    connectionId: string,
+  ): void {
+    const restored = widestRemainingTerminalSize(
+      this.terminalConnectionSizes,
+      agentSessionId,
+      connectionId,
+    );
+    if (!restored) {
+      return;
+    }
+
+    this.resize(agentSessionId, restored.cols, restored.rows);
   }
 
   getScrollback(agentSessionId: string): string {

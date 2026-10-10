@@ -3,6 +3,8 @@
 @import "./styles/prism.css";
 @import "./styles/streaming.css";
 @import "./styles/git-diff.css";
+@import "./codex-presentation.css";
+@import "katex/dist/katex.min.css";
 
 @source "../../node_modules/streamdown/dist/*.js";
 @source "./";
@@ -290,12 +292,28 @@ body:has(#usage-panel) {
   background-color: var(--background);
   background-image:
     url("/session-assets/themes/ghibli-scene-light.svg"),
-    radial-gradient(ellipse 70% 50% at 15% 0%, oklch(0.93 0.05 145 / 45%), transparent 70%),
-    radial-gradient(ellipse 60% 45% at 100% 10%, oklch(0.95 0.05 95 / 50%), transparent 70%),
+    radial-gradient(
+      ellipse 70% 50% at 15% 0%,
+      oklch(0.93 0.05 145 / 45%),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 60% 45% at 100% 10%,
+      oklch(0.95 0.05 95 / 50%),
+      transparent 70%
+    ),
     linear-gradient(180deg, oklch(0.98 0.015 95) 0%, oklch(0.96 0.02 145) 100%);
   background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;
-  background-position: center bottom, 0 0, 0 0, 0 0;
-  background-size: min(1400px, 180vw) auto, 100% 100%, 100% 100%, 100% 100%;
+  background-position:
+    center bottom,
+    0 0,
+    0 0,
+    0 0;
+  background-size:
+    min(1400px, 180vw) auto,
+    100% 100%,
+    100% 100%,
+    100% 100%;
   background-attachment: fixed;
 }
 
@@ -303,12 +321,28 @@ body:has(#usage-panel) {
   background-color: var(--background);
   background-image:
     url("/session-assets/themes/ghibli-scene-dark.svg"),
-    radial-gradient(ellipse 70% 50% at 15% 0%, oklch(0.3 0.05 145 / 35%), transparent 70%),
-    radial-gradient(ellipse 60% 45% at 100% 10%, oklch(0.28 0.04 95 / 35%), transparent 70%),
+    radial-gradient(
+      ellipse 70% 50% at 15% 0%,
+      oklch(0.3 0.05 145 / 35%),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 60% 45% at 100% 10%,
+      oklch(0.28 0.04 95 / 35%),
+      transparent 70%
+    ),
     linear-gradient(180deg, oklch(0.16 0.015 145) 0%, oklch(0.13 0.015 95) 100%);
   background-repeat: no-repeat, no-repeat, no-repeat, no-repeat;
-  background-position: center bottom, 0 0, 0 0, 0 0;
-  background-size: min(1400px, 180vw) auto, 100% 100%, 100% 100%, 100% 100%;
+  background-position:
+    center bottom,
+    0 0,
+    0 0,
+    0 0;
+  background-size:
+    min(1400px, 180vw) auto,
+    100% 100%,
+    100% 100%,
+    100% 100%;
   background-attachment: fixed;
 }
 
@@ -348,21 +382,63 @@ body:has(#usage-panel) {
   background-image:
     radial-gradient(1px 1px at 10% 15%, rgba(255, 255, 255, 0.9), transparent),
     radial-gradient(1px 1px at 25% 60%, rgba(255, 255, 255, 0.7), transparent),
-    radial-gradient(1.5px 1.5px at 40% 30%, rgba(255, 255, 255, 0.8), transparent),
+    radial-gradient(
+      1.5px 1.5px at 40% 30%,
+      rgba(255, 255, 255, 0.8),
+      transparent
+    ),
     radial-gradient(1px 1px at 55% 80%, rgba(255, 255, 255, 0.6), transparent),
     radial-gradient(1px 1px at 70% 20%, rgba(255, 255, 255, 0.9), transparent),
-    radial-gradient(1.5px 1.5px at 85% 65%, rgba(255, 255, 255, 0.7), transparent),
+    radial-gradient(
+      1.5px 1.5px at 85% 65%,
+      rgba(255, 255, 255, 0.7),
+      transparent
+    ),
     radial-gradient(1px 1px at 5% 85%, rgba(255, 255, 255, 0.5), transparent),
     radial-gradient(1px 1px at 95% 40%, rgba(255, 255, 255, 0.8), transparent),
-    radial-gradient(1.5px 1.5px at 60% 50%, rgba(255, 255, 255, 0.6), transparent),
+    radial-gradient(
+      1.5px 1.5px at 60% 50%,
+      rgba(255, 255, 255, 0.6),
+      transparent
+    ),
     radial-gradient(1px 1px at 33% 92%, rgba(255, 255, 255, 0.7), transparent),
     radial-gradient(1px 1px at 78% 8%, rgba(255, 255, 255, 0.6), transparent),
     radial-gradient(1px 1px at 15% 45%, rgba(255, 255, 255, 0.5), transparent),
-    radial-gradient(ellipse 80% 60% at 50% 0%, oklch(0.16 0.03 265 / 60%), transparent 70%),
-    radial-gradient(ellipse 60% 50% at 100% 100%, oklch(0.14 0.03 280 / 40%), transparent 70%),
-    linear-gradient(180deg, oklch(0.07 0.01 260) 0%, oklch(0.09 0.012 260) 50%, oklch(0.06 0.01 255) 100%);
-  background-repeat: repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat, no-repeat, no-repeat, no-repeat;
-  background-size: 200px 200px, 250px 250px, 180px 180px, 220px 220px, 210px 210px, 240px 240px, 190px 190px, 230px 230px, 260px 260px, 200px 200px, 220px 220px, 250px 250px, 100% 100%, 100% 100%, 100% 100%;
+    radial-gradient(
+      ellipse 80% 60% at 50% 0%,
+      oklch(0.16 0.03 265 / 60%),
+      transparent 70%
+    ),
+    radial-gradient(
+      ellipse 60% 50% at 100% 100%,
+      oklch(0.14 0.03 280 / 40%),
+      transparent 70%
+    ),
+    linear-gradient(
+      180deg,
+      oklch(0.07 0.01 260) 0%,
+      oklch(0.09 0.012 260) 50%,
+      oklch(0.06 0.01 255) 100%
+    );
+  background-repeat:
+    repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat, repeat,
+    repeat, repeat, repeat, no-repeat, no-repeat, no-repeat;
+  background-size:
+    200px 200px,
+    250px 250px,
+    180px 180px,
+    220px 220px,
+    210px 210px,
+    240px 240px,
+    190px 190px,
+    230px 230px,
+    260px 260px,
+    200px 200px,
+    220px 220px,
+    250px 250px,
+    100% 100%,
+    100% 100%,
+    100% 100%;
   background-attachment: fixed;
 }
 

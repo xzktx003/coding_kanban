@@ -88,6 +88,13 @@ export function MobileAgentComposer({
         className="mobile-agent-composer-input"
         disabled={disabled || sending}
         onChange={(event) => setText(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+            return;
+          }
+          event.preventDefault();
+          void send("send");
+        }}
         placeholder="输入给 Codex / Agent 的内容"
         rows={3}
         value={text}
@@ -108,6 +115,11 @@ export function MobileAgentComposer({
         <button
           className="mobile-agent-composer-btn mobile-agent-composer-btn--primary"
           disabled={!text || disabled || sending}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            void send("send");
+          }}
           type="submit"
         >
           发送

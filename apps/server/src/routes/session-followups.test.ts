@@ -18,6 +18,117 @@ const body = {
   parameters: { model: "saved" },
   mode: "queue",
 };
+test("native per-thread turn settings pass queue validation and reach the runtime unchanged", async () => {
+  const granular = {
+    granular: {
+      sandbox_approval: true,
+      rules: false,
+      skill_approval: true,
+      request_permissions: false,
+      mcp_elicitations: true,
+    },
+  };
+  for (const parameters of [
+    { serviceTier: null, approvalsReviewer: "user" },
+    { serviceTier: "fast", approvalsReviewer: "auto_review" },
+    {
+      serviceTier: "flex",
+      approvalsReviewer: "guardian_subagent",
+      approvalPolicy: granular,
+    },
+    {
+      serviceTier: null,
+      approvalsReviewer: "user",
+      sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
+    },
+    {
+      serviceTier: null,
+      approvalsReviewer: "user",
+      sandboxPolicy: { type: "externalSandbox", networkAccess: "enabled" },
+    },
+  ]) {
+    const app = Fastify();
+    const calls: Array<{ method: string; params: any }> = [];
+    const queue = registerSessionFollowupRoutes(app, {
+      origin: () => null,
+      autoStart: false,
+      runtime: {
+        statuses: async () => ({ thread: "idle" }),
+        call: async (method, params) => {
+          calls.push({ method, params });
+          return { turn: { id: "native-settings-turn" } };
+        },
+      },
+    });
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/session/followups/submit",
+        payload: { ...body, parameters: { ...body.parameters, ...parameters } },
+      });
+      assert.equal(response.statusCode, 200, response.body);
+      await queue.tick();
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].method, "turn/start");
+      for (const [name, value] of Object.entries(parameters))
+        assert.deepEqual(calls[0].params[name], value);
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test("malformed native turn settings are rejected before journaling or runtime calls", async () => {
+  const app = Fastify();
+  let calls = 0;
+  const queue = registerSessionFollowupRoutes(app, {
+    origin: () => null,
+    autoStart: false,
+    runtime: {
+      statuses: async () => ({ thread: "idle" }),
+      call: async () => {
+        calls++;
+        return { turn: { id: "unexpected" } };
+      },
+    },
+  });
+  try {
+    for (const parameters of [
+      { serviceTier: 1 },
+      { serviceTier: "tier\0" },
+      { serviceTier: "x".repeat(257) },
+      { approvalsReviewer: "invented-reviewer" },
+      { approvalsReviewer: true },
+      { approvalPolicy: { granular: { sandbox_approval: "true" } } },
+      {
+        approvalPolicy: {
+          granular: {
+            sandbox_approval: true,
+            rules: false,
+            skill_approval: true,
+            request_permissions: false,
+            mcp_elicitations: true,
+            execute: true,
+          },
+        },
+      },
+      { sandboxPolicy: { type: "externalSandbox", networkAccess: true } },
+      { sandboxPolicy: { type: "externalSandbox", networkAccess: "invented" } },
+      { sandboxPolicy: { type: "readOnly", networkAccess: "enabled" } },
+    ]) {
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/session/followups/submit",
+        payload: { ...body, parameters },
+      });
+      assert.equal(response.statusCode, 400, response.body);
+    }
+    await queue.tick();
+    assert.equal(calls, 0);
+  } finally {
+    await app.close();
+  }
+});
 
 async function flockProcessesFor(path: string): Promise<string[]> {
   const { stdout } = await execFileAsync("ps", ["-eo", "pid=,args="], {

@@ -1,11 +1,13 @@
 import { expect, test } from "@playwright/test";
-import Fastify from "fastify";
+import { createRequire } from "node:module";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { registerSessionModeRoutes } from "../../apps/server/src/routes/session-mode";
+import { registerSessionModeRoutes } from "../../apps/server/src/routes/session-mode.ts";
+
+const Fastify = createRequire(new URL("../../apps/server/package.json", import.meta.url))("fastify");
 
 type SseClient = ServerResponse & { bytesWritten: number };
 

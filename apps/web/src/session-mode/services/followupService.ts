@@ -14,11 +14,7 @@ import type {
   ComposerContext,
   AgentMention,
 } from "@agent-orchestrator/shared";
-import {
-  approvalsReviewerForSandbox,
-  useConfigStore,
-  useCodexStore,
-} from "../components/codex/stores";
+import { useCodexStore } from "../components/codex/stores";
 import { getThreadModelSettings } from "../stores/useThreadModelStore";
 import { getJsonWithOptions, postJsonWithOptions } from "./apiAdapt/shared";
 export const useFollowupStore = create<{
@@ -91,19 +87,21 @@ function accept(id: string, data: FollowupThread) {
   return data;
 }
 export function followupParameters(threadId: string): Record<string, unknown> {
-  const c = useConfigStore.getState(),
+  const c = getThreadModelSettings(threadId || null),
     thread = useCodexStore.getState().threads.find((t) => t.id === threadId);
-  const { model, reasoningEffort } = getThreadModelSettings(threadId);
+  const { model, reasoningEffort, serviceTier } = c;
   return {
     // Restored metadata may use an empty placeholder until its directory loads.
     // Leave the native thread's directory in effect; never borrow another project.
     cwd: thread?.cwd?.trim() ? thread.cwd : null,
     model: model || null,
     effort: reasoningEffort ?? null,
-    approvalPolicy: c.approvalPolicy,
-    approvalsReviewer: approvalsReviewerForSandbox(c.sandbox),
-    sandboxPolicy:
-      c.sandbox === "read-only"
+    serviceTier: serviceTier ?? null,
+    approvalPolicy: structuredClone(c.approvalPolicy),
+    approvalsReviewer: c.approvalsReviewer,
+    sandboxPolicy: c.sandboxPolicy
+      ? structuredClone(c.sandboxPolicy)
+      : c.sandbox === "read-only"
         ? { type: "readOnly", networkAccess: c.webSearchRequest }
         : c.sandbox === "workspace-write"
           ? {

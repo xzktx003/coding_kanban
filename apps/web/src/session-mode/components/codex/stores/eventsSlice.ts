@@ -1,6 +1,9 @@
 import { withoutToolTranscriptEvent } from "@session/services/codexTranscriptVisibility";
 import { isCodexTranscriptDormant } from "@session/services/codexTranscriptActivity";
-import { acceptTurnStart } from "@session/utils/codexRuntimeState";
+import {
+  acceptTurnStart,
+  verifiedTurnDuration,
+} from "@session/utils/codexRuntimeState";
 import type { StateCreator } from "zustand";
 import type { ServerNotification } from "@session/bindings";
 import type { ThreadGoal, ThreadTokenUsage } from "@session/bindings/v2";
@@ -163,10 +166,18 @@ export const createEventsSlice: StateCreator<
         });
       }
 
-      const nextThreadEvents =
-        isRetryNotice || isCodexTranscriptDormant(threadId)
-          ? existingEvents
-          : appendTranscriptEvent(filteredEvents, event);
+      let nextThreadEvents = isRetryNotice
+        ? existingEvents
+        : appendTranscriptEvent(filteredEvents, event);
+      if (isCodexTranscriptDormant(threadId)) nextThreadEvents = existingEvents;
+      if (
+        nextThreadEvents !== existingEvents &&
+        nextThreadEvents.length === existingEvents.length &&
+        nextThreadEvents.every(
+          (entry, index) => entry === existingEvents[index],
+        )
+      )
+        nextThreadEvents = existingEvents;
       const newEvents =
         isRetryNotice || nextThreadEvents === existingEvents
           ? state.events
@@ -228,7 +239,10 @@ export const createEventsSlice: StateCreator<
                 (typeof turn.startedAt === "number"
                   ? turn.startedAt * 1000
                   : Date.now()),
-              durationMs: turn.durationMs,
+              durationMs: verifiedTurnDuration(
+                turn.durationMs,
+                existing?.durationMs,
+              ),
               status: turn.status === "inProgress" ? "completed" : turn.status,
             },
           };
@@ -280,6 +294,33 @@ export const createEventsSlice: StateCreator<
         }
       }
 
+      // Only events accepted by the safe projection above can update tool state.
+      // Keep native command timing without retaining the command output body.
+      let commandStatusMap = state.commandStatusMap;
+      let commandDurationMap = state.commandDurationMap;
+      if (
+        (event.method === "item/started" ||
+          event.method === "item/completed") &&
+        event.params.item.type === "commandExecution"
+      ) {
+        const item = event.params.item;
+        const previousStatus = commandStatusMap[item.id];
+        const lateStart =
+          event.method === "item/started" &&
+          previousStatus !== undefined &&
+          previousStatus !== "inProgress";
+        if (!lateStart && previousStatus !== item.status)
+          commandStatusMap = { ...commandStatusMap, [item.id]: item.status };
+        if (event.method === "item/completed") {
+          const duration = verifiedTurnDuration(
+            item.durationMs,
+            commandDurationMap[item.id],
+          );
+          if (duration !== commandDurationMap[item.id])
+            commandDurationMap = { ...commandDurationMap, [item.id]: duration };
+        }
+      }
+
       let goalMap = state.goalMap;
       if (event.method === "thread/goal/updated") {
         goalMap = { ...goalMap, [threadId]: event.params.goal };
@@ -295,11 +336,12 @@ export const createEventsSlice: StateCreator<
         threadStatusMap === state.threadStatusMap &&
         turnTimingMap === state.turnTimingMap &&
         currentTurnId === state.currentTurnId &&
+        commandStatusMap === state.commandStatusMap &&
+        commandDurationMap === state.commandDurationMap &&
         retryNoticeMap === state.retryNoticeMap &&
         goalMap === state.goalMap
       )
         return state;
-
       return {
         ...(eventsChanged ? { events: newEvents } : {}),
         ...(streamingAgentMessages !== state.streamingAgentMessages
@@ -308,6 +350,8 @@ export const createEventsSlice: StateCreator<
         threadStatusMap,
         turnTimingMap,
         currentTurnId,
+        commandStatusMap,
+        commandDurationMap,
         retryNoticeMap,
         goalMap,
       };

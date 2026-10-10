@@ -29,6 +29,13 @@ interface MobileTerminalHoldGesture {
   startY: number;
 }
 
+interface MobileTerminalToolbarDrag {
+  pointerId: number;
+  startX: number;
+  startScrollLeft: number;
+  moved: boolean;
+}
+
 export function MobileTerminalShortcutHelp({
   onClose,
 }: MobileTerminalShortcutHelpProps) {
@@ -133,6 +140,9 @@ export function MobileTerminalToolbar({
   const [showHelp, setShowHelp] = useState(false);
   const [shifted, setShifted] = useState(false);
   const [inputError, setInputError] = useState<string | null>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const toolbarDragRef = useRef<MobileTerminalToolbarDrag | null>(null);
+  const suppressToolbarClickRef = useRef(false);
   const repeaterRef = useRef<MobilePressRepeater | null>(null);
   const holdGestureRef = useRef<MobileTerminalHoldGesture | null>(null);
   const suppressClickRef = useRef<MobileTerminalControlId | null>(null);
@@ -230,7 +240,47 @@ export function MobileTerminalToolbar({
       suppressClickRef.current = null;
       return;
     }
+    if (suppressToolbarClickRef.current) return;
     sendControlWithoutUnhandledRejection(controlId);
+  };
+
+  const beginToolbarDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0 || !event.isPrimary) return;
+    const toolbar = toolbarRef.current;
+    if (!toolbar) return;
+    toolbarDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startScrollLeft: toolbar.scrollLeft,
+      moved: false,
+    };
+  };
+
+  const moveToolbarDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = toolbarDragRef.current;
+    const toolbar = toolbarRef.current;
+    if (!drag || !toolbar || drag.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - drag.startX;
+    if (!drag.moved && Math.abs(deltaX) <= 10) return;
+    drag.moved = true;
+    suppressToolbarClickRef.current = true;
+    if (!toolbar.hasPointerCapture?.(event.pointerId)) {
+      toolbar.setPointerCapture?.(event.pointerId);
+    }
+    toolbar.scrollLeft = drag.startScrollLeft - deltaX;
+  };
+
+  const endToolbarDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = toolbarDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    toolbarDragRef.current = null;
+    if (toolbarRef.current?.hasPointerCapture?.(event.pointerId)) {
+      toolbarRef.current.releasePointerCapture(event.pointerId);
+    }
+    if (!drag.moved) return;
+    globalThis.setTimeout(() => {
+      suppressToolbarClickRef.current = false;
+    }, 0);
   };
 
   return (
@@ -238,6 +288,16 @@ export function MobileTerminalToolbar({
       <div
         aria-label="手机终端快捷键"
         className="mobile-terminal-toolbar"
+        onClickCapture={(event) => {
+          if (!suppressToolbarClickRef.current) return;
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onPointerCancel={endToolbarDrag}
+        onPointerDown={beginToolbarDrag}
+        onPointerMove={moveToolbarDrag}
+        onPointerUp={endToolbarDrag}
+        ref={toolbarRef}
         role="toolbar"
       >
         {MOBILE_TERMINAL_TOOLBAR_ORDER.map((item) => {
@@ -248,7 +308,10 @@ export function MobileTerminalToolbar({
                 className={`mobile-terminal-key mobile-terminal-key--modifier${shifted ? " active" : ""}`}
                 disabled={disabled}
                 key={item}
-                onClick={() => setShifted((active) => !active)}
+                onClick={() => {
+                  if (suppressToolbarClickRef.current) return;
+                  setShifted((active) => !active);
+                }}
                 title="为下一次快捷键启用 Shift"
                 type="button"
               >
@@ -263,7 +326,10 @@ export function MobileTerminalToolbar({
                 aria-expanded={showHelp}
                 className="mobile-terminal-key mobile-terminal-key--help"
                 key={item}
-                onClick={() => setShowHelp(true)}
+                onClick={() => {
+                  if (suppressToolbarClickRef.current) return;
+                  setShowHelp(true);
+                }}
                 type="button"
               >
                 说明

@@ -70,3 +70,12 @@ export function resolveWebDevConfig(
     wsTarget: `ws://${backendHost}:${serverPort}`,
   };
 }
+
+/** Vite string targets imply changeOrigin:true, breaking exact browser Origin/Host checks. */
+export function resolveWebDevProxies(config: Pick<WebDevConfig, "apiTarget" | "wsTarget">) {
+  return {
+    "/api": { target: config.apiTarget, changeOrigin: false },
+    "/vscode": { target: config.apiTarget, changeOrigin: false, ws: true },
+    "/ws": { target: config.wsTarget, changeOrigin: false, ws: true },
+  };
+}

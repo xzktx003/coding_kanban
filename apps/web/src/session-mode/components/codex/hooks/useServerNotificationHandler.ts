@@ -1,4 +1,9 @@
-import { isToolTranscriptEvent } from "@session/services/codexTranscriptVisibility";
+import { nativeThreadSettings } from "@session/services/nativeThreadSettings";
+import { observeConfigNotice } from "@session/features/codex-account/config-notices";
+import {
+  isToolTranscriptEvent,
+  withoutToolTranscriptEvent,
+} from "@session/services/codexTranscriptVisibility";
 import {
   isCodexTranscriptDormant,
   onCodexTranscriptReleased,
@@ -193,7 +198,10 @@ export function useServerNotificationHandler(
 
   return useCallback(
     (payload: ServerNotification) => {
+      observeConfigNotice(payload);
       const method = payload.method;
+      // Private reasoning is never retained, even when an older source emits it.
+      if (method === "item/reasoning/textDelta") return;
       if (method === "serverRequest/resolved") {
         resolveCodexServerRequest(
           payload.params.threadId,
@@ -263,15 +271,9 @@ export function useServerNotificationHandler(
             .threads.some((thread) => thread.id === threadId);
         if (method === "thread/settings/updated" && known) {
           const settings = payload.params.threadSettings;
-          hydrateThreadModel(
-            threadId,
-            {
-              model: settings.model,
-              modelProvider: settings.modelProvider,
-              reasoningEffort: settings.effort,
-            },
-            { notify: !!useCodexStore.getState().historyLoadedMap?.[threadId] },
-          );
+          hydrateThreadModel(threadId, nativeThreadSettings(settings), {
+            notify: !!useCodexStore.getState().historyLoadedMap?.[threadId],
+          });
           return;
         }
         if (["mcpServer/startupStatus/updated"].includes(method)) {
@@ -369,14 +371,16 @@ export function useServerNotificationHandler(
 
         // Lifecycle cleanup also runs after a task leaves display membership.
         // Only observed tasks retain transcript bodies and derived execution state.
-        if (!observed || isToolTranscriptEvent(payload)) return;
-        if (isDeltaEvent(payload)) {
-          queueDelta(threadId, payload);
+        if (!observed) return;
+        const displayPayload = withoutToolTranscriptEvent(payload);
+        if (!displayPayload) return;
+        if (isDeltaEvent(displayPayload)) {
+          queueDelta(threadId, displayPayload);
           return;
         }
         const previousEvents = useCodexStore.getState().events[threadId] ?? [];
-        useCodexStore.getState().addEvent(threadId, payload);
-        revealNewQuestion(payload, previousEvents);
+        useCodexStore.getState().addEvent(threadId, displayPayload);
+        revealNewQuestion(displayPayload, previousEvents);
       }
     },
     // syncAccountState and refs are stable across renders (refs by identity,

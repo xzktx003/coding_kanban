@@ -1,4 +1,3 @@
-import { withoutToolTranscriptEvents } from "@session/services/codexTranscriptVisibility";
 import type { ServerNotification } from "@session/bindings";
 import {
   normalizeQuestionEvents,
@@ -6,6 +5,7 @@ import {
 } from "@session/features/async-questions/model";
 import type { RenderEventContext } from "../items/fileChangeLogic";
 import { deriveRenderItems, type RenderItem } from "./deriveRenderItems";
+import { projectTranscriptItems } from "./projectTranscriptItems";
 import {
   normalizeUserMessageEvents,
   userMessageKey,
@@ -27,6 +27,7 @@ const hiddenMethods = new Set([
   "rawResponseItem/completed",
   "item/commandExecution/outputDelta",
   "item/fileChange/outputDelta",
+  "item/reasoning/textDelta",
   "turn/started",
   "mcpServer/startupStatus/updated",
   "hook/started",
@@ -39,9 +40,8 @@ function turnIdOf(event: ServerNotification): string | undefined {
 
 /** Index once per history update; row renderers never scan the entire transcript. */
 export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
-  events = normalizeQuestionEvents(
-    normalizeUserMessageEvents(withoutToolTranscriptEvents(events)),
-  );
+  events = normalizeQuestionEvents(normalizeUserMessageEvents(events));
+  const projection = projectTranscriptItems(events);
   const laterTurns = new Set<string>();
   const rollbackCounts = new Map<number, number>();
   for (let i = events.length - 1; i >= 0; i--) {
@@ -78,7 +78,9 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
     localIndices.set(index, turn.length);
     turn.push(event);
     if (
-      (event.method === "turn/diff/updated" && event.params.diff.trim()) ||
+      (event.method === "turn/diff/updated" &&
+        typeof event.params.diff === "string" &&
+        event.params.diff.trim()) ||
       (event.method === "item/completed" &&
         event.params.item.type === "fileChange" &&
         event.params.item.changes.length > 0)
@@ -98,20 +100,30 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
     ),
   );
   const seenCollab = new Set<string>();
-  const seenDeltaIds = new Set<string>();
   const rows: ThreadRow[] = [];
   for (const item of deriveRenderItems(events)) {
     if (item.kind === "cmdGroup") {
       rows.push({ key: item.key, item });
       continue;
     }
-    const { event, index } = item;
+    const { index } = item;
+    if (projection.hidden.has(index)) continue;
+    const event = projection.replacements.get(index) ?? item.event;
     if (hiddenMethods.has(event.method)) continue;
     if (
+      event.method === "item/commandExecution/terminalInteraction" &&
+      (typeof event.params.stdin !== "string" || !event.params.stdin.length)
+    )
+      continue;
+    if (
       event.method === "item/started" &&
-      !["userMessage", "collabAgentToolCall", "subAgentActivity"].includes(
-        event.params.item.type,
-      )
+      [
+        "agentMessage",
+        "commandExecution",
+        "enteredReviewMode",
+        "exitedReviewMode",
+        "sleep",
+      ].includes(event.params.item.type)
     )
       continue;
     if (
@@ -129,9 +141,24 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
       seenCollab.add(key);
     }
     if (event.method === "item/agentMessage/delta") {
-      seenDeltaIds.add(event.params.itemId);
       if (!event.params.delta.trim()) continue;
     }
+    if (event.method === "item/started" || event.method === "item/completed") {
+      const visibleItem = event.params.item;
+      // These renderers return null until public content exists. Keep the
+      // native lifecycle in the log without allocating padding or duplicate
+      // reading anchors for an invisible item.
+      if (
+        (visibleItem.type === "reasoning" &&
+          !visibleItem.summary.some((part) => part.trim())) ||
+        (visibleItem.type === "plan" && !visibleItem.text.length) ||
+        (visibleItem.type === "hookPrompt" &&
+          !visibleItem.fragments.some((fragment) => Boolean(fragment.text)))
+      )
+        continue;
+    }
+    if (event.method === "item/plan/delta" && !event.params.delta.length)
+      continue;
     if (event.method === "item/completed") {
       const completed = event.params.item;
       if (
@@ -140,7 +167,6 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
           "commandExecution",
           "enteredReviewMode",
           "exitedReviewMode",
-          "reasoning",
           "sleep",
         ].includes(completed.type)
       )
@@ -148,11 +174,14 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
       if (
         completed.type === "agentMessage" &&
         !readQuestions(completed).length &&
-        (!completed.text.trim() || seenDeltaIds.has(completed.id))
+        !completed.text.trim()
       )
         continue;
     }
-    let context: RenderEventContext | undefined;
+    const renderTermination = projection.termination.get(index);
+    let context: RenderEventContext | undefined = renderTermination
+      ? { renderTermination }
+      : undefined;
     if (
       event.method === "item/started" &&
       event.params.item.type === "userMessage"
@@ -190,7 +219,7 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
         : itemId
           ? `event-${turnIdOf(event) ?? ""}-${itemId}`
           : `event-${index}`,
-      item,
+      item: event === item.event ? item : { ...item, event },
       context,
     });
   }

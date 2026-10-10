@@ -4,13 +4,13 @@ import {
   $createTextNode,
   $getRoot,
   type ParagraphNode,
-} from 'lexical';
-import type { MentionItem } from '../mentions';
-import { $createMentionChipNode } from './MentionChipNode';
+} from "lexical";
+import type { MentionItem } from "../mentions";
+import { $createMentionChipNode } from "./MentionChipNode";
 
 /** Escape a literal string for use inside a RegExp. */
 function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
@@ -24,14 +24,17 @@ function buildMentionRegExp(items: MentionItem[]): RegExp | null {
   if (texts.length === 0) {
     return null;
   }
-  return new RegExp(`(?<![\\w$])(${texts.map(escapeRegExp).join('|')})(?![\\w-])`, 'g');
+  return new RegExp(
+    `(?<![\\w$@])(${texts.map(escapeRegExp).join("|")})(?![\\w-])`,
+    "g",
+  );
 }
 
 function appendLine(
   paragraph: ParagraphNode,
   line: string,
   pattern: RegExp | null,
-  byInsertText: Map<string, MentionItem>
+  byInsertText: Map<string, MentionItem>,
 ): void {
   if (!pattern) {
     if (line) {
@@ -55,7 +58,7 @@ function appendLine(
           displayName: item.displayName,
           iconSrc: item.iconSrc,
           brandColor: item.brandColor,
-        })
+        }),
       );
       cursor = match.index + match[1].length;
     }
@@ -73,14 +76,17 @@ function appendLine(
  * Everything lands in a single paragraph separated by line breaks, matching how
  * PlainTextPlugin handles Shift+Enter, so `getTextContent()` round-trips `\n`.
  */
-export function $setEditorFromString(value: string, items: MentionItem[]): void {
+export function $setEditorFromString(
+  value: string,
+  items: MentionItem[],
+): void {
   const root = $getRoot();
   root.clear();
 
   const byInsertText = new Map(items.map((item) => [item.insertText, item]));
   const pattern = buildMentionRegExp(items);
   const paragraph = $createParagraphNode();
-  const lines = value.split('\n');
+  const lines = value.split("\n");
 
   lines.forEach((line, index) => {
     if (index > 0) {

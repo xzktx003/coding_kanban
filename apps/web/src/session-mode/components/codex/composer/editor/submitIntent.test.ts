@@ -32,3 +32,6 @@ it("honors multiline and modifier-only submission preferences", () => {
     submitIntent({ ...plain, ctrlKey: true }, "one\ntwo", "cmdIfMultiline"),
   ).toBe("default");
 });
+it("does not submit an IME Enter reported as the native 229 key code", () => {
+  expect(submitIntent({ ...plain, keyCode: 229 }, "中文", "enter")).toBeNull();
+});

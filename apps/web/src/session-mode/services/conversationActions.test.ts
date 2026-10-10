@@ -88,8 +88,15 @@ it("does not retain forked tool payloads in side-chat metadata", async () => {
   expect(
     state.threads.find((t) => t.id === thread.id)?.turns[0].items.length,
   ).toBe(0);
+  const tool = state.events[thread.id].find(
+    (e: any) => e.params.item?.type === "commandExecution",
+  ) as any;
+  expect(tool.params.item).toMatchObject({
+    transcriptMetadataOnly: true,
+    aggregatedOutput: null,
+  });
   expect(JSON.stringify(state.events[thread.id])).not.toContain(
-    "commandExecution",
+    "x".repeat(1024),
   );
   expect(JSON.stringify(state.events[thread.id])).toContain("Final answer");
   expect(thread.turns[0].items).toHaveLength(2);

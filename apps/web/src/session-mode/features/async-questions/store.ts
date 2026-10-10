@@ -4,16 +4,21 @@ export type QuestionDraft = {
   text: string;
   baseline?: string;
   skipped: boolean;
+  turnId?: string;
 };
 export type QuestionSession = {
   openId?: string;
+  openTurnId?: string;
   presentedSources?: string[];
   drafts: Record<string, QuestionDraft>;
   sending: boolean;
   error?: string;
   uncertain?: Reply[];
   uncertainClientId?: string;
-  confirmed?: Record<string, { answer: string; baseline?: string }>;
+  confirmed?: Record<
+    string,
+    { answer: string; baseline?: string; turnId?: string }
+  >;
 };
 export const EMPTY_SESSION: QuestionSession = { drafts: {}, sending: false };
 export const useAsyncQuestionStore = create<{
@@ -40,14 +45,23 @@ export const useAsyncQuestionStore = create<{
     const drafts = { ...old.drafts };
     for (const q of questions) {
       const draft = drafts[q.id];
-      if (!draft || draft.text === (draft.baseline ?? ""))
+      if (
+        !draft ||
+        (draft.turnId !== undefined && draft.turnId !== q.turnId) ||
+        draft.text === (draft.baseline ?? "")
+      )
         drafts[q.id] = {
           text: q.answer ?? "",
           baseline: q.answer,
           skipped: false,
+          turnId: q.turnId,
         };
     }
-    get().patch(id, { openId: selected ?? questions[0]?.id, drafts });
+    get().patch(id, {
+      openId: selected ?? questions[0]?.id,
+      openTurnId: questions[0]?.turnId,
+      drafts,
+    });
   },
   edit: (id, q, text, skipped = false) => {
     const old = get().sessions[id] ?? EMPTY_SESSION;
@@ -57,6 +71,7 @@ export const useAsyncQuestionStore = create<{
         [q.id]: {
           text,
           skipped,
+          turnId: q.turnId,
           baseline: old.drafts[q.id]?.baseline ?? q.answer,
         },
       },
@@ -79,7 +94,9 @@ export const pendingQuestions = (
 export function withConfirmed(questions: Question[], session: QuestionSession) {
   return questions.map((q) => {
     const receipt = session.confirmed?.[q.id];
-    return receipt && q.answer === receipt.baseline
+    return receipt &&
+      (receipt.turnId === undefined || receipt.turnId === q.turnId) &&
+      q.answer === receipt.baseline
       ? { ...q, answer: receipt.answer }
       : q;
   });

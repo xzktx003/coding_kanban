@@ -1,6 +1,6 @@
-import { Package2 } from 'lucide-react';
-import { MCP } from '@session/components/icons';
-import { Button } from '@session/components/ui/button';
+import { Package2 } from "lucide-react";
+import { MCP } from "@session/components/icons";
+import { Button } from "@session/components/ui/button";
 
 export function TabSwitcher<T extends string>({
   tabs,
@@ -23,9 +23,9 @@ export function TabSwitcher<T extends string>({
           variant="ghost"
           size="sm"
           onClick={() => onChange(t)}
-          className={`h-7 ${active === t ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground'}`}
+          className={`session-plugin-touch-target h-7 ${active === t ? "bg-background text-foreground shadow-sm" : "text-muted-foreground"}`}
         >
-          {t.startsWith('Connector') ? (
+          {t.startsWith("Connector") ? (
             <MCP className="h-3.5 w-3.5" />
           ) : (
             <Package2 className="h-4 w-4" />

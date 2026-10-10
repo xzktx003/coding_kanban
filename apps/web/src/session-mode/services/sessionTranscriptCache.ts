@@ -95,7 +95,15 @@ export async function readTranscriptCache(
       if (cached.events)
         return {
           ...cached,
-          ...(cached.thread ? { thread: { ...cached.thread, turns: [] } } : {}),
+          ...(cached.thread
+            ? {
+                thread: {
+                  ...cached.thread,
+                  turns: [],
+                  status: { type: "notLoaded" as const },
+                },
+              }
+            : {}),
           events: withoutToolTranscriptEvents(cached.events).filter(
             (event) => !isIgnoredTranscriptEvent(event),
           ),
@@ -281,7 +289,11 @@ async function writeTranscriptCacheNow(record: TranscriptCache) {
     if (!db) return;
     if (record.savedAt <= cacheInvalidatedAt(record.key)) return;
     const limit = cacheRecordLimit();
-    const serialized = JSON.stringify(record);
+    // JSON is used only to estimate bytes. IndexedDB persists the original
+    // structured-clone record, including exact native bigint hook counters.
+    const serialized = JSON.stringify(record, (_key, value) =>
+      typeof value === "bigint" ? value.toString() : value,
+    );
     record.bytes = textEncoder.encode(serialized).byteLength;
     if (record.bytes > limit) return;
     const tx = db.transaction(["transcripts", "budget"], "readwrite"),

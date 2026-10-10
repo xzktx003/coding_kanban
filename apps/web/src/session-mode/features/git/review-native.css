@@ -1,0 +1,132 @@
+/* Native review structure and metrics: code-diff-c89aa729eee1.js,
+ * use-diff-annotations-d90c9cdbdde0.js. Scoped to Session and Codex only. */
+.session-mode .codex-native-diff-content { position: relative; min-width: 0; font-family: var(--codex-code-font); font-size: calc(var(--codex-code-size, 12px) - 1px); line-height: 1.8; }
+/* The native local review caller fixes the Diff code theme to Codex. Light uses
+ * its exact Lab mixes. Dark keeps the approved screenshot source aliases; the
+ * separate gutter uses 25% host + 75% approved line (the native 85/15
+ * gutter when the approved source is the native 80/20 Lab mix). */
+.session-mode .codex-native-diff-content { --codex-review-added-line: color-mix(in lab,#fff 88%,var(--codex-added)); --codex-review-removed-line: color-mix(in lab,#fff 88%,var(--codex-removed)); --codex-review-added-gutter: color-mix(in lab,#fff 91%,var(--codex-added)); --codex-review-removed-gutter: color-mix(in lab,#fff 91%,var(--codex-removed)); --codex-review-added-number: var(--codex-added); --codex-review-removed-number: var(--codex-removed); --codex-review-code-foreground: #0d0d0d; }
+:is(.session-mode.dark,.dark .session-mode) .codex-native-diff-content { --codex-review-added-line: var(--codex-added-bg); --codex-review-removed-line: var(--codex-removed-bg); --codex-review-added-gutter: color-mix(in lab,var(--codex-surface) 25%,var(--codex-added-bg)); --codex-review-removed-gutter: color-mix(in lab,var(--codex-surface) 25%,var(--codex-removed-bg)); --codex-review-added-number: var(--codex-added); --codex-review-removed-number: var(--codex-removed); --codex-review-code-foreground: var(--codex-text); }
+.session-mode .codex-native-diff-content .codex-diff-line { color: var(--codex-review-code-foreground); }
+.session-mode .codex-native-diff-content .codex-diff-line[data-kind="add"] { background: var(--codex-review-added-line); }
+.session-mode .codex-native-diff-content .codex-diff-line[data-kind="remove"] { background: var(--codex-review-removed-line); }
+.session-mode .codex-native-diff-content .codex-diff-line[data-kind="add"] .codex-diff-number { background: var(--codex-review-added-gutter); color: var(--codex-review-added-number); }
+.session-mode .codex-native-diff-content .codex-diff-line[data-kind="remove"] .codex-diff-number { background: var(--codex-review-removed-gutter); color: var(--codex-review-removed-number); }
+.session-mode .codex-native-diff-content .codex-diff-line[data-kind="add"]::before { background: var(--codex-review-added-number); }
+.session-mode .codex-native-diff-content .codex-diff-line[data-kind="remove"]::before { background-image: linear-gradient(0deg,var(--codex-review-removed-line) 50%,var(--codex-review-removed-number) 50%); background-repeat: repeat; background-size: calc(1lh / round(1lh / 2px)) calc(1lh / round(1lh / 2px)); }
+.session-mode .codex-native-diff-content[data-diff-split="true"] .codex-diff-line[data-kind="remove"]::before { background: var(--codex-review-removed-number); }
+.session-mode:not(.dark) .codex-native-diff-content .codex-diff-line[data-kind="add"] .codex-diff-word { background: rgb(from var(--codex-review-added-number) r g b / .15); }
+.session-mode:not(.dark) .codex-native-diff-content .codex-diff-line[data-kind="remove"] .codex-diff-word { background: rgb(from var(--codex-review-removed-number) r g b / .15); }
+.dark .session-mode:not(.dark) .codex-native-diff-content .codex-diff-line .codex-diff-word { background: color-mix(in srgb,var(--codex-added) 25%,transparent); }
+.dark .session-mode:not(.dark) .codex-native-diff-content .codex-diff-line[data-kind="remove"] .codex-diff-word { background: color-mix(in srgb,var(--codex-removed) 25%,transparent); }
+.session-mode .codex-native-diff-content .codex-diff-number { min-width: 0; padding-inline: 2ch 1ch; border-inline-start: 0; border-inline-end: 2px solid var(--codex-surface); }
+.session-mode .codex-native-diff-content .codex-diff-number > span { display: inline-block; min-width: 4ch; }
+.session-mode .codex-native-diff-content .codex-diff-source { padding-inline: 1ch; font-family: inherit; }
+.session-mode .codex-native-diff-content .codex-diff-word { border-radius: 3px; }
+.session-mode .codex-native-diff.codex-full-native-diff { border-radius: 12.5px; padding-bottom: 2px; background: color-mix(in srgb,var(--codex-surface) 94%,var(--codex-text)); }
+.session-mode .codex-native-diff:is(.codex-inline-diff,.codex-preview-native-diff) { border-radius: 0; }
+.session-mode .codex-file-preview { border-radius: 12.5px; border-color: color-mix(in oklab,var(--codex-text) 8%,transparent); }
+.session-mode .codex-diff-line-info { min-height: 32px; padding: 0 8px; font-family: var(--codex-chat-font, system-ui); font-size: 11px; line-height: 19.8px; }
+.session-mode .codex-review-file-header { min-height: 38px; box-sizing: border-box; display: flex; min-width: 0; align-items: center; gap: 8px; padding: 8px; font-family: var(--codex-chat-font, system-ui); font-size: 13px; line-height: 19.5px; color-scheme: light; }
+:is(.session-mode.dark,.dark .session-mode) .codex-review-file-header { color-scheme: dark; }
+.session-mode .codex-review-file-header > svg { flex-shrink: 0; }
+.session-mode .codex-review-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; cursor: pointer; }
+.session-mode .codex-review-file-toggle { opacity: 0; }
+.session-mode .codex-review-file-header:is(:hover,:focus-within) .codex-review-file-toggle { opacity: 1; }
+.session-mode .codex-review-file-directory { color: var(--codex-muted); font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-mode .codex-review-file-stats { margin-left: auto; display: flex; flex-shrink: 0; gap: 6px; font-size: 12px; }
+.session-mode .codex-review-file-toggle, .session-mode .codex-review-file-menu { display: flex; flex-shrink: 0; width: 20px; height: 20px; align-items: center; justify-content: center; cursor: pointer; color: var(--codex-muted); border-radius: 6px; }
+.session-mode .codex-review-menu { font-family: var(--codex-chat-font, system-ui); font-size: 13px; }
+.session-mode .codex-hover-diff-header { display: flex; min-width: 0; align-items: center; gap: 8px; padding: 2px 10px; border-bottom: 1px solid var(--codex-border); background: color-mix(in srgb,var(--codex-secondary) 60%,transparent); color: color-mix(in srgb,var(--codex-muted) 80%,transparent); font-family: var(--codex-chat-font,system-ui); font-size: 13px; line-height: 19.5px; }
+.session-mode .codex-hover-diff-label { display: flex; min-width: 0; align-items: baseline; gap: 6px; flex: 1; }
+.session-mode .codex-hover-diff-label > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-mode .codex-hover-diff-label > button:hover { text-decoration: underline; }
+.session-mode .codex-hover-diff-copy { display: flex; width: 20px; height: 20px; flex-shrink: 0; align-items: center; justify-content: center; cursor: pointer; }
+.session-mode .codex-hover-diff-menu { display: none; }
+.session-mode .codex-diff-annotated-row { min-width: 0; }
+.session-mode .codex-diff-line[data-selected] { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--codex-link, #a9c5de) 50%, transparent); background: color-mix(in srgb, var(--codex-link, #a9c5de) 16%, transparent); }
+.session-mode button.codex-diff-select-line { border: 0; background: transparent; font: inherit; color: inherit; cursor: pointer; }
+.session-mode .codex-diff-select-line:focus-visible { outline: 1px solid var(--codex-link, #a9c5de); outline-offset: -1px; }
+.session-mode .codex-diff-hunk { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.session-mode .codex-diff-hunk > span { overflow: hidden; text-overflow: ellipsis; }
+.session-mode .codex-diff-virtual { max-height: 440px; overflow: auto; contain: layout paint; }
+.session-mode .codex-native-diff-content[data-diff-wrap] .codex-diff-source { white-space: pre-wrap; overflow-wrap: anywhere; }
+.session-mode .codex-review-comment { margin: 6px 8px 6px 38px; padding: 10px 12px; border: 1px solid var(--codex-border, rgba(128,128,128,.2)); border-radius: 12px; background: var(--codex-surface, var(--background)); font-family: var(--codex-chat-font, system-ui); font-size: 13px; line-height: 21px; }
+.session-mode .codex-review-comment > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--codex-muted, var(--muted-foreground)); font-size: 12px; }
+.session-mode .codex-review-comment textarea { display: block; width: 100%; min-height: 72px; margin: 8px 0; resize: vertical; padding: 4px; background: transparent; color: inherit; border: 0; font: inherit; }
+.session-mode .codex-review-comment textarea:focus { outline: 1px solid var(--codex-border); }
+.session-mode .codex-review-comment footer { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.session-mode .codex-review-comment button, .session-mode .codex-review-findings button, .session-mode .codex-hunk-actions button { min-height: 28px; padding: 3px 8px; border-radius: 6px; cursor: pointer; font: inherit; }
+.session-mode .codex-review-comment button:disabled, .session-mode .codex-hunk-actions button:disabled { opacity: .45; cursor: default; }
+.session-mode .codex-review-findings { margin-top: 8px; font-size: 13px; line-height: 21px; }
+.session-mode .codex-review-findings summary { cursor: pointer; color: var(--codex-muted, var(--muted-foreground)); }
+.session-mode .codex-review-finding { padding: 8px 0; }
+.session-mode .codex-review-finding { container-type: inline-size; }
+.session-mode .codex-review-finding + .codex-review-finding { border-top: 1px solid var(--codex-border); }
+.session-mode .codex-review-finding > button { display: flex; align-items: baseline; gap: 8px; max-width: 100%; padding-left: 0; text-align: left; }
+.session-mode .codex-review-finding > button > span:last-child { font-family: var(--codex-code-font, monospace); font-size: 12px; color: var(--codex-muted, var(--muted-foreground)); overflow: hidden; text-overflow: ellipsis; }
+.session-mode .codex-review-finding p { margin: 4px 0; white-space: pre-wrap; }
+.session-mode .codex-review-selection-summary { padding: 8px 12px; color: var(--codex-muted, var(--muted-foreground)); font-size: 12px; }
+.session-mode .codex-review-snapshot-entry { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-block: 8px; }
+.session-mode .codex-review-snapshot-entry > p { flex-basis: 100%; }
+.session-mode .codex-review-snapshot-provenance, .session-mode .codex-review-unmapped-findings { padding: 8px 12px; border-bottom: 1px solid var(--codex-border); font: 12px/1.65 var(--codex-chat-font,system-ui); color: var(--codex-muted); overflow-wrap: anywhere; }
+.session-mode .codex-review-snapshot-provenance details { margin-top: 4px; }
+.session-mode .codex-review-snapshot-provenance summary { cursor: pointer; }
+.session-mode .codex-review-snapshot-provenance code { font-family: var(--codex-code-font); }
+.session-mode .codex-review-file-header { border-bottom: 1px solid var(--codex-border); padding-left: 16px; background: color-mix(in srgb,var(--codex-surface) 94%,var(--codex-text)); border-radius: 0; }
+.session-mode .codex-diff-line-info { margin-inline: 8px; border-radius: 8px; }
+.session-mode .codex-diff-split-annotations { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+.session-mode .codex-diff-split-annotations:empty { display: none; }
+@container (max-width: 440px) {
+  .session-mode .codex-review-finding > button { flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; }
+  .session-mode .codex-diff-split-annotations { display: block; }
+  .session-mode .codex-diff-split-annotations > div:empty { display: none; }
+  .session-mode .codex-diff-split-annotations .codex-review-comment { margin-inline: 8px; }
+}
+.session-mode .codex-hunk-actions { display: flex; flex-shrink: 0; gap: 4px; font-family: var(--codex-chat-font, system-ui); }
+.session-mode .codex-diff-hunk-annotation { position: relative; height: 0; }
+.session-mode .codex-diff-hunk-annotation .codex-hunk-actions { position: absolute; top: -34px; right: 2px; z-index: 20; padding: 2px; border-radius: 999px; background: color-mix(in srgb,var(--codex-secondary) 90%,transparent); box-shadow: 0 1px 2px #0002; outline: 1px solid color-mix(in srgb,var(--codex-border) 60%,transparent); opacity: 0; pointer-events: none; transition: opacity 120ms; }
+.session-mode .codex-workspace-hunk-review:is(:hover,:focus-within) .codex-hunk-actions { opacity: 1; pointer-events: auto; }
+.session-mode .codex-hunk-confirm { padding: 8px 12px; font-size: 13px; border: 1px solid var(--codex-border); border-radius: 8px; }
+.session-mode .codex-hunk-confirm p { margin-bottom: 8px; overflow-wrap: anywhere; }
+@media (pointer: coarse) {
+  .session-mode .codex-review-file-toggle { opacity: 1; }
+  .session-mode .codex-diff-hunk-annotation { height: 44px; }
+  .session-mode .codex-diff-hunk-annotation .codex-hunk-actions { position: static; margin-left: auto; width: fit-content; opacity: 1; pointer-events: auto; }
+  .session-mode .codex-review-comment button, .session-mode .codex-review-findings button, .session-mode .codex-hunk-actions button { min-height: 44px; }
+  .session-mode button.codex-diff-select-line { min-width: 36px; touch-action: manipulation; }
+  .session-mode .codex-review-file-toggle, .session-mode .codex-review-file-menu { width: 36px; height: 44px; }
+  .session-mode .codex-hover-diff-copy, .session-mode .codex-hover-diff-menu { display: flex; align-items: center; justify-content: center; width: 36px; height: 44px; flex-shrink: 0; }
+}
+
+/* Actual completed turn UT ResourceCard, with explicit preview retained for touch devices. */
+.session-mode .codex-turn-diff-summary { border: 1px solid color-mix(in oklab,var(--codex-text) 8%,transparent); border-radius: 12.5px; padding: 0; overflow: hidden; background: transparent; font-family: var(--codex-chat-font, system-ui); font-size: 13px; line-height: 19.5px; }
+.session-mode .codex-turn-diff-header { display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 12px; box-sizing: border-box; }
+.session-mode .codex-turn-diff-icon { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 12.5px; background: color-mix(in oklab, var(--codex-secondary) 92%, transparent); color: color-mix(in srgb, var(--codex-text) 65%, transparent); }
+.session-mode .codex-turn-diff-icon svg { width: 24px; height: 24px; }
+.session-mode .codex-turn-diff-title { display: flex; flex: 1; flex-direction: column; min-width: 0; padding: 0; background: transparent; text-align: left; font: inherit; color: var(--codex-text); cursor: pointer; }
+.session-mode .codex-turn-diff-title-text { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session-mode .codex-turn-diff-subtitle, .session-mode .codex-turn-diff-hover-subtitle { height: 18px; font-size: 12px; line-height: 18px; }
+.session-mode .codex-turn-diff-hover-subtitle { display: none; align-items: center; gap: 4px; color: var(--codex-muted); }
+.session-mode .codex-turn-diff-stats { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; line-height: 1; font-variant-numeric: tabular-nums; font-feature-settings: "ss01"; letter-spacing: -.025em; white-space: nowrap; flex-shrink: 0; }
+.session-mode .codex-turn-diff-stats [data-kind="add"] { color: var(--codex-added); }
+.session-mode .codex-turn-diff-stats [data-kind="remove"] { color: var(--codex-removed); }
+.session-mode .codex-turn-diff-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.session-mode .codex-turn-diff-actions .codex-patch-action, .session-mode .codex-turn-diff-review { height: 28px; min-height: 28px; padding: 0 8px; font: 12px/18px var(--codex-chat-font, system-ui); border-radius: 7px; }
+.session-mode .codex-turn-diff-review { color: var(--codex-text); border: 1px solid color-mix(in oklab,var(--codex-text) 8%,transparent); background: color-mix(in oklab, var(--codex-text) 2.5%, transparent); }
+.session-mode .codex-turn-diff-preview { flex-shrink: 0; width: 28px; min-height: 28px; color: var(--codex-muted); }
+.session-mode .codex-turn-diff-summary .session-file-changes-list { --file-change-row-height: 36px; border-top: 1px solid var(--codex-border); border-radius: 0; }
+.session-mode .codex-turn-diff-file-row { display: flex; align-items: center; width: 100%; gap: 8px; padding: 4px 12px; font-size: 13px; line-height: 19.5px; background: color-mix(in oklab, var(--codex-secondary) 70%, transparent); }
+.session-mode .codex-turn-diff-file-row:hover { background: color-mix(in oklab, var(--codex-text) 6%, transparent); }
+.session-mode .codex-turn-diff-file-row > button { height: 28px; }
+.session-mode .codex-individual-file-change-row { display: flex; min-height: 21px; align-items: center; gap: 4px; font: 13px/19.5px var(--codex-chat-font,system-ui); color: color-mix(in srgb,var(--codex-muted) 80%,transparent); }
+.session-mode .codex-individual-file-change-label { height: auto; padding: 0; font: inherit; color: inherit; }
+.session-mode .codex-individual-file-change-row .codex-file-link { font-family: var(--codex-code-font,ui-monospace); font-size: 12px; }
+.session-mode .codex-individual-file-change-stats { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; line-height: 1; letter-spacing: -.025em; font-variant-numeric: tabular-nums; color: inherit; }
+.session-mode .codex-individual-file-change-stats span { color: inherit; }
+@media (hover:hover) { .session-mode .codex-turn-diff-header:is(:hover,:focus-within) .codex-turn-diff-subtitle { display: none; } .session-mode .codex-turn-diff-header:is(:hover,:focus-within) .codex-turn-diff-hover-subtitle { display: inline-flex; } .session-mode .codex-individual-file-change-row:hover:not(:has(.codex-file-link:hover)) .codex-individual-file-change-stats [data-kind="add"] { color: var(--codex-added); } .session-mode .codex-individual-file-change-row:hover:not(:has(.codex-file-link:hover)) .codex-individual-file-change-stats [data-kind="remove"] { color: var(--codex-removed); } }
+@media(max-width:767px) { .session-mode .codex-turn-diff-header { padding-block: 10px; } .session-mode .codex-turn-diff-title { min-height: 44px; justify-content: center; } .session-mode .codex-turn-diff-header .codex-turn-diff-preview, .session-mode .codex-turn-diff-actions button { min-height: 44px; } .session-mode .codex-turn-diff-header .codex-turn-diff-preview { width: 32px; } .session-mode .codex-turn-diff-summary .session-file-changes-list { --file-change-row-height: 44px; } }
+
+.session-mode .codex-individual-file-disclosure { display: flex; opacity: 0; width: 16px; height: 16px; min-width: 16px; min-height: 16px; padding: 0; color: inherit; }
+.session-mode .codex-individual-file-change-row:is(:hover,:focus-within) .codex-individual-file-disclosure { opacity: 1; }
+@media(hover:none) { .session-mode .codex-individual-file-disclosure { opacity: 1; min-width: 44px; min-height: 44px; } }

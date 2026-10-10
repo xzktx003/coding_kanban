@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { MoreHorizontal, MessagesSquare } from "lucide-react";
+import { Search, List, Download, MessagesSquare } from "lucide-react";
 import { toast } from "sonner";
 import { threadAccess } from "@session/services/apiAdapt/codex";
 import { createSideChat } from "@session/services/conversationActions";
 import { Button } from "../../ui/button";
+import { NativeComposerIcon } from "./NativeComposerIcon";
+import { threadWorkflowActions } from "@session/features/thread-workflows/actions";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,7 +30,7 @@ export function ConversationMenu({
           aria-label="当前会话的更多操作"
           title="当前会话的更多操作"
         >
-          <MoreHorizontal size={17} />
+          <NativeComposerIcon name="more" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
@@ -38,6 +40,42 @@ export function ConversationMenu({
         collisionPadding={12}
       >
         <p className="session-conversation-menu-title">{title}</p>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() =>
+            threadId && threadWorkflowActions.request(threadId, "search")
+          }
+        >
+          <Search size={16} />
+          搜索会话
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() =>
+            threadId && threadWorkflowActions.request(threadId, "users")
+          }
+        >
+          <List size={16} />
+          用户消息导航
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() =>
+            threadId && threadWorkflowActions.request(threadId, "export")
+          }
+        >
+          <Download size={16} />
+          导出 Markdown
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() =>
+            threadId && threadWorkflowActions.request(threadId, "copyLink")
+          }
+        >
+          <NativeComposerIcon name="link" />
+          复制会话链接
+        </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!threadId || busy}
           onSelect={() => {

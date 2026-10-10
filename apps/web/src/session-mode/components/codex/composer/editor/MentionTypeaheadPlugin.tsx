@@ -15,6 +15,8 @@ import { useTranslation } from "react-i18next";
 import { ComposerSuggestionPopover } from "../ComposerSuggestionPanel";
 import { type MentionItem, matchesMention } from "../mentions";
 import { $createMentionChipNode } from "./MentionChipNode";
+import { pluginInputDrafts } from "@session/features/plugins/pluginInputs";
+import { sessionPortalContainer } from "@session/session-dom";
 
 class MentionOption extends MenuOption {
   item: MentionItem;
@@ -26,12 +28,20 @@ class MentionOption extends MenuOption {
 }
 
 /** `$` typeahead that inserts an atomic mention chip. */
-export function MentionTypeaheadPlugin({ items }: { items: MentionItem[] }) {
+export function MentionTypeaheadPlugin({
+  items,
+  trigger = "$",
+  owner,
+}: {
+  items: MentionItem[];
+  trigger?: "@" | "$";
+  owner?: string;
+}) {
   const { t } = useTranslation("thread");
   const [editor] = useLexicalComposerContext();
   const [query, setQuery] = useState<string | null>(null);
 
-  const triggerFn = useBasicTypeaheadTriggerMatch("$", {
+  const triggerFn = useBasicTypeaheadTriggerMatch(trigger, {
     minLength: 0,
     maxLength: 128,
     punctuation: "",
@@ -52,6 +62,8 @@ export function MentionTypeaheadPlugin({ items }: { items: MentionItem[] }) {
       closeMenu: () => void,
     ) => {
       editor.update(() => {
+        if (owner && option.item.inputMention)
+          pluginInputDrafts.add(owner, option.item.inputMention);
         const chip = $createMentionChipNode({
           insertText: option.item.insertText,
           displayName: option.item.displayName,
@@ -67,11 +79,13 @@ export function MentionTypeaheadPlugin({ items }: { items: MentionItem[] }) {
         closeMenu();
       });
     },
-    [editor],
+    [editor, owner],
   );
 
   return (
     <LexicalTypeaheadMenuPlugin<MentionOption>
+      parent={sessionPortalContainer() ?? undefined}
+      anchorClassName="session-native-typeahead-anchor"
       onQueryChange={setQuery}
       onSelectOption={onSelectOption}
       triggerFn={triggerFn}

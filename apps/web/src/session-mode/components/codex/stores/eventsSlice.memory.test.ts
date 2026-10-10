@@ -89,16 +89,33 @@ it("keeps dormant tasks live without retaining snapshots or deltas, and resumes 
     forgetCodexTranscript(id);
   }
 });
-it("drops command events before they enter the retained transcript", () => {
-  const before = useCodexStore.getState();
 
-  useCodexStore.getState().addEvent("thread", command("item/completed"));
+it("retains bounded command metadata, preserves completion and reuses identical snapshots", () => {
+  const completed = command("item/completed");
+  completed.params.item.aggregatedOutput = "private-output".repeat(100_000);
+  useCodexStore.getState().addEvent("thread", completed);
   useCodexStore.getState().addEvent("thread", command("item/started"));
 
-  expect(useCodexStore.getState()).toBe(before);
-  expect(useCodexStore.getState().events.thread).toBeUndefined();
-  expect(useCodexStore.getState().commandStatusMap).toEqual({});
-  expect(useCodexStore.getState().commandDurationMap).toEqual({});
+  const state = useCodexStore.getState();
+  expect(state.events.thread).toHaveLength(1);
+  expect(state.events.thread[0]).toMatchObject({
+    method: "item/completed",
+    params: {
+      item: {
+        id: "cmd",
+        type: "commandExecution",
+        status: "completed",
+        aggregatedOutput: null,
+        transcriptMetadataOnly: true,
+      },
+    },
+  });
+  expect(state.commandStatusMap).toEqual({ cmd: "completed" });
+  expect(state.commandDurationMap).toEqual({ cmd: 7 });
+  expect(JSON.stringify(state.events.thread)).not.toContain("private-output");
+  expect(JSON.stringify(state.events.thread).length).toBeLessThan(4096);
+  useCodexStore.getState().addEvent("thread", completed);
+  expect(useCodexStore.getState()).toBe(state);
 });
 
 it("strips nested tool payloads from completed turns while preserving final status", () => {
@@ -148,8 +165,34 @@ it("strips nested tool payloads from completed turns while preserving final stat
   } as any);
 
   const state = useCodexStore.getState();
-  expect(state.events.thread).toHaveLength(2);
-  expect(state.events.thread[0]).toMatchObject({
+  expect(state.events.thread).toHaveLength(4);
+  const answer = state.events.thread.find(
+    (event) =>
+      event.method === "item/completed" &&
+      event.params.item.type === "agentMessage",
+  )!;
+  const toolItems = state.events.thread.filter(
+    (event) =>
+      event.method === "item/completed" &&
+      event.params.item.type !== "agentMessage",
+  );
+  expect(toolItems).toHaveLength(2);
+  expect(toolItems.map((event) => (event.params as any).item)).toMatchObject([
+    {
+      id: "cmd",
+      type: "commandExecution",
+      status: "completed",
+      transcriptMetadataOnly: true,
+      aggregatedOutput: null,
+    },
+    {
+      id: "file",
+      type: "fileChange",
+      status: "applied",
+      transcriptMetadataOnly: true,
+    },
+  ]);
+  expect(answer).toMatchObject({
     method: "item/completed",
     params: {
       item: {
@@ -159,14 +202,14 @@ it("strips nested tool payloads from completed turns while preserving final stat
       },
     },
   });
-  expect((state.events.thread[1] as any).params.turn.items).toEqual([]);
+  expect((state.events.thread.at(-1) as any).params.turn.items).toEqual([]);
   expect(JSON.stringify(state.events.thread).includes("x".repeat(1024))).toBe(
     false,
   );
   expect(JSON.stringify(state.events.thread).includes("y".repeat(1024))).toBe(
     false,
   );
-  expect((state.events.thread[0] as any).params.item).toEqual({
+  expect((answer.params as any).item).toEqual({
     id: "answer",
     type: "agentMessage",
     text: "done",
@@ -180,6 +223,7 @@ it("strips nested tool payloads from completed turns while preserving final stat
   });
   expect(state.commandStatusMap).toEqual({});
   expect(state.commandDurationMap).toEqual({});
+  expect(JSON.stringify(state.events.thread).length).toBeLessThan(8192);
 });
 
 it("keeps streaming assistant text outside the retained transcript and caps it", () => {

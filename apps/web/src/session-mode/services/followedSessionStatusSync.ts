@@ -45,7 +45,7 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
   let repairedAt = -Infinity;
   let requestRepairTimer: ReturnType<typeof setTimeout>;
   const threadUpdatedAt = new Map<string, number>();
-  const repairedIdleTurns = new Map<string, string>();
+  const completionRepairTurns = new Map<string, string>();
   const missingRequests = () =>
     [...followedIds()].some((id) => {
       const status = useCodexStore.getState().threadStatusMap[id];
@@ -125,11 +125,7 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
           for (const id of remaining)
             if (!currentMembers.has(id)) remaining.delete(id);
           const statuses: Record<string, ThreadStatus> = {};
-          const updatedThreads: Array<{
-            id: string;
-            status: ThreadStatus;
-            updatedAt: number;
-          }> = [];
+          const updatedThreads = new Map<string, number>();
           for (const thread of page.data) {
             if (!remaining.has(thread.id) || !isThreadStatus(thread.status))
               continue;
@@ -139,33 +135,13 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
               typeof thread.updatedAt === "number" &&
               Number.isFinite(thread.updatedAt)
             )
-              updatedThreads.push({
-                id: thread.id,
-                status: thread.status,
-                updatedAt: thread.updatedAt,
-              });
+              updatedThreads.set(thread.id, thread.updatedAt);
           }
-          const reconcile: string[] = [];
-          for (const thread of updatedThreads) {
-            const previous = threadUpdatedAt.get(thread.id);
-            threadUpdatedAt.set(thread.id, thread.updatedAt);
-            if (previous === undefined || thread.updatedAt <= previous)
-              continue;
-            if (thread.status.type === "active") continue;
-            if (baseline.threadStatusMap[thread.id]?.type === "active")
-              continue;
-            if (baseline.turnTimingMap[thread.id]?.status === "inProgress")
-              continue;
-            reconcile.push(thread.id);
-          }
+          const reconcile = new Set<string>();
           useCodexStore.setState((state) => {
             const threadStatusMap = { ...state.threadStatusMap };
             let changed = false;
             for (const [id, status] of Object.entries(statuses)) {
-              if (
-                JSON.stringify(threadStatusMap[id]) === JSON.stringify(status)
-              )
-                continue;
               if (state.threadStatusMap[id] !== baseline.threadStatusMap[id])
                 continue;
               if (state.turnTimingMap[id] !== baseline.turnTimingMap[id]) {
@@ -174,33 +150,47 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
                 requested = true;
                 continue;
               }
+              const timing = baseline.turnTimingMap[id];
+              // A short turn can start and finish between metadata snapshots.
+              // Recent history may observe it running while status stays idle.
+              // Repair that authoritative completion boundary once per turn,
+              // without publishing unchanged state or polling its full history.
+              if (
+                (status.type === "idle" || status.type === "systemError") &&
+                timing?.status === "inProgress" &&
+                completionRepairTurns.get(id) !== timing.turnId
+              ) {
+                completionRepairTurns.set(id, timing.turnId);
+                reconcile.add(id);
+              } else if (
+                status.type === "active" ||
+                timing?.status !== "inProgress"
+              )
+                completionRepairTurns.delete(id);
+
+              const updatedAt = updatedThreads.get(id);
+              if (updatedAt !== undefined) {
+                const previous = threadUpdatedAt.get(id);
+                threadUpdatedAt.set(id, updatedAt);
+                if (
+                  previous !== undefined &&
+                  updatedAt > previous &&
+                  status.type !== "active" &&
+                  baseline.threadStatusMap[id]?.type !== "active" &&
+                  timing?.status !== "inProgress"
+                )
+                  reconcile.add(id);
+              }
+              if (
+                JSON.stringify(threadStatusMap[id]) === JSON.stringify(status)
+              )
+                continue;
               threadStatusMap[id] = status;
               changed = true;
             }
             return changed ? { threadStatusMap } : state;
           });
-          // A short turn can finish between status snapshots: idle -> idle,
-          // while the receipt/history already established an in-progress turn.
-          // Repair that contradiction once, never poll full history indefinitely.
-          const current = useCodexStore.getState();
-          for (const [id, status] of Object.entries(statuses)) {
-            const timing = current.turnTimingMap[id];
-            if (status.type === "active" || timing?.status !== "inProgress") {
-              repairedIdleTurns.delete(id);
-              continue;
-            }
-            if (
-              (status.type === "idle" || status.type === "systemError") &&
-              baseline.threadStatusMap[id]?.type === status.type &&
-              current.threadStatusMap[id] === baseline.threadStatusMap[id] &&
-              timing === baseline.turnTimingMap[id] &&
-              repairedIdleTurns.get(id) !== timing.turnId
-            ) {
-              repairedIdleTurns.set(id, timing.turnId);
-              reconcile.push(id);
-            }
-          }
-          for (const id of new Set(reconcile))
+          for (const id of reconcile)
             window.dispatchEvent(
               new CustomEvent("session-history-reconcile", { detail: id }),
             );
@@ -243,8 +233,8 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
     const current = followedIds();
     for (const id of threadUpdatedAt.keys())
       if (!current.has(id)) threadUpdatedAt.delete(id);
-    for (const id of repairedIdleTurns.keys())
-      if (!current.has(id)) repairedIdleTurns.delete(id);
+    for (const id of completionRepairTurns.keys())
+      if (!current.has(id)) completionRepairTurns.delete(id);
     schedule();
   });
   const closeStream = openEventStream({

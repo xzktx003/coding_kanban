@@ -12,6 +12,8 @@ import { useTranslation } from "react-i18next";
 import OpenAIIcon from "@session/assets/openai.svg";
 import type { Account } from "@session/bindings/v2";
 import { CodexAuthDialog } from "@session/components/codex/CodexAuthDialog";
+import { NativeAccountUsageDialog } from "@session/features/codex-account/NativeAccountUsageDialog";
+import { NativeAccountLogout } from "@session/features/codex-account/NativeAccountLogout";
 import { useCodexStore } from "@session/components/codex/stores";
 import { Button } from "@session/components/ui/button";
 import {
@@ -49,6 +51,7 @@ export function UserInfo() {
   const account = useCodexStore((s) => s.account);
   const hasProject = useWorkspaceStore((s) => s.projects.length > 0);
   const [codexAuthOpen, setCodexAuthOpen] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
   const [popoverOpen, setPopoverOpen] = useState(false);
   const [savedAccounts, setSavedAccounts] = useState<AccountSnapshotSummary[]>(
     [],
@@ -202,6 +205,24 @@ export function UserInfo() {
               {label ? "Add Account" : "ChatGPT Login"}
             </Button>
             <Separator className="my-1" />
+            <NativeAccountLogout
+              open={popoverOpen}
+              onLoggedOut={() => {
+                hasAutoPrompted.current = true;
+                setPopoverOpen(false);
+              }}
+            />
+            <Button
+              variant="ghost"
+              className="w-full justify-start gap-2 max-sm:h-11"
+              onClick={() => {
+                setUsageOpen(true);
+                setPopoverOpen(false);
+              }}
+            >
+              <BarChart2 className="h-4 w-4" />
+              {t("usage")}
+            </Button>
             <Button
               variant="ghost"
               className="w-full justify-start gap-2"
@@ -226,6 +247,11 @@ export function UserInfo() {
       </Popover>
 
       <CodexAuthDialog open={codexAuthOpen} onOpenChange={setCodexAuthOpen} />
+      <NativeAccountUsageDialog
+        open={usageOpen}
+        onOpenChange={setUsageOpen}
+        onSignIn={() => setCodexAuthOpen(true)}
+      />
     </div>
   );
 }

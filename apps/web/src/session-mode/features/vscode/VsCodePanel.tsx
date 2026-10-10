@@ -4,20 +4,46 @@ import { Button } from "@session/components/ui/button";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { useVsCodePanelStore } from "@session/stores/useVsCodePanelStore";
 import type { OpenVsCodeWebResponse } from "@agent-orchestrator/shared";
+import type { CodexHostOwner } from "@agent-orchestrator/shared";
+import { useCodexStore } from "@session/components/codex/stores/useCodexStore";
+import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
+import { activeDraftOwner } from "@session/stores/useInputStore";
+import {
+  EditorHostBridge,
+  codexHostOwnerKey,
+} from "@session/features/codex-host/bridge";
 
 const projectName = (path: string) =>
   path.split("/").filter(Boolean).at(-1) ?? path;
 function EditorFrame({
   entry,
   active,
+  owner,
 }: {
   entry: OpenVsCodeWebResponse;
   active: boolean;
+  owner: CodexHostOwner | null;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const bridge = useRef<EditorHostBridge | null>(null);
+  const ownerKey = owner ? codexHostOwnerKey(owner) : null;
+  useEffect(() => {
+    if (!loaded || !frame.current || !owner) return;
+    const client = new EditorHostBridge(frame.current, owner);
+    bridge.current = client;
+    void client.start(active);
+    return () => {
+      client.dispose();
+      if (bridge.current === client) bridge.current = null;
+    };
+    // A captured owner changes the bridge binding, never the editor iframe.
+  }, [loaded, ownerKey, attempt]);
+  useEffect(() => {
+    void bridge.current?.setActive(active);
+  }, [active]);
   useEffect(() => {
     if (loaded) return;
     const timer = window.setTimeout(() => setFailed(true), 45_000);
@@ -76,6 +102,8 @@ function EditorFrame({
 /** One mounted frame per canonical workspace; hiding a tab never disposes it. */
 export function VsCodePanel({ active }: { active: boolean }) {
   const cwd = useWorkspaceStore((state) => state.cwd);
+  const threadId = useCodexStore((state) => state.currentThreadId);
+  const agent = useAgentSettingsStore((state) => state.selectedAgent);
   const { pinnedPath, pin, entries, aliases, errors, loading, ensure } =
     useVsCodePanelStore();
   const path = pinnedPath ?? cwd;
@@ -156,6 +184,11 @@ export function VsCodePanel({ active }: { active: boolean }) {
             key={project}
             entry={entry}
             active={active && project === key}
+            owner={
+              agent === "codex" && cwd && (aliases[cwd] ?? cwd) === project
+                ? { cwd: project, threadId, draftOwner: activeDraftOwner() }
+                : null
+            }
           />
         ))}
       </div>

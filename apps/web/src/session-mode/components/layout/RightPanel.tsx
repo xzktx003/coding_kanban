@@ -12,6 +12,8 @@ import { useLayoutStore, useWorkspaceStore } from "@session/stores";
 import { useGitStatsStore } from "@session/stores/useGitStatsStore";
 import { detectWebFramework } from "../../features/web-preview/webFrameworkDetection";
 import { RightPanelHeader } from "./RightPanelHeader";
+import { useSavedTurnReviewStore } from "@session/stores/useSavedTurnReviewStore";
+const SavedTurnDiffPanel = lazy(() => import("@session/features/git/SavedTurnDiffPanel").then(m => ({ default: m.SavedTurnDiffPanel })));
 
 const VsCodePanel = lazy(() =>
   import("@session/features/vscode/VsCodePanel").then((m) => ({
@@ -49,6 +51,7 @@ function ToolLoading({ label }: { label: string }) {
 export function RightPanel({ visible = true }: { visible?: boolean }) {
   const { activeRightPanelTab, openRightPanelTabs } = useLayoutStore();
   const { cwd } = useWorkspaceStore();
+  const savedReview = useSavedTurnReviewStore(s => s.target);
   const { refreshStats } = useGitStatsStore();
   const isMobile = useIsMobile();
   const hasOpenedFiles = useRef(false);
@@ -130,10 +133,10 @@ export function RightPanel({ visible = true }: { visible?: boolean }) {
                   : "hidden"
               }
             >
-              <GitDiffPanel
+              {savedReview ? <SavedTurnDiffPanel /> : <GitDiffPanel
                 cwd={cwd}
                 isActive={visible && activeRightPanelTab === "diff"}
-              />
+              />}
             </div>
           </Suspense>
 

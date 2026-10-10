@@ -1029,10 +1029,11 @@ export function openVsCodeWeb(
 
 export function openProjectVsCodeWeb(
   path: string,
+  clientId?: string,
 ): Promise<OpenVsCodeWebResponse> {
   return request<OpenVsCodeWebResponse>("/api/workbench/vscode-web", {
     method: "POST",
-    body: JSON.stringify({ path }),
+    body: JSON.stringify({ path, ...(clientId ? { clientId } : {}) }),
   });
 }
 

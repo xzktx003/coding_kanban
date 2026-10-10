@@ -66,7 +66,7 @@ export function PluginsViewHeader() {
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8"
+          className="session-plugin-touch-target h-8 w-8"
           aria-label="Manage plugins and tools"
           title="Manage plugins and tools"
           onClick={() => setOverlay("manage")}
@@ -77,7 +77,12 @@ export function PluginsViewHeader() {
 
       {/* Tab switcher: shown in normal browsing */}
       {overlay === "manage" ? (
-        <Button variant="ghost" size="sm" onClick={() => setOverlay(null)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="session-plugin-touch-target"
+          onClick={() => setOverlay(null)}
+        >
           <ArrowLeft className="h-4 w-4" />
           {isMobile ? "" : "Plugin"}
         </Button>
@@ -114,7 +119,7 @@ export function PluginsViewHeader() {
         <Button
           variant="ghost"
           size="icon"
-          className="h-8 w-8"
+          className="session-plugin-touch-target h-8 w-8"
           aria-label="Manage plugins and tools"
           title="Manage plugins and tools"
           onClick={() => setOverlay("manage")}
@@ -166,7 +171,7 @@ export function PluginsViewHeader() {
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8"
+            className="session-plugin-touch-target h-8 w-8"
             aria-label="Add connector or skill"
             title="Add connector or skill"
             onClick={() => {
@@ -182,7 +187,7 @@ export function PluginsViewHeader() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8"
+                  className="session-plugin-touch-target h-8 w-8"
                   aria-label="插件目录操作"
                 >
                   <MoreHorizontal className="h-4 w-4" />
@@ -219,7 +224,11 @@ export function PluginDetailHeader({
 }: PluginDetailHeaderProps) {
   return (
     <header className="flex items-center gap-1">
-      <Button variant="ghost" onClick={onBack}>
+      <Button
+        variant="ghost"
+        className="session-plugin-touch-target"
+        onClick={onBack}
+      >
         Plugin
       </Button>
       <ChevronRight className="h-3.5 w-3.5" />

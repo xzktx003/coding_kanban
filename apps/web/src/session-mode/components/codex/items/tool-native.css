@@ -1,0 +1,615 @@
+.session-mode .codex-native-tool {
+  min-width: 0;
+  max-width: 100%;
+  color: var(--codex-text);
+  font: var(--codex-chat-size, 13px)/1.5 var(--codex-chat-font, system-ui);
+}
+.session-mode .codex-native-tool-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  color: color-mix(in oklab, var(--codex-text) 60%, transparent);
+}
+.session-mode .codex-native-tool-toggle {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.session-mode .codex-native-tool-header > svg {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+}
+.session-mode .codex-native-tool-header > .codex-command-chevron {
+  width: 14px;
+  height: 14px;
+  margin-left: -2px;
+  color: color-mix(in oklab, var(--codex-text) 60%, transparent);
+}
+.session-mode .codex-native-tool-header > .codex-command-chevron.is-expanded {
+  opacity: 1;
+}
+.session-mode .codex-native-mcp .codex-native-tool-header > svg:first-of-type {
+  color: color-mix(in srgb, var(--codex-text) 65%, transparent);
+}
+.session-mode .codex-native-compaction .codex-native-tool-label {
+  color: inherit;
+}
+.session-mode .codex-native-tool-detail {
+  color: color-mix(in oklab, var(--codex-text) 40%, transparent);
+}
+.session-mode .codex-native-web-search .codex-native-tool-label,
+.session-mode .codex-native-web-search .codex-native-tool-detail {
+  color: inherit;
+}
+.session-mode
+  .codex-native-tool-header:has(button[aria-expanded]):hover
+  .codex-native-tool-detail {
+  color: var(--codex-text);
+}
+.session-mode .codex-native-tool-header > :not(button) {
+  position: relative;
+  pointer-events: none;
+}
+.session-mode .codex-native-tool-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in oklab, var(--codex-muted) 90%, transparent);
+}
+.session-mode
+  .codex-native-tool-header:has(button):hover
+  .codex-native-tool-label {
+  color: var(--codex-text);
+}
+.session-mode
+  .codex-native-tool-header:has(button):is(:hover, :has(:focus-visible))
+  .codex-command-chevron {
+  opacity: 1;
+}
+.session-mode .codex-native-tool-toggle:focus-visible {
+  outline: 2px solid var(--codex-link);
+  outline-offset: -2px;
+}
+.session-mode .codex-native-tool-body {
+  margin-left: 24px;
+  padding-top: 4px;
+  min-width: 0;
+  color: color-mix(in oklab, var(--codex-text) 50%, transparent);
+  max-height: 224px;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.session-mode .codex-native-tool .codex-tool-content {
+  gap: 2px;
+}
+.session-mode .codex-native-tool-text {
+  overflow: hidden;
+  border-radius: 8px;
+  border: 1px solid color-mix(in oklab, var(--codex-text) 12%, transparent);
+  background: color-mix(in oklab, var(--codex-secondary) 30%, transparent);
+}
+.session-mode .codex-native-tool-text-title {
+  padding: 4px 8px;
+  font: 12px/1.428571 system-ui;
+  color: color-mix(in oklab, var(--codex-text) 50%, transparent);
+}
+.session-mode .codex-native-tool-text pre {
+  margin: 0;
+  padding: 8px;
+  max-height: 192px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: var(--codex-chat-size, 13px)/1.5 var(--codex-code-font, ui-monospace);
+  color: color-mix(in oklab, var(--codex-text) 50%, transparent);
+}
+.session-mode .codex-native-mcp > .codex-native-tool-body {
+  margin-left: 0;
+}
+.session-mode .codex-tool-call > .codex-tool-progress {
+  margin: 2px 0 0 24px;
+  color: color-mix(in oklab, var(--codex-text) 50%, transparent);
+  font-size: var(--codex-chat-size, 13px);
+  overflow-wrap: anywhere;
+}
+.session-mode .codex-native-tool-raw-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-top: 4px;
+  cursor: pointer;
+  border-radius: 4px;
+  color: var(--codex-muted);
+}
+.session-mode .codex-native-tool-raw-button:hover {
+  color: var(--codex-text);
+  background: var(--codex-secondary);
+}
+.session-mode .codex-native-tool-json {
+  font: var(--codex-code-size, 12px)/1.625 var(--codex-code-font, monospace);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 70dvh;
+  overflow: auto;
+}
+.session-mode .codex-native-reasoning .codex-native-tool-label {
+  color: color-mix(in oklab, var(--codex-text) 30%, transparent);
+}
+.session-mode .codex-native-reasoning .codex-native-tool-body {
+  margin-left: 0;
+  max-height: 140px;
+  padding-top: 0;
+}
+.session-mode .codex-native-reasoning .codex-markdown {
+  color: color-mix(in oklab, var(--codex-text) 50%, transparent);
+}
+.session-mode .codex-native-reasoning .codex-markdown p {
+  margin: 0 0 6px;
+}
+.session-mode .codex-native-reasoning-stream {
+  font: var(--codex-chat-size, 13px)/1.5 var(--codex-chat-font, system-ui);
+}
+.session-mode .codex-native-reasoning-stream > .codex-native-tool-label {
+  display: block;
+}
+.session-mode .codex-native-reasoning-stream .codex-summary-body {
+  max-height: 140px;
+  padding-top: 0;
+  color: color-mix(in oklab, var(--codex-text) 50%, transparent);
+}
+.session-mode .codex-native-image-gallery {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  max-width: 100%;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+.session-mode .codex-native-image-gallery > .codex-image-preview {
+  flex: none;
+}
+.session-mode .codex-native-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font: var(--codex-chat-size, 13px)/1.5 var(--codex-chat-font, system-ui);
+  color: color-mix(in oklab, var(--codex-text) 60%, transparent);
+}
+.session-mode .codex-native-divider {
+  gap: 8px;
+  color: color-mix(in srgb, var(--codex-text) 65%, transparent);
+}
+.session-mode .codex-native-divider:before,
+.session-mode .codex-native-divider:after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: color-mix(in srgb, var(--codex-text) 8%, transparent);
+}
+.session-mode .codex-native-divider-message {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.session-mode .codex-native-divider-message > button {
+  display: inline-flex;
+  cursor: pointer;
+}
+.session-mode .codex-native-notice-tooltip p + p {
+  margin-top: 8px;
+}
+.session-mode .codex-native-notice details > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+}
+.session-mode .codex-native-notice details[open] {
+  align-self: flex-start;
+  max-width: 100%;
+}
+.session-mode .codex-native-notice details[open] > div {
+  padding: 8px 12px;
+  margin-top: 4px;
+  border-radius: 8px;
+  background: var(--codex-secondary);
+  max-width: 320px;
+}
+.session-mode .codex-native-hook-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--codex-muted);
+}
+.session-mode .codex-native-hook-trigger:is(:hover, :focus-visible) {
+  color: var(--codex-text);
+  background: var(--codex-secondary);
+}
+.session-mode {
+  --codex-tool-warning: var(--vscode-editorWarning-foreground, #923b0f);
+}
+.session-mode.dark {
+  --codex-tool-warning: var(--vscode-editorWarning-foreground, #e25507);
+}
+.session-mode .codex-native-auto-review .codex-native-tool-label {
+  color: color-mix(in oklab, var(--codex-text) 60%, transparent);
+}
+.session-mode
+  .codex-native-auto-review
+  .codex-native-tool-header:hover
+  .codex-native-tool-label {
+  color: var(--codex-text);
+}
+.session-mode .codex-native-auto-review > .codex-native-tool-body {
+  margin-left: 0;
+  padding-top: 0;
+  max-height: none;
+  overflow: visible;
+}
+.session-mode .codex-native-auto-review-explanation {
+  max-width: 80ch;
+  margin: 0;
+  padding-top: 4px;
+  white-space: pre-wrap;
+  color: color-mix(in oklab, var(--codex-text) 60%, transparent);
+  font: var(--codex-chat-size, 13px)/1.625 var(--codex-chat-font, system-ui);
+}
+.session-mode .codex-native-auto-review-details {
+  padding-top: 4px;
+}
+.session-mode .codex-native-auto-review-details-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  cursor: pointer;
+  color: color-mix(in oklab, var(--codex-muted) 80%, transparent);
+}
+.session-mode .codex-native-auto-review-details-toggle:hover {
+  color: var(--codex-text);
+}
+.session-mode .codex-native-auto-review-details-toggle .codex-command-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--codex-muted);
+}
+.session-mode
+  .codex-native-auto-review-details-toggle:hover
+  .codex-command-chevron,
+.session-mode
+  .codex-native-auto-review-details-toggle
+  .codex-command-chevron.is-expanded {
+  opacity: 1;
+}
+.session-mode ::highlight(codex-thread-search-active) {
+  background: var(--vscode-editor-findMatchBackground, #ea9e3466);
+  color: inherit;
+}
+.session-mode .codex-native-dynamic-tool {
+  font-size: 16px;
+  line-height: 24px;
+}
+.session-mode .codex-native-dynamic-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: color-mix(in oklab, var(--codex-text) 40%, transparent);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.session-mode .codex-native-dynamic-tool:hover .codex-native-dynamic-label {
+  color: var(--codex-text);
+}
+.session-mode .codex-native-firstparty-tool .codex-native-tool-label {
+  color: color-mix(in oklab, var(--codex-text) 60%, transparent);
+}
+.session-mode
+  .codex-native-firstparty-tool.has-native-target
+  .codex-native-tool-header {
+  min-height: 20.25px;
+}
+.session-mode
+  .codex-native-firstparty-tool.has-native-target
+  .codex-native-tool-label {
+  transform: translateY(0.375px);
+}
+.session-mode .codex-native-dynamic-completed-label {
+  display: inline-flex;
+  align-items: center;
+  line-height: 19.5px;
+}
+.session-mode
+  .codex-native-firstparty-tool
+  .codex-native-tool-header:hover
+  .codex-native-tool-label {
+  color: var(--codex-text);
+}
+.session-mode .codex-native-dynamic-target {
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: 6px;
+  text-align: start;
+  max-width: 100%;
+}
+.session-mode .codex-native-dynamic-target:focus-visible {
+  outline: 2px solid var(--codex-link);
+  outline-offset: 2px;
+}
+.session-mode .codex-native-target-info {
+  font: 13px/1.5 var(--codex-chat-font, system-ui);
+}
+.session-mode .codex-native-activity-group .codex-native-dynamic-label {
+  vertical-align: top;
+}
+.session-mode .codex-native-hook-trigger.is-warning {
+  color: var(--codex-tool-warning);
+}
+.session-mode .codex-native-hook-dialog ul {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.session-mode .codex-native-hook-dialog summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.session-mode .codex-native-hook-dialog summary::-webkit-details-marker {
+  display: none;
+}
+.session-mode .codex-native-hook-outcome {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: color-mix(in srgb, var(--codex-text) 65%, transparent);
+}
+.session-mode .codex-native-hook-outcome.is-warning,
+.session-mode .codex-native-hook-entry.is-error p {
+  color: var(--codex-tool-warning);
+}
+.session-mode .codex-native-hook-outcome svg {
+  width: 12px;
+  height: 12px;
+  transform: rotate(-90deg);
+}
+.session-mode
+  .codex-native-hook-dialog
+  details[open]
+  .codex-native-hook-outcome
+  svg {
+  transform: rotate(0deg);
+}
+.session-mode .codex-native-hook-origin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.session-mode .codex-native-hook-origin > span:last-child {
+  color: var(--codex-muted);
+}
+.session-mode .codex-native-hook-dialog details > div {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-wrap: anywhere;
+}
+.session-mode .codex-native-hook-dialog details p {
+  margin: 0;
+  white-space: pre-wrap;
+  user-select: text;
+}
+.session-mode .codex-native-hook-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.session-mode .codex-native-hook-entry > span,
+.session-mode .codex-native-hook-status-message {
+  color: var(--codex-muted);
+}
+.session-mode .codex-file-preview.codex-native-hook-dialog {
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+  display: block;
+  width: 680px;
+  max-width: 92vw;
+  height: min(92vh, 800px);
+  max-height: min(92vh, 800px);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 25px;
+  background: color-mix(in oklab, var(--codex-secondary) 90%, transparent);
+  box-shadow:
+    0 0 0 0.5px color-mix(in oklab, var(--codex-text) 8%, transparent),
+    0 4px 8px -2px rgb(0 0 0 / 10%);
+  backdrop-filter: blur(24px);
+  font: 16px/24px var(--codex-chat-font, system-ui);
+}
+.session-mode [data-slot="dialog-overlay"]:has(+ .codex-native-hook-dialog) {
+  background: transparent;
+}
+.session-mode .codex-native-hook-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 20px;
+  font: 14px/21px var(--codex-chat-font, system-ui);
+  user-select: none;
+}
+.session-mode .codex-native-hook-title {
+  margin: 0;
+  font: 600 16px/28px var(--codex-chat-font, system-ui);
+  letter-spacing: normal;
+}
+.session-mode .codex-native-hook-history {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: 12px;
+  gap: 8px;
+  font: 12px/1.4285714286 var(--codex-chat-font, system-ui);
+}
+.session-mode .codex-native-hook-history > div,
+.session-mode .codex-native-hook-counts > span:nth-child(odd),
+.session-mode .codex-native-hook-origin > span:last-child,
+.session-mode .codex-native-hook-entry > span,
+.session-mode .codex-native-hook-status-message {
+  color: color-mix(in srgb, var(--codex-text) 65%, transparent);
+}
+.session-mode .codex-native-hook-dialog .codex-native-hook-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 4px;
+  border-radius: 4px;
+  color: color-mix(in oklab, var(--codex-text) 80%, transparent);
+}
+.session-mode .codex-native-hook-close::before {
+  content: "";
+  position: absolute;
+  inset: -10px;
+}
+.session-mode .codex-native-hook-close:hover {
+  background: color-mix(in oklab, var(--codex-text) 5%, transparent);
+}
+.session-mode .codex-native-hook-close:focus-visible {
+  outline: 2px solid var(--codex-link);
+}
+.session-mode .codex-native-hook-close svg {
+  width: 16px;
+  height: 16px;
+}
+.session-mode .codex-native-hook-counts {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 4px 12px;
+  width: 100%;
+  padding-top: 12px;
+  font: 12px/1.4285714286 var(--codex-chat-font, system-ui);
+}
+.session-mode .codex-native-hook-counts > span:nth-child(even) {
+  text-align: right;
+}
+.session-mode .codex-native-generated-gallery {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+}
+.session-mode .codex-native-generated-track {
+  display: flex;
+  gap: 8px;
+  transition: transform 150ms ease-out;
+}
+.session-mode .codex-native-generated-tile {
+  position: relative;
+  flex-shrink: 0;
+}
+.session-mode .codex-native-generated-tile .codex-image-preview {
+  width: 100%;
+  height: 100%;
+  border-radius: 16px;
+}
+.session-mode .codex-native-generated-tile .codex-image-preview img {
+  max-height: none;
+  height: 100%;
+  width: 100%;
+  object-fit: cover;
+}
+.session-mode .codex-native-generated-actions {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.session-mode .codex-native-generated-pagination {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  padding: 2px 4px;
+  background: #0007;
+  color: #fff;
+}
+.session-mode .codex-native-generated-pagination button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+}
+.session-mode .codex-native-generated-pagination button:disabled {
+  opacity: 0.4;
+}
+.session-mode .codex-native-generated-actions > :is(a, button) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  border-radius: 50%;
+  color: #fff;
+  background: #0007;
+}
+.session-mode
+  .codex-native-generated-actions
+  > :is(a, button):is(:hover, :focus-visible) {
+  color: #fff;
+  background: #000a;
+}
+@media (pointer: coarse) {
+  .session-mode .codex-native-generated-actions > :is(a, button) {
+    width: 44px;
+    height: 44px;
+  }
+}
+@media (pointer: coarse) {
+  .session-mode .codex-native-tool-header:has(button) {
+    min-height: 44px;
+  }
+  .session-mode .codex-native-tool-raw-button {
+    width: 44px;
+    height: 44px;
+  }
+}

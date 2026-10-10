@@ -18,13 +18,15 @@ pnpm dev:restart
 ## 日常启动与拉取更新后
 
 ```bash
-# 首次安装或依赖清单更新后执行
+# 首次安装或手动拉取源码后执行；在线确认更新会自动完成这两步
 pnpm install --frozen-lockfile
 pnpm dev:restart
 pnpm session:status
 ```
 
 `dev:restart` 会编译 shared，并对默认 Rust 运行层执行增量 Cargo build。随后保存可迁移的终端状态，重启本仓库 Node/Vite；前端固定绑定 `0.0.0.0`，使用指定端口，端口冲突不会静默换端口。HTTPS 默认开启。局域网会话界面依赖浏览器安全上下文（例如 `crypto.randomUUID`），应保留 HTTPS 并信任证书；`WEB_HTTPS=0` 仅适合终端模式或 localhost 调试，不作为局域网会话入口。
+
+看板的在线更新在用户确认 fast-forward 后会自动等待目标版本、运行 `pnpm install --frozen-lockfile`，再执行 `pnpm dev:restart`。用户无需另行安装依赖或再次确认重启；运行中的 Rust 会话服务和 Agent 会复用。更新日志保存在 `.dev-runtime/online-update.log`。若页面没有恢复，先查看该日志，再按下方步骤手动运行依赖安装和重启命令。
 
 运行中的 Rust 服务和 Agent 保持复用。重启后端并不重启 Rust；前后端准备完毕但会话健康检查失败时，脚本返回非零状态并输出运行层日志路径。
 
@@ -56,7 +58,7 @@ pnpm session:status
 
 ## 故障定位与验收
 
-1. 提示依赖缺失：运行 `pnpm install --frozen-lockfile`；Node 版本不满足时先切换版本。
+1. 在线更新后仍提示依赖缺失：查看 `.dev-runtime/online-update.log`；需要手动恢复时运行 `pnpm install --frozen-lockfile` 和 `pnpm dev:restart`。Node 版本不满足时先切换版本。
 2. Cargo 编译失败：按首个编译错误补齐工具或依赖，然后重新启动；已有服务仍保留。
 3. 端口被其他工作区占用：修改本仓库 `.env` 端口，或确认归属后自行处理；脚本不会清理外部进程。
 4. 前端可打开但会话不可用：运行 `pnpm session:status`，检查输出中的运行层日志及 `.dev-runtime/server.log`；不要把 `/api/health` 成功当作会话验收。若接口提示“会话服务尚未启动”，还须核对网关进程实际继承的 `SESSION_MODE_ENABLED`；启动环境中的 `0` 会禁用会话，即使 `.env` 没有这一项。需要会话模式时，在本机 `.env` 显式设置 `SESSION_MODE_ENABLED=1`，再执行 `pnpm dev:restart`。
@@ -85,3 +87,9 @@ pnpm session:status
 - 浏览器通过独立 **HTTPS 局域网地址** 验证前端代理的两层健康接口、会话/终端切换、刷新和手机尺寸；`dev-startup.spec.ts` 与 `session-mode.spec.ts` 的导航用例共 2 项通过。旧导航用例引用已移除的顶栏选择器，此次已改为校验当前导航。
 - HTTP 局域网试运行暴露出浏览器安全上下文限制，已在指南和脚本输出中明确要求会话入口使用 HTTPS。未声称独立物理手机或另一台同网段设备已验收。
 - 测试服务结束后清理；当前正式会话运行层保留。日志位于本机被忽略的 `.dev-runtime/startup-refresh/`，不提交证书、数据和截图。
+
+### 终端历史文件读取失败或看板为空
+
+终端记录使用 `SESSION_STATE_PATH`（默认 `.dev-runtime/agent-sessions.json`），浏览器分组和排版另存于该设备的 localStorage。历史文件损坏或不支持时，网关明确报错并阻止覆盖原文件；只有文件不存在才按首次启动处理。重启脚本也不会用空接口结果覆盖已有非空历史或损坏文件。先备份现场，再用已验证快照恢复原 ID，不要通过重新创建会话替代历史恢复。仅恢复仍存活的 tmux；direct PTY、已消失及不可达目标保留手动恢复，不自动重跑历史命令。
+
+实际恢复的只读浏览器验收可设置 `TERMINAL_RECOVERY_LIVE=1` 并运行 `tests/e2e/terminal-history-recovery-live.spec.ts`；测试用独立浏览器存储验证分组刷新关联，不读取或覆盖用户设备布局。

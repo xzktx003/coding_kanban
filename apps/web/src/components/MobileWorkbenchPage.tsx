@@ -495,6 +495,8 @@ export function MobileWorkbenchPage({
       visibleSessions,
     ],
   );
+  const activeSessionRef = useRef(activeSession);
+  activeSessionRef.current = activeSession;
   const projectGroups = useMemo(() => {
     const groups = new Map<string, AgentSessionRecord[]>();
     for (const session of visibleSessions) {
@@ -528,7 +530,27 @@ export function MobileWorkbenchPage({
   useLayoutEffect(() => {
     document.documentElement.classList.add("mobile-terminal-route");
     document.body.classList.add("mobile-terminal-route");
+    const page = document.querySelector(".mobile-workbench-page");
+    const nav = document.querySelector(".mobile-primary-nav");
+    const syncNavClearance = () => {
+      if (!(page instanceof HTMLElement) || !(nav instanceof HTMLElement)) return;
+      const hidden = window.getComputedStyle(nav).display === "none";
+      const height = hidden ? 0 : Math.ceil(nav.getBoundingClientRect().height);
+      page.style.setProperty("--mobile-nav-clearance", `${height}px`);
+    };
+    syncNavClearance();
+    const observer =
+      typeof ResizeObserver === "undefined" || !(nav instanceof HTMLElement)
+        ? null
+        : new ResizeObserver(syncNavClearance);
+    if (nav instanceof HTMLElement) observer?.observe(nav);
+    window.addEventListener("resize", syncNavClearance);
     return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", syncNavClearance);
+      if (page instanceof HTMLElement) {
+        page.style.removeProperty("--mobile-nav-clearance");
+      }
       document.documentElement.classList.remove("mobile-terminal-route");
       document.body.classList.remove("mobile-terminal-route");
     };
@@ -576,7 +598,7 @@ export function MobileWorkbenchPage({
   };
 
   const handleSendInput = (input: string): Promise<void> => {
-    const sessionId = activeSession?.id;
+    const sessionId = activeSessionRef.current?.id;
     if (!sessionId) return Promise.reject(new Error("没有可用会话"));
 
     const pending = inputQueueRef.current.then(async () => {

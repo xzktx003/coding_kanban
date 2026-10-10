@@ -64,6 +64,10 @@ export default defineConfig({
             CHOKIDAR_USEPOLLING:
               process.env.CHOKIDAR_USEPOLLING ?? '1',
             PATH: testPath,
+            WEB_BACKEND_HOST:
+              process.env.WEB_BACKEND_HOST?.trim() || '127.0.0.1',
+            WEB_BACKEND_PORT:
+              process.env.WEB_BACKEND_PORT?.trim() || String(serverPort),
           },
           url: `${frontendProtocol}://${frontendHost}:${frontendPort}`,
           ignoreHTTPSErrors: frontendProtocol === 'https',

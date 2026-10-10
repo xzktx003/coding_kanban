@@ -284,7 +284,7 @@ test("renders live Codex text outside transcript history until final markdown ar
   }
   await mixedCdp.send("HeapProfiler.collectGarbage");
   const mixedAfter = (await mixedCdp.send("Runtime.getHeapUsage")).usedSize;
-  const outputs = await page.evaluate(() => {
+  const commands = await page.evaluate(() => {
     const events = (window as any).__memoryStore.getState().events[
       "stream-memory"
     ];
@@ -294,11 +294,33 @@ test("renders live Codex text outside transcript history until final markdown ar
           event.method === "item/completed" &&
           event.params.item.type === "commandExecution",
       )
-      .map((event: any) => event.params.item.aggregatedOutput.length);
+      .map((event: any) => ({
+        id: event.params.item.id,
+        command: event.params.item.command,
+        status: event.params.item.status,
+        exitCode: event.params.item.exitCode,
+        durationMs: event.params.item.durationMs,
+        output: event.params.item.aggregatedOutput,
+        metadataOnly: event.params.item.transcriptMetadataOnly,
+      }));
   });
-  expect(outputs).toHaveLength(0);
-  await expect(page.getByText("echo mixed-2-7", { exact: true })).toHaveCount(
-    0,
+  expect(commands).toHaveLength(24);
+  for (let batch = 0; batch < 3; batch++) {
+    for (let index = 0; index < 8; index++) {
+      const id = `mixed-${batch}-${index}`;
+      expect(commands.find((command) => command.id === id)).toEqual({
+        id,
+        command: `echo ${id}`,
+        status: "completed",
+        exitCode: 0,
+        durationMs: 1,
+        output: null,
+        metadataOnly: true,
+      });
+    }
+  }
+  await expect(page.locator(".thread-surface")).not.toContainText(
+    "x".repeat(256),
   );
   expect(mixedAfter - mixedBefore).toBeLessThan(16 * 1024 * 1024);
   console.info(
@@ -332,7 +354,7 @@ for (const kind of [
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("HeapProfiler.collectGarbage");
     const before = (await cdp.send("Runtime.getHeapUsage")).usedSize;
-    const retainedChars = await page.evaluate((kind) => {
+    const retained = await page.evaluate((kind) => {
       const w = window as any;
       w.__boundedToolOutputs = [];
       for (let index = 0; index < 16; index++) {
@@ -342,12 +364,24 @@ for (const kind of [
         );
         const fields =
           kind === "commandExecution"
-            ? { aggregatedOutput: output }
+            ? {
+                command: `echo output-${index}`,
+                commandActions: [],
+                status: "completed",
+                exitCode: 0,
+                durationMs: 1,
+                aggregatedOutput: output,
+              }
             : kind === "agentMessage"
               ? { text: output }
               : {
+                  server: "fixture",
+                  tool: "read",
+                  status: "completed",
                   arguments: {},
                   result: { content: [{ type: "text", text: output }] },
+                  error: null,
+                  durationMs: 1,
                 };
         w.__boundedToolOutputs.push(
           kind === "streamingPreview"
@@ -362,22 +396,73 @@ for (const kind of [
               }),
         );
       }
-      return w.__boundedToolOutputs.reduce((total: number, event: any) => {
-        if (kind === "streamingPreview")
-          return (
-            total +
-            event.head.join("").length +
-            event.tail.join("").length +
-            event.tailCurrent.length
-          );
-        const item = event.params.item;
-        return (
-          total +
-          (item.aggregatedOutput ?? item.text ?? item.result.content[0].text)
-            .length
-        );
-      }, 0);
+      const retainedChars = w.__boundedToolOutputs.reduce(
+        (total: number, event: any) => {
+          if (kind === "streamingPreview")
+            return (
+              total +
+              event.head.join("").length +
+              event.tail.join("").length +
+              event.tailCurrent.length
+            );
+          const item = event.params.item;
+          // Metadata keeps its identity and status, never an output preview.
+          if (kind === "commandExecution")
+            return (
+              total +
+              (typeof item.aggregatedOutput === "string"
+                ? item.aggregatedOutput.length
+                : 0)
+            );
+          if (kind === "mcpToolCall")
+            return (
+              total +
+              (Array.isArray(item.result?.content)
+                ? item.result.content.reduce(
+                    (length: number, block: any) =>
+                      length +
+                      (typeof block.text === "string" ? block.text.length : 0),
+                    0,
+                  )
+                : 0)
+            );
+          return total + item.text.length;
+        },
+        0,
+      );
+      return {
+        retainedChars,
+        metadata:
+          kind === "commandExecution" || kind === "mcpToolCall"
+            ? w.__boundedToolOutputs.map((event: any) => {
+                const item = event.params.item;
+                return {
+                  id: item.id,
+                  status: item.status,
+                  metadataOnly: item.transcriptMetadataOnly,
+                  ...(kind === "commandExecution"
+                    ? { output: item.aggregatedOutput, exitCode: item.exitCode }
+                    : { arguments: item.arguments, result: item.result }),
+                };
+              })
+            : [],
+      };
     }, kind);
+    const { retainedChars } = retained;
+    if (kind === "commandExecution" || kind === "mcpToolCall") {
+      expect(retained.metadata).toHaveLength(16);
+      expect(retainedChars).toBe(0);
+      for (let index = 0; index < 16; index++) {
+        expect(retained.metadata[index]).toEqual({
+          id: `tool-${index}`,
+          status: "completed",
+          metadataOnly: true,
+          ...(kind === "commandExecution"
+            ? { output: null, exitCode: 0 }
+            : { arguments: null, result: null }),
+        });
+      }
+    }
     await cdp.send("HeapProfiler.collectGarbage");
     const retainedBytes =
       (await cdp.send("Runtime.getHeapUsage")).usedSize - before;

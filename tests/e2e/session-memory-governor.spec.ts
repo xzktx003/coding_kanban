@@ -113,34 +113,37 @@ test("active visible Codex history reaches a bounded plateau and older turns rem
   expect(result.cursor).toMatch(/^kanban-memory-reload:/);
   expect(result.events).toBeLessThan(60);
   const recovered: string[] = [];
-  await page.route(/\/api\/codex\/thread\/turns\/list(?:\?.*)?$/, async (route) => {
-    const body = route.request().postDataJSON();
-    const ids = Array.from(
-      { length: 150 },
-      (_, i) => `memory-${Math.floor(i / 30)}-${i % 30}`,
-    ).reverse();
-    const start = body.cursor ? Number(String(body.cursor).split(":")[1]) : 0;
-    const data = ids.slice(start, start + 10).map((id) => ({
-      id,
-      status: "completed",
-      startedAt: 1,
-      completedAt: 2,
-      durationMs: 1,
-      error: null,
-      items:
-        body.itemsView === "full"
-          ? [{ id, type: "agentMessage", text: `已重新读取 ${id}` }]
-          : [],
-    }));
-    if (body.itemsView === "full")
-      recovered.push(...data.map((turn) => turn.id));
-    await route.fulfill({
-      json: {
-        data,
-        nextCursor: start + 10 < ids.length ? `native:${start + 10}` : null,
-      },
-    });
-  });
+  await page.route(
+    /\/api\/codex\/thread\/turns\/list(?:\?.*)?$/,
+    async (route) => {
+      const body = route.request().postDataJSON();
+      const ids = Array.from(
+        { length: 150 },
+        (_, i) => `memory-${Math.floor(i / 30)}-${i % 30}`,
+      ).reverse();
+      const start = body.cursor ? Number(String(body.cursor).split(":")[1]) : 0;
+      const data = ids.slice(start, start + 10).map((id) => ({
+        id,
+        status: "completed",
+        startedAt: 1,
+        completedAt: 2,
+        durationMs: 1,
+        error: null,
+        items:
+          body.itemsView === "full"
+            ? [{ id, type: "agentMessage", text: `已重新读取 ${id}` }]
+            : [],
+      }));
+      if (body.itemsView === "full")
+        recovered.push(...data.map((turn) => turn.id));
+      await route.fulfill({
+        json: {
+          data,
+          nextCursor: start + 10 < ids.length ? `native:${start + 10}` : null,
+        },
+      });
+    },
+  );
   await page.evaluate(async () => {
     const path = "/src/session-mode/services/codexService.ts";
     const url =
@@ -170,7 +173,7 @@ test("active visible Codex history reaches a bounded plateau and older turns rem
   );
 });
 
-test("one running turn can drop tool history while keeping its live answer", async ({
+test("one running turn retains bounded tool metadata while keeping its live answer", async ({
   page,
 }) => {
   test.setTimeout(90000);
@@ -290,8 +293,33 @@ test("one running turn can drop tool history while keeping its live answer", asy
     });
     const memory = releaseSessionMemory();
     const state = useCodexStore.getState();
+    const events = state.events["ux-0"];
+    const commands = events.filter(
+      (event: any) =>
+        ["item/started", "item/completed"].includes(event.method) &&
+        event.params.item?.type === "commandExecution",
+    );
     return {
       bytes: memory.afterBytes,
+      nonToolCount: events.length - commands.length,
+      metadataEventCount: commands.length,
+      metadataItemCount: new Set(
+        commands.map((event: any) => event.params.item.id),
+      ).size,
+      completedCount: commands.filter(
+        (event: any) => event.params.item.status === "completed",
+      ).length,
+      metadataSafe: commands.every(
+        (event: any) =>
+          event.params.threadId === "ux-0" &&
+          event.params.turnId === "running" &&
+          event.params.item.transcriptMetadataOnly === true &&
+          event.params.item.aggregatedOutput === null,
+      ),
+      liveCommand: commands.find(
+        (event: any) => event.params.item.id === "live-command",
+      )?.params.item,
+
       count: state.events["ux-0"].length,
       current: state.currentTurnId,
       status: state.turnTimingMap["ux-0"].status,
@@ -305,11 +333,27 @@ test("one running turn can drop tool history while keeping its live answer", asy
     };
   });
   expect(result.bytes).toBeLessThan(4 * 1024 * 1024);
-  expect(result.count).toBeLessThan(100);
+  // The old total-event <100 assertion assumed all tool lifecycle rows were
+  // deleted. Apply it to non-tool content; metadata has independent bounds from
+  // this unchanged 500 started/completed + one running-command workload.
+  expect(result.nonToolCount).toBeLessThan(100);
+  expect(result.metadataItemCount).toBeLessThanOrEqual(501);
+  expect(result.metadataEventCount).toBeLessThanOrEqual(1002);
+  expect(result.metadataEventCount).toBeGreaterThan(1);
+  expect(result.completedCount).toBeGreaterThan(0);
+  expect(result.completedCount).toBeLessThanOrEqual(500);
+  expect(result.metadataSafe).toBe(true);
+  expect(result.metadataEventCount).toBe(result.metadataItemCount);
+  expect(result.liveCommand).toMatchObject({
+    id: "live-command",
+    status: "inProgress",
+    aggregatedOutput: null,
+    transcriptMetadataOnly: true,
+  });
   expect(result).toMatchObject({
     current: "running",
     status: "inProgress",
-    command: false,
+    command: true,
     answer: true,
   });
   expect(result.cursor).toBeUndefined();
@@ -416,6 +460,36 @@ test("real tool lifecycles stay bounded through automatic recovery and cache wri
         }),
       )
       .toBeLessThan(8 * 1024 * 1024);
+    const metadata = await page.evaluate((batch) => {
+      const events = (window as any).__lifecycleStore.getState().events["ux-0"];
+      const commands = events.filter(
+        (event: any) => event.params.item?.type === "commandExecution",
+      );
+      return {
+        count: commands.length,
+        latest: commands.find(
+          (event: any) => event.params.item.id === `real-${batch}-99`,
+        )?.params.item,
+        safe: commands.every(
+          (event: any) =>
+            event.params.threadId === "ux-0" &&
+            event.params.turnId === "lifecycle" &&
+            event.params.item.status === "completed" &&
+            event.params.item.exitCode === 0 &&
+            event.params.item.transcriptMetadataOnly === true &&
+            event.params.item.aggregatedOutput === null,
+        ),
+      };
+    }, batch);
+    expect(metadata.count).toBeGreaterThan(0);
+    expect(metadata.safe).toBe(true);
+    expect(metadata.latest).toMatchObject({
+      id: `real-${batch}-99`,
+      status: "completed",
+      exitCode: 0,
+      aggregatedOutput: null,
+      transcriptMetadataOnly: true,
+    });
     // Let the normal 500ms cache writer run; do not call the governor or CDP GC.
     await page.waitForTimeout(700);
     samples.push((await cdp.send("Runtime.getHeapUsage")).usedSize);

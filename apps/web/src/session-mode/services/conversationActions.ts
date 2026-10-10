@@ -8,6 +8,7 @@ import { useCodexStore } from "../components/codex/stores";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
 import { appendDraft, sessionDraftKey } from "../stores/useSessionDraftStore";
 import { useSideChatStore } from "../stores/useSideChatStore";
+import { useSavedTurnReviewStore } from "../stores/useSavedTurnReviewStore";
 import { convertThreadHistoryToEvents } from "../utils/threadHistoryConverter";
 import {
   getThreadModelSettings,
@@ -70,16 +71,32 @@ export async function runConversationReview(
   target: ReviewTarget,
 ): Promise<string> {
   const s = useCodexStore.getState();
+  const capturedTarget = structuredClone(target);
+  const capturedCwd =
+    s.threads.find((t) => t.id === threadId)?.cwd ??
+    useAgentCenterStore
+      .getState()
+      .cards.find((c) => c.id === threadId && c.kind === "codex")?.cwd;
   if (delivery === "inline" && codexRuntimeState(s, threadId).running)
     throw new Error("当前任务运行中，请选择独立审查");
   const result = await postJsonWithOptions<ReviewStartResponse>(
     "/followups/review",
-    { threadId, delivery, target },
+    { threadId, delivery, target: capturedTarget },
     { suppressToast: true },
   );
   if (!result.reviewThreadId || !result.turn?.id)
     throw new Error("服务未返回审查会话");
   const id = result.reviewThreadId;
+  if (capturedCwd)
+    useSavedTurnReviewStore
+      .getState()
+      .captureReviewScope({
+        requestThreadId: threadId,
+        reviewThreadId: id,
+        turnId: result.turn.id,
+        cwd: capturedCwd,
+        target: capturedTarget,
+      });
   const beforeTiming = s.turnTimingMap[id];
   useCodexStore.setState((s) => {
     if (
@@ -109,11 +126,7 @@ export async function runConversationReview(
     };
   });
   if (delivery === "detached") {
-    const cwd =
-      s.threads.find((t) => t.id === threadId)?.cwd ??
-      useAgentCenterStore
-        .getState()
-        .cards.find((c) => c.id === threadId && c.kind === "codex")?.cwd;
+    const cwd = capturedCwd;
     useAgentCenterStore
       .getState()
       .addAgentCard(

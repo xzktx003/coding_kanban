@@ -1,4 +1,5 @@
 import { useSessionLeaveGuard } from "@session/hooks/useSessionLeaveGuard";
+import { NativeConfigNotices } from "@session/features/codex-account/NativeConfigNotices";
 import { useEffect, useState } from 'react';
 import { CodeEditor } from '@session/features/files';
 import { getCodexHome, readTextFile, writeFile } from '@session/services/apiAdapt';
@@ -87,6 +88,7 @@ export function ConfigSettings() {
 
   return (
     <div className="space-y-6">
+      <NativeConfigNotices />
       <section className="space-y-3">
         <h3>Configuration</h3>
         <p className="text-xs font-semibold tracking-wider text-muted-foreground">

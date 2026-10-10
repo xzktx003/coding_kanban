@@ -13,6 +13,7 @@ import {
 import { AppVersionService } from "./services/app-version-service.js";
 import { ScriptFeishuCompletionSender } from "./services/agent-completion-feishu-notifier.js";
 import { GitAutoUpdateService } from "./services/git-auto-update-service.js";
+import { scheduleOnlineUpdateFinalizer } from "./services/online-update-finalizer.js";
 import { FeishuNotificationSettingsService } from "./services/feishu-notification-settings-service.js";
 import { FeishuQuickReplyStore } from "./services/feishu-quick-reply-store.js";
 import { FeishuReplyBindingStore } from "./services/feishu-reply-binding-store.js";
@@ -22,7 +23,7 @@ import { ensureSharedPackageBuilt } from "./services/shared-package-builder.js";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(currentDirectory, "../../..");
-loadDotenv({ path: resolve(repositoryRoot, ".env") });
+loadDotenv({ path: resolve(repositoryRoot, ".env"), override: false });
 
 async function main(): Promise<void> {
   // Pulls can change shared source and server imports in the same update.
@@ -84,6 +85,12 @@ async function main(): Promise<void> {
     gitAutoUpdateService: new GitAutoUpdateService({
       sourceRoot: appSourceRoot,
       intervalMinutes: gitAutoPullIntervalMinutes,
+      scheduleUpdateFinalize: (sourceRoot, targetHead) =>
+        scheduleOnlineUpdateFinalizer({
+          repositoryRoot,
+          sourceRoot,
+          targetHead,
+        }),
     }),
     sessionStateStore: new FileSessionStateStore(sessionStatePath),
     feishuNotificationSettingsService,

@@ -1,7 +1,8 @@
 import { expect, it } from "vitest";
 import { buildThreadRows } from "@session/components/codex/thread/threadRows";
 import { observeSubagents, useSubagentStore } from "./store";
-it("observes collab progress without rendering tool rows in the chat transcript", () => {
+import { withoutToolTranscriptEvent } from "@session/services/codexTranscriptVisibility";
+it("observes collab progress and renders bounded identity metadata without retaining private bodies", () => {
   useSubagentStore.setState({ nodes: {}, revision: 0 });
   const item = {
     id: "spawn",
@@ -10,7 +11,7 @@ it("observes collab progress without rendering tool rows in the chat transcript"
     senderThreadId: "root",
     receiverThreadIds: ["child"],
     agentsStates: {},
-    prompt: "inspect",
+    prompt: "inspect" + "x".repeat(1024 * 1024),
     status: "inProgress",
   };
   const start: any = {
@@ -25,8 +26,18 @@ it("observes collab progress without rendering tool rows in the chat transcript"
   observeSubagents(done);
   expect(useSubagentStore.getState().nodes.child.parentId).toBe("root");
   expect(useSubagentStore.getState().nodes.child.createdInTurn).toBe("turn");
-  expect(buildThreadRows([start]).length).toBe(0);
-  expect(buildThreadRows([start, done]).length).toBe(0);
+  const safeStart = withoutToolTranscriptEvent(start)!;
+  const safeDone = withoutToolTranscriptEvent(done)!;
+  expect(buildThreadRows([safeStart]).length).toBe(1);
+  expect(buildThreadRows([safeStart, safeDone]).length).toBe(1);
+  expect((safeDone.params as any).item).toMatchObject({
+    id: "spawn",
+    receiverThreadIds: ["child"],
+    status: "completed",
+    transcriptMetadataOnly: true,
+  });
+  expect((safeDone.params as any).item.prompt.length).toBeLessThanOrEqual(1024);
+  expect(JSON.stringify([safeStart, safeDone])).not.toContain(item.prompt);
 });
 it("activity reports do not grant direct input; native metadata confirms parent", () => {
   useSubagentStore.setState({ nodes: {}, revision: 0 });

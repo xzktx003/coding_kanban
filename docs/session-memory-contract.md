@@ -15,7 +15,7 @@
 | 边界 | 必须保持 | 会重新引入问题的做法 |
 | --- | --- | --- |
 | 浏览器接收数据之前 | 浏览器 SSE 与 Codex 只读历史使用 `view=chat`；Node 网关在发送前裁剪隐藏工具正文，且不把该参数传给运行层 | 只在 React、store 或 `JSON.parse` 之后过滤；以“界面没有显示”为理由恢复原始大包 |
-| 工具及内嵌数据 | 同时覆盖输出 delta、最终工具项、turn/thread 内嵌 items、raw response、hook、diff、自动审批复核等；子 Agent 的 prompt/message 仅保留有界预览，当前为 1024 字符 | 仅裁剪 command 输出；通过工具参数、`agentsStates.message`、元数据或旧缓存重新持有原始正文 |
+| 工具及内嵌数据 | 同时覆盖输出 delta、最终工具项、turn/thread 内嵌 items、raw response、hook、diff、自动审批复核等；子 Agent 的 prompt/message 仅保留有界预览，当前为 1024 字符；原生工具卡片仅保留共享投影的有界身份、状态、短描述和安全数组，缺正文标记为未加载详情 | 仅裁剪 command 输出；通过工具参数、`agentsStates.message`、元数据或旧缓存重新持有原始正文 |
 | 协议与任务状态 | 保留原事件序号、轮次生命周期、真正的审批/提问及子 Agent 身份/状态；后台内部消费者继续使用原协议 | 直接丢掉序号造成缺口与重读风暴；混淆“自动审批复核提示”和“需要用户处理的审批请求” |
 | 过大 SSE 帧 | 当前单帧上限 16 MiB；网关发出命名事件 `session-projection-error` 后释放上游，浏览器暂停接收并显示原因；显式重试恢复连接与只读历史 | 静默丢弃审批；伪造 `seq: 0`；自动无限重连并回放同一巨帧；为恢复页面而停止 Agent |
 | 后台历史读取 | 首次加载、连接缺口、缺失回执、完成边界、手动/页面恢复触发补读；外部空闲会话由轻量状态列表的 `updatedAt` 变化触发 | 恢复“活动静默 5 秒 / 空闲 30 秒”完整历史轮询；把工具执行安静当作消息丢失；活动时间戳每次变化都重读正文 |
@@ -34,7 +34,7 @@
 
 | 修改位置 | 必查测试 |
 | --- | --- |
-| `apps/server/src/routes/session-mode.ts` | 同目录 `session-mode.test.ts`；`tests/e2e/session-network-memory.spec.ts`（真实 HTTP → 网关 → 浏览器原生 EventSource） |
+| `apps/server/src/routes/session-mode.ts` | 同目录 `session-mode.test.ts`；`tests/e2e/session-network-memory.spec.mts`（真实 HTTP → 网关 → 浏览器原生 EventSource） |
 | `apps/web/src/session-mode/lib/eventStream.ts`、`services/apiAdapt/codex.ts` | `lib/eventStream.test.ts`、`services/apiAdapt/codex.history-page.test.ts`、`services/apiAdapt/codex-ownership.test.ts`、`components/codex/thread/CodexAccessNotice.test.tsx` |
 | `services/followedSessionHistorySync.ts`、`services/followedSessionStatusSync.ts`（位于 session-mode） | 对应两个 `.test.ts`；`tests/e2e/session-background-sync.spec.ts`、`session-restoration.spec.ts`、`session-state-recovery.spec.ts` |
 | `services/codexTranscriptActivity.ts`、`sessionTranscriptRetention.ts`、`components/codex/hooks/useTranscriptVisibility.ts`（位于 session-mode） | 对应单测；`tests/e2e/session-idle-memory.spec.ts`；发送回执、审批和恢复回归 |
@@ -55,8 +55,8 @@ pnpm --filter web exec vitest run --config vitest.session.config.ts
 
 ```sh
 PLAYWRIGHT_SKIP_WEBSERVER=1 pnpm exec playwright test \
-  tests/e2e/session-network-memory.spec.ts \
   tests/e2e/session-idle-memory.spec.ts \
+  tests/e2e/session-network-memory.spec.mts \
   tests/e2e/session-codex-stream-memory.spec.ts \
   tests/e2e/session-transcript-memory.spec.ts \
   tests/e2e/session-memory-governor.spec.ts \
@@ -85,3 +85,19 @@ SESSION_MEMORY_SOAK_MINUTES=30 PLAYWRIGHT_SKIP_WEBSERVER=1 pnpm exec playwright 
 ```
 
 默认不运行该 30 分钟用例。它使用原生 EventSource、持续任务与反复切换，不强制 GC，附件 `natural-gc-soak.json` 记录 JS 堆及 DOM/监听器计数。Linux 下该附件同时记录浏览器 renderer RSS，其他平台需另行采样，不能以堆值替代；React 开发性能记录不得继续留存。
+
+## 原生工具元数据兼容验收（2026-10-10）
+
+原生工具 UI 保留有界的身份、状态、短描述及真实导航目标，工具正文仍在网关发送前裁剪。对应测试从整项工具缺失改为逐项验证元数据、真实完成状态及正文为 null；500 工具压力用例分别约束不含工具的正文/交互事件少于 100、工具唯一身份至多 501、工具事件至多 1002。原先总事件少于 100 的断言依赖整项工具删除，已明确更换表示层指标，未更改生产事件预算。相同压力负载的 4 MiB 字节、heap、SlicedString、强制 GC 与自然 GC 门槛保持；已单批通过 8 项物理留存与自动恢复用例，后续复验单独记录，不能把逻辑事件数当成物理内存证明。
+
+最终复验：同一隔离 HTTPS 服务单 worker 运行 stream-memory、memory-governor 与 transcript-memory，9/9 通过。自动恢复自然 GC 的 24 次样本保持原门槛；无关会话/隐藏工具输出突发的强制 GC heap 增量为 -68,728 bytes。另子 Agent 12/12、消息投递 4/4、手机输入与附件 4/4 通过。健康探测 503 但只读接口可用的短轮次完成恢复，已在真实 SSE 静默场景验证正文、未读、停止转圈、草稿隔离及单次投递；不据此声称物理手机、所有性能指标或所有插件功能均已验收。
+
+滚动测试已改用实际有界流式增量与独立 live 节点；历史阅读测试使用 20 个独立最终报告，适配原生轮次折叠，阅读位置、未读及禁止执行型请求的断言保持。仍有一项严格滚动验收未通过：正向滚轮跟随 live 内容时，两次独立测试均捕获 ResizeObserver loop completed with undelivered notifications；绘制前及 RO 微任务距底均为 0，但零错误门槛仍为红。未移除或放宽该断言，RO 调度问题作为独立未解决项保留。
+
+## 两个远程同步后的合并复验（2026-10-10）
+
+合并本地自动回收、文件管理与通知去重，以及 GitLab/GitHub 的原生 UI 和权威完成恢复更新后，在独立工作区验证：`pnpm check`、`pnpm session:check` 通过；会话前端 1548、终端前端 534、后端 792（另 1 个跳过）、脚本 105、编辑器伴随扩展 4 个测试通过。隔离 HTTPS 前端为 `https://10.30.0.28:18487`，绑定 `0.0.0.0`；没有启动或中断用户 Agent。
+
+文件传输／展开／草稿、不可见正文 60 秒自动回收和真实 SSE 恢复：12 项通过；传输、流式正文及物理留存回归：11 项通过。原生 HTTP → 网关 → EventSource 压力用例保留上游大于 96 MiB、浏览器正文小于 128 KiB、最大事件小于 16 KiB、回收后 heap 增量小于 8 MiB 的原断言，序号、审批和最终答复同时通过。可见历史 5 次强制 GC 样本为 41.28／40.51／40.74／40.79／40.36 MiB，自动恢复 24 次自然 GC 样本约 46.95–84.07 MiB；无关正文突发回收后 heap 增量为 -96,836 bytes。此轮没有重跑 30 分钟 renderer RSS 长测，之前的长期增长失败记录和严格滚动问题仍保留，不能把这些短时测试解释为长期 RSS 已彻底解决。
+
+隔离工作区的 Node 类型解析复用已经安装的 `@types/node` 包（仅 node_modules 链接，不新增依赖）；其余依赖按远程 lockfile 冻结安装。浏览器初次在冲突清除期间遇到 HMR 加载失败，固定合并内容后新鲜浏览器复验通过，没有因此修改或放宽产品断言。

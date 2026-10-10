@@ -184,3 +184,13 @@ it("hydrates fresh CLI settings from the read-only thread and preserves them whe
   await codexService.loadThreadHistory("from-cli");
   expect(useThreadModelStore.getState().threads["from-cli"].reasoningEffort).toBe("high");
 });
+
+it("hydrates all native owner settings and sends them while another conversation and global defaults are selected", async () => {
+  api.threadRead.mockResolvedValueOnce({thread:{id:"owned-settings",cwd:"/project",turns:[],model:"source-model",modelProvider:"openai",reasoningEffort:"high",serviceTier:"fast",approvalPolicy:"on-request",sandboxPolicy:{type:"readOnly",networkAccess:false},collaborationMode:{mode:"default",settings:{model:"source-model",reasoning_effort:"high",developer_instructions:null}}}});
+  await codexService.loadThreadHistory("owned-settings");
+  expect(useThreadModelStore.getState().threads["owned-settings"]).toMatchObject({serviceTier:"fast",sandbox:"read-only",approvalPolicy:"on-request",collaborationMode:"default"});
+  useConfigStore.setState({serviceTier:"flex",sandbox:"danger-full-access",approvalPolicy:"never",collaborationMode:"plan"});
+  useCodexStore.setState({currentThreadId:"other"});
+  await codexService.turnStart("owned-settings","owner input");
+  expect(api.turnStart.mock.calls.at(-1)?.[0]).toMatchObject({threadId:"owned-settings",serviceTier:"fast",approvalPolicy:"on-request",sandboxPolicy:{type:"readOnly",networkAccess:false},collaborationMode:{mode:"default"}});
+});

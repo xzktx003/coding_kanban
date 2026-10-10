@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -125,6 +125,16 @@ export async function captureSessionState({
     const snapshot = await response.json();
     if (!isAgentSessionSnapshot(snapshot)) {
       return false;
+    }
+    // An empty gateway must not erase the only persisted recovery source.
+    if (snapshot.items.length === 0) {
+      try {
+        const persisted = JSON.parse(readFileSync(filePath, "utf8"));
+        const prior = persisted?.version === 1 ? persisted.snapshot : persisted;
+        if (!isAgentSessionSnapshot(prior) || prior.items.length > 0) return false;
+      } catch (error) {
+        if (error.code !== "ENOENT") return false;
+      }
     }
     const projectedSnapshot = {
       items: snapshot.items.map(projectSession),

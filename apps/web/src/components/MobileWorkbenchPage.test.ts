@@ -91,6 +91,10 @@ describe("MobileWorkbenchPage", () => {
       css,
       /\.mobile-session-picker-menu\s*{[^}]*position:\s*absolute;/s,
     );
+    assert.match(
+      css,
+      /\.mobile-session-switcher\s*{[^}]*grid-template-areas:[^}]*"label trigger"[^}]*"actions actions"/s,
+    );
   });
 
   it("presents mobile board sessions as compact terminal cards", () => {

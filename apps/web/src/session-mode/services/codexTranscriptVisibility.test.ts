@@ -1,3 +1,4 @@
+import { projectCodexChatValue } from "@agent-orchestrator/shared";
 import { beforeEach, expect, it } from "vitest";
 import type { ServerNotification } from "@session/bindings";
 import { buildThreadRows } from "@session/components/codex/thread/threadRows";
@@ -257,7 +258,7 @@ it("classifies tool transcript events while preserving chat, reasoning, warnings
   expect(visible.map(isToolTranscriptEvent)).toEqual(visible.map(() => false));
 });
 
-it("removes tool items nested in turn snapshots and preserves unchanged identities", () => {
+it("projects tool items nested in turn snapshots and preserves safe identities", () => {
   const changed = [
     event("turn/started", {
       threadId: "thread",
@@ -279,8 +280,12 @@ it("removes tool items nested in turn snapshots and preserves unchanged identiti
   expect((filtered[0] as any).params.turn).not.toBe(
     (changed[0] as any).params.turn,
   );
-  expect((filtered[0] as any).params.turn.items).toEqual([userMessage]);
-  expect((filtered[1] as any).params.turn.items).toEqual([agentMessage]);
+  expect((filtered[0] as any).params.turn.items.map((item: any) => item.id)).toEqual(["user", "cmd", "dynamic"]);
+  expect((filtered[0] as any).params.turn.items[1].aggregatedOutput).toBeNull();
+  expect((filtered[0] as any).params.turn.items[2].arguments).toBeNull();
+  expect((filtered[1] as any).params.turn.items.map((item: any) => item.id)).toEqual(["cmd", "answer", "patch", "mcp"]);
+  expect(JSON.stringify(filtered)).not.toContain("large output");
+  expect(JSON.stringify(filtered)).not.toContain("large result");
   expect((filtered[1] as any).params.turn.status).toBe("completed");
   expect((filtered[1] as any).params.turn.durationMs).toBe(1);
 
@@ -293,7 +298,7 @@ it("removes tool items nested in turn snapshots and preserves unchanged identiti
   expect(withoutToolTranscriptEvents(filtered)).toBe(filtered);
 });
 
-it("removes tool items nested in thread snapshots before they become chat history", () => {
+it("projects nested tool history without dropping lifecycle metadata", () => {
   const snapshot = [
     event("thread/started", {
       thread: thread([
@@ -310,16 +315,14 @@ it("removes tool items nested in thread snapshots before they become chat histor
   expect((filtered[0] as any).params.thread).not.toBe(
     (snapshot[0] as any).params.thread,
   );
-  expect((filtered[0] as any).params.thread.turns[0].items).toEqual([
-    userMessage,
-  ]);
-  expect((filtered[0] as any).params.thread.turns[1].items).toEqual([
-    agentMessage,
-  ]);
+  expect((filtered[0] as any).params.thread.turns[0].items.map((item: any) => item.id)).toEqual(["user", "cmd", "mcp"]);
+  expect((filtered[0] as any).params.thread.turns[1].items.map((item: any) => item.id)).toEqual(["dynamic", "answer", "subagent"]);
+  expect(JSON.stringify(filtered)).not.toContain("large output");
+  expect(JSON.stringify(filtered)).not.toContain("large result");
   expect((filtered[0] as any).params.thread.name).toBe(null);
 });
 
-it("does not retain tool events in the store or mutate command status maps", () => {
+it("stores bounded tool metadata and true command status without output bursts", () => {
   useCodexStore
     .getState()
     .addEvent("thread", itemEvent("item/started", commandExecution));
@@ -337,9 +340,10 @@ it("does not retain tool events in the store or mutate command status maps", () 
   );
 
   let state = useCodexStore.getState();
-  expect(state.events.thread).toBeUndefined();
-  expect(state.commandStatusMap).toEqual({});
-  expect(state.commandDurationMap).toEqual({});
+  expect(state.events.thread).toHaveLength(1);
+  expect((state.events.thread[0] as any).params.item.aggregatedOutput).toBeNull();
+  expect(state.commandStatusMap.cmd).toBe("completed");
+  expect(state.commandDurationMap.cmd).toBe(10);
 
   useCodexStore.getState().addEvent(
     "thread",
@@ -365,7 +369,8 @@ it("does not retain tool events in the store or mutate command status maps", () 
           "subAgentActivity",
         ].includes((stored as any).params.item.type),
     ),
-  ).toBe(false);
+  ).toBe(true);
+  expect(JSON.stringify(state.events.thread)).not.toContain("large output");
   const completedTurn = state.events.thread.find(
     (stored) => stored.method === "turn/completed",
   );
@@ -380,8 +385,8 @@ it("does not retain tool events in the store or mutate command status maps", () 
   expect(state.turnTimingMap.thread?.status).toBe("completed");
 });
 
-it("keeps tool calls out of rendered thread rows while preserving the user and final answer", () => {
-  const rows = buildThreadRows([
+it("renders safe native tool rows while preserving the user and final answer", () => {
+  const rows = buildThreadRows(withoutToolTranscriptEvents([
     itemEvent("item/started", userMessage),
     itemEvent("item/started", commandExecution),
     itemEvent("item/completed", commandExecution),
@@ -404,9 +409,9 @@ it("keeps tool calls out of rendered thread rows while preserving the user and f
       ]),
     }),
     itemEvent("item/completed", agentMessage),
-  ]);
+  ]));
 
-  expect(rows.map((row) => row.item.kind)).not.toContain("cmdGroup");
+  expect(rows.map((row) => row.item.kind)).toContain("cmdGroup");
   expect(
     rows.some(
       (row) =>
@@ -423,7 +428,7 @@ it("keeps tool calls out of rendered thread rows while preserving the user and f
           "subAgentActivity",
         ].includes((row.item.event.params as any).item?.type),
     ),
-  ).toBe(false);
+  ).toBe(true);
   expect(
     rows.some(
       (row) =>
@@ -440,4 +445,72 @@ it("keeps tool calls out of rendered thread rows while preserving the user and f
         (row.item.event.params as any).item.type === "agentMessage",
     ),
   ).toBe(true);
+});
+
+
+it("retains only bounded metadata for native tool cards and public Hook statistics", () => {
+  const secret = "private-body".repeat(100_000);
+  const source = [
+    itemEvent("item/completed", { ...commandExecution, aggregatedOutput: secret }),
+    itemEvent("item/completed", { ...mcpToolCall, arguments: { secret }, result: { content: secret } }),
+    event("hook/completed", { threadId: "thread", turnId: "turn", run: { id: "hook", eventName: "Stop", source: "project", status: "completed", entries: [{ kind: "context", text: secret }, { kind: "warning", text: "public warning" }], durationMs: "10" } }),
+    itemEvent("item/completed", { ...reasoning, content: [secret] }),
+  ];
+  const projected = withoutToolTranscriptEvents(source);
+  expect(projected).toHaveLength(4);
+  expect((projected[0] as any).params.item.commandActions).toHaveLength(1);
+  expect((projected[0] as any).params.item.aggregatedOutput).toBeNull();
+  expect((projected[1] as any).params.item.arguments).toBeNull();
+  expect((projected[1] as any).params.item.result).toBeNull();
+  expect((projected[2] as any).params.run.entries).toEqual([{ kind: "warning", text: "public warning" }]);
+  expect((projected[3] as any).params.item.content).toEqual([]);
+  expect(JSON.stringify(projected)).not.toContain(secret);
+  expect(JSON.stringify(projected).length).toBeLessThan(12_000);
+  expect(withoutToolTranscriptEvents(projected)).toBe(projected);
+});
+
+
+it("bounds malicious metadata arrays and copies short previews without leaking raw arguments", () => {
+  const secret = "private-body".repeat(200_000);
+  const original = itemEvent("item/completed", { ...commandExecution,
+    command: secret, aggregatedOutput: secret,
+    commandActions: Array.from({ length: 100 }, () => ({ type: "read", command: secret, name: secret, path: "/repo/a.ts", privateExtra: secret })),
+    unexpected: { content: secret },
+  });
+  const projected = withoutToolTranscriptEvents([original])[0] as any;
+  expect(projected.params.item.commandActions.length).toBeLessThanOrEqual(16);
+  expect(projected.params.item.command.length).toBeLessThanOrEqual(1024);
+  expect(projected.params.item.aggregatedOutput).toBeNull();
+  expect(projected.params.item.unexpected).toBeUndefined();
+  expect(JSON.stringify(projected).length * 2).toBeLessThan(64 * 1024);
+  expect(JSON.stringify(projected)).not.toContain("privateExtra");
+  expect(projectCodexChatValue(JSON.parse(JSON.stringify(projected)))).toEqual(projected);
+});
+
+it("retains only native dynamic target identities and explicit booleans", () => {
+  const privateText = "private-body".repeat(200_000);
+  for (const [tool, safe] of [
+    ["read_thread", { threadId: "target" }],
+    ["send_message_to_thread", { threadId: "target" }],
+    ["set_thread_archived", { threadId: "target", archived: false }],
+    ["set_thread_pinned", { threadId: "target", pinned: false }],
+    ["move_thread_to_sidebar_section", { sectionId: null }],
+    ["write_settings", { config: {} }],
+  ] as const) {
+    const original = itemEvent("item/completed", { ...dynamicToolCall, namespace: "codex_app", tool,
+      arguments: { ...safe, text: privateText, raw: privateText },
+      contentItems: [{ type: "inputText", text: privateText }],
+    });
+    const projected = withoutToolTranscriptEvents([original])[0] as any;
+    expect(projected.params.item.arguments).toEqual(safe);
+    expect(projected.params.item.contentItems).toEqual([]);
+    expect(projected.params.item.status).toBe("completed");
+    expect(projected.params.item.success).toBe(true);
+    expect(JSON.stringify(projected)).not.toContain(privateText);
+    expect(withoutToolTranscriptEvents([projected])[0]).toBe(projected);
+    const decoded = JSON.parse(JSON.stringify(projected));
+    expect(projectCodexChatValue(decoded)).toBe(decoded);
+  }
+  const invalid = itemEvent("item/completed", { ...dynamicToolCall, namespace: "codex_app", tool: "read_thread", arguments: { threadId: privateText } });
+  expect((withoutToolTranscriptEvents([invalid])[0] as any).params.item.arguments).toBeNull();
 });

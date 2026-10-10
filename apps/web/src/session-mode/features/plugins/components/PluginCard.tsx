@@ -1,9 +1,18 @@
-import { Loader2, MessageCircleCode, Plus, Trash2 } from 'lucide-react';
-import type { MarketplaceLoadErrorInfo, PluginSummary } from '@session/bindings/v2';
-import { Button } from '@session/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@session/components/ui/card';
-import { hideBrokenImage } from './imageFallback';
-import { pluginIconSrc } from './pluginIcon';
+import { Loader2, MessageCircleCode, Plus, Trash2 } from "lucide-react";
+import type {
+  MarketplaceLoadErrorInfo,
+  PluginSummary,
+} from "@session/bindings/v2";
+import { Button } from "@session/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@session/components/ui/card";
+import { hideBrokenImage } from "./imageFallback";
+import { pluginIconSrc } from "./pluginIcon";
 
 interface PluginCardProps {
   plugin: PluginSummary;
@@ -36,7 +45,7 @@ export function PluginCard({
     if (onDetail) {
       // Don't trigger detail if clicking on action buttons
       const target = e.target as HTMLElement;
-      if (target.closest('button')) return;
+      if (target.closest("button")) return;
       onDetail();
     }
   };
@@ -46,8 +55,8 @@ export function PluginCard({
       <CardHeader className="px-5 py-4">
         <div className="flex items-start justify-between gap-3">
           <div
-            className="flex items-start gap-3 cursor-pointer"
-            style={onDetail ? { cursor: 'pointer' } : {}}
+            className="session-plugin-card-summary flex items-start gap-3 cursor-pointer"
+            style={onDetail ? { cursor: "pointer" } : {}}
           >
             {iconSrc && (
               <img
@@ -62,12 +71,12 @@ export function PluginCard({
               <CardDescription>{description}</CardDescription>
             </div>
           </div>
-          <div className="flex flex-col items-end gap-2">
+          <div className="session-plugin-card-actions flex flex-col items-end gap-2">
             {showManageActions ? (
               <Button
                 size="icon"
                 variant="outline"
-                className="h-8 w-8"
+                className="session-plugin-touch-target h-8 w-8"
                 title="Uninstall"
                 disabled={isUninstalling}
                 onClick={(e) => {
@@ -85,7 +94,7 @@ export function PluginCard({
               <Button
                 size="icon"
                 variant="secondary"
-                className="h-8 w-8"
+                className="session-plugin-touch-target h-8 w-8"
                 title={`Use ${displayName}`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -98,7 +107,7 @@ export function PluginCard({
               <Button
                 size="icon"
                 variant="outline"
-                className="h-8 w-8"
+                className="session-plugin-touch-target h-8 w-8"
                 title={`Install ${displayName}`}
                 disabled={!canInstall || isInstalling}
                 onClick={(e) => {
@@ -131,7 +140,9 @@ export function MarketplaceErrorCard({ error }: MarketplaceErrorCardProps) {
         <CardTitle className="text-sm">Marketplace load error</CardTitle>
         <CardDescription>{error.marketplacePath}</CardDescription>
       </CardHeader>
-      <CardContent className="px-5 pb-4 text-sm text-muted-foreground">{error.message}</CardContent>
+      <CardContent className="px-5 pb-4 text-sm text-muted-foreground">
+        {error.message}
+      </CardContent>
     </Card>
   );
 }

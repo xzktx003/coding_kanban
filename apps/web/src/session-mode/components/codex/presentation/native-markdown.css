@@ -1,0 +1,489 @@
+/* Measured from the unmodified Codex VSIX Markdown/CodeSurface components.
+   Existing download/export functions use a compact overflow action; touch
+   controls remain 44px as required by the shared mobile workbench. */
+.session-mode .codex-markdown {
+  --codex-markdown-space: calc(var(--codex-chat-size, 13px) / 4);
+  --codex-fence-keyword: #ab4f7a;
+  --codex-fence-literal: #ac4f23;
+  --codex-fence-string: #3a843f;
+  --codex-fence-variable: #643cae;
+  --codex-fence-attribute: #b8802b;
+  --codex-fence-name: #1f4e94;
+  --codex-fence-comment: #4f4f4f;
+  --codex-fence-error: #ba2623;
+}
+:is(.session-mode.dark, .dark .session-mode, .session-mode .dark)
+  .codex-markdown {
+  --codex-fence-keyword: #f8a6c8;
+  --codex-fence-literal: #f1a275;
+  --codex-fence-string: #83d197;
+  --codex-fence-variable: #b897f4;
+  --codex-fence-attribute: #f9dc78;
+  --codex-fence-name: #63a8f8;
+  --codex-fence-comment: #b9b9b9;
+  --codex-fence-error: #ff8583;
+}
+.session-mode .codex-markdown .codex-markdown-blocks > * {
+  margin-block: 0;
+}
+.session-mode .codex-markdown .codex-markdown-blocks > .codex-paragraph {
+  margin-bottom: var(--codex-markdown-space);
+}
+.session-mode
+  .codex-markdown
+  .codex-markdown-blocks
+  > .codex-paragraph:not(:first-child) {
+  margin-top: calc(var(--codex-markdown-space) * 2);
+}
+.session-mode
+  .codex-markdown
+  .codex-markdown-blocks
+  > .codex-paragraph
+  + .codex-paragraph {
+  margin-block: calc(var(--codex-markdown-space) * 4);
+}
+.session-mode .codex-markdown .codex-markdown-blocks > :last-child,
+.session-mode
+  .codex-markdown
+  .codex-markdown-blocks
+  > .codex-paragraph:last-child {
+  margin-bottom: 0;
+}
+.session-mode
+  .codex-markdown
+  .codex-markdown-blocks
+  > [data-markdown-han-text]:has(+ [data-markdown-han-text]) {
+  margin-bottom: 4px;
+}
+.session-mode .codex-markdown :is(ul, ol) {
+  list-style-position: outside;
+  padding-inline-start: calc(var(--codex-chat-size, 13px) * 1.625);
+}
+.session-mode .codex-markdown li {
+  padding-block: 0;
+  padding-inline-start: calc(var(--codex-markdown-space) * 1.5);
+  margin-block: 0;
+}
+.session-mode .codex-markdown li + li {
+  margin-top: 0;
+}
+.session-mode .codex-markdown li::marker {
+  font-weight: 600;
+}
+.session-mode
+  .codex-markdown
+  .codex-markdown-blocks
+  :is(h1, h2, h3, h4, h5, h6) {
+  font-weight: 600;
+  padding: 0;
+}
+.session-mode .codex-markdown .codex-markdown-blocks h1 {
+  margin: calc(var(--codex-markdown-space) * 4) 0
+    calc(var(--codex-markdown-space) * 2);
+  font-size: calc(var(--codex-chat-size, 13px) * 1.5);
+  line-height: calc(var(--codex-markdown-space) * 8);
+}
+.session-mode .codex-markdown .codex-markdown-blocks h2 {
+  margin: calc(var(--codex-markdown-space) * 4) 0 var(--codex-markdown-space);
+  font-size: calc(var(--codex-chat-size, 13px) * 1.25);
+  line-height: calc(var(--codex-markdown-space) * 7);
+}
+.session-mode .codex-markdown .codex-markdown-blocks h3 {
+  margin: calc(var(--codex-markdown-space) * 4) 0 var(--codex-markdown-space);
+  font-size: calc(var(--codex-chat-size, 13px) * 1.125);
+  line-height: calc(var(--codex-markdown-space) * 7);
+}
+.session-mode .codex-markdown .codex-markdown-blocks h4 {
+  margin: calc(var(--codex-markdown-space) * 4) 0 0;
+  font-size: var(--codex-chat-size, 13px);
+  line-height: calc(var(--codex-markdown-space) * 6);
+}
+.session-mode .codex-markdown .codex-markdown-blocks :is(h5, h6) {
+  margin: 0;
+  font-size: var(--codex-chat-size, 13px);
+  line-height: 1.625;
+}
+.session-mode .codex-markdown .codex-markdown-blocks > :first-child {
+  margin-top: 0;
+}
+.session-mode
+  .codex-markdown
+  .codex-markdown-blocks
+  > :is(h1, h2, h3, h4)
+  + .codex-paragraph:not(:first-child) {
+  margin-top: 0;
+}
+.session-mode .codex-markdown .codex-markdown-blocks blockquote {
+  position: relative;
+  margin: 0 0 calc(var(--codex-markdown-space) * 2);
+  padding: calc(var(--codex-markdown-space) * 2) 0
+    calc(var(--codex-markdown-space) * 2) calc(var(--codex-markdown-space) * 6);
+  border: 0;
+  color: var(--codex-text);
+  font-style: normal;
+  line-height: calc(var(--codex-markdown-space) * 6);
+  background: transparent !important;
+}
+.session-mode .codex-markdown blockquote > .codex-paragraph {
+  margin: 0;
+  font-weight: 400;
+}
+.session-mode .codex-markdown blockquote::after {
+  position: absolute;
+  content: "";
+  inset-inline-start: 0;
+  top: calc(var(--codex-markdown-space) * 2);
+  bottom: calc(var(--codex-markdown-space) * 2);
+  width: var(--codex-markdown-space);
+  border-radius: calc(var(--codex-markdown-space) / 2);
+  background: color-mix(in oklab, var(--codex-text) 12%, transparent);
+}
+.session-mode .codex-markdown .codex-markdown-blocks hr {
+  clear: both;
+  height: 0;
+  margin: calc(var(--codex-markdown-space) * 7) 0;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid color-mix(in oklab, var(--codex-text) 12%, transparent);
+}
+.session-mode .codex-markdown [data-streamdown="inline-code"] {
+  line-height: calc(var(--codex-chat-size, 13px) * 1.625);
+  background: var(--vscode-list-hoverBackground, transparent);
+}
+@supports (color: color-mix(in srgb, red, red)) {
+  .session-mode .codex-markdown [data-streamdown="inline-code"] {
+    background: color-mix(
+      in srgb,
+      var(--vscode-list-hoverBackground) 60%,
+      var(--codex-text) 6%
+    );
+  }
+}
+.session-mode
+  .codex-markdown
+  .codex-markdown-blocks
+  > .codex-native-code-fence {
+  margin-block: calc(var(--codex-markdown-space) * 5);
+}
+.session-mode .codex-markdown .codex-native-code-fence {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  overflow: clip;
+  contain: inline-size;
+  border: 1px solid color-mix(in oklab, var(--codex-text) 8%, transparent);
+  border-radius: 20px;
+  color: var(--codex-text);
+  background: var(--codex-surface);
+}
+.session-mode .codex-markdown .codex-native-code-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 6px 6px 6px 16px;
+  font: 500 12px/1.4285714 var(--codex-chat-font, system-ui, sans-serif);
+  user-select: none;
+  background: transparent;
+  border: 0;
+}
+.session-mode .codex-markdown .codex-native-code-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-mode
+  .codex-markdown
+  :is(.codex-native-code-actions, .codex-native-table-actions) {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  flex-shrink: 0;
+}
+.session-mode
+  .codex-markdown
+  :is(.codex-native-code-actions, .codex-native-table-actions)
+  button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  line-height: 20px;
+}
+.session-mode
+  .codex-markdown
+  :is(.codex-native-code-actions, .codex-native-table-actions)
+  button:hover,
+.session-mode
+  .codex-markdown
+  :is(.codex-native-code-actions, .codex-native-table-actions)
+  button[data-state="open"] {
+  background: color-mix(in oklab, var(--codex-text) 7%, transparent);
+  color: var(--codex-text);
+}
+.session-mode
+  .codex-markdown
+  :is(.codex-native-code-actions, .codex-native-table-actions)
+  button:focus-visible {
+  outline: 2px solid var(--codex-focus);
+  outline-offset: -2px;
+}
+.session-mode .codex-markdown .codex-native-markdown-more {
+  opacity: 0;
+}
+.session-mode
+  .codex-markdown
+  :is(.codex-native-code-fence, .codex-native-table):hover
+  .codex-native-markdown-more,
+.session-mode
+  .codex-markdown
+  :is(.codex-native-code-fence, .codex-native-table):focus-within
+  .codex-native-markdown-more {
+  opacity: 1;
+}
+.session-mode
+  .codex-markdown
+  .codex-native-code-fence
+  pre[data-streamdown="code-block-body"] {
+  display: block;
+  margin: 0;
+  padding: 0 16px 12px;
+  font: 400 12px/20px var(--codex-code-font);
+  color: inherit !important;
+  background: transparent !important;
+  border: 0;
+  border-radius: 0;
+  max-height: none;
+  overflow: auto;
+  tab-size: 4;
+}
+.session-mode .codex-markdown .codex-native-code-fence pre code {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.session-mode
+  .codex-markdown
+  .codex-native-code-fence
+  pre[data-wrap="true"]
+  code {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.session-mode
+  .codex-markdown
+  .codex-native-code-fence
+  :is(.hljs-doctag, .hljs-keyword, .hljs-formula, .hljs-operator) {
+  color: var(--codex-fence-keyword);
+}
+.session-mode
+  .codex-markdown
+  .codex-native-code-fence
+  :is(.hljs-built_in, .hljs-class .hljs-title, .hljs-literal, .hljs-number) {
+  color: var(--codex-fence-literal);
+}
+.session-mode
+  .codex-markdown
+  .codex-native-code-fence
+  :is(.hljs-string, .hljs-regexp, .hljs-addition, .hljs-meta-string) {
+  color: var(--codex-fence-string);
+}
+.session-mode
+  .codex-markdown
+  .codex-native-code-fence
+  :is(
+    .hljs-variable,
+    .hljs-template-variable,
+    .hljs-type,
+    .hljs-title,
+    .hljs-selector-class,
+    .hljs-selector-pseudo
+  ) {
+  color: var(--codex-fence-variable);
+}
+.session-mode
+  .codex-markdown
+  .codex-native-code-fence
+  :is(.hljs-attr, .hljs-attribute, .hljs-section, .hljs-selector-attr) {
+  color: var(--codex-fence-attribute);
+}
+.session-mode
+  .codex-markdown
+  .codex-native-code-fence
+  :is(
+    .hljs-name,
+    .hljs-selector-tag,
+    .hljs-symbol,
+    .hljs-bullet,
+    .hljs-link,
+    .hljs-meta,
+    .hljs-selector-id
+  ) {
+  color: var(--codex-fence-name);
+}
+.session-mode .codex-markdown .codex-native-code-fence .hljs-deletion {
+  color: var(--codex-fence-error);
+}
+.session-mode .codex-markdown .codex-native-code-fence .hljs-emphasis {
+  font-style: italic;
+}
+.session-mode .codex-markdown .codex-native-code-fence .hljs-strong {
+  font-weight: 700;
+}
+.session-mode .codex-markdown .codex-native-code-fence .hljs-link {
+  text-decoration: underline;
+}
+.session-mode .codex-markdown .codex-native-table {
+  position: relative;
+  min-width: 0;
+  background: inherit;
+}
+.session-mode .codex-markdown .codex-native-table-scroller {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  max-width: 100%;
+}
+.session-mode .codex-markdown .codex-native-table table {
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;
+  text-align: start;
+  width: fit-content;
+  min-width: 100%;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  line-height: calc(var(--codex-chat-size, 13px) * 1.625);
+  font-variant-numeric: tabular-nums;
+}
+.session-mode
+  .codex-markdown
+  .codex-native-table
+  :is(thead, tbody, tr, th, td) {
+  background: transparent;
+  color: inherit;
+  border: 0;
+}
+.session-mode .codex-markdown .codex-native-table th {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: var(--codex-chat-size, 13px);
+  padding: calc(var(--codex-markdown-space) * 2)
+    calc(var(--codex-markdown-space) * 6) calc(var(--codex-markdown-space) * 2)
+    0;
+  border-bottom: 1px solid
+    color-mix(in oklab, var(--codex-text) 12%, transparent);
+  text-align: inherit;
+}
+.session-mode .codex-markdown .codex-native-table th:last-child {
+  padding-inline-end: calc(var(--codex-markdown-space) * 10);
+}
+.session-mode .codex-markdown .codex-native-table td {
+  font-size: 12px;
+  line-height: inherit;
+  padding: calc(var(--codex-markdown-space) * 2.5)
+    calc(var(--codex-markdown-space) * 6)
+    calc(var(--codex-markdown-space) * 2.5) 0;
+  border-bottom: 1px solid
+    color-mix(in oklab, var(--codex-text) 5%, transparent);
+  vertical-align: baseline;
+}
+.session-mode .codex-markdown .codex-native-table td:last-child {
+  padding-inline-end: 0;
+}
+.session-mode .codex-markdown .codex-native-table tbody tr:last-child td {
+  padding-bottom: calc(var(--codex-markdown-space) * 6);
+  border-bottom: 0;
+}
+.session-mode .codex-markdown .codex-native-table-actions {
+  position: absolute;
+  inset-inline-end: 2px;
+  top: 2px;
+  color: var(--codex-muted);
+  opacity: 0;
+}
+.session-mode
+  .codex-markdown
+  .codex-native-table:hover
+  .codex-native-table-actions,
+.session-mode
+  .codex-markdown
+  .codex-native-table:focus-within
+  .codex-native-table-actions {
+  opacity: 1;
+}
+.session-mode .codex-presentation.codex-native-markdown-menu {
+  background: var(--codex-secondary);
+  color: var(--codex-text);
+  border-color: var(--codex-border);
+  font: 400 12px/18px var(--codex-chat-font, system-ui, sans-serif);
+  max-width: calc(100vw - 16px);
+}
+.session-mode .codex-native-markdown-menu [role="menuitem"] {
+  font-size: 12px;
+}
+.session-mode .codex-markdown .codex-native-markdown-error {
+  padding: 8px 16px;
+  color: var(--destructive);
+  font-size: 12px;
+}
+@media (min-width: 768px) {
+  .session-mode .codex-markdown .codex-native-code-header {
+    padding-inline-start: 20px;
+  }
+  .session-mode
+    .codex-markdown
+    .codex-native-code-fence
+    pre[data-streamdown="code-block-body"] {
+    padding-inline: 20px;
+  }
+}
+@media (pointer: coarse), (hover: none) {
+  .session-mode
+    .codex-markdown
+    :is(.codex-native-code-actions, .codex-native-table-actions)
+    button {
+    width: 44px;
+    height: 44px;
+  }
+  .session-mode .codex-markdown .codex-native-code-header {
+    min-height: 56px;
+  }
+  .session-mode .codex-markdown .codex-native-table {
+    padding-top: 44px;
+  }
+  .session-mode
+    .codex-markdown
+    :is(.codex-native-markdown-more, .codex-native-table-actions) {
+    opacity: 1;
+  }
+  .session-mode .codex-native-markdown-menu [role="menuitem"] {
+    min-height: 44px;
+  }
+}
+.session-mode
+  .codex-markdown
+  .codex-native-code-fence
+  :is(.hljs-comment, .hljs-quote) {
+  color: var(--codex-fence-comment);
+  font-style: italic;
+}

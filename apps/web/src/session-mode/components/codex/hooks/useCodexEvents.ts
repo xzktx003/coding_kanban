@@ -1,18 +1,18 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from "react";
 import {
   useApprovalStore,
   useCodexStore,
   useElicitationStore,
   usePermissionsStore,
   useRequestUserInputStore,
-} from '@session/components/codex/stores';
-import { isDesktopTauri } from '@session/hooks/runtime';
-import { getAccountWithParams } from '@session/services';
-import { useLayoutStore } from '@session/stores';
-import { useSettingsStore } from '@session/stores/settings';
-import { useServerNotificationHandler } from './useServerNotificationHandler';
-import { useSseEventBridge } from './useSseEventBridge';
-import { useTauriEventListeners } from './useTauriEventListeners';
+} from "@session/components/codex/stores";
+import { buildUrl, isDesktopTauri } from "@session/hooks/runtime";
+import { getAccountWithParams } from "@session/services";
+import { useLayoutStore } from "@session/stores";
+import { useSettingsStore } from "@session/stores/settings";
+import { useServerNotificationHandler } from "./useServerNotificationHandler";
+import { useSseEventBridge } from "./useSseEventBridge";
+import { useTauriEventListeners } from "./useTauriEventListeners";
 
 export function useCodexEvents(enabled = true) {
   // Read volatile values via refs so downstream hooks never need to re-run
@@ -20,34 +20,73 @@ export function useCodexEvents(enabled = true) {
   // store update or layout change (e.g. window resize) was causing listeners
   // to drop.
   const isCodexThreadActiveRef = useRef(false);
-  const taskCompleteBeepModeRef = useRef<'never' | 'unfocused' | 'always'>('unfocused');
+  const taskCompleteBeepModeRef = useRef<"never" | "unfocused" | "always">(
+    "unfocused",
+  );
   const preventSleepDuringTasksRef = useRef(false);
 
   // Keep refs in sync with current store values on every render (cheap).
-  isCodexThreadActiveRef.current = useLayoutStore((state) => state.view === 'agent');
-  taskCompleteBeepModeRef.current = useSettingsStore((state) => state.enableTaskCompleteBeep);
-  preventSleepDuringTasksRef.current = useSettingsStore((state) => state.preventSleepDuringTasks);
+  isCodexThreadActiveRef.current = useLayoutStore(
+    (state) => state.view === "agent",
+  );
+  taskCompleteBeepModeRef.current = useSettingsStore(
+    (state) => state.enableTaskCompleteBeep,
+  );
+  preventSleepDuringTasksRef.current = useSettingsStore(
+    (state) => state.preventSleepDuringTasks,
+  );
 
-  const syncAccountState = async (refreshToken: boolean) => {
+  const accountRead = useRef({ active: false, generation: 0, epoch: 0 });
+  const syncAccountState = useCallback(async (refreshToken: boolean) => {
+    if (!accountRead.current.active) return;
+    const generation = ++accountRead.current.generation;
+    const epoch = accountRead.current.epoch;
+    const source = buildUrl("/health");
     try {
       const response = await getAccountWithParams({ refreshToken });
+      const account = response?.account;
+      if (
+        account !== null &&
+        (!account ||
+          typeof account !== "object" ||
+          !["apiKey", "chatgpt", "amazonBedrock"].includes(account.type))
+      ) {
+        throw new Error("Invalid account observation");
+      }
+      if (
+        !accountRead.current.active ||
+        generation !== accountRead.current.generation ||
+        epoch !== accountRead.current.epoch ||
+        source !== buildUrl("/health")
+      )
+        return;
       useCodexStore.getState().setAccount(response.account);
     } catch (error) {
-      console.error('[useCodexEvents] Failed to sync account state:', error);
-      useCodexStore.getState().setAccount(null);
+      // A failed observation says nothing about authentication. Keep initial
+      // unknown or the last authoritative account instead of inventing logout.
+      if (
+        accountRead.current.active &&
+        generation === accountRead.current.generation
+      )
+        console.error("[useCodexEvents] Failed to sync account state:", error);
     }
-  };
+  }, []);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: one-shot initial sync; syncAccountState is rebuilt every render
   useEffect(() => {
-    if (!enabled) {
-      return;
-    }
+    accountRead.current.active = enabled;
+    if (!enabled) return;
+    const invalidate = () => {
+      accountRead.current.epoch++;
+      accountRead.current.generation++;
+    };
+    window.addEventListener("session-runtime-restarted", invalidate);
     syncAccountState(false).catch(console.error);
-    // Only re-run when enabled toggles; syncAccountState identity is stable
-    // enough for this one-shot initial sync.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled]);
+    return () => {
+      accountRead.current.active = false;
+      invalidate();
+      window.removeEventListener("session-runtime-restarted", invalidate);
+    };
+  }, [enabled, syncAccountState]);
 
   const handleServerNotification = useServerNotificationHandler(
     {
@@ -55,7 +94,7 @@ export function useCodexEvents(enabled = true) {
       taskCompleteBeepModeRef,
       preventSleepDuringTasksRef,
     },
-    syncAccountState
+    syncAccountState,
   );
 
   // Store actions accessed via getState() are stable function references
@@ -78,6 +117,9 @@ export function useCodexEvents(enabled = true) {
   // SSE. The SSE stream stays open on desktop as well, because the filesystem
   // watcher now only publishes there — the bridge drops the duplicate agent
   // events itself.
-  useTauriEventListeners({ ...sharedHandlers, enabled: enabled && isDesktopTauri() });
+  useTauriEventListeners({
+    ...sharedHandlers,
+    enabled: enabled && isDesktopTauri(),
+  });
   useSseEventBridge({ ...sharedHandlers, enabled });
 }

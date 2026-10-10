@@ -1,3 +1,4 @@
+import { CODEX_CHAT_PRIVATE_BODY_METHODS, projectCodexChatValue } from "@agent-orchestrator/shared";
 import type { Thread } from "@session/bindings/v2/Thread";
 import type { ServerNotification } from "@session/bindings";
 import type { ThreadItem } from "@session/bindings/v2/ThreadItem";
@@ -33,34 +34,12 @@ export const isToolTranscriptEvent = (event: ServerNotification): boolean =>
   ((event.method === "item/started" || event.method === "item/completed") &&
     isToolTranscriptItem(event.params.item));
 
+// Compatibility name: remove private bodies, retain safe native metadata.
 export function withoutToolTranscriptEvent(
   event: ServerNotification,
 ): ServerNotification | null {
-  if (isToolTranscriptEvent(event)) return null;
-  if (event.method === "turn/started" || event.method === "turn/completed") {
-    const originalItems = event.params.turn?.items ?? [];
-    const items = originalItems.filter((item) => !isToolTranscriptItem(item));
-    if (items.length !== originalItems.length)
-      return {
-        ...event,
-        params: { ...event.params, turn: { ...event.params.turn, items } },
-      } as ServerNotification;
-  }
-  if (event.method === "thread/started") {
-    let changed = false;
-    const turns = (event.params.thread?.turns ?? []).map((turn) => {
-      const items = turn.items.filter((item) => !isToolTranscriptItem(item));
-      if (items.length === turn.items.length) return turn;
-      changed = true;
-      return { ...turn, items };
-    });
-    if (changed)
-      return {
-        ...event,
-        params: { ...event.params, thread: { ...event.params.thread, turns } },
-      };
-  }
-  return event;
+  if (CODEX_CHAT_PRIVATE_BODY_METHODS.has(event.method)) return null;
+  return projectCodexChatValue(event) as ServerNotification;
 }
 
 export function withoutToolTranscriptEvents(

@@ -1,21 +1,25 @@
-import { deliverRpc, sameRpc, rpcRequestContext } from './rpcLifecycle';
-import { create } from 'zustand';
-import type { RequestId } from '@session/bindings';
+import { deliverRpc, sameRpc, rpcRequestContext } from "./rpcLifecycle";
+import { allowsApprovalDecision } from "./approvalDecisions";
+import { create } from "zustand";
+import type { RequestId } from "@session/bindings";
 import type {
   CommandExecutionApprovalDecision,
   CommandExecutionRequestApprovalParams,
   FileChangeApprovalDecision,
   FileChangeRequestApprovalParams,
-} from '@session/bindings/v2';
-import { respondToCommandExecutionApproval, respondToFileChangeApproval } from '@session/services';
+} from "@session/bindings/v2";
+import {
+  respondToCommandExecutionApproval,
+  respondToFileChangeApproval,
+} from "@session/services";
 
 export type ApprovalRequest =
   | (CommandExecutionRequestApprovalParams & {
-      type: 'commandExecution';
+      type: "commandExecution";
       requestId: RequestId;
     })
   | (FileChangeRequestApprovalParams & {
-      type: 'fileChange';
+      type: "fileChange";
       requestId: RequestId;
     });
 
@@ -30,7 +34,7 @@ interface ApprovalStore {
     requestId: RequestId,
     isCommandExecution: boolean,
     decision: CommandExecutionApprovalDecision | FileChangeApprovalDecision,
-    target?: ApprovalRequest
+    target?: ApprovalRequest,
   ) => Promise<void>;
   clearCurrent: () => void;
 }
@@ -43,22 +47,55 @@ export const useApprovalStore = create<ApprovalStore>((set, get) => ({
   // Actions
   addApproval: (approval) => {
     set((state) => ({
-      pendingApprovals: state.pendingApprovals.some(r => sameRpc(r, approval)) ? state.pendingApprovals : [...state.pendingApprovals, approval],
+      pendingApprovals: state.pendingApprovals.some((r) => sameRpc(r, approval))
+        ? state.pendingApprovals
+        : [...state.pendingApprovals, approval],
       currentApproval: state.currentApproval || approval,
     }));
   },
 
-  respondToApproval: async (requestId, isCommandExecution, decision, target) => {
-    const request = target ?? get().pendingApprovals.find(r => r.requestId === requestId);
-    if (!request || !get().pendingApprovals.includes(request)) throw new Error('审批已过期，请核对当前请求');
-    await deliverRpc(request, () => isCommandExecution
-      ? respondToCommandExecutionApproval(requestId, decision as CommandExecutionApprovalDecision, rpcRequestContext(request))
-      : respondToFileChangeApproval(requestId, decision as FileChangeApprovalDecision, rpcRequestContext(request)), () => {
-        set(state => {
-          const pending = state.pendingApprovals.filter(r => r !== request);
-          return { pendingApprovals: pending, currentApproval: pending[0] ?? null };
+  respondToApproval: async (
+    requestId,
+    isCommandExecution,
+    decision,
+    target,
+  ) => {
+    const request =
+      target ?? get().pendingApprovals.find((r) => r.requestId === requestId);
+    if (
+      !request ||
+      request.requestId !== requestId ||
+      !get().pendingApprovals.includes(request)
+    )
+      throw new Error("审批已过期，请核对当前请求");
+    if (isCommandExecution !== (request.type === "commandExecution"))
+      throw new Error("审批类型与请求不匹配");
+    if (!allowsApprovalDecision(request, decision))
+      throw new Error("当前请求不允许此授权选项，请核对最新请求");
+    await deliverRpc(
+      request,
+      () =>
+        isCommandExecution
+          ? respondToCommandExecutionApproval(
+              requestId,
+              decision as CommandExecutionApprovalDecision,
+              rpcRequestContext(request),
+            )
+          : respondToFileChangeApproval(
+              requestId,
+              decision as FileChangeApprovalDecision,
+              rpcRequestContext(request),
+            ),
+      () => {
+        set((state) => {
+          const pending = state.pendingApprovals.filter((r) => r !== request);
+          return {
+            pendingApprovals: pending,
+            currentApproval: pending[0] ?? null,
+          };
         });
-      });
+      },
+    );
   },
 
   clearCurrent: () => {

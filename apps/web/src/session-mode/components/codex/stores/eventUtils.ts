@@ -5,6 +5,7 @@ import {
   estimateTranscriptBytes,
 } from "@session/services/codexTranscriptMemoryBudget";
 import { recordTranscriptTraffic } from "@session/services/sessionMemoryPressure";
+import { withoutToolTranscriptEvent } from "@session/services/codexTranscriptVisibility";
 
 type DeltaMethod =
   | "item/agentMessage/delta"
@@ -23,19 +24,22 @@ type TurnCompletedEvent = Extract<
   ServerNotification,
   { method: "turn/completed" }
 >;
+type HookEvent = Extract<
+  ServerNotification,
+  { method: "hook/started" | "hook/completed" }
+>;
 
 const ignoredTranscriptMethods = new Set<ServerNotification["method"]>([
   "rawResponseItem/completed",
   "item/commandExecution/outputDelta",
   "item/fileChange/outputDelta",
-  "hook/started",
-  "hook/completed",
 ]);
 
 export const isIgnoredTranscriptEvent = (event: ServerNotification): boolean =>
   ignoredTranscriptMethods.has(event.method) ||
   ((event.method === "item/started" || event.method === "item/completed") &&
-    event.params.item.type === "sleep");
+    event.params.item.type === "sleep") ||
+  withoutToolTranscriptEvent(event) === null;
 
 export const isDeltaEvent = (
   event: ServerNotification,
@@ -306,6 +310,25 @@ const appendTurnCompleted = (
   return compactDeltaEvents(next, stripTurnItems(incoming));
 };
 
+const replaceHookSnapshot = (
+  events: ServerNotification[],
+  incoming: HookEvent,
+): ServerNotification[] => {
+  const index = lastEventIndex(
+    events,
+    (event) =>
+      (event.method === "hook/started" || event.method === "hook/completed") &&
+      event.method === incoming.method &&
+      event.params.threadId === incoming.params.threadId &&
+      event.params.turnId === incoming.params.turnId &&
+      event.params.run.id === incoming.params.run.id,
+  );
+  if (index < 0) return [...events, incoming];
+  const next = [...events];
+  next[index] = incoming;
+  return next;
+};
+
 export const appendTranscriptEvent = (
   events: ServerNotification[],
   incoming: ServerNotification,
@@ -313,6 +336,8 @@ export const appendTranscriptEvent = (
   if (isIgnoredTranscriptEvent(incoming)) return events;
   recordTranscriptTraffic(estimateTranscriptBytes(incoming));
   incoming = compactCodexEventPayload(incoming);
+  if (incoming.method === "hook/started" || incoming.method === "hook/completed")
+    return replaceHookSnapshot(events, incoming);
   const incomingItemKey = keyOfItemEvent(incoming);
   if (
     isDeltaEvent(incoming) &&

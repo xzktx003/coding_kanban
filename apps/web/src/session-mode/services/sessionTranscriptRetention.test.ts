@@ -629,9 +629,32 @@ it("filters legacy hidden payloads from observed HMR caches without rewriting vi
   const events = useCodexStore.getState().events.legacy ?? [];
   expect(events.map((event) => event.method)).toEqual([
     "item/agentMessage/delta",
+    "item/completed",
   ]);
   expect(events[0]).toMatchObject({
     params: { delta: "visible body" },
   });
+  expect((events[1].params as any).item).toMatchObject({
+    type: "commandExecution",
+    id: "cmd",
+    command: "pnpm test",
+    status: "completed",
+    aggregatedOutput: null,
+    transcriptMetadataOnly: true,
+  });
+  expect(JSON.stringify(events)).not.toContain("hidden streamed output");
+  expect(JSON.stringify(events)).not.toContain("hidden patch output");
+  expect(JSON.stringify(events)).not.toContain("hidden raw");
   expect(JSON.stringify(events)).not.toContain("final output");
+  // Re-running retention on an already projected HMR snapshot is a no-op.
+  let updates = 0;
+  const unsubscribe = useCodexStore.subscribe(() => {
+    updates += 1;
+  });
+  const stopAgain = startSessionTranscriptRetention();
+  await flushRetention();
+  stopAgain();
+  unsubscribe();
+  expect(useCodexStore.getState().events.legacy).toBe(events);
+  expect(updates).toBe(0);
 });

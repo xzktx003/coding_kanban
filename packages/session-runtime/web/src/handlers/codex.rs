@@ -18,6 +18,50 @@ fn require_codex(state: &WebServerState) -> Result<&AppState, ErrorResponse> {
     })
 }
 
+type ReadonlyError = (StatusCode, Json<ErrorResponse>);
+
+fn readonly_input_error(error: String) -> ReadonlyError {
+    (StatusCode::BAD_REQUEST, Json(ErrorResponse { error }))
+}
+
+fn readonly_native_error(error: String) -> ReadonlyError {
+    let status = if super::codex_readonly::unsupported(&error) {
+        StatusCode::NOT_IMPLEMENTED
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+    (status, Json(ErrorResponse { error }))
+}
+
+/// Global, projected config only: no browser-supplied paths, config layers or credentials.
+pub(crate) async fn api_config_read(
+    AxumState(state): AxumState<WebServerState>, Json(params): Json<Value>,
+) -> Result<Json<Value>, ReadonlyError> {
+    super::codex_readonly::config_params(params.clone()).map_err(readonly_input_error)?;
+    let codex = &require_codex(&state).map_err(|error| readonly_native_error(error.error))?.codex;
+    super::codex_readonly::read_config(params, |method, params| codex.send_request(method, params))
+        .await.map(Json).map_err(readonly_native_error)
+}
+
+pub(crate) async fn api_config_requirements_read(
+    AxumState(state): AxumState<WebServerState>, Json(params): Json<Value>,
+) -> Result<Json<Value>, ReadonlyError> {
+    super::codex_readonly::requirements_params(params.clone()).map_err(readonly_input_error)?;
+    let codex = &require_codex(&state).map_err(|error| readonly_native_error(error.error))?.codex;
+    super::codex_readonly::read_requirements(params, |method, params| codex.send_request(method, params))
+        .await.map(Json).map_err(readonly_native_error)
+}
+
+/// Searches stored history without resume, subscription, ownership or writer acquisition.
+pub(crate) async fn api_thread_search_occurrences(
+    AxumState(state): AxumState<WebServerState>, Json(params): Json<Value>,
+) -> Result<Json<Value>, ReadonlyError> {
+    super::codex_readonly::search_params(params.clone()).map_err(readonly_input_error)?;
+    let codex = &require_codex(&state).map_err(|error| readonly_native_error(error.error))?.codex;
+    super::codex_readonly::search_occurrences(params, |method, params| codex.send_request(method, params))
+        .await.map(Json).map_err(readonly_native_error)
+}
+
 fn claim_response(state: &WebServerState, request: Option<&Value>, id: &codexia_codex::protocol::RequestId, event: &str, kind: &str) -> Result<(), ErrorResponse> {
     if let Some(request) = request
         && !state.event_hub.claim_reply(request, &json!(id), event, kind) {
@@ -191,6 +235,40 @@ pub(crate) async fn api_login_account(
         .await
         .map_err(to_error_response)?;
     Ok(Json(result))
+}
+
+fn account_scope_error(error: String) -> ReadonlyError {
+    let status = if error.starts_with("SESSION_AUTH_SCOPE_CHANGED:") {
+        StatusCode::CONFLICT
+    } else if error.starts_with("DELIVERY_UNKNOWN") {
+        StatusCode::BAD_GATEWAY
+    } else if super::codex_readonly::unsupported(&error) {
+        StatusCode::NOT_IMPLEMENTED
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+    (status, Json(ErrorResponse { error }))
+}
+
+pub(crate) async fn api_cancel_account_login(
+    AxumState(state): AxumState<WebServerState>, Json(params): Json<Value>,
+) -> Result<Json<Value>, ReadonlyError> {
+    super::codex_account_auth::cancel_scope_params(&params).map_err(readonly_input_error)?;
+    let instance = super::runtime_instance();
+    let codex = &require_codex(&state).map_err(|error| account_scope_error(error.error))?.codex;
+    super::codex_account_auth::cancel_scoped(params, instance.as_deref(), |method, params| codex.send_request(method, params))
+        .await.map(Json).map_err(account_scope_error)
+}
+
+/// Explicit global logout with a public snapshot stale-state check, not email/account-ID ownership.
+pub(crate) async fn api_logout_account(
+    AxumState(state): AxumState<WebServerState>, Json(params): Json<Value>,
+) -> Result<Json<Value>, ReadonlyError> {
+    super::codex_account_auth::logout_scope_params(&params).map_err(readonly_input_error)?;
+    let instance = super::runtime_instance();
+    let codex = &require_codex(&state).map_err(|error| account_scope_error(error.error))?.codex;
+    super::codex_account_auth::logout_scoped(params, instance.as_deref(), |method, params| codex.send_request(method, params))
+        .await.map(Json).map_err(account_scope_error)
 }
 
 pub(crate) async fn api_skills_list(

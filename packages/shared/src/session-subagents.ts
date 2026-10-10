@@ -16,7 +16,12 @@ export interface SubagentThread {
   canAcceptDirectInput?: boolean | null;
   historyMode?: string;
   status?: { type: string; activeFlags?: string[] };
-  turns?: Array<{ id: string; status: string; startedAt?: number | null; items?: unknown[] }>;
+  turns?: Array<{
+    id: string;
+    status: string;
+    startedAt?: number | null;
+    items?: unknown[];
+  }>;
 }
 export interface SubagentSnapshot {
   threads: SubagentThread[];
@@ -25,26 +30,92 @@ export interface SubagentSnapshot {
   checkedAt: number;
   unavailableIds?: string[];
 }
-export interface AgentMention { name: string; path: string }
-export interface SubagentStopTarget { threadId: string; turnId: string }
+export interface AgentMention {
+  name: string;
+  path: string;
+}
+/** Native UserInput.mention also supports a literal plugin identity. */
+export type NativeInputMention = AgentMention;
+export interface SubagentStopTarget {
+  threadId: string;
+  turnId: string;
+}
 export interface SubagentStopResult extends SubagentStopTarget {
   phase: "requested" | "confirmed" | "superseded" | "failed" | "uncertain";
   message?: string;
 }
 export function subagentParent(thread: SubagentThread): string | null {
-  const source = thread.source as { subAgent?: { thread_spawn?: { parent_thread_id?: string }; threadSpawn?: { parentThreadId?: string } }; subagent?: { thread_spawn?: { parent_thread_id?: string } } } | undefined;
-  return thread.parentThreadId ?? source?.subAgent?.thread_spawn?.parent_thread_id ?? source?.subAgent?.threadSpawn?.parentThreadId ?? source?.subagent?.thread_spawn?.parent_thread_id ?? null;
+  const source = thread.source as
+    | {
+        subAgent?: {
+          thread_spawn?: { parent_thread_id?: string };
+          threadSpawn?: { parentThreadId?: string };
+        };
+        subagent?: { thread_spawn?: { parent_thread_id?: string } };
+      }
+    | undefined;
+  return (
+    thread.parentThreadId ??
+    source?.subAgent?.thread_spawn?.parent_thread_id ??
+    source?.subAgent?.threadSpawn?.parentThreadId ??
+    source?.subagent?.thread_spawn?.parent_thread_id ??
+    null
+  );
 }
 /** Older servers keep nickname/role in the spawn source instead of top-level metadata. */
-export function normalizeSubagentThread(thread: SubagentThread): SubagentThread {
-  const source = thread.source as { subAgent?: { thread_spawn?: Record<string, unknown>; threadSpawn?: Record<string, unknown> }; subagent?: { thread_spawn?: Record<string, unknown> } } | undefined;
-  const spawn = source?.subAgent?.thread_spawn ?? source?.subAgent?.threadSpawn ?? source?.subagent?.thread_spawn;
+export function normalizeSubagentThread(
+  thread: SubagentThread,
+): SubagentThread {
+  const source = thread.source as
+    | {
+        subAgent?: {
+          thread_spawn?: Record<string, unknown>;
+          threadSpawn?: Record<string, unknown>;
+        };
+        subagent?: { thread_spawn?: Record<string, unknown> };
+      }
+    | undefined;
+  const spawn =
+    source?.subAgent?.thread_spawn ??
+    source?.subAgent?.threadSpawn ??
+    source?.subagent?.thread_spawn;
   const nickname = spawn?.agent_nickname ?? spawn?.agentNickname;
   const role = spawn?.agent_role ?? spawn?.agentRole;
-  return { ...thread, ...(!thread.agentNickname && typeof nickname === "string" ? { agentNickname: nickname } : {}), ...(!thread.agentRole && typeof role === "string" ? { agentRole: role } : {}) };
+  return {
+    ...thread,
+    ...(!thread.agentNickname && typeof nickname === "string"
+      ? { agentNickname: nickname }
+      : {}),
+    ...(!thread.agentRole && typeof role === "string"
+      ? { agentRole: role }
+      : {}),
+  };
 }
 export function validAgentMention(value: unknown): value is AgentMention {
   if (!value || typeof value !== "object") return false;
   const v = value as AgentMention;
-  return typeof v.name === "string" && v.name.length > 0 && v.name.length <= 160 && !/[\x00-\x1f]/.test(v.name) && typeof v.path === "string" && /^(agent|subagent):\/\/[-a-zA-Z0-9_:]{1,160}$/.test(v.path);
+  return (
+    typeof v.name === "string" &&
+    v.name.length > 0 &&
+    v.name.length <= 160 &&
+    !/[\x00-\x1f]/.test(v.name) &&
+    typeof v.path === "string" &&
+    /^(agent|subagent):\/\/[-a-zA-Z0-9_:]{1,160}$/.test(v.path)
+  );
+}
+export function validNativeInputMention(
+  value: unknown,
+): value is NativeInputMention {
+  if (validAgentMention(value)) return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const v = value as NativeInputMention;
+  return (
+    typeof v.name === "string" &&
+    v.name.trim().length > 0 &&
+    v.name.length <= 160 &&
+    !/[\x00-\x1f]/.test(v.name) &&
+    typeof v.path === "string" &&
+    /^plugin:\/\/[-a-zA-Z0-9_:.@]{1,512}$/.test(v.path) &&
+    !v.path.includes("..")
+  );
 }

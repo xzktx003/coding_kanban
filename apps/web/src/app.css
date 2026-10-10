@@ -1257,8 +1257,61 @@ input {
 .mobile-changes-overlay {
   position: fixed;
   inset: 0;
-  z-index: 20;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
   background: #14191f;
+  /* Fallback until the workbench measures .mobile-primary-nav. */
+  padding-bottom: var(--mobile-nav-clearance, 88px);
+}
+
+.mobile-workbench-page:has(.mobile-agent-composer-input:focus)
+  .mobile-changes-overlay {
+  padding-bottom: 0;
+}
+
+.mobile-changes-overlay .changes-panel--compact {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+.mobile-changes-overlay .changes-panel--compact .changes-body,
+.mobile-changes-overlay .changes-panel--compact .diff-viewer {
+  min-height: 0;
+  overflow: auto;
+}
+
+.mobile-changes-overlay .changes-panel--compact .diff-viewer {
+  overflow-x: hidden;
+}
+
+.mobile-changes-overlay .changes-panel--compact .diff-code,
+.mobile-changes-overlay .changes-panel--compact .diff-hunk,
+.mobile-changes-overlay .changes-panel--compact .diff-row {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.mobile-changes-overlay .changes-panel--compact .diff-row {
+  grid-template-columns: 32px 32px minmax(0, 1fr);
+}
+
+.mobile-changes-overlay .changes-panel--compact .diff-row code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.mobile-changes-overlay .changes-panel--compact .diff-code .diff-hunk-revert {
+  grid-column: 1 / -1;
+  grid-row: auto;
+  width: auto;
+  max-width: 100%;
+  margin: 4px 8px;
+  justify-self: start;
 }
 
 .changes-panel--compact .changes-body {
@@ -5990,11 +6043,18 @@ input {
   position: relative;
   z-index: 2;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "label trigger"
+    "actions actions";
   align-items: center;
   gap: 8px;
   color: rgba(244, 241, 234, 0.64);
   font-size: 12px;
+}
+
+.mobile-session-switcher > span:first-child {
+  grid-area: label;
 }
 
 .mobile-session-switcher--active > span:first-child {
@@ -6003,6 +6063,7 @@ input {
 }
 
 .mobile-session-picker-trigger {
+  grid-area: trigger;
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -6077,6 +6138,7 @@ input {
 }
 
 .mobile-session-actions {
+  grid-area: actions;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -6445,6 +6507,134 @@ input {
 .mobile-agent-composer-btn:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+/* Short viewports (phone landscape) cannot fit the portrait chrome stack.
+   Compact it so the live terminal keeps a readable slice instead of
+   shrinking to its min-content slit. Must follow the base mobile rules. */
+@media (max-height: 460px) and (orientation: landscape) {
+  .mobile-workbench-header {
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+
+  .mobile-workbench-title .kanban-brand-logo,
+  .mobile-workbench-title strong {
+    display: none;
+  }
+
+  .mobile-workbench-desktop-link,
+  .mobile-workbench-notification-toggle {
+    min-height: 28px;
+    padding: 4px 8px;
+  }
+
+  .mobile-workbench-content--session {
+    padding: 4px 8px 52px;
+  }
+
+  .mobile-session-switcher {
+    gap: 4px;
+  }
+
+  .mobile-session-picker-trigger {
+    height: 32px;
+    padding-top: 2px;
+    padding-bottom: 2px;
+  }
+
+  .mobile-session-picker-trigger::after {
+    top: 10px;
+  }
+
+  .mobile-session-picker-trigger[aria-expanded="true"]::after {
+    top: 13px;
+  }
+
+  .mobile-transcript-btn {
+    min-height: 32px;
+    padding: 2px 6px;
+  }
+
+  .mobile-terminal-surface {
+    flex: 1 1 96px;
+    min-height: 96px;
+    padding: 4px;
+  }
+
+  .mobile-terminal-toolbar {
+    padding: 4px 8px;
+  }
+
+  .mobile-terminal-key {
+    min-width: 36px;
+    min-height: 32px;
+    padding: 4px 6px;
+  }
+
+  .mobile-agent-composer {
+    gap: 4px;
+    padding: 4px 8px 6px;
+  }
+
+  .mobile-agent-composer-input {
+    min-height: 36px;
+    max-height: 36px;
+    padding: 6px 8px;
+  }
+
+  .mobile-agent-composer-btn {
+    min-height: 32px;
+    padding: 4px 8px;
+  }
+
+  .mobile-primary-nav {
+    padding-top: 2px;
+    padding-bottom: max(2px, env(safe-area-inset-bottom));
+  }
+
+  .mobile-primary-nav button {
+    min-height: 36px;
+    padding: 2px;
+  }
+}
+
+/* A focused composer means the soft keyboard is covering the layout viewport.
+   Tighten the same fixed bars so the live terminal keeps a readable slice. */
+.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-workbench-content--session {
+  padding: 4px 8px 0;
+}
+
+.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-session-switcher {
+  gap: 4px;
+}
+
+.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-session-picker-trigger,
+.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-transcript-btn {
+  min-height: 32px;
+  height: 32px;
+}
+
+.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-terminal-surface {
+  flex: 1 1 96px;
+  min-height: 96px;
+  padding: 4px;
+}
+
+.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-terminal-toolbar,
+.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-agent-composer {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-terminal-key,
+.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-agent-composer-btn {
+  min-height: 32px;
+}
+
+.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-agent-composer-input {
+  min-height: 36px;
+  max-height: 36px;
 }
 
 .quick-tmux-recent {

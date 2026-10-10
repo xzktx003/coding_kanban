@@ -1,0 +1,832 @@
+[
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "fixture"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:fixture",
+      "name": "Fixture"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": " fixture "
+    },
+    "apps": [],
+    "source": {
+      "key": "server:fixture",
+      "name": "Fixture"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": ""
+    },
+    "apps": [],
+    "source": null,
+    "presentation": null,
+    "parts": ["unnamed-mcp-calls"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "  "
+    },
+    "apps": [],
+    "source": null,
+    "presentation": null,
+    "parts": ["unnamed-mcp-calls"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "github_mcp_server"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:github_mcp_server",
+      "name": "GitHub MCP Server"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "openai_api_tools"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:openai_api_tools",
+      "name": "OpenAI API Tools"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "GH_PRs"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:GH_PRs",
+      "name": "GH PRs"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": {
+        "connectorId": "connector_public",
+        "appName": "Public name"
+      },
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "fixture"
+    },
+    "apps": [],
+    "source": {
+      "key": "app:connector_public",
+      "name": "Public name"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": {
+        "connectorId": "connector_public",
+        "appName": null
+      },
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "fixture"
+    },
+    "apps": [],
+    "source": {
+      "key": "app:connector_public",
+      "name": "connector_public"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": "public-plugin",
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "fixture"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:fixture",
+      "name": "Fixture"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": "public-plugin",
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "codex_apps"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:codex_apps",
+      "name": "Codex Apps"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "node_repl"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:node_repl",
+      "name": "Node Repl"
+    },
+    "presentation": null,
+    "parts": ["commands"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "cua_repl"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:cua_repl",
+      "name": "Cua Repl"
+    },
+    "presentation": null,
+    "parts": ["commands"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": {
+        "connectorId": "connector_public",
+        "appName": "Public name"
+      },
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "node_repl"
+    },
+    "apps": [],
+    "source": {
+      "key": "app:connector_public",
+      "name": "Public name"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "read_thread",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "codex_app"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:codex_app",
+      "name": "Codex App"
+    },
+    "presentation": {
+      "descriptorId": "localConversation.codexTool.read_thread.state",
+      "state": "completed",
+      "key": "read_thread:completed"
+    },
+    "parts": ["codex-tool-call"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "read_thread",
+      "arguments": {},
+      "status": "failed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "codex_app"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:codex_app",
+      "name": "Codex App"
+    },
+    "presentation": {
+      "descriptorId": "localConversation.codexTool.read_thread.state",
+      "state": "failed",
+      "key": "read_thread:failed"
+    },
+    "parts": ["codex-tool-call"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "set_thread_archived",
+      "arguments": {
+        "archived": false
+      },
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "codex_app"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:codex_app",
+      "name": "Codex App"
+    },
+    "presentation": {
+      "descriptorId": "localConversation.codexTool.restore_chat.state",
+      "state": "completed",
+      "key": "restore_chat:completed"
+    },
+    "parts": ["codex-tool-call"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "inspect_repository",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "codex_app"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:codex_app",
+      "name": "Codex App"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "cloud_threads.read",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "codex_apps"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:codex_apps",
+      "name": "Codex Apps"
+    },
+    "presentation": {
+      "descriptorId": "localConversation.codexTool.cloud_threads.read.state",
+      "state": "completed",
+      "key": "cloud_threads.read:completed"
+    },
+    "parts": ["codex-tool-call"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "read",
+      "arguments": {},
+      "status": "completed",
+      "appContext": {
+        "connectorId": "connector_openai_threads",
+        "appName": "Cloud"
+      },
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "codex_apps"
+    },
+    "apps": [],
+    "source": {
+      "key": "app:connector_openai_threads",
+      "name": "Cloud"
+    },
+    "presentation": {
+      "descriptorId": "localConversation.codexTool.cloud_threads.read.state",
+      "state": "completed",
+      "key": "cloud_threads.read:completed"
+    },
+    "parts": ["codex-tool-call"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "cloud_threads_read",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "codex_apps"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:codex_apps",
+      "name": "Codex Apps"
+    },
+    "presentation": {
+      "descriptorId": "localConversation.codexTool.cloud_threads.read.state",
+      "state": "completed",
+      "key": "cloud_threads.read:completed"
+    },
+    "parts": ["codex-tool-call"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "read_page",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "pages"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:pages",
+      "name": "Pages"
+    },
+    "presentation": {
+      "descriptorId": "localConversation.codexTool.read_page.state",
+      "state": "completed",
+      "key": "read_page:completed"
+    },
+    "parts": ["codex-tool-call"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "pages_read_page",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "codex_apps"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:codex_apps",
+      "name": "Codex Apps"
+    },
+    "presentation": {
+      "descriptorId": "localConversation.codexTool.read_page.state",
+      "state": "completed",
+      "key": "read_page:completed"
+    },
+    "parts": ["codex-tool-call"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "read_page",
+      "arguments": {},
+      "status": "completed",
+      "appContext": {
+        "connectorId": "connector_openai_pages",
+        "appName": "Space"
+      },
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "codex_apps"
+    },
+    "apps": [],
+    "source": {
+      "key": "app:connector_openai_pages",
+      "name": "Space"
+    },
+    "presentation": {
+      "descriptorId": "localConversation.codexTool.read_page.state",
+      "state": "completed",
+      "key": "read_page:completed"
+    },
+    "parts": ["codex-tool-call"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "pages_read_page",
+      "arguments": {},
+      "status": "completed",
+      "appContext": {
+        "connectorId": "connector_github",
+        "appName": "GitHub"
+      },
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "codex_apps"
+    },
+    "apps": [],
+    "source": {
+      "key": "app:connector_github",
+      "name": "GitHub"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "manage_page_comment",
+      "arguments": {
+        "action": "react",
+        "active": false
+      },
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "pages"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:pages",
+      "name": "Pages"
+    },
+    "presentation": {
+      "descriptorId": "localConversation.codexTool.comment_remove_reaction.state",
+      "state": "completed",
+      "key": "comment_remove_reaction:completed"
+    },
+    "parts": ["codex-tool-call"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "create_page_visualization",
+      "arguments": {
+        "replace_block": {}
+      },
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "pages"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:pages",
+      "name": "Pages"
+    },
+    "presentation": {
+      "descriptorId": "localConversation.codexTool.replace_visualization.state",
+      "state": "completed",
+      "key": "replace_visualization:completed"
+    },
+    "parts": ["codex-tool-call"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "read_artifact",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "pages"
+    },
+    "apps": [],
+    "source": {
+      "key": "server:pages",
+      "name": "Pages"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": null,
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "public"
+    },
+    "apps": [
+      {
+        "id": "connector_public",
+        "name": "Actual name",
+        "pluginDisplayNames": ["public"],
+        "logoUrl": "https://example.invalid/logo.svg"
+      }
+    ],
+    "source": {
+      "key": "app:connector_public",
+      "name": "Actual name"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  },
+  {
+    "item": {
+      "type": "mcpToolCall",
+      "id": "public-call",
+      "tool": "lookup",
+      "arguments": {},
+      "status": "completed",
+      "appContext": {
+        "connectorId": "different",
+        "appName": "Public name"
+      },
+      "pluginId": null,
+      "result": {
+        "content": [],
+        "structuredContent": null,
+        "_meta": null
+      },
+      "error": null,
+      "server": "fixture"
+    },
+    "apps": [
+      {
+        "id": "connector_public",
+        "name": "Actual name",
+        "pluginDisplayNames": ["fixture"],
+        "logoUrl": "https://example.invalid/logo.svg"
+      }
+    ],
+    "source": {
+      "key": "app:different",
+      "name": "Public name"
+    },
+    "presentation": null,
+    "parts": ["mcp-sources"]
+  }
+]

@@ -1,4 +1,3 @@
-import { selectBuiltinInputTarget } from "@session/services/builtinInputNavigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   MarketplaceLoadErrorInfo,
@@ -6,10 +5,8 @@ import type {
   PluginMarketplaceEntry,
   PluginSummary,
 } from "@session/bindings/v2";
-import { toast } from "@session/components/ui/use-toast";
+import { pluginNotice as toast } from "../pluginNotices";
 import { pluginInstall, pluginList, pluginRead } from "@session/services";
-import { useLayoutStore } from "@session/stores";
-import { useInputStore } from "@session/stores/useInputStore";
 import { usePluginsViewContext } from "../hooks";
 import {
   dedupePluginEntries,
@@ -18,6 +15,8 @@ import {
   preferredLocalSources,
 } from "./pluginTargets";
 import { useExternalUrl } from "./useExternalUrl";
+import { invalidatePluginCapabilities } from "../pluginInputs";
+import { tryPluginInComposer } from "../pluginNavigation";
 
 /**
  * Process-wide cache of the last plugin/list result, so re-entering the view
@@ -75,8 +74,6 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
   );
   const [query, setQuery] = useState("");
 
-  const { setView } = useLayoutStore();
-  const { appendInputValue } = useInputStore();
   const { handlePluginDetail } = usePluginsViewContext();
   const { openExternalUrl } = useExternalUrl();
 
@@ -154,6 +151,7 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
       setInstallingPluginId(plugin.id);
       try {
         const response = await pluginInstall(target);
+        invalidatePluginCapabilities();
 
         const authTargets = response.appsNeedingAuth.filter(
           (app) => app.installUrl,
@@ -189,15 +187,9 @@ export function usePluginsMarketplace(refreshTrigger = 0) {
     [markInstalled, openExternalUrl, preferred],
   );
 
-  const handleUsePlugin = useCallback(
-    (plugin: PluginSummary) => {
-      const pluginName = plugin.interface?.displayName ?? plugin.name;
-      selectBuiltinInputTarget("codex");
-      setView("agent");
-      appendInputValue(`@${pluginName}`);
-    },
-    [appendInputValue, setView],
-  );
+  const handleUsePlugin = useCallback((plugin: PluginSummary) => {
+    tryPluginInComposer(plugin);
+  }, []);
 
   const handleShowDetail = useCallback(
     async (marketplace: PluginMarketplaceEntry, plugin: PluginSummary) => {

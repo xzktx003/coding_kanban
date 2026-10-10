@@ -153,8 +153,9 @@ export default function VisualizationPreview({
       )
         setError(`预览脚本出错：${message.message.slice(0, 300)}`);
     };
-    window.addEventListener("message", receive);
-    return () => window.removeEventListener("message", receive);
+    const ownerWindow = container.current?.ownerDocument.defaultView ?? window;
+    ownerWindow.addEventListener("message", receive);
+    return () => ownerWindow.removeEventListener("message", receive);
   }, [nonce]);
   return (
     <div

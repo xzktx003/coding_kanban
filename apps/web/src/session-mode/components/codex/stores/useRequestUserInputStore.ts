@@ -1,4 +1,4 @@
-import { deliverRpc, rpcRequestContext } from './rpcLifecycle';
+import { deliverRpc, rpcRequestContext } from "./rpcLifecycle";
 import { create } from "zustand";
 import type { RequestId } from "@session/bindings";
 import type { ToolRequestUserInputResponse } from "@session/bindings/v2";
@@ -28,6 +28,7 @@ export type UserInputDraft = {
   collapsed: boolean;
   answers: Record<string, string[]>;
   custom: Record<string, boolean>;
+  customText?: Record<string, string>;
 };
 export const requestUserInputKey = (request: RequestUserInputRequest) =>
   JSON.stringify([
@@ -61,6 +62,7 @@ interface RequestUserInputStore {
     requestId: RequestId,
     response: ToolRequestUserInputResponse,
     threadId?: string,
+    target?: RequestUserInputRequest,
   ) => Promise<void>;
   clearCurrent: () => void;
 }
@@ -94,7 +96,14 @@ export const useRequestUserInputStore = create<RequestUserInputStore>(
       }),
     replaceRequests: (requests) =>
       set((state) => ({
-        pendingRequests: requests.map(r => state.pendingRequests.find(old => requestUserInputKey(old) === requestUserInputKey(r) && JSON.stringify(old) === JSON.stringify(r)) ?? r),
+        pendingRequests: requests.map(
+          (r) =>
+            state.pendingRequests.find(
+              (old) =>
+                requestUserInputKey(old) === requestUserInputKey(r) &&
+                JSON.stringify(old) === JSON.stringify(r),
+            ) ?? r,
+        ),
         currentRequest: requests[0] ?? null,
         drafts: retainedDrafts(requests, state.drafts),
       })),
@@ -129,20 +138,39 @@ export const useRequestUserInputStore = create<RequestUserInputStore>(
       );
       get().replaceRequests(requests);
     },
-    respondToRequest: async (requestId, response, threadId) => {
-      const request = get().pendingRequests.find(
-        (r) =>
-          r.requestId === requestId &&
-          (threadId === undefined || r.threadId === threadId),
-      );
-      if (!request) throw new Error("Question is no longer pending");
+    respondToRequest: async (requestId, response, threadId, target) => {
+      const request =
+        target ??
+        get().pendingRequests.find(
+          (r) =>
+            r.requestId === requestId &&
+            (threadId === undefined || r.threadId === threadId),
+        );
+      if (
+        !request ||
+        request.requestId !== requestId ||
+        (threadId !== undefined && request.threadId !== threadId) ||
+        !get().pendingRequests.includes(request)
+      )
+        throw new Error("Question is no longer pending");
       const key = requestUserInputKey(request);
       if (submittingRequests.has(key)) return;
       submittingRequests.add(key);
       try {
-        await deliverRpc(request, () => respondToRequestUserInput(requestId, response, rpcRequestContext(request)), () => {
-          get().replaceRequests(get().pendingRequests.filter(r => r !== request));
-        });
+        await deliverRpc(
+          request,
+          () =>
+            respondToRequestUserInput(
+              requestId,
+              response,
+              rpcRequestContext(request),
+            ),
+          () => {
+            get().replaceRequests(
+              get().pendingRequests.filter((r) => r !== request),
+            );
+          },
+        );
       } finally {
         submittingRequests.delete(key);
       }

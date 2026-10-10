@@ -1,7 +1,90 @@
+import { buildThreadRows } from "@session/components/codex/thread/threadRows";
 import { expect, it } from "vitest";
 import type { Thread } from "@session/bindings/v2";
-import { buildThreadRows } from "@session/components/codex/thread/threadRows";
 import { convertThreadHistoryToEvents } from "./threadHistoryConverter";
+import { projectNativeHookRuns } from "../components/codex/presentation/nativeHookRuns";
+const run = {
+  id: "hook",
+  eventName: "postToolUse",
+  handlerType: "command",
+  executionMode: "sync",
+  scope: "turn",
+  sourcePath: "/project/hooks.json",
+  source: "project",
+  displayOrder: "9007199254740994",
+  status: "blocked",
+  statusMessage: "Policy",
+  startedAt: "9007199254740995",
+  completedAt: "9007199254740996",
+  durationMs: 1,
+  entries: [{ kind: "feedback", text: "Actual output" }],
+};
+const history = (extra: object = {}) =>
+  ({
+    id: "owner",
+    turns: [
+      {
+        id: "turn",
+        items: [],
+        itemsView: "full",
+        status: "completed",
+        error: null,
+        startedAt: 1,
+        completedAt: 2,
+        durationMs: 1,
+        ...extra,
+      },
+    ],
+  }) as unknown as Thread;
+it("restores only actual turn hookRuns metadata with exact bigint counters and owner identity", () => {
+  const events = convertThreadHistoryToEvents(
+    history({
+      hookRuns: [
+        run,
+        {
+          ...run,
+          id: "running",
+          status: "running",
+          completedAt: null,
+          durationMs: null,
+        },
+      ],
+    }),
+  );
+  expect(
+    events.filter((event) => event.method.startsWith("hook/")),
+  ).toHaveLength(2);
+  const runs = projectNativeHookRuns(events).get('["owner","turn"]')!;
+  expect(runs[0]).toMatchObject({
+    id: "hook",
+    displayOrder: 9007199254740994n,
+    startedAt: 9007199254740995n,
+    status: "blocked",
+    entries: [{ kind: "feedback", text: "Actual output" }],
+  });
+  expect(
+    events.find((event) => event.method === "hook/started")?.params,
+  ).toMatchObject({ threadId: "owner", turnId: "turn" });
+});
+it("does not invent runs from tools and rejects malformed actual hook metadata", () => {
+  expect(
+    convertThreadHistoryToEvents(history()).filter((event) =>
+      event.method.startsWith("hook/"),
+    ),
+  ).toEqual([]);
+  const events = convertThreadHistoryToEvents(
+    history({
+      hookRuns: [
+        { ...run, id: "", status: "success" },
+        { ...run, startedAt: Number.MAX_SAFE_INTEGER + 1 },
+        { ...run, entries: [{ kind: "secret", text: "invalid" }] },
+      ],
+    }),
+  );
+  expect(events.filter((event) => event.method.startsWith("hook/"))).toEqual(
+    [],
+  );
+});
 
 const baseTurn = {
   id: "turn",
@@ -109,7 +192,10 @@ it("materializes completed chat history without tool payloads or nested turn ite
   });
 
   const rows = buildThreadRows(events);
-  expect(rows.some((row) => row.item.kind === "cmdGroup")).toBe(false);
+  expect(rows.some((row) => row.item.kind === "cmdGroup")).toBe(true);
+  expect(JSON.stringify(events)).not.toContain('"aggregatedOutput":"passed"');
+  expect(JSON.stringify(events)).not.toContain('"oldText":"old"');
+  expect(JSON.stringify(events)).not.toContain('"newText":"new"');
   expect(
     rows.some(
       (row) =>
@@ -118,7 +204,7 @@ it("materializes completed chat history without tool payloads or nested turn ite
           row.item.event.method === "item/completed") &&
         row.item.event.params.item.type === "fileChange",
     ),
-  ).toBe(false);
+  ).toBe(true);
   expect(
     rows.some(
       (row) =>
@@ -137,7 +223,7 @@ it("materializes completed chat history without tool payloads or nested turn ite
   ).toBe(true);
 });
 
-it("omits historical command snapshots without inventing completion rows", () => {
+it("preserves historical command metadata without raw output or invented terminal states", () => {
   const command = (id: string, status: string) => ({
     id,
     type: "commandExecution",
@@ -155,24 +241,17 @@ it("omits historical command snapshots without inventing completion rows", () =>
       },
     ]),
   );
-  expect(
-    events.filter(
-      (event) =>
-        event.method === "item/started" || event.method === "item/completed",
-    ),
-  ).toEqual([]);
-  expect(events).toEqual([
-    expect.objectContaining({
-      method: "turn/completed",
-      params: expect.objectContaining({
-        turn: expect.objectContaining({
-          id: "turn",
-          status: "inProgress",
-          items: [],
-        }),
-      }),
-    }),
+  const snapshots = events.filter((event) => event.method === "item/completed");
+  expect(snapshots).toHaveLength(2);
+  expect(snapshots.map((event) => (event.params as any).item)).toMatchObject([
+    { id: "done", type: "commandExecution", status: "completed" },
+    { id: "live", type: "commandExecution", status: "inProgress" },
   ]);
+  expect(JSON.stringify(events)).not.toContain('"aggregatedOutput":"done"');
+  expect(events.at(-1)).toMatchObject({
+    method: "turn/completed",
+    params: { turn: { id: "turn", status: "inProgress" } },
+  });
 });
 
 it("keeps question completions visible while stripping completed turn item payloads", () => {
@@ -240,4 +319,56 @@ it("preserves in-progress turn snapshots and does not mutate the source thread",
   ]);
   expect(sourceTurn.items).toEqual([agent]);
   expect((events.at(-1) as any).params.turn).not.toBe(sourceTurn);
+});
+
+it("retains public reasoning summaries while removing private history content", () => {
+  const events = convertThreadHistoryToEvents(
+    history({
+      items: [
+        {
+          type: "reasoning",
+          id: "reasoning",
+          summary: ["Public summary"],
+          content: ["private raw content"],
+        },
+      ],
+    }),
+  );
+  const itemEvents = events.filter(
+    (event) =>
+      event.method === "item/started" || event.method === "item/completed",
+  );
+  expect(itemEvents).toHaveLength(2);
+  for (const event of itemEvents)
+    expect((event.params as any).item).toMatchObject({
+      summary: ["Public summary"],
+      content: [],
+    });
+  expect(JSON.stringify(events)).not.toContain("private raw content");
+});
+it("bounds actual hook previews and discards unknown bodies and duplicate turn hook metadata", () => {
+  const huge = "x".repeat(1024 * 1024);
+  const events = convertThreadHistoryToEvents(
+    history({
+      hookRuns: [
+        {
+          ...run,
+          entries: [{ kind: "feedback", text: huge }],
+          unknownOutput: huge,
+        },
+      ],
+      unknownTurnPayload: huge,
+    }),
+  );
+  const hook = events.find((event) => event.method === "hook/completed")!;
+  expect((hook.params as any).run.entries[0].text.length).toBeLessThanOrEqual(
+    1024,
+  );
+  expect((hook.params as any).run).not.toHaveProperty("unknownOutput");
+  const boundary = events.at(-1)!;
+  expect((boundary.params as any).turn).not.toHaveProperty("hookRuns");
+  expect((boundary.params as any).turn).not.toHaveProperty(
+    "unknownTurnPayload",
+  );
+  expect((hook.params as any).run.displayOrder).toBe(9007199254740994n);
 });

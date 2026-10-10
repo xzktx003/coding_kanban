@@ -71,6 +71,8 @@ it("does not restore or persist hidden output payloads alongside the final resul
           item: {
             type: "commandExecution",
             id: "cmd",
+            status: "completed",
+            command: "pnpm test",
             aggregatedOutput: "complete output",
           },
         },
@@ -81,8 +83,19 @@ it("does not restore or persist hidden output payloads alongside the final resul
   const cached = await readTranscriptCache("codex:hidden-output");
   expect(cached?.events?.map((event) => event.method)).toEqual([
     "item/completed",
+    "item/completed",
   ]);
-  expect((cached?.events?.[0].params as any).item.text).toBe("Final reply");
+  expect((cached?.events?.[0].params as any).item).toMatchObject({
+    type: "commandExecution",
+    id: "cmd",
+    status: "completed",
+    command: "pnpm test",
+    aggregatedOutput: null,
+    transcriptMetadataOnly: true,
+  });
+  expect((cached?.events?.[1].params as any).item.text).toBe("Final reply");
+  expect(JSON.stringify(cached?.events)).not.toContain("old hidden output");
+  expect(JSON.stringify(cached?.events)).not.toContain("complete output");
 });
 it("filters hidden payloads from records written by an older client", async () => {
   const events = [
@@ -107,6 +120,8 @@ it("filters hidden payloads from records written by an older client", async () =
         item: {
           type: "commandExecution",
           id: "legacy-tool",
+          status: "completed",
+          command: "legacy command",
           aggregatedOutput: "old tool output",
         },
       },
@@ -139,6 +154,22 @@ it("filters hidden payloads from records written by an older client", async () =
         key: "codex:legacy-output",
         savedAt: Date.now(),
         events,
+        thread: {
+          id: "legacy-output",
+          status: { type: "active", activeFlags: ["waitingOnApproval"] },
+          turns: [
+            {
+              id: "old",
+              items: [
+                {
+                  type: "commandExecution",
+                  id: "old-tool",
+                  aggregatedOutput: "legacy nested output",
+                },
+              ],
+            },
+          ],
+        },
       });
       tx.oncomplete = () => {
         db.close();
@@ -151,12 +182,25 @@ it("filters hidden payloads from records written by an older client", async () =
     };
   });
   const cached = await readTranscriptCache("codex:legacy-output");
+  expect(cached?.thread?.status.type).toBe("notLoaded");
+  expect(cached?.thread?.turns).toEqual([]);
   expect(cached?.events?.map((event) => event.method)).toEqual([
     "item/completed",
+    "item/completed",
   ]);
-  expect((cached?.events?.[0].params as any).item.text).toBe(
+  expect((cached?.events?.[0].params as any).item).toMatchObject({
+    id: "legacy-tool",
+    type: "commandExecution",
+    status: "completed",
+    aggregatedOutput: null,
+    transcriptMetadataOnly: true,
+  });
+  expect((cached?.events?.[1].params as any).item.text).toBe(
     "complete visible reply",
   );
+  expect(JSON.stringify(cached)).not.toContain("legacy hidden output");
+  expect(JSON.stringify(cached)).not.toContain("old tool output");
+  expect(JSON.stringify(cached)).not.toContain("legacy nested output");
 });
 it("restores recent content and a reading anchor without restoring executable requests", async () => {
   await writeTranscriptCache({
@@ -267,7 +311,21 @@ it("drops oversized codex tool payloads before serializing cache records", async
   expect(stringifyCalls).toBeLessThanOrEqual(1);
   expect(largestSerialized).toBeLessThan(2 * 1024 * 1024);
   const cached = await readTranscriptCache("codex:oversized-tool-cache");
-  expect(cached?.events).toEqual([visibleReply]);
+  expect(cached?.events).toHaveLength(121);
+  expect(cached?.events).toContainEqual(visibleReply);
+  const tools = cached!.events!.filter(
+    (event) =>
+      event.method === "item/completed" &&
+      event.params.item.type === "commandExecution",
+  );
+  expect(tools).toHaveLength(120);
+  for (const event of tools)
+    expect((event.params as any).item).toMatchObject({
+      status: "completed",
+      aggregatedOutput: null,
+      transcriptMetadataOnly: true,
+    });
+  expect(JSON.stringify(cached?.events)).not.toContain("0:".repeat(1024));
   expect(cached?.bytes).toBeLessThanOrEqual(2 * 1024 * 1024);
 });
 
@@ -397,7 +455,23 @@ it("queues only bounded cache records for repeated oversized sources", async () 
   expect(Math.max(...serializedLengths)).toBeLessThan(2 * 1024 * 1024);
   const cached = await readTranscriptCache("codex:blocked-cache");
   expect(cached?.savedAt).toBe(21);
-  expect(cached?.events).toEqual([visibleReply]);
+  expect(cached?.events).toHaveLength(101);
+  expect(cached?.events).toContainEqual(visibleReply);
+  const tools = cached!.events!.filter(
+    (event) =>
+      event.method === "item/completed" &&
+      event.params.item.type === "commandExecution",
+  );
+  expect(tools).toHaveLength(100);
+  for (const event of tools)
+    expect((event.params as any).item).toMatchObject({
+      status: "completed",
+      aggregatedOutput: null,
+      transcriptMetadataOnly: true,
+    });
+  expect((tools.at(-1)!.params as any).item.id).toBe("cmd-latest-99");
+  expect(JSON.stringify(cached?.events)).not.toContain("latest:".repeat(1024));
+  expect(JSON.stringify(cached?.events)).not.toContain("first:".repeat(1024));
   expect(cached?.bytes).toBeLessThanOrEqual(2 * 1024 * 1024);
 });
 
@@ -452,4 +526,47 @@ it("resolves superseded writes and rechecks cache invalidation before queued wri
     undefined,
   ]);
   expect(await readTranscriptCache(key)).toBeUndefined();
+});
+
+it("persists native hook bigint counters without losing the final reply or precision", async () => {
+  const events = [
+    {
+      method: "hook/completed",
+      params: {
+        threadId: "hook-cache",
+        turnId: "t",
+        run: {
+          id: "hook",
+          eventName: "postToolUse",
+          handlerType: "command",
+          executionMode: "sync",
+          scope: "turn",
+          source: "project",
+          sourcePath: "/repo/hooks.json",
+          displayOrder: 9007199254740994n,
+          status: "completed",
+          statusMessage: null,
+          startedAt: 9007199254740995n,
+          completedAt: 9007199254740996n,
+          durationMs: 1n,
+          entries: [{ kind: "feedback", text: "Public hook result" }],
+        },
+      },
+    },
+    visibleReply,
+  ] as ServerNotification[];
+  await writeTranscriptCache({
+    key: "codex:hook-cache",
+    savedAt: Date.now(),
+    events,
+  });
+  const cached = await readTranscriptCache("codex:hook-cache");
+  expect(cached?.events).toHaveLength(2);
+  const hook = cached?.events?.find(
+    (event) => event.method === "hook/completed",
+  );
+  expect((hook?.params as any).run.displayOrder).toBe(9007199254740994n);
+  expect((hook?.params as any).run.startedAt).toBe(9007199254740995n);
+  expect(cached?.events).toContainEqual(visibleReply);
+  expect(cached?.bytes).toBeLessThanOrEqual(2 * 1024 * 1024);
 });

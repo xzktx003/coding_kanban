@@ -5,6 +5,7 @@ import { registerSessionModeRoutes } from "./routes/session-mode.js";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
+import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 
 import type {
@@ -634,6 +635,7 @@ export function buildServer(options: BuildServerOptions = {}): {
       origin: options.sessionRuntimeOrigin,
       ensureRuntime: options.ensureSessionRuntime,
       attachmentRoot: options.sessionAttachmentRoot,
+      vsCodeWebManager,
       ...(options.feishuCompletionSender
         ? {
             completionNotifications: {
@@ -766,7 +768,11 @@ export function buildServer(options: BuildServerOptions = {}): {
         "x-content-type-options": "nosniff",
       });
       response.flushHeaders();
-      response.once("close", close);
+      const terminalConnectionId = randomUUID();
+      response.once("close", () => {
+        close();
+        ptyRuntimeManager.releaseTerminalConnection(id, terminalConnectionId);
+      });
 
       const send = (frame: string) => {
         if (closed || response.destroyed) {
@@ -833,6 +839,7 @@ export function buildServer(options: BuildServerOptions = {}): {
           socket.close(4004, "没有找到 PTY 会话");
           return;
         }
+        const terminalConnectionId = randomUUID();
 
         socket.on("message", (message: Buffer | string) => {
           const writeToRuntime = (payload: string) => {
@@ -887,7 +894,12 @@ export function buildServer(options: BuildServerOptions = {}): {
                 rows: number;
               };
 
-              ptyRuntimeManager.resize(id, parsed.cols, parsed.rows);
+              ptyRuntimeManager.resize(
+                id,
+                parsed.cols,
+                parsed.rows,
+                terminalConnectionId,
+              );
             } catch {
               /* ignore malformed resize */
             }
@@ -919,6 +931,7 @@ export function buildServer(options: BuildServerOptions = {}): {
         socket.on("close", () => {
           unsubscribe();
           localTmuxSocketInputState.clearOnClose();
+          ptyRuntimeManager.releaseTerminalConnection(id, terminalConnectionId);
         });
       },
     );

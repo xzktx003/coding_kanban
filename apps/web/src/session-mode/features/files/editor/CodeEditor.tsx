@@ -21,6 +21,7 @@ import { Button } from "@session/components/ui/button";
 import { Input } from "@session/components/ui/input";
 import { useThemeContext } from "@session/contexts/ThemeContext";
 import { useEditorStore } from "@session/stores/EditorStore";
+import { useEditorStore as useOpenFiles } from "@session/stores/useEditorStore";
 // Import Ace Editor modes
 import "ace-builds/src-noconflict/mode-javascript";
 import "ace-builds/src-noconflict/mode-typescript";
@@ -90,6 +91,45 @@ export function CodeEditor({
     null,
   );
   const [aceEditor, setAceEditor] = useState<any>(null);
+  const appliedReveal = useRef<{
+    editor: unknown;
+    path: string;
+    revision: number;
+  } | null>(null);
+  const reveal = useOpenFiles((state) => state.revealLocation);
+  useEffect(() => {
+    if (!aceEditor || reveal?.path !== filePath) return;
+    const applied = appliedReveal.current;
+    if (
+      applied &&
+      applied.editor === aceEditor &&
+      applied.path === filePath &&
+      applied.revision === reveal.revision
+    )
+      return;
+    const lines = editedContent.split("\n");
+    if (
+      reveal.endLine !== undefined &&
+      (reveal.line > lines.length || reveal.endLine > lines.length)
+    )
+      return;
+    // Reveal a location without focusing: navigation must not summon a phone keyboard.
+    aceEditor.gotoLine(reveal.line, Math.max(0, reveal.column - 1), false);
+    if (reveal.endLine !== undefined) {
+      aceEditor.selection.setSelectionRange({
+        start: { row: reveal.line - 1, column: Math.max(0, reveal.column - 1) },
+        end: {
+          row: reveal.endLine - 1,
+          column: lines[reveal.endLine - 1].length,
+        },
+      });
+    }
+    appliedReveal.current = {
+      editor: aceEditor,
+      path: filePath,
+      revision: reveal.revision,
+    };
+  }, [aceEditor, filePath, reveal, editedContent]);
   const [selection, setSelection] = useState<{
     text: string;
     position: { x: number; y: number };
@@ -191,6 +231,11 @@ export function CodeEditor({
     const savedPosition = getCursorPosition(filePath);
     if (savedPosition) {
       setTimeout(() => {
+        if (
+          currentFilePath.current !== filePath ||
+          useOpenFiles.getState().revealLocation?.path === filePath
+        )
+          return;
         aceEditor.gotoLine(savedPosition.row + 1, savedPosition.column, false);
       }, 100);
     }

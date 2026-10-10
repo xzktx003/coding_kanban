@@ -14,6 +14,7 @@ import { WorkspaceSwitcher } from "../common";
 import { selectedAgentCard } from "@session/stores/useAgentCenterStore";
 import { useSessionName } from "@session/stores/useSessionNameStore";
 import { useCodexStore } from "@session/components/codex/stores";
+import { shouldAutoFocusComposer } from "../codex/composer/composerFocus";
 
 const focusCCInput = () =>
   window.dispatchEvent(new Event("cc-input-focus-request"));
@@ -72,12 +73,12 @@ export function AgentComposer() {
     acpActive ? undefined : nativeTitle || undefined,
   );
 
-  // Auto-focus the CC composer input when switching to the cc agent
+  // Preserve desktop refocus without opening a touch keyboard during navigation.
   useEffect(() => {
-    if (selectedAgent === "cc") {
-      focusCCInput();
-    }
-  }, [selectedAgent]);
+    if (!visible || selectedAgent !== "cc" || !shouldAutoFocusComposer())
+      return;
+    focusCCInput();
+  }, [selectedAgent, visible]);
 
   const targetLabel = (
     <div
