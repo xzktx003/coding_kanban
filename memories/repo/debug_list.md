@@ -725,3 +725,5 @@
 - 2026-10-10：浏览器断线验收 fixture 主动结束 SSE Response 后仍保留连接，下一次心跳触发 write-after-end，掩盖实际恢复行为。断开时立即移出连接集合，所有发送前检查 destroyed/writableEnded；故障注入和恢复断言继续保留。原生答题自动换题后的旧 CSS 选择器与额外下一题点击同步改为语义提醒/实际题目状态等待，保留旧轮次不提醒、草稿与显式提交检查。
 
 - 2026-10-10：健康探测持续失败时，短轮次可能在两次轻量列表采样之间完成，中间 active 未被采到；回执补读已保存 inProgress timing，但本地与返回的 status 同为 idle，状态相等短路使完成与未读恢复漏触发。现对同一快照/轮次的权威 idle/systemError 与 inProgress timing 冲突派发一次只读恢复；旧快照不覆盖较新轮次，同值 store 及重复终态保持稳定。35 项专项红转绿，不恢复活动静默全历史轮询。
+
+- 2026-10-10（看板持续重连）：后端热更新加载 `codex-saved-patch.ts` 时，已声明并锁定的 `diff@8.0.3` 尚未安装，触发 `ERR_MODULE_NOT_FOUND`，网关端口 4001 无监听，前端代理持续 `ECONNREFUSED`。执行 `pnpm install --frozen-lockfile` 补齐依赖，再执行 `pnpm dev:restart` 恢复；局域网 HTTPS 入口的网关与会话健康接口均通过，原 Rust 会话运行层 PID 保持不变，未停止 Agent。更新源码新增依赖后须先安装锁文件依赖，具体启动流程见 `docs/startup.md`。
