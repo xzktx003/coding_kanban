@@ -45,6 +45,7 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
   let repairedAt = -Infinity;
   let requestRepairTimer: ReturnType<typeof setTimeout>;
   const threadUpdatedAt = new Map<string, number>();
+  const repairedIdleTurns = new Map<string, string>();
   const missingRequests = () =>
     [...followedIds()].some((id) => {
       const status = useCodexStore.getState().threadStatusMap[id];
@@ -178,7 +179,28 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
             }
             return changed ? { threadStatusMap } : state;
           });
-          for (const id of reconcile)
+          // A short turn can finish between status snapshots: idle -> idle,
+          // while the receipt/history already established an in-progress turn.
+          // Repair that contradiction once, never poll full history indefinitely.
+          const current = useCodexStore.getState();
+          for (const [id, status] of Object.entries(statuses)) {
+            const timing = current.turnTimingMap[id];
+            if (status.type === "active" || timing?.status !== "inProgress") {
+              repairedIdleTurns.delete(id);
+              continue;
+            }
+            if (
+              (status.type === "idle" || status.type === "systemError") &&
+              baseline.threadStatusMap[id]?.type === status.type &&
+              current.threadStatusMap[id] === baseline.threadStatusMap[id] &&
+              timing === baseline.turnTimingMap[id] &&
+              repairedIdleTurns.get(id) !== timing.turnId
+            ) {
+              repairedIdleTurns.set(id, timing.turnId);
+              reconcile.push(id);
+            }
+          }
+          for (const id of new Set(reconcile))
             window.dispatchEvent(
               new CustomEvent("session-history-reconcile", { detail: id }),
             );
@@ -221,6 +243,8 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
     const current = followedIds();
     for (const id of threadUpdatedAt.keys())
       if (!current.has(id)) threadUpdatedAt.delete(id);
+    for (const id of repairedIdleTurns.keys())
+      if (!current.has(id)) repairedIdleTurns.delete(id);
     schedule();
   });
   const closeStream = openEventStream({

@@ -1,5 +1,10 @@
 import { observeSubagents } from "@session/features/subagents/store";
 import {
+  isCodexTranscriptDormant,
+  needsCodexTranscriptRestore,
+  acknowledgeCodexTranscriptRestore,
+} from "./codexTranscriptActivity";
+import {
   withoutToolTranscriptEvents,
   lightweightThreadForStore,
 } from "./codexTranscriptVisibility";
@@ -27,7 +32,11 @@ import { useWorkspaceStore } from "@session/stores";
 import { useSettingsStore } from "@session/stores/settings";
 import { convertThreadHistoryToEvents } from "@session/utils/threadHistoryConverter";
 import { mergeThreadHistory } from "@session/utils/mergeThreadHistory";
-import { clearDeliveryEchoes } from "@session/stores/useCodexDeliveryStore";
+import {
+  clearDeliveryEchoes,
+  acknowledgeDeliveryEchoes,
+  deliveredClientIds,
+} from "@session/stores/useCodexDeliveryStore";
 import { revealNewQuestion } from "@session/features/async-questions/arrival";
 import { enqueueSessionRead, readWithDeadline } from "./sessionReadQueue";
 import { mergeHistoryPage } from "./sessionHistoryPages";
@@ -220,10 +229,12 @@ const syncThreadToStore = (
     threads: threads.some((t) => t.id === threadId)
       ? threads.map((t) => (t.id === threadId ? lightweightThread : t))
       : [lightweightThread, ...threads],
-    events: {
-      ...events,
-      [threadId]: withoutToolTranscriptEvents(historicalEvents),
-    },
+    events: isCodexTranscriptDormant(threadId)
+      ? events
+      : {
+          ...events,
+          [threadId]: withoutToolTranscriptEvents(historicalEvents),
+        },
     historyLoadedMap: {
       ...useCodexStore.getState().historyLoadedMap,
       [threadId]: true,
@@ -567,9 +578,11 @@ export const codexService = {
     const cancel = () => controller.abort(options?.signal?.reason);
     if (options?.signal?.aborted) cancel();
     else options?.signal?.addEventListener("abort", cancel, { once: true });
+    const restoringEvicted = needsCodexTranscriptRestore(threadId);
     const cached =
-      useCodexStore.getState().historyLoadedMap[threadId] ||
-      (useCodexStore.getState().events[threadId]?.length ?? 0) > 0;
+      !restoringEvicted &&
+      (useCodexStore.getState().historyLoadedMap[threadId] ||
+        (useCodexStore.getState().events[threadId]?.length ?? 0) > 0);
     useCodexStore.setState((state) =>
       state.historyLoadingMap[threadId] === !cached &&
       !state.historyErrorMap[threadId]
@@ -606,7 +619,8 @@ export const codexService = {
                           ? { cursor: options.cursor }
                           : options.afterTurnId
                             ? { afterTurnId: options.afterTurnId }
-                            : baseline.turnTimingMap[threadId]?.turnId
+                            : !restoringEvicted &&
+                                baseline.turnTimingMap[threadId]?.turnId
                               ? {
                                   afterTurnId:
                                     baseline.turnTimingMap[threadId].turnId,
@@ -673,6 +687,11 @@ export const codexService = {
       const historicalEvents = convertThreadHistoryToEvents(thread).filter(
         (event) => !itemPage || event.method !== "turn/completed",
       );
+      // Receipt acknowledgement must not require a mounted transcript.
+      if (isCodexTranscriptDormant(threadId)) {
+        const delivered = deliveredClientIds(historicalEvents);
+        if (delivered.size) acknowledgeDeliveryEchoes(threadId, [...delivered]);
+      }
       const current = useCodexStore.getState();
       const beforeEvents =
         baseline.events[threadId] ??
@@ -698,6 +717,7 @@ export const codexService = {
       });
       useSessionSyncStore.setState((s) =>
         page &&
+        !restoringEvicted &&
         baseline.historyLoadedMap[threadId] &&
         !("truncated" in page && page.truncated) &&
         !options?.cursor &&
@@ -760,6 +780,7 @@ export const codexService = {
         for (const event of historicalEvents)
           revealNewQuestion(event, beforeEvents);
       cachedTranscriptBaselines.delete(threadId);
+      acknowledgeCodexTranscriptRestore(threadId);
       if (page) readInitialThreadMetadata(threadId);
     })();
     if (!overrides) pendingThreadResumes.set(threadId, pending);

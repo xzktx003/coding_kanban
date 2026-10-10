@@ -1,4 +1,5 @@
 import { withoutToolTranscriptEvent } from "@session/services/codexTranscriptVisibility";
+import { isCodexTranscriptDormant } from "@session/services/codexTranscriptActivity";
 import { acceptTurnStart } from "@session/utils/codexRuntimeState";
 import type { StateCreator } from "zustand";
 import type { ServerNotification } from "@session/bindings";
@@ -162,9 +163,10 @@ export const createEventsSlice: StateCreator<
         });
       }
 
-      const nextThreadEvents = isRetryNotice
-        ? existingEvents
-        : appendTranscriptEvent(filteredEvents, event);
+      const nextThreadEvents =
+        isRetryNotice || isCodexTranscriptDormant(threadId)
+          ? existingEvents
+          : appendTranscriptEvent(filteredEvents, event);
       const newEvents =
         isRetryNotice || nextThreadEvents === existingEvents
           ? state.events
@@ -287,6 +289,17 @@ export const createEventsSlice: StateCreator<
         goalMap = newGoalMap;
       }
 
+      if (
+        !eventsChanged &&
+        streamingAgentMessages === state.streamingAgentMessages &&
+        threadStatusMap === state.threadStatusMap &&
+        turnTimingMap === state.turnTimingMap &&
+        currentTurnId === state.currentTurnId &&
+        retryNoticeMap === state.retryNoticeMap &&
+        goalMap === state.goalMap
+      )
+        return state;
+
       return {
         ...(eventsChanged ? { events: newEvents } : {}),
         ...(streamingAgentMessages !== state.streamingAgentMessages
@@ -302,7 +315,7 @@ export const createEventsSlice: StateCreator<
   },
 
   addTranscriptDeltas: (threadId: string, events: DeltaEvent[]) => {
-    if (!events.length) return;
+    if (!events.length || isCodexTranscriptDormant(threadId)) return;
     set((state: CodexStore) => {
       const existingEvents = state.events[threadId] ?? [];
       let nextEvents = existingEvents;
@@ -329,7 +342,7 @@ export const createEventsSlice: StateCreator<
   },
 
   setStreamingAgentDeltas: (threadId: string, events: DeltaEvent[]) => {
-    if (!events.length) return;
+    if (!events.length || isCodexTranscriptDormant(threadId)) return;
     set((state: CodexStore) => {
       let current = state.streamingAgentMessages?.[threadId];
       for (const event of events) {

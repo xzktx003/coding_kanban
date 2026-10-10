@@ -1,11 +1,19 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 
+import { installReactPerformanceRetention } from "./lib/react-performance-retention";
+
 import { WorkbenchShell } from "./components/WorkbenchShell";
 import {
   measureAppViewportHeight,
   measureAppViewportOffsetTop,
 } from "./lib/viewport-height";
+
+const stopReactPerformanceRetention = installReactPerformanceRetention(
+  window.performance,
+  import.meta.env.DEV,
+);
+if (import.meta.hot) import.meta.hot.dispose(stopReactPerformanceRetention);
 
 function syncAppViewportMetrics() {
   const viewportHeight = measureAppViewportHeight();

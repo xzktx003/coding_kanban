@@ -7,14 +7,17 @@ import {
   lstat,
   mkdir,
   open,
+  opendir,
   readFile,
-  readdir,
   realpath,
   rename,
   rm,
   stat,
   writeFile,
 } from "node:fs/promises";
+import * as archiverModule from "archiver";
+import type archiver from "archiver";
+import { Readable } from "node:stream";
 import {
   basename,
   dirname,
@@ -34,16 +37,34 @@ export class WorkspaceFileError extends Error {
   }
 }
 const MAX_TEXT = 4 * 1024 * 1024;
+const MAX_ZIP_ENTRIES = 10_000;
+const MAX_ZIP_DEPTH = 64;
 const hash = (bytes: Buffer) =>
   createHash("sha256").update(bytes).digest("hex");
 const inside = (root: string, path: string) =>
   path === root || path.startsWith(root + sep);
+type ZipArchiveConstructor = new (
+  options?: archiver.ArchiverOptions,
+) => archiver.Archiver;
+const { ZipArchive } = archiverModule as unknown as {
+  ZipArchive: ZipArchiveConstructor;
+};
 export interface TrashItem {
   id: string;
   root: string;
   path: string;
   name: string;
   deletedAt: string;
+}
+export interface WorkspaceDownload {
+  path: string;
+  filename: string;
+  contentType: string;
+  stream: NodeJS.ReadableStream & { destroy(error?: Error): void };
+  close(): void;
+}
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new WorkspaceFileError("下载已取消", 499);
 }
 export class WorkspaceFiles {
   private queue: Promise<unknown> = Promise.resolve();
@@ -308,7 +329,12 @@ export class WorkspaceFiles {
     await this.target(root, root);
     let ids: string[] = [];
     try {
-      ids = await readdir(this.trashHome);
+      const dir = await opendir(this.trashHome);
+      try {
+        for await (const entry of dir) ids.push(entry.name);
+      } finally {
+        await dir.close().catch(() => {});
+      }
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
     }
@@ -358,5 +384,157 @@ export class WorkspaceFiles {
       throw new WorkspaceFileError("请选择文件下载");
     }
     return { path: t.path, stream: handle.createReadStream() };
+  }
+  async downloadInfo(root: string, path: string) {
+    const t = await this.target(root, path);
+    const s = await lstat(t.path);
+    if (s.isSymbolicLink())
+      throw new WorkspaceFileError("不能通过符号链接访问文件", 403);
+    if (s.isFile()) return { path: t.path, filename: basename(t.path) };
+    if (s.isDirectory())
+      return { path: t.path, filename: `${basename(t.path)}.zip` };
+    throw new WorkspaceFileError("只支持下载普通文件或文件夹", 415);
+  }
+  private async *zipEntries(
+    requestRoot: string,
+    root: string,
+    dir: string,
+    signal: AbortSignal | undefined,
+    depth = 0,
+  ): AsyncGenerator<{ path: string; name: string; mode: number }> {
+    throwIfAborted(signal);
+    if (depth > MAX_ZIP_DEPTH)
+      throw new WorkspaceFileError("文件夹层级过深，无法打包下载", 413);
+    await this.target(requestRoot, dir);
+    const handle = await opendir(dir);
+    try {
+      for await (const entry of handle) {
+        throwIfAborted(signal);
+        const fullPath = join(dir, entry.name);
+        const s = await lstat(fullPath);
+        if (s.isSymbolicLink()) continue;
+        const checked = await this.target(requestRoot, fullPath);
+        const relativePath = relative(root, checked.path).split(sep).join("/");
+        if (s.isDirectory()) {
+          yield { path: checked.path, name: `${relativePath}/`, mode: s.mode };
+          yield* this.zipEntries(
+            requestRoot,
+            root,
+            checked.path,
+            signal,
+            depth + 1,
+          );
+          continue;
+        }
+        if (!s.isFile())
+          throw new WorkspaceFileError("文件夹包含不能下载的特殊文件", 415);
+        yield { path: checked.path, name: relativePath, mode: s.mode };
+      }
+    } finally {
+      await handle.close().catch(() => {});
+    }
+  }
+  private noFollowStream(
+    root: string,
+    path: string,
+    active: Set<Readable>,
+    onError: (error: Error) => void,
+  ) {
+    const source = Readable.from(
+      (async function* (files: WorkspaceFiles) {
+        const checked = await files.target(root, path);
+        const handle = await open(
+          checked.path,
+          constants.O_RDONLY | constants.O_NOFOLLOW,
+        );
+        try {
+          const s = await handle.stat();
+          if (!s.isFile())
+            throw new WorkspaceFileError("文件夹包含不能下载的特殊文件", 415);
+          for await (const chunk of handle.createReadStream({
+            autoClose: false,
+          })) {
+            yield chunk;
+          }
+        } finally {
+          await handle.close().catch(() => {});
+        }
+      })(this),
+    );
+    active.add(source);
+    source.once("close", () => active.delete(source));
+    source.once("error", (error) => onError(error));
+    return source;
+  }
+  async downloadArchive(
+    root: string,
+    path: string,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<WorkspaceDownload> {
+    throwIfAborted(options.signal);
+    const info = await this.downloadInfo(root, path);
+    throwIfAborted(options.signal);
+    const s = await lstat(info.path);
+    if (s.isFile()) {
+      const file = await this.download(root, path);
+      return {
+        ...file,
+        filename: info.filename,
+        contentType: "application/octet-stream",
+        close: () => file.stream.destroy(),
+      };
+    }
+    const archive = new ZipArchive({ zlib: { level: 5 } });
+    const active = new Set<Readable>();
+    archive.on("error", () => {});
+    const cleanupActive = (error?: Error) => {
+      for (const source of active) source.destroy(error);
+      active.clear();
+    };
+    const fail = (error: Error) => {
+      cleanupActive(error);
+      archive.destroy(error);
+    };
+    const close = (error?: Error) => {
+      cleanupActive(error);
+      if (error) archive.destroy(error);
+      else archive.abort();
+    };
+    archive.once("close", () => cleanupActive());
+    let count = 0;
+    try {
+      for await (const entry of this.zipEntries(
+        root,
+        info.path,
+        info.path,
+        options.signal,
+      )) {
+        count += 1;
+        if (count > MAX_ZIP_ENTRIES)
+          throw new WorkspaceFileError("文件夹文件数量过多，无法打包下载", 413);
+        if (entry.name.endsWith("/")) {
+          archive.append(Buffer.alloc(0), {
+            name: entry.name,
+            mode: entry.mode & 0o777,
+          });
+          continue;
+        }
+        archive.append(this.noFollowStream(root, entry.path, active, fail), {
+          name: entry.name,
+          mode: entry.mode & 0o777,
+        });
+      }
+    } catch (error) {
+      close(error instanceof Error ? error : undefined);
+      throw error;
+    }
+    archive.finalize().catch(() => {});
+    return {
+      path: info.path,
+      filename: info.filename,
+      contentType: "application/zip",
+      stream: archive,
+      close,
+    };
   }
 }

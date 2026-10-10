@@ -1,5 +1,6 @@
 import { withoutToolTranscriptEvents } from "./codexTranscriptVisibility";
 import type { ServerNotification } from "../bindings";
+import { isCodexTranscriptDormant } from "./codexTranscriptActivity";
 import type { Thread } from "../bindings/v2";
 import type { CCMessage } from "../components/cc/types/messages";
 import { useCodexStore } from "../components/codex/stores";
@@ -376,6 +377,7 @@ export function startSessionTranscriptCache() {
   }
   async function restore() {
     for (const card of openedSessions()) {
+      if (card.kind === "codex" && isCodexTranscriptDormant(card.id)) continue;
       const key = `${card.kind}:${card.id}`;
       if (restoring.has(key)) continue;
       restoring.add(key);
@@ -386,6 +388,7 @@ export function startSessionTranscriptCache() {
       const cached = await readTranscriptCache(key);
       if (
         stopped ||
+        (card.kind === "codex" && isCodexTranscriptDormant(card.id)) ||
         !cached ||
         !openedSessions().some((c) => c.kind === card.kind && c.id === card.id)
       )

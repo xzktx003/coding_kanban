@@ -17,6 +17,13 @@ import { useAgentSettingsStore } from "../stores/useAgentSettingsStore";
 import { useAcpStore } from "../stores/useAcpStore";
 import { useAsyncQuestionStore } from "../features/async-questions/store";
 import {
+  trackCodexTranscript,
+  markCodexTranscriptDormant,
+  retainCodexTranscript,
+  needsCodexTranscriptRestore,
+  forgetCodexTranscript,
+} from "./codexTranscriptActivity";
+import {
   hydrateThreadModel,
   useThreadModelStore,
 } from "../stores/useThreadModelStore";
@@ -34,6 +41,72 @@ beforeEach(() => {
     earlierErrors: {},
     connection: "connected",
   });
+});
+it("keeps dormant background reads metadata-only and restores a fresh recent page when viewed again", async () => {
+  const id = "evicted-read";
+  useCodexStore.setState({
+    threads: [],
+    currentThreadId: null,
+    events: {},
+    historyLoadedMap: { [id]: true },
+    turnTimingMap: {
+      [id]: {
+        turnId: "last",
+        status: "completed",
+        startedAtMs: 1000,
+        durationMs: 1,
+      },
+    },
+    threadStatusMap: {},
+  });
+  trackCodexTranscript(id);
+  markCodexTranscriptDormant(id);
+  api.threadRead.mockResolvedValue({
+    thread: {
+      id,
+      turns: [
+        {
+          id: "last",
+          status: "completed",
+          startedAt: 1,
+          durationMs: 1,
+          items: [
+            { type: "agentMessage", id: "answer", text: "recoverable answer" },
+          ],
+        },
+      ],
+    },
+  });
+  await codexService.loadThreadHistory(id, undefined, {
+    background: true,
+    recent: true,
+  });
+  expect(useCodexStore.getState().events[id]).toBeUndefined();
+  expect(needsCodexTranscriptRestore(id)).toBe(true);
+  expect(useCodexStore.getState().turnTimingMap[id].turnId).toBe("last");
+  const release = retainCodexTranscript(id);
+  try {
+    api.threadRead.mockClear();
+    await codexService.loadThreadHistory(id, undefined, {
+      background: true,
+      recent: true,
+    });
+    expect(api.threadRead.mock.calls[0][0]).toEqual({
+      threadId: id,
+      recent: true,
+    });
+    expect(
+      useCodexStore
+        .getState()
+        .events[
+          id
+        ].some((e: any) => e.params.item?.text === "recoverable answer"),
+    ).toBe(true);
+    expect(needsCodexTranscriptRestore(id)).toBe(false);
+  } finally {
+    release();
+    forgetCodexTranscript(id);
+  }
 });
 it("a background check keeps existing content interactive without the initial history loader", async () => {
   let resolve!: (value: unknown) => void;

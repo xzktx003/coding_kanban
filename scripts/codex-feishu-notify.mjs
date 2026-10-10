@@ -1053,6 +1053,17 @@ export async function runCodexFeishuNotification({
     LARKSUITE_CLI_NO_UPDATE_NOTIFIER: "1",
     LARKSUITE_CLI_NO_SKILLS_NOTIFIER: "1",
   };
+  // Only the fixed Kanban child receives this context. Do not forward the
+  // private native identity to lark-cli or include it in the message card.
+  const idempotencyNotification =
+    typeof env.KANBAN_COMPLETION_IDEMPOTENCY_THREAD === "string" &&
+    env.KANBAN_COMPLETION_IDEMPOTENCY_THREAD.trim()
+      ? {
+          ...notification,
+          "thread-id": env.KANBAN_COMPLETION_IDEMPOTENCY_THREAD.trim(),
+        }
+      : notification;
+  delete commandEnv.KANBAN_COMPLETION_IDEMPOTENCY_THREAD;
   const directNotification =
     destination.flag === "--user-id"
       ? notification
@@ -1089,7 +1100,7 @@ export async function runCodexFeishuNotification({
       "--content",
       JSON.stringify(card),
       "--idempotency-key",
-      createIdempotencyKey(notification, partIndex),
+      createIdempotencyKey(idempotencyNotification, partIndex),
     ];
     let lastError;
     let sent = false;

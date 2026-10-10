@@ -64,6 +64,15 @@ const findNodeByPath = (
   return null;
 };
 
+const pathIsWithinRoot = (candidate: string, rootPath: string): boolean => {
+  const normalizedCandidate = candidate.replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalizedRoot = rootPath.replace(/\\/g, "/").replace(/\/+$/, "");
+  return (
+    normalizedCandidate === normalizedRoot ||
+    normalizedCandidate.startsWith(`${normalizedRoot}/`)
+  );
+};
+
 export function useFileTree(folder: string): UseFileTreeReturn {
   const treeContainerRef = useRef<HTMLDivElement | null>(null);
   const [root, setRoot] = useState<FileNode | null>(null);
@@ -85,11 +94,17 @@ export function useFileTree(folder: string): UseFileTreeReturn {
 
   const autoExpandedTargetRef = useRef<string | null>(null);
   const prevFolderRef = useRef(folder);
+  const expandedRef = useRef(expanded);
+  const rootPathRef = useRef<string | null>(null);
 
   if (folder !== prevFolderRef.current) {
     prevFolderRef.current = folder;
     setFolderTrigger((prev) => prev + 1);
   }
+
+  useEffect(() => {
+    expandedRef.current = expanded;
+  }, [expanded]);
 
   const hiddenSet = useMemo(
     () => new Set(hiddenNames.map(normalizeName)),
@@ -131,6 +146,7 @@ export function useFileTree(folder: string): UseFileTreeReturn {
         if (isActive) {
           setRoot(null);
           setExpanded(new Set());
+          rootPathRef.current = null;
         }
         return;
       }
@@ -140,14 +156,48 @@ export function useFileTree(folder: string): UseFileTreeReturn {
         const resolved = await canonicalizePath(folder);
         const label = getFilename(resolved);
         const children = await listDir(resolved);
+        if (!isActive) return;
+        const previousRootPath = rootPathRef.current;
+        const preserveExpanded = previousRootPath === resolved;
+        const nextExpanded = preserveExpanded
+          ? new Set(
+              [...expandedRef.current].filter((path) =>
+                pathIsWithinRoot(path, resolved),
+              ),
+            )
+          : new Set<string>();
+        nextExpanded.add(resolved);
+        let nextRoot: FileNode = {
+          name: label || folder,
+          path: resolved,
+          kind: "dir",
+          children,
+        };
+
+        if (preserveExpanded) {
+          const expandedDirs = [...nextExpanded]
+            .filter((path) => path !== resolved)
+            .sort((a, b) => a.length - b.length);
+          for (const dirPath of expandedDirs) {
+            if (!findNodeByPath(nextRoot, dirPath)) {
+              nextExpanded.delete(dirPath);
+              continue;
+            }
+            try {
+              if (!isActive) return;
+              const dirChildren = await listDir(dirPath);
+              if (!isActive) return;
+              nextRoot = updateChildren(nextRoot, dirPath, dirChildren);
+            } catch {
+              nextExpanded.delete(dirPath);
+            }
+          }
+        }
+
         if (isActive) {
-          setRoot({
-            name: label || folder,
-            path: resolved,
-            kind: "dir",
-            children,
-          });
-          setExpanded(new Set([resolved]));
+          rootPathRef.current = resolved;
+          setRoot(nextRoot);
+          setExpanded(nextExpanded);
         }
       } catch (err) {
         if (isActive) {
@@ -157,6 +207,7 @@ export function useFileTree(folder: string): UseFileTreeReturn {
               : String(err) || "Failed to read folder.",
           );
           setRoot(null);
+          rootPathRef.current = null;
         }
       } finally {
         if (isActive) setLoading(false);
@@ -383,7 +434,7 @@ export function useFileTree(folder: string): UseFileTreeReturn {
       const kind = event.kind;
 
       // Check if the changed path is within our watched folder
-      if (!root || !changed.startsWith(root.path)) {
+      if (!root || !pathIsWithinRoot(changed, root.path)) {
         return;
       }
 

@@ -7,6 +7,14 @@ import {
   getReadingPosition,
 } from "./sessionTranscriptCache";
 import { invalidateTranscriptCache } from "./sessionCacheState";
+import { startSessionTranscriptCache } from "./sessionTranscriptCache";
+import { useAgentCenterStore } from "../stores/useAgentCenterStore";
+import { useCodexStore } from "../components/codex/stores";
+import {
+  trackCodexTranscript,
+  markCodexTranscriptDormant,
+  forgetCodexTranscript,
+} from "./codexTranscriptActivity";
 import type { ServerNotification } from "../bindings";
 const visibleReply = {
   method: "item/completed",
@@ -16,6 +24,31 @@ const visibleReply = {
     item: { type: "agentMessage", id: "final", text: "Final reply" },
   },
 } as ServerNotification;
+
+it("does not resurrect dormant bodies from the device cache after a runtime reset", async () => {
+  const id = "dormant-device-cache";
+  await writeTranscriptCache({
+    key: `codex:${id}`,
+    savedAt: Date.now(),
+    events: [visibleReply],
+  });
+  trackCodexTranscript(id);
+  markCodexTranscriptDormant(id);
+  useAgentCenterStore.setState({
+    cards: [{ kind: "codex", id, cwd: "/repo" }],
+    detachedCard: null,
+  });
+  useCodexStore.setState({ events: {}, historyLoadedMap: {} });
+  const stop = startSessionTranscriptCache();
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(useCodexStore.getState().events[id]).toBeUndefined();
+  } finally {
+    stop();
+    forgetCodexTranscript(id);
+    useAgentCenterStore.setState({ cards: [] });
+  }
+});
 it("does not restore or persist hidden output payloads alongside the final result", async () => {
   await writeTranscriptCache({
     key: "codex:hidden-output",

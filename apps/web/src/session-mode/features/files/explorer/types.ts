@@ -18,5 +18,7 @@ export type FileNode = {
 export type FileTreeProps = {
   folder: string;
   onFileSelect?: (path: string) => void;
+  onNodeSelect?: (node: FileNode) => void;
+  selectedPath?: string;
   onFileAction?: (action: FileAction, node: FileNode) => void;
 };

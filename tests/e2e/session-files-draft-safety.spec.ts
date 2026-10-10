@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { installSessionUxFixture } from "./session-ux-fixture";
 
 test("real file editor preserves full documents and unsaved per-file drafts across tools with guarded hidden input", async ({
   page,
@@ -16,6 +17,7 @@ test("real file editor preserves full documents and unsaved per-file drafts acro
   let failWrite = false;
   let holdWrite = false;
   let releaseWrite: (() => void) | null = null;
+  await installSessionUxFixture(page, 0);
   await page.route("**/api/session/api/settings", (r) =>
     r.fulfill({ json: {} }),
   );
@@ -35,13 +37,21 @@ test("real file editor preserves full documents and unsaved per-file drafts acro
   await page.route("**/api/session/api/terminal/**", (r) =>
     r.fulfill({ json: { session_id: "isolated-draft-terminal" } }),
   );
-  await page.route("**/api/session/api/filesystem/**", async (r) => {
-    const path = new URL(r.request().url()).pathname;
-    const payload =
-      r.request().method() === "POST" ? r.request().postDataJSON() : {};
-    if (path.endsWith("/read-text-file"))
-      await r.fulfill({ json: disk.get(payload.filePath) ?? "" });
-    else if (path.endsWith("/write-file")) {
+  let version = 1;
+  await page.route("**/api/session/workspace-files/**", async (r) => {
+    const action = new URL(r.request().url()).pathname.split("/").at(-1);
+    const payload = r.request().postDataJSON();
+    if (action === "read") {
+      const content = disk.get(payload.path) ?? "";
+      await r.fulfill({
+        json: {
+          path: payload.path,
+          content,
+          version: String(version),
+          size: Buffer.byteLength(content),
+        },
+      });
+    } else if (action === "save") {
       if (failWrite) {
         await r.fulfill({ status: 500, json: { error: "隔离写入失败" } });
         return;
@@ -50,10 +60,18 @@ test("real file editor preserves full documents and unsaved per-file drafts acro
         await new Promise<void>((done) => {
           releaseWrite = done;
         });
-      writes.push({ path: payload.filePath, content: payload.content });
-      disk.set(payload.filePath, payload.content);
-      await r.fulfill({ status: 200, body: "" });
-    } else if (path.endsWith("/canonicalize-path"))
+      writes.push({ path: payload.path, content: payload.content });
+      disk.set(payload.path, payload.content);
+      await r.fulfill({
+        json: { path: payload.path, version: String(++version) },
+      });
+    } else await r.fulfill({ json: [] });
+  });
+  await page.route("**/api/session/api/filesystem/**", async (r) => {
+    const path = new URL(r.request().url()).pathname;
+    const payload =
+      r.request().method() === "POST" ? r.request().postDataJSON() : {};
+    if (path.endsWith("/canonicalize-path"))
       await r.fulfill({ json: payload.path });
     else if (path.endsWith("/read-directory") || path.includes("/search-files"))
       await r.fulfill({ json: [] });

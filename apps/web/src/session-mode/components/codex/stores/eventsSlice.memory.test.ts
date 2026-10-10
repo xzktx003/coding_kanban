@@ -1,6 +1,12 @@
 import { beforeEach, expect, it } from "vitest";
 import { useCodexStore } from "./useCodexStore";
 import {
+  trackCodexTranscript,
+  markCodexTranscriptDormant,
+  retainCodexTranscript,
+  forgetCodexTranscript,
+} from "@session/services/codexTranscriptActivity";
+import {
   materializeStreamingTextPreview,
   STREAMING_TEXT_LIMIT,
 } from "@session/services/codexTranscriptMemoryBudget";
@@ -29,6 +35,60 @@ const command = (method: "item/started" | "item/completed", turnId = "turn") =>
       },
     },
   }) as any;
+
+it("keeps dormant tasks live without retaining snapshots or deltas, and resumes visible streaming", () => {
+  const id = "sleeping";
+  trackCodexTranscript(id);
+  markCodexTranscriptDormant(id);
+  const store = useCodexStore.getState();
+  const delta = {
+    method: "item/agentMessage/delta",
+    params: {
+      threadId: id,
+      turnId: "live",
+      itemId: "answer",
+      delta: "payload",
+    },
+  } as any;
+  store.addEvent(id, {
+    method: "turn/started",
+    params: {
+      threadId: id,
+      turn: { id: "live", startedAt: 1, status: "inProgress", items: [] },
+    },
+  } as any);
+  expect(useCodexStore.getState().turnTimingMap[id].status).toBe("inProgress");
+  for (let i = 0; i < 100; i++) {
+    store.setStreamingAgentDeltas(id, [delta]);
+    store.addTranscriptDeltas(id, [delta]);
+    store.addEvent(id, {
+      method: "item/completed",
+      params: {
+        threadId: id,
+        turnId: "live",
+        item: { id: String(i), type: "agentMessage", text: "payload" },
+      },
+    } as any);
+  }
+  store.addEvent(id, {
+    method: "turn/completed",
+    params: {
+      threadId: id,
+      turn: { id: "live", status: "completed", items: [], durationMs: 1 },
+    },
+  } as any);
+  expect(useCodexStore.getState().events[id]).toBeUndefined();
+  expect(useCodexStore.getState().streamingAgentMessages[id]).toBeUndefined();
+  expect(useCodexStore.getState().turnTimingMap[id].status).toBe("completed");
+  const release = retainCodexTranscript(id);
+  try {
+    store.setStreamingAgentDeltas(id, [delta]);
+    expect(useCodexStore.getState().streamingAgentMessages[id]).toBeDefined();
+  } finally {
+    release();
+    forgetCodexTranscript(id);
+  }
+});
 it("drops command events before they enter the retained transcript", () => {
   const before = useCodexStore.getState();
 

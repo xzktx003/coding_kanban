@@ -434,3 +434,47 @@ it("does not announce active progress timestamp changes as history reconciles", 
     window.removeEventListener("session-history-reconcile", reconcile);
   }
 });
+
+it("repairs a missed active edge once per turn when an unchanged idle snapshot contradicts live timing", async () => {
+  const reconcile = vi.fn();
+  window.addEventListener("session-history-reconcile", reconcile);
+  useCodexStore.setState({
+    threadStatusMap: { a: idle, b: idle },
+    turnTimingMap: {
+      a: {
+        turnId: "brief",
+        status: "inProgress",
+        startedAtMs: 1,
+        durationMs: null,
+      },
+    },
+  });
+  const fetcher = vi.fn(async () =>
+    response([
+      { id: "a", status: idle },
+      { id: "b", status: idle },
+    ]),
+  );
+  try {
+    stop = startFollowedSessionStatusSync(fetcher);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    expect(reconcile.mock.calls[0][0].detail).toBe("a");
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    useCodexStore.setState({
+      turnTimingMap: {
+        a: {
+          turnId: "next",
+          status: "inProgress",
+          startedAtMs: 2,
+          durationMs: null,
+        },
+      },
+    });
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(reconcile).toHaveBeenCalledTimes(2);
+  } finally {
+    window.removeEventListener("session-history-reconcile", reconcile);
+  }
+});

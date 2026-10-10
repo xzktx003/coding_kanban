@@ -551,6 +551,7 @@
 }
 .session-mode .session-file-tools {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   padding: 4px 7px;
@@ -558,6 +559,10 @@
   min-width: 0;
 }
 .session-mode .session-file-tools > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
   padding: 7px;
   border-radius: 4px;
   flex-shrink: 0;

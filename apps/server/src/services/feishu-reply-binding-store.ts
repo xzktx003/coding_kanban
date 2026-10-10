@@ -64,6 +64,11 @@ export interface RecordProcessedFeishuReplyInput {
   codexThreadId: string;
 }
 
+export interface FeishuCompletionDeliveryLookupResult {
+  messages: Array<{ messageId: string; chatId: string }>;
+  referencedFiles?: FeishuCompletionFileReference[];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -244,6 +249,24 @@ function parseProcessed(value: unknown): ProcessedFeishuReply | null {
   return { messageId, processedAt };
 }
 
+function codexCompletionThreadId(
+  binding: FeishuReplyBinding,
+): string | undefined {
+  if (binding.sessionModeThreadId) {
+    return binding.sessionModeThreadId;
+  }
+  if (binding.codexThreadId) {
+    return binding.codexThreadId;
+  }
+  return binding.transcriptAgentKind === "codex"
+    ? binding.transcriptSessionId
+    : undefined;
+}
+
+function isNativeBinding(binding: FeishuReplyBinding): boolean {
+  return Boolean(binding.sessionModeThreadId);
+}
+
 export class FeishuReplyBindingStore {
   readonly #statePath: string;
   readonly #ttlMs: number;
@@ -273,6 +296,7 @@ export class FeishuReplyBindingStore {
     const createdAt = this.#now().toISOString();
     const referencedFiles = parseReferencedFiles(input.referencedFiles);
     const transcriptTarget = parseTranscriptTarget(input);
+    const nextBindings: FeishuReplyBinding[] = [];
     for (const message of input.messages) {
       if (
         !MESSAGE_ID_PATTERN.test(message.messageId) ||
@@ -280,7 +304,11 @@ export class FeishuReplyBindingStore {
       ) {
         continue;
       }
-      this.#bindings.set(message.messageId, {
+      const existing = this.#bindings.get(message.messageId);
+      if (existing?.sessionModeThreadId && !input.sessionModeThreadId) {
+        continue;
+      }
+      nextBindings.push({
         messageId: message.messageId,
         chatId: message.chatId,
         sessionId: input.sessionId,
@@ -295,11 +323,67 @@ export class FeishuReplyBindingStore {
           : {}),
         ...(transcriptTarget ?? {}),
         ...(referencedFiles ? { referencedFiles } : {}),
-        createdAt,
+        createdAt: existing?.createdAt ?? createdAt,
       });
+    }
+    for (const binding of nextBindings) {
+      this.#bindings.set(binding.messageId, binding);
     }
     this.#prune();
     this.#persist();
+  }
+
+  findCodexCompletionDelivery(
+    threadId: string,
+    completionId: string,
+  ): FeishuCompletionDeliveryLookupResult | undefined {
+    if (!CODEX_THREAD_ID_PATTERN.test(threadId) || !completionId.trim()) {
+      return undefined;
+    }
+    const changed = this.#prune();
+    if (changed) {
+      this.#persist();
+    }
+
+    const candidates = [...this.#bindings.values()].filter(
+      (binding) =>
+        !this.#processed.has(binding.messageId) &&
+        binding.completionId === completionId &&
+        codexCompletionThreadId(binding) === threadId,
+    );
+    if (candidates.length === 0) {
+      return undefined;
+    }
+
+    const selected =
+      candidates.find(isNativeBinding) ??
+      [...candidates].sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt),
+      )[0];
+    if (!selected) {
+      return undefined;
+    }
+
+    const messages = candidates
+      .filter(
+        (binding) =>
+          binding.sessionId === selected.sessionId &&
+          binding.createdAt === selected.createdAt,
+      )
+      .sort((left, right) => left.messageId.localeCompare(right.messageId))
+      .map((binding) => ({
+        messageId: binding.messageId,
+        chatId: binding.chatId,
+      }));
+    if (messages.length === 0) {
+      return undefined;
+    }
+    return {
+      messages,
+      ...(selected.referencedFiles
+        ? { referencedFiles: selected.referencedFiles }
+        : {}),
+    };
   }
 
   resolve(messageId: string): FeishuReplyBinding | null {

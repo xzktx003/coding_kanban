@@ -9,6 +9,8 @@ import { useFileTree } from "./useFileTree";
 export function FileTree({
   folder,
   onFileSelect,
+  onNodeSelect,
+  selectedPath,
   onFileAction,
 }: FileTreeProps) {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -149,6 +151,8 @@ export function FileTree({
                     onToggle={toggle}
                     onLoadChildren={loadChildren}
                     onFileSelect={onFileSelect}
+                    onNodeSelect={onNodeSelect}
+                    selectedPath={selectedPath}
                     onFileAction={onFileAction}
                   />
                 ))}

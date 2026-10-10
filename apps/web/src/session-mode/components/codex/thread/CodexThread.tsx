@@ -1,4 +1,10 @@
 import { pruneRowState } from "./pruneRowState";
+import { useTranscriptVisibility } from "../hooks/useTranscriptVisibility";
+import {
+  isCodexTranscriptDormant,
+  needsCodexTranscriptRestore,
+  onCodexTranscriptReleased,
+} from "@session/services/codexTranscriptActivity";
 import { TranscriptInspectionContext } from "./inspection";
 import { CodexAccessNotice } from "./CodexAccessNotice";
 import { useSessionReadReceipt } from "@session/hooks/useSessionReadReceipt";
@@ -52,6 +58,12 @@ const positions = new Map<
     disclosure: Map<string, Map<string, unknown>>;
   }
 >();
+// The cache owns only disposable view state. Unmount may follow the release
+// notification, so its cleanup must also avoid writing a dormant entry back.
+const stopPositionCleanup = onCodexTranscriptReleased((id) =>
+  positions.delete(id),
+);
+if (import.meta.hot) import.meta.hot.dispose(stopPositionCleanup);
 const ThreadMessage = memo(
   function ThreadMessage({ row }: { row: ThreadRow }) {
     const item = row.item;
@@ -431,6 +443,7 @@ const CodexTranscript = memo(function CodexTranscript({
       remember();
       cancelAnimationFrame(rememberFrame);
       positions.delete(activeThreadId);
+      if (isCodexTranscriptDormant(activeThreadId)) return;
       positions.set(activeThreadId, {
         measurements:
           virtualizer.measurementsCache.length <= 3000
@@ -547,26 +560,32 @@ const CodexTranscript = memo(function CodexTranscript({
                   {t("historyLoading")}
                 </div>
               )}
-              {historyError && !loading && !loaded && events.length === 0 && (
-                <div
-                  role="alert"
-                  className="rounded-md border p-3 text-sm space-y-2"
-                >
-                  <p>
-                    {t("historyFailed")}: {historyError}
-                  </p>
-                  <button
-                    className="text-primary underline underline-offset-4"
-                    onClick={() => {
-                      void codexService
-                        .loadThreadHistory(activeThreadId)
-                        .catch(() => {});
-                    }}
+              {historyError &&
+                !loading &&
+                (!loaded || needsCodexTranscriptRestore(activeThreadId)) &&
+                events.length === 0 && (
+                  <div
+                    role="alert"
+                    className="rounded-md border p-3 text-sm space-y-2"
                   >
-                    {t("historyRetry")}
-                  </button>
-                </div>
-              )}
+                    <p>
+                      {t("historyFailed")}: {historyError}
+                    </p>
+                    <button
+                      className="text-primary underline underline-offset-4"
+                      onClick={() => {
+                        void codexService
+                          .loadThreadHistory(activeThreadId, undefined, {
+                            background: true,
+                            recent: true,
+                          })
+                          .catch(() => {});
+                      }}
+                    >
+                      {t("historyRetry")}
+                    </button>
+                  </div>
+                )}
               <ApprovalItem currentThreadId={activeThreadId} />
               <WorkingIndicator
                 turnTiming={turnTiming}
@@ -598,13 +617,26 @@ export const CodexThread = memo(function CodexThread({
   inspection = false,
 }: CodexThreadProps = {}) {
   const activeThreadId = useCodexStore((s) => threadId ?? s.currentThreadId);
+  const { ref, renderTranscript } = useTranscriptVisibility(
+    activeThreadId ?? "",
+  );
   return (
     <TranscriptInspectionContext.Provider value={inspection}>
-      <CodexTranscript
-        key={activeThreadId ?? ""}
-        activeThreadId={activeThreadId ?? ""}
-        fillHeight={fillHeight}
-      />
+      <div
+        ref={ref}
+        data-codex-transcript-shell={activeThreadId ?? ""}
+        className={`flex flex-col flex-1 min-h-0 ${fillHeight ? "h-full" : ""}`}
+      >
+        {renderTranscript ? (
+          <CodexTranscript
+            key={activeThreadId ?? ""}
+            activeThreadId={activeThreadId ?? ""}
+            fillHeight={fillHeight}
+          />
+        ) : (
+          <div className="flex-1 min-h-0" data-transcript-sleeping />
+        )}
+      </div>
     </TranscriptInspectionContext.Provider>
   );
 });

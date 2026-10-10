@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { FilePlus, FolderPlus, Upload, Trash2 } from "lucide-react";
+import {
+  Copy,
+  Download,
+  FilePlus,
+  FolderPlus,
+  RefreshCw,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -17,6 +26,7 @@ import {
 } from "@session/services/workspaceFiles";
 import { useEditorStore } from "@session/stores/useEditorStore";
 import { useFileDocumentStore } from "@session/stores/useFileDocumentStore";
+import { copyTextToClipboard } from "../../../lib/clipboard";
 import type { FileAction } from "./explorer/types";
 export type FileOperationTarget = {
   type: FileAction | "purge";
@@ -25,19 +35,39 @@ export type FileOperationTarget = {
   isDir: boolean;
   id?: string;
 };
+export type FileOperationSelection = {
+  path: string;
+  isDir: boolean;
+};
 const parent = (path: string) => path.slice(0, path.lastIndexOf("/")) || "/";
 const name = (path: string) => path.split("/").pop() ?? "";
 const join = (dir: string, file: string) => dir.replace(/\/$/, "") + "/" + file;
+const isAbortError = (error: unknown) =>
+  error instanceof DOMException
+    ? error.name === "AbortError"
+    : error instanceof Error && error.name === "AbortError";
+const isInsideRoot = (root: string, path: string) =>
+  path === root || path.startsWith(root.replace(/\/$/, "") + "/");
+const relativePath = (root: string, path: string) => {
+  const base = root.replace(/\/+$/, "");
+  return path.replace(/\/+$/, "") === base
+    ? "."
+    : path.startsWith(base + "/")
+      ? path.slice(base.length + 1)
+      : path;
+};
 export const refreshFiles = (root: string) =>
   window.dispatchEvent(
     new CustomEvent("workspace-files-changed", { detail: { root } }),
   );
 export function FileOperations({
   root,
+  target,
   action,
   onAction,
 }: {
   root: string | null;
+  target?: FileOperationSelection | null;
   action: FileOperationTarget | null;
   onAction: (a: FileOperationTarget | null) => void;
 }) {
@@ -46,10 +76,17 @@ export function FileOperations({
     [directories, setDirectories] = useState<string[]>([]),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(""),
-    [notice, setNotice] = useState("");
+    [notice, setNotice] = useState(""),
+    [progress, setProgress] = useState<{
+      file: string;
+      index: number;
+      total: number;
+      percent: number;
+    } | null>(null);
   const busyRef = useRef(false),
     uploadRef = useRef<HTMLInputElement>(null),
-    uploadTarget = useRef<{ root: string; dir: string } | null>(null);
+    uploadTarget = useRef<{ root: string; dir: string } | null>(null),
+    uploadAbort = useRef<AbortController | null>(null);
   const [trashRoot, setTrashRoot] = useState<string | null>(null),
     [trash, setTrash] = useState<TrashEntry[]>([]);
   const [uploadConflict, setUploadConflict] = useState<{
@@ -60,9 +97,16 @@ export function FileOperations({
   const conflictAnswer = useRef<
     ((answer: { path: string; overwrite: boolean } | null) => void) | null
   >(null);
+  const selectedTarget =
+    root && target && isInsideRoot(root, target.path) ? target : null;
+  const operationPath = selectedTarget?.path ?? root ?? "";
+  const operationIsDir = selectedTarget?.isDir ?? true;
+  const operationDir = operationIsDir ? operationPath : parent(operationPath);
+  const downloadLabel = operationIsDir ? "下载文件夹（ZIP）" : "下载文件";
   useEffect(
     () => () => {
       conflictAnswer.current?.(null);
+      uploadAbort.current?.abort();
     },
     [],
   );
@@ -85,14 +129,11 @@ export function FileOperations({
     );
     setDestination(action.root);
     if (action.type === "copy-path" || action.type === "copy-relative") {
-      void navigator.clipboard
-        .writeText(
-          action.type === "copy-path"
-            ? action.path
-            : action.path.slice(action.root.length + 1),
-        )
-        .then(() => setNotice("路径已复制"))
-        .catch((e) => setError(String(e)));
+      const text =
+        action.type === "copy-path"
+          ? action.path
+          : relativePath(action.root, action.path);
+      void copyPath(text);
       onAction(null);
     } else if (action.type === "download") {
       void downloadWorkspaceFile(action.root, action.path).catch((e) =>
@@ -123,6 +164,51 @@ export function FileOperations({
       active = false;
     };
   }, [action?.type, destination]);
+  useEffect(() => {
+    const handleUpload = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          root?: unknown;
+          dir?: unknown;
+          files?: unknown;
+        }>
+      ).detail;
+      if (
+        !root ||
+        !detail ||
+        detail.root !== root ||
+        typeof detail.dir !== "string" ||
+        !isInsideRoot(root, detail.dir) ||
+        !Array.isArray(detail.files) ||
+        !detail.files.every((file) => file instanceof File)
+      )
+        return;
+      if (busyRef.current) {
+        setNotice("文件操作进行中，请稍后再上传");
+        return;
+      }
+      void uploadFiles(detail.files, { root, dir: detail.dir });
+    };
+    window.addEventListener("workspace-files-upload", handleUpload);
+    return () =>
+      window.removeEventListener("workspace-files-upload", handleUpload);
+  }, [root]);
+  const copyPath = async (text: string) => {
+    setError("");
+    const copied = await copyTextToClipboard(text);
+    if (copied) setNotice("路径已复制");
+    else setError(`浏览器阻止复制，请手动复制：${text}`);
+  };
+  const startDownload = async () => {
+    if (!root || busyRef.current) return;
+    setError("");
+    try {
+      await downloadWorkspaceFile(root, operationPath);
+      setNotice(operationIsDir ? "已开始下载 ZIP" : "已开始下载文件");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
   const finish = async () => {
     if (!action || busyRef.current) return;
     const target = action;
@@ -180,21 +266,53 @@ export function FileOperations({
       setBusy(false);
     }
   };
-  const upload = async (files: FileList | null) => {
-    const target = uploadTarget.current;
+  const uploadFiles = async (
+    files: FileList | File[] | null,
+    target = uploadTarget.current,
+  ) => {
     if (!files || !target || busyRef.current) return;
+    const list = Array.from(files);
+    if (list.length === 0) return;
     busyRef.current = true;
     setBusy(true);
     setError("");
+    setProgress(null);
     try {
       let done = 0;
-      for (const file of Array.from(files)) {
-        setNotice(`上传 ${done + 1}/${files.length}：${file.name}`);
+      for (const file of list) {
+        uploadAbort.current = new AbortController();
+        setProgress({
+          file: file.name,
+          index: done + 1,
+          total: list.length,
+          percent: 0,
+        });
+        setNotice(`上传 ${done + 1}/${list.length}：${file.name}`);
         let path = join(target.dir, file.name),
           version: string | undefined;
+        const options = {
+          signal: uploadAbort.current.signal,
+          onProgress: (percent: number) =>
+            setProgress({
+              file: file.name,
+              index: done + 1,
+              total: list.length,
+              percent,
+            }),
+        };
         try {
-          await uploadWorkspaceFile(target.root, path, file);
+          await uploadWorkspaceFile(
+            target.root,
+            path,
+            file,
+            undefined,
+            options,
+          );
         } catch (e) {
+          if (isAbortError(e)) {
+            setNotice("已取消上传");
+            return;
+          }
           if (!String(e).includes("已存在")) throw e;
           const choice = await new Promise<{
             path: string;
@@ -206,6 +324,10 @@ export function FileOperations({
           });
           setUploadConflict(null);
           conflictAnswer.current = null;
+          if (options.signal.aborted) {
+            setNotice("已取消上传");
+            return;
+          }
           if (!choice) {
             done++;
             continue;
@@ -218,17 +340,20 @@ export function FileOperations({
                 path,
               })
             ).version;
-          await uploadWorkspaceFile(target.root, path, file, version);
+          await uploadWorkspaceFile(target.root, path, file, version, options);
         }
         done++;
         refreshFiles(target.root);
       }
       setNotice(`上传处理完成：${done} 个文件`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      if (isAbortError(e)) setNotice("已取消上传");
+      else setError(e instanceof Error ? e.message : String(e));
     } finally {
       busyRef.current = false;
       setBusy(false);
+      uploadAbort.current = null;
+      setProgress(null);
       if (uploadRef.current) uploadRef.current.value = "";
     }
   };
@@ -264,10 +389,17 @@ export function FileOperations({
             aria-label={label}
             title={label}
             onClick={() =>
-              root && onAction({ type, root, path: root, isDir: true })
+              root &&
+              onAction({
+                type,
+                root,
+                path: operationPath || root,
+                isDir: operationIsDir,
+              })
             }
           >
             <Icon size={16} />
+            <span>{label}</span>
           </button>
         ))}
         <button
@@ -277,12 +409,55 @@ export function FileOperations({
           title="上传文件"
           onClick={() => {
             if (root) {
-              uploadTarget.current = { root, dir: root };
+              uploadTarget.current = { root, dir: operationDir || root };
               uploadRef.current?.click();
             }
           }}
         >
           <Upload size={16} />
+          <span>上传文件</span>
+        </button>
+        <button
+          type="button"
+          disabled={!root || busy || !operationPath}
+          aria-label={downloadLabel}
+          title={downloadLabel}
+          onClick={() => void startDownload()}
+        >
+          <Download size={16} />
+          <span>{downloadLabel}</span>
+        </button>
+        <button
+          type="button"
+          disabled={!root || busy || !operationPath}
+          aria-label="复制绝对路径"
+          title="复制绝对路径"
+          onClick={() => void copyPath(operationPath)}
+        >
+          <Copy size={16} />
+          <span>复制绝对路径</span>
+        </button>
+        <button
+          type="button"
+          disabled={!root || busy || !operationPath}
+          aria-label="复制相对路径"
+          title="复制相对路径"
+          onClick={() =>
+            root && void copyPath(relativePath(root, operationPath))
+          }
+        >
+          <Copy size={16} />
+          <span>复制相对路径</span>
+        </button>
+        <button
+          type="button"
+          disabled={!root || busy}
+          aria-label="刷新文件"
+          title="刷新文件"
+          onClick={() => root && refreshFiles(root)}
+        >
+          <RefreshCw size={16} />
+          <span>刷新</span>
         </button>
         <button
           type="button"
@@ -297,7 +472,34 @@ export function FileOperations({
           }}
         >
           <Trash2 size={16} />
+          <span>回收站</span>
         </button>
+        {progress && (
+          <div className="flex min-w-44 items-center gap-2 text-xs">
+            <progress
+              aria-label="上传进度"
+              max={100}
+              value={progress.percent}
+              className="h-2 w-24"
+            />
+            <span className="truncate">
+              上传 {progress.index}/{progress.total}：{progress.file}{" "}
+              {progress.percent}%
+            </span>
+            <button
+              type="button"
+              aria-label="取消上传"
+              title="取消上传"
+              onClick={() => {
+                conflictAnswer.current?.(null);
+                uploadAbort.current?.abort();
+              }}
+            >
+              <X size={14} />
+              <span>取消上传</span>
+            </button>
+          </div>
+        )}
         <span role="status" className="text-xs truncate">
           {notice}
         </span>
@@ -307,7 +509,7 @@ export function FileOperations({
           multiple
           className="hidden"
           aria-label="选择上传文件"
-          onChange={(e) => void upload(e.target.files)}
+          onChange={(e) => void uploadFiles(e.target.files)}
         />
       </div>
       {error && !modal && (
@@ -492,6 +694,15 @@ export function FileOperations({
             onChange={(e) => setUploadName(e.target.value)}
           />
           <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                uploadAbort.current?.abort();
+                conflictAnswer.current?.(null);
+              }}
+            >
+              取消上传
+            </Button>
             <Button
               variant="outline"
               onClick={() => conflictAnswer.current?.(null)}

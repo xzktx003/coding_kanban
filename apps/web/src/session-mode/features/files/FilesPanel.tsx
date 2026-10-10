@@ -8,6 +8,7 @@ import { useIsMobile } from "@session/hooks/use-mobile";
 import { useEditorStore, useWorkspaceStore } from "@session/stores";
 import { getFilename } from "@session/utils/getFilename";
 import { FileTree, FileViewer } from "./explorer";
+import type { FileNode } from "./explorer/types";
 
 export default function FilesPanel() {
   const { openFiles, activeFile, openFile, closeFile, setActiveFile } =
@@ -18,6 +19,30 @@ export default function FilesPanel() {
   const [fileAction, setFileAction] = useState<FileOperationTarget | null>(
     null,
   );
+  const [selectedNode, setSelectedNode] = useState<{
+    root: string;
+    node: FileNode;
+  } | null>(null);
+  const [draggingFiles, setDraggingFiles] = useState(false);
+  const [dropError, setDropError] = useState("");
+  const selected = selectedNode?.root === cwd ? selectedNode.node : null;
+  const currentFile =
+    activeFile && cwd && activeFile.startsWith(cwd.replace(/\/$/, "") + "/")
+      ? activeFile
+      : null;
+  const operationTarget = selected
+    ? { path: selected.path, isDir: selected.kind === "dir" }
+    : currentFile
+      ? { path: currentFile, isDir: false }
+      : null;
+  const selectNode = (node: FileNode) => {
+    if (cwd) setSelectedNode({ root: cwd, node });
+  };
+  useEffect(() => {
+    setSelectedNode(null);
+    setDropError("");
+    setDraggingFiles(false);
+  }, [cwd, activeFile]);
   const requestClose = (path: string) => {
     const doc = useFileDocumentStore.getState().documents[path];
     if (doc && doc.draft !== doc.base) setClosing(path);
@@ -48,7 +73,63 @@ export default function FilesPanel() {
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0 w-full overflow-hidden">
+    <div
+      className="relative flex flex-col h-full min-h-0 w-full overflow-hidden"
+      role="region"
+      aria-label="会话文件管理"
+      onDragOver={(event) => {
+        if (!cwd || !Array.from(event.dataTransfer.types).includes("Files"))
+          return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "copy";
+        setDraggingFiles(true);
+      }}
+      onDragLeave={(event) => {
+        if (
+          !(event.relatedTarget instanceof Node) ||
+          !event.currentTarget.contains(event.relatedTarget)
+        )
+          setDraggingFiles(false);
+      }}
+      onDrop={(event) => {
+        if (!Array.from(event.dataTransfer.types).includes("Files")) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setDraggingFiles(false);
+        if (!cwd) return;
+        if (
+          Array.from(event.dataTransfer.items ?? []).some(
+            (item) => item.webkitGetAsEntry?.()?.isDirectory,
+          )
+        ) {
+          setDropError("请展开文件夹后选择文件上传；当前拖入上传仅支持文件。");
+          return;
+        }
+        const files = Array.from(event.dataTransfer.files);
+        if (!files.length) return;
+        setDropError("");
+        const dir = operationTarget
+          ? operationTarget.isDir
+            ? operationTarget.path
+            : operationTarget.path.slice(
+                0,
+                operationTarget.path.lastIndexOf("/"),
+              )
+          : cwd;
+        window.dispatchEvent(
+          new CustomEvent("workspace-files-upload", {
+            detail: { root: cwd, dir, files },
+          }),
+        );
+      }}
+    >
+      {draggingFiles && (
+        <div className="pointer-events-none absolute inset-0 z-30 flex items-center justify-center border-2 border-primary bg-background/90 text-sm">
+          松开文件，上传到
+          {operationTarget?.isDir ? operationTarget.path : "当前目录"}
+        </div>
+      )}
       {/* Tab bar */}
       <div className="flex h-9 shrink-0 items-center border-b border-border bg-sidebar/30 backdrop-blur-sm overflow-hidden">
         {/* Scrollable tabs */}
@@ -122,7 +203,17 @@ export default function FilesPanel() {
         </Button>
       </div>
 
-      <FileOperations root={cwd} action={fileAction} onAction={setFileAction} />
+      <FileOperations
+        root={cwd}
+        target={operationTarget}
+        action={fileAction}
+        onAction={setFileAction}
+      />
+      {dropError && (
+        <p role="alert" className="p-2 text-xs text-destructive">
+          {dropError}
+        </p>
+      )}
       <FileCloseDialog
         path={closing}
         onCancel={() => setClosing(null)}
@@ -175,6 +266,8 @@ export default function FilesPanel() {
             <FileTree
               folder={cwd}
               onFileSelect={handleFileSelect}
+              onNodeSelect={selectNode}
+              selectedPath={operationTarget?.path}
               onFileAction={(action, node) =>
                 setFileAction({
                   type: action,
@@ -200,6 +293,8 @@ export default function FilesPanel() {
               <FileTree
                 folder={cwd}
                 onFileSelect={handleFileSelect}
+                onNodeSelect={selectNode}
+                selectedPath={operationTarget?.path}
                 onFileAction={(action, node) =>
                   setFileAction({
                     type: action,
