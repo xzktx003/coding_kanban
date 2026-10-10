@@ -1,3 +1,5 @@
+- 2026-10-10：在线 fast-forward 后 `tsx watch` 可能早于依赖安装重启，因缺少新依赖导致后端退出。独立 finalizer 等待确认的目标 HEAD，执行 frozen lockfile 安装后安全重启；冲突时取消 finalizer。
+
 - 2026-10-10：手机把 tmux PTY 收窄后，电脑端即使还开着也不会再发 resize，所以桌面一直是手机列宽。服务端按 WebSocket 连接记住尺寸，手机断开后恢复到仍在线客户端里最宽的那组。最后一条连接断开时不主动改 PTY。
 
 - 2026-10-10：手机「发送」在 Playwright 里写到了错误后端。`apps/server/src/index.ts` 的 dotenv 默认覆盖进程环境，把测试传入的 `SERVER_PORT` 盖回 `.env`。改为 `override: false`，并让 Vite 的 `WEB_BACKEND_PORT` 跟随同一个测试端口。软键盘可视高度 400px 时，输入框和「发送」必须留在可视区域内，终端面至少 96px。终端手势会拦住按钮 click，「发送」改为在 pointerdown 写入当前会话。

@@ -13,6 +13,7 @@ import {
 import { AppVersionService } from "./services/app-version-service.js";
 import { ScriptFeishuCompletionSender } from "./services/agent-completion-feishu-notifier.js";
 import { GitAutoUpdateService } from "./services/git-auto-update-service.js";
+import { scheduleOnlineUpdateFinalizer } from "./services/online-update-finalizer.js";
 import { FeishuNotificationSettingsService } from "./services/feishu-notification-settings-service.js";
 import { FeishuQuickReplyStore } from "./services/feishu-quick-reply-store.js";
 import { FeishuReplyBindingStore } from "./services/feishu-reply-binding-store.js";
@@ -84,6 +85,12 @@ async function main(): Promise<void> {
     gitAutoUpdateService: new GitAutoUpdateService({
       sourceRoot: appSourceRoot,
       intervalMinutes: gitAutoPullIntervalMinutes,
+      scheduleUpdateFinalize: (sourceRoot, targetHead) =>
+        scheduleOnlineUpdateFinalizer({
+          repositoryRoot,
+          sourceRoot,
+          targetHead,
+        }),
     }),
     sessionStateStore: new FileSessionStateStore(sessionStatePath),
     feishuNotificationSettingsService,

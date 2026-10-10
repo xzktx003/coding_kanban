@@ -220,7 +220,7 @@
 
 - 后端通过 `GET /api/app-version` 暴露当前进程 runtime id、启动时间、Git branch/head、本地源码指纹和自动更新状态；指纹覆盖 tracked 修改、未跟踪文件、commit、checkout 和 pull 后的 HEAD 变化。tracked diff 使用流式哈希，未跟踪文件按总预算有界读取；并发版本查询会复用同一次指纹计算和短期缓存。
 - `GIT_AUTO_PULL_INTERVAL_MINUTES` 可设置为 `10`、`15`、`30` 或 `0`。启用后，独立 `GitAutoUpdateService` 在启动时立即检查并按配置周期固定执行 `fetch --prune`，只更新 `available` 提醒状态，绝不由定时器执行 pull 或 merge；定时器和手动操作通过 single-flight 串行化。
-- 检测到远程新版本时，前端显示可关闭的“拉取并更新”提示。提示是非模态的，只有更新和关闭按钮接收指针事件，不会遮挡底下终端或顶栏控件。只有用户点击确认后，后端才通过 `POST /api/app-update/apply` 尝试 `merge --ff-only <remote-head>`；成功后自动保存恢复意图、reload 并恢复受管 tmux，不再要求第二次确认。
+- 检测到远程新版本时，前端显示可关闭的“拉取并更新”提示。提示是非模态的，只有更新和关闭按钮接收指针事件，不会遮挡底下终端或顶栏控件。只有用户点击确认后，后端才通过 `POST /api/app-update/apply` 尝试 `merge --ff-only <remote-head>`；成功后独立更新进程等待目标 revision、执行 `pnpm install --frozen-lockfile` 和安全的 `pnpm dev:restart`。source revision 变化时，前端复用已记录的恢复意图，只 reload 一次并恢复受管 tmux，不再要求第二次确认。自动重启复用正在运行的 Rust 会话服务和 Agent；日志写入 `.dev-runtime/online-update.log`。
 - 会话模式首次打开时无需加载终端工作台，也会轮询现有的应用版本状态；当前分支的 GitLab upstream 有新提交时，顶栏显示更新提示。点击提示切换到终端模式，由现有的确认拉取流程处理；隐藏的会话模式暂停这项轮询。
 - 用户确认拉取后，如本地未提交修改会被覆盖、存在未跟踪同名文件、分支已经分叉或 fast-forward 被 Git 拒绝，后端保持 HEAD 和工作区不变，前端显示“检测到新版本，但存在冲突”，仅允许再次显式确认重试拉取。网络、上游或凭证错误显示独立检查失败提示。
 - 前端每 3 秒检查版本。源码 revision 变化时只显示“检测到新版本 / 更新并恢复”，不会在用户输入终端时自动刷新；提示可主动关闭，同一 revision 在后续轮询和 reload 后保持隐藏，新的 revision 会重新提示。
@@ -231,7 +231,7 @@
 - `restart-dev.sh` 在停止旧后端前读取 `/api/agent-sessions`，用于首次升级时把旧版内存注册表迁移到状态文件；迁移时立即剔除 terminal output、PTY PID、runtime id 和其他瞬态字段。只有目标端口存在本仓库后端且捕获失败时才拒绝重启；无本仓库监听器或只有外部监听器时不会误判为迁移失败。
 - `restart-dev.sh` 在计算后端和前端端口默认值前，把 `.env` 按 dotenv 的 `KEY=value` 数据读取，不执行其中的 shell 片段；未加引号的空格值可被保留，带引号值会去除外围引号，`SERVER_PORT`、`PORT` 和 `WEB_PORT` 会按该配置生效，格式错误会在停止任何服务前明确失败。
 - 会话状态文件只在持久化元数据实际变化时原子写入，终端输出快照、连接运行态或单纯 `updatedAt` 变化不会造成持续落盘；写入失败只记录后端错误，不中断看板服务。
-- Git 更新测试使用临时 bare remote 和两个 clone，覆盖后台只 fetch/check 且不改 HEAD、用户确认后的 clean fast-forward、未提交修改冲突、分支分叉、并发 single-flight、10/30 分钟定时器和手动接口；隔离 E2E 继续使用临时 Git 根目录、状态文件、前后端端口和 tmux socket，覆盖提醒、确认、冲突到自动会话恢复的完整链路。
+- Git 更新测试使用临时 bare remote 和两个 clone，覆盖后台只 fetch/check 且不改 HEAD、用户确认后的 clean fast-forward、未提交修改冲突、分支分叉、并发 single-flight、10/30 分钟定时器和手动接口；finalizer 测试覆盖等待目标 HEAD、先安装锁文件依赖再重启、安装失败后的恢复尝试和 fast-forward 冲突取消。隔离 E2E 继续使用临时 Git 根目录、状态文件、前后端端口和 tmux socket，覆盖提醒、确认、冲突到自动会话恢复的完整链路。
 
 ## 12. PM 审计增强 (2026-06-16)
 

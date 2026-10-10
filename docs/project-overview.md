@@ -225,7 +225,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 
 更新状态机为 `disabled / idle / checking / available / updated / conflict / error`。定时器与手动操作共享 single-flight；发现上游领先时只进入 `available` 并提醒用户。只有用户点击“拉取并更新”后，apply 端点才允许 `merge --ff-only <remote-head>`。HEAD 与 upstream 分叉时不创建 merge commit；本地修改或未跟踪文件阻止 fast-forward 时保留原 HEAD 和工作区；Git 错误只返回有界、去机器路径的用户消息。
 
-用户确认后的安全 fast-forward 成功后，source revision 变化会自动复用既有热更新链：前端记录恢复意图并 reload 一次，不再要求第二次确认，随后恢复受管 tmux。后端开发入口在导入应用模块前重新构建 `@agent-orchestrator/shared`，并让 `tsx` 监听共享源码，避免拉取后共享包 `dist` 落后于服务端 import 而退出。未经“拉取并更新”确认，后台检查不会修改源码或刷新浏览器。版本和恢复提示是非模态的，只有其操作按钮接收指针事件，提示本身不会截获底下终端或顶栏控件的输入；恢复成功提示可主动关闭并在 5 秒内自动隐藏，恢复失败提示保持可见。
+用户确认后的安全 fast-forward 会先启动独立更新进程；该进程等待 HEAD 到达确认的 revision，执行 `pnpm install --frozen-lockfile`，再调用安全的 `pnpm dev:restart`。因此 watcher 因新版本依赖缺失退出时，更新进程仍能完成依赖安装并恢复前后端。重启保留运行中的 Rust 会话服务和 Agent；source revision 变化时，前端复用确认时记录的恢复意图，只 reload 一次并恢复受管 tmux，不再要求第二次确认。过程日志位于 `.dev-runtime/online-update.log`。后端开发入口在导入应用模块前重新构建 `@agent-orchestrator/shared`，并让 `tsx` 监听共享源码。未经“拉取并更新”确认，后台检查不会修改源码或刷新浏览器。版本和恢复提示是非模态的，只有其操作按钮接收指针事件，提示本身不会截获底下终端或顶栏控件的输入；恢复成功提示可主动关闭并在 5 秒内自动隐藏，恢复失败提示保持可见。
 
 生产入口使用 `FileSessionStateStore` 把稳定会话目录保存到 `SESSION_STATE_PATH`，默认 `.dev-runtime/agent-sessions.json`：
 
@@ -352,6 +352,7 @@ memories/        仓库记忆，不是产品运行依赖
 - `LocalTmuxInputRouter`：统一 REST/WebSocket 的本地 tmux 输入队列，并区分 pane 输入、鼠标协议和 tmux 前缀命令。
 - `AppVersionService`：计算本地 Git source revision 和 backend runtime version。
 - `GitAutoUpdateService`：按配置周期只 fetch/check 当前 upstream；用户确认后才执行安全 fast-forward，并维护可用更新、冲突和错误状态。
+- `OnlineUpdateFinalizer`：在快进前启动独立进程，等待目标 revision 后安装 frozen lockfile 依赖并安全重启应用。
 - `FileSessionStateStore`：校验、投影并原子持久化稳定会话目录。
 - `AgentCompletionFeishuNotifier`：观察所有已登记会话的新完成点，并在共享开关开启时异步交给飞书发送器；本地 tmux 按每个 Codex thread 独立建立完成游标，Codex 候选只接受结构化完成，初始空闲会话和重复快照不会补发。
 - `CodexCompletionContentResolver`：从看板会话定位 Codex session；本地 tmux 枚举全部 pane 并逐 thread 读取最后一条完整 assistant 输出作为飞书正文，SSH 保持单会话定位。Goal 内部自动续轮先抑制，未解析 session 不做负缓存，Codex 结构化记录为空或读取失败时不触发摘要降级。
@@ -536,7 +537,7 @@ curl http://127.0.0.1:4000/api/health
 - `VSCODE_WEB_EXTENSIONS_DIR`：覆盖 VS Code Web 的扩展目录；默认优先使用 `~/.vscode-server/extensions`。
 - `VSCODE_WEB_REMOTE_BIND_HOST`：SSH 远端 code-server 的绑定地址，默认 `127.0.0.1`。
 - `VSCODE_WEB_REMOTE_PORT`：SSH 远端 code-server 的固定端口，默认 `13338`。
-- `APP_SOURCE_ROOT`：更新检测读取的本地源码根目录，默认仓库根目录。
+- `APP_SOURCE_ROOT`：在线更新检查、快进和依赖安装使用的本地源码根目录，默认仓库根目录。
 - `SESSION_STATE_PATH`：稳定会话目录文件，默认 `.dev-runtime/agent-sessions.json`。
 
 ### SSH

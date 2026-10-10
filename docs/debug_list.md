@@ -1,5 +1,7 @@
 # Coding Kanban Bug 修复记录
 
+- 2026-10-10：在线 fast-forward 后 `tsx watch` 可能先于依赖安装重启，缺少新依赖时后端退出，看板无法进入。确认更新前启动独立 finalizer，等待目标 HEAD 后安装 frozen lockfile 依赖并安全重启；新增顺序、冲突取消和重启失败回归测试。
+
 - 2026-10-10：手机打开 tmux 后把 PTY 收成窄列宽，关掉手机再打开电脑端，桌面 xterm 仍按这块窄宽度排版。每个终端 WebSocket 现在记住自己报过的尺寸；手机连接断开时，如果电脑端连接还在，就把 PTY 恢复成其中最宽的尺寸。只剩手机一个连接时不改宽度。红绿灯：`pty-terminal-size.test.ts`。
 
 - 2026-10-10：手机端到端测试里「发送」后草稿不消失，页面随后显示没有可用会话。服务端启动时 `dotenv` 默认覆盖了 Playwright 传入的 `SERVER_PORT`，API 仍听在 `.env` 的端口；页面把 `/focus` 打到另一套没有这个会话的后端。现在 `.env` 只填补未设置的变量，Vite 的 `WEB_BACKEND_PORT` 也跟同一个测试 API。软键盘把可视高度收到 400px 时，输入框和「发送」仍在可视区域内，底栏隐藏，失焦后恢复。多行输入框按 Enter 不会触发表单提交，现在 Enter 与「发送」按钮走同一条写入，Shift+Enter 仍换行。「发送」在 pointerdown 就写入当前会话：终端手势会拦住随后的 click，只等 click 时手机上的一次点按发不出去。软键盘把可视高度收到 400px 时，固定顶栏和三行输入框会把终端再压成约 16px；输入框聚焦后这些固定条收紧，终端面至少留 96px。红绿灯：`tests/e2e/mobile-terminal.spec.ts` 的发送清空与 keyboard inset。
