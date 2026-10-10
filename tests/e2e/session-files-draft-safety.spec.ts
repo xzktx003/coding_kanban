@@ -76,21 +76,7 @@ test("real file editor preserves full documents and unsaved per-file drafts acro
     const path = new URL(r.request().url()).pathname;
     const payload =
       r.request().method() === "POST" ? r.request().postDataJSON() : {};
-    if (path.endsWith("/read-text-file"))
-      await r.fulfill({ json: disk.get(payload.filePath) ?? "" });
-    else if (path.endsWith("/write-file")) {
-      if (failWrite) {
-        await r.fulfill({ status: 500, json: { error: "隔离写入失败" } });
-        return;
-      }
-      if (holdWrite)
-        await new Promise<void>((done) => {
-          releaseWrite = done;
-        });
-      writes.push({ path: payload.filePath, content: payload.content });
-      disk.set(payload.filePath, payload.content);
-      await r.fulfill({ status: 200, body: "" });
-    } else if (path.endsWith("/canonicalize-path"))
+    if (path.endsWith("/canonicalize-path"))
       await r.fulfill({ json: payload.path });
     else if (path.endsWith("/read-directory") || path.includes("/search-files"))
       await r.fulfill({ json: [] });

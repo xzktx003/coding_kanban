@@ -8,6 +8,12 @@ import { useSubagentStore } from "@session/features/subagents/store";
 import { useServerNotificationHandler } from "./useServerNotificationHandler";
 import { allowSleep } from "@session/services/apiAdapt";
 import {
+  trackCodexTranscript,
+  markCodexTranscriptDormant,
+  forgetCodexTranscript,
+} from "@session/services/codexTranscriptActivity";
+import { useCodexDeliveryStore } from "@session/stores/useCodexDeliveryStore";
+import {
   materializeStreamingTextPreview,
   STREAMING_TEXT_LIMIT,
 } from "@session/services/codexTranscriptMemoryBudget";
@@ -69,6 +75,74 @@ const reply = (threadId: string) =>
       },
     },
   }) as any;
+
+it("cancels buffered frames on dormancy and acknowledges hidden message receipts without retaining bodies", () => {
+  const id = "cold-handler";
+  useAgentCenterStore.setState({ cards: [{ kind: "codex", id }] });
+  trackCodexTranscript(id);
+  const cancel = vi.spyOn(window, "cancelAnimationFrame");
+  const request = vi.spyOn(window, "requestAnimationFrame").mockReturnValue(77);
+  const h = handler();
+  try {
+    act(() =>
+      h.current({
+        method: "item/agentMessage/delta",
+        params: {
+          threadId: id,
+          turnId: "turn",
+          itemId: "answer",
+          delta: "queued before hidden",
+        },
+      } as any),
+    );
+    act(() => markCodexTranscriptDormant(id));
+    expect(cancel).toHaveBeenCalledWith(77);
+    useCodexDeliveryStore.setState({
+      entries: {
+        [JSON.stringify([id, "received"])]: {
+          id: "received",
+          threadId: id,
+          text: "sent",
+          images: [],
+          status: "sent",
+        },
+      },
+    });
+    act(() =>
+      h.current({
+        method: "item/completed",
+        params: {
+          threadId: id,
+          turnId: "turn",
+          item: {
+            id: "user",
+            type: "userMessage",
+            clientId: "received",
+            content: [],
+          },
+        },
+      } as any),
+    );
+    expect(useCodexDeliveryStore.getState().entries).toEqual({});
+    expect(useCodexStore.getState().events[id]).toBeUndefined();
+    act(() =>
+      h.current({
+        method: "item/agentMessage/delta",
+        params: {
+          threadId: id,
+          turnId: "turn",
+          itemId: "answer",
+          delta: "new hidden text",
+        },
+      } as any),
+    );
+    expect(request).toHaveBeenCalledTimes(1);
+  } finally {
+    forgetCodexTranscript(id);
+    request.mockRestore();
+    cancel.mockRestore();
+  }
+});
 
 it("does not retain messages or discover children from an unrelated global thread", () => {
   const h = handler();

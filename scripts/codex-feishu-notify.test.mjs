@@ -1027,3 +1027,45 @@ test("adds a view button for a home file outside the session directory", () => {
     rmSync(homeRoot, { recursive: true, force: true });
   }
 });
+
+test("cross-source sends retain native per-part idempotency without exposing the local identity", async () => {
+  const canonicalThread = "kanban-session-codex:private-native-thread";
+  const event = {
+    ...completion,
+    "thread-id": "kanban-terminal-registry",
+    "last-assistant-message": "x".repeat(2200),
+  };
+  const keys = [];
+  const result = await runCodexFeishuNotification({
+    rawNotification: JSON.stringify(event),
+    env: {
+      FEISHU_NOTIFY_USER_ID: "ou_test",
+      FEISHU_NOTIFY_MESSAGE_CHUNK_CHARS: "1000",
+      KANBAN_COMPLETION_IDEMPOTENCY_THREAD: canonicalThread,
+    },
+    runCommand: async (_binary, args, options) => {
+      const card = args[args.indexOf("--content") + 1];
+      assert.doesNotMatch(card, /private-native-thread/);
+      assert.equal(options.env.KANBAN_COMPLETION_IDEMPOTENCY_THREAD, undefined);
+      keys.push(args[args.indexOf("--idempotency-key") + 1]);
+      return {
+        stdout: JSON.stringify({
+          ok: true,
+          data: { message_id: `om_part_${keys.length}`, chat_id: "oc_test" },
+        }),
+      };
+    },
+  });
+  assert.equal(result.messages.length, 3);
+  assert.deepEqual(
+    keys,
+    [0, 1, 2].map((part) =>
+      createIdempotencyKey({ ...event, "thread-id": canonicalThread }, part),
+    ),
+  );
+  assert.equal(
+    new Set(keys).size,
+    3,
+    "legitimate output parts are not duplicates",
+  );
+});

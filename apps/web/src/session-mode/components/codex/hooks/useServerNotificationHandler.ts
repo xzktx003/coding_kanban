@@ -4,6 +4,14 @@ import {
   isToolTranscriptEvent,
   withoutToolTranscriptEvent,
 } from "@session/services/codexTranscriptVisibility";
+import {
+  isCodexTranscriptDormant,
+  onCodexTranscriptReleased,
+} from "@session/services/codexTranscriptActivity";
+import {
+  acknowledgeDeliveryEchoes,
+  deliveredClientIds,
+} from "@session/stores/useCodexDeliveryStore";
 import { subagentParent } from "@agent-orchestrator/shared";
 import { isObservedCodexThread } from "@session/services/observedCodexThreads";
 import {
@@ -67,6 +75,7 @@ export function useServerNotificationHandler(
     for (const [key, pending] of pendingDeltas.current) {
       if (threadId && pending.threadId !== threadId) continue;
       pendingDeltas.current.delete(key);
+      if (isCodexTranscriptDormant(pending.threadId)) continue;
       const batch = batches.get(pending.threadId);
       const event = pending.preview
         ? ({
@@ -101,6 +110,7 @@ export function useServerNotificationHandler(
 
   const queueDelta = useCallback(
     (threadId: string, event: DeltaEvent) => {
+      if (isCodexTranscriptDormant(threadId)) return;
       const boundedEvent = compactCodexEventPayload(event) as DeltaEvent;
       const params = boundedEvent.params as typeof boundedEvent.params & {
         summaryIndex?: number;
@@ -170,6 +180,21 @@ export function useServerNotificationHandler(
   );
 
   useEffect(() => () => flushPendingDeltas(), [flushPendingDeltas]);
+  useEffect(
+    () =>
+      onCodexTranscriptReleased((id) => {
+        // Hidden documents may never run the queued animation frame. Release its
+        // payloads immediately instead of waiting for a future visible frame.
+        for (const [key, pending] of pendingDeltas.current) {
+          if (pending.threadId === id) pendingDeltas.current.delete(key);
+        }
+        if (!pendingDeltas.current.size && deltaFrame.current !== null) {
+          cancelAnimationFrame(deltaFrame.current);
+          deltaFrame.current = null;
+        }
+      }),
+    [],
+  );
 
   return useCallback(
     (payload: ServerNotification) => {
@@ -213,7 +238,14 @@ export function useServerNotificationHandler(
         const observed =
           isObservedCodexThread(threadId) ||
           (parent !== null && isObservedCodexThread(parent));
-        if (observed) observeSubagents(payload);
+        if (observed) {
+          observeSubagents(payload);
+          if (isCodexTranscriptDormant(threadId)) {
+            const delivered = deliveredClientIds([payload]);
+            if (delivered.size)
+              acknowledgeDeliveryEchoes(threadId, [...delivered]);
+          }
+        }
 
         // Pending RPCs have their own stores and may outlive display membership.
         // Expiration must still follow the exact native thread/turn identity.

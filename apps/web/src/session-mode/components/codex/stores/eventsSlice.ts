@@ -1,4 +1,5 @@
 import { withoutToolTranscriptEvent } from "@session/services/codexTranscriptVisibility";
+import { isCodexTranscriptDormant } from "@session/services/codexTranscriptActivity";
 import {
   acceptTurnStart,
   verifiedTurnDuration,
@@ -168,6 +169,7 @@ export const createEventsSlice: StateCreator<
       let nextThreadEvents = isRetryNotice
         ? existingEvents
         : appendTranscriptEvent(filteredEvents, event);
+      if (isCodexTranscriptDormant(threadId)) nextThreadEvents = existingEvents;
       if (
         nextThreadEvents !== existingEvents &&
         nextThreadEvents.length === existingEvents.length &&
@@ -357,7 +359,7 @@ export const createEventsSlice: StateCreator<
   },
 
   addTranscriptDeltas: (threadId: string, events: DeltaEvent[]) => {
-    if (!events.length) return;
+    if (!events.length || isCodexTranscriptDormant(threadId)) return;
     set((state: CodexStore) => {
       const existingEvents = state.events[threadId] ?? [];
       let nextEvents = existingEvents;
@@ -384,7 +386,7 @@ export const createEventsSlice: StateCreator<
   },
 
   setStreamingAgentDeltas: (threadId: string, events: DeltaEvent[]) => {
-    if (!events.length) return;
+    if (!events.length || isCodexTranscriptDormant(threadId)) return;
     set((state: CodexStore) => {
       let current = state.streamingAgentMessages?.[threadId];
       for (const event of events) {

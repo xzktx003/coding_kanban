@@ -1,5 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { FeishuReplyBindingStore } from "./feishu-reply-binding-store.js";
+import { SessionCodexFeishuNotifier } from "./session-codex-feishu-notifier.js";
 
 import type {
   AgentSessionRecord,
@@ -1286,4 +1291,294 @@ test("script sender marks native session cards without offering terminal control
   assert.equal(notification["session-mode-thread-id"], "native-thread");
   assert.equal(notification["quick-replies-available"], undefined);
   assert.equal(notification["records-available"], undefined);
+});
+
+const sharedCompletion: FeishuCompletionEvent = {
+  sessionId: "session-codex:native-thread-123",
+  sessionModeThreadId: "native-thread-123",
+  agentKind: "codex",
+  displayName: "会话任务",
+  summary: "已经完成",
+  completionId: "shared-turn-1",
+  completedAt: "2026-10-10T10:00:00.000Z",
+};
+const terminalCompletion: FeishuCompletionEvent = {
+  ...sharedCompletion,
+  sessionId: "terminal-registry-session",
+  sessionModeThreadId: undefined,
+  codexThreadId: "native-thread-123",
+};
+
+test("native and terminal observers share one delivery, including concurrent sends", async () => {
+  let calls = 0;
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const sender = new ScriptFeishuCompletionSender({
+    scriptPath: "/workspace/notify.mjs",
+    fallbackWorkingDirectory: "/workspace",
+    runCommand: async () => {
+      calls++;
+      await pending;
+      return {
+        stdout: JSON.stringify({
+          status: "sent",
+          messages: [{ messageId: "om_shared", chatId: "oc_private" }],
+        }),
+      };
+    },
+  });
+  const native = sender.send(sharedCompletion);
+  const terminal = sender.send(terminalCompletion);
+  release();
+  const deliveries = await Promise.all([native, terminal]);
+  assert.equal(calls, 1);
+  assert.deepEqual(deliveries[0], deliveries[1]);
+  assert.deepEqual(await sender.send(terminalCompletion), deliveries[0]);
+  assert.equal(calls, 1);
+  await sender.send({ ...sharedCompletion, completionId: "shared-turn-2" });
+  await sender.send({
+    ...terminalCompletion,
+    codexThreadId: "another-thread-123",
+  });
+  assert.equal(calls, 3, "different turns and threads must still notify");
+});
+
+test("shared sender retries failed delivery and keeps the old native idempotency identity locally", async () => {
+  let attempts = 0;
+  const identities: Array<string | undefined> = [];
+  const sender = new ScriptFeishuCompletionSender({
+    scriptPath: "/workspace/notify.mjs",
+    fallbackWorkingDirectory: "/workspace",
+    runCommand: async (_binary, args, options) => {
+      identities.push(options.env?.KANBAN_COMPLETION_IDEMPOTENCY_THREAD);
+      if (!JSON.parse(args[2]!)["session-mode-thread-id"])
+        assert.doesNotMatch(args[2]!, /native-thread-123/);
+      if (++attempts === 1) throw new Error("temporary failure");
+      return {
+        stdout: JSON.stringify({
+          status: "sent",
+          messages: [{ messageId: "om_retry", chatId: "oc_private" }],
+        }),
+      };
+    },
+  });
+  await assert.rejects(sender.send(sharedCompletion), /delivery failed/);
+  await sender.send(terminalCompletion);
+  await sender.send(sharedCompletion);
+  assert.equal(attempts, 2);
+  assert.deepEqual(identities, [
+    "kanban-session-codex:native-thread-123",
+    "kanban-session-codex:native-thread-123",
+  ]);
+});
+
+test("persisted cross-source delivery survives sender restart and retains native reply routing", async () => {
+  const root = mkdtempSync(join(tmpdir(), "feishu-shared-delivery-"));
+  const statePath = join(root, "bindings.json");
+  let calls = 0;
+  try {
+    for (const events of [
+      [sharedCompletion, terminalCompletion],
+      [terminalCompletion, sharedCompletion],
+    ]) {
+      rmSync(statePath, { force: true });
+      for (const event of events) {
+        const bindings = new FeishuReplyBindingStore({ statePath });
+        const sender = new ScriptFeishuCompletionSender({
+          deliveryHistory: bindings,
+          scriptPath: "/workspace/notify.mjs",
+          fallbackWorkingDirectory: "/workspace",
+          runCommand: async () => {
+            calls++;
+            return {
+              stdout: JSON.stringify({
+                status: "sent",
+                messages: [
+                  { messageId: "om_first", chatId: "oc_private" },
+                  { messageId: "om_second", chatId: "oc_private" },
+                ],
+              }),
+            };
+          },
+        });
+        const delivery = await sender.send(event);
+        bindings.record({
+          ...event,
+          completionId: event.completionId!,
+          messages: delivery.messages,
+        });
+      }
+      const stored = new FeishuReplyBindingStore({ statePath });
+      assert.equal(
+        stored.resolve("om_first")?.sessionModeThreadId,
+        sharedCompletion.sessionModeThreadId,
+      );
+      assert.equal(
+        stored.resolve("om_second")?.sessionModeThreadId,
+        sharedCompletion.sessionModeThreadId,
+      );
+    }
+    assert.equal(
+      calls,
+      2,
+      "only the first observer in each order may send, even across restart",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("real native completion events and terminal rollout observations produce one Feishu card in either order", async () => {
+  const root = mkdtempSync(join(tmpdir(), "feishu-observer-pair-"));
+  const waitFor = async (check: () => boolean) => {
+    const deadline = Date.now() + 2000;
+    while (!check()) {
+      assert.ok(Date.now() < deadline, "observers did not converge");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  };
+  try {
+    for (const nativeFirst of [true, false]) {
+      const bindings = new FeishuReplyBindingStore({
+        statePath: join(root, `${nativeFirst}.json`),
+      });
+      let sends = 0;
+      const observed: FeishuCompletionEvent[] = [];
+      const sender = new ScriptFeishuCompletionSender({
+        scriptPath: "/workspace/notify.mjs",
+        fallbackWorkingDirectory: "/workspace",
+        deliveryHistory: bindings,
+        runCommand: async () => {
+          sends++;
+          return {
+            stdout: JSON.stringify({
+              status: "sent",
+              messages: [
+                { messageId: "om_observer_card", chatId: "oc_private" },
+              ],
+            }),
+          };
+        },
+      });
+      const deliveryRecorder = {
+        record: (
+          event: FeishuCompletionEvent,
+          delivery: { messages: Array<{ messageId: string; chatId: string }> },
+        ) => {
+          observed.push(event);
+          bindings.record({
+            ...event,
+            completionId: event.completionId!,
+            messages: delivery.messages,
+          });
+        },
+      };
+      let observation: FeishuCompletionObservation = {
+        codexThreadId: sharedCompletion.sessionModeThreadId,
+        completionId: "baseline-old-turn",
+        content: "旧任务",
+        completedAt: new Date(Date.now() - 60_000).toISOString(),
+      };
+      const source = new SnapshotSource({
+        items: [makeNodeTmuxSession("running")],
+        activeAgentSessionId: "session-1",
+        updatedAt: new Date().toISOString(),
+      });
+      const stop = new AgentCompletionFeishuNotifier({
+        source,
+        sender,
+        deliveryRecorder,
+        settings: { get: () => ({ configured: true, enabled: true }) },
+        contentResolver: {
+          resolve: async () => observation.content,
+          inspectLatestCompletion: async () => observation,
+        },
+        structuredCompletionProbeDelayMs: 0,
+        structuredCompletionProbeIntervalMs: 0,
+      }).start();
+      const native = new SessionCodexFeishuNotifier({
+        sender,
+        deliveryRecorder,
+        settings: { get: () => ({ configured: true, enabled: true }) },
+        readThread: async () => ({
+          thread: {
+            id: sharedCompletion.sessionModeThreadId,
+            source: "appServer",
+            turns: [
+              {
+                id: sharedCompletion.completionId,
+                status: "completed",
+                items: [
+                  {
+                    type: "agentMessage",
+                    phase: "final_answer",
+                    text: "已经完成",
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+      });
+      try {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        const triggerNative = async () => {
+          await native.observe("runtime-observer-test", {
+            seq: 1,
+            event: "codex:notification",
+            payload: {
+              method: "turn/completed",
+              params: {
+                threadId: sharedCompletion.sessionModeThreadId,
+                turn: {
+                  id: sharedCompletion.completionId,
+                  status: "completed",
+                },
+              },
+            },
+          });
+          await native.drain();
+        };
+        const triggerTerminal = async () => {
+          observation = {
+            ...observation,
+            completionId: sharedCompletion.completionId!,
+            content: "已经完成",
+            completedAt: new Date().toISOString(),
+          };
+          source.emitSession({
+            ...makeNodeTmuxSession("running"),
+            lastOutputAt: new Date().toISOString(),
+          });
+          await waitFor(() =>
+            observed.some((event) => !event.sessionModeThreadId),
+          );
+        };
+        if (nativeFirst) {
+          await triggerNative();
+          await triggerTerminal();
+        } else {
+          await triggerTerminal();
+          await triggerNative();
+        }
+        assert.equal(
+          observed.length,
+          2,
+          "both real observers must execute their completion path",
+        );
+        assert.equal(sends, 1, "the shared sender must invoke the bridge once");
+        assert.equal(
+          bindings.resolve("om_observer_card")?.sessionModeThreadId,
+          sharedCompletion.sessionModeThreadId,
+        );
+      } finally {
+        stop();
+        await native.close();
+      }
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

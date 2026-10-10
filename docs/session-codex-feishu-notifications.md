@@ -12,6 +12,8 @@
 
 发送成功的每个分片 message_id 都保存 `sessionModeThreadId` 和 chat_id，在本地已有的 `.dev-runtime/feishu-reply-bindings.json` 中绑定原生 thread。该目标与终端 `codexThreadId` 分开，原生回复不查询终端注册表，也不跟随当前选中会话。旧版本已发送的卡片没有保存此绑定，不能自动补建；请回复升级后新收到的卡片。
 
+同一原生 Codex thread 也可能被终端历史观察器识别为完成。发送器会按真实 threadId 与 turnId 先查本地绑定，再查当前进程内的进行中/已发送回执；会话模式和终端历史观察到同一轮时只调用一次飞书发送脚本。若两个观察器都记录同一张卡片，绑定优先保留 `sessionModeThreadId`，确保飞书回复继续回到原生会话。
+
 复用现有 `im.message.receive_v1` 长连接、回复开关与身份校验；只接受配置用户在对应私聊中对已绑定卡片或其已投递回复的回复。普通新消息、群聊、其他用户、跨会话父消息与子 Agent 目标不会执行。文字最多 8000 个字符；单张图片复用下载服务，校验真实 PNG/JPEG/WebP 和 10 MB 上限，保存在会话附件目录，飞书上传/下载权限沿用终端配置。多图富文本中的图片组合不在本次支持范围。
 
 `SessionCodexFeishuReplyService` 先只读核对原会话 metadata，再以 `feishu:<message_id>` 作为稳定请求 ID，通过 `registerSessionFollowupRoutes` 的同一个校验、flock 归属和持久化入口提交 `mode: queue`。模型、工作目录和审批参数继承原会话，不调用 resume、steer 或 interrupt。只有本地队列保存成功才记录消息已处理与回复链继承；同一消息重放不重复提交任务。飞书“已接收”仅表示入队，任务实际送达结果和暂停原因仍可在会话模式队列中查看。
@@ -23,6 +25,16 @@
 `registerSessionModeRoutes` 复用现有飞书 settings/sender，`registerSessionFollowupRoutes` 在同一后台 SSE 中接收 `codex:notification / turn/completed`。观察器先将完成身份、对应事件及重放游标原子写入独立 outbox，随后后台读取目标轮次并发送，慢读取或飞书发送不阻塞聊天事件及下一轮派发。
 
 `SessionCodexFeishuNotifier` 使用真实 threadId/turnId 去重；发送器以稳定 `session-codex:<threadId>` 和原 turnId 构建分片幂等键。状态保存在 `SESSION_DATA_HOME/codex-completion-notifications.json`，复用 durable-json 原子替换和 0600 权限。重启恢复 pending；读取或发送失败保留 pending 并定时重试，一个任务失败不会永久挡住其他结果。关闭通知期间到达的完成记为跳过，重新开启不补发这些任务。通知状态损坏时停止此通知器并记录错误，不覆盖原文件；无法写入 outbox 时记录错误并保留原持久游标，聊天仍继续，修复存储后需重新加载网关恢复通知器，重放仍受运行层缓存范围限制。
+
+### 跨会话模式／终端模式去重（2026-10-10）
+
+同一个原生 Codex thread 的 rollout 也可能被终端注册表观察到。现场通知绑定记录确认，同一 thread/turn 曾分别由原生通知器和终端通知器发送，两个 Kanban session ID 不同，导致原有各自去重失效；这与长回复正常分片不同。
+
+两个通知器继续观察各自的完成来源，但共用 `ScriptFeishuCompletionSender` 按真实 Codex threadId + completionId 合并发送。同轮并发共享进行中的发送；成功只缓存回执与文件引用，最多 1000 项、30 天，不保留回复正文，失败不进入成功缓存。发送前查询既有持久回复绑定，服务重启后仍能复用已发送卡片，沿用绑定的 30 天／10000 项上限。查找只取同一发送组的分片，排除已处理的用户回复；原生回复绑定优先，后到的终端观察不得覆盖它，终端先发送时原生观察可将卡片升级为原生绑定。
+
+固定 Node 子进程通过临时 `KANBAN_COMPLETION_IDEMPOTENCY_THREAD` 上下文统一分片幂等身份为 `kanban-session-codex:<threadId>`，保持旧原生 pending 的幂等键不变；该上下文不是用户配置，不进入终端脚本参数、飞书卡片或回调，并在启动 `lark-cli` 前移除。仍保留各分片的独立序号，不合并不同轮次或不同 thread 的完成结果。没有可靠 Codex thread/turn 身份的其他通知继续原流程。
+
+去重不删除已发出的历史重复卡片，也不扩展飞书服务自身的幂等有效期；本地记录过期、被清理或落盘失败且进程退出时，仍受现有 pending／服务幂等恢复边界限制。完成卡片回复目标的正确绑定依赖本地记录可写。
 
 读取使用原生 `/api/codex/thread/metadata` 与 `/api/codex/thread/turns/list`（倒序每页 20 项、full），精确定位原轮次，核对线程和完成状态并过滤 parentThreadId/source.subAgent；不 resume、不占写锁，也不读取另一个轮次替代结果。读取失败或原生历史尚未写入时保留待核对记录。
 
@@ -43,3 +55,9 @@
 ### 2026-10-10 回复续跑扩展验收
 
 此次回复链路使用隔离运行层和模拟飞书收发验证，不向用户 Agent 投递测试任务。`pnpm check` 与 `pnpm test` 通过，桌面 1440px 与手机 375px 的设置浏览器测试通过（`https://10.30.0.22:8484`，仅拦截测试设置 API，不修改真实开关）。本机 Node 热更新后确认回复已配置且开启、`im.message.receive_v1` 监听运行，会话运行层仍为原 PID。补充队列初始化期间关闭的锁释放回归；无需为本次 Node 改动重启 Rust 或中断现有任务。
+
+### 2026-10-10 重复完成通知修复验收
+
+先红后绿复现跨来源重复：同轮并发产生两次脚本发送、发送器重建后再次发送、后到的终端覆盖原生回复目标；修复后两种真实通知器的触发顺序均只执行一次发送。回归同时覆盖不同 thread／turn 仍发送、失败后可重试、全部分片回执重载、用户回复不当作完成卡片、绑定过期，以及临时身份不进入飞书卡片或 `lark-cli` 环境。
+
+当前工作区 `pnpm check` 通过；完整后端测试 724 通过／1 跳过，脚本测试 97 通过（通知脚本专项 38 项），相关文件 Prettier 检查、脚本语法检查和 `git diff --check` 通过。构建仅有既有大 chunk 提示。全部飞书调用使用模拟执行器，未发送真实测试通知；Node 开发服务复用热更新，`pnpm session:status` 确认原运行层服务就绪，无须重启 Rust 或中断现有 Agent。

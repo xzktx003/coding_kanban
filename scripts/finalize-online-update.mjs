@@ -66,41 +66,23 @@ export async function finalizeOnlineUpdate({
     await sleep(pollIntervalMs);
   }
 
-  let installFailure;
   try {
     await run("pnpm", ["install", "--frozen-lockfile"], {
       cwd: sourceRoot,
       env,
     });
   } catch (error) {
-    installFailure = error;
     logger.error(
-      "[online-update] frozen dependency installation failed",
+      "[online-update] frozen dependency installation failed; restart skipped",
       error,
     );
+    throw new Error("dependency installation failed", { cause: error });
   }
 
-  let restartFailure;
-  try {
-    await run("pnpm", ["dev:restart"], {
-      cwd: repositoryRoot,
-      env: { ...env, APP_SOURCE_ROOT: sourceRoot },
-    });
-  } catch (error) {
-    restartFailure = error;
-    logger.error("[online-update] safe application restart failed", error);
-  }
-
-  if (installFailure || restartFailure) {
-    throw new Error(
-      [
-        installFailure && "dependency installation failed",
-        restartFailure && "application restart failed",
-      ]
-        .filter(Boolean)
-        .join("; "),
-    );
-  }
+  await run("pnpm", ["dev:restart"], {
+    cwd: repositoryRoot,
+    env: { ...env, APP_SOURCE_ROOT: sourceRoot },
+  });
 
   logger.log(
     `[online-update] dependencies installed and application restarted at ${targetHead}`,

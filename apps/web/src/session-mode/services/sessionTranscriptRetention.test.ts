@@ -1,4 +1,15 @@
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import {
+  retainCodexTranscript,
+  isCodexTranscriptDormant,
+  forgetCodexTranscript,
+  trackedCodexTranscripts,
+} from "./codexTranscriptActivity";
+import { useCodexDeliveryStore } from "../stores/useCodexDeliveryStore";
+import { useApprovalStore } from "../components/codex/stores/useApprovalStore";
+import { useRequestUserInputStore } from "../components/codex/stores/useRequestUserInputStore";
+import { useSessionDraftStore } from "../stores/useSessionDraftStore";
+import { useSessionAttentionStore } from "../stores/useSessionAttentionStore";
 
 const cancelCodexHistoryRead = vi.hoisted(() => vi.fn());
 
@@ -102,6 +113,8 @@ const transcriptEvents = (threadId: string, turns: number, body: string) =>
 
 beforeEach(() => {
   vi.clearAllMocks();
+  for (const id of trackedCodexTranscripts()) forgetCodexTranscript(id);
+  useCodexDeliveryStore.setState({ entries: {} });
   localStorage.clear();
   cachedTranscriptBaselines.clear();
   cachedTranscriptTimings.clear();
@@ -136,6 +149,163 @@ beforeEach(() => {
     threadStatusMap: {},
     turnTimingMap: {},
   });
+});
+
+afterEach(() => vi.useRealTimers());
+
+it("automatically releases an invisible followed running transcript after 60 seconds, preserving task state", async () => {
+  vi.useFakeTimers();
+  useAgentCenterStore.setState({
+    sharedTabsInitialized: true,
+    cards: [
+      { kind: "codex", id: "visible", cwd: "/repo" },
+      { kind: "codex", id: "cold", cwd: "/repo" },
+    ],
+  });
+  const timing = {
+    turnId: "running",
+    status: "inProgress" as const,
+    startedAtMs: 1,
+    durationMs: null,
+  };
+  const events = transcriptEvents("cold", 2, "retained body");
+  useCodexStore.setState({
+    threads: [thread("visible"), thread("cold")],
+    events: { cold: events, visible: events },
+    historyLoadedMap: { cold: true, visible: true },
+    turnTimingMap: { cold: timing },
+    threadStatusMap: { cold: { type: "active", activeFlags: [] } },
+  });
+  cachedTranscriptBaselines.set("cold", events);
+  const release = retainCodexTranscript("visible");
+  const approvals = [
+    { requestId: "approval", threadId: "cold", turnId: "running" },
+  ] as any;
+  const requests = [
+    {
+      requestId: "question",
+      threadId: "cold",
+      turnId: "running",
+      itemId: "q",
+      questions: [],
+    },
+  ];
+  useApprovalStore.setState({ pendingApprovals: approvals });
+  useRequestUserInputStore.setState({ pendingRequests: requests });
+  useSessionDraftStore.getState().setText("cold-draft", "unsent text");
+  useSessionAttentionStore.getState().complete("codex", "cold", "unread-turn");
+  const drafts = useSessionDraftStore.getState().drafts;
+  const attention = useSessionAttentionStore.getState().receipts;
+  const stop = startSessionTranscriptRetention();
+  try {
+    await flushRetention();
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(useCodexStore.getState().events.cold).toBe(events);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(useCodexStore.getState().events.cold).toBeUndefined();
+    expect(useCodexStore.getState().events.visible).toBe(events);
+    expect(cachedTranscriptBaselines.has("cold")).toBe(false);
+    expect(isCodexTranscriptDormant("cold")).toBe(true);
+    expect(useCodexStore.getState().historyLoadedMap.cold).toBe(true);
+    expect(useCodexStore.getState().turnTimingMap.cold).toBe(timing);
+    expect(useCodexStore.getState().threadStatusMap.cold.type).toBe("active");
+    expect(useApprovalStore.getState().pendingApprovals).toBe(approvals);
+    expect(useRequestUserInputStore.getState().pendingRequests).toBe(requests);
+    expect(useSessionDraftStore.getState().drafts).toBe(drafts);
+    expect(useSessionAttentionStore.getState().receipts).toBe(attention);
+    expect(
+      useCodexStore.getState().threads.find((t) => t.id === "cold")?.turns,
+    ).toEqual([]);
+  } finally {
+    stop();
+    release();
+  }
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("defers dormant eviction while history is loading or a delivery receipt is unresolved", async () => {
+  vi.useFakeTimers();
+  useAgentCenterStore.setState({
+    cards: [{ kind: "codex", id: "busy", cwd: "/repo" }],
+  });
+  const events = transcriptEvents("busy", 2, "body");
+  useCodexStore.setState({
+    events: { busy: events },
+    historyLoadedMap: { busy: true },
+  });
+  useSessionSyncStore.setState({ checking: { busy: true } });
+  const stop = startSessionTranscriptRetention();
+  try {
+    await flushRetention();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(useCodexStore.getState().events.busy).toBe(events);
+    useCodexDeliveryStore.setState({
+      entries: {
+        receipt: {
+          id: "receipt",
+          threadId: "busy",
+          text: "draft",
+          images: [],
+          status: "sent",
+        },
+      },
+    });
+    useSessionSyncStore.setState({ checking: {} });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(useCodexStore.getState().events.busy).toBe(events);
+    useCodexDeliveryStore.setState({ entries: {} });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(useCodexStore.getState().events.busy).toBeUndefined();
+  } finally {
+    stop();
+  }
+});
+
+it("retires a confirmed offscreen receipt before evicting its body instead of pinning it forever", async () => {
+  vi.useFakeTimers();
+  const id = "confirmed-offscreen";
+  useAgentCenterStore.setState({
+    cards: [{ kind: "codex", id, cwd: "/repo" }],
+  });
+  useCodexStore.setState({
+    events: {
+      [id]: [
+        {
+          method: "item/completed",
+          params: {
+            threadId: id,
+            turnId: "done",
+            item: {
+              type: "userMessage",
+              id: "native",
+              clientId: "delivered",
+              content: [],
+            },
+          },
+        } as any,
+      ],
+    },
+    historyLoadedMap: { [id]: true },
+  });
+  useCodexDeliveryStore.setState({
+    entries: {
+      [JSON.stringify([id, "delivered"])]: {
+        id: "delivered",
+        threadId: id,
+        text: "sent",
+        images: [],
+        status: "sent",
+      },
+    },
+  });
+  const stop = startSessionTranscriptRetention();
+  try {
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(useCodexDeliveryStore.getState().entries).toEqual({});
+    expect(useCodexStore.getState().events[id]).toBeUndefined();
+  } finally {
+    stop();
+  }
 });
 
 it("trims old completed turns from an observed transcript over budget while keeping it loaded", () => {

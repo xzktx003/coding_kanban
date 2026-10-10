@@ -1,11 +1,50 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import multipart from "@fastify/multipart";
-import { basename } from "node:path";
 import { guessMimeType } from "../services/file-system-utils.js";
 import {
   WorkspaceFiles,
   WorkspaceFileError,
+  type WorkspaceDownload,
 } from "../services/workspace-files.js";
+function buildContentDisposition(filename: string): string {
+  const encoded = encodeURIComponent(filename).replace(/'/g, "%27");
+  const fallback = filename
+    .replace(/[^\x20-\x7e]/g, "_")
+    .replace(/["\\]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return `attachment; filename="${fallback || "download"}"; filename*=UTF-8''${encoded}`;
+}
+function closeDownloadWhenResponseCloses(
+  reply: FastifyReply,
+  result: WorkspaceDownload,
+) {
+  const onClose = () => result.close();
+  const onFinish = () => reply.raw.off("close", onClose);
+  reply.raw.once("close", onClose);
+  reply.raw.once("finish", onFinish);
+}
+async function prepareDownload(
+  reply: FastifyReply,
+  load: (signal: AbortSignal) => Promise<WorkspaceDownload>,
+) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  reply.raw.once("close", abort);
+  try {
+    const result = await load(controller.signal);
+    reply.raw.off("close", abort);
+    if (controller.signal.aborted || reply.raw.destroyed) {
+      result.close();
+      return null;
+    }
+    return result;
+  } catch (error) {
+    reply.raw.off("close", abort);
+    if (controller.signal.aborted || reply.raw.destroyed) return null;
+    throw error;
+  }
+}
 export function registerWorkspaceFileRoutes(
   app: FastifyInstance,
   options: { trashHome?: string; roots: () => Promise<string[]> },
@@ -56,6 +95,25 @@ export function registerWorkspaceFileRoutes(
         return reply.send(result.stream);
       },
     );
+    scope.get<{ Querystring: { root: string; path: string } }>(
+      prefix + "download",
+      async (req, reply) => {
+        const result = await prepareDownload(reply, (signal) =>
+          files!.downloadArchive(req.query.root, req.query.path, { signal }),
+        );
+        if (!result) return reply;
+        closeDownloadWhenResponseCloses(reply, result);
+        reply
+          .header("content-type", result.contentType)
+          .header("x-content-type-options", "nosniff")
+          .header(
+            "content-disposition",
+            buildContentDisposition(result.filename),
+          )
+          .header("cache-control", "no-store");
+        return reply.send(result.stream);
+      },
+    );
     interface Input {
       root: string;
       path: string;
@@ -76,6 +134,7 @@ export function registerWorkspaceFileRoutes(
       "trash-list",
       "restore",
       "purge",
+      "download-info",
       "download",
     ] as const) {
       scope.post<{ Body: Input }>(
@@ -110,14 +169,20 @@ export function registerWorkspaceFileRoutes(
               return files!.restore(b.root, b.id);
             case "purge":
               return files!.purge(b.root, b.id);
+            case "download-info":
+              return files!.downloadInfo(b.root, b.path);
             case "download": {
-              const result = await files!.download(b.root, b.path);
+              const result = await prepareDownload(reply, (signal) =>
+                files!.downloadArchive(b.root, b.path, { signal }),
+              );
+              if (!result) return reply;
+              closeDownloadWhenResponseCloses(reply, result);
               reply
-                .header("content-type", "application/octet-stream")
+                .header("content-type", result.contentType)
                 .header("x-content-type-options", "nosniff")
                 .header(
                   "content-disposition",
-                  `attachment; filename="download"; filename*=UTF-8''${encodeURIComponent(basename(result.path)).replace(/'/g, "%27")}`,
+                  buildContentDisposition(result.filename),
                 );
               return reply.send(result.stream);
             }

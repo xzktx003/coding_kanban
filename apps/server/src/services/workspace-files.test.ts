@@ -7,11 +7,15 @@ import {
   rm,
   symlink,
   chmod,
+  rename,
 } from "node:fs/promises";
+import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import test from "node:test";
 import { WorkspaceFiles } from "./workspace-files.js";
+const execFileAsync = promisify(execFile);
 async function fixture() {
   const base = await mkdtemp(join(tmpdir(), "kanban-workspace-files-"));
   const root = join(base, "project");
@@ -117,6 +121,90 @@ test("binary text and oversized files cannot be edited; uploads never overwrite 
       files.save(root, "large.txt", "x".repeat(4 * 1024 * 1024 + 1), null),
       /过大/,
     );
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+test("download info names files and folders without following symlinks", async () => {
+  const { base, root, files } = await fixture();
+  try {
+    await mkdir(join(root, "folder"));
+    await writeFile(join(root, "folder", "a.txt"), "hello");
+    await writeFile(join(base, "outside.txt"), "outside");
+    await symlink(join(base, "outside.txt"), join(root, "folder", "link.txt"));
+    assert.deepEqual(await files.downloadInfo(root, "folder/a.txt"), {
+      path: join(root, "folder", "a.txt"),
+      filename: "a.txt",
+    });
+    assert.deepEqual(await files.downloadInfo(root, "folder"), {
+      path: join(root, "folder"),
+      filename: "folder.zip",
+    });
+    const archive = await files.downloadArchive(root, "folder");
+    const chunks: Buffer[] = [];
+    for await (const chunk of archive.stream) chunks.push(Buffer.from(chunk));
+    const bytes = Buffer.concat(chunks);
+    assert.equal(archive.filename, "folder.zip");
+    assert.equal(archive.contentType, "application/zip");
+    assert.match(bytes.toString("latin1"), /a\.txt/);
+    assert.doesNotMatch(bytes.toString("latin1"), /link\.txt/);
+    assert.doesNotMatch(bytes.toString("utf8"), /outside/);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+test("folder downloads preserve empty directories and reject unsafe trees", async () => {
+  const { base, root, files } = await fixture();
+  try {
+    await mkdir(join(root, "folder", "empty"), { recursive: true });
+    const archive = await files.downloadArchive(root, "folder");
+    const chunks: Buffer[] = [];
+    for await (const chunk of archive.stream) chunks.push(Buffer.from(chunk));
+    assert.match(Buffer.concat(chunks).toString("latin1"), /empty\//);
+
+    let deep = join(root, "deep");
+    await mkdir(deep);
+    for (let i = 0; i < 65; i += 1) {
+      deep = join(deep, String(i));
+      await mkdir(deep);
+    }
+    await assert.rejects(files.downloadArchive(root, "deep"), /层级过深/);
+
+    await mkdir(join(root, "special"));
+    await execFileAsync("mkfifo", [join(root, "special", "pipe")]);
+    await assert.rejects(files.downloadArchive(root, "special"), /特殊文件/);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+test("folder download revalidates lazy file streams before reading", async () => {
+  const base = await mkdtemp(join(tmpdir(), "kanban-workspace-files-"));
+  const root = join(base, "project");
+  await mkdir(root);
+  let rootChecks = 0;
+  let swapped = false;
+  const files = new WorkspaceFiles(join(base, "trash"), async () => {
+    rootChecks += 1;
+    if (rootChecks >= 6 && !swapped) {
+      swapped = true;
+      await rename(
+        join(root, "folder", "sub"),
+        join(root, "folder", "old-sub"),
+      );
+      await symlink(base, join(root, "folder", "sub"));
+    }
+    return [root];
+  });
+  try {
+    await mkdir(join(root, "folder", "sub"), { recursive: true });
+    await writeFile(join(root, "folder", "sub", "a.txt"), "inside");
+    await writeFile(join(base, "secret.txt"), "secret");
+    const archive = await files.downloadArchive(root, "folder");
+    const chunks: Buffer[] = [];
+    await assert.rejects(async () => {
+      for await (const chunk of archive.stream) chunks.push(Buffer.from(chunk));
+    });
+    assert.doesNotMatch(Buffer.concat(chunks).toString("utf8"), /secret/);
   } finally {
     await rm(base, { recursive: true, force: true });
   }

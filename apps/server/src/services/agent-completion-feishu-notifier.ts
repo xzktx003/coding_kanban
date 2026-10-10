@@ -662,6 +662,7 @@ export class AgentCompletionFeishuNotifier {
 }
 
 interface ScriptCommandOptions {
+  env?: NodeJS.ProcessEnv;
   timeout: number;
   encoding: "utf8";
   maxBuffer: number;
@@ -690,7 +691,21 @@ function runScriptCommand(
   });
 }
 
+interface CodexCompletionDeliveryHistory {
+  findCodexCompletionDelivery(
+    threadId: string,
+    completionId: string,
+  ): FeishuCompletionDelivery | undefined;
+}
+
 export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike {
+  readonly #deliveryHistory?: CodexCompletionDeliveryHistory;
+  readonly #inFlight = new Map<string, Promise<FeishuCompletionDelivery>>();
+  // Keep only receipts, never the completed task's potentially large body.
+  readonly #delivered = new Map<
+    string,
+    { delivery: FeishuCompletionDelivery; expiresAt: number }
+  >();
   readonly #nodeBinary: string;
   readonly #scriptPath: string;
   readonly #fallbackWorkingDirectory: string;
@@ -708,8 +723,10 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
     runCommand?: ScriptCommandRunner;
     quickRepliesAvailable?: () => boolean;
     fileReferences?: Pick<FeishuCompletionFileReferenceService, "prepare">;
+    deliveryHistory?: CodexCompletionDeliveryHistory;
   }) {
     this.#nodeBinary = options.nodeBinary ?? process.execPath;
+    this.#deliveryHistory = options.deliveryHistory;
     this.#scriptPath = options.scriptPath;
     this.#fallbackWorkingDirectory = options.fallbackWorkingDirectory;
     this.#runCommand = options.runCommand ?? runScriptCommand;
@@ -720,6 +737,61 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
   }
 
   async send(event: FeishuCompletionEvent): Promise<FeishuCompletionDelivery> {
+    const threadId = this.#codexThreadId(event);
+    if (!threadId || !event.completionId) {
+      return this.#sendNotification(event);
+    }
+    const key = JSON.stringify([threadId, event.completionId]);
+    const persisted = this.#deliveryHistory?.findCodexCompletionDelivery(
+      threadId,
+      event.completionId,
+    );
+    if (persisted) {
+      return persisted;
+    }
+    const cached = this.#delivered.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.delivery;
+    }
+    this.#delivered.delete(key);
+    const inFlight = this.#inFlight.get(key);
+    if (inFlight) {
+      return inFlight;
+    }
+    const pending = this.#sendNotification(event).then((delivery) => {
+      this.#delivered.set(key, {
+        delivery,
+        expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1_000,
+      });
+      if (this.#delivered.size > 1_000) {
+        this.#delivered.delete(this.#delivered.keys().next().value!);
+      }
+      return delivery;
+    });
+    this.#inFlight.set(key, pending);
+    try {
+      return await pending;
+    } finally {
+      this.#inFlight.delete(key);
+    }
+  }
+
+  #codexThreadId(event: FeishuCompletionEvent): string | undefined {
+    if (event.transcriptAgentKind === "claude") {
+      return undefined;
+    }
+    return (
+      event.sessionModeThreadId ||
+      event.codexThreadId ||
+      (event.transcriptAgentKind === "codex"
+        ? event.transcriptSessionId
+        : undefined)
+    );
+  }
+
+  async #sendNotification(
+    event: FeishuCompletionEvent,
+  ): Promise<FeishuCompletionDelivery> {
     let summary = event.summary;
     let referencedFiles: FeishuCompletionFileReference[] = [];
     if (
@@ -767,6 +839,7 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
         : {}),
     };
 
+    const canonicalThreadId = this.#codexThreadId(event);
     try {
       const { stdout } = await this.#runCommand(
         this.#nodeBinary,
@@ -776,6 +849,15 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
           maxBuffer: 64 * 1024,
           timeout: 300_000,
           windowsHide: true,
+          // Local child context preserves the old native per-part keys without
+          // putting terminal thread identities into argv, cards or callbacks.
+          env: {
+            ...process.env,
+            KANBAN_COMPLETION_IDEMPOTENCY_THREAD:
+              canonicalThreadId && event.completionId
+                ? `kanban-session-codex:${canonicalThreadId}`
+                : undefined,
+          },
         },
       );
       const parsed = JSON.parse(stdout) as {

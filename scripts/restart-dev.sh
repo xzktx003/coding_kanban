@@ -140,10 +140,11 @@ kill_repo_dev_server_process_groups() {
     fi
 
     full_cmdline="$cmdline $rest"
-    if pid_belongs_to_repo "$pid" && [[ "$full_cmdline" == *"$ROOT_DIR"* &&
+    if pid_belongs_to_repo "$pid" && [[ ( "$full_cmdline" == *"$ROOT_DIR"* || "$full_cmdline" == *"../../scripts/watch-server.mjs"* ) &&
       ( ( "$full_cmdline" == *"tsx"* &&
           "$full_cmdline" == *"watch"* &&
           "$full_cmdline" == *"src/index.ts"* ) ||
+        ( "$full_cmdline" == *"watch-server.mjs"* ) ||
         ( "$full_cmdline" == *"vite"* && "$full_cmdline" == *"--host"* ) ) ]]; then
       process_groups["$pgid"]="$pid"
     fi

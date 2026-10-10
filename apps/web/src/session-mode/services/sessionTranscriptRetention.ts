@@ -8,6 +8,19 @@ import { cancelCodexHistoryRead } from "./codexService";
 import { isObservedCodexThread } from "./observedCodexThreads";
 import { pruneObservedCodexTranscriptBudget } from "./sessionTranscriptBudget";
 import {
+  useCodexDeliveryStore,
+  deliveredClientIds,
+  acknowledgeDeliveryEchoes,
+} from "../stores/useCodexDeliveryStore";
+import { memoryHistoryWindows } from "./sessionMemoryHistory";
+import {
+  trackCodexTranscript,
+  trackedCodexTranscripts,
+  expiredCodexTranscripts,
+  markCodexTranscriptDormant,
+  forgetCodexTranscript,
+} from "./codexTranscriptActivity";
+import {
   cachedTranscriptBaselines,
   cachedTranscriptTimings,
 } from "./sessionCacheState";
@@ -50,8 +63,10 @@ function knownTranscriptIds() {
   ]);
 }
 
-function pruneThreadTranscript(id: string) {
+function pruneThreadTranscript(id: string, dormant = false) {
   cancelCodexHistoryRead(id);
+  memoryHistoryWindows.delete(id);
+  if (!dormant) forgetCodexTranscript(id);
   cachedTranscriptBaselines.delete(id);
   cachedTranscriptTimings.delete(id);
 
@@ -61,10 +76,16 @@ function pruneThreadTranscript(id: string) {
       state.streamingAgentMessages ?? {},
       id,
     );
-    const historyLoadedMap = deleteKey(state.historyLoadedMap, id);
+    // Keep the hydration marker for background completion/unread reconciliation.
+    // The separate eviction marker requires a fresh recent page on activation.
+    const historyLoadedMap = dormant
+      ? state.historyLoadedMap
+      : deleteKey(state.historyLoadedMap, id);
     const historyLoadingMap = deleteKey(state.historyLoadingMap, id);
     const historyErrorMap = deleteKey(state.historyErrorMap, id);
-    const retryNoticeMap = deleteKey(state.retryNoticeMap, id);
+    const retryNoticeMap = dormant
+      ? state.retryNoticeMap
+      : deleteKey(state.retryNoticeMap, id);
     let threads = state.threads;
     const threadIndex = state.threads.findIndex(
       (thread) => thread.id === id && thread.turns.length > 0,
@@ -151,6 +172,38 @@ export function pruneUnobservedCodexTranscripts() {
   }
 }
 
+function releaseInvisibleTranscripts() {
+  if (!retentionReady()) return;
+  for (const id of knownTranscriptIds()) {
+    if (isObservedCodexThread(id)) trackCodexTranscript(id);
+  }
+  for (const id of trackedCodexTranscripts()) {
+    if (!isObservedCodexThread(id)) forgetCodexTranscript(id);
+  }
+  const state = useCodexStore.getState();
+  const sync = useSessionSyncStore.getState();
+  const receipts = Object.values(useCodexDeliveryStore.getState().entries);
+  for (const id of expiredCodexTranscripts()) {
+    const threadReceipts = receipts.filter((e) => e.threadId === id);
+    const confirmed = threadReceipts.length
+      ? deliveredClientIds(state.events[id] ?? [])
+      : new Set<string>();
+    // Avoid cancelling useful reconciliation or discarding a not-yet-acknowledged send.
+    if (
+      state.historyLoadingMap[id] ||
+      sync.checking[id] ||
+      sync.earlierLoading[id] ||
+      threadReceipts.some((e) => !confirmed.has(e.id))
+    )
+      continue;
+    // Warm views keep their existing acknowledgement ordering. Before evicting
+    // an offscreen body, reconcile receipts whose native client IDs are present.
+    if (confirmed.size) acknowledgeDeliveryEchoes(id, [...confirmed]);
+    markCodexTranscriptDormant(id);
+    pruneThreadTranscript(id, true);
+  }
+}
+
 export function startSessionTranscriptRetention() {
   let stopped = false;
   let queued = false;
@@ -178,9 +231,12 @@ export function startSessionTranscriptRetention() {
     useSubagentStore.subscribe(schedule),
     useSessionSyncStore.subscribe(schedule),
   ];
+  releaseInvisibleTranscripts();
+  const expirationTimer = setInterval(releaseInvisibleTranscripts, 5000);
   schedule();
   return () => {
     stopped = true;
+    clearInterval(expirationTimer);
     for (const stop of stops) stop();
   };
 }

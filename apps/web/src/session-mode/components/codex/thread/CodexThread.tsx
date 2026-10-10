@@ -1,4 +1,10 @@
 import { pruneRowState } from "./pruneRowState";
+import { useTranscriptVisibility } from "../hooks/useTranscriptVisibility";
+import {
+  isCodexTranscriptDormant,
+  needsCodexTranscriptRestore,
+  onCodexTranscriptReleased,
+} from "@session/services/codexTranscriptActivity";
 import { TranscriptInspectionContext } from "./inspection";
 import { CodexAccessNotice } from "./CodexAccessNotice";
 import { CodexContentOwner } from "../presentation/ownerContext";
@@ -96,6 +102,12 @@ const positions = new Map<
     openedWork?: Set<string>;
   }
 >();
+// The cache owns only disposable view state. Unmount may follow the release
+// notification, so its cleanup must also avoid writing a dormant entry back.
+const stopPositionCleanup = onCodexTranscriptReleased((id) =>
+  positions.delete(id),
+);
+if (import.meta.hot) import.meta.hot.dispose(stopPositionCleanup);
 const ThreadMessage = memo(
   function ThreadMessage({
     row,
@@ -141,7 +153,8 @@ const ThreadMessage = memo(
     if (
       before.onToggleWork !== after.onToggleWork ||
       before.retryNotice !== after.retryNotice
-    ) return false;
+    )
+      return false;
     if (before.row.work || after.row.work)
       return before.row.work === after.row.work;
     if (before.nativeEditUser !== after.nativeEditUser) return false;
@@ -328,22 +341,43 @@ const CodexTranscript = memo(function CodexTranscript({
   );
   const openedWorkRef = useRef(openedWork);
   openedWorkRef.current = openedWork;
-  const readingAnchor = reading.current?.atBottom === false
-    ? reading.current.anchor
-    : undefined;
+  const readingAnchor =
+    reading.current?.atBottom === false ? reading.current.anchor : undefined;
   const rows = useMemo(() => {
-    const display = projectTurnWork(activityRows, events, turnTiming, openedWork, activeThreadId);
-    const hiddenAnchor = readingAnchor && display.find(
-      row => row.work?.processKeys.has(readingAnchor) && !row.work.expanded,
+    const display = projectTurnWork(
+      activityRows,
+      events,
+      turnTiming,
+      openedWork,
+      activeThreadId,
     );
+    const hiddenAnchor =
+      readingAnchor &&
+      display.find(
+        (row) => row.work?.processKeys.has(readingAnchor) && !row.work.expanded,
+      );
     if (hiddenAnchor)
       return projectTurnWork(
-        activityRows, events, turnTiming,
-        new Set([...openedWork, hiddenAnchor.key]), activeThreadId,
+        activityRows,
+        events,
+        turnTiming,
+        new Set([...openedWork, hiddenAnchor.key]),
+        activeThreadId,
       );
     return display;
-  }, [activityRows, events, turnTiming, openedWork, activeThreadId, readingAnchor]);
-  latestWorkflow.current = { threadId: activeThreadId, messages: workflow.messages, rows };
+  }, [
+    activityRows,
+    events,
+    turnTiming,
+    openedWork,
+    activeThreadId,
+    readingAnchor,
+  ]);
+  latestWorkflow.current = {
+    threadId: activeThreadId,
+    messages: workflow.messages,
+    rows,
+  };
   const userScrolling = useRef(false);
   const disclosure = useRef(
     saved.current?.disclosure ?? new Map<string, Map<string, unknown>>(),
@@ -478,25 +512,40 @@ const CodexTranscript = memo(function CodexTranscript({
   }, [activeThreadId, jumpToBottom]);
 
   const totalSize = virtualizer.getTotalSize();
-  const toggleWork = useCallback((key: string) => {
-    const element = viewport();
-    const node = element && [...element.querySelectorAll<HTMLElement>("[data-codex-row]")].find(row => row.dataset.codexRow === key);
-    pinned.current = false;
-    userScrolling.current = false;
-    restoringAnchor.current = true;
-    setAtBottom(false);
-    if (element && node) reading.current = {
-      atBottom: false, anchor: key, format: "row", scrollTop: element.scrollTop,
-      offset: element.getBoundingClientRect().top - node.getBoundingClientRect().top,
-    };
-    setOpenedWork(current => {
-      const next = new Set(current);
-      const expanded = latestWorkflow.current.rows.find(row => row.key === key)?.work?.expanded;
-      if (expanded) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, [viewport]);
+  const toggleWork = useCallback(
+    (key: string) => {
+      const element = viewport();
+      const node =
+        element &&
+        [...element.querySelectorAll<HTMLElement>("[data-codex-row]")].find(
+          (row) => row.dataset.codexRow === key,
+        );
+      pinned.current = false;
+      userScrolling.current = false;
+      restoringAnchor.current = true;
+      setAtBottom(false);
+      if (element && node)
+        reading.current = {
+          atBottom: false,
+          anchor: key,
+          format: "row",
+          scrollTop: element.scrollTop,
+          offset:
+            element.getBoundingClientRect().top -
+            node.getBoundingClientRect().top,
+        };
+      setOpenedWork((current) => {
+        const next = new Set(current);
+        const expanded = latestWorkflow.current.rows.find(
+          (row) => row.key === key,
+        )?.work?.expanded;
+        if (expanded) next.delete(key);
+        else next.add(key);
+        return next;
+      });
+    },
+    [viewport],
+  );
   const navigateToMessage = useCallback(
     (anchor: WorkflowAnchor) => {
       const current = latestWorkflow.current;
@@ -511,13 +560,18 @@ const CodexTranscript = memo(function CodexTranscript({
         )
       )
         return;
-      const foldedWork = index < 0 && current.rows.find(row => row.work?.processKeys.has(anchor.rowId));
+      const foldedWork =
+        index < 0 &&
+        current.rows.find((row) => row.work?.processKeys.has(anchor.rowId));
       if (index < 0 && !foldedWork) return;
       pinned.current = false;
       userScrolling.current = false;
       restoringAnchor.current = true;
       setAtBottom(false);
-      const offset = index < 0 ? (viewport()?.scrollTop ?? 0) : virtualizer.measurementsCache[index]?.start ?? index * 160;
+      const offset =
+        index < 0
+          ? (viewport()?.scrollTop ?? 0)
+          : (virtualizer.measurementsCache[index]?.start ?? index * 160);
       reading.current = {
         atBottom: false,
         anchor: anchor.rowId,
@@ -527,7 +581,7 @@ const CodexTranscript = memo(function CodexTranscript({
       };
       saveReadingPosition(`codex:${activeThreadId}`, reading.current);
       if (foldedWork) {
-        setOpenedWork(current => new Set([...current, foldedWork.key]));
+        setOpenedWork((current) => new Set([...current, foldedWork.key]));
         setNavigation({ ...anchor });
         return;
       }
@@ -900,6 +954,7 @@ const CodexTranscript = memo(function CodexTranscript({
       remember();
       cancelAnimationFrame(rememberFrame);
       positions.delete(activeThreadId);
+      if (isCodexTranscriptDormant(activeThreadId)) return;
       positions.set(activeThreadId, {
         measurements:
           virtualizer.measurementsCache.length <= 3000
@@ -957,13 +1012,7 @@ const CodexTranscript = memo(function CodexTranscript({
       observer.disconnect();
       cancelAnimationFrame(frame);
     };
-  }, [
-    jumpToBottom,
-    viewport,
-    rows.length,
-    lastRowKey,
-    lastMountedKey,
-  ]);
+  }, [jumpToBottom, viewport, rows.length, lastRowKey, lastMountedKey]);
 
   return (
     <div
@@ -1038,7 +1087,11 @@ const CodexTranscript = memo(function CodexTranscript({
                       <ThreadMessage
                         row={rows[item.index]}
                         onToggleWork={toggleWork}
-                        retryNotice={rows[item.index].work?.turnId === turnTiming?.turnId ? retryNotice : undefined}
+                        retryNotice={
+                          rows[item.index].work?.turnId === turnTiming?.turnId
+                            ? retryNotice
+                            : undefined
+                        }
                         nativeEditUser={
                           rows[item.index].key === workflow.lastUserRowId
                         }
@@ -1078,28 +1131,34 @@ const CodexTranscript = memo(function CodexTranscript({
                   {t("historyLoading")}
                 </div>
               )}
-              {historyError && !loading && !loaded && events.length === 0 && (
-                <div
-                  role="alert"
-                  className="rounded-md border p-3 text-sm space-y-2"
-                >
-                  <p>
-                    {t("historyFailed")}: {historyError}
-                  </p>
-                  <button
-                    className="text-primary underline underline-offset-4"
-                    onClick={() => {
-                      void codexService
-                        .loadThreadHistory(activeThreadId)
-                        .catch(() => {});
-                    }}
+              {historyError &&
+                !loading &&
+                (!loaded || needsCodexTranscriptRestore(activeThreadId)) &&
+                events.length === 0 && (
+                  <div
+                    role="alert"
+                    className="rounded-md border p-3 text-sm space-y-2"
                   >
-                    {t("historyRetry")}
-                  </button>
-                </div>
-              )}
+                    <p>
+                      {t("historyFailed")}: {historyError}
+                    </p>
+                    <button
+                      className="text-primary underline underline-offset-4"
+                      onClick={() => {
+                        void codexService
+                          .loadThreadHistory(activeThreadId, undefined, {
+                            background: true,
+                            recent: true,
+                          })
+                          .catch(() => {});
+                      }}
+                    >
+                      {t("historyRetry")}
+                    </button>
+                  </div>
+                )}
               <ApprovalItem currentThreadId={activeThreadId} />
-              {!rows.some(row => row.work?.turnId === turnTiming?.turnId) && (
+              {!rows.some((row) => row.work?.turnId === turnTiming?.turnId) && (
                 <WorkingIndicator
                   turnTiming={turnTiming}
                   retryNotice={retryNotice}
@@ -1131,16 +1190,29 @@ export const CodexThread = memo(function CodexThread({
   inspection = false,
 }: CodexThreadProps = {}) {
   const activeThreadId = useCodexStore((s) => threadId ?? s.currentThreadId);
+  const { ref, renderTranscript } = useTranscriptVisibility(
+    activeThreadId ?? "",
+  );
   return (
     <TranscriptInspectionContext.Provider value={inspection}>
-      <CodexContentOwner.Provider value={activeThreadId ?? null}>
-        <CodexTranscript
-          key={activeThreadId ?? ""}
-          activeThreadId={activeThreadId ?? ""}
-          fillHeight={fillHeight}
-          inspection={inspection}
-        />
-      </CodexContentOwner.Provider>
+      <div
+        ref={ref}
+        data-codex-transcript-shell={activeThreadId ?? ""}
+        className={`flex flex-col flex-1 min-h-0 ${fillHeight ? "h-full" : ""}`}
+      >
+        <CodexContentOwner.Provider value={activeThreadId ?? null}>
+          {renderTranscript ? (
+            <CodexTranscript
+              key={activeThreadId ?? ""}
+              activeThreadId={activeThreadId ?? ""}
+              fillHeight={fillHeight}
+              inspection={inspection}
+            />
+          ) : (
+            <div className="flex-1 min-h-0" data-transcript-sleeping />
+          )}
+        </CodexContentOwner.Provider>
+      </div>
     </TranscriptInspectionContext.Provider>
   );
 });

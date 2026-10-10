@@ -102,6 +102,7 @@ async function main(): Promise<void> {
     feishuCompletionSender: new ScriptFeishuCompletionSender({
       scriptPath: resolve(repositoryRoot, "scripts/codex-feishu-notify.mjs"),
       fallbackWorkingDirectory: repositoryRoot,
+      deliveryHistory: feishuReplyBindingStore,
       quickRepliesAvailable: () => {
         const settings = feishuNotificationSettingsService.get();
         return (
