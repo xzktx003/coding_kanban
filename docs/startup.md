@@ -18,13 +18,15 @@ pnpm dev:restart
 ## 日常启动与拉取更新后
 
 ```bash
-# 首次安装或依赖清单更新后执行
+# 首次安装或手动拉取源码后执行；在线确认更新会自动完成这两步
 pnpm install --frozen-lockfile
 pnpm dev:restart
 pnpm session:status
 ```
 
 `dev:restart` 会编译 shared，并对默认 Rust 运行层执行增量 Cargo build。随后保存可迁移的终端状态，重启本仓库 Node/Vite；前端固定绑定 `0.0.0.0`，使用指定端口，端口冲突不会静默换端口。HTTPS 默认开启。局域网会话界面依赖浏览器安全上下文（例如 `crypto.randomUUID`），应保留 HTTPS 并信任证书；`WEB_HTTPS=0` 仅适合终端模式或 localhost 调试，不作为局域网会话入口。
+
+看板的在线更新在用户确认 fast-forward 后会自动等待目标版本、运行 `pnpm install --frozen-lockfile`，再执行 `pnpm dev:restart`。用户无需另行安装依赖或再次确认重启；运行中的 Rust 会话服务和 Agent 会复用。更新日志保存在 `.dev-runtime/online-update.log`。若页面没有恢复，先查看该日志，再按下方步骤手动运行依赖安装和重启命令。
 
 运行中的 Rust 服务和 Agent 保持复用。重启后端并不重启 Rust；前后端准备完毕但会话健康检查失败时，脚本返回非零状态并输出运行层日志路径。
 
@@ -56,7 +58,7 @@ pnpm session:status
 
 ## 故障定位与验收
 
-1. 提示依赖缺失：运行 `pnpm install --frozen-lockfile`；Node 版本不满足时先切换版本。
+1. 在线更新后仍提示依赖缺失：查看 `.dev-runtime/online-update.log`；需要手动恢复时运行 `pnpm install --frozen-lockfile` 和 `pnpm dev:restart`。Node 版本不满足时先切换版本。
 2. Cargo 编译失败：按首个编译错误补齐工具或依赖，然后重新启动；已有服务仍保留。
 3. 端口被其他工作区占用：修改本仓库 `.env` 端口，或确认归属后自行处理；脚本不会清理外部进程。
 4. 前端可打开但会话不可用：运行 `pnpm session:status`，检查输出中的运行层日志及 `.dev-runtime/server.log`；不要把 `/api/health` 成功当作会话验收。若接口提示“会话服务尚未启动”，还须核对网关进程实际继承的 `SESSION_MODE_ENABLED`；启动环境中的 `0` 会禁用会话，即使 `.env` 没有这一项。需要会话模式时，在本机 `.env` 显式设置 `SESSION_MODE_ENABLED=1`，再执行 `pnpm dev:restart`。

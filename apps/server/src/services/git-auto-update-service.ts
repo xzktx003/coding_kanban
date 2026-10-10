@@ -43,6 +43,10 @@ export interface GitAutoUpdateServiceOptions {
   intervalMinutes: 10 | 15 | 30 | null;
   checkRunner?: (sourceRoot: string) => Promise<GitUpdateRunResult>;
   applyRunner?: (sourceRoot: string) => Promise<GitUpdateRunResult>;
+  scheduleUpdateFinalize?: (
+    sourceRoot: string,
+    targetHead: string,
+  ) => Promise<() => void>;
   now?: () => Date;
 }
 
@@ -208,7 +212,10 @@ async function runGitCheck(sourceRoot: string): Promise<GitUpdateRunResult> {
   };
 }
 
-async function runGitApply(sourceRoot: string): Promise<GitUpdateRunResult> {
+async function runGitApply(
+  sourceRoot: string,
+  scheduleUpdateFinalize?: GitAutoUpdateServiceOptions["scheduleUpdateFinalize"],
+): Promise<GitUpdateRunResult> {
   const repository = await inspectGitRepository(sourceRoot);
   if (repository.relation === "equal" || repository.relation === "ahead") {
     return {
@@ -232,11 +239,16 @@ async function runGitApply(sourceRoot: string): Promise<GitUpdateRunResult> {
     };
   }
 
+  const cancelFinalizer = await scheduleUpdateFinalize?.(
+    sourceRoot,
+    repository.remoteHead,
+  );
   try {
     await runGit(sourceRoot, ["merge", "--ff-only", repository.remoteHead], {
       timeoutMs: GIT_READ_TIMEOUT_MS,
     });
   } catch (error) {
+    cancelFinalizer?.();
     if (!(error instanceof GitCommandError)) {
       throw error;
     }
@@ -256,7 +268,7 @@ async function runGitApply(sourceRoot: string): Promise<GitUpdateRunResult> {
     branch: repository.branch,
     remoteHead: repository.remoteHead,
     conflictReason: null,
-    message: "远程新版本已安全拉取，正在等待前端执行热更新恢复。",
+    message: "远程新版本已安全拉取，正在安装依赖并重启应用。",
     updated: true,
   };
 }
@@ -275,7 +287,9 @@ export class GitAutoUpdateService {
 
   constructor(private readonly options: GitAutoUpdateServiceOptions) {
     this.checkRunner = options.checkRunner ?? runGitCheck;
-    this.applyRunner = options.applyRunner ?? runGitApply;
+    this.applyRunner =
+      options.applyRunner ??
+      ((sourceRoot) => runGitApply(sourceRoot, options.scheduleUpdateFinalize));
     this.now = options.now ?? (() => new Date());
     this.status = {
       enabled: options.intervalMinutes !== null,

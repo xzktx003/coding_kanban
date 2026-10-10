@@ -49,10 +49,21 @@ test("only reports an available update until the user confirms the pull", async 
     git(fixture.peer, ["commit", "-m", "remote update"]);
     git(fixture.peer, ["push"]);
     const remoteHead = git(fixture.peer, ["rev-parse", "HEAD"]);
+    const originalHead = git(fixture.local, ["rev-parse", "HEAD"]);
+    let scheduledHead: string | undefined;
+    let cancelledFinalizers = 0;
 
     const service = new GitAutoUpdateService({
       sourceRoot: fixture.local,
       intervalMinutes: 10,
+      scheduleUpdateFinalize: async (sourceRoot, targetHead) => {
+        assert.equal(sourceRoot, fixture.local);
+        assert.equal(git(fixture.local, ["rev-parse", "HEAD"]), originalHead);
+        scheduledHead = targetHead;
+        return () => {
+          cancelledFinalizers += 1;
+        };
+      },
     });
     const available = await service.checkNow();
 
@@ -68,6 +79,8 @@ test("only reports an available update until the user confirms the pull", async 
 
     assert.equal(updated.phase, "updated");
     assert.equal(updated.remoteHead, remoteHead);
+    assert.equal(scheduledHead, remoteHead);
+    assert.equal(cancelledFinalizers, 0);
     assert.equal(git(fixture.local, ["rev-parse", "HEAD"]), remoteHead);
     assert.equal(
       await readFile(join(fixture.local, "tracked.txt"), "utf8"),
@@ -126,10 +139,14 @@ test("reports local worktree conflicts only after the user confirms the pull", a
     git(fixture.peer, ["add", "tracked.txt"]);
     git(fixture.peer, ["commit", "-m", "remote update"]);
     git(fixture.peer, ["push"]);
+    let cancelledFinalizers = 0;
 
     const service = new GitAutoUpdateService({
       sourceRoot: fixture.local,
       intervalMinutes: 30,
+      scheduleUpdateFinalize: async () => () => {
+        cancelledFinalizers += 1;
+      },
     });
     const available = await service.checkNow();
 
@@ -144,6 +161,7 @@ test("reports local worktree conflicts only after the user confirms the pull", a
 
     assert.equal(conflict.phase, "conflict");
     assert.equal(conflict.conflictReason, "local-changes");
+    assert.equal(cancelledFinalizers, 1);
     assert.equal(git(fixture.local, ["rev-parse", "HEAD"]), originalHead);
     assert.equal(git(fixture.local, ["diff", "--name-only"]), "tracked.txt");
     assert.throws(() =>
