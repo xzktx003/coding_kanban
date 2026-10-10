@@ -4,16 +4,20 @@ export const useSessionSyncStore = create<{
   recovering: Record<string, "syncing" | "retrying">;
   checking: Record<string, boolean>;
   cursors: Record<string, string | null>;
+  trimmedHistoryAnchors: Record<string, string>;
   earlierLoading: Record<string, boolean>;
   earlierErrors: Record<string, string>;
-  connection: "connecting" | "connected" | "reconnecting";
+  connection: "connecting" | "connected" | "reconnecting" | "paused";
+  connectionError: string | null;
 }>(() => ({
   recovering: {},
   checking: {},
   cursors: {},
+  trimmedHistoryAnchors: {},
   earlierLoading: {},
   earlierErrors: {},
   connection: "connecting",
+  connectionError: null,
 }));
 export function setSessionChecking(id: string, value: boolean) {
   useSessionSyncStore.setState((s) => {

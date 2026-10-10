@@ -30,6 +30,7 @@ struct Entry {
     reason: String,
     generation: u64,
     uncertain: bool,
+    awaiting_first_turn: bool,
     releasing_since: Option<Instant>,
 }
 impl Default for Entry {
@@ -39,6 +40,7 @@ impl Default for Entry {
             reason: String::new(),
             generation: 0,
             uncertain: false,
+            awaiting_first_turn: false,
             releasing_since: None,
         }
     }
@@ -164,7 +166,11 @@ impl Ownership {
             if matches!(method, "thread/start" | "thread/fork")
                 && let Some(id) = result.pointer("/thread/id").and_then(Value::as_str)
             {
-                self.entry(id).lock().await.state = "owned";
+                let entry = self.entry(id);
+                let mut entry = entry.lock().await;
+                entry.state = "owned";
+                // An empty new thread has no rollout to resume after unloading.
+                entry.awaiting_first_turn = method == "thread/start";
             }
             return Ok(result);
         }
@@ -232,6 +238,9 @@ impl Ownership {
                     // unknown operation; the gateway still protects uncertain
                     // submissions until the user resolves their outbox record.
                     entry.uncertain = false;
+                    if method == "turn/start" {
+                        entry.awaiting_first_turn = false;
+                    }
                 }
                 if method == "review/start"
                     && let Some(review_id) = value["reviewThreadId"]
@@ -305,6 +314,10 @@ impl Ownership {
             return Ok(());
         }
         entry.state = "owned";
+        if entry.awaiting_first_turn {
+            entry.reason = "新会话尚未接受首条消息，保留执行实例".into();
+            return Ok(());
+        }
         if entry.uncertain {
             entry.reason = "操作送达结果待确认".into();
             return Ok(());
@@ -435,7 +448,16 @@ pub async fn read_history(rpc: &impl Rpc, id: &str) -> Result<Value, String> {
     let mut cursor = Value::Null;
     let mut seen = HashSet::new();
     loop {
-        let page = rpc.raw("thread/turns/list",json!({"threadId":id,"cursor":cursor,"limit":100,"sortDirection":"asc","itemsView":"full"})).await?;
+        let page = match rpc.raw("thread/turns/list",json!({"threadId":id,"cursor":cursor,"limit":100,"sortDirection":"asc","itemsView":"full"})).await {
+            Ok(page) => page,
+            Err(error) if turns.is_empty() && cursor.is_null()
+                && error.contains("not materialized yet")
+                && error.contains("before first user message") => {
+                    result["thread"]["turns"] = json!([]);
+                    return Ok(result);
+                }
+            Err(error) => return Err(error),
+        };
         turns.extend(
             page["data"]
                 .as_array()
@@ -483,6 +505,10 @@ mod tests {
         async fn raw(&self, method: &str, _params: Value) -> Result<Value, String> {
             self.calls.lock().unwrap().push(method.into());
             match method {
+                "thread/start" => {
+                    *self.loaded.lock().unwrap() = true;
+                    Ok(json!({"thread":{"id":"t"}}))
+                }
                 "thread/loaded/list" => Ok(
                     json!({"data": if *self.loaded.lock().unwrap() {vec!["t"]} else {vec![]}, "nextCursor":null}),
                 ),
@@ -545,6 +571,74 @@ mod tests {
         owner.queue_update(false, vec![]);
         owner
     }
+    #[tokio::test]
+    async fn new_thread_survives_sweep_until_first_turn_is_accepted() {
+        let rpc = Fake::idle();
+        let owner = ready();
+        owner.call(&rpc, "thread/start", json!({})).await.unwrap();
+        owner.sweep(&rpc, "t").await;
+        owner.release(&rpc, "t").await.unwrap();
+        assert_eq!(owner.access("t").await["state"], "owned");
+        assert!(!rpc.calls.lock().unwrap().iter().any(|m| m == "thread/unsubscribe"));
+        owner.call(&rpc, "turn/start", json!({"threadId":"t"})).await.unwrap();
+        assert!(!rpc.calls.lock().unwrap().iter().any(|m| m == "thread/resume"));
+        owner.sweep(&rpc, "t").await;
+        assert_eq!(owner.access("t").await["state"], "releasing");
+    }
+
+    struct RejectedFirstTurn {
+        rpc: Fake,
+        error: &'static str,
+    }
+    #[async_trait::async_trait]
+    impl Rpc for RejectedFirstTurn {
+        async fn raw(&self, method: &str, params: Value) -> Result<Value, String> {
+            if method == "turn/start" {
+                return Err(self.error.into());
+            }
+            self.rpc.raw(method, params).await
+        }
+    }
+    #[tokio::test]
+    async fn failed_or_uncertain_first_send_keeps_new_thread_loaded() {
+        for error in ["invalid input", "DELIVERY_UNKNOWN: response lost"] {
+            let rpc = RejectedFirstTurn { rpc: Fake::idle(), error };
+            let owner = ready();
+            owner.call(&rpc, "thread/start", json!({})).await.unwrap();
+            assert!(owner.call(&rpc, "turn/start", json!({"threadId":"t"})).await.is_err());
+            owner.sweep(&rpc, "t").await;
+            owner.release(&rpc, "t").await.unwrap();
+            assert_eq!(owner.access("t").await["state"], "owned");
+            assert!(!rpc.rpc.calls.lock().unwrap().iter().any(|m| m == "thread/unsubscribe"));
+        }
+    }
+
+    struct EmptyHistory {
+        error: String,
+    }
+    #[async_trait::async_trait]
+    impl Rpc for EmptyHistory {
+        async fn raw(&self, method: &str, _params: Value) -> Result<Value, String> {
+            match method {
+                "thread/read" => Ok(json!({"thread":{"id":"new","historyMode":"paginated"}})),
+                "thread/turns/list" => Err(self.error.clone()),
+                _ => panic!("unexpected mutation or history request: {method}"),
+            }
+        }
+    }
+    #[tokio::test]
+    async fn unmaterialized_thread_has_empty_read_only_history() {
+        let rpc = EmptyHistory { error: "thread new is not materialized yet; thread/turns/list is unavailable before first user message".into() };
+        let result = read_history(&rpc, "new").await.unwrap();
+        assert_eq!(result["thread"]["id"], "new");
+        assert_eq!(result["thread"]["turns"], json!([]));
+    }
+    #[tokio::test]
+    async fn empty_history_does_not_mask_unrelated_native_errors() {
+        let rpc = EmptyHistory { error: "thread not loaded: new".into() };
+        assert_eq!(read_history(&rpc, "new").await.unwrap_err(), rpc.error);
+    }
+
     #[tokio::test]
     async fn reading_does_not_acquire() {
         let rpc = Fake::idle();

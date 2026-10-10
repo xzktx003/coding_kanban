@@ -25,7 +25,7 @@ test("10000 native history messages and 30 tabs remain usable in a built workben
       },
     ],
   }));
-  await page.route("**/api/session/api/codex/thread/read", (route) => {
+  await page.route(/\/api\/session\/api\/codex\/thread\/read(?:\?.*)?$/, (route) => {
     const body = route.request().postDataJSON(),
       thread = f.threads.find((t) => t.id === body.threadId);
     return route.fulfill({
@@ -37,7 +37,7 @@ test("10000 native history messages and 30 tabs remain usable in a built workben
       },
     });
   });
-  await page.route("**/api/session/api/codex/thread/turns/list", (route) => {
+  await page.route(/\/api\/session\/api\/codex\/thread\/turns\/list(?:\?.*)?$/, (route) => {
     const body = route.request().postDataJSON();
     const data = body.threadId === "ux-0" ? turns : [];
     return route.fulfill({

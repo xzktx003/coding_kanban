@@ -2,6 +2,7 @@ import { useCodexDeliveryStore } from "../stores/useCodexDeliveryStore";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const mock = vi.hoisted(() => ({
   resume: vi.fn(),
+  event: undefined as ((event: any) => void) | undefined,
   open: undefined as (() => void) | undefined,
   resync: undefined as (() => void) | undefined,
 }));
@@ -9,7 +10,12 @@ vi.mock("./codexService", () => ({
   codexService: { loadThreadHistory: mock.resume },
 }));
 vi.mock("../lib/eventStream", () => ({
-  openEventStream: (s: { onOpen: () => void; onResync?: () => void }) => {
+  openEventStream: (s: {
+    onOpen: () => void;
+    onResync?: () => void;
+    onEvent: (event: any) => void;
+  }) => {
+    mock.event = s.onEvent;
     mock.open = s.onOpen;
     mock.resync = s.onResync;
     return () => {};
@@ -167,24 +173,159 @@ it("repairs an accepted receipt without a native echo even when SSE never report
   await vi.advanceTimersByTimeAsync(20000);
   expect(mock.resume).not.toHaveBeenCalled();
 });
-it("repairs a silent running turn, stops at terminal history, and responds to stream gaps", async () => {
+it("does not poll full history while a running turn is quiet, and still responds to stream gaps", async () => {
   stop = startFollowedSessionHistorySync();
   await vi.advanceTimersByTimeAsync(1);
   mock.resume.mockClear();
   useCodexStore.setState({
     threadStatusMap: { a: { type: "active", activeFlags: [] } },
   });
-  await vi.advanceTimersByTimeAsync(6000);
-  expect(mock.resume.mock.calls.map((c) => c[0])).toEqual(["a"]);
+  await vi.advanceTimersByTimeAsync(20000);
+  expect(mock.resume).not.toHaveBeenCalled();
   useCodexStore.setState({
     threadStatusMap: { a: { type: "idle" } },
     turnTimingMap: {},
   });
+  await vi.advanceTimersByTimeAsync(40000);
+  expect(mock.resume.mock.calls.map((c) => c[0])).toEqual(["a"]);
   mock.resume.mockClear();
-  await vi.advanceTimersByTimeAsync(15000);
+  await vi.advanceTimersByTimeAsync(40000);
   expect(mock.resume).not.toHaveBeenCalled();
   mock.resync?.();
   await vi.advanceTimersByTimeAsync(1);
+  expect(mock.resume).toHaveBeenCalledTimes(2);
+});
+
+it("repairs once when a followed turn completes without returning to quiet polling", async () => {
+  useAgentCenterStore.setState({ cards: [{ kind: "codex", id: "a" }] });
+  stop = startFollowedSessionHistorySync();
+  await vi.advanceTimersByTimeAsync(1);
+  mock.resume.mockClear();
+  useCodexStore.setState({
+    turnTimingMap: {
+      a: {
+        turnId: "turn-1",
+        status: "inProgress",
+        startedAtMs: Date.now(),
+        durationMs: null,
+      },
+    },
+  });
+  mock.event?.({
+    event: "codex:notification",
+    payload: {
+      method: "turn/completed",
+      params: {
+        threadId: "a",
+        turn: { id: "turn-1", status: "completed", items: [] },
+      },
+    },
+  });
+  await vi.advanceTimersByTimeAsync(1);
+  expect(mock.resume.mock.calls.map((c) => c[0])).toEqual(["a"]);
+  mock.resume.mockClear();
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(mock.resume).not.toHaveBeenCalled();
+});
+
+it("repairs once when status changes from active to idle even if turn timing stays stale", async () => {
+  useAgentCenterStore.setState({ cards: [{ kind: "codex", id: "a" }] });
+  useCodexStore.setState({
+    threadStatusMap: { a: { type: "active", activeFlags: [] } },
+    turnTimingMap: {
+      a: {
+        turnId: "turn-1",
+        status: "inProgress",
+        startedAtMs: Date.now(),
+        durationMs: null,
+      },
+    },
+  });
+  stop = startFollowedSessionHistorySync();
+  await vi.advanceTimersByTimeAsync(1);
+  mock.resume.mockClear();
+  useCodexStore.setState({
+    threadStatusMap: { a: { type: "idle" } },
+    turnTimingMap: {
+      a: {
+        turnId: "turn-1",
+        status: "inProgress",
+        startedAtMs: Date.now(),
+        durationMs: null,
+      },
+    },
+  });
+  await vi.advanceTimersByTimeAsync(1);
+  expect(mock.resume.mock.calls.map((c) => c[0])).toEqual(["a"]);
+  mock.resume.mockClear();
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(mock.resume).not.toHaveBeenCalled();
+});
+
+it("queues one completion repair after an in-flight read from events or status edges", async () => {
+  useAgentCenterStore.setState({ cards: [{ kind: "codex", id: "a" }] });
+  let release!: () => void;
+  mock.resume.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  stop = startFollowedSessionHistorySync();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(mock.resume).toHaveBeenCalledTimes(1);
+  mock.event?.({
+    event: "codex:notification",
+    payload: {
+      method: "turn/completed",
+      params: {
+        threadId: "a",
+        turn: { id: "turn-1", status: "completed", items: [] },
+      },
+    },
+  });
+  await vi.advanceTimersByTimeAsync(1);
+  expect(mock.resume).toHaveBeenCalledTimes(1);
+  release();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(mock.resume).toHaveBeenCalledTimes(2);
+
+  mock.resume.mockClear();
+  useCodexStore.setState({
+    threadStatusMap: { a: { type: "active", activeFlags: [] } },
+    turnTimingMap: {
+      a: {
+        turnId: "turn-1",
+        status: "inProgress",
+        startedAtMs: Date.now(),
+        durationMs: null,
+      },
+    },
+  });
+  mock.resume.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  mock.resync?.();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(mock.resume).toHaveBeenCalledTimes(1);
+  useCodexStore.setState({
+    threadStatusMap: { a: { type: "idle" } },
+    turnTimingMap: {
+      a: {
+        turnId: "turn-1",
+        status: "completed",
+        startedAtMs: Date.now(),
+        durationMs: 1000,
+      },
+    },
+  });
+  release();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(mock.resume).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(60000);
   expect(mock.resume).toHaveBeenCalledTimes(2);
 });
 
@@ -283,7 +424,7 @@ it("a manual retry during an in-flight failed read is not delayed by the old req
   await vi.advanceTimersByTimeAsync(1);
   expect(mock.resume).toHaveBeenCalledTimes(2);
 });
-it("checks idle cached tabs periodically and coalesces a foreground event burst", async () => {
+it("coalesces a foreground event burst without idle cached-tab polling", async () => {
   useCodexStore.setState({ historyLoadedMap: { a: true, b: true } });
   stop = startFollowedSessionHistorySync();
   await vi.advanceTimersByTimeAsync(1);
@@ -293,10 +434,8 @@ it("checks idle cached tabs periodically and coalesces a foreground event burst"
   document.dispatchEvent(new Event("visibilitychange"));
   await vi.advanceTimersByTimeAsync(1000);
   expect(mock.resume).not.toHaveBeenCalled();
-  await vi.advanceTimersByTimeAsync(30000);
-  expect(new Set(mock.resume.mock.calls.map((c) => c[0]))).toEqual(
-    new Set(["a", "b"]),
-  );
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(mock.resume).not.toHaveBeenCalled();
 });
 it("measures freshness after a successful slow read completes", async () => {
   useCodexStore.setState({
@@ -314,4 +453,21 @@ it("measures freshness after a successful slow read completes", async () => {
   release();
   await vi.advanceTimersByTimeAsync(1000);
   expect(mock.resume.mock.calls.filter((c) => c[0] === "a")).toHaveLength(1);
+});
+
+it("healthy streaming and later silence do not refetch running history", async () => {
+  useAgentCenterStore.setState({ cards: [{ kind: "codex", id: "a" }] });
+  stop = startFollowedSessionHistorySync();
+  await vi.advanceTimersByTimeAsync(1);
+  mock.resume.mockClear();
+  useCodexStore.setState({
+    threadStatusMap: { a: { type: "active", activeFlags: [] } },
+  });
+  for (let i = 0; i < 7; i++) {
+    mock.event?.({ payload: { params: { threadId: "a" } } });
+    await vi.advanceTimersByTimeAsync(1000);
+  }
+  expect(mock.resume).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(mock.resume).not.toHaveBeenCalled();
 });

@@ -59,7 +59,7 @@ pnpm session:status
 1. 提示依赖缺失：运行 `pnpm install --frozen-lockfile`；Node 版本不满足时先切换版本。
 2. Cargo 编译失败：按首个编译错误补齐工具或依赖，然后重新启动；已有服务仍保留。
 3. 端口被其他工作区占用：修改本仓库 `.env` 端口，或确认归属后自行处理；脚本不会清理外部进程。
-4. 前端可打开但会话不可用：运行 `pnpm session:status`，检查输出中的运行层日志及 `.dev-runtime/server.log`；不要把 `/api/health` 成功当作会话验收。
+4. 前端可打开但会话不可用：运行 `pnpm session:status`，检查输出中的运行层日志及 `.dev-runtime/server.log`；不要把 `/api/health` 成功当作会话验收。若接口提示“会话服务尚未启动”，还须核对网关进程实际继承的 `SESSION_MODE_ENABLED`；启动环境中的 `0` 会禁用会话，即使 `.env` 没有这一项。需要会话模式时，在本机 `.env` 显式设置 `SESSION_MODE_ENABLED=1`，再执行 `pnpm dev:restart`。
 5. 在同网段设备打开输出的 `Open` 地址，确认页面加载和会话连接；服务器本机的 HTTP 检查不能代替其他设备连通性检查。
 
 ### 终端一直显示“服务已更新，等待恢复 tmux 会话”

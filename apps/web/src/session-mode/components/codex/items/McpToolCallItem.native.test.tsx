@@ -72,3 +72,25 @@ it("renders mixed native content as media and resources with a separate raw view
     screen.getByRole("button", { name: "显示原始工具调用输出" }),
   ).toBeTruthy();
 });
+
+it("labels projected MCP details as unloaded without inventing an empty result or raw response", () => {
+  render(
+    <McpToolCallItem
+      item={
+        {
+          ...base,
+          status: "failed",
+          error: { message: "Real failure" },
+          transcriptMetadataOnly: true,
+        } as never
+      }
+    />,
+  );
+  expect(screen.getByText("详情未加载")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /Inspect/ }));
+  expect(screen.getByRole("alert").textContent).toBe("Real failure");
+  expect(screen.queryByText("工具未返回任何内容")).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "显示原始工具调用输出" }),
+  ).toBeNull();
+});

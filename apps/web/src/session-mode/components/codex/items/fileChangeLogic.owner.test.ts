@@ -1,6 +1,10 @@
 import { expect, it } from "vitest";
 import type { ServerNotification } from "@session/bindings";
-import { completedTurnChanges, aggregateFileChanges, getDiffViewerProps } from "./fileChangeLogic";
+import {
+  completedTurnChanges,
+  aggregateFileChanges,
+  getDiffViewerProps,
+} from "./fileChangeLogic";
 const delta = (threadId: string, diff: string) =>
   ({
     method: "turn/diff/updated",
@@ -48,11 +52,44 @@ it("failed or declined file changes never become applied-turn undo receipts", ()
 });
 it("keeps added/deleted saved hunks and native coordinates instead of converting them to line-one fragments", () => {
   for (const type of ["add", "delete"] as const) {
-    const patch = type === "add" ? "--- /dev/null\n+++ b/file.ts\n@@ -0,0 +80,1 @@\n+added\n" : "--- a/file.ts\n+++ /dev/null\n@@ -80,1 +0,0 @@\n-removed\n";
-    const [change] = aggregateFileChanges([{ path: "file.ts", kind: { type }, diff: patch }]);
+    const patch =
+      type === "add"
+        ? "--- /dev/null\n+++ b/file.ts\n@@ -0,0 +80,1 @@\n+added\n"
+        : "--- a/file.ts\n+++ /dev/null\n@@ -80,1 +0,0 @@\n-removed\n";
+    const [change] = aggregateFileChanges([
+      { path: "file.ts", kind: { type }, diff: patch },
+    ]);
     expect(change.diff).toBe(patch);
     expect(getDiffViewerProps(change).unifiedDiff).toBe(patch);
     expect(change.addedCount).toBe(type === "add" ? 1 : 0);
     expect(change.removedCount).toBe(type === "delete" ? 1 : 0);
   }
+});
+
+it("retains unloaded file metadata through completion and aggregation without treating an earlier body as the latest patch", () => {
+  const projected = { ...change, diff: "", transcriptMetadataOnly: true };
+  const result = completedTurnChanges("own", "turn", [
+    {
+      type: "fileChange",
+      id: "patch",
+      status: "completed",
+      changes: [projected],
+    },
+  ] as any);
+  expect(result.changes).toMatchObject([
+    { path: change.path, diff: "", transcriptMetadataOnly: true },
+  ]);
+  expect(result.batches[0].changes[0]).toMatchObject({
+    transcriptMetadataOnly: true,
+  });
+  expect(aggregateFileChanges([change, projected])[0]).toMatchObject({
+    diff: "",
+    transcriptMetadataOnly: true,
+  });
+  expect(aggregateFileChanges([projected, change])[0]).toMatchObject({
+    diff: change.diff,
+  });
+  expect(aggregateFileChanges([projected, change])[0]).not.toHaveProperty(
+    "transcriptMetadataOnly",
+  );
 });

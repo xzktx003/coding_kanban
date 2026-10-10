@@ -22,7 +22,7 @@ const item = {
 async function load(page: Page, count = 2) {
   // This suite's question payloads use the legacy full-read fixture. Exercise
   // the explicit capability fallback; paginated history has its own SSE suite.
-  await page.route("**/api/codex/thread/turns/list", (route) =>
+  await page.route(/\/api\/codex\/thread\/turns\/list(?:\?.*)?$/, (route) =>
     route.fulfill({
       status: 404,
       json: { error: "fixture: paginated history unavailable" },
@@ -89,7 +89,7 @@ for (const width of [375, 1440]) {
         },
       },
     });
-    await page.route("**/api/codex/thread/read", (route) =>
+    await page.route(/\/api\/codex\/thread\/read(?:\?.*)?$/, (route) =>
       route.fulfill({
         json: {
           thread: {
@@ -172,7 +172,7 @@ for (const width of [375, 1440]) {
     const fixture = await installSessionUxFixture(page, 1);
     let nextTurn = false,
       newQuestion = false;
-    await page.route("**/api/codex/thread/read", (r) =>
+    await page.route(/\/api\/codex\/thread\/read(?:\?.*)?$/, (r) =>
       r.fulfill({
         json: {
           thread: {
@@ -208,9 +208,7 @@ for (const width of [375, 1440]) {
     );
     await load(page, 1);
     await expect(
-      page
-        .locator(".session-compact-status")
-        .filter({ hasText: /个问题待回答/ }),
+      page.getByRole("button", { name: /^回答问题 · \d+$/ }),
     ).toContainText("有 2 个问题待回答");
     nextTurn = true;
     await page.evaluate(async () => {
@@ -233,18 +231,14 @@ for (const width of [375, 1440]) {
       });
     });
     await expect(
-      page
-        .locator(".session-compact-status")
-        .filter({ hasText: /个问题待回答/ }),
+      page.getByRole("button", { name: /^回答问题 · \d+$/ }),
     ).toHaveCount(0);
     await expect(page.locator(".session-async-message").first()).toContainText(
       "开发预览",
     );
     await load(page, 1);
     await expect(
-      page
-        .locator(".session-compact-status")
-        .filter({ hasText: /个问题待回答/ }),
+      page.getByRole("button", { name: /^回答问题 · \d+$/ }),
     ).toHaveCount(0);
     // Reloading an old pending question must not reintroduce its global count.
     await expect(page.locator(".session-attention-trigger")).not.toContainText(
@@ -253,9 +247,7 @@ for (const width of [375, 1440]) {
     newQuestion = true;
     await resume(page);
     await expect(
-      page
-        .locator(".session-compact-status")
-        .filter({ hasText: /个问题待回答/ }),
+      page.getByRole("button", { name: /^回答问题 · \d+$/ }),
     ).toContainText("有 1 个问题待回答");
     await openQuestions(page);
     await expect(page.locator("[data-session-async-panel]")).toContainText(
@@ -302,7 +294,7 @@ for (const width of [320, 375, 390, 1440]) {
         },
       ],
     });
-    await page.route("**/api/codex/thread/read", (r) =>
+    await page.route(/\/api\/codex\/thread\/read(?:\?.*)?$/, (r) =>
       r.fulfill({ json: { thread: thread() } }),
     );
     await page.route("**/api/codex/turn/steer", async (r) => {
@@ -326,7 +318,11 @@ for (const width of [320, 375, 390, 1440]) {
     await expect(composer.locator("xpath=ancestor::*[@inert]")).toHaveCount(1);
     await panel.getByRole("radio").first().check();
     expect(submissions).toHaveLength(0);
-    await panel.getByRole("button", { name: "下一题" }).click();
+    await expect(
+      panel.getByText("还有什么需要补充？", { exact: true }),
+    ).toBeVisible();
+    await expect(panel.locator("header")).toContainText("2 / 2");
+    expect(submissions).toHaveLength(0);
     await panel.getByRole("textbox").fill("开发预览端口也要可配置");
     await panel.getByRole("button", { name: "上一题" }).click();
     await expect(panel.getByRole("radio").first()).toBeChecked();
@@ -355,9 +351,7 @@ for (const width of [320, 375, 390, 1440]) {
     );
     await load(page);
     await expect(
-      page
-        .locator(".session-compact-status")
-        .filter({ hasText: /个问题待回答/ }),
+      page.getByRole("button", { name: /^回答问题 · \d+$/ }),
     ).toHaveCount(0);
     await expect(page.locator(".session-async-message")).toContainText(
       "你的回答：开发预览端口也要可配置",
@@ -383,7 +377,7 @@ test("async answer rejection retries, uncertain delivery reconciles, and complet
     clientId: string | undefined;
   const submissions: string[] = [],
     starts: any[] = [];
-  await page.route("**/api/codex/thread/read", (r) =>
+  await page.route(/\/api\/codex\/thread\/read(?:\?.*)?$/, (r) =>
     r.fulfill({
       json: {
         thread: {
@@ -437,7 +431,11 @@ test("async answer rejection retries, uncertain delivery reconciles, and complet
   const panel = page.locator("[data-session-async-panel]");
   await openQuestions(page);
   await panel.getByRole("radio").first().check();
-  await panel.getByRole("button", { name: "下一题" }).click();
+  await expect(
+    panel.getByText("还有什么需要补充？", { exact: true }),
+  ).toBeVisible();
+  await expect(panel.locator("header")).toContainText("2 / 2");
+  expect(submissions).toHaveLength(0);
   await panel.getByRole("textbox").fill("保持隔离");
   await panel.getByRole("button", { name: "提交回答", exact: true }).click();
   await expect(panel.getByRole("alert")).toContainText("回答未发送");
@@ -496,7 +494,7 @@ test("remote answers preserve local drafts; split panes send to their own thread
   try {
     for (const page of pages) {
       const fixture = await installSessionUxFixture(page, 2);
-      await page.route("**/api/codex/thread/read", (r) => {
+      await page.route(/\/api\/codex\/thread\/read(?:\?.*)?$/, (r) => {
         const id = r.request().postDataJSON().threadId;
         return r.fulfill({
           json: {
@@ -549,7 +547,11 @@ test("remote answers preserve local drafts; split panes send to their own thread
     await panel.getByRole("textbox").fill("本地尚未提交的方案");
     await openQuestions(other);
     await otherPanel.getByRole("radio").first().check();
-    await otherPanel.getByRole("button", { name: "下一题" }).click();
+    await expect(
+      otherPanel.getByText("还有什么需要补充？", { exact: true }),
+    ).toBeVisible();
+    await expect(otherPanel.locator("header")).toContainText("2 / 2");
+    expect(submissions).toHaveLength(0);
     await otherPanel.getByRole("textbox").fill("另一设备的补充");
     await otherPanel
       .getByRole("button", { name: "提交回答", exact: true })
@@ -606,7 +608,11 @@ test("remote answers preserve local drafts; split panes send to their own thread
       .click();
     await expect(panel.getByRole("textbox")).toHaveValue("");
     await panel.getByRole("radio").last().check();
-    await panel.getByRole("button", { name: "下一题" }).click();
+    await expect(
+      panel.getByText("还有什么需要补充？", { exact: true }),
+    ).toBeVisible();
+    await expect(panel.locator("header")).toContainText("2 / 2");
+    expect(submissions).toHaveLength(1);
     await panel.getByRole("textbox").fill("仅发给第二个会话");
     await panel.getByRole("button", { name: "提交回答", exact: true }).click();
     await expect.poll(() => submissions.length).toBe(2);

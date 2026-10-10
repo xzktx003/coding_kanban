@@ -2,7 +2,11 @@ import { afterEach, expect, it, vi } from "vitest";
 vi.mock("@session/hooks/runtime", () => ({
   buildEventUrl: (path: string) => path,
 }));
-import { openEventStream, reconcileEventStream } from "./eventStream";
+import {
+  openEventStream,
+  reconcileEventStream,
+  retryEventStream,
+} from "./eventStream";
 afterEach(() => vi.unstubAllGlobals());
 it("recovers when a reconnect snapshot proves the runtime sequence restarted", () => {
   const instances: any[] = [];
@@ -54,6 +58,7 @@ it("shares one browser connection across agent subscribers and releases it only 
   const closeB = openEventStream({ agents: ["cc"], onEvent: cc });
   try {
     expect(instances).toHaveLength(1);
+    expect(instances[0].url).toContain("view=chat");
     instances[0].onmessage?.({
       data: JSON.stringify({ seq: 1, event: "cc-message", payload: {} }),
     });
@@ -66,6 +71,43 @@ it("shares one browser connection across agent subscribers and releases it only 
     closeB();
   }
   expect(instances[0].close).toHaveBeenCalledOnce();
+});
+it("routes acp-message frames to acp subscribers without leaking codex frames", () => {
+  const instances: FakeSource[] = [];
+  class FakeSource {
+    onmessage: ((event: { data: string }) => void) | null = null;
+    close = vi.fn();
+    constructor(public url: string) {
+      instances.push(this);
+    }
+  }
+  vi.stubGlobal("EventSource", FakeSource);
+  const acp = vi.fn();
+  const codex = vi.fn();
+  const closeA = openEventStream({ agents: ["acp"], onEvent: acp });
+  const closeB = openEventStream({ agents: ["codex"], onEvent: codex });
+  try {
+    expect(instances).toHaveLength(1);
+    instances[0].onmessage?.({
+      data: JSON.stringify({ seq: 1, event: "acp-message", payload: {} }),
+    });
+    instances[0].onmessage?.({
+      data: JSON.stringify({
+        seq: 2,
+        event: "codex:notification",
+        payload: {},
+      }),
+    });
+    expect(acp.mock.calls.map((call) => call[0].event)).toEqual([
+      "acp-message",
+    ]);
+    expect(codex.mock.calls.map((call) => call[0].event)).toEqual([
+      "codex:notification",
+    ]);
+  } finally {
+    closeA();
+    closeB();
+  }
 });
 it("delivers reconciliation at the same sequence as replay without redelivering ordinary events", () => {
   let source: any;
@@ -166,6 +208,43 @@ it("invalid frames request reconciliation and stale connections cannot deliver a
       }),
     });
     expect(receive).not.toHaveBeenCalled();
+  } finally {
+    close();
+    vi.useRealTimers();
+  }
+});
+
+it("pauses oversized stream failures without replaying or repairing in a loop", async () => {
+  vi.useFakeTimers();
+  const instances: any[] = [];
+  class FakeSource {
+    onopen: any;
+    onmessage: any;
+    onerror: any;
+    close = vi.fn();
+    listeners = new Map<string, () => void>();
+    addEventListener(name: string, listener: () => void) {
+      this.listeners.set(name, listener);
+    }
+    constructor() {
+      instances.push(this);
+    }
+  }
+  vi.stubGlobal("EventSource", FakeSource);
+  const resync = vi.fn();
+  const close = openEventStream({ onEvent: vi.fn(), onResync: resync });
+  try {
+    instances[0].onopen();
+    instances[0].listeners.get("session-projection-error")?.();
+    instances[0].onerror();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(instances[0].close).toHaveBeenCalledOnce();
+    expect(instances).toHaveLength(1);
+    expect(resync).not.toHaveBeenCalled();
+    reconcileEventStream();
+    expect(instances).toHaveLength(1);
+    retryEventStream();
+    expect(instances).toHaveLength(2);
   } finally {
     close();
     vi.useRealTimers();

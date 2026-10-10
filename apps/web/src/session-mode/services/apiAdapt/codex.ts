@@ -1,3 +1,9 @@
+import { estimateTranscriptBytes } from "../codexTranscriptMemoryBudget";
+import {
+  MEMORY_HISTORY_RESTART_CURSOR,
+  MEMORY_ITEM_CURSOR,
+  pinMemoryHistoryPage,
+} from "../sessionMemoryHistory";
 import type { RpcIdentity } from "@session/components/codex/stores/rpcLifecycle";
 import { isDesktopTauri } from "@session/hooks/runtime";
 import { preventBrowserSleep, allowBrowserSleep } from "@session/browser-sleep";
@@ -99,12 +105,204 @@ export async function threadRead(
     afterTurnId?: string;
   },
   options?: { suppressToast?: boolean; signal?: AbortSignal },
-) {
+): Promise<
+  ThreadReadResponse &
+    Partial<ThreadResumeResponse> & {
+      historyPage?: {
+        nextCursor: string | null;
+        earlier: boolean;
+        itemPage?: boolean;
+        truncated?: boolean;
+      };
+    }
+> {
+  if (params.recent && params.cursor?.startsWith(MEMORY_ITEM_CURSOR)) {
+    const recovery = JSON.parse(
+      decodeURIComponent(params.cursor.slice(MEMORY_ITEM_CURSOR.length)),
+    ) as { turnId: string; beforeItemId?: string; cursor?: string };
+    let cursor = recovery.cursor ?? null;
+    const seen = new Set<string>();
+    for (let scan = 0; scan < 1000; scan++) {
+      const page = await postJsonWithOptions<{
+        data: Array<{
+          turnId: string;
+          item: import("../../bindings/v2").ThreadItem;
+        }>;
+        nextCursor: string | null;
+      }>(
+        "/api/codex/thread/items/list",
+        {
+          threadId: params.threadId,
+          turnId: recovery.turnId,
+          cursor,
+          limit: 20,
+          sortDirection: "desc",
+        },
+        options,
+      );
+      const index = recovery.beforeItemId
+        ? page.data.findIndex(
+            (entry) => entry.item.id === recovery.beforeItemId,
+          )
+        : -1;
+      if (!recovery.beforeItemId || index >= 0) {
+        let older = recovery.beforeItemId
+          ? page.data.slice(index + 1)
+          : page.data;
+        let nextCursor = page.nextCursor;
+        if (!older.length && nextCursor) {
+          const next = await postJsonWithOptions<typeof page>(
+            "/api/codex/thread/items/list",
+            {
+              threadId: params.threadId,
+              turnId: recovery.turnId,
+              cursor: nextCursor,
+              limit: 20,
+              sortDirection: "desc",
+            },
+            options,
+          );
+          older = next.data;
+          nextCursor = next.nextCursor;
+        }
+        pinMemoryHistoryPage(params.threadId, [recovery.turnId]);
+        return {
+          thread: {
+            id: params.threadId,
+            turns: [
+              {
+                id: recovery.turnId,
+                status: "completed",
+                items: older.map((entry) => entry.item).reverse(),
+                error: null,
+                startedAt: null,
+                completedAt: null,
+                durationMs: null,
+              },
+            ],
+          } as ThreadReadResponse["thread"],
+          historyPage: {
+            earlier: true,
+            itemPage: true,
+            nextCursor: nextCursor
+              ? MEMORY_ITEM_CURSOR +
+                encodeURIComponent(
+                  JSON.stringify({
+                    turnId: recovery.turnId,
+                    cursor: nextCursor,
+                  }),
+                )
+              : MEMORY_HISTORY_RESTART_CURSOR +
+                encodeURIComponent(recovery.turnId),
+          },
+        };
+      }
+      if (!page.nextCursor || seen.has(page.nextCursor))
+        throw new Error("Released tool history could not be located");
+      seen.add(page.nextCursor);
+      cursor = page.nextCursor;
+    }
+    throw new Error("Tool history recovery exceeded page limit");
+  }
+  if (
+    params.recent &&
+    params.cursor?.startsWith(MEMORY_HISTORY_RESTART_CURSOR)
+  ) {
+    const anchor = decodeURIComponent(
+      params.cursor.slice(MEMORY_HISTORY_RESTART_CURSOR.length),
+    );
+    let cursor: string | null = null;
+    const seen = new Set<string>();
+    for (let scan = 0; scan < 1000; scan++) {
+      const page: {
+        data: ThreadReadResponse["thread"]["turns"];
+        nextCursor: string | null;
+      } = await postJsonWithOptions<{
+        data: ThreadReadResponse["thread"]["turns"];
+        nextCursor: string | null;
+      }>(
+        "/api/codex/thread/turns/list?view=chat",
+        {
+          threadId: params.threadId,
+          cursor,
+          limit: 10,
+          sortDirection: "desc",
+          itemsView: "summary",
+        },
+        options,
+      );
+      const index = page.data.findIndex((turn) => turn.id === anchor);
+      if (index >= 0 || !anchor) {
+        const full = await postJsonWithOptions<{
+          data: ThreadReadResponse["thread"]["turns"];
+          nextCursor: string | null;
+        }>(
+          "/api/codex/thread/turns/list?view=chat",
+          {
+            threadId: params.threadId,
+            cursor,
+            limit: 10,
+            sortDirection: "desc",
+            itemsView: "full",
+          },
+          options,
+        );
+        const fullIndex = full.data.findIndex((turn) => turn.id === anchor);
+        if (anchor && fullIndex < 0)
+          throw new Error(
+            "History changed while recovering released messages; refresh the session history",
+          );
+        let older = anchor ? full.data.slice(fullIndex + 1) : full.data;
+        let nextCursor = full.nextCursor;
+        if (!older.length && nextCursor) {
+          const next = await postJsonWithOptions<{
+            data: ThreadReadResponse["thread"]["turns"];
+            nextCursor: string | null;
+          }>(
+            "/api/codex/thread/turns/list?view=chat",
+            {
+              threadId: params.threadId,
+              cursor: nextCursor,
+              limit: 10,
+              sortDirection: "desc",
+              itemsView: "full",
+            },
+            options,
+          );
+          older = next.data;
+          nextCursor = next.nextCursor;
+        }
+        pinMemoryHistoryPage(
+          params.threadId,
+          older.map((turn) => turn.id),
+        );
+        return {
+          thread: {
+            id: params.threadId,
+            turns: older.reverse(),
+          } as ThreadReadResponse["thread"],
+          historyPage: { nextCursor, earlier: true },
+        };
+      }
+      if (!page.nextCursor)
+        throw new Error(
+          "History changed while recovering released messages; refresh the session history",
+        );
+      if (seen.has(page.nextCursor))
+        throw new Error("Repeated recovery history cursor");
+      seen.add(page.nextCursor);
+      cursor = page.nextCursor;
+    }
+    throw new Error("History recovery exceeded page limit");
+  }
   if (params.recent) {
     try {
       let cursor = params.cursor ?? null;
       const seen = new Set<string>();
       const turns: ThreadReadResponse["thread"]["turns"] = [];
+      let pagesRead = 0;
+      let boundedCursor: string | null | undefined;
+      let truncated = false;
       let page: {
         data: ThreadReadResponse["thread"]["turns"];
         nextCursor: string | null;
@@ -114,7 +312,7 @@ export async function threadRead(
           data: ThreadReadResponse["thread"]["turns"];
           nextCursor: string | null;
         }>(
-          "/api/codex/thread/turns/list",
+          "/api/codex/thread/turns/list?view=chat",
           {
             threadId: params.threadId,
             cursor,
@@ -135,7 +333,19 @@ export async function threadRead(
           (page.nextCursor != null && typeof page.nextCursor !== "string")
         )
           throw new Error("Invalid recent history page");
+        pagesRead += 1;
+        boundedCursor ??= page.nextCursor;
         turns.push(...page.data);
+        if (
+          params.afterTurnId &&
+          (pagesRead >= 5 ||
+            estimateTranscriptBytes([...turns]) > 8 * 1024 * 1024) &&
+          !turns.some((turn) => turn.id === params.afterTurnId) &&
+          page.nextCursor
+        ) {
+          truncated = true;
+          break;
+        }
         cursor = page.nextCursor;
         if (
           !params.afterTurnId ||
@@ -146,13 +356,21 @@ export async function threadRead(
         if (seen.has(cursor)) throw new Error("Repeated recent history cursor");
         seen.add(cursor);
       } while (cursor);
+      if (params.cursor)
+        pinMemoryHistoryPage(
+          params.threadId,
+          turns.map((turn) => turn.id),
+        );
       return {
         thread: {
           id: params.threadId,
           turns: turns.reverse(),
         } as ThreadReadResponse["thread"],
         historyPage: {
-          nextCursor: page.nextCursor ?? null,
+          nextCursor: truncated
+            ? (boundedCursor ?? null)
+            : (page.nextCursor ?? null),
+          ...(truncated ? { truncated: true } : {}),
           earlier: !!params.cursor,
         },
       };
@@ -169,7 +387,7 @@ export async function threadRead(
     return await postJsonWithOptions<
       ThreadReadResponse & Partial<ThreadResumeResponse>
     >(
-      "/api/codex/thread/read",
+      "/api/codex/thread/read?view=chat",
       { threadId: params.threadId },
       { ...options, suppressToast: true },
     );

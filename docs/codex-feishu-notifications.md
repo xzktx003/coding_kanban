@@ -198,3 +198,7 @@ node --test scripts/codex-feishu-notify.test.mjs
 - 回复监听仅在私聊目标有效且独立回复开关开启时启动；事件字段采用白名单校验，终端输入复用现有统一输入服务。
 - 只把 `lark-cli` JSON 信封中的 `ok: true` 视为成功。
 - 发送失败写入 Kanban 后端日志，不会改变任务状态或伪造成功；当前没有持久化 outbox，机器断电或后端被强制终止时不保证补发。
+
+## 会话模式 Codex 完成通知
+
+原生会话模式现已接入同一飞书开关和发送器，每轮 Codex 成功完成分别发送最终回复，独立于浏览器。终端通知仍沿用注册表/rollout 判断；原生会话走后台完成事件与持久 outbox，不伪造终端 session，也不显示依赖终端注册表的回复或记录按钮。设置与验收见 [会话模式通知](session-codex-feishu-notifications.md)。

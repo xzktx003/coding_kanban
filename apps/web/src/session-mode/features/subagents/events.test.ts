@@ -1,7 +1,9 @@
 import { expect, it } from "vitest";
 import { buildThreadRows } from "@session/components/codex/thread/threadRows";
 import { observeSubagents, useSubagentStore } from "./store";
-it("one collab item progresses from started to completed without duplicate rows", () => {
+import { withoutToolTranscriptEvent } from "@session/services/codexTranscriptVisibility";
+it("observes collab progress and renders bounded identity metadata without retaining private bodies", () => {
+  useSubagentStore.setState({ nodes: {}, revision: 0 });
   const item = {
     id: "spawn",
     type: "collabAgentToolCall",
@@ -9,7 +11,7 @@ it("one collab item progresses from started to completed without duplicate rows"
     senderThreadId: "root",
     receiverThreadIds: ["child"],
     agentsStates: {},
-    prompt: "inspect",
+    prompt: "inspect" + "x".repeat(1024 * 1024),
     status: "inProgress",
   };
   const start: any = {
@@ -20,8 +22,22 @@ it("one collab item progresses from started to completed without duplicate rows"
     method: "item/completed",
     params: { ...start.params, item: { ...item, status: "completed" } },
   };
-  expect(buildThreadRows([start]).length).toBe(1);
-  expect(buildThreadRows([start, done]).length).toBe(1);
+  observeSubagents(start);
+  observeSubagents(done);
+  expect(useSubagentStore.getState().nodes.child.parentId).toBe("root");
+  expect(useSubagentStore.getState().nodes.child.createdInTurn).toBe("turn");
+  const safeStart = withoutToolTranscriptEvent(start)!;
+  const safeDone = withoutToolTranscriptEvent(done)!;
+  expect(buildThreadRows([safeStart]).length).toBe(1);
+  expect(buildThreadRows([safeStart, safeDone]).length).toBe(1);
+  expect((safeDone.params as any).item).toMatchObject({
+    id: "spawn",
+    receiverThreadIds: ["child"],
+    status: "completed",
+    transcriptMetadataOnly: true,
+  });
+  expect((safeDone.params as any).item.prompt.length).toBeLessThanOrEqual(1024);
+  expect(JSON.stringify([safeStart, safeDone])).not.toContain(item.prompt);
 });
 it("activity reports do not grant direct input; native metadata confirms parent", () => {
   useSubagentStore.setState({ nodes: {}, revision: 0 });

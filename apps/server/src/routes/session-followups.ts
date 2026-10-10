@@ -13,6 +13,7 @@ import {
   FollowupRejected,
   type FollowupRuntime,
 } from "../services/codex-followups.js";
+import type { SessionCodexFeishuNotifier } from "../services/session-codex-feishu-notifier.js";
 
 function invalid(message = "无效的消息队列请求"): never {
   throw Object.assign(new Error(message), { statusCode: 400 });
@@ -295,19 +296,30 @@ export function registerSessionFollowupRoutes(
     fetch?: typeof fetch;
     runtime?: FollowupRuntime;
     autoStart?: boolean;
+    completionNotifier?: Pick<
+      SessionCodexFeishuNotifier,
+      "cursor" | "observe" | "close"
+    >;
   },
 ) {
   const fetcher = options.fetch ?? fetch,
     lifetime = new AbortController();
-  let lease: ChildProcess | undefined, init: Promise<void> | undefined;
+  let lease: ChildProcess | undefined,
+    leaseExit: Promise<void> | undefined,
+    init: Promise<void> | undefined;
   let streamConnected = false,
     streamGeneration = 0;
   async function acquire() {
     if (!options.file) return;
     await mkdir(dirname(options.file), { recursive: true, mode: 0o700 });
+    if (lifetime.signal.aborted) throw new Error("消息队列服务已停止");
     // Kernel lease is released even if the gateway is killed; no PID cleanup or process termination.
     await new Promise<void>((resolve, reject) => {
-      lease = spawn(
+      if (lifetime.signal.aborted) {
+        reject(new Error("消息队列服务已停止"));
+        return;
+      }
+      const child = spawn(
         "flock",
         [
           "-n",
@@ -320,15 +332,39 @@ export function registerSessionFollowupRoutes(
         ],
         { stdio: ["pipe", "pipe", "ignore"] },
       );
-      let held = false;
-      lease.stdout!.once("data", () => {
-        held = true;
-        resolve();
+      lease = child;
+      leaseExit = new Promise<void>((done) => {
+        child.once("exit", () => done());
+        child.once("error", () => done());
       });
-      lease.once("error", reject);
-      lease.once("exit", () => {
+      let held = false;
+      let settled = false;
+      const cleanup = () =>
+        lifetime.signal.removeEventListener("abort", abortLease);
+      const done = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (error) reject(error);
+        else resolve();
+      };
+      const abortLease = () => {
+        child.stdin?.end();
+        if (!held) done(new Error("消息队列服务已停止"));
+      };
+      lifetime.signal.addEventListener("abort", abortLease, { once: true });
+      child.stdout!.once("data", () => {
+        held = true;
+        done();
+      });
+      child.once("error", (error) => done(error));
+      child.once("exit", () => {
         if (held && !lifetime.signal.aborted) lifetime.abort();
-        reject(new Error("消息队列已由另一服务管理"));
+        done(
+          lifetime.signal.aborted
+            ? new Error("消息队列服务已停止")
+            : new Error("消息队列已由另一服务管理"),
+        );
       });
     });
   }
@@ -408,6 +444,14 @@ export function registerSessionFollowupRoutes(
     },
   };
   const queue = new CodexFollowups(runtime, options.file);
+  const dispatchSoon = () => {
+    if (options.autoStart === false) return;
+    void queue
+      .tick()
+      .catch((error) =>
+        app.log.warn({ err: error }, "Follow-up dispatch unavailable"),
+      );
+  };
   const ready = () => {
     if (lifetime.signal.aborted)
       return Promise.reject(new Error("消息队列服务已停止"));
@@ -419,6 +463,14 @@ export function registerSessionFollowupRoutes(
       }))
     );
   };
+  // HTTP and trusted bot replies share validation, ownership lease and dispatch.
+  async function enqueue(input: unknown) {
+    const data = submit(input);
+    await ready();
+    const result = await queue.submit(data);
+    dispatchSoon();
+    return result;
+  }
   app.get<{ Querystring: { threadId: string } }>(
     "/api/session/followups",
     async (request) => {
@@ -431,9 +483,7 @@ export function registerSessionFollowupRoutes(
     "/api/session/followups/submit",
     { bodyLimit: 1024 * 1024 },
     async (request) => {
-      const data = submit(request.body);
-      await ready();
-      return queue.submit(data);
+      return enqueue(request.body);
     },
   );
   app.post("/api/session/followups/change", async (request) => {
@@ -443,7 +493,9 @@ export function registerSessionFollowupRoutes(
     if (!Number.isSafeInteger(data.revision) || data.revision < 0) invalid();
     const op = action(data.action);
     await ready();
-    return queue.change(threadId, data.revision, op);
+    const result = await queue.change(threadId, data.revision, op);
+    dispatchSoon();
+    return result;
   });
   app.post("/api/session/followups/stop", async (request) => {
     const data = object(request.body);
@@ -501,7 +553,7 @@ export function registerSessionFollowupRoutes(
       if (health.instance !== instance) {
         if (instance !== undefined)
           await queue.recover("会话服务已重启，请确认任务状态后继续队列");
-        sequence = undefined;
+        sequence = await options.completionNotifier?.cursor(health.instance);
         instance = health.instance;
       }
       const response = await fetcher(
@@ -535,6 +587,16 @@ export function registerSessionFollowupRoutes(
             continue;
           if (sequence !== undefined && event.seq > sequence + 1)
             await queue.recover("连接期间有任务事件缺失，请检查后继续队列");
+          try {
+            await options.completionNotifier?.observe(instance!, event);
+          } catch (error) {
+            // Notification storage must not disconnect the task dispatch stream.
+            // Its durable cursor stays unchanged so a restored notifier can replay.
+            app.log.warn(
+              { err: error },
+              "Session completion notification was not recorded",
+            );
+          }
           sequence = event.seq;
           if (event.event === "codex:notification")
             void queue
@@ -565,8 +627,11 @@ export function registerSessionFollowupRoutes(
     lifetime.abort();
     clearTimeout(timer);
     clearTimeout(streamTimer);
+    await options.completionNotifier?.close();
+    await init?.catch(() => {});
     await queue.drain();
     lease?.stdin?.end();
+    await leaseExit?.catch(() => {});
   });
-  return queue;
+  return Object.assign(queue, { enqueue });
 }

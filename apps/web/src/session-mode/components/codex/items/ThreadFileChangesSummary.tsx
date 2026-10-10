@@ -15,6 +15,8 @@ import { SavedPatchAction } from "@session/features/git/SavedPatchAction";
 import { useCodexContentOwner } from "../presentation/ownerContext";
 import type { AggregatedFileChange } from "./fileChangeLogic";
 import { getDiffViewerProps } from "./fileChangeLogic";
+import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
+import { TranscriptDetailsNotice } from "./TranscriptDetailsNotice";
 import { toRelativePath, useOpenReviewTab } from "./fileChangeUtils";
 import { getFilename } from "@session/utils/getFilename";
 import { NativeTurnDiffIcon } from "@session/features/git/NativeReviewIcons";
@@ -40,9 +42,21 @@ export const ThreadFileChangesSummary = ({
   const inspection = useTranscriptInspection();
   const { t } = useTranslation("thread");
   const { cwd } = useCodexContentOwner(threadId);
+  const unloaded = changes.some(isTranscriptMetadataOnly);
+  const incompleteReceipts =
+    unloaded ||
+    batches.some((batch) => batch.changes.some(isTranscriptMetadataOnly));
   const openReviewTab = useOpenReviewTab(
     threadId && turnId
-      ? { threadId, turnId, cwd, changes, batches }
+      ? {
+          threadId,
+          turnId,
+          cwd,
+          changes: unloaded
+            ? changes.filter((change) => !isTranscriptMetadataOnly(change))
+            : changes,
+          batches: incompleteReceipts ? [] : batches,
+        }
       : undefined,
   );
   const [previewPath, setPreviewPath] = useState<string | null>(null);
@@ -75,20 +89,48 @@ export const ThreadFileChangesSummary = ({
 
   if (changes.length === 0) return null;
 
+  if (changes.every(isTranscriptMetadataOnly))
+    return (
+      <div
+        className="session-file-changes codex-turn-diff-summary"
+        data-file-count={changes.length}
+      >
+        <div className="codex-turn-diff-header">
+          <NativeTurnDiffIcon />
+          <span>{t("fileChanges.changed", { count: changes.length })}</span>
+          <TranscriptDetailsNotice />
+        </div>
+        {changes.map((change) => (
+          <div key={change.path} className="codex-turn-diff-file-row">
+            {toRelativePath(change.path, cwd)}
+          </div>
+        ))}
+      </div>
+    );
+
   if (inspection)
     return (
       <div className="session-file-changes space-y-2">
         {changes.map((change) => (
           <details key={change.path}>
             <summary className="cursor-pointer text-sm">
-              {change.path} +{change.addedCount} −{change.removedCount}
+              {change.path}{" "}
+              {isTranscriptMetadataOnly(change) ? (
+                <TranscriptDetailsNotice />
+              ) : (
+                <>
+                  +{change.addedCount} −{change.removedCount}
+                </>
+              )}
             </summary>
-            <DiffViewer
-              native
-              {...getDiffViewerProps(change)}
-              displayPath={change.path}
-              isCollapsed={false}
-            />
+            {!isTranscriptMetadataOnly(change) && (
+              <DiffViewer
+                native
+                {...getDiffViewerProps(change)}
+                displayPath={change.path}
+                isCollapsed={false}
+              />
+            )}
           </details>
         ))}
       </div>
@@ -122,7 +164,11 @@ export const ThreadFileChangesSummary = ({
     <>
       <span className="codex-turn-diff-title-text">{title}</span>
       <span className="codex-turn-diff-subtitle">
-        {stats(totals.added, totals.removed)}
+        {unloaded ? (
+          <TranscriptDetailsNotice />
+        ) : (
+          stats(totals.added, totals.removed)
+        )}
       </span>
       <span className="codex-turn-diff-hover-subtitle" aria-hidden="true">
         {t("common.review")}
@@ -206,8 +252,8 @@ export const ThreadFileChangesSummary = ({
             threadId={threadId}
             turnId={turnId}
             cwd={cwd}
-            batches={batches}
-            disabled={Boolean(inspection)}
+            batches={incompleteReceipts ? [] : batches}
+            disabled={Boolean(inspection) || incompleteReceipts}
           />
           <Button
             variant="outline"
@@ -230,91 +276,104 @@ export const ThreadFileChangesSummary = ({
           className="session-file-changes-list"
           onScroll={updateScrollEnd}
         >
-          {changes.map((change) => (
-            <div
-              key={change.path}
-              className="session-file-change-row codex-turn-diff-file-row"
-            >
-              <HoverCard
-                openDelay={200}
-                open={previewPath === change.path}
-                onOpenChange={(open) =>
-                  setPreviewPath(
-                    open && !previewDismissed.current ? change.path : null,
-                  )
-                }
+          {changes.map((change) =>
+            isTranscriptMetadataOnly(change) ? (
+              <div
+                key={change.path}
+                className="session-file-change-row codex-turn-diff-file-row"
               >
-                <HoverCardTrigger asChild>
-                  <button
-                    type="button"
-                    onPointerLeave={() => {
-                      previewDismissed.current = false;
-                    }}
-                    onClick={() => openReview(change.path)}
-                    className="flex-1 min-w-0 text-left"
-                    title={toRelativePath(change.path, cwd)}
-                  >
-                    <span className="font-mono truncate block">
-                      {toRelativePath(change.path, cwd)}
-                    </span>
-                  </button>
-                </HoverCardTrigger>
-                <Button
-                  type="button"
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label={`预览 ${toRelativePath(change.path, cwd)} Diff`}
-                  onClick={() => {
-                    previewDismissed.current = false;
-                    setPreviewPath((value) =>
-                      value === change.path ? null : change.path,
-                    );
-                  }}
+                <span className="font-mono truncate">
+                  {toRelativePath(change.path, cwd)}
+                </span>
+                <TranscriptDetailsNotice />
+              </div>
+            ) : (
+              <div
+                key={change.path}
+                className="session-file-change-row codex-turn-diff-file-row"
+              >
+                <HoverCard
+                  openDelay={200}
+                  open={previewPath === change.path}
+                  onOpenChange={(open) =>
+                    setPreviewPath(
+                      open && !previewDismissed.current ? change.path : null,
+                    )
+                  }
                 >
-                  <Eye size={14} />
-                </Button>
-                <HoverCardContent className="codex-file-preview w-[36rem] max-w-[80vw] p-0 overflow-hidden">
-                  <DiffViewer
-                    native
-                    presentation="preview"
-                    {...getDiffViewerProps(change)}
-                    displayPath={toRelativePath(change.path, cwd)}
-                    isCollapsed={false}
-                    className="max-h-96"
-                  />
-                </HoverCardContent>
-              </HoverCard>
-              {stats(change.addedCount, change.removedCount)}
-              <SavedPatchAction
-                threadId={threadId}
-                turnId={turnId}
-                cwd={cwd}
-                batches={batches}
-                filePath={
-                  batches
-                    .flatMap((b) => b.changes)
-                    .find(
-                      (c) =>
-                        c.path === change.path ||
-                        toRelativePath(c.path, cwd) ===
-                          toRelativePath(change.path, cwd),
-                    )?.path
-                }
-                compact
-                disabled={
-                  Boolean(inspection) ||
-                  !batches.some((b) =>
-                    b.changes.some(
-                      (c) =>
-                        c.path === change.path ||
-                        toRelativePath(c.path, cwd) ===
-                          toRelativePath(change.path, cwd),
-                    ),
-                  )
-                }
-              />
-            </div>
-          ))}
+                  <HoverCardTrigger asChild>
+                    <button
+                      type="button"
+                      onPointerLeave={() => {
+                        previewDismissed.current = false;
+                      }}
+                      onClick={() => openReview(change.path)}
+                      className="flex-1 min-w-0 text-left"
+                      title={toRelativePath(change.path, cwd)}
+                    >
+                      <span className="font-mono truncate block">
+                        {toRelativePath(change.path, cwd)}
+                      </span>
+                    </button>
+                  </HoverCardTrigger>
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    aria-label={`预览 ${toRelativePath(change.path, cwd)} Diff`}
+                    onClick={() => {
+                      previewDismissed.current = false;
+                      setPreviewPath((value) =>
+                        value === change.path ? null : change.path,
+                      );
+                    }}
+                  >
+                    <Eye size={14} />
+                  </Button>
+                  <HoverCardContent className="codex-file-preview w-[36rem] max-w-[80vw] p-0 overflow-hidden">
+                    <DiffViewer
+                      native
+                      presentation="preview"
+                      {...getDiffViewerProps(change)}
+                      displayPath={toRelativePath(change.path, cwd)}
+                      isCollapsed={false}
+                      className="max-h-96"
+                    />
+                  </HoverCardContent>
+                </HoverCard>
+                {stats(change.addedCount, change.removedCount)}
+                <SavedPatchAction
+                  threadId={threadId}
+                  turnId={turnId}
+                  cwd={cwd}
+                  batches={incompleteReceipts ? [] : batches}
+                  filePath={
+                    batches
+                      .flatMap((b) => b.changes)
+                      .find(
+                        (c) =>
+                          c.path === change.path ||
+                          toRelativePath(c.path, cwd) ===
+                            toRelativePath(change.path, cwd),
+                      )?.path
+                  }
+                  compact
+                  disabled={
+                    Boolean(inspection) ||
+                    incompleteReceipts ||
+                    !batches.some((b) =>
+                      b.changes.some(
+                        (c) =>
+                          c.path === change.path ||
+                          toRelativePath(c.path, cwd) ===
+                            toRelativePath(change.path, cwd),
+                      ),
+                    )
+                  }
+                />
+              </div>
+            ),
+          )}
         </div>
       )}
       {!single && scrollable && (

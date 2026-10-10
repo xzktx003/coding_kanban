@@ -252,3 +252,31 @@ it("does not briefly show another owner's relative image while its replacement l
     ).toBeTruthy(),
   );
 });
+
+it("does not fetch images whose projected pixels were omitted", () => {
+  const { rerender } = render(
+    <EventItem
+      event={event("imageView", {
+        path: "/owner/omitted.png",
+        transcriptMetadataOnly: true,
+      })}
+    />,
+  );
+  expect(screen.getByText("详情未加载")).toBeTruthy();
+  expect(api.readFile).not.toHaveBeenCalled();
+  expect(screen.queryByRole("img")).toBeNull();
+  rerender(
+    <EventItem
+      event={event("imageGeneration", {
+        savedPath: "/owner/generated.png",
+        result: "",
+        status: "failed",
+        transcriptMetadataOnly: true,
+      })}
+    />,
+  );
+  expect(screen.getByText("详情未加载")).toBeTruthy();
+  expect(screen.getByText("activity.imageFailed")).toBeTruthy();
+  expect(api.readFile).not.toHaveBeenCalled();
+  expect(screen.queryByRole("img")).toBeNull();
+});

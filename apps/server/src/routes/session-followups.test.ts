@@ -1,7 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import Fastify from "fastify";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { registerSessionFollowupRoutes } from "./session-followups.js";
+
+const execFileAsync = promisify(execFile);
+
 const body = {
   id: "request",
   threadId: "thread",
@@ -122,6 +130,15 @@ test("malformed native turn settings are rejected before journaling or runtime c
   }
 });
 
+async function flockProcessesFor(path: string): Promise<string[]> {
+  const { stdout } = await execFileAsync("ps", ["-eo", "pid=,args="], {
+    encoding: "utf8",
+  });
+  return stdout
+    .split("\n")
+    .filter((line) => line.includes("flock") && line.includes(path));
+}
+
 test("validates input before journaling, deduplicates requests and serializes revision conflicts", async () => {
   const app = Fastify();
   const calls: any[] = [];
@@ -218,6 +235,52 @@ test("validates input before journaling, deduplicates requests and serializes re
       ).json().items[0].status,
       "sent",
     );
+  } finally {
+    await app.close();
+  }
+});
+
+test("followup parameters allow only native approval reviewer values and forward them", async () => {
+  const app = Fastify();
+  const calls: any[] = [];
+  const queue = registerSessionFollowupRoutes(app, {
+    origin: () => null,
+    autoStart: false,
+    runtime: {
+      statuses: async () => ({ thread: "idle" }),
+      call: async (method, params) => {
+        calls.push({ method, params });
+        return { turn: { id: "run" } };
+      },
+    },
+  });
+  try {
+    const accepted = await app.inject({
+      method: "POST",
+      url: "/api/session/followups/submit",
+      payload: {
+        ...body,
+        id: "auto-review",
+        parameters: {
+          approvalPolicy: "on-request",
+          approvalsReviewer: "auto_review",
+        },
+      },
+    });
+    assert.equal(accepted.statusCode, 200, accepted.body);
+    const rejected = await app.inject({
+      method: "POST",
+      url: "/api/session/followups/submit",
+      payload: {
+        ...body,
+        id: "bad-reviewer",
+        parameters: { approvalsReviewer: "browser_auto_approve" },
+      },
+    });
+    assert.equal(rejected.statusCode, 400);
+    await queue.tick();
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].params.approvalsReviewer, "auto_review");
   } finally {
     await app.close();
   }
@@ -345,5 +408,57 @@ test("blank cwd from restored mobile clients inherits the native thread director
     assert.equal(calls[0].params.cwd, null);
   } finally {
     await app.close();
+  }
+});
+
+test("newly submitted messages dispatch without waiting for the one-second poll", async () => {
+  const app = Fastify();
+  let accepted = 0;
+  registerSessionFollowupRoutes(app, {
+    origin: () => null,
+    runtime: {
+      statuses: async () => ({ thread: "idle" }),
+      call: async () => ({ turn: { id: `run-${++accepted}` } }),
+    },
+  });
+  try {
+    await app.ready();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await app.inject({
+      method: "POST",
+      url: "/api/session/followups/submit",
+      payload: body,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(accepted, 1);
+    await app.inject({
+      method: "POST",
+      url: "/api/session/followups/submit",
+      payload: body,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(accepted, 1, "duplicate submissions must not dispatch twice");
+  } finally {
+    await app.close();
+  }
+});
+
+test("closing during queue lease startup does not leave a flock child", async () => {
+  const root = await mkdtemp(join(tmpdir(), "kanban-native-reply-"));
+  const file = join(root, "codex-followups.json");
+  try {
+    const app = Fastify();
+    registerSessionFollowupRoutes(app, {
+      file,
+      origin: () => null,
+    });
+
+    await app.ready();
+    await app.close();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(await flockProcessesFor(file + ".lock"), []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

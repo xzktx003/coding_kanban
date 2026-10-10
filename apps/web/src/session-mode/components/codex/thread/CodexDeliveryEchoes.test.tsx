@@ -104,6 +104,28 @@ it("does not resurrect archived sent receipts on refresh or after rollback", () 
   reconcileDeliveryEchoes("a", receipt("sent"));
   expect(Object.keys(useCodexDeliveryStore.getState().entries)).toHaveLength(0);
 });
+it("preserves delivery echo identity when the receipt has not changed", () => {
+  beginDeliveryEcho(message);
+  reconcileDeliveryEchoes("a", receipt("queued"));
+  const firstEntries = useCodexDeliveryStore.getState().entries;
+  const firstEntry = Object.values(firstEntries)[0];
+
+  reconcileDeliveryEchoes("a", receipt("queued"));
+
+  expect(useCodexDeliveryStore.getState().entries).toBe(firstEntries);
+  expect(Object.values(useCodexDeliveryStore.getState().entries)[0]).toBe(
+    firstEntry,
+  );
+
+  reconcileDeliveryEchoes("a", receipt("sent"));
+  expect(useCodexDeliveryStore.getState().entries).not.toBe(firstEntries);
+  expect(
+    Object.values(useCodexDeliveryStore.getState().entries)[0],
+  ).toMatchObject({
+    status: "sent",
+    turnId: "turn",
+  });
+});
 it("does not merge identical messages by their text", () => {
   beginDeliveryEcho(message);
   beginDeliveryEcho({ ...message, id: "second" });

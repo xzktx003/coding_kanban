@@ -3,7 +3,10 @@ import test from "node:test";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
-import { resolveCodexSessionIds } from "./active-codex-session-resolver.js";
+import {
+  resolveActiveCodexSessionId,
+  resolveCodexSessionIds,
+} from "./active-codex-session-resolver.js";
 
 function makeSession(): AgentSessionRecord {
   return {
@@ -56,4 +59,58 @@ test("resolveCodexSessionIds falls back to the active thread when pane enumerati
   });
 
   assert.deepEqual(result, ["active-thread"]);
+});
+
+test("history-only resolution cannot replace the registered input target", async () => {
+  const updates: unknown[] = [];
+  const session = { ...makeSession(), agentSessionId: "registered-thread" };
+  const dependencies = {
+    registry: {
+      updateSession: (...args: unknown[]) => {
+        updates.push(args);
+        return session;
+      },
+    },
+    codexSessionLocator: {
+      resolve: async (input: { historySessionId?: string }) =>
+        input.historySessionId ? "registered-thread" : undefined,
+    },
+  };
+  assert.equal(
+    await resolveActiveCodexSessionId(session, dependencies, {
+      historyOnly: true,
+    }),
+    "registered-thread",
+  );
+  assert.deepEqual(updates, []);
+  assert.equal(
+    await resolveActiveCodexSessionId(session, dependencies),
+    undefined,
+  );
+});
+
+test("history reads do not mutate registered IDs even with a precise live match", async () => {
+  const session = { ...makeSession(), agentSessionId: "registered-thread" };
+  const updates: unknown[] = [];
+  const dependencies = {
+    registry: {
+      updateSession: (...args: unknown[]) => {
+        updates.push(args);
+        return session;
+      },
+    },
+    codexSessionLocator: { resolve: async () => "live-thread" },
+  };
+  assert.equal(
+    await resolveActiveCodexSessionId(session, dependencies, {
+      historyOnly: true,
+    }),
+    "live-thread",
+  );
+  assert.deepEqual(updates, []);
+  assert.equal(
+    await resolveActiveCodexSessionId(session, dependencies),
+    "live-thread",
+  );
+  assert.equal(updates.length, 1);
 });

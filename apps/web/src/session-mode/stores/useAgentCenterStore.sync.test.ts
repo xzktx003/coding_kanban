@@ -125,3 +125,21 @@ it("restores the confirmed shared list even when an older page overwrote the agg
   expect(useAgentCenterStore.getState().cards).toEqual([a]);
   expect(readTabOperations()).toHaveLength(0);
 });
+
+it("unchanged polling snapshots do not notify UI subscribers", () => {
+  const snapshot = { initialized: true, revision: 1, cards: [a] };
+  useAgentCenterStore.getState().acceptSharedTabs(snapshot);
+  const baseline = useAgentCenterStore.getState();
+  let notifications = 0;
+  const stop = useAgentCenterStore.subscribe(() => notifications++);
+  try {
+    for (let i = 0; i < 30; i++)
+      useAgentCenterStore
+        .getState()
+        .acceptSharedTabs(JSON.parse(JSON.stringify(snapshot)));
+    expect(notifications).toBe(0);
+    expect(useAgentCenterStore.getState()).toBe(baseline);
+  } finally {
+    stop();
+  }
+});

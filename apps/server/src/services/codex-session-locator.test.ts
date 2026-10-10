@@ -19,14 +19,21 @@ function writeSession(
   id: string,
   source: unknown,
   cwd = "/workspace/shared",
+  timestamp = "2026-08-19T00:00:00.000Z",
+  metadataTimestamp?: string,
 ): string {
   const path = join(sessionsRoot, `${name}.jsonl`);
   writeFileSync(
     path,
     `${JSON.stringify({
-      timestamp: "2026-08-19T00:00:00.000Z",
+      timestamp,
       type: "session_meta",
-      payload: { id, cwd, source },
+      payload: {
+        id,
+        cwd,
+        source,
+        ...(metadataTimestamp ? { timestamp: metadataTimestamp } : {}),
+      },
     })}\n`,
   );
   return path;
@@ -569,6 +576,60 @@ test("CodexSessionLocator uses the explicit resume session id before same-direct
   }
 });
 
+test("CodexSessionLocator follows an explicit resumed ID when its original cwd differs from the active pane", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-session-resume-cwd-change-"));
+  const sessionsRoot = join(root, "sessions");
+  const procRoot = join(root, "proc");
+  mkdirSync(sessionsRoot, { recursive: true });
+  mkdirSync(procRoot, { recursive: true });
+
+  try {
+    const selectedId = "codex-resumed-thread";
+    writeSession(
+      sessionsRoot,
+      `rollout-${selectedId}`,
+      selectedId,
+      "cli",
+      "/workspace/project",
+    );
+    writeSession(
+      sessionsRoot,
+      "stale-pane-thread",
+      "codex-stale-pane-thread",
+      "cli",
+      "/workspace/project/docs",
+    );
+
+    const paneRoot = join(procRoot, "851");
+    mkdirSync(join(paneRoot, "task", "851"), { recursive: true });
+    writeFileSync(join(paneRoot, "task", "851", "children"), "852\n");
+    const codexRoot = join(procRoot, "852");
+    mkdirSync(join(codexRoot, "task", "852"), { recursive: true });
+    writeFileSync(join(codexRoot, "task", "852", "children"), "");
+    writeFileSync(
+      join(codexRoot, "cmdline"),
+      `/usr/local/bin/codex\0resume\0${selectedId}\0`,
+    );
+    exposeProcessWorkingDirectory(procRoot, 852, "/workspace/project/docs");
+
+    const locator = new CodexSessionLocator({
+      procRoot,
+      sessionsRoot,
+      resolveTmuxPanePid: async () => 851,
+    });
+
+    assert.equal(
+      await locator.resolve({
+        tmuxTarget: "tmux-resumed-codex-different-cwd",
+        workingDirectory: "/workspace/project/docs",
+      }),
+      selectedId,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("CodexSessionLocator reads only the explicitly resumed rollout among unrelated history", async () => {
   const root = mkdtempSync(join(tmpdir(), "codex-session-targeted-resume-"));
   const sessionsRoot = join(root, "sessions");
@@ -699,6 +760,99 @@ test("CodexSessionLocator ignores newer subagent JSONL files held by the same Co
         workingDirectory: "/workspace/shared",
       }),
       "codex-parent-session",
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("CodexSessionLocator reads an exact registered history ID after a Codex restart", async () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-registered-old-history-"));
+  const sessionsRoot = join(root, "sessions");
+  const shellSnapshotsRoot = join(root, "snapshots");
+  const procRoot = join(root, "proc");
+  mkdirSync(sessionsRoot, { recursive: true });
+  mkdirSync(shellSnapshotsRoot, { recursive: true });
+  mkdirSync(procRoot, { recursive: true });
+
+  try {
+    const selectedId = "codex-registered-old";
+    const processStart = Date.parse("2026-10-08T13:26:42.000Z");
+    const oldCreationTime = "2026-08-19T00:00:00.000Z";
+    writeSession(
+      sessionsRoot,
+      "registered-old",
+      selectedId,
+      "cli",
+      "/workspace/shared",
+      oldCreationTime,
+      oldCreationTime,
+    );
+    writeSession(
+      sessionsRoot,
+      "same-directory-newer",
+      "codex-same-directory-newer",
+      "cli",
+      "/workspace/shared",
+      "2026-10-08T13:26:42.000Z",
+    );
+    writeSession(
+      sessionsRoot,
+      "other-directory",
+      "codex-other-directory",
+      "cli",
+      "/workspace/other",
+      oldCreationTime,
+      oldCreationTime,
+    );
+    writeSession(
+      sessionsRoot,
+      "subagent",
+      "codex-registered-subagent",
+      { subagent: {} },
+      "/workspace/shared",
+      oldCreationTime,
+      oldCreationTime,
+    );
+
+    mkdirSync(join(procRoot, "1201", "task", "1201"), { recursive: true });
+    writeFileSync(join(procRoot, "1201", "task", "1201", "children"), "");
+    exposeCodexCommand(procRoot, 1201);
+    exposeLinuxProcessStartTime(procRoot, 1201, processStart);
+    exposeProcessWorkingDirectory(procRoot, 1201, "/workspace/shared");
+
+    const locator = new CodexSessionLocator({
+      clockTicksPerSecond: 100,
+      procRoot,
+      sessionsRoot,
+      shellSnapshotsRoot,
+      resolveTmuxPanePid: async () => 1201,
+      resolveTmuxActivePanePid: async () => 1201,
+    });
+    const input = {
+      tmuxTarget: "%1",
+      tmuxSession: "existing-codex-session",
+      workingDirectory: "/workspace/stale",
+    };
+
+    assert.equal(await locator.resolve(input), undefined);
+    assert.equal(
+      await locator.resolve({ ...input, historySessionId: selectedId }),
+      selectedId,
+    );
+    assert.equal(
+      await locator.resolve({
+        ...input,
+        historySessionId: "codex-other-directory",
+      }),
+      undefined,
+    );
+    assert.equal(
+      await locator.resolve({
+        ...input,
+        historySessionId: "codex-registered-subagent",
+      }),
+      undefined,
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

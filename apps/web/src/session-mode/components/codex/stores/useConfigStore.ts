@@ -44,6 +44,19 @@ export const SANDBOX_APPROVAL_MAP: Record<SandboxMode, AskForApproval> = {
   "danger-full-access": "never",
 };
 
+export const SANDBOX_APPROVALS_REVIEWER_MAP: Record<
+  SandboxMode,
+  ApprovalsReviewer
+> = {
+  "read-only": "user",
+  "workspace-write": "auto_review",
+  "danger-full-access": "user",
+};
+
+export const approvalsReviewerForSandbox = (
+  sandbox: SandboxMode,
+): ApprovalsReviewer => SANDBOX_APPROVALS_REVIEWER_MAP[sandbox];
+
 export const useConfigStore = create<ConfigStore>()(
   persist(
     (set) => ({

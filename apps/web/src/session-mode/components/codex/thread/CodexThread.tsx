@@ -1,3 +1,4 @@
+import { pruneRowState } from "./pruneRowState";
 import { TranscriptInspectionContext } from "./inspection";
 import { CodexAccessNotice } from "./CodexAccessNotice";
 import { CodexContentOwner } from "../presentation/ownerContext";
@@ -19,6 +20,7 @@ import type { ServerNotification } from "@session/bindings";
 import { useCodexStore } from "@session/components/codex/stores";
 import { ScrollArea } from "@session/components/ui/scroll-area";
 import { EventItem } from "../items";
+import { AgentMessageItem } from "../items/AgentMessageItem";
 import { ApprovalItem } from "../items/ApprovalItem";
 import { CommandActionSummaryItem } from "../items/CommandActionSummaryItem";
 import { ElicitationItem } from "../items/ElicitationItem";
@@ -180,6 +182,9 @@ const CodexTranscript = memo(function CodexTranscript({
   );
   const historyError = useCodexStore((s) => s.historyErrorMap[activeThreadId]);
   const events = useCodexStore((s) => s.events[activeThreadId] ?? EMPTY_EVENTS);
+  const streamingMessage = useCodexStore(
+    (s) => s.streamingAgentMessages?.[activeThreadId],
+  );
   const turnTiming = useCodexStore((s) => s.turnTimingMap[activeThreadId]);
   const completedHookTurns = useMemo(() => {
     const keys = projectNativeCompletedHookTurns(events);
@@ -350,17 +355,17 @@ const CodexTranscript = memo(function CodexTranscript({
   const newest = useRef<string | undefined>(undefined);
   useEffect(() => {
     const last = rows.at(-1);
-    const signature = last
-      ? last.activity
+    // Keep only identities/revisions here, never a serialized message or tool
+    // result. Live output is outside retained rows and needs its own revision.
+    const signature = streamingMessage
+      ? `live-${streamingMessage.turnId}-${streamingMessage.itemId}-${streamingMessage.length}`
+      : last?.activity
         ? `${last.key}:${last.activity.revision}`
-        : JSON.stringify(
-            last.item.kind === "event" ? last.item.event : last.item.actions,
-          )
-      : undefined;
+        : last?.key;
     if (newest.current && signature !== newest.current && !pinned.current)
       setHasNewMessages(true);
     newest.current = signature;
-  }, [rows]);
+  }, [rows, streamingMessage]);
   const viewport = useCallback(
     () =>
       rootRef.current?.querySelector<HTMLDivElement>(
@@ -414,6 +419,21 @@ const CodexTranscript = memo(function CodexTranscript({
         ? Math.max(0, rows.length * 160 - 600)
         : (reading.current?.scrollTop ?? 0),
   });
+  useEffect(() => {
+    const visibleKeys = new Set(
+      virtualizer
+        .getVirtualItems()
+        .map((item) => rows[item.index]?.key)
+        .filter((key): key is string => !!key),
+    );
+    pruneRowState(
+      disclosure.current,
+      // A collapsed turn still owns its activity disclosures. Retain those
+      // keys while their source rows exist, within the same bounded cache.
+      [...activityRows, ...rows].map((row) => row.key),
+      visibleKeys,
+    );
+  }, [activityRows, rows, virtualizer]);
   // Compensate rows entirely above the reader. Growing the partly visible row
   // itself must keep its top fixed, rather than jumping by its added height.
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) =>
@@ -730,7 +750,7 @@ const CodexTranscript = memo(function CodexTranscript({
       if (pinned.current) jumpToBottom();
     });
     return () => cancelAnimationFrame(frame);
-  }, [events, totalSize, jumpToBottom]);
+  }, [rows, totalSize, jumpToBottom]);
   useLayoutEffect(() => {
     const element = viewport();
     if (!element) return;
@@ -882,7 +902,7 @@ const CodexTranscript = memo(function CodexTranscript({
       positions.delete(activeThreadId);
       positions.set(activeThreadId, {
         measurements:
-          virtualizer.measurementsCache.length <= 10000
+          virtualizer.measurementsCache.length <= 3000
             ? [...virtualizer.measurementsCache]
             : [],
         width: window.innerWidth,
@@ -1029,6 +1049,24 @@ const CodexTranscript = memo(function CodexTranscript({
                 );
               })}
             </div>
+            {streamingMessage && (
+              <div className="py-1" data-codex-live-message>
+                <AgentMessageItem
+                  text=""
+                  threadId={activeThreadId}
+                  itemId={streamingMessage.itemId}
+                  turnId={streamingMessage.turnId}
+                  streaming
+                  streamingSegments={
+                    streamingMessage.preview
+                      ? undefined
+                      : streamingMessage.segments
+                  }
+                  streamingCurrent={streamingMessage.current}
+                  streamingPreview={streamingMessage.preview}
+                />
+              </div>
+            )}
             <div className="space-y-2">
               <CodexDeliveryEchoes threadId={activeThreadId} events={events} />
               {loading && !loaded && events.length === 0 && (

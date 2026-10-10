@@ -306,3 +306,95 @@ it("settles unfinished commands at turn termination without inventing exit codes
     ],
   });
 });
+
+it("renders a command recovered only from a completed turn item", () => {
+  const command = {
+    id: "cmd",
+    type: "commandExecution",
+    command: "pnpm test",
+    commandActions: [],
+    aggregatedOutput: "passed",
+  };
+  const events = [
+    { method: "item/completed", params: { item: command } },
+    { method: "turn/completed", params: { turn: { id: "t", items: [] } } },
+  ] as unknown as ServerNotification[];
+
+  const commandGroup = deriveRenderItems(events).find(
+    (row) => row.kind === "cmdGroup",
+  );
+
+  expect(commandGroup).toMatchObject({
+    kind: "cmdGroup",
+    actions: [{ type: "unknown", command: "pnpm test" }],
+    actionSources: [{ commandItemId: "cmd", aggregatedOutput: "passed" }],
+    completed: true,
+  });
+});
+
+it("keeps a completed command group before the completed assistant message that follows it", () => {
+  const command = {
+    id: "cmd",
+    type: "commandExecution",
+    command: "pnpm test",
+    commandActions: [],
+    aggregatedOutput: "passed",
+  };
+  const message = {
+    id: "reply",
+    type: "agentMessage",
+    text: "Tests passed.",
+  };
+  const events = [
+    { method: "item/completed", params: { item: command } },
+    { method: "item/completed", params: { item: message } },
+  ] as unknown as ServerNotification[];
+
+  const rows = deriveRenderItems(events);
+
+  expect(rows).toMatchObject([
+    {
+      kind: "cmdGroup",
+      actionSources: [{ commandItemId: "cmd", aggregatedOutput: "passed" }],
+      completed: true,
+    },
+    {
+      kind: "event",
+      event: {
+        method: "item/completed",
+        params: { item: { id: "reply", type: "agentMessage" } },
+      },
+    },
+  ]);
+});
+
+it("retains projected command state without synthesizing output from a body-free cursor", () => {
+  const item = {
+    type: "commandExecution",
+    id: "cmd",
+    command: "checks",
+    commandActions: [],
+    aggregatedOutput: null,
+    status: "inProgress",
+    transcriptMetadataOnly: true,
+  };
+  const rows = deriveRenderItems([
+    {
+      method: "item/started",
+      params: { threadId: "owner", turnId: "turn", item },
+    },
+    {
+      method: "item/commandExecution/outputDelta",
+      params: { threadId: "owner", turnId: "turn", itemId: "cmd" },
+    },
+  ] as unknown as ServerNotification[]);
+  expect(rows.find((row) => row.kind === "cmdGroup")).toMatchObject({
+    actionSources: [
+      {
+        aggregatedOutput: null,
+        status: "inProgress",
+        transcriptMetadataOnly: true,
+      },
+    ],
+  });
+});

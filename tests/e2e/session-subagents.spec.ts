@@ -38,7 +38,7 @@ async function setup(page: Page, options: { oldRound?: boolean; approval?: boole
     if (path.endsWith("roles")) return r.fulfill({ json: { roles: [{ name: "reviewer", description: "审查变更" }] } });
     return r.fulfill({ json: { results: body.targets.map((t: any) => ({ ...t, phase: "requested" })) } });
   });
-  await page.route("**/api/session/api/codex/thread/turns/list", async r => {
+  await page.route(/\/api\/session\/api\/codex\/thread\/turns\/list(?:\?.*)?$/, async r => {
     const body = r.request().postDataJSON(), child = children.find(c => c.id === body.threadId);
     if (!child) return r.fallback();
     return r.fulfill({ json: { data: child.turns, nextCursor: null } });

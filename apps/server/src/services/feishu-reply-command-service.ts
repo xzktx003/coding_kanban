@@ -41,7 +41,10 @@ export type FeishuReplyCommandOutcome =
   | "ignored_invalid_image"
   | "ignored_unavailable";
 
+import type { SessionCodexFeishuReplyInput } from "./session-codex-feishu-reply-service.js";
+
 interface FeishuReplyCommandServiceOptions {
+  sessionMode?: { send(input: SessionCodexFeishuReplyInput): Promise<void> };
   allowedUserId: string;
   settings: { get(): FeishuNotificationSettingsResponse };
   bindings: {
@@ -89,6 +92,7 @@ function isAvailableCodexSession(session: AgentSessionRecord): boolean {
 }
 
 export class FeishuReplyCommandService {
+  readonly #sessionMode: FeishuReplyCommandServiceOptions["sessionMode"];
   readonly #allowedUserId: string;
   readonly #settings: FeishuReplyCommandServiceOptions["settings"];
   readonly #bindings: FeishuReplyCommandServiceOptions["bindings"];
@@ -102,6 +106,7 @@ export class FeishuReplyCommandService {
       ? options.allowedUserId
       : "";
     this.#settings = options.settings;
+    this.#sessionMode = options.sessionMode;
     this.#bindings = options.bindings;
     this.#registry = options.registry;
     this.#images = options.images;
@@ -149,6 +154,7 @@ export class FeishuReplyCommandService {
       parentBinding &&
       (parentBinding.chatId !== event.chat_id ||
         parentBinding.sessionId !== rootBinding.sessionId ||
+        parentBinding.sessionModeThreadId !== rootBinding.sessionModeThreadId ||
         (parentBinding.codexThreadId &&
           rootBinding.codexThreadId &&
           parentBinding.codexThreadId !== rootBinding.codexThreadId))
@@ -181,6 +187,33 @@ export class FeishuReplyCommandService {
       return event.message_type === "image"
         ? "ignored_invalid_image"
         : "ignored_invalid_text";
+    }
+
+    if (binding.sessionModeThreadId) {
+      if (!this.#sessionMode) return "ignored_unavailable";
+      this.#inFlightMessageIds.add(event.message_id);
+      try {
+        const image = imageKey
+          ? await this.#images.download({
+              messageId: event.message_id,
+              imageKey,
+            })
+          : undefined;
+        await this.#sessionMode.send({
+          messageId: event.message_id,
+          threadId: binding.sessionModeThreadId,
+          text: image ? DEFAULT_FEISHU_IMAGE_PROMPT : prompt!,
+          ...(image ? { image } : {}),
+        });
+        this.#bindings.recordProcessedReply({
+          messageId: event.message_id,
+          parent: binding,
+          codexThreadId: binding.sessionModeThreadId,
+        });
+        return "delivered";
+      } finally {
+        this.#inFlightMessageIds.delete(event.message_id);
+      }
     }
 
     let session: AgentSessionRecord;

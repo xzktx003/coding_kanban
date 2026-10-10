@@ -14,6 +14,8 @@ import {
   nativeMcpResultPresentation,
 } from "../presentation/nativeToolSemantics";
 import { NativeToolDisclosure } from "./NativeToolDisclosure";
+import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
+import { TranscriptDetailsNotice } from "./TranscriptDetailsNotice";
 export function McpToolCallItem({
   item,
   termination,
@@ -24,6 +26,7 @@ export function McpToolCallItem({
   const { t, i18n } = useTranslation("thread"),
     [raw, setRaw] = useState(false);
   if (item.type !== "mcpToolCall") return null;
+  const metadataOnly = isTranscriptMetadataOnly(item);
   const running = item.status === "inProgress" && !termination,
     language = i18n?.language ?? "zh",
     chinese = language.startsWith("zh");
@@ -45,10 +48,12 @@ export function McpToolCallItem({
     error: item.error,
   };
   const error = item.error?.message;
-  const presentation = nativeMcpResultPresentation(
-    item.result?.content,
-    item.result?.structuredContent,
-  );
+  const presentation = metadataOnly
+    ? { content: [], structured: null }
+    : nativeMcpResultPresentation(
+        item.result?.content,
+        item.result?.structuredContent,
+      );
   const hasContent = !!presentation.content.length,
     structured = presentation.structured;
   return (
@@ -68,7 +73,7 @@ export function McpToolCallItem({
                 {nativeToolJson(structured)}
               </pre>
             )}
-            {!hasContent && structured == null && !error && (
+            {!metadataOnly && !hasContent && structured == null && !error && (
               <p>
                 {chinese ? "工具未返回任何内容" : "Tool returned no content"}
               </p>
@@ -84,23 +89,26 @@ export function McpToolCallItem({
                 )}
               </p>
             )}
-            <button
-              type="button"
-              className="codex-native-tool-raw-button"
-              aria-label={rawLabel}
-              onClick={() => setRaw(true)}
-            >
-              <NativeToolIcon name="raw" />
-            </button>
+            {!metadataOnly && (
+              <button
+                type="button"
+                className="codex-native-tool-raw-button"
+                aria-label={rawLabel}
+                onClick={() => setRaw(true)}
+              >
+                <NativeToolIcon name="raw" />
+              </button>
+            )}
           </>
         )}
       </NativeToolDisclosure>
+      {metadataOnly && <TranscriptDetailsNotice />}
       {progress && (
         <p role="status" className="codex-tool-progress">
           {progress}
         </p>
       )}
-      <Dialog open={raw} onOpenChange={setRaw}>
+      <Dialog open={raw && !metadataOnly} onOpenChange={setRaw}>
         <DialogContent className="codex-file-preview max-w-[90vw] max-h-[90dvh] overflow-auto">
           <DialogTitle>
             {chinese

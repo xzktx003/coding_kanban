@@ -745,7 +745,11 @@ export async function registerAgentSessionRoutes(
       });
     }
 
-    const sessionId = await resolveCodexSessionId(agentSession);
+    const sessionId = await resolveActiveCodexSessionId(
+      agentSession,
+      { registry, codexSessionLocator },
+      { historyOnly: true },
+    );
     return codexTranscriptService.read({
       sessionId,
       workingDirectory: resolveCodexWorkingDirectory(agentSession, sessionId),

@@ -108,7 +108,7 @@ function formatTimestamp(timestamp: string): string {
     return "";
   }
   const value = new Date(timestamp);
-  return Number.isNaN(value.getTime()) ? timestamp : value.toLocaleTimeString();
+  return Number.isNaN(value.getTime()) ? timestamp : value.toLocaleString();
 }
 
 function getTranscriptAgentLabel(

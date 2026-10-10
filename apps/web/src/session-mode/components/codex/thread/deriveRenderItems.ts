@@ -1,4 +1,5 @@
 import type { ServerNotification } from "@session/bindings";
+import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
 import type {
   CommandAction,
   ThreadItem,
@@ -16,6 +17,7 @@ export type CommandActionSource = {
   startedAtMs?: number | null;
   exitCode?: number | null;
   termination?: TurnStatus;
+  transcriptMetadataOnly?: boolean;
 };
 
 /** Intermediate render item: either a raw event or an aggregated command group. */
@@ -68,6 +70,9 @@ export function deriveRenderItems(events: ServerNotification[]): RenderItem[] {
           ? event.params.startedAtMs
           : null,
       exitCode: item.exitCode,
+      ...(isTranscriptMetadataOnly(item)
+        ? { transcriptMetadataOnly: true }
+        : {}),
     };
     const key = keyOf(event.params.threadId, event.params.turnId, item.id);
     sourcesById.set(key, source);
@@ -101,6 +106,7 @@ export function deriveRenderItems(events: ServerNotification[]): RenderItem[] {
           status: item.status,
           durationMs: item.durationMs,
           exitCode: item.exitCode,
+          transcriptMetadataOnly: isTranscriptMetadataOnly(item),
         });
       if (
         !finalized.has(key) &&
@@ -165,6 +171,7 @@ export function deriveRenderItems(events: ServerNotification[]): RenderItem[] {
           status: event.params.item.status,
           durationMs: event.params.item.durationMs,
           exitCode: event.params.item.exitCode,
+          transcriptMetadataOnly: isTranscriptMetadataOnly(event.params.item),
         });
         delete source.termination;
       }
@@ -180,6 +187,7 @@ export function deriveRenderItems(events: ServerNotification[]): RenderItem[] {
       );
       if (
         source &&
+        typeof event.params.delta === "string" &&
         !finalized.has(
           keyOf(
             event.params.threadId,

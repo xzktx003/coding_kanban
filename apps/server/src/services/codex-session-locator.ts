@@ -41,6 +41,7 @@ interface CodexSessionLocatorOptions {
 
 interface ResolveCodexSessionInput {
   tmuxTarget: string;
+  historySessionId?: string;
   tmuxSession?: string;
   tmuxClientProcessId?: number;
   tmuxPaneProcessId?: number;
@@ -108,7 +109,13 @@ function readOpenSession(path: string): OpenSessionCandidate | null {
     const source = record.payload.source;
     const subagent =
       source !== null && typeof source === "object" && "subagent" in source;
-    return { id, cwd, mtimeMs: statSync(path).mtimeMs, path, subagent };
+    return {
+      id,
+      cwd,
+      mtimeMs: statSync(path).mtimeMs,
+      path,
+      subagent,
+    };
   } catch {
     return null;
   } finally {
@@ -715,18 +722,17 @@ export class CodexSessionLocator {
     }
 
     const sessionFiles = listSessionFiles(this.sessionsRoot);
+    // A resumed thread retains the cwd stored when it was created. The active
+    // Codex command line is an exact, read-only history identity even when the
+    // shell pane has since changed directories; still require a matching
+    // session header and reject subagent rollouts.
     for (const sessionId of explicitResumeSessionIds) {
       for (const path of sessionFiles) {
         if (!path.includes(sessionId)) {
           continue;
         }
         const candidate = this.readCachedSessionCandidate(path);
-        if (
-          candidate?.id === sessionId &&
-          !candidate.subagent &&
-          (!normalizedDirectory ||
-            resolve(candidate.cwd) === normalizedDirectory)
-        ) {
+        if (candidate?.id === sessionId && !candidate.subagent) {
           return candidate.id;
         }
       }
@@ -743,9 +749,9 @@ export class CodexSessionLocator {
         ),
       );
 
-    // `codex resume <session-id>` exposes the selected conversation directly
-    // in the pane process tree. Prefer that exact identity over file recency or
-    // shell-snapshot timing, while still validating the rollout and cwd.
+    // Prefer an explicitly resumed identity over candidates matched by cwd or
+    // shell-snapshot timing. The exact file lookup above handles the common
+    // path; this also covers a rollout already open in the pane process tree.
     for (const sessionId of explicitResumeSessionIds) {
       if (
         openCandidates.some((candidate) => candidate.id === sessionId) ||
@@ -787,6 +793,22 @@ export class CodexSessionLocator {
       if (matchingSession) {
         return matchingSession.id;
       }
+    }
+
+    // Shell snapshots can be regenerated and Codex can close rollout handles
+    // between writes. For history display only, an exact registered ID remains
+    // safe when the active pane still runs Codex and the rollout metadata
+    // matches that pane's current directory. Never use this fallback for input
+    // routing or when another pane/process kind is active.
+    if (
+      input.historySessionId &&
+      normalizedDirectory &&
+      codexProcessIds.length > 0
+    ) {
+      const registeredHistory = sessionCandidates.find(
+        (candidate) => candidate.id === input.historySessionId,
+      );
+      if (registeredHistory) return registeredHistory.id;
     }
 
     // Recent Codex builds append rollout JSONL through short-lived handles

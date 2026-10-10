@@ -147,7 +147,7 @@ for (const width of [375, 1440])
     let failB = true;
     const reads: string[] = [];
     await page.route(
-      "**/api/session/api/codex/thread/turns/list",
+      (url) => url.pathname.endsWith("/api/codex/thread/turns/list"),
       async (route) => {
         const { threadId: id, cursor, limit } = route.request().postDataJSON();
         reads.push(id);

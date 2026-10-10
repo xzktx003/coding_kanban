@@ -9,6 +9,8 @@ import { startFollowedSessionStatusSync } from "./services/followedSessionStatus
 import { startFollowedSessionHistorySync } from "./services/followedSessionHistorySync";
 import { startSessionTranscriptCache } from "./services/sessionTranscriptCache";
 import { startFollowedSessionAuxSync } from "./services/followedSessionAuxSync";
+import { startSessionMemoryGovernor } from "./services/sessionMemoryGovernor";
+import { startSessionTranscriptRetention } from "./services/sessionTranscriptRetention";
 import { useCodexStore } from "./components/codex/stores";
 import { useCCStore } from "./stores/cc";
 import { useAttentionStorageSync } from "./hooks/useSessionReadReceipt";
@@ -35,6 +37,8 @@ function SessionWorkbenchContent({
   useComposerViewport();
   useAttentionStorageSync();
   useEffect(() => startSessionTranscriptCache(), []);
+  useEffect(() => startSessionTranscriptRetention(), []);
+  useEffect(() => startSessionMemoryGovernor(), []);
   useEffect(() => {
     const tabs = startSessionTabsSync(),
       projects = startSessionProjectsSync();

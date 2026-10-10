@@ -1,3 +1,4 @@
+import { projectCodexChatValue } from "@agent-orchestrator/shared";
 import { registerSessionFollowupRoutes } from "./session-followups.js";
 import { registerSessionSubagentRoutes } from "./session-subagents.js";
 import { registerSessionProjectsRoutes } from "./session-projects.js";
@@ -14,6 +15,10 @@ import { projectCodexPriorConversation } from "../services/codex-cloud-history.j
 import { CodexHostCompanionCredential, prepareCodexHostCompanion } from "../services/codex-host-companion.js";
 import type { VsCodeWebManager } from "../services/vscode-web-manager.js";
 import { saveSessionAttachment } from "../services/session-attachments.js";
+import { SessionCodexFeishuReplyService } from "../services/session-codex-feishu-reply-service.js";
+import type { FeishuReplyBindingStore } from "../services/feishu-reply-binding-store.js";
+import { SessionCodexFeishuNotifier } from "../services/session-codex-feishu-notifier.js";
+import type { FeishuCompletionSenderLike } from "../services/agent-completion-feishu-notifier.js";
 import { resolve } from "node:path";
 import { Readable } from "node:stream";
 import type { FastifyInstance } from "fastify";
@@ -26,6 +31,11 @@ interface SessionModeRouteOptions {
   projects?: () => string[];
   ensureRuntime?: () => Promise<string | undefined>;
   vsCodeWebManager?: VsCodeWebManager;
+  completionNotifications?: {
+    settings: { get(): { configured: boolean; enabled: boolean } };
+    sender: FeishuCompletionSenderLike;
+    bindings?: Pick<FeishuReplyBindingStore, "record">;
+  };
 }
 
 function validateOrigin(origin: string): URL {
@@ -46,10 +56,120 @@ function validateOrigin(origin: string): URL {
   return url;
 }
 
+const CHAT_PROJECTION_VIEW = "chat";
+const MAX_CHAT_SSE_FRAME_BYTES = 16 * 1024 * 1024;
+const CHAT_PROJECTION_ERROR_EVENT = "session-projection-error";
+const chatHistoryPaths = new Set([
+  "/api/codex/thread/read",
+  "/api/codex/thread/turns/list",
+  "/api/codex/thread/items/list",
+  "/api/codex/thread/metadata",
+]);
+
+function splitSessionSuffix(origin: string, suffix: string) {
+  const url = new URL(suffix, origin);
+  const chatProjection = url.searchParams.get("view") === CHAT_PROJECTION_VIEW;
+  if (chatProjection) url.searchParams.delete("view");
+  const upstreamSuffix = `${url.pathname}${url.search}`;
+  return { chatProjection, upstreamSuffix };
+}
+
+function projectChatEnvelope(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const envelope = value as Record<string, unknown>;
+  if (envelope.event !== "codex:notification") return value;
+  const payload = projectCodexChatValue(envelope.payload);
+  return payload === envelope.payload ? value : { ...envelope, payload };
+}
+
+function projectionErrorFrame(reason: string): string {
+  return `event: ${CHAT_PROJECTION_ERROR_EVENT}\ndata: ${JSON.stringify({ error: reason })}\n\n`;
+}
+
+function projectSseFrame(frame: string): string {
+  if (Buffer.byteLength(frame) > MAX_CHAT_SSE_FRAME_BYTES)
+    return projectionErrorFrame(
+      "Session event frame exceeds chat projection limit",
+    );
+  const data: string[] = [];
+  const passthrough: string[] = [];
+  for (const line of frame.split(/\r?\n/)) {
+    if (line.startsWith("data:")) {
+      data.push(line.slice(5).replace(/^ /, ""));
+    } else if (line) {
+      passthrough.push(line);
+    }
+  }
+  if (!data.length) return `${frame}\n\n`;
+  try {
+    const projected = projectChatEnvelope(JSON.parse(data.join("\n")));
+    return `${passthrough.length ? `${passthrough.join("\n")}\n` : ""}data: ${JSON.stringify(projected)}\n\n`;
+  } catch {
+    return Buffer.byteLength(frame) > 64 * 1024
+      ? projectionErrorFrame("Invalid oversized session event frame")
+      : `${frame}\n\n`;
+  }
+}
+
+function findSseBoundary(buffer: string): { index: number; length: number } {
+  const lf = buffer.indexOf("\n\n");
+  const crlf = buffer.indexOf("\r\n\r\n");
+  if (lf < 0) return { index: crlf, length: crlf < 0 ? 0 : 4 };
+  if (crlf < 0 || lf < crlf) return { index: lf, length: 2 };
+  return { index: crlf, length: 4 };
+}
+
+async function* projectChatSseStream(
+  body: ReadableStream<Uint8Array>,
+): AsyncGenerator<Buffer> {
+  const upstream = Readable.fromWeb(
+    body as Parameters<typeof Readable.fromWeb>[0],
+  );
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for await (const chunk of upstream) {
+      buffer += decoder.decode(chunk as Buffer, { stream: true });
+      let boundary = findSseBoundary(buffer);
+      while (boundary.index >= 0) {
+        const frame = buffer.slice(0, boundary.index);
+        buffer = buffer.slice(boundary.index + boundary.length);
+        const projected = projectSseFrame(frame);
+        yield Buffer.from(projected);
+        if (projected.startsWith(`event: ${CHAT_PROJECTION_ERROR_EVENT}\n`))
+          return;
+        boundary = findSseBoundary(buffer);
+      }
+      if (Buffer.byteLength(buffer) > MAX_CHAT_SSE_FRAME_BYTES) {
+        yield Buffer.from(
+          projectionErrorFrame(
+            "Session event frame exceeds chat projection limit",
+          ),
+        );
+        return;
+      }
+    }
+    buffer += decoder.decode();
+    let boundary = findSseBoundary(buffer);
+    while (boundary.index >= 0) {
+      const frame = buffer.slice(0, boundary.index);
+      buffer = buffer.slice(boundary.index + boundary.length);
+      const projected = projectSseFrame(frame);
+      yield Buffer.from(projected);
+      if (projected.startsWith(`event: ${CHAT_PROJECTION_ERROR_EVENT}\n`))
+        return;
+      boundary = findSseBoundary(buffer);
+    }
+    if (buffer) yield Buffer.from(projectSseFrame(buffer));
+  } finally {
+    upstream.destroy();
+  }
+}
+
 export function registerSessionModeRoutes(
   app: FastifyInstance,
   options: SessionModeRouteOptions = {},
-): void {
+): SessionCodexFeishuReplyService {
   registerSessionGitHunkRoutes(app);
   registerSessionGitReviewRoutes(app);
   registerSessionGuardianDenialRoutes(app, {
@@ -106,6 +226,76 @@ export function registerSessionModeRoutes(
     fetch: fetchUpstream,
     file: options.attachmentRoot ? resolve(options.attachmentRoot, "..", "codex-saved-patches.json") : undefined,
   });
+  const completionNotifier = options.completionNotifications
+    ? new SessionCodexFeishuNotifier({
+        ...options.completionNotifications,
+        deliveryRecorder: options.completionNotifications.bindings
+          ? {
+              record: (event, delivery) =>
+                options.completionNotifications!.bindings!.record({
+                  sessionId: event.sessionId,
+                  sessionModeThreadId: event.sessionModeThreadId,
+                  completionId: event.completionId ?? event.completedAt,
+                  messages: delivery.messages,
+                }),
+            }
+          : undefined,
+        file: options.attachmentRoot
+          ? resolve(
+              options.attachmentRoot,
+              "..",
+              "codex-completion-notifications.json",
+            )
+          : undefined,
+        readThread: async (threadId, turnId) => {
+          if (!origin) throw new Error("会话服务尚未连接");
+          const request = async (path: string, body: unknown) => {
+            const response = await fetchUpstream(
+              `${origin}/api/codex/thread/${path}`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(15000),
+              },
+            );
+            if (!response.ok) throw new Error("无法读取任务完成记录");
+            return response.json() as Promise<any>;
+          };
+          const metadata = await request("metadata", { threadId });
+          const thread = metadata.thread;
+          if (!thread || thread.id !== threadId)
+            throw new Error("任务会话身份不匹配");
+          if (thread.parentThreadId || thread.source?.subAgent) return metadata;
+          let cursor: string | null = null;
+          const seen = new Set<string>();
+          do {
+            const page = await request("turns/list", {
+              threadId,
+              cursor,
+              limit: 20,
+              sortDirection: "desc",
+              itemsView: "full",
+            });
+            if (!Array.isArray(page.data)) throw new Error("任务历史格式无效");
+            const turn = page.data.find((turn: any) => turn.id === turnId);
+            if (turn) return { thread: { ...thread, turns: [turn] } };
+            cursor = page.nextCursor ?? null;
+            if (cursor !== null) {
+              if (typeof cursor !== "string" || seen.has(cursor))
+                throw new Error("任务历史游标无效");
+              seen.add(cursor);
+            }
+          } while (cursor !== null);
+          throw new Error("任务完成记录暂未写入");
+        },
+        logError: (error) =>
+          app.log.warn(
+            { err: error },
+            "Session Feishu notification unavailable",
+          ),
+      })
+    : undefined;
   const followups = registerSessionFollowupRoutes(app, {
     origin: () => origin,
     fetch: fetchUpstream,
@@ -113,8 +303,31 @@ export function registerSessionModeRoutes(
       ? resolve(options.attachmentRoot, "..", "codex-followups.json")
       : undefined,
     autoStart: Boolean(options.attachmentRoot),
+    completionNotifier,
   });
-  registerSessionSubagentRoutes(app, { origin: () => origin, fetch: fetchUpstream, stop: (id, turn) => followups.stop(id, turn) });
+  const replyService = new SessionCodexFeishuReplyService({
+    attachmentRoot: options.attachmentRoot,
+    submit: (input) => followups.enqueue(input),
+    readThread: async (threadId) => {
+      if (!origin) throw new Error("会话服务尚未连接");
+      const response = await fetchUpstream(
+        `${origin}/api/codex/thread/metadata`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ threadId }),
+          signal: AbortSignal.timeout(15000),
+        },
+      );
+      if (!response.ok) throw new Error("无法读取原会话");
+      return response.json();
+    },
+  });
+  registerSessionSubagentRoutes(app, {
+    origin: () => origin,
+    fetch: fetchUpstream,
+    stop: (id, turn) => followups.stop(id, turn),
+  });
   registerWorkspaceFileRoutes(app, {
     trashHome: options.attachmentRoot
       ? resolve(options.attachmentRoot, "..", "file-trash")
@@ -235,6 +448,10 @@ export function registerSessionModeRoutes(
       }
       if (decodeURIComponent(pathname).startsWith("/api/internal/"))
         return reply.code(403).send({ error: "Internal session API" });
+      const { chatProjection, upstreamSuffix } = splitSessionSuffix(
+        origin,
+        suffix,
+      );
       const controller = new AbortController();
       // ACP prompts and local inference can legitimately run for several minutes.
       const longRunning = [
@@ -248,7 +465,7 @@ export function registerSessionModeRoutes(
       const abort = () => controller.abort();
       request.raw.on("aborted", abort);
       try {
-        const response = await fetchUpstream(`${origin}${suffix}`, {
+        const response = await fetchUpstream(`${origin}${upstreamSuffix}`, {
           method: request.method,
           headers:
             request.method === "POST"
@@ -295,10 +512,24 @@ export function registerSessionModeRoutes(
             });
           return reply.send(result);
         }
+        if (
+          response.ok &&
+          chatProjection &&
+          request.method === "POST" &&
+          chatHistoryPaths.has(pathname)
+        ) {
+          return reply.send(projectCodexChatValue(await response.json()));
+        }
         if (!response.body) return reply.send();
-        const stream = Readable.fromWeb(
-          response.body as Parameters<typeof Readable.fromWeb>[0],
-        );
+        const stream =
+          chatProjection &&
+          request.method === "GET" &&
+          pathname === "/api/events" &&
+          response.headers.get("content-type")?.includes("text/event-stream")
+            ? Readable.from(projectChatSseStream(response.body))
+            : Readable.fromWeb(
+                response.body as Parameters<typeof Readable.fromWeb>[0],
+              );
         reply.raw.once("close", () => {
           if (!reply.raw.writableFinished) controller.abort();
         });
@@ -355,4 +586,5 @@ export function registerSessionModeRoutes(
       client.on("error", close);
     });
   }
+  return replyService;
 }

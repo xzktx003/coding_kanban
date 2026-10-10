@@ -28,6 +28,7 @@ export interface FeishuReplyBinding {
   chatId: string;
   sessionId: string;
   completionId: string;
+  sessionModeThreadId?: string;
   codexThreadId?: string;
   transcriptAgentKind?: FeishuTranscriptAgentKind;
   transcriptSessionId?: string;
@@ -49,6 +50,7 @@ interface PersistedFeishuReplyState {
 export interface RecordFeishuReplyBindingsInput {
   sessionId: string;
   completionId: string;
+  sessionModeThreadId?: string;
   codexThreadId?: string;
   transcriptAgentKind?: string;
   transcriptSessionId?: string;
@@ -176,6 +178,7 @@ function parseBinding(value: unknown): FeishuReplyBinding | null {
     sessionId,
     completionId,
     codexThreadId,
+    sessionModeThreadId,
     transcriptAgentKind,
     transcriptSessionId,
     referencedFiles,
@@ -193,6 +196,11 @@ function parseBinding(value: unknown): FeishuReplyBinding | null {
     (codexThreadId !== undefined &&
       (typeof codexThreadId !== "string" ||
         !CODEX_THREAD_ID_PATTERN.test(codexThreadId))) ||
+    (sessionModeThreadId !== undefined &&
+      (typeof sessionModeThreadId !== "string" ||
+        !CODEX_THREAD_ID_PATTERN.test(sessionModeThreadId) ||
+        sessionId !== `session-codex:${sessionModeThreadId}` ||
+        codexThreadId !== undefined)) ||
     !isValidTimestamp(createdAt)
   ) {
     return null;
@@ -208,6 +216,7 @@ function parseBinding(value: unknown): FeishuReplyBinding | null {
     chatId,
     sessionId,
     completionId,
+    ...(typeof sessionModeThreadId === "string" ? { sessionModeThreadId } : {}),
     ...(typeof codexThreadId === "string" &&
     parsedTranscriptTarget?.transcriptAgentKind !== "claude"
       ? { codexThreadId }
@@ -254,6 +263,13 @@ export class FeishuReplyBindingStore {
   }
 
   record(input: RecordFeishuReplyBindingsInput): void {
+    if (
+      input.sessionModeThreadId !== undefined &&
+      (!CODEX_THREAD_ID_PATTERN.test(input.sessionModeThreadId) ||
+        input.sessionId !== `session-codex:${input.sessionModeThreadId}` ||
+        input.codexThreadId)
+    )
+      throw new Error("Invalid native session reply binding");
     const createdAt = this.#now().toISOString();
     const referencedFiles = parseReferencedFiles(input.referencedFiles);
     const transcriptTarget = parseTranscriptTarget(input);
@@ -269,6 +285,9 @@ export class FeishuReplyBindingStore {
         chatId: message.chatId,
         sessionId: input.sessionId,
         completionId: input.completionId,
+        ...(input.sessionModeThreadId
+          ? { sessionModeThreadId: input.sessionModeThreadId }
+          : {}),
         ...(transcriptTarget?.transcriptAgentKind !== "claude" &&
         input.codexThreadId &&
         CODEX_THREAD_ID_PATTERN.test(input.codexThreadId)
@@ -312,7 +331,9 @@ export class FeishuReplyBindingStore {
       chatId: input.parent.chatId,
       sessionId: input.parent.sessionId,
       completionId: input.parent.completionId,
-      codexThreadId: input.codexThreadId,
+      ...(input.parent.sessionModeThreadId
+        ? { sessionModeThreadId: input.parent.sessionModeThreadId }
+        : { codexThreadId: input.codexThreadId }),
       ...(input.parent.transcriptAgentKind === "codex" &&
       input.parent.transcriptSessionId
         ? {

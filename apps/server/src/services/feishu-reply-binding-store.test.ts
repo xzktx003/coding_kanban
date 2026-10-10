@@ -229,3 +229,34 @@ test("persists trusted absolute references and drops unsafe absolute paths", () 
     rmSync(directory, { force: true, recursive: true });
   }
 });
+
+test("native session binding survives disk reload and reply chains without terminal thread actions", () => {
+  const directory = mkdtempSync(join(tmpdir(), "kanban-native-bindings-"));
+  const statePath = join(directory, "bindings.json");
+  try {
+    const store = new FeishuReplyBindingStore({ statePath });
+    store.record({
+      sessionId: "session-codex:native-thread",
+      sessionModeThreadId: "native-thread",
+      completionId: "turn-1",
+      messages: [{ messageId: "om_native", chatId: "oc_private" }],
+    });
+    const reloaded = new FeishuReplyBindingStore({ statePath });
+    const parent = reloaded.resolve("om_native")!;
+    assert.equal(parent.sessionModeThreadId, "native-thread");
+    assert.equal(parent.codexThreadId, undefined);
+    reloaded.recordProcessedReply({
+      messageId: "om_reply",
+      parent,
+      codexThreadId: "native-thread",
+    });
+    const again = new FeishuReplyBindingStore({ statePath });
+    assert.equal(
+      again.resolve("om_reply")?.sessionModeThreadId,
+      "native-thread",
+    );
+    assert.equal(again.resolve("om_reply")?.codexThreadId, undefined);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

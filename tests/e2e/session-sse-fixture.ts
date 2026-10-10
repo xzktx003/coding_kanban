@@ -78,27 +78,31 @@ export async function liveStream(page: Page, baseURL: string) {
     },
     { origin: origin.origin },
   );
-  const heartbeat = setInterval(() => {
-    for (const c of clients) c.write(": alive\n\n");
-  }, 250);
+  const write = (frame: string) => {
+    for (const client of clients) {
+      if (client.destroyed || client.writableEnded) clients.delete(client);
+      else client.write(frame);
+    }
+  };
+  const heartbeat = setInterval(() => write(": alive\n\n"), 250);
   return {
     opens: () => opens,
     connections: () => clients.size,
     disconnect: () => {
-      for (const c of clients) c.end();
+      const ending = [...clients];
+      clients.clear();
+      for (const client of ending) client.end();
     },
     raw: (data: string) => {
-      for (const c of clients) c.write(`data: ${data}\n\n`);
+      write(`data: ${data}\n\n`);
     },
     envelope: (seq: number, event: string, payload: unknown) => {
-      for (const c of clients)
-        c.write(`data: ${JSON.stringify({ seq, event, payload })}\n\n`);
+      write(`data: ${JSON.stringify({ seq, event, payload })}\n\n`);
     },
     emit: (seq: number, payload: any) => {
-      for (const c of clients)
-        c.write(
-          `data: ${JSON.stringify({ seq, event: "codex:notification", payload })}\n\n`,
-        );
+      write(
+        `data: ${JSON.stringify({ seq, event: "codex:notification", payload })}\n\n`,
+      );
     },
     close: async () => {
       clearInterval(heartbeat);

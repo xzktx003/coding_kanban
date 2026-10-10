@@ -1,5 +1,6 @@
 import { registerWorkbenchVsCodeWebRoutes } from "./routes/workbench-vscode-web.js";
 import { registerSessionPreviewRoutes } from "./routes/session-preview.js";
+import type { SessionCodexFeishuReplyService } from "./services/session-codex-feishu-reply-service.js";
 import { registerSessionModeRoutes } from "./routes/session-mode.js";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
@@ -411,9 +412,17 @@ export function buildServer(options: BuildServerOptions = {}): {
         },
       }).start()
     : null;
+  let sessionFeishuReplyService: SessionCodexFeishuReplyService | undefined;
   const feishuReplyCommandService =
     options.feishuReplyBindingStore && options.feishuReplyAllowedUserId
       ? new FeishuReplyCommandService({
+          sessionMode: {
+            send: async (input) => {
+              if (!sessionFeishuReplyService)
+                throw new Error("会话回复服务尚未就绪");
+              await sessionFeishuReplyService.send(input);
+            },
+          },
           allowedUserId: options.feishuReplyAllowedUserId,
           settings: feishuNotificationSettingsService,
           bindings: options.feishuReplyBindingStore,
@@ -622,11 +631,20 @@ export function buildServer(options: BuildServerOptions = {}): {
   app.register(async function sessionModeGateway(instance) {
     registerSessionPreviewRoutes(instance);
     registerWorkbenchVsCodeWebRoutes(instance, vsCodeWebManager);
-    registerSessionModeRoutes(instance, {
+    sessionFeishuReplyService = registerSessionModeRoutes(instance, {
       origin: options.sessionRuntimeOrigin,
       ensureRuntime: options.ensureSessionRuntime,
       attachmentRoot: options.sessionAttachmentRoot,
       vsCodeWebManager,
+      ...(options.feishuCompletionSender
+        ? {
+            completionNotifications: {
+              settings: feishuNotificationSettingsService,
+              sender: options.feishuCompletionSender,
+              bindings: options.feishuReplyBindingStore,
+            },
+          }
+        : {}),
       projects: () =>
         registry
           .list()

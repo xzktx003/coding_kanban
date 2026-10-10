@@ -70,7 +70,17 @@ test(
     const origin = () => `http://127.0.0.1:${address.port}`;
     const app = Fastify(),
       contender = Fastify();
-    const q = registerSessionFollowupRoutes(app, { origin, file });
+    const q = registerSessionFollowupRoutes(app, {
+      origin,
+      file,
+      completionNotifier: {
+        cursor: async () => undefined,
+        observe: async () => {
+          throw new Error("notification storage unavailable");
+        },
+        close: async () => {},
+      },
+    });
     registerSessionFollowupRoutes(contender, {
       origin,
       file,

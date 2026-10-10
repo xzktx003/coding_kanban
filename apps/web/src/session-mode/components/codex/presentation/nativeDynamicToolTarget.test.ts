@@ -1,3 +1,4 @@
+import { projectCodexChatValue } from "@agent-orchestrator/shared";
 import { expect, it } from "vitest";
 import { nativeDynamicToolTarget } from "./nativeDynamicToolTarget";
 const base = {
@@ -86,4 +87,29 @@ it("accepts actual read/send target arguments during execution while rejecting o
   expect(
     nativeDynamicToolTarget({ ...base, tool: "set_thread_title" }),
   ).toBeNull();
+});
+
+
+it("retains only verified creation target metadata after raw result projection", () => {
+  const original = { ...base, type: "dynamicToolCall", id: "created", arguments: { threadId: "wrong", text: "private argument" },
+    contentItems: [{ type: "inputText", text: JSON.stringify({ kind: "codex", threadId: " child ", hostId: "local", privateOutput: "private output" }) }],
+  };
+  const projected = projectCodexChatValue(original) as any;
+  expect(nativeDynamicToolTarget(projected)).toEqual({ kind: "codex", threadId: "child", hostId: "local" });
+  expect(projected.contentItems).toEqual([]);
+  expect(projected.arguments).toBeNull();
+  expect(JSON.stringify(projected)).not.toContain("private output");
+  expect(JSON.stringify(projected)).not.toContain("private argument");
+  expect(projectCodexChatValue(projected)).toBe(projected);
+  const restored = JSON.parse(JSON.stringify(projected));
+  expect(projectCodexChatValue(restored)).toBe(restored);
+  expect(nativeDynamicToolTarget(restored)).toEqual({ kind: "codex", threadId: "child", hostId: "local" });
+  for (const invalid of [
+    { ...original, success: false },
+    { ...original, status: "inProgress" },
+    { ...original, contentItems: [{ type: "inputText", text: "invalid" }] },
+    { ...original, contentItems: [{ type: "inputText", text: "x".repeat(65537) }] },
+    { ...original, contentItems: [{ type: "inputText", text: '{"kind":"other","threadId":"child"}' }] },
+    { ...original, contentItems: [{ type: "inputText", text: '{"threadId":"bad\\nchild"}' }] },
+  ]) expect(nativeDynamicToolTarget(projectCodexChatValue(invalid))).toBeNull();
 });

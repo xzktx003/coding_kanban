@@ -8,6 +8,8 @@ import { Button } from "@session/components/ui/button";
 import { DiffViewer } from "@session/features/DiffViewer";
 import { getFilename } from "@session/utils/getFilename";
 import type { DiffViewerInput } from "./fileChangeLogic";
+import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
+import { TranscriptDetailsNotice } from "./TranscriptDetailsNotice";
 import "@session/features/git/review-native.css";
 
 type IndividualFileChangesProps = {
@@ -54,6 +56,7 @@ export const IndividualFileChanges = ({
   return (
     <div>
       {changes.map((change, index) => {
+        const metadataOnly = isTranscriptMetadataOnly(change);
         const filePath =
           owner.threadId && owner.cwd
             ? resolveLiteralFilePath(
@@ -71,10 +74,9 @@ export const IndividualFileChanges = ({
         };
         const key = `${change.path}-${index}`;
         const isExpanded = expandedKeys.has(key);
-        const { addedCount, removedCount } = getChangeCounts(
-          change.kind,
-          change.diff,
-        );
+        const { addedCount, removedCount } = metadataOnly
+          ? { addedCount: 0, removedCount: 0 }
+          : getChangeCounts(change.kind, change.diff);
 
         return (
           <div key={key}>
@@ -83,6 +85,7 @@ export const IndividualFileChanges = ({
                 variant="ghost"
                 className="codex-individual-file-change-label"
                 onClick={() => toggleExpanded(key)}
+                disabled={metadataOnly}
               >
                 {fileChangeMap[change.kind.type]}
               </Button>
@@ -97,15 +100,20 @@ export const IndividualFileChanges = ({
                   {getFilename(change.path)}
                 </button>
               </span>
-              <span className="codex-individual-file-change-stats">
-                <span data-kind="add">+{addedCount}</span>
-                <span data-kind="remove">-{removedCount}</span>
-              </span>
+              {metadataOnly ? (
+                <TranscriptDetailsNotice />
+              ) : (
+                <span className="codex-individual-file-change-stats">
+                  <span data-kind="add">+{addedCount}</span>
+                  <span data-kind="remove">-{removedCount}</span>
+                </span>
+              )}
               <Button
                 className="codex-individual-file-disclosure"
                 size="icon"
                 aria-label={`展开或收起 ${getFilename(change.path)} Diff`}
                 aria-expanded={isExpanded}
+                disabled={metadataOnly}
                 variant="ghost"
                 onClick={() => toggleExpanded(key)}
               >
@@ -114,7 +122,7 @@ export const IndividualFileChanges = ({
                 />
               </Button>
             </div>
-            {isExpanded && (
+            {isExpanded && !metadataOnly && (
               <DiffViewer
                 native
                 presentation="inline"

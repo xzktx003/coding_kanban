@@ -33,6 +33,7 @@ import { ReasoningSummaryItem } from "./ReasoningSummaryItem";
 import { NativeActivityItem } from "./NativeActivityItem";
 import { CodexContentOwner } from "../presentation/ownerContext";
 import { nativeToolJson } from "../presentation/nativeToolSemantics";
+import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
 import type { HookRunSummary } from "@session/bindings/v2/HookRunSummary";
 import { NativeHookPromptItem } from "./NativeHookStats";
 import {
@@ -132,9 +133,19 @@ const EventItemBody = ({
     update: t("fileChanges.edited"),
   };
 
-  const renderFileChanges = (changes: FileUpdateChange[]) => (
+  const renderFileChanges = (
+    changes: FileUpdateChange[],
+    metadataOnly = false,
+  ) => (
     <IndividualFileChanges
-      changes={changes}
+      changes={
+        metadataOnly
+          ? changes.map((change) => ({
+              ...change,
+              transcriptMetadataOnly: true,
+            }))
+          : changes
+      }
       fileChangeMap={fileChangeMap}
       getChangeCounts={getChangeCounts}
       getDiffViewerProps={getDiffViewerProps}
@@ -248,7 +259,10 @@ const EventItemBody = ({
         case "sleep":
           return null;
         case "fileChange":
-          return renderFileChanges(startedItem.changes);
+          return renderFileChanges(
+            startedItem.changes,
+            isTranscriptMetadataOnly(startedItem),
+          );
         default:
           return (
             <CollapsedJsonItem
@@ -288,7 +302,10 @@ const EventItemBody = ({
             <NativeHookPromptItem fragments={item.fragments} runs={hookRuns} />
           );
         case "fileChange":
-          return renderFileChanges(item.changes);
+          return renderFileChanges(
+            item.changes,
+            isTranscriptMetadataOnly(item),
+          );
         case "enteredReviewMode":
         case "exitedReviewMode":
         case "reasoning":

@@ -62,3 +62,42 @@ it("uses the review thread returned by the backend and keeps the source selected
     useAgentCenterStore.getState().cards.some((c) => c.id === "review"),
   ).toBe(true);
 });
+it("does not retain forked tool payloads in side-chat metadata", async () => {
+  const thread = {
+    id: "side-tools",
+    cwd: "/main",
+    status: { type: "idle" },
+    turns: [
+      {
+        id: "old-turn",
+        status: "completed",
+        items: [
+          {
+            type: "commandExecution",
+            id: "tool",
+            aggregatedOutput: "x".repeat(1024 * 1024),
+          },
+          { type: "agentMessage", id: "answer", text: "Final answer" },
+        ],
+      },
+    ],
+  };
+  api.threadFork.mockResolvedValueOnce({ thread });
+  await createSideChat("main");
+  const state = useCodexStore.getState();
+  expect(
+    state.threads.find((t) => t.id === thread.id)?.turns[0].items.length,
+  ).toBe(0);
+  const tool = state.events[thread.id].find(
+    (e: any) => e.params.item?.type === "commandExecution",
+  ) as any;
+  expect(tool.params.item).toMatchObject({
+    transcriptMetadataOnly: true,
+    aggregatedOutput: null,
+  });
+  expect(JSON.stringify(state.events[thread.id])).not.toContain(
+    "x".repeat(1024),
+  );
+  expect(JSON.stringify(state.events[thread.id])).toContain("Final answer");
+  expect(thread.turns[0].items).toHaveLength(2);
+});

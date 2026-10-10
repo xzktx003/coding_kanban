@@ -21,6 +21,8 @@ import { NativeCadencedShimmer } from "../presentation/NativeCadencedShimmer";
 import { NativeToolIcon } from "../presentation/NativeToolIcons";
 import { NativeCompactionItem } from "./NativeCompactionItem";
 import { NativeDynamicToolItem } from "./NativeDynamicToolItem";
+import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
+import { TranscriptDetailsNotice } from "./TranscriptDetailsNotice";
 
 function queryDetail(query: string) {
   const sites: string[] = [];
@@ -172,6 +174,21 @@ export function NativeActivityItem({
       const count =
         (item as typeof item & { imageCount?: number }).imageCount ??
         paths.length;
+      if (isTranscriptMetadataOnly(item))
+        return (
+          <div className="codex-native-image-metadata">
+            <NativeToolDisclosure
+              icon={<NativeToolIcon name="image" />}
+              running={active}
+              summary={
+                count === 1
+                  ? t("activity.viewedImage")
+                  : `Viewed ${count} images`
+              }
+            />
+            <TranscriptDetailsNotice />
+          </div>
+        );
       return (
         <NativeToolDisclosure
           icon={<NativeToolIcon name="image" />}

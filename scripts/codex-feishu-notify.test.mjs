@@ -161,6 +161,26 @@ test("does not render quick replies for non-Codex notifications", () => {
   assert.match(serialized, /查看完整记录/);
 });
 
+test("shows native session reply guidance without terminal-only actions", () => {
+  const [card] = buildCompletionCards({
+    ...completion,
+    "agent-kind": "codex",
+    "session-mode-thread-id": "native-thread-123",
+    "records-available": true,
+    "quick-replies-available": true,
+    "referenced-files": [{ path: "apps/server/src/app.ts", line: 120 }],
+  });
+  const serialized = JSON.stringify(card);
+  assert.match(serialized, /开启「飞书回复继续任务」后/);
+  assert.match(serialized, /回复本卡片可继续原会话/);
+  assert.match(serialized, /会排队/);
+  assert.doesNotMatch(serialized, /快捷回复/);
+  assert.doesNotMatch(serialized, /查看完整记录/);
+  assert.doesNotMatch(serialized, /kanban_completion_quick_reply/);
+  assert.doesNotMatch(serialized, /kanban_completion_records/);
+  assert.doesNotMatch(serialized, /kanban_completion_file/);
+});
+
 test("preserves exact formula source across Unicode chunking", () => {
   for (const prefixLength of [995, 999, 1000]) {
     const cards = buildCompletionCards(
@@ -439,7 +459,9 @@ test("builds a sanitized Card 2.0 without forwarding the prompt or full path", (
   assert.equal(card.body.elements[0].elements[0].tag, "markdown");
   assert.ok(serialized.includes(repositoryRoot.split("/").at(-1)));
   assert.match(output, /^Done!/);
-  assert.ok(output.includes(`${repositoryRoot.split("/").at(-1)}/scripts/notify.mjs`));
+  assert.ok(
+    output.includes(`${repositoryRoot.split("/").at(-1)}/scripts/notify.mjs`),
+  );
   assert.doesNotMatch(serialized, /do not forward this private prompt/);
   assert.doesNotMatch(serialized, /data01\/home/);
   assert.doesNotMatch(serialized, /\u001b|\u0000/);

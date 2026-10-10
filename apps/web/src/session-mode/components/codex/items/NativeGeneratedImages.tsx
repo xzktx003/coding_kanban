@@ -20,6 +20,8 @@ import { parseFileReference } from "../presentation/fileReference";
 import { useCodexContentOwner } from "../presentation/ownerContext";
 import { NativeToolDisclosure } from "./NativeToolDisclosure";
 import { nativeImageGalleryLayout } from "../presentation/nativeImageGalleryLayout";
+import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
+import { TranscriptDetailsNotice } from "./TranscriptDetailsNotice";
 
 type CapturedEditor = { owner: string; item: ImageAttachment };
 function CapturedGeneratedImageEditor({
@@ -203,12 +205,15 @@ export function NativeGeneratedImages({
 }) {
   const { t } = useTranslation("thread"),
     usable = items.filter(
-      (item) => nativeImageData(item.result) || item.savedPath,
+      (item) =>
+        !isTranscriptMetadataOnly(item) &&
+        (nativeImageData(item.result) || item.savedPath),
     );
   const pending =
     running && !termination
       ? items.filter(
           (item) =>
+            !isTranscriptMetadataOnly(item) &&
             !nativeImageData(item.result) &&
             !item.savedPath &&
             (item.status === "in_progress" || item.status === "inProgress"),
@@ -238,6 +243,25 @@ export function NativeGeneratedImages({
       pending.length ? 4 : 0,
     ),
     index = Math.min(start, layout.maxStartIndex);
+  if (items.length && items.every(isTranscriptMetadataOnly))
+    return (
+      <div className="codex-native-generated-metadata">
+        <NativeToolDisclosure
+          running={running && !termination}
+          summary={t(
+            items.some((item) => item.status === "failed") ||
+              termination === "failed"
+              ? "activity.imageFailed"
+              : termination === "interrupted"
+                ? "activity.interrupted"
+                : running && !termination
+                  ? "activity.generatingImage"
+                  : "activity.ended",
+          )}
+        />
+        <TranscriptDetailsNotice />
+      </div>
+    );
   if (usable.length)
     return (
       <div

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { installSessionUxFixture } from "./session-ux-fixture";
 
 const turns = Array.from({ length: 3 }, (_, i) => ({
   id: `fixture-turn-${i}`,
@@ -42,6 +43,16 @@ test("rollback confirms its boundary, removes later turns, restores the draft an
   page,
 }) => {
   const calls: unknown[] = [];
+  await installSessionUxFixture(page, 0);
+  let currentThread = thread;
+  await page.route(/\/api\/session\/api\/codex\/thread\/read(?:\?.*)?$/, (route) =>
+    route.fulfill({ json: { thread: currentThread } }),
+  );
+  await page.route(/\/api\/session\/api\/codex\/thread\/turns\/list(?:\?.*)?$/, (route) =>
+    route.fulfill({
+      json: { data: [...currentThread.turns].reverse(), nextCursor: null },
+    }),
+  );
   await page.route("**/api/session/api/settings", (route) =>
     route.request().method() === "POST"
       ? route.fulfill({ status: 200, body: "" })
@@ -52,8 +63,9 @@ test("rollback confirms its boundary, removes later turns, restores the draft an
   );
   await page.route("**/api/session/api/codex/thread/rollback", (route) => {
     calls.push(route.request().postDataJSON());
+    currentThread = { ...thread, turns: turns.slice(0, 1) };
     return route.fulfill({
-      json: { thread: { ...thread, turns: turns.slice(0, 1) } },
+      json: { thread: currentThread },
     });
   });
   await page.goto("/?mode=session");
@@ -62,20 +74,69 @@ test("rollback confirms its boundary, removes later turns, restores the draft an
     .first()
     .waitFor({ timeout: 30000 });
   await page.evaluate(async (thread) => {
-    const { useCodexStore } =
-      await import("/src/session-mode/components/codex/stores/index.ts");
-    const { convertThreadHistoryToEvents } =
-      await import("/src/session-mode/utils/threadHistoryConverter.ts");
-    const { useWorkspaceStore } =
-      await import("/src/session-mode/stores/useWorkspaceStore.ts");
-    const { usePinStore } =
-      await import("/src/session-mode/stores/usePinStore.ts");
-    const { useLayoutStore } =
-      await import("/src/session-mode/stores/useLayoutStore.ts");
-    const { useAgentSettingsStore } =
-      await import("/src/session-mode/stores/useAgentSettingsStore.ts");
-    const { useAgentCenterStore } =
-      await import("/src/session-mode/stores/useAgentCenterStore.ts");
+    const { useCodexStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/components/codex/stores/index.ts",
+        )?.name ?? "/src/session-mode/components/codex/stores/index.ts"
+    );
+    const { convertThreadHistoryToEvents } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/utils/threadHistoryConverter.ts",
+        )?.name ?? "/src/session-mode/utils/threadHistoryConverter.ts"
+    );
+    const { useWorkspaceStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/stores/useWorkspaceStore.ts",
+        )?.name ?? "/src/session-mode/stores/useWorkspaceStore.ts"
+    );
+    const { usePinStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/stores/usePinStore.ts",
+        )?.name ?? "/src/session-mode/stores/usePinStore.ts"
+    );
+    const { useLayoutStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/stores/useLayoutStore.ts",
+        )?.name ?? "/src/session-mode/stores/useLayoutStore.ts"
+    );
+    const { useAgentSettingsStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/stores/useAgentSettingsStore.ts",
+        )?.name ?? "/src/session-mode/stores/useAgentSettingsStore.ts"
+    );
+    const { useAgentCenterStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast(
+          (e) =>
+            new URL(e.name).pathname ===
+            "/src/session-mode/stores/useAgentCenterStore.ts",
+        )?.name ?? "/src/session-mode/stores/useAgentCenterStore.ts"
+    );
     useAgentSettingsStore.setState({ selectedAgent: "codex" });
     useAgentCenterStore.setState({
       cards: [],
@@ -107,12 +168,17 @@ test("rollback confirms its boundary, removes later turns, restores the draft an
     useCodexStore.setState({
       currentThreadId: thread.id,
       currentTurnId: null,
+      historyLoadedMap: { [thread.id]: true },
       activeThreadIds: [thread.id],
       threads: [thread],
       events: { [thread.id]: convertThreadHistoryToEvents(thread) },
       threadStatusMap: { [thread.id]: { type: "idle" } },
       turnTimingMap: {},
     });
+    useAgentCenterStore
+      .getState()
+      .addAgentCard({ kind: "codex", id: thread.id, cwd: thread.cwd });
+    useAgentCenterStore.getState().setCurrentAgentCardId(thread.id, "codex");
   }, thread);
   const message = page.getByText("rollback fixture message 1", { exact: true });
   await message.scrollIntoViewIfNeeded();

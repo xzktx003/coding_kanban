@@ -4,6 +4,11 @@ import {
   codexRuntimeState,
   verifiedTurnDuration,
 } from "@session/utils/codexRuntimeState";
+import { observeSubagents } from "@session/features/subagents/store";
+import {
+  withoutToolTranscriptEvents,
+  lightweightThreadForStore,
+} from "./codexTranscriptVisibility";
 import { clearAsyncQuestions } from "../features/async-questions/store";
 import type {
   SandboxMode,
@@ -39,6 +44,7 @@ import {
   cachedTranscriptBaselines,
   invalidateTranscriptCache,
 } from "./sessionCacheState";
+import { clearTrimmedHistoryAnchor } from "./sessionTranscriptBudget";
 import {
   getThreadModelSettings,
   hydrateThreadModel,
@@ -193,6 +199,24 @@ const syncThreadToStore = (
           status: lastTurn.status,
         }
       : undefined;
+  // Operational subagent discovery must precede the chat-only projection.
+  // Do not retain command/output events just to feed the independent panel.
+  for (const turn of thread.turns)
+    for (const item of turn.items)
+      if (
+        item.type === "collabAgentToolCall" ||
+        item.type === "subAgentActivity"
+      )
+        observeSubagents({
+          method: "item/completed",
+          params: {
+            threadId,
+            turnId: turn.id,
+            item,
+            completedAtMs: 0,
+          },
+        });
+  const lightweightThread = lightweightThreadForStore(thread);
 
   return {
     ...(activate
@@ -202,11 +226,11 @@ const syncThreadToStore = (
       ? activeThreadIds
       : [...activeThreadIds, threadId],
     threads: threads.some((t) => t.id === threadId)
-      ? threads.map((t) => (t.id === threadId ? thread : t))
-      : [thread, ...threads],
+      ? threads.map((t) => (t.id === threadId ? lightweightThread : t))
+      : [lightweightThread, ...threads],
     events: {
       ...events,
-      [threadId]: historicalEvents,
+      [threadId]: withoutToolTranscriptEvents(historicalEvents),
     },
     historyLoadedMap: {
       ...useCodexStore.getState().historyLoadedMap,
@@ -255,6 +279,29 @@ const pendingThreadResumes = new Map<string, Promise<void>>();
 const resumeVersions = new Map<string, symbol>();
 const historyControllers = new Map<string, AbortController>();
 const metadataReads = new Set<string>();
+
+export function cancelCodexHistoryRead(threadId: string) {
+  resumeVersions.delete(threadId);
+  pendingThreadResumes.delete(threadId);
+  const controller = historyControllers.get(threadId);
+  if (controller) {
+    historyControllers.delete(threadId);
+    controller.abort();
+  }
+  if (useSessionSyncStore.getState().checking[threadId])
+    setSessionChecking(threadId, false);
+  useCodexStore.setState((state) =>
+    state.historyLoadingMap[threadId]
+      ? {
+          historyLoadingMap: {
+            ...state.historyLoadingMap,
+            [threadId]: false,
+          },
+        }
+      : state,
+  );
+}
+
 function readInitialThreadMetadata(threadId: string) {
   if (getThreadModelSettings(threadId).model || metadataReads.has(threadId))
     return;
@@ -319,6 +366,7 @@ export function resetCodexRuntimeState() {
   });
   useCodexStore.setState((state) => ({
     activeThreadIds: [],
+    streamingAgentMessages: {},
     currentTurnId: null,
     threadStatusMap: {},
     turnTimingMap: {},
@@ -515,6 +563,7 @@ export const codexService = {
       cursor?: string;
       /** Seeking a search hit must not move the contiguous older-history boundary. */
       preserveEarlierCursor?: boolean;
+      afterTurnId?: string;
     },
   ) {
     const precedingRead = !overrides
@@ -574,12 +623,14 @@ export const codexService = {
                         recent: true,
                         ...(options.cursor
                           ? { cursor: options.cursor }
-                          : baseline.turnTimingMap[threadId]?.turnId
-                            ? {
-                                afterTurnId:
-                                  baseline.turnTimingMap[threadId].turnId,
-                              }
-                            : {}),
+                          : options.afterTurnId
+                            ? { afterTurnId: options.afterTurnId }
+                            : baseline.turnTimingMap[threadId]?.turnId
+                              ? {
+                                  afterTurnId:
+                                    baseline.turnTimingMap[threadId].turnId,
+                                }
+                              : {}),
                       }
                     : {}),
                 },
@@ -619,7 +670,10 @@ export const codexService = {
         revision: modelRevision,
         notify: !!baseline.historyLoadedMap[threadId],
       });
-      const historicalEvents = convertThreadHistoryToEvents(thread);
+      const itemPage = page && "itemPage" in page && page.itemPage;
+      const historicalEvents = convertThreadHistoryToEvents(thread).filter(
+        (event) => !itemPage || event.method !== "turn/completed",
+      );
       const current = useCodexStore.getState();
       const beforeEvents =
         baseline.events[threadId] ??
@@ -632,6 +686,7 @@ export const codexService = {
             current.events[threadId] ?? [],
             thread.turns.map((t) => t.id),
             page.earlier,
+            !!itemPage,
           )
         : mergeThreadHistory(
             historicalEvents,
@@ -646,11 +701,14 @@ export const codexService = {
         options?.preserveEarlierCursor ||
         (page &&
           baseline.historyLoadedMap[threadId] &&
+          !("truncated" in page && page.truncated) &&
           !options?.cursor &&
+          !options?.afterTurnId &&
           s.cursors[threadId] !== undefined)
           ? s
           : { cursors: { ...s.cursors, [threadId]: page?.nextCursor ?? null } },
       );
+      if (options?.afterTurnId && page) clearTrimmedHistoryAnchor(threadId);
       const unchanged =
         page &&
         current.historyLoadedMap[threadId] &&
@@ -660,8 +718,16 @@ export const codexService = {
       if (!unchanged)
         useCodexStore.setState({
           ...restored,
+          ...(itemPage
+            ? {
+                turnTimingMap: current.turnTimingMap,
+                currentTurnId: current.currentTurnId,
+              }
+            : {}),
           ...(page ? { threadStatusMap: current.threadStatusMap } : {}),
-          ...(options?.background && current.currentThreadId === threadId
+          ...(!itemPage &&
+          options?.background &&
+          current.currentThreadId === threadId
             ? {
                 currentTurnId:
                   restored.turnTimingMap?.[threadId]?.status === "inProgress"
@@ -737,8 +803,9 @@ export const codexService = {
   async loadEarlierHistory(threadId: string) {
     const state = useSessionSyncStore.getState();
     const cursor = state.cursors[threadId];
+    const trimmedAnchor = state.trimmedHistoryAnchors[threadId];
     if (
-      !cursor ||
+      (!trimmedAnchor && !cursor) ||
       state.earlierLoading[threadId] ||
       pendingThreadResumes.has(threadId)
     )
@@ -751,7 +818,11 @@ export const codexService = {
       await codexService.loadThreadHistory(threadId, undefined, {
         background: true,
         recent: true,
-        cursor,
+        ...(trimmedAnchor
+          ? { afterTurnId: trimmedAnchor }
+          : cursor
+            ? { cursor }
+            : {}),
       });
     } catch (error) {
       useSessionSyncStore.setState((s) => ({

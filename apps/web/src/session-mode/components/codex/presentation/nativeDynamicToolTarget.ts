@@ -29,10 +29,19 @@ export function nativeDynamicToolTarget(
   if (
     item.tool !== "create_thread" ||
     item.status !== "completed" ||
-    item.success !== true ||
-    !Array.isArray(item.contentItems)
+    item.success !== true
   )
     return null;
+  if (item.transcriptMetadataOnly === true) {
+    const target = object(item.nativeTarget), kind = target.kind;
+    if (kind !== "codex" && kind !== "chatgpt") return null;
+    const threadId = id(target.threadId), clientThreadId = id(target.clientThreadId);
+    const identity = threadId ? { threadId } : clientThreadId && (kind === "chatgpt" || clientThreadId.startsWith("client-new-thread:")) ? { clientThreadId } : null;
+    const hostId = target.hostId === undefined ? undefined : id(target.hostId);
+    if (!identity || hostId === null) return null;
+    return { kind, ...identity, ...(kind === "codex" && hostId ? { hostId } : {}) };
+  }
+  if (!Array.isArray(item.contentItems)) return null;
   const first = item.contentItems
     .map(object)
     .find((content) => content.type === "inputText");

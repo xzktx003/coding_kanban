@@ -258,3 +258,23 @@ it("updates running duration from the native start, then settles on its complete
   vi.useRealTimers();
   visible.mockRestore();
 });
+
+it("distinguishes unloaded command details from real empty output and retains the actual exit status", () => {
+  render(
+    <ShellCommand
+      command="metadata-command"
+      commandItemId="metadata"
+      status="failed"
+      exitCode={7}
+      transcriptMetadataOnly
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /metadata-command/ }));
+  expect(screen.getAllByText("详情未加载").length).toBeGreaterThan(0);
+  expect(screen.queryByText("command.noOutput")).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "command.copyOutput" }),
+  ).toBeNull();
+  expect(screen.getByText("command.exitCode 7")).toBeTruthy();
+  expect(screen.queryByText("command.success")).toBeNull();
+});

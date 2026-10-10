@@ -361,3 +361,76 @@ it("rechecks a snapshot invalidated only by a turn event instead of leaving stat
   expect(fetcher).toHaveBeenCalledTimes(2);
   expect(useCodexStore.getState().threadStatusMap.a).toEqual(active);
 });
+
+it("announces idle external history changes from thread-list timestamps without polling full history", async () => {
+  const reconcile = vi.fn();
+  window.addEventListener("session-history-reconcile", reconcile);
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(
+      response([
+        { id: "a", status: idle, updatedAt: 10 },
+        { id: "b", status: idle, updatedAt: 20 },
+      ]),
+    )
+    .mockResolvedValueOnce(
+      response([
+        { id: "a", status: idle, updatedAt: 11 },
+        { id: "b", status: idle, updatedAt: 20 },
+      ]),
+    )
+    .mockResolvedValueOnce(
+      response([
+        { id: "a", status: idle, updatedAt: 11 },
+        { id: "b", status: idle, updatedAt: 20 },
+      ]),
+    );
+  try {
+    stop = startFollowedSessionStatusSync(fetcher);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(reconcile).not.toHaveBeenCalled();
+
+    stream.onOpen?.();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(reconcile).toHaveBeenCalledOnce();
+    expect(reconcile.mock.calls[0][0]).toMatchObject({ detail: "a" });
+
+    stream.onOpen?.();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(reconcile).toHaveBeenCalledOnce();
+  } finally {
+    window.removeEventListener("session-history-reconcile", reconcile);
+  }
+});
+
+it("does not announce active progress timestamp changes as history reconciles", async () => {
+  const reconcile = vi.fn();
+  window.addEventListener("session-history-reconcile", reconcile);
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(
+      response([{ id: "a", status: active, updatedAt: 10 }]),
+    )
+    .mockResolvedValueOnce(
+      response([{ id: "a", status: active, updatedAt: 11 }]),
+    );
+  try {
+    stop = startFollowedSessionStatusSync(fetcher);
+    await vi.advanceTimersByTimeAsync(1);
+    useCodexStore.setState({
+      turnTimingMap: {
+        a: {
+          turnId: "turn-a",
+          status: "inProgress",
+          startedAtMs: 1,
+          durationMs: null,
+        },
+      },
+    });
+    stream.onOpen?.();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(reconcile).not.toHaveBeenCalled();
+  } finally {
+    window.removeEventListener("session-history-reconcile", reconcile);
+  }
+});

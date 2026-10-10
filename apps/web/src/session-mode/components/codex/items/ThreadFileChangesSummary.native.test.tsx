@@ -127,3 +127,30 @@ it("opening full review dismisses a manually opened file preview", () => {
   fireEvent.click(screen.getByRole("button", { name: "file.py" }));
   expect(api.previewOpen).toBe(false);
 });
+
+it("does not offer blank review or saved-patch actions for projected metadata", () => {
+  const projected = changes.map((change) => ({
+    ...change,
+    diff: "",
+    addedCount: 0,
+    removedCount: 0,
+    transcriptMetadataOnly: true,
+  }));
+  render(
+    <ThreadFileChangesSummary
+      changes={projected}
+      threadId="a"
+      turnId="old-turn"
+      batches={batches}
+    />,
+  );
+  expect(screen.getByText("详情未加载")).toBeTruthy();
+  expect(screen.queryByText("+0")).toBeNull();
+  expect(screen.queryByText("-0")).toBeNull();
+  expect(screen.queryByRole("button", { name: /预览.*Diff/ })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "撤销此轮保存的变更" }),
+  ).toBeNull();
+  expect(screen.queryByRole("button", { name: "file.py" })).toBeNull();
+  expect(api.apply).not.toHaveBeenCalled();
+});

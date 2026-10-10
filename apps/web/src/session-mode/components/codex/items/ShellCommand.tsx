@@ -9,6 +9,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { useTranscriptState } from "../thread/rowState";
 import { useCodexStore } from "../stores/useCodexStore";
+import { TranscriptDetailsNotice } from "./TranscriptDetailsNotice";
 import type { CommandActionSource } from "../thread/deriveRenderItems";
 import {
   ansiSegments,
@@ -83,6 +84,7 @@ function ShellCommandContent({
   cwd,
   threadId,
   turnId,
+  transcriptMetadataOnly = false,
 }: ShellCommandProps) {
   const { t } = useTranslation("thread");
   const key = JSON.stringify([threadId, turnId, commandItemId, command]);
@@ -141,8 +143,9 @@ function ShellCommandContent({
   );
   const display = useMemo(() => normalizeNativeCommand(command), [command]);
   const shell = nativeShellName(command) ?? t("command.shell");
-  const output =
-    aggregatedOutput && /\S/.test(aggregatedOutput)
+  const output = transcriptMetadataOnly
+    ? ""
+    : aggregatedOutput && /\S/.test(aggregatedOutput)
       ? aggregatedOutput
       : running
         ? ""
@@ -182,6 +185,7 @@ function ShellCommandContent({
         <span className="codex-command-summary-content">
           <NativeCommandTerminal className="codex-command-terminal" />
           <span className="codex-command-summary-label">{summary}</span>
+          {transcriptMetadataOnly && <TranscriptDetailsNotice />}
         </span>
         <NativeCommandChevron
           className="codex-command-chevron"
@@ -217,7 +221,9 @@ function ShellCommandContent({
                 <span className="codex-command-prompt">$</span>
                 <code>{display}</code>
               </div>
-              <CommandCopy text={display} label={t("command.copyCommand")} />
+              {!transcriptMetadataOnly && (
+                <CommandCopy text={display} label={t("command.copyCommand")} />
+              )}
             </div>
             <div className="codex-command-output-wrap">
               <div
@@ -233,23 +239,29 @@ function ShellCommandContent({
                 }
               >
                 <div className="codex-command-output-content">
-                  <code>
-                    {tokens.map((segment, index) => (
-                      <span
-                        key={index}
-                        className={segment.className}
-                        style={segment.style}
-                      >
-                        {segment.text}
-                      </span>
-                    ))}
-                  </code>
+                  {transcriptMetadataOnly ? (
+                    <TranscriptDetailsNotice />
+                  ) : (
+                    <code>
+                      {tokens.map((segment, index) => (
+                        <span
+                          key={index}
+                          className={segment.className}
+                          style={segment.style}
+                        >
+                          {segment.text}
+                        </span>
+                      ))}
+                    </code>
+                  )}
                 </div>
               </div>
-              <CommandCopy
-                text={aggregatedOutput ?? ""}
-                label={t("command.copyOutput")}
-              />
+              {!transcriptMetadataOnly && (
+                <CommandCopy
+                  text={aggregatedOutput ?? ""}
+                  label={t("command.copyOutput")}
+                />
+              )}
             </div>
             <div className="codex-command-footer" aria-live="polite">
               {!running && (

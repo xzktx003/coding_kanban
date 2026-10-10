@@ -55,16 +55,20 @@ it("opens a file in the message owner's project with exact line and column", asy
 });
 
 for (const streaming of [false, true]) {
-  it(`renders GFM tables and strikethrough with file references while streaming=${streaming}`, async () => {
-    const { container } = render(
-      <AgentMessageItem
-        threadId="own"
-        streaming={streaming}
-        text={
-          "用途与数据：\n\n| 用途 | 实际使用的数据 |\n|---|---|\n| Torch 敏感度对齐 | v02 语料，829 个窗口 |\n| GPTQ 量化校准 | 前 8 个合格段落 |\n\n~~旧结论~~ [校准语料](src/corpus.py:12)"
-        }
-      />,
+  it(`renders completed GFM tables and file references after streaming=${streaming}`, async () => {
+    const value =
+      "用途与数据：\n\n| 用途 | 实际使用的数据 |\n|---|---|\n| Torch 敏感度对齐 | v02 语料，829 个窗口 |\n| GPTQ 量化校准 | 前 8 个合格段落 |\n\n~~旧结论~~ [校准语料](src/corpus.py:12)";
+    const { container, rerender } = render(
+      <AgentMessageItem threadId="own" streaming={streaming} text={value} />,
     );
+    if (streaming) {
+      expect(
+        container.querySelector("[data-codex-streaming-text]")?.textContent,
+      ).toBe(value);
+      expect(container.querySelector("table")).toBeNull();
+      expect(container.querySelector(".codex-markdown")).toBeNull();
+      rerender(<AgentMessageItem threadId="own" text={value} />);
+    }
     await waitFor(() =>
       expect(container.querySelector("table")).not.toBeNull(),
     );

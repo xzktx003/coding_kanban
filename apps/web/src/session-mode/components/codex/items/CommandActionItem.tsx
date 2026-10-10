@@ -7,6 +7,7 @@ import { useEditorStore } from "@session/stores/useEditorStore";
 import { useLayoutStore } from "@session/stores/useLayoutStore";
 import { ShellCommand } from "./ShellCommand";
 import type { CommandActionSource } from "../thread/deriveRenderItems";
+import { TranscriptDetailsNotice } from "./TranscriptDetailsNotice";
 
 export const CommandActionItem = ({
   action,
@@ -20,6 +21,7 @@ export const CommandActionItem = ({
   threadId,
   turnId,
   exitCode,
+  transcriptMetadataOnly,
 }: {
   action: CommandAction;
   commandItemId?: string | null;
@@ -32,6 +34,7 @@ export const CommandActionItem = ({
   threadId?: string;
   turnId?: string;
   exitCode?: number | null;
+  transcriptMetadataOnly?: boolean;
 }) => {
   const { t } = useTranslation("thread");
   const owner = useCodexContentOwner(threadId);
@@ -56,6 +59,7 @@ export const CommandActionItem = ({
         threadId={threadId}
         turnId={turnId}
         exitCode={exitCode}
+        transcriptMetadataOnly={transcriptMetadataOnly}
       />
     );
   }
@@ -109,6 +113,7 @@ export const CommandActionItem = ({
       <span className="codex-exploration-label">
         <Trans t={t} i18nKey={`exploration.${key}`} components={components} />
       </span>
+      {transcriptMetadataOnly && <TranscriptDetailsNotice />}
     </div>
   );
 };

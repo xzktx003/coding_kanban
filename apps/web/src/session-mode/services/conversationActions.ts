@@ -1,3 +1,4 @@
+import { lightweightThreadForStore } from "./codexTranscriptVisibility";
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { postJsonWithOptions } from "./apiAdapt/shared";
 import type { ReviewStartResponse } from "../bindings/v2";
@@ -9,7 +10,10 @@ import { appendDraft, sessionDraftKey } from "../stores/useSessionDraftStore";
 import { useSideChatStore } from "../stores/useSideChatStore";
 import { useSavedTurnReviewStore } from "../stores/useSavedTurnReviewStore";
 import { convertThreadHistoryToEvents } from "../utils/threadHistoryConverter";
-import { getThreadModelSettings, hydrateThreadModel } from "../stores/useThreadModelStore";
+import {
+  getThreadModelSettings,
+  hydrateThreadModel,
+} from "../stores/useThreadModelStore";
 const pending = new Map<string, Promise<string>>();
 export function createSideChat(
   parentId: string,
@@ -28,10 +32,16 @@ export function createSideChat(
     hydrateThreadModel(thread.id, {
       model: response.model || parentModel.model,
       modelProvider: response.modelProvider ?? parentModel.modelProvider,
-      reasoningEffort: response.reasoningEffort === undefined ? parentModel.reasoningEffort : response.reasoningEffort,
+      reasoningEffort:
+        response.reasoningEffort === undefined
+          ? parentModel.reasoningEffort
+          : response.reasoningEffort,
     });
     useCodexStore.setState((s) => ({
-      threads: [thread, ...s.threads.filter((t) => t.id !== thread.id)],
+      threads: [
+        lightweightThreadForStore(thread),
+        ...s.threads.filter((t) => t.id !== thread.id),
+      ],
       events: { ...s.events, [thread.id]: events },
       activeThreadIds: [...new Set([...s.activeThreadIds, thread.id])],
       threadStatusMap: { ...s.threadStatusMap, [thread.id]: thread.status },
@@ -43,14 +53,12 @@ export function createSideChat(
         { activate: false },
       );
     if (text) appendDraft(sessionDraftKey("codex", thread.id), text);
-    useSideChatStore
-      .getState()
-      .open({
-        id: thread.id,
-        parentId,
-        title: "侧边聊天",
-        images: [...images],
-      });
+    useSideChatStore.getState().open({
+      id: thread.id,
+      parentId,
+      title: "侧边聊天",
+      images: [...images],
+    });
     return thread.id;
   })();
   pending.set(parentId, task);
@@ -64,11 +72,12 @@ export async function runConversationReview(
 ): Promise<string> {
   const s = useCodexStore.getState();
   const capturedTarget = structuredClone(target);
-  const capturedCwd = s.threads.find(t => t.id === threadId)?.cwd ?? useAgentCenterStore.getState().cards.find(c => c.id === threadId && c.kind === "codex")?.cwd;
-  if (
-    delivery === "inline" &&
-    (codexRuntimeState(s, threadId).running)
-  )
+  const capturedCwd =
+    s.threads.find((t) => t.id === threadId)?.cwd ??
+    useAgentCenterStore
+      .getState()
+      .cards.find((c) => c.id === threadId && c.kind === "codex")?.cwd;
+  if (delivery === "inline" && codexRuntimeState(s, threadId).running)
     throw new Error("当前任务运行中，请选择独立审查");
   const result = await postJsonWithOptions<ReviewStartResponse>(
     "/followups/review",
@@ -78,7 +87,16 @@ export async function runConversationReview(
   if (!result.reviewThreadId || !result.turn?.id)
     throw new Error("服务未返回审查会话");
   const id = result.reviewThreadId;
-  if (capturedCwd) useSavedTurnReviewStore.getState().captureReviewScope({ requestThreadId: threadId, reviewThreadId: id, turnId: result.turn.id, cwd: capturedCwd, target: capturedTarget });
+  if (capturedCwd)
+    useSavedTurnReviewStore
+      .getState()
+      .captureReviewScope({
+        requestThreadId: threadId,
+        reviewThreadId: id,
+        turnId: result.turn.id,
+        cwd: capturedCwd,
+        target: capturedTarget,
+      });
   const beforeTiming = s.turnTimingMap[id];
   useCodexStore.setState((s) => {
     if (

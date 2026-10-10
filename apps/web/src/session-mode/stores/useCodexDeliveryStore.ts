@@ -21,6 +21,15 @@ export const useCodexDeliveryStore = create<{
   entries: Record<string, DeliveryEcho>;
 }>()(() => ({ entries: {} }));
 const key = (threadId: string, id: string) => JSON.stringify([threadId, id]);
+const sameImages = (a: string[], b: string[]) =>
+  a.length === b.length && a.every((image, index) => image === b[index]);
+const sameEcho = (a: DeliveryEcho, b: DeliveryEcho) =>
+  a.id === b.id &&
+  a.threadId === b.threadId &&
+  a.text === b.text &&
+  a.status === b.status &&
+  a.turnId === b.turnId &&
+  sameImages(a.images, b.images);
 export function beginDeliveryEcho(
   message: Omit<FollowupSubmit, "id"> & { id: string },
 ) {
@@ -42,11 +51,16 @@ export function reconcileDeliveryEchoes(
   receipt: FollowupThread,
 ) {
   useCodexDeliveryStore.setState((s) => {
-    const entries = { ...s.entries };
+    let entries = s.entries;
+    let changed = false;
     for (const message of receipt.items) {
       const id = key(threadId, message.id);
       if (message.status === "cancelled") {
-        delete entries[id];
+        if (entries[id]) {
+          entries = { ...entries };
+          delete entries[id];
+          changed = true;
+        }
         continue;
       }
       // Follow pending messages restored from the durable queue, but never
@@ -57,7 +71,7 @@ export function reconcileDeliveryEchoes(
         message.status !== "sending"
       )
         continue;
-      entries[id] = {
+      const next = {
         id: message.id,
         threadId,
         text: composeContextText(message.text, message.contexts),
@@ -65,8 +79,12 @@ export function reconcileDeliveryEchoes(
         status: message.status,
         turnId: message.turnId,
       };
+      if (entries[id] && sameEcho(entries[id], next)) continue;
+      if (!changed) entries = { ...entries };
+      entries[id] = next;
+      changed = true;
     }
-    return { entries };
+    return changed ? { entries } : s;
   });
 }
 export function failDeliveryEcho(threadId: string, id: string) {

@@ -209,3 +209,348 @@ test("browsers cannot forge queue ownership holds through the session proxy", as
     await app.close();
   }
 });
+
+test("session gateway chat SSE projection strips tool bodies before browser delivery", async () => {
+  const app = Fastify();
+  const requests: string[] = [];
+  const big = "x".repeat(10_000);
+  registerSessionModeRoutes(app, {
+    origin: "http://127.0.0.1:12345",
+    fetch: async (url) => {
+      requests.push(String(url));
+      return new Response(
+        [
+          `data: ${JSON.stringify({
+            seq: 1,
+            event: "codex:notification",
+            payload: {
+              method: "item/commandExecution/outputDelta",
+              params: {
+                threadId: "thread",
+                turnId: "turn",
+                itemId: "cmd",
+                delta: big,
+              },
+            },
+          })}\r\n\r\n`,
+          `data: ${JSON.stringify({
+            seq: 2,
+            event: "codex/approval-request",
+            payload: {
+              threadId: "thread",
+              turnId: "turn",
+              itemId: "cmd",
+              requestId: "approval",
+              reason: "needs approval",
+            },
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            seq: 3,
+            event: "codex:notification",
+            payload: {
+              method: "item/completed",
+              params: {
+                threadId: "thread",
+                turnId: "turn",
+                item: {
+                  id: "cmd",
+                  type: "commandExecution",
+                  status: "completed",
+                  command: "cat huge.log",
+                  aggregatedOutput: big,
+                  exitCode: 0,
+                },
+              },
+            },
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            seq: 4,
+            event: "codex:notification",
+            payload: {
+              method: "rawResponseItem/completed",
+              params: {
+                threadId: "thread",
+                turnId: "turn",
+                item: {
+                  type: "function_call",
+                  id: "raw",
+                  name: "web.run",
+                  arguments: big,
+                  call_id: "call",
+                },
+              },
+            },
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            seq: 5,
+            event: "codex:notification",
+            payload: {
+              method: "item/commandExecution/terminalInteraction",
+              params: {
+                threadId: "thread",
+                turnId: "turn",
+                itemId: "cmd",
+                processId: "proc",
+                stdin: big,
+              },
+            },
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            seq: 6,
+            event: "codex:notification",
+            payload: {
+              method: "hook/completed",
+              params: {
+                threadId: "thread",
+                turnId: "turn",
+                run: {
+                  id: "hook",
+                  status: "completed",
+                  eventName: "Stop",
+                  entries: [{ output: big }],
+                },
+              },
+            },
+          })}\n\n`,
+          `data: ${JSON.stringify({
+            seq: 7,
+            event: "codex:notification",
+            payload: {
+              method: "item/autoApprovalReview/completed",
+              params: {
+                threadId: "thread",
+                turnId: "turn",
+                reviewId: "review",
+                targetItemId: "cmd",
+                startedAtMs: 1,
+                completedAtMs: 2,
+                decisionSource: "user",
+                review: {
+                  status: "approved",
+                  riskLevel: "medium",
+                  userAuthorization: null,
+                  rationale: big,
+                },
+                action: {
+                  type: "command",
+                  command: big,
+                  cwd: "/repo",
+                },
+              },
+            },
+          })}\n\n`,
+        ].join(""),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    },
+  });
+  try {
+    const response = await app.inject({
+      url: "/api/session/api/events?since=5&view=chat",
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(requests[0], "http://127.0.0.1:12345/api/events?since=5");
+    assert.equal(response.body.includes(big), false);
+    const frames = response.body
+      .trim()
+      .split("\n\n")
+      .map((frame) => JSON.parse(frame.replace(/^data: /, "")));
+    assert.equal(frames[0].seq, 1);
+    assert.equal(frames[0].payload.params.delta, undefined);
+    assert.equal(frames[1].event, "codex/approval-request");
+    assert.equal(frames[1].payload.reason, "needs approval");
+    assert.equal(frames[2].payload.params.item.id, "cmd");
+    assert.equal(frames[2].payload.params.item.status, "completed");
+    assert.equal(frames[2].payload.params.item.command, "cat huge.log");
+    assert.equal(frames[2].payload.params.item.aggregatedOutput, null);
+    assert.deepEqual(frames[3].payload.params.item, {
+      type: "function_call",
+      id: "raw",
+      name: "web.run",
+      call_id: "call",
+    });
+    assert.deepEqual(frames[4].payload.params, {
+      threadId: "thread",
+      turnId: "turn",
+      itemId: "cmd",
+      processId: "proc",
+    });
+    assert.deepEqual(frames[5].payload.params.run, {
+      id: "hook",
+      status: "completed",
+      eventName: "Stop",
+      sourcePath: null,
+      statusMessage: null,
+      entries: [],
+    });
+    assert.equal(frames[6].payload.params.review.rationale.length, 1024);
+    assert.equal(frames[6].payload.params.action.command, undefined);
+    assert.equal(frames[6].payload.params.action.type, "command");
+  } finally {
+    await app.close();
+  }
+});
+
+test("session gateway chat SSE projection stops on oversized frames", async () => {
+  const app = Fastify();
+  const oversized = "x".repeat(17 * 1024 * 1024);
+  registerSessionModeRoutes(app, {
+    origin: "http://127.0.0.1:12345",
+    fetch: async () =>
+      new Response(
+        `data: ${JSON.stringify({
+          seq: 9,
+          event: "codex:notification",
+          payload: {
+            method: "item/agentMessage/delta",
+            params: {
+              threadId: "thread",
+              turnId: "turn",
+              itemId: "reply",
+              delta: oversized,
+            },
+          },
+        })}\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      ),
+  });
+  try {
+    const response = await app.inject({
+      url: "/api/session/api/events?view=chat",
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.includes(oversized), false);
+    assert.match(response.body, /^event: session-projection-error\n/);
+    assert.match(
+      response.body,
+      /Session event frame exceeds chat projection limit/,
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test("session gateway chat history projection strips tool bodies but keeps protocol shape", async () => {
+  const app = Fastify();
+  const big = "x".repeat(10_000);
+  const requests: string[] = [];
+  registerSessionModeRoutes(app, {
+    origin: "http://127.0.0.1:12345",
+    fetch: async (url) => {
+      requests.push(String(url));
+      return new Response(
+        JSON.stringify({
+          thread: {
+            id: "thread",
+            turns: [
+              {
+                id: "turn",
+                items: [
+                  { id: "reply", type: "agentMessage", text: "visible reply" },
+                  {
+                    id: "cmd",
+                    type: "commandExecution",
+                    status: "completed",
+                    command: big,
+                    aggregatedOutput: big,
+                  },
+                  {
+                    id: "spawn",
+                    type: "collabAgentToolCall",
+                    tool: "spawnAgent",
+                    status: "completed",
+                    receiverThreadIds: ["child"],
+                    agentsStates: {
+                      child: { status: "completed", message: big },
+                    },
+                    prompt: big,
+                  },
+                ],
+              },
+            ],
+          },
+        }),
+        { headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/session/api/codex/thread/read?view=chat",
+      payload: { threadId: "thread" },
+    });
+    assert.equal(response.statusCode, 200);
+    assert.equal(requests[0], "http://127.0.0.1:12345/api/codex/thread/read");
+    assert.equal(response.body.includes(big), false);
+    const body = response.json();
+    const items = body.thread.turns[0].items;
+    assert.equal(items[0].text, "visible reply");
+    assert.deepEqual(items[1], {
+      id: "cmd",
+      type: "commandExecution",
+      status: "completed",
+      command: `${big.slice(0, 1023)}…`,
+      commandActions: [],
+      aggregatedOutput: null,
+      transcriptMetadataOnly: true,
+    });
+    assert.deepEqual(items[2], {
+      id: "spawn",
+      type: "collabAgentToolCall",
+      tool: "spawnAgent",
+      status: "completed",
+      receiverThreadIds: ["child"],
+      prompt: `${big.slice(0, 1023)}…`,
+      agentsStates: {
+        child: { status: "completed", message: `${big.slice(0, 1023)}…` },
+      },
+      transcriptMetadataOnly: true,
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+
+test("chat metadata preserves native tool and public Hook shapes without retaining tool bodies", async () => {
+  const app = Fastify();
+  const privateBody = "private-tool-body".repeat(100_000);
+  const items = [
+    { type: "commandExecution", id: "cmd", status: "completed", command: "pnpm test", cwd: "/repo", commandActions: [{ type: "read", command: "cat a.ts", name: "a.ts", path: "/repo/a.ts" }], aggregatedOutput: privateBody, exitCode: 0, durationMs: 15 },
+    { type: "fileChange", id: "files", status: "completed", changes: [{ path: "a.ts", kind: { type: "update", move_path: null }, diff: privateBody }] },
+    { type: "mcpToolCall", id: "mcp", status: "completed", server: "github", tool: "search", arguments: { secret: privateBody }, result: { content: privateBody }, error: null },
+    { type: "dynamicToolCall", id: "dynamic", namespace: "codex", tool: "read_thread", status: "completed", arguments: { threadId: "other", text: privateBody }, contentItems: [{ type: "inputText", text: privateBody }], success: true },
+    { type: "webSearch", id: "web", query: "bounded query", action: { type: "search", query: "bounded query", queries: ["bounded query"] }, results: privateBody },
+    { type: "reasoning", id: "thought", summary: ["public summary"], content: [privateBody] },
+  ];
+  const hook = { id: "hook", eventName: "Stop", source: "project", sourcePath: "/private/hook", status: "completed", displayOrder: "1", startedAt: "1", completedAt: "2", durationMs: "1", entries: [{ kind: "context", text: privateBody }, { kind: "warning", text: "public warning" }], statusMessage: null };
+  registerSessionModeRoutes(app, {
+    origin: "http://127.0.0.1:12345",
+    fetch: async () => Response.json({ thread: { id: "thread", turns: [{ id: "turn", status: "completed", items, hookRuns: [hook] }] } }),
+  });
+  try {
+    const response = await app.inject({ method: "POST", url: "/api/session/api/codex/thread/read?view=chat", payload: { threadId: "thread" } });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.includes(privateBody), false);
+    const turn = response.json().thread.turns[0];
+    assert.equal(turn.items[0].command, "pnpm test");
+    assert.deepEqual(turn.items[0].commandActions[0], { type: "read", command: "cat a.ts", name: "a.ts", path: "/repo/a.ts" });
+    assert.equal(turn.items[0].aggregatedOutput, null);
+    assert.equal(turn.items[0].transcriptMetadataOnly, true);
+    assert.equal(turn.items[1].changes[0].path, "a.ts");
+    assert.equal(turn.items[1].changes[0].diff, "");
+    assert.equal(turn.items[1].changes[0].transcriptMetadataOnly, true);
+    assert.equal(turn.items[2].server, "github");
+    assert.equal(turn.items[2].arguments, null);
+    assert.equal(turn.items[2].result, null);
+    assert.equal(turn.items[3].arguments, null);
+    assert.deepEqual(turn.items[3].contentItems, []);
+    assert.equal(turn.items[4].action.query, "bounded query");
+    assert.deepEqual(turn.items[5].content, []);
+    assert.equal(turn.hookRuns[0].id, "hook");
+    assert.equal(turn.hookRuns[0].sourcePath, "/private/hook");
+    assert.deepEqual(turn.hookRuns[0].entries, [{ kind: "warning", text: "public warning" }]);
+    assert.ok(response.body.length < 12_000);
+  } finally { await app.close(); }
+});

@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect } from "react";
-import { buildEventUrl, isDesktopTauri } from "@session/hooks/runtime";
+import { isDesktopTauri } from "@session/hooks/runtime";
+import { openEventStream } from "@session/lib/eventStream";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { applyAcpUpdate } from "./applyUpdate";
 
@@ -89,17 +90,12 @@ export function useAcpEvents(connectionId: string | null) {
       };
     }
 
-    const es = new EventSource(buildEventUrl("/api/events"));
-    es.onmessage = (e) => {
-      try {
-        const envelope = JSON.parse(e.data as string) as {
-          event?: string;
-          payload?: unknown;
-        };
+    return openEventStream({
+      agents: ["acp"],
+      onEvent: (envelope) => {
         if (envelope.event === "acp-message")
           handle(envelope.payload as AcpEventPayload);
-      } catch {}
-    };
-    return () => es.close();
+      },
+    });
   }, [connectionId]);
 }

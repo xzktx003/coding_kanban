@@ -1,10 +1,16 @@
 // @vitest-environment jsdom
 import { beforeEach, expect, it, vi } from "vitest";
 import { webcrypto } from "node:crypto";
+const api = vi.hoisted(() => ({
+  getJsonWithOptions: vi.fn(),
+  postJsonWithOptions: vi.fn(),
+}));
+vi.mock("./apiAdapt/shared", () => api);
 import {
-  submissionId,
-  followupParameters,
   followupService,
+  followupParameters,
+  submissionId,
+  useFollowupStore,
 } from "./followupService";
 import { useWorkspaceStore } from "../stores/useWorkspaceStore";
 import { useConfigStore, useCodexStore } from "../components/codex/stores";
@@ -13,14 +19,15 @@ import {
   hydrateThreadModel,
   useThreadModelStore,
 } from "../stores/useThreadModelStore";
-const transport = vi.hoisted(() => ({ post: vi.fn() }));
-vi.mock("./apiAdapt/shared", () => ({
-  getJsonWithOptions: vi.fn(),
-  postJsonWithOptions: transport.post,
-}));
 beforeEach(() => {
+  vi.clearAllMocks();
   localStorage.clear();
   useThreadModelStore.setState({ threads: {} });
+  useFollowupStore.setState({ threads: {}, errors: {} });
+  useCodexStore.setState({
+    turnTimingMap: {},
+    threadStatusMap: {},
+  });
   vi.stubGlobal("crypto", webcrypto);
 });
 it("reuses the same request identity after reload and separates new drafts, targets and attachments", async () => {
@@ -57,11 +64,25 @@ it("captures the target directory, model, permissions and plan mode at enqueue t
     cwd: "/target",
     model: "chosen",
     sandboxPolicy: { type: "readOnly" },
+    approvalsReviewer: "user",
     collaborationMode: { mode: "plan" },
   });
   expect(followupParameters("a")).toMatchObject({
     model: "changed-for-a",
     effort: "high",
+  });
+});
+it("captures explicit native auto review for workspace-write queued followups", () => {
+  useCodexStore.setState({ threads: [{ id: "a", cwd: "/target" } as any] });
+  changeThreadModel("a", {
+    sandbox: "workspace-write",
+    approvalPolicy: "on-request",
+    approvalsReviewer: "auto_review",
+  });
+  expect(followupParameters("a")).toMatchObject({
+    approvalPolicy: "on-request",
+    approvalsReviewer: "auto_review",
+    sandboxPolicy: { type: "workspaceWrite" },
   });
 });
 it("reconciles native review execution ids after completion or browser refresh without touching a newer turn", async () => {
@@ -105,6 +126,46 @@ it("reconciles native review execution ids after completion or browser refresh w
   });
   reconcileReview("a", data);
   expect(useCodexStore.getState().turnTimingMap.a.status).toBe("inProgress");
+});
+
+it("reconciles a completed review again when an unchanged queue snapshot reloads", async () => {
+  const data = {
+    revision: 1,
+    paused: null,
+    items: [],
+    review: {
+      turnId: "review",
+      executionTurnId: "execution",
+      status: "completed" as const,
+      durationMs: 12,
+    },
+  };
+  api.getJsonWithOptions.mockResolvedValueOnce(data);
+  await followupService.load("a");
+
+  useCodexStore.setState({
+    turnTimingMap: {
+      a: {
+        turnId: "execution",
+        status: "inProgress",
+        startedAtMs: 1,
+        durationMs: null,
+      },
+    },
+    threadStatusMap: { a: { type: "active", activeFlags: [] } as any },
+  });
+
+  api.getJsonWithOptions.mockResolvedValueOnce(structuredClone(data));
+  await followupService.load("a");
+
+  expect(useCodexStore.getState().turnTimingMap.a).toMatchObject({
+    turnId: "review",
+    status: "completed",
+    durationMs: 12,
+  });
+  expect(useCodexStore.getState().threadStatusMap.a).toEqual({
+    type: "idle",
+  });
 });
 
 it("does not send a blank restored thread directory or borrow another project's directory", () => {
@@ -180,7 +241,7 @@ it.each(["queue", "steer"] as const)(
       webSearchRequest: true,
       collaborationMode: "plan",
     });
-    transport.post.mockImplementation(async (_path, data) => ({
+    api.postJsonWithOptions.mockImplementation(async (_path, data) => ({
       revision: 1,
       paused: null,
       items: [{ ...data, status: "queued" }],
@@ -201,7 +262,7 @@ it.each(["queue", "steer"] as const)(
       approvalPolicy: "never",
     });
     await operation;
-    expect(transport.post).toHaveBeenLastCalledWith(
+    expect(api.postJsonWithOptions).toHaveBeenLastCalledWith(
       "/followups/submit",
       expect.objectContaining({
         threadId: "a",
@@ -220,3 +281,51 @@ it.each(["queue", "steer"] as const)(
     );
   },
 );
+
+it("keeps an unchanged same-revision queue snapshot stable while accepting real same-revision changes", async () => {
+  const first = {
+    revision: 2,
+    paused: null,
+    items: [
+      {
+        id: "message",
+        threadId: "a",
+        text: "hello",
+        images: [],
+        mode: "queue",
+        parameters: {},
+        status: "queued",
+        createdAt: 1,
+      },
+    ],
+  };
+  api.getJsonWithOptions.mockResolvedValueOnce(first);
+  await followupService.load("a");
+  const firstState = useFollowupStore.getState();
+
+  api.getJsonWithOptions.mockResolvedValueOnce(structuredClone(first));
+  await followupService.load("a");
+  expect(useFollowupStore.getState()).toBe(firstState);
+
+  useFollowupStore.setState((s) => ({
+    threads: s.threads,
+    errors: { ...s.errors, a: "stale" },
+  }));
+  const changed = {
+    ...first,
+    items: [{ ...first.items[0], status: "sending" }],
+  };
+  api.getJsonWithOptions.mockResolvedValueOnce(changed);
+  await followupService.load("a");
+  expect(useFollowupStore.getState().threads.a).toBe(changed);
+  expect(useFollowupStore.getState().errors.a).toBeUndefined();
+
+  const accepted = useFollowupStore.getState();
+  api.getJsonWithOptions.mockResolvedValueOnce({
+    ...changed,
+    revision: 1,
+    items: [{ ...changed.items[0], status: "failed" }],
+  });
+  await followupService.load("a");
+  expect(useFollowupStore.getState()).toBe(accepted);
+});

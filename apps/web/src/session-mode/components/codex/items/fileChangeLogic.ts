@@ -2,10 +2,8 @@ import type { ServerNotification } from "@session/bindings";
 import type { FileUpdateChange } from "@session/bindings/v2";
 import type { ThreadItem } from "@session/bindings/v2";
 import type { SavedPatchBatch } from "@agent-orchestrator/shared";
-import {
-  getDiffCounts,
-  normalizeUnifiedDiff,
-} from "@session/utils/diff";
+import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
+import { getDiffCounts, normalizeUnifiedDiff } from "@session/utils/diff";
 import { splitNativePatchFiles as splitUnifiedDiffByFile } from "@session/features/nativePatchPaths";
 
 export type AggregatedFileChange = {
@@ -14,6 +12,7 @@ export type AggregatedFileChange = {
   kind: FileUpdateChange["kind"];
   addedCount: number;
   removedCount: number;
+  transcriptMetadataOnly?: boolean;
 };
 
 export type RenderEventContext = {
@@ -49,7 +48,8 @@ const isLikelyUnifiedDiff = (value?: string) => {
   );
 };
 
-const normalizeChangeDiff = (_kind: FileUpdateChange["kind"], diff: string) => diff;
+const normalizeChangeDiff = (_kind: FileUpdateChange["kind"], diff: string) =>
+  diff;
 
 const countContentLines = (content?: string) => {
   if (!content) return 0;
@@ -80,7 +80,8 @@ export const getChangeCounts = (
   kind: FileUpdateChange["kind"],
   diff: string,
 ) => {
-  if (isLikelyUnifiedDiff(diff)) return getDiffCounts({ unifiedDiff: diff, diffLines: [] });
+  if (isLikelyUnifiedDiff(diff))
+    return getDiffCounts({ unifiedDiff: diff, diffLines: [] });
   if (kind.type === "add") {
     return { addedCount: countContentLines(diff), removedCount: 0 };
   }
@@ -100,7 +101,8 @@ export const getDiffViewerProps = (change: {
   kind: FileUpdateChange["kind"];
   diff: string;
 }): DiffViewerInput => {
-  if (isLikelyUnifiedDiff(change.diff)) return { unifiedDiff: change.diff, displayPath: change.path };
+  if (isLikelyUnifiedDiff(change.diff))
+    return { unifiedDiff: change.diff, displayPath: change.path };
   if (change.kind.type === "add") {
     return {
       original: "",
@@ -140,16 +142,21 @@ export const aggregateFileChanges = (
       const path = entry.path || change.path || fallbackPath;
       const key = path;
       const existing = merged.get(key);
+      const metadataOnly = isTranscriptMetadataOnly(change);
       const normalizedDiff = normalizeChangeDiff(change.kind, entry.diff ?? "");
-      const nextDiff = normalizedDiff.trim()
-        ? normalizedDiff
-        : (existing?.diff ?? "");
+      const nextDiff = metadataOnly
+        ? ""
+        : normalizedDiff.trim()
+          ? normalizedDiff
+          : (existing?.diff ?? "");
 
       if (existing) {
         existing.kind = change.kind;
-        if (nextDiff) {
+        if (nextDiff || metadataOnly) {
           existing.diff = nextDiff;
         }
+        if (metadataOnly) existing.transcriptMetadataOnly = true;
+        else delete existing.transcriptMetadataOnly;
         return;
       }
 
@@ -157,6 +164,7 @@ export const aggregateFileChanges = (
         path,
         diff: nextDiff,
         kind: change.kind,
+        ...(metadataOnly ? { transcriptMetadataOnly: true } : {}),
       });
     });
   });
@@ -202,7 +210,8 @@ export const aggregateTurnChangesFromContext = (
       event.method === "turn/diff/updated" &&
       event.params.turnId === turnId
     ) {
-      latestTurnDiff = event.params.diff;
+      if (typeof event.params.diff === "string")
+        latestTurnDiff = event.params.diff;
       continue;
     }
 
@@ -291,6 +300,7 @@ export function completedTurnChanges(
     .map((c) => ({
       path: c.path,
       diff: c.diff,
+      ...(isTranscriptMetadataOnly(c) ? { transcriptMetadataOnly: true } : {}),
       kind:
         c.kind.type === "update"
           ? { type: "update", move_path: c.kind.move_path ?? null }

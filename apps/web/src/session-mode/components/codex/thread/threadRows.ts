@@ -78,7 +78,9 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
     localIndices.set(index, turn.length);
     turn.push(event);
     if (
-      (event.method === "turn/diff/updated" && event.params.diff.trim()) ||
+      (event.method === "turn/diff/updated" &&
+        typeof event.params.diff === "string" &&
+        event.params.diff.trim()) ||
       (event.method === "item/completed" &&
         event.params.item.type === "fileChange" &&
         event.params.item.changes.length > 0)
@@ -108,6 +110,11 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
     if (projection.hidden.has(index)) continue;
     const event = projection.replacements.get(index) ?? item.event;
     if (hiddenMethods.has(event.method)) continue;
+    if (
+      event.method === "item/commandExecution/terminalInteraction" &&
+      (typeof event.params.stdin !== "string" || !event.params.stdin.length)
+    )
+      continue;
     if (
       event.method === "item/started" &&
       [

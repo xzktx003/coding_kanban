@@ -1257,3 +1257,33 @@ test("script sender hides notification content when the child process fails", as
     },
   );
 });
+
+test("script sender marks native session cards without offering terminal controls", async () => {
+  let notification: any;
+  const sender = new ScriptFeishuCompletionSender({
+    scriptPath: "/scripts/notify.mjs",
+    fallbackWorkingDirectory: "/workspace",
+    quickRepliesAvailable: () => true,
+    runCommand: async (_binary, args) => {
+      notification = JSON.parse(args[2]!);
+      return {
+        stdout: JSON.stringify({
+          status: "sent",
+          messages: [{ messageId: "om_native", chatId: "oc_private" }],
+        }),
+      };
+    },
+  });
+  await sender.send({
+    sessionId: "session-codex:native-thread",
+    sessionModeThreadId: "native-thread",
+    displayName: "原会话",
+    agentKind: "codex",
+    summary: "完成",
+    completionId: "turn-one",
+    completedAt: "2026-10-10T01:00:00.000Z",
+  });
+  assert.equal(notification["session-mode-thread-id"], "native-thread");
+  assert.equal(notification["quick-replies-available"], undefined);
+  assert.equal(notification["records-available"], undefined);
+});

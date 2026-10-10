@@ -1,7 +1,8 @@
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
 import { useCCStore } from "../stores/cc";
+import { useCodexStore } from "../components/codex/stores";
 import { openedSessions } from "./openedSessions";
-import { followupService } from "./followupService";
+import { followupService, useFollowupStore } from "./followupService";
 import { ccGetSessionMessages } from "./apiAdapt/cc";
 import { fromSdkMessages } from "../components/cc/utils/fromSdkMessages";
 import { enqueueSessionRead, readWithDeadline } from "./sessionReadQueue";
@@ -68,9 +69,23 @@ export function startFollowedSessionAuxSync() {
       if (!keys.has(key)) controller.abort();
     for (const card of members) {
       const key = `${card.kind}:${card.id}`;
+      const queue = useFollowupStore.getState().threads[card.id];
+      const codex = useCodexStore.getState();
+      const codexBusy =
+        !queue ||
+        queue.awaitingTurnId ||
+        queue.stopTurnId ||
+        queue.review?.status === "inProgress" ||
+        queue.items.some((item) =>
+          ["queued", "sending", "uncertain"].includes(item.status),
+        ) ||
+        codex.threadStatusMap[card.id]?.type === "active" ||
+        codex.turnTimingMap[card.id]?.status === "inProgress";
       const interval =
         card.kind === "codex"
-          ? 5000
+          ? codexBusy
+            ? 5000
+            : 30000
           : useCCStore.getState().sessionLoadingMap[card.id]
             ? 5000
             : 30000;

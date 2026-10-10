@@ -1,3 +1,4 @@
+import { retryEventStream } from "@session/lib/eventStream";
 import {
   useSessionSyncStore,
   requestSessionHistorySync,
@@ -13,6 +14,7 @@ import { SessionApiError } from "@session/services/apiAdapt/shared";
 export function CodexAccessNotice({ threadId }: { threadId: string }) {
   const recovery = useSessionSyncStore((s) => s.recovering[threadId]);
   const connection = useSessionSyncStore((s) => s.connection);
+  const connectionError = useSessionSyncStore((s) => s.connectionError);
   const [showReconnect, setShowReconnect] = useState(false);
   useEffect(() => {
     if (connection !== "reconnecting") {
@@ -65,7 +67,7 @@ export function CodexAccessNotice({ threadId }: { threadId: string }) {
       : access?.state === "external"
         ? "其他客户端占用 · 历史可读，草稿已保留"
         : access?.reason);
-  if (recovery || showReconnect)
+  if (connectionError || recovery || showReconnect)
     return (
       <div
         role="status"
@@ -73,16 +75,20 @@ export function CodexAccessNotice({ threadId }: { threadId: string }) {
         className="session-sync-notice"
       >
         <span>
-          {showReconnect
-            ? "连接中断，正在重连"
-            : recovery === "retrying"
-              ? "同步延迟，正在重试"
-              : "正在恢复会话同步…"}
+          {connectionError ||
+            (showReconnect
+              ? "连接中断，正在重连"
+              : recovery === "retrying"
+                ? "同步延迟，正在重试"
+                : "正在恢复会话同步…")}
         </span>
         <button
           type="button"
           className="underline underline-offset-2"
-          onClick={() => requestSessionHistorySync(threadId)}
+          onClick={() => {
+            if (connectionError) retryEventStream();
+            requestSessionHistorySync(threadId);
+          }}
         >
           重试
         </button>

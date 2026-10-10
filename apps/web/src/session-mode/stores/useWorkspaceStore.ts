@@ -157,7 +157,7 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
             (current, op) => applyProjectAction(current, op.action),
             accepted.projects,
           );
-          return {
+          const next = {
             projects:
               JSON.stringify(projects) === JSON.stringify(state.projects)
                 ? state.projects
@@ -174,6 +174,12 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
             ),
             projectSyncError: null,
           };
+          // Polling unchanged data must not rerender every subscribed transcript.
+          return Object.entries(next).every(
+            ([key, value]) => state[key as keyof typeof state] === value,
+          )
+            ? state
+            : next;
         });
         return fresh;
       },
