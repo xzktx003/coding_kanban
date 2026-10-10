@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::skills::{
-    central_skills_dir, copy_dir_recursive, link_skill, parse_skill_front_matter,
-    resolve_skills_install_root,
+    central_skills_dir, copy_dir_recursive, existing_managed_skill, link_skill_in_roots,
+    managed_skill_path, parse_skill_front_matter, resolve_skills_install_root, validate_skill_name,
+    validate_skill_source_tree,
 };
 
 const USER_AGENT: &str = "skills-manager";
@@ -133,14 +134,50 @@ pub fn install_from_skillssh(
     scope: &str,
     cwd: Option<&str>,
 ) -> Result<String> {
+    validate_skillssh_source(source)?;
+    validate_skill_name(skill_id).map_err(anyhow::Error::msg)?;
+    let agent_roots = ["codex", "cc"]
+        .iter()
+        .map(|agent| resolve_skills_install_root(agent, scope, cwd))
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(anyhow::Error::msg)?;
+    let central_dir = central_skills_dir().map_err(anyhow::Error::msg)?;
     let temp_dir = tempfile::tempdir().context("Failed to create temp dir")?;
     let clone_path = temp_dir.path().join("repo");
     let repo_url = format!("https://github.com/{}.git", source);
 
-    codexia_git::clone(&repo_url, &clone_path)
-        .context("Failed to clone repository")?;
+    codexia_git::clone(&repo_url, &clone_path).context("Failed to clone repository")?;
 
-    let skill_dir = find_skill_dir(&clone_path, skill_id)?;
+    install_cloned_skill(&clone_path, skill_id, &central_dir, &agent_roots)
+}
+
+fn validate_skillssh_source(source: &str) -> Result<()> {
+    let parts = source.split('/').collect::<Vec<_>>();
+    if parts.len() != 2
+        || parts.iter().any(|part| {
+            part.is_empty()
+                || part.len() > 255
+                || *part == "."
+                || *part == ".."
+                || !part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        })
+    {
+        anyhow::bail!("Skill source must be a GitHub owner/repository");
+    }
+    Ok(())
+}
+
+fn install_cloned_skill(
+    repo_root: &std::path::Path,
+    skill_id: &str,
+    central_dir: &std::path::Path,
+    agent_roots: &[PathBuf],
+) -> Result<String> {
+    validate_skill_name(skill_id).map_err(anyhow::Error::msg)?;
+    let skill_dir = find_skill_dir(repo_root, skill_id)?;
+    validate_skill_source_tree(&skill_dir, repo_root).map_err(anyhow::Error::msg)?;
 
     let install_name = {
         let md = skill_dir.join("SKILL.md");
@@ -154,24 +191,25 @@ pub fn install_from_skillssh(
             skill_id.to_string()
         }
     };
+    let install_name = validate_skill_name(&install_name).map_err(anyhow::Error::msg)?;
 
-    let central_dir = central_skills_dir().map_err(|e| anyhow::anyhow!(e))?;
-    std::fs::create_dir_all(&central_dir).context("Failed to create central skills dir")?;
-    let central_skill_dir = central_dir.join(&install_name);
-    if !central_skill_dir.exists() {
+    // Validate every destination before creating the central copy or links.
+    let central_skill_dir =
+        managed_skill_path(central_dir, install_name, false).map_err(anyhow::Error::msg)?;
+    for root in agent_roots {
+        managed_skill_path(root, install_name, false).map_err(anyhow::Error::msg)?;
+    }
+    managed_skill_path(central_dir, install_name, true).map_err(anyhow::Error::msg)?;
+    if central_skill_dir.exists() || central_skill_dir.is_symlink() {
+        existing_managed_skill(central_dir, install_name).map_err(anyhow::Error::msg)?;
+    } else {
         copy_dir_recursive(&skill_dir, &central_skill_dir)
-            .map_err(|e| anyhow::anyhow!(e))
+            .map_err(anyhow::Error::msg)
             .context("Failed to copy skill to central store")?;
     }
 
-    for agent in &["codex", "cc"] {
-        if let Ok(root) = resolve_skills_install_root(agent, scope, cwd) {
-            let _ = std::fs::create_dir_all(&root);
-            let target = root.join(&install_name);
-            if !target.exists() && !target.is_symlink() {
-                link_skill(&central_skill_dir, &target).ok();
-            }
-        }
+    for root in agent_roots {
+        link_skill_in_roots(install_name, central_dir, root).map_err(anyhow::Error::msg)?;
     }
 
     Ok(central_skill_dir.to_string_lossy().to_string())
@@ -243,4 +281,118 @@ fn percent_encode(input: &str) -> String {
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod skillssh_boundary_tests {
+    use super::*;
+
+    #[test]
+    fn front_matter_name_cannot_write_outside_the_skill_roots() {
+        let fixture = tempfile::tempdir().unwrap();
+        let repo = fixture.path().join("repo");
+        let central = fixture.path().join("home/.agents/skills");
+        let agent = fixture.path().join("native/skills");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(
+            repo.join("SKILL.md"),
+            "---\nname: ../../escaped\n---\nfixture\n",
+        )
+        .unwrap();
+        assert!(install_cloned_skill(&repo, "safe-id", &central, &[agent]).is_err());
+        assert!(!fixture.path().join("home/escaped/SKILL.md").exists());
+        assert!(!fixture.path().join("escaped").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn installer_rejects_a_source_symlink_that_leaves_the_clone() {
+        let fixture = tempfile::tempdir().unwrap();
+        let repo = fixture.path().join("repo");
+        let outside = fixture.path().join("outside");
+        let central = fixture.path().join("central");
+        std::fs::create_dir(&repo).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("sentinel"), "private fixture content").unwrap();
+        std::fs::write(repo.join("SKILL.md"), "---\nname: safe\n---\nfixture\n").unwrap();
+        std::os::unix::fs::symlink(&outside, repo.join("linked-content")).unwrap();
+        assert!(install_cloned_skill(&repo, "safe-id", &central, &[]).is_err());
+        assert!(!central.join("safe").exists());
+        assert!(outside.join("sentinel").exists());
+    }
+
+    #[test]
+    fn legitimate_skill_is_copied_and_linked_without_overwriting_existing_contents() {
+        let fixture = tempfile::tempdir().unwrap();
+        let repo = fixture.path().join("repo");
+        let central = fixture.path().join("central");
+        let agent = fixture.path().join("agent");
+        std::fs::create_dir(&repo).unwrap();
+        std::fs::write(
+            repo.join("SKILL.md"),
+            "---\nname: safe-skill\n---\nfixture\n",
+        )
+        .unwrap();
+        let result = install_cloned_skill(&repo, "safe-id", &central, std::slice::from_ref(&agent)).unwrap();
+        assert_eq!(PathBuf::from(result), central.join("safe-skill"));
+        assert!(agent.join("safe-skill/SKILL.md").exists());
+        std::fs::write(central.join("safe-skill/SKILL.md"), "preserved existing").unwrap();
+        install_cloned_skill(&repo, "safe-id", &central, &[agent]).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(central.join("safe-skill/SKILL.md")).unwrap(),
+            "preserved existing"
+        );
+    }
+
+    #[test]
+    fn malformed_repository_skill_id_or_scope_is_rejected_before_git_clone() {
+        for source in [
+            "",
+            "owner",
+            "../repo",
+            "owner/../repo",
+            "owner/repo?query",
+            "owner/repo#fragment",
+            "https://github.com/owner/repo",
+        ] {
+            assert!(install_from_skillssh(source, "safe", "user", None).is_err());
+        }
+        assert!(validate_skillssh_source("openai/skills").is_ok());
+        assert!(install_from_skillssh("openai/skills", "../escaped", "user", None).is_err());
+        assert!(install_from_skillssh("openai/skills", "safe", "invalid", None).is_err());
+        assert!(
+            install_from_skillssh("openai/skills", "safe", "project", Some("relative")).is_err()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn in_repository_file_links_are_preserved_but_cycles_and_destination_redirects_are_rejected() {
+        let fixture = tempfile::tempdir().unwrap();
+        let repo = fixture.path().join("repo");
+        let central = fixture.path().join("central");
+        std::fs::create_dir(&repo).unwrap();
+        std::fs::write(repo.join("SKILL.md"), "---\nname: safe\n---\nfixture\n").unwrap();
+        std::fs::write(repo.join("content"), "safe linked content").unwrap();
+        std::os::unix::fs::symlink(repo.join("content"), repo.join("content-link")).unwrap();
+        install_cloned_skill(&repo, "safe-id", &central, &[]).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(central.join("safe/content-link")).unwrap(),
+            "safe linked content"
+        );
+        std::os::unix::fs::symlink(&repo, repo.join("cycle")).unwrap();
+        assert!(install_cloned_skill(&repo, "safe-id", &central, &[]).is_err());
+        std::fs::remove_file(repo.join("cycle")).unwrap();
+        let outside = fixture.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        let redirected = fixture.path().join("redirected");
+        std::os::unix::fs::symlink(&outside, &redirected).unwrap();
+        let untouched = fixture.path().join("untouched-central");
+        assert!(
+            install_cloned_skill(&repo, "safe-id", &untouched, &[redirected.join("skills")])
+                .is_err()
+        );
+        assert!(!untouched.exists());
+        assert!(!outside.join("skills").exists());
+    }
 }

@@ -22,7 +22,7 @@ import { ensureSharedPackageBuilt } from "./services/shared-package-builder.js";
 
 const currentDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(currentDirectory, "../../..");
-loadDotenv({ path: resolve(repositoryRoot, ".env") });
+loadDotenv({ path: resolve(repositoryRoot, ".env"), override: false });
 
 async function main(): Promise<void> {
   // Pulls can change shared source and server imports in the same update.

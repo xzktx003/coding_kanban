@@ -97,7 +97,7 @@ test("large paste and selected reply survive reload, freeze in queue, and undo p
 
 test("expanded code editing keeps content across modes, close and reload", async ({
   page,
-}) => {
+}, info) => {
   const f = await setup(page);
   try {
     let value = "原需求\n\n```typescript\nconst x = 1;\n```\n最后一段";
@@ -115,6 +115,10 @@ test("expanded code editing keeps content across modes, close and reload", async
     await page
       .getByRole("textbox", { name: "展开的消息草稿", exact: true })
       .fill(value + "\n追加");
+    await page.screenshot({
+      path: info.outputPath("expanded-code-editing.png"),
+      fullPage: true,
+    });
     await page
       .getByRole("button", { name: "返回并保留草稿", exact: true })
       .click();
@@ -347,7 +351,7 @@ test("settings commands preserve draft and do not start a turn", async ({
 
 test("image annotation keeps original pixels, remains editable and supports attachment undo", async ({
   page,
-}) => {
+}, info) => {
   const f = await setup(page);
   try {
     const uploads: string[] = [];
@@ -405,6 +409,10 @@ test("image annotation keeps original pixels, remains editable and supports atta
         .locator(".session-drawing-canvas text")
         .filter({ hasText: "检查布局" }),
     ).toBeVisible();
+    await page.screenshot({
+      path: info.outputPath("annotation-original-image.png"),
+      fullPage: true,
+    });
     await page.getByRole("button", { name: "完成并附加", exact: true }).click();
     await expect.poll(() => uploads.length).toBe(2);
     const pixels = await page.evaluate(async (data) => {

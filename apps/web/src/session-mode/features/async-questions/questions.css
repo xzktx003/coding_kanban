@@ -94,19 +94,45 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  margin-bottom: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 12px;
+  margin-bottom: 4px;
+  min-height: 32px;
 }
 .session-mode .session-async-option:has(input:checked) {
-  border-color: var(--primary);
-  background: var(--accent);
+  background: color-mix(
+    in oklab,
+    var(--codex-fg, var(--foreground)) 5%,
+    transparent
+  );
 }
 .session-mode .session-async-option input {
-  flex-shrink: 0;
-  margin-top: 4px;
-  accent-color: var(--primary);
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.session-mode .session-async-option:focus-within {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.session-mode .session-async-choice-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  font-size: 12px;
+  border: 1px solid var(--codex-border, var(--border));
+  border-radius: 2px;
+  background: color-mix(
+    in oklab,
+    var(--codex-fg, var(--foreground)) 5%,
+    transparent
+  );
 }
 .session-mode .session-async-option span {
   min-width: 0;
@@ -145,6 +171,7 @@
 }
 @media (max-width: 767px), (pointer: coarse) {
   .session-mode .session-async-panel button,
+  .session-mode .session-async-option,
   .session-mode .session-async-message button,
   .session-mode .session-async-composer .session-async-notice {
     min-height: 44px;

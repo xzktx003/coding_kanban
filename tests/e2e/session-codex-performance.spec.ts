@@ -90,6 +90,22 @@ test("long Codex history stays bounded, scrollable and isolated from background 
     () => import(performance.getEntriesByType("resource").findLast(e => new URL(e.name).pathname === '/src/session-mode/components/codex/thread/CodexThread.tsx')?.name ?? '/src/session-mode/components/codex/thread/CodexThread.tsx'),
   );
   await expect(page.getByText("预热消息", { exact: true })).toBeAttached();
+  const foregroundBefore = await page.evaluate(() => ({
+    focused: document.hasFocus(),
+    visibility: document.visibilityState,
+  }));
+  await page.bringToFront();
+  await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
+  console.log(
+    "performance foreground:",
+    JSON.stringify({
+      before: foregroundBefore,
+      after: await page.evaluate(() => ({
+        focused: document.hasFocus(),
+        visibility: document.visibilityState,
+      })),
+    }),
+  );
   await page.waitForTimeout(500);
   const switchMs = await page.evaluate(async () => {
     const { useCodexStore } =
@@ -123,11 +139,11 @@ test("long Codex history stays bounded, scrollable and isolated from background 
     await surface.locator("*").count(),
     "only visible history should be mounted",
   ).toBeLessThan(2000);
+  console.log(`cached 1500-message switch: ${switchMs.toFixed(1)}ms`);
   expect(
     switchMs,
     "cached long history must not block switching for seconds",
   ).toBeLessThan(500);
-  console.log(`cached 1500-message switch: ${switchMs.toFixed(1)}ms`);
   await expect(page.getByText("性能消息 1499", { exact: true })).toBeVisible();
   const viewport = surface.locator(
     'xpath=ancestor::*[@data-slot="scroll-area-viewport"]',

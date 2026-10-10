@@ -36,6 +36,52 @@ async function fixedHeight(page: Page, expected: number) {
     )
     .toBeLessThanOrEqual(2);
 }
+async function nativeGeometry(page: Page) {
+  const geometry = await page
+    .locator(".session-native-composer .session-compact-frame")
+    .first()
+    .evaluate((el) => {
+      const body = el.querySelector(".session-compact-body")!,
+        toolbar = el.querySelector(".session-composer-bottom")!;
+      const css = getComputedStyle(el),
+        container = el.closest(".session-composer-width")!;
+      return {
+        width: container.getBoundingClientRect().width,
+        height: el.getBoundingClientRect().height,
+        autoHeight:
+          body.getBoundingClientRect().height +
+          toolbar.getBoundingClientRect().height +
+          parseFloat(css.paddingTop) +
+          parseFloat(css.paddingBottom) +
+          parseFloat(css.rowGap) +
+          parseFloat(css.borderTopWidth) +
+          parseFloat(css.borderBottomWidth),
+      };
+    });
+  if (geometry.width <= 480) expect(geometry.height).toBe(124);
+  else
+    expect(
+      Math.abs(geometry.height - Math.max(98, geometry.autoHeight)),
+    ).toBeLessThanOrEqual(1);
+  return geometry;
+}
+async function identityPlacement(page: Page) {
+  const surface = (await page
+    .locator(".session-native-composer .session-compact-frame")
+    .first()
+    .boundingBox())!;
+  const input = (await page.locator(".session-composer-editor").boundingBox())!;
+  const identity = (await page
+    .locator(".session-compact-meta")
+    .first()
+    .boundingBox())!;
+  const container = (await page
+    .locator(".session-composer-width")
+    .boundingBox())!;
+  if (container.width <= 840)
+    expect(identity.y + identity.height).toBeLessThanOrEqual(surface.y);
+  else expect(identity.y).toBeGreaterThanOrEqual(input.y + input.height);
+}
 async function setModelNotice(page: Page) {
   await page.evaluate(async () => {
     const path = "/src/session-mode/stores/useThreadModelStore.ts";
@@ -56,7 +102,7 @@ async function setModelNotice(page: Page) {
   });
 }
 for (const width of [375, 1440]) {
-  test(`compact input keeps its height for long text, images and native state (${width}px)`, async ({
+  test(`native input keeps mobile height and desktop autoheight for long text, images and state (${width}px)`, async ({
     page,
   }, info) => {
     await page.setViewportSize({ width, height: 900 });
@@ -66,10 +112,20 @@ for (const width of [375, 1440]) {
     try {
       const before = (await frame.boundingBox())!.height;
       measurements.empty = before;
+      let stable = before;
+      await nativeGeometry(page);
       await editor(page).fill("请参考图片");
+      const textHeight = (await frame.boundingBox())!.height;
+      measurements.shortText = textHeight;
       await pasteImage(page);
       await expect(page.locator(".session-context-chip").first()).toBeVisible();
-      await fixedHeight(page, before);
+      await nativeGeometry(page);
+      if (width === 375) await fixedHeight(page, stable);
+      else
+        expect((await frame.boundingBox())!.height).toBeGreaterThanOrEqual(
+          textHeight,
+        );
+      stable = (await frame.boundingBox())!.height;
       measurements.oneImage = (await frame.boundingBox())!.height;
       await pasteImage(page, 7);
       await expect(page.locator(".session-context-chip")).toHaveCount(8);
@@ -78,7 +134,7 @@ for (const width of [375, 1440]) {
           page.locator(".session-context-chip[data-state=ready]").count(),
         )
         .toBe(8);
-      await fixedHeight(page, before);
+      await fixedHeight(page, stable);
       measurements.eightImages = (await frame.boundingBox())!.height;
       const strip = page.locator(".session-context-strip.is-compact");
       expect(
@@ -91,7 +147,10 @@ for (const width of [375, 1440]) {
         strip.getByRole("button", { name: "8 项", exact: true }),
       ).toBeInViewport();
       await editor(page).fill("正文内部滚动\n".repeat(12));
-      await fixedHeight(page, before);
+      await nativeGeometry(page);
+      if (width === 375) await fixedHeight(page, before);
+      else expect((await frame.boundingBox())!.height).toBeGreaterThan(stable);
+      stable = (await frame.boundingBox())!.height;
       measurements.longText = (await frame.boundingBox())!.height;
       expect(
         await page
@@ -100,11 +159,11 @@ for (const width of [375, 1440]) {
       ).toBe(true);
       await setModelNotice(page);
       await expect(
-        page.locator(".session-compact-status").first(),
+        page.locator(".session-native-composer-status").first(),
       ).toContainText("模型已切换");
-      await fixedHeight(page, before);
+      await fixedHeight(page, stable);
       measurements.modelChange = (await frame.boundingBox())!.height;
-      expect(before).toBeLessThanOrEqual(width < 768 ? 150 : 134);
+      if (width === 375) expect(before).toBeLessThanOrEqual(150);
       if (width > 1024)
         expect((await frame.boundingBox())!.width).toBeGreaterThan(1000);
       const first = strip.getByRole("button", { name: /^预览 / }).first();
@@ -112,12 +171,12 @@ for (const width of [375, 1440]) {
       await expect(
         page.getByRole("dialog", { name: "附件与上下文", exact: true }),
       ).toBeVisible();
-      await fixedHeight(page, before);
+      await fixedHeight(page, stable);
       await page.getByRole("button", { name: "移除", exact: true }).click();
-      await fixedHeight(page, before);
+      await fixedHeight(page, stable);
       await page.getByRole("button", { name: "撤销", exact: true }).click();
       await expect(page.locator(".session-context-chip")).toHaveCount(8);
-      await fixedHeight(page, before);
+      await fixedHeight(page, stable);
       await composerAction(page, "展开编辑");
       await page
         .getByRole("button", { name: "纯文本模式", exact: true })
@@ -129,7 +188,7 @@ for (const width of [375, 1440]) {
         .getByRole("button", { name: "返回并保留草稿", exact: true })
         .click();
       await expect(editor(page)).toBeFocused();
-      await fixedHeight(page, before);
+      await fixedHeight(page, stable);
       await page.screenshot({
         path: `.dev-runtime/compact-composer-review/accepted-${width}.png`,
       });
@@ -145,148 +204,161 @@ for (const width of [375, 1440]) {
   });
 }
 
-test("touch controls, agent label, fixed states and narrow desktop pane stay within the frame", async ({
+test("touch controls, agent label, owner states and narrow desktop pane stay within the frame", async ({
   browser,
 }, info) => {
-  const context = await browser.newContext({
-    viewport: { width: 375, height: 900 },
-    isMobile: true,
-    hasTouch: true,
-    ignoreHTTPSErrors: true,
-  });
-  const page = await context.newPage(),
-    f = await setup(page);
-  const metrics: Array<Record<string, number>> = [];
-  try {
-    await editor(page).fill("运行中的草稿");
-    for (const width of [320, 360, 375, 390, 430, 768, 1024, 1440]) {
-      await page.setViewportSize({ width, height: 900 });
-      await expect(page.locator(".session-target-agent")).toHaveText("Codex");
-      const frame = (await page
+  test.setTimeout(90000);
+  const metrics: Array<Record<string, number | boolean>> = [];
+  for (const touch of [true, false]) {
+    const context = await browser.newContext({
+      viewport: { width: touch ? 375 : 1440, height: 900 },
+      isMobile: touch,
+      hasTouch: touch,
+      ignoreHTTPSErrors: true,
+    });
+    const page = await context.newPage(),
+      f = await setup(page);
+    try {
+      await editor(page).fill("运行中的草稿");
+      for (const width of touch
+        ? [320, 360, 375, 390, 430]
+        : [768, 1024, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        await expect(page.locator(".session-target-agent")).toHaveText("Codex");
+        const frame = (await page
+          .locator(".session-compact-frame")
+          .first()
+          .boundingBox())!;
+        const container = (await page
+          .locator(".session-composer-width")
+          .boundingBox())!;
+        const coarse = await page.evaluate(
+          () => matchMedia("(pointer: coarse)").matches,
+        );
+        expect(coarse).toBe(touch);
+        const controls = await page
+          .locator(".session-native-composer .session-composer-toolbar button")
+          .evaluateAll((els) =>
+            els.map((el) => {
+              const r = el.getBoundingClientRect();
+              return { left: r.left, right: r.right, w: r.width, h: r.height };
+            }),
+          );
+        for (const control of controls) {
+          expect(control.left).toBeGreaterThanOrEqual(frame.x);
+          expect(control.right).toBeLessThanOrEqual(frame.x + frame.width);
+          expect(control.h).toBeGreaterThanOrEqual(
+            coarse || container.width <= 480 ? 44 : 28,
+          );
+          if (coarse || container.width <= 480)
+            expect(control.w).toBeGreaterThanOrEqual(44);
+        }
+        const model = (await page
+          .locator(".session-native-model-trigger")
+          .first()
+          .boundingBox())!;
+        for (const right of await page
+          .locator(".session-native-model-label, .session-native-model-effort")
+          .evaluateAll((els) =>
+            els.map((el) => el.getBoundingClientRect().right),
+          ))
+          expect(right).toBeLessThanOrEqual(model.x + model.width);
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth),
+        ).toBeLessThanOrEqual(width);
+        await nativeGeometry(page);
+        await identityPlacement(page);
+        metrics.push({
+          viewport: width,
+          width: frame.width,
+          height: frame.height,
+          coarse,
+        });
+        await page.screenshot({
+          path: `.dev-runtime/compact-composer-review/accepted-running-${width}.png`,
+        });
+      }
+      const initial = (await page
+        .locator(".session-composer-target-container")
+        .boundingBox())!.height;
+      await page.evaluate(async () => {
+        const module = (path: string) =>
+          import(
+            performance
+              .getEntriesByType("resource")
+              .findLast((e) => new URL(e.name).pathname === path)?.name ?? path
+          );
+        const [{ changeThreadModel }, { goalDrafts }, { activeDraftOwner }] =
+          await Promise.all([
+            module("/src/session-mode/stores/useThreadModelStore.ts"),
+            module("/src/session-mode/components/codex/composer/goalDrafts.ts"),
+            module("/src/session-mode/stores/useInputStore.ts"),
+          ]);
+        changeThreadModel("ux-0", { collaborationMode: "plan" });
+        goalDrafts.set(activeDraftOwner(), true);
+      });
+      await expect(
+        page.locator(".session-native-composer-status").first(),
+      ).toHaveText("规划模式");
+      await fixedHeight(page, initial);
+      await openComposerStatus(page);
+      await expect(
+        page.getByRole("button", { name: "取消规划模式", exact: true }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("button", { name: "取消目标草稿", exact: true }),
+      ).toBeVisible();
+      await fixedHeight(page, initial);
+      await page.getByRole("button", { name: "关闭面板", exact: true }).click();
+      await page.evaluate(async () => {
+        const path = "/src/session-mode/components/codex/composer/v2/drafts.ts";
+        const { useComposerDraftStore } = await import(
+          performance
+            .getEntriesByType("resource")
+            .findLast((e) => new URL(e.name).pathname === path)?.name ?? path
+        );
+        useComposerDraftStore.setState({ error: "测试磁盘空间不足" });
+      });
+      await expect(
+        page.locator(".session-native-composer-status[role=alert]"),
+      ).toContainText("上下文保存失败");
+      await expect(
+        page.getByRole("button", { name: "排队消息", exact: true }),
+      ).toBeDisabled();
+      await fixedHeight(page, initial);
+      await openComposerStatus(page);
+      await expect(
+        page.getByRole("alert").filter({ hasText: "测试磁盘空间不足" }).last(),
+      ).toBeVisible();
+      await page.getByRole("button", { name: "关闭面板", exact: true }).click();
+      await page.locator(".session-composer-width").evaluate((el) => {
+        (el as HTMLElement).style.width = "360px";
+      });
+      await nativeGeometry(page);
+      const pane = (await page
         .locator(".session-compact-frame")
         .first()
         .boundingBox())!;
-      const controls = await page
-        .locator(".session-compact-composer .session-composer-toolbar button")
-        .evaluateAll((els) =>
-          els.map((el) => {
-            const r = el.getBoundingClientRect();
-            return {
-              left: r.left,
-              right: r.right,
-              w: r.width,
-              h: r.height,
-              utility: !!el.closest(".session-composer-utilities"),
-            };
-          }),
-        );
-      for (const c of controls) {
-        expect(c.left).toBeGreaterThanOrEqual(frame.x);
-        expect(c.right).toBeLessThanOrEqual(frame.x + frame.width);
-        if (frame.width < 840) {
-          expect(c.h).toBeGreaterThanOrEqual(44);
-          expect(c.w).toBeGreaterThanOrEqual(44);
-        }
-      }
-      const modelBox = (await page
-        .locator(".session-model-trigger")
-        .first()
+      expect(pane.width).toBeLessThanOrEqual(360);
+      expect(pane.height).toBe(124);
+      const send = (await page
+        .getByRole("button", { name: "排队消息", exact: true })
         .boundingBox())!;
-      const modelText = await page
-        .locator(
-          ".session-model-trigger .session-model-name, .session-model-trigger .session-model-effort",
-        )
-        .evaluateAll((els) =>
-          els.map((el) => el.getBoundingClientRect().right),
-        );
-      for (const right of modelText)
-        expect(right).toBeLessThanOrEqual(modelBox.x + modelBox.width);
-      expect(
-        await page.evaluate(() => document.documentElement.scrollWidth),
-      ).toBeLessThanOrEqual(width);
-      metrics.push({
-        viewport: width,
-        width: frame.width,
-        height: frame.height,
-      });
+      expect(send.x + send.width).toBeLessThanOrEqual(pane.x + pane.width);
       await page.screenshot({
-        path: `.dev-runtime/compact-composer-review/accepted-running-${width}.png`,
+        path: `.dev-runtime/compact-composer-review/accepted-narrow-pane-${touch ? "touch" : "desktop"}.png`,
       });
+      expect(f.calls).toHaveLength(0);
+      expect(f.errors).toEqual([]);
+    } finally {
+      await f.close();
+      await context.close();
     }
-    const initial = (await page
-      .locator(".session-composer-target-container")
-      .boundingBox())!.height;
-    await page.evaluate(async (url) => {
-      const { useConfigStore, useCodexStore } = await import(url);
-      useConfigStore.setState({ collaborationMode: "plan" });
-      useCodexStore.setState({ goalEnabled: true });
-    }, f.storeUrl());
-    await expect(page.locator(".session-compact-status").first()).toHaveText(
-      "规划模式",
-    );
-    await fixedHeight(page, initial);
-    await openComposerStatus(page);
-    await expect(
-      page.getByRole("button", { name: "取消规划模式", exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "取消目标草稿", exact: true }),
-    ).toBeVisible();
-    await fixedHeight(page, initial);
-    await page.getByRole("button", { name: "关闭面板", exact: true }).click();
-    await page.evaluate(async () => {
-      const path = "/src/session-mode/components/codex/composer/v2/drafts.ts";
-      const { useComposerDraftStore } = await import(
-        performance
-          .getEntriesByType("resource")
-          .findLast((e) => new URL(e.name).pathname === path)?.name ?? path
-      );
-      useComposerDraftStore.setState({ error: "测试磁盘空间不足" });
-    });
-    await expect(
-      page.locator(".session-compact-status[role=alert]"),
-    ).toContainText("上下文保存失败");
-    await expect(
-      page.getByRole("button", { name: "排队消息", exact: true }),
-    ).toBeDisabled();
-    await fixedHeight(page, initial);
-    await openComposerStatus(page);
-    await expect(
-      page.getByRole("alert").filter({ hasText: "测试磁盘空间不足" }).last(),
-    ).toBeVisible();
-    await page.getByRole("button", { name: "关闭面板", exact: true }).click();
-    await page.locator(".session-composer-width").evaluate((el) => {
-      (el as HTMLElement).style.width = "360px";
-    });
-    await expect
-      .poll(
-        async () =>
-          (await page.locator(".session-compact-frame").first().boundingBox())!
-            .height,
-      )
-      .toBe(140);
-    const pane = (await page
-      .locator(".session-compact-frame")
-      .first()
-      .boundingBox())!;
-    expect(pane.width).toBeLessThanOrEqual(360);
-    const send = (await page
-      .getByRole("button", { name: "排队消息", exact: true })
-      .boundingBox())!;
-    expect(send.x + send.width).toBeLessThanOrEqual(pane.x + pane.width);
-    await page.screenshot({
-      path: ".dev-runtime/compact-composer-review/accepted-narrow-pane.png",
-    });
-    await info.attach("width-matrix", {
-      body: JSON.stringify(metrics),
-      contentType: "application/json",
-    });
-    expect(f.calls).toHaveLength(0);
-    expect(f.errors).toEqual([]);
-  } finally {
-    await f.close();
-    await context.close();
   }
+  await info.attach("width-matrix", {
+    body: JSON.stringify(metrics),
+    contentType: "application/json",
+  });
 });
 
 test("slow upload, upload failure and retry reserve the same geometry and keep sending blocked", async ({
@@ -316,7 +388,7 @@ test("slow upload, upload failure and retry reserve the same geometry and keep s
     ).toBeVisible();
     await fixedHeight(page, before);
     await expect(
-      page.locator(".session-compact-status[role=status]"),
+      page.locator(".session-native-composer-status[role=status]"),
     ).toContainText("正在上传");
     await expect(
       page.getByRole("button", { name: "发送消息", exact: true }),
@@ -326,7 +398,7 @@ test("slow upload, upload failure and retry reserve the same geometry and keep s
       page.locator(".session-context-chip[data-state=error]"),
     ).toBeVisible();
     await expect(
-      page.locator(".session-compact-status[role=alert]"),
+      page.locator(".session-native-composer-status[role=alert]"),
     ).toContainText("图片上传失败");
     await fixedHeight(page, before);
     await page.getByRole("button", { name: /预览 .*上传失败/ }).click();
@@ -524,42 +596,39 @@ test("visual acceptance captures both themes, left thumbnails, direct utilities 
 });
 
 for (const width of [375, 1440])
-  test(`thumbnail delete remains direct, images are larger and identity sits below text (${width}px)`, async ({
+  test(`thumbnail delete remains direct, images are larger and identity follows native placement (${width}px)`, async ({
     page,
   }) => {
     await page.setViewportSize({ width, height: 900 });
     const f = await setup(page, false);
     try {
-      const before = (await page
+      await editor(page).fill("不要移除正文");
+      const textHeight = (await page
         .locator(".session-composer-target-container")
         .boundingBox())!.height;
-      await editor(page).fill("不要移除正文");
       await pasteImage(page);
       const image = page.locator(".session-context-chip.is-image img");
       const b = (await image.boundingBox())!;
       expect(b.width).toBeGreaterThanOrEqual(width < 768 ? 80 : 64);
       expect(b.height).toBeGreaterThanOrEqual(60);
-      const text = (await page
-        .locator(".session-composer-editor")
-        .boundingBox())!;
-      const identity = (await page
-        .locator(".session-compact-meta")
-        .first()
-        .boundingBox())!;
-      expect(identity.y).toBeGreaterThanOrEqual(text.y + text.height);
+      await nativeGeometry(page);
+      await identityPlacement(page);
+      const imageHeight = (await page
+        .locator(".session-composer-target-container")
+        .boundingBox())!.height;
       await page
         .getByRole("button", { name: "移除 布局图片-0.png", exact: true })
         .click();
       await expect(page.locator(".session-context-chip.is-image")).toHaveCount(
         0,
       );
-      await fixedHeight(page, before);
+      await fixedHeight(page, textHeight);
       await page.getByRole("button", { name: "撤销", exact: true }).click();
       await expect(page.locator(".session-context-chip.is-image")).toHaveCount(
         1,
       );
       await expect(editor(page)).toHaveText("不要移除正文");
-      await fixedHeight(page, before);
+      await fixedHeight(page, imageHeight);
       expect(f.calls).toHaveLength(0);
       expect(f.errors).toEqual([]);
     } finally {

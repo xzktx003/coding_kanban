@@ -1,7 +1,13 @@
 import { SubagentEvent } from "@session/features/subagents/SubagentEvent";
 import { useMemo } from "react";
-import { readQuestions, repliesFromContent } from "@session/features/async-questions/model";
-import { QuestionMessage, AnswerMessage } from "@session/features/async-questions/QuestionMessage";
+import {
+  readQuestions,
+  repliesFromContent,
+} from "@session/features/async-questions/model";
+import {
+  QuestionMessage,
+  AnswerMessage,
+} from "@session/features/async-questions/QuestionMessage";
 import { useTranscriptState } from "../thread/rowState";
 import { useTranslation } from "react-i18next";
 import type { ServerNotification } from "@session/bindings";
@@ -11,6 +17,7 @@ import { AgentMessageItem } from "./AgentMessageItem";
 import {
   aggregateFileChanges,
   aggregateTurnChangesFromContext,
+  completedTurnChanges,
   getChangeCounts,
   getDiffViewerProps,
   type RenderEventContext,
@@ -21,6 +28,17 @@ import { ThreadFileChangesSummary } from "./ThreadFileChangesSummary";
 import { TurnPlan } from "./TurnPlan";
 import { TurnFailureNotice } from "./TurnFailureNotice";
 import { EditableUserMessageItem } from "./UserMessageItem";
+import { PlanContentItem } from "./PlanContentItem";
+import { ReasoningSummaryItem } from "./ReasoningSummaryItem";
+import { NativeActivityItem } from "./NativeActivityItem";
+import { CodexContentOwner } from "../presentation/ownerContext";
+import { nativeToolJson } from "../presentation/nativeToolSemantics";
+import type { HookRunSummary } from "@session/bindings/v2/HookRunSummary";
+import { NativeHookPromptItem } from "./NativeHookStats";
+import {
+  NativeAutomaticReviewItem,
+  NativeModelReroutedNotice,
+} from "./NativeSystemNotice";
 
 type CollapsedJsonItemProps = {
   label: string;
@@ -30,7 +48,7 @@ type CollapsedJsonItemProps = {
 const CollapsedJsonItem = ({ label, value }: CollapsedJsonItemProps) => {
   const [expanded, setExpanded] = useTranscriptState("json", false);
   const text = useMemo(
-    () => (expanded ? JSON.stringify(value, null, 2) : ""),
+    () => (expanded ? nativeToolJson(value) : ""),
     [expanded, value],
   );
   return (
@@ -86,9 +104,27 @@ const getRollbackTurnsForTurn = (
 type EventItemProps = {
   event: ServerNotification;
   context?: RenderEventContext;
+  nativeEditUser?: boolean;
+  hookRuns?: readonly HookRunSummary[];
 };
 
-export const EventItem = ({ event, context }: EventItemProps) => {
+export const EventItem = (props: EventItemProps) => {
+  const params = props.event.params as { threadId?: unknown };
+  return typeof params.threadId === "string" ? (
+    <CodexContentOwner.Provider value={params.threadId}>
+      <EventItemBody {...props} />
+    </CodexContentOwner.Provider>
+  ) : (
+    <EventItemBody {...props} />
+  );
+};
+
+const EventItemBody = ({
+  event,
+  context,
+  nativeEditUser = false,
+  hookRuns,
+}: EventItemProps) => {
   const { t } = useTranslation("thread");
   const fileChangeMap = {
     add: t("fileChanges.created"),
@@ -105,6 +141,22 @@ export const EventItem = ({ event, context }: EventItemProps) => {
     />
   );
   switch (event.method) {
+    case "model/rerouted":
+      return <NativeModelReroutedNotice value={event.params} />;
+    case "item/autoApprovalReview/started":
+    case "item/autoApprovalReview/completed":
+      return (
+        <NativeAutomaticReviewItem
+          value={event.params}
+          termination={context?.renderTermination}
+        />
+      );
+    case "guardianWarning":
+      return (
+        <p className="codex-native-notice" role="status">
+          {event.params.message}
+        </p>
+      );
     case "error":
       return (
         <TurnFailureNotice
@@ -131,6 +183,9 @@ export const EventItem = ({ event, context }: EventItemProps) => {
           return (
             <EditableUserMessageItem
               content={startedItem.content}
+              itemId={startedItem.id}
+              nativeEdit={nativeEditUser}
+              hookRuns={hookRuns}
               threadId={threadId}
               turnId={turnId}
               rollbackTurns={rollbackTurns}
@@ -139,68 +194,143 @@ export const EventItem = ({ event, context }: EventItemProps) => {
         }
         case "collabAgentToolCall":
         case "subAgentActivity":
-          return <SubagentEvent root={event.params.threadId} item={startedItem} />;
+          return (
+            <SubagentEvent root={event.params.threadId} item={startedItem} />
+          );
         case "commandExecution":
           return null;
+        case "hookPrompt":
+          return (
+            <NativeHookPromptItem
+              fragments={startedItem.fragments}
+              runs={hookRuns}
+            />
+          );
         case "reasoning":
+          return (
+            <ReasoningSummaryItem
+              summary={startedItem.summary}
+              running={!context?.renderTermination}
+            />
+          );
+        case "plan":
+          return (
+            <PlanContentItem
+              text={startedItem.text}
+              threadId={event.params.threadId}
+              turnId={event.params.turnId}
+              running={!context?.renderTermination}
+            />
+          );
+        case "mcpToolCall":
+          return (
+            <McpToolCallItem
+              item={startedItem}
+              termination={context?.renderTermination}
+            />
+          );
+        case "webSearch":
+        case "imageView":
+        case "imageGeneration":
+        case "contextCompaction":
+        case "dynamicToolCall":
+          return (
+            <NativeActivityItem
+              item={startedItem}
+              running
+              startedAtMs={event.params.startedAtMs}
+              termination={context?.renderTermination}
+            />
+          );
         case "agentMessage":
         case "enteredReviewMode":
+        case "exitedReviewMode":
+        case "sleep":
+          return null;
         case "fileChange":
-          return null;
+          return renderFileChanges(startedItem.changes);
         default:
-          return null;
+          return (
+            <CollapsedJsonItem
+              label={(startedItem as { type: string }).type}
+              value={startedItem}
+            />
+          );
       }
     }
     case "item/completed": {
       const { item } = event.params;
       switch (item.type) {
         case "agentMessage":
-          if (readQuestions(item).length) return <QuestionMessage threadId={event.params.threadId} sourceId={item.id} />;
+          if (readQuestions(item).length)
+            return (
+              <QuestionMessage
+                threadId={event.params.threadId}
+                sourceId={item.id}
+              />
+            );
           return item.text.trim() ? (
             <AgentMessageItem
               text={item.text}
               itemId={item.id}
               threadId={event.params.threadId}
+              turnId={event.params.turnId}
+              phase={item.phase}
+              memoryCitation={item.memoryCitation}
+              hookRuns={hookRuns}
             />
           ) : null;
         case "userMessage":
         case "commandExecution":
           return null;
+        case "hookPrompt":
+          return (
+            <NativeHookPromptItem fragments={item.fragments} runs={hookRuns} />
+          );
         case "fileChange":
           return renderFileChanges(item.changes);
         case "enteredReviewMode":
         case "exitedReviewMode":
         case "reasoning":
-          return null;
+          return item.type === "reasoning" ? (
+            <ReasoningSummaryItem summary={item.summary} />
+          ) : null;
+        case "plan":
+          return (
+            <PlanContentItem
+              text={item.text}
+              threadId={event.params.threadId}
+              turnId={event.params.turnId}
+            />
+          );
         case "collabAgentToolCall":
         case "subAgentActivity":
           return <SubagentEvent root={event.params.threadId} item={item} />;
         case "mcpToolCall":
           return <McpToolCallItem item={item} />;
+        case "webSearch":
+        case "imageView":
+        case "imageGeneration":
+        case "contextCompaction":
+        case "dynamicToolCall":
+        case "sleep":
+          return <NativeActivityItem item={item} />;
         default:
-          return <CollapsedJsonItem label={item.type} value={item} />;
+          return (
+            <CollapsedJsonItem
+              label={(item as { type: string }).type}
+              value={item}
+            />
+          );
       }
     }
     case "turn/completed": {
-      if (event.params.turn.status === "interrupted") {
-        return (
-          <div>
-            <Badge variant="destructive">{event.params.turn.status}</Badge>
-          </div>
-        );
-      }
-
-      const fileChangeItems = event.params.turn.items.filter(
-        (
-          turnItem,
-        ): turnItem is Extract<typeof turnItem, { type: "fileChange" }> =>
-          turnItem.type === "fileChange" && turnItem.changes.length > 0,
+      const { changes: aggregatedChanges, batches } = completedTurnChanges(
+        event.params.threadId,
+        event.params.turn.id,
+        event.params.turn.items,
+        context,
       );
-
-      const aggregatedChanges =
-        fileChangeItems.length > 0
-          ? aggregateFileChanges(fileChangeItems.flatMap((it) => it.changes))
-          : aggregateTurnChangesFromContext(event.params.turn.id, context);
 
       const alreadyShown = context?.events
         ?.slice(0, context.eventIndex)
@@ -212,15 +342,23 @@ export const EventItem = ({ event, context }: EventItemProps) => {
             !candidate.params.willRetry,
         );
       const failed = event.params.turn.status === "failed" && !alreadyShown;
-      if (aggregatedChanges.length === 0 && !failed) return null;
+      const interrupted = event.params.turn.status === "interrupted";
+      if (aggregatedChanges.length === 0 && !failed && !interrupted)
+        return null;
 
       return (
         <div className="space-y-2">
+          {interrupted && <Badge variant="destructive">已中断</Badge>}
           {failed && (
             <TurnFailureNotice message={event.params.turn.error?.message} />
           )}
           {aggregatedChanges.length > 0 && (
-            <ThreadFileChangesSummary changes={aggregatedChanges} />
+            <ThreadFileChangesSummary
+              changes={aggregatedChanges}
+              threadId={event.params.threadId}
+              turnId={event.params.turn.id}
+              batches={batches}
+            />
           )}
         </div>
       );
@@ -237,8 +375,23 @@ export const EventItem = ({ event, context }: EventItemProps) => {
         <AgentMessageItem
           text={event.params.delta}
           threadId={event.params.threadId}
+          turnId={event.params.turnId}
+          itemId={event.params.itemId}
+          streaming={!context?.renderTermination}
+          hookRuns={hookRuns}
         />
       ) : null;
+    case "item/plan/delta":
+      return (
+        <PlanContentItem
+          text={event.params.delta}
+          threadId={event.params.threadId}
+          turnId={event.params.turnId}
+          running={!context?.renderTermination}
+        />
+      );
+    case "item/reasoning/textDelta":
+      return null;
     case "item/fileChange/outputDelta":
       return null;
     case "item/commandExecution/terminalInteraction":
@@ -261,6 +414,8 @@ export const EventItem = ({ event, context }: EventItemProps) => {
     case "item/commandExecution/outputDelta":
     case "turn/started":
     case "mcpServer/startupStatus/updated":
+    case "hook/started":
+    case "hook/completed":
       return null;
 
     default:

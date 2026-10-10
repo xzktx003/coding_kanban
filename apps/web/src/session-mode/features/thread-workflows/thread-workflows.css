@@ -1,0 +1,282 @@
+.session-mode .codex-thread-workflows {
+  flex: none;
+  position: relative;
+  z-index: 4;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  font-size: 12px;
+}
+.session-mode .codex-thread-workflow-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 10px;
+}
+.session-mode .codex-thread-workflows button {
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.session-mode .codex-thread-workflow-actions button,
+.session-mode .codex-thread-search-input button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  flex: none;
+}
+.session-mode .codex-thread-workflows button:hover {
+  background: var(--codex-native-control-hover, rgba(128, 128, 128, 0.13));
+}
+.session-mode .codex-thread-workflows button:focus-visible,
+.session-mode .codex-thread-user-rail button:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, var(--ring));
+  outline-offset: 1px;
+}
+.session-mode .codex-thread-workflows button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.session-mode .codex-thread-search,
+.session-mode .codex-thread-user-navigation {
+  position: absolute;
+  top: 100%;
+  inset-inline: 8px;
+  background: var(--vscode-editor-background, var(--background));
+  border: 1px solid var(--codex-native-border, var(--border));
+  box-shadow: 0 4px 12px #0002;
+  border-radius: 8px;
+  padding: 6px;
+  max-height: min(50vh, 420px);
+  overflow: auto;
+}
+.session-mode .codex-thread-search {
+  /* Reserve space only while open so native top-aligned first matches remain visible. */
+  position: relative;
+  top: auto;
+  inset-inline: auto;
+  margin-inline: 8px;
+}
+.session-mode .codex-thread-search-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.session-mode .codex-thread-search-input input {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  color: var(--vscode-foreground, var(--foreground));
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  padding: 5px 2px;
+  font: inherit;
+}
+.session-mode .codex-thread-search-input input:focus {
+  outline: none;
+}
+.session-mode .codex-thread-search-input:focus-within {
+  box-shadow: inset 0 0 0 1px var(--vscode-focusBorder, var(--ring));
+  border-radius: 5px;
+}
+.session-mode .codex-thread-search-input [role="status"] {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.session-mode .codex-thread-search-results {
+  margin-top: 5px;
+}
+.session-mode .codex-thread-search-results > button,
+.session-mode .codex-thread-user-navigation > button {
+  display: block;
+  width: 100%;
+  text-align: start;
+  padding: 8px;
+  border-radius: 5px;
+  color: var(--vscode-foreground, var(--foreground));
+  overflow-wrap: anywhere;
+}
+.session-mode
+  .codex-thread-search-results
+  > button
+  > .codex-thread-match-speaker,
+.session-mode .codex-thread-user-navigation > button > span {
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  display: inline-block;
+  min-width: 36px;
+  margin-inline-end: 8px;
+}
+.session-mode .codex-thread-search-results mark {
+  color: inherit;
+  background: var(--vscode-editor-findMatchHighlightBackground, #e2b93b55);
+  border-radius: 2px;
+}
+.session-mode .codex-thread-search-results > button.selected {
+  background: var(--codex-native-control-hover, rgba(128, 128, 128, 0.13));
+}
+.session-mode .codex-thread-history-scope {
+  padding: 6px;
+  font-size: 11px;
+}
+.session-mode .codex-thread-history-scope button {
+  text-decoration: underline;
+  padding: 0;
+}
+.session-mode .codex-thread-search-results p,
+.session-mode .codex-thread-user-navigation p {
+  padding: 8px;
+}
+.session-mode .codex-thread-user-rail {
+  position: absolute;
+  inset-inline-start: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  max-height: min(70vh, 640px);
+  overflow: auto;
+  scrollbar-width: none;
+}
+.session-mode .codex-thread-user-rail button {
+  display: flex;
+  width: 36px;
+  height: 10px;
+  flex: none;
+  align-items: center;
+  justify-content: flex-start;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  outline: none;
+}
+.session-mode .codex-thread-user-rail .codex-user-rail-marker {
+  display: flex;
+  position: relative;
+  width: 26px;
+  height: 2px;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+  opacity: 0.4;
+}
+.session-mode .codex-thread-user-rail .codex-user-rail-marker-line {
+  height: 100%;
+  width: 100%;
+  background: currentColor;
+  transform: scaleX(0.2308);
+  transform-origin: 0;
+  transition: transform 0.16s;
+}
+.session-mode
+  .codex-thread-user-rail
+  button[aria-current]
+  .codex-user-rail-marker {
+  color: var(--vscode-foreground, var(--foreground));
+  opacity: 0.6;
+}
+.session-mode
+  .codex-thread-user-rail
+  button:is(:hover, :focus-visible)
+  .codex-user-rail-marker {
+  color: var(--vscode-foreground, var(--foreground));
+  opacity: 1;
+}
+.session-mode
+  .codex-thread-user-rail
+  button:is(:hover, :focus-visible)
+  .codex-user-rail-marker-line {
+  transform: scaleX(1);
+}
+.session-mode
+  .codex-thread-user-rail
+  button:has(+ button:hover)
+  .codex-user-rail-marker-line,
+.session-mode
+  .codex-thread-user-rail
+  button:hover
+  + button
+  .codex-user-rail-marker-line {
+  transform: scaleX(0.76924);
+}
+.session-mode
+  .codex-thread-user-rail
+  button:has(+ button + button:hover)
+  .codex-user-rail-marker-line,
+.session-mode
+  .codex-thread-user-rail
+  button:hover
+  + button
+  + button
+  .codex-user-rail-marker-line {
+  transform: scaleX(0.53848);
+}
+.session-mode
+  .codex-thread-user-rail
+  button:has(+ button + button + button:hover)
+  .codex-user-rail-marker-line,
+.session-mode
+  .codex-thread-user-rail
+  button:hover
+  + button
+  + button
+  + button
+  .codex-user-rail-marker-line {
+  transform: scaleX(0.38464);
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-mode .codex-thread-user-rail .codex-user-rail-marker-line {
+    transition: none;
+  }
+}
+@media (pointer: coarse), (hover: none) {
+  .session-mode .codex-thread-workflow-actions button,
+  .session-mode .codex-thread-search-input button {
+    width: 44px;
+    height: 44px;
+  }
+  .session-mode .codex-thread-search-input {
+    gap: 3px;
+    flex-wrap: wrap;
+  }
+  .session-mode .codex-thread-search-input input {
+    min-width: 100px;
+  }
+  .session-mode .codex-thread-search-results > button,
+  .session-mode .codex-thread-user-navigation > button {
+    min-height: 44px;
+  }
+  .session-mode .codex-thread-user-rail {
+    display: none;
+  }
+}
+
+.session-mode .codex-thread-edit-recovery {
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+}
+.session-mode .codex-thread-edit-recovery details {
+  padding: 6px;
+  border: 1px solid var(--codex-native-border, var(--border));
+  border-radius: 6px;
+}
+.session-mode .codex-thread-edit-recovery pre {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.session-mode .codex-thread-edit-recovery button {
+  min-height: 28px;
+  padding: 4px 8px;
+  text-decoration: underline;
+}
+@media (pointer: coarse), (hover: none) {
+  .session-mode .codex-thread-edit-recovery button {
+    min-height: 44px;
+  }
+}

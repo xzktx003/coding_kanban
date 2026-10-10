@@ -1,15 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-fn codex_home() -> PathBuf {
-    if let Some(path) = std::env::var_os("CODEX_HOME") {
-        return PathBuf::from(path);
-    }
-    dirs::home_dir()
-        .map(|home| home.join(".codex"))
-        .unwrap_or_else(|| PathBuf::from(".codex"))
-}
-
 fn plugins_root_dir() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or_else(|| "Failed to resolve home directory".to_string())?;
     Ok(home.join(".agents").join("plugins"))
@@ -17,7 +8,151 @@ fn plugins_root_dir() -> Result<PathBuf, String> {
 
 pub(crate) fn central_skills_dir() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or_else(|| "Failed to resolve home directory".to_string())?;
+    let home = home
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve home directory: {}", error))?;
     Ok(home.join(".agents").join("skills"))
+}
+
+pub(crate) fn validate_skill_name(name: &str) -> Result<&str, String> {
+    let name = name.trim();
+    if name.is_empty()
+        || name.len() > 255
+        || name == "."
+        || name == ".."
+        || name
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '/' | '\\' | ':'))
+        || Path::new(name).is_absolute()
+    {
+        return Err("skill_name must be a single directory name".to_string());
+    }
+    Ok(name)
+}
+
+fn check_skills_root(root: &Path, create: bool) -> Result<(), String> {
+    if !root.is_absolute()
+        || root
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err("Skills root must be an absolute directory".to_string());
+    }
+    // The selected home/cwd is canonicalized before constructing its managed
+    // suffix. Refuse redirects in that suffix, including a symlinked parent.
+    let mut ancestors = root.ancestors().collect::<Vec<_>>();
+    ancestors.reverse();
+    for path in ancestors {
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(format!(
+                    "Skills root cannot contain a symlink: {}",
+                    path.display()
+                ));
+            }
+            Ok(metadata) if !metadata.is_dir() => {
+                return Err(format!(
+                    "Skills root is not a directory: {}",
+                    path.display()
+                ));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if create {
+                    std::fs::create_dir(path).map_err(|error| {
+                        format!(
+                            "Failed to create skills directory {}: {}",
+                            path.display(),
+                            error
+                        )
+                    })?;
+                }
+            }
+            Err(error) => {
+                return Err(format!(
+                    "Failed to inspect skills directory {}: {}",
+                    path.display(),
+                    error
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn managed_skill_path(
+    root: &Path,
+    name: &str,
+    create_root: bool,
+) -> Result<PathBuf, String> {
+    let name = validate_skill_name(name)?;
+    check_skills_root(root, create_root)?;
+    Ok(root.join(name))
+}
+
+pub(crate) fn existing_managed_skill(root: &Path, name: &str) -> Result<PathBuf, String> {
+    let path = managed_skill_path(root, name, false)?;
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve skills root: {}", error))?;
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| format!("Skill '{}' not found in central store: {}", name, error))?;
+    if !canonical.starts_with(&canonical_root) || canonical == canonical_root || !canonical.is_dir()
+    {
+        return Err(format!("Skill '{}' leaves its central store", name));
+    }
+    Ok(canonical)
+}
+
+pub(crate) fn validate_skill_source_tree(source: &Path, scope: &Path) -> Result<(), String> {
+    fn visit(
+        path: &Path,
+        scope: &Path,
+        active: &mut std::collections::HashSet<PathBuf>,
+    ) -> Result<(), String> {
+        let canonical = path.canonicalize().map_err(|error| {
+            format!(
+                "Failed to resolve skill source {}: {}",
+                path.display(),
+                error
+            )
+        })?;
+        if !canonical.starts_with(scope) {
+            return Err(format!(
+                "Skill source leaves the cloned repository: {}",
+                path.display()
+            ));
+        }
+        if canonical.is_dir() {
+            if !active.insert(canonical.clone()) {
+                return Err(format!(
+                    "Skill source contains a directory link cycle: {}",
+                    path.display()
+                ));
+            }
+            for entry in std::fs::read_dir(path)
+                .map_err(|error| format!("Failed to read skill source: {}", error))?
+            {
+                visit(
+                    &entry.map_err(|error| error.to_string())?.path(),
+                    scope,
+                    active,
+                )?;
+            }
+            active.remove(&canonical);
+        } else if !canonical.is_file() {
+            return Err(format!(
+                "Skill source is not a file or directory: {}",
+                path.display()
+            ));
+        }
+        Ok(())
+    }
+    let scope = scope
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve cloned repository: {}", error))?;
+    visit(source, &scope, &mut std::collections::HashSet::new())
 }
 
 pub(crate) fn resolve_skills_install_root(
@@ -36,28 +171,66 @@ pub(crate) fn resolve_skills_install_root(
     }
 
     match (normalized_agent.as_str(), normalized_scope.as_str()) {
-        ("codex", "user") => Ok(codex_home().join("skills")),
+        ("codex", "user") => {
+            if let Some(path) = std::env::var("CODEX_HOME")
+                .ok()
+                .filter(|path| !path.is_empty())
+            {
+                let root = PathBuf::from(path)
+                    .canonicalize()
+                    .map_err(|error| format!("Failed to resolve CODEX_HOME: {}", error))?;
+                if !root.is_dir() {
+                    return Err("CODEX_HOME must be a directory".to_string());
+                }
+                Ok(root.join("skills"))
+            } else {
+                let home = dirs::home_dir()
+                    .ok_or_else(|| "Failed to resolve home directory".to_string())?;
+                Ok(home
+                    .canonicalize()
+                    .map_err(|error| error.to_string())?
+                    .join(".codex/skills"))
+            }
+        }
         ("codex", "project") => {
             let working_dir = cwd
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| "cwd is required when scope is project".to_string())?;
-            Ok(PathBuf::from(working_dir).join(".codex").join("skills"))
+            project_skills_root(working_dir, ".codex")
         }
         ("cc", "user") => {
             let home =
                 dirs::home_dir().ok_or_else(|| "Failed to resolve home directory".to_string())?;
-            Ok(home.join(".claude").join("skills"))
+            Ok(home
+                .canonicalize()
+                .map_err(|error| error.to_string())?
+                .join(".claude")
+                .join("skills"))
         }
         ("cc", "project") => {
             let working_dir = cwd
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| "cwd is required when scope is project".to_string())?;
-            Ok(PathBuf::from(working_dir).join(".claude").join("skills"))
+            project_skills_root(working_dir, ".claude")
         }
         _ => Err("Failed to resolve install root".to_string()),
     }
+}
+
+fn project_skills_root(cwd: &str, agent_directory: &str) -> Result<PathBuf, String> {
+    let path = Path::new(cwd);
+    if !path.is_absolute() {
+        return Err("cwd must be an absolute directory".to_string());
+    }
+    let path = path
+        .canonicalize()
+        .map_err(|error| format!("Failed to resolve cwd: {}", error))?;
+    if !path.is_dir() {
+        return Err("cwd must be a directory".to_string());
+    }
+    Ok(path.join(agent_directory).join("skills"))
 }
 
 fn ensure_plugins_root(target: &std::path::Path) -> Result<(), String> {
@@ -559,33 +732,41 @@ pub async fn link_skill_to_agent(
     cwd: Option<String>,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let requested_name = skill_name.trim();
-        if requested_name.is_empty() {
-            return Err("skill_name cannot be empty".to_string());
-        }
-        let central_skill_dir = central_skills_dir()?.join(requested_name);
-        if !central_skill_dir.exists() {
-            return Err(format!(
-                "Skill '{}' not found in central store",
-                requested_name
-            ));
-        }
+        let central_root = central_skills_dir()?;
         let agent_root = resolve_skills_install_root(&agent, &scope, cwd.as_deref())?;
-        std::fs::create_dir_all(&agent_root).map_err(|err| {
-            format!(
-                "Failed to create agent skills directory {}: {}",
-                agent_root.display(),
-                err
-            )
-        })?;
-        let target = agent_root.join(requested_name);
-        if target.exists() || target.is_symlink() {
-            return Ok(());
-        }
-        link_skill(&central_skill_dir, &target)
+        link_skill_in_roots(&skill_name, &central_root, &agent_root)
     })
     .await
     .map_err(|err| format!("Link skill task failed: {}", err))?
+}
+
+pub(crate) fn link_skill_in_roots(
+    skill_name: &str,
+    central_root: &Path,
+    agent_root: &Path,
+) -> Result<(), String> {
+    let requested_name = validate_skill_name(skill_name)?;
+    let central_skill_dir = existing_managed_skill(central_root, requested_name)?;
+    let target = managed_skill_path(agent_root, requested_name, true)?;
+    if target.is_symlink() {
+        if target.canonicalize().ok().as_ref() == Some(&central_skill_dir) {
+            return Ok(());
+        }
+        return Err(format!(
+            "Existing skill link has a different target: {}",
+            target.display()
+        ));
+    }
+    if target.exists() {
+        if target.is_dir() {
+            return Ok(());
+        }
+        return Err(format!(
+            "Existing skill target is not a directory: {}",
+            target.display()
+        ));
+    }
+    link_skill(&central_skill_dir, &target)
 }
 
 /// Remove a skill entirely from the central store and all agent links.
@@ -595,27 +776,35 @@ pub async fn delete_central_skill(
     cwd: Option<String>,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let requested_name = skill_name.trim();
-        if requested_name.is_empty() {
-            return Err("skill_name cannot be empty".to_string());
-        }
-        // Remove agent links first
-        for agent in &["codex", "cc"] {
-            if let Ok(root) = resolve_skills_install_root(agent, &scope, cwd.as_deref()) {
-                remove_skill_link(&root.join(requested_name)).ok();
-            }
-        }
-        // Remove central copy
-        let central = central_skills_dir()?.join(requested_name);
-        if central.exists() {
-            std::fs::remove_dir_all(&central).map_err(|err| {
-                format!("Failed to remove central skill {}: {}", central.display(), err)
-            })?;
-        }
-        Ok(())
+        validate_skill_name(&skill_name)?;
+        let agent_roots = ["codex", "cc"]
+            .iter()
+            .map(|agent| resolve_skills_install_root(agent, &scope, cwd.as_deref()))
+            .collect::<Result<Vec<_>, _>>()?;
+        delete_skill_in_roots(&skill_name, &central_skills_dir()?, &agent_roots)
     })
     .await
     .map_err(|err| format!("Delete central skill task failed: {}", err))?
+}
+
+fn delete_skill_in_roots(
+    skill_name: &str,
+    central_root: &Path,
+    agent_roots: &[PathBuf],
+) -> Result<(), String> {
+    let requested_name = validate_skill_name(skill_name)?;
+    // Validate every root before the first removal. Existing leaf symlinks are
+    // unlinked rather than followed, preserving their external destinations.
+    let central = managed_skill_path(central_root, requested_name, false)?;
+    let links = agent_roots
+        .iter()
+        .map(|root| managed_skill_path(root, requested_name, false))
+        .collect::<Result<Vec<_>, _>>()?;
+    for link in links {
+        remove_skill_link(&link)?;
+    }
+    remove_skill_link(&central)?;
+    Ok(())
 }
 
 // ── Skill Groups ─────────────────────────────────────────────────────────────
@@ -715,4 +904,133 @@ pub async fn clone_skills_repo(url: String) -> Result<String, String> {
     }
 
     Ok(actual_path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod skill_boundary_tests {
+    use super::*;
+
+    fn roots() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let fixture = tempfile::tempdir().unwrap();
+        let central = fixture.path().join("home/.agents/skills");
+        let agent = fixture.path().join("native/skills");
+        std::fs::create_dir_all(&central).unwrap();
+        std::fs::create_dir_all(&agent).unwrap();
+        (fixture, central, agent)
+    }
+
+    #[test]
+    fn link_rejects_parent_and_absolute_names_without_creating_an_external_link() {
+        let (fixture, central, agent) = roots();
+        let outside = fixture.path().join("home/escaped");
+        std::fs::create_dir(&outside).unwrap();
+        assert!(link_skill_in_roots("../../escaped", &central, &agent).is_err());
+        assert!(!fixture.path().join("escaped").is_symlink());
+        assert!(link_skill_in_roots(outside.to_str().unwrap(), &central, &agent).is_err());
+        assert!(link_skill_in_roots(".", &central, &agent).is_err());
+        assert!(link_skill_in_roots("..", &central, &agent).is_err());
+    }
+
+    #[test]
+    fn delete_rejects_parent_and_absolute_names_and_preserves_external_files() {
+        let (fixture, central, agent) = roots();
+        let outside = fixture.path().join("home/escaped");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("sentinel"), "owned fixture").unwrap();
+        assert!(delete_skill_in_roots("../../escaped", &central, std::slice::from_ref(&agent)).is_err());
+        assert!(outside.join("sentinel").exists());
+        assert!(delete_skill_in_roots(outside.to_str().unwrap(), &central, &[agent]).is_err());
+        assert!(outside.join("sentinel").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn link_rejects_an_external_central_symlink_and_redirected_agent_root() {
+        let (fixture, central, agent) = roots();
+        let outside = fixture.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, central.join("external")).unwrap();
+        assert!(link_skill_in_roots("external", &central, &agent).is_err());
+        std::fs::create_dir(central.join("valid")).unwrap();
+        let redirected = fixture.path().join("redirected");
+        std::os::unix::fs::symlink(&outside, &redirected).unwrap();
+        assert!(link_skill_in_roots("valid", &central, &redirected.join("skills")).is_err());
+        assert!(!outside.join("skills/valid").exists());
+    }
+
+    #[test]
+    fn legitimate_link_is_idempotent_and_delete_only_removes_its_own_skill() {
+        let (_fixture, central, agent) = roots();
+        std::fs::create_dir(central.join("valid-skill")).unwrap();
+        std::fs::write(central.join("valid-skill/SKILL.md"), "fixture").unwrap();
+        std::fs::create_dir(central.join("keep")).unwrap();
+        link_skill_in_roots("valid-skill", &central, &agent).unwrap();
+        link_skill_in_roots("valid-skill", &central, &agent).unwrap();
+        assert!(agent.join("valid-skill/SKILL.md").exists());
+        delete_skill_in_roots("valid-skill", &central, std::slice::from_ref(&agent)).unwrap();
+        assert!(!agent.join("valid-skill").exists());
+        assert!(!central.join("valid-skill").exists());
+        assert!(central.join("keep").exists());
+    }
+
+    #[test]
+    fn malformed_names_and_project_scopes_fail_before_filesystem_changes() {
+        for name in [
+            "",
+            ".",
+            "..",
+            "../escaped",
+            "/absolute",
+            "x\\y",
+            "C:drive",
+            "nul\0",
+            "line\nbreak",
+        ] {
+            assert!(validate_skill_name(name).is_err(), "accepted {name:?}");
+        }
+        for name in ["safe-skill", ".system", "name_with_underscore", "技能"] {
+            assert_eq!(validate_skill_name(name).unwrap(), name);
+        }
+        let (fixture, _central, _agent) = roots();
+        assert!(resolve_skills_install_root("other", "project", Some("/tmp")).is_err());
+        assert!(resolve_skills_install_root("codex", "other", None).is_err());
+        assert!(resolve_skills_install_root("codex", "project", None).is_err());
+        assert!(resolve_skills_install_root("codex", "project", Some("relative")).is_err());
+        let missing = fixture.path().join("missing");
+        assert!(resolve_skills_install_root("codex", "project", missing.to_str()).is_err());
+        let file = fixture.path().join("file");
+        std::fs::write(&file, "fixture").unwrap();
+        assert!(resolve_skills_install_root("codex", "project", file.to_str()).is_err());
+        assert_eq!(
+            resolve_skills_install_root("codex", "project", fixture.path().to_str()).unwrap(),
+            fixture.path().canonicalize().unwrap().join(".codex/skills")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn deletion_validates_all_roots_first_and_unlinks_leaf_symlinks_without_following_them() {
+        let (fixture, central, agent) = roots();
+        std::fs::create_dir(central.join("safe")).unwrap();
+        let outside = fixture.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("sentinel"), "fixture").unwrap();
+        let redirected = fixture.path().join("redirected");
+        std::os::unix::fs::symlink(&outside, &redirected).unwrap();
+        assert!(
+            delete_skill_in_roots(
+                "safe",
+                &central,
+                &[agent.clone(), redirected.join("skills")]
+            )
+            .is_err()
+        );
+        assert!(central.join("safe").exists());
+        assert!(outside.join("sentinel").exists());
+        std::os::unix::fs::symlink(&outside, central.join("leaf-link")).unwrap();
+        std::os::unix::fs::symlink(central.join("leaf-link"), agent.join("leaf-link")).unwrap();
+        delete_skill_in_roots("leaf-link", &central, &[agent]).unwrap();
+        assert!(!central.join("leaf-link").is_symlink());
+        assert!(outside.join("sentinel").exists());
+    }
 }

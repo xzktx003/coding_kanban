@@ -8,6 +8,7 @@ vi.mock("@session/services/sessionAttachmentStorage", () => storage);
 vi.mock("@session/browser-dialog", () => ({ uploadBrowserFile: vi.fn() }));
 import { uploadBrowserFile } from "@session/browser-dialog";
 import {
+  flushAttachmentDraft,
   useAttachmentDraftStore,
   useImageAttachments,
 } from "./useImageAttachments";
@@ -62,12 +63,36 @@ test("a quota failure keeps local file bytes, blocks upload, and permits retry a
   expect(result.current.paths).toEqual(["/saved-after-recovery.png"]);
 });
 
-test("a persistence failure blocks ready path attachments until storage is saved",async()=>{
-  const owner=`ready-quota:${crypto.randomUUID()}`;
-  const {result}=renderHook(()=>useImageAttachments(owner));
-  await waitFor(()=>expect(result.current.blocked).toBe(false));
+test("a persistence failure blocks ready path attachments until storage is saved", async () => {
+  const owner = `ready-quota:${crypto.randomUUID()}`;
+  const { result } = renderHook(() => useImageAttachments(owner));
+  await waitFor(() => expect(result.current.blocked).toBe(false));
   storage.saveAttachmentDraft.mockRejectedValue(new Error("quota"));
-  act(()=>result.current.addPaths(["/ready.png"]));
-  await waitFor(()=>expect(result.current.storageError).toBe("quota"));
+  act(() => result.current.addPaths(["/ready.png"]));
+  await waitFor(() => expect(result.current.storageError).toBe("quota"));
   expect(result.current.blocked).toBe(true);
+});
+test("removing a photo while its bytes are being saved prevents a later upload", async () => {
+  const owner = `remove-before-upload:${crypto.randomUUID()}`;
+  const { result } = renderHook(() => useImageAttachments(owner));
+  await waitFor(() => expect(result.current.blocked).toBe(false));
+  let release!: () => void;
+  storage.saveAttachmentDraft.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  vi.mocked(uploadBrowserFile).mockResolvedValue("/removed.png");
+  act(() =>
+    result.current.addFiles([
+      new File(["private local bytes"], "removed.png", { type: "image/png" }),
+    ]),
+  );
+  await waitFor(() => expect(release).toBeTypeOf("function"));
+  act(() => result.current.remove(result.current.attachments[0].id));
+  await act(async () => release());
+  await act(async () => flushAttachmentDraft(owner));
+  expect(result.current.attachments).toHaveLength(0);
+  expect(uploadBrowserFile).not.toHaveBeenCalled();
 });

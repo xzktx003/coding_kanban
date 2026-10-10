@@ -3,6 +3,8 @@ import { sessionDraftSubmissions } from "@session/features/subagents/submissions
 import { SubagentSummary } from "@session/features/subagents/SubagentSummary";
 import { AgentMentionPicker } from "@session/features/subagents/AgentMentionPicker";
 import { mentionDrafts } from "@session/features/subagents/mentions";
+import { pluginInputDrafts } from "@session/features/plugins/pluginInputs";
+import type { NativeInputMention } from "@agent-orchestrator/shared";
 import { useSubagentStore } from "@session/features/subagents/store";
 import { composeContextText } from "@agent-orchestrator/shared";
 import {
@@ -33,6 +35,16 @@ import { useQuestions } from "@session/features/async-questions/useQuestions";
 import { useAsyncQuestionStore } from "@session/features/async-questions/store";
 import { SideChatPanel } from "./SideChatPanel";
 import { ReviewDialog } from "./ReviewDialog";
+import { RunningTurnChanges } from "./RunningTurnChanges";
+import { ComposerEnterSettings } from "./ComposerEnterSettings";
+import { NativeComposerIcon } from "./NativeComposerIcon";
+import { NativeModelSelector } from "./NativeModelSelector";
+import { NativeAgentSettings } from "./NativeAgentSettings";
+import { goalDrafts, useGoalDraft } from "./goalDrafts";
+import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
+import { CloudTasksPanel } from "@session/features/codex-host/CloudTasksPanel";
+import { CodexHostPanel } from "@session/features/codex-host/CodexHostPanel";
+import "./composer-native.css";
 import type { FollowupMode } from "@agent-orchestrator/shared";
 import { useStopAction } from "../../common/useStopAction";
 import { useTurnControl } from "../hooks/useTurnControl";
@@ -43,7 +55,6 @@ import {
 import { useShallow } from "zustand/react/shallow";
 import { toast } from "sonner";
 import {
-  ArrowUp,
   Pause,
   Play,
   Square,
@@ -55,14 +66,10 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ThreadGoal } from "@session/bindings/v2";
-import { AgentModelPanel } from "@session/components/agent/AgentModelPanel";
-import { AgentModelTrigger } from "@session/components/agent/AgentModelTrigger";
 import { useThreadGoal } from "@session/components/codex/hooks";
-import {
-  useCodexStore,
-  useConfigStore,
-} from "@session/components/codex/stores";
+import { useCodexStore } from "@session/components/codex/stores";
 import { ContextWindowWidget } from "@session/components/codex/widget";
+import { deriveContextWindowUsage } from "@session/components/codex/widget/ContextWindowWidget";
 import { FileMentionPopover } from "@session/components/common";
 import { Button } from "@session/components/ui/button";
 import { codexService } from "@session/services/codexService";
@@ -87,6 +94,7 @@ import {
   type ComposerEditorHandle,
 } from "./editor/ComposerEditor";
 import { shouldAutoFocusComposer } from "./composerFocus";
+import { useComposerFileDrop } from "./composerDrop";
 import { SlashCommandDialogs } from "./SlashCommandDialogs";
 import { SlashCommandPopover } from "./SlashCommandsSelector";
 import type { SlashDialog } from "./slashCommands";
@@ -122,7 +130,6 @@ export function Composer({
   targetLabel,
 }: ComposerProps) {
   const preferences = useFollowupSettingsStore();
-  const { collaborationMode, setCollaborationMode } = useConfigStore();
   const [reviewOpen, setReviewOpen] = useState(false);
   const [detailsOwner, setDetailsOwner] = useState<string | null>(null);
 
@@ -132,18 +139,27 @@ export function Composer({
     text: string;
   } | null>(null);
   const [slashDialog, setSlashDialog] = useState<SlashDialog | null>(null);
-  const { currentThreadId, inputFocusTrigger, goalEnabled, setGoalEnabled } =
-    useCodexStore(
-      useShallow((s) => ({
-        currentThreadId: s.currentThreadId,
-        inputFocusTrigger: s.inputFocusTrigger,
-        goalEnabled: s.goalEnabled,
-        setGoalEnabled: s.setGoalEnabled,
-      })),
-    );
+  const { currentThreadId, inputFocusTrigger } = useCodexStore(
+    useShallow((s) => ({
+      currentThreadId: s.currentThreadId,
+      inputFocusTrigger: s.inputFocusTrigger,
+    })),
+  );
   const cwd = useWorkspaceStore((s) => s.cwd);
   const owner = sessionDraftKey("codex", currentThreadId, cwd);
+  const { enabled: goalEnabled, setEnabled: setGoalEnabled } =
+    useGoalDraft(owner);
+  const { collaborationMode, setCollaborationMode } =
+    useThreadModelSettings(currentThreadId);
+  useEffect(() => {
+    if (activeDraftOwner() === owner)
+      goalDrafts.migrateLegacy(owner, useCodexStore.getState().goalEnabled);
+  }, [owner]);
   const { inputValue, setInputValue } = useSessionTextDraft(owner, "codex");
+  useEffect(
+    () => pluginInputDrafts.prune(owner, inputValue),
+    [owner, inputValue],
+  );
   const richDraft = useComposerDraft(owner);
   const contextStorageError = useComposerDraftStore((s) => s.error);
   const [pendingFiles, setPendingFiles] = useState<Record<string, number>>({});
@@ -151,10 +167,16 @@ export function Composer({
     null,
   );
   const [commandsOwner, setCommandsOwner] = useState<string | null>(null);
+  const [hostOwner, setHostOwner] = useState<string | null>(null);
+  const [cloudOwner, setCloudOwner] = useState<string | null>(null);
+  const [modelOwner, setModelOwner] = useState<string | null>(null);
   useEffect(() => {
     setSlashDialog(null);
     setReviewOpen(false);
     setDetailsOwner(null);
+    setHostOwner(null);
+    setCloudOwner(null);
+    setModelOwner(null);
   }, [owner]);
   const appendFileLinks = useCallback(
     (paths: string[]) => {
@@ -173,11 +195,28 @@ export function Composer({
   const { addAgentCard, setCurrentAgentCardId } = useAgentCenterStore();
   const attachments = useImageAttachments(owner);
   const images = attachments.paths;
-  const child = useSubagentStore(s => currentThreadId ? s.nodes[currentThreadId] : undefined);
-  const nativeChild = useCodexStore(s => s.threads.find(t => t.id === currentThreadId));
-  const directInputBlocked = child ? child.thread.canAcceptDirectInput !== true : !!nativeChild && !!subagentParent(nativeChild) && nativeChild.canAcceptDirectInput !== true;
+  const child = useSubagentStore((s) =>
+    currentThreadId ? s.nodes[currentThreadId] : undefined,
+  );
+  const nativeChild = useCodexStore((s) =>
+    s.threads.find((t) => t.id === currentThreadId),
+  );
+  const hostCwd = nativeChild?.cwd ?? cwd;
+  const directInputBlocked = child
+    ? child.thread.canAcceptDirectInput !== true
+    : !!nativeChild &&
+      !!subagentParent(nativeChild) &&
+      nativeChild.canAcceptDirectInput !== true;
+  const fileDrop = useComposerFileDrop(owner, {
+    addImages: attachments.addFiles,
+    disabled: directInputBlocked || !!contextStorageError,
+  });
   const blocked =
-    directInputBlocked || attachments.blocked || !!contextStorageError || !!pendingFiles[owner];
+    directInputBlocked ||
+    attachments.blocked ||
+    !!contextStorageError ||
+    !!pendingFiles[owner] ||
+    fileDrop.pending;
   const hasContent = !!(
     inputValue.trim() ||
     images.length ||
@@ -221,7 +260,9 @@ export function Composer({
   // from ThreadGoal.status rather than a local UI toggle).
   const threadGoal = useThreadGoal();
   const hasContextUsage = useCodexStore(
-    (s) => !!currentThreadId && !!s.tokenUsageMap[currentThreadId],
+    (s) =>
+      !!currentThreadId &&
+      deriveContextWindowUsage(s.tokenUsageMap[currentThreadId]) !== null,
   );
 
   const editorRef = useRef<ComposerEditorHandle>(null);
@@ -257,9 +298,12 @@ export function Composer({
         : (submitMode.current ?? preferences.mode);
     submitMode.current = null;
     const parameters = followupParameters(currentThreadId ?? "");
+    const submittedGoal = goalDrafts.read(owner);
+    let goalClearingOwner = owner;
     const text = inputValue.trim();
     const submittedContexts = richDraft.contexts;
     const submittedMentions = mentionDrafts.read(owner);
+    const submittedPluginMentions = pluginInputDrafts.read(owner, text);
     const completeText = composeContextText(text, submittedContexts);
     if (
       blocked ||
@@ -288,6 +332,7 @@ export function Composer({
       useSessionDraftStore.getState().clearSubmitted(submittedOwner, snapshot);
       composerDrafts.clearSubmitted(submittedOwner, submittedContexts);
       mentionDrafts.clear(submittedOwner, submittedMentions);
+      pluginInputDrafts.clear(submittedOwner, submittedPluginMentions);
       if (unchanged) composerDrafts.setExpanded(submittedOwner, false);
     };
     const markSending = (key: string, value: boolean) => {
@@ -299,7 +344,7 @@ export function Composer({
     try {
       if (running && requestedMode !== "queue" && !currentTurnId)
         throw new Error("正在同步当前任务，请稍后引导或停止");
-      if (running && goalEnabled)
+      if (running && submittedGoal.enabled)
         throw new Error("当前任务运行中，请先取消目标草稿再发送追加消息");
       if (overrideSend) {
         overrideSend(completeText);
@@ -316,8 +361,11 @@ export function Composer({
         submittedOwner = sessionDraftKey("codex", thread.id);
         markSending(submittedOwner, true);
         useSessionDraftStore.getState().move(owner, submittedOwner);
+        if (goalDrafts.move(owner, submittedOwner))
+          goalClearingOwner = submittedOwner;
         composerDrafts.move(owner, submittedOwner);
         mentionDrafts.move(owner, submittedOwner);
+        pluginInputDrafts.move(owner, submittedOwner);
         // Follow the newly created identity before moving attachments, so a storage failure
         // leaves a visible retry destination instead of creating a second session.
         useSessionNameStore.getState().initializeName("codex", thread.id, text);
@@ -339,12 +387,12 @@ export function Composer({
         );
         await moveImageDraft(owner, submittedOwner);
       }
-      if (goalEnabled) {
+      if (submittedGoal.enabled) {
         await codexService.threadGoalSet({
           threadId: targetThreadId,
           objective: completeText,
         });
-        setGoalEnabled(false);
+        goalDrafts.complete(goalClearingOwner, submittedGoal);
         clearSubmitted();
         return;
       }
@@ -362,7 +410,7 @@ export function Composer({
         running ? (currentTurnId ?? undefined) : undefined,
         parameters,
         submittedContexts,
-        submittedMentions,
+        [...submittedMentions, ...submittedPluginMentions],
       );
       setDeliveryNotice({
         owner: submittedOwner,
@@ -407,7 +455,8 @@ export function Composer({
   // Append a `$mention` (optionally followed by a starter prompt) from the plus
   // menu. The editor turns the known mention text back into a chip via its
   // external-value sync, so this only has to deal with plain strings.
-  const handleInsertMention = (text: string) => {
+  const handleInsertMention = (text: string, mention?: NativeInputMention) => {
+    if (mention) pluginInputDrafts.add(owner, mention);
     const separator = !inputValue || /\s$/.test(inputValue) ? "" : " ";
     setInputValue(`${inputValue}${separator}${text} `);
     editorRef.current?.focus();
@@ -479,11 +528,12 @@ export function Composer({
                                 : "运行中"
                               : "";
   return (
-    <div className="session-codex-composer session-compact-composer">
+    <div className="session-codex-composer session-compact-composer session-native-composer">
       <div
         className="session-composer-floating"
         aria-label="会话提示与待发送消息"
       >
+        <RunningTurnChanges threadId={currentThreadId} />
         {pendingQuestions.length > 0 && (
           <button
             type="button"
@@ -526,7 +576,9 @@ export function Composer({
           {deliveryNotice.text}
         </p>
       )}
-      {directInputBlocked && <p role="status">当前子线程由主 Agent 调度，不能直接发送消息。</p>}
+      {directInputBlocked && (
+        <p role="status">当前子线程由主 Agent 调度，不能直接发送消息。</p>
+      )}
       <SideChatPanel />
       {reviewOpen && (
         <ReviewDialog
@@ -538,6 +590,9 @@ export function Composer({
         ref={formRef}
         onSubmit={handleSubmit}
         onPasteCapture={handlePaste}
+        onDragOverCapture={fileDrop.onDragOver}
+        onDragLeaveCapture={fileDrop.onDragLeave}
+        onDropCapture={fileDrop.onDrop}
         className="session-composer-form pb-[env(safe-area-inset-bottom)]"
       >
         <FileMentionPopover
@@ -557,11 +612,22 @@ export function Composer({
 
         <div
           data-composer-suggestion-anchor
+          data-composer-layout="multiline"
+          data-composer-radius-variant="default"
+          data-composer-density="default"
+          data-composer-surface-variant="default"
+          data-file-drop-active={fileDrop.active || undefined}
           className="session-composer-surface session-compact-frame"
         >
+          {fileDrop.active && (
+            <div className="session-composer-drop-hint" role="status">
+              松开以添加附件
+            </div>
+          )}
           <div className="session-compact-body">
             <div ref={wrapperRef} className="session-composer-editor">
               <ComposerEditor
+                owner={owner}
                 key={owner}
                 ref={editorRef}
                 value={inputValue}
@@ -589,14 +655,50 @@ export function Composer({
           <div className="session-composer-bottom">
             <ComposerToolbarProvider className="session-composer-toolbar flex items-center justify-between w-full">
               <div className="session-composer-policy flex items-center">
-                <AgentMentionPicker root={currentThreadId} owner={owner} />
                 <ComposerMenu
+                  owner={owner}
                   onImageFilesSelected={attachments.addFiles}
                   onImagesSelected={attachments.addPaths}
                   onFilesSelected={appendFileLinks}
                   onInsertMention={handleInsertMention}
                   actions={(close) => (
                     <>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="justify-start"
+                        onClick={() => {
+                          close();
+                          setModelOwner(owner);
+                        }}
+                      >
+                        <NativeComposerIcon name="chat" />
+                        Agent 与提供商设置
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="justify-start"
+                        onClick={() => {
+                          close();
+                          setCloudOwner(owner);
+                        }}
+                      >
+                        <NativeComposerIcon name="chat" />
+                        Codex 云任务
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="justify-start"
+                        onClick={() => {
+                          close();
+                          setHostOwner(owner);
+                        }}
+                      >
+                        <Code2 size={16} />
+                        VS Code 上下文
+                      </Button>
                       <Button
                         type="button"
                         variant="ghost"
@@ -725,23 +827,9 @@ export function Composer({
                 />
                 <AccessModePopover compact />
               </div>
-              <div className="session-compact-meta">
-                {targetLabel}
-                <span
-                  className="session-compact-status"
-                  role={
-                    contextStorageError ||
-                    attachments.storageError ||
-                    failedImage
-                      ? "alert"
-                      : "status"
-                  }
-                  title={statusText}
-                >
-                  {statusText}
-                </span>
-              </div>
+              <div className="session-compact-meta">{targetLabel}</div>
               <div className="session-composer-utilities" aria-label="输入工具">
+                <AgentMentionPicker root={currentThreadId} owner={owner} />
                 <Button
                   type="button"
                   variant="ghost"
@@ -753,15 +841,18 @@ export function Composer({
                 >
                   <Maximize2 size={18} />
                 </Button>
-                <DictationButton
-                  key={owner}
-                  onTranscript={(text) => {
-                    const value = readDraft(owner).text;
-                    useSessionDraftStore
-                      .getState()
-                      .setText(owner, value ? `${value} ${text}` : text);
-                  }}
-                />
+                <span className="session-native-dictation">
+                  <NativeComposerIcon name="microphone" />
+                  <DictationButton
+                    key={owner}
+                    onTranscript={(text) => {
+                      const value = readDraft(owner).text;
+                      useSessionDraftStore
+                        .getState()
+                        .setText(owner, value ? `${value} ${text}` : text);
+                    }}
+                  />
+                </span>
                 <Button
                   type="button"
                   variant="ghost"
@@ -775,19 +866,36 @@ export function Composer({
                 <ConversationMenu threadId={currentThreadId} title="当前会话" />
               </div>
               <div className="session-composer-actions flex items-center gap-2">
-                <AgentModelPanel trigger={<AgentModelTrigger compact />} />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="session-native-agent-trigger"
+                  aria-label="当前 Agent：Codex，切换 Agent"
+                  title="切换 Agent"
+                  onClick={() => setModelOwner(owner)}
+                >
+                  Codex
+                  <NativeComposerIcon name="chevron" />
+                </Button>
+                <NativeModelSelector threadId={currentThreadId} />
+                {hasContextUsage && <ContextWindowWidget />}
                 {running && (
                   <Button
                     type="button"
                     aria-label={stopping ? "正在停止" : "停止生成"}
                     onClick={requestStop}
                     disabled={stopping}
-                    title={stopping ? "正在停止…" : "停止主 Agent 并暂停主会话队列；子任务继续运行，可在子任务面板停止"}
+                    title={
+                      stopping
+                        ? "正在停止…"
+                        : "停止主 Agent 并暂停主会话队列；子任务继续运行，可在子任务面板停止"
+                    }
                     variant="ghost"
                     size="icon"
                     className={`session-composer-stop ${hasContent ? "" : "is-primary"}`}
                   >
-                    <Square className="w-4 h-4" />
+                    <NativeComposerIcon name="stop" />
                   </Button>
                 )}
                 {(!running || hasContent) && (
@@ -821,7 +929,7 @@ export function Composer({
                         {preferences.mode === "queue" ? "排队" : "引导"}
                       </span>
                     ) : (
-                      <ArrowUp className="w-4 h-4" />
+                      <NativeComposerIcon name="send" />
                     )}
                   </Button>
                 )}
@@ -830,6 +938,19 @@ export function Composer({
           </div>
         </div>
       </form>
+      {statusText && (
+        <span
+          className="session-native-composer-status"
+          role={
+            contextStorageError || attachments.storageError || failedImage
+              ? "alert"
+              : "status"
+          }
+          title={statusText}
+        >
+          {statusText}
+        </span>
+      )}
       {detailsOwner === owner && (
         <ComposerSheet
           title="输入状态与消息队列"
@@ -839,6 +960,7 @@ export function Composer({
             editorRef.current?.focus();
           }}
         >
+          <ComposerEnterSettings />
           {attachments.storageError && (
             <p role="alert">
               附件草稿保存失败：{attachments.storageError}
@@ -971,6 +1093,54 @@ export function Composer({
           {!statusText && <p>暂无待处理状态。</p>}
         </ComposerSheet>
       )}
+      {hostOwner === owner && (
+        <ComposerSheet
+          title="VS Code 上下文"
+          description="从本会话的编辑工作区添加活动文件和选区。"
+          onClose={() => setHostOwner(null)}
+        >
+          {hostCwd ? (
+            <CodexHostPanel
+              owner={{
+                cwd: hostCwd,
+                threadId: currentThreadId,
+                draftOwner: owner,
+              }}
+            />
+          ) : (
+            <p role="status">先选择本会话的项目，再连接编辑器上下文。</p>
+          )}
+        </ComposerSheet>
+      )}
+      {cloudOwner === owner && (
+        <ComposerSheet
+          title="Codex 云任务"
+          description="检查当前账号与环境能力，再明确创建或委派任务。"
+          onClose={() => setCloudOwner(null)}
+        >
+          {hostCwd ? (
+            <CloudTasksPanel
+              owner={{
+                cwd: hostCwd,
+                threadId: currentThreadId,
+                draftOwner: owner,
+              }}
+            />
+          ) : (
+            <p role="status">先选择本会话项目，再使用云任务。</p>
+          )}
+        </ComposerSheet>
+      )}
+      {modelOwner === owner && (
+        <ComposerSheet
+          title="Agent 与提供商设置"
+          onClose={() => setModelOwner(null)}
+        >
+          <NativeAgentSettings>
+            <ModelReasonSelector mode="panel" threadId={currentThreadId} />
+          </NativeAgentSettings>
+        </ComposerSheet>
+      )}
       {richDraft.expanded && (
         <ComposerSheet
           full
@@ -981,7 +1151,18 @@ export function Composer({
           footer={
             <>
               <AccessModePopover compact />
-              <AgentModelPanel trigger={<AgentModelTrigger compact />} />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="session-native-agent-trigger"
+                aria-label="当前 Agent：Codex，切换 Agent"
+                onClick={() => setModelOwner(owner)}
+              >
+                Codex
+                <NativeComposerIcon name="chevron" />
+              </Button>
+              <NativeModelSelector threadId={currentThreadId} />
               {running && (
                 <Button
                   type="button"
@@ -1009,7 +1190,12 @@ export function Composer({
             </>
           }
         >
-          <div onPasteCapture={handlePaste}>
+          <div
+            onPasteCapture={handlePaste}
+            onDragOverCapture={fileDrop.onDragOver}
+            onDragLeaveCapture={fileDrop.onDragLeave}
+            onDropCapture={fileDrop.onDrop}
+          >
             <ContextAttachments
               owner={owner}
               images={attachments}

@@ -1,4 +1,6 @@
 mod codex_rollback;
+mod codex_readonly;
+mod codex_account_auth;
 use axum::{Json, extract::State as AxumState, http::StatusCode, response::IntoResponse};
 use codexia_codex::env::set_env;
 use codexia_codex::providers::{load_and_fetch_models, load_env_keys};
@@ -71,10 +73,16 @@ pub(super) async fn api_allow_sleep(
     Ok(StatusCode::OK)
 }
 
+pub(super) fn runtime_instance() -> Option<String> {
+    std::env::var("SESSION_RUNTIME_INSTANCE").ok().filter(|instance| {
+        !instance.trim().is_empty() && instance.len() <= 512 && !instance.chars().any(char::is_control)
+    })
+}
+
 pub(super) async fn health_check() -> impl IntoResponse {
     Json(json!({
-        "status": "ok", "instance": std::env::var("SESSION_RUNTIME_INSTANCE").ok(),
-        "capabilities": { "acpImages": true, "codexOwnership": true },
+        "status": "ok", "instance": runtime_instance(),
+        "capabilities": { "acpImages": true, "codexOwnership": true, "codexAccountMutationsV1": true },
         "timezone": chrono::Local::now().format("%Z %:z").to_string()
     }))
 }

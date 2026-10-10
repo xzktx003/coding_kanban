@@ -1,9 +1,13 @@
-import React, { type ReactNode, useEffect, useState } from 'react';
-import { type Accent, type Theme, useThemeStore } from '@session/stores/settings/useThemeStore';
+import React, { type ReactNode, useEffect, useState } from "react";
+import {
+  type Accent,
+  type Theme,
+  useThemeStore,
+} from "@session/stores/settings/useThemeStore";
 
-interface ThemeContextType {
+export interface ThemeContextType {
   theme: Theme;
-  resolvedTheme: 'light' | 'dark';
+  resolvedTheme: "light" | "dark";
   accent: Accent;
   starfield: boolean;
   backgroundImage: string | null;
@@ -16,7 +20,9 @@ interface ThemeContextType {
 
 export type { Accent, Theme };
 
-const ThemeContext = React.createContext<ThemeContextType | undefined>(undefined);
+const ThemeContext = React.createContext<ThemeContextType | undefined>(
+  undefined,
+);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const inherited = React.useContext(ThemeContext);
@@ -35,14 +41,20 @@ export function ThemeRoot({ children }: { children: ReactNode }) {
     setStarfield,
     setBackgroundImage,
   } = useThemeStore();
-  const [resolvedTheme, setResolvedTheme] = useState<'light' | 'dark'>(() => theme === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme);
+  const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">(() =>
+    theme === "system"
+      ? window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light"
+      : theme,
+  );
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
 
     const updateResolvedTheme = () => {
-      if (theme === 'system') {
-        setResolvedTheme(mediaQuery.matches ? 'dark' : 'light');
+      if (theme === "system") {
+        setResolvedTheme(mediaQuery.matches ? "dark" : "light");
       } else {
         setResolvedTheme(theme);
       }
@@ -51,24 +63,26 @@ export function ThemeRoot({ children }: { children: ReactNode }) {
     updateResolvedTheme();
 
     const handler = () => updateResolvedTheme();
-    mediaQuery.addEventListener('change', handler);
-    return () => mediaQuery.removeEventListener('change', handler);
+    mediaQuery.addEventListener("change", handler);
+    return () => mediaQuery.removeEventListener("change", handler);
   }, [theme]);
 
   useEffect(() => {
-    const root = (document.querySelector<HTMLElement>(".session-mode") ?? document.documentElement);
+    const root =
+      document.querySelector<HTMLElement>(".session-mode") ??
+      document.documentElement;
 
     // Classes to cleanup
-    const themes = ['light', 'dark'];
+    const themes = ["light", "dark"];
     const accents = [
-      'accent-default',
-      'accent-ghibli',
-      'accent-black',
-      'accent-pink',
-      'accent-blue',
-      'accent-green',
-      'accent-purple',
-      'accent-orange',
+      "accent-default",
+      "accent-ghibli",
+      "accent-black",
+      "accent-pink",
+      "accent-blue",
+      "accent-green",
+      "accent-purple",
+      "accent-orange",
     ];
 
     // Handle dark/light mode
@@ -80,20 +94,25 @@ export function ThemeRoot({ children }: { children: ReactNode }) {
     root.classList.add(`accent-${accent}`);
 
     // Apply color-scheme for browser UI elements (affects scrollbars, etc)
-    root.style.setProperty('color-scheme', resolvedTheme);
+    root.style.setProperty("color-scheme", resolvedTheme);
 
     // Starfield effect toggle
-    root.classList.toggle('starfield', starfield);
+    root.classList.toggle("starfield", starfield);
   }, [resolvedTheme, accent, starfield]);
 
   useEffect(() => {
-    const root = (document.querySelector<HTMLElement>(".session-mode") ?? document.documentElement);
+    const root =
+      document.querySelector<HTMLElement>(".session-mode") ??
+      document.documentElement;
     if (backgroundImage) {
-      root.style.setProperty('--custom-background-image', `url("${backgroundImage}")`);
-      root.classList.add('has-custom-background');
+      root.style.setProperty(
+        "--custom-background-image",
+        `url("${backgroundImage}")`,
+      );
+      root.classList.add("has-custom-background");
     } else {
-      root.style.removeProperty('--custom-background-image');
-      root.classList.remove('has-custom-background');
+      root.style.removeProperty("--custom-background-image");
+      root.classList.remove("has-custom-background");
     }
   }, [backgroundImage]);
 
@@ -110,13 +129,28 @@ export function ThemeRoot({ children }: { children: ReactNode }) {
     setBackgroundImage,
   };
 
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  return (
+    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+  );
 }
 
 export function useThemeContext(): ThemeContextType {
   const context = React.useContext(ThemeContext);
   if (context === undefined) {
-    throw new Error('useThemeContext must be used within ThemeProvider');
+    throw new Error("useThemeContext must be used within ThemeProvider");
   }
   return context;
+}
+
+/** A detached native content window retains the theme captured by its opener. */
+export function CapturedThemeProvider({
+  value,
+  children,
+}: {
+  value: ThemeContextType;
+  children: ReactNode;
+}) {
+  return (
+    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+  );
 }

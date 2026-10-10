@@ -1,5 +1,6 @@
 import {
   sessionPortalContainer,
+  useSessionPortalDocument,
   useSessionInteractionVisible,
   isSessionInteractionVisible,
 } from "@session/session-dom";
@@ -24,9 +25,10 @@ function DialogTrigger({
 function DialogPortal({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Portal>) {
+  const ownerDocument = useSessionPortalDocument();
   return (
     <DialogPrimitive.Portal
-      container={sessionPortalContainer()}
+      container={sessionPortalContainer(ownerDocument ?? undefined)}
       data-slot="dialog-portal"
       {...props}
     />
@@ -73,8 +75,9 @@ function DialogContent({
       ? "w-full max-w-5xl"
       : "w-full max-w-[calc(100%-2rem)] sm:max-w-lg";
 
+  const ownerDocument = useSessionPortalDocument();
   const interactionVisible = useSessionInteractionVisible();
-  if (!interactionVisible) return null;
+  if (!interactionVisible && !ownerDocument) return null;
 
   return (
     <DialogPortal data-slot="dialog-portal">
@@ -87,14 +90,16 @@ function DialogContent({
           className,
         )}
         onOpenAutoFocus={(event) => {
+          const activeElement = (ownerDocument ?? document)
+            .activeElement as HTMLElement | null;
           openerRef.current =
-            document.activeElement instanceof HTMLElement
-              ? document.activeElement
+            activeElement && typeof activeElement.focus === "function"
+              ? activeElement
               : null;
           onOpenAutoFocus?.(event);
         }}
         onCloseAutoFocus={(event) => {
-          if (!isSessionInteractionVisible()) {
+          if (!ownerDocument && !isSessionInteractionVisible()) {
             event.preventDefault();
             return;
           }

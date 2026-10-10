@@ -1,5 +1,5 @@
 import { useTranscriptInspection } from "../thread/inspection";
-import { Diff, Undo2 } from "lucide-react";
+import { ArrowRight, Eye } from "lucide-react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useIsMobile } from "@session/hooks/use-mobile";
 import { useTranslation } from "react-i18next";
@@ -10,17 +10,22 @@ import {
   HoverCardTrigger,
 } from "@session/components/ui/hover-card";
 import { DiffViewer } from "@session/features/DiffViewer";
-import { gitReverseFiles } from "@session/services/apiAdapt";
-import { useEditorStore, useWorkspaceStore } from "@session/stores";
+import type { SavedPatchBatch } from "@agent-orchestrator/shared";
+import { SavedPatchAction } from "@session/features/git/SavedPatchAction";
+import { useCodexContentOwner } from "../presentation/ownerContext";
 import type { AggregatedFileChange } from "./fileChangeLogic";
 import { getDiffViewerProps } from "./fileChangeLogic";
 import { toRelativePath, useOpenReviewTab } from "./fileChangeUtils";
+import { getFilename } from "@session/utils/getFilename";
+import { NativeTurnDiffIcon } from "@session/features/git/NativeReviewIcons";
+import "@session/features/git/review-native.css";
 
 type ThreadFileChangesSummaryProps = {
   changes: AggregatedFileChange[];
+  threadId?: string;
+  turnId?: string;
+  batches?: SavedPatchBatch[];
 };
-
-type PendingUndo = { kind: "all" } | { kind: "file"; path: string };
 
 /**
  * Compact turn-diff summary shown inline in CodexThread. Deliberately does
@@ -28,14 +33,25 @@ type PendingUndo = { kind: "all" } | { kind: "file"; path: string };
  */
 export const ThreadFileChangesSummary = ({
   changes,
+  threadId,
+  turnId,
+  batches = [],
 }: ThreadFileChangesSummaryProps) => {
   const inspection = useTranscriptInspection();
   const { t } = useTranslation("thread");
-  const { cwd } = useWorkspaceStore();
-  const { hasConfirmedGitRevert, setHasConfirmedGitRevert } = useEditorStore();
-  const openReviewTab = useOpenReviewTab();
-  const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
-  const [undoing, setUndoing] = useState(false);
+  const { cwd } = useCodexContentOwner(threadId);
+  const openReviewTab = useOpenReviewTab(
+    threadId && turnId
+      ? { threadId, turnId, cwd, changes, batches }
+      : undefined,
+  );
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
+  const previewDismissed = useRef(false);
+  const openReview = (path?: string) => {
+    previewDismissed.current = true;
+    setPreviewPath(null);
+    openReviewTab(path);
+  };
   const mobile = useIsMobile();
   const scrollable = changes.length > (mobile ? 4 : 6);
   const listRef = useRef<HTMLDivElement>(null);
@@ -59,7 +75,24 @@ export const ThreadFileChangesSummary = ({
 
   if (changes.length === 0) return null;
 
-  if (inspection) return <div className="session-file-changes space-y-2">{changes.map(change => <details key={change.path}><summary className="cursor-pointer text-sm">{change.path} +{change.addedCount} −{change.removedCount}</summary><DiffViewer {...getDiffViewerProps(change)} displayPath={change.path} isCollapsed={false} /></details>)}</div>;
+  if (inspection)
+    return (
+      <div className="session-file-changes space-y-2">
+        {changes.map((change) => (
+          <details key={change.path}>
+            <summary className="cursor-pointer text-sm">
+              {change.path} +{change.addedCount} −{change.removedCount}
+            </summary>
+            <DiffViewer
+              native
+              {...getDiffViewerProps(change)}
+              displayPath={change.path}
+              isCollapsed={false}
+            />
+          </details>
+        ))}
+      </div>
+    );
   const totals = changes.reduce(
     (acc, change) => {
       acc.added += change.addedCount;
@@ -69,156 +102,222 @@ export const ThreadFileChangesSummary = ({
     { added: 0, removed: 0 },
   );
 
-  const doUndo = async (target: PendingUndo) => {
-    if (!cwd) return;
-    const paths =
-      target.kind === "all"
-        ? changes.map((change) => change.path)
-        : [target.path];
-    setUndoing(true);
-    try {
-      await gitReverseFiles(cwd, paths, false);
-    } finally {
-      setUndoing(false);
-      setPendingUndo(null);
-    }
-  };
-
-  const requestUndo = (target: PendingUndo) => {
-    if (!hasConfirmedGitRevert) {
-      setPendingUndo(target);
-      return;
-    }
-    void doUndo(target);
-  };
-
+  const single = changes.length === 1 ? changes[0] : undefined;
+  const stats = (added: number, removed: number) => (
+    <span className="codex-turn-diff-stats">
+      <span data-kind="add">+{added}</span>
+      <span data-kind="remove">-{removed}</span>
+    </span>
+  );
+  const title = single
+    ? t("fileChanges.editedSingle", {
+        filename: getFilename(single.path),
+        defaultValue: `${t("fileChanges.edited")} ${getFilename(single.path)}`,
+      })
+    : t("fileChanges.editedFiles", {
+        count: changes.length,
+        defaultValue: t("fileChanges.changed", { count: changes.length }),
+      });
+  const titleContent = (
+    <>
+      <span className="codex-turn-diff-title-text">{title}</span>
+      <span className="codex-turn-diff-subtitle">
+        {stats(totals.added, totals.removed)}
+      </span>
+      <span className="codex-turn-diff-hover-subtitle" aria-hidden="true">
+        {t("common.review")}
+        <ArrowRight size={12} />
+      </span>
+    </>
+  );
+  const preview = single && (
+    <HoverCardContent className="codex-file-preview w-[36rem] max-w-[80vw] p-0 overflow-hidden">
+      <DiffViewer
+        native
+        presentation="preview"
+        {...getDiffViewerProps(single)}
+        displayPath={toRelativePath(single.path, cwd)}
+        isCollapsed={false}
+        className="max-h-96"
+      />
+    </HoverCardContent>
+  );
   return (
-    <div className="session-file-changes space-y-1 border rounded-md p-3">
-      <div className="session-file-changes-header flex flex-wrap items-center justify-between gap-3">
-        <div className="text-sm font-medium text-muted-foreground">
-          {t("fileChanges.changed", { count: changes.length })}
-        </div>
-        <div className="flex items-center gap-1.5">
+    <div
+      className="session-file-changes codex-turn-diff-summary"
+      data-file-count={changes.length}
+    >
+      <div className="session-file-changes-header codex-turn-diff-header">
+        <span className="codex-turn-diff-icon">
+          <NativeTurnDiffIcon />
+        </span>
+        {single ? (
+          <HoverCard
+            openDelay={200}
+            open={previewPath === single.path}
+            onOpenChange={(open) =>
+              setPreviewPath(
+                open && !previewDismissed.current ? single.path : null,
+              )
+            }
+          >
+            <HoverCardTrigger asChild>
+              <button
+                type="button"
+                className="codex-turn-diff-title"
+                aria-label={toRelativePath(single.path, cwd)}
+                title={toRelativePath(single.path, cwd)}
+                onPointerLeave={() => {
+                  previewDismissed.current = false;
+                }}
+                onClick={() => openReview(single.path)}
+              >
+                {titleContent}
+              </button>
+            </HoverCardTrigger>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              className="codex-turn-diff-preview"
+              aria-label={`预览 ${toRelativePath(single.path, cwd)} Diff`}
+              onClick={() => {
+                previewDismissed.current = false;
+                setPreviewPath((value) =>
+                  value === single.path ? null : single.path,
+                );
+              }}
+            >
+              <Eye size={14} />
+            </Button>
+            {preview}
+          </HoverCard>
+        ) : (
+          <button
+            type="button"
+            className="codex-turn-diff-title"
+            onClick={() => openReview()}
+          >
+            {titleContent}
+          </button>
+        )}
+        <div className="codex-turn-diff-actions">
+          <SavedPatchAction
+            threadId={threadId}
+            turnId={turnId}
+            cwd={cwd}
+            batches={batches}
+            disabled={Boolean(inspection)}
+          />
           <Button
             variant="outline"
             size="sm"
-            className="h-6 px-2 gap-1.5"
-            onClick={() => requestUndo({ kind: "all" })}
-            disabled={undoing || inspection}
-            title={t("fileChanges.undoAllTitle")}
+            className="codex-turn-diff-review"
+            onClick={() => openReview(single?.path)}
           >
-            <Undo2 className="h-3 w-3" />
-            {t("fileChanges.undoAll")}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6 px-2 gap-1.5"
-            onClick={openReviewTab}
-          >
-            <Diff className="h-3 w-3" />
             {t("common.review")}
-            <span className="flex items-center gap-1.5 text-xs">
-              <span className="text-green-600 dark:text-green-400">
-                +{totals.added}
-              </span>
-              <span className="text-red-600 dark:text-red-400">
-                -{totals.removed}
-              </span>
-            </span>
           </Button>
         </div>
       </div>
 
-      {pendingUndo && (
-        <div className="flex items-center gap-2 rounded-sm bg-destructive/10 px-2 py-1.5 text-xs">
-          <span className="flex-1 text-destructive">
-            {pendingUndo.kind === "all"
-              ? t("fileChanges.confirmUndoAll", { count: changes.length })
-              : t("fileChanges.confirmUndoFile", {
-                  path: toRelativePath(pendingUndo.path, cwd),
-                })}
-          </span>
-          <Button
-            size="sm"
-            variant="destructive"
-            className="h-6 px-2 text-xs"
-            onClick={() => {
-              setHasConfirmedGitRevert(true);
-              void doUndo(pendingUndo);
-            }}
-          >
-            {t("common.undo")}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 px-2 text-xs"
-            onClick={() => setPendingUndo(null)}
-          >
-            {t("common.cancel")}
-          </Button>
+      {!single && (
+        <div
+          ref={listRef}
+          role="region"
+          aria-label={t("fileChanges.listLabel")}
+          tabIndex={scrollable ? 0 : -1}
+          data-scrollable={scrollable}
+          className="session-file-changes-list"
+          onScroll={updateScrollEnd}
+        >
+          {changes.map((change) => (
+            <div
+              key={change.path}
+              className="session-file-change-row codex-turn-diff-file-row"
+            >
+              <HoverCard
+                openDelay={200}
+                open={previewPath === change.path}
+                onOpenChange={(open) =>
+                  setPreviewPath(
+                    open && !previewDismissed.current ? change.path : null,
+                  )
+                }
+              >
+                <HoverCardTrigger asChild>
+                  <button
+                    type="button"
+                    onPointerLeave={() => {
+                      previewDismissed.current = false;
+                    }}
+                    onClick={() => openReview(change.path)}
+                    className="flex-1 min-w-0 text-left"
+                    title={toRelativePath(change.path, cwd)}
+                  >
+                    <span className="font-mono truncate block">
+                      {toRelativePath(change.path, cwd)}
+                    </span>
+                  </button>
+                </HoverCardTrigger>
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={`预览 ${toRelativePath(change.path, cwd)} Diff`}
+                  onClick={() => {
+                    previewDismissed.current = false;
+                    setPreviewPath((value) =>
+                      value === change.path ? null : change.path,
+                    );
+                  }}
+                >
+                  <Eye size={14} />
+                </Button>
+                <HoverCardContent className="codex-file-preview w-[36rem] max-w-[80vw] p-0 overflow-hidden">
+                  <DiffViewer
+                    native
+                    presentation="preview"
+                    {...getDiffViewerProps(change)}
+                    displayPath={toRelativePath(change.path, cwd)}
+                    isCollapsed={false}
+                    className="max-h-96"
+                  />
+                </HoverCardContent>
+              </HoverCard>
+              {stats(change.addedCount, change.removedCount)}
+              <SavedPatchAction
+                threadId={threadId}
+                turnId={turnId}
+                cwd={cwd}
+                batches={batches}
+                filePath={
+                  batches
+                    .flatMap((b) => b.changes)
+                    .find(
+                      (c) =>
+                        c.path === change.path ||
+                        toRelativePath(c.path, cwd) ===
+                          toRelativePath(change.path, cwd),
+                    )?.path
+                }
+                compact
+                disabled={
+                  Boolean(inspection) ||
+                  !batches.some((b) =>
+                    b.changes.some(
+                      (c) =>
+                        c.path === change.path ||
+                        toRelativePath(c.path, cwd) ===
+                          toRelativePath(change.path, cwd),
+                    ),
+                  )
+                }
+              />
+            </div>
+          ))}
         </div>
       )}
-
-      <div
-        ref={listRef}
-        role="region"
-        aria-label={t("fileChanges.listLabel")}
-        tabIndex={scrollable ? 0 : -1}
-        data-scrollable={scrollable}
-        className="session-file-changes-list divide-y"
-        onScroll={updateScrollEnd}
-      >
-        {changes.map((change) => (
-          <div
-            key={change.path}
-            className="session-file-change-row flex w-full items-center justify-between gap-3 text-sm hover:bg-muted/50 rounded-sm px-1"
-          >
-            <HoverCard openDelay={200}>
-              <HoverCardTrigger asChild>
-                <button
-                  type="button"
-                  onClick={openReviewTab}
-                  className="flex-1 min-w-0 text-left"
-                  title={toRelativePath(change.path, cwd)}
-                >
-                  <span className="font-mono truncate block">
-                    {toRelativePath(change.path, cwd)}
-                  </span>
-                </button>
-              </HoverCardTrigger>
-              <HoverCardContent className="w-[36rem] max-w-[80vw] p-0 overflow-hidden">
-                <DiffViewer
-                  {...getDiffViewerProps(change)}
-                  displayPath={toRelativePath(change.path, cwd)}
-                  isCollapsed={false}
-                  className="max-h-96"
-                />
-              </HoverCardContent>
-            </HoverCard>
-            <span className="flex items-center gap-2 text-xs shrink-0">
-              <span className="text-green-600 dark:text-green-400">
-                +{change.addedCount}
-              </span>
-              <span className="text-red-600 dark:text-red-400">
-                -{change.removedCount}
-              </span>
-            </span>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-5 w-5 shrink-0"
-              onClick={() => requestUndo({ kind: "file", path: change.path })}
-              disabled={undoing || inspection}
-              title={t("fileChanges.undoFileTitle")}
-            >
-              <Undo2 className="h-3 w-3" />
-            </Button>
-          </div>
-        ))}
-      </div>
-      {scrollable && (
+      {!single && scrollable && (
         <div className="session-file-changes-hint" data-at-end={atEnd}>
           {t(atEnd ? "fileChanges.scrollEnd" : "fileChanges.scrollMore")}
         </div>

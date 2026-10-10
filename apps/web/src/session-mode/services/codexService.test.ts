@@ -17,6 +17,7 @@ import { useAgentSettingsStore } from "../stores/useAgentSettingsStore";
 import { useAcpStore } from "../stores/useAcpStore";
 import { useAsyncQuestionStore } from "../features/async-questions/store";
 import {
+  changeThreadModel,
   hydrateThreadModel,
   useThreadModelStore,
 } from "../stores/useThreadModelStore";
@@ -25,6 +26,87 @@ beforeEach(() => {
   useThreadModelStore.setState({ threads: {} });
   useWorkspaceStore.setState({ cwd: "/project" });
   useConfigStore.setState({ threadCwdMode: "worktree", model: "" });
+});
+it("targeted cursor hydration preserves the contiguous pagination boundary until the intervening history is read", async () => {
+  const id = "cursor-gap";
+  useCodexStore.setState({
+    threads: [],
+    currentThreadId: id,
+    events: { [id]: [] },
+    historyLoadedMap: { [id]: true },
+    turnTimingMap: {},
+    threadStatusMap: {},
+  });
+  useSessionSyncStore.setState({ cursors: { [id]: "before-50" } });
+  api.threadRead.mockResolvedValue({
+    thread: { id, turns: [] },
+    historyPage: { earlier: true, nextCursor: null },
+  });
+  await codexService.loadThreadHistory(id, undefined, {
+    background: true,
+    recent: true,
+    cursor: "target-turn-0",
+    preserveEarlierCursor: true,
+  });
+  expect(useSessionSyncStore.getState().cursors[id]).toBe("before-50");
+  await codexService.loadThreadHistory(id, undefined, {
+    background: true,
+    recent: true,
+    cursor: "before-50",
+  });
+  expect(useSessionSyncStore.getState().cursors[id]).toBeNull();
+});
+
+it("a targeted cursor read waits for a running recent check instead of reusing its different page", async () => {
+  const id = "cursor-inflight";
+  let finish!: (value: unknown) => void;
+  api.threadRead.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  api.threadRead.mockImplementation((params) =>
+    Promise.resolve({
+      thread: { id, turns: [] },
+      ...(params.cursor
+        ? { historyPage: { earlier: true, nextCursor: null } }
+        : {}),
+    }),
+  );
+  useCodexStore.setState({
+    threads: [],
+    currentThreadId: id,
+    events: { [id]: [] },
+    historyLoadedMap: { [id]: true },
+    turnTimingMap: {},
+    threadStatusMap: {},
+  });
+  useSessionSyncStore.setState({ cursors: { [id]: "before-50" } });
+  const recent = codexService.loadThreadHistory(id, undefined, {
+    background: true,
+    recent: true,
+  });
+  const target = codexService.loadThreadHistory(id, undefined, {
+    background: true,
+    recent: true,
+    cursor: "target-turn-0",
+    preserveEarlierCursor: true,
+  });
+  expect(api.threadRead).toHaveBeenCalledTimes(1);
+  finish({
+    thread: { id, turns: [] },
+    historyPage: { earlier: false, nextCursor: "before-50" },
+  });
+  await Promise.all([recent, target]);
+  expect(
+    api.threadRead.mock.calls.filter((call) => call[0].recent),
+  ).toHaveLength(2);
+  expect(api.threadRead).toHaveBeenCalledWith(
+    { threadId: id, recent: true, cursor: "target-turn-0" },
+    expect.anything(),
+  );
+  expect(useSessionSyncStore.getState().cursors[id]).toBe("before-50");
 });
 it("a background check keeps existing content interactive without the initial history loader", async () => {
   let resolve!: (value: unknown) => void;
@@ -134,6 +216,11 @@ it("sends the selected collaboration mode on each actual turn, including an exis
   });
   useConfigStore.setState({ collaborationMode: "default" });
   await codexService.turnStart("mode", "Continue");
+  expect(api.turnStart.mock.calls.at(-1)?.[0].collaborationMode.mode).toBe(
+    "plan",
+  );
+  changeThreadModel("mode", { collaborationMode: "default" });
+  await codexService.turnStart("mode", "Use my changed thread setting");
   expect(api.turnStart.mock.calls.at(-1)?.[0].collaborationMode.mode).toBe(
     "default",
   );

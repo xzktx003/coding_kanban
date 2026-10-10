@@ -34,21 +34,24 @@ export function revealNewQuestion(
   );
   if (turnId !== latestTurn) return;
   const previous = collectQuestions(previousEvents, threadId);
-  if (previous.some((q) => q.sourceId === event.params.item.id)) return;
+  if (
+    previous.some(
+      (q) => q.sourceId === event.params.item.id && q.turnId === turnId,
+    )
+  )
+    return;
   const session = useAsyncQuestionStore.getState().sessions[threadId];
-  if (session?.presentedSources?.includes(event.params.item.id)) return;
+  const sourceInstance = JSON.stringify([turnId, event.params.item.id]);
+  if (session?.presentedSources?.includes(sourceInstance)) return;
   // Don't replace a partially answered batch or an unresolved submission.
   if (session?.openId || session?.sending || session?.uncertain) return;
   const questions = collectQuestions(
     state.events[threadId] ?? [],
     threadId,
-  ).filter((q) => q.sourceId === event.params.item.id);
+  ).filter((q) => q.sourceId === event.params.item.id && q.turnId === turnId);
   if (questions.length && questions.some((q) => q.answer === undefined)) {
     useAsyncQuestionStore.getState().patch(threadId, {
-      presentedSources: [
-        ...(session?.presentedSources ?? []),
-        event.params.item.id,
-      ],
+      presentedSources: [...(session?.presentedSources ?? []), sourceInstance],
     });
     useAsyncQuestionStore.getState().open(threadId, questions);
   }

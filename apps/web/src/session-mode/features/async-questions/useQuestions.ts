@@ -40,6 +40,7 @@ export function useQuestions(threadId: string) {
           text: q.answer ?? "",
           baseline: q.answer,
           skipped: false,
+          turnId: q.turnId,
         };
         changed = true;
       }
@@ -85,5 +86,6 @@ export function useQuestions(threadId: string) {
     questions,
     session,
     pending: pendingQuestions(questions, session, latestTurnId),
+    latestTurnId,
   };
 }

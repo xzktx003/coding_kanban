@@ -8,6 +8,7 @@ import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
 import {
+  $createRangeSelection,
   $getRoot,
   $getSelection,
   $isRangeSelection,
@@ -22,9 +23,12 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
 } from "react";
 import { type MentionItem, useMentionItems } from "../mentions";
+import { usePluginInputDrafts } from "@session/features/plugins/pluginInputs";
+import { validNativeInputMention } from "@agent-orchestrator/shared";
 import { MentionChipDeletePlugin } from "./MentionChipDeletePlugin";
 import { MentionChipNode } from "./MentionChipNode";
 import { MentionTypeaheadPlugin } from "./MentionTypeaheadPlugin";
@@ -37,10 +41,61 @@ export interface ComposerEditorHandle {
 }
 
 interface ComposerEditorProps {
+  owner?: string;
   value: string;
   onChange: (value: string) => void;
   onSubmit: (intent?: "default" | "opposite") => void;
   placeholder: string;
+}
+
+/** Native selectionchange can arrive after Delete, especially after a menu. */
+function NativeDeletionSelectionPlugin() {
+  const [editor] = useLexicalComposerContext();
+  useEffect(() => {
+    const synchronize = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.keyCode === 229 ||
+        editor.isComposing() ||
+        (event.key !== "Delete" && event.key !== "Backspace")
+      )
+        return;
+      const root = editor.getRootElement();
+      const native = root?.ownerDocument.getSelection();
+      if (
+        !root ||
+        !native ||
+        !native.rangeCount ||
+        native.isCollapsed ||
+        !root.contains(native.anchorNode) ||
+        !root.contains(native.focusNode)
+      )
+        return;
+      const range = native.getRangeAt(0).cloneRange();
+      editor.update(() => {
+        const current = $getSelection();
+        // Atomic chip/node selection keeps its existing deletion behavior.
+        if (current && !$isRangeSelection(current)) return;
+        const next = $isRangeSelection(current)
+          ? current.clone()
+          : $createRangeSelection();
+        next.applyDOMRange(range);
+        $setSelection(next);
+      });
+    };
+    const unregister = editor.registerRootListener((root, previous) => {
+      previous?.removeEventListener("keydown", synchronize, true);
+      root?.addEventListener("keydown", synchronize, true);
+    });
+    return () => {
+      unregister();
+      editor
+        .getRootElement()
+        ?.removeEventListener("keydown", synchronize, true);
+    };
+  }, [editor]);
+  return null;
 }
 
 /** Enter submits, Shift+Enter inserts a newline, IME composition never submits. */
@@ -104,6 +159,8 @@ function ExternalValuePlugin({
 }) {
   const [editor] = useLexicalComposerContext();
   const selectionRef = useRef<RangeSelection | null>(null);
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
   useEffect(
     () =>
       editor.registerUpdateListener(({ editorState }) =>
@@ -122,8 +179,15 @@ function ExternalValuePlugin({
       insertText: (text) =>
         editor.update(() => {
           try {
-            if (selectionRef.current)
-              $setSelection(selectionRef.current.clone());
+            if (selectionRef.current) {
+              const restored = selectionRef.current.clone();
+              if (
+                restored.anchor.getNode().isAttached() &&
+                restored.focus.getNode().isAttached()
+              )
+                $setSelection(restored);
+              else $getRoot().selectEnd();
+            }
           } catch {
             $getRoot().selectEnd();
           }
@@ -149,17 +213,21 @@ function ExternalValuePlugin({
     // Restoring another draft must not move the DOM selection into this editor:
     // WebKit/Chromium can focus contenteditable through selection alone.
     const passive = !root?.contains(document.activeElement);
+    const capturedItems = itemsRef.current;
     editor.update(
       () => {
         if ($getRoot().getTextContent() === value) {
           return;
         }
-        $setEditorFromString(value, items);
+        $setEditorFromString(value, capturedItems);
         if (passive) $setSelection(null);
       },
       { tag: passive ? SKIP_DOM_SELECTION_TAG : undefined },
     );
-  }, [value, items, editor]);
+    // Capability discovery is presentation metadata, not an external text edit.
+    // Replaying an unchanged controlled value on metadata updates would replace
+    // a user edit whose onChange has not reached the parent render yet.
+  }, [value, editor]);
 
   const handleChange = useCallback(
     (
@@ -181,9 +249,57 @@ function ExternalValuePlugin({
 export const ComposerEditor = forwardRef<
   ComposerEditorHandle,
   ComposerEditorProps
->(function ComposerEditor({ value, onChange, onSubmit, placeholder }, ref) {
+>(function ComposerEditor(
+  { owner, value, onChange, onSubmit, placeholder },
+  ref,
+) {
   const handleRef = useRef<ComposerEditorHandle | null>(null);
-  const { items } = useMentionItems();
+  const { items: discoveredItems } = useMentionItems();
+  const capturedPlugins = usePluginInputDrafts((state) =>
+    owner ? state.drafts[owner] : undefined,
+  );
+  const items = useMemo(() => {
+    const merged: MentionItem[] = [...discoveredItems];
+    for (const mention of Array.isArray(capturedPlugins)
+      ? capturedPlugins
+      : []) {
+      if (
+        !validNativeInputMention(mention) ||
+        !mention.path.startsWith("plugin://")
+      )
+        continue;
+      const found = merged.findIndex(
+        (item) => item.inputMention?.path === mention.path,
+      );
+      const item: MentionItem =
+        found >= 0
+          ? merged[found]
+          : {
+              key: mention.path,
+              kind: "plugin",
+              displayName: mention.name,
+              description: null,
+              insertText: `@${mention.name}`,
+              inputMention: mention,
+              searchTerms: [mention.name.toLowerCase()],
+              categoryTag: "[Plugin]",
+              sortRank: 0,
+              iconSrc: null,
+              brandColor: null,
+              defaultPrompts: [],
+            };
+      if (found < 0) merged.push(item);
+    }
+    return merged;
+  }, [discoveredItems, capturedPlugins]);
+  const pluginItems = useMemo(
+    () => items.filter((item) => item.kind === "plugin"),
+    [items],
+  );
+  const skillItems = useMemo(
+    () => items.filter((item) => item.kind === "skill"),
+    [items],
+  );
 
   useImperativeHandle(
     ref,
@@ -219,9 +335,11 @@ export const ComposerEditor = forwardRef<
           ErrorBoundary={LexicalErrorBoundary}
         />
         <HistoryPlugin />
+        <NativeDeletionSelectionPlugin />
         <SubmitPlugin onSubmit={onSubmit} />
         <MentionChipDeletePlugin />
-        <MentionTypeaheadPlugin items={items} />
+        <MentionTypeaheadPlugin items={pluginItems} trigger="@" owner={owner} />
+        <MentionTypeaheadPlugin items={skillItems} trigger="$" owner={owner} />
         <ExternalValuePlugin
           value={value}
           onChange={onChange}

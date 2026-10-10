@@ -85,3 +85,9 @@ pnpm session:status
 - 浏览器通过独立 **HTTPS 局域网地址** 验证前端代理的两层健康接口、会话/终端切换、刷新和手机尺寸；`dev-startup.spec.ts` 与 `session-mode.spec.ts` 的导航用例共 2 项通过。旧导航用例引用已移除的顶栏选择器，此次已改为校验当前导航。
 - HTTP 局域网试运行暴露出浏览器安全上下文限制，已在指南和脚本输出中明确要求会话入口使用 HTTPS。未声称独立物理手机或另一台同网段设备已验收。
 - 测试服务结束后清理；当前正式会话运行层保留。日志位于本机被忽略的 `.dev-runtime/startup-refresh/`，不提交证书、数据和截图。
+
+### 终端历史文件读取失败或看板为空
+
+终端记录使用 `SESSION_STATE_PATH`（默认 `.dev-runtime/agent-sessions.json`），浏览器分组和排版另存于该设备的 localStorage。历史文件损坏或不支持时，网关明确报错并阻止覆盖原文件；只有文件不存在才按首次启动处理。重启脚本也不会用空接口结果覆盖已有非空历史或损坏文件。先备份现场，再用已验证快照恢复原 ID，不要通过重新创建会话替代历史恢复。仅恢复仍存活的 tmux；direct PTY、已消失及不可达目标保留手动恢复，不自动重跑历史命令。
+
+实际恢复的只读浏览器验收可设置 `TERMINAL_RECOVERY_LIVE=1` 并运行 `tests/e2e/terminal-history-recovery-live.spec.ts`；测试用独立浏览器存储验证分组刷新关联，不读取或覆盖用户设备布局。

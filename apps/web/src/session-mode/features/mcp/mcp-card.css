@@ -1,0 +1,162 @@
+.session-mode .session-codex-mcp-server-card {
+  container: session-mcp-card / inline-size;
+}
+.session-mode .session-codex-mcp-server-card .session-mcp-server-identity {
+  min-width: 0;
+  gap: 8px;
+}
+.session-mode .session-codex-mcp-server-card .session-mcp-server-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 20px;
+}
+.session-mode
+  .session-codex-mcp-server-card
+  .session-mcp-server-identity
+  [data-slot="badge"] {
+  flex-shrink: 0;
+}
+.session-mode .session-codex-mcp-server-card [data-auth-status="notLoggedIn"] {
+  color: #991b1b;
+  background: #fef2f2;
+}
+.session-mode.dark
+  .session-codex-mcp-server-card
+  [data-auth-status="notLoggedIn"] {
+  color: #fca5a5;
+  background: #7f1d1d33;
+}
+.session-mode
+  .session-codex-mcp-server-card
+  :is([data-auth-status="oAuth"], [data-auth-status="bearerToken"]) {
+  color: #166534;
+  background: #f0fdf4;
+}
+.session-mode.dark
+  .session-codex-mcp-server-card
+  :is([data-auth-status="oAuth"], [data-auth-status="bearerToken"]) {
+  color: #86efac;
+  background: #14532d33;
+}
+.session-mode .session-codex-mcp-server-card .session-mcp-server-actions {
+  flex-shrink: 0;
+}
+.session-mode .session-codex-mcp-server-card .session-mcp-server-details {
+  margin-top: 10px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 767px) {
+  .session-mode
+    [data-sonner-toast].session-mcp-notice[data-type]
+    [data-close-button] {
+    width: 44px;
+    height: 44px;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .session-mode .session-mcp-notice [data-close-button]::before {
+    content: "";
+    position: absolute;
+    inset: 12px;
+    border: 1px solid var(--normal-border);
+    border-radius: 50%;
+    background: var(--normal-bg);
+    pointer-events: none;
+  }
+  .session-mode
+    .session-mcp-notice[data-type="success"]
+    [data-close-button]::before {
+    background: var(--success-bg);
+    border-color: var(--success-border);
+  }
+  .session-mode
+    .session-mcp-notice[data-type="info"]
+    [data-close-button]::before {
+    background: var(--info-bg);
+    border-color: var(--info-border);
+  }
+  .session-mode
+    .session-mcp-notice[data-type="error"]
+    [data-close-button]::before {
+    background: var(--error-bg);
+    border-color: var(--error-border);
+  }
+  .session-mode .session-mcp-notice [data-close-button] svg {
+    width: 12px;
+    height: 12px;
+    z-index: 1;
+    pointer-events: none;
+  }
+}
+@container session-mcp-card (max-width: 480px) {
+  .session-mode .session-codex-mcp-server-card [data-slot="card-header"],
+  .session-mode .session-codex-mcp-server-card [data-slot="card-content"] {
+    padding-inline: 16px;
+  }
+  .session-mode .session-codex-mcp-server-card [data-slot="card-title"] {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .session-mode .session-codex-mcp-server-card .session-mcp-server-identity {
+    justify-content: space-between;
+  }
+  .session-mode .session-codex-mcp-server-card .session-mcp-server-actions {
+    justify-content: flex-end;
+    gap: 6px;
+  }
+  .session-mode
+    .session-codex-mcp-server-card
+    .session-mcp-server-actions
+    > button {
+    min-width: 44px;
+    min-height: 44px;
+    height: 44px;
+  }
+  .session-mode
+    .session-codex-mcp-server-card
+    button.session-mcp-server-switch {
+    width: 44px;
+    position: relative;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .session-mode
+    .session-codex-mcp-server-card
+    button.session-mcp-server-switch::before {
+    content: "";
+    position: absolute;
+    width: 32px;
+    height: 18px;
+    left: 6px;
+    top: 13px;
+    border-radius: 999px;
+    background: var(--input);
+    pointer-events: none;
+  }
+  .session-mode
+    .session-codex-mcp-server-card
+    button.session-mcp-server-switch[data-state="checked"]::before {
+    background: var(--primary);
+  }
+  .session-mode
+    .session-codex-mcp-server-card
+    button.session-mcp-server-switch
+    [data-slot="switch-thumb"] {
+    position: absolute;
+    left: 7px;
+    top: 14px;
+    translate: none;
+    transform: translateX(0);
+  }
+  .session-mode
+    .session-codex-mcp-server-card
+    button.session-mcp-server-switch[data-state="checked"]
+    [data-slot="switch-thumb"] {
+    transform: translateX(14px);
+  }
+}

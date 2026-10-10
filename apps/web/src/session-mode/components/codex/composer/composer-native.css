@@ -1,0 +1,1007 @@
+/* Main enabled ComposerLayout (15oep), VSIX 26.51002.51308. Mobile keeps the
+   reviewed detached 124px input and explicit 44px touch targets. */
+.session-mode .session-codex-composer.session-native-composer {
+  --native-composer-control: 28px;
+  --native-composer-input-line: 20px;
+  color: var(--codex-text, var(--foreground));
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-compact-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  min-height: 98px;
+  max-height: none;
+  padding: 14px 8px 8px;
+  gap: 4px;
+  border: 0;
+  border-radius: 22px;
+  background: var(--codex-secondary, var(--background));
+  box-shadow: inset 0 0 1px 0 #ffffff33;
+}
+.session-mode
+  .session-native-composer
+  .session-compact-frame[data-file-drop-active] {
+  outline: 2px solid var(--codex-link, var(--foreground));
+  outline-offset: -2px;
+}
+.session-mode .session-native-composer .session-composer-drop-hint {
+  position: absolute;
+  inset: 8px 8px auto auto;
+  z-index: 3;
+  pointer-events: none;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--codex-text, var(--foreground));
+  background: color-mix(
+    in srgb,
+    var(--codex-secondary, var(--background)) 92%,
+    transparent
+  );
+  box-shadow: 0 0 0 1px
+    color-mix(in srgb, var(--codex-text, var(--foreground)) 14%, transparent);
+  backdrop-filter: blur(8px);
+}
+.session-mode:not(.dark)
+  .session-codex-composer.session-native-composer
+  .session-compact-frame {
+  box-shadow:
+    0 0 0 1px #0000000a,
+    0 2px 8px #0000000a,
+    0 4px 80px 8px #00000006;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-compact-body {
+  flex: 1 1 auto;
+  min-height: 44px;
+  align-items: stretch;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-editor {
+  height: auto;
+  min-height: 44px;
+  max-height: 25dvh;
+  padding-inline: 4px;
+  color: var(--codex-text, var(--foreground));
+  scrollbar-width: thin;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-editor
+  [contenteditable],
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-editor
+  [contenteditable]
+  + div {
+  font-family: var(--codex-chat-font, inherit);
+  font-size: var(--codex-chat-size, 13px);
+  line-height: var(--native-composer-input-line);
+  min-height: 44px;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-editor
+  [contenteditable]
+  + div {
+  color: inherit;
+  opacity: 0.5;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-bottom {
+  padding: 0;
+  margin: 0;
+  flex: 0 0 auto;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-toolbar {
+  height: var(--native-composer-control);
+  gap: 5px;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-toolbar
+  button {
+  height: var(--native-composer-control);
+  min-height: var(--native-composer-control);
+  border-radius: 9999px;
+  color: var(--codex-muted, var(--muted-foreground));
+  font-family: var(--codex-chat-font, inherit);
+  font-size: 12px;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-toolbar
+  button:hover {
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-toolbar
+  button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-policy
+  > button:first-of-type,
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-utilities
+  > button,
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-send,
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-stop,
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-native-dictation
+  button {
+  width: var(--native-composer-control);
+  min-width: var(--native-composer-control);
+  height: var(--native-composer-control);
+  padding: 0;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-access-trigger {
+  gap: 4px;
+  padding-inline: 4px;
+  color: var(--codex-muted, var(--muted-foreground));
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-access-trigger
+  span {
+  font-size: 12px;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-native-model-trigger {
+  max-width: 300px;
+  gap: 4px;
+  padding-inline: 4px;
+  font-weight: 400;
+}
+.session-mode .session-native-model-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.session-mode .session-native-model-effort {
+  flex-shrink: 0;
+  color: var(--codex-muted, var(--muted-foreground));
+  text-transform: capitalize;
+}
+.session-mode .session-native-context-usage {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: var(--native-composer-control, 28px);
+  height: var(--native-composer-control, 28px);
+  padding: 0;
+  border-radius: 4px;
+  color: var(--codex-muted, var(--muted-foreground));
+}
+.session-mode .session-native-context-usage:hover {
+  background: var(--codex-hover);
+}
+/* Lexical tracks a caret anchor, while our visible candidate panel is attached
+   to the input frame. Keep the unused anchor box stable as the query grows so
+   Lexical's observer does not resize its own target during delivery. */
+.session-mode .session-native-typeahead-anchor {
+  position: fixed !important;
+  width: 0 !important;
+  height: 0 !important;
+  padding: 0;
+  border: 0;
+  pointer-events: none;
+}
+.session-mode .session-native-context-description {
+  display: flex;
+  width: 152px;
+  flex-direction: column;
+  gap: 2px;
+  text-align: center;
+}
+.session-mode .session-native-context-description > :first-child,
+.session-mode .session-native-context-description > .is-full {
+  opacity: 0.6;
+}
+.session-mode .session-native-context-usage circle:last-child {
+  transition:
+    stroke-dashoffset 120ms ease-out,
+    opacity 120ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-mode .session-native-context-usage circle:last-child {
+    transition: none;
+  }
+}
+@media (pointer: coarse) {
+  .session-mode .session-native-context-usage {
+    min-width: 44px;
+    min-height: 44px;
+    width: 44px;
+    height: 44px;
+  }
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-toolbar
+  button.session-composer-send,
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-toolbar
+  button.session-composer-stop.is-primary {
+  border-radius: 9999px;
+  background: var(--codex-text, var(--foreground));
+  color: var(--codex-secondary, var(--background));
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-toolbar
+  button.session-composer-send:hover,
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-toolbar
+  button.session-composer-stop.is-primary:hover {
+  background: color-mix(
+    in srgb,
+    var(--codex-text, var(--foreground)) 85%,
+    transparent
+  );
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-toolbar
+  button.session-composer-send:disabled {
+  opacity: 0.4;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-toolbar
+  button.session-composer-send:has(span) {
+  width: auto;
+  padding-inline: 8px;
+  border-radius: 14px;
+}
+.session-mode .session-native-dictation {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+.session-mode .session-native-dictation > svg {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 1;
+}
+.session-mode .session-native-dictation .lucide-mic {
+  opacity: 0;
+}
+.session-mode
+  .session-native-dictation:has(
+    .lucide-square,
+    .lucide-loader-circle,
+    .lucide-loader-2
+  )
+  > svg {
+  display: none;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-compact-meta {
+  flex: 1 1 0;
+}
+.session-mode .session-native-composer-status {
+  position: absolute;
+  right: 4px;
+  bottom: calc(100% + 3px);
+  max-width: 75%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--codex-muted, var(--muted-foreground));
+  background: color-mix(
+    in srgb,
+    var(--codex-background, var(--background)) 85%,
+    transparent
+  );
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.session-mode .session-native-composer-status[role="alert"] {
+  color: var(--destructive);
+}
+.session-mode .session-native-enter-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.session-mode .session-native-enter-settings label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.session-mode .session-native-enter-settings p {
+  margin: 4px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.session-mode .session-native-permission-menu,
+.session-mode .session-composer-menu {
+  border-radius: 8px;
+  padding: 4px;
+  font-family: var(--codex-chat-font, inherit);
+  font-size: 13px;
+}
+.session-mode .session-native-composer-tooltip {
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: var(--codex-chat-font, inherit);
+  font-size: 12px;
+  line-height: 18px;
+}
+.session-mode
+  :is(
+    .session-native-model-menu,
+    .session-native-tier-menu,
+    .session-native-permission-menu,
+    .session-native-composer-tooltip
+  ) {
+  --codex-secondary: var(--vscode-sideBar-background, #f5f5f3);
+  --codex-text: var(--vscode-foreground, #3b3b3b);
+  --codex-muted: var(--vscode-descriptionForeground, #717171);
+  --codex-border: color-mix(in srgb, var(--codex-text) 8%, transparent);
+  --codex-chat-font: var(--vscode-font-family, system-ui, sans-serif);
+}
+:is(.session-mode.dark, .dark .session-mode, .session-mode .dark)
+  :is(
+    .session-native-model-menu,
+    .session-native-tier-menu,
+    .session-native-permission-menu,
+    .session-native-composer-tooltip
+  ) {
+  --codex-secondary: var(--vscode-sideBar-background, #282a23);
+  --codex-text: var(--vscode-foreground, #ccc);
+  --codex-muted: var(--vscode-descriptionForeground, #858585);
+}
+.session-mode .session-native-model-menu {
+  width: 224px;
+  min-width: 224px;
+  border: 0;
+  padding: 0;
+  border-radius: 20px;
+  color: var(--codex-text);
+  background: color-mix(in srgb, var(--codex-secondary) 90%, transparent);
+  backdrop-filter: blur(8px);
+  box-shadow:
+    0 0 0 0.5px color-mix(in oklab, var(--codex-text) 8%, transparent),
+    0 0 0 0.5px color-mix(in oklab, var(--codex-text) 8%, transparent),
+    0 8px 16px -4px #0000001f;
+  font-family: var(--codex-chat-font);
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+:is(.session-mode.dark, .dark .session-mode, .session-mode .dark)
+  .session-native-model-menu {
+  --native-model-thumb-foreground: #000;
+}
+.session-mode .session-native-permission-menu {
+  width: min(277px, calc(100vw - 16px));
+  padding: 4px;
+  border: 0;
+  border-radius: 20px;
+  color: var(--codex-text);
+  background: color-mix(in srgb, var(--codex-secondary) 90%, transparent);
+  font-family: var(--codex-chat-font);
+  box-shadow:
+    0 8px 16px -4px #0000001f,
+    0 0 0 0.5px var(--codex-border);
+  backdrop-filter: blur(8px);
+}
+.session-mode .session-native-permission-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--codex-muted);
+}
+.session-mode .session-native-permission-heading a {
+  flex-shrink: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.session-mode
+  .session-native-permission-menu
+  .session-native-permission-option {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  gap: 6px;
+  border-radius: 15px;
+  font-size: 12px;
+  line-height: 17.1429px;
+  color: var(--codex-text);
+}
+.session-mode .session-native-permission-option[data-highlighted] {
+  background: color-mix(in srgb, var(--codex-text) 7%, transparent);
+}
+.session-mode .session-native-permission-option > svg,
+.session-mode .session-native-service-tier svg {
+  color: inherit;
+}
+.session-mode .session-native-permission-option > svg:first-child {
+  opacity: 0.75;
+}
+.session-mode .session-native-permission-option.is-full-access,
+.session-mode .session-native-permission-option.is-full-access small {
+  color: var(--vscode-editorWarning-foreground, var(--codex-text));
+}
+.session-mode .session-native-permission-copy {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0;
+}
+.session-mode .session-native-permission-copy small {
+  color: var(--codex-muted);
+  font-size: 11px;
+  line-height: 12.8333px;
+  white-space: normal;
+}
+.session-mode .session-native-permission-adaptations {
+  border-top: 1px solid var(--codex-border);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+.session-mode .session-native-agent-settings {
+  font-family: system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 20px;
+}
+.session-mode .session-native-agent-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 16px;
+}
+.session-mode .session-native-agent-choices button {
+  min-height: 44px;
+  border-radius: 12px;
+  padding: 8px 12px;
+}
+.session-mode .session-native-agent-choices [aria-pressed="true"] {
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+.session-mode .session-native-provider-settings {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+}
+.session-mode .session-native-provider-settings > p {
+  margin: 0 0 8px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.session-mode .session-native-provider-settings [role="slider"] {
+  accent-color: var(--foreground);
+}
+.session-mode .session-native-provider-settings .text-indigo-500,
+.session-mode .session-native-provider-settings .dark\:text-indigo-400 {
+  color: var(--muted-foreground);
+}
+.session-mode .session-native-provider-settings .bg-primary {
+  background: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+@media (max-width: 640px) {
+  .session-mode
+    .session-composer-target-container:has(.session-native-composer)
+    > .session-workspace-switcher {
+    flex-wrap: nowrap;
+    height: 48px;
+    min-height: 48px;
+    padding-block: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .session-mode
+    .session-composer-target-container:has(.session-native-composer)
+    > .session-workspace-switcher
+    > button {
+    flex: 0 0 auto;
+    height: 44px;
+    min-height: 44px;
+    max-width: 110px;
+  }
+  .session-mode
+    .session-composer-target-container:has(.session-native-composer)
+    > .session-workspace-switcher
+    > .session-project-trigger {
+    flex: 1 0 120px;
+    min-width: 0;
+    max-width: 160px;
+  }
+  .session-mode .session-native-permission-menu [role="menuitem"],
+  .session-mode .session-native-permission-menu [role="menuitemradio"] {
+    min-height: 44px;
+  }
+}
+.session-mode .session-native-model-list {
+  max-height: 316px;
+  padding: 4px;
+  overflow-y: auto;
+}
+.session-mode .session-native-model-heading {
+  margin: 0;
+  padding: 4px 8px;
+  color: var(--codex-muted);
+  font-size: 12px;
+  line-height: 17.1429px;
+}
+.session-mode .session-native-model-menu .session-native-model-option,
+.session-mode .session-native-model-menu .session-native-model-back,
+.session-mode .session-native-model-configuration [role="menuitem"] {
+  min-height: 0;
+  justify-content: space-between;
+  border-radius: 15px;
+  padding: 4px 8px;
+  color: var(--codex-text);
+  font-size: 12px;
+  line-height: 17.1429px;
+}
+.session-mode .session-native-model-option[data-highlighted],
+.session-mode .session-native-model-configuration [data-highlighted] {
+  background: color-mix(in srgb, var(--codex-text) 7%, transparent);
+  color: var(--codex-text);
+}
+.session-mode .session-native-model-option svg {
+  color: inherit;
+  opacity: 0.75;
+}
+.session-mode .session-native-model-option[data-highlighted] svg {
+  opacity: 1;
+}
+.session-mode .session-native-power-view {
+  padding: 4px;
+}
+.session-mode .session-native-power-controls {
+  position: relative;
+  min-height: 36px;
+  padding-inline: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.session-mode .session-native-service-tier {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0;
+  width: 32px;
+  min-height: 32px;
+  padding: 0;
+  justify-content: center;
+  background: transparent;
+  border-radius: 8px;
+  color: var(--codex-muted);
+}
+.session-mode .session-native-service-tier > span {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+}
+.session-mode .session-native-service-tier[aria-checked="true"] {
+  color: var(--vscode-charts-blue, var(--codex-text));
+}
+.session-mode .session-native-service-tier[data-highlighted] > span {
+  background: color-mix(in srgb, var(--codex-text) 7%, transparent);
+}
+.session-mode .session-native-agent-trigger {
+  gap: 2px;
+  padding-inline: 4px;
+}
+.session-mode .session-native-model-menu .session-native-power-caption {
+  min-height: 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  padding: 4px;
+  margin: 0;
+  border-radius: 8px;
+  color: var(--codex-text);
+  background: none;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+.session-mode .session-native-power-caption-content {
+  display: grid;
+  align-items: center;
+  grid-template-columns: minmax(16px, 1fr) minmax(0, auto) minmax(16px, 1fr);
+  padding: 2px 4px;
+  text-align: center;
+  border-radius: 6px;
+}
+.session-mode
+  .session-native-power-caption[data-highlighted]
+  .session-native-power-caption-content {
+  background: color-mix(in srgb, var(--codex-text) 7%, transparent);
+}
+.session-mode .session-native-power-effort {
+  grid-area: 1 / 1 / 2 / -1;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+.session-mode
+  .session-native-model-menu
+  .session-native-power-effort[data-accent="true"] {
+  color: var(--vscode-charts-blue, var(--codex-text));
+}
+.session-mode
+  .session-native-model-menu
+  .session-native-power-effort[data-maximum="true"] {
+  color: var(--vscode-charts-purple, var(--codex-text));
+}
+.session-mode .session-native-power-model {
+  grid-area: 2 / 2;
+  min-width: 0;
+  max-width: 100%;
+  color: color-mix(in srgb, var(--codex-text) 65%, transparent);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: calc(1 / 0.75);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.session-mode .session-native-model-menu .session-native-power-chevron {
+  grid-area: 2 / 3;
+  width: 12px;
+  height: 12px;
+  color: var(--codex-muted);
+}
+.session-mode .session-native-power-slider {
+  width: 200px;
+  height: 32px;
+  margin: 4px auto 4px;
+  position: relative;
+  touch-action: none;
+  cursor: pointer;
+}
+.session-mode .session-native-power-track {
+  position: absolute;
+  inset: 4px 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--codex-text) 10%, transparent);
+  box-shadow: inset 0 0 0 0.5px
+    color-mix(in oklab, var(--codex-text) 8%, transparent);
+}
+.session-mode .session-native-power-dot {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  top: 10px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: #ffffff4d;
+}
+.session-mode .session-native-power-thumb {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  border: 0.5px solid color-mix(in oklab, var(--codex-text) 12%, transparent);
+  border-radius: 50%;
+  padding: 0;
+  color: var(--native-model-thumb-foreground, var(--codex-text));
+  background: #fff;
+  box-shadow: 0 0 2px #0000001a;
+}
+.session-mode .session-native-power-thumb:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.session-mode .session-native-model-configuration {
+  border-top: 1px solid var(--codex-border);
+  padding: 4px 8px;
+}
+@media (pointer: coarse) {
+  .session-mode .session-native-model-menu .session-native-model-option,
+  .session-mode .session-native-model-configuration [role="menuitem"] {
+    min-height: 44px;
+  }
+  .session-mode .session-native-power-slider {
+    height: 44px;
+  }
+  .session-mode .session-native-power-track {
+    inset-block: 10px;
+  }
+  .session-mode .session-native-power-thumb {
+    top: 0;
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .session-mode .session-native-power-thumb::before {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    border-radius: 50%;
+    border: 0.5px solid color-mix(in oklab, var(--codex-text) 12%, transparent);
+    background: #fff;
+    box-shadow: 0 0 2px #0000001a;
+  }
+  .session-mode .session-native-service-tier {
+    width: 44px;
+    min-height: 44px;
+  }
+}
+@container compact-composer (max-width: 840px) {
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-compact-meta {
+    position: absolute;
+    inset-inline: auto;
+    left: 4px;
+    bottom: calc(100% + 12px);
+    justify-content: flex-start;
+    height: 18px;
+    max-width: min(48%, calc(100% - 190px));
+    margin: 0;
+    font-size: 11px;
+    line-height: 18px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-utilities {
+    height: 44px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-utilities
+    > button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+  .session-mode .session-native-composer-status {
+    bottom: calc(100% + 52px);
+  }
+}
+@container compact-composer (max-width: 480px) {
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-compact-frame {
+    --native-composer-control: 44px;
+    --native-composer-input-line: 24px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-compact-frame {
+    height: 124px;
+    min-height: 124px;
+    max-height: 124px;
+    padding: 6px 8px;
+    gap: 6px;
+    border-radius: 18px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-compact-body {
+    height: 62px;
+    min-height: 0;
+    flex: 1 1 0;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-editor {
+    height: 100%;
+    min-height: 0;
+    max-height: none;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-editor
+    [contenteditable],
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-editor
+    [contenteditable]
+    + div {
+    font-size: 16px;
+    min-height: 0;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-toolbar {
+    height: 44px;
+    gap: 2px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-toolbar
+    button {
+    min-height: 44px;
+    height: 44px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-access-trigger
+    > span {
+    display: none;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-access-trigger {
+    min-width: 44px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-compact-meta {
+    position: absolute;
+    left: 4px;
+    bottom: calc(100% + 12px);
+    max-width: calc(100% - var(--native-utilities-width) - 8px);
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-toolbar {
+    --native-utilities-width: 234px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-toolbar:has(
+      .session-composer-actions > .session-native-context-usage
+    ) {
+    --native-utilities-width: 280px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-toolbar:has(
+      .session-composer-actions > .session-native-context-usage
+    )
+    .session-composer-utilities {
+    padding-inline-start: 48px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-native-model-trigger {
+    flex: 0 1 auto;
+    min-width: 56px;
+    max-width: 110px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-actions {
+    flex: 1 1 0;
+    min-width: 0;
+    gap: 4px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-native-agent-trigger {
+    width: 64px;
+    min-width: 64px;
+    max-width: 64px;
+    flex: 0 0 64px;
+    overflow: hidden;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-native-model-effort {
+    font-size: 11px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-compact-body
+    .session-context-strip.is-compact {
+    height: 62px;
+    min-width: 62px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-context-strip.is-compact
+    > .is-image:nth-child(n) {
+    width: 96px;
+    min-width: 96px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-context-strip.is-compact
+    .is-image
+    img {
+    width: 96px;
+    min-width: 96px;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-context-strip.is-compact
+    .is-image
+    > button:last-child:not(:first-child) {
+    top: 0;
+    right: 0;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    border: 0;
+    background: transparent;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-context-strip.is-compact
+    .is-image
+    > button:last-child:not(:first-child)::before {
+    content: "";
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+    background: color-mix(in srgb, var(--background) 88%, transparent);
+    pointer-events: none;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-context-strip.is-compact
+    .is-image
+    > button:last-child:not(:first-child)
+    svg {
+    position: absolute;
+    top: 6.5px;
+    right: 6.5px;
+    width: 15px;
+    height: 15px;
+    pointer-events: none;
+  }
+  .session-mode
+    .session-codex-composer.session-native-composer
+    .session-composer-actions
+    > button.session-native-context-usage {
+    position: absolute;
+    right: 233px;
+    bottom: calc(100% + 6px);
+    width: 44px;
+    min-width: 44px;
+  }
+}

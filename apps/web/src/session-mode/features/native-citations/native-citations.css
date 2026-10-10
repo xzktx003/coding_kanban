@@ -1,0 +1,90 @@
+/* Original H3/iii focus wrapper and C3 inline-flow Mention_292xh geometry.
+   Native file citations are inline mentions; touch targets follow the shared
+   workbench's 44px accessibility requirement. */
+.session-mode .native-file-citation {
+  cursor: pointer;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.session-mode .native-file-citation[aria-disabled="true"] {
+  cursor: default;
+}
+.session-mode .native-file-citation-content {
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+.session-mode .native-file-citation-mention {
+  --native-citation-color: var(
+    --codex-link,
+    var(--vscode-textLink-foreground, #006ab1)
+  );
+  color: var(--native-citation-color);
+  font-family: var(--codex-chat-font, inherit);
+  font-weight: 500;
+  white-space: nowrap;
+  padding-inline: 0;
+  display: inline;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+@supports (color: color-mix(in srgb, red, red)) {
+  .session-mode .native-file-citation-mention {
+    --native-citation-color: color-mix(
+      in srgb,
+      var(--codex-link, #006ab1) 80%,
+      var(--codex-text, currentColor) 20%
+    );
+  }
+}
+.session-mode .native-file-citation-icon {
+  box-sizing: content-box;
+  vertical-align: bottom;
+  padding-inline-end: 3px;
+  display: inline-block;
+  height: 1lh;
+  position: relative;
+}
+.session-mode .native-file-citation-icon svg {
+  width: 16px;
+  height: 16px;
+  top: 50%;
+  position: relative;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.session-mode .native-file-citation-label {
+  overflow-wrap: break-word;
+  min-width: 0;
+  white-space: normal;
+}
+.session-mode .native-file-citation:focus-visible {
+  outline: none;
+}
+.session-mode
+  .native-file-citation:focus-visible
+  .native-file-citation-mention {
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px var(--vscode-focusBorder, var(--ring, #006ab1));
+}
+@media (hover: hover) {
+  .session-mode
+    .native-file-citation[data-inline-mention-interactive]:hover
+    .native-file-citation-mention {
+    text-decoration-line: underline;
+    text-underline-offset: 2px;
+    text-decoration-style: dashed;
+    text-decoration-color: currentColor;
+    text-decoration-thickness: 0.5px;
+  }
+}
+@media (pointer: coarse), (hover: none) {
+  .session-mode .native-file-citation {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    min-width: 44px;
+    max-width: 100%;
+  }
+}

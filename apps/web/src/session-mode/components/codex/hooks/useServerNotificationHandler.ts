@@ -1,3 +1,5 @@
+import { nativeThreadSettings } from "@session/services/nativeThreadSettings";
+import { observeConfigNotice } from "@session/features/codex-account/config-notices";
 import { observeSubagents, useSubagentStore } from "@session/features/subagents/store";
 import { useSessionAttentionStore } from "@session/stores/useSessionAttentionStore";
 import { revealNewQuestion } from "@session/features/async-questions/arrival";
@@ -33,6 +35,7 @@ export function useServerNotificationHandler(
 ) {
   return useCallback(
     (payload: ServerNotification) => {
+      observeConfigNotice(payload);
       observeSubagents(payload);
       const method = payload.method;
       if (method === "serverRequest/resolved") {
@@ -64,11 +67,7 @@ export function useServerNotificationHandler(
       if (threadId) {
         if (method === "thread/settings/updated") {
           const settings = payload.params.threadSettings;
-          hydrateThreadModel(threadId, {
-            model: settings.model,
-            modelProvider: settings.modelProvider,
-            reasoningEffort: settings.effort,
-          }, { notify: !!useCodexStore.getState().historyLoadedMap?.[threadId] });
+          hydrateThreadModel(threadId, nativeThreadSettings(settings), { notify: !!useCodexStore.getState().historyLoadedMap?.[threadId] });
           return;
         }
         if (

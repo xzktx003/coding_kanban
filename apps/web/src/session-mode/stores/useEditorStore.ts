@@ -2,6 +2,20 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 interface EditorStore {
+  revealLocation: {
+    path: string;
+    line: number;
+    column: number;
+    endLine?: number;
+    revision: number;
+  } | null;
+  revealFile: (
+    path: string,
+    root?: string,
+    line?: number,
+    column?: number,
+    endLine?: number,
+  ) => void;
   roots: Record<string, string>;
   moveFiles: (from: string, to: string) => void;
   openFiles: string[];
@@ -21,6 +35,49 @@ interface EditorStore {
 export const useEditorStore = create<EditorStore>()(
   persist(
     (set) => ({
+      revealLocation: null,
+      revealFile: (path, root, line = 1, column = 1, endLine) =>
+        set((state) => {
+          if (endLine !== undefined) {
+            const cleanPath = path.replace(/\\/g, "/"),
+              cleanRoot =
+                root?.replace(/\\/g, "/").replace(/\/+$/, "") ||
+                (root === "/" ? "/" : undefined);
+            if (
+              !cleanRoot ||
+              /[\u0000-\u001f]/.test(path + root) ||
+              cleanPath
+                .split("/")
+                .some((part) => part === "." || part === "..") ||
+              !(
+                cleanPath === cleanRoot ||
+                cleanPath.startsWith(cleanRoot === "/" ? "/" : cleanRoot + "/")
+              ) ||
+              !Number.isSafeInteger(line) ||
+              line < 1 ||
+              !Number.isSafeInteger(column) ||
+              column < 1 ||
+              !Number.isSafeInteger(endLine) ||
+              endLine < line
+            )
+              return state;
+          }
+          return {
+            openFiles: state.openFiles.includes(path)
+              ? state.openFiles
+              : [...state.openFiles, path],
+            activeFile: path,
+            selectedFilePath: path,
+            roots: root ? { ...state.roots, [path]: root } : state.roots,
+            revealLocation: {
+              path,
+              line,
+              column,
+              ...(endLine === undefined ? {} : { endLine }),
+              revision: (state.revealLocation?.revision ?? 0) + 1,
+            },
+          };
+        }),
       roots: {},
       moveFiles: (from, to) =>
         set((state) => {
@@ -78,7 +135,12 @@ export const useEditorStore = create<EditorStore>()(
       setHasConfirmedGitRevert: (value) =>
         set({ hasConfirmedGitRevert: value }),
       resetFiles: () =>
-        set({ openFiles: [], activeFile: null, selectedFilePath: null }),
+        set({
+          openFiles: [],
+          activeFile: null,
+          selectedFilePath: null,
+          revealLocation: null,
+        }),
     }),
     {
       name: "kanban.session.open-files",

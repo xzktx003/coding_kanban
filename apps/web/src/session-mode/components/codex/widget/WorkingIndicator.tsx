@@ -26,14 +26,14 @@ export function WorkingIndicator({
     return () => clearInterval(intervalId);
   }, [inProgress]);
 
-  const elapsed = inProgress && turnTiming ? Date.now() - turnTiming.startedAtMs : 0;
+  const elapsed = inProgress && turnTiming && Number.isFinite(turnTiming.startedAtMs) ? Math.max(0, Date.now() - turnTiming.startedAtMs) : null;
 
   if (!turnTiming) return null;
 
   if (inProgress) {
     return (
       <div className="text-sm text-muted-foreground animate-pulse">
-        {t('working')} {fmtElapsed(elapsed)}
+        {t('working')}{elapsed !== null ? ` ${fmtElapsed(elapsed)}` : ''}
         {retryNotice && (
           <span className="text-yellow-600 dark:text-yellow-400"> · {retryNotice}</span>
         )}
@@ -41,7 +41,7 @@ export function WorkingIndicator({
     );
   }
 
-  if (turnTiming.durationMs === null) return null;
+  if (typeof turnTiming.durationMs !== 'number' || !Number.isFinite(turnTiming.durationMs) || turnTiming.durationMs < 0) return null;
 
   return (
     <div className="text-xs text-muted-foreground/60">

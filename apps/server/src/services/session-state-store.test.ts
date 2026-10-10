@@ -81,17 +81,17 @@ test("file store persists stable metadata without ephemeral process references",
   }
 });
 
-test("file store ignores malformed and unsupported state files", () => {
+test("file store rejects unreadable history instead of initializing an empty registry", () => {
   const directory = mkdtempSync(join(tmpdir(), "coding-kanban-sessions-"));
   const filePath = join(directory, "sessions.json");
   const store = new FileSessionStateStore(filePath);
 
   try {
     writeFileSync(filePath, "not json");
-    assert.equal(store.load(), null);
+    assert.throws(() => store.load(), /会话历史/);
 
     writeFileSync(filePath, JSON.stringify({ version: 999, snapshot: {} }));
-    assert.equal(store.load(), null);
+    assert.throws(() => store.load(), /会话历史/);
 
     const duplicated = buildSnapshot();
     writeFileSync(
@@ -101,7 +101,7 @@ test("file store ignores malformed and unsupported state files", () => {
         items: [duplicated.items[0], duplicated.items[0]],
       }),
     );
-    assert.equal(store.load(), null);
+    assert.throws(() => store.load(), /会话历史/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -263,4 +263,29 @@ test("registry restores stable ids and marks tmux/direct sessions with the corre
   assert.equal(direct.connectionState, "offline");
   assert.equal(direct.interactionState, "exited");
   assert.match(direct.outputPreview ?? "", /需要手动恢复/);
+});
+
+test("failed history loads prevent later writes from destroying recovery evidence", () => {
+  const directory = mkdtempSync(join(tmpdir(), "coding-kanban-sessions-"));
+  const filePath = join(directory, "sessions.json");
+  const store = new FileSessionStateStore(filePath);
+  try {
+    writeFileSync(filePath, "broken history");
+    assert.throws(() => store.load(), /会话历史/);
+    assert.throws(() => store.save({ items: [], activeAgentSessionId: null, updatedAt: "now" }), /会话历史/);
+    assert.equal(readFileSync(filePath, "utf8"), "broken history");
+    writeFileSync(filePath, JSON.stringify(buildSnapshot()));
+    assert.equal(store.load()?.items.length, 2);
+    store.save(buildSnapshot());
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+});
+
+test("missing history permits first startup and a valid empty history remains valid", () => {
+  const directory = mkdtempSync(join(tmpdir(), "coding-kanban-sessions-"));
+  const store = new FileSessionStateStore(join(directory, "sessions.json"));
+  try {
+    assert.equal(store.load(), null);
+    store.save({ items: [], activeAgentSessionId: null, updatedAt: "now" });
+    assert.deepEqual(store.load()?.items, []);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });

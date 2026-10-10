@@ -1,134 +1,167 @@
 import type { CommandActionSource } from "../thread/deriveRenderItems";
-import type { TFunction } from "i18next";
-import { ChevronDown, ChevronRight, SquareTerminal } from "lucide-react";
 import { useTranscriptState } from "../thread/rowState";
 import { useTranslation } from "react-i18next";
 import type { CommandAction } from "@session/bindings/v2";
 import { CommandActionItem } from "./CommandActionItem";
+import {
+  NativeCommandChevron,
+  NativeCommandTerminal,
+} from "../presentation/NativeCommandIcons";
+import {
+  NativeReadIcon,
+  NativeSearchIcon,
+  NativeListIcon,
+} from "../presentation/NativeExplorationIcons";
 
 type Props = {
   actions: CommandAction[];
   actionSources: CommandActionSource[];
-  /** True when this group has been followed by an agentMessage — show fully collapsed. */
-  completed: boolean;
+  /** Closed slice, not proof that every command succeeded. */ completed: boolean;
 };
-
-// Count actions by type and build a summary label.
-function buildSummaryParts(
-  actions: CommandAction[],
-  t: TFunction<"thread">,
-): string[] {
-  const counts: Record<string, number> = {
-    read: 0,
-    unknown: 0,
-    listFiles: 0,
-    search: 0,
-  };
-  for (const a of actions) counts[a.type] = (counts[a.type] ?? 0) + 1;
-
-  const parts: string[] = [];
-  const p = (n: number, key: string) =>
-    n > 0 ? parts.push(t(key, { count: n })) : undefined;
-
-  p(counts.read, "readFiles");
-  p(counts.unknown, "ranCommands");
-  p(counts.listFiles, "listedFolders");
-  p(counts.search, "searched");
-
-  return parts;
+function ActionIcon({ type }: { type: CommandAction["type"] }) {
+  const Icon =
+    type === "read"
+      ? NativeReadIcon
+      : type === "search"
+        ? NativeSearchIcon
+        : type === "listFiles"
+          ? NativeListIcon
+          : NativeCommandTerminal;
+  return <Icon className="codex-activity-icon" />;
 }
-
-export const CommandActionSummaryItem = ({
+export function CommandActionSummaryItem(props: Props) {
+  const first = props.actionSources[0];
+  const identity = JSON.stringify([
+    first?.threadId,
+    first?.turnId,
+    first?.commandItemId,
+  ]);
+  return <CommandActionSummary key={identity} {...props} identity={identity} />;
+}
+function CommandActionSummary({
   actions,
   actionSources,
   completed,
-}: Props) => {
+  identity,
+}: Props & { identity: string }) {
   const { t } = useTranslation("thread");
+  const [expanded, setExpanded] = useTranscriptState(
+    `activity:${identity}`,
+    false,
+  );
+  if (!actions.length) return null;
   const sourceFor = (index: number) =>
-    actionSources[index] ?? { commandItemId: null, aggregatedOutput: null };
-  const [expanded, setExpanded] = useTranscriptState("summary", false);
-
-  if (actions.length === 0) return null;
-
-  // All actions collapsed under summary toggle.
-  if (completed) {
-    const parts = buildSummaryParts(actions, t);
-    if (parts.length === 0) return null;
-    return (
-      <div className="text-xs text-muted-foreground">
-        <button
-          aria-expanded={expanded}
-          onClick={() => setExpanded((v) => !v)}
-          className="flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer py-0.5"
-        >
-          <SquareTerminal className="h-3 w-3" />
-          {parts.join(", ")}
-          {expanded ? (
-            <ChevronDown className="w-3 h-3 shrink-0" />
-          ) : (
-            <ChevronRight className="w-3 h-3 shrink-0" />
-          )}
-        </button>
-        {expanded && (
-          <div className="mt-1 ml-2 space-y-1 border-l pl-1 border-border/50">
-            {actions.map((action, i) => (
-              <CommandActionItem
-                // biome-ignore lint/suspicious/noArrayIndexKey: append-only action list, no stable id
-                key={i}
-                action={action}
-                {...sourceFor(i)}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    );
+    actionSources[index] ?? { commandItemId: "", aggregatedOutput: null };
+  let activeIndex = -1;
+  for (let index = actions.length - 1; index >= 0; index--) {
+    if (
+      sourceFor(index).status === "inProgress" &&
+      !sourceFor(index).termination
+    ) {
+      activeIndex = index;
+      break;
+    }
   }
-
-  // Streaming: show last action inline, rest collapsed.
-  const hiddenActions = actions.slice(0, -1);
-  const lastAction = actions[actions.length - 1];
-  const hiddenParts = buildSummaryParts(hiddenActions, t);
-
+  // Native single finished activity is a direct row, without aggregate disclosure.
+  if (
+    actions.length === 1 &&
+    (activeIndex < 0 || actions[0].type === "unknown")
+  )
+    return <CommandActionItem action={actions[0]} {...sourceFor(0)} />;
+  const active = activeIndex >= 0 ? actions[activeIndex] : null;
+  let label: string;
+  if (active) {
+    const key =
+      active.type === "read"
+        ? "readingHeader"
+        : active.type === "listFiles"
+          ? active.path
+            ? "listingPathHeader"
+            : "listingHeader"
+          : active.type === "search"
+            ? active.query
+              ? active.path
+                ? "searchingQueryPathHeader"
+                : "searchingQueryHeader"
+              : "searchingHeader"
+            : null;
+    label = key
+      ? t(`exploration.${key}`, {
+          path:
+            active.type === "read"
+              ? active.name
+              : active.type !== "unknown"
+                ? active.path
+                : "",
+          query: active.type === "search" ? active.query : "",
+          interpolation: { escapeValue: false },
+        })
+      : t("exploration.runningCommand", {
+          command: active.command,
+          interpolation: { escapeValue: false },
+        });
+  } else {
+    const parts: string[] = [];
+    if (
+      actions.some(
+        (action, i) =>
+          action.type !== "unknown" && sourceFor(i).status === "completed",
+      )
+    )
+      parts.push(t("exploration.readFiles"));
+    const commandIds = new Set(
+      actions.flatMap((action, i) =>
+        action.type === "unknown" && sourceFor(i).status === "completed"
+          ? [JSON.stringify([sourceFor(i).commandItemId, action.command])]
+          : [],
+      ),
+    );
+    if (commandIds.size)
+      parts.push(t("exploration.commands", { count: commandIds.size }));
+    label = parts.length ? parts.join(" ") : t("activity.ended");
+  }
+  const iconAction =
+    active ??
+    actions.find(
+      (a, i) => a.type !== "unknown" && sourceFor(i).status === "completed",
+    ) ??
+    actions[0];
   return (
-    <div className="text-xs text-muted-foreground space-y-1">
-      {hiddenActions.length > 0 && (
-        <>
-          <button
-            aria-expanded={expanded}
-            onClick={() => setExpanded((v) => !v)}
-            className="flex items-center gap-1 hover:text-foreground transition-colors cursor-pointer py-0.5"
-          >
-            <SquareTerminal className="h-3 w-3" />
-            {hiddenParts.join(", ")}
-            {expanded ? (
-              <ChevronDown className="w-3 h-3 shrink-0" />
-            ) : (
-              <ChevronRight className="w-3 h-3 shrink-0" />
-            )}
-          </button>
-          {expanded && (
-            <div className="ml-2 space-y-1 border-l pl-1 border-border/50">
-              {hiddenActions.map((action, i) => (
-                <CommandActionItem
-                  // biome-ignore lint/suspicious/noArrayIndexKey: append-only action list, no stable id
-                  key={i}
-                  action={action}
-                  {...sourceFor(i)}
-                />
-              ))}
-            </div>
-          )}
-        </>
-      )}
-      {/* Last action always visible during streaming */}
-      <div className="flex items-center gap-1 py-0.5">
-        <SquareTerminal className="h-3 w-3 shrink-0" />
-        <CommandActionItem
-          action={lastAction}
-          {...sourceFor(actions.length - 1)}
+    <div className="codex-activity-group" data-slice-closed={completed}>
+      <button
+        className="codex-command-summary codex-activity-header"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span className="codex-command-summary-content">
+          <ActionIcon type={iconAction.type} />
+          <span className="codex-command-summary-label">{label}</span>
+        </span>
+        <NativeCommandChevron
+          className="codex-command-chevron"
+          data-expanded={expanded}
         />
-      </div>
+      </button>
+      {expanded && (
+        <div className="codex-activity-body" tabIndex={0}>
+          {actions.map((action, index) => {
+            const source = sourceFor(index);
+            return (
+              <CommandActionItem
+                key={JSON.stringify([
+                  source.threadId,
+                  source.turnId,
+                  source.commandItemId,
+                  action,
+                  index,
+                ])}
+                action={action}
+                {...source}
+              />
+            );
+          })}
+        </div>
+      )}
     </div>
   );
-};
+}

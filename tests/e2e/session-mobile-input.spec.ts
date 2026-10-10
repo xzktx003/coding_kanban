@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
-import { mkdirSync } from "node:fs";
 import { installSessionUxFixture } from "./session-ux-fixture";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
 test.use({
   viewport: { width: 390, height: 844 },
@@ -13,6 +14,38 @@ const png = Buffer.from(
   "base64",
 );
 const image = (name: string) => ({ name, mimeType: "image/png", buffer: png });
+test.afterEach(async ({ page }, info) => {
+  if (info.status === info.expectedStatus || page.isClosed()) return;
+  const diagnostic = await page
+    .evaluate(async () => {
+      const path = "/src/session-mode/components/common/useImageAttachments.ts";
+      const { useAttachmentDraftStore } = await import(
+        performance
+          .getEntriesByType("resource")
+          .findLast((e) => new URL(e.name).pathname === path)?.name ?? path
+      );
+      const { drafts, errors } = useAttachmentDraftStore.getState();
+      return {
+        errors,
+        attachments: Object.values(drafts)
+          .flat()
+          .map((item) => ({
+            name: item.name,
+            status: item.status,
+            error: item.error,
+            fileSize: item.file?.size,
+          })),
+      };
+    })
+    .catch((error) => ({ diagnosticError: String(error) }));
+  const file = info.outputPath("attachment-failure-diagnostic.json");
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, JSON.stringify(diagnostic, null, 2));
+  await info.attach("attachment-failure-diagnostic", {
+    path: file,
+    contentType: "application/json",
+  });
+});
 async function setup(page: Page, kind: "codex" | "cc" = "codex") {
   const fixture = await installSessionUxFixture(page, 2);
   const cards = fixture.threads.map((thread) => ({
@@ -140,7 +173,7 @@ test("touch tab changes restore different drafts without focusing an editor, inc
 for (const kind of ["codex", "cc"] as const)
   test(`${kind}: plus uploads images immediately, retains their owner during slow uploads and supports retries and reload`, async ({
     page,
-  }) => {
+  }, info) => {
     test.setTimeout(60000);
     const { input, fixture } = await setup(page, kind);
     let release!: () => Promise<void>;
@@ -172,9 +205,8 @@ for (const kind of ["codex", "cc"] as const)
     await expect
       .poll(async () => (await upload.boundingBox())!.height)
       .toBeGreaterThanOrEqual(44);
-    mkdirSync(".dev-runtime/session-mobile-input", { recursive: true });
     await page.screenshot({
-      path: `.dev-runtime/session-mobile-input/${kind}-menu.png`,
+      path: info.outputPath(`${kind}-menu.png`),
     });
     const chooserReady = page.waitForEvent("filechooser");
     await upload.tap();
@@ -228,8 +260,7 @@ for (const kind of ["codex", "cc"] as const)
         ),
       ),
     ).toEqual([]);
-    mkdirSync(".dev-runtime/session-mobile-input", { recursive: true });
     await page.screenshot({
-      path: `.dev-runtime/session-mobile-input/${kind}-images.png`,
+      path: info.outputPath(`${kind}-images.png`),
     });
   });

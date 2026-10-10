@@ -6,7 +6,7 @@ import type {
   FollowupAction,
   FollowupSubmit,
 } from "@agent-orchestrator/shared";
-import { validAgentMention } from "@agent-orchestrator/shared";
+import { validNativeInputMention } from "@agent-orchestrator/shared";
 import { composeContextText } from "@agent-orchestrator/shared";
 import {
   CodexFollowups,
@@ -74,7 +74,13 @@ function submit(value: unknown): FollowupSubmit {
     )
   )
     invalid();
-  if (v.mentions !== undefined && (!Array.isArray(v.mentions) || v.mentions.length > 32 || v.mentions.some((m: unknown) => !validAgentMention(m)))) invalid("无效的 Agent 引用");
+  if (
+    v.mentions !== undefined &&
+    (!Array.isArray(v.mentions) ||
+      v.mentions.length > 32 ||
+      v.mentions.some((m: unknown) => !validNativeInputMention(m)))
+  )
+    invalid("无效的原生引用");
   if (v.contexts !== undefined) {
     if (!Array.isArray(v.contexts) || v.contexts.length > 32) invalid();
     const seen = new Set<string>();
@@ -132,7 +138,9 @@ function submit(value: unknown): FollowupSubmit {
     "cwd",
     "model",
     "effort",
+    "serviceTier",
     "approvalPolicy",
+    "approvalsReviewer",
     "sandboxPolicy",
     "collaborationMode",
   ]);
@@ -151,12 +159,41 @@ function submit(value: unknown): FollowupSubmit {
   if (p.cwd != null && !p.cwd.startsWith("/"))
     invalid("消息工作目录必须是绝对路径");
   if (
-    p.approvalPolicy != null &&
-    !["untrusted", "on-failure", "on-request", "never"].includes(
-      p.approvalPolicy,
-    )
+    p.serviceTier != null &&
+    (typeof p.serviceTier !== "string" ||
+      !p.serviceTier.trim() ||
+      p.serviceTier.length > 256 ||
+      /[\x00-\x1f]/.test(p.serviceTier))
   )
     invalid();
+  if (
+    p.approvalsReviewer != null &&
+    !["user", "auto_review", "guardian_subagent"].includes(p.approvalsReviewer)
+  )
+    invalid();
+  if (p.approvalPolicy != null) {
+    if (typeof p.approvalPolicy === "string") {
+      if (
+        !["untrusted", "on-failure", "on-request", "never"].includes(
+          p.approvalPolicy,
+        )
+      )
+        invalid();
+    } else {
+      const policy = object(p.approvalPolicy);
+      keys(policy, ["granular"]);
+      const granular = object(policy.granular);
+      const fields = [
+        "sandbox_approval",
+        "rules",
+        "skill_approval",
+        "request_permissions",
+        "mcp_elicitations",
+      ];
+      keys(granular, fields);
+      if (fields.some((name) => typeof granular[name] !== "boolean")) invalid();
+    }
+  }
   if (p.sandboxPolicy != null) {
     const s = object(p.sandboxPolicy);
     keys(s, [
@@ -175,7 +212,15 @@ function submit(value: unknown): FollowupSubmit {
       ].includes(s.type)
     )
       invalid();
-    for (const k of ["networkAccess", "excludeTmpdirEnvVar", "excludeSlashTmp"])
+    if (s.type === "externalSandbox") {
+      if (
+        s.networkAccess != null &&
+        !["restricted", "enabled"].includes(s.networkAccess)
+      )
+        invalid();
+    } else if (s.networkAccess != null && typeof s.networkAccess !== "boolean")
+      invalid();
+    for (const k of ["excludeTmpdirEnvVar", "excludeSlashTmp"])
       if (s[k] != null && typeof s[k] !== "boolean") invalid();
     if (
       s.writableRoots != null &&

@@ -1,0 +1,61 @@
+{
+  "name": "codex-host-bridge",
+  "displayName": "Coding Kanban Editor Context",
+  "description": "A private editor context companion for the Coding Kanban session workspace.",
+  "publisher": "coding-kanban",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "main": "./extension.cjs",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "Read editor text, navigate and display Diff without executing project code. Language queries still require an explicit user setting.",
+      "restrictedConfigurations": [
+        "codingKanban.host.lsp"
+      ]
+    },
+    "virtualWorkspaces": {
+      "supported": false
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "codingKanban.addEditorContext",
+        "title": "Coding Kanban: Add File or Selection to Session"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "codingKanban.addEditorContext",
+          "group": "navigation@99"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Coding Kanban Editor Context",
+      "properties": {
+        "codingKanban.host.todoCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Offer a session context action on TODO comments. This adds a draft context and never sends an Agent message."
+        },
+        "codingKanban.host.lsp": {
+          "type": "boolean",
+          "default": false,
+          "description": "Allow the session bridge to query VS Code definition providers. No LSP server is started by this setting."
+        }
+      }
+    }
+  }
+}

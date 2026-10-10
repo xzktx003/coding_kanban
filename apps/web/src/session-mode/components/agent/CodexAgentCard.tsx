@@ -218,7 +218,11 @@ export function CodexAgentCard({
       onClickCapture={(event) => {
         if (window.getSelection() && !window.getSelection()!.isCollapsed)
           return;
-        if ((event.target as Element).closest("button, a, input, textarea"))
+        if (
+          (event.target as Element).closest(
+            'button, [role="button"], a, input, textarea',
+          )
+        )
           return;
         if (!isSelected) void selectTab(card);
       }}

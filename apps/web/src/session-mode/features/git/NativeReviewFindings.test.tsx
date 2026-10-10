@@ -1,0 +1,41 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
+const read = vi.hoisted(() => vi.fn());
+vi.mock("./gitReviewService", () => ({ readGitReviewSnapshot: read }));
+import { NativeReviewFindings } from "./NativeReviewFindings";
+import { readDraft, sessionDraftKey, useSessionDraftStore } from "@session/stores/useSessionDraftStore";
+import { useEditorStore, useWorkspaceStore } from "@session/stores";
+import { useSavedTurnReviewStore } from "@session/stores/useSavedTurnReviewStore";
+import { waitFor } from "@testing-library/react";
+it("reads captured base target as separate readonly provenance and renders rich finding text", async () => {
+  useSavedTurnReviewStore.setState({ reviewScopes: {}, target: null });
+  const target = { type: "baseBranch" as const, branch: "main" };
+  useSavedTurnReviewStore.getState().captureReviewScope({ requestThreadId: "source", reviewThreadId: "review", turnId: "turn", cwd: "/owner", target });
+  read.mockResolvedValue({ cwd: "/owner", target, resolved: { head: "b".repeat(40), base: "a".repeat(40) }, capturedAt: "2026-10-10T00:00:00.000Z", digest: "a".repeat(64), unifiedDiff: "diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -80 +80 @@\n-before\n+after\n", omitted: [] });
+  render(<NativeReviewFindings threadId="review" turnId="turn" cwd="/owner" findings={[{ id: "rich", title: "[P1] contract", body: "Keep **ownership** and `native coordinates`.", path: "/owner/a.ts", start: 80, end: 80, side: "new" }]} />);
+  expect(screen.getByText("ownership").outerHTML).toContain("ownership");
+  expect(screen.getByText("native coordinates").closest("code")).not.toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "查看审查 Diff" }));
+  await waitFor(() => expect(useSavedTurnReviewStore.getState().target?.source?.type).toBe("git-review"));
+  expect(read).toHaveBeenCalledWith("/owner", target);
+  expect(useSavedTurnReviewStore.getState().target).toMatchObject({ threadId: "review", turnId: "turn", cwd: "/owner", batches: [], changes: [{ path: "/owner/a.ts" }], source: { scope: { requestThreadId: "source", target } } });
+});
+it("finding location and reply use captured literal path and own thread, even when the main project differs", () => {
+  useSessionDraftStore.setState({ drafts: {} });useWorkspaceStore.setState({ cwd: "/foreign" });useEditorStore.getState().resetFiles();
+  const findings = [{ id: "f", title: "[P1] Keep contract", body: "Preserve the tail.", path: "/owner/100%:12.ts", start: 80, end: 82, side: "new" as const }];
+  const view = render(<NativeReviewFindings findings={findings} threadId="a" turnId="first" cwd="/owner"/>);
+  fireEvent.click(screen.getByRole("button", { name: /^查看/ }));
+  expect(useEditorStore.getState()).toMatchObject({ activeFile: "/owner/100%:12.ts", revealLocation: { line: 80 } });
+  fireEvent.click(screen.getByRole("button", { name: "回复此意见" }));
+  expect(readDraft(sessionDraftKey("codex", "a")).text).toContain("/owner/100%:12.ts:80-82");
+  expect(useWorkspaceStore.getState().cwd).toBe("/foreign");
+  view.rerender(<NativeReviewFindings findings={findings} threadId="b" turnId="first" cwd="/other"/>);
+  expect((screen.getByRole("button", { name: "回复此意见" }) as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "回复此意见" }));
+  expect(readDraft(sessionDraftKey("codex", "b")).text).toContain("Preserve the tail");
+});
+it("a captured review with no findings still offers its scoped Diff", () => {
+  useSavedTurnReviewStore.getState().captureReviewScope({ requestThreadId: "no-findings", reviewThreadId: "empty-review", turnId: "empty-turn", cwd: "/empty", target: { type: "uncommittedChanges" } });
+  render(<NativeReviewFindings findings={[]} threadId="empty-review" turnId="empty-turn" cwd="/empty" />);
+  expect(screen.getByRole("button", { name: "查看审查 Diff" })).toBeTruthy();
+});

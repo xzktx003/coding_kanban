@@ -1,8 +1,54 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import Fastify from "fastify";
+import { mkdtemp, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { registerSessionModeRoutes } from "./session-mode.js";
+import type { VsCodeWebManager } from "../services/vscode-web-manager.js";
+
+test("private editor companion uses the real listening gateway port and never waits during inject", async () => {
+  const dataHome=await mkdtemp(join(tmpdir(),"kanban-host-listen-"));
+  let prepare!: (paths:{extensionsDir:string;workspacesDir:string})=>Promise<void>;
+  const manager={setCodexHostPreparation(callback:typeof prepare){prepare=callback;}} as unknown as VsCodeWebManager;
+  const app=Fastify();
+  app.register(async instance=>registerSessionModeRoutes(instance,{attachmentRoot:join(dataHome,"uploads"),vsCodeWebManager:manager}));
+  try {
+    await app.ready();
+    const paths={extensionsDir:join(dataHome,"extensions"),workspacesDir:join(dataHome,"workspaces")};
+    await assert.rejects(prepare(paths),/尚未监听/);
+    await app.listen({host:"0.0.0.0",port:0});
+    await prepare(paths);
+    const address=app.server.address(); assert.ok(address && typeof address !== "string");
+    const credential=JSON.parse(await readFile(join(dataHome,"codex-host-companion.json"),"utf8"));
+    assert.equal(credential.origin,`http://127.0.0.1:${address.port}`);
+    assert.equal((await stat(join(dataHome,"codex-host-companion.json"))).mode & 0o777,0o600);
+    const companion=JSON.parse(await readFile(join(paths.workspacesDir,"codex-host-companion.json"),"utf8"));
+    assert.equal(credential.token===companion.token,true);
+    assert.equal((await stat(join(paths.extensionsDir,"coding-kanban.codex-host-bridge-0.1.0","extension.cjs"))).isFile(),true);
+  } finally {await app.close();await rm(dataHome,{recursive:true,force:true});}
+});
+
+test("session gateway mounts owner-verified host APIs without starting or resuming an Agent", async () => {
+  const dataHome = await mkdtemp(join(tmpdir(), "kanban-host-gateway-"));
+  const cwd = join(dataHome, "project"); await mkdir(cwd);
+  const app = Fastify();
+  const requests: string[] = [];
+  registerSessionModeRoutes(app, {
+    origin: "http://127.0.0.1:1", attachmentRoot: join(dataHome, "uploads"), projects: () => [cwd],
+    fetch: async (url) => { requests.push(String(url)); throw new Error("new draft does not need native runtime"); },
+  });
+  try {
+    const relay = await app.inject("/api/session/codex-host/relay.js");
+    assert.equal(relay.statusCode, 200); assert.match(relay.headers["content-type"]!, /javascript/);
+    const response = await app.inject({ method: "POST", url: "/api/session/codex-host/bind", payload: {
+      owner: { cwd, threadId: null, draftOwner: JSON.stringify(["codex", "", "new", cwd]) }, nonce: "nonce-a", editorKey: join(dataHome, "missing.code-workspace"),
+    } });
+    assert.equal(response.statusCode, 409); assert.match(response.json().message ?? response.json().error, /工作区/);
+    assert.deepEqual(requests, []);
+  } finally { await app.close(); await rm(dataHome, { recursive: true, force: true }); }
+});
 
 test("session gateway preserves JSON, query parameters and response status", async () => {
   const app = Fastify();

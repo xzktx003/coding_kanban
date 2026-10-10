@@ -33,6 +33,10 @@
   flex-direction: column;
   min-width: 0;
 }
+.session-mode .session-workbench {
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
 .session-section-nav {
   flex-shrink: 0;
   min-height: 43px;

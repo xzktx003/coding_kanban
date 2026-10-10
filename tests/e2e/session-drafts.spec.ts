@@ -494,15 +494,17 @@ test("an interrupted image upload survives reload with file bytes and can retry"
 test("closing and restarting the browser restores text and attachment bytes from the same profile", async ({
   browser,
   baseURL,
-}) => {
+}, testInfo) => {
   test.setTimeout(90000);
   const profile = await mkdtemp(join(tmpdir(), "kanban-draft-browser-"));
   const tabs = sharedTabs();
-  let context = await browser.browserType().launchPersistentContext(profile, {
+  const launchOptions = {
+    ...testInfo.project.use.launchOptions,
     headless: true,
     ignoreHTTPSErrors: true,
     baseURL,
-  });
+  };
+  let context = await browser.browserType().launchPersistentContext(profile, launchOptions);
   try {
     let page = context.pages()[0];
     await installSessionUxFixture(page, 2);
@@ -530,11 +532,7 @@ test("closing and restarting the browser restores text and attachment bytes from
       await flushAttachmentDraft(key);
     });
     await context.close();
-    context = await browser.browserType().launchPersistentContext(profile, {
-      headless: true,
-      ignoreHTTPSErrors: true,
-      baseURL,
-    });
+    context = await browser.browserType().launchPersistentContext(profile, launchOptions);
     page = context.pages()[0];
     await installSessionUxFixture(page, 2);
     await tabs(page);

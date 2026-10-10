@@ -15,16 +15,53 @@ use codex_finder::discover_codex_command;
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-/// Reasoning traffic is dropped before it reaches the frontend.
+/// Public summaries are part of the UI protocol. Never deliver raw reasoning.
 fn is_reasoning_notification(method: &str, raw: &Value) -> bool {
     match method {
-        "item/reasoning/textDelta"
-        | "item/reasoning/summaryTextDelta"
-        | "item/reasoning/summaryPartAdded" => true,
-        "item/started" | "item/completed" => {
+        "item/reasoning/textDelta" => true,
+        "rawResponseItem/completed" => {
             raw.pointer("/params/item/type").and_then(Value::as_str) == Some("reasoning")
         }
         _ => false,
+    }
+}
+
+fn sanitize_reasoning_item(raw: &mut Value) {
+    if let Some(item) = raw.pointer_mut("/params/item")
+        && item.get("type").and_then(Value::as_str) == Some("reasoning")
+        && let Some(object) = item.as_object_mut()
+    {
+        object.insert("content".into(), serde_json::json!([]));
+    }
+}
+
+#[cfg(test)]
+mod summary_delivery_tests {
+    use super::{is_reasoning_notification, sanitize_reasoning_item};
+    use serde_json::json;
+
+    #[test]
+    fn public_summary_notifications_are_not_dropped() {
+        let raw = json!({"params":{"delta":"Checking files","summaryIndex":0}});
+        assert!(!is_reasoning_notification("item/reasoning/summaryTextDelta", &raw));
+        assert!(!is_reasoning_notification("item/reasoning/summaryPartAdded", &raw));
+        let item = json!({"params":{"item":{"type":"reasoning","summary":["Checking files"],"content":["private"]}}});
+        assert!(!is_reasoning_notification("item/started", &item));
+        assert!(!is_reasoning_notification("item/completed", &item));
+    }
+
+    #[test]
+    fn raw_reasoning_text_stays_private() {
+        assert!(is_reasoning_notification("item/reasoning/textDelta", &json!({"params":{"delta":"private"}})));
+    }
+
+    #[test]
+    fn summary_item_removes_raw_content_without_changing_identity() {
+        let mut raw = json!({"params":{"threadId":"thread","turnId":"turn","item":{"type":"reasoning","id":"item","summary":["Public"],"content":["private"]}}});
+        sanitize_reasoning_item(&mut raw);
+        assert_eq!(raw.pointer("/params/item/content"), Some(&json!([])));
+        assert_eq!(raw.pointer("/params/item/summary"), Some(&json!(["Public"])));
+        assert_eq!(raw.pointer("/params/threadId"), Some(&json!("thread")));
     }
 }
 
@@ -215,10 +252,11 @@ pub async fn connect_codex(event_sink: Arc<dyn EventSink>) -> Result<Arc<CodexAp
                     }
                     handle_server_request(&event_sink_clone, id, &method, params).await;
                 }
-                Some(ServerMessage::Notification { method, raw }) => {
+                Some(ServerMessage::Notification { method, mut raw }) => {
                     if is_reasoning_notification(&method, &raw) {
                         continue;
                     }
+                    sanitize_reasoning_item(&mut raw);
                     client_clone.ownership.observe(&method, &raw["params"]);
                     sync_automation_run_status(&raw);
                     event_sink_clone.emit("codex:notification", raw);

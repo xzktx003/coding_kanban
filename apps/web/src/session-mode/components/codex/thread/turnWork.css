@@ -1,0 +1,27 @@
+.session-mode .codex-turn-work-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 0 12px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  background: transparent;
+  color: var(--codex-muted);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  text-align: start;
+}
+.session-mode button.codex-turn-work-header {
+  cursor: pointer;
+}
+.session-mode button.codex-turn-work-header:hover {
+  color: var(--codex-text);
+}
+.session-mode button.codex-turn-work-header:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.session-mode .codex-turn-work-header .is-expanded {
+  transform: rotate(90deg);
+}

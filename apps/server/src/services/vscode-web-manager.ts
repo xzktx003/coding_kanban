@@ -285,8 +285,13 @@ function buildEditorUrl(
   url.pathname = url.pathname.endsWith("/") ? url.pathname : `${url.pathname}/`;
   if (workspacePath) {
     url.searchParams.set("workspace", workspacePath);
+    // code-server prioritizes `folder` over `workspace` when both are present.
+    // Keep the native managed workspace identity and carry its canonical cwd in
+    // a companion-only parameter which does not change the editor workspace.
+    url.searchParams.set("kanbanCwd", workingDirectory);
+  } else {
+    url.searchParams.set("folder", workingDirectory);
   }
-  url.searchParams.set("folder", workingDirectory);
   return url.toString();
 }
 
@@ -1101,6 +1106,11 @@ function buildRemoteTunnelArgs(
 }
 
 export class VsCodeWebManager {
+  private prepareCodexHost: ((paths: { extensionsDir: string; workspacesDir: string }) => Promise<void>) | undefined;
+  /** Preparing a companion never reloads the shared editor or changes its process. */
+  setCodexHostPreparation(prepare: (paths: { extensionsDir: string; workspacesDir: string }) => Promise<void>): void {
+    this.prepareCodexHost = prepare;
+  }
   private readonly allocatePort: (preferredPort?: number) => Promise<number>;
   private readonly createDataRoot: () => Promise<string>;
   private readonly findCommand: (candidate: string) => Promise<string | null>;
@@ -1610,6 +1620,7 @@ export class VsCodeWebManager {
     session: AgentSessionRecord,
   ): Promise<{ path: string; workingDirectory: string }> {
     const dataRootPaths = await this.ensureDataRootPaths();
+    if (this.prepareCodexHost) await this.prepareCodexHost(dataRootPaths);
     const workingDirectory = resolveLocalWorkingDirectory(
       session.workingDirectory,
     );

@@ -8,9 +8,25 @@ import type { Page } from "@playwright/test";
 export async function installSessionUxFixture(page: Page, count = 40) {
   // Vite loads more than 250 modules. Retain their actual HMR URLs so test-side
   // imports use the mounted stores instead of creating a second module instance.
-  await page.addInitScript(() =>
-    performance.setResourceTimingBufferSize(10_000),
-  );
+  await page.addInitScript(() => {
+    performance.setResourceTimingBufferSize(10_000);
+    // Isolated Vite caches have instance-specific URLs. Product fixture roots
+    // must share the mounted React/renderer, never import a second legacy cache.
+    (window as any).__sessionFixtureDependency = (file: string) => {
+      if (!["react.js", "react-dom_client.js"].includes(file))
+        throw new Error("Unexpected fixture dependency");
+      const entries = performance
+        .getEntriesByType("resource")
+        .filter((e) => new URL(e.name).pathname.endsWith(`/deps/${file}`));
+      const mounted =
+        entries.findLast((e) =>
+          new URL(e.name).pathname.includes("/.dev-runtime/vite-cache/"),
+        ) ?? entries.at(-1);
+      if (!mounted)
+        throw new Error(`Mounted fixture dependency unavailable: ${file}`);
+      return mounted.name;
+    };
+  });
   const calls: Array<{ path: string; body: any }> = [];
   let followed: FollowedSession[] = [];
   let projects = ["/fixture/项目/very-long-project-path-for-ui-regression"];
@@ -130,7 +146,8 @@ export async function installSessionUxFixture(page: Page, count = 40) {
         requiresOpenaiAuth: false,
       };
     else if (path.endsWith("/config/read")) json = { config: {} };
-    else if (path.endsWith("/subagents/snapshot")) json = { threads: [], complete: true, errors: [], checkedAt: Date.now() };
+    else if (path.endsWith("/subagents/snapshot"))
+      json = { threads: [], complete: true, errors: [], checkedAt: Date.now() };
     else if (path.endsWith("/subagents/roles")) json = { roles: [] };
     else if (path.endsWith("/thread/list")) {
       if (listError) {
@@ -248,7 +265,7 @@ export async function seedSessionUx(page: Page, count = 1) {
     const { useCodexStore } = await import(
       performance
         .getEntriesByType("resource")
-        .find(
+        .findLast(
           (e) =>
             new URL(e.name).pathname ===
             "/src/session-mode/components/codex/stores/index.ts",
@@ -257,7 +274,7 @@ export async function seedSessionUx(page: Page, count = 1) {
     const { useConfigStore } = await import(
       performance
         .getEntriesByType("resource")
-        .find(
+        .findLast(
           (e) =>
             new URL(e.name).pathname ===
             "/src/session-mode/components/codex/stores/useConfigStore.ts",
@@ -266,7 +283,7 @@ export async function seedSessionUx(page: Page, count = 1) {
     const { useWorkspaceStore } = await import(
       performance
         .getEntriesByType("resource")
-        .find(
+        .findLast(
           (e) =>
             new URL(e.name).pathname ===
             "/src/session-mode/stores/useWorkspaceStore.ts",
@@ -275,7 +292,7 @@ export async function seedSessionUx(page: Page, count = 1) {
     const { useLayoutStore } = await import(
       performance
         .getEntriesByType("resource")
-        .find(
+        .findLast(
           (e) =>
             new URL(e.name).pathname ===
             "/src/session-mode/stores/useLayoutStore.ts",
@@ -284,7 +301,7 @@ export async function seedSessionUx(page: Page, count = 1) {
     const { useAgentSettingsStore } = await import(
       performance
         .getEntriesByType("resource")
-        .find(
+        .findLast(
           (e) =>
             new URL(e.name).pathname ===
             "/src/session-mode/stores/useAgentSettingsStore.ts",

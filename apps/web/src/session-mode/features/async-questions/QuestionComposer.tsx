@@ -4,6 +4,7 @@ import { useQuestions } from "./useQuestions";
 import { useAsyncQuestionStore } from "./store";
 import { answerTarget, reconcileAnswers, sendAnswers } from "./service";
 import "./questions.css";
+import "../../components/codex/items/request-native.css";
 
 export function QuestionComposer({
   threadId,
@@ -14,12 +15,17 @@ export function QuestionComposer({
   threadId: string;
   children: ReactNode;
 }) {
-  const { questions, session, pending } = useQuestions(threadId);
+  const { questions, session, pending, latestTurnId } = useQuestions(threadId);
   // Subscribe to timing even when the question message itself has not changed.
   useCodexStore((s) => s.turnTimingMap[threadId]);
   useCodexStore((s) => s.threadStatusMap[threadId]);
   const target = answerTarget(threadId);
-  const current = questions.find((q) => q.id === session.openId);
+  const current = questions.find(
+    (q) =>
+      q.id === session.openId &&
+      q.turnId === latestTurnId &&
+      (session.openTurnId === undefined || q.turnId === session.openTurnId),
+  );
   const group = current
     ? questions.filter((q) => q.sourceId === current.sourceId)
     : [];
@@ -30,6 +36,19 @@ export function QuestionComposer({
     () => window.visualViewport?.height ?? window.innerHeight,
   );
   const root = useRef<HTMLDivElement>(null);
+  const advance = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (advance.current) clearTimeout(advance.current);
+    },
+    [
+      threadId,
+      current?.id,
+      current?.turnId,
+      session.sending,
+      session.uncertain,
+    ],
+  );
   useEffect(() => {
     const viewport = window.visualViewport;
     const resize = () => setHeight(viewport?.height ?? window.innerHeight);
@@ -90,9 +109,25 @@ export function QuestionComposer({
     value !== (current.answer ?? "");
   const disabled = session.sending || !!session.uncertain;
   const last = index === group.length - 1;
+  const select = (value: string) => {
+    if (disabled) return;
+    edit(threadId, current, value);
+    if (advance.current) clearTimeout(advance.current);
+    if (!last)
+      advance.current = setTimeout(() => {
+        const state = useAsyncQuestionStore.getState().sessions[threadId];
+        if (
+          state?.openId === current.id &&
+          state.openTurnId === current.turnId &&
+          !state.sending &&
+          !state.uncertain
+        )
+          patch(threadId, { openId: group[index + 1].id });
+      }, 180);
+  };
   const send = () => {
     if (target !== undefined)
-      void sendAnswers(threadId, current.sourceId, target);
+      void sendAnswers(threadId, current.sourceId, target, current.turnId);
   };
   const submittedCount = group.filter((q) => {
     const d = session.drafts[q.id];
@@ -117,6 +152,42 @@ export function QuestionComposer({
         if (e.key === "Escape" && !session.sending) {
           e.preventDefault();
           close();
+          return;
+        }
+        if (
+          disabled ||
+          e.repeat ||
+          e.nativeEvent.isComposing ||
+          e.defaultPrevented
+        )
+          return;
+        if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+          e.preventDefault();
+          if (last) {
+            if (submittedCount > 0) send();
+          } else if (value.trim())
+            patch(threadId, { openId: group[index + 1].id });
+          return;
+        }
+        if (
+          e.altKey ||
+          e.ctrlKey ||
+          e.metaKey ||
+          e.shiftKey ||
+          (e.target as HTMLElement).closest(
+            "input,textarea,select,[contenteditable=true]",
+          )
+        )
+          return;
+        if (/^[1-9]$/.test(e.key) && current.options[Number(e.key) - 1]) {
+          e.preventDefault();
+          select(current.options[Number(e.key) - 1]);
+        } else if (e.key === "ArrowLeft" && index > 0) {
+          e.preventDefault();
+          patch(threadId, { openId: group[index - 1].id });
+        } else if (e.key === "ArrowRight" && !last) {
+          e.preventDefault();
+          patch(threadId, { openId: group[index + 1].id });
         }
       }}
     >
@@ -157,8 +228,11 @@ export function QuestionComposer({
                 name={`async-${threadId}-${current.id}`}
                 checked={isOption && value === option}
                 disabled={disabled}
-                onChange={() => edit(threadId, current, option)}
+                onChange={() => select(option)}
               />
+              <span className="session-async-choice-index" aria-hidden="true">
+                {isOption && value === option ? "✓" : i + 1}
+              </span>
               <span>{option}</span>
             </label>
           ))}

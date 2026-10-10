@@ -1,6 +1,11 @@
 import type { CodexStore, TurnTiming } from '../components/codex/stores/types';
 
 type Source = Pick<CodexStore, 'currentThreadId' | 'currentTurnId' | 'threadStatusMap' | 'turnTimingMap' | 'threads'>;
+/** Older native snapshots may omit timing. Unknown is not a zero or NaN. */
+export function verifiedTurnDuration(value: unknown, previous?: unknown): number | null {
+  for (const duration of [value, previous]) if (typeof duration === 'number' && Number.isFinite(duration) && duration >= 0) return duration;
+  return null;
+}
 /** All interaction gates and status surfaces read the same reconciled facts. */
 export function codexRuntimeState(state: Source, id: string | null | undefined) {
   const status = id ? state.threadStatusMap[id] ?? state.threads.find(t => t.id === id)?.status : undefined;

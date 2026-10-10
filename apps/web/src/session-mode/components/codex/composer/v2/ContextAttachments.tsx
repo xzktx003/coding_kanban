@@ -150,36 +150,6 @@ export function ContextAttachments({
           className={`session-context-strip ${compact ? "is-compact" : ""}`}
           aria-label="本次消息的附件与上下文"
         >
-          {contexts.map((c) => (
-            <div className="session-context-chip" key={c.id}>
-              <button
-                type="button"
-                aria-label={`查看上下文 ${c.name} ${c.range ? `L${c.range.start}–${c.range.end}` : c.kind === "paste" ? `${c.text.split(/\r?\n/).length} 行 · 完整内容` : c.kind === "quote" ? "回答引用" : "文件快照"}`}
-                onClick={() => setPanel(c.id)}
-              >
-                {c.kind === "quote" ? <Quote /> : <FileText />}
-                <span>
-                  <strong>{c.name}</strong>
-                  <small>
-                    {c.range
-                      ? `L${c.range.start}–${c.range.end}`
-                      : c.kind === "paste"
-                        ? `${c.text.split(/\r?\n/).length} 行 · 完整内容`
-                        : c.kind === "quote"
-                          ? "回答引用"
-                          : "文件快照"}
-                  </small>
-                </span>
-              </button>
-              <button
-                type="button"
-                aria-label={`移除 ${c.name}`}
-                onClick={() => remove(c)}
-              >
-                <X />
-              </button>
-            </div>
-          ))}
           {images.attachments.map((a) => (
             <div
               className="session-context-chip is-image"
@@ -212,6 +182,36 @@ export function ContextAttachments({
                 type="button"
                 aria-label={`移除 ${a.name}`}
                 onClick={() => removeImage(a.id)}
+              >
+                <X />
+              </button>
+            </div>
+          ))}
+          {contexts.map((c) => (
+            <div className="session-context-chip" key={c.id}>
+              <button
+                type="button"
+                aria-label={`查看上下文 ${c.name} ${c.range ? `L${c.range.start}–${c.range.end}` : c.kind === "paste" ? `${c.text.split(/\r?\n/).length} 行 · 完整内容` : c.kind === "quote" ? "回答引用" : "文件快照"}`}
+                onClick={() => setPanel(c.id)}
+              >
+                {c.kind === "quote" ? <Quote /> : <FileText />}
+                <span>
+                  <strong>{c.name}</strong>
+                  <small>
+                    {c.range
+                      ? `L${c.range.start}–${c.range.end}`
+                      : c.kind === "paste"
+                        ? `${c.text.split(/\r?\n/).length} 行 · 完整内容`
+                        : c.kind === "quote"
+                          ? "回答引用"
+                          : "文件快照"}
+                  </small>
+                </span>
+              </button>
+              <button
+                type="button"
+                aria-label={`移除 ${c.name}`}
+                onClick={() => remove(c)}
               >
                 <X />
               </button>

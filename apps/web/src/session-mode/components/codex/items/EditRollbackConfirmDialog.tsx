@@ -14,6 +14,7 @@ type EditRollbackConfirmDialogProps = {
   open: boolean;
   submitting: boolean;
   error?: string | null;
+  confirmDisabled?: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 };
@@ -22,6 +23,7 @@ export const EditRollbackConfirmDialog = ({
   open,
   submitting,
   error,
+  confirmDisabled = false,
   onOpenChange,
   onConfirm,
 }: EditRollbackConfirmDialogProps) => {
@@ -63,7 +65,7 @@ export const EditRollbackConfirmDialog = ({
             {t("common.cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
-            disabled={submitting}
+            disabled={submitting || confirmDisabled}
             onClick={(event) => {
               event.preventDefault();
               onConfirm();

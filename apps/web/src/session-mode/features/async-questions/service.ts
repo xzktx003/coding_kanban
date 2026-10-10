@@ -6,6 +6,7 @@ import {
   collectQuestions,
   encodeReplies,
   hasReplyReceipt,
+  latestQuestionTurn,
   type Reply,
 } from "./model";
 import { EMPTY_SESSION, useAsyncQuestionStore } from "./store";
@@ -46,6 +47,7 @@ export async function sendAnswers(
   threadId: string,
   sourceId: string,
   expectedTurnId: string | null,
+  expectedSourceTurnId?: string,
 ) {
   const store = useAsyncQuestionStore.getState();
   const session = store.sessions[threadId] ?? EMPTY_SESSION;
@@ -53,6 +55,27 @@ export async function sendAnswers(
   const questions = questionsNow(threadId).filter(
     (q) => q.sourceId === sourceId,
   );
+  const state = useCodexStore.getState();
+  const latestTurn = latestQuestionTurn(
+    state.events[threadId] ?? [],
+    threadId,
+    state.turnTimingMap[threadId]?.turnId ??
+      (state.currentThreadId === threadId ? state.currentTurnId : null),
+  );
+  if (
+    questions.some(
+      (q) =>
+        q.turnId !== latestTurn ||
+        (expectedSourceTurnId !== undefined &&
+          q.turnId !== expectedSourceTurnId),
+    )
+  ) {
+    store.patch(threadId, {
+      openId: undefined,
+      error: "此问题所属轮次已结束，草稿已保留，未发送回答。",
+    });
+    return;
+  }
   if (!questions.length) {
     store.patch(threadId, {
       openId: undefined,
@@ -68,7 +91,10 @@ export async function sendAnswers(
   }
   const replies: Reply[] = questions.flatMap((q) => {
     const d = session.drafts[q.id];
-    return d && !d.skipped && d.text.trim()
+    return d &&
+      (d.turnId === undefined || d.turnId === q.turnId) &&
+      !d.skipped &&
+      d.text.trim()
       ? [{ questionItemId: q.id, question: q.title, answer: d.text.trim() }]
       : [];
   });
@@ -92,28 +118,35 @@ export async function sendAnswers(
       );
     // Rollback or deletion while an HTTP response was in flight must not
     // resurrect a question or open a panel in another session.
-    const alive = new Set(questionsNow(threadId).map((q) => q.id));
+    const alive = new Map(questionsNow(threadId).map((q) => [q.id, q.turnId]));
     const current =
       useAsyncQuestionStore.getState().sessions[threadId] ?? EMPTY_SESSION;
     const confirmed = { ...current.confirmed },
       drafts = { ...current.drafts };
     for (const reply of replies)
-      if (alive.has(reply.questionItemId)) {
+      if (
+        alive.get(reply.questionItemId) ===
+        questions.find((q) => q.id === reply.questionItemId)?.turnId
+      ) {
         confirmed[reply.questionItemId] = {
           answer: reply.answer,
           baseline: questions.find((q) => q.id === reply.questionItemId)
             ?.answer,
+          turnId: questions.find((q) => q.id === reply.questionItemId)?.turnId,
         };
         drafts[reply.questionItemId] = {
           text: reply.answer,
           baseline: reply.answer,
           skipped: false,
+          turnId: questions.find((q) => q.id === reply.questionItemId)?.turnId,
         };
       }
     store.patch(threadId, {
       confirmed,
       drafts,
-      openId: undefined,
+      ...(current.openTurnId === questions[0]?.turnId
+        ? { openId: undefined }
+        : {}),
       uncertain: undefined,
       uncertainClientId: undefined,
       error: undefined,

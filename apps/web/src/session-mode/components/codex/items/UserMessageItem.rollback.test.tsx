@@ -6,6 +6,8 @@ import {
   sessionDraftKey,
   useSessionDraftStore,
 } from "@session/stores/useSessionDraftStore";
+import { SessionApiError } from "@session/services/apiAdapt/shared";
+import { useThreadWorkflowStore } from "@session/features/thread-workflows/delivery";
 import { EditableUserMessageItem } from "./UserMessageItem";
 
 const mock = vi.hoisted(() => ({ rollback: vi.fn(), error: vi.fn() }));
@@ -31,6 +33,7 @@ vi.mock("@session/components/common", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  useThreadWorkflowStore.setState({ mutations: {}, inlineEdits: {} });
   useCodexStore.setState({
     currentThreadId: "thread",
     currentTurnId: null,
@@ -86,7 +89,7 @@ test("every destructive edit is confirmed, then rolls back once at its exact tur
 });
 
 test("a rollback failure keeps the existing draft and dialog for retry", async () => {
-  mock.rollback.mockRejectedValue(new Error("offline"));
+  mock.rollback.mockRejectedValue(new SessionApiError("offline", 400));
   show();
   fireEvent.click(screen.getByRole("button", { name: "userMessage.edit" }));
   fireEvent.click(
@@ -106,7 +109,7 @@ test("a rollback failure keeps the existing draft and dialog for retry", async (
   ).toBe(false);
 });
 
-test("unsupported rollback shows actionable inline feedback and collapses protocol details", async () => {
+test("a typed unsupported rollback rejection shows actionable feedback and collapses protocol details", async () => {
   const protocol =
     "Request failed: " +
     JSON.stringify({
@@ -115,7 +118,9 @@ test("unsupported rollback shows actionable inline feedback and collapses protoc
         "Invalid request: unknown variant `thread/rollback`, expected one of `thread/revert`, " +
         "otherMethod ".repeat(400),
     });
-  mock.rollback.mockRejectedValue(new Error(protocol));
+  // A native invalid-request HTTP response explicitly rejected execution.
+  // An untyped transport error must remain uncertain, regardless of its text.
+  mock.rollback.mockRejectedValue(new SessionApiError(protocol, 400));
   show();
   fireEvent.click(screen.getByRole("button", { name: "userMessage.edit" }));
   fireEvent.click(
@@ -170,5 +175,44 @@ test("a delayed rollback restores the original session without overwriting the n
   );
   expect(readDraft(sessionDraftKey("codex", "other")).text).toBe(
     "other unfinished text",
+  );
+});
+
+test("a newer draft revision written while rollback is pending survives restore to the same session", async () => {
+  let finish!: () => void;
+  mock.rollback.mockImplementation(
+    () => new Promise<void>((resolve) => (finish = resolve)),
+  );
+  show();
+  fireEvent.click(screen.getByRole("button", { name: "userMessage.edit" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "common.continue" }),
+  );
+  useSessionDraftStore
+    .getState()
+    .setText(sessionDraftKey("codex", "thread"), "newer unfinished text");
+  finish();
+  await waitFor(() =>
+    expect(readDraft(sessionDraftKey("codex", "thread")).text).toBe(
+      "newer unfinished text\n\noriginal message",
+    ),
+  );
+});
+test("an unknown rollback response preserves original draft and prevents blind retry", async () => {
+  mock.rollback.mockRejectedValue(new TypeError("Failed to fetch"));
+  show();
+  fireEvent.click(screen.getByRole("button", { name: "userMessage.edit" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "common.continue" }),
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("alert").textContent).toContain("结果尚未确认"),
+  );
+  const confirm = screen.getByRole("button", { name: "common.continue" });
+  expect(confirm.hasAttribute("disabled")).toBe(true);
+  fireEvent.click(confirm);
+  expect(mock.rollback).toHaveBeenCalledTimes(1);
+  expect(readDraft(sessionDraftKey("codex", "thread")).text).toBe(
+    "existing draft",
   );
 });

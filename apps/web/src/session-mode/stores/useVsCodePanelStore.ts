@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { v4 as uuid } from "uuid";
 import { persist } from "zustand/middleware";
 import type { OpenVsCodeWebResponse } from "@agent-orchestrator/shared";
 import { openProjectVsCodeWeb } from "../../lib/api";
@@ -15,6 +16,9 @@ type State = {
   ensure: (path: string, refresh?: boolean) => Promise<void>;
 };
 const inFlight = new Map<string, Promise<void>>();
+// Per page identity: two tabs/devices have independent native editor selections.
+// Canonical directory dedup and retained frames within this page are unchanged.
+const editorClientId = uuid();
 export const useVsCodePanelStore = create<State>()(
   persist(
     (set, get) => ({
@@ -36,7 +40,7 @@ export const useVsCodePanelStore = create<State>()(
         }));
         const pending = (async () => {
           try {
-            const response = await openProjectVsCodeWeb(path);
+            const response = await openProjectVsCodeWeb(path, editorClientId);
             const url = new URL(response.url, window.location.href);
             if (
               url.origin !== window.location.origin ||

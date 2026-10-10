@@ -16,6 +16,8 @@ import {
   gitUnstageFiles,
 } from "@session/services/apiAdapt";
 import { useEditorStore, useLayoutStore } from "@session/stores";
+import { selectedAgentCard, useAgentCenterStore } from "@session/stores/useAgentCenterStore";
+import { NativeGitHunkReview } from "./NativeGitHunkReview";
 import type { DiffSection, DiffSource } from "./types";
 import {
   formatBytes,
@@ -51,6 +53,7 @@ export function GitDiffFileItem({
   onSelect,
   onRefreshStatus,
 }: GitDiffFileItemProps) {
+  const native = useAgentCenterStore(state => selectedAgentCard(state)?.kind === "codex");
   const { resolvedTheme } = useThemeContext();
   const { hasConfirmedGitRevert, setHasConfirmedGitRevert } = useEditorStore();
   const { diffSplitMode } = useLayoutStore();
@@ -65,7 +68,8 @@ export function GitDiffFileItem({
   const [largeDiffConfirmed, setLargeDiffConfirmed] = useState(false);
   const [stageLoading, setStageLoading] = useState(false);
   const [revertLoading, setRevertLoading] = useState(false);
-  const [revertConfirm, setRevertConfirm] = useState(false);
+  const [revertConfirm, setRevertConfirm] = useState<{ cwd: string; path: string; section: DiffSection } | null>(null);
+  useEffect(() => { setRevertConfirm(null); }, [cwd, entry.path, section]);
 
   // Load diff meta + data whenever the item is expanded, including on mount,
   // and reload when the file, section or refresh key changes.
@@ -92,7 +96,7 @@ export function GitDiffFileItem({
 
         // Binary blobs (images, pptx, ...) have no meaningful text diff and
         // would otherwise be stringified and line-diffed, freezing the panel.
-        if (!meta.is_binary && meta.total_bytes <= LARGE_DIFF_THRESHOLD_BYTES) {
+        if (!native && !meta.is_binary && meta.total_bytes <= LARGE_DIFF_THRESHOLD_BYTES) {
           const data = await gitFileDiff(cwd, entry.path, section === "staged");
           if (cancelled) return;
           setDiffData(data);
@@ -109,11 +113,11 @@ export function GitDiffFileItem({
     return () => {
       cancelled = true;
     };
-  }, [expanded, cwd, entry.path, section, refreshKey, readRetry]);
+  }, [expanded, cwd, entry.path, section, refreshKey, readRetry, native]);
 
   // Load full data once user confirms large diff
   useEffect(() => {
-    if (!largeDiffConfirmed || diffMeta?.is_binary) return;
+    if (native || !largeDiffConfirmed || diffMeta?.is_binary) return;
 
     let cancelled = false;
     setLoading(true);
@@ -135,7 +139,7 @@ export function GitDiffFileItem({
     return () => {
       cancelled = true;
     };
-  }, [largeDiffConfirmed, diffMeta?.is_binary, cwd, entry.path, section]);
+  }, [largeDiffConfirmed, diffMeta?.is_binary, cwd, entry.path, section, native]);
 
   const diffHunks = useMemo(() => {
     if (!diffData || !diffData.has_changes) return [];
@@ -184,13 +188,13 @@ export function GitDiffFileItem({
       setActionError(error instanceof Error ? error.message : String(error));
     } finally {
       setRevertLoading(false);
-      setRevertConfirm(false);
+      setRevertConfirm(null);
     }
   };
 
   const handleRevert = () => {
-    if (!hasConfirmedGitRevert) {
-      setRevertConfirm(true);
+    if (native || !hasConfirmedGitRevert) {
+      setRevertConfirm({ cwd, path: entry.path, section });
       return;
     }
     void doRevert();
@@ -208,7 +212,7 @@ export function GitDiffFileItem({
 
   return (
     <div
-      className={`border-b border-border ${isSelected ? "ring-1 ring-inset ring-primary/40" : ""}`}
+      className={`${native ? "codex-presentation codex-workspace-diff-file " : ""}border-b border-border ${isSelected ? "ring-1 ring-inset ring-primary/40" : ""}`}
     >
       {/* File header */}
       <div
@@ -292,16 +296,17 @@ export function GitDiffFileItem({
       </div>
 
       {/* Inline revert confirmation */}
-      {revertConfirm && (
+      {revertConfirm && revertConfirm.cwd === cwd && revertConfirm.path === entry.path && revertConfirm.section === section && (
         <div className="flex items-center gap-2 px-3 py-2 text-xs bg-destructive/10 border-t border-border">
           <span className="flex-1 text-destructive">
-            确认丢弃 {name} 的所选变更？
+            确认丢弃 {native ? `${cwd.replace(/\/$/, "")}/${entry.path}（${section === "staged" ? "暂存区与工作区" : "工作区"}整个文件的所选变更）` : name} 的所选变更？
           </span>
           <Button
             size="sm"
             variant="destructive"
             className="h-6 text-xs px-2"
             onClick={() => {
+              if (revertConfirm.cwd !== cwd || revertConfirm.path !== entry.path || revertConfirm.section !== section) { setRevertConfirm(null); return; }
               setHasConfirmedGitRevert(true);
               void doRevert();
             }}
@@ -312,7 +317,7 @@ export function GitDiffFileItem({
             size="sm"
             variant="ghost"
             className="h-6 text-xs px-2"
-            onClick={() => setRevertConfirm(false)}
+            onClick={() => setRevertConfirm(null)}
           >
             取消
           </Button>
@@ -381,6 +386,9 @@ export function GitDiffFileItem({
               二进制文件不显示文本差异（{formatBytes(diffMeta.total_bytes)}）
             </div>
           )}
+          {!loading && native && !diffError && !isBinary && (!isLarge || largeDiffConfirmed) && (
+            <NativeGitHunkReview cwd={cwd} filePath={entry.path} staged={section === "staged"} split={diffSplitMode} wrap={wordWrapEnabled} refreshKey={refreshKey} onRefresh={onRefreshStatus} />
+          )}
 
           {!loading && diffData && !diffData.has_changes && (
             <div className="px-3 py-2 text-xs text-muted-foreground">
@@ -389,7 +397,7 @@ export function GitDiffFileItem({
           )}
 
           {!loading &&
-            diffData &&
+            !native && diffData &&
             diffData.has_changes &&
             diffHunks.length > 0 && (
               <div className="git-diff-compact-num">

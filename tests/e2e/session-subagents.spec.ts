@@ -182,8 +182,8 @@ test("nested descendants can fold and detail selection survives parent tab switc
 test("restricted child approval replies retain the child's RPC identity after parent completion", async ({ page }) => {
   const f = await setup(page, { approval: true });
   await page.locator('[data-subagent-id="child-iris"]').click();
-  await page.locator('.session-subagent-panel').getByRole("button", { name: "显示详情" }).click();
-  await expect(page.locator('.session-subagent-panel')).toContainText("子线程审批验收");
+  // Native approval cards keep the reason visible, including read-only child panes.
+  await expect(page.locator('.session-subagent-panel').getByText("子线程审批验收", { exact: true })).toBeVisible();
   await page.locator('.session-subagent-panel').getByRole("button", { name: /拒绝|Decline/ }).click();
   await expect.poll(() => f.fixture.calls.filter(c => /approval\/command-execution/.test(c.path)).length).toBe(1);
   const reply = f.fixture.calls.find(c => /approval\/command-execution/.test(c.path))!;

@@ -1,4 +1,9 @@
-import { codexRuntimeState } from "@session/utils/codexRuntimeState";
+import { MutationNotStartedError } from "./MutationNotStartedError";
+import { nativeThreadSettings } from "./nativeThreadSettings";
+import {
+  codexRuntimeState,
+  verifiedTurnDuration,
+} from "@session/utils/codexRuntimeState";
 import { clearAsyncQuestions } from "../features/async-questions/store";
 import type {
   SandboxMode,
@@ -11,6 +16,7 @@ import type {
   ThreadResumeParams,
   ThreadRollbackParams,
   ThreadStartParams,
+  TurnStartParams,
   UserInput,
 } from "@session/bindings/v2";
 import {
@@ -180,7 +186,10 @@ const syncThreadToStore = (
               : previous?.turnId === lastTurn.id
                 ? previous.startedAtMs
                 : 0,
-          durationMs: lastTurn.durationMs,
+          durationMs: verifiedTurnDuration(
+            lastTurn.durationMs,
+            previous?.turnId === lastTurn.id ? previous.durationMs : undefined,
+          ),
           status: lastTurn.status,
         }
       : undefined;
@@ -225,11 +234,13 @@ const applyThreadMutation = (
   set: typeof useCodexStore.setState,
   threadId: string,
   thread: Thread,
+  activate = true,
 ): Thread => {
   const historicalEvents = convertThreadHistoryToEvents(thread);
   set({
     ...syncThreadToStore(threadId, thread, historicalEvents, {
       resetCurrentTurnId: true,
+      activate,
     }),
   });
   return thread;
@@ -266,23 +277,9 @@ function readInitialThreadMetadata(threadId: string) {
           typeof getThreadModelSettings
         >["reasoningEffort"];
       };
-      hydrateThreadModel(
-        threadId,
-        {
-          model:
-            ("model" in response ? response.model : undefined) ??
-            settings.model,
-          modelProvider:
-            ("modelProvider" in response
-              ? response.modelProvider
-              : undefined) ?? settings.modelProvider,
-          reasoningEffort:
-            "reasoningEffort" in response
-              ? response.reasoningEffort
-              : settings.reasoningEffort,
-        },
-        { revision },
-      );
+      hydrateThreadModel(threadId, nativeThreadSettings(response, settings), {
+        revision,
+      });
       useCodexStore.setState((s) => {
         const existing = s.threads.find((t) => t.id === threadId);
         if (!existing) return s;
@@ -433,8 +430,11 @@ export const codexService = {
         model,
         modelProvider,
         approvalPolicy,
+        approvalsReviewer,
         sandbox,
         reasoningEffort,
+        serviceTier,
+        collaborationMode,
         webSearchRequest,
         threadCwdMode,
       } = useConfigStore.getState();
@@ -447,8 +447,10 @@ export const codexService = {
       const params: ThreadStartParams = {
         model: model || null,
         modelProvider,
+        serviceTier,
         cwd: threadCwd,
         approvalPolicy,
+        approvalsReviewer,
         sandbox,
         baseInstructions: null,
         developerInstructions: null,
@@ -467,14 +469,20 @@ export const codexService = {
       };
       const response = await apiThreadStart(params);
       const thread = response.thread;
-      hydrateThreadModel(thread.id, {
-        model: response.model || model,
-        modelProvider: response.modelProvider ?? modelProvider,
-        reasoningEffort:
-          response.reasoningEffort === undefined
-            ? reasoningEffort
-            : response.reasoningEffort,
-      });
+      hydrateThreadModel(
+        thread.id,
+        nativeThreadSettings(response, {
+          model,
+          modelProvider,
+          reasoningEffort,
+          serviceTier,
+          approvalPolicy,
+          approvalsReviewer,
+          sandbox,
+          webSearchRequest,
+          collaborationMode,
+        }),
+      );
 
       set({
         ...syncThreadToStore(thread.id, thread, [], {
@@ -505,10 +513,23 @@ export const codexService = {
       recent?: boolean;
       signal?: AbortSignal;
       cursor?: string;
+      /** Seeking a search hit must not move the contiguous older-history boundary. */
+      preserveEarlierCursor?: boolean;
     },
   ) {
-    if (!overrides && pendingThreadResumes.has(threadId))
-      return pendingThreadResumes.get(threadId);
+    const precedingRead = !overrides
+      ? pendingThreadResumes.get(threadId)
+      : undefined;
+    if (precedingRead) {
+      if (!options?.cursor) return precedingRead;
+      // An opaque target cursor is a different page. Let the bounded current
+      // read settle, then request that page rather than reusing its response.
+      await precedingRead.catch(() => undefined);
+      if (options?.signal?.aborted)
+        throw (
+          options.signal.reason ?? new DOMException("Aborted", "AbortError")
+        );
+    }
     const version = Symbol(threadId);
     resumeVersions.set(threadId, version);
     const controller = new AbortController();
@@ -594,28 +615,10 @@ export const codexService = {
           typeof getThreadModelSettings
         >["reasoningEffort"];
       };
-      hydrateThreadModel(
-        threadId,
-        {
-          model:
-            ("model" in response ? response.model : undefined) ??
-            settings.model,
-          modelProvider:
-            ("modelProvider" in response
-              ? response.modelProvider
-              : undefined) ??
-            (settings.modelProvider || undefined),
-          reasoningEffort:
-            "reasoningEffort" in response &&
-            response.reasoningEffort !== undefined
-              ? response.reasoningEffort
-              : settings.reasoningEffort,
-        },
-        {
-          revision: modelRevision,
-          notify: !!baseline.historyLoadedMap[threadId],
-        },
-      );
+      hydrateThreadModel(threadId, nativeThreadSettings(response, settings), {
+        revision: modelRevision,
+        notify: !!baseline.historyLoadedMap[threadId],
+      });
       const historicalEvents = convertThreadHistoryToEvents(thread);
       const current = useCodexStore.getState();
       const beforeEvents =
@@ -640,10 +643,11 @@ export const codexService = {
         activate: !options?.background && current.currentThreadId === threadId,
       });
       useSessionSyncStore.setState((s) =>
-        page &&
-        baseline.historyLoadedMap[threadId] &&
-        !options?.cursor &&
-        s.cursors[threadId] !== undefined
+        options?.preserveEarlierCursor ||
+        (page &&
+          baseline.historyLoadedMap[threadId] &&
+          !options?.cursor &&
+          s.cursors[threadId] !== undefined)
           ? s
           : { cursors: { ...s.cursors, [threadId]: page?.nextCursor ?? null } },
       );
@@ -759,15 +763,47 @@ export const codexService = {
       }));
     }
   },
-  async threadFork(threadId: string) {
+  async threadFork(
+    threadId: string,
+    boundary: { lastTurnId?: string; beforeTurnId?: string } = {},
+  ) {
+    const { lastTurnId, beforeTurnId } = boundary;
+    if (
+      (lastTurnId !== undefined && beforeTurnId !== undefined) ||
+      [lastTurnId, beforeTurnId].some(
+        (value) =>
+          value !== undefined && (!value.trim() || /[\x00-\x1f]/.test(value)),
+      )
+    )
+      throw new MutationNotStartedError("无效或冲突的分支轮次边界。");
+    const timing = useCodexStore.getState().turnTimingMap[threadId];
+    if (
+      lastTurnId &&
+      timing?.turnId === lastTurnId &&
+      timing.status === "inProgress"
+    )
+      throw new MutationNotStartedError(
+        "不能从尚未结束的轮次创建包含该轮的分支。",
+      );
     const set = useCodexStore.setState;
     try {
       const params: ThreadForkParams = {
         threadId,
+        ...(lastTurnId !== undefined ? { lastTurnId } : {}),
+        ...(beforeTurnId !== undefined ? { beforeTurnId } : {}),
+        deferGoalContinuation: true,
       };
       const response = await threadFork(params);
-      hydrateThreadModel(response.thread.id, response);
-      return applyThreadMutation(set, response.thread.id, response.thread);
+      hydrateThreadModel(
+        response.thread.id,
+        nativeThreadSettings(response, response.thread),
+      );
+      return applyThreadMutation(
+        set,
+        response.thread.id,
+        response.thread,
+        lastTurnId === undefined && beforeTurnId === undefined,
+      );
     } catch (error: unknown) {
       console.error("[CodexService] threadFork error:", error);
       throw error;
@@ -782,14 +818,14 @@ export const codexService = {
     const boundary = beforeTurnId ?? String(numTurns);
     if (existing) {
       if (existing.boundary === boundary) return existing.promise;
-      throw new Error("回滚正在进行，请等待完成后再编辑。");
+      throw new MutationNotStartedError("回滚正在进行，请等待完成后再编辑。");
     }
     const state = useCodexStore.getState();
     if (codexRuntimeState(state, threadId).running) {
-      throw new Error("请先停止当前任务，再回滚编辑消息。");
+      throw new MutationNotStartedError("请先停止当前任务，再回滚编辑消息。");
     }
     if (!Number.isInteger(numTurns) || numTurns < 1)
-      throw new Error("无效的回滚轮数。");
+      throw new MutationNotStartedError("无效的回滚轮数。");
     const pending = (async () => {
       const params: ThreadRollbackParams & { beforeTurnId?: string } = {
         threadId,
@@ -826,7 +862,7 @@ export const codexService = {
           turnTimingMap[threadId] = {
             turnId: lastTurn.id,
             startedAtMs: (lastTurn.startedAt ?? 0) * 1000,
-            durationMs: lastTurn.durationMs,
+            durationMs: verifiedTurnDuration(lastTurn.durationMs),
             status: lastTurn.status,
           };
         return {
@@ -859,24 +895,76 @@ export const codexService = {
     input: string,
     images: string[] = [],
     clientUserMessageId?: string,
+    userInputOverride?: UserInput[],
+    configOverride?: Pick<
+      TurnStartParams,
+      | "cwd"
+      | "model"
+      | "effort"
+      | "serviceTier"
+      | "approvalPolicy"
+      | "approvalsReviewer"
+      | "sandboxPolicy"
+      | "collaborationMode"
+    >,
   ) {
     const set = useCodexStore.setState;
     const epoch = runtimeEpoch;
     const timingAtRequest = useCodexStore.getState().turnTimingMap[threadId];
     try {
-      const userInputs = buildUserInputs(input, images);
+      const userInputs = structuredClone(
+        userInputOverride ?? buildUserInputs(input, images),
+      );
+      const capturedConfig = configOverride
+        ? structuredClone(
+            Object.fromEntries(
+              [
+                "cwd",
+                "model",
+                "effort",
+                "serviceTier",
+                "approvalPolicy",
+                "approvalsReviewer",
+                "sandboxPolicy",
+                "collaborationMode",
+              ]
+                .filter((key) =>
+                  Object.prototype.hasOwnProperty.call(configOverride, key),
+                )
+                .map((key) => [
+                  key,
+                  configOverride[key as keyof typeof configOverride],
+                ]),
+            ),
+          )
+        : {};
 
-      const { approvalPolicy, sandbox, webSearchRequest, collaborationMode } =
-        useConfigStore.getState();
-      const { model, reasoningEffort } = getThreadModelSettings(threadId);
+      const {
+        model,
+        reasoningEffort,
+        serviceTier,
+        approvalPolicy,
+        approvalsReviewer,
+        sandbox,
+        sandboxPolicy,
+        webSearchRequest,
+        collaborationMode,
+      } = getThreadModelSettings(threadId);
 
       const response = await turnStart({
         threadId,
         ...(clientUserMessageId ? { clientUserMessageId } : {}),
         input: userInputs,
         cwd: resolveThreadCwd(threadId),
-        approvalPolicy,
-        sandboxPolicy: sandboxModeToPolicy(sandbox, webSearchRequest),
+        ...(model
+          ? {
+              approvalPolicy,
+              approvalsReviewer,
+              sandboxPolicy:
+                sandboxPolicy ?? sandboxModeToPolicy(sandbox, webSearchRequest),
+              serviceTier,
+            }
+          : {}),
         model: model || null,
         effort: reasoningEffort ?? null,
         // Mode is a turn/start field, not a thread/start config key. Explicit
@@ -893,6 +981,7 @@ export const codexService = {
               },
             }
           : {}),
+        ...capturedConfig,
       });
 
       if (epoch !== runtimeEpoch)
@@ -931,7 +1020,12 @@ export const codexService = {
                     turnId: response.turn.id,
                     startedAtMs:
                       (response.turn.startedAt ?? Date.now() / 1000) * 1000,
-                    durationMs: response.turn.durationMs,
+                    durationMs: verifiedTurnDuration(
+                      response.turn.durationMs,
+                      state.turnTimingMap[threadId]?.turnId === response.turn.id
+                        ? state.turnTimingMap[threadId].durationMs
+                        : undefined,
+                    ),
                     status: response.turn.status,
                   },
                 },

@@ -158,7 +158,12 @@ export function useImageAttachments(owner: string) {
     try {
       await ensureAttachmentDraft(owner);
       // File bytes must be committed before an upload begins, so an interrupted upload is recoverable.
-      await flushAttachmentDraft(itemOwner(owner, item.id) ?? owner);
+      const target = itemOwner(owner, item.id);
+      if (!target) return;
+      await flushAttachmentDraft(target);
+      // Reading and saving photo bytes can outlive removal. A removed draft
+      // must not start a network upload when that earlier work finally finishes.
+      if (!itemOwner(owner, item.id)) return;
       const path = await uploadBrowserFile(item.file!);
       updateItem(owner, item.id, (value) => ({
         ...value,

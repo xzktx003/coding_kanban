@@ -128,6 +128,61 @@ function waitForTerminalMarker(
   });
 }
 
+/** Each wait sees only new live output, never an old prompt in replay history. */
+function waitForLiveTerminalMarker(
+  socket: WebSocket,
+  marker: string,
+  timeoutMs = 3_000,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let output = "";
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+      socket.removeEventListener("message", onMessage);
+      socket.removeEventListener("close", onClose);
+      socket.removeEventListener("error", onError);
+    };
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      reject(
+        new Error(
+          `live terminal did not render ${marker}; tail=${output.slice(-500)}`,
+        ),
+      );
+    }, timeoutMs);
+    const onMessage = async (event: MessageEvent) => {
+      const payload =
+        typeof event.data === "string" ? event.data : await event.data.text();
+      try {
+        const envelope = JSON.parse(payload);
+        if (envelope.__agentOrchestrator === "terminal-control") return;
+      } catch {
+        // Raw live PTY output is intentionally not JSON.
+      }
+      output = (output + payload).slice(-64 * 1024);
+      const rendered = output
+        .replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/g, "")
+        .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "")
+        .replace(/\x1b[()][0-2A-Z]/g, "");
+      if (rendered.includes(marker)) {
+        cleanup();
+        resolve();
+      }
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error("owned terminal closed before prompt rendered"));
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("owned terminal failed before prompt rendered"));
+    };
+    socket.addEventListener("message", onMessage);
+    socket.addEventListener("close", onClose);
+    socket.addEventListener("error", onError);
+  });
+}
+
 test("POST /api/agent-discovery/tmux/add ignores a stale generated title", async () => {
   const { app } = buildServer();
   const sessionName = `tmux-canonical-${Date.now()}`;
@@ -421,6 +476,7 @@ test("POST /api/agent-sessions/:id/stdin edits and cancels a real tmux rename-wi
   const cancelledWindowName = `cancelled-${Date.now()}`;
   const readyMarker = `TMUX_RENAME_PROMPT_READY_${Date.now()}`;
   let agentSessionId: string | undefined;
+  let promptSocket: WebSocket | undefined;
 
   killTmuxSession(sessionName);
   runTmux([
@@ -475,15 +531,51 @@ test("POST /api/agent-sessions/:id/stdin edits and cancels a real tmux rename-wi
       readyMarker,
     );
 
+    promptSocket = new WebSocket(
+      `${terminalUrl}/ws/agent-sessions/${agentSessionId}/terminal`,
+    );
+    await new Promise<void>((resolve, reject) => {
+      const timeoutId = setTimeout(
+        () => reject(new Error("owned prompt socket did not open")),
+        3_000,
+      );
+      promptSocket!.addEventListener(
+        "open",
+        () => {
+          clearTimeout(timeoutId);
+          resolve();
+        },
+        { once: true },
+      );
+      promptSocket!.addEventListener(
+        "error",
+        () => {
+          clearTimeout(timeoutId);
+          reject(new Error("owned prompt socket failed"));
+        },
+        { once: true },
+      );
+    });
+
     await sendInput("\x02");
+    const firstPromptReady = waitForLiveTerminalMarker(
+      promptSocket,
+      `(rename-window) ${originalWindowName}`,
+    );
     await sendInput(",");
+    await firstPromptReady;
     await sendInput("\x15");
     await sendInput(committedWindowName);
     await sendInput("\r");
     await waitForTmuxFormat(sessionName, "#{window_name}", committedWindowName);
 
     await sendInput("\x02");
+    const secondPromptReady = waitForLiveTerminalMarker(
+      promptSocket,
+      `(rename-window) ${committedWindowName}`,
+    );
     await sendInput(",");
+    await secondPromptReady;
     await sendInput("\x15");
     await sendInput(cancelledWindowName);
     await sendInput("\x1b");
@@ -495,6 +587,7 @@ test("POST /api/agent-sessions/:id/stdin edits and cancels a real tmux rename-wi
       committedWindowName,
     );
   } finally {
+    promptSocket?.close();
     if (agentSessionId) {
       await fetch(`${baseUrl}/api/agent-sessions/${agentSessionId}`, {
         method: "DELETE",

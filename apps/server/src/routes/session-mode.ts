@@ -3,6 +3,16 @@ import { registerSessionSubagentRoutes } from "./session-subagents.js";
 import { registerSessionProjectsRoutes } from "./session-projects.js";
 import { registerWorkspaceFileRoutes } from "./workspace-files.js";
 import { registerSessionTabsRoutes } from "./session-tabs.js";
+import { registerSessionSavedPatchRoutes } from "./session-saved-patch.js";
+import { registerSessionGitHunkRoutes } from "./session-git-hunks.js";
+import { registerSessionGitReviewRoutes } from "./session-git-review.js";
+import { registerSessionGuardianDenialRoutes } from "./session-codex-guardian.js";
+import { registerCodexHostRoutes } from "./session-codex-host.js";
+import { registerCodexCloudRoutes } from "./session-codex-cloud.js";
+import { createCodexHostOwnerResolver } from "../services/codex-host-owner.js";
+import { projectCodexPriorConversation } from "../services/codex-cloud-history.js";
+import { CodexHostCompanionCredential, prepareCodexHostCompanion } from "../services/codex-host-companion.js";
+import type { VsCodeWebManager } from "../services/vscode-web-manager.js";
 import { saveSessionAttachment } from "../services/session-attachments.js";
 import { resolve } from "node:path";
 import { Readable } from "node:stream";
@@ -15,6 +25,7 @@ interface SessionModeRouteOptions {
   fetch?: typeof globalThis.fetch;
   projects?: () => string[];
   ensureRuntime?: () => Promise<string | undefined>;
+  vsCodeWebManager?: VsCodeWebManager;
 }
 
 function validateOrigin(origin: string): URL {
@@ -39,6 +50,11 @@ export function registerSessionModeRoutes(
   app: FastifyInstance,
   options: SessionModeRouteOptions = {},
 ): void {
+  registerSessionGitHunkRoutes(app);
+  registerSessionGitReviewRoutes(app);
+  registerSessionGuardianDenialRoutes(app, {
+    file: options.attachmentRoot ? resolve(options.attachmentRoot, "..", "codex-guardian-denials.json") : undefined,
+  });
   registerSessionTabsRoutes(app, {
     file: options.attachmentRoot
       ? resolve(options.attachmentRoot, "..", "followed-sessions.json")
@@ -54,6 +70,42 @@ export function registerSessionModeRoutes(
   });
   let origin = options.origin ? validateOrigin(options.origin).origin : null;
   const fetchUpstream = options.fetch ?? globalThis.fetch;
+  if (options.attachmentRoot) {
+    const dataHome = resolve(options.attachmentRoot, "..");
+    const owners = createCodexHostOwnerResolver({
+      origin: () => origin,
+      fetch: fetchUpstream,
+      projects: async () => [...(options.projects?.() ?? []), ...(await sharedProjects.getProjects())],
+    });
+    const credential = new CodexHostCompanionCredential(dataHome);
+    let credentialReady: Promise<void> | undefined;
+    app.addHook("onListen", async () => {
+      const address = app.server.address();
+      if (!address || typeof address === "string") throw new Error("编辑器宿主网关尚未绑定 HTTP 端口");
+      credentialReady = credential.write(`http://127.0.0.1:${address.port}`);
+      await credentialReady;
+    });
+    options.vsCodeWebManager?.setCodexHostPreparation(async (paths) => {
+      if (!credentialReady) throw new Error("编辑器宿主网关尚未监听，请稍后重新连接");
+      await credentialReady;
+      await prepareCodexHostCompanion({
+        ...paths,
+        packageRoot: resolve(import.meta.dirname, "../../../../packages/codex-host-bridge"),
+        credentialFile: credential.file,
+      });
+    });
+    registerCodexHostRoutes(app, { credential, resolveOwner: owners.resolve });
+    registerCodexCloudRoutes(app, {
+      dataHome,
+      resolveOwner: owners.resolve,
+      priorConversation: async (request) => projectCodexPriorConversation(await owners.readThread(request.owner.threadId!)),
+    });
+  }
+  registerSessionSavedPatchRoutes(app, {
+    origin: () => origin,
+    fetch: fetchUpstream,
+    file: options.attachmentRoot ? resolve(options.attachmentRoot, "..", "codex-saved-patches.json") : undefined,
+  });
   const followups = registerSessionFollowupRoutes(app, {
     origin: () => origin,
     fetch: fetchUpstream,

@@ -1,4 +1,4 @@
-import { acceptTurnStart } from "@session/utils/codexRuntimeState";
+import { acceptTurnStart, verifiedTurnDuration } from "@session/utils/codexRuntimeState";
 import type { StateCreator } from 'zustand';
 import type { ServerNotification } from '@session/bindings';
 import type { ThreadGoal, ThreadTokenUsage } from '@session/bindings/v2';
@@ -93,7 +93,7 @@ export const createEventsSlice: StateCreator<CodexStore, [], [], EventsSlice> = 
               startedAtMs:
                 existing?.startedAtMs ??
                 (typeof turn.startedAt === 'number' ? turn.startedAt * 1000 : Date.now()),
-              durationMs: turn.durationMs,
+              durationMs: verifiedTurnDuration(turn.durationMs, existing?.durationMs),
               status: turn.status === 'inProgress' ? 'completed' : turn.status,
             },
           };

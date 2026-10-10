@@ -135,3 +135,90 @@ it("a cold snapshot of a changed native model clears an obsolete notice without 
   expect(getThreadModelSettings("a").model).toBe("sol");
   expect(useThreadModelStore.getState().threads.a.notice).toBeUndefined();
 });
+
+it("isolates service tier, permission and plan choices, and restores them without borrowing a different thread's defaults", async () => {
+  const originalB = getThreadModelSettings("b");
+  changeThreadModel("a", {
+    serviceTier: "fast",
+    sandbox: "read-only",
+    approvalPolicy: "untrusted",
+    webSearchRequest: true,
+    collaborationMode: "plan",
+  });
+  expect(getThreadModelSettings("a")).toMatchObject({
+    serviceTier: "fast",
+    sandbox: "read-only",
+    approvalPolicy: "untrusted",
+    webSearchRequest: true,
+    collaborationMode: "plan",
+  });
+  expect(getThreadModelSettings("b")).toEqual(originalB);
+  const saved = localStorage.getItem("kanban.session.codex-thread-models")!;
+  useThreadModelStore.setState({ threads: {} });
+  localStorage.setItem("kanban.session.codex-thread-models", saved);
+  await useThreadModelStore.persist.rehydrate();
+  expect(getThreadModelSettings("a")).toMatchObject({
+    serviceTier: "fast",
+    collaborationMode: "plan",
+  });
+});
+
+it("retains native external policies and ignores late settings until the selected owner's tier and permissions are confirmed", () => {
+  hydrateThreadModel("a", {
+    model: "astra",
+    sandboxPolicy: { type: "externalSandbox", networkAccess: "restricted" },
+    approvalPolicy: "on-request",
+    serviceTier: null,
+  });
+  expect(getThreadModelSettings("a").sandboxPolicy).toEqual({
+    type: "externalSandbox",
+    networkAccess: "restricted",
+  });
+  changeThreadModel("a", {
+    serviceTier: "fast",
+    sandbox: "read-only",
+    sandboxPolicy: null,
+    approvalPolicy: "untrusted",
+  });
+  hydrateThreadModel("a", {
+    model: "astra",
+    serviceTier: null,
+    sandboxPolicy: {
+      type: "workspaceWrite",
+      writableRoots: [],
+      networkAccess: false,
+      excludeTmpdirEnvVar: false,
+      excludeSlashTmp: false,
+    },
+    approvalPolicy: "on-request",
+  });
+  expect(getThreadModelSettings("a")).toMatchObject({
+    serviceTier: "fast",
+    sandbox: "read-only",
+    approvalPolicy: "untrusted",
+  });
+  expect(useThreadModelStore.getState().threads.a.pending).toBe(true);
+  hydrateThreadModel("a", {
+    model: "astra",
+    serviceTier: "fast",
+    sandboxPolicy: { type: "readOnly", networkAccess: false },
+    approvalPolicy: "untrusted",
+  });
+  expect(useThreadModelStore.getState().threads.a.pending).toBe(false);
+});
+
+it("enables auto approval only from the same owner's authoritative native reviewer, preserving another owner's default-off capability", () => {
+  expect(getThreadModelSettings("a").autoReviewCapability).toBeNull();
+  hydrateThreadModel("a", { model: "astra", approvalsReviewer: "auto_review" });
+  expect(getThreadModelSettings("a")).toMatchObject({
+    approvalsReviewer: "auto_review",
+    autoReviewCapability: "auto_review",
+  });
+  expect(getThreadModelSettings("b")).toMatchObject({
+    approvalsReviewer: "user",
+    autoReviewCapability: null,
+  });
+  changeThreadModel("a", { approvalsReviewer: "user" });
+  hydrateThreadModel("a", { model: "astra", approvalsReviewer: "auto_review" });
+  expect(getThreadModelSettings("a").approvalsReviewer).toBe("user");
+});

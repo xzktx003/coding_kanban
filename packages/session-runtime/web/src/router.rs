@@ -12,6 +12,8 @@ use tower_http::services::{ServeDir, ServeFile};
 use super::{
     handlers::{
         api_account_rate_limits, api_allow_sleep, api_archive_thread, api_unarchive_thread, api_canonicalize_path,
+        api_config_read, api_config_requirements_read, api_thread_search_occurrences,
+        api_cancel_account_login, api_logout_account,
         api_acp_list_agents, api_acp_install_agent, api_acp_start, api_acp_prompt, api_acp_cancel,
         api_acp_authenticate, api_acp_new_session, api_acp_respond_permission, api_acp_stop,
         api_acp_set_mode, api_acp_set_model, api_acp_set_config_option,
@@ -194,6 +196,9 @@ pub fn create_router(state: WebServerState) -> Router {
         .route("/api/codex/start-thread", post(api_start_thread))
         .route("/api/codex/thread/resume", post(api_resume_thread))
         .route("/api/codex/thread/read", post(api_read_thread))
+        .route("/api/codex/thread/search-occurrences", post(api_thread_search_occurrences))
+        .route("/api/codex/config/read", post(api_config_read))
+        .route("/api/codex/config/requirements/read", post(api_config_requirements_read))
         .route("/api/codex/thread/metadata", post(api_thread_metadata))
         .route("/api/codex/agents/roles", post(api_agent_roles))
         .route("/api/codex/thread/loaded/list", post(api_loaded_threads))
@@ -264,6 +269,8 @@ pub fn create_router(state: WebServerState) -> Router {
         .route("/api/claude/usage", get(api_claude_usage))
         .route("/api/codex/account/get", post(api_get_account))
         .route("/api/codex/account/login", post(api_login_account))
+        .route("/api/codex/account/login/cancel", post(api_cancel_account_login))
+        .route("/api/codex/account/logout", post(api_logout_account))
         .route(
             "/api/codex/account/snapshot/save",
             post(api_save_account_snapshot),

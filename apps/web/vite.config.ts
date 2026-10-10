@@ -7,10 +7,12 @@ import { defineConfig, loadEnv, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { sessionCssScope } from "../../scripts/session-css-scope.mjs";
+import { resolveWebDevCacheDir } from "../../scripts/vite-dev-cache.mjs";
 
 import {
   resolveHttpsFallbackRedirectLocation,
   resolveWebDevConfig,
+  resolveWebDevProxies,
 } from "./src/lib/dev-server-config";
 import {
   VSCODE_HTTPS_CA_DOWNLOAD_PATH,
@@ -167,7 +169,7 @@ function httpFallbackPlugin(): Plugin {
 // Backend host:port is looked up from .env (WEB_BACKEND_HOST / WEB_BACKEND_PORT)
 // so users can redirect API/WebSocket traffic without editing source code.
 // See .env.example at repo root.
-export default defineConfig(({ mode }) => {
+export default defineConfig(({ command, mode }) => {
   const env = {
     ...process.env,
     ...loadEnv(mode, resolve(__dirname, "../.."), ""),
@@ -178,6 +180,15 @@ export default defineConfig(({ mode }) => {
   const httpsCaCertificate = readHttpsCaCertificate(env);
 
   return {
+    // Separate optimizers from other Vite processes sharing node_modules.
+    // This process keeps its cache identity through normal config reloads.
+    cacheDir:
+      command === "serve"
+        ? resolveWebDevCacheDir({
+            projectRoot: resolve(__dirname, "../.."),
+            mode,
+          })
+        : undefined,
     plugins: [
       react(),
       tailwindcss(),
@@ -190,17 +201,7 @@ export default defineConfig(({ mode }) => {
       host: WEB_HOST,
       port: webConfig.webPort,
       https: readHttpsConfig(env),
-      proxy: {
-        "/api": webConfig.apiTarget,
-        "/vscode": {
-          target: webConfig.apiTarget,
-          ws: true,
-        },
-        "/ws": {
-          target: webConfig.wsTarget,
-          ws: true,
-        },
-      },
+      proxy: resolveWebDevProxies(webConfig),
     },
   };
 });

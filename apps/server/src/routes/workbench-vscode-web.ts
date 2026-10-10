@@ -12,10 +12,12 @@ export function registerWorkbenchVsCodeWebRoutes(
   app: FastifyInstance,
   manager: Pick<VsCodeWebManager, "ensureSession">,
 ): void {
-  app.post<{ Body: { path?: unknown } }>(
+  app.post<{ Body: { path?: unknown; clientId?: unknown } }>(
     "/api/workbench/vscode-web",
     async (request, reply) => {
       const path = request.body?.path;
+      const clientId = request.body?.clientId;
+      if (clientId !== undefined && (typeof clientId !== "string" || !/^[a-zA-Z0-9_-]{16,80}$/.test(clientId))) return reply.code(400).send({ error: "编辑器窗口标识无效。" });
       if (
         typeof path !== "string" ||
         !isAbsolute(path) ||
@@ -38,7 +40,7 @@ export function registerWorkbenchVsCodeWebRoutes(
         // a terminal or launching an Agent just to open a project directory.
         return await manager.ensureSession(
           {
-            id: `session-project-${createHash("sha256").update(workingDirectory).digest("hex")}`,
+            id: `session-project-${createHash("sha256").update(`${workingDirectory}\0${clientId ?? "legacy"}`).digest("hex")}`,
             workspaceId: "default",
             sourceType: "local",
             agentKind: "shell",

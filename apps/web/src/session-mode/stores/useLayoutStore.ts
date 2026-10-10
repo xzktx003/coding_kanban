@@ -37,7 +37,7 @@ interface LayoutStore {
   rightPanelSize: number;
   setRightPanelSize: (size: number) => void;
   view: viewType;
-  setView: (view: viewType) => void;
+  setView: (view: viewType, onNavigated?: () => void) => void;
   // Focus mode: hides the left main content and lets the right panel fill the width
   isRightPanelFocused: boolean;
   setIsRightPanelFocused: (focused: boolean) => void;
@@ -87,8 +87,9 @@ export const useLayoutStore = create<LayoutStore>()(
       rightPanelSize: 45,
       setRightPanelSize: (size) => set({ rightPanelSize: size }),
       view: 'agent',
-      setView: (view) => {
-        if (get().view !== view) requestSessionNavigation(() => set({ view }));
+      setView: (view, onNavigated) => {
+        if (get().view !== view) requestSessionNavigation(() => { set({ view }); onNavigated?.(); });
+        else onNavigated?.();
       },
       isRightPanelFocused: false,
       setIsRightPanelFocused: (focused: boolean) => set({ isRightPanelFocused: focused }),

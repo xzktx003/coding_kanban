@@ -1,6 +1,9 @@
 import { formatEditorContext } from "@session/services/editorContext";
 import { activeDraftOwner } from "@session/stores/useInputStore";
-import { composerDrafts } from "@session/components/codex/composer/v2/drafts";
+import { addBrowserEditorContext } from "@session/features/codex-host/bridge";
+import { useCodexStore } from "@session/components/codex/stores";
+import { sessionDraftKey } from "@session/stores/useSessionDraftStore";
+import { useVsCodePanelStore } from "@session/stores/useVsCodePanelStore";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -57,9 +60,11 @@ export function FileViewer({ filePath }: { filePath: string }) {
     useWorkspaceStore((s) => s.cwd) ??
     filePath.slice(0, filePath.lastIndexOf("/"));
   const doc = useFileDocumentStore((s) => s.documents[filePath]);
+  const reveal = useEditorStore((s) => s.revealLocation);
   const docs = useFileDocumentStore.getState();
   const [loading, setLoading] = useState(true),
     [error, setError] = useState<string | null>(null),
+    [contextError, setContextError] = useState<string | null>(null),
     [full, setFull] = useState(false),
     [mode, setMode] = useState<"edit" | "preview" | "both">("edit"),
     [reloadOpen, setReloadOpen] = useState(false),
@@ -101,6 +106,7 @@ export function FileViewer({ filePath }: { filePath: string }) {
     setSaving(false);
     setError(null);
     setFull(false);
+    setContextError(null);
     void load();
     return () => {
       generation.current++;
@@ -167,8 +173,15 @@ export function FileViewer({ filePath }: { filePath: string }) {
       </div>
     );
   const large = (doc?.base.split("\n").length ?? 0) > 500;
+  const revealBeyondPreview =
+    reveal?.path === filePath &&
+    reveal.endLine !== undefined &&
+    reveal.endLine > 500;
   const text = doc?.draft ?? "",
-    display = large && !full ? text.split("\n").slice(0, 500).join("\n") : text;
+    display =
+      large && !full && !revealBeyondPreview
+        ? text.split("\n").slice(0, 500).join("\n")
+        : text;
   const preview = (
     <div
       className="session-file-markdown overflow-auto p-4 h-full"
@@ -274,6 +287,11 @@ export function FileViewer({ filePath }: { filePath: string }) {
           </Button>
         </div>
       )}
+      {contextError && (
+        <div role="alert" className="p-2 text-sm text-destructive">
+          未添加到输入区：{contextError}
+        </div>
+      )}
       {doc?.diskChanged && (
         <div role="status" className="session-file-conflict">
           磁盘文件已更新，当前草稿已保留。
@@ -314,14 +332,68 @@ export function FileViewer({ filePath }: { filePath: string }) {
                   onContentChange={(value) => docs.edit(filePath, value)}
                   onSave={save}
                   onSendToAI={(text, range) => {
-                    const owner = activeDraftOwner();
-                    if(JSON.parse(owner)[0]==="codex") {
-                      composerDrafts.add(owner,{id:crypto.randomUUID(),kind:"file",name:filePath.split("/").pop()??filePath,path:filePath,text,...(range?{range}:{})});
-                    } else useInputStore
-                      .getState()
-                      .appendInputValue(
-                        formatEditorContext(filePath, text, range),
+                    // Resolve the input owner at this deliberate action, then keep its identity immutable.
+                    const draftOwner = activeDraftOwner();
+                    try {
+                      const parts: unknown = JSON.parse(draftOwner);
+                      if (Array.isArray(parts) && parts[0] === "codex") {
+                        const state = useCodexStore.getState();
+                        const workspace = useWorkspaceStore.getState().cwd;
+                        if (
+                          draftOwner !==
+                          sessionDraftKey(
+                            "codex",
+                            state.currentThreadId,
+                            workspace,
+                          )
+                        )
+                          throw new Error(
+                            "输入目标已改变，请重新选择原会话项目。",
+                          );
+                        const threadId = state.currentThreadId;
+                        const cwd = threadId
+                          ? state.threads.find(
+                              (thread) => thread.id === threadId,
+                            )?.cwd
+                          : workspace;
+                        if (!cwd?.trim())
+                          throw new Error(
+                            "原会话项目目录尚未确认，请加载该会话后重试。",
+                          );
+                        const aliases = useVsCodePanelStore.getState().aliases;
+                        const canonicalRoot = aliases[root] ?? root;
+                        if (canonicalRoot !== (aliases[cwd] ?? cwd))
+                          throw new Error(
+                            "文件不属于当前输入的原会话项目，请选择对应会话后重试。",
+                          );
+                        const path =
+                          canonicalRoot !== root &&
+                          filePath.startsWith(root.replace(/\/$/, "") + "/")
+                            ? canonicalRoot.replace(/\/$/, "") +
+                              filePath.slice(root.replace(/\/$/, "").length)
+                            : filePath;
+                        const owner = Object.freeze({
+                          cwd,
+                          threadId,
+                          draftOwner,
+                        });
+                        addBrowserEditorContext(owner, {
+                          path,
+                          text,
+                          ...(range ? { range: { ...range } } : {}),
+                        });
+                      } else
+                        useInputStore
+                          .getState()
+                          .appendInputValue(
+                            formatEditorContext(filePath, text, range),
+                          );
+                      setContextError(null);
+                    } catch (error) {
+                      setContextError(
+                        error instanceof Error ? error.message : String(error),
                       );
+                    }
                   }}
                   onAddToTodo={addTodo}
                 />

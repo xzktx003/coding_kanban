@@ -1,0 +1,526 @@
+/* openai.chatgpt 26.51002.51308 request-panel/Jn/Qr/jn and approvalRequestCard.
+ * Host colors follow the existing Codex presentation tokens. Mobile targets
+ * intentionally keep the project's 44px accessibility boundary. */
+.session-mode .codex-elicitation__image-picker {
+  display: flex;
+  gap: 12px;
+  overflow: auto;
+  scroll-snap-type: x proximity;
+  padding: 4px;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
+}
+.session-mode .codex-elicitation__image-option {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px;
+  flex: 0 0 auto;
+  width: 250px;
+  max-width: calc(100cqw - 32px);
+  border-radius: 16px;
+  position: relative;
+  scroll-snap-align: start;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--codex-muted);
+  cursor: pointer;
+}
+.session-mode .codex-elicitation__image-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 136px;
+  aspect-ratio: 16/9;
+  border: 1px solid var(--codex-border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--vscode-editor-background, var(--background));
+}
+.session-mode .codex-elicitation__image-frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: scale-down;
+}
+.session-mode .codex-elicitation__image-frame > span {
+  font-size: 28px;
+}
+.session-mode
+  .codex-elicitation__image-option[data-selected="true"]
+  .codex-elicitation__image-frame,
+.session-mode
+  .codex-elicitation__image-option:focus-within
+  .codex-elicitation__image-frame {
+  outline: 3px solid var(--codex-border);
+  outline-offset: 1px;
+}
+.session-mode .codex-elicitation__file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+.session-mode .codex-elicitation__image-carousel {
+  position: relative;
+  min-width: 0;
+}
+.session-mode
+  .codex-elicitation__image-picker[data-portrait="true"]
+  .codex-elicitation__image-frame {
+  aspect-ratio: 4/5;
+  width: 108.8px;
+}
+.session-mode
+  .codex-elicitation__image-picker[data-portrait="true"]
+  .codex-elicitation__image-option {
+  width: 116.8px;
+}
+.session-mode .codex-elicitation__image-option > span:last-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-mode .codex-elicitation__gallery-navigation {
+  position: absolute;
+  inset-inline: 0;
+  top: 58px;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.session-mode .codex-elicitation__gallery-navigation button {
+  pointer-events: auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 1px solid var(--codex-border);
+  background: var(--vscode-editor-background, var(--background));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.session-mode .codex-elicitation__gallery-navigation button:disabled {
+  visibility: hidden;
+}
+.session-mode
+  :is(.codex-request-card, .codex-elicitation, .session-async-panel) {
+  --codex-text: var(--vscode-foreground, #3b3b3b);
+  --codex-secondary: var(
+    --vscode-dropdown-background,
+    var(--vscode-sideBar-background, #f5f5f3)
+  );
+  --codex-muted: var(--vscode-descriptionForeground, #717171);
+  --codex-border: color-mix(in srgb, var(--codex-text) 8%, transparent);
+  --codex-chat-font: var(--vscode-font-family, system-ui, sans-serif);
+  font-family: var(--codex-chat-font);
+}
+:is(.session-mode.dark, .dark .session-mode, .session-mode .dark)
+  :is(.codex-request-card, .codex-elicitation, .session-async-panel) {
+  --codex-text: var(--vscode-foreground, #ccc);
+  --codex-secondary: var(
+    --vscode-dropdown-background,
+    var(--vscode-sideBar-background, #282a23)
+  );
+  --codex-muted: var(--vscode-descriptionForeground, #858585);
+}
+.session-mode
+  :is(.codex-request-card, .codex-elicitation, .session-async-panel) {
+  color: var(--codex-text, var(--foreground));
+  background: var(--codex-secondary, var(--background));
+  border: 1px solid var(--codex-border, var(--border));
+  border-radius: 25px;
+  overflow: hidden;
+  container-type: inline-size;
+  min-width: 0;
+  font-size: var(--codex-chat-font-size, 13px);
+}
+.session-mode .session-user-question.codex-request-card {
+  padding: 0;
+  border-radius: 25px;
+  color: var(--codex-text, var(--foreground));
+  background: var(--codex-secondary, var(--background));
+  border: 1px solid var(--codex-border, var(--border));
+}
+.session-mode section.codex-approval {
+  border-radius: 25px;
+}
+.session-mode .codex-request-card .session-user-question-header {
+  border: 0;
+  padding: 16px 16px 8px;
+  gap: 8px;
+  margin: 0;
+}
+.session-mode .codex-request-card .session-user-question-header button {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  border-radius: 8px;
+  padding: 0;
+}
+.session-mode .codex-request-card .codex-request-question-title {
+  min-width: 0;
+  flex: 1;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 500;
+}
+.session-mode .codex-request-card fieldset {
+  padding: 0 8px 8px;
+}
+.session-mode .codex-request-card legend {
+  padding: 0 8px;
+  margin: 0 0 12px;
+  font-size: 16px;
+  line-height: 20px;
+  font-weight: 500;
+}
+.session-mode .codex-request-card [role="radiogroup"] {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.session-mode .codex-request-card [role="radiogroup"] > * {
+  margin: 0;
+}
+.session-mode .codex-request-card .session-user-question-option {
+  border: 0;
+  background: transparent;
+  border-radius: 12px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  text-align: start;
+}
+.session-mode .codex-request-card .session-user-question-option:hover,
+.session-mode
+  .codex-request-card
+  .session-user-question-option[aria-checked="true"] {
+  background: color-mix(
+    in oklab,
+    var(--codex-text, var(--foreground)) 5%,
+    transparent
+  );
+}
+.session-mode
+  .codex-request-card
+  .session-user-question-option
+  > span:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+}
+.session-mode
+  .codex-request-card
+  .session-user-question-option
+  > span:last-child
+  > span {
+  font-size: 13px;
+  line-height: 20px;
+  margin: 0;
+}
+.session-mode .codex-request-card .session-user-question-number {
+  border: 1px solid var(--codex-border, var(--border));
+  border-radius: 5px;
+  background: transparent;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+.session-mode .codex-request-card .session-user-question-footer {
+  padding: 12px 16px;
+  margin: 0;
+  border-top: 1px solid var(--codex-border, var(--border));
+}
+.session-mode .codex-request-card :is(textarea, input) {
+  margin: 4px 8px 0;
+  width: calc(100% - 16px);
+}
+.session-mode
+  :is(.codex-request-card, .codex-elicitation)
+  button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.session-mode .codex-request-card button {
+  min-height: 32px;
+}
+.session-mode .codex-approval-hotkey {
+  font-size: 11px;
+  margin-inline-start: 8px;
+  opacity: 0.65;
+}
+.session-mode .codex-approval-patches {
+  min-width: 0;
+  padding: 0 12px 12px;
+  max-height: 280px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.session-mode .codex-approval-patches summary {
+  padding: 8px 4px;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.session-mode .codex-approval-patches .codex-diff {
+  overflow: auto;
+}
+.session-mode .codex-elicitation__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+  padding: 16px 16px 12px 20px;
+}
+.session-mode .codex-elicitation__server {
+  font-size: 12px;
+  color: var(--codex-muted, var(--muted-foreground));
+}
+.session-mode .codex-elicitation__title {
+  font-size: 13px;
+  font-weight: 500;
+}
+.session-mode .codex-elicitation:has(form) .codex-elicitation__title {
+  font-size: 16px;
+  line-height: 20px;
+  flex: 1;
+}
+.session-mode .codex-elicitation__field-heading {
+  flex-basis: 100%;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--codex-muted);
+}
+.session-mode .codex-elicitation__message {
+  padding: 0 16px 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.session-mode .codex-elicitation__fields {
+  padding: 0 12px 16px;
+  max-height: min(50vh, 440px);
+  overflow: auto;
+  /* At the field area's edge, continue scrolling the inline transcript so
+     the header and submit actions remain reachable in a short viewport. */
+  overscroll-behavior: auto;
+}
+.session-mode .codex-elicitation__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-block: 0;
+}
+.session-mode .codex-elicitation__label {
+  font-weight: 500;
+}
+.session-mode .codex-elicitation__description {
+  color: var(--codex-muted, var(--muted-foreground));
+  font-size: 12px;
+}
+.session-mode .codex-elicitation__input {
+  border: 1px solid var(--codex-border, var(--border));
+  border-radius: 8px;
+  padding: 8px;
+  background: transparent;
+  min-height: 32px;
+}
+.session-mode .codex-elicitation__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.session-mode .codex-elicitation__choice {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px;
+  border-radius: 10px;
+}
+.session-mode .codex-elicitation__choice[data-selected="true"] {
+  background: color-mix(
+    in oklab,
+    var(--codex-text, var(--foreground)) 5%,
+    transparent
+  );
+}
+.session-mode .codex-elicitation__error {
+  color: var(--destructive);
+  padding: 4px 16px;
+  font-size: 12px;
+}
+.session-mode .codex-elicitation [aria-invalid="true"] {
+  border-color: var(--destructive);
+}
+.session-mode .codex-elicitation__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--codex-border, var(--border));
+}
+.session-mode .codex-elicitation__actions button {
+  min-height: 32px;
+  border-radius: 10px;
+  padding: 0 8px;
+  font-size: 13px;
+  line-height: 18px;
+  border: 1px solid var(--codex-border);
+  background: var(--vscode-editor-background, var(--background));
+}
+.session-mode .codex-elicitation__actions button[data-primary="true"] {
+  order: 2;
+  border-color: transparent;
+  background: var(--vscode-button-background, var(--codex-text));
+  color: var(--vscode-button-foreground, var(--background));
+}
+.session-mode
+  .codex-elicitation__actions
+  button:not([data-primary]):first-child {
+  border-radius: 999px;
+}
+.session-mode .codex-elicitation__choice-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.session-mode .codex-elicitation__custom-input {
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 1px solid var(--codex-border);
+  border-radius: 8px;
+  background: transparent;
+}
+.session-mode .codex-elicitation__navigation {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-inline-start: auto;
+  flex-shrink: 0;
+  color: var(--codex-muted, var(--muted-foreground));
+  font-size: 12px;
+}
+.session-mode
+  :is(.codex-elicitation__navigation button, .codex-elicitation__collapse) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+}
+.session-mode .codex-elicitation__choice-input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+.session-mode .codex-elicitation__choice-index {
+  border: 1px solid var(--codex-border, var(--border));
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 20px;
+  font-size: 12px;
+  line-height: 1;
+  background: color-mix(
+    in oklab,
+    var(--codex-text, var(--foreground)) 5%,
+    transparent
+  );
+}
+.session-mode .codex-elicitation__choice-mark {
+  width: 12px;
+  height: 12px;
+}
+.session-mode .codex-elicitation__choice {
+  min-height: 32px;
+  padding: 6px 8px;
+}
+.session-mode .codex-elicitation__choice:focus-within {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+@container (max-width: 1536px) {
+  .session-mode
+    .codex-request-card
+    .session-user-question-option
+    > span:last-child {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+@container (max-width: 480px) {
+  .session-mode .codex-approval-hotkey {
+    display: none;
+  }
+}
+@media (max-width: 767px), (pointer: coarse) {
+  .session-mode :is(.codex-request-card, .codex-elicitation) button,
+  .session-mode .codex-elicitation__choice,
+  .session-mode .codex-elicitation__input {
+    min-height: 44px;
+  }
+  .session-mode .codex-approval-patches summary {
+    min-height: 44px;
+  }
+  .session-mode .codex-request-card .session-user-question-header button {
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+  .session-mode
+    :is(.codex-request-card, .codex-elicitation)
+    :is(input, textarea) {
+    font-size: 16px;
+  }
+}
+
+@media (pointer: coarse) {
+  .session-mode .codex-elicitation__gallery-navigation {
+    inset-inline: -6px;
+    top: 52px;
+  }
+
+  .session-mode .codex-elicitation__gallery-navigation button {
+    position: relative;
+    isolation: isolate;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    border: 0;
+    background: transparent;
+  }
+
+  .session-mode .codex-elicitation__gallery-navigation button::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    top: 50%;
+    left: 50%;
+    width: 32px;
+    height: 32px;
+    transform: translate(-50%, -50%);
+    box-sizing: border-box;
+    border-radius: 999px;
+    border: 1px solid var(--codex-border);
+    background: var(--vscode-editor-background, var(--background));
+    pointer-events: none;
+  }
+}

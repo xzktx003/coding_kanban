@@ -8,7 +8,7 @@ import {
   LoaderCircle,
   X,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@session/components/ui/button";
 import { Input } from "@session/components/ui/input";
@@ -18,6 +18,7 @@ import {
   useRequestUserInputStore,
   type RequestUserInputRequest,
 } from "../stores/useRequestUserInputStore";
+import "./request-native.css";
 
 export function RequestUserInputItem({
   currentThreadId,
@@ -41,7 +42,18 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
   const respond = useRequestUserInputStore((state) => state.respondToRequest);
   const [submitting, setSubmitting] = useState(false);
   const lock = useRef(false);
+  const advance = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState(false);
+  const disabled =
+    submitting ||
+    delivery?.phase === "submitting" ||
+    delivery?.phase === "uncertain";
+  useEffect(
+    () => () => {
+      if (advance.current) clearTimeout(advance.current);
+    },
+    [key, draft?.index, draft?.collapsed, disabled],
+  );
   if (!draft || !request.questions.length) return null;
   const index = Math.min(draft.index, request.questions.length - 1);
   const question = request.questions[index];
@@ -56,15 +68,34 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
     return value !== undefined && (value.length === 0 || !!value[0]?.trim());
   });
   const last = index === request.questions.length - 1;
-  const select = (value: string, isCustom = false) => {
+  const select = (value: string, isCustom = false, restore = false) => {
+    if (disabled) return;
+    if (advance.current) clearTimeout(advance.current);
     setError(false);
+    const selected = restore ? (draft.customText?.[question.id] ?? "") : value;
     updateDraft(request, {
-      answers: { ...draft.answers, [question.id]: [value] },
+      answers: { ...draft.answers, [question.id]: [selected] },
       custom: { ...draft.custom, [question.id]: isCustom },
+      ...(isCustom
+        ? { customText: { ...draft.customText, [question.id]: selected } }
+        : {}),
     });
+    // Native request-panel Jn/we advances one selected choice after 180ms.
+    // The last choice waits for explicit submit; stale instances never advance.
+    if (!isCustom && !last)
+      advance.current = setTimeout(() => {
+        const state = useRequestUserInputStore.getState();
+        const current = state.drafts[key];
+        if (
+          state.pendingRequests.includes(request) &&
+          current?.index === index &&
+          !current.collapsed
+        )
+          state.updateDraft(request, { index: index + 1 });
+      }, 180);
   };
   const submit = async () => {
-    if (!allAnswered || lock.current) return;
+    if (!allAnswered || lock.current || disabled) return;
     lock.current = true;
     setSubmitting(true);
     setError(false);
@@ -86,6 +117,7 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
           ),
         },
         request.threadId,
+        request,
       );
       // The original running turn resumes through its JSON-RPC response.
       // Never start another turn or change collaboration/approval settings.
@@ -117,15 +149,73 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
     );
   return (
     <section
-      className="session-user-question"
+      className="session-user-question codex-request-card"
       data-session-user-question
       aria-label={t("userInput.title")}
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (
+          event.nativeEvent.isComposing ||
+          event.repeat ||
+          event.defaultPrevented
+        )
+          return;
+        if (event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          if (!submitting) updateDraft(request, { collapsed: true });
+          return;
+        }
+        if (disabled) return;
+        if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+          event.preventDefault();
+          event.stopPropagation();
+          if (last) void submit();
+          else if (answered) updateDraft(request, { index: index + 1 });
+          return;
+        }
+        const editing = (event.target as HTMLElement).closest(
+          "input,textarea,select,[contenteditable=true]",
+        );
+        if (
+          editing ||
+          event.altKey ||
+          event.ctrlKey ||
+          event.metaKey ||
+          event.shiftKey
+        )
+          return;
+        if (/^[1-9]$/.test(event.key)) {
+          const number = Number(event.key) - 1;
+          if (number < options.length) {
+            event.preventDefault();
+            select(options[number].label);
+          } else if (number === options.length && question.isOther) {
+            event.preventDefault();
+            select("", true, true);
+          }
+        } else if (event.key === "ArrowLeft" && index > 0) {
+          event.preventDefault();
+          updateDraft(request, { index: index - 1 });
+        } else if (event.key === "ArrowRight" && !last) {
+          event.preventDefault();
+          updateDraft(request, { index: index + 1 });
+        }
+      }}
     >
       <div className="session-user-question-header">
-        <span className="flex items-center gap-2 text-sm font-medium">
-          <CircleHelp className="size-4 text-muted-foreground" />
-          {t("userInput.title")}
+        <span className="codex-request-question-title">
+          {question.question}
         </span>
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={index === 0 || disabled}
+          aria-label={t("userInput.previous")}
+          onClick={() => updateDraft(request, { index: index - 1 })}
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
         <span
           className="ml-auto text-xs tabular-nums text-muted-foreground"
           aria-live="polite"
@@ -146,16 +236,39 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
           <X className="size-4" />
         </Button>
       </div>
-      <fieldset disabled={submitting} className="min-w-0 space-y-3">
-        <legend className="mb-3 text-base font-semibold leading-relaxed whitespace-pre-wrap break-words">
-          {question.question}
-        </legend>
+      <fieldset
+        disabled={disabled}
+        aria-label={question.question}
+        className="min-w-0 space-y-3"
+      >
         {options.length > 0 && (
           <div
             role="radiogroup"
             aria-label={question.header || question.question}
             className="space-y-2"
             onKeyDown={(event) => {
+              if (
+                event.key === "Enter" &&
+                !event.nativeEvent.isComposing &&
+                !event.repeat &&
+                !event.altKey &&
+                !event.ctrlKey &&
+                !event.metaKey &&
+                !event.shiftKey &&
+                !disabled
+              ) {
+                const radio = event.target as HTMLButtonElement;
+                if (
+                  radio.getAttribute("role") === "radio" &&
+                  radio.getAttribute("aria-checked") === "true"
+                ) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (last) void submit();
+                  else updateDraft(request, { index: index + 1 });
+                  return;
+                }
+              }
               if (
                 ![
                   "ArrowDown",
@@ -173,7 +286,16 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
                 ),
               ];
               const current = radios.indexOf(event.target as HTMLButtonElement);
-              if (current < 0 || submitting) return;
+              if (
+                current < 0 ||
+                disabled ||
+                event.nativeEvent.isComposing ||
+                event.altKey ||
+                event.ctrlKey ||
+                event.metaKey ||
+                event.shiftKey
+              )
+                return;
               const target =
                 event.key === "Home"
                   ? 0
@@ -198,6 +320,7 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
                   type="button"
                   role="radio"
                   aria-checked={selected}
+                  disabled={disabled}
                   tabIndex={
                     selected || (!custom && !text && number === 0) ? 0 : -1
                   }
@@ -228,15 +351,16 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
                 type="button"
                 role="radio"
                 aria-checked={!!custom}
+                disabled={disabled}
                 tabIndex={custom ? 0 : -1}
                 className="session-user-question-option"
-                onClick={() => select("", true)}
+                onClick={() => select("", true, true)}
               >
                 <span
                   className="session-user-question-number"
                   aria-hidden="true"
                 >
-                  {custom ? <Check className="size-4" /> : "+"}
+                  {custom ? <Check className="size-4" /> : options.length + 1}
                 </span>
                 <span className="text-sm">{t("userInput.custom")}</span>
               </button>
@@ -247,6 +371,7 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
           (question.isSecret ? (
             <Input
               type="password"
+              disabled={disabled}
               autoComplete="off"
               aria-label={question.question}
               placeholder={t("userInput.enterAnswer")}
@@ -256,6 +381,7 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
             />
           ) : (
             <Textarea
+              disabled={disabled}
               aria-label={question.question}
               placeholder={t("userInput.enterAnswer")}
               value={text}
@@ -276,20 +402,11 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
         </p>
       )}
       <div className="session-user-question-footer">
-        <Button
-          variant="ghost"
-          className="min-h-11"
-          disabled={index === 0 || submitting}
-          onClick={() => updateDraft(request, { index: index - 1 })}
-        >
-          <ChevronLeft className="size-4" />
-          {t("userInput.previous")}
-        </Button>
         <div className="ml-auto flex flex-wrap justify-end gap-2">
           <Button
             variant="ghost"
             className="min-h-11"
-            disabled={submitting}
+            disabled={disabled}
             onClick={() => {
               updateDraft(request, {
                 answers: { ...draft.answers, [question.id]: [] },
@@ -300,25 +417,26 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
           >
             {t("userInput.skip")}
           </Button>
-          {last ? (
-            <Button
-              className="min-h-11"
-              disabled={!allAnswered || submitting}
-              onClick={() => void submit()}
-            >
-              {submitting && <LoaderCircle className="size-4 animate-spin" />}
-              {t(submitting ? "userInput.submitting" : "userInput.submit")}
-            </Button>
-          ) : (
-            <Button
-              className="min-h-11"
-              disabled={!answered || submitting}
-              onClick={() => updateDraft(request, { index: index + 1 })}
-            >
-              {t("userInput.next")}
-              <ChevronRight className="size-4" />
-            </Button>
-          )}
+          {(!options.length || text.trim()) &&
+            (last ? (
+              <Button
+                className="min-h-11"
+                disabled={!allAnswered || disabled}
+                onClick={() => void submit()}
+              >
+                {submitting && <LoaderCircle className="size-4 animate-spin" />}
+                {t(submitting ? "userInput.submitting" : "userInput.submit")}
+              </Button>
+            ) : (
+              <Button
+                className="min-h-11"
+                disabled={!answered || disabled}
+                onClick={() => updateDraft(request, { index: index + 1 })}
+              >
+                {t("userInput.next")}
+                <ChevronRight className="size-4" />
+              </Button>
+            ))}
         </div>
       </div>
     </section>

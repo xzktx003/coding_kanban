@@ -34,7 +34,7 @@ it("routes native settings notifications by thread ID and keeps local next-turn 
         method: "thread/settings/updated",
         params: {
           threadId: id,
-          threadSettings: { model, modelProvider: "openai", effort },
+          threadSettings: { model, modelProvider: "openai", effort, serviceTier:"fast", approvalPolicy:"on-request", approvalsReviewer:"user", sandboxPolicy:{type:"readOnly",networkAccess:false}, collaborationMode:{mode:"default",settings:{model,reasoning_effort:effort,developer_instructions:null}} },
         },
       } as any),
     );
@@ -42,6 +42,10 @@ it("routes native settings notifications by thread ID and keeps local next-turn 
   notify("b", "astra", "high");
   expect(useThreadModelStore.getState().threads.b).toMatchObject({
     model: "astra",
+    serviceTier: "fast",
+    approvalsReviewer: "user",
+    sandbox: "read-only",
+    collaborationMode: "default",
     notice: { from: "sol", to: "astra" },
   });
   expect(useThreadModelStore.getState().threads.a).toMatchObject({
