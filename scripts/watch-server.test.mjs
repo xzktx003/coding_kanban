@@ -65,6 +65,7 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
   const { spawn } = await import("node:child_process");
   const root = await mkdtemp(join(tmpdir(), "gateway-watch-"));
   let watcher;
+  let independentRuntime;
   let output = "";
   const waitFor = async (predicate) => {
     const deadline = Date.now() + 8000;
@@ -81,6 +82,7 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
       "apps/server/node_modules/tsx",
       "apps/web",
       "packages/shared/src",
+      "packages/session-runtime",
     ])
       await mkdir(join(root, path), { recursive: true });
     for (const path of [
@@ -88,6 +90,7 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
       "apps/server/package.json",
       "apps/web/package.json",
       "packages/shared/package.json",
+      "packages/session-runtime/package.json",
     ])
       await writeFile(join(root, path), '{"type":"module","dependencies":{}}');
     for (const path of ["pnpm-lock.yaml", "pnpm-workspace.yaml"])
@@ -105,10 +108,19 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
       new URL("./watch-server.mjs", import.meta.url),
       join(root, "scripts/watch-server.mjs"),
     );
+    await copyFile(
+      new URL("./startup-env.mjs", import.meta.url),
+      join(root, "scripts/startup-env.mjs"),
+    );
     await writeFile(
       join(root, "bin/pnpm"),
       "#!/bin/sh\nif [ -f install-fails ]; then echo INSTALL_FAILED; exit 1; fi\necho INSTALLED\n",
       { mode: 0o755 },
+    );
+    independentRuntime = spawn(
+      process.execPath,
+      ["-e", "setInterval(()=>{},1000)"],
+      { stdio: "ignore" },
     );
     watcher = spawn(
       process.execPath,
@@ -116,6 +128,8 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
       {
         env: {
           ...process.env,
+          SESSION_MODE_ENABLED: "1",
+          SESSION_RUNTIME_BIN: "",
           PATH: `${join(root, "bin")}:${process.env.PATH}`,
         },
         stdio: ["ignore", "pipe", "pipe"],
@@ -133,19 +147,29 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
     const original = pids()[0];
     await writeFile(join(root, "install-fails"), "");
     await writeFile(
-      join(root, "apps/server/package.json"),
+      join(root, "packages/session-runtime/package.json"),
       '{"type":"module","dependencies":{"new-dependency":"1.0.0"}}',
     );
     await waitFor(() => output.includes("Preparation failed"));
     assert.equal(pids().length, 1);
     process.kill(original, 0);
-    await mkdir(join(root, "apps/server/node_modules/new-dependency"));
+    process.kill(independentRuntime.pid, 0);
+    await mkdir(
+      join(root, "packages/session-runtime/node_modules/new-dependency"),
+      { recursive: true },
+    );
     await writeFile(
-      join(root, "apps/server/node_modules/new-dependency/package.json"),
+      join(
+        root,
+        "packages/session-runtime/node_modules/new-dependency/package.json",
+      ),
       '{"main":"index.js"}',
     );
     await writeFile(
-      join(root, "apps/server/node_modules/new-dependency/index.js"),
+      join(
+        root,
+        "packages/session-runtime/node_modules/new-dependency/index.js",
+      ),
       "",
     );
     await rm(join(root, "install-fails"));
@@ -156,11 +180,13 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
     await waitFor(() => pids().length === 2);
     assert.throws(() => process.kill(original, 0), /ESRCH/);
     const lastPid = pids()[1];
+    process.kill(independentRuntime.pid, 0);
     const exited = new Promise((resolve) => watcher.once("exit", resolve));
     watcher.kill("SIGTERM");
     await exited;
     assert.throws(() => process.kill(lastPid, 0), /ESRCH/);
   } finally {
+    if (independentRuntime) independentRuntime.kill("SIGTERM");
     if (watcher && watcher.exitCode === null && watcher.signalCode === null) {
       const exited = new Promise((resolve) => watcher.once("exit", resolve));
       watcher.kill("SIGTERM");
@@ -170,7 +196,7 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
   }
 });
 
-test("preparation installs changed manifests, skips ordinary edits and repairs missing runtime dependencies", async () => {
+test("preparation installs changed manifests, skips ordinary edits and repairs missing gateway dependencies", async () => {
   const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
@@ -178,13 +204,19 @@ test("preparation installs changed manifests, skips ordinary edits and repairs m
   const root = await mkdtemp(join(tmpdir(), "gateway-deps-"));
   let installs = 0;
   try {
-    for (const path of ["apps/server", "apps/web", "packages/shared"])
+    for (const path of [
+      "apps/server",
+      "apps/web",
+      "packages/shared",
+      "packages/session-runtime",
+    ])
       await mkdir(join(root, path), { recursive: true });
     for (const path of [
       "package.json",
       "apps/server/package.json",
       "apps/web/package.json",
       "packages/shared/package.json",
+      "packages/session-runtime/package.json",
     ])
       await writeFile(join(root, path), '{"dependencies":{}}');
     for (const path of ["pnpm-lock.yaml", "pnpm-workspace.yaml"])
@@ -230,4 +262,77 @@ test("preparation installs changed manifests, skips ordinary edits and repairs m
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("runtime manifest and missing dependencies are checked only for the default enabled TS runtime", async (t) => {
+  const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { createDependencyPreparation } = await import("./watch-server.mjs");
+  const root = await mkdtemp(join(tmpdir(), "runtime-watch-deps-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const path of [
+    "apps/server",
+    "apps/web",
+    "packages/shared",
+    "packages/session-runtime",
+  ])
+    await mkdir(join(root, path), { recursive: true });
+  for (const path of [
+    "package.json",
+    "apps/server/package.json",
+    "apps/web/package.json",
+    "packages/shared/package.json",
+    "packages/session-runtime/package.json",
+  ])
+    await writeFile(join(root, path), '{"dependencies":{}}');
+  for (const path of ["pnpm-lock.yaml", "pnpm-workspace.yaml"])
+    await writeFile(join(root, path), "fixture");
+  let installs = 0;
+  const run = async () => {
+    installs++;
+  };
+  const prepare = createDependencyPreparation({ root, env: {}, run });
+  await prepare();
+  assert.equal(installs, 1);
+  await writeFile(
+    join(root, "packages/session-runtime/package.json"),
+    '{"dependencies":{"runtime-only-dep":"1.0.0"}}',
+  );
+  await assert.rejects(prepare(), /runtime-only-dep/);
+  assert.equal(installs, 2);
+  const dep = join(
+    root,
+    "packages/session-runtime/node_modules/runtime-only-dep",
+  );
+  await mkdir(dep, { recursive: true });
+  await writeFile(join(dep, "package.json"), '{"main":"index.js"}');
+  await writeFile(join(dep, "index.js"), "");
+  await prepare();
+  assert.equal(installs, 3);
+  await prepare();
+  assert.equal(installs, 3);
+  await rm(join(dep, "index.js"));
+  await assert.rejects(prepare(), /runtime-only-dep/);
+  assert.equal(installs, 4);
+  await createDependencyPreparation({
+    root,
+    env: { SESSION_MODE_ENABLED: "0" },
+    run,
+  })();
+  await createDependencyPreparation({
+    root,
+    env: { SESSION_RUNTIME_BIN: "/custom/runtime" },
+    run,
+  })();
+  await writeFile(join(root, ".env"), "SESSION_MODE_ENABLED=0\n");
+  await createDependencyPreparation({ root, env: {}, run })();
+  await assert.rejects(
+    createDependencyPreparation({
+      root,
+      env: { SESSION_MODE_ENABLED: "1" },
+      run,
+    })(),
+    /runtime-only-dep/,
+  );
 });

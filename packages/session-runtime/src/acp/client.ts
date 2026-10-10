@@ -66,14 +66,20 @@ export class AcpClient {
       onExit: () => {
         this.cleanup();
         this.emit({ kind: "exited" });
-        if (
-          this.rpc.child.exitCode !== null ||
-          this.rpc.child.signalCode !== null
-        )
-          this.options.onExit?.();
-        else this.rpc.child.once("close", () => this.options.onExit?.());
       },
     });
+    // RPC failure can precede process termination (for example stdout EOF).
+    // Keep a live process registered so explicit stop can still reach it, but
+    // release ownership on exit even if the transport already failed. Waiting
+    // only for close leaves a dead connection registered while stdio drains.
+    const processExited = () => {
+      this.rpc.child.off("exit", processExited);
+      this.rpc.child.off("close", processExited);
+      this.options.onExit?.();
+    };
+    this.rpc.child.once("exit", processExited);
+    // Failed spawn can emit error + close without an exit event.
+    this.rpc.child.once("close", processExited);
   }
   private emit(payload: JsonObject) {
     this.options.hub.publish("acp-message", {

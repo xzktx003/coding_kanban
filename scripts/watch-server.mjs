@@ -1,3 +1,4 @@
+import { loadStartupEnv } from "./startup-env.mjs";
 import { spawn } from "node:child_process";
 import { watch, readFileSync, existsSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -45,7 +46,11 @@ function command(command, args, options) {
   });
 }
 
-export function createDependencyPreparation({ root, run = command }) {
+export function createDependencyPreparation({
+  root,
+  run = command,
+  env = process.env,
+}) {
   const manifests = [
     "package.json",
     "pnpm-lock.yaml",
@@ -53,6 +58,7 @@ export function createDependencyPreparation({ root, run = command }) {
     "apps/server/package.json",
     "apps/web/package.json",
     "packages/shared/package.json",
+    "packages/session-runtime/package.json",
   ];
   let installed;
   const fingerprintNow = () =>
@@ -62,33 +68,46 @@ export function createDependencyPreparation({ root, run = command }) {
   return async () => {
     while (true) {
       const fingerprint = fingerprintNow();
-      const serverRequire = createRequire(
-        resolve(root, "apps/server/package.json"),
-      );
-      const { dependencies } = JSON.parse(
-        readFileSync(resolve(root, "apps/server/package.json"), "utf8"),
-      );
-      let missing = false;
-      for (const name of Object.keys(dependencies)) {
-        try {
-          if (!existsSync(serverRequire.resolve(name))) missing = true;
-        } catch {
-          missing = true;
-        }
-      }
+      const runtimeEnv = loadStartupEnv(root, { ...env });
+      const targets = ["apps/server"];
+      if (
+        runtimeEnv.SESSION_MODE_ENABLED !== "0" &&
+        !runtimeEnv.SESSION_RUNTIME_BIN
+      )
+        targets.push("packages/session-runtime");
+      const required = targets.flatMap((target) => {
+        const path = resolve(root, target, "package.json");
+        const resolver = createRequire(path);
+        const { dependencies = {} } = JSON.parse(readFileSync(path, "utf8"));
+        return Object.keys(dependencies).map((name) => ({
+          name,
+          resolver,
+          target,
+        }));
+      });
+      const missingDependencies = () =>
+        required.filter(({ name, resolver }) => {
+          try {
+            return !existsSync(resolver.resolve(name));
+          } catch {
+            return true;
+          }
+        });
+      const missing = missingDependencies().length > 0;
       if (installed !== fingerprint || missing) {
         console.log(
           "[server-watch] Preparing locked dependencies before gateway replacement…",
         );
         await run("pnpm", ["install", "--frozen-lockfile"], {
           cwd: root,
-          env: process.env,
+          env: runtimeEnv,
         });
         if (fingerprintNow() !== fingerprint) continue;
-        for (const name of Object.keys(dependencies)) {
-          if (!existsSync(serverRequire.resolve(name)))
-            throw new Error(`Missing dependency: ${name}`);
-        }
+        const unresolved = missingDependencies();
+        if (unresolved.length)
+          throw new Error(
+            `Missing dependencies: ${unresolved.map(({ name, target }) => `${target}: ${name}`).join(", ")}`,
+          );
         installed = fingerprint;
       }
       return;
@@ -158,6 +177,7 @@ async function main() {
     ["apps/server", ["package.json"]],
     ["apps/web", ["package.json"]],
     ["packages/shared", ["package.json"]],
+    ["packages/session-runtime", ["package.json"]],
   ]) {
     watchers.push(
       watch(resolve(root, path), (_event, name) => {

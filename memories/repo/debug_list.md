@@ -1,3 +1,7 @@
+- 2026-10-10：ACP stdout EOF 先于进程 exit 时，RPC 的一次失败通知使连接注销延迟到 stdio close。独立监听 exit/close 并去重，保留 EOF 后活进程显式 stop 权限；真实子进程先红后绿，退出边界立即释放连接，不影响其他连接。
+
+- 2026-10-10：TS 迁移合并后的 watcher 遗漏 runtime manifest 与依赖预检；监听及安装指纹现包含该包，默认启用模式安装前后校验依赖，关闭或自定义运行文件按配置跳过。失败保留旧网关，隔离红绿确认独立 runtime PID 不被停止。
+
 - 2026-10-10：在线 fast-forward 后 `tsx watch` 可能早于依赖安装重启，因缺少新依赖导致后端退出。独立 finalizer 等待确认的目标 HEAD，执行 frozen lockfile 安装后安全重启；冲突时取消 finalizer。
 
 - 2026-10-10：手机把 tmux PTY 收窄后，电脑端即使还开着也不会再发 resize，所以桌面一直是手机列宽。服务端按 WebSocket 连接记住尺寸，手机断开后恢复到仍在线客户端里最宽的那组。最后一条连接断开时不主动改 PTY。

@@ -19,6 +19,7 @@ const update=(sessionId,text)=>send({method:'session/update',params:{sessionId,u
 let waiters=new Map();
 readline.createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line),p=m.params||{};
  if(!m.method){const orig=waiters.get(String(m.id)); if(orig){waiters.delete(String(m.id));reply(orig,m.result??{error:m.error})}return;}
+ if(m.method==='fixture/end_stdout'){reply(m,{});process.stdout.end();return;}
  if(m.method==='initialize')return reply(m,{protocolVersion:1,agentCapabilities:{loadSession:true,promptCapabilities:{image:process.env.IMAGES!=='0'}},_meta:{'keke.dev/mcp-policy':process.env.POLICY||'client-only'}});
  if(m.method==='session/new'||m.method==='session/load') {if(opening)return send({id:m.id,error:{code:-1,message:'overlap'}});opening=true;setTimeout(()=>{opening=false;const id=p.sessionId||'s'+(++n); if(p.sessionId)update(id,'replay');reply(m,{sessionId:id,mcpServers:p.mcpServers})},25);return;}
  if(m.method==='session/prompt'){const text=p.prompt.find(x=>x.type==='text')?.text;
@@ -557,5 +558,42 @@ test("ACP sessions and raw updates survive a real SQLite restart and reads launc
     db.close();
     hub.close();
     await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ACP retains stop authority after stdout EOF but unregisters synchronously on actual process exit", async () => {
+  const f = await setup();
+  try {
+    const client = f.service.get(f.start.connectionId);
+    const child = client.rpc.child;
+    const ended = new Promise<void>((resolve) =>
+      child.stdout.once("end", resolve),
+    );
+    await client.rpc.request("fixture/end_stdout", {});
+    await ended;
+    assert.equal(child.exitCode, null);
+    assert.equal(child.signalCode, null);
+    assert.equal(client.rpc.available, false);
+    assert.equal(
+      f.service.get(f.start.connectionId),
+      client,
+      "A live process must remain explicitly stoppable after protocol EOF",
+    );
+    // Capture at the authoritative exit boundary, before Node may emit close.
+    // Awaiting exit and checking later would accidentally pass when close wins the microtask race.
+    const stateAtExit = new Promise<string>((resolve) =>
+      child.once("exit", () => {
+        try {
+          f.service.get(f.start.connectionId);
+          resolve("connection retained after native exit");
+        } catch (error) {
+          resolve((error as Error).message);
+        }
+      }),
+    );
+    child.kill("SIGTERM");
+    assert.match(await stateAtExit, /unknown ACP connection/);
+  } finally {
+    await f.cleanup();
   }
 });
