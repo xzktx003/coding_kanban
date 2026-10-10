@@ -677,8 +677,8 @@ test("hot update restores stable managed sessions and the dual-pane workspace", 
     await firstCard.dblclick();
 
     await page
-    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
-    .click();
+      .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+      .click();
     await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
     const firstPane = page.locator(
@@ -704,8 +704,17 @@ test("hot update restores stable managed sessions and the dual-pane workspace", 
     await expect
       .poll(() =>
         page.evaluate(() => {
-          const raw = localStorage.getItem("terminal-monitor-workspace-v1");
-          return raw ? JSON.parse(raw) : null;
+          const raw = localStorage.getItem("terminal-monitor-pages-v1");
+          if (!raw) return null;
+          const workspace = JSON.parse(raw) as {
+            activePageId: string;
+            pages: Array<{ id: string; state: unknown }>;
+          };
+          return (
+            workspace.pages.find(
+              (candidate) => candidate.id === workspace.activePageId,
+            )?.state ?? null
+          );
         }),
       )
       .toMatchObject({
@@ -760,6 +769,15 @@ test("hot update restores stable managed sessions and the dual-pane workspace", 
     await page.waitForTimeout(3_500);
     await expect(page.getByTestId("apply-app-update")).toBeVisible();
 
+    // The update button is already visible for revision-2. Wait for the
+    // browser's own poll before clicking it, so it accepts revision-3.
+    const browserVersionChanged = page.waitForResponse(async (response) => {
+      if (!response.url().endsWith("/api/app-version") || !response.ok()) {
+        return false;
+      }
+      const version = (await response.json()) as AppVersion;
+      return version.sourceRevision !== updatedVersion.sourceRevision;
+    });
     runtime.changeSourceRevision("revision-3");
     await expect
       .poll(
@@ -772,6 +790,11 @@ test("hot update restores stable managed sessions and the dual-pane workspace", 
         { timeout: 20_000 },
       )
       .not.toBe(updatedVersion.sourceRevision);
+    await browserVersionChanged;
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
     await expect(page.getByTestId("apply-app-update")).toBeVisible({
       timeout: 20_000,
     });

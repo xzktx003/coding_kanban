@@ -20,19 +20,25 @@ const browserDepsAvailable = (() => {
 
 test.describe("Mobile Terminal", () => {
   let sessionId: string | undefined;
+  let sessionName: string;
 
   async function openCurrentSession(page: Page) {
     await page.goto("/mobile");
-    await expect(page.locator(".mobile-session-picker-trigger")).toBeEnabled({
-      timeout: 8000,
-    });
+    const trigger = page.locator(".mobile-session-picker-trigger");
+    await expect(trigger).toBeEnabled({ timeout: 8000 });
+    // Other tests may leave a different active session in the backend. Select
+    // this case's owned PTY explicitly before checking output or sending input.
+    await trigger.click();
+    await page.getByRole("option", { name: sessionName }).click();
+    await expect(trigger).toContainText(sessionName);
   }
 
   test.beforeEach(async ({ page, request }) => {
+    sessionName = `Mobile E2E ${Date.now()}`;
     const response = await request.post("/api/agent-launch/pty", {
       data: {
         workspaceId: "default",
-        displayName: `Mobile E2E ${Date.now()}`,
+        displayName: sessionName,
         agentKind: "shell",
         command: "node scripts/mock-terminal-agent.mjs raw",
         workingDirectory: process.cwd(),
@@ -157,7 +163,14 @@ test.describe("Mobile Terminal", () => {
     );
     await expect(sendBtn).toBeEnabled();
     await expect(trigger).not.toHaveText("没有可用会话");
+    const sent = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname ===
+          `/api/agent-sessions/${sessionId}/stdin`,
+    );
     await sendBtn.click();
+    expect((await sent).postDataJSON().input).toContain("echo hello");
 
     await expect(trigger).not.toHaveText("没有可用会话");
     await expect(textarea).toHaveValue("");
@@ -329,7 +342,8 @@ test.describe("Mobile Terminal", () => {
       const identityBox = identity.getBoundingClientRect();
       const sendBox = send.getBoundingClientRect();
       const navBox = nav?.getBoundingClientRect() ?? null;
-      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const viewportHeight =
+        window.visualViewport?.height ?? window.innerHeight;
       const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
       const inside = (box: DOMRect) =>
         box.top >= -1 &&
@@ -409,10 +423,10 @@ test.describe("Mobile Terminal", () => {
       const inside = (box: DOMRect | undefined) =>
         Boolean(
           box &&
-            box.width > 0 &&
-            box.height > 0 &&
-            box.top >= -1 &&
-            box.bottom <= visibleHeight + 1,
+          box.width > 0 &&
+          box.height > 0 &&
+          box.top >= -1 &&
+          box.bottom <= visibleHeight + 1,
         );
       return {
         visibleHeight,
@@ -487,7 +501,10 @@ test.describe("Mobile Terminal", () => {
           const send = [...document.querySelectorAll("button")].find(
             (button) => button.textContent?.trim() === "发送",
           );
-          const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+          const walker = document.createTreeWalker(
+            element,
+            NodeFilter.SHOW_TEXT,
+          );
           let tokenNode: Text | null = null;
           let tokenOffset = -1;
           while (walker.nextNode()) {
@@ -561,7 +578,9 @@ test.describe("Mobile Terminal", () => {
           await trigger.click();
         }
         await page.getByRole("option", { name }).click();
-        await expect(page.locator(".mobile-session-picker-menu")).toHaveCount(0);
+        await expect(page.locator(".mobile-session-picker-menu")).toHaveCount(
+          0,
+        );
       };
 
       const assertClosedToken = (
@@ -575,9 +594,9 @@ test.describe("Mobile Terminal", () => {
         expect(reading!.coversSend).toBe(false);
         expect(reading!.triggerHeight).toBeGreaterThanOrEqual(44);
         expect(reading!.shortcutHeights.length).toBeGreaterThan(0);
-        expect(
-          Math.min(...reading!.shortcutHeights),
-        ).toBeGreaterThanOrEqual(44);
+        expect(Math.min(...reading!.shortcutHeights)).toBeGreaterThanOrEqual(
+          44,
+        );
         expect(reading!.navHeights.length).toBeGreaterThan(0);
         expect(Math.min(...reading!.navHeights)).toBeGreaterThanOrEqual(44);
       };
@@ -613,7 +632,10 @@ test.describe("Mobile Terminal", () => {
     writeFileSync(join(root, "wide.txt"), `kept\n${"pad\n".repeat(80)}`);
     execFileSync("git", ["add", "wide.txt"], { cwd: root });
     execFileSync("git", ["commit", "-m", "base"], { cwd: root });
-    writeFileSync(join(root, "wide.txt"), `kept\n${wide}\n${"tail\n".repeat(80)}`);
+    writeFileSync(
+      join(root, "wide.txt"),
+      `kept\n${wide}\n${"tail\n".repeat(80)}`,
+    );
 
     try {
       const launched = await request.post("/api/agent-launch/pty", {
@@ -676,10 +698,10 @@ test.describe("Mobile Terminal", () => {
         const overlaps = (a: DOMRect, b: DOMRect | null) =>
           Boolean(
             b &&
-              a.top < b.bottom - 1 &&
-              a.bottom > b.top + 1 &&
-              a.left < b.right - 1 &&
-              a.right > b.left + 1,
+            a.top < b.bottom - 1 &&
+            a.bottom > b.top + 1 &&
+            a.left < b.right - 1 &&
+            a.right > b.left + 1,
           );
         const insideClient = (box: DOMRect, host: DOMRect) =>
           box.left >= host.left - 1 &&

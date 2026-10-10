@@ -94,6 +94,8 @@ SESSION_MEMORY_SOAK_MINUTES=30 PLAYWRIGHT_SKIP_WEBSERVER=1 pnpm exec playwright 
 
 滚动测试已改用实际有界流式增量与独立 live 节点；历史阅读测试使用 20 个独立最终报告，适配原生轮次折叠，阅读位置、未读及禁止执行型请求的断言保持。仍有一项严格滚动验收未通过：正向滚轮跟随 live 内容时，两次独立测试均捕获 ResizeObserver loop completed with undelivered notifications；绘制前及 RO 微任务距底均为 0，但零错误门槛仍为红。未移除或放宽该断言，RO 调度问题作为独立未解决项保留。
 
+后续严格验收定位上述滚动红灯的触发方式：测试在初始 RO 交付微任务的 continuation 中人工注入新正文，导致同周期改变受观察祖先高度；无 React／产品源码的纯 DOM 案例也能复现相同错误。仅在人工注入增长前等待独立动画帧后，三次定向与整文件七项通过。增长后的首个原生 RO 微任务及绘制前距底、零错误、草稿和禁止执行请求断言均保留，产品滚动源码未改；这解释了该测试红灯，不推断所有浏览器和负载都不存在 RO 问题。证据在被忽略的 `.dev-runtime/session-typescript-migration/post-push/scroll-ro-audit/`。
+
 ## 两个远程同步后的合并复验（2026-10-10）
 
 合并本地自动回收、文件管理与通知去重，以及 GitLab/GitHub 的原生 UI 和权威完成恢复更新后，在独立工作区验证：`pnpm check`、`pnpm session:check` 通过；会话前端 1548、终端前端 534、后端 792（另 1 个跳过）、脚本 105、编辑器伴随扩展 4 个测试通过。隔离 HTTPS 前端为 `https://10.30.0.28:18487`，绑定 `0.0.0.0`；没有启动或中断用户 Agent。

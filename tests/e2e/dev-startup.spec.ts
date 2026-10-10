@@ -15,9 +15,17 @@ test("startup exposes gateway and session health through the frontend and loads 
   await expect(
     page.getByRole("navigation", { name: "会话工作台导航" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "终端", exact: true }).click();
+  await page
+    .locator(".session-mode:not([hidden])")
+    .getByRole("group", { name: "工作模式", exact: true })
+    .getByRole("button", { name: "终端", exact: true })
+    .click();
   await expect(page.locator(".workbench-terminal")).toBeVisible();
-  await page.getByRole("button", { name: "会话", exact: true }).click();
+  await page
+    .locator(".workbench-terminal:not([hidden])")
+    .getByRole("group", { name: "工作模式", exact: true })
+    .getByRole("button", { name: "会话", exact: true })
+    .click();
   await expect(
     page.getByRole("navigation", { name: "会话工作台导航" }),
   ).toBeVisible();
@@ -27,7 +35,10 @@ test("startup exposes gateway and session health through the frontend and loads 
   ).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(
-    page.getByRole("button", { name: "终端", exact: true }),
+    page
+      .locator(".session-mode:not([hidden])")
+      .getByRole("group", { name: "工作模式", exact: true })
+      .getByRole("button", { name: "终端", exact: true }),
   ).toBeInViewport();
   expect(errors).toEqual([]);
 });

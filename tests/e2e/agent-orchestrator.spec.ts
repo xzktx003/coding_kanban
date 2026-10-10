@@ -41,7 +41,9 @@ test("v2: 启动 PTY Agent 并在宫格中显示", async ({ page, request }) => 
     sessionId = await launchMockSession(request, displayName);
 
     await page.goto("/");
-    await expect(page.locator(".top-bar-title")).toContainText("Coding Kanban");
+    await expect(
+      page.locator(".workbench-terminal:not([hidden]) .workbench-brand"),
+    ).toContainText("Coding Kanban");
 
     const myCard = page.locator(".grid-card", {
       has: page.locator(".grid-card-name", { hasText: displayName }),
@@ -135,10 +137,12 @@ test("v2: 彻底删除聚焦终端后双击其他卡片仍显示对应终端", a
   }
 });
 
-test("v2: 聚焦视图可以一键折叠右侧其他会话小窗", async ({
-  page,
-  request,
-}) => {
+test("v2: 聚焦视图可以一键折叠右侧其他会话小窗", async ({ page, request }) => {
+  // This case exercises collapsing an already expanded sidebar. New devices
+  // intentionally start collapsed, so make the scenario's initial state explicit.
+  await page.addInitScript(() =>
+    localStorage.setItem("focus-sidebar-collapsed", "false"),
+  );
   const focusedName = `主终端-${Date.now()}`;
   const siblingName = `侧栏终端-${Date.now()}`;
   let focusedId: string | undefined;
@@ -160,7 +164,7 @@ test("v2: 聚焦视图可以一键折叠右侧其他会话小窗", async ({
     await expect(page.locator(".focus-sidebar")).toBeVisible();
     await expect(
       page.locator(".focus-sidebar-card", {
-        has: page.locator("span", { hasText: siblingName }),
+        has: page.locator(".focus-sidebar-card-name", { hasText: siblingName }),
       }),
     ).toBeVisible();
 
@@ -168,7 +172,9 @@ test("v2: 聚焦视图可以一键折叠右侧其他会话小窗", async ({
     await expect(toggle).toBeVisible();
 
     const expandedLayout = await page.evaluate(() => {
-      const main = document.querySelector(".focus-main")?.getBoundingClientRect();
+      const main = document
+        .querySelector(".focus-main")
+        ?.getBoundingClientRect();
       const toggleBtn = document
         .querySelector('[data-testid="focus-sidebar-collapse-toggle"]')
         ?.getBoundingClientRect();
@@ -176,7 +182,9 @@ test("v2: 聚焦视图可以一键折叠右侧其他会话小窗", async ({
       return {
         toggleWidth: toggleBtn?.width ?? 0,
         rightGap:
-          main && toggleBtn ? toggleBtn.right - main.right : Number.POSITIVE_INFINITY,
+          main && toggleBtn
+            ? toggleBtn.right - main.right
+            : Number.POSITIVE_INFINITY,
       };
     });
 
@@ -188,8 +196,12 @@ test("v2: 聚焦视图可以一键折叠右侧其他会话小窗", async ({
     await expect(page.locator(".focus-sidebar")).toHaveCount(0);
 
     const collapsedLayout = await page.evaluate(() => {
-      const container = document.querySelector(".focus-view")?.getBoundingClientRect();
-      const main = document.querySelector(".focus-main")?.getBoundingClientRect();
+      const container = document
+        .querySelector(".focus-view")
+        ?.getBoundingClientRect();
+      const main = document
+        .querySelector(".focus-main")
+        ?.getBoundingClientRect();
 
       return {
         rightGap:
@@ -206,7 +218,7 @@ test("v2: 聚焦视图可以一键折叠右侧其他会话小窗", async ({
     await expect(page.locator(".focus-sidebar")).toBeVisible();
     await expect(
       page.locator(".focus-sidebar-card", {
-        has: page.locator("span", { hasText: siblingName }),
+        has: page.locator(".focus-sidebar-card-name", { hasText: siblingName }),
       }),
     ).toBeVisible();
   } finally {
@@ -257,10 +269,14 @@ test("v2: 顶栏显示会话统计", async ({ page, request }) => {
 
   try {
     await page.goto("/");
-    await expect(page.locator(".top-bar-title")).toContainText("Coding Kanban");
+    await expect(
+      page.locator(".workbench-terminal:not([hidden]) .workbench-brand"),
+    ).toContainText("Coding Kanban");
 
     // Wait for stat to be populated with a real count
-    const statLocator = page.locator(".stat-item").first();
+    const statLocator = page.locator(
+      ".workbench-terminal:not([hidden]) .top-bar-session-count",
+    );
     await expect(statLocator).toContainText(/共 \d+ 个会话/, {
       timeout: 10000,
     });
@@ -273,10 +289,9 @@ test("v2: 顶栏显示会话统计", async ({ page, request }) => {
 
     sessionId = await launchMockSession(request, displayName);
 
-    await expect(page.locator(".stat-item").first()).toContainText(
-      `共 ${currentCount + 1} 个会话`,
-      { timeout: 15000 },
-    );
+    await expect(
+      page.locator(".workbench-terminal:not([hidden]) .top-bar-session-count"),
+    ).toContainText(`共 ${currentCount + 1} 个会话`, { timeout: 15000 });
   } finally {
     await deleteSessionIfPresent(request, sessionId);
   }

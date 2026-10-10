@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { installSessionUxFixture } from "./session-ux-fixture";
 
 test("long Codex, Claude and ACP chats keep navigation, latest message and composer inside the workspace", async ({
   page,
@@ -6,19 +7,8 @@ test("long Codex, Claude and ACP chats keep navigation, latest message and compo
   test.setTimeout(60000);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  // Keep synthetic conversations and draft changes confined to this browser.
-  await page.route("**/api/session/api/settings", (route) =>
-    route.request().method() === "POST"
-      ? route.fulfill({ status: 200, body: "" })
-      : route.continue(),
-  );
-  await page.route("**/api/session/api/acp/**", (route) =>
-    route.request().method() === "POST"
-      ? route.fulfill({
-          json: route.request().url().endsWith("/sessions") ? [] : {},
-        })
-      : route.continue(),
-  );
+  // Keep all synthetic conversations, reads and draft writes in this browser.
+  await installSessionUxFixture(page, 0);
   await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
   await page
     .locator(".session-mode [contenteditable=true]")
@@ -26,22 +16,32 @@ test("long Codex, Claude and ACP chats keep navigation, latest message and compo
     .waitFor({ timeout: 30000 });
   for (const kind of ["codex", "cc", "acp"]) {
     await page.evaluate(async (kind) => {
-      const { useAgentSettingsStore } =
-        await import("/src/session-mode/stores/useAgentSettingsStore.ts");
-      const { useAgentCenterStore } =
-        await import("/src/session-mode/stores/useAgentCenterStore.ts");
-      const { useCodexStore } =
-        await import("/src/session-mode/components/codex/stores/index.ts");
-      const { useCCStore } =
-        await import("/src/session-mode/stores/cc/index.ts");
-      const { useAcpStore } = await import(
-        performance
-          .getEntriesByType("resource")
-          .findLast((entry) =>
-            entry.name.includes("/src/session-mode/stores/useAcpStore.ts"),
-          )?.name ?? "/src/session-mode/stores/useAcpStore.ts"
+      const mountedModule = (path: string) =>
+        import(
+          performance
+            .getEntriesByType("resource")
+            .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+            path
+        );
+      const { useAgentSettingsStore } = await mountedModule(
+        "/src/session-mode/stores/useAgentSettingsStore.ts",
+      );
+      const { useAgentCenterStore } = await mountedModule(
+        "/src/session-mode/stores/useAgentCenterStore.ts",
+      );
+      const { useCodexStore } = await mountedModule(
+        "/src/session-mode/components/codex/stores/index.ts",
+      );
+      const { useCCStore } = await mountedModule(
+        "/src/session-mode/stores/cc/index.ts",
+      );
+      const { useAcpStore } = await mountedModule(
+        "/src/session-mode/stores/useAcpStore.ts",
       );
       const lines = Array.from({ length: 40 }, (_, i) => `布局回归消息 ${i}`);
+      for (const card of useAgentCenterStore.getState().cards) {
+        useAgentCenterStore.getState().removeCard(card);
+      }
       useAgentCenterStore.setState({
         cards: [],
         currentAgentCardId: null,
@@ -52,13 +52,20 @@ test("long Codex, Claude and ACP chats keep navigation, latest message and compo
       });
       useCodexStore.setState({
         currentThreadId: "layout-codex",
+        historyLoadedMap: { "layout-codex": true },
+        historyLoadingMap: {},
         events: {
           "layout-codex": lines.map((text, i) => ({
             method: "item/completed",
             params: {
               threadId: "layout-codex",
-              turnId: "layout-turn",
-              item: { id: `layout-${i}`, type: "agentMessage", text },
+              turnId: `layout-turn-${i}`,
+              item: {
+                id: `layout-${i}`,
+                type: "agentMessage",
+                phase: "final_answer",
+                text,
+              },
             },
           })),
         },
@@ -89,6 +96,15 @@ test("long Codex, Claude and ACP chats keep navigation, latest message and compo
         running: false,
         connecting: false,
       });
+      // Solo transcripts follow the selected workspace card, just like tabs.
+      if (kind !== "acp") {
+        useAgentCenterStore
+          .getState()
+          .addAgentCard(
+            { kind, id: `layout-${kind}`, preview: "布局回归会话" },
+            { activate: true },
+          );
+      }
     }, kind);
     for (const viewport of [
       { width: 1440, height: 900 },

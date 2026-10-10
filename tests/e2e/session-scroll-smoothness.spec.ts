@@ -293,6 +293,13 @@ test("a positive wheel at latest keeps before-paint following when the reply gro
     observer.observe(row);
     observer.observe(surface);
     await firstDelivery;
+    // Finish the initial observer delivery before injecting a new stream update.
+    // Mutating the ancestor from that RO microtask manufactures a depth-order
+    // loop even in plain DOM. This wait precedes growth; every growth-time
+    // before-paint, native RO microtask and zero-error assertion stays intact.
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => resolve()),
+    );
     growing = true;
     (window as any).__smoothDelta({
       method: "item/agentMessage/delta",
