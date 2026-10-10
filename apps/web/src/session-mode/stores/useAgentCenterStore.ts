@@ -169,7 +169,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
             !cards.some((c) => agentCardKey(c) === agentCardKey(active))
               ? active
               : null;
-          return {
+          const next = {
             cards:
               JSON.stringify(cards) === JSON.stringify(state.cards)
                 ? state.cards
@@ -187,6 +187,12 @@ export const useAgentCenterStore = create<AgentCenterState>()(
             detachedCard,
             tabSyncError: null,
           };
+          // Polling unchanged data must not rerender every subscribed transcript.
+          return Object.entries(next).every(
+            ([key, value]) => state[key as keyof typeof state] === value,
+          )
+            ? state
+            : next;
         });
         return fresh;
       },

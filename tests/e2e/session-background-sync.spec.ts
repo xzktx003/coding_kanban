@@ -243,19 +243,22 @@ for (const width of [390, 1440])
           .first();
         const beforeNotice = await viewport.boundingBox();
         let failedRead = false;
-        await page.route("**/api/codex/thread/turns/list", (route) => {
-          if (
-            !failedRead &&
-            route.request().postDataJSON().threadId === target.id
-          ) {
-            failedRead = true;
-            return route.fulfill({
-              status: 503,
-              json: { error: "isolated readonly outage" },
-            });
-          }
-          return route.fallback();
-        });
+        await page.route(
+          (url) => url.pathname.endsWith("/api/codex/thread/turns/list"),
+          (route) => {
+            if (
+              !failedRead &&
+              route.request().postDataJSON().threadId === target.id
+            ) {
+              failedRead = true;
+              return route.fulfill({
+                status: 503,
+                json: { error: "isolated readonly outage" },
+              });
+            }
+            return route.fallback();
+          },
+        );
         await page.evaluate(
           (id) =>
             window.dispatchEvent(
@@ -529,7 +532,7 @@ test("50 tabs recover after a browser freeze and two slow recent reads do not bl
   page.on("pageerror", (e) => errors.push(e.message));
   try {
     await page.route(
-      "**/api/session/api/codex/thread/turns/list",
+      (url) => url.pathname.endsWith("/api/codex/thread/turns/list"),
       async (route) => {
         const body = route.request().postDataJSON();
         const read = {

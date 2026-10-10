@@ -44,6 +44,7 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
   let checkedAt = -Infinity;
   let repairedAt = -Infinity;
   let requestRepairTimer: ReturnType<typeof setTimeout>;
+  const threadUpdatedAt = new Map<string, number>();
   const missingRequests = () =>
     [...followedIds()].some((id) => {
       const status = useCodexStore.getState().threadStatusMap[id];
@@ -110,7 +111,7 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
           });
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           const page = (await response.json()) as {
-            data: Array<{ id: string; status: unknown }>;
+            data: Array<{ id: string; status: unknown; updatedAt?: unknown }>;
             nextCursor?: string | null;
           };
           if (
@@ -123,11 +124,38 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
           for (const id of remaining)
             if (!currentMembers.has(id)) remaining.delete(id);
           const statuses: Record<string, ThreadStatus> = {};
+          const updatedThreads: Array<{
+            id: string;
+            status: ThreadStatus;
+            updatedAt: number;
+          }> = [];
           for (const thread of page.data) {
             if (!remaining.has(thread.id) || !isThreadStatus(thread.status))
               continue;
             remaining.delete(thread.id);
             statuses[thread.id] = thread.status;
+            if (
+              typeof thread.updatedAt === "number" &&
+              Number.isFinite(thread.updatedAt)
+            )
+              updatedThreads.push({
+                id: thread.id,
+                status: thread.status,
+                updatedAt: thread.updatedAt,
+              });
+          }
+          const reconcile: string[] = [];
+          for (const thread of updatedThreads) {
+            const previous = threadUpdatedAt.get(thread.id);
+            threadUpdatedAt.set(thread.id, thread.updatedAt);
+            if (previous === undefined || thread.updatedAt <= previous)
+              continue;
+            if (thread.status.type === "active") continue;
+            if (baseline.threadStatusMap[thread.id]?.type === "active")
+              continue;
+            if (baseline.turnTimingMap[thread.id]?.status === "inProgress")
+              continue;
+            reconcile.push(thread.id);
           }
           useCodexStore.setState((state) => {
             const threadStatusMap = { ...state.threadStatusMap };
@@ -150,6 +178,10 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
             }
             return changed ? { threadStatusMap } : state;
           });
+          for (const id of reconcile)
+            window.dispatchEvent(
+              new CustomEvent("session-history-reconcile", { detail: id }),
+            );
           cursor = page.nextCursor ?? null;
           if (cursor && cursors.has(cursor))
             throw new Error("Repeated thread list cursor");
@@ -186,6 +218,9 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
     const next = membershipKey();
     if (next === members) return;
     members = next;
+    const current = followedIds();
+    for (const id of threadUpdatedAt.keys())
+      if (!current.has(id)) threadUpdatedAt.delete(id);
     schedule();
   });
   const closeStream = openEventStream({

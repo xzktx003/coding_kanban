@@ -22,7 +22,7 @@ const item = {
 async function load(page: Page, count = 2) {
   // This suite's question payloads use the legacy full-read fixture. Exercise
   // the explicit capability fallback; paginated history has its own SSE suite.
-  await page.route("**/api/codex/thread/turns/list", (route) =>
+  await page.route(/\/api\/codex\/thread\/turns\/list(?:\?.*)?$/, (route) =>
     route.fulfill({
       status: 404,
       json: { error: "fixture: paginated history unavailable" },
@@ -89,7 +89,7 @@ for (const width of [375, 1440]) {
         },
       },
     });
-    await page.route("**/api/codex/thread/read", (route) =>
+    await page.route(/\/api\/codex\/thread\/read(?:\?.*)?$/, (route) =>
       route.fulfill({
         json: {
           thread: {
@@ -172,7 +172,7 @@ for (const width of [375, 1440]) {
     const fixture = await installSessionUxFixture(page, 1);
     let nextTurn = false,
       newQuestion = false;
-    await page.route("**/api/codex/thread/read", (r) =>
+    await page.route(/\/api\/codex\/thread\/read(?:\?.*)?$/, (r) =>
       r.fulfill({
         json: {
           thread: {
@@ -302,7 +302,7 @@ for (const width of [320, 375, 390, 1440]) {
         },
       ],
     });
-    await page.route("**/api/codex/thread/read", (r) =>
+    await page.route(/\/api\/codex\/thread\/read(?:\?.*)?$/, (r) =>
       r.fulfill({ json: { thread: thread() } }),
     );
     await page.route("**/api/codex/turn/steer", async (r) => {
@@ -383,7 +383,7 @@ test("async answer rejection retries, uncertain delivery reconciles, and complet
     clientId: string | undefined;
   const submissions: string[] = [],
     starts: any[] = [];
-  await page.route("**/api/codex/thread/read", (r) =>
+  await page.route(/\/api\/codex\/thread\/read(?:\?.*)?$/, (r) =>
     r.fulfill({
       json: {
         thread: {
@@ -496,7 +496,7 @@ test("remote answers preserve local drafts; split panes send to their own thread
   try {
     for (const page of pages) {
       const fixture = await installSessionUxFixture(page, 2);
-      await page.route("**/api/codex/thread/read", (r) => {
+      await page.route(/\/api\/codex\/thread\/read(?:\?.*)?$/, (r) => {
         const id = r.request().postDataJSON().threadId;
         return r.fulfill({
           json: {

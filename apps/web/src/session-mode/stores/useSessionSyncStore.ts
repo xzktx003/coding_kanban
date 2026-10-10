@@ -7,7 +7,8 @@ export const useSessionSyncStore = create<{
   trimmedHistoryAnchors: Record<string, string>;
   earlierLoading: Record<string, boolean>;
   earlierErrors: Record<string, string>;
-  connection: "connecting" | "connected" | "reconnecting";
+  connection: "connecting" | "connected" | "reconnecting" | "paused";
+  connectionError: string | null;
 }>(() => ({
   recovering: {},
   checking: {},
@@ -16,6 +17,7 @@ export const useSessionSyncStore = create<{
   earlierLoading: {},
   earlierErrors: {},
   connection: "connecting",
+  connectionError: null,
 }));
 export function setSessionChecking(id: string, value: boolean) {
   useSessionSyncStore.setState((s) => {

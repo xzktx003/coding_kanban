@@ -45,10 +45,10 @@ test("rollback confirms its boundary, removes later turns, restores the draft an
   const calls: unknown[] = [];
   await installSessionUxFixture(page, 0);
   let currentThread = thread;
-  await page.route("**/api/session/api/codex/thread/read", (route) =>
+  await page.route(/\/api\/session\/api\/codex\/thread\/read(?:\?.*)?$/, (route) =>
     route.fulfill({ json: { thread: currentThread } }),
   );
-  await page.route("**/api/session/api/codex/thread/turns/list", (route) =>
+  await page.route(/\/api\/session\/api\/codex\/thread\/turns\/list(?:\?.*)?$/, (route) =>
     route.fulfill({
       json: { data: [...currentThread.turns].reverse(), nextCursor: null },
     }),

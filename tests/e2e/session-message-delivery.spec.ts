@@ -189,7 +189,7 @@ test("sending from an older reading position reveals the submitted message, and 
     )
     .toBeLessThan(8);
   let pending: any = null;
-  await page.route("**/api/codex/thread/read", async (route) => {
+  await page.route(/\/api\/codex\/thread\/read(?:\?.*)?$/, async (route) => {
     pending = route;
   });
   await page.evaluate(async () => {

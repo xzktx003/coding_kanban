@@ -54,3 +54,21 @@ it("offline mutations and device settings survive browser reload, and remote hyd
   );
   expect(useWorkspaceStore.getState().pendingProjectOperations).toEqual([]);
 });
+
+it("unchanged polling snapshots do not notify UI subscribers", () => {
+  const snapshot = { initialized: true, revision: 1, projects: ["/a"] };
+  useWorkspaceStore.getState().acceptSharedProjects(snapshot);
+  const baseline = useWorkspaceStore.getState();
+  let notifications = 0;
+  const stop = useWorkspaceStore.subscribe(() => notifications++);
+  try {
+    for (let i = 0; i < 30; i++)
+      useWorkspaceStore
+        .getState()
+        .acceptSharedProjects(JSON.parse(JSON.stringify(snapshot)));
+    expect(notifications).toBe(0);
+    expect(useWorkspaceStore.getState()).toBe(baseline);
+  } finally {
+    stop();
+  }
+});

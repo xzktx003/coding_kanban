@@ -75,7 +75,7 @@ for (const width of [375, 1440]) {
     await page.route("**/api/codex/model/list", (r) =>
       r.fulfill({ json: { data: models, nextCursor: null } }),
     );
-    await page.route("**/api/codex/thread/read", (r) => {
+    await page.route(/\/api\/codex\/thread\/read(?:\?.*)?$/, (r) => {
       const id = r.request().postDataJSON().threadId;
       return r.fulfill({
         json: {

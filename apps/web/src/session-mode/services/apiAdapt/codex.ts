@@ -221,7 +221,7 @@ export async function threadRead(
         data: ThreadReadResponse["thread"]["turns"];
         nextCursor: string | null;
       }>(
-        "/api/codex/thread/turns/list",
+        "/api/codex/thread/turns/list?view=chat",
         {
           threadId: params.threadId,
           cursor,
@@ -237,7 +237,7 @@ export async function threadRead(
           data: ThreadReadResponse["thread"]["turns"];
           nextCursor: string | null;
         }>(
-          "/api/codex/thread/turns/list",
+          "/api/codex/thread/turns/list?view=chat",
           {
             threadId: params.threadId,
             cursor,
@@ -259,7 +259,7 @@ export async function threadRead(
             data: ThreadReadResponse["thread"]["turns"];
             nextCursor: string | null;
           }>(
-            "/api/codex/thread/turns/list",
+            "/api/codex/thread/turns/list?view=chat",
             {
               threadId: params.threadId,
               cursor: nextCursor,
@@ -312,7 +312,7 @@ export async function threadRead(
           data: ThreadReadResponse["thread"]["turns"];
           nextCursor: string | null;
         }>(
-          "/api/codex/thread/turns/list",
+          "/api/codex/thread/turns/list?view=chat",
           {
             threadId: params.threadId,
             cursor,
@@ -387,7 +387,7 @@ export async function threadRead(
     return await postJsonWithOptions<
       ThreadReadResponse & Partial<ThreadResumeResponse>
     >(
-      "/api/codex/thread/read",
+      "/api/codex/thread/read?view=chat",
       { threadId: params.threadId },
       { ...options, suppressToast: true },
     );

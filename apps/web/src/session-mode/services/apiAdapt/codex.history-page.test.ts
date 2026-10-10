@@ -36,7 +36,7 @@ it("reads recent turns until the last observed turn and never resumes execution"
   expect(fetcher).toHaveBeenCalledTimes(2);
   expect(
     fetcher.mock.calls.every((c) =>
-      String(c[0]).endsWith("/thread/turns/list"),
+      String(c[0]).endsWith("/thread/turns/list?view=chat"),
     ),
   ).toBe(true);
 });
@@ -49,7 +49,9 @@ it("falls back for a missing read capability but never for a business failure", 
     );
   vi.stubGlobal("fetch", fetcher);
   await threadRead({ threadId: "a", recent: true });
-  expect(String(fetcher.mock.calls[1][0])).toMatch(/\/thread\/read$/);
+  expect(String(fetcher.mock.calls[1][0])).toMatch(
+    /\/thread\/read\?view=chat$/,
+  );
   fetcher
     .mockClear()
     .mockResolvedValueOnce(new Response("{}", { status: 500 }));
@@ -100,7 +102,7 @@ it("restores released turns with summary scans and bounded full pages without ac
   expect(bodies.map((body) => body.cursor)).toEqual([null, null, "older"]);
   expect(
     fetcher.mock.calls.every((call) =>
-      String(call[0]).endsWith("/thread/turns/list"),
+      String(call[0]).endsWith("/thread/turns/list?view=chat"),
     ),
   ).toBe(true);
 });

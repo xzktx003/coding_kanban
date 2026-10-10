@@ -44,6 +44,381 @@ function validateOrigin(origin: string): URL {
   return url;
 }
 
+const CHAT_PROJECTION_VIEW = "chat";
+const MAX_CHAT_SSE_FRAME_BYTES = 16 * 1024 * 1024;
+const CHAT_PROJECTION_ERROR_EVENT = "session-projection-error";
+const CHAT_TEXT_PREVIEW_CHARS = 1024;
+const chatHistoryPaths = new Set([
+  "/api/codex/thread/read",
+  "/api/codex/thread/turns/list",
+  "/api/codex/thread/items/list",
+  "/api/codex/thread/metadata",
+]);
+const toolItemTypes = new Set([
+  "commandExecution",
+  "fileChange",
+  "mcpToolCall",
+  "dynamicToolCall",
+  "collabAgentToolCall",
+  "subAgentActivity",
+  "webSearch",
+  "imageView",
+  "imageGeneration",
+]);
+const largeToolBodyFields = new Set([
+  "aggregatedOutput",
+  "content",
+  "delta",
+  "deltaBase64",
+  "diff",
+  "output",
+  "patch",
+  "prompt",
+  "stdin",
+  "result",
+  "stderr",
+  "stdout",
+  "text",
+]);
+const toolItemKeepFields = new Set([
+  "agentsStates",
+  "cwd",
+  "durationMs",
+  "exitCode",
+  "id",
+  "itemId",
+  "model",
+  "pluginId",
+  "processId",
+  "reasoningEffort",
+  "receiverThreadIds",
+  "scriptPath",
+  "senderThreadId",
+  "source",
+  "status",
+  "threadId",
+  "tool",
+  "turnId",
+  "type",
+]);
+const cursorOnlyNotificationMethods = new Set([
+  "command/exec/outputDelta",
+  "hook/completed",
+  "hook/started",
+  "item/autoApprovalReview/completed",
+  "item/autoApprovalReview/started",
+  "item/commandExecution/outputDelta",
+  "item/commandExecution/terminalInteraction",
+  "item/fileChange/outputDelta",
+  "item/fileChange/patchUpdated",
+  "item/mcpToolCall/progress",
+  "process/exited",
+  "process/outputDelta",
+  "rawResponseItem/completed",
+  "turn/diff/updated",
+]);
+const cursorParamKeepFields = new Set([
+  "capReached",
+  "exitCode",
+  "completedAtMs",
+  "decisionSource",
+  "itemId",
+  "processHandle",
+  "processId",
+  "requestId",
+  "reviewId",
+  "startedAtMs",
+  "status",
+  "targetItemId",
+  "stderrCapReached",
+  "stdoutCapReached",
+  "stream",
+  "threadId",
+  "turnId",
+  "type",
+]);
+const itemCursorKeepFields = new Set([
+  "call_id",
+  "id",
+  "name",
+  "namespace",
+  "status",
+  "type",
+]);
+const hookRunKeepFields = new Set([
+  "completedAt",
+  "durationMs",
+  "eventName",
+  "executionMode",
+  "handlerType",
+  "id",
+  "scope",
+  "source",
+  "startedAt",
+  "status",
+  "statusMessage",
+]);
+
+function splitSessionSuffix(origin: string, suffix: string) {
+  const url = new URL(suffix, origin);
+  const chatProjection = url.searchParams.get("view") === CHAT_PROJECTION_VIEW;
+  if (chatProjection) url.searchParams.delete("view");
+  const upstreamSuffix = `${url.pathname}${url.search}`;
+  return { chatProjection, upstreamSuffix };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isToolItem(value: Record<string, unknown>): boolean {
+  return typeof value.type === "string" && toolItemTypes.has(value.type);
+}
+
+function projectShortText(value: string): string {
+  return value.length > CHAT_TEXT_PREVIEW_CHARS
+    ? `${value.slice(0, CHAT_TEXT_PREVIEW_CHARS)}…`
+    : value;
+}
+
+function projectAgentsStates(value: unknown): unknown {
+  if (!isRecord(value)) return undefined;
+  const projected: Record<string, unknown> = {};
+  for (const [threadId, state] of Object.entries(value)) {
+    if (!isRecord(state)) continue;
+    projected[threadId] = {
+      ...(typeof state.status === "string" ? { status: state.status } : {}),
+      ...(typeof state.message === "string"
+        ? { message: projectShortText(state.message) }
+        : {}),
+    };
+  }
+  return projected;
+}
+
+function projectToolItem(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const projected: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === "agentsStates") {
+      projected.agentsStates = projectAgentsStates(entry);
+      continue;
+    }
+    if (key === "prompt") {
+      if (typeof entry === "string") projected.prompt = projectShortText(entry);
+      else if (entry === null) projected.prompt = null;
+      continue;
+    }
+    if (!toolItemKeepFields.has(key) || largeToolBodyFields.has(key)) continue;
+    projected[key] = projectChatValue(entry);
+  }
+  return projected;
+}
+
+function projectCursorItem(value: unknown): unknown {
+  if (!isRecord(value)) return undefined;
+  const projected: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (itemCursorKeepFields.has(key)) projected[key] = entry;
+  }
+  return projected;
+}
+
+function projectHookRun(value: unknown): unknown {
+  if (!isRecord(value)) return undefined;
+  const projected: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (hookRunKeepFields.has(key)) projected[key] = entry;
+  }
+  return projected;
+}
+
+function projectReview(value: unknown): unknown {
+  if (!isRecord(value)) return undefined;
+  return {
+    ...(typeof value.status === "string" ? { status: value.status } : {}),
+    ...(typeof value.riskLevel === "string"
+      ? { riskLevel: value.riskLevel }
+      : value.riskLevel === null
+        ? { riskLevel: null }
+        : {}),
+    ...(typeof value.userAuthorization === "string"
+      ? { userAuthorization: value.userAuthorization }
+      : value.userAuthorization === null
+        ? { userAuthorization: null }
+        : {}),
+    ...(typeof value.rationale === "string"
+      ? { rationale: projectShortText(value.rationale) }
+      : value.rationale === null
+        ? { rationale: null }
+        : {}),
+  };
+}
+
+function projectReviewAction(value: unknown): unknown {
+  if (!isRecord(value)) return undefined;
+  const projected: Record<string, unknown> = {};
+  for (const key of [
+    "type",
+    "source",
+    "cwd",
+    "server",
+    "toolName",
+    "connectorId",
+    "connectorName",
+    "toolTitle",
+    "target",
+    "host",
+    "protocol",
+    "port",
+  ]) {
+    if (key in value) projected[key] = value[key];
+  }
+  return projected;
+}
+
+function projectCursorParams(
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  const projected: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(params)) {
+    if (cursorParamKeepFields.has(key)) projected[key] = entry;
+  }
+  const item = projectCursorItem(params.item);
+  if (item) projected.item = item;
+  const run = projectHookRun(params.run);
+  if (run) projected.run = run;
+  const review = projectReview(params.review);
+  if (review) projected.review = review;
+  const action = projectReviewAction(params.action);
+  if (action) projected.action = action;
+  return projected;
+}
+
+function projectChatValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(projectChatValue);
+  if (!isRecord(value)) return value;
+  if (typeof value.method === "string" && isRecord(value.params))
+    return projectNotification(value);
+  if (isToolItem(value)) return projectToolItem(value);
+  const projected: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    projected[key] = projectChatValue(entry);
+  }
+  return projected;
+}
+
+function projectNotification(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const method = String(value.method);
+  const params = isRecord(value.params) ? value.params : {};
+  if (cursorOnlyNotificationMethods.has(method))
+    return { ...value, params: projectCursorParams(params) };
+  const projectedParams: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(params)) {
+    projectedParams[key] = projectChatValue(entry);
+  }
+  return { ...value, params: projectedParams };
+}
+
+function projectChatEnvelope(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  if (
+    value.event === "codex:notification" &&
+    isRecord(value.payload) &&
+    typeof value.payload.method === "string"
+  ) {
+    return { ...value, payload: projectChatValue(value.payload) };
+  }
+  return value;
+}
+
+function projectionErrorFrame(reason: string): string {
+  return `event: ${CHAT_PROJECTION_ERROR_EVENT}\ndata: ${JSON.stringify({ error: reason })}\n\n`;
+}
+
+function projectSseFrame(frame: string): string {
+  if (Buffer.byteLength(frame) > MAX_CHAT_SSE_FRAME_BYTES)
+    return projectionErrorFrame(
+      "Session event frame exceeds chat projection limit",
+    );
+  const data: string[] = [];
+  const passthrough: string[] = [];
+  for (const line of frame.split(/\r?\n/)) {
+    if (line.startsWith("data:")) {
+      data.push(line.slice(5).replace(/^ /, ""));
+    } else if (line) {
+      passthrough.push(line);
+    }
+  }
+  if (!data.length) return `${frame}\n\n`;
+  try {
+    const projected = projectChatEnvelope(JSON.parse(data.join("\n")));
+    return `${passthrough.length ? `${passthrough.join("\n")}\n` : ""}data: ${JSON.stringify(projected)}\n\n`;
+  } catch {
+    return Buffer.byteLength(frame) > 64 * 1024
+      ? projectionErrorFrame("Invalid oversized session event frame")
+      : `${frame}\n\n`;
+  }
+}
+
+function findSseBoundary(buffer: string): { index: number; length: number } {
+  const lf = buffer.indexOf("\n\n");
+  const crlf = buffer.indexOf("\r\n\r\n");
+  if (lf < 0) return { index: crlf, length: crlf < 0 ? 0 : 4 };
+  if (crlf < 0 || lf < crlf) return { index: lf, length: 2 };
+  return { index: crlf, length: 4 };
+}
+
+async function* projectChatSseStream(
+  body: ReadableStream<Uint8Array>,
+): AsyncGenerator<Buffer> {
+  const upstream = Readable.fromWeb(
+    body as Parameters<typeof Readable.fromWeb>[0],
+  );
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    for await (const chunk of upstream) {
+      buffer += decoder.decode(chunk as Buffer, { stream: true });
+      let boundary = findSseBoundary(buffer);
+      while (boundary.index >= 0) {
+        const frame = buffer.slice(0, boundary.index);
+        buffer = buffer.slice(boundary.index + boundary.length);
+        const projected = projectSseFrame(frame);
+        yield Buffer.from(projected);
+        if (projected.startsWith(`event: ${CHAT_PROJECTION_ERROR_EVENT}\n`))
+          return;
+        boundary = findSseBoundary(buffer);
+      }
+      if (Buffer.byteLength(buffer) > MAX_CHAT_SSE_FRAME_BYTES) {
+        yield Buffer.from(
+          projectionErrorFrame(
+            "Session event frame exceeds chat projection limit",
+          ),
+        );
+        return;
+      }
+    }
+    buffer += decoder.decode();
+    let boundary = findSseBoundary(buffer);
+    while (boundary.index >= 0) {
+      const frame = buffer.slice(0, boundary.index);
+      buffer = buffer.slice(boundary.index + boundary.length);
+      const projected = projectSseFrame(frame);
+      yield Buffer.from(projected);
+      if (projected.startsWith(`event: ${CHAT_PROJECTION_ERROR_EVENT}\n`))
+        return;
+      boundary = findSseBoundary(buffer);
+    }
+    if (buffer) yield Buffer.from(projectSseFrame(buffer));
+  } finally {
+    upstream.destroy();
+  }
+}
+
 export function registerSessionModeRoutes(
   app: FastifyInstance,
   options: SessionModeRouteOptions = {},
@@ -285,6 +660,10 @@ export function registerSessionModeRoutes(
       }
       if (decodeURIComponent(pathname).startsWith("/api/internal/"))
         return reply.code(403).send({ error: "Internal session API" });
+      const { chatProjection, upstreamSuffix } = splitSessionSuffix(
+        origin,
+        suffix,
+      );
       const controller = new AbortController();
       // ACP prompts and local inference can legitimately run for several minutes.
       const longRunning = [
@@ -298,7 +677,7 @@ export function registerSessionModeRoutes(
       const abort = () => controller.abort();
       request.raw.on("aborted", abort);
       try {
-        const response = await fetchUpstream(`${origin}${suffix}`, {
+        const response = await fetchUpstream(`${origin}${upstreamSuffix}`, {
           method: request.method,
           headers:
             request.method === "POST"
@@ -345,10 +724,24 @@ export function registerSessionModeRoutes(
             });
           return reply.send(result);
         }
+        if (
+          response.ok &&
+          chatProjection &&
+          request.method === "POST" &&
+          chatHistoryPaths.has(pathname)
+        ) {
+          return reply.send(projectChatValue(await response.json()));
+        }
         if (!response.body) return reply.send();
-        const stream = Readable.fromWeb(
-          response.body as Parameters<typeof Readable.fromWeb>[0],
-        );
+        const stream =
+          chatProjection &&
+          request.method === "GET" &&
+          pathname === "/api/events" &&
+          response.headers.get("content-type")?.includes("text/event-stream")
+            ? Readable.from(projectChatSseStream(response.body))
+            : Readable.fromWeb(
+                response.body as Parameters<typeof Readable.fromWeb>[0],
+              );
         reply.raw.once("close", () => {
           if (!reply.raw.writableFinished) controller.abort();
         });

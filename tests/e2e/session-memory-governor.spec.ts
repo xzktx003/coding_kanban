@@ -113,7 +113,7 @@ test("active visible Codex history reaches a bounded plateau and older turns rem
   expect(result.cursor).toMatch(/^kanban-memory-reload:/);
   expect(result.events).toBeLessThan(60);
   const recovered: string[] = [];
-  await page.route("**/api/codex/thread/turns/list", async (route) => {
+  await page.route(/\/api\/codex\/thread\/turns\/list(?:\?.*)?$/, async (route) => {
     const body = route.request().postDataJSON();
     const ids = Array.from(
       { length: 150 },

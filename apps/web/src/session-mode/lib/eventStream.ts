@@ -18,10 +18,11 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let sequence: number | null = null;
 let retry = 500;
 let connected = false;
+let paused = false;
 let repairReconnectAt = -Infinity;
 let repairTimer: ReturnType<typeof setTimeout> | null = null;
 function requestRepair() {
-  if (repairTimer || !subscribers.size) return;
+  if (paused || repairTimer || !subscribers.size) return;
   repairTimer = setTimeout(() => {
     repairTimer = null;
     for (const subscriber of [...subscribers]) {
@@ -56,24 +57,43 @@ function invoke(callback: (() => void) | undefined) {
   }
 }
 function connect() {
-  if (!subscribers.size) return;
+  if (paused || !subscribers.size) return;
   if (timer) clearTimeout(timer);
   timer = null;
   source?.close();
   connected = false;
   const next = new EventSource(
     buildEventUrl(
-      `/api/events${sequence === null ? "" : `?since=${sequence}`}`,
+      `/api/events?view=chat${sequence === null ? "" : `&since=${sequence}`}`,
     ),
   );
   source = next;
   next.onopen = () => {
     if (source !== next) return;
     connected = true;
-    useSessionSyncStore.setState({ connection: "connected" });
+    useSessionSyncStore.setState({
+      connection: "connected",
+      connectionError: null,
+    });
     retry = 500;
     for (const subscriber of [...subscribers]) invoke(subscriber.onOpen);
   };
+  next.addEventListener?.("session-projection-error", () => {
+    if (source !== next) return;
+    paused = true;
+    connected = false;
+    next.close();
+    source = null;
+    if (timer) clearTimeout(timer);
+    if (repairTimer) clearTimeout(repairTimer);
+    timer = null;
+    repairTimer = null;
+    useSessionSyncStore.setState({
+      connection: "paused",
+      connectionError:
+        "收到的会话数据过大或格式异常，已暂停实时接收以保护页面。任务仍在后台运行。",
+    });
+  });
   next.onmessage = (event) => {
     if (source !== next) return;
     try {
@@ -137,6 +157,7 @@ function connect() {
   };
 }
 function restart() {
+  paused = false;
   sequence = null;
   if (timer) clearTimeout(timer);
   timer = null;
@@ -168,6 +189,7 @@ export function openEventStream(subscriber: Subscriber): () => void {
     repairTimer = null;
     repairReconnectAt = -Infinity;
     connected = false;
+    paused = false;
     retry = 500;
   };
 }
@@ -177,4 +199,9 @@ export function reconcileEventStream() {
   if (timer) clearTimeout(timer);
   timer = null;
   connect();
+}
+
+/** Explicit recovery skips oversized replay; readonly history recovers visible messages. */
+export function retryEventStream() {
+  restart();
 }

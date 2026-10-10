@@ -348,22 +348,25 @@ test("real SSE sequence gap repairs transcript and a failed read offers read-onl
   const { fixture, stream } = await setup(page, baseURL!);
   let fail = false,
     reads = 0;
-  await page.route("**/api/session/api/codex/thread/turns/list", (route) => {
-    reads++;
-    const id = route.request().postDataJSON().threadId;
-    return route.fulfill(
-      fail
-        ? { status: 503, json: { error: "isolated outage" } }
-        : {
-            json: {
-              data: [
-                ...fixture.threads.find((t) => t.id === id)!.turns,
-              ].reverse(),
-              nextCursor: null,
+  await page.route(
+    (url) => url.pathname.endsWith("/api/codex/thread/turns/list"),
+    (route) => {
+      reads++;
+      const id = route.request().postDataJSON().threadId;
+      return route.fulfill(
+        fail
+          ? { status: 503, json: { error: "isolated outage" } }
+          : {
+              json: {
+                data: [
+                  ...fixture.threads.find((t) => t.id === id)!.turns,
+                ].reverse(),
+                nextCursor: null,
+              },
             },
-          },
-    );
-  });
+      );
+    },
+  );
   try {
     await page.goto("/?mode=session");
     await expect.poll(stream.opens).toBeGreaterThan(0);

@@ -13,6 +13,16 @@ import { codexService } from "./codexService";
 import { openedCodexIds } from "./openedSessions";
 import { cachedTranscriptTimings } from "./sessionCacheState";
 
+function activeTurn(
+  state: ReturnType<typeof useCodexStore.getState>,
+  id: string,
+) {
+  const timing = state.turnTimingMap[id];
+  if (timing?.status === "inProgress") return timing.turnId;
+  if (state.threadStatusMap[id]?.type === "active") return timing?.turnId ?? id;
+  return null;
+}
+
 /** Hydrate followed Codex histories independently of which transcript is mounted.
  * Recovery uses read-only history, never execution ownership or message resubmission. */
 export function startFollowedSessionHistorySync() {
@@ -24,12 +34,12 @@ export function startFollowedSessionHistorySync() {
   const done = new Map<string, number>();
   const retryAt = new Map<string, number>();
   const loading = new Set<string>();
-  const lastSignal = new Map<string, number>();
   const checked = new Map<string, number>();
   const pendingSince = new Map<string, number>();
   const repairing = new Set<string>();
   const attempts = new Map<string, number>();
   const retryRequested = new Set<string>();
+  const completionAfterLoad = new Set<string>();
   const controllers = new Map<string, AbortController>();
   let wokeAt = -Infinity;
 
@@ -42,6 +52,14 @@ export function startFollowedSessionHistorySync() {
     if (wanted.get(id) === done.get(id) || !wanted.has(id))
       wanted.set(id, (wanted.get(id) ?? 0) + 1);
     schedule();
+  }
+  function repairAfterCompletion(id: string) {
+    if (stopped || !ids().includes(id)) return;
+    if (loading.has(id)) {
+      completionAfterLoad.add(id);
+      return;
+    }
+    repair(id);
   }
   function schedule(delay = 0) {
     if (stopped) return;
@@ -68,9 +86,9 @@ export function startFollowedSessionHistorySync() {
         done.delete(id);
         retryAt.delete(id);
         checked.delete(id);
-        lastSignal.delete(id);
         attempts.delete(id);
         retryRequested.delete(id);
+        completionAfterLoad.delete(id);
         repairing.delete(id);
         setSessionRecovery(id);
       }
@@ -167,6 +185,17 @@ export function startFollowedSessionHistorySync() {
         .finally(() => {
           loading.delete(id);
           controllers.delete(id);
+          if (
+            !stopped &&
+            completionAfterLoad.delete(id) &&
+            ids().includes(id)
+          ) {
+            const base = Math.max(wanted.get(id) ?? 0, done.get(id) ?? 0);
+            wanted.set(id, base + 1);
+            retryAt.delete(id);
+            attempts.delete(id);
+            retryRequested.delete(id);
+          }
           schedule();
         });
     }
@@ -183,10 +212,16 @@ export function startFollowedSessionHistorySync() {
     agents: ["codex"],
     onEvent: (event) => {
       const p = event.payload as {
-        params?: { threadId?: string; thread?: { id?: string } };
+        method?: string;
+        params?: {
+          threadId?: string;
+          thread?: { id?: string };
+          turn?: { id?: string };
+        };
       };
       const id = p?.params?.threadId ?? p?.params?.thread?.id;
-      if (id) lastSignal.set(id, Date.now());
+      if (id && p.method === "turn/completed" && ids().includes(id))
+        repairAfterCompletion(id);
     },
     onResync: () => {
       for (const id of ids()) repair(id);
@@ -204,6 +239,19 @@ export function startFollowedSessionHistorySync() {
         !next.threads[id]?.awaitingTurnId
       )
         repair(id);
+    }
+  });
+  const stopCompletions = useCodexStore.subscribe((state, previous) => {
+    const members = ids();
+    for (const id of members) {
+      const before = activeTurn(previous, id);
+      const currentStatus = state.threadStatusMap[id]?.type;
+      const statusEnded =
+        previous.threadStatusMap[id]?.type === "active" &&
+        (currentStatus === "idle" || currentStatus === "systemError");
+      if (!before && !statusEnded) continue;
+      if (!statusEnded && activeTurn(state, id)) continue;
+      repairAfterCompletion(id);
     }
   });
   const manual = (event: Event) => {
@@ -239,19 +287,12 @@ export function startFollowedSessionHistorySync() {
         (e) =>
           Date.now() - pendingSince.get(JSON.stringify([id, e.id]))! >= 3000,
       );
-      const running =
-        state.threadStatusMap[id]?.type === "active" ||
-        state.turnTimingMap[id]?.status === "inProgress" ||
-        !!useFollowupStore.getState().threads[id]?.awaitingTurnId;
       const quiet = Date.now() - (checked.get(id) ?? 0);
       if (
         !loading.has(id) &&
         wanted.get(id) === done.get(id) &&
-        ((waiting && quiet >= 3000) ||
-          (running &&
-            quiet >= 5000 &&
-            Date.now() - (lastSignal.get(id) ?? -Infinity) >= 5000) ||
-          (!running && quiet >= 30000))
+        waiting &&
+        quiet >= 3000
       )
         repair(id);
     }
@@ -275,6 +316,7 @@ export function startFollowedSessionHistorySync() {
     clearTimeout(timer);
     unsubscribe();
     stopQueues();
+    stopCompletions();
     clearInterval(watchdog);
     window.removeEventListener("session-history-reconcile", manual);
     for (const id of repairing) setSessionRecovery(id);
