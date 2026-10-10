@@ -54,7 +54,7 @@ test("does not install or restart when the expected revision was not applied", a
   assert.deepEqual(commands, []);
 });
 
-test("attempts the safe restart even if dependency installation fails", async () => {
+test("keeps the running service when dependency installation fails", async () => {
   const commands = [];
 
   await assert.rejects(
@@ -71,10 +71,7 @@ test("attempts the safe restart even if dependency installation fails", async ()
     }),
     /dependency installation failed/,
   );
-  assert.deepEqual(commands, [
-    ["pnpm", ["install", "--frozen-lockfile"]],
-    ["pnpm", ["dev:restart"]],
-  ]);
+  assert.deepEqual(commands, [["pnpm", ["install", "--frozen-lockfile"]]]);
 });
 
 test("rejects malformed target revisions before invoking commands", async () => {
