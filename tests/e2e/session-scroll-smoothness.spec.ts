@@ -73,6 +73,9 @@ async function prepare(
         currentThreadId: "ux-0",
       });
       (window as any).__smoothStore = useCodexStore;
+      // Match the notification handler's bounded batch path for live deltas.
+      (window as any).__smoothDelta = (event: unknown) =>
+        useCodexStore.getState().setStreamingAgentDeltas("ux-0", [event]);
     },
     { longRows },
   );
@@ -99,7 +102,7 @@ test("small upward trackpad increments keep the reader detached during live upda
     await page.mouse.wheel(0, -2);
     samples.push(
       await viewport.evaluate(async (element, step) => {
-        (window as any).__smoothStore.getState().addEvent("ux-0", {
+        (window as any).__smoothDelta({
           method: "item/agentMessage/delta",
           params: {
             threadId: "ux-0",
@@ -138,7 +141,7 @@ test("small upward trackpad increments keep the reader detached during live upda
   ).toContainText("有新消息");
   await page.getByRole("button", { name: "Scroll to bottom" }).click();
   await viewport.evaluate(async (el) => {
-    (window as any).__smoothStore.getState().addEvent("ux-0", {
+    (window as any).__smoothDelta({
       method: "item/agentMessage/delta",
       params: {
         threadId: "ux-0",
@@ -158,9 +161,11 @@ test("small upward trackpad increments keep the reader detached during live upda
       ),
     )
     .toBeLessThanOrEqual(1);
-  await expect(
-    page.getByText("末尾主动继续跟随。", { exact: true }),
-  ).toBeVisible();
+  const liveText = page.locator(
+    "[data-codex-live-message] [data-codex-streaming-text]",
+  );
+  await expect(liveText).toContainText("末尾主动继续跟随。");
+  await expect(liveText).toBeVisible();
   expect(errors).toEqual([]);
   expect(
     await page.evaluate(() => (window as any).__resizeObserverReceipts.errors),
@@ -180,9 +185,9 @@ test("a positive wheel at latest keeps before-paint following when the reply gro
   page,
 }, info) => {
   const { viewport, fixture, errors } = await prepare(page);
-  const key = "event-positive-smooth-turn-positive-smooth-item";
+  const liveSelector = "[data-codex-live-message]";
   await page.evaluate(() =>
-    (window as any).__smoothStore.getState().addEvent("ux-0", {
+    (window as any).__smoothDelta({
       method: "item/agentMessage/delta",
       params: {
         threadId: "ux-0",
@@ -202,7 +207,7 @@ test("a positive wheel at latest keeps before-paint following when the reply gro
       ),
     )
     .toBeLessThanOrEqual(1);
-  const initial = await viewport.evaluate((el, key) => {
+  const initial = await viewport.evaluate((el, liveSelector) => {
     (window as any).__positiveWheel = { wheels: [], scrolls: 0 };
     el.addEventListener(
       "wheel",
@@ -219,11 +224,9 @@ test("a positive wheel at latest keeps before-paint following when the reply gro
     );
     return {
       scrollTop: el.scrollTop,
-      height: el
-        .querySelector(`[data-codex-row="${key}"]`)!
-        .getBoundingClientRect().height,
+      height: el.querySelector(liveSelector)!.getBoundingClientRect().height,
     };
-  }, key);
+  }, liveSelector);
   const bounds = (await viewport.boundingBox())!;
   await page.mouse.move(
     bounds.x + bounds.width / 2,
@@ -248,9 +251,9 @@ test("a positive wheel at latest keeps before-paint following when the reply gro
   ).toBe(true);
   expect(wheel.scrolls).toBe(0);
   expect(wheel.scrollTop).toBe(initial.scrollTop);
-  const samples = await viewport.evaluate(async (el, key) => {
+  const samples = await viewport.evaluate(async (el, liveSelector) => {
     const snapshot = () => {
-      const row = el.querySelector(`[data-codex-row="${key}"]`);
+      const row = el.querySelector(liveSelector);
       if (!row)
         throw new Error("Latest reply disappeared during positive following");
       return {
@@ -271,7 +274,7 @@ test("a positive wheel at latest keeps before-paint following when the reply gro
     const firstDelivery = new Promise<void>((resolve) => {
       resolveInitial = resolve;
     });
-    const row = el.querySelector(`[data-codex-row="${key}"]`)!;
+    const row = el.querySelector(liveSelector)!;
     const surface = el.querySelector(".thread-surface")!;
     // The production observers are already registered. Witness a real native
     // delivery and its microtask, separately from RAF/zero-task ordering.
@@ -291,7 +294,7 @@ test("a positive wheel at latest keeps before-paint following when the reply gro
     observer.observe(surface);
     await firstDelivery;
     growing = true;
-    (window as any).__smoothStore.getState().addEvent("ux-0", {
+    (window as any).__smoothDelta({
       method: "item/agentMessage/delta",
       params: {
         threadId: "ux-0",
@@ -324,7 +327,7 @@ test("a positive wheel at latest keeps before-paint following when the reply gro
     }
     observer.disconnect();
     return { frames, initialDeliveries, growthDeliveries };
-  }, key);
+  }, liveSelector);
   await writeFile(
     info.outputPath("positive-wheel-before-paint.json"),
     JSON.stringify({ initial, wheel, samples }, null, 2),
@@ -339,7 +342,8 @@ test("a positive wheel at latest keeps before-paint following when the reply gro
     samples.growthDeliveries.some((delivery) =>
       delivery.targets.some(
         (target) =>
-          target.target === "latest-row" && target.height > initial.height + 200,
+          target.target === "latest-row" &&
+          target.height > initial.height + 200,
       ),
     ),
   ).toBe(true);
@@ -350,9 +354,13 @@ test("a positive wheel at latest keeps before-paint following when the reply gro
       ),
     ),
   ).toBeLessThanOrEqual(1);
-  await expect(
-    page.getByText("正向滑动之后第11段，回复增高仍保持底部。", { exact: true }),
-  ).toBeVisible();
+  const liveText = page.locator(
+    "[data-codex-live-message] [data-codex-streaming-text]",
+  );
+  await expect(liveText).toContainText(
+    "正向滑动之后第11段，回复增高仍保持底部。",
+  );
+  await expect(liveText).toBeVisible();
   await expect(
     page.locator(".session-codex-composer [contenteditable=true]").first(),
   ).toHaveText("平滑滚动的会话草稿");
@@ -654,7 +662,7 @@ test("inline text editing navigation and consumed keys retain positive latest fo
     await inline.press(key);
     await page.evaluate(
       (key) =>
-        (window as any).__smoothStore.getState().addEvent("ux-0", {
+        (window as any).__smoothDelta({
           method: "item/agentMessage/delta",
           params: {
             threadId: "ux-0",
@@ -665,9 +673,11 @@ test("inline text editing navigation and consumed keys retain positive latest fo
         }),
       key,
     );
-    await expect(
-      page.getByText(`${key} 导航期间的实时回复。`, { exact: true }),
-    ).toBeVisible();
+    const liveText = page.locator(
+      "[data-codex-live-message] [data-codex-streaming-text]",
+    );
+    await expect(liveText).toContainText(`${key} 导航期间的实时回复。`);
+    await expect(liveText).toBeVisible();
     await viewport.evaluate(
       () =>
         new Promise<void>((resolve) =>
@@ -698,7 +708,7 @@ test("inline text editing navigation and consumed keys retain positive latest fo
   await viewport.focus();
   await page.keyboard.press("Home");
   await page.evaluate(() =>
-    (window as any).__smoothStore.getState().addEvent("ux-0", {
+    (window as any).__smoothDelta({
       method: "item/agentMessage/delta",
       params: {
         threadId: "ux-0",
@@ -708,9 +718,11 @@ test("inline text editing navigation and consumed keys retain positive latest fo
       },
     }),
   );
-  await expect(
-    page.getByText("已处理的按键继续跟随新回复。", { exact: true }),
-  ).toBeVisible();
+  const liveText = page.locator(
+    "[data-codex-live-message] [data-codex-streaming-text]",
+  );
+  await expect(liveText).toContainText("已处理的按键继续跟随新回复。");
+  await expect(liveText).toBeVisible();
   await viewport.evaluate(
     () =>
       new Promise<void>((resolve) =>

@@ -186,7 +186,35 @@ test("real event bridge discards unrelated bodies and hidden output bursts", asy
   ).toEqual([
     { method: "item/completed", text: "观察中的消息", output: undefined },
     { method: "item/completed", text: "最终完整回复", output: undefined },
+    { method: "item/completed", text: undefined, output: null },
   ]);
+  expect(
+    await page.evaluate(() => {
+      const event = (window as any).__memoryStore
+        .getState()
+        .events[
+          "memory-observed"
+        ].find((e: any) => e.params.item?.id === "verbose-command");
+      const item = event.params.item;
+      return {
+        id: item.id,
+        command: item.command,
+        status: item.status,
+        exitCode: item.exitCode,
+        durationMs: item.durationMs,
+        transcriptMetadataOnly: item.transcriptMetadataOnly,
+        output: item.aggregatedOutput,
+      };
+    }),
+  ).toEqual({
+    id: "verbose-command",
+    command: "printf result",
+    status: "completed",
+    exitCode: 0,
+    durationMs: 5,
+    transcriptMetadataOnly: true,
+    output: null,
+  });
   await page.evaluate(async () => {
     const path = "/src/session-mode/stores/useAgentCenterStore.ts";
     const url =

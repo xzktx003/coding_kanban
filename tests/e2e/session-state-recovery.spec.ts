@@ -432,19 +432,23 @@ test("SSE gap recovery preserves a middle reading position and leaves the new re
   test.setTimeout(60000);
   await page.setViewportSize({ width: 1440, height: 900 });
   const { fixture, stream } = await setup(page, baseURL!);
-  const old = {
-    id: "old",
+  // Separate final reports keep this reading fixture scrollable with native turn grouping.
+  const oldTurns = Array.from({ length: 20 }, (_, i) => ({
+    id: `old-turn-${i}`,
     status: "completed",
     startedAt: 1,
     durationMs: 20,
     error: null,
-    items: Array.from({ length: 20 }, (_, i) => ({
-      type: "agentMessage",
-      id: `old-${i}`,
-      text: `旧消息 ${i} ${"保持阅读位置。".repeat(70)}`,
-    })),
-  };
-  fixture.threads[0].turns = [old] as any;
+    items: [
+      {
+        type: "agentMessage",
+        id: `old-${i}`,
+        phase: "final_answer",
+        text: `旧消息 ${i} ${"保持阅读位置。".repeat(70)}`,
+      },
+    ],
+  }));
+  fixture.threads[0].turns = oldTurns as any;
   try {
     await page.goto("/?mode=session");
     await expect.poll(stream.opens).toBeGreaterThan(0);
