@@ -89,6 +89,7 @@ interface TerminalViewProps {
   wheelPassthrough?: boolean;
   preferLocalMouseSelection?: boolean;
   restoreBracketedPasteMode?: boolean;
+  scrollToBottomRequest?: number;
 }
 
 type TerminalContainer = HTMLDivElement & {
@@ -147,6 +148,7 @@ export const TerminalView = memo(function TerminalView({
   wheelPassthrough = false,
   preferLocalMouseSelection = false,
   restoreBracketedPasteMode = false,
+  scrollToBottomRequest = 0,
 }: TerminalViewProps) {
   const inputEnabled = inputEnabledProp ?? interactive;
   const terminalFontSize = clampTerminalFontSize(
@@ -167,9 +169,17 @@ export const TerminalView = memo(function TerminalView({
   const tmuxMouseReportingRef = useRef(tmuxMouseReporting);
   const terminalInputReadyRef = useRef(false);
   const userScrollLockedRef = useRef(false);
+  const followExternalInputRef = useRef(false);
   const retryConnectionRef = useRef<(() => void) | null>(null);
   const [connectionPhase, setConnectionPhase] =
     useState<TerminalConnectionPhase>("connecting");
+
+  useEffect(() => {
+    if (!scrollToBottomRequest) return;
+    followExternalInputRef.current = true;
+    userScrollLockedRef.current = false;
+    termRef.current?.scrollToBottom();
+  }, [agentSessionId, scrollToBottomRequest]);
 
   useEffect(() => {
     terminalFontSizeRef.current = terminalFontSize;
@@ -282,6 +292,7 @@ export const TerminalView = memo(function TerminalView({
     setConnectionPhase("connecting");
     terminalInputReadyRef.current = false;
     userScrollLockedRef.current = false;
+    followExternalInputRef.current = false;
 
     const timeoutIds: number[] = [];
     const intervalIds: number[] = [];
@@ -816,6 +827,9 @@ export const TerminalView = memo(function TerminalView({
               Math.min(next.viewportYBeforeWrite, term.buffer.active.baseY),
             );
           }
+          if (!disposed && followExternalInputRef.current) {
+            term.scrollToBottom();
+          }
 
           reportInitialReadyIfSettled();
           remainingCallbacks -= 1;
@@ -888,6 +902,7 @@ export const TerminalView = memo(function TerminalView({
 
       wheelScrollRemainder = result.remainingDeltaY;
       if (result.scrollLines !== 0) {
+        followExternalInputRef.current = false;
         term.scrollLines(result.scrollLines);
         refreshUserScrollLock();
       }
@@ -1566,6 +1581,7 @@ export const TerminalView = memo(function TerminalView({
       try {
         applyPreviewLayout();
         fitAddon.fit();
+        if (followExternalInputRef.current) term.scrollToBottom();
         if (term.cols > 0 && term.rows > 0) {
           cachePreviewGeometry(term.cols, term.rows);
         }
@@ -1656,6 +1672,7 @@ export const TerminalView = memo(function TerminalView({
           touchState.lastY = nextY;
           touchState.scrollRemainder = result.remainingDeltaY;
           if (result.scrollLines !== 0) {
+            followExternalInputRef.current = false;
             term.scrollLines(result.scrollLines);
           }
           return;

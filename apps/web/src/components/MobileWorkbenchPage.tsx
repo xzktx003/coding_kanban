@@ -464,6 +464,10 @@ export function MobileWorkbenchPage({
   >(() => new Set());
   const sessionSwitcherRef = useRef<HTMLDivElement>(null);
   const inputQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const [inputActivity, setInputActivity] = useState<{
+    sessionId: string;
+    revision: number;
+  } | null>(null);
   const visibleSessions = useMemo(
     () => sessions.filter((session) => !session.hidden),
     [sessions],
@@ -533,7 +537,8 @@ export function MobileWorkbenchPage({
     const page = document.querySelector(".mobile-workbench-page");
     const nav = document.querySelector(".mobile-primary-nav");
     const syncNavClearance = () => {
-      if (!(page instanceof HTMLElement) || !(nav instanceof HTMLElement)) return;
+      if (!(page instanceof HTMLElement) || !(nav instanceof HTMLElement))
+        return;
       const hidden = window.getComputedStyle(nav).display === "none";
       const height = hidden ? 0 : Math.ceil(nav.getBoundingClientRect().height);
       page.style.setProperty("--mobile-nav-clearance", `${height}px`);
@@ -603,6 +608,10 @@ export function MobileWorkbenchPage({
 
     const pending = inputQueueRef.current.then(async () => {
       await sendAgentInput(sessionId, { input });
+      setInputActivity((previous) => ({
+        sessionId,
+        revision: (previous?.revision ?? 0) + 1,
+      }));
     });
     inputQueueRef.current = pending.catch(() => undefined);
     return pending;
@@ -852,6 +861,11 @@ export function MobileWorkbenchPage({
                           inputEnabled={false}
                           interactive
                           mobileTouchMode
+                          scrollToBottomRequest={
+                            inputActivity?.sessionId === activeSession.id
+                              ? inputActivity.revision
+                              : 0
+                          }
                           onFontSizeChange={onTerminalFontSizeChange}
                           tmuxMouseReporting={Boolean(
                             activeSession.transportRef?.tmuxSession,

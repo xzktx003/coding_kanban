@@ -191,6 +191,175 @@ test.describe("Mobile Terminal", () => {
     await page.waitForTimeout(500);
   });
 
+  test.describe("touch composer delivery", () => {
+    test.use({
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+    });
+    let ownedTmux: string | undefined;
+    test.afterEach(() => {
+      if (ownedTmux) {
+        execFileSync("tmux", ["kill-session", "-t", ownedTmux]);
+        ownedTmux = undefined;
+      }
+    });
+
+    for (const transport of ["pty", "tmux"] as const) {
+      for (const mode of ["send", "paste"] as const) {
+        test(`${transport} ${mode} delivers the focused mobile draft to the terminal`, async ({
+          page,
+          request,
+        }) => {
+          if (transport === "tmux") {
+            await request.delete(`/api/agent-sessions/${sessionId}`);
+            sessionId = undefined;
+            ownedTmux = `e2e-mobile-touch-${Date.now()}`;
+            execFileSync("tmux", [
+              "new-session",
+              "-d",
+              "-s",
+              ownedTmux,
+              "-c",
+              process.cwd(),
+              "node scripts/mock-terminal-agent.mjs raw",
+            ]);
+            sessionName = `Mobile Touch ${ownedTmux}`;
+            const response = await request.post("/api/agent-launch/pty", {
+              data: {
+                workspaceId: "default",
+                displayName: sessionName,
+                agentKind: "shell",
+                command: `tmux attach -t '${ownedTmux}'`,
+                workingDirectory: process.cwd(),
+                tmuxSessionName: ownedTmux,
+              },
+            });
+            expect(response.ok()).toBeTruthy();
+            sessionId = (await response.json()).id;
+          }
+          await openCurrentSession(page);
+          await expect(page.locator(".mobile-terminal-surface")).toContainText(
+            "raw-ready",
+          );
+          const textarea = page.locator(".mobile-agent-composer-input");
+          const draft = "手机输入测试";
+          await textarea.fill(draft);
+          await textarea.focus();
+          await page.evaluate(() => {
+            Object.defineProperty(window.visualViewport, "height", {
+              configurable: true,
+              get: () =>
+                document.activeElement?.matches(".mobile-agent-composer-input")
+                  ? 400
+                  : 844,
+            });
+            document
+              .querySelector(".mobile-agent-composer-input")
+              ?.addEventListener("blur", () =>
+                window.visualViewport?.dispatchEvent(new Event("resize")),
+              );
+            window.visualViewport?.dispatchEvent(new Event("resize"));
+          });
+          await page.evaluate(async () => {
+            const term = (
+              document.querySelector(".terminal-view") as HTMLElement & {
+                __xterm: {
+                  write(text: string, callback: () => void): void;
+                  scrollToTop(): void;
+                };
+              }
+            ).__xterm;
+            await new Promise<void>((resolve) =>
+              term.write(
+                Array.from({ length: 80 }, (_, i) => `history-${i}\r\n`).join(
+                  "",
+                ),
+                resolve,
+              ),
+            );
+            term.scrollToTop();
+          });
+          const frames: string[] = [];
+          page.on("request", (request) => {
+            if (
+              request.method() === "POST" &&
+              new URL(request.url()).pathname ===
+                `/api/agent-sessions/${sessionId}/stdin`
+            ) {
+              frames.push(request.postDataJSON().input);
+            }
+          });
+          await page
+            .getByRole("button", {
+              name: mode === "send" ? "发送" : "粘贴",
+              exact: true,
+            })
+            .tap();
+          const pasteFrame = `\x1b[200~${draft}\x1b[201~`;
+          await expect
+            .poll(() => frames)
+            .toEqual(mode === "send" ? [pasteFrame, "\r"] : [pasteFrame]);
+          await expect(textarea).toHaveValue("");
+          await expect(page.locator(".mobile-terminal-surface")).toContainText(
+            Buffer.from(draft).toString("hex"),
+          );
+          await expect
+            .poll(() =>
+              page.evaluate(() => {
+                const term = (
+                  document.querySelector(".terminal-view") as HTMLElement & {
+                    __xterm: {
+                      buffer: { active: { baseY: number; viewportY: number } };
+                    };
+                  }
+                ).__xterm;
+                return term.buffer.active.baseY - term.buffer.active.viewportY;
+              }),
+            )
+            .toBe(0);
+          await page.locator(".terminal-view").dispatchEvent("wheel", {
+            deltaY: -300,
+            bubbles: true,
+            cancelable: true,
+          });
+          const background = "after-user-scroll";
+          await request.post(`/api/agent-sessions/${sessionId}/stdin`, {
+            data: { input: background },
+          });
+          await expect
+            .poll(() =>
+              page.evaluate((hex) => {
+                const term = (
+                  document.querySelector(".terminal-view") as HTMLElement & {
+                    __xterm: {
+                      buffer: {
+                        active: {
+                          length: number;
+                          getLine(
+                            index: number,
+                          ): { translateToString(): string } | undefined;
+                          baseY: number;
+                          viewportY: number;
+                        };
+                      };
+                    };
+                  }
+                ).__xterm;
+                const buffer = term.buffer.active;
+                const text = Array.from(
+                  { length: buffer.length },
+                  (_, i) => buffer.getLine(i)?.translateToString() ?? "",
+                ).join("");
+                return text.includes(hex) && buffer.viewportY < buffer.baseY;
+              }, Buffer.from(background).toString("hex")),
+            )
+            .toBe(true);
+        });
+      }
+    }
+  });
+
   test("pinch-zoom: font size persists in localStorage", async ({
     page,
     browserName,

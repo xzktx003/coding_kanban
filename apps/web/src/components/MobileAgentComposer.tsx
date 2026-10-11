@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   buildMobileComposerInputFrames,
@@ -28,6 +28,7 @@ export function MobileAgentComposer({
 }: MobileAgentComposerProps) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [failedAttempt, setFailedAttempt] =
     useState<FailedComposerAttempt | null>(null);
@@ -37,6 +38,7 @@ export function MobileAgentComposer({
     startFrameIndex: number,
     draft: string,
   ) => {
+    sendingRef.current = true;
     setSending(true);
     setSendError(null);
     try {
@@ -57,18 +59,19 @@ export function MobileAgentComposer({
       setFailedAttempt(null);
       setText((current) => (current === draft ? "" : current));
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
 
   const send = async (mode: MobileComposerSendMode) => {
-    if (!text || disabled || sending) return;
+    if (!text || disabled || sendingRef.current) return;
     const draft = text;
     await deliver(buildMobileComposerInputFrames(draft, mode), 0, draft);
   };
 
   const retry = async () => {
-    if (!failedAttempt || disabled || sending) return;
+    if (!failedAttempt || disabled || sendingRef.current) return;
     await deliver(
       failedAttempt.frames,
       failedAttempt.nextFrameIndex,
@@ -89,7 +92,11 @@ export function MobileAgentComposer({
         disabled={disabled || sending}
         onChange={(event) => setText(event.target.value)}
         onKeyDown={(event) => {
-          if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+          if (
+            event.key !== "Enter" ||
+            event.shiftKey ||
+            event.nativeEvent.isComposing
+          ) {
             return;
           }
           event.preventDefault();
@@ -127,6 +134,11 @@ export function MobileAgentComposer({
         <button
           className="mobile-agent-composer-btn"
           disabled={!text || disabled || sending}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            void send("paste");
+          }}
           onClick={() => void send("paste")}
           type="button"
         >

@@ -8,6 +8,7 @@ export interface TerminalViewRenderProps {
   mobileTouchMode?: boolean;
   preferLocalMouseSelection?: boolean;
   restoreBracketedPasteMode?: boolean;
+  scrollToBottomRequest?: number;
   suspended?: boolean;
   tmuxMouseReporting?: boolean;
   visible?: boolean;
