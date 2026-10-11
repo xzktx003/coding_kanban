@@ -421,6 +421,10 @@ importers:
 
   packages/codex-host-bridge: {}
 
+  packages/native-codex-adapter: {}
+
+  packages/native-codex-host: {}
+
   packages/session-runtime:
     dependencies:
       '@agent-orchestrator/shared':

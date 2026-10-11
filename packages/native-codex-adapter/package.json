@@ -1,0 +1,12 @@
+{
+  "name": "@agent-orchestrator/native-codex-adapter",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.mjs",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "check": "node --check src/index.mjs"
+  },
+  "engines": { "node": "^20.19.0 || >=22.12.0" }
+}

@@ -12,6 +12,7 @@
 - `pnpm session:test`、`pnpm session:clippy`：TS 运行层测试与类型检查（clippy 为兼容命令名），测试使用独立的应用/CLI 数据目录。
 - 会话运行层 TS 实现位于 `packages/session-runtime/src`，新启动默认使用独立 Node 进程。`pnpm --filter @agent-orchestrator/session-runtime run audit` 核对原 208 个迁移契约方法/路径；新 Slack 预览 context/read 两个只读接口有独立行为验收，见 `docs/session-slack-preview.md`。注册通过不替代行为验收。已有 legacy 服务仍安全复用，禁止因新产物而隐式停止活跃 Agent，进度与验收见 `docs/session-typescript-migration.md`。
 - `pnpm e2e`：浏览器测试；会话模式联调使用独立 `.env`、端口和 `SESSION_DATA_HOME`，详情见 `docs/session-mode-architecture.md`。
+- 原生 Codex 实验宿主与只读适配器位于 `packages/native-codex-host`、`packages/native-codex-adapter`，不随 `pnpm dev` 启动。专项验收：`node --test packages/native-codex-host/test/*.test.mjs packages/native-codex-adapter/test/*.test.mjs`；启动参数与真实浏览器边界见各包 README 和 `docs/designs/session-render-alignment/native-prototype-acceptance.md`。不得连接默认 CLI IPC、复制登录数据或因实验部署重启正式 Agent。
 
 
 ## 任务完成前的最低要求

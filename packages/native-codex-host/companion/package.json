@@ -1,0 +1,25 @@
+{
+  "name": "native-codex-companion",
+  "publisher": "agent-orchestrator",
+  "version": "0.1.0",
+  "displayName": "Isolated Native Codex Companion",
+  "description": "Controlled local thread panel opener for the isolated native prototype.",
+  "engines": {
+    "vscode": "^1.96.2"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.cjs",
+  "extensionKind": [
+    "workspace"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "nativeCodexPrototype.openTwoTestPanels",
+        "title": "Native Codex: Open Two Test Panels"
+      }
+    ]
+  }
+}

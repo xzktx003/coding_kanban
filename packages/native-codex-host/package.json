@@ -1,0 +1,8 @@
+{
+  "name": "@agent-orchestrator/native-codex-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test test/*.test.mjs", "start": "node launcher.mjs" },
+  "engines": { "node": ">=22.12.0" }
+}
