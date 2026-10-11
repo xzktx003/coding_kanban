@@ -1088,3 +1088,12 @@
 - LAN 实验宿主曾默认无认证，独立数据目录并不能限制完整 IDE 的主机文件/终端能力；现默认要求 owned0600 密码文件，私有 YAML 设置密码认证，argv/公开记录不含密码。无认证仅允许显式诊断开关。以上与原型宿主共27项回归及独立复审通过。
 
 - 真实浏览器重连时，code-server保留首个extension host的broker，后续实例因EADDRINUSE激活失败。仅对该明确错误禁用新实例HTTP并保留本实例固定双面板命令，既不接管首listener也不将命令转发给它；其他bind失败仍释放自身资源并拒绝。实例metadata不覆盖首broker的ready记录。同端口两个独立VM module实例的真实HTTP回归先红后绿，宿主29项、适配器29项以及整分支补充复审通过；真实更新重连结果见原型验收。
+
+### 2026-10-12：独立 Codex 模式
+
+- broker listen 尚未建立时 dispose 会抑制 listening 回调；activate 须在 close/error/listening 共同结算，取消后不得打开面板/写 readiness，不能关闭其他实例 listener。
+- native 同源代理须对真实 Host+协议校验 Origin，不能以 Origin 自造可信 Host；HTTPS Vite 必须传递协议。接收端分片限制与待发队列是两个边界，native 专用 receiver 限制不可影响终端；本服务不使用 WS 子协议，握手前拒绝避免上下游不一致。
+- Vite WS 的 xfwd协议为wss/ws，须规范化后与HTTPS/HTTP Origin比较；仅打开101并不证明插件数据流完整。surface按官方extensionId过滤，迟到就绪清理专用loadError，后台不继续加载超时计时。
+- code-server真实初始化WS消息约1257KB，native初设1MiB会1009反复重连；按实际bytes证据设独立2MiB message/queue预算，256KiB背压，>limit片段仍拒绝，不改终端receiver。握手101不足以验收数据链路。
+- 原始宿主36秒稳定对照：browser→host最大6541792bytes，host→browser最大262144bytes，双登录UI且无close。最终native方向预算browser message/queue8MiB、upstream message/browserbuffer2MiB，单测须验证6.54MB完整发送及每方向超限早拒绝；握手/首消息通过仍不足证明后续资源流稳定。
+- Native DOM ready/locator.isVisible不能证明实际绘制：code-server overlay父容器clip-path/overflow会裁剪自有fixediframe。只用自有可恢复container标记解除clip、设置指针边界，引用计数保留其他窗，不能改原inline/移动iframe。验收必须看截图并检查实际hit-test，不只数DOM窗口。

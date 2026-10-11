@@ -14,6 +14,57 @@ it("exposes both modes and switches with one click", () => {
   fireEvent.click(screen.getByRole("button", { name: "会话" }));
   expect(change).toHaveBeenLastCalledWith("session");
 });
+it("exposes Codex as a separate selection while retaining the binary rail", () => {
+  const change = vi.fn();
+  const view = render(
+    <WorkbenchModeSwitch mode="terminal" onChange={change} />,
+  );
+  const codex = screen.getByRole("button", { name: "Codex" });
+  expect(codex.getAttribute("aria-pressed")).toBe("false");
+  fireEvent.click(codex);
+  expect(change).toHaveBeenLastCalledWith("codex");
+  view.rerender(<WorkbenchModeSwitch mode="codex" onChange={change} />);
+  expect(codex.getAttribute("aria-pressed")).toBe("true");
+  expect(
+    screen.getByRole("button", { name: "会话" }).getAttribute("aria-pressed"),
+  ).toBe("false");
+  expect(
+    screen.getByRole("button", { name: "终端" }).getAttribute("aria-pressed"),
+  ).toBe("false");
+  fireEvent.click(screen.getByRole("switch", { name: "工作模式" }));
+  expect(change).toHaveBeenLastCalledWith("session");
+});
+it("reaches all three labeled choices by keyboard and prevents disabled navigation", () => {
+  const change = vi.fn();
+  const view = render(
+    <WorkbenchModeSwitch mode="terminal" onChange={change} />,
+  );
+  fireEvent.keyDown(screen.getByRole("button", { name: "终端" }), {
+    key: "ArrowRight",
+  });
+  expect(change).toHaveBeenLastCalledWith("codex");
+  view.rerender(<WorkbenchModeSwitch mode="codex" onChange={change} />);
+  const codex = screen.getByRole("button", { name: "Codex" });
+  fireEvent.keyDown(codex, { key: "ArrowLeft" });
+  expect(change).toHaveBeenLastCalledWith("terminal");
+  fireEvent.keyDown(codex, { key: "Home" });
+  expect(change).toHaveBeenLastCalledWith("session");
+  fireEvent.keyDown(screen.getByRole("button", { name: "会话" }), {
+    key: "End",
+  });
+  expect(change).toHaveBeenLastCalledWith("codex");
+  view.rerender(
+    <WorkbenchModeSwitch mode="session" onChange={change} disabled />,
+  );
+  change.mockClear();
+  expect(
+    screen.getByRole("button", { name: "Codex" }).hasAttribute("disabled"),
+  ).toBe(true);
+  fireEvent.keyDown(screen.getByRole("button", { name: "会话" }), {
+    key: "End",
+  });
+  expect(change).not.toHaveBeenCalled();
+});
 it("supports keyboard direction and disabled targets", () => {
   const change = vi.fn();
   const view = render(<WorkbenchModeSwitch mode="session" onChange={change} />);

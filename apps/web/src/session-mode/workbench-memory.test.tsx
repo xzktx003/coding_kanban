@@ -61,10 +61,19 @@ test("switching modes keeps terminal state mounted while suspending hidden work"
   await waitFor(() =>
     expect(terminal.getAttribute("data-active")).toBe("false"),
   );
+  expect(terminal.closest(".workbench-terminal")?.hasAttribute("hidden")).toBe(
+    true,
+  );
+  expect(terminal.closest(".workbench-terminal")?.hasAttribute("inert")).toBe(
+    true,
+  );
   fireEvent.click(await screen.findByRole("button", { name: "前往终端" }));
   await waitFor(() =>
     expect(terminal.getAttribute("data-active")).toBe("true"),
   );
   expect(screen.getByTestId("terminal-app")).toBe(terminal);
   expect(lifecycle.terminalMounts).toBe(1);
+  expect(terminal.closest(".workbench-terminal")?.hasAttribute("inert")).toBe(
+    false,
+  );
 });

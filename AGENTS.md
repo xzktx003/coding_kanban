@@ -142,3 +142,9 @@
 - 关注集合与正文可见消费者必须分开：不可见正文在 60 秒宽限期后可回收，休眠中的事件/历史/设备缓存不得重新持有正文；重显只读恢复，后台任务状态与回执确认必须独立于正文挂载。修改该机制须运行 `session-idle-memory` 及恢复/审批回归。
 - 完成提示音必须复用单个音频上下文，每声结束断开节点，空闲关闭；音频时钟挂起须有墙钟清理。不得改回每轮创建 AudioContext 或仅 stop 不 close；这类原生分配不计入 JS 堆。
 - 按约定运行相关单测与原生 HTTP/EventSource 浏览器回归，记录传输量和内存测量边界；修改限制须提供等效或更好的实测证据，不能删除保护断言或单纯放宽阈值。纯文档修改只需核对路径、命令和记录一致性。
+
+### 独立 Codex 模式
+
+- 工作台现在包含会话、终端、Codex 三种模式，共用 `WorkbenchModeSwitch`，首次访问后保留各自挂载状态。原生插件适配开发集中在 `apps/web/src/codex-mode`，不得混入会话模式草稿/正文 store。
+- 官方 VSIX 保持不修改；宿主与自有伴随扩展位于 `packages/native-codex-host`，同源网关位于 `apps/server/src/routes/native-codex.ts`。配置与阶段验收见 `docs/codex-workbench-mode.md`。
+- surface 适配只能调整自有样式与观察，不得移动原生 iframe/父节点或替换 MessagePort；隐藏模式停止观察，保留 iframe。真实宿主验收使用隔离 HOME/fixture，不得停止正式 Agent。

@@ -8,7 +8,9 @@ type Props = {
   disabled?: boolean;
 };
 
-/** A shared two-position control. Only a completed gesture changes workspace mode. */
+const labeledModes: WorkbenchMode[] = ["session", "terminal", "codex"];
+
+/** The rail retains its two-position gesture; labeled choices include Codex. */
 export function WorkbenchModeSwitch({
   mode,
   onChange,
@@ -30,15 +32,36 @@ export function WorkbenchModeSwitch({
       aria-label="工作模式"
       data-mode={mode}
       onKeyDown={(event) => {
-        if (disabled || !["ArrowLeft", "ArrowRight"].includes(event.key))
+        if (
+          disabled ||
+          !["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
+        )
           return;
         event.preventDefault();
-        choose(event.key === "ArrowLeft" ? "session" : "terminal");
+        const target = event.target as HTMLElement;
+        if (event.key === "Home") choose("session");
+        else if (event.key === "End") choose("codex");
+        else if (target.closest(".mode-switch-rail")) {
+          choose(event.key === "ArrowLeft" ? "session" : "terminal");
+        } else {
+          const focusedMode =
+            target.closest<HTMLElement>("[data-choice]")?.dataset.choice;
+          const index = labeledModes.indexOf(
+            (focusedMode ?? mode) as WorkbenchMode,
+          );
+          const direction = event.key === "ArrowLeft" ? -1 : 1;
+          choose(
+            labeledModes[
+              Math.max(0, Math.min(labeledModes.length - 1, index + direction))
+            ],
+          );
+        }
       }}
     >
       <button
         type="button"
         className="mode-switch-label"
+        data-choice="session"
         aria-pressed={mode === "session"}
         disabled={disabled && mode !== "session"}
         onClick={() => choose("session")}
@@ -118,14 +141,26 @@ export function WorkbenchModeSwitch({
       <button
         type="button"
         className="mode-switch-label"
+        data-choice="terminal"
         aria-pressed={mode === "terminal"}
         disabled={disabled && mode !== "terminal"}
         onClick={() => choose("terminal")}
       >
         终端
       </button>
+      <button
+        type="button"
+        className="mode-switch-label mode-switch-codex"
+        data-choice="codex"
+        aria-pressed={mode === "codex"}
+        disabled={disabled && mode !== "codex"}
+        onClick={() => choose("codex")}
+      >
+        Codex
+      </button>
       <span id={helpId} className="mode-switch-help">
-        左侧会话，右侧终端。点击或左右拖动切换。
+        轨道左侧会话，右侧终端，点击或左右拖动切换。Codex
+        使用独立按钮；标签支持方向键、Home 和 End。
       </span>
     </div>
   );

@@ -8,11 +8,28 @@ import {
 } from "./dev-server-config";
 
 test("dev proxy preserves browser Host for same-origin host bridge requests", () => {
-  const config=resolveWebDevConfig({WEB_BACKEND_HOST:"configured-backend",WEB_BACKEND_PORT:"45678"});
-  assert.deepEqual(resolveWebDevProxies(config),{
-    "/api":{target:"http://configured-backend:45678",changeOrigin:false},
-    "/vscode":{target:"http://configured-backend:45678",changeOrigin:false,ws:true},
-    "/ws":{target:"ws://configured-backend:45678",changeOrigin:false,ws:true},
+  const config = resolveWebDevConfig({
+    WEB_BACKEND_HOST: "configured-backend",
+    WEB_BACKEND_PORT: "45678",
+  });
+  assert.deepEqual(resolveWebDevProxies(config), {
+    "/api": { target: "http://configured-backend:45678", changeOrigin: false },
+    "/vscode": {
+      target: "http://configured-backend:45678",
+      changeOrigin: false,
+      ws: true,
+    },
+    "/native-codex": {
+      target: "http://configured-backend:45678",
+      changeOrigin: false,
+      xfwd: true,
+      ws: true,
+    },
+    "/ws": {
+      target: "ws://configured-backend:45678",
+      changeOrigin: false,
+      ws: true,
+    },
   });
 });
 

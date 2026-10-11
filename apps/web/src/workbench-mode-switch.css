@@ -50,6 +50,15 @@
 .workbench-mode-switch .mode-switch-label:hover {
   color: var(--mode-switch-text);
 }
+.workbench-mode-switch .mode-switch-codex {
+  margin-left: 3px;
+  border-left: 1px solid var(--mode-switch-border);
+  border-radius: 0 6px 6px 0;
+  padding-left: 8px;
+}
+.workbench-mode-switch[data-mode="codex"] .mode-switch-thumb {
+  opacity: 0.35;
+}
 .workbench-mode-switch .mode-switch-rail {
   display: grid;
   place-items: center;

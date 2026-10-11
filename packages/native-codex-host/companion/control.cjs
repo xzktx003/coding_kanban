@@ -16,11 +16,14 @@ async function openThread(vscode, body, allowed) {
     { viewColumn: captured.column, preview: false, preserveFocus: false });
   return captured;
 }
-async function openFixturePanels(vscode, capturedFixtures) {
+function validateFixturePanels(capturedFixtures) {
   if (capturedFixtures.length !== 2 || capturedFixtures[0] === capturedFixtures[1]) throw new Error('two distinct fixture threads required');
-  const panels = capturedFixtures.map((threadId, index) => validateOpen({ threadId, column: index + 1 }, capturedFixtures));
+  return capturedFixtures.map((threadId, index) => validateOpen({ threadId, column: index + 1 }, capturedFixtures));
+}
+async function openFixturePanels(vscode, capturedFixtures, assertActive = () => {}) {
+  const panels = validateFixturePanels(capturedFixtures);
   const result = [];
-  for (const panel of panels) result.push(await openThread(vscode, { threadId: panel.threadId, column: panel.column }, capturedFixtures));
+  for (const panel of panels) { assertActive(); result.push(await openThread(vscode, { threadId: panel.threadId, column: panel.column }, capturedFixtures)); }
   return result;
 }
-module.exports = { threadUri, validateOpen, openThread, openFixturePanels };
+module.exports = { threadUri, validateOpen, openThread, validateFixturePanels, openFixturePanels };

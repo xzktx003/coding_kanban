@@ -13,6 +13,17 @@ test("explicit mode takes precedence over the saved mode", () => {
   assert.equal(resolveWorkbenchMode("?other=1", "session"), "session");
 });
 
+test("Codex deep links and device preferences select the third workbench", () => {
+  assert.equal(resolveWorkbenchMode("?mode=codex", "session"), "codex");
+  assert.equal(resolveWorkbenchMode("?mode=terminal", "codex"), "terminal");
+  assert.equal(resolveWorkbenchMode("?mode=unknown", "codex"), "codex");
+  assert.equal(parseWorkbenchMode("codex"), "codex");
+  assert.equal(
+    workbenchModeUrl("/mobile?session=abc&mode=session#details", "codex"),
+    "/mobile?session=abc&mode=codex#details",
+  );
+});
+
 test("invalid persisted or URL values fall back safely", () => {
   assert.equal(parseWorkbenchMode("unknown"), "terminal");
   assert.equal(resolveWorkbenchMode("?mode=unknown", "session"), "session");

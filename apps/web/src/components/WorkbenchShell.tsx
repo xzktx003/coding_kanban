@@ -18,9 +18,10 @@ import "../workbench.css";
 
 const TerminalApp = lazy(() => import("../App"));
 const SessionApp = lazy(() => import("../session-mode/SessionWorkbench"));
+const CodexApp = lazy(() => import("../codex-mode/CodexWorkbench"));
 
-class SessionBoundary extends Component<
-  { children: ReactNode; onTerminal: () => void },
+class WorkbenchBoundary extends Component<
+  { children: ReactNode; modeName: string; onTerminal: () => void },
   { failed: boolean }
 > {
   state = { failed: false };
@@ -31,7 +32,7 @@ class SessionBoundary extends Component<
     if (this.state.failed)
       return (
         <div className="workbench-state" role="alert">
-          <h2>会话界面加载失败</h2>
+          <h2>{this.props.modeName}界面加载失败</h2>
           <p>终端模式仍然可用。</p>
           <button onClick={this.props.onTerminal}>切换到终端模式</button>
           <button onClick={() => this.setState({ failed: false })}>
@@ -47,6 +48,7 @@ export function WorkbenchShell() {
   const [mode, setMode] = useState<WorkbenchMode>(readWorkbenchMode);
   const [terminalVisited, setTerminalVisited] = useState(mode === "terminal");
   const [sessionVisited, setSessionVisited] = useState(mode === "session");
+  const [codexVisited, setCodexVisited] = useState(mode === "codex");
   const restoreModeFocus = useRef(false);
   useEffect(() => {
     if (!restoreModeFocus.current) return;
@@ -54,7 +56,9 @@ export function WorkbenchShell() {
       const selector =
         mode === "terminal"
           ? ".workbench-header .mode-switch-rail"
-          : ".session-mode:not([hidden]) .mode-switch-rail";
+          : mode === "session"
+            ? ".session-mode:not([hidden]) .mode-switch-rail"
+            : ".codex-mode:not([hidden]) .mode-switch-codex";
       const target = document.querySelector<HTMLButtonElement>(selector);
       if (!target) return false;
       target.focus({ preventScroll: true });
@@ -80,6 +84,7 @@ export function WorkbenchShell() {
       );
       if (next === "session") setSessionVisited(true);
       if (next === "terminal") setTerminalVisited(true);
+      if (next === "codex") setCodexVisited(true);
     };
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
@@ -94,6 +99,7 @@ export function WorkbenchShell() {
     );
     if (next === "session") setSessionVisited(true);
     if (next === "terminal") setTerminalVisited(true);
+    if (next === "codex") setCodexVisited(true);
     try {
       localStorage.setItem(WORKBENCH_MODE_KEY, next);
     } catch {
@@ -110,7 +116,11 @@ export function WorkbenchShell() {
   }
   return (
     <div className="workbench-shell" data-mode={mode}>
-      <div className="workbench-terminal" hidden={mode !== "terminal"}>
+      <div
+        className="workbench-terminal"
+        hidden={mode !== "terminal"}
+        inert={mode !== "terminal"}
+      >
         {terminalVisited && (
           <Suspense
             fallback={
@@ -136,8 +146,15 @@ export function WorkbenchShell() {
         )}
       </div>
       {sessionVisited && (
-        <div className="session-mode dark" hidden={mode !== "session"}>
-          <SessionBoundary onTerminal={() => select("terminal")}>
+        <div
+          className="session-mode dark"
+          hidden={mode !== "session"}
+          inert={mode !== "session"}
+        >
+          <WorkbenchBoundary
+            modeName="会话"
+            onTerminal={() => select("terminal")}
+          >
             <Suspense
               fallback={
                 <div className="workbench-state" role="status">
@@ -150,7 +167,32 @@ export function WorkbenchShell() {
             >
               <SessionApp active={mode === "session"} onModeChange={select} />
             </Suspense>
-          </SessionBoundary>
+          </WorkbenchBoundary>
+        </div>
+      )}
+      {codexVisited && (
+        <div
+          className="codex-mode"
+          hidden={mode !== "codex"}
+          inert={mode !== "codex"}
+        >
+          <WorkbenchBoundary
+            modeName="Codex"
+            onTerminal={() => select("terminal")}
+          >
+            <Suspense
+              fallback={
+                <div className="workbench-state" role="status">
+                  正在加载 Codex 工作台…
+                  <button onClick={() => select("terminal")}>
+                    切换到终端模式
+                  </button>
+                </div>
+              }
+            >
+              <CodexApp active={mode === "codex"} onModeChange={select} />
+            </Suspense>
+          </WorkbenchBoundary>
         </div>
       )}
     </div>

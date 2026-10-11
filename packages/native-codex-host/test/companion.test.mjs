@@ -160,3 +160,140 @@ test('listen errors other than address-in-use still fail activation and dispose 
   try { await assert.rejects(extension.activate({ subscriptions: disposals }), /permission denied/); assert.equal(commands.size, 0); assert.equal(closed, true); }
   finally { extension.deactivate(); for (const item of disposals) item.dispose(); await rm(root, { recursive: true, force: true }); }
 });
+
+const secondFixture = '019aabcd-1234-7890-abcd-0123456789ac';
+const thirdFixture = '019aabcd-1234-7890-abcd-0123456789ad';
+function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
+async function startupFixture(t, config = {}, callbacks = {}) {
+  const root = await mkdtemp(join(tmpdir(), 'native-startup-')); const file = join(root, 'auth.json'); const port = config.port ?? await sparePort();
+  const token = 'test-only-startup-012345678901234567890'; const calls = []; const commands = new Map(); const subscriptions = [];
+  const official = { isActive: false, packageJSON: { version: 'test' }, async activate() { await callbacks.activate?.(); this.isActive = true; } };
+  const vscode = { extensions: { getExtension: () => callbacks.missingOfficial ? undefined : official }, window: { tabGroups: { all: [] } }, Uri: { parse: uri => uri },
+    commands: { registerCommand(name, callback) { commands.set(name, callback); return { dispose() { commands.delete(name); } }; },
+      async executeCommand(...args) { calls.push(args); await callbacks.open?.(...args); } } };
+  await writeFile(file, JSON.stringify({ port, token, threads: [id, secondFixture, thirdFixture], ...config }), { mode: 0o600 });
+  const extension = await load(file, vscode, callbacks.httpModule ? { httpModule: callbacks.httpModule } : {});
+  t.after(async () => { callbacks.cleanup?.(); extension.deactivate(); for (const item of subscriptions) item.dispose(); await rm(root, { recursive: true, force: true }); });
+  return { root, calls, commands, subscriptions, extension, base: `http://127.0.0.1:${port}`, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } };
+}
+test('explicit startup auto-open waits for official activation and opens only the first two captured fixtures', async t => {
+  const activation = deferred(); const entered = deferred();
+  const data = await startupFixture(t, { autoOpenFixtures: true }, { activate: () => { entered.resolve(); return activation.promise; }, cleanup: activation.resolve });
+  const pending = data.extension.activate({ subscriptions: data.subscriptions }); await entered.promise;
+  assert.equal(data.calls.length, 0); assert.equal(data.commands.size, 0);
+  activation.resolve(); await pending;
+  assert.deepEqual(data.calls.map(call => [call[0], call[1], call[2], call[3].viewColumn]), [
+    ['vscode.openWith', `openai-codex://route/local/${id}`, 'chatgpt.conversationEditor', 1],
+    ['vscode.openWith', `openai-codex://route/local/${secondFixture}`, 'chatgpt.conversationEditor', 2]
+  ]);
+  const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
+  assert.deepEqual(status.autoOpenFixtures, { enabled: true, state: 'completed' }); assert.equal(status.opened.length, 2);
+});
+test('explicit false leaves startup panels unopened', async t => {
+  const data = await startupFixture(t, { autoOpenFixtures: false });
+  await data.extension.activate({ subscriptions: data.subscriptions }); assert.equal(data.calls.length, 0);
+  const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
+  assert.deepEqual(status.autoOpenFixtures, { enabled: false, state: 'disabled' });
+});
+test('startup opening shares the palette and broker lock and releases it after completion', async t => {
+  const entered = deferred(); const execution = deferred();
+  const data = await startupFixture(t, { autoOpenFixtures: true }, { open: () => { entered.resolve(); return execution.promise; }, cleanup: execution.resolve });
+  const pending = data.extension.activate({ subscriptions: data.subscriptions }); await entered.promise;
+  await assert.rejects(data.commands.get('nativeCodexPrototype.openTwoTestPanels')(), /opening in progress/);
+  const options = { method: 'POST', headers: data.headers, body: JSON.stringify({ threadId: thirdFixture, column: 3 }) };
+  assert.equal((await fetch(`${data.base}/open`, options)).status, 409);
+  const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
+  assert.equal(status.autoOpenFixtures.state, 'opening'); assert.equal(data.calls.length, 1);
+  execution.resolve(); await pending;
+  await data.commands.get('nativeCodexPrototype.openTwoTestPanels')(); assert.equal(data.calls.length, 4);
+  assert.equal((await fetch(`${data.base}/open`, options)).status, 200); assert.equal(data.calls.length, 5);
+});
+test('private startup configuration accepts booleans only and requires two distinct captured fixtures', async t => {
+  for (const config of [{ autoOpenFixtures: 'true' }, { autoOpenFixtures: 1 }, { autoOpenFixtures: null },
+    { autoOpenFixtures: true, threads: [id] }, { autoOpenFixtures: true, threads: [id, id, thirdFixture] }]) {
+    const data = await startupFixture(t, config);
+    await assert.rejects(data.extension.activate({ subscriptions: data.subscriptions }), /boolean|two distinct fixture threads/);
+    assert.equal(data.commands.size, 0); assert.equal(data.calls.length, 0);
+  }
+});
+test('startup refuses to open when the official extension is missing or activation fails', async t => {
+  for (const callbacks of [{ missingOfficial: true }, { activate() { throw new Error('fixture activation failure'); } }]) {
+    const data = await startupFixture(t, { autoOpenFixtures: true }, callbacks);
+    await data.extension.activate({ subscriptions: data.subscriptions }); assert.equal(data.calls.length, 0);
+    const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
+    assert.equal(status.autoOpenFixtures.state, 'failed'); assert.match(status.autoOpenFixtures.error, /official extension/);
+  }
+});
+test('startup command failure is diagnosed without retry and the opening lock is released', async t => {
+  let fail = true;
+  const data = await startupFixture(t, { autoOpenFixtures: true }, { open() { if (fail) throw new Error('fixture panel open failure'); } });
+  await data.extension.activate({ subscriptions: data.subscriptions }); assert.equal(data.calls.length, 1);
+  const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
+  assert.equal(status.autoOpenFixtures.state, 'failed'); assert.match(status.autoOpenFixtures.error, /panel open/);
+  fail = false; await data.commands.get('nativeCodexPrototype.openTwoTestPanels')(); assert.equal(data.calls.length, 3);
+});
+test('deactivation during startup cannot open a second panel or leave a usable palette command', async t => {
+  const entered = deferred(); const execution = deferred();
+  const data = await startupFixture(t, { autoOpenFixtures: true }, { open: () => { entered.resolve(); return execution.promise; }, cleanup: execution.resolve });
+  const pending = data.extension.activate({ subscriptions: data.subscriptions }); await entered.promise;
+  const command = data.commands.get('nativeCodexPrototype.openTwoTestPanels'); data.extension.deactivate();
+  execution.resolve(); await pending;
+  assert.equal(data.calls.length, 1); assert.equal(data.commands.size, 0);
+  await assert.rejects(command(), /disposed/);
+  await assert.rejects(readFile(join(data.root, 'companion-ready.json')), { code: 'ENOENT' });
+});
+test('deactivation while official activation is pending prevents broker and palette startup', async t => {
+  const entered = deferred(); const activation = deferred();
+  const data = await startupFixture(t, { autoOpenFixtures: true }, { activate: () => { entered.resolve(); return activation.promise; }, cleanup: activation.resolve });
+  const pending = data.extension.activate({ subscriptions: data.subscriptions }); await entered.promise;
+  data.extension.deactivate(); activation.resolve(); await pending;
+  assert.equal(data.calls.length, 0); assert.equal(data.commands.size, 0);
+  await assert.rejects(readFile(join(data.root, 'companion-ready.json')), { code: 'ENOENT' });
+});
+test('auto-open with an occupied broker remains local to its own VS Code instance', async t => {
+  const port = await sparePort(); const first = await startupFixture(t, { port }); const second = await startupFixture(t, { port, autoOpenFixtures: true });
+  await first.extension.activate({ subscriptions: first.subscriptions });
+  await second.extension.activate({ subscriptions: second.subscriptions });
+  assert.equal(first.calls.length, 0); assert.equal(second.calls.length, 2);
+  const ownerStatus = await (await fetch(`${first.base}/status`, { headers: first.headers })).json();
+  assert.equal(ownerStatus.broker.enabled, true); assert.equal(ownerStatus.autoOpenFixtures.enabled, false); assert.equal(ownerStatus.opened.length, 0);
+  await assert.rejects(readFile(join(second.root, 'companion-ready.json')), { code: 'ENOENT' });
+  second.extension.deactivate();
+  assert.equal((await fetch(`${first.base}/status`, { headers: first.headers })).status, 200);
+});
+test('deactivation while a broker body is pending prevents any later VS Code execution', async t => {
+  const data = await startupFixture(t); await data.extension.activate({ subscriptions: data.subscriptions });
+  let request;
+  const response = new Promise((resolve, reject) => {
+    request = http.request(`${data.base}/open`, { method: 'POST', headers: data.headers }, incoming => {
+      incoming.resume(); incoming.on('end', () => resolve(incoming.statusCode));
+    });
+    request.on('error', reject); request.write('{');
+  });
+  response.catch(() => {}); t.after(() => request.destroy());
+  await fetch(`${data.base}/status`, { headers: data.headers }); data.extension.deactivate();
+  request.end(JSON.stringify({ threadId: id, column: 1 }).slice(1));
+  assert.equal(await response, 400); assert.equal(data.calls.length, 0);
+});
+test('deactivation during broker listen settles activation without panels or readiness and preserves another listener', async t => {
+  const first = await startupFixture(t); await first.extension.activate({ subscriptions: first.subscriptions });
+  let closed = false; let ownedServer; let data;
+  const httpModule = { createServer(handler) {
+    ownedServer = http.createServer(handler); const listen = ownedServer.listen.bind(ownedServer);
+    ownedServer.listen = (...args) => { const result = listen(...args); queueMicrotask(() => data.extension.deactivate()); return result; };
+    ownedServer.on('close', () => { closed = true; }); return ownedServer;
+  } };
+  data = await startupFixture(t, { autoOpenFixtures: true }, { httpModule });
+  const pending = data.extension.activate({ subscriptions: data.subscriptions });
+  let deadline;
+  try {
+    const settled = await Promise.race([pending.then(() => true), new Promise(resolve => { deadline = setTimeout(() => resolve(false), 100); })]);
+    assert.equal(settled, true, 'activation must settle after closing its pending listener');
+    assert.equal(closed, true); assert.equal(ownedServer.listening, false);
+    assert.equal(data.calls.length, 0); assert.equal(data.commands.size, 0);
+    await assert.rejects(readFile(join(data.root, 'companion-ready.json')), { code: 'ENOENT' });
+    const { readdir } = await import('node:fs/promises');
+    assert.equal((await readdir(data.root)).some(name => name.startsWith('companion-instance-')), false);
+    assert.equal((await fetch(`${first.base}/status`, { headers: first.headers })).status, 200);
+  } finally { clearTimeout(deadline); }
+});

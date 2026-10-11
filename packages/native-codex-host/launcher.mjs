@@ -8,9 +8,10 @@ import { createFixtureThreads } from './fixtures.mjs';
 import { buildCompanionVsix } from './vsix.mjs';
 const args = process.argv.slice(2); const input = {};
 const fields = { 'runtime-root': 'runtimeRoot', 'code-server': 'codeServer', 'official-vsix': 'officialVsix', 'codex-cli': 'codexCli', port: 'port', 'broker-port': 'brokerPort', 'user-data-dir': 'userDataDir', 'extensions-dir': 'extensionsDir', 'project-dir': 'projectDir', 'codex-home': 'codexHome', 'process-home': 'processHome', cert: 'cert', 'cert-key': 'certKey', record: 'record', 'threads-file': 'threadsFile', 'password-file': 'passwordFile' };
-let createThreads = false;
+let createThreads = false; let autoOpenFixtures = false;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--create-threads') { createThreads = true; continue; }
+  if (args[i] === '--auto-open-fixtures') { autoOpenFixtures = true; continue; }
   if (args[i] === '--unsafe-no-auth') { input.unsafeNoAuth = true; continue; }
   const field = fields[args[i].replace(/^--/, '')];
   if (!args[i].startsWith('--') || !field || !args[i + 1] || args[i + 1].startsWith('--')) throw new Error('unknown or missing launcher argument');
@@ -50,9 +51,10 @@ try {
   const threads = fixture.threads.map(thread => typeof thread === 'string' ? thread : thread.id);
   const { default: control } = await import('./companion/control.cjs');
   for (const id of threads) control.threadUri(id, threads);
+  if (autoOpenFixtures) control.validateFixturePanels(threads.slice(0, 2));
   const authFile = join(options.runtimeRoot, 'companion-auth.json');
   owned.assertRunning();
-  await writeFile(authFile, JSON.stringify({ port: options.brokerPort, token: randomBytes(32).toString('hex'), threads }), { mode: 0o600, flag: 'wx' }); await chmod(authFile, 0o600);
+  await writeFile(authFile, JSON.stringify({ port: options.brokerPort, token: randomBytes(32).toString('hex'), threads, autoOpenFixtures }), { mode: 0o600, flag: 'wx' }); await chmod(authFile, 0o600);
   await writeFile(join(options.runtimeRoot, 'threads.json'), JSON.stringify(fixture, null, 2), { mode: 0o600, flag: 'wx' });
   const installArgs = ['--config', join(options.runtimeRoot, 'code-server.yaml'), '--user-data-dir', options.userDataDir, '--extensions-dir', options.extensionsDir,
     '--install-extension', options.officialVsix, '--force'];

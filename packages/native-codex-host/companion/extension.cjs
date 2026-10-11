@@ -4,8 +4,8 @@ const http = require('node:http');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const vscode = require('vscode');
-const { openThread, threadUri, openFixturePanels } = require('./control.cjs');
-let server;
+const { openThread, threadUri, validateFixturePanels, openFixturePanels } = require('./control.cjs');
+let server; let disposeActivation;
 function secureRead(file) {
   if (!file || !path.isAbsolute(file)) throw new Error('explicit companion config path required');
   const stat = fs.lstatSync(file);
@@ -22,28 +22,41 @@ async function activate(context) {
   const config = secureRead(process.env.NATIVE_CODEX_COMPANION_CONFIG);
   if (!Number.isInteger(config.port) || config.port < 1024 || config.port > 65535) throw new Error('private companion port invalid');
   if (!Array.isArray(config.threads) || config.threads.length > 16 || typeof config.token !== 'string' || config.token.length < 32) throw new Error('invalid companion config');
+  if (Object.hasOwn(config, 'autoOpenFixtures') && typeof config.autoOpenFixtures !== 'boolean') throw new Error('autoOpenFixtures must be a boolean');
   for (const id of config.threads) threadUri(id, config.threads);
   const opened = []; let opening = false;
   const fixtures = Object.freeze(config.threads.slice(0, 2));
+  const autoOpenFixtures = { enabled: config.autoOpenFixtures === true, state: config.autoOpenFixtures === true ? 'pending' : 'disabled' };
+  if (autoOpenFixtures.enabled) validateFixturePanels(fixtures);
+  let disposed = false; let commandDisposable; let ownedServer;
+  const assertActive = () => { if (disposed) throw new Error('companion instance disposed'); };
+  disposeActivation = () => { disposed = true; commandDisposable?.dispose(); ownedServer?.close(); if (server === ownedServer) server = null; };
+  context.subscriptions.push({ dispose: disposeActivation });
   const instanceId = crypto.randomUUID();
   const broker = { enabled: false, scope: 'first-listener-instance', pid: process.pid, instanceId };
   const official = vscode.extensions.getExtension('openai.chatgpt');
   let activationError = null;
   try { if (official) await official.activate(); } catch (error) { activationError = String(error.message); }
+  if (disposed) return;
   const remember = results => { opened.push(...results); while (opened.length > 32) opened.shift(); };
-  const commandDisposable = vscode.commands.registerCommand('nativeCodexPrototype.openTwoTestPanels', async (...args) => {
-    if (args.length !== 0) throw new Error('test panel command accepts no arguments');
+  const openCapturedFixtures = async () => {
+    assertActive();
     if (opening) throw new Error('panel opening in progress');
     opening = true;
-    try { const results = await openFixturePanels(vscode, fixtures); remember(results); return results; }
+    try { const results = await openFixturePanels(vscode, fixtures, assertActive); remember(results); return results; }
     finally { opening = false; }
+  };
+  commandDisposable = vscode.commands.registerCommand('nativeCodexPrototype.openTwoTestPanels', async (...args) => {
+    if (args.length !== 0) throw new Error('test panel command accepts no arguments');
+    return openCapturedFixtures();
   });
   context.subscriptions.push(commandDisposable);
   server = http.createServer(async (request, response) => {
     const send = (status, value) => { if (response.writableEnded || response.destroyed) return; response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); };
     const supplied = Buffer.from(request.headers.authorization || ''); const expected = Buffer.from(`Bearer ${config.token}`);
     if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return send(401, { error: 'unauthorized' });
-    if (request.method === 'GET' && request.url === '/status') return send(200, { ...activationStatus(opened), activationError, broker });
+    if (disposed) return send(503, { error: 'companion instance disposed' });
+    if (request.method === 'GET' && request.url === '/status') return send(200, { ...activationStatus(opened), activationError, broker, autoOpenFixtures });
     if (request.method !== 'POST' || request.url !== '/open') return send(404, { error: 'unsupported operation' });
     if (opening) return send(409, { error: 'panel opening in progress' });
     opening = true;
@@ -53,6 +66,7 @@ async function activate(context) {
     try {
       for await (const chunk of request) { body += chunk; if (Buffer.byteLength(body) > 2048) { send(413, { error: 'request too large' }); request.destroy(); return; } }
       clearTimeout(bodyDeadline); request.setTimeout(0);
+      assertActive();
       // VS Code commands cannot be cancelled. A timeout replies but retains the lock until the command settles.
       executionDeadline = setTimeout(() => send(504, { error: 'panel command timed out; still waiting for VS Code' }), 20000);
       const result = await openThread(vscode, JSON.parse(body), config.threads); remember([result]);
@@ -60,32 +74,52 @@ async function activate(context) {
     } catch (error) { send(400, { error: String(error.message).slice(0, 240) }); }
     finally { clearTimeout(bodyDeadline); clearTimeout(executionDeadline); opening = false; }
   });
+  ownedServer = server;
   // A retained browser extension host may still own the fixed port. Never replace it or pick another port.
   try {
     try {
-      await new Promise((resolve, reject) => { server.once('error', reject); server.listen(config.port, '127.0.0.1', resolve); });
+      await new Promise((resolve, reject) => {
+        const cleanup = () => { ownedServer.off('error', onError); ownedServer.off('close', onClose); ownedServer.off('listening', onListening); };
+        const onError = error => { cleanup(); reject(error); };
+        const onListening = () => { cleanup(); resolve(); };
+        // Closing before the listening event suppresses its callback. Disposal still must settle activation.
+        const onClose = () => { cleanup(); disposed ? resolve() : reject(new Error('broker closed before listening')); };
+        ownedServer.once('error', onError); ownedServer.once('close', onClose); ownedServer.once('listening', onListening);
+        try { ownedServer.listen(config.port, '127.0.0.1'); } catch (error) { onError(error); }
+      });
+      if (disposed) return;
       broker.enabled = true;
     } catch (error) {
       if (error.code !== 'EADDRINUSE') throw error;
-      server.close(); server = null;
+      ownedServer.close(); if (server === ownedServer) server = null;
       broker.disabledReason = 'address-in-use';
     }
+    if (disposed) return;
+    if (autoOpenFixtures.enabled) {
+      if (activationError || !official?.isActive) {
+        autoOpenFixtures.state = 'failed'; autoOpenFixtures.error = 'official extension activation unavailable';
+      } else {
+        autoOpenFixtures.state = 'opening';
+        try { await openCapturedFixtures(); autoOpenFixtures.state = 'completed'; }
+        catch (error) { autoOpenFixtures.state = disposed ? 'cancelled' : 'failed'; autoOpenFixtures.error = String(error.message).slice(0, 240); }
+      }
+    }
+    if (disposed) return;
     const directory = path.dirname(process.env.NATIVE_CODEX_COMPANION_CONFIG);
     const activatedAt = new Date().toISOString();
     // Per-instance diagnostics contain flags/counts only; a disabled instance must not overwrite owner readiness.
     fs.writeFileSync(path.join(directory, `companion-instance-${process.pid}-${instanceId}.json`), JSON.stringify({
       pid: process.pid, activatedAt, companionActive: true, brokerEnabled: broker.enabled,
-      brokerDisabledReason: broker.disabledReason ?? null, fixtureCount: fixtures.length
+      brokerDisabledReason: broker.disabledReason ?? null, fixtureCount: fixtures.length,
+      autoOpenFixturesEnabled: autoOpenFixtures.enabled, autoOpenFixturesState: autoOpenFixtures.state
     }, null, 2), { mode: 0o600, flag: 'wx' });
     if (broker.enabled) fs.writeFileSync(path.join(directory, 'companion-ready.json'), JSON.stringify({
-      pid: process.pid, activatedAt, ...activationStatus(opened), activationError, broker
+      pid: process.pid, activatedAt, ...activationStatus(opened), activationError, broker, autoOpenFixtures
     }, null, 2), { mode: 0o600 });
-    const ownedServer = server;
-    context.subscriptions.push({ dispose() { ownedServer?.close(); } });
   } catch (error) {
-    commandDisposable.dispose(); server?.close(); server = null;
+    disposeActivation();
     throw error;
   }
 }
-function deactivate() { server?.close(); }
+function deactivate() { disposeActivation?.(); }
 module.exports = { activate, deactivate };

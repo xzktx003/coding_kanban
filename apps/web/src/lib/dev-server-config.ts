@@ -76,6 +76,7 @@ export function resolveWebDevProxies(config: Pick<WebDevConfig, "apiTarget" | "w
   return {
     "/api": { target: config.apiTarget, changeOrigin: false },
     "/vscode": { target: config.apiTarget, changeOrigin: false, ws: true },
+    "/native-codex": { target: config.apiTarget, changeOrigin: false, xfwd: true, ws: true },
     "/ws": { target: config.wsTarget, changeOrigin: false, ws: true },
   };
 }

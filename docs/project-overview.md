@@ -877,3 +877,7 @@ Codex 回复、代码和表格复制失败现在与反馈 ID 复制统一使用�
 2026-10-11 阶段调整：暂停云任务、云环境与云端委派开发，继续本地 Codex 编辑/聊天以及外部工具接入。MCP 重新认证作为共享 `view=chat` 元数据消费者运行；原生账号工作区隔离、能力声明和固定 reload 路由详见 [MCP 认证](session-codex-mcp-auth.md)。它不创建云任务或获取会话写入权；正式服务启用与真实账号验收单列。
 
 2026-10-12 原生插件路线：独立实验分支增加 `packages/native-codex-host`（真实宿主与自身伴随扩展）和 `packages/native-codex-adapter`（版本限制的只读 IPC）。官方 VSIX 不作补丁，可独立安装；窗口控制保留在自身扩展中。已实测原版双面板登录界面，尚未将正式看板切入或验收真实模型交互；启动、部署与性能边界见 [原型验收](designs/session-render-alignment/native-prototype-acceptance.md)。
+
+## 独立 Codex 工作台
+
+应用现在提供会话、终端和 Codex 三种模式。原生 Codex 插件适配集中在独立 `apps/web/src/codex-mode`，通过网关同源代理连接单独宿主，官方插件保持原样并可独立升级。当前交付为原生双窗口展示基础，真实聊天与看板编排仍需后续接入和验收；会话模式保留原实现，云任务延期。架构、配置、联调入口和验收边界见 [Codex 工作台模式](codex-workbench-mode.md)。

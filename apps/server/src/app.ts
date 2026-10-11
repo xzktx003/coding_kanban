@@ -33,6 +33,7 @@ import { registerFilesystemRoutes } from "./routes/filesystem.js";
 import { registerFeishuNotificationSettingsRoutes } from "./routes/feishu-notification-settings.js";
 import { registerSshHostsRoutes } from "./routes/ssh-hosts.js";
 import { registerVsCodeWebProxyRoutes } from "./routes/vscode-web-proxy.js";
+import { registerNativeCodexRoutes } from "./routes/native-codex.js";
 import { AgentSessionRegistry } from "./services/agent-session-registry.js";
 import {
   resolveActiveCodexSessionId,
@@ -701,6 +702,7 @@ export function buildServer(options: BuildServerOptions = {}): {
     await registerVsCodeWebProxyRoutes(instance, {
       vsCodeWebManager,
     });
+    await instance.register(registerNativeCodexRoutes);
 
     instance.get("/api/diagnostics/terminal-history", async () => {
       const response: TerminalHistoryDiagnosticsResponse = {

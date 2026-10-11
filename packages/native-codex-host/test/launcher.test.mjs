@@ -45,3 +45,27 @@ if (!process.argv.includes('--install-extension')) writeFileSync(join(process.en
     assert.equal(JSON.parse(argv).includes('password'), true); assert.equal(JSON.parse(record).authentication, 'password');
   } finally { await rm(data.base, { recursive: true, force: true }); }
 });
+
+for (const enabled of [false, true]) test(`launcher captures explicit fixture auto-open flag as private boolean ${enabled}`, async () => {
+  const data = await fixture('process.exit(0);');
+  const ids = ['019aabcd-1234-7890-abcd-0123456789ab', '019aabcd-1234-7890-abcd-0123456789ac'];
+  try {
+    await writeFile(join(data.base, 'threads.json'), JSON.stringify({ threads: ids.map(id => ({ id })) }));
+    const result = await run([...data.args, '--unsafe-no-auth', ...(enabled ? ['--auto-open-fixtures'] : [])]);
+    assert.equal(result.code, 0, result.output);
+    const file = join(data.root, 'companion-auth.json'); const config = JSON.parse(await readFile(file, 'utf8'));
+    assert.equal(config.autoOpenFixtures, enabled); assert.deepEqual(config.threads, ids);
+    assert.equal((await lstat(file)).mode & 0o777, 0o600);
+    assert.equal(result.output.includes(config.token), false);
+  } finally { await rm(data.base, { recursive: true, force: true }); }
+});
+
+test('launcher refuses auto-open without two distinct captured fixtures before installing', async () => {
+  const data = await fixture('process.exit(0);');
+  try {
+    const result = await run([...data.args, '--unsafe-no-auth', '--auto-open-fixtures']);
+    assert.equal(result.code, 1); assert.match(result.output, /two distinct fixture threads/);
+    await assert.rejects(lstat(join(data.root, 'install.log')), { code: 'ENOENT' });
+    await assert.rejects(lstat(join(data.root, 'companion-auth.json')), { code: 'ENOENT' });
+  } finally { await rm(data.base, { recursive: true, force: true }); }
+});
