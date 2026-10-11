@@ -202,3 +202,7 @@ node --test scripts/codex-feishu-notify.test.mjs
 ## 会话模式 Codex 完成通知
 
 原生会话模式现已接入同一飞书开关和发送器，每轮 Codex 成功完成分别发送最终回复，独立于浏览器。终端通知仍沿用注册表/rollout 判断；原生会话走后台完成事件与持久 outbox，不伪造终端 session，也不显示依赖终端注册表的回复或记录按钮。设置与验收见 [会话模式通知](session-codex-feishu-notifications.md)。
+
+### 卡片回复与终端进程标签
+
+终端发现时的 `agentKind` 是 shell/进程标签，可能在 Codex 启动后仍为 `bash`。带有明确 `codexThreadId` 的本地 tmux 卡片回复使用实际窗格进程枚举校验 thread 是否仍属于该终端，再投递到卡片绑定的原生 Codex queue；不要求目标窗格当前被选中，也不依赖记录中的旧窗格编号。没有实时成员校验能力时不能仅凭缓存 ID 放行；未绑定卡片仍遵守原有 Codex 候选检查。连接、控制权限、文本校验和成功后幂等规则保持生效。
