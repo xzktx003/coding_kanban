@@ -92,7 +92,7 @@ export const AgentMessageItem = memo(function AgentMessageItem({
         {streaming ? (
           <div
             data-codex-streaming-text
-            className="whitespace-pre-wrap break-words text-sm leading-relaxed"
+            className="whitespace-pre-wrap break-words leading-relaxed"
           >
             {streamingPreview ? (
               <>
@@ -132,13 +132,13 @@ export const AgentMessageItem = memo(function AgentMessageItem({
       </div>
       {!streaming && (
         <div
-          className={`session-message-actions codex-message-native-actions flex min-h-7 items-center gap-1 px-1 ${
+          className={`session-message-actions codex-message-native-actions ${
             isWindowFocused
               ? "invisible group-hover:visible group-focus-within:visible"
               : "invisible"
           }`}
         >
-          <NativeMessageCopy text={text} />
+          <NativeMessageCopy text={text} kind="assistant" contentRef={contentRef} />
           <NativeMessageFork
             threadId={threadId}
             turnId={turnId}

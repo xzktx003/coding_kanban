@@ -201,6 +201,8 @@ export async function createRuntime(options: RuntimeOptions) {
       runtime: "typescript",
       capabilities: {
         codexOwnership: true,
+        codexMcpAuthV1:true,
+        codexMcpOAuthThreadId:codex.mcpOAuthThreadId,
         codexAccountMutationsV1: true,
         acpImages: true,
       },

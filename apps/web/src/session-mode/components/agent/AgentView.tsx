@@ -7,6 +7,8 @@ import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
 import { AgentCard } from "./AgentCard";
 import { AgentComposer } from "./AgentComposer";
+import { SubagentPanel } from "@session/features/subagents/SubagentPanel";
+import { useSubagentStore } from "@session/features/subagents/store";
 import { AgentViewHeader } from "./AgentViewHeader";
 import { SessionGroups } from "./SessionGroups";
 import { SessionWelcome } from "@session/SessionWelcome";
@@ -55,6 +57,20 @@ export default function AgentView() {
   const cards = detachedCard ? [...sharedCards, detachedCard] : sharedCards;
 
   // When no active thread/session, center the composer vertically
+  const subagentRoot =
+    currentAgentCardKind === "codex" && currentAgentCardId
+      ? currentAgentCardId
+      : selectedAgent === "codex"
+        ? currentThreadId
+        : null;
+  const subagentOpen = useSubagentStore(
+    (s) => !!subagentRoot && s.panelRoot === subagentRoot,
+  );
+  const subagentDock = subagentOpen ? (
+    <aside className="session-subagent-dock" aria-label="子智能体">
+      <SubagentPanel />
+    </aside>
+  ) : null;
   const noActiveSession = acpActive
     ? !acpConnectionId
     : selectedAgent === "codex"
@@ -66,7 +82,10 @@ export default function AgentView() {
       {acpActive && <AgentViewHeader />}
       {!acpActive && cardsViewMode === "solo" ? (
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-          <SessionGroups />
+          <div className="flex flex-1 min-h-0 overflow-hidden">
+            <SessionGroups />
+            {subagentDock}
+          </div>
           <div className="shrink-0 flex justify-center border-t">
             <div className="session-composer-width w-full">
               <AgentComposer />
@@ -78,6 +97,7 @@ export default function AgentView() {
         cards.length > 0 &&
         cardsViewMode !== "solo" ? (
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+          <div className="flex flex-1 min-h-0 overflow-hidden">
           <div className="flex-1 min-h-0 overflow-y-auto p-2">
             {cardsViewMode === "grid" && (
               // flex-wrap (not CSS grid) so each card's manually-resized width/height
@@ -122,6 +142,8 @@ export default function AgentView() {
               </div>
             )}
           </div>
+          {subagentDock}
+          </div>
 
           <div className="shrink-0 flex justify-center border-t">
             <div className="session-composer-width w-full">
@@ -141,10 +163,13 @@ export default function AgentView() {
       ) : (
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
           {/* Stable solo tree: adding a task card must not remount the transcript. */}
-          <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-            <Suspense fallback={null}>
-              <AgentSession />
-            </Suspense>
+          <div className="flex flex-1 min-h-0 overflow-hidden">
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+              <Suspense fallback={null}>
+                <AgentSession />
+              </Suspense>
+            </div>
+            {subagentDock}
           </div>
 
           <div className="shrink-0 flex justify-center">

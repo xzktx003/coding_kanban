@@ -124,7 +124,7 @@ for (const width of [375, 1440]) {
       await form.getByRole("radio", { name: /出门逛逛/ }).click();
       expect(responses).toHaveLength(0);
       await form.getByRole("button", { name: "下一步" }).click();
-      await form.getByPlaceholder("请输入你的回答").fill("喜欢安静，也想走走");
+      await form.getByPlaceholder("在此输入").fill("喜欢安静，也想走走");
       await form.getByRole("button", { name: "上一题" }).click();
       await expect(
         form.getByRole("radio", { name: /出门逛逛/ }),
@@ -141,7 +141,7 @@ for (const width of [375, 1440]) {
       await form.getByRole("button", { name: "下一步" }).click();
       await form.getByRole("button", { name: "提交回答" }).click();
       await expect(form.getByRole("alert")).toContainText("回答发送失败");
-      await expect(form.getByPlaceholder("请输入你的回答")).toHaveValue(
+      await expect(form.getByPlaceholder("在此输入")).toHaveValue(
         "喜欢安静，也想走走",
       );
       await form.getByRole("button", { name: "提交回答" }).click();

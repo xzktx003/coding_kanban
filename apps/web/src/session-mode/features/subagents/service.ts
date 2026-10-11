@@ -5,7 +5,6 @@ import type {
   SubagentStopResult,
 } from "@agent-orchestrator/shared";
 import { postJsonWithOptions } from "@session/services/apiAdapt/shared";
-import { useLayoutStore } from "@session/stores/useLayoutStore";
 import { reconcileNodes } from "./model";
 import { useSubagentStore, observedIds } from "./store";
 import { subagentScope } from "./scope";
@@ -160,12 +159,16 @@ export const subagentService = {
   },
 };
 export function openSubagents(root: string, selected?: string | null) {
-  if (selected !== undefined)
-    useSubagentStore.setState((s) => ({
-      selection: { ...s.selection, [root]: selected },
-    }));
-  const layout = useLayoutStore.getState();
-  layout.setActiveRightPanelTab("subagents");
-  layout.setRightPanelOpen(true);
+  useSubagentStore.setState((s) => ({
+    panelRoot: root,
+    selection:
+      selected === undefined
+        ? s.selection
+        : { ...s.selection, [root]: selected },
+  }));
   void subagentService.refresh(root);
+}
+
+export function closeSubagents() {
+  useSubagentStore.setState({ panelRoot: null });
 }

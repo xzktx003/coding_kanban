@@ -165,7 +165,7 @@ for (const width of [1440, 390])
       await composer
         .getByRole("button", { name: "预览 drop.png，上传失败", exact: true })
         .click();
-      await page.getByRole("button", { name: "重试上传", exact: true }).click();
+      await page.getByRole("button", { name: "再次尝试上传", exact: true }).click();
       await page.getByRole("button", { name: "关闭面板", exact: true }).click();
       await expect(composer.locator('[data-state="ready"]')).toBeVisible();
       expect(uploadCount).toBe(2);
@@ -204,7 +204,7 @@ for (const width of [1440, 390])
         composer.getByRole("button", { name: "预览 drop.png", exact: true }),
       ).toBeVisible();
       await composer
-        .getByRole("button", { name: "发送消息", exact: true })
+        .getByRole("button", { name: "发送", exact: true })
         .click();
       await expect
         .poll(

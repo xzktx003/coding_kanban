@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import { toast } from "sonner";
 import { useCallback, useRef } from "react";
 import { fromSdkMessages } from "@session/components/cc/utils/fromSdkMessages";
@@ -172,7 +173,7 @@ export function useCCSessionManager() {
         let sessionCwd = cwd;
         let sessionWorktreePath: string | undefined;
         if (options.worktreeMode === "worktree" && cwd?.trim()) {
-          const worktreeKey = `cc-${crypto.randomUUID()}`;
+          const worktreeKey = `cc-${randomUUID()}`;
           const prepared = await gitCreateWorktree(cwd, worktreeKey);
           sessionCwd = prepared.worktree_path;
           sessionWorktreePath = prepared.worktree_path;

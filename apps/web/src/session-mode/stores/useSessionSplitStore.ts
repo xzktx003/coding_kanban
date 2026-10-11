@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
@@ -21,7 +22,7 @@ export type SessionSplit = {
 export type SessionSplitNode = SessionGroup | SessionSplit;
 const group = (keys: string[] = []): SessionGroup => ({
   type: "group",
-  id: crypto.randomUUID(),
+  id: randomUUID(),
   keys,
   selected: keys[0] ?? null,
 });
@@ -194,7 +195,7 @@ export const useSessionSplitStore = create<State>()(
             const leading = edge === "left" || edge === "top";
             tree = replace(tree, targetId, {
               type: "split",
-              id: crypto.randomUUID(),
+              id: randomUUID(),
               direction:
                 edge === "left" || edge === "right" ? "horizontal" : "vertical",
               ratio: 50,

@@ -15,3 +15,6 @@ it("keeps unfinished native delimiters literal until their closure arrives", () 
   expect(nativeMathMarkdown("\\(pending")).toBe("\\(pending");
   expect(nativeMathMarkdown("\\(complete\\)")).toBe("$complete$");
 });
+it("treats the native one-line bracket delimiter as inline math", () => {
+  expect(nativeMathMarkdown("Before \\[y\\] after")).toBe("Before $y$ after");
+});

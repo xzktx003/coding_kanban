@@ -4,7 +4,10 @@ import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
 
 const reference = process.env.CODEX_NATIVE_REFERENCE_URL;
 const text =
-  "检查完成。会话正文、代码和文件变更沿用相同的视觉标准。\n\n- 保留标签、分屏和独立输入区。\n- 切换会话时保留阅读位置与草稿。\n\n```typescript\nexport function add(a: number, b: number) {\n  return a + b;\n}\n```\n\n| 场景 | 检查内容 |\n| --- | --- |\n| 桌面 | 字体、行距与菜单 |\n| 手机 | 触控、换行与空间 |\n\n表格后保留段落。\n\n# Heading one\n\nParagraph with `inline`.\n\n## Heading two\n\nParagraph.\n\n### Heading three\n\n#### Heading four\n\n##### Heading five\n\n###### Heading six\n\n> Quoted text.\n>\n> Second quoted line.\n\n---\n\nLast paragraph.";
+  "检查完成。会话正文、代码和文件变更沿用相同的视觉标准。\n\n- 保留标签、分屏和独立输入区。\n- 切换会话时保留阅读位置与草稿。\n\n```typescript\nexport function add(a: number, b: number) {\n  return a + b;\n}\n```\n\n| 场景 | 检查内容 |\n| --- | --- |\n| 桌面 | 字体、行距与菜单 |\n| 手机 | 触控、换行与空间 |\n\n表格后保留段落。\n\n# Heading one\n\nParagraph with `inline`.\n\n## Heading two\n\nParagraph.\n\n### Heading three\n\n#### Heading four\n\n##### Heading five\n\n###### Heading six\n\n> Quoted text.\n>\n> Second quoted line.\n\n---\n\nLast paragraph.".replace(
+    "```\n\n| 场景",
+    '```\n\n```python\nprint("second block")\n```\n\n| 场景',
+  );
 
 async function metrics(page: Page, original: boolean) {
   return page
@@ -275,17 +278,18 @@ for (const width of [700, 390])
           JSON.stringify({ original, measured }, null, 2),
         );
         expect(measured.list).toEqual(original.list);
+        // Each of the two code headers retains the approved extra 8px touch height.
         expect(measured.cells).toEqual(
           original.cells.map((cell) => ({
             ...cell,
-            y: cell.y + (width === 390 ? 8 : 0),
+            y: cell.y + (width === 390 ? 16 : 0),
           })),
         );
         expect(measured.syntax).toEqual(original.syntax);
         const shifted = (elements: typeof original.headings) =>
           elements.map((element) => ({
             ...element,
-            y: element.y + (width === 390 ? 8 : 0),
+            y: element.y + (width === 390 ? 16 : 0),
           }));
         expect(measured.headings).toEqual(shifted(original.headings));
         expect(measured.quotes).toEqual(shifted(original.quotes));
@@ -328,14 +332,68 @@ for (const width of [700, 390])
           original.buttons.find((button) => button.label === "启用自动换行")!
             .svg,
         );
-        const fence = page.locator(".codex-native-code-fence");
+        const fence = page.locator(".codex-native-code-fence").first();
+        await native
+          .getByRole("button", { name: "启用自动换行" })
+          .first()
+          .click();
+        await expect(
+          native.getByRole("button", { name: "禁用自动换行" }),
+        ).toHaveCount(2);
         await fence.getByRole("button", { name: "启用自动换行" }).click();
+        await expect(
+          page.getByRole("button", { name: "禁用自动换行" }),
+        ).toHaveCount(2);
         await expect(fence.locator("pre")).toHaveAttribute("data-wrap", "true");
         await expect(fence.locator("code")).toHaveCSS(
           "white-space",
           "pre-wrap",
         );
-        await fence.getByRole("button", { name: "禁用自动换行" }).click();
+        const wrappedGlyph = (button: import("@playwright/test").Locator) =>
+          button
+            .locator("svg path")
+            .evaluateAll((paths) =>
+              paths.map((path) => path.getAttribute("d")),
+            );
+        const originalWrapped = await wrappedGlyph(
+          native.getByRole("button", { name: "禁用自动换行" }).first(),
+        );
+        const productWrapped = await wrappedGlyph(
+          fence.getByRole("button", { name: "禁用自动换行" }),
+        );
+        await writeFile(
+          info.outputPath("wrapped-icons.json"),
+          JSON.stringify({ originalWrapped, productWrapped }, null, 2),
+        );
+        await page.mouse.move(200, 200);
+        await page.mouse.wheel(0, -2000);
+        await expect(fence).toBeInViewport({ ratio: 1 });
+        await native.mouse.move(0, 0);
+        await page.mouse.move(0, 0);
+        await fence.screenshot({
+          path: info.outputPath(`product-wrapped-fence-${width}-${theme}.png`),
+        });
+        await native
+          .locator("[class*=CodeBlock]")
+          .first()
+          .screenshot({
+            path: info.outputPath(`native-wrapped-fence-${width}-${theme}.png`),
+          });
+        await native.screenshot({
+          path: info.outputPath(`native-wrapped-${width}-${theme}.png`),
+        });
+        await page.screenshot({
+          path: info.outputPath(`product-wrapped-${width}-${theme}.png`),
+        });
+        expect(productWrapped).toEqual(originalWrapped);
+        await page
+          .locator(".codex-native-code-fence")
+          .nth(1)
+          .getByRole("button", { name: "禁用自动换行" })
+          .click();
+        await expect(
+          page.getByRole("button", { name: "启用自动换行" }),
+        ).toHaveCount(2);
         await fence.hover();
         await fence.getByRole("button", { name: "代码块更多操作" }).click();
         const download = page.waitForEvent("download");

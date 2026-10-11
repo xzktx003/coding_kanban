@@ -57,14 +57,14 @@ const show = () =>
 it("opens native inline editor, edits independently, cancels without touching detached draft", () => {
   show();
   fireEvent.click(screen.getByRole("button", { name: "userMessage.edit" }));
-  const editor = screen.getByRole("textbox", { name: "编辑上一条用户消息" });
+  const editor = screen.getByRole("textbox", { name: "编辑消息" });
   expect(editor.textContent).toBe("Original message");
   editor.textContent = "Changed message";
   fireEvent.input(editor);
   expect(readDraft(sessionDraftKey("codex", "owner")).text).toBe(
     "Unsent detached draft",
   );
-  fireEvent.click(screen.getByRole("button", { name: "取消编辑" }));
+  fireEvent.click(screen.getByRole("button", { name: "取消" }));
   expect(screen.queryByRole("textbox")).toBeNull();
   expect(mocks.edit).not.toHaveBeenCalled();
 });
@@ -77,7 +77,7 @@ it("IME composition Enter does not submit; send requires visible rollback confir
   fireEvent.input(editor);
   fireEvent.keyDown(editor, { key: "Enter", code: "Enter", isComposing: true });
   expect(screen.queryByRole("button", { name: "common.continue" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "发送编辑消息" }));
+  fireEvent.click(screen.getByRole("button", { name: "发送" }));
   expect(mocks.edit).not.toHaveBeenCalled();
   fireEvent.click(
     await screen.findByRole("button", { name: "common.continue" }),
@@ -103,7 +103,7 @@ it("keeps failed edit buffer after collapsing editor and reopening", async () =>
   fireEvent.click(screen.getByRole("button", { name: "userMessage.edit" }));
   screen.getByRole("textbox").textContent = "Saved changed text";
   fireEvent.input(screen.getByRole("textbox"));
-  fireEvent.click(screen.getByRole("button", { name: "发送编辑消息" }));
+  fireEvent.click(screen.getByRole("button", { name: "发送" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "common.continue" }),
   );
@@ -120,7 +120,7 @@ it("does not clear a newer buffer preserved by the service when its text equals 
   fireEvent.click(screen.getByRole("button", { name: "userMessage.edit" }));
   screen.getByRole("textbox").textContent = "Submitted text";
   fireEvent.input(screen.getByRole("textbox"));
-  fireEvent.click(screen.getByRole("button", { name: "发送编辑消息" }));
+  fireEvent.click(screen.getByRole("button", { name: "发送" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "common.continue" }),
   );

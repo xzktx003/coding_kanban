@@ -19,14 +19,14 @@ it("shows the full model identity and current thread effort when switching owner
   const { rerender } = render(<NativeModelTrigger />);
   expect(
     screen.getByRole("button", {
-      name: "Agent 与模型：Codex，gpt-6.1-sol，xhigh",
+      name: "模型：gpt-6.1-sol，xhigh",
     }),
   ).toBeDefined();
   state.threadId = "two";
   rerender(<NativeModelTrigger />);
   expect(
     screen.getByRole("button", {
-      name: "Agent 与模型：Codex，gpt-6-astra，medium",
+      name: "模型：gpt-6-astra，medium",
     }),
   ).toBeDefined();
 });

@@ -52,6 +52,21 @@ beforeEach(() => {
     drafts: {},
   });
 });
+it("uses native Other and free-form placeholders independently of secret input", () => {
+  useRequestUserInputStore.getState().addRequest(request());
+  render(<RequestUserInputItem currentThreadId="owner" />);
+  fireEvent.click(screen.getByRole("radio", { name: "userInput.custom" }));
+  expect(
+    screen.getByPlaceholderText("userInput.otherPlaceholder"),
+  ).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: /userInput.nextQuestion/ }),
+  );
+  expect(
+    screen.getByPlaceholderText("userInput.freeFormPlaceholder"),
+  ).toBeTruthy();
+  expect(api.respond).not.toHaveBeenCalled();
+});
 it("rejects a captured request after a new instance reuses its RPC id", async () => {
   const old = request();
   const store = useRequestUserInputStore.getState();
@@ -66,7 +81,7 @@ it("advances a selected native option after 180ms without submitting, and retain
   useRequestUserInputStore.getState().addRequest(request());
   render(<RequestUserInputItem currentThreadId="owner" />);
   fireEvent.click(screen.getByRole("radio", { name: "userInput.custom" }));
-  fireEvent.change(screen.getByPlaceholderText("userInput.enterAnswer"), {
+  fireEvent.change(screen.getByPlaceholderText("userInput.otherPlaceholder"), {
     target: { value: "remember custom" },
   });
   fireEvent.click(screen.getByRole("radio", { name: /A \(Recommended\)/ }));
@@ -77,7 +92,7 @@ it("advances a selected native option after 180ms without submitting, and retain
   expect(
     (
       screen.getByPlaceholderText(
-        "userInput.enterAnswer",
+        "userInput.otherPlaceholder",
       ) as HTMLTextAreaElement
     ).value,
   ).toBe("remember custom");
@@ -105,7 +120,7 @@ it("Escape only closes, CmdOrCtrl+Enter advances, and uncertainty locks all answ
   expect(
     (
       screen.getByPlaceholderText(
-        "userInput.enterAnswer",
+        "userInput.freeFormPlaceholder",
       ) as HTMLTextAreaElement
     ).disabled,
   ).toBe(true);
@@ -128,4 +143,40 @@ it("Enter on an already selected final option submits once, while IME Enter rema
   expect(api.respond).not.toHaveBeenCalled();
   fireEvent.keyDown(option, { key: "Enter" });
   await waitFor(() => expect(api.respond).toHaveBeenCalledTimes(1));
+});
+
+it("the native header browses unanswered questions without submitting or losing a custom draft", () => {
+  const value = request();
+  useRequestUserInputStore.getState().addRequest(value);
+  render(<RequestUserInputItem currentThreadId="owner" />);
+  const next = screen.getByRole("button", { name: "userInput.nextQuestion" });
+  expect((next as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(next);
+  expect(screen.getByText("Explain")).toBeTruthy();
+  expect(screen.getByRole("status")).toBeTruthy();
+  fireEvent.change(
+    screen.getByPlaceholderText("userInput.freeFormPlaceholder"),
+    {
+      target: { value: "keep this unfinished answer" },
+    },
+  );
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "userInput.nextQuestion",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "userInput.previous" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "userInput.nextQuestion" }),
+  );
+  expect(
+    (
+      screen.getByPlaceholderText(
+        "userInput.freeFormPlaceholder",
+      ) as HTMLTextAreaElement
+    ).value,
+  ).toBe("keep this unfinished answer");
+  expect(api.respond).not.toHaveBeenCalled();
 });

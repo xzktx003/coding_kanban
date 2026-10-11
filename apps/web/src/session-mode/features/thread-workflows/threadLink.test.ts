@@ -231,6 +231,11 @@ it("a delayed read cannot follow or activate a thread after the user's input tar
   expect(useAgentCenterStore.getState().cards).toHaveLength(0);
   expect(useCodexStore.getState().currentThreadId).toBe("newer");
   expect(useThreadLinkStore.getState().target).toBeNull();
+  expect(
+    useCodexStore.getState().threads.find((item) => item.id === "target")
+      ?.turns.length,
+  ).toBeGreaterThan(0);
+  expect(useThreadLinkStore.getState().error).toContain("历史已缓存");
 });
 it("wrong native identity, missing cwd or unavailable turn/history fail explicitly without following", async () => {
   const activate = vi.fn();

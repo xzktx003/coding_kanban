@@ -28,6 +28,11 @@ export async function installSessionUxFixture(page: Page, count = 40) {
     };
   });
   const calls: Array<{ path: string; body: any }> = [];
+  const delayedReads: Array<{
+    threadId: string;
+    release: Promise<void>;
+    resolve: () => void;
+  }> = [];
   let followed: FollowedSession[] = [];
   let projects = ["/fixture/项目/very-long-project-path-for-ui-regression"];
   const tabSequences = new Map<string, number>(),
@@ -54,7 +59,8 @@ export async function installSessionUxFixture(page: Page, count = 40) {
     const request = route.request(),
       path = new URL(request.url()).pathname;
     const body = request.method() === "POST" ? request.postDataJSON() : null;
-    if (request.method() !== "GET") calls.push({ path, body });
+    if (request.method() !== "GET" && !path.endsWith("/model/list"))
+      calls.push({ path, body });
     let json: any = {};
     if (path === "/api/session/tabs" || path === "/api/session/projects") {
       const tabs = path.endsWith("/tabs"),
@@ -100,8 +106,16 @@ export async function installSessionUxFixture(page: Page, count = 40) {
         state.revision++;
       }
       if (path.endsWith("/stop")) {
-        state.paused = "你已停止当前任务，队列已暂停";
+        state.paused = "由于你中断了当前响应，队列已暂停";
         state.revision++;
+      }
+      if (path.endsWith("/change") && body?.action?.type === "retry") {
+        const item = state.items.find((entry: any) => entry.id === body.action.id);
+        if (item && (item.status === "failed" || item.status === "uncertain")) {
+          item.status = "queued";
+          item.error = undefined;
+          state.revision++;
+        }
       }
       followups.set(threadId, state);
       await route.fulfill({ json: state });
@@ -147,8 +161,35 @@ export async function installSessionUxFixture(page: Page, count = 40) {
       };
     else if (path.endsWith("/config/read")) json = { config: {} };
     else if (path.endsWith("/subagents/snapshot"))
-      json = { threads: [], complete: true, errors: [], checkedAt: Date.now() };
+      json = {
+        threads: [
+          {
+            id: "bg-child",
+            name: "检查测试",
+            preview: "检查测试",
+            parentThreadId: "ux-0",
+            status: { type: "idle" },
+            model: "fixture-model",
+            turns: [
+              {
+                id: "bg-turn",
+                status: calls.some((call) => call.path.endsWith("/subagents/stop"))
+                  ? "interrupted"
+                  : "inProgress",
+                startedAt: 1,
+                items: [],
+              },
+            ],
+            canAcceptDirectInput: false,
+          },
+        ],
+        complete: true,
+        errors: [],
+        checkedAt: Date.now(),
+      };
     else if (path.endsWith("/subagents/roles")) json = { roles: [] };
+    else if (path.endsWith("/subagents/stop"))
+      json = { results: body?.targets ?? [] };
     else if (path.endsWith("/thread/list")) {
       if (listError) {
         await route.fulfill({
@@ -164,6 +205,23 @@ export async function installSessionUxFixture(page: Page, count = 40) {
         nextCursor:
           offset + limit < threads.length ? String(offset + limit) : null,
       };
+    } else if (path.endsWith("/thread/delete")) {
+      threads.splice(
+        0,
+        threads.length,
+        ...threads.filter((thread) => thread.id !== body?.threadId),
+      );
+      json = {};
+    } else if (path.endsWith("/thread/fork")) {
+      const parent = threads.find((t) => t.id === body?.threadId) ?? threads[0];
+      const id = threads.some((thread) => thread.id === "ux-side")
+        ? "ux-fork"
+        : "ux-side";
+      const thread = makeThread(id, id === "ux-fork" ? "分叉聊天" : "侧边聊天");
+      thread.cwd = parent?.cwd ?? thread.cwd;
+      thread.turns = parent?.turns ?? [];
+      threads.unshift(thread);
+      json = { thread, model: "fixture-model", modelProvider: "openai" };
     } else if (path.endsWith("/thread/start")) {
       const thread = makeThread("ux-created", "新的中文任务");
       threads.unshift(thread);
@@ -182,13 +240,15 @@ export async function installSessionUxFixture(page: Page, count = 40) {
       };
     } else if (path.endsWith("/thread/access"))
       json = { state: "owned", reason: "", generation: 1 };
-    else if (path.endsWith("/thread/read"))
+    else if (path.endsWith("/thread/read")) {
+      const hold = delayedReads.find((item) => item.threadId === body?.threadId);
+      if (hold) await hold.release;
       json = {
         thread:
           threads.find((t) => t.id === body?.threadId) ??
           makeThread(body?.threadId ?? "missing", "恢复的会话"),
       };
-    else if (path.endsWith("/turn/start"))
+    } else if (path.endsWith("/turn/start"))
       json = {
         turn: {
           id: "ux-turn",
@@ -205,6 +265,14 @@ export async function installSessionUxFixture(page: Page, count = 40) {
             id: "fixture-model",
             model: "fixture-model",
             displayName: "测试模型",
+            upgrade: "fixture-next",
+            upgradeInfo: {
+              model: "fixture-next",
+              upgradeCopy: "目录提供的替换说明",
+              modelLink: null,
+              migrationMarkdown: null,
+              retirementAt: 1800000000,
+            },
             description: "隔离测试模型",
             isDefault: true,
             hidden: false,
@@ -215,8 +283,35 @@ export async function installSessionUxFixture(page: Page, count = 40) {
             inputModalities: ["text", "image"],
             supportsPersonality: false,
             additionalSpeedTiers: [],
-            serviceTiers: [],
+            serviceTiers: [
+              { id: "fast", name: "Fast", description: "更快" },
+              { id: "ultra", name: "Ultra", description: "最快" },
+            ],
             defaultServiceTier: null,
+          },
+          {
+            id: "fixture-next",
+            model: "fixture-next",
+            displayName: "接替模型",
+            description: "替换测试模型",
+            isDefault: false,
+            hidden: false,
+            supportedReasoningEfforts: [
+              { reasoningEffort: "low", description: "轻度" },
+              { reasoningEffort: "medium", description: "标准推理" },
+              { reasoningEffort: "high", description: "高" },
+            ],
+            defaultReasoningEffort: "medium",
+            inputModalities: ["text"],
+            supportsPersonality: false,
+            additionalSpeedTiers: [],
+            serviceTiers: [
+              { id: "fast", name: "Fast", description: "更快" },
+              { id: "ultra", name: "Ultra", description: "最快" },
+            ],
+            defaultServiceTier: null,
+            upgrade: null,
+            upgradeInfo: null,
           },
         ],
         nextCursor: null,
@@ -225,23 +320,142 @@ export async function installSessionUxFixture(page: Page, count = 40) {
       json = { path: "/fixture/upload.png" };
     else if (path.endsWith("/git/branch-info"))
       json = {
+        owner: "fixture",
+        repo: "fixture",
         branch: "feature/long-branch-name-for-layout",
         isDetached: false,
+      };
+    else if (path.endsWith("/git/list-branches"))
+      json = {
+        current: "feature/long-branch-name-for-layout",
+        branches: ["feature/long-branch-name-for-layout", "main"],
+      };
+    else if (path.endsWith("/git/status"))
+      json = {
+        entries: [
+          { path: "src/app.ts", index_status: "M", worktree_status: " " },
+          { path: "src/conflict.ts", index_status: "U", worktree_status: "U" },
+        ],
+      };
+    else if (path.endsWith("/git/file-numstat"))
+      json = [
+        { path: "src/app.ts", additions: 4, deletions: 1 },
+        { path: "src/conflict.ts", additions: 2, deletions: 2 },
+      ];
+    else if (path.endsWith("/git/commit")) json = "fixture-commit";
+    else if (path.endsWith("/git/checkout-branch")) json = {};
+    else if (path.endsWith("/git/create-branch")) json = {};
+    else if (path.endsWith("/git/blame-line"))
+      json = {
+        present: true,
+        hash: "abcdef1234567890",
+        shortHash: "abcdef1",
+        author: "Test",
+        date: "2026-10-11",
+        summary: "initial",
+      };
+    else if (path.endsWith("/workspace-files/read"))
+      json = {
+        path: body?.path,
+        content: "alpha\nbeta\n目标行\n",
+        version: "fixture",
+        size: 20,
       };
     else if (path.endsWith("/git/diff-stats"))
       json = {
         staged: { additions: 0, deletions: 0 },
         unstaged: { additions: 0, deletions: 0 },
       };
+    else if (path.endsWith("/filesystem/canonicalize-path")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(body?.path ?? "/fixture"),
+      });
+      return;
+    }
+    else if (path.endsWith("/filesystem/read-directory")) json = [];
     else if (path.endsWith("/ssh-hosts")) json = { hosts: [] };
     else if (path.endsWith("/workbench/projects")) json = { projects: [] };
     else if (
-      /(read-directory|bots\/list|acp\/agents|acp\/sessions|automations\/list|account.*\/list)$/.test(
+      /(bots\/list|acp\/agents|acp\/sessions|automations\/list|account.*\/list)$/.test(
         path,
       )
     )
       json = [];
-    else if (path.endsWith("/skills/list")) json = { data: [] };
+    else if (path.endsWith("/skills/list"))
+      json = {
+        data: [
+          {
+            cwd: "/fixture",
+            errors: [],
+            skills: [
+              {
+                name: "review-skill",
+                description: "检查当前改动",
+                path: "/fixture/.codex/skills/review-skill",
+                scope: "repo",
+                enabled: true,
+              },
+            ],
+          },
+        ],
+      };
+    else if (path.endsWith("/mcp/status/list"))
+      json = {
+        data: [
+          {
+            name: "fixture-mcp",
+            serverInfo: null,
+            tools: { ping: {} },
+            resources: [],
+            resourceTemplates: [],
+            authStatus: "unsupported",
+          },
+        ],
+        nextCursor: null,
+      };
+    else if (path.endsWith("/feedback/upload"))
+      json = { threadId: "ux-0" };
+    else if (path.endsWith("/guardian-denial/snapshot")) {
+      const identity = body?.identity ?? {};
+      json = {
+        identity,
+        runtimeInstance: "fixture-runtime",
+        approvalToken: "a".repeat(64),
+        canApprove: true,
+        canAcceptDirectInput: true,
+        state: "available",
+        review: {
+          ...identity,
+          decisionSource: "agent",
+          review: {
+            status: "denied",
+            riskLevel: "high",
+            userAuthorization: "unknown",
+            rationale: "需要明确授权",
+          },
+          action: {
+            type: "command",
+            source: "shell",
+            command: "curl target",
+            cwd: "/fixture",
+          },
+        },
+      };
+    } else if (path.endsWith("/guardian-denial/approve"))
+      json = {
+        identity: body?.identity,
+        runtimeInstance: body?.runtimeInstance,
+        clientRequestId: body?.clientRequestId,
+        state: "recorded",
+      };
+    else if (path.endsWith("/git/create-worktree"))
+      json = {
+        repo_root: "/fixture",
+        worktree_path: "/fixture/.codexia/worktrees/slash",
+        existed: false,
+        copied_env_files: [],
+      };
     else if (
       /\/codex\/(provider\/(list|presets)|model\/list-other)$/.test(path)
     )
@@ -256,6 +470,21 @@ export async function installSessionUxFixture(page: Page, count = 40) {
     },
     setHealthError: (value: boolean) => {
       healthError = value;
+    },
+    holdRead(threadId: string) {
+      let resolve!: () => void;
+      const release = new Promise<void>((done) => {
+        resolve = done;
+      });
+      delayedReads.push({ threadId, release, resolve });
+      return {
+        seen: () =>
+          calls.some(
+            (call) =>
+              call.path.endsWith("/thread/read") && call.body?.threadId === threadId,
+          ),
+        release: () => resolve(),
+      };
     },
   };
 }

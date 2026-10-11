@@ -134,10 +134,7 @@ export function NativeInlineUserEditor({
           editing ? (
             <div className="codex-native-inline-editor">
               <InlineEditInput
-                label={label(
-                  "编辑上一条用户消息",
-                  "Edit previous user message",
-                )}
+                label={label("编辑消息", "Edit message")}
                 value={text}
                 disabled={submitting}
                 onChange={(value) =>
@@ -157,7 +154,7 @@ export function NativeInlineUserEditor({
                 <button
                   type="button"
                   disabled={submitting}
-                  aria-label={label("取消编辑", "Cancel edit")}
+                  aria-label={label("取消", "Cancel")}
                   onClick={cancel}
                 >
                   {label("取消", "Cancel")}
@@ -165,7 +162,7 @@ export function NativeInlineUserEditor({
                 <button
                   type="button"
                   disabled={!text.trim() || running || submitting || uncertain}
-                  aria-label={label("发送编辑消息", "Send edited message")}
+                  aria-label={label("发送", "Send")}
                   onClick={beginConfirm}
                 >
                   {label("发送", "Send")}

@@ -137,6 +137,7 @@ export function projectTurnWork(
       legacyFinal.set(key, row.key);
   }
   const isProcess = (row: ActivityDisplayRow, key: string) => {
+    const meta = groups.get(key);
     if (legacyFinal.get(key) === row.key) return false;
     if (row.activity || row.activityEntry || row.item.kind === "cmdGroup")
       return true;
@@ -152,6 +153,14 @@ export function projectTurnWork(
     if (event.method !== "item/started" && event.method !== "item/completed")
       return false;
     const item = event.params.item;
+    // A finished plan is the turn's public document. Keep its open-window
+    // control in the transcript; only the streaming delta stays in the fold.
+    if (
+      event.method === "item/completed" &&
+      item.type === "plan" &&
+      meta?.status !== "inProgress"
+    )
+      return false;
     if (item.type === "agentMessage")
       return (
         item.phase !== "final_answer" &&

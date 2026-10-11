@@ -149,7 +149,7 @@ for (const width of [1440, 390])
           page.locator('[data-thread-workflows="ux-0"]'),
         ).toHaveCount(1);
         await expect(page.locator(".codex-thread-search")).toHaveCount(0);
-        await menu(page, "搜索会话");
+        await menu(page, "查找");
         const input = page.getByRole("textbox", { name: "搜索会话正文" });
         await expect(input).toBeVisible();
         await input.fill("STABLE TARGET");
@@ -179,17 +179,20 @@ for (const width of [1440, 390])
           .getByRole("button", { name: /编辑消息|Edit message/ })
           .click();
         await expect(
-          page.getByRole("textbox", { name: "编辑上一条用户消息" }),
+          page.getByRole("textbox", { name: "编辑消息" }),
         ).toBeVisible();
         await page
-          .getByRole("textbox", { name: "编辑上一条用户消息" })
+          .getByRole("textbox", { name: "编辑消息" })
           .fill("Inline buffer is independent");
         await expect(
           page
             .locator(".session-codex-composer [contenteditable=true]")
             .first(),
         ).toContainText("Detached draft stays intact");
-        await page.getByRole("button", { name: "取消编辑" }).click();
+        await page.screenshot({
+          path: test.info().outputPath("dialog-inline-edit.png"),
+        });
+        await page.getByRole("button", { name: "取消", exact: true }).click();
         const download = page.waitForEvent("download");
         await menu(page, "导出 Markdown");
         const file = await download;
@@ -199,7 +202,7 @@ for (const width of [1440, 390])
         expect(exported).toContain("stable target café 中文");
         expect(exported).toContain("完成回复 59");
         expect(exported).not.toMatch(
-          /复制消息|从此轮创建分支|引用选区|raw reasoning/,
+          /复制回复|从这里创建聊天分支|引用选区|raw reasoning/,
         );
         if (width === 390) {
           const actions = last.locator(".codex-message-native-actions button");
@@ -254,7 +257,10 @@ test("fork selection captures original source and delayed response cannot switch
   await configure(page, turns, "dark");
   const reply = page.locator('.codex-assistant[data-owner-turn="turn-1"]');
   await reply.hover();
-  await reply.getByRole("button", { name: "从此轮创建分支" }).click();
+  await page.screenshot({
+    path: test.info().outputPath("dialog-message-actions.png"),
+  });
+  await reply.getByRole("button", { name: "从这里创建聊天分支" }).click();
   await expect.poll(() => calls.length).toBe(1);
   await page.evaluate(async () => {
     const module = (path: string) =>
@@ -375,9 +381,9 @@ test("native last-user edit preserves original remote attachment and settings ac
   await user.hover();
   await user.getByRole("button", { name: "编辑消息" }).click();
   await page
-    .getByRole("textbox", { name: "编辑上一条用户消息" })
+    .getByRole("textbox", { name: "编辑消息" })
     .fill("Edited independent message");
-  await page.getByRole("button", { name: "发送编辑消息" }).click();
+  await page.locator(".codex-native-inline-editor").getByRole("button", { name: "发送", exact: true }).click();
   await page.getByRole("button", { name: "继续", exact: true }).click();
   await expect
     .poll(() => calls.filter((call) => call.kind === "rollback").length)
@@ -507,9 +513,9 @@ test("unknown native edit send preserves accessible buffer after rollback and ne
   await user.hover();
   await user.getByRole("button", { name: "编辑消息" }).click();
   await page
-    .getByRole("textbox", { name: "编辑上一条用户消息" })
+    .getByRole("textbox", { name: "编辑消息" })
     .fill("Retained unknown edit");
-  await page.getByRole("button", { name: "发送编辑消息" }).click();
+  await page.locator(".codex-native-inline-editor").getByRole("button", { name: "发送", exact: true }).click();
   await page.getByRole("button", { name: "继续", exact: true }).click();
   const recovery = page.locator(".codex-thread-edit-recovery");
   await expect(recovery).toContainText("编辑结果待确认");
@@ -521,7 +527,7 @@ test("unknown native edit send preserves accessible buffer after rollback and ne
   await expect(
     page.locator(".session-codex-composer [contenteditable=true]").first(),
   ).toContainText("Detached draft stays intact");
-  await menu(page, "搜索会话");
+  await menu(page, "查找");
   await page.getByRole("button", { name: "关闭搜索" }).click();
   expect(rollback).toBe(1);
   expect(start).toBe(1);
@@ -926,21 +932,24 @@ test("copied conversation URL reads native history, opens a followed tab and rea
 });
 
 test("a late URL history result cannot add interest or steal a newly chosen owner", async ({
-  page,
+  browser,
 }, info) => {
   test.setTimeout(90000);
+  // openThreadLink records a module-level processed flag. A fresh context is
+  // the only way this case sees the read that a real new tab would issue.
+  const context = await browser.newContext({
+    ignoreHTTPSErrors: true,
+    viewport: { width: 1440, height: 844 },
+  });
+  const page = await context.newPage();
   const fixture = await installSessionUxFixture(page, 2);
   fixture.threads[0].turns = history(2);
-  let pending: Route | null = null;
-  await page.route("**/api/codex/thread/read", (route) => {
-    if (route.request().postDataJSON()?.threadId === "ux-0") {
-      pending = route;
-      return;
-    }
-    return route.fallback();
+  const held = fixture.holdRead("ux-0");
+  await page.goto("/?mode=session&thread=ux-0&turn=turn-0", {
+    waitUntil: "domcontentloaded",
   });
-  await page.goto("/?mode=session&thread=ux-0&turn=turn-0");
-  await expect.poll(() => !!pending, { timeout: 60000 }).toBe(true);
+  // openThreadLink aborts the read after 15s. The hold must be observed before that.
+  await expect.poll(() => held.seen(), { timeout: 10000 }).toBe(true);
   await page.evaluate(async () => {
     const module = (path: string) =>
       import(
@@ -977,7 +986,7 @@ test("a late URL history result cannot add interest or steal a newly chosen owne
       .getState()
       .setText(sessionDraftKey("codex", "ux-1"), "New owner unsent draft");
   });
-  await pending!.fulfill({ json: { thread: fixture.threads[0] } });
+  held.release();
   await expect(
     page.getByText(
       "输入目标在读取链接期间已改变；历史已缓存，未自动加入关注或切换会话。",
@@ -1001,7 +1010,7 @@ test("a late URL history result cannot add interest or steal a newly chosen owne
       thread: useCodexStore.getState().currentThreadId,
       cards: useAgentCenterStore.getState().cards,
       cwd: useWorkspaceStore.getState().cwd,
-      cached: !!useCodexStore.getState().events["ux-0"]?.length,
+      cached: (useCodexStore.getState().threads.find((item) => item.id === "ux-0")?.turns.length ?? 0) > 0,
     };
   });
   expect(state).toMatchObject({
@@ -1019,6 +1028,7 @@ test("a late URL history result cannot add interest or steal a newly chosen owne
     path: info.outputPath("copied-link-late-owner-cas.png"),
     fullPage: true,
   });
+  await context.close();
 });
 
 test("the real file editor adds captured Codex selection context and rejects another project's pinned file", async ({
@@ -1213,7 +1223,7 @@ test("native remote search resolves only the actual item and inclusive history c
   await configure(page, turns.slice(-5), "dark");
   const searchCalls: any[] = [],
     historyCalls: any[] = [];
-  await page.route("**/api/codex/thread/search-occurrences", async (route) => {
+  await page.route("**/api/**/thread/search-occurrences", async (route) => {
     searchCalls.push(route.request().postDataJSON());
     await route.fulfill({
       json: {
@@ -1230,7 +1240,7 @@ test("native remote search resolves only the actual item and inclusive history c
       },
     });
   });
-  await page.route("**/api/codex/thread/turns/list", async (route) => {
+  await page.route("**/api/**/thread/turns/list**", async (route) => {
     const body = route.request().postDataJSON();
     if (body.cursor !== "actual-inclusive-native-cursor")
       return route.fallback();
@@ -1240,7 +1250,7 @@ test("native remote search resolves only the actual item and inclusive history c
   await expect(
     page.locator('.codex-native-user[data-owner-turn="turn-0"]'),
   ).toHaveCount(0);
-  await menu(page, "搜索会话");
+  await menu(page, "查找");
   await page
     .getByRole("textbox", { name: "搜索会话正文" })
     .fill("stable target");
@@ -1311,7 +1321,7 @@ test("a newer native user turn keeps the earlier independent edit buffer reachab
   await last.hover();
   await last.getByRole("button", { name: /编辑消息|Edit message/ }).click();
   await page
-    .getByRole("textbox", { name: "编辑上一条用户消息" })
+    .getByRole("textbox", { name: "编辑消息" })
     .fill("Earlier edit remains independently reachable");
   const later = history(3)[2];
   await page.evaluate(async (later) => {
@@ -1336,7 +1346,7 @@ test("a newer native user turn keeps the earlier independent edit buffer reachab
     }));
   }, later);
   await expect(
-    page.getByRole("textbox", { name: "编辑上一条用户消息" }),
+    page.getByRole("textbox", { name: "编辑消息" }),
   ).toHaveCount(0);
   await page.getByText("未完成的消息编辑已保留", { exact: true }).click();
   await expect(page.locator(".codex-thread-edit-recovery pre")).toHaveText(

@@ -322,6 +322,48 @@ export class GitService {
         : [this.blob(root, path, false), this.working(root, path)],
     );
   }
+  async blameLine(cwd: string, file: string, line: number) {
+    if (!Number.isSafeInteger(line) || line < 1)
+      throw new HttpError(400, "Invalid line");
+    const root = await this.root(cwd);
+    const path = await this.path(root, file);
+    const result = await this.run(root, [
+      "blame",
+      "-L",
+      `${line},${line}`,
+      "--porcelain",
+      "HEAD",
+      "--",
+      path,
+    ]);
+    if (result.code !== 0) {
+      const detail = result.stderr.trim();
+      if (/no such path|fatal: no such/i.test(detail))
+        return { present: false };
+      throw new Error(`git blame failed: ${detail || `exit ${result.code}`}`);
+    }
+    const textOut = result.stdout.toString("utf8");
+    const hash = textOut.slice(0, textOut.indexOf(" "));
+    const value = (name: string) => {
+      const prefix = `${name} `;
+      const row = textOut
+        .split("\n")
+        .find((item) => item.startsWith(prefix));
+      return row ? row.slice(prefix.length) : "";
+    };
+    const authorTime = Number(value("author-time"));
+    const date = Number.isFinite(authorTime)
+      ? new Date(authorTime * 1000).toISOString().slice(0, 10)
+      : "";
+    return {
+      present: true,
+      hash,
+      shortHash: hash.slice(0, 7),
+      author: value("author"),
+      date,
+      summary: value("summary"),
+    };
+  }
   async fileDiff(cwd: string, file: string, staged: boolean) {
     const [old, fresh] = (await this.pair(cwd, file, staged)) as [
       Buffer,
@@ -419,6 +461,44 @@ export class GitService {
       return counts;
     };
     return { staged: await count(true), unstaged: await count(false) };
+  }
+  /** Per-file additions and deletions across the index and the working tree. */
+  async fileNumstat(cwd: string) {
+    const root = await this.root(cwd);
+    const totals = new Map<string, { additions: number; deletions: number }>();
+    const collect = async (staged: boolean) => {
+      const tokens = (
+        await this.git(root, [
+          "diff",
+          "--no-ext-diff",
+          "--no-textconv",
+          "--diff-algorithm=myers",
+          "--numstat",
+          "-z",
+          ...(staged ? ["--cached"] : []),
+        ])
+      ).stdout
+        .toString()
+        .split("\0");
+      for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i]!;
+        if (!token) continue;
+        const match = /^(\d+|-)\t(\d+|-)\t([\s\S]*)$/.exec(token);
+        if (!match) throw new Error("Invalid git numstat");
+        let path = match[3];
+        if (!path) path = tokens[(i += 2)] || tokens[i - 1] || "";
+        if (!path) continue;
+        const current = totals.get(path) ?? { additions: 0, deletions: 0 };
+        current.additions += Number(match[1]) || 0;
+        current.deletions += Number(match[2]) || 0;
+        totals.set(path, current);
+      }
+    };
+    await collect(true);
+    await collect(false);
+    return [...totals.entries()]
+      .map(([path, counts]) => ({ path, ...counts }))
+      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   }
   async stageFiles(cwd: string, files: string[]) {
     const root = await this.root(cwd);
@@ -956,11 +1036,17 @@ export function registerGitRoutes(
     (body: JsonObject, cwd: string) => Promise<unknown>
   > = {
     status: (_, cwd) => service.status(cwd),
+    "blame-line": (b, cwd) => {
+      const line = b.line;
+      if (typeof line !== "number") throw new HttpError(400, "Invalid line");
+      return service.blameLine(cwd, field(b, "filePath", "file_path"), line);
+    },
     "file-diff": (b, cwd) =>
       service.fileDiff(cwd, field(b, "filePath", "file_path"), staged(b)),
     "file-diff-meta": (b, cwd) =>
       service.fileDiffMeta(cwd, field(b, "filePath", "file_path"), staged(b)),
     "diff-stats": (_, cwd) => service.diffStats(cwd),
+    "file-numstat": (_, cwd) => service.fileNumstat(cwd),
     "stage-files": (b, cwd) => service.stageFiles(cwd, paths(b)),
     "unstage-files": (b, cwd) => service.unstageFiles(cwd, paths(b)),
     "reverse-files": (b, cwd) => service.reverseFiles(cwd, paths(b), staged(b)),

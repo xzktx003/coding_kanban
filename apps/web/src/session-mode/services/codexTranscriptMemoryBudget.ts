@@ -451,6 +451,14 @@ const compactEvent = (
   if (projected === null) {
     // Direct callers still receive a typed event, but never its private body.
     const cursor = projectCodexChatValue(event) as ServerNotification;
+    if (
+      cursor.method === "item/started" ||
+      cursor.method === "item/completed" ||
+      cursor.method === "turn/completed"
+    ) {
+      const [next, changed] = compactVisibleEvent(cursor, limit);
+      return [next, changed || cursor !== event];
+    }
     return [cursor, cursor !== event];
   }
   const [next, changed] = compactVisibleEvent(projected, limit);

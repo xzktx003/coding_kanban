@@ -390,7 +390,7 @@ https://<局域网地址>:<WEB_PORT>/?view=mobile
 - `code-server` 或 `openvscode-server`：内嵌 VS Code Web；未安装时应用可尝试通过网络安装 `code-server`。
 - Codex、Copilot 或 Claude CLI：只需安装并登录实际要从看板启动的 Agent；纯 shell 会话不需要。
 - Python 3、`make` 和 C/C++ 编译工具：`node-pty`、`better-sqlite3` 缺少当前平台的预编译包时需要；自有会话运行层使用 TypeScript / Node.js，无需 Rust 工具链。
-- `whisper-cli`（whisper.cpp）：会话语音转写使用独立推理程序；可通过 `.env` 的 `SESSION_WHISPER_BIN` 指定路径。
+- `whisper-cli`（whisper.cpp）：本机没有可用的 Codex 登录，或 Codex 转写失败时，会话语音使用这个独立推理程序；可通过 `.env` 的 `SESSION_WHISPER_BIN` 指定路径。
 - `lark-cli`：仅发送飞书提醒或从飞书回复继续 Codex 时需要。飞书完成通知中的公式保留源码，不需要图片上传权限或 Chromium。
 - Playwright 浏览器和系统依赖：仅运行 E2E 或生成 README 截图时需要。
 
@@ -432,7 +432,7 @@ JavaScript 预览库随 `pnpm install --frozen-lockfile` 安装、随前端构�
 | SSH 终端、远端文件 / 图片 | 本机 OpenSSH 客户端及 SSH 凭据；目标提供 SSH 服务、shell，文件功能还需可用的 SFTP 子系统 | 先用相同配置登录 SSH；远端无需安装图片转换器，文件权限与符号链接边界仍生效 |
 | VS Code Web | 编辑目录所在主机安装 `code-server` 或 `openvscode-server`；自动安装需该主机能下载 code-server | 运行对应命令 `--version`；浏览器需信任 HTTPS CA；远端编辑另需 SSH。见 [编辑工作区](docs/session-vscode-panel.md) |
 | 飞书通知、回复控制和文件工作区 | 本机 `lark-cli`、机器人身份、相应消息/资源权限及回调配置 | 见下方飞书检查清单及 [飞书工作区](docs/feishu-session-workspace.md)；通知保留公式源码，无需服务器 Chromium |
-| 语音输入（会话模式） | 本机 whisper.cpp 的 `whisper-cli`（PATH 或 `SESSION_WHISPER_BIN`），设置中下载的 GGML Whisper 模型；浏览器麦克风权限与可信 HTTPS（localhost 例外） | 首次模型下载需后端能访问 Hugging Face，下载后由外部 CLI 本地转写；模型越大，内存与 CPU 消耗越大；运行层不再内嵌 Whisper Rust bindings |
+| 语音输入（会话模式） | 本机已登录 Codex 时走其转写；否则使用 whisper.cpp 的 `whisper-cli`（PATH 或 `SESSION_WHISPER_BIN`）和设置中下载的 GGML 模型。浏览器需要麦克风权限与可信 HTTPS（localhost 例外） | Codex 转写需要能访问其 realtime 服务；失败自动回退本地。首次模型下载需后端能访问 Hugging Face，下载后由外部 CLI 本地转写 |
 | 浏览器通知、剪贴板和麦克风 | 访问设备上的现代浏览器、对应权限与安全上下文 | 局域网使用可信 HTTPS；不同浏览器支持范围不同；无需在服务器安装桌面环境 |
 | E2E、浏览器回归、README 截图 | 开发机上的 Playwright Chromium 及其系统动态库 | `pnpm exec playwright install chromium`；Linux 可执行 `pnpm exec playwright install-deps chromium`（安装系统包需管理员权限）。这些依赖用于测试与截图，不是普通文件预览的运行条件 |
 
@@ -492,7 +492,7 @@ pnpm session:build
 按需功能：
 
 - [ ] **tmux 会话恢复**：`tmux -V` 可执行；本地和准备连接的 SSH 主机都已安装 tmux。
-- [ ] **语音输入**：已安装 whisper.cpp 的 `whisper-cli`，或在 `.env` 设置 `SESSION_WHISPER_BIN`；已下载模型并授予 HTTPS 页面麦克风权限。
+- [ ] **语音输入**：本机 Codex 已登录，或已安装 whisper.cpp 的 `whisper-cli`（也可在 `.env` 设置 `SESSION_WHISPER_BIN`）并下载模型；已授予 HTTPS 页面麦克风权限。
 - [ ] **Coding Agent**：需要使用的 `codex`、`copilot` 或 `claude` 命令已加入 `PATH` 并完成登录；远端会话还需在远端主机安装。
 - [ ] **SSH 工作流**：`ssh -V` 可执行；可使用 `~/.ssh/config` 中的预设主机，也可在“新建会话 → 新增 SSH 连接”直接填写目标。请先确认本机 `ssh-agent`、SSH 配置或私钥能够免交互登录。
 - [ ] **可信 HTTPS**：已安装 `mkcert`，或配置自己的可信证书；手机和其他局域网设备已信任对应 CA。只接受 OpenSSL 自签警告可能导致 VS Code Web 的 Service Worker、图片或 webview 无法加载。

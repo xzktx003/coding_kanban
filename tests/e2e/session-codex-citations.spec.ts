@@ -207,15 +207,40 @@ for (const width of [1440, 390])
           message.getByRole("link", { name: "External source" }),
         ).toHaveAttribute("href", "https://example.invalid/reference");
         await expect(message).toContainText(literal);
-        await page
-          .context()
-          .grantPermissions(["clipboard-read", "clipboard-write"]);
+        const clipboardApi = await page.evaluate(
+          () => typeof navigator.clipboard?.readText === "function",
+        );
+        if (clipboardApi)
+          await page
+            .context()
+            .grantPermissions(["clipboard-read", "clipboard-write"]);
+        else
+          await page.evaluate(() => {
+            (window as any).httpCitationCopy = null;
+            window.addEventListener(
+              "copy",
+              (event) => {
+                if (event.defaultPrevented)
+                  (window as any).httpCitationCopy =
+                    event.clipboardData?.getData("text/plain");
+              },
+              { once: true },
+            );
+          });
         if (width !== 390) await message.hover();
         await message
-          .getByRole("button", { name: "复制消息", exact: true })
+          .getByRole("button", { name: "复制回复", exact: true })
           .click();
-        const copied = await page.evaluate(() =>
-          navigator.clipboard.readText(),
+        await expect(message.locator(".codex-native-copy")).toHaveAttribute(
+          "aria-label",
+          "已复制",
+        );
+        const copied = await page.evaluate(
+          (clipboardApi) =>
+            clipboardApi
+              ? navigator.clipboard.readText()
+              : (window as any).httpCitationCopy,
+          clipboardApi,
         );
         expect(copied).toContain("source.ts （第 502-503 行）");
         expect(copied).toContain("legacy.py （第 8-9 行）");
@@ -462,13 +487,28 @@ for (const width of [1440, 390])
             module("/src/session-mode/stores/useAgentCenterStore.ts"),
             module("/src/session-mode/stores/useWorkspaceStore.ts"),
           ]);
-          useCodexStore.setState({ currentThreadId: "ux-1" });
           useWorkspaceStore.setState({ cwd: "/other-project" });
           useAgentCenterStore.setState({
             cardsViewMode: "grid",
             currentAgentCardId: "ux-1",
             currentAgentCardKind: "codex",
           });
+          useCodexStore.setState({ currentThreadId: "ux-1" });
+          const w = window as any;
+          w.citationThreadTrace = [];
+          w.stopCitationTrace = useCodexStore.subscribe(
+            (state: any, previous: any) => {
+              if (
+                state.currentThreadId !== previous.currentThreadId &&
+                w.citationThreadTrace.length < 20
+              )
+                w.citationThreadTrace.push({
+                  from: previous.currentThreadId,
+                  to: state.currentThreadId,
+                  stack: new Error().stack,
+                });
+            },
+          );
         });
         await message
           .getByRole("button", { name: /source\.ts.*502-503/ })
@@ -487,6 +527,9 @@ for (const width of [1440, 390])
             element.env.editor.getReadOnly(),
           ),
         ).toBe(true);
+        await page.screenshot({
+          path: info.outputPath("editor-citation-open.png"),
+        });
         const state = await page.evaluate(async () => {
           const module = (path: string) =>
             import(
@@ -526,6 +569,18 @@ for (const width of [1440, 390])
               (document.activeElement as HTMLElement)?.isContentEditable,
           };
         });
+        await writeFile(
+          info.outputPath("input-thread-trace.json"),
+          JSON.stringify(
+            await page.evaluate(() => {
+              const w = window as any;
+              w.stopCitationTrace?.();
+              return w.citationThreadTrace;
+            }),
+            null,
+            2,
+          ),
+        );
         expect(state).toMatchObject({
           thread: "ux-1",
           card: "ux-1",

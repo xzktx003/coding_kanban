@@ -84,7 +84,7 @@ for (const width of [375, 1440])
     for (let i = 0; i < 2; i++) {
       pending = null;
       await editor(page).fill(text);
-      await page.getByRole("button", { name: "发送消息", exact: true }).click();
+      await page.getByRole("button", { name: "发送", exact: true }).click();
       await expect.poll(() => !!pending).toBe(true);
       const request = pending.request().postDataJSON();
       await expect(page.locator("[data-delivery-echo]")).toHaveCount(1);
@@ -179,7 +179,7 @@ test("sending from an older reading position reveals the submitted message, and 
   });
   await expect.poll(() => viewport.evaluate((el) => el.scrollTop)).toBe(0);
   await editor(page).fill("从历史位置发送的新消息");
-  await page.getByRole("button", { name: "发送消息", exact: true }).click();
+  await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(page.locator("[data-delivery-echo]")).toBeVisible();
   await expect
     .poll(() =>
@@ -268,7 +268,7 @@ test("late send receipt keeps text and image with the original session without c
   await expect(
     page.locator(".session-context-chip[data-state=ready]"),
   ).toHaveCount(1);
-  await page.getByRole("button", { name: "发送消息", exact: true }).click();
+  await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect.poll(() => !!pending).toBe(true);
   const request = pending.request().postDataJSON();
   expect(request.images).toHaveLength(1);

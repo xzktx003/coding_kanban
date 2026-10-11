@@ -17,7 +17,7 @@ export function FollowupSnapshot({ message }: { message: FollowupMessage }) {
         <span>Codex · {String(p.model ?? "服务默认模型")}</span>
         <span>思考强度：{String(p.effort ?? "默认")}</span>
         <span>{permission}</span>
-        <span>{mode?.mode === "plan" ? "规划模式" : "执行模式"}</span>
+        <span>{mode?.mode === "plan" ? "计划模式" : "执行模式"}</span>
       </div>
       <p>使用入队时的配置，后续设置不会改变本条消息。</p>
       <small>

@@ -31,6 +31,91 @@ export function RawToolValue({
     </details>
   );
 }
+function openResourceFile(
+  file: NonNullable<ReturnType<typeof parseFileReference>>,
+  cwd: string | null | undefined,
+) {
+  useEditorStore
+    .getState()
+    .revealFile(file.path, cwd ?? undefined, file.line, file.column);
+  const layout = useLayoutStore.getState();
+  layout.setActiveRightPanelTab("files");
+  layout.setRightPanelOpen(true);
+}
+
+function ResourceOpenMenu({
+  uri,
+  file,
+  cwd,
+}: {
+  uri: string;
+  file: ReturnType<typeof parseFileReference>;
+  cwd: string | null | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const [place, setPlace] = useState<{ top: number; left: number } | null>(null);
+  const external = /^https?:\/\//i.test(uri);
+  const close = () => setOpen(false);
+  return (
+    <span className="codex-resource-open">
+      <button
+        type="button"
+        className="codex-resource-open-button"
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={(event) => {
+          const box = event.currentTarget.getBoundingClientRect();
+          setPlace({ top: box.bottom + 4, left: box.left });
+          setOpen((value) => !value);
+        }}
+      >
+        打开方式
+      </button>
+      {open && place && (
+        <div
+          role="menu"
+          aria-label="选择打开位置"
+          style={{ top: place.top, left: place.left }}
+        >
+          {file && (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                openResourceFile(file, cwd);
+                close();
+              }}
+            >
+              在文件管理器中显示
+            </button>
+          )}
+          {external && (
+            <a
+              role="menuitem"
+              href={uri}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={close}
+            >
+              在默认浏览器中打开
+            </a>
+          )}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              void navigator.clipboard.writeText(uri);
+              close();
+            }}
+          >
+            复制链接
+          </button>
+        </div>
+      )}
+    </span>
+  );
+}
+
 function ResourceLink({ uri, name }: { uri: string; name: string }) {
   const { cwd } = useCodexContentOwner();
   const file = parseFileReference(uri, cwd),
@@ -42,24 +127,22 @@ function ResourceLink({ uri, name }: { uri: string; name: string }) {
       </span>
     );
   return (
-    <a
-      href={external ? uri : "#file"}
-      className="codex-resource-link"
-      target={external ? "_blank" : undefined}
-      rel="noopener noreferrer"
-      onClick={(event) => {
-        if (!file) return;
-        event.preventDefault();
-        useEditorStore
-          .getState()
-          .revealFile(file.path, cwd ?? undefined, file.line, file.column);
-        const layout = useLayoutStore.getState();
-        layout.setActiveRightPanelTab("files");
-        layout.setRightPanelOpen(true);
-      }}
-    >
-      {name}
-    </a>
+    <span className="codex-resource-link-row">
+      <a
+        href={external ? uri : "#file"}
+        className="codex-resource-link"
+        target={external ? "_blank" : undefined}
+        rel="noopener noreferrer"
+        onClick={(event) => {
+          if (!file) return;
+          event.preventDefault();
+          openResourceFile(file, cwd);
+        }}
+      >
+        {name}
+      </a>
+      <ResourceOpenMenu uri={uri} file={file} cwd={cwd} />
+    </span>
   );
 }
 function ToolBlock({

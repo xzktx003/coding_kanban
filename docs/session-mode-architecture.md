@@ -59,7 +59,7 @@ pnpm dev:restart  # 自动编译 shared 与默认 TypeScript 运行层
 pnpm session:status
 ```
 
-需要 Node/pnpm；PTY、SQLite 在缺少预编译包时需要本机编译工具。语音推理由外部 whisper.cpp CLI 执行，可通过 `SESSION_WHISPER_BIN` 指定。默认使用 `node packages/session-runtime/dist/main.js`，`SESSION_RUNTIME_BIN` 保留显式可执行文件覆盖。准备失败不停止现有服务；已有 legacy 进程复用，构建不会隐式激活新产物。详见 [启动与更新指南](startup.md)及 [TS 迁移](session-typescript-migration.md)。
+需要 Node/pnpm；PTY、SQLite 在缺少预编译包时需要本机编译工具。语音在本机 Codex 已登录时使用其转写，失败或未登录时由外部 whisper.cpp CLI 执行，可通过 `SESSION_WHISPER_BIN` 指定。默认使用 `node packages/session-runtime/dist/main.js`，`SESSION_RUNTIME_BIN` 保留显式可执行文件覆盖。准备失败不停止现有服务；已有 legacy 进程复用，构建不会隐式激活新产物。详见 [启动与更新指南](startup.md)及 [TS 迁移](session-typescript-migration.md)。
 
 `SESSION_MODE_ENABLED`、`SESSION_RUNTIME_BIN`、`SESSION_DATA_HOME`、`SESSION_RUNTIME_PORT`、`SESSION_CARGO_BIN`、`SESSION_CLAUDE_CONNECT_TIMEOUT_MS` 和 `SESSION_FS_WATCH_MAX_DIRS` 均在 `.env.example` 中说明。前端/后端/HTTPS 端口仍由原有 `.env` 配置；运行层仅绑定 loopback，不把参考项目的固定端口暴露给浏览器。定时任务 UI 明确显示服务器时区。
 

@@ -1,3 +1,4 @@
+import { mcpOAuthThreadIdSupported } from "@agent-orchestrator/shared";
 import { randomUUID } from "node:crypto";
 import { EventHub } from "../core/events.js";
 import { KeyedSerial } from "../core/serial.js";
@@ -13,6 +14,8 @@ import { sanitizeCodexNotification } from "./projection.js";
 import { discoverCodex } from "./executable.js";
 import { Ownership, readHistory, type Rpc } from "./ownership.js";
 import { boundedText, rollback } from "./protocol.js";
+import { GithubPreviewService } from "./github-preview.js";
+import { SlackPreviewService } from "./slack-preview.js";
 
 export interface CodexOptions {
   hub: EventHub;
@@ -46,6 +49,7 @@ const requests: Record<string, { event: string; kind: string }> = {
 };
 
 export class CodexService {
+  mcpOAuthThreadId = false;
   readonly ownership: Ownership;
   readonly accountOperations = new KeyedSerial();
   private starting?: Promise<StdioRpc>;
@@ -55,6 +59,14 @@ export class CodexService {
   private sweeping = false;
   private pending = new Map<string, { event: string; payload: JsonObject }>();
   private rollbacks = new Map<string, { key: string; work: Promise<Json> }>();
+  private previews?: SlackPreviewService;
+  private githubPreview?: GithubPreviewService;
+  get githubPreviews(): GithubPreviewService {
+    return this.githubPreview ??= new GithubPreviewService((method, params) => this.raw(method, params), this.options.instance);
+  }
+  get slackPreviews(): SlackPreviewService {
+    return this.previews ??= new SlackPreviewService((method, params) => this.raw(method, params), this.options.instance);
+  }
 
   constructor(readonly options: CodexOptions) {
     this.ownership = new Ownership(this.raw);
@@ -78,6 +90,9 @@ export class CodexService {
       onDiagnostic: (text) =>
         this.options.hub.publish("codex:stderr", { message: text }),
       onExit: () => {
+        this.mcpOAuthThreadId=false;
+        this.previews?.invalidate();
+        this.githubPreview?.invalidate();
         this.pending.clear();
         this.ownership.invalidate();
         this.options.hub.invalidatePending("codex");
@@ -99,6 +114,7 @@ export class CodexService {
           optOutNotificationMethods: null,
         },
       });
+      this.mcpOAuthThreadId=mcpOAuthThreadIdSupported(object(response).userAgent);
       await rpc.notify("initialized");
       this.options.hub.publish("codex:initialized", object(response));
       const interval = this.options.sweepIntervalMs ?? 1000;
@@ -168,6 +184,8 @@ export class CodexService {
     notification = sanitized;
     const method = String(notification.method),
       params = object(notification.params);
+    this.previews?.observe(method, params);
+    this.githubPreview?.observe(method, params);
     this.ownership.observe(method, params);
     if (method === "serverRequest/resolved")
       this.pending.delete(JSON.stringify(params.requestId));
@@ -275,6 +293,8 @@ export class CodexService {
   }
 
   async close(): Promise<void> {
+    await this.previews?.close();
+    await this.githubPreview?.close();
     this.closed = true;
     clearInterval(this.sweep);
     await this.transport?.close();

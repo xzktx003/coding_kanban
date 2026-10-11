@@ -36,7 +36,7 @@ test("nonzero browser safe-area reserves bottom controls without clipping or foc
       parseFloat(getComputedStyle(el).paddingTop),
     ),
   ).toBe(44);
-  const send = composer.getByRole("button", { name: "发送消息", exact: true });
+  const send = composer.getByRole("button", { name: "发送", exact: true });
   const box = (await send.boundingBox())!;
   expect(box.y + box.height).toBeLessThanOrEqual(844 - 34);
   const branch = (await page

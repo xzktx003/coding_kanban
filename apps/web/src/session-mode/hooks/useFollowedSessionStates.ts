@@ -51,29 +51,19 @@ export const SESSION_STATE_LABELS: Record<FollowedSessionState, string> = {
 const EMPTY_EVENTS: readonly ServerNotification[] = [];
 
 /** Read existing state only: following/navigation must never create an Agent. */
-export function useFollowedSessionStates(
+export function followedSessionRows(
   connection: SessionConnectionState = "ready",
 ) {
-  const { cards, sharedTabsInitialized } = useAgentCenterStore(
-    useShallow((s) => ({
-      cards: s.cards,
-      sharedTabsInitialized: s.sharedTabsInitialized,
-    })),
-  );
-  const cc = useCCStore(
-    useShallow((s) => ({
-      loading: s.sessionLoadingMap,
-      messages: s.sessionMessagesMap,
-    })),
-  );
-  const receipts = useSessionAttentionStore((s) => s.receipts);
-  const questionSessions = useAsyncQuestionStore((s) => s.sessions);
-  const approvals = useApprovalStore((s) => s.pendingApprovals);
-  const permissions = usePermissionsStore((s) => s.pendingRequests);
-  const questions = useRequestUserInputStore((s) => s.pendingRequests);
-  const elicitations = useElicitationStore((s) => s.pendingRequests);
-  const subagents = useSubagentStore((s) => s.nodes);
-  const families = useSubagentStore((s) => s.families);
+  const { cards, sharedTabsInitialized } = useAgentCenterStore.getState();
+  const cc = useCCStore.getState();
+  const receipts = useSessionAttentionStore.getState().receipts;
+  const questionSessions = useAsyncQuestionStore.getState().sessions;
+  const approvals = useApprovalStore.getState().pendingApprovals;
+  const permissions = usePermissionsStore.getState().pendingRequests;
+  const questions = useRequestUserInputStore.getState().pendingRequests;
+  const elicitations = useElicitationStore.getState().pendingRequests;
+  const subagents = useSubagentStore.getState().nodes;
+  const families = useSubagentStore.getState().families;
   const followedCodexIds = [
     ...new Set(
       cards
@@ -84,30 +74,17 @@ export function useFollowedSessionStates(
         ]),
     ),
   ];
-  const codexEvents = useCodexStore(
-    useShallow((s) =>
-      followedCodexIds.map((id) => s.events[id] ?? EMPTY_EVENTS),
-    ),
+  const codex = useCodexStore.getState();
+  const codexEvents = followedCodexIds.map((id) => codex.events[id] ?? EMPTY_EVENTS);
+  const codexStatuses = followedCodexIds.map((id) => codex.threadStatusMap[id]);
+  const codexTiming = followedCodexIds.map((id) => codex.turnTimingMap[id]);
+  const codexThreads = followedCodexIds.map(
+    (id) => codex.threads.find((thread) => thread.id === id) ?? null,
   );
-  const codexStatuses = useCodexStore(
-    useShallow((s) => followedCodexIds.map((id) => s.threadStatusMap[id])),
-  );
-  const codexTiming = useCodexStore(
-    useShallow((s) => followedCodexIds.map((id) => s.turnTimingMap[id])),
-  );
-  const codexThreads = useCodexStore(
-    useShallow((s) =>
-      followedCodexIds.map(
-        (id) => s.threads.find((thread) => thread.id === id) ?? null,
-      ),
-    ),
-  );
-  const codexCurrent = useCodexStore(
-    useShallow((s) => ({
-      currentThreadId: s.currentThreadId,
-      currentTurnId: s.currentTurnId,
-    })),
-  );
+  const codexCurrent = {
+    currentThreadId: codex.currentThreadId,
+    currentTurnId: codex.currentTurnId,
+  };
   const eventById = new Map(
     followedCodexIds.map((id, index) => [id, codexEvents[index]]),
   );
@@ -171,12 +148,12 @@ export function useFollowedSessionStates(
         else if (finished) state = "completed";
         else if (runtime.known) state = "idle";
       } else {
-        const messages = cc.messages[card.id];
+        const messages = cc.sessionMessagesMap[card.id];
         if (
           messages?.some((m) => m.type === "permission_request" && !m.resolved)
         )
           state = "pending";
-        else if (cc.loading[card.id]) state = "running";
+        else if (cc.sessionLoadingMap[card.id]) state = "running";
         else if (
           messages?.at(-1)?.type === "result" &&
           (messages.at(-1) as { is_error?: boolean }).is_error
@@ -184,7 +161,7 @@ export function useFollowedSessionStates(
           state = "failed";
         else if (unread) state = "unread";
         else if (finished) state = "completed";
-        else if (messages || Object.hasOwn(cc.loading, card.id)) state = "idle";
+        else if (messages || Object.hasOwn(cc.sessionLoadingMap, card.id)) state = "idle";
       }
     }
     const session = questionSessions[card.id] ?? EMPTY_SESSION;
@@ -244,4 +221,44 @@ export function useFollowedSessionStates(
           card.kind !== "codex" || families[card.id]?.complete !== false,
       ),
   };
+}
+
+export function useFollowedSessionStates(
+  connection: SessionConnectionState = "ready",
+) {
+  const cards = useAgentCenterStore((s) => s.cards);
+  const subagents = useSubagentStore((s) => s.nodes);
+  const followedCodexIds = [
+    ...new Set(
+      cards
+        .filter((card) => card.kind === "codex")
+        .flatMap((card) => [
+          card.id,
+          ...descendants(subagents, card.id).map((node) => node.thread.id),
+        ]),
+    ),
+  ];
+  useAgentCenterStore((s) => s.sharedTabsInitialized);
+  useCCStore(useShallow((s) => ({
+    loading: s.sessionLoadingMap,
+    messages: s.sessionMessagesMap,
+  })));
+  useSessionAttentionStore((s) => s.receipts);
+  useAsyncQuestionStore((s) => s.sessions);
+  useApprovalStore((s) => s.pendingApprovals);
+  usePermissionsStore((s) => s.pendingRequests);
+  useRequestUserInputStore((s) => s.pendingRequests);
+  useElicitationStore((s) => s.pendingRequests);
+  useSubagentStore((s) => s.families);
+  useCodexStore(useShallow((s) => followedCodexIds.map((id) => s.events[id] ?? EMPTY_EVENTS)));
+  useCodexStore(useShallow((s) => followedCodexIds.map((id) => s.threadStatusMap[id])));
+  useCodexStore(useShallow((s) => followedCodexIds.map((id) => s.turnTimingMap[id])));
+  useCodexStore(useShallow((s) =>
+    followedCodexIds.map((id) => s.threads.find((thread) => thread.id === id) ?? null),
+  ));
+  useCodexStore(useShallow((s) => ({
+    currentThreadId: s.currentThreadId,
+    currentTurnId: s.currentTurnId,
+  })));
+  return followedSessionRows(connection);
 }

@@ -26,7 +26,7 @@ export function normalizeSessionNames(value: unknown): Record<string, string> {
   return Object.fromEntries(
     Object.entries(value).filter(
       ([key, name]) =>
-        /^(cc|acp):.{1,256}$/.test(key) &&
+        /^(cc|acp|codex):.{1,256}$/.test(key) &&
         typeof name === "string" &&
         name.trim().length > 0 &&
         name.length <= SESSION_NAME_LIMIT,

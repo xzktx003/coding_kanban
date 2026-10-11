@@ -27,7 +27,8 @@ vi.mock("react-i18next", () => ({
         "userInput.custom": "自行填写",
         "userInput.collapse": "收起问题",
         "userInput.expand": "继续回答",
-        "userInput.enterAnswer": "请输入你的回答",
+        "userInput.freeFormPlaceholder": "在此输入",
+        "userInput.otherPlaceholder": "否，并告诉 ChatGPT 应该如何做得不同",
         "userInput.progress": `${values?.current} / ${values?.total}`,
         "userInput.failed": "提交失败，请重试",
       })[key] ?? key,
@@ -78,7 +79,7 @@ it("shows numbered options, navigates without submitting, then submits only the 
   fireEvent.click(screen.getByRole("radio", { name: /出门逛逛/ }));
   expect(api.respond).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "下一步" }));
-  fireEvent.change(screen.getByPlaceholderText("请输入你的回答"), {
+  fireEvent.change(screen.getByPlaceholderText("在此输入"), {
     target: { value: "安静一点" },
   });
   fireEvent.click(screen.getByRole("button", { name: "上一题" }));
@@ -130,7 +131,7 @@ it("supports custom answers and explicit skips; confirmed rejection retains the 
   useRequestUserInputStore.getState().addRequest(request("rpc"));
   render(<RequestUserInputItem currentThreadId="a" />);
   fireEvent.click(screen.getByRole("radio", { name: "自行填写" }));
-  fireEvent.change(screen.getByPlaceholderText("请输入你的回答"), {
+  fireEvent.change(screen.getByPlaceholderText("否，并告诉 ChatGPT 应该如何做得不同"), {
     target: { value: "散步" },
   });
   fireEvent.click(screen.getByRole("button", { name: "下一步" }));
@@ -185,7 +186,7 @@ it("masks secret text and does not put answers into browser persistent storage",
   ];
   useRequestUserInputStore.getState().addRequest(secret);
   render(<RequestUserInputItem currentThreadId="a" />);
-  const input = screen.getByPlaceholderText("请输入你的回答");
+  const input = screen.getByPlaceholderText("在此输入");
   expect(input.getAttribute("type")).toBe("password");
   fireEvent.change(input, { target: { value: "only-in-memory-example" } });
   expect(JSON.stringify(localStorage)).not.toContain("only-in-memory-example");

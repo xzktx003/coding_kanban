@@ -67,6 +67,9 @@
 .session-mode .codex-review-finding > button > span:last-child { font-family: var(--codex-code-font, monospace); font-size: 12px; color: var(--codex-muted, var(--muted-foreground)); overflow: hidden; text-overflow: ellipsis; }
 .session-mode .codex-review-finding p { margin: 4px 0; white-space: pre-wrap; }
 .session-mode .codex-review-selection-summary { padding: 8px 12px; color: var(--codex-muted, var(--muted-foreground)); font-size: 12px; }
+.session-mode .codex-diff-too-large { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--codex-surface-tertiary, var(--muted)); color: var(--codex-description, var(--muted-foreground)); font-size: var(--codex-chat-size, 13px); }
+.session-mode .codex-diff-too-large span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-mode .codex-diff-too-large button { flex: none; padding: 2px 6px; }
 .session-mode .codex-review-snapshot-entry { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-block: 8px; }
 .session-mode .codex-review-snapshot-entry > p { flex-basis: 100%; }
 .session-mode .codex-review-snapshot-provenance, .session-mode .codex-review-unmapped-findings { padding: 8px 12px; border-bottom: 1px solid var(--codex-border); font: 12px/1.65 var(--codex-chat-font,system-ui); color: var(--codex-muted); overflow-wrap: anywhere; }
@@ -99,8 +102,18 @@
   .session-mode .codex-hover-diff-copy, .session-mode .codex-hover-diff-menu { display: flex; align-items: center; justify-content: center; width: 36px; height: 44px; flex-shrink: 0; }
 }
 
+/* Native TurnDiffContent row: count, line stats, and view-changes action. */
+.session-mode .codex-turn-diff-row { display: flex; align-items: center; gap: 8px; min-height: 28px; font: 13px/19.5px var(--codex-chat-font, system-ui); color: var(--codex-muted); }
+.session-mode .codex-turn-diff-row-main { display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 28px; padding: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.session-mode .codex-turn-diff-row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-mode .codex-turn-diff-row-action { flex-shrink: 0; min-height: 28px; padding: 0 8px; border: 0; border-radius: 7px; background: transparent; color: var(--codex-text); font: inherit; cursor: pointer; }
+.session-mode .codex-turn-diff-row-action:hover, .session-mode .codex-turn-diff-row-main:hover { background: color-mix(in oklab, var(--codex-text) 6%, transparent); }
+@media (pointer: coarse) { .session-mode .codex-turn-diff-row-main, .session-mode .codex-turn-diff-row-action { min-height: 44px; } }
+
 /* Actual completed turn UT ResourceCard, with explicit preview retained for touch devices. */
-.session-mode .codex-turn-diff-summary { border: 1px solid color-mix(in oklab,var(--codex-text) 8%,transparent); border-radius: 12.5px; padding: 0; overflow: hidden; background: transparent; font-family: var(--codex-chat-font, system-ui); font-size: 13px; line-height: 19.5px; }
+.session-mode .codex-turn-diff-summary { border: 1px solid color-mix(in oklab,var(--codex-text) 8%,transparent); border-radius: 12.5px; padding: 0; overflow: visible; background: transparent; font-family: var(--codex-chat-font, system-ui); font-size: 13px; line-height: 19.5px; }
+.session-mode .codex-turn-diff-summary .codex-turn-diff-header { border-radius: 12.5px 12.5px 0 0; }
+.session-mode .codex-turn-diff-summary .session-file-changes-list { border-radius: 0 0 12.5px 12.5px; }
 .session-mode .codex-turn-diff-header { display: flex; align-items: center; gap: 10px; min-height: 64px; padding: 12px; box-sizing: border-box; }
 .session-mode .codex-turn-diff-icon { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 12.5px; background: color-mix(in oklab, var(--codex-secondary) 92%, transparent); color: color-mix(in srgb, var(--codex-text) 65%, transparent); }
 .session-mode .codex-turn-diff-icon svg { width: 24px; height: 24px; }
@@ -117,6 +130,8 @@
 .session-mode .codex-turn-diff-preview { flex-shrink: 0; width: 28px; min-height: 28px; color: var(--codex-muted); }
 .session-mode .codex-turn-diff-summary .session-file-changes-list { --file-change-row-height: 36px; border-top: 1px solid var(--codex-border); border-radius: 0; }
 .session-mode .codex-turn-diff-file-row { display: flex; align-items: center; width: 100%; gap: 8px; padding: 4px 12px; font-size: 13px; line-height: 19.5px; background: color-mix(in oklab, var(--codex-secondary) 70%, transparent); }
+.session-mode .codex-turn-diff-file-path { display: flex; min-width: 0; flex: 1; align-items: center; gap: 8px; height: 28px; padding: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.session-mode .codex-turn-diff-file-path > span:first-child { min-width: 0; flex: 1; }
 .session-mode .codex-turn-diff-file-row:hover { background: color-mix(in oklab, var(--codex-text) 6%, transparent); }
 .session-mode .codex-turn-diff-file-row > button { height: 28px; }
 .session-mode .codex-individual-file-change-row { display: flex; min-height: 21px; align-items: center; gap: 4px; font: 13px/19.5px var(--codex-chat-font,system-ui); color: color-mix(in srgb,var(--codex-muted) 80%,transparent); }
@@ -124,9 +139,30 @@
 .session-mode .codex-individual-file-change-row .codex-file-link { font-family: var(--codex-code-font,ui-monospace); font-size: 12px; }
 .session-mode .codex-individual-file-change-stats { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; line-height: 1; letter-spacing: -.025em; font-variant-numeric: tabular-nums; color: inherit; }
 .session-mode .codex-individual-file-change-stats span { color: inherit; }
-@media (hover:hover) { .session-mode .codex-turn-diff-header:is(:hover,:focus-within) .codex-turn-diff-subtitle { display: none; } .session-mode .codex-turn-diff-header:is(:hover,:focus-within) .codex-turn-diff-hover-subtitle { display: inline-flex; } .session-mode .codex-individual-file-change-row:hover:not(:has(.codex-file-link:hover)) .codex-individual-file-change-stats [data-kind="add"] { color: var(--codex-added); } .session-mode .codex-individual-file-change-row:hover:not(:has(.codex-file-link:hover)) .codex-individual-file-change-stats [data-kind="remove"] { color: var(--codex-removed); } }
+@media (hover:hover) { .session-mode .codex-turn-diff-header[data-review-available="true"]:is(:hover,:focus-within) .codex-turn-diff-subtitle { display: none; } .session-mode .codex-turn-diff-header[data-review-available="true"]:is(:hover,:focus-within) .codex-turn-diff-hover-subtitle { display: inline-flex; } .session-mode .codex-individual-file-change-row:hover:not(:has(.codex-file-link:hover)) .codex-individual-file-change-stats [data-kind="add"] { color: var(--codex-added); } .session-mode .codex-individual-file-change-row:hover:not(:has(.codex-file-link:hover)) .codex-individual-file-change-stats [data-kind="remove"] { color: var(--codex-removed); } }
 @media(max-width:767px) { .session-mode .codex-turn-diff-header { padding-block: 10px; } .session-mode .codex-turn-diff-title { min-height: 44px; justify-content: center; } .session-mode .codex-turn-diff-header .codex-turn-diff-preview, .session-mode .codex-turn-diff-actions button { min-height: 44px; } .session-mode .codex-turn-diff-header .codex-turn-diff-preview { width: 32px; } .session-mode .codex-turn-diff-summary .session-file-changes-list { --file-change-row-height: 44px; } }
+
+/* Plugin YC (sites-end-resource): rounded border card, filename + counts, copy, tertiary diff body. */
+.session-mode .codex-chat-file-diff { display: flex; flex-direction: column; margin-top: 6px; overflow: hidden; border: 1px solid var(--codex-border); border-radius: 8px; background: var(--codex-surface); }
+.session-mode .codex-chat-file-diff-header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 10px; border-bottom: 1px solid var(--codex-border); background: color-mix(in srgb,var(--codex-secondary) 60%,transparent); color: color-mix(in srgb,var(--codex-muted) 80%,transparent); font: 12px/18px var(--codex-chat-font,system-ui); }
+.session-mode .codex-chat-file-diff-title { display: flex; min-width: 0; flex: 1; align-items: center; gap: 8px; }
+.session-mode .codex-chat-file-diff-path { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+.session-mode .codex-chat-file-diff-path:hover:not(:disabled) { text-decoration: underline; }
+.session-mode .codex-chat-file-diff-path:disabled { cursor: default; }
+.session-mode .codex-chat-file-diff-stats { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; letter-spacing: -.025em; }
+.session-mode .codex-chat-file-diff-stats [data-kind="add"] { color: var(--codex-added); }
+.session-mode .codex-chat-file-diff-stats [data-kind="remove"] { color: var(--codex-removed); }
+.session-mode .codex-chat-file-diff-copy { display: flex; width: 20px; height: 20px; flex-shrink: 0; align-items: center; justify-content: center; color: inherit; cursor: pointer; }
+.session-mode .codex-chat-file-diff-body { background: var(--codex-secondary); }
+.session-mode .codex-chat-file-diff-body .codex-native-diff > div:last-child { max-height: 240px; }
+.session-mode .codex-chat-file-diff-body .codex-diff-line[data-kind="remove"] { background: color-mix(in srgb, var(--codex-removed) 22%, var(--codex-surface)); }
+.session-mode .codex-chat-file-diff-body .codex-diff-line[data-kind="add"] { background: color-mix(in srgb, var(--codex-added) 18%, var(--codex-surface)); }
+.session-mode .codex-chat-file-diff-body .codex-diff-number { min-width: 4ch; padding-inline: 8px; color: color-mix(in srgb, var(--codex-muted) 75%, transparent); font-variant-numeric: tabular-nums; }
+@media (pointer: coarse) { .session-mode .codex-chat-file-diff-copy { width: 36px; height: 44px; } }
 
 .session-mode .codex-individual-file-disclosure { display: flex; opacity: 0; width: 16px; height: 16px; min-width: 16px; min-height: 16px; padding: 0; color: inherit; }
 .session-mode .codex-individual-file-change-row:is(:hover,:focus-within) .codex-individual-file-disclosure { opacity: 1; }
 @media(hover:none) { .session-mode .codex-individual-file-disclosure { opacity: 1; min-width: 44px; min-height: 44px; } }
+
+.session-mode div.codex-turn-diff-title { cursor: default; }
+.session-mode .codex-turn-diff-file-path { min-width: 0; flex: 1; }

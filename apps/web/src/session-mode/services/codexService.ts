@@ -600,8 +600,7 @@ export const codexService = {
     const restoringEvicted = needsCodexTranscriptRestore(threadId);
     const cached =
       !restoringEvicted &&
-      (useCodexStore.getState().historyLoadedMap[threadId] ||
-        (useCodexStore.getState().events[threadId]?.length ?? 0) > 0);
+      Boolean(useCodexStore.getState().historyLoadedMap[threadId]);
     useCodexStore.setState((state) =>
       state.historyLoadingMap[threadId] === !cached &&
       !state.historyErrorMap[threadId]
@@ -998,6 +997,7 @@ export const codexService = {
       | "approvalsReviewer"
       | "sandboxPolicy"
       | "collaborationMode"
+      | "personality"
     >,
   ) {
     const set = useCodexStore.setState;
@@ -1019,6 +1019,7 @@ export const codexService = {
                 "approvalsReviewer",
                 "sandboxPolicy",
                 "collaborationMode",
+                "personality",
               ]
                 .filter((key) =>
                   Object.prototype.hasOwnProperty.call(configOverride, key),
@@ -1041,6 +1042,7 @@ export const codexService = {
         sandboxPolicy,
         webSearchRequest,
         collaborationMode,
+        personality,
       } = getThreadModelSettings(threadId);
 
       const response = await turnStart({
@@ -1059,6 +1061,7 @@ export const codexService = {
           : {}),
         model: model || null,
         effort: reasoningEffort ?? null,
+        ...(personality ? { personality } : {}),
         // Mode is a turn/start field, not a thread/start config key. Explicit
         // default also lets an existing planned thread leave planning mode.
         ...(model

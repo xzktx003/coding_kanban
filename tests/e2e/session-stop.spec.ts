@@ -133,7 +133,7 @@ for (const kind of ["codex", "cc", "acp"]) {
       },
       { kind, modules },
     );
-    const stop = page.getByRole("button", { name: "停止生成", exact: true });
+    const stop = page.getByRole("button", { name: "停止", exact: true });
     await expect(stop).toBeEnabled();
     const editor =
       kind === "codex"
@@ -211,7 +211,7 @@ for (const kind of ["codex", "cc", "acp"]) {
       { kind, modules },
     );
     await expect(
-      page.getByRole("button", { name: "发送消息", exact: true }),
+      page.getByRole("button", { name: "发送", exact: true }),
     ).toBeVisible();
     if (kind === "codex") await expect(editor).toContainText("保留草稿");
     else await expect(editor).toHaveValue("保留草稿");
@@ -220,7 +220,7 @@ for (const kind of ["codex", "cc", "acp"]) {
       await editor.press("Backspace");
     } else await editor.fill("  \n");
     await expect(
-      page.getByRole("button", { name: "发送消息", exact: true }),
+      page.getByRole("button", { name: "发送", exact: true }),
     ).toBeDisabled();
     expect(calls[0]).toEqual(
       kind === "codex"

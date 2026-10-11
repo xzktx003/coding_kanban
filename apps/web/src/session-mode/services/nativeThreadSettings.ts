@@ -15,5 +15,6 @@ export function nativeThreadSettings(value: unknown, fallback?: unknown): Settin
     ...(native.sandboxPolicy ? { sandboxPolicy: native.sandboxPolicy as Settings["sandboxPolicy"] } : typeof native.sandbox === "object" && native.sandbox ? { sandboxPolicy: native.sandbox as Settings["sandboxPolicy"] } : typeof native.sandbox === "string" ? { sandbox: native.sandbox as Settings["sandbox"] } : {}),
     ...(typeof native.webSearchRequest === "boolean" ? { webSearchRequest: native.webSearchRequest } : {}),
     ...(native.collaborationMode ? { collaborationMode: native.collaborationMode as Settings["collaborationMode"] } : {}),
+    ...(native.personality === "friendly" || native.personality === "pragmatic" || native.personality === "none" ? { personality: native.personality } : {}),
   };
 }

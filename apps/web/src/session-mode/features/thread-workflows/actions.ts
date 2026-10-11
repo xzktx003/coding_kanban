@@ -1,9 +1,15 @@
 import { create } from "zustand";
-export type ThreadWorkflowAction = "search" | "users" | "export" | "copyLink";
+export type ThreadWorkflowAction =
+  | "search"
+  | "users"
+  | "export"
+  | "copyMarkdown"
+  | "copyLink"
+  | "copyDeeplink";
 export interface WorkflowActionRequest {
   id: number;
   threadId: string;
-  action: "export" | "copyLink";
+  action: "export" | "copyMarkdown" | "copyLink" | "copyDeeplink";
 }
 interface WorkflowActions {
   panels: Record<string, "search" | "users">;

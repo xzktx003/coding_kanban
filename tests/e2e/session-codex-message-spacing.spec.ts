@@ -802,7 +802,7 @@ for (const width of [1440, 390])
         await captureReadiness("after-actual-foreground");
         if (width !== 390) await reply.hover();
         await captureReadiness("after-hover-before-visible-wait");
-        for (const name of ["复制消息", "从此轮创建分支", "引用", "侧边追问"])
+        for (const name of ["复制回复", "从这里创建聊天分支", "引用", "侧边追问"])
           await expect(
             reply.getByRole("button", { name, exact: true }),
           ).toBeVisible();
@@ -834,7 +834,7 @@ for (const width of [1440, 390])
         const activate = async (button: ReturnType<typeof reply.getByRole>) =>
           width === 390 ? button.tap() : button.click();
         await activate(
-          reply.getByRole("button", { name: "复制消息", exact: true }),
+          reply.getByRole("button", { name: "复制回复", exact: true }),
         );
         await expect(
           reply.getByRole("button", { name: "已复制", exact: true }),
@@ -843,13 +843,13 @@ for (const width of [1440, 390])
           // Native keyboard navigation must reveal the same owner actions after hover ends.
           await page.keyboard.press("Tab");
           await expect(
-            reply.getByRole("button", { name: "从此轮创建分支", exact: true }),
+            reply.getByRole("button", { name: "从这里创建聊天分支", exact: true }),
           ).toBeFocused();
           await page.mouse.move(0, 0);
           await expect
             .poll(() => reply.evaluate((element) => element.matches(":hover")))
             .toBe(false);
-          for (const name of ["已复制", "从此轮创建分支", "引用", "侧边追问"])
+          for (const name of ["已复制", "从这里创建聊天分支", "引用", "侧边追问"])
             await expect(
               reply.getByRole("button", { name, exact: true }),
             ).toBeVisible();
@@ -909,7 +909,7 @@ for (const width of [1440, 390])
           });
         await expect.poll(async () => (await state()).aQuotes.length).toBe(2);
         await activate(
-          reply.getByRole("button", { name: "从此轮创建分支", exact: true }),
+          reply.getByRole("button", { name: "从这里创建聊天分支", exact: true }),
         );
         await expect.poll(() => forks.length).toBe(1);
         expect(forks[0]).toMatchObject({

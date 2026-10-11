@@ -613,7 +613,7 @@ it("filters legacy hidden payloads from observed HMR caches without rewriting vi
               cwd: "/repo",
               source: "agent",
               status: "completed",
-              aggregatedOutput: "final output",
+              aggregatedOutput: "final output ".repeat(20),
             },
           },
         } as any,
@@ -645,7 +645,7 @@ it("filters legacy hidden payloads from observed HMR caches without rewriting vi
   expect(JSON.stringify(events)).not.toContain("hidden streamed output");
   expect(JSON.stringify(events)).not.toContain("hidden patch output");
   expect(JSON.stringify(events)).not.toContain("hidden raw");
-  expect(JSON.stringify(events)).not.toContain("final output");
+  expect(JSON.stringify(events)).not.toContain("final output final output");
   // Re-running retention on an already projected HMR snapshot is a no-op.
   let updates = 0;
   const unsubscribe = useCodexStore.subscribe(() => {

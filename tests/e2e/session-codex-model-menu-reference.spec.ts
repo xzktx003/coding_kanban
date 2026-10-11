@@ -272,7 +272,7 @@ for (const theme of ["dark", "light"])
           original.locator("[class*='_Track_xwb5v_']"),
         ).toBeVisible();
       else await expect(original.getByRole("menuitemradio")).toHaveCount(2);
-      await page.getByRole("button", { name: /^Agent 与模型：/ }).click();
+      await page.getByRole("button", { name: /^模型：/ }).click();
       const product = page.locator(".session-native-model-menu");
       await expect(
         product.getByRole("slider", { name: "推理强度" }),

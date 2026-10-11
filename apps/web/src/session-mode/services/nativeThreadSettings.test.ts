@@ -4,4 +4,5 @@ it("preserves absent native settings and distinguishes explicit null from missin
   expect(nativeThreadSettings({ model:"owner", reasoningEffort:undefined, serviceTier:null }, { reasoningEffort:"high",serviceTier:"fast",approvalPolicy:"on-request" })).toMatchObject({model:"owner",reasoningEffort:"high",serviceTier:null,approvalPolicy:"on-request"});
   expect(nativeThreadSettings({ model:"owner", effort:null,sandbox:{type:"readOnly",networkAccess:false} })).toMatchObject({reasoningEffort:null,sandboxPolicy:{type:"readOnly",networkAccess:false}});
   expect(nativeThreadSettings({threadId:"foreign",input:["no"],modelProvider:""})).toEqual({});
+  expect(nativeThreadSettings({ model: "owner", personality: "pragmatic" }).personality).toBe("pragmatic");
 });

@@ -40,6 +40,37 @@ it("recovers when a reconnect snapshot proves the runtime sequence restarted", (
     window.removeEventListener("session-runtime-restarted", restart);
   }
 });
+it("a runtime restart repairs subscribers without closing its fresh stream a second time", () => {
+  vi.useFakeTimers();
+  const instances: any[] = [];
+  class FakeSource {
+    onmessage: any;
+    close = vi.fn();
+    constructor(public url: string) {
+      instances.push(this);
+    }
+  }
+  vi.stubGlobal("EventSource", FakeSource);
+  const receive = vi.fn(),
+    resync = vi.fn();
+  const stop = openEventStream({ onEvent: receive, onResync: resync });
+  const emit = (source: any, seq: number, event = "codex:notification") =>
+    source.onmessage({ data: JSON.stringify({ seq, event, payload: {} }) });
+  try {
+    emit(instances[0], 900);
+    emit(instances[0], 2, "codex/pending-requests-snapshot");
+    expect(instances).toHaveLength(2);
+    vi.advanceTimersByTime(300);
+    expect(resync).toHaveBeenCalledOnce();
+    expect(instances).toHaveLength(2);
+    expect(instances[1].close).not.toHaveBeenCalled();
+    emit(instances[1], 3);
+    expect(receive.mock.calls.at(-1)?.[0].seq).toBe(3);
+  } finally {
+    stop();
+    vi.useRealTimers();
+  }
+});
 it("shares one browser connection across agent subscribers and releases it only after all unsubscribe", () => {
   const instances: FakeSource[] = [];
   class FakeSource {

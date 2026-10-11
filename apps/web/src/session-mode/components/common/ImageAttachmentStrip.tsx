@@ -87,9 +87,11 @@ export function ImageAttachmentStrip({
                   {selected.status === "error" && (
                     <button
                       type="button"
+                      aria-label="再次尝试上传"
+                      title="再次尝试上传"
                       onClick={() => void draft.retry(selected.id)}
                     >
-                      重试上传
+                      重试
                     </button>
                   )}
                   <button

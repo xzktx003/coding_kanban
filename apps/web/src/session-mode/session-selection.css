@@ -1,11 +1,11 @@
 /* Selection only paints the frame: existing headers and tab fills remain intact. */
 .session-mode.light {
-  --session-selection-border: #3b82f6;
-  --session-selection-underline: #94713d;
+  --session-selection-border: #1c64c8;
+  --session-selection-underline: #1c64c8;
 }
 .session-mode.dark {
-  --session-selection-border: #60a5fa;
-  --session-selection-underline: #d6b77a;
+  --session-selection-border: #63a8f8;
+  --session-selection-underline: #63a8f8;
 }
 
 .session-mode .session-window-group[data-group-active="true"],

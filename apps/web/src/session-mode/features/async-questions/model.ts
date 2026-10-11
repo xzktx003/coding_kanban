@@ -233,16 +233,34 @@ export function normalizeQuestionEvents(
   const key = (thread: unknown, turn: unknown, item: unknown) =>
     JSON.stringify([thread, turn, item]);
   const structured = new Map<string, ServerNotification>();
-  for (const e of events) {
+  const itemIndices = new Map<string, number>();
+  for (const [index, e] of events.entries()) {
+    if (e.method === "item/started" || e.method === "item/completed") {
+      const id = key(e.params.threadId, e.params.turnId, e.params.item.id);
+      if (!itemIndices.has(id)) itemIndices.set(id, index);
+    }
     if (e.method === "item/completed" && readQuestions(e.params.item).length)
       structured.set(
         key(e.params.threadId, e.params.turnId, e.params.item.id),
         e,
       );
   }
-  const extras: ServerNotification[] = [];
-  for (const e of events)
+  const extras = new Map<number, ServerNotification[]>();
+  for (const [boundary, e] of events.entries())
     if (e.method === "turn/completed") {
+      // Native turn.items order is authoritative. Missing historical questions
+      // belong before the next retained item, never at the transcript tail.
+      let anchor = boundary;
+      const anchors = new Map<string, number>();
+      for (let i = e.params.turn.items.length - 1; i >= 0; i--) {
+        const item = e.params.turn.items[i];
+        anchor = Math.min(
+          anchor,
+          itemIndices.get(key(e.params.threadId, e.params.turn.id, item.id)) ??
+            anchor,
+        );
+        anchors.set(item.id, anchor);
+      }
       for (const item of e.params.turn.items)
         if (readQuestions(item).length) {
           const id = key(e.params.threadId, e.params.turn.id, item.id);
@@ -257,24 +275,29 @@ export function normalizeQuestionEvents(
               },
             };
             structured.set(id, completed);
-            extras.push(completed);
+            const index = anchors.get(item.id) ?? boundary;
+            const additions = extras.get(index) ?? [];
+            additions.push(completed);
+            extras.set(index, additions);
           }
         }
     }
   if (!structured.size) return events;
   const seen = new Set<string>();
-  return [...events, ...extras].filter((e) => {
-    if (e.method === "item/agentMessage/delta")
-      return !structured.has(
-        key(e.params.threadId, e.params.turnId, e.params.itemId),
-      );
-    if (e.method === "item/completed") {
-      const id = key(e.params.threadId, e.params.turnId, e.params.item.id);
-      if (structured.has(id)) {
-        if (seen.has(id)) return false;
-        seen.add(id);
+  return events
+    .flatMap((e, index) => [...(extras.get(index) ?? []), e])
+    .filter((e) => {
+      if (e.method === "item/agentMessage/delta")
+        return !structured.has(
+          key(e.params.threadId, e.params.turnId, e.params.itemId),
+        );
+      if (e.method === "item/completed") {
+        const id = key(e.params.threadId, e.params.turnId, e.params.item.id);
+        if (structured.has(id)) {
+          if (seen.has(id)) return false;
+          seen.add(id);
+        }
       }
-    }
-    return true;
-  });
+      return true;
+    });
 }

@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type {
@@ -71,7 +72,7 @@ export const useSavedPatchStore = create<{
           return Promise.resolve();
         const request = structuredClone({
           ...input,
-          requestId: crypto.randomUUID(),
+          requestId: randomUUID(),
         });
         set((state) => ({
           records: {

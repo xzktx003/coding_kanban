@@ -229,7 +229,7 @@ for (const theme of ["dark", "light"])
       original.find((button) => button.label === "编辑消息")!.svg,
     );
     await edit.click();
-    const product = page.getByRole("textbox", { name: "编辑上一条用户消息" });
+    const product = page.getByRole("textbox", { name: "编辑消息" });
     await expect(product).toBeVisible();
     const measured = await product.evaluate((element) => ({
       font: getComputedStyle(element).fontSize,

@@ -65,6 +65,7 @@ export function pickBrowserFiles(
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
+    input.dataset.filePicker = "browser";
     input.multiple = Boolean(options.multiple);
     input.accept =
       options.accept ??

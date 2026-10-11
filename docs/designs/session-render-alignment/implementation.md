@@ -1,8 +1,18 @@
 # Codex 原生呈现实施与验收进度
 
+## 2026-10-11：本阶段范围与严格验收
+
+用户确认暂停云任务相关开发，将云环境、上传、委派和远端任务执行的完整复刻放到下一阶段。本阶段继续完成其余 Codex 编辑器与聊天功能；已有云入口和接口保留，不以暂停开发为由禁用功能或停止服务。MCP 认证属于工具连接流程，继续按原包核对，不并入云任务延期。
+
+本阶段验收以当前源码为准：新增或修复行为先红后绿，原包组件直接运行对照；桌面／窄屏、深／浅主题记录截图、几何、键盘、焦点及异步状态。HTTP／EventSource、恢复、审批、草稿与内存保护保留原严格门槛。单测、注册审计和受控 RPC 不替代真实宿主或外部账号验收；历史批次不相加成一次全绿。不能闭合的外部能力和真实性能差异必须单独记录。
+
+恢复开发时，MCP 认证代码已写入且有局部单测，但浏览器原生 SSE 尚未通过、加载按钮未完成原包对照，不计作已验收。后续结果追加专门记录。
+
 状态：进行中，不是整项完成声明。完整目标仍为 [plan.md](plan.md) 的 P0–P4；最新范围是 Codex 专用复刻，保留公共输入区分离、文件悬浮 Diff、多项目/标签/自由分屏、持久草稿/附件及所有现有核心能力，Claude 不换渲染器。
 
-正式运行层状态：2026-10-10 15:17（+08）已按用户指令启用新版 Rust，PID79218，运行文件与当前构建一致，`codexAccountMutationsV1` 已声明。文中此前“未激活/旧PID540655”的记录是历史阶段；新增能力的正式接口验收见文末。云任务原入口/API保留，没有新增禁用或拒绝策略；远端可用性限制仍按实际响应呈现。
+当前正式运行层只读核对（2026-10-11）：`pnpm session:status` 就绪，PID2712539，运行文件与新磁盘构建不同。health200，仅声明 codexOwnership、codexAccountMutationsV1、acpImages；新 MCP 能力尚未安全激活，本轮没有重启或停止正式 Agent。下列旧 Rust 启用记录仅是历史快照。
+
+历史正式运行层状态：2026-10-10 15:17（+08）已按用户指令启用新版 Rust，PID79218，运行文件与当前构建一致，`codexAccountMutationsV1` 已声明。文中此前“未激活/旧PID540655”的记录是历史阶段；新增能力的正式接口验收见文末。云任务原入口/API保留，没有新增禁用或拒绝策略；远端可用性限制仍按实际响应呈现。
 
 ## 2026-10-10 10:36：请求与插件修正后的阶段门禁
 
@@ -304,3 +314,57 @@ WebKit原in-flight刷新诊断中，3条Fetch/EventSource网络diagnostic发生�
 实际备份及启用/只读/历史/状态回执位于被忽略的 `.dev-runtime/session-render-alignment/runtime-activation/`。正式启用不等于云端任务成功、原生搜索支持、实体手机或所有账户动作已验收；既有WebKit500ms性能和外部能力边界继续保留。
 
 正式LAN无API夹具的Chromium1440/390两页只读冒烟完成，分别6.35s/3.95s：health均200并匹配新instance/账号capability；真实关注标签、输入区和云任务入口可见，独立新context没有选中目标，显示明确“开始一个会话”空态，历史加载提示0。console warning/error和pageerror均0；每页各保留一条health ERR_ABORTED原始记录，独立健康读取成功、页面正常，不过滤或重试挑绿。没有点击执行云任务、账号操作、消息、审批或接管。两张整页截图已由主线程实际查看，browser/context均关闭；此冒烟不冒充选中会话完整动态交互或实体手机测试。结果在 `.dev-runtime/session-render-alignment/formal-readonly-smoke/`。
+
+## 反馈表单组件追加（2026-10-11）
+
+原包 `FeedbackSubmissionDialog` 的六分类／日志／校验／pending 按真实 Provider 运行并与产品逐状态比较，补齐表单与 owner 回执隔离。生产 API 仍使用原 feedback/upload；表单关闭和焦点保留本项目 Back／输入目标规则。真实宿主 `startFeedbackUpload` 的独立报告／持久通知、预检和诊断附件仍未移植，不把一般表单 callback 的 await 验收当成完整原宿主工作流。详细实现、截图与测试边界见 [反馈表单进度](../../session-codex-feedback.md)。完整目标继续进行。
+
+## 反馈上传编排追加（2026-10-11）
+
+默认反馈已移植原 `startFeedbackUpload` 的独立任务／报告语义，六状态按原错误分类，关闭继续、通知重开、明确失败重试、实际 ID 复制及外部 GitHub 链接均加入原包浏览器对照。通用表单等待 callback 的夹具与实际菜单交接分别验证。通知实例 guard 修复重开后误删除报告，复制提示不再吞掉首次 Escape；账号／连接／配对身份变化移除旧 UI 而不复活迟到回执。原通知视觉、预检和诊断附件仍未闭合，不将本批报告完成扩大成全部插件完成。证据及限制见 [反馈进度](../../session-codex-feedback.md)。
+
+## Codex 普通通知追加（2026-10-11）
+
+反馈上传持久通知和复制错误已接入原生卡片呈现层。参考直接运行未修改原包 `XK` Provider／`GAt` 服务／`rxr` 卡片，修复右上角普通 Sonner 的位置与尺寸差异；按原秒级 duration、同 ID 替换和 `onRemove` 语义保护上传实例。截图、行为门禁和特殊通知／动态 boundary 的未完成范围见 [Codex 通知呈现](../../session-codex-notifications.md)。完整复刻目标继续进行。
+
+## 自定义通知与正文复制错误追加（2026-10-11）
+
+原 `GAt` custom 生命周期、用户滑出与程序关闭区别已补齐；原 RPC／富文本 API 的复制拒绝已在回复、代码、表格接入统一原生错误卡片。浏览器红灯证明产品多出的正文异常行，修复后严格对照卡片与 alert 数量，并保留真实 LAN HTTP copy event 回归。详细证据及真实 MCP 认证尚未接入的边界见 [通知呈现](../../session-codex-notifications.md)。完整目标继续进行。
+
+## 2026-10-11：云延期后的非云阶段验收
+
+MCP 启动/运行认证与账号工作区隔离已接入，具体协议、公开配置投影、原卡片像素范围及外部条件见 [MCP 认证](../../session-codex-mcp-auth.md)。原复制成功 SVG/浮层和通知边界已补齐，用户规定的后台批量停止名单确认、轮次保护已修复。聊天输出仍传输前裁剪，不把短命令结果放回正文；MCP 参数摘要排除凭证并尊重调用方更小预算。低序号快照后的重复重连已修复，保留修复通知和原回复时限。
+
+阶段记录以最终独立批次为准：53 项核心恢复/发送/审批/提问/子 Agent/正文与网络内存浏览器整组通过；8 个 MCP 用例（含真实 TS 公共 config handler）、2 个边界、4 个原用户复制 profile、2 个真实 HTTP 复制以及 13 个子 Agent 用例的组合批次 29 项通过。两组有重叠，不相加成 82 项不同场景。最终构建及单测将按日志另记；30 分钟自然 GC 与 renderer RSS 仍独立验收，此前红灯保留。
+
+正式服务只读复核：当前保留旧运行服务，health 未声明 codexMcpAuthV1/codexMcpOAuthThreadId，尚未安全激活新能力。MCP 目录没有可用于重连测试的 OAuth 服务；Codex Apps 目录现已识别 GitHub，未识别 Slack。没有主动登录、创建用户连接、上传真实反馈或停止真实 Agent。反馈账号/工作区策略、诊断文档、实验开关与真实原宿主能力继续单列；云任务延期不代表这些非云项自动延期或已完成。
+
+高级反馈需按当前 VS Code 宿主能力重新分界：该固定 extension/out/extension.js 的 feedback-desktop-log-archive 实际返回 archiveId:null/filePaths:[]，没有 performance-trace 或 internalSlackMessage 宿主实现；不能仅凭共享 Webview 桌面代码就为本项目新增真实进程档案采集并宣称是该 VS Code 原功能。其 createTemporaryFile/releaseTemporaryFile 存在，文档捕获是否可达仍须核对 Artifact Session 能力。缺少真实账号/宿主证据的条目不标完成。
+
+本阶段最新构建与单测：`/tmp/codex-noncloud-delivery-check.log` 的 shared／TS runtime／server／web 类型与生产构建全部通过；`/tmp/codex-noncloud-delivery-tests.log` 的 Session 415 文件／1824 项、终端 534、后端 806（另 1 个既有跳过）、TS runtime 186、脚本 120 全部通过。最新 30 分钟自然长测仍失败：renderer RSS 低点增长 170.6445 MiB，大于原 128 MiB 门槛；堆低点增长 5.0031 MiB，不能据堆稳定宣布物理内存达标。完整 JSON 和时序边界见会话内存约定。真实 GitHub 公开 PR 只读预览已取得标题和 merged 状态，正式实验开关、OAuth 服务、Slack 连接以及安全启用新运行接口仍另行验收；不把这些结果标为全项目完成。
+
+默认 rich copy 的补充审计发现实际差异：原包 UserMessage 的默认分支复制渲染正文，先前四 profile 明确强制了 source plain 分支，不能覆盖默认行为。现在用户与助手共享清理后的 DOM HTML，用户取渲染纯文本，助手仍取规范化源码纯文本；原列表、代码、表格、隐藏控制、引用和公式源按公开 copy 规则处理。助手使用原默认 CopyButton 2000ms，用户保持 1500ms；单行 bracket 公式按原 inline 解析，已排版公式按原生 LaTeX 规则规范化，加载占位与已排版的复制时机分别核对。相关新门禁及长测结果单独追加，不覆盖此前的通过快照。
+
+2026-10-11 复制最终专项：`/tmp/codex-message-rich-closed.log` 单批 11 项通过；四个原用户 glyph／tooltip／plain-source profile、四个默认 rich payload（prose、代码／表格、单行／多行公式／任务）与一个原助手 CopyButton，以及两个真实 HTTP copy-event 场景。用户默认纯文本取渲染内容，助手纯文本保留规范化源码；HTML 完整与原包实际输出比较。公式先等待原组件真正 typeset，加载占位保留原始文本与已排版规范化输出分开，之前提前复制占位和参考宿主缺 selector 的失败日志保留，不伪称产品原样输入必须不变。助手两秒 timer 同时释放两个 pending write 后比较，避免先点的参考页在另一页准备期间已过期；用户保持 1500ms。更晚的同邮箱反馈工作区隔离另有 1 项浏览器通过，不与该 11 项相加成一次组合通过。
+
+2026-10-11 最新源码追加：用户 Markdown 图片语法按原生链接呈现，真实附件维持放大／下载；批量停止确认期间范围一旦变化，即使身份值随后恢复也永久失效。两项均先红后绿。最新 `pnpm check` 全部通过（`/tmp/codex-noncloud-image-scope-check.log`），`pnpm test` Session418文件／1846项、终端534、后端806（1既有跳过）、TS runtime187、脚本120通过（`/tmp/codex-noncloud-image-scope-tests.log`）。原包通知／MCP／复制／反馈及子 Agent 最新合并整组50/50通过（`/tmp/codex-noncloud-image-scope-ui.log`），保留之前47/48的失败，不与早期专项累加。Chromium1500条缓存历史严格用例444.1ms／500ms通过，阅读位置、草稿、后台30次更新17.9ms和211个挂载元素的原断言通过；WebKit同场景仍失败，可信真实点击测到916ms（`/tmp/codex-current-perf-stages.log`），没有放宽门槛。忽略目录中的布局／虚拟范围／字体／提示音实验未写入产品。
+
+正式 HTTPS `https://10.30.0.24:8484/?mode=session` 无API夹具、独立新context，1440／390两页只读加载均health200、输入区可见、无页面或console error、执行请求0；每页两条console warning保留，不能声称零warning。截图已实际查看，仅为空态／当前关注栏加载，不替代选中真实会话完整操作。证据 `.dev-runtime/codex-noncloud-formal-readonly-current/`。GitHub公开PR只读结果、真实OAuth／Slack条件、原宿主策略以及正式运行层安全启用仍按前文单列；最新长测结果继续独立记录。
+
+最终标准长测仍红：30.1分钟／859样本，RSS低点增长177.75MiB＞128MiB，堆增长6.7994MiB，完整记录见会话内存约定；更早170.6445MiB同样保留。最新未变换产品的WebKit原用例922ms＞500ms（`/tmp/codex-noncloud-final-webkit-performance.log`）；可信点击阶段测量916ms是另一次诊断，不冒充原用例。正式两条warning已限定为Lexical对contenteditable所在flex元素的建议，不属于零warning结果。完整非云阶段仍进行中。
+
+2026-10-11 归因检查补充：音频三种实现的15分钟对照没有支持替换产品提示音；20分钟原生分配快照不能解释标准RSS失败，详见会话内存约定。WebKit仅在忽略目录加入transcript layout/style containment的诊断测到1018ms，未达500ms，也未写入产品。没有用删样式／换观察方式／刷新来挑绿。反馈原包预检已核对到明确policy/configuration/unavailable分支，但公共CLI缺少工作区结构和beta_settings权威数据，完整预检不计完成。非云阶段严格验收继续保留未闭合项。
+
+2026-10-11 WebKit功能补验定位两类差异：真实公共config handler用例的跨端口JSON预检被测试夹具404拒绝，仅补齐该固定路径的OPTIONS204后，Chromium／WebKit各单项通过；生产网关未改。反馈圆角漏了原包@supports分支，补齐后WebKit原包交接与两尺寸×两主题五项通过。WebKit对interactive-widget的浏览器错误仍保留，子Agent的零console-error断言未过滤；未带原包参考地址的初次48项检查发生30跳过，明确不作为完整验收。修复圆角发生在第二批WebKit运行期间，该批按源码边界记录，不当成最终冻结整组。最新构建又发现绘图订阅清理返回boolean的类型错误，仅调整为void并保留现有绘图实现，6项专项先红后绿。新的合并构建／单测／浏览器正在复验，不能沿用早期通过快照声称最新源码全绿。
+
+最新合并构建／单测（绘图清理和反馈圆角冻结后）：`/tmp/codex-noncloud-corner-dispose-final-check.log`退出0；`/tmp/codex-noncloud-corner-dispose-final-tests.log`退出0，Session419文件／1862项、终端534、后端806加1既有跳过、运行层187、脚本120通过。其后用户消息hover纯CSS修复单独两引擎各1项通过，测试夹具支持导航前预置HTTP历史，最小生产构建另行核对。
+
+这批不能宣称UI整组全绿：Chromium新50项为49通过／1失败（`/tmp/codex-noncloud-corner-final-chromium.log`，后台反馈报告在原报告关闭后未出现），随后同场景三次带状态捕获通过，但未证明间歇失败根因。带原包参考的WebKit50项为11通过／39失败（`/tmp/codex-noncloud-current-webkit-ui-with-reference.log`）；圆角在此批过程中修正，有源码混合边界，后续5项专项通过不替代整组。还包含浏览器interactive-widget错误、请求访问检查错误及隐藏用户操作栏；操作栏随后已独立先红后绿，其余失败保留。
+
+React专用console.timeStamp过滤的30分钟因果诊断仍失败：860样本，RSS低点增长161.9492MiB＞128MiB，堆增长5.8805MiB；没有支持将该实验写入产品，普通API和现有React measure保护保持。没有强制GC／刷新／停止Agent，详细证据见会话内存约定。缓存历史估高的隔离实验测到518ms，加入源行数提示测到555ms，仍超过500ms，均未写入产品，原922ms失败继续保留。
+
+2026-10-11 最新冻结Chromium UI：51项通过，日志 `/tmp/codex-noncloud-final-observer-ui.log`；之前49/50与50/51失败仍保留。公共config响应观察器处理实际取消请求，所有非取消读取错误仍断言为空，所有成功响应必须无私有配置。WebKit消息复制导航前预置HTTP历史的五项诊断通过，原plain／HTML断言不变，但不替代原刷新场景完整验收。
+
+用户确认“使用当前已经配置的真实连接”后重新只读核对：原包独立app-server、独立SESSION_DATA_HOME，8个MCP服务，codex_apps为bearerToken，GitHub91个工具；当前无OAuth登录型MCP、无Slack连接。现有GitHub连接账户读取成功，不新增连接、不退出／重连既有服务、不发送外部消息、不启动Agent轮次；库存仅保存脱敏名称、状态和数量（`.dev-runtime/current-real-connections/inventory.json`）。OAuth／Slack仍按缺少现有验收条件记录，不算通过。
+
+真实GitHub产品链路复验通过：当前既有CLI连接、固定原VSIX app-server、独立应用数据目录，经应用ReadOnlyMcpPreviewService读取 `https://github.com/openai/codex/pull/44344`，标题“Open tasks with Right from the agents overview”、状态merged；`/tmp/codex-current-real-github-preview.log`。无Agent轮次及外部写入。最新未变换产品的WebKit原性能用例971ms＞500ms（`/tmp/codex-noncloud-latest-webkit-performance.log`），先前922ms仍保留；两项严格性能门槛、原宿主策略／真实OAuth和Slack／正式新运行层安全启用仍未闭合，非云阶段不计完整验收完成。

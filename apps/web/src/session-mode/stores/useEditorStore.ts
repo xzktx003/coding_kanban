@@ -29,6 +29,8 @@ interface EditorStore {
   setSelectedFilePath: (path: string | null) => void;
   hasConfirmedGitRevert: boolean;
   setHasConfirmedGitRevert: (value: boolean) => void;
+  gitBlame: boolean;
+  setGitBlame: (value: boolean) => void;
   resetFiles: () => void;
 }
 
@@ -134,6 +136,8 @@ export const useEditorStore = create<EditorStore>()(
       hasConfirmedGitRevert: false,
       setHasConfirmedGitRevert: (value) =>
         set({ hasConfirmedGitRevert: value }),
+      gitBlame: false,
+      setGitBlame: (value) => set({ gitBlame: value }),
       resetFiles: () =>
         set({
           openFiles: [],

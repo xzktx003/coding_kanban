@@ -1,13 +1,15 @@
 import { expect, test } from "@playwright/test";
 import { createRequire } from "node:module";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { registerSessionModeRoutes } from "../../apps/server/src/routes/session-mode.ts";
 
-const Fastify = createRequire(new URL("../../apps/server/package.json", import.meta.url))("fastify");
+const Fastify = createRequire(
+  new URL("../../apps/server/package.json", import.meta.url),
+)("fastify");
 
 type SseClient = ServerResponse & { bytesWritten: number };
 
@@ -198,15 +200,20 @@ test("chat SSE projection keeps oversized tool output out of the browser EventSo
       const { done: _done, ...rest } = (window as any).__sessionNetworkProbe;
       return rest;
     });
+    const metrics = {
+      upstreamBytes,
+      browserDataChars: probe.eventDataChars,
+      largestBrowserEventData: probe.largestEventData,
+      heapBefore,
+      heapAfterGc,
+      retainedHeapBytes: heapAfterGc - heapBefore,
+    };
+    writeFileSync(
+      testInfo.outputPath("session-network-memory-metrics.json"),
+      JSON.stringify(metrics, null, 2),
+    );
     await testInfo.attach("session-network-memory-metrics.json", {
-      body: JSON.stringify({
-        upstreamBytes,
-        browserDataChars: probe.eventDataChars,
-        largestBrowserEventData: probe.largestEventData,
-        heapBefore,
-        heapAfterGc,
-        retainedHeapBytes: heapAfterGc - heapBefore,
-      }),
+      body: JSON.stringify(metrics),
       contentType: "application/json",
     });
     expect(
@@ -278,8 +285,9 @@ test("chat SSE projection emits a named error for oversized native EventSource f
                 message.data.length,
               );
             if (message.data.includes("oversized-native-frame-marker")) {
-              (window as any).__sessionProjectionErrorProbe.containsOversizedBody =
-                true;
+              (
+                window as any
+              ).__sessionProjectionErrorProbe.containsOversizedBody = true;
             }
           };
           source.addEventListener("session-projection-error", (event) => {

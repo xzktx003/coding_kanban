@@ -19,6 +19,8 @@ interface State {
   nodes: Record<string, SubagentNode>;
   families: Record<string, Family>;
   selection: Record<string, string | null>;
+  /** Which Codex parent currently has the subagent sheet open. */
+  panelRoot: string | null;
   stopResults: Record<string, SubagentStopResult[]>;
   revision: number;
   runtimeEpoch: number;
@@ -31,6 +33,7 @@ export const useSubagentStore = create<State>()(
       nodes: {},
       families: {},
       selection: {},
+      panelRoot: null,
       stopResults: {},
       revision: 0,
       runtimeEpoch: 0,
@@ -66,7 +69,11 @@ export const useSubagentStore = create<State>()(
       name: subagentStorageKey(),
       version: 1,
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ nodes: s.nodes, selection: s.selection }),
+      partialize: (s) => ({
+        nodes: s.nodes,
+        selection: s.selection,
+        panelRoot: s.panelRoot,
+      }),
       merge: (saved, current) => {
         const cached = saved as Partial<State>;
         return {
@@ -75,6 +82,7 @@ export const useSubagentStore = create<State>()(
           revision: 0,
           families: {},
           stopResults: {},
+          panelRoot: cached?.panelRoot ?? null,
           selection: cached?.selection ?? {},
           nodes: Object.fromEntries(
             Object.entries(cached?.nodes ?? {}).map(([id, node]) => [

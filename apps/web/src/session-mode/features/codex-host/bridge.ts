@@ -23,6 +23,9 @@ export const useCodexHostStore = create<{
   statuses: Record<string, CodexHostStatus>;
 }>(() => ({ statuses: {} }));
 const clients = new Map<string, EditorHostBridge>();
+export function editorHostFor(owner: CodexHostOwner) {
+  return clients.get(codexHostOwnerKey(owner)) ?? null;
+}
 const disabled = {
   context: false,
   openLocation: false,

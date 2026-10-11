@@ -219,12 +219,24 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
         <span
           className="ml-auto text-xs tabular-nums text-muted-foreground"
           aria-live="polite"
+          role="status"
         >
           {t("userInput.progress", {
             current: index + 1,
             total: request.questions.length,
           })}
         </span>
+        {request.questions.length > 1 && (
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={last || disabled}
+            aria-label={t("userInput.nextQuestion")}
+            onClick={() => updateDraft(request, { index: index + 1 })}
+          >
+            <ChevronRight className="size-4" />
+          </Button>
+        )}
         <Button
           variant="ghost"
           size="icon"
@@ -374,7 +386,11 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
               disabled={disabled}
               autoComplete="off"
               aria-label={question.question}
-              placeholder={t("userInput.enterAnswer")}
+              placeholder={t(
+                question.isOther
+                  ? "userInput.otherPlaceholder"
+                  : "userInput.freeFormPlaceholder",
+              )}
               value={text}
               onChange={(e) => select(e.target.value, true)}
               className="min-h-11 text-base"
@@ -383,7 +399,11 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
             <Textarea
               disabled={disabled}
               aria-label={question.question}
-              placeholder={t("userInput.enterAnswer")}
+              placeholder={t(
+                question.isOther
+                  ? "userInput.otherPlaceholder"
+                  : "userInput.freeFormPlaceholder",
+              )}
               value={text}
               onChange={(e) => select(e.target.value, true)}
               className="min-h-20 text-base"

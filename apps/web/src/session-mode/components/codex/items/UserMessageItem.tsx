@@ -56,6 +56,7 @@ export const UserMessageItem = ({
 }: UserMessageItemProps) => {
   const { t } = useTranslation("thread");
   const isWindowFocused = useWindowFocus();
+  const copyContentRef = useRef<HTMLDivElement>(null);
   const images = content.filter((m) => m.type === "image").map((m) => m.url);
   const localImages = content
     .filter((m) => m.type === "localImage")
@@ -83,7 +84,10 @@ export const UserMessageItem = ({
         {inlineEditor ? (
           <div className="codex-native-inline-edit-wrap">{inlineEditor}</div>
         ) : (
-          <div className="codex-user-bubble box-border flex w-fit min-w-0 self-end flex-col gap-2 break-words">
+          <div
+            ref={copyContentRef}
+            className="codex-user-bubble box-border flex w-fit min-w-0 self-end flex-col gap-2 break-words"
+          >
             {(images.length > 0 || localImages.length > 0) && (
               <div className="flex flex-wrap gap-2">
                 {images.map((src, index) => (
@@ -105,7 +109,11 @@ export const UserMessageItem = ({
               </div>
             )}
             {text.length > 0 && (
-              <Markdown className="min-w-0 max-w-full" value={text} />
+              <Markdown
+                className="min-w-0 max-w-full"
+                value={text}
+                imagesAsLinks
+              />
             )}
           </div>
         )}
@@ -129,7 +137,7 @@ export const UserMessageItem = ({
                 <NativeMessageEdit width={16} height={16} />
               </Button>
             )}
-            <NativeMessageCopy text={text} />
+            <NativeMessageCopy text={text} contentRef={copyContentRef} />
             <AddToTodo text={text} />
             {hookRuns?.length ? <NativeHookStats runs={hookRuns} /> : null}
           </div>

@@ -6,44 +6,98 @@ import { PermissionsItem } from "@session/components/codex/items/PermissionsItem
 import { ElicitationItem } from "@session/components/codex/items/ElicitationItem";
 import { RequestUserInputItem } from "@session/components/codex/items/RequestUserInputItem";
 import { codexService } from "@session/services/codexService";
-import {
-  appendDraft,
-  sessionDraftKey,
-} from "@session/stores/useSessionDraftStore";
-import { useLayoutStore } from "@session/stores/useLayoutStore";
+import { closeSubagents } from "./service";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
 import { useAgentCenterStore, selectedAgentCard } from "@session/stores/useAgentCenterStore";
 import { useSubagentFamily } from "./hooks";
-import { CHILD_LABELS, selectStopTargets } from "./model";
+import type { ChildState } from "./model";
 import { subagentService } from "./service";
 import { useSubagentStore } from "./store";
 import { SubagentInput } from "./SubagentInput";
-import { mentionDrafts } from "./mentions";
-import type { SubagentStopTarget } from "@agent-orchestrator/shared";
 import "./subagents.css";
+
+type Family = ReturnType<typeof useSubagentFamily>;
+type Row = Family["rows"][number];
+
+const DONE: ReadonlySet<ChildState> = new Set([
+  "completed",
+  "failed",
+  "stopped",
+]);
+
+function statusLabel(state: ChildState) {
+  switch (state) {
+    case "running":
+      return "处理中";
+    case "pending":
+      return "待处理";
+    case "waiting":
+      return "等待中";
+    case "completed":
+      return "已完成";
+    case "failed":
+      return "失败";
+    case "stopped":
+      return "已停止";
+    case "unknown":
+      return "待确认";
+  }
+}
+
+function displayName(row: Row) {
+  return (
+    row.node.thread.agentNickname ??
+    row.node.thread.name ??
+    row.node.thread.id.slice(0, 8)
+  );
+}
+
+function clip(value: string | undefined, limit: number) {
+  const text = value?.trim();
+  if (!text) return null;
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+}
+
+function span(ms: number) {
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时`;
+  return `${Math.floor(hours / 24)} 天`;
+}
+
+function Avatar({ id, label }: { id: string; label: string }) {
+  let hash = 0;
+  for (const ch of id) hash = (hash * 33 + ch.charCodeAt(0)) >>> 0;
+  return (
+    <span
+      className="session-subagent-avatar"
+      style={{ background: `hsl(${hash % 360} 42% 38%)` }}
+      aria-hidden
+    >
+      {(label.trim()[0] ?? "?").toUpperCase()}
+    </span>
+  );
+}
+
 export function SubagentPanel() {
   const currentThread = useCodexStore((s) => s.currentThreadId),
     agent = useAgentSettingsStore((s) => s.selectedAgent);
   const card = useAgentCenterStore(selectedAgentCard);
   const root = card?.kind === "codex" ? card.id : currentThread;
   const isCodex = card ? card.kind === "codex" : agent === "codex";
-  const rootRef = useRef(root);
-  rootRef.current = root;
   const timings = useCodexStore((s) => s.turnTimingMap);
   const data = useSubagentFamily(root),
     selected = root ? data.selection[root] : null;
-  const [history, setHistory] = useState(false),
-    [search, setSearch] = useState(""),
-    [limit, setLimit] = useState(30),
-    [error, setError] = useState("");
+  const [showAllActive, setShowAllActive] = useState(false);
+  const [showAllDone, setShowAllDone] = useState(false);
+  const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const [verifiedSelection, setVerifiedSelection] = useState("");
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [clock, setClock] = useState(Date.now());
-  const [targets, setTargets] = useState<SubagentStopTarget[] | null>(null),
-    [stopping, setStopping] = useState(false);
-  const dialogRef = useRef<HTMLDialogElement>(null),
-    backRef = useRef<HTMLButtonElement>(null);
+  const backRef = useRef<HTMLButtonElement>(null);
   const row = data.rows.find((r) => r.node.thread.id === selected);
   const select = (id: string | null) => {
     if (root)
@@ -53,8 +107,6 @@ export function SubagentPanel() {
   };
   const returnList = () => {
     const id = selected;
-    if (row && !row.current) setHistory(true);
-    setCollapsed(new Set());
     select(null);
     requestAnimationFrame(() => {
       const task = id
@@ -62,20 +114,13 @@ export function SubagentPanel() {
             `[data-subagent-id="${CSS.escape(id)}"]`,
           )
         : null;
-      (
-        task ??
-        document.querySelector<HTMLInputElement>(".session-subagent-list input")
-      )?.focus();
+      task?.focus();
     });
   };
   useEffect(() => {
-    setHistory(false);
-    setSearch("");
-    setLimit(30);
-    setTargets(null);
-    setStopping(false);
+    setShowAllActive(false);
+    setShowAllDone(false);
     setError("");
-    setCollapsed(new Set());
   }, [root]);
   useEffect(() => {
     const timer = setInterval(() => setClock(Date.now()), 1000);
@@ -106,10 +151,6 @@ export function SubagentPanel() {
       active = false;
     };
   }, [root, selected, retry, data.runtimeEpoch, data.scope]);
-  useEffect(() => {
-    if (targets) dialogRef.current?.showModal();
-    else dialogRef.current?.close();
-  }, [targets]);
   if (!root || !isCodex)
     return (
       <div className="session-subagent-panel">
@@ -120,211 +161,150 @@ export function SubagentPanel() {
     !!selected &&
     verifiedSelection === `${root}:${selected}` &&
     !row?.node.unavailable;
-  const belowCollapsed = (id: string) => {
-    const seen = new Set<string>();
-    let p = data.nodes[id]?.parentId;
-    while (p && p !== root && !seen.has(p)) {
-      if (collapsed.has(p)) return true;
-      seen.add(p);
-      p = data.nodes[p]?.parentId;
-    }
-    return false;
+  const active = data.rows.filter((item) => !DONE.has(item.state));
+  const done = data.rows.filter((item) => DONE.has(item.state));
+  const waiting = active.filter(
+    (item) => item.state === "waiting" || item.state === "pending",
+  ).length;
+  const uncertain = !data.family?.complete;
+  const activeCount = uncertain ? "待确认" : String(active.length);
+  const elapsed = (item: Row) => {
+    const timing = timings[item.node.thread.id];
+    if (!timing?.startedAtMs) return null;
+    return span(
+      timing.durationMs ?? Math.max(0, clock - timing.startedAtMs),
+    );
   };
-  const elapsed = (id: string) => {
-    const timing = timings[id];
-    return timing
-      ? `${Math.floor((timing.durationMs ?? Math.max(0, clock - timing.startedAtMs)) / 1000)} 秒`
-      : "耗时未记录";
+  const finishedAgo = (item: Row) => {
+    const updated = item.node.thread.updatedAt;
+    if (!updated) return null;
+    return `${span(Math.max(0, clock - updated * 1000))} 前`;
   };
-  const rows = data.rows.filter(
-    (r) =>
-      (history ||
-        r.current ||
-        r.state === "running" ||
-        r.state === "pending") &&
-      !belowCollapsed(r.node.thread.id) &&
-      `${r.node.thread.agentNickname ?? ""} ${r.node.objective ?? ""} ${r.node.thread.preview ?? ""} ${r.node.thread.agentRole ?? ""}`
-        .toLowerCase()
-        .includes(search.toLowerCase()),
-  );
-  const name = (r: NonNullable<typeof row>) =>
-    r.node.thread.agentNickname ??
-    r.node.thread.name ??
-    r.node.thread.id.slice(0, 8);
-  const stopScope = (id?: string, subtree = true) => {
-    const pending = selectStopTargets(data.rows, history, id, subtree);
-    if (pending.length) setTargets(pending);
-    else setError("当前执行轮次尚未确认，请刷新后重试；未发送停止请求");
+  const preview = (item: Row) => {
+    const text = clip(
+      item.node.objective ?? item.node.thread.preview,
+      60,
+    );
+    if (text) return text;
+    if (DONE.has(item.state)) return null;
+    if (item.state === "unknown" || item.node.unavailable) return "待确认";
+    return "处理中";
   };
-  const confirmStop = async () => {
-    if (!targets || stopping) return;
-    const captured = targets,
-      capturedRoot = root;
-    setStopping(true);
-    try {
-      await subagentService.stop(capturedRoot, captured);
-      if (rootRef.current === capturedRoot) setTargets(null);
-    } catch (e) {
-      if (rootRef.current === capturedRoot) {
-        setError(String(e));
-        setTargets(null);
-      }
-    } finally {
-      if (rootRef.current === capturedRoot) setStopping(false);
-    }
+  const trailing = (item: Row) => {
+    if (item.state === "waiting" || item.state === "pending") return "等待中";
+    if (item.state === "unknown" || item.node.unavailable) return "待确认";
+    if (DONE.has(item.state))
+      return finishedAgo(item) ?? statusLabel(item.state);
+    return elapsed(item) ?? statusLabel(item.state);
   };
-  const path = row
-    ? (() => {
-        const names = [name(row)],
-          seen = new Set<string>();
-        let p = row.node.parentId;
-        while (p !== root && data.nodes[p] && !seen.has(p)) {
-          seen.add(p);
-          names.unshift(data.nodes[p].thread.agentNickname ?? p.slice(0, 8));
-          p = data.nodes[p].parentId;
-        }
-        return names.join(" / ");
-      })()
+  const modelLine = row
+    ? [row.node.thread.model, row.node.thread.reasoningEffort]
+        .filter(Boolean)
+        .join(" · ")
     : "";
+  const section = (
+    title: string,
+    items: Row[],
+    limit: number,
+    expanded: boolean,
+    expand: () => void,
+    empty: string | null,
+    extra?: string,
+  ) => (
+    <section className="session-subagent-section">
+      <h2>
+        <span>
+          {title} · {title === "已开启" ? activeCount : items.length}
+        </span>
+        {extra ? <small>{extra}</small> : null}
+      </h2>
+      {!items.length && empty ? <p>{empty}</p> : null}
+      <div className="session-subagent-rows">
+      {(expanded ? items : items.slice(0, limit)).map((item) => {
+        const label = displayName(item);
+        return (
+          <button
+            type="button"
+            className="session-subagent-task"
+            data-subagent-id={item.node.thread.id}
+            key={item.node.thread.id}
+            onClick={() => select(item.node.thread.id)}
+          >
+            <Avatar id={item.node.thread.id} label={label} />
+            <span className="session-subagent-task-copy">
+              <span className="session-subagent-task-line">
+                <strong>{label}</strong>
+                <span>{trailing(item)}</span>
+              </span>
+              {preview(item) ? <small>{preview(item)}</small> : null}
+            </span>
+          </button>
+        );
+      })}
+      </div>
+      {!expanded && items.length > limit ? (
+        <button type="button" className="session-subagent-more" onClick={expand}>
+          显示全部{title}
+        </button>
+      ) : null}
+    </section>
+  );
   return (
     <section
       className="session-subagent-panel"
       aria-label="子任务工作台"
       onKeyDown={(e) => {
-        if (e.key === "Escape" && !targets) {
+        if (e.key === "Escape") {
           e.stopPropagation();
           if (selected) returnList();
           else {
-            useLayoutStore.getState().setRightPanelOpen(false);
+            closeSubagents();
             useCodexStore.getState().triggerInputFocus();
           }
         }
       }}
     >
-      <header>
-        {selected ? (
-          <button type="button" ref={backRef} onClick={returnList}>
-            ← 返回子任务列表
-          </button>
-        ) : (
-          <h2>子任务 · {data.rows.length}</h2>
-        )}
-        {selected && (
-          <button
-            type="button"
-            onClick={() => {
-              void subagentService.refresh(root);
-              setRetry((r) => r + 1);
-            }}
-          >
-            重新核对子任务
-          </button>
-        )}
-        {row && (
-          <>
-            <h2>
-              {name(row)}{" "}
-              <span data-child-state={row.state}>
-                {CHILD_LABELS[row.state]}
-              </span>
-            </h2>
-            <small>
-              {row.node.thread.agentRole ?? "角色未知"} ·{" "}
-              {row.node.thread.model ?? "模型信息未记录"}{" "}
-              {row.node.thread.reasoningEffort ?? ""}
-            </small>
-          </>
-        )}
-        {!selected && (
-          <div className="session-subagent-filters">
-            <button
-              type="button"
-              aria-pressed={!history}
-              onClick={() => setHistory(false)}
-            >
-              本轮
-            </button>
-            <button
-              type="button"
-              aria-pressed={history}
-              onClick={() => setHistory(true)}
-            >
-              全部历史
-            </button>
-            <button
-              type="button"
-              onClick={() => void subagentService.refresh(root)}
-            >
-              刷新
-            </button>
-          </div>
-        )}
-        {(!data.family?.complete || data.family?.error) && (
-          <p role="status" className="session-subagent-notice">
-            {data.family?.loading
-              ? "正在确认子任务…"
-              : "子任务信息未完整确认，保留已知记录"}
-            {data.family?.error && <small>{data.family.error}</small>}
-          </p>
-        )}
-        {data.family?.checkedAt ? (
-          <small>
-            最近确认：{new Date(data.family.checkedAt).toLocaleTimeString()}
-          </small>
-        ) : null}
-        {error && <p role="alert">{error}</p>}
-      </header>
       {selected ? (
         <>
-          {row && (
-            <div className="session-subagent-detail-meta">
-              <small>{path}</small>
-              <p>
-                {row.node.objective ??
-                  row.node.thread.preview ??
-                  "任务摘要未记录"}
-              </p>
+          <header className="session-subagent-detail-bar">
+            <button
+              type="button"
+              ref={backRef}
+              aria-label="返回子代理列表"
+              onClick={returnList}
+            >
+              ←
+            </button>
+            <Avatar
+              id={selected}
+              label={row ? displayName(row) : selected.slice(0, 8)}
+            />
+            <h2>{row ? displayName(row) : selected.slice(0, 8)}</h2>
+            {modelLine ? <small>{modelLine}</small> : null}
+          </header>
+          {error ? (
+            <p role="alert" className="session-subagent-notice">
+              {error}
               <button
                 type="button"
-                onClick={() =>
-                  void navigator.clipboard.writeText(row.node.thread.id)
-                }
+                onClick={() => setRetry((value) => value + 1)}
               >
-                复制线程 ID
+                重新确认所属关系
               </button>
-              {row.node.thread.canAcceptDirectInput !== true && (
-                <p className="session-subagent-notice">
-                  由主 Agent 调度 ·{" "}
-                  {row.node.thread.canAcceptDirectInput === false
-                    ? "子线程只读"
-                    : "输入权限待确认"}
-                </p>
-              )}
-              <small>
-                显示原生子线程历史；无法确认继承上下文边界时保留完整记录。
-              </small>
-              {inspected && row.turnId && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => stopScope(selected, false)}
-                  >
-                    停止此任务…
-                  </button>
-                  <button type="button" onClick={() => stopScope(selected)}>
-                    停止此任务及后代…
-                  </button>
-                </>
-              )}
-            </div>
+            </p>
+          ) : null}
+          {(!data.family?.complete || data.family?.error) && (
+            <p role="status" className="session-subagent-notice">
+              {data.family?.loading
+                ? "正在确认子任务…"
+                : "子任务信息未完整确认，保留已知记录"}
+            </p>
           )}
           <div className="session-subagent-transcript">
             {inspected ? (
               <CodexThread threadId={selected} inspection />
             ) : (
-              <p role="status">
-                正在验证子任务所属关系；验证成功后显示历史和操作。
-              </p>
+              <p role="status">正在确认所属关系</p>
             )}
           </div>
           {!inspected && !!row?.pending && (
@@ -336,224 +316,53 @@ export function SubagentPanel() {
               <RequestUserInputItem currentThreadId={selected} />
             </div>
           )}
-          <footer>
-            {inspected &&
-              (row?.node.thread.canAcceptDirectInput === true ? (
-                <SubagentInput
-                  key={selected}
-                  root={root}
-                  id={selected}
-                  name={name(row)}
-                />
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const label = row ? name(row) : selected;
-                    const owner = sessionDraftKey("codex", root);
-                    // This is an instruction to the parent, never a direct-send receipt to the child.
-                    mentionDrafts.add(owner, {
-                      name: label,
-                      path: `agent://${selected}`,
-                    });
-                    appendDraft(owner, `请让 @${label} 跟进：`);
-                    useLayoutStore.getState().setRightPanelOpen(false);
-                    useCodexStore.getState().triggerInputFocus();
-                  }}
-                >
-                  在主会话中跟进{row ? ` ${name(row)}` : ""}
-                </button>
-              ))}
-          </footer>
+          {inspected && row?.node.thread.canAcceptDirectInput === true && (
+            <footer>
+              <SubagentInput
+                key={selected}
+                root={root}
+                id={selected}
+                name={displayName(row)}
+              />
+            </footer>
+          )}
         </>
       ) : (
-        <>
-          <div className="session-subagent-list">
-            <input
-              aria-label="搜索子任务"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setLimit(30);
-              }}
-              placeholder="搜索名称、角色或任务…"
-            />
-            {!rows.length && (
-              <p>
-                {data.family?.complete
-                  ? "当前范围内没有子任务"
-                  : "等待确认子任务；也可切换全部历史"}
-              </p>
-            )}
-            {(
-              [
-                "running",
-                "pending",
-                "waiting",
-                "completed",
-                "failed",
-                "stopped",
-                "unknown",
-              ] as const
-            ).map((state) => {
-              const group = rows
-                .slice(0, limit)
-                .filter((r) => r.state === state);
-              if (!group.length) return null;
-              return (
-                <div key={state}>
-                  <h3>
-                    {CHILD_LABELS[state]} ·{" "}
-                    {rows.filter((r) => r.state === state).length}
-                  </h3>
-                  {group.map((r) => (
-                    <div key={r.node.thread.id}>
-                      <button
-                        type="button"
-                        className="session-subagent-task"
-                        data-subagent-id={r.node.thread.id}
-                        key={r.node.thread.id}
-                        onClick={() => select(r.node.thread.id)}
-                      >
-                        <strong>
-                          {r.node.parentId !== root ? "↳ " : ""}
-                          {name(r)}
-                        </strong>
-                        <span>
-                          {CHILD_LABELS[r.state]}
-                          {r.pending ? ` · ${r.pending}` : ""}
-                        </span>
-                        <small>
-                          {r.node.thread.agentRole ?? "角色未知"}
-                          {!r.current && " · 其他或未记录轮次"}
-                        </small>
-                        <p>
-                          {r.node.objective ??
-                            r.node.thread.preview ??
-                            "任务摘要未记录"}
-                        </p>
-                        <small>
-                          {elapsed(r.node.thread.id)} ·{" "}
-                          {r.node.thread.model ?? "模型未记录"}
-                        </small>
-                        <small>
-                          {r.node.thread.updatedAt
-                            ? new Date(
-                                r.node.thread.updatedAt * 1000,
-                              ).toLocaleString()
-                            : "更新时间未知"}
-                        </small>
-                      </button>
-                      {data.rows.some(
-                        (child) => child.node.parentId === r.node.thread.id,
-                      ) && (
-                        <button
-                          type="button"
-                          aria-expanded={!collapsed.has(r.node.thread.id)}
-                          aria-label={`${collapsed.has(r.node.thread.id) ? "展开" : "收起"} ${name(r)} 的后代`}
-                          onClick={() =>
-                            setCollapsed((previous) => {
-                              const next = new Set(previous);
-                              if (next.has(r.node.thread.id))
-                                next.delete(r.node.thread.id);
-                              else next.add(r.node.thread.id);
-                              return next;
-                            })
-                          }
-                        >
-                          {collapsed.has(r.node.thread.id)
-                            ? "展开后代"
-                            : "收起后代"}
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
-            {rows.length > limit && (
-              <button type="button" onClick={() => setLimit(limit + 30)}>
-                显示更多
-              </button>
-            )}
-          </div>
-          <footer>
-            <button
-              type="button"
-              disabled={!selectStopTargets(data.rows, history).length}
-              onClick={() => stopScope()}
-            >
-              {history ? "停止全部历史中的运行子任务…" : "停止本轮运行子任务…"}
-            </button>
-          </footer>
-        </>
-      )}
-      <div className="session-subagent-results">
-        {(data.stopResults[root] ?? []).map((result) => {
-          const target = data.rows.find(
-            (r) => r.node.thread.id === result.threadId,
-          );
-          const confirmed =
-            result.phase === "requested" &&
-            ((timings[result.threadId]?.turnId === result.turnId &&
-              timings[result.threadId]?.status === "interrupted") ||
-              target?.node.thread.turns?.some(
-                (t) => t.id === result.turnId && t.status === "interrupted",
-              ));
-          const outcome = {
-            requested: "停止已请求，等待原轮终态确认",
-            confirmed: "已确认停止",
-            superseded: "原轮已结束或已换轮，未发送停止",
-            failed: "停止请求失败",
-            uncertain: "停止回执待确认",
-          }[result.phase];
-          return (
-            <p
-              key={result.threadId}
-              role="status"
-              className="session-subagent-stop-result"
-            >
-              {target ? name(target) : result.threadId.slice(0, 8)} ·{" "}
-              {confirmed ? "已确认停止" : outcome}
-              {result.message && ` · ${result.message}`}
+        <div className="session-subagent-list">
+          <header className="session-subagent-detail-bar">
+            <h2>子智能体</h2>
+          </header>
+          <div className="session-subagent-sheet">
+          {(!data.family?.complete || data.family?.error) && (
+            <p role="status" className="session-subagent-notice">
+              {data.family?.loading
+                ? "正在确认子任务…"
+                : "子任务信息未完整确认，保留已知记录"}
+              {data.family?.error ? <small>{data.family.error}</small> : null}
             </p>
-          );
-        })}
-      </div>
-      <dialog
-        ref={dialogRef}
-        className="session-subagent-confirm"
-        onCancel={(e) => {
-          if (stopping) e.preventDefault();
-          else setTargets(null);
-        }}
-      >
-        <h3>停止这些子任务的当前执行？</h3>
-        <ul>
-          {targets?.map((t) => (
-            <li key={t.threadId}>
-              {data.rows.find((r) => r.node.thread.id === t.threadId)?.node
-                .thread.agentNickname ?? t.threadId}{" "}
-              · {t.turnId.slice(0, 8)}
-            </li>
-          ))}
-        </ul>
-        <p>仅包含列出的任务；主 Agent 和其他会话继续运行。</p>
-        <button
-          type="button"
-          disabled={stopping}
-          onClick={() => setTargets(null)}
-        >
-          取消
-        </button>
-        <button
-          type="button"
-          disabled={stopping}
-          onClick={() => void confirmStop()}
-        >
-          {stopping ? "正在请求停止…" : "确认停止"}
-        </button>
-      </dialog>
+          )}
+          {section(
+            "已开启",
+            active,
+            4,
+            showAllActive,
+            () => setShowAllActive(true),
+            "没有已开启的子代理",
+            waiting ? `${waiting} 个等待中` : undefined,
+          )}
+          {done.length
+            ? section(
+                "完成",
+                done,
+                10,
+                showAllDone,
+                () => setShowAllDone(true),
+                null,
+              )
+            : null}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

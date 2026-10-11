@@ -114,6 +114,51 @@ it("keeps dormant background reads metadata-only and restores a fresh recent pag
   }
 });
 
+it("partial live tool events do not count as confirmed history while restoring", async () => {
+  const id = "partial-live-history";
+  let finish!: (value: unknown) => void;
+  api.threadRead.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  useCodexStore.setState({
+    events: {
+      [id]: [
+        {
+          method: "item/started",
+          params: {
+            threadId: id,
+            turnId: "t",
+            item: {
+              id: "wait",
+              type: "collabAgentToolCall",
+              tool: "wait",
+              status: "inProgress",
+            },
+          },
+        } as any,
+      ],
+    },
+    historyLoadedMap: {},
+    historyLoadingMap: {},
+    historyErrorMap: {},
+    turnTimingMap: {},
+    threadStatusMap: {},
+    currentThreadId: id,
+  });
+  const pending = codexService.loadThreadHistory(id, undefined, {
+    background: true,
+    recent: true,
+  });
+  const loading = useCodexStore.getState().historyLoadingMap[id];
+  finish({ thread: { id, turns: [] } });
+  await pending;
+  expect(loading).toBe(true);
+  expect(useCodexStore.getState().historyLoadingMap[id]).toBe(false);
+});
+
 it("targeted cursor hydration preserves the contiguous pagination boundary until the intervening history is read", async () => {
   const id = "cursor-gap";
   useCodexStore.setState({

@@ -24,7 +24,9 @@ export function McpToolCallItem({
   termination?: TurnStatus;
 }) {
   const { t, i18n } = useTranslation("thread"),
-    [raw, setRaw] = useState(false);
+    [raw, setRaw] = useState(false),
+    [argsOpen, setArgsOpen] = useState(false),
+    [argsMore, setArgsMore] = useState(false);
   if (item.type !== "mcpToolCall") return null;
   const metadataOnly = isTranscriptMetadataOnly(item);
   const running = item.status === "inProgress" && !termination,
@@ -66,6 +68,46 @@ export function McpToolCallItem({
       >
         {running && !item.result && !item.error && !termination ? null : (
           <>
+            {item.arguments != null && (
+              <div className="codex-mcp-arguments">
+                <button
+                  type="button"
+                  aria-label="展开 参数"
+                  aria-expanded={argsOpen}
+                  title="展开"
+                  onClick={() => setArgsOpen((value) => !value)}
+                >
+                  展开
+                </button>
+                {argsOpen &&
+                  item.arguments &&
+                  typeof item.arguments === "object" &&
+                  !Array.isArray(item.arguments) && (
+                    <div>
+                      <pre className="codex-native-tool-json">
+                        {nativeToolJson(
+                          Object.fromEntries(
+                            Object.entries(item.arguments).slice(
+                              0,
+                              argsMore ? undefined : 4,
+                            ),
+                          ),
+                        )}
+                      </pre>
+                      {Object.keys(item.arguments).length > 4 && (
+                        <button
+                          type="button"
+                          onClick={() => setArgsMore((value) => !value)}
+                        >
+                          {argsMore
+                            ? "收起部分条目"
+                            : `再显示 ${Object.keys(item.arguments).length - 4} 项`}
+                        </button>
+                      )}
+                    </div>
+                  )}
+              </div>
+            )}
             {error && <p role="alert">{error}</p>}
             {hasContent && <ToolContent content={presentation.content} />}
             {structured != null && (

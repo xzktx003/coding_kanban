@@ -57,7 +57,8 @@ export function nativeMathMarkdown(text: string): string {
         end = text.indexOf(closing, end + 2);
       if (end >= 0) {
         const value = text.slice(index + 2, end);
-        result += display ? `\n$$\n${value}\n$$\n` : `$${value}$`;
+        const block = display && value.includes("\n");
+        result += block ? `\n$$\n${value}\n$$\n` : `$${value}$`;
         index = end + 2;
         continue;
       }

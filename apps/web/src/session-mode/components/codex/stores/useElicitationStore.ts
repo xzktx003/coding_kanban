@@ -73,6 +73,37 @@ export function isApprovalElicitation(request: ElicitationRequest): boolean {
   return isMessageOnlySchema(request.requestedSchema);
 }
 
+function metaText(value: unknown): string {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+
+/** Plugin `Be`: English protocol titles become “是否允许 {连接器} 运行 {工具} 工具？”. */
+export function mcpToolApprovalTitle(request: ElicitationRequest): {
+  connectorName: string;
+  toolName: string;
+  elevated: boolean;
+} | null {
+  const meta = metaObject(request);
+  if (!meta || meta[APPROVAL_KIND_KEY] !== APPROVAL_KIND_MCP_TOOL_CALL)
+    return null;
+  const connectorName =
+    metaText(meta.connector_name) ||
+    metaText(meta.connectorName) ||
+    request.serverName.trim() ||
+    "连接器";
+  const fromMessage = /^Allow\s+(.+?)\s+to\s+run\s+tool\s+"([^"]+)"\?$/.exec(
+    request.message,
+  );
+  const toolName =
+    metaText(meta.tool_name) || metaText(meta.toolName) || fromMessage?.[2] || "";
+  if (!toolName) return null;
+  return {
+    connectorName,
+    toolName,
+    elevated: meta.risk_level === "high" || meta.riskLevel === "high",
+  };
+}
+
 export function elicitationChoices(
   request: ElicitationRequest,
 ): ElicitationChoice[] {
@@ -81,39 +112,37 @@ export function elicitationChoices(
 
   const choices: ElicitationChoice[] = [
     {
-      label: "Allow",
-      description: isToolCall
-        ? "Run the tool and continue."
-        : "Allow this request and continue.",
+      label: "允许一次",
+      description: isToolCall ? "运行该工具并继续。" : "允许此请求并继续。",
       action: "accept",
     },
   ];
   if (supportsPersist(meta, PERSIST_SESSION)) {
     choices.push({
-      label: "Allow for this session",
-      description: "Remember this choice for this session.",
+      label: "允许此对话",
+      description: "在本次会话中记住此选择。",
       action: "accept",
       persist: PERSIST_SESSION,
     });
   }
   if (supportsPersist(meta, PERSIST_ALWAYS)) {
     choices.push({
-      label: "Always allow",
-      description: "Remember this choice for future requests.",
+      label: "始终允许",
+      description: "记住此选择，用于以后的请求。",
       action: "accept",
       persist: PERSIST_ALWAYS,
     });
   }
   if (!isToolCall) {
     choices.push({
-      label: "Deny",
-      description: "Decline and continue.",
+      label: "拒绝",
+      description: "拒绝并继续。",
       action: "decline",
     });
   }
   choices.push({
-    label: "Cancel",
-    description: "Cancel this request.",
+    label: "取消",
+    description: "取消此请求。",
     action: "cancel",
   });
   return choices;

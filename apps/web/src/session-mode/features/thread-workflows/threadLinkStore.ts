@@ -8,12 +8,15 @@ export const useThreadLinkStore = create<{
   target: { threadId: string; turnId: string } | null;
   loading: boolean;
   error: string | null;
+  /** Thread whose history was cached after the user had already chosen another session. */
+  retainedThreadId: string | null;
   consumeTarget: (threadId: string, turnId: string) => void;
 }>((set) => ({
   requestId: 0,
   target: null,
   loading: false,
   error: null,
+  retainedThreadId: null,
   consumeTarget: (threadId, turnId) =>
     set((state) =>
       state.target?.threadId === threadId && state.target.turnId === turnId

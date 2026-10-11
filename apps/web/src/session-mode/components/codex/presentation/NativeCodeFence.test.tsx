@@ -1,3 +1,4 @@
+import { nativeNotifications } from "@session/features/native-notifications/service";
 import {
   act,
   fireEvent,
@@ -7,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { NativeCodeFence } from "./NativeCodeFence";
+import { useMarkdownSettingsStore } from "@session/stores/settings/useMarkdownSettingsStore";
 
 const callbacks = vi.hoisted(() => [] as Array<(html: string) => void>);
 vi.mock("./nativeFenceHighlight", () => ({
@@ -18,6 +20,7 @@ vi.mock("./nativeFenceHighlight", () => ({
   },
 }));
 afterEach(() => {
+  act(() => useMarkdownSettingsStore.getState().setWordWrap(false));
   callbacks.splice(0);
   vi.restoreAllMocks();
 });
@@ -55,6 +58,7 @@ it("does not let a stale highlighter return replace the current code", async () 
 });
 
 it("copies the captured code and reports a rejected clipboard operation truthfully", async () => {
+  const danger = vi.spyOn(nativeNotifications, "danger");
   const writeText = vi.fn().mockRejectedValue(new Error("Clipboard denied"));
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -62,7 +66,13 @@ it("copies the captured code and reports a rejected clipboard operation truthful
   });
   render(<NativeCodeFence code={"exact source\n"} language="text" />);
   fireEvent.click(screen.getByRole("button", { name: "复制" }));
-  await screen.findByRole("alert");
+  await waitFor(() =>
+    expect(danger).toHaveBeenCalledWith("无法复制到剪贴板", {
+      id: "copy-to-clipboard-error",
+      description: "内容未复制。请在 ChatGPT 处于焦点时重试",
+    }),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
   expect(writeText).toHaveBeenCalledWith("exact source\n");
   expect(screen.queryByRole("button", { name: "已复制" })).toBeNull();
 });
@@ -88,4 +98,46 @@ it("keeps source download reachable from the compact native menu", async () => {
   fireEvent.click(await screen.findByRole("menuitem", { name: "下载代码" }));
   expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
   expect(click).toHaveBeenCalledOnce();
+});
+
+it("shares the native wrap choice across code blocks and later mounted messages", () => {
+  const first = render(<NativeCodeFence code="first" language="typescript" />);
+  render(<NativeCodeFence code="second" language="python" />);
+  fireEvent.click(screen.getAllByRole("button", { name: "启用自动换行" })[0]);
+  expect(screen.getAllByRole("button", { name: "禁用自动换行" })).toHaveLength(
+    2,
+  );
+  first.unmount();
+  render(<NativeCodeFence code="later" language="javascript" />);
+  expect(screen.getAllByRole("button", { name: "禁用自动换行" })).toHaveLength(
+    2,
+  );
+  fireEvent.click(screen.getAllByRole("button", { name: "禁用自动换行" })[0]);
+  expect(screen.getAllByRole("button", { name: "启用自动换行" })).toHaveLength(
+    2,
+  );
+});
+
+it("locks repeated copy clicks while clipboard permission is pending and during the copied feedback", async () => {
+  let finish!: () => void;
+  const writeText = vi.fn(
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  render(<NativeCodeFence code="source" language="typescript" />);
+  const button = screen.getByRole("button", { name: "复制" });
+  fireEvent.click(button);
+  expect(button.getAttribute("aria-busy")).toBe("true");
+  expect(button.getAttribute("aria-disabled")).toBe("true");
+  fireEvent.click(button);
+  expect(writeText).toHaveBeenCalledTimes(1);
+  await act(async () => finish());
+  fireEvent.click(screen.getByRole("button", { name: "已复制" }));
+  expect(writeText).toHaveBeenCalledTimes(1);
 });

@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
@@ -115,7 +116,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
     (set) => ({
       cards: [],
       detachedCard: null,
-      syncClientId: crypto.randomUUID(),
+      syncClientId: randomUUID(),
       nextTabSequence: 1,
       pendingTabOperations: [],
       sharedTabsInitialized: false,

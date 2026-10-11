@@ -130,6 +130,7 @@ function CommandActionSummary({
     <div className="codex-activity-group" data-slice-closed={completed}>
       <button
         className="codex-command-summary codex-activity-header"
+        aria-label={label}
         aria-expanded={expanded}
         onClick={() => setExpanded((value) => !value)}
       >

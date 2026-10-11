@@ -4,9 +4,11 @@ import { useCodexStore } from "../../stores";
 import { codexService } from "@session/services/codexService";
 import {
   SLASH_COMMANDS,
+  slashCommandDescription,
   type SlashCommand,
   type SlashDialog,
 } from "../slashCommands";
+import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
 import { ComposerSheet } from "./ComposerSheet";
 export function ComposerCommands({
   onClose,
@@ -19,8 +21,9 @@ export function ComposerCommands({
     [confirm, setConfirm] = useState<SlashCommand | null>(null),
     [busy, setBusy] = useState(false);
   const currentThreadId = useCodexStore((s) => s.currentThreadId);
+  const { collaborationMode } = useThreadModelSettings(currentThreadId);
   const matches = SLASH_COMMANDS.filter((c) =>
-    (c.id + " " + c.description)
+    (c.id + " " + c.title + " " + slashCommandDescription(c, collaborationMode))
       .toLowerCase()
       .includes(query.replace(/^\//, "").toLowerCase()),
   );
@@ -42,8 +45,8 @@ export function ComposerCommands({
   }
   return (
     <ComposerSheet
-      title={confirm ? `运行 /${confirm.id}？` : "快捷命令"}
-      description="模型、思考强度与规划设置不会发送当前草稿。"
+      title={confirm ? `运行 /${confirm.id}？` : "斜杠命令"}
+      description="搜索并运行斜杠命令"
       onClose={onClose}
     >
       {confirm ? (
@@ -71,11 +74,12 @@ export function ComposerCommands({
           <input
             className="session-command-search"
             autoFocus
-            aria-label="搜索快捷命令"
+            aria-label="搜索"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索命令，如 /model"
+            placeholder="搜索"
           />
+          <p className="composer-suggestion-group">斜杠命令</p>
           {matches.map((c) => (
             <button
               type="button"
@@ -85,10 +89,11 @@ export function ComposerCommands({
               onClick={() => (c.confirmation ? setConfirm(c) : void run(c))}
             >
               <strong>/{c.id}</strong>
-              <span>{c.description}</span>
+              <span>{c.title}</span>
+              <span>{slashCommandDescription(c, collaborationMode)}</span>
             </button>
           ))}
-          {!matches.length && <p>没有匹配命令</p>}
+          {!matches.length && <p>无命令</p>}
         </>
       )}
     </ComposerSheet>

@@ -8,7 +8,8 @@ import type {
 } from "@session/bindings/v2";
 import type { Provider } from "@session/stores/settings";
 
-export type Personality = "friendly" | "pragmatic";
+import type { Personality } from "@session/bindings/Personality";
+export type { Personality } from "@session/bindings/Personality";
 export type ModeKind = "default" | "plan";
 export type ThreadCwdMode = "local" | "worktree";
 

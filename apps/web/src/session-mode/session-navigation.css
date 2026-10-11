@@ -14,54 +14,7 @@
     display: none;
   }
 }
-.session-mode.dark.accent-default {
-  --background: #20252c;
-  --foreground: #e5e9ee;
-  --card: #252c34;
-  --card-foreground: #e5e9ee;
-  --popover: #292f37;
-  --popover-foreground: #e5e9ee;
-  --muted: #242b33;
-  --muted-foreground: #9ba6b2;
-  --secondary: #292f37;
-  --secondary-foreground: #e5e9ee;
-  --accent: #303842;
-  --accent-foreground: #e5e9ee;
-  --border: #38414c;
-  --input: #485360;
-  --sidebar: #191e24;
-  --sidebar-foreground: #b2bbc5;
-  --sidebar-border: #38414c;
-  --sidebar-accent: #303842;
-  --sidebar-accent-foreground: #e5e9ee;
-}
-.session-mode.light.accent-default {
-  --background: #fcfcfd;
-  --foreground: #242c35;
-  --card: #f4f5f7;
-  --card-foreground: #242c35;
-  --popover: #fcfcfd;
-  --popover-foreground: #242c35;
-  --primary: #7c5e2c;
-  --primary-foreground: #fcfcfd;
-  --secondary: #edf0f3;
-  --secondary-foreground: #242c35;
-  --muted: #e9edf1;
-  --muted-foreground: #586777;
-  --accent: #dfe5eb;
-  --accent-foreground: #242c35;
-  --border: #c9d0d8;
-  --input: #b9c2ce;
-  --ring: #7c5e2c;
-  --sidebar: #f4f5f7;
-  --sidebar-foreground: #465360;
-  --sidebar-primary: #7c5e2c;
-  --sidebar-primary-foreground: #fcfcfd;
-  --sidebar-border: #c9d0d8;
-  --sidebar-accent: #dfe5eb;
-  --sidebar-accent-foreground: #242c35;
-  --sidebar-ring: #7c5e2c;
-}
+/* Palette lives in session-theme.css so navigation cannot override Codex colors. */
 .session-mode.light {
   --session-running: #356b52;
   --session-pending: #886114;

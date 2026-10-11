@@ -241,7 +241,11 @@ describe("codex transcript memory budget", () => {
     const cmd = (result.events[2] as any).params.item;
     expect(cmd.aggregatedOutput).toBeNull();
     expect(cmd.transcriptMetadataOnly).toBe(true);
-    expect(cmd).toMatchObject({ id: "t1-cmd", status: "completed", exitCode: 0 });
+    expect(cmd).toMatchObject({
+      id: "t1-cmd",
+      status: "completed",
+      exitCode: 0,
+    });
     expect(JSON.stringify(cmd)).not.toContain(huge);
     expect((result.events[0] as any).params.item.content[0].text).toBe(
       "keep user",
@@ -319,10 +323,11 @@ describe("codex transcript memory budget", () => {
     expect(mcpItem).toMatchObject({
       id: "mcp",
       status: "completed",
-      arguments: null,
       result: null,
       transcriptMetadataOnly: true,
     });
+    expect(mcpItem.arguments.query.length).toBeLessThanOrEqual(64);
+    expect(mcpItem.arguments.query).not.toBe("q".repeat(200));
     for (const item of [dynamicItem, mcpItem]) {
       expect(JSON.stringify(item)).not.toContain("x".repeat(100));
       expect(JSON.stringify(item)).not.toContain("p".repeat(100));
@@ -345,7 +350,9 @@ describe("codex transcript memory budget", () => {
             id: "hook",
             status: "running",
             sourcePath: "/private-hook",
-            entries: [{ kind: "context", text: "private context".repeat(1000) }],
+            entries: [
+              { kind: "context", text: "private context".repeat(1000) },
+            ],
           },
         },
       },
@@ -359,7 +366,9 @@ describe("codex transcript memory budget", () => {
             status: "completed",
             durationMs: 23,
             sourcePath: "/private-hook",
-            entries: [{ kind: "context", text: "private context".repeat(1000) }],
+            entries: [
+              { kind: "context", text: "private context".repeat(1000) },
+            ],
           },
         },
       },
@@ -531,7 +540,9 @@ describe("codex transcript memory budget", () => {
       ),
     ).toBe(true);
     expect(retainedCommands.length).toBeLessThan(1000);
-    expect(retainedCommands.every((item) => item.aggregatedOutput === null)).toBe(true);
+    expect(
+      retainedCommands.every((item) => item.aggregatedOutput === null),
+    ).toBe(true);
     expect(result.compactedPayloadCount).toBe(1001);
     expect(result.sameTurnTrimmedEventCount).toBeGreaterThan(0);
     expect(result.truncatedTurnIds).toEqual(["live"]);
@@ -566,7 +577,9 @@ describe("codex transcript memory budget", () => {
     expect(result.estimatedBytes).toBeLessThanOrEqual(4 * 1024 * 1024);
     expect(retainedCommands.some((item) => item.id === "running")).toBe(true);
     expect(retainedCommands.length).toBeLessThan(500);
-    expect(retainedCommands.every((item) => item.aggregatedOutput === null)).toBe(true);
+    expect(
+      retainedCommands.every((item) => item.aggregatedOutput === null),
+    ).toBe(true);
     expect(result.compactedPayloadCount).toBe(1001);
     expect(retainedItems.some((item) => item.type === "userMessage")).toBe(
       true,
@@ -657,12 +670,15 @@ describe("codex transcript memory budget", () => {
       maxBytes: 8 * 1024 * 1024,
       maxEvents: 20,
     });
-    expect(result.events.some((event) => event.method === "turn/diff/updated")).toBe(false);
+    expect(
+      result.events.some((event) => event.method === "turn/diff/updated"),
+    ).toBe(false);
     expect(result.hiddenEventCount).toBe(1);
   });
 
   it("projects tools embedded in a turn without losing user or assistant items", () => {
-    const commandItem = (command("t1", "private body".repeat(1000)) as any).params.item;
+    const commandItem = (command("t1", "private body".repeat(1000)) as any)
+      .params.item;
     const event = {
       method: "turn/completed",
       params: {
@@ -683,9 +699,16 @@ describe("codex transcript memory budget", () => {
       maxEvents: 20,
     });
     const items = (result.events[0] as any).params.turn.items;
-    expect(items.map((item: any) => item.id)).toEqual(["t1-user", "t1-cmd", "t1-agent"]);
+    expect(items.map((item: any) => item.id)).toEqual([
+      "t1-user",
+      "t1-cmd",
+      "t1-agent",
+    ]);
     expect(items[0].content[0].text).toBe("keep user");
-    expect(items[1]).toMatchObject({ aggregatedOutput: null, status: "completed" });
+    expect(items[1]).toMatchObject({
+      aggregatedOutput: null,
+      status: "completed",
+    });
     expect(items[2].text).toBe("keep assistant");
     expect(result.compactedPayloadCount).toBe(1);
     expect(compactCodexEventPayload(result.events[0])).toBe(result.events[0]);
@@ -694,39 +717,53 @@ describe("codex transcript memory budget", () => {
   it("rejects every private tool body method before retaining history", () => {
     const events = [user("t1"), agent("t1")];
     for (const method of privateBodyMethods) {
-      const result = compactCodexTranscript([
-        ...events,
-        { method, params: { threadId: "thread", turnId: "t1", itemId: "tool", delta: "private".repeat(1000) } } as ServerNotification,
-      ], { maxBytes: 100_000, maxEvents: 20 });
+      const result = compactCodexTranscript(
+        [
+          ...events,
+          {
+            method,
+            params: {
+              threadId: "thread",
+              turnId: "t1",
+              itemId: "tool",
+              delta: "private".repeat(1000),
+            },
+          } as ServerNotification,
+        ],
+        { maxBytes: 100_000, maxEvents: 20 },
+      );
       expect(result.events).toEqual(events);
       expect(result.hiddenEventCount).toBe(1);
     }
   });
 
-  it.each(privateBodyMethods)("returns only a safe cursor when %s is compacted directly", (method) => {
-    const body = "private body".repeat(100_000);
-    const event = {
-      method,
-      params: {
-        threadId: "thread",
-        turnId: "t1",
-        itemId: "tool",
-        delta: body,
-        diff: body,
-        stdin: body,
-        item: { content: body },
-      },
-    } as ServerNotification;
-    const compacted = compactCodexEventPayload(event);
-    expect(compacted).toMatchObject({
-      method,
-      params: { threadId: "thread", turnId: "t1", itemId: "tool" },
-    });
-    expect(JSON.stringify(compacted)).not.toContain("private body");
-    expect(estimateTranscriptBytes(compacted)).toBeLessThan(4096);
-    expect(compactCodexEventPayload(compacted)).toBe(compacted);
-    expect((event.params as any).delta).toBe(body);
-  });
+  it.each(privateBodyMethods)(
+    "returns only a safe cursor when %s is compacted directly",
+    (method) => {
+      const body = "private body".repeat(100_000);
+      const event = {
+        method,
+        params: {
+          threadId: "thread",
+          turnId: "t1",
+          itemId: "tool",
+          delta: body,
+          diff: body,
+          stdin: body,
+          item: { content: body },
+        },
+      } as ServerNotification;
+      const compacted = compactCodexEventPayload(event);
+      expect(compacted).toMatchObject({
+        method,
+        params: { threadId: "thread", turnId: "t1", itemId: "tool" },
+      });
+      expect(JSON.stringify(compacted)).not.toContain("private body");
+      expect(estimateTranscriptBytes(compacted)).toBeLessThan(4096);
+      expect(compactCodexEventPayload(compacted)).toBe(compacted);
+      expect((event.params as any).delta).toBe(body);
+    },
+  );
 });
 
 // Browser CDP tests cover physical retention; these guard exact UTF-16 fidelity.

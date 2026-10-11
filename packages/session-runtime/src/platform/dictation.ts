@@ -13,6 +13,11 @@ import { tmpdir } from "node:os";
 import { Readable } from "node:stream";
 import { HttpError, type JsonObject } from "../core/json.js";
 import { Serial, run } from "./common.js";
+import {
+  readCodexAuth,
+  transcribeWithCodex,
+  type CodexSocket,
+} from "./codex-dictation.js";
 export class Dictation {
   private downloads = new Map<
     string,
@@ -25,6 +30,7 @@ export class Dictation {
     private dataHome: string,
     private env: NodeJS.ProcessEnv,
     private fetcher: typeof fetch = fetch,
+    private socketFactory?: CodexSocket,
   ) {}
   private model(input: JsonObject) {
     const id = input.modelId ?? input.model ?? "base";
@@ -153,12 +159,6 @@ export class Dictation {
   async transcribe(input: JsonObject) {
     const id = this.model(input);
     if (
-      !(await stat(this.path(id))
-        .then((s) => s.isFile())
-        .catch(() => false))
-    )
-      throw new HttpError(400, "Download the selected dictation model first");
-    if (
       typeof input.data !== "string" ||
       input.data.length > 5120000 ||
       input.data.length % 4 !== 0 ||
@@ -177,6 +177,27 @@ export class Dictation {
     if (typeof language !== "string" || !/^[a-zA-Z-]{2,16}$/.test(language))
       throw new HttpError(400, "Invalid dictation language");
     return this.inference.run(async () => {
+      const auth = await readCodexAuth(this.env).catch(() => null);
+      if (auth) {
+        try {
+          return await transcribeWithCodex(
+            pcm,
+            auth,
+            this.env,
+            this.socketFactory,
+          );
+        } catch (error) {
+          console.warn(
+            `Codex dictation unavailable, using local Whisper: ${(error as Error).message}`,
+          );
+        }
+      }
+      if (
+        !(await stat(this.path(id))
+          .then((s) => s.isFile())
+          .catch(() => false))
+      )
+        throw new HttpError(400, "Download the selected dictation model first");
       const dir = await mkdtemp(join(tmpdir(), "kanban-dictation-"));
       try {
         const wav = Buffer.alloc(44);

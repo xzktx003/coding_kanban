@@ -1,6 +1,6 @@
 import "ace-builds/src-noconflict/ace";
 import { useEffect } from "react";
-import { act, render } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
 import { CodeEditor } from "./CodeEditor";
 import { useEditorStore } from "@session/stores/useEditorStore";
@@ -43,6 +43,16 @@ const revealRange = (
     1,
     endLine,
   );
+
+it("jumps to the typed line from the plugin go-to-line field", () => {
+  render(<CodeEditor content={"one\ntwo\nthree"} filePath="/owner/file.ts" />);
+  const field = screen.getByRole("textbox", { name: "转到行" });
+  expect(field.getAttribute("placeholder")).toBe("转到行");
+  fireEvent.change(field, { target: { value: "3" } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  expect(ace.gotoLine).toHaveBeenCalledWith(3, 0, true);
+  expect(ace.focus).toHaveBeenCalled();
+});
 
 it("retains native start/end lines and selects the supplied inclusive range without focusing", () => {
   revealRange("/owner/file.ts", "/owner", 42, 45);

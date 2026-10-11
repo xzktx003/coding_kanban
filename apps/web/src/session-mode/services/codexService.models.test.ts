@@ -11,6 +11,7 @@ import { followupParameters } from "./followupService";
 import { useWorkspaceStore } from "../stores/useWorkspaceStore";
 import {
   changeThreadModel,
+  getThreadModelSettings,
   hydrateThreadModel,
   useThreadModelStore,
 } from "../stores/useThreadModelStore";
@@ -193,4 +194,17 @@ it("hydrates all native owner settings and sends them while another conversation
   useCodexStore.setState({currentThreadId:"other"});
   await codexService.turnStart("owned-settings","owner input");
   expect(api.turnStart.mock.calls.at(-1)?.[0]).toMatchObject({threadId:"owned-settings",serviceTier:"fast",approvalPolicy:"on-request",sandboxPolicy:{type:"readOnly",networkAccess:false},collaborationMode:{mode:"default"}});
+});
+
+it("sends the selected thread personality and leaves another thread unchanged", async () => {
+  await codexService.threadResume("model-a");
+  changeThreadModel("model-a", { personality: "pragmatic" });
+  await codexService.turnStart("model-a", "tone");
+  expect(api.turnStart.mock.calls.at(-1)?.[0]).toMatchObject({
+    threadId: "model-a",
+    personality: "pragmatic",
+  });
+  expect(followupParameters("model-b").personality).toBeUndefined();
+  changeThreadModel("bare", { personality: "pragmatic" });
+  expect(getThreadModelSettings("bare").personality).toBe("pragmatic");
 });

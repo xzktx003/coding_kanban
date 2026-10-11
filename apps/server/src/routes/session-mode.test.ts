@@ -384,7 +384,9 @@ test("session gateway chat SSE projection strips tool bodies before browser deli
       entries: [],
     });
     assert.equal(frames[6].payload.params.review.rationale.length, 1024);
-    assert.equal(frames[6].payload.params.action.command, undefined);
+    assert.equal(frames[6].payload.params.action.command, `${big.slice(0,1023)}…`);
+    assert.equal(frames[6].payload.params.action.command.length,1024);
+    assert.equal(frames[6].payload.params.action.stdout,undefined);
     assert.equal(frames[6].payload.params.action.type, "command");
   } finally {
     await app.close();
@@ -518,7 +520,8 @@ test("chat metadata preserves native tool and public Hook shapes without retaini
   const privateBody = "private-tool-body".repeat(100_000);
   const items = [
     { type: "commandExecution", id: "cmd", status: "completed", command: "pnpm test", cwd: "/repo", commandActions: [{ type: "read", command: "cat a.ts", name: "a.ts", path: "/repo/a.ts" }], aggregatedOutput: privateBody, exitCode: 0, durationMs: 15 },
-    { type: "fileChange", id: "files", status: "completed", changes: [{ path: "a.ts", kind: { type: "update", move_path: null }, diff: privateBody }] },
+    { type: "fileChange", id: "files", status: "completed", changes: [{ path: "a.ts", kind: { type: "update", move_path: null }, diff: privateBody }, { path: "b.ts", kind: { type: "update", move_path: null }, diff: "@@ -1 +1 @@\n-old\n+new\n" }] },
+    { type: "fileChange", id: "native", status: "completed", changes: { "/repo/native.ts": { type: "update", unified_diff: "@@ -1,2 +1,3 @@\n context\n-old\n+new\n+extra\n", move_path: null }, "/repo/created.ts": { type: "add", content: "one\ntwo\n" } } },
     { type: "mcpToolCall", id: "mcp", status: "completed", server: "github", tool: "search", arguments: { secret: privateBody }, result: { content: privateBody }, error: null },
     { type: "dynamicToolCall", id: "dynamic", namespace: "codex", tool: "read_thread", status: "completed", arguments: { threadId: "other", text: privateBody }, contentItems: [{ type: "inputText", text: privateBody }], success: true },
     { type: "webSearch", id: "web", query: "bounded query", action: { type: "search", query: "bounded query", queries: ["bounded query"] }, results: privateBody },
@@ -541,16 +544,27 @@ test("chat metadata preserves native tool and public Hook shapes without retaini
     assert.equal(turn.items[1].changes[0].path, "a.ts");
     assert.equal(turn.items[1].changes[0].diff, "");
     assert.equal(turn.items[1].changes[0].transcriptMetadataOnly, true);
-    assert.equal(turn.items[2].server, "github");
-    assert.equal(turn.items[2].arguments, null);
-    assert.equal(turn.items[2].result, null);
+    assert.equal(turn.items[1].changes[1].diff, "@@ -1 +1 @@\n-old\n+new\n");
+    assert.equal(turn.items[1].changes[1].transcriptMetadataOnly, undefined);
+    const native = turn.items.find((item: { id?: string }) => item.id === "native");
+    assert.equal(native.changes[0].path, "/repo/native.ts");
+    assert.equal(native.changes[0].kind.type, "update");
+    assert.equal(native.changes[0].diff, "@@ -1,2 +1,3 @@\n context\n-old\n+new\n+extra\n");
+    assert.equal(native.changes[0].transcriptMetadataOnly, undefined);
+    assert.equal(native.changes[1].path, "/repo/created.ts");
+    assert.equal(native.changes[1].kind.type, "add");
+    assert.equal(native.changes[1].diff, "one\ntwo\n");
+    assert.equal("unified_diff" in native.changes[0], false);
+    assert.equal(turn.items[3].server, "github");
     assert.equal(turn.items[3].arguments, null);
-    assert.deepEqual(turn.items[3].contentItems, []);
-    assert.equal(turn.items[4].action.query, "bounded query");
-    assert.deepEqual(turn.items[5].content, []);
+    assert.equal(turn.items[3].result, null);
+    assert.equal(turn.items[4].arguments, null);
+    assert.deepEqual(turn.items[4].contentItems, []);
+    assert.equal(turn.items[5].action.query, "bounded query");
+    assert.deepEqual(turn.items[6].content, []);
     assert.equal(turn.hookRuns[0].id, "hook");
     assert.equal(turn.hookRuns[0].sourcePath, "/private/hook");
     assert.deepEqual(turn.hookRuns[0].entries, [{ kind: "warning", text: "public warning" }]);
-    assert.ok(response.body.length < 12_000);
+    assert.ok(response.body.length < 16_000);
   } finally { await app.close(); }
 });

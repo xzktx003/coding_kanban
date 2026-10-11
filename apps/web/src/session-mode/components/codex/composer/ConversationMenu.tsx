@@ -1,37 +1,210 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Search, List, Download, MessagesSquare } from "lucide-react";
 import { toast } from "sonner";
-import { threadAccess } from "@session/services/apiAdapt/codex";
+import {
+  archiveThread,
+  deleteThread,
+  threadAccess,
+} from "@session/services/apiAdapt/codex";
+import { codexService } from "@session/services/codexService";
+import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
+import { takeClosedTab } from "@session/stores/closedSessionTabs";
+import { sessionTabSelect } from "@session/stores/sessionTabSelect";
+import { adjacentFollowedCard, nextAttentionCard } from "./nextAttention";
+import { nextRecentViewedCard, recentViewedCards } from "./recentView";
+import { usePinStore } from "@session/stores/usePinStore";
+import { useLayoutStore } from "@session/stores";
+import { useEditorStore } from "@session/stores/useEditorStore";
 import { createSideChat } from "@session/services/conversationActions";
+import { useSideChatStore } from "@session/stores/useSideChatStore";
 import { Button } from "../../ui/button";
 import { NativeComposerIcon } from "./NativeComposerIcon";
 import { threadWorkflowActions } from "@session/features/thread-workflows/actions";
+import { lastAssistantCodeBlock } from "@session/features/thread-workflows/lastCodeBlock";
+import { useCodexStore } from "../stores/useCodexStore";
+import { useConfigStore } from "../stores/useConfigStore";
+import { useSessionAttentionStore } from "@session/stores/useSessionAttentionStore";
+import { useSessionNameStore } from "@session/stores/useSessionNameStore";
+import {
+  sessionDraftKey,
+  useSessionDraftStore,
+} from "@session/stores/useSessionDraftStore";
+import { cycleServiceTier } from "./cycleServiceTier";
+import { stepReasoningEffort } from "./cycleReasoningEffort";
+import { nativeReasoningLabel } from "./nativeReasoningLabel";
+import { formatDraftRange, type FormatKind } from "./editor/formatSelection";
+import { useModelCacheStore } from "../hooks/useModels";
+import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
+import { gitCommit, gitPush } from "@session/services/apiAdapt/git";
+import { GitCommitDialog } from "@session/features/git/GitCommitDialog";
+import {
+  MergePullRequestSheet,
+  OpenPullRequestSheet,
+  PullRequestSheet,
+} from "./PullRequestSheet";
+import { CreateBranchSheet } from "./CreateBranchSheet";
+import { SearchChatsSheet } from "./SearchChatsSheet";
+import { FileSearchSheet } from "./FileSearchSheet";
+import { KeyboardShortcutsSheet } from "./KeyboardShortcutsSheet";
+import { requestCanvasPrompt, requestDrawingTool } from "./v2/drawingTool";
+import {
+  canRedoAppAction,
+  canUndoAppAction,
+  recordAppAction,
+  redoAppAction,
+  undoAppAction,
+} from "./appActionHistory";
+import { ComposerSheet } from "./v2/ComposerSheet";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../ui/dropdown-menu";
+function applyExpandedList(kind: Extract<FormatKind, "ol" | "ul" | "check">) {
+  const field = document.querySelector(
+    ".session-composer-sheet.is-full .session-rich-draft textarea[data-draft-start], .session-composer-sheet.is-full .session-rich-draft textarea[data-draft-selection]",
+  );
+  if (!(field instanceof HTMLTextAreaElement)) {
+    toast.message("当前没有打开的页面编辑器");
+    return;
+  }
+  const owner = document
+    .querySelector(".session-codex-composer")
+    ?.getAttribute("data-draft-owner");
+  if (!owner) {
+    toast.message("当前输入不属于这个聊天");
+    return;
+  }
+  const marked = field.dataset.draftSelection?.split(":") ?? [];
+  const start = Number(marked[0] ?? field.selectionStart);
+  const end = Number(marked[1] ?? field.selectionEnd);
+  const next = formatDraftRange(field.value, start, end, kind);
+  const name = kind === "ol" ? "编号" : kind === "ul" ? "项目符号" : "核对清单";
+  if (!next) {
+    toast.message(
+      kind === "check"
+        ? "当前没有可切换核对清单的文本"
+        : `当前没有可设置${name}的文本`,
+    );
+    return;
+  }
+  useSessionDraftStore.getState().setText(owner, next.value);
+  toast.message(kind === "check" ? "已切换核对清单" : `已设置为${name}列表`);
+}
+
 export function ConversationMenu({
   threadId,
   title,
+  variant = "icon",
+  onOpen,
+  onRename,
 }: {
   threadId: string | null;
   title: string;
+  variant?: "icon" | "item";
+  onOpen?: () => void;
+  onRename?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [fileSearch, setFileSearch] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [commitOpen, setCommitOpen] = useState(false);
+  const [commitForm, setCommitForm] = useState(false);
+  const [pullRequest, setPullRequest] = useState<null | { draft: boolean }>(null);
+  const [branchOpen, setBranchOpen] = useState(false);
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [openPullRequest, setOpenPullRequest] = useState(false);
+  const [searchChats, setSearchChats] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [, setHistoryTick] = useState(0);
+  const menuCardId = useRef<string | null>(null);
+  const bumpHistory = () => setHistoryTick((tick) => tick + 1);
+  const shiftReasoning = (direction: 1 | -1, wrap: boolean) => {
+    const catalog = useModelCacheStore
+      .getState()
+      .openAiModels.find((item) => item.id === model || item.model === model);
+    const options =
+      catalog?.supportedReasoningEfforts.map((option) => option.reasoningEffort) ??
+      [];
+    const next = stepReasoningEffort(options, reasoningEffort, direction, wrap);
+    if (!next || next === reasoningEffort) {
+      toast.message(
+        options.length < 2
+          ? "当前模型没有可切换的推理强度"
+          : direction > 0
+            ? "推理强度已是最高"
+            : "推理强度已是最低",
+      );
+      return;
+    }
+    setReasoningEffort(next);
+    toast.message(`推理强度已设为${nativeReasoningLabel(next)}`);
+  };
+  const {
+    model,
+    serviceTier,
+    setServiceTier,
+    reasoningEffort,
+    setReasoningEffort,
+    collaborationMode,
+    setCollaborationMode,
+  } = useThreadModelSettings(threadId);
+  useEffect(() => {
+    const openShortcuts = () => setShortcutsOpen(true);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "/" || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey)
+        return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.closest(".session-mode") === null) return;
+      event.preventDefault();
+      setShortcutsOpen(true);
+    };
+    window.addEventListener("codex-open-keyboard-shortcuts", openShortcuts);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("codex-open-keyboard-shortcuts", openShortcuts);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
+  const cwd = useCodexStore((state) =>
+    threadId
+      ? state.threads.find((thread) => thread.id === threadId)?.cwd
+      : undefined,
+  );
   return (
-    <DropdownMenu>
+    <>
+    <DropdownMenu
+      onOpenChange={(next) => {
+        if (next)
+          menuCardId.current = useAgentCenterStore.getState().currentAgentCardId;
+      }}
+    >
       <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="当前会话的更多操作"
-          title="当前会话的更多操作"
-        >
-          <NativeComposerIcon name="more" />
-        </Button>
+        {variant === "item" ? (
+          <Button
+            type="button"
+            variant="ghost"
+            className="justify-start"
+            onClick={onOpen}
+          >
+            <NativeComposerIcon name="more" />
+            当前会话
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="当前会话的更多操作"
+            title="当前会话的更多操作"
+          >
+            <NativeComposerIcon name="more" />
+          </Button>
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent
         className="session-composer-menu"
@@ -47,7 +220,432 @@ export function ConversationMenu({
           }
         >
           <Search size={16} />
-          搜索会话
+          查找
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!cwd}
+          onSelect={() => setFileSearch(true)}
+        >
+          <Search size={16} />
+          搜索文件
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId || !onRename}
+          onSelect={() => onRename?.()}
+        >
+          重命名聊天
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId || busy}
+          onSelect={() => setArchiveOpen(true)}
+        >
+          归档聊天
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId || busy}
+          onSelect={() => setDeleteOpen(true)}
+        >
+          删除聊天
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() => {
+            if (!threadId) return;
+            const thread = useCodexStore
+              .getState()
+              .threads.find((item) => item.id === threadId);
+            const item = {
+              kind: "codex" as const,
+              id: threadId,
+              title: thread?.name || thread?.preview || title || "Codex",
+              cwd: thread?.cwd ?? "",
+            };
+            const wasPinned = usePinStore.getState().isPinned(threadId);
+            usePinStore.getState().togglePin(item);
+            recordAppAction({
+              label: wasPinned ? "取消置顶聊天" : "置顶聊天",
+              undo: () => usePinStore.getState().togglePin(item),
+              redo: () => usePinStore.getState().togglePin(item),
+            });
+            bumpHistory();
+            toast.message(wasPinned ? "已取消置顶聊天" : "已置顶聊天");
+          }}
+        >
+          置顶/取消置顶聊天
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const layout = useLayoutStore.getState();
+            const visible =
+              layout.isRightPanelOpen && layout.activeRightPanelTab === "diff";
+            const previousOpen = layout.isRightPanelOpen;
+            const previousTab = layout.activeRightPanelTab;
+            if (visible) layout.setRightPanelOpen(false);
+            else {
+              layout.setActiveRightPanelTab("diff");
+              layout.setRightPanelOpen(true);
+            }
+            recordAppAction({
+              label: visible ? "隐藏“变更”面板" : "显示“变更”面板",
+              undo: () => {
+                const next = useLayoutStore.getState();
+                if (previousTab === null)
+                  useLayoutStore.setState({ activeRightPanelTab: null });
+                else next.setActiveRightPanelTab(previousTab);
+                next.setRightPanelOpen(previousOpen);
+              },
+              redo: () => {
+                const next = useLayoutStore.getState();
+                if (visible) next.setRightPanelOpen(false);
+                else {
+                  next.setActiveRightPanelTab("diff");
+                  next.setRightPanelOpen(true);
+                }
+              },
+            });
+            bumpHistory();
+            toast.message(visible ? "已隐藏“变更”面板" : "已显示“变更”面板");
+          }}
+        >
+          显示/隐藏“变更”面板
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const layout = useLayoutStore.getState();
+            const previousOpen = layout.isRightPanelOpen;
+            const previousTab = layout.activeRightPanelTab;
+            const created = layout.terminals.length === 0;
+            if (created) layout.addTerminal();
+            const createdTab = created
+              ? useLayoutStore.getState().terminals.at(-1) ?? null
+              : null;
+            layout.setActiveRightPanelTab("terminal");
+            layout.setRightPanelOpen(true);
+            recordAppAction({
+              label: "打开终端",
+              undo: () => {
+                const next = useLayoutStore.getState();
+                if (createdTab) next.removeTerminal(createdTab.id);
+                if (previousTab === null)
+                  useLayoutStore.setState({ activeRightPanelTab: null });
+                else next.setActiveRightPanelTab(previousTab);
+                next.setRightPanelOpen(previousOpen);
+              },
+              redo: () => {
+                const next = useLayoutStore.getState();
+                if (
+                  createdTab &&
+                  !next.terminals.some((tab) => tab.id === createdTab.id)
+                ) {
+                  useLayoutStore.setState({
+                    terminals: [...next.terminals, createdTab],
+                    activeTerminalId: createdTab.id,
+                  });
+                }
+                useLayoutStore.getState().setActiveRightPanelTab("terminal");
+                useLayoutStore.getState().setRightPanelOpen(true);
+              },
+            });
+            bumpHistory();
+            toast.message("已打开终端");
+          }}
+        >
+          打开终端
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            window.dispatchEvent(new Event("session-open-projects"));
+            toast.message("已打开项目选择器");
+          }}
+        >
+          打开项目选择器
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const button = document.querySelector<HTMLButtonElement>(
+              '.session-codex-composer button[aria-label="听写"], .session-codex-composer button[aria-label="停止听写"]',
+            );
+            if (!button) {
+              toast.message("当前输入没有听写");
+              return;
+            }
+            const stopping = button.getAttribute("aria-label") === "停止听写";
+            button.click();
+            toast.message(stopping ? "已停止听写" : "已开始听写");
+          }}
+        >
+          切换语音聊天
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const button = document.querySelector<HTMLButtonElement>(
+              '.session-codex-composer button[aria-label="听写"], .session-codex-composer button[aria-label="停止听写"]',
+            );
+            if (button?.getAttribute("aria-label") !== "停止听写") {
+              toast.message("当前没有进行中的听写");
+              return;
+            }
+            button.click();
+            toast.message("已将麦克风静音");
+          }}
+        >
+          切换语音聊天麦克风
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            toast.message("当前听写没有可静音的播放音频");
+          }}
+        >
+          切换语音聊天音频
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const button = document.querySelector<HTMLButtonElement>(
+              '.session-codex-composer button[aria-label="停止听写"]',
+            );
+            if (!button) {
+              toast.message("当前没有可结束的听写");
+              return;
+            }
+            button.click();
+            toast.message("已结束听写");
+          }}
+        >
+          结束语音聊天
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() => setNotesOpen(true)}
+        >
+          会议：记笔记
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const composer = document.querySelector(".session-codex-composer");
+            if (!composer) {
+              toast.message("当前输入不能添加照片");
+              return;
+            }
+            window.dispatchEvent(new Event("session-add-photos"));
+            toast.message("已打开照片选择");
+          }}
+        >
+          添加照片
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const button = document.querySelector<HTMLButtonElement>(
+              '.session-codex-composer button[aria-label="发送"]',
+            );
+            if (!button || button.disabled) {
+              toast.message("当前输入没有可发送的消息");
+              return;
+            }
+            button.click();
+            toast.message("已在后台发送消息");
+          }}
+        >
+          在后台发送消息
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const shown = document
+              .querySelector(".session-native-model-label")
+              ?.textContent?.trim();
+            const models = useModelCacheStore.getState().openAiModels;
+            const catalog =
+              models.find((item) => item.id === model || item.model === model) ??
+              models.find(
+                (item) => item.displayName === shown || item.model === shown || item.id === shown,
+              );
+            const next = cycleServiceTier(catalog?.serviceTiers ?? [], serviceTier);
+            if (!next) {
+              toast.message("当前模型没有可切换的速度");
+              return;
+            }
+            setServiceTier(next.id);
+            toast.message(`已切换到${next.label}`);
+          }}
+        >
+          循环切换速度
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() => {
+            const next = collaborationMode === "plan" ? "default" : "plan";
+            setCollaborationMode(next);
+            toast.message(next === "plan" ? "已开启规划模式" : "已关闭规划模式");
+          }}
+        >
+          切换规划模式
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const current = useConfigStore.getState().threadCwdMode;
+            const next = current === "worktree" ? "local" : "worktree";
+            useConfigStore.getState().setThreadCwdMode(next);
+            toast.message(
+              next === "worktree"
+                ? "新任务将使用独立工作树"
+                : "新任务将使用本地目录",
+            );
+          }}
+        >
+          切换本地/工作树
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => shiftReasoning(1, false)}
+        >
+          提高推理强度
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => shiftReasoning(-1, false)}
+        >
+          降低推理强度
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => shiftReasoning(1, true)}
+        >
+          循环切换推理强度
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            toast.message("没有可用的远程计算机。新任务仍使用本机");
+          }}
+        >
+          在主机间循环切换
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            if (!cwd) {
+              toast.message("当前聊天没有工作目录");
+              return;
+            }
+            setCommitOpen(true);
+          }}
+        >
+          提交或推送
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            if (!cwd) {
+              toast.message("当前聊天没有工作目录");
+              return;
+            }
+            setPullRequest({ draft: false });
+          }}
+        >
+          创建 PR
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            if (!cwd) {
+              toast.message("当前聊天没有工作目录");
+              return;
+            }
+            setPullRequest({ draft: true });
+          }}
+        >
+          创建草稿 PR
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            if (!cwd) {
+              toast.message("当前聊天没有工作目录");
+              return;
+            }
+            setBranchOpen(true);
+          }}
+        >
+          创建分支
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            if (!cwd) {
+              toast.message("当前聊天没有工作目录");
+              return;
+            }
+            setMergeOpen(true);
+          }}
+        >
+          合并 PR
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            if (!cwd) {
+              toast.message("当前聊天没有工作目录");
+              return;
+            }
+            setOpenPullRequest(true);
+          }}
+        >
+          在 GitHub 上打开 PR
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const files = useEditorStore.getState();
+            if (!cwd) {
+              toast.message("当前没有打开的文件");
+              return;
+            }
+            const next = !files.gitBlame;
+            files.setGitBlame(next);
+            const layout = useLayoutStore.getState();
+            layout.setRightPanelOpen(true);
+            layout.setActiveRightPanelTab("files");
+            toast.message(next ? "已显示 Git 追溯信息" : "已隐藏 Git 追溯信息");
+          }}
+        >
+          切换 Git 追溯信息
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            toast.message("浏览器不能为编辑器捕获应用快照");
+          }}
+        >
+          捕获应用快照
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            toast.message("当前页面没有可发送的浏览器批注");
+          }}
+        >
+          发送批注
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const card = takeClosedTab();
+            if (!card) {
+              toast.message("没有可重新打开的标签页");
+              return;
+            }
+            useAgentCenterStore.getState().addAgentCard(card, { activate: true });
+            void sessionTabSelect(card);
+            bumpHistory();
+            toast.message("已重新打开标签页");
+          }}
+        >
+          重新打开已关闭的标签页
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!canUndoAppAction()}
+          onSelect={() => {
+            const label = undoAppAction();
+            bumpHistory();
+            if (label) toast.message(`已撤销${label}`);
+          }}
+        >
+          撤销上一步操作
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!canRedoAppAction()}
+          onSelect={() => {
+            const label = redoAppAction();
+            bumpHistory();
+            if (label) toast.message(`已重做${label}`);
+          }}
+        >
+          重做上一步操作
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!threadId}
@@ -66,6 +664,108 @@ export function ConversationMenu({
         >
           <Download size={16} />
           导出 Markdown
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() =>
+            threadId && threadWorkflowActions.request(threadId, "copyMarkdown")
+          }
+        >
+          复制为 Markdown
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() =>
+            threadId && threadWorkflowActions.request(threadId, "copyDeeplink")
+          }
+        >
+          复制深层链接
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() => {
+            if (!threadId) return;
+            const text = lastAssistantCodeBlock(
+              useCodexStore.getState().events[threadId] ?? [],
+            );
+            if (text == null) {
+              toast.message("当前聊天没有代码块");
+              return;
+            }
+            void navigator.clipboard.writeText(text).then(
+              () => toast.success("已复制最后一个代码块"),
+              () => toast.error("未能复制代码块"),
+            );
+          }}
+        >
+          复制最后一个代码块
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() => {
+            if (!threadId) return;
+            const cwd = useCodexStore
+              .getState()
+              .threads.find((thread) => thread.id === threadId)?.cwd;
+            if (!cwd) {
+              toast.message("当前聊天没有工作目录");
+              return;
+            }
+            void navigator.clipboard.writeText(cwd).then(
+              () => toast.success("已复制工作目录"),
+              () => toast.error("未能复制工作目录"),
+            );
+          }}
+        >
+          复制工作目录
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() => {
+            if (!threadId) return;
+            const marked = useSessionAttentionStore
+              .getState()
+              .markUnread("codex", threadId);
+            toast.message(marked ? "已标记为未读" : "当前聊天没有可标记的回复");
+          }}
+        >
+          标记为未读
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() => {
+            if (!threadId) return;
+            const owner = document
+              .querySelector(".session-codex-composer")
+              ?.getAttribute("data-draft-owner");
+            if (owner !== sessionDraftKey("codex", threadId)) {
+              toast.message("当前输入不属于这个聊天");
+              return;
+            }
+            useSessionDraftStore.getState().setText(owner, "");
+            toast.message("已清除提示");
+          }}
+        >
+          清除提示
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() => {
+            if (!threadId) return;
+            const path = useCodexStore
+              .getState()
+              .threads.find((thread) => thread.id === threadId)?.path;
+            if (!path) {
+              toast.message("当前聊天没有磁盘路径");
+              return;
+            }
+            void navigator.clipboard.writeText(path).then(
+              () => toast.success("已复制对话路径"),
+              () => toast.error("未能复制对话路径"),
+            );
+          }}
+        >
+          复制对话路径
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!threadId}
@@ -94,6 +794,491 @@ export function ConversationMenu({
           onSelect={() => {
             if (!threadId) return;
             setBusy(true);
+            void codexService
+              .threadFork(threadId)
+              .then((forked) => {
+                const title = "分叉聊天";
+                useSessionNameStore.getState().setName("codex", forked.id, title);
+                useCodexStore.setState((state) => ({
+                  threads: [
+                    { ...forked, name: title, preview: title },
+                    ...state.threads.filter((thread) => thread.id !== forked.id),
+                  ],
+                }));
+                const center = useAgentCenterStore.getState();
+                if (
+                  !center.cards.some(
+                    (card) => card.id === forked.id && card.kind === "codex",
+                  )
+                ) {
+                  center.addAgentCard(
+                    {
+                      kind: "codex",
+                      id: forked.id,
+                      cwd: forked.cwd,
+                      preview: title,
+                    },
+                    { activate: true },
+                  );
+                }
+                useAgentCenterStore
+                  .getState()
+                  .setCurrentAgentCardId(forked.id, "codex");
+                useCodexStore.getState().setCurrentThreadId(forked.id);
+                toast.message("已分叉聊天");
+              })
+              .catch((error: unknown) => toast.error(String(error)))
+              .finally(() => setBusy(false));
+          }}
+        >
+          分叉聊天
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => setSearchChats(true)}>
+          切换聊天…
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const layout = useLayoutStore.getState();
+            const next = !layout.isSidebarOpen;
+            layout.setSidebarOpen(next);
+            if (next) window.dispatchEvent(new Event("session-open-projects"));
+            toast.message(next ? "已开启活动视图" : "已关闭活动视图");
+          }}
+        >
+          切换活动视图
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const trigger = document.activeElement;
+            const focusMain = () => useCodexStore.getState().triggerInputFocus();
+            if (trigger instanceof HTMLElement) {
+              const observer = new MutationObserver(() => {
+                if (document.activeElement !== trigger) return;
+                observer.disconnect();
+                focusMain();
+              });
+              observer.observe(trigger, { attributes: true, attributeFilter: ["data-state"] });
+              window.setTimeout(() => {
+                observer.disconnect();
+                focusMain();
+              }, 300);
+            } else focusMain();
+            toast.message("已聚焦主聊天输入框");
+          }}
+        >
+          聚焦主聊天输入框
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            if (!useSideChatStore.getState().chat) {
+              toast.message("当前没有打开的侧边聊天");
+              return;
+            }
+            const trigger = document.activeElement;
+            const focusSide = () => useSideChatStore.getState().requestFocus();
+            if (trigger instanceof HTMLElement) {
+              const observer = new MutationObserver(() => {
+                if (document.activeElement !== trigger) return;
+                observer.disconnect();
+                focusSide();
+              });
+              observer.observe(trigger, {
+                attributes: true,
+                attributeFilter: ["data-state"],
+              });
+              window.setTimeout(() => {
+                observer.disconnect();
+                focusSide();
+              }, 300);
+            } else focusSide();
+            toast.message("已聚焦侧边聊天");
+          }}
+        >
+          聚焦侧边聊天
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const canvas = document.querySelector(".session-drawing-canvas");
+            if (!canvas) {
+              toast.message("当前没有打开的工件画布");
+              return;
+            }
+            requestDrawingTool("select");
+            toast.message("已选择工件");
+          }}
+        >
+          工件：选择
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const canvas = document.querySelector(".session-drawing-canvas");
+            if (!canvas) {
+              toast.message("当前没有打开的工件画布");
+              return;
+            }
+            requestDrawingTool("hand");
+            toast.message("已切换为平移工件");
+          }}
+        >
+          工件：平移
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            if (!document.querySelector(".session-drawing-canvas")) {
+              toast.message("当前没有打开的工件画布");
+              return;
+            }
+            requestCanvasPrompt(null);
+            toast.message("已打开画布提示");
+          }}
+        >
+          画布：询问 ChatGPT
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            if (!document.querySelector(".session-drawing-canvas")) {
+              toast.message("当前没有打开的工件画布");
+              return;
+            }
+            requestDrawingTool("rect");
+            toast.message("已切换为矩形");
+          }}
+        >
+          工件：矩形
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            if (!document.querySelector(".session-drawing-canvas")) {
+              toast.message("当前没有打开的工件画布");
+              return;
+            }
+            requestDrawingTool("ellipse");
+            toast.message("已切换为圆形");
+          }}
+        >
+          工件：圆形
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            if (!document.querySelector(".session-drawing-canvas")) {
+              toast.message("当前没有打开的工件画布");
+              return;
+            }
+            requestDrawingTool("arrow");
+            toast.message("已切换为箭头");
+          }}
+        >
+          工件：箭头
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            if (!document.querySelector(".session-drawing-canvas")) {
+              toast.message("当前没有打开的工件画布");
+              return;
+            }
+            requestDrawingTool("line");
+            toast.message("已切换为直线");
+          }}
+        >
+          工件：直线
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            if (!document.querySelector(".session-drawing-canvas")) {
+              toast.message("当前没有打开的工件画布");
+              return;
+            }
+            requestDrawingTool("text");
+            toast.message("已切换为文本");
+          }}
+        >
+          工件：文本
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            if (!document.querySelector(".session-drawing-canvas")) {
+              toast.message("当前没有打开的工件画布");
+              return;
+            }
+            requestDrawingTool("comment");
+            toast.message("已切换为便签");
+          }}
+        >
+          工件：便签
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const link = window.location.href;
+            void navigator.clipboard.writeText(link).then(
+              () => toast.success("已复制页面链接"),
+              () => toast.error("未能复制页面链接"),
+            );
+          }}
+        >
+          复制页面链接
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const trigger = document.activeElement;
+            const focusContent = () => {
+              const editor = document.querySelector(
+                ".session-composer-sheet.is-full textarea, .session-composer-sheet.is-full [contenteditable='true']",
+              );
+              const control = document.querySelector(
+                ".session-composer-sheet.is-full .session-rich-tools button",
+              );
+              if (!(editor instanceof HTMLElement) || !(control instanceof HTMLElement)) {
+                toast.message("当前没有打开的页面编辑器");
+                return;
+              }
+              control.focus();
+              toast.message("已聚焦内容控件");
+            };
+            if (trigger instanceof HTMLElement) {
+              const observer = new MutationObserver(() => {
+                if (document.activeElement !== trigger) return;
+                observer.disconnect();
+                focusContent();
+              });
+              observer.observe(trigger, {
+                attributes: true,
+                attributeFilter: ["data-state"],
+              });
+              window.setTimeout(() => {
+                observer.disconnect();
+                focusContent();
+              }, 300);
+            } else focusContent();
+          }}
+        >
+          将焦点移至内容控件
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => applyExpandedList("ol")}>
+          编号列表
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => applyExpandedList("ul")}>
+          项目符号列表
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => applyExpandedList("check")}>
+          核对清单
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            toast.message("本机没有与 Dot 的对话");
+          }}
+        >
+          打开您的 Dot
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            window.setTimeout(() => {
+              const card = nextAttentionCard(
+                menuCardId.current ??
+                  useAgentCenterStore.getState().currentAgentCardId,
+              );
+              if (!card) {
+                toast.message("没有需关注的聊天");
+                return;
+              }
+              void sessionTabSelect(card);
+              toast.message("已切换到下一个需关注的聊天");
+            }, 0);
+          }}
+        >
+          下一个需关注的聊天
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            window.setTimeout(() => {
+              const currentId = useAgentCenterStore.getState().currentAgentCardId;
+              const card = adjacentFollowedCard(-1, currentId);
+              if (!card) {
+                toast.message("没有上一个聊天");
+                return;
+              }
+              useAgentCenterStore.getState().setCurrentAgentCardId(card.id, card.kind);
+              void sessionTabSelect(card);
+              toast.message("已切换到上一个聊天");
+            }, 50);
+          }}
+        >
+          上一个聊天
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            window.setTimeout(() => {
+              const currentId = useAgentCenterStore.getState().currentAgentCardId;
+              const card = adjacentFollowedCard(1, currentId);
+              if (!card) {
+                toast.message("没有下一个聊天");
+                return;
+              }
+              useAgentCenterStore.getState().setCurrentAgentCardId(card.id, card.kind);
+              void sessionTabSelect(card);
+              toast.message("已切换到下一个聊天");
+            }, 50);
+          }}
+        >
+          下一个聊天
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            window.setTimeout(() => {
+              const card = nextRecentViewedCard();
+              if (!card) {
+                toast.message("没有最近查看的聊天");
+                return;
+              }
+              useAgentCenterStore.getState().setCurrentAgentCardId(card.id, card.kind);
+              void sessionTabSelect(card);
+              toast.message("已切换到下一个最近查看的聊天");
+            }, 50);
+          }}
+        >
+          下一个最近查看的聊天
+        </DropdownMenuItem>
+        {[1, 2, 3, 4, 5, 6].map((slot) => (
+          <DropdownMenuItem
+            key={`recent-${slot}`}
+            onSelect={() => {
+              window.setTimeout(() => {
+                const card = recentViewedCards()[slot - 1];
+                if (!card) {
+                  toast.message(`最近聊天 ${slot} 还没有会话`);
+                  return;
+                }
+                useAgentCenterStore
+                  .getState()
+                  .setCurrentAgentCardId(card.id, card.kind);
+                void sessionTabSelect(card);
+                toast.message(`已打开最近聊天 ${slot}`);
+              }, 50);
+            }}
+          >
+            转到最近聊天 {slot}
+          </DropdownMenuItem>
+        ))}
+        {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((index) => (
+          <DropdownMenuItem
+            key={`tab-${index}`}
+            onSelect={() => {
+              window.setTimeout(() => {
+                const card = useAgentCenterStore.getState().cards[index - 1];
+                if (!card) {
+                  toast.message(`第 ${index} 个标签页还没有会话`);
+                  return;
+                }
+                useAgentCenterStore
+                  .getState()
+                  .setCurrentAgentCardId(card.id, card.kind);
+                void sessionTabSelect(card);
+                toast.message(`已聚焦第 ${index} 个标签页`);
+              }, 50);
+            }}
+          >
+            聚焦第 {index} 个标签页
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuItem
+          onSelect={() => {
+            const url = new URL(window.location.href);
+            url.searchParams.set("mode", "session");
+            url.searchParams.set("view", "agent");
+            window.location.assign(url.toString());
+          }}
+        >
+          切换到聊天
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            toast.message("本机没有 ChatGPT 工作模式");
+          }}
+        >
+          切换到工作
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const url = new URL(window.location.href);
+            const already =
+              url.searchParams.get("mode") === "session" &&
+              url.searchParams.get("view") === "agent";
+            if (already) {
+              toast.message("当前已是 Codex 会话");
+              return;
+            }
+            url.searchParams.set("mode", "session");
+            url.searchParams.set("view", "agent");
+            window.location.assign(url.toString());
+          }}
+        >
+          切换到 Codex
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const url = new URL(window.location.href);
+            url.searchParams.set("mode", "session");
+            url.searchParams.set("view", "settings");
+            window.location.assign(url.toString());
+          }}
+        >
+          设置
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            window.dispatchEvent(new Event("codex-open-mcp"));
+          }}
+        >
+          MCP
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            window.dispatchEvent(new Event("codex-open-personality"));
+          }}
+        >
+          个性
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            toast.message("未找到兼容的导入项", {
+              description: "后摩智能找不到来自其他编程智能体的兼容数据",
+            });
+          }}
+        >
+          从其他 AI 应用导入
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            window.dispatchEvent(new Event("codex-open-keyboard-shortcuts"));
+          }}
+        >
+          键盘快捷方式
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            window.dispatchEvent(new Event("codex-open-keyboard-shortcuts"));
+          }}
+        >
+          显示键盘快捷键
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const ids = useAgentCenterStore
+              .getState()
+              .cards.filter((card) => card.kind === "codex")
+              .map((card) => card.id);
+            const cleared = useSessionAttentionStore.getState().markFollowedRead(ids);
+            toast.message(
+              cleared > 0 ? "已全部标为已读" : "当前没有未读的关注聊天",
+            );
+          }}
+        >
+          全部标为已读
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId || busy}
+          onSelect={() => {
+            if (!threadId) return;
+            setBusy(true);
             void threadAccess(threadId, true)
               .then((access) => {
                 toast.message(
@@ -111,5 +1296,176 @@ export function ConversationMenu({
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+    {fileSearch && cwd && (
+      <FileSearchSheet cwd={cwd} onClose={() => setFileSearch(false)} />
+    )}
+    {shortcutsOpen && (
+      <KeyboardShortcutsSheet onClose={() => setShortcutsOpen(false)} />
+    )}
+    {commitOpen && cwd && (
+      <ComposerSheet
+        title="提交或推送"
+        description="打开提交或推送选项"
+        onClose={() => setCommitOpen(false)}
+      >
+        <p>选择提交已暂存的更改，或把当前分支推送到远程仓库。</p>
+        <button
+          type="button"
+          onClick={() => {
+            setCommitOpen(false);
+            setCommitForm(true);
+          }}
+        >
+          提交更改
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const root = cwd;
+            setCommitOpen(false);
+            void gitPush(root)
+              .then(() => toast.message("已推送到远程仓库"))
+              .catch((error: unknown) => toast.error(String(error)));
+          }}
+        >
+          推送到远程仓库
+        </button>
+      </ComposerSheet>
+    )}
+    {pullRequest && cwd && (
+      <PullRequestSheet
+        cwd={cwd}
+        draft={pullRequest.draft}
+        onClose={() => setPullRequest(null)}
+      />
+    )}
+    {searchChats && <SearchChatsSheet onClose={() => setSearchChats(false)} />}
+    {branchOpen && cwd && (
+      <CreateBranchSheet cwd={cwd} onClose={() => setBranchOpen(false)} />
+    )}
+    {mergeOpen && cwd && (
+      <MergePullRequestSheet cwd={cwd} onClose={() => setMergeOpen(false)} />
+    )}
+    {openPullRequest && cwd && (
+      <OpenPullRequestSheet
+        cwd={cwd}
+        onClose={() => setOpenPullRequest(false)}
+      />
+    )}
+    <GitCommitDialog
+      isOpen={commitForm}
+      onClose={() => setCommitForm(false)}
+      onConfirm={async (message) => {
+        if (!cwd) return;
+        await gitCommit(cwd, message);
+        toast.message(`已提交：${message}`);
+      }}
+    />
+    {archiveOpen && threadId && (
+      <ComposerSheet
+        title="归档聊天"
+        description="归档当前聊天"
+        onClose={() => setArchiveOpen(false)}
+      >
+        <p>将归档当前聊天，并从关注列表移出。Agent 不会被停止。</p>
+        <button type="button" disabled={busy} onClick={() => setArchiveOpen(false)}>
+          返回
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            const id = threadId;
+            setBusy(true);
+            void archiveThread(id)
+              .then(() => {
+                useAgentCenterStore.getState().removeCard({ kind: "codex", id });
+                useCodexStore.setState((state) => ({
+                  threads: state.threads.filter((thread) => thread.id !== id),
+                }));
+                toast.message("已归档聊天");
+                setArchiveOpen(false);
+              })
+              .catch((error: unknown) => toast.error(String(error)))
+              .finally(() => setBusy(false));
+          }}
+        >
+          确认归档
+        </button>
+      </ComposerSheet>
+    )}
+    {notesOpen && threadId && (
+      <ComposerSheet
+        title="会议：记笔记"
+        description="在此设备上使用 Meetings 开始记笔记"
+        onClose={() => setNotesOpen(false)}
+      >
+        <p>本机没有 Codex Meetings。笔记会追加到当前输入，不会自动开始会议。</p>
+        <textarea
+          aria-label="会议笔记"
+          value={notes}
+          onChange={(event) => setNotes(event.target.value)}
+        />
+        <button type="button" onClick={() => setNotesOpen(false)}>
+          取消
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const text = notes.trim();
+            if (!text) {
+              toast.message("先写下会议笔记");
+              return;
+            }
+            const owner = sessionDraftKey("codex", threadId);
+            const current = useSessionDraftStore.getState().drafts[owner]?.text ?? "";
+            useSessionDraftStore
+              .getState()
+              .setText(owner, current ? `${current}\n${text}` : text);
+            setNotes("");
+            setNotesOpen(false);
+            toast.message("已记入当前输入");
+          }}
+        >
+          记入当前输入
+        </button>
+      </ComposerSheet>
+    )}
+    {deleteOpen && threadId && (
+      <ComposerSheet
+        title="要删除任务？"
+        description="确认是否要删除当前聊天"
+        onClose={() => setDeleteOpen(false)}
+      >
+        <p>这将永久删除该任务及其子智能体任务。此操作无法撤销。</p>
+        <button type="button" disabled={busy} onClick={() => setDeleteOpen(false)}>
+          取消
+        </button>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            const id = threadId;
+            setBusy(true);
+            void deleteThread(id)
+              .then(async () => {
+                useAgentCenterStore.getState().removeCard({ kind: "codex", id });
+                useCodexStore.setState((state) => ({
+                  threads: state.threads.filter((thread) => thread.id !== id),
+                }));
+                if (useCodexStore.getState().currentThreadId === id)
+                  await codexService.setCurrentThread(null);
+                toast.message("任务已删除");
+                setDeleteOpen(false);
+              })
+              .catch(() => toast.error("无法删除任务。请重试。"))
+              .finally(() => setBusy(false));
+          }}
+        >
+          删除
+        </button>
+      </ComposerSheet>
+    )}
+    </>
   );
 }

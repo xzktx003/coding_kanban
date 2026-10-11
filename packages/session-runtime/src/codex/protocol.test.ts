@@ -4,6 +4,13 @@ import { readConfig, readRequirements, searchOccurrences, cancelLogin, logout, r
 import { RpcError } from "../transport/rpc.js";
 import { object, type Json } from "../core/json.js";
 import type { Rpc } from "./ownership.js";
+test("public MCP startup configuration retains only its explicit boolean", async () => {
+  const projected = await readConfig({}, async () => ({config:{desktop:{mcp_startup_authentication:true,secret:"PRIVATE",path:"/private"}}}));
+  assert.deepEqual(object(object(projected.config).desktop),{mcp_startup_authentication:true});
+  assert.doesNotMatch(JSON.stringify(projected),/PRIVATE|private/);
+  const absent = await readConfig({}, async () => ({config:{desktop:{mcp_startup_authentication:"true"}}}));
+  assert.equal(object(absent.config).desktop,undefined);
+});
 
 test("public config and requirements project only permission fields and never expose credentials or paths", async () => {
   const config = await readConfig({}, async (method, params) => {

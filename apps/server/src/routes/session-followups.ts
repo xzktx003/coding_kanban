@@ -144,6 +144,7 @@ function submit(value: unknown): FollowupSubmit {
     "approvalsReviewer",
     "sandboxPolicy",
     "collaborationMode",
+    "personality",
   ]);
   if (JSON.stringify(p).length > 32000) invalid();
   for (const name of ["cwd", "model", "effort"])
@@ -159,6 +160,11 @@ function submit(value: unknown): FollowupSubmit {
   if (typeof p.cwd === "string" && !p.cwd.trim()) p.cwd = null;
   if (p.cwd != null && !p.cwd.startsWith("/"))
     invalid("消息工作目录必须是绝对路径");
+  if (
+    p.personality != null &&
+    !["friendly", "pragmatic", "none"].includes(p.personality)
+  )
+    invalid();
   if (
     p.serviceTier != null &&
     (typeof p.serviceTier !== "string" ||

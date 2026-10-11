@@ -142,7 +142,7 @@ test("composer command and mention menus inherit the theme and fit desktop and m
   await editor.press("Backspace");
   await editor.pressSequentially("/no-such-command");
   await expect(page.locator("[data-composer-suggestions]")).toContainText(
-    "没有匹配项",
+    "无命令",
   );
   await editor.press("Escape");
   await expect(page.locator("[data-composer-suggestions]")).toHaveCount(0);

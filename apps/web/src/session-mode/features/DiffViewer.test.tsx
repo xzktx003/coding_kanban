@@ -75,6 +75,37 @@ it("reports clipboard rejection without claiming copy success", async () => {
   await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("复制失败"));
   expect((screen.getByRole("button", { name: "Copy" }) as HTMLButtonElement).disabled).toBe(false);
 });
+it("replaces an oversized native diff with the editor prompt", () => {
+  const open = vi.fn();
+  const huge = `--- a/generated.ts\n+++ b/generated.ts\n@@ -1 +1 @@\n-${"a".repeat(100_001)}\n+${"b".repeat(10)}\n`;
+  render(
+    <DiffViewer
+      native
+      presentation="review"
+      displayPath="generated.ts"
+      unifiedDiff={huge}
+      isCollapsed={false}
+      onOpenFile={open}
+    />,
+  );
+  expect(screen.getByRole("status").textContent).toContain("此文件过大，无法在此显示。");
+  expect(screen.queryByText("a".repeat(20))).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "在编辑器中打开" }));
+  expect(open).toHaveBeenCalledOnce();
+});
+it("labels a content-free rename with the plugin sentence", () => {
+  render(
+    <DiffViewer
+      native
+      presentation="review"
+      displayPath="next.ts"
+      unifiedDiff={"diff --git a/old.ts b/next.ts\nsimilarity index 100%\nrename from old.ts\nrename to next.ts\n"}
+      isCollapsed={false}
+    />,
+  );
+  expect(screen.getByText("文件已重命名，内容未变更")).toBeTruthy();
+  expect(screen.queryByText("重命名：old.ts → next.ts")).toBeNull();
+});
 it("labels binary and metadata-only native patches instead of an empty Diff", () => {
   const view = render(<DiffViewer native presentation="review" displayPath="image.bin" unifiedDiff={"diff --git a/image.bin b/image.bin\nBinary files a/image.bin and b/image.bin differ\n"} isCollapsed={false}/>);
   expect(screen.getByText("二进制文件不显示文本变更块")).toBeTruthy();

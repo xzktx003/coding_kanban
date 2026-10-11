@@ -122,7 +122,7 @@ for (const width of [375, 1440]) {
       .first();
     const label = (model: string, effort: string) =>
       page.getByRole("button", {
-        name: `Agent 与模型：Codex，${model}，${effort}`,
+        name: `模型：${model}，${effort}`,
         exact: true,
       });
     await expect(label("gpt-6-astra", "high")).toBeVisible();
@@ -148,8 +148,9 @@ for (const width of [375, 1440]) {
     await editor.click();
     await expect(label("gpt-6-luna", "high")).toBeVisible();
     const notice = page.locator(".session-model-change-notice");
-    await expect(notice).toContainText("gpt-6-sol → gpt-6-luna");
-    await expect(notice).toContainText("下次发送生效");
+    await expect(notice).toContainText("gpt-6-sol");
+    await expect(notice).toContainText("gpt-6-luna");
+    await expect(notice).toContainText("在对话中途更改模型会降低性能");
     await expect(editor).toContainText("A 的未发送草稿");
     expect(
       f.calls.filter((c) => /\/turn\/(start|steer|interrupt)$/.test(c.path)),
@@ -159,7 +160,7 @@ for (const width of [375, 1440]) {
     await expect(label("gpt-6-sol", "low")).toBeVisible();
     await expect(notice).toHaveCount(0);
     await editor.fill("B 的独立消息");
-    await page.getByRole("button", { name: "发送消息", exact: true }).click();
+    await page.getByRole("button", { name: "发送", exact: true }).click();
     await expect
       .poll(
         () =>
@@ -182,7 +183,8 @@ for (const width of [375, 1440]) {
     await page.reload();
     await selectThread(page, "ux-0");
     await expect(label("gpt-6-luna", "high")).toBeVisible();
-    await expect(notice).toContainText("gpt-6-sol → gpt-6-luna");
+    await expect(notice).toContainText("gpt-6-sol");
+    await expect(notice).toContainText("gpt-6-luna");
     await expect(editor).toContainText("A 的未发送草稿");
     const bounds = await notice.evaluate((el) => {
       const r = el.getBoundingClientRect();
@@ -201,7 +203,7 @@ for (const width of [375, 1440]) {
     expect(bounds.scroll).toBeLessThanOrEqual(bounds.width);
     if (width < 768) {
       const close = await notice
-        .getByRole("button", { name: "收起模型切换提示" })
+        .getByRole("button", { name: "关闭模型升级横幅" })
         .boundingBox();
       expect(close!.width).toBeGreaterThanOrEqual(44);
       expect(close!.height).toBeGreaterThanOrEqual(44);
@@ -210,14 +212,14 @@ for (const width of [375, 1440]) {
       path: `.dev-runtime/session-models/notice-${width}.png`,
       animations: "disabled",
     });
-    await notice.getByRole("button", { name: "收起模型切换提示" }).click();
+    await notice.getByRole("button", { name: "关闭模型升级横幅" }).click();
     await expect(notice).toHaveCount(0);
     await page.reload();
     await selectThread(page, "ux-0");
     await expect(notice).toHaveCount(0);
     await expect(label("gpt-6-luna", "high")).toBeVisible();
     const beforeA = f.calls.length;
-    await page.getByRole("button", { name: "发送消息", exact: true }).click();
+    await page.getByRole("button", { name: "发送", exact: true }).click();
     await expect
       .poll(
         () =>

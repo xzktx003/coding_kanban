@@ -7,6 +7,7 @@ import { Button } from "@session/components/ui/button";
 import { isTauri } from "@session/hooks/runtime";
 import { writeFile } from "@session/services";
 import { openPlanWindow } from "@session/features/thread-workflows/planWindow";
+import { planSidePanel } from "@session/features/thread-workflows/planSidePanel";
 import { useThemeContext } from "@session/contexts/ThemeContext";
 import { useCodexContentOwner } from "../presentation/ownerContext";
 import { NativePlanOpenWindow } from "@session/features/thread-workflows/NativeMessageIcons";
@@ -102,8 +103,12 @@ export const PlanContentItem = ({
               variant="outline"
               size="xs"
               disabled={running}
-              aria-label="在新窗口打开计划"
-              title="在新窗口打开计划"
+              aria-label={
+                i18n?.language?.startsWith("zh")
+                  ? "在新窗口打开计划"
+                  : t("plan.openWindow")
+              }
+              title={t("plan.openWindow")}
               onClick={() => {
                 try {
                   openPlanWindow({
@@ -123,6 +128,22 @@ export const PlanContentItem = ({
             >
               {i18n?.language?.startsWith("zh") ? "打开" : "Open"}
               <NativePlanOpenWindow width={12} height={12} />
+            </Button>
+            <Button
+              variant="outline"
+              size="xs"
+              disabled={running}
+              aria-label={t("plan.openSide")}
+              title={t("plan.openSide")}
+              onClick={() =>
+                planSidePanel.open({
+                  text,
+                  threadId: owner.threadId ?? undefined,
+                  turnId,
+                })
+              }
+            >
+              {t("plan.openSide")}
             </Button>
             <Button
               variant="ghost"
@@ -155,9 +176,7 @@ export const PlanContentItem = ({
               aria-label={
                 collapsed ? t("plan.expandContent") : t("plan.collapseContent")
               }
-              title={
-                collapsed ? t("plan.expandContent") : t("plan.collapseContent")
-              }
+              title={collapsed ? t("plan.expand") : t("plan.collapse")}
             >
               <NativeChevronDown
                 width={12}

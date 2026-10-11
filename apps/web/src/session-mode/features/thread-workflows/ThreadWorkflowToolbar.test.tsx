@@ -48,6 +48,31 @@ it("only the visible owning panel consumes export even if the same thread remain
   );
   expect(downloadThreadMarkdown).toHaveBeenCalledTimes(1);
 });
+it("copies the visible transcript as Markdown and a deep link without downloading", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  render(
+    <ThreadWorkflowToolbar
+      threadId="owner"
+      title="当前会话"
+      rows={rows}
+      turns={[]}
+      onNavigate={vi.fn()}
+    />,
+  );
+  act(() => threadWorkflowActions.request("owner", "copyMarkdown"));
+  await vi.waitFor(() =>
+    expect(writeText.mock.calls.at(-1)?.[0]).toContain("Stable target 中文"),
+  );
+  expect(downloadThreadMarkdown).not.toHaveBeenCalled();
+  act(() => threadWorkflowActions.request("owner", "copyDeeplink"));
+  await vi.waitFor(() =>
+    expect(String(writeText.mock.calls.at(-1)?.[0])).toContain("thread=owner"),
+  );
+});
 it("a deliberate keyboard request focuses only its captured transcript panel", () => {
   const view = render(
     <>

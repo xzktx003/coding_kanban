@@ -31,7 +31,26 @@ export function registerCodexRoutes(
       );
       return reply.type("application/json").send(JSON.stringify(result));
     });
+  post("mcp/reload", (body) => {
+    if(Object.keys(object(body)).length)throw new HttpError(400,"MCP refresh takes no parameters");
+    return service.raw("config/mcpServer/reload",null);
+  });
   const methods: Record<string, string> = {};
+  const previewBody = (body: Json, fields: string[]) => {
+    const value = object(body);
+    if (Object.keys(value).some(key => !fields.includes(key))) throw new HttpError(400, "Unexpected MCP preview parameter");
+    return value;
+  };
+  post("mcp/slack-preview/context", (body) => service.slackPreviews.context(previewBody(body, ["href"]).href));
+  post("mcp/slack-preview/read", (body) => {
+    const value = previewBody(body, ["href", "contextToken"]);
+    return service.slackPreviews.read(value.href, value.contextToken);
+  });
+  post("mcp/github-preview/context", (body) => service.githubPreviews.context(previewBody(body, ["href"]).href));
+  post("mcp/github-preview/read", (body) => {
+    const value = previewBody(body, ["href", "contextToken"]);
+    return service.githubPreviews.read(value.href, value.contextToken);
+  });
   for (const path of [
     "thread/start",
     "thread/resume",
@@ -77,6 +96,7 @@ export function registerCodexRoutes(
     "account/get": "account/read",
     "mcp/oauth/login": "mcpServer/oauth/login",
     "mcp/status/list": "mcpServerStatus/list",
+    "feedback/upload": "feedback/upload",
   });
   for (const [path, method] of Object.entries(methods))
     post(path, (body) =>

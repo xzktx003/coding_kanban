@@ -106,6 +106,18 @@ function ApprovalCard({
         ? commandValue.join(" ")
         : null;
   const network = command?.networkApprovalContext;
+  // Native Ur/Kba keeps the first allowed host amendment as a separate
+  // leading action. Visibility still comes only from allowed decisions.
+  const leading = network
+    ? scopes.find(
+        (decision) =>
+          typeof decision === "object" &&
+          "applyNetworkPolicyAmendment" in decision &&
+          decision.applyNetworkPolicyAmendment.network_policy_amendment
+            .action === "allow",
+      )
+    : undefined;
+  const menuScopes = scopes.filter((decision) => decision !== leading);
   const destination = network
     ? /^(https?|socks5)$/.test(network.protocol)
       ? `${network.protocol}://${network.host}`
@@ -360,11 +372,16 @@ function ApprovalCard({
             {decisions.length === 0 && (
               <span role="status">{t("approval.noDecisions")}</span>
             )}
+            {leading && (
+              <div className="codex-approval-leading-action">
+                {button(leading)}
+              </div>
+            )}
             {deny.map((decision) => button(decision))}
             {once ? (
               <div className="codex-approval-split">
                 {button(once, true)}
-                {scopes.length > 0 && (
+                {menuScopes.length > 0 && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
@@ -383,7 +400,9 @@ function ApprovalCard({
                       {decisions
                         .filter(
                           (decision) =>
-                            decision !== "decline" && decision !== "cancel",
+                            decision !== "decline" &&
+                            decision !== "cancel" &&
+                            decision !== leading,
                         )
                         .map((decision) => {
                           const { label, detail } = describe(decision);
@@ -410,7 +429,7 @@ function ApprovalCard({
                 )}
               </div>
             ) : (
-              scopes.map((decision, index) => button(decision, index === 0))
+              menuScopes.map((decision, index) => button(decision, index === 0))
             )}
           </div>
         </>

@@ -531,7 +531,7 @@ for (const { name, width, height, touch } of profiles)
         if (touch) await environmentChoice.tap();
         else await environmentChoice.click();
         await expect(questions.getByText("补充要求")).toBeVisible();
-        const answer = questions.getByPlaceholder("请输入你的回答");
+        const answer = questions.getByPlaceholder("在此输入");
         await fitsViewport(
           page,
           answer,

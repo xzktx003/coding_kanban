@@ -1,8 +1,11 @@
+import { v4 as randomUUID } from "uuid";
 import { useEffect, useRef, useState, type PointerEvent, type CSSProperties } from "react";
 import {
   Hand,
+  MousePointer2,
   Pencil,
   ArrowUpRight,
+  Circle,
   Square,
   Type,
   MessageSquare,
@@ -11,8 +14,15 @@ import {
   Trash2,
   Minus,
   Plus,
+  Slash,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  onCanvasPrompt,
+  onDrawingTool,
+  type DrawingTool,
+} from "./drawingTool";
+import { appendDraft } from "@session/stores/useSessionDraftStore";
 import type {
   ImageAttachment,
   useImageAttachments,
@@ -22,6 +32,7 @@ import { ComposerSheet } from "./ComposerSheet";
 import { composerDrafts } from "./drafts";
 import {
   arrowHead,
+  ellipseGeometry,
   blankDrawing,
   drawingToFile,
   drawingTextLayout,
@@ -102,7 +113,7 @@ export function DrawingEditor({
     [ready, setReady] = useState(!item),
     [error, setError] = useState<string | null>(null),
     [saving, setSaving] = useState(false);
-  const [tool, setTool] = useState<DrawingMark["kind"] | "hand">("pen"),
+  const [tool, setTool] = useState<DrawingTool>("pen"),
     [color, setColor] = useState("#d76b26"),
     [width, setWidth] = useState(4);
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 }),
@@ -110,6 +121,11 @@ export function DrawingEditor({
     [redo, setRedo] = useState<DrawingMark[]>([]),
     [pending, setPending] = useState<Point | null>(null),
     [label, setLabel] = useState("");
+  const [canvasPrompt, setCanvasPrompt] = useState<{
+    x: number;
+    y: number;
+    text: string;
+  } | null>(null);
   const svg = useRef<SVGSVGElement>(null),
     docRef = useRef(doc),
     viewRef = useRef(view),
@@ -130,6 +146,54 @@ export function DrawingEditor({
     setDoc(next);
     composerDrafts.drawing(owner, key, next);
   };
+  const pointer = useRef<{ x: number; y: number } | null>(null);
+  const openCanvasPrompt = (client: { x: number; y: number } | null) => {
+    const host = svg.current?.parentElement;
+    if (!host) return;
+    const rect = host.getBoundingClientRect();
+    const rawX = client ? client.x - rect.left : rect.width / 2;
+    const rawY = client ? client.y - rect.top : rect.height / 2;
+    setCanvasPrompt({
+      x: Math.min(Math.max(8, rawX), Math.max(8, rect.width - 8)),
+      y: Math.min(Math.max(8, rawY), Math.max(8, rect.height - 8)),
+      text: "",
+    });
+  };
+  const openCanvasPromptRef = useRef(openCanvasPrompt);
+  openCanvasPromptRef.current = openCanvasPrompt;
+  useEffect(() => onDrawingTool(setTool), []);
+  useEffect(
+    () => onCanvasPrompt((point) => openCanvasPromptRef.current(point)),
+    [],
+  );
+  useEffect(() => {
+    const typing = (target: EventTarget | null) =>
+      target instanceof HTMLElement &&
+      (target.isContentEditable ||
+        !!target.closest("input, textarea, select, [contenteditable='true']"));
+    const onKey = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || typing(event.target))
+        return;
+      if (event.key === "/" || event.key === "?") {
+        event.preventDefault();
+        openCanvasPromptRef.current(pointer.current);
+        return;
+      }
+      if (event.shiftKey) return;
+      if (event.key === "v" || event.key === "V") setTool("select");
+      else if (event.key === "h" || event.key === "H") setTool("hand");
+      else if (event.key === "r" || event.key === "R") setTool("rect");
+      else if (event.key === "o" || event.key === "O") setTool("ellipse");
+      else if (event.key === "a" || event.key === "A") setTool("arrow");
+      else if (event.key === "l" || event.key === "L") setTool("line");
+      else if (event.key === "t" || event.key === "T") setTool("text");
+      else if (event.key === "n" || event.key === "N") setTool("comment");
+      else return;
+      event.preventDefault();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   useEffect(() => {
     mounted.current = true;
     let stopped = false,
@@ -211,14 +275,14 @@ export function DrawingEditor({
       };
       return;
     }
-    if (pointers.current.size > 1 || tool === "hand") return;
+    if (pointers.current.size > 1 || tool === "hand" || tool === "select") return;
     if (tool === "text" || tool === "comment") {
       setPending(point(e));
       setLabel("");
       return;
     }
     const mark: DrawingMark = {
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       kind: tool,
       points: [point(e)],
       color,
@@ -307,7 +371,7 @@ export function DrawingEditor({
       marks: [
         ...docRef.current.marks,
         {
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           kind: tool === "comment" ? "comment" : "text",
           points: [pending],
           color,
@@ -393,18 +457,21 @@ export function DrawingEditor({
       >
         {(
           [
-            { id: "hand", name: "移动", Icon: Hand },
+            { id: "select", name: "工件：选择", Icon: MousePointer2 },
+            { id: "arrow", name: "工件：箭头", Icon: ArrowUpRight },
+            { id: "line", name: "工件：直线", Icon: Slash },
+            { id: "hand", name: "工件：平移", Icon: Hand },
             { id: "pen", name: "画笔", Icon: Pencil },
-            { id: "arrow", name: "箭头", Icon: ArrowUpRight },
-            { id: "rect", name: "矩形", Icon: Square },
-            { id: "text", name: "文字", Icon: Type },
-            { id: "comment", name: "批注", Icon: MessageSquare },
+            { id: "rect", name: "工件：矩形", Icon: Square },
+            { id: "ellipse", name: "工件：圆形", Icon: Circle },
+            { id: "text", name: "工件：文本", Icon: Type },
+            { id: "comment", name: "工件：便签", Icon: MessageSquare },
           ] as const
         ).map(({ id, name, Icon }) => (
           <button
             type="button"
             key={id}
-            aria-label={name}
+            aria-label={id === "comment" ? "批注" : name}
             title={name}
             aria-pressed={tool === id}
             onClick={() => {
@@ -486,9 +553,13 @@ export function DrawingEditor({
           <Plus />
         </button>
       </div>
+      <div className="session-drawing-stage">
       <svg
         ref={svg}
         className="session-drawing-canvas"
+        onPointerMoveCapture={(event) => {
+          pointer.current = { x: event.clientX, y: event.clientY };
+        }}
         viewBox={`0 0 ${doc.width} ${doc.height}`}
         preserveAspectRatio="none"
         style={{ aspectRatio: `${doc.width}/${doc.height}`, "--drawing-ratio":doc.width/doc.height } as CSSProperties}
@@ -540,6 +611,8 @@ export function DrawingEditor({
                       height={Math.abs(b.y - a.y)}
                       {...common}
                     />
+                  ) : m.kind === "ellipse" ? (
+                    <ellipse {...ellipseGeometry(a, b)} {...common} />
                   ) : m.kind === "text" || m.kind === "comment" ? (
                     <DrawingText
                       mark={m}
@@ -576,12 +649,47 @@ export function DrawingEditor({
           </g>
         </g>
       </svg>
+      {canvasPrompt && (
+        <form
+          className="session-canvas-prompt"
+          style={{ left: canvasPrompt.x, top: canvasPrompt.y }}
+          role="dialog"
+          aria-label="画布：询问 ChatGPT"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const text = canvasPrompt.text.trim();
+            if (!text) return;
+            appendDraft(owner, text);
+            setCanvasPrompt(null);
+            toast.message("已把画布提示加入输入");
+          }}
+        >
+          <p>在指针位置打开画布提示</p>
+          <textarea
+            autoFocus
+            aria-label="画布提示"
+            placeholder="询问 ChatGPT…"
+            value={canvasPrompt.text}
+            onChange={(event) =>
+              setCanvasPrompt((current) =>
+                current ? { ...current, text: event.target.value } : current,
+              )
+            }
+          />
+          <button type="submit">添加到输入</button>
+          <button type="button" onClick={() => setCanvasPrompt(null)}>
+            取消
+          </button>
+        </form>
+      )}
+      </div>
       {pending && (
         <div className="session-drawing-comment">
           <label>
             说明文字
             <textarea
               autoFocus
+              aria-label="说明文字"
               maxLength={500}
               value={label}
               onChange={(e) => setLabel(e.target.value)}
@@ -610,6 +718,8 @@ export function DrawingEditor({
                     pen: "笔画",
                     arrow: "箭头",
                     rect: "矩形",
+                    ellipse: "圆形",
+                    line: "直线",
                     text: "文字",
                     comment: "批注",
                   }[m.kind]}

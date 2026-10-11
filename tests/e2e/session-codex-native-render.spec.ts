@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
+import { projectCodexChatValue } from "../../packages/shared/src/codex-chat-projection";
 
 const patch =
   "--- a/example.py\n+++ b/example.py\n@@ -115,3 +115,4 @@\n context\n-old = 1\n+new = 2\n+extra = 3\n tail\n@@ -307,1 +308,1 @@\n-old = 4\n+new = 5\n";
@@ -67,7 +68,9 @@ async function state(page: Page, theme: string, events: any[]) {
         currentThreadId: "ux-0",
       });
     },
-    { theme, events },
+    // Match the production gateway before data crosses into the browser. Full
+    // tool results are never an implicit detail source for a chat snapshot.
+    { theme, events: projectCodexChatValue(events) as any[] },
   );
 }
 const item = (id: string, data: any) => ({
@@ -79,18 +82,28 @@ const item = (id: string, data: any) => ({
     item: { id, ...data },
   },
 });
+function observeHistoryReads(page: Page) {
+  const urls: string[] = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (/\/codex\/thread\/(read|turns\/list)$/.test(url.pathname))
+      urls.push(url.href);
+  });
+  return urls;
+}
 
 for (const width of [1440, 390])
   test.describe(`${width}px native content`, () => {
     test.use({ hasTouch: width === 390, isMobile: width === 390 });
     for (const theme of ["dark", "light"]) {
-      test(`native semantic tools decode media and settle interrupted activity (${width}, ${theme})`, async ({
+      test(`native bounded tool metadata and explicit owner image settle interrupted activity (${width}, ${theme})`, async ({
         page,
       }, info) => {
         test.setTimeout(90000);
         const errors: string[] = [];
         page.on("pageerror", (error) => errors.push(error.message));
-        await installSessionUxFixture(page);
+        const fixture = await installSessionUxFixture(page);
+        const historyReads = observeHistoryReads(page);
         let reads = 0;
         await page.route("**/api/filesystem/read-file", async (route) => {
           reads++;
@@ -157,17 +170,84 @@ for (const width of [1440, 390])
           surface.getByText("上下文已压缩", { exact: true }),
         ).toBeVisible();
         expect(reads).toBe(0);
-        const generated = surface.getByRole("img", {
-          name: "生成的图片",
-          exact: true,
+        await expect(
+          surface.locator("[data-transcript-details-unloaded]"),
+        ).toHaveCount(3);
+        await expect(surface.locator("img, audio")).toHaveCount(0);
+        await expect(
+          surface.getByRole("link", { name: "资源文档" }),
+        ).toHaveCount(0);
+        await expect(
+          surface.getByRole("button", { name: "显示原始工具调用输出" }),
+        ).toHaveCount(0);
+        await expect(
+          surface.getByText("工具未返回任何内容", { exact: true }),
+        ).toHaveCount(0);
+        await expect(
+          surface.getByText("真实媒体解码验收", { exact: true }),
+        ).toHaveCount(0);
+        expect(reads).toBe(0);
+        const projected = projectCodexChatValue(events) as any[];
+        expect(
+          projected.find((event) => event.params.item.id === "mcp").params.item,
+        ).toMatchObject({
+          result: null,
+          arguments: null,
+          transcriptMetadataOnly: true,
         });
-        await expect
-          .poll(() =>
-            generated.evaluate((el: HTMLImageElement) => el.naturalWidth),
-          )
-          .toBe(120);
-        await surface.getByRole("button", { name: "已查看 1 张图像" }).click();
-        const inspected = surface.getByRole("img", {
+        expect(
+          projected.find((event) => event.params.item.id === "image").params
+            .item.result,
+        ).toBeUndefined();
+        await page.screenshot({
+          path: info.outputPath(`semantic-metadata-${width}-${theme}.png`),
+          fullPage: true,
+        });
+
+        // An independent, explicit read-only component fixture tests an available
+        // owner image. It does not restore a full tool result/history into chat.
+        await page.evaluate(async () => {
+          const dependency = (window as any).__sessionFixtureDependency;
+          const [react, dom, { EventItem }] = await Promise.all([
+            import(dependency("react.js")),
+            import(dependency("react-dom_client.js")),
+            import("/src/session-mode/components/codex/items/EventItem.tsx"),
+          ]);
+          const R = react.default ?? react;
+          const host = document.createElement("div");
+          host.className = "session-mode";
+          host.id = "explicit-owner-image-fixture";
+          host.style.cssText =
+            "position:fixed;inset:220px 16px auto;z-index:90;padding:12px;background:var(--background);";
+          document.body.append(host);
+          const { createRoot } = dom.default ?? dom;
+          const root = createRoot(host);
+          (window as any).__explicitOwnerImageRoot = root;
+          root.render(
+            R.createElement(
+              "div",
+              { className: "codex-presentation" },
+              R.createElement(EventItem, {
+                event: {
+                  method: "item/completed",
+                  params: {
+                    threadId: "ux-0",
+                    turnId: "explicit-image-read",
+                    item: {
+                      id: "explicit-image",
+                      type: "imageView",
+                      path: "/fixture/owner-image.png",
+                    },
+                  },
+                },
+              }),
+            ),
+          );
+        });
+        const explicit = page.locator("#explicit-owner-image-fixture");
+        expect(reads).toBe(0);
+        await explicit.getByRole("button", { name: "已查看 1 张图像" }).click();
+        const inspected = explicit.getByRole("img", {
           name: "查看的图片",
           exact: true,
         });
@@ -177,28 +257,39 @@ for (const width of [1440, 390])
           )
           .toBe(120);
         expect(reads).toBe(1);
-        await surface.getByRole("button", { name: /^Inspect/ }).click();
-        await expect(
-          surface.getByRole("link", { name: "资源文档" }),
-        ).toHaveAttribute("href", "https://example.invalid/resource");
-        const audio = surface.locator("audio");
-        await expect
-          .poll(() => audio.evaluate((el: HTMLAudioElement) => el.readyState))
-          .toBeGreaterThanOrEqual(1);
-        expect(
-          await audio.evaluate((el: HTMLAudioElement) => el.duration),
-        ).toBeCloseTo(0.1, 2);
-        await page.screenshot({
-          path: info.outputPath(`semantic-${width}-${theme}.png`),
-          fullPage: true,
-        });
-        await surface
-          .getByRole("button", { name: "放大生成的图片", exact: true })
+        await explicit
+          .getByRole("button", { name: "放大查看的图片", exact: true })
           .click();
         await expect(
           page.getByRole("dialog").getByRole("link", { name: "下载图片" }),
         ).toBeVisible();
         await page.keyboard.press("Escape");
+        await page.evaluate(() => {
+          (window as any).__explicitOwnerImageRoot.unmount();
+          delete (window as any).__explicitOwnerImageRoot;
+          document.getElementById("explicit-owner-image-fixture")?.remove();
+        });
+        // Event-driven chat reconciliation may finish while the explicit image
+        // is opened; it must keep tool bodies unloaded and use chat projection.
+        await expect(
+          surface.locator("[data-transcript-details-unloaded]"),
+        ).toHaveCount(3);
+        await expect(surface.locator("img, audio")).toHaveCount(0);
+        await expect(
+          surface.getByRole("button", { name: "显示原始工具调用输出" }),
+        ).toHaveCount(0);
+        expect(
+          historyReads.every(
+            (url) => new URL(url).searchParams.get("view") === "chat",
+          ),
+        ).toBe(true);
+        expect(
+          fixture.calls.filter(({ path }) =>
+            /\/(turn\/(start|steer|interrupt)|thread\/(resume|fork)|review\/start)$/.test(
+              path,
+            ),
+          ),
+        ).toEqual([]);
         const running = {
           method: "item/started",
           params: {
@@ -233,6 +324,9 @@ for (const width of [1440, 390])
             },
           },
         ]);
+        await surface
+          .getByRole("button", { name: "工作过程", exact: true })
+          .click();
         await expect(
           surface.locator('[data-codex-row="event-native-turn-unfinished"]'),
         ).toBeVisible();
@@ -343,13 +437,14 @@ for (const width of [1440, 390])
         });
         expect(errors).toEqual([]);
       });
-      test(`Codex native content preserves the detached composer and file hover (${width}, ${theme})`, async ({
+      test(`Codex native content preserves the detached composer and metadata source navigation (${width}, ${theme})`, async ({
         page,
       }, info) => {
         test.setTimeout(90000);
         const errors: string[] = [];
         page.on("pageerror", (error) => errors.push(error.message));
-        await installSessionUxFixture(page);
+        const fixture = await installSessionUxFixture(page);
+        const historyReads = observeHistoryReads(page);
         await page.setViewportSize({ width, height: 1000 });
         await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
         await page
@@ -410,53 +505,105 @@ for (const width of [1440, 390])
         expect(
           await body.evaluate((el) => getComputedStyle(el).borderTopWidth),
         ).toBe("0px");
+        // Completed work is folded separately from the final answer. Inspect it
+        // explicitly; expanding does not load the discarded raw patch body.
+        await surface
+          .getByRole("button", { name: "工作过程", exact: true })
+          .click();
         const patchRow = surface.locator(
           '[data-codex-row="event-native-turn-patch"]',
         );
-        await patchRow
-          .getByRole("button", { name: "已编辑", exact: true })
-          .click();
-        const inlinePatch = patchRow.locator(".codex-inline-diff");
-        await expect(inlinePatch).toBeVisible();
         await expect(
-          inlinePatch.getByText("307", { exact: true }),
+          patchRow.getByRole("button", { name: "已编辑", exact: true }),
+        ).toBeDisabled();
+        await expect(
+          patchRow.locator("[data-transcript-details-unloaded]"),
         ).toBeVisible();
-        await expect(inlinePatch.locator("[data-diff-toolbar]")).toHaveCount(0);
+        await expect(patchRow.locator(".codex-inline-diff")).toHaveCount(0);
         await expect(
-          inlinePatch.getByText("@@ -115,3 +115,4 @@", { exact: true }),
+          patchRow.locator("[data-kind=add], [data-kind=remove]"),
         ).toHaveCount(0);
-        await page
-          .context()
-          .grantPermissions(["clipboard-read", "clipboard-write"]);
-        await inlinePatch.hover();
-        await inlinePatch
-          .getByRole("button", { name: "Copy", exact: true })
-          .click();
-        expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
-          patch,
-        );
-        const filename = page
-          .locator(".codex-turn-diff-summary")
-          .getByTitle("example.py", { exact: true });
+        const summary = page.locator(".codex-turn-diff-summary");
+        const filename = summary.locator(".codex-turn-diff-title-text");
         await expect(filename).toBeVisible();
-        if (width === 390)
-          await page
-            .getByRole("button", { name: "预览 example.py Diff", exact: true })
-            .click();
-        else await filename.hover();
-        const preview = page.locator('[data-slot="hover-card-content"]');
-        await expect(preview).toBeVisible();
-        await expect(preview.getByText("307", { exact: true })).toBeVisible();
-        const previewTitle = preview.locator(".codex-hover-diff-label");
+        await expect(filename).toHaveText("已编辑 example.py");
         await expect(
-          previewTitle.getByTitle("example.py", { exact: true }),
-        ).toHaveText("example.py");
-        expect((await previewTitle.boundingBox())!.width).toBeGreaterThan(75);
+          summary.locator("[data-transcript-details-unloaded]"),
+        ).toBeVisible();
+        await filename.hover();
+        await expect(
+          page.locator('[data-slot="hover-card-content"]'),
+        ).toHaveCount(0);
+        await expect(
+          page.getByRole("button", {
+            name: "预览 example.py Diff",
+            exact: true,
+          }),
+        ).toHaveCount(0);
+        await expect(
+          summary.getByRole("button", { name: "Review", exact: true }),
+        ).toHaveCount(0);
+        await expect(
+          summary.getByRole("button", { name: "审查", exact: true }),
+        ).toHaveCount(0);
+        // Metadata keeps real source navigation while refusing unavailable diff
+        // previews, copied patches and invented addition/deletion counts.
+        const sourceReads: Array<{ root: string; path: string }> = [];
+        await page.route(
+          "**/api/session/workspace-files/read",
+          async (route) => {
+            const { root, path } = route.request().postDataJSON();
+            sourceReads.push({ root, path });
+            const content = "owner source file content";
+            await route.fulfill({
+              json: {
+                path,
+                content,
+                version: "owner-source-v1",
+                size: Buffer.byteLength(content),
+              },
+            });
+          },
+        );
+        await summary
+          .getByRole("button", { name: "查看文件 example.py", exact: true })
+          .click();
+        await expect
+          // The dev entry uses StrictMode: its mount effect can repeat a
+          // read-only request. Every request must still target the same owner.
+          .poll(() => [
+            ...new Set(sourceReads.map((value) => JSON.stringify(value))),
+          ])
+          .toEqual([
+            JSON.stringify({
+              root: "/fixture/项目/very-long-project-path-for-ui-regression",
+              path: changes[0].path,
+            }),
+          ]);
+        const selected = await page.evaluate(async () => {
+          const path = "/src/session-mode/stores/useEditorStore.ts";
+          const { useEditorStore } = await import(
+            performance
+              .getEntriesByType("resource")
+              .findLast((entry) => new URL(entry.name).pathname === path)
+              ?.name ?? path
+          );
+          return useEditorStore.getState().selectedFilePath;
+        });
+        expect(selected).toBe(changes[0].path);
+        await expect(patchRow.locator(".codex-inline-diff")).toHaveCount(0);
         expect(
-          await preview
-            .locator('[data-old-line="116"]:not([data-new-line])')
-            .evaluate((el) => getComputedStyle(el).backgroundColor),
-        ).not.toBe("rgba(0, 0, 0, 0)");
+          historyReads.every(
+            (url) => new URL(url).searchParams.get("view") === "chat",
+          ),
+        ).toBe(true);
+        expect(
+          fixture.calls.filter(({ path }) =>
+            /\/(turn\/(start|steer|interrupt)|thread\/(resume|fork)|review\/start)$/.test(
+              path,
+            ),
+          ),
+        ).toEqual([]);
         await page.screenshot({
           path: info.outputPath(`native-${width}-${theme}.png`),
           fullPage: true,

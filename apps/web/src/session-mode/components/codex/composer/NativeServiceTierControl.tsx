@@ -19,8 +19,13 @@ export function NativeServiceTierControl({
   const { serviceTier, setServiceTier } = useThreadModelSettings(threadId);
   const tiers = model?.serviceTiers ?? [];
   if (!tiers.length) return null;
-  const fast = tiers.find((tier) => tier.id === "fast");
-  if (fast && tiers.length === 1)
+  // Native catalogs expose Fast as `priority`; older catalogs use `fast`.
+  // Send the advertised ID rather than the UI label or deprecated speed tier.
+  const fast =
+    tiers.find((tier) => tier.id === "priority") ??
+    tiers.find((tier) => tier.id === "fast");
+  // Standard + Fast is still a binary toggle, not a nested tier picker.
+  if (fast)
     return (
       <DropdownMenuItem
         className="session-native-service-tier"

@@ -1,5 +1,8 @@
-import { lazy, Suspense, useId, useMemo } from "react";
+import { lazy, Suspense, useEffect, useId, useMemo, useRef } from "react";
 import { splitDraftBlocks, replaceDraftBlock } from "./content";
+import { formatDraftRange } from "../editor/formatSelection";
+import { CodeLanguagePicker } from "./CodeLanguagePicker";
+import { canonicalCodeLanguage } from "./codeLanguages";
 const CodeBlockEditor = lazy(() => import("./CodeBlockEditor"));
 export function RichDraftEditor({
   value,
@@ -16,6 +19,56 @@ export function RichDraftEditor({
 }) {
   const id = useId(),
     blocks = useMemo(() => splitDraftBlocks(value), [value]);
+  const selection = useRef({ start: 0, end: 0 });
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const remember = (start: number, end: number) => {
+    selection.current = { start, end };
+    onSelection?.(start, end);
+  };
+  const markRange = (
+    event: { currentTarget: HTMLTextAreaElement },
+    base: number,
+  ) => {
+    const start = base + event.currentTarget.selectionStart;
+    const end = base + event.currentTarget.selectionEnd;
+    event.currentTarget.dataset.draftSelection = `${start}:${end}`;
+    remember(start, end);
+  };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const listKind =
+        (event.altKey && !event.shiftKey && event.key === "4") ||
+        (event.shiftKey && !event.altKey && event.key === "9")
+          ? "ol"
+          : (event.altKey && !event.shiftKey && event.key === "5") ||
+              (event.shiftKey && !event.altKey && event.key === "8")
+            ? "ul"
+            : event.altKey && !event.shiftKey && event.key === "6"
+              ? "check"
+              : null;
+      if (!listKind || !(event.metaKey || event.ctrlKey)) return;
+      const target = event.target;
+      if (
+        !(target instanceof HTMLTextAreaElement) ||
+        !target.closest(".session-rich-draft")
+      )
+        return;
+      const base = Number(target.dataset.draftStart ?? 0);
+      const next = formatDraftRange(
+        valueRef.current,
+        base + target.selectionStart,
+        base + target.selectionEnd,
+        listKind,
+      );
+      if (!next) return;
+      event.preventDefault();
+      onChange(next.value);
+      remember(next.start, next.end);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onChange, onSelection]);
   return (
     <div className="session-rich-draft">
       <div className="session-rich-tools">
@@ -31,7 +84,7 @@ export function RichDraftEditor({
           onClick={() =>
             onChange(
               value +
-                `${value && !value.endsWith("\n") ? "\n" : ""}\n\`\`\`typescript\n\n\`\`\`\n`,
+                `\`\`\`\n\n\`\`\`\n${value && !value.startsWith("\n") ? "\n" : ""}${value}`,
             )
           }
         >
@@ -40,13 +93,9 @@ export function RichDraftEditor({
       </div>
       {plain || !blocks.length ? (
         <textarea
+          data-draft-start={0}
           aria-label="展开的消息草稿"
-          onSelect={(e) =>
-            onSelection?.(
-              e.currentTarget.selectionStart,
-              e.currentTarget.selectionEnd,
-            )
-          }
+          onSelect={(e) => markRange(e, 0)}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           spellCheck={false}
@@ -56,13 +105,9 @@ export function RichDraftEditor({
           block.kind === "text" ? (
             <textarea
               key={i}
+              data-draft-start={block.contentStart}
               aria-label={`正文段落 ${i + 1}`}
-              onSelect={(e) =>
-                onSelection?.(
-                  block.contentStart + e.currentTarget.selectionStart,
-                  block.contentStart + e.currentTarget.selectionEnd,
-                )
-              }
+              onSelect={(e) => markRange(e, block.contentStart)}
               value={block.text}
               onChange={(e) =>
                 onChange(replaceDraftBlock(value, block, e.target.value))
@@ -72,52 +117,27 @@ export function RichDraftEditor({
           ) : (
             <section className="session-draft-code" key={i}>
               <header>
-                <label>
-                  语言
-                  <select
-                    aria-label={`代码块 ${i + 1} 的语言`}
-                    value={block.language || "text"}
-                    onChange={(e) => {
-                      const raw = block.raw;
-                      const firstEnd = raw.indexOf("\n");
-                      const ending = raw[firstEnd - 1] === "\r" ? "\r\n" : "\n";
-                      const opening = raw.match(/^ */)?.[0] ?? "";
-                      onChange(
-                        value.slice(0, block.start) +
-                          opening +
-                          block.fence +
-                          (e.target.value === "text" ? "" : e.target.value) +
-                          ending +
-                          value.slice(block.start + firstEnd + 1),
-                      );
-                    }}
-                  >
-                    {[
-                      ...new Set([
-                        block.language || "text",
-                        "text",
-                        "typescript",
-                        "javascript",
-                        "python",
-                        "json",
-                        "bash",
-                        "rust",
-                        "go",
-                        "cpp",
-                        "html",
-                        "css",
-                        "sql",
-                        "yaml",
-                        "markdown",
-                      ]),
-                    ].map((lang) => (
-                      <option key={lang} value={lang}>
-                        {lang === "text" ? "纯文本" : lang}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <span>代码块</span>
+                <CodeLanguagePicker
+                  index={i + 1}
+                  language={block.language ?? ""}
+                  code={block.text}
+                  onChange={(language) => {
+                    const raw = block.raw;
+                    const firstEnd = raw.indexOf("\n");
+                    const ending = raw[firstEnd - 1] === "\r" ? "\r\n" : "\n";
+                    const opening = raw.match(/^ */)?.[0] ?? "";
+                    const token =
+                      language === "" ? "" : canonicalCodeLanguage(language);
+                    onChange(
+                      value.slice(0, block.start) +
+                        opening +
+                        block.fence +
+                        token +
+                        ending +
+                        value.slice(block.start + firstEnd + 1),
+                    );
+                  }}
+                />
               </header>
               <Suspense
                 fallback={

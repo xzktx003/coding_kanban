@@ -109,7 +109,8 @@ export function ThreadWorkflowToolbar({
         return;
     }
     if (!threadWorkflowActions.consume(request)) return;
-    if (request.action === "export") {
+    const markdown = exportThreadMarkdown(rows, title, i18n?.language ?? "en");
+    if (request.action === "export" || request.action === "copyMarkdown") {
       if (!historyComplete)
         toast.info(
           label(
@@ -117,16 +118,32 @@ export function ThreadWorkflowToolbar({
             "Export includes loaded history only.",
           ),
         );
-      downloadThreadMarkdown(
-        exportThreadMarkdown(rows, title, i18n?.language ?? "en"),
-        title || threadId,
-      );
+      if (request.action === "export")
+        downloadThreadMarkdown(markdown, title || threadId);
+      else
+        void navigator.clipboard.writeText(markdown).then(
+          () =>
+            toast.success(
+              label("已复制为 Markdown", "Copied conversation as Markdown"),
+            ),
+          () =>
+            toast.error(
+              label("未能复制为 Markdown", "Could not copy conversation"),
+            ),
+        );
     } else
       void navigator.clipboard
         .writeText(makeThreadUrl(window.location.href, request.threadId))
         .then(
           () =>
-            toast.success(label("会话链接已复制", "Conversation link copied")),
+            toast.success(
+              label(
+                request.action === "copyDeeplink"
+                  ? "已复制深层链接"
+                  : "会话链接已复制",
+                "Conversation link copied",
+              ),
+            ),
           () =>
             toast.error(
               label("未能复制会话链接", "Could not copy conversation link"),

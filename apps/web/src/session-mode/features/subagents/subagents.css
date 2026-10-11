@@ -1,3 +1,12 @@
+.session-mode .session-subagent-dock {
+  display: flex;
+  flex-direction: column;
+  width: min(360px, 42vw);
+  min-width: 240px;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--background);
+}
 .session-mode .session-subagent-panel {
   display: flex;
   flex-direction: column;
@@ -9,9 +18,12 @@
 .session-mode .session-subagent-panel header,
 .session-mode .session-subagent-panel footer,
 .session-mode .session-subagent-detail-meta {
-  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+}
+.session-mode .session-subagent-panel footer,
+.session-mode .session-subagent-detail-meta {
+  padding: 12px 16px;
 }
 .session-mode .session-subagent-panel footer {
   border-top: 1px solid var(--border);
@@ -19,21 +31,167 @@
   max-height: 45%;
   overflow: auto;
 }
-.session-mode .session-subagent-panel h2 {
-  font-size: 16px;
-  font-weight: 600;
+.session-mode .session-subagent-section h2 {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 8px 8px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  user-select: none;
+}
+.session-mode .session-subagent-section h2 span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-mode .session-subagent-section + .session-subagent-section {
+  margin-top: 24px;
+}
+.session-mode .session-subagent-section p {
+  margin: 0;
+  padding: 4px 8px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 20px;
+}
+.session-mode .session-subagent-detail-bar {
+  display: flex;
+  height: 48px;
+  flex-shrink: 0;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+}
+.session-mode .session-subagent-detail-bar h2 {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-mode .session-subagent-detail-bar button {
+  display: flex;
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+.session-mode .session-subagent-detail-bar small {
+  display: block;
+  max-width: 50%;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: none;
+}
+.session-mode .session-subagent-avatar {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 12px;
+}
+.session-mode .session-subagent-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.session-mode .session-subagent-task {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px;
+  border-radius: 8px;
+  text-align: start;
+  user-select: none;
+}
+.session-mode .session-subagent-task-copy {
+  min-width: 0;
+  flex: 1;
+}
+.session-mode .session-subagent-task-line {
+  display: flex;
+  min-height: 24px;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.session-mode .session-subagent-task-line strong {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-mode .session-subagent-task-line span,
+.session-mode .session-subagent-section h2 small {
+  display: block;
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.session-mode .session-subagent-task-copy > small {
+  display: block;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-mode .session-subagent-more {
+  margin-top: 8px;
+  margin-left: 44px;
 }
 .session-mode .session-subagent-panel h3 {
   font-size: 12px;
   color: var(--muted-foreground);
   margin: 14px 0 6px;
 }
-.session-mode .session-subagent-panel button,
 .session-mode .session-subagent-summary button,
 .session-mode .session-agent-mentions button {
   min-height: 44px;
   border-radius: 6px;
   padding: 5px 9px;
+  text-align: left;
+}
+.session-mode .session-subagent-panel button {
+  border-radius: 8px;
   text-align: left;
 }
 .session-mode .session-subagent-panel button:hover,
@@ -54,14 +212,6 @@
   color: var(--muted-foreground);
   overflow-wrap: anywhere;
 }
-.session-mode .session-subagent-filters {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-.session-mode .session-subagent-filters [aria-pressed="true"] {
-  background: var(--muted);
-}
 .session-mode .session-subagent-notice {
   font-size: 12px;
   background: var(--muted);
@@ -74,19 +224,12 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 12px 16px;
+  padding: 20px 12px;
 }
-.session-mode .session-subagent-task {
-  display: block;
+.session-mode .session-subagent-sheet {
   width: 100%;
-  border-bottom: 1px solid var(--border);
-}
-.session-mode .session-subagent-task strong {
-  font-weight: 600;
-}
-.session-mode .session-subagent-task span {
-  float: right;
-  font-size: 12px;
+  max-width: var(--thread-content-max-width, 768px);
+  margin-inline: auto;
 }
 .session-mode .session-subagent-task p {
   font-size: 13px;
@@ -116,6 +259,26 @@
   max-width: 180px;
   font-size: 12px;
 }
+.session-mode .codex-native-subagent-activity {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--codex-chat-size, 13px);
+  line-height: 1.5;
+  color: color-mix(in oklab, var(--codex-text, var(--foreground)) 60%, transparent);
+  text-align: start;
+}
+.session-mode button.codex-native-subagent-activity {
+  cursor: pointer;
+}
+.session-mode button.codex-native-subagent-activity:is(:hover, :focus-visible) {
+  color: var(--codex-text, var(--foreground));
+}
+.session-mode button.codex-native-subagent-activity:focus-visible {
+  outline: 2px solid var(--ring);
+}
 .session-mode .session-subagent-summary {
   border-top: 1px solid var(--border);
   font-size: 12px;
@@ -132,6 +295,13 @@
   align-items: center;
   flex-wrap: wrap;
   font-size: 12px;
+}
+.session-mode .session-composer-policy > .session-agent-mentions > button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
 }
 .session-mode .session-mention-chip {
   border: 1px solid var(--border);
@@ -163,33 +333,6 @@
 .session-mode .session-agent-mention-menu strong {
   margin-top: 8px;
 }
-.session-mode .session-subagent-confirm {
-  background: var(--background);
-  color: var(--foreground);
-  padding: 24px;
-  max-width: min(480px, 95vw);
-  max-height: 80dvh;
-  overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-}
-.session-mode .session-subagent-confirm::backdrop {
-  background: #0008;
-}
-.session-mode .session-subagent-stop-result {
-  padding: 6px 16px;
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.session-mode .session-subagent-results {
-  flex-shrink: 0;
-  max-height: 25%;
-  overflow: auto;
-}
-.session-mode .session-subagent-detail-meta {
-  max-height: 35%;
-  overflow: auto;
-}
 .session-mode .session-subagent-pending {
   padding: 12px 16px;
   max-height: 45%;
@@ -198,4 +341,13 @@
 }
 .session-mode .session-agent-mentions > button {
   min-width: 44px;
+}
+
+/* The existing inspector entry owns layout space. Composer notices must not
+   float across that entry when both observers have discovered descendants. */
+.session-mode
+  .session-composer-target-container:has(> .session-subagent-summary)
+  .session-composer-floating {
+  position: relative;
+  inset: auto;
 }

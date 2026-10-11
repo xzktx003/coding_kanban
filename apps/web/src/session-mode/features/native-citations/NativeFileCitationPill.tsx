@@ -78,7 +78,8 @@ export function NativeFileCitationPill({
     "toml",
     "shell",
   ]).has(nativeCitationFileKind(path));
-  const zh = i18n.language.startsWith("zh");
+  const language = i18n.language ?? "zh";
+  const zh = language.startsWith("zh");
   const location =
     lineStart == null ||
     (lineStart === 1 && !isCode && (lineEnd == null || lineEnd === lineStart))
@@ -91,7 +92,7 @@ export function NativeFileCitationPill({
           ? `第 ${lineStart} 行`
           : `line ${lineStart}`;
   const label = location ? `${name} (${location})` : name;
-  const ariaLabel = nativeCitationLabels(validated, i18n.language).ariaLabel;
+  const ariaLabel = nativeCitationLabels(validated, language).ariaLabel;
   const copyText =
     path +
     (lineStart ? `:${lineStart}` : "") +

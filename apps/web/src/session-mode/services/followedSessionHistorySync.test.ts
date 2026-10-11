@@ -24,6 +24,7 @@ vi.mock("../lib/eventStream", () => ({
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
 import { useCodexStore } from "../components/codex/stores";
 import { startFollowedSessionHistorySync } from "./followedSessionHistorySync";
+import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 let stop: (() => void) | undefined;
 beforeEach(() => {
   vi.useFakeTimers();
@@ -37,6 +38,7 @@ beforeEach(() => {
     currentThreadId: "a",
   });
   useCodexDeliveryStore.setState({ entries: {} });
+  useSessionSyncStore.setState({ recovering: {} });
   useAgentCenterStore.setState({
     detachedCard: null,
     cards: [
@@ -46,6 +48,26 @@ beforeEach(() => {
     currentAgentCardId: "a",
     currentAgentCardKind: "codex",
   });
+});
+it("clears an initial history failure after automatic read-only retry", async () => {
+  useAgentCenterStore.setState({ cards: [{ kind: "codex", id: "a" }] });
+  mock.resume.mockRejectedValueOnce(new Error("offline"));
+  stop = startFollowedSessionHistorySync();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(useSessionSyncStore.getState().recovering.a).toBe("retrying");
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(mock.resume).toHaveBeenCalledTimes(2);
+  expect(useSessionSyncStore.getState().recovering.a).toBeUndefined();
+  await vi.advanceTimersByTimeAsync(60000);
+  expect(mock.resume).toHaveBeenCalledTimes(2);
+});
+it("clears failed initial recovery on teardown without leaving a stale notice", async () => {
+  mock.resume.mockRejectedValue(new Error("offline"));
+  stop = startFollowedSessionHistorySync();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(useSessionSyncStore.getState().recovering.a).toBe("retrying");
+  stop();
+  expect(useSessionSyncStore.getState().recovering).toEqual({});
 });
 afterEach(() => {
   stop?.();

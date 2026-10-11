@@ -57,7 +57,7 @@ it("clears the native quote action when a deliberate null selection arrives", as
     fireEvent(document, new Event("selectionchange"));
   });
   expect(screen.getByRole("button").getAttribute("aria-label")).toBe(
-    "从此轮创建分支",
+    "从这里创建聊天分支",
   );
   fireEvent.click(screen.getByRole("button"));
   expect(mocks.fork).toHaveBeenCalledWith(

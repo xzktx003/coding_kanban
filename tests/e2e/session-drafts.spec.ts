@@ -481,7 +481,7 @@ test("an interrupted image upload survives reload with file bytes and can retry"
     ),
   ).toHaveCount(1);
   await page.getByRole("button", { name: /预览 .*上传失败/ }).click();
-  await page.getByRole("button", { name: "重试上传", exact: true }).click();
+  await page.getByRole("button", { name: "再次尝试上传", exact: true }).click();
   await page.getByRole("button", { name: "关闭面板", exact: true }).click();
   await expect(
     page.locator(

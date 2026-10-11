@@ -80,6 +80,23 @@ const reasoning = {
 
 const plan = { type: "plan", id: "plan", text: "1. Test\n2. Fix" };
 
+it("keeps the short command label while all output stays behind explicit detail reads", () => {
+  const projected = projectCodexChatValue({
+    type: "commandExecution",
+    id: "command",
+    command: "echo isolated_tool_result",
+    aggregatedOutput: "isolated_tool_result",
+    status: "completed",
+  }) as {
+    command: string;
+    aggregatedOutput: string;
+    transcriptMetadataOnly?: boolean;
+  };
+  expect(projected.command).toBe("echo isolated_tool_result");
+  expect(projected.aggregatedOutput).toBeNull();
+  expect(projected.transcriptMetadataOnly).toBe(true);
+});
+
 const commandExecution = {
   type: "commandExecution",
   id: "cmd",
@@ -91,7 +108,7 @@ const commandExecution = {
   source: "model",
   status: "completed",
   commandActions: [{ type: "unknown", command: "pnpm test" }],
-  aggregatedOutput: "large output",
+  aggregatedOutput: "large output ".repeat(20),
   exitCode: 0,
   durationMs: 10,
 };
@@ -280,10 +297,14 @@ it("projects tool items nested in turn snapshots and preserves safe identities",
   expect((filtered[0] as any).params.turn).not.toBe(
     (changed[0] as any).params.turn,
   );
-  expect((filtered[0] as any).params.turn.items.map((item: any) => item.id)).toEqual(["user", "cmd", "dynamic"]);
+  expect(
+    (filtered[0] as any).params.turn.items.map((item: any) => item.id),
+  ).toEqual(["user", "cmd", "dynamic"]);
   expect((filtered[0] as any).params.turn.items[1].aggregatedOutput).toBeNull();
   expect((filtered[0] as any).params.turn.items[2].arguments).toBeNull();
-  expect((filtered[1] as any).params.turn.items.map((item: any) => item.id)).toEqual(["cmd", "answer", "patch", "mcp"]);
+  expect(
+    (filtered[1] as any).params.turn.items.map((item: any) => item.id),
+  ).toEqual(["cmd", "answer", "patch", "mcp"]);
   expect(JSON.stringify(filtered)).not.toContain("large output");
   expect(JSON.stringify(filtered)).not.toContain("large result");
   expect((filtered[1] as any).params.turn.status).toBe("completed");
@@ -315,8 +336,16 @@ it("projects nested tool history without dropping lifecycle metadata", () => {
   expect((filtered[0] as any).params.thread).not.toBe(
     (snapshot[0] as any).params.thread,
   );
-  expect((filtered[0] as any).params.thread.turns[0].items.map((item: any) => item.id)).toEqual(["user", "cmd", "mcp"]);
-  expect((filtered[0] as any).params.thread.turns[1].items.map((item: any) => item.id)).toEqual(["dynamic", "answer", "subagent"]);
+  expect(
+    (filtered[0] as any).params.thread.turns[0].items.map(
+      (item: any) => item.id,
+    ),
+  ).toEqual(["user", "cmd", "mcp"]);
+  expect(
+    (filtered[0] as any).params.thread.turns[1].items.map(
+      (item: any) => item.id,
+    ),
+  ).toEqual(["dynamic", "answer", "subagent"]);
   expect(JSON.stringify(filtered)).not.toContain("large output");
   expect(JSON.stringify(filtered)).not.toContain("large result");
   expect((filtered[0] as any).params.thread.name).toBe(null);
@@ -341,7 +370,12 @@ it("stores bounded tool metadata and true command status without output bursts",
 
   let state = useCodexStore.getState();
   expect(state.events.thread).toHaveLength(1);
-  expect((state.events.thread[0] as any).params.item.aggregatedOutput).toBeNull();
+  expect(
+    (state.events.thread[0] as any).params.item.aggregatedOutput,
+  ).toBeNull();
+  expect(
+    (state.events.thread[0] as any).params.item.transcriptMetadataOnly,
+  ).toBe(true);
   expect(state.commandStatusMap.cmd).toBe("completed");
   expect(state.commandDurationMap.cmd).toBe(10);
 
@@ -386,30 +420,32 @@ it("stores bounded tool metadata and true command status without output bursts",
 });
 
 it("renders safe native tool rows while preserving the user and final answer", () => {
-  const rows = buildThreadRows(withoutToolTranscriptEvents([
-    itemEvent("item/started", userMessage),
-    itemEvent("item/started", commandExecution),
-    itemEvent("item/completed", commandExecution),
-    itemEvent("item/completed", mcpToolCall),
-    itemEvent("item/completed", collabAgentToolCall),
-    event("item/commandExecution/outputDelta", {
-      threadId: "thread",
-      turnId: "turn",
-      itemId: "cmd",
-      delta: "output",
-    }),
-    event("turn/completed", {
-      threadId: "thread",
-      turn: turn([
-        userMessage,
-        commandExecution,
-        mcpToolCall,
-        collabAgentToolCall,
-        agentMessage,
-      ]),
-    }),
-    itemEvent("item/completed", agentMessage),
-  ]));
+  const rows = buildThreadRows(
+    withoutToolTranscriptEvents([
+      itemEvent("item/started", userMessage),
+      itemEvent("item/started", commandExecution),
+      itemEvent("item/completed", commandExecution),
+      itemEvent("item/completed", mcpToolCall),
+      itemEvent("item/completed", collabAgentToolCall),
+      event("item/commandExecution/outputDelta", {
+        threadId: "thread",
+        turnId: "turn",
+        itemId: "cmd",
+        delta: "output",
+      }),
+      event("turn/completed", {
+        threadId: "thread",
+        turn: turn([
+          userMessage,
+          commandExecution,
+          mcpToolCall,
+          collabAgentToolCall,
+          agentMessage,
+        ]),
+      }),
+      itemEvent("item/completed", agentMessage),
+    ]),
+  );
 
   expect(rows.map((row) => row.item.kind)).toContain("cmdGroup");
   expect(
@@ -447,44 +483,77 @@ it("renders safe native tool rows while preserving the user and final answer", (
   ).toBe(true);
 });
 
-
 it("retains only bounded metadata for native tool cards and public Hook statistics", () => {
   const secret = "private-body".repeat(100_000);
   const source = [
-    itemEvent("item/completed", { ...commandExecution, aggregatedOutput: secret }),
-    itemEvent("item/completed", { ...mcpToolCall, arguments: { secret }, result: { content: secret } }),
-    event("hook/completed", { threadId: "thread", turnId: "turn", run: { id: "hook", eventName: "Stop", source: "project", status: "completed", entries: [{ kind: "context", text: secret }, { kind: "warning", text: "public warning" }], durationMs: "10" } }),
+    itemEvent("item/completed", {
+      ...commandExecution,
+      aggregatedOutput: secret,
+    }),
+    itemEvent("item/completed", {
+      ...mcpToolCall,
+      arguments: { secret },
+      result: { content: secret },
+    }),
+    event("hook/completed", {
+      threadId: "thread",
+      turnId: "turn",
+      run: {
+        id: "hook",
+        eventName: "Stop",
+        source: "project",
+        status: "completed",
+        entries: [
+          { kind: "context", text: secret },
+          { kind: "warning", text: "public warning" },
+        ],
+        durationMs: "10",
+      },
+    }),
     itemEvent("item/completed", { ...reasoning, content: [secret] }),
   ];
   const projected = withoutToolTranscriptEvents(source);
   expect(projected).toHaveLength(4);
   expect((projected[0] as any).params.item.commandActions).toHaveLength(1);
   expect((projected[0] as any).params.item.aggregatedOutput).toBeNull();
+  expect((projected[0] as any).params.item.transcriptMetadataOnly).toBe(true);
   expect((projected[1] as any).params.item.arguments).toBeNull();
   expect((projected[1] as any).params.item.result).toBeNull();
-  expect((projected[2] as any).params.run.entries).toEqual([{ kind: "warning", text: "public warning" }]);
+  expect((projected[2] as any).params.run.entries).toEqual([
+    { kind: "warning", text: "public warning" },
+  ]);
   expect((projected[3] as any).params.item.content).toEqual([]);
   expect(JSON.stringify(projected)).not.toContain(secret);
   expect(JSON.stringify(projected).length).toBeLessThan(12_000);
   expect(withoutToolTranscriptEvents(projected)).toBe(projected);
 });
 
-
 it("bounds malicious metadata arrays and copies short previews without leaking raw arguments", () => {
   const secret = "private-body".repeat(200_000);
-  const original = itemEvent("item/completed", { ...commandExecution,
-    command: secret, aggregatedOutput: secret,
-    commandActions: Array.from({ length: 100 }, () => ({ type: "read", command: secret, name: secret, path: "/repo/a.ts", privateExtra: secret })),
+  const original = itemEvent("item/completed", {
+    ...commandExecution,
+    command: secret,
+    aggregatedOutput: secret,
+    commandActions: Array.from({ length: 100 }, () => ({
+      type: "read",
+      command: secret,
+      name: secret,
+      path: "/repo/a.ts",
+      privateExtra: secret,
+    })),
     unexpected: { content: secret },
   });
   const projected = withoutToolTranscriptEvents([original])[0] as any;
   expect(projected.params.item.commandActions.length).toBeLessThanOrEqual(16);
   expect(projected.params.item.command.length).toBeLessThanOrEqual(1024);
   expect(projected.params.item.aggregatedOutput).toBeNull();
+  expect(projected.params.item.transcriptMetadataOnly).toBe(true);
   expect(projected.params.item.unexpected).toBeUndefined();
   expect(JSON.stringify(projected).length * 2).toBeLessThan(64 * 1024);
   expect(JSON.stringify(projected)).not.toContain("privateExtra");
-  expect(projectCodexChatValue(JSON.parse(JSON.stringify(projected)))).toEqual(projected);
+  expect(projectCodexChatValue(JSON.parse(JSON.stringify(projected)))).toEqual(
+    projected,
+  );
 });
 
 it("retains only native dynamic target identities and explicit booleans", () => {
@@ -497,7 +566,10 @@ it("retains only native dynamic target identities and explicit booleans", () => 
     ["move_thread_to_sidebar_section", { sectionId: null }],
     ["write_settings", { config: {} }],
   ] as const) {
-    const original = itemEvent("item/completed", { ...dynamicToolCall, namespace: "codex_app", tool,
+    const original = itemEvent("item/completed", {
+      ...dynamicToolCall,
+      namespace: "codex_app",
+      tool,
       arguments: { ...safe, text: privateText, raw: privateText },
       contentItems: [{ type: "inputText", text: privateText }],
     });
@@ -511,6 +583,13 @@ it("retains only native dynamic target identities and explicit booleans", () => 
     const decoded = JSON.parse(JSON.stringify(projected));
     expect(projectCodexChatValue(decoded)).toBe(decoded);
   }
-  const invalid = itemEvent("item/completed", { ...dynamicToolCall, namespace: "codex_app", tool: "read_thread", arguments: { threadId: privateText } });
-  expect((withoutToolTranscriptEvents([invalid])[0] as any).params.item.arguments).toBeNull();
+  const invalid = itemEvent("item/completed", {
+    ...dynamicToolCall,
+    namespace: "codex_app",
+    tool: "read_thread",
+    arguments: { threadId: privateText },
+  });
+  expect(
+    (withoutToolTranscriptEvents([invalid])[0] as any).params.item.arguments,
+  ).toBeNull();
 });

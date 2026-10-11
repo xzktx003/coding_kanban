@@ -61,6 +61,25 @@ export type GitBranchListResponse = {
   branches: string[];
 };
 
+export type GitBlameLine =
+  | { present: false }
+  | {
+      present: true;
+      hash: string;
+      shortHash: string;
+      author: string;
+      date: string;
+      summary: string;
+    };
+
+export async function gitBlameLine(cwd: string, filePath: string, line: number) {
+  return await postJsonWithOptions<GitBlameLine>(
+    "/api/git/blame-line",
+    { cwd, filePath, line },
+    { suppressToast: true },
+  );
+}
+
 export async function gitBranchInfo(cwd: string) {
   return await postJson<GitBranchInfoResponse>('/api/git/branch-info', {
     cwd,
@@ -120,6 +139,16 @@ export async function gitFileDiffMeta(cwd: string, filePath: string, staged: boo
     filePath,
     staged,
   });
+}
+
+export type GitFileNumstat = {
+  path: string;
+  additions: number;
+  deletions: number;
+};
+
+export async function gitFileNumstat(cwd: string) {
+  return await postJson<GitFileNumstat[]>("/api/git/file-numstat", { cwd });
 }
 
 export async function gitDiffStats(cwd: string) {

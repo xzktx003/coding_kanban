@@ -215,6 +215,28 @@ it("preserves a legacy final report and never folds explicit final-answer deltas
     event: { method: "item/agentMessage/delta" },
   });
 });
+it("keeps a completed plan document outside the duration fold", () => {
+  const events = fixture();
+  const params = { threadId: "thread", turnId: "turn" };
+  events.splice(
+    4,
+    0,
+    event("item/completed", {
+      ...params,
+      item: { id: "plan-doc", type: "plan", text: "# Plan\n\nopen me" },
+    }),
+  );
+  const rows = project(events);
+  expect(
+    rows.some(
+      (row) =>
+        !row.work &&
+        row.item.kind === "event" &&
+        row.item.event.method === "item/completed" &&
+        row.item.event.params.item.type === "plan",
+    ),
+  ).toBe(true);
+});
 it("folds streamed plans, terminal input, hooks and child-agent process records with the turn", () => {
   const events = fixture();
   const params = { threadId: "thread", turnId: "turn" };

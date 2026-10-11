@@ -1,8 +1,9 @@
 .session-mode .codex-message-native-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
-  min-height: 28px;
+  gap: 2px;
+  min-height: 20px;
+  margin-top: 6px;
   color: var(--vscode-descriptionForeground, var(--muted-foreground));
 }
 .session-mode .codex-message-native-actions button {
@@ -144,6 +145,12 @@
 }
 @media (pointer: fine) and (hover: hover) {
   /* Keep the window-focus gate while avoiding nested group utility invalidation. */
+  .session-mode
+    .codex-native-user:hover
+    .codex-message-native-actions[class~="group-hover:visible"],
+  .session-mode
+    .codex-native-user:focus-within
+    .codex-message-native-actions[class~="group-focus-within:visible"],
   .session-mode
     .codex-assistant:hover
     .codex-message-native-actions[class~="group-hover:visible"],

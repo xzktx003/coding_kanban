@@ -116,7 +116,7 @@ test("stop pauses queued work and replacement waits for the actual interrupted e
   await q.tick();
   assert.equal(f.calls.length, 2);
   const s = await q.get("a");
-  assert.ok(s.paused);
+  assert.equal(s.paused, "由于你中断了当前响应，队列已暂停");
   await q.change("a", s.revision, { type: "resume" });
   await q.tick();
   assert.equal(f.calls.length, 3);
@@ -530,7 +530,12 @@ for (const status of ["failed", "interrupted"])
     f.states.a = "notLoaded";
     await q.tick();
     assert.equal(f.calls.length, 1);
-    assert.ok((await q.get("a")).paused);
+    assert.equal(
+      (await q.get("a")).paused,
+      status === "interrupted"
+        ? "由于你中断了当前响应，队列已暂停"
+        : "上一轮执行失败，请检查后继续",
+    );
     assert.equal((await q.get("a")).awaitingTurnId, undefined);
   });
 

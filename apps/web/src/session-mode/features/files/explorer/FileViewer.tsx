@@ -29,6 +29,7 @@ import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { useInputStore } from "@session/stores";
 import { useTodoStore } from "@session/stores/useTodoStore";
 import { CodeEditor } from "../editor/CodeEditor";
+import { EditorGitBlame } from "../editor/EditorGitBlame";
 import { OfficeView } from "./OfficeView";
 import { OFFICE_EXTENSIONS } from "./officeFileTypes";
 const extension = (path: string) =>
@@ -324,6 +325,7 @@ export function FileViewer({ filePath }: { filePath: string }) {
                 hidden={markdown && mode === "preview"}
                 inert={markdown && mode === "preview"}
               >
+                <EditorGitBlame cwd={root} filePath={filePath} />
                 <CodeEditor
                   key={filePath}
                   content={display}

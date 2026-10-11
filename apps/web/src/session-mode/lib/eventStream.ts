@@ -159,6 +159,9 @@ function connect() {
 function restart() {
   paused = false;
   sequence = null;
+  // The runtime-reset event already opens a new stream. A pending repair must
+  // still notify readers, but must not immediately replace this fresh stream.
+  repairReconnectAt = Date.now();
   if (timer) clearTimeout(timer);
   timer = null;
   connect();

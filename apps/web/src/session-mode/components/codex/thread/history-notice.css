@@ -1,0 +1,106 @@
+/* VSIX mG: density=compact, layout=warningCallout, ghostActive CTA,
+   stackOnNarrow=true; default notice colors (no fabricated warning icon). */
+.session-mode .codex-native-history-notice {
+  container-type: inline-size;
+  width: 100%;
+}
+.session-mode .codex-native-history-notice > aside {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  width: 100%;
+  overflow: hidden;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid
+    var(
+      --color-border-primary-outline,
+      color-mix(in oklab, var(--vscode-foreground, #ccc) 12%, transparent)
+    );
+  border-radius: 20px;
+  padding: 8px 8px 8px 12px;
+  background: var(--vscode-editor-background, var(--background));
+  color: var(--vscode-foreground, var(--foreground));
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+  font-size: 12px;
+  line-height: calc(20 / 14);
+  text-wrap: pretty;
+  box-shadow:
+    0 0 2px 0 rgb(0 0 0 / 5%),
+    0 4px 6px 0 rgb(0 0 0 / 2%);
+}
+.session-mode .codex-native-history-content {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.session-mode .codex-native-history-content > span {
+  min-width: 0;
+  flex: 1;
+  user-select: none;
+}
+.session-mode .codex-native-history-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+  border-inline-start: 1px solid
+    var(
+      --color-border-default,
+      color-mix(in oklab, var(--vscode-foreground, #ccc) 12%, transparent)
+    );
+  padding-inline-start: 12px;
+}
+.session-mode .codex-native-history-actions > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 24px;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  padding: 2px 8px;
+  line-height: 18px;
+  background: transparent;
+  cursor: pointer;
+}
+.session-mode .codex-native-history-actions > button:hover {
+  background: color-mix(
+    in oklab,
+    var(--vscode-foreground, #ccc) 8%,
+    transparent
+  );
+}
+.session-mode .codex-native-history-actions > button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+@supports (corner-shape: superellipse(1.5)) {
+  .session-mode .codex-native-history-notice > aside {
+    border-radius: 25px;
+    corner-shape: superellipse(1.5);
+  }
+}
+@container (max-width: 400px) {
+  .session-mode .codex-native-history-notice > aside {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .session-mode .codex-native-history-actions {
+    width: 100%;
+    flex-shrink: 1;
+    flex-wrap: wrap;
+    justify-content: center;
+    border-inline-start: 0;
+    border-top: 1px solid
+      var(
+        --color-border-default,
+        color-mix(in oklab, var(--vscode-foreground, #ccc) 12%, transparent)
+      );
+    padding-top: 8px;
+    padding-inline-start: 0;
+  }
+}

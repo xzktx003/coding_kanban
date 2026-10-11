@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import { useSessionLeaveGuard } from "@session/hooks/useSessionLeaveGuard";
 import { Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -8,7 +9,7 @@ import { ccGetSettings, ccUpdateSettings } from '@session/services/apiAdapt/cc';
 
 type EnvRow = { id: string; key: string; value: string };
 
-const newRow = (key = '', value = ''): EnvRow => ({ id: crypto.randomUUID(), key, value });
+const newRow = (key = '', value = ''): EnvRow => ({ id: randomUUID(), key, value });
 
 const GATEWAY_KEYS = [
   'ANTHROPIC_BASE_URL',

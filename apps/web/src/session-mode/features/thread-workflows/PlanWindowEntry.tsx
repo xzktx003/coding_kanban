@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import {
   useEffect,
   useLayoutEffect,
@@ -149,7 +150,7 @@ export function PlanWindowEntry() {
       return;
     }
     setFileError(null);
-    const requestId = crypto.randomUUID();
+    const requestId = randomUUID();
     requests.current.set(
       requestId,
       setTimeout(() => {
@@ -192,7 +193,7 @@ export function PlanWindowEntry() {
               >
                 <header>
                   <span>Plan</span>
-                  <NativeMessageCopy text={snapshot.text} />
+                  <NativeMessageCopy text={snapshot.text} kind="assistant" />
                   <button
                     type="button"
                     onClick={() =>

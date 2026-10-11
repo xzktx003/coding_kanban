@@ -35,3 +35,15 @@ it("honors multiline and modifier-only submission preferences", () => {
 it("does not submit an IME Enter reported as the native 229 key code", () => {
   expect(submitIntent({ ...plain, keyCode: 229 }, "中文", "enter")).toBeNull();
 });
+it.each(["enter", "cmdIfMultiline", "cmdAlways"] as const)(
+  "keeps native Alt Enter for editing under the %s preference",
+  (behavior) => {
+    const alt = { ...plain, altKey: true };
+    expect(submitIntent(alt, "one", behavior)).toBeNull();
+    expect(submitIntent(alt, "one\ntwo", behavior)).toBeNull();
+    expect(submitIntent({ ...alt, ctrlKey: true }, "one", behavior)).toBeNull();
+    expect(
+      submitIntent({ ...alt, metaKey: true, shiftKey: true }, "one", behavior),
+    ).toBeNull();
+  },
+);

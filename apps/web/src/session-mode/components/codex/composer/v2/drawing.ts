@@ -4,7 +4,7 @@ export interface Point {
 }
 export interface DrawingMark {
   id: string;
-  kind: "pen" | "arrow" | "rect" | "text" | "comment";
+  kind: "pen" | "arrow" | "line" | "rect" | "ellipse" | "text" | "comment";
   points: Point[];
   color: string;
   width: number;
@@ -92,6 +92,14 @@ export function loadDrawingImage(source: string): Promise<HTMLImageElement> {
     image.src = source;
   });
 }
+export function ellipseGeometry(a: Point, b: Point) {
+  return {
+    cx: (a.x + b.x) / 2,
+    cy: (a.y + b.y) / 2,
+    rx: Math.abs(b.x - a.x) / 2,
+    ry: Math.abs(b.y - a.y) / 2,
+  };
+}
 export function arrowHead(a: Point, b: Point, width: number): [Point, Point] {
   const angle = Math.atan2(b.y - a.y, b.x - a.x),
     length = Math.max(12, width * 4);
@@ -125,7 +133,12 @@ export async function drawingToFile(
     ctx.lineJoin = "round";
     if (mark.kind === "rect")
       ctx.strokeRect(first.x, first.y, last.x - first.x, last.y - first.y);
-    else if (mark.kind === "pen" || mark.kind === "arrow") {
+    else if (mark.kind === "ellipse") {
+      const shape = ellipseGeometry(first, last);
+      ctx.beginPath();
+      ctx.ellipse(shape.cx, shape.cy, shape.rx, shape.ry, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (mark.kind === "pen" || mark.kind === "arrow" || mark.kind === "line") {
       ctx.beginPath();
       ctx.moveTo(first.x, first.y);
       for (const p of mark.points.slice(1)) ctx.lineTo(p.x, p.y);

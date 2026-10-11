@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import type {
   SessionTabAction,
   SessionTabOperation,
@@ -82,7 +83,7 @@ export function readTabOperations(): SessionTabOperation[] {
 export function saveTabOperation(
   action: SessionTabAction,
   seq: number,
-  id: string = crypto.randomUUID(),
+  id: string = randomUUID(),
 ): SessionTabOperation {
   const pending = entries();
   const existing = pending.find((entry) => entry.operation.id === id);

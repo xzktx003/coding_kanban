@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import type { ReasoningEffort } from "@session/bindings";
+import type { ReasoningEffort, Personality } from "@session/bindings";
 import type { SandboxMode, ApprovalsReviewer } from "@session/bindings/v2";
 import {
   useConfigStore,
@@ -60,6 +60,13 @@ export function useThreadModelSettings(threadId: string | null) {
     },
     [threadId],
   );
+  const setPersonality = useCallback(
+    (personality: Personality | null) => {
+      if (threadId) changeThreadModel(threadId, { personality });
+      else useConfigStore.getState().setPersonality(personality);
+    },
+    [threadId],
+  );
   const setCollaborationMode = useCallback(
     (collaborationMode: "default" | "plan") => {
       if (threadId) changeThreadModel(threadId, { collaborationMode });
@@ -104,6 +111,7 @@ export function useThreadModelSettings(threadId: string | null) {
     setReasoningEffort,
     setServiceTier,
     setAccessMode,
+    setPersonality,
     setCollaborationMode,
     setApprovalsReviewer,
     setWebSearch,

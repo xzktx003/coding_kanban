@@ -174,7 +174,7 @@ test("workbench controls remain coherent, readable and usable through responsive
     expect(geometry.height).toBeLessThanOrEqual(48);
     expect(geometry.scroll).toBeLessThanOrEqual(width);
     await expect(
-      page.getByRole("button", { name: "发送消息", exact: true }),
+      page.getByRole("button", { name: "发送", exact: true }),
     ).toBeInViewport();
     await page.screenshot({
       animations: "disabled",

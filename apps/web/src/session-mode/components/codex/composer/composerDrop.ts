@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import { useEffect, useState } from "react";
 import type { DragEvent } from "react";
 import { toast } from "sonner";
@@ -44,7 +45,7 @@ export function useComposerFileDrop(
             if (text.length > 180_000)
               throw new Error("文件过长，请选择需要的片段后引用");
             return {
-              id: crypto.randomUUID(),
+              id: randomUUID(),
               kind: "file" as const,
               name: file.name || "文本文件",
               text,

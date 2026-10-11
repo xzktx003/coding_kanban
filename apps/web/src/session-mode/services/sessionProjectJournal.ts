@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import type {
   ProjectAction,
   ProjectOperation,
@@ -84,7 +85,7 @@ export function readProjectOperations(): PendingProjectOperation[] {
 export function saveProjectOperation(
   action: ProjectAction,
   seq: number,
-  id: string = crypto.randomUUID(),
+  id: string = randomUUID(),
 ): PendingProjectOperation {
   const pending = entries();
   const existing = pending.find((entry) => entry.operation.id === id);

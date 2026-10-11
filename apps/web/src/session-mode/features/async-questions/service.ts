@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { useCodexStore } from "../../components/codex/stores/useCodexStore";
 import { codexService } from "../../services/codexService";
@@ -103,7 +104,7 @@ export async function sendAnswers(
     return;
   }
   store.patch(threadId, { sending: true, error: undefined });
-  const clientId = crypto.randomUUID();
+  const clientId = randomUUID();
   try {
     const input = encodeReplies(replies);
     if (expectedTurnId === null)

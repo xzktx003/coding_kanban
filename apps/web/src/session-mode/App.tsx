@@ -20,6 +20,9 @@ import { AppLayout } from "@session/components/layout";
 import { MobileShell } from "@session/components/mobile/MobileShell";
 import { PairingView } from "@session/components/pairing/PairingView";
 import { TelemetryConsentDialog } from "@session/components/settings/TelemetryConsentDialog";
+import { NativeFeedbackUploads } from "@session/features/native-feedback/NativeFeedbackUploads";
+import { NativeNotificationViewport } from "@session/features/native-notifications/NativeNotificationViewport";
+import { NativeMcpAuthentication } from "@session/features/native-mcp-auth/NativeMcpAuthentication";
 import { Toaster } from "@session/components/ui/toaster";
 import { TooltipProvider } from "@session/components/ui/tooltip";
 import { ThemeProvider } from "@session/contexts/ThemeContext";
@@ -198,6 +201,9 @@ export default function App() {
             <>
               <AppEntry />
               <Toaster />
+              <NativeNotificationViewport />
+              <NativeMcpAuthentication />
+              <NativeFeedbackUploads />
             </>
           )}
         </TooltipProvider>

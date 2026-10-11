@@ -32,6 +32,7 @@ import { validNativeInputMention } from "@agent-orchestrator/shared";
 import { MentionChipDeletePlugin } from "./MentionChipDeletePlugin";
 import { MentionChipNode } from "./MentionChipNode";
 import { MentionTypeaheadPlugin } from "./MentionTypeaheadPlugin";
+import { FormatToolbar } from "./FormatToolbar";
 import { $setEditorFromString } from "./useExternalValueSync";
 import { shouldAutoFocusComposer } from "../composerFocus";
 
@@ -311,7 +312,7 @@ export const ComposerEditor = forwardRef<
   );
 
   return (
-    <div className="relative">
+    <div className="session-composer-editor relative">
       <LexicalComposer
         initialConfig={{
           namespace: "codex-composer",
@@ -335,6 +336,7 @@ export const ComposerEditor = forwardRef<
           ErrorBoundary={LexicalErrorBoundary}
         />
         <HistoryPlugin />
+        <FormatToolbar />
         <NativeDeletionSelectionPlugin />
         <SubmitPlugin onSubmit={onSubmit} />
         <MentionChipDeletePlugin />

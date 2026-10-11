@@ -2,11 +2,11 @@
 
 ## Product and working scene
 
-Product register. Developers work for hours at a desktop in changing daylight and check running jobs from a phone. Preserve the current dark graphite workspace and warm sand accent, and respect the existing optional Session accent themes; do not force a new light/dark preference.
+Product register. Developers work for hours at a desktop in changing daylight and check running jobs from a phone. The default Session shell uses the Codex editor palette: warm olive surfaces in dark mode, warm paper in light mode, and ChatGPT blue for the current target and primary action. Optional Session accent themes stay available; do not force a new light/dark preference.
 
 ## Color and meaning
 
-Use existing CSS tokens (`--background`, `--card`, `--foreground`, `--muted-foreground`, `--primary`, `--border`, `--ring`) in Session mode. Use existing terminal theme variables in terminal mode. Define new shared colors in OKLCH when needed. Restrained color strategy: neutral surfaces, warm accent for the selected session/input target and primary action, semantic warning/error/success colors only alongside text or an icon. No decorative gradients, neon, gradient text or heavy colored side stripes.
+Use existing CSS tokens (`--background`, `--card`, `--foreground`, `--muted-foreground`, `--primary`, `--border`, `--ring`) in Session mode. Default dark values follow the Codex host: editor `#20211d`, sidebar `#282a23`, text `#cccccc`, accent `#63a8f8`. Default light values are editor white, sidebar `#f5f5f3`, text `#3b3b3b`, accent `#1c64c8`. Use existing terminal theme variables in terminal mode. Restrained color strategy: Codex neutrals, blue only for the selected session/input target and primary action, semantic warning/error/success colors only alongside text or an icon. No decorative gradients, neon, gradient text or heavy colored side stripes.
 
 ## Typography and rhythm
 

@@ -6,6 +6,128 @@ import { CodexService } from "./client.js";
 import { EventHub } from "../core/events.js";
 import type { Json } from "../core/json.js";
 
+test("Slack HTTP preview uses only its private read-only host thread and returns bounded matched fields", async (t) => {
+  const app = Fastify(),
+    service = new CodexService({
+      hub: new EventHub(),
+      instance: "slack-fixture",
+      sweepIntervalMs: 0,
+    });
+  const calls: { method: string; params: Json }[] = [];
+  Object.assign(service, {
+    raw: async (method: string, params: Json) => {
+      calls.push({ method, params });
+      if (method === "account/read")
+        return {
+          account: {
+            type: "chatgpt",
+            email: "fixture@example.invalid",
+            planType: "plus",
+          },
+          workspaceRouting: {
+            chatgptAccountId: "account-one",
+            backendOrigin: "https://example.invalid",
+            accountRoutingOverride: "NO_CONSTRAINT",
+          },
+        };
+      if (method === "mcpServerStatus/list")
+        return {
+          data: [
+            {
+              name: "codex_apps",
+              tools: {
+                profile: {
+                  name: "profile",
+                  _meta: {
+                    connector_name: "Slack",
+                    connectorId: "slack",
+                    _codex_apps: {
+                      resource_uri: "/slack/workspace/slack_read_user_profile",
+                    },
+                  },
+                },
+              },
+            },
+          ],
+          nextCursor: null,
+        };
+      if (method === "thread/start")
+        return { thread: { id: "private-preview" } };
+      if (method === "mcpServer/tool/call")
+        return {
+          isError: false,
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                result:
+                  "User ID: U123\nReal Name: Alice\nTitle: " +
+                  "x".repeat(8000) +
+                  "\nEmail: private@example.invalid",
+              }),
+            },
+          ],
+        };
+      if (method === "thread/unsubscribe") return {};
+      throw new Error("Unexpected preview RPC: " + method);
+    },
+  });
+  registerCodexRoutes(app, service);
+  t.after(async () => {
+    await app.close();
+    await service.close();
+  });
+  const href = "https://team.slack.com/team/U123";
+  const context = await app.inject({
+    method: "POST",
+    url: "/api/codex/mcp/slack-preview/context",
+    payload: { href },
+  });
+  assert.equal(context.statusCode, 200);
+  assert.equal(typeof context.json().context?.token, "string");
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/codex/mcp/slack-preview/read",
+    payload: { href, contextToken: context.json().context.token },
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().data, {
+    status: "ready",
+    title: "Alice",
+    description: "x".repeat(300),
+  });
+  assert(response.body.length < 1000);
+  assert(!response.body.includes("private@example.invalid"));
+  assert.deepEqual(calls.find((c) => c.method === "thread/start")?.params, {
+    ephemeral: true,
+    permissions: ":read-only",
+    threadSource: "mcp_extension_host",
+  });
+  const call = calls.find((c) => c.method === "mcpServer/tool/call")!;
+  assert.equal((call.params as any).threadId, "private-preview");
+  assert.deepEqual((call.params as any).arguments, {
+    user_id: "U123",
+    response_format: "detailed",
+  });
+  assert(
+    !calls.some((c) =>
+      /^(?:turn\/|thread\/(?:resume|fork|rollback))/u.test(c.method),
+    ),
+  );
+  assert.equal(service.ownership.ids().length, 0);
+});
+
+test("GitHub preview endpoints reject unsupported URLs and caller-supplied tool or account routing", async t => {
+  const app = Fastify(), service = new CodexService({ hub: new EventHub(), instance: "github-route-validation", sweepIntervalMs: 0 });
+  let calls = 0; Object.assign(service, { raw: async () => { calls++; throw new Error("Should not dispatch"); } });
+  registerCodexRoutes(app, service); t.after(async () => { await app.close(); await service.close(); });
+  for (const payload of [{href:"https://github.com/a/b/pull/1",tool:"shell"}, {href:"https://github.com/a/b/pull/1",threadId:"running-agent"}, {href:"https://evil.invalid/a/b/pull/1"}, {href:"https://github.com/a/b/pull/0"}]) {
+    const response = await app.inject({method:"POST",url:"/api/codex/mcp/github-preview/context",payload});
+    assert.equal(response.statusCode,400);
+  }
+  assert.equal(calls,0);
+});
+
 test("HTTP readonly history and metadata never implicitly resume; compatibility aliases dispatch exact methods", async (t) => {
   const app = Fastify(),
     service = new CodexService({
@@ -57,6 +179,7 @@ test("HTTP readonly history and metadata never implicitly resume; compatibility 
     ["start-thread", "thread/start"],
     ["thread/rename", "thread/name/set"],
     ["mcp/status/list", "mcpServerStatus/list"],
+    ["feedback/upload", "feedback/upload"],
     [
       "external-agent-config/import/read-histories",
       "externalAgentConfig/import/readHistories",
@@ -113,4 +236,15 @@ test("HTTP queue ownership validates u128 and monotonically rejects stale snapsh
     (await send({ sequence: "124", busy: "false", threadIds: [] })).statusCode,
     400,
   );
+});
+
+test("MCP refresh forwards only the fixed native RPC and rejects arbitrary parameters",async()=>{
+ const app=Fastify(),service=new CodexService({hub:new EventHub(),instance:"mcp-auth-route",sweepIntervalMs:0});
+ const calls:any[]=[];
+ Object.assign(service,{raw:async(method:string,params:Json)=>{calls.push({method,params});return {};}});
+ registerCodexRoutes(app,service);
+ try {
+  const ok=await app.inject({method:"POST",url:"/api/codex/mcp/reload",payload:{}});assert.equal(ok.statusCode,200);assert.deepEqual(calls,[{method:"config/mcpServer/reload",params:null}]);
+  assert.equal((await app.inject({method:"POST",url:"/api/codex/mcp/reload",payload:{path:"/other",command:"anything"}})).statusCode,400);assert.equal(calls.length,1);
+ }finally{await app.close();await service.close();}
 });

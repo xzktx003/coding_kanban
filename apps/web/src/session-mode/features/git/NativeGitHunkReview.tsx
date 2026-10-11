@@ -20,6 +20,7 @@ export function NativeGitHunkReview({ cwd, filePath, staged, split = false, wrap
     gitHunkRead({ cwd, filePath, staged }).then(data => { if (active) { setSnapshot(data); setUncertain(false); } }).catch(reason => { if (active) setError(reason instanceof Error ? reason.message : String(reason)); });
     return () => { active = false; };
   }, [cwd, filePath, staged, refreshKey, readVersion]);
+  const hunks = snapshot?.hunks ?? [];
   const lines = useMemo(() => nativeDiffLines("", "", snapshot?.unifiedDiff), [snapshot]);
   const run = async (hunkIndex: number, action: "stage" | "unstage" | "revert") => {
     if (!snapshot || busy || uncertain || pendingScopes.current.has(identity)) return;
@@ -38,12 +39,12 @@ export function NativeGitHunkReview({ cwd, filePath, staged, split = false, wrap
       setError(`${unknown ? "操作回执不明，请只读刷新并核对，勿重复提交。" : "操作未完成，请核对变更后重试。"}${reason instanceof Error ? reason.message : String(reason)}`);
     } finally { pendingScopes.current.delete(captured); if (owner.current === captured) { setBusy(false); setConfirm(null); } }
   };
-  const hunk = confirm !== null ? snapshot?.hunks[confirm] : null;
+  const hunk = confirm !== null ? hunks[confirm] : null;
   return <div className="codex-presentation codex-workspace-hunk-review" data-owner-cwd={cwd} data-owner-path={filePath}>
     {error && <div role="alert" className="codex-hunk-confirm"><p>{error}</p><button type="button" disabled={busy} onClick={() => setReadVersion(version => version + 1)}>只读刷新并核对</button></div>}
     {!snapshot && !error && <p role="status" className="codex-review-selection-summary">正在读取 Git 变更块…</p>}
     {snapshot?.binary && <p className="codex-review-selection-summary">二进制文件不显示文本变更块</p>}
-    {snapshot && !snapshot.binary && !snapshot.hunks.length && <p className="codex-review-selection-summary">没有文本变更块；文件模式和重命名使用文件操作。</p>}
+    {snapshot && !snapshot.binary && !hunks.length && <p className="codex-review-selection-summary">没有文本变更块；文件模式和重命名使用文件操作。</p>}
     {hunk && <section role="alertdialog" aria-label="确认丢弃变更块" className="codex-hunk-confirm"><p>确认丢弃 {resolveLiteralFilePath(filePath, cwd)} 的变更块 {hunk.index + 1}？范围：新文件 {hunk.newStart}–{hunk.newStart + Math.max(0, hunk.newCount - 1)} 行，旧文件 {hunk.oldStart}–{hunk.oldStart + Math.max(0, hunk.oldCount - 1)} 行。{staged ? "将同时修改暂存区与工作区；存在未暂存冲突时拒绝执行。" : "只修改此块对应的工作区内容。"}</p><button type="button" disabled={busy} onClick={() => void run(hunk.index, "revert")}>确认丢弃此块</button><button type="button" disabled={busy} onClick={() => setConfirm(null)}>取消</button></section>}
     {snapshot && !snapshot.binary && <NativeDiffContent path={filePath} lines={lines} split={split} wrap={wrap} hunkPresentation="line-info" onOpenLine={({ line }) => {
       const path = resolveLiteralFilePath(filePath, cwd); if (!path) return;

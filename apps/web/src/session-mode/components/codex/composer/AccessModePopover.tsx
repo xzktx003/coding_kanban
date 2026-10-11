@@ -117,7 +117,7 @@ export function AccessModePopover({ compact = false }: { compact?: boolean }) {
               size="sm"
               className="session-access-trigger h-8 gap-2 px-2"
               aria-label={`执行权限：${label}`}
-              title={label}
+              title={`执行权限：${label}`}
             >
               {collaborationMode === "plan" ? (
                 <ListChecks className="h-4 w-4" />

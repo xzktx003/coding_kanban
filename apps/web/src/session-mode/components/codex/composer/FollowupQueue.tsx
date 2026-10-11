@@ -200,8 +200,8 @@ export function FollowupQueueContent({
               size="icon"
               variant="ghost"
               className="session-queue-delete"
-              aria-label="删除排队消息"
-              title="删除排队消息"
+              aria-label="删除排队的消息"
+              title="删除排队的消息"
               disabled={busy || m.status === "sending"}
               onClick={() => remove(m)}
             >
@@ -213,7 +213,7 @@ export function FollowupQueueContent({
                   type="button"
                   size="icon"
                   variant="ghost"
-                  aria-label={`排队消息 ${index + 1} 的更多操作`}
+                  aria-label={`排队消息操作 ${index + 1}`}
                   disabled={busy}
                 >
                   <MoreHorizontal size={18} />
@@ -232,6 +232,23 @@ export function FollowupQueueContent({
                   }
                 }}
               >
+                {(m.status === "failed" || m.status === "uncertain") && (
+                  <DropdownMenuItem
+                    aria-label="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
+                    title="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
+                    onSelect={() =>
+                      m.status === "uncertain"
+                        ? setConfirm({
+                            type: "retry",
+                            id: m.id,
+                            confirmUncertain: true,
+                          })
+                        : void change({ type: "retry", id: m.id })
+                    }
+                  >
+                    重试
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   disabled={m.status === "sending" || m.status === "uncertain"}
                   onSelect={() => {
@@ -251,7 +268,7 @@ export function FollowupQueueContent({
                 {onSideChat && (
                   <DropdownMenuItem onSelect={() => onSideChat(m)}>
                     <Plus />
-                    复制到侧边聊天
+                    在侧边聊天中打开
                   </DropdownMenuItem>
                 )}
                 <DropdownMenuItem
@@ -386,7 +403,9 @@ export function FollowupQueueContent({
                       : void change({ type: "retry", id: m.id })
                   }
                 >
-                  {m.error?.startsWith("SESSION_OWNED_ELSEWHERE") ? "重新连接并发送" : "重试发送"}
+                  {m.error?.startsWith("SESSION_OWNED_ELSEWHERE")
+                    ? "重新连接并发送"
+                    : "重试"}
                 </Button>
               )}
             </div>

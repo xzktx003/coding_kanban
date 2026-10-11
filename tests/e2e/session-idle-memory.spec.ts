@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { expect, test, type CDPSession, type Page } from "@playwright/test";
 import { installSessionUxFixture } from "./session-ux-fixture";
 import { liveStream } from "./session-sse-fixture";
@@ -171,13 +171,40 @@ test("invisible transcripts expire automatically while native completions and re
   page,
   context,
   baseURL,
-}) => {
+}, info) => {
   test.setTimeout(180_000);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   const { fixture, stream } = await setup(page, baseURL!);
-  const audio = await observeAudioContexts(await context.newCDPSession(page));
+  const cdp = await context.newCDPSession(page);
+  const audio = await observeAudioContexts(cdp);
+  const browserCdp = await context.browser()!.newBrowserCDPSession();
+  const started = Date.now(),
+    observations: unknown[] = [];
+  const observe = async (phase: string) => {
+    const heap = await cdp.send("Runtime.getHeapUsage");
+    const processes = await browserCdp.send("SystemInfo.getProcessInfo");
+    const rendererRssBytes =
+      process.platform === "linux"
+        ? processes.processInfo
+            .filter((p) => p.type === "renderer")
+            .reduce((sum, p) => {
+              const status = readFileSync(`/proc/${p.id}/status`, "utf8");
+              return (
+                sum + Number(status.match(/VmRSS:\s+(\d+)/)?.[1] ?? 0) * 1024
+              );
+            }, 0)
+        : null;
+    observations.push({
+      phase,
+      seconds: (Date.now() - started) / 1000,
+      heapBytes: heap.usedSize,
+      rendererRssBytes,
+      snapshot: await snapshot(page),
+    });
+  };
   try {
+    await observe("visible-and-background");
     // Real clock and the normally mounted retention service, without calling its release function.
     await expect
       .poll(async () => (await snapshot(page)).counts["ux-1"], {
@@ -185,6 +212,7 @@ test("invisible transcripts expire automatically while native completions and re
       })
       .toBeUndefined();
     const cold = await snapshot(page);
+    await observe("dormant-body-expired");
     expect(cold.counts["ux-0"]).toBeGreaterThan(0);
     expect(cold.counts["ux-2"]).toBeUndefined();
     expect(cold.approvals).toBe(1);
@@ -255,7 +283,23 @@ test("invisible transcripts expire automatically while native completions and re
       ),
     ).toEqual([]);
     expect(errors).toEqual([]);
+    await observe("read-only-reactivated");
   } finally {
+    writeFileSync(
+      info.outputPath("idle-memory-observations.json"),
+      JSON.stringify(
+        {
+          boundary:
+            "Natural heap samples and all renderer RSS in this isolated browser; no forced GC or reload",
+          observations,
+          errors,
+        },
+        null,
+        2,
+      ),
+    );
+    await browserCdp.detach();
+    await cdp.detach();
     await stream.close();
   }
 });
@@ -412,13 +456,10 @@ test("long-running native events keep dormant bodies empty with natural garbage 
     expect(audio().created).toBe(1);
     await expect.poll(() => audio().active, { timeout: 35_000 }).toBe(0);
   } finally {
+    const evidence = JSON.stringify({minutes:soakMinutes,cycles:cycle,samples,errors});
+    writeFileSync(testInfo.outputPath("natural-gc-soak.json"), evidence);
     await testInfo.attach("natural-gc-soak.json", {
-      body: JSON.stringify({
-        minutes: soakMinutes,
-        cycles: cycle,
-        samples,
-        errors,
-      }),
+      body: evidence,
       contentType: "application/json",
     });
     await stream.close();

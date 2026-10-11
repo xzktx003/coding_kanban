@@ -173,6 +173,8 @@ const EventItemBody = ({
         <TurnFailureNotice
           message={event.params.error.message}
           willRetry={event.params.willRetry}
+          errorInfo={event.params.error.codexErrorInfo}
+          additionalDetails={event.params.error.additionalDetails}
         />
       );
     case "warning":
@@ -367,7 +369,11 @@ const EventItemBody = ({
         <div className="space-y-2">
           {interrupted && <Badge variant="destructive">已中断</Badge>}
           {failed && (
-            <TurnFailureNotice message={event.params.turn.error?.message} />
+            <TurnFailureNotice
+              message={event.params.turn.error?.message}
+              errorInfo={event.params.turn.error?.codexErrorInfo}
+              additionalDetails={event.params.turn.error?.additionalDetails}
+            />
           )}
           {aggregatedChanges.length > 0 && (
             <ThreadFileChangesSummary

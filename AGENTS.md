@@ -2,7 +2,7 @@
 
 ## 构建、测试与开发命令
 
-- `pnpm install --frozen-lockfile`；Node.js 要求 `^20.19.0 || >=22.12.0`。默认会话运行层使用 TypeScript/Node；PTY、SQLite 无预编译包时需要本机编译工具。语音转写使用外部 whisper.cpp CLI。
+- `pnpm install --frozen-lockfile`；Node.js 要求 `^20.19.0 || >=22.12.0`。默认会话运行层使用 TypeScript/Node；PTY、SQLite 无预编译包时需要本机编译工具。语音在 Codex 已登录时使用其转写，否则使用外部 whisper.cpp CLI。
 - 后端 `dev:app` 使用 `scripts/watch-server.mjs`：清单/锁文件变化先安装锁定依赖，再热更新网关；失败保留旧网关，保存源码/清单可重试。边界与回归见 `docs/startup.md`。
 - `pnpm dev:prepare`：编译 shared 与默认 TypeScript 运行层；`SESSION_MODE_ENABLED=0` 跳过运行层，显式 `SESSION_RUNTIME_BIN` 只校验已有可执行文件。`pnpm dev` 与 `pnpm dev:restart` 自动执行准备。
 - `pnpm session:status`：检查会话服务和运行产物；编译不替换已有运行进程或停止 Agent，详细流程见 `docs/startup.md`。
@@ -10,7 +10,7 @@
 - `pnpm check`：共享包、TS 运行层、后端和前端类型检查及生产构建；`pnpm session:check`：TS 运行层检查。
 - `pnpm test`：终端单测、迁移的会话 Vitest 单测及脚本测试；后端测试并发限制为 4，避免共享主机上的 tmux 测试争用。
 - `pnpm session:test`、`pnpm session:clippy`：TS 运行层测试与类型检查（clippy 为兼容命令名），测试使用独立的应用/CLI 数据目录。
-- 会话运行层 TS 实现位于 `packages/session-runtime/src`，新启动默认使用独立 Node 进程。`pnpm --filter @agent-orchestrator/session-runtime audit` 核对全部 208 个方法/路径；注册通过不替代行为验收。已有 legacy 服务仍安全复用，禁止因新产物而隐式停止活跃 Agent，进度与验收见 `docs/session-typescript-migration.md`。
+- 会话运行层 TS 实现位于 `packages/session-runtime/src`，新启动默认使用独立 Node 进程。`pnpm --filter @agent-orchestrator/session-runtime run audit` 核对原 208 个迁移契约方法/路径；新 Slack 预览 context/read 两个只读接口有独立行为验收，见 `docs/session-slack-preview.md`。注册通过不替代行为验收。已有 legacy 服务仍安全复用，禁止因新产物而隐式停止活跃 Agent，进度与验收见 `docs/session-typescript-migration.md`。
 - `pnpm e2e`：浏览器测试；会话模式联调使用独立 `.env`、端口和 `SESSION_DATA_HOME`，详情见 `docs/session-mode-architecture.md`。
 
 

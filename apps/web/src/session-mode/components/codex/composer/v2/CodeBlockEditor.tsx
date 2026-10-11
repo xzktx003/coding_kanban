@@ -16,11 +16,21 @@ import "ace-builds/src-noconflict/mode-text";
 import "ace-builds/src-noconflict/theme-monokai";
 const modes: Record<string, string> = {
   ts: "typescript",
+  tsx: "typescript",
   js: "javascript",
+  jsx: "javascript",
   bash: "sh",
+  shell: "sh",
+  zsh: "sh",
   go: "golang",
   cpp: "c_cpp",
   c: "c_cpp",
+  plaintext: "text",
+  text: "text",
+  py: "python",
+  rs: "rust",
+  yml: "yaml",
+  md: "markdown",
 };
 export default function CodeBlockEditor({
   id,

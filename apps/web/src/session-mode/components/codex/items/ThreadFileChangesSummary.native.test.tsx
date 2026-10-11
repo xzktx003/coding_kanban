@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { ThreadFileChangesSummary } from "./ThreadFileChangesSummary";
 import { CodexContentOwner } from "../presentation/ownerContext";
 import { useCodexStore } from "../stores/useCodexStore";
-import { useWorkspaceStore } from "@session/stores";
+import { useEditorStore, useWorkspaceStore } from "@session/stores";
 import { useSavedTurnReviewStore } from "@session/stores/useSavedTurnReviewStore";
 import { useSavedPatchStore } from "@session/stores/useSavedPatchStore";
 const api = vi.hoisted(() => ({
@@ -153,4 +153,68 @@ it("does not offer blank review or saved-patch actions for projected metadata", 
   ).toBeNull();
   expect(screen.queryByRole("button", { name: "file.py" })).toBeNull();
   expect(api.apply).not.toHaveBeenCalled();
+});
+
+it("projected paths can open the owning file without opening an empty historical diff or changing input target", () => {
+  const reveal = vi
+    .spyOn(useEditorStore.getState(), "revealFile")
+    .mockImplementation(() => {});
+  render(
+    <ThreadFileChangesSummary
+      changes={changes.map((change) => ({
+        ...change,
+        diff: "",
+        transcriptMetadataOnly: true,
+      }))}
+      threadId="a"
+      turnId="old-turn"
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "查看文件 file.py" }));
+  expect(reveal).toHaveBeenCalledWith("/a/file.py", "/a");
+  expect(useWorkspaceStore.getState().cwd).toBe("/b");
+  expect(useCodexStore.getState().currentThreadId).toBe("b");
+  expect(useSavedTurnReviewStore.getState().target).toBeNull();
+  expect(api.apply).not.toHaveBeenCalled();
+  reveal.mockRestore();
+});
+
+it("projected deleted files cannot open a nonexistent source, while renames reveal the exact destination", () => {
+  const reveal = vi
+    .spyOn(useEditorStore.getState(), "revealFile")
+    .mockImplementation(() => {});
+  const removed = {
+    ...changes[0],
+    kind: { type: "delete" as const },
+    diff: "",
+    transcriptMetadataOnly: true,
+  };
+  const { rerender } = render(
+    <ThreadFileChangesSummary
+      changes={[removed]}
+      threadId="a"
+      turnId="old-turn"
+    />,
+  );
+  const button = screen.getByRole("button", { name: "查看文件 file.py" });
+  expect((button as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(button);
+  expect(reveal).not.toHaveBeenCalled();
+  rerender(
+    <ThreadFileChangesSummary
+      changes={[
+        {
+          ...changes[0],
+          kind: { type: "update", move_path: "/a/new:100%.py" },
+          diff: "",
+          transcriptMetadataOnly: true,
+        },
+      ]}
+      threadId="a"
+      turnId="old-turn"
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "查看文件 file.py" }));
+  expect(reveal).toHaveBeenCalledWith("/a/new:100%.py", "/a");
+  reveal.mockRestore();
 });

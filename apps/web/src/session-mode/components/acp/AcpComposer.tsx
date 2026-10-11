@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import { useAgentInteractionVisible } from "@session/session-dom";
 import { useStopAction } from "../common/useStopAction";
 import { useSessionAttentionStore } from "@session/stores/useSessionAttentionStore";
@@ -310,7 +311,7 @@ export function AcpComposer({
       if (result.stopReason === "end_turn")
         useSessionAttentionStore
           .getState()
-          .complete("acp", `${agentId}:${live.sessionId}`, crypto.randomUUID());
+          .complete("acp", `${agentId}:${live.sessionId}`, randomUUID());
     } catch (e) {
       if (ownsTarget()) {
         addEntry({ id: `e-${Date.now()}`, role: "error", text: String(e) });

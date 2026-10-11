@@ -7,7 +7,8 @@ test("active visible Codex history reaches a bounded plateau and older turns rem
 }) => {
   test.setTimeout(90000);
   await installSessionUxFixture(page, 1);
-  await page.goto("/?mode=session", { waitUntil: "networkidle" });
+  await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".session-mode")).toBeVisible();
   await page.evaluate(async () => {
     const url = (path: string) =>
       performance
@@ -178,7 +179,8 @@ test("one running turn retains bounded tool metadata while keeping its live answ
 }) => {
   test.setTimeout(90000);
   await installSessionUxFixture(page, 1);
-  await page.goto("/?mode=session", { waitUntil: "networkidle" });
+  await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".session-mode")).toBeVisible();
   const result = await page.evaluate(async () => {
     const url = (path: string) =>
       performance
@@ -365,7 +367,8 @@ test("real tool lifecycles stay bounded through automatic recovery and cache wri
 }) => {
   test.setTimeout(150000);
   await installSessionUxFixture(page, 1);
-  await page.goto("/?mode=session", { waitUntil: "networkidle" });
+  await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
+  await expect(page.locator(".session-mode")).toBeVisible();
   await page.evaluate(async () => {
     const url = (path: string) =>
       performance

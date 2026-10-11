@@ -299,11 +299,11 @@ test("touch controls, agent label, owner states and narrow desktop pane stay wit
       });
       await expect(
         page.locator(".session-native-composer-status").first(),
-      ).toHaveText("规划模式");
+      ).toHaveText("计划模式");
       await fixedHeight(page, initial);
       await openComposerStatus(page);
       await expect(
-        page.getByRole("button", { name: "取消规划模式", exact: true }),
+        page.getByRole("button", { name: "取消计划模式", exact: true }),
       ).toBeVisible();
       await expect(
         page.getByRole("button", { name: "取消目标草稿", exact: true }),
@@ -391,7 +391,7 @@ test("slow upload, upload failure and retry reserve the same geometry and keep s
       page.locator(".session-native-composer-status[role=status]"),
     ).toContainText("正在上传");
     await expect(
-      page.getByRole("button", { name: "发送消息", exact: true }),
+      page.getByRole("button", { name: "发送", exact: true }),
     ).toBeDisabled();
     release();
     await expect(
@@ -403,17 +403,17 @@ test("slow upload, upload failure and retry reserve the same geometry and keep s
     await fixedHeight(page, before);
     await page.getByRole("button", { name: /预览 .*上传失败/ }).click();
     await expect(
-      page.getByRole("button", { name: "重试上传", exact: true }),
+      page.getByRole("button", { name: "再次尝试上传", exact: true }),
     ).toBeVisible();
     retry = true;
-    await page.getByRole("button", { name: "重试上传", exact: true }).click();
+    await page.getByRole("button", { name: "再次尝试上传", exact: true }).click();
     await expect(
       page.locator(".session-context-chip[data-state=ready]"),
     ).toHaveCount(1);
     await page.getByRole("button", { name: "关闭面板", exact: true }).click();
     await fixedHeight(page, before);
     await expect(
-      page.getByRole("button", { name: "发送消息", exact: true }),
+      page.getByRole("button", { name: "发送", exact: true }),
     ).toBeEnabled();
     await expect(editor(page)).toHaveText("上传时保留草稿");
     expect(f.calls).toHaveLength(0);
@@ -551,7 +551,7 @@ test("visual acceptance captures both themes, left thumbnails, direct utilities 
       page.getByRole("button", { name: "立即引导", exact: true }),
     ).toBeVisible();
     await page
-      .getByRole("button", { name: "排队消息 1 的更多操作", exact: true })
+      .getByRole("button", { name: "排队消息操作 1", exact: true })
       .click();
     await expect(
       page.getByRole("menuitem", { name: "删除消息", exact: true }),

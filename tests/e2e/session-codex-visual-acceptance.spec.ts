@@ -355,7 +355,7 @@ for (const profile of profiles) {
         for (const control of metrics.controls.filter(
           (control) =>
             control.name &&
-            /发送消息|当前 Agent|Agent 与模型|执行权限|展开编辑|输入状态/.test(
+            /发送|模型：|执行权限|展开编辑|输入状态/.test(
               control.name,
             ),
         )) {
@@ -370,7 +370,7 @@ for (const profile of profiles) {
           expect(control.hit, control.name!).toBe(true);
         }
         // Capture actual source model and permission overlays in the complete workbench.
-        await composer.getByRole("button", { name: /^Agent 与模型：/ }).click();
+        await composer.getByRole("button", { name: /^模型：/ }).click();
         const modelMenu = page.locator(".session-native-model-menu");
         await expect(modelMenu).toBeVisible();
         await page.screenshot({

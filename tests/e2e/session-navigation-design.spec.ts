@@ -99,7 +99,7 @@ test("merged navigation keeps projects, followed sessions and pending status rea
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(width);
     await expect(
-      page.getByRole("button", { name: "发送消息", exact: true }),
+      page.getByRole("button", { name: "发送", exact: true }),
     ).toBeInViewport();
     if (width < 768) {
       await expect(
@@ -165,7 +165,7 @@ test("merged navigation keeps projects, followed sessions and pending status rea
   await editor.fill("手机键盘尺寸变化后保留的草稿");
   await editor.focus();
   await expect(
-    page.getByRole("button", { name: /^(发送消息|停止生成)$/ }),
+    page.getByRole("button", { name: /^(发送|停止)$/ }),
   ).toBeInViewport();
   await expect(nav).toBeInViewport();
   await page.setViewportSize({ width: 390, height: 900 });

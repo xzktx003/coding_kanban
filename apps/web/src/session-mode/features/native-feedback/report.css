@@ -1,0 +1,234 @@
+.session-mode .codex-feedback-report {
+  --feedback-link: var(--vscode-textLink-foreground, #006ab1);
+  width: 520px;
+  max-height: calc(100dvh - 32px);
+  overflow: hidden;
+}
+.session-mode .feedback-report-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 20px;
+  font-size: 14px;
+  line-height: 21px;
+  max-height: calc(100dvh - 32px);
+}
+.session-mode .feedback-report-section:not(:first-child) {
+  padding-top: 12px;
+}
+.session-mode .feedback-report-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.session-mode .feedback-report-header h2 {
+  width: 100%;
+}
+.session-mode .feedback-report-status-icon {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 8px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--foreground) 5%, transparent);
+}
+.session-mode .feedback-report-status-icon > svg {
+  width: 20px;
+  height: 20px;
+}
+.session-mode .feedback-report-status-icon > svg[data-feedback-error] {
+  color: var(--vscode-errorForeground, var(--foreground));
+}
+.session-mode .feedback-report-spinner {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  line-height: 1;
+  align-items: center;
+  justify-content: center;
+  contain: layout paint style;
+  color: rgb(from var(--foreground) r g b / 0.65);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .session-mode .feedback-report-spinner {
+    animation: feedback-report-spin 2s steps(60, end) infinite;
+  }
+}
+@keyframes feedback-report-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.session-mode .feedback-report-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: auto;
+}
+.session-mode .feedback-report-content p {
+  margin: 0;
+  flex-shrink: 0;
+}
+.session-mode .feedback-report-content a {
+  color: var(--feedback-link);
+  text-decoration: underline;
+}
+.session-mode .feedback-report-id-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.session-mode .feedback-report-id {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--feedback-border);
+  border-radius: 4px;
+  background: var(--vscode-menu-background, var(--popover));
+  padding: 8px 12px;
+}
+.session-mode .feedback-report-id > div {
+  min-width: 0;
+  flex: 1;
+}
+.session-mode .feedback-report-id-label {
+  font-size: 11px;
+  line-height: 1.3333333333333333;
+  color: rgb(from var(--foreground) r g b / 0.65);
+  border-color: currentColor;
+}
+.session-mode .feedback-report-id code {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font:
+    14px/21px var(--vscode-editor-font-family, ui-monospace),
+    ui-monospace,
+    SFMono-Regular,
+    "SF Mono",
+    menlo,
+    consolas,
+    "Liberation Mono",
+    monospace;
+  color: var(--foreground);
+}
+.session-mode .feedback-id-copy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+.session-mode .feedback-id-copy svg {
+  width: 14px;
+  height: 14px;
+}
+.session-mode .feedback-id-copy:not([aria-disabled="true"]):hover {
+  background: var(--vscode-list-hoverBackground, transparent);
+}
+.session-mode .feedback-report-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.session-mode .feedback-report-footer button {
+  flex: none;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--feedback-border);
+  border-radius: 10px;
+  background: var(--foreground);
+  color: var(--popover);
+  font: 12px/18px var(--vscode-font-family, system-ui);
+}
+.session-mode .feedback-report-footer .feedback-report-secondary {
+  background: color-mix(in oklab, var(--foreground) 5%, transparent);
+  border-color: transparent;
+  color: var(--foreground);
+}
+.session-mode .codex-feedback-report button:focus-visible {
+  outline-style: none;
+  box-shadow:
+    0 0 0 0 #fff,
+    0 0 0 2px var(--vscode-focusBorder, currentColor);
+  outline-offset: 0;
+}
+
+.session-mode .feedback-report-content p,
+.session-mode .feedback-report-id code {
+  border-color: currentColor;
+}
+.session-mode .feedback-id-copy,
+.session-mode .feedback-report-footer button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+.session-mode .feedback-id-copy[aria-disabled="true"] {
+  opacity: 0.4;
+}
+
+.session-mode .feedback-report-status-icon {
+  border-color: currentColor;
+}
+
+.session-mode .feedback-report-spinner svg {
+  border-color: currentColor;
+}
+
+.session-mode .feedback-report-content a,
+.session-mode .feedback-report-status-icon svg {
+  border-color: currentColor;
+}
+
+.session-mode .codex-feedback-report,
+.session-mode .codex-feedback-report * {
+  outline-color: currentColor;
+}
+
+.session-mode .feedback-report-footer button:only-child {
+  flex: 1;
+}
+.session-mode
+  .feedback-report-footer
+  button:not(.feedback-report-secondary):hover {
+  background: color-mix(in oklab, var(--foreground) 80%, transparent);
+}
+.session-mode .feedback-report-footer .feedback-report-secondary:hover {
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+}
+
+.session-mode .feedback-id-copy[aria-disabled="true"] {
+  cursor: default;
+}
+
+:is(.session-mode.dark, .dark .session-mode, .session-mode .dark)
+  .codex-feedback-report {
+  --feedback-link: var(--vscode-textLink-foreground, #a9c5de);
+}
+
+@supports (corner-shape: superellipse(1.5)) {
+  .session-mode .feedback-report-status-icon {
+    border-radius: 15px;
+    corner-shape: superellipse(1.5);
+  }
+  .session-mode .feedback-report-footer button {
+    border-radius: 12.5px;
+    corner-shape: superellipse(1.5);
+  }
+}

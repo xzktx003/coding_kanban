@@ -110,6 +110,14 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
     if (projection.hidden.has(index)) continue;
     const event = projection.replacements.get(index) ?? item.event;
     if (hiddenMethods.has(event.method)) continue;
+    // VSIX app-initial-e98b9eaef8e3: wait never becomes a
+    // multi-agent-action. Retain its native lifecycle for observation only.
+    if (
+      (event.method === "item/started" || event.method === "item/completed") &&
+      event.params.item.type === "collabAgentToolCall" &&
+      event.params.item.tool === "wait"
+    )
+      continue;
     if (
       event.method === "item/commandExecution/terminalInteraction" &&
       (typeof event.params.stdin !== "string" || !event.params.stdin.length)
@@ -164,7 +172,6 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
       if (
         [
           "userMessage",
-          "commandExecution",
           "enteredReviewMode",
           "exitedReviewMode",
           "sleep",

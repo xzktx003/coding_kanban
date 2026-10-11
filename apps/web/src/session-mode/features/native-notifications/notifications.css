@@ -1,0 +1,260 @@
+.session-mode .codex-native-toast-area {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  font: 16px/24px var(--vscode-font-family, system-ui);
+  color: var(--foreground);
+}
+.session-mode .codex-native-toast-area:not(:has([data-sonner-toast])) {
+  visibility: hidden;
+}
+.session-mode .codex-native-toast-position {
+  position: absolute;
+  inset: 8px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding: 0 8px;
+}
+.session-mode .codex-native-toast-width {
+  position: relative;
+  width: 100%;
+}
+.session-mode [data-sonner-toaster].codex-native-sonner-toaster {
+  position: absolute;
+  top: 0;
+  width: 100%;
+  max-width: 790px;
+  display: flex;
+  justify-content: center;
+  font-family: inherit;
+  transition-duration: 0.3s;
+}
+.session-mode
+  [data-sonner-toaster].codex-native-sonner-toaster[data-x-position="right"] {
+  position: fixed;
+  inset-inline: 24px;
+  top: 56px;
+  width: auto;
+  max-width: 320px;
+  margin-inline-start: auto;
+}
+.session-mode .codex-native-sonner-toaster [data-sonner-toast],
+.session-mode .codex-native-sonner-toaster [data-sonner-toast] > * {
+  transition-duration: 0.3s;
+}
+.session-mode .codex-native-toast {
+  pointer-events: auto;
+  width: max-content;
+  max-width: 100%;
+  border-color: currentColor;
+}
+.session-mode .codex-native-toast-contents {
+  display: contents;
+}
+.session-mode .codex-native-custom-notice {
+  min-width: 0;
+  max-width: 100%;
+}
+.session-mode .codex-native-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  border-radius: 12px;
+  padding: 8px 12px;
+  font: 14px/21px var(--vscode-font-family, system-ui);
+  color: var(--foreground);
+  border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+  background: var(--vscode-sideBar-background, var(--popover));
+  pointer-events: all;
+  box-shadow: 0 4px 12px #0000001a;
+}
+.session-mode .codex-native-alert[data-level="success"] {
+  color: var(--vscode-charts-green, var(--foreground));
+  border-color: color-mix(
+    in oklab,
+    var(--vscode-charts-green) 20%,
+    transparent
+  );
+  background: var(--native-notice-success-surface, #011c0b);
+}
+.session-mode .codex-native-alert[data-level="warning"] {
+  color: var(--vscode-editorWarning-foreground, var(--foreground));
+  border-color: var(--vscode-inputValidation-warningBorder, currentColor);
+  background: #281105;
+}
+.session-mode .codex-native-alert[data-level="danger"] {
+  color: var(--vscode-errorForeground, var(--foreground));
+  border-color: var(--vscode-inputValidation-errorBorder, currentColor);
+  background: #280b0a;
+}
+.session-mode.light .codex-native-alert[data-level="success"] {
+  background: #edfaf2;
+}
+.session-mode.light .codex-native-alert[data-level="warning"] {
+  background: #fff5f0;
+}
+.session-mode.light .codex-native-alert[data-level="danger"] {
+  background: #fff0f0;
+}
+.session-mode .codex-native-alert-row {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 4px;
+}
+.session-mode .codex-native-alert-leading,
+.session-mode .codex-native-alert-close {
+  display: flex;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  flex-grow: 0;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+}
+.session-mode .codex-native-alert-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: 12px;
+  align-items: flex-start;
+}
+.session-mode .codex-native-alert-content {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: break-word;
+}
+.session-mode .codex-native-alert-title {
+  display: flex;
+  min-height: 24px;
+  align-items: center;
+  white-space: pre-wrap;
+  font-weight: 500;
+  text-align: start;
+}
+.session-mode .codex-native-alert-description {
+  text-align: start;
+}
+/* The fixed VSIX has no warning/success/danger /80 utility; these inherit the card color. */
+.session-mode
+  .codex-native-alert[data-level="info"]
+  .codex-native-alert-description {
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+}
+.session-mode .codex-native-alert-actions {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+}
+.session-mode .codex-native-alert-actions-block {
+  justify-content: flex-end;
+}
+.session-mode .codex-native-alert-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+  border-radius: 10px;
+  white-space: nowrap;
+  font: 11px/16px var(--vscode-font-family, system-ui);
+  color: var(--foreground);
+  background: color-mix(in oklab, var(--foreground) 5%, transparent);
+  cursor: pointer;
+  user-select: none;
+}
+.session-mode .codex-native-alert-action[data-primary] {
+  background: var(--foreground);
+  color: var(--vscode-sideBar-background, var(--popover));
+}
+@supports (corner-shape: superellipse(1.5)) {
+  .session-mode .codex-native-alert {
+    border-radius: 15px;
+    corner-shape: superellipse(1.5);
+  }
+  .session-mode .codex-native-alert-action {
+    border-radius: 12.5px;
+    corner-shape: superellipse(1.5);
+  }
+}
+.session-mode .codex-native-alert-action:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--foreground) 10%, transparent);
+}
+.session-mode .codex-native-alert-action[data-primary]:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--foreground) 80%, transparent);
+}
+.session-mode .codex-native-alert-action:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.session-mode .codex-native-alert-close {
+  border: 0 solid currentColor;
+  padding: 0;
+  border-radius: 9999px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.session-mode .codex-native-alert svg {
+  border: 0 solid currentColor;
+}
+.session-mode .codex-native-alert-close:hover {
+  background: color-mix(in oklab, var(--foreground) 5%, transparent);
+}
+.session-mode .codex-native-alert button:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, var(--foreground));
+  outline-offset: 0;
+}
+.session-mode .codex-native-alert[data-inline-center] {
+  width: max-content;
+}
+.session-mode .codex-native-alert[data-inline-center] .codex-native-alert-row {
+  align-items: center;
+  gap: 12px;
+}
+.session-mode .codex-native-alert[data-inline-center] .codex-native-alert-body {
+  align-items: center;
+}
+.session-mode
+  .codex-native-alert[data-inline-center]
+  .codex-native-alert-leading,
+.session-mode
+  .codex-native-alert[data-inline-center]
+  .codex-native-alert-close {
+  align-self: auto;
+}
+.session-mode .codex-native-alert-spinner {
+  display: inline-flex;
+  width: fit-content;
+  height: fit-content;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  contain: layout paint style;
+}
+.session-mode .codex-native-alert-spinner svg {
+  width: 12px;
+  height: 12px;
+}
+@keyframes codex-notice-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+:root[data-reduced-motion="false"] .session-mode .codex-native-alert-spinner {
+  animation: codex-notice-spin 2s steps(60, end) infinite;
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduced-motion]) .session-mode .codex-native-alert-spinner {
+    animation: codex-notice-spin 2s steps(60, end) infinite;
+  }
+}

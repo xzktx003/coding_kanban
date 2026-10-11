@@ -484,7 +484,7 @@ for (const { width, theme } of [
         page.getByRole("button", { name: "引用子 Agent 或配置角色" }),
       ).toHaveText("@");
       await activate(
-        page.getByRole("button", { name: "发送消息", exact: true }),
+        page.getByRole("button", { name: "发送", exact: true }),
       );
       await expect
         .poll(

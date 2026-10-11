@@ -35,15 +35,44 @@ function TooltipTrigger({
 function TooltipContent({
   className,
   sideOffset = 0,
+  hideArrow = false,
+  interactive = false,
+  ref,
   children,
   ...props
-}: React.ComponentProps<typeof TooltipPrimitive.Content>) {
+}: React.ComponentProps<typeof TooltipPrimitive.Content> & {
+  hideArrow?: boolean;
+  interactive?: boolean;
+}) {
   const visible = useSessionInteractionVisible();
+  const attach = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      // Native rich tooltips expose their actual interactive surface. Radix's
+      // ordinary tooltip otherwise clones every child into an invisible span.
+      if (interactive && node) {
+        const hidden = node.querySelector<HTMLSpanElement>(
+          'span[role="tooltip"]',
+        );
+        if (hidden) {
+          node.id = hidden.id;
+          node.setAttribute("role", "tooltip");
+          node.removeAttribute("aria-label");
+          hidden.removeAttribute("id");
+          hidden.removeAttribute("role");
+          hidden.setAttribute("aria-hidden", "true");
+        }
+      }
+      if (typeof ref === "function") return ref(node);
+      if (ref) ref.current = node;
+    },
+    [ref, interactive],
+  );
   if (!visible) return null;
 
   return (
     <TooltipPrimitive.Portal container={sessionPortalContainer()}>
       <TooltipPrimitive.Content
+        ref={attach}
         data-slot="tooltip-content"
         sideOffset={sideOffset}
         className={cn(
@@ -51,9 +80,12 @@ function TooltipContent({
           className,
         )}
         {...props}
+        aria-label={interactive ? "Preview" : props["aria-label"]}
       >
         {children}
-        <TooltipPrimitive.Arrow className="bg-foreground fill-foreground z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px]" />
+        {!hideArrow && (
+          <TooltipPrimitive.Arrow className="bg-foreground fill-foreground z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px]" />
+        )}
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
   );

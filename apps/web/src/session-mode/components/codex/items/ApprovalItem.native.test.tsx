@@ -90,6 +90,37 @@ it("offers only native allowed decisions, with the exact network amendment", asy
   );
 });
 
+it("keeps the native network always-allow action visible beside once/session options", async () => {
+  const amendment = {
+    applyNetworkPolicyAmendment: {
+      network_policy_amendment: {
+        host: "example.org",
+        action: "allow" as const,
+      },
+    },
+  };
+  const value = request({
+    networkApprovalContext: { host: "example.org", protocol: "https" },
+    availableDecisions: ["accept", "acceptForSession", amendment, "decline"],
+  });
+  const respond = seed(value);
+  render(<ApprovalItem currentThreadId="owner" />);
+  const allow = screen.getByRole("button", {
+    name: "approval.alwaysAllowHost",
+  });
+  expect(allow.closest(".codex-approval-actions")).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "approval.approveOnce" }),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "approval.scopeOptions" }),
+  ).toBeTruthy();
+  fireEvent.click(allow);
+  await waitFor(() =>
+    expect(respond).toHaveBeenCalledWith(8, true, amendment, value),
+  );
+});
+
 it("an explicit empty allowed-decision list never invents approval scopes", () => {
   seed(request({ availableDecisions: [] }));
   render(<ApprovalItem currentThreadId="owner" />);

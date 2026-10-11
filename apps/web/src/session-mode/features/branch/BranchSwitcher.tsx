@@ -1,4 +1,5 @@
 import { Check, ChevronDown, GitBranch, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { useEffect, useState } from "react";
 import { Button } from "@session/components/ui/button";
 import {
@@ -13,10 +14,15 @@ import {
   type GitBranchInfoResponse,
   gitBranchInfo,
   gitCheckoutBranch,
+  gitCommit,
+  gitFileNumstat,
   gitListBranches,
   gitStatus,
 } from "@session/services/apiAdapt/git";
-import { DirtyBranchAlertDialog } from "./DirtyBranchAlertDialog";
+import {
+  DirtyBranchAlertDialog,
+  type BranchFileStat,
+} from "./DirtyBranchAlertDialog";
 import { NewBranchSubMenu } from "./NewBranchSubMenu";
 
 export function BranchSwitcher({ cwd }: { cwd: string | null }) {
@@ -25,7 +31,8 @@ export function BranchSwitcher({ cwd }: { cwd: string | null }) {
   const [loading, setLoading] = useState(false);
   const [switching, setSwitching] = useState<string | null>(null);
   const [dirtyBranch, setDirtyBranch] = useState<string | null>(null);
-  const [dirtyCount, setDirtyCount] = useState(0);
+  const [dirtyFiles, setDirtyFiles] = useState<BranchFileStat[]>([]);
+  const [workspaceDirty, setWorkspaceDirty] = useState(false);
   const [branchInfo, setBranchInfo] = useState<GitBranchInfoResponse | null>(
     null,
   );
@@ -59,6 +66,9 @@ export function BranchSwitcher({ cwd }: { cwd: string | null }) {
       .then((res) => setBranches(res.branches))
       .catch(() => setBranches([]))
       .finally(() => setLoading(false));
+    gitStatus(currentCwd)
+      .then((status) => setWorkspaceDirty(status.entries.length > 0))
+      .catch(() => setWorkspaceDirty(false));
   }, [menuOpen, cwd]);
 
   async function doCheckoutBranch(branch: string) {
@@ -85,7 +95,22 @@ export function BranchSwitcher({ cwd }: { cwd: string | null }) {
     try {
       const status = await gitStatus(currentCwd);
       if (status.entries.length > 0) {
-        setDirtyCount(status.entries.length);
+        const stats = await gitFileNumstat(currentCwd).catch(
+          () => [] as Awaited<ReturnType<typeof gitFileNumstat>>,
+        );
+        const byPath = new Map(stats.map((file) => [file.path, file]));
+        setDirtyFiles(
+          status.entries.map((entry) => ({
+            path: entry.path,
+            additions: byPath.get(entry.path)?.additions ?? 0,
+            deletions: byPath.get(entry.path)?.deletions ?? 0,
+            conflict:
+              entry.index_status === "U" ||
+              entry.worktree_status === "U" ||
+              (entry.index_status === "A" && entry.worktree_status === "A") ||
+              (entry.index_status === "D" && entry.worktree_status === "D"),
+          })),
+        );
         setDirtyBranch(branch);
         return;
       }
@@ -114,10 +139,21 @@ export function BranchSwitcher({ cwd }: { cwd: string | null }) {
           if (!open) setDirtyBranch(null);
         }}
         dirtyBranch={dirtyBranch}
-        dirtyCount={dirtyCount}
+        files={dirtyFiles}
         onConfirm={(branch) => {
           setDirtyBranch(null);
-          doCheckoutBranch(branch);
+          void (async () => {
+            if (!cwd) return;
+            try {
+              await gitCommit(cwd, `切换到 ${branch} 前提交未保存更改`);
+            } catch (error) {
+              toast.error(
+                `无法切换分支：${error instanceof Error ? error.message : String(error)}`,
+              );
+              return;
+            }
+            await doCheckoutBranch(branch);
+          })();
         }}
         onCancel={() => setDirtyBranch(null)}
       />
@@ -131,7 +167,7 @@ export function BranchSwitcher({ cwd }: { cwd: string | null }) {
         <DropdownMenuTrigger asChild>
           <Button
             aria-label={`Git 分支：${branchInfo.branch ?? "未选择"}`}
-            title={`Git 分支：${branchInfo.branch ?? "未选择"}`}
+            title="切换分支"
             variant="ghost"
             size="sm"
             className="h-auto gap-1 px-1.5 py-0.5 text-xs text-muted-foreground"
@@ -185,6 +221,7 @@ export function BranchSwitcher({ cwd }: { cwd: string | null }) {
 
               <NewBranchSubMenu
                 cwd={cwd}
+                disabled={workspaceDirty}
                 onBranchCreated={handleBranchCreated}
                 onCloseMenu={() => setMenuOpen(false)}
               />

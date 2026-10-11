@@ -4,6 +4,7 @@ export function submitIntent(
     shiftKey: boolean;
     ctrlKey: boolean;
     metaKey: boolean;
+    altKey?: boolean;
     isComposing?: boolean;
     keyCode?: number;
   },
@@ -12,6 +13,8 @@ export function submitIntent(
 ): "default" | "opposite" | null {
   // Some browser/IME combinations only mark the final composing Enter as 229.
   if (event.isComposing || event.keyCode === 229) return null;
+  // The native main editor reserves Alt Enter for editing rather than sending.
+  if (event.altKey) return null;
   const modifier = event.ctrlKey || event.metaKey;
   if (modifier && event.shiftKey) return "opposite";
   if (event.shiftKey) return null;

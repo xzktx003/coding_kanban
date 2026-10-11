@@ -260,7 +260,7 @@ export class CodexFollowups {
       if (data.mode === "steer") await this.deliver(data.threadId, item, true);
       if (data.mode === "replace") {
         await this.transaction(() => {
-          thread.paused = "停止后队列已暂停";
+          thread.paused = "由于你中断了当前响应，队列已暂停";
           thread.replacementId = item.id;
           thread.stopTurnId = data.expectedTurnId;
           thread.revision++;
@@ -432,7 +432,7 @@ export class CodexFollowups {
     return this.run(async () => {
       const thread = this.thread(id);
       await this.transaction(() => {
-        thread.paused = "你已停止当前任务，队列已暂停";
+        thread.paused = "由于你中断了当前响应，队列已暂停";
         thread.stopTurnId = turnId;
         thread.revision++;
       });
@@ -542,7 +542,7 @@ export class CodexFollowups {
           thread.paused =
             p.turn.status === "failed"
               ? "上一轮执行失败，请检查后继续"
-              : "当前任务已中断，队列已暂停";
+              : "由于你中断了当前响应，队列已暂停";
         thread.revision++;
       });
     });
@@ -596,7 +596,7 @@ export class CodexFollowups {
       if (failed || interrupted)
         thread.paused = failed
           ? "上一轮执行失败，请检查后继续"
-          : "当前任务已中断，队列已暂停";
+          : "由于你中断了当前响应，队列已暂停";
       else if (thread.paused === "重新连接后等待任务完成确认")
         thread.paused = null;
       thread.revision++;

@@ -162,6 +162,7 @@
   line-height: 1.5;
   color: var(--muted-foreground);
 }
+.session-mode .session-composer-floating .session-composer-mode,
 .session-mode .session-composer-mode {
   padding: 6px 8px 0;
 }
@@ -615,4 +616,9 @@
 @media (pointer: coarse), (max-width: 767px) {
   .session-mode .session-model-change-notice { margin-inline: 8px; }
   .session-mode .session-model-change-notice button { width: 44px; height: 44px; }
+}
+.session-mode .session-personality-notice {
+  margin: 8px 12px 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
 }

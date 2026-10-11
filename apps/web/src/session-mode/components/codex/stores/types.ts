@@ -45,6 +45,8 @@ export interface ThreadsSlice {
   hasAccount: boolean | null;
   /** Logged-in account details, null when signed out or not yet resolved. */
   account: Account | null;
+  /** Authoritative workspace routing identity, separate from display email/plan. */
+  accountNamespace: string | null;
   activeThreadIds: string[]; // Track resumed/active threads
   inputFocusTrigger: number; // Increment to trigger focus in InputArea
   threadListNextCursor: string | null;
@@ -53,7 +55,7 @@ export interface ThreadsSlice {
   setThreads: (threads: Thread[]) => void;
   appendThreads: (threads: Thread[]) => void;
   setThreadListNextCursor: (cursor: string | null) => void;
-  setAccount: (account: Account | null) => void;
+  setAccount: (account: Account | null, namespace?: string | null) => void;
   triggerInputFocus: () => void;
 
   // Selectors

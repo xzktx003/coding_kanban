@@ -69,8 +69,8 @@ export function NativeMessageFork({
         ? "从此轮分支并引用选区"
         : "Fork from this turn with selected text"
       : zh
-        ? "从此轮创建分支"
-        : "Fork from this turn";
+        ? "从这里创建聊天分支"
+        : "Fork chat from here";
   return (
     <button
       type="button"

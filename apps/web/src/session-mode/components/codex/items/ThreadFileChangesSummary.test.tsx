@@ -1,10 +1,4 @@
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ThreadFileChangesSummary } from "./ThreadFileChangesSummary";
 import type { AggregatedFileChange } from "./fileChangeLogic";
@@ -58,97 +52,62 @@ it("renders no card for no files", () => {
   const { container } = render(<ThreadFileChangesSummary changes={[]} />);
   expect(container.childElementCount).toBe(0);
 });
-it.each([6, 7, 39])(
-  "desktop keeps all %i records and scrolls only above six",
-  (count) => {
-    render(<ThreadFileChangesSummary changes={changes(count)} />);
+it.each([false, true])(
+  "projected file changes keep the native card and bounded list (mobile=%s)",
+  (mobile) => {
+    mock.mobile = mobile;
+    const projected = changes(16).map((change) => ({
+      ...change,
+      transcriptMetadataOnly: true,
+      addedCount: 0,
+      removedCount: 0,
+    }));
+    const { container } = render(
+      <ThreadFileChangesSummary
+        changes={projected}
+        threadId="owner"
+        turnId="turn"
+      />,
+    );
     const list = screen.getByRole("region", { name: "fileChanges.listLabel" });
-    expect(list.getAttribute("data-scrollable")).toBe(String(count > 6));
-    expect(list.tabIndex).toBe(count > 6 ? 0 : -1);
-    expect(list.querySelectorAll(".session-file-change-row")).toHaveLength(
-      count,
-    );
-    expect(screen.queryByText("fileChanges.scrollMore") !== null).toBe(
-      count > 6,
-    );
-    expect(within(list).queryByText("fileChanges.undoAll")).toBeNull();
+    expect(list.getAttribute("data-scrollable")).toBe("true");
+    expect(list.querySelectorAll(".session-file-change-row")).toHaveLength(16);
+    expect(container.querySelector(".codex-turn-diff-icon")).not.toBeNull();
+    expect(screen.getAllByText("详情未加载")).toHaveLength(1);
+    expect(screen.queryByText("+0")).toBeNull();
+    expect(screen.queryByText("-0")).toBeNull();
+    expect(screen.queryByRole("button", { name: /common.review/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /预览.*Diff/ })).toBeNull();
+    expect(mock.review).not.toHaveBeenCalled();
   },
 );
-it("single-file footer keeps one header with review and preview, without a duplicate lower row", () => {
-  const { container } = render(
-    <ThreadFileChangesSummary
-      changes={changes(1)}
-      threadId="owner"
-      turnId="turn"
-    />,
-  );
-  expect(container.querySelectorAll(".session-file-change-row")).toHaveLength(
-    0,
-  );
-  expect(container.querySelectorAll(".codex-turn-diff-title")).toHaveLength(1);
-  expect(
-    screen.getByRole("button", { name: "/project/file-0.ts" }),
-  ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "/project/file-0.ts" }));
-  expect(mock.review).toHaveBeenCalledWith("/project/file-0.ts");
-  expect(
-    screen.getByRole("button", { name: "预览 /project/file-0.ts Diff" }),
-  ).toBeTruthy();
-  expect(screen.getByRole("button", { name: /common.review/ })).toBeTruthy();
-});
-it.each([4, 5])("mobile scroll threshold is four records: %i", (count) => {
-  mock.mobile = true;
-  render(<ThreadFileChangesSummary changes={changes(count)} />);
-  expect(screen.getByRole("region").getAttribute("data-scrollable")).toBe(
-    String(count > 4),
-  );
-});
-it("last record remains operable and undo all includes offscreen files with confirmation", async () => {
-  const rows = changes(39);
-  render(
-    <ThreadFileChangesSummary
-      changes={rows}
-      threadId="owner"
-      turnId="turn"
-      batches={[{ id: "saved", changes: rows }]}
-    />,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "/project/file-38.ts" }));
-  expect(mock.review).toHaveBeenCalledOnce();
-  fireEvent.click(screen.getByRole("button", { name: "撤销此轮保存的变更" }));
-  expect(mock.undo).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "确认撤销" }));
-  await waitFor(() =>
-    expect(mock.undo.mock.calls[0][0]).toMatchObject({
-      threadId: "owner",
-      turnId: "turn",
-      expectedChanges: [{ id: "saved", changes: rows }],
-      action: "undo",
-    }),
-  );
-});
-
-it("undoing the last offscreen record targets only that file after confirmation", async () => {
-  const rows = changes(39);
-  render(
-    <ThreadFileChangesSummary
-      changes={rows}
-      threadId="owner"
-      turnId="turn"
-      batches={[{ id: "saved", changes: rows }]}
-    />,
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "撤销file-38.ts保存的变更" }),
-  );
-  expect(mock.undo).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "确认撤销" }));
-  await waitFor(() =>
-    expect(mock.undo.mock.calls[0][0]).toMatchObject({
-      threadId: "owner",
-      turnId: "turn",
-      filePath: "/project/file-38.ts",
-      action: "undo",
-    }),
-  );
-});
+it.each([1, 6, 39])(
+  "loaded diffs keep the file card and a hover preview for %i files",
+  (count) => {
+    render(
+      <ThreadFileChangesSummary
+        changes={changes(count)}
+        threadId="owner"
+        turnId="turn"
+      />,
+    );
+    expect(
+      screen.getByText(
+        count === 1 ? "已编辑 file-0.ts" : `已编辑 ${count} 个文件`,
+      ),
+    ).toBeTruthy();
+    if (count === 1) {
+      expect(screen.queryByRole("region", { name: "fileChanges.listLabel" })).toBeNull();
+    } else {
+      const list = screen.getByRole("region", { name: "fileChanges.listLabel" });
+      expect(list.querySelectorAll(".session-file-change-row")).toHaveLength(count);
+      expect(list.textContent).toContain("/project/file-0.ts");
+      expect(list.textContent).toContain("+1");
+    }
+    expect(screen.getAllByRole("button", { name: /预览 .* Diff/ }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getAllByRole("button", { name: "查看变更" })[0]);
+    expect(mock.review).toHaveBeenCalledWith(
+      count === 1 ? "/project/file-0.ts" : undefined,
+    );
+  },
+);

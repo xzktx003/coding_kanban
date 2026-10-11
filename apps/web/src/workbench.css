@@ -41,7 +41,7 @@ body:has(.workbench-shell) {
   min-height: 0;
   overflow: hidden;
   color: var(--foreground, #f4f1ea);
-  background: var(--background, #151b21);
+  background: var(--background, #20211d);
 }
 .workbench-terminal[hidden],
 .session-mode[hidden] {

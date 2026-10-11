@@ -31,8 +31,9 @@ it("shows a persisted failed turn even when no standalone error event was replay
     />,
   );
   expect(screen.getByRole("alert").textContent).toContain(
-    "历史工具调用参数过长",
+    "Invalid 'input[1853].arguments': string too long.",
   );
+  expect(screen.getByText(/历史工具调用参数过长/)).toBeTruthy();
   expect(screen.getByText("查看错误详情")).toBeTruthy();
 });
 it("a retry or error from another turn does not hide the final failure", () => {
@@ -105,7 +106,8 @@ it("labels transient errors as retrying instead of terminal failure", () => {
     },
   };
   render(<EventItem event={event} />);
-  expect(screen.getByRole("alert").textContent).toContain("正在自动重试");
+  expect(screen.getByRole("status").textContent).toBe("busy");
+  expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.queryByText("本轮执行失败")).toBeNull();
 });
 it("does not duplicate a failure already rendered for the same turn", () => {

@@ -72,7 +72,7 @@ test("large paste and selected reply survive reload, freeze in queue, and undo p
       "使用入队时的配置",
     );
     await page
-      .getByRole("button", { name: "删除排队消息", exact: true })
+      .getByRole("button", { name: "删除排队的消息", exact: true })
       .click();
     await page.getByRole("button", { name: "撤销", exact: true }).click();
     await expect
@@ -323,19 +323,22 @@ test("settings commands preserve draft and do not start a turn", async ({
     await page
       .getByRole("button", { name: "添加附件与上下文", exact: true })
       .click();
-    await page.getByRole("button", { name: "快捷命令", exact: true }).click();
+    await page.getByRole("button", { name: "斜杠命令", exact: true }).click();
     await page
-      .getByRole("textbox", { name: "搜索快捷命令", exact: true })
+      .getByRole("textbox", { name: "搜索", exact: true })
       .fill("/plan");
     await page.getByRole("button", { name: /\/plan/ }).click();
     await expect(editor(page)).toHaveText("保留这个需求");
-    await expect(page.locator(".session-compact-status").first()).toHaveText(
-      "规划模式",
-    );
+    await expect(
+      page.getByRole("button", { name: "取消计划模式", exact: true }),
+    ).toHaveText("计划模式");
     await openComposerStatus(page);
     await expect(
-      page.getByRole("button", { name: "取消规划模式", exact: true }),
+      page.getByRole("dialog", { name: "输入状态与消息队列", exact: true }),
     ).toBeVisible();
+    await expect(page.locator('[aria-label="取消计划模式"]')).toHaveText(
+      "计划模式",
+    );
     await page.getByRole("button", { name: "关闭面板", exact: true }).click();
     await editor(page).fill("保留这个需求 /effort");
     await page.getByRole("option").filter({ hasText: "/effort" }).click();
@@ -555,7 +558,7 @@ test("queue edit undo is reachable inside the dialog and retains the original co
     await openComposerStatus(page);
     const dialog = page.getByRole("dialog", { name: "输入状态与消息队列" });
     await dialog
-      .getByRole("button", { name: "排队消息 1 的更多操作", exact: true })
+      .getByRole("button", { name: "排队消息操作 1", exact: true })
       .click();
     await page.getByRole("menuitem", { name: "编辑消息", exact: true }).click();
     await page

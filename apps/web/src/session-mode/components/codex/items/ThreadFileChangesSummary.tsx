@@ -19,6 +19,8 @@ import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
 import { TranscriptDetailsNotice } from "./TranscriptDetailsNotice";
 import { toRelativePath, useOpenReviewTab } from "./fileChangeUtils";
 import { getFilename } from "@session/utils/getFilename";
+import { useEditorStore, useLayoutStore } from "@session/stores";
+import { resolveLiteralFilePath } from "../presentation/fileReference";
 import { NativeTurnDiffIcon } from "@session/features/git/NativeReviewIcons";
 import "@session/features/git/review-native.css";
 
@@ -42,7 +44,25 @@ export const ThreadFileChangesSummary = ({
   const inspection = useTranscriptInspection();
   const { t } = useTranslation("thread");
   const { cwd } = useCodexContentOwner(threadId);
+  const sourcePath = (change: AggregatedFileChange) =>
+    threadId && cwd && change.kind.type !== "delete"
+      ? resolveLiteralFilePath(
+          change.kind.type === "update"
+            ? (change.kind.move_path ?? change.path)
+            : change.path,
+          cwd,
+        )
+      : null;
+  const openSource = (change: AggregatedFileChange) => {
+    const path = sourcePath(change);
+    if (!path || !cwd) return;
+    useEditorStore.getState().revealFile(path, cwd);
+    useLayoutStore.getState().setActiveRightPanelTab("files");
+    useLayoutStore.getState().setRightPanelOpen(true);
+  };
   const unloaded = changes.some(isTranscriptMetadataOnly);
+  const metadataOnly =
+    changes.length > 0 && changes.every(isTranscriptMetadataOnly);
   const incompleteReceipts =
     unloaded ||
     batches.some((batch) => batch.changes.some(isTranscriptMetadataOnly));
@@ -89,25 +109,6 @@ export const ThreadFileChangesSummary = ({
 
   if (changes.length === 0) return null;
 
-  if (changes.every(isTranscriptMetadataOnly))
-    return (
-      <div
-        className="session-file-changes codex-turn-diff-summary"
-        data-file-count={changes.length}
-      >
-        <div className="codex-turn-diff-header">
-          <NativeTurnDiffIcon />
-          <span>{t("fileChanges.changed", { count: changes.length })}</span>
-          <TranscriptDetailsNotice />
-        </div>
-        {changes.map((change) => (
-          <div key={change.path} className="codex-turn-diff-file-row">
-            {toRelativePath(change.path, cwd)}
-          </div>
-        ))}
-      </div>
-    );
-
   if (inspection)
     return (
       <div className="session-file-changes space-y-2">
@@ -152,14 +153,10 @@ export const ThreadFileChangesSummary = ({
     </span>
   );
   const title = single
-    ? t("fileChanges.editedSingle", {
-        filename: getFilename(single.path),
-        defaultValue: `${t("fileChanges.edited")} ${getFilename(single.path)}`,
-      })
-    : t("fileChanges.editedFiles", {
-        count: changes.length,
-        defaultValue: t("fileChanges.changed", { count: changes.length }),
-      });
+    ? `已编辑 ${getFilename(single.path)}`
+    : metadataOnly
+      ? "已编辑文件"
+      : `已编辑 ${changes.length} 个文件`;
   const titleContent = (
     <>
       <span className="codex-turn-diff-title-text">{title}</span>
@@ -176,7 +173,7 @@ export const ThreadFileChangesSummary = ({
       </span>
     </>
   );
-  const preview = single && (
+  const preview = single && !isTranscriptMetadataOnly(single) && (
     <HoverCardContent className="codex-file-preview w-[36rem] max-w-[80vw] p-0 overflow-hidden">
       <DiffViewer
         native
@@ -188,16 +185,22 @@ export const ThreadFileChangesSummary = ({
       />
     </HoverCardContent>
   );
+
   return (
     <div
       className="session-file-changes codex-turn-diff-summary"
       data-file-count={changes.length}
     >
-      <div className="session-file-changes-header codex-turn-diff-header">
+      <div
+        className="session-file-changes-header codex-turn-diff-header"
+        data-review-available={!metadataOnly}
+      >
         <span className="codex-turn-diff-icon">
           <NativeTurnDiffIcon />
         </span>
-        {single ? (
+        {metadataOnly ? (
+          <div className="codex-turn-diff-title">{titleContent}</div>
+        ) : single ? (
           <HoverCard
             openDelay={200}
             open={previewPath === single.path}
@@ -247,23 +250,41 @@ export const ThreadFileChangesSummary = ({
             {titleContent}
           </button>
         )}
-        <div className="codex-turn-diff-actions">
-          <SavedPatchAction
-            threadId={threadId}
-            turnId={turnId}
-            cwd={cwd}
-            batches={incompleteReceipts ? [] : batches}
-            disabled={Boolean(inspection) || incompleteReceipts}
-          />
+        {metadataOnly && single && (
           <Button
-            variant="outline"
-            size="sm"
-            className="codex-turn-diff-review"
-            onClick={() => openReview(single?.path)}
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="codex-turn-diff-preview"
+            disabled={!sourcePath(single)}
+            aria-label={t("fileChanges.viewFile", {
+              filename: getFilename(single.path),
+              defaultValue: `查看文件 ${getFilename(single.path)}`,
+            })}
+            onClick={() => openSource(single)}
           >
-            {t("common.review")}
+            <Eye size={14} />
           </Button>
-        </div>
+        )}
+        {!metadataOnly && (
+          <div className="codex-turn-diff-actions">
+            <SavedPatchAction
+              threadId={threadId}
+              turnId={turnId}
+              cwd={cwd}
+              batches={incompleteReceipts ? [] : batches}
+              disabled={Boolean(inspection) || incompleteReceipts}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              className="codex-turn-diff-review"
+              onClick={() => openReview(single?.path)}
+            >
+              查看变更
+            </Button>
+          </div>
+        )}
       </div>
 
       {!single && (
@@ -282,10 +303,19 @@ export const ThreadFileChangesSummary = ({
                 key={change.path}
                 className="session-file-change-row codex-turn-diff-file-row"
               >
-                <span className="font-mono truncate">
-                  {toRelativePath(change.path, cwd)}
-                </span>
-                <TranscriptDetailsNotice />
+                <button
+                  type="button"
+                  className="codex-turn-diff-file-path font-mono truncate text-left"
+                  title={toRelativePath(change.path, cwd)}
+                  aria-label={t("fileChanges.viewFile", {
+                    filename: getFilename(change.path),
+                    defaultValue: `查看文件 ${getFilename(change.path)}`,
+                  })}
+                  disabled={!sourcePath(change)}
+                  onClick={() => openSource(change)}
+                >
+                  {getFilename(change.path)}
+                </button>
               </div>
             ) : (
               <div
@@ -308,12 +338,13 @@ export const ThreadFileChangesSummary = ({
                         previewDismissed.current = false;
                       }}
                       onClick={() => openReview(change.path)}
-                      className="flex-1 min-w-0 text-left"
+                      className="codex-turn-diff-file-path"
                       title={toRelativePath(change.path, cwd)}
                     >
-                      <span className="font-mono truncate block">
+                      <span className="font-mono truncate">
                         {toRelativePath(change.path, cwd)}
                       </span>
+                      {stats(change.addedCount, change.removedCount)}
                     </button>
                   </HoverCardTrigger>
                   <Button
@@ -341,7 +372,6 @@ export const ThreadFileChangesSummary = ({
                     />
                   </HoverCardContent>
                 </HoverCard>
-                {stats(change.addedCount, change.removedCount)}
                 <SavedPatchAction
                   threadId={threadId}
                   turnId={turnId}

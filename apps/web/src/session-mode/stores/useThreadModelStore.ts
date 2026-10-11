@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { ReasoningEffort, CollaborationMode } from "@session/bindings";
+import type {
+  ReasoningEffort,
+  CollaborationMode,
+  Personality,
+} from "@session/bindings";
 import type {
   AskForApproval,
   SandboxMode,
@@ -22,6 +26,7 @@ export interface ThreadModelSettings {
   autoReviewCapability?: ApprovalsReviewer | null;
   webSearchRequest?: boolean;
   collaborationMode?: "default" | "plan";
+  personality?: Personality | null;
 }
 export interface ModelChangeNotice {
   id: number;
@@ -29,12 +34,17 @@ export interface ModelChangeNotice {
   to: string;
   dismissed: boolean;
 }
+export interface PersonalityNotice {
+  personality: Personality;
+}
 export interface ThreadModelEntry extends ThreadModelSettings {
   revision: number;
   pending: boolean;
   pendingFields?: Array<keyof ThreadModelSettings>;
   observed?: Omit<ThreadModelSettings, "providerModels">;
   notice?: ModelChangeNotice;
+  /** Local transcript line. Not a protocol event and not part of the chat cache. */
+  personalityNotice?: PersonalityNotice | null;
 }
 const UNKNOWN: ThreadModelSettings = {
   model: "",
@@ -48,6 +58,7 @@ const UNKNOWN: ThreadModelSettings = {
   autoReviewCapability: null,
   webSearchRequest: false,
   collaborationMode: "default",
+  personality: null,
 };
 const EDITABLE_FIELDS = [
   "model",
@@ -60,6 +71,7 @@ const EDITABLE_FIELDS = [
   "approvalsReviewer",
   "webSearchRequest",
   "collaborationMode",
+  "personality",
 ] as const;
 export const useThreadModelStore = create<{
   threads: Record<string, ThreadModelEntry>;
@@ -107,6 +119,10 @@ export function changeThreadModel(
     const changedModel =
       next.model !== before.model ||
       next.modelProvider !== before.modelProvider;
+    const personalityNotice =
+      patch.personality && patch.personality !== before.personality
+        ? { personality: patch.personality }
+        : old?.personalityNotice;
     const changedFields = EDITABLE_FIELDS.filter(
       (key) => JSON.stringify(next[key]) !== JSON.stringify(before[key]),
     );
@@ -146,6 +162,7 @@ export function changeThreadModel(
                 },
               }
             : {}),
+          ...(personalityNotice ? { personalityNotice } : {}),
         },
       },
     };
@@ -166,6 +183,7 @@ export function hydrateThreadModel(
     sandboxPolicy?: SandboxPolicy;
     webSearchRequest?: boolean;
     collaborationMode?: CollaborationMode | "default" | "plan";
+    personality?: Personality | null;
   },
   options: { revision?: number; notify?: boolean } = {},
 ) {
@@ -225,6 +243,9 @@ export function hydrateThreadModel(
                 ? value.collaborationMode
                 : value.collaborationMode.mode,
           }
+        : {}),
+      ...(value.personality !== undefined
+        ? { personality: value.personality }
         : {}),
     };
     const observed = {

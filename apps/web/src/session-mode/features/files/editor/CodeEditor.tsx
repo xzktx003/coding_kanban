@@ -582,8 +582,9 @@ export function CodeEditor({
         </Button>
         <input
           className="session-editor-goto"
-          aria-label="跳转行号"
-          placeholder="行号"
+          aria-label="转到行"
+          title="转到行"
+          placeholder="转到行"
           inputMode="numeric"
           value={gotoLine}
           onChange={(e) => setGotoLine(e.target.value)}

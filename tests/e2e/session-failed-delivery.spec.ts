@@ -43,7 +43,7 @@ test("a sent message that fails recovers its native echo and shows the persisted
     .locator(".session-agent-view [contenteditable=true]")
     .first();
   await editor.fill("请问刚刚做了什么？");
-  await page.getByRole("button", { name: "发送消息", exact: true }).click();
+  await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect(
     page.getByText("已接收，等待消息同步", { exact: true }),
   ).toBeVisible();

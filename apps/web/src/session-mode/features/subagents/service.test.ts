@@ -35,6 +35,7 @@ it("reopening the main summary preserves the last inspected child for that paren
   });
   post.mockResolvedValue(snapshot);
   openSubagents("root");
+  expect(useSubagentStore.getState().panelRoot).toBe("root");
   expect(useSubagentStore.getState().selection.root).toBe("child");
   expect(useSubagentStore.getState().selection.other).toBe("other-child");
   await subagentService.refresh("root");

@@ -12,6 +12,8 @@ import {
   type AgentCenterCard,
 } from "@session/stores/useAgentCenterStore";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
+import { rememberClosedTab } from "@session/stores/closedSessionTabs";
+import { registerSessionTabSelect } from "@session/stores/sessionTabSelect";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { useCCSessionManager } from "./useCCSessionManager";
 
@@ -50,6 +52,10 @@ export function useSessionTabActions() {
       const active = selectedAgentCard(tabs);
       const wasActive = active && agentCardKey(active) === agentCardKey(card);
       try {
+        const stored = tabs.cards.find(
+          (item) => agentCardKey(item) === agentCardKey(card),
+        );
+        rememberClosedTab(stored ?? card);
         tabs.removeCard(card);
       } catch (error) {
         toast.error("关闭标签未能保存，请检查浏览器存储后重试", {
@@ -72,6 +78,7 @@ export function useSessionTabActions() {
     },
     [selectTab],
   );
+  useEffect(() => registerSessionTabSelect(selectTab), [selectTab]);
   return { selectTab, closeTab };
 }
 

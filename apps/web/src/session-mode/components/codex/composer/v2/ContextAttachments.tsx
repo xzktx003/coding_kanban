@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import { useState } from "react";
 import { FileText, Image, Quote, X, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
@@ -20,7 +21,7 @@ export async function addFileContexts(owner: string, paths: string[]) {
     if (text.length > 180_000)
       throw new Error("文件过长，请在文件编辑器中选择需要的片段后引用");
     composerDrafts.add(owner, {
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       kind: "file",
       name: path.split("/").pop() ?? path,
       path,
@@ -122,7 +123,7 @@ export function ContextAttachments({
             onClick={() => {
               const next = {
                 ...c,
-                id: crypto.randomUUID(),
+                id: randomUUID(),
                 text: changed[c.id],
               };
               composerDrafts.replace(owner, c.id, next);
@@ -244,6 +245,35 @@ export function ContextAttachments({
           )}
           {selected ? (
             details(selected)
+          ) : images.attachments.some((item) => item.id === panel) ? (
+            images.attachments
+              .filter((item) => item.id === panel)
+              .map((item) => (
+                <section key={item.id}>
+                  <img
+                    className="session-context-image"
+                    src={item.preview || (item.path ? fileSrc(item.path) : undefined)}
+                    alt={item.name}
+                  />
+                  {item.error && <p role="alert">{item.error}</p>}
+                  <div className="session-context-actions">
+                    {item.status === "error" && (
+                      <button
+                        type="button"
+                        aria-label="再次尝试上传"
+                        title="再次尝试上传"
+                        onClick={() => void images.retry(item.id)}
+                      >
+                        <RotateCcw />
+                        重试
+                      </button>
+                    )}
+                    <button type="button" onClick={() => removeImage(item.id)}>
+                      移除
+                    </button>
+                  </div>
+                </section>
+              ))
           ) : (
             <div className="session-context-list">
               {contexts.map((c) => (
@@ -281,10 +311,12 @@ export function ContextAttachments({
                       {a.status === "error" && (
                         <button
                           type="button"
+                          aria-label="再次尝试上传"
+                          title="再次尝试上传"
                           onClick={() => void images.retry(a.id)}
                         >
                           <RotateCcw />
-                          重试上传
+                          重试
                         </button>
                       )}
                       <button

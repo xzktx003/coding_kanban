@@ -1,7 +1,18 @@
-import { createContext, useContext, useMemo } from "react";
+import { NativeWebsitePreview } from "./NativeWebsitePreview";
+import { NativeGithubPreview } from "./NativeGithubPreview";
+import { nativeGithubPullRequest } from "@agent-orchestrator/shared";
+import {
+  Children,
+  createContext,
+  isValidElement,
+  useContext,
+  useMemo,
+  type ReactNode,
+} from "react";
 import {
   Streamdown,
   defaultRemarkPlugins,
+  defaultRehypePlugins,
   defaultUrlTransform,
   type Components,
 } from "streamdown";
@@ -10,6 +21,9 @@ import { createMathPlugin } from "@streamdown/math";
 import { nativeMermaid as mermaid } from "./nativeMermaidLayout";
 import { VisualizationContent } from "@session/features/visualizations/VisualizationContent";
 import { useEditorStore } from "@session/stores/useEditorStore";
+import { openVsCodePanel } from "@session/stores/useVsCodePanelStore";
+import { editorHostFor } from "@session/features/codex-host/bridge";
+import { sessionDraftKey } from "@session/stores/useSessionDraftStore";
 import { useLayoutStore } from "@session/stores";
 import { parseFileReference, resolveLiteralFilePath } from "./fileReference";
 import {
@@ -21,6 +35,11 @@ import { toast } from "sonner";
 import { useCodexContentOwner } from "./ownerContext";
 import { nativeMathMarkdown } from "./nativeMath";
 import { NativeCodeFence } from "./NativeCodeFence";
+import { NativeExternalLinkLabel } from "./NativeExternalLinkLabel";
+import { NativeMarkdownTooltip } from "./NativeMarkdownTooltip";
+import { nativeHotlineLink } from "./nativeHotlineLink";
+import { nativeSlackUrl } from "./nativeSlackPreview";
+import { NativeSlackPreview } from "./NativeSlackPreview";
 import { useThemeContext } from "@session/contexts/ThemeContext";
 import { nativeMermaidConfig } from "./nativeMermaidTheme";
 import {
@@ -33,7 +52,56 @@ const referencePrefix = "#codex-file=";
 const MarkdownStreaming = createContext(false);
 const nativeCitationTags = {
   span: ["className", "data-native-file-citation", "dataNativeFileCitation"],
+  a: [
+    "href",
+    "title",
+    "target",
+    "rel",
+    "data-native-link-href",
+    "dataNativeLinkHref",
+  ],
 };
+// Preserve Streamdown's sanitizer/hardening and the existing citation tags;
+// only add the SMS protocol that the native Cni/wni link renderer supports.
+const sanitize = defaultRehypePlugins.sanitize;
+function nativeSanitizer(plugin: typeof sanitize): typeof sanitize {
+  if (!Array.isArray(plugin)) return plugin;
+  const schema = plugin[1];
+  return [
+    plugin[0],
+    {
+      ...schema,
+      tagNames: [
+        ...(schema.tagNames ?? []),
+        ...Object.keys(nativeCitationTags),
+      ],
+      attributes: { ...schema.attributes, ...nativeCitationTags },
+      protocols: {
+        ...schema.protocols,
+        href: [...(schema.protocols?.href ?? []), "sms"],
+      },
+    },
+  ];
+}
+const nativeRehypePlugins = Object.values({
+  ...defaultRehypePlugins,
+  sanitize: nativeSanitizer(sanitize),
+});
+// Rehype hardening still decides whether a link is safe. Keep only an original
+// spelling that resolves to exactly the same approved URL (e.g. no added '/').
+function originalApprovedHref(raw: unknown, approved: string | undefined) {
+  if (typeof raw !== "string" || !approved) return approved;
+  try {
+    const safe = new URL(approved, window.location.href);
+    if (!["http:", "https:", "mailto:", "tel:", "sms:"].includes(safe.protocol))
+      return approved;
+    return new URL(raw, window.location.href).href === safe.href
+      ? raw
+      : approved;
+  } catch {
+    return approved;
+  }
+}
 function NativeMermaidFence({ source }: { source: string }) {
   const streaming = useContext(MarkdownStreaming);
   const { resolvedTheme } = useThemeContext();
@@ -64,29 +132,77 @@ function containsImage(node: unknown): boolean {
   return tree.tagName === "img" || !!tree.children?.some(containsImage);
 }
 
+// Native Markdown HU/ZBn tests rendered descendant text, including links and
+// emphasis, against Script=Han rather than only the basic CJK Unicode block.
+function hasHanText(children: ReactNode): boolean {
+  return Children.toArray(children).some((child) => {
+    if (typeof child === "string" || typeof child === "number")
+      return /\p{Script=Han}/u.test(String(child));
+    return isValidElement<{ children?: ReactNode }>(child)
+      ? hasHanText(child.props.children)
+      : false;
+  });
+}
+
 export function CodexMarkdown({
   value,
   threadId,
   streaming = false,
   className = "",
   inline = false,
+  imagesAsLinks = false,
 }: {
   value: string;
   threadId?: string;
   streaming?: boolean;
   className?: string;
   inline?: boolean;
+  /** Native user text presents image syntax as links; attachments stay separate. */
+  imagesAsLinks?: boolean;
 }) {
   const owner = useCodexContentOwner(threadId);
   const { cwd } = owner;
-  // Streamdown remounts parsed blocks when streaming switches to static mode.
-  // Keep reader choices with this message/thread, outside those parsed blocks.
-  const wrapChoices = useMemo(() => new Map<string, boolean>(), [threadId]);
   const fileReferences = useMemo(
     () =>
       () =>
-      (tree: { type: string; url?: string; children?: unknown[] }) => {
+      (tree: {
+        type: string;
+        url?: string;
+        alt?: string;
+        title?: string | null;
+        children?: unknown[];
+        data?: { hProperties?: Record<string, unknown> };
+      }) => {
         const visit = (node: typeof tree) => {
+          if (imagesAsLinks && node.children)
+            node.children = node.children.flatMap((child) => {
+              const image = child as typeof tree;
+              return image.type === "image" && image.url
+                ? [
+                    // Native Markdown keeps the image marker as its own text
+                    // token, including in the cleaned rich clipboard payload.
+                    {
+                      type: "text",
+                      value: "!",
+                      data: {
+                        hName: "span",
+                        hProperties: { className: "codex-native-image-marker" },
+                      },
+                    },
+                    {
+                      type: "link",
+                      url: image.url,
+                      title: image.title,
+                      children: [{ type: "text", value: image.alt ?? "" }],
+                    },
+                  ]
+                : [child];
+            });
+          if (node.type === "link" && node.url) {
+            node.data ??= {};
+            node.data.hProperties ??= {};
+            node.data.hProperties["data-native-link-href"] = node.url;
+          }
           if (
             node.type === "link" &&
             node.url &&
@@ -97,11 +213,22 @@ export function CodexMarkdown({
         };
         visit(tree);
       },
-    [cwd],
+    [cwd, imagesAsLinks],
   );
   const components = useMemo<Components>(
     () => ({
+      strong: ({ children, node: _node, ...props }) => (
+        <strong {...props} data-streamdown="strong">
+          {children}
+        </strong>
+      ),
       span: ({ children, node, ...props }) => {
+        if (props.className === "codex-native-image-marker")
+          return (
+            <span {...props} data-markdown-copy="contents">
+              {children}
+            </span>
+          );
         const citation = decodeNativeFileCitation(
           (props as Record<string, unknown>)["data-native-file-citation"],
         );
@@ -136,6 +263,24 @@ export function CodexMarkdown({
               const layout = useLayoutStore.getState();
               layout.setActiveRightPanelTab("files");
               layout.setRightPanelOpen(true);
+              const host = editorHostFor({
+                cwd: root,
+                threadId: captured.threadId ?? null,
+                draftOwner: sessionDraftKey(
+                  "codex",
+                  captured.threadId ?? null,
+                  root,
+                ),
+              });
+              if (host) {
+                openVsCodePanel();
+                void host.command({
+                  type: "openLocation",
+                  path: reference.path,
+                  line: reference.line,
+                  column: 1,
+                });
+              }
             }}
           />
         );
@@ -146,6 +291,7 @@ export function CodexMarkdown({
           return (
             <code
               {...props}
+              dir="ltr"
               data-streamdown="inline-code"
               className={className}
             >
@@ -159,15 +305,7 @@ export function CodexMarkdown({
         // renderer. Only ordinary code fences use the measured native surface.
         if (language === "mermaid")
           return <NativeMermaidFence source={source} />;
-        const key = `${node?.position?.start.offset ?? 0}:${language}`;
-        return (
-          <NativeCodeFence
-            code={source}
-            language={language}
-            initialWrap={wrapChoices.get(key)}
-            onWrapChange={(wrap) => wrapChoices.set(key, wrap)}
-          />
-        );
+        return <NativeCodeFence code={source} language={language} />;
       },
       table: ({ children, node, ...props }) => (
         <NativeMarkdownTable
@@ -194,7 +332,14 @@ export function CodexMarkdown({
         <td {...props}>{children}</td>
       ),
       a: ({ href, children, node: _node, ...props }) => {
-        let reference = href;
+        const originalHref = (props as Record<string, unknown>)[
+          "data-native-link-href"
+        ];
+        const approvedHref = originalApprovedHref(originalHref, href);
+        const displayHref = approvedHref
+          ? (nativeHotlineLink(approvedHref) ?? approvedHref)
+          : approvedHref;
+        let reference = displayHref;
         if (reference?.startsWith(referencePrefix)) {
           try {
             reference = decodeURIComponent(
@@ -205,11 +350,12 @@ export function CodexMarkdown({
           }
         }
         const file = reference ? parseFileReference(reference, cwd) : null;
-        return (
+        const anchor = (
           <a
             {...props}
-            href={href}
-            title={file?.path ?? href}
+            href={file ? href : displayHref}
+            className={file ? props.className : "codex-native-external-link"}
+            title={file?.path ?? props.title}
             onClick={(event) => {
               if (!file) return;
               event.preventDefault();
@@ -227,8 +373,25 @@ export function CodexMarkdown({
               layout.setRightPanelOpen(true);
             }}
           >
-            {children}
+            {file ? (
+              children
+            ) : (
+              <NativeExternalLinkLabel key={displayHref} href={displayHref}>
+                {children}
+              </NativeExternalLinkLabel>
+            )}
           </a>
+        );
+        return !file && displayHref && nativeSlackUrl(displayHref) ? (
+          <NativeSlackPreview href={displayHref}>{anchor}</NativeSlackPreview>
+        ) : !file && displayHref && nativeGithubPullRequest(displayHref) ? (
+          <NativeGithubPreview href={displayHref}>{anchor}</NativeGithubPreview>
+        ) : file || !displayHref ? (
+          anchor
+        ) : (
+          <NativeWebsitePreview href={displayHref}>
+            {anchor}
+          </NativeWebsitePreview>
         );
       },
       p: ({ children, node, ...props }) => {
@@ -239,16 +402,14 @@ export function CodexMarkdown({
           <Container
             {...props}
             className="codex-paragraph"
-            data-markdown-han-text={
-              /[\u3400-\u9fff]/.test(String(children)) ? "" : undefined
-            }
+            data-markdown-han-text={hasHanText(children) ? "true" : undefined}
           >
             {children}
           </Container>
         );
       },
     }),
-    [cwd, owner.threadId, wrapChoices],
+    [cwd, owner.threadId],
   );
   return (
     <div className={`codex-markdown ${inline ? "is-inline" : ""} ${className}`}>
@@ -281,8 +442,9 @@ export function CodexMarkdown({
                 mode={streaming ? "streaming" : "static"}
                 isAnimating={streaming}
                 className="codex-markdown-blocks"
+                rehypePlugins={nativeRehypePlugins}
                 urlTransform={(url, key, node) =>
-                  parseFileReference(url, cwd)
+                  parseFileReference(url, cwd) || /^sms:/i.test(url)
                     ? url
                     : defaultUrlTransform(url, key, node)
                 }

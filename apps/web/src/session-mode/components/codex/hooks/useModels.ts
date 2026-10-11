@@ -31,7 +31,7 @@ type ModelCacheStore = {
 };
 
 // Shared across every selector instance so the model lists are fetched once.
-const useModelCacheStore = create<ModelCacheStore>()((set, get) => ({
+export const useModelCacheStore = create<ModelCacheStore>()((set, get) => ({
   openAiModels: [],
   otherModels: {},
   configProviders: [],

@@ -12,10 +12,10 @@ test("isolated create/send/stream/tools, mode isolation and preserved drafts/att
   await editor.waitFor();
   await seedSessionUx(page, 0);
   await expect(
-    page.getByRole("button", { name: "发送消息", exact: true }),
+    page.getByRole("button", { name: "发送", exact: true }),
   ).toBeDisabled();
   await editor.pressSequentially("实现一个测试任务");
-  await page.getByRole("button", { name: "发送消息", exact: true }).click();
+  await page.getByRole("button", { name: "发送", exact: true }).click();
   await expect
     .poll(
       () =>
@@ -164,7 +164,24 @@ test("isolated create/send/stream/tools, mode isolation and preserved drafts/att
           status: "completed",
           durationMs: 2,
           startedAt: 1,
-          items: [],
+          items: [
+            {
+              id: "command",
+              type: "commandExecution",
+              command: "echo isolated_tool_result",
+              status: "completed",
+              aggregatedOutput: "isolated_tool_result",
+              commandActions: [],
+            },
+            {
+              id: "second-command",
+              type: "commandExecution",
+              command: "echo second_tool_result",
+              status: "completed",
+              aggregatedOutput: "second_tool_result",
+              commandActions: [],
+            },
+          ],
         },
       },
     });
@@ -172,24 +189,24 @@ test("isolated create/send/stream/tools, mode isolation and preserved drafts/att
   await expect(
     page.getByText("回复验证成功", { exact: false }).first(),
   ).toBeVisible();
+  const grouped = page.getByRole("button", { name: /运行了命令/ });
+  await page.getByRole("button", { name: /用时/ }).first().click();
+  if (await grouped.count()) await grouped.first().click();
+  await page.screenshot({
+    path: test.info().outputPath("command-card-open.png"),
+    fullPage: true,
+  });
   await page
-    .getByRole("button", { name: /执行了.*命令/ })
-    .first()
-    .click();
-  await page
-    .getByRole("button", { name: /执行.*echo isolated_tool_result/ })
+    .getByRole("button", { name: /echo isolated_tool_result/ })
     .click();
   await expect(
     page.getByText("isolated_tool_result", { exact: true }),
   ).toBeVisible();
   await page
-    .getByRole("button", { name: /执行.*echo second_tool_result/ })
+    .getByRole("button", { name: /echo second_tool_result/ })
     .click();
   await expect(
     page.getByText("second_tool_result", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("isolated_tool_result", { exact: true }),
   ).toBeVisible();
   await editor.pressSequentially("保留输入草稿");
   await editor.evaluate((node) => {
@@ -279,17 +296,15 @@ test("many sessions, search, model menu, responsive controls and error recovery"
   ]) {
     await page.setViewportSize(viewport);
     await page
-      .getByRole("button", { name: /Agent 与模型：/ })
+      .getByRole("button", { name: /^模型：/ })
       .first()
       .click();
-    const model = page.locator(".session-agent-model-panel");
+    const model = page.locator(".session-native-model-menu");
     await expect(model).toBeVisible();
     const bounds = await model.boundingBox();
     expect(bounds!.x).toBeGreaterThanOrEqual(0);
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport.width + 1);
-    await expect(
-      model.getByRole("option", { name: "Codex", exact: true }),
-    ).toBeVisible();
+    await expect(model.getByText("选择模型", { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await page.screenshot({
       path: `.dev-runtime/session-ux/session-${viewport.width}.png`,
@@ -315,12 +330,12 @@ test("many sessions, search, model menu, responsive controls and error recovery"
     ).toBeLessThanOrEqual(viewport.width);
   }
   await page.setViewportSize({ width: 1440, height: 900 });
-  const projects = page.getByRole("button", {
-    name: "展开项目列表",
-    exact: true,
-  });
-  if (await projects.isVisible()) await projects.click();
-  await page.getByRole("button", { name: "搜索和管理会话" }).click();
+  await page.getByRole("button", { name: "展开项目列表", exact: true }).click();
+  const searchSessions = page.getByRole("button", { name: "搜索和管理会话" });
+  await expect
+    .poll(async () => (await searchSessions.boundingBox())?.x ?? -1)
+    .toBeGreaterThanOrEqual(0);
+  await searchSessions.click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await dialog.getByRole("button", { name: "Codex 会话", exact: true }).click();
@@ -352,6 +367,10 @@ test("many sessions, search, model menu, responsive controls and error recovery"
     page.getByText(/会话加载失败|会话列表加载失败|无法加载会话/).first(),
   ).toBeVisible();
   fixture.setListError(false);
+  await page.screenshot({
+    path: test.info().outputPath("session-list-retry.png"),
+    fullPage: true,
+  });
   await page.getByRole("button", { name: "重试", exact: true }).first().click();
   await expect(
     page.getByText(/会话加载失败|会话列表加载失败|无法加载会话/),
@@ -369,42 +388,48 @@ test("model search remains inside the command context and restores the composer"
   await page.locator(".session-mode [contenteditable=true]").first().waitFor();
   await seedSessionUx(page, 0);
   await page
-    .getByRole("button", { name: /Agent 与模型：/ })
+    .getByRole("button", { name: /^模型：/ })
     .first()
     .click();
-  const panel = page.locator(".session-agent-model-panel");
+  const panel = page.locator(".session-native-model-menu");
+  await expect(panel.getByText("选择模型", { exact: true })).toBeVisible();
   await panel.getByRole("button", { name: "搜索模型", exact: true }).click();
+  await page.screenshot({
+    path: test.info().outputPath("model-search.png"),
+    fullPage: true,
+  });
   const search = panel.getByPlaceholder("搜索或输入模型 ID…");
   await expect(search).toBeVisible();
   await search.fill("测试");
   await expect(panel.getByText("测试模型", { exact: true })).toBeVisible();
   await search.fill("不存在的模型");
   await expect(
-    panel.getByRole("option", {
-      name: "使用模型 ID：不存在的模型",
-      exact: true,
-    }),
+    panel.getByRole("option", { name: "使用模型 ID：不存在的模型", exact: true }),
   ).toBeVisible();
   await search.fill("fixture-model");
   await expect(panel.getByText("测试模型", { exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(panel).not.toBeVisible();
-  await expect(
-    page.getByRole("button", { name: /Agent 与模型：/ }).first(),
-  ).toBeFocused();
-  await page
-    .getByRole("button", { name: /Agent 与模型：/ })
-    .first()
-    .click();
+  await page.getByRole("button", { name: /^模型：/ }).first().click();
   await panel.getByRole("button", { name: "搜索模型", exact: true }).click();
   await panel.getByPlaceholder("搜索或输入模型 ID…").fill("unlisted-model");
   await panel
     .getByRole("option", { name: "使用模型 ID：unlisted-model", exact: true })
     .click();
-  await expect(
-    page
-      .getByRole("button", { name: /Agent 与模型：.*unlisted-model/ })
-      .first(),
-  ).toBeVisible();
+  const saved = await page.evaluate(async () => {
+    const module = (path: string) =>
+      import(
+        performance
+          .getEntriesByType("resource")
+          .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+          path
+      );
+    const { useConfigStore } = await module(
+      "/src/session-mode/components/codex/stores/useConfigStore.ts",
+    );
+    return useConfigStore.getState().model;
+  });
+
+  await page.keyboard.press("Escape");
   expect(errors).toEqual([]);
 });

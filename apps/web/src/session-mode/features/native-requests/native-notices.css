@@ -1,0 +1,93 @@
+/* Enabled 26.51002.51308 mOi/mG default verticalIcon and Lw stream error. */
+.session-mode :is(.codex-native-error-card, .codex-native-retry) {
+  --codex-notice-text: var(--vscode-foreground, #3b3b3b);
+  --codex-notice-muted: var(--vscode-descriptionForeground, #717171);
+  color: var(--codex-notice-text);
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+}
+:is(.session-mode.dark, .dark .session-mode, .session-mode .dark)
+  :is(.codex-native-error-card, .codex-native-retry) {
+  --codex-notice-text: var(--vscode-foreground, #ccc);
+  --codex-notice-muted: var(--vscode-descriptionForeground, #858585);
+}
+.session-mode .codex-native-error-card {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  width: 100%;
+  gap: 12px;
+  overflow: hidden;
+  border: 1px solid
+    var(
+      --color-border-primary-outline,
+      color-mix(in oklab, var(--codex-notice-text) 12%, transparent)
+    );
+  border-radius: 25px;
+  padding: 16px 12px 16px 20px;
+  background: var(--vscode-editor-background, var(--background));
+  box-shadow:
+    var(--tw-inset-shadow, 0 0 #0000),
+    var(--tw-inset-ring-shadow, 0 0 #0000),
+    var(--tw-ring-offset-shadow, 0 0 #0000),
+    var(--tw-ring-shadow, 0 0 #0000),
+    0 0 2px 0 rgb(0 0 0 / 5%),
+    0 4px 6px 0 rgb(0 0 0 / 2%);
+  font-size: 12px;
+  line-height: 17.1429px;
+}
+.session-mode .codex-native-error-card > svg {
+  flex-shrink: 0;
+  align-self: center;
+  width: 18px;
+  height: 18px;
+}
+.session-mode .codex-native-error-content {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+.session-mode .codex-native-error-content a {
+  color: var(--vscode-textLink-foreground, var(--color-info, #0071e3));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.session-mode .codex-native-retry {
+  font-size: var(--codex-chat-size, 13px);
+  line-height: 1.5;
+  color: color-mix(in oklab, var(--codex-notice-muted) 80%, transparent);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.session-mode .codex-native-retry button {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  text-align: start;
+  cursor: pointer;
+}
+.session-mode .codex-native-retry button > svg {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  margin-top: 2px;
+  opacity: 0;
+}
+.session-mode .codex-native-retry button:hover > svg,
+.session-mode .codex-native-retry button:focus-visible > svg,
+.session-mode .codex-native-retry button[aria-expanded="true"] > svg {
+  opacity: 1;
+}
+.session-mode .codex-native-retry button[aria-expanded="true"] > svg {
+  transform: rotate(180deg);
+}
+.session-mode .codex-native-retry p {
+  margin-top: 4px;
+}
+@media (max-width: 767px), (pointer: coarse) {
+  .session-mode .codex-native-retry button {
+    min-height: 44px;
+  }
+}

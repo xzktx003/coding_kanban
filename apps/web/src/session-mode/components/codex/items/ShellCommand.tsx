@@ -177,6 +177,7 @@ function ShellCommandContent({
       <button
         type="button"
         className="codex-command-summary"
+        aria-label={summary}
         aria-expanded={expanded}
         aria-controls={bodyId}
         title={command}

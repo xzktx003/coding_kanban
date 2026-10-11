@@ -1,6 +1,34 @@
 /* Measured from the unmodified Codex VSIX Markdown/CodeSurface components.
    Existing download/export functions use a compact overflow action; touch
    controls remain 44px as required by the shared mobile workbench. */
+.session-mode .codex-presentation.codex-native-markdown-tooltip {
+  --codex-tooltip-background: var(--codex-text);
+  --codex-tooltip-text: var(
+    --vscode-dropdown-background,
+    var(--codex-secondary)
+  );
+  padding: 5px 12px;
+  border: 1px solid
+    color-mix(in oklab, var(--codex-tooltip-text) 5%, transparent);
+  border-radius: 20px;
+  background: var(--codex-tooltip-background);
+  color: var(--codex-tooltip-text);
+  font: 400 12px/18px var(--vscode-font-family, system-ui);
+  text-align: center;
+  letter-spacing: -0.15px;
+  white-space: normal;
+  overflow-wrap: break-word;
+  text-wrap: wrap;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.2);
+  animation: none;
+  pointer-events: none;
+  max-width: min(320px, calc(100vw - 16px));
+}
+:is(.session-mode.dark, .dark .session-mode, .session-mode .dark)
+  .codex-presentation.codex-native-markdown-tooltip {
+  --codex-tooltip-background: var(--codex-secondary);
+  --codex-tooltip-text: var(--codex-text);
+}
 .session-mode .codex-markdown {
   --codex-markdown-space: calc(var(--codex-chat-size, 13px) / 4);
   --codex-fence-keyword: #ab4f7a;
@@ -11,6 +39,73 @@
   --codex-fence-name: #1f4e94;
   --codex-fence-comment: #4f4f4f;
   --codex-fence-error: #ba2623;
+}
+.session-mode .codex-markdown a.codex-native-external-link {
+  color: inherit;
+  text-decoration: none;
+}
+.session-mode .codex-markdown .codex-native-external-link-label {
+  color: color-mix(in srgb, var(--codex-link) 80%, var(--codex-text) 20%);
+  font-weight: 500;
+  white-space: nowrap;
+  display: inline;
+  box-decoration-break: clone;
+}
+.session-mode .codex-markdown a.codex-native-external-link:focus-visible {
+  outline: none;
+}
+.session-mode
+  .codex-markdown
+  a.codex-native-external-link:focus-visible
+  > .codex-native-external-link-label {
+  border-radius: 10px;
+  box-shadow: 0 0 0 2px var(--vscode-focusBorder, currentColor);
+}
+.session-mode .codex-markdown .codex-native-link-icon {
+  box-sizing: content-box;
+  position: relative;
+  height: 1lh;
+  vertical-align: bottom;
+  padding-inline-end: 3px;
+  display: inline-block;
+}
+.session-mode .codex-markdown .codex-native-favicon {
+  position: relative;
+  top: 50%;
+  inset-inline-start: 0;
+  transform: translateY(-50%);
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 2.5px;
+}
+.session-mode
+  .codex-markdown
+  .codex-native-favicon
+  :is(img, .codex-native-favicon-fallback) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.session-mode .codex-markdown .codex-native-favicon-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.session-mode .codex-markdown .codex-native-favicon img {
+  border-radius: inherit;
+  object-fit: contain;
+}
+.session-mode .codex-markdown .codex-native-link-text {
+  white-space: normal;
+}
+.session-mode
+  .codex-markdown
+  a.codex-native-external-link:hover
+  .codex-native-external-link-label {
+  text-decoration: underline dashed currentColor 0.5px;
+  text-underline-offset: 2px;
 }
 :is(.session-mode.dark, .dark .session-mode, .session-mode .dark)
   .codex-markdown {
@@ -236,11 +331,23 @@
   .codex-markdown
   :is(.codex-native-code-actions, .codex-native-table-actions)
   button:focus-visible {
-  outline: 2px solid var(--codex-focus);
-  outline-offset: -2px;
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--vscode-focusBorder, currentColor);
 }
 .session-mode .codex-markdown .codex-native-markdown-more {
   opacity: 0;
+}
+.session-mode
+  .codex-markdown
+  .codex-native-code-actions
+  button:not(.codex-native-markdown-more) {
+  border-radius: 9999px;
+}
+.session-mode
+  .codex-markdown
+  .codex-native-code-actions
+  button:not(.codex-native-markdown-more):hover {
+  background: transparent;
 }
 .session-mode
   .codex-markdown
@@ -279,6 +386,14 @@
   font: inherit;
   white-space: pre;
   overflow-wrap: normal;
+}
+.session-mode
+  .codex-markdown
+  .codex-native-code-fence
+  .codex-native-svg-preview {
+  display: block;
+  width: 100%;
+  max-height: 384px;
 }
 .session-mode
   .codex-markdown
@@ -360,6 +475,42 @@
   overflow-x: auto;
   overscroll-behavior-x: contain;
   max-width: 100%;
+  mask: linear-gradient(
+    to right in oklch,
+    oklch(60% 0 0 / 0),
+    oklch(85% 0 0) var(--codex-table-left-fade)
+      calc(100% - var(--codex-table-right-fade)),
+    oklch(60% 0 0 / 0)
+  );
+  animation: codex-table-edge-fade linear both;
+  animation-timeline: scroll(self x);
+  animation-range: min(2px, 50%) max(100% - 2px, 50%);
+  scrollbar-width: thin;
+}
+@property --codex-table-left-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --codex-table-right-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0;
+}
+@keyframes codex-table-edge-fade {
+  0% {
+    --codex-table-left-fade: 0;
+    --codex-table-right-fade: 1rem;
+  }
+  .1%,
+  99.9% {
+    --codex-table-left-fade: 1rem;
+    --codex-table-right-fade: 1rem;
+  }
+  100% {
+    --codex-table-left-fade: 1rem;
+    --codex-table-right-fade: 0;
+  }
 }
 .session-mode .codex-markdown .codex-native-table table {
   border-collapse: separate;
@@ -375,6 +526,18 @@
   line-height: calc(var(--codex-chat-size, 13px) * 1.625);
   font-variant-numeric: tabular-nums;
 }
+.session-mode .codex-markdown .codex-native-table-wrapper {
+  pointer-events: auto;
+  flex-shrink: 0;
+  width: fit-content;
+  min-width: 100%;
+}
+.session-mode .codex-markdown :not(pre) > code[data-streamdown="inline-code"] {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+  unicode-bidi: isolate;
+}
 .session-mode
   .codex-markdown
   .codex-native-table
@@ -382,6 +545,27 @@
   background: transparent;
   color: inherit;
   border: 0;
+}
+.session-mode .codex-markdown .codex-native-table :is(th, td) {
+  overflow-wrap: break-word;
+  vertical-align: top;
+}
+.session-mode .codex-markdown .codex-native-table [data-col-size="sm"] {
+  max-width: calc(40rem * 6 / 24);
+}
+.session-mode .codex-markdown .codex-native-table [data-col-size="md"] {
+  max-width: calc(40rem * 8 / 24);
+}
+.session-mode .codex-markdown .codex-native-table [data-col-size="lg"] {
+  max-width: calc(40rem * 12 / 24);
+}
+.session-mode .codex-markdown .codex-native-table [data-col-size="xl"] {
+  max-width: calc(40rem * 18 / 24);
+}
+.session-mode .codex-markdown .codex-native-table td[data-numeric-cell] {
+  /* Eui's ordinary (non-wide) table overrides the numeric minimum to auto. */
+  min-width: auto;
+  white-space: nowrap;
 }
 .session-mode .codex-markdown .codex-native-table th {
   font-size: 12px;
@@ -405,7 +589,7 @@
     calc(var(--codex-markdown-space) * 2.5) 0;
   border-bottom: 1px solid
     color-mix(in oklab, var(--codex-text) 5%, transparent);
-  vertical-align: baseline;
+  vertical-align: top;
 }
 .session-mode .codex-markdown .codex-native-table td:last-child {
   padding-inline-end: 0;
@@ -416,9 +600,13 @@
 }
 .session-mode .codex-markdown .codex-native-table-actions {
   position: absolute;
-  inset-inline-end: 2px;
-  top: 2px;
+  inset-inline-end: 0;
+  top: 0;
+  padding: 2px;
+  border-radius: 9999px;
+  background: var(--codex-surface);
   color: var(--codex-muted);
+  pointer-events: none;
   opacity: 0;
 }
 .session-mode
@@ -428,8 +616,42 @@
 .session-mode
   .codex-markdown
   .codex-native-table:focus-within
-  .codex-native-table-actions {
+  .codex-native-table-actions,
+.session-mode
+  .codex-markdown
+  .codex-native-table-actions:has([data-state="open"]) {
   opacity: 1;
+  pointer-events: auto;
+}
+.session-mode .codex-markdown .codex-native-table-actions button {
+  border-radius: 9999px;
+}
+.session-mode .codex-markdown .codex-native-table-actions button:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--vscode-focusBorder, currentColor);
+}
+.session-mode
+  .codex-markdown
+  .codex-native-table-actions
+  button:not(.codex-native-markdown-more):hover {
+  background: transparent;
+}
+@media (hover: hover) {
+  .session-mode
+    .codex-markdown
+    :is(.codex-native-code-actions, .codex-native-table-actions)
+    button:not(.codex-native-markdown-more):hover {
+    background: var(--vscode-list-hoverBackground, transparent);
+  }
+}
+.session-mode
+  .codex-markdown
+  .codex-native-table-actions
+  button[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: default;
+  background: transparent;
+  color: var(--codex-muted);
 }
 .session-mode .codex-presentation.codex-native-markdown-menu {
   background: var(--codex-secondary);
@@ -471,6 +693,9 @@
   .session-mode .codex-markdown .codex-native-table {
     padding-top: 44px;
   }
+  .session-mode .codex-markdown .codex-native-table-actions {
+    pointer-events: auto;
+  }
   .session-mode
     .codex-markdown
     :is(.codex-native-markdown-more, .codex-native-table-actions) {
@@ -480,6 +705,14 @@
     min-height: 44px;
   }
 }
+@media (hover: none) {
+  .session-mode
+    .codex-markdown
+    .codex-native-table-actions
+    button:not(.codex-native-markdown-more):hover {
+    color: var(--codex-muted);
+  }
+}
 .session-mode
   .codex-markdown
   .codex-native-code-fence
@@ -487,3 +720,124 @@
   color: var(--codex-fence-comment);
   font-style: italic;
 }
+
+.session-mode [data-radix-popper-content-wrapper]:has(.codex-native-slack-preview) {
+  /* Native J1t positions immediately. Global reduced-motion duration must not
+     interpolate the wrapper's initial offscreen measuring coordinates. */
+  transition: none !important;
+  animation: none !important;
+}
+.session-mode .codex-presentation.codex-native-slack-preview {
+  width: 360px;
+  max-width: min(
+    360px,
+    var(--radix-tooltip-content-available-width),
+    calc(100vw - 16px)
+  );
+  max-height: var(--radix-tooltip-content-available-height);
+  margin: 1px;
+  padding: 0;
+  border: 0 solid currentColor;
+  border-radius: 15px;
+  background: var(--codex-secondary);
+  color: var(--codex-text);
+  box-shadow:
+    0 0 0 0.5px color-mix(in oklab, var(--codex-text) 8%, transparent),
+    0 0 0 0.5px color-mix(in oklab, var(--codex-text) 8%, transparent),
+    0 8px 16px -4px rgba(0, 0, 0, 0.12);
+  font: 400 12px/1.428571 var(--vscode-font-family, system-ui);
+  text-align: start;
+  animation: none;
+  transition: none !important;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  pointer-events: auto;
+  user-select: text;
+}
+.session-mode .codex-native-slack-toolbar {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+  height: 46px;
+  padding: 0 16px;
+  user-select: none;
+}
+.session-mode .codex-native-preview-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 2.5px;
+}
+.session-mode .codex-native-github-preview .codex-native-preview-icon {
+  color: color-mix(in srgb, var(--codex-text) 65%, transparent);
+}
+.session-mode .codex-native-slack-domain {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--codex-text) 65%, transparent);
+  font: 400 11px/1.333333 var(--vscode-font-family, system-ui);
+}
+.session-mode .codex-native-slack-toolbar a {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+  font: 400 11px/1.333333 var(--vscode-font-family, system-ui);
+  color: var(--codex-text);
+  text-decoration: none;
+}
+.session-mode .codex-native-slack-body {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+}
+.session-mode .codex-native-slack-details {
+  padding: 16px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.session-mode .codex-native-slack-details :is(h3, p) {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  text-wrap: pretty;
+}
+.session-mode .codex-native-slack-details h3 {
+  font: 600 14px/1.375 var(--vscode-font-family, system-ui);
+}
+.session-mode .codex-native-slack-details p {
+  font: 400 12px/1.625 var(--vscode-font-family, system-ui);
+  color: color-mix(in srgb, var(--codex-text) 65%, transparent);
+}
+
+.session-mode .codex-native-rich-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.session-mode .codex-native-rich-content { display: flex; min-height: 0; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; border-top: 1px solid color-mix(in oklab, var(--codex-text) 5%, transparent); }
+.session-mode .codex-native-slack-details[data-center="true"] { align-items: center; }
+.session-mode .codex-native-slack-details[data-standalone="true"] { justify-content: center; }
+.session-mode :is(.codex-native-preview-hero,.codex-native-preview-thumbnail,.codex-native-preview-standalone) { display: block; flex-shrink: 0; }
+.session-mode .codex-native-preview-hero { width: 100%; height: auto; border-bottom: 1px solid color-mix(in oklab, var(--codex-text) 5%, transparent); }
+.session-mode .codex-native-preview-thumbnail { width: 80px; height: 80px; object-fit: contain; border-radius: 10px; }
+.session-mode .codex-native-preview-standalone { width: 160px; height: 160px; object-fit: contain; border-radius: 10px; }
+
+.session-mode .codex-native-website-icon { position: relative; display: block; width: 16px; height: 16px; flex-shrink: 0; color: color-mix(in srgb, var(--codex-text) 65%, transparent); }
+.session-mode .codex-native-website-icon > :is(img,svg) { position: absolute; inset: 0; width: 16px; height: 16px; }
+
+.session-mode .codex-native-website-icon > img { object-fit: contain; border-radius: 2.5px; }
+
+.session-mode .codex-native-website-preview .codex-native-slack-toolbar > .codex-native-preview-icon { color: color-mix(in srgb, var(--codex-text) 65%, transparent); }

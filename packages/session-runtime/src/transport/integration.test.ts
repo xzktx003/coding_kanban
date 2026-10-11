@@ -34,9 +34,12 @@ test("complete runtime registers legacy HTTP contract with shared isolated stora
   );
   assert.deepEqual((await runtime.app.inject("/health")).json().capabilities, {
     codexOwnership: true,
+    codexMcpAuthV1: true,
+    codexMcpOAuthThreadId: false,
     codexAccountMutationsV1: true,
     acpImages: true,
   });
+  assert.equal(runtime.app.hasRoute({method:"POST",url:"/api/codex/mcp/reload"}),true);
   for (const [path, payload, expected] of [
     ["bots/list", {}, []],
     ["automation/list", {}, []],

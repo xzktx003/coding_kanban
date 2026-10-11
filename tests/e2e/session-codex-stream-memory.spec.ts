@@ -344,7 +344,8 @@ for (const kind of [
     page,
   }) => {
     await installSessionUxFixture(page, 1);
-    await page.goto("/?mode=session", { waitUntil: "networkidle" });
+    await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
+    await expect(page.locator(".session-mode")).toBeVisible();
     await page.evaluate(async () => {
       const budget =
         await import("/src/session-mode/services/codexTranscriptMemoryBudget.ts");

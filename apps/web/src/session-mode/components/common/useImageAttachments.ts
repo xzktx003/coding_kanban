@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import { useEffect } from "react";
 import { create } from "zustand";
 import { toast } from "sonner";
@@ -180,7 +181,7 @@ export function useImageAttachments(owner: string) {
   }
   function addFiles(files: File[], drawing?: ImageDrawing, replaceId?: string) {
     const items: ImageAttachment[] = files.map((file) => ({
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       name: file.name || "剪贴板图片",
       file,
       preview:
@@ -308,7 +309,7 @@ export function useImageAttachments(owner: string) {
       update(owner, (items) => [
         ...items,
         ...paths.map((path) => ({
-          id: crypto.randomUUID(),
+          id: randomUUID(),
           name: path.split("/").at(-1) ?? "图片",
           path,
           preview: "",

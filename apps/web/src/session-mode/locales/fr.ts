@@ -398,11 +398,16 @@ export const fr = {
       openLink: "Ouvrir le lien",
       selectOption: "Sélectionner une option",
     },
+    nativeErrors: {
+      busyReconnecting:
+        "Le serveur est occupé, reconnexion en cours{{progress}}",
+    },
     userInput: {
       title: "Question",
       waiting: "En attente de votre réponse",
       progress: "{{current}} / {{total}}",
       next: "Suivant",
+      nextQuestion: "Question suivante",
       previous: "Précédent",
       submit: "Envoyer les réponses",
       submitting: "Envoi…",
@@ -416,6 +421,8 @@ export const fr = {
       selectOption: "Sélectionner une option",
       other: "Autre…",
       enterAnswer: "Saisissez votre réponse",
+      freeFormPlaceholder: "Saisissez du texte ici",
+      otherPlaceholder: "Non, et indiquer à ChatGPT quoi faire différemment",
     },
     plan: {
       label: "Plan",
@@ -428,6 +435,8 @@ export const fr = {
       expandPlan: "Développer le plan",
     },
     fileChanges: {
+      viewFile: "Ouvrir le fichier {{filename}}",
+      editedFilesUnknown: "Fichiers modifiés",
       editedSingle: "{{filename}} modifié",
       editedFiles: "{{count}} fichiers modifiés",
       changed_one: "{{count}} fichier modifié",

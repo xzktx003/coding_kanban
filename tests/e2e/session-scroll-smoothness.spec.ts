@@ -641,7 +641,7 @@ test("inline text editing navigation and consumed keys retain positive latest fo
   await user.hover();
   await user.getByRole("button", { name: "编辑消息", exact: true }).click();
   const inline = page.getByRole("textbox", {
-    name: "编辑上一条用户消息",
+    name: "编辑消息",
     exact: true,
   });
   await inline.fill("输入区方向键\nHome保留编辑草稿");

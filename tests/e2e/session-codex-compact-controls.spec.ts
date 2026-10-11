@@ -233,7 +233,7 @@ for (const touch of [false, true])
         await page.keyboard.press("Escape");
         for (const [trigger, menu] of [
           [
-            composer.getByRole("button", { name: /^Agent 与模型：/ }),
+            composer.getByRole("button", { name: /^模型：/ }),
             page.locator(".session-native-model-menu"),
           ],
           [
@@ -283,7 +283,7 @@ for (const touch of [false, true])
           });
         });
         await expect(
-          composer.getByRole("button", { name: "停止生成", exact: true }),
+          composer.getByRole("button", { name: "停止", exact: true }),
         ).toBeVisible();
         await expect(
           composer.getByRole("button", { name: "排队消息", exact: true }),

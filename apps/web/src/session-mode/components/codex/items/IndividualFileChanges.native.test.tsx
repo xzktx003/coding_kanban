@@ -36,6 +36,41 @@ it("opens literal protocol paths at their own project without Markdown URL/line 
   expect(useWorkspaceStore.getState().cwd).toBe("/foreign");
 });
 
+it("expands a chat file change into the plugin diff card with path, counts, and original lines", () => {
+  const path = "backend/hmops/xh3/vsum_inner_torch.py";
+  render(
+    <CodexContentOwner.Provider value="owner">
+      <IndividualFileChanges
+        changes={[
+          {
+            path,
+            kind: { type: "update", move_path: null },
+            diff: "@@ -593,4 +593,4 @@\n if all_position:\n-seed[0] = initial_value\n+# 切片 fill_ 直接写设备内存\n+seed[:1].fill_(float(initial_value))\n else:\n",
+          },
+        ]}
+        fileChangeMap={{ add: "创建", update: "已编辑", delete: "删除" }}
+        getChangeCounts={getChangeCounts}
+        getDiffViewerProps={getDiffViewerProps}
+      />
+    </CodexContentOwner.Provider>,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: `展开或收起 ${path.split("/").pop()} Diff` }),
+  );
+  const card = document.querySelector(".codex-chat-file-diff");
+  expect(card).toBeTruthy();
+  const name = card?.querySelector(".codex-chat-file-diff-path");
+  expect(name?.textContent).toBe(path.split("/").pop());
+  expect(name?.getAttribute("title")).toBe(path);
+  expect(card?.textContent).toContain("+2");
+  expect(card?.textContent).toContain("-1");
+  expect(screen.getAllByText("594").length).toBeGreaterThan(0);
+  expect(card?.textContent).toContain("seed[0] = initial_value");
+  expect(card?.textContent).toContain("seed[:1].fill_(float(initial_value))");
+  expect(document.querySelector(".codex-diff-line[data-kind='remove']")).toBeTruthy();
+  expect(document.querySelector(".codex-diff-line[data-kind='add']")).toBeTruthy();
+});
+
 it("keeps projected file paths usable without showing zero changes or an empty Diff", () => {
   const changes = [
     {

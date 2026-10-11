@@ -378,11 +378,15 @@ export const ja = {
       openLink: "リンクを開く",
       selectOption: "選択してください",
     },
+    nativeErrors: {
+      busyReconnecting: "サーバーが混雑しています。再接続中{{progress}}",
+    },
     userInput: {
       title: "質問",
       waiting: "回答を待っています",
       progress: "{{current}} / {{total}}",
       next: "次へ",
+      nextQuestion: "次の質問",
       previous: "前の質問",
       submit: "回答を送信",
       submitting: "送信中…",
@@ -397,6 +401,8 @@ export const ja = {
       selectOption: "選択してください",
       other: "その他…",
       enterAnswer: "回答を入力",
+      freeFormPlaceholder: "ここに入力してください",
+      otherPlaceholder: "いいえ、ChatGPT に改善してほしい点を伝える",
     },
     plan: {
       label: "プラン",
@@ -409,6 +415,8 @@ export const ja = {
       expandPlan: "プランを展開",
     },
     fileChanges: {
+      viewFile: "ファイルを開く {{filename}}",
+      editedFilesUnknown: "編集したファイル",
       editedSingle: "{{filename}} を編集",
       editedFiles: "{{count}} 件のファイルを編集",
       changed_other: "{{count}} 件のファイルを変更",

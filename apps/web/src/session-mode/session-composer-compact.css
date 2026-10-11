@@ -395,6 +395,10 @@
   align-items: center;
   gap: 2px;
   margin-inline-start: auto;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 .session-mode .session-compact-composer .session-composer-utilities > button {
   width: 36px;
@@ -403,7 +407,7 @@
   color: var(--muted-foreground);
 }
 @container compact-composer (max-width: 840px) {
-  .session-mode .session-composer-utilities {
+  .session-mode:not(:has(.session-native-composer)) .session-composer-utilities {
     position: absolute;
     right: 0;
     bottom: calc(100% + 6px);
@@ -414,13 +418,18 @@
     background: var(--background);
     box-shadow: 0 2px 8px #0000000a;
   }
-  .session-mode .session-compact-composer .session-composer-utilities > button {
+  .session-mode:not(:has(.session-native-composer))
+    .session-compact-composer
+    .session-composer-utilities
+    > button {
     width: 44px;
     min-width: 44px;
     height: 44px;
     padding: 0;
   }
-  .session-mode .session-codex-composer > .session-composer-floating {
+  .session-mode:not(:has(.session-native-composer))
+    .session-codex-composer
+    > .session-composer-floating {
     bottom: calc(100% + 52px);
   }
 }
@@ -501,7 +510,7 @@
 }
 .session-mode .session-composer-floating > .session-followup-queue,
 .session-mode .session-composer-floating > .session-model-change-notice,
-.session-mode .session-composer-utilities,
+.session-mode:not(:has(.session-native-composer)) .session-composer-utilities,
 .session-mode .session-async-question-overlay {
   background: color-mix(in oklab, var(--background) 78%, transparent);
   backdrop-filter: blur(3px);

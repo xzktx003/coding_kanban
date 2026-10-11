@@ -66,6 +66,19 @@ it("keeps added/deleted saved hunks and native coordinates instead of converting
   }
 });
 
+it("counts a native unified hunk that starts with @@ and has no diff --git header", () => {
+  const [change] = aggregateFileChanges([
+    {
+      path: "/repo/native.ts",
+      kind: { type: "update", move_path: null },
+      diff: "@@ -1,2 +1,3 @@\n context\n-old\n+new\n+extra\n",
+    },
+  ]);
+  expect(change.addedCount).toBe(2);
+  expect(change.removedCount).toBe(1);
+  expect(change).not.toHaveProperty("transcriptMetadataOnly");
+});
+
 it("retains unloaded file metadata through completion and aggregation without treating an earlier body as the latest patch", () => {
   const projected = { ...change, diff: "", transcriptMetadataOnly: true };
   const result = completedTurnChanges("own", "turn", [

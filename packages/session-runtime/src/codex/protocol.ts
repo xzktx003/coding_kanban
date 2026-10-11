@@ -37,7 +37,9 @@ export async function readConfig(params: Json, request: Rpc): Promise<JsonObject
   const raw = object(await request("config/read", { includeLayers: false }));
   if (!isObject(raw.config)) throw new Error("Invalid native config response");
   return { config: { approvals_reviewer: reviewer(raw.config.approvals_reviewer), approval_policy: approval(raw.config.approval_policy),
-    sandbox_mode: sandbox(raw.config.sandbox_mode), permissions: permission(raw.config.permissions) } };
+    sandbox_mode: sandbox(raw.config.sandbox_mode), permissions: permission(raw.config.permissions),
+    ...(typeof object(raw.config.desktop).mcp_startup_authentication === "boolean" ? {desktop:{mcp_startup_authentication:object(raw.config.desktop).mcp_startup_authentication}} : {}),
+  } };
 }
 export async function readRequirements(params: Json, request: Rpc): Promise<JsonObject> {
   empty(params);

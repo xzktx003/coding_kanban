@@ -71,6 +71,11 @@ test("status and literal staging preserve spaces, newlines, wildcards and index 
   await service.unstageFiles(cwd, [special]);
   assert.ok(git("diff", "--cached", "--name-only").includes("a.txt"));
   assert.equal((await service.diffStats(cwd)).staged.deletions, 2);
+  const files = await service.fileNumstat(cwd);
+  assert.deepEqual(
+    files.find((file) => file.path === "a.txt"),
+    { path: "a.txt", additions: 1, deletions: 2 },
+  );
   await service.reverseFiles(cwd, [special], false);
   await assert.rejects(lstat(join(cwd, special)));
 });
@@ -164,6 +169,18 @@ test("worktree committed renames/deletions, missing source, and stale unmanaged 
     /unmanaged|unregistered/i,
   );
   assert.ok(git("rev-parse", "HEAD"));
+});
+
+test("blame returns the commit that last touched one line", async (t) => {
+  const { cwd, service } = await fixture(t);
+  const blame = await service.blameLine(cwd, "a.txt", 1);
+  assert.equal(blame.present, true);
+  if (!blame.present) return;
+  assert.equal(blame.author, "Test");
+  assert.equal(blame.summary, "initial");
+  assert.match(blame.shortHash, /^[0-9a-f]{7}$/);
+  assert.equal((await service.blameLine(cwd, "missing.txt", 1)).present, false);
+  await assert.rejects(service.blameLine(cwd, "a.txt", 0));
 });
 
 test("branches and commits reject conflicts; push supports configured local remote and reports failure", async (t) => {

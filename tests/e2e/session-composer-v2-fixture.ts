@@ -7,7 +7,13 @@ import { registerSessionFollowupRoutes } from "../../apps/server/src/routes/sess
 import { installSessionUxFixture } from "./session-ux-fixture";
 import { applySessionTabAction } from "../../packages/shared/src/session-tabs";
 
-export async function setup(page: Page, active = true) {
+export async function setup(
+  page: Page,
+  active = true,
+  beforeNavigation?: (
+    fixture: Awaited<ReturnType<typeof installSessionUxFixture>>,
+  ) => Promise<void>,
+) {
   const root = await mkdtemp(join(tmpdir(), "kanban-followup-e2e-")),
     app = Fastify();
   const fixture = await installSessionUxFixture(page, 2);
@@ -207,6 +213,7 @@ export async function setup(page: Page, active = true) {
   }, cards);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  await beforeNavigation?.(fixture);
   await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
   await page
     .locator(".session-agent-view [contenteditable=true]")

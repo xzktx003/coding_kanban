@@ -7,9 +7,9 @@ import {
 } from "@session/services/codexTranscriptActivity";
 import { TranscriptInspectionContext } from "./inspection";
 import { CodexAccessNotice } from "./CodexAccessNotice";
+import { CodexHistoryNotice } from "./CodexHistoryNotice";
 import { CodexContentOwner } from "../presentation/ownerContext";
 import { useSessionReadReceipt } from "@session/hooks/useSessionReadReceipt";
-import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { codexService } from "@session/services/codexService";
 import {
@@ -49,7 +49,10 @@ import {
   saveReadingPosition,
   type ReadingPosition,
 } from "@session/services/sessionTranscriptCache";
-import { useSessionSyncStore } from "@session/stores/useSessionSyncStore";
+import {
+  requestSessionHistorySync,
+  useSessionSyncStore,
+} from "@session/stores/useSessionSyncStore";
 import { projectWorkflowRows } from "./projectWorkflowRows";
 import {
   ThreadWorkflowToolbar,
@@ -1122,41 +1125,21 @@ const CodexTranscript = memo(function CodexTranscript({
             )}
             <div className="space-y-2">
               <CodexDeliveryEchoes threadId={activeThreadId} events={events} />
-              {loading && !loaded && events.length === 0 && (
-                <div
-                  role="status"
-                  className="flex items-center gap-2 py-2 text-sm text-muted-foreground"
-                >
-                  <Loader2 className="size-4 animate-spin" />
-                  {t("historyLoading")}
-                </div>
-              )}
-              {historyError &&
-                !loading &&
-                (!loaded || needsCodexTranscriptRestore(activeThreadId)) &&
-                events.length === 0 && (
-                  <div
-                    role="alert"
-                    className="rounded-md border p-3 text-sm space-y-2"
-                  >
-                    <p>
-                      {t("historyFailed")}: {historyError}
-                    </p>
-                    <button
-                      className="text-primary underline underline-offset-4"
-                      onClick={() => {
-                        void codexService
-                          .loadThreadHistory(activeThreadId, undefined, {
-                            background: true,
-                            recent: true,
-                          })
-                          .catch(() => {});
-                      }}
-                    >
-                      {t("historyRetry")}
-                    </button>
-                  </div>
-                )}
+              <CodexHistoryNotice
+                loading={loading}
+                loaded={loaded && !needsCodexTranscriptRestore(activeThreadId)}
+                error={historyError}
+                onRetry={() => {
+                  if (inspection) {
+                    void codexService
+                      .loadThreadHistory(activeThreadId, undefined, {
+                        background: true,
+                        recent: true,
+                      })
+                      .catch(() => {});
+                  } else requestSessionHistorySync(activeThreadId);
+                }}
+              />
               <ApprovalItem currentThreadId={activeThreadId} />
               {!rows.some((row) => row.work?.turnId === turnTiming?.turnId) && (
                 <WorkingIndicator

@@ -47,6 +47,15 @@ const getFilename = (path: string) => {
 };
 
 const VIEW_MODES: Array<"old" | "new" | "diff"> = ["old", "new", "diff"];
+/** In-panel render stops here. Longer text opens in the editor instead. */
+export const NATIVE_DIFF_DISPLAY_LIMIT = 100_000;
+
+export function nativeDiffTooLarge(unifiedDiff: string, original = "", current = "") {
+  return (
+    unifiedDiff.length > NATIVE_DIFF_DISPLAY_LIMIT ||
+    original.length + current.length > NATIVE_DIFF_DISPLAY_LIMIT
+  );
+}
 
 export function DiffViewer({
   original = "",
@@ -67,6 +76,7 @@ export function DiffViewer({
   renderHunkActions,
   wrap = false,
 }: DiffViewerProps) {
+  const tooLarge = native && nativeDiffTooLarge(unifiedDiff ?? "", original, current);
   const inline = native && presentation === "inline";
   const review = native && presentation === "review";
   const preview = native && presentation === "preview";
@@ -314,7 +324,16 @@ export function DiffViewer({
       )}
       {!collapsed && (
         <div className="font-mono text-sm overflow-auto max-h-[500px] min-w-0">
-          {native ? (
+          {tooLarge ? (
+            <div className="codex-diff-too-large" role="status">
+              <span>此文件过大，无法在此显示。</span>
+              {onOpenFile && (
+                <button type="button" onClick={onOpenFile}>
+                  在编辑器中打开
+                </button>
+              )}
+            </div>
+          ) : native ? (
             diffLines.length ? <NativeDiffContent
               split={split && viewMode === "diff"}
               lines={diffLines}
@@ -328,7 +347,7 @@ export function DiffViewer({
               renderHunkActions={renderHunkActions}
               wrap={localWrap}
             />
-            : <p className="codex-review-selection-summary">{/^(?:Binary files |GIT binary patch)/m.test(normalizedUnified) ? "二进制文件不显示文本变更块" : /^old mode (\d+)/m.test(normalizedUnified) && /^new mode (\d+)/m.test(normalizedUnified) ? `文件模式：${normalizedUnified.match(/^old mode (\d+)/m)?.[1]} → ${normalizedUnified.match(/^new mode (\d+)/m)?.[1]}` : /^rename from /m.test(normalizedUnified) ? `重命名：${normalizedUnified.match(/^rename from (.+)/m)?.[1]} → ${normalizedUnified.match(/^rename to (.+)/m)?.[1]}` : /^new file mode /m.test(normalizedUnified) ? "新增空文件" : /^deleted file mode /m.test(normalizedUnified) ? "空文件已删除" : "没有文本变更块"}</p>
+            : <p className="codex-review-selection-summary">{/^(?:Binary files |GIT binary patch)/m.test(normalizedUnified) ? "二进制文件不显示文本变更块" : /^old mode (\d+)/m.test(normalizedUnified) && /^new mode (\d+)/m.test(normalizedUnified) ? `文件模式：${normalizedUnified.match(/^old mode (\d+)/m)?.[1]} → ${normalizedUnified.match(/^new mode (\d+)/m)?.[1]}` : /^rename from /m.test(normalizedUnified) ? "文件已重命名，内容未变更" : /^new file mode /m.test(normalizedUnified) ? "新增空文件" : /^deleted file mode /m.test(normalizedUnified) ? "空文件已删除" : "没有文本变更块"}</p>
           ) : (
             diffLines.map((line, i) =>
               line.separator ? (

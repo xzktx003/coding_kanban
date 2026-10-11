@@ -48,6 +48,27 @@ it("reuses the same request identity after reload and separates new drafts, targ
     await submissionId("owner", 1, { ...data, images: ["/image.png"] }),
   ).not.toBe(first);
 });
+it("preserves the SHA-256 submission identity on nonsecure LAN HTTP and after switching to HTTPS", async () => {
+  const data = {
+    threadId: "a",
+    text: "中文消息🙂",
+    images: ["/image.png"],
+    parameters: {},
+    mode: "queue" as const,
+  };
+  const first = await submissionId("owner", 7, data);
+  const saved = localStorage.getItem("kanban.session.followup-submissions");
+  vi.stubGlobal("crypto", {
+    getRandomValues: webcrypto.getRandomValues.bind(webcrypto),
+  });
+  expect(await submissionId("owner", 7, data)).toBe(first);
+  expect(localStorage.getItem("kanban.session.followup-submissions")).toBe(
+    saved,
+  );
+  expect(await submissionId("owner", 8, data)).not.toBe(first);
+  vi.stubGlobal("crypto", webcrypto);
+  expect(await submissionId("owner", 7, data)).toBe(first);
+});
 it("captures the target directory, model, permissions and plan mode at enqueue time", () => {
   useCodexStore.setState({ threads: [{ id: "a", cwd: "/target" } as any] });
   useConfigStore.setState({

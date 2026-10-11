@@ -37,7 +37,7 @@
 
 ## 2026-10-10 首批实现证据
 
-- 实际 Rust router 的生产定义提取出 **208** 个方法/路径；`route-contract.json` 保留其处理函数归属。`pnpm --filter @agent-orchestrator/session-runtime audit` 创建隔离实例并检查注册状态：**23 已注册，185 待迁移**，当前按预期退出 1。这仅是接口存在性审计，不能证明完整行为兼容。
+- 实际 Rust router 的生产定义提取出 **208** 个方法/路径；`route-contract.json` 保留其处理函数归属。`pnpm --filter @agent-orchestrator/session-runtime run audit` 创建隔离实例并检查注册状态：**23 已注册，185 待迁移**，当前按预期退出 1。这仅是接口存在性审计，不能证明完整行为兼容。
 - 已实现健康、设置 GET/POST、SSE/WS、文件系统全部 14 个路由、终端 4 个路由。新增运行服务尚未成为默认启动入口。
 - **22 项回归通过**，每组先运行失败用例再补实现：事件过滤与单调序号、重放/实时交界、独立待审批快照、完整身份校验与一次认领、完成/删除清理、按条数和字节限制缓冲、慢消费者断开、原子 JSON 保存与损坏保护、分片 UTF-8/乱序 JSON-RPC、原生进程退出/超时/超长帧、真实 HTTP SSE / WebSocket、文件读写/二进制/大小与路径边界、忽略规则/模糊查找、监听引用计数/目录数量限制，以及真实 PTY 输入、Unicode 输出、resize 和自然退出清理。
 - TS 包类型检查/构建以及根 `pnpm check`（shared、后端、前端类型检查与生产构建）通过；Vite 仍提示已有混合导入与大块资源。新源代码未依赖 Cargo。原生进程测试只创建测试子进程和临时文件，不连接用户正在运行的 Codex/Claude/ACP。
@@ -53,7 +53,7 @@
 - 默认新启动为 `node packages/session-runtime/dist/main.js`；manager 用启动锁、原子 identity、PID/命令行/instance 与构建指纹核验。存活 legacy 实例继续复用，健康失败/归属未知拒绝第二份。`pnpm session:status` 现场仍报告复用旧实例，因此不声称正式切换完成。
 - 搜索实现与当前 Nucleo 0.3.1 原生参考核验 6400 个 ASCII/Unicode 评分零差分、14 组文件排序，以及矩阵阈值后 greedy 分支、ignore 类型优先级/大小写、linked worktree。测试不需要 Rust；Unicode 表保留 MPL-2.0 通知，不能把有限语料称为完整数学等价。
 - Claude 使用官方 SDK 0.3.296，可用 `SESSION_CLAUDE_BIN` 指定外部 CLI；隔离 fixture 验证连续轮次、stream-json、权限和只读 JSONL 历史。TOML 保留未知字段与 `.bak`，格式及注释会规范化；provider 环境密钥保存在应用隔离目录且只影响新进程。
-- 语音使用外部 whisper.cpp CLI，`SESSION_WHISPER_BIN` 指定程序；统计扫描在 worker 内执行，休眠锁按会话引用并确认原生握手。真实 Whisper 模型推理、各桌面操作系统休眠和真实云发布未运行；本轮使用隔离 CLI/HTTP fixture。
+- 语音在本机 Codex ChatGPT 登录可用时走 realtime transcription，失败或未登录时使用外部 whisper.cpp CLI，`SESSION_WHISPER_BIN` 指定程序；统计扫描在 worker 内执行，休眠锁按会话引用并确认原生握手。真实 Whisper 模型推理、各桌面操作系统休眠和真实云发布未运行；Codex 转写用本机登录对一段 “hello” 录音返回了文字。其余用例使用隔离 CLI/HTTP fixture。
 - 浏览器在独立、绑定 `0.0.0.0` 的前端执行内存/恢复/审批回归；结果待最终收尾。旧 Rust 删除与现场实例切换仍有独立完成边界。
 
 ### 收尾审计与旧源码移除

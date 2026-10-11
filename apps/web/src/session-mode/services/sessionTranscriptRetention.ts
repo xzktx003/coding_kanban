@@ -2,6 +2,7 @@ import { withoutToolTranscriptEvents } from "./codexTranscriptVisibility";
 import { useCodexStore } from "../components/codex/stores";
 import { isIgnoredTranscriptEvent } from "../components/codex/stores/eventUtils";
 import { useSubagentStore } from "../features/subagents/store";
+import { useThreadLinkStore } from "../features/thread-workflows/threadLinkStore";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
 import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 import { cancelCodexHistoryRead } from "./codexService";
@@ -87,8 +88,11 @@ function pruneThreadTranscript(id: string, dormant = false) {
       ? state.retryNoticeMap
       : deleteKey(state.retryNoticeMap, id);
     let threads = state.threads;
+    // A link that arrived after the user chose another session keeps its
+    // turns here. The event body can leave; the thread record is the cache.
+    const linked = useThreadLinkStore.getState().retainedThreadId === id;
     const threadIndex = state.threads.findIndex(
-      (thread) => thread.id === id && thread.turns.length > 0,
+      (thread) => thread.id === id && thread.turns.length > 0 && !linked,
     );
     if (threadIndex >= 0) {
       threads = [...state.threads];

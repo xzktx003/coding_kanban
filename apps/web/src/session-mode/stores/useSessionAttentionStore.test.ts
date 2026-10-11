@@ -17,6 +17,36 @@ test("completion is unread until its exact reply is viewed; replay cannot re-not
     latestUnread(useSessionAttentionStore.getState().receipts["codex:a"]),
   ).toBeNull();
 });
+test("mark unread reopens only the latest read reply", () => {
+  const store = useSessionAttentionStore.getState();
+  expect(store.markUnread("codex", "a")).toBe(false);
+  store.complete("codex", "a", "one");
+  store.complete("codex", "a", "two");
+  store.read("codex", "a", "two");
+  expect(useSessionAttentionStore.getState().markUnread("codex", "a")).toBe(true);
+  expect(
+    latestUnread(useSessionAttentionStore.getState().receipts["codex:a"]),
+  ).toBe("two");
+  expect(
+    useSessionAttentionStore.getState().receipts["codex:a"].read,
+  ).toEqual(["one"]);
+});
+test("mark followed read clears only listed Codex chats that have an unread reply", () => {
+  const store = useSessionAttentionStore.getState();
+  store.complete("codex", "a", "one");
+  store.complete("codex", "b", "two");
+  store.read("codex", "b", "two");
+  store.complete("cc", "a", "cc-result");
+  expect(
+    useSessionAttentionStore.getState().markFollowedRead(["a", "b", "missing", ""]),
+  ).toBe(1);
+  expect(
+    latestUnread(useSessionAttentionStore.getState().receipts["codex:a"]),
+  ).toBeNull();
+  expect(
+    latestUnread(useSessionAttentionStore.getState().receipts["cc:a"]),
+  ).toBe("cc-result");
+});
 test("an older read receipt cannot dismiss a newer completion or another agent", () => {
   const store = useSessionAttentionStore.getState();
   store.complete("codex", "a", "one");

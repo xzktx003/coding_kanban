@@ -596,9 +596,12 @@ export function ThreadList({ cwd }: ThreadListProps) {
         )}
       </div>
       {pageError && (
-        <p role="alert" className="px-2 text-xs text-destructive">
-          更多会话加载失败：{pageError}
-        </p>
+        <div role="alert" className="px-2 text-xs text-destructive">
+          <p>更多会话加载失败：{pageError}</p>
+          <Button variant="ghost" size="sm" onClick={handleLoadMore}>
+            重试
+          </Button>
+        </div>
       )}
       {nextCursor && (
         <SessionLoadMore loading={isLoadingMore} error={Boolean(pageError)} onClick={handleLoadMore} />

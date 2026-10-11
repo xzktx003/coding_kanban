@@ -225,7 +225,7 @@ it("uses the first actual image dimensions for the native portrait gallery witho
   expect(send).not.toHaveBeenCalled();
 });
 function seed(...requests: ElicitationRequest[]) {
-  useElicitationStore.setState({ pendingRequests: requests });
+  useElicitationStore.setState({ pendingRequests: requests, respond });
 }
 beforeEach(() => {
   resetRpcLifecycle();
@@ -347,6 +347,26 @@ it("isolates a same-turn replacement instance and rejects a stale captured targe
     respond(31, "accept", { query: "old draft" }, null, first),
   ).rejects.toThrow("请求已过期");
   expect(send).not.toHaveBeenCalled();
+});
+
+it("skips the current MCP field for now and declines the last field", () => {
+  const value = request({
+    mode: "form",
+    requestedSchema: {
+      type: "object",
+      properties: {
+        first: { type: "string", title: "First" },
+        second: { type: "string", title: "Second" },
+      },
+    },
+  } as Partial<ElicitationRequest>);
+  seed(value);
+  render(<ElicitationItem currentThreadId="owner" />);
+  fireEvent.click(screen.getByRole("button", { name: "elicitation.skipQuestion" }));
+  expect(screen.getByRole("textbox", { name: "Second" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "elicitation.skipChoice" }));
+  expect(send).toHaveBeenCalled();
+  expect(send.mock.calls[0]?.[1]).toBe("decline");
 });
 
 it("accepts supported openai/form primitives with const values, typed defaults and pattern validation", async () => {
@@ -844,7 +864,7 @@ it("retains a draft after a confirmed rejection and disables every reply when de
       "uncertain",
     ),
   );
-  for (const name of ["common.submit", "common.decline", "common.cancel"]) {
+  for (const name of ["common.submit", "elicitation.skipChoice", "common.cancel"]) {
     const button = screen.getByRole("button", { name }) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
     fireEvent.click(button);
@@ -953,6 +973,33 @@ it("does not invent secret controls or accept an unsupported openai form schema"
   ).toBe(true);
 });
 
+it("titles a high-risk MCP tool approval with the connector and tool", () => {
+  seed(
+    request({
+      requestedSchema: { type: "object", properties: {} },
+      serverName: "workspace",
+      message: 'Allow workspace to run tool "inspect"?',
+      _meta: {
+        codex_approval_kind: "mcp_tool_call",
+        connector_name: "GitHub",
+        tool_name: "inspect",
+        risk_level: "high",
+      },
+    }),
+  );
+  render(<ElicitationItem currentThreadId="owner" />);
+  expect(screen.getByText("较高风险")).toBeTruthy();
+  expect(
+    screen.getByText((_, node) =>
+      node?.classList.contains("codex-elicitation__title") === true &&
+      (node.textContent ?? "").includes("是否允许 GitHub 运行 inspect 工具？"),
+    ),
+  ).toBeTruthy();
+  expect(screen.getByText("inspect").className).toContain(
+    "codex-elicitation__tool",
+  );
+});
+
 it("keeps URL authorization and message-only decisions attached to their captured identity", async () => {
   const url = request({
     mode: "url",
@@ -976,10 +1023,8 @@ it("keeps URL authorization and message-only decisions attached to their capture
   });
   act(() => seed(approval));
   rerender(<ElicitationItem currentThreadId="owner" />);
-  expect(screen.queryByRole("button", { name: "Always allow" })).toBeNull();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Allow for this session" }),
-  );
+  expect(screen.queryByRole("button", { name: "始终允许" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "允许此对话" }));
   await waitFor(() =>
     expect(send.mock.calls[1]).toEqual([
       31,

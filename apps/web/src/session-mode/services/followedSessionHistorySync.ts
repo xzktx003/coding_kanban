@@ -160,9 +160,10 @@ export function startFollowedSessionHistorySync() {
                   .getState()
                   .complete("codex", id, timing.turnId);
               cachedTranscriptTimings.delete(id);
-              if (repairing.delete(id)) {
-                setSessionRecovery(id);
-              }
+              repairing.delete(id);
+              // Initial hydration failures also set retrying; successful reads
+              // must clear it even when no explicit repair was requested.
+              setSessionRecovery(id);
             }
           },
           () => {
@@ -319,7 +320,7 @@ export function startFollowedSessionHistorySync() {
     stopCompletions();
     clearInterval(watchdog);
     window.removeEventListener("session-history-reconcile", manual);
-    for (const id of repairing) setSessionRecovery(id);
+    for (const id of wanted.keys()) setSessionRecovery(id);
     closeStream();
     window.removeEventListener("online", wake);
     window.removeEventListener("focus", wake);

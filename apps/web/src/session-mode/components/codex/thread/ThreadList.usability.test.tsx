@@ -64,6 +64,22 @@ test("Codex deletion requires confirmation", async () => {
     expect(api.remove).toHaveBeenCalledWith("keyboard-codex"),
   );
 });
+test("failed next page offers retry instead of a dead error line", async () => {
+  api.list.mockReset();
+  api.list
+    .mockResolvedValueOnce({ data: [row], nextCursor: "page-2" })
+    .mockRejectedValueOnce(new Error("page offline"))
+    .mockResolvedValueOnce({
+      data: [{ ...row, id: "page-row", name: "第二页" }],
+      nextCursor: null,
+    });
+  render(<ThreadList cwd="/fixture" />);
+  await screen.findByText("中文任务");
+  fireEvent.click(screen.getByRole("button", { name: "加载更多" }));
+  expect((await screen.findByRole("alert")).textContent).toContain("page offline");
+  fireEvent.click(screen.getByRole("button", { name: "重试" }));
+  await waitFor(() => expect(screen.getByText("第二页")).toBeTruthy());
+});
 test("late pagination cannot insert rows from a previous project", async () => {
   let resolveOld!: (value: any) => void;
   api.list.mockReset();

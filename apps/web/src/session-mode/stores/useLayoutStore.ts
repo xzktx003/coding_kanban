@@ -25,7 +25,7 @@ export type viewType =
 
 export type SidebarMode = 'agent' | 'bot';
 
-export type RightPanelTab = 'diff' | 'tasks' | 'todo' | 'terminal' | 'webpreview' | 'files' | 'vscode' | 'subagents';
+export type RightPanelTab = 'diff' | 'tasks' | 'todo' | 'terminal' | 'webpreview' | 'files' | 'vscode';
 
 interface LayoutStore {
   isSidebarOpen: boolean;
@@ -163,7 +163,7 @@ export const useLayoutStore = create<LayoutStore>()(
     }),
     {
       name: 'kanban.session.layout-storage',
-      version: 7,
+      version: 8,
       partialize: (state) => ({
         isSidebarOpen: state.isSidebarOpen,
         isRightPanelOpen: state.isRightPanelOpen,
@@ -202,6 +202,17 @@ export const useLayoutStore = create<LayoutStore>()(
           // must land on the sidebar it was last actually showing.
           persistedState.sidebarMode = 'agent';
           if (persistedState.view === 'bot') persistedState.view = 'agent';
+        }
+        if (version < 8 && persistedState) {
+          const dropSubagents = (tab: string) => tab === 'subagents' ? 'diff' : tab;
+          if (persistedState.activeRightPanelTab === 'subagents') {
+            persistedState.activeRightPanelTab = 'diff';
+          }
+          if (Array.isArray(persistedState.openRightPanelTabs)) {
+            persistedState.openRightPanelTabs = [
+              ...new Set(persistedState.openRightPanelTabs.map(dropSubagents)),
+            ];
+          }
         }
         return persistedState;
       },

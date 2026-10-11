@@ -10,6 +10,8 @@ vi.mock("./useCCSessionManager", () => ({
 vi.mock("@session/services/codexService", () => ({
   codexService: { setCurrentThread: selectCodex },
 }));
+import { resetClosedTabs, takeClosedTab } from "../stores/closedSessionTabs";
+import { sessionTabSelect } from "../stores/sessionTabSelect";
 import { useSessionTabActions, useRestoreSessionTabs } from "./useSessionTabs";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
 import { useWorkspaceStore } from "../stores/useWorkspaceStore";
@@ -36,6 +38,7 @@ beforeEach(() => {
   useAgentSettingsStore.setState({ selectedAgent: "codex" });
   useAcpStore.setState({ active: false });
   useCodexStore.setState({ currentThreadId: null, currentTurnId: null });
+  resetClosedTabs();
 });
 it("selects the matching project and composer target together", async () => {
   const { result } = renderHook(useSessionTabActions);
@@ -51,6 +54,26 @@ it("closing a running tab only navigates to its neighbor, without deleting its w
   expect(selectCodex).toHaveBeenCalledExactlyOnceWith("b");
   await act(() => result.current.closeTab(b));
   expect(selectCodex).toHaveBeenLastCalledWith(null);
+});
+it("remembers the most recently closed tab for reopen", async () => {
+  const { result } = renderHook(useSessionTabActions);
+  await act(() => result.current.closeTab(b));
+  await act(() => result.current.closeTab(a));
+  expect(takeClosedTab()).toEqual(a);
+  expect(takeClosedTab()).toEqual(b);
+  expect(takeClosedTab()).toBeNull();
+});
+it("reopen uses the registered tab select after the closed tab returns", async () => {
+  renderHook(useSessionTabActions);
+  const { result } = renderHook(useSessionTabActions);
+  await act(() => result.current.closeTab(b));
+  expect(useAgentCenterStore.getState().cards.map((card) => card.id)).toEqual(["a"]);
+  const closed = takeClosedTab();
+  expect(closed?.id).toBe("b");
+  useAgentCenterStore.getState().addAgentCard(closed!, { activate: true });
+  await act(() => sessionTabSelect(closed!));
+  expect(selectCodex).toHaveBeenLastCalledWith("b");
+  expect(useAgentCenterStore.getState().currentAgentCardId).toBe("b");
 });
 it("closing an unselected tab preserves the input target", async () => {
   const { result } = renderHook(useSessionTabActions);

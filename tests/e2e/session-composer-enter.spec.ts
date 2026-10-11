@@ -123,7 +123,7 @@ test.describe("desktop Enter and browser composition", () => {
     );
     await page.waitForTimeout(100);
     expect(submitted()).toHaveLength(0);
-    await page.getByRole("button", { name: "发送消息", exact: true }).click();
+    await page.getByRole("button", { name: "发送", exact: true }).click();
     await expect.poll(() => submitted().length).toBe(1);
   });
 });

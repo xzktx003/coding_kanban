@@ -1,11 +1,12 @@
+import { v4 as randomUUID } from "uuid";
 import { subagentParent } from "@agent-orchestrator/shared";
 import { sessionDraftSubmissions } from "@session/features/subagents/submissions";
-import { SubagentSummary } from "@session/features/subagents/SubagentSummary";
-import { AgentMentionPicker } from "@session/features/subagents/AgentMentionPicker";
 import { mentionDrafts } from "@session/features/subagents/mentions";
 import { pluginInputDrafts } from "@session/features/plugins/pluginInputs";
 import type { NativeInputMention } from "@agent-orchestrator/shared";
 import { useSubagentStore } from "@session/features/subagents/store";
+import { BackgroundAgentSummary } from "@session/features/subagents/BackgroundAgentSummary";
+import { AgentMentionPicker } from "@session/features/subagents/AgentMentionPicker";
 import { composeContextText } from "@agent-orchestrator/shared";
 import {
   composerDrafts,
@@ -19,7 +20,7 @@ import { DrawingEditor } from "./v2/DrawingEditor";
 import { ComposerCommands } from "./v2/ComposerCommands";
 import { ModelReasonSelector } from "./ModelReasonSelector";
 import { isLargePaste, insertAtSelection } from "./v2/content";
-import { Maximize2, Pencil, Code2, Search } from "lucide-react";
+import { Pencil, Code2, Search } from "lucide-react";
 import {
   followupService,
   followupParameters,
@@ -28,8 +29,11 @@ import { createSideChat } from "@session/services/conversationActions";
 import { useFollowupSettingsStore } from "@session/stores/useFollowupSettingsStore";
 import { FollowupQueueContent } from "./FollowupQueue";
 import { useFollowups } from "@session/hooks/useFollowups";
-import { ModelChangeNotice } from "./ModelChangeNotice";
+import { ModelChangeNotice, ModelUpgradeBanner } from "./ModelChangeNotice";
+import { PersonalityNotice } from "./PersonalityNotice";
 import { ConversationMenu } from "./ConversationMenu";
+import { SearchChatsSheet } from "./SearchChatsSheet";
+
 import { useThreadModelStore } from "@session/stores/useThreadModelStore";
 import { useQuestions } from "@session/features/async-questions/useQuestions";
 import { useAsyncQuestionStore } from "@session/features/async-questions/store";
@@ -45,6 +49,8 @@ import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
 import { CloudTasksPanel } from "@session/features/codex-host/CloudTasksPanel";
 import { CodexHostPanel } from "@session/features/codex-host/CodexHostPanel";
 import "./composer-native.css";
+import { NativeSubmitButton } from "./NativeSubmitButton";
+import { nativeComposerPlaceholder } from "./nativeComposerPlaceholder";
 import type { FollowupMode } from "@agent-orchestrator/shared";
 import { useStopAction } from "../../common/useStopAction";
 import { useTurnControl } from "../hooks/useTurnControl";
@@ -69,6 +75,7 @@ import type { ThreadGoal } from "@session/bindings/v2";
 import { useThreadGoal } from "@session/components/codex/hooks";
 import { useCodexStore } from "@session/components/codex/stores";
 import { ContextWindowWidget } from "@session/components/codex/widget";
+import { NativeCodexUsage } from "@session/features/codex-account/NativeCodexUsage";
 import { deriveContextWindowUsage } from "@session/components/codex/widget/ContextWindowWidget";
 import { FileMentionPopover } from "@session/components/common";
 import { Button } from "@session/components/ui/button";
@@ -98,6 +105,14 @@ import { useComposerFileDrop } from "./composerDrop";
 import { SlashCommandDialogs } from "./SlashCommandDialogs";
 import { SlashCommandPopover } from "./SlashCommandsSelector";
 import type { SlashDialog } from "./slashCommands";
+import {
+  forkSlashLocal,
+  forkSlashWorktree,
+  loadMcpStatus,
+  submitSlashRename,
+} from "./slashCommands";
+import { NativeFeedbackDialog } from "./NativeFeedbackDialog";
+import { AutoReviewDenialsSheet } from "./AutoReviewDenialsSheet";
 
 interface ComposerProps {
   targetLabel?: React.ReactNode;
@@ -107,6 +122,39 @@ interface ComposerProps {
 
 // Compact status label per goal status, mirroring
 // codex-rs/tui/src/bottom_pane/footer.rs::goal_status_indicator_line.
+function McpSlashStatus({
+  threadId,
+  rows,
+  onRows,
+}: {
+  threadId: string | null;
+  rows: { name: string; auth: string; tools: number }[] | null;
+  onRows: (rows: { name: string; auth: string; tools: number }[]) => void;
+}) {
+  useEffect(() => {
+    let cancelled = false;
+    loadMcpStatus(threadId)
+      .then((next) => {
+        if (!cancelled) onRows(next);
+      })
+      .catch((error) => toast.error(String(error)));
+    return () => {
+      cancelled = true;
+    };
+  }, [threadId, onRows]);
+  if (!rows) return <p role="status">正在读取 MCP 服务器…</p>;
+  if (!rows.length) return <p>没有 MCP 服务器</p>;
+  return (
+    <ul>
+      {rows.map((row) => (
+        <li key={row.name}>
+          {row.name} · {row.auth} · {row.tools} 个工具
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function goalStatusLabel(status: ThreadGoal["status"]): string {
   switch (status) {
     case "active":
@@ -131,6 +179,7 @@ export function Composer({
 }: ComposerProps) {
   const preferences = useFollowupSettingsStore();
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [searchChats, setSearchChats] = useState(false);
   const [detailsOwner, setDetailsOwner] = useState<string | null>(null);
 
   const submitMode = useRef<FollowupMode | null>(null);
@@ -139,6 +188,10 @@ export function Composer({
     text: string;
   } | null>(null);
   const [slashDialog, setSlashDialog] = useState<SlashDialog | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [mcpRows, setMcpRows] = useState<
+    { name: string; auth: string; tools: number }[] | null
+  >(null);
   const { currentThreadId, inputFocusTrigger } = useCodexStore(
     useShallow((s) => ({
       currentThreadId: s.currentThreadId,
@@ -147,10 +200,91 @@ export function Composer({
   );
   const cwd = useWorkspaceStore((s) => s.cwd);
   const owner = sessionDraftKey("codex", currentThreadId, cwd);
+  const feedbackDialogOwner = useRef<string | null>(null);
+  const openSlashDialog = (dialog: SlashDialog) => {
+    if (dialog === "feedback") feedbackDialogOwner.current = owner;
+    setSlashDialog(dialog);
+  };
+  useEffect(() => {
+    const openMcp = () => openSlashDialog("mcp");
+    const openPersonality = () => openSlashDialog("personality");
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "i" || !event.shiftKey || event.altKey) return;
+      if (!(event.metaKey || event.ctrlKey)) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest(".session-mode") === null
+      )
+        return;
+      event.preventDefault();
+      openPersonality();
+    };
+    window.addEventListener("codex-open-mcp", openMcp);
+    window.addEventListener("codex-open-personality", openPersonality);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("codex-open-mcp", openMcp);
+      window.removeEventListener("codex-open-personality", openPersonality);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, []);
   const { enabled: goalEnabled, setEnabled: setGoalEnabled } =
     useGoalDraft(owner);
-  const { collaborationMode, setCollaborationMode } =
-    useThreadModelSettings(currentThreadId);
+  const {
+    collaborationMode,
+    setCollaborationMode,
+    personality,
+    setPersonality,
+  } = useThreadModelSettings(currentThreadId);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== "k" || !(event.metaKey || event.ctrlKey)) return;
+      if (event.altKey || event.shiftKey) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest(".session-mode") === null
+      )
+        return;
+      event.preventDefault();
+      setSearchChats(true);
+    };
+    const focusMain = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !event.shiftKey) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest(".session-mode") === null
+      )
+        return;
+      event.preventDefault();
+      useCodexStore.getState().triggerInputFocus();
+    };
+    const focusContent = (event: KeyboardEvent) => {
+      if (event.key !== "F10" || !event.shiftKey) return;
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const editor = document.querySelector(
+        ".session-composer-sheet.is-full textarea, .session-composer-sheet.is-full [contenteditable='true']",
+      );
+      if (!(editor instanceof HTMLElement) || document.activeElement !== editor) return;
+      const control = document.querySelector(
+        ".session-composer-sheet.is-full .session-rich-tools button",
+      );
+      if (!(control instanceof HTMLElement)) return;
+      event.preventDefault();
+      control.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("keydown", focusMain);
+    window.addEventListener("keydown", focusContent);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keydown", focusMain);
+      window.removeEventListener("keydown", focusContent);
+    };
+  }, []);
   useEffect(() => {
     if (activeDraftOwner() === owner)
       goalDrafts.migrateLegacy(owner, useCodexStore.getState().goalEnabled);
@@ -233,7 +367,7 @@ export function Composer({
       event.preventDefault();
       event.stopPropagation();
       composerDrafts.add(owner, {
-        id: crypto.randomUUID(),
+        id: randomUUID(),
         kind: "paste",
         name: "粘贴的文本",
         text,
@@ -515,7 +649,7 @@ export function Composer({
                     : modelEntry?.notice && !modelEntry.notice.dismissed
                       ? `模型已切换：${modelEntry.notice.from} → ${modelEntry.notice.to}`
                       : collaborationMode === "plan"
-                        ? "规划模式"
+                        ? "计划模式"
                         : goalEnabled
                           ? "目标草稿"
                           : threadGoal
@@ -528,12 +662,37 @@ export function Composer({
                                 : "运行中"
                               : "";
   return (
-    <div className="session-codex-composer session-compact-composer session-native-composer">
+    <div
+      className="session-codex-composer session-compact-composer session-native-composer"
+      data-draft-owner={owner}
+    >
       <div
         className="session-composer-floating"
         aria-label="会话提示与待发送消息"
       >
+        {searchChats && (
+          <SearchChatsSheet onClose={() => setSearchChats(false)} />
+        )}
+        <BackgroundAgentSummary threadId={currentThreadId} />
         <RunningTurnChanges threadId={currentThreadId} />
+        {directInputBlocked && (
+          <p role="status">当前子线程由主 Agent 调度，不能直接发送消息。</p>
+        )}
+        {collaborationMode === "plan" && (
+          <div className="session-composer-mode">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setCollaborationMode("default")}
+              aria-label="取消计划模式"
+              title="创建计划"
+            >
+              计划模式
+              <X size={12} />
+            </Button>
+          </div>
+        )}
         {pendingQuestions.length > 0 && (
           <button
             type="button"
@@ -554,7 +713,7 @@ export function Composer({
         )}
 
         {currentThreadId && <ModelChangeNotice threadId={currentThreadId} />}
-        <SubagentSummary root={currentThreadId} />
+        {currentThreadId && <ModelUpgradeBanner threadId={currentThreadId} />}
         <FollowupQueueContent
           compactShelf
           snapshot={queueSnapshot}
@@ -576,15 +735,25 @@ export function Composer({
           {deliveryNotice.text}
         </p>
       )}
-      {directInputBlocked && (
-        <p role="status">当前子线程由主 Agent 调度，不能直接发送消息。</p>
-      )}
       <SideChatPanel />
       {reviewOpen && (
         <ReviewDialog
           threadId={currentThreadId}
           onClose={() => setReviewOpen(false)}
         />
+      )}
+      {statusText && (
+        <span
+          className="session-native-composer-status"
+          role={
+            contextStorageError || attachments.storageError || failedImage
+              ? "alert"
+              : "status"
+          }
+          title={statusText}
+        >
+          {statusText}
+        </span>
       )}
       <form
         ref={formRef}
@@ -607,7 +776,7 @@ export function Composer({
           setInputValue={setInputValue}
           editorRef={editorRef}
           triggerElement={wrapperRef.current}
-          onOpenDialog={setSlashDialog}
+          onOpenDialog={openSlashDialog}
         />
 
         <div
@@ -625,6 +794,7 @@ export function Composer({
             </div>
           )}
           <div className="session-compact-body">
+            {currentThreadId && <PersonalityNotice threadId={currentThreadId} />}
             <div ref={wrapperRef} className="session-composer-editor">
               <ComposerEditor
                 owner={owner}
@@ -633,13 +803,11 @@ export function Composer({
                 value={inputValue}
                 onChange={setInputValue}
                 onSubmit={handleEditorSubmit}
-                placeholder={
-                  goalEnabled
-                    ? "输入目标…"
-                    : running
-                      ? "继续补充…"
-                      : "描述你想完成的任务…"
-                }
+                placeholder={nativeComposerPlaceholder({
+                  goal: goalEnabled,
+                  plan: collaborationMode === "plan",
+                  threadId: currentThreadId,
+                })}
               />
             </div>
 
@@ -655,6 +823,7 @@ export function Composer({
           <div className="session-composer-bottom">
             <ComposerToolbarProvider className="session-composer-toolbar flex items-center justify-between w-full">
               <div className="session-composer-policy flex items-center">
+                <AgentMentionPicker root={currentThreadId} owner={owner} />
                 <ComposerMenu
                   owner={owner}
                   onImageFilesSelected={attachments.addFiles}
@@ -673,7 +842,7 @@ export function Composer({
                         }}
                       >
                         <NativeComposerIcon name="chat" />
-                        Agent 与提供商设置
+                        模型与提供商设置
                       </Button>
                       <Button
                         type="button"
@@ -733,7 +902,7 @@ export function Composer({
                         }}
                       >
                         <Search size={16} />
-                        快捷命令
+                        斜杠命令
                       </Button>
                       <Button
                         type="button"
@@ -748,6 +917,41 @@ export function Composer({
                         <ClipboardCheck size={16} />
                         代码审查
                       </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="justify-start"
+                        onClick={() => {
+                          close();
+                          composerDrafts.setExpanded(owner, true);
+                        }}
+                      >
+                        <NativeComposerIcon
+                          name="expand"
+                          width={16}
+                          height={16}
+                        />
+                        展开编辑
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="justify-start"
+                        onClick={() => {
+                          close();
+                          setDetailsOwner(owner);
+                        }}
+                      >
+                        <ListPlus size={16} />
+                        输入状态与消息队列
+                      </Button>
+                      <ConversationMenu
+                        threadId={currentThreadId}
+                        title="当前会话"
+                        variant="item"
+                        onOpen={() => close()}
+                        onRename={() => openSlashDialog("rename")}
+                      />
                       {hasContextUsage && (
                         <div className="session-composer-context">
                           <ContextWindowWidget />
@@ -827,20 +1031,13 @@ export function Composer({
                 />
                 <AccessModePopover compact />
               </div>
-              <div className="session-compact-meta">{targetLabel}</div>
-              <div className="session-composer-utilities" aria-label="输入工具">
-                <AgentMentionPicker root={currentThreadId} owner={owner} />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="session-composer-expand"
-                  aria-label="展开编辑"
-                  title="展开编辑"
-                  onClick={() => composerDrafts.setExpanded(owner, true)}
-                >
-                  <Maximize2 size={18} />
-                </Button>
+              <div className="session-composer-actions flex items-center gap-2">
+                <ConversationMenu
+                  threadId={currentThreadId}
+                  title="当前会话"
+                  onRename={() => openSlashDialog("rename")}
+                />
+                <NativeModelSelector threadId={currentThreadId} />
                 <span className="session-native-dictation">
                   <NativeComposerIcon name="microphone" />
                   <DictationButton
@@ -853,104 +1050,65 @@ export function Composer({
                     }}
                   />
                 </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label="输入状态与消息队列"
-                  title="输入状态与消息队列"
-                  onClick={() => setDetailsOwner(owner)}
-                >
-                  <ListPlus size={18} />
-                </Button>
-                <ConversationMenu threadId={currentThreadId} title="当前会话" />
-              </div>
-              <div className="session-composer-actions flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="session-native-agent-trigger"
-                  aria-label="当前 Agent：Codex，切换 Agent"
-                  title="切换 Agent"
-                  onClick={() => setModelOwner(owner)}
-                >
-                  Codex
-                  <NativeComposerIcon name="chevron" />
-                </Button>
-                <NativeModelSelector threadId={currentThreadId} />
-                {hasContextUsage && <ContextWindowWidget />}
-                {running && (
-                  <Button
-                    type="button"
-                    aria-label={stopping ? "正在停止" : "停止生成"}
-                    onClick={requestStop}
-                    disabled={stopping}
-                    title={
-                      stopping
-                        ? "正在停止…"
-                        : "停止主 Agent 并暂停主会话队列；子任务继续运行，可在子任务面板停止"
-                    }
-                    variant="ghost"
-                    size="icon"
-                    className={`session-composer-stop ${hasContent ? "" : "is-primary"}`}
-                  >
-                    <NativeComposerIcon name="stop" />
-                  </Button>
-                )}
-                {(!running || hasContent) && (
-                  <Button
-                    aria-label={
-                      running
-                        ? preferences.mode === "queue"
-                          ? "排队消息"
-                          : "引导当前任务"
-                        : "发送消息"
-                    }
-                    title={
-                      running
-                        ? "Ctrl/Cmd+Shift+Enter 临时切换排队与引导"
-                        : "发送消息"
-                    }
+                {running ? (
+                  <>
+                    {hasContent && (
+                      <NativeSubmitButton
+                        aria-label={
+                          preferences.mode === "queue"
+                            ? "排队消息"
+                            : "引导当前任务"
+                        }
+                        title={
+                          preferences.mode === "queue"
+                            ? "排队消息"
+                            : "引导当前任务"
+                        }
+                        type="submit"
+                        loading={sending}
+                        disabled={sending || blocked || !hasContent}
+                        size="icon"
+                        className="session-composer-send"
+                      >
+                        {preferences.mode === "queue" ? (
+                          <ListPlus size={18} />
+                        ) : (
+                          <CornerDownRight size={18} />
+                        )}
+                      </NativeSubmitButton>
+                    )}
+                    <NativeSubmitButton
+                      type="button"
+                      aria-label={stopping ? "正在停止" : "停止"}
+                      onClick={requestStop}
+                      disabled={stopping}
+                      loading={stopping}
+                      title={stopping ? "正在停止…" : "停止"}
+                      variant="ghost"
+                      size="icon"
+                      className="session-composer-stop is-primary"
+                    >
+                      <NativeComposerIcon name="stop" />
+                    </NativeSubmitButton>
+                  </>
+                ) : (
+                  <NativeSubmitButton
+                    aria-label="发送"
+                    title="发送"
                     type="submit"
-                    disabled={
-                      sending ||
-                      blocked ||
-                      !hasContent ||
-                      (running &&
-                        preferences.mode === "steer" &&
-                        !currentTurnId)
-                    }
+                    loading={sending}
+                    disabled={sending || blocked || !hasContent}
                     size="icon"
                     className="session-composer-send"
                   >
-                    {running ? (
-                      <span aria-hidden="true">
-                        {preferences.mode === "queue" ? "排队" : "引导"}
-                      </span>
-                    ) : (
-                      <NativeComposerIcon name="send" />
-                    )}
-                  </Button>
+                    <NativeComposerIcon name="send" />
+                  </NativeSubmitButton>
                 )}
               </div>
             </ComposerToolbarProvider>
           </div>
         </div>
       </form>
-      {statusText && (
-        <span
-          className="session-native-composer-status"
-          role={
-            contextStorageError || attachments.storageError || failedImage
-              ? "alert"
-              : "status"
-          }
-          title={statusText}
-        >
-          {statusText}
-        </span>
-      )}
       {detailsOwner === owner && (
         <ComposerSheet
           title="输入状态与消息队列"
@@ -978,20 +1136,6 @@ export function Composer({
             </p>
           )}
           {!!pendingFiles[owner] && <p role="status">正在读取文件快照…</p>}
-          {collaborationMode === "plan" && (
-            <div className="session-composer-mode">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => setCollaborationMode("default")}
-                aria-label="取消规划模式"
-              >
-                规划模式
-                <X size={12} />
-              </Button>
-            </div>
-          )}
 
           {threadGoal && (
             <div className="flex items-center gap-1.5 px-3 pb-1 text-xs text-muted-foreground">
@@ -1133,7 +1277,7 @@ export function Composer({
       )}
       {modelOwner === owner && (
         <ComposerSheet
-          title="Agent 与提供商设置"
+          title="模型与提供商设置"
           onClose={() => setModelOwner(null)}
         >
           <NativeAgentSettings>
@@ -1151,42 +1295,40 @@ export function Composer({
           footer={
             <>
               <AccessModePopover compact />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="session-native-agent-trigger"
-                aria-label="当前 Agent：Codex，切换 Agent"
-                onClick={() => setModelOwner(owner)}
-              >
-                Codex
-                <NativeComposerIcon name="chevron" />
-              </Button>
               <NativeModelSelector threadId={currentThreadId} />
               {running && (
-                <Button
+                <NativeSubmitButton
                   type="button"
-                  aria-label="停止生成"
+                  aria-label={stopping ? "正在停止" : "停止"}
                   variant="ghost"
                   className="session-expanded-stop"
                   disabled={stopping}
+                  loading={stopping}
                   onClick={requestStop}
                 >
-                  <Square size={18} />
-                </Button>
+                  <NativeComposerIcon name="stop" />
+                </NativeSubmitButton>
               )}
-              <Button
+              <NativeSubmitButton
                 type="button"
                 className="session-v2-primary session-expanded-submit"
                 disabled={sending || blocked || !hasContent}
+                loading={sending}
+                aria-label={
+                  running
+                    ? preferences.mode === "queue"
+                      ? "加入队列"
+                      : "引导当前任务"
+                    : "发送"
+                }
                 onClick={() => formRef.current?.requestSubmit()}
               >
                 {running
                   ? preferences.mode === "queue"
                     ? "加入队列"
                     : "引导当前任务"
-                  : "发送消息"}
-              </Button>
+                  : "发送"}
+              </NativeSubmitButton>
             </>
           }
         >
@@ -1236,7 +1378,7 @@ export function Composer({
       {commandsOwner === owner && (
         <ComposerCommands
           onClose={() => setCommandsOwner(null)}
-          onOpenDialog={setSlashDialog}
+          onOpenDialog={openSlashDialog}
         />
       )}
       {(slashDialog === "model" || slashDialog === "effort") && (
@@ -1247,6 +1389,147 @@ export function Composer({
         >
           <ModelReasonSelector mode="panel" />
         </ComposerSheet>
+      )}
+      {slashDialog === "status" && (
+        <ComposerSheet
+          title="状态"
+          description="显示聊天 ID、上下文用量和速率限制"
+          onClose={() => setSlashDialog(null)}
+        >
+          <p>聊天 ID：{currentThreadId ?? "尚未开始"}</p>
+          <ContextWindowWidget />
+          <NativeCodexUsage />
+        </ComposerSheet>
+      )}
+      {slashDialog === "rename" && currentThreadId && (
+        <ComposerSheet
+          title="重命名"
+          description="重命名当前聊天"
+          onClose={() => setSlashDialog(null)}
+        >
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              const threadId = currentThreadId;
+              void submitSlashRename(threadId, renameDraft).then(
+                () => setSlashDialog(null),
+                (error) => toast.error(String(error)),
+              );
+            }}
+          >
+            <input
+              className="session-command-search"
+              aria-label="会话名称"
+              value={renameDraft}
+              autoFocus
+              onChange={(event) => setRenameDraft(event.target.value)}
+            />
+            <button type="submit">保存</button>
+          </form>
+        </ComposerSheet>
+      )}
+      {slashDialog === "fork" && currentThreadId && (
+        <ComposerSheet
+          title="创建聊天分支"
+          description="在当前工作空间或新工作树中创建此聊天的分支"
+          onClose={() => setSlashDialog(null)}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              const threadId = currentThreadId;
+              void forkSlashLocal(threadId).then(
+                () => setSlashDialog(null),
+                (error) => toast.error(String(error)),
+              );
+            }}
+          >
+            创建聊天分支
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const threadId = currentThreadId;
+              void forkSlashWorktree(threadId).then(
+                () => setSlashDialog(null),
+                (error) => toast.error(String(error)),
+              );
+            }}
+          >
+            在新工作树中创建聊天分支
+          </button>
+        </ComposerSheet>
+      )}
+      {slashDialog === "mcp" && (
+        <ComposerSheet
+          title="MCP"
+          description="显示 MCP 服务器状态"
+          onClose={() => setSlashDialog(null)}
+        >
+          <McpSlashStatus
+            threadId={currentThreadId}
+            rows={mcpRows}
+            onRows={setMcpRows}
+          />
+        </ComposerSheet>
+      )}
+      {slashDialog === "personality" && (
+        <ComposerSheet
+          title="个性"
+          description="调整语气和回复风格"
+          onClose={() => setSlashDialog(null)}
+        >
+          {(
+            [
+              ["friendly", "亲和友善"],
+              ["pragmatic", "务实"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={(personality ?? "friendly") === value}
+              onClick={() => {
+                setPersonality(value);
+                setSlashDialog(null);
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </ComposerSheet>
+      )}
+      {slashDialog === "ide" && (
+        <ComposerSheet
+          title="IDE 上下文"
+          description="包含当前选择、打开的文件以及其他来自你的 IDE 的上下文"
+          onClose={() => setSlashDialog(null)}
+        >
+          {cwd ? (
+            <CodexHostPanel
+              owner={{ cwd, threadId: currentThreadId, draftOwner: owner }}
+            />
+          ) : (
+            <p role="status">先选择本会话的项目，再连接编辑器上下文。</p>
+          )}
+        </ComposerSheet>
+      )}
+      {slashDialog === "auto-review-denials" && (
+        <AutoReviewDenialsSheet
+          threadId={currentThreadId}
+          onClose={() => setSlashDialog(null)}
+        />
+      )}
+      {slashDialog === "feedback" && feedbackDialogOwner.current === owner && (
+        <NativeFeedbackDialog
+          owner={owner}
+          key={currentThreadId ?? owner}
+          threadId={currentThreadId}
+          onClose={() => setSlashDialog(null)}
+          returnFocus={() => {
+            if (activeDraftOwner() === owner) editorRef.current?.focus();
+          }}
+        />
       )}
       <SlashCommandDialogs
         open={slashDialog}

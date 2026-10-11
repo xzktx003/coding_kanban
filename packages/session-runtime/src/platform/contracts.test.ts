@@ -12,7 +12,10 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
+import { EventEmitter } from "node:events";
+import type { CodexSocket } from "./codex-dictation.js";
 import { Dictation } from "./dictation.js";
+
 import { Insights } from "./insights.js";
 import { Telemetry } from "./telemetry.js";
 import { Publisher } from "./publish.js";
@@ -86,6 +89,7 @@ test("dictation converts signed PCM to WAV and invokes external CLI with literal
   );
   const d = new Dictation(home, {
     ...process.env,
+    CODEX_HOME: join(home, "no-codex"),
     SESSION_WHISPER_BIN: executable,
   });
   try {
@@ -110,6 +114,72 @@ test("dictation converts signed PCM to WAV and invokes external CLI with literal
     );
   } finally {
     await d.close();
+    await rm(home, { recursive: true, force: true });
+  }
+});
+test("signed-in Codex dictation is preferred and a failed session falls back to Whisper", async () => {
+  const home = await mkdtemp(join(tmpdir(), "dictation-codex-"));
+  await mkdir(join(home, ".codex"), { recursive: true });
+  await writeFile(
+    join(home, ".codex/auth.json"),
+    JSON.stringify({ tokens: { access_token: "fixture-token", account_id: "acct" } }),
+  );
+  const executable = join(home, "whisper");
+  await writeFile(
+    executable,
+    `#!/usr/bin/env node\nconst fs=require('fs');const a=process.argv.slice(2);fs.writeFileSync(a[a.indexOf('-of')+1]+'.json',JSON.stringify({transcription:[{text:'local'}]}));`,
+    { mode: 0o700 },
+  );
+  class Socket extends EventEmitter {
+    static mode: "ok" | "fail" = "ok";
+    sent: string[] = [];
+    constructor() {
+      super();
+      queueMicrotask(() => this.emit("open"));
+    }
+    send(data: string) {
+      this.sent.push(data);
+      const message = JSON.parse(data);
+      if (message.type === "session.update") {
+        queueMicrotask(() => this.emit("message", JSON.stringify({ type: "session.updated" })));
+        return;
+      }
+      if (message.type !== "input_audio_buffer.commit") return;
+      queueMicrotask(() => {
+        if (Socket.mode === "fail") this.emit("error", new Error("realtime down"));
+        else
+          this.emit(
+            "message",
+            JSON.stringify({
+              type: "conversation.item.input_audio_transcription.completed",
+              transcript: "codex",
+            }),
+          );
+      });
+    }
+    close() {}
+  }
+  const env = {
+    ...process.env,
+    CODEX_HOME: join(home, ".codex"),
+    SESSION_WHISPER_BIN: executable,
+    SESSION_CODEX_REALTIME_URL:
+      "ws://127.0.0.1:9/v1/realtime?intent=transcription",
+  };
+  const audio = Buffer.alloc(6400).toString("base64");
+  const codex = new Dictation(home, env, fetch, Socket as unknown as CodexSocket);
+  try {
+    assert.deepEqual(await codex.transcribe({ modelId: "base", data: audio }), {
+      text: "codex",
+    });
+    Socket.mode = "fail";
+    await mkdir(join(home, "dictation"));
+    await writeFile(join(home, "dictation/ggml-base.bin"), "fixture");
+    assert.deepEqual(await codex.transcribe({ modelId: "base", data: audio }), {
+      text: "local",
+    });
+  } finally {
+    await codex.close();
     await rm(home, { recursive: true, force: true });
   }
 });
@@ -416,6 +486,7 @@ test("maximum-length 120-second PCM is accepted without recursive base64 validat
   );
   const d = new Dictation(home, {
     ...process.env,
+    CODEX_HOME: join(home, "no-codex"),
     SESSION_WHISPER_BIN: executable,
   });
   try {

@@ -1,5 +1,10 @@
 import { expect, it } from "vitest";
-import { arrowHead, toDrawingPoint, drawingTextLayout } from "./drawing";
+import {
+  arrowHead,
+  ellipseGeometry,
+  toDrawingPoint,
+  drawingTextLayout,
+} from "./drawing";
 it("maps a touch through viewport offsets, canvas scaling and pan/zoom", () => {
   expect(
     toDrawingPoint(
@@ -10,6 +15,15 @@ it("maps a touch through viewport offsets, canvas scaling and pan/zoom", () => {
     ),
   ).toEqual({ x: 200, y: 150 });
 });
+it("sizes an ellipse from the two drag corners", () => {
+  expect(ellipseGeometry({ x: 10, y: 20 }, { x: 110, y: 80 })).toEqual({
+    cx: 60,
+    cy: 50,
+    rx: 50,
+    ry: 30,
+  });
+});
+
 it("arrow tips remain symmetric and finite for horizontal, vertical and zero-length marks", () => {
   const [a, b] = arrowHead({ x: 0, y: 0 }, { x: 100, y: 0 }, 4);
   expect(a.x).toBeCloseTo(b.x);

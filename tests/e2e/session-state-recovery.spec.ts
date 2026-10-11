@@ -5,6 +5,7 @@ import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 test.use({ ignoreHTTPSErrors: true });
 import { installSessionUxFixture } from "./session-ux-fixture";
 
@@ -70,6 +71,8 @@ async function liveStream(page: Page, baseURL: string) {
   await page.addInitScript(
     ({ origin }) => {
       const Native = window.EventSource;
+      const frames: unknown[] = [], sources: EventSource[] = [];
+      Object.assign(window, {snapshotFrames:frames, snapshotSources:sources});
       window.EventSource = class extends Native {
         constructor(url: string | URL, options?: EventSourceInit) {
           const parsed = new URL(String(url), location.href);
@@ -79,6 +82,12 @@ async function liveStream(page: Page, baseURL: string) {
               : url,
             options,
           );
+          sources.push(this);
+          this.addEventListener("message", event => {
+            const envelope=JSON.parse(event.data);
+            frames.push({seq:envelope.seq,event:envelope.event,method:envelope.payload?.method});
+            if(frames.length>20)frames.shift();
+          });
         }
       };
     },
@@ -107,7 +116,7 @@ async function liveStream(page: Page, baseURL: string) {
 test("a lower runtime snapshot resets the stream cursor without refreshing the page", async ({
   page,
   baseURL,
-}) => {
+}, info) => {
   const { fixture, stream } = await setup(page, baseURL!);
   let bridgeReady = false;
   page.on("console", (message) => {
@@ -167,7 +176,16 @@ test("a lower runtime snapshot resets the stream cursor without refreshing the p
     });
     await expect(
       page.getByText("新运行实例的实时回复", { exact: true }),
-    ).toBeVisible({ timeout: 2500 });
+    ).toBeVisible({ timeout: 2500 }).catch(async error => {
+      const state = await page.evaluate(async () => {
+        const path="/src/session-mode/components/codex/stores/index.ts";
+        const {useCodexStore}=await import(performance.getEntriesByType("resource").findLast(e=>new URL(e.name).pathname===path)?.name??path);
+        const s=useCodexStore.getState(),w=window as any;
+        return {frames:w.snapshotFrames,sources:w.snapshotSources.map((s:any)=>s.readyState),thread:s.currentThreadId,events:s.events["ux-0"],timing:s.turnTimingMap["ux-0"],loading:s.historyLoadingMap["ux-0"]};
+      });
+      await writeFile(info.outputPath("snapshot-failure.json"),JSON.stringify({state,cursors:stream.cursors(),calls:fixture.calls},null,2));
+      throw error;
+    });
     await expect(editor).toHaveText("序号重置后保留的草稿");
     expect(await page.evaluate(() => performance.timeOrigin)).toBe(
       documentStartedAt,
@@ -301,7 +319,7 @@ for (const { width, healthFailure } of [
         ).toBeVisible({ timeout: 22000 });
       }
       await editor.fill("只投递一次，等待真实流恢复");
-      await page.getByRole("button", { name: "发送消息", exact: true }).click();
+      await page.getByRole("button", { name: "发送", exact: true }).click();
       await expect.poll(() => submissions).toBe(1);
       await expect(
         page.getByText("真实事件流静默后补回的回复", { exact: true }),

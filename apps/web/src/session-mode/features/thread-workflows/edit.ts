@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import type { TurnStartParams, UserInput } from "@session/bindings/v2";
 import { threadRead } from "@session/services/apiAdapt/codex";
 import { codexService } from "@session/services/codexService";
@@ -122,7 +123,7 @@ export async function editLastUserMessage(
       source.threadId,
       text,
       [],
-      crypto.randomUUID(),
+      randomUUID(),
       input,
       config,
     );

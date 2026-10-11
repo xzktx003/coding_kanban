@@ -1,0 +1,221 @@
+.session-mode .codex-native-feedback {
+  --feedback-border: color-mix(in oklab, var(--foreground) 8%, transparent);
+  position: fixed;
+  z-index: 50;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 600px;
+  max-width: 92vw;
+  max-height: 92dvh;
+  overflow: auto;
+  border-radius: 20px;
+  background: color-mix(in oklab, var(--popover) 90%, transparent);
+  color: var(--foreground);
+  outline: none;
+  box-shadow:
+    0 0 0 0.5px var(--feedback-border),
+    0 4px 8px -2px #0000001a;
+  backdrop-filter: blur(24px);
+  font-family: var(--vscode-font-family, system-ui);
+  font-size: 16px;
+  line-height: 24px;
+  border: 0 solid currentColor;
+  -webkit-font-smoothing: antialiased;
+  font-synthesis-weight: none;
+}
+.session-mode .codex-native-feedback form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+  font-size: 14px;
+  line-height: 21px;
+}
+.session-mode .codex-native-feedback .feedback-section:not(:first-child) {
+  padding-top: 12px;
+}
+.session-mode .codex-native-feedback h2 {
+  font-size: 16px;
+  line-height: 28px;
+  font-weight: 600;
+  letter-spacing: normal;
+  margin: 0;
+}
+.session-mode .codex-native-feedback .feedback-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.session-mode .codex-native-feedback [role="radiogroup"] {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.session-mode .codex-native-feedback [role="radio"] {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border: 1px solid var(--feedback-border);
+  border-radius: 9999px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}
+.session-mode .codex-native-feedback [role="radio"][aria-checked="true"] {
+  background: var(--foreground);
+  color: var(--popover);
+}
+.session-mode .codex-native-feedback [role="radio"]:hover {
+  background: color-mix(in oklab, var(--popover) 60%, transparent);
+}
+.session-mode .codex-native-feedback [role="radio"][aria-checked="true"]:hover {
+  background: var(--foreground);
+}
+.session-mode .codex-native-feedback textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--feedback-border);
+  border-radius: 10px;
+  background: transparent;
+  resize: vertical;
+  font: 12px/17.1429px var(--vscode-font-family, system-ui);
+  outline: none;
+}
+.session-mode .codex-native-feedback textarea:focus {
+  border-color: var(--foreground);
+}
+.session-mode .codex-native-feedback textarea::placeholder {
+  color: var(--muted-foreground);
+  opacity: 1;
+}
+.session-mode .codex-native-feedback .feedback-consent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted-foreground);
+}
+.session-mode .codex-native-feedback .feedback-consent button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border: 1px solid color-mix(in oklab, var(--foreground) 12%, transparent);
+  border-radius: 5px;
+  color: var(--foreground);
+  background: transparent;
+}
+.session-mode .codex-native-feedback .feedback-legal {
+  font-size: 12px;
+  line-height: 17.1429px;
+  color: var(--muted-foreground);
+}
+.session-mode .codex-native-feedback .feedback-legal a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.session-mode .codex-native-feedback .feedback-submit {
+  position: relative;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--feedback-border);
+  border-radius: 10px;
+  background: var(--foreground);
+  color: var(--popover);
+  font: 12px/18px var(--vscode-font-family, system-ui);
+  cursor: pointer;
+}
+.session-mode .codex-native-feedback .feedback-submit:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.session-mode .codex-native-feedback .feedback-close {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  border-radius: 4px;
+  color: color-mix(in oklab, var(--foreground) 80%, transparent);
+  background: transparent;
+}
+.session-mode .codex-native-feedback button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.session-mode .codex-native-feedback .feedback-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  line-height: 1;
+  contain: layout paint style;
+  animation: feedback-spin 2s steps(60, end) infinite;
+}
+.session-mode .codex-native-feedback .feedback-submit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+@keyframes feedback-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-mode .codex-native-feedback .feedback-spinner {
+    animation: none;
+  }
+}
+
+.session-mode .codex-native-feedback h2,
+.session-mode .codex-native-feedback label {
+  border-color: currentColor;
+}
+.session-mode .codex-native-feedback .feedback-close {
+  border: 0 solid currentColor;
+  font: 16px/16px var(--vscode-font-family, system-ui);
+}
+.session-mode .codex-native-feedback .feedback-close svg {
+  width: 16px;
+  height: 16px;
+}
+.session-mode .codex-native-feedback .feedback-consent svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.session-mode .codex-native-feedback .feedback-consent button {
+  box-shadow: 0 1px 2px -1px #00000014;
+}
+.session-mode .codex-native-feedback .feedback-legal {
+  border-color: currentColor;
+}
+
+.session-mode
+  .codex-native-feedback
+  .feedback-consent
+  button[data-state="unchecked"] {
+  color: var(--muted-foreground);
+}
+
+/* VSIX radius scale is 1.25 only when the browser supports its corner shape. */
+@supports (corner-shape: superellipse(1.5)) {
+  .session-mode .codex-native-feedback {
+    border-radius: 25px;
+    corner-shape: superellipse(1.5);
+  }
+  .session-mode .codex-native-feedback .feedback-submit {
+    border-radius: 12.5px;
+    corner-shape: superellipse(1.5);
+  }
+}

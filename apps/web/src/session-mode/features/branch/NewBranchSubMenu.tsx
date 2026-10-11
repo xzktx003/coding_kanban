@@ -2,6 +2,7 @@ import { GitBranchPlus, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@session/components/ui/button';
 import {
+  DropdownMenuItem,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
@@ -11,11 +12,17 @@ import { gitCreateBranch } from '@session/services/apiAdapt/git';
 
 interface NewBranchSubMenuProps {
   cwd: string | null;
+  disabled?: boolean;
   onBranchCreated: (name: string) => void;
   onCloseMenu: () => void;
 }
 
-export function NewBranchSubMenu({ cwd, onBranchCreated, onCloseMenu }: NewBranchSubMenuProps) {
+export function NewBranchSubMenu({
+  cwd,
+  disabled = false,
+  onBranchCreated,
+  onCloseMenu,
+}: NewBranchSubMenuProps) {
   const [open, setOpen] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
   const [creating, setCreating] = useState(false);
@@ -27,9 +34,13 @@ export function NewBranchSubMenu({ cwd, onBranchCreated, onCloseMenu }: NewBranc
   };
 
   async function handleCreateBranch() {
-    if (!cwd) return;
+    if (!cwd || disabled) return;
     const name = newBranchName.trim();
     if (!name || creating) return;
+    if (name.endsWith("/")) {
+      setError("分支名不能以“/”结尾。");
+      return;
+    }
     setError(null);
     setCreating(true);
     try {
@@ -45,6 +56,20 @@ export function NewBranchSubMenu({ cwd, onBranchCreated, onCloseMenu }: NewBranc
     }
   }
 
+  if (disabled) {
+    return (
+      <DropdownMenuItem
+        disabled
+        title="提交更改以创建并检出新分支"
+        className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground"
+        onSelect={(event) => event.preventDefault()}
+      >
+        <GitBranchPlus className="h-3 w-3 shrink-0" />
+        <span>创建并检出新分支…</span>
+      </DropdownMenuItem>
+    );
+  }
+
   return (
     <DropdownMenuSub
       open={open}
@@ -53,16 +78,21 @@ export function NewBranchSubMenu({ cwd, onBranchCreated, onCloseMenu }: NewBranc
         if (!nextOpen) resetForm();
       }}
     >
-      <DropdownMenuSubTrigger className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground cursor-pointer">
+      <DropdownMenuSubTrigger
+        disabled={disabled}
+        title={disabled ? "提交更改以创建并检出新分支" : "创建并检出新分支…"}
+        className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground cursor-pointer"
+      >
         <GitBranchPlus className="h-3 w-3 shrink-0" />
-        <span>New branch</span>
+        <span>创建并检出新分支…</span>
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-56 p-2 ml-1">
         {/* biome-ignore lint/a11y/noStaticElementInteractions: not a control — it only stops the row's click from reaching the parent */}
         <div className="flex flex-col gap-1.5" onClick={(e) => e.stopPropagation()}>
           <Input
             autoFocus
-            placeholder="New branch name..."
+            aria-label="分支名称"
+            placeholder="新分支"
             value={newBranchName}
             onChange={(e) => {
               setNewBranchName(e.target.value);
@@ -88,7 +118,7 @@ export function NewBranchSubMenu({ cwd, onBranchCreated, onCloseMenu }: NewBranc
               onClick={handleCreateBranch}
               disabled={!newBranchName.trim() || creating}
             >
-              {creating ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Create'}
+              {creating ? <Loader2 className="h-3 w-3 animate-spin" /> : "创建并检出"}
             </Button>
             <Button
               size="sm"
@@ -96,7 +126,7 @@ export function NewBranchSubMenu({ cwd, onBranchCreated, onCloseMenu }: NewBranc
               className="h-6 text-xs"
               onClick={() => setOpen(false)}
             >
-              Cancel
+              关闭
             </Button>
           </div>
         </div>

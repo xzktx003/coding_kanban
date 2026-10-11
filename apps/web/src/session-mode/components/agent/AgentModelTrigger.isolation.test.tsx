@@ -71,19 +71,17 @@ it("shows one dismissible per-thread switch notice without sending a message or 
   const { rerender } = render(<ModelChangeNotice threadId="a" />);
   expect(screen.queryByRole("status")).toBeNull();
   act(() => result.current.setModel("gpt-6-luna"));
-  expect(screen.getByRole("status").textContent).toContain(
-    "gpt-6-astra → gpt-6-luna",
-  );
-  expect(screen.getByRole("status").textContent).toContain("下次发送生效");
+  expect(screen.getByRole("status").textContent).toContain("gpt-6-astra");
+  expect(screen.getByRole("status").textContent).toContain("gpt-6-luna");
+  expect(screen.getByRole("status").textContent).toContain("在对话中途更改模型会降低性能");
   rerender(<ModelChangeNotice threadId="b" />);
   expect(screen.queryByRole("status")).toBeNull();
   rerender(<ModelChangeNotice threadId="a" />);
-  fireEvent.click(screen.getByRole("button", { name: "收起模型切换提示" }));
+  fireEvent.click(screen.getByRole("button", { name: "关闭模型升级横幅" }));
   expect(screen.queryByRole("status")).toBeNull();
   act(() => result.current.setModel("gpt-6-sol"));
-  expect(screen.getByRole("status").textContent).toContain(
-    "gpt-6-luna → gpt-6-sol",
-  );
+  expect(screen.getByRole("status").textContent).toContain("gpt-6-luna");
+  expect(screen.getByRole("status").textContent).toContain("gpt-6-sol");
   act(() =>
     hydrateThreadModel(
       "a",
@@ -92,6 +90,6 @@ it("shows one dismissible per-thread switch notice without sending a message or 
     ),
   );
   expect(screen.getByRole("status").textContent).toContain(
-    "后续发送使用当前模型",
+    "在对话中途更改模型会降低性能",
   );
 });

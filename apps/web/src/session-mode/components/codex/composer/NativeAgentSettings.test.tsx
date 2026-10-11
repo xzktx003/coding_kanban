@@ -1,22 +1,13 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { it, expect } from "vitest";
 import { NativeAgentSettings } from "./NativeAgentSettings";
-const choose = vi.hoisted(() => vi.fn());
-vi.mock("@session/services/builtinInputNavigation", () => ({
-  selectBuiltinInputTarget: choose,
-}));
-vi.mock("@session/components/agent/AgentModelPanel", () => ({
-  AgentModelPanel: ({ trigger }: { trigger: React.ReactNode }) => trigger,
-}));
-it("keeps a direct Agent switch visible while advanced provider configuration stays separate", () => {
+
+it("keeps Codex model settings without a Claude switch in the composer", () => {
   render(
     <NativeAgentSettings>
-      <p>高级提供商配置</p>
+      <p>提供商模型列表</p>
     </NativeAgentSettings>,
   );
-  fireEvent.click(screen.getByRole("button", { name: "切换到 Claude Code" }));
-  expect(choose).toHaveBeenCalledWith("cc");
-  expect(
-    screen.getByRole("button", { name: "当前 Agent：Codex" }),
-  ).toBeDefined();
+  expect(screen.queryByRole("button", { name: "切换到 Claude Code" })).toBeNull();
+  expect(screen.getByText("提供商模型列表")).toBeDefined();
 });

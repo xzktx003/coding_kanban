@@ -8,7 +8,7 @@ for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     const f = await setup(page, false);
     try {
-      f.fixture.threads[0].turns = [{ id: "table-turn", status: "completed", items: [{ type: "agentMessage", id: "table-message", text, phase: "final" }] }] as never;
+      f.fixture.threads[0].turns = [{ id: "table-turn", status: "completed", items: [{ type: "agentMessage", id: "table-message", text, phase: "final_answer" }] }] as never;
       await page.reload({ waitUntil: "domcontentloaded" });
       const table = page.locator(".codex-assistant table").first();
       await expect(table).toBeVisible();

@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import { useEffect, useState, type RefObject } from "react";
 import { Quote, MessageSquarePlus } from "lucide-react";
 import { toast } from "sonner";
@@ -40,7 +41,7 @@ export function MessageReferenceActions({
     return () => document.removeEventListener("selectionchange", update);
   }, [contentRef]);
   const reference = (): ComposerContext => ({
-    id: crypto.randomUUID(),
+    id: randomUUID(),
     kind: "quote",
     name: selection ? "引用的选区" : "引用的回答",
     text: selection || text,

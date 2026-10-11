@@ -12,7 +12,7 @@ import {
   PlusIcon,
   Target,
 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ScreenshotPopover } from "@session/components/codex/composer/ScreenshotPopover";
 import { useCodexStore } from "@session/components/codex/stores";
@@ -34,6 +34,7 @@ import {
   mentionsWithIcon,
   useMentionItems,
 } from "./mentions";
+import { RecordSkillDialog } from "./RecordSkillDialog";
 
 interface SelectFilesMenuItemProps {
   onFilesSelected?: (paths: string[]) => void;
@@ -76,7 +77,7 @@ export function SelectFilesMenuItem({
       onClick={handleSelectFiles}
     >
       <File className="w-4 h-4" />
-      <span>选择文件</span>
+      <span>文件和文件夹</span>
     </Button>
   );
 }
@@ -164,6 +165,7 @@ export function ComposerMenu({
     useGoalDraft(owner);
   const { t } = useTranslation("composer");
   const [openState, setOpenState] = useState(false);
+  const [recordOpen, setRecordOpen] = useState(false);
   const { items } = useMentionItems();
   const mentionItems = mentionsWithIcon(items);
 
@@ -192,17 +194,27 @@ export function ComposerMenu({
       console.error("Failed to select image:", error);
     }
   };
+  useEffect(() => {
+    const openPhotos = () => {
+      void handleSelectImage();
+    };
+    window.addEventListener("session-add-photos", openPhotos);
+    return () => window.removeEventListener("session-add-photos", openPhotos);
+  });
 
   return (
     <Popover open={openState} onOpenChange={setOpenState}>
-      <ComposerTooltip label="添加附件与上下文">
+      <ComposerTooltip
+        label="添加文件等内容"
+        shortcut="@"
+        popupOpen={openState}
+      >
         <PopoverTrigger asChild>
           <Button
             type="button"
             variant="ghost"
             size="icon"
             aria-label="添加附件与上下文"
-            title="添加附件与上下文"
           >
             <NativeComposerIcon name="plus" />
           </Button>
@@ -246,6 +258,18 @@ export function ComposerMenu({
             onFilesSelected={onFilesSelected}
             onAfterSelect={() => setOpenState(false)}
           />
+          <Button
+            type="button"
+            variant="ghost"
+            className="justify-start gap-2 px-2 hover:bg-accent hover:text-accent-foreground transition-colors"
+            onClick={() => {
+              setOpenState(false);
+              setRecordOpen(true);
+            }}
+          >
+            <PlusIcon className="w-4 h-4" />
+            <span>录制技能</span>
+          </Button>
           {/* Screenshot button */}
           <ScreenshotPopover
             onScreenshotTaken={(path) => {
@@ -287,6 +311,7 @@ export function ComposerMenu({
           )}
         </div>
       </PopoverContent>
+      {recordOpen && <RecordSkillDialog onClose={() => setRecordOpen(false)} />}
     </Popover>
   );
 }

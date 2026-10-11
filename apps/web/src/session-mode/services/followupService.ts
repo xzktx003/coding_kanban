@@ -1,3 +1,5 @@
+import { v4 as randomUUID } from "uuid";
+import { hash as sha256 } from "fast-sha256";
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { enqueueSessionRead, readWithDeadline } from "./sessionReadQueue";
 import { create } from "zustand";
@@ -97,6 +99,7 @@ export function followupParameters(threadId: string): Record<string, unknown> {
     model: model || null,
     effort: reasoningEffort ?? null,
     serviceTier: serviceTier ?? null,
+    ...(c.personality ? { personality: c.personality } : {}),
     approvalPolicy: structuredClone(c.approvalPolicy),
     approvalsReviewer: c.approvalsReviewer,
     sandboxPolicy: c.sandboxPolicy
@@ -132,10 +135,14 @@ export async function submissionId(
   revision: number,
   data: Omit<FollowupSubmit, "id">,
 ) {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(JSON.stringify({ owner, revision, data })),
+  const bytes = new TextEncoder().encode(
+    JSON.stringify({ owner, revision, data }),
   );
+  // Web Crypto digest is restricted to secure contexts. Keep the identical key
+  // on LAN HTTP so retries and protocol changes cannot create another submission.
+  const digest = globalThis.crypto?.subtle
+    ? await globalThis.crypto.subtle.digest("SHA-256", bytes)
+    : sha256(bytes);
   const key = Array.from(new Uint8Array(digest), (b) =>
     b.toString(16).padStart(2, "0"),
   ).join("");
@@ -148,7 +155,7 @@ export async function submissionId(
     throw new Error("无法读取消息提交记录，请保留草稿并检查浏览器存储");
   }
   if (saved[key]) return saved[key];
-  const id = crypto.randomUUID();
+  const id = randomUUID();
   saved[key] = id;
   const keys = Object.keys(saved);
   for (const old of keys.slice(0, Math.max(0, keys.length - 1000)))

@@ -105,6 +105,7 @@ export async function openThreadLink(
     );
     // Cache under the actual identity without activating input, adding interest, or replacing live events.
     const historical = convertThreadHistoryToEvents(response.thread);
+    const cachedTurns = response.thread.turns;
     useCodexStore.setState((state) => ({
       threads: state.threads.some((thread) => thread.id === source.threadId)
         ? state.threads.map((thread) =>
@@ -112,13 +113,14 @@ export async function openThreadLink(
               ? {
                   ...thread,
                   ...response.thread,
+                  turns: cachedTurns,
                   ...(state.threadStatusMap[source.threadId]
                     ? { status: state.threadStatusMap[source.threadId] }
                     : {}),
                 }
               : thread,
           )
-        : [response.thread, ...state.threads],
+        : [{ ...response.thread, turns: cachedTurns }, ...state.threads],
       events: {
         ...state.events,
         [source.threadId]: mergeThreadHistory(
@@ -140,6 +142,7 @@ export async function openThreadLink(
     if (selection() !== intent) {
       useThreadLinkStore.setState({
         loading: false,
+        retainedThreadId: source.threadId,
         error:
           "输入目标在读取链接期间已改变；历史已缓存，未自动加入关注或切换会话。",
       });

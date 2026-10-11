@@ -7,6 +7,7 @@ export const createThreadsSlice: StateCreator<CodexStore, [], [], ThreadsSlice> 
   currentTurnId: null,
   hasAccount: null,
   account: null,
+  accountNamespace: null,
   activeThreadIds: [],
   inputFocusTrigger: 0,
   threadListNextCursor: null,
@@ -40,8 +41,8 @@ export const createThreadsSlice: StateCreator<CodexStore, [], [], ThreadsSlice> 
     set({ threadListNextCursor: cursor });
   },
 
-  setAccount: (account) => {
-    set({ account, hasAccount: Boolean(account) });
+  setAccount: (account, namespace = null) => {
+    set({ account, hasAccount: Boolean(account), accountNamespace: account ? namespace : null });
   },
 
   triggerInputFocus: () => {

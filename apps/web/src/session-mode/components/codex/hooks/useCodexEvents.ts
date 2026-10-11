@@ -60,7 +60,10 @@ export function useCodexEvents(enabled = true) {
         source !== buildUrl("/health")
       )
         return;
-      useCodexStore.getState().setAccount(response.account);
+      const namespace = response.workspaceRouting?.chatgptAccountId;
+      useCodexStore.getState().setAccount(response.account,
+        account?.type === "chatgpt" && typeof namespace === "string" && namespace.length > 0 && namespace.length <= 512
+          ? namespace : null);
     } catch (error) {
       // A failed observation says nothing about authentication. Keep initial
       // unknown or the last authoritative account instead of inventing logout.

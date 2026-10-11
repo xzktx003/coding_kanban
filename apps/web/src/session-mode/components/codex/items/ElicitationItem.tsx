@@ -10,6 +10,7 @@ import "./request-native.css";
 import { useTranslation } from "react-i18next";
 import {
   elicitationChoices,
+  mcpToolApprovalTitle,
   isApprovalElicitation,
   useElicitationStore,
 } from "../stores/useElicitationStore";
@@ -124,6 +125,7 @@ export function ElicitationItem({
   const errors = draft?.errors ?? {};
   const customDrafts = draft?.customDrafts ?? {};
   const approval = isApprovalElicitation(request);
+  const toolApproval = approval ? mcpToolApprovalTitle(request) : null;
   const unsupported = unsupportedElicitationField(request);
   const activeField = fields[fieldIndex];
   const uploadFile = async (field: ElicitationField) => {
@@ -361,15 +363,28 @@ export function ElicitationItem({
       <header className="codex-elicitation__header">
         {(approval || request.mode === "url") && (
           <span className="codex-elicitation__server">
-            {request.serverName}
+            {toolApproval?.elevated && (
+              <span className="codex-elicitation__risk">较高风险</span>
+            )}
+            {toolApproval?.connectorName ?? request.serverName}
           </span>
         )}
         <span className="codex-elicitation__title">
-          {request.mode === "url"
-            ? t("elicitation.authorizationRequired")
-            : approval
-              ? t("elicitation.approvalRequired")
-              : request.message}
+          {request.mode === "url" ? (
+            t("elicitation.authorizationRequired")
+          ) : toolApproval ? (
+            <>
+              是否允许 {toolApproval.connectorName} 运行{" "}
+              <span className="codex-elicitation__tool">
+                {toolApproval.toolName}
+              </span>{" "}
+              工具？
+            </>
+          ) : approval ? (
+            t("elicitation.approvalRequired")
+          ) : (
+            request.message
+          )}
         </span>
         {!collapsed && fields.length > 1 && (
           <div className="codex-elicitation__navigation">
@@ -977,8 +992,8 @@ export function ElicitationItem({
             >
               {t(
                 fieldIndex < fields.length - 1
-                  ? "elicitation.skipChoice"
-                  : "common.decline",
+                  ? "elicitation.skipQuestion"
+                  : "elicitation.skipChoice",
               )}
             </button>
             <button

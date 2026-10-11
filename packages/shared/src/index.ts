@@ -639,3 +639,12 @@ export * from "./session-codex-host.js";
 export * from "./session-codex-cloud.js";
 export * from "./session-codex-guardian.js";
 export * from "./codex-chat-projection.js";
+export * from "./codex-slack-preview.js";
+
+export * from "./codex-github-preview.js";
+
+export * from "./codex-website-preview.js";
+
+export { mcpAuthChallenge, type NativeMcpAuthChallenge } from "./codex-mcp-auth.js";
+
+export { mcpOAuthThreadIdSupported } from "./codex-mcp-version.js";

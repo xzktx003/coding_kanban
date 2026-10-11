@@ -15,7 +15,7 @@
 | 边界 | 必须保持 | 会重新引入问题的做法 |
 | --- | --- | --- |
 | 浏览器接收数据之前 | 浏览器 SSE 与 Codex 只读历史使用 `view=chat`；Node 网关在发送前裁剪隐藏工具正文，且不把该参数传给运行层 | 只在 React、store 或 `JSON.parse` 之后过滤；以“界面没有显示”为理由恢复原始大包 |
-| 工具及内嵌数据 | 同时覆盖输出 delta、最终工具项、turn/thread 内嵌 items、raw response、hook、diff、自动审批复核等；子 Agent 的 prompt/message 仅保留有界预览，当前为 1024 字符；原生工具卡片仅保留共享投影的有界身份、状态、短描述和安全数组，缺正文标记为未加载详情 | 仅裁剪 command 输出；通过工具参数、`agentsStates.message`、元数据或旧缓存重新持有原始正文 |
+| 工具及内嵌数据 | 同时覆盖输出 delta、最终工具项、turn/thread 内嵌 items、raw response、hook、diff、自动审批复核等；子 Agent 的 prompt/message 仅保留有界预览，当前为 1024 字符；原生 `unified_diff` / `content` 先映射成 `diff`，单个文件 diff 最多保留 24,000 字符供聊天计数和悬停预览，超出仍标记未加载；命令输出、MCP 结果和原始响应不进入聊天 | 把完整工具正文、超大 diff 或命令输出放回聊天投影；通过工具参数、`agentsStates.message`、元数据或旧缓存重新持有原始正文 |
 | 协议与任务状态 | 保留原事件序号、轮次生命周期、真正的审批/提问及子 Agent 身份/状态；后台内部消费者继续使用原协议 | 直接丢掉序号造成缺口与重读风暴；混淆“自动审批复核提示”和“需要用户处理的审批请求” |
 | 过大 SSE 帧 | 当前单帧上限 16 MiB；网关发出命名事件 `session-projection-error` 后释放上游，浏览器暂停接收并显示原因；显式重试恢复连接与只读历史 | 静默丢弃审批；伪造 `seq: 0`；自动无限重连并回放同一巨帧；为恢复页面而停止 Agent |
 | 后台历史读取 | 首次加载、连接缺口、缺失回执、完成边界、手动/页面恢复触发补读；外部空闲会话由轻量状态列表的 `updatedAt` 变化触发 | 恢复“活动静默 5 秒 / 空闲 30 秒”完整历史轮询；把工具执行安静当作消息丢失；活动时间戳每次变化都重读正文 |
@@ -103,3 +103,21 @@ SESSION_MEMORY_SOAK_MINUTES=30 PLAYWRIGHT_SKIP_WEBSERVER=1 pnpm exec playwright 
 文件传输／展开／草稿、不可见正文 60 秒自动回收和真实 SSE 恢复：12 项通过；传输、流式正文及物理留存回归：11 项通过。原生 HTTP → 网关 → EventSource 压力用例保留上游大于 96 MiB、浏览器正文小于 128 KiB、最大事件小于 16 KiB、回收后 heap 增量小于 8 MiB 的原断言，序号、审批和最终答复同时通过。可见历史 5 次强制 GC 样本为 41.28／40.51／40.74／40.79／40.36 MiB，自动恢复 24 次自然 GC 样本约 46.95–84.07 MiB；无关正文突发回收后 heap 增量为 -96,836 bytes。此轮没有重跑 30 分钟 renderer RSS 长测，之前的长期增长失败记录和严格滚动问题仍保留，不能把这些短时测试解释为长期 RSS 已彻底解决。
 
 隔离工作区的 Node 类型解析复用已经安装的 `@types/node` 包（仅 node_modules 链接，不新增依赖）；其余依赖按远程 lockfile 冻结安装。浏览器初次在冲突清除期间遇到 HMR 加载失败，固定合并内容后新鲜浏览器复验通过，没有因此修改或放宽产品断言。
+
+2026-10-11 回归追加：移除“短命令输出 <=80 字可进入聊天”的分支，输出正文一律为 null，明细继续显式只读恢复。MCP 公开参数与 OAuth scope 是有界元数据，result/credential 不进入聊天；调用方更小的 toolTextLimit 同样作用于保留的参数摘要，安全 cursor 不重新读取已删除的 delta/diff 正文。相关单测与 9 项正文/缓存浏览器通过；30 分钟 renderer RSS 本轮先失败（低点增长 156.79MiB >128MiB），最新 MCP 身份/重连版本随后一次通过，保留两次记录，不把后者解释为长期增长根治。真实 HTTP/EventSource、恢复与审批整组结论随最终验收追加。
+
+同日游标恢复修复：低序号快照的立即重连计入已有物理重连节流。250ms 修复通知仍执行，避免立即关闭刚建立的新流丢失新回复。保留序号、只读恢复、审批快照与原 2500ms 回复可见断言；8 项流单测和 3 次真实 HTTP/EventSource 通过，全组及最新长测以独立批次为准。
+
+2026-10-11 最新严格长测仍为红灯：`/tmp/codex-noncloud-final-memory-soak.log` 30.2 分钟、861 次自然采样，JS 堆低点从 54.3685 到 59.3707 MiB（增长 5.0031 MiB），renderer RSS 低点从 329.0625 到 499.7070 MiB（增长 170.6445 MiB，超过原 128 MiB 门槛）；RSS 峰值 659.9531 MiB，堆峰值 233.6865 MiB，页面错误为零。DOM／监听器的低点仅增加 7／9，不据此排除原生分配或证明无泄漏。实际 JSON 保存在被忽略的 `.dev-runtime/codex-noncloud-final-memory-soak/session-idle-memory-long-r-12e42--natural-garbage-collection/natural-gc-soak.json`。本轮冻结加载源含重复重连修复，随后新增的公共配置投影与批量停止规则未载入该页；不能冒充所有最终源码的同批长测。失败发生在最后的音频空闲断言之前，连续任务仅一个活跃上下文已检查，最终空闲归零不得计作本次通过。之前一次绿色长测不能覆盖此红灯，不放宽门槛、不强制 GC／刷新／停止 Agent。
+
+2026-10-11 独立观测对照（不替代标准长测）：raw-CDP 桌面 1280×720、30 分钟、882 轮相同原生事件负载，传输 178,901,074 bytes，不启用 Network 域；堆低点增长 4.0828 MiB、renderer RSS 低点增长 108.5117 MiB，峰值约 233.238／620.168 MiB，页面错误为零，最后音频空闲归零通过。原门槛保持，无强制 GC／刷新；JSON 为 `.dev-runtime/codex-memory-raw-cdp-desktop.json`。窄屏 700×900 的 Network 域对照同为 882 轮／相同传输量，RSS 增长 135.46875 MiB，仍超原 128 MiB 门槛（`.dev-runtime/codex-memory-raw-cdp-network.json`）；窄屏无 Network 对照增长 111.1377 MiB。不同视口／观察方式／加载源码边界不能混作因果证明；标准 Playwright 的 170.6445 MiB 红灯仍保留。桌面对照额外只读检查仅见两条 WebSocket 日志，未支持持续 HMR 日志积累的猜测。忽略目录内的替代提示音五分钟实验仅验证实验可运行，没有长期收益证据，未写入产品。
+
+2026-10-11 标准当前源码复验仍失败：30.1分钟／859样本，堆低点增长6.7994MiB、renderer RSS低点从311.2930到489.0430MiB（增长177.7500MiB＞128MiB），峰值235.6489／650.6172MiB，错误数组空；失败在最终音频空闲检查之前，不计该检查通过。原门槛／自然GC／连续事件场景保留。日志 `/tmp/codex-noncloud-current-source-soak.log`，完整JSON `.dev-runtime/codex-noncloud-current-source-soak/session-idle-memory-long-r-12e42--natural-garbage-collection/natural-gc-soak.json`。冻结页面早于新增用户图片链接／确认ABA保护；事件／历史／内存源码本轮未改。之前raw-CDP绿色与标准红灯并列保留。
+
+Inspector存档因果诊断（未改产品／安装目录）：仅在独立测试Node进程覆盖Network.enable为总4MiB／单资源1MiB，Network保持开启，其余标准场景／门槛不变。30.1分钟仍失败，RSS低点增长139.6602MiB＞128MiB；堆增长1.6782MiB，页面错误为零。日志 `/tmp/codex-memory-inspector-archive-diagnostic.log`，JSON位于 `.dev-runtime/codex-memory-inspector-archive-diagnostic/`。不能把约38MiB的条件差异解释为完整根因或用此结果覆盖标准177.75MiB失败；更不能直接改门禁的观察方式挑绿。
+
+提示音原生分配诊断未支持更换产品实现：三组独立1280×720 raw-CDP／无Network域15分钟（各440轮／89,236,954bytes），原每声新振荡器RSS增长57.3320MiB，复用PCM的BufferSource方案103.2852MiB，复用振荡器＋Gain并每声断开的方案109.5000MiB。草稿／审批、60秒正文释放、React measure、单上下文及最后自然空闲归零均通过；但15分钟不替代标准30分钟，波形相位／启动测量助手的差异与GC时序不能被忽略。三组均在忽略目录／独立Vite，不修改产品beep.ts，也未修改安装包。两种替代方案未显示收益，未合入。日志为 `/tmp/codex-memory-default-tone-15min.log`、`/tmp/codex-memory-buffer-tone-15min-v2.log`、`/tmp/codex-memory-reusable-tone-15min.log`。
+
+2026-10-11 原生分配归因诊断：独立 raw-CDP 桌面 1280×720／无 Network 域，20 分钟 586 轮、118,854,514 bytes；堆低点增长4.6074MiB、renderer RSS低点增长115.0508MiB，草稿／审批／正文释放及自然音频空闲归零通过。两份 memory-infra 快照使用 deterministic:false，没有触发强制 GC，且记录同一自有 renderer PID186445；不是标准 Playwright 30分钟验收。开始／结束时 Blink 活对象7.6157→8.8730MiB，已提交堆54.8702→58.9952MiB，V8堆容量129.0312→139.0586MiB，buffer分区活对象55.6361→55.8761MiB；这些时点差异无法解释全部RSS低点增长，不能据此宣布根因、将父子allocator节点重复求和或把虚拟地址空间当作物理占用。日志 `/tmp/codex-memory-native-allocations.log`，完整样本与快照 `.dev-runtime/codex-memory-native-allocations.json`。2分钟启动验证只证明采集可用，不当成稳定性证据；标准177.75MiB及Inspector存档139.6602MiB失败仍保留。
+
+React原生时间戳因果诊断没有闭合标准RSS红灯：在独立Node进程对自有页面初始化脚本仅过滤console.timeStamp的Components⚛／Scheduler⚛字段，普通时间戳转发原实现、Performance.measure现有释放保留、Network及所有原工作负载／门槛保留；不修改产品或安装包。30.1分钟／860样本仍失败，RSS低点322.0391→483.9883MiB（增长161.9492MiB＞128MiB），堆低点增长5.8805MiB，峰值246.8119／654.9570MiB，errors[]；音频最终空闲检查因RSS先失败未执行。日志 `/tmp/codex-memory-react-stamp-diagnostic.log`，JSON `.dev-runtime/codex-memory-react-stamp-diagnostic/session-idle-memory-long-r-12e42--natural-garbage-collection/natural-gc-soak.json`。相对原177.75MiB的条件差异不足以证明收益／根因，未合入时间戳过滤，也没有移除普通API或更新原标准门槛。

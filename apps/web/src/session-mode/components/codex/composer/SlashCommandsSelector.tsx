@@ -1,19 +1,22 @@
 import { useShallow } from "zustand/react/shallow";
 import {
+  Activity,
   Brain,
   Download,
   FilePlus2,
+  Gauge,
   MessageSquarePlus,
   Minimize2,
   ScanSearch,
+  Split,
   Workflow,
 } from "lucide-react";
-import { useTranslation } from "react-i18next";
 import { ComposerSuggestionPopover } from "./ComposerSuggestionPanel";
 import { useCallback, useState } from "react";
 import { ConfirmDialog } from "@session/components/ui/ConfirmDialog";
 import { toast } from "sonner";
 import { useCodexStore } from "@session/components/codex/stores";
+import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
 import type { ComposerEditorRef } from "@session/components/common/useComposerPopover";
 import {
   applyEditorReplacement,
@@ -22,13 +25,20 @@ import {
   useComposerPopover,
 } from "@session/components/common/useComposerPopover";
 import { codexService } from "@session/services/codexService";
+import { useMentionItems, type MentionItem } from "./mentions";
 import {
   SLASH_COMMANDS,
+  slashCommandDescription,
   type SlashCommand,
   type SlashDialog,
 } from "./slashCommands";
 
 const commandIcons = {
+  model: Gauge,
+  effort: Gauge,
+  plan: Workflow,
+  status: Activity,
+  side: Split,
   review: ScanSearch,
   compact: Minimize2,
   init: FilePlus2,
@@ -57,9 +67,24 @@ export function SlashCommandPopover({
   onOpenDialog,
 }: SlashCommandPopoverProps) {
   const [pending, setPending] = useState<SlashCommand | null>(null);
-  const { t } = useTranslation("thread");
   const { currentThreadId } = useCodexStore(
     useShallow((s) => ({ currentThreadId: s.currentThreadId })),
+  );
+  const { collaborationMode } = useThreadModelSettings(currentThreadId);
+  const { items: mentions } = useMentionItems();
+  const { open, query, filteredItems, selectedIndex, setSelectedIndex, itemRefs } =
+    useComposerPopover({
+      input,
+      items: SLASH_COMMANDS,
+      filter: filterCmd,
+      detect: detectSlash,
+      onKeySelect: (cmd) => void handleSelect(cmd),
+    });
+  const needle = query.toLowerCase();
+  const skills = mentions.filter(
+    (item) =>
+      item.kind === "skill" &&
+      (!needle || item.searchTerms.some((term) => term.includes(needle))),
   );
 
   const handleSelect = useCallback(
@@ -93,14 +118,10 @@ export function SlashCommandPopover({
     [input, setInputValue, editorRef, currentThreadId, onOpenDialog],
   );
 
-  const { open, filteredItems, selectedIndex, setSelectedIndex, itemRefs } =
-    useComposerPopover({
-      input,
-      items: SLASH_COMMANDS,
-      filter: filterCmd,
-      detect: detectSlash,
-      onKeySelect: handleSelect,
-    });
+  const insertSkill = (skill: MentionItem) => {
+    const cleaned = replaceAtTrigger(input, "/", skill.insertText) ?? input;
+    applyEditorReplacement(cleaned, setInputValue, editorRef);
+  };
 
   if (pending)
     return (
@@ -119,8 +140,11 @@ export function SlashCommandPopover({
     <ComposerSuggestionPopover
       anchor={triggerElement}
       kind="commands"
-      count={filteredItems.length}
+      count={filteredItems.length + skills.length}
     >
+      {filteredItems.length > 0 && (
+        <p className="composer-suggestion-group">斜杠命令</p>
+      )}
       {filteredItems.map((cmd, index) => {
         const Icon =
           commandIcons[cmd.id as keyof typeof commandIcons] ?? Workflow;
@@ -145,16 +169,44 @@ export function SlashCommandPopover({
             <span className="composer-suggestion-text">
               <span className="composer-suggestion-name composer-suggestion-command">
                 /{cmd.id}
+                <span className="composer-suggestion-title">{cmd.title}</span>
               </span>
               <span className="composer-suggestion-description">
-                {t(`suggestions.descriptions.${cmd.id}`, {
-                  defaultValue: cmd.description,
-                })}
+                {slashCommandDescription(cmd, collaborationMode)}
               </span>
             </span>
           </button>
         );
       })}
+      {skills.length > 0 && <p className="composer-suggestion-group">技能</p>}
+      {skills.map((skill) => (
+        <button
+          key={skill.key}
+          type="button"
+          role="option"
+          className="composer-suggestion-option"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => insertSkill(skill)}
+        >
+          <span className="composer-suggestion-icon" aria-hidden="true">
+            <Workflow />
+          </span>
+          <span className="composer-suggestion-text">
+            <span className="composer-suggestion-name">
+              {skill.insertText}
+              <span className="composer-suggestion-title">
+                {skill.displayName}
+              </span>
+            </span>
+            {skill.description && (
+              <span className="composer-suggestion-description">
+                {skill.description}
+              </span>
+            )}
+          </span>
+          <span className="composer-suggestion-tag">技能</span>
+        </button>
+      ))}
     </ComposerSuggestionPopover>
   );
 }

@@ -1588,6 +1588,33 @@
   color: var(--muted-foreground);
   padding: 0 0.5rem;
 }
+.session-mode .session-side-chat-confirm {
+  position: absolute;
+  z-index: 5;
+  left: 16px;
+  top: 56px;
+  width: min(320px, calc(100% - 32px));
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--popover, var(--background));
+  box-shadow: 0 12px 32px #0006;
+}
+.session-mode .session-side-chat-confirm h2,
+.session-mode .session-side-chat-confirm p {
+  margin: 0 0 8px;
+}
+.session-mode .session-side-chat-confirm label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.session-mode .session-side-chat-confirm > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
 .session-mode .session-side-chat {
   position: fixed;
   right: 12px;

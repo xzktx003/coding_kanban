@@ -1,7 +1,10 @@
+import { mcpAuthChallenge } from "./codex-mcp-auth.js";
 /** The browser chat view carries tool metadata, never the tool transcript. */
 export const CODEX_CHAT_METADATA_TEXT_LIMIT = 1024;
 export const CODEX_CHAT_METADATA_TOTAL_TEXT_LIMIT = 4096;
 export const CODEX_CHAT_METADATA_ARRAY_LIMIT = 16;
+/** Bounded unified diff kept so the chat can show line counts and a hover preview. */
+export const CODEX_CHAT_FILE_DIFF_LIMIT = 24_000;
 const cache = new WeakMap<object, unknown>();
 type RecordValue = Record<string, unknown>;
 type TextBudget = { remaining: number };
@@ -23,9 +26,9 @@ const cursorFields = [
 const isRecord = (value: unknown): value is RecordValue =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 const copy = (value: string) => value.split("").join("");
-function short(value: unknown, budget: TextBudget): string | null {
+function short(value: unknown, budget: TextBudget, floor = 0): string | null {
   if (typeof value !== "string") return null;
-  const limit = Math.min(CODEX_CHAT_METADATA_TEXT_LIMIT, budget.remaining);
+  const limit = Math.min(CODEX_CHAT_METADATA_TEXT_LIMIT, Math.max(budget.remaining, floor));
   if (limit <= 0) return "";
   const text = value.length > limit
     ? copy(value.slice(0, Math.max(0, limit - 1))) + "…"
@@ -74,11 +77,40 @@ function action(value: unknown, budget: TextBudget): unknown {
   if ("queries" in value) next.queries = value.queries === null ? null : strings(value.queries, budget);
   return reuse(value, next);
 }
+function fileDiff(value: unknown): { diff: string; transcriptMetadataOnly?: true } {
+  if (typeof value !== "string" || value.length > CODEX_CHAT_FILE_DIFF_LIMIT) return { diff: "", transcriptMetadataOnly: true };
+  return { diff: copy(value) };
+}
+/** Native FileChange stores the patch on `unified_diff` / `content`, not `diff`. */
+function nativeChangeBody(value: RecordValue): unknown {
+  if (typeof value.diff === "string" && value.diff.length > 0) return value.diff;
+  if (typeof value.unified_diff === "string") return value.unified_diff;
+  if (typeof value.content === "string") return value.content;
+  return value.diff;
+}
+function nativeChangeKind(value: RecordValue): unknown {
+  if (typeof value.kind === "string" || isRecord(value.kind)) return value.kind;
+  if (value.type === "update") return { type: "update", move_path: value.move_path ?? null };
+  if (value.type === "add" || value.type === "delete") return { type: value.type };
+  return undefined;
+}
 function change(value: unknown): unknown {
   if (!isRecord(value)) return undefined;
-  if (!identity(value.path, 1024) || !(typeof value.kind === "string" || isRecord(value.kind))) return undefined;
-  const kind = isRecord(value.kind) ? reuse(value.kind, fields(value.kind, ["type", "move_path"])) : scalar(value.kind);
-  return reuse(value, { path: identity(value.path, 1024), kind, diff: "", transcriptMetadataOnly: true });
+  const path = identity(value.path, 1024);
+  const kindSource = nativeChangeKind(value);
+  if (!path || !(typeof kindSource === "string" || isRecord(kindSource))) return undefined;
+  const kind = isRecord(kindSource) ? reuse(kindSource, fields(kindSource, ["type", "move_path"])) : scalar(kindSource);
+  return reuse(value, { path, kind, ...fileDiff(nativeChangeBody(value)) });
+}
+function changes(value: unknown): unknown[] {
+  if (Array.isArray(value)) return list(value, change);
+  if (!isRecord(value)) return [];
+  const projected = Object.entries(value).slice(0, CODEX_CHAT_METADATA_ARRAY_LIMIT).flatMap(([path, entry]) => {
+    if (!isRecord(entry) || ["__proto__", "constructor", "prototype"].includes(path)) return [];
+    const projectedChange = change({ ...entry, path });
+    return projectedChange === undefined ? [] : [projectedChange];
+  });
+  return reuse(value, projected);
 }
 function states(value: unknown, budget: TextBudget): unknown {
   if (!isRecord(value)) return {};
@@ -93,6 +125,20 @@ function states(value: unknown, budget: TextBudget): unknown {
     });
   }
   return reuse(value, next);
+}
+/** Public MCP argument labels only. Nested objects and result bodies stay out. */
+function publicArguments(value: unknown, budget: TextBudget): RecordValue | null {
+  if (!isRecord(value)) return null;
+  const next: RecordValue = {};
+  for (const key of Object.keys(value).slice(0, CODEX_CHAT_METADATA_ARRAY_LIMIT)) {
+    if (!identity(key) || ["__proto__", "constructor", "prototype"].includes(key)) continue;
+    if (/^(?:secret|token|accessToken|refreshToken|password|authorization|apiKey|credentials|clientSecret|bearerToken)$/i.test(key.replace(/[-_]/g, ""))) continue;
+    const entry = value[key];
+    if (typeof entry === "boolean" || (typeof entry === "number" && Number.isFinite(entry)))
+      next[key] = entry;
+    else if (typeof entry === "string") next[key] = short(entry, budget, 240);
+  }
+  return Object.keys(next).length ? next : null;
 }
 function nativeArguments(value: RecordValue): unknown {
   if ((value.namespace !== "codex_app" && value.namespace != null) || !isRecord(value.arguments)) return null;
@@ -147,17 +193,24 @@ function tool(value: RecordValue): RecordValue {
     if (name in value) next[name] = identity(value[name], 1024);
   switch (value.type) {
     case "commandExecution":
-      next.command = short(value.command, budget) ?? "";
+      next.command = short(value.command, budget, 240) ?? "";
       next.commandActions = list(value.commandActions, (entry) => action(entry, budget));
       next.aggregatedOutput = null;
       break;
     case "fileChange":
-      next.changes = list(value.changes, change);
+      next.changes = changes(value.changes);
       break;
     case "mcpToolCall":
       next.server = identity(value.server) ?? "";
-      next.arguments = null;
+      next.arguments = publicArguments(value.arguments, budget);
       next.result = null;
+      {
+        const raw=isRecord(value.result) && isRecord(value.result._meta) ? mcpAuthChallenge(value.result._meta["mcp/www_authenticate"]) : undefined;
+        const existing=value.nativeMcpAuthChallenge;
+        const retained=isRecord(existing) && Array.isArray(existing.scopes) && existing.scopes.every(v=>typeof v==="string" && v.length<=256) && existing.scopes.length<=32 && existing.scopes.join(" ").length<=2048 ? {scopes:reuse(existing.scopes,[...existing.scopes]),...(existing.truncated===true?{truncated:true as const}:{})} : undefined;
+        const challenge=raw??retained;
+        if(challenge)next.nativeMcpAuthChallenge=reuse(existing,challenge);
+      }
       next.error = isRecord(value.error) ? reuse(value.error, { message: short(value.error.message, budget) }) : null;
       next.appContext = isRecord(value.appContext) ? reuse(value.appContext, fields(value.appContext, ["connectorId", "appName"])) : null;
       if ("progressMessage" in value) next.progressMessage = short(value.progressMessage, budget);
@@ -205,6 +258,22 @@ function cursor(params: RecordValue): RecordValue {
   if (isRecord(params.item)) next.item = reuse(params.item, fields(params.item, ["type", "id", "name", "namespace", "status", "call_id"]));
   return reuse(params, next);
 }
+/** Public auto-review action label. Commands stay bounded; bodies stay out. */
+function reviewAction(action: RecordValue): RecordValue {
+  const budget = { remaining: CODEX_CHAT_METADATA_TEXT_LIMIT };
+  const next = fields(action, [
+    "type", "source", "cwd", "processId", "server", "toolName", "connectorId",
+    "connectorName", "toolTitle", "target", "host", "protocol", "port",
+  ]);
+  for (const name of ["command", "program", "stdin", "reason"]) {
+    if (name in action) next[name] = short(action[name], budget);
+  }
+  if (Array.isArray(action.argv))
+    next.argv = strings(action.argv, budget);
+  if (Array.isArray(action.files))
+    next.files = strings(action.files, budget);
+  return next;
+}
 function notification(value: RecordValue): RecordValue {
   const params = isRecord(value.params) ? value.params : {};
   const method = String(value.method);
@@ -213,7 +282,7 @@ function notification(value: RecordValue): RecordValue {
   else if (method === "hook/started" || method === "hook/completed")
     next = reuse(params, { ...fields(params, cursorFields), run: hook(params.run) });
   else if (method === "item/fileChange/patchUpdated")
-    next = reuse(params, { ...fields(params, cursorFields), changes: list(params.changes, change), transcriptMetadataOnly: true });
+    next = reuse(params, { ...fields(params, cursorFields), changes: changes(params.changes) });
   else if (method === "item/mcpToolCall/progress")
     next = reuse(params, { ...fields(params, cursorFields), message: short(params.message, { remaining: CODEX_CHAT_METADATA_TEXT_LIMIT }) });
   else if (method === "item/autoApprovalReview/started" || method === "item/autoApprovalReview/completed") {
@@ -222,7 +291,7 @@ function notification(value: RecordValue): RecordValue {
       ...fields(params.review, ["status", "riskLevel", "userAuthorization"]),
       rationale: short(params.review.rationale, { remaining: CODEX_CHAT_METADATA_TEXT_LIMIT }),
     });
-    if (isRecord(params.action)) projected.action = reuse(params.action, fields(params.action, ["type", "source", "cwd", "server", "toolName", "connectorId", "connectorName", "toolTitle", "target", "host", "protocol", "port"]));
+    if (isRecord(params.action)) projected.action = reuse(params.action, reviewAction(params.action));
     next = reuse(params, projected);
   } else next = projectCodexChatValue(params);
   return reuse(value, { ...value, params: next });

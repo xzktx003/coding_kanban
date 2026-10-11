@@ -54,6 +54,8 @@ interface AttentionState {
   receipts: Record<string, ReplyReceipt>;
   complete: (kind: SessionKind, id: string, replyId: string) => void;
   read: (kind: SessionKind, id: string, replyId: string) => void;
+  markUnread: (kind: SessionKind, id: string) => boolean;
+  markFollowedRead: (ids: string[]) => number;
 }
 export const useSessionAttentionStore = create<AttentionState>()(
   persist(
@@ -71,6 +73,48 @@ export const useSessionAttentionStore = create<AttentionState>()(
             }),
           };
         }),
+      markUnread: (kind, id) => {
+        let marked = false;
+        set((state) => {
+          const key = sessionKey(kind, id);
+          const receipt = state.receipts[key];
+          const latest = receipt?.completed.at(-1);
+          if (!receipt || !latest || !receipt.read.includes(latest.id))
+            return state;
+          marked = true;
+          return {
+            receipts: {
+              ...state.receipts,
+              [key]: {
+                ...receipt,
+                read: receipt.read.filter((replyId) => replyId !== latest.id),
+              },
+            },
+          };
+        });
+        return marked;
+      },
+      markFollowedRead: (ids) => {
+        let cleared = 0;
+        set((state) => {
+          const next = { ...state.receipts };
+          let changed = false;
+          for (const id of ids) {
+            if (!id) continue;
+            const key = sessionKey("codex", id);
+            const receipt = next[key];
+            if (!receipt || latestUnread(receipt) == null) continue;
+            next[key] = {
+              ...receipt,
+              read: receipt.completed.map((reply) => reply.id),
+            };
+            cleared += 1;
+            changed = true;
+          }
+          return changed ? { receipts: next } : state;
+        });
+        return cleared;
+      },
       read: (kind, id, replyId) =>
         set((state) => {
           const key = sessionKey(kind, id);

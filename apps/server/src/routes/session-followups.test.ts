@@ -29,7 +29,7 @@ test("native per-thread turn settings pass queue validation and reach the runtim
     },
   };
   for (const parameters of [
-    { serviceTier: null, approvalsReviewer: "user" },
+    { serviceTier: null, approvalsReviewer: "user", personality: "pragmatic" },
     { serviceTier: "fast", approvalsReviewer: "auto_review" },
     {
       serviceTier: "flex",
@@ -98,6 +98,7 @@ test("malformed native turn settings are rejected before journaling or runtime c
       { serviceTier: "tier\0" },
       { serviceTier: "x".repeat(257) },
       { approvalsReviewer: "invented-reviewer" },
+      { personality: "playful" },
       { approvalsReviewer: true },
       { approvalPolicy: { granular: { sandbox_approval: "true" } } },
       {

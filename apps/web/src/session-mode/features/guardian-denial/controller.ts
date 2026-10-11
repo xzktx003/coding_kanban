@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import type {
   GuardianDenialApproveRequest,
   GuardianDenialResult,
@@ -208,7 +209,7 @@ export class GuardianDenialController {
         identity: structuredClone(this.identity),
         runtimeInstance: refreshed.runtimeInstance!,
         approvalToken: refreshed.approvalToken!,
-        clientRequestId: crypto.randomUUID(),
+        clientRequestId: randomUUID(),
       };
       this.persist({
         identity: structuredClone(this.identity),

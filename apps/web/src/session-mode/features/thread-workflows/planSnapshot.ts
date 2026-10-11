@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import type { ThemeContextType } from "@session/contexts/ThemeContext";
 export const PLAN_WINDOW_STORAGE_PREFIX = "kanban.session.plan-window:";
 export const planWindowChannel = (id: string) => "kanban.plan-window." + id;
@@ -74,7 +75,7 @@ export function savePlanWindowSnapshot(
     structuredClone({ ...input, version: 1, createdAt: now }),
     now,
   );
-  const id = crypto.randomUUID();
+  const id = randomUUID();
   const old = Array.from({ length: storage.length }, (_, index) =>
     storage.key(index),
   ).filter(

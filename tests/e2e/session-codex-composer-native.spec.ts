@@ -12,8 +12,37 @@ for (const width of [1440, 390]) {
       }, info) => {
         test.setTimeout(90000);
         const errors: string[] = [];
+        const diagnostics: Array<{ type: string; text: string }> = [];
+        const record = (entry: { type: string; text: string }) => {
+          diagnostics.push(entry);
+          console.log(`[composer fixture] ${JSON.stringify(entry)}`);
+        };
+        page.on("framenavigated", (frame) => {
+          if (frame === page.mainFrame())
+            record({ type: "navigation", text: frame.url() });
+        });
+        page.on("console", (message) => {
+          if (message.text().startsWith("[vite]") || message.type() === "error")
+            record({
+              type: message.type(),
+              text: message.text().slice(0, 1024),
+            });
+        });
+        page.on("response", (response) => {
+          if (response.status() >= 400)
+            record({
+              type: "response",
+              text: `${response.status()} ${new URL(response.url()).pathname}`,
+            });
+        });
+        page.on("requestfailed", (request) => {
+          record({
+            type: "requestfailed",
+            text: `${new URL(request.url()).pathname}: ${request.failure()?.errorText}`,
+          });
+        });
         page.on("pageerror", (e) => errors.push(e.stack ?? e.message));
-        await installSessionUxFixture(page);
+        const fixture = await installSessionUxFixture(page);
         await page.route(/\/api\/(?:session\/)?codex\/model\/list$/, (route) =>
           route.fulfill({
             json: {
@@ -68,6 +97,11 @@ for (const width of [1440, 390]) {
           const { useCodexStore } = await module(
             "/src/session-mode/components/codex/stores/index.ts",
           );
+          // Capture the mounted store while initializing the fixture. A late
+          // resource-timing import can pick a stale HMR URL after recompilation.
+          (window as any).__nativeComposerFixtureSelectThread = (
+            threadId: string,
+          ) => useCodexStore.setState({ currentThreadId: threadId });
           const { useLayoutStore } = await module(
             "/src/session-mode/stores/useLayoutStore.ts",
           );
@@ -173,6 +207,10 @@ for (const width of [1440, 390]) {
           }),
         ).toBeVisible();
         const editor = composer.locator("[contenteditable=true]").first();
+        await expect(editor).toHaveAttribute(
+          "aria-placeholder",
+          "提出后续变更要求",
+        );
         if (width === 390) {
           expect(
             await editor.evaluate((el) => el === document.activeElement),
@@ -181,13 +219,23 @@ for (const width of [1440, 390]) {
             await surface.evaluate((el) => el.getBoundingClientRect().height),
           ).toBe(124);
           const button = composer.getByRole("button", {
-            name: "发送消息",
+            name: "发送",
             exact: true,
           });
           expect(
             await button.evaluate((el) => el.getBoundingClientRect().height),
           ).toBeGreaterThanOrEqual(44);
         }
+        await editor.fill("Alt Enter 保留草稿");
+        await editor.press("Alt+Enter");
+        await editor.press("B");
+        await expect(editor).toContainText("Alt Enter 保留草稿");
+        expect(await editor.innerText()).toContain("\n");
+        expect(
+          fixture.calls.filter((call) =>
+            call.path.endsWith("/followups/submit"),
+          ),
+        ).toHaveLength(0);
         await composer
           .getByRole("button", { name: "输入状态与消息队列", exact: true })
           .click();
@@ -214,7 +262,7 @@ for (const width of [1440, 390]) {
         await expect(editor).toContainText("第一行");
         await expect(editor).toContainText("A");
         const send = composer.getByRole("button", {
-          name: "发送消息",
+          name: "发送",
           exact: true,
         });
         await expect(send).toHaveCSS("border-radius", "9999px");
@@ -260,7 +308,12 @@ for (const width of [1440, 390]) {
           path: info.outputPath(`composer-workbench-${width}-${theme}.png`),
           fullPage: true,
         });
-        await composer.getByRole("button", { name: /^Agent 与模型：/ }).click();
+        await expect(
+          composer.getByRole("button", { name: "当前 Agent：Codex，切换 Agent" }),
+        ).toHaveCount(0);
+        const utilities = composer.locator(".session-composer-utilities");
+        await expect(utilities).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+        await composer.getByRole("button", { name: /^模型：/ }).click();
         const modelMenu = page.locator(".session-native-model-menu");
         await expect(
           modelMenu.getByRole("slider", { name: "推理强度" }),
@@ -318,21 +371,24 @@ for (const width of [1440, 390]) {
         await modelMenu.press("Escape");
         await expect(
           composer.getByRole("button", {
-            name: "Agent 与模型：Codex，fixture-second，high",
+            name: "模型：fixture-second，high",
           }),
         ).toBeVisible();
         await composer
-          .getByRole("button", {
-            name: "当前 Agent：Codex，切换 Agent",
-            exact: true,
-          })
+          .getByRole("button", { name: "添加附件与上下文", exact: true })
+          .click();
+        await page
+          .getByRole("button", { name: "Agent 与提供商设置", exact: true })
           .click();
         await expect(
           page.getByRole("heading", {
-            name: "Agent 与提供商设置",
+            name: "模型与提供商设置",
             exact: true,
           }),
         ).toBeVisible();
+        await expect(
+          page.getByRole("button", { name: "切换到 Claude Code" }),
+        ).toHaveCount(0);
         await page.screenshot({
           path: info.outputPath(
             `composer-workbench-agent-${width}-${theme}.png`,
@@ -359,6 +415,69 @@ for (const width of [1440, 390]) {
         await permissions
           .getByRole("menuitemradio", { name: /^请求批准/ })
           .click();
+
+        // Hold the isolated fixture receipt to exercise the real owner-scoped
+        // pending state. The request falls back only to installSessionUxFixture.
+        let releaseSubmit!: () => void;
+        const pendingReceipt = new Promise<void>((resolve) => {
+          releaseSubmit = resolve;
+        });
+        let capturedSubmission: { threadId: string; text: string } | null =
+          null;
+        await page.route("**/api/session/followups/submit", async (route) => {
+          capturedSubmission = route.request().postDataJSON();
+          await pendingReceipt;
+          await route.fallback();
+        });
+        await editor.fill("原会话发送中，保留另一会话草稿");
+        const sendWidth = await send.evaluate(
+          (el) => el.getBoundingClientRect().width,
+        );
+        await send.click();
+        await expect(send).toHaveAttribute("aria-busy", "true");
+        await expect(send).toBeDisabled();
+        const spinner = send.locator('[data-native-icon="spinner-native-16"]');
+        await expect(spinner).toBeVisible();
+        await expect(spinner).toHaveCSS("animation-duration", "2s");
+        await expect(spinner).toHaveCSS(
+          "animation-timing-function",
+          "steps(60)",
+        );
+        expect(
+          await send.evaluate((el) => el.getBoundingClientRect().width),
+        ).toBe(sendWidth);
+        await expect.poll(() => capturedSubmission?.threadId).toBe("ux-0");
+        await page.mouse.move(width / 2, 100);
+        await page.screenshot({
+          path: info.outputPath(
+            `composer-workbench-pending-${width}-${theme}.png`,
+          ),
+          fullPage: true,
+        });
+        await page.evaluate(() => {
+          (window as any).__nativeComposerFixtureSelectThread("ux-1");
+        });
+        await editor.fill("另一会话自己的新草稿");
+        await expect(send).not.toHaveAttribute("aria-busy", "true");
+        await expect(send).toBeEnabled();
+        releaseSubmit();
+        await expect
+          .poll(
+            () =>
+              fixture.calls.filter((call) =>
+                call.path.endsWith("/followups/submit"),
+              ).length,
+          )
+          .toBe(1);
+        await expect(editor).toContainText("另一会话自己的新草稿");
+        expect(
+          fixture.calls.filter((call) => call.path.endsWith("/turn/start")),
+        ).toHaveLength(0);
+        expect(errors).toEqual([]);
+        await info.attach("navigation-and-vite-final.json", {
+          contentType: "application/json",
+          body: JSON.stringify(diagnostics, null, 2),
+        });
       });
     }
     test("left image thumbnails, direct deletion and long paste keep the draft owner", async ({

@@ -1,3 +1,4 @@
+import { registerCodexWebsitePreviewRoutes } from "./routes/codex-website-preview.js";
 import { registerWorkbenchVsCodeWebRoutes } from "./routes/workbench-vscode-web.js";
 import { registerSessionPreviewRoutes } from "./routes/session-preview.js";
 import type { SessionCodexFeishuReplyService } from "./services/session-codex-feishu-reply-service.js";
@@ -630,6 +631,7 @@ export function buildServer(options: BuildServerOptions = {}): {
   app.register(websocket);
   app.register(async function sessionModeGateway(instance) {
     registerSessionPreviewRoutes(instance);
+    registerCodexWebsitePreviewRoutes(instance);
     registerWorkbenchVsCodeWebRoutes(instance, vsCodeWebManager);
     sessionFeishuReplyService = registerSessionModeRoutes(instance, {
       origin: options.sessionRuntimeOrigin,

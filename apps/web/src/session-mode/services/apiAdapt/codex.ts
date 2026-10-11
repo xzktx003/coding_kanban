@@ -472,7 +472,9 @@ export async function getAccount() {
 }
 
 export async function getAccountWithParams(params: GetAccountParams) {
-  return await postJson<GetAccountResponse>("/api/codex/account/get", params);
+  return await postJson<GetAccountResponse & {
+    workspaceRouting?: { chatgptAccountId?: unknown };
+  }>("/api/codex/account/get", params);
 }
 
 export async function loginAccount(params: LoginAccountParams) {

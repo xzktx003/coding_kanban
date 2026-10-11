@@ -29,6 +29,7 @@ export function BrowserDictationButton({
   const [starting, setStarting] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [picker, setPicker] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
   const transcript = useRef(onTranscript); transcript.current = onTranscript;
   const capture = useRef<{
     model: string;
@@ -92,7 +93,9 @@ export function BrowserDictationButton({
       if (mounted.current && result.text.trim()) transcript.current(result.text);
     } catch (error) {
       if (mounted.current)
-        toast.error(error instanceof Error ? error.message : "语音转录失败");
+        setFailure(
+          error instanceof Error ? error.message : "无法转录音频",
+        );
     } finally {
       chunks.current = [];
       if (mounted.current) setProcessing(false);
@@ -108,12 +111,6 @@ export function BrowserDictationButton({
     let stream: MediaStream | null = null;
     let context: AudioContext | null = null;
     try {
-      const current = await dictationModelStatus(selectedModelId);
-      setStatus(current);
-      if (current.state !== "ready") {
-        setPicker(true);
-        return;
-      }
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1 },
         video: false,
@@ -152,8 +149,18 @@ export function BrowserDictationButton({
       cleanup();
       stream?.getTracks().forEach((track) => track.stop());
       if (context && context.state !== "closed") void context.close();
-      if (mounted.current)
-        toast.error(error instanceof Error ? error.message : "无法访问麦克风");
+      if (mounted.current) {
+        const name = error instanceof Error ? error.name : "";
+        setFailure(
+          name === "NotAllowedError"
+            ? "请启用麦克风访问权限以使用听写功能"
+            : name === "NotFoundError"
+              ? "连接麦克风以使用听写功能"
+              : name === "NotReadableError"
+                ? "关闭其他正在使用麦克风的应用"
+                : "无法开始听写",
+        );
+      }
     } finally {
       if (mounted.current) setStarting(false);
     }
@@ -170,12 +177,23 @@ export function BrowserDictationButton({
             event.preventDefault();
             void start();
           }}
+          aria-label={
+            processing
+              ? "正在转写"
+              : recording
+                ? "停止听写"
+                : starting
+                  ? "正在启动听写；点击可取消"
+                  : "听写"
+          }
           title={
             processing
-              ? "正在转录…"
+              ? "正在转写"
               : recording
-                ? "录音中，点击结束（最长 120 秒）"
-                : "语音输入"
+                ? "停止听写"
+                : starting
+                  ? "正在启动听写…"
+                  : "听写"
           }
           className={recording ? "text-red-400" : ""}
         >
@@ -188,6 +206,23 @@ export function BrowserDictationButton({
           )}
         </Button>
       </PopoverTrigger>
+      {failure && (
+        <span className="session-dictation-failure" role="alert">
+          <span>{failure}</span>
+          <button type="button" onClick={() => setFailure(null)}>
+            关闭
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setFailure(null);
+              void start();
+            }}
+          >
+            重试听写
+          </button>
+        </span>
+      )}
       <PopoverContent className="w-72">
         <DictationPopoverContent
           selectedModelId={selectedModelId}

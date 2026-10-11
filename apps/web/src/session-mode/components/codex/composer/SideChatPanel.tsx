@@ -1,3 +1,4 @@
+import { v4 as randomUUID } from "uuid";
 import { composeContextText } from "@agent-orchestrator/shared";
 import {
   composerDrafts,
@@ -10,6 +11,8 @@ import { isLargePaste, insertAtSelection } from "./v2/content";
 import { ArrowUp, Square, ListPlus, CornerDownRight } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { deleteThread } from "@session/services/apiAdapt/codex";
+import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
 import { useSideChatStore } from "@session/stores/useSideChatStore";
 import {
   sessionDraftKey,
@@ -35,6 +38,7 @@ import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
 import { useThreadModelStore } from "@session/stores/useThreadModelStore";
 import { ModelReasonSelector } from "./ModelReasonSelector";
 import { AccessModePopover } from "./AccessModePopover";
+import { PlanSidePanel } from "@session/features/thread-workflows/PlanSidePanel";
 function SideChat({
   id,
   title,
@@ -60,15 +64,22 @@ function SideChat({
   const [modelOpen, setModelOpen] = useState(false);
   const [drawingId, setDrawingId] = useState<string | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
+  const focusTrigger = useSideChatStore((s) => s.focusTrigger);
   const hasContent = !!(
     inputValue.trim() ||
     draft.paths.length ||
     contextDraft.contexts.length
   );
+  const [confirming, setConfirming] = useState(false);
+  const [skipNext, setSkipNext] = useState(false);
   const [sending, setSending] = useState(false),
     busy = useRef(false),
     settings = useFollowupSettingsStore();
   const { running, turnId } = useTurnControl(id);
+  useEffect(() => {
+    if (!focusTrigger) return;
+    editorRef.current?.focus();
+  }, [focusTrigger]);
   useEffect(() => {
     if (!initialized.current) {
       initialized.current = true;
@@ -128,6 +139,26 @@ function SideChat({
       setSending(false);
     }
   };
+  const finishClose = () => {
+    if (skipNext)
+      localStorage.setItem("kanban.session.side-chat-close-skip", "1");
+    setConfirming(false);
+    const sideId = id;
+    useSideChatStore.getState().close();
+    useAgentCenterStore.getState().removeCard({ kind: "codex", id: sideId });
+    useCodexStore.setState((state) => ({
+      threads: state.threads.filter((thread) => thread.id !== sideId),
+    }));
+    useCodexStore.getState().triggerInputFocus();
+    void deleteThread(sideId).catch(() => toast.error("无法删除任务。请重试。"));
+  };
+  const requestClose = () => {
+    if (localStorage.getItem("kanban.session.side-chat-close-skip") === "1") {
+      finishClose();
+      return;
+    }
+    setConfirming(true);
+  };
   return (
     <section className="session-side-chat" aria-label={title}>
       <header>
@@ -137,11 +168,8 @@ function SideChat({
           type="button"
           variant="ghost"
           size="sm"
-          aria-label="关闭侧边聊天"
-          onClick={() => {
-            useSideChatStore.getState().close();
-            useCodexStore.getState().triggerInputFocus();
-          }}
+          aria-label="返回主会话"
+          onClick={requestClose}
         >
           返回主会话
         </Button>
@@ -166,7 +194,7 @@ function SideChat({
             e.preventDefault();
             e.stopPropagation();
             composerDrafts.add(owner, {
-              id: crypto.randomUUID(),
+              id: randomUUID(),
               kind: "paste",
               name: "粘贴的文本",
               text,
@@ -340,6 +368,28 @@ function SideChat({
           </div>
         </div>
       </form>
+      {confirming && (
+        <div className="session-side-chat-confirm" role="dialog" aria-label="关闭侧边聊天？">
+          <h2>关闭侧边聊天？</h2>
+          <p>这个侧边聊天将被删除，且无法恢复。你确定吗？</p>
+          <label>
+            <input
+              type="checkbox"
+              checked={skipNext}
+              onChange={(event) => setSkipNext(event.target.checked)}
+            />
+            不再询问
+          </label>
+          <div>
+            <Button type="button" variant="ghost" onClick={() => setConfirming(false)}>
+              取消
+            </Button>
+            <Button type="button" onClick={finishClose}>
+              关闭侧边聊天
+            </Button>
+          </div>
+        </div>
+      )}
       {detailsOpen && (
         <ComposerSheet
           title="侧边输入状态与消息队列"
@@ -394,5 +444,10 @@ function SideChat({
 }
 export function SideChatPanel() {
   const chat = useSideChatStore((s) => s.chat);
-  return chat ? <SideChat key={chat.id} {...chat} /> : null;
+  return (
+    <>
+      <PlanSidePanel />
+      {chat ? <SideChat key={chat.id} {...chat} /> : null}
+    </>
+  );
 }

@@ -37,8 +37,20 @@ function Observer({ enabled = true }: { enabled?: boolean }) {
 beforeEach(() => {
   vi.clearAllMocks();
   api.read.mockReset();
-  useCodexStore.setState({ account: null, hasAccount: null });
+  useCodexStore.setState({ account: null, hasAccount: null,accountNamespace:null });
   vi.spyOn(console, "error").mockImplementation(() => {});
+});
+it("keeps authoritative workspace identity separately from the display account", async () => {
+  const account = {type:"chatgpt",email:"fixture@example.invalid",planType:"plus"};
+  api.read.mockResolvedValueOnce({account,workspaceRouting:{chatgptAccountId:"workspace-A"}})
+    .mockResolvedValueOnce({account:{...account,planType:"pro"},workspaceRouting:{chatgptAccountId:"workspace-B"}})
+    .mockResolvedValueOnce({account:null});
+  render(<Observer />);
+  await vi.waitFor(()=>expect((useCodexStore.getState() as any).accountNamespace).toBe("workspace-A"));
+  await act(async()=>api.sync?.(false));
+  expect((useCodexStore.getState() as any).accountNamespace).toBe("workspace-B");
+  await act(async()=>api.sync?.(false));
+  expect((useCodexStore.getState() as any).accountNamespace).toBeNull();
 });
 it("failed initial account read retains unknown and cannot trigger the no-account login flow", async () => {
   api.read.mockRejectedValueOnce(new Error("offline"));
