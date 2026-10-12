@@ -87,11 +87,11 @@ export function FileTreeNode({
       onToggle(node.path);
       return;
     }
-    setSelectedFilePath(node.path);
     if (onFileSelect) {
       onFileSelect(node.path);
       return;
     }
+    setSelectedFilePath(node.path);
     if (
       isLatexFile(extension) ||
       isPdfFile(extension) ||

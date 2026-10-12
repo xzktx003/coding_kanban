@@ -43,6 +43,8 @@ const hash = (bytes: Buffer) =>
   createHash("sha256").update(bytes).digest("hex");
 const inside = (root: string, path: string) =>
   path === root || path.startsWith(root + sep);
+const moreSpecific = (left: string, right: string) =>
+  right.length > left.length ? right : left;
 type ZipArchiveConstructor = new (
   options?: archiver.ArchiverOptions,
 ) => archiver.Archiver;
@@ -139,6 +141,50 @@ export class WorkspaceFiles {
       }
     }
     return { root: canonical, path };
+  }
+  private async registeredRootFor(path: string) {
+    const allowed = await this.roots();
+    let selected: string | null = null;
+    for (const item of allowed) {
+      try {
+        const root = await realpath(item);
+        if (root !== sep && inside(root, path))
+          selected = selected ? moreSpecific(selected, root) : root;
+      } catch {}
+    }
+    return selected;
+  }
+  async resolveReference(root: string, input: string) {
+    if (
+      typeof root !== "string" ||
+      typeof input !== "string" ||
+      !isAbsolute(root) ||
+      /[\\\x00-\x1f]/.test(root + input) ||
+      input.split("/").includes("..")
+    )
+      throw new WorkspaceFileError("无效文件路径");
+    const lexicalRoot = resolve(root);
+    const canonicalRoot = await realpath(root);
+    if (canonicalRoot === sep || !(await stat(canonicalRoot)).isDirectory())
+      throw new WorkspaceFileError("请选择有效的项目目录");
+    const requestRoot = await this.registeredRootFor(canonicalRoot);
+    if (!requestRoot)
+      throw new WorkspaceFileError("项目目录未注册，不能执行文件操作", 403);
+    const lexicalPath = isAbsolute(input)
+      ? resolve(input)
+      : resolve(lexicalRoot, input);
+    if (
+      !inside(lexicalRoot, lexicalPath) &&
+      !inside(canonicalRoot, lexicalPath)
+    )
+      throw new WorkspaceFileError("文件路径超出当前项目", 403);
+    const resolved = await realpath(lexicalPath);
+    const resolvedRoot = inside(canonicalRoot, resolved)
+      ? canonicalRoot
+      : await this.registeredRootFor(resolved);
+    if (!resolvedRoot)
+      throw new WorkspaceFileError("文件路径超出当前项目", 403);
+    return this.target(resolvedRoot, resolved);
   }
   private async bytes(path: string, limit = MAX_TEXT) {
     const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);

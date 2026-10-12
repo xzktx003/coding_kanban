@@ -48,8 +48,10 @@ function createFixture(
     replyEnabled?: boolean;
     resolvedBinding?: FeishuReplyBinding | null;
     targetSession?: AgentSessionRecord;
+    sessionAfterResolution?: AgentSessionRecord;
     threadId?: string | null;
     threadIds?: string[];
+    supportsThreadEnumeration?: boolean;
     sendText?: () => Promise<void>;
     downloadImage?: () => Promise<{
       image: Buffer;
@@ -103,6 +105,9 @@ function createFixture(
     registry: {
       get: (sessionId) => {
         sessionLookups.push(sessionId);
+        if (sessionLookups.length > 1 && overrides.sessionAfterResolution) {
+          return overrides.sessionAfterResolution;
+        }
         return overrides.targetSession ?? session;
       },
     },
@@ -124,8 +129,12 @@ function createFixture(
         overrides.threadId === null
           ? undefined
           : (overrides.threadId ?? "codex-thread-1"),
-      resolveSessionIds: async () =>
-        overrides.threadIds ?? [overrides.threadId ?? "codex-thread-1"],
+      ...(overrides.supportsThreadEnumeration === false
+        ? {}
+        : {
+            resolveSessionIds: async () =>
+              overrides.threadIds ?? [overrides.threadId ?? "codex-thread-1"],
+          }),
       sendText: async (input) => {
         writes.push({ sessionId: input.threadId, prompt: input.message });
         await overrides.sendText?.();
@@ -212,6 +221,122 @@ test("rejects a bound thread that no longer belongs to the tmux session", async 
 
   assert.equal(await fixture.service.handle(validEvent), "ignored_unavailable");
   assert.deepEqual(fixture.writes, []);
+});
+
+test("delivers consecutive card replies to the bound live Codex pane of a bash terminal", async () => {
+  const fixture = createFixture({
+    targetSession: {
+      ...session,
+      agentKind: "bash",
+      agentSessionId: "codex-thread-first-pane",
+      transportRef: { tmuxSession: "perblock", tmuxPane: "%150" },
+    },
+    resolvedBinding: { ...binding, codexThreadId: "codex-thread-second-pane" },
+    threadId: "codex-thread-first-pane",
+    threadIds: ["codex-thread-first-pane", "codex-thread-second-pane"],
+  });
+
+  for (let index = 0; index < 3; index += 1) {
+    assert.equal(
+      await fixture.service.handle({
+        ...validEvent,
+        message_id: `om_bash_reply_${index}`,
+        content: `第二条对话的回复 ${index}`,
+      }),
+      "delivered",
+    );
+  }
+  assert.deepEqual(
+    fixture.writes,
+    Array.from({ length: 3 }, (_, index) => ({
+      sessionId: "codex-thread-second-pane",
+      prompt: `第二条对话的回复 ${index}`,
+    })),
+  );
+  assert.equal(fixture.processed.size, 3);
+});
+
+test("does not use a shell label or cached thread ID as proof of a live bound Codex pane", async () => {
+  for (const overrides of [
+    { resolvedBinding: binding, threadIds: ["codex-thread-first-pane"] },
+    {
+      resolvedBinding: {
+        ...binding,
+        codexThreadId: "codex-thread-closed-pane",
+      },
+      threadIds: ["codex-thread-first-pane"],
+    },
+  ]) {
+    const fixture = createFixture({
+      ...overrides,
+      targetSession: {
+        ...session,
+        agentKind: "bash",
+        agentSessionId: "codex-thread-closed-pane",
+      },
+    });
+    assert.equal(
+      await fixture.service.handle(validEvent),
+      "ignored_unavailable",
+    );
+    assert.deepEqual(fixture.writes, []);
+    assert.equal(fixture.processed.size, 0);
+  }
+});
+
+test("bound shell replies still require local live controllable tmux membership", async () => {
+  const boundSession = { ...session, agentKind: "bash" };
+  for (const targetSession of [
+    { ...boundSession, connectionState: "offline" as const },
+    { ...boundSession, interactionState: "exited" as const },
+    { ...boundSession, interactionState: "detached" as const },
+    { ...boundSession, controlMode: "observe" as const },
+    { ...boundSession, transportRef: undefined },
+    { ...boundSession, hostId: "remote-host" },
+  ]) {
+    const fixture = createFixture({
+      targetSession,
+      resolvedBinding: { ...binding, codexThreadId: "codex-thread-1" },
+    });
+    assert.equal(
+      await fixture.service.handle(validEvent),
+      "ignored_unavailable",
+    );
+    assert.deepEqual(fixture.writes, []);
+    assert.equal(fixture.processed.size, 0);
+  }
+  const noEnumeration = createFixture({
+    targetSession: boundSession,
+    resolvedBinding: { ...binding, codexThreadId: "codex-thread-1" },
+    supportsThreadEnumeration: false,
+  });
+  assert.equal(
+    await noEnumeration.service.handle(validEvent),
+    "ignored_unavailable",
+  );
+  assert.deepEqual(noEnumeration.writes, []);
+});
+
+test("rechecks terminal eligibility after thread resolution before sending", async () => {
+  for (const resolvedBinding of [
+    binding,
+    { ...binding, codexThreadId: "codex-thread-1" },
+  ]) {
+    const fixture = createFixture({
+      resolvedBinding,
+      sessionAfterResolution: {
+        ...session,
+        agentKind: "bash",
+        transportRef: undefined,
+      },
+    });
+    assert.equal(
+      await fixture.service.handle(validEvent),
+      "ignored_unavailable",
+    );
+    assert.deepEqual(fixture.writes, []);
+    assert.equal(fixture.processed.size, 0);
+  }
 });
 
 test("keeps a delivered reply bound for a follow-up reply in the same thread", async () => {

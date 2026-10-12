@@ -1,3 +1,4 @@
+import { openWorkspaceFileReference } from "@session/services/openWorkspaceFileReference";
 import { formatEditorContext } from "@session/services/editorContext";
 import { activeDraftOwner } from "@session/stores/useInputStore";
 import { addBrowserEditorContext } from "@session/features/codex-host/bridge";
@@ -56,9 +57,11 @@ function localPath(source: string, path: string, root: string) {
   }
 }
 export function FileViewer({ filePath }: { filePath: string }) {
+  const registeredRoot = useEditorStore((s) => s.roots[filePath]);
+  const workspaceRoot = useWorkspaceStore((s) => s.cwd);
   const root =
-    useEditorStore((s) => s.roots[filePath]) ??
-    useWorkspaceStore((s) => s.cwd) ??
+    registeredRoot ??
+    workspaceRoot ??
     filePath.slice(0, filePath.lastIndexOf("/"));
   const doc = useFileDocumentStore((s) => s.documents[filePath]);
   const reveal = useEditorStore((s) => s.revealLocation);
@@ -201,7 +204,8 @@ export function FileViewer({ filePath }: { filePath: string }) {
                 if (href && !/^(https?:|mailto:|#)/i.test(href)) {
                   e.preventDefault();
                   const target = localPath(href, filePath, root);
-                  if (target) useEditorStore.getState().openFile(target, root);
+                  if (target)
+                    void openWorkspaceFileReference({ path: target }, root);
                 }
               }}
             >

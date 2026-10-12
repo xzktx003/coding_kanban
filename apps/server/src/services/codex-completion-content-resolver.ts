@@ -274,7 +274,10 @@ export class CodexCompletionContentResolver {
       return completion ? [completion] : [];
     }
 
-    const panes = await this.#codexSessionLocator.resolveTmuxPanes(tmuxSession);
+    const panes = await this.#codexSessionLocator.resolveTmuxPanes(
+      tmuxSession,
+      { readOnlyCompletion: true },
+    );
     if (panes.length === 0) {
       const completion = await this.inspectLatestCompletion(event);
       return completion ? [completion] : [];

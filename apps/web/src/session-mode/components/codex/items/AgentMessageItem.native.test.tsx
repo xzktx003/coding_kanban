@@ -4,6 +4,14 @@ import { AgentMessageItem } from "./AgentMessageItem";
 import { useCodexStore } from "../stores/useCodexStore";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { useEditorStore } from "@session/stores/useEditorStore";
+import { resolveWorkspaceFileReference } from "@session/services/workspaceFiles";
+
+vi.mock("@session/services/workspaceFiles", () => ({
+  resolveWorkspaceFileReference: vi.fn(async (root: string, path: string) => ({
+    root,
+    path,
+  })),
+}));
 vi.mock("@session/contexts/ThemeContext", () => ({
   useThemeContext: () => ({ resolvedTheme: "dark" }),
 }));
@@ -13,6 +21,9 @@ beforeEach(() => {
   });
   useWorkspaceStore.setState({ cwd: "/different", projects: ["/different"] });
   useEditorStore.getState().resetFiles();
+  vi.mocked(resolveWorkspaceFileReference).mockImplementation(
+    async (root: string, path: string) => ({ root, path }),
+  );
 });
 it("renders flat native assistant content with math and inline code", async () => {
   const { container } = render(

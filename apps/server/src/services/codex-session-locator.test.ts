@@ -858,3 +858,147 @@ test("CodexSessionLocator reads an exact registered history ID after a Codex res
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+function startupCompletionFixture() {
+  const root = mkdtempSync(join(tmpdir(), "codex-completion-startup-"));
+  const sessionsRoot = join(root, "sessions"),
+    procRoot = join(root, "proc");
+  mkdirSync(sessionsRoot, { recursive: true });
+  for (const pid of [601, 602]) {
+    const process = join(procRoot, String(pid));
+    mkdirSync(join(process, "task", String(pid)), { recursive: true });
+    writeFileSync(
+      join(process, "task", String(pid), "children"),
+      pid === 601 ? "602" : "",
+    );
+  }
+  writeFileSync(
+    join(procRoot, "602", "cmdline"),
+    "/usr/local/bin/codex\0--yolo\0",
+  );
+  exposeProcessWorkingDirectory(procRoot, 602, "/workspace/shared");
+  const started = Date.now() - 24 * 60 * 60 * 1000;
+  utimesSync(join(procRoot, "602"), started / 1000, started / 1000);
+  const locator = new CodexSessionLocator({
+    procRoot,
+    sessionsRoot,
+    shellSnapshotsRoot: join(root, "no-snapshots"),
+    resolveTmuxPanePid: async () => 601,
+    listTmuxPanes: async () => [
+      { paneId: "%291", processId: 601, workingDirectory: "/workspace/shared" },
+    ],
+  });
+  const candidate = (
+    name: string,
+    created: number,
+    source: unknown = "cli",
+    cwd = "/workspace/shared",
+  ) =>
+    writeSession(
+      sessionsRoot,
+      name,
+      `codex-${name}`,
+      source,
+      cwd,
+      new Date().toISOString(),
+      new Date(created).toISOString(),
+    );
+  return { root, procRoot, sessionsRoot, locator, started, candidate };
+}
+test("completion-only startup matching finds an unambiguous launch-born thread without snapshots or held files", async () => {
+  const f = startupCompletionFixture();
+  try {
+    f.candidate("selected", f.started + 2000, "vscode");
+    f.candidate("other-history", f.started - 60 * 60 * 1000);
+    f.candidate("later-parallel", f.started + 60 * 60 * 1000);
+    f.candidate("subagent", f.started + 1000, { subagent: {} });
+    f.candidate("other-directory", f.started + 500, "cli", "/workspace/other");
+    assert.deepEqual(await f.locator.resolveTmuxPanes("terminal"), []);
+    assert.deepEqual(
+      await f.locator.resolveTmuxPanes("terminal", {
+        readOnlyCompletion: true,
+      }),
+      [
+        {
+          paneId: "%291",
+          sessionId: "codex-selected",
+          workingDirectory: "/workspace/shared",
+        },
+      ],
+    );
+    assert.equal(
+      await f.locator.resolve({
+        tmuxTarget: "%291",
+        workingDirectory: "/workspace/shared",
+      }),
+      undefined,
+      "completion matching must not change input routing",
+    );
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+test("completion startup matching refuses ambiguous, resumed and non-Codex processes", async () => {
+  const f = startupCompletionFixture();
+  try {
+    f.candidate("first", f.started + 1000);
+    f.candidate("second", f.started + 2000);
+    assert.deepEqual(
+      await f.locator.resolveTmuxPanes("terminal", {
+        readOnlyCompletion: true,
+      }),
+      [],
+    );
+    rmSync(join(f.sessionsRoot, "second.jsonl"));
+    f.candidate("unrelated", f.started + 60 * 60 * 1000);
+    writeFileSync(
+      join(f.procRoot, "602", "cmdline"),
+      "/usr/local/bin/codex\0resume\0",
+    );
+    assert.deepEqual(
+      await f.locator.resolveTmuxPanes("terminal", {
+        readOnlyCompletion: true,
+      }),
+      [],
+    );
+    writeFileSync(join(f.procRoot, "602", "cmdline"), "/bin/bash\0");
+    assert.deepEqual(
+      await f.locator.resolveTmuxPanes("terminal", {
+        readOnlyCompletion: true,
+      }),
+      [],
+    );
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+test("completion startup matching never uses outer rewritten timestamps or mtimes as thread birth", async () => {
+  const f = startupCompletionFixture();
+  try {
+    writeSession(
+      f.sessionsRoot,
+      "old",
+      "codex-old",
+      "cli",
+      "/workspace/shared",
+      new Date(f.started + 1000).toISOString(),
+      new Date(f.started - 60 * 60 * 1000).toISOString(),
+    );
+    writeSession(
+      f.sessionsRoot,
+      "missing",
+      "codex-missing",
+      "cli",
+      "/workspace/shared",
+      new Date(f.started + 1000).toISOString(),
+    );
+    assert.deepEqual(
+      await f.locator.resolveTmuxPanes("terminal", {
+        readOnlyCompletion: true,
+      }),
+      [],
+    );
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});

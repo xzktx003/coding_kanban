@@ -78,9 +78,20 @@ function normalizePrompt(content: string): string | null {
   return normalized;
 }
 
-function isAvailableCodexSession(session: AgentSessionRecord): boolean {
+function isAvailableCodexSession(
+  session: AgentSessionRecord,
+  hasBoundThreadVerification = false,
+): boolean {
+  // Discovery may still label a Codex terminal "bash". Only a bound local
+  // tmux thread with live pane verification can bypass that process label.
+  const canVerifyBoundTmuxThread = Boolean(
+    hasBoundThreadVerification &&
+    session.transportRef?.tmuxSession &&
+    (!session.hostId || session.hostId === "local") &&
+    !session.sshTarget,
+  );
   return (
-    isCodexSessionCandidate(session) &&
+    (isCodexSessionCandidate(session) || canVerifyBoundTmuxThread) &&
     session.connectionState === "online" &&
     session.interactionState !== "exited" &&
     session.interactionState !== "detached" &&
@@ -222,7 +233,10 @@ export class FeishuReplyCommandService {
     } catch {
       return "ignored_unavailable";
     }
-    if (!isAvailableCodexSession(session)) {
+    const hasBoundThreadVerification = Boolean(
+      binding.codexThreadId && this.#codex.resolveSessionIds,
+    );
+    if (!isAvailableCodexSession(session, hasBoundThreadVerification)) {
       return "ignored_unavailable";
     }
 
@@ -239,7 +253,10 @@ export class FeishuReplyCommandService {
       }
       if (
         !threadId ||
-        !isAvailableCodexSession(this.#registry.get(binding.sessionId))
+        !isAvailableCodexSession(
+          this.#registry.get(binding.sessionId),
+          hasBoundThreadVerification,
+        )
       ) {
         return "ignored_unavailable";
       }

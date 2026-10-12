@@ -94,6 +94,27 @@ class SnapshotSource {
     };
     this.#listener?.(this.snapshot);
   }
+
+  removeSession(sessionId: string): void {
+    this.snapshot = {
+      ...this.snapshot,
+      items: this.snapshot.items.filter((session) => session.id !== sessionId),
+      updatedAt: new Date().toISOString(),
+    };
+    this.#listener?.(this.snapshot);
+  }
+}
+
+async function waitFor(
+  check: () => boolean,
+  message: string,
+  timeoutMs = 500,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!check()) {
+    assert.ok(Date.now() < deadline, message);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 test("notifies when an already-running non-Codex session completes after the switch is enabled", async () => {
@@ -712,6 +733,542 @@ test("a tmux card state transition does not resend unchanged pane completions", 
     );
   } finally {
     stop();
+  }
+});
+
+test("retries the same structured Codex turn after a transient send failure", async () => {
+  const source = new SnapshotSource({
+    items: [
+      {
+        ...makeNodeTmuxSession("running"),
+        lastOutputAt: "2026-10-12T10:00:00.000Z",
+      },
+    ],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-10-12T10:00:00.000Z",
+  });
+  let completion: FeishuCompletionObservation = {
+    codexThreadId: "codex-thread-retry",
+    completionId: "turn-existing",
+    content: "旧完成",
+    completedAt: "2026-10-12T09:59:00.000Z",
+  };
+  const sent: FeishuCompletionEvent[] = [];
+  const recorded: FeishuCompletionEvent[] = [];
+  let attempts = 0;
+  const stop = new AgentCompletionFeishuNotifier({
+    source,
+    settings: {
+      get: () => ({ configured: true, enabled: true }),
+    },
+    contentResolver: {
+      resolve: async () => completion.content,
+      inspectLatestCompletions: async () => [completion],
+    },
+    structuredCompletionProbeDelayMs: 0,
+    structuredCompletionProbeIntervalMs: 30,
+    sender: {
+      send: async (event) => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw new Error("temporary Feishu failure");
+        }
+        sent.push(event);
+        return {
+          messages: [{ messageId: "om_retry", chatId: "oc_private" }],
+        };
+      },
+    },
+    deliveryRecorder: {
+      record: (event) => {
+        recorded.push(event);
+      },
+    },
+    logError: () => {},
+  }).start();
+
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    completion = {
+      codexThreadId: "codex-thread-retry",
+      completionId: "turn-new",
+      content: "新完成",
+      completedAt: "2026-10-12T10:00:05.000Z",
+    };
+    source.emitSession({
+      ...makeNodeTmuxSession("running"),
+      lastOutputAt: "2026-10-12T10:00:05.000Z",
+    });
+
+    await waitFor(() => attempts === 2, "send failure was not retried");
+    assert.deepEqual(
+      sent.map((event) => event.completionId),
+      ["turn-new"],
+    );
+    assert.deepEqual(
+      recorded.map((event) => event.completionId),
+      ["turn-new"],
+    );
+
+    source.emitSession({
+      ...makeNodeTmuxSession("running"),
+      lastOutputAt: "2026-10-12T10:00:06.000Z",
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    assert.equal(attempts, 2);
+    assert.equal(recorded.length, 1);
+  } finally {
+    stop();
+  }
+});
+
+test("counts retry budget per probe round when multiple panes fail delivery", async () => {
+  const source = new SnapshotSource({
+    items: [
+      {
+        ...makeNodeTmuxSession("running"),
+        lastOutputAt: "2026-10-12T10:10:00.000Z",
+      },
+    ],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-10-12T10:10:00.000Z",
+  });
+  let observations: FeishuCompletionObservation[] = [1, 2, 3].map((index) => ({
+    codexThreadId: `codex-thread-multi-${index}`,
+    completionId: `turn-existing-${index}`,
+    content: `旧完成 ${index}`,
+    completedAt: "2026-10-12T10:09:00.000Z",
+  }));
+  let inspections = 0;
+  let attempts = 0;
+  const stop = new AgentCompletionFeishuNotifier({
+    source,
+    settings: {
+      get: () => ({ configured: true, enabled: true }),
+    },
+    contentResolver: {
+      resolve: async () => null,
+      inspectLatestCompletions: async () => {
+        inspections += 1;
+        return observations;
+      },
+    },
+    structuredCompletionProbeDelayMs: 0,
+    structuredCompletionProbeIntervalMs: 5,
+    sender: {
+      send: async () => {
+        attempts += 1;
+        throw new Error("temporary Feishu failure");
+      },
+    },
+    logError: () => {},
+  }).start();
+
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    observations = [1, 2, 3].map((index) => ({
+      codexThreadId: `codex-thread-multi-${index}`,
+      completionId: `turn-new-${index}`,
+      content: `新完成 ${index}`,
+      completedAt: "2026-10-12T10:10:05.000Z",
+    }));
+    source.emitSession({
+      ...makeNodeTmuxSession("running"),
+      lastOutputAt: "2026-10-12T10:10:05.000Z",
+    });
+
+    await waitFor(
+      () => inspections === 5,
+      "multi-pane send failures consumed the retry budget per observation",
+      1000,
+    );
+    assert.equal(attempts, 12);
+    await new Promise<void>((resolve) => setTimeout(resolve, 30));
+    assert.equal(inspections, 5);
+    assert.equal(attempts, 12);
+  } finally {
+    stop();
+  }
+});
+
+test("retries transient structured inspection failures without retrying startup baseline failures", async () => {
+  const baselineFailureSource = new SnapshotSource({
+    items: [
+      {
+        ...makeNodeTmuxSession("running"),
+        lastOutputAt: "2026-10-12T10:20:00.000Z",
+      },
+    ],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-10-12T10:20:00.000Z",
+  });
+  let baselineInspections = 0;
+  const stopBaseline = new AgentCompletionFeishuNotifier({
+    source: baselineFailureSource,
+    settings: {
+      get: () => ({ configured: true, enabled: true }),
+    },
+    contentResolver: {
+      resolve: async () => null,
+      inspectLatestCompletions: async () => {
+        baselineInspections += 1;
+        throw new Error("temporary startup read failure");
+      },
+    },
+    structuredCompletionProbeDelayMs: 0,
+    structuredCompletionProbeIntervalMs: 5,
+    sender: {
+      send: async () => {
+        throw new Error("should not send");
+      },
+    },
+    logError: () => {},
+  }).start();
+
+  try {
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    assert.equal(baselineInspections, 1);
+  } finally {
+    stopBaseline();
+  }
+
+  const source = new SnapshotSource({
+    items: [
+      {
+        ...makeNodeTmuxSession("running"),
+        lastOutputAt: "2026-10-12T10:21:00.000Z",
+      },
+    ],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-10-12T10:21:00.000Z",
+  });
+  let mode: "baseline" | "failing" | "restored" = "baseline";
+  let failureCount = 0;
+  let inspections = 0;
+  const sent: FeishuCompletionEvent[] = [];
+  const stop = new AgentCompletionFeishuNotifier({
+    source,
+    settings: {
+      get: () => ({ configured: true, enabled: true }),
+    },
+    contentResolver: {
+      resolve: async () => null,
+      inspectLatestCompletions: async () => {
+        inspections += 1;
+        if (mode === "failing" && failureCount < 2) {
+          failureCount += 1;
+          throw new Error("temporary completion read failure");
+        }
+        return [
+          mode === "baseline"
+            ? {
+                codexThreadId: "codex-thread-inspect-retry",
+                completionId: "turn-existing",
+                content: "旧完成",
+                completedAt: "2026-10-12T10:20:00.000Z",
+              }
+            : {
+                codexThreadId: "codex-thread-inspect-retry",
+                completionId: "turn-new",
+                content: "异常恢复后的完成",
+                completedAt: "2026-10-12T10:21:05.000Z",
+              },
+        ];
+      },
+    },
+    structuredCompletionProbeDelayMs: 0,
+    structuredCompletionProbeIntervalMs: 5,
+    sender: {
+      send: async (event) => {
+        sent.push(event);
+      },
+    },
+    logError: () => {},
+  }).start();
+
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    mode = "failing";
+    source.emitSession({
+      ...makeNodeTmuxSession("running"),
+      lastOutputAt: "2026-10-12T10:21:05.000Z",
+    });
+    await waitFor(() => failureCount === 2, "inspect failure was not retried");
+    mode = "restored";
+
+    await waitFor(
+      () => sent.length === 1,
+      "completion was not sent after inspect recovered",
+    );
+    assert.equal(inspections, 4);
+    assert.deepEqual(
+      sent.map((event) => ({
+        completionId: event.completionId,
+        summary: event.summary,
+      })),
+      [
+        {
+          completionId: "turn-new",
+          summary: "异常恢复后的完成",
+        },
+      ],
+    );
+  } finally {
+    stop();
+  }
+});
+
+test("retries a non-baseline structured probe that temporarily finds no completion", async () => {
+  const source = new SnapshotSource({
+    items: [
+      {
+        ...makeNodeTmuxSession("running"),
+        lastOutputAt: "2026-10-12T11:00:00.000Z",
+      },
+    ],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-10-12T11:00:00.000Z",
+  });
+  let mode: "baseline" | "missing" | "restored" = "baseline";
+  const sent: FeishuCompletionEvent[] = [];
+  let inspections = 0;
+  const stop = new AgentCompletionFeishuNotifier({
+    source,
+    settings: {
+      get: () => ({ configured: true, enabled: true }),
+    },
+    contentResolver: {
+      resolve: async () => null,
+      inspectLatestCompletions: async () => {
+        inspections += 1;
+        if (mode === "missing") {
+          return [];
+        }
+        return [
+          mode === "baseline"
+            ? {
+                codexThreadId: "codex-thread-empty-retry",
+                completionId: "turn-existing",
+                content: "旧完成",
+                completedAt: "2026-10-12T10:59:00.000Z",
+              }
+            : {
+                codexThreadId: "codex-thread-empty-retry",
+                completionId: "turn-restored",
+                content: "恢复后读到的新完成",
+                completedAt: "2026-10-12T11:00:05.000Z",
+              },
+        ];
+      },
+    },
+    structuredCompletionProbeDelayMs: 0,
+    structuredCompletionProbeIntervalMs: 5,
+    sender: {
+      send: async (event) => {
+        sent.push(event);
+      },
+    },
+  }).start();
+
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    mode = "missing";
+    source.emitSession({
+      ...makeNodeTmuxSession("running"),
+      lastOutputAt: "2026-10-12T11:00:05.000Z",
+    });
+    await waitFor(() => inspections >= 2, "missing completion was not probed");
+    mode = "restored";
+
+    await waitFor(() => sent.length === 1, "restored completion was not sent");
+    assert.deepEqual(
+      sent.map((event) => ({
+        completionId: event.completionId,
+        summary: event.summary,
+      })),
+      [
+        {
+          completionId: "turn-restored",
+          summary: "恢复后读到的新完成",
+        },
+      ],
+    );
+  } finally {
+    stop();
+  }
+});
+
+test("does not retry an empty startup baseline or revive a shouldNotify false turn", async () => {
+  const source = new SnapshotSource({
+    items: [
+      {
+        ...makeNodeTmuxSession("running"),
+        lastOutputAt: "2026-10-12T12:00:00.000Z",
+      },
+    ],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-10-12T12:00:00.000Z",
+  });
+  let observations: FeishuCompletionObservation[] = [];
+  let inspections = 0;
+  const sent: FeishuCompletionEvent[] = [];
+  const stop = new AgentCompletionFeishuNotifier({
+    source,
+    settings: {
+      get: () => ({ configured: true, enabled: true }),
+    },
+    contentResolver: {
+      resolve: async () => null,
+      inspectLatestCompletions: async () => {
+        inspections += 1;
+        return observations;
+      },
+    },
+    structuredCompletionProbeDelayMs: 0,
+    structuredCompletionProbeIntervalMs: 5,
+    sender: {
+      send: async (event) => {
+        sent.push(event);
+      },
+    },
+  }).start();
+
+  try {
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    assert.equal(inspections, 1);
+
+    observations = [
+      {
+        codexThreadId: "codex-thread-muted",
+        completionId: "turn-muted",
+        content: "不应发送",
+        completedAt: "2026-10-12T12:00:05.000Z",
+        shouldNotify: false,
+      },
+    ];
+    source.emitSession({
+      ...makeNodeTmuxSession("running"),
+      lastOutputAt: "2026-10-12T12:00:05.000Z",
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    observations = [
+      {
+        codexThreadId: "codex-thread-muted",
+        completionId: "turn-muted",
+        content: "仍不应补发",
+        completedAt: "2026-10-12T12:00:05.000Z",
+        shouldNotify: true,
+      },
+    ];
+    source.emitSession({
+      ...makeNodeTmuxSession("running"),
+      lastOutputAt: "2026-10-12T12:00:06.000Z",
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(sent.length, 0);
+  } finally {
+    stop();
+  }
+});
+
+test("bounds empty structured probe retries and clears them when the session is removed or stopped", async () => {
+  const source = new SnapshotSource({
+    items: [
+      {
+        ...makeNodeTmuxSession("running"),
+        lastOutputAt: "2026-10-12T13:00:00.000Z",
+      },
+    ],
+    activeAgentSessionId: "session-1",
+    updatedAt: "2026-10-12T13:00:00.000Z",
+  });
+  let inspections = 0;
+  let removeAfterNextInspection = false;
+  let stopAfterNextInspection = false;
+  let stop: (() => void) | undefined;
+  stop = new AgentCompletionFeishuNotifier({
+    source,
+    settings: {
+      get: () => ({ configured: true, enabled: true }),
+    },
+    contentResolver: {
+      resolve: async () => null,
+      inspectLatestCompletions: async () => {
+        inspections += 1;
+        if (removeAfterNextInspection) {
+          removeAfterNextInspection = false;
+          queueMicrotask(() => source.removeSession("session-1"));
+        }
+        if (stopAfterNextInspection) {
+          stopAfterNextInspection = false;
+          queueMicrotask(() => stop?.());
+        }
+        return inspections === 1
+          ? [
+              {
+                codexThreadId: "codex-thread-bounded",
+                completionId: "turn-existing",
+                content: "旧完成",
+                completedAt: "2026-10-12T12:59:00.000Z",
+              },
+            ]
+          : [];
+      },
+    },
+    structuredCompletionProbeDelayMs: 0,
+    structuredCompletionProbeIntervalMs: 5,
+    sender: {
+      send: async () => {
+        throw new Error("should not send");
+      },
+    },
+    logError: () => {},
+  }).start();
+
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    source.emitSession({
+      ...makeNodeTmuxSession("running"),
+      lastOutputAt: "2026-10-12T13:00:05.000Z",
+    });
+    await waitFor(
+      () => inspections === 5,
+      "empty probe did not stop after three retries",
+      1000,
+    );
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    assert.equal(inspections, 5);
+
+    source.emitSession({
+      ...makeNodeTmuxSession("running"),
+      lastOutputAt: "2026-10-12T13:00:06.000Z",
+    });
+    await waitFor(
+      () => inspections === 9,
+      "new output did not reset retry budget",
+      1000,
+    );
+
+    removeAfterNextInspection = true;
+    source.emitSession({
+      ...makeNodeTmuxSession("running"),
+      lastOutputAt: "2026-10-12T13:00:07.000Z",
+    });
+    await waitFor(() => inspections >= 10, "new output was not inspected");
+    await new Promise<void>((resolve) => setTimeout(resolve, 80));
+    assert.equal(inspections, 10);
+
+    stopAfterNextInspection = true;
+    source.emitSession({
+      ...makeNodeTmuxSession("running"),
+      lastOutputAt: "2026-10-12T13:00:08.000Z",
+    });
+    await waitFor(() => inspections >= 11, "session restore was not inspected");
+    await new Promise<void>((resolve) => setTimeout(resolve, 80));
+    assert.equal(inspections, 11);
+  } finally {
+    stop?.();
   }
 });
 

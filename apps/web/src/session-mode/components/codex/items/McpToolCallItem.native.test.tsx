@@ -1,8 +1,13 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { useEditorStore } from "@session/stores/useEditorStore";
 import { useLayoutStore } from "@session/stores";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
+import { resolveWorkspaceFileReference } from "@session/services/workspaceFiles";
 import { McpToolCallItem } from "./McpToolCallItem";
+vi.mock("@session/services/workspaceFiles", () => ({
+  resolveWorkspaceFileReference: vi.fn(async () => ({ root: "/registered", path: "/registered/note.md" })),
+}));
 vi.mock("@session/contexts/ThemeContext", () => ({
   useThemeContext: () => ({ resolvedTheme: "dark" }),
 }));
@@ -105,7 +110,7 @@ it("renders mixed native content as media and resources with a separate raw view
   ).toBeTruthy();
 });
 
-it("opens a resource from the plugin open-in menu", () => {
+it("opens a resolved resource from the plugin open-in menu", async () => {
   const writeText = vi.fn().mockResolvedValue(undefined);
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
@@ -117,6 +122,7 @@ it("opens a resource from the plugin open-in menu", () => {
     revealLocation: null,
   });
   useLayoutStore.setState({ isRightPanelOpen: false });
+  useWorkspaceStore.setState({ cwd: "/project" });
   render(
     <McpToolCallItem
       item={
@@ -152,8 +158,9 @@ it("opens a resource from the plugin open-in menu", () => {
   expect(writeText).toHaveBeenCalledWith("https://example.invalid/resource");
   fireEvent.click(screen.getAllByRole("button", { name: "打开方式" })[1]);
   fireEvent.click(screen.getByRole("menuitem", { name: "在文件管理器中显示" }));
-  expect(useLayoutStore.getState().isRightPanelOpen).toBe(true);
-  expect(useEditorStore.getState().activeFile).toBe("/project/note.md");
+  await waitFor(() => expect(useLayoutStore.getState().isRightPanelOpen).toBe(true));
+  expect(resolveWorkspaceFileReference).toHaveBeenCalledWith("/project", "/project/note.md");
+  expect(useEditorStore.getState().activeFile).toBe("/registered/note.md");
 });
 
 it("labels projected MCP details as unloaded without inventing an empty result or raw response", () => {

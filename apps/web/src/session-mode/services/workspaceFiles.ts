@@ -17,6 +17,11 @@ export const workspaceFileRequest = <T>(action: string, body: unknown) =>
   postJsonWithOptions<T>("/workspace-files/" + action, body, {
     suppressToast: true,
   });
+export const resolveWorkspaceFileReference = (root: string, path: string) =>
+  workspaceFileRequest<{ root: string; path: string }>("resolve", {
+    root,
+    path,
+  });
 export const readWorkspaceVisualization = (root: string, path: string) =>
   workspaceFileRequest<TextSnapshot>("visualization", { root, path });
 export const readWorkspaceText = (root: string, path: string) =>

@@ -9,6 +9,7 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
+import { openWorkspaceFileReference } from "@session/services/openWorkspaceFileReference";
 import {
   Streamdown,
   defaultRemarkPlugins,
@@ -20,11 +21,9 @@ import { codexCode as code } from "./codexCode";
 import { createMathPlugin } from "@streamdown/math";
 import { nativeMermaid as mermaid } from "./nativeMermaidLayout";
 import { VisualizationContent } from "@session/features/visualizations/VisualizationContent";
-import { useEditorStore } from "@session/stores/useEditorStore";
 import { openVsCodePanel } from "@session/stores/useVsCodePanelStore";
 import { editorHostFor } from "@session/features/codex-host/bridge";
 import { sessionDraftKey } from "@session/stores/useSessionDraftStore";
-import { useLayoutStore } from "@session/stores";
 import { parseFileReference, resolveLiteralFilePath } from "./fileReference";
 import {
   decodeNativeFileCitation,
@@ -251,36 +250,26 @@ export function CodexMarkdown({
                 toast.error("引用文件不属于原会话项目，未打开其他项目文件");
                 return;
               }
-              useEditorStore
-                .getState()
-                .revealFile(
-                  reference.path,
-                  root,
-                  reference.line,
-                  1,
-                  reference.endLine,
-                );
-              const layout = useLayoutStore.getState();
-              layout.setActiveRightPanelTab("files");
-              layout.setRightPanelOpen(true);
-              const host = editorHostFor({
-                cwd: root,
-                threadId: captured.threadId ?? null,
-                draftOwner: sessionDraftKey(
-                  "codex",
-                  captured.threadId ?? null,
-                  root,
-                ),
-              });
-              if (host) {
-                openVsCodePanel();
-                void host.command({
-                  type: "openLocation",
-                  path: reference.path,
-                  line: reference.line,
-                  column: 1,
+              void openWorkspaceFileReference(reference, root, (target) => {
+                const host = editorHostFor({
+                  cwd: target.root,
+                  threadId: captured.threadId ?? null,
+                  draftOwner: sessionDraftKey(
+                    "codex",
+                    captured.threadId ?? null,
+                    target.root,
+                  ),
                 });
-              }
+                if (host) {
+                  openVsCodePanel();
+                  void host.command({
+                    type: "openLocation",
+                    path: target.path,
+                    line: reference.line,
+                    column: 1,
+                  });
+                }
+              });
             }}
           />
         );
@@ -360,17 +349,7 @@ export function CodexMarkdown({
               if (!file) return;
               event.preventDefault();
               event.stopPropagation();
-              useEditorStore
-                .getState()
-                .revealFile(
-                  file.path,
-                  cwd ?? undefined,
-                  file.line,
-                  file.column,
-                );
-              const layout = useLayoutStore.getState();
-              layout.setActiveRightPanelTab("files");
-              layout.setRightPanelOpen(true);
+              void openWorkspaceFileReference(file, cwd);
             }}
           >
             {file ? (

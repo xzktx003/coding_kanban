@@ -1,9 +1,17 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { CodexMarkdown } from "./CodexMarkdown";
 import { useCodexStore } from "../stores/useCodexStore";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { useEditorStore } from "@session/stores/useEditorStore";
+import { resolveWorkspaceFileReference } from "@session/services/workspaceFiles";
+
+vi.mock("@session/services/workspaceFiles", () => ({
+  resolveWorkspaceFileReference: vi.fn(async (root: string, path: string) => ({
+    root,
+    path,
+  })),
+}));
 vi.mock("@session/contexts/ThemeContext", () => ({
   useThemeContext: () => ({ resolvedTheme: "dark" }),
 }));
@@ -19,8 +27,11 @@ beforeEach(() => {
   });
   useWorkspaceStore.setState({ cwd: "/other" });
   useEditorStore.getState().resetFiles();
+  vi.mocked(resolveWorkspaceFileReference).mockImplementation(
+    async (root: string, path: string) => ({ root, path }),
+  );
 });
-it("renders a native directive and a second-paragraph legacy citation as captured-owner range actions", () => {
+it("renders a native directive and a second-paragraph legacy citation as captured-owner range actions", async () => {
   render(
     <CodexMarkdown
       threadId="citation-owner"
@@ -30,7 +41,11 @@ it("renders a native directive and a second-paragraph legacy citation as capture
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: /file\.ts.*42-45/ }));
-  expect(useEditorStore.getState().roots["/owner/src/file.ts"]).toBe("/owner");
+  await waitFor(() =>
+    expect(useEditorStore.getState().roots["/owner/src/file.ts"]).toBe(
+      "/owner",
+    ),
+  );
   expect(useEditorStore.getState().revealLocation).toMatchObject({
     path: "/owner/src/file.ts",
     line: 42,
@@ -39,11 +54,13 @@ it("renders a native directive and a second-paragraph legacy citation as capture
   fireEvent.keyDown(screen.getByRole("button", { name: /second\.py.*8-9/ }), {
     key: "Enter",
   });
-  expect(useEditorStore.getState().revealLocation).toMatchObject({
-    path: "/owner/src/second.py",
-    line: 8,
-    endLine: 9,
-  });
+  await waitFor(() =>
+    expect(useEditorStore.getState().revealLocation).toMatchObject({
+      path: "/owner/src/second.py",
+      line: 8,
+      endLine: 9,
+    }),
+  );
   expect(useWorkspaceStore.getState().cwd).toBe("/other");
 });
 it.each(["inline code", "fenced code", "escaped", "HTML", "Markdown link"])(

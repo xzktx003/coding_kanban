@@ -1,9 +1,8 @@
+import { openWorkspaceFileReference } from "@session/services/openWorkspaceFileReference";
 import { useState } from "react";
 import { CodexImage } from "./CodexImage";
 import { useCodexContentOwner } from "./ownerContext";
 import { parseFileReference } from "./fileReference";
-import { useEditorStore } from "@session/stores/useEditorStore";
-import { useLayoutStore } from "@session/stores";
 import { nativeMediaUrl } from "./nativeMedia";
 import { nativeToolJson } from "./nativeToolSemantics";
 import "../items/tool-native.css";
@@ -35,12 +34,7 @@ function openResourceFile(
   file: NonNullable<ReturnType<typeof parseFileReference>>,
   cwd: string | null | undefined,
 ) {
-  useEditorStore
-    .getState()
-    .revealFile(file.path, cwd ?? undefined, file.line, file.column);
-  const layout = useLayoutStore.getState();
-  layout.setActiveRightPanelTab("files");
-  layout.setRightPanelOpen(true);
+  void openWorkspaceFileReference(file, cwd);
 }
 
 function ResourceOpenMenu({
