@@ -1,15 +1,19 @@
 import { ArrowLeft } from "lucide-react";
+import { ConversationMenu } from "../codex/composer/ConversationMenu";
+import { useCodexStore } from "../codex/stores/useCodexStore";
 import { useLayoutStore } from "../../stores/useLayoutStore";
 import { secondaryPages } from "../../services/sessionPageHistory";
 import { useActiveSessionProject } from "../../hooks/useActiveSessionProject";
 
 export function SessionSecondaryHeader() {
   const { view, setView } = useLayoutStore();
+  const threadId = useCodexStore((state) => state.currentThreadId);
   const project = useActiveSessionProject();
   const page = secondaryPages.find((item) => item.view === view);
   if (!page) return null;
   return <header className="session-secondary-header">
     <button type="button" className="session-return-button" onClick={() => setView("agent")}><ArrowLeft size={16} aria-hidden="true" />返回会话</button>
+    <ConversationMenu threadId={threadId} title="当前会话" />
     <h1 tabIndex={-1} data-session-page-heading>{page.label}</h1>
     <select aria-label="切换功能页" value={page.view} onChange={(event) => {
       const next = secondaryPages.find((item) => item.view === event.target.value);

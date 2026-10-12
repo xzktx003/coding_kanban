@@ -1,23 +1,26 @@
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile, readFile, open, stat, chmod } from 'node:fs/promises';
 import { join, dirname, isAbsolute } from 'node:path';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
 import { validateOptions, validateDirectories, buildHostArgs, buildChildEnv, assertPortAvailable, OwnedProcesses, readPasswordFile, assertFreshOutput } from './host.mjs';
 import { createFixtureThreads } from './fixtures.mjs';
 import { buildCompanionVsix } from './vsix.mjs';
+import { importConnectionProfile } from './connection-profile.mjs';
 const args = process.argv.slice(2); const input = {};
-const fields = { 'runtime-root': 'runtimeRoot', 'code-server': 'codeServer', 'official-vsix': 'officialVsix', 'codex-cli': 'codexCli', port: 'port', 'broker-port': 'brokerPort', 'user-data-dir': 'userDataDir', 'extensions-dir': 'extensionsDir', 'project-dir': 'projectDir', 'codex-home': 'codexHome', 'process-home': 'processHome', cert: 'cert', 'cert-key': 'certKey', record: 'record', 'threads-file': 'threadsFile', 'password-file': 'passwordFile' };
-let createThreads = false; let autoOpenFixtures = false;
+const fields = { 'runtime-root': 'runtimeRoot', 'code-server': 'codeServer', 'official-vsix': 'officialVsix', 'codex-cli': 'codexCli', port: 'port', 'broker-port': 'brokerPort', 'user-data-dir': 'userDataDir', 'extensions-dir': 'extensionsDir', 'project-dir': 'projectDir', 'codex-home': 'codexHome', 'process-home': 'processHome', cert: 'cert', 'cert-key': 'certKey', record: 'record', 'threads-file': 'threadsFile', 'password-file': 'passwordFile', 'connection-profile-home': 'connectionProfileHome' };
+let createThreads = false; let autoOpenFixtures = false; let autoOpenNewChats = false;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--create-threads') { createThreads = true; continue; }
   if (args[i] === '--auto-open-fixtures') { autoOpenFixtures = true; continue; }
+  if (args[i] === '--auto-open-new-chats') { autoOpenNewChats = true; continue; }
   if (args[i] === '--unsafe-no-auth') { input.unsafeNoAuth = true; continue; }
   const field = fields[args[i].replace(/^--/, '')];
   if (!args[i].startsWith('--') || !field || !args[i + 1] || args[i + 1].startsWith('--')) throw new Error('unknown or missing launcher argument');
   input[field] = args[++i];
 }
 for (const [key, field] of Object.entries(fields)) input[field] ??= process.env[`NATIVE_CODEX_${key.toUpperCase().replaceAll('-', '_')}`];
+if (autoOpenNewChats && (autoOpenFixtures || createThreads || input.threadsFile)) throw new Error('new-chat and fixture startup options are mutually exclusive');
 const options = validateOptions(input);
 if (!options.brokerPort) throw new Error('explicit broker-port required');
 if (!options.record || !isAbsolute(options.record)) throw new Error('explicit absolute ignored record path required');
@@ -41,12 +44,13 @@ try {
   for (const name of ['code-server.yaml', 'companion-auth.json', 'threads.json', 'native-codex-companion.vsix', 'install.log', 'host.log', 'fixture-app-server.log', 'companion-ready.json']) await assertFreshOutput(join(options.runtimeRoot, name));
   await assertFreshOutput(options.record);
   await validateDirectories(options);
+  const connectionProfile = await importConnectionProfile(options);
   owned.assertRunning();
   for (const file of [options.codeServer, options.codexCli, options.officialVsix, ...(options.cert ? [options.cert, options.certKey] : [])]) if (!(await stat(file)).isFile()) throw new Error('configured tool or input must be a file');
   await mkdir(join(options.runtimeRoot, 'tmp'), { mode: 0o700, recursive: true });
   owned.assertRunning();
   await writeFile(join(options.runtimeRoot, 'code-server.yaml'), `auth: ${password === null ? 'none' : 'password'}\n${password === null ? '' : `password: ${JSON.stringify(password)}\n`}disable-telemetry: true\ndisable-update-check: true\n`, { mode: 0o600, flag: 'wx' });
-  const fixture = createThreads ? await createFixtureThreads(options, owned) : { threads: JSON.parse(await readFile(options.threadsFile, 'utf8')).threads };
+  const fixture = autoOpenNewChats ? { threads: [] } : createThreads ? await createFixtureThreads(options, owned) : { threads: JSON.parse(await readFile(options.threadsFile, 'utf8')).threads };
   owned.assertRunning();
   const threads = fixture.threads.map(thread => typeof thread === 'string' ? thread : thread.id);
   const { default: control } = await import('./companion/control.cjs');
@@ -54,7 +58,8 @@ try {
   if (autoOpenFixtures) control.validateFixturePanels(threads.slice(0, 2));
   const authFile = join(options.runtimeRoot, 'companion-auth.json');
   owned.assertRunning();
-  await writeFile(authFile, JSON.stringify({ port: options.brokerPort, token: randomBytes(32).toString('hex'), threads, autoOpenFixtures }), { mode: 0o600, flag: 'wx' }); await chmod(authFile, 0o600);
+  const newChatWindowIds = autoOpenNewChats ? [randomUUID(), randomUUID()] : undefined;
+  await writeFile(authFile, JSON.stringify({ port: options.brokerPort, token: randomBytes(32).toString('hex'), threads, autoOpenFixtures, autoOpenNewChats, ...(newChatWindowIds ? { newChatWindowIds } : {}) }), { mode: 0o600, flag: 'wx' }); await chmod(authFile, 0o600);
   await writeFile(join(options.runtimeRoot, 'threads.json'), JSON.stringify(fixture, null, 2), { mode: 0o600, flag: 'wx' });
   const installArgs = ['--config', join(options.runtimeRoot, 'code-server.yaml'), '--user-data-dir', options.userDataDir, '--extensions-dir', options.extensionsDir,
     '--install-extension', options.officialVsix, '--force'];
@@ -78,7 +83,7 @@ try {
     runtimeRoot: options.runtimeRoot, userDataDir: options.userDataDir, extensionsDir: options.extensionsDir, projectDir: options.projectDir,
     codexHome: options.codexHome, processHome: options.processHome, tempDir: join(options.runtimeRoot, 'tmp'), ipcSocket: join(options.codexHome, 'ipc', 'ipc.sock'),
     brokerAuthFile: authFile, threads: fixture.threads, fixtureAppServerPid: fixture.appServerPid, fixtureAppServerStopped: createThreads,
-    officialVsix: options.officialVsix, officialVsixSha256: createHash('sha256').update(await readFile(options.officialVsix)).digest('hex') };
+    officialVsix: options.officialVsix, officialVsixSha256: createHash('sha256').update(await readFile(options.officialVsix)).digest('hex'), connectionProfile, panelMode: autoOpenNewChats ? 'new-chats' : 'fixtures', ...(newChatWindowIds ? { newChatWindowIds } : {}) };
   await mkdir(dirname(options.record), { recursive: true });
   owned.assertRunning();
   await writeFile(options.record, JSON.stringify(record, null, 2), { mode: 0o600, flag: 'wx' });

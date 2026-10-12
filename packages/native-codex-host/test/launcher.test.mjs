@@ -69,3 +69,26 @@ test('launcher refuses auto-open without two distinct captured fixtures before i
     await assert.rejects(lstat(join(data.root, 'companion-auth.json')), { code: 'ENOENT' });
   } finally { await rm(data.base, { recursive: true, force: true }); }
 });
+
+test('explicit live new-chat launch imports only private connection and captures two unique native window IDs', async()=>{
+ const data=await fixture('process.exit(0);');const source=join(data.base,'source');
+ try{
+  const {mkdir}=await import('node:fs/promises');await mkdir(source,{mode:0o700});
+  const auth=JSON.stringify({auth_mode:'chatgpt',tokens:{access_token:'test-launch-secret'}});
+  await writeFile(join(source,'auth.json'),auth,{mode:0o600});await writeFile(join(source,'config.toml'),'model="gpt-test"\n',{mode:0o600});
+  const index=data.args.indexOf('--threads-file');const args=data.args.slice(0,index);
+  const result=await run([...args,'--unsafe-no-auth','--auto-open-new-chats','--connection-profile-home',source]);assert.equal(result.code,0,result.output);
+  const config=JSON.parse(await readFile(join(data.root,'companion-auth.json'),'utf8'));
+  assert.equal(config.autoOpenNewChats,true);assert.equal(config.autoOpenFixtures,false);assert.deepEqual(config.threads,[]);
+  assert.equal(config.newChatWindowIds.length,2);assert.notEqual(config.newChatWindowIds[0],config.newChatWindowIds[1]);
+  const record=await readFile(join(data.base,'record.json'),'utf8');assert.equal(record.includes('test-launch-secret'),false);assert.equal(result.output.includes('test-launch-secret'),false);
+  assert.equal(await readFile(join(data.root,'c','auth.json'),'utf8'),auth);assert.equal(await readFile(join(source,'auth.json'),'utf8'),auth);
+ }finally{await rm(data.base,{recursive:true,force:true})}
+});
+
+test('new-chat startup cannot also open fixture threads',async()=>{
+ const data=await fixture('process.exit(0);');try{
+  const result=await run([...data.args,'--unsafe-no-auth','--auto-open-new-chats','--auto-open-fixtures']);assert.equal(result.code,1);assert.match(result.output,/new.chat.*fixture|exclusive/);
+  await assert.rejects(lstat(join(data.root,'install.log')),{code:'ENOENT'});
+ }finally{await rm(data.base,{recursive:true,force:true})}
+});

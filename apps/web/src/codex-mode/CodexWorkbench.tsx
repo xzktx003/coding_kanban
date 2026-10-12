@@ -24,6 +24,8 @@ export default function CodexWorkbench({
   const [loadError, setLoadError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [panels, setPanels] = useState(0);
+  const [readyPanels, setReadyPanels] = useState(0);
+  const [hostUrl, setHostUrl] = useState<string | null>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const surface = useRef<ReturnType<typeof mountNativeSurface> | null>(null);
   const activeRef = useRef(active);
@@ -47,8 +49,11 @@ export default function CodexWorkbench({
         )
           throw new Error("Codex 服务返回了无效状态");
         const next = value as NativeStatus;
-        if (next.available && !nativeIframeUrl(next.iframeUrl, location.origin))
-          throw new Error("Codex 界面地址不可用");
+        const nextUrl = next.available
+          ? nativeIframeUrl(next.iframeUrl, location.origin)
+          : null;
+        if (next.available && !nextUrl) throw new Error("Codex 界面地址不可用");
+        if (nextUrl) setHostUrl((current) => current ?? nextUrl);
         setStatus(next);
         setError(null);
       } catch (cause) {
@@ -70,23 +75,18 @@ export default function CodexWorkbench({
     [],
   );
   useEffect(() => {
-    if (!active || !status?.available || panels) return;
+    if (!active || !status?.available || (panels > 0 && readyPanels === panels)) return;
     const timer = window.setTimeout(
       () => setLoadError("原生 Codex 界面未能加载，请重试连接"),
       60_000,
     );
     return () => window.clearTimeout(timer);
-  }, [active, status, panels]);
-  const url = status?.available
-    ? nativeIframeUrl(status.iframeUrl, location.origin)
-    : null;
+  }, [active, status, panels, readyPanels]);
+  const url = hostUrl;
   const retryConnection = () => {
-    surface.current?.dispose();
-    surface.current = null;
     setStatus(null);
     setError(null);
     setLoadError(null);
-    setPanels(0);
     setRetry((value) => value + 1);
   };
   return (
@@ -106,6 +106,7 @@ export default function CodexWorkbench({
         <strong>Codex</strong>
         <span>独立开发会话</span>
         {panels > 0 && <span>{panels} 个窗口</span>}
+        {panels > readyPanels && <span role="status">正在加载窗口（{readyPanels}/{panels}）</span>}
         <button type="button" onClick={retryConnection}>
           重试连接
         </button>
@@ -113,14 +114,14 @@ export default function CodexWorkbench({
       <main className="codex-mode-canvas">
         {url && (
           <iframe
-            key={`${url}:${retry}`}
+            key={url}
             ref={frame}
             title="原生 Codex 会话窗口"
             src={url}
             allow="clipboard-read; clipboard-write; fullscreen"
             tabIndex={active ? 0 : -1}
             className="codex-mode-frame"
-            style={{ opacity: panels ? 1 : 0 }}
+            style={{ opacity: readyPanels ? 1 : 0 }}
             onLoad={() => {
               surface.current?.dispose();
               surface.current = null;
@@ -129,6 +130,8 @@ export default function CodexWorkbench({
                 if (!document) throw new Error("原生 Codex 界面暂时无法连接");
                 const next = mountNativeSurface(document, (count) => {
                   setPanels(count);
+                }, (count) => {
+                  setReadyPanels(count);
                   if (count > 0) setLoadError(null);
                 });
                 surface.current = next;
@@ -143,7 +146,7 @@ export default function CodexWorkbench({
             }}
           />
         )}
-        {(!status || !status.available || !panels || error || loadError) && (
+        {(!status || !status.available || !readyPanels || error || loadError) && (
           <div
             className="codex-mode-state"
             role={

@@ -113,3 +113,58 @@ it("removes the original overlay container clip without changing its inline geom
   expect(parent.getAttribute("data-kanban-native-container")).toBeNull();
   expect(parent.getAttribute("style")).toBe(original);
 });
+
+function nativeContentFixture() {
+  const frame = document.createElement("iframe");
+  frame.className = "webview ready";
+  frame.src = `${location.origin}/native-codex/static/out/vs/workbench/contrib/webview/browser/pre/index.html?extensionId=openai.chatgpt`;
+  document.body.append(frame);
+  const outer = frame.contentDocument!;
+  outer.open();
+  outer.write('<!doctype html><html><body><iframe id="active-frame"></iframe></body></html>');
+  outer.close();
+  const inner = outer.querySelector<HTMLIFrameElement>("#active-frame")!;
+  const app = inner.contentDocument!;
+  app.body.innerHTML = '<div id="root"><div class="startup-loader"></div></div>';
+  return { frame, app };
+}
+
+it("does not report transport-ready windows as usable until the original app has rendered", async () => {
+  const { frame, app } = nativeContentFixture();
+  const windows: number[] = [];
+  const ready: number[] = [];
+  const surface = mountNativeSurface(document, c => windows.push(c), c => ready.push(c));
+  dispose = () => surface.dispose();
+  surface.start();
+  expect(windows).toEqual([1]);
+  expect(ready.at(-1)).toBe(0);
+  app.querySelector("#root")!.innerHTML = '<button>Sign in with ChatGPT</button>';
+  await new Promise(r => setTimeout(r, 40));
+  expect(ready.at(-1)).toBe(1);
+  expect(frame.parentElement).toBe(document.body);
+});
+
+it("pauses content readiness observation when hidden and catches up without polling on return", async () => {
+  const { app } = nativeContentFixture();
+  app.querySelector("#root")!.innerHTML = '<button>Next</button>';
+  const ready: number[] = [];
+  const surface = mountNativeSurface(document, () => {}, c => ready.push(c));
+  dispose = () => surface.dispose();
+  surface.start();
+  expect(ready.at(-1)).toBe(1);
+  surface.pause();
+  const previous = ready.length;
+  app.querySelector("#root")!.replaceChildren();
+  await new Promise(r => setTimeout(r, 40));
+  expect(ready).toHaveLength(previous);
+  surface.start();
+  expect(ready.at(-1)).toBe(0);
+  app.querySelector("#root")!.innerHTML = '<button>Send</button>';
+  await new Promise(r => setTimeout(r, 40));
+  expect(ready.at(-1)).toBe(1);
+  surface.dispose();
+  const final = ready.length;
+  app.querySelector("#root")!.replaceChildren();
+  await new Promise(r => setTimeout(r, 40));
+  expect(ready).toHaveLength(final);
+});

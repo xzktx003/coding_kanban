@@ -4,7 +4,7 @@ const http = require('node:http');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const vscode = require('vscode');
-const { openThread, threadUri, validateFixturePanels, openFixturePanels } = require('./control.cjs');
+const { openThread, threadUri, validateFixturePanels, openFixturePanels, validateNewChatPanels, openNewChatPanels } = require('./control.cjs');
 let server; let disposeActivation;
 function secureRead(file) {
   if (!file || !path.isAbsolute(file)) throw new Error('explicit companion config path required');
@@ -23,14 +23,20 @@ async function activate(context) {
   if (!Number.isInteger(config.port) || config.port < 1024 || config.port > 65535) throw new Error('private companion port invalid');
   if (!Array.isArray(config.threads) || config.threads.length > 16 || typeof config.token !== 'string' || config.token.length < 32) throw new Error('invalid companion config');
   if (Object.hasOwn(config, 'autoOpenFixtures') && typeof config.autoOpenFixtures !== 'boolean') throw new Error('autoOpenFixtures must be a boolean');
+  if (Object.hasOwn(config, 'autoOpenNewChats') && typeof config.autoOpenNewChats !== 'boolean') throw new Error('autoOpenNewChats must be a boolean');
+  if (config.autoOpenFixtures === true && config.autoOpenNewChats === true) throw new Error('fixture and new chat startup are mutually exclusive');
+  if (Object.hasOwn(config, 'newChatWindowIds')) validateNewChatPanels(config.newChatWindowIds);
   for (const id of config.threads) threadUri(id, config.threads);
   const opened = []; let opening = false;
   const fixtures = Object.freeze(config.threads.slice(0, 2));
   const autoOpenFixtures = { enabled: config.autoOpenFixtures === true, state: config.autoOpenFixtures === true ? 'pending' : 'disabled' };
+  const newChatWindows = Object.freeze((config.newChatWindowIds ?? []).slice());
+  const autoOpenNewChats = { enabled: config.autoOpenNewChats === true, state: config.autoOpenNewChats === true ? 'pending' : 'disabled' };
   if (autoOpenFixtures.enabled) validateFixturePanels(fixtures);
-  let disposed = false; let commandDisposable; let ownedServer;
+  if (autoOpenNewChats.enabled) validateNewChatPanels(newChatWindows);
+  let disposed = false; const commandDisposables = []; let ownedServer;
   const assertActive = () => { if (disposed) throw new Error('companion instance disposed'); };
-  disposeActivation = () => { disposed = true; commandDisposable?.dispose(); ownedServer?.close(); if (server === ownedServer) server = null; };
+  disposeActivation = () => { disposed = true; for (const item of commandDisposables) item.dispose(); ownedServer?.close(); if (server === ownedServer) server = null; };
   context.subscriptions.push({ dispose: disposeActivation });
   const instanceId = crypto.randomUUID();
   const broker = { enabled: false, scope: 'first-listener-instance', pid: process.pid, instanceId };
@@ -39,24 +45,29 @@ async function activate(context) {
   try { if (official) await official.activate(); } catch (error) { activationError = String(error.message); }
   if (disposed) return;
   const remember = results => { opened.push(...results); while (opened.length > 32) opened.shift(); };
-  const openCapturedFixtures = async () => {
+  const openCapturedPanels = async (openPanels, identities) => {
     assertActive();
     if (opening) throw new Error('panel opening in progress');
     opening = true;
-    try { const results = await openFixturePanels(vscode, fixtures, assertActive); remember(results); return results; }
+    try { const results = await openPanels(vscode, identities, assertActive); remember(results); return results; }
     finally { opening = false; }
   };
-  commandDisposable = vscode.commands.registerCommand('nativeCodexPrototype.openTwoTestPanels', async (...args) => {
+  const openCapturedFixtures = () => openCapturedPanels(openFixturePanels, fixtures);
+  const openCapturedNewChats = () => openCapturedPanels(openNewChatPanels, newChatWindows);
+  commandDisposables.push(vscode.commands.registerCommand('nativeCodexPrototype.openTwoTestPanels', async (...args) => {
     if (args.length !== 0) throw new Error('test panel command accepts no arguments');
     return openCapturedFixtures();
-  });
-  context.subscriptions.push(commandDisposable);
+  }), vscode.commands.registerCommand('nativeCodexPrototype.openTwoNewChats', async (...args) => {
+    if (args.length !== 0) throw new Error('new chat panel command accepts no arguments');
+    return openCapturedNewChats();
+  }));
+  context.subscriptions.push(...commandDisposables);
   server = http.createServer(async (request, response) => {
     const send = (status, value) => { if (response.writableEnded || response.destroyed) return; response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); };
     const supplied = Buffer.from(request.headers.authorization || ''); const expected = Buffer.from(`Bearer ${config.token}`);
     if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return send(401, { error: 'unauthorized' });
     if (disposed) return send(503, { error: 'companion instance disposed' });
-    if (request.method === 'GET' && request.url === '/status') return send(200, { ...activationStatus(opened), activationError, broker, autoOpenFixtures });
+    if (request.method === 'GET' && request.url === '/status') return send(200, { ...activationStatus(opened), activationError, broker, autoOpenFixtures, autoOpenNewChats });
     if (request.method !== 'POST' || request.url !== '/open') return send(404, { error: 'unsupported operation' });
     if (opening) return send(409, { error: 'panel opening in progress' });
     opening = true;
@@ -95,13 +106,14 @@ async function activate(context) {
       broker.disabledReason = 'address-in-use';
     }
     if (disposed) return;
-    if (autoOpenFixtures.enabled) {
+    for (const [autoOpen, openPanels] of [[autoOpenFixtures, openCapturedFixtures], [autoOpenNewChats, openCapturedNewChats]]) {
+      if (!autoOpen.enabled) continue;
       if (activationError || !official?.isActive) {
-        autoOpenFixtures.state = 'failed'; autoOpenFixtures.error = 'official extension activation unavailable';
+        autoOpen.state = 'failed'; autoOpen.error = 'official extension activation unavailable';
       } else {
-        autoOpenFixtures.state = 'opening';
-        try { await openCapturedFixtures(); autoOpenFixtures.state = 'completed'; }
-        catch (error) { autoOpenFixtures.state = disposed ? 'cancelled' : 'failed'; autoOpenFixtures.error = String(error.message).slice(0, 240); }
+        autoOpen.state = 'opening';
+        try { await openPanels(); autoOpen.state = disposed ? 'cancelled' : 'completed'; }
+        catch (error) { autoOpen.state = disposed ? 'cancelled' : 'failed'; autoOpen.error = String(error.message).slice(0, 240); }
       }
     }
     if (disposed) return;
@@ -111,10 +123,11 @@ async function activate(context) {
     fs.writeFileSync(path.join(directory, `companion-instance-${process.pid}-${instanceId}.json`), JSON.stringify({
       pid: process.pid, activatedAt, companionActive: true, brokerEnabled: broker.enabled,
       brokerDisabledReason: broker.disabledReason ?? null, fixtureCount: fixtures.length,
-      autoOpenFixturesEnabled: autoOpenFixtures.enabled, autoOpenFixturesState: autoOpenFixtures.state
+      autoOpenFixturesEnabled: autoOpenFixtures.enabled, autoOpenFixturesState: autoOpenFixtures.state,
+      newChatWindowCount: newChatWindows.length, autoOpenNewChatsEnabled: autoOpenNewChats.enabled, autoOpenNewChatsState: autoOpenNewChats.state
     }, null, 2), { mode: 0o600, flag: 'wx' });
     if (broker.enabled) fs.writeFileSync(path.join(directory, 'companion-ready.json'), JSON.stringify({
-      pid: process.pid, activatedAt, ...activationStatus(opened), activationError, broker, autoOpenFixtures
+      pid: process.pid, activatedAt, ...activationStatus(opened), activationError, broker, autoOpenFixtures, autoOpenNewChats
     }, null, 2), { mode: 0o600 });
   } catch (error) {
     disposeActivation();

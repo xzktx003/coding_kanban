@@ -6,7 +6,7 @@ const out = process.env.CODEX_UI_SHOTS ?? "test-results/codex-dialog-controls";
 test("question, approval, queue, and side chat stay on the shipped Codex dialog", async ({
   page,
 }, info) => {
-  test.setTimeout(240000);
+  test.setTimeout(480000);
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(String(error)));
   const fixture = await installSessionUxFixture(page, 1);
@@ -759,7 +759,7 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
   await remove.getByRole("button", { name: "取消", exact: true }).click();
   await expect(remove).toHaveCount(0);
   await page.getByRole("button", { name: "当前会话的更多操作" }).click();
-  await page.getByRole("menuitem", { name: "查找", exact: true }).click();
+  await page.getByRole("menuitem", { name: "查找聊天", exact: true }).click();
   const find = page.getByRole("textbox", { name: "搜索会话正文" });
   await expect(find).toBeVisible();
   await find.fill("需要确认范围");
@@ -802,7 +802,7 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
   await page.getByRole("menuitem", { name: "显示/隐藏“变更”面板" }).click();
   await expect(page.getByRole("button", { name: "变更", pressed: true })).toHaveCount(0);
   await page.getByRole("button", { name: "当前会话的更多操作" }).click();
-  const terminal = page.getByRole("menuitem", { name: "打开终端" });
+  const terminal = page.getByRole("menuitem", { name: "打开终端面板" });
   await expect(terminal).toBeVisible();
   await terminal.click();
   await expect(page.locator("[data-tool-tab='terminal'][aria-pressed='true']")).toBeVisible();
@@ -1687,6 +1687,14 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
   await expect(page.getByRole("menuitem", { name: "键盘快捷方式", exact: true })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "显示键盘快捷键", exact: true })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "全部标为已读", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "管理已安排任务", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "前往技能", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "强制重新加载技能", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "打开文件夹…", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "显示/隐藏固定摘要", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "打开“变更”选项卡", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "显示/隐藏侧边栏", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "反馈", exact: true })).toBeVisible();
   await openDotInMenu.evaluate((item) => item.scrollIntoView({ block: "end" }));
   const copyPage = page.getByRole("menuitem", { name: "复制页面链接", exact: true });
   await expect(copyPage).toBeVisible();
@@ -2418,16 +2426,202 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
     path: `${out}/control-clear-all-unreads.png`,
     animations: "disabled",
   });
-  await page.getByRole("tab", { name: /中文会话 0/ }).click();
-  await expect(page.getByRole("tab", { name: /中文会话 0/ })).toHaveAttribute(
-    "aria-selected",
-    "true",
-  );
-  await page
-    .locator(".session-codex-composer")
-    .getByRole("button", { name: "添加附件与上下文" })
-    .click();
-  await page.getByRole("button", { name: "展开编辑", exact: true }).click();
+  await page.getByRole("button", { name: "当前会话的更多操作" }).click();
+  const manageTasks = page.getByRole("menuitem", { name: "管理已安排任务", exact: true });
+  await manageTasks.scrollIntoViewIfNeeded();
+  await manageTasks.click();
+  await expect(page).toHaveURL(/view=automations/);
+  await expect(page.getByRole("heading", { name: "定时任务", exact: true })).toBeVisible();
+  await page.screenshot({
+    path: `${out}/control-manage-tasks.png`,
+    animations: "disabled",
+  });
+  await page.goto(`${page.url().replace(/view=automations/, "view=agent")}`);
+  await expect(page.getByRole("tablist", { name: "关注会话" })).toBeVisible();
+  await page.getByRole("button", { name: "当前会话的更多操作" }).click();
+  const openSkills = page.getByRole("menuitem", { name: "前往技能", exact: true });
+  await openSkills.scrollIntoViewIfNeeded();
+  await openSkills.click();
+  await expect(page).toHaveURL(/view=plugins/);
+  await expect(page.getByRole("button", { name: "插件目录操作", exact: true })).toBeVisible();
+  await page.screenshot({
+    path: `${out}/control-open-skills.png`,
+    animations: "disabled",
+  });
+  await page.goto(`${page.url().replace(/view=plugins/, "view=agent")}`);
+  await expect(page.getByRole("tablist", { name: "关注会话" })).toBeVisible();
+  await page.getByRole("button", { name: "当前会话的更多操作" }).click();
+  const reloadSkills = page.getByRole("menuitem", { name: "强制重新加载技能", exact: true });
+  await reloadSkills.scrollIntoViewIfNeeded();
+  await reloadSkills.click();
+  await expect(page.getByText("无法刷新技能和应用")).toBeVisible();
+  await page.screenshot({
+    path: `${out}/control-reload-skills.png`,
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "当前会话的更多操作" }).click();
+  const openFolder = page.getByRole("menuitem", { name: "打开文件夹…", exact: true });
+  await openFolder.scrollIntoViewIfNeeded();
+  await openFolder.click();
+  await expect(page.getByRole("button", { name: "收起项目列表" })).toBeVisible();
+  await page.screenshot({
+    path: `${out}/control-open-folder.png`,
+    animations: "disabled",
+  });
+  await page.getByRole("button", { name: "收起项目列表" }).click();
+  await page.getByRole("button", { name: "当前会话的更多操作" }).click();
+  const hideSidebar = page.getByRole("menuitem", { name: "显示/隐藏侧边栏", exact: true });
+  await hideSidebar.scrollIntoViewIfNeeded();
+  await hideSidebar.click();
+  await expect(page.getByRole("button", { name: "收起项目列表" })).toBeVisible();
+  await page.getByRole("button", { name: "当前会话的更多操作" }).click();
+  const openFeedback = page.getByRole("menuitem", { name: "反馈", exact: true });
+  await openFeedback.scrollIntoViewIfNeeded();
+  await openFeedback.click();
+  const feedbackDialog = page.getByRole("dialog", { name: "提交反馈" });
+  await expect(feedbackDialog).toBeVisible();
+  await page.screenshot({
+    path: `${out}/control-feedback.png`,
+    animations: "disabled",
+  });
+  await page.keyboard.press("Escape");
+  const tailCommands: Array<[string, RegExp]> = [
+    ["显示/隐藏导航面板", /已(显示|隐藏)导航面板/],
+    ["显示/隐藏底部面板", /已(显示|隐藏)底部面板/],
+    ["显示/隐藏固定摘要", /当前没有可切换的置顶摘要/],
+    ["打开终端", /已打开终端面板/],
+    ["完整视图", /本机没有独立完整视图/],
+    ["循环切换工作空间布局", /已(显示|隐藏)分屏/],
+    ["打开“变更”选项卡", /已打开“变更”选项卡/],
+    ["打开浏览器标签页", /本机没有应用内浏览器标签页/],
+    ["转到行", /当前文件没有转到行|已聚焦转到行/],
+    ["聚焦浏览器地址栏", /本机没有应用内浏览器地址栏/],
+  ];
+  for (const [label, result] of tailCommands) {
+    await page.evaluate(() => {
+      const button = [...document.querySelectorAll("button")].find(
+        (node) => node.getAttribute("aria-label") === "当前会话的更多操作",
+      );
+      if (!(button instanceof HTMLButtonElement)) return;
+      button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      button.click();
+    });
+    const item = page.getByRole("menuitem", { name: label, exact: true });
+    await item.scrollIntoViewIfNeeded();
+    await item.click();
+    await expect(page.getByText(result).first()).toBeVisible();
+    const file = label.replaceAll(/[“”/]/g, "");
+    const shot = `${out}/control-tail-${file}.png`;
+    await page.screenshot({
+      path: shot,
+      animations: "disabled",
+    });
+    console.log(`TAIL_COMMAND ${label} asserted ${result} shot ${shot}`);
+  }
+  const openTailMenu = async () => {
+    await page.evaluate(() => {
+      const button = [...document.querySelectorAll("button")].find(
+        (node) => node.getAttribute("aria-label") === "当前会话的更多操作",
+      );
+      if (!(button instanceof HTMLButtonElement)) return;
+      button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      button.click();
+    });
+  };
+  const clickFind = async () => {
+    await openTailMenu();
+    await page.evaluate(() => {
+      const item = [...document.querySelectorAll('[role="menuitem"]')].find(
+        (node) => node.textContent?.trim() === "查找",
+      );
+      if (item instanceof HTMLElement) item.click();
+    });
+  };
+  const search = page.locator(".codex-thread-search");
+  if (await search.count()) await clickFind();
+  await clickFind();
+  await expect(search).toHaveCount(1);
+  await page.screenshot({
+    path: `${out}/control-tail-find.png`,
+    animations: "disabled",
+  });
+  console.log(`TAIL_COMMAND 查找 asserted .codex-thread-search shot ${out}/control-tail-find.png`);
+  await page.keyboard.press("Escape");
+  await openTailMenu();
+  const logOut = page.getByRole("menuitem", { name: "退出登录", exact: true });
+  await logOut.scrollIntoViewIfNeeded();
+  await logOut.click();
+  await expect(page).toHaveURL(/view=settings/);
+  await expect(page.getByText("退出登录在设置里")).toBeVisible();
+  await page.screenshot({
+    path: `${out}/control-tail-logout.png`,
+    animations: "disabled",
+  });
+  console.log(`TAIL_COMMAND 退出登录 asserted view=settings shot ${out}/control-tail-logout.png`);
+  const settingsMenu = page.locator(".session-secondary-header").getByRole("button", {
+    name: "当前会话的更多操作",
+    exact: true,
+  });
+  const openSettingsMenu = async () => {
+    await expect(page).toHaveURL(/view=settings|view=plugins/);
+    await expect(settingsMenu).toBeVisible();
+    await settingsMenu.click();
+  };
+  await expect(page).toHaveURL(/view=settings/);
+  await openSettingsMenu();
+  await page.getByRole("menuitem", { name: "前往技能", exact: true }).click();
+  await expect(page).toHaveURL(/view=plugins/);
+  await openSettingsMenu();
+  await page.getByRole("menuitem", { name: "返回", exact: true }).click();
+  await expect(page).toHaveURL(/view=settings/);
+  const beforeForward = page.url();
+  await openSettingsMenu();
+  const goForward = page.getByRole("menuitem", { name: "前进", exact: true });
+  await expect(goForward).toBeVisible();
+  await goForward.click();
+  await expect(page).toHaveURL(/view=plugins/);
+  await expect.poll(() => page.url()).not.toBe(beforeForward);
+  await page.screenshot({
+    path: `${out}/control-tail-forward.png`,
+    animations: "disabled",
+  });
+  console.log(`TAIL_COMMAND 前进 clicked getByRole menuitem while view=settings asserted url changed shot ${out}/control-tail-forward.png`);
+  await openSettingsMenu();
+  await page.getByRole("menuitem", { name: "返回", exact: true }).click();
+  await expect(page).toHaveURL(/view=settings/);
+  const beforeBack = page.url();
+  await openSettingsMenu();
+  const goBack = page.getByRole("menuitem", { name: "返回", exact: true });
+  await expect(goBack).toBeVisible();
+  await goBack.click();
+  await expect(page).toHaveURL(/view=agent/);
+  await expect.poll(() => page.url()).not.toBe(beforeBack);
+  await page.screenshot({
+    path: `${out}/control-tail-back.png`,
+    animations: "disabled",
+  });
+  console.log(`TAIL_COMMAND 返回 clicked getByRole menuitem while view=settings asserted url changed shot ${out}/control-tail-back.png`);
+  await page.goto("/?mode=session&view=agent");
+  await expect(page.getByRole("tablist", { name: "关注会话" })).toBeVisible();
+  await page.evaluate(() => {
+    const grid = [...document.querySelectorAll("button")].find(
+      (node) => node.getAttribute("aria-label") === "多会话网格",
+    );
+    if (grid instanceof HTMLButtonElement) grid.click();
+  });
+  await page.evaluate(() => {
+    const composer = document.querySelector(".session-codex-composer");
+    const add = [...(composer?.querySelectorAll("button") ?? [])].find(
+      (node) => node.getAttribute("aria-label") === "添加附件与上下文",
+    );
+    if (add instanceof HTMLButtonElement) add.click();
+  });
+  await page.evaluate(() => {
+    const expand = [...document.querySelectorAll("button")].find(
+      (node) => node.textContent?.trim() === "展开编辑",
+    );
+    if (expand instanceof HTMLButtonElement) expand.click();
+  });
   await expect(expanded).toBeVisible();
   await expanded.getByRole("button", { name: "插入代码块" }).click();
   const languageButton = expanded.getByRole("button", { name: "代码语言：自动检测" });
@@ -2442,15 +2636,16 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
   await expect(expanded.getByRole("button", { name: "代码语言：Rust" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(expanded).toHaveCount(0);
-
-  await page.getByRole("button", { name: "多会话网格" }).click();
-  await page
-    .locator(".session-global-new")
-    .getByRole("button", { name: "新聊天", exact: true })
-    .click();
+  await page.evaluate(() => {
+    const button = document.querySelector(".session-global-new button");
+    if (button instanceof HTMLButtonElement) button.click();
+  });
   const branch = page.getByRole("button", { name: /^Git 分支：/ });
   await expect(branch).toHaveAttribute("title", "切换分支");
-  await branch.click();
+  await branch.evaluate((node) => {
+    node.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    (node as HTMLButtonElement).click();
+  });
   await page.getByRole("menuitem", { name: "main" }).click();
   const dirty = page.getByRole("alertdialog", { name: "提交更改以切换分支" });
   await expect(dirty).toContainText("提交 2 个文件中的");

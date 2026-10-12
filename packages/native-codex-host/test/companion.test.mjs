@@ -89,7 +89,7 @@ test('contributed palette command opens exactly two captured fixture threads wit
     const manifest = JSON.parse(await readFile(new URL('../companion/package.json', import.meta.url), 'utf8'));
     const contribution = manifest.contributes.commands.find(item => item.command === 'nativeCodexPrototype.openTwoTestPanels');
     assert.equal(contribution.title, 'Native Codex: Open Two Test Panels');
-    assert.deepEqual([...commands.keys()], ['nativeCodexPrototype.openTwoTestPanels']);
+    assert.deepEqual([...commands.keys()], ['nativeCodexPrototype.openTwoTestPanels', 'nativeCodexPrototype.openTwoNewChats']);
     const command = commands.get('nativeCodexPrototype.openTwoTestPanels');
     await assert.rejects(command({ threadId: secondId, column: 3 }), /arguments|parameters/); assert.equal(calls.length, 0);
     await command();
@@ -168,7 +168,7 @@ async function startupFixture(t, config = {}, callbacks = {}) {
   const root = await mkdtemp(join(tmpdir(), 'native-startup-')); const file = join(root, 'auth.json'); const port = config.port ?? await sparePort();
   const token = 'test-only-startup-012345678901234567890'; const calls = []; const commands = new Map(); const subscriptions = [];
   const official = { isActive: false, packageJSON: { version: 'test' }, async activate() { await callbacks.activate?.(); this.isActive = true; } };
-  const vscode = { extensions: { getExtension: () => callbacks.missingOfficial ? undefined : official }, window: { tabGroups: { all: [] } }, Uri: { parse: uri => uri },
+  const vscode = { extensions: { getExtension: () => callbacks.missingOfficial ? undefined : official }, window: { tabGroups: { all: callbacks.tabs ?? [] } }, Uri: { parse: uri => uri },
     commands: { registerCommand(name, callback) { commands.set(name, callback); return { dispose() { commands.delete(name); } }; },
       async executeCommand(...args) { calls.push(args); await callbacks.open?.(...args); } } };
   await writeFile(file, JSON.stringify({ port, token, threads: [id, secondFixture, thirdFixture], ...config }), { mode: 0o600 });
@@ -296,4 +296,119 @@ test('deactivation during broker listen settles activation without panels or rea
     assert.equal((await readdir(data.root)).some(name => name.startsWith('companion-instance-')), false);
     assert.equal((await fetch(`${first.base}/status`, { headers: first.headers })).status, 200);
   } finally { clearTimeout(deadline); }
+});
+
+const newWindowIds = ['019aabcd-5678-7890-abcd-0123456789ab', '019aabcd-5678-7890-abcd-0123456789ac'];
+const newChatConfig = { threads: [], newChatWindowIds: newWindowIds, autoOpenNewChats: true };
+test('native new chat control constructs only captured new-page URIs and fixed columns', async () => {
+  const { newChatUri, validateNewChatPanels, openNewChatPanels } = require('../companion/control.cjs');
+  assert.equal(newChatUri(newWindowIds[0], newWindowIds), `openai-codex://route/extension/panel/new?nativeCodexPanel=${newWindowIds[0]}`);
+  for (const value of ['../local/evil', `${newWindowIds[0]}&command=evil`, id, null]) assert.throws(() => newChatUri(value, newWindowIds), /allowlisted.*UUID/);
+  for (const value of [[], [id], [id, id], [id, secondFixture, thirdFixture]]) assert.throws(() => validateNewChatPanels(value), /two distinct/);
+  const calls = [];
+  await openNewChatPanels({ Uri: { parse: uri => uri }, commands: { executeCommand: async (...args) => calls.push(args) } }, newWindowIds);
+  assert.deepEqual(calls.map(call => [call[0], call[1], call[2], call[3]]), newWindowIds.map((windowId, index) => [
+    'vscode.openWith', `openai-codex://route/extension/panel/new?nativeCodexPanel=${windowId}`, 'chatgpt.conversationEditor',
+    { viewColumn: index + 1, preview: false, preserveFocus: false }
+  ]));
+});
+test('explicit new-chat startup waits for official activation and requires no fixture threads', async t => {
+  const activation = deferred(); const entered = deferred();
+  const data = await startupFixture(t, newChatConfig, { activate: () => { entered.resolve(); return activation.promise; }, cleanup: activation.resolve });
+  const pending = data.extension.activate({ subscriptions: data.subscriptions }); await entered.promise;
+  assert.equal(data.calls.length, 0); activation.resolve(); await pending;
+  assert.deepEqual(data.calls.map(call => [call[0], call[1], call[2], call[3].viewColumn]), newWindowIds.map((windowId, index) => [
+    'vscode.openWith', `openai-codex://route/extension/panel/new?nativeCodexPanel=${windowId}`, 'chatgpt.conversationEditor', index + 1
+  ]));
+  const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
+  assert.deepEqual(status.autoOpenNewChats, { enabled: true, state: 'completed' });
+  assert.deepEqual(status.autoOpenFixtures, { enabled: false, state: 'disabled' });
+  assert.deepEqual(status.opened.map(item => item.windowId), newWindowIds);
+  assert.equal(status.opened.some(item => item.threadId !== undefined), false);
+  assert.equal(status.tabs.length, 0);
+});
+test('new chat palette command accepts no arguments and startup stays disabled by default', async t => {
+  const data = await startupFixture(t, { threads: [], newChatWindowIds: newWindowIds });
+  await data.extension.activate({ subscriptions: data.subscriptions }); assert.equal(data.calls.length, 0);
+  const manifest = JSON.parse(await readFile(new URL('../companion/package.json', import.meta.url), 'utf8'));
+  assert.equal(manifest.contributes.commands.find(item => item.command === 'nativeCodexPrototype.openTwoNewChats').title, 'Native Codex: Open Two New Chats');
+  const command = data.commands.get('nativeCodexPrototype.openTwoNewChats');
+  for (const args of [[{}], [{ uri: 'command:evil' }], [newWindowIds], [undefined]]) await assert.rejects(command(...args), /arguments/);
+  assert.equal(data.calls.length, 0); await command(); assert.equal(data.calls.length, 2);
+  const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
+  assert.deepEqual(status.autoOpenNewChats, { enabled: false, state: 'disabled' });
+  assert.equal((await fetch(`${data.base}/open-new`, { method: 'POST', headers: data.headers, body: '{}' })).status, 404);
+});
+test('new chat configuration rejects invalid identities, booleans and fixture startup conflict', async t => {
+  for (const config of [{ autoOpenNewChats: 'true' }, { autoOpenNewChats: 1 }, { autoOpenNewChats: null },
+    { autoOpenNewChats: true }, { autoOpenNewChats: true, newChatWindowIds: [id] }, { newChatWindowIds: [id, id] },
+    { newChatWindowIds: [id, 'command:evil'] }, { newChatWindowIds: 'evil' }, { ...newChatConfig, threads: [id, secondFixture], autoOpenFixtures: true }]) {
+    const data = await startupFixture(t, config);
+    await assert.rejects(data.extension.activate({ subscriptions: data.subscriptions }), /boolean|two distinct|allowlisted|mutually exclusive/);
+    assert.equal(data.commands.size, 0); assert.equal(data.calls.length, 0);
+  }
+});
+test('new chat startup shares the fixture palette and HTTP lock; disposal prevents second panel', async t => {
+  const entered = deferred(); const execution = deferred();
+  const data = await startupFixture(t, { ...newChatConfig, threads: [id, secondFixture] }, { open: () => { entered.resolve(); return execution.promise; }, cleanup: execution.resolve });
+  const pending = data.extension.activate({ subscriptions: data.subscriptions }); await entered.promise;
+  const command = data.commands.get('nativeCodexPrototype.openTwoNewChats');
+  await assert.rejects(command(), /opening in progress/);
+  await assert.rejects(data.commands.get('nativeCodexPrototype.openTwoTestPanels')(), /opening in progress/);
+  assert.equal((await fetch(`${data.base}/open`, { method: 'POST', headers: data.headers, body: JSON.stringify({ threadId: id, column: 1 }) })).status, 409);
+  const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
+  assert.equal(status.autoOpenNewChats.state, 'opening');
+  data.extension.deactivate(); execution.resolve(); await pending;
+  assert.equal(data.calls.length, 1); assert.equal(data.commands.size, 0); await assert.rejects(command(), /disposed/);
+  await assert.rejects(readFile(join(data.root, 'companion-ready.json')), { code: 'ENOENT' });
+});
+test('new chat startup rejects missing official activation and reports failures without retry', async t => {
+  for (const callbacks of [{ missingOfficial: true }, { activate() { throw new Error('activation failure'); } }, { open() { throw new Error('new panel failure'); } }]) {
+    const data = await startupFixture(t, newChatConfig, callbacks); await data.extension.activate({ subscriptions: data.subscriptions });
+    const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
+    assert.equal(status.autoOpenNewChats.state, 'failed'); assert.match(status.autoOpenNewChats.error, /official extension|new panel failure/);
+    assert.equal(data.calls.length, callbacks.open ? 1 : 0);
+  }
+});
+test('new chat startup on occupied broker remains scoped to its own VS Code instance', async t => {
+  const port = await sparePort(); const first = await startupFixture(t, { port }); const second = await startupFixture(t, { ...newChatConfig, port });
+  await first.extension.activate({ subscriptions: first.subscriptions }); await second.extension.activate({ subscriptions: second.subscriptions });
+  assert.equal(first.calls.length, 0); assert.equal(second.calls.length, 2);
+  const status = await (await fetch(`${first.base}/status`, { headers: first.headers })).json();
+  assert.deepEqual(status.autoOpenNewChats, { enabled: false, state: 'disabled' }); assert.equal(status.opened.length, 0);
+  await assert.rejects(readFile(join(second.root, 'companion-ready.json')), { code: 'ENOENT' }); second.extension.deactivate();
+  assert.equal((await fetch(`${first.base}/status`, { headers: first.headers })).status, 200);
+});
+test('new chat status observes current native tab URI identity without opening or creating threads', async t => {
+  const tabs = [{ viewColumn: 1, isActive: true, tabs: [{ label: 'Native response', isActive: true,
+    input: { uri: { toString: () => `openai-codex://route/local/${id}` }, viewType: 'chatgpt.conversationEditor' } }] }];
+  const data = await startupFixture(t, { threads: [], newChatWindowIds: newWindowIds }, { tabs });
+  await data.extension.activate({ subscriptions: data.subscriptions });
+  for (let i = 0; i < 2; i += 1) {
+    const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
+    assert.deepEqual(status.tabs, [{ column: 1, active: true, tabs: [{ label: 'Native response', active: true,
+      uri: `openai-codex://route/local/${id}`, viewType: 'chatgpt.conversationEditor' }] }]);
+    assert.equal(status.opened.length, 0); assert.equal(data.calls.length, 0);
+  }
+});
+test('new chat disposal during official activation prevents all commands and broker readiness', async t => {
+  const entered = deferred(); const activation = deferred();
+  const data = await startupFixture(t, newChatConfig, { activate: () => { entered.resolve(); return activation.promise; }, cleanup: activation.resolve });
+  const pending = data.extension.activate({ subscriptions: data.subscriptions }); await entered.promise;
+  data.extension.deactivate(); activation.resolve(); await pending;
+  assert.equal(data.calls.length, 0); assert.equal(data.commands.size, 0);
+  await assert.rejects(readFile(join(data.root, 'companion-ready.json')), { code: 'ENOENT' });
+});
+test('new chat startup releases the shared lock after success or command failure', async t => {
+  for (const failInitially of [false, true]) {
+    let fail = failInitially;
+    const data = await startupFixture(t, { ...newChatConfig, threads: [id, secondFixture] }, { open() { if (fail) throw new Error('new panel failure'); } });
+    await data.extension.activate({ subscriptions: data.subscriptions }); fail = false;
+    const startupCalls = data.calls.length;
+    await data.commands.get('nativeCodexPrototype.openTwoNewChats')();
+    await data.commands.get('nativeCodexPrototype.openTwoTestPanels')();
+    assert.equal(data.calls.length, startupCalls + 4);
+    assert.equal((await fetch(`${data.base}/open`, { method: 'POST', headers: data.headers, body: JSON.stringify({ threadId: id, column: 1 }) })).status, 200);
+    assert.equal(data.calls.length, startupCalls + 5);
+  }
 });

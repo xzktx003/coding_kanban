@@ -3,7 +3,7 @@
   "publisher": "agent-orchestrator",
   "version": "0.1.0",
   "displayName": "Isolated Native Codex Companion",
-  "description": "Controlled local thread panel opener for the isolated native prototype.",
+  "description": "Controlled native new-chat and local thread panel opener for the isolated native prototype.",
   "engines": {
     "vscode": "^1.96.2"
   },
@@ -19,6 +19,10 @@
       {
         "command": "nativeCodexPrototype.openTwoTestPanels",
         "title": "Native Codex: Open Two Test Panels"
+      },
+      {
+        "command": "nativeCodexPrototype.openTwoNewChats",
+        "title": "Native Codex: Open Two New Chats"
       }
     ]
   }

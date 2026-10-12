@@ -1,3 +1,5 @@
+import { observeNativeContent } from "./native-content";
+
 export function nativeIframeUrl(value: unknown, origin: string): string | null {
   if (typeof value !== "string" || !value.startsWith("/native-codex/"))
     return null;
@@ -17,10 +19,17 @@ export function nativeIframeUrl(value: unknown, origin: string): string | null {
 export function mountNativeSurface(
   document: Document,
   onCount: (count: number) => void,
+  onReady?: (count: number) => void,
 ) {
   const view = document.defaultView;
   if (!view) throw new Error("原生界面暂时不可访问");
   const managed = new Set<HTMLIFrameElement>();
+  const content = new Map<HTMLIFrameElement, ReturnType<typeof observeNativeContent>>();
+  let readyCount = -1;
+  const publishReady = () => {
+    const next = Array.from(content.values()).filter(item => item.ready).length;
+    if (readyCount !== next) { readyCount = next; onReady?.(next); }
+  };
   const previous = new WeakMap<
     HTMLIFrameElement,
     { marker: string | null; column: string; container: HTMLElement | null }
@@ -36,6 +45,7 @@ export function mountNativeSurface(
   style.textContent = `
     html.kanban-native-surface body { margin:0!important; overflow:hidden!important; }
     html.kanban-native-surface body * { visibility:hidden!important; }
+    html.kanban-native-surface .monaco-workbench { visibility:visible!important; }
     html.kanban-native-surface [data-kanban-native-container] {
       visibility:visible!important; clip-path:none!important;
       overflow:visible!important; pointer-events:none!important;
@@ -95,6 +105,8 @@ export function mountNativeSurface(
       frame.style.setProperty("--kanban-native-column", original.column);
     else frame.style.removeProperty("--kanban-native-column");
     releaseContainer(original.container, frame);
+    content.get(frame)?.dispose();
+    content.delete(frame);
     managed.delete(frame);
     previous.delete(frame);
   };
@@ -143,11 +155,20 @@ export function mountNativeSurface(
       }
       frame.setAttribute("data-kanban-native-surface", "true");
       frame.style.setProperty("--kanban-native-column", String(index));
+      if (onReady) {
+        let tracker = content.get(frame);
+        if (!tracker) {
+          tracker = observeNativeContent(frame, publishReady);
+          content.set(frame, tracker);
+        }
+        tracker.start();
+      }
     });
     if (count !== frames.length) {
       count = frames.length;
       onCount(count);
     }
+    publishReady();
   };
   const observer = new view.MutationObserver(() => {
     if (running && queued === null)
@@ -156,6 +177,7 @@ export function mountNativeSurface(
   const pause = () => {
     running = false;
     observer.disconnect();
+    for (const tracker of content.values()) tracker.pause();
     if (queued !== null) {
       view.cancelAnimationFrame(queued);
       queued = null;

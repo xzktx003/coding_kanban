@@ -220,7 +220,7 @@ export function ConversationMenu({
           }
         >
           <Search size={16} />
-          查找
+          查找聊天
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!cwd}
@@ -350,7 +350,7 @@ export function ConversationMenu({
             toast.message("已打开终端");
           }}
         >
-          打开终端
+          打开终端面板
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => {
@@ -1273,6 +1273,184 @@ export function ConversationMenu({
           }}
         >
           全部标为已读
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            useLayoutStore.getState().setView("automations");
+          }}
+        >
+          管理已安排任务
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            toast.message("无法刷新技能和应用");
+          }}
+        >
+          强制重新加载技能
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            useLayoutStore.getState().setView("plugins");
+          }}
+        >
+          前往技能
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            window.dispatchEvent(new Event("session-open-projects"));
+            toast.message("已打开项目选择器");
+          }}
+        >
+          打开文件夹…
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const layout = useLayoutStore.getState();
+            const next = !layout.isSidebarOpen;
+            layout.setSidebarOpen(next);
+            toast.message(next ? "已显示侧边栏" : "已隐藏侧边栏");
+          }}
+        >
+          显示/隐藏侧边栏
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const layout = useLayoutStore.getState();
+            const open = layout.isRightPanelOpen && layout.activeRightPanelTab === "files";
+            if (open) layout.setRightPanelOpen(false);
+            else {
+              layout.setActiveRightPanelTab("files");
+              layout.setRightPanelOpen(true);
+            }
+            toast.message(open ? "已隐藏导航面板" : "已显示导航面板");
+          }}
+        >
+          显示/隐藏导航面板
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const layout = useLayoutStore.getState();
+            const open = layout.isRightPanelOpen && layout.activeRightPanelTab === "terminal";
+            if (open) layout.setRightPanelOpen(false);
+            else {
+              layout.setActiveRightPanelTab("terminal");
+              layout.setRightPanelOpen(true);
+            }
+            toast.message(open ? "已隐藏底部面板" : "已显示底部面板");
+          }}
+        >
+          显示/隐藏底部面板
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            toast.message("当前没有可切换的置顶摘要");
+          }}
+        >
+          显示/隐藏固定摘要
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const layout = useLayoutStore.getState();
+            if (layout.terminals.length === 0) layout.addTerminal();
+            layout.setActiveRightPanelTab("terminal");
+            layout.setRightPanelOpen(true);
+            toast.message("已打开终端面板");
+          }}
+        >
+          打开终端
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            toast.message("本机没有独立完整视图");
+          }}
+        >
+          完整视图
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const layout = useLayoutStore.getState();
+            const next = !layout.isRightPanelOpen;
+            layout.setRightPanelOpen(next);
+            toast.message(next ? "已显示分屏" : "已隐藏分屏");
+          }}
+        >
+          循环切换工作空间布局
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const layout = useLayoutStore.getState();
+            layout.setActiveRightPanelTab("diff");
+            layout.setRightPanelOpen(true);
+            toast.message("已打开“变更”选项卡");
+          }}
+        >
+          打开“变更”选项卡
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            toast.message("本机没有应用内浏览器标签页");
+          }}
+        >
+          打开浏览器标签页
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            const field = document.querySelector<HTMLInputElement>(
+              ".session-mode input[aria-label='转到行'], .session-mode input[placeholder='转到行']",
+            );
+            if (!field) {
+              toast.message("当前文件没有转到行");
+              return;
+            }
+            field.focus();
+            toast.message("已聚焦转到行");
+          }}
+        >
+          转到行
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            window.history.back();
+          }}
+        >
+          返回
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            window.history.forward();
+          }}
+        >
+          前进
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            toast.message("本机没有应用内浏览器地址栏");
+          }}
+        >
+          聚焦浏览器地址栏
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId}
+          onSelect={() =>
+            threadId && threadWorkflowActions.request(threadId, "search")
+          }
+        >
+          查找
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            useLayoutStore.getState().setView("settings");
+            toast.message("退出登录在设置里");
+          }}
+        >
+          退出登录
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => {
+            window.dispatchEvent(new Event("codex-open-feedback"));
+          }}
+        >
+          反馈
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!threadId || busy}

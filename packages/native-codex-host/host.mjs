@@ -28,6 +28,7 @@ export function validateOptions(input) {
     if (!/^\d+$/.test(String(input.brokerPort)) || Number(input.brokerPort) < 1024 || Number(input.brokerPort) > 65535 || Number(input.brokerPort) === result.port) throw new Error('brokerPort must be a distinct integer port');
     result.brokerPort = Number(input.brokerPort);
   }
+  if (input.connectionProfileHome != null) result.connectionProfileHome = absolute(input.connectionProfileHome, 'connectionProfileHome');
   return result;
 }
 async function noSymlink(path) {
@@ -93,7 +94,7 @@ export class OwnedProcesses {
 export function buildChildEnv(options, inherited = process.env) {
   const env = {};
   for (const key of ['PATH', 'SHELL', 'LANG', 'LC_ALL', 'TZ', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy']) if (inherited[key]) env[key] = inherited[key];
-  return { ...env, HOME: options.processHome, CODEX_HOME: options.codexHome, TMPDIR: join(options.runtimeRoot, 'tmp'), TMP: join(options.runtimeRoot, 'tmp'), TEMP: join(options.runtimeRoot, 'tmp'),
+  return { ...env, ...options.connectionEnvironment, HOME: options.processHome, CODEX_HOME: options.codexHome, TMPDIR: join(options.runtimeRoot, 'tmp'), TMP: join(options.runtimeRoot, 'tmp'), TEMP: join(options.runtimeRoot, 'tmp'),
     XDG_CONFIG_HOME: join(options.processHome, '.config'), XDG_DATA_HOME: join(options.processHome, '.local', 'share'), XDG_CACHE_HOME: join(options.processHome, '.cache'),
     NATIVE_CODEX_COMPANION_CONFIG: join(options.runtimeRoot, 'companion-auth.json') };
 }

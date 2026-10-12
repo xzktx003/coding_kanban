@@ -149,7 +149,7 @@ for (const width of [1440, 390])
           page.locator('[data-thread-workflows="ux-0"]'),
         ).toHaveCount(1);
         await expect(page.locator(".codex-thread-search")).toHaveCount(0);
-        await menu(page, "查找");
+        await menu(page, "查找聊天");
         const input = page.getByRole("textbox", { name: "搜索会话正文" });
         await expect(input).toBeVisible();
         await input.fill("STABLE TARGET");
@@ -527,7 +527,7 @@ test("unknown native edit send preserves accessible buffer after rollback and ne
   await expect(
     page.locator(".session-codex-composer [contenteditable=true]").first(),
   ).toContainText("Detached draft stays intact");
-  await menu(page, "查找");
+  await menu(page, "查找聊天");
   await page.getByRole("button", { name: "关闭搜索" }).click();
   expect(rollback).toBe(1);
   expect(start).toBe(1);
@@ -1250,7 +1250,7 @@ test("native remote search resolves only the actual item and inclusive history c
   await expect(
     page.locator('.codex-native-user[data-owner-turn="turn-0"]'),
   ).toHaveCount(0);
-  await menu(page, "查找");
+  await menu(page, "查找聊天");
   await page
     .getByRole("textbox", { name: "搜索会话正文" })
     .fill("stable target");

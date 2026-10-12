@@ -423,7 +423,11 @@ importers:
 
   packages/native-codex-adapter: {}
 
-  packages/native-codex-host: {}
+  packages/native-codex-host:
+    dependencies:
+      '@iarna/toml':
+        specifier: 2.2.5
+        version: 2.2.5
 
   packages/session-runtime:
     dependencies:

@@ -208,6 +208,7 @@ export function Composer({
   useEffect(() => {
     const openMcp = () => openSlashDialog("mcp");
     const openPersonality = () => openSlashDialog("personality");
+    const openFeedback = () => openSlashDialog("feedback");
     const onKey = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() !== "i" || !event.shiftKey || event.altKey) return;
       if (!(event.metaKey || event.ctrlKey)) return;
@@ -222,10 +223,12 @@ export function Composer({
     };
     window.addEventListener("codex-open-mcp", openMcp);
     window.addEventListener("codex-open-personality", openPersonality);
+    window.addEventListener("codex-open-feedback", openFeedback);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("codex-open-mcp", openMcp);
       window.removeEventListener("codex-open-personality", openPersonality);
+      window.removeEventListener("codex-open-feedback", openFeedback);
       window.removeEventListener("keydown", onKey);
     };
   }, []);

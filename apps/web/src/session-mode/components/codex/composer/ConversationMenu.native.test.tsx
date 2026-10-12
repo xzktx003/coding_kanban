@@ -88,7 +88,7 @@ vi.mock("@session/services/codexService", () => ({
 it("opens each workflow for the conversation that owns the menu", async () => {
   render(<ConversationMenu threadId="original-owner" title="当前会话" />);
   for (const [label, action] of [
-    ["查找", "search"],
+    ["查找聊天", "search"],
     ["用户消息导航", "users"],
     ["导出 Markdown", "export"],
     ["复制为 Markdown", "copyMarkdown"],
@@ -698,6 +698,85 @@ it("toggles an expanded draft checklist", async () => {
   composer.remove();
 });
 
+it("opens the remaining plugin command-menu surfaces", async () => {
+  useLayoutStore.setState({
+    view: "agent",
+    isSidebarOpen: true,
+    isRightPanelOpen: false,
+    isRightPanelFocused: false,
+    activeRightPanelTab: "diff",
+  });
+  const opened = vi.fn();
+  const feedback = vi.fn();
+  window.addEventListener("session-open-projects", opened);
+  window.addEventListener("codex-open-feedback", feedback);
+  const back = vi.spyOn(window.history, "back").mockImplementation(() => undefined);
+  const forward = vi.spyOn(window.history, "forward").mockImplementation(() => undefined);
+  render(<ConversationMenu threadId="original-owner" title="当前会话" />);
+  const choose = async (name: string) => {
+    fireEvent.keyDown(screen.getByRole("button", { name: "当前会话的更多操作" }), {
+      key: "ArrowDown",
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name }));
+  };
+  await choose("强制重新加载技能");
+  expect(toast.message).toHaveBeenCalledWith("无法刷新技能和应用");
+  await choose("打开文件夹…");
+  expect(opened).toHaveBeenCalled();
+  await choose("显示/隐藏侧边栏");
+  expect(useLayoutStore.getState().isSidebarOpen).toBe(false);
+  await choose("显示/隐藏导航面板");
+  expect(useLayoutStore.getState().activeRightPanelTab).toBe("files");
+  expect(useLayoutStore.getState().isRightPanelOpen).toBe(true);
+  await choose("显示/隐藏底部面板");
+  expect(useLayoutStore.getState().activeRightPanelTab).toBe("terminal");
+  await choose("显示/隐藏固定摘要");
+  expect(toast.message).toHaveBeenCalledWith("当前没有可切换的置顶摘要");
+  await choose("打开终端");
+  expect(toast.message).toHaveBeenCalledWith("已打开终端面板");
+  await choose("打开“变更”选项卡");
+  expect(toast.message).toHaveBeenCalledWith("已打开“变更”选项卡");
+  await choose("查找");
+  expect(request).toHaveBeenCalledWith("original-owner", "search");
+  await choose("完整视图");
+  expect(toast.message).toHaveBeenCalledWith("本机没有独立完整视图");
+  await choose("循环切换工作空间布局");
+  expect(useLayoutStore.getState().isRightPanelOpen).toBe(false);
+  await choose("打开浏览器标签页");
+  expect(toast.message).toHaveBeenCalledWith("本机没有应用内浏览器标签页");
+  await choose("转到行");
+  expect(toast.message).toHaveBeenCalledWith("当前文件没有转到行");
+  await choose("返回");
+  expect(back).toHaveBeenCalled();
+  await choose("前进");
+  expect(forward).toHaveBeenCalled();
+  await choose("聚焦浏览器地址栏");
+  expect(toast.message).toHaveBeenCalledWith("本机没有应用内浏览器地址栏");
+  await choose("退出登录");
+  expect(useLayoutStore.getState().view).toBe("settings");
+  await choose("反馈");
+  expect(feedback).toHaveBeenCalled();
+  window.removeEventListener("session-open-projects", opened);
+  window.removeEventListener("codex-open-feedback", feedback);
+  back.mockRestore();
+  forward.mockRestore();
+});
+
+it("opens scheduled tasks and installed skills from the menu", async () => {
+  useLayoutStore.setState({ view: "agent" });
+  render(<ConversationMenu threadId="original-owner" title="当前会话" />);
+  fireEvent.keyDown(screen.getByRole("button", { name: "当前会话的更多操作" }), {
+    key: "ArrowDown",
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "管理已安排任务" }));
+  expect(useLayoutStore.getState().view).toBe("automations");
+  fireEvent.keyDown(screen.getByRole("button", { name: "当前会话的更多操作" }), {
+    key: "ArrowDown",
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "前往技能" }));
+  expect(useLayoutStore.getState().view).toBe("plugins");
+});
+
 it("marks every followed Codex chat read", async () => {
   useSessionAttentionStore.setState({ receipts: {} });
   useAgentCenterStore.setState({
@@ -1187,7 +1266,7 @@ it("restores the same terminal tab when redoing open terminal", async () => {
     });
   };
   await open();
-  fireEvent.click(screen.getByRole("menuitem", { name: "打开终端" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "打开终端面板" }));
   const created = useLayoutStore.getState().terminals[0];
   await open();
   fireEvent.click(screen.getByRole("menuitem", { name: "撤销上一步操作" }));
@@ -1203,7 +1282,7 @@ it("undoes panel actions from a closed panel without inserting a null tab", asyn
   useLayoutStore.setState({isRightPanelOpen:false,activeRightPanelTab:null,openRightPanelTabs:[],terminals:[],activeTerminalId:null});
   render(<ConversationMenu threadId="original-owner" title="当前会话"/>);
   const open=()=>fireEvent.keyDown(screen.getByRole("button",{name:"当前会话的更多操作"}),{key:"ArrowDown"});
-  for(const label of ["打开终端","显示/隐藏“变更”面板"]){
+  for(const label of ["打开终端面板","显示/隐藏“变更”面板"]){
     open();fireEvent.click(screen.getByRole("menuitem",{name:label}));
     open();fireEvent.click(screen.getByRole("menuitem",{name:"撤销上一步操作"}));
     expect(useLayoutStore.getState().activeRightPanelTab).toBeNull();
@@ -1471,7 +1550,7 @@ it("opens the shipped terminal panel", async () => {
   fireEvent.keyDown(screen.getByRole("button", { name: "当前会话的更多操作" }), {
     key: "ArrowDown",
   });
-  fireEvent.click(await screen.findByRole("menuitem", { name: "打开终端" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "打开终端面板" }));
   const layout = useLayoutStore.getState();
   expect(layout.isRightPanelOpen).toBe(true);
   expect(layout.activeRightPanelTab).toBe("terminal");
