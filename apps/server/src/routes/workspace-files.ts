@@ -134,6 +134,7 @@ export function registerWorkspaceFileRoutes(
       "trash-list",
       "restore",
       "purge",
+      "resolve",
       "download-info",
       "download",
     ] as const) {
@@ -169,6 +170,8 @@ export function registerWorkspaceFileRoutes(
               return files!.restore(b.root, b.id);
             case "purge":
               return files!.purge(b.root, b.id);
+            case "resolve":
+              return files!.resolveReference(b.root, b.path);
             case "download-info":
               return files!.downloadInfo(b.root, b.path);
             case "download": {

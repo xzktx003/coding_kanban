@@ -1,13 +1,16 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { FileTreeNode } from "./FileTreeNode";
-const input = vi.hoisted(() => ({ append: vi.fn() }));
-beforeEach(() => input.append.mockClear());
+const input = vi.hoisted(() => ({ append: vi.fn(), select: vi.fn() }));
+beforeEach(() => {
+  input.append.mockClear();
+  input.select.mockClear();
+});
 vi.mock("@session/hooks/runtime", () => ({ isTauri: () => false }));
 vi.mock("@session/stores", () => ({
   useEditorStore: () => ({
     selectedFilePath: null,
-    setSelectedFilePath: vi.fn(),
+    setSelectedFilePath: input.select,
   }),
   useWorkspaceStore: () => ({ addProject: vi.fn() }),
   useLayoutStore: () => ({
@@ -84,4 +87,23 @@ test("inserting a directory path leaves its expansion unchanged", () => {
   expect(toggle).not.toHaveBeenCalled();
   expect(load).not.toHaveBeenCalled();
   expect(input.append).toHaveBeenCalledExactlyOnceWith("`src`");
+});
+
+test("a file selection callback owns opening and does not expose the unresolved alias first", () => {
+  const selected = vi.fn();
+  render(
+    <FileTreeNode
+      node={{ name: "file.py", path: "/fixture/link/file.py", kind: "file" }}
+      depth={0}
+      rootPath="/fixture"
+      activeExpanded={new Set()}
+      loadingNodes={new Set()}
+      onToggle={() => {}}
+      onLoadChildren={() => {}}
+      onFileSelect={selected}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "文件 file.py" }));
+  expect(selected).toHaveBeenCalledExactlyOnceWith("/fixture/link/file.py");
+  expect(input.select).not.toHaveBeenCalled();
 });

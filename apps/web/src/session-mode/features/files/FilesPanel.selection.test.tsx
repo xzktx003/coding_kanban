@@ -1,14 +1,25 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import FilesPanel from "./FilesPanel";
 import { useEditorStore } from "@session/stores/useEditorStore";
 
-const fixture = vi.hoisted(() => ({ cwd: "/fixture" }));
+import { resolveWorkspaceFileReference } from "@session/services/workspaceFiles";
+vi.mock("@session/services/workspaceFiles", () => ({
+  resolveWorkspaceFileReference: vi.fn(async (root: string, path: string) => ({
+    root,
+    path,
+  })),
+}));
+const fixture = vi.hoisted(() => ({
+  cwd: "/fixture",
+  projects: ["/fixture"],
+  filePath: null as string | null,
+}));
 vi.mock("@session/hooks/use-mobile", () => ({ useIsMobile: () => false }));
 vi.mock("@session/stores", async () => ({
   useEditorStore: (await import("@session/stores/useEditorStore"))
     .useEditorStore,
-  useWorkspaceStore: () => ({ cwd: fixture.cwd }),
+  useWorkspaceStore: () => ({ cwd: fixture.cwd, projects: fixture.projects }),
 }));
 vi.mock("./FileOperations", () => ({
   FileOperations: ({
@@ -43,7 +54,11 @@ vi.mock("./explorer", () => ({
       >
         选择测试目录
       </button>
-      <button onClick={() => onFileSelect(fixture.cwd + "/readme.md")}>
+      <button
+        onClick={() =>
+          onFileSelect(fixture.filePath ?? fixture.cwd + "/readme.md")
+        }
+      >
         选择测试文件
       </button>
     </div>
@@ -51,7 +66,12 @@ vi.mock("./explorer", () => ({
   FileViewer: () => <div>文件内容</div>,
 }));
 beforeEach(() => {
+  vi.mocked(resolveWorkspaceFileReference)
+    .mockReset()
+    .mockImplementation(async (root, path) => ({ root, path }));
   fixture.cwd = "/fixture";
+  fixture.projects = ["/fixture"];
+  fixture.filePath = null;
   useEditorStore.getState().resetFiles();
 });
 test("directory selection supplies its own upload target without opening an editor", () => {
@@ -69,10 +89,13 @@ test("project switches discard the previous selected directory", () => {
   view.rerender(<FilesPanel />);
   expect(screen.getByLabelText("文件操作目标").textContent).toBe("项目根目录");
 });
-test("files and opened tabs select the corresponding file actions", () => {
+test("files and opened tabs select the corresponding file actions", async () => {
   useEditorStore.getState().openFile("/fixture/other.ts", "/fixture");
   render(<FilesPanel />);
   fireEvent.click(screen.getByText("选择测试文件"));
+  await waitFor(() =>
+    expect(useEditorStore.getState().activeFile).toBe("/fixture/readme.md"),
+  );
   expect(screen.getByLabelText("文件操作目标").textContent).toBe(
     "/fixture/readme.md:文件",
   );
@@ -119,4 +142,32 @@ test("dropping a folder reports the unsupported input instead of uploading an em
   } finally {
     window.removeEventListener("workspace-files-upload", uploaded);
   }
+});
+
+test("file tree selection resolves linked files into their registered real project", async () => {
+  vi.mocked(resolveWorkspaceFileReference).mockResolvedValue({
+    root: "/dependency",
+    path: "/dependency/readme.md",
+  });
+  render(<FilesPanel />);
+  fireEvent.click(screen.getByText("选择测试文件"));
+  await waitFor(() =>
+    expect(useEditorStore.getState().activeFile).toBe("/dependency/readme.md"),
+  );
+  expect(useEditorStore.getState().roots["/dependency/readme.md"]).toBe(
+    "/dependency",
+  );
+});
+
+test("canonical entries returned under a linked directory use their known registered project", async () => {
+  fixture.projects = ["/fixture", "/dependency"];
+  fixture.filePath = "/dependency/readme.md";
+  render(<FilesPanel />);
+  fireEvent.click(screen.getByText("选择测试文件"));
+  await waitFor(() =>
+    expect(resolveWorkspaceFileReference).toHaveBeenCalledWith(
+      "/dependency",
+      "/dependency/readme.md",
+    ),
+  );
 });

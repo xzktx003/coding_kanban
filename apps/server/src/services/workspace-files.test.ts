@@ -8,6 +8,7 @@ import {
   symlink,
   chmod,
   rename,
+  realpath,
 } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -100,6 +101,90 @@ test("path traversal, unknown roots, symlinks, project root deletion and git met
     await mkdir(join(root, ".git"));
     await assert.rejects(files.create(root, ".git/config", "file"));
     assert.equal(await readFile(join(base, "outside.txt"), "utf8"), "outside");
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+test("resolve reference maps symlinked files and folders back to real registered paths", async () => {
+  const { base, root, files } = await fixture();
+  try {
+    await mkdir(join(root, "real"));
+    await writeFile(join(root, "real", "a.txt"), "inside");
+    await symlink(join(root, "real", "a.txt"), join(root, "file-link.txt"));
+    await symlink(join(root, "real"), join(root, "dir-link"));
+
+    assert.deepEqual(await files.resolveReference(root, "file-link.txt"), {
+      root: await realpath(root),
+      path: await realpath(join(root, "real", "a.txt")),
+    });
+    assert.deepEqual(await files.resolveReference(root, "dir-link/a.txt"), {
+      root: await realpath(root),
+      path: await realpath(join(root, "real", "a.txt")),
+    });
+    await assert.rejects(files.read(root, "file-link.txt"), /符号链接/);
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+test("resolve reference supports registered sibling projects and symlink root aliases only after real-path revalidation", async () => {
+  const base = await mkdtemp(join(tmpdir(), "kanban-workspace-files-"));
+  const root = join(base, "xh2", "xh2modelzoo");
+  const sibling = join(base, "xh2", "xhquanttool");
+  const aliasRoot = join(base, "alias-modelzoo");
+  await mkdir(join(root), { recursive: true });
+  await mkdir(join(sibling, "xhquant", "backend"), { recursive: true });
+  await writeFile(join(sibling, "xhquant", "backend", "op.py"), "ok");
+  await writeFile(join(root, "plain.txt"), "plain");
+  await symlink(join(sibling, "xhquant"), join(root, "xhquant"));
+  await symlink(root, aliasRoot, "dir");
+  const files = new WorkspaceFiles(join(base, "trash"), async () => [
+    root,
+    sibling,
+  ]);
+  try {
+    assert.deepEqual(
+      await files.resolveReference(root, "xhquant/backend/op.py"),
+      {
+        root: await realpath(sibling),
+        path: await realpath(join(sibling, "xhquant", "backend", "op.py")),
+      },
+    );
+    assert.deepEqual(
+      await files.resolveReference(
+        root,
+        join(root, "xhquant", "backend", "op.py"),
+      ),
+      {
+        root: await realpath(sibling),
+        path: await realpath(join(sibling, "xhquant", "backend", "op.py")),
+      },
+    );
+    assert.deepEqual(await files.resolveReference(aliasRoot, "plain.txt"), {
+      root: await realpath(root),
+      path: join(await realpath(root), "plain.txt"),
+    });
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+test("resolve reference rejects unregistered targets, external lexical input, broken links and loops", async () => {
+  const { base, root, files } = await fixture();
+  try {
+    await mkdir(join(base, "outside"));
+    await writeFile(join(base, "outside", "secret.txt"), "secret");
+    await symlink(join(base, "outside", "secret.txt"), join(root, "secret"));
+    await symlink(join(root, "missing"), join(root, "broken"));
+    await symlink("loop-b", join(root, "loop-a"));
+    await symlink("loop-a", join(root, "loop-b"));
+
+    await assert.rejects(files.resolveReference(root, "secret"), /超出|注册/);
+    await assert.rejects(
+      files.resolveReference(root, join(base, "outside", "secret.txt")),
+      /超出/,
+    );
+    await assert.rejects(files.resolveReference(root, "broken"));
+    await assert.rejects(files.resolveReference(root, "loop-a"));
+    await assert.rejects(files.resolveReference(root, "../outside/secret.txt"));
   } finally {
     await rm(base, { recursive: true, force: true });
   }

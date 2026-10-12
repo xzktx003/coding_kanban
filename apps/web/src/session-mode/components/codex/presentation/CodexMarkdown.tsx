@@ -1,3 +1,4 @@
+import { openWorkspaceFileReference } from "@session/services/openWorkspaceFileReference";
 import { createContext, useContext, useMemo } from "react";
 import {
   Streamdown,
@@ -9,8 +10,6 @@ import { codexCode as code } from "./codexCode";
 import { createMathPlugin } from "@streamdown/math";
 import { nativeMermaid as mermaid } from "./nativeMermaidLayout";
 import { VisualizationContent } from "@session/features/visualizations/VisualizationContent";
-import { useEditorStore } from "@session/stores/useEditorStore";
-import { useLayoutStore } from "@session/stores";
 import { parseFileReference, resolveLiteralFilePath } from "./fileReference";
 import {
   decodeNativeFileCitation,
@@ -124,18 +123,7 @@ export function CodexMarkdown({
                 toast.error("引用文件不属于原会话项目，未打开其他项目文件");
                 return;
               }
-              useEditorStore
-                .getState()
-                .revealFile(
-                  reference.path,
-                  root,
-                  reference.line,
-                  1,
-                  reference.endLine,
-                );
-              const layout = useLayoutStore.getState();
-              layout.setActiveRightPanelTab("files");
-              layout.setRightPanelOpen(true);
+              void openWorkspaceFileReference(reference, root);
             }}
           />
         );
@@ -214,17 +202,7 @@ export function CodexMarkdown({
               if (!file) return;
               event.preventDefault();
               event.stopPropagation();
-              useEditorStore
-                .getState()
-                .revealFile(
-                  file.path,
-                  cwd ?? undefined,
-                  file.line,
-                  file.column,
-                );
-              const layout = useLayoutStore.getState();
-              layout.setActiveRightPanelTab("files");
-              layout.setRightPanelOpen(true);
+              void openWorkspaceFileReference(file, cwd);
             }}
           >
             {children}

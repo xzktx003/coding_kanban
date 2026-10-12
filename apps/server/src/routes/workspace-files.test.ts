@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
+import {
+  mkdtemp,
+  mkdir,
+  writeFile,
+  rm,
+  symlink,
+  realpath,
+} from "node:fs/promises";
 import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -136,6 +143,45 @@ test("workspace file routes stream folder downloads as zip without leaking symli
     assert.match(download.rawPayload.toString("latin1"), /a\.txt/);
     assert.doesNotMatch(download.rawPayload.toString("latin1"), /secret-link/);
     assert.doesNotMatch(download.rawPayload.toString("utf8"), /secret/);
+  } finally {
+    await app.close();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+test("workspace file routes resolve symlink references only into registered roots", async () => {
+  const base = await mkdtemp(join(tmpdir(), "workspace-routes-"));
+  const root = join(base, "project");
+  const sibling = join(base, "sibling");
+  await mkdir(root);
+  await mkdir(join(sibling, "pkg"), { recursive: true });
+  await writeFile(join(sibling, "pkg", "op.py"), "ok");
+  await writeFile(join(base, "secret.txt"), "secret");
+  await symlink(join(sibling, "pkg"), join(root, "pkg"));
+  await symlink(join(base, "secret.txt"), join(root, "secret"));
+  const app = Fastify();
+  registerWorkspaceFileRoutes(app, {
+    trashHome: join(base, "trash"),
+    roots: async () => [root, sibling],
+  });
+  await app.ready();
+  const req = (payload: Record<string, unknown>) =>
+    app.inject({
+      method: "POST",
+      url: "/api/session/workspace-files/resolve",
+      payload,
+    });
+  try {
+    const resolved = await req({ root, path: "pkg/op.py" });
+    assert.equal(resolved.statusCode, 200);
+    assert.deepEqual(resolved.json(), {
+      root: await realpath(sibling),
+      path: await realpath(join(sibling, "pkg", "op.py")),
+    });
+    assert.equal((await req({ root, path: "secret" })).statusCode, 403);
+    assert.equal(
+      (await req({ root, path: join(base, "secret.txt") })).statusCode,
+      403,
+    );
   } finally {
     await app.close();
     await rm(base, { recursive: true, force: true });

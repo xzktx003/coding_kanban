@@ -1,3 +1,4 @@
+import { openWorkspaceFileReference } from "@session/services/openWorkspaceFileReference";
 import { useFileDocumentStore } from "@session/stores/useFileDocumentStore";
 import { FileCloseDialog } from "./FileCloseDialog";
 import { FileOperations, type FileOperationTarget } from "./FileOperations";
@@ -11,9 +12,8 @@ import { FileTree, FileViewer } from "./explorer";
 import type { FileNode } from "./explorer/types";
 
 export default function FilesPanel() {
-  const { openFiles, activeFile, openFile, closeFile, setActiveFile } =
-    useEditorStore();
-  const { cwd } = useWorkspaceStore();
+  const { openFiles, activeFile, closeFile, setActiveFile } = useEditorStore();
+  const { cwd, projects } = useWorkspaceStore();
   const drafts = useFileDocumentStore((s) => s.documents);
   const [closing, setClosing] = useState<string | null>(null);
   const [fileAction, setFileAction] = useState<FileOperationTarget | null>(
@@ -67,9 +67,19 @@ export default function FilesPanel() {
   }, [cwd, isMobile]);
 
   // Close tree overlay when a file is selected on mobile
-  const handleFileSelect = (path: string) => {
-    openFile(path, cwd ?? undefined);
-    if (isMobile) setIsFileTreeVisible(false);
+  const handleFileSelect = async (path: string) => {
+    // Directory listings can return canonical paths beneath linked project folders.
+    const ownerRoot =
+      [cwd, ...(projects ?? [])]
+        .filter(
+          (root): root is string =>
+            !!root &&
+            (path === root || path.startsWith(root.replace(/\/+$/, "") + "/")),
+        )
+        .sort((left, right) => right.length - left.length)[0] ?? cwd;
+    if (await openWorkspaceFileReference({ path }, ownerRoot)) {
+      if (isMobile) setIsFileTreeVisible(false);
+    }
   };
 
   return (
