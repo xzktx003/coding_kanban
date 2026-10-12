@@ -38,6 +38,7 @@ import { AgentSessionRegistry } from "./services/agent-session-registry.js";
 import {
   resolveActiveCodexSessionId,
   resolveCodexSessionIds,
+  verifyBoundCodexQueueThread,
 } from "./services/active-codex-session-resolver.js";
 import { AgentSessionInputService } from "./services/agent-session-input-service.js";
 import { createAgentSessionStreamEvent } from "./services/agent-session-stream.js";
@@ -438,6 +439,11 @@ export function buildServer(options: BuildServerOptions = {}): {
               }),
             resolveSessionIds: (session) =>
               resolveCodexSessionIds(session, {
+                registry,
+                codexSessionLocator,
+              }),
+            verifyBoundQueueThread: (session, boundThreadId) =>
+              verifyBoundCodexQueueThread(session, boundThreadId, {
                 registry,
                 codexSessionLocator,
               }),

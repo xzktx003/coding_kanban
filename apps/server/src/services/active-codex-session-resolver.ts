@@ -90,3 +90,28 @@ export async function resolveCodexSessionIds(
   );
   return activeSessionId ? [activeSessionId] : [];
 }
+
+/** Verify the exact thread attached to a Feishu card before native queue delivery. */
+export async function verifyBoundCodexQueueThread(
+  agentSession: AgentSessionRecord,
+  boundThreadId: string,
+  dependencies: ActiveCodexSessionResolverDependencies,
+): Promise<boolean> {
+  const tmuxSession = agentSession.transportRef?.tmuxSession;
+  if (
+    !boundThreadId ||
+    !tmuxSession ||
+    isRemoteAgentSession(agentSession) ||
+    !dependencies.codexSessionLocator.resolveTmuxPanes
+  ) {
+    return false;
+  }
+
+  // The locator's startup recovery requires a live Codex process and a unique
+  // creation-time match. Keep that read-only proof confined to card-bound queues.
+  const panes = await dependencies.codexSessionLocator.resolveTmuxPanes(
+    tmuxSession,
+    { readOnlyCompletion: true },
+  );
+  return panes.some((pane) => pane.sessionId === boundThreadId);
+}

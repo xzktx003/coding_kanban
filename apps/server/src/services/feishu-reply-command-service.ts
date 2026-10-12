@@ -61,6 +61,10 @@ interface FeishuReplyCommandServiceOptions {
   codex: {
     resolveSessionId(session: AgentSessionRecord): Promise<string | undefined>;
     resolveSessionIds?(session: AgentSessionRecord): Promise<string[]>;
+    verifyBoundQueueThread?(
+      session: AgentSessionRecord,
+      boundThreadId: string,
+    ): Promise<boolean>;
     sendText: CodexImageMessageService["sendText"];
     sendImage: CodexImageMessageService["send"];
   };
@@ -234,7 +238,8 @@ export class FeishuReplyCommandService {
       return "ignored_unavailable";
     }
     const hasBoundThreadVerification = Boolean(
-      binding.codexThreadId && this.#codex.resolveSessionIds,
+      binding.codexThreadId &&
+      (this.#codex.resolveSessionIds || this.#codex.verifyBoundQueueThread),
     );
     if (!isAvailableCodexSession(session, hasBoundThreadVerification)) {
       return "ignored_unavailable";
@@ -246,6 +251,23 @@ export class FeishuReplyCommandService {
       if (binding.codexThreadId && this.#codex.resolveSessionIds) {
         const availableThreadIds = await this.#codex.resolveSessionIds(session);
         threadId = availableThreadIds.includes(binding.codexThreadId)
+          ? binding.codexThreadId
+          : undefined;
+        if (
+          !threadId &&
+          this.#codex.verifyBoundQueueThread &&
+          (await this.#codex.verifyBoundQueueThread(
+            session,
+            binding.codexThreadId,
+          ))
+        ) {
+          threadId = binding.codexThreadId;
+        }
+      } else if (binding.codexThreadId && this.#codex.verifyBoundQueueThread) {
+        threadId = (await this.#codex.verifyBoundQueueThread(
+          session,
+          binding.codexThreadId,
+        ))
           ? binding.codexThreadId
           : undefined;
       } else {

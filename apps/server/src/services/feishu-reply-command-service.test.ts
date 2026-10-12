@@ -52,6 +52,7 @@ function createFixture(
     threadId?: string | null;
     threadIds?: string[];
     supportsThreadEnumeration?: boolean;
+    verifyBoundQueueThread?: (threadId: string) => Promise<boolean>;
     sendText?: () => Promise<void>;
     downloadImage?: () => Promise<{
       image: Buffer;
@@ -135,6 +136,14 @@ function createFixture(
             resolveSessionIds: async () =>
               overrides.threadIds ?? [overrides.threadId ?? "codex-thread-1"],
           }),
+      ...(overrides.verifyBoundQueueThread
+        ? {
+            verifyBoundQueueThread: async (
+              _session: AgentSessionRecord,
+              threadId: string,
+            ) => overrides.verifyBoundQueueThread!(threadId),
+          }
+        : {}),
       sendText: async (input) => {
         writes.push({ sessionId: input.threadId, prompt: input.message });
         await overrides.sendText?.();
@@ -221,6 +230,57 @@ test("rejects a bound thread that no longer belongs to the tmux session", async 
 
   assert.equal(await fixture.service.handle(validEvent), "ignored_unavailable");
   assert.deepEqual(fixture.writes, []);
+});
+
+test("queues a reply to its exact live startup thread when strict pane discovery has no match", async () => {
+  const checked: string[] = [];
+  const fixture = createFixture({
+    targetSession: { ...session, agentKind: "bash" },
+    resolvedBinding: { ...binding, codexThreadId: "startup-thread" },
+    threadIds: [],
+    verifyBoundQueueThread: async (threadId) => {
+      checked.push(threadId);
+      return threadId === "startup-thread";
+    },
+  });
+
+  assert.equal(await fixture.service.handle(validEvent), "delivered");
+  assert.deepEqual(checked, ["startup-thread"]);
+  assert.deepEqual(fixture.writes, [
+    { sessionId: "startup-thread", prompt: "继续运行测试" },
+  ]);
+  assert.equal(await fixture.service.handle(validEvent), "ignored_duplicate");
+});
+
+test("startup thread fallback rejects a different bound ID and never marks it processed", async () => {
+  const fixture = createFixture({
+    targetSession: { ...session, agentKind: "bash" },
+    resolvedBinding: { ...binding, codexThreadId: "old-thread" },
+    threadIds: [],
+    verifyBoundQueueThread: async (threadId) => threadId === "startup-thread",
+  });
+
+  assert.equal(await fixture.service.handle(validEvent), "ignored_unavailable");
+  assert.deepEqual(fixture.writes, []);
+  assert.equal(fixture.processed.size, 0);
+});
+
+test("startup thread fallback keeps image replies on the bound native queue", async () => {
+  const fixture = createFixture({
+    resolvedBinding: { ...binding, codexThreadId: "startup-thread" },
+    threadIds: [],
+    verifyBoundQueueThread: async (threadId) => threadId === "startup-thread",
+  });
+  assert.equal(
+    await fixture.service.handle({
+      ...validEvent,
+      message_type: "image",
+      content: "![Image](img_v3_safe_image_key)",
+    }),
+    "delivered",
+  );
+  assert.equal(fixture.imageWrites[0]?.sessionId, "startup-thread");
+  assert.equal(fixture.processed.has("om_reply"), true);
 });
 
 test("delivers consecutive card replies to the bound live Codex pane of a bash terminal", async () => {
