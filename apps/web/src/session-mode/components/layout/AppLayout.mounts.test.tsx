@@ -10,7 +10,8 @@ const state = vi.hoisted(() => ({
   agentMounts: 0,
   agentUnmounts: 0,
 }));
-vi.mock("@session/session-dom", () => ({
+vi.mock("@session/session-dom", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@session/session-dom")>(),
   listenInSessionMode: () => () => {},
   isSessionModeActive: () => true,
 }));
