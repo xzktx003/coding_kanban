@@ -98,6 +98,8 @@ interface PendingCompletionProbe {
   baselineOnly: boolean;
 }
 
+const MAX_COMPLETION_PROBE_RETRIES = 3;
+
 function isCompletionState(
   state: AgentSessionRecord["interactionState"],
 ): boolean {
@@ -204,6 +206,8 @@ export class AgentCompletionFeishuNotifier {
   readonly #completionProbeInFlight = new Set<string>();
   readonly #pendingCompletionProbes = new Map<string, PendingCompletionProbe>();
   readonly #completionDeliveryInFlight = new Set<string>();
+  readonly #retryableCompletionDeliveries = new Set<string>();
+  readonly #completionProbeRetryCounts = new Map<string, number>();
   #previousSnapshot: ListAgentSessionsResponse | null = null;
   #stop: (() => void) | null = null;
   #isActive = false;
@@ -312,6 +316,8 @@ export class AgentCompletionFeishuNotifier {
       this.#completionProbeInFlight.clear();
       this.#pendingCompletionProbes.clear();
       this.#completionDeliveryInFlight.clear();
+      this.#retryableCompletionDeliveries.clear();
+      this.#completionProbeRetryCounts.clear();
     };
     return this.#stop;
   }
@@ -370,6 +376,7 @@ export class AgentCompletionFeishuNotifier {
       this.#baselinedSessionIds.delete(sessionId);
       this.#observedSessionIds.delete(sessionId);
       this.#pendingCompletionProbes.delete(sessionId);
+      this.#completionProbeRetryCounts.delete(sessionId);
     }
   }
 
@@ -377,7 +384,11 @@ export class AgentCompletionFeishuNotifier {
     event: FeishuCompletionEvent,
     baselineOnly: boolean,
     delayMs: number,
+    options: { resetRetryBudget?: boolean } = {},
   ): void {
+    if (options.resetRetryBudget !== false) {
+      this.#completionProbeRetryCounts.delete(event.sessionId);
+    }
     const existingTimer = this.#completionProbeTimers.get(event.sessionId);
     if (existingTimer) {
       clearTimeout(existingTimer);
@@ -402,6 +413,33 @@ export class AgentCompletionFeishuNotifier {
     }, effectiveDelayMs);
     timer.unref();
     this.#completionProbeTimers.set(event.sessionId, timer);
+  }
+
+  #scheduleCompletionRetry(probe: PendingCompletionProbe): void {
+    if (probe.baselineOnly || !this.#isActive) {
+      return;
+    }
+    const sessionId = probe.event.sessionId;
+    if (!this.#observedSessionIds.has(sessionId)) {
+      return;
+    }
+    if (this.#completionProbeTimers.has(sessionId)) {
+      return;
+    }
+    if (this.#pendingCompletionProbes.has(sessionId)) {
+      return;
+    }
+    const retryCount = this.#completionProbeRetryCounts.get(sessionId) ?? 0;
+    if (retryCount >= MAX_COMPLETION_PROBE_RETRIES) {
+      return;
+    }
+    this.#completionProbeRetryCounts.set(sessionId, retryCount + 1);
+    this.#scheduleCompletionProbe(
+      probe.event,
+      false,
+      this.#structuredCompletionProbeIntervalMs,
+      { resetRetryBudget: false },
+    );
   }
 
   #queueCompletionProbe(probe: PendingCompletionProbe): void {
@@ -438,6 +476,7 @@ export class AgentCompletionFeishuNotifier {
         new Error("Agent structured completion inspection failed"),
         probe.event,
       );
+      this.#scheduleCompletionRetry(probe);
       return;
     }
     if (!this.#isActive) {
@@ -448,40 +487,73 @@ export class AgentCompletionFeishuNotifier {
     const establishBaseline =
       probe.baselineOnly && !this.#baselinedSessionIds.has(sessionId);
     this.#baselinedSessionIds.add(sessionId);
+    if (observations.length === 0) {
+      this.#scheduleCompletionRetry(probe);
+      return;
+    }
+    let shouldRetry = false;
     for (const observation of observations) {
       if (observation.pendingContinuationSource) {
         continue;
       }
       const streamKey = this.#completionStreamKey(sessionId, observation);
+      const deliveryKey = this.#completionDeliveryKey(
+        streamKey,
+        observation.completionId,
+      );
       const hadBaseline = this.#observedCompletionIds.has(streamKey);
       const previousCompletionId = this.#observedCompletionIds.get(streamKey);
+      if (
+        previousCompletionId &&
+        previousCompletionId !== observation.completionId
+      ) {
+        this.#retryableCompletionDeliveries.delete(
+          this.#completionDeliveryKey(streamKey, previousCompletionId),
+        );
+      }
       this.#observedCompletionIds.set(streamKey, observation.completionId);
-      if (previousCompletionId === observation.completionId) {
+      if (
+        previousCompletionId === observation.completionId &&
+        !this.#retryableCompletionDeliveries.has(deliveryKey)
+      ) {
         continue;
       }
       if (!hadBaseline && establishBaseline) {
         continue;
       }
       if (observation.shouldNotify === false) {
+        this.#retryableCompletionDeliveries.delete(deliveryKey);
         continue;
       }
-      await this.#deliverObservation(probe.event, observation);
+      const delivered = await this.#deliverObservation(
+        probe.event,
+        observation,
+      );
+      if (!delivered) {
+        shouldRetry = true;
+      }
+    }
+    if (shouldRetry) {
+      this.#scheduleCompletionRetry(probe);
     }
   }
 
   async #deliverObservation(
     event: FeishuCompletionEvent,
     observation: FeishuCompletionObservation,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const streamKey = this.#completionStreamKey(event.sessionId, observation);
     if (
       this.#deliveredCompletionIds.get(streamKey) === observation.completionId
     ) {
-      return;
+      return true;
     }
-    const deliveryKey = `${streamKey}:${observation.completionId}`;
+    const deliveryKey = this.#completionDeliveryKey(
+      streamKey,
+      observation.completionId,
+    );
     if (this.#completionDeliveryInFlight.has(deliveryKey)) {
-      return;
+      return true;
     }
 
     let settings: Pick<
@@ -492,10 +564,10 @@ export class AgentCompletionFeishuNotifier {
       settings = this.#settings.get();
     } catch (error) {
       this.#logError(error, event);
-      return;
+      return true;
     }
     if (!settings.configured || !settings.enabled) {
-      return;
+      return true;
     }
 
     const deliveryEvent: FeishuCompletionEvent = {
@@ -522,8 +594,12 @@ export class AgentCompletionFeishuNotifier {
       const delivery = await this.#sender.send(deliveryEvent);
       this.#recordDelivery(deliveryEvent, delivery);
       this.#deliveredCompletionIds.set(streamKey, observation.completionId);
+      this.#retryableCompletionDeliveries.delete(deliveryKey);
+      return true;
     } catch (error) {
+      this.#retryableCompletionDeliveries.add(deliveryKey);
       this.#logError(error, deliveryEvent);
+      return false;
     } finally {
       this.#completionDeliveryInFlight.delete(deliveryKey);
     }
@@ -552,6 +628,18 @@ export class AgentCompletionFeishuNotifier {
             const previousCompletionId =
               this.#observedCompletionIds.get(streamKey);
             const wasObserved = this.#observedCompletionIds.has(streamKey);
+            const deliveryKey = this.#completionDeliveryKey(
+              streamKey,
+              observation.completionId,
+            );
+            if (
+              previousCompletionId &&
+              previousCompletionId !== observation.completionId
+            ) {
+              this.#retryableCompletionDeliveries.delete(
+                this.#completionDeliveryKey(streamKey, previousCompletionId),
+              );
+            }
             this.#observedCompletionIds.set(
               streamKey,
               observation.completionId,
@@ -559,11 +647,13 @@ export class AgentCompletionFeishuNotifier {
             if (
               this.#contentResolver.inspectLatestCompletions &&
               wasObserved &&
-              previousCompletionId === observation.completionId
+              previousCompletionId === observation.completionId &&
+              !this.#retryableCompletionDeliveries.has(deliveryKey)
             ) {
               continue;
             }
             if (observation.shouldNotify === false) {
+              this.#retryableCompletionDeliveries.delete(deliveryKey);
               continue;
             }
             await this.#deliverObservation(event, observation);
@@ -646,6 +736,10 @@ export class AgentCompletionFeishuNotifier {
       : sessionId;
   }
 
+  #completionDeliveryKey(streamKey: string, completionId: string): string {
+    return `${streamKey}\u0000${completionId}`;
+  }
+
   #clearCompletionState(sessionId: string): void {
     const prefix = `${sessionId}\u0000`;
     for (const key of this.#observedCompletionIds.keys()) {
@@ -658,6 +752,12 @@ export class AgentCompletionFeishuNotifier {
         this.#deliveredCompletionIds.delete(key);
       }
     }
+    for (const key of this.#retryableCompletionDeliveries.keys()) {
+      if (key === sessionId || key.startsWith(prefix)) {
+        this.#retryableCompletionDeliveries.delete(key);
+      }
+    }
+    this.#completionProbeRetryCounts.delete(sessionId);
   }
 }
 

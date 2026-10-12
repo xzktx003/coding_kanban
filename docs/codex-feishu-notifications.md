@@ -206,3 +206,17 @@ node --test scripts/codex-feishu-notify.test.mjs
 ### 卡片回复与终端进程标签
 
 终端发现时的 `agentKind` 是 shell/进程标签，可能在 Codex 启动后仍为 `bash`。带有明确 `codexThreadId` 的本地 tmux 卡片回复使用实际窗格进程枚举校验 thread 是否仍属于该终端，再投递到卡片绑定的原生 Codex queue；不要求目标窗格当前被选中，也不依赖记录中的旧窗格编号。没有实时成员校验能力时不能仅凭缓存 ID 放行；未绑定卡片仍遵守原有 Codex 候选检查。连接、控制权限、文本校验和成功后幂等规则保持生效。
+
+## 终端无常驻记录句柄时的完成检测（2026-10-12）
+
+`xh2modelzoo` 的本地 tmux 窗格有存活的 Codex 子进程，但没有常驻 rollout 句柄、没有匹配的 shell snapshot，也没有 `resume <id>` 参数。同工作目录存在多条历史时，原定位器返回空，完成观察便取不到原生 `task_complete`。飞书开关、目标配置和终端连接正常不能证明完成检测正常。
+
+完成观察现在以 `resolveTmuxPanes(..., {readOnlyCompletion: true})` 请求专用的只读恢复：读取 `session_meta.payload.timestamp` 的原始创建时间，与当前 Codex 进程启动时间关联；工作目录一致、非子 Agent、启动窗口内仅有一个线程才采用。时钟精度保留 1 秒前缘容差、沿用 2 分钟启动窗口；候选冲突、明确 resume/fork 启动、非 Codex 窗格或缺失原始时间都不使用这一关联。外层记录时间和文件 mtime 可能被重写，不能替代原始创建时间。
+
+这只能观察启动时创建的线程；它不授予写入权，不更新终端登记的 `agentSessionId`，也不改变普通定位、输入、审批和卡片回复的实时成员校验。进程内另开会话、使用会话选择器恢复历史等仍需原来的实时身份线索，不保证通过创建时间确定其当前输入目标。
+
+新的输出／状态变化后，如果暂时定位不到完成、结构化读取报错或发送失败，通知器按既有 2 秒间隔最多恢复探测 3 次；同一轮多窗格失败只消耗一轮预算。成功回执与已观察的完成 ID 分开，失败仍可重试，成功后同 turn 不重复发送。新的真实输出重置预算；删除会话、关闭通知器清理计时器和状态。启动时的空结果／异常基线不后台补历史，`shouldNotify:false` 与内部续跑规则保持。终端通知仍不提供持久 outbox 保证。
+
+验证使用隔离 proc/session 文件和模拟发送器，覆盖从定位、原生 transcript、完成观察到发送及去重的完整链路。现场只读检查已能定位到该终端的启动线程，并读到带真实 thread/turn ID 的最新可通知完成结果，登记记录写入次数为零；没有向用户 Codex 投递测试任务，也没有手工发送飞书卡片。回归入口：`codex-session-locator.test.ts`、`codex-completion-content-resolver.test.ts`、`agent-completion-feishu-notifier.test.ts`、`terminal-codex-completion.integration.test.ts`。
+
+本轮验收：`pnpm check` 通过，后端全量 815 项通过、1 项跳过（含隔离完整链路）；只读现场检查的飞书设置为 configured/enabled，真实 tmux 原 Codex 进程保持存活。发送阶段用模拟回执验证，不把它写成已取得新一轮真实飞书回执。

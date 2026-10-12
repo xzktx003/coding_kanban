@@ -46,6 +46,7 @@ interface ResolveCodexSessionInput {
   tmuxClientProcessId?: number;
   tmuxPaneProcessId?: number;
   workingDirectory?: string;
+  readOnlyCompletion?: boolean;
 }
 
 interface TmuxPaneProcess {
@@ -61,6 +62,7 @@ export interface ResolvedTmuxCodexPane {
 }
 
 interface OpenSessionCandidate {
+  createdAtMs?: number;
   id: string;
   cwd: string;
   mtimeMs: number;
@@ -109,7 +111,12 @@ function readOpenSession(path: string): OpenSessionCandidate | null {
     const source = record.payload.source;
     const subagent =
       source !== null && typeof source === "object" && "subagent" in source;
+    const createdAtMs =
+      typeof record.payload.timestamp === "string"
+        ? Date.parse(record.payload.timestamp)
+        : NaN;
     return {
+      ...(Number.isFinite(createdAtMs) ? { createdAtMs } : {}),
       id,
       cwd,
       mtimeMs: statSync(path).mtimeMs,
@@ -593,6 +600,7 @@ export class CodexSessionLocator {
 
   async resolveTmuxPanes(
     sessionName: string,
+    options: { readOnlyCompletion?: boolean } = {},
   ): Promise<ResolvedTmuxCodexPane[]> {
     const panes = await this.listTmuxPanes(sessionName);
     const resolved = await Promise.all(
@@ -600,6 +608,7 @@ export class CodexSessionLocator {
         const sessionId = await this.resolve({
           tmuxTarget: pane.paneId,
           tmuxPaneProcessId: pane.processId,
+          ...(options.readOnlyCompletion ? { readOnlyCompletion: true } : {}),
           ...(pane.workingDirectory
             ? { workingDirectory: pane.workingDirectory }
             : {}),
@@ -809,6 +818,50 @@ export class CodexSessionLocator {
         (candidate) => candidate.id === input.historySessionId,
       );
       if (registeredHistory) return registeredHistory.id;
+    }
+
+    // Completion observation can recover the thread born with this live Codex
+    // process when it has neither a snapshot nor a held rollout. Use the
+    // immutable payload timestamp, not rewritten record times or recency.
+    // This weaker historical association is never enabled for input routing.
+    if (
+      input.readOnlyCompletion &&
+      normalizedDirectory &&
+      codexProcessIds.length > 0
+    ) {
+      const matching = new Set<string>();
+      let ambiguous = false;
+      for (const processId of codexProcessIds) {
+        let args: string[];
+        try {
+          args = readFileSync(
+            join(this.procRoot, String(processId), "cmdline"),
+            "utf8",
+          ).split("\0");
+        } catch {
+          continue;
+        }
+        if (args.some((arg) => ["resume", "fork", "--resume"].includes(arg)))
+          continue;
+        const started = readProcessStartTime(
+          this.procRoot,
+          processId,
+          this.clockTicksPerSecond,
+        );
+        if (started === null) continue;
+        const born = sessionCandidates.filter(
+          (candidate) =>
+            candidate.createdAtMs !== undefined &&
+            candidate.createdAtMs >= started - 1000 &&
+            candidate.createdAtMs <= started + SHELL_SNAPSHOT_MATCH_WINDOW_MS,
+        );
+        if (born.length > 1) {
+          ambiguous = true;
+          break;
+        }
+        if (born.length === 1) matching.add(born[0].id);
+      }
+      if (!ambiguous && matching.size === 1) return [...matching][0];
     }
 
     // Recent Codex builds append rollout JSONL through short-lived handles

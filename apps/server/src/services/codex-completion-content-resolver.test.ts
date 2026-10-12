@@ -143,18 +143,22 @@ test("inspects every Codex pane in one local tmux session", async () => {
     },
     codexSessionLocator: {
       resolve: async () => "active-thread",
-      resolveTmuxPanes: async () => [
-        {
-          paneId: "%1",
-          sessionId: "codex-thread-one",
-          workingDirectory: "/workspace/project/one",
-        },
-        {
-          paneId: "%2",
-          sessionId: "codex-thread-two",
-          workingDirectory: "/workspace/project/two",
-        },
-      ],
+      resolveTmuxPanes: async (target, options) => {
+        assert.equal(target, "project-shell");
+        assert.deepEqual(options, { readOnlyCompletion: true });
+        return [
+          {
+            paneId: "%1",
+            sessionId: "codex-thread-one",
+            workingDirectory: "/workspace/project/one",
+          },
+          {
+            paneId: "%2",
+            sessionId: "codex-thread-two",
+            workingDirectory: "/workspace/project/two",
+          },
+        ];
+      },
     },
     codexTranscriptService: {
       read: () => {
