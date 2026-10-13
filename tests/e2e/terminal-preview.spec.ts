@@ -37,19 +37,25 @@ function buildSnapshot(items: AgentSessionRecord[]): ListAgentSessionsResponse {
 async function installTrackingWebSocket(
   page: Page,
   {
+    mockTerminalHttpStream = false,
     stalledTerminalConnections = 0,
-  }: { stalledTerminalConnections?: number } = {},
+  }: {
+    mockTerminalHttpStream?: boolean;
+    stalledTerminalConnections?: number;
+  } = {},
 ): Promise<void> {
-  await page.addInitScript((initialStalledTerminalConnections: number) => {
+  await page.addInitScript((options: [number, boolean]) => {
     if (!sessionStorage.getItem("coding-kanban-e2e-storage-initialized")) {
       localStorage.clear();
       sessionStorage.setItem("coding-kanban-e2e-storage-initialized", "true");
     }
 
+    const [initialStalledTerminalConnections, mockTerminalHttpStream] = options;
     const trackedWindow = window as Window & {
       __allWebSocketUrls?: string[];
       __closeLatestTerminalWebSocket?: () => void;
       __disableTerminalMonitorDragImageForTest?: boolean;
+      __terminalHttpStreamSubscriptions?: string[];
       __terminalWebSocketMaxPendingReplayCount?: number;
       __terminalWebSocketPendingReplayCount?: number;
       __terminalWebSocketClosedUrls?: string[];
@@ -59,6 +65,7 @@ async function installTrackingWebSocket(
     };
     trackedWindow.__allWebSocketUrls = [];
     trackedWindow.__disableTerminalMonitorDragImageForTest = true;
+    trackedWindow.__terminalHttpStreamSubscriptions = [];
     trackedWindow.__terminalWebSocketMaxPendingReplayCount = 0;
     trackedWindow.__terminalWebSocketPendingReplayCount = 0;
     trackedWindow.__terminalWebSocketClosedUrls = [];
@@ -66,6 +73,100 @@ async function installTrackingWebSocket(
     trackedWindow.__terminalWebSocketUrls = [];
     const terminalSockets: MockWebSocket[] = [];
     let remainingStalledTerminalConnections = initialStalledTerminalConnections;
+
+    if (mockTerminalHttpStream) {
+      const originalFetch = window.fetch.bind(window);
+      const encoder = new TextEncoder();
+      let streamController: ReadableStreamDefaultController<Uint8Array> | null =
+        null;
+      const streamId = "fixture-terminal-stream";
+      const writeSharedFrame = (
+        agentSessionId: string,
+        subscriptionId: string,
+        frame: string,
+      ) => {
+        streamController?.enqueue(
+          encoder.encode(
+            `${JSON.stringify({
+              type: "frame",
+              agentSessionId,
+              subscriptionId,
+              frame,
+            })}\n`,
+          ),
+        );
+      };
+
+      window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        const url = new URL(request.url, window.location.origin);
+        if (url.pathname === "/api/terminal-stream") {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              streamController = controller;
+              controller.enqueue(
+                encoder.encode(`${JSON.stringify({ type: "ready", streamId })}\n`),
+              );
+              request.signal.addEventListener(
+                "abort",
+                () => {
+                  if (streamController === controller) {
+                    streamController = null;
+                  }
+                  controller.close();
+                },
+                { once: true },
+              );
+            },
+          });
+          return new Response(stream, {
+            status: 200,
+            headers: { "content-type": "application/x-ndjson" },
+          });
+        }
+
+        const subscription = url.pathname.match(
+          /^\/api\/terminal-stream\/([^/]+)\/subscriptions(?:\/([^/]+))?$/,
+        );
+        if (subscription?.[1] === streamId) {
+          if (request.method === "POST") {
+            const body = (await request.json()) as {
+              agentSessionId: string;
+              subscriptionId: string;
+            };
+            trackedWindow.__terminalHttpStreamSubscriptions?.push(
+              body.agentSessionId,
+            );
+            writeSharedFrame(
+              body.agentSessionId,
+              body.subscriptionId,
+              JSON.stringify({
+                __agentOrchestrator: "terminal-control",
+                event: "replay",
+                data: "tracked terminal replay\r\n",
+              }),
+            );
+            writeSharedFrame(
+              body.agentSessionId,
+              body.subscriptionId,
+              JSON.stringify({
+                __agentOrchestrator: "terminal-control",
+                event: "replay-complete",
+              }),
+            );
+            return new Response(JSON.stringify({ ok: true }), {
+              status: 200,
+              headers: { "content-type": "application/json" },
+            });
+          }
+          if (request.method === "DELETE") {
+            return new Response(null, { status: 204 });
+          }
+        }
+
+        return originalFetch(input, init);
+      }) as typeof window.fetch;
+    }
 
     class MockWebSocket extends EventTarget {
       static CONNECTING = 0;
@@ -192,7 +293,7 @@ async function installTrackingWebSocket(
       writable: true,
       value: MockWebSocket,
     });
-  }, stalledTerminalConnections);
+  }, [stalledTerminalConnections, mockTerminalHttpStream]);
 }
 
 async function installFocusReportTimerTracking(page: Page): Promise<void> {
@@ -448,6 +549,15 @@ async function closedTerminalWebSocketUrls(page: Page): Promise<string[]> {
     return [
       ...((window as Window & { __terminalWebSocketClosedUrls?: string[] })
         .__terminalWebSocketClosedUrls ?? []),
+    ];
+  });
+}
+
+async function terminalHttpStreamSubscriptions(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    return [
+      ...((window as Window & { __terminalHttpStreamSubscriptions?: string[] })
+        .__terminalHttpStreamSubscriptions ?? []),
     ];
   });
 }
@@ -1741,7 +1851,10 @@ test("multi-pane layout bounds initial replays and keeps queued panes visible", 
     }),
   );
   await page.setViewportSize({ width: 1920, height: 1080 });
-  await mockSessions(page, sessions, { stalledTerminalConnections: 2 });
+  await mockSessions(page, sessions, {
+    mockTerminalHttpStream: true,
+    stalledTerminalConnections: 2,
+  });
   await page.goto("/");
 
   await page
@@ -1753,30 +1866,40 @@ test("multi-pane layout bounds initial replays and keeps queued panes visible", 
     .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
     .click();
   await page.getByRole("menuitemradio", { name: /八屏/ }).click();
+  await page.keyboard.press("Escape");
 
   const layout = page.locator(".focus-terminal-layout--eight");
   await expect(layout.locator("[data-terminal-pane-session]")).toHaveCount(8);
   await expect.poll(() => terminalWebSocketUrls(page)).toHaveLength(2);
-  await expect(layout.getByRole("status")).toHaveCount(8);
+  await expect(layout.locator(".terminal-pane-loading-status")).toHaveCount(8);
   await expect(
     layout.locator('[data-terminal-render-mode="loading"]'),
   ).toHaveCount(6);
 
   await expect
     .poll(() => terminalWebSocketUrls(page), { timeout: 8_000 })
-    .toHaveLength(10);
+    .toHaveLength(8);
+  await expect
+    .poll(() => terminalHttpStreamSubscriptions(page), { timeout: 8_000 })
+    .toHaveLength(2);
   await expect(layout.locator('[data-terminal-ready="true"]')).toHaveCount(8);
-  await expect(layout.getByRole("status")).toHaveCount(0);
+  await expect(layout.locator(".terminal-pane-loading-status")).toHaveCount(0);
   expect(await maximumPendingTerminalReplays(page)).toBeLessThanOrEqual(2);
   expect(await terminalWebSocketUrls(page)).toEqual(
     expect.arrayContaining(
       sessions.map((session) =>
         expect.stringMatching(
-          new RegExp(`/agent-sessions/${session.id}/terminal$`),
+          new RegExp(
+            `/agent-sessions/${session.id}/terminal\\?replayBytes=524288$`,
+          ),
         ),
       ),
     ),
   );
+  expect(await terminalHttpStreamSubscriptions(page)).toEqual([
+    "multi-load-session-1",
+    "multi-load-session-2",
+  ]);
 });
 
 test("manual layout switches reuse terminal sockets already opened on this page", async ({
@@ -1802,27 +1925,55 @@ test("manual layout switches reuse terminal sockets already opened on this page"
     .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
     .click();
   await page.getByRole("menuitemradio", { name: /六屏/ }).click();
+  await page.keyboard.press("Escape");
 
   const layout = page.locator(".focus-terminal-layout");
   await expect(layout.locator("[data-terminal-pane-session]")).toHaveCount(6);
   await expect
     .poll(() => terminalWebSocketUrls(page), { timeout: 8_000 })
     .toHaveLength(6);
+  expect(await closedTerminalWebSocketUrls(page)).toHaveLength(0);
 
   await page
     .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
     .click();
   await page.getByRole("menuitemradio", { name: /单屏/ }).click();
+  await page.keyboard.press("Escape");
   await expect(layout.locator("[data-terminal-pane-session]")).toHaveCount(1);
   await expect(layout.locator(".focus-terminal-pane:visible")).toHaveCount(1);
+  await expect.poll(() => terminalWebSocketUrls(page)).toHaveLength(6);
+  await expect.poll(() => closedTerminalWebSocketUrls(page)).toHaveLength(5);
+  expect(await closedTerminalWebSocketUrls(page)).toEqual(
+    expect.arrayContaining(
+      sessions
+        .slice(1)
+        .map((session) =>
+          expect.stringMatching(
+            new RegExp(
+              `/agent-sessions/${session.id}/terminal\\?replayBytes=524288$`,
+            ),
+          ),
+        ),
+    ),
+  );
 
   await page
     .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
     .click();
   await page.getByRole("menuitemradio", { name: /六屏/ }).click();
+  await page.keyboard.press("Escape");
   await expect(layout.locator("[data-terminal-pane-session]")).toHaveCount(6);
   await expect(layout.locator(".focus-terminal-pane:visible")).toHaveCount(6);
-  await expect.poll(() => terminalWebSocketUrls(page)).toHaveLength(6);
+  await expect.poll(() => terminalWebSocketUrls(page)).toHaveLength(11);
+  const urls = await terminalWebSocketUrls(page);
+  const countForSession = (sessionId: string) =>
+    urls.filter((url) => url.includes(`/agent-sessions/${sessionId}/terminal`))
+      .length;
+  expect(countForSession("retained-layout-session-1")).toBe(1);
+  for (const session of sessions.slice(1)) {
+    expect(countForSession(session.id)).toBe(2);
+  }
+  expect(await closedTerminalWebSocketUrls(page)).toHaveLength(5);
 });
 
 test("narrow multi-pane layouts preserve terminal height and scroll the pane list", async ({

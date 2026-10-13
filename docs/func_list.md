@@ -541,3 +541,71 @@
 - 默认构建/新启动已改为 TS；已有 legacy 服务健康时复用，归属不明时拒绝第二份实例，不隐式停止 Agent。正式实例切换不由构建成功推断。
 
 - Codex 插件呈现差异对齐：元数据文件卡片有界滚动与原会话源文件查看、原生答题浏览/输入提示、网络始终允许操作、错误/重连卡片、统一流式排版及输入忙状态。手机保留固定高度和触控适配；缺历史 diff 不虚构。见 [本轮来源与验收](designs/session-render-alignment/ui-parity-audit-20261010.md)。
+
+- Codex 代码块自动换行与原生插件共用同一个设备偏好：切换一个代码块会同步所有消息／会话中的代码块，刷新和流式结束后保留；开启／关闭使用原包对应 SVG。偏好只保存一个布尔值，不保留聊天正文。验收见 `docs/designs/session-render-alignment/code-wrap-progress.md`。
+
+- Codex SVG 代码块支持原生图片预览，`xml`／`html` 仅在内容以 SVG 开头时启用；复制和下载仍使用原始代码。代码复制提示复刻原生 200ms 浮层、成功图标和反馈状态，浏览器剪贴板等待时防止重复操作。验收见 `docs/designs/session-render-alignment/code-preview-controls-progress.md`。
+
+- Codex 模型菜单的 Fast 闪电为直接开关：点亮即当前会话启用加速，再点熄灭恢复标准模式；真实 catalog 的 `priority`（Fast）及旧 `fast` 均可直接开关，并写回对应原生 ID；保留键盘操作和真实能力门禁。
+
+- Codex Markdown 表格对齐原生复制等待／成功反馈、按钮焦点方向键、平台 Alt 边界、列宽分档、滚动渐隐及干净富文本复制；正文加粗和安全链接保留原生语义，网站图标支持加载／失败回退。保留 CSV／TSV 与下载入口，详见 [表格验收](designs/session-render-alignment/table-controls-progress.md)。
+
+- Codex 普通网站链接支持原宿主的 HTTPS 富预览，未知能力／其他协议继续使用 URL 提示；保留长地址断行、键盘焦点环圈、Escape／失焦关闭。代码按钮焦点和悬停色按 host token 对齐，隐藏模式不会重现旧提示，favicon 解码不再丢失表格复制成功反馈。最新能力见 [网站预览](session-website-preview.md)，普通提示历史验收见 [链接与焦点进度](designs/session-render-alignment/link-focus-progress.md)。
+
+- 会话 LAN HTTP 兼容：会话、分屏、操作与附件标识采用既有 UUID 依赖；代码／表格／回复复制在无 Clipboard API 时同步写入真实 copy event，保留表格 HTML、完整引用范围与原输入选区。HTTPS 的 Clipboard API 拒绝继续显示错误。提示保留原 8px 视口边距，并尊重桌面 host 悬停色。验收与剩余像素差异见 [对照记录](designs/session-render-alignment/link-focus-progress.md)。
+
+- Codex hotline 链接按原插件移除独立来源标记，保留原电话、短信、网站目标与其余参数；安全短信协议可用，电话／短信标签使用原地球图标。特殊 Slack／GitHub／网站预览门禁继续逐分支对照，见 [特殊链接进度](designs/session-render-alignment/special-links-progress.md)。
+
+- Codex Slack 链接提供原生域名／打开卡片、固定图标、键盘 Tab／Escape、视口翻转及隐藏释放；生产控制器已接 TS 运行层的限定 context/read 接口，经当前账号与唯一工具目录核对、专用只读临时线程调用原生 Codex Apps MCP，网页只接收有界匹配正文。账号切换不接受旧回复，临时线程不加入关注标签／输入目标，断连不自动重读。真实 HTTP／EventSource 和原包协议探测已验；正式旧运行服务尚未启用这两个入口，当前目录也没有可用 Slack 连接，远程读取仍待验。见 [数据架构](session-slack-preview.md)与[特殊链接进度](designs/session-render-alignment/special-links-progress.md)。
+
+- Codex GitHub PR 预览分支：原生实验开关关闭／未知使用一般网站能力，网站能力也不可用才保留 URL 提示，开启后显示仓库、编号与经匹配的真实标题／Draft、Open、Closed、Merged 状态；失败仍保留仓库／编号。限定只读 MCP 接口及账号／连接隔离已实现，真实 Statsig 开关接入、远程 GitHub 与正式运行启用待验收；详见 [GitHub PR 预览](session-github-preview.md)。
+
+- 2026-10-11：Codex 普通 HTTPS 网站按原宿主提供文字、hero／缩略／单独图片预览；只读网关检查公开 DNS、固定 TLS 连接、限制字节／并发／跳转与 LRU，能力未知时仍保留 URL 提示。新增十类原生品牌 SVG 与中英日卡片文案；跨控制器图片预算、关闭时 Blob 注销和三轮浏览器 RSS 验收，详见 [网站预览](session-website-preview.md)。浏览器内置复制图片地址为 blob URL，与原包 data URI 尚有差异，完整复刻目标继续进行。
+- 2026-10-11：网站完整弹层追加原包 RPC／Provider 集成对照，实际走网站查询与生产 HTTP handler；深浅主题、390／700 宽度、已解码 hero、交互悬停及 Tab／Escape 验证通过。与既有 Slack／Agent 隔离共 9 项浏览器回归通过；受控网络 fixture 不代表真实 VS Code extension 或远程账号验收，边界见 [网站预览](session-website-preview.md)。
+- 2026-10-11：共用 Codex rich 预览补原生空间候选：上下不足时尝试左右，窄屏再约束正文并支持真实滚轮；原网站 RPC 迟到内容的展开及图片解码失败回退有独立浏览器对照。卡片定位与整页超低高度布局的边界见 [网站预览](session-website-preview.md)。
+- 2026-10-11：共用 rich 预览的内部细分隔线按原 border-subtle 的 5% oklab token 呈现；增加实际字体／合成层与相同合成场景的严格像素对照，保持零不同像素门槛，完整窗口边界见 [网站预览](session-website-preview.md)。
+
+- 2026-10-11：Codex `/feedback` 提供原六类、日志选择、校验和中英日法文；默认提交立即交给独立上传报告，保留六种状态、关闭后后台完成／通知重开、实际反馈 ID 复制与 GitHub 链接，仅明确 failed 开放重试。账号／主机变化释放旧工作流，回执与输入按 owner 隔离。原生通知外观、策略预检和诊断附件仍待闭合，详见 [反馈进度](session-codex-feedback.md)。
+
+- Codex 反馈持久通知和复制错误使用原包普通通知卡片：顶部中央、五秒／持久、原图标、主动作重开、明确关闭与向右滑出。覆盖深浅主题及 390／700 浏览器截图，边界与复现见 [Codex 通知呈现](session-codex-notifications.md)。其他原生通知调用点和特殊变体继续移植。
+
+- Codex 正文复制错误：回复／代码／表格统一使用原包语言的顶部错误通知，同一逻辑 ID 去重，拒绝保持未复制；代码与表格不额外插入原包没有的异常正文。普通文本 RPC 和富文本 API 拒绝分别做浏览器对照，LAN HTTP 真实 copy event 成功路径保留。
+- 原生通知服务支持自定义 content 和原 `onUserDismiss`／`onRemove` 区别，动作不隐式关闭，截图与滑动验收见 [Codex 通知呈现](session-codex-notifications.md)。真实 MCP 认证编排仍需接入。
+
+### 本阶段范围与 MCP 认证（2026-10-11）
+
+- 云任务、云环境、云端委派延期至下一阶段；现有入口与数据保留。
+- 2026-10-12：独立分支提供未修改原版 Codex 的实验宿主与单独安装的伴随扩展，真实双编辑器面板已显示原版登录页；只读 IPC 初始化与无 owner 回应实测通过，真实聊天、看板窗口组/公共输入、跨版本和性能验收未闭合。正式模式未切换，详见 [原型验收](designs/session-render-alignment/native-prototype-acceptance.md)。
+- Codex MCP 重新认证接入启动配置预检、工具 scope、OAuth 重试/链接复用、当前账号工作区隔离和只读断线恢复；7 项原包卡片/真实 HTTP EventSource 浏览器测试通过。固定 reload 路由与能力门控已实现，正式运行启用和真实外部账号仍待验。见 [MCP 认证](session-codex-mcp-auth.md)。这条记录更新前文“真实 MCP 认证仍需接入”的阶段状态。
+
+- 2026-10-11：LAN HTTP 发送使用与 HTTPS 相同的 SHA-256 提交身份，刷新、重复回执与协议切换仍去重；原提交目录/模型/权限/附件捕获规则保留。正文复制补齐原成功 SVG 与提示；MCP 参数摘要不保留凭证，并服从更小的缓存文本预算。相关行为和验收见 [本轮 bug 记录](debug_list.md)。
+
+- Codex 通知动态范围按原边界矩形及 ResizeObserver 更新，移除恢复上一登记，相同范围不触发更新，隐藏模式保持隔离；两宽度原 ZK/XK 几何对照通过。固定版本侧边 inset 保持原可达的零值，范围与验收见 [通知呈现](session-codex-notifications.md)。
+
+- 后台汇总批量停止按本轮与核实身份筛选，确认数量/名单，轮次或连接/账号变化后重新确认，取消不发送、重复确认只发一次；这是仓库安全约定的浏览器适配，详情见 [子 Agent](session-subagents.md)。
+
+- Codex 默认消息复制按当前 DOM 清理结构复制；用户为渲染纯文本，助手为规范化源码纯文本，同时提供 HTML，保留 HTTP copy-event 回退。点击才序列化，不新增正文缓存；用户／助手成功状态分别 1500／2000ms，卸载不创建迟到计时器。原包默认 rich payload、公式、列表、表格与消息生命周期采用独立红绿灯验收，结果见原生呈现实施文档。
+
+- 用户消息 Markdown 图片语法显示为原生 `!` 加链接，富文本复制保留原生独立标记；真实图片附件继续单独放大／下载，助手 Markdown 图片继续图片展示。新增原包对照及附件回归已先红后绿。
+
+- 子 Agent 批量停止的确认永久失效保护：范围曾变化后恢复原值也必须重新确认；只在弹窗存在时订阅元数据，正文增量不扫描名单。
+
+### 独立 Codex 模式（2026-10-12～13）
+
+- 主分支新增“会话 / 终端 / Codex”三模式导航，URL 与设备偏好识别 Codex，访问后的工作区保持挂载与隐藏快捷键隔离。
+- 原生插件适配开发放在独立 Codex 工作台，未修改官方 VSIX；原生双面板、同源代理、自有 surface 适配与显式重试已接入。初版已用已授权连接实测原生发送、流式、中断及后续回复、双窗口草稿隔离和原生历史恢复；项目 Resume 与公共输入的最新真实浏览器验收见下方条目，窗口组同步仍待后续，云任务继续延期。详见 [Codex 模式](codex-workbench-mode.md)。
+- 新聊天同窗恢复已实现原生 composer thread UUID 观察、仅存 UUID 的本机映射、同源 broker 路由、清洁标签校验和串行恢复；新聊天草稿、附件或用户交互会取消恢复。前端、服务路由和伴随扩展专项回归通过；真实登录 Webview 的首发后刷新尚未行为验收。
+
+- Codex 模式列出当前项目及其原生 thread 历史；点击历史项以精确 thread UUID 和选定列 Resume 原生会话，并将会话模式切到同一项目/thread。公共 composer 显示准确的 Codex 窗口目标，并经同源 gateway 与版本受限的 companion 向原生插件 app-server 投递；目标 editor、thread、列和项目必须匹配，目标忙碌、Session 队列有未决条目或回执未知时保留草稿，不广播且不回退到 Session runtime。companion 仅保存不含正文的幂等回执。单测和路由测试通过；2026-10-13 一次性项目的真实浏览器验收完成一条公共消息及助手回复，忙碌轮次 queue/steer/replace 与多窗口组同步未接入。
+- 已授权 `--shared-codex-home` 将真实 Codex 账号配置、持久会话数据库和历史以文件链接接入私有 HOME overlay，同时隔离宿主 IPC、app-server control、临时目录和缓存；与复制登录配置的 `--connection-profile-home` 互斥。正式 thread 未用于测试发送；一次性项目的真实消息验收见 [Codex 模式](codex-workbench-mode.md)。
+- 原生 Resume 按钮现在等待网关确认 broker、伴随扩展和官方插件均就绪；进入 Codex 模式后限时轮询，隐藏时取消，避免宿主 HTTP 可用但 Resume 接口未监听的短暂竞态。
+
+- 独立 Codex 宿主支持显式复用已授权连接到全新私有登录目录，并打开两份带固定窗口身份的原生新聊天面板；不导入正式历史、IPC 或项目权限，默认不读取登录目录、不自动发送任务。原生 composer 保持由官方插件处理；公共 Session composer 仅对精确 Resume 的原生 thread 使用受版本限制的同一 app-server 连接桥接。
+
+- 原生 Codex 聊天验收覆盖两个隔离真实线程、实际完成与中断轮次、模式切换保留和原生历史恢复；保持官方文件摘要不变。新建面板刷新路径现已接入同窗恢复，但真实登录浏览器行为尚未确认；旧宿主宽限期的原生占用提示仍是明确限制。
+
+- 会话文件链接：普通链接、原生引用及文件树先解析项目内目录／文件软链接，再按真实文件所属的已注册项目预览；保留行列范围、保存版本与草稿，不开放未注册目录。详见 [文件管理](session-file-management.md#对话文件链接与符号链接解析)。
+
+- 终端 Codex 完成通知：无常驻 rollout 句柄或 shell snapshot 时，通过仅用于完成观察的唯一启动关联恢复；定位／解析／发送失败有限重试，保留新任务边沿与成功回执去重，不改变终端输入权限。详见 [完成通知](codex-feishu-notifications.md#终端无常驻记录句柄时的完成检测2026-10-12)。
+
+- 终端 HTTP 回退连接按页面共享，多屏各自保留独立回放与订阅；退出最后一个终端立即释放长流，避免八屏占满浏览器连接池影响输入。协议与验收见 [终端性能排查](terminal-performance.md)。

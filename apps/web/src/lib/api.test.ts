@@ -27,6 +27,32 @@ function setWindowLocation(protocol: "http:" | "https:", host: string): void {
   });
 }
 
+function makeNdjsonStream() {
+  const encoder = new TextEncoder();
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({
+    start(next) {
+      controller = next;
+    },
+  });
+  return {
+    stream,
+    write(value: unknown) {
+      controller.enqueue(encoder.encode(`${JSON.stringify(value)}\n`));
+    },
+    writeRaw(value: string) {
+      controller.enqueue(encoder.encode(value));
+    },
+    close() {
+      controller.close();
+    },
+  };
+}
+
+function flush(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 test("buildTerminalWebSocketUrl uses wss on the default HTTPS dev frontend", () => {
   setWindowLocation("https:", "10.30.0.24:3100");
 
@@ -63,78 +89,118 @@ test("terminal HTTP fallback stays on the current HTTPS origin", () => {
   );
 });
 
-test("terminal HTTP fallback incrementally decodes split NDJSON frames", async () => {
-  const encoder = new TextEncoder();
-  const replayFrame = JSON.stringify(
-    JSON.stringify({
-      __agentOrchestrator: "terminal-control",
-      event: "replay",
-      data: "first line\nsecond line",
-    }),
-  );
-  const completeFrame = JSON.stringify(
-    JSON.stringify({
-      __agentOrchestrator: "terminal-control",
-      event: "replay-complete",
-    }),
-  );
-  const source = `${replayFrame}\n${completeFrame}\n`;
-  const splitAt = Math.floor(source.length / 2);
-  let requestedUrl = "";
+test("terminal HTTP fallback incrementally decodes split shared-stream frames", async () => {
+  const ndjson = makeNdjsonStream();
+  const replayFrame = JSON.stringify({
+    __agentOrchestrator: "terminal-control",
+    event: "replay",
+    data: "first line\nsecond line",
+  });
+  const completeFrame = JSON.stringify({
+    __agentOrchestrator: "terminal-control",
+    event: "replay-complete",
+  });
+  let getUrl = "";
+  let postUrl = "";
+  let postBody:
+    | { agentSessionId: string; replayBytes: number; subscriptionId: string }
+    | undefined;
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
-    value: async (input: string | URL | Request) => {
-      requestedUrl = String(input);
-      return new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.enqueue(encoder.encode(source.slice(0, splitAt)));
-            controller.enqueue(encoder.encode(source.slice(splitAt)));
-            controller.close();
-          },
-        }),
-        {
+    value: async (input: string | URL | Request, init?: RequestInit) => {
+      if (!init?.method) {
+        getUrl = String(input);
+        return new Response(ndjson.stream, {
           status: 200,
           headers: { "content-type": "application/x-ndjson" },
-        },
-      );
+        });
+      }
+      postUrl = String(input);
+      postBody = JSON.parse(String(init.body));
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
     },
   });
 
   const received: string[] = [];
-  await streamTerminalOutput("agent-1", {
+  const promise = streamTerminalOutput("agent-1", {
     replayBytes: 256 * 1024,
     onFrame: (frame) => received.push(frame),
   });
 
-  assert.equal(
-    requestedUrl,
-    "/api/agent-sessions/agent-1/terminal-stream?replayBytes=262144",
-  );
-  assert.deepEqual(received, [
-    JSON.parse(replayFrame) as string,
-    JSON.parse(completeFrame) as string,
-  ]);
+  await flush();
+  ndjson.write({ type: "ready", streamId: "stream-1" });
+  await flush();
+  await flush();
+  assert.ok(postBody);
+  const source = `${JSON.stringify({
+    type: "frame",
+    agentSessionId: "agent-1",
+    subscriptionId: postBody.subscriptionId,
+    frame: replayFrame,
+  })}\n${JSON.stringify({
+    type: "frame",
+    agentSessionId: "agent-1",
+    subscriptionId: postBody.subscriptionId,
+    frame: completeFrame,
+  })}\n`;
+  const splitAt = Math.floor(source.length / 2);
+  ndjson.writeRaw(source.slice(0, splitAt));
+  ndjson.writeRaw(source.slice(splitAt));
+  ndjson.close();
+  await promise;
+
+  assert.equal(getUrl, "/api/terminal-stream");
+  assert.equal(postUrl, "/api/terminal-stream/stream-1/subscriptions");
+  assert.equal(postBody.agentSessionId, "agent-1");
+  assert.equal(postBody.replayBytes, 256 * 1024);
+  assert.match(postBody.subscriptionId, /^[0-9a-f-]{36}$/i);
+  assert.deepEqual(received, [replayFrame, completeFrame]);
 });
 
-test("terminal HTTP fallback accepts a final NDJSON frame without a newline", async () => {
+test("terminal HTTP fallback accepts a final shared-stream frame without a newline", async () => {
+  const ndjson = makeNdjsonStream();
   const expectedFrame = JSON.stringify({
     __agentOrchestrator: "terminal-control",
     event: "replay-complete",
   });
+  let subscriptionId = "";
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
-    value: async () =>
-      new Response(JSON.stringify(expectedFrame), {
-        status: 200,
-        headers: { "content-type": "application/x-ndjson" },
-      }),
+    value: async (_input: string | URL | Request, init?: RequestInit) => {
+      if (!init?.method) {
+        return new Response(ndjson.stream, {
+          status: 200,
+          headers: { "content-type": "application/x-ndjson" },
+        });
+      }
+      const body = JSON.parse(String(init.body)) as { subscriptionId: string };
+      subscriptionId = body.subscriptionId;
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    },
   });
 
   const received: string[] = [];
-  await streamTerminalOutput("agent-1", {
+  const promise = streamTerminalOutput("agent-1", {
     onFrame: (frame) => received.push(frame),
   });
+
+  await flush();
+  ndjson.write({ type: "ready", streamId: "stream-2" });
+  await flush();
+  await flush();
+  ndjson.writeRaw(
+    JSON.stringify({
+      type: "frame",
+      agentSessionId: "agent-1",
+      subscriptionId,
+      frame: expectedFrame,
+    }),
+  );
+  ndjson.close();
+  await promise;
 
   assert.deepEqual(received, [expectedFrame]);
 });
