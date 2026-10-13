@@ -2070,3 +2070,5 @@
 - 2026-10-13（公共 composer 向原生 thread 发送遭遇 `SESSION_OWNED_ELSEWHERE`）：项目历史 Resume 已打开精确原生窗口，但旧 followup 路径另起 Session runtime 并尝试获取同一 thread writer，故发送被拒。公共输入现在经版本受限的 companion 调用官方插件自己的 app-server；逐项核对 active editor、thread UUID、列、cwd 和 idle 状态，并保存不含正文的幂等回执。busy/uncertain 与已有队列保留草稿并拒绝，禁止回退到 Session runtime；伴随扩展、gateway、UI 红绿灯转绿。2026-10-13 一次性项目真实浏览器验收得到 Resume 与发送两个 202 回执，原生 history 有一条新增 user turn 和精确助手回复，第 2 列不变；已归档测试 thread、移除临时项目登记并清空目标。多项目、多状态和正式 thread 没有用该单次验收替代。
 
 - 2026-10-13（顶栏模式选择层级不一致）：新增 Codex 后仍保留会话／终端二态推杆，造成三种模式入口不并列。统一为三个同级按钮，删除拖动状态、轨道与 Codex 专用分隔；切换焦点移到新模式的选中按钮。红绿灯覆盖无二态开关、选中状态、禁用操作及隐藏工作区／草稿保留，隔离浏览器覆盖桌面与手机几何和键盘。
+
+- 2026-10-13（xh2modelzoo 卡片完整记录为空）：完成通知与飞书回复已能通过存活进程启动时间关联找到原 thread，但完整记录的 historyOnly 分支仍要求注册表已有 ID，且未启用同一只读关联，返回 available:false。历史定位在严格失败时复用有歧义保护的启动关联，即使未登记 ID 也按精确 thread 读取与分页；不更新登记／普通输入目标，不回退同目录最新历史。隔离真实 locator→HTTP→JSONL 分页回归先红后绿，覆盖非 Codex 拒绝与零登记变更；现场原卡片已返回正确 thread 的非空消息及上一页，未重启／中断 Codex。

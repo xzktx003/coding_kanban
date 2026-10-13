@@ -10,9 +10,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import Fastify from "fastify";
 
 import type {
   AgentSessionRecord,
+  AgentTranscriptResponse,
   ListAgentSessionsResponse,
 } from "@agent-orchestrator/shared";
 
@@ -23,6 +25,9 @@ import {
 import { CodexCompletionContentResolver } from "./codex-completion-content-resolver.js";
 import { CodexSessionLocator } from "./codex-session-locator.js";
 import { CodexTranscriptService } from "./codex-transcript-service.js";
+import { AgentSessionRegistry } from "./agent-session-registry.js";
+import { resolveActiveCodexSessionId } from "./active-codex-session-resolver.js";
+import { registerAgentSessionRoutes } from "../routes/agent-sessions.js";
 
 class SnapshotSource {
   #listener: ((snapshot: ListAgentSessionsResponse) => void) | null = null;
@@ -340,6 +345,138 @@ test("terminal Codex completion notification recovers a launch-born thread witho
     assert.equal(sent.length, 1);
   } finally {
     stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("terminal transcript API recovers launch history and pagination without changing input routing", async () => {
+  const root = mkdtempSync(join(tmpdir(), "terminal-transcript-startup-"));
+  const sessionsRoot = join(root, "sessions");
+  const procRoot = join(root, "proc");
+  mkdirSync(sessionsRoot, { recursive: true });
+  const app = Fastify();
+  try {
+    exposeProcess(procRoot, 601, {
+      children: "602",
+      cwd: "/workspace/project",
+    });
+    exposeProcess(procRoot, 602, {
+      cmdline: "/usr/local/bin/codex\0--yolo\0",
+      cwd: "/workspace/project",
+      startedAtMs: Date.parse("2026-10-12T15:00:00.000Z"),
+    });
+    const threadId = "codex-startup-thread";
+    const path = writeCodexSession(
+      sessionsRoot,
+      `rollout-${threadId}`,
+      threadId,
+      "/workspace/project",
+      "2026-10-12T15:00:02.000Z",
+    );
+    for (const [role, text] of [
+      ["user", "fixture question"],
+      ["assistant", "fixture answer"],
+    ]) {
+      writeFileSync(
+        path,
+        `${JSON.stringify({
+          timestamp: "2026-10-12T15:01:00.000Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role,
+            content: [
+              { type: role === "user" ? "input_text" : "output_text", text },
+            ],
+          },
+        })}\n`,
+        { flag: "a" },
+      );
+    }
+    const unrelated = writeCodexSession(
+      sessionsRoot,
+      "rollout-codex-old-thread",
+      "codex-old-thread",
+      "/workspace/project",
+      "2026-10-12T14:00:00.000Z",
+    );
+    utimesSync(
+      unrelated,
+      new Date("2026-10-13T01:00:00.000Z"),
+      new Date("2026-10-13T01:00:00.000Z"),
+    );
+    const registry = new AgentSessionRegistry();
+    const session = registry.register({
+      workspaceId: "default",
+      sourceType: "local",
+      agentKind: "node",
+      displayName: "fixture Codex",
+      workingDirectory: "/workspace/project",
+      connectionState: "offline",
+      interactionState: "detached",
+      transportRef: { tmuxSession: "fixture-terminal", tmuxPane: "%291" },
+    });
+    const locator = new CodexSessionLocator({
+      procRoot,
+      sessionsRoot,
+      shellSnapshotsRoot: join(root, "no-snapshots"),
+      resolveTmuxPanePid: async () => 601,
+      resolveTmuxActivePanePid: async () => 601,
+    });
+    const before = structuredClone(registry.get(session.id));
+    await registerAgentSessionRoutes(app, {
+      registry,
+      codexSessionLocator: locator,
+      codexTranscriptService: new CodexTranscriptService({ sessionsRoot }),
+      processRuntimeManager: {} as never,
+      tmuxAdapter: {} as never,
+      localTmuxInputRouter: {} as never,
+      sshRuntimeManager: {} as never,
+      ptyRuntimeManager: {} as never,
+      remoteLaunchPreflight: {} as never,
+      vsCodeWebManager: {} as never,
+    });
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/agent-sessions/${session.id}/transcript?limit=1`,
+    });
+    assert.equal(response.statusCode, 200);
+    const first = response.json<AgentTranscriptResponse>();
+    assert.equal(first.available, true);
+    assert.equal(first.sessionId, threadId);
+    assert.equal(first.matchedBy, "session-id");
+    assert.deepEqual(
+      first.entries.map((entry) => entry.text),
+      ["fixture answer"],
+    );
+    assert.equal(first.hasMore, true);
+    assert.ok(first.nextCursor);
+    const older = await app.inject({
+      method: "GET",
+      url: `/api/agent-sessions/${session.id}/transcript?limit=1&cursor=${encodeURIComponent(first.nextCursor!)}`,
+    });
+    assert.deepEqual(
+      older.json<AgentTranscriptResponse>().entries.map((entry) => entry.text),
+      ["fixture question"],
+    );
+    assert.deepEqual(registry.get(session.id), before);
+    assert.equal(
+      await resolveActiveCodexSessionId(session, {
+        registry,
+        codexSessionLocator: locator,
+      }),
+      undefined,
+    );
+    // Without a live Codex process, its old directory history remains unavailable.
+    writeFileSync(join(procRoot, "602", "cmdline"), "/usr/bin/bash\0");
+    const shell = await app.inject({
+      method: "GET",
+      url: `/api/agent-sessions/${session.id}/transcript`,
+    });
+    assert.equal(shell.json<AgentTranscriptResponse>().available, false);
+    assert.deepEqual(registry.get(session.id), before);
+  } finally {
+    await app.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

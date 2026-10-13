@@ -217,6 +217,8 @@ node --test scripts/codex-feishu-notify.test.mjs
 
 启动关联本身只提供线程身份的只读证据，不更新终端登记的 `agentSessionId`，也不改变普通定位、输入和审批。卡片回复必须额外通过私聊用户、原消息绑定、当前终端可控性及原生 queue 的精确线程校验；进程内另开会话、使用会话选择器恢复历史等仍需原来的实时身份线索，不保证通过创建时间确定其当前输入目标。
 
+终端卡片的「完整记录」也复用这一只读关联：`resolveActiveCodexSessionId(..., {historyOnly: true})` 在严格定位无结果时开启启动匹配，即使注册表没有原生 thread ID 也能恢复显示，再按该 ID 读取有界消息页和上一页。当前窗格不是 Codex、启动关联有歧义或元数据缺失时仍不按目录猜测最近记录；普通输入定位和注册表保持不变。这是启动线程的历史显示，不能据此证明进程内切换后的输入目标。
+
 新的输出／状态变化后，如果暂时定位不到完成、结构化读取报错或发送失败，通知器按既有 2 秒间隔最多恢复探测 3 次；同一轮多窗格失败只消耗一轮预算。成功回执与已观察的完成 ID 分开，失败仍可重试，成功后同 turn 不重复发送。新的真实输出重置预算；删除会话、关闭通知器清理计时器和状态。启动时的空结果／异常基线不后台补历史，`shouldNotify:false` 与内部续跑规则保持。终端通知仍不提供持久 outbox 保证。
 
 验证使用隔离 proc/session 文件和模拟发送器，覆盖从定位、原生 transcript、完成观察到发送及去重的完整链路。现场只读检查已能定位到该终端的启动线程，并读到带真实 thread/turn ID 的最新可通知完成结果，登记记录写入次数为零；没有向用户 Codex 投递测试任务，也没有手工发送飞书卡片。回归入口：`codex-session-locator.test.ts`、`codex-completion-content-resolver.test.ts`、`agent-completion-feishu-notifier.test.ts`、`terminal-codex-completion.integration.test.ts`。

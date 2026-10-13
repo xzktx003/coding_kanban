@@ -48,10 +48,15 @@ export async function resolveActiveCodexSessionId(
   };
   const activeSessionId =
     await dependencies.codexSessionLocator.resolve(locatorInput);
-  if (!activeSessionId && options.historyOnly && agentSession.agentSessionId) {
+  if (!activeSessionId && options.historyOnly) {
+    // History may display the unique thread born with the live Codex process.
+    // It remains read-only evidence and must not become an ordinary input target.
     return dependencies.codexSessionLocator.resolve({
       ...locatorInput,
-      historySessionId: agentSession.agentSessionId,
+      ...(agentSession.agentSessionId
+        ? { historySessionId: agentSession.agentSessionId }
+        : {}),
+      readOnlyCompletion: true,
     });
   }
   if (!activeSessionId) {

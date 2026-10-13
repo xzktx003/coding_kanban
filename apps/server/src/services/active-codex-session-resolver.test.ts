@@ -116,6 +116,44 @@ test("history reads do not mutate registered IDs even with a precise live match"
   assert.equal(updates.length, 1);
 });
 
+test("history can recover a unique startup thread without granting an input target", async () => {
+  const session = makeSession();
+  const calls: unknown[] = [];
+  const dependencies = {
+    registry: {
+      updateSession: () => {
+        throw new Error("history must not write registry");
+      },
+    },
+    codexSessionLocator: {
+      resolve: async (input: { readOnlyCompletion?: boolean }) => {
+        calls.push(input);
+        return input.readOnlyCompletion ? "startup-thread" : undefined;
+      },
+    },
+  };
+  assert.equal(
+    await resolveActiveCodexSessionId(session, dependencies, {
+      historyOnly: true,
+    }),
+    "startup-thread",
+  );
+  assert.equal(
+    await resolveActiveCodexSessionId(session, dependencies),
+    undefined,
+  );
+  assert.deepEqual(calls, [
+    { tmuxTarget: "%1", tmuxSession: "split", workingDirectory: undefined },
+    {
+      tmuxTarget: "%1",
+      tmuxSession: "split",
+      workingDirectory: undefined,
+      readOnlyCompletion: true,
+    },
+    { tmuxTarget: "%1", tmuxSession: "split", workingDirectory: undefined },
+  ]);
+});
+
 test("bound card queue checks only its exact local live thread without changing input routing", async () => {
   const calls: unknown[] = [];
   const updates: unknown[] = [];
