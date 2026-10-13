@@ -374,7 +374,7 @@ export function readCodexWindows(
       const window = persistedWindow(row, seen, sameHost, initialWindowId);
       if (window === "invalid") return fallback;
       if (window === "skip") continue;
-      if (row.kind === "new" && window.id !== row.id) convertedIds.set(row.id, window.id);
+      if (row.kind === "new" && typeof row.id === "string" && window.id !== row.id) convertedIds.set(row.id, window.id);
       seen.add(window.id);
       windows.push(window);
     }

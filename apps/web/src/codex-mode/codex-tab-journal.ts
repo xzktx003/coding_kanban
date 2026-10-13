@@ -58,11 +58,11 @@ function entries(): Entry[] {
   return result.sort((left, right) => left.order - right.order || left.operation.id.localeCompare(right.operation.id));
 }
 
-export function readCodexTabOperations(): CodexTabOperation[] {
+export function readCodexTabOperations(): Array<CodexTabOperation & { id: string }> {
   return entries().map((entry) => entry.operation);
 }
 
-export function saveCodexTabOperation(action: CodexTabAction, id = crypto.randomUUID()): CodexTabOperation {
+export function saveCodexTabOperation(action: CodexTabAction, id: string = crypto.randomUUID()): CodexTabOperation & { id: string } {
   const pending = entries();
   const existing = pending.find((entry) => entry.operation.id === id);
   if (existing) return existing.operation;

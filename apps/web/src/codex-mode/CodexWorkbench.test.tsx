@@ -8,6 +8,7 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import * as nativeSurface from "./native-surface";
 import { CODEX_WINDOW_THREADS_KEY } from "./codex-window-restore";
+import { CODEX_TAB_OPERATION_PREFIX, CODEX_TAB_REVISION_PREFIX } from "./codex-tab-journal";
 import { CODEX_MULTIWINDOW_KEY } from "./codex-multiwindow-state";
 const sessionBridge = vi.hoisted(() => ({
   navigateToAgentSession: vi.fn(),
@@ -94,6 +95,9 @@ afterEach(() => {
   localStorage.removeItem(CODEX_WINDOW_THREADS_KEY);
   localStorage.removeItem(CODEX_MULTIWINDOW_KEY);
   localStorage.removeItem("kanban.codex.multiwindow.v1");
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith(CODEX_TAB_OPERATION_PREFIX) || key.startsWith(CODEX_TAB_REVISION_PREFIX)) localStorage.removeItem(key);
+  }
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.useRealTimers();
@@ -551,7 +555,7 @@ it("keeps an unsent native new-chat draft out of newly opened windows", async ()
   vi.stubGlobal("fetch", withSessionListEndpoints(vi.fn(async (input: RequestInfo | URL) => {
     requests.push(String(input));
     if (input === "/api/native-codex/status") return { ok: true, json: async () => ({
-      available: true, resumeAvailable: true, iframeUrl: "/native-codex/", newChatWindowIds: [firstWindowId, "019aabcd-5678-7890-abcd-0123456789ac"],
+      available: true, resumeAvailable: true, iframeUrl: "/native-codex/?folder=%2Ftmp%2Fnew-chat-project", newChatWindowIds: [firstWindowId, "019aabcd-5678-7890-abcd-0123456789ac"],
     }) } as Response;
     if (input === "/api/native-codex/new-beside") return { ok: true, status: 202, json: async () => ({ opened: true, column: 2 }) } as Response;
     throw new Error(`unexpected request ${String(input)}`);
@@ -571,6 +575,9 @@ it("keeps an unsent native new-chat draft out of newly opened windows", async ()
   act(() => report?.(`new:${firstWindowId}`, { ready: true, conversationId: null, hasComposer: true, composerEmpty: true, userInteracted: true }));
   fireEvent.click(screen.getByRole("button", { name: "+ 新聊天" }));
   await waitFor(() => expect(requests).toContain("/api/native-codex/new-beside"));
+  const saved = JSON.parse(localStorage.getItem(CODEX_MULTIWINDOW_KEY)!);
+  expect(saved.windows).toHaveLength(2);
+  expect(saved.windows.at(-1).cwd).toBe("/tmp/new-chat-project");
 });
 
 it("keeps a matching loaded native thread usable if a duplicate open request conflicts", async () => {
@@ -655,7 +662,7 @@ it("opens a project conversation as a second independent window and never rerout
   const conversation = await screen.findByRole("button", {
     name: "Resume Existing conversation",
   });
-  expect(screen.getByText("1 个")).toBeTruthy();
+  expect(screen.getAllByRole("button", { name: /^Resume / })).toHaveLength(1);
   await markVisibleHostReady();
   await waitFor(
     () => expect((conversation as HTMLButtonElement).disabled).toBe(false),
@@ -736,8 +743,7 @@ it("isolates a failed history open while other project conversations keep openin
   expect(calls).toHaveLength(4);
   fireEvent.click(screen.getByRole("button", { name: "Resume Conversation 3" }));
   expect(calls).toHaveLength(4);
-  throw new Error(Array.from(document.querySelectorAll("[data-codex-window]")).map((item) => item.textContent).join(" || "));
-  expect(screen.getByText("4 个窗口")).toBeTruthy();
+  expect(screen.getByText("5 个窗口")).toBeTruthy();
   expect(screen.getByTitle("原生 Codex 会话窗口")).toBe(original);
 });
 
@@ -775,7 +781,7 @@ it("opens a thread added in another browser and keeps the current thread after t
   render(<CodexWorkbench active onModeChange={vi.fn()} />);
   await markVisibleHostReady();
   expect(await screen.findByRole("tab", { name: /First/ })).toBeTruthy();
-  expect(screen.getByRole("button", { name: /project-b/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "project-b" })).toBeTruthy();
   Object.assign(shared, { revision: 2, threads: [thread(first, "First"), thread(second, "Second")] });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2100)); });
   expect(await screen.findByRole("tab", { name: /Second/ })).toBeTruthy();

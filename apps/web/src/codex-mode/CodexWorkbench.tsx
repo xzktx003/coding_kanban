@@ -220,6 +220,7 @@ export default function CodexWorkbench({
   const sharedTabs = useRef<ReturnType<typeof startCodexTabSync> | null>(null);
   const [sharedState, setSharedState] = useState<CodexTabSyncState>({ threads: [], detached: null, pending: [], initialized: false, error: null });
   const pendingOpenThreads = useRef(new Set<string>());
+  const seenSharedThreadIds = useRef(new Set<string>());
   const [mobilePane, setMobilePane] = useState<"sessions" | "native">(
     "native",
   );
@@ -945,7 +946,7 @@ export default function CodexWorkbench({
           }
           onNewChat={addNewChat}
           onEnsureProject={(project) => {
-            if (conversationStates[project]) return;
+            if (project === selectedProject || conversationStates[project]) return;
             setConversationStates((previous) => ({
               ...previous,
               [project]: { loading: true, error: null, conversations: [] },
@@ -974,7 +975,7 @@ export default function CodexWorkbench({
               !sharedState.threads.some((thread) => thread.id === selectedNativeWindow.threadId) &&
               <span className="codex-unfollowed" role="status">当前会话未关注</span>}
             {sharedState.error && <span className="codex-resume-error" role="status">{sharedState.error}</span>}
-            <button type="button" className="codex-new-chat" onClick={addNewChat} disabled={!hostInstanceId}>+ 新聊天</button>
+            <button type="button" className="codex-new-chat" onClick={() => addNewChat()} disabled={!hostInstanceId}>+ 新聊天</button>
             {newChatNotice && <span className="codex-resume-error" role="alert">{newChatNotice}</span>}
             {status?.available && !hostInstanceId && (
               <span role="status">正在连接原生 Codex 窗口…</span>
