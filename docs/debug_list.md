@@ -2068,3 +2068,5 @@
 - 2026-10-13（Codex 公共输入缺少目标标记）：composer 接受 `targetLabel` 但没有渲染，Resume 后会话 store 已指向精确 thread，界面却无法确认投递目标。新增紧凑目标元数据展示和回归；不改变单 thread followup 提交路径。
 - 2026-10-13（项目会话列表含不可 Resume 的 thread ID）：列表只检查 ID 非空，但原生 Resume 路由严格要求小写 UUID，导致条目显示后打开必失败。列表解析现在使用与网关相同的 UUID 格式校验；无效分页记录整体报错，不计入会话数。新增失败用例先红后绿。
 - 2026-10-13（公共 composer 向原生 thread 发送遭遇 `SESSION_OWNED_ELSEWHERE`）：项目历史 Resume 已打开精确原生窗口，但旧 followup 路径另起 Session runtime 并尝试获取同一 thread writer，故发送被拒。公共输入现在经版本受限的 companion 调用官方插件自己的 app-server；逐项核对 active editor、thread UUID、列、cwd 和 idle 状态，并保存不含正文的幂等回执。busy/uncertain 与已有队列保留草稿并拒绝，禁止回退到 Session runtime；伴随扩展、gateway、UI 红绿灯转绿。2026-10-13 一次性项目真实浏览器验收得到 Resume 与发送两个 202 回执，原生 history 有一条新增 user turn 和精确助手回复，第 2 列不变；已归档测试 thread、移除临时项目登记并清空目标。多项目、多状态和正式 thread 没有用该单次验收替代。
+
+- 2026-10-13（顶栏模式选择层级不一致）：新增 Codex 后仍保留会话／终端二态推杆，造成三种模式入口不并列。统一为三个同级按钮，删除拖动状态、轨道与 Codex 专用分隔；切换焦点移到新模式的选中按钮。红绿灯覆盖无二态开关、选中状态、禁用操作及隐藏工作区／草稿保留，隔离浏览器覆盖桌面与手机几何和键盘。

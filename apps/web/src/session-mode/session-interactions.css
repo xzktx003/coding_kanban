@@ -1144,23 +1144,6 @@
   flex-shrink: 0;
   margin: 0 6px;
 }
-.session-mode .session-top-nav .mode-switch-label,
-.session-mode .session-top-nav .mode-switch-rail {
-  padding: 0;
-  height: 30px;
-  background: transparent;
-}
-.session-mode .session-top-nav .mode-switch-label {
-  min-width: 40px;
-  padding: 0 6px;
-}
-.session-mode .session-top-nav .mode-switch-rail {
-  width: 44px;
-}
-.session-mode .session-top-nav .mode-switch-label[aria-pressed="true"] {
-  color: var(--primary);
-  background: transparent;
-}
 .session-mode .session-top-nav > button[aria-pressed="true"] {
   color: var(--foreground);
   background: transparent;
@@ -1365,15 +1348,6 @@
   .session-mode .session-navigation-divider {
     margin: 0 2px;
     height: 18px;
-  }
-  .session-mode .session-top-nav .mode-switch-label {
-    min-width: 36px;
-    height: 44px;
-    padding: 0 4px;
-  }
-  .session-mode .session-top-nav .mode-switch-rail {
-    height: 44px;
-    width: 44px;
   }
   .session-mode .session-top-schedule {
     display: none !important;

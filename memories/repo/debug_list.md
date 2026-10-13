@@ -1128,3 +1128,5 @@
 - 2026-10-13（Codex 项目历史 thread ID 校验）：项目 thread/list 曾接收任意非空 ID，Resume 路由只允许 UUID。列表解析与原生路由采用相同 UUID 格式校验，无效记录拒绝，红绿灯先复现后通过。
 - 2026-10-13（Codex 公共输入遇到原生 writer 占用）：history Resume 打开原生窗口后仍走 Session followup，Session runtime 对已由官方插件 app-server 持有的 thread 返回 `SESSION_OWNED_ELSEWHERE`。改为 companion 版本门控的同实例 app-server `turn/start`，发送前校验原生 editor/thread/列/cwd/idle，幂等账本只存 hash 和回执不存正文。busy、待处理队列或未知回执保留草稿、不改走 Session writer、不广播；专项测试通过，真实浏览器助手回复待验收。
 - 2026-10-13（Codex 公共输入浏览器验收续记）：上条记录中的首次尝试确实在生成回执前拒绝，没有产生 turn。之后在隔离一次性 thread 上重新 Resume，并从公共 Session composer 单次提交；网关返回 202，thread/read 只有一条新增 user turn 和对应已完成的精确助手回复，第 2 列未变化。测试 thread 通过原生界面归档，项目登记和浏览器目标已清除；这不扩展为 busy、重复提交或多窗口组的实浏览器验收。
+
+- 2026-10-13（顶栏模式选择层级不一致）：新增 Codex 后仍保留会话／终端二态推杆，造成三种模式入口不并列。统一为三个同级按钮，删除拖动状态、轨道与 Codex 专用分隔；切换焦点移到新模式的选中按钮。红绿灯覆盖无二态开关、选中状态、禁用操作及隐藏工作区／草稿保留，隔离浏览器覆盖桌面与手机几何和键盘。

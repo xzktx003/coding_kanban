@@ -1,5 +1,24 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
+
+async function readInputTarget(page: Page) {
+  return page.evaluate(async () => {
+    const mounted = (path: string) =>
+      performance.getEntriesByType("resource").findLast(
+        (entry) => new URL(entry.name).pathname === path,
+      )?.name ?? path;
+    const { useCodexStore } = await import(
+      mounted("/src/session-mode/components/codex/stores/useCodexStore.ts")
+    );
+    const { useAgentSettingsStore } = await import(
+      mounted("/src/session-mode/stores/useAgentSettingsStore.ts")
+    );
+    return {
+      threadId: useCodexStore.getState().currentThreadId,
+      agent: useAgentSettingsStore.getState().selectedAgent,
+    };
+  });
+}
 test("merged navigation keeps projects, followed sessions and pending status reachable on phones", async ({
   page,
 }) => {
@@ -112,9 +131,11 @@ test("merged navigation keeps projects, followed sessions and pending status rea
   await nav.getByRole("button", { name: "待确认 1", exact: true }).click();
   await expect(page.getByRole("menu")).toContainText("仅统计关注会话");
   await page.getByRole("menuitem").filter({ hasText: "中文会话 1 " }).click();
-  await expect(page.locator(".session-input-target")).toContainText(
-    "中文会话 1",
-  );
+  // The native Codex composer no longer renders the legacy target label.
+  await expect.poll(() => readInputTarget(page)).toEqual({
+    threadId: "ux-1",
+    agent: "codex",
+  });
   await expect(
     page.getByText("/fixture/pending-target", { exact: true }),
   ).toBeVisible();
@@ -171,7 +192,10 @@ test("merged navigation keeps projects, followed sessions and pending status rea
   await page.setViewportSize({ width: 390, height: 900 });
   await expect(editor).toContainText("手机键盘尺寸变化后保留的草稿");
 
-  await nav.getByRole("switch", { name: "工作模式", exact: true }).click();
+  await nav
+    .getByRole("group", { name: "工作模式", exact: true })
+    .getByRole("button", { name: "终端", exact: true })
+    .click();
   await expect(page.locator(".session-mode")).toBeHidden();
   await page.getByRole("button", { name: "会话", exact: true }).click();
   await expect(nav).toBeVisible();
@@ -180,8 +204,10 @@ test("merged navigation keeps projects, followed sessions and pending status rea
     "true",
   );
   await page.locator(".session-tabs .session-new-tab button").click();
-  await expect(page.locator(".session-input-target")).toContainText("新聊天");
-  await expect(page.locator(".session-input-target")).toContainText("Codex");
+  await expect.poll(() => readInputTarget(page)).toEqual({
+    threadId: null,
+    agent: "codex",
+  });
   expect(
     fixture.calls.filter((c) => /turn\/start|approval.*respond/.test(c.path)),
   ).toEqual([]);

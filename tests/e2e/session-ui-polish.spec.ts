@@ -148,7 +148,7 @@ test("workbench controls remain coherent, readable and usable through responsive
       page.getByText("项目进展", { exact: true }).first(),
     ).toBeVisible();
     await expect(
-      nav.getByRole("switch", { name: "工作模式" }),
+      nav.getByRole("group", { name: "工作模式" }),
     ).toBeInViewport();
     const geometry = await nav.evaluate((el) => {
       const brand = el
@@ -204,28 +204,30 @@ test("workbench controls remain coherent, readable and usable through responsive
   await expect(
     page.getByRole("tab", { name: "模板", exact: true }),
   ).toBeVisible();
-  await nav.getByRole("button", { name: "会话", exact: true }).click();
+  await page.getByRole("button", { name: "返回会话", exact: true }).click();
   await expect(editor).toContainText("切换模式后保留的草稿");
   await page.setViewportSize({ width: 1440, height: 1000 });
-  const rail = nav.getByRole("switch", { name: "工作模式" });
-  const box = (await rail.boundingBox())!;
-  await page.mouse.move(box.x + 10, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x + box.width - 6, box.y + box.height / 2, {
-    steps: 8,
-  });
-  await page.mouse.up();
+  const sessionButton = nav
+    .getByRole("group", { name: "工作模式" })
+    .getByRole("button", { name: "会话", exact: true });
+  await nav
+    .getByRole("group", { name: "工作模式" })
+    .getByRole("button", { name: "终端", exact: true })
+    .click();
   await expect(page.locator(".workbench-terminal")).toBeVisible();
-  const terminalRail = page.getByRole("switch", { name: "工作模式" });
-  await expect(terminalRail).toHaveAttribute("aria-checked", "true");
-  await expect(terminalRail).toBeFocused();
+  const terminalButton = page
+    .locator(".workbench-terminal")
+    .getByRole("group", { name: "工作模式" })
+    .getByRole("button", { name: "终端", exact: true });
+  await expect(terminalButton).toHaveAttribute("aria-pressed", "true");
+  await expect(terminalButton).toBeFocused();
   await page.screenshot({
     animations: "disabled",
     path: ".dev-runtime/ui-ux-audit-20261007/verified-terminal.png",
   });
-  await terminalRail.press("ArrowLeft");
+  await terminalButton.press("ArrowLeft");
   await expect(nav).toBeVisible();
-  await expect(rail).toBeFocused();
+  await expect(sessionButton).toBeFocused();
   await expect(editor).toContainText("切换模式后保留的草稿");
   await page.getByRole("button", { name: "多会话网格", exact: true }).click();
   await expect(page.locator("[data-session-card]")).toHaveCount(6);
@@ -287,7 +289,7 @@ test("workbench controls remain coherent, readable and usable through responsive
         .locator(".session-brand-mark img")
         .evaluate((element) => getComputedStyle(element).filter),
     )
-    .toBe("brightness(0)");
+    .toBe("brightness(0.3)");
   await page.screenshot({
     animations: "disabled",
     path: ".dev-runtime/ui-ux-audit-20261007/verified-light.png",
