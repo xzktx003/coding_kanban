@@ -10,6 +10,7 @@ export const NATIVE_CODEX_MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
 export const NATIVE_CODEX_MAX_UPSTREAM_MESSAGE_BYTES = 2 * 1024 * 1024;
 export const NATIVE_CODEX_MAX_OUTGOING_BYTES = 2 * 1024 * 1024;
 export const NATIVE_CODEX_MAX_PENDING_BYTES = 8 * 1024 * 1024;
+export const NATIVE_CODEX_MAX_SEND_BODY_BYTES = 1024 * 1024;
 const HIGH_WATER_BYTES = 256 * 1024;
 const HOP_HEADERS = new Set([
   "connection",
@@ -56,6 +57,10 @@ function sameOrigin(request: FastifyRequest): boolean {
   } catch {
     return false;
   }
+}
+
+function sameOriginMutation(request: FastifyRequest): boolean {
+  return typeof request.headers.origin === "string" && sameOrigin(request);
 }
 
 function headers(
@@ -350,6 +355,109 @@ export async function registerNativeCodexRoutes(
     reply.header("cache-control", "no-store");
     return gateway.status();
   });
+  app.post(
+    "/api/native-codex/restore",
+    { bodyLimit: 1024 },
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      if (!sameOriginMutation(request))
+        return reply
+          .code(403)
+          .send({ error: "Native Codex restore requires same-origin access." });
+      if (
+        request.headers["content-type"]
+          ?.split(";", 1)[0]
+          ?.trim()
+          .toLowerCase() !== "application/json"
+      )
+        return reply
+          .code(415)
+          .send({ error: "Native Codex restore requires JSON." });
+      const status = await gateway.restoreNewChatThread(request.body);
+      if (status === 202) return reply.code(202).send({ restored: true });
+      if (status === 400)
+        return reply.code(400).send({ error: "Invalid Codex restore target." });
+      if (status === 409)
+        return reply
+          .code(409)
+          .send({ error: "Codex window is not ready to restore." });
+      return reply
+        .code(503)
+        .send({ error: "Native Codex restore is unavailable." });
+    },
+  );
+  app.post(
+    "/api/native-codex/resume",
+    { bodyLimit: 1024 },
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      if (!sameOriginMutation(request))
+        return reply
+          .code(403)
+          .send({ error: "Native Codex resume requires same-origin access." });
+      if (
+        request.headers["content-type"]
+          ?.split(";", 1)[0]
+          ?.trim()
+          .toLowerCase() !== "application/json"
+      )
+        return reply
+          .code(415)
+          .send({ error: "Native Codex resume requires JSON." });
+      const status = await gateway.resumeThreadInNativeWindow(request.body);
+      if (status === 202) return reply.code(202).send({ opened: true });
+      if (status === 400)
+        return reply.code(400).send({ error: "Invalid Codex resume target." });
+      if (status === 409)
+        return reply
+          .code(409)
+          .send({ error: "Codex window could not open the selected thread." });
+      return reply
+        .code(503)
+        .send({ error: "Native Codex resume is unavailable." });
+    },
+  );
+  app.post(
+    "/api/native-codex/send",
+    { bodyLimit: NATIVE_CODEX_MAX_SEND_BODY_BYTES },
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      if (!sameOriginMutation(request))
+        return reply
+          .code(403)
+          .send({ error: "Native Codex send requires same-origin access." });
+      if (
+        request.headers["content-type"]
+          ?.split(";", 1)[0]
+          ?.trim()
+          .toLowerCase() !== "application/json"
+      )
+        return reply
+          .code(415)
+          .send({ error: "Native Codex send requires JSON." });
+      const result = await gateway.sendToNativeThread(request.body);
+      if (result.status === 202)
+        return reply.code(202).send({ accepted: true, turnId: result.turnId });
+      if (result.status === 400)
+        return reply
+          .code(400)
+          .send({ error: "Invalid native Codex send request." });
+      if (result.status === 409)
+        return reply
+          .code(409)
+          .send({
+            error:
+              "The selected native Codex thread is unavailable or its delivery receipt needs review.",
+          });
+      if (result.status === 413)
+        return reply
+          .code(413)
+          .send({ error: "Native Codex send request is too large." });
+      return reply
+        .code(503)
+        .send({ error: "Native Codex send is unavailable." });
+    },
+  );
   app.addHook("onClose", async () => {
     for (const client of active) client.terminate();
     active.clear();

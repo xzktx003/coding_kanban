@@ -135,6 +135,13 @@ export async function submissionId(
   revision: number,
   data: Omit<FollowupSubmit, "id">,
 ) {
+  return stableSubmissionId(owner, revision, data);
+}
+export async function stableSubmissionId(
+  owner: string,
+  revision: number,
+  data: unknown,
+) {
   const bytes = new TextEncoder().encode(
     JSON.stringify({ owner, revision, data }),
   );

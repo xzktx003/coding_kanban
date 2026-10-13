@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   mkdtemp,
   writeFile,
+  readFile,
   rm,
   chmod,
   symlink,
@@ -29,6 +30,7 @@ import {
 import {
   NativeCodexGateway,
   validateNativeCodexUpstream,
+  validateNativeCodexResume,
 } from "../services/native-codex-gateway.js";
 
 async function setup(handler: RequestListener = (_req, res) => res.end("ok")) {
@@ -112,6 +114,8 @@ test("status uses verified record and returns only public metadata", async () =>
     );
     assert.deepEqual(response.json(), {
       available: true,
+      resumeAvailable: false,
+      sendAvailable: false,
       iframeUrl: `/native-codex/?folder=${encodeURIComponent(join(fixture.dir, "project"))}`,
       extensionVersion: "26.1.2",
       fixtures: [{ id: "fixture-a", label: "First fixture" }],
@@ -120,6 +124,387 @@ test("status uses verified record and returns only public metadata", async () =>
   } finally {
     await fixture.close();
   }
+});
+
+test("status enables resume only after the private native companion is ready", async () => {
+  const fixture = await setup();
+  const brokerToken =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  let authorizationMatches = false;
+  const broker = createServer((request, response) => {
+    authorizationMatches =
+      request.method === "GET" &&
+      request.url === "/status" &&
+      request.headers.authorization === `Bearer ${brokerToken}`;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(
+      JSON.stringify({
+        companionActive: true,
+        officialActive: true,
+        sendAvailable: true,
+        broker: { enabled: true },
+        tabs: [{ uri: "private native editor state" }],
+      }),
+    );
+  });
+  broker.listen(0, "127.0.0.1");
+  await once(broker, "listening");
+  const address = broker.address();
+  assert.ok(address && typeof address !== "string");
+  const authFile = join(fixture.dir, "companion-auth.json");
+  await writeFile(
+    authFile,
+    JSON.stringify({ port: address.port, token: brokerToken }),
+    { mode: 0o600 },
+  );
+  const record = JSON.parse(await readFile(fixture.record, "utf8"));
+  await writeFile(
+    fixture.record,
+    JSON.stringify({
+      ...record,
+      brokerPort: address.port,
+      brokerAuthFile: authFile,
+    }),
+    { mode: 0o600 },
+  );
+  try {
+    const status = await fixture.gateway.status();
+    assert.equal(authorizationMatches, true);
+    assert.equal(status.available, true);
+    assert.equal(status.resumeAvailable, true);
+    assert.equal(status.sendAvailable, true);
+    assert.equal("tabs" in status, false);
+    assert.equal(JSON.stringify(status).includes(brokerToken), false);
+    assert.equal(
+      JSON.stringify(status).includes("private native editor state"),
+      false,
+    );
+  } finally {
+    broker.closeAllConnections();
+    await new Promise<void>((resolve) => broker.close(() => resolve()));
+    await fixture.close();
+  }
+});
+
+test("same-origin native send forwards one validated message to the selected thread broker", async () => {
+  const fixture = await setup();
+  const brokerToken =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  const threadId = "019aabcd-1234-7890-abcd-0123456789ab";
+  const submissionId = "019aabcd-1234-7890-abcd-0123456789ac";
+  const turnId = "019aabcd-1234-7890-abcd-0123456789ad";
+  const capture: {
+    received: {
+      method: string;
+      url: string;
+      authorization: string;
+      body: string;
+    } | null;
+  } = { received: null };
+  const broker = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    request.on("end", () => {
+      capture.received = {
+        method: request.method ?? "",
+        url: request.url ?? "",
+        authorization: request.headers.authorization ?? "",
+        body: Buffer.concat(chunks).toString("utf8"),
+      };
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ accepted: true, turnId }));
+    });
+  });
+  broker.listen(0, "127.0.0.1");
+  await once(broker, "listening");
+  const address = broker.address();
+  assert.ok(address && typeof address !== "string");
+  const authFile = join(fixture.dir, "send-auth.json");
+  await writeFile(
+    authFile,
+    JSON.stringify({ port: address.port, token: brokerToken }),
+    { mode: 0o600 },
+  );
+  const record = JSON.parse(await readFile(fixture.record, "utf8"));
+  await writeFile(
+    fixture.record,
+    JSON.stringify({
+      ...record,
+      brokerPort: address.port,
+      brokerAuthFile: authFile,
+    }),
+    { mode: 0o600 },
+  );
+  const body = {
+    threadId,
+    column: 2,
+    cwd: join(fixture.dir, "project"),
+    submissionId,
+    text: "selected-window payload",
+    images: [],
+    contexts: [],
+    mentions: [],
+  };
+  try {
+    const response = await fetch(`${fixture.origin}/api/native-codex/send`, {
+      method: "POST",
+      headers: { origin: fixture.origin, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 202);
+    assert.deepEqual(await response.json(), { accepted: true, turnId });
+    assert.deepEqual(capture.received, {
+      method: "POST",
+      url: "/send",
+      authorization: `Bearer ${brokerToken}`,
+      body: JSON.stringify(body),
+    });
+    const foreign = await fetch(`${fixture.origin}/api/native-codex/send`, {
+      method: "POST",
+      headers: {
+        origin: "https://attacker.example",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    assert.equal(foreign.status, 403);
+    const invalid = await fetch(`${fixture.origin}/api/native-codex/send`, {
+      method: "POST",
+      headers: { origin: fixture.origin, "content-type": "application/json" },
+      body: JSON.stringify({ ...body, threadId: "../../etc/passwd" }),
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal(
+      capture.received?.url,
+      "/send",
+      "invalid or cross-origin input must not reach the companion",
+    );
+  } finally {
+    broker.closeAllConnections();
+    await new Promise<void>((resolve) => broker.close(() => resolve()));
+    await fixture.close();
+  }
+});
+
+test("same-origin restore forwards only a captured window and observed local thread", async () => {
+  const fixture = await setup();
+  const broker = createServer((request, response) => {
+    if (request.method === "GET" && request.url === "/status") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          companionActive: true,
+          officialActive: true,
+          broker: { enabled: true },
+        }),
+      );
+      return;
+    }
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    request.on("end", () => {
+      received = {
+        method: request.method ?? "",
+        url: request.url ?? "",
+        authorization: request.headers.authorization ?? "",
+        body: Buffer.concat(chunks).toString("utf8"),
+      };
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ restored: true }));
+    });
+  });
+  let received = { method: "", url: "", authorization: "", body: "" };
+  broker.listen(0, "127.0.0.1");
+  await once(broker, "listening");
+  const brokerAddress = broker.address();
+  assert.ok(brokerAddress && typeof brokerAddress !== "string");
+  const brokerAuthFile = join(fixture.dir, "broker-auth.json");
+  const brokerToken =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  const windowIds = [
+    "019aabcd-5678-7890-abcd-0123456789ab",
+    "019aabcd-5678-7890-abcd-0123456789ac",
+  ];
+  const record = JSON.parse(await readFile(fixture.record, "utf8"));
+  await writeFile(
+    brokerAuthFile,
+    JSON.stringify({ port: brokerAddress.port, token: brokerToken }),
+    { mode: 0o600 },
+  );
+  await writeFile(
+    fixture.record,
+    JSON.stringify({
+      ...record,
+      brokerPort: brokerAddress.port,
+      brokerAuthFile,
+      panelMode: "new-chats",
+      newChatWindowIds: windowIds,
+    }),
+    { mode: 0o600 },
+  );
+  try {
+    const body = {
+      windowId: windowIds[1],
+      threadId: "019aabcd-1234-7890-abcd-0123456789ab",
+      column: 2,
+    };
+    const response = await fetch(`${fixture.origin}/api/native-codex/restore`, {
+      method: "POST",
+      headers: { origin: fixture.origin, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 202);
+    assert.deepEqual(received, {
+      method: "POST",
+      url: "/restore",
+      authorization: `Bearer ${brokerToken}`,
+      body: JSON.stringify(body),
+    });
+    assert.equal((await response.text()).includes(brokerToken), false);
+    assert.deepEqual(
+      (await fixture.gateway.status()).newChatWindowIds,
+      windowIds,
+    );
+    const foreign = await fetch(`${fixture.origin}/api/native-codex/restore`, {
+      method: "POST",
+      headers: {
+        origin: "https://attacker.example",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    assert.equal(foreign.status, 403);
+    const invalid = await fetch(`${fixture.origin}/api/native-codex/restore`, {
+      method: "POST",
+      headers: { origin: fixture.origin, "content-type": "application/json" },
+      body: JSON.stringify({ ...body, command: "evil" }),
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal(received.body, JSON.stringify(body));
+  } finally {
+    broker.closeAllConnections();
+    await new Promise<void>((resolve) => broker.close(() => resolve()));
+    await fixture.close();
+  }
+});
+
+test("same-origin resume opens the exact selected thread through the private broker", async () => {
+  const fixture = await setup();
+  const brokerToken =
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  let received: { url: string; authorization: string; body: string } | null =
+    null;
+  const broker = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    request.on("end", () => {
+      received = {
+        url: request.url ?? "",
+        authorization: request.headers.authorization ?? "",
+        body: Buffer.concat(chunks).toString("utf8"),
+      };
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ opened: true }));
+    });
+  });
+  broker.listen(0, "127.0.0.1");
+  await once(broker, "listening");
+  const address = broker.address();
+  assert.ok(address && typeof address !== "string");
+  const authFile = join(fixture.dir, "resume-auth.json");
+  await writeFile(
+    authFile,
+    JSON.stringify({ port: address.port, token: brokerToken }),
+    { mode: 0o600 },
+  );
+  const record = JSON.parse(await readFile(fixture.record, "utf8"));
+  await writeFile(
+    fixture.record,
+    JSON.stringify({
+      ...record,
+      brokerPort: address.port,
+      brokerAuthFile: authFile,
+    }),
+    { mode: 0o600 },
+  );
+  try {
+    const body = {
+      threadId: "019aabcd-1234-7890-abcd-0123456789ab",
+      column: 2,
+    };
+    const publicHost = "frontend.example:3100";
+    const forwardedResponse = await new Promise<{
+      statusCode: number;
+      body: string;
+    }>((resolve, reject) => {
+      const request = httpRequest(
+        {
+          hostname: "127.0.0.1",
+          port: Number(new URL(fixture.origin).port),
+          path: "/api/native-codex/resume",
+          method: "POST",
+          headers: {
+            host: publicHost,
+            origin: `https://${publicHost}`,
+            "x-forwarded-proto": "https",
+            "content-type": "application/json",
+          },
+        },
+        (response) => {
+          const chunks: Buffer[] = [];
+          response.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+          response.on("end", () =>
+            resolve({
+              statusCode: response.statusCode ?? 0,
+              body: Buffer.concat(chunks).toString("utf8"),
+            }),
+          );
+        },
+      );
+      request.once("error", reject);
+      request.end(JSON.stringify(body));
+    });
+    assert.equal(forwardedResponse.statusCode, 202);
+    assert.deepEqual(received, {
+      url: "/resume",
+      authorization: `Bearer ${brokerToken}`,
+      body: JSON.stringify(body),
+    });
+    assert.deepEqual(JSON.parse(forwardedResponse.body), { opened: true });
+    const foreign = await fetch(`${fixture.origin}/api/native-codex/resume`, {
+      method: "POST",
+      headers: {
+        origin: "https://attacker.example",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    assert.equal(foreign.status, 403);
+    const invalid = await fetch(`${fixture.origin}/api/native-codex/resume`, {
+      method: "POST",
+      headers: { origin: fixture.origin, "content-type": "application/json" },
+      body: JSON.stringify({ ...body, command: "evil" }),
+    });
+    assert.equal(invalid.status, 400);
+  } finally {
+    broker.closeAllConnections();
+    await new Promise<void>((resolve) => broker.close(() => resolve()));
+    await fixture.close();
+  }
+});
+
+test("resume validates an exact thread and supported editor column", () => {
+  const value = {
+    threadId: "019aabcd-1234-7890-abcd-0123456789ab",
+    column: 2,
+  };
+  assert.deepEqual(validateNativeCodexResume(value), value);
+  for (const invalid of [
+    { ...value, column: 4 },
+    { ...value, threadId: "../../etc/passwd" },
+    { ...value, extra: true },
+  ])
+    assert.throws(() => validateNativeCodexResume(invalid));
 });
 
 test("unsafe, oversized, mismatched and symlink records fail closed", async () => {
@@ -328,6 +713,8 @@ test("unconfigured and stopped host status stays unavailable without exposing co
   const disabled = new NativeCodexGateway(() => ({}));
   assert.deepEqual(await disabled.status(), {
     available: false,
+    resumeAvailable: false,
+    sendAvailable: false,
     reason: "Codex 宿主暂未配置。",
   });
   const fixture = await setup();
@@ -338,6 +725,8 @@ test("unconfigured and stopped host status stays unavailable without exposing co
     );
     assert.deepEqual(await fixture.gateway.status(), {
       available: false,
+      resumeAvailable: false,
+      sendAvailable: false,
       reason: "Codex 宿主暂不可用。",
     });
     const response = await fixture.app.inject("/native-codex/file");

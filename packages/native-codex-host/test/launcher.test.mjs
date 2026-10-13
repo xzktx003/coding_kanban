@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, writeFile, readFile, lstat, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, lstat, rm, mkdir, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import net from 'node:net';
@@ -83,6 +83,26 @@ test('explicit live new-chat launch imports only private connection and captures
   assert.equal(config.newChatWindowIds.length,2);assert.notEqual(config.newChatWindowIds[0],config.newChatWindowIds[1]);
   const record=await readFile(join(data.base,'record.json'),'utf8');assert.equal(record.includes('test-launch-secret'),false);assert.equal(result.output.includes('test-launch-secret'),false);
   assert.equal(await readFile(join(data.root,'c','auth.json'),'utf8'),auth);assert.equal(await readFile(join(source,'auth.json'),'utf8'),auth);
+ }finally{await rm(data.base,{recursive:true,force:true})}
+});
+
+test('shared-home launch uses the existing Codex history in place and opens selected threads on demand', async () => {
+ const code = "import {appendFileSync} from 'node:fs';import {join} from 'node:path';appendFileSync(join(process.env.HOME,'codex-home-paths.txt'),process.env.CODEX_HOME+String.fromCharCode(10));process.exit(0);";
+ const data=await fixture(code);const shared=join(data.base,'shared-codex-home');
+ try{
+  await mkdir(shared,{mode:0o700});await writeFile(join(shared,'history.marker'),'existing-history',{mode:0o600});
+  const args=data.args.filter((value,index)=>data.args[index-1]!=='--threads-file'&&value!=='--threads-file');
+  args.push('--shared-codex-home',shared,'--unsafe-no-auth');
+  const result=await run(args);assert.equal(result.code,0,result.output);
+  const config=JSON.parse(await readFile(join(data.root,'companion-auth.json'),'utf8'));
+  const record=JSON.parse(await readFile(join(data.base,'record.json'),'utf8'));
+  assert.deepEqual(config.threads,[]);assert.equal(config.autoOpenNewChats,false);
+  assert.equal(record.codexHome,join(data.root,'c'));assert.equal(record.sharedCodexHome,shared);assert.equal(record.panelMode,'resume-on-demand');
+  assert.deepEqual(await readdir(shared),['history.marker']);
+  const observed=(await readFile(join(data.root,'h','codex-home-paths.txt'),'utf8')).trim().split(String.fromCharCode(10));
+  assert.ok(observed.length>=3);assert.ok(observed.every(path=>path===join(data.root,'c')));
+  assert.deepEqual(record.connectionProfile,{enabled:true,storage:'linked',ipcIsolated:true});
+  assert.equal((await lstat(join(data.root,'c','ipc'))).isSymbolicLink(),false);
  }finally{await rm(data.base,{recursive:true,force:true})}
 });
 

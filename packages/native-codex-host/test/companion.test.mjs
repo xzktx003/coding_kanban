@@ -15,7 +15,7 @@ async function load(config, vscode, timerOverrides = {}) {
   const module = { exports: {} };
   const context = { module, exports: module.exports, Buffer, console, setTimeout, clearTimeout, ...timerOverrides,
     process: { env: { NATIVE_CODEX_COMPANION_CONFIG: config }, getuid: () => process.getuid(), pid: process.pid },
-    require: name => name === 'node:http' && timerOverrides.httpModule ? timerOverrides.httpModule : name === 'vscode' ? vscode : name === './control.cjs' ? require('../companion/control.cjs') : require(name) };
+    require: name => name === 'node:http' && timerOverrides.httpModule ? timerOverrides.httpModule : name === 'vscode' ? vscode : name === './control.cjs' ? require('../companion/control.cjs') : name === './appserver-send.cjs' ? require('../companion/appserver-send.cjs') : require(name) };
   vm.runInNewContext(source, context); return module.exports;
 }
 test('private companion enforces auth, bounded schema and fixed allowlist without arbitrary commands', async () => {
@@ -41,6 +41,107 @@ test('private companion enforces auth, bounded schema and fixed allowlist withou
     assert.equal(ready.officialActive, true); assert.equal(JSON.stringify(ready).includes(token), false);
   } finally { extension.deactivate(); for (const disposable of disposals) disposable.dispose(); await rm(root, { recursive: true, force: true }); }
 });
+
+test('resume opens the exact selected local thread in only its requested editor column', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'native-resume-')); const file = join(root, 'auth.json'); const port = await sparePort();
+  const selectedThread = '019aabcd-1234-7890-abcd-0123456789ac'; const calls = []; const disposals = [];
+  const vscode = { extensions: { getExtension: () => ({ isActive: true, packageJSON: { version: 'test' }, async activate() {} }) }, window: { tabGroups: { all: [] } }, Uri: { parse: uri => uri },
+    commands: { registerCommand: () => ({ dispose() {} }), executeCommand: async (...args) => { calls.push(args); } } };
+  await writeFile(file, JSON.stringify({ port, token: 'test-only-resume-012345678901234567890', threads: [] }), { mode: 0o600 });
+  const extension = await load(file, vscode); const headers = { authorization: 'Bearer test-only-resume-012345678901234567890', 'content-type': 'application/json' };
+  try {
+    await extension.activate({ subscriptions: disposals });
+    const base = `http://127.0.0.1:${port}`;
+    assert.equal((await fetch(`${base}/resume`, { method: 'POST', headers, body: JSON.stringify({ threadId: selectedThread, column: 2 }) })).status, 200);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].slice(0, 3), ['vscode.openWith', `openai-codex://route/local/${selectedThread}`, 'chatgpt.conversationEditor']);
+    assert.equal(calls[0][3].viewColumn, 2);
+    assert.equal((await fetch(`${base}/resume`, { method: 'POST', headers, body: JSON.stringify({ threadId: 'not-a-thread', column: 2 }) })).status, 400);
+    assert.equal((await fetch(`${base}/resume`, { method: 'POST', headers, body: JSON.stringify({ threadId: selectedThread, column: 4 }) })).status, 400);
+    assert.equal(calls.length, 1);
+  } finally { extension.deactivate(); for (const disposable of disposals) disposable.dispose(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('send uses the captured official app-server for the exact open thread and deduplicates receipts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'native-send-')); const file = join(root, 'auth.json'); const port = await sparePort();
+  const selectedThread = '019aabcd-1234-7890-abcd-0123456789ac'; const submissionId = '019aabcd-1234-7890-abcd-0123456789ad';
+  const turnId = '019aabcd-1234-7890-abcd-0123456789ae'; const requests = []; const providers = new Map(); const disposals = []; let threadStatus = 'idle';
+  const official = { isActive: false, packageJSON: { version: '26.51002.51308' }, async activate() {
+    this.isActive = true;
+    vscode.window.registerCustomEditorProvider('chatgpt.conversationEditor', { codexMcpConnection: appServer }, {});
+  } };
+  const appServer = {
+    registerProvider(name, callbacks) { providers.set(name, callbacks); return { dispose() { providers.delete(name); } }; },
+    sendRequest(name, requestId, method, params, reportDelivery) {
+      requests.push({ name, requestId, method, params, reportDelivery });
+      queueMicrotask(() => providers.get(name).onResult({ id: requestId, result: method === 'thread/read'
+        ? { thread: { id: selectedThread, cwd: body.cwd, status: { type: threadStatus } } }
+        : { turn: { id: turnId } } }));
+    },
+  };
+  const uri = `openai-codex://route/local/${selectedThread}`;
+  const vscode = { extensions: { getExtension: () => official },
+    window: { tabGroups: { all: [{ viewColumn: 2, tabs: [{ isActive: true, input: { viewType: 'chatgpt.conversationEditor', uri: { toString: () => uri } } }] }] },
+      registerCustomEditorProvider(_type, provider) { this.capturedProvider = provider; return { dispose() {} }; } },
+    Uri: { parse: value => value }, commands: { registerCommand: () => ({ dispose() {} }), executeCommand: async () => {} } };
+  await writeFile(file, JSON.stringify({ port, token: 'test-only-send-012345678901234567890', threads: [] }), { mode: 0o600 });
+  const extension = await load(file, vscode); const headers = { authorization: 'Bearer test-only-send-012345678901234567890', 'content-type': 'application/json' };
+  const body = { threadId: selectedThread, column: 2, cwd: root, submissionId, text: 'send only to the selected native thread', images: [], contexts: [], mentions: [] };
+  try {
+    await extension.activate({ subscriptions: disposals });
+    const base = `http://127.0.0.1:${port}`;
+    assert.equal((await (await fetch(`${base}/status`, { headers })).json()).sendAvailable, true);
+    const sent = await fetch(`${base}/send`, { method: 'POST', headers, body: JSON.stringify(body) });
+    assert.equal(sent.status, 200); assert.deepEqual(await sent.json(), { accepted: true, turnId });
+    assert.deepEqual(requests.map(request => request.method), ['thread/read', 'turn/start']);
+    assert.equal(requests[1].params.threadId, selectedThread);
+    assert.equal(requests[1].params.clientUserMessageId, submissionId);
+    assert.deepEqual(requests[1].params.input, [{ type: 'text', text: body.text, text_elements: [] }]);
+    assert.equal('sandboxPolicy' in requests[1].params, false, 'native thread settings must remain authoritative');
+    const duplicate = await fetch(`${base}/send`, { method: 'POST', headers, body: JSON.stringify(body) });
+    assert.equal(duplicate.status, 200); assert.deepEqual(await duplicate.json(), { accepted: true, turnId });
+    assert.equal(requests.length, 2);
+    const ledger = await readFile(join(root, 'companion-send-receipts.json'), 'utf8');
+    assert.equal(ledger.includes(body.text), false, 'durable receipts must not retain message bodies');
+    assert.equal((await fetch(`${base}/send`, { method: 'POST', headers, body: JSON.stringify({ ...body, text: 'different payload with same id' }) })).status, 409);
+    assert.equal((await fetch(`${base}/send`, { method: 'POST', headers, body: JSON.stringify({ ...body, column: 1 }) })).status, 409);
+    assert.equal(requests.length, 2);
+    threadStatus = 'active';
+    const busy = await fetch(`${base}/send`, { method: 'POST', headers, body: JSON.stringify({ ...body, submissionId: '019aabcd-1234-7890-abcd-0123456789af' }) });
+    assert.equal(busy.status, 409);
+    assert.equal(requests.at(-1).method, 'thread/read', 'busy native turns must not receive a second turn/start');
+  } finally { extension.deactivate(); for (const disposable of disposals) disposable.dispose(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('module-load capture survives the official extension becoming active before companion activation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'native-send-capture-order-')); const file = join(root, 'auth.json'); const port = await sparePort();
+  const disposals = []; const providers = new Map();
+  const appServer = { registerProvider(name) { providers.set(name, true); return { dispose() { providers.delete(name); } }; }, sendRequest() {} };
+  const official = { isActive: false, packageJSON: { version: '26.51002.51308' }, async activate() { this.isActive = true; } };
+  const vscode = { extensions: { getExtension: () => official }, window: { tabGroups: { all: [] },
+    registerCustomEditorProvider() { return { dispose() {} }; } }, Uri: { parse: value => value },
+    commands: { registerCommand: () => ({ dispose() {} }), executeCommand: async () => {} } };
+  const originalRegistration = vscode.window.registerCustomEditorProvider;
+  await writeFile(file, JSON.stringify({ port, token: 'test-only-order-012345678901234567890', threads: [] }), { mode: 0o600 });
+  const extension = await load(file, vscode);
+  // Simulate an onUri/startup activation racing after the companion module loads but before activate().
+  vscode.window.registerCustomEditorProvider('chatgpt.conversationEditor', { codexMcpConnection: appServer }, {});
+  official.isActive = true;
+  try {
+    await extension.activate({ subscriptions: disposals });
+    const status = await (await fetch(`http://127.0.0.1:${port}/status`, { headers: { authorization: 'Bearer test-only-order-012345678901234567890' } })).json();
+    assert.equal(status.sendAvailable, true);
+    assert.equal(status.sendBridge.officialActiveAtModuleLoad, false);
+    assert.equal(status.sendBridge.officialActiveAtActivation, true);
+    assert.equal(status.sendBridge.capturePatchRetainedAtModuleLoad, true);
+    assert.equal(status.sendBridge.registrationCallCount, 1);
+    assert.deepEqual(status.sendBridge.registeredViewTypes, ['chatgpt.conversationEditor']);
+    assert.equal(status.sendBridge.providerCaptured, true);
+    assert.equal(providers.size, 1);
+    assert.equal(vscode.window.registerCustomEditorProvider, originalRegistration, 'capture wrapper must be removed after activation');
+  } finally { extension.deactivate(); for (const disposable of disposals) disposable.dispose(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('companion refuses non-private credential file before binding broker', async () => {
   const root = await mkdtemp(join(tmpdir(), 'native-companion-test-')); const file = join(root, 'auth.json');
   try {
@@ -168,7 +269,7 @@ async function startupFixture(t, config = {}, callbacks = {}) {
   const root = await mkdtemp(join(tmpdir(), 'native-startup-')); const file = join(root, 'auth.json'); const port = config.port ?? await sparePort();
   const token = 'test-only-startup-012345678901234567890'; const calls = []; const commands = new Map(); const subscriptions = [];
   const official = { isActive: false, packageJSON: { version: 'test' }, async activate() { await callbacks.activate?.(); this.isActive = true; } };
-  const vscode = { extensions: { getExtension: () => callbacks.missingOfficial ? undefined : official }, window: { tabGroups: { all: callbacks.tabs ?? [] } }, Uri: { parse: uri => uri },
+  const vscode = { extensions: { getExtension: () => callbacks.missingOfficial ? undefined : official }, window: { tabGroups: { all: callbacks.tabs ?? [], async close(tab, preserveFocus) { return callbacks.close ? callbacks.close(tab, preserveFocus) : true; } } }, Uri: { parse: uri => uri },
     commands: { registerCommand(name, callback) { commands.set(name, callback); return { dispose() { commands.delete(name); } }; },
       async executeCommand(...args) { calls.push(args); await callbacks.open?.(...args); } } };
   await writeFile(file, JSON.stringify({ port, token, threads: [id, secondFixture, thirdFixture], ...config }), { mode: 0o600 });
@@ -311,6 +412,56 @@ test('native new chat control constructs only captured new-page URIs and fixed c
     'vscode.openWith', `openai-codex://route/extension/panel/new?nativeCodexPanel=${windowId}`, 'chatgpt.conversationEditor',
     { viewColumn: index + 1, preview: false, preserveFocus: false }
   ]));
+});
+test('new-chat restore replaces only its captured clean editor with the observed local thread', async () => {
+  const { newChatUri, restoreNewChatThread } = require('../companion/control.cjs');
+  const calls = []; const closed = [];
+  const tabs = newWindowIds.map((windowId, index) => ({ viewColumn: index + 1, tabs: [{
+    input: { uri: { toString: () => newChatUri(windowId, newWindowIds) }, viewType: 'chatgpt.conversationEditor' },
+    isDirty: false
+  }] }));
+  const vscode = {
+    Uri: { parse: uri => uri },
+    window: { tabGroups: { all: tabs, async close(tab, preserveFocus) { closed.push({ tab, preserveFocus }); return true; } } },
+    commands: { async executeCommand(...args) { calls.push(args); } }
+  };
+  const result = await restoreNewChatThread(vscode, { windowId: newWindowIds[1], threadId: id, column: 2 }, newWindowIds);
+  assert.deepEqual(result, { windowId: newWindowIds[1], threadId: id, column: 2, restored: true });
+  assert.deepEqual(calls, [[
+    'vscode.openWith', `openai-codex://route/local/${id}`, 'chatgpt.conversationEditor',
+    { viewColumn: 2, preview: false, preserveFocus: false }
+  ]]);
+  assert.equal(closed.length, 1); assert.equal(closed[0].tab, tabs[1].tabs[0]); assert.equal(closed[0].preserveFocus, true);
+  for (const body of [
+    { windowId: newWindowIds[0], threadId: id, column: 2 },
+    { windowId: newWindowIds[1], threadId: id, column: 3 },
+    { windowId: newWindowIds[1], threadId: '../local/evil', column: 2 },
+    { windowId: newWindowIds[1], threadId: id, column: 2, command: 'evil' },
+  ]) await assert.rejects(restoreNewChatThread(vscode, body, newWindowIds));
+  assert.equal(calls.length, 1); assert.equal(closed.length, 1);
+  tabs[0].tabs[0].isDirty = true;
+  await assert.rejects(restoreNewChatThread(vscode, { windowId: newWindowIds[0], threadId: id, column: 1 }, newWindowIds), /unsaved/);
+  assert.equal(calls.length, 1); assert.equal(closed.length, 1);
+});
+test('private restore route shares auth and lock and accepts only an open captured new-chat tab', async t => {
+  const { newChatUri } = require('../companion/control.cjs');
+  const tabs = newWindowIds.map((windowId, index) => ({ viewColumn: index + 1, tabs: [{ isDirty: false,
+    input: { uri: { toString: () => newChatUri(windowId, newWindowIds) }, viewType: 'chatgpt.conversationEditor' } }] }));
+  const closed = [];
+  const data = await startupFixture(t, newChatConfig, { tabs, close: async (tab, preserveFocus) => { closed.push({ tab, preserveFocus }); return true; } });
+  await data.extension.activate({ subscriptions: data.subscriptions });
+  const body = { windowId: newWindowIds[0], threadId: id, column: 1 };
+  assert.equal((await fetch(`${data.base}/restore`, { method: 'POST', headers: data.headers, body: JSON.stringify(body) })).status, 200);
+  assert.deepEqual(data.calls.at(-1), ['vscode.openWith', `openai-codex://route/local/${id}`, 'chatgpt.conversationEditor',
+    { viewColumn: 1, preview: false, preserveFocus: false }]);
+  assert.equal(closed.length, 1); assert.equal(closed[0].tab, tabs[0].tabs[0]); assert.equal(closed[0].preserveFocus, true);
+  const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
+  assert.equal(status.opened.at(-1).kind, 'restore'); assert.equal(status.opened.at(-1).threadId, undefined);
+  for (const invalid of [
+    { ...body, column: 2 }, { ...body, windowId: secondFixture }, { ...body, threadId: 'command:evil' }, { ...body, command: 'evil' },
+  ]) assert.equal((await fetch(`${data.base}/restore`, { method: 'POST', headers: data.headers, body: JSON.stringify(invalid) })).status, 400);
+  assert.equal((await fetch(`${data.base}/restore`, { headers: data.headers })).status, 404);
+  assert.equal(closed.length, 1);
 });
 test('explicit new-chat startup waits for official activation and requires no fixture threads', async t => {
   const activation = deferred(); const entered = deferred();

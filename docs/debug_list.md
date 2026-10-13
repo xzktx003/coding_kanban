@@ -2041,6 +2041,14 @@
 - 完整 36 秒原始宿主浏览器对照又测到后续 browser→host 最大 6,541,792 字节，而反向单消息最大 262,144 字节，无连接关闭；仅检查最初 1.2 MiB 仍会漏掉第二次 1009。最终按方向限定 browser 消息/待发各 8 MiB、host 返回消息/浏览器待发各 2 MiB，背压保持，不改原插件或添加启动延迟；复现使用精确字节长度与分块回传验证完整性，不保留消息正文。
 - 原生 webview 的 DOM/可见性断言通过但截图空白：原 iframe 父容器仍有编辑器定位的 `clip-path` 与 `overflow:hidden`。自有可恢复 container 标记去掉展示裁剪并限定指针命中，共享父节点按窗口引用计数；父节点、iframe、MessagePort 与原 inline 几何保留。宿主所有非原生后代隐藏，去掉残留菜单。父容器红绿灯和实际截图检查覆盖，真实桌面/390px 截图已显示双原版登录页，30 秒无断连、模式切换保留及刷新恢复通过。
 
+### 2026-10-13：Codex 原生恢复与发送
+
+- HTTPS 开发代理没有转发 `X-Forwarded-Proto`，网关把浏览器的 HTTPS Resume 误判成 HTTP 并返回 403。给 `/api` 代理开启受控的 forwarded headers，并用本地 HTTP proxy 回归 HTTPS Origin 校验。
+- 原生启动遮罩原位移除 `startup-loader` class 后，observer 没监听 `class` 属性，ready 计数一直不变。扩展 mutation filter 并补 class 变化红绿灯。
+- surface CSS 隐藏宿主外壳后仍由 `.monaco-workbench` 截获点击。宿主外壳设为不接收指针事件，只让所选原生 iframe 接收；新增命中测试。
+- 编辑器路由留下的离屏旧 webview 被误算成第三个窗口。按父容器视口位置筛掉离屏 iframe，并按屏幕 x 坐标映射两列；新增三帧回归。
+- 公共 composer 把 Session followup 的 `paused` 状态直接判成待处理，即使 `items` 为空也拒绝原生桥。现在仅 `queued`、`sending`、`uncertain` 条目阻止发送；空暂停队列及已结束、失败或取消条目可继续走原生窗口，未决消息仍保留草稿。回归先红后绿。
+
 ### 2026-10-12：原生新聊天与连接隔离
 
 - 原插件新面板命令使用固定 URI，重复调用会被编辑器去重；自身伴随扩展采用白名单 UUID query 区分两个新聊天文档，原插件与 MessagePort 保持原样。URI、互斥、取消和独立面板调用有先红后绿回归，真实宿主已显示两个原生输入框。
@@ -2055,3 +2063,8 @@
 
 - 2026-10-12（xh2modelzoo 终端 Codex 完成无飞书通知）：现场 tmux 存活且飞书已配置／开启，但 Codex 无常驻 rollout 句柄、无匹配 shell snapshot、无显式 resume ID，同目录多历史使定位返回空。完成观察新增仅只读的进程启动／原始会话创建时间唯一关联，保留目录与子 Agent 过滤、歧义拒绝，普通输入定位不变；现场已恢复真实 thread/turn 完成读取。定位／解析／发送暂时失败最多恢复 3 轮，发送失败不再被“已观察 ID”吞掉，成功仍去重；多窗格按探测轮次计预算，基线不补历史，stop/delete 清理。隔离完整链路与边界见 `docs/codex-feishu-notifications.md`，测试不向真实 Codex／飞书投递消息。
 - 2026-10-13（飞书完成卡片回复仍被忽略）：终端完成通知已借助启动时间关联恢复发送，但回复处理仍只用严格窗格定位；`xh2modelzoo` 的真实回复到达后返回 `ignored_unavailable`，未进入 Codex queue。已绑定本地卡片在严格定位失败时，额外用存活进程与原始创建时间的唯一关联校验**同一个绑定 thread**，再投递文字／图片；普通输入和审批定位不放宽，旧 ID、离线、只读和歧义仍拒绝。红绿灯测试覆盖绑定目标、错误目标、图片及成功幂等；现场只读核对真实绑定命中、旧 ID 拒绝，未向运行中的 Codex 发送测试任务。
+
+- 2026-10-13（Codex Resume 就绪竞态）：宿主 HTTP 已可用但伴随扩展 broker 尚未监听时，Resume 按钮仍可点击并返回 503。状态接口现在以私有凭证探测 broker 的官方扩展与 listener 就绪；前端仅在可用时开放 Resume，并在 Codex 可见期间有限轮询，隐藏时取消。服务与 UI 回归覆盖未就绪／就绪切换。
+- 2026-10-13（Codex 公共输入缺少目标标记）：composer 接受 `targetLabel` 但没有渲染，Resume 后会话 store 已指向精确 thread，界面却无法确认投递目标。新增紧凑目标元数据展示和回归；不改变单 thread followup 提交路径。
+- 2026-10-13（项目会话列表含不可 Resume 的 thread ID）：列表只检查 ID 非空，但原生 Resume 路由严格要求小写 UUID，导致条目显示后打开必失败。列表解析现在使用与网关相同的 UUID 格式校验；无效分页记录整体报错，不计入会话数。新增失败用例先红后绿。
+- 2026-10-13（公共 composer 向原生 thread 发送遭遇 `SESSION_OWNED_ELSEWHERE`）：项目历史 Resume 已打开精确原生窗口，但旧 followup 路径另起 Session runtime 并尝试获取同一 thread writer，故发送被拒。公共输入现在经版本受限的 companion 调用官方插件自己的 app-server；逐项核对 active editor、thread UUID、列、cwd 和 idle 状态，并保存不含正文的幂等回执。busy/uncertain 与已有队列保留草稿并拒绝，禁止回退到 Session runtime；伴随扩展、gateway、UI 红绿灯转绿。2026-10-13 一次性项目真实浏览器验收得到 Resume 与发送两个 202 回执，原生 history 有一条新增 user turn 和精确助手回复，第 2 列不变；已归档测试 thread、移除临时项目登记并清空目标。多项目、多状态和正式 thread 没有用该单次验收替代。

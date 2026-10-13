@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, symlink, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, symlink, rm, readdir, writeFile, lstat, readlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
-import { validateOptions, validateDirectories, buildHostArgs, OwnedProcesses, assertPortAvailable, buildChildEnv, readPasswordFile, assertFreshOutput } from '../host.mjs';
+import { spawnSync } from 'node:child_process';
+import { validateOptions, validateDirectories, createSharedCodexHomeView, buildHostArgs, OwnedProcesses, assertPortAvailable, buildChildEnv, readPasswordFile, assertFreshOutput } from '../host.mjs';
 import companion from '../companion/control.cjs';
 const id = '019aabcd-1234-7890-abcd-0123456789ab';
 function options(root = '/isolated') {
@@ -14,6 +16,7 @@ function options(root = '/isolated') {
 test('strict options reject missing, malformed ports, nested or default directories', () => {
   assert.equal(validateOptions(options()).port, 34567);
   for (const port of ['34567;kill', 0, 1023, 65536, '12.3']) assert.throws(() => validateOptions({ ...options(), port }));
+  for (const bindHost of ['localhost', '192.168.1.2', '0.0.0.0;evil']) assert.throws(() => validateOptions({ ...options(), bindHost }));
   assert.throws(() => validateOptions({ ...options(), codeServer: 'code-server' }));
   assert.throws(() => validateOptions({ ...options(), projectDir: '/tmp/project' }));
   assert.throws(() => validateOptions({ ...options(), codexHome: '/isolated/home/.codex' }));
@@ -27,13 +30,52 @@ test('directory checks reject symlink escape before writing', async () => {
     await assert.rejects(validateDirectories(validateOptions(options(root))), /symlink|outside/);
   } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
 });
+test('shared Codex home reuses the exact conversation store while keeping host scratch private', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'native-host-shared-'));
+  const shared = join(root, 'real-codex-home');
+  const runtime = join(root, 'runtime');
+  try {
+    await mkdir(shared, { mode: 0o700 });
+    await writeFile(join(shared, 'history.marker'), 'existing history', { mode: 0o600 });
+    const input = { ...options(runtime), sharedCodexHome: shared };
+    const configured = validateOptions(input);
+    await validateDirectories(configured);
+    const view = await createSharedCodexHomeView(configured);
+    const environment = buildChildEnv(configured, { PATH: '/usr/bin', CODEX_HOME: '/different/inherited' });
+    assert.deepEqual(view, { enabled: true, storage: 'linked', ipcIsolated: true });
+    assert.equal(configured.codexHome, join(runtime, 'codex'));
+    assert.equal(environment.CODEX_HOME, configured.codexHome);
+    assert.equal(environment.HOME, join(runtime, 'home'));
+    assert.equal(environment.TMPDIR, join(runtime, 'tmp'));
+    assert.deepEqual(await readdir(shared), ['history.marker']);
+    assert.equal((await lstat(join(configured.codexHome, 'history.marker'))).isSymbolicLink(), true);
+    assert.equal(await readlink(join(configured.codexHome, 'history.marker')), join(shared, 'history.marker'));
+    assert.equal((await lstat(join(configured.codexHome, 'ipc'))).isSymbolicLink(), false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+test('shared Codex home must be explicit, owned, non-symlinked and cannot be combined with a cloned home', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'native-host-shared-guard-'));
+  const shared = join(root, 'real-home');
+  try {
+    await mkdir(shared, { mode: 0o700 });
+    const input = { ...options(join(root, 'runtime')), sharedCodexHome: shared };
+    await assert.rejects(validateDirectories(validateOptions({ ...input, sharedCodexHome: join(root, 'missing') })), /shared Codex home/);
+    assert.throws(() => validateOptions({ ...input, connectionProfileHome: join(root, 'connection') }), /mutually exclusive/);
+    assert.throws(() => validateOptions({ ...input, sharedCodexHome: root }), /overlap private runtime directories/);
+    const alias = join(root, 'alias');
+    await symlink(shared, alias);
+    await assert.rejects(validateDirectories(validateOptions({ ...input, sharedCodexHome: alias })), /symlink/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 test('host arguments isolate settings and bind LAN, never shell interpolate', () => {
   const args = buildHostArgs(validateOptions(options()));
-  assert.ok(args.includes('0.0.0.0:34567'));
+  assert.ok(args.includes('127.0.0.1:34567'));
   assert.ok(args.includes('/isolated/user'));
   assert.ok(args.includes('/isolated/extensions'));
   assert.ok(args.includes('/isolated/project'));
   assert.ok(args.includes('openai.chatgpt'));
+  const lanArgs = buildHostArgs(validateOptions({ ...options(), bindHost: '0.0.0.0' }));
+  assert.ok(lanArgs.includes('0.0.0.0:34567'));
 });
 test('occupied port rejects and does not terminate listener', async () => {
   const net = await import('node:net');
@@ -63,10 +105,21 @@ test('companion opens captured validated thread with fixed original editor only'
 });
 
 test('child environment isolates modern and legacy IPC and omits inherited credentials', () => {
-  const env = buildChildEnv(validateOptions(options()), { PATH: '/bin', HOME: '/real', TMPDIR: '/tmp', CODEX_HOME: '/real/.codex', OPENAI_API_KEY: 'secret', PASSWORD: 'secret', CODEX_API_KEY: 'secret' });
+  const env = buildChildEnv(validateOptions(options()), { PATH: '/bin', HOME: '/real', TMPDIR: '/tmp', CODEX_HOME: '/real/.codex', NODE_OPTIONS: '--require=/tmp/untrusted.cjs', OPENAI_API_KEY: 'secret', PASSWORD: 'secret', CODEX_API_KEY: 'secret' });
   assert.equal(env.CODEX_HOME, '/isolated/codex'); assert.equal(env.HOME, '/isolated/home');
   assert.equal(env.TMPDIR, '/isolated/tmp'); assert.equal(env.TMP, env.TMPDIR); assert.equal(env.TEMP, env.TMPDIR);
+  assert.equal(env.NODE_OPTIONS, `--require=${JSON.stringify(fileURLToPath(new URL('../companion/preload.cjs', import.meta.url)))}`);
   assert.equal(env.OPENAI_API_KEY, undefined); assert.equal(env.PASSWORD, undefined); assert.equal(env.CODEX_API_KEY, undefined);
+});
+test('child environment loads the provider hook only in extension-host Node processes', () => {
+  const env = buildChildEnv(validateOptions(options()), { PATH: '/bin', NODE_OPTIONS: '--require=/tmp/untrusted.cjs' });
+  const expression = `process.stdout.write(String(Boolean(process[Symbol.for('coding-kanban.native-codex.appserver-provider')])));`;
+  const extensionHost = spawnSync(process.execPath, ['-e', expression, '--', '--type=extensionHost'], { encoding: 'utf8', env });
+  const ordinaryNode = spawnSync(process.execPath, ['-e', expression], { encoding: 'utf8', env });
+  assert.equal(extensionHost.status, 0, extensionHost.stderr);
+  assert.equal(extensionHost.stdout, 'true');
+  assert.equal(ordinaryNode.status, 0, ordinaryNode.stderr);
+  assert.equal(ordinaryNode.stdout, 'false');
 });
 test('runtime root must be private before creating child directories', async () => {
   const { chmod } = await import('node:fs/promises');

@@ -1106,6 +1106,8 @@
 - 原始宿主36秒稳定对照：browser→host最大6541792bytes，host→browser最大262144bytes，双登录UI且无close。最终native方向预算browser message/queue8MiB、upstream message/browserbuffer2MiB，单测须验证6.54MB完整发送及每方向超限早拒绝；握手/首消息通过仍不足证明后续资源流稳定。
 - Native DOM ready/locator.isVisible不能证明实际绘制：code-server overlay父容器clip-path/overflow会裁剪自有fixediframe。只用自有可恢复container标记解除clip、设置指针边界，引用计数保留其他窗，不能改原inline/移动iframe。验收必须看截图并检查实际hit-test，不只数DOM窗口。
 
+- 2026-10-13（原生 Codex 浏览器恢复与公共输入）：HTTPS Vite `/api` 代理漏转发实际协议，Resume 同源校验因此误判；启动遮罩 class 原位变化未更新 ready；宿主根截获原生 iframe 点击；离屏旧 webview 被当成第三列。分别补 forwarded headers、class mutation、宿主 pointer pass-through 和视口筛选，并有红绿灯回归。另修复空暂停 Session 队列阻塞原生发送，仅 queued/sending/uncertain 条目会阻止。真实浏览器唯一提交返回 409 且草稿保留、无回执文件或新 turn；可见 iframe 与 broker 当前状态仍未一致，不能声称完整 UI/发送闭环。
+
 ### 2026-10-12：原生新聊天与连接隔离
 
 - 原插件新面板命令使用固定 URI，重复调用会被编辑器去重；自身伴随扩展采用白名单 UUID query 区分两个新聊天文档，原插件与 MessagePort 保持原样。URI、互斥、取消和独立面板调用有先红后绿回归，真实宿主已显示两个原生输入框。
@@ -1120,3 +1122,9 @@
 
 - 2026-10-12（xh2modelzoo 终端 Codex 完成无飞书通知）：现场 tmux 存活且飞书已配置／开启，但 Codex 无常驻 rollout 句柄、无匹配 shell snapshot、无显式 resume ID，同目录多历史使定位返回空。完成观察新增仅只读的进程启动／原始会话创建时间唯一关联，保留目录与子 Agent 过滤、歧义拒绝，普通输入定位不变；现场已恢复真实 thread/turn 完成读取。定位／解析／发送暂时失败最多恢复 3 轮，发送失败不再被“已观察 ID”吞掉，成功仍去重；多窗格按探测轮次计预算，基线不补历史，stop/delete 清理。隔离完整链路与边界见 `docs/codex-feishu-notifications.md`，测试不向真实 Codex／飞书投递消息。
 - 2026-10-13（飞书卡片回复 `ignored_unavailable`）：通知侧启动关联已找到存活 Codex thread，回复侧严格定位仍返回空。仅对私聊卡片绑定的精确 thread 增加只读存活进程／创建时间校验，然后交给原生 queue；普通输入、审批和登记保持严格，旧绑定／不可控终端拒绝，成功才幂等。隔离红绿灯与现场只读定位通过，未对真实 Agent 注入测试消息。
+
+- 2026-10-13（Codex Resume 就绪竞态）：仅探测 code-server HTTP 使 UI 在 companion broker 未监听时提前开放 Resume 并得到 503。改为私有 broker status readiness gate 和可见模式有限轮询，未就绪时不可点击；新增服务/UI 红绿灯。
+- 2026-10-13（Codex composer 目标不可见）：Codex composer 接收了 targetLabel 属性却未渲染，用户看不到当前 thread 目标。增加 compact target meta 与组件测试，保留当前单 thread followup 行为。
+- 2026-10-13（Codex 项目历史 thread ID 校验）：项目 thread/list 曾接收任意非空 ID，Resume 路由只允许 UUID。列表解析与原生路由采用相同 UUID 格式校验，无效记录拒绝，红绿灯先复现后通过。
+- 2026-10-13（Codex 公共输入遇到原生 writer 占用）：history Resume 打开原生窗口后仍走 Session followup，Session runtime 对已由官方插件 app-server 持有的 thread 返回 `SESSION_OWNED_ELSEWHERE`。改为 companion 版本门控的同实例 app-server `turn/start`，发送前校验原生 editor/thread/列/cwd/idle，幂等账本只存 hash 和回执不存正文。busy、待处理队列或未知回执保留草稿、不改走 Session writer、不广播；专项测试通过，真实浏览器助手回复待验收。
+- 2026-10-13（Codex 公共输入浏览器验收续记）：上条记录中的首次尝试确实在生成回执前拒绝，没有产生 turn。之后在隔离一次性 thread 上重新 Resume，并从公共 Session composer 单次提交；网关返回 202，thread/read 只有一条新增 user turn 和对应已完成的精确助手回复，第 2 列未变化。测试 thread 通过原生界面归档，项目登记和浏览器目标已清除；这不扩展为 busy、重复提交或多窗口组的实浏览器验收。

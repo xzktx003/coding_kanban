@@ -8,7 +8,7 @@
     "vscode": "^1.96.2"
   },
   "activationEvents": [
-    "onStartupFinished"
+    "*"
   ],
   "main": "./extension.cjs",
   "extensionKind": [

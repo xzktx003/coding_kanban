@@ -14,7 +14,9 @@ test('self package is a separate VSIX with original editor companion only', asyn
   assert.equal(bytes.readUInt32LE(offset), 0x02014b50);
   assert.ok(files.has('[Content_Types].xml')); assert.ok(files.has('extension.vsixmanifest'));
   assert.ok(files.has('extension/extension.cjs')); assert.ok(files.has('extension/control.cjs'));
+  assert.ok(files.has('extension/appserver-send.cjs'));
   const manifest = JSON.parse(files.get('extension/package.json'));
   assert.equal(manifest.publisher, 'agent-orchestrator'); assert.equal(manifest.name, 'native-codex-companion');
+  assert.deepEqual(manifest.activationEvents, ['*']);
   assert.ok(![...files.keys()].some(path => path.startsWith('extension/out/')));
 });

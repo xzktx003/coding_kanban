@@ -24,6 +24,7 @@ import { Pencil, Code2, Search } from "lucide-react";
 import {
   followupService,
   followupParameters,
+  stableSubmissionId,
 } from "@session/services/followupService";
 import { createSideChat } from "@session/services/conversationActions";
 import { useFollowupSettingsStore } from "@session/stores/useFollowupSettingsStore";
@@ -113,6 +114,15 @@ import {
 } from "./slashCommands";
 import { NativeFeedbackDialog } from "./NativeFeedbackDialog";
 import { AutoReviewDenialsSheet } from "./AutoReviewDenialsSheet";
+import { ComposerTargetMeta } from "./ComposerTargetMeta";
+import {
+  hasPendingSessionFollowups,
+  sendToNativeCodex,
+} from "../../../../codex-mode/native-codex-send";
+import {
+  matchesNativeCodexTarget,
+  useNativeCodexTargetStore,
+} from "../../../../codex-mode/native-codex-target";
 
 interface ComposerProps {
   targetLabel?: React.ReactNode;
@@ -199,6 +209,12 @@ export function Composer({
     })),
   );
   const cwd = useWorkspaceStore((s) => s.cwd);
+  const nativeTarget = useNativeCodexTargetStore((s) => s.target);
+  const targetsNativeCodex = matchesNativeCodexTarget(
+    nativeTarget,
+    currentThreadId,
+    cwd,
+  );
   const owner = sessionDraftKey("codex", currentThreadId, cwd);
   const feedbackDialogOwner = useRef<string | null>(null);
   const openSlashDialog = (dialog: SlashDialog) => {
@@ -210,7 +226,8 @@ export function Composer({
     const openPersonality = () => openSlashDialog("personality");
     const openFeedback = () => openSlashDialog("feedback");
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "i" || !event.shiftKey || event.altKey) return;
+      if (event.key.toLowerCase() !== "i" || !event.shiftKey || event.altKey)
+        return;
       if (!(event.metaKey || event.ctrlKey)) return;
       const target = event.target;
       if (
@@ -242,7 +259,8 @@ export function Composer({
   } = useThreadModelSettings(currentThreadId);
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "k" || !(event.metaKey || event.ctrlKey)) return;
+      if (event.key.toLowerCase() !== "k" || !(event.metaKey || event.ctrlKey))
+        return;
       if (event.altKey || event.shiftKey) return;
       const target = event.target;
       if (
@@ -271,7 +289,8 @@ export function Composer({
       const editor = document.querySelector(
         ".session-composer-sheet.is-full textarea, .session-composer-sheet.is-full [contenteditable='true']",
       );
-      if (!(editor instanceof HTMLElement) || document.activeElement !== editor) return;
+      if (!(editor instanceof HTMLElement) || document.activeElement !== editor)
+        return;
       const control = document.querySelector(
         ".session-composer-sheet.is-full .session-rich-tools button",
       );
@@ -523,6 +542,41 @@ export function Composer({
           },
         );
         await moveImageDraft(owner, submittedOwner);
+      }
+      if (targetsNativeCodex && nativeTarget?.threadId === targetThreadId) {
+        if (submittedGoal.enabled)
+          throw new Error("请在选中的原生 Codex 窗口中管理会话目标");
+        const queue = await followupService.load(targetThreadId);
+        if (hasPendingSessionFollowups(queue))
+          throw new Error("该会话有待处理的 Session 消息，请先处理队列再发送");
+        const mentions = [...submittedMentions, ...submittedPluginMentions];
+        const nativeSubmissionId = await stableSubmissionId(
+          submittedOwner,
+          snapshot.revision,
+          {
+            target: nativeTarget,
+            text,
+            images: [...images],
+            contexts: structuredClone(submittedContexts),
+            mentions: structuredClone(mentions),
+          },
+        );
+        await sendToNativeCodex({
+          target: nativeTarget,
+          submissionId: nativeSubmissionId,
+          text,
+          images: [...images],
+          contexts: structuredClone(submittedContexts),
+          mentions: structuredClone(mentions),
+        });
+        onAfterSend?.(targetThreadId, text);
+        setDeliveryNotice({
+          owner: submittedOwner,
+          text: `已发送到 Codex 窗口 ${nativeTarget.column}`,
+        });
+        clearSubmitted();
+        attachments.clear(submittedIds);
+        return;
       }
       if (submittedGoal.enabled) {
         await codexService.threadGoalSet({
@@ -797,7 +851,9 @@ export function Composer({
             </div>
           )}
           <div className="session-compact-body">
-            {currentThreadId && <PersonalityNotice threadId={currentThreadId} />}
+            {currentThreadId && (
+              <PersonalityNotice threadId={currentThreadId} />
+            )}
             <div ref={wrapperRef} className="session-composer-editor">
               <ComposerEditor
                 owner={owner}
@@ -1034,6 +1090,7 @@ export function Composer({
                 />
                 <AccessModePopover compact />
               </div>
+              <ComposerTargetMeta targetLabel={targetLabel} />
               <div className="session-composer-actions flex items-center gap-2">
                 <ConversationMenu
                   threadId={currentThreadId}

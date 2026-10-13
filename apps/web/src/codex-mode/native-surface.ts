@@ -1,4 +1,12 @@
-import { observeNativeContent } from "./native-content";
+import {
+  observeNativeContent,
+  type NativeContentState,
+} from "./native-content";
+
+export type NativeSurfaceOptions = {
+  windowIds?: readonly string[];
+  onThreadState?: (panelIndex: number, state: NativeContentState) => void;
+};
 
 export function nativeIframeUrl(value: unknown, origin: string): string | null {
   if (typeof value !== "string" || !value.startsWith("/native-codex/"))
@@ -20,15 +28,25 @@ export function mountNativeSurface(
   document: Document,
   onCount: (count: number) => void,
   onReady?: (count: number) => void,
+  options: NativeSurfaceOptions = {},
 ) {
   const view = document.defaultView;
   if (!view) throw new Error("原生界面暂时不可访问");
   const managed = new Set<HTMLIFrameElement>();
-  const content = new Map<HTMLIFrameElement, ReturnType<typeof observeNativeContent>>();
+  const content = new Map<
+    HTMLIFrameElement,
+    ReturnType<typeof observeNativeContent>
+  >();
+  const contentWindowIds = new Map<HTMLIFrameElement, string | undefined>();
   let readyCount = -1;
   const publishReady = () => {
-    const next = Array.from(content.values()).filter(item => item.ready).length;
-    if (readyCount !== next) { readyCount = next; onReady?.(next); }
+    const next = Array.from(content.values()).filter(
+      (item) => item.ready,
+    ).length;
+    if (readyCount !== next) {
+      readyCount = next;
+      onReady?.(next);
+    }
   };
   const previous = new WeakMap<
     HTMLIFrameElement,
@@ -45,7 +63,9 @@ export function mountNativeSurface(
   style.textContent = `
     html.kanban-native-surface body { margin:0!important; overflow:hidden!important; }
     html.kanban-native-surface body * { visibility:hidden!important; }
-    html.kanban-native-surface .monaco-workbench { visibility:visible!important; }
+    html.kanban-native-surface .monaco-workbench {
+      visibility:visible!important; pointer-events:none!important;
+    }
     html.kanban-native-surface [data-kanban-native-container] {
       visibility:visible!important; clip-path:none!important;
       overflow:visible!important; pointer-events:none!important;
@@ -107,13 +127,14 @@ export function mountNativeSurface(
     releaseContainer(original.container, frame);
     content.get(frame)?.dispose();
     content.delete(frame);
+    contentWindowIds.delete(frame);
     managed.delete(frame);
     previous.delete(frame);
   };
   const refresh = () => {
     queued = null;
     if (!running || disposed) return;
-    const frames = Array.from(
+    const candidates = Array.from(
       document.querySelectorAll<HTMLIFrameElement>("iframe.webview.ready"),
     )
       .filter((frame) => {
@@ -130,7 +151,32 @@ export function mountNativeSurface(
           return false;
         }
       })
+      .slice(0, 32);
+    const visibleFrames = candidates.filter((frame) => {
+      const container = frame.parentElement;
+      if (!container) return false;
+      const rect = container.getBoundingClientRect();
+      return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.right > 0 &&
+        rect.bottom > 0 &&
+        rect.left < view.innerWidth &&
+        rect.top < view.innerHeight
+      );
+    });
+    const frames = (visibleFrames.length ? visibleFrames : candidates)
+      .sort((left, right) => {
+        if (!visibleFrames.length) return 0;
+        return (
+          left.parentElement!.getBoundingClientRect().left -
+          right.parentElement!.getBoundingClientRect().left
+        );
+      })
       .slice(0, 8);
+    const windowIds = options.windowIds ?? [];
+    const mappedWindowIds =
+      frames.length === 2 && windowIds.length === 2 ? windowIds : [];
     for (const frame of managed) if (!frames.includes(frame)) restore(frame);
     document.documentElement.style.setProperty(
       "--kanban-native-columns",
@@ -157,9 +203,19 @@ export function mountNativeSurface(
       frame.style.setProperty("--kanban-native-column", String(index));
       if (onReady) {
         let tracker = content.get(frame);
+        const windowId = mappedWindowIds[index];
+        if (tracker && contentWindowIds.get(frame) !== windowId) {
+          tracker.dispose();
+          content.delete(frame);
+          contentWindowIds.delete(frame);
+          tracker = undefined;
+        }
         if (!tracker) {
-          tracker = observeNativeContent(frame, publishReady);
+          tracker = observeNativeContent(frame, publishReady, (state) => {
+            if (windowId) options.onThreadState?.(index, state);
+          });
           content.set(frame, tracker);
+          contentWindowIds.set(frame, windowId);
         }
         tracker.start();
       }

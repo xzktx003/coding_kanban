@@ -16,6 +16,10 @@ import { selectedAgentCard } from "@session/stores/useAgentCenterStore";
 import { useSessionName } from "@session/stores/useSessionNameStore";
 import { useCodexStore } from "@session/components/codex/stores";
 import { shouldAutoFocusComposer } from "../codex/composer/composerFocus";
+import {
+  matchesNativeCodexTarget,
+  useNativeCodexTargetStore,
+} from "../../../codex-mode/native-codex-target";
 
 const focusCCInput = () =>
   window.dispatchEvent(new Event("cc-input-focus-request"));
@@ -45,6 +49,14 @@ export function AgentComposer() {
     return thread?.name || thread?.preview;
   });
   const currentThreadId = useCodexStore((s) => s.currentThreadId);
+  const nativeTarget = useNativeCodexTargetStore((s) => s.target);
+  const nativeTargetColumn = matchesNativeCodexTarget(
+    nativeTarget,
+    currentThreadId,
+    project.path,
+  )
+    ? nativeTarget.column
+    : null;
   const subagentRoot =
     card?.kind === "codex"
       ? card.id
@@ -99,7 +111,13 @@ export function AgentComposer() {
         <span className="session-target-project">{project.label}</span>
       </strong>
       <span className="session-target-agent">
-        {acpActive ? acpTitle : effectiveAgent === "cc" ? "Claude" : "Codex"}
+        {acpActive
+          ? acpTitle
+          : effectiveAgent === "cc"
+            ? "Claude"
+            : nativeTargetColumn
+              ? `Codex 窗口 ${nativeTargetColumn}`
+              : "Codex"}
       </span>
     </div>
   );

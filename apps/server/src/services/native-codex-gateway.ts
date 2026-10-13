@@ -2,21 +2,44 @@ import { constants } from "node:fs";
 import { lstat, open, readdir } from "node:fs/promises";
 import { request } from "node:http";
 import { isAbsolute, join, parse, resolve } from "node:path";
+import {
+  composeContextText,
+  validNativeInputMention,
+} from "@agent-orchestrator/shared";
 
 const MAX_RECORD_BYTES = 64 * 1024;
 const MAX_MANIFEST_BYTES = 1024 * 1024;
+const MAX_BROKER_AUTH_BYTES = 4096;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const MAX_SEND_BODY_BYTES = 1024 * 1024;
 export interface NativeCodexStatus {
   available: boolean;
+  resumeAvailable: boolean;
+  sendAvailable: boolean;
   reason?: string;
   iframeUrl?: string;
   extensionVersion?: string;
   fixtures?: Array<{ id: string; label: string }>;
+  newChatWindowIds?: string[];
+}
+export interface NativeCodexSendRequest {
+  threadId: string;
+  column: number;
+  cwd: string;
+  submissionId: string;
+  text: string;
+  images: string[];
+  contexts: Array<Record<string, unknown>>;
+  mentions: Array<{ name: string; path: string }>;
 }
 export interface NativeCodexRuntime {
   upstream: URL;
   projectDir: string;
   extensionVersion?: string;
   fixtures: Array<{ id: string; label: string }>;
+  newChatWindowIds?: string[];
+  brokerPort?: number;
+  brokerAuthFile?: string;
 }
 export interface NativeCodexConfiguration {
   upstreamUrl?: string;
@@ -161,6 +184,189 @@ function fixtures(value: unknown): NativeCodexRuntime["fixtures"] {
   return result;
 }
 
+function newChatWindowIds(
+  record: Record<string, unknown>,
+): string[] | undefined {
+  const value = record.newChatWindowIds;
+  if (
+    record.panelMode !== "new-chats" ||
+    !Array.isArray(value) ||
+    value.length !== 2 ||
+    value.some((id) => typeof id !== "string" || !UUID.test(id)) ||
+    new Set(value).size !== 2
+  )
+    return undefined;
+  return value.slice() as string[];
+}
+
+export function validateNativeCodexWindowRestore(
+  value: unknown,
+  allowedWindowIds: readonly string[],
+): { windowId: string; threadId: string; column: number } {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !== "column,threadId,windowId"
+  )
+    throw new Error("invalid native Codex restore request");
+  const input = value as Record<string, unknown>;
+  if (
+    typeof input.windowId !== "string" ||
+    !UUID.test(input.windowId) ||
+    !allowedWindowIds.includes(input.windowId) ||
+    typeof input.threadId !== "string" ||
+    !UUID.test(input.threadId) ||
+    !Number.isInteger(input.column) ||
+    (input.column as number) < 1 ||
+    (input.column as number) > 2 ||
+    allowedWindowIds[(input.column as number) - 1] !== input.windowId
+  )
+    throw new Error("native Codex restore target is not allowlisted");
+  return {
+    windowId: input.windowId,
+    threadId: input.threadId,
+    column: input.column as number,
+  };
+}
+
+export function validateNativeCodexResume(value: unknown): {
+  threadId: string;
+  column: number;
+} {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !== "column,threadId"
+  )
+    throw new Error("invalid native Codex resume request");
+  const input = value as Record<string, unknown>;
+  if (
+    typeof input.threadId !== "string" ||
+    !UUID.test(input.threadId) ||
+    !Number.isInteger(input.column) ||
+    (input.column as number) < 1 ||
+    (input.column as number) > 3
+  )
+    throw new Error("native Codex resume target is invalid");
+  return { threadId: input.threadId, column: input.column as number };
+}
+
+function nativeSendRequest(value: unknown): NativeCodexSendRequest {
+  const invalid = (): never => {
+    throw new Error("invalid native Codex send request");
+  };
+  if (!value || typeof value !== "object" || Array.isArray(value)) invalid();
+  const input = value as Record<string, unknown>;
+  if (
+    Object.keys(input).sort().join(",") !==
+      "column,contexts,cwd,images,mentions,submissionId,text,threadId" ||
+    typeof input.threadId !== "string" ||
+    !UUID.test(input.threadId) ||
+    typeof input.submissionId !== "string" ||
+    !UUID.test(input.submissionId) ||
+    !Number.isInteger(input.column) ||
+    Number(input.column) < 1 ||
+    Number(input.column) > 3 ||
+    typeof input.cwd !== "string" ||
+    !isAbsolute(input.cwd) ||
+    input.cwd.length > 4096 ||
+    /[\x00-\x1f\x7f]/.test(input.cwd) ||
+    typeof input.text !== "string" ||
+    input.text.length > 200_000 ||
+    input.text.includes("\0") ||
+    !Array.isArray(input.images) ||
+    input.images.length > 8 ||
+    input.images.some(
+      (path) =>
+        typeof path !== "string" ||
+        !isAbsolute(path) ||
+        path.length > 4096 ||
+        /[\x00-\x1f\x7f]/.test(path),
+    ) ||
+    !Array.isArray(input.contexts) ||
+    input.contexts.length > 32 ||
+    !Array.isArray(input.mentions) ||
+    input.mentions.length > 32 ||
+    input.mentions.some((mention) => !validNativeInputMention(mention))
+  )
+    invalid();
+  const contexts = input.contexts as Array<Record<string, unknown>>;
+  const seen = new Set<string>();
+  for (const context of contexts) {
+    if (
+      !context ||
+      typeof context !== "object" ||
+      Array.isArray(context) ||
+      Object.keys(context).some(
+        (key) =>
+          ![
+            "id",
+            "kind",
+            "name",
+            "text",
+            "path",
+            "range",
+            "sourceThreadId",
+            "sourceItemId",
+          ].includes(key),
+      ) ||
+      typeof context.id !== "string" ||
+      !context.id ||
+      context.id.length > 160 ||
+      /[\x00-\x1f\x7f]/.test(context.id) ||
+      seen.has(context.id) ||
+      !["paste", "quote", "file"].includes(String(context.kind)) ||
+      typeof context.name !== "string" ||
+      context.name.length > 512 ||
+      /[\x00-\x1f\x7f]/.test(context.name) ||
+      typeof context.text !== "string" ||
+      context.text.length > 200_000 ||
+      context.text.includes("\0") ||
+      (context.path !== undefined &&
+        (typeof context.path !== "string" ||
+          !isAbsolute(context.path) ||
+          context.path.length > 4096 ||
+          /[\x00-\x1f\x7f]/.test(context.path)))
+    )
+      invalid();
+    seen.add(context.id as string);
+    for (const field of ["sourceThreadId", "sourceItemId"])
+      if (
+        context[field] !== undefined &&
+        (typeof context[field] !== "string" ||
+          !context[field] ||
+          context[field].length > 160 ||
+          /[\x00-\x1f\x7f]/.test(context[field] as string))
+      )
+        invalid();
+    if (context.range !== undefined) {
+      const range = context.range as Record<string, unknown>;
+      if (
+        !range ||
+        typeof range !== "object" ||
+        Array.isArray(range) ||
+        Object.keys(range).sort().join(",") !== "end,start" ||
+        !Number.isSafeInteger(range.start) ||
+        !Number.isSafeInteger(range.end) ||
+        Number(range.start) < 1 ||
+        Number(range.end) < Number(range.start)
+      )
+        invalid();
+    }
+  }
+  const images = input.images as string[];
+  const mentions = input.mentions as Array<{ name: string; path: string }>;
+  const text = composeContextText(input.text as string, contexts as never);
+  if (
+    text.length > 200_000 ||
+    (!text.trim() && images.length === 0 && mentions.length === 0)
+  )
+    invalid();
+  return structuredClone(input) as unknown as NativeCodexSendRequest;
+}
+
 async function probe(upstream: URL): Promise<boolean> {
   return new Promise((resolveProbe) => {
     const req = request(
@@ -214,11 +420,30 @@ export class NativeCodexGateway {
       const extensionVersion =
         version(record.extensionVersion) ??
         (await installedVersion(record.extensionsDir));
+      const windows = newChatWindowIds(record);
+      const brokerPort =
+        Number.isInteger(record.brokerPort) &&
+        (record.brokerPort as number) >= 1024 &&
+        (record.brokerPort as number) <= 65535 &&
+        record.brokerPort !== record.port
+          ? (record.brokerPort as number)
+          : undefined;
+      const brokerAuthFile =
+        typeof record.brokerAuthFile === "string" &&
+        record.brokerAuthFile.length <= 4096 &&
+        isAbsolute(record.brokerAuthFile) &&
+        resolve(record.brokerAuthFile) === record.brokerAuthFile &&
+        !/[\u0000-\u001f\u007f]/.test(record.brokerAuthFile)
+          ? record.brokerAuthFile
+          : undefined;
       return {
         upstream,
         projectDir,
         fixtures: fixtures(record.threads),
         ...(extensionVersion ? { extensionVersion } : {}),
+        ...(windows ? { newChatWindowIds: windows } : {}),
+        ...(brokerPort ? { brokerPort } : {}),
+        ...(brokerAuthFile ? { brokerAuthFile } : {}),
       };
     } catch {
       return null;
@@ -230,17 +455,320 @@ export class NativeCodexGateway {
     if (!runtime)
       return {
         available: false,
+        resumeAvailable: false,
+        sendAvailable: false,
         reason: "Codex 宿主暂未配置。",
       };
     if (!(await probe(runtime.upstream)))
-      return { available: false, reason: "Codex 宿主暂不可用。" };
+      return {
+        available: false,
+        resumeAvailable: false,
+        sendAvailable: false,
+        reason: "Codex 宿主暂不可用。",
+      };
+    const capabilities = await this.companionCapabilities(runtime);
     return {
       available: true,
+      resumeAvailable: capabilities.resumeAvailable,
+      sendAvailable: capabilities.sendAvailable,
       iframeUrl: `/native-codex/?folder=${encodeURIComponent(runtime.projectDir)}`,
       ...(runtime.extensionVersion
         ? { extensionVersion: runtime.extensionVersion }
         : {}),
       fixtures: runtime.fixtures,
+      ...(runtime.newChatWindowIds
+        ? { newChatWindowIds: runtime.newChatWindowIds }
+        : {}),
     };
+  }
+
+  private async companionCapabilities(
+    runtime: NativeCodexRuntime,
+  ): Promise<{ resumeAvailable: boolean; sendAvailable: boolean }> {
+    if (!runtime.brokerPort || !runtime.brokerAuthFile)
+      return { resumeAvailable: false, sendAvailable: false };
+    try {
+      const auth = await readBoundedJson(
+        runtime.brokerAuthFile,
+        MAX_BROKER_AUTH_BYTES,
+        true,
+      );
+      if (
+        auth.port !== runtime.brokerPort ||
+        typeof auth.token !== "string" ||
+        !/^[0-9a-f]{64}$/.test(auth.token)
+      )
+        return { resumeAvailable: false, sendAvailable: false };
+      return await new Promise<{
+        resumeAvailable: boolean;
+        sendAvailable: boolean;
+      }>((resolveReady) => {
+        let settled = false;
+        const finish = (capabilities: {
+          resumeAvailable: boolean;
+          sendAvailable: boolean;
+        }) => {
+          if (settled) return;
+          settled = true;
+          resolveReady(capabilities);
+        };
+        const outbound = request(
+          {
+            hostname: "127.0.0.1",
+            port: runtime.brokerPort,
+            path: "/status",
+            method: "GET",
+            timeout: 1500,
+            headers: { authorization: `Bearer ${auth.token}` },
+          },
+          (response) => {
+            let responseBody = "";
+            let size = 0;
+            response.on("data", (chunk: Buffer) => {
+              size += chunk.length;
+              if (size <= MAX_BROKER_AUTH_BYTES)
+                responseBody += chunk.toString("utf8");
+              else response.destroy();
+            });
+            response.on("end", () => {
+              if (response.statusCode !== 200 || size > MAX_BROKER_AUTH_BYTES) {
+                finish({ resumeAvailable: false, sendAvailable: false });
+                return;
+              }
+              try {
+                const status: unknown = JSON.parse(responseBody);
+                const value = status as {
+                  companionActive?: unknown;
+                  officialActive?: unknown;
+                  sendAvailable?: unknown;
+                  broker?: { enabled?: unknown };
+                };
+                const ready =
+                  value?.companionActive === true &&
+                  value.officialActive === true &&
+                  value.broker?.enabled === true;
+                finish({
+                  resumeAvailable: ready,
+                  sendAvailable: ready && value.sendAvailable === true,
+                });
+              } catch {
+                finish({ resumeAvailable: false, sendAvailable: false });
+              }
+            });
+            response.on("error", () =>
+              finish({ resumeAvailable: false, sendAvailable: false }),
+            );
+          },
+        );
+        outbound.on("timeout", () => outbound.destroy());
+        outbound.on("error", () =>
+          finish({ resumeAvailable: false, sendAvailable: false }),
+        );
+        outbound.end();
+      });
+    } catch {
+      return { resumeAvailable: false, sendAvailable: false };
+    }
+  }
+
+  async restoreNewChatThread(value: unknown): Promise<number> {
+    const runtime = await this.runtime();
+    if (
+      !runtime?.newChatWindowIds ||
+      !runtime.brokerPort ||
+      !runtime.brokerAuthFile
+    )
+      return 503;
+    let body: ReturnType<typeof validateNativeCodexWindowRestore>;
+    try {
+      body = validateNativeCodexWindowRestore(value, runtime.newChatWindowIds);
+    } catch {
+      return 400;
+    }
+    return this.callBroker(runtime, "/restore", body, "restored");
+  }
+
+  async resumeThreadInNativeWindow(value: unknown): Promise<number> {
+    const runtime = await this.runtime();
+    if (!runtime?.brokerPort || !runtime.brokerAuthFile) return 503;
+    let body: ReturnType<typeof validateNativeCodexResume>;
+    try {
+      body = validateNativeCodexResume(value);
+    } catch {
+      return 400;
+    }
+    return this.callBroker(runtime, "/resume", body, "opened");
+  }
+
+  async sendToNativeThread(
+    value: unknown,
+  ): Promise<{ status: number; turnId?: string }> {
+    const runtime = await this.runtime();
+    if (!runtime?.brokerPort || !runtime.brokerAuthFile) return { status: 503 };
+    let body: NativeCodexSendRequest;
+    try {
+      body = nativeSendRequest(value);
+    } catch {
+      return { status: 400 };
+    }
+    const payload = JSON.stringify(body);
+    if (Buffer.byteLength(payload) > MAX_SEND_BODY_BYTES)
+      return { status: 413 };
+    return this.callSendBroker(runtime, payload);
+  }
+
+  private async callSendBroker(
+    runtime: NativeCodexRuntime,
+    payload: string,
+  ): Promise<{ status: number; turnId?: string }> {
+    try {
+      const auth = await readBoundedJson(
+        runtime.brokerAuthFile!,
+        MAX_BROKER_AUTH_BYTES,
+        true,
+      );
+      if (
+        auth.port !== runtime.brokerPort ||
+        typeof auth.token !== "string" ||
+        !/^[0-9a-f]{64}$/.test(auth.token)
+      )
+        return { status: 503 };
+      return await new Promise((resolveResult) => {
+        const outbound = request(
+          {
+            hostname: "127.0.0.1",
+            port: runtime.brokerPort,
+            path: "/send",
+            method: "POST",
+            timeout: 25_000,
+            headers: {
+              authorization: `Bearer ${auth.token}`,
+              "content-type": "application/json",
+              "content-length": Buffer.byteLength(payload),
+            },
+          },
+          (response) => {
+            let responseBody = "";
+            let size = 0;
+            response.on("data", (chunk: Buffer) => {
+              size += chunk.length;
+              if (size <= MAX_BROKER_AUTH_BYTES)
+                responseBody += chunk.toString("utf8");
+              else response.destroy();
+            });
+            response.on("end", () => {
+              if (size > MAX_BROKER_AUTH_BYTES) {
+                resolveResult({ status: 502 });
+                return;
+              }
+              if (response.statusCode !== 200) {
+                resolveResult({
+                  status:
+                    response.statusCode === 400 || response.statusCode === 409
+                      ? response.statusCode
+                      : response.statusCode === 413
+                        ? 413
+                        : 503,
+                });
+                return;
+              }
+              try {
+                const result: unknown = JSON.parse(responseBody);
+                const turnId = (result as { turnId?: unknown })?.turnId;
+                resolveResult(
+                  result &&
+                    typeof result === "object" &&
+                    (result as { accepted?: unknown }).accepted === true &&
+                    typeof turnId === "string" &&
+                    UUID.test(turnId)
+                    ? { status: 202, turnId }
+                    : { status: 502 },
+                );
+              } catch {
+                resolveResult({ status: 502 });
+              }
+            });
+            response.on("error", () => resolveResult({ status: 502 }));
+          },
+        );
+        outbound.on("timeout", () => outbound.destroy());
+        outbound.on("error", () => resolveResult({ status: 503 }));
+        outbound.end(payload);
+      });
+    } catch {
+      return { status: 503 };
+    }
+  }
+
+  private async callBroker(
+    runtime: NativeCodexRuntime,
+    path: "/restore" | "/resume",
+    body: object,
+    successField: "restored" | "opened",
+  ): Promise<number> {
+    try {
+      const auth = await readBoundedJson(
+        runtime.brokerAuthFile!,
+        MAX_BROKER_AUTH_BYTES,
+        true,
+      );
+      if (
+        auth.port !== runtime.brokerPort ||
+        typeof auth.token !== "string" ||
+        !/^[0-9a-f]{64}$/.test(auth.token)
+      )
+        return 503;
+      const payload = JSON.stringify(body);
+      return await new Promise<number>((resolveStatus) => {
+        const outbound = request(
+          {
+            hostname: "127.0.0.1",
+            port: runtime.brokerPort,
+            path,
+            method: "POST",
+            timeout: 25_000,
+            headers: {
+              authorization: `Bearer ${auth.token}`,
+              "content-type": "application/json",
+              "content-length": Buffer.byteLength(payload),
+            },
+          },
+          (response) => {
+            let responseBody = "";
+            let size = 0;
+            response.on("data", (chunk: Buffer) => {
+              size += chunk.length;
+              if (size <= MAX_BROKER_AUTH_BYTES)
+                responseBody += chunk.toString("utf8");
+              else response.destroy();
+            });
+            response.on("end", () => {
+              if (response.statusCode !== 200 || size > MAX_BROKER_AUTH_BYTES) {
+                resolveStatus(response.statusCode === 400 ? 409 : 503);
+                return;
+              }
+              try {
+                const result: unknown = JSON.parse(responseBody);
+                resolveStatus(
+                  result &&
+                    typeof result === "object" &&
+                    (result as Record<string, unknown>)[successField] === true
+                    ? 202
+                    : 503,
+                );
+              } catch {
+                resolveStatus(503);
+              }
+            });
+            response.on("error", () => resolveStatus(503));
+          },
+        );
+        outbound.on("timeout", () => outbound.destroy());
+        outbound.on("error", () => resolveStatus(503));
+        outbound.end(payload);
+      });
+    } catch {
+      return 503;
+    }
   }
 }

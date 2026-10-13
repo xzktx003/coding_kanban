@@ -72,11 +72,18 @@ export function resolveWebDevConfig(
 }
 
 /** Vite string targets imply changeOrigin:true, breaking exact browser Origin/Host checks. */
-export function resolveWebDevProxies(config: Pick<WebDevConfig, "apiTarget" | "wsTarget">) {
+export function resolveWebDevProxies(
+  config: Pick<WebDevConfig, "apiTarget" | "wsTarget">,
+) {
   return {
-    "/api": { target: config.apiTarget, changeOrigin: false },
+    "/api": { target: config.apiTarget, changeOrigin: false, xfwd: true },
     "/vscode": { target: config.apiTarget, changeOrigin: false, ws: true },
-    "/native-codex": { target: config.apiTarget, changeOrigin: false, xfwd: true, ws: true },
+    "/native-codex": {
+      target: config.apiTarget,
+      changeOrigin: false,
+      xfwd: true,
+      ws: true,
+    },
     "/ws": { target: config.wsTarget, changeOrigin: false, ws: true },
   };
 }
