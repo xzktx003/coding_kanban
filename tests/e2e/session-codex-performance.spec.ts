@@ -258,7 +258,10 @@ test("long Codex history stays bounded, scrollable and isolated from background 
       surface.locator("[data-codex-row]").first().getAttribute("data-index"),
     )
     .toBe(anchor);
-  await page.getByRole("switch", { name: "工作模式", exact: true }).click();
+  await page
+    .getByRole("group", { name: "工作模式", exact: true })
+    .getByRole("button", { name: "终端", exact: true })
+    .click();
   await page.getByRole("button", { name: "会话", exact: true }).click();
   await expect
     .poll(() =>

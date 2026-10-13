@@ -55,9 +55,9 @@ export function WorkbenchShell() {
     const focusSwitch = () => {
       const selector =
         mode === "terminal"
-          ? ".workbench-header .mode-switch-rail"
+          ? '.workbench-terminal:not([hidden]) .mode-switch-label[data-choice="terminal"]'
           : mode === "session"
-            ? ".session-mode:not([hidden]) .mode-switch-rail"
+            ? '.session-mode:not([hidden]) .mode-switch-label[data-choice="session"]'
             : ".codex-mode:not([hidden]) .mode-switch-codex";
       const target = document.querySelector<HTMLButtonElement>(selector);
       if (!target) return false;

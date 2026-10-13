@@ -110,7 +110,9 @@ it("retains all three visited workbenches, isolates hidden surfaces and restores
   fireEvent.click(toSession);
   const session = await screen.findByTestId("session-app");
   await waitFor(() =>
-    expect(document.activeElement).toBe(within(session).getByRole("switch")),
+    expect(document.activeElement).toBe(
+      within(session).getByRole("button", { name: "会话" }),
+    ),
   );
   fireEvent.change(within(session).getByRole("textbox"), {
     target: { value: "保留会话输入" },
