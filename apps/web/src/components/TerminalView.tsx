@@ -48,6 +48,12 @@ import {
 } from "../lib/terminal-input-forwarding";
 import { isTerminalViewportMeasurable } from "../lib/terminal-resize";
 import {
+  createTerminalOutputBackpressureState,
+  releaseTerminalOutputCapacity,
+  reserveTerminalOutputCapacity,
+  resetTerminalOutputCapacity,
+} from "../lib/terminal-output-backpressure";
+import {
   isTerminalProtocolResponsePayload,
   stripTerminalResponsePayload,
 } from "../lib/terminal-input";
@@ -126,6 +132,7 @@ const PASSIVE_FOCUS_REPAIR_INTERVAL_MS = 500;
 const TERMINAL_CONNECT_TIMEOUT_MS = 3_000;
 const MOBILE_TERMINAL_REPLAY_BYTES = 256 * 1024;
 const TERMINAL_REPLAY_WRITE_BATCH_CHUNKS = 4;
+const TERMINAL_OUTPUT_BACKPRESSURE_REBUILD_DELAY_MS = 750;
 const MOBILE_TOUCH_LISTENER_OPTIONS = {
   capture: true,
   passive: false,
@@ -171,6 +178,7 @@ export const TerminalView = memo(function TerminalView({
   const userScrollLockedRef = useRef(false);
   const followExternalInputRef = useRef(false);
   const retryConnectionRef = useRef<(() => void) | null>(null);
+  const [terminalRenderGeneration, setTerminalRenderGeneration] = useState(0);
   const [connectionPhase, setConnectionPhase] =
     useState<TerminalConnectionPhase>("connecting");
 
@@ -808,6 +816,15 @@ export const TerminalView = memo(function TerminalView({
       viewportYBeforeWrite: number;
     }> = [];
     let terminalWriteActive = false;
+    let recoverTerminalOutputBackpressure = () => {};
+    let terminalOutputBackpressureExceeded = false;
+    let terminalOutputRebuildTimerId: number | null = null;
+    const terminalOutputBackpressureState =
+      createTerminalOutputBackpressureState();
+
+    const releaseTerminalWrite = (chunk: string) => {
+      releaseTerminalOutputCapacity(terminalOutputBackpressureState, chunk);
+    };
 
     const drainTerminalWriteQueue = () => {
       if (disposed || terminalWriteActive) {
@@ -831,6 +848,10 @@ export const TerminalView = memo(function TerminalView({
       let remainingCallbacks = batch.length;
       for (const next of batch) {
         term.write(next.chunk, () => {
+          releaseTerminalWrite(next.chunk);
+          if (terminalOutputBackpressureExceeded) {
+            return;
+          }
           if (next.blocksInitialReady) {
             pendingInitialReplayWrites = Math.max(
               0,
@@ -870,6 +891,10 @@ export const TerminalView = memo(function TerminalView({
     };
 
     const writeTerminalOutput = (data: string, blocksInitialReady = false) => {
+      if (terminalOutputBackpressureExceeded) {
+        return;
+      }
+
       const preserveViewport =
         userScrollLockedRef.current &&
         term.buffer.active.viewportY < term.buffer.active.baseY;
@@ -880,6 +905,18 @@ export const TerminalView = memo(function TerminalView({
         : [data];
       if (blocksInitialReady) {
         pendingInitialReplayWrites += chunks.length;
+      }
+      if (
+        !reserveTerminalOutputCapacity(terminalOutputBackpressureState, chunks)
+      ) {
+        terminalOutputBackpressureExceeded = true;
+        terminalWriteQueue.length = 0;
+        terminalWriteActive = false;
+        pendingInitialReplayWrites = 0;
+        resetTerminalOutputCapacity(terminalOutputBackpressureState);
+        recoverTerminalOutputBackpressure();
+        reportInitialReadyIfSettled();
+        return;
       }
       for (const chunk of chunks) {
         terminalWriteQueue.push({
@@ -1138,23 +1175,17 @@ export const TerminalView = memo(function TerminalView({
         }
       });
 
-      scheduleTrackedTimeout(
-        () => {
-          if (!disposed) {
-            focusInteractiveTerminal(unlockInput);
-          }
-        },
-        0,
-      );
+      scheduleTrackedTimeout(() => {
+        if (!disposed) {
+          focusInteractiveTerminal(unlockInput);
+        }
+      }, 0);
 
-      scheduleTrackedTimeout(
-        () => {
-          if (!disposed) {
-            focusInteractiveTerminal(unlockInput);
-          }
-        },
-        32,
-      );
+      scheduleTrackedTimeout(() => {
+        if (!disposed) {
+          focusInteractiveTerminal(unlockInput);
+        }
+      }, 32);
     };
 
     const wsUrl = buildTerminalWebSocketUrl(agentSessionId, {
@@ -1276,15 +1307,12 @@ export const TerminalView = memo(function TerminalView({
         return;
       }
 
-      terminalFocusReportTimerId = scheduleTrackedTimeout(
-        () => {
-          terminalFocusReportTimerId = null;
-          if (!disposed) {
-            syncTerminalFocusReport();
-          }
-        },
-        0,
-      );
+      terminalFocusReportTimerId = scheduleTrackedTimeout(() => {
+        terminalFocusReportTimerId = null;
+        if (!disposed) {
+          syncTerminalFocusReport();
+        }
+      }, 0);
     };
 
     const reportFocusedTerminalBeforeInput = () => {
@@ -1359,6 +1387,9 @@ export const TerminalView = memo(function TerminalView({
     let connectTerminalTransport = () => {};
 
     const markTerminalDisconnected = () => {
+      if (terminalOutputBackpressureExceeded) {
+        return;
+      }
       setConnectionPhase("reconnecting");
       clearReplaySafetyTimer();
       replayComplete = false;
@@ -1379,7 +1410,11 @@ export const TerminalView = memo(function TerminalView({
     };
 
     const scheduleTerminalReconnect = () => {
-      if (disposed || reconnectTimerId !== null) {
+      if (
+        disposed ||
+        terminalOutputBackpressureExceeded ||
+        reconnectTimerId !== null
+      ) {
         return;
       }
 
@@ -1402,7 +1437,7 @@ export const TerminalView = memo(function TerminalView({
     };
 
     const connectTerminalHttpStream = () => {
-      if (disposed) {
+      if (disposed || terminalOutputBackpressureExceeded) {
         return;
       }
 
@@ -1452,7 +1487,7 @@ export const TerminalView = memo(function TerminalView({
     };
 
     const connectTerminalWebSocket = () => {
-      if (disposed) {
+      if (disposed || terminalOutputBackpressureExceeded) {
         return;
       }
 
@@ -1521,6 +1556,9 @@ export const TerminalView = memo(function TerminalView({
     };
 
     connectTerminalTransport = () => {
+      if (terminalOutputBackpressureExceeded) {
+        return;
+      }
       if (transport === "http-stream") {
         connectTerminalHttpStream();
       } else {
@@ -1528,8 +1566,52 @@ export const TerminalView = memo(function TerminalView({
       }
     };
 
+    recoverTerminalOutputBackpressure = () => {
+      if (disposed || terminalOutputRebuildTimerId !== null) {
+        return;
+      }
+
+      setConnectionPhase("reconnecting");
+      clearReplaySafetyTimer();
+      clearTerminalConnectionTimeout();
+      if (reconnectTimerId !== null) {
+        window.clearTimeout(reconnectTimerId);
+        reconnectTimerId = null;
+      }
+      term.options.disableStdin = true;
+
+      const staleHttpStream = httpStreamAbortController;
+      httpStreamAbortController = null;
+      httpStreamOpen = false;
+      staleHttpStream?.abort();
+
+      const staleSocket = ws;
+      ws = null;
+      if (staleSocket) {
+        staleSocket.onopen = null;
+        staleSocket.onmessage = null;
+        staleSocket.onclose = null;
+        activeTerminalSocketTracker?.markClosed();
+        activeTerminalSocketTracker = null;
+        if (
+          staleSocket.readyState === WebSocket.CONNECTING ||
+          staleSocket.readyState === WebSocket.OPEN
+        ) {
+          staleSocket.close(4000, "terminal output backpressure");
+        }
+      }
+
+      terminalInputReadyRef.current = false;
+      terminalOutputRebuildTimerId = scheduleTrackedTimeout(() => {
+        terminalOutputRebuildTimerId = null;
+        if (!disposed) {
+          setTerminalRenderGeneration((generation) => generation + 1);
+        }
+      }, TERMINAL_OUTPUT_BACKPRESSURE_REBUILD_DELAY_MS);
+    };
+
     retryConnectionRef.current = () => {
-      if (disposed) {
+      if (disposed || terminalOutputBackpressureExceeded) {
         return;
       }
 
@@ -1806,6 +1888,10 @@ export const TerminalView = memo(function TerminalView({
     };
 
     const handleTerminalFrame = (payload: string) => {
+      if (terminalOutputBackpressureExceeded) {
+        return;
+      }
+
       recordTerminalFrame(payload);
 
       try {
@@ -1846,6 +1932,10 @@ export const TerminalView = memo(function TerminalView({
       data: string,
       recordForSafariRecovery: boolean,
     ): boolean => {
+      if (terminalOutputBackpressureExceeded) {
+        return false;
+      }
+
       const sanitized = stripTerminalResponsePayload(data);
       if (
         !terminalInputReadyRef.current &&
@@ -1968,6 +2058,10 @@ export const TerminalView = memo(function TerminalView({
     }
 
     term.onBinary((data) => {
+      if (terminalOutputBackpressureExceeded) {
+        return;
+      }
+
       const sanitized = stripTerminalResponsePayload(data);
       if (
         !terminalInputReadyRef.current &&
@@ -2155,10 +2249,8 @@ export const TerminalView = memo(function TerminalView({
               return;
             }
 
-            scheduleFocusInteractiveTerminal();
-          },
-          0,
-        );
+          scheduleFocusInteractiveTerminal();
+        }, 0);
       };
 
       handleWindowFocus = () => {
@@ -2177,14 +2269,11 @@ export const TerminalView = memo(function TerminalView({
 
         rememberActiveExternalFocusIfUserDriven();
 
-        scheduleTrackedTimeout(
-          () => {
-            if (!disposed) {
-              rememberActiveExternalFocusIfUserDriven();
-            }
-          },
-          0,
-        );
+        scheduleTrackedTimeout(() => {
+          if (!disposed) {
+            rememberActiveExternalFocusIfUserDriven();
+          }
+        }, 0);
       };
 
       handleDocumentPointerDownCapture = (event) => {
@@ -2493,6 +2582,7 @@ export const TerminalView = memo(function TerminalView({
       retryConnectionRef.current = null;
 
       terminalWriteQueue.length = 0;
+      resetTerminalOutputCapacity(terminalOutputBackpressureState);
       term.dispose();
       delete container.__xterm;
       termRef.current = null;
@@ -2508,6 +2598,7 @@ export const TerminalView = memo(function TerminalView({
     preferLocalMouseSelection,
     restoreBracketedPasteMode,
     suspended,
+    terminalRenderGeneration,
     wheelPassthrough,
   ]);
 

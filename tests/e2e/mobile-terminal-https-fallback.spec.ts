@@ -35,9 +35,7 @@ test("mobile terminal falls back to the same HTTPS origin when WSS never opens",
 
     const streamResponse = page.waitForResponse(
       (response) =>
-        response
-          .url()
-          .includes(`/api/agent-sessions/${sessionId}/terminal-stream`) &&
+        response.url().endsWith("/api/terminal-stream") &&
         response.status() === 200,
       { timeout: 10_000 },
     );

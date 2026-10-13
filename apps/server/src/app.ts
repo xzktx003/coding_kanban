@@ -34,6 +34,7 @@ import { registerFeishuNotificationSettingsRoutes } from "./routes/feishu-notifi
 import { registerSshHostsRoutes } from "./routes/ssh-hosts.js";
 import { registerVsCodeWebProxyRoutes } from "./routes/vscode-web-proxy.js";
 import { registerNativeCodexRoutes } from "./routes/native-codex.js";
+import { registerTerminalHttpMultiplexerRoutes } from "./routes/terminal-http-multiplexer.js";
 import { AgentSessionRegistry } from "./services/agent-session-registry.js";
 import {
   resolveActiveCodexSessionId,
@@ -86,6 +87,9 @@ import {
   restoreManagedSessions,
 } from "./services/managed-session-restorer.js";
 import { PtyRuntimeManager } from "./services/pty-runtime-manager.js";
+import { TerminalHttpMultiplexer } from "./services/terminal-http-multiplexer.js";
+import { subscribeTerminalOutput } from "./services/terminal-output-subscription.js";
+import { createBoundedTerminalWebSocketSender } from "./services/terminal-websocket-backpressure.js";
 import {
   RemoteLaunchPreflight,
   type RemoteLaunchPreflightLike,
@@ -97,13 +101,9 @@ import {
   isTerminalFocusPayload,
   isTerminalMouseMotionPayload,
   isTerminalPtyControlPayload,
-  sanitizeReplayForTerminal,
   stripTerminalResponsePayload,
 } from "./services/terminal-control-filter.js";
-import {
-  resolveTerminalReplayByteLimit,
-  takeUtf8Tail,
-} from "./services/terminal-replay-window.js";
+import { resolveTerminalReplayByteLimit } from "./services/terminal-replay-window.js";
 import { VsCodeWebManager } from "./services/vscode-web-manager.js";
 
 interface BuildServerOptions {
@@ -144,83 +144,6 @@ interface BuildServerOptions {
 
 interface LocalTmuxSocketInputStateDependencies {
   localTmuxInputRouter: Pick<LocalTmuxInputRouter, "clear">;
-}
-
-type TerminalOutputSender = (frame: string) => void;
-
-function buildTerminalControlFrame(
-  event: "replay" | "replay-complete",
-  data?: string,
-): string {
-  return JSON.stringify({
-    __agentOrchestrator: "terminal-control",
-    event,
-    data,
-  });
-}
-
-function subscribeTerminalOutput(
-  agentSessionId: string,
-  replayByteLimit: number,
-  dependencies: {
-    registry: AgentSessionRegistry;
-    ptyRuntimeManager: PtyRuntimeManager;
-  },
-  send: TerminalOutputSender,
-): (() => void) | null {
-  const { registry, ptyRuntimeManager } = dependencies;
-  let replaying = true;
-  const bufferedLiveFrames: string[] = [];
-  let unsubscribe = () => {};
-
-  if (ptyRuntimeManager.has(agentSessionId)) {
-    unsubscribe = ptyRuntimeManager.subscribe(
-      agentSessionId,
-      (data) => {
-        if (replaying) {
-          bufferedLiveFrames.push(data);
-          return;
-        }
-
-        send(data);
-      },
-      { replay: false },
-    );
-
-    const replay = takeUtf8Tail(
-      sanitizeReplayForTerminal(
-        ptyRuntimeManager.getScrollback(agentSessionId),
-      ),
-      replayByteLimit,
-    );
-    if (replay) {
-      send(buildTerminalControlFrame("replay", replay));
-    }
-  } else if (registry.has(agentSessionId)) {
-    const replay = takeUtf8Tail(
-      sanitizeReplayForTerminal(
-        registry
-          .getDetail(agentSessionId)
-          .outputEntries.map((entry) => entry.text)
-          .join(""),
-      ),
-      replayByteLimit,
-    );
-    if (replay) {
-      send(buildTerminalControlFrame("replay", replay));
-    }
-  } else {
-    return null;
-  }
-
-  send(buildTerminalControlFrame("replay-complete"));
-  replaying = false;
-  for (const frame of bufferedLiveFrames) {
-    send(frame);
-  }
-  bufferedLiveFrames.length = 0;
-
-  return unsubscribe;
 }
 
 export function createLocalTmuxSocketInputState(
@@ -282,6 +205,10 @@ export function buildServer(options: BuildServerOptions = {}): {
     maxScrollbackBytes: terminalHistoryConfig.terminalScrollbackBytes,
     tmuxCaptureLines: terminalHistoryConfig.terminalTmuxCaptureLines,
   });
+  const terminalHttpMultiplexer = new TerminalHttpMultiplexer(
+    { registry, ptyRuntimeManager },
+    { maxScrollbackBytes: terminalHistoryConfig.terminalScrollbackBytes },
+  );
   const localTmuxInputRouter = new LocalTmuxInputRouter({
     registry,
     tmuxAdapter,
@@ -725,6 +652,8 @@ export function buildServer(options: BuildServerOptions = {}): {
       return response;
     });
 
+    registerTerminalHttpMultiplexerRoutes(instance, terminalHttpMultiplexer);
+
     instance.get("/ws/agent-sessions", { websocket: true }, (socket) => {
       let previousSnapshot: ReturnType<AgentSessionRegistry["list"]> | null =
         null;
@@ -789,15 +718,19 @@ export function buildServer(options: BuildServerOptions = {}): {
           return;
         }
 
+        const line = `${JSON.stringify(frame)}\n`;
         // A slow or suspended browser reconnects from bounded replay instead
         // of letting one HTTP stream retain an unbounded output queue.
-        if (response.writableLength > 1024 * 1024) {
+        if (
+          response.writableLength + Buffer.byteLength(line) >
+          8 * 1024 * 1024
+        ) {
           response.destroy();
           close();
           return;
         }
 
-        response.write(`${JSON.stringify(frame)}\n`);
+        response.write(line);
       };
 
       const outputSubscription = subscribeTerminalOutput(
@@ -839,14 +772,20 @@ export function buildServer(options: BuildServerOptions = {}): {
           localTmuxInputRouter,
         });
 
+        const sendTerminalFrame = createBoundedTerminalWebSocketSender(socket);
+
         const unsubscribe = subscribeTerminalOutput(
           id,
           replayByteLimit,
           { registry, ptyRuntimeManager },
-          (frame) => socket.send(frame),
+          sendTerminalFrame,
         );
         if (!unsubscribe) {
           socket.close(4004, "没有找到 PTY 会话");
+          return;
+        }
+        if (sendTerminalFrame.isClosed()) {
+          unsubscribe();
           return;
         }
         const terminalConnectionId = randomUUID();
@@ -950,6 +889,7 @@ export function buildServer(options: BuildServerOptions = {}): {
   // Release attached clients before HTTP/WebSocket draining can delay shutdown.
   // This closes owned PTYs only; tmux panes and their Agents keep running.
   app.addHook("preClose", async () => {
+    terminalHttpMultiplexer.closeAllStreams();
     ptyRuntimeManager.dispose();
   });
   app.addHook("onClose", () => {
