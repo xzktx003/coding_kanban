@@ -27,7 +27,7 @@ beforeEach(() => {
 test("tool selectors expose names and selection even with hidden labels", () => {
   render(<RightPanelHeader />);
   expect(
-    screen.getByRole("button", { name: "变更" }).getAttribute("aria-pressed"),
+    screen.getByRole("button", { name: "查看变更" }).getAttribute("aria-pressed"),
   ).toBe("true");
   const terminal = screen.getByRole("button", { name: "终端" });
   fireEvent.click(terminal);
@@ -53,7 +53,7 @@ test("all closed tools remain discoverable with localized empty state", () => {
 
 test("closing the focused tool returns focus to the active tool", async () => {
   render(<RightPanelHeader />);
-  const close = screen.getByRole("button", { name: "关闭变更面板" });
+  const close = screen.getByRole("button", { name: "关闭查看变更面板" });
   close.focus();
   fireEvent.click(close);
   await waitFor(() =>

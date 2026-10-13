@@ -120,13 +120,13 @@ export const useConfigStore = create<ConfigStore>()(
     }),
     {
       name: "kanban.session.codex-config-storage",
-      version: 1,
+      version: 2,
       migrate: (persisted, version) => {
         const saved = persisted as Partial<ConfigStore>;
         // Update the legacy new-chat default once. Per-thread native settings
         // live in a separate store; subsequent explicit choices stay saved.
         if (
-          version === 0 &&
+          version < 2 &&
           saved.sandbox === "workspace-write" &&
           saved.approvalPolicy === "on-request"
         )

@@ -154,7 +154,7 @@ export function SubagentPanel() {
   if (!root || !isCodex)
     return (
       <div className="session-subagent-panel">
-        <p>请选择一个 Codex 主会话查看子任务。</p>
+        <p>请选择一个 Codex 主会话查看子智能体。</p>
       </div>
     );
   const inspected =
@@ -252,7 +252,7 @@ export function SubagentPanel() {
   return (
     <section
       className="session-subagent-panel"
-      aria-label="子任务工作台"
+      aria-label="子智能体"
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.stopPropagation();
@@ -296,8 +296,8 @@ export function SubagentPanel() {
           {(!data.family?.complete || data.family?.error) && (
             <p role="status" className="session-subagent-notice">
               {data.family?.loading
-                ? "正在确认子任务…"
-                : "子任务信息未完整确认，保留已知记录"}
+                ? "正在加载最终回复…"
+                : "此子智能体在当前分支上已不可用。"}
             </p>
           )}
           <div className="session-subagent-transcript">
@@ -336,18 +336,18 @@ export function SubagentPanel() {
           {(!data.family?.complete || data.family?.error) && (
             <p role="status" className="session-subagent-notice">
               {data.family?.loading
-                ? "正在确认子任务…"
-                : "子任务信息未完整确认，保留已知记录"}
+                ? "正在加载最终回复…"
+                : "此子智能体在当前分支上已不可用。"}
               {data.family?.error ? <small>{data.family.error}</small> : null}
             </p>
           )}
           {section(
             "已开启",
-            active,
+            uncertain ? [] : active,
             4,
             showAllActive,
             () => setShowAllActive(true),
-            "没有已开启的子代理",
+            uncertain ? null : "没有已开启的子代理",
             waiting ? `${waiting} 个等待中` : undefined,
           )}
           {done.length

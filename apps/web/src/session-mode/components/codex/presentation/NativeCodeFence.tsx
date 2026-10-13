@@ -171,7 +171,7 @@ export function NativeCodeFence({
           >
             <button
               type="button"
-              aria-label={copied ? labels.copied : labels.copy}
+              aria-label={copied ? labels.copied : labels.copyCode}
               aria-busy={copyPending || undefined}
               aria-disabled={copyPending || undefined}
               onClick={

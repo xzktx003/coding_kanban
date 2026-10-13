@@ -387,18 +387,17 @@ it("asks the main composer to take keyboard focus", async () => {
   expect(toast.message).toHaveBeenCalledWith("已聚焦主聊天输入框");
 });
 
-it("focuses an open side chat and reports when none is open", async () => {
+it("opens a side chat from the current conversation", async () => {
   useSideChatStore.setState({ chat: null, focusTrigger: 2 });
   render(<ConversationMenu threadId="original-owner" title="当前会话" />);
   const open = async () => {
     fireEvent.keyDown(screen.getByRole("button", { name: "当前会话的更多操作" }), {
       key: "ArrowDown",
     });
-    fireEvent.click(await screen.findByRole("menuitem", { name: "聚焦侧边聊天" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "打开侧边聊天" }));
   };
   await open();
-  expect(toast.message).toHaveBeenCalledWith("当前没有打开的侧边聊天");
-  expect(useSideChatStore.getState().focusTrigger).toBe(2);
+  expect(toast.message).not.toHaveBeenCalledWith("当前没有打开的侧边聊天");
   useSideChatStore.setState({
     chat: { id: "side-1", parentId: "original-owner", title: "侧边聊天", images: [] },
   });
@@ -407,7 +406,7 @@ it("focuses an open side chat and reports when none is open", async () => {
     await new Promise((resolve) => setTimeout(resolve, 320));
   });
   expect(useSideChatStore.getState().focusTrigger).toBe(3);
-  expect(toast.message).toHaveBeenCalledWith("已聚焦侧边聊天");
+  expect(toast.message).toHaveBeenCalledWith("已打开侧边聊天");
 });
 
 it("selects or pans the open artifact canvas", async () => {

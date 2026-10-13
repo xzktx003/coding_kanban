@@ -219,7 +219,7 @@ for (const width of [1440, 390]) {
             await surface.evaluate((el) => el.getBoundingClientRect().height),
           ).toBe(124);
           const button = composer.getByRole("button", {
-            name: "发送",
+            name: "发送消息",
             exact: true,
           });
           expect(
@@ -262,7 +262,7 @@ for (const width of [1440, 390]) {
         await expect(editor).toContainText("第一行");
         await expect(editor).toContainText("A");
         const send = composer.getByRole("button", {
-          name: "发送",
+          name: "发送消息",
           exact: true,
         });
         await expect(send).toHaveCSS("border-radius", "9999px");

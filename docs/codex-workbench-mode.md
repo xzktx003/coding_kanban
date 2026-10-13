@@ -1,6 +1,6 @@
 # Codex 工作台模式
 
-应用保留会话与终端模式，新增独立 Codex 模式。原生 Codex 插件的适配与后续多窗口开发放在 `apps/web/src/codex-mode`，不替换会话模式的 renderer、草稿或 Agent 状态。顶栏共用「会话 / 终端 / Codex」三个并列按钮，直接选择并高亮当前模式，不显示会话／终端二态开关；`?mode=codex` 可以直接进入，本设备保存选择，三个工作区访问后保留挂载状态。
+应用提供会话、终端和独立 Codex 三种模式。Codex 模式默认只展示一个原生窗口；选择项目中的历史会话会追加窗口，可在专注和分屏之间切换，每个窗口保留官方插件自己的输入框。原生适配位于 `apps/web/src/codex-mode`，不替换会话模式的 renderer、草稿或 Agent 状态。顶栏的三个模式按钮直接切换；`?mode=codex` 可以直接进入，本设备保存选择，三个工作区访问后保留挂载状态。
 
 ## 实现边界
 
@@ -14,11 +14,13 @@ Codex 页面只展示原生 webview 窗口：自有适配样式隐藏宿主 IDE 
 
 Surface 只把父容器仍在视口内的官方 webview 作为窗口，并按屏幕横向位置排序；原生编辑器内部留下的离屏旧 iframe 不会被误计为额外列。就绪观察也监听原位启动遮罩的 class 变化。宿主外壳不接收鼠标事件，选中的原生 iframe 保留交互命中。HTTPS 开发代理向网关转发协议头，使同源校验按浏览器实际 HTTPS scheme 判断。
 
-新聊天同窗恢复读取官方 composer 的 `data-above-composer-conversation-id`，只把两个启动时捕获窗口的 UUID→thread UUID 映射保存在当前浏览器 localStorage。刷新后的初始空 composer 稳定 800ms、无附件且没有用户交互时，前端串行调用同源 `POST /api/native-codex/restore`；后端验证来源、列号和 UUID，并从私有运行记录读取 broker 凭证。伴随扩展只接受捕获窗口对应的原生新聊天标签；先打开 `/local/<threadId>`，再关闭那一个干净新聊天标签。用户开始输入、当前已有 thread、编辑器关闭或标签有 dirty 状态时不替换。没有映射或恢复接口失败时保留原编辑器。
+旧版启动窗口的同窗恢复兼容路径读取官方 composer 的 `data-above-composer-conversation-id`，只把两个启动时捕获窗口的 UUID→thread UUID 映射保存在当前浏览器 localStorage。刷新后的初始空 composer 稳定 800ms、无附件且没有用户交互时，前端串行调用同源 `POST /api/native-codex/restore`；后端验证来源、列号和 UUID，并从私有运行记录读取 broker 凭证。伴随扩展只接受捕获窗口对应的原生新聊天标签；先打开 `/local/<threadId>`，再关闭那一个干净新聊天标签。用户开始输入、当前已有 thread、编辑器关闭或标签有 dirty 状态时不替换。没有映射或恢复接口失败时保留原编辑器。当前多窗口集合优先使用下述 thread UUID 恢复。
 
-项目导航调用既有会话项目接口取得本机项目，再用当前 Codex 会话服务分页读取各项目的 thread 历史；只展示已校验的本地 Codex 对话，不把子 Agent 或临时项计入会话数。选中一条记录后，`POST /api/native-codex/resume` 只接受精确 thread UUID 和列号，由伴随扩展固定打开该 thread 的原生 custom editor。打开回执成功后，会话 store 与公共输入目标都绑定同一项目、thread 和列。公共 composer 只向该目标发送，不广播；发送由伴随扩展转交给当前官方插件自己的 app-server 连接，使用原生 thread 设置，不经过会话运行层的另一条 writer 实例。为避免官方扩展激活事件先于伴随扩展回调完成，隔离宿主只给 Node extension host 注入私有 `NODE_OPTIONS` preload；它只观察 `chatgpt.conversationEditor` provider 注册，成功捕获后立即恢复 Module loader 与 VS Code API 方法，官方 VSIX 不作修改。伴随扩展按官方版本门控，要求目标标签仍在指定列、thread 项目匹配、原生会话空闲；待处理的 Session 队列、忙碌或未知回执会保留草稿并拒绝发送，不会改道到另一会话。发送回执只保存提交哈希、thread、轮次和状态，不保存正文。队列中断、替换及忙碌轮次中的排队仍需后续扩展。
+项目导航调用既有会话项目接口取得本机项目，再从 Codex 会话服务分页读取各项目的 thread 历史；只展示已校验的本地 Codex 对话，不把子 Agent 或临时项计入会话数。点击一条记录经 `POST /api/native-codex/resume-beside` 打开对应的原生 custom editor；重复点击聚焦已有窗口。`+ 新聊天` 经 `POST /api/native-codex/new-beside` 打开另一份原生编辑器。两条新接口都要求当前浏览器原生宿主的实例 UUID；网关只从 owned0600 的实例记录找到其私有 loopback broker，并把经过 UUID 校验的目标送到该实例。固定 broker 的旧 `/resume`、`/restore` 和版本门控 `/send` 保留兼容，但多窗口界面不使用公共输入或 Session 草稿 store。每个窗口的输入、发送、审批和运行状态由对应官方 webview 处理；关闭工作台标签只移出本设备关注集合，不中断 Agent 或关闭原生标签。窗格标签已经显示会话名、项目和关闭，原生内容就绪后不再覆盖第二条标题或「已就绪」。加载失败仍在窗格内提示并可重试；官方引导和另一实例占用只在角落提示。官方插件自己的标题栏保留。
 
-公共输入只把 `queued`、`sending`、`uncertain` 的 Session 消息视为待处理；队列暂停但没有未决条目时，仍可提交到原生 Codex。
+已有真实 thread UUID 的关注标签由 `GET/POST /api/native-codex/tabs` 在服务实例内跨浏览器、跨设备共享，持久化到 `SESSION_DATA_HOME/codex-followed-threads.json`，不写入会话模式的 `followed-sessions.json`。每个浏览器仍用自己的原生宿主实例按同一 UUID 调用 `resume-beside`；当前选中项、专注／分屏、原生列号和尚未产生 thread UUID 的空白新聊天留在本浏览器 localStorage。另一处关闭正在阅读的标签后，本窗口继续显示并提示「当前会话未关注」。同一 thread 可在多个浏览器同时打开，写入冲突由官方插件处理。旧的本机窗口缓存只由首个连接的浏览器迁移一次。已产生真实 thread UUID 的新聊天会加入共享集合，并以 `/resume-beside` 在其它浏览器打开；空白新聊天才继续用独立 UUID。旧版仅保存启动窗口 UUID→thread UUID 的映射时，`POST /api/native-codex/restore` 仍可按当前可见宿主实例做兼容恢复。原生 iframe、父节点和 MessagePort 不移动；surface 只调整自有样式与观察。实例未识别、窗口未渲染或打开失败时保留局部加载／错误状态与重试入口，其它窗口可继续操作。
+
+最新官方插件的两个空白新聊天资源会在创建时复制已有未发送草稿，尽管它们的 editor URI 和 iframe 独立。因此工作台只在所有未提交的新聊天输入框已加载且为空时允许再点 `+ 新聊天`；否则提示先发送草稿。历史 thread 随时可追加，已形成 thread 的窗口可以并行发送。伴随扩展不修改官方插件的 composer。单独启动的 Codex app-server `thread/start` 虽返回 thread UUID，但零轮次不写 rollout，官方插件打开 `/local/<UUID>` 会报 `no rollout found`；此路径不用于新聊天。
 
 授权连接有两种显式宿主方式。`--connection-profile-home` 把授权登录配置复制到新的私有 HOME，不导入历史；`--shared-codex-home` 为用户授权的 `$CODEX_HOME` 建立私有 overlay，认证配置及会话数据库／历史仍链接到原文件，`ipc`、app-server 控制端点、临时文件、日志和缓存留在隔离宿主。两种方式互斥。共享模式使用相同本机账号和持久历史，同时通过独立 IPC 避免接管用户默认 CLI socket；它不等于复用同一个运行中 app-server 进程。未经用户授权不启用该模式，也不得对真实历史发送测试任务。
 
@@ -27,6 +29,8 @@ Surface 只把父容器仍在视口内的官方 webview 作为窗口，并按屏
 在被忽略的 `.env` 配置 `NATIVE_CODEX_UPSTREAM_URL` 和 `NATIVE_CODEX_RUNTIME_RECORD`；前者必须是明确的 loopback HTTP 地址，端口匹配运行记录，后者为启动器生成的记录。不可从请求参数选择主机或文件路径。上游、broker 端口和各运行目录全部由启动参数配置。
 
 开发入口继续使用 `pnpm dev` / `pnpm dev:restart`。正式应用中选择 Codex 或打开 `?mode=codex`，不向用户提供裸 IDE 作为入口。当前联调地址：**HTTPS https://10.30.0.24:8484/?mode=codex，端口 8484**；地址属于本机部署记录，不是源码默认值。用户已要求关闭站点密码，此部署显式使用启动器的无认证选项。已有会话运行服务及 Agent 不因原生宿主启动或网关热更新而停止。
+
+独立原生宿主不随 `pnpm dev:restart` 自动启动。2026-10-13 联调曾把 launcher 留在交互式执行会话中；该会话结束后，`.env` 仍指向已经停止的端口，网关正确返回“Codex 宿主暂不可用”。2026-10-14 为加载更快的会话打开逻辑，已停止 v15 并用全新私有目录启动用户级 `coding-kanban-native-codex-v16.service`，`.env` 指向 `runtime-v16.json`。当前将隔离宿主交给该服务管理；检查需同时覆盖服务进程、loopback 端口、`/api/native-codex/status` 和原生嵌套 webview。重新进入隔离 Chrome 的官方首次引导后，实际显示原生输入框且状态为 `available=true`、`resumeAvailable=true`；[恢复截图](../.dev-runtime/native-multiwindow/host-recovery-v15.png)。这个临时用户级服务只保证当前登录会话中的常驻运行，机器重启后须按宿主 README 用新的私有运行目录重新启动；旧运行记录不能代表仍在线。
 
 ## 最小验收与阶段范围
 
@@ -37,6 +41,26 @@ Surface 只把父容器仍在视口内的官方 webview 作为窗口，并按屏
 - 初版浏览器基线使用隔离 Codex HOME 和两个空 fixture，检查官方登录页、同源资源、窗口尺寸和模式切换；该记录本身不证明真实登录、发送/流式回复、审批、中断、看板窗口组和公共输入。项目 Resume 与单条公共输入的后续真实验收见下方 2026-10-13 记录。云任务继续延期。
 
 运行 `pnpm check`，及 `pnpm --filter web exec vitest run --config vitest.session.config.ts src/codex-mode`、网关与宿主对应测试。真实宿主测试可按 `tests/e2e/native-codex-mode.spec.ts` 的环境开关运行；不得通过恢复正式线程或停止活跃 Agent 代替隔离验收。
+
+## 最新多窗口浏览器验收（2026-10-13）
+
+隔离宿主使用官方 code-server `4.141.0` 和未修改的官方 `openai.chatgpt` Linux x64 `26.51007.21434`；真实 Chrome 经 `https://10.30.0.24:8484/?mode=codex` 操作，复用用户已授权的真实账号与历史，但测试消息只发到一次性项目 `/tmp/ck-multiwindow-v11-20261013/project`。默认一个窗口；在两份空白窗口里先后填入 A、B，切换后两份草稿均保持各自文字。[双草稿截图](../.dev-runtime/native-multiwindow/draft-isolation-v11.png)。有未发送草稿时点击 `+ 新聊天`，窗口数保持为 2 且提示原因；[提示截图](../.dev-runtime/native-multiwindow/draft-guard-v11.png)。
+
+用官方原生发送按钮从 A、B 分别发送独立短任务，两个线程 `01a134f6-cd7e-7442-84ac-4b1a81e2620a`、`01a134fb-9fd6-76f2-9631-5d6ef9e41eb6` 各自完成并在自己的原生窗口显示 `ACK11_A`、`ACK11_B`。发送后 `+ 新聊天` 追加第三窗口，三窗口分屏可见；[桌面截图](../.dev-runtime/native-multiwindow/three-window-v11.png)、[390px 手机截图](../.dev-runtime/native-multiwindow/mobile-v11.png)。源码回归：Codex 前端 52 项、原生宿主与适配器 112 项、原生网关 26 项，`pnpm check` 通过。
+
+刷新后工作台仍显示三个关注窗口，但旧 code-server 扩展宿主在重连宽限期内持有 B 的原生 writer，新的插件实例先显示“在另一个应用中打开”；这是当时尚未闭合的原生恢复边界。确认两条测试任务均已完成后，仅终止这次浏览器测试留下的旧隔离扩展宿主，再点原生 Retry，B 的消息与 `ACK11_B` 恢复；[恢复截图](../.dev-runtime/native-multiwindow/refresh-recovered-b-v11.png)。正式 Agent、会话运行服务和其他宿主未停止。后续显式交接实现与验收见下文；旧实例仍有运行任务时不得自动结束它。
+
+后续修正把默认首窗已发送的 thread 也按精确 UUID 重新打开，并复用宿主中已存在的同一原生编辑器组；若原生内容和输入框已就绪，重复打开请求的冲突不再覆盖就绪状态。源码先红后绿；在全新隔离 code-server `4.141.0`／插件 `26.51007.21434` 宿主中预置上一轮已保存的首窗状态，真实 Chrome 显示 A 的本地 thread `01a134f6-cd7e-7442-84ac-4b1a81e2620a`、原生输入框和 `ACK11_A`，卡片为“已就绪”；[首窗恢复截图](../.dev-runtime/native-multiwindow/default-thread-restore-v12-final.png)。这仍要求旧 writer 已释放，不代表刷新时可以安全中断仍运行的旧宿主。
+
+官方首次引导、登录页和 composer 都算原生界面已出现：没有启动遮罩且存在按钮或输入框时撤掉「正在加载」并显示 iframe。引导阶段卡片写「请完成官方引导」，当前窗口立即可以点击官方按钮；工作台不代点 Next、Back 或 Sign in。根节点观察保持到 composer 出现，不设提前停止。焦点请求失败只在角落提示，不再盖住引导。
+
+打开历史会话时，伴随扩展只等新编辑器组创建完成，不等官方 `openWith` 把整页历史渲染完；渲染继续在后台进行，页面仍以原生内容出现为准。已经位于前台的同一会话再次点击时直接返回，不再重复调用 `openWith`。焦点请求也等到该窗口的原生界面出现后才发送。
+
+旧实例提示只在官方明确显示被其他实例占用、且刷新前实例仍存活时出现。空白引导或普通新聊天不暂停打开，也不提供释放。释放仍须用户点击“释放旧实例并恢复”，经同源 `POST /api/native-codex/release-instance` 发起；刷新交接使用浏览器当前标签的 sessionStorage 记录上一次原生宿主 UUID。网关校验两个不同 UUID、确认当前实例仍活跃，再从私有 0600 实例记录调用旧实例的独立 loopback broker。旧伴随扩展仅在自己的实例 broker 接受请求，回应后向**自身 PID**发送 SIGTERM；固定 broker 与任意命令入口都不能执行释放。用户也可选择保留旧实例继续打开，但原生插件可能要求手动处理 writer 占用。工作台只观察官方 webview 的占用状态，显示“另一实例占用 · 请点原生 Retry”，不改动官方插件或代点按钮。
+
+新版隔离宿主的真实 Chrome 刷新验收使用已完成的 B 会话 `01a134fb-9fd6-76f2-9631-5d6ef9e41eb6`：刷新前原生历史显示 `ACK11_B` 和输入框；刷新后页面显示[显式交接提示](../.dev-runtime/native-multiwindow/refresh-handoff-pending-v14.png)，释放请求携带精确旧/新 UUID，旧扩展宿主 PID `1414473` 实测退出。新实例显示同一原生 thread、`ACK11_B` 和可交互输入框，持续 3 秒后未出现 writer 占用或页面错误；[恢复截图](../.dev-runtime/native-multiwindow/refresh-handoff-recovered-v14.png)。这一证据证明**用户显式释放后的刷新恢复**，不证明有正在运行任务时无损迁移；关闭显示标签仍不结束 Agent。原生插件偶发延迟显示占用时，用户可在原生界面点击 Retry，工作台状态不会把占用误报为“已就绪”。
+
+同一 LAN HTTPS 页面在 390px Chrome 视口下刷新后，[交接提示和两个按钮](../.dev-runtime/native-multiwindow/mobile-handoff-pending-v14.png)均位于屏幕内，文档宽度保持 390px；点击释放后提示消失，保留一个原生窗口，页面无 JS 错误。该手机用例使用空白新聊天，未发送模型任务。
 
 ## 初版验收记录（2026-10-12）
 

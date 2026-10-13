@@ -14,26 +14,24 @@
 - `pnpm e2e`：浏览器测试；会话模式联调使用独立 `.env`、端口和 `SESSION_DATA_HOME`，详情见 `docs/session-mode-architecture.md`。
 - 原生 Codex 实验宿主与只读适配器位于 `packages/native-codex-host`、`packages/native-codex-adapter`，不随 `pnpm dev` 启动。专项验收：`node --test packages/native-codex-host/test/*.test.mjs packages/native-codex-adapter/test/*.test.mjs`；启动参数与真实浏览器边界见各包 README 和 `docs/designs/session-render-alignment/native-prototype-acceptance.md`。不得连接默认 CLI IPC、未经用户明确授权复制登录数据或因实验部署重启正式 Agent；已授权连接复用仅走私有 `--connection-profile-home` 路径。
 
-
 ## 任务完成前的最低要求
 
 ## 编码风格与命名约定
 
 ## 前端约定
 
+- UI在开发的时候要保持美观。如果在开发中，你发现了一些不协调、不好看，就请顺手把它改的协调好看
 - 终端模式位于原有 `apps/web/src`；迁移会话模式位于 `apps/web/src/session-mode`，别名 `@session`。
 - 两种模式保留各自挂载状态；迁移样式和 Portal 必须限定在 `.session-mode`，隐藏模式不得处理全局快捷键。
 - 会话／终端模式切换共用 `apps/web/src/components/WorkbenchModeSwitch.tsx`；项目列表入口共用会话模式的 `ProjectNavigationButton`，样式、焦点与响应式约定见 `docs/workbench-ui-polish.md`。
 - 会话模式的标签、网格、列表共用 `useAgentCenterStore.cards` 关注集合；切换和关闭通过 `useSessionTabActions` 同步输入目标与项目。关闭标签只移出关注集合，不得中断 Agent 或清理 worktree；交互与恢复规则见 `docs/session-tabs.md`。
 - 公共输入区的文字和附件以 Agent/session 隔离并在本设备持久保存；异步发送、上传、回滚使用捕获的原会话与提交版本，不得在返回时修改另一个会话的草稿。会话名称与聊天预览独立，规则与验收见 `docs/session-drafts.md`。
 
-
 ## 后端约定
 
 - Node 网关与运行服务管理位于 `apps/server/src`；独立 TS 会话运行层位于 `packages/session-runtime/src`。已替换的自有 Rust 源码与 Cargo 构建文件已移除；原生 Codex/Claude/ACP、PTY/SQLite/Whisper 属于外部依赖。
 - 应用数据由 `SESSION_DATA_HOME` 隔离；原生 CLI 登录目录沿用，禁止静默导入用户 Codexia 数据。
 - 不得因端口占用、过期 PID 或热更新而停止其他工作树/仓库的进程；运行服务重启不得重复创建仍存活的 Agent 服务。
-
 
 ## 测试约定
 
@@ -148,6 +146,5 @@
 - 工作台现在包含会话、终端、Codex 三种模式，共用 `WorkbenchModeSwitch`，首次访问后保留各自挂载状态。原生插件适配开发集中在 `apps/web/src/codex-mode`，不得混入会话模式草稿/正文 store。
 - 官方 VSIX 保持不修改；宿主与自有伴随扩展位于 `packages/native-codex-host`，同源网关位于 `apps/server/src/routes/native-codex.ts`。配置与阶段验收见 `docs/codex-workbench-mode.md`。
 - surface 适配只能调整自有样式与观察，不得移动原生 iframe/父节点或替换 MessagePort；隐藏模式停止观察，保留 iframe。真实宿主验收使用隔离 HOME/fixture，不得停止正式 Agent。
-
 - Codex 宿主显式 `--auto-open-new-chats` 打开两个独立原生新聊天，禁止与 fixture 参数混用。连接副本模式只复制用户授权的登录配置到全新私有 HOME，不导入历史；`--shared-codex-home` 仅在用户明确授权后创建私有链接视图，共用授权的登录配置和持久历史，同时隔离 IPC、app-server control、临时目录、日志和缓存，且不得接管默认 CLI socket。项目历史 Resume 必须使用精确 thread UUID 和受限列号；公共 composer 只能向会话 store 当前选中的单个 thread 提交，不得广播。原生新资源首发后的内部路由不等于编辑器 URI 更新，刷新验收须单独核对原生历史恢复。
 - 项目历史 Resume 后，公共 composer 只有在 Session 当前 thread 与捕获的 native target 完全一致时，才经同源 gateway/companion 向官方插件当前 app-server 的精确 thread、项目和 editor 列发送；不得广播、回退到另一 Session writer 或覆盖 thread 原生设置。宿主只向自有 code-server 的 Node extensionHost 注入 `preload.cjs`，精确观察官方 custom editor provider 注册并在捕获后恢复钩子；官方 VSIX 保持不修改。伴随扩展桥接须按官方版本门控，发送前核对对应列中的原生 custom editor、thread cwd 和空闲状态；Session 队列存在 queued/sending/uncertain 条目、原生会话忙碌或回执未知时保留草稿并拒绝重复投递，空暂停队列不阻止原生发送。回执持久化不得保存正文。协议、验证与未完成的 queue/steer/replace 边界见 `docs/codex-workbench-mode.md`。

@@ -418,6 +418,87 @@ export async function registerNativeCodexRoutes(
     },
   );
   app.post(
+    "/api/native-codex/resume-beside",
+    { bodyLimit: 1024 },
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      if (!sameOriginMutation(request))
+        return reply.code(403).send({ error: "Native Codex resume requires same-origin access." });
+      if (request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json")
+        return reply.code(415).send({ error: "Native Codex resume requires JSON." });
+      const result = await gateway.resumeThreadBeside(request.body);
+      if (result.status === 202) return reply.code(202).send({ opened: true, ...(result.column ? { column: result.column } : {}) });
+      if (result.status === 400) return reply.code(400).send({ error: "Invalid Codex conversation." });
+      if (result.status === 409) return reply.code(409).send({ error: "This Codex conversation is already opening or cannot open." });
+      if (result.status === 504) return reply.code(504).send({ error: "Native Codex is still waiting for this conversation to open." });
+      return reply.code(503).send({ error: "Native Codex resume is unavailable." });
+    },
+  );
+  app.post(
+    "/api/native-codex/new-beside",
+    { bodyLimit: 1024 },
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      if (!sameOriginMutation(request))
+        return reply.code(403).send({ error: "Native Codex new chat requires same-origin access." });
+      if (request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json")
+        return reply.code(415).send({ error: "Native Codex new chat requires JSON." });
+      const result = await gateway.openNewChatBeside(request.body);
+      if (result.status === 202) return reply.code(202).send({ opened: true, ...(result.column ? { column: result.column } : {}) });
+      if (result.status === 400) return reply.code(400).send({ error: "Invalid Codex new-chat window." });
+      if (result.status === 409) return reply.code(409).send({ error: "This Codex new chat is already opening." });
+      if (result.status === 504) return reply.code(504).send({ error: "Native Codex is still opening this new chat." });
+      return reply.code(503).send({ error: "Native Codex new chat is unavailable." });
+    },
+  );
+  app.post(
+    "/api/native-codex/focus",
+    { bodyLimit: 1024 },
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      if (!sameOriginMutation(request))
+        return reply.code(403).send({ error: "Native Codex focus requires same-origin access." });
+      if (request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json")
+        return reply.code(415).send({ error: "Native Codex focus requires JSON." });
+      const result = await gateway.focusNativeWindow(request.body);
+      if (result.status === 202) return reply.code(202).send({ focused: true, ...(result.column ? { column: result.column } : {}) });
+      if (result.status === 400) return reply.code(400).send({ error: "Invalid Codex focus target." });
+      if (result.status === 409) return reply.code(409).send({ error: "The selected native Codex editor is unavailable." });
+      if (result.status === 504) return reply.code(504).send({ error: "Native Codex is still switching editors." });
+      return reply.code(503).send({ error: "Native Codex focus is unavailable." });
+    },
+  );
+  app.post(
+    "/api/native-codex/instance-status",
+    { bodyLimit: 512 },
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      if (!sameOriginMutation(request))
+        return reply.code(403).send({ error: "Native Codex instance status requires same-origin access." });
+      if (request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json")
+        return reply.code(415).send({ error: "Native Codex instance status requires JSON." });
+      const result = await gateway.instanceStatus(request.body);
+      if (result.status === 200) return reply.send({ active: result.active === true });
+      return reply.code(result.status).send({ error: "Native Codex instance status is unavailable." });
+    },
+  );
+  app.post(
+    "/api/native-codex/release-instance",
+    { bodyLimit: 512 },
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      if (!sameOriginMutation(request))
+        return reply.code(403).send({ error: "Native Codex handoff requires same-origin access." });
+      if (request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json")
+        return reply.code(415).send({ error: "Native Codex handoff requires JSON." });
+      const result = await gateway.releasePreviousInstance(request.body);
+      if (result.status === 202) return reply.code(202).send({ released: true });
+      if (result.status === 400) return reply.code(400).send({ error: "Invalid Codex host handoff." });
+      if (result.status === 409) return reply.code(409).send({ error: "Current Codex host is unavailable." });
+      return reply.code(503).send({ error: "Previous Codex host cannot be released." });
+    },
+  );
+  app.post(
     "/api/native-codex/send",
     { bodyLimit: NATIVE_CODEX_MAX_SEND_BODY_BYTES },
     async (request, reply) => {

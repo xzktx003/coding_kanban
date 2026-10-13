@@ -29,10 +29,10 @@ export function QuestionMessage({
     >
       <p className="session-async-caption">
         {answered
-          ? "已回答"
+          ? `已询问 ${group.length} 个问题`
           : pending
-            ? `${pending} 个问题待回答`
-            : "已跳过 · 可重新回答"}
+            ? "正在等待你的回答"
+            : "未提供答案"}
       </p>
       {group.map((q) => (
         <div key={q.id}>

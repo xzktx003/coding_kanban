@@ -870,8 +870,9 @@ export function ConversationMenu({
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => {
+            if (!threadId) return;
             if (!useSideChatStore.getState().chat) {
-              toast.message("当前没有打开的侧边聊天");
+              void createSideChat(threadId);
               return;
             }
             const trigger = document.activeElement;
@@ -891,10 +892,10 @@ export function ConversationMenu({
                 focusSide();
               }, 300);
             } else focusSide();
-            toast.message("已聚焦侧边聊天");
+            toast.message("已打开侧边聊天");
           }}
         >
-          聚焦侧边聊天
+          打开侧边聊天
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => {

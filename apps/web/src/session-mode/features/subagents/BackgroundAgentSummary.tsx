@@ -131,7 +131,7 @@ export function BackgroundAgentSummary({
     if (!threadId || busy) return;
     const targets = currentStopTargets(threadId);
     if (!targets.length) {
-      toast.message("本轮没有已确认可停止的后台智能体");
+      toast.message("本轮没有已确认可停止的子智能体");
       return;
     }
     setConfirmation({
@@ -171,14 +171,14 @@ export function BackgroundAgentSummary({
   }
 
   return (
-    <section className="session-background-agents" aria-label="后台智能体">
+    <section className="session-background-agents" aria-label="子智能体">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
         {backgroundAgentSummary(rows.length)}
-        <span>{open ? "收起后台智能体的详情" : "展开后台智能体详情"}</span>
+        <span>{open ? "返回子智能体" : "打开子智能体"}</span>
       </button>
       {open && (
         <>
@@ -207,8 +207,8 @@ export function BackgroundAgentSummary({
       {confirmation && confirmation.root === threadId && (
         <ConfirmDialog
           isOpen
-          title="停止本轮后台智能体"
-          description={`将停止本轮 ${confirmation.names.length} 个已确认的后台智能体：${confirmation.names.join("、")}。`}
+          title="停止本轮子智能体"
+          description={`将停止本轮 ${confirmation.names.length} 个已确认的子智能体：${confirmation.names.join("、")}。`}
           confirmLabel="确认停止"
           onConfirm={() => void confirmStop()}
           onCancel={() => setConfirmation(null)}

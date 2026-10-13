@@ -1,7 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, it, expect, vi } from "vitest";
 import { NativeModelSelector } from "./NativeModelSelector";
-import { resetRecentModels } from "./recentModelConfigs";
 const calls = vi.hoisted(() => ({
   model: vi.fn(),
   effort: vi.fn(),
@@ -11,7 +10,6 @@ const calls = vi.hoisted(() => ({
 beforeEach(() => {
   calls.effortValue = "high";
   calls.options = ["low", "medium", "high"];
-  resetRecentModels();
 });
 vi.mock("@session/components/codex/stores", () => ({
   useCodexStore: (selector: (s: unknown) => unknown) =>
@@ -77,19 +75,6 @@ it("uses native simple power view and switches to native radio model rows withou
   );
   expect(calls.model).toHaveBeenCalledWith("model-two");
   expect(calls.effort).not.toHaveBeenCalledWith("low");
-});
-
-it("opens the recent model, effort, and speed combinations", async () => {
-  render(<NativeModelSelector threadId="original" />);
-  fireEvent.keyDown(screen.getByRole("button", { name: /^模型：/ }), {
-    key: "ArrowDown",
-  });
-  fireEvent.click(screen.getByRole("menuitem", { name: "选择模型" }));
-  fireEvent.click(screen.getByRole("button", { name: "打开最近使用的模型" }));
-  expect(screen.getByRole("status").textContent).toContain("还没有最近使用的模型");
-  fireEvent.click(screen.getByRole("menuitemradio", { name: "原生模型二" }));
-  fireEvent.click(screen.getByRole("button", { name: /原生模型二 ·/ }));
-  expect(calls.model).toHaveBeenLastCalledWith("model-two");
 });
 
 it("matches native pointer view changes by focusing the menu container", async () => {

@@ -35,6 +35,7 @@ export interface NativeCodexSendRequest {
 export interface NativeCodexRuntime {
   upstream: URL;
   projectDir: string;
+  runtimeRoot?: string;
   extensionVersion?: string;
   fixtures: Array<{ id: string; label: string }>;
   newChatWindowIds?: string[];
@@ -253,6 +254,56 @@ export function validateNativeCodexResume(value: unknown): {
   return { threadId: input.threadId, column: input.column as number };
 }
 
+export function validateNativeCodexResumeBeside(value: unknown): {
+  threadId: string;
+  instanceId: string;
+} {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !== "instanceId,threadId" ||
+    !UUID.test((value as { threadId?: string }).threadId ?? "") ||
+    !UUID.test((value as { instanceId?: string }).instanceId ?? "")
+  )
+    throw new Error("invalid native Codex multiwindow resume request");
+  return { threadId: (value as { threadId: string }).threadId, instanceId: (value as { instanceId: string }).instanceId };
+}
+
+export function validateNativeCodexNewBeside(value: unknown): { windowId: string; instanceId: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !== "instanceId,windowId" ||
+    typeof (value as { windowId?: unknown }).windowId !== "string" ||
+    !UUID.test((value as { windowId: string }).windowId) ||
+    !UUID.test((value as { instanceId?: string }).instanceId ?? ""))
+    throw new Error("invalid native Codex new-chat request");
+  return { windowId: (value as { windowId: string }).windowId, instanceId: (value as { instanceId: string }).instanceId };
+}
+
+export function validateNativeCodexFocus(value: unknown): { kind: "new" | "thread"; targetId: string; instanceId: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !== "instanceId,kind,targetId")
+    throw new Error("invalid native Codex focus request");
+  const input = value as Record<string, unknown>;
+  if ((input.kind !== "new" && input.kind !== "thread") ||
+    typeof input.targetId !== "string" || !UUID.test(input.targetId) ||
+    typeof input.instanceId !== "string" || !UUID.test(input.instanceId))
+    throw new Error("invalid native Codex focus target");
+  return { kind: input.kind, targetId: input.targetId, instanceId: input.instanceId };
+}
+
+export function validateNativeCodexReleaseInstance(value: unknown): { oldInstanceId: string; currentInstanceId: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !== "currentInstanceId,oldInstanceId")
+    throw new Error("invalid native Codex host handoff");
+  const input = value as Record<string, unknown>;
+  if (typeof input.oldInstanceId !== "string" || !UUID.test(input.oldInstanceId) ||
+    typeof input.currentInstanceId !== "string" || !UUID.test(input.currentInstanceId) ||
+    input.oldInstanceId === input.currentInstanceId)
+    throw new Error("native Codex host handoff requires two distinct instances");
+  return { oldInstanceId: input.oldInstanceId, currentInstanceId: input.currentInstanceId };
+}
+
 function nativeSendRequest(value: unknown): NativeCodexSendRequest {
   const invalid = (): never => {
     throw new Error("invalid native Codex send request");
@@ -436,9 +487,15 @@ export class NativeCodexGateway {
         !/[\u0000-\u001f\u007f]/.test(record.brokerAuthFile)
           ? record.brokerAuthFile
           : undefined;
+      const runtimeRoot = typeof record.runtimeRoot === "string" &&
+        record.runtimeRoot.length <= 4096 && isAbsolute(record.runtimeRoot) &&
+        resolve(record.runtimeRoot) === record.runtimeRoot &&
+        !/[\u0000-\u001f\u007f]/.test(record.runtimeRoot)
+          ? record.runtimeRoot : undefined;
       return {
         upstream,
         projectDir,
+        ...(runtimeRoot ? { runtimeRoot } : {}),
         fixtures: fixtures(record.threads),
         ...(extensionVersion ? { extensionVersion } : {}),
         ...(windows ? { newChatWindowIds: windows } : {}),
@@ -580,12 +637,21 @@ export class NativeCodexGateway {
     )
       return 503;
     let body: ReturnType<typeof validateNativeCodexWindowRestore>;
+    let instanceId: string | undefined;
     try {
-      body = validateNativeCodexWindowRestore(value, runtime.newChatWindowIds);
+      if (value && typeof value === "object" && !Array.isArray(value) && "instanceId" in value) {
+        const input = value as Record<string, unknown>;
+        if (Object.keys(input).sort().join(",") !== "column,instanceId,threadId,windowId" ||
+          typeof input.instanceId !== "string" || !UUID.test(input.instanceId)) throw new Error("invalid host instance");
+        instanceId = input.instanceId;
+        body = validateNativeCodexWindowRestore({ windowId: input.windowId, threadId: input.threadId, column: input.column }, runtime.newChatWindowIds);
+      } else {
+        body = validateNativeCodexWindowRestore(value, runtime.newChatWindowIds);
+      }
     } catch {
       return 400;
     }
-    return this.callBroker(runtime, "/restore", body, "restored");
+    return (await this.callBroker(runtime, "/restore", body, "restored", instanceId)).status;
   }
 
   async resumeThreadInNativeWindow(value: unknown): Promise<number> {
@@ -597,7 +663,83 @@ export class NativeCodexGateway {
     } catch {
       return 400;
     }
-    return this.callBroker(runtime, "/resume", body, "opened");
+    return (await this.callBroker(runtime, "/resume", body, "opened")).status;
+  }
+
+  async resumeThreadBeside(value: unknown): Promise<{ status: number; column?: number }> {
+    const runtime = await this.runtime();
+    if (!runtime?.brokerPort || !runtime.brokerAuthFile) return { status: 503 };
+    let body: ReturnType<typeof validateNativeCodexResumeBeside>;
+    try {
+      body = validateNativeCodexResumeBeside(value);
+    } catch {
+      return { status: 400 };
+    }
+    return this.callBroker(runtime, "/resume-beside", { threadId: body.threadId }, "opened", body.instanceId);
+  }
+
+  async openNewChatBeside(value: unknown): Promise<{ status: number; column?: number }> {
+    const runtime = await this.runtime();
+    if (!runtime?.brokerPort || !runtime.brokerAuthFile) return { status: 503 };
+    let body: ReturnType<typeof validateNativeCodexNewBeside>;
+    try { body = validateNativeCodexNewBeside(value); }
+    catch { return { status: 400 }; }
+    return this.callBroker(runtime, "/new-beside", { windowId: body.windowId }, "opened", body.instanceId);
+  }
+
+  async focusNativeWindow(value: unknown): Promise<{ status: number; column?: number }> {
+    const runtime = await this.runtime();
+    if (!runtime?.brokerPort || !runtime.brokerAuthFile) return { status: 503 };
+    let body: ReturnType<typeof validateNativeCodexFocus>;
+    try { body = validateNativeCodexFocus(value); }
+    catch { return { status: 400 }; }
+    return this.callBroker(runtime, "/focus", { kind: body.kind, targetId: body.targetId }, "focused", body.instanceId);
+  }
+
+  async releasePreviousInstance(value: unknown): Promise<{ status: number }> {
+    let body: ReturnType<typeof validateNativeCodexReleaseInstance>;
+    try { body = validateNativeCodexReleaseInstance(value); }
+    catch { return { status: 400 }; }
+    const runtime = await this.runtime();
+    if (!runtime?.runtimeRoot || !runtime.brokerPort || !runtime.brokerAuthFile) return { status: 503 };
+    if (!(await this.instanceActive(runtime, body.currentInstanceId))) return { status: 409 };
+    return this.callBroker(runtime, "/release", { currentInstanceId: body.currentInstanceId }, "released", body.oldInstanceId);
+  }
+
+  async instanceStatus(value: unknown): Promise<{ status: number; active?: boolean }> {
+    if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).join(",") !== "instanceId" ||
+      typeof (value as { instanceId?: unknown }).instanceId !== "string" || !UUID.test((value as { instanceId: string }).instanceId))
+      return { status: 400 };
+    const runtime = await this.runtime();
+    if (!runtime?.runtimeRoot) return { status: 503 };
+    return { status: 200, active: await this.instanceActive(runtime, (value as { instanceId: string }).instanceId) };
+  }
+
+  private async instanceActive(runtime: NativeCodexRuntime, instanceId: string): Promise<boolean> {
+    try {
+      const auth = await readBoundedJson(join(runtime.runtimeRoot!, `companion-session-${instanceId}.json`), MAX_BROKER_AUTH_BYTES, true);
+      if (auth.instanceId !== instanceId || !Number.isInteger(auth.port) || (auth.port as number) < 1024 || (auth.port as number) > 65535 ||
+        typeof auth.token !== "string" || !/^[0-9a-f]{64}$/.test(auth.token)) return false;
+      return await new Promise<boolean>((resolveActive) => {
+        let settled = false;
+        const finish = (active: boolean) => { if (!settled) { settled = true; resolveActive(active); } };
+        const outbound = request({ hostname: "127.0.0.1", port: auth.port as number, path: "/status", method: "GET", timeout: 1500,
+          headers: { authorization: `Bearer ${auth.token}` } }, (response) => {
+          let body = ""; let size = 0;
+          response.on("data", (chunk: Buffer) => { size += chunk.length; if (size <= MAX_RECORD_BYTES) body += chunk.toString("utf8"); else response.destroy(); });
+          response.on("end", () => {
+            if (response.statusCode !== 200 || size > MAX_RECORD_BYTES) return finish(false);
+            try { const result = JSON.parse(body) as { instanceBroker?: { enabled?: unknown; instanceId?: unknown } };
+              finish(result?.instanceBroker?.enabled === true && result.instanceBroker.instanceId === instanceId);
+            } catch { finish(false); }
+          });
+          response.on("error", () => finish(false));
+        });
+        outbound.on("timeout", () => outbound.destroy());
+        outbound.on("error", () => finish(false));
+        outbound.end();
+      });
+    } catch { return false; }
   }
 
   async sendToNativeThread(
@@ -702,28 +844,31 @@ export class NativeCodexGateway {
 
   private async callBroker(
     runtime: NativeCodexRuntime,
-    path: "/restore" | "/resume",
+    path: "/restore" | "/resume" | "/resume-beside" | "/new-beside" | "/focus" | "/release",
     body: object,
-    successField: "restored" | "opened",
-  ): Promise<number> {
+    successField: "restored" | "opened" | "focused" | "released",
+    instanceId?: string,
+  ): Promise<{ status: number; column?: number }> {
     try {
+      if (instanceId && (!runtime.runtimeRoot || !UUID.test(instanceId))) return { status: 503 };
       const auth = await readBoundedJson(
-        runtime.brokerAuthFile!,
+        instanceId ? join(runtime.runtimeRoot!, `companion-session-${instanceId}.json`) : runtime.brokerAuthFile!,
         MAX_BROKER_AUTH_BYTES,
         true,
       );
       if (
-        auth.port !== runtime.brokerPort ||
+        (instanceId ? auth.instanceId !== instanceId : auth.port !== runtime.brokerPort) ||
+        !Number.isInteger(auth.port) || (auth.port as number) < 1024 || (auth.port as number) > 65535 ||
         typeof auth.token !== "string" ||
         !/^[0-9a-f]{64}$/.test(auth.token)
       )
-        return 503;
+        return { status: 503 };
       const payload = JSON.stringify(body);
-      return await new Promise<number>((resolveStatus) => {
+      return await new Promise<{ status: number; column?: number }>((resolveStatus) => {
         const outbound = request(
           {
             hostname: "127.0.0.1",
-            port: runtime.brokerPort,
+            port: auth.port as number,
             path,
             method: "POST",
             timeout: 25_000,
@@ -744,31 +889,37 @@ export class NativeCodexGateway {
             });
             response.on("end", () => {
               if (response.statusCode !== 200 || size > MAX_BROKER_AUTH_BYTES) {
-                resolveStatus(response.statusCode === 400 ? 409 : 503);
+                resolveStatus({ status:
+                  response.statusCode === 400 || response.statusCode === 409
+                    ? 409
+                    : response.statusCode === 504
+                      ? 504
+                      : 503,
+                });
                 return;
               }
               try {
                 const result: unknown = JSON.parse(responseBody);
-                resolveStatus(
-                  result &&
+                const success = result &&
                     typeof result === "object" &&
-                    (result as Record<string, unknown>)[successField] === true
-                    ? 202
-                    : 503,
-                );
+                    (result as Record<string, unknown>)[successField] === true;
+                const column = (result as { column?: unknown })?.column;
+                resolveStatus(success
+                  ? { status: 202, ...(Number.isInteger(column) && (column as number) >= 1 ? { column: column as number } : {}) }
+                  : { status: 503 });
               } catch {
-                resolveStatus(503);
+                resolveStatus({ status: 503 });
               }
             });
-            response.on("error", () => resolveStatus(503));
+            response.on("error", () => resolveStatus({ status: 503 }));
           },
         );
-        outbound.on("timeout", () => outbound.destroy());
-        outbound.on("error", () => resolveStatus(503));
+        outbound.on("timeout", () => { resolveStatus({ status: 504 }); outbound.destroy(); });
+        outbound.on("error", () => resolveStatus({ status: 503 }));
         outbound.end(payload);
       });
     } catch {
-      return 503;
+      return { status: 503 };
     }
   }
 }

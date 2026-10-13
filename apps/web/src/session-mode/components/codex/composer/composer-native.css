@@ -210,7 +210,6 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  flex: 1 1 auto;
 }
 .session-mode .session-native-model-effort {
   flex-shrink: 0;
@@ -317,23 +316,6 @@
   flex: 0 0 auto;
   align-items: center;
 }
-.session-mode .session-dictation-failure {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
-  z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: max-content;
-  max-width: min(320px, 70vw);
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--popover);
-  color: var(--popover-foreground);
-  font-size: 12px;
-}
 .session-mode .session-native-dictation > svg {
   position: absolute;
   left: 50%;
@@ -360,10 +342,9 @@
   flex: 1 1 0;
 }
 .session-mode .session-native-composer-status {
-  display: block;
-  position: relative;
-  width: fit-content;
-  margin: 0 4px 4px auto;
+  position: absolute;
+  right: 4px;
+  bottom: calc(100% + 3px);
   max-width: 75%;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -638,25 +619,6 @@
   font-size: 12px;
   line-height: 17.1429px;
 }
-.session-mode .session-native-model-heading-row {
-  position: relative;
-}
-.session-mode .session-native-model-search-toggle {
-  position: absolute;
-  inset-inline-end: 4px;
-  top: 0;
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 6px;
-  color: var(--codex-muted);
-}
-.session-mode .session-native-model-search-toggle:hover,
-.session-mode .session-native-model-search-toggle:focus-visible {
-  background: color-mix(in srgb, var(--codex-text) 7%, transparent);
-  color: var(--codex-text);
-}
 .session-mode .session-native-model-menu .session-native-model-option,
 .session-mode .session-native-model-menu .session-native-model-back,
 .session-mode .session-native-model-configuration [role="menuitem"] {
@@ -924,6 +886,9 @@
     height: 44px;
     min-height: 44px;
   }
+  .session-mode .session-native-composer-status {
+    bottom: calc(100% + 8px);
+  }
 }
 @container compact-composer (max-width: 480px) {
   .session-mode
@@ -971,10 +936,8 @@
   .session-mode
     .session-codex-composer.session-native-composer
     .session-composer-toolbar {
-    height: auto;
-    min-height: 44px;
+    height: 44px;
     gap: 2px;
-    flex-wrap: wrap;
   }
   .session-mode
     .session-codex-composer.session-native-composer
@@ -987,11 +950,7 @@
     .session-codex-composer.session-native-composer
     .session-access-trigger
     > span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
+    display: none;
   }
   .session-mode
     .session-codex-composer.session-native-composer
@@ -1009,20 +968,9 @@
   .session-mode
     .session-codex-composer.session-native-composer
     .session-composer-actions {
-    flex: 0 0 auto;
+    flex: 1 1 0;
     min-width: 0;
     gap: 4px;
-    margin-left: auto;
-  }
-  .session-mode
-    .session-codex-composer.session-native-composer
-    .session-composer-actions
-    > button[aria-label="当前会话的更多操作"] {
-    width: 44px;
-    height: 44px;
-    min-width: 44px;
-    min-height: 44px;
-    flex: none;
   }
   .session-mode
     .session-codex-composer.session-native-composer

@@ -209,7 +209,7 @@ for (const width of [375, 1440]) {
     await load(page, 1);
     await expect(
       page.getByRole("button", { name: /^回答问题 · \d+$/ }),
-    ).toContainText("有 2 个问题待回答");
+    ).toContainText("正在等待你的回答");
     nextTurn = true;
     await page.evaluate(async () => {
       const { useCodexStore } = await import(
@@ -248,7 +248,7 @@ for (const width of [375, 1440]) {
     await resume(page);
     await expect(
       page.getByRole("button", { name: /^回答问题 · \d+$/ }),
-    ).toContainText("有 1 个问题待回答");
+    ).toContainText("正在等待你的回答");
     await openQuestions(page);
     await expect(page.locator("[data-session-async-panel]")).toContainText(
       "本轮的新问题",

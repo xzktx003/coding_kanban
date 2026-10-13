@@ -91,10 +91,7 @@ export function QuestionComposer({
             className="session-async-notice"
             onClick={openPending}
           >
-            <span>
-              {target ? "运行中 · " : ""}有 {pending.length} 个问题待回答
-            </span>
-            <span>回答</span>
+            <span>正在等待你的回答</span>
           </button>
         )}
         {children}

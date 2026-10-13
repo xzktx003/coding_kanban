@@ -199,7 +199,7 @@ test("sketch exports a real PNG, restores editable marks and keeps original imag
       await r.fulfill({ json: { path: "/fixture/drawing.png" } });
     });
     await page
-      .getByRole("button", { name: "添加附件与上下文", exact: true })
+      .getByRole("button", { name: "附加文件", exact: true })
       .click();
     await page.getByRole("button", { name: "画草图", exact: true }).click();
     const canvas = page.getByRole("img", { name: "绘图画布", exact: true });
@@ -218,7 +218,7 @@ test("sketch exports a real PNG, restores editable marks and keeps original imag
       .getByRole("button", { name: "返回并保留草稿", exact: true })
       .click();
     await page
-      .getByRole("button", { name: "添加附件与上下文", exact: true })
+      .getByRole("button", { name: "附加文件", exact: true })
       .click();
     await page.getByRole("button", { name: "画草图", exact: true }).click();
     await expect(
@@ -321,7 +321,7 @@ test("settings commands preserve draft and do not start a turn", async ({
   try {
     await editor(page).fill("保留这个需求");
     await page
-      .getByRole("button", { name: "添加附件与上下文", exact: true })
+      .getByRole("button", { name: "附加文件", exact: true })
       .click();
     await page.getByRole("button", { name: "斜杠命令", exact: true }).click();
     await page
@@ -478,7 +478,7 @@ test("mobile pinch does not leave an accidental stroke and simulated keyboard ke
     f = await setup(page);
   try {
     await page
-      .getByRole("button", { name: "添加附件与上下文", exact: true })
+      .getByRole("button", { name: "附加文件", exact: true })
       .click();
     await page.getByRole("button", { name: "画草图", exact: true }).click();
     const bounds = (await page
@@ -652,7 +652,7 @@ test("desktop and phone acceptance captures keep attachments and nested panels w
       .getByRole("button", { name: "返回并保留草稿", exact: true })
       .click();
     await page
-      .getByRole("button", { name: "添加附件与上下文", exact: true })
+      .getByRole("button", { name: "附加文件", exact: true })
       .click();
     await page.getByRole("button", { name: "画草图", exact: true }).click();
     await page.screenshot({

@@ -67,7 +67,7 @@ it("stops reminding about old questions when a new turn starts, while keeping hi
     </>,
   );
   expect(
-    screen.getByRole("button", { name: /有 2 个问题待回答/ }),
+    screen.getByRole("button", { name: "正在等待你的回答" }),
   ).toBeTruthy();
   act(() =>
     useCodexStore.getState().addEvent("a", {
@@ -79,7 +79,7 @@ it("stops reminding about old questions when a new turn starts, while keeping hi
     } as any),
   );
   expect(
-    screen.queryByRole("button", { name: /有 .* 个问题待回答/ }),
+    screen.queryByRole("button", { name: "正在等待你的回答" }),
   ).toBeNull();
   expect(screen.getByText("选择环境")).toBeTruthy();
   act(() =>
@@ -97,9 +97,9 @@ it("stops reminding about old questions when a new turn starts, while keeping hi
     }),
   );
   expect(
-    screen.getByRole("button", { name: /有 1 个问题待回答/ }),
+    screen.getByRole("button", { name: "正在等待你的回答" }),
   ).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: /有 1 个问题待回答/ }));
+  fireEvent.click(screen.getByRole("button", { name: "正在等待你的回答" }));
   expect(
     screen.getByRole("region", { name: "回答 Codex 问题" }).textContent,
   ).toContain("新问题");
@@ -118,7 +118,7 @@ it("keeps the latest completed turn answerable until a subsequent turn starts", 
     </QuestionComposer>,
   );
   expect(
-    screen.getByRole("button", { name: /有 2 个问题待回答/ }),
+    screen.getByRole("button", { name: "正在等待你的回答" }),
   ).toBeTruthy();
 });
 it("renders structured async questions as an answer entry, not a Markdown-only message", () => {
@@ -133,7 +133,7 @@ it("opens on demand, never preselects or submits on selection, and preserves dra
     </QuestionComposer>,
   );
   expect(screen.queryByRole("region")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: /有 2 个问题待回答/ }));
+  fireEvent.click(screen.getByRole("button", { name: "正在等待你的回答" }));
   expect(
     screen.getAllByRole("radio").every((r) => !(r as HTMLInputElement).checked),
   ).toBe(true);
@@ -145,7 +145,7 @@ it("opens on demand, never preselects or submits on selection, and preserves dra
   });
   fireEvent.click(screen.getByRole("button", { name: "收起" }));
   expect(screen.getByText("ordinary composer")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: /有 2 个问题待回答/ }));
+  fireEvent.click(screen.getByRole("button", { name: "正在等待你的回答" }));
   expect(
     (screen.getByRole("radio", { name: "隔离" }) as HTMLInputElement).checked,
   ).toBe(true);
@@ -163,7 +163,7 @@ it("skipping all questions sends nothing; switching threads never exposes the ot
       <div>ordinary composer</div>
     </QuestionComposer>,
   );
-  fireEvent.click(screen.getByRole("button", { name: /有 2 个问题待回答/ }));
+  fireEvent.click(screen.getByRole("button", { name: "正在等待你的回答" }));
   fireEvent.click(screen.getByRole("button", { name: "跳过" }));
   fireEvent.click(screen.getByRole("button", { name: "跳过" }));
   expect(screen.queryByRole("region")).toBeNull();
@@ -182,7 +182,7 @@ it("marks remote answer changes without overwriting edits and closes removed que
       <div>ordinary composer</div>
     </QuestionComposer>,
   );
-  fireEvent.click(screen.getByRole("button", { name: /有 2 个问题待回答/ }));
+  fireEvent.click(screen.getByRole("button", { name: "正在等待你的回答" }));
   fireEvent.change(screen.getByRole("textbox"), {
     target: { value: "本地编辑" },
   });

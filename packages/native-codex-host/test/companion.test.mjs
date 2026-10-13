@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, chmod, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, readdir, chmod, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -14,7 +14,7 @@ async function load(config, vscode, timerOverrides = {}) {
   const source = await readFile(new URL('../companion/extension.cjs', import.meta.url), 'utf8');
   const module = { exports: {} };
   const context = { module, exports: module.exports, Buffer, console, setTimeout, clearTimeout, ...timerOverrides,
-    process: { env: { NATIVE_CODEX_COMPANION_CONFIG: config }, getuid: () => process.getuid(), pid: process.pid },
+    process: { env: { NATIVE_CODEX_COMPANION_CONFIG: config }, getuid: () => process.getuid(), pid: process.pid, kill: timerOverrides.kill ?? (() => { throw new Error('unexpected extension-host signal'); }) },
     require: name => name === 'node:http' && timerOverrides.httpModule ? timerOverrides.httpModule : name === 'vscode' ? vscode : name === './control.cjs' ? require('../companion/control.cjs') : name === './appserver-send.cjs' ? require('../companion/appserver-send.cjs') : require(name) };
   vm.runInNewContext(source, context); return module.exports;
 }
@@ -267,15 +267,20 @@ const thirdFixture = '019aabcd-1234-7890-abcd-0123456789ad';
 function deferred() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
 async function startupFixture(t, config = {}, callbacks = {}) {
   const root = await mkdtemp(join(tmpdir(), 'native-startup-')); const file = join(root, 'auth.json'); const port = config.port ?? await sparePort();
-  const token = 'test-only-startup-012345678901234567890'; const calls = []; const commands = new Map(); const subscriptions = [];
+  const token = 'test-only-startup-012345678901234567890'; const calls = []; const groupsCreated = []; const commands = new Map(); const subscriptions = [];
   const official = { isActive: false, packageJSON: { version: 'test' }, async activate() { await callbacks.activate?.(); this.isActive = true; } };
-  const vscode = { extensions: { getExtension: () => callbacks.missingOfficial ? undefined : official }, window: { tabGroups: { all: callbacks.tabs ?? [], async close(tab, preserveFocus) { return callbacks.close ? callbacks.close(tab, preserveFocus) : true; } } }, Uri: { parse: uri => uri },
+  let nextColumn = Math.max(1, ...(callbacks.tabs ?? []).map(group => group.viewColumn ?? 0));
+  const tabGroups = { all: callbacks.tabs ?? [], activeTabGroup: { viewColumn: nextColumn }, async close(tab, preserveFocus) { return callbacks.close ? callbacks.close(tab, preserveFocus) : true; } };
+  const vscode = { extensions: { getExtension: () => callbacks.missingOfficial ? undefined : official }, window: { tabGroups, createStatusBarItem: callbacks.createStatusBarItem }, Uri: { parse: uri => uri },
     commands: { registerCommand(name, callback) { commands.set(name, callback); return { dispose() { commands.delete(name); } }; },
-      async executeCommand(...args) { calls.push(args); await callbacks.open?.(...args); } } };
+      async executeCommand(...args) {
+        if (args[0] === 'workbench.action.newGroupRight') { tabGroups.activeTabGroup = { viewColumn: ++nextColumn }; groupsCreated.push(nextColumn); return; }
+        calls.push(args); await callbacks.open?.(...args);
+      } } };
   await writeFile(file, JSON.stringify({ port, token, threads: [id, secondFixture, thirdFixture], ...config }), { mode: 0o600 });
-  const extension = await load(file, vscode, callbacks.httpModule ? { httpModule: callbacks.httpModule } : {});
+  const extension = await load(file, vscode, { ...(callbacks.httpModule ? { httpModule: callbacks.httpModule } : {}), ...(callbacks.kill ? { kill: callbacks.kill } : {}) });
   t.after(async () => { callbacks.cleanup?.(); extension.deactivate(); for (const item of subscriptions) item.dispose(); await rm(root, { recursive: true, force: true }); });
-  return { root, calls, commands, subscriptions, extension, base: `http://127.0.0.1:${port}`, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } };
+  return { root, calls, groupsCreated, commands, subscriptions, extension, base: `http://127.0.0.1:${port}`, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } };
 }
 test('explicit startup auto-open waits for official activation and opens only the first two captured fixtures', async t => {
   const activation = deferred(); const entered = deferred();
@@ -308,6 +313,132 @@ test('startup opening shares the palette and broker lock and releases it after c
   execution.resolve(); await pending;
   await data.commands.get('nativeCodexPrototype.openTwoTestPanels')(); assert.equal(data.calls.length, 4);
   assert.equal((await fetch(`${data.base}/open`, options)).status, 200); assert.equal(data.calls.length, 5);
+});
+test('one stalled resume does not block a different conversation opening beside it', async t => {
+  const entered = deferred(); const stalled = deferred();
+  const data = await startupFixture(t, {}, {
+    open: (_name, uri) => {
+      if (String(uri).endsWith(id)) { entered.resolve(); return stalled.promise; }
+    },
+    cleanup: stalled.resolve,
+  });
+  await data.extension.activate({ subscriptions: data.subscriptions });
+  const first = fetch(`${data.base}/resume-beside`, {
+    method: 'POST', headers: data.headers, body: JSON.stringify({ threadId: id }),
+  });
+  const early = await Promise.race([
+    first.then(response => ({ returned: true, status: response.status })),
+    stalled.promise.then(() => ({ returned: false })),
+  ]);
+  assert.equal(early.returned, true);
+  assert.equal(early.status, 200);
+  const second = await fetch(`${data.base}/resume-beside`, {
+    method: 'POST', headers: data.headers, body: JSON.stringify({ threadId: secondFixture }),
+  });
+  assert.equal(second.status, 200);
+  assert.equal((await second.json()).opened, true);
+  assert.equal((await fetch(`${data.base}/resume-beside`, {
+    method: 'POST', headers: data.headers, body: JSON.stringify({ threadId: id }),
+  })).status, 409);
+  assert.equal(data.calls.length, 2);
+  assert.deepEqual(data.groupsCreated, [2, 3]);
+  assert.deepEqual(data.calls.map(call => call[3].viewColumn), [2, 3]);
+  stalled.resolve();
+  assert.equal((await first).status, 200);
+});
+test('private broker opens successive independent new-chat editors without a fixed window cap', async t => {
+  const data = await startupFixture(t);
+  await data.extension.activate({ subscriptions: data.subscriptions });
+  for (let index = 1; index <= 12; index++) {
+    const windowId = `019aabcd-1234-7890-abcd-${String(index).padStart(12, '0')}`;
+    const response = await fetch(`${data.base}/new-beside`, {
+      method: 'POST', headers: data.headers, body: JSON.stringify({ windowId }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).opened, true);
+  }
+  assert.equal(data.calls.length, 12);
+  assert.deepEqual(data.groupsCreated, Array.from({ length: 12 }, (_, index) => index + 2));
+  assert.deepEqual(data.calls.map(call => call[3].viewColumn), data.groupsCreated);
+});
+test('native focus selects only the exact existing editor group before input', async () => {
+  const { focusNativeWindow, newChatUri, threadUri } = require('../companion/control.cjs');
+  const windowId = '019aabcd-1234-7890-abcd-0123456789ae';
+  const newUri = newChatUri(windowId, [windowId]);
+  const localUri = threadUri(id, [id]);
+  const makeTab = uri => ({ isActive: true, input: { uri: { toString: () => uri }, viewType: 'chatgpt.conversationEditor' } });
+  const first = { viewColumn: 1, isActive: true, tabs: [makeTab(newUri)] };
+  const second = { viewColumn: 2, isActive: false, tabs: [makeTab(localUri)] };
+  const tabGroups = { all: [first, second], activeTabGroup: first };
+  const calls = [];
+  const vscode = { window: { tabGroups }, Uri: { parse: uri => uri }, commands: { async executeCommand(...args) {
+    calls.push(args);
+    const group = tabGroups.all.find(candidate => candidate.viewColumn === args[3]?.viewColumn);
+    if (group) { for (const candidate of tabGroups.all) candidate.isActive = candidate === group; tabGroups.activeTabGroup = group; }
+  } } };
+  assert.deepEqual(await focusNativeWindow(vscode, { kind: 'thread', targetId: id }), { focused: true, column: 2 });
+  assert.equal(tabGroups.activeTabGroup, second);
+  assert.deepEqual(await focusNativeWindow(vscode, { kind: 'new', targetId: windowId }), { focused: true, column: 1 });
+  assert.equal(tabGroups.activeTabGroup, first);
+  assert.deepEqual(await focusNativeWindow(vscode, { kind: 'new', targetId: windowId }), { focused: true, column: 1 });
+  assert.deepEqual(calls.map(call => [call[0], call[1], call[3].viewColumn]), [
+    ['vscode.openWith', localUri, 2], ['vscode.openWith', newUri, 1],
+  ]);
+  await assert.rejects(focusNativeWindow(vscode, { kind: 'new', targetId: windowId, command: 'evil' }), /only/);
+  await assert.rejects(focusNativeWindow(vscode, { kind: 'thread', targetId: '019aabcd-1234-7890-abcd-0123456789af' }), /not open/);
+});
+test('resuming a thread already open in a native editor reuses its group', async () => {
+  const { resumeThreadBeside, threadUri } = require('../companion/control.cjs');
+  const uri = threadUri(id, [id]);
+  const tab = { isActive: false, input: { uri: { toString: () => uri }, viewType: 'chatgpt.conversationEditor' } };
+  const group = { viewColumn: 3, isActive: false, tabs: [tab] };
+  const tabGroups = { all: [group], activeTabGroup: { viewColumn: 1, tabs: [] } };
+  const calls = [];
+  const vscode = { window: { tabGroups }, Uri: { parse: value => value }, commands: { async executeCommand(...args) {
+    calls.push(args);
+    if (args[0] === 'workbench.action.newGroupRight') throw new Error('must reuse exact existing group');
+    tab.isActive = true; group.isActive = true; tabGroups.activeTabGroup = group;
+  } } };
+  assert.deepEqual(await resumeThreadBeside(vscode, { threadId: id }), { threadId: id, opened: true, column: 3 });
+  assert.deepEqual(calls.map(call => call[0]), ['vscode.openWith']);
+});
+test('each extension instance publishes a private broker and a browser-visible identity marker', async t => {
+  const marker = { text: '', showCalled: false, disposed: false, show() { this.showCalled = true; }, dispose() { this.disposed = true; } };
+  const data = await startupFixture(t, {}, { createStatusBarItem: () => marker });
+  await data.extension.activate({ subscriptions: data.subscriptions });
+  const files = (await readdir(data.root)).filter(name => name.startsWith('companion-session-'));
+  assert.equal(files.length, 1);
+  const registry = JSON.parse(await readFile(join(data.root, files[0]), 'utf8'));
+  assert.match(registry.instanceId, /^[0-9a-f-]{36}$/);
+  assert.equal(marker.text, `Kanban host ${registry.instanceId}`);
+  assert.equal(marker.showCalled, true);
+  const status = await fetch(`http://127.0.0.1:${registry.port}/status`, { headers: { authorization: `Bearer ${registry.token}` } });
+  assert.equal(status.status, 200);
+  assert.deepEqual((await status.json()).instanceBroker, { enabled: true, instanceId: registry.instanceId });
+  data.extension.deactivate();
+  assert.equal(marker.disposed, true);
+  assert.equal((await readdir(data.root)).some(name => name === files[0]), false);
+});
+test('release stops only the authenticated private extension-host instance', async t => {
+  const signals = [];
+  const data = await startupFixture(t, {}, { kill: (pid, signal) => signals.push({ pid, signal }) });
+  await data.extension.activate({ subscriptions: data.subscriptions });
+  const file = (await readdir(data.root)).find(name => name.startsWith('companion-session-'));
+  const registry = JSON.parse(await readFile(join(data.root, file), 'utf8'));
+  const privateBase = `http://127.0.0.1:${registry.port}`;
+  const nextInstanceId = '019aabcd-1234-7890-abcd-0123456789ae';
+  const headers = { authorization: `Bearer ${registry.token}`, 'content-type': 'application/json' };
+  assert.equal((await fetch(`${data.base}/release`, { method: 'POST', headers, body: JSON.stringify({ currentInstanceId: nextInstanceId }) })).status, 404);
+  assert.equal((await fetch(`${privateBase}/release`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ currentInstanceId: nextInstanceId }) })).status, 401);
+  assert.equal((await fetch(`${privateBase}/release`, { method: 'POST', headers, body: JSON.stringify({ currentInstanceId: registry.instanceId }) })).status, 400);
+  assert.equal((await fetch(`${privateBase}/release`, { method: 'POST', headers, body: JSON.stringify({ currentInstanceId: nextInstanceId, command: 'evil' }) })).status, 400);
+  assert.deepEqual(signals, []);
+  const response = await fetch(`${privateBase}/release`, { method: 'POST', headers, body: JSON.stringify({ currentInstanceId: nextInstanceId }) });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { released: true });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.deepEqual(signals, [{ pid: process.pid, signal: 'SIGTERM' }]);
+  assert.equal((await readdir(data.root)).includes(file), false);
 });
 test('private startup configuration accepts booleans only and requires two distinct captured fixtures', async t => {
   for (const config of [{ autoOpenFixtures: 'true' }, { autoOpenFixtures: 1 }, { autoOpenFixtures: null },

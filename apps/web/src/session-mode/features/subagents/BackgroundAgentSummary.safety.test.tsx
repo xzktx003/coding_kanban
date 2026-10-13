@@ -57,7 +57,7 @@ beforeEach(() => {
 });
 const open = () => {
   render(<BackgroundAgentSummary threadId="root" />);
-  fireEvent.click(screen.getByRole("button", { name: /个后台智能体/ }));
+  fireEvent.click(screen.getByRole("button", { name: /子智能体 ·/ }));
   fireEvent.click(screen.getByRole("button", { name: "全部停止" }));
 };
 it("requires explicit confirmation showing only verified current-round targets", async () => {

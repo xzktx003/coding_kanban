@@ -24,8 +24,8 @@ function actionLabel(tool: string, status: string) {
   if (status === "interrupted") return "已中断";
   const index = ["inProgress", "completed", "failed"].indexOf(status);
   return index < 0
-    ? "子任务活动"
-    : (actionLabels[actionAlias[tool] ?? tool]?.[index] ?? "子任务活动");
+    ? "子智能体"
+    : (actionLabels[actionAlias[tool] ?? tool]?.[index] ?? "子智能体");
 }
 /** Native jS(agentPath), before selecting the fallback name. */
 function pathName(path: unknown) {

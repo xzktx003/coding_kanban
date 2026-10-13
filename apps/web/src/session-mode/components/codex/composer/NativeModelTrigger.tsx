@@ -1,6 +1,5 @@
 import { forwardRef } from "react";
 import { useCodexStore } from "@session/components/codex/stores";
-import { useConfigStore } from "@session/components/codex/stores/useConfigStore";
 import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
 import { Button } from "@session/components/ui/button";
 import { NativeComposerIcon } from "./NativeComposerIcon";
@@ -14,14 +13,12 @@ export const NativeModelTrigger = forwardRef<
   React.ComponentProps<typeof Button>
 >(function NativeModelTrigger(props, ref) {
   const threadId = useCodexStore((s) => s.currentThreadId);
-  const fallbackModel = useConfigStore((state) => state.model);
   const { model, modelProvider, reasoningEffort } =
     useThreadModelSettings(threadId);
-  const shownModel = model || (!threadId ? fallbackModel : "");
   const { providerItems } = useModels();
   const label =
-    providerItems(modelProvider).find((item) => item.id === shownModel)?.label ??
-    shownModel ??
+    providerItems(modelProvider).find((item) => item.id === model)?.label ??
+    model ??
     "选择模型";
   const effort = reasoningEffort || "默认";
   return (
@@ -32,7 +29,7 @@ export const NativeModelTrigger = forwardRef<
         variant="ghost"
         size="sm"
         className="session-model-trigger session-native-model-trigger"
-        aria-label={`模型：${shownModel || "选择模型"}，${effort}`}
+        aria-label={`模型：${model || "选择模型"}，${effort}`}
         {...props}
       >
         <span className="session-native-model-label session-model-name">

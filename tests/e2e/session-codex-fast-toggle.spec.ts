@@ -91,7 +91,7 @@ for (const width of [1440, 375])
       await page
         .locator(".session-codex-composer")
         .first()
-        .getByRole("button", { name: /^模型：/ })
+        .getByRole("button", { name: "选择 ChatGPT 模型" })
         .click();
       const menu = page.locator(".session-native-model-menu");
       await expect(
@@ -189,7 +189,7 @@ test("the live native Fast catalog uses priority and still opens no submenu", as
   await page
     .locator(".session-codex-composer")
     .first()
-    .getByRole("button", { name: /^模型：/ })
+    .getByRole("button", { name: "选择 ChatGPT 模型" })
     .click();
   const menu = page.locator(".session-native-model-menu");
   await menu.getByRole("menuitemcheckbox", { name: "启用快速模式" }).click();

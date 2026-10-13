@@ -50,11 +50,30 @@ it("preserves a previously saved read-only choice", async () => {
     approvalPolicy: "untrusted",
   });
 });
-it("keeps subsequent workspace-write choices after reload", async () => {
+it("moves the saved request-approval default to full access", async () => {
   localStorage.setItem(
     key,
     JSON.stringify({
       version: 1,
+      state: {
+        sandbox: "workspace-write",
+        approvalPolicy: "on-request",
+        model: "kept-model",
+      },
+    }),
+  );
+  await useConfigStore.persist.rehydrate();
+  expect(useConfigStore.getState()).toMatchObject({
+    sandbox: "danger-full-access",
+    approvalPolicy: "never",
+    model: "kept-model",
+  });
+});
+it("keeps subsequent workspace-write choices after reload", async () => {
+  localStorage.setItem(
+    key,
+    JSON.stringify({
+      version: 2,
       state: {
         sandbox: "workspace-write",
         approvalPolicy: "on-request",

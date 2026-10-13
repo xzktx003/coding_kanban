@@ -50,7 +50,7 @@ export const nativeMarkdownLabels = (language: string) => {
   return {
     copy: "复制",
     copyCode: "复制代码",
-    copied: "已复制",
+    copied: "已复制代码",
     wrapOn: "启用自动换行",
     wrapOff: "禁用自动换行",
     moreCode: "代码块更多操作",

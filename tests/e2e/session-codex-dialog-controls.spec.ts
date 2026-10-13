@@ -367,6 +367,44 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
     "title",
     "折叠",
   );
+  await page.evaluate(() => {
+    Object.defineProperty(navigator.clipboard, "writeText", {
+      configurable: true,
+      value: async (text: string) => {
+        (window as unknown as { __planCopied?: string }).__planCopied = text;
+      },
+    });
+  });
+  await plan.getByRole("button", { name: "复制计划", exact: true }).click();
+  await expect(plan.getByRole("button", { name: "已复制", exact: true })).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __planCopied?: string }).__planCopied))
+    .toContain("先看范围，再改代码。");
+  await page.evaluate(() => {
+    const hidden: HTMLElement[] = [];
+    for (const node of document.querySelectorAll(
+      "[data-codex-approval-surface], .codex-elicitation",
+    )) {
+      if (node instanceof HTMLElement) {
+        node.dataset.planShotHidden = node.style.display;
+        node.style.display = "none";
+        hidden.push(node);
+      }
+    }
+    document.querySelector(".codex-plan")?.scrollIntoView({ block: "center" });
+    (window as unknown as { __planShotHidden?: HTMLElement[] }).__planShotHidden =
+      hidden;
+  });
+  await page.screenshot({
+    path: `${out}/control-plan-copy.png`,
+    animations: "disabled",
+  });
+  await page.evaluate(() => {
+    for (const node of document.querySelectorAll<HTMLElement>("[data-plan-shot-hidden]")) {
+      node.style.display = node.dataset.planShotHidden ?? "";
+      delete node.dataset.planShotHidden;
+    }
+  });
   await expect(plan).toContainText("先看范围，再改代码。");
 
   const card = page.locator("[data-codex-approval-surface]");
@@ -439,11 +477,15 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
     module.useElicitationStore.setState({ pendingRequests: [], drafts: {} });
   });
   await expect(toolApproval).toHaveCount(0);
-  const agents = page.getByRole("region", { name: "后台智能体" });
-  await expect(agents.getByRole("button", { name: /1 个后台智能体/ })).toBeVisible();
-  await agents.getByRole("button", { name: /展开后台智能体详情/ }).click();
+  const agents = page.getByRole("region", { name: "子智能体" });
+  await expect(agents.getByRole("button", { name: /子智能体 · 1/ })).toBeVisible();
+  await agents.getByRole("button", { name: /打开子智能体/ }).click();
+  await page.screenshot({
+    path: `${out}/control-subagents.png`,
+    animations: "disabled",
+  });
   await expect(agents).toContainText("检查测试");
-  await expect(agents).toContainText("正在运行");
+  await expect(agents).toContainText("处理中");
   await expect(agents).toContainText("（使用 @ 标记智能体）");
   await expect(agents.getByText("fixture-model")).toHaveAttribute("title", "使用 fixture-model");
   await expect(agents.getByRole("button", { name: "全部停止" })).toHaveAttribute(
@@ -455,7 +497,7 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
     animations: "disabled",
   });
   await agents.getByRole("button", { name: "全部停止" }).click();
-  const stopAll = page.getByRole("dialog", { name: "停止本轮后台智能体" });
+  const stopAll = page.getByRole("dialog", { name: "停止本轮子智能体" });
   await expect(stopAll).toContainText("检查测试");
   await stopAll.getByRole("button", { name: "确认停止" }).click();
   await expect
@@ -469,7 +511,7 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
       ),
     )
     .toBe(true);
-  await agents.getByRole("button", { name: /收起后台智能体的详情/ }).click();
+  await agents.getByRole("button", { name: /返回子智能体/ }).click();
   await page.evaluate(async () => {
     const load = (path: string) =>
       import(
@@ -793,14 +835,14 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
   const changes = page.getByRole("menuitem", { name: "显示/隐藏“变更”面板" });
   await expect(changes).toBeVisible();
   await changes.click();
-  await expect(page.getByRole("button", { name: "变更", pressed: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "查看变更", pressed: true })).toBeVisible();
   await page.screenshot({
     path: `${out}/control-changes-panel.png`,
     animations: "disabled",
   });
   await page.getByRole("button", { name: "当前会话的更多操作" }).click();
   await page.getByRole("menuitem", { name: "显示/隐藏“变更”面板" }).click();
-  await expect(page.getByRole("button", { name: "变更", pressed: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "查看变更", pressed: true })).toHaveCount(0);
   await page.getByRole("button", { name: "当前会话的更多操作" }).click();
   const terminal = page.getByRole("menuitem", { name: "打开终端面板" });
   await expect(terminal).toBeVisible();
@@ -1290,9 +1332,16 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
   await upgrade.getByRole("button", { name: "立即切换" }).click();
   await expect(page.getByText("此对话将自动切换到 接替模型")).toHaveCount(0);
   await expect(
-    page.locator(".session-codex-composer").getByRole("button", { name: /fixture-next/ }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: /^模型：/ }).click();
+    page.locator(".session-codex-composer").getByRole("button", { name: "选择 ChatGPT 模型" }),
+  ).toContainText("接替模型");
+  await page.locator(".session-codex-composer").getByRole("button", { name: "附加文件", exact: true }).click();
+  await expect(page.getByRole("button", { name: "附加照片或视频", exact: true })).toBeVisible();
+  await page.screenshot({
+    path: `${out}/control-attach-menu.png`,
+    animations: "disabled",
+  });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "选择 ChatGPT 模型", exact: true }).click();
   const chooseModel = page.getByRole("menuitem", { name: "选择模型" });
   if (await chooseModel.isVisible()) await chooseModel.click();
   const recentModels = page.getByRole("button", { name: "打开最近使用的模型" });
@@ -1620,7 +1669,7 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
 
   await page.setViewportSize({ width: 1440, height: 2400 });
   await page.getByRole("button", { name: "当前会话的更多操作" }).click();
-  const focusSideClosed = page.getByRole("menuitem", { name: "聚焦侧边聊天", exact: true });
+  const focusSideClosed = page.getByRole("menuitem", { name: "打开侧边聊天", exact: true });
   await expect(focusSideClosed).toBeVisible();
   await page.screenshot({
     path: `${out}/control-focus-side-menu.png`,
@@ -1639,8 +1688,8 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
   await expect(sideInput).toBeVisible();
   await page.locator(".session-top-icon").first().focus();
   await page.getByRole("button", { name: "当前会话的更多操作" }).click();
-  await page.getByRole("menuitem", { name: "聚焦侧边聊天", exact: true }).click();
-  await expect(page.getByText("已聚焦侧边聊天")).toBeVisible();
+  await page.getByRole("menuitem", { name: "打开侧边聊天", exact: true }).click();
+  await expect(page.getByText("已打开侧边聊天")).toBeVisible();
   await expect(sideInput).toBeFocused();
   await page.screenshot({
     path: `${out}/control-focus-side.png`,
@@ -1740,7 +1789,7 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
   });
   await page
     .locator(".session-codex-composer")
-    .getByRole("button", { name: "添加附件与上下文" })
+    .getByRole("button", { name: "附加文件" })
     .click();
   await page.getByRole("button", { name: "画草图", exact: true }).click();
   const drawing = page.getByRole("img", { name: "绘图画布", exact: true });
@@ -1891,7 +1940,7 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
 
   await page
     .locator(".session-codex-composer")
-    .getByRole("button", { name: "添加附件与上下文" })
+    .getByRole("button", { name: "附加文件" })
     .click();
   await expect(page.getByRole("button", { name: "文件和文件夹" })).toBeVisible();
   await shot("control-files-folders");
@@ -1906,7 +1955,7 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
 
   await page
     .locator(".session-codex-composer")
-    .getByRole("button", { name: "添加附件与上下文" })
+    .getByRole("button", { name: "附加文件" })
     .click();
   await page.getByRole("button", { name: "展开编辑", exact: true }).click();
   const expanded = page.getByRole("dialog", { name: "展开编辑" });
@@ -2612,7 +2661,7 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
   await page.evaluate(() => {
     const composer = document.querySelector(".session-codex-composer");
     const add = [...(composer?.querySelectorAll("button") ?? [])].find(
-      (node) => node.getAttribute("aria-label") === "添加附件与上下文",
+      (node) => node.getAttribute("aria-label") === "附加文件",
     );
     if (add instanceof HTMLButtonElement) add.click();
   });

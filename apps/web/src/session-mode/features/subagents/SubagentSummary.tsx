@@ -24,6 +24,7 @@ export function SubagentSummary({ root }: { root: string | null }) {
   const active = rows.filter((row) => !DONE.has(row.state));
   const uncertain =
     !family?.complete || rows.some((row) => row.state === "unknown");
+  if (!uncertain && active.length === 0) return null;
   return (
     <div className="session-subagent-summary">
       <div className="session-subagent-summary-row">
@@ -32,20 +33,18 @@ export function SubagentSummary({ root }: { root: string | null }) {
           aria-expanded={expanded}
           onClick={() => setExpanded(!expanded)}
         >
-          {expanded ? "▾" : "▸"} 子任务 ·{" "}
-          {uncertain ? "进行中待确认" : `进行中 ${active.length}`}
+          {expanded ? "▾" : "▸"} 子智能体 ·{" "}
+          {uncertain ? "已开启 · 待确认" : `已开启 · ${active.length}`}
         </button>
         <button
           type="button"
           aria-expanded={open}
           onClick={() => (open ? closeSubagents() : openSubagents(root))}
         >
-          {open ? "收起子任务" : "查看子任务"}
+          {open ? "返回子智能体" : "打开子智能体"}
         </button>
       </div>
-      {parentFinished && active.length > 0 && (
-        <small>主任务已结束 · 子任务仍在执行或等待处理</small>
-      )}
+      {parentFinished && active.length > 0 ? null : null}
       {expanded &&
         active.slice(0, 4).map((row) => (
           <button

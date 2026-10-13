@@ -172,7 +172,7 @@ export function WorkbenchShell() {
       )}
       {codexVisited && (
         <div
-          className="codex-mode"
+          className="codex-mode dark"
           hidden={mode !== "codex"}
           inert={mode !== "codex"}
         >

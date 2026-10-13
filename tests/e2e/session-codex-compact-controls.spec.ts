@@ -283,7 +283,7 @@ for (const touch of [false, true])
           });
         });
         await expect(
-          composer.getByRole("button", { name: "停止", exact: true }),
+          composer.getByRole("button", { name: "停止生成", exact: true }),
         ).toBeVisible();
         await expect(
           composer.getByRole("button", { name: "排队消息", exact: true }),

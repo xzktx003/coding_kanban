@@ -4,7 +4,7 @@ const http = require('node:http');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const vscode = require('vscode');
-const { openThread, resumeThread, threadUri, validateFixturePanels, openFixturePanels, validateNewChatPanels, restoreNewChatThread, openNewChatPanels } = require('./control.cjs');
+const { openThread, resumeThread, validateResumeBeside, resumeThreadBeside, validateNewChatBeside, openNewChatBeside, focusNativeWindow, threadUri, validateFixturePanels, openFixturePanels, validateNewChatPanels, restoreNewChatThread, openNewChatPanels } = require('./control.cjs');
 const { MAX_BODY_BYTES, SUPPORTED_OFFICIAL_VERSION, createNativeAppServerSender } = require('./appserver-send.cjs');
 let server; let disposeActivation;
 const officialAtModuleLoad = vscode.extensions?.getExtension?.('openai.chatgpt');
@@ -64,16 +64,16 @@ async function activate(context) {
   if (config.autoOpenFixtures === true && config.autoOpenNewChats === true) throw new Error('fixture and new chat startup are mutually exclusive');
   if (Object.hasOwn(config, 'newChatWindowIds')) validateNewChatPanels(config.newChatWindowIds);
   for (const id of config.threads) threadUri(id, config.threads);
-  const opened = []; let opening = false;
+  const opened = []; let opening = false; const openingThreads = new Set(); const openingNewWindows = new Set();
   const fixtures = Object.freeze(config.threads.slice(0, 2));
   const autoOpenFixtures = { enabled: config.autoOpenFixtures === true, state: config.autoOpenFixtures === true ? 'pending' : 'disabled' };
   const newChatWindows = Object.freeze((config.newChatWindowIds ?? []).slice());
   const autoOpenNewChats = { enabled: config.autoOpenNewChats === true, state: config.autoOpenNewChats === true ? 'pending' : 'disabled' };
   if (autoOpenFixtures.enabled) validateFixturePanels(fixtures);
   if (autoOpenNewChats.enabled) validateNewChatPanels(newChatWindows);
-  let disposed = false; const commandDisposables = []; let ownedServer; let sender;
+  let disposed = false; const commandDisposables = []; let ownedServer; let sender; let instanceServer; let instanceMarker; let instanceRegistryFile;
   const assertActive = () => { if (disposed) throw new Error('companion instance disposed'); };
-  disposeActivation = () => { disposed = true; restoreProviderRegistrationCapture(); sender?.dispose(); for (const item of commandDisposables) item.dispose(); ownedServer?.close(); if (server === ownedServer) server = null; };
+  disposeActivation = () => { disposed = true; restoreProviderRegistrationCapture(); sender?.dispose(); for (const item of commandDisposables) item.dispose(); instanceMarker?.dispose(); instanceServer?.close(); if (instanceRegistryFile) { try { fs.unlinkSync(instanceRegistryFile); } catch {} } ownedServer?.close(); if (server === ownedServer) server = null; };
   context.subscriptions.push({ dispose: disposeActivation });
   const instanceId = crypto.randomUUID();
   const broker = { enabled: false, scope: 'first-listener-instance', pid: process.pid, instanceId };
@@ -134,21 +134,27 @@ async function activate(context) {
     return openCapturedNewChats();
   }));
   context.subscriptions.push(...commandDisposables);
-  server = http.createServer(async (request, response) => {
+  const handleBrokerRequest = async (request, response) => {
     const send = (status, value) => { if (response.writableEnded || response.destroyed) return; response.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' }); response.end(JSON.stringify(value)); };
     const supplied = Buffer.from(request.headers.authorization || ''); const expected = Buffer.from(`Bearer ${config.token}`);
     if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return send(401, { error: 'unauthorized' });
     if (disposed) return send(503, { error: 'companion instance disposed' });
-    if (request.method === 'GET' && request.url === '/status') return send(200, { ...activationStatus(opened), activationError, broker, autoOpenFixtures, autoOpenNewChats, sendBridge,
+    if (request.method === 'GET' && request.url === '/status') return send(200, { ...activationStatus(opened), activationError, broker, instanceBroker: { enabled: Boolean(instanceServer?.listening), instanceId }, autoOpenFixtures, autoOpenNewChats, sendBridge,
       sendAvailable: sender?.available === true, ...(sender?.available ? {} : { sendReason }) });
-    if (request.method !== 'POST' || !['/open', '/restore', '/resume', '/send'].includes(request.url)) return send(404, { error: 'unsupported operation' });
+    if (request.method !== 'POST' || !['/open', '/restore', '/resume', '/resume-beside', '/new-beside', '/focus', '/send', '/release'].includes(request.url)) return send(404, { error: 'unsupported operation' });
+    const releasing = request.url === '/release';
+    if (releasing && (!instanceServer?.listening || request.socket.localPort !== instanceServer.address()?.port)) return send(404, { error: 'unsupported operation' });
     const restoringNewChat = request.url === '/restore';
     const resumingThread = request.url === '/resume';
+    const resumingBeside = request.url === '/resume-beside';
+    const openingNewBeside = request.url === '/new-beside';
+    const focusing = request.url === '/focus';
     const sending = request.url === '/send';
     if (sending && !sender?.available) return send(503, { error: 'native Codex send is unavailable' });
     if (restoringNewChat && !autoOpenNewChats.enabled) return send(404, { error: 'unsupported operation' });
-    if (opening) return send(409, { error: 'panel opening in progress' });
-    opening = true;
+    if (!resumingBeside && !openingNewBeside && !focusing && !releasing && opening) return send(409, { error: 'panel opening in progress' });
+    if (!resumingBeside && !openingNewBeside && !focusing && !releasing) opening = true;
+    let pendingThreadId; let pendingWindowId;
     let body = ''; request.setTimeout(5000, () => request.destroy());
     const bodyDeadline = setTimeout(() => request.destroy(), 5000);
     let executionDeadline;
@@ -159,6 +165,27 @@ async function activate(context) {
       // VS Code commands cannot be cancelled. A timeout replies but retains the lock until the command settles.
       executionDeadline = setTimeout(() => send(504, { error: 'panel command timed out; still waiting for VS Code' }), 20000);
       const input = JSON.parse(body);
+      if (releasing) {
+        if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).join(',') !== 'currentInstanceId' ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.currentInstanceId) || input.currentInstanceId === instanceId)
+          return send(400, { error: 'invalid native host handoff' });
+        send(200, { released: true });
+        // The browser requested this destructive handoff explicitly. Only this extension host exits.
+        setTimeout(() => { disposeActivation(); process.kill(process.pid, 'SIGTERM'); }, 25);
+        return;
+      }
+      if (resumingBeside) {
+        const validated = validateResumeBeside(input);
+        if (openingThreads.has(validated.threadId)) { send(409, { error: 'this conversation is already opening' }); return; }
+        pendingThreadId = validated.threadId;
+        openingThreads.add(pendingThreadId);
+      }
+      if (openingNewBeside) {
+        const validated = validateNewChatBeside(input);
+        if (openingNewWindows.has(validated.windowId)) { send(409, { error: 'this new chat is already opening' }); return; }
+        pendingWindowId = validated.windowId;
+        openingNewWindows.add(pendingWindowId);
+      }
       if (restoringNewChat) {
         const result = await restoreNewChatThread(vscode, input, newChatWindows);
         remember([{ windowId: result.windowId, column: result.column, kind: 'restore' }]);
@@ -167,6 +194,19 @@ async function activate(context) {
         const result = await resumeThread(vscode, input);
         remember([{ threadId: result.threadId, column: result.column, kind: 'resume' }]);
         send(200, { opened: true });
+      } else if (resumingBeside) {
+        const result = await resumeThreadBeside(vscode, input);
+        remember([{ threadId: result.threadId, column: result.column, kind: 'resume-beside' }]);
+        send(200, { opened: true, column: result.column });
+        await result.settled;
+      } else if (openingNewBeside) {
+        const result = await openNewChatBeside(vscode, input);
+        remember([{ windowId: result.windowId, column: result.column, kind: 'new-beside' }]);
+        send(200, { opened: true, column: result.column });
+        await result.settled;
+      } else if (focusing) {
+        const result = await focusNativeWindow(vscode, input);
+        send(200, result);
       } else if (sending) {
         send(200, await sender.send(input));
       } else {
@@ -174,8 +214,9 @@ async function activate(context) {
         send(200, result);
       }
     } catch (error) { send(Number.isInteger(error.statusCode) ? error.statusCode : 400, { error: String(error.message).slice(0, 240) }); }
-    finally { clearTimeout(bodyDeadline); clearTimeout(executionDeadline); opening = false; }
-  });
+    finally { clearTimeout(bodyDeadline); clearTimeout(executionDeadline); if (pendingThreadId) openingThreads.delete(pendingThreadId); if (pendingWindowId) openingNewWindows.delete(pendingWindowId); if (!resumingBeside && !openingNewBeside && !focusing && !releasing) opening = false; }
+  };
+  server = http.createServer(handleBrokerRequest);
   ownedServer = server;
   // A retained browser extension host may still own the fixed port. Never replace it or pick another port.
   try {
@@ -209,6 +250,25 @@ async function activate(context) {
     }
     if (disposed) return;
     const directory = path.dirname(process.env.NATIVE_CODEX_COMPANION_CONFIG);
+    instanceServer = http.createServer(handleBrokerRequest);
+    await new Promise((resolve, reject) => {
+      const onError = error => { instanceServer.off('listening', onListening); reject(error); };
+      const onListening = () => { instanceServer.off('error', onError); resolve(); };
+      instanceServer.once('error', onError); instanceServer.once('listening', onListening);
+      instanceServer.listen(0, '127.0.0.1');
+    });
+    assertActive();
+    const instanceAddress = instanceServer.address();
+    if (!instanceAddress || typeof instanceAddress !== 'object' || !Number.isInteger(instanceAddress.port)) throw new Error('instance broker has no owned loopback port');
+    instanceRegistryFile = path.join(directory, `companion-session-${instanceId}.json`);
+    fs.writeFileSync(instanceRegistryFile, JSON.stringify({ instanceId, pid: process.pid, port: instanceAddress.port, token: config.token }), { mode: 0o600, flag: 'wx' });
+    if (typeof vscode.window.createStatusBarItem === 'function') {
+      instanceMarker = vscode.window.createStatusBarItem(vscode.StatusBarAlignment?.Right ?? 2, -9999);
+      instanceMarker.name = 'Coding Kanban native instance';
+      instanceMarker.text = `Kanban host ${instanceId}`;
+      instanceMarker.tooltip = 'Coding Kanban native control';
+      instanceMarker.show();
+    }
     const activatedAt = new Date().toISOString();
     // Per-instance diagnostics contain flags/counts only; a disabled instance must not overwrite owner readiness.
     fs.writeFileSync(path.join(directory, `companion-instance-${process.pid}-${instanceId}.json`), JSON.stringify({

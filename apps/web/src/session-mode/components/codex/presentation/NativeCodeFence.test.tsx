@@ -57,6 +57,20 @@ it("does not let a stale highlighter return replace the current code", async () 
   );
 });
 
+it("shows copied code after the clipboard accepts the source", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  render(<NativeCodeFence code={"exact source\n"} language="text" />);
+  fireEvent.click(screen.getByRole("button", { name: "复制代码" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "已复制代码" })).toBeTruthy(),
+  );
+  expect(writeText).toHaveBeenCalledWith("exact source\n");
+});
+
 it("copies the captured code and reports a rejected clipboard operation truthfully", async () => {
   const danger = vi.spyOn(nativeNotifications, "danger");
   const writeText = vi.fn().mockRejectedValue(new Error("Clipboard denied"));
@@ -65,7 +79,7 @@ it("copies the captured code and reports a rejected clipboard operation truthful
     value: { writeText },
   });
   render(<NativeCodeFence code={"exact source\n"} language="text" />);
-  fireEvent.click(screen.getByRole("button", { name: "复制" }));
+  fireEvent.click(screen.getByRole("button", { name: "复制代码" }));
   await waitFor(() =>
     expect(danger).toHaveBeenCalledWith("无法复制到剪贴板", {
       id: "copy-to-clipboard-error",
@@ -74,7 +88,7 @@ it("copies the captured code and reports a rejected clipboard operation truthful
   );
   expect(screen.queryByRole("alert")).toBeNull();
   expect(writeText).toHaveBeenCalledWith("exact source\n");
-  expect(screen.queryByRole("button", { name: "已复制" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "已复制代码" })).toBeNull();
 });
 
 it("keeps source download reachable from the compact native menu", async () => {
@@ -131,13 +145,13 @@ it("locks repeated copy clicks while clipboard permission is pending and during 
     value: { writeText },
   });
   render(<NativeCodeFence code="source" language="typescript" />);
-  const button = screen.getByRole("button", { name: "复制" });
+  const button = screen.getByRole("button", { name: "复制代码" });
   fireEvent.click(button);
   expect(button.getAttribute("aria-busy")).toBe("true");
   expect(button.getAttribute("aria-disabled")).toBe("true");
   fireEvent.click(button);
   expect(writeText).toHaveBeenCalledTimes(1);
   await act(async () => finish());
-  fireEvent.click(screen.getByRole("button", { name: "已复制" }));
+  fireEvent.click(screen.getByRole("button", { name: "已复制代码" }));
   expect(writeText).toHaveBeenCalledTimes(1);
 });

@@ -38,7 +38,7 @@ interface TabConfig {
 
 // Order tabs the way users scan them: work-in-progress first, reference last.
 const TAB_BUTTONS: TabConfig[] = [
-  { tab: "diff", icon: Diff, label: "变更" },
+  { tab: "diff", icon: Diff, label: "查看变更" },
   { tab: "todo", icon: ListTodo, label: "待办" },
   { tab: "vscode", icon: VsCodeIcon, label: "VS Code" },
   { tab: "terminal", icon: SquareTerminal, label: "终端" },

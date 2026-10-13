@@ -11,13 +11,13 @@ export interface BackgroundAgentRow {
 }
 
 const labels: Record<ChildState, string> = {
-  running: "正在运行",
-  pending: "正在运行",
-  waiting: "正在等待指示",
+  running: "处理中",
+  pending: "处理中",
+  waiting: "等待中",
   completed: "已完成",
-  failed: "已完成",
-  stopped: "已完成",
-  unknown: "正在等待指示",
+  failed: "未成功",
+  stopped: "已停止",
+  unknown: "等待中",
 };
 
 export function backgroundAgentRows(
@@ -39,5 +39,5 @@ export function backgroundAgentRows(
 }
 
 export function backgroundAgentSummary(count: number) {
-  return `${count} 个后台智能体`;
+  return `子智能体 · ${count}`;
 }

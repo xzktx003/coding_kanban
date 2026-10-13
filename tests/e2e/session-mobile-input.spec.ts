@@ -198,9 +198,9 @@ for (const kind of ["codex", "cc"] as const)
     await input.fill("A 图片草稿");
     const height = await page.locator(".session-compact-frame").boundingBox();
     await page
-      .getByRole("button", { name: "添加附件与上下文", exact: true })
+      .getByRole("button", { name: "附加文件", exact: true })
       .tap();
-    const upload = page.getByRole("button", { name: "上传图片", exact: true });
+    const upload = page.getByRole("button", { name: "附加照片或视频", exact: true });
     await expect(upload).toBeInViewport();
     await expect
       .poll(async () => (await upload.boundingBox())!.height)

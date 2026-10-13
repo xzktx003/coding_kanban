@@ -33,11 +33,11 @@ describe("background agent summary", () => {
         id: "child",
         title: "child",
         state: "waiting",
-        label: "正在等待指示",
+        label: "等待中",
         model: "fixture-model",
       },
     ]);
-    expect(backgroundAgentSummary(2)).toBe("2 个后台智能体");
+    expect(backgroundAgentSummary(2)).toBe("子智能体 · 2");
     expect(backgroundAgentRows({}, null, {})).toEqual([]);
   });
 });

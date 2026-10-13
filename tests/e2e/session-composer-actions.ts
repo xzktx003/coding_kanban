@@ -11,7 +11,7 @@ export async function composerAction(
   });
   if (!(await action.isVisible()))
     await page
-      .getByRole("button", { name: "添加附件与上下文", exact: true })
+      .getByRole("button", { name: "附加文件", exact: true })
       .click();
   await expect(action).toBeVisible();
   await action.click({ timeout });

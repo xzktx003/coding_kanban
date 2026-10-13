@@ -355,7 +355,7 @@ for (const profile of profiles) {
         for (const control of metrics.controls.filter(
           (control) =>
             control.name &&
-            /发送|模型：|执行权限|展开编辑|输入状态/.test(
+            /发送消息|模型：|执行权限|展开编辑|输入状态/.test(
               control.name,
             ),
         )) {

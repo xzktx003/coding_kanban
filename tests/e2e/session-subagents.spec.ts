@@ -221,7 +221,7 @@ async function setup(
     throw e;
   });
   const openChildren = page.getByRole("button", {
-    name: "查看子任务",
+    name: "打开子智能体",
     exact: true,
   });
   await openChildren.waitFor({ timeout: 20000 });
@@ -364,8 +364,8 @@ test("interactive child draft and image restore after refresh without changing t
       ),
     });
   await expect(page.locator(".session-subagent-input")).toContainText("ready");
-  await page.getByRole("button", { name: "收起子任务", exact: true }).click();
-  await page.getByRole("button", { name: "查看子任务", exact: true }).click();
+  await page.getByRole("button", { name: "返回子智能体", exact: true }).click();
+  await page.getByRole("button", { name: "打开子智能体", exact: true }).click();
   await expect(childDraft).toHaveValue("子草稿输入一半");
   // This case verifies durable drafts after completed reads; navigation-aborted
   // background reads are exercised separately from page runtime errors.
@@ -428,7 +428,7 @@ test("role mentions retain native identity in a parent submission; the panel doe
   await expect(panel.getByRole("heading", { name: /已开启/ })).toBeVisible();
   await expect(panel.getByRole("button", { name: /停止/ })).toHaveCount(0);
   await expect(panel.getByLabel("搜索子任务")).toHaveCount(0);
-  await page.getByRole("button", { name: "收起子任务", exact: true }).click();
+  await page.getByRole("button", { name: "返回子智能体", exact: true }).click();
   await page.getByRole("button", { name: "引用子 Agent 或配置角色" }).click();
   await page
     .locator(".session-agent-mention-menu")
@@ -489,6 +489,67 @@ test("active and done sections list every descendant without a round filter", as
   expect(f.calls.filter((c) => c.path.endsWith("/stop"))).toEqual([]);
   expect(f.errors).toEqual([]);
 });
+test("a finished family leaves the composer summary hidden and shows the empty panel", async ({
+  page,
+}) => {
+  await page.goto("/?mode=session&view=agent", { waitUntil: "domcontentloaded" });
+  await page.getByRole("tablist", { name: "关注会话" }).waitFor();
+  await page.evaluate(async () => {
+    const load = (path: string) =>
+      import(
+        performance
+          .getEntriesByType("resource")
+          .findLast((entry) => new URL(entry.name).pathname === path)?.name ?? path
+      );
+    const store = await load("/src/session-mode/features/subagents/store.ts");
+    const done = {
+      thread: {
+        id: "done-child",
+        name: "已完成检查",
+        status: { type: "idle" },
+        turns: [
+          {
+            id: "done-turn",
+            status: "completed",
+            items: [],
+            startedAt: 1,
+            completedAt: 2,
+          },
+        ],
+      },
+      parentId: "ux-0",
+      verified: true,
+      revision: 1,
+    };
+    store.useSubagentStore.setState({
+      nodes: { "done-child": done },
+      families: { "ux-0": { complete: true, loading: false, error: null } },
+    });
+  });
+  await expect(page.getByRole("button", { name: /子智能体 · 已开启/ })).toHaveCount(
+    0,
+  );
+  await page.screenshot({
+    path: `${process.env.CODEX_UI_SHOTS ?? "test-results"}/control-subagents-hidden.png`,
+    animations: "disabled",
+  });
+  await page.evaluate(async () => {
+    const path = "/src/session-mode/features/subagents/service.ts";
+    const module = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast((entry) => new URL(entry.name).pathname === path)?.name ?? path
+    );
+    module.openSubagents("ux-0");
+  });
+  const panel = page.locator(".session-subagent-panel");
+  await expect(panel.getByText("已开启 · 0", { exact: true })).toBeVisible();
+  await expect(panel.getByText("没有已开启的子代理")).toBeVisible();
+  await page.screenshot({
+    path: `${process.env.CODEX_UI_SHOTS ?? "test-results"}/control-subagents-empty.png`,
+    animations: "disabled",
+  });
+});
 test("incomplete discovery retains unavailable identities and avoids claiming completion", async ({
   page,
 }) => {
@@ -500,13 +561,13 @@ test("incomplete discovery retains unavailable identities and avoids claiming co
   f.discovery.complete = false;
   f.discovery.errors = ["fixture history unavailable"];
   f.discovery.unavailableIds = ["child-atlas"];
-  await page.getByRole("button", { name: "收起子任务", exact: true }).click();
-  await page.getByRole("button", { name: "查看子任务", exact: true }).click();
+  await page.getByRole("button", { name: "返回子智能体", exact: true }).click();
+  await page.getByRole("button", { name: "打开子智能体", exact: true }).click();
   await expect(page.locator('[data-subagent-id="child-atlas"]')).toContainText(
     "待确认",
   );
   await expect(
-    page.getByText("子任务信息未完整确认，保留已知记录", { exact: false }),
+    page.getByText("此子智能体在当前分支上已不可用。", { exact: false }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: /已开启 · 0/ })).toHaveCount(
     0,
@@ -693,9 +754,12 @@ test("background batch stop confirms only this round and rejects a stale confirm
   page,
 }) => {
   const f = await setup(page, { oldRound: true });
-  await page.getByRole("button", { name: /个后台智能体/ }).click();
+  await page
+    .getByRole("region", { name: "子智能体" })
+    .getByRole("button", { name: /打开子智能体/ })
+    .click();
   await page.getByRole("button", { name: "全部停止", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "停止本轮后台智能体" });
+  const dialog = page.getByRole("dialog", { name: "停止本轮子智能体" });
   await expect(dialog).toContainText("Atlas");
   await expect(dialog).not.toContainText("Iris");
   expect(f.calls.filter((c) => c.path.endsWith("/stop"))).toEqual([]);
@@ -728,9 +792,12 @@ test("an old batch-stop confirmation stays invalid after the scope returns", asy
   page,
 }) => {
   const f = await setup(page, { oldRound: true });
-  await page.getByRole("button", { name: /个后台智能体/ }).click();
+  await page
+    .getByRole("region", { name: "子智能体" })
+    .getByRole("button", { name: /打开子智能体/ })
+    .click();
   await page.getByRole("button", { name: "全部停止", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "停止本轮后台智能体" });
+  const dialog = page.getByRole("dialog", { name: "停止本轮子智能体" });
   await expect(dialog).toContainText("Atlas");
   await page.evaluate(async () => {
     const path = "/src/session-mode/components/codex/stores/index.ts";

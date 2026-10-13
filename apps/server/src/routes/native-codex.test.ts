@@ -31,6 +31,9 @@ import {
   NativeCodexGateway,
   validateNativeCodexUpstream,
   validateNativeCodexResume,
+  validateNativeCodexResumeBeside,
+  validateNativeCodexNewBeside,
+  validateNativeCodexReleaseInstance,
 } from "../services/native-codex-gateway.js";
 
 async function setup(handler: RequestListener = (_req, res) => res.end("ok")) {
@@ -47,6 +50,7 @@ async function setup(handler: RequestListener = (_req, res) => res.end("ok")) {
       port: address.port,
       protocol: "http",
       projectDir: join(dir, "project"),
+      runtimeRoot: dir,
       extensionVersion: "26.1.2",
       threads: [{ id: "fixture-a", title: "First fixture" }],
       brokerAuthFile: "/private/auth.json",
@@ -388,6 +392,50 @@ test("same-origin restore forwards only a captured window and observed local thr
   }
 });
 
+test("restore in a visible host instance never reaches the stale fixed broker", async () => {
+  const fixture = await setup();
+  const instanceId = "019aabcd-1234-7890-abcd-0123456789ae";
+  const windowIds = ["019aabcd-5678-7890-abcd-0123456789ab", "019aabcd-5678-7890-abcd-0123456789ac"];
+  const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  let received = "";
+  const broker = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    request.on("end", () => {
+      received = `${request.url} ${Buffer.concat(chunks).toString("utf8")}`;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ restored: true }));
+    });
+  });
+  broker.listen(0, "127.0.0.1");
+  await once(broker, "listening");
+  const address = broker.address();
+  assert.ok(address && typeof address !== "string");
+  let staleCalls = 0;
+  const stale = createServer((_request, response) => { staleCalls++; response.writeHead(503); response.end(); });
+  stale.listen(0, "127.0.0.1");
+  await once(stale, "listening");
+  const staleAddress = stale.address();
+  assert.ok(staleAddress && typeof staleAddress !== "string");
+  const authFile = join(fixture.dir, "restore-stale-auth.json");
+  await writeFile(authFile, JSON.stringify({ port: staleAddress.port, token }), { mode: 0o600 });
+  await writeFile(join(fixture.dir, `companion-session-${instanceId}.json`), JSON.stringify({ instanceId, port: address.port, token }), { mode: 0o600 });
+  const record = JSON.parse(await readFile(fixture.record, "utf8"));
+  await writeFile(fixture.record, JSON.stringify({ ...record, panelMode: "new-chats", newChatWindowIds: windowIds, brokerPort: staleAddress.port, brokerAuthFile: authFile }), { mode: 0o600 });
+  try {
+    const body = { windowId: windowIds[0], threadId: "019aabcd-1234-7890-abcd-0123456789ab", column: 1, instanceId };
+    const response = await fetch(`${fixture.origin}/api/native-codex/restore`, { method: "POST", headers: { origin: fixture.origin, "content-type": "application/json" }, body: JSON.stringify(body) });
+    assert.equal(response.status, 202);
+    assert.equal(received, `/restore ${JSON.stringify({ windowId: body.windowId, threadId: body.threadId, column: body.column })}`);
+    assert.equal(staleCalls, 0);
+  } finally {
+    broker.closeAllConnections(); stale.closeAllConnections();
+    await new Promise<void>((resolve) => broker.close(() => resolve()));
+    await new Promise<void>((resolve) => stale.close(() => resolve()));
+    await fixture.close();
+  }
+});
+
 test("same-origin resume opens the exact selected thread through the private broker", async () => {
   const fixture = await setup();
   const brokerToken =
@@ -505,6 +553,170 @@ test("resume validates an exact thread and supported editor column", () => {
     { ...value, extra: true },
   ])
     assert.throws(() => validateNativeCodexResume(invalid));
+});
+
+test("multiwindow resume validates only a thread and preserves broker conflict status", async () => {
+  const threadId = "019aabcd-1234-7890-abcd-0123456789ab";
+  const instanceId = "019aabcd-1234-7890-abcd-0123456789ac";
+  assert.deepEqual(validateNativeCodexResumeBeside({ threadId, instanceId }), { threadId, instanceId });
+  assert.deepEqual(validateNativeCodexNewBeside({ windowId: threadId, instanceId }), { windowId: threadId, instanceId });
+  for (const invalid of [{ threadId, instanceId, column: 1 }, { threadId: "../bad", instanceId }])
+    assert.throws(() => validateNativeCodexResumeBeside(invalid));
+  assert.throws(() => validateNativeCodexNewBeside({ windowId: threadId, instanceId, command: "evil" }));
+  const fixture = await setup();
+  const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  let brokerStatus = 409;
+  const received: Array<{ path: string; body: string }> = [];
+  const broker = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    request.on("end", () => {
+      received.push({ path: request.url ?? "", body: Buffer.concat(chunks).toString("utf8") });
+      response.writeHead(brokerStatus, { "content-type": "application/json" });
+      response.end(brokerStatus === 200 ? JSON.stringify({ [request.url === "/focus" ? "focused" : "opened"]: true, column: 12 }) : JSON.stringify({ error: "already opening" }));
+    });
+  });
+  broker.listen(0, "127.0.0.1");
+  await once(broker, "listening");
+  const address = broker.address();
+  assert.ok(address && typeof address !== "string");
+  let wrongInstanceCalls = 0;
+  const wrongInstance = createServer((_request, response) => { wrongInstanceCalls++; response.writeHead(503); response.end(); });
+  wrongInstance.listen(0, "127.0.0.1");
+  await once(wrongInstance, "listening");
+  const wrongAddress = wrongInstance.address();
+  assert.ok(wrongAddress && typeof wrongAddress !== "string");
+  const authFile = join(fixture.dir, "multiwindow-auth.json");
+  await writeFile(authFile, JSON.stringify({ port: wrongAddress.port, token }), { mode: 0o600 });
+  await writeFile(join(fixture.dir, `companion-session-${instanceId}.json`), JSON.stringify({ instanceId, port: address.port, token }), { mode: 0o600 });
+  const record = JSON.parse(await readFile(fixture.record, "utf8"));
+  await writeFile(fixture.record, JSON.stringify({ ...record, brokerPort: wrongAddress.port, brokerAuthFile: authFile }), { mode: 0o600 });
+  try {
+    const response = await fetch(`${fixture.origin}/api/native-codex/resume-beside`, {
+      method: "POST",
+      headers: { origin: fixture.origin, "content-type": "application/json" },
+      body: JSON.stringify({ threadId, instanceId }),
+    });
+    assert.equal(response.status, 409);
+    const foreign = await fetch(`${fixture.origin}/api/native-codex/resume-beside`, {
+      method: "POST",
+      headers: { origin: "https://attacker.example", "content-type": "application/json" },
+      body: JSON.stringify({ threadId, instanceId }),
+    });
+    assert.equal(foreign.status, 403);
+    brokerStatus = 200;
+    const newChat = await fetch(`${fixture.origin}/api/native-codex/new-beside`, {
+      method: "POST",
+      headers: { origin: fixture.origin, "content-type": "application/json" },
+      body: JSON.stringify({ windowId: threadId, instanceId }),
+    });
+    assert.equal(newChat.status, 202);
+    assert.deepEqual(await newChat.json(), { opened: true, column: 12 });
+    assert.deepEqual(received.at(-1), { path: "/new-beside", body: JSON.stringify({ windowId: threadId }) });
+    const invalidNew = await fetch(`${fixture.origin}/api/native-codex/new-beside`, {
+      method: "POST",
+      headers: { origin: fixture.origin, "content-type": "application/json" },
+      body: JSON.stringify({ windowId: threadId, instanceId, command: "evil" }),
+    });
+    assert.equal(invalidNew.status, 400);
+    const focus = await fetch(`${fixture.origin}/api/native-codex/focus`, {
+      method: "POST",
+      headers: { origin: fixture.origin, "content-type": "application/json" },
+      body: JSON.stringify({ kind: "new", targetId: threadId, instanceId }),
+    });
+    assert.equal(focus.status, 202);
+    assert.deepEqual(await focus.json(), { focused: true, column: 12 });
+    assert.deepEqual(received.at(-1), { path: "/focus", body: JSON.stringify({ kind: "new", targetId: threadId }) });
+    const invalidFocus = await fetch(`${fixture.origin}/api/native-codex/focus`, {
+      method: "POST", headers: { origin: fixture.origin, "content-type": "application/json" },
+      body: JSON.stringify({ kind: "new", targetId: threadId, instanceId, command: "evil" }),
+    });
+    assert.equal(invalidFocus.status, 400);
+    assert.equal(wrongInstanceCalls, 0);
+  } finally {
+    wrongInstance.closeAllConnections();
+    await new Promise<void>((resolve) => wrongInstance.close(() => resolve()));
+    broker.closeAllConnections();
+    await new Promise<void>((resolve) => broker.close(() => resolve()));
+    await fixture.close();
+  }
+});
+test("release is same-origin, validates two distinct live instance IDs, and reaches only the old private broker", async () => {
+  const oldInstanceId = "019aabcd-1234-7890-abcd-0123456789ad";
+  const currentInstanceId = "019aabcd-1234-7890-abcd-0123456789ae";
+  assert.deepEqual(validateNativeCodexReleaseInstance({ oldInstanceId, currentInstanceId }), { oldInstanceId, currentInstanceId });
+  for (const invalid of [{ oldInstanceId, currentInstanceId: oldInstanceId }, { oldInstanceId: "../bad", currentInstanceId }, { oldInstanceId, currentInstanceId, command: "evil" }])
+    assert.throws(() => validateNativeCodexReleaseInstance(invalid));
+  const fixture = await setup();
+  const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  const calls: string[] = [];
+  const makeBroker = (instanceId: string) => createServer((request, response) => {
+    calls.push(`${instanceId}:${request.method}:${request.url}`);
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(request.url === "/status"
+      ? { instanceBroker: { enabled: true, instanceId } }
+      : { released: true }));
+  });
+  const oldBroker = makeBroker(oldInstanceId);
+  const currentBroker = makeBroker(currentInstanceId);
+  oldBroker.listen(0, "127.0.0.1"); currentBroker.listen(0, "127.0.0.1");
+  await Promise.all([once(oldBroker, "listening"), once(currentBroker, "listening")]);
+  const oldPort = (oldBroker.address() as { port: number }).port;
+  const currentPort = (currentBroker.address() as { port: number }).port;
+  const record = JSON.parse(await readFile(fixture.record, "utf8"));
+  const authFile = join(fixture.dir, "broker-auth.json");
+  await writeFile(authFile, JSON.stringify({ port: currentPort, token }), { mode: 0o600 });
+  await writeFile(fixture.record, JSON.stringify({ ...record, brokerPort: currentPort, brokerAuthFile: authFile }), { mode: 0o600 });
+  await writeFile(join(fixture.dir, `companion-session-${oldInstanceId}.json`), JSON.stringify({ instanceId: oldInstanceId, port: oldPort, token }), { mode: 0o600 });
+  await writeFile(join(fixture.dir, `companion-session-${currentInstanceId}.json`), JSON.stringify({ instanceId: currentInstanceId, port: currentPort, token }), { mode: 0o600 });
+  const post = (origin: string, body: object) => fetch(`${fixture.origin}/api/native-codex/release-instance`, {
+    method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  try {
+    assert.equal((await post("https://other.example", { oldInstanceId, currentInstanceId })).status, 403);
+    assert.equal((await post(fixture.origin, { oldInstanceId: currentInstanceId, currentInstanceId })).status, 400);
+    assert.deepEqual(calls, []);
+    const response = await post(fixture.origin, { oldInstanceId, currentInstanceId });
+    assert.equal(response.status, 202);
+    assert.deepEqual(await response.json(), { released: true });
+    assert.deepEqual(calls, [`${currentInstanceId}:GET:/status`, `${oldInstanceId}:POST:/release`]);
+  } finally {
+    oldBroker.closeAllConnections(); currentBroker.closeAllConnections();
+    await Promise.all([new Promise<void>(resolve => oldBroker.close(() => resolve())), new Promise<void>(resolve => currentBroker.close(() => resolve()))]);
+    await fixture.close();
+  }
+});
+
+test("instance liveness is read-only, validates origin and UUID, and does not expose private broker data", async () => {
+  const fixture = await setup();
+  const instanceId = "019aabcd-1234-7890-abcd-0123456789ad";
+  const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  const calls: string[] = [];
+  const broker = createServer((request, response) => {
+    calls.push(`${request.method}:${request.url}`);
+    assert.equal(request.headers.authorization, `Bearer ${token}`);
+    response.end(JSON.stringify({ instanceBroker: { enabled: true, instanceId }, tabs: "x".repeat(5000) }));
+  });
+  broker.listen(0, "127.0.0.1"); await once(broker, "listening");
+  await writeFile(join(fixture.dir, `companion-session-${instanceId}.json`), JSON.stringify({ instanceId, port: (broker.address() as { port: number }).port, token }), { mode: 0o600 });
+  const post = (origin: string, body: object) => fetch(`${fixture.origin}/api/native-codex/instance-status`, {
+    method: "POST", headers: { origin, "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  try {
+    assert.equal((await post("https://other.example", { instanceId })).status, 403);
+    assert.equal((await post(fixture.origin, { instanceId: "../bad" })).status, 400);
+    assert.equal((await post(fixture.origin, { instanceId, command: "evil" })).status, 400);
+    assert.deepEqual(calls, []);
+    const response = await post(fixture.origin, { instanceId });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { active: true });
+    assert.deepEqual(calls, ["GET:/status"]);
+    await rm(join(fixture.dir, `companion-session-${instanceId}.json`));
+    assert.deepEqual(await (await post(fixture.origin, { instanceId })).json(), { active: false });
+  } finally {
+    broker.closeAllConnections(); await new Promise<void>(resolve => broker.close(() => resolve()));
+    await fixture.close();
+  }
 });
 
 test("unsafe, oversized, mismatched and symlink records fail closed", async () => {

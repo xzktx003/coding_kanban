@@ -297,21 +297,12 @@ export function FollowupQueueContent({
                     </DropdownMenuItem>
                   </>
                 )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onSelect={() =>
-                    void change({ type: state.paused ? "resume" : "pause" })
-                  }
-                >
-                  {state.paused ? <Play /> : <Pause />}
-                  {state.paused ? "继续队列" : "暂停队列"}
-                </DropdownMenuItem>
-                {items.length > 1 && (
+                {state.paused && (
                   <DropdownMenuItem
-                    onSelect={() => setConfirm({ type: "clear" })}
+                    onSelect={() => void change({ type: "resume" })}
                   >
-                    <Trash2 />
-                    清空队列
+                    <Play />
+                    继续
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
@@ -403,9 +394,7 @@ export function FollowupQueueContent({
                       : void change({ type: "retry", id: m.id })
                   }
                 >
-                  {m.error?.startsWith("SESSION_OWNED_ELSEWHERE")
-                    ? "重新连接并发送"
-                    : "重试"}
+                  重试
                 </Button>
               )}
             </div>
@@ -419,25 +408,10 @@ export function FollowupQueueContent({
       className={`session-followup-queue ${inlineDetails ? "session-queue-detail" : "session-queue-shelf"}`}
       aria-label="消息队列"
     >
-      {error && (
-        <p role="status" className="session-queue-status">
-          队列连接暂不可用，正在重试。
-          <button
-            type="button"
-            onClick={() =>
-              void followupService
-                .load(threadId)
-                .catch((e) => toast.error(String(e)))
-            }
-          >
-            重试连接
-          </button>
-        </p>
-      )}
       {state.paused && (
         <div className="session-queue-status" role="status">
           <Pause size={14} />
-          <span title={state.paused}>{state.paused}</span>
+          <span>由于你中断了当前响应，队列已暂停</span>
           <Button
             type="button"
             size="sm"
@@ -446,7 +420,7 @@ export function FollowupQueueContent({
             onClick={() => void change({ type: "resume" })}
           >
             <Play size={14} />
-            继续队列
+            继续
           </Button>
         </div>
       )}
@@ -462,15 +436,6 @@ export function FollowupQueueContent({
         >
           <section className="session-followup-queue session-queue-detail">
             {queueList}
-            <Button
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void change({ type: state.paused ? "resume" : "pause" })
-              }
-            >
-              {state.paused ? "继续队列" : "暂停队列"}
-            </Button>
           </section>
         </ComposerSheet>
       )}

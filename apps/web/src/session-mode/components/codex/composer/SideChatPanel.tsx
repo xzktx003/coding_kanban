@@ -280,7 +280,7 @@ function SideChat({
               <AccessModePopover compact />
             </div>
             <div className="session-compact-meta">
-              <span>侧边聊天 · Codex</span>
+              <span>侧边聊天是临时聊天，关闭应用后会消失。</span>
               <span
                 className="session-compact-status"
                 role={

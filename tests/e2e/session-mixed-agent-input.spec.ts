@@ -166,13 +166,13 @@ for (const profile of [
       const addImage = async (kind: "codex" | "cc") => {
         await activate(
           page.getByRole("button", {
-            name: "添加附件与上下文",
+            name: kind === "codex" ? "附加文件" : "添加附件与上下文",
             exact: true,
           }),
         );
         const chosen = page.waitForEvent("filechooser");
         await activate(
-          page.getByRole("button", { name: "上传图片", exact: true }),
+          page.getByRole("button", { name: kind === "codex" ? "附加照片或视频" : "上传图片", exact: true }),
         );
         await (
           await chosen

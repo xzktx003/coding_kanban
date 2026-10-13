@@ -205,7 +205,7 @@ export function ComposerMenu({
   return (
     <Popover open={openState} onOpenChange={setOpenState}>
       <ComposerTooltip
-        label="添加文件等内容"
+        label="附加文件"
         shortcut="@"
         popupOpen={openState}
       >
@@ -214,7 +214,7 @@ export function ComposerMenu({
             type="button"
             variant="ghost"
             size="icon"
-            aria-label="添加附件与上下文"
+            aria-label="附加文件"
           >
             <NativeComposerIcon name="plus" />
           </Button>
@@ -234,7 +234,7 @@ export function ComposerMenu({
             onClick={handleSelectImage}
           >
             <ImageIcon className="w-4 h-4" />
-            <span>上传图片</span>
+            <span>附加照片或视频</span>
           </Button>
           {actions?.(() => setOpenState(false))}
           <Button

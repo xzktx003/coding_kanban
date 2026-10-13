@@ -384,9 +384,7 @@ test("session gateway chat SSE projection strips tool bodies before browser deli
       entries: [],
     });
     assert.equal(frames[6].payload.params.review.rationale.length, 1024);
-    assert.equal(frames[6].payload.params.action.command, `${big.slice(0,1023)}…`);
-    assert.equal(frames[6].payload.params.action.command.length,1024);
-    assert.equal(frames[6].payload.params.action.stdout,undefined);
+    assert.equal(frames[6].payload.params.action.command, undefined);
     assert.equal(frames[6].payload.params.action.type, "command");
   } finally {
     await app.close();

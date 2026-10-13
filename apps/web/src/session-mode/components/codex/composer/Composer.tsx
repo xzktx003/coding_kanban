@@ -1,12 +1,9 @@
-import { v4 as randomUUID } from "uuid";
 import { subagentParent } from "@agent-orchestrator/shared";
 import { sessionDraftSubmissions } from "@session/features/subagents/submissions";
 import { mentionDrafts } from "@session/features/subagents/mentions";
 import { pluginInputDrafts } from "@session/features/plugins/pluginInputs";
 import type { NativeInputMention } from "@agent-orchestrator/shared";
 import { useSubagentStore } from "@session/features/subagents/store";
-import { BackgroundAgentSummary } from "@session/features/subagents/BackgroundAgentSummary";
-import { AgentMentionPicker } from "@session/features/subagents/AgentMentionPicker";
 import { composeContextText } from "@agent-orchestrator/shared";
 import {
   composerDrafts,
@@ -24,16 +21,13 @@ import { Pencil, Code2, Search } from "lucide-react";
 import {
   followupService,
   followupParameters,
-  stableSubmissionId,
 } from "@session/services/followupService";
 import { createSideChat } from "@session/services/conversationActions";
 import { useFollowupSettingsStore } from "@session/stores/useFollowupSettingsStore";
 import { FollowupQueueContent } from "./FollowupQueue";
 import { useFollowups } from "@session/hooks/useFollowups";
-import { ModelChangeNotice, ModelUpgradeBanner } from "./ModelChangeNotice";
-import { PersonalityNotice } from "./PersonalityNotice";
+import { ModelChangeNotice } from "./ModelChangeNotice";
 import { ConversationMenu } from "./ConversationMenu";
-import { SearchChatsSheet } from "./SearchChatsSheet";
 
 import { useThreadModelStore } from "@session/stores/useThreadModelStore";
 import { useQuestions } from "@session/features/async-questions/useQuestions";
@@ -76,7 +70,6 @@ import type { ThreadGoal } from "@session/bindings/v2";
 import { useThreadGoal } from "@session/components/codex/hooks";
 import { useCodexStore } from "@session/components/codex/stores";
 import { ContextWindowWidget } from "@session/components/codex/widget";
-import { NativeCodexUsage } from "@session/features/codex-account/NativeCodexUsage";
 import { deriveContextWindowUsage } from "@session/components/codex/widget/ContextWindowWidget";
 import { FileMentionPopover } from "@session/components/common";
 import { Button } from "@session/components/ui/button";
@@ -106,23 +99,6 @@ import { useComposerFileDrop } from "./composerDrop";
 import { SlashCommandDialogs } from "./SlashCommandDialogs";
 import { SlashCommandPopover } from "./SlashCommandsSelector";
 import type { SlashDialog } from "./slashCommands";
-import {
-  forkSlashLocal,
-  forkSlashWorktree,
-  loadMcpStatus,
-  submitSlashRename,
-} from "./slashCommands";
-import { NativeFeedbackDialog } from "./NativeFeedbackDialog";
-import { AutoReviewDenialsSheet } from "./AutoReviewDenialsSheet";
-import { ComposerTargetMeta } from "./ComposerTargetMeta";
-import {
-  hasPendingSessionFollowups,
-  sendToNativeCodex,
-} from "../../../../codex-mode/native-codex-send";
-import {
-  matchesNativeCodexTarget,
-  useNativeCodexTargetStore,
-} from "../../../../codex-mode/native-codex-target";
 
 interface ComposerProps {
   targetLabel?: React.ReactNode;
@@ -132,39 +108,6 @@ interface ComposerProps {
 
 // Compact status label per goal status, mirroring
 // codex-rs/tui/src/bottom_pane/footer.rs::goal_status_indicator_line.
-function McpSlashStatus({
-  threadId,
-  rows,
-  onRows,
-}: {
-  threadId: string | null;
-  rows: { name: string; auth: string; tools: number }[] | null;
-  onRows: (rows: { name: string; auth: string; tools: number }[]) => void;
-}) {
-  useEffect(() => {
-    let cancelled = false;
-    loadMcpStatus(threadId)
-      .then((next) => {
-        if (!cancelled) onRows(next);
-      })
-      .catch((error) => toast.error(String(error)));
-    return () => {
-      cancelled = true;
-    };
-  }, [threadId, onRows]);
-  if (!rows) return <p role="status">正在读取 MCP 服务器…</p>;
-  if (!rows.length) return <p>没有 MCP 服务器</p>;
-  return (
-    <ul>
-      {rows.map((row) => (
-        <li key={row.name}>
-          {row.name} · {row.auth} · {row.tools} 个工具
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function goalStatusLabel(status: ThreadGoal["status"]): string {
   switch (status) {
     case "active":
@@ -189,7 +132,6 @@ export function Composer({
 }: ComposerProps) {
   const preferences = useFollowupSettingsStore();
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [searchChats, setSearchChats] = useState(false);
   const [detailsOwner, setDetailsOwner] = useState<string | null>(null);
 
   const submitMode = useRef<FollowupMode | null>(null);
@@ -198,10 +140,6 @@ export function Composer({
     text: string;
   } | null>(null);
   const [slashDialog, setSlashDialog] = useState<SlashDialog | null>(null);
-  const [renameDraft, setRenameDraft] = useState("");
-  const [mcpRows, setMcpRows] = useState<
-    { name: string; auth: string; tools: number }[] | null
-  >(null);
   const { currentThreadId, inputFocusTrigger } = useCodexStore(
     useShallow((s) => ({
       currentThreadId: s.currentThreadId,
@@ -209,104 +147,11 @@ export function Composer({
     })),
   );
   const cwd = useWorkspaceStore((s) => s.cwd);
-  const nativeTarget = useNativeCodexTargetStore((s) => s.target);
-  const targetsNativeCodex = matchesNativeCodexTarget(
-    nativeTarget,
-    currentThreadId,
-    cwd,
-  );
   const owner = sessionDraftKey("codex", currentThreadId, cwd);
-  const feedbackDialogOwner = useRef<string | null>(null);
-  const openSlashDialog = (dialog: SlashDialog) => {
-    if (dialog === "feedback") feedbackDialogOwner.current = owner;
-    setSlashDialog(dialog);
-  };
-  useEffect(() => {
-    const openMcp = () => openSlashDialog("mcp");
-    const openPersonality = () => openSlashDialog("personality");
-    const openFeedback = () => openSlashDialog("feedback");
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "i" || !event.shiftKey || event.altKey)
-        return;
-      if (!(event.metaKey || event.ctrlKey)) return;
-      const target = event.target;
-      if (
-        target instanceof HTMLElement &&
-        target.closest(".session-mode") === null
-      )
-        return;
-      event.preventDefault();
-      openPersonality();
-    };
-    window.addEventListener("codex-open-mcp", openMcp);
-    window.addEventListener("codex-open-personality", openPersonality);
-    window.addEventListener("codex-open-feedback", openFeedback);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("codex-open-mcp", openMcp);
-      window.removeEventListener("codex-open-personality", openPersonality);
-      window.removeEventListener("codex-open-feedback", openFeedback);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, []);
   const { enabled: goalEnabled, setEnabled: setGoalEnabled } =
     useGoalDraft(owner);
-  const {
-    collaborationMode,
-    setCollaborationMode,
-    personality,
-    setPersonality,
-  } = useThreadModelSettings(currentThreadId);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() !== "k" || !(event.metaKey || event.ctrlKey))
-        return;
-      if (event.altKey || event.shiftKey) return;
-      const target = event.target;
-      if (
-        target instanceof HTMLElement &&
-        target.closest(".session-mode") === null
-      )
-        return;
-      event.preventDefault();
-      setSearchChats(true);
-    };
-    const focusMain = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || !event.shiftKey) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target;
-      if (
-        target instanceof HTMLElement &&
-        target.closest(".session-mode") === null
-      )
-        return;
-      event.preventDefault();
-      useCodexStore.getState().triggerInputFocus();
-    };
-    const focusContent = (event: KeyboardEvent) => {
-      if (event.key !== "F10" || !event.shiftKey) return;
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const editor = document.querySelector(
-        ".session-composer-sheet.is-full textarea, .session-composer-sheet.is-full [contenteditable='true']",
-      );
-      if (!(editor instanceof HTMLElement) || document.activeElement !== editor)
-        return;
-      const control = document.querySelector(
-        ".session-composer-sheet.is-full .session-rich-tools button",
-      );
-      if (!(control instanceof HTMLElement)) return;
-      event.preventDefault();
-      control.focus();
-    };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("keydown", focusMain);
-    window.addEventListener("keydown", focusContent);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("keydown", focusMain);
-      window.removeEventListener("keydown", focusContent);
-    };
-  }, []);
+  const { collaborationMode, setCollaborationMode } =
+    useThreadModelSettings(currentThreadId);
   useEffect(() => {
     if (activeDraftOwner() === owner)
       goalDrafts.migrateLegacy(owner, useCodexStore.getState().goalEnabled);
@@ -389,7 +234,7 @@ export function Composer({
       event.preventDefault();
       event.stopPropagation();
       composerDrafts.add(owner, {
-        id: randomUUID(),
+        id: crypto.randomUUID(),
         kind: "paste",
         name: "粘贴的文本",
         text,
@@ -543,41 +388,6 @@ export function Composer({
         );
         await moveImageDraft(owner, submittedOwner);
       }
-      if (targetsNativeCodex && nativeTarget?.threadId === targetThreadId) {
-        if (submittedGoal.enabled)
-          throw new Error("请在选中的原生 Codex 窗口中管理会话目标");
-        const queue = await followupService.load(targetThreadId);
-        if (hasPendingSessionFollowups(queue))
-          throw new Error("该会话有待处理的 Session 消息，请先处理队列再发送");
-        const mentions = [...submittedMentions, ...submittedPluginMentions];
-        const nativeSubmissionId = await stableSubmissionId(
-          submittedOwner,
-          snapshot.revision,
-          {
-            target: nativeTarget,
-            text,
-            images: [...images],
-            contexts: structuredClone(submittedContexts),
-            mentions: structuredClone(mentions),
-          },
-        );
-        await sendToNativeCodex({
-          target: nativeTarget,
-          submissionId: nativeSubmissionId,
-          text,
-          images: [...images],
-          contexts: structuredClone(submittedContexts),
-          mentions: structuredClone(mentions),
-        });
-        onAfterSend?.(targetThreadId, text);
-        setDeliveryNotice({
-          owner: submittedOwner,
-          text: `已发送到 Codex 窗口 ${nativeTarget.column}`,
-        });
-        clearSubmitted();
-        attachments.clear(submittedIds);
-        return;
-      }
       if (submittedGoal.enabled) {
         await codexService.threadGoalSet({
           threadId: targetThreadId,
@@ -694,7 +504,7 @@ export function Composer({
           : uploading
             ? `正在上传 ${uploading} 张图片…`
             : pendingQuestions.length
-              ? `有 ${pendingQuestions.length} 个问题待回答`
+              ? "正在等待你的回答"
               : queued.some(
                     (m) => m.status === "failed" || m.status === "uncertain",
                   )
@@ -706,7 +516,7 @@ export function Composer({
                     : modelEntry?.notice && !modelEntry.notice.dismissed
                       ? `模型已切换：${modelEntry.notice.from} → ${modelEntry.notice.to}`
                       : collaborationMode === "plan"
-                        ? "计划模式"
+                        ? "规划模式"
                         : goalEnabled
                           ? "目标草稿"
                           : threadGoal
@@ -719,36 +529,14 @@ export function Composer({
                                 : "运行中"
                               : "";
   return (
-    <div
-      className="session-codex-composer session-compact-composer session-native-composer"
-      data-draft-owner={owner}
-    >
+    <div className="session-codex-composer session-compact-composer session-native-composer">
       <div
         className="session-composer-floating"
         aria-label="会话提示与待发送消息"
       >
-        {searchChats && (
-          <SearchChatsSheet onClose={() => setSearchChats(false)} />
-        )}
-        <BackgroundAgentSummary threadId={currentThreadId} />
         <RunningTurnChanges threadId={currentThreadId} />
         {directInputBlocked && (
           <p role="status">当前子线程由主 Agent 调度，不能直接发送消息。</p>
-        )}
-        {collaborationMode === "plan" && (
-          <div className="session-composer-mode">
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => setCollaborationMode("default")}
-              aria-label="取消计划模式"
-              title="创建计划"
-            >
-              计划模式
-              <X size={12} />
-            </Button>
-          </div>
         )}
         {pendingQuestions.length > 0 && (
           <button
@@ -764,13 +552,11 @@ export function Composer({
               );
             }}
           >
-            <span>有 {pendingQuestions.length} 个问题待回答</span>
-            <span>回答</span>
+            <span>正在等待你的回答</span>
           </button>
         )}
 
         {currentThreadId && <ModelChangeNotice threadId={currentThreadId} />}
-        {currentThreadId && <ModelUpgradeBanner threadId={currentThreadId} />}
         <FollowupQueueContent
           compactShelf
           snapshot={queueSnapshot}
@@ -799,19 +585,6 @@ export function Composer({
           onClose={() => setReviewOpen(false)}
         />
       )}
-      {statusText && (
-        <span
-          className="session-native-composer-status"
-          role={
-            contextStorageError || attachments.storageError || failedImage
-              ? "alert"
-              : "status"
-          }
-          title={statusText}
-        >
-          {statusText}
-        </span>
-      )}
       <form
         ref={formRef}
         onSubmit={handleSubmit}
@@ -833,7 +606,7 @@ export function Composer({
           setInputValue={setInputValue}
           editorRef={editorRef}
           triggerElement={wrapperRef.current}
-          onOpenDialog={openSlashDialog}
+          onOpenDialog={setSlashDialog}
         />
 
         <div
@@ -851,9 +624,6 @@ export function Composer({
             </div>
           )}
           <div className="session-compact-body">
-            {currentThreadId && (
-              <PersonalityNotice threadId={currentThreadId} />
-            )}
             <div ref={wrapperRef} className="session-composer-editor">
               <ComposerEditor
                 owner={owner}
@@ -882,7 +652,6 @@ export function Composer({
           <div className="session-composer-bottom">
             <ComposerToolbarProvider className="session-composer-toolbar flex items-center justify-between w-full">
               <div className="session-composer-policy flex items-center">
-                <AgentMentionPicker root={currentThreadId} owner={owner} />
                 <ComposerMenu
                   owner={owner}
                   onImageFilesSelected={attachments.addFiles}
@@ -961,7 +730,7 @@ export function Composer({
                         }}
                       >
                         <Search size={16} />
-                        斜杠命令
+                        快捷命令
                       </Button>
                       <Button
                         type="button"
@@ -985,11 +754,7 @@ export function Composer({
                           composerDrafts.setExpanded(owner, true);
                         }}
                       >
-                        <NativeComposerIcon
-                          name="expand"
-                          width={16}
-                          height={16}
-                        />
+                        <NativeComposerIcon name="expand" width={16} height={16} />
                         展开编辑
                       </Button>
                       <Button
@@ -1009,7 +774,6 @@ export function Composer({
                         title="当前会话"
                         variant="item"
                         onOpen={() => close()}
-                        onRename={() => openSlashDialog("rename")}
                       />
                       {hasContextUsage && (
                         <div className="session-composer-context">
@@ -1090,13 +854,7 @@ export function Composer({
                 />
                 <AccessModePopover compact />
               </div>
-              <ComposerTargetMeta targetLabel={targetLabel} />
               <div className="session-composer-actions flex items-center gap-2">
-                <ConversationMenu
-                  threadId={currentThreadId}
-                  title="当前会话"
-                  onRename={() => openSlashDialog("rename")}
-                />
                 <NativeModelSelector threadId={currentThreadId} />
                 <span className="session-native-dictation">
                   <NativeComposerIcon name="microphone" />
@@ -1111,50 +869,23 @@ export function Composer({
                   />
                 </span>
                 {running ? (
-                  <>
-                    {hasContent && (
-                      <NativeSubmitButton
-                        aria-label={
-                          preferences.mode === "queue"
-                            ? "排队消息"
-                            : "引导当前任务"
-                        }
-                        title={
-                          preferences.mode === "queue"
-                            ? "排队消息"
-                            : "引导当前任务"
-                        }
-                        type="submit"
-                        loading={sending}
-                        disabled={sending || blocked || !hasContent}
-                        size="icon"
-                        className="session-composer-send"
-                      >
-                        {preferences.mode === "queue" ? (
-                          <ListPlus size={18} />
-                        ) : (
-                          <CornerDownRight size={18} />
-                        )}
-                      </NativeSubmitButton>
-                    )}
-                    <NativeSubmitButton
-                      type="button"
-                      aria-label={stopping ? "正在停止" : "停止"}
-                      onClick={requestStop}
-                      disabled={stopping}
-                      loading={stopping}
-                      title={stopping ? "正在停止…" : "停止"}
-                      variant="ghost"
-                      size="icon"
-                      className="session-composer-stop is-primary"
-                    >
-                      <NativeComposerIcon name="stop" />
-                    </NativeSubmitButton>
-                  </>
+                  <NativeSubmitButton
+                    type="button"
+                    aria-label={stopping ? "正在停止" : "停止生成"}
+                    onClick={requestStop}
+                    disabled={stopping}
+                    loading={stopping}
+                    title={stopping ? "正在停止…" : "停止生成"}
+                    variant="ghost"
+                    size="icon"
+                    className="session-composer-stop is-primary"
+                  >
+                    <NativeComposerIcon name="stop" />
+                  </NativeSubmitButton>
                 ) : (
                   <NativeSubmitButton
-                    aria-label="发送"
-                    title="发送"
+                    aria-label="发送消息"
+                    title="发送消息"
                     type="submit"
                     loading={sending}
                     disabled={sending || blocked || !hasContent}
@@ -1169,6 +900,19 @@ export function Composer({
           </div>
         </div>
       </form>
+      {statusText && (
+        <span
+          className="session-native-composer-status"
+          role={
+            contextStorageError || attachments.storageError || failedImage
+              ? "alert"
+              : "status"
+          }
+          title={statusText}
+        >
+          {statusText}
+        </span>
+      )}
       {detailsOwner === owner && (
         <ComposerSheet
           title="输入状态与消息队列"
@@ -1196,6 +940,20 @@ export function Composer({
             </p>
           )}
           {!!pendingFiles[owner] && <p role="status">正在读取文件快照…</p>}
+          {collaborationMode === "plan" && (
+            <div className="session-composer-mode">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setCollaborationMode("default")}
+                aria-label="取消规划模式"
+              >
+                规划模式
+                <X size={12} />
+              </Button>
+            </div>
+          )}
 
           {threadGoal && (
             <div className="flex items-center gap-1.5 px-3 pb-1 text-xs text-muted-foreground">
@@ -1359,7 +1117,7 @@ export function Composer({
               {running && (
                 <NativeSubmitButton
                   type="button"
-                  aria-label={stopping ? "正在停止" : "停止"}
+                  aria-label={stopping ? "正在停止" : "停止生成"}
                   variant="ghost"
                   className="session-expanded-stop"
                   disabled={stopping}
@@ -1379,7 +1137,7 @@ export function Composer({
                     ? preferences.mode === "queue"
                       ? "加入队列"
                       : "引导当前任务"
-                    : "发送"
+                    : "发送消息"
                 }
                 onClick={() => formRef.current?.requestSubmit()}
               >
@@ -1387,7 +1145,7 @@ export function Composer({
                   ? preferences.mode === "queue"
                     ? "加入队列"
                     : "引导当前任务"
-                  : "发送"}
+                  : "发送消息"}
               </NativeSubmitButton>
             </>
           }
@@ -1438,7 +1196,7 @@ export function Composer({
       {commandsOwner === owner && (
         <ComposerCommands
           onClose={() => setCommandsOwner(null)}
-          onOpenDialog={openSlashDialog}
+          onOpenDialog={setSlashDialog}
         />
       )}
       {(slashDialog === "model" || slashDialog === "effort") && (
@@ -1449,147 +1207,6 @@ export function Composer({
         >
           <ModelReasonSelector mode="panel" />
         </ComposerSheet>
-      )}
-      {slashDialog === "status" && (
-        <ComposerSheet
-          title="状态"
-          description="显示聊天 ID、上下文用量和速率限制"
-          onClose={() => setSlashDialog(null)}
-        >
-          <p>聊天 ID：{currentThreadId ?? "尚未开始"}</p>
-          <ContextWindowWidget />
-          <NativeCodexUsage />
-        </ComposerSheet>
-      )}
-      {slashDialog === "rename" && currentThreadId && (
-        <ComposerSheet
-          title="重命名"
-          description="重命名当前聊天"
-          onClose={() => setSlashDialog(null)}
-        >
-          <form
-            onSubmit={(event) => {
-              event.preventDefault();
-              const threadId = currentThreadId;
-              void submitSlashRename(threadId, renameDraft).then(
-                () => setSlashDialog(null),
-                (error) => toast.error(String(error)),
-              );
-            }}
-          >
-            <input
-              className="session-command-search"
-              aria-label="会话名称"
-              value={renameDraft}
-              autoFocus
-              onChange={(event) => setRenameDraft(event.target.value)}
-            />
-            <button type="submit">保存</button>
-          </form>
-        </ComposerSheet>
-      )}
-      {slashDialog === "fork" && currentThreadId && (
-        <ComposerSheet
-          title="创建聊天分支"
-          description="在当前工作空间或新工作树中创建此聊天的分支"
-          onClose={() => setSlashDialog(null)}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              const threadId = currentThreadId;
-              void forkSlashLocal(threadId).then(
-                () => setSlashDialog(null),
-                (error) => toast.error(String(error)),
-              );
-            }}
-          >
-            创建聊天分支
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const threadId = currentThreadId;
-              void forkSlashWorktree(threadId).then(
-                () => setSlashDialog(null),
-                (error) => toast.error(String(error)),
-              );
-            }}
-          >
-            在新工作树中创建聊天分支
-          </button>
-        </ComposerSheet>
-      )}
-      {slashDialog === "mcp" && (
-        <ComposerSheet
-          title="MCP"
-          description="显示 MCP 服务器状态"
-          onClose={() => setSlashDialog(null)}
-        >
-          <McpSlashStatus
-            threadId={currentThreadId}
-            rows={mcpRows}
-            onRows={setMcpRows}
-          />
-        </ComposerSheet>
-      )}
-      {slashDialog === "personality" && (
-        <ComposerSheet
-          title="个性"
-          description="调整语气和回复风格"
-          onClose={() => setSlashDialog(null)}
-        >
-          {(
-            [
-              ["friendly", "亲和友善"],
-              ["pragmatic", "务实"],
-            ] as const
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={(personality ?? "friendly") === value}
-              onClick={() => {
-                setPersonality(value);
-                setSlashDialog(null);
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </ComposerSheet>
-      )}
-      {slashDialog === "ide" && (
-        <ComposerSheet
-          title="IDE 上下文"
-          description="包含当前选择、打开的文件以及其他来自你的 IDE 的上下文"
-          onClose={() => setSlashDialog(null)}
-        >
-          {cwd ? (
-            <CodexHostPanel
-              owner={{ cwd, threadId: currentThreadId, draftOwner: owner }}
-            />
-          ) : (
-            <p role="status">先选择本会话的项目，再连接编辑器上下文。</p>
-          )}
-        </ComposerSheet>
-      )}
-      {slashDialog === "auto-review-denials" && (
-        <AutoReviewDenialsSheet
-          threadId={currentThreadId}
-          onClose={() => setSlashDialog(null)}
-        />
-      )}
-      {slashDialog === "feedback" && feedbackDialogOwner.current === owner && (
-        <NativeFeedbackDialog
-          owner={owner}
-          key={currentThreadId ?? owner}
-          threadId={currentThreadId}
-          onClose={() => setSlashDialog(null)}
-          returnFocus={() => {
-            if (activeDraftOwner() === owner) editorRef.current?.focus();
-          }}
-        />
       )}
       <SlashCommandDialogs
         open={slashDialog}

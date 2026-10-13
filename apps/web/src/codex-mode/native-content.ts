@@ -5,6 +5,7 @@ export type NativeContentState = {
   hasComposer: boolean;
   composerEmpty: boolean;
   userInteracted: boolean;
+  blockedByOtherApp?: boolean;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -23,13 +24,28 @@ export function observeNativeContent(
   let composer: HTMLElement | null = null;
   let ready = false;
   let userInteracted = false;
-  let rootObserverTimer: number | null = null;
-  let rootObserverExpired = false;
   let lastState = "";
+  let lastValue: NativeContentState | null = null;
+  let observedLockRoot: HTMLElement | null = null;
+  let lockCheckTimer: number | null = null;
+  let lockWatchDeadline: number | null = null;
+  let lockWatchExpired = false;
   const appObserver = new view.MutationObserver(() => check());
   const conversationObserver = new view.MutationObserver(() =>
     checkConversation(),
   );
+  const lockObserver = new view.MutationObserver(() => {
+    if (lockCheckTimer !== null) return;
+    lockCheckTimer = view.setTimeout(() => { lockCheckTimer = null; checkConversation(); }, 20);
+  });
+  const stopLockWatch = () => {
+    lockObserver.disconnect();
+    observedLockRoot = null;
+    if (lockCheckTimer !== null) view.clearTimeout(lockCheckTimer);
+    if (lockWatchDeadline !== null) view.clearTimeout(lockWatchDeadline);
+    lockCheckTimer = null;
+    lockWatchDeadline = null;
+  };
   const publish = (value: boolean) => {
     ready = value;
     onReady(value);
@@ -105,24 +121,37 @@ export function observeNativeContent(
         "[data-composer-attachment-pill], [data-appshot-attachment], [data-attachment-thumbnail-source]",
       ),
     );
+    const blockedByOtherApp = Boolean(root?.textContent?.includes("This is open in another app") &&
+      root?.textContent?.includes("Close it there to continue here.") &&
+      Array.from(root.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Retry"));
+    const hasComposer = Boolean(composer) && !blockedByOtherApp;
     const state: NativeContentState = {
       ready: rendered,
       conversationId,
-      hasComposer: Boolean(composer),
+      hasComposer,
       composerEmpty:
-        Boolean(composer) && !composerValue.trim() && !hasAttachment,
+        hasComposer && !composerValue.trim() && !hasAttachment,
       userInteracted,
+      blockedByOtherApp,
     };
+    lastValue = state;
     const key = JSON.stringify(state);
     if (key !== lastState) {
       lastState = key;
       onState?.(state);
     }
-    if (portal) {
-      appObserver.disconnect();
-      if (rootObserverTimer !== null) view.clearTimeout(rootObserverTimer);
-      rootObserverTimer = null;
-    } else if (app && !rootObserverExpired) {
+    if (root && conversationId && !lockWatchExpired && observedLockRoot !== root) {
+      stopLockWatch();
+      observedLockRoot = root;
+      lockObserver.observe(root, { childList: true, characterData: true, subtree: true });
+      lockWatchDeadline = view.setTimeout(() => {
+        lockWatchDeadline = null;
+        lockWatchExpired = true;
+        if (!lastValue?.blockedByOtherApp) stopLockWatch();
+      }, 30_000);
+    } else if (lockWatchExpired && observedLockRoot && !blockedByOtherApp) stopLockWatch();
+    if (portal && composer) appObserver.disconnect();
+    else if (app) {
       appObserver.observe(root ?? app, {
         childList: true,
         subtree: true,
@@ -142,12 +171,6 @@ export function observeNativeContent(
           "data-attachment-thumbnail-source",
         ],
       });
-      if (rootObserverTimer === null)
-        rootObserverTimer = view.setTimeout(() => {
-          appObserver.disconnect();
-          rootObserverTimer = null;
-          rootObserverExpired = true;
-        }, 15_000);
     }
   };
   function checkConversation() {
@@ -161,13 +184,12 @@ export function observeNativeContent(
           'button, [role="textbox"], [data-conversation-role], textarea, [contenteditable="true"]',
         ),
       );
+      if (ready !== rendered) publish(rendered);
       readConversationState(root, rendered);
     } catch {
       conversationObserver.disconnect();
       appObserver.disconnect();
-      if (rootObserverTimer !== null) view.clearTimeout(rootObserverTimer);
-      rootObserverTimer = null;
-      rootObserverExpired = true;
+      stopLockWatch();
       conversationPortal = null;
       composer?.removeEventListener("input", handleInput);
       composer = null;
@@ -177,6 +199,7 @@ export function observeNativeContent(
         hasComposer: false,
         composerEmpty: false,
         userInteracted,
+        blockedByOtherApp: false,
       });
     }
   }
@@ -197,9 +220,8 @@ export function observeNativeContent(
       if (app !== next) {
         appObserver.disconnect();
         conversationObserver.disconnect();
-        if (rootObserverTimer !== null) view.clearTimeout(rootObserverTimer);
-        rootObserverTimer = null;
-        rootObserverExpired = false;
+        stopLockWatch();
+        lockWatchExpired = false;
         composer?.removeEventListener("input", handleInput);
         app?.removeEventListener("pointerdown", handleUserAction, true);
         app?.removeEventListener("keydown", handleUserAction, true);
@@ -209,6 +231,7 @@ export function observeNativeContent(
         app = next;
         userInteracted = false;
         lastState = "";
+        lastValue = null;
         app?.addEventListener("pointerdown", handleUserAction, true);
         app?.addEventListener("keydown", handleUserAction, true);
         app?.addEventListener("input", handleUserAction, true);
@@ -228,9 +251,8 @@ export function observeNativeContent(
       const failedApp = app;
       appObserver.disconnect();
       conversationObserver.disconnect();
-      if (rootObserverTimer !== null) view.clearTimeout(rootObserverTimer);
-      rootObserverTimer = null;
-      rootObserverExpired = true;
+      stopLockWatch();
+      lockWatchExpired = true;
       app = null;
       conversationPortal = null;
       composer?.removeEventListener("input", handleInput);
@@ -262,9 +284,8 @@ export function observeNativeContent(
         inner?.removeEventListener("load", check);
         appObserver.disconnect();
         conversationObserver.disconnect();
-        if (rootObserverTimer !== null) view.clearTimeout(rootObserverTimer);
-        rootObserverTimer = null;
-        rootObserverExpired = false;
+        stopLockWatch();
+        lockWatchExpired = false;
         composer?.removeEventListener("input", handleInput);
         app?.removeEventListener("pointerdown", handleUserAction, true);
         app?.removeEventListener("keydown", handleUserAction, true);
@@ -292,15 +313,15 @@ export function observeNativeContent(
     app?.removeEventListener("input", handleUserAction, true);
     appObserver.disconnect();
     conversationObserver.disconnect();
-    if (rootObserverTimer !== null) view.clearTimeout(rootObserverTimer);
-    rootObserverTimer = null;
-    rootObserverExpired = false;
+    stopLockWatch();
+    lockWatchExpired = false;
     outerObserver.disconnect();
     outer = null;
     inner = null;
     app = null;
     conversationPortal = null;
     composer = null;
+    lastValue = null;
   };
   return {
     get ready() {
@@ -311,6 +332,11 @@ export function observeNativeContent(
       running = true;
       frame.addEventListener("load", connect);
       connect();
+    },
+    snapshot() {
+      if (!running) return null;
+      checkConversation();
+      return lastValue;
     },
     pause,
     dispose: pause,
