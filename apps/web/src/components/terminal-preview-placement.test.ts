@@ -4,7 +4,7 @@ import type { ReactElement, ReactNode } from "react";
 
 import type { AgentSessionRecord } from "@agent-orchestrator/shared";
 
-import { AgentGridCard } from "./AgentGridCard.js";
+import { AgentGridCardView } from "./AgentGridCard.js";
 import { FocusSidebarSessionCard } from "./FocusSidebarSessionCard.js";
 import { LazyTerminalView } from "./LazyTerminalView.js";
 import { TerminalPreview } from "./TerminalPreview.js";
@@ -56,7 +56,7 @@ function collectElementTypes(
 
 describe("terminal preview placement", () => {
   it("uses lightweight preview by default in grid cards", () => {
-    const element = AgentGridCard({
+    const element = AgentGridCardView({
       session: makeSession(),
       onDoubleClick: () => {},
       onDelete: () => {},

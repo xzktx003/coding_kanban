@@ -1,3 +1,5 @@
+import { memo } from "react";
+
 import {
   isLocalCodexSessionCandidate,
   type AgentSessionRecord,
@@ -9,8 +11,9 @@ import { AgentGridGitSummary } from "./AgentGridGitSummary";
 import { SessionGroupMenu } from "./SessionGroupControls";
 import { TerminalPreview } from "./TerminalPreview";
 import type { SessionGroupState } from "../lib/session-groups";
+import { sameJsonValue } from "../lib/session-list-stability";
 
-interface AgentGridCardProps {
+export interface AgentGridCardProps {
   session: AgentSessionRecord;
   onDoubleClick: (id: string) => void;
   onDelete: (id: string) => void;
@@ -55,6 +58,11 @@ const interactiveDoubleClickSelectors = [
 
 const TASK_SUMMARY_REFRESH_INTERVAL_MS = 15_000;
 const GIT_SUMMARY_REFRESH_INTERVAL_MS = 60_000;
+const AGENT_CARD_IGNORED_SESSION_FIELDS = new Set([
+  "lastHeartbeatAt",
+  "lastRefreshedAt",
+  "lastOutputAt",
+]);
 
 function getSummaryRefreshKey(
   session: AgentSessionRecord,
@@ -82,6 +90,65 @@ export function getAgentCardGitSummaryRefreshKey(
   session: AgentSessionRecord,
 ): string {
   return getSummaryRefreshKey(session, GIT_SUMMARY_REFRESH_INTERVAL_MS);
+}
+
+function sameCardSession(
+  previous: AgentSessionRecord,
+  next: AgentSessionRecord,
+): boolean {
+  if (previous === next) return true;
+  if (
+    getAgentCardTaskSummaryRefreshKey(previous) !==
+      getAgentCardTaskSummaryRefreshKey(next) ||
+    getAgentCardGitSummaryRefreshKey(previous) !==
+      getAgentCardGitSummaryRefreshKey(next)
+  ) {
+    return false;
+  }
+
+  const previousRecord = previous as unknown as Record<string, unknown>;
+  const nextRecord = next as unknown as Record<string, unknown>;
+  const previousKeys = Object.keys(previousRecord);
+  const nextKeys = Object.keys(nextRecord);
+  let previousComparableKeys = 0;
+  for (const key of previousKeys) {
+    if (AGENT_CARD_IGNORED_SESSION_FIELDS.has(key)) continue;
+    previousComparableKeys += 1;
+    if (
+      !Object.prototype.hasOwnProperty.call(nextRecord, key) ||
+      !sameJsonValue(previousRecord[key], nextRecord[key])
+    ) {
+      return false;
+    }
+  }
+  let nextComparableKeys = 0;
+  for (const key of nextKeys) {
+    if (!AGENT_CARD_IGNORED_SESSION_FIELDS.has(key)) {
+      nextComparableKeys += 1;
+    }
+  }
+  return previousComparableKeys === nextComparableKeys;
+}
+
+export function areAgentGridCardPropsEqual(
+  previous: AgentGridCardProps,
+  next: AgentGridCardProps,
+): boolean {
+  return (
+    sameCardSession(previous.session, next.session) &&
+    previous.onDoubleClick === next.onDoubleClick &&
+    previous.onDelete === next.onDelete &&
+    previous.onReconnect === next.onReconnect &&
+    previous.onRename === next.onRename &&
+    previous.onHide === next.onHide &&
+    previous.onCopyConnectCommand === next.onCopyConnectCommand &&
+    previous.onKillTmux === next.onKillTmux &&
+    previous.onUnreadCompletionChange === next.onUnreadCompletionChange &&
+    sameJsonValue(previous.sessionGroups, next.sessionGroups) &&
+    previous.onCreateSessionGroup === next.onCreateSessionGroup &&
+    previous.onMoveSessionToGroup === next.onMoveSessionToGroup &&
+    previous.terminalSuspended === next.terminalSuspended
+  );
 }
 
 export function shouldFocusGridCardFromDoubleClick(
@@ -129,7 +196,7 @@ function shortenPath(dir?: string): string {
   return p;
 }
 
-export function AgentGridCard({
+export function AgentGridCardView({
   session,
   onDoubleClick,
   onDelete,
@@ -335,3 +402,8 @@ export function AgentGridCard({
     </div>
   );
 }
+
+export const AgentGridCard = memo(
+  AgentGridCardView,
+  areAgentGridCardPropsEqual,
+);
