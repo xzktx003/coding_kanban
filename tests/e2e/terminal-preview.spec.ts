@@ -53,6 +53,7 @@ async function installTrackingWebSocket(
       __terminalWebSocketMaxPendingReplayCount?: number;
       __terminalWebSocketPendingReplayCount?: number;
       __terminalWebSocketClosedUrls?: string[];
+      __emitTerminalWebSocketMessages?: (messages: string[]) => void;
       __terminalWebSocketSends?: string[];
       __terminalWebSocketUrls?: string[];
     };
@@ -173,6 +174,18 @@ async function installTrackingWebSocket(
     trackedWindow.__closeLatestTerminalWebSocket = () => {
       terminalSockets.at(-1)?.close();
     };
+    trackedWindow.__emitTerminalWebSocketMessages = (messages: string[]) => {
+      const socket = terminalSockets.at(-1);
+      if (!socket || socket.readyState !== MockWebSocket.OPEN) {
+        throw new Error("No open terminal WebSocket is available");
+      }
+
+      for (const data of messages) {
+        const event = new MessageEvent("message", { data });
+        socket.dispatchEvent(event);
+        socket.onmessage?.(event);
+      }
+    };
 
     Object.defineProperty(window, "WebSocket", {
       configurable: true,
@@ -180,6 +193,59 @@ async function installTrackingWebSocket(
       value: MockWebSocket,
     });
   }, stalledTerminalConnections);
+}
+
+async function installFocusReportTimerTracking(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const originalSetTimeout = window.setTimeout.bind(window);
+    const originalClearTimeout = window.clearTimeout.bind(window);
+    const trackedTimers = new Set<number>();
+    const stats = {
+      active: 0,
+      cleared: 0,
+      fired: 0,
+      scheduled: 0,
+    };
+    (
+      window as Window & {
+        __terminalFocusReportTimerStats?: typeof stats;
+      }
+    ).__terminalFocusReportTimerStats = stats;
+
+    window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args) => {
+      const stack = new Error().stack ?? "";
+      const track = stack.includes("scheduleTerminalFocusReport");
+      let timerId = 0;
+      const wrappedHandler: TimerHandler =
+        typeof handler === "function"
+          ? (...callbackArgs: unknown[]) => {
+              if (track && trackedTimers.delete(timerId)) {
+                stats.active -= 1;
+              }
+              if (track) {
+                stats.fired += 1;
+              }
+              return handler(...callbackArgs);
+            }
+          : handler;
+
+      timerId = originalSetTimeout(wrappedHandler, timeout, ...args);
+      if (track) {
+        trackedTimers.add(timerId);
+        stats.active += 1;
+        stats.scheduled += 1;
+      }
+      return timerId;
+    }) as typeof window.setTimeout;
+
+    window.clearTimeout = ((handle?: number) => {
+      if (typeof handle === "number" && trackedTimers.delete(handle)) {
+        stats.active -= 1;
+        stats.cleared += 1;
+      }
+      return originalClearTimeout(handle);
+    }) as typeof window.clearTimeout;
+  });
 }
 
 async function mockSessions(
@@ -336,6 +402,44 @@ async function terminalWebSocketSends(page: Page): Promise<string[]> {
       ...((window as Window & { __terminalWebSocketSends?: string[] })
         .__terminalWebSocketSends ?? []),
     ];
+  });
+}
+
+async function emitTerminalWebSocketMessages(
+  page: Page,
+  messages: string[],
+): Promise<void> {
+  await page.evaluate((frames) => {
+    (
+      window as Window & {
+        __emitTerminalWebSocketMessages?: (messages: string[]) => void;
+      }
+    ).__emitTerminalWebSocketMessages?.(frames);
+  }, messages);
+}
+
+async function terminalFocusReportTimerStats(page: Page): Promise<{
+  active: number;
+  cleared: number;
+  fired: number;
+  scheduled: number;
+}> {
+  return page.evaluate(() => {
+    return {
+      ...((window as Window & {
+        __terminalFocusReportTimerStats?: {
+          active: number;
+          cleared: number;
+          fired: number;
+          scheduled: number;
+        };
+      }).__terminalFocusReportTimerStats ?? {
+        active: 0,
+        cleared: 0,
+        fired: 0,
+        scheduled: 0,
+      }),
+    };
   });
 }
 
@@ -1225,6 +1329,68 @@ test("focused terminal reconnects after an unexpected WebSocket close and accept
     .toContain("reconnected-input");
 });
 
+test("focused terminal coalesces focus-report timers across burst output and cancels on unmount", async ({
+  page,
+}) => {
+  const session = makeSession({
+    id: "focus-report-burst-session",
+    displayName: "Focus Report Burst Session",
+    outputPreview: "ready",
+  });
+  await installFocusReportTimerTracking(page);
+  await mockSessions(page, [session]);
+  await page.goto("/");
+
+  await page
+    .locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: session.displayName }),
+    })
+    .dblclick();
+  await expect(page.locator(".focus-main")).toBeVisible();
+  await expect.poll(() => terminalWebSocketUrls(page)).toHaveLength(1);
+
+  const initialStats = await terminalFocusReportTimerStats(page);
+  await emitTerminalWebSocketMessages(
+    page,
+    Array.from({ length: 8 }, (_, index) => `burst-output-${index}\r\n`),
+  );
+  const burstStats = await terminalFocusReportTimerStats(page);
+  expect(burstStats.scheduled - initialStats.scheduled).toBeLessThanOrEqual(1);
+  expect(burstStats.active).toBeLessThanOrEqual(1);
+
+  await expect
+    .poll(async () => (await terminalFocusReportTimerStats(page)).active)
+    .toBe(0);
+
+  const textarea = page.locator(
+    '[data-active-terminal-pane="true"] .xterm-helper-textarea',
+  );
+  await textarea.click();
+  await page.keyboard.type("focus-report-input");
+  await expect
+    .poll(async () => (await terminalWebSocketSends(page)).join(""))
+    .toContain("focus-report-input");
+
+  const beforeUnmount = await terminalFocusReportTimerStats(page);
+  await page.evaluate(() => {
+    const emit = (
+      window as Window & {
+        __emitTerminalWebSocketMessages?: (messages: string[]) => void;
+      }
+    ).__emitTerminalWebSocketMessages;
+    emit?.(["pending-before-unmount-1\r\n", "pending-before-unmount-2\r\n"]);
+    document.querySelector<HTMLButtonElement>(".focus-exit-btn")?.click();
+  });
+  await expect(page.locator(".agent-grid")).toBeVisible();
+  await page.waitForTimeout(30);
+  const afterUnmount = await terminalFocusReportTimerStats(page);
+  expect(afterUnmount.scheduled - beforeUnmount.scheduled).toBeLessThanOrEqual(
+    1,
+  );
+  expect(afterUnmount.fired - beforeUnmount.fired).toBe(0);
+  expect(afterUnmount.active).toBe(0);
+});
+
 test("remote tmux panes enable browser mouse reports when the remote handshake omits them", async ({
   page,
 }) => {
@@ -1324,6 +1490,7 @@ test("activating the other monitor pane keeps both terminal instances mounted", 
     .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
     .click();
   await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
+  await page.keyboard.press("Escape");
 
   const leftPane = page.locator(
     '[data-terminal-pane-slot="terminal-monitor-slot-1"]',

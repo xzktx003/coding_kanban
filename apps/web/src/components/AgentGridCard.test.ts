@@ -6,11 +6,34 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   AgentGridCard,
+  areAgentGridCardPropsEqual,
   getAgentCardGitSummaryRefreshKey,
   getAgentCardTaskSummaryRefreshKey,
   shouldFocusGridCardFromDoubleClick,
   shouldFocusGridCardFromMouseDown,
+  type AgentGridCardProps,
 } from "./AgentGridCard.js";
+
+function makeCardProps(
+  overrides: Partial<AgentGridCardProps> = {},
+): AgentGridCardProps {
+  return {
+    session: {
+      id: "session-card-memo",
+      workspaceId: "default",
+      sourceType: "local",
+      agentKind: "codex",
+      displayName: "Memo Session",
+      connectionState: "online",
+      interactionState: "running",
+      lastOutputAt: "2026-08-14T15:00:00.000Z",
+    },
+    onDoubleClick: () => {},
+    onDelete: () => {},
+    onReconnect: () => {},
+    ...overrides,
+  };
+}
 
 test("continuous terminal output does not invalidate card summaries", () => {
   const session = {
@@ -59,6 +82,106 @@ test("continuous terminal output does not invalidate card summaries", () => {
       lastOutputAt: "2026-08-14T15:01:00.000Z",
     }),
   );
+});
+
+test("grid card memo skips heartbeat refreshes but keeps summary output buckets", () => {
+  const previous = makeCardProps({
+    session: {
+      ...makeCardProps().session,
+      lastHeartbeatAt: "2026-08-14T15:00:00.000Z",
+      lastRefreshedAt: "2026-08-14T15:00:00.000Z",
+    },
+  });
+
+  assert.equal(
+    areAgentGridCardPropsEqual(previous, {
+      ...previous,
+      session: {
+        ...previous.session,
+        lastHeartbeatAt: "2026-08-14T15:00:01.000Z",
+        lastRefreshedAt: "2026-08-14T15:00:01.000Z",
+      },
+    }),
+    true,
+  );
+
+  assert.equal(
+    areAgentGridCardPropsEqual(previous, {
+      ...previous,
+      session: {
+        ...previous.session,
+        lastOutputAt: "2026-08-14T15:00:14.999Z",
+      },
+    }),
+    true,
+  );
+
+  assert.equal(
+    areAgentGridCardPropsEqual(previous, {
+      ...previous,
+      session: {
+        ...previous.session,
+        lastOutputAt: "2026-08-14T15:00:15.000Z",
+      },
+    }),
+    false,
+  );
+
+  assert.equal(
+    areAgentGridCardPropsEqual(previous, {
+      ...previous,
+      session: {
+        ...previous.session,
+        lastOutputAt: "2026-08-14T15:01:00.000Z",
+      },
+    }),
+    false,
+  );
+});
+
+test("grid card memo still publishes content, metadata, grouping and callback changes", () => {
+  const previous = makeCardProps({
+    sessionGroups: {
+      groups: [{ id: "group-old", name: "Old" }],
+      assignments: {},
+      collapsedGroupIds: [],
+    },
+  });
+
+  for (const next of [
+    makeCardProps({
+      ...previous,
+      session: { ...previous.session, outputPreview: "new output" },
+    }),
+    makeCardProps({
+      ...previous,
+      session: { ...previous.session, lastUserMessageSummary: "new task" },
+    }),
+    makeCardProps({
+      ...previous,
+      session: { ...previous.session, transportRef: { processId: 1234 } },
+    }),
+    makeCardProps({
+      ...previous,
+      session: { ...previous.session, tags: ["urgent"] },
+    }),
+    makeCardProps({
+      ...previous,
+      sessionGroups: {
+        groups: [{ id: "group-new", name: "New" }],
+        assignments: {},
+        collapsedGroupIds: [],
+      },
+    }),
+    makeCardProps({
+      ...previous,
+      onDoubleClick: () => {
+        throw new Error("new callback");
+      },
+    }),
+  ]) {
+    assert.equal(areAgentGridCardPropsEqual(previous, next), false);
+  }
 });
 
 test("grid cards show structured task summaries above terminal previews", () => {

@@ -1,4 +1,5 @@
 import {
+  startTransition,
   useCallback,
   useEffect,
   useMemo,
@@ -553,8 +554,12 @@ export default function App({
 
     const unsubscribe = subscribeAgentSessions(
       (data) => {
-        setSnapshot(data);
-        setIsLoading(false);
+        // Background output may update many cards at once. Let typing and
+        // explicit user actions interrupt that work instead of waiting for it.
+        startTransition(() => {
+          setSnapshot(data);
+          setIsLoading(false);
+        });
       },
       (status) => {
         setConnectionStatus(status);
@@ -833,9 +838,10 @@ export default function App({
       return Object.fromEntries(nextEntries);
     });
 
-    setVscodeCacheSessionIds((current) =>
-      current.filter((sessionId) => knownIds.has(sessionId)),
-    );
+    setVscodeCacheSessionIds((current) => {
+      const retained = current.filter((sessionId) => knownIds.has(sessionId));
+      return retained.length === current.length ? current : retained;
+    });
 
     if (!isLoading && focusedId && !knownIds.has(focusedId)) {
       setFocusedId(null);
@@ -879,12 +885,15 @@ export default function App({
     focusAgentSession({ agentSessionId: id }).catch(() => {});
   }, []);
 
-  function handleFocusSession(id: string) {
-    setFocusedId(id);
-    setActiveTerminalSessionId(id);
-    setViewMode("focus");
-    acknowledgeFocusedSession(id);
-  }
+  const handleFocusSession = useCallback(
+    (id: string) => {
+      setFocusedId(id);
+      setActiveTerminalSessionId(id);
+      setViewMode("focus");
+      acknowledgeFocusedSession(id);
+    },
+    [acknowledgeFocusedSession],
+  );
 
   const handleQuickTmuxConnected = useCallback(
     (session: AgentSessionRecord) => {
@@ -1083,14 +1092,14 @@ export default function App({
     [],
   );
 
-  async function handleDeleteSession(id: string) {
+  const handleDeleteSession = useCallback(async (id: string) => {
     await deleteAgentSession(id);
     listAgentSessions()
       .then(setSnapshot)
       .catch(() => {});
-  }
+  }, []);
 
-  async function handleHideSession(id: string) {
+  const handleHideSession = useCallback(async (id: string) => {
     await hideAgentSession(id);
     const snap = await listAgentSessions().catch(() => null);
     if (snap) {
@@ -1102,7 +1111,7 @@ export default function App({
         }
       }
     }
-  }
+  }, []);
 
   async function handleUnhideSession(id: string) {
     await unhideAgentSession(id);
@@ -1111,27 +1120,27 @@ export default function App({
       .catch(() => {});
   }
 
-  async function handleKillTmux(id: string) {
+  const handleKillTmux = useCallback(async (id: string) => {
     await killTmuxSession(id);
     listAgentSessions()
       .then(setSnapshot)
       .catch(() => {});
-  }
+  }, []);
 
-  function handleCopyConnectCommand(id: string) {
-    const session = sessions.find((s) => s.id === id);
+  const handleCopyConnectCommand = useCallback((id: string) => {
+    const session = rawSessionsRef.current.find((s) => s.id === id);
     if (session?.transportRef?.tmuxSession) {
       const cmd = `tmux attach -t ${session.transportRef.tmuxSession}`;
       copyTextToClipboard(cmd).catch(() => {});
     }
-  }
+  }, []);
 
-  async function handleReconnectSession(id: string) {
+  const handleReconnectSession = useCallback(async (id: string) => {
     await reconnectAgentSession(id);
     listAgentSessions()
       .then(setSnapshot)
       .catch(() => {});
-  }
+  }, []);
 
   const handleUnreadCompletionChange = useCallback(
     async (id: string, unread: boolean) => {
@@ -1161,41 +1170,38 @@ export default function App({
     [],
   );
 
-  const handleRenameSession = useCallback(
-    async (id: string) => {
-      const session = sessions.find((item) => item.id === id);
-      if (!session) {
-        return;
-      }
+  const handleRenameSession = useCallback(async (id: string) => {
+    const session = rawSessionsRef.current.find((item) => item.id === id);
+    if (!session) {
+      return;
+    }
 
-      const nextName = window.prompt("输入新的会话名称", session.displayName);
-      if (nextName === null) {
-        return;
-      }
+    const nextName = window.prompt("输入新的会话名称", session.displayName);
+    if (nextName === null) {
+      return;
+    }
 
-      const displayName = nextName.trim();
-      if (!displayName) {
-        window.alert("名称不能为空");
-        return;
-      }
+    const displayName = nextName.trim();
+    if (!displayName) {
+      window.alert("名称不能为空");
+      return;
+    }
 
-      if (displayName === session.displayName) {
-        return;
-      }
+    if (displayName === session.displayName) {
+      return;
+    }
 
-      try {
-        await updateAgentSession(id, { displayName });
-        listAgentSessions()
-          .then(setSnapshot)
-          .catch(() => {});
-      } catch (error) {
-        window.alert(
-          `改名失败: ${error instanceof Error ? error.message : "未知错误"}`,
-        );
-      }
-    },
-    [sessions],
-  );
+    try {
+      await updateAgentSession(id, { displayName });
+      listAgentSessions()
+        .then(setSnapshot)
+        .catch(() => {});
+    } catch (error) {
+      window.alert(
+        `改名失败: ${error instanceof Error ? error.message : "未知错误"}`,
+      );
+    }
+  }, []);
 
   const handleCreateSessionGroup = useCallback(
     (sessionId?: string) => {
@@ -1226,7 +1232,7 @@ export default function App({
       setSessionGroups((current) => {
         let next = addSessionGroup(current, { id: groupId, name });
         const session = sessionId
-          ? sessions.find((item) => item.id === sessionId)
+          ? rawSessionsRef.current.find((item) => item.id === sessionId)
           : undefined;
         if (session) {
           next = assignSessionToGroup(
@@ -1238,7 +1244,7 @@ export default function App({
         return next;
       });
     },
-    [sessionGroups.groups, sessions],
+    [sessionGroups.groups],
   );
 
   const handleRenameSessionGroup = useCallback(
@@ -1289,14 +1295,16 @@ export default function App({
 
   const handleMoveSessionToGroup = useCallback(
     (sessionId: string, groupId: string | null) => {
-      const session = sessions.find((item) => item.id === sessionId);
+      const session = rawSessionsRef.current.find(
+        (item) => item.id === sessionId,
+      );
       if (!session) return;
 
       setSessionGroups((current) =>
         assignSessionToGroup(current, getSessionGroupKeys(session), groupId),
       );
     },
-    [sessions],
+    [],
   );
 
   const handleToggleSessionGroup = useCallback(

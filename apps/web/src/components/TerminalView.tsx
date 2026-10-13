@@ -294,9 +294,9 @@ export const TerminalView = memo(function TerminalView({
     userScrollLockedRef.current = false;
     followExternalInputRef.current = false;
 
-    const timeoutIds: number[] = [];
-    const intervalIds: number[] = [];
-    const animationFrameIds: number[] = [];
+    const timeoutIds = new Set<number>();
+    const intervalIds = new Set<number>();
+    const animationFrameIds = new Set<number>();
     const isPreview = !interactive;
     const ownerToken = Symbol(agentSessionId);
     const ownerPriority = 2;
@@ -328,6 +328,7 @@ export const TerminalView = memo(function TerminalView({
     let lastExternalPointerIntentAt = 0;
     let lastExternalUserIntentAt = 0;
     let lastTerminalIntentAt = 0;
+    let terminalFocusReportTimerId: number | null = null;
     let initialReadyReported = false;
     let pendingInitialReplayWrites = 0;
     let replayCompletionObserved = false;
@@ -339,6 +340,24 @@ export const TerminalView = memo(function TerminalView({
         userAgent: navigator.userAgent,
         vendor: navigator.vendor,
       });
+
+    const scheduleTrackedTimeout = (callback: () => void, delayMs: number) => {
+      const timeoutId = window.setTimeout(() => {
+        timeoutIds.delete(timeoutId);
+        callback();
+      }, delayMs);
+      timeoutIds.add(timeoutId);
+      return timeoutId;
+    };
+
+    const scheduleTrackedAnimationFrame = (callback: FrameRequestCallback) => {
+      const frameId = window.requestAnimationFrame((timestamp) => {
+        animationFrameIds.delete(frameId);
+        callback(timestamp);
+      });
+      animationFrameIds.add(frameId);
+      return frameId;
+    };
 
     const ensureInputOwner = () => {
       if (!inputEnabledRef.current) {
@@ -685,7 +704,7 @@ export const TerminalView = memo(function TerminalView({
           shiftKey: true,
           buttons: 0,
         });
-        timeoutIds.push(window.setTimeout(copyTerminalSelectionToClipboard, 0));
+        scheduleTrackedTimeout(copyTerminalSelectionToClipboard, 0);
       } else {
         dispatchPreferredMouseEvent(
           "mousedown",
@@ -842,7 +861,7 @@ export const TerminalView = memo(function TerminalView({
             return;
           }
           if (first.blocksInitialReady) {
-            timeoutIds.push(window.setTimeout(drainTerminalWriteQueue, 0));
+            scheduleTrackedTimeout(drainTerminalWriteQueue, 0);
           } else {
             drainTerminalWriteQueue();
           }
@@ -1113,27 +1132,28 @@ export const TerminalView = memo(function TerminalView({
 
       focusInteractiveTerminal(unlockInput);
 
-      const frameId = window.requestAnimationFrame(() => {
+      scheduleTrackedAnimationFrame(() => {
         if (!disposed) {
           focusInteractiveTerminal(unlockInput);
         }
       });
-      animationFrameIds.push(frameId);
 
-      timeoutIds.push(
-        window.setTimeout(() => {
+      scheduleTrackedTimeout(
+        () => {
           if (!disposed) {
             focusInteractiveTerminal(unlockInput);
           }
-        }, 0),
+        },
+        0,
       );
 
-      timeoutIds.push(
-        window.setTimeout(() => {
+      scheduleTrackedTimeout(
+        () => {
           if (!disposed) {
             focusInteractiveTerminal(unlockInput);
           }
-        }, 32),
+        },
+        32,
       );
     };
 
@@ -1252,12 +1272,18 @@ export const TerminalView = memo(function TerminalView({
     };
 
     const scheduleTerminalFocusReport = () => {
-      timeoutIds.push(
-        window.setTimeout(() => {
+      if (terminalFocusReportTimerId !== null) {
+        return;
+      }
+
+      terminalFocusReportTimerId = scheduleTrackedTimeout(
+        () => {
+          terminalFocusReportTimerId = null;
           if (!disposed) {
             syncTerminalFocusReport();
           }
-        }, 0),
+        },
+        0,
       );
     };
 
@@ -2123,14 +2149,15 @@ export const TerminalView = memo(function TerminalView({
           return;
         }
 
-        timeoutIds.push(
-          window.setTimeout(() => {
+        scheduleTrackedTimeout(
+          () => {
             if (disposed || isIntentionalExternalFocus()) {
               return;
             }
 
             scheduleFocusInteractiveTerminal();
-          }, 0),
+          },
+          0,
         );
       };
 
@@ -2150,12 +2177,13 @@ export const TerminalView = memo(function TerminalView({
 
         rememberActiveExternalFocusIfUserDriven();
 
-        timeoutIds.push(
-          window.setTimeout(() => {
+        scheduleTrackedTimeout(
+          () => {
             if (!disposed) {
               rememberActiveExternalFocusIfUserDriven();
             }
-          }, 0),
+          },
+          0,
         );
       };
 
@@ -2204,7 +2232,7 @@ export const TerminalView = memo(function TerminalView({
       );
       document.addEventListener("focusin", handleDocumentFocusInCapture, true);
       document.addEventListener("keydown", handleDocumentKeyDownCapture, true);
-      intervalIds.push(
+      intervalIds.add(
         window.setInterval(
           repairPassiveFocusDrift,
           PASSIVE_FOCUS_REPAIR_INTERVAL_MS,
@@ -2436,12 +2464,16 @@ export const TerminalView = memo(function TerminalView({
       for (const timeoutId of timeoutIds) {
         window.clearTimeout(timeoutId);
       }
+      timeoutIds.clear();
+      terminalFocusReportTimerId = null;
       for (const intervalId of intervalIds) {
         window.clearInterval(intervalId);
       }
+      intervalIds.clear();
       for (const animationFrameId of animationFrameIds) {
         window.cancelAnimationFrame(animationFrameId);
       }
+      animationFrameIds.clear();
 
       const currentOwner = terminalInputOwners.get(agentSessionId);
       if (currentOwner?.token === ownerToken) {
