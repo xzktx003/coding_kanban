@@ -32,9 +32,9 @@ pnpm session:status
 
 ## 后端热更新的依赖保护
 
-`dev:app` 使用 `scripts/watch-server.mjs` 监听后端/shared 源码及 workspace 的依赖清单、锁文件。首次启动或清单变化时先运行 `pnpm install --frozen-lockfile`，成功且后端声明的运行依赖可解析后，才停止旧 Node 网关并加载新源码。普通源码保存不重复安装；同一批文件变更合并处理，安装期间的新变更在替换网关前重新检查。
+`dev:app` 使用 `scripts/watch-server.mjs` 监听后端/shared 源码及 workspace 的依赖清单、锁文件。首次启动或清单变化时先运行 `pnpm install --frozen-lockfile`，成功且后端声明的运行依赖可解析后，每次启动或替换网关前先编译 shared，再停止旧 Node 网关并加载新源码。编译在网关进程外完成，避免静态依赖提前缓存旧 shared，导致新路由缺少命名导出；watcher 仅监听源码，不会因 shared 的 `dist` 写入重复重启。普通源码保存不重复安装；同一批文件变更合并处理，准备期间的新变更在替换网关前重新检查。
 
-依赖安装失败（网络、锁文件不一致等）时记录错误并保留当前网关；修复原因后保存受监听源码或清单可重试。在线更新安装失败也跳过重启。此保护针对依赖准备顺序，不保证新源码的语法、启动逻辑错误零停机；已运行代码后续动态导入新文件也不在保护范围。原 Rust 会话运行层与 Agent 不受热更新管理。
+依赖安装失败（网络、锁文件不一致等）或 shared 编译失败时记录错误并保留当前网关；修复原因后保存受监听源码或清单可重试。在线更新安装失败也跳过重启。此保护针对依赖与 shared 编译准备顺序，不保证后端新源码的语法、启动逻辑错误零停机；已运行代码后续动态导入新文件也不在保护范围。原 Rust 会话运行层与 Agent 不受热更新管理。
 
 相关回归：`node --test scripts/watch-server.test.mjs scripts/finalize-online-update.test.mjs`，包含真实隔离 watcher 进程在安装失败时保持旧网关存活、修复后替换及关闭子进程检查。局域网入口仍使用 `dev:restart` 输出的 HTTPS 地址与 `.env` 端口，前端绑定 `0.0.0.0`。
 

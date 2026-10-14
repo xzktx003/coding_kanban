@@ -121,6 +121,7 @@ async function main() {
   let stopping = false;
   let timer;
   const watchers = [];
+  const prepareDependencies = createDependencyPreparation({ root });
   async function stopChild() {
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
     const current = child;
@@ -134,7 +135,18 @@ async function main() {
     });
   }
   const request = createRestartQueue({
-    prepare: createDependencyPreparation({ root }),
+    prepare: async () => {
+      await prepareDependencies();
+      // Static gateway imports can cache shared before index.ts checks its
+      // build. Emit it in a separate process before loading any gateway code.
+      // This watcher observes source only, so dist writes cannot restart it.
+      console.log("[server-watch] Building shared before gateway replacement…");
+      await command(
+        "pnpm",
+        ["--filter", "@agent-orchestrator/shared", "build"],
+        { cwd: root, env: process.env },
+      );
+    },
     restart: async () => {
       if (stopping) return;
       await stopChild();
@@ -155,7 +167,7 @@ async function main() {
     },
     onError: (error) =>
       console.error(
-        "[server-watch] Preparation failed; current gateway retained. Fix dependencies and save a watched file to retry.",
+        "[server-watch] Preparation failed; current gateway retained. Fix dependencies or the shared build and save a watched file to retry.",
         error.message,
       ),
   });

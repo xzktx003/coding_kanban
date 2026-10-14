@@ -1158,3 +1158,5 @@
 - 2026-10-13（Codex 宿主离线但网站在线）：独立 launcher 从交互式会话启动，进程退出后 `.env` 保留旧运行记录，导致前后端均 200 而 `/api/native-codex/status` 返回 `available=false`。改由用户级 `coding-kanban-native-codex-v15.service` 常驻运行，用新的私有 runtime/record 更新 `.env`，`pnpm dev:restart` 保留会话运行服务。浏览器需验嵌套原生输入框，不能只验宿主 HTTP 或外层 iframe；机器重启后须用新私有目录重新启动宿主。
 
 - 2026-10-14（两远程同步后的 Codex 工作台编译与回归阻塞）：合入新版工作台后，共享 thread 观察集合未定义、新聊天按钮直接把点击事件当项目参数、恢复 ID 缺少类型收窄，本地关注 journal 的已验证 ID 类型也丢失。补齐 ref、点击包装和明确的字符串／必填 ID 类型；选中项目统一由已有父层读取，避免侧栏再重复请求。回归更新过期界面定位、保留重新选中后的窗口数量，并移除误提交的调试 throw、隔离各用例 journal 存储；新增按钮点击创建两个窗口且项目路径正确的断言。旧代码先复现编译失败／新窗口未创建，相关 26 项回归转绿，构建通过。
+
+- 2026-10-14（网关启动缺少 shared 新导出）：`ScriptFeishuCompletionSender` 的静态依赖会在 `main()` 编译前加载并缓存旧 shared，随后动态导入新 `codex-tabs` 路由因 `applyCodexTabAction` 缺失退出。必须在 watcher 父进程中先编译 shared，再启动／替换网关；编译失败保留旧网关，源码 watcher 不观察 dist，避免自激重启。真实隔离 watcher 红绿灯、脚本 120 项、相关后端 12 项、全仓构建／类型检查和 HTTPS 启动浏览器回归通过。现场复用原独立会话运行层，未停止 Agent；详情见 `docs/startup.md` 与 `docs/debug_list.md`。

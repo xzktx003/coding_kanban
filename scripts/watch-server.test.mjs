@@ -57,7 +57,7 @@ test("changes during installation are coalesced into a serialized follow-up", as
   assert.deepEqual(calls, ["prepare", "prepare", "restart"]);
 });
 
-test("real watcher keeps the live gateway on failed install and recovers on a new change", async () => {
+test("real watcher builds shared before gateway imports and preserves the live gateway on failed preparation", async () => {
   const { mkdtemp, mkdir, writeFile, copyFile, rm } =
     await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
@@ -82,6 +82,7 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
       "apps/server/node_modules/tsx",
       "apps/web",
       "packages/shared/src",
+      "packages/shared/dist",
       "packages/session-runtime",
     ])
       await mkdir(join(root, path), { recursive: true });
@@ -102,7 +103,15 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
     await writeFile(join(root, "apps/server/node_modules/tsx/index.js"), "");
     await writeFile(
       join(root, "apps/server/src/index.ts"),
-      'console.log("GATEWAY="+process.pid); setInterval(()=>{},1000);',
+      'import { value } from "../../../packages/shared/dist/index.js"; console.log("SHARED="+value); console.log("GATEWAY="+process.pid); setInterval(()=>{},1000);',
+    );
+    await writeFile(
+      join(root, "packages/shared/src/index.ts"),
+      "export const value = 1;\n",
+    );
+    await writeFile(
+      join(root, "packages/shared/dist/index.js"),
+      "export const oldValue = 0;\n",
     );
     await copyFile(
       new URL("./watch-server.mjs", import.meta.url),
@@ -114,7 +123,7 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
     );
     await writeFile(
       join(root, "bin/pnpm"),
-      "#!/bin/sh\nif [ -f install-fails ]; then echo INSTALL_FAILED; exit 1; fi\necho INSTALLED\n",
+      '#!/bin/sh\nif [ "$1" = install ]; then\n  if [ -f install-fails ]; then echo INSTALL_FAILED; exit 1; fi\n  echo INSTALLED\nelse\n  if [ -f build-fails ]; then echo BUILD_FAILED; exit 1; fi\n  cp packages/shared/src/index.ts packages/shared/dist/index.js\n  echo BUILT_SHARED\nfi\n',
       { mode: 0o755 },
     );
     independentRuntime = spawn(
@@ -144,6 +153,9 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
     const pids = () =>
       [...output.matchAll(/GATEWAY=(\d+)/g)].map((match) => Number(match[1]));
     await waitFor(() => pids().length === 1);
+    assert.match(output, /SHARED=1/);
+    assert.ok(output.indexOf("INSTALLED") < output.indexOf("BUILT_SHARED"));
+    assert.ok(output.indexOf("BUILT_SHARED") < output.indexOf("GATEWAY="));
     const original = pids()[0];
     await writeFile(join(root, "install-fails"), "");
     await writeFile(
@@ -173,11 +185,26 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
       "",
     );
     await rm(join(root, "install-fails"));
+    await writeFile(join(root, "build-fails"), "");
     await writeFile(
-      join(root, "apps/server/src/index.ts"),
-      'console.log("GATEWAY="+process.pid); setInterval(()=>{},1000);\n',
+      join(root, "packages/shared/src/index.ts"),
+      "export const value = 2;\n",
+    );
+    await waitFor(
+      () =>
+        output.includes("BUILD_FAILED") &&
+        output.match(/Preparation failed/g)?.length === 2,
+    );
+    assert.equal(pids().length, 1);
+    process.kill(original, 0);
+    process.kill(independentRuntime.pid, 0);
+    await rm(join(root, "build-fails"));
+    await writeFile(
+      join(root, "packages/shared/src/index.ts"),
+      "export const value = 3;\n",
     );
     await waitFor(() => pids().length === 2);
+    assert.match(output, /SHARED=3/);
     assert.throws(() => process.kill(original, 0), /ESRCH/);
     const lastPid = pids()[1];
     process.kill(independentRuntime.pid, 0);
