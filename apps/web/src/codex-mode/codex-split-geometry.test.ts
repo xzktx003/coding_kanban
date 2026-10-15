@@ -26,7 +26,7 @@ it("gives a nested split unequal rectangles instead of equal grid cells", () => 
     [512, 500, 344],
     [512, 500, 344],
   ]);
-  expect(codexNativeFrames(boxes).map((frame) => frame.y)).toEqual([40, 40, 396]);
+  expect(codexNativeFrames(boxes).map((frame) => frame.y)).toEqual([44, 44, 400]);
   expect(codexNativeFrames(boxes)).toHaveLength(3);
 });
 

@@ -180,3 +180,23 @@ it("hides hook lifecycle notifications while keeping useful warnings", () => {
     "warning",
   );
 });
+
+it("does not allocate transcript rows for thread close records, while retaining warnings and errors", () => {
+  const events = [
+    event("thread/closed", { threadId: "owner" }),
+    event("thread/closed", { threadId: "owner" }),
+    event("warning", { message: "Visible warning" }),
+    event("error", {
+      message: "Visible error",
+      codexErrorInfo: null,
+      additionalDetails: null,
+      willRetry: false,
+    }),
+  ];
+  const snapshot = JSON.stringify(events);
+  const rows = buildThreadRows(events);
+  expect(
+    rows.map((row) => row.item.kind === "event" && row.item.event.method),
+  ).toEqual(["warning", "error"]);
+  expect(JSON.stringify(events)).toBe(snapshot);
+});

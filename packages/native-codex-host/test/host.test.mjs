@@ -193,3 +193,13 @@ test('owned lifecycle cannot accept or start further work after stop', () => {
   const child = new EventEmitter(); child.exitCode = null; child.signalCode = null; let killed = false; child.kill = () => { killed = true; };
   assert.throws(() => owned.add(child), /stopped/); assert.equal(killed, true);
 });
+
+test('short browser reconnection grace requires an explicit scoped persistent native service', () => {
+  assert.throws(()=>validateOptions({...options(),reconnectionGraceSeconds:60}),/refresh service/);
+  assert.throws(()=>validateOptions({...options(),refreshServiceConfig:'/private/bridge.json'}),/domain/);
+  assert.throws(()=>validateOptions({...options(),refreshDomain:id}),/config/);
+  for(const value of ['0','301','60;kill','1.5'])assert.throws(()=>validateOptions({...options(),refreshServiceConfig:'/private/bridge.json',refreshDomain:id,reconnectionGraceSeconds:value}),/grace/);
+  const configured=validateOptions({...options(),refreshServiceConfig:'/private/bridge.json',refreshDomain:id,reconnectionGraceSeconds:'60'});
+  const args=buildHostArgs(configured);assert.equal(args[args.indexOf('--reconnection-grace-time')+1],'60');
+  assert.equal(buildHostArgs(validateOptions(options())).includes('--reconnection-grace-time'),false);
+});

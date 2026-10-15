@@ -52,6 +52,11 @@ async function load(page: Page, count = 2) {
     const { codexService } = await import(path("services/codexService"));
     await codexService.threadResume("ux-0");
   });
+  // History reads no longer navigate or acquire execution. Select through the
+  // actual tab action so live question auto-open observes the intended target.
+  const target = page.locator('[role=tab][data-tab-key="codex:ux-0"]');
+  await target.click({ position: { x: 24, y: 10 } });
+  await expect(target).toHaveAttribute("aria-selected", "true");
 }
 async function resume(page: Page) {
   await page.evaluate(async () => {
@@ -122,6 +127,7 @@ for (const width of [375, 1440]) {
       await editor.fill("自动展开时保留这条草稿");
       const panel = page.locator("[data-session-async-panel]");
       stage = 1;
+      Object.assign(fixture.threads[0], { status: { type: "active", activeFlags: [] } });
       stream.emit(1, {
         method: "turn/started",
         params: {
@@ -463,6 +469,7 @@ test("async answer rejection retries, uncertain delivery reconciles, and complet
   await expect(panel).toHaveCount(0);
   expect(submissions).toHaveLength(2);
   phase = "completed";
+  Object.assign(fixture.threads[0], { status: { type: "idle" } });
   await resume(page);
   await page
     .locator(".session-async-message")

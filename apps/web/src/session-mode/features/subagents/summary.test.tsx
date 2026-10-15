@@ -55,8 +55,9 @@ it("does not revive the removed tool tab or close the workspace for a stale suba
     isRightPanelOpen: true,
   });
   render(<SubagentSummary root="root" />);
-  fireEvent.click(screen.getByRole("button", { name: "打开子智能体" }));
-  expect(openSubagents).toHaveBeenCalledWith("root");
+  fireEvent.click(screen.getByRole("button", { name: /已开启 · 待确认/ }));
+  fireEvent.click(screen.getByRole("button", { name: "child" }));
+  expect(openSubagents).toHaveBeenCalledWith("root", "child");
   expect(useLayoutStore.getState().isRightPanelOpen).toBe(true);
   expect(screen.queryByRole("button", { name: "返回子智能体" })).toBeNull();
   useLayoutStore.setState({

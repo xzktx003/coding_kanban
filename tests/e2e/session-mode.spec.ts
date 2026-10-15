@@ -74,7 +74,7 @@ test("session navigation, drafts, theme isolation and responsive layout", async 
         .getByRole("button", { name: "终端", exact: true }),
     ).toBeInViewport();
     const send = await page
-      .getByRole("button", { name: "发送", exact: true })
+      .getByRole("button", { name: "发送消息", exact: true })
       .boundingBox();
     expect(send).not.toBeNull();
     expect(send!.x).toBeGreaterThanOrEqual(0);

@@ -22,7 +22,6 @@ import { NativeToolIcon } from "../presentation/NativeToolIcons";
 import { NativeCompactionItem } from "./NativeCompactionItem";
 import { NativeDynamicToolItem } from "./NativeDynamicToolItem";
 import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
-import { TranscriptDetailsNotice } from "./TranscriptDetailsNotice";
 
 function queryDetail(query: string) {
   const sites: string[] = [];
@@ -186,7 +185,6 @@ export function NativeActivityItem({
                   : `Viewed ${count} images`
               }
             />
-            <TranscriptDetailsNotice />
           </div>
         );
       return (

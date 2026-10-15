@@ -7,7 +7,6 @@ import { useEditorStore } from "@session/stores/useEditorStore";
 import { useLayoutStore } from "@session/stores/useLayoutStore";
 import { ShellCommand } from "./ShellCommand";
 import type { CommandActionSource } from "../thread/deriveRenderItems";
-import { TranscriptDetailsNotice } from "./TranscriptDetailsNotice";
 
 export const CommandActionItem = ({
   action,
@@ -109,11 +108,23 @@ export const CommandActionItem = ({
     ),
   };
   return (
-    <div className="codex-exploration" data-command-action={action.type}>
-      <span className="codex-exploration-label">
+    <ShellCommand
+      command={action.command}
+      commandItemId={commandItemId}
+      aggregatedOutput={aggregatedOutput}
+      status={status}
+      durationMs={durationMs}
+      startedAtMs={startedAtMs}
+      termination={termination}
+      cwd={cwd}
+      threadId={threadId}
+      turnId={turnId}
+      exitCode={exitCode}
+      transcriptMetadataOnly={transcriptMetadataOnly}
+      explorationType={action.type}
+      explorationSummary={
         <Trans t={t} i18nKey={`exploration.${key}`} components={components} />
-      </span>
-      {transcriptMetadataOnly && <TranscriptDetailsNotice />}
-    </div>
+      }
+    />
   );
 };

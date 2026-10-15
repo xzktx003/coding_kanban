@@ -111,7 +111,7 @@ test("mobile focus and streaming preserve historical reading; explicit sends fol
   await expect
     .poll(() => transcript.evaluate((el) => el.scrollTop))
     .toBeCloseTo(readingTop, 0);
-  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await page.getByRole("button", { name: "发送消息", exact: true }).click();
   // The established delivery contract intentionally follows the newly submitted
   // message. Focus, uploads and incoming streaming alone must preserve reading.
   await expect.poll(remaining).toBeLessThan(5);

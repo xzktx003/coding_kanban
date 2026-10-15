@@ -9,6 +9,38 @@ const cwd = "/tmp/project-a";
 const threadA = "00000000-0000-4000-8000-000000000001";
 const threadB = "00000000-0000-4000-8000-000000000002";
 
+it("shows the first verified page while later history is still loading", async () => {
+  let release!: (value: unknown) => void;
+  const later = new Promise((resolve) => {
+    release = resolve;
+  });
+  const onPage = vi.fn();
+  const query: ThreadListQuery = async (params) =>
+    params.cursor
+      ? later
+      : {
+          data: [
+            {
+              id: threadA,
+              cwd,
+              name: "First",
+              preview: "first",
+              updatedAt: 20,
+              parentThreadId: null,
+              ephemeral: false,
+            },
+          ],
+          nextCursor: "later",
+        };
+  const pending = loadProjectConversations(cwd, query, undefined, onPage);
+  await vi.waitFor(() => expect(onPage).toHaveBeenCalledTimes(1));
+  expect(
+    onPage.mock.calls[0][0].map((item: { id: string }) => item.id),
+  ).toEqual([threadA]);
+  release({ data: [], nextCursor: null });
+  await expect(pending).resolves.toHaveLength(1);
+});
+
 it("loads every resumable conversation for one project across cursor pages", async () => {
   const requests: Array<{
     params: Parameters<ThreadListQuery>[0];

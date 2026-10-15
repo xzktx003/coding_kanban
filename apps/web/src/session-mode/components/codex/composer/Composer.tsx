@@ -1,9 +1,10 @@
-import { subagentParent } from "@agent-orchestrator/shared";
 import { sessionDraftSubmissions } from "@session/features/subagents/submissions";
 import { mentionDrafts } from "@session/features/subagents/mentions";
+import { AgentMentionPicker } from "@session/features/subagents/AgentMentionPicker";
+import { BackgroundAgentSummary } from "@session/features/subagents/BackgroundAgentSummary";
 import { pluginInputDrafts } from "@session/features/plugins/pluginInputs";
 import type { NativeInputMention } from "@agent-orchestrator/shared";
-import { useSubagentStore } from "@session/features/subagents/store";
+import { useCodexThreadInput } from "@session/hooks/useCodexThreadInput";
 import { composeContextText } from "@agent-orchestrator/shared";
 import {
   composerDrafts,
@@ -22,6 +23,7 @@ import {
   followupService,
   followupParameters,
 } from "@session/services/followupService";
+import { useCodexSendBlockReason } from "@session/hooks/useCodexSendBlockReason";
 import { createSideChat } from "@session/services/conversationActions";
 import { useFollowupSettingsStore } from "@session/stores/useFollowupSettingsStore";
 import { FollowupQueueContent } from "./FollowupQueue";
@@ -196,23 +198,23 @@ export function Composer({
   const { addAgentCard, setCurrentAgentCardId } = useAgentCenterStore();
   const attachments = useImageAttachments(owner);
   const images = attachments.paths;
-  const child = useSubagentStore((s) =>
-    currentThreadId ? s.nodes[currentThreadId] : undefined,
-  );
+  const threadInput = useCodexThreadInput(currentThreadId);
   const nativeChild = useCodexStore((s) =>
     s.threads.find((t) => t.id === currentThreadId),
   );
   const hostCwd = nativeChild?.cwd ?? cwd;
-  const directInputBlocked = child
-    ? child.thread.canAcceptDirectInput !== true
-    : !!nativeChild &&
-      !!subagentParent(nativeChild) &&
-      nativeChild.canAcceptDirectInput !== true;
+  const directInputBlocked = threadInput.blocked;
   const fileDrop = useComposerFileDrop(owner, {
     addImages: attachments.addFiles,
     disabled: directInputBlocked || !!contextStorageError,
   });
+  const queueSnapshot = useFollowups(currentThreadId);
+  const accessBlock = useCodexSendBlockReason(
+    currentThreadId,
+    queueSnapshot.state.items.some((item) => item.status === "uncertain"),
+  );
   const blocked =
+    !!accessBlock ||
     directInputBlocked ||
     attachments.blocked ||
     !!contextStorageError ||
@@ -400,7 +402,6 @@ export function Composer({
       // Continuing an existing session never replaces its name with this message.
       if (activeDraftOwner() === submittedOwner)
         setCurrentAgentCardId(targetThreadId, "codex");
-      onAfterSend?.(targetThreadId, text);
       const accepted = await followupService.submit(
         submittedOwner,
         snapshot.revision,
@@ -413,6 +414,7 @@ export function Composer({
         submittedContexts,
         [...submittedMentions, ...submittedPluginMentions],
       );
+      onAfterSend?.(targetThreadId, text);
       setDeliveryNotice({
         owner: submittedOwner,
         text:
@@ -479,7 +481,6 @@ export function Composer({
     }
   };
 
-  const queueSnapshot = useFollowups(currentThreadId);
   const queued = queueSnapshot.state.items.filter(
     (m) => m.status !== "sent" && m.status !== "cancelled",
   );
@@ -493,51 +494,57 @@ export function Composer({
   const uploading = attachments.attachments.filter(
     (a) => a.status === "uploading",
   ).length;
-  const statusText = contextStorageError
-    ? "上下文保存失败，打开状态面板重试"
-    : attachments.storageError
-      ? "附件草稿保存失败，打开状态面板重试"
-      : failedImage
-        ? "图片上传失败，点击缩略图重试"
-        : pendingFiles[owner]
-          ? "正在读取文件快照…"
-          : uploading
-            ? `正在上传 ${uploading} 张图片…`
-            : pendingQuestions.length
-              ? "正在等待你的回答"
-              : queued.some(
-                    (m) => m.status === "failed" || m.status === "uncertain",
-                  )
-                ? "队列有消息需要处理"
-                : queueSnapshot.error
-                  ? "队列连接暂不可用，正在重试"
-                  : queued.length || queueSnapshot.state.paused
-                    ? `待发送 ${queued.length} 条${queueSnapshot.state.paused ? " · 已暂停" : ""}`
-                    : modelEntry?.notice && !modelEntry.notice.dismissed
-                      ? `模型已切换：${modelEntry.notice.from} → ${modelEntry.notice.to}`
-                      : collaborationMode === "plan"
-                        ? "规划模式"
-                        : goalEnabled
-                          ? "目标草稿"
-                          : threadGoal
-                            ? goalStatusLabel(threadGoal.status)
-                            : running
-                              ? hasContent
-                                ? preferences.mode === "queue"
-                                  ? "本轮结束后发送"
-                                  : "发送将引导当前任务"
-                                : "运行中"
-                              : "";
+  const statusText = accessBlock
+    ? accessBlock
+    : threadInput.reason
+      ? threadInput.reason
+      : contextStorageError
+        ? "上下文保存失败，打开状态面板重试"
+        : attachments.storageError
+          ? "附件草稿保存失败，打开状态面板重试"
+          : failedImage
+            ? "图片上传失败，点击缩略图重试"
+            : pendingFiles[owner]
+              ? "正在读取文件快照…"
+              : uploading
+                ? `正在上传 ${uploading} 张图片…`
+                : pendingQuestions.length
+                  ? "正在等待你的回答"
+                  : queued.some(
+                        (m) =>
+                          m.status === "failed" || m.status === "uncertain",
+                      )
+                    ? "队列有消息需要处理"
+                    : queueSnapshot.error
+                      ? "队列连接暂不可用，正在重试"
+                      : queued.length || queueSnapshot.state.paused
+                        ? `待发送 ${queued.length} 条${queueSnapshot.state.paused ? " · 已暂停" : ""}`
+                        : modelEntry?.notice && !modelEntry.notice.dismissed
+                          ? `模型已从 ${modelEntry.notice.from} 更改为 ${modelEntry.notice.to}。`
+                          : collaborationMode === "plan"
+                            ? "规划模式"
+                            : goalEnabled
+                              ? "目标草稿"
+                              : threadGoal
+                                ? goalStatusLabel(threadGoal.status)
+                                : running
+                                  ? hasContent
+                                    ? preferences.mode === "queue"
+                                      ? "本轮结束后发送"
+                                      : "发送将引导当前任务"
+                                    : "运行中"
+                                  : "";
   return (
-    <div className="session-codex-composer session-compact-composer session-native-composer">
+    <div
+      className="session-codex-composer session-compact-composer session-native-composer"
+      data-owner-thread={currentThreadId ?? undefined}
+      data-draft-owner={owner}
+    >
       <div
         className="session-composer-floating"
         aria-label="会话提示与待发送消息"
       >
         <RunningTurnChanges threadId={currentThreadId} />
-        {directInputBlocked && (
-          <p role="status">当前子线程由主 Agent 调度，不能直接发送消息。</p>
-        )}
         {pendingQuestions.length > 0 && (
           <button
             type="button"
@@ -624,7 +631,7 @@ export function Composer({
             </div>
           )}
           <div className="session-compact-body">
-            <div ref={wrapperRef} className="session-composer-editor">
+            <div ref={wrapperRef} className="session-native-editor-slot">
               <ComposerEditor
                 owner={owner}
                 key={owner}
@@ -754,7 +761,11 @@ export function Composer({
                           composerDrafts.setExpanded(owner, true);
                         }}
                       >
-                        <NativeComposerIcon name="expand" width={16} height={16} />
+                        <NativeComposerIcon
+                          name="expand"
+                          width={16}
+                          height={16}
+                        />
                         展开编辑
                       </Button>
                       <Button
@@ -771,9 +782,13 @@ export function Composer({
                       </Button>
                       <ConversationMenu
                         threadId={currentThreadId}
+                        draftOwner={owner}
                         title="当前会话"
                         variant="item"
-                        onOpen={() => close()}
+                      />
+                      <AgentMentionPicker
+                        root={currentThreadId}
+                        owner={owner}
                       />
                       {hasContextUsage && (
                         <div className="session-composer-context">
@@ -868,7 +883,7 @@ export function Composer({
                     }}
                   />
                 </span>
-                {running ? (
+                {running && (
                   <NativeSubmitButton
                     type="button"
                     aria-label={stopping ? "正在停止" : "停止生成"}
@@ -882,7 +897,8 @@ export function Composer({
                   >
                     <NativeComposerIcon name="stop" />
                   </NativeSubmitButton>
-                ) : (
+                )}
+                {(!running || hasContent) && (
                   <NativeSubmitButton
                     aria-label="发送消息"
                     title="发送消息"
@@ -911,6 +927,15 @@ export function Composer({
           title={statusText}
         >
           {statusText}
+          {threadInput.needsVerification && (
+            <button
+              type="button"
+              onClick={threadInput.recheck}
+              disabled={threadInput.rechecking}
+            >
+              重新核对
+            </button>
+          )}
         </span>
       )}
       {detailsOwner === owner && (
@@ -1052,6 +1077,7 @@ export function Composer({
             }}
           />
 
+          <BackgroundAgentSummary threadId={currentThreadId} />
           {!statusText && <p>暂无待处理状态。</p>}
         </ComposerSheet>
       )}

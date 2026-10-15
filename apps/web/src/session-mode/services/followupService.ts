@@ -7,6 +7,8 @@ import {
   beginDeliveryEcho,
   failDeliveryEcho,
   reconcileDeliveryEchoes,
+  useCodexDeliveryStore,
+  uncertainDeliveryReason,
 } from "../stores/useCodexDeliveryStore";
 import type {
   FollowupAction,
@@ -17,8 +19,19 @@ import type {
   AgentMention,
 } from "@agent-orchestrator/shared";
 import { useCodexStore } from "../components/codex/stores";
+import { assertCodexSendAccess } from "../stores/useCodexAccessStore";
+import { MutationNotStartedError } from "./MutationNotStartedError";
+import {
+  assertCodexThreadInput,
+  codexThreadInputState,
+} from "@session/features/subagents/inputIdentity";
+import { subagentService } from "@session/features/subagents/service";
 import { getThreadModelSettings } from "../stores/useThreadModelStore";
-import { getJsonWithOptions, postJsonWithOptions } from "./apiAdapt/shared";
+import {
+  getJsonWithOptions,
+  postJsonWithOptions,
+  isExplicitRequestRejection,
+} from "./apiAdapt/shared";
 export const useFollowupStore = create<{
   threads: Record<string, FollowupThread>;
   errors: Record<string, string | undefined>;
@@ -209,6 +222,10 @@ export const followupService = {
     contexts?: ComposerContext[],
     mentions?: AgentMention[],
   ) {
+    const input = codexThreadInputState(threadId);
+    if (input.kind === "child" || input.needsVerification)
+      await subagentService.inspectIdentity(threadId);
+    assertCodexThreadInput(threadId);
     const data = {
       ...(mode === "queue" &&
       codexRuntimeState(useCodexStore.getState(), threadId).failed
@@ -224,6 +241,17 @@ export const followupService = {
       ...(mentions?.length ? { mentions: structuredClone(mentions) } : {}),
     };
     const id = await submissionId(owner, revision, data);
+    if (
+      Object.values(useCodexDeliveryStore.getState().entries).some(
+        (e) => e.threadId === threadId && e.status === "uncertain",
+      ) ||
+      useFollowupStore
+        .getState()
+        .threads[threadId]?.items.some((item) => item.status === "uncertain")
+    )
+      throw new MutationNotStartedError(uncertainDeliveryReason);
+    await assertCodexSendAccess(threadId);
+    assertCodexThreadInput(threadId);
     beginDeliveryEcho({ ...data, id });
     if (useCodexStore.getState().currentThreadId === threadId)
       window.dispatchEvent(
@@ -246,7 +274,7 @@ export const followupService = {
         );
       return result;
     } catch (error) {
-      failDeliveryEcho(threadId, id);
+      failDeliveryEcho(threadId, id, isExplicitRequestRejection(error));
       throw error;
     }
   },

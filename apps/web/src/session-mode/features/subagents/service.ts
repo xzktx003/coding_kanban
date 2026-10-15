@@ -5,17 +5,42 @@ import type {
   SubagentStopResult,
 } from "@agent-orchestrator/shared";
 import { postJsonWithOptions } from "@session/services/apiAdapt/shared";
-import { reconcileNodes } from "./model";
-import { useSubagentStore, observedIds } from "./store";
+import { threadMetadata } from "@session/services/apiAdapt/codex";
+import {
+  enqueueSessionRead,
+  readWithDeadline,
+} from "@session/services/sessionReadQueue";
+import {
+  confirmSubagentMetadata,
+  captureSubagentMetadataFence,
+  resetSubagentMetadataFences,
+  useSubagentStore,
+  observedIds,
+} from "./store";
 import { subagentScope } from "./scope";
 const pending = new Map<string, Promise<void>>();
+const identityPending = new Map<
+  string,
+  {
+    task: Promise<SubagentThread>;
+    controller: AbortController;
+    consumers: Set<symbol>;
+    settled: boolean;
+  }
+>();
 let epoch = 0;
+let identityRead = 0;
 export function resetSubagentRuntime() {
   epoch++;
+  resetSubagentMetadataFences();
   pending.clear();
+  for (const entry of identityPending.values()) entry.controller.abort();
+  identityPending.clear();
   useSubagentStore.setState((s) => ({
     families: {},
     stopResults: {},
+    identities: {},
+    identityChecks: {},
     revision: s.revision + 1,
     runtimeEpoch: s.runtimeEpoch + 1,
     nodes: Object.fromEntries(
@@ -24,6 +49,8 @@ export function resetSubagentRuntime() {
         {
           ...node,
           unavailable: true,
+          verified: false,
+          metadataRevision: undefined,
           revision: s.revision + 1,
           thread: {
             ...node.thread,
@@ -43,23 +70,135 @@ const current = (version: number, scope: string) =>
 const post = <T>(path: string, body: unknown) =>
   postJsonWithOptions<T>(`/subagents/${path}`, body, { suppressToast: true });
 export const subagentService = {
+  /** Coalesced, cancellable read-only identity recovery; never resumes a thread. */
+  inspectIdentity(
+    threadId: string,
+    signal?: AbortSignal,
+  ): Promise<SubagentThread> {
+    const version = epoch,
+      scope = subagentScope();
+    if (!current(version, scope))
+      return Promise.reject(new Error("会话服务已切换，请重新核对"));
+    if (signal?.aborted)
+      return Promise.reject(new DOMException("Aborted", "AbortError"));
+    let entry = identityPending.get(threadId);
+    if (!entry) {
+      const baseline = useSubagentStore.getState().revision;
+      const observationFence = captureSubagentMetadataFence();
+      const controller = new AbortController();
+      useSubagentStore.setState((s) => ({
+        identityChecks: { ...s.identityChecks, [threadId]: { loading: true } },
+      }));
+      const task = enqueueSessionRead(
+        "recent",
+        `identity:${version}:${threadId}:${++identityRead}`,
+        () =>
+          readWithDeadline(
+            (readSignal) =>
+              threadMetadata(threadId, {
+                signal: readSignal,
+                suppressToast: true,
+              }),
+            5000,
+            controller.signal,
+          ),
+      )
+        .then((response) => {
+          if (!current(version, scope) || controller.signal.aborted)
+            throw new Error("运行实例已改变，旧身份结果已忽略");
+          if (response.thread?.id !== threadId)
+            throw new Error("线程身份尚未确认，请重新核对");
+          confirmSubagentMetadata(
+            [response.thread],
+            baseline,
+            observationFence,
+          );
+          // A newer native event may revoke permission while this read is in flight.
+          // Return the accepted current identity, never the stale raw response.
+          return (
+            useSubagentStore.getState().identities[threadId]?.thread ??
+            response.thread
+          );
+        })
+        .catch((error) => {
+          if (current(version, scope) && !controller.signal.aborted)
+            useSubagentStore.setState((s) => ({
+              identityChecks: {
+                ...s.identityChecks,
+                [threadId]: { loading: false, error: String(error) },
+              },
+            }));
+          throw error;
+        })
+        .finally(() => {
+          const running = identityPending.get(threadId);
+          if (running?.task !== task) return;
+          running.settled = true;
+          identityPending.delete(threadId);
+          if (current(version, scope))
+            useSubagentStore.setState((s) => {
+              const check = s.identityChecks[threadId];
+              return check?.loading
+                ? {
+                    identityChecks: {
+                      ...s.identityChecks,
+                      [threadId]: { ...check, loading: false },
+                    },
+                  }
+                : s;
+            });
+        });
+      entry = { task, controller, consumers: new Set(), settled: false };
+      identityPending.set(threadId, entry);
+    }
+    const chosen = entry;
+    const consumer = Symbol(threadId);
+    chosen.consumers.add(consumer);
+    let aborted: (() => void) | undefined;
+    return new Promise((resolve, reject) => {
+      aborted = () => reject(new DOMException("Aborted", "AbortError"));
+      signal?.addEventListener("abort", aborted, { once: true });
+      chosen.task.then(resolve, reject);
+    }).finally(() => {
+      if (aborted) signal?.removeEventListener("abort", aborted);
+      chosen.consumers.delete(consumer);
+      if (!chosen.settled && !chosen.consumers.size) {
+        chosen.controller.abort();
+        if (identityPending.get(threadId) === chosen) {
+          identityPending.delete(threadId);
+          if (current(version, scope))
+            useSubagentStore.setState((s) => ({
+              identityChecks: {
+                ...s.identityChecks,
+                [threadId]: { loading: false },
+              },
+            }));
+        }
+      }
+    }) as Promise<SubagentThread>;
+  },
   refresh(root: string): Promise<void> {
     const version = epoch,
       scope = subagentScope();
     if (useSubagentStore.getState().scope !== scope) return Promise.resolve();
     if (pending.has(root)) return pending.get(root)!;
     const baseline = useSubagentStore.getState().revision;
-    useSubagentStore.setState((s) => ({
-      families: {
-        ...s.families,
-        [root]: {
-          ...s.families[root],
-          complete: s.families[root]?.complete ?? false,
-          checkedAt: s.families[root]?.checkedAt ?? 0,
-          loading: true,
-        },
-      },
-    }));
+    const observationFence = captureSubagentMetadataFence();
+    useSubagentStore.setState((s) =>
+      s.families[root]?.complete && !s.families[root]?.error
+        ? s
+        : {
+            families: {
+              ...s.families,
+              [root]: {
+                ...s.families[root],
+                complete: s.families[root]?.complete ?? false,
+                checkedAt: s.families[root]?.checkedAt ?? 0,
+                loading: true,
+              },
+            },
+          },
+    );
     const task = post<SubagentSnapshot>("snapshot", {
       rootId: root,
       observedIds: observedIds(root),
@@ -72,7 +211,9 @@ export const subagentService = {
           !Array.isArray(result.errors)
         )
           throw new Error("子任务响应无效，状态尚未确认");
-        useSubagentStore.getState().apply(root, result, baseline);
+        useSubagentStore
+          .getState()
+          .apply(root, result, baseline, observationFence);
       })
       .catch((e) => {
         if (!current(version, scope)) return;
@@ -101,6 +242,7 @@ export const subagentService = {
     if (!current(version, scope))
       throw new Error("会话服务已切换，请重新确认子任务");
     const baseline = useSubagentStore.getState().revision;
+    const observationFence = captureSubagentMetadataFence();
     const result = await post<{
       thread: SubagentThread;
       threads?: SubagentThread[];
@@ -112,14 +254,17 @@ export const subagentService = {
       throw new Error("运行实例已改变，操作尚未发送，请重新确认");
     if (result.thread?.id !== threadId)
       throw new Error("子任务身份尚未确认，未开放历史或输入");
-    useSubagentStore.setState((s) => ({
-      nodes: reconcileNodes(
-        s.nodes,
-        result.threads ?? [result.thread],
-        baseline,
-      ),
-    }));
-    return result.thread;
+    confirmSubagentMetadata(
+      result.threads ?? [result.thread],
+      baseline,
+      observationFence,
+    );
+    const node = useSubagentStore.getState().nodes[threadId];
+    if (!node?.verified || node.unavailable)
+      throw new Error("子任务身份尚未确认，未开放历史或输入");
+    return (
+      useSubagentStore.getState().identities[threadId]?.thread ?? node.thread
+    );
   },
   async stop(root: string, targets: SubagentStopTarget[]) {
     const version = epoch,

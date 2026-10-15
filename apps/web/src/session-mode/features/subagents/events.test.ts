@@ -1,7 +1,10 @@
-import { expect, it } from "vitest";
+import { beforeEach, expect, it } from "vitest";
 import { buildThreadRows } from "@session/components/codex/thread/threadRows";
 import { observeSubagents, useSubagentStore } from "./store";
 import { withoutToolTranscriptEvent } from "@session/services/codexTranscriptVisibility";
+beforeEach(() =>
+  useSubagentStore.setState({ nodes: {}, identities: {}, revision: 0 }),
+);
 it("observes collab progress and renders bounded identity metadata without retaining private bodies", () => {
   useSubagentStore.setState({ nodes: {}, revision: 0 });
   const item = {
@@ -71,4 +74,68 @@ it("activity reports do not grant direct input; native metadata confirms parent"
   } as any);
   expect(useSubagentStore.getState().nodes.child.parentId).toBe("parent");
   expect(useSubagentStore.getState().nodes.child.verified).toBe(true);
+});
+
+it("historical spawn metadata neither revives an unavailable child nor defeats an in-flight snapshot", async () => {
+  const { observeSubagentHistory } = await import("./store");
+  useSubagentStore.setState({ nodes: {}, families: {}, revision: 0 });
+  const native: any = {
+    method: "thread/started",
+    params: {
+      thread: {
+        id: "child",
+        parentThreadId: "root",
+        status: { type: "active" },
+        canAcceptDirectInput: true,
+      },
+    },
+  };
+  observeSubagents(native);
+  const baseline = useSubagentStore.getState().revision;
+  const history = (): any => ({
+    method: "item/completed",
+    params: {
+      threadId: "root",
+      turnId: "old-turn",
+      item: {
+        id: "old-spawn",
+        type: "collabAgentToolCall",
+        tool: "spawnAgent",
+        senderThreadId: "root",
+        receiverThreadIds: ["child"],
+        agentsStates: {},
+        status: "completed",
+      },
+    },
+  });
+  observeSubagentHistory([history()]);
+  expect(useSubagentStore.getState().nodes.child.revision).toBe(baseline);
+  useSubagentStore
+    .getState()
+    .apply(
+      "root",
+      {
+        threads: [],
+        complete: false,
+        errors: [],
+        checkedAt: 1,
+        unavailableIds: ["child"],
+      },
+      baseline,
+    );
+  expect(useSubagentStore.getState().nodes.child.unavailable).toBe(true);
+  observeSubagentHistory([history()]);
+  expect(useSubagentStore.getState().nodes.child.unavailable).toBe(true);
+  expect(
+    useSubagentStore.getState().nodes.child.thread.canAcceptDirectInput,
+  ).toBeNull();
+  // Only a fresh native event can confirm that the identity is available again.
+  observeSubagents({
+    ...native,
+    params: { thread: { ...native.params.thread } },
+  });
+  expect(useSubagentStore.getState().nodes.child.unavailable).toBe(false);
+  expect(
+    useSubagentStore.getState().nodes.child.thread.canAcceptDirectInput,
+  ).toBe(true);
 });

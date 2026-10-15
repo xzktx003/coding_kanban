@@ -34,7 +34,8 @@ it("unwraps a single completed read without a redundant aggregate disclosure", (
     />,
   );
   expect(screen.getByRole("link", { name: "a.ts" })).toBeTruthy();
-  expect(screen.queryByRole("button", { expanded: false })).toBeNull();
+  expect(document.querySelector(".codex-activity-header")).toBeNull();
+  expect(screen.getByRole("button", { name: "查看命令输出", expanded: false })).toBeTruthy();
 });
 it("keeps the single pending exploration visible in its active header", () => {
   render(
@@ -97,7 +98,7 @@ it("a closed slice does not turn an unfinished command into a completed action",
     />,
   );
   expect(
-    screen.getByRole("button", { name: "正在运行 long-task" }),
+    screen.getByRole("button", { name: "正在运行命令 long-task" }),
   ).toBeTruthy();
   expect(screen.queryByText(/运行了命令/)).toBeNull();
 });

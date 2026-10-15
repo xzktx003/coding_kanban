@@ -4,8 +4,9 @@ import type { Readable } from "node:stream";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import WebSocket, { WebSocketServer, type RawData } from "ws";
 import { NativeCodexGateway } from "../services/native-codex-gateway.js";
+import {registerNativeCodexVisibility,type NativeVisibilityController} from "./native-codex-visibility.js";
 
-const PREFIX = "/native-codex";
+const DEFAULT_PREFIX = "/native-codex";
 export const NATIVE_CODEX_MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
 export const NATIVE_CODEX_MAX_UPSTREAM_MESSAGE_BYTES = 2 * 1024 * 1024;
 export const NATIVE_CODEX_MAX_OUTGOING_BYTES = 2 * 1024 * 1024;
@@ -23,10 +24,68 @@ const HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
-function requestPath(request: FastifyRequest): string {
+function immutableNativeAsset(
+  path: string,
+  incoming: IncomingMessage,
+): boolean {
+  if (incoming.statusCode !== 200 || incoming.headers["set-cookie"])
+    return false;
+  if (
+    /(?:^|,)\s*(?:private|no-store|no-cache)\b/i.test(
+      String(incoming.headers["cache-control"] ?? ""),
+    ) ||
+    String(incoming.headers.vary ?? "")
+      .split(",")
+      .some((name) => /^(?:\*|cookie|authorization)$/i.test(name.trim()))
+  )
+    return false;
+  const match =
+    /^\/stable-[0-9a-f]{40}\/static\/([A-Za-z0-9_@+./-]+)(?:\?vscode-coi=[123])?$/.exec(
+      path,
+    );
+  if (
+    !match ||
+    match[1]!.split("/").some((part) => !part || part === "." || part === "..")
+  )
+    return false;
+  const extension = match[1]!.split(".").at(-1);
+  const mime = String(incoming.headers["content-type"] ?? "")
+    .split(";")[0]!
+    .trim()
+    .toLowerCase();
+  switch (extension) {
+    case "js":
+    case "mjs":
+      return mime === "text/javascript" || mime === "application/javascript";
+    case "css":
+      return mime === "text/css";
+    case "woff":
+    case "woff2":
+    case "ttf":
+    case "otf":
+      return mime === `font/${extension}`;
+    case "png":
+    case "gif":
+    case "webp":
+      return mime === `image/${extension}`;
+    case "jpg":
+    case "jpeg":
+      return mime === "image/jpeg";
+    case "svg":
+      return mime === "image/svg+xml";
+    case "ico":
+      return mime === "image/x-icon" || mime === "image/vnd.microsoft.icon";
+    case "wasm":
+      return mime === "application/wasm";
+    default:
+      return false;
+  }
+}
+
+function requestPath(request: FastifyRequest, prefix = DEFAULT_PREFIX): string {
   const raw = request.raw.url ?? request.url;
   // Do not resolve against a URL: a double slash must never select a different host.
-  return raw.slice(PREFIX.length) || "/";
+  return raw.slice(prefix.length) || "/";
 }
 
 function publicProtocol(request: FastifyRequest): "http" | "https" {
@@ -66,6 +125,7 @@ function sameOriginMutation(request: FastifyRequest): boolean {
 function headers(
   request: FastifyRequest,
   websocket = false,
+  prefix = DEFAULT_PREFIX,
 ): Record<string, string | string[]> {
   const result: Record<string, string | string[]> = {};
   const connectionHeaders = new Set(
@@ -89,7 +149,7 @@ function headers(
   result.host = request.headers.host ?? request.hostname;
   result["x-forwarded-host"] = result.host;
   result["x-forwarded-proto"] = publicProtocol(request);
-  result["x-forwarded-prefix"] = PREFIX;
+  result["x-forwarded-prefix"] = prefix;
   result["x-forwarded-for"] = request.ip;
   return result;
 }
@@ -97,32 +157,33 @@ function headers(
 export function rewriteNativeCodexLocation(
   location: string,
   upstream: URL,
+  prefix = DEFAULT_PREFIX,
 ): string {
-  if (location.startsWith(`${PREFIX}/`) || location === PREFIX) return location;
+  if (location.startsWith(`${prefix}/`) || location === prefix) return location;
   if (location.startsWith("/") && !location.startsWith("//"))
-    return PREFIX + location;
+    return prefix + location;
   try {
     const url = location.startsWith("//")
       ? new URL(location, upstream)
       : new URL(location);
     if (url.origin === upstream.origin)
-      return PREFIX + url.pathname + url.search + url.hash;
+      return prefix + url.pathname + url.search + url.hash;
   } catch {
     /* Relative locations already resolve within the mounted prefix. */
   }
   return location;
 }
 
-function cookie(value: string): string {
+function cookie(value: string, prefix = DEFAULT_PREFIX): string {
   // Scope upstream cookies to this host surface and discard upstream-only domains.
   let result = value.replace(/;\s*Domain=[^;]*/gi, "");
   if (/;\s*Path=/i.test(result))
     result = result.replace(
       /(;\s*Path=)([^;]*)/i,
       (_match, key: string, path: string) =>
-        `${key}${path === PREFIX || path.startsWith(`${PREFIX}/`) ? path : PREFIX + (path.startsWith("/") ? path : `/${path}`)}`,
+        `${key}${path === prefix || path.startsWith(`${prefix}/`) ? path : prefix + (path.startsWith("/") ? path : `/${path}`)}`,
     );
-  else result += `; Path=${PREFIX}/`;
+  else result += `; Path=${prefix}/`;
   return result;
 }
 
@@ -130,6 +191,7 @@ async function proxyHttp(
   request: FastifyRequest,
   reply: FastifyReply,
   gateway: NativeCodexGateway,
+  prefix = DEFAULT_PREFIX,
 ): Promise<void> {
   const runtime = await gateway.runtime();
   if (request.raw.aborted || reply.raw.destroyed) return;
@@ -144,9 +206,9 @@ async function proxyHttp(
     {
       hostname: upstream.hostname.replace(/^\[|\]$/g, ""),
       port: upstream.port || "80",
-      path: requestPath(request),
+      path: requestPath(request, prefix),
       method: request.method,
-      headers: headers(request),
+      headers: headers(request, false, prefix),
     },
     (incoming) => {
       response = incoming;
@@ -167,12 +229,12 @@ async function proxyHttp(
         if (name === "location" && typeof value === "string")
           reply.raw.setHeader(
             name,
-            rewriteNativeCodexLocation(value, upstream),
+            rewriteNativeCodexLocation(value, upstream, prefix),
           );
         else if (name === "set-cookie")
           reply.raw.setHeader(
             name,
-            (Array.isArray(value) ? value : [value]).map(cookie),
+            (Array.isArray(value) ? value : [value]).map(value => cookie(value, prefix)),
           );
         else reply.raw.setHeader(name, value);
       }
@@ -180,6 +242,18 @@ async function proxyHttp(
         "permissions-policy",
         "clipboard-read=(self), clipboard-write=(self)",
       );
+      const immutableStatic =
+        request.method === "GET" &&
+        immutableNativeAsset(requestPath(request, prefix), incoming);
+      const upstreamCache = String(incoming.headers["cache-control"] ?? "");
+      if (
+        immutableStatic &&
+        !/immutable|max-age\s*=\s*[1-9]/i.test(upstreamCache)
+      )
+        reply.raw.setHeader(
+          "cache-control",
+          "public, max-age=31536000, immutable",
+        );
       incoming.on("error", () => reply.raw.destroy());
       incoming.pipe(reply.raw);
     },
@@ -212,6 +286,7 @@ function proxyWebSocket(
   request: FastifyRequest,
   gateway: NativeCodexGateway,
   active: Set<WebSocket>,
+  prefix = DEFAULT_PREFIX,
 ): void {
   active.add(client);
   let upstream: WebSocket | undefined;
@@ -284,9 +359,9 @@ function proxyWebSocket(
         finish();
         return;
       }
-      const path = requestPath(request);
+      const path = requestPath(request, prefix);
       upstream = new WebSocket(`ws://${runtime.upstream.host}${path}`, [], {
-        headers: headers(request, true),
+        headers: headers(request, true, prefix),
         handshakeTimeout: 5000,
         maxPayload: NATIVE_CODEX_MAX_UPSTREAM_MESSAGE_BYTES,
       });
@@ -326,9 +401,14 @@ function proxyWebSocket(
 
 export async function registerNativeCodexRoutes(
   app: FastifyInstance,
-  options: { gateway?: NativeCodexGateway },
+  options: { gateway?: NativeCodexGateway; profileId?: string; visibility?: NativeVisibilityController },
 ): Promise<void> {
+  if (options.profileId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(options.profileId)) throw new Error("exact native profile UUID required");
+  if(options.visibility&&(!options.profileId||options.visibility.profileId!==options.profileId))throw Error("visibility requires its exact registered profile");
+  const PREFIX = options.profileId ? `${DEFAULT_PREFIX}/clients/${options.profileId}` : DEFAULT_PREFIX;
+  const API_PREFIX = options.profileId ? `/api/native-codex/clients/${options.profileId}` : "/api/native-codex";
   const gateway = options.gateway ?? new NativeCodexGateway();
+  if(options.visibility)await registerNativeCodexVisibility(app,{profileId:options.profileId!,controller:options.visibility,gateway,sameOrigin:sameOriginMutation});
   const active = new Set<WebSocket>();
   // The shared Fastify WS plugin has no per-route receiver budget. Keep native
   // upgrades on a dedicated server, after the normal Fastify request hooks.
@@ -351,12 +431,14 @@ export async function registerNativeCodexRoutes(
   app.addHook("preClose", async () => {
     for (const client of nativeWss.clients) client.terminate();
   });
-  app.get("/api/native-codex/status", async (_request, reply) => {
+  app.get(`${API_PREFIX}/status`, async (_request, reply) => {
     reply.header("cache-control", "no-store");
-    return gateway.status();
+    const nativeStatus=await gateway.status();
+    const status=options.visibility?{...nativeStatus,refreshVisibility:{available:options.visibility.snapshot().available}}:nativeStatus;
+    return status.iframeUrl?.startsWith(`${DEFAULT_PREFIX}/`) ? { ...status, iframeUrl:PREFIX+status.iframeUrl.slice(DEFAULT_PREFIX.length) } : status;
   });
   app.post(
-    "/api/native-codex/restore",
+    `${API_PREFIX}/restore`,
     { bodyLimit: 1024 },
     async (request, reply) => {
       reply.header("cache-control", "no-store");
@@ -387,7 +469,7 @@ export async function registerNativeCodexRoutes(
     },
   );
   app.post(
-    "/api/native-codex/resume",
+    `${API_PREFIX}/resume`,
     { bodyLimit: 1024 },
     async (request, reply) => {
       reply.header("cache-control", "no-store");
@@ -418,7 +500,7 @@ export async function registerNativeCodexRoutes(
     },
   );
   app.post(
-    "/api/native-codex/resume-beside",
+    `${API_PREFIX}/resume-beside`,
     { bodyLimit: 1024 },
     async (request, reply) => {
       reply.header("cache-control", "no-store");
@@ -435,7 +517,7 @@ export async function registerNativeCodexRoutes(
     },
   );
   app.post(
-    "/api/native-codex/new-beside",
+    `${API_PREFIX}/new-beside`,
     { bodyLimit: 1024 },
     async (request, reply) => {
       reply.header("cache-control", "no-store");
@@ -452,7 +534,22 @@ export async function registerNativeCodexRoutes(
     },
   );
   app.post(
-    "/api/native-codex/focus",
+    `${API_PREFIX}/theme`,
+    { bodyLimit: 512 },
+    async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      if (!sameOriginMutation(request))
+        return reply.code(403).send({ error: "Native Codex theme requires same-origin access." });
+      if (request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json")
+        return reply.code(415).send({ error: "Native Codex theme requires JSON." });
+      const result = await gateway.applyNativeTheme(request.body);
+      if (result.status === 202) return reply.code(202).send({ applied: true });
+      if (result.status === 400) return reply.code(400).send({ error: "Invalid Codex theme." });
+      return reply.code(503).send({ error: "Native Codex theme is unavailable." });
+    },
+  );
+  app.post(
+    `${API_PREFIX}/focus`,
     { bodyLimit: 1024 },
     async (request, reply) => {
       reply.header("cache-control", "no-store");
@@ -469,7 +566,7 @@ export async function registerNativeCodexRoutes(
     },
   );
   app.post(
-    "/api/native-codex/instance-status",
+    `${API_PREFIX}/instance-status`,
     { bodyLimit: 512 },
     async (request, reply) => {
       reply.header("cache-control", "no-store");
@@ -483,7 +580,7 @@ export async function registerNativeCodexRoutes(
     },
   );
   app.post(
-    "/api/native-codex/release-instance",
+    `${API_PREFIX}/release-instance`,
     { bodyLimit: 512 },
     async (request, reply) => {
       reply.header("cache-control", "no-store");
@@ -499,7 +596,7 @@ export async function registerNativeCodexRoutes(
     },
   );
   app.post(
-    "/api/native-codex/send",
+    `${API_PREFIX}/send`,
     { bodyLimit: NATIVE_CODEX_MAX_SEND_BODY_BYTES },
     async (request, reply) => {
       reply.header("cache-control", "no-store");
@@ -572,7 +669,7 @@ export async function registerNativeCodexRoutes(
           request.raw,
           request.raw.socket,
           head,
-          (client) => proxyWebSocket(client, request, gateway, active),
+          (client) => proxyWebSocket(client, request, gateway, active, PREFIX),
         );
       };
     });
@@ -587,7 +684,7 @@ export async function registerNativeCodexRoutes(
       ),
     );
     const handler = (request: FastifyRequest, reply: FastifyReply) =>
-      proxyHttp(request, reply, gateway);
+      proxyHttp(request, reply, gateway, PREFIX);
     for (const url of [`${PREFIX}/`, `${PREFIX}/*`]) {
       proxy.route({
         url,

@@ -36,6 +36,8 @@ pnpm session:status
 
 依赖安装失败（网络、锁文件不一致等）时记录错误并保留当前网关；修复原因后保存受监听源码或清单可重试。在线更新安装失败也跳过重启。此保护针对依赖准备顺序，不保证新源码的语法、启动逻辑错误零停机；已运行代码后续动态导入新文件也不在保护范围。原 Rust 会话运行层与 Agent 不受热更新管理。
 
+网关意外退出（包括 OOM 后的退出信号）会经同一依赖准备与串行队列按 1/2/4 秒重试，连续失败最多三次，耗尽后明确记录原因并等待源码/清单保存。存活至少 60 秒或显式保存后恢复重试预算；计划热更新、关闭 watcher 会取消待执行恢复，避免双重启动。仅恢复 Node 网关，已有独立会话运行服务、原生宿主和 Agent 保持原进程。此措施恢复掉线服务，不能作为内存泄漏已解决的证据；OOM 现场仍需保留日志并调查增长来源。
+
 相关回归：`node --test scripts/watch-server.test.mjs scripts/finalize-online-update.test.mjs`，包含真实隔离 watcher 进程在安装失败时保持旧网关存活、修复后替换及关闭子进程检查。局域网入口仍使用 `dev:restart` 输出的 HTTPS 地址与 `.env` 端口，前端绑定 `0.0.0.0`。
 
 ## 构建和运行版本是两件事
@@ -104,3 +106,15 @@ pnpm session:status
 终端记录使用 `SESSION_STATE_PATH`（默认 `.dev-runtime/agent-sessions.json`），浏览器分组和排版另存于该设备的 localStorage。历史文件损坏或不支持时，网关明确报错并阻止覆盖原文件；只有文件不存在才按首次启动处理。重启脚本也不会用空接口结果覆盖已有非空历史或损坏文件。先备份现场，再用已验证快照恢复原 ID，不要通过重新创建会话替代历史恢复。仅恢复仍存活的 tmux；direct PTY、已消失及不可达目标保留手动恢复，不自动重跑历史命令。
 
 实际恢复的只读浏览器验收可设置 `TERMINAL_RECOVERY_LIVE=1` 并运行 `tests/e2e/terminal-history-recovery-live.spec.ts`；测试用独立浏览器存储验证分组刷新关联，不读取或覆盖用户设备布局。
+
+## 文件监听配额降级（2026-10-14）
+
+TypeScript 运行层的文件监听遇到 EMFILE/ENOSPC 时，使用 500 ms 的元数据轮询降级。每个登记路径最多保存 4096 项轮询元数据，stat 并发上限为 8，递归目录仍遵守原 maxDirectories 边界；超过预算明确报错，不无限扫描。合并同一路径/别名的引用，取消监听和关闭服务时释放计时器与快照，不终止其他监听进程。此运行层改动经编译后仍按既有活跃 Agent 安全窗口启用，不因网关热更新而隐式替换运行进程。
+
+### 2026-10-14 开发网关监听配额降级
+
+`scripts/watch-server.mjs` 对 EMFILE/ENOSPC 使用整组元数据轮询降级，避免 Node recursive 监听部分注册后漏掉源码保存。每条路径快照最多 4096 项，不读取正文或追随符号链接，默认 1 秒扫描且不重叠，退出时关闭定时器。权限和其他错误不冒充配额耗尽。降级不改变依赖准备、失败保留旧网关、保存重试及独立运行层复用规则；覆盖真实子进程启动与模拟晚到配额错误的测试在 `scripts/watch-server.test.mjs`。现有 watcher 进程不会因脚本更新自行重启。
+
+原生刷新候选路径的显式隔离启动：新宿主的 `--refresh-service-config` 和 `--refresh-domain` 仅接入已验证的私有服务；检查发生在登录副本导入和扩展安装前，失败不重启服务。可选 `--reconnection-grace-seconds` 为 1–300 秒（该显式模式默认 60），不是 thread TTL。独立客户端路由由服务端按 UUID 注册，`/?mode=codex&nativeClient=<UUID>` 只选择已注册宿主；关注集合共用，布局、原生状态目录和连接分别隔离。默认 `pnpm dev`、正式运行服务和已有 Agent 不因这些参数改变。完整参数及当前红灯见 [组件说明](../packages/native-codex-host/refresh-prototype/README.md#explicit-private-host-and-client-routing) 和 [持续验收](designs/codex-mode-audit-20261014/refresh-recovery-progress-20261015.md)。
+
+生成的隔离 CLI 包装器每次执行都重查固定服务域、代次、PID 和 Linux start ticks，连接打开后、initialize 转发前再次核对；失效不附着新实例。保温管理器启动在线程操作前核对两次原生只读账号/工作区身份及初始通知，等待有界（默认 15 秒）。这些步骤失败只关闭自己的连接，不重启服务或停止任务。手机验收按用户确认使用 iPhone 16 尺寸模拟，参数、浏览器引擎和系统键盘边界记入原始结果。

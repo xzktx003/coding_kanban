@@ -71,3 +71,7 @@ CLI 0.159.2 的 paginated history thread 明确拒绝原生 detached review。�
 ## 输入栏 V2 扩展
 
 新增可选 `contexts` 内容快照和受 token/revision/消息状态共同校验的 `undo` 队列操作。Codex 文件选区改为独立卡片，不再直接拼进正文；最终提交仍包含文件路径、行号及完整内容。协议、存储和双端交互见 [输入栏 V2](session-composer-v2.md)。
+
+## 2026-10-14：明确未入队与结果未知
+
+网关 journal 锁竞争返回 HTTP 409，正文为 `{error, code: "FOLLOWUP_QUEUE_OWNED_ELSEWHERE", deliveryStage: "not-admitted"}`。只有确定发生于入队前的拒绝使用该阶段；未知 5xx/断网/缺失回执继续按未知处理。浏览器保留错误代码与阶段，不凭中文文案或全部 500 推断未发送。队列 failed 与原生已接纳后的执行失败分开：无原生接纳证据的失败条目只留在队列，原生用户消息保持不变。

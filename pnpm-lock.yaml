@@ -23,6 +23,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@agent-orchestrator/session-runtime':
+        specifier: workspace:*
+        version: link:../../packages/session-runtime
       '@agent-orchestrator/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -428,6 +431,9 @@ importers:
       '@iarna/toml':
         specifier: 2.2.5
         version: 2.2.5
+      ws:
+        specifier: ^8.18.3
+        version: 8.20.0
 
   packages/session-runtime:
     dependencies:
@@ -455,6 +461,12 @@ importers:
       node-pty:
         specifier: 1.2.0-beta.12
         version: 1.2.0-beta.12
+      stream-chain:
+        specifier: 4.2.6
+        version: 4.2.6
+      stream-json:
+        specifier: 3.7.0
+        version: 3.7.0
       ws:
         specifier: ^8.18.3
         version: 8.20.0
@@ -4888,6 +4900,12 @@ packages:
 
   std-env@4.3.0:
     resolution: {integrity: sha512-OtU/EgQ1kIm5KwqQpBC6ZEMXrZRui11w8zgfTWp8cdO9B8OaPsbA8bTHO2P+HNo1VlUTGMVBwPhydu6poeXiag==}
+
+  stream-chain@4.2.6:
+    resolution: {integrity: sha512-1zeJ8CrtJfmiba26ui8jXkq/xLRFvhzkdH02D5QLO9Cnovgeb28IJxg88DdraWnjnkbOol/++uIAybJbJhk7ig==}
+
+  stream-json@3.7.0:
+    resolution: {integrity: sha512-rCSBdcBP/bPk6T8QFcxAj1MSzAuc5i49cYW6IE7sYObNEPccBJIUiL6fU9c9BWt40aJK0siVynLX7lWaW8alXw==}
 
   stream-shift@1.0.3:
     resolution: {integrity: sha512-76ORR0DO1o1hlKwTbi/DM3EXWGf3ZJYO8cXX5RJwnul2DEg2oyoZyjLNoQM8WsvZiFKCRfC1O0J7iCvie3RZmQ==}
@@ -10205,6 +10223,12 @@ snapshots:
   statuses@2.0.2: {}
 
   std-env@4.3.0: {}
+
+  stream-chain@4.2.6: {}
+
+  stream-json@3.7.0:
+    dependencies:
+      stream-chain: 4.2.6
 
   stream-shift@1.0.3: {}
 

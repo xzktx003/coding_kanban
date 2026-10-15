@@ -90,3 +90,32 @@ it.each(["queued", "sending", "uncertain"] as const)(
     ).toBe(true);
   },
 );
+it("sends through the selected native client and refuses malformed selectors before delivery", async () => {
+  const original = window.location.href;
+  const profile = "019aabcd-1234-7890-abcd-000000000041";
+  const fetcher = vi.fn<typeof fetch>().mockImplementation(
+    async () =>
+      new Response(
+        JSON.stringify({
+          accepted: true,
+          turnId: "019aabcd-1234-7890-abcd-0123456789ad",
+        }),
+        { status: 202 },
+      ),
+  );
+  try {
+    window.history.replaceState(null, "", `/?nativeClient=${profile}`);
+    await sendToNativeCodex(input, fetcher);
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      `/api/native-codex/clients/${profile}/send`,
+    );
+    fetcher.mockClear();
+    window.history.replaceState(null, "", "/?nativeClient=invalid");
+    await expect(sendToNativeCodex(input, fetcher)).rejects.toThrow(
+      /客户端标识/,
+    );
+    expect(fetcher).not.toHaveBeenCalled();
+  } finally {
+    window.history.replaceState(null, "", original);
+  }
+});

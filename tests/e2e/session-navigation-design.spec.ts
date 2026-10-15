@@ -118,7 +118,7 @@ test("merged navigation keeps projects, followed sessions and pending status rea
       await page.evaluate(() => document.documentElement.scrollWidth),
     ).toBeLessThanOrEqual(width);
     await expect(
-      page.getByRole("button", { name: "发送", exact: true }),
+      page.getByRole("button", { name: "发送消息", exact: true }),
     ).toBeInViewport();
     if (width < 768) {
       await expect(

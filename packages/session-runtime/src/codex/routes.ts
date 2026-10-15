@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { registerItemDetailChannel } from "./item-detail-channel.js";
 import { getTomlStore } from "../config/toml-store.js";
 import { codexHome } from "./accounts.js";
 import { sanitizeCodexHistory } from "./projection.js";
@@ -24,6 +25,7 @@ export function registerCodexRoutes(
   app: FastifyInstance,
   service: CodexService,
 ): void {
+  registerItemDetailChannel(app, service.options);
   const post = (path: string, handler: (body: Json) => Promise<Json>) =>
     app.post("/api/codex/" + path, async (request, reply) => {
       const result = sanitizeCodexHistory(

@@ -7,8 +7,14 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import * as nativeSurface from "./native-surface";
+vi.mock("../lib/vscode-service-worker", () => ({
+  probeVsCodeWebServiceWorker: vi.fn(async () => ({ state: "ready" })),
+}));
 import { CODEX_WINDOW_THREADS_KEY } from "./codex-window-restore";
-import { CODEX_TAB_OPERATION_PREFIX, CODEX_TAB_REVISION_PREFIX } from "./codex-tab-journal";
+import {
+  CODEX_TAB_OPERATION_PREFIX,
+  CODEX_TAB_REVISION_PREFIX,
+} from "./codex-tab-journal";
 import { CODEX_MULTIWINDOW_KEY } from "./codex-multiwindow-state";
 const sessionBridge = vi.hoisted(() => ({
   navigateToAgentSession: vi.fn(),
@@ -32,8 +38,122 @@ vi.mock("@session/services/apiAdapt/shared", () => ({
 }));
 import CodexWorkbench from "./CodexWorkbench";
 const visibleInstanceId = "019aabcd-1234-7890-abcd-0123456789ae";
+it("keeps the selected history loading after command acknowledgement and rejects a different composer", async () => {
+  const startup = "019aabcd-5678-7890-abcd-0123456789ab";
+  const threadId = "019aabcd-1234-7890-abcd-0123456789ab";
+  localStorage.setItem(
+    CODEX_MULTIWINDOW_KEY,
+    JSON.stringify({
+      version: 2,
+      hostKey: startup,
+      activeId: threadId,
+      activeGroupId: "saved",
+      tree: {
+        type: "group",
+        id: "saved",
+        keys: [threadId],
+        selected: threadId,
+      },
+      windows: [
+        {
+          id: threadId,
+          kind: "thread",
+          threadId,
+          title: "Selected history",
+          cwd: "/tmp/project",
+        },
+      ],
+    }),
+  );
+  const resume = vi.fn();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      if (input === "/api/session/projects")
+        return { ok: true, json: async () => ({ projects: [] }) } as Response;
+      if (input === "/api/native-codex/tabs")
+        return {
+          ok: true,
+          json: async () => ({
+            initialized: true,
+            revision: 1,
+            sequence: 0,
+            threads: [
+              { id: threadId, title: "Selected history", cwd: "/tmp/project" },
+            ],
+          }),
+        } as Response;
+      if (input === "/api/native-codex/status")
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            resumeAvailable: true,
+            iframeUrl: "/native-codex/",
+            newChatWindowIds: [startup],
+          }),
+        } as Response;
+      if (input === "/api/native-codex/resume-beside") {
+        resume();
+        return {
+          ok: true,
+          status: 202,
+          json: async () => ({ opened: true, column: 1 }),
+        } as Response;
+      }
+      if (input === "/api/native-codex/focus")
+        return { ok: true, json: async () => ({ focused: true }) } as Response;
+      if (input === "/api/native-codex/theme")
+        return { ok: true, json: async () => ({ applied: true }) } as Response;
+      throw new Error(`unexpected request ${String(input)}`);
+    }),
+  );
+  let report: nativeSurface.NativeSurfaceOptions["onWindowState"];
+  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation(
+    (_document, onCount, onReady, options) => {
+      onCount(2);
+      onReady?.(1);
+      options?.onHostInstance?.(visibleInstanceId);
+      report = options?.onWindowState;
+      return {
+        start: vi.fn(),
+        pause: vi.fn(),
+        dispose: vi.fn(),
+        setLayout: vi.fn(),
+        bindWindowAtColumn: vi.fn(),
+      };
+    },
+  );
+  render(<CodexWorkbench active onModeChange={vi.fn()} />);
+  fireEvent.load(await screen.findByTitle("原生 Codex 会话窗口"));
+  await waitFor(() => expect(resume).toHaveBeenCalledOnce());
+  const state = {
+    ready: true,
+    conversationId: null,
+    hasComposer: true,
+    composerEmpty: true,
+    userInteracted: false,
+  };
+  act(() => report?.(threadId, state));
+  expect(screen.getByText("正在加载原生 Codex…")).toBeTruthy();
+  expect(screen.getByText("正在加载所选会话")).toBeTruthy();
+  expect(screen.queryByText("当前会话可输入")).toBeNull();
+  act(() =>
+    report?.(threadId, { ...state, hasComposer: false, onboarding: true }),
+  );
+  expect(screen.queryByText("正在加载原生 Codex…")).toBeNull();
+  expect(screen.getByText("请在原生界面中完成官方引导")).toBeTruthy();
+  expect(screen.queryByText("当前会话可输入")).toBeNull();
+  act(() => report?.(threadId, state));
+  expect(screen.getByText("正在加载原生 Codex…")).toBeTruthy();
+  act(() => report?.(threadId, { ...state, conversationId: threadId }));
+  expect(screen.queryByText("正在加载原生 Codex…")).toBeNull();
+  expect(screen.getByText("当前会话可输入")).toBeTruthy();
+});
 async function markVisibleHostReady() {
-  const frame = await screen.findByTitle("原生 Codex 会话窗口") as HTMLIFrameElement;
+  const frame = (await screen.findByTitle(
+    "原生 Codex 会话窗口",
+  )) as HTMLIFrameElement;
   if (!frame.contentDocument!.body) {
     frame.contentDocument!.open();
     frame.contentDocument!.write("<!doctype html><html><body></body></html>");
@@ -42,24 +162,95 @@ async function markVisibleHostReady() {
   const marker = frame.contentDocument!.createElement("div");
   marker.className = "statusbar-item";
   marker.textContent = `Kanban host ${visibleInstanceId}`;
+  Object.defineProperty(frame.contentWindow!.performance, "getEntriesByName", {
+    configurable: true,
+    value: (name: string, type: string) =>
+      name === "code/didStartWorkbench" && type === "mark"
+        ? [{ name, entryType: "mark" }]
+        : [],
+  });
   frame.contentDocument!.body.append(marker);
   fireEvent.load(frame);
   return frame;
 }
 
-function dragCodexTabToPaneEdge(windowId: string, edge: "left" | "right" | "top" | "bottom") {
+function connectionRetryButton() {
+  const visible = screen.queryByRole("button", { name: "重试连接" });
+  if (visible) return visible;
+  fireEvent.click(screen.getByLabelText("Codex 连接状态"));
+  return screen.getByRole("button", { name: "重试连接" });
+}
+
+function publishSharedTabs(snapshot: {
+  revision: number;
+  threads: Array<{ id: string; cwd: string; title: string }>;
+}) {
+  const key = `kanban.codex.tab-snapshot.${snapshot.revision}`;
+  localStorage.setItem(key, JSON.stringify({ initialized: true, ...snapshot }));
+  const shared = (
+    globalThis as {
+      __codexSharedTabs?: { revision: number; threads: unknown[] };
+    }
+  ).__codexSharedTabs;
+  if (shared)
+    Object.assign(shared, {
+      revision: snapshot.revision,
+      threads: snapshot.threads,
+    });
+  window.dispatchEvent(
+    new StorageEvent("storage", { key, storageArea: localStorage }),
+  );
+}
+
+function dragCodexTabToPaneEdge(
+  windowId: string,
+  edge: "left" | "right" | "top" | "bottom",
+) {
   HTMLElement.prototype.setPointerCapture = () => {};
-  const tab = document.querySelector<HTMLElement>(`[data-codex-window="${windowId}"]`);
+  const tab = document.querySelector<HTMLElement>(
+    `[data-codex-window="${windowId}"]`,
+  );
   const body = document.querySelector<HTMLElement>("[data-codex-group-body]");
   if (!tab || !body) throw new Error("missing Codex split drag target");
   vi.spyOn(body, "getBoundingClientRect").mockReturnValue({
-    x: 0, y: 40, left: 0, top: 40, right: 800, bottom: 640, width: 800, height: 600, toJSON: () => ({}),
+    x: 0,
+    y: 40,
+    left: 0,
+    top: 40,
+    right: 800,
+    bottom: 640,
+    width: 800,
+    height: 600,
+    toJSON: () => ({}),
   } as DOMRect);
-  Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => body });
-  const point = edge === "left" ? [10, 300] : edge === "right" ? [790, 300] : edge === "top" ? [400, 50] : [400, 620];
-  fireEvent.pointerDown(tab, { pointerId: 1, clientX: 100, clientY: 10, button: 0 });
-  fireEvent.pointerMove(tab, { pointerId: 1, clientX: point[0], clientY: point[1] });
-  fireEvent.pointerUp(tab, { pointerId: 1, clientX: point[0], clientY: point[1] });
+  Object.defineProperty(document, "elementFromPoint", {
+    configurable: true,
+    value: () => body,
+  });
+  const point =
+    edge === "left"
+      ? [10, 300]
+      : edge === "right"
+        ? [790, 300]
+        : edge === "top"
+          ? [400, 50]
+          : [400, 620];
+  fireEvent.pointerDown(tab, {
+    pointerId: 1,
+    clientX: 100,
+    clientY: 10,
+    button: 0,
+  });
+  fireEvent.pointerMove(tab, {
+    pointerId: 1,
+    clientX: point[0],
+    clientY: point[1],
+  });
+  fireEvent.pointerUp(tab, {
+    pointerId: 1,
+    clientX: point[0],
+    clientY: point[1],
+  });
 }
 
 function withSessionListEndpoints(fetcher: unknown): typeof fetch {
@@ -72,7 +263,12 @@ function withSessionListEndpoints(fetcher: unknown): typeof fetch {
     if (input === "/api/native-codex/tabs")
       return {
         ok: true,
-        json: async () => ({ initialized: true, revision: 1, threads: [], sequence: 0 }),
+        json: async () => ({
+          initialized: true,
+          revision: 1,
+          threads: [],
+          sequence: 0,
+        }),
       } as Response;
     if (input === "/api/codex/thread/list")
       return {
@@ -80,7 +276,11 @@ function withSessionListEndpoints(fetcher: unknown): typeof fetch {
         json: async () => ({ data: [], nextCursor: null }),
       } as Response;
     if (input === "/api/native-codex/focus")
-      return { ok: true, status: 202, json: async () => ({ focused: true, column: 1 }) } as Response;
+      return {
+        ok: true,
+        status: 202,
+        json: async () => ({ focused: true, column: 1 }),
+      } as Response;
     return (
       fetcher as unknown as (
         input: RequestInfo | URL,
@@ -91,12 +291,18 @@ function withSessionListEndpoints(fetcher: unknown): typeof fetch {
 }
 
 afterEach(() => {
+  window.history.replaceState(null, "", "/");
   sessionStorage.clear();
+  localStorage.clear();
   localStorage.removeItem(CODEX_WINDOW_THREADS_KEY);
   localStorage.removeItem(CODEX_MULTIWINDOW_KEY);
   localStorage.removeItem("kanban.codex.multiwindow.v1");
   for (const key of Object.keys(localStorage)) {
-    if (key.startsWith(CODEX_TAB_OPERATION_PREFIX) || key.startsWith(CODEX_TAB_REVISION_PREFIX)) localStorage.removeItem(key);
+    if (
+      key.startsWith(CODEX_TAB_OPERATION_PREFIX) ||
+      key.startsWith(CODEX_TAB_REVISION_PREFIX)
+    )
+      localStorage.removeItem(key);
   }
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -109,60 +315,203 @@ it("offers handoff only after native writer conflict and live previous host are 
   const firstWindowId = "019aabcd-5678-7890-abcd-0123456789ab";
   const oldInstanceId = "019aabcd-1234-7890-abcd-0123456789ad";
   const threadId = "019aabcd-1234-7890-abcd-0123456789ab";
-  localStorage.setItem(CODEX_MULTIWINDOW_KEY, JSON.stringify({ version: 2, hostKey: firstWindowId, activeId: threadId,
-    activeGroupId: "saved", tree: { type: "group", id: "saved", keys: [threadId], selected: threadId },
-    windows: [{ id: threadId, kind: "thread", threadId, title: "Saved chat", cwd: "/tmp/project" }] }));
-  sessionStorage.setItem("kanban.codex.native-host.v1", JSON.stringify({ hostKey: firstWindowId, instanceId: oldInstanceId }));
+  localStorage.setItem(
+    CODEX_MULTIWINDOW_KEY,
+    JSON.stringify({
+      version: 2,
+      hostKey: firstWindowId,
+      activeId: threadId,
+      activeGroupId: "saved",
+      tree: {
+        type: "group",
+        id: "saved",
+        keys: [threadId],
+        selected: threadId,
+      },
+      windows: [
+        {
+          id: threadId,
+          kind: "thread",
+          threadId,
+          title: "Saved chat",
+          cwd: "/tmp/project",
+        },
+      ],
+    }),
+  );
+  sessionStorage.setItem(
+    "kanban.codex.native-host.v1",
+    JSON.stringify({ hostKey: firstWindowId, instanceId: oldInstanceId }),
+  );
   const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
-  vi.stubGlobal("fetch", withSessionListEndpoints(vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    requests.push({ input, init });
-    if (input === "/api/native-codex/status") return { ok: true, json: async () => ({ available: true, resumeAvailable: true,
-      iframeUrl: "/native-codex/?folder=%2Ftmp%2Fproject", newChatWindowIds: [firstWindowId, "019aabcd-5678-7890-abcd-0123456789ac"] }) } as Response;
-    if (input === "/api/native-codex/release-instance") return { ok: true, status: 202, json: async () => ({ released: true }) } as Response;
-    if (input === "/api/native-codex/instance-status") return { ok: true, json: async () => ({ active: true }) } as Response;
-    if (input === "/api/native-codex/resume-beside") return { ok: true, status: 202, json: async () => ({ opened: true, column: 2 }) } as Response;
-    throw new Error(`unexpected request ${String(input)}`);
-  })));
+  vi.stubGlobal(
+    "fetch",
+    withSessionListEndpoints(
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        requests.push({ input, init });
+        if (input === "/api/native-codex/status")
+          return {
+            ok: true,
+            json: async () => ({
+              available: true,
+              resumeAvailable: true,
+              iframeUrl: "/native-codex/?folder=%2Ftmp%2Fproject",
+              newChatWindowIds: [
+                firstWindowId,
+                "019aabcd-5678-7890-abcd-0123456789ac",
+              ],
+            }),
+          } as Response;
+        if (input === "/api/native-codex/release-instance")
+          return {
+            ok: true,
+            status: 202,
+            json: async () => ({ released: true }),
+          } as Response;
+        if (input === "/api/native-codex/instance-status")
+          return { ok: true, json: async () => ({ active: true }) } as Response;
+        if (input === "/api/native-codex/resume-beside")
+          return {
+            ok: true,
+            status: 202,
+            json: async () => ({ opened: true, column: 2 }),
+          } as Response;
+        throw new Error(`unexpected request ${String(input)}`);
+      }),
+    ),
+  );
   let report: nativeSurface.NativeSurfaceOptions["onWindowState"];
-  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation((_document, onCount, onReady, options) => {
-    onCount(2); onReady?.(2); options?.onHostInstance?.(visibleInstanceId);
-    report = options?.onWindowState;
-    return { start: vi.fn(), pause: vi.fn(), dispose: vi.fn(), setLayout: vi.fn() };
-  });
+  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation(
+    (_document, onCount, onReady, options) => {
+      onCount(2);
+      onReady?.(2);
+      options?.onHostInstance?.(visibleInstanceId);
+      report = options?.onWindowState;
+      return {
+        start: vi.fn(),
+        pause: vi.fn(),
+        dispose: vi.fn(),
+        setLayout: vi.fn(),
+      };
+    },
+  );
   render(<CodexWorkbench active onModeChange={vi.fn()} />);
   fireEvent.load(await screen.findByTitle("原生 Codex 会话窗口"));
-  await waitFor(() => expect(requests.some(({ input }) => input === "/api/native-codex/resume-beside")).toBe(true));
+  await waitFor(() =>
+    expect(
+      requests.some(({ input }) => input === "/api/native-codex/resume-beside"),
+    ).toBe(true),
+  );
   expect(screen.queryByRole("button", { name: "释放旧实例并恢复" })).toBeNull();
-  act(() => report?.(threadId, { ready: true, conversationId: threadId, hasComposer: false, composerEmpty: false, userInteracted: false, blockedByOtherApp: true }));
-  const release = await screen.findByRole("button", { name: "释放旧实例并恢复" });
-  expect(requests.some(({ input }) => input === "/api/native-codex/release-instance")).toBe(false);
+  act(() =>
+    report?.(threadId, {
+      ready: true,
+      conversationId: threadId,
+      hasComposer: false,
+      composerEmpty: false,
+      userInteracted: false,
+      blockedByOtherApp: true,
+    }),
+  );
+  const release = await screen.findByRole("button", {
+    name: "释放旧实例并恢复",
+  });
+  expect(
+    requests.some(
+      ({ input }) => input === "/api/native-codex/release-instance",
+    ),
+  ).toBe(false);
   fireEvent.click(release);
-  await waitFor(() => expect(requests.some(({ input }) => input === "/api/native-codex/resume-beside")).toBe(true));
-  expect(JSON.parse(String(requests.find(({ input }) => input === "/api/native-codex/release-instance")?.init?.body))).toEqual({ oldInstanceId, currentInstanceId: visibleInstanceId });
-  expect(JSON.parse(sessionStorage.getItem("kanban.codex.native-host.v1")!)).toMatchObject({ hostKey: firstWindowId, instanceId: visibleInstanceId });
+  await waitFor(() =>
+    expect(
+      requests.some(({ input }) => input === "/api/native-codex/resume-beside"),
+    ).toBe(true),
+  );
+  expect(
+    JSON.parse(
+      String(
+        requests.find(
+          ({ input }) => input === "/api/native-codex/release-instance",
+        )?.init?.body,
+      ),
+    ),
+  ).toEqual({ oldInstanceId, currentInstanceId: visibleInstanceId });
+  expect(
+    JSON.parse(sessionStorage.getItem("kanban.codex.native-host.v1")!),
+  ).toMatchObject({ hostKey: firstWindowId, instanceId: visibleInstanceId });
 });
 
 it("does not block an empty chat or offer release for a dead previous instance", async () => {
   const firstWindowId = "019aabcd-5678-7890-abcd-0123456789ab";
-  sessionStorage.setItem("kanban.codex.native-host.v1", JSON.stringify({ hostKey: firstWindowId, instanceId: "019aabcd-1234-7890-abcd-0123456789ad" }));
+  sessionStorage.setItem(
+    "kanban.codex.native-host.v1",
+    JSON.stringify({
+      hostKey: firstWindowId,
+      instanceId: "019aabcd-1234-7890-abcd-0123456789ad",
+    }),
+  );
   const requests: string[] = [];
-  vi.stubGlobal("fetch", withSessionListEndpoints(vi.fn(async (input: string) => {
-    requests.push(input);
-    if (input === "/api/native-codex/status") return { ok: true, json: async () => ({ available: true, resumeAvailable: true, iframeUrl: "/native-codex/", newChatWindowIds: [firstWindowId, "019aabcd-5678-7890-abcd-0123456789ac"] }) } as Response;
-    if (input === "/api/native-codex/instance-status") return { ok: true, json: async () => ({ active: false }) } as Response;
-    throw new Error(input);
-  })));
+  vi.stubGlobal(
+    "fetch",
+    withSessionListEndpoints(
+      vi.fn(async (input: string) => {
+        requests.push(input);
+        if (input === "/api/native-codex/status")
+          return {
+            ok: true,
+            json: async () => ({
+              available: true,
+              resumeAvailable: true,
+              iframeUrl: "/native-codex/",
+              newChatWindowIds: [
+                firstWindowId,
+                "019aabcd-5678-7890-abcd-0123456789ac",
+              ],
+            }),
+          } as Response;
+        if (input === "/api/native-codex/instance-status")
+          return {
+            ok: true,
+            json: async () => ({ active: false }),
+          } as Response;
+        throw new Error(input);
+      }),
+    ),
+  );
   let report: nativeSurface.NativeSurfaceOptions["onWindowState"];
-  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation((_document, onCount, onReady, options) => {
-    onCount(2); onReady?.(2); options?.onHostInstance?.(visibleInstanceId); report = options?.onWindowState;
-    return { start: vi.fn(), pause: vi.fn(), dispose: vi.fn(), setLayout: vi.fn() };
-  });
+  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation(
+    (_document, onCount, onReady, options) => {
+      onCount(2);
+      onReady?.(2);
+      options?.onHostInstance?.(visibleInstanceId);
+      report = options?.onWindowState;
+      return {
+        start: vi.fn(),
+        pause: vi.fn(),
+        dispose: vi.fn(),
+        setLayout: vi.fn(),
+      };
+    },
+  );
   render(<CodexWorkbench active onModeChange={vi.fn()} />);
   fireEvent.load(await screen.findByTitle("原生 Codex 会话窗口"));
   expect(screen.queryByText("刷新后检测到旧 Codex 实例")).toBeNull();
-  expect(screen.getByRole("button", { name: "+ 新聊天" }).hasAttribute("disabled")).toBe(false);
-  act(() => report?.(`new:${firstWindowId}`, { ready: true, conversationId: null, hasComposer: false, composerEmpty: false, userInteracted: false, blockedByOtherApp: true }));
-  await waitFor(() => expect(requests).toContain("/api/native-codex/instance-status"));
+  expect(
+    screen.getByRole("button", { name: "+ 新聊天" }).hasAttribute("disabled"),
+  ).toBe(false);
+  act(() =>
+    report?.(`new:${firstWindowId}`, {
+      ready: true,
+      conversationId: null,
+      hasComposer: false,
+      composerEmpty: false,
+      userInteracted: false,
+      blockedByOtherApp: true,
+    }),
+  );
+  await waitFor(() =>
+    expect(requests).toContain("/api/native-codex/instance-status"),
+  );
   expect(screen.queryByRole("button", { name: "释放旧实例并恢复" })).toBeNull();
   expect(requests).not.toContain("/api/native-codex/release-instance");
 });
@@ -170,41 +519,142 @@ it("waits for the selected native editor group before enabling its input", async
   const firstWindowId = "019aabcd-5678-7890-abcd-0123456789ab";
   let resolveFocus: ((value: Response) => void) | undefined;
   const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    requests.push({ input, init });
-    if (input === "/api/native-codex/status") return { ok: true, json: async () => ({
-      available: true, resumeAvailable: true, iframeUrl: "/native-codex/", newChatWindowIds: [firstWindowId, "019aabcd-5678-7890-abcd-0123456789ac"],
-    }) } as Response;
-    if (input === "/api/session/projects") return { ok: true, json: async () => ({ projects: [] }) } as Response;
-    if (input === "/api/native-codex/tabs") return { ok: true, json: async () => ({ initialized: true, revision: 1, threads: [], sequence: 0 }) } as Response;
-    if (input === "/api/native-codex/focus") return new Promise<Response>((resolve) => { resolveFocus = resolve; });
-    throw new Error("unexpected request " + String(input));
-  }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({ input, init });
+      if (input === "/api/native-codex/status")
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            resumeAvailable: true,
+            iframeUrl: "/native-codex/",
+            newChatWindowIds: [
+              firstWindowId,
+              "019aabcd-5678-7890-abcd-0123456789ac",
+            ],
+          }),
+        } as Response;
+      if (input === "/api/session/projects")
+        return { ok: true, json: async () => ({ projects: [] }) } as Response;
+      if (input === "/api/native-codex/tabs")
+        return {
+          ok: true,
+          json: async () => ({
+            initialized: true,
+            revision: 1,
+            threads: [],
+            sequence: 0,
+          }),
+        } as Response;
+      if (input === "/api/native-codex/focus")
+        return new Promise<Response>((resolve) => {
+          resolveFocus = resolve;
+        });
+      throw new Error("unexpected request " + String(input));
+    }),
+  );
   const setLayout = vi.fn();
-  let report: ((windowId: string, state: { ready: boolean; conversationId: string | null; hasComposer: boolean; composerEmpty: boolean; userInteracted: boolean; blockedByOtherApp?: boolean }) => void) | undefined;
-  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation((_document, onCount, onReady, options) => {
-    onCount(2); onReady?.(2); options?.onHostInstance?.(visibleInstanceId); report = options?.onWindowState;
-    return { start: vi.fn(), pause: vi.fn(), dispose: vi.fn(), setLayout };
-  });
+  let report:
+    | ((
+        windowId: string,
+        state: {
+          ready: boolean;
+          conversationId: string | null;
+          hasComposer: boolean;
+          composerEmpty: boolean;
+          userInteracted: boolean;
+          blockedByOtherApp?: boolean;
+        },
+      ) => void)
+    | undefined;
+  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation(
+    (_document, onCount, onReady, options) => {
+      onCount(2);
+      onReady?.(2);
+      options?.onHostInstance?.(visibleInstanceId);
+      report = options?.onWindowState;
+      return { start: vi.fn(), pause: vi.fn(), dispose: vi.fn(), setLayout };
+    },
+  );
   render(<CodexWorkbench active onModeChange={vi.fn()} />);
   fireEvent.load(await screen.findByTitle("原生 Codex 会话窗口"));
-  await waitFor(() => expect(screen.getByRole("button", { name: "+ 新聊天" }).hasAttribute("disabled")).toBe(false));
-  expect(requests.some(request => request.input === "/api/native-codex/focus")).toBe(false);
-  act(() => report?.(`new:${firstWindowId}`, { ready: true, conversationId: null, hasComposer: false, composerEmpty: false, userInteracted: false, blockedByOtherApp: false }));
-  await waitFor(() => expect(requests.some(request => request.input === "/api/native-codex/focus")).toBe(true));
-  expect(JSON.parse(String(requests.find(request => request.input === "/api/native-codex/focus")?.init?.body))).toEqual({
-    instanceId: visibleInstanceId, kind: "new", targetId: firstWindowId,
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "+ 新聊天" }).hasAttribute("disabled"),
+    ).toBe(false),
+  );
+  expect(
+    requests.some((request) => request.input === "/api/native-codex/focus"),
+  ).toBe(false);
+  act(() =>
+    report?.(`new:${firstWindowId}`, {
+      ready: true,
+      conversationId: null,
+      hasComposer: false,
+      composerEmpty: false,
+      userInteracted: false,
+      blockedByOtherApp: false,
+    }),
+  );
+  await waitFor(() =>
+    expect(
+      requests.some((request) => request.input === "/api/native-codex/focus"),
+    ).toBe(true),
+  );
+  expect(
+    JSON.parse(
+      String(
+        requests.find((request) => request.input === "/api/native-codex/focus")
+          ?.init?.body,
+      ),
+    ),
+  ).toEqual({
+    instanceId: visibleInstanceId,
+    kind: "new",
+    targetId: firstWindowId,
   });
   expect(screen.getByText("请在原生界面中完成官方引导")).toBeTruthy();
   expect(screen.queryByText("正在切换原生输入窗口…")).toBeNull();
-  expect(setLayout.mock.lastCall?.[0].interactiveId).toBe(`new:${firstWindowId}`);
-  act(() => resolveFocus?.({ ok: false, status: 503, json: async () => ({}) } as Response));
-  await waitFor(() => expect(screen.getByText("原生窗口切换失败（HTTP 503）")).toBeTruthy());
+  expect(setLayout.mock.lastCall?.[0].interactiveId).toBe(
+    `new:${firstWindowId}`,
+  );
+  act(() =>
+    resolveFocus?.({
+      ok: false,
+      status: 503,
+      json: async () => ({}),
+    } as Response),
+  );
+  await waitFor(() =>
+    expect(screen.getByText("原生窗口切换失败（HTTP 503）")).toBeTruthy(),
+  );
   expect(screen.queryByText("请在原生界面中完成官方引导")).toBeNull();
-  expect(setLayout.mock.lastCall?.[0].interactiveId).toBe(`new:${firstWindowId}`);
-  act(() => report?.(`new:${firstWindowId}`, { ready: true, conversationId: null, hasComposer: false, composerEmpty: false, userInteracted: false, blockedByOtherApp: true }));
+  expect(setLayout.mock.lastCall?.[0].interactiveId).toBe(
+    `new:${firstWindowId}`,
+  );
+  act(() =>
+    report?.(`new:${firstWindowId}`, {
+      ready: true,
+      conversationId: null,
+      hasComposer: false,
+      composerEmpty: false,
+      userInteracted: false,
+      blockedByOtherApp: true,
+    }),
+  );
   expect(screen.getByText("另一实例占用 · 请点原生 Retry")).toBeTruthy();
-  act(() => report?.(`new:${firstWindowId}`, { ready: true, conversationId: null, hasComposer: true, composerEmpty: true, userInteracted: false, blockedByOtherApp: false }));
+  act(() =>
+    report?.(`new:${firstWindowId}`, {
+      ready: true,
+      conversationId: null,
+      hasComposer: true,
+      composerEmpty: true,
+      userInteracted: false,
+      blockedByOtherApp: false,
+    }),
+  );
   expect(screen.queryByText("已就绪")).toBeNull();
   expect(document.querySelector(".codex-window-status")).toBeNull();
   expect(screen.queryByRole("button", { name: "关闭 新聊天 窗口" })).toBeNull();
@@ -296,13 +746,15 @@ it("times out unrendered native content even when outer panels exist and clears 
   const frame = await screen.findByTitle("原生 Codex 会话窗口");
   fireEvent.load(frame);
   vi.useFakeTimers(); // Re-arm timeout using current fake clock.
-  fireEvent.click(screen.getByRole("button", { name: "重试连接" }));
+  fireEvent.click(connectionRetryButton());
   await act(async () => {
     await Promise.resolve();
   });
   fireEvent.load(screen.getByTitle("原生 Codex 会话窗口"));
   act(() => vi.advanceTimersByTime(60_000));
-  expect(screen.getByRole("alert").textContent).toContain("原生 Codex 界面未能加载");
+  expect(screen.getByRole("alert").textContent).toContain(
+    "原生 Codex 界面未能加载",
+  );
   act(() => ready(2));
   expect(screen.queryByRole("alert")).toBeNull();
   expect(screen.getByText("1 个窗口")).toBeTruthy();
@@ -324,7 +776,7 @@ it("pauses its loading timeout while the Codex mode is hidden", async () => {
   const view = render(<CodexWorkbench active onModeChange={vi.fn()} />);
   await screen.findByTitle("原生 Codex 会话窗口");
   vi.useFakeTimers();
-  fireEvent.click(screen.getByRole("button", { name: "重试连接" }));
+  fireEvent.click(connectionRetryButton());
   await act(async () => {
     await Promise.resolve();
   });
@@ -363,7 +815,7 @@ it("rechecks the connection without replacing an open native iframe or its unsen
   original.contentDocument!.body.append(input);
   fireEvent.load(original);
   await screen.findByText("1 个窗口");
-  fireEvent.click(screen.getByRole("button", { name: "重试连接" }));
+  fireEvent.click(connectionRetryButton());
   await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
   expect(screen.getByTitle("原生 Codex 会话窗口")).toBe(original);
   expect(original.isConnected).toBe(true);
@@ -388,7 +840,7 @@ it("retains an already open native document when a connection recheck fails", as
   vi.stubGlobal("fetch", withSessionListEndpoints(fetcher));
   render(<CodexWorkbench active onModeChange={vi.fn()} />);
   const original = await screen.findByTitle("原生 Codex 会话窗口");
-  fireEvent.click(screen.getByRole("button", { name: "重试连接" }));
+  fireEvent.click(connectionRetryButton());
   await screen.findByRole("alert");
   expect(screen.getByTitle("原生 Codex 会话窗口")).toBe(original);
 });
@@ -451,11 +903,28 @@ it("restores a saved local thread only into its visible blank new-chat window", 
   );
   render(<CodexWorkbench active onModeChange={vi.fn()} />);
   fireEvent.load(await screen.findByTitle("原生 Codex 会话窗口"));
-  await waitFor(() => expect(calls.some((call) => call.input === "/api/native-codex/restore")).toBe(true), { timeout: 3000 });
-  expect(calls.filter((call) => call.input === "/api/native-codex/restore")).toHaveLength(1);
+  await waitFor(
+    () =>
+      expect(
+        calls.some((call) => call.input === "/api/native-codex/restore"),
+      ).toBe(true),
+    { timeout: 3000 },
+  );
   expect(
-    calls.filter((call) => call.input === "/api/native-codex/restore").map((call) => JSON.parse(String(call.init?.body))),
-  ).toEqual([{ windowId: windowIds[0], threadId, column: 1, instanceId: visibleInstanceId }]);
+    calls.filter((call) => call.input === "/api/native-codex/restore"),
+  ).toHaveLength(1);
+  expect(
+    calls
+      .filter((call) => call.input === "/api/native-codex/restore")
+      .map((call) => JSON.parse(String(call.init?.body))),
+  ).toEqual([
+    {
+      windowId: windowIds[0],
+      threadId,
+      column: 1,
+      instanceId: visibleInstanceId,
+    },
+  ]);
   const frame = screen.getByTitle("原生 Codex 会话窗口") as HTMLIFrameElement;
   expect(frame.style.pointerEvents).toBe("");
   expect(frame.tabIndex).toBe(0);
@@ -524,57 +993,170 @@ it("cancels delayed restoration when the user interacts with the original compos
 
 it("returns a native card to loading when its webview loses rendered content", async () => {
   const firstWindowId = "019aabcd-5678-7890-abcd-0123456789ab";
-  vi.stubGlobal("fetch", withSessionListEndpoints(vi.fn(async () => ({ ok: true, json: async () => ({
-    available: true, resumeAvailable: true, iframeUrl: "/native-codex/",
-    newChatWindowIds: [firstWindowId, "019aabcd-5678-7890-abcd-0123456789ac"],
-  }) }))));
-  let report: ((windowId: string, state: { ready: boolean; conversationId: string | null; hasComposer: boolean; composerEmpty: boolean; userInteracted: boolean }) => void) | undefined;
-  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation((_document, onCount, onReady, options) => {
-    onCount(2);
-    onReady?.(1);
-    options?.onHostInstance?.(visibleInstanceId);
-    report = options?.onWindowState;
-    return { start: vi.fn(), pause: vi.fn(), dispose: vi.fn() };
-  });
+  vi.stubGlobal(
+    "fetch",
+    withSessionListEndpoints(
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          available: true,
+          resumeAvailable: true,
+          iframeUrl: "/native-codex/",
+          newChatWindowIds: [
+            firstWindowId,
+            "019aabcd-5678-7890-abcd-0123456789ac",
+          ],
+        }),
+      })),
+    ),
+  );
+  let report:
+    | ((
+        windowId: string,
+        state: {
+          ready: boolean;
+          conversationId: string | null;
+          hasComposer: boolean;
+          composerEmpty: boolean;
+          userInteracted: boolean;
+        },
+      ) => void)
+    | undefined;
+  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation(
+    (_document, onCount, onReady, options) => {
+      onCount(2);
+      onReady?.(1);
+      options?.onHostInstance?.(visibleInstanceId);
+      report = options?.onWindowState;
+      return { start: vi.fn(), pause: vi.fn(), dispose: vi.fn() };
+    },
+  );
   render(<CodexWorkbench active onModeChange={vi.fn()} />);
   fireEvent.load(await screen.findByTitle("原生 Codex 会话窗口"));
   expect(report).toBeTypeOf("function");
-  act(() => report?.(`new:${firstWindowId}`, { ready: true, conversationId: null, hasComposer: true, composerEmpty: true, userInteracted: false }));
+  act(() =>
+    report?.(`new:${firstWindowId}`, {
+      ready: true,
+      conversationId: null,
+      hasComposer: true,
+      composerEmpty: true,
+      userInteracted: false,
+    }),
+  );
   expect(screen.queryByText("已就绪")).toBeNull();
   expect(document.querySelector(".codex-window-status")).toBeNull();
-  act(() => report?.(`new:${firstWindowId}`, { ready: true, conversationId: null, hasComposer: false, composerEmpty: false, userInteracted: false }));
+  act(() =>
+    report?.(`new:${firstWindowId}`, {
+      ready: true,
+      conversationId: null,
+      hasComposer: false,
+      composerEmpty: false,
+      userInteracted: false,
+    }),
+  );
   expect(screen.getByText("请在原生界面中完成官方引导")).toBeTruthy();
   expect(screen.queryByText("正在加载原生 Codex…")).toBeNull();
-  act(() => report?.(`new:${firstWindowId}`, { ready: false, conversationId: null, hasComposer: false, composerEmpty: false, userInteracted: false }));
+  act(() =>
+    report?.(`new:${firstWindowId}`, {
+      ready: false,
+      conversationId: null,
+      hasComposer: false,
+      composerEmpty: false,
+      userInteracted: false,
+    }),
+  );
   expect(screen.getByText("正在加载原生 Codex…")).toBeTruthy();
 });
 
 it("keeps an unsent native new-chat draft out of newly opened windows", async () => {
   const firstWindowId = "019aabcd-5678-7890-abcd-0123456789ab";
   const requests: string[] = [];
-  vi.stubGlobal("fetch", withSessionListEndpoints(vi.fn(async (input: RequestInfo | URL) => {
-    requests.push(String(input));
-    if (input === "/api/native-codex/status") return { ok: true, json: async () => ({
-      available: true, resumeAvailable: true, iframeUrl: "/native-codex/?folder=%2Ftmp%2Fnew-chat-project", newChatWindowIds: [firstWindowId, "019aabcd-5678-7890-abcd-0123456789ac"],
-    }) } as Response;
-    if (input === "/api/native-codex/new-beside") return { ok: true, status: 202, json: async () => ({ opened: true, column: 2 }) } as Response;
-    throw new Error(`unexpected request ${String(input)}`);
-  })));
-  let report: ((windowId: string, state: { ready: boolean; conversationId: string | null; hasComposer: boolean; composerEmpty: boolean; userInteracted: boolean }) => void) | undefined;
-  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation((_document, onCount, onReady, options) => {
-    onCount(2); onReady?.(2); options?.onHostInstance?.(visibleInstanceId); report = options?.onWindowState;
-    return { start: vi.fn(), pause: vi.fn(), dispose: vi.fn(), setLayout: vi.fn() };
-  });
+  vi.stubGlobal(
+    "fetch",
+    withSessionListEndpoints(
+      vi.fn(async (input: RequestInfo | URL) => {
+        requests.push(String(input));
+        if (input === "/api/native-codex/status")
+          return {
+            ok: true,
+            json: async () => ({
+              available: true,
+              resumeAvailable: true,
+              iframeUrl: "/native-codex/?folder=%2Ftmp%2Fnew-chat-project",
+              newChatWindowIds: [
+                firstWindowId,
+                "019aabcd-5678-7890-abcd-0123456789ac",
+              ],
+            }),
+          } as Response;
+        if (input === "/api/native-codex/new-beside")
+          return {
+            ok: true,
+            status: 202,
+            json: async () => ({ opened: true, column: 2 }),
+          } as Response;
+        throw new Error(`unexpected request ${String(input)}`);
+      }),
+    ),
+  );
+  let report:
+    | ((
+        windowId: string,
+        state: {
+          ready: boolean;
+          conversationId: string | null;
+          hasComposer: boolean;
+          composerEmpty: boolean;
+          userInteracted: boolean;
+        },
+      ) => void)
+    | undefined;
+  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation(
+    (_document, onCount, onReady, options) => {
+      onCount(2);
+      onReady?.(2);
+      options?.onHostInstance?.(visibleInstanceId);
+      report = options?.onWindowState;
+      return {
+        start: vi.fn(),
+        pause: vi.fn(),
+        dispose: vi.fn(),
+        setLayout: vi.fn(),
+      };
+    },
+  );
   render(<CodexWorkbench active onModeChange={vi.fn()} />);
   fireEvent.load(await screen.findByTitle("原生 Codex 会话窗口"));
-  await waitFor(() => expect(screen.getByRole("button", { name: "+ 新聊天" }).hasAttribute("disabled")).toBe(false));
-  act(() => report?.(`new:${firstWindowId}`, { ready: true, conversationId: null, hasComposer: true, composerEmpty: false, userInteracted: true }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "+ 新聊天" }).hasAttribute("disabled"),
+    ).toBe(false),
+  );
+  act(() =>
+    report?.(`new:${firstWindowId}`, {
+      ready: true,
+      conversationId: null,
+      hasComposer: true,
+      composerEmpty: false,
+      userInteracted: true,
+    }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "+ 新聊天" }));
   expect(requests).not.toContain("/api/native-codex/new-beside");
   expect(screen.getByText(/先发送当前新聊天草稿/)).toBeTruthy();
-  act(() => report?.(`new:${firstWindowId}`, { ready: true, conversationId: null, hasComposer: true, composerEmpty: true, userInteracted: true }));
+  act(() =>
+    report?.(`new:${firstWindowId}`, {
+      ready: true,
+      conversationId: null,
+      hasComposer: true,
+      composerEmpty: true,
+      userInteracted: true,
+    }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "+ 新聊天" }));
-  await waitFor(() => expect(requests).toContain("/api/native-codex/new-beside"));
+  await waitFor(() =>
+    expect(requests).toContain("/api/native-codex/new-beside"),
+  );
   const saved = JSON.parse(localStorage.getItem(CODEX_MULTIWINDOW_KEY)!);
   expect(saved.windows).toHaveLength(2);
   expect(saved.windows.at(-1).cwd).toBe("/tmp/new-chat-project");
@@ -583,27 +1165,100 @@ it("keeps an unsent native new-chat draft out of newly opened windows", async ()
 it("keeps a matching loaded native thread usable if a duplicate open request conflicts", async () => {
   const firstWindowId = "019aabcd-5678-7890-abcd-0123456789ab";
   const threadId = "019aabcd-1234-7890-abcd-0123456789ab";
-  localStorage.setItem(CODEX_MULTIWINDOW_KEY, JSON.stringify({ version: 2, hostKey: firstWindowId, activeId: threadId,
-    activeGroupId: "saved", tree: { type: "group", id: "saved", keys: [threadId], selected: threadId },
-    windows: [{ id: threadId, kind: "thread", threadId, title: "Saved chat", cwd: "/tmp/project" }] }));
+  localStorage.setItem(
+    CODEX_MULTIWINDOW_KEY,
+    JSON.stringify({
+      version: 2,
+      hostKey: firstWindowId,
+      activeId: threadId,
+      activeGroupId: "saved",
+      tree: {
+        type: "group",
+        id: "saved",
+        keys: [threadId],
+        selected: threadId,
+      },
+      windows: [
+        {
+          id: threadId,
+          kind: "thread",
+          threadId,
+          title: "Saved chat",
+          cwd: "/tmp/project",
+        },
+      ],
+    }),
+  );
   let resolveResume: ((value: Response) => void) | undefined;
-  vi.stubGlobal("fetch", withSessionListEndpoints(vi.fn(async (input: RequestInfo | URL) => {
-    if (input === "/api/native-codex/status") return { ok: true, json: async () => ({ available: true, resumeAvailable: true,
-      iframeUrl: "/native-codex/?folder=%2Ftmp%2Fproject", newChatWindowIds: [firstWindowId, "019aabcd-5678-7890-abcd-0123456789ac"] }) } as Response;
-    if (input === "/api/native-codex/resume-beside") return new Promise<Response>((resolve) => { resolveResume = resolve; });
-    throw new Error(`unexpected request ${String(input)}`);
-  })));
-  let report: ((windowId: string, state: { ready: boolean; conversationId: string | null; hasComposer: boolean; composerEmpty: boolean; userInteracted: boolean }) => void) | undefined;
-  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation((_document, onCount, onReady, options) => {
-    onCount(2); onReady?.(2); options?.onHostInstance?.(visibleInstanceId); report = options?.onWindowState;
-    return { start: vi.fn(), pause: vi.fn(), dispose: vi.fn(), setLayout: vi.fn() };
-  });
+  vi.stubGlobal(
+    "fetch",
+    withSessionListEndpoints(
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (input === "/api/native-codex/status")
+          return {
+            ok: true,
+            json: async () => ({
+              available: true,
+              resumeAvailable: true,
+              iframeUrl: "/native-codex/?folder=%2Ftmp%2Fproject",
+              newChatWindowIds: [
+                firstWindowId,
+                "019aabcd-5678-7890-abcd-0123456789ac",
+              ],
+            }),
+          } as Response;
+        if (input === "/api/native-codex/resume-beside")
+          return new Promise<Response>((resolve) => {
+            resolveResume = resolve;
+          });
+        throw new Error(`unexpected request ${String(input)}`);
+      }),
+    ),
+  );
+  let report:
+    | ((
+        windowId: string,
+        state: {
+          ready: boolean;
+          conversationId: string | null;
+          hasComposer: boolean;
+          composerEmpty: boolean;
+          userInteracted: boolean;
+        },
+      ) => void)
+    | undefined;
+  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation(
+    (_document, onCount, onReady, options) => {
+      onCount(2);
+      onReady?.(2);
+      options?.onHostInstance?.(visibleInstanceId);
+      report = options?.onWindowState;
+      return {
+        start: vi.fn(),
+        pause: vi.fn(),
+        dispose: vi.fn(),
+        setLayout: vi.fn(),
+      };
+    },
+  );
   render(<CodexWorkbench active onModeChange={vi.fn()} />);
   fireEvent.load(await screen.findByTitle("原生 Codex 会话窗口"));
   await waitFor(() => expect(resolveResume).toBeTypeOf("function"));
-  act(() => report?.(threadId, { ready: true, conversationId: threadId, hasComposer: true, composerEmpty: true, userInteracted: false }));
+  act(() =>
+    report?.(threadId, {
+      ready: true,
+      conversationId: threadId,
+      hasComposer: true,
+      composerEmpty: true,
+      userInteracted: false,
+    }),
+  );
   act(() => resolveResume?.({ ok: false, status: 409 } as Response));
-  await waitFor(() => expect(screen.getByRole("tab", { name: /Saved chat/ })).toBeTruthy());
+  await waitFor(() =>
+    expect(
+      document.querySelector("[data-codex-window] strong")?.textContent,
+    ).toContain("Saved chat"),
+  );
   expect(screen.queryByText("已就绪")).toBeNull();
   expect(screen.queryByText("打开失败")).toBeNull();
   expect(document.querySelector(".codex-window-status")).toBeNull();
@@ -647,7 +1302,15 @@ it("opens a project conversation as a second independent window and never rerout
           json: async () => ({ projects: [cwd] }),
         } as Response;
       if (input === "/api/native-codex/tabs")
-        return { ok: true, json: async () => ({ initialized: true, revision: 1, threads: [], sequence: 0 }) } as Response;
+        return {
+          ok: true,
+          json: async () => ({
+            initialized: true,
+            revision: 1,
+            threads: [],
+            sequence: 0,
+          }),
+        } as Response;
       if (input === "/api/native-codex/resume-beside")
         return {
           ok: true,
@@ -662,6 +1325,9 @@ it("opens a project conversation as a second independent window and never rerout
   const conversation = await screen.findByRole("button", {
     name: "Resume Existing conversation",
   });
+  expect(
+    screen.getByRole("button", { name: "Resume Existing conversation" }),
+  ).toBeTruthy();
   expect(screen.getAllByRole("button", { name: /^Resume / })).toHaveLength(1);
   await markVisibleHostReady();
   await waitFor(
@@ -672,7 +1338,9 @@ it("opens a project conversation as a second independent window and never rerout
 
   await waitFor(() =>
     expect(
-      requests.find((request) => request.input === "/api/native-codex/resume-beside"),
+      requests.find(
+        (request) => request.input === "/api/native-codex/resume-beside",
+      ),
     ).toBeTruthy(),
   );
   const resumeRequest = requests.find(
@@ -683,13 +1351,17 @@ it("opens a project conversation as a second independent window and never rerout
     instanceId: visibleInstanceId,
   });
   expect(screen.getByText("2 个窗口")).toBeTruthy();
-  expect(screen.queryByRole("button", { name: "分屏" })).toBeNull();
+  expect(screen.getByRole("button", { name: "分屏" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "专注" })).toBeNull();
   dragCodexTabToPaneEdge(threadId, "right");
   expect(document.querySelectorAll(".codex-window-card")).toHaveLength(2);
   fireEvent.click(conversation);
-  expect(requests.filter((request) => request.input === "/api/native-codex/resume-beside")).toHaveLength(1);
-  expect(sessionBridge.listThreads).toHaveBeenCalledExactlyOnceWith({
+  expect(
+    requests.filter(
+      (request) => request.input === "/api/native-codex/resume-beside",
+    ),
+  ).toHaveLength(1);
+  expect(sessionBridge.listThreads).toHaveBeenCalledWith({
     cwd,
     limit: 100,
     sortKey: "updated_at",
@@ -713,37 +1385,105 @@ it("isolates a failed history open while other project conversations keep openin
     parentThreadId: null,
     ephemeral: false,
   }));
-  sessionBridge.listThreads.mockResolvedValue({ data: conversations, nextCursor: null });
+  sessionBridge.listThreads.mockResolvedValue({
+    data: conversations,
+    nextCursor: null,
+  });
   const calls: string[] = [];
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (input === "/api/native-codex/status") return { ok: true, json: async () => ({
-      available: true, resumeAvailable: true, iframeUrl: "/native-codex/?folder=%2Ftmp%2Fproject-a",
-    }) } as Response;
-    if (input === "/api/session/projects") return { ok: true, json: async () => ({ projects: [cwd] }) } as Response;
-    if (input === "/api/native-codex/tabs") return { ok: true, json: async () => ({ initialized: true, revision: 1, threads: [], sequence: init?.method === "POST" ? 1 : 0 }) } as Response;
-    if (input === "/api/native-codex/resume-beside") {
-      calls.push(String(input));
-      return calls.length === 1 ? { ok: false, status: 503 } as Response
-        : { ok: true, status: 202, json: async () => ({ opened: true }) } as Response;
-    }
-    throw new Error(`unexpected request ${String(input)}`);
-  }));
+  const sharedThreads = new Map<
+    string,
+    { id: string; cwd: string; title: string }
+  >();
+  let revision = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/native-codex/status")
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            resumeAvailable: true,
+            iframeUrl: "/native-codex/?folder=%2Ftmp%2Fproject-a",
+          }),
+        } as Response;
+      if (input === "/api/session/projects")
+        return {
+          ok: true,
+          json: async () => ({ projects: [cwd] }),
+        } as Response;
+      if (input === "/api/native-codex/tabs") {
+        const action =
+          init?.method === "POST"
+            ? JSON.parse(String(init.body)).operations[0]?.action
+            : null;
+        if (action?.type === "add") {
+          sharedThreads.set(action.thread.id, action.thread);
+          revision++;
+        }
+        if (action?.type === "remove") {
+          sharedThreads.delete(action.id);
+          revision++;
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            initialized: true,
+            revision,
+            threads: [...sharedThreads.values()],
+            sequence: action ? 1 : 0,
+          }),
+        } as Response;
+      }
+      if (input === "/api/native-codex/theme")
+        return {
+          ok: true,
+          status: 202,
+          json: async () => ({ applied: true }),
+        } as Response;
+      if (input === "/api/native-codex/resume-beside") {
+        calls.push(String(input));
+        return calls.length === 1
+          ? ({ ok: false, status: 503 } as Response)
+          : ({
+              ok: true,
+              status: 202,
+              json: async () => ({ opened: true }),
+            } as Response);
+      }
+      throw new Error(`unexpected request ${String(input)}`);
+    }),
+  );
   render(<CodexWorkbench active onModeChange={vi.fn()} />);
   const original = await markVisibleHostReady();
   for (let index = 1; index <= 4; index++) {
-    const button = await screen.findByRole("button", { name: `Resume Conversation ${index}` });
+    const button = await screen.findByRole("button", {
+      name: `Resume Conversation ${index}`,
+    });
+    await waitFor(() =>
+      expect((button as HTMLButtonElement).disabled).toBe(false),
+    );
     fireEvent.click(button);
+    await waitFor(() => expect(calls).toHaveLength(index));
   }
   await waitFor(() => expect(calls).toHaveLength(4));
   expect(screen.getByText("5 个窗口")).toBeTruthy();
   expect(document.querySelectorAll(".codex-window-card")).toHaveLength(1);
   dragCodexTabToPaneEdge(conversations[0]!.id, "right");
   expect(document.querySelectorAll(".codex-window-card")).toHaveLength(2);
-  expect(await screen.findByText("Codex 窗口打开失败（HTTP 503）")).toBeTruthy();
+  expect(
+    await screen.findByText("Codex 窗口打开失败（HTTP 503）"),
+  ).toBeTruthy();
   expect(calls).toHaveLength(4);
-  fireEvent.click(screen.getByRole("button", { name: "Resume Conversation 3" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Resume Conversation 3" }),
+  );
   expect(calls).toHaveLength(4);
   expect(screen.getByText("5 个窗口")).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "关闭 Conversation 1 标签" }),
+  );
+  expect(screen.getByText("4 个窗口")).toBeTruthy();
   expect(screen.getByTitle("原生 Codex 会话窗口")).toBe(original);
 });
 
@@ -752,47 +1492,210 @@ it("opens a thread added in another browser and keeps the current thread after t
   const first = "019aabcd-1234-7890-abcd-000000000001";
   const second = "019aabcd-1234-7890-abcd-000000000002";
   const thread = (id: string, title: string) => ({ id, cwd, title });
-  const shared = { initialized: true, revision: 1, threads: [thread(first, "First")] };
+  const shared = {
+    initialized: true,
+    revision: 1,
+    threads: [thread(first, "First")],
+  };
+  (globalThis as { __codexSharedTabs?: typeof shared }).__codexSharedTabs =
+    shared;
   const requests: Array<{ input: RequestInfo | URL; body?: string }> = [];
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    requests.push({ input, body: typeof init?.body === "string" ? init.body : undefined });
-    if (input === "/api/native-codex/status") return { ok: true, json: async () => ({
-      available: true, resumeAvailable: true, iframeUrl: `/native-codex/?folder=${encodeURIComponent(cwd)}`,
-      newChatWindowIds: ["019aabcd-5678-7890-abcd-0123456789ab"],
-    }) } as Response;
-    if (input === "/api/session/projects") return { ok: true, json: async () => ({ initialized: true, revision: 3, projects: [cwd, "/tmp/project-b"] }) } as Response;
-    if (input === "/api/native-codex/tabs") {
-      if (init?.method === "POST") {
-        const action = JSON.parse(init.body as string).operations[0]?.action;
-        if (action?.type === "add") Object.assign(shared, { revision: shared.revision + 1, threads: [...shared.threads, action.thread] });
-        if (action?.type === "remove") Object.assign(shared, { revision: shared.revision + 1, threads: shared.threads.filter((item) => item.id !== action.id) });
-        return { ok: true, json: async () => ({ ...shared, sequence: 1 }) } as Response;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      requests.push({
+        input,
+        body: typeof init?.body === "string" ? init.body : undefined,
+      });
+      if (input === "/api/native-codex/status")
+        return {
+          ok: true,
+          json: async () => ({
+            available: true,
+            resumeAvailable: true,
+            iframeUrl: `/native-codex/?folder=${encodeURIComponent(cwd)}`,
+            newChatWindowIds: ["019aabcd-5678-7890-abcd-0123456789ab"],
+          }),
+        } as Response;
+      if (input === "/api/session/projects")
+        return {
+          ok: true,
+          json: async () => ({
+            initialized: true,
+            revision: 3,
+            projects: [cwd, "/tmp/project-b"],
+          }),
+        } as Response;
+      if (input === "/api/native-codex/tabs") {
+        if (init?.method === "POST") {
+          const action = JSON.parse(init.body as string).operations[0]?.action;
+          if (action?.type === "add")
+            Object.assign(shared, {
+              revision: shared.revision + 1,
+              threads: [...shared.threads, action.thread],
+            });
+          if (action?.type === "remove")
+            Object.assign(shared, {
+              revision: shared.revision + 1,
+              threads: shared.threads.filter((item) => item.id !== action.id),
+            });
+          return {
+            ok: true,
+            json: async () => ({ ...shared, sequence: 1 }),
+          } as Response;
+        }
+        return { ok: true, json: async () => shared } as Response;
       }
-      return { ok: true, json: async () => shared } as Response;
-    }
-    if (input === "/api/native-codex/resume-beside") return { ok: true, status: 202, json: async () => ({ opened: true, column: 1 }) } as Response;
-    if (input === "/api/native-codex/focus") return { ok: true, json: async () => ({ focused: true }) } as Response;
-    throw new Error(`unexpected request ${String(input)}`);
-  }));
-  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation((_document, onCount, onReady, options) => {
-    onCount(1); onReady?.(1); options?.onHostInstance?.(visibleInstanceId);
-    return { start: vi.fn(), pause: vi.fn(), dispose: vi.fn(), setLayout: vi.fn() };
-  });
+      if (input === "/api/native-codex/resume-beside")
+        return {
+          ok: true,
+          status: 202,
+          json: async () => ({ opened: true, column: 1 }),
+        } as Response;
+      if (input === "/api/native-codex/theme")
+        return {
+          ok: true,
+          status: 202,
+          json: async () => ({ applied: true }),
+        } as Response;
+      if (input === "/api/native-codex/focus")
+        return { ok: true, json: async () => ({ focused: true }) } as Response;
+      throw new Error(`unexpected request ${String(input)}`);
+    }),
+  );
+  vi.spyOn(nativeSurface, "mountNativeSurface").mockImplementation(
+    (_document, onCount, onReady, options) => {
+      onCount(1);
+      onReady?.(1);
+      options?.onHostInstance?.(visibleInstanceId);
+      options?.onWindowState?.(`new:019aabcd-5678-7890-abcd-0123456789ab`, {
+        ready: true,
+        conversationId: null,
+        hasComposer: true,
+        composerEmpty: true,
+        userInteracted: false,
+      });
+      return {
+        start: vi.fn(),
+        pause: vi.fn(),
+        dispose: vi.fn(),
+        setLayout: vi.fn(),
+      };
+    },
+  );
   render(<CodexWorkbench active onModeChange={vi.fn()} />);
   await markVisibleHostReady();
   expect(await screen.findByRole("tab", { name: /First/ })).toBeTruthy();
   expect(screen.getByRole("button", { name: "project-b" })).toBeTruthy();
-  Object.assign(shared, { revision: 2, threads: [thread(first, "First"), thread(second, "Second")] });
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2100)); });
-  expect(await screen.findByRole("tab", { name: /Second/ })).toBeTruthy();
-  await waitFor(() => expect(requests.filter((request) => request.input === "/api/native-codex/resume-beside")).toHaveLength(2));
+  // Shared attention adds metadata; the native writer opens on display.
+  expect(
+    requests.filter(
+      (request) => request.input === "/api/native-codex/resume-beside",
+    ),
+  ).toHaveLength(0);
+  fireEvent.click(screen.getByRole("tab", { name: /First/ }));
+  publishSharedTabs({
+    revision: 2,
+    threads: [thread(first, "First"), thread(second, "Second")],
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  await waitFor(() =>
+    expect(
+      Array.from(document.querySelectorAll("[data-codex-window] strong")).some(
+        (item) => item.textContent === "Second",
+      ),
+    ).toBe(true),
+  );
+  await waitFor(() =>
+    expect(
+      requests.filter(
+        (request) => request.input === "/api/native-codex/resume-beside",
+      ),
+    ).toHaveLength(1),
+  );
   HTMLElement.prototype.setPointerCapture = () => {};
   dragCodexTabToPaneEdge(second, "right");
-  expect(document.querySelectorAll("[data-codex-group]").length).toBeGreaterThan(1);
+  await waitFor(() =>
+    expect(
+      requests.filter(
+        (request) => request.input === "/api/native-codex/resume-beside",
+      ),
+    ).toHaveLength(2),
+  );
+  expect(
+    document.querySelectorAll("[data-codex-group]").length,
+  ).toBeGreaterThan(1);
   fireEvent.click(screen.getByRole("tab", { name: /First/ }));
-  Object.assign(shared, { revision: 3, threads: [thread(second, "Second")] });
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 2100)); });
-  expect(screen.getByText("当前会话未关注")).toBeTruthy();
+  publishSharedTabs({ revision: 3, threads: [thread(second, "Second")] });
+  expect(
+    await screen.findByText("当前会话未关注", {}, { timeout: 4000 }),
+  ).toBeTruthy();
   expect(screen.getByRole("tab", { name: /First/ })).toBeTruthy();
-  expect(document.querySelectorAll("[data-codex-group]").length).toBeGreaterThan(1);
+  expect(
+    document.querySelectorAll("[data-codex-group]").length,
+  ).toBeGreaterThan(1);
 });
+
+it("routes an explicitly selected native client to its own host while keeping followed tabs shared", async () => {
+  const profile = "019aabcd-1234-7890-abcd-000000000041";
+  window.history.replaceState(null, "", `/?mode=codex&nativeClient=${profile}`);
+  const fetcher = vi.fn(async () => ({
+    ok: true,
+    json: async () => ({
+      available: true,
+      iframeUrl: `/native-codex/clients/${profile}/`,
+    }),
+  }));
+  vi.stubGlobal("fetch", withSessionListEndpoints(fetcher));
+  render(<CodexWorkbench active onModeChange={vi.fn()} />);
+  await waitFor(() =>
+    expect(fetcher).toHaveBeenCalledWith(
+      `/api/native-codex/clients/${profile}/status`,
+      expect.anything(),
+    ),
+  );
+  const frame = await screen.findByTitle("原生 Codex 会话窗口");
+  expect(frame.getAttribute("src")).toBe(`/native-codex/clients/${profile}/`);
+});
+
+it("does not mount a cached native host belonging to a different client", () => {
+  const profile = "019aabcd-1234-7890-abcd-000000000041";
+  window.history.replaceState(null, "", `/?mode=codex&nativeClient=${profile}`);
+  sessionStorage.setItem("kanban.codex.native-iframe-url.v1", "/native-codex/");
+  sessionStorage.setItem(
+    `kanban.codex.native-iframe-url.v1:${profile}`,
+    "/native-codex/clients/019aabcd-1234-7890-abcd-000000000042/",
+  );
+  vi.stubGlobal(
+    "fetch",
+    withSessionListEndpoints(vi.fn(() => new Promise<Response>(() => {}))),
+  );
+  render(<CodexWorkbench active onModeChange={vi.fn()} />);
+  expect(document.querySelector("iframe")).toBeNull();
+});
+
+it.each([
+  "invalid",
+  "../status",
+  "019aabcd-1234-7890-abcd-000000000041&nativeClient=019aabcd-1234-7890-abcd-000000000042",
+])(
+  "rejects an invalid or ambiguous client selector without falling back to the default host: %s",
+  async (selector) => {
+    window.history.replaceState(
+      null,
+      "",
+      `/?mode=codex&nativeClient=${selector}`,
+    );
+    const fetcher = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ available: false }),
+    }));
+    vi.stubGlobal("fetch", withSessionListEndpoints(fetcher));
+    render(<CodexWorkbench active onModeChange={vi.fn()} />);
+    await screen.findByRole("alert");
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(document.querySelector("iframe")).toBeNull();
+  },
+);

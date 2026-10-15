@@ -115,8 +115,17 @@ test(
             url: "/api/session/followups?threadId=owned-thread",
           })
         ).statusCode,
-        500,
+        409,
       );
+      const refused = await contender.inject({
+        method: "POST", url: "/api/session/followups/submit",
+        payload: { id: "refused", threadId: "owned-thread", mode: "queue", text: "not admitted", images: [], parameters: {} },
+      });
+      assert.equal(refused.statusCode, 409);
+      assert.equal(refused.json().code, "FOLLOWUP_QUEUE_OWNED_ELSEWHERE");
+      assert.equal(refused.json().deliveryStage, "not-admitted");
+      assert.equal((await q.get("owned-thread")).items.some(item => item.id === "refused"), false);
+      assert.equal(calls.length, 1);
       status = "idle";
       emit("turn/completed", { id: "run-one", status: "completed" });
       await until(() => calls.length === 2);

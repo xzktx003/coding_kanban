@@ -25,6 +25,7 @@ import { ConversationMenu } from "./ConversationMenu";
 import * as sessionTabs from "@session/stores/sessionTabSelect";
 import { resetViewedChats } from "./recentView";
 import { toast } from "sonner";
+import { threadAccess } from "@session/services/apiAdapt/codex";
 const request = vi.hoisted(() => vi.fn());
 const collaboration = vi.hoisted(() => ({ mode: "default" as "default" | "plan" }));
 const searchFiles = vi.hoisted(() => vi.fn());
@@ -82,6 +83,26 @@ vi.mock("@session/services/apiAdapt/codex", () => ({
   deleteThread,
   threadAccess: vi.fn(),
 }));
+it("opens lifecycle details on demand using only the captured thread's read-only access", async () => {
+  vi.mocked(threadAccess).mockResolvedValueOnce({ state: "owned", reason: "仍有空闲子实例", generation: 1 });
+  render(<ConversationMenu threadId="access-owner" title="状态测试" />);
+  fireEvent.keyDown(screen.getByRole("button", { name: "当前会话的更多操作" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "查看执行状态" }));
+  await waitFor(() => expect(threadAccess).toHaveBeenCalledWith("access-owner", false));
+  expect(toast.message).toHaveBeenCalledWith("本项目保留执行实例", { description: "仍有空闲子实例" });
+});
+it.each(["readonly", "releasing"] as const)("explains parent-only handoff when release returns %s", async (state) => {
+  if (state !== "readonly" && state !== "releasing") throw new Error("Invalid handoff test state");
+  vi.mocked(threadAccess).mockResolvedValueOnce({ state, reason: state === "releasing" ? "等待原生服务确认" : "", generation: 1 });
+  render(<ConversationMenu threadId="handoff-owner" title="交接测试" />);
+  fireEvent.keyDown(screen.getByRole("button", { name: "当前会话的更多操作" }), { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "释放给其他客户端" }));
+  await waitFor(() => expect(threadAccess).toHaveBeenCalledWith("handoff-owner", true));
+  expect(toast.message).toHaveBeenCalledWith(
+    state === "readonly" ? "本项目已释放执行权" : "等待原生服务确认",
+    { description: "仅释放当前会话；已有子 Agent 仍由原运行实例控制。" },
+  );
+});
 vi.mock("@session/services/codexService", () => ({
   codexService: { threadFork },
 }));
@@ -1433,10 +1454,11 @@ it("asks the open composer to pick photos", async () => {
 it("clicks the shipped send button for a background message", async () => {
   const clicked = vi.fn();
   const button = document.createElement("button");
-  button.setAttribute("aria-label", "发送");
+  button.setAttribute("aria-label", "发送消息");
   button.addEventListener("click", clicked);
   const host = document.createElement("div");
   host.className = "session-codex-composer";
+  host.dataset.ownerThread = "original-owner";
   host.append(button);
   document.body.append(host);
   render(<ConversationMenu threadId="original-owner" title="当前会话" />);
@@ -1446,6 +1468,27 @@ it("clicks the shipped send button for a background message", async () => {
   fireEvent.click(screen.getByRole("menuitem", { name: "在后台发送消息" }));
   expect(clicked).toHaveBeenCalledOnce();
   host.remove();
+});
+it("never sends another thread or a hidden composer through the background action", async () => {
+  const clicked = vi.fn();
+  render(<>
+    <div className="session-codex-composer" data-owner-thread="other"><button aria-label="发送消息" onClick={clicked} /></div>
+    <div hidden><div className="session-codex-composer" data-owner-thread="original-owner"><button aria-label="发送消息" onClick={clicked} /></div></div>
+    <ConversationMenu threadId="original-owner" title="当前会话" />
+  </>);
+  fireEvent.keyDown(screen.getByRole("button", { name: "当前会话的更多操作" }), { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("menuitem", { name: "在后台发送消息" }));
+  expect(clicked).not.toHaveBeenCalled();
+});
+it("can background-submit a new chat only from its captured draft owner", async () => {
+  const clicked = vi.fn();
+  render(<>
+    <div className="session-codex-composer" data-draft-owner="codex:new:a"><button aria-label="发送消息" onClick={clicked} /></div>
+    <ConversationMenu threadId={null} title="当前会话" draftOwner="codex:new:a" />
+  </>);
+  fireEvent.keyDown(screen.getByRole("button", { name: "当前会话的更多操作" }), { key: "ArrowDown" });
+  fireEvent.click(screen.getByRole("menuitem", { name: "在后台发送消息" }));
+  expect(clicked).toHaveBeenCalledOnce();
 });
 
 it("cycles the catalog speed for the open thread", async () => {

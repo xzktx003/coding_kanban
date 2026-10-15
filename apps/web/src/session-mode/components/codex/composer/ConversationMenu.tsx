@@ -95,12 +95,14 @@ function applyExpandedList(kind: Extract<FormatKind, "ol" | "ul" | "check">) {
 
 export function ConversationMenu({
   threadId,
+  draftOwner,
   title,
   variant = "icon",
   onOpen,
   onRename,
 }: {
   threadId: string | null;
+  draftOwner?: string;
   title: string;
   variant?: "icon" | "item";
   onOpen?: () => void;
@@ -189,6 +191,7 @@ export function ConversationMenu({
             type="button"
             variant="ghost"
             className="justify-start"
+            aria-label="当前会话的更多操作"
             onClick={onOpen}
           >
             <NativeComposerIcon name="more" />
@@ -434,9 +437,11 @@ export function ConversationMenu({
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => {
-            const button = document.querySelector<HTMLButtonElement>(
-              '.session-codex-composer button[aria-label="发送"]',
-            );
+            const composer = Array.from(document.querySelectorAll<HTMLElement>(".session-codex-composer"))
+              .find(element => !element.closest("[hidden]") && (threadId
+                ? element.dataset.ownerThread === threadId
+                : Boolean(draftOwner) && !element.dataset.ownerThread && element.dataset.draftOwner === draftOwner));
+            const button = composer?.querySelector<HTMLButtonElement>('button[aria-label="发送消息"]');
             if (!button || button.disabled) {
               toast.message("当前输入没有可发送的消息");
               return;
@@ -1458,12 +1463,36 @@ export function ConversationMenu({
           onSelect={() => {
             if (!threadId) return;
             setBusy(true);
+            void threadAccess(threadId, false)
+              .then((access) => {
+                const label = {
+                  readonly: "本项目未加载此会话，发送时恢复原会话",
+                  owned: "本项目保留执行实例",
+                  external: "其他客户端占用，历史可读",
+                  releasing: "正在等待原生服务确认释放",
+                  acquiring: "正在恢复执行实例",
+                  unknown: "执行状态尚未确认",
+                }[access.state];
+                toast.message(label, access.reason ? { description: access.reason } : undefined);
+              })
+              .catch((error) => toast.error(String(error)))
+              .finally(() => setBusy(false));
+          }}
+        >
+          查看执行状态
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!threadId || busy}
+          onSelect={() => {
+            if (!threadId) return;
+            setBusy(true);
             void threadAccess(threadId, true)
               .then((access) => {
                 toast.message(
                   access.state === "readonly"
                     ? "本项目已释放执行权"
                     : access.reason || "正在检查释放条件",
+                  { description: "仅释放当前会话；已有子 Agent 仍由原运行实例控制。" },
                 );
                 window.dispatchEvent(new Event("codex-access-changed"));
               })

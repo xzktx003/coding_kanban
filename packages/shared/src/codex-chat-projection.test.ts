@@ -60,3 +60,11 @@ test("MCP challenge without scopes remains actionable, oversized scopes never be
  assert.deepEqual((projectCodexChatValue({type:"mcpToolCall",result:{_meta:{"mcp/www_authenticate":"Bearer"}}}) as any).nativeMcpAuthChallenge,{scopes:[]});
  assert.deepEqual((projectCodexChatValue({type:"mcpToolCall",result:{_meta:{"mcp/www_authenticate":'Bearer scope="'+"x".repeat(20000)+'"'}}}) as any).nativeMcpAuthChallenge,{scopes:[],truncated:true});
 });
+
+ test("auto-review does not expose an oversized command as a truncated executable action", () => {
+  const projected = projectCodexChatValue({ method: "item/autoApprovalReview/completed", params: { threadId: "ux", action: { type: "command", command: "x".repeat(4 * 1024 * 1024), stdout: "secret" }, review: { status: "denied", rationale: "still public" } } }) as { params: { action: Record<string, unknown>; review: Record<string, unknown> } };
+  assert.equal(projected.params.action.command, undefined);
+  assert.equal(projected.params.action.stdout, undefined);
+  assert.equal(projected.params.action.type, "command");
+  assert.equal(projected.params.review.rationale, "still public");
+ });

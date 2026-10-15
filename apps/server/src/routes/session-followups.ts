@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
 import type {
   FollowupAction,
   FollowupSubmit,
@@ -14,6 +14,17 @@ import {
   type FollowupRuntime,
 } from "../services/codex-followups.js";
 import type { SessionCodexFeishuNotifier } from "../services/session-codex-feishu-notifier.js";
+
+class QueueOwnedElsewhere extends Error {
+  readonly statusCode = 409;
+  readonly code = "FOLLOWUP_QUEUE_OWNED_ELSEWHERE";
+  constructor() { super("消息队列已由另一服务管理；本次消息未入队，草稿已保留"); }
+}
+function followupErrorHandler(error: Error, _request: FastifyRequest, reply: FastifyReply) {
+  if (error instanceof QueueOwnedElsewhere)
+    return reply.code(409).send({ error: error.message, code: error.code, deliveryStage: "not-admitted" });
+  return reply.send(error);
+}
 
 function invalid(message = "无效的消息队列请求"): never {
   throw Object.assign(new Error(message), { statusCode: 400 });
@@ -364,12 +375,12 @@ export function registerSessionFollowupRoutes(
         done();
       });
       child.once("error", (error) => done(error));
-      child.once("exit", () => {
+      child.once("exit", (code) => {
         if (held && !lifetime.signal.aborted) lifetime.abort();
         done(
           lifetime.signal.aborted
             ? new Error("消息队列服务已停止")
-            : new Error("消息队列已由另一服务管理"),
+            : code === 75 ? new QueueOwnedElsewhere() : new Error("无法获取消息队列锁，请检查队列服务"),
         );
       });
     });
@@ -479,6 +490,7 @@ export function registerSessionFollowupRoutes(
   }
   app.get<{ Querystring: { threadId: string } }>(
     "/api/session/followups",
+    { errorHandler: followupErrorHandler },
     async (request) => {
       const threadId = id(request.query.threadId);
       await ready();
@@ -487,12 +499,12 @@ export function registerSessionFollowupRoutes(
   );
   app.post(
     "/api/session/followups/submit",
-    { bodyLimit: 1024 * 1024 },
+    { bodyLimit: 1024 * 1024, errorHandler: followupErrorHandler },
     async (request) => {
       return enqueue(request.body);
     },
   );
-  app.post("/api/session/followups/change", async (request) => {
+  app.post("/api/session/followups/change", { errorHandler: followupErrorHandler }, async (request) => {
     const data = object(request.body);
     keys(data, ["threadId", "revision", "action"]);
     const threadId = id(data.threadId);
@@ -503,7 +515,7 @@ export function registerSessionFollowupRoutes(
     dispatchSoon();
     return result;
   });
-  app.post("/api/session/followups/stop", async (request) => {
+  app.post("/api/session/followups/stop", { errorHandler: followupErrorHandler }, async (request) => {
     const data = object(request.body);
     keys(data, ["threadId", "turnId"]);
     const threadId = id(data.threadId),
@@ -512,7 +524,7 @@ export function registerSessionFollowupRoutes(
     await queue.stop(threadId, turnId);
     return queue.get(threadId);
   });
-  app.post("/api/session/followups/review", async (request) => {
+  app.post("/api/session/followups/review", { errorHandler: followupErrorHandler }, async (request) => {
     const data = object(request.body);
     keys(data, ["threadId", "delivery", "target"]);
     const threadId = id(data.threadId);

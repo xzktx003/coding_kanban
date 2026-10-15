@@ -4,14 +4,16 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { EventHub } from "../core/events.js";
 import { absolutePath } from "./paths.js";
+import { pollingFileWatcher } from "./polling-file-watcher.js";
 
 interface WatchRecord {
   path: string;
   directory: boolean;
   recursive: boolean;
   references: number;
-  watchers: Map<string, FSWatcher>;
+  watchers: Map<string, Pick<FSWatcher, "close">>;
   refreshing: boolean;
+  pollingBudget: { entries: number; limit: number };
 }
 
 /** Registration and release share one queue, including canonicalization and preflight. */
@@ -21,12 +23,18 @@ export class FileWatches {
   private tail: Promise<unknown> = Promise.resolve();
   private closed = false;
   private maxDirectories: number;
+  private nativeWatch: typeof watch;
+  private pollIntervalMs: number;
 
   constructor(
     private readonly hub: EventHub,
-    options: { maxDirectories?: number } = {},
+    options: { maxDirectories?: number; watch?: typeof watch; pollIntervalMs?: number } = {},
   ) {
     this.maxDirectories = options.maxDirectories ?? 1024;
+    this.nativeWatch = options.watch ?? watch;
+    this.pollIntervalMs = options.pollIntervalMs ?? 500;
+    if (!Number.isSafeInteger(this.pollIntervalMs) || this.pollIntervalMs < 25 || this.pollIntervalMs > 60_000)
+      throw new Error("Invalid file watch polling interval");
     if (
       !Number.isSafeInteger(this.maxDirectories) ||
       this.maxDirectories < 1 ||
@@ -68,9 +76,9 @@ export class FileWatches {
     return Boolean(await this.directories(absolutePath(path)));
   }
 
-  private attach(record: WatchRecord, directory: string): void {
+  private async attach(record: WatchRecord, directory: string): Promise<void> {
     if (this.closed || record.watchers.has(directory)) return;
-    const watcher = watch(directory, (kind, name) => {
+    const changed = (kind: string, name: string | Buffer | null) => {
       if (!name || this.closed || this.records.get(record.path) !== record)
         return;
       const changed = join(directory, name.toString());
@@ -89,14 +97,25 @@ export class FileWatches {
           });
           if (kind === "rename" && record.recursive) this.refresh(record);
         });
-    });
-    watcher.on("error", (error) => {
+    };
+    const reportError = (error: Error) => {
       if (!this.closed)
         this.hub.publish("fs:watch-error", {
           path: directory,
           error: error.message,
         });
-    });
+    };
+    let watcher: Pick<FSWatcher, "close">;
+    try {
+      const native = this.nativeWatch(directory, changed);
+      native.on("error", reportError);
+      watcher = native;
+    } catch (error) {
+      if (!["EMFILE", "ENOSPC"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+      watcher = await pollingFileWatcher(directory, { file: record.directory ? undefined : record.path,
+        intervalMs: this.pollIntervalMs, budget: record.pollingBudget, changed, error: reportError });
+    }
+    if (this.closed || this.records.get(record.path) !== record) { watcher.close(); return; }
     record.watchers.set(directory, watcher);
   }
 
@@ -117,7 +136,7 @@ export class FileWatches {
         for (const path of desired)
           if (!record.watchers.has(path)) {
             try {
-              this.attach(record, path);
+              await this.attach(record, path);
             } catch {
               /* Directory disappeared during refresh. */
             }
@@ -151,13 +170,15 @@ export class FileWatches {
         references: 1,
         watchers: new Map(),
         refreshing: false,
+        pollingBudget: { entries: 0, limit: 4096 },
       };
       this.records.set(path, record);
       try {
         for (const directory of directories ?? [
           info.isDirectory() ? path : dirname(path),
         ])
-          this.attach(record, directory);
+          await this.attach(record, directory);
+        if (this.closed) throw new Error("File watch service closed");
         this.aliases.set(alias, path);
       } catch (error) {
         for (const watcher of record.watchers.values()) watcher.close();

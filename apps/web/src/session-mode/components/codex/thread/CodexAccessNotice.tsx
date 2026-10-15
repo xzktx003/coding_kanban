@@ -5,13 +5,18 @@ import {
 } from "@session/stores/useSessionSyncStore";
 import { useEffect, useState } from "react";
 import {
-  threadAccess,
-  type CodexAccess,
-} from "@session/services/apiAdapt/codex";
-import { SessionApiError } from "@session/services/apiAdapt/shared";
+  refreshCodexAccess,
+  useCodexAccessStore,
+} from "@session/stores/useCodexAccessStore";
 
 /** Informational only: reading/polling never attempts to acquire execution. */
-export function CodexAccessNotice({ threadId }: { threadId: string }) {
+export function CodexAccessNotice({
+  threadId,
+  suppressStatus = false,
+}: {
+  threadId: string;
+  suppressStatus?: boolean;
+}) {
   const recovery = useSessionSyncStore((s) => s.recovering[threadId]);
   const connection = useSessionSyncStore((s) => s.connection);
   const connectionError = useSessionSyncStore((s) => s.connectionError);
@@ -24,8 +29,11 @@ export function CodexAccessNotice({ threadId }: { threadId: string }) {
     const timer = setTimeout(() => setShowReconnect(true), 1000);
     return () => clearTimeout(timer);
   }, [connection]);
-  const [access, setAccess] = useState<CodexAccess | null>(null);
-  const [error, setError] = useState("");
+  const entry = useCodexAccessStore((s) => s.entries[threadId]);
+  const access = entry?.access;
+  const error = entry?.unsupported
+    ? "当前运行服务尚未启用会话自动释放"
+    : entry?.error;
   useEffect(() => {
     let cancelled = false,
       inFlight = false;
@@ -33,20 +41,7 @@ export function CodexAccessNotice({ threadId }: { threadId: string }) {
       if (inFlight || cancelled) return;
       inFlight = true;
       try {
-        const result = await threadAccess(threadId);
-        if (!cancelled) {
-          setAccess(result);
-          setError("");
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setAccess(null);
-          setError(
-            e instanceof SessionApiError && e.status === 404
-              ? "当前运行服务尚未启用会话自动释放"
-              : "执行占用状态暂时无法确认",
-          );
-        }
+        await refreshCodexAccess(threadId);
       } finally {
         inFlight = false;
       }
@@ -62,11 +57,17 @@ export function CodexAccessNotice({ threadId }: { threadId: string }) {
   }, [threadId]);
   const text =
     error ||
-    (access?.state === "readonly"
-      ? "只读查看，发送时恢复原会话"
+    (access?.state === "readonly" || access?.state === "owned"
+      ? undefined
       : access?.state === "external"
         ? "其他客户端占用 · 历史可读，草稿已保留"
-        : access?.reason);
+        : access?.reason ||
+          (access?.state === "unknown"
+            ? "执行状态尚未确认，草稿已保留"
+            : undefined));
+  // A specific history failure already owns the retry affordance. Keep metadata
+  // observation mounted, but never cover that action with a second floating banner.
+  if (suppressStatus) return null;
   if (connectionError || recovery || showReconnect)
     return (
       <div
@@ -96,12 +97,19 @@ export function CodexAccessNotice({ threadId }: { threadId: string }) {
     );
   if (!text) return null;
   return (
-    <p
+    <div
       role="status"
       data-codex-access={access?.state ?? "unknown"}
       className="session-sync-notice session-access-notice"
     >
-      {text}
-    </p>
+      <span>{text}</span>
+      <button
+        type="button"
+        className="underline underline-offset-2"
+        onClick={() => void refreshCodexAccess(threadId)}
+      >
+        重新核对
+      </button>
+    </div>
   );
 }

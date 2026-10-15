@@ -22,6 +22,8 @@ import {
 } from "@session/stores/useSessionDraftStore";
 import { useFollowupSettingsStore } from "@session/stores/useFollowupSettingsStore";
 import { followupService } from "@session/services/followupService";
+import { useCodexSendBlockReason } from "@session/hooks/useCodexSendBlockReason";
+import { useCodexThreadInput } from "@session/hooks/useCodexThreadInput";
 import { useCodexStore } from "../stores";
 import { codexService } from "@session/services/codexService";
 import { CodexThread } from "../thread/CodexThread";
@@ -76,6 +78,11 @@ function SideChat({
     busy = useRef(false),
     settings = useFollowupSettingsStore();
   const { running, turnId } = useTurnControl(id);
+  const threadInput = useCodexThreadInput(id);
+  const accessBlock = useCodexSendBlockReason(
+    id,
+    queueSnapshot.state.items.some((item) => item.status === "uncertain"),
+  );
   useEffect(() => {
     if (!focusTrigger) return;
     editorRef.current?.focus();
@@ -99,7 +106,15 @@ function SideChat({
     },
   );
   const send = async (opposite = false) => {
-    if (busy.current || draft.blocked || !!storageError || !hasContent) return;
+    if (
+      busy.current ||
+      accessBlock ||
+      threadInput.blocked ||
+      draft.blocked ||
+      !!storageError ||
+      !hasContent
+    )
+      return;
     const contexts = contextDraft.contexts;
     if (composeContextText(inputValue, contexts).length > 200_000) {
       toast.error("正文与上下文合计不能超过 200,000 字符");
@@ -150,7 +165,9 @@ function SideChat({
       threads: state.threads.filter((thread) => thread.id !== sideId),
     }));
     useCodexStore.getState().triggerInputFocus();
-    void deleteThread(sideId).catch(() => toast.error("无法删除任务。请重试。"));
+    void deleteThread(sideId).catch(() =>
+      toast.error("无法删除任务。请重试。"),
+    );
   };
   const requestClose = () => {
     if (localStorage.getItem("kanban.session.side-chat-close-skip") === "1") {
@@ -291,21 +308,34 @@ function SideChat({
                     : "status"
                 }
               >
-                {storageError
-                  ? "上下文保存失败，打开状态面板重试"
-                  : draft.storageError
-                    ? "附件草稿保存失败，打开状态面板重试"
-                    : draft.attachments.some((a) => a.status === "error")
-                      ? "图片上传失败，点击缩略图重试"
-                      : draft.blocked
-                        ? "正在上传图片…"
-                        : queued.length || queueSnapshot.state.paused
-                          ? `待发送 ${queued.length} 条${queueSnapshot.state.paused ? " · 已暂停" : ""}`
-                          : notice && !notice.dismissed
-                            ? `模型已切换：${notice.to}`
-                            : running
-                              ? "运行中"
-                              : ""}
+                {accessBlock
+                  ? accessBlock
+                  : threadInput.reason
+                    ? threadInput.reason
+                    : storageError
+                      ? "上下文保存失败，打开状态面板重试"
+                      : draft.storageError
+                        ? "附件草稿保存失败，打开状态面板重试"
+                        : draft.attachments.some((a) => a.status === "error")
+                          ? "图片上传失败，点击缩略图重试"
+                          : draft.blocked
+                            ? "正在上传图片…"
+                            : queued.length || queueSnapshot.state.paused
+                              ? `待发送 ${queued.length} 条${queueSnapshot.state.paused ? " · 已暂停" : ""}`
+                              : notice && !notice.dismissed
+                                ? `模型已从 ${notice.from} 更改为 ${notice.to}。`
+                                : running
+                                  ? "运行中"
+                                  : ""}
+                {threadInput.needsVerification && (
+                  <button
+                    type="button"
+                    onClick={threadInput.recheck}
+                    disabled={threadInput.rechecking}
+                  >
+                    重新核对
+                  </button>
+                )}
               </span>
             </div>
             <div className="session-composer-actions">
@@ -350,7 +380,12 @@ function SideChat({
                   className="session-composer-send"
                   type="submit"
                   disabled={
-                    sending || draft.blocked || !!storageError || !hasContent
+                    sending ||
+                    !!accessBlock ||
+                    threadInput.blocked ||
+                    draft.blocked ||
+                    !!storageError ||
+                    !hasContent
                   }
                 >
                   {running ? (
@@ -369,7 +404,11 @@ function SideChat({
         </div>
       </form>
       {confirming && (
-        <div className="session-side-chat-confirm" role="dialog" aria-label="关闭侧边聊天？">
+        <div
+          className="session-side-chat-confirm"
+          role="dialog"
+          aria-label="关闭侧边聊天？"
+        >
           <h2>关闭侧边聊天？</h2>
           <p>这个侧边聊天将被删除，且无法恢复。你确定吗？</p>
           <label>
@@ -381,7 +420,11 @@ function SideChat({
             不再询问
           </label>
           <div>
-            <Button type="button" variant="ghost" onClick={() => setConfirming(false)}>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => setConfirming(false)}
+            >
               取消
             </Button>
             <Button type="button" onClick={finishClose}>

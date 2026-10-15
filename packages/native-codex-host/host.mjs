@@ -42,6 +42,15 @@ export function validateOptions(input) {
     result.brokerPort = Number(input.brokerPort);
   }
   if (input.connectionProfileHome != null) result.connectionProfileHome = absolute(input.connectionProfileHome, 'connectionProfileHome');
+  if (input.refreshServiceConfig != null || input.refreshDomain != null) {
+    if (input.refreshServiceConfig == null) throw new Error('refresh service config required');
+    result.refreshServiceConfig = absolute(input.refreshServiceConfig, 'refreshServiceConfig');
+    if (typeof input.refreshDomain !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.refreshDomain)) throw new Error('refresh service domain UUID required');
+    result.refreshDomain = input.refreshDomain;
+    const grace = input.reconnectionGraceSeconds ?? 60;
+    if (!/^\d+$/.test(String(grace)) || Number(grace) < 1 || Number(grace) > 300) throw new Error('refresh reconnection grace must be 1-300 seconds');
+    result.reconnectionGraceSeconds = Number(grace);
+  } else if (input.reconnectionGraceSeconds != null) throw new Error('short reconnection grace requires an explicit refresh service');
   return result;
 }
 async function noSymlink(path) {
@@ -119,6 +128,7 @@ export function buildHostArgs(options) {
   return ['--config', join(options.runtimeRoot, 'code-server.yaml'), '--bind-addr', `${options.bindHost}:${options.port}`, '--auth', options.unsafeNoAuth === true ? 'none' : 'password',
     '--user-data-dir', options.userDataDir, '--extensions-dir', options.extensionsDir, '--disable-telemetry', '--disable-update-check',
     '--disable-proxy', '--disable-workspace-trust', '--enable-proposed-api', 'openai.chatgpt',
+    ...(options.refreshServiceConfig ? ['--reconnection-grace-time', String(options.reconnectionGraceSeconds)] : []),
     ...(options.cert ? ['--cert', options.cert, '--cert-key', options.certKey] : []), options.projectDir];
 }
 export function assertPortAvailable(port) {

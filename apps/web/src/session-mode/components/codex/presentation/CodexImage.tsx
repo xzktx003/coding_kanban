@@ -4,7 +4,15 @@ import {
   DialogContent,
   DialogTitle,
 } from "@session/components/ui/dialog";
-export function CodexImage({ src, alt }: { src: string; alt: string }) {
+export function CodexImage({
+  src,
+  alt,
+  onError,
+}: {
+  src: string;
+  alt: string;
+  onError?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -14,7 +22,7 @@ export function CodexImage({ src, alt }: { src: string; alt: string }) {
         onClick={() => setOpen(true)}
         aria-label={`放大${alt}`}
       >
-        <img src={src} alt={alt} loading="lazy" />
+        <img src={src} alt={alt} loading="lazy" onError={onError} />
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="codex-file-preview max-w-[90vw] max-h-[90dvh] overflow-auto">

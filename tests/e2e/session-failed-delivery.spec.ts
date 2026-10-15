@@ -43,7 +43,7 @@ test("a sent message that fails recovers its native echo and shows the persisted
     .locator(".session-agent-view [contenteditable=true]")
     .first();
   await editor.fill("请问刚刚做了什么？");
-  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await page.getByRole("button", { name: "发送消息", exact: true }).click();
   await expect(
     page.getByText("已接收，等待消息同步", { exact: true }),
   ).toBeVisible();
@@ -68,7 +68,7 @@ test("a sent message that fails recovers its native echo and shows the persisted
   };
   // Simulate a missing userMessage SSE event. Only a read-only history rejoin
   // can recover the native clientId, which must remove the optimistic echo.
-  let refreshes = 0;
+  const historyRequests: Array<{ path: string; body: any }> = [];
   const nativeTurn = {
     ...turn,
     items: [
@@ -90,10 +90,10 @@ test("a sent message that fails recovers its native echo and shows the persisted
       executionRequests.push(request.url());
   });
   await page.route(
-    /\/api\/session\/api\/codex\/thread\/(?:read|turns\/list)$/,
+    /\/api\/session\/api\/codex\/thread\/(?:read|turns\/list)(?:\?.*)?$/,
     async (route) => {
       expect(route.request().postDataJSON().threadId).toBe("ux-0");
-      refreshes++;
+      historyRequests.push({ path: new URL(route.request().url()).pathname, body: route.request().postDataJSON() });
       await route.fulfill({
         json: new URL(route.request().url()).pathname.endsWith("/turns/list")
           ? { data: [nativeTurn], nextCursor: null, backwardsCursor: "0" }
@@ -123,13 +123,25 @@ test("a sent message that fails recovers its native echo and shows the persisted
     { url: storeUrl, turn },
   );
   await expect(
-    page.getByRole("alert").filter({ hasText: "历史工具调用参数过长" }),
+    page.getByRole("alert").filter({ hasText: "string too long" }),
   ).toBeVisible();
+  await page.getByText("查看错误详情", { exact: true }).click();
+  await expect(page.getByText(/历史工具调用参数过长/)).toBeVisible();
   await expect(page.locator("[data-delivery-echo]")).toHaveCount(0);
   await expect(
     page.getByText("请问刚刚做了什么？", { exact: true }),
   ).toHaveCount(1);
-  expect(refreshes).toBe(1);
+  // Concurrent echo and terminal-event recovery may coalesce. Each path reads at most once.
+  expect(historyRequests.length).toBeGreaterThanOrEqual(1);
+  expect(historyRequests.length).toBeLessThanOrEqual(2);
+  const fullReads = historyRequests.filter(request => request.path.endsWith("/thread/read"));
+  expect(fullReads.length).toBeLessThanOrEqual(1);
+  for (const request of fullReads) expect(request.body).toEqual({ threadId: "ux-0" });
+  const recentReads = historyRequests.filter(request => request.path.endsWith("/thread/turns/list"));
+  expect(recentReads.length).toBeLessThanOrEqual(1);
+  for (const request of recentReads) expect(request.body).toEqual({
+    threadId: "ux-0", cursor: null, limit: 2, sortDirection: "desc", itemsView: "full",
+  });
   expect(
     fixture.calls.filter((c) => c.path.endsWith("/followups/submit")),
   ).toHaveLength(1);
@@ -144,7 +156,7 @@ test("a sent message that fails recovers its native echo and shows the persisted
   });
   await page.reload({ waitUntil: "domcontentloaded" });
   await expect(
-    page.getByRole("alert").filter({ hasText: "历史工具调用参数过长" }),
+    page.getByRole("alert").filter({ hasText: "string too long" }),
   ).toBeVisible();
   await expect(
     page.getByText("请问刚刚做了什么？", { exact: true }),

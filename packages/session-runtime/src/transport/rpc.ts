@@ -272,7 +272,7 @@ export class StdioRpc {
   request(
     method: string,
     params: Json,
-    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+    options: { timeoutMs?: number; signal?: AbortSignal; beforeSend?: () => void } = {},
   ): Promise<Json> {
     if (this.failure)
       return Promise.reject(new Error("NOT_SENT: RPC transport unavailable"));
@@ -281,6 +281,7 @@ export class StdioRpc {
     const id = this.nextId++;
     const key = JSON.stringify(id);
     return new Promise((resolve, reject) => {
+      let dispatched = false;
       const fail = (message: string) => {
         const pending = this.pending.get(key);
         if (!pending) return;
@@ -289,10 +290,10 @@ export class StdioRpc {
         reject(new Error(message));
       };
       const timer = setTimeout(
-        () => fail("DELIVERY_UNKNOWN: RPC response timeout"),
+        () => fail(options.beforeSend && !dispatched ? "NOT_SENT: RPC dispatch queue timeout" : "DELIVERY_UNKNOWN: RPC response timeout"),
         options.timeoutMs ?? 30_000,
       );
-      const aborted = () => fail("DELIVERY_UNKNOWN: RPC response wait aborted");
+      const aborted = () => fail(options.beforeSend && !dispatched ? "NOT_SENT: RPC request aborted before dispatch" : "DELIVERY_UNKNOWN: RPC response wait aborted");
       options.signal?.addEventListener("abort", aborted, { once: true });
       this.pending.set(key, {
         resolve,
@@ -302,7 +303,12 @@ export class StdioRpc {
           options.signal?.removeEventListener("abort", aborted);
         },
       });
-      this.write({ id, method, params }, () => this.pending.has(key)).catch(
+      this.write({ id, method, params }, () => {
+        if (!this.pending.has(key)) return false;
+        options.beforeSend?.();
+        dispatched = true;
+        return true;
+      }).catch(
         (error) => fail(String(error.message ?? error)),
       );
     });

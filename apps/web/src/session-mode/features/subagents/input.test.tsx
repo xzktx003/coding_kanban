@@ -35,10 +35,13 @@ vi.mock("@session/components/common/useImageAttachments", () => ({
 }));
 import { SubagentInput } from "./SubagentInput";
 import { sessionDraftSubmissions } from "./submissions";
+import { useSubagentStore } from "./store";
+import { useCodexStore } from "@session/components/codex/stores";
 const owner = sessionDraftKey("codex", "child");
 it("child input preserves native child settings instead of inheriting the open parent's controls", async () => {
   mock.verify.mockResolvedValue({
     id: "child",
+    parentThreadId: "root",
     canAcceptDirectInput: true,
     cwd: "/child",
     model: "child-model",
@@ -58,6 +61,24 @@ beforeEach(() => {
   vi.clearAllMocks();
   sessionDraftSubmissions.clear();
   useSessionDraftStore.setState({ drafts: {} });
+  useCodexStore.setState({ threads: [] });
+  useSubagentStore.setState({
+    identities: {},
+    identityChecks: {},
+    runtimeEpoch: 0,
+    nodes: {
+      child: {
+        thread: {
+          id: "child",
+          parentThreadId: "root",
+          canAcceptDirectInput: true,
+        },
+        parentId: "root",
+        verified: true,
+        revision: 0,
+      },
+    },
+  });
   mock.verify.mockResolvedValue({
     id: "child",
     parentThreadId: "root",

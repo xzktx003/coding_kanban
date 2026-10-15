@@ -1096,7 +1096,7 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
   await slashEditor.pressSequentially("换一种语气");
   await page
     .locator(".session-codex-composer")
-    .getByRole("button", { name: "发送", exact: true })
+    .getByRole("button", { name: "发送消息", exact: true })
     .click();
   await expect.poll(() => {
     const sent = fixture.calls.findLast((call) =>
@@ -1350,6 +1350,15 @@ test("question, approval, queue, and side chat stay on the shipped Codex dialog"
   await expect(page.getByText("还没有最近使用的模型")).toBeVisible();
   await page.getByRole("menuitemradio", { name: "接替模型" }).click();
   await expect(page.getByRole("button", { name: /接替模型 ·/ })).toBeVisible();
+  const modelNotice = page.getByRole("status").filter({ hasText: "模型已从" });
+  await expect(modelNotice).toContainText("模型已从");
+  await expect(modelNotice).toContainText("更改为");
+  await expect(modelNotice).toContainText("背景信息可能会自动压缩。");
+  await expect(modelNotice).not.toContainText("当前模型是");
+  await page.screenshot({
+    path: `${out}/control-model-switch-notice.png`,
+    animations: "disabled",
+  });
   await page.screenshot({
     path: `${out}/control-recent-models.png`,
     animations: "disabled",

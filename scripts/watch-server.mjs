@@ -1,11 +1,111 @@
 import { loadStartupEnv } from "./startup-env.mjs";
 import { spawn } from "node:child_process";
 import { watch, readFileSync, existsSync } from "node:fs";
+import { readdir, lstat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+
+// Quota exhaustion must not prevent startup or stop the existing gateway.
+// Metadata polling is bounded and never reads source or credential contents.
+export async function watchWithQuotaFallback(
+  path,
+  options,
+  onChange,
+  {
+    nativeWatch = watch,
+    pollMs = 1000,
+    forcePolling = false,
+    onQuota = () => {},
+    onError = (error) =>
+      console.error("[server-watch] Watch failed:", error.message),
+  } = {},
+) {
+  if (!Number.isInteger(pollMs) || pollMs < 25 || pollMs > 60000)
+    throw new Error("Invalid watch polling interval");
+  const quota = (error) => ["EMFILE", "ENOSPC"].includes(error?.code);
+  let native,
+    timer,
+    closed = false,
+    polling = false,
+    busy = false;
+  async function snapshot() {
+    const entries = new Map();
+    const dirs = [path];
+    for (let index = 0; index < dirs.length; index++) {
+      for (const entry of await readdir(dirs[index], { withFileTypes: true })) {
+        if (entries.size >= 4096)
+          throw new Error("Watch polling snapshot exceeds 4096 entries");
+        if (entry.isSymbolicLink()) continue;
+        const full = join(dirs[index], entry.name);
+        let stat;
+        try {
+          stat = await lstat(full);
+        } catch (error) {
+          if (error.code === "ENOENT") continue;
+          throw error;
+        }
+        if (stat.isSymbolicLink()) continue;
+        entries.set(
+          relative(path, full),
+          `${stat.mtimeMs}:${stat.ctimeMs}:${stat.size}`,
+        );
+        if (options.recursive && stat.isDirectory()) dirs.push(full);
+      }
+    }
+    return entries;
+  }
+  async function poll() {
+    if (polling || closed) return;
+    polling = true;
+    native?.close();
+    let before = await snapshot();
+    if (closed) return;
+    timer = setInterval(async () => {
+      if (busy || closed) return;
+      busy = true;
+      try {
+        const after = await snapshot();
+        if (closed) return;
+        for (const name of new Set([...before.keys(), ...after.keys()]))
+          if (before.get(name) !== after.get(name)) onChange("change", name);
+        before = after;
+      } catch (error) {
+        if (!closed) onError(error);
+      } finally {
+        busy = false;
+      }
+    }, pollMs);
+  }
+  try {
+    if (forcePolling) {
+      await poll();
+      return { close, poll };
+    }
+    native = nativeWatch(path, options, onChange);
+    native.on("error", (error) => {
+      if (closed) return;
+      if (quota(error))
+        void Promise.resolve()
+          .then(() => onQuota(error))
+          .then(poll)
+          .catch(onError);
+      else onError(error);
+    });
+  } catch (error) {
+    if (!quota(error)) throw error;
+    await onQuota(error);
+    await poll();
+  }
+  return { close, poll };
+  function close() {
+    closed = true;
+    clearInterval(timer);
+    native?.close();
+  }
+}
 
 // One owner serializes installs and replacements; failed preparation never stops
 // the live gateway. A change arriving during preparation gets another pass.
@@ -32,6 +132,44 @@ export function createRestartQueue({ prepare, restart, onError }) {
       });
     }
     return running;
+  };
+}
+
+export function createGatewayCrashRecovery({
+  restart,
+  onRetry = () => {},
+  onExhausted = () => {},
+  now = Date.now,
+  setTimer = setTimeout,
+  clearTimer = clearTimeout,
+}) {
+  const delays = [1000, 2000, 4000];
+  let attempts = 0;
+  let timer;
+  const cancel = () => {
+    if (timer !== undefined) clearTimer(timer);
+    timer = undefined;
+  };
+  return {
+    cancel,
+    reset() {
+      cancel();
+      attempts = 0;
+    },
+    exited(startedAt) {
+      cancel();
+      if (now() - startedAt >= 60000) attempts = 0;
+      if (attempts >= delays.length) {
+        onExhausted();
+        return;
+      }
+      const delay = delays[attempts++];
+      onRetry(attempts, delay);
+      timer = setTimer(() => {
+        timer = undefined;
+        void restart();
+      }, delay);
+    },
   };
 }
 
@@ -121,9 +259,22 @@ async function main() {
   let stopping = false;
   let timer;
   const watchers = [];
+  let watchQuota = false;
+  const watched = (path, options, onChange) =>
+    watchWithQuotaFallback(path, options, onChange, {
+      forcePolling: watchQuota,
+      onQuota: async () => {
+        // Recursive Node watchers can be partially registered when another watch
+        // exposes quota exhaustion. Switch this gateway's whole group together.
+        watchQuota = true;
+        await Promise.all(watchers.map((watcher) => watcher.poll()));
+      },
+    });
   async function stopChild() {
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
     const current = child;
+    // Planned replacement/shutdown must not schedule crash recovery.
+    child = undefined;
     await new Promise((resolveStop) => {
       const timeout = setTimeout(() => current.kill("SIGKILL"), 5000);
       current.once("exit", () => {
@@ -137,20 +288,27 @@ async function main() {
     prepare: createDependencyPreparation({ root }),
     restart: async () => {
       if (stopping) return;
+      recovery.cancel();
       await stopChild();
       if (stopping) return;
       // Run tsx in this process rather than through a shell/CLI child tree.
-      child = spawn(process.execPath, ["--import", "tsx", "src/index.ts"], {
-        cwd: serverRoot,
-        env: process.env,
-        stdio: "inherit",
-      });
-      child.on("error", (error) => console.error("[server-watch]", error));
-      child.on("exit", (code, signal) => {
-        if (code && !stopping)
-          console.error(
-            `[server-watch] Gateway exited (${code ?? signal}); waiting for the next source change.`,
-          );
+      const startedAt = Date.now();
+      const current = spawn(
+        process.execPath,
+        ["--import", "tsx", "src/index.ts"],
+        {
+          cwd: serverRoot,
+          env: process.env,
+          stdio: "inherit",
+        },
+      );
+      child = current;
+      current.on("error", (error) => console.error("[server-watch]", error));
+      current.on("exit", (code, signal) => {
+        if (stopping || child !== current) return;
+        child = undefined;
+        console.error(`[server-watch] Gateway exited (${signal ?? code}).`);
+        recovery.exited(startedAt);
       });
     },
     onError: (error) =>
@@ -159,7 +317,19 @@ async function main() {
         error.message,
       ),
   });
+  const recovery = createGatewayCrashRecovery({
+    restart: () => request(),
+    onRetry: (attempt, delay) =>
+      console.error(
+        `[server-watch] Recovering gateway in ${delay}ms (attempt ${attempt}/3).`,
+      ),
+    onExhausted: () =>
+      console.error(
+        "[server-watch] Gateway recovery exhausted; fix the failure and save a watched file to retry.",
+      ),
+  });
   const changed = () => {
+    recovery.reset();
     clearTimeout(timer);
     timer = setTimeout(() => {
       if (!stopping) void request();
@@ -167,9 +337,13 @@ async function main() {
   };
   for (const path of ["apps/server/src", "packages/shared/src"]) {
     watchers.push(
-      watch(resolve(root, path), { recursive: true }, (_event, name) => {
-        if (name && /\.(?:ts|tsx|js|mjs|json)$/.test(String(name))) changed();
-      }),
+      await watched(
+        resolve(root, path),
+        { recursive: true },
+        (_event, name) => {
+          if (name && /\.(?:ts|tsx|js|mjs|json)$/.test(String(name))) changed();
+        },
+      ),
     );
   }
   for (const [path, names] of [
@@ -180,7 +354,7 @@ async function main() {
     ["packages/session-runtime", ["package.json"]],
   ]) {
     watchers.push(
-      watch(resolve(root, path), (_event, name) => {
+      await watched(resolve(root, path), {}, (_event, name) => {
         if (names.includes(String(name))) changed();
       }),
     );
@@ -189,6 +363,7 @@ async function main() {
     process.once(signal, async () => {
       stopping = true;
       clearTimeout(timer);
+      recovery.cancel();
       watchers.forEach((watcher) => watcher.close());
       await stopChild();
       process.exit(0);

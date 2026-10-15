@@ -1,4 +1,5 @@
 import { projectCodexChatValue } from "@agent-orchestrator/shared";
+import { registerSessionItemDetail } from "./session-item-detail.js";
 import { registerSessionFollowupRoutes } from "./session-followups.js";
 import { registerSessionSubagentRoutes } from "./session-subagents.js";
 import { registerSessionProjectsRoutes } from "./session-projects.js";
@@ -25,6 +26,9 @@ import type { FastifyInstance } from "fastify";
 import WebSocket from "ws";
 
 interface SessionModeRouteOptions {
+  loadDetailChannel?: () => Promise<{
+    registerLocalItemDetailChannel: (app: FastifyInstance, dataDir: string) => void;
+  }>;
   origin?: string;
   attachmentRoot?: string;
   fetch?: typeof globalThis.fetch;
@@ -190,6 +194,23 @@ export function registerSessionModeRoutes(
   });
   let origin = options.origin ? validateOrigin(options.origin).origin : null;
   const fetchUpstream = options.fetch ?? globalThis.fetch;
+  if (options.attachmentRoot && process.env.SESSION_MODE_ENABLED !== "0") {
+    app.register(async (detailScope) => {
+      let channel;
+      try {
+        channel = await (options.loadDetailChannel?.() ?? import("@agent-orchestrator/session-runtime/item-detail"));
+      } catch (error) {
+        // A custom/disabled runtime may not have prepared the default TS library.
+        // Keep the gateway and existing service available; never replace an Agent.
+        if ((error as NodeJS.ErrnoException).code !== "ERR_MODULE_NOT_FOUND") throw error;
+        registerSessionItemDetail(detailScope, () => origin, fetchUpstream);
+        return;
+      }
+      channel.registerLocalItemDetailChannel(detailScope, resolve(options.attachmentRoot!, "..", ".codexia"));
+    });
+  } else {
+    registerSessionItemDetail(app, () => origin, fetchUpstream);
+  }
   if (options.attachmentRoot) {
     const dataHome = resolve(options.attachmentRoot, "..");
     const owners = createCodexHostOwnerResolver({

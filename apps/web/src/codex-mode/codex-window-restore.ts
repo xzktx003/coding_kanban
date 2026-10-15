@@ -3,13 +3,14 @@ export const CODEX_WINDOW_THREADS_KEY = "kanban.codex.window-threads.v1";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export function validateCodexWindowIds(value: unknown): string[] | undefined {
-  if (!Array.isArray(value) || value.length !== 2) return undefined;
+  if (!Array.isArray(value) || value.length < 1 || value.length > 2)
+    return undefined;
   const windowIds = value as unknown[];
   if (
     !windowIds.every(
       (id) => typeof id === "string" && UUID.test(id as string),
     ) ||
-    new Set(windowIds).size !== 2
+    new Set(windowIds).size !== windowIds.length
   )
     return undefined;
   return windowIds as string[];

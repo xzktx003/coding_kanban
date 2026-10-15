@@ -1,13 +1,21 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
-  subagentParent,
-  normalizeSubagentThread,
+  classifySubagentThread,
+  type SubagentThread,
   type SubagentSnapshot,
   type SubagentStopResult,
 } from "@agent-orchestrator/shared";
 import type { ServerNotification } from "@session/bindings";
-import { descendants, reconcileNodes, type SubagentNode } from "./model";
+import {
+  boundedSubagentThread,
+  descendants,
+  reconcileNodes,
+  sameSubagentValue,
+  validParentEdge,
+  type SubagentIdentity,
+  type SubagentNode,
+} from "./model";
 import { subagentScope, subagentStorageKey } from "./scope";
 interface Family {
   complete: boolean;
@@ -17,6 +25,9 @@ interface Family {
 }
 interface State {
   nodes: Record<string, SubagentNode>;
+  /** Current-runtime, bounded native metadata; never restored as permission from disk. */
+  identities: Record<string, SubagentIdentity>;
+  identityChecks: Record<string, { loading: boolean; error?: string }>;
   families: Record<string, Family>;
   selection: Record<string, string | null>;
   /** Which Codex parent currently has the subagent sheet open. */
@@ -25,12 +36,19 @@ interface State {
   revision: number;
   runtimeEpoch: number;
   scope: string;
-  apply: (root: string, snapshot: SubagentSnapshot, baseline: number) => void;
+  apply: (
+    root: string,
+    snapshot: SubagentSnapshot,
+    baseline: number,
+    observationFence?: number,
+  ) => void;
 }
 export const useSubagentStore = create<State>()(
   persist(
     (set) => ({
       nodes: {},
+      identities: {},
+      identityChecks: {},
       families: {},
       selection: {},
       panelRoot: null,
@@ -38,42 +56,73 @@ export const useSubagentStore = create<State>()(
       revision: 0,
       runtimeEpoch: 0,
       scope: subagentScope(),
-      apply: (root, snapshot, baseline) =>
-        set((s) => ({
-          nodes: Object.fromEntries(
-            Object.entries(
-              reconcileNodes(s.nodes, snapshot.threads, baseline),
-            ).map(([id, node]) => [
-              id,
-              snapshot.unavailableIds?.includes(id) && node.revision <= baseline
-                ? {
-                    ...node,
-                    unavailable: true,
-                    thread: { ...node.thread, canAcceptDirectInput: null },
-                  }
-                : node,
-            ]),
-          ),
-          families: {
-            ...s.families,
-            [root]: {
-              complete: snapshot.complete,
-              checkedAt: snapshot.checkedAt,
-              loading: false,
-              error: snapshot.errors.join("；") || undefined,
-            },
-          },
-        })),
+      apply: (root, snapshot, baseline, observationFence) =>
+        set((s) => {
+          const changes = metadataChanges(
+            s,
+            snapshot.threads,
+            baseline,
+            observationFence,
+          );
+          const unavailable = snapshot.unavailableIds ?? [];
+          let nodes = changes.nodes;
+          for (const id of unavailable) {
+            const node = nodes[id];
+            if (
+              node &&
+              node.revision <= baseline &&
+              (nativeObservationFences.get(id) ?? 0) <=
+                (observationFence ?? captureSubagentMetadataFence()) &&
+              (!node.unavailable || node.thread.canAcceptDirectInput !== null)
+            )
+              nodes = {
+                ...nodes,
+                [id]: {
+                  ...node,
+                  unavailable: true,
+                  thread: { ...node.thread, canAcceptDirectInput: null },
+                },
+              };
+          }
+          const family: Family = {
+            complete: snapshot.complete,
+            checkedAt: s.families[root]?.checkedAt ?? snapshot.checkedAt,
+            loading: false,
+            error: snapshot.errors.join("；") || undefined,
+          };
+          const changedFamily = !sameSubagentValue(s.families[root], family);
+          if (
+            nodes === s.nodes &&
+            changes.identities === s.identities &&
+            !changedFamily
+          )
+            return s;
+          return {
+            ...changes,
+            nodes,
+            revision:
+              nodes !== s.nodes && changes.revision === s.revision
+                ? s.revision + 1
+                : changes.revision,
+            families: changedFamily
+              ? {
+                  ...s.families,
+                  [root]: { ...family, checkedAt: snapshot.checkedAt },
+                }
+              : s.families,
+          };
+        }),
     }),
     {
       name: subagentStorageKey(),
-      version: 1,
+      version: 2,
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         nodes: s.nodes,
         selection: s.selection,
         panelRoot: s.panelRoot,
       }),
+      migrate: (saved) => saved,
       merge: (saved, current) => {
         const cached = saved as Partial<State>;
         return {
@@ -81,39 +130,156 @@ export const useSubagentStore = create<State>()(
           scope: subagentScope(),
           revision: 0,
           families: {},
+          identities: {},
+          identityChecks: {},
           stopResults: {},
           panelRoot: cached?.panelRoot ?? null,
           selection: cached?.selection ?? {},
-          nodes: Object.fromEntries(
-            Object.entries(cached?.nodes ?? {}).map(([id, node]) => [
-              id,
-              {
-                ...node,
-                unavailable: true,
-                revision: 0,
-                thread: {
-                  ...node.thread,
-                  status: { type: "notLoaded" },
-                  turns: undefined,
-                  canAcceptDirectInput: null,
-                },
-              },
-            ]),
-          ),
+          nodes: restoreCandidateNodes(cached?.nodes ?? {}),
         };
       },
     },
   ),
 );
+function restoreCandidateNodes(cached: Record<string, SubagentNode>) {
+  const nodes: Record<string, SubagentNode> = {};
+  for (const [id, node] of Object.entries(cached)) {
+    if (
+      !node?.thread ||
+      node.thread.id !== id ||
+      typeof node.parentId !== "string"
+    )
+      continue;
+    // A cached main source proves a communication edge false, but a missing
+    // source cannot prove the child is a main thread. Remaining clues need a read.
+    if (
+      classifySubagentThread(node.thread) === "main" ||
+      !validParentEdge(cached, id, node.parentId)
+    )
+      continue;
+    nodes[id] = {
+      parentId: node.parentId,
+      createdInTurn:
+        typeof node.createdInTurn === "string"
+          ? node.createdInTurn.slice(0, 512)
+          : undefined,
+      objective:
+        typeof node.objective === "string"
+          ? ` ${node.objective.slice(0, 1024)}`.slice(1)
+          : undefined,
+      thread: {
+        ...boundedSubagentThread(node.thread),
+        status: { type: "notLoaded" },
+        turns: undefined,
+        canAcceptDirectInput: null,
+      },
+      verified: false,
+      evidence: "legacy",
+      unavailable: true,
+      revision: 0,
+      metadataRevision: undefined,
+    };
+  }
+  return nodes;
+}
+// A newer live observation must fence older reads even when its fields are
+// unchanged. Keep that ordering separate from UI snapshots and body stores.
+let metadataObservationClock = 0;
+const nativeObservationFences = new Map<string, number>();
+export function captureSubagentMetadataFence() {
+  return metadataObservationClock;
+}
+export function resetSubagentMetadataFences() {
+  metadataObservationClock = 0;
+  nativeObservationFences.clear();
+}
+function metadataChanges(
+  state: State,
+  threads: SubagentThread[],
+  baseline: number,
+  observationFence = captureSubagentMetadataFence(),
+) {
+  // Native identity also leaves a main-thread tombstone, so an older snapshot
+  // or replayed spawn cannot resurrect the removed observation node.
+  const accepted = threads.filter(
+    (thread) =>
+      typeof thread?.id === "string" &&
+      (state.identities[thread.id]?.revision ?? -1) <= baseline &&
+      (nativeObservationFences.get(thread.id) ?? 0) <= observationFence,
+  );
+  let nodes = reconcileNodes(state.nodes, accepted, baseline);
+  let identities = state.identities;
+  const revision = state.revision + 1;
+  for (const raw of accepted) {
+    const {
+      turns: _turns,
+      preview: _preview,
+      status: _status,
+      ...thread
+    } = boundedSubagentThread(raw);
+    const previous = identities[thread.id];
+    if (
+      !sameSubagentValue(previous?.thread, thread) ||
+      previous?.runtimeEpoch !== state.runtimeEpoch
+    ) {
+      identities = {
+        ...identities,
+        [thread.id]: { thread, revision, runtimeEpoch: state.runtimeEpoch },
+      };
+    }
+    const node = nodes[thread.id];
+    if (
+      node &&
+      classifySubagentThread(thread) === "child" &&
+      !sameSubagentValue(state.nodes[thread.id], node)
+    ) {
+      nodes = {
+        ...nodes,
+        [thread.id]: { ...node, metadataRevision: revision, revision },
+      };
+    }
+  }
+  return {
+    nodes,
+    identities,
+    revision:
+      nodes !== state.nodes || identities !== state.identities
+        ? revision
+        : state.revision,
+  };
+}
+export function confirmSubagentMetadata(
+  threads: SubagentThread[],
+  baseline = useSubagentStore.getState().revision,
+  observationFence?: number,
+) {
+  if (observationFence === undefined) {
+    // Omission means a current native metadata observation. Read responses
+    // and historical replay always provide the fence captured before reading.
+    for (const thread of threads)
+      if (typeof thread?.id === "string")
+        nativeObservationFences.set(thread.id, ++metadataObservationClock);
+    observationFence = captureSubagentMetadataFence();
+  }
+  useSubagentStore.setState((state) => {
+    const next = metadataChanges(state, threads, baseline, observationFence);
+    return next.nodes === state.nodes && next.identities === state.identities
+      ? state
+      : next;
+  });
+}
 const seenEvents = new WeakSet<object>();
 const seenHistory = new WeakSet<readonly ServerNotification[]>();
 /** Snapshots are immutable; unrelated session updates reuse the same array. */
 export function observeSubagentHistory(events: readonly ServerNotification[]) {
   if (seenHistory.has(events)) return;
   seenHistory.add(events);
-  for (const event of events) observeSubagents(event);
+  for (const event of events) observeSubagents(event, true);
 }
-export function observeSubagents(event: ServerNotification) {
+export function observeSubagents(
+  event: ServerNotification,
+  historical = false,
+) {
   if (seenEvents.has(event)) return;
   seenEvents.add(event);
   const p = event.params as any;
@@ -127,28 +293,50 @@ export function observeSubagents(event: ServerNotification) {
     thread: any = {},
   ) => {
     const old = nodes[id];
+    if (
+      !validParentEdge(nodes, id, old?.verified ? old.parentId : parent) ||
+      classifySubagentThread(state.identities[id]?.thread ?? { id }) === "main"
+    )
+      return;
+    const next: SubagentNode = {
+      ...old,
+      ...data,
+      unavailable: historical
+        ? (old?.unavailable ?? true)
+        : (old?.unavailable ?? false),
+      parentId: old?.verified ? old.parentId : parent,
+      revision: historical && old ? old.revision : revision,
+      verified: data.verified ?? old?.verified ?? false,
+      evidence: data.evidence ?? old?.evidence ?? "created",
+      thread: boundedSubagentThread(
+        historical && old?.verified
+          ? { ...thread, ...old.thread, id }
+          : { ...old?.thread, ...thread, id },
+      ),
+    };
+    if (old && sameSubagentValue(old, { ...next, revision: old.revision }))
+      return;
     nodes = {
       ...nodes,
-      [id]: {
-        ...old,
-        ...data,
-        unavailable: false,
-        parentId: parent,
-        revision,
-        verified: data.verified ?? old?.verified ?? false,
-        thread: { ...old?.thread, ...thread, id },
-      },
+      [id]: next,
     };
   };
   if (event.method === "thread/started") {
-    const parent = subagentParent(p.thread);
-    if (parent)
-      update(
-        p.thread.id,
-        parent,
-        { verified: true },
-        normalizeSubagentThread(p.thread),
-      );
+    if (typeof p.thread?.id !== "string") return;
+    if (historical && state.identities[p.thread.id]) return;
+    confirmSubagentMetadata(
+      [
+        {
+          ...p.thread,
+          ...(historical && p.thread.canAcceptDirectInput === true
+            ? { canAcceptDirectInput: null }
+            : {}),
+        },
+      ],
+      undefined,
+      historical ? captureSubagentMetadataFence() : undefined,
+    );
+    return;
   } else if (
     event.method === "item/started" ||
     event.method === "item/completed"
@@ -159,6 +347,8 @@ export function observeSubagents(event: ServerNotification) {
         ...(item.receiverThreadIds ?? []),
         ...Object.keys(item.agentsStates ?? {}),
       ])) {
+        // Communication, waiting, resuming and closing are not creation evidence.
+        if (item.tool !== "spawnAgent" && !nodes[id]) continue;
         const parent = nodes[id]?.parentId ?? item.senderThreadId ?? p.threadId;
         const status = item.agentsStates?.[id]?.status;
         update(
@@ -168,13 +358,18 @@ export function observeSubagents(event: ServerNotification) {
             ...(item.tool === "spawnAgent"
               ? {
                   createdInTurn: nodes[id]?.createdInTurn ?? p.turnId,
-                  objective: item.prompt ?? undefined,
+                  objective:
+                    typeof item.prompt === "string"
+                      ? ` ${item.prompt.slice(0, 1024)}`.slice(1)
+                      : undefined,
                 }
               : {}),
           },
           {
-            ...(item.model ? { model: item.model } : {}),
-            ...(item.reasoningEffort
+            ...(item.tool === "spawnAgent" && item.model
+              ? { model: item.model }
+              : {}),
+            ...(item.tool === "spawnAgent" && item.reasoningEffort
               ? { reasoningEffort: item.reasoningEffort }
               : {}),
             ...(!nodes[id]?.verified && status
@@ -194,7 +389,7 @@ export function observeSubagents(event: ServerNotification) {
       }
     } else if (item.type === "subAgentActivity") {
       const id = item.agentThreadId;
-      if (typeof id === "string")
+      if (typeof id === "string" && (item.kind === "started" || nodes[id]))
         update(id, nodes[id]?.parentId ?? p.threadId, {
           ...(item.kind === "started"
             ? { createdInTurn: nodes[id]?.createdInTurn ?? p.turnId }

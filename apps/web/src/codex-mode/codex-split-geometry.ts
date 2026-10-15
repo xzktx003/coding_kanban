@@ -59,9 +59,9 @@ export function codexNativeFrames(boxes: readonly CodexPaneBox[]): NativeSurface
   return boxes.flatMap((box) => box.windowId ? [{
     id: box.windowId,
     x: box.x,
-    y: box.y + 40,
+    y: box.y + 44,
     width: box.width,
-    height: Math.max(1, box.height - 40),
+    height: Math.max(1, box.height - 44),
   }] : []);
 }
 

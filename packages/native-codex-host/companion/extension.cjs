@@ -55,6 +55,8 @@ function activationStatus(opened) {
       tabs: group.tabs.map(tab => ({ label: tab.label, active: tab.isActive, uri: tab.input?.uri?.toString(), viewType: tab.input?.viewType })) })) };
 }
 async function activate(context) {
+  const startedAt = Date.now();
+  const startup = { officialActivationMs: null, instanceReadyMs: null, panelOpenMs: null };
   context.subscriptions.push({ dispose: restoreProviderRegistrationCapture });
   const config = secureRead(process.env.NATIVE_CODEX_COMPANION_CONFIG);
   if (!Number.isInteger(config.port) || config.port < 1024 || config.port > 65535) throw new Error('private companion port invalid');
@@ -69,17 +71,23 @@ async function activate(context) {
   const autoOpenFixtures = { enabled: config.autoOpenFixtures === true, state: config.autoOpenFixtures === true ? 'pending' : 'disabled' };
   const newChatWindows = Object.freeze((config.newChatWindowIds ?? []).slice());
   const autoOpenNewChats = { enabled: config.autoOpenNewChats === true, state: config.autoOpenNewChats === true ? 'pending' : 'disabled' };
+  let finishStartup;
+  const startupPanelsReady = new Promise(resolve => { finishStartup = resolve; });
+  if (!autoOpenFixtures.enabled && !autoOpenNewChats.enabled) finishStartup(true);
   if (autoOpenFixtures.enabled) validateFixturePanels(fixtures);
   if (autoOpenNewChats.enabled) validateNewChatPanels(newChatWindows);
-  let disposed = false; const commandDisposables = []; let ownedServer; let sender; let instanceServer; let instanceMarker; let instanceRegistryFile;
+  let disposed = false; const commandDisposables = []; let ownedServer; let sender; let instanceServer; let instanceMarker; let instanceRegistryFile; let ownedReadyFile;
   const assertActive = () => { if (disposed) throw new Error('companion instance disposed'); };
-  disposeActivation = () => { disposed = true; restoreProviderRegistrationCapture(); sender?.dispose(); for (const item of commandDisposables) item.dispose(); instanceMarker?.dispose(); instanceServer?.close(); if (instanceRegistryFile) { try { fs.unlinkSync(instanceRegistryFile); } catch {} } ownedServer?.close(); if (server === ownedServer) server = null; };
+  disposeActivation = () => { disposed = true; finishStartup(false); restoreProviderRegistrationCapture(); sender?.dispose(); for (const item of commandDisposables) item.dispose(); instanceMarker?.dispose(); if (ownedReadyFile) { try { const value = JSON.parse(fs.readFileSync(ownedReadyFile, 'utf8')); if (value.broker?.instanceId === instanceId) fs.unlinkSync(ownedReadyFile); } catch {} } instanceServer?.close(); if (instanceRegistryFile) { try { fs.unlinkSync(instanceRegistryFile); } catch {} } ownedServer?.close(); if (server === ownedServer) server = null; };
   context.subscriptions.push({ dispose: disposeActivation });
   const instanceId = crypto.randomUUID();
   const broker = { enabled: false, scope: 'first-listener-instance', pid: process.pid, instanceId };
   const official = vscode.extensions.getExtension('openai.chatgpt');
   const officialActiveAtActivation = Boolean(official?.isActive);
   let activationError = null;
+  let sendBridge = { officialActiveAtModuleLoad, officialActiveAtActivation };
+  let sendReason = 'official Codex extension is still activating';
+  const activateOfficial = async () => {
   if (official) {
     try { await official.activate(); } catch (error) { activationError = String(error.message); }
     finally { restoreProviderRegistrationCapture(); }
@@ -88,6 +96,7 @@ async function activate(context) {
         receiptFile: path.join(path.dirname(process.env.NATIVE_CODEX_COMPANION_CONFIG), 'companion-send-receipts.json') });
     }
   }
+  startup.officialActivationMs = Date.now() - startedAt;
   capturedProvider ??= preloadedBridge?.provider;
   if (!sender && !activationError && capturedProvider) {
     sender = createNativeAppServerSender({ provider: capturedProvider, officialVersion: official?.packageJSON?.version, vscode,
@@ -95,7 +104,7 @@ async function activate(context) {
   }
   registrationCallCount = preloadedBridge?.registrationCallCount ?? registrationCallCount;
   const observedViewTypes = preloadedBridge?.registeredViewTypes ?? registeredViewTypes;
-  const sendBridge = {
+  sendBridge = {
     officialActiveAtModuleLoad,
     officialActiveAtActivation,
     preloadInstalled: Boolean(preloadedBridge),
@@ -111,10 +120,11 @@ async function activate(context) {
     providerCaptured: Boolean(capturedProvider),
     officialExportKeys: Object.keys(official?.exports ?? {}).slice(0, 16),
   };
-  const sendReason = sender?.reason ?? (!official ? 'official Codex extension is unavailable' : activationError ? 'official Codex extension activation failed' :
+  sendReason = sender?.reason ?? (!official ? 'official Codex extension is unavailable' : activationError ? 'official Codex extension activation failed' :
     officialActiveAtModuleLoad ? 'official extension was active before the companion module loaded' :
     officialActiveAtActivation ? 'official extension was active before the companion activated' :
     capturedProvider ? 'official app-server bridge is unavailable' : 'official custom editor provider registration was not captured');
+  };
   if (disposed) { sender?.dispose(); return; }
   const remember = results => { opened.push(...results); while (opened.length > 32) opened.shift(); };
   const openCapturedPanels = async (openPanels, identities) => {
@@ -139,9 +149,9 @@ async function activate(context) {
     const supplied = Buffer.from(request.headers.authorization || ''); const expected = Buffer.from(`Bearer ${config.token}`);
     if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return send(401, { error: 'unauthorized' });
     if (disposed) return send(503, { error: 'companion instance disposed' });
-    if (request.method === 'GET' && request.url === '/status') return send(200, { ...activationStatus(opened), activationError, broker, instanceBroker: { enabled: Boolean(instanceServer?.listening), instanceId }, autoOpenFixtures, autoOpenNewChats, sendBridge,
+    if (request.method === 'GET' && request.url === '/status') return send(200, { ...activationStatus(opened), activationError, startup, broker, instanceBroker: { enabled: Boolean(instanceServer?.listening), instanceId }, autoOpenFixtures, autoOpenNewChats, sendBridge,
       sendAvailable: sender?.available === true, ...(sender?.available ? {} : { sendReason }) });
-    if (request.method !== 'POST' || !['/open', '/restore', '/resume', '/resume-beside', '/new-beside', '/focus', '/send', '/release'].includes(request.url)) return send(404, { error: 'unsupported operation' });
+    if (request.method !== 'POST' || !['/open', '/restore', '/resume', '/resume-beside', '/new-beside', '/focus', '/send', '/release', '/theme'].includes(request.url)) return send(404, { error: 'unsupported operation' });
     const releasing = request.url === '/release';
     if (releasing && (!instanceServer?.listening || request.socket.localPort !== instanceServer.address()?.port)) return send(404, { error: 'unsupported operation' });
     const restoringNewChat = request.url === '/restore';
@@ -149,11 +159,12 @@ async function activate(context) {
     const resumingBeside = request.url === '/resume-beside';
     const openingNewBeside = request.url === '/new-beside';
     const focusing = request.url === '/focus';
+    const applyingTheme = request.url === '/theme';
     const sending = request.url === '/send';
     if (sending && !sender?.available) return send(503, { error: 'native Codex send is unavailable' });
     if (restoringNewChat && !autoOpenNewChats.enabled) return send(404, { error: 'unsupported operation' });
-    if (!resumingBeside && !openingNewBeside && !focusing && !releasing && opening) return send(409, { error: 'panel opening in progress' });
-    if (!resumingBeside && !openingNewBeside && !focusing && !releasing) opening = true;
+    if (!resumingBeside && !openingNewBeside && !focusing && !releasing && !applyingTheme && opening) return send(409, { error: 'panel opening in progress' });
+    if (!resumingBeside && !openingNewBeside && !focusing && !releasing && !applyingTheme) opening = true;
     let pendingThreadId; let pendingWindowId;
     let body = ''; request.setTimeout(5000, () => request.destroy());
     const bodyDeadline = setTimeout(() => request.destroy(), 5000);
@@ -179,12 +190,16 @@ async function activate(context) {
         if (openingThreads.has(validated.threadId)) { send(409, { error: 'this conversation is already opening' }); return; }
         pendingThreadId = validated.threadId;
         openingThreads.add(pendingThreadId);
+        if (!(await startupPanelsReady)) return send(503, { error: 'native startup panels unavailable' });
+        assertActive();
       }
       if (openingNewBeside) {
         const validated = validateNewChatBeside(input);
         if (openingNewWindows.has(validated.windowId)) { send(409, { error: 'this new chat is already opening' }); return; }
         pendingWindowId = validated.windowId;
         openingNewWindows.add(pendingWindowId);
+        if (!(await startupPanelsReady)) return send(503, { error: 'native startup panels unavailable' });
+        assertActive();
       }
       if (restoringNewChat) {
         const result = await restoreNewChatThread(vscode, input, newChatWindows);
@@ -207,6 +222,13 @@ async function activate(context) {
       } else if (focusing) {
         const result = await focusNativeWindow(vscode, input);
         send(200, result);
+      } else if (applyingTheme) {
+        if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).join(',') !== 'theme' ||
+          (input.theme !== 'light' && input.theme !== 'dark'))
+          return send(400, { error: 'native Codex theme must be light or dark' });
+        const colorTheme = input.theme === 'dark' ? 'Default Dark Modern' : 'Default Light Modern';
+        await vscode.workspace.getConfiguration().update('workbench.colorTheme', colorTheme, vscode.ConfigurationTarget.Global);
+        send(200, { applied: true, theme: input.theme });
       } else if (sending) {
         send(200, await sender.send(input));
       } else {
@@ -214,7 +236,7 @@ async function activate(context) {
         send(200, result);
       }
     } catch (error) { send(Number.isInteger(error.statusCode) ? error.statusCode : 400, { error: String(error.message).slice(0, 240) }); }
-    finally { clearTimeout(bodyDeadline); clearTimeout(executionDeadline); if (pendingThreadId) openingThreads.delete(pendingThreadId); if (pendingWindowId) openingNewWindows.delete(pendingWindowId); if (!resumingBeside && !openingNewBeside && !focusing && !releasing) opening = false; }
+    finally { clearTimeout(bodyDeadline); clearTimeout(executionDeadline); if (pendingThreadId) openingThreads.delete(pendingThreadId); if (pendingWindowId) openingNewWindows.delete(pendingWindowId); if (!resumingBeside && !openingNewBeside && !focusing && !releasing && !applyingTheme) opening = false; }
   };
   server = http.createServer(handleBrokerRequest);
   ownedServer = server;
@@ -238,16 +260,6 @@ async function activate(context) {
       broker.disabledReason = 'address-in-use';
     }
     if (disposed) return;
-    for (const [autoOpen, openPanels] of [[autoOpenFixtures, openCapturedFixtures], [autoOpenNewChats, openCapturedNewChats]]) {
-      if (!autoOpen.enabled) continue;
-      if (activationError || !official?.isActive) {
-        autoOpen.state = 'failed'; autoOpen.error = 'official extension activation unavailable';
-      } else {
-        autoOpen.state = 'opening';
-        try { await openPanels(); autoOpen.state = disposed ? 'cancelled' : 'completed'; }
-        catch (error) { autoOpen.state = disposed ? 'cancelled' : 'failed'; autoOpen.error = String(error.message).slice(0, 240); }
-      }
-    }
     if (disposed) return;
     const directory = path.dirname(process.env.NATIVE_CODEX_COMPANION_CONFIG);
     instanceServer = http.createServer(handleBrokerRequest);
@@ -269,18 +281,51 @@ async function activate(context) {
       instanceMarker.tooltip = 'Coding Kanban native control';
       instanceMarker.show();
     }
+    startup.instanceReadyMs = Date.now() - startedAt;
     const activatedAt = new Date().toISOString();
     // Per-instance diagnostics contain flags/counts only; a disabled instance must not overwrite owner readiness.
     fs.writeFileSync(path.join(directory, `companion-instance-${process.pid}-${instanceId}.json`), JSON.stringify({
-      pid: process.pid, activatedAt, companionActive: true, brokerEnabled: broker.enabled,
+      pid: process.pid, activatedAt, startup, companionActive: true, brokerEnabled: broker.enabled,
       brokerDisabledReason: broker.disabledReason ?? null, fixtureCount: fixtures.length,
       autoOpenFixturesEnabled: autoOpenFixtures.enabled, autoOpenFixturesState: autoOpenFixtures.state,
       newChatWindowCount: newChatWindows.length, autoOpenNewChatsEnabled: autoOpenNewChats.enabled, autoOpenNewChatsState: autoOpenNewChats.state
     }, null, 2), { mode: 0o600, flag: 'wx' });
-    if (broker.enabled) fs.writeFileSync(path.join(directory, 'companion-ready.json'), JSON.stringify({
-      pid: process.pid, activatedAt, ...activationStatus(opened), activationError, broker, autoOpenFixtures, autoOpenNewChats,
+    if (broker.enabled) { ownedReadyFile = path.join(directory, 'companion-ready.json'); fs.writeFileSync(ownedReadyFile, JSON.stringify({
+      pid: process.pid, activatedAt, startup, ...activationStatus(opened), activationError, broker, autoOpenFixtures, autoOpenNewChats,
       sendAvailable: sender?.available === true, sendBridge, ...(sender?.available ? {} : { sendReason })
-    }, null, 2), { mode: 0o600 });
+    }, null, 2), { mode: 0o600 }); }
+    // vscode.openWith can wait for this extension's activation to complete.
+    // Publish the private instance first and finish activation before awaiting editors.
+    void Promise.resolve().then(async () => {
+      if (disposed) return;
+      await activateOfficial();
+      if (disposed) { sender?.dispose(); return; }
+      const panelStarted = Date.now();
+    for (const [autoOpen, openPanels] of [[autoOpenFixtures, openCapturedFixtures], [autoOpenNewChats, openCapturedNewChats]]) {
+      if (!autoOpen.enabled) continue;
+      if (activationError || !official?.isActive) {
+        autoOpen.state = 'failed'; autoOpen.error = 'official extension activation unavailable';
+      } else {
+        autoOpen.state = 'opening';
+        try { await openPanels(); autoOpen.state = disposed ? 'cancelled' : 'completed'; }
+        catch (error) { autoOpen.state = disposed ? 'cancelled' : 'failed'; autoOpen.error = String(error.message).slice(0, 240); }
+      }
+    }
+      startup.panelOpenMs = Date.now() - panelStarted;
+      finishStartup([autoOpenFixtures, autoOpenNewChats].every(item => !item.enabled || item.state === 'completed'));
+      if (disposed) return;
+      const diagnosticsFile = path.join(directory, `companion-instance-${process.pid}-${instanceId}.json`);
+      const diagnostics = JSON.parse(fs.readFileSync(diagnosticsFile, 'utf8'));
+      fs.writeFileSync(diagnosticsFile, JSON.stringify({ ...diagnostics, startup,
+        autoOpenFixturesState: autoOpenFixtures.state, autoOpenNewChatsState: autoOpenNewChats.state }, null, 2), { mode: 0o600 });
+      if (broker.enabled) fs.writeFileSync(path.join(directory, 'companion-ready.json'), JSON.stringify({
+        pid: process.pid, activatedAt, startup, ...activationStatus(opened), activationError, broker, autoOpenFixtures, autoOpenNewChats,
+        sendAvailable: sender?.available === true, sendBridge, ...(sender?.available ? {} : { sendReason })
+      }, null, 2), { mode: 0o600 });
+    }).catch(error => {
+      finishStartup(false);
+      if (!disposed) console.error('Native Codex startup diagnostics failed:', String(error.message).slice(0, 240));
+    });
   } catch (error) {
     disposeActivation();
     throw error;

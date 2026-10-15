@@ -361,7 +361,7 @@ test("mobile tap and keyboard layout scrolls do not cancel following latest", as
   await page.setViewportSize({ width: 375, height: 480 });
   await expect.poll(remaining).toBeLessThan(5);
   await editor.fill("手机发送回归测试");
-  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await page.getByRole("button", { name: "发送消息", exact: true }).click();
   await page.setViewportSize({ width: 375, height: 812 });
   await expect.poll(remaining).toBeLessThan(5);
   // Actual vertical finger movement keeps control with the history reader.

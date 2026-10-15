@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { installSessionUxFixture } from "./session-ux-fixture";
+import { composerAction } from "./session-composer-actions";
 
 async function setup(page: Page) {
   const fixture = await installSessionUxFixture(page, 2);
@@ -24,7 +25,14 @@ async function setup(page: Page) {
 
 test("navigation, refresh and explicit synchronization remain read-only; draft survives", async ({page}) => {
   const f=await setup(page);
-  await expect(page.locator("[data-codex-access=readonly]")).toBeVisible();
+  await expect.poll(() => page.evaluate(async () => {
+    const path = "/src/session-mode/stores/useCodexAccessStore.ts";
+    const resources = performance.getEntriesByType("resource");
+    const mounted = resources.findLast(entry => new URL(entry.name).pathname === path)?.name ?? path;
+    const { useCodexAccessStore } = await import(mounted);
+    return useCodexAccessStore.getState().entries["ux-0"]?.access?.state;
+  })).toBe("readonly");
+  await expect(page.locator("[data-codex-access=readonly]")).toHaveCount(0);
   await f.editor.fill("交接前保留的草稿");
   await page.locator('[role=tab][data-tab-key="codex:ux-1"]').click();
   await page.locator('[role=tab][data-tab-key="codex:ux-0"]').click();
@@ -43,13 +51,20 @@ test("navigation, refresh and explicit synchronization remain read-only; draft s
 test("manual release waits for confirmation and never interrupts", async ({page}) => {
   const f=await setup(page);
   await f.editor.fill("释放时也保留草稿");
-  await page.getByRole("button",{name:"当前会话的更多操作",exact:true}).click();
+  await composerAction(page, "当前会话的更多操作");
   await page.getByRole("menuitem",{name:"释放给其他客户端",exact:true}).click();
   await expect(page.locator("[data-codex-access=releasing]")).toContainText("等待原生服务");
   expect(f.requests.filter(r=>r.release)).toEqual([{threadId:"ux-0",release:true}]);
   await expect(f.editor).toHaveText("释放时也保留草稿");
   f.access.state="readonly";f.access.reason="";
-  await expect(page.locator("[data-codex-access=readonly]")).toBeVisible();
+  await expect.poll(() => page.evaluate(async () => {
+    const path = "/src/session-mode/stores/useCodexAccessStore.ts";
+    const resources = performance.getEntriesByType("resource");
+    const mounted = resources.findLast(entry => new URL(entry.name).pathname === path)?.name ?? path;
+    const { useCodexAccessStore } = await import(mounted);
+    return useCodexAccessStore.getState().entries["ux-0"]?.access?.state;
+  })).toBe("readonly");
+  await expect(page.locator("[data-codex-access=readonly]")).toHaveCount(0);
   expect(f.fixture.calls.filter(c=>/turn\/(interrupt|start)|thread\/resume/.test(c.path))).toEqual([]);
   expect(f.errors).toEqual([]);
 });
@@ -58,9 +73,10 @@ test("background resource holds and external ownership remain explanatory, prese
   const f=await setup(page);
   await f.editor.fill("尚未发送的完整内容");
   f.access.state="owned";f.access.reason="会话仍有后台终端，释放会结束这些进程";
-  await page.getByRole("button",{name:"当前会话的更多操作",exact:true}).click();
+  await composerAction(page, "当前会话的更多操作");
   await page.getByRole("menuitem",{name:"释放给其他客户端",exact:true}).click();
-  await expect(page.locator("[data-codex-access=owned]")).toContainText("后台终端");
+  await expect(page.getByText("会话仍有后台终端，释放会结束这些进程", { exact: true })).toBeVisible();
+  await expect(page.locator("[data-codex-access=owned]")).toHaveCount(0);
   f.access.state="external";
   await expect(page.locator("[data-codex-access=external]")).toContainText("其他客户端占用");
   await expect(f.editor).toHaveText("尚未发送的完整内容");

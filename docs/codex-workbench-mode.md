@@ -1,14 +1,22 @@
 # Codex 工作台模式
 
-应用提供会话、终端和独立 Codex 三种模式。Codex 模式默认只展示一个原生窗口；选择项目中的历史会话会追加窗口，可在专注和分屏之间切换，每个窗口保留官方插件自己的输入框。原生适配位于 `apps/web/src/codex-mode`，不替换会话模式的 renderer、草稿或 Agent 状态。顶栏的三个模式按钮直接切换；`?mode=codex` 可以直接进入，本设备保存选择，三个工作区访问后保留挂载状态。
+伴随扩展实例标记早于 VS Code 完成原编辑器布局恢复，因此该标记不直接开放打开/聚焦操作。surface 读取原生 `code/didStartWorkbench` 时间点，并监听 PerformanceObserver mark 事件；完成后才发布实例身份，隐藏时停止观察。缺失原生完成标记时保留未就绪状态，不猜测已经恢复；普通性能 API 和记录保持。此屏障计入普通刷新耗时，不能排除后声称两秒达标。
+
+原生打开回执按精确 URI 的当前 tab 组回报列号，不能把 `vscode.openWith` 之前预留的空组列号当成最终位置；恢复时该空组可能已被 VS Code 移除。已有未选中的新聊天聚焦原组，重复身份拒绝操作。此回执只用于定位，不能替代 composer、目标及原生焦点就绪验收。
+
+应用提供会话、终端和独立 Codex 三种模式。Codex 模式使用与会话模式相同的自由分屏：窗口组可左右或上下嵌套，拖标签到边缘分屏，拖分隔线调整比例。每个窗格只显示当前标签对应的原生窗口，每个窗口保留官方插件自己的输入框。手机只显示当前窗口组，并用窗口组菜单切换。原生适配位于 `apps/web/src/codex-mode`，不替换会话模式的 renderer、草稿或 Agent 状态。顶栏的三个模式按钮直接切换；`?mode=codex` 可以直接进入，本设备保存选择，三个工作区访问后保留挂载状态。
 
 ## 实现边界
 
+普通刷新与再次进入的 [恢复计划](designs/codex-mode-audit-20261014/refresh-recovery-plan.md) 已执行阶段 0：增加独立、版本/哈希门控的私有连接原型，通过真实匹配 CLI 和原版插件验证连接；页面性能关卡失败，正式入口仍保持现有路径。后台进程保留不等于官方本地页面已恢复，不宣称 10 项 LRU、独立草稿或 2 秒操作已支持。原型与未完成项见 [阶段 0 验收](designs/codex-mode-audit-20261014/refresh-recovery-stage0.md)。
+
 按官方插件逐项跟踪的功能范围、证据和未闭合项见 [Codex 插件对照清单](codex-plugin-parity.md)。只有隔离真实浏览器操作、截图和对应回归都完成后，矩阵状态才可标为已验收。
 
-未修改的官方 VSIX 由 `packages/native-codex-host` 的独立 code-server 宿主运行。自有伴随扩展默认不自动打开面板。`--auto-open-fixtures` 打开两个隔离 fixture；`--auto-open-new-chats` 打开两份独立原生新聊天面板，后者与 fixture 启动参数互斥。新聊天采用白名单窗口 UUID 的 query URI，避免原插件固定新建 URI 被编辑器去重；输入与发送仍交给原插件。原版插件和伴随扩展单独安装，后续升级官方插件需要重新核对命令、DOM 与协议契约。
+未修改的官方 VSIX 由 `packages/native-codex-host` 的独立 code-server 宿主运行。自有伴随扩展默认不自动打开面板。`--auto-open-fixtures` 打开两个隔离 fixture；`--auto-open-new-chats` 启动时只打开一份原生新聊天，更多聊天由 `+ 新聊天` 追加。后者与 fixture 启动参数互斥。已有两份启动窗口的旧运行记录仍可恢复。新聊天采用白名单窗口 UUID 的 query URI，避免原插件固定新建 URI 被编辑器去重；输入与发送仍交给原插件。原版插件和伴随扩展单独安装，后续升级官方插件需要重新核对命令、DOM 与协议契约。
 
-Node 网关只从本机环境配置读取上游和 owned0600 运行记录。`GET /api/native-codex/status` 返回可用状态、版本、界面 URL、fixture 标识和不含凭证的 `resumeAvailable`；只有上游与原生伴随扩展 broker 都就绪时才开放 Resume。私有 broker 凭证不进入浏览器。`/native-codex/` 提供同源 HTTP/WebSocket 代理，校验浏览器 Origin 与实际 Host；原生路由使用独立方向限制：浏览器发来的单消息及待发队列各 8 MiB，宿主返回的单消息及浏览器待发缓冲各 2 MiB（上游连接完成后，待发达到 256 KiB 即暂停继续接收；握手期间队列也有 8 MiB 上限），保留终端既有接收限制。此上游无子协议需求，因此带子协议的握手明确拒绝。HTTPS Vite 转发保留 Host 并传递协议。
+Node 网关只从本机环境配置读取上游和 owned0600 运行记录。`GET /api/native-codex/status` 返回可用状态、版本、界面 URL、fixture 标识和不含凭证的 `resumeAvailable`；只有上游与原生伴随扩展 broker 都就绪时才开放 Resume。私有 broker 凭证不进入浏览器。`/native-codex/` 提供同源 HTTP/WebSocket 代理，校验浏览器 Origin 与实际 Host。只有版本哈希路径 `GET /native-codex/stable-<40位十六进制>/static/` 下白名单脚本、样式、字体、图片及 WASM，在 HTTP 200 且 MIME 匹配时可补一年 immutable；拒绝目录穿越、非预期 query、Set-Cookie、按认证变化的 Vary，并保留上游 private/no-store/no-cache。HTML、错误页、接口、WebSocket 和未哈希路径不加入该静态缓存。浏览器只在 sessionStorage 记住上一次校验通过的同源 iframe 路径，状态返回前即可挂载；地址变化会替换，加载失败或服务不可用会丢掉缓存。原生路由使用独立方向限制：浏览器发来的单消息及待发队列各 8 MiB，宿主返回的单消息及浏览器待发缓冲各 2 MiB（上游连接完成后，待发达到 256 KiB 即暂停继续接收；握手期间队列也有 8 MiB 上限），保留终端既有接收限制。此上游无子协议需求，因此带子协议的握手明确拒绝。HTTPS Vite 转发保留 Host 并传递协议。
+
+Codex 左侧项目栏复用会话模式的视觉结构：搜索、可折叠项目和项目下的会话行。它只读取 Codex 自己的项目和 thread 列表；展开、搜索和打开都留在 Codex 模式，不写入会话模式的项目、当前线程或关注标签。删除、归档、重命名和移除项目不在这个侧栏提供。顶栏的太阳/月亮读写会话模式同一份 `kanban.session.theme-storage`。`.session-mode` 与 `.codex-mode` 同时切换 `light`/`dark`，外壳使用同一套默认色板。原生编辑器通过伴随扩展只接受 `light` 或 `dark`，分别设置 `Default Light Modern` 与 `Default Dark Modern`；官方 VSIX 不修改。宿主尚未连接时外壳先变，连接后补发一次。
 
 Codex 页面只展示原生 webview 窗口：自有适配样式隐藏宿主 IDE 外框、按窗口数量铺开。原生 iframe、父节点与 MessagePort 保持原位，既不复制 webview 正文也不修改插件。后台仍加载 IDE 运行框架，因此不承诺它与独立聊天页具有相同内存成本。隐藏模式暂停 DOM 观察器，保留原生 iframe；进入 Codex 模式后只在伴随扩展就绪前以 500ms 间隔有限轮询，最多 120 次；就绪、隐藏或重试会结束／取消该轮询。
 
@@ -18,7 +26,7 @@ Surface 只把父容器仍在视口内的官方 webview 作为窗口，并按屏
 
 项目导航调用既有会话项目接口取得本机项目，再从 Codex 会话服务分页读取各项目的 thread 历史；只展示已校验的本地 Codex 对话，不把子 Agent 或临时项计入会话数。点击一条记录经 `POST /api/native-codex/resume-beside` 打开对应的原生 custom editor；重复点击聚焦已有窗口。`+ 新聊天` 经 `POST /api/native-codex/new-beside` 打开另一份原生编辑器。两条新接口都要求当前浏览器原生宿主的实例 UUID；网关只从 owned0600 的实例记录找到其私有 loopback broker，并把经过 UUID 校验的目标送到该实例。固定 broker 的旧 `/resume`、`/restore` 和版本门控 `/send` 保留兼容，但多窗口界面不使用公共输入或 Session 草稿 store。每个窗口的输入、发送、审批和运行状态由对应官方 webview 处理；关闭工作台标签只移出本设备关注集合，不中断 Agent 或关闭原生标签。窗格标签已经显示会话名、项目和关闭，原生内容就绪后不再覆盖第二条标题或「已就绪」。加载失败仍在窗格内提示并可重试；官方引导和另一实例占用只在角落提示。官方插件自己的标题栏保留。
 
-已有真实 thread UUID 的关注标签由 `GET/POST /api/native-codex/tabs` 在服务实例内跨浏览器、跨设备共享，持久化到 `SESSION_DATA_HOME/codex-followed-threads.json`，不写入会话模式的 `followed-sessions.json`。每个浏览器仍用自己的原生宿主实例按同一 UUID 调用 `resume-beside`；当前选中项、专注／分屏、原生列号和尚未产生 thread UUID 的空白新聊天留在本浏览器 localStorage。另一处关闭正在阅读的标签后，本窗口继续显示并提示「当前会话未关注」。同一 thread 可在多个浏览器同时打开，写入冲突由官方插件处理。旧的本机窗口缓存只由首个连接的浏览器迁移一次。已产生真实 thread UUID 的新聊天会加入共享集合，并以 `/resume-beside` 在其它浏览器打开；空白新聊天才继续用独立 UUID。旧版仅保存启动窗口 UUID→thread UUID 的映射时，`POST /api/native-codex/restore` 仍可按当前可见宿主实例做兼容恢复。原生 iframe、父节点和 MessagePort 不移动；surface 只调整自有样式与观察。实例未识别、窗口未渲染或打开失败时保留局部加载／错误状态与重试入口，其它窗口可继续操作。
+已有真实 thread UUID 的关注标签由 `GET/POST /api/native-codex/tabs` 在服务实例内跨浏览器、跨设备共享，持久化到 `SESSION_DATA_HOME/codex-followed-threads.json`，不写入会话模式的 `followed-sessions.json`。每个浏览器仍用自己的原生宿主实例按同一 UUID 调用 `resume-beside`；当前选中项、自由分屏树、原生列号和尚未产生 thread UUID 的空白新聊天留在本浏览器 localStorage。另一处关闭正在阅读的标签后，本窗口继续显示并提示「当前会话未关注」。同一 thread 可在多个浏览器同时打开，写入冲突由官方插件处理。旧的本机窗口缓存只由首个连接的浏览器迁移一次。已产生真实 thread UUID 的新聊天会加入共享集合，并以 `/resume-beside` 在其它浏览器打开；空白新聊天才继续用独立 UUID。旧版仅保存启动窗口 UUID→thread UUID 的映射时，`POST /api/native-codex/restore` 仍可按当前可见宿主实例做兼容恢复。原生 iframe、父节点和 MessagePort 不移动；surface 只调整自有样式与观察。实例未识别、窗口未渲染或打开失败时保留局部加载／错误状态与重试入口，其它窗口可继续操作。
 
 最新官方插件的两个空白新聊天资源会在创建时复制已有未发送草稿，尽管它们的 editor URI 和 iframe 独立。因此工作台只在所有未提交的新聊天输入框已加载且为空时允许再点 `+ 新聊天`；否则提示先发送草稿。历史 thread 随时可追加，已形成 thread 的窗口可以并行发送。伴随扩展不修改官方插件的 composer。单独启动的 Codex app-server `thread/start` 虽返回 thread UUID，但零轮次不写 rollout，官方插件打开 `/local/<UUID>` 会报 `no rollout found`；此路径不用于新聊天。
 
@@ -76,7 +84,7 @@ Surface 只把父容器仍在视口内的官方 webview 作为窗口，并按屏
 
 启动器增加显式 `--connection-profile-home <绝对目录>`：仅复用用户已授权的现有登录文件、选定模型及该模型服务配置，写入全新 owned0700 `CODEX_HOME` 中的 owned0600 文件。源文件不写入，不复制历史、IPC、MCP、项目权限或其他模型服务；目标已有内容则拒绝。默认不读取用户登录目录。服务引用的环境变量只向子进程传递，不进入状态或运行记录；禁止覆盖 HOME、PATH、shell 初始化及动态库加载变量。状态只公开是否启用和限定登录类型。
 
-`--auto-open-new-chats` 不预先创建 fixture 线程或发送模型任务。两份新聊天通过自身伴随扩展调用原生 `vscode.openWith`，保留原 custom editor、输入器与原生首次引导。伴随扩展命令只允许已捕获的两份窗口身份；HTTP broker 没有新聊天写接口，原有固定 fixture 白名单保持。站点无密码与 Codex 账号登录分别配置，本部署遵循用户无密码要求。
+`--auto-open-new-chats` 不预先创建 fixture 线程或发送模型任务。启动时只捕获并打开一份新聊天，通过自身伴随扩展调用原生 `vscode.openWith`，保留原 custom editor、输入器与原生首次引导。`+ 新聊天` 仍可追加独立窗口。伴随扩展命令只允许已捕获的一或两份窗口身份；HTTP broker 没有新聊天写接口，原有固定 fixture 白名单保持。站点无密码与 Codex 账号登录分别配置，本部署遵循用户无密码要求。
 
 连接导入、服务环境变量隔离、新聊天 URI／互斥／取消与启动器私有记录已有红绿灯回归；两份原生已登录 onboarding 与输入框已在隔离宿主实际显示。真实模型轮次、流式、中断及刷新历史的验收结果单独记录，不能以输入框或预先创建线程替代回复证据。
 
@@ -113,3 +121,24 @@ Codex 模式项目导航复用会话模式的项目索引，并通过会话服�
 此证据只覆盖单项目、单列、单条空闲 thread 的发送闭环，不代表忙碌轮次 queue/steer/replace、多窗口组同步、附件双向同步、重复提交实浏览器场景、正式部署刷新或全部插件能力已闭合。
 
 宿主用户直接运行全量 `pnpm test` 时，会话运行层 187 项中 186 项通过，文件监听用例因主机 `EMFILE: too many open files, watch` 失败；单独以并发 1 重跑该文件仍复现。随后在无网络隔离的 rootful Docker 中，用只读源码挂载、隔离 HOME、遮蔽本机 `.env` 与 `.dev-runtime`、单独临时构建/Vite 缓存目录，并将 workspace 并行度设为 1，完整 `pnpm test` 以 exit 0 通过；末段脚本测试 120 项全通过。没有停止其他服务、改系统限额或放宽断言。最终记录保留两种环境结果：完整套件已在隔离环境通过，宿主用户 watcher 配额仍会阻塞其直接运行。
+
+## 刷新恢复的隔离进度（2026-10-15）
+
+原生首次发送的 thread 发现、启动列竞争与引导遮挡已补充行为回归；Codex 外壳的布局、启动 thread 映射、项目和侧栏宽度使用标签内视图快照，设备存储仅作为新标签初始模板。关注成员同步沿用原契约。该变化不接管官方 composer 的草稿。
+
+`packages/native-codex-host/refresh-prototype` 的私有常驻进程、版本门控独立连接、原生资源探测与 LRU 已有真实原生测试。它们没有接入默认 launcher、网关或正式宿主；已有安装的 companion 也不会随源码测试被替换。创建管理进程退出不结束 native turn；旧代次/PID、已有记录和端点均拒绝隐式接管。配置、组件 API 及测试见 [组件说明](../packages/native-codex-host/refresh-prototype/README.md)。
+
+两秒性能、官方多端草稿、profile、长历史和长期 RSS 关卡仍未通过或未完成。三页草稿试验的失败与后续页面恢复失败分别保留，不改写为多端已支持；在线配置/认证/状态/历史/RPC 不进入静态缓存。详见 [持续进度与证据边界](designs/codex-mode-audit-20261014/refresh-recovery-progress-20261015.md)。
+
+刷新候选的显式 profile 路由已经接入前端和隔离宿主。`nativeClient=<UUID>` 只选择服务端预先注册的宿主，所有原生操作与发送经对应 API；关注集合仍使用公共 journal。缓存地址必须属于同一 profile 的精确入口，布局模板、启动映射与旧实例身份也按 profile 保存；无效或重复选择器拒绝请求，不切回默认宿主。此路径不自动创建 profile，不改变官方 VSIX 或 MessagePort，也未完成两秒/真实多端验收。启动参数、断连宽限期和边界见 [显式隔离启动](../packages/native-codex-host/refresh-prototype/README.md#explicit-private-host-and-client-routing)。
+
+后续隔离试验确认同源不同路径仍共用 code-server 默认 profile 的原生浏览器存储。新增显式独立源监听器，复用同一自有前端 HTTP/2、请求与 WS handler；不增加服务器浏览器或修改官方 bundle。一个 code-server、同一 native thread、三页独立源的已有会话草稿已保持完整输入并分别刷新保留，三个官方 Send 均取得精确原生轮次回执且历史各出现一次；390 px 页只算模拟。刷新到接受仍为 14.627–16.147 秒，批次保留请求失败，完整验收未通过。持久源分配、防端口复用串扰及整体资源准入仍待实现。
+
+用户随后确认以 iPhone 16 尺寸模拟替代实机：393×852/DPR 3、触控及缩小视口已在原生页面验证，系统键盘边界单列。打开回执、错误与超时按宿主实例和数字页面代次校验，实例变化或同实例 iframe 重载清理旧恢复标记；当前选中目标的有效回执才重试焦点，后台打开不抢焦点。等待不保留旧 iframe 文档。相关红绿灯通过后，已有 thread 的三页草稿/官方发送回归保持；后续时间点确认原布局恢复会覆盖早期新聊天打开；以原生 workbench 完成事件门控实例、完成命令后读取精确注册列，已在两个桌面标签与 iPhone 16 尺寸页通过 9 项每端单个空白新聊天的独立草稿及刷新检查。既有同浏览器未发送新聊天限制保持，两秒关卡继续失败，见持续进度。
+
+原生聊天输入现在等待当前宿主实例、窗口及目标的焦点回执，过期回执不能开放另一目标，后台窗格就绪也不再重新聚焦当前输入；无 composer 的官方引导与 Retry 仍可点击。保温管理器收到无 thread ID 的账号变化后停止报告热就绪，阻止迟到协议写入和资源读取后的成功返回，仅关闭自己的连接，不释放或停止原生任务。初始账号身份绑定与全部桥接的授权控制仍未完成。
+
+原生快照现在重新核对当前 iframe 的文档，文档读取失败同步撤销旧 ready/thread，恢复后同一 UUID 可再次发布。一次透明预渲染实验虽缩短诊断时间，但 CSS inert 对已有焦点不能阻止全部原生键盘事件，候选已撤回；产品仍按原隐藏方式工作，不拦截官方输入事件。隔离原生连接仍有实际 2 MiB 大消息兼容失败，关闭清理和有界错误元数据已补回归，不能据此宣布兼容或两秒验收通过。
+
+
+原生内容观察在 portal 的 UUID 与当前历史请求精确相符时直接更新临时身份，不依赖外层 workbench 的另一次 DOM 变化。portal 已就绪后保留最多 64 层直接父链的 childList 观察，支持整体替换；不观察兄弟聊天正文的子树、属性或字符流。原有 30 秒占用观察独立保留，不能用其掩盖之后的结构恢复；暂停、文档更换和异常时释放所有观察及父链引用。此规则只观察官方 DOM，不替换输入、通道或 native API。

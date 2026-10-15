@@ -426,6 +426,7 @@ const EventItemBody = ({
           </code>
         </div>
       );
+    case "thread/closed":
     case "thread/name/updated":
     case "thread/started":
     case "thread/tokenUsage/updated":

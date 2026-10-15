@@ -6,9 +6,13 @@ import { PermissionsItem } from "@session/components/codex/items/PermissionsItem
 import { ElicitationItem } from "@session/components/codex/items/ElicitationItem";
 import { RequestUserInputItem } from "@session/components/codex/items/RequestUserInputItem";
 import { codexService } from "@session/services/codexService";
+import { useCodexThreadInput } from "@session/hooks/useCodexThreadInput";
 import { closeSubagents } from "./service";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
-import { useAgentCenterStore, selectedAgentCard } from "@session/stores/useAgentCenterStore";
+import {
+  useAgentCenterStore,
+  selectedAgentCard,
+} from "@session/stores/useAgentCenterStore";
 import { useSubagentFamily } from "./hooks";
 import type { ChildState } from "./model";
 import { subagentService } from "./service";
@@ -91,6 +95,7 @@ export function SubagentPanel() {
   const timings = useCodexStore((s) => s.turnTimingMap);
   const data = useSubagentFamily(root),
     selected = root ? data.selection[root] : null;
+  const selectedInput = useCodexThreadInput(selected, true);
   const [showAllActive, setShowAllActive] = useState(false);
   const [showAllDone, setShowAllDone] = useState(false);
   const [error, setError] = useState("");
@@ -160,6 +165,7 @@ export function SubagentPanel() {
   const inspected =
     !!selected &&
     verifiedSelection === `${root}:${selected}` &&
+    !!row?.node.verified &&
     !row?.node.unavailable;
   const active = data.rows.filter((item) => !DONE.has(item.state));
   const done = data.rows.filter((item) => DONE.has(item.state));
@@ -171,9 +177,7 @@ export function SubagentPanel() {
   const elapsed = (item: Row) => {
     const timing = timings[item.node.thread.id];
     if (!timing?.startedAtMs) return null;
-    return span(
-      timing.durationMs ?? Math.max(0, clock - timing.startedAtMs),
-    );
+    return span(timing.durationMs ?? Math.max(0, clock - timing.startedAtMs));
   };
   const finishedAgo = (item: Row) => {
     const updated = item.node.thread.updatedAt;
@@ -181,10 +185,7 @@ export function SubagentPanel() {
     return `${span(Math.max(0, clock - updated * 1000))} 前`;
   };
   const preview = (item: Row) => {
-    const text = clip(
-      item.node.objective ?? item.node.thread.preview,
-      60,
-    );
+    const text = clip(item.node.objective ?? item.node.thread.preview, 60);
     if (text) return text;
     if (DONE.has(item.state)) return null;
     if (item.state === "unknown" || item.node.unavailable) return "待确认";
@@ -220,30 +221,34 @@ export function SubagentPanel() {
       </h2>
       {!items.length && empty ? <p>{empty}</p> : null}
       <div className="session-subagent-rows">
-      {(expanded ? items : items.slice(0, limit)).map((item) => {
-        const label = displayName(item);
-        return (
-          <button
-            type="button"
-            className="session-subagent-task"
-            data-subagent-id={item.node.thread.id}
-            key={item.node.thread.id}
-            onClick={() => select(item.node.thread.id)}
-          >
-            <Avatar id={item.node.thread.id} label={label} />
-            <span className="session-subagent-task-copy">
-              <span className="session-subagent-task-line">
-                <strong>{label}</strong>
-                <span>{trailing(item)}</span>
+        {(expanded ? items : items.slice(0, limit)).map((item) => {
+          const label = displayName(item);
+          return (
+            <button
+              type="button"
+              className="session-subagent-task"
+              data-subagent-id={item.node.thread.id}
+              key={item.node.thread.id}
+              onClick={() => select(item.node.thread.id)}
+            >
+              <Avatar id={item.node.thread.id} label={label} />
+              <span className="session-subagent-task-copy">
+                <span className="session-subagent-task-line">
+                  <strong>{label}</strong>
+                  <span>{trailing(item)}</span>
+                </span>
+                {preview(item) ? <small>{preview(item)}</small> : null}
               </span>
-              {preview(item) ? <small>{preview(item)}</small> : null}
-            </span>
-          </button>
-        );
-      })}
+            </button>
+          );
+        })}
       </div>
       {!expanded && items.length > limit ? (
-        <button type="button" className="session-subagent-more" onClick={expand}>
+        <button
+          type="button"
+          className="session-subagent-more"
+          onClick={expand}
+        >
           显示全部{title}
         </button>
       ) : null}
@@ -273,7 +278,7 @@ export function SubagentPanel() {
               aria-label="返回子代理列表"
               onClick={returnList}
             >
-              ←
+              返回子代理列表
             </button>
             <Avatar
               id={selected}
@@ -316,7 +321,7 @@ export function SubagentPanel() {
               <RequestUserInputItem currentThreadId={selected} />
             </div>
           )}
-          {inspected && row?.node.thread.canAcceptDirectInput === true && (
+          {inspected && !selectedInput.blocked && (
             <footer>
               <SubagentInput
                 key={selected}
@@ -326,6 +331,20 @@ export function SubagentPanel() {
               />
             </footer>
           )}
+          {selectedInput.blocked && selectedInput.reason && (
+            <p role="status" className="session-subagent-notice">
+              {selectedInput.reason}
+              {selectedInput.needsVerification && (
+                <button
+                  type="button"
+                  onClick={selectedInput.recheck}
+                  disabled={selectedInput.rechecking}
+                >
+                  重新核对
+                </button>
+              )}
+            </p>
+          )}
         </>
       ) : (
         <div className="session-subagent-list">
@@ -333,33 +352,33 @@ export function SubagentPanel() {
             <h2>子智能体</h2>
           </header>
           <div className="session-subagent-sheet">
-          {(!data.family?.complete || data.family?.error) && (
-            <p role="status" className="session-subagent-notice">
-              {data.family?.loading
-                ? "正在加载最终回复…"
-                : "此子智能体在当前分支上已不可用。"}
-              {data.family?.error ? <small>{data.family.error}</small> : null}
-            </p>
-          )}
-          {section(
-            "已开启",
-            uncertain ? [] : active,
-            4,
-            showAllActive,
-            () => setShowAllActive(true),
-            uncertain ? null : "没有已开启的子代理",
-            waiting ? `${waiting} 个等待中` : undefined,
-          )}
-          {done.length
-            ? section(
-                "完成",
-                done,
-                10,
-                showAllDone,
-                () => setShowAllDone(true),
-                null,
-              )
-            : null}
+            {(!data.family?.complete || data.family?.error) && (
+              <p role="status" className="session-subagent-notice">
+                {data.family?.loading
+                  ? "正在加载最终回复…"
+                  : "此子智能体在当前分支上已不可用。"}
+                {data.family?.error ? <small>{data.family.error}</small> : null}
+              </p>
+            )}
+            {section(
+              "已开启",
+              active,
+              4,
+              showAllActive,
+              () => setShowAllActive(true),
+              uncertain ? null : "没有已开启的子代理",
+              waiting ? `${waiting} 个等待中` : undefined,
+            )}
+            {done.length
+              ? section(
+                  "完成",
+                  done,
+                  10,
+                  showAllDone,
+                  () => setShowAllDone(true),
+                  null,
+                )
+              : null}
           </div>
         </div>
       )}

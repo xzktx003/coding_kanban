@@ -1,4 +1,5 @@
 import { estimateTranscriptBytes } from "../codexTranscriptMemoryBudget";
+import type { SubagentThread } from "@agent-orchestrator/shared";
 import {
   MEMORY_HISTORY_RESTART_CURSOR,
   MEMORY_ITEM_CURSOR,
@@ -410,11 +411,27 @@ export interface CodexAccess {
   reason: string;
   generation: number;
 }
-export function threadAccess(threadId: string, release = false) {
+export function threadAccess(
+  threadId: string,
+  release = false,
+  signal?: AbortSignal,
+) {
   return postJsonWithOptions<CodexAccess>(
     "/api/codex/thread/access",
     { threadId, release },
-    { suppressToast: true },
+    { suppressToast: true, ...(signal ? { signal } : {}) },
+  );
+}
+
+/** Metadata only. Never restores a writer or reads the transcript body. */
+export function threadMetadata(
+  threadId: string,
+  options: { signal?: AbortSignal; suppressToast?: boolean } = {},
+) {
+  return postJsonWithOptions<{ thread: SubagentThread }>(
+    "/api/codex/thread/metadata?view=chat",
+    { threadId },
+    { ...options, suppressToast: options.suppressToast ?? true },
   );
 }
 
@@ -472,9 +489,11 @@ export async function getAccount() {
 }
 
 export async function getAccountWithParams(params: GetAccountParams) {
-  return await postJson<GetAccountResponse & {
-    workspaceRouting?: { chatgptAccountId?: unknown };
-  }>("/api/codex/account/get", params);
+  return await postJson<
+    GetAccountResponse & {
+      workspaceRouting?: { chatgptAccountId?: unknown };
+    }
+  >("/api/codex/account/get", params);
 }
 
 export async function loginAccount(params: LoginAccountParams) {

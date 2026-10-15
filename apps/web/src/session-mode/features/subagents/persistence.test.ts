@@ -68,6 +68,61 @@ it("mentions are isolated and a late receipt preserves references reselected whi
   expect(mentionDrafts.read("b")[0].path).toBe("agent://child");
 });
 
+it("v1 migration removes provable main, self and cycle edges while preserving unknown candidates and selection", async () => {
+  const node = (
+    id: string,
+    parentId: string,
+    thread: Record<string, unknown> = {},
+  ) => ({
+    thread: { id, canAcceptDirectInput: true, ...thread },
+    parentId,
+    verified: true,
+    revision: 500,
+    objective: "x".repeat(20_000),
+  });
+  localStorage.setItem(
+    subagentStorageKey(),
+    JSON.stringify({
+      version: 1,
+      state: {
+        nodes: {
+          main: node("main", "child", {
+            source: "vscode",
+            parentThreadId: null,
+          }),
+          self: node("self", "self"),
+          a: node("a", "b"),
+          b: node("b", "a"),
+          suspect: node("suspect", "root"),
+          child: node("child", "root", { parentThreadId: "root" }),
+        },
+        selection: { root: "suspect" },
+        panelRoot: "root",
+      },
+    }),
+  );
+  localStorage.setItem(
+    "kanban.session.session-drafts",
+    "draft-attachment-card-target-sentinel",
+  );
+  await useSubagentStore.persist.rehydrate();
+  const state = useSubagentStore.getState();
+  expect(Object.keys(state.nodes)).toEqual(["suspect", "child"]);
+  expect(state.nodes.suspect).toMatchObject({
+    verified: false,
+    unavailable: true,
+    evidence: "legacy",
+  });
+  expect(state.nodes.child.thread.canAcceptDirectInput).toBeNull();
+  expect(state.nodes.suspect.objective?.length).toBeLessThanOrEqual(1024);
+  expect(state.identities).toEqual({});
+  expect(state.selection).toEqual({ root: "suspect" });
+  expect(state.panelRoot).toBe("root");
+  expect(localStorage.getItem("kanban.session.session-drafts")).toBe(
+    "draft-attachment-card-target-sentinel",
+  );
+});
+
 it("request markers separate reused native ids without retaining old answer drafts", async () => {
   const { sameRpc } =
     await import("@session/components/codex/stores/rpcLifecycle");

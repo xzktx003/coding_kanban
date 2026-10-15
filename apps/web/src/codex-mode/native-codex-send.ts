@@ -3,6 +3,7 @@ import type {
   FollowupThread,
   NativeInputMention,
 } from "@agent-orchestrator/shared";
+import { nativeClientScope } from "./native-client-scope";
 import type { NativeCodexTarget } from "./native-codex-target";
 
 export function hasPendingSessionFollowups(queue: FollowupThread): boolean {
@@ -24,21 +25,24 @@ export async function sendToNativeCodex(
   input: NativeCodexSend,
   fetcher: typeof fetch = fetch,
 ): Promise<{ accepted: true; turnId: string }> {
-  const response = await fetcher("/api/native-codex/send", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      threadId: input.target.threadId,
-      column: input.target.column,
-      cwd: input.target.cwd,
-      submissionId: input.submissionId,
-      text: input.text,
-      images: input.images,
-      contexts: input.contexts,
-      mentions: input.mentions,
-    }),
-    cache: "no-store",
-  });
+  const response = await fetcher(
+    nativeClientScope(window.location.search).api("send"),
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        threadId: input.target.threadId,
+        column: input.target.column,
+        cwd: input.target.cwd,
+        submissionId: input.submissionId,
+        text: input.text,
+        images: input.images,
+        contexts: input.contexts,
+        mentions: input.mentions,
+      }),
+      cache: "no-store",
+    },
+  );
   let value: unknown;
   try {
     value = await response.json();

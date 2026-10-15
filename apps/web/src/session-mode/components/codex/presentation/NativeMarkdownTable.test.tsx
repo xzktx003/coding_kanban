@@ -42,7 +42,7 @@ it("copies the actual table contents and keeps exports reachable without an extr
   });
   render(<NativeMarkdownTable>{rows}</NativeMarkdownTable>);
   fireEvent.click(screen.getByRole("button", { name: "复制表格" }));
-  await screen.findByRole("button", { name: "已复制" });
+  await screen.findByRole("button", { name: "已复制代码" });
   expect(writeText).toHaveBeenCalledWith(
     '| Name | Value |\n| --- | --- |\n| one, two | "quoted" |\n| last | value |',
   );
@@ -75,7 +75,7 @@ it("does not report a failed table clipboard write as copied", async () => {
     }),
   );
   expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.queryByRole("button", { name: "已复制" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "已复制代码" })).toBeNull();
 });
 
 it("serializes CSV quotes and Markdown pipes from cells rather than rendered controls", () => {
@@ -145,7 +145,7 @@ it("locks repeated default copy requests while permission is pending and shows n
   fireEvent.click(button);
   expect(writeText).toHaveBeenCalledTimes(1);
   await act(async () => finish());
-  fireEvent.click(screen.getByRole("button", { name: "已复制" }));
+  fireEvent.click(screen.getByRole("button", { name: "已复制代码" }));
   expect(writeText).toHaveBeenCalledTimes(1);
 });
 
@@ -221,7 +221,7 @@ it("does not bubble a default copy request into its containing message", async (
     </div>,
   );
   fireEvent.click(screen.getByRole("button", { name: "复制表格" }));
-  await screen.findByRole("button", { name: "已复制" });
+  await screen.findByRole("button", { name: "已复制代码" });
   expect(parent).not.toHaveBeenCalled();
 });
 
@@ -286,7 +286,7 @@ it("keeps copy success when only hint or favicon UI attributes change while perm
   fireEvent.click(screen.getByRole("button", { name: "复制表格" }));
   view.container.querySelector("td")!.setAttribute("data-state", "open");
   await act(async () => finish());
-  expect(screen.queryByRole("button", { name: "已复制" })).not.toBeNull();
+  expect(screen.queryByRole("button", { name: "已复制代码" })).not.toBeNull();
 });
 
 it("does not mark replacement rows copied after an older permission request completes", async () => {
@@ -312,5 +312,5 @@ it("does not mark replacement rows copied after an older permission request comp
     </NativeMarkdownTable>,
   );
   await act(async () => finish());
-  expect(screen.queryByRole("button", { name: "已复制" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "已复制代码" })).toBeNull();
 });

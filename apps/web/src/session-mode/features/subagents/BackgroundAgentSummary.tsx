@@ -178,7 +178,7 @@ export function BackgroundAgentSummary({
         onClick={() => setOpen((value) => !value)}
       >
         {backgroundAgentSummary(rows.length)}
-        <span>{open ? "返回子智能体" : "打开子智能体"}</span>
+        <span>{open ? "收起" : "展开"}</span>
       </button>
       {open && (
         <>

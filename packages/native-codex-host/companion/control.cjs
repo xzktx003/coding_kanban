@@ -32,9 +32,11 @@ function validateResumeBeside(body) {
 }
 function findNativeTab(vscode, uri) {
   const canonical = vscode.Uri.parse(uri).toString();
-  return vscode.window.tabGroups.all.flatMap(group => group.tabs
+  const matches = vscode.window.tabGroups.all.flatMap(group => group.tabs
     .filter(tab => tab.input?.viewType === 'chatgpt.conversationEditor' && tab.input?.uri?.toString() === canonical)
-    .map(tab => ({ tab, group, column: group.viewColumn }))).at(0);
+    .map(tab => ({ tab, group, column: group.viewColumn })));
+  if (matches.length > 1) { const error = new Error('native target has ambiguous editor identity'); error.statusCode = 409; throw error; }
+  return matches[0];
 }
 function validateNativeFocus(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).sort().join(',') !== 'kind,targetId')
@@ -72,15 +74,16 @@ async function openInFreshNativeGroup(vscode, uri) {
       throw new Error('native editor group could not be created');
     const opening = vscode.commands.executeCommand('vscode.openWith', vscode.Uri.parse(uri), 'chatgpt.conversationEditor',
       { viewColumn: group.viewColumn, preview: false, preserveFocus: false });
-    return { group, opening };
+    return { opening };
   });
   nativeGroupStarts.set(vscode, started.then(() => {}, () => {}));
-  const { group, opening } = await started;
-  let rejected = null;
-  const settled = opening.then(value => value, error => { rejected = error; throw error; });
-  await Promise.race([settled.then(() => {}, () => {}), new Promise(resolve => setTimeout(resolve, 50))]);
-  if (rejected) throw rejected;
-  return { column: group.viewColumn, settled };
+  const { opening } = await started;
+  await opening;
+  // Opening can reuse a restored editor and remove the freshly reserved empty
+  // group. Only the exact registered URI establishes its resulting column.
+  const registered = findNativeTab(vscode, uri);
+  if (!registered) { const error = new Error('native target did not register an editor'); error.statusCode = 503; throw error; }
+  return { column: registered.column, settled: opening };
 }
 async function resumeThreadBeside(vscode, body) {
   const { threadId } = validateResumeBeside(body);
@@ -105,7 +108,12 @@ async function openNewChatBeside(vscode, body) {
   const { windowId } = validateNewChatBeside(body);
   const uri = newChatUri(windowId, [windowId]);
   const existing = findNativeTab(vscode, uri);
-  if (existing?.tab.isActive) return { windowId, opened: true, column: existing.column };
+  if (existing) {
+    if (existing.tab.isActive && existing.group === vscode.window.tabGroups.activeTabGroup)
+      return { windowId, opened: true, column: existing.column };
+    const focused = await focusNativeWindow(vscode, { kind: 'new', targetId: windowId });
+    return { windowId, opened: true, column: focused.column };
+  }
   const opened = await openInFreshNativeGroup(vscode, uri);
   return { windowId, opened: true, column: opened.column, settled: opened.settled };
 }
@@ -124,14 +132,14 @@ function newChatUri(windowId, allowed) {
   return `openai-codex://route/extension/panel/new?nativeCodexPanel=${windowId}`;
 }
 function validateNewChatPanels(capturedWindows) {
-  if (!Array.isArray(capturedWindows) || capturedWindows.length !== 2 || capturedWindows[0] === capturedWindows[1]) throw new Error('two distinct new chat window UUIDs required');
+  if (!Array.isArray(capturedWindows) || capturedWindows.length < 1 || capturedWindows.length > 2 || new Set(capturedWindows).size !== capturedWindows.length) throw new Error('one or two distinct new chat window UUIDs required');
   return capturedWindows.map((windowId, index) => ({ uri: newChatUri(windowId, capturedWindows), windowId, column: index + 1, kind: 'new-chat' }));
 }
 function validateNewChatRestore(body, capturedWindows) {
   if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).sort().join(',') !== 'column,threadId,windowId') throw new Error('expected only windowId, threadId and column');
   const windows = validateNewChatPanels(capturedWindows);
   const window = windows.find(candidate => candidate.windowId === body.windowId);
-  if (!window || !Number.isInteger(body.column) || body.column < 1 || body.column > 2 || window.column !== body.column) throw new Error('restore target must match a captured window and column');
+  if (!window || !Number.isInteger(body.column) || body.column < 1 || body.column > windows.length || window.column !== body.column) throw new Error('restore target must match a captured window and column');
   return { windowId: window.windowId, threadId: body.threadId, column: window.column, windowUri: window.uri, uri: threadUri(body.threadId, [body.threadId]) };
 }
 async function restoreNewChatThread(vscode, body, capturedWindows) {

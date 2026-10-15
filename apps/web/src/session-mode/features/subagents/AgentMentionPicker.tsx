@@ -4,6 +4,7 @@ import { validAgentMention } from "@agent-orchestrator/shared";
 import { useSubagentFamily } from "./hooks";
 import { subagentService } from "./service";
 import { mentionDrafts, useAgentMentionDrafts } from "./mentions";
+import { selectCodexThreadInput } from "./inputIdentity";
 const EMPTY: never[] = [];
 export function AgentMentionPicker({
   root,
@@ -16,6 +17,11 @@ export function AgentMentionPicker({
     [roles, setRoles] = useState<{ name: string; description: string }[]>([]),
     [error, setError] = useState("");
   const { rows } = useSubagentFamily(root);
+  const inputRows = rows.filter(
+    (r) =>
+      !selectCodexThreadInput(r.node.thread, r.node, undefined, 0, true)
+        .blocked,
+  );
   const selected = useAgentMentionDrafts((s) => s.drafts[owner] ?? EMPTY);
   useEffect(() => {
     setOpen(false);
@@ -81,28 +87,26 @@ export function AgentMentionPicker({
           }}
         >
           <strong>已有子 Agent</strong>
-          {rows
-            .filter((r) => r.node.thread.canAcceptDirectInput === true)
-            .map((r) => (
-              <button
-                type="button"
-                key={r.node.thread.id}
-                onClick={() =>
-                  insert(
-                    r.node.thread.agentNickname ??
-                      r.node.thread.name ??
-                      r.node.thread.id.slice(0, 8),
-                    `agent://${r.node.thread.id}`,
-                  )
-                }
-              >
-                {r.node.thread.agentNickname ??
-                  r.node.thread.name ??
-                  r.node.thread.id.slice(0, 8)}{" "}
-                · {r.node.objective ?? r.node.thread.preview}
-              </button>
-            ))}
-          {!rows.some((r) => r.node.thread.canAcceptDirectInput === true) && (
+          {inputRows.map((r) => (
+            <button
+              type="button"
+              key={r.node.thread.id}
+              onClick={() =>
+                insert(
+                  r.node.thread.agentNickname ??
+                    r.node.thread.name ??
+                    r.node.thread.id.slice(0, 8),
+                  `agent://${r.node.thread.id}`,
+                )
+              }
+            >
+              {r.node.thread.agentNickname ??
+                r.node.thread.name ??
+                r.node.thread.id.slice(0, 8)}{" "}
+              · {r.node.objective ?? r.node.thread.preview}
+            </button>
+          ))}
+          {!inputRows.length && (
             <small>
               当前没有可直接引用的子 Agent；可在子任务详情中让主 Agent 跟进。
             </small>

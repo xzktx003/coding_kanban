@@ -17,7 +17,12 @@ export const createThreadsSlice: StateCreator<CodexStore, [], [], ThreadsSlice> 
   },
 
   setThreads: (threads) => {
-    set({ threads: threads });
+    const seen = new Set<string>();
+    set({ threads: threads.filter(thread => {
+      if (seen.has(thread.id)) return false;
+      seen.add(thread.id);
+      return true;
+    }) });
   },
 
   appendThreads: (threads) => {

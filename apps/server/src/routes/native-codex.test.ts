@@ -33,10 +33,11 @@ import {
   validateNativeCodexResume,
   validateNativeCodexResumeBeside,
   validateNativeCodexNewBeside,
+  validateNativeCodexTheme,
   validateNativeCodexReleaseInstance,
 } from "../services/native-codex-gateway.js";
 
-async function setup(handler: RequestListener = (_req, res) => res.end("ok")) {
+async function setup(handler: RequestListener = (_req, res) => res.end("ok"), scope: { profileId?: string; additionalProfileId?: string } = {}) {
   const dir = await mkdtemp(join(tmpdir(), "native-codex-gateway-"));
   const upstream = createServer(handler);
   upstream.listen(0, "127.0.0.1");
@@ -67,8 +68,11 @@ async function setup(handler: RequestListener = (_req, res) => res.end("ok")) {
   app.get("/test-global-ws", { websocket: true }, (socket) => {
     socket.on("message", (data, binary) => socket.send(data, { binary }));
   });
-  await app.register(registerNativeCodexRoutes, { gateway });
+  try {
+  await app.register(registerNativeCodexRoutes, { gateway, ...(scope.profileId ? { profileId: scope.profileId } : {}) });
+  if (scope.additionalProfileId) await app.register(registerNativeCodexRoutes, { gateway, profileId: scope.additionalProfileId });
   await app.listen({ host: "127.0.0.1", port: 0 });
+  } catch(error) { await app.close(); upstream.closeAllConnections(); await new Promise<void>(done=>upstream.close(()=>done())); await rm(dir,{recursive:true,force:true}); throw error; }
   const appAddress = app.server.address();
   assert.ok(appAddress && typeof appAddress !== "string");
   return {
@@ -553,6 +557,18 @@ test("resume validates an exact thread and supported editor column", () => {
     { ...value, extra: true },
   ])
     assert.throws(() => validateNativeCodexResume(invalid));
+});
+
+test("native theme accepts only light or dark for one host instance", () => {
+  const instanceId = "019aabcd-1234-7890-abcd-0123456789ac";
+  assert.deepEqual(validateNativeCodexTheme({ instanceId, theme: "dark" }), { instanceId, theme: "dark" });
+  assert.deepEqual(validateNativeCodexTheme({ instanceId, theme: "light" }), { instanceId, theme: "light" });
+  for (const invalid of [
+    { instanceId, theme: "system" },
+    { instanceId, theme: "Default Dark Modern" },
+    { instanceId, theme: "dark", colorTheme: "Default Dark Modern" },
+    { theme: "dark" },
+  ]) assert.throws(() => validateNativeCodexTheme(invalid));
 });
 
 test("multiwindow resume validates only a thread and preserves broker conflict status", async () => {
@@ -1040,6 +1056,194 @@ test("HTTPS frontend forwarding stays same-origin through the HTTP development g
   }
 });
 
+test("hashed native static assets are cached for a year and documents stay uncached", async () => {
+  const hash = "8b41915d25547e2edd553bab03ea4cbd621f98c5";
+  const fixture = await setup((request, response) => {
+    const cache = request.url === `/stable-${hash}/static/already.js` ? "public, max-age=60" : undefined;
+    response.writeHead(200, {
+      "content-type": request.url?.endsWith(".html") ? "text/html" : "text/javascript",
+      ...(cache ? { "cache-control": cache } : {}),
+    });
+    response.end("asset");
+  });
+  try {
+    const immutable = await fixture.app.inject({ method: "GET", url: `/native-codex/stable-${hash}/static/workbench.js` });
+    assert.equal(immutable.headers["cache-control"], "public, max-age=31536000, immutable");
+    const preserved = await fixture.app.inject({ method: "GET", url: `/native-codex/stable-${hash}/static/already.js` });
+    assert.equal(preserved.headers["cache-control"], "public, max-age=60");
+    const unhashed = await fixture.app.inject({ method: "GET", url: "/native-codex/static/workbench.js" });
+    assert.notEqual(unhashed.headers["cache-control"], "public, max-age=31536000, immutable");
+    const document = await fixture.app.inject({ method: "GET", url: `/native-codex/stable-${hash}/index.html` });
+    assert.notEqual(document.headers["cache-control"], "public, max-age=31536000, immutable");
+    const posted = await fixture.app.inject({ method: "POST", url: `/native-codex/stable-${hash}/static/workbench.js` });
+    assert.notEqual(posted.headers["cache-control"], "public, max-age=31536000, immutable");
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("immutable native caching refuses error pages, HTML, auth-sensitive responses and unverified resource paths", async () => {
+  const hash = "8b41915d25547e2edd553bab03ea4cbd621f98c5";
+  const cases = [
+    { path: "missing.js", status: 404, mime: "text/javascript" },
+    { path: "login.js", status: 401, mime: "text/javascript" },
+    { path: "failure.js", status: 502, mime: "text/javascript" },
+    { path: "index.html", status: 200, mime: "text/html" },
+    { path: "html.js", status: 200, mime: "text/html" },
+    { path: "state.js", status: 200, mime: "application/json" },
+    {
+      path: "private.js",
+      status: 200,
+      mime: "text/javascript",
+      headers: { "cache-control": "private" },
+    },
+    {
+      path: "no-store.js",
+      status: 200,
+      mime: "text/javascript",
+      headers: { "cache-control": "no-store" },
+    },
+    {
+      path: "revalidate.js",
+      status: 200,
+      mime: "text/javascript",
+      headers: { "cache-control": "no-cache" },
+    },
+    {
+      path: "cookie.js",
+      status: 200,
+      mime: "text/javascript",
+      headers: { "set-cookie": "private-fixture=1; HttpOnly" },
+    },
+    {
+      path: "varies.js",
+      status: 200,
+      mime: "text/javascript",
+      headers: { vary: "Accept-Encoding, Cookie" },
+    },
+    { path: "rpc.json", status: 200, mime: "text/javascript" },
+    {
+      path: "query.js?token=private-fixture",
+      status: 200,
+      mime: "text/javascript",
+    },
+    { path: "%2e%2e/outside.js", status: 200, mime: "text/javascript" },
+  ];
+  const fixture = await setup((request, response) => {
+    const item = cases.find((entry) => {
+      const path = `/stable-${hash}/static/${entry.path}`;
+      const normalized = new URL(path, "http://fixture.invalid");
+      return (
+        request.url === path ||
+        request.url === normalized.pathname + normalized.search
+      );
+    });
+    if (!item) {
+      response.writeHead(400);
+      response.end("unknown fixture resource");
+      return;
+    }
+    response.writeHead(item.status, {
+      "content-type": item.mime,
+      ...item.headers,
+    });
+    response.end("fixture response");
+  });
+  try {
+    const observed = [];
+    for (const item of cases) {
+      const response = await fixture.app.inject({
+        method: "GET",
+        url: `/native-codex/stable-${hash}/static/${item.path}`,
+      });
+      observed.push({
+        path: item.path,
+        status: response.statusCode,
+        cache: response.headers["cache-control"],
+      });
+    }
+    assert.deepEqual(
+      observed,
+      cases.map((item) => ({
+        path: item.path,
+        status: item.status,
+        cache: item.headers?.["cache-control"],
+      })),
+    );
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("verified native scripts, styles, fonts and binary assets keep immutable caching and exact bytes", async () => {
+  const hash = "8b41915d25547e2edd553bab03ea4cbd621f98c5";
+  const assets: Record<string, string> = {
+    "workbench.js?vscode-coi=3": "application/javascript; charset=utf-8",
+    "out/workbench.css": "text/css",
+    "out/font.woff2": "font/woff2",
+    "out/module.wasm": "application/wasm",
+    "out/logo.svg": "image/svg+xml",
+  };
+  const body = Buffer.from([0, 10, 127, 128, 255]);
+  const fixture = await setup((request, response) => {
+    const mime = assets[request.url!.slice(`/stable-${hash}/static/`.length)];
+    response.writeHead(200, {
+      "content-type": mime ?? "text/plain",
+      "content-security-policy": "default-src 'self'",
+    });
+    response.end(body);
+  });
+  try {
+    for (const path of Object.keys(assets)) {
+      const response = await fixture.app.inject({
+        method: "GET",
+        url: `/native-codex/stable-${hash}/static/${path}`,
+      });
+      assert.equal(
+        response.headers["cache-control"],
+        "public, max-age=31536000, immutable",
+      );
+      assert.equal(
+        response.headers["content-security-policy"],
+        "default-src 'self'",
+      );
+      assert.deepEqual(response.rawPayload, body);
+    }
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("one captured startup window is exposed and column two is refused", async () => {
+  const fixture = await setup();
+  const windowId = "019aabcd-5678-7890-abcd-0123456789ab";
+  const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  let brokerCalls = 0;
+  const broker = createServer((_request, response) => { brokerCalls++; response.writeHead(202); response.end("{}"); });
+  broker.listen(0, "127.0.0.1");
+  await once(broker, "listening");
+  const address = broker.address();
+  assert.ok(address && typeof address !== "string");
+  const authFile = join(fixture.dir, "single-window-auth.json");
+  await writeFile(authFile, JSON.stringify({ port: address.port, token }), { mode: 0o600 });
+  const record = JSON.parse(await readFile(fixture.record, "utf8"));
+  await writeFile(fixture.record, JSON.stringify({ ...record, panelMode: "new-chats", newChatWindowIds: [windowId], brokerPort: address.port, brokerAuthFile: authFile }), { mode: 0o600 });
+  try {
+    assert.deepEqual((await fixture.gateway.status()).newChatWindowIds, [windowId]);
+    brokerCalls = 0;
+    const response = await fetch(`${fixture.origin}/api/native-codex/restore`, {
+      method: "POST", headers: { origin: fixture.origin, "content-type": "application/json" },
+      body: JSON.stringify({ windowId, threadId: "019aabcd-1234-7890-abcd-0123456789ab", column: 2 }),
+    });
+    assert.equal(response.status, 400);
+    assert.equal(brokerCalls, 0);
+  } finally {
+    broker.closeAllConnections();
+    await new Promise<void>((resolve) => broker.close(() => resolve()));
+    await fixture.close();
+  }
+});
+
 test("native HTTP and WS reject foreign Origin before contacting upstream", async () => {
   let upstreamRequests = 0;
   const fixture = await setup((_req, res) => {
@@ -1365,5 +1569,31 @@ test("native upstream decompression is bounded by its independent message limit"
     wss.clients.forEach((ws) => ws.terminate());
     wss.close();
     await fixture.close();
+  }
+});
+
+
+test("profile mounts keep native HTTP, redirects, cookies, status and WebSockets in their own scope", async () => {
+  const profileId="019aabcd-1234-7890-abcd-0123456789ab", other="019aabcd-1234-7890-abcd-0123456789ac";
+  const prefix=`/native-codex/clients/${profileId}`;
+  const f=await setup((request,response)=>{
+    if(request.url==='/redirect'){response.writeHead(302,{location:'/next','set-cookie':'session=private; Domain=upstream.invalid; Path=/'});response.end();return;}
+    response.end(JSON.stringify({path:request.url,prefix:request.headers['x-forwarded-prefix']}));
+  },{profileId,additionalProfileId:other});
+  const wss=new WebSocketServer({server:f.upstream});wss.on('connection',socket=>socket.on('message',(data,binary)=>socket.send(data,{binary})));
+  try{
+    const http=await f.app.inject({url:prefix+'/asset?x=1'});assert.deepEqual(http.json(),{path:'/asset?x=1',prefix});
+    const redirect=await f.app.inject({url:prefix+'/redirect'});assert.equal(redirect.headers.location,prefix+'/next');assert.deepEqual(redirect.headers['set-cookie'],['session=private; Path='+prefix+'/']);
+    const status=(await f.app.inject({url:`/api/native-codex/clients/${profileId}/status`})).json();assert.ok(status.iframeUrl.startsWith(prefix+'/'));
+    const otherStatus=(await f.app.inject({url:`/api/native-codex/clients/${other}/status`})).json();assert.ok(otherStatus.iframeUrl.startsWith(`/native-codex/clients/${other}/`));
+    assert.equal((await f.app.inject({url:'/api/native-codex/status'})).statusCode,404);
+    const socket=new WebSocket(f.origin.replace('http:','ws:')+prefix+'/socket',{origin:f.origin});await once(socket,'open');
+    const received=once(socket,'message');socket.send('profile exact protocol');assert.equal((await received)[0].toString(),'profile exact protocol');socket.close();await once(socket,'close');
+  }finally{for(const socket of wss.clients)socket.terminate();await new Promise<void>(done=>wss.close(()=>done()));await f.close();}
+});
+
+test("profile scopes accept exact local UUIDs only before registering native routes",async()=>{
+  for(const profileId of ['../other','other?upstream=remote','019Aabcd-1234-7890-abcd-0123456789ab']){
+    const app=Fastify();try{await assert.rejects(registerNativeCodexRoutes(app,{profileId}),/profile/);}finally{await app.close();}
   }
 });

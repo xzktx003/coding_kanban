@@ -118,7 +118,7 @@ it("unavailable snapshots retain identity and selection but withdraw capability"
       errors: ["not found"],
       checkedAt: 2,
     },
-    0,
+    useSubagentStore.getState().revision,
   );
   expect(useSubagentStore.getState().nodes.child.unavailable).toBe(true);
   expect(

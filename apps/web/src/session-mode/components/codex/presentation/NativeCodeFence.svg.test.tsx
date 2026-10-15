@@ -28,9 +28,9 @@ it("copies the untouched SVG source rather than its browser-normalized preview",
     value: { writeText },
   });
   render(<NativeCodeFence code={svg} language="svg" />);
-  fireEvent.click(screen.getByRole("button", { name: "复制" }));
+  fireEvent.click(screen.getByRole("button", { name: "复制代码" }));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith(svg));
-  expect(await screen.findByRole("button", { name: "已复制" })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "已复制代码" })).toBeTruthy();
 });
 
 it("keeps other XML/HTML as source and switches back from image when the content changes", () => {

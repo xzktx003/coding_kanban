@@ -33,7 +33,7 @@ for (const kind of ["message", "code", "table"] as const)
           kind === "message"
             ? "复制回复"
             : kind === "code"
-              ? "复制"
+              ? "复制代码"
               : "复制表格",
       }),
     );
@@ -43,6 +43,6 @@ for (const kind of ["message", "code", "table"] as const)
         description: "内容未复制。请在 ChatGPT 处于焦点时重试",
       }),
     );
-    expect(screen.queryByRole("button", { name: "已复制" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "已复制代码" })).toBeNull();
     expect(screen.queryByRole("alert")).toBeNull();
   });

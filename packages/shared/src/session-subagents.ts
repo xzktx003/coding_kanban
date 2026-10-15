@@ -51,16 +51,31 @@ export function subagentParent(thread: SubagentThread): string | null {
           thread_spawn?: { parent_thread_id?: string };
           threadSpawn?: { parentThreadId?: string };
         };
-        subagent?: { thread_spawn?: { parent_thread_id?: string } };
+        subagent?: {
+          thread_spawn?: { parent_thread_id?: string };
+          threadSpawn?: { parentThreadId?: string };
+        };
       }
     | undefined;
-  return (
-    thread.parentThreadId ??
-    source?.subAgent?.thread_spawn?.parent_thread_id ??
-    source?.subAgent?.threadSpawn?.parentThreadId ??
-    source?.subagent?.thread_spawn?.parent_thread_id ??
-    null
-  );
+  const candidates = [thread.parentThreadId,
+    source?.subAgent?.thread_spawn?.parent_thread_id,
+    source?.subAgent?.threadSpawn?.parentThreadId,
+    source?.subagent?.thread_spawn?.parent_thread_id,
+    source?.subagent?.threadSpawn?.parentThreadId];
+  return candidates.find((id): id is string => typeof id === "string" && id.trim().length > 0) ?? null;
+}
+
+/** Native identity only: collaboration receivers and ordinary forks are not ancestry. */
+export function classifySubagentThread(thread: SubagentThread): "main" | "child" | "unknown" {
+  if (subagentParent(thread)) return "child";
+  const source = thread.source;
+  if (source && typeof source === "object" && !Array.isArray(source)) {
+    const value = source as Record<string, unknown>;
+    if (Object.hasOwn(value, "subAgent") || Object.hasOwn(value, "subagent")) return "child";
+    if (typeof value.custom === "string") return "main";
+  }
+  if (["cli", "vscode", "exec", "appServer"].includes(source as string)) return "main";
+  return "unknown";
 }
 /** Older servers keep nickname/role in the spawn source instead of top-level metadata. */
 export function normalizeSubagentThread(

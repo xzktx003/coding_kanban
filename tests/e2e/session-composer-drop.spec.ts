@@ -204,7 +204,7 @@ for (const width of [1440, 390])
         composer.getByRole("button", { name: "预览 drop.png", exact: true }),
       ).toBeVisible();
       await composer
-        .getByRole("button", { name: "发送", exact: true })
+        .getByRole("button", { name: "发送消息", exact: true })
         .click();
       await expect
         .poll(

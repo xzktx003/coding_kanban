@@ -68,11 +68,10 @@ export function ThemeRoot({ children }: { children: ReactNode }) {
   }, [theme]);
 
   useEffect(() => {
-    const root =
-      document.querySelector<HTMLElement>(".session-mode") ??
-      document.documentElement;
-
-    // Classes to cleanup
+    const roots = [
+      ...document.querySelectorAll<HTMLElement>(".session-mode, .codex-mode"),
+    ];
+    const targets = roots.length ? roots : [document.documentElement];
     const themes = ["light", "dark"];
     const accents = [
       "accent-default",
@@ -84,20 +83,12 @@ export function ThemeRoot({ children }: { children: ReactNode }) {
       "accent-purple",
       "accent-orange",
     ];
-
-    // Handle dark/light mode
-    root.classList.remove(...themes);
-    root.classList.add(resolvedTheme);
-
-    // Handle accent color
-    root.classList.remove(...accents);
-    root.classList.add(`accent-${accent}`);
-
-    // Apply color-scheme for browser UI elements (affects scrollbars, etc)
-    root.style.setProperty("color-scheme", resolvedTheme);
-
-    // Starfield effect toggle
-    root.classList.toggle("starfield", starfield);
+    for (const target of targets) {
+      target.classList.remove(...themes, ...accents);
+      target.classList.add(resolvedTheme, `accent-${accent}`);
+      target.style.setProperty("color-scheme", resolvedTheme);
+      target.classList.toggle("starfield", starfield);
+    }
   }, [resolvedTheme, accent, starfield]);
 
   useEffect(() => {

@@ -45,7 +45,7 @@ export function CodexDeliveryEchoes({
   const refreshed = useRef(new Set<string>());
   useEffect(() => {
     // A failed turn may finish before its userMessage event reaches this client.
-    // Rejoin once to recover the persisted clientId; never resubmit the message.
+    // Read history once to recover the persisted clientId; never resume or resubmit.
     const missing = Object.values(entries).filter(
       (e) =>
         e.threadId === threadId &&
@@ -71,6 +71,7 @@ export function CodexDeliveryEchoes({
       e.threadId === threadId &&
       e.status !== "queued" &&
       e.status !== "cancelled" &&
+      e.status !== "failed" &&
       !acknowledged.has(e.id),
   );
   return (

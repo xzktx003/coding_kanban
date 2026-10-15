@@ -42,6 +42,25 @@ test('private companion enforces auth, bounded schema and fixed allowlist withou
   } finally { extension.deactivate(); for (const disposable of disposals) disposable.dispose(); await rm(root, { recursive: true, force: true }); }
 });
 
+test('theme changes only the native color theme between light and dark', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'native-theme-')); const file = join(root, 'auth.json'); const port = await sparePort();
+  const updates = []; const disposals = [];
+  const vscode = { ConfigurationTarget: { Global: 1 }, extensions: { getExtension: () => ({ isActive: true, packageJSON: { version: 'test' }, async activate() {} }) },
+    window: { tabGroups: { all: [] } }, workspace: { getConfiguration: () => ({ update: async (...args) => { updates.push(args); } }) },
+    Uri: { parse: uri => uri }, commands: { registerCommand: () => ({ dispose() {} }), executeCommand: async () => { throw new Error('theme must not run a command'); } } };
+  await writeFile(file, JSON.stringify({ port, token: 'test-only-theme-01234567890123456789012', threads: [] }), { mode: 0o600 });
+  const extension = await load(file, vscode); const headers = { authorization: 'Bearer test-only-theme-01234567890123456789012', 'content-type': 'application/json' };
+  try {
+    await extension.activate({ subscriptions: disposals });
+    const base = `http://127.0.0.1:${port}`;
+    assert.equal((await fetch(`${base}/theme`, { method: 'POST', headers, body: JSON.stringify({ theme: 'dark' }) })).status, 200);
+    assert.deepEqual(updates, [['workbench.colorTheme', 'Default Dark Modern', 1]]);
+    assert.equal((await fetch(`${base}/theme`, { method: 'POST', headers, body: JSON.stringify({ theme: 'system' }) })).status, 400);
+    assert.equal((await fetch(`${base}/theme`, { method: 'POST', headers, body: JSON.stringify({ theme: 'light', command: 'evil' }) })).status, 400);
+    assert.equal(updates.length, 1);
+  } finally { extension.deactivate(); for (const disposable of disposals) disposable.dispose(); await rm(root, { recursive: true, force: true }); }
+});
+
 test('resume opens the exact selected local thread in only its requested editor column', async () => {
   const root = await mkdtemp(join(tmpdir(), 'native-resume-')); const file = join(root, 'auth.json'); const port = await sparePort();
   const selectedThread = '019aabcd-1234-7890-abcd-0123456789ac'; const calls = []; const disposals = [];
@@ -274,7 +293,16 @@ async function startupFixture(t, config = {}, callbacks = {}) {
   const vscode = { extensions: { getExtension: () => callbacks.missingOfficial ? undefined : official }, window: { tabGroups, createStatusBarItem: callbacks.createStatusBarItem }, Uri: { parse: uri => uri },
     commands: { registerCommand(name, callback) { commands.set(name, callback); return { dispose() { commands.delete(name); } }; },
       async executeCommand(...args) {
-        if (args[0] === 'workbench.action.newGroupRight') { tabGroups.activeTabGroup = { viewColumn: ++nextColumn }; groupsCreated.push(nextColumn); return; }
+        if (args[0] === 'workbench.action.newGroupRight') { tabGroups.activeTabGroup = { viewColumn: ++nextColumn, tabs: [] }; tabGroups.all.push(tabGroups.activeTabGroup); groupsCreated.push(nextColumn); return; }
+        if (args[0] === 'vscode.openWith' && args[2] === 'chatgpt.conversationEditor') {
+          let group = tabGroups.all.find(candidate => candidate.viewColumn === args[3].viewColumn);
+          if (!group) { group = { viewColumn: args[3].viewColumn, tabs: [] }; tabGroups.all.push(group); }
+          for (const candidate of tabGroups.all) { candidate.isActive = candidate === group; for (const tab of candidate.tabs) tab.isActive = false; }
+          const existing = group.tabs.find(tab => tab.input?.viewType === args[2] && tab.input?.uri?.toString() === String(args[1]));
+          if (existing) existing.isActive = true;
+          else group.tabs.push({ isActive: true, input: { viewType: args[2], uri: { toString: () => String(args[1]) } } });
+          tabGroups.activeTabGroup = group;
+        }
         calls.push(args); await callbacks.open?.(...args);
       } } };
   await writeFile(file, JSON.stringify({ port, token, threads: [id, secondFixture, thirdFixture], ...config }), { mode: 0o600 });
@@ -282,12 +310,59 @@ async function startupFixture(t, config = {}, callbacks = {}) {
   t.after(async () => { callbacks.cleanup?.(); extension.deactivate(); for (const item of subscriptions) item.dispose(); await rm(root, { recursive: true, force: true }); });
   return { root, calls, groupsCreated, commands, subscriptions, extension, base: `http://127.0.0.1:${port}`, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } };
 }
+async function waitStartup(data) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const file = (await readdir(data.root)).find(name => name.startsWith('companion-instance-'));
+    if (file) {
+      const value = JSON.parse(await readFile(join(data.root, file), 'utf8'));
+      if (![value.autoOpenFixturesState, value.autoOpenNewChatsState].some(state => state === 'pending' || state === 'opening')) return value;
+    }
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  throw new Error('native startup did not settle');
+}
+test('activation and private instance readiness do not wait for a native editor command', async t => {
+  const execution = deferred(); const entered = deferred();
+  const marker = { text: '', show() {}, dispose() {} };
+  const data = await startupFixture(t, { autoOpenFixtures: true }, {
+    open: () => { entered.resolve(); return execution.promise; },
+    cleanup: execution.resolve, createStatusBarItem: () => marker,
+  });
+  let activated = false;
+  const pending = data.extension.activate({ subscriptions: data.subscriptions }).then(() => { activated = true; });
+  await entered.promise;
+  try {
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(activated, true, 'opening an editor must not deadlock its extension activation');
+    assert.match(marker.text, /^Kanban host [0-9a-f-]{36}$/);
+    const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
+    assert.equal(status.autoOpenFixtures.state, 'opening');
+    assert.equal(status.instanceBroker.enabled, true);
+  } finally { execution.resolve(); await pending; }
+});
+test('private instance activation settles while official activation is waiting for eager extensions', async t => {
+  const activation = deferred(); const entered = deferred();
+  const data = await startupFixture(t, { autoOpenFixtures: true }, { activate: () => { entered.resolve(); return activation.promise; }, cleanup: activation.resolve });
+  let settled = false;
+  const pending = data.extension.activate({ subscriptions: data.subscriptions }).then(() => { settled = true; });
+  await entered.promise;
+  try {
+    await new Promise(resolve => setTimeout(resolve, 30));
+    assert.equal(settled, true, 'official startup may await eager extension activation; companion must settle first');
+    const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
+    assert.equal(status.instanceBroker.enabled, true);
+    assert.equal(status.officialActive, false);
+    assert.equal(data.calls.length, 0);
+  } finally { activation.resolve(); await pending; await waitStartup(data); }
+});
 test('explicit startup auto-open waits for official activation and opens only the first two captured fixtures', async t => {
   const activation = deferred(); const entered = deferred();
   const data = await startupFixture(t, { autoOpenFixtures: true }, { activate: () => { entered.resolve(); return activation.promise; }, cleanup: activation.resolve });
   const pending = data.extension.activate({ subscriptions: data.subscriptions }); await entered.promise;
-  assert.equal(data.calls.length, 0); assert.equal(data.commands.size, 0);
-  activation.resolve(); await pending;
+  assert.equal(data.calls.length, 0);
+  // The private broker and palette exist, but no native panel opens before official activation.
+  assert.equal(data.commands.size, 2);
+  activation.resolve(); await pending; await waitStartup(data);
   assert.deepEqual(data.calls.map(call => [call[0], call[1], call[2], call[3].viewColumn]), [
     ['vscode.openWith', `openai-codex://route/local/${id}`, 'chatgpt.conversationEditor', 1],
     ['vscode.openWith', `openai-codex://route/local/${secondFixture}`, 'chatgpt.conversationEditor', 2]
@@ -310,7 +385,7 @@ test('startup opening shares the palette and broker lock and releases it after c
   assert.equal((await fetch(`${data.base}/open`, options)).status, 409);
   const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
   assert.equal(status.autoOpenFixtures.state, 'opening'); assert.equal(data.calls.length, 1);
-  execution.resolve(); await pending;
+  execution.resolve(); await pending; await waitStartup(data);
   await data.commands.get('nativeCodexPrototype.openTwoTestPanels')(); assert.equal(data.calls.length, 4);
   assert.equal((await fetch(`${data.base}/open`, options)).status, 200); assert.equal(data.calls.length, 5);
 });
@@ -326,12 +401,7 @@ test('one stalled resume does not block a different conversation opening beside 
   const first = fetch(`${data.base}/resume-beside`, {
     method: 'POST', headers: data.headers, body: JSON.stringify({ threadId: id }),
   });
-  const early = await Promise.race([
-    first.then(response => ({ returned: true, status: response.status })),
-    stalled.promise.then(() => ({ returned: false })),
-  ]);
-  assert.equal(early.returned, true);
-  assert.equal(early.status, 200);
+  await entered.promise;
   const second = await fetch(`${data.base}/resume-beside`, {
     method: 'POST', headers: data.headers, body: JSON.stringify({ threadId: secondFixture }),
   });
@@ -345,6 +415,25 @@ test('one stalled resume does not block a different conversation opening beside 
   assert.deepEqual(data.calls.map(call => call[3].viewColumn), [2, 3]);
   stalled.resolve();
   assert.equal((await first).status, 200);
+});
+test('early history recovery waits until startup columns are reserved instead of racing the startup new chat', async t => {
+  const entered = deferred(); const startup = deferred();
+  const windowId = '019aabcd-1234-7890-abcd-0123456789af';
+  const data = await startupFixture(t, { autoOpenNewChats: true, newChatWindowIds: [windowId] }, {
+    open: (_name, uri) => { if (String(uri).includes('/panel/new')) { entered.resolve(); return startup.promise; } },
+    cleanup: startup.resolve,
+  });
+  await data.extension.activate({ subscriptions: data.subscriptions });
+  await entered.promise;
+  const pending = fetch(`${data.base}/resume-beside`, {
+    method: 'POST', headers: data.headers, body: JSON.stringify({ threadId: id }),
+  });
+  await new Promise(resolve => setTimeout(resolve, 80));
+  assert.deepEqual(data.groupsCreated, [], 'startup owns its fixed columns until its editor commands settle');
+  startup.resolve();
+  const response = await pending;
+  assert.equal(response.status, 200);
+  assert.deepEqual(data.groupsCreated, [2]);
 });
 test('private broker opens successive independent new-chat editors without a fixed window cap', async t => {
   const data = await startupFixture(t);
@@ -402,6 +491,77 @@ test('resuming a thread already open in a native editor reuses its group', async
   assert.deepEqual(await resumeThreadBeside(vscode, { threadId: id }), { threadId: id, opened: true, column: 3 });
   assert.deepEqual(calls.map(call => call[0]), ['vscode.openWith']);
 });
+test('opening an inactive existing new chat focuses its exact group instead of creating a duplicate', async () => {
+  const { openNewChatBeside, newChatUri } = require('../companion/control.cjs');
+  const windowId = '019aabcd-1234-7890-abcd-0123456789ae';
+  const uri = newChatUri(windowId, [windowId]);
+  const tab = { isActive: false, input: { uri: { toString: () => uri }, viewType: 'chatgpt.conversationEditor' } };
+  const group = { viewColumn: 2, isActive: false, tabs: [tab] };
+  const tabGroups = { all: [group], activeTabGroup: { viewColumn: 1, tabs: [] } };
+  const calls = [];
+  const vscode = { window: { tabGroups }, Uri: { parse: value => value }, commands: { async executeCommand(...args) {
+    calls.push(args);
+    if (args[0] === 'workbench.action.newGroupRight') throw new Error('must reuse exact existing new chat group');
+    tab.isActive = true; group.isActive = true; tabGroups.activeTabGroup = group;
+  } } };
+  assert.deepEqual(await openNewChatBeside(vscode, { windowId }), { windowId, opened: true, column: 2 });
+  assert.deepEqual(calls.map(call => call[0]), ['vscode.openWith']);
+  assert.deepEqual(await openNewChatBeside(vscode, { windowId }), { windowId, opened: true, column: 2 });
+  assert.equal(calls.length, 1);
+});
+test('native editor lookup rejects duplicate exact identities without issuing a command', async () => {
+  const { openNewChatBeside, focusNativeWindow, resumeThreadBeside, newChatUri, threadUri } = require('../companion/control.cjs');
+  const windowId = '019aabcd-1234-7890-abcd-0123456789ae';
+  for (const [kind, targetId, uri] of [['new', windowId, newChatUri(windowId, [windowId])], ['thread', id, threadUri(id, [id])]]) {
+    const groups = [1, 2].map(viewColumn => ({ viewColumn, tabs: [{ isActive: true, input: { viewType: 'chatgpt.conversationEditor', uri: { toString: () => uri } } }] }));
+    const calls = [];
+    const vscode = { window: { tabGroups: { all: groups, activeTabGroup: groups[0] } }, Uri: { parse: value => value }, commands: { async executeCommand(...args) { calls.push(args); } } };
+    await assert.rejects(focusNativeWindow(vscode, { kind, targetId }), /ambiguous/);
+    await assert.rejects(kind === 'new' ? openNewChatBeside(vscode, { windowId }) : resumeThreadBeside(vscode, { threadId: id }), /ambiguous/);
+    assert.equal(calls.length, 0);
+  }
+});
+test('new native editor receipts use the registered tab column after VS Code removes an empty group', async () => {
+  const { openNewChatBeside, resumeThreadBeside } = require('../companion/control.cjs');
+  const windowId = '019aabcd-1234-7890-abcd-0123456789ae';
+  for (const kind of ['new', 'thread']) {
+    const old = { viewColumn: 1, tabs: [] };
+    const tabGroups = { all: [old], activeTabGroup: old };
+    const calls = [];
+    const vscode = { window: { tabGroups }, Uri: { parse: value => value }, commands: { async executeCommand(...args) {
+      calls.push(args);
+      if (args[0] === 'workbench.action.newGroupRight') {
+        const reserved = { viewColumn: 3, tabs: [] }; tabGroups.all.push(reserved); tabGroups.activeTabGroup = reserved;
+      } else {
+        const registered = { viewColumn: 2, tabs: [{ isActive: true, input: { viewType: 'chatgpt.conversationEditor', uri: { toString: () => args[1] } } }] };
+        tabGroups.all = [old, registered]; tabGroups.activeTabGroup = registered;
+      }
+    } } };
+    const result = await (kind === 'new' ? openNewChatBeside(vscode, { windowId }) : resumeThreadBeside(vscode, { threadId: id }));
+    assert.equal(result.column, 2);
+    assert.equal(calls[1][3].viewColumn, 3, 'the reserved column is only a command argument, never evidence of the resulting editor');
+    await result.settled;
+  }
+});
+test('native open acknowledgement waits for command completion before reading a column that can still move', async () => {
+  const { openNewChatBeside } = require('../companion/control.cjs');
+  const windowId = '019aabcd-1234-7890-abcd-0123456789ae';
+  const old = { viewColumn: 1, tabs: [] };
+  const tabGroups = { all: [old], activeTabGroup: old };
+  const vscode = { window: { tabGroups }, Uri: { parse: value => value }, commands: { async executeCommand(...args) {
+    if (args[0] === 'workbench.action.newGroupRight') {
+      const reserved = { viewColumn: 3, tabs: [] }; tabGroups.all.push(reserved); tabGroups.activeTabGroup = reserved;
+    } else {
+      const tab = { isActive: true, input: { viewType: 'chatgpt.conversationEditor', uri: { toString: () => args[1] } } };
+      tabGroups.activeTabGroup.tabs.push(tab);
+      await new Promise(resolve => setTimeout(resolve, 140));
+      const registered = { viewColumn: 2, tabs: [tab] };
+      tabGroups.all = [old, registered]; tabGroups.activeTabGroup = registered;
+    }
+  } } };
+  const result = await openNewChatBeside(vscode, { windowId });
+  assert.equal(result.column, 2);
+});
 test('each extension instance publishes a private broker and a browser-visible identity marker', async t => {
   const marker = { text: '', showCalled: false, disposed: false, show() { this.showCalled = true; }, dispose() { this.disposed = true; } };
   const data = await startupFixture(t, {}, { createStatusBarItem: () => marker });
@@ -451,7 +611,7 @@ test('private startup configuration accepts booleans only and requires two disti
 test('startup refuses to open when the official extension is missing or activation fails', async t => {
   for (const callbacks of [{ missingOfficial: true }, { activate() { throw new Error('fixture activation failure'); } }]) {
     const data = await startupFixture(t, { autoOpenFixtures: true }, callbacks);
-    await data.extension.activate({ subscriptions: data.subscriptions }); assert.equal(data.calls.length, 0);
+    await data.extension.activate({ subscriptions: data.subscriptions }); await waitStartup(data); assert.equal(data.calls.length, 0);
     const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
     assert.equal(status.autoOpenFixtures.state, 'failed'); assert.match(status.autoOpenFixtures.error, /official extension/);
   }
@@ -459,7 +619,7 @@ test('startup refuses to open when the official extension is missing or activati
 test('startup command failure is diagnosed without retry and the opening lock is released', async t => {
   let fail = true;
   const data = await startupFixture(t, { autoOpenFixtures: true }, { open() { if (fail) throw new Error('fixture panel open failure'); } });
-  await data.extension.activate({ subscriptions: data.subscriptions }); assert.equal(data.calls.length, 1);
+  await data.extension.activate({ subscriptions: data.subscriptions }); await waitStartup(data); assert.equal(data.calls.length, 1);
   const status = await (await fetch(`${data.base}/status`, { headers: data.headers })).json();
   assert.equal(status.autoOpenFixtures.state, 'failed'); assert.match(status.autoOpenFixtures.error, /panel open/);
   fail = false; await data.commands.get('nativeCodexPrototype.openTwoTestPanels')(); assert.equal(data.calls.length, 3);
@@ -485,7 +645,7 @@ test('deactivation while official activation is pending prevents broker and pale
 test('auto-open with an occupied broker remains local to its own VS Code instance', async t => {
   const port = await sparePort(); const first = await startupFixture(t, { port }); const second = await startupFixture(t, { port, autoOpenFixtures: true });
   await first.extension.activate({ subscriptions: first.subscriptions });
-  await second.extension.activate({ subscriptions: second.subscriptions });
+  await second.extension.activate({ subscriptions: second.subscriptions }); await waitStartup(second);
   assert.equal(first.calls.length, 0); assert.equal(second.calls.length, 2);
   const ownerStatus = await (await fetch(`${first.base}/status`, { headers: first.headers })).json();
   assert.equal(ownerStatus.broker.enabled, true); assert.equal(ownerStatus.autoOpenFixtures.enabled, false); assert.equal(ownerStatus.opened.length, 0);
@@ -536,9 +696,12 @@ test('native new chat control constructs only captured new-page URIs and fixed c
   const { newChatUri, validateNewChatPanels, openNewChatPanels } = require('../companion/control.cjs');
   assert.equal(newChatUri(newWindowIds[0], newWindowIds), `openai-codex://route/extension/panel/new?nativeCodexPanel=${newWindowIds[0]}`);
   for (const value of ['../local/evil', `${newWindowIds[0]}&command=evil`, id, null]) assert.throws(() => newChatUri(value, newWindowIds), /allowlisted.*UUID/);
-  for (const value of [[], [id], [id, id], [id, secondFixture, thirdFixture]]) assert.throws(() => validateNewChatPanels(value), /two distinct/);
+  for (const value of [[], [id, id], [id, secondFixture, thirdFixture]]) assert.throws(() => validateNewChatPanels(value), /one or two distinct/);
   const calls = [];
   await openNewChatPanels({ Uri: { parse: uri => uri }, commands: { executeCommand: async (...args) => calls.push(args) } }, newWindowIds);
+  const single = [];
+  await openNewChatPanels({ Uri: { parse: uri => uri }, commands: { executeCommand: async (...args) => single.push(args) } }, [newWindowIds[0]]);
+  assert.deepEqual(single, [['vscode.openWith', `openai-codex://route/extension/panel/new?nativeCodexPanel=${newWindowIds[0]}`, 'chatgpt.conversationEditor', { viewColumn: 1, preview: false, preserveFocus: false }]]);
   assert.deepEqual(calls.map(call => [call[0], call[1], call[2], call[3]]), newWindowIds.map((windowId, index) => [
     'vscode.openWith', `openai-codex://route/extension/panel/new?nativeCodexPanel=${windowId}`, 'chatgpt.conversationEditor',
     { viewColumn: index + 1, preview: false, preserveFocus: false }
@@ -598,7 +761,7 @@ test('explicit new-chat startup waits for official activation and requires no fi
   const activation = deferred(); const entered = deferred();
   const data = await startupFixture(t, newChatConfig, { activate: () => { entered.resolve(); return activation.promise; }, cleanup: activation.resolve });
   const pending = data.extension.activate({ subscriptions: data.subscriptions }); await entered.promise;
-  assert.equal(data.calls.length, 0); activation.resolve(); await pending;
+  assert.equal(data.calls.length, 0); activation.resolve(); await pending; await waitStartup(data);
   assert.deepEqual(data.calls.map(call => [call[0], call[1], call[2], call[3].viewColumn]), newWindowIds.map((windowId, index) => [
     'vscode.openWith', `openai-codex://route/extension/panel/new?nativeCodexPanel=${windowId}`, 'chatgpt.conversationEditor', index + 1
   ]));
@@ -607,7 +770,8 @@ test('explicit new-chat startup waits for official activation and requires no fi
   assert.deepEqual(status.autoOpenFixtures, { enabled: false, state: 'disabled' });
   assert.deepEqual(status.opened.map(item => item.windowId), newWindowIds);
   assert.equal(status.opened.some(item => item.threadId !== undefined), false);
-  assert.equal(status.tabs.length, 0);
+  assert.equal(status.tabs.length, 2);
+  assert.deepEqual(status.tabs.map(group => group.tabs[0].uri), newWindowIds.map(windowId => `openai-codex://route/extension/panel/new?nativeCodexPanel=${windowId}`));
 });
 test('new chat palette command accepts no arguments and startup stays disabled by default', async t => {
   const data = await startupFixture(t, { threads: [], newChatWindowIds: newWindowIds });
@@ -623,7 +787,7 @@ test('new chat palette command accepts no arguments and startup stays disabled b
 });
 test('new chat configuration rejects invalid identities, booleans and fixture startup conflict', async t => {
   for (const config of [{ autoOpenNewChats: 'true' }, { autoOpenNewChats: 1 }, { autoOpenNewChats: null },
-    { autoOpenNewChats: true }, { autoOpenNewChats: true, newChatWindowIds: [id] }, { newChatWindowIds: [id, id] },
+    { autoOpenNewChats: true }, { autoOpenNewChats: true, newChatWindowIds: [] }, { newChatWindowIds: [id, id] },
     { newChatWindowIds: [id, 'command:evil'] }, { newChatWindowIds: 'evil' }, { ...newChatConfig, threads: [id, secondFixture], autoOpenFixtures: true }]) {
     const data = await startupFixture(t, config);
     await assert.rejects(data.extension.activate({ subscriptions: data.subscriptions }), /boolean|two distinct|allowlisted|mutually exclusive/);
@@ -654,7 +818,7 @@ test('new chat startup rejects missing official activation and reports failures 
 });
 test('new chat startup on occupied broker remains scoped to its own VS Code instance', async t => {
   const port = await sparePort(); const first = await startupFixture(t, { port }); const second = await startupFixture(t, { ...newChatConfig, port });
-  await first.extension.activate({ subscriptions: first.subscriptions }); await second.extension.activate({ subscriptions: second.subscriptions });
+  await first.extension.activate({ subscriptions: first.subscriptions }); await second.extension.activate({ subscriptions: second.subscriptions }); await waitStartup(second);
   assert.equal(first.calls.length, 0); assert.equal(second.calls.length, 2);
   const status = await (await fetch(`${first.base}/status`, { headers: first.headers })).json();
   assert.deepEqual(status.autoOpenNewChats, { enabled: false, state: 'disabled' }); assert.equal(status.opened.length, 0);
@@ -685,7 +849,7 @@ test('new chat startup releases the shared lock after success or command failure
   for (const failInitially of [false, true]) {
     let fail = failInitially;
     const data = await startupFixture(t, { ...newChatConfig, threads: [id, secondFixture] }, { open() { if (fail) throw new Error('new panel failure'); } });
-    await data.extension.activate({ subscriptions: data.subscriptions }); fail = false;
+    await data.extension.activate({ subscriptions: data.subscriptions }); await waitStartup(data); fail = false;
     const startupCalls = data.calls.length;
     await data.commands.get('nativeCodexPrototype.openTwoNewChats')();
     await data.commands.get('nativeCodexPrototype.openTwoTestPanels')();

@@ -192,9 +192,10 @@ function newChatWindowIds(
   if (
     record.panelMode !== "new-chats" ||
     !Array.isArray(value) ||
-    value.length !== 2 ||
+    value.length < 1 ||
+    value.length > 2 ||
     value.some((id) => typeof id !== "string" || !UUID.test(id)) ||
-    new Set(value).size !== 2
+    new Set(value).size !== value.length
   )
     return undefined;
   return value.slice() as string[];
@@ -220,7 +221,7 @@ export function validateNativeCodexWindowRestore(
     !UUID.test(input.threadId) ||
     !Number.isInteger(input.column) ||
     (input.column as number) < 1 ||
-    (input.column as number) > 2 ||
+    (input.column as number) > allowedWindowIds.length ||
     allowedWindowIds[(input.column as number) - 1] !== input.windowId
   )
     throw new Error("native Codex restore target is not allowlisted");
@@ -290,6 +291,17 @@ export function validateNativeCodexFocus(value: unknown): { kind: "new" | "threa
     typeof input.instanceId !== "string" || !UUID.test(input.instanceId))
     throw new Error("invalid native Codex focus target");
   return { kind: input.kind, targetId: input.targetId, instanceId: input.instanceId };
+}
+
+export function validateNativeCodexTheme(value: unknown): { instanceId: string; theme: "light" | "dark" } {
+  if (!value || typeof value !== "object" || Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !== "instanceId,theme")
+    throw new Error("invalid native Codex theme request");
+  const input = value as Record<string, unknown>;
+  if (typeof input.instanceId !== "string" || !UUID.test(input.instanceId) ||
+    (input.theme !== "light" && input.theme !== "dark"))
+    throw new Error("native Codex theme must be light or dark");
+  return { instanceId: input.instanceId, theme: input.theme };
 }
 
 export function validateNativeCodexReleaseInstance(value: unknown): { oldInstanceId: string; currentInstanceId: string } {
@@ -630,11 +642,7 @@ export class NativeCodexGateway {
 
   async restoreNewChatThread(value: unknown): Promise<number> {
     const runtime = await this.runtime();
-    if (
-      !runtime?.newChatWindowIds ||
-      !runtime.brokerPort ||
-      !runtime.brokerAuthFile
-    )
+    if (!runtime?.newChatWindowIds || !runtime.brokerPort || !runtime.brokerAuthFile)
       return 503;
     let body: ReturnType<typeof validateNativeCodexWindowRestore>;
     let instanceId: string | undefined;
@@ -685,6 +693,15 @@ export class NativeCodexGateway {
     try { body = validateNativeCodexNewBeside(value); }
     catch { return { status: 400 }; }
     return this.callBroker(runtime, "/new-beside", { windowId: body.windowId }, "opened", body.instanceId);
+  }
+
+  async applyNativeTheme(value: unknown): Promise<{ status: number }> {
+    const runtime = await this.runtime();
+    if (!runtime?.brokerPort || !runtime.brokerAuthFile) return { status: 503 };
+    let body: ReturnType<typeof validateNativeCodexTheme>;
+    try { body = validateNativeCodexTheme(value); }
+    catch { return { status: 400 }; }
+    return this.callBroker(runtime, "/theme", { theme: body.theme }, "applied", body.instanceId);
   }
 
   async focusNativeWindow(value: unknown): Promise<{ status: number; column?: number }> {
@@ -844,9 +861,9 @@ export class NativeCodexGateway {
 
   private async callBroker(
     runtime: NativeCodexRuntime,
-    path: "/restore" | "/resume" | "/resume-beside" | "/new-beside" | "/focus" | "/release",
+    path: "/restore" | "/resume" | "/resume-beside" | "/new-beside" | "/focus" | "/release" | "/theme",
     body: object,
-    successField: "restored" | "opened" | "focused" | "released",
+    successField: "restored" | "opened" | "focused" | "released" | "applied",
     instanceId?: string,
   ): Promise<{ status: number; column?: number }> {
     try {

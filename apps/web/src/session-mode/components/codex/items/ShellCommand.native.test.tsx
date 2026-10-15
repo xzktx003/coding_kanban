@@ -269,8 +269,11 @@ it("distinguishes unloaded command details from real empty output and retains th
       transcriptMetadataOnly
     />,
   );
+  expect(screen.queryByText("详情未加载")).toBeNull();
+  expect(screen.queryByText("输出未放入当前页面")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: /metadata-command/ }));
-  expect(screen.getAllByText("详情未加载").length).toBeGreaterThan(0);
+  expect(screen.getByText("command.detail.identity")).toBeTruthy();
+  expect(screen.queryByText("详情未加载")).toBeNull();
   expect(screen.queryByText("command.noOutput")).toBeNull();
   expect(
     screen.queryByRole("button", { name: "command.copyOutput" }),

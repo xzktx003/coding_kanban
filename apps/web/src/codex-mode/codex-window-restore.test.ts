@@ -4,6 +4,7 @@ import {
   persistCodexWindowThread,
   readCodexWindowThreads,
   shouldRestoreCodexWindowThread,
+  validateCodexWindowIds,
 } from "./codex-window-restore";
 
 const windowIds = [
@@ -96,4 +97,14 @@ it("fails closed on corrupt storage and restores only a blank original window", 
       composerEmpty: true,
     }),
   ).toBe(false);
+});
+
+it("accepts one or two distinct startup window ids and rejects every other shape", () => {
+  const only = [windowIds[0]!];
+  expect(validateCodexWindowIds(only)).toEqual(only);
+  expect(validateCodexWindowIds(windowIds)).toEqual(windowIds);
+  expect(validateCodexWindowIds([])).toBeUndefined();
+  expect(validateCodexWindowIds([windowIds[0], windowIds[0]])).toBeUndefined();
+  expect(validateCodexWindowIds([...windowIds, firstThread])).toBeUndefined();
+  expect(validateCodexWindowIds(["not-a-uuid"])).toBeUndefined();
 });

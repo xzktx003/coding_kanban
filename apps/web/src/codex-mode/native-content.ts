@@ -6,6 +6,7 @@ export type NativeContentState = {
   composerEmpty: boolean;
   userInteracted: boolean;
   blockedByOtherApp?: boolean;
+  onboarding?: boolean;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -34,9 +35,45 @@ export function observeNativeContent(
   const conversationObserver = new view.MutationObserver(() =>
     checkConversation(),
   );
+  const portalStructureObserver = new view.MutationObserver(() =>
+    checkConversation(),
+  );
+  let portalAncestors: HTMLElement[] = [];
+  const stopPortalStructureWatch = () => {
+    portalStructureObserver.disconnect();
+    portalAncestors = [];
+  };
+  const watchPortalStructure = (
+    portal: HTMLElement | null,
+    root: HTMLElement | null,
+  ) => {
+    const next: HTMLElement[] = [];
+    for (
+      let parent = portal?.parentElement;
+      parent && next.length < 64;
+      parent = parent.parentElement
+    ) {
+      next.push(parent);
+      if (parent === root) break;
+    }
+    if (
+      next.length === portalAncestors.length &&
+      next.every((parent, index) => parent === portalAncestors[index])
+    )
+      return;
+    stopPortalStructureWatch();
+    portalAncestors = next;
+    // Watch only direct children along the portal's ancestry. Changes deep in
+    // a sibling transcript do not rescan the application after it becomes ready.
+    for (const parent of next)
+      portalStructureObserver.observe(parent, { childList: true });
+  };
   const lockObserver = new view.MutationObserver(() => {
     if (lockCheckTimer !== null) return;
-    lockCheckTimer = view.setTimeout(() => { lockCheckTimer = null; checkConversation(); }, 20);
+    lockCheckTimer = view.setTimeout(() => {
+      lockCheckTimer = null;
+      checkConversation();
+    }, 20);
   });
   const stopLockWatch = () => {
     lockObserver.disconnect();
@@ -49,6 +86,23 @@ export function observeNativeContent(
   const publish = (value: boolean) => {
     ready = value;
     onReady(value);
+  };
+  const publishFailure = () => {
+    const state: NativeContentState = {
+      ready: false,
+      conversationId: null,
+      hasComposer: false,
+      composerEmpty: false,
+      userInteracted,
+      blockedByOtherApp: false,
+    };
+    lastValue = state;
+    publish(false);
+    const key = JSON.stringify(state);
+    if (lastState !== key) {
+      lastState = key;
+      onState?.(state);
+    }
   };
   const composerIsHidden = (element: HTMLElement) => {
     for (
@@ -93,6 +147,7 @@ export function observeNativeContent(
           ],
         });
     }
+    watchPortalStructure(portal, root);
     const candidate =
       Array.from(
         root?.querySelectorAll<HTMLElement>(
@@ -121,18 +176,35 @@ export function observeNativeContent(
         "[data-composer-attachment-pill], [data-appshot-attachment], [data-attachment-thumbnail-source]",
       ),
     );
-    const blockedByOtherApp = Boolean(root?.textContent?.includes("This is open in another app") &&
+    const blockedByOtherApp = Boolean(
+      root?.textContent?.includes("This is open in another app") &&
       root?.textContent?.includes("Close it there to continue here.") &&
-      Array.from(root.querySelectorAll("button")).some((button) => button.textContent?.trim() === "Retry"));
+      Array.from(root.querySelectorAll("button")).some(
+        (button) => button.textContent?.trim() === "Retry",
+      ),
+    );
     const hasComposer = Boolean(composer) && !blockedByOtherApp;
+    // This pinned native onboarding has Back/Next controls and no thread or
+    // composer. Expose its own controls without accepting an unrelated chat.
+    const buttons =
+      !conversationId && !hasComposer
+        ? Array.from(root?.querySelectorAll("button") ?? [], (button) =>
+            button.textContent?.trim(),
+          )
+        : [];
+    const onboarding =
+      buttons.some((text) => text === "Next" || text === "下一步") &&
+      buttons.some(
+        (text) => text === "Back" || text === "上一步" || text === "返回",
+      );
     const state: NativeContentState = {
       ready: rendered,
       conversationId,
       hasComposer,
-      composerEmpty:
-        hasComposer && !composerValue.trim() && !hasAttachment,
+      composerEmpty: hasComposer && !composerValue.trim() && !hasAttachment,
       userInteracted,
       blockedByOtherApp,
+      ...(onboarding ? { onboarding: true } : {}),
     };
     lastValue = state;
     const key = JSON.stringify(state);
@@ -140,17 +212,30 @@ export function observeNativeContent(
       lastState = key;
       onState?.(state);
     }
-    if (root && conversationId && !lockWatchExpired && observedLockRoot !== root) {
+    if (
+      root &&
+      conversationId &&
+      !lockWatchExpired &&
+      observedLockRoot !== root
+    ) {
       stopLockWatch();
       observedLockRoot = root;
-      lockObserver.observe(root, { childList: true, characterData: true, subtree: true });
+      lockObserver.observe(root, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
       lockWatchDeadline = view.setTimeout(() => {
         lockWatchDeadline = null;
         lockWatchExpired = true;
         if (!lastValue?.blockedByOtherApp) stopLockWatch();
       }, 30_000);
-    } else if (lockWatchExpired && observedLockRoot && !blockedByOtherApp) stopLockWatch();
-    if (portal && composer) appObserver.disconnect();
+    } else if (lockWatchExpired && observedLockRoot && !blockedByOtherApp)
+      stopLockWatch();
+    // The native first send can replace the entire blank composer portal.
+    // Keep structural observation until the real conversation identity exists;
+    // observing the detached old portal cannot discover that transition.
+    if (portal && composer && conversationId) appObserver.disconnect();
     else if (app) {
       appObserver.observe(root ?? app, {
         childList: true,
@@ -188,19 +273,13 @@ export function observeNativeContent(
       readConversationState(root, rendered);
     } catch {
       conversationObserver.disconnect();
+      stopPortalStructureWatch();
       appObserver.disconnect();
       stopLockWatch();
       conversationPortal = null;
       composer?.removeEventListener("input", handleInput);
       composer = null;
-      onState?.({
-        ready: false,
-        conversationId: null,
-        hasComposer: false,
-        composerEmpty: false,
-        userInteracted,
-        blockedByOtherApp: false,
-      });
+      publishFailure();
     }
   }
   function handleInput() {
@@ -220,6 +299,7 @@ export function observeNativeContent(
       if (app !== next) {
         appObserver.disconnect();
         conversationObserver.disconnect();
+        stopPortalStructureWatch();
         stopLockWatch();
         lockWatchExpired = false;
         composer?.removeEventListener("input", handleInput);
@@ -246,11 +326,12 @@ export function observeNativeContent(
       );
       publish(rendered);
       readConversationState(root, rendered);
-      // Keep observing only until the composer portal and editor exist; then observe the portal alone.
+      // A known composer keeps its portal and bounded ancestor structure watch.
     } catch {
       const failedApp = app;
       appObserver.disconnect();
       conversationObserver.disconnect();
+      stopPortalStructureWatch();
       stopLockWatch();
       lockWatchExpired = true;
       app = null;
@@ -260,7 +341,7 @@ export function observeNativeContent(
       failedApp?.removeEventListener("keydown", handleUserAction, true);
       failedApp?.removeEventListener("input", handleUserAction, true);
       composer = null;
-      publish(false);
+      publishFailure();
     }
   };
   const connect = () => {
@@ -284,6 +365,7 @@ export function observeNativeContent(
         inner?.removeEventListener("load", check);
         appObserver.disconnect();
         conversationObserver.disconnect();
+        stopPortalStructureWatch();
         stopLockWatch();
         lockWatchExpired = false;
         composer?.removeEventListener("input", handleInput);
@@ -299,7 +381,22 @@ export function observeNativeContent(
       }
       check();
     } catch {
-      publish(false);
+      outerObserver.disconnect();
+      inner?.removeEventListener("load", check);
+      appObserver.disconnect();
+      conversationObserver.disconnect();
+      stopPortalStructureWatch();
+      stopLockWatch();
+      composer?.removeEventListener("input", handleInput);
+      app?.removeEventListener("pointerdown", handleUserAction, true);
+      app?.removeEventListener("keydown", handleUserAction, true);
+      app?.removeEventListener("input", handleUserAction, true);
+      outer = null;
+      inner = null;
+      app = null;
+      composer = null;
+      conversationPortal = null;
+      publishFailure();
     }
   };
   const outerObserver = new view.MutationObserver(() => connect());
@@ -313,6 +410,7 @@ export function observeNativeContent(
     app?.removeEventListener("input", handleUserAction, true);
     appObserver.disconnect();
     conversationObserver.disconnect();
+    stopPortalStructureWatch();
     stopLockWatch();
     lockWatchExpired = false;
     outerObserver.disconnect();
@@ -335,7 +433,9 @@ export function observeNativeContent(
     },
     snapshot() {
       if (!running) return null;
-      checkConversation();
+      // A retained reference is not evidence that the frame still owns this
+      // document: native navigation can replace it before the load callback.
+      connect();
       return lastValue;
     },
     pause,

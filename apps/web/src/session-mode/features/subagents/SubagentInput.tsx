@@ -7,6 +7,9 @@ import {
 } from "@session/stores/useSessionDraftStore";
 import { useImageAttachments } from "@session/components/common/useImageAttachments";
 import { followupService } from "@session/services/followupService";
+import { useCodexSendBlockReason } from "@session/hooks/useCodexSendBlockReason";
+import { useCodexThreadInput } from "@session/hooks/useCodexThreadInput";
+import { selectCodexThreadInput } from "./inputIdentity";
 import { subagentService } from "./service";
 import { AgentMentionPicker } from "./AgentMentionPicker";
 import { mentionDrafts } from "./mentions";
@@ -26,10 +29,14 @@ export function SubagentInput({
     attachments = useImageAttachments(owner);
   const [sending, setSending] = useState(false),
     [notice, setNotice] = useState("");
+  const accessBlock = useCodexSendBlockReason(id);
+  const threadInput = useCodexThreadInput(id, true);
   const send = async (event: React.FormEvent) => {
     event.preventDefault();
     if (
       submissions.has(owner) ||
+      !!accessBlock ||
+      threadInput.blocked ||
       attachments.blocked ||
       (!draft.inputValue.trim() && !attachments.paths.length)
     )
@@ -43,7 +50,15 @@ export function SubagentInput({
     setNotice("");
     try {
       const metadata = await subagentService.verify(root, id);
-      if (metadata.canAcceptDirectInput !== true)
+      if (
+        selectCodexThreadInput(
+          metadata,
+          undefined,
+          { thread: metadata, revision: 0, runtimeEpoch: 0 },
+          0,
+          true,
+        ).blocked
+      )
         throw new Error("当前子线程不允许直接输入，请通过主 Agent 跟进");
       const parameters = {
         cwd: metadata.cwd ?? null,
@@ -132,10 +147,28 @@ export function SubagentInput({
           }}
         />
       </label>
-      <button type="submit" disabled={sending || attachments.blocked}>
+      <button
+        type="submit"
+        disabled={
+          sending || !!accessBlock || threadInput.blocked || attachments.blocked
+        }
+      >
         {sending ? "正在发送…" : `发送给 ${name}`}
       </button>
-      {notice && <p role="status">{notice}</p>}
+      {(accessBlock || threadInput.reason || notice) && (
+        <p role="status">
+          {accessBlock || threadInput.reason || notice}
+          {threadInput.needsVerification && (
+            <button
+              type="button"
+              onClick={threadInput.recheck}
+              disabled={threadInput.rechecking}
+            >
+              重新核对
+            </button>
+          )}
+        </p>
+      )}
     </form>
   );
 }

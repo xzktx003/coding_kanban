@@ -94,7 +94,17 @@
 }
 .session-mode
   .session-codex-composer.session-native-composer
+  .session-native-editor-slot {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
   .session-composer-editor {
+  flex: 1 1 auto;
   height: auto;
   min-height: 44px;
   max-height: 25dvh;
@@ -917,6 +927,7 @@
   .session-mode
     .session-codex-composer.session-native-composer
     .session-composer-editor {
+    flex: 1 1 0;
     height: 100%;
     min-height: 0;
     max-height: none;

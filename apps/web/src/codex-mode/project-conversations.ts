@@ -120,6 +120,7 @@ export async function loadProjectConversations(
   project: string,
   query: ThreadListQuery = queryThreadList,
   signal?: AbortSignal,
+  onPage?: (conversations: CodexProjectConversation[]) => void,
 ): Promise<CodexProjectConversation[]> {
   if (
     !project.startsWith("/") ||
@@ -154,6 +155,7 @@ export async function loadProjectConversations(
       const item = resumableConversation(raw, project);
       if (item && !conversations.has(item.id)) conversations.set(item.id, item);
     }
+    onPage?.([...conversations.values()]);
     if (page.nextCursor === null) break;
     if (!page.nextCursor || cursorHistory.has(page.nextCursor))
       throw new Error("Codex 会话列表分页游标重复，无法确认项目会话总数");

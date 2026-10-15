@@ -360,11 +360,11 @@ it("keeps a live caption for the native one-second dwell, but completes immediat
       command("next", "inProgress"),
     ]);
     view.rerender(<NativeActivityGroup group={next} />);
-    expect(screen.getByRole("button", { name: "正在运行 first" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "正在运行命令 first" })).toBeTruthy();
     act(() => vi.advanceTimersByTime(749));
-    expect(screen.getByRole("button", { name: "正在运行 first" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "正在运行命令 first" })).toBeTruthy();
     act(() => vi.advanceTimersByTime(1));
-    expect(screen.getByRole("button", { name: "正在运行 next" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "正在运行命令 next" })).toBeTruthy();
     view.rerender(
       <NativeActivityGroup
         group={group([command("first"), mcp("lookup"), command("next")])}

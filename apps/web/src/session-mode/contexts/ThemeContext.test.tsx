@@ -31,3 +31,20 @@ it("applies both themes to the session scope without changing the document or re
   expect(document.documentElement.className).toBe(original);
   expect(root.style.colorScheme).toBe("dark");
 });
+
+it("keeps a mounted Codex shell on the same resolved theme", async () => {
+  root = document.createElement("div");
+  root.className = "session-mode dark";
+  const codex = document.createElement("div");
+  codex.className = "codex-mode dark";
+  document.body.append(root, codex);
+  useThemeStore.setState({ theme: "light", accent: "default" });
+  render(<ThemeProvider><span>会话</span></ThemeProvider>, { container: root });
+  await waitFor(() => expect(codex.classList.contains("light")).toBe(true));
+  expect(root.classList.contains("light")).toBe(true);
+  expect(codex.classList.contains("accent-default")).toBe(true);
+  act(() => useThemeStore.getState().setTheme("dark"));
+  await waitFor(() => expect(codex.classList.contains("dark")).toBe(true));
+  expect(root.classList.contains("dark")).toBe(true);
+  codex.remove();
+});

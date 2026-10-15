@@ -1,13 +1,47 @@
 import { test, expect, type Page } from "@playwright/test";
 import { installSessionUxFixture } from "./session-ux-fixture";
+import { openComposerStatus } from "./session-composer-actions";
+import { liveStream } from "./session-sse-fixture";
+import { writeFileSync } from "node:fs";
+async function openInspection(page: Page, list = true) {
+  const summary = page.locator(".session-subagent-summary");
+  const expand = summary.getByRole("button", { name: /子智能体 · 已开启/ });
+  if (await expand.isVisible()) {
+    if (await expand.getAttribute("aria-expanded") !== "true") await expand.click();
+    await summary.locator(":scope > button").first().click();
+  } else {
+    const process = page.getByRole("button", { name: /^工作过程$|^用时/ }).first();
+    await process.click();
+    const created = page.getByRole("button", { name: /已创建.*个智能体/ }).first();
+    if (await created.getAttribute("aria-expanded") !== "true") await created.click();
+    await page.locator(".codex-activity-body").getByRole("button", { name: "Atlas", exact: true }).click();
+  }
+  if (list) await page.getByRole("button", { name: "返回子代理列表", exact: true }).click();
+}
+async function closeInspection(page: Page) {
+  const panel = page.locator(".session-subagent-panel");
+  const back = panel.getByRole("button", { name: "返回子代理列表", exact: true });
+  if (await back.isVisible()) await back.click();
+  await panel.getByRole("button").first().focus();
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+}
 async function setup(
   page: Page,
   options: { oldRound?: boolean; approval?: boolean } = {},
 ) {
   const fixture = await installSessionUxFixture(page, 2),
     calls: any[] = [];
-  const errorEvents: Array<{ text: string; at: number }> = [],
+  const errorEvents: Array<{ text: string; at: number; kind: string }> = [],
     navigationAborts: number[] = [];
+  const expectedMetadata404 = new Set<string>();
+  const metadataResponses: Array<{ threadId: string; status: number; at: number; path: string }> = [];
+  page.on("response", response => {
+    const path = new URL(response.url()).pathname;
+    if (!path.endsWith("/thread/metadata") || response.status() !== 404) return;
+    const body = response.request().postDataJSON();
+    metadataResponses.push({ threadId: body.threadId, status: response.status(), at: Date.now(), path });
+  });
   const pendingReads = new Set<import("@playwright/test").Request>();
   page.on("request", (r) => {
     if (/\/thread\/(read|turns\/list)$/.test(new URL(r.url()).pathname))
@@ -24,14 +58,17 @@ async function setup(
       .filter(
         (e) =>
           !(
-            e.text.includes(
+            e.kind === "console" && e.text.includes(
               "[CodexService] threadResume error: TypeError: Failed to fetch",
             ) && navigationAborts.some((at) => Math.abs(at - e.at) < 100)
+          ) && !(
+            e.kind === "console" && e.text === "Failed to load resource: the server responded with a status of 404 (Not Found)" &&
+            metadataResponses.some(response => expectedMetadata404.has(response.threadId) && Math.abs(response.at - e.at) < 100)
           ),
       )
       .map((e) => e.text);
   page.on("pageerror", (e) =>
-    errorEvents.push({ text: e.message, at: Date.now() }),
+    errorEvents.push({ text: e.message, at: Date.now(), kind: "pageerror" }),
   );
   page.on("console", (m) => {
     if (
@@ -39,7 +76,7 @@ async function setup(
       !m.text().startsWith("[vite]") &&
       !m.text().includes("AbortError")
     )
-      errorEvents.push({ text: m.text().slice(0, 1500), at: Date.now() });
+      errorEvents.push({ text: m.text().slice(0, 1500), at: Date.now(), kind: "console" });
   });
   const now = Math.floor(Date.now() / 1000);
   const children: any[] = [
@@ -201,6 +238,17 @@ async function setup(
     });
   });
   await page.route(
+    /\/api\/session\/api\/codex\/thread\/metadata(?:\?.*)?$/,
+    async (r) => {
+      const body = r.request().postDataJSON(),
+        child = children.find((c) => c.id === body.threadId);
+      if (!child) return r.fallback();
+      calls.push({ body, path: new URL(r.request().url()).pathname });
+      const { turns: _turns, ...metadata } = child;
+      return r.fulfill({ json: { thread: metadata } });
+    },
+  );
+  await page.route(
     /\/api\/session\/api\/codex\/thread\/turns\/list(?:\?.*)?$/,
     async (r) => {
       const body = r.request().postDataJSON(),
@@ -220,18 +268,17 @@ async function setup(
     console.log(errors());
     throw e;
   });
-  const openChildren = page.getByRole("button", {
-    name: "打开子智能体",
-    exact: true,
-  });
-  await openChildren.waitFor({ timeout: 20000 });
-  await openChildren.click();
+  await page.locator('[role=tab][data-tab-key="codex:ux-0"] .session-identity-title').click();
+  await expect(page.locator('[role=tab][data-tab-key="codex:ux-0"]')).toHaveAttribute("aria-selected", "true");
+  await openInspection(page);
   (page as any).sessionOptFixture = {
     calls,
     get errors() {
       return errors();
     },
     navigationAborts,
+    metadataResponses,
+    get expectedMetadataThreadIds() { return [...expectedMetadata404]; },
   };
   return {
     fixture,
@@ -243,6 +290,9 @@ async function setup(
     children,
     discovery,
     pendingReads,
+    metadataResponses,
+    expectedMetadata404,
+    errorEvents,
   };
 }
 test.afterEach(async ({ page }, info) => {
@@ -364,8 +414,8 @@ test("interactive child draft and image restore after refresh without changing t
       ),
     });
   await expect(page.locator(".session-subagent-input")).toContainText("ready");
-  await page.getByRole("button", { name: "返回子智能体", exact: true }).click();
-  await page.getByRole("button", { name: "打开子智能体", exact: true }).click();
+  await closeInspection(page);
+  await openInspection(page, false);
   await expect(childDraft).toHaveValue("子草稿输入一半");
   // This case verifies durable drafts after completed reads; navigation-aborted
   // background reads are exercised separately from page runtime errors.
@@ -428,14 +478,15 @@ test("role mentions retain native identity in a parent submission; the panel doe
   await expect(panel.getByRole("heading", { name: /已开启/ })).toBeVisible();
   await expect(panel.getByRole("button", { name: /停止/ })).toHaveCount(0);
   await expect(panel.getByLabel("搜索子任务")).toHaveCount(0);
-  await page.getByRole("button", { name: "返回子智能体", exact: true }).click();
+  await closeInspection(page);
+  await page.getByRole("button", { name: "附加文件", exact: true }).click();
   await page.getByRole("button", { name: "引用子 Agent 或配置角色" }).click();
   await page
     .locator(".session-agent-mention-menu")
     .getByRole("button", { name: "reviewer" })
     .click();
   await f.editor.fill("请审查变更");
-  await page.getByRole("button", { name: "发送", exact: true }).click();
+  await page.getByRole("button", { name: "发送消息", exact: true }).click();
   await expect
     .poll(
       () =>
@@ -489,71 +540,41 @@ test("active and done sections list every descendant without a round filter", as
   expect(f.calls.filter((c) => c.path.endsWith("/stop"))).toEqual([]);
   expect(f.errors).toEqual([]);
 });
-test("a finished family leaves the composer summary hidden and shows the empty panel", async ({
-  page,
-}) => {
-  await page.goto("/?mode=session&view=agent", { waitUntil: "domcontentloaded" });
-  await page.getByRole("tablist", { name: "关注会话" }).waitFor();
-  await page.evaluate(async () => {
-    const load = (path: string) =>
-      import(
-        performance
-          .getEntriesByType("resource")
-          .findLast((entry) => new URL(entry.name).pathname === path)?.name ?? path
-      );
-    const store = await load("/src/session-mode/features/subagents/store.ts");
-    const done = {
-      thread: {
-        id: "done-child",
-        name: "已完成检查",
-        status: { type: "idle" },
-        turns: [
-          {
-            id: "done-turn",
-            status: "completed",
-            items: [],
-            startedAt: 1,
-            completedAt: 2,
-          },
-        ],
-      },
-      parentId: "ux-0",
-      verified: true,
-      revision: 1,
-    };
-    store.useSubagentStore.setState({
-      nodes: { "done-child": done },
-      families: { "ux-0": { complete: true, loading: false, error: null } },
-    });
-  });
-  await expect(page.getByRole("button", { name: /子智能体 · 已开启/ })).toHaveCount(
-    0,
-  );
-  await page.screenshot({
-    path: `${process.env.CODEX_UI_SHOTS ?? "test-results"}/control-subagents-hidden.png`,
-    animations: "disabled",
-  });
-  await page.evaluate(async () => {
+test("a finished family leaves the composer summary hidden and shows the empty panel", async ({ page, baseURL }) => {
+  const stream = await liveStream(page, baseURL!);
+  try {
+  const f = await setup(page);
+  await closeInspection(page);
+  const refresh = () => page.evaluate(async () => {
     const path = "/src/session-mode/features/subagents/service.ts";
-    const module = await import(
-      performance
-        .getEntriesByType("resource")
-        .findLast((entry) => new URL(entry.name).pathname === path)?.name ?? path
-    );
-    module.openSubagents("ux-0");
+    const service = await import(performance.getEntriesByType("resource").findLast(entry => new URL(entry.name).pathname === path)?.name ?? path);
+    await service.subagentService.refresh("ux-0");
   });
+  // Settle initial discovery before changing the authoritative fixture snapshot.
+  await refresh();
+  await expect.poll(() => stream.connections()).toBeGreaterThan(0);
+  let seq = 1;
+  for (const child of f.children) {
+    const previous = child.turns.at(-1);
+    const turn = { ...previous, status: "completed", startedAt: previous.startedAt ?? 1, completedAt: 2 };
+    Object.assign(child, { status: { type: "idle" }, turns: [turn] });
+    stream.emit(seq++, { method: "turn/completed", params: { threadId: child.id, turn } });
+  }
+  await refresh();
+  await expect(page.getByRole("button", { name: /子智能体 · 已开启/ })).toHaveCount(0);
+  await openInspection(page);
   const panel = page.locator(".session-subagent-panel");
   await expect(panel.getByText("已开启 · 0", { exact: true })).toBeVisible();
   await expect(panel.getByText("没有已开启的子代理")).toBeVisible();
-  await page.screenshot({
-    path: `${process.env.CODEX_UI_SHOTS ?? "test-results"}/control-subagents-empty.png`,
-    animations: "disabled",
-  });
+  await expect(panel.getByRole("heading", { name: "完成 · 3", exact: true })).toBeVisible();
+  expect(f.errors).toEqual([]);
+  } finally { await stream.close(); }
 });
 test("incomplete discovery retains unavailable identities and avoids claiming completion", async ({
   page,
 }) => {
   const f = await setup(page);
+  f.expectedMetadata404.add("child-atlas");
   f.children.splice(
     f.children.findIndex((c) => c.id === "child-atlas"),
     1,
@@ -561,8 +582,8 @@ test("incomplete discovery retains unavailable identities and avoids claiming co
   f.discovery.complete = false;
   f.discovery.errors = ["fixture history unavailable"];
   f.discovery.unavailableIds = ["child-atlas"];
-  await page.getByRole("button", { name: "返回子智能体", exact: true }).click();
-  await page.getByRole("button", { name: "打开子智能体", exact: true }).click();
+  await closeInspection(page);
+  await openInspection(page);
   await expect(page.locator('[data-subagent-id="child-atlas"]')).toContainText(
     "待确认",
   );
@@ -573,6 +594,15 @@ test("incomplete discovery retains unavailable identities and avoids claiming co
     0,
   );
   expect(f.errors).toEqual([]);
+  expect(f.metadataResponses.filter(response => response.threadId === "child-atlas" && response.status === 404).length).toBeGreaterThan(0);
+  expect(f.fixture.calls.filter(call => /thread\/(resume|start)|turn\/(start|interrupt)/.test(call.path))).toEqual([]);
+  writeFileSync(test.info().outputPath("expected-metadata-404.json"), JSON.stringify({
+    expectedThreadIds: [...f.expectedMetadata404],
+    responses: f.metadataResponses,
+    observedErrors: f.errorEvents,
+    unexpectedErrors: f.errors,
+    mutationCalls: f.fixture.calls.filter(call => /thread\/(resume|start)|turn\/(start|interrupt)/.test(call.path)),
+  }, null, 2));
 });
 test("nested descendants stay in the flat list and detail selection survives parent tab switching", async ({
   page,
@@ -754,10 +784,9 @@ test("background batch stop confirms only this round and rejects a stale confirm
   page,
 }) => {
   const f = await setup(page, { oldRound: true });
-  await page
-    .getByRole("region", { name: "子智能体" })
-    .getByRole("button", { name: /打开子智能体/ })
-    .click();
+  await expect(page.locator(".session-subagent-panel")).toBeVisible();
+  await openComposerStatus(page);
+  await page.locator(".session-background-agents button[aria-expanded]").click();
   await page.getByRole("button", { name: "全部停止", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "停止本轮子智能体" });
   await expect(dialog).toContainText("Atlas");
@@ -792,10 +821,9 @@ test("an old batch-stop confirmation stays invalid after the scope returns", asy
   page,
 }) => {
   const f = await setup(page, { oldRound: true });
-  await page
-    .getByRole("region", { name: "子智能体" })
-    .getByRole("button", { name: /打开子智能体/ })
-    .click();
+  await expect(page.locator(".session-subagent-panel")).toBeVisible();
+  await openComposerStatus(page);
+  await page.locator(".session-background-agents button[aria-expanded]").click();
   await page.getByRole("button", { name: "全部停止", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "停止本轮子智能体" });
   await expect(dialog).toContainText("Atlas");

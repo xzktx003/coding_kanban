@@ -5,7 +5,25 @@ const api = vi.hoisted(() => ({
   getJsonWithOptions: vi.fn(),
   postJsonWithOptions: vi.fn(),
 }));
-vi.mock("./apiAdapt/shared", () => api);
+vi.mock("./apiAdapt/shared", async (original) => ({
+  ...(await original<object>()),
+  ...api,
+}));
+vi.mock("./apiAdapt/codex", () => ({
+  threadAccess: vi.fn(async () => ({
+    state: "owned",
+    reason: "",
+    generation: 1,
+  })),
+}));
+import { SessionApiError } from "./apiAdapt/shared";
+import { threadAccess } from "./apiAdapt/codex";
+import { resetCodexAccessCache } from "../stores/useCodexAccessStore";
+import {
+  useCodexDeliveryStore,
+  beginDeliveryEcho,
+  reconcileDeliveryEchoes,
+} from "../stores/useCodexDeliveryStore";
 import {
   followupService,
   followupParameters,
@@ -21,14 +39,161 @@ import {
 } from "../stores/useThreadModelStore";
 beforeEach(() => {
   vi.clearAllMocks();
+  api.postJsonWithOptions.mockReset();
+  api.getJsonWithOptions.mockReset();
+  resetCodexAccessCache();
+  vi.mocked(threadAccess)
+    .mockReset()
+    .mockResolvedValue({ state: "owned", reason: "", generation: 1 });
   localStorage.clear();
   useThreadModelStore.setState({ threads: {} });
   useFollowupStore.setState({ threads: {}, errors: {} });
+  useCodexDeliveryStore.setState({ entries: {} });
   useCodexStore.setState({
     turnTimingMap: {},
     threadStatusMap: {},
   });
   vi.stubGlobal("crypto", webcrypto);
+});
+it.each([400, 403, 409, 422])(
+  "removes only an unaccepted submission after an explicit HTTP %s rejection",
+  async (status) => {
+    beginDeliveryEcho({
+      id: "other",
+      threadId: "b",
+      text: "other draft",
+      images: [],
+      mode: "queue",
+      parameters: {},
+    });
+    api.postJsonWithOptions.mockRejectedValueOnce(
+      new SessionApiError("not sent", status),
+    );
+    await expect(
+      followupService.submit(
+        "codex:a",
+        1,
+        "a",
+        "rejected",
+        ["/draft.png"],
+        "queue",
+        undefined,
+        {},
+      ),
+    ).rejects.toThrow("not sent");
+    expect(
+      Object.values(useCodexDeliveryStore.getState().entries).map(
+        (e) => e.threadId,
+      ),
+    ).toEqual(["b"]);
+  },
+);
+it("keeps uncertain delivery after a generic 500 or missing acknowledgement", async () => {
+  api.postJsonWithOptions.mockRejectedValueOnce(
+    new SessionApiError("server disconnected", 500),
+  );
+  await expect(
+    followupService.submit(
+      "codex:a",
+      1,
+      "a",
+      "unknown",
+      [],
+      "queue",
+      undefined,
+      {},
+    ),
+  ).rejects.toThrow();
+  expect(Object.values(useCodexDeliveryStore.getState().entries)).toMatchObject(
+    [{ status: "uncertain", text: "unknown" }],
+  );
+});
+it("retains accepted delivery when a rejection arrives after its sent receipt", async () => {
+  api.postJsonWithOptions.mockImplementationOnce(async (_path, data) => {
+    reconcileDeliveryEchoes("a", {
+      revision: 1,
+      paused: null,
+      items: [{ ...data, status: "sent", turnId: "accepted-turn" }],
+    });
+    throw new SessionApiError("late rejection", 409);
+  });
+  await expect(
+    followupService.submit(
+      "codex:a",
+      1,
+      "a",
+      "accepted",
+      [],
+      "queue",
+      undefined,
+      {},
+    ),
+  ).rejects.toThrow();
+  expect(Object.values(useCodexDeliveryStore.getState().entries)).toMatchObject(
+    [{ status: "sent", turnId: "accepted-turn" }],
+  );
+});
+it("rejects known external ownership before creating an echo or submitting the queue", async () => {
+  vi.mocked(threadAccess).mockResolvedValueOnce({
+    state: "external",
+    reason: "external writer",
+    generation: 1,
+  });
+  api.postJsonWithOptions.mockImplementationOnce(async (_path, data) => ({
+    revision: 1,
+    paused: null,
+    items: [{ ...data, status: "queued" }],
+  }));
+  await expect(
+    followupService.submit(
+      "codex:a",
+      1,
+      "a",
+      "not sent",
+      ["/image.png"],
+      "queue",
+      undefined,
+      {},
+    ),
+  ).rejects.toThrow(/其他客户端占用/);
+  expect(api.postJsonWithOptions).not.toHaveBeenCalled();
+  expect(Object.keys(useCodexDeliveryStore.getState().entries)).toHaveLength(0);
+});
+it("does not resubmit any draft while the same thread has an unresolved delivery", async () => {
+  api.postJsonWithOptions.mockRejectedValueOnce(new Error("response lost"));
+  await expect(
+    followupService.submit(
+      "codex:a",
+      1,
+      "a",
+      "first",
+      [],
+      "queue",
+      undefined,
+      {},
+    ),
+  ).rejects.toThrow();
+  api.postJsonWithOptions.mockImplementationOnce(async (_path, data) => ({
+    revision: 1,
+    paused: null,
+    items: [{ ...data, status: "queued" }],
+  }));
+  await expect(
+    followupService.submit(
+      "codex:a",
+      2,
+      "a",
+      "new draft",
+      [],
+      "queue",
+      undefined,
+      {},
+    ),
+  ).rejects.toThrow(/送达结果待确认/);
+  expect(api.postJsonWithOptions).toHaveBeenCalledOnce();
+  expect(Object.values(useCodexDeliveryStore.getState().entries)).toMatchObject(
+    [{ text: "first", status: "uncertain" }],
+  );
 });
 it("reuses the same request identity after reload and separates new drafts, targets and attachments", async () => {
   const data = {

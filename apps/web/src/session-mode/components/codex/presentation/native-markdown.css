@@ -841,3 +841,24 @@
 .session-mode .codex-native-website-icon > img { object-fit: contain; border-radius: 2.5px; }
 
 .session-mode .codex-native-website-preview .codex-native-slack-toolbar > .codex-native-preview-icon { color: color-mix(in srgb, var(--codex-text) 65%, transparent); }
+
+.session-mode .codex-markdown-image {
+  max-width: 100%;
+  margin-block: 8px;
+}
+.session-mode .codex-markdown-image .codex-image-preview img {
+  max-height: 420px;
+}
+.session-mode .codex-markdown-image-status {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+.session-mode .codex-markdown-image-status button {
+  text-decoration: underline;
+}

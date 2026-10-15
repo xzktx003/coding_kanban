@@ -119,14 +119,15 @@ export function ModelChangeNotice({ threadId }: { threadId: string }) {
       className="session-model-change-notice"
     >
       <span>
+        模型已从 <strong>{notice.from}</strong> 更改为 <strong>{notice.to}</strong>。
         在对话中途更改模型会降低性能。为获得最佳体验，请开始新会话，或切换回{" "}
-        <strong>{notice.from}</strong>。当前模型是 <strong>{notice.to}</strong>。
+        <strong>{notice.from}</strong>。
       </span>
       <Button
         type="button"
         variant="ghost"
         size="icon"
-        aria-label="关闭模型升级横幅"
+        aria-label="关闭模型切换提示"
         onClick={() => dismissModelNotice(threadId, notice.id)}
       >
         <X size={14} />

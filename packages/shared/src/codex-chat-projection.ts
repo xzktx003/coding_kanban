@@ -266,7 +266,13 @@ function reviewAction(action: RecordValue): RecordValue {
     "connectorName", "toolTitle", "target", "host", "protocol", "port",
   ]);
   for (const name of ["command", "program", "stdin", "reason"]) {
-    if (name in action) next[name] = short(action[name], budget);
+    if (name in action) {
+      // An incomplete executable command can misrepresent the reviewed action.
+      // Keep short public labels; oversized command bodies stay out of chat.
+      if (name === "command" && typeof action[name] === "string" && action[name].length > CODEX_CHAT_METADATA_TEXT_LIMIT)
+        continue;
+      next[name] = short(action[name], budget);
+    }
   }
   if (Array.isArray(action.argv))
     next.argv = strings(action.argv, budget);

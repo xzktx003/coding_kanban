@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { SessionApiError } from "@session/services/apiAdapt/shared";
+import { isExplicitRequestRejection } from "@session/services/apiAdapt/shared";
 import { MutationNotStartedError } from "@session/services/MutationNotStartedError";
 import type { TurnSource } from "./model";
 export type TurnMutationKind = "fork" | "restore" | "editRollback" | "editSend";
@@ -80,9 +80,7 @@ export class MutationUncertainError extends Error {
 export function isExplicitMutationRejection(error: unknown): boolean {
   if (error instanceof MutationNotStartedError) return true;
   // Timeout/5xx may follow execution. Authentication and invalid-input responses are non-execution acknowledgements.
-  if (error instanceof SessionApiError)
-    return [400, 401, 403, 404, 405, 409, 422].includes(error.status);
-  return false;
+  return isExplicitRequestRejection(error);
 }
 function record(key: string, value: TurnMutationRecord) {
   useThreadWorkflowStore.setState((state) => ({

@@ -319,7 +319,7 @@ for (const { width, healthFailure } of [
         ).toBeVisible({ timeout: 22000 });
       }
       await editor.fill("只投递一次，等待真实流恢复");
-      await page.getByRole("button", { name: "发送", exact: true }).click();
+      await page.getByRole("button", { name: "发送消息", exact: true }).click();
       await expect.poll(() => submissions).toBe(1);
       await expect(
         page.getByText("真实事件流静默后补回的回复", { exact: true }),
@@ -404,10 +404,10 @@ test("real SSE sequence gap repairs transcript and a failed read offers read-onl
       params: { threadId: "ux-0", tokenUsage: null },
     });
     await expect(
-      page.locator("[data-session-recovery=retrying]").first(),
+      page.locator(".codex-native-history-notice").getByRole("alert"),
     ).toBeVisible({ timeout: 15000 });
     const beforeRetry = reads;
-    await page.getByRole("button", { name: "重试", exact: true }).click();
+    await page.getByRole("alert").getByRole("button", { name: "重试", exact: true }).click();
     await expect.poll(() => reads).toBeGreaterThan(beforeRetry);
     fail = false;
     fixture.threads[0].status = { type: "idle" };

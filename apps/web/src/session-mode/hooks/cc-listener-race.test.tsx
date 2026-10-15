@@ -10,7 +10,10 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("@session/services", () => api);
 vi.mock("@session/services/apiAdapt/git", () => api);
-vi.mock("@session/hooks/runtime", () => ({ isDesktopTauri: () => false }));
+vi.mock("@session/hooks/runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@session/hooks/runtime")>()),
+  isDesktopTauri: () => false,
+}));
 vi.mock("@session/lib/eventStream", () => ({
   openEventStream: (options: { onOpen?: () => void }) => {
     queueMicrotask(() => options.onOpen?.());

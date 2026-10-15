@@ -52,10 +52,10 @@ function httpClipboard(success = true) {
 it("copies code on HTTP and restores the focused control", async () => {
   const { data, exec } = httpClipboard();
   render(<NativeCodeFence code={"original source\n"} language="text" />);
-  const button = screen.getByRole("button", { name: "复制" });
+  const button = screen.getByRole("button", { name: "复制代码" });
   button.focus();
   fireEvent.click(button);
-  await screen.findByRole("button", { name: "已复制" });
+  await screen.findByRole("button", { name: "已复制代码" });
   expect(exec).toHaveBeenCalledWith("copy");
   expect(data.get("text/plain")).toBe("original source\n");
   expect(document.activeElement).toBe(button);
@@ -78,7 +78,7 @@ it("copies sanitized HTML and Markdown together on HTTP", async () => {
     </NativeMarkdownTable>,
   );
   fireEvent.click(screen.getByRole("button", { name: "复制表格" }));
-  await screen.findByRole("button", { name: "已复制" });
+  await screen.findByRole("button", { name: "已复制代码" });
   expect(data.get("text/plain")).toBe("| a\\|b |\n| --- |");
   expect(data.get("text/html")).toBe(
     '<table><tbody><tr><td><code dir="ltr">a|b</code></td></tr></tbody></table>',
@@ -88,7 +88,7 @@ it("copies sanitized HTML and Markdown together on HTTP", async () => {
 it("does not report success if the browser rejects legacy copy", async () => {
   httpClipboard(false);
   render(<NativeCodeFence code="source" language="text" />);
-  fireEvent.click(screen.getByRole("button", { name: "复制" }));
+  fireEvent.click(screen.getByRole("button", { name: "复制代码" }));
   await waitFor(() =>
     expect(notices.danger).toHaveBeenCalledWith("无法复制到剪贴板", {
       id: "copy-to-clipboard-error",
@@ -96,7 +96,7 @@ it("does not report success if the browser rejects legacy copy", async () => {
     }),
   );
   expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.queryByRole("button", { name: "已复制" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "已复制代码" })).toBeNull();
 });
 
 it("preserves the composer selection after copying another control's source", async () => {
@@ -112,8 +112,8 @@ it("preserves the composer selection after copying another control's source", as
   }) as HTMLInputElement;
   input.focus();
   input.setSelectionRange(1, 6, "backward");
-  fireEvent.click(screen.getByRole("button", { name: "复制" }));
-  await screen.findByRole("button", { name: "已复制" });
+  fireEvent.click(screen.getByRole("button", { name: "复制代码" }));
+  await screen.findByRole("button", { name: "已复制代码" });
   expect(document.activeElement).toBe(input);
   expect([
     input.selectionStart,

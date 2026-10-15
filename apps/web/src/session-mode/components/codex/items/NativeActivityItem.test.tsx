@@ -262,7 +262,8 @@ it("does not fetch images whose projected pixels were omitted", () => {
       })}
     />,
   );
-  expect(screen.getByText("详情未加载")).toBeTruthy();
+  expect(screen.queryByText("详情未加载")).toBeNull();
+  expect(screen.getByText("activity.viewedImage")).toBeTruthy();
   expect(api.readFile).not.toHaveBeenCalled();
   expect(screen.queryByRole("img")).toBeNull();
   rerender(

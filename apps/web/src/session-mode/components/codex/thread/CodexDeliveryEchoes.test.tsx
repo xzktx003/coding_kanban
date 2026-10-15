@@ -18,7 +18,17 @@ const resume = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@session/services/codexService", () => ({
   codexService: { loadThreadHistory: resume },
 }));
-vi.mock("@session/services/apiAdapt/shared", () => api);
+vi.mock("@session/services/apiAdapt/shared", async (original) => ({
+  ...(await original<object>()),
+  ...api,
+}));
+vi.mock("@session/services/apiAdapt/codex", () => ({
+  threadAccess: vi.fn(async () => ({
+    state: "owned",
+    reason: "",
+    generation: 1,
+  })),
+}));
 import { CodexDeliveryEchoes } from "./CodexDeliveryEchoes";
 import {
   beginDeliveryEcho,
@@ -31,6 +41,7 @@ import {
   useFollowupStore,
 } from "@session/services/followupService";
 import { useCodexStore } from "../stores";
+import { resetCodexAccessCache } from "@session/stores/useCodexAccessStore";
 const message = {
   id: "request",
   threadId: "a",
@@ -63,6 +74,7 @@ const event = (method = "item/started") =>
   }) as any;
 beforeEach(() => {
   vi.clearAllMocks();
+  resetCodexAccessCache();
   localStorage.clear();
   vi.stubGlobal("crypto", webcrypto);
   useCodexDeliveryStore.setState({ entries: {} });
@@ -103,6 +115,39 @@ it("does not resurrect archived sent receipts on refresh or after rollback", () 
   clearDeliveryEchoes("a");
   reconcileDeliveryEchoes("a", receipt("sent"));
   expect(Object.keys(useCodexDeliveryStore.getState().entries)).toHaveLength(0);
+});
+it("removes a rejected queued/sending message from the transcript and never revives it from failed snapshots", () => {
+  beginDeliveryEcho(message);
+  reconcileDeliveryEchoes("a", {
+    ...receipt("sending"),
+    items: [{ ...receipt("sending").items[0], turnId: undefined }],
+  });
+  const view = render(<CodexDeliveryEchoes threadId="a" events={[]} />);
+  expect(screen.getByText("hello")).toBeTruthy();
+  const failed = {
+    ...receipt("failed"),
+    items: [{ ...receipt("failed").items[0], turnId: undefined }],
+  };
+  act(() => reconcileDeliveryEchoes("a", failed));
+  expect(screen.queryByText("hello")).toBeNull();
+  act(() => reconcileDeliveryEchoes("a", failed));
+  expect(Object.keys(useCodexDeliveryStore.getState().entries)).toHaveLength(0);
+  view.unmount();
+  render(<CodexDeliveryEchoes threadId="a" events={[]} />);
+  expect(screen.queryByText("hello")).toBeNull();
+});
+it.each(["sent", "uncertain"])("cannot retract a %s receipt with a native turn when a negative snapshot arrives", (status) => {
+  beginDeliveryEcho(message);
+  reconcileDeliveryEchoes("a", receipt(status));
+  for (const negative of ["failed", "cancelled"]) {
+    reconcileDeliveryEchoes("a", {
+      ...receipt(negative),
+      items: [{ ...receipt(negative).items[0], turnId: undefined }],
+    });
+    expect(Object.values(useCodexDeliveryStore.getState().entries)).toMatchObject(
+      [{ status, turnId: "turn" }],
+    );
+  }
 });
 it("preserves delivery echo identity when the receipt has not changed", () => {
   beginDeliveryEcho(message);

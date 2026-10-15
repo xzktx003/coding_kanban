@@ -180,11 +180,21 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
     await waitFor(() => pids().length === 2);
     assert.throws(() => process.kill(original, 0), /ESRCH/);
     const lastPid = pids()[1];
+    process.kill(lastPid, "SIGKILL");
+    await waitFor(() => pids().length === 3);
+    const recoveredPid = pids()[2];
+    assert.equal(pids().length, 3);
+    process.kill(recoveredPid, 0);
     process.kill(independentRuntime.pid, 0);
     const exited = new Promise((resolve) => watcher.once("exit", resolve));
     watcher.kill("SIGTERM");
     await exited;
-    assert.throws(() => process.kill(lastPid, 0), /ESRCH/);
+    assert.throws(() => process.kill(recoveredPid, 0), /ESRCH/);
+    assert.equal(
+      pids().length,
+      3,
+      "intentional shutdown must not restart the gateway",
+    );
   } finally {
     if (independentRuntime) independentRuntime.kill("SIGTERM");
     if (watcher && watcher.exitCode === null && watcher.signalCode === null) {
@@ -194,6 +204,79 @@ test("real watcher keeps the live gateway on failed install and recovers on a ne
     }
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("gateway crash recovery backs off and stops after three consecutive retries", async () => {
+  const { createGatewayCrashRecovery } = await import("./watch-server.mjs");
+  let now = 0;
+  let scheduled;
+  let restarts = 0;
+  let exhausted = 0;
+  const retries = [];
+  const recovery = createGatewayCrashRecovery({
+    restart: () => {
+      restarts++;
+    },
+    onRetry: (attempt, delay) => retries.push([attempt, delay]),
+    onExhausted: () => {
+      exhausted++;
+    },
+    now: () => now,
+    setTimer: (callback, delay) => {
+      scheduled = { callback, delay };
+      return scheduled;
+    },
+    clearTimer: () => {
+      scheduled = undefined;
+    },
+  });
+  for (const delay of [1000, 2000, 4000]) {
+    recovery.exited(now);
+    assert.equal(scheduled.delay, delay);
+    now += delay;
+    const callback = scheduled.callback;
+    scheduled = undefined;
+    callback();
+  }
+  recovery.exited(now);
+  assert.equal(scheduled, undefined);
+  assert.equal(restarts, 3);
+  assert.equal(exhausted, 1);
+  assert.deepEqual(retries, [
+    [1, 1000],
+    [2, 2000],
+    [3, 4000],
+  ]);
+  recovery.reset();
+  recovery.exited(now);
+  assert.equal(
+    scheduled.delay,
+    1000,
+    "an explicit source save restores the retry budget",
+  );
+  recovery.cancel();
+  assert.equal(scheduled, undefined, "shutdown cancels pending recovery");
+});
+
+test("a gateway that stayed alive for a minute gets a fresh crash recovery budget", async () => {
+  const { createGatewayCrashRecovery } = await import("./watch-server.mjs");
+  let now = 0;
+  const delays = [];
+  const recovery = createGatewayCrashRecovery({
+    restart: () => {},
+    now: () => now,
+    setTimer: (_callback, delay) => {
+      delays.push(delay);
+      return delay;
+    },
+    clearTimer: () => {},
+  });
+  recovery.exited(0);
+  recovery.exited(0);
+  now = 60000;
+  recovery.exited(0);
+  assert.deepEqual(delays, [1000, 2000, 1000]);
+  recovery.cancel();
 });
 
 test("preparation installs changed manifests, skips ordinary edits and repairs missing gateway dependencies", async () => {
@@ -335,4 +418,113 @@ test("runtime manifest and missing dependencies are checked only for the default
     })(),
     /runtime-only-dep/,
   );
+});
+
+for (const code of ["EMFILE", "ENOSPC"])
+  test(`watch quota ${code} preserves recursive changes and closes its polling timer`, async () => {
+    const { watchWithQuotaFallback } = await import("./watch-server.mjs");
+    const { mkdtemp, mkdir, writeFile, rm } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = await mkdtemp(join(tmpdir(), "gateway-quota-"));
+    const changes = [];
+    const errors = [];
+    let watcher;
+    async function changedAfter(count) {
+      const deadline = Date.now() + 3000;
+      while (changes.length === count && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.ok(changes.length > count, "metadata change is delivered");
+    }
+    try {
+      await mkdir(join(root, "nested"));
+      watcher = await watchWithQuotaFallback(
+        root,
+        { recursive: true },
+        (_event, name) => changes.push(name),
+        {
+          pollMs: 25,
+          nativeWatch() {
+            throw Object.assign(new Error("quota"), { code });
+          },
+          onError: (error) => errors.push(error),
+        },
+      );
+      await writeFile(join(root, "nested/source.ts"), "initial");
+      await changedAfter(0);
+      assert.ok(changes.includes("nested/source.ts"));
+      const created = changes.length;
+      await writeFile(join(root, "nested/source.ts"), "modified source");
+      await changedAfter(created);
+      const modified = changes.length;
+      await rm(join(root, "nested/source.ts"));
+      await changedAfter(modified);
+      watcher.close();
+      const count = changes.length;
+      await writeFile(join(root, "nested/later.ts"), "closed");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(changes.length, count);
+      assert.deepEqual(errors, []);
+    } finally {
+      watcher?.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+test("watcher does not treat permission failure as quota exhaustion", async () => {
+  const { watchWithQuotaFallback } = await import("./watch-server.mjs");
+  await assert.rejects(
+    watchWithQuotaFallback("/unused", {}, () => {}, {
+      nativeWatch() {
+        throw Object.assign(new Error("denied"), { code: "EACCES" });
+      },
+    }),
+    { code: "EACCES" },
+  );
+});
+
+test("a late native quota error closes the incomplete subscription and continues metadata changes", async () => {
+  const { watchWithQuotaFallback } = await import("./watch-server.mjs");
+  const { EventEmitter } = await import("node:events");
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const root = await mkdtemp(join(tmpdir(), "gateway-late-quota-"));
+  const native = new EventEmitter();
+  let closed = 0,
+    quota = 0;
+  native.close = () => {
+    closed++;
+  };
+  const changes = [],
+    errors = [];
+  const watcher = await watchWithQuotaFallback(
+    root,
+    {},
+    (_event, name) => changes.push(name),
+    {
+      nativeWatch: () => native,
+      pollMs: 25,
+      onQuota: () => {
+        quota++;
+      },
+      onError: (error) => errors.push(error),
+    },
+  );
+  try {
+    native.emit("error", Object.assign(new Error("quota"), { code: "ENOSPC" }));
+    await watcher.poll();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await writeFile(join(root, "saved.ts"), "source");
+    const deadline = Date.now() + 3000;
+    while (!changes.includes("saved.ts") && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.equal(quota, 1);
+    assert.ok(closed > 0);
+    assert.ok(changes.includes("saved.ts"));
+    assert.deepEqual(errors, []);
+  } finally {
+    watcher.close();
+    await rm(root, { recursive: true, force: true });
+  }
 });

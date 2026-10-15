@@ -8,7 +8,7 @@ import { createFixtureThreads } from './fixtures.mjs';
 import { buildCompanionVsix } from './vsix.mjs';
 import { importConnectionProfile } from './connection-profile.mjs';
 const args = process.argv.slice(2); const input = {};
-const fields = { 'runtime-root': 'runtimeRoot', 'code-server': 'codeServer', 'official-vsix': 'officialVsix', 'codex-cli': 'codexCli', port: 'port', 'broker-port': 'brokerPort', 'bind-host': 'bindHost', 'user-data-dir': 'userDataDir', 'extensions-dir': 'extensionsDir', 'project-dir': 'projectDir', 'codex-home': 'codexHome', 'shared-codex-home': 'sharedCodexHome', 'process-home': 'processHome', cert: 'cert', 'cert-key': 'certKey', record: 'record', 'threads-file': 'threadsFile', 'password-file': 'passwordFile', 'connection-profile-home': 'connectionProfileHome' };
+const fields = { 'runtime-root': 'runtimeRoot', 'code-server': 'codeServer', 'official-vsix': 'officialVsix', 'codex-cli': 'codexCli', port: 'port', 'broker-port': 'brokerPort', 'bind-host': 'bindHost', 'user-data-dir': 'userDataDir', 'extensions-dir': 'extensionsDir', 'project-dir': 'projectDir', 'codex-home': 'codexHome', 'shared-codex-home': 'sharedCodexHome', 'process-home': 'processHome', cert: 'cert', 'cert-key': 'certKey', record: 'record', 'threads-file': 'threadsFile', 'password-file': 'passwordFile', 'connection-profile-home': 'connectionProfileHome', 'refresh-service-config': 'refreshServiceConfig', 'refresh-domain': 'refreshDomain', 'reconnection-grace-seconds': 'reconnectionGraceSeconds' };
 let createThreads = false; let autoOpenFixtures = false; let autoOpenNewChats = false;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--create-threads') { createThreads = true; continue; }
@@ -47,6 +47,10 @@ try {
   for (const name of ['code-server.yaml', 'companion-auth.json', 'threads.json', 'native-codex-companion.vsix', 'install.log', 'host.log', 'fixture-app-server.log', 'companion-ready.json']) await assertFreshOutput(join(options.runtimeRoot, name));
   await assertFreshOutput(options.record);
   await validateDirectories(options);
+  const refreshConnection = options.refreshServiceConfig
+    ? await (await import('./refresh-prototype/host-connection.mjs')).prepareRefreshHost(options, { assertRunning: () => owned.assertRunning() })
+    : null;
+  owned.assertRunning();
   const sharedHomeView = await createSharedCodexHomeView(options);
   const connectionProfile = options.sharedCodexHome
     ? sharedHomeView
@@ -64,7 +68,7 @@ try {
   if (autoOpenFixtures) control.validateFixturePanels(threads.slice(0, 2));
   const authFile = join(options.runtimeRoot, 'companion-auth.json');
   owned.assertRunning();
-  const newChatWindowIds = autoOpenNewChats ? [randomUUID(), randomUUID()] : undefined;
+  const newChatWindowIds = autoOpenNewChats ? [randomUUID()] : undefined;
   await writeFile(authFile, JSON.stringify({ port: options.brokerPort, token: randomBytes(32).toString('hex'), threads, autoOpenFixtures, autoOpenNewChats, ...(newChatWindowIds ? { newChatWindowIds } : {}) }), { mode: 0o600, flag: 'wx' }); await chmod(authFile, 0o600);
   await writeFile(join(options.runtimeRoot, 'threads.json'), JSON.stringify(fixture, null, 2), { mode: 0o600, flag: 'wx' });
   const installArgs = ['--config', join(options.runtimeRoot, 'code-server.yaml'), '--user-data-dir', options.userDataDir, '--extensions-dir', options.extensionsDir,
@@ -77,7 +81,7 @@ try {
   const companionArgs = [...installArgs]; companionArgs[companionArgs.indexOf('--install-extension') + 1] = companionVsix;
   await run(options.codeServer, companionArgs, join(options.runtimeRoot, 'install.log'));
   await mkdir(join(options.userDataDir, 'User'), { recursive: true });
-  await writeFile(join(options.userDataDir, 'User', 'settings.json'), JSON.stringify({ 'chatgpt.openOnStartup': false, 'extensions.autoUpdate': false, 'extensions.autoCheckUpdates': false, 'workbench.startupEditor': 'none' }, null, 2), { mode: 0o600 });
+  await writeFile(join(options.userDataDir, 'User', 'settings.json'), JSON.stringify({ 'chatgpt.openOnStartup': false, 'extensions.autoUpdate': false, 'extensions.autoCheckUpdates': false, 'workbench.startupEditor': 'none', 'workbench.colorTheme': 'Default Dark Modern', ...(refreshConnection ? { 'chatgpt.cliExecutable': refreshConnection.executable } : {}) }, null, 2), { mode: 0o600 });
   const hostLog = await open(join(options.runtimeRoot, 'host.log'), 'a', 0o600);
   owned.assertRunning();
   const child = owned.add(spawn(options.codeServer, buildHostArgs(options), { env: buildChildEnv(options), cwd: options.projectDir, stdio: ['ignore', hostLog.fd, hostLog.fd] }));
@@ -90,6 +94,7 @@ try {
     runtimeRoot: options.runtimeRoot, userDataDir: options.userDataDir, extensionsDir: options.extensionsDir, projectDir: options.projectDir,
     codexHome: options.codexHome, processHome: options.processHome, tempDir: join(options.runtimeRoot, 'tmp'), ipcSocket: join(options.codexHome, 'ipc', 'ipc.sock'),
     ...(options.sharedCodexHome ? { sharedCodexHome: options.sharedCodexHome } : {}),
+    ...(refreshConnection ? { refreshConnection } : {}),
     brokerAuthFile: authFile, threads: fixture.threads, fixtureAppServerPid: fixture.appServerPid, fixtureAppServerStopped: createThreads,
     officialVsix: options.officialVsix, officialVsixSha256: createHash('sha256').update(await readFile(options.officialVsix)).digest('hex'), connectionProfile, panelMode: autoOpenNewChats ? 'new-chats' : autoOpenFixtures ? 'fixtures' : options.sharedCodexHome ? 'resume-on-demand' : 'fixtures', ...(newChatWindowIds ? { newChatWindowIds } : {}) };
   await mkdir(dirname(options.record), { recursive: true });

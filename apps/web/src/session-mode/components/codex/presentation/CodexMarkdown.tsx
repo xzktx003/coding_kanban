@@ -1,3 +1,5 @@
+import { CodexMarkdownImage } from "./CodexMarkdownImage";
+import { isLocalChatImage } from "./chatImageSource";
 import { NativeWebsitePreview } from "./NativeWebsitePreview";
 import { NativeGithubPreview } from "./NativeGithubPreview";
 import { nativeGithubPullRequest } from "@agent-orchestrator/shared";
@@ -50,6 +52,13 @@ const math = createMathPlugin({ singleDollarTextMath: true });
 const referencePrefix = "#codex-file=";
 const MarkdownStreaming = createContext(false);
 const nativeCitationTags = {
+  img: [
+    "src",
+    "alt",
+    "title",
+    "data-native-image-source",
+    "dataNativeImageSource",
+  ],
   span: ["className", "data-native-file-citation", "dataNativeFileCitation"],
   a: [
     "href",
@@ -197,6 +206,11 @@ export function CodexMarkdown({
                   ]
                 : [child];
             });
+          if (node.type === "image" && node.url && isLocalChatImage(node.url)) {
+            node.data ??= {};
+            node.data.hProperties ??= {};
+            node.data.hProperties["data-native-image-source"] = node.url;
+          }
           if (node.type === "link" && node.url) {
             node.data ??= {};
             node.data.hProperties ??= {};
@@ -216,6 +230,20 @@ export function CodexMarkdown({
   );
   const components = useMemo<Components>(
     () => ({
+      img: ({ src, alt, ...props }) => {
+        const original = (props as Record<string, unknown>)[
+          "data-native-image-source"
+        ];
+        const source =
+          typeof original === "string" && isLocalChatImage(original)
+            ? original
+            : typeof src === "string"
+              ? src
+              : "";
+        return source ? (
+          <CodexMarkdownImage source={source} alt={alt} cwd={cwd} />
+        ) : null;
+      },
       strong: ({ children, node: _node, ...props }) => (
         <strong {...props} data-streamdown="strong">
           {children}

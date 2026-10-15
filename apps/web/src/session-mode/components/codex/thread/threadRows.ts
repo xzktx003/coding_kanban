@@ -17,6 +17,7 @@ export interface ThreadRow {
   context?: RenderEventContext;
 }
 const hiddenMethods = new Set([
+  "thread/closed",
   "thread/name/updated",
   "thread/started",
   "thread/tokenUsage/updated",

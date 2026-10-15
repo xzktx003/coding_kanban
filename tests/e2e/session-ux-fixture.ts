@@ -48,6 +48,7 @@ export async function installSessionUxFixture(page: Page, count = 40) {
     createdAt: 1,
     updatedAt: 2,
     modelProvider: "openai",
+    source: "vscode",
     status: { type: "idle" },
     turns: [],
   });
@@ -240,7 +241,15 @@ export async function installSessionUxFixture(page: Page, count = 40) {
       };
     } else if (path.endsWith("/thread/access"))
       json = { state: "owned", reason: "", generation: 1 };
-    else if (path.endsWith("/thread/read")) {
+    else if (path.endsWith("/thread/metadata")) {
+      const thread = threads.find((item) => item.id === body?.threadId);
+      if (!thread) {
+        await route.fulfill({ status: 404, json: { error: "fixture thread metadata unavailable" } });
+        return;
+      }
+      const { turns: _turns, ...metadata } = thread;
+      json = { thread: metadata };
+    } else if (path.endsWith("/thread/read")) {
       const hold = delayedReads.find((item) => item.threadId === body?.threadId);
       if (hold) await hold.release;
       json = {

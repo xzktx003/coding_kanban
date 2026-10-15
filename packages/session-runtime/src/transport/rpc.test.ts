@@ -4,10 +4,13 @@ import { StdioRpc, RpcError } from "./rpc.js";
 
 const childSource = String.raw`
 const readline = require('node:readline');
+let guardedWrites = 0;
 const send = value => process.stdout.write(JSON.stringify(value) + '\n');
 readline.createInterface({input:process.stdin}).on('line', line => {
   const m = JSON.parse(line);
   if (m.method === 'echo') setTimeout(() => send({id:m.id,result:m.params}), m.params.delay || 0);
+  if (m.method === 'guarded') { guardedWrites++; send({id:m.id,result:'sent'}); }
+  if (m.method === 'guard-count') send({id:m.id,result:guardedWrites});
   if (m.method === 'error') send({id:m.id,error:{code:-32601,message:'Method not found'}});
   if (m.method === 'fragment') {
     const text = Buffer.from(JSON.stringify({id:m.id,result:{text:'你好🌍'}})+'\n');
@@ -70,6 +73,40 @@ test("timeouts have unknown delivery, never replay a mutation, and late replies 
   const result = await rpc.request("echo", { delay: 150, value: "correct" });
   assert.deepEqual(result, { delay: 150, value: "correct" });
   assert.equal(rpc.pendingCount, 0);
+});
+
+test("a dispatch guard checks again after write queue admission and rejects before any native frame is written", async t => {
+  const rpc = new StdioRpc({ command: process.execPath, args: ["-e", childSource] });
+  t.after(() => rpc.close());
+  await rpc.request("echo", {});
+  let valid = true;
+  const blocked = rpc.request("guarded", {}, { beforeSend: () => {
+    if (!valid) throw new Error("NOT_SENT: release safety changed before dispatch");
+  } });
+  valid = false;
+  await assert.rejects(blocked, /NOT_SENT: release safety changed/);
+  assert.equal(await rpc.request("guard-count", {}), 0);
+  assert.equal(rpc.pendingCount, 0);
+  const sent = rpc.request("guarded", {}, { beforeSend: () => { assert.equal(valid, true); } });
+  valid = true;
+  assert.equal(await sent, "sent");
+  assert.equal(await rpc.request("guard-count", {}), 1);
+});
+
+test("guarded requests that timeout or are cancelled while queued report NOT_SENT and never execute their dispatch guard", async t => {
+  const rpc = new StdioRpc({ command: process.execPath, args: ["-e", "setInterval(() => {}, 1000)"] });
+  t.after(() => rpc.close());
+  // This fixture never reads stdin, so the first large frame holds the write
+  // queue. It is our own Node process, with no native Agent or real session.
+  void rpc.request("hold", { data: "x".repeat(1024 * 1024) }, { timeoutMs: 5000 }).catch(() => undefined);
+  await Promise.resolve();
+  let dispatched = 0;
+  await assert.rejects(rpc.request("guarded", {}, { timeoutMs: 20, beforeSend: () => { dispatched++; } }), /NOT_SENT/);
+  const controller = new AbortController();
+  const cancelled = rpc.request("guarded", {}, { signal: controller.signal, beforeSend: () => { dispatched++; } });
+  controller.abort();
+  await assert.rejects(cancelled, /NOT_SENT/);
+  assert.equal(dispatched, 0);
 });
 
 test("process death rejects every pending request and does not spawn a replacement", async (t) => {

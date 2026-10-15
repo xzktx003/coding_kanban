@@ -1,6 +1,7 @@
 import {
   subagentParent,
   normalizeSubagentThread,
+  classifySubagentThread,
   type SubagentThread,
   type SubagentStopTarget,
 } from "@agent-orchestrator/shared";
@@ -15,6 +16,82 @@ export interface SubagentNode {
   objective?: string;
   revision: number;
   unavailable?: boolean;
+  /** Creation observations are discovery hints; only current native metadata confirms identity. */
+  evidence?: "created" | "native" | "legacy";
+  metadataRevision?: number;
+}
+export interface SubagentIdentity {
+  thread: SubagentThread;
+  revision: number;
+  runtimeEpoch: number;
+}
+/** Observation caches retain metadata, never native turn items or large prompt strings. */
+export function boundedSubagentThread(raw: SubagentThread): SubagentThread {
+  const thread = normalizeSubagentThread(raw);
+  const clipped = (value: string | null | undefined, length: number) =>
+    typeof value === "string" ? ` ${value.slice(0, length)}`.slice(1) : value;
+  const parent = subagentParent(thread);
+  const kind = classifySubagentThread(thread);
+  const source =
+    typeof thread.source === "string"
+      ? clipped(thread.source, 512)
+      : kind === "child"
+        ? { subAgent: {} }
+        : kind === "main" && thread.source && typeof thread.source === "object"
+          ? {
+              custom: clipped(
+                (thread.source as { custom?: string }).custom,
+                512,
+              ),
+            }
+          : undefined;
+  return {
+    id: thread.id,
+    ...(source === undefined ? {} : { source }),
+    ...(parent
+      ? { parentThreadId: parent }
+      : thread.parentThreadId === null
+        ? { parentThreadId: null }
+        : {}),
+    agentNickname: clipped(thread.agentNickname, 160),
+    agentRole: clipped(thread.agentRole, 160),
+    name: clipped(thread.name, 512),
+    preview: clipped(thread.preview, 1024) ?? undefined,
+    model: clipped(thread.model, 512),
+    reasoningEffort: clipped(thread.reasoningEffort, 160),
+    cwd: clipped(thread.cwd, 4096),
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+    canAcceptDirectInput: thread.canAcceptDirectInput,
+    historyMode: thread.historyMode,
+    status: thread.status && {
+      type: thread.status.type,
+      ...(thread.status.activeFlags
+        ? { activeFlags: thread.status.activeFlags.slice(0, 20) }
+        : {}),
+    },
+    turns: thread.turns
+      ?.slice(-1)
+      .map(({ id, status, startedAt }) => ({ id, status, startedAt })),
+  };
+}
+export function sameSubagentValue(a: unknown, b: unknown) {
+  return a === b || JSON.stringify(a) === JSON.stringify(b);
+}
+export function validParentEdge(
+  nodes: Record<string, SubagentNode>,
+  id: string,
+  parent: string,
+) {
+  if (!id || !parent || id === parent) return false;
+  const seen = new Set([id]);
+  let next: string | undefined = parent;
+  while (next) {
+    if (seen.has(next)) return false;
+    seen.add(next);
+    next = nodes[next]?.parentId;
+  }
+  return true;
 }
 export function descendants(nodes: Record<string, SubagentNode>, root: string) {
   return Object.values(nodes).filter((n) => {
@@ -49,13 +126,22 @@ export function reconcileNodes(
   threads: SubagentThread[],
   baseline: number,
 ) {
-  const next = { ...nodes };
+  let next = nodes;
   for (const raw of threads) {
-    const thread = normalizeSubagentThread(raw);
+    const thread = boundedSubagentThread(raw);
+    const old = next[thread.id];
+    const newerMetadata =
+      (old?.metadataRevision ?? (old?.verified ? old.revision : -1)) > baseline;
+    if (classifySubagentThread(thread) === "main") {
+      if (old && !newerMetadata) {
+        next = { ...next };
+        delete next[thread.id];
+      }
+      continue;
+    }
     const parent = subagentParent(thread);
-    if (!parent) continue;
-    const old = nodes[thread.id];
-    next[thread.id] = {
+    if (!parent || !validParentEdge(next, thread.id, parent)) continue;
+    const candidate: SubagentNode = {
       ...old,
       thread: {
         ...old?.thread,
@@ -63,12 +149,29 @@ export function reconcileNodes(
         ...(old && old.revision > baseline
           ? { status: old.thread.status, turns: old.thread.turns }
           : {}),
+        ...(newerMetadata && old
+          ? {
+              source: old.thread.source,
+              parentThreadId: old.thread.parentThreadId,
+              canAcceptDirectInput: old.thread.canAcceptDirectInput,
+            }
+          : {}),
       },
-      parentId: parent,
+      parentId: newerMetadata && old ? old.parentId : parent,
       verified: true,
-      unavailable: false,
+      unavailable: newerMetadata && old ? old.unavailable : false,
+      evidence: "native",
+      metadataRevision: newerMetadata && old ? old.metadataRevision : baseline,
       revision: old?.revision ?? baseline,
     };
+    if (
+      !old ||
+      !sameSubagentValue(old, {
+        ...candidate,
+        metadataRevision: old.metadataRevision,
+      })
+    )
+      next = { ...next, [thread.id]: candidate };
   }
   return next;
 }

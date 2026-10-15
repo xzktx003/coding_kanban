@@ -5,7 +5,7 @@ vi.mock("@session/hooks/runtime", () => ({
   isDesktopTauri: () => false,
   isTauri: () => false,
 }));
-import { threadRead } from "./codex";
+import { threadRead, threadMetadata } from "./codex";
 afterEach(() => vi.unstubAllGlobals());
 it("history reads never resume, including when an older runtime cannot serve reads", async () => {
   const fetcher = vi.fn().mockResolvedValue(
@@ -26,4 +26,13 @@ it("history reads never resume, including when an older runtime cannot serve rea
       ([url]) => url === "/api/codex/thread/read?view=chat",
     ),
   ).toBe(true);
+});
+it("checks metadata on its bounded read-only endpoint and propagates cancellation without resume", async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ thread: { id: "same", source: "vscode" } }), { status: 200 }));
+  vi.stubGlobal("fetch", fetcher);
+  const controller = new AbortController();
+  await threadMetadata("same", { signal: controller.signal });
+  expect(fetcher.mock.calls[0][0]).toBe("/api/codex/thread/metadata?view=chat");
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({ threadId: "same" });
+  expect(fetcher.mock.calls[0][1].signal).toBe(controller.signal);
 });

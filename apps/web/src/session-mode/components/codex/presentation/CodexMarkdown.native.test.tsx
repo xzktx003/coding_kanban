@@ -29,7 +29,7 @@ it("copies the selected table rather than preceding Markdown or another table", 
   render(<CodexMarkdown value={value} />);
   const copies = await screen.findAllByRole("button", { name: "复制表格" });
   fireEvent.click(copies[1]);
-  await screen.findByRole("button", { name: "已复制" });
+  await screen.findByRole("button", { name: "已复制代码" });
   expect(writeText).toHaveBeenCalledWith(
     "| Second | Value |\n| --- | --- |\n| B | two |",
   );

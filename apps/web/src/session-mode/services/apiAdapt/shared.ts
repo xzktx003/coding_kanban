@@ -30,9 +30,19 @@ export class SessionApiError extends Error {
   constructor(
     message: string,
     public readonly status: number,
+    public readonly code?: string,
+    public readonly deliveryStage?: "not-admitted" | "outcome-unknown",
   ) {
     super(message);
   }
+}
+export function isExplicitRequestRejection(error: unknown): boolean {
+  return (
+    error instanceof SessionApiError &&
+    error.deliveryStage !== "outcome-unknown" &&
+    (error.deliveryStage === "not-admitted" ||
+      [400, 401, 403, 404, 405, 409, 422].includes(error.status))
+  );
 }
 export type SkillAgent = "codex" | "cc";
 export type UnifiedMcpClientName = "codex" | "cc";
@@ -67,6 +77,25 @@ async function extractErrorMessage(response: Response) {
     }
   } catch {}
   return `Request failed: ${response.status}`;
+}
+async function extractApiError(response: Response) {
+  let code: string | undefined;
+  let stage: SessionApiError["deliveryStage"];
+  try {
+    const payload = await response.clone().json();
+    if (typeof payload?.code === "string") code = payload.code;
+    if (
+      payload?.deliveryStage === "not-admitted" ||
+      payload?.deliveryStage === "outcome-unknown"
+    )
+      stage = payload.deliveryStage;
+  } catch {}
+  return new SessionApiError(
+    await extractErrorMessage(response),
+    response.status,
+    code,
+    stage,
+  );
 }
 
 export async function invokeTauri<T>(
@@ -127,7 +156,8 @@ export async function getJsonWithOptions<T>(
   });
 
   if (!response.ok) {
-    const message = await extractErrorMessage(response);
+    const error = await extractApiError(response);
+    const message = error.message;
     if (!options?.suppressToast) {
       toast({
         title: "Request failed",
@@ -136,7 +166,7 @@ export async function getJsonWithOptions<T>(
         id: message,
       });
     }
-    return Promise.reject(new Error(message));
+    return Promise.reject(error);
   }
 
   return (await response.json()) as T;
@@ -159,7 +189,8 @@ export async function postJsonWithOptions<T>(
   });
 
   if (!response.ok) {
-    const message = await extractErrorMessage(response);
+    const error = await extractApiError(response);
+    const message = error.message;
     if (!options?.suppressToast) {
       toast({
         title: "Request failed",
@@ -168,7 +199,7 @@ export async function postJsonWithOptions<T>(
         id: message,
       });
     }
-    return Promise.reject(new SessionApiError(message, response.status));
+    return Promise.reject(error);
   }
 
   return (await response.json()) as T;
@@ -193,7 +224,8 @@ export async function postNoContentWithOptions(
   });
 
   if (!response.ok) {
-    const message = await extractErrorMessage(response);
+    const error = await extractApiError(response);
+    const message = error.message;
     if (!options?.suppressToast) {
       toast({
         title: "Request failed",
@@ -202,7 +234,7 @@ export async function postNoContentWithOptions(
         id: message,
       });
     }
-    return Promise.reject(new SessionApiError(message, response.status));
+    return Promise.reject(error);
   }
 }
 

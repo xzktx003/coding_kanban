@@ -74,23 +74,45 @@ export function CodexProjectNavigation({
 }) {
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>(
+    {},
+  );
+  const needle = query.trim().toLowerCase();
+  const searchPending = Boolean(
+    needle &&
+    projects.some(
+      (project) =>
+        !conversationStates[project] || conversationStates[project]?.loading,
+    ),
+  );
+  useEffect(() => {
+    setVisibleCounts({});
+  }, [needle]);
   const loadedProjects = useRef(new Set<string>());
   useEffect(() => {
     for (const project of projects) {
-      const open = expanded[project] ?? project === selectedProject;
+      const open =
+        Boolean(needle) || (expanded[project] ?? project === selectedProject);
       if (!open || loadedProjects.current.has(project)) continue;
       loadedProjects.current.add(project);
       onEnsureProject?.(project);
     }
-  }, [expanded, onEnsureProject, projects, selectedProject]);
-  const needle = query.trim().toLowerCase();
+  }, [expanded, needle, onEnsureProject, projects, selectedProject]);
   const visibleProjects = useMemo(
     () =>
       projects.filter((project) => {
         if (!needle) return true;
+        if (
+          !conversationStates[project] ||
+          conversationStates[project]?.loading ||
+          conversationStates[project]?.error
+        )
+          return true;
         if (projectName(project).toLowerCase().includes(needle)) return true;
         return (conversationStates[project]?.conversations ?? []).some((item) =>
-          `${conversationName(item)} ${item.preview}`.toLowerCase().includes(needle),
+          `${conversationName(item)} ${item.preview}`
+            .toLowerCase()
+            .includes(needle),
         );
       }),
     [conversationStates, needle, projects],
@@ -101,6 +123,12 @@ export function CodexProjectNavigation({
       className="codex-project-navigation"
       aria-label="项目与 Codex 会话"
       data-mobile-pane={mobilePane}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && mobilePane === "sessions") {
+          event.preventDefault();
+          onDismiss();
+        }
+      }}
     >
       <button
         type="button"
@@ -116,7 +144,7 @@ export function CodexProjectNavigation({
           <input
             value={query}
             aria-label="搜索会话"
-            placeholder="搜索会话"
+            placeholder="搜索全部项目会话"
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
@@ -136,6 +164,7 @@ export function CodexProjectNavigation({
         <div className="codex-sidebar-projects-heading">
           <span>项目</span>
           {projectsLoading && <span role="status">读取中…</span>}
+          {searchPending && <span role="status">正在检索全部项目…</span>}
         </div>
         {projectsError && (
           <p className="codex-navigation-message" role="alert">
@@ -144,12 +173,17 @@ export function CodexProjectNavigation({
         )}
         <div className="codex-project-list" aria-label="项目列表">
           {visibleProjects.map((project) => {
-            const open = needle ? true : (expanded[project] ?? project === selectedProject);
+            const open = needle
+              ? true
+              : (expanded[project] ?? project === selectedProject);
             const state = conversationStates[project];
-            const conversations = (state?.conversations ?? []).filter((item) =>
-              !needle ||
-              projectName(project).toLowerCase().includes(needle) ||
-              `${conversationName(item)} ${item.preview}`.toLowerCase().includes(needle),
+            const conversations = (state?.conversations ?? []).filter(
+              (item) =>
+                !needle ||
+                projectName(project).toLowerCase().includes(needle) ||
+                `${conversationName(item)} ${item.preview}`
+                  .toLowerCase()
+                  .includes(needle),
             );
             return (
               <section
@@ -163,12 +197,23 @@ export function CodexProjectNavigation({
                     aria-expanded={open}
                     onClick={() => {
                       onSelectProject(project);
-                      setExpanded((current) => ({ ...current, [project]: !open }));
+                      setExpanded((current) => ({
+                        ...current,
+                        [project]: !open,
+                      }));
                     }}
                   >
-                    {open ? <FolderOpen size={14} /> : <FolderClosed size={14} />}
+                    {open ? (
+                      <FolderOpen size={14} />
+                    ) : (
+                      <FolderClosed size={14} />
+                    )}
                     <span>{projectName(project)}</span>
-                    {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    {open ? (
+                      <ChevronDown size={14} />
+                    ) : (
+                      <ChevronRight size={14} />
+                    )}
                   </button>
                   <button
                     type="button"
@@ -184,7 +229,7 @@ export function CodexProjectNavigation({
                   <div className="session-project-sessions">
                     {state?.loading && (
                       <p className="codex-navigation-message" role="status">
-                        正在读取这个项目的全部会话…
+                        正在逐页读取项目会话…
                       </p>
                     )}
                     {state?.error && (
@@ -199,41 +244,65 @@ export function CodexProjectNavigation({
                         </button>
                       </p>
                     )}
-                    {!state?.loading && !state?.error && conversations.length === 0 && (
-                      <p className="codex-navigation-message">
-                        这个项目还没有可恢复的 Codex 会话。
-                      </p>
+                    {state &&
+                      !state.loading &&
+                      !state.error &&
+                      conversations.length === 0 && (
+                        <p className="codex-navigation-message">
+                          这个项目还没有可恢复的 Codex 会话。
+                        </p>
+                      )}
+                    {conversations
+                      .slice(0, visibleCounts[project] ?? 100)
+                      .map((conversation) => {
+                        const current = openThreadIds.includes(conversation.id);
+                        const name = openingThreadIds.includes(conversation.id)
+                          ? "正在打开…"
+                          : conversationName(conversation);
+                        return (
+                          <button
+                            type="button"
+                            key={conversation.id}
+                            className="session-nav-row"
+                            aria-current={current || undefined}
+                            disabled={!canResume && !current}
+                            aria-label={`Resume ${conversationName(conversation)}`}
+                            title={conversation.preview || name}
+                            onClick={() => onOpenConversation(conversation)}
+                          >
+                            <span className="session-nav-title">
+                              <span
+                                className="session-agent-symbol"
+                                aria-hidden="true"
+                              >
+                                <img src={openai} alt="" />
+                              </span>
+                              <span className="session-row-title">{name}</span>
+                            </span>
+                            <span className="session-nav-meta">
+                              <span className="session-nav-age">
+                                {conversationAge(conversation.updatedAt)}
+                              </span>
+                            </span>
+                          </button>
+                        );
+                      })}
+                    {conversations.length > (visibleCounts[project] ?? 100) && (
+                      <button
+                        type="button"
+                        className="codex-show-more"
+                        onClick={() =>
+                          setVisibleCounts((current) => ({
+                            ...current,
+                            [project]: (current[project] ?? 100) + 100,
+                          }))
+                        }
+                      >
+                        显示更多（剩余{" "}
+                        {conversations.length - (visibleCounts[project] ?? 100)}
+                        ）
+                      </button>
                     )}
-                    {conversations.map((conversation) => {
-                      const current = openThreadIds.includes(conversation.id);
-                      const name = openingThreadIds.includes(conversation.id)
-                        ? "正在打开…"
-                        : conversationName(conversation);
-                      return (
-                        <button
-                          type="button"
-                          key={conversation.id}
-                          className="session-nav-row"
-                          aria-current={current || undefined}
-                          disabled={!canResume && !current}
-                          aria-label={`Resume ${conversationName(conversation)}`}
-                          title={conversation.preview || name}
-                          onClick={() => onOpenConversation(conversation)}
-                        >
-                          <span className="session-nav-title">
-                            <span className="session-agent-symbol" aria-hidden="true">
-                              <img src={openai} alt="" />
-                            </span>
-                            <span className="session-row-title">{name}</span>
-                          </span>
-                          <span className="session-nav-meta">
-                            <span className="session-nav-age">
-                              {conversationAge(conversation.updatedAt)}
-                            </span>
-                          </span>
-                        </button>
-                      );
-                    })}
                   </div>
                 )}
               </section>
@@ -242,9 +311,13 @@ export function CodexProjectNavigation({
           {!projectsLoading && !projectsError && projects.length === 0 && (
             <p className="codex-navigation-message">还没有已登记的项目。</p>
           )}
-          {!projectsLoading && !projectsError && projects.length > 0 && visibleProjects.length === 0 && (
-            <p className="codex-navigation-message">没有匹配的项目或会话。</p>
-          )}
+          {!projectsLoading &&
+            !projectsError &&
+            !searchPending &&
+            projects.length > 0 &&
+            visibleProjects.length === 0 && (
+              <p className="codex-navigation-message">没有匹配的项目或会话。</p>
+            )}
         </div>
       </div>
     </aside>

@@ -48,6 +48,18 @@ const requests: Record<string, { event: string; kind: string }> = {
   },
 };
 
+// These exact handshake versions passed isolated native parent-only release,
+// writer transfer, same-ID history restore, and dispatch to the original child.
+// Child writers remain with their original app-server; the verified transfer
+// covers the parent writer and same-process restoration of the native family.
+// Unknown/new versions retain loaded descendants until their lifecycle is tested.
+const verifiedParentOnlyReleaseVersions = new Set(["0.162.1", "0.162.0-alpha.17.2"]);
+export function supportsParentOnlyRelease(userAgent: unknown): boolean {
+  if (typeof userAgent !== "string") return false;
+  const version = /^codexia\/(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\s|$)/.exec(userAgent)?.[1];
+  return version !== undefined && verifiedParentOnlyReleaseVersions.has(version);
+}
+
 export class CodexService {
   mcpOAuthThreadId = false;
   readonly ownership: Ownership;
@@ -115,6 +127,7 @@ export class CodexService {
         },
       });
       this.mcpOAuthThreadId=mcpOAuthThreadIdSupported(object(response).userAgent);
+      this.ownership.setIdleDescendantRelease(supportsParentOnlyRelease(object(response).userAgent));
       await rpc.notify("initialized");
       this.options.hub.publish("codex:initialized", object(response));
       const interval = this.options.sweepIntervalMs ?? 1000;
@@ -146,8 +159,8 @@ export class CodexService {
     this.starting ??= this.connect();
     return this.starting;
   }
-  readonly raw: Rpc = async (method, params) =>
-    (await this.ready()).request(method, params);
+  readonly raw: Rpc = async (method, params, options) =>
+    (await this.ready()).request(method, params, options);
   readonly call: Rpc = (method, params) => this.ownership.call(method, params);
   readHistory(id: string): Promise<Json> {
     return readHistory(this.raw, id);

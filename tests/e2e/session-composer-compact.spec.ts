@@ -5,6 +5,22 @@ const png =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 const editor = (page: Page) =>
   page.locator(".session-codex-composer [contenteditable=true]").first();
+test("an active turn keeps Stop available and offers an explicit queued send for a draft", async ({ page }) => {
+  const f = await setup(page);
+  try {
+    await editor(page).fill("本轮结束后处理这条消息");
+    await expect(page.getByRole("button", { name: "停止生成", exact: true })).toBeVisible();
+    const send = page.getByRole("button", { name: "发送消息", exact: true });
+    await expect(send).toBeEnabled();
+    await send.click();
+    const state = await (await page.request.get(f.origin + "/api/session/followups?threadId=ux-0")).json();
+    expect(state.items).toHaveLength(1);
+    expect(state.items[0]).toMatchObject({ threadId: "ux-0", mode: "queue", text: "本轮结束后处理这条消息", status: "queued" });
+    await expect(editor(page)).toHaveText("");
+    expect(f.calls).toEqual([]);
+    expect(f.errors).toEqual([]);
+  } finally { await f.close(); }
+});
 async function pasteImage(page: Page, count = 1) {
   await editor(page).evaluate(
     (el, { png, count }) => {
@@ -30,7 +46,7 @@ async function fixedHeight(page: Page, expected: number) {
     .poll(async () =>
       Math.abs(
         (await page
-          .locator(".session-composer-target-container")
+          .locator(".session-native-composer .session-compact-frame")
           .boundingBox())!.height - expected,
       ),
     )
@@ -72,15 +88,15 @@ async function identityPlacement(page: Page) {
     .boundingBox())!;
   const input = (await page.locator(".session-composer-editor").boundingBox())!;
   const identity = (await page
-    .locator(".session-compact-meta")
+    .getByRole("button", { name: /^模型：/ })
     .first()
     .boundingBox())!;
   const container = (await page
     .locator(".session-composer-width")
     .boundingBox())!;
-  if (container.width <= 840)
-    expect(identity.y + identity.height).toBeLessThanOrEqual(surface.y);
-  else expect(identity.y).toBeGreaterThanOrEqual(input.y + input.height);
+  expect(identity.y).toBeGreaterThanOrEqual(input.y + input.height - 1);
+  expect(identity.y + identity.height).toBeLessThanOrEqual(surface.y + surface.height + 1);
+  expect(identity.x).toBeGreaterThanOrEqual(container.x);
 }
 async function setModelNotice(page: Page) {
   await page.evaluate(async () => {
@@ -107,7 +123,7 @@ for (const width of [375, 1440]) {
   }, info) => {
     await page.setViewportSize({ width, height: 900 });
     const f = await setup(page, false);
-    const frame = page.locator(".session-composer-target-container");
+    const frame = page.locator(".session-native-composer .session-compact-frame");
     const measurements: Record<string, number> = {};
     try {
       const before = (await frame.boundingBox())!.height;
@@ -160,7 +176,7 @@ for (const width of [375, 1440]) {
       await setModelNotice(page);
       await expect(
         page.locator(".session-native-composer-status").first(),
-      ).toContainText("模型已切换");
+      ).toContainText("模型已从");
       await fixedHeight(page, stable);
       measurements.modelChange = (await frame.boundingBox())!.height;
       if (width === 375) expect(before).toBeLessThanOrEqual(150);
@@ -224,7 +240,7 @@ test("touch controls, agent label, owner states and narrow desktop pane stay wit
         ? [320, 360, 375, 390, 430]
         : [768, 1024, 1440]) {
         await page.setViewportSize({ width, height: 900 });
-        await expect(page.locator(".session-target-agent")).toHaveText("Codex");
+        await expect(page.locator(".session-native-composer")).toHaveAttribute("data-owner-thread", "ux-0");
         const frame = (await page
           .locator(".session-compact-frame")
           .first()
@@ -279,7 +295,7 @@ test("touch controls, agent label, owner states and narrow desktop pane stay wit
         });
       }
       const initial = (await page
-        .locator(".session-composer-target-container")
+        .locator(".session-native-composer .session-compact-frame")
         .boundingBox())!.height;
       await page.evaluate(async () => {
         const module = (path: string) =>
@@ -299,11 +315,11 @@ test("touch controls, agent label, owner states and narrow desktop pane stay wit
       });
       await expect(
         page.locator(".session-native-composer-status").first(),
-      ).toHaveText("计划模式");
+      ).toHaveText("规划模式");
       await fixedHeight(page, initial);
       await openComposerStatus(page);
       await expect(
-        page.getByRole("button", { name: "取消计划模式", exact: true }),
+        page.getByRole("button", { name: "取消规划模式", exact: true }),
       ).toBeVisible();
       await expect(
         page.getByRole("button", { name: "取消目标草稿", exact: true }),
@@ -323,7 +339,7 @@ test("touch controls, agent label, owner states and narrow desktop pane stay wit
         page.locator(".session-native-composer-status[role=alert]"),
       ).toContainText("上下文保存失败");
       await expect(
-        page.getByRole("button", { name: "排队消息", exact: true }),
+        page.getByRole("button", { name: "发送消息", exact: true }),
       ).toBeDisabled();
       await fixedHeight(page, initial);
       await openComposerStatus(page);
@@ -342,7 +358,7 @@ test("touch controls, agent label, owner states and narrow desktop pane stay wit
       expect(pane.width).toBeLessThanOrEqual(360);
       expect(pane.height).toBe(124);
       const send = (await page
-        .getByRole("button", { name: "排队消息", exact: true })
+        .getByRole("button", { name: "发送消息", exact: true })
         .boundingBox())!;
       expect(send.x + send.width).toBeLessThanOrEqual(pane.x + pane.width);
       await page.screenshot({
@@ -379,7 +395,7 @@ test("slow upload, upload failure and retry reserve the same geometry and keep s
   });
   try {
     const before = (await page
-      .locator(".session-composer-target-container")
+      .locator(".session-native-composer .session-compact-frame")
       .boundingBox())!.height;
     await editor(page).fill("上传时保留草稿");
     await pasteImage(page);
@@ -391,7 +407,7 @@ test("slow upload, upload failure and retry reserve the same geometry and keep s
       page.locator(".session-native-composer-status[role=status]"),
     ).toContainText("正在上传");
     await expect(
-      page.getByRole("button", { name: "发送", exact: true }),
+      page.getByRole("button", { name: "发送消息", exact: true }),
     ).toBeDisabled();
     release();
     await expect(
@@ -413,7 +429,7 @@ test("slow upload, upload failure and retry reserve the same geometry and keep s
     await page.getByRole("button", { name: "关闭面板", exact: true }).click();
     await fixedHeight(page, before);
     await expect(
-      page.getByRole("button", { name: "发送", exact: true }),
+      page.getByRole("button", { name: "发送消息", exact: true }),
     ).toBeEnabled();
     await expect(editor(page)).toHaveText("上传时保留草稿");
     expect(f.calls).toHaveLength(0);
@@ -496,6 +512,7 @@ test("visual acceptance captures both themes, left thumbnails, direct utilities 
           .locator(".session-context-strip.is-compact")
           .boundingBox())!;
         expect(a.x + a.width).toBeLessThanOrEqual(e.x);
+        await page.getByRole("button", { name: "附加文件", exact: true }).click();
         await expect(
           page.getByRole("button", { name: "展开编辑", exact: true }),
         ).toBeVisible();
@@ -505,6 +522,7 @@ test("visual acceptance captures both themes, left thumbnails, direct utilities 
         await expect(
           page.getByRole("button", { name: "输入状态与消息队列", exact: true }),
         ).toBeVisible();
+        await page.keyboard.press("Escape");
         const path = `.dev-runtime/compact-composer-review/visual-${theme}-${width}.png`;
         await page.screenshot({ path });
         await info.attach(`${theme}-${width}`, {
@@ -515,7 +533,7 @@ test("visual acceptance captures both themes, left thumbnails, direct utilities 
     }
     await page.setViewportSize({ width: 375, height: 900 });
     const before = (await page
-      .locator(".session-composer-target-container")
+      .locator(".session-native-composer .session-compact-frame")
       .boundingBox())!.height;
     (f.fixture.threads[0] as any).turns[0].items.push({
       type: "agentMessage",
@@ -546,7 +564,7 @@ test("visual acceptance captures both themes, left thumbnails, direct utilities 
         },
       });
     });
-    await page.getByRole("button", { name: "排队消息", exact: true }).click();
+    await page.getByRole("button", { name: "发送消息", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "立即引导", exact: true }),
     ).toBeVisible();
@@ -604,7 +622,7 @@ for (const width of [375, 1440])
     try {
       await editor(page).fill("不要移除正文");
       const textHeight = (await page
-        .locator(".session-composer-target-container")
+        .locator(".session-native-composer .session-compact-frame")
         .boundingBox())!.height;
       await pasteImage(page);
       const image = page.locator(".session-context-chip.is-image img");
@@ -614,7 +632,7 @@ for (const width of [375, 1440])
       await nativeGeometry(page);
       await identityPlacement(page);
       const imageHeight = (await page
-        .locator(".session-composer-target-container")
+        .locator(".session-native-composer .session-compact-frame")
         .boundingBox())!.height;
       await page
         .getByRole("button", { name: "移除 布局图片-0.png", exact: true })

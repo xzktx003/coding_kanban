@@ -9,7 +9,7 @@ afterEach(() => vi.useRealTimers());
 it("uses the native copy-code hint after 200ms without a second browser title", async () => {
   vi.useFakeTimers();
   render(<NativeCodeFence code="const a = 1;" language="typescript" />);
-  const button = screen.getByRole("button", { name: "复制" });
+  const button = screen.getByRole("button", { name: "复制代码" });
   expect(button.hasAttribute("title")).toBe(false);
   const move = new MouseEvent("pointermove", { bubbles: true });
   Object.defineProperty(move, "pointerType", { value: "mouse" });

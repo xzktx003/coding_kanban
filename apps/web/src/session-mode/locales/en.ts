@@ -218,6 +218,21 @@ export const en = {
       pending_other: "{{count}} pending",
     },
     command: {
+      showOutput: "Show command output",
+      hideOutput: "Hide command output",
+      detail: {
+        missingOutput: "Output was not persisted in the native snapshot",
+        unloaded: "Details not loaded",
+        loading: "Loading details…",
+        busy: "Another detail is loading. Retry when it finishes.",
+        identity: "Native item identity is missing",
+        incomplete: "Detail read did not complete. Retry.",
+        load: "Load details",
+        retry: "Retry",
+        activeSnapshot:
+          "This snapshot is still in progress; it does not update automatically.",
+        snapshot: "Native detail snapshot",
+      },
       shell: "Shell",
       generic: "command",
       running: "Running command",

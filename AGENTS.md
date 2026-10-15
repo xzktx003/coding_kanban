@@ -3,9 +3,10 @@
 ## 构建、测试与开发命令
 
 - `pnpm install --frozen-lockfile`；Node.js 要求 `^20.19.0 || >=22.12.0`。默认会话运行层使用 TypeScript/Node；PTY、SQLite 无预编译包时需要本机编译工具。语音在 Codex 已登录时使用其转写，否则使用外部 whisper.cpp CLI。
-- 后端 `dev:app` 使用 `scripts/watch-server.mjs`：清单/锁文件变化先安装锁定依赖，再热更新网关；失败保留旧网关，保存源码/清单可重试。边界与回归见 `docs/startup.md`。
+- 后端 `dev:app` 使用 `scripts/watch-server.mjs`：清单/锁文件变化先安装锁定依赖，再热更新网关；失败保留旧网关，保存源码/清单可重试。网关异常退出按 1/2/4 秒最多恢复三次；计划替换和关闭不触发重试，独立运行层仍复用。边界与回归见 `docs/startup.md`。
 - `pnpm dev:prepare`：编译 shared 与默认 TypeScript 运行层；`SESSION_MODE_ENABLED=0` 跳过运行层，显式 `SESSION_RUNTIME_BIN` 只校验已有可执行文件。`pnpm dev` 与 `pnpm dev:restart` 自动执行准备。
 - `pnpm session:status`：检查会话服务和运行产物；编译不替换已有运行进程或停止 Agent，详细流程见 `docs/startup.md`。
+- 命令详情网关使用运行包的独立只读库；后端 `build` 会编译该依赖，但不会替换活跃运行进程。关闭会话模式时不加载详情库；自定义运行服务没有默认库产物时保留网关和旧服务，通过既有只读接口明确返回支持状态。见 `docs/session-command-details.md`。
 - `pnpm dev:restart`：先检查两个端口的归属并完成编译，再按 `.env` 启动/恢复前后端；前端绑定 `0.0.0.0`。会话运行服务绑定 loopback，随后端热更新复用。
 - `pnpm check`：共享包、TS 运行层、后端和前端类型检查及生产构建；`pnpm session:check`：TS 运行层检查。
 - `pnpm test`：终端单测、迁移的会话 Vitest 单测及脚本测试；后端测试并发限制为 4，避免共享主机上的 tmux 测试争用。
@@ -13,6 +14,11 @@
 - 会话运行层 TS 实现位于 `packages/session-runtime/src`，新启动默认使用独立 Node 进程。`pnpm --filter @agent-orchestrator/session-runtime run audit` 核对原 208 个迁移契约方法/路径；新 Slack 预览 context/read 两个只读接口有独立行为验收，见 `docs/session-slack-preview.md`。注册通过不替代行为验收。已有 legacy 服务仍安全复用，禁止因新产物而隐式停止活跃 Agent，进度与验收见 `docs/session-typescript-migration.md`。
 - `pnpm e2e`：浏览器测试；会话模式联调使用独立 `.env`、端口和 `SESSION_DATA_HOME`，详情见 `docs/session-mode-architecture.md`。
 - 原生 Codex 实验宿主与只读适配器位于 `packages/native-codex-host`、`packages/native-codex-adapter`，不随 `pnpm dev` 启动。专项验收：`node --test packages/native-codex-host/test/*.test.mjs packages/native-codex-adapter/test/*.test.mjs`；启动参数与真实浏览器边界见各包 README 和 `docs/designs/session-render-alignment/native-prototype-acceptance.md`。不得连接默认 CLI IPC、未经用户明确授权复制登录数据或因实验部署重启正式 Agent；已授权连接复用仅走私有 `--connection-profile-home` 路径。
+- 刷新恢复的 `refresh-prototype` 为隔离组件，默认启动不启用；包含私有常驻进程、原生客户端/订阅适配器、事件管理器与默认 10 项 LRU。真实协议复验显式提供 `NATIVE_CODEX_REFRESH_CLI` 后运行 `test/refresh-native.test.mjs`、`test/refresh-lifecycle-native.test.mjs`、`test/refresh-service.test.mjs`（均在 `packages/native-codex-host` 下）；未提供时跳过，不能计为已验收。真实 11→10 回收与运行/审批保护不替代正式桥接、多端草稿、长测或两秒验收，完整启用仍未实现。进度与历史红灯见 `docs/designs/codex-mode-audit-20261014/refresh-recovery-progress-20261015.md` 和同目录 `refresh-recovery-stage0.md`。
+- 刷新原型可在全新隔离宿主显式使用 `--refresh-service-config` / `--refresh-domain` 接入已验证私有服务；`--reconnection-grace-seconds` 仅控制该宿主断连宽限期（1–300 秒，默认 60）。profile 网关必须由服务端固定注册，`nativeClient=<UUID>` 不得接受端口/目录或回退到另一宿主；关注集合保持共享，布局、启动映射、iframe 缓存和旧实例身份按 profile 隔离。自动 profile 管理、控制通道/租约及正式启用仍未完成，见 [原型启动契约](packages/native-codex-host/refresh-prototype/README.md#explicit-private-host-and-client-routing)。
+- 默认 code-server profile 的浏览器全局存储按源共享，服务端目录/路径隔离不能证明原生草稿独立。`refresh-prototype/origin-listener.mjs` 仅为显式自有前端监听器原型，保留 HTTP/2、原始请求/升级 handler 和 WS 预算；持久源分配与资源准入未完成，不自动启用或复用不同客户端的源。保温管理器先通过只读原生账号/工作区核对建立初始绑定，之后账号变化使其失效，只关闭自身连接、不停止 native 任务；所有官方桥接的完整授权控制仍待实现。生成的 CLI 包装器每次启动及连接打开后均须重查固定服务域/代次/PID/start ticks，准入有界、可取消，旧身份不得回退到新实例。手机关卡按用户确认采用 iPhone 16 尺寸模拟，具体参数与边界见刷新计划。见原型 README 与持续进度。
+
+- 隔离刷新管理器 `createRefreshManager` 要求显式 `resourceMonitor`：用自有进程创建时持有的 PID/start ticks 列齐 native、宿主、管理器及网关根；不得把同 UID 或 HTTP 提供的 PID 当成所有权。资源缺测、过期或超预算暂停新增空闲保温，不停止任务；自动全宿主注册、预算定标与最终恢复验收仍待完成，见 `packages/native-codex-host/refresh-prototype/README.md`。
 
 ## 任务完成前的最低要求
 
@@ -130,6 +136,7 @@
 - 子 Agent 位于 `features/subagents`，独立观察集合不得自动加入关注标签或改变主输入/项目。打开原生历史只读，不 resume 或获取写入权。
 - 普通输入只有原生明确 `canAcceptDirectInput === true` 才开放；审批按实际 thread/request/turn/item/实例标记回复，中断权限独立。批量停止须显式确认范围与轮次，默认本轮不包含旧轮或未知创建轮次。
 - 协议、恢复规则和原生隔离验收脚本见 `docs/session-subagents.md`；两份原生测试版本的问题由主线程发起，不绕过限制。启用新运行产物仍遵守活跃 Agent 安全窗口。
+- 协作通信不得作为父子创建证据；身份与普通输入权限复用原生 metadata，同值新确认也须阻止迟到旧权限恢复。idle 后代释放仅按真实 initialize 精确版本门控，且只取消父订阅，已有子 Agent 仍由原运行实例控制；不得扩展为隐式整家族接管。兼容关卡：`python3 scripts/session-subagent-release-acceptance.py --codex /absolute/path/to/codex --output-dir /private/acceptance/output`，结果与边界见 `docs/designs/session-subagent-identity-release-acceptance-20261014.md`。
 
 ### 会话内存防回归（用户已确认有效）
 

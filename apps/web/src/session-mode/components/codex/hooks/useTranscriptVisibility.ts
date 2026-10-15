@@ -58,5 +58,5 @@ export function useTranscriptVisibility(threadId: string) {
     }
     return release;
   }, [threadId, visible]);
-  return { ref, renderTranscript: !sleeping };
+  return { ref, renderTranscript: !sleeping, visible };
 }

@@ -1,3 +1,6 @@
+import { CodexSystemRecords } from "./CodexSystemRecords";
+import { TranscriptDetailVisibility } from "../hooks/transcriptDetailVisibility";
+import { countClosedThreadRecords } from "./closedThreadRecords";
 import { pruneRowState } from "./pruneRowState";
 import { useTranscriptVisibility } from "../hooks/useTranscriptVisibility";
 import {
@@ -198,6 +201,10 @@ const CodexTranscript = memo(function CodexTranscript({
   );
   const historyError = useCodexStore((s) => s.historyErrorMap[activeThreadId]);
   const events = useCodexStore((s) => s.events[activeThreadId] ?? EMPTY_EVENTS);
+  const closedRecordCount = useMemo(
+    () => countClosedThreadRecords(events, activeThreadId),
+    [events, activeThreadId],
+  );
   const streamingMessage = useCodexStore(
     (s) => s.streamingAgentMessages?.[activeThreadId],
   );
@@ -1155,7 +1162,12 @@ const CodexTranscript = memo(function CodexTranscript({
           </div>
         </ScrollArea>
       </div>
-      <CodexAccessNotice key={activeThreadId} threadId={activeThreadId} />
+      <CodexSystemRecords
+        key={`records:${activeThreadId}`}
+        threadId={activeThreadId}
+        count={closedRecordCount}
+      />
+      <CodexAccessNotice key={`access:${activeThreadId}`} threadId={activeThreadId} suppressStatus={Boolean(historyError)} />
       {!isAtBottom && (
         <ScrollToBottomButton
           onClick={jumpToBottom}
@@ -1173,7 +1185,7 @@ export const CodexThread = memo(function CodexThread({
   inspection = false,
 }: CodexThreadProps = {}) {
   const activeThreadId = useCodexStore((s) => threadId ?? s.currentThreadId);
-  const { ref, renderTranscript } = useTranscriptVisibility(
+  const { ref, renderTranscript, visible } = useTranscriptVisibility(
     activeThreadId ?? "",
   );
   return (
@@ -1183,7 +1195,8 @@ export const CodexThread = memo(function CodexThread({
         data-codex-transcript-shell={activeThreadId ?? ""}
         className={`flex flex-col flex-1 min-h-0 ${fillHeight ? "h-full" : ""}`}
       >
-        <CodexContentOwner.Provider value={activeThreadId ?? null}>
+        <TranscriptDetailVisibility.Provider value={visible}>
+          <CodexContentOwner.Provider value={activeThreadId ?? null}>
           {renderTranscript ? (
             <CodexTranscript
               key={activeThreadId ?? ""}
@@ -1195,6 +1208,7 @@ export const CodexThread = memo(function CodexThread({
             <div className="flex-1 min-h-0" data-transcript-sleeping />
           )}
         </CodexContentOwner.Provider>
+          </TranscriptDetailVisibility.Provider>
       </div>
     </TranscriptInspectionContext.Provider>
   );
