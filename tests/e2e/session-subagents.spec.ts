@@ -207,6 +207,10 @@ async function setup(
       turns: [{ id: "echo-turn", status: "completed", items: [] }],
     },
   ];
+  for (const child of children)
+    child.source = {
+      subAgent: { thread_spawn: { parent_thread_id: child.parentThreadId } },
+    };
   (fixture.threads[0] as any).turns = [
     {
       id: "parent-turn",
