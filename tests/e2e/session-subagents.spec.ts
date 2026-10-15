@@ -321,6 +321,17 @@ async function setup(
     },
   );
   await page.route(
+    /\/api\/session\/api\/codex\/thread\/read(?:\?.*)?$/,
+    async (route) => {
+      const body = route.request().postDataJSON();
+      const child = children.find((thread) => thread.id === body.threadId);
+      if (!child) return route.fallback();
+      // The generic fixture fabricates a main thread for unknown IDs. Child
+      // history must retain its real parent/source identity after it is opened.
+      return route.fulfill({ json: { thread: child } });
+    },
+  );
+  await page.route(
     /\/api\/session\/api\/codex\/thread\/turns\/list(?:\?.*)?$/,
     async (r) => {
       const body = r.request().postDataJSON(),
