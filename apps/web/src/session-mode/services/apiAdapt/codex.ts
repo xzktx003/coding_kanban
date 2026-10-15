@@ -81,8 +81,15 @@ export async function listModels() {
   return await postJson<ModelListResponse>("/api/codex/model/list", params);
 }
 
-export async function threadStart(params: ThreadStartParams) {
-  return await postJson<ThreadStartResponse>("/api/codex/thread/start", params);
+export async function threadStart(
+  params: ThreadStartParams,
+  options?: { signal?: AbortSignal },
+) {
+  return await postJsonWithOptions<ThreadStartResponse>(
+    "/api/codex/thread/start",
+    params,
+    options,
+  );
 }
 
 export async function threadResume(
@@ -651,10 +658,14 @@ export async function setEnv(key: string, value: string) {
   await postNoContent("/api/codex/set_env", { key, value });
 }
 
-export async function threadGoalSet(params: ThreadGoalSetParams) {
-  return await postJson<ThreadGoalSetResponse>(
+export async function threadGoalSet(
+  params: ThreadGoalSetParams,
+  options?: { signal?: AbortSignal },
+) {
+  return await postJsonWithOptions<ThreadGoalSetResponse>(
     "/api/codex/thread/goal/set",
     params,
+    options,
   );
 }
 

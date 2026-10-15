@@ -121,3 +121,12 @@ Inspector存档因果诊断（未改产品／安装目录）：仅在独立测�
 2026-10-11 原生分配归因诊断：独立 raw-CDP 桌面 1280×720／无 Network 域，20 分钟 586 轮、118,854,514 bytes；堆低点增长4.6074MiB、renderer RSS低点增长115.0508MiB，草稿／审批／正文释放及自然音频空闲归零通过。两份 memory-infra 快照使用 deterministic:false，没有触发强制 GC，且记录同一自有 renderer PID186445；不是标准 Playwright 30分钟验收。开始／结束时 Blink 活对象7.6157→8.8730MiB，已提交堆54.8702→58.9952MiB，V8堆容量129.0312→139.0586MiB，buffer分区活对象55.6361→55.8761MiB；这些时点差异无法解释全部RSS低点增长，不能据此宣布根因、将父子allocator节点重复求和或把虚拟地址空间当作物理占用。日志 `/tmp/codex-memory-native-allocations.log`，完整样本与快照 `.dev-runtime/codex-memory-native-allocations.json`。2分钟启动验证只证明采集可用，不当成稳定性证据；标准177.75MiB及Inspector存档139.6602MiB失败仍保留。
 
 React原生时间戳因果诊断没有闭合标准RSS红灯：在独立Node进程对自有页面初始化脚本仅过滤console.timeStamp的Components⚛／Scheduler⚛字段，普通时间戳转发原实现、Performance.measure现有释放保留、Network及所有原工作负载／门槛保留；不修改产品或安装包。30.1分钟／860样本仍失败，RSS低点322.0391→483.9883MiB（增长161.9492MiB＞128MiB），堆低点增长5.8805MiB，峰值246.8119／654.9570MiB，errors[]；音频最终空闲检查因RSS先失败未执行。日志 `/tmp/codex-memory-react-stamp-diagnostic.log`，JSON `.dev-runtime/codex-memory-react-stamp-diagnostic/session-idle-memory-long-r-12e42--natural-garbage-collection/natural-gc-soak.json`。相对原177.75MiB的条件差异不足以证明收益／根因，未合入时间戳过滤，也没有移除普通API或更新原标准门槛。
+
+
+## 发送与身份恢复加固复验（2026-10-15）
+
+本轮涉及 API 取消信号与连接身份复位，保留既有事件驱动恢复和预算。真实 HTTP → 网关 → 原生 EventSource 用例通过：上游 100,669,814 bytes，浏览器收到 6,178 个 SSE 数据字符，单事件最多 317 字符，强制 GC 后堆增量 35,964 bytes；序号、审批和最终回复断言保留。流式正文／可见历史预算／大字符串释放／无关正文隔离另 9 项通过，自动恢复自然 GC 的 24 次样本约 34.3–80.1 MB，未放宽门槛。
+
+独立浏览器自动回收与只读重显约 96.5 秒：JS heap 为 93,977,620 → 62,124,452 → 235,419,324 bytes，renderer RSS 为 432,459,776 → 295,903,232 → 561,545,216 bytes；没有强制 GC／刷新，草稿、审批与完成回复保留，页面错误为空。该短测只证明回收和恢复边界，不证明长期 RSS 稳定，未重跑默认跳过的 30 分钟 soak，之前标准长测红灯仍保留。
+
+证据位于被忽略的 `.dev-runtime/send-reliability-final/`（`session-network-memory-metrics.json`、`idle-memory-observations.json`）和 `.dev-runtime/send-reliability-memory/`，局域网 HTTPS 前端为 `https://10.30.0.22:8484`、绑定 `0.0.0.0`；隔离 fixture 接收全部测试写入，没有向真实 Agent 发送测试任务。

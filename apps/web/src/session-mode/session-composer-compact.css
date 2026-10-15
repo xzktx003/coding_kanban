@@ -99,8 +99,7 @@
 .session-mode
   .session-compact-composer
   .session-composer-editor
-  [contenteditable]
-  + div {
+  .session-composer-placeholder {
   top: 0;
   left: 0;
   font-size: 15px;

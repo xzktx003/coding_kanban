@@ -7,7 +7,12 @@ import {
   type SubagentStopResult,
 } from "@agent-orchestrator/shared";
 import type { ServerNotification } from "@session/bindings";
-import { descendants, reconcileNodes, type SubagentNode } from "./model";
+import {
+  descendants,
+  isKnownRootThread,
+  reconcileNodes,
+  type SubagentNode,
+} from "./model";
 import { subagentScope, subagentStorageKey } from "./scope";
 interface Family {
   complete: boolean;
@@ -40,15 +45,25 @@ export const useSubagentStore = create<State>()(
       scope: subagentScope(),
       apply: (root, snapshot, baseline) =>
         set((s) => ({
+          revision: s.revision + 1,
           nodes: Object.fromEntries(
             Object.entries(
-              reconcileNodes(s.nodes, snapshot.threads, baseline),
+              reconcileNodes(
+                s.nodes,
+                snapshot.threads,
+                baseline,
+                s.revision + 1,
+              ),
             ).map(([id, node]) => [
               id,
-              snapshot.unavailableIds?.includes(id) && node.revision <= baseline
+              snapshot.unavailableIds?.includes(id) &&
+              (s.nodes[id]?.metadataRevision ?? s.nodes[id]?.revision ?? 0) <=
+                baseline
                 ? {
                     ...node,
                     unavailable: true,
+                    revision: s.revision + 1,
+                    metadataRevision: s.revision + 1,
                     thread: { ...node.thread, canAcceptDirectInput: null },
                   }
                 : node,
@@ -91,6 +106,7 @@ export const useSubagentStore = create<State>()(
                 ...node,
                 unavailable: true,
                 revision: 0,
+                metadataRevision: 0,
                 thread: {
                   ...node.thread,
                   status: { type: "notLoaded" },
@@ -120,6 +136,18 @@ export function observeSubagents(event: ServerNotification) {
   const state = useSubagentStore.getState(),
     revision = state.revision + 1;
   let nodes = state.nodes;
+  const canObserveChild = (id: string, parent: string) => {
+    if (typeof id !== "string" || !id || typeof parent !== "string" || !parent)
+      return false;
+    const seen = new Set([id]);
+    let next: string | undefined = parent;
+    while (next) {
+      if (seen.has(next)) return false;
+      seen.add(next);
+      next = nodes[next]?.parentId;
+    }
+    return true;
+  };
   const update = (
     id: string,
     parent: string,
@@ -135,6 +163,7 @@ export function observeSubagents(event: ServerNotification) {
         unavailable: false,
         parentId: parent,
         revision,
+        metadataRevision: data.metadataRevision ?? old?.metadataRevision ?? 0,
         verified: data.verified ?? old?.verified ?? false,
         thread: { ...old?.thread, ...thread, id },
       },
@@ -146,9 +175,16 @@ export function observeSubagents(event: ServerNotification) {
       update(
         p.thread.id,
         parent,
-        { verified: true },
-        normalizeSubagentThread(p.thread),
+        { verified: true, metadataRevision: revision },
+        {
+          ...normalizeSubagentThread(p.thread),
+          canAcceptDirectInput: p.thread.canAcceptDirectInput ?? null,
+        },
       );
+    else if (isKnownRootThread(p.thread) && nodes[p.thread.id]) {
+      nodes = { ...nodes };
+      delete nodes[p.thread.id];
+    }
   } else if (
     event.method === "item/started" ||
     event.method === "item/completed"
@@ -159,7 +195,11 @@ export function observeSubagents(event: ServerNotification) {
         ...(item.receiverThreadIds ?? []),
         ...Object.keys(item.agentsStates ?? {}),
       ])) {
+        // A message/wait recipient may be the sender's parent or a sibling.
+        // Only spawning establishes a new relationship.
+        if (!nodes[id] && item.tool !== "spawnAgent") continue;
         const parent = nodes[id]?.parentId ?? item.senderThreadId ?? p.threadId;
+        if (!canObserveChild(id, parent)) continue;
         const status = item.agentsStates?.[id]?.status;
         update(
           id,
@@ -194,8 +234,9 @@ export function observeSubagents(event: ServerNotification) {
       }
     } else if (item.type === "subAgentActivity") {
       const id = item.agentThreadId;
-      if (typeof id === "string")
-        update(id, nodes[id]?.parentId ?? p.threadId, {
+      const parent = nodes[id]?.parentId ?? p.threadId;
+      if ((nodes[id] || item.kind === "started") && canObserveChild(id, parent))
+        update(id, parent, {
           ...(item.kind === "started"
             ? { createdInTurn: nodes[id]?.createdInTurn ?? p.turnId }
             : {}),

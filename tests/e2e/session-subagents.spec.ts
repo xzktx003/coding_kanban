@@ -2,7 +2,11 @@ import { test, expect, type Page } from "@playwright/test";
 import { installSessionUxFixture } from "./session-ux-fixture";
 async function setup(
   page: Page,
-  options: { oldRound?: boolean; approval?: boolean } = {},
+  options: {
+    oldRound?: boolean;
+    approval?: boolean;
+    poisonedRoot?: boolean;
+  } = {},
 ) {
   const fixture = await installSessionUxFixture(page, 2),
     calls: any[] = [];
@@ -42,6 +46,36 @@ async function setup(
       errorEvents.push({ text: m.text().slice(0, 1500), at: Date.now() });
   });
   const now = Math.floor(Date.now() / 1000);
+  if (options.poisonedRoot) {
+    Object.assign(fixture.threads[0], {
+      source: "cli",
+      parentThreadId: null,
+      canAcceptDirectInput: true,
+    });
+    await page.addInitScript(() => {
+      const key = `kanban.session.subagent-families:${location.origin}`;
+      // Seed once: reload must exercise the repaired persisted state.
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          version: 1,
+          state: {
+            nodes: {
+              "ux-0": {
+                thread: { id: "ux-0", canAcceptDirectInput: false },
+                parentId: "child-atlas",
+                verified: false,
+                revision: 1,
+              },
+            },
+            selection: {},
+            panelRoot: null,
+          },
+        }),
+      );
+    });
+  }
   const children: any[] = [
     {
       id: "child-atlas",
@@ -275,6 +309,51 @@ test.afterEach(async ({ page }, info) => {
     contentType: "application/json",
   });
 });
+test("native root recovers from a persisted false child restriction and stays sendable after reload", async ({
+  page,
+}) => {
+  const f = await setup(page, { poisonedRoot: true });
+  await page.getByRole("button", { name: "返回子智能体", exact: true }).click();
+  await f.editor.fill("主会话新的草稿");
+  const warning = page.getByText(
+    "当前子线程由主 Agent 调度，不能直接发送消息。",
+    { exact: true },
+  );
+  await expect(warning).toHaveCount(0);
+  const send = page.getByRole("button", { name: "发送消息", exact: true });
+  await expect(send).toBeEnabled();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const cached = JSON.parse(
+          localStorage.getItem(
+            `kanban.session.subagent-families:${location.origin}`,
+          ) ?? "{}",
+        );
+        return !!cached.state?.nodes?.["ux-0"];
+      }),
+    )
+    .toBe(false);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(f.editor).toHaveText("主会话新的草稿");
+  await expect(warning).toHaveCount(0);
+  await expect(send).toBeEnabled();
+  await send.click();
+  await expect
+    .poll(
+      () =>
+        f.fixture.calls.filter((c) => c.path.endsWith("/followups/submit"))
+          .length,
+    )
+    .toBe(1);
+  expect(
+    f.fixture.calls.find((c) => c.path.endsWith("/followups/submit"))!.body,
+  ).toMatchObject({
+    threadId: "ux-0",
+    text: "主会话新的草稿",
+  });
+  expect(f.errors).toEqual([]);
+});
 test("child inspection preserves parent input and project; native V2 child is read-only", async ({
   page,
 }) => {
@@ -310,16 +389,14 @@ test("child inspection preserves parent input and project; native V2 child is re
           events: c.events,
         };
       });
-      await test
-        .info()
-        .attach("subagent-first-open-state", {
-          body: JSON.stringify(
-            { stores, calls: f.calls, errors: f.errors },
-            null,
-            2,
-          ),
-          contentType: "application/json",
-        });
+      await test.info().attach("subagent-first-open-state", {
+        body: JSON.stringify(
+          { stores, calls: f.calls, errors: f.errors },
+          null,
+          2,
+        ),
+        contentType: "application/json",
+      });
       throw error;
     });
   await expect(page.getByText("由主 Agent 调度 · 子线程只读")).toHaveCount(0);
@@ -353,16 +430,14 @@ test("interactive child draft and image restore after refresh without changing t
     exact: true,
   });
   await childDraft.fill("子草稿输入一半");
-  await page
-    .locator(".session-subagent-input input[type=file]")
-    .setInputFiles({
-      name: "draft.png",
-      mimeType: "image/png",
-      buffer: Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jF5cAAAAASUVORK5CYII=",
-        "base64",
-      ),
-    });
+  await page.locator(".session-subagent-input input[type=file]").setInputFiles({
+    name: "draft.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jF5cAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  });
   await expect(page.locator(".session-subagent-input")).toContainText("ready");
   await page.getByRole("button", { name: "返回子智能体", exact: true }).click();
   await page.getByRole("button", { name: "打开子智能体", exact: true }).click();
@@ -402,16 +477,14 @@ test("interactive child draft and image restore after refresh without changing t
             .map((k) => [k, localStorage.getItem(k)]),
         };
       });
-      await test
-        .info()
-        .attach("subagent-reload-state", {
-          body: JSON.stringify(
-            { stores, calls: f.calls, errors: f.errors },
-            null,
-            2,
-          ),
-          contentType: "application/json",
-        });
+      await test.info().attach("subagent-reload-state", {
+        body: JSON.stringify(
+          { stores, calls: f.calls, errors: f.errors },
+          null,
+          2,
+        ),
+        contentType: "application/json",
+      });
       throw error;
     });
   await expect(page.locator(".session-subagent-input")).toContainText(
@@ -492,14 +565,19 @@ test("active and done sections list every descendant without a round filter", as
 test("a finished family leaves the composer summary hidden and shows the empty panel", async ({
   page,
 }) => {
-  await page.goto("/?mode=session&view=agent", { waitUntil: "domcontentloaded" });
-  await page.getByRole("tablist", { name: "关注会话" }).waitFor();
+  const f = await setup(page);
+  await expect(page.locator('[data-subagent-id="child-atlas"]')).toBeVisible();
+  // Keep every request isolated, including the refresh when reopening the panel.
+  f.children.splice(0);
+  (f.fixture.threads[0] as any).turns = [];
+  await page.getByRole("button", { name: "返回子智能体", exact: true }).click();
   await page.evaluate(async () => {
     const load = (path: string) =>
       import(
         performance
           .getEntriesByType("resource")
-          .findLast((entry) => new URL(entry.name).pathname === path)?.name ?? path
+          .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+          path
       );
     const store = await load("/src/session-mode/features/subagents/store.ts");
     const done = {
@@ -526,9 +604,9 @@ test("a finished family leaves the composer summary hidden and shows the empty p
       families: { "ux-0": { complete: true, loading: false, error: null } },
     });
   });
-  await expect(page.getByRole("button", { name: /子智能体 · 已开启/ })).toHaveCount(
-    0,
-  );
+  await expect(
+    page.getByRole("button", { name: /子智能体 · 已开启/ }),
+  ).toHaveCount(0);
   await page.screenshot({
     path: `${process.env.CODEX_UI_SHOTS ?? "test-results"}/control-subagents-hidden.png`,
     animations: "disabled",
@@ -538,7 +616,8 @@ test("a finished family leaves the composer summary hidden and shows the empty p
     const module = await import(
       performance
         .getEntriesByType("resource")
-        .findLast((entry) => new URL(entry.name).pathname === path)?.name ?? path
+        .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+        path
     );
     module.openSubagents("ux-0");
   });
@@ -563,9 +642,36 @@ test("incomplete discovery retains unavailable identities and avoids claiming co
   f.discovery.unavailableIds = ["child-atlas"];
   await page.getByRole("button", { name: "返回子智能体", exact: true }).click();
   await page.getByRole("button", { name: "打开子智能体", exact: true }).click();
-  await expect(page.locator('[data-subagent-id="child-atlas"]')).toContainText(
-    "待确认",
-  );
+  await expect(
+    page.getByRole("heading", { name: "已开启 · 待确认" }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const path = "/src/session-mode/features/subagents/store.ts";
+        const { useSubagentStore } = await import(
+          performance
+            .getEntriesByType("resource")
+            .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+            path
+        );
+        const node = useSubagentStore.getState().nodes["child-atlas"];
+        return (
+          node && {
+            id: node.thread.id,
+            parentId: node.parentId,
+            unavailable: node.unavailable,
+            canAcceptDirectInput: node.thread.canAcceptDirectInput,
+          }
+        );
+      }),
+    )
+    .toEqual({
+      id: "child-atlas",
+      parentId: "ux-0",
+      unavailable: true,
+      canAcceptDirectInput: null,
+    });
   await expect(
     page.getByText("此子智能体在当前分支上已不可用。", { exact: false }),
   ).toBeVisible();

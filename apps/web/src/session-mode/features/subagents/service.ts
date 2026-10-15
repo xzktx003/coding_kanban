@@ -1,11 +1,13 @@
-import type {
-  SubagentSnapshot,
-  SubagentThread,
-  SubagentStopTarget,
-  SubagentStopResult,
+import {
+  subagentParent,
+  type SubagentSnapshot,
+  type SubagentThread,
+  type SubagentStopTarget,
+  type SubagentStopResult,
 } from "@agent-orchestrator/shared";
 import { postJsonWithOptions } from "@session/services/apiAdapt/shared";
-import { reconcileNodes } from "./model";
+import { readWithDeadline } from "@session/services/sessionReadQueue";
+import { descendants, reconcileNodes } from "./model";
 import { useSubagentStore, observedIds } from "./store";
 import { subagentScope } from "./scope";
 const pending = new Map<string, Promise<void>>();
@@ -25,6 +27,7 @@ export function resetSubagentRuntime() {
           ...node,
           unavailable: true,
           revision: s.revision + 1,
+          metadataRevision: s.revision + 1,
           thread: {
             ...node.thread,
             status: { type: "notLoaded" },
@@ -42,6 +45,15 @@ const current = (version: number, scope: string) =>
   useSubagentStore.getState().scope === scope;
 const post = <T>(path: string, body: unknown) =>
   postJsonWithOptions<T>(`/subagents/${path}`, body, { suppressToast: true });
+const read = <T>(path: string, body: unknown) =>
+  readWithDeadline(
+    (signal) =>
+      postJsonWithOptions<T>(`/subagents/${path}`, body, {
+        suppressToast: true,
+        signal,
+      }),
+    15000,
+  );
 export const subagentService = {
   refresh(root: string): Promise<void> {
     const version = epoch,
@@ -60,7 +72,7 @@ export const subagentService = {
         },
       },
     }));
-    const task = post<SubagentSnapshot>("snapshot", {
+    const task = read<SubagentSnapshot>("snapshot", {
       rootId: root,
       observedIds: observedIds(root),
     })
@@ -101,7 +113,7 @@ export const subagentService = {
     if (!current(version, scope))
       throw new Error("会话服务已切换，请重新确认子任务");
     const baseline = useSubagentStore.getState().revision;
-    const result = await post<{
+    const result = await read<{
       thread: SubagentThread;
       threads?: SubagentThread[];
     }>("verify", {
@@ -112,11 +124,32 @@ export const subagentService = {
       throw new Error("运行实例已改变，操作尚未发送，请重新确认");
     if (result.thread?.id !== threadId)
       throw new Error("子任务身份尚未确认，未开放历史或输入");
+    const nodes = useSubagentStore.getState().nodes;
+    const latest = nodes[threadId];
+    if (latest && (latest.metadataRevision ?? latest.revision) > baseline) {
+      // Opening a panel refreshes discovery and verifies its selected child in
+      // parallel. An unchanged newer snapshot is still valid authority; never
+      // write the older response over it or return its stale execution state.
+      if (
+        latest.verified &&
+        !latest.unavailable &&
+        latest.parentId === subagentParent(result.thread) &&
+        JSON.stringify(latest.thread.source ?? null) ===
+          JSON.stringify(result.thread.source ?? null) &&
+        (latest.thread.canAcceptDirectInput ?? null) ===
+          (result.thread.canAcceptDirectInput ?? null) &&
+        descendants(nodes, root).some((node) => node.thread.id === threadId)
+      )
+        return latest.thread;
+      throw new Error("子任务身份或权限已更新，请重新确认");
+    }
     useSubagentStore.setState((s) => ({
+      revision: s.revision + 1,
       nodes: reconcileNodes(
         s.nodes,
         result.threads ?? [result.thread],
         baseline,
+        s.revision + 1,
       ),
     }));
     return result.thread;
@@ -143,7 +176,7 @@ export const subagentService = {
       scope = subagentScope();
     if (!current(version, scope))
       throw new Error("会话服务已切换，请重新读取角色");
-    const result = await post<{
+    const result = await read<{
       roles: { name: string; description: string }[];
     }>("roles", { rootId: root });
     if (!current(version, scope))

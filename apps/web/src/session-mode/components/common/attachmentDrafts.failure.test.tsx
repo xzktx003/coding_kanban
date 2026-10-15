@@ -63,6 +63,28 @@ test("a quota failure keeps local file bytes, blocks upload, and permits retry a
   expect(result.current.paths).toEqual(["/saved-after-recovery.png"]);
 });
 
+test("an upload timeout retains the original file for an explicit retry", async () => {
+  const owner = `upload-timeout:${crypto.randomUUID()}`;
+  const { result } = renderHook(() => useImageAttachments(owner));
+  await waitFor(() => expect(result.current.blocked).toBe(false));
+  const file = new File(["original bytes"], "retry.png", { type: "image/png" });
+  vi.mocked(uploadBrowserFile).mockRejectedValueOnce(
+    new Error("附件上传超时，请重试"),
+  );
+  act(() => result.current.addFiles([file]));
+  await waitFor(() =>
+    expect(result.current.attachments[0]?.status).toBe("error"),
+  );
+  expect(result.current.attachments[0].file).toBe(file);
+  expect(result.current.blocked).toBe(true);
+  expect(uploadBrowserFile).toHaveBeenCalledOnce();
+  vi.mocked(uploadBrowserFile).mockResolvedValueOnce("/retried.png");
+  await act(async () => result.current.retry(result.current.attachments[0].id));
+  expect(uploadBrowserFile).toHaveBeenNthCalledWith(2, file);
+  expect(result.current.paths).toEqual(["/retried.png"]);
+  expect(result.current.blocked).toBe(false);
+});
+
 test("a persistence failure blocks ready path attachments until storage is saved", async () => {
   const owner = `ready-quota:${crypto.randomUUID()}`;
   const { result } = renderHook(() => useImageAttachments(owner));

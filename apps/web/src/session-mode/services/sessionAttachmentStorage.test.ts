@@ -1,10 +1,18 @@
 import { afterEach, expect, it, vi } from "vitest";
+import { act, renderHook } from "@testing-library/react";
 import {
   loadAttachmentDraft,
   saveAttachmentDraft,
 } from "./sessionAttachmentStorage";
+import {
+  useAttachmentDraftStore,
+  useImageAttachments,
+} from "../components/common/useImageAttachments";
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 it("persists the original annotated photo as portable bytes and restores its editable drawing", async () => {
   const put = IDBObjectStore.prototype.put;
   vi.spyOn(IDBObjectStore.prototype, "put").mockImplementation(function (
@@ -144,4 +152,118 @@ it("keeps uploaded path-only metadata and drawings across the portable format", 
   });
   await saveAttachmentDraft(owner, []);
   expect(await loadAttachmentDraft(owner)).toEqual([]);
+});
+
+it("reports a hanging initial database open and retries without losing unread attachments", async () => {
+  const owner = `open-timeout:${crypto.randomUUID()}`;
+  await saveAttachmentDraft(owner, [
+    {
+      id: "saved",
+      name: "saved.png",
+      path: "/saved.png",
+      preview: "",
+      status: "ready",
+    },
+  ]);
+  vi.useFakeTimers();
+  const lateDatabase = { close: vi.fn(), transaction: vi.fn() };
+  const request = { result: lateDatabase } as unknown as IDBOpenDBRequest;
+  const open = vi.spyOn(indexedDB, "open").mockReturnValueOnce(request);
+  const { result } = renderHook(() => useImageAttachments(owner));
+  await act(async () => vi.advanceTimersByTimeAsync(10_000));
+  expect(result.current.storageError).toContain("超时");
+  expect(result.current.blocked).toBe(true);
+  expect(useAttachmentDraftStore.getState().hydrated[owner]).not.toBe(true);
+  expect(result.current.attachments).toEqual([]);
+
+  open.mockRestore();
+  vi.useRealTimers();
+  await act(async () => result.current.retryStorage());
+  expect(result.current.paths).toEqual(["/saved.png"]);
+  expect(result.current.storageError).toBeUndefined();
+  expect(result.current.blocked).toBe(false);
+  const restored = useAttachmentDraftStore.getState();
+  await act(async () => request.onsuccess?.call(request, new Event("success")));
+  expect(lateDatabase.close).toHaveBeenCalledOnce();
+  expect(lateDatabase.transaction).not.toHaveBeenCalled();
+  expect(useAttachmentDraftStore.getState()).toBe(restored);
+  expect((await loadAttachmentDraft(owner))[0].id).toBe("saved");
+});
+
+it.each(["readonly", "readwrite"] as const)(
+  "aborts a hanging %s transaction and closes the connection on timeout",
+  async (mode) => {
+    vi.useFakeTimers();
+    const transaction = {
+      abort: vi.fn(),
+      objectStore: () => ({
+        get: () => ({ result: [] }),
+        delete: () => ({ result: undefined }),
+      }),
+    } as unknown as IDBTransaction;
+    const database = { transaction: vi.fn(() => transaction), close: vi.fn() };
+    const request = { result: database } as unknown as IDBOpenDBRequest;
+    vi.spyOn(indexedDB, "open").mockImplementation(() => {
+      queueMicrotask(() =>
+        request.onsuccess?.call(request, new Event("success")),
+      );
+      return request;
+    });
+    const outcome: { settled: boolean; error?: Error } = { settled: false };
+    void (
+      mode === "readonly"
+        ? loadAttachmentDraft("read")
+        : saveAttachmentDraft("write", [])
+    ).then(
+      () => {
+        outcome.settled = true;
+      },
+      (error) => Object.assign(outcome, { settled: true, error }),
+    );
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(outcome.settled).toBe(true);
+    expect(outcome.error?.message).toContain("超时");
+    expect(transaction.abort).toHaveBeenCalledOnce();
+    expect(database.close).toHaveBeenCalledOnce();
+  },
+);
+
+it("expires stuck file-byte preparation so retry can read again and a late save cannot overwrite it", async () => {
+  const owner = `bytes-timeout:${crypto.randomUUID()}`;
+  const file = new File(["photo"], "photo.png", { type: "image/png" });
+  let resolveBytes!: (bytes: ArrayBuffer) => void;
+  const arrayBuffer = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          resolveBytes = resolve;
+        }),
+    )
+    .mockResolvedValue(new Uint8Array([1, 2, 3]).buffer);
+  Object.defineProperty(file, "arrayBuffer", { value: arrayBuffer });
+  const item = {
+    id: "old",
+    name: file.name,
+    file,
+    preview: "",
+    status: "uploading" as const,
+  };
+  vi.useFakeTimers();
+  const outcome: { settled: boolean; error?: Error } = { settled: false };
+  void saveAttachmentDraft(owner, [item]).then(
+    () => {
+      outcome.settled = true;
+    },
+    (error) => Object.assign(outcome, { settled: true, error }),
+  );
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(outcome.settled).toBe(true);
+  expect(outcome.error?.message).toContain("超时");
+  vi.useRealTimers();
+  await saveAttachmentDraft(owner, [{ ...item, id: "retried" }]);
+  expect(arrayBuffer).toHaveBeenCalledTimes(2);
+  resolveBytes(new Uint8Array([9]).buffer);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect((await loadAttachmentDraft(owner))[0].id).toBe("retried");
 });

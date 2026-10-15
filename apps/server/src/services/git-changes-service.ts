@@ -13,6 +13,9 @@ import type {
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 5_000;
 const MAX_OUTPUT_BYTES = 1 * 1024 * 1024;
+const MAX_CHECKOUT_DIFF_FILES = 200;
+const MAX_CHECKOUT_DIFF_BYTES = 16 * 1024 * 1024;
+const MAX_CHECKOUT_DIFF_READ_MS = 20_000;
 
 async function runGit(
   cwd: string,
@@ -361,6 +364,7 @@ export class GitChangesService {
     }
 
     const directory = resolve(requestedDirectory);
+    const readStartedAt = Date.now();
     try {
       await access(directory);
       const repositoryRoot = (
@@ -378,7 +382,14 @@ export class GitChangesService {
       ]);
       const statuses = parseStatus(status);
       const files: DiffFileChange[] = [];
-      for (const path of [...statuses.keys()].sort()) {
+      const paths = [...statuses.keys()].sort();
+      let totalPatchBytes = 0;
+      let truncated = paths.length > MAX_CHECKOUT_DIFF_FILES;
+      for (const path of paths.slice(0, MAX_CHECKOUT_DIFF_FILES)) {
+        if (Date.now() - readStartedAt >= MAX_CHECKOUT_DIFF_READ_MS) {
+          truncated = true;
+          break;
+        }
         const safePath = filePatchPath(directory, path);
         const { status: statusValue, previousPath } = statuses.get(path)!;
         const safePreviousPath = previousPath
@@ -413,6 +424,12 @@ export class GitChangesService {
                 ],
                 true,
               );
+        const patchBytes = Buffer.byteLength(patch, "utf8");
+        if (totalPatchBytes + patchBytes > MAX_CHECKOUT_DIFF_BYTES) {
+          truncated = true;
+          break;
+        }
+        totalPatchBytes += patchBytes;
         const binary =
           patch.includes("Binary files") || patch.includes("GIT binary patch");
         const counts = binary
@@ -435,11 +452,12 @@ export class GitChangesService {
         repositoryRoot,
         branch: branch.trim() || undefined,
         head: head.trim(),
-        changedFiles: files.length,
+        changedFiles: statuses.size,
         addedLines: files.reduce((sum, file) => sum + file.addedLines, 0),
         deletedLines: files.reduce((sum, file) => sum + file.deletedLines, 0),
         files,
         generatedAt,
+        ...(truncated ? { truncated: true } : {}),
       };
     } catch {
       return this.unavailable(generatedAt, "当前目录不是可读取的 Git 工作区");

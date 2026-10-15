@@ -17,6 +17,7 @@ it("cached state never grants permission or wins over a fresh snapshot after rel
             parentId: "root",
             verified: true,
             revision: 500,
+            metadataRevision: 500,
             thread: {
               id: "child",
               parentThreadId: "root",
@@ -30,6 +31,7 @@ it("cached state never grants permission or wins over a fresh snapshot after rel
     }),
   );
   await useSubagentStore.persist.rehydrate();
+  expect(useSubagentStore.getState().nodes.child.metadataRevision).toBe(0);
   expect(
     useSubagentStore.getState().nodes.child.thread.canAcceptDirectInput,
   ).toBeNull();

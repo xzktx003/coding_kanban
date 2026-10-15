@@ -398,6 +398,7 @@ export const codexService = {
     archived: boolean = false,
     sortKey: "created_at" | "updated_at" = "updated_at",
   ) {
+    const epoch = runtimeEpoch;
     try {
       const params: ThreadListParams = {
         cursor: null,
@@ -409,12 +410,14 @@ export const codexService = {
         useStateDbOnly: true,
       };
       const response = await listThreads(params);
+      if (epoch !== runtimeEpoch) return;
       const workingDirThreads = response.data;
       const nextCursor = response.nextCursor ?? null;
       const { setThreads, setThreadListNextCursor } = useCodexStore.getState();
       setThreads(workingDirThreads);
       setThreadListNextCursor(nextCursor);
     } catch (error: unknown) {
+      if (epoch !== runtimeEpoch) return;
       console.error("[CodexService] Failed to load threads:", error);
       useCodexStore.getState().setThreadListNextCursor(null);
       useCodexStore.getState().setThreads([]);
@@ -484,6 +487,7 @@ export const codexService = {
   },
   async threadStart(options?: { shouldActivate?: () => boolean }) {
     const set = useCodexStore.setState;
+    const epoch = runtimeEpoch;
     try {
       const {
         model,
@@ -500,7 +504,18 @@ export const codexService = {
       const { cwd } = useWorkspaceStore.getState();
       let threadCwd = cwd;
       if (threadCwdMode === "worktree" && cwd) {
-        const prepared = await gitCreateWorktree(cwd, generateWorktreeKey());
+        const prepared = await readWithDeadline(async (signal) => {
+          const result = await gitCreateWorktree(cwd, generateWorktreeKey(), {
+            signal,
+          });
+          if (signal.aborted) throw signal.reason;
+          return result;
+        }, 60_000);
+        if (epoch !== runtimeEpoch) {
+          throw new Error(
+            "连接目标已切换，创建结果未确认，请先核对原连接的会话列表及工作区状态。",
+          );
+        }
         threadCwd = prepared.worktree_path;
       }
       const params: ThreadStartParams = {
@@ -526,7 +541,17 @@ export const codexService = {
           ...buildAgentsConfigFragment(),
         },
       };
-      const response = await apiThreadStart(params);
+      const response = await readWithDeadline(async (signal) => {
+        const result = await apiThreadStart(params, { signal });
+        // A late response cannot activate a thread or hydrate its model settings.
+        if (signal.aborted) throw signal.reason;
+        return result;
+      }, 30_000);
+      if (epoch !== runtimeEpoch) {
+        throw new Error(
+          "连接目标已切换，创建结果未确认，请先核对原连接的会话列表及工作区状态。",
+        );
+      }
       const thread = response.thread;
       hydrateThreadModel(
         thread.id,
@@ -553,6 +578,11 @@ export const codexService = {
       return thread;
     } catch (error: unknown) {
       console.error("[CodexService] threadStart error:", error);
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        throw new Error(
+          "创建会话结果未确认，请先核对会话列表及工作区状态；不会自动重发。",
+        );
+      }
       throw error;
     }
   },
@@ -1196,11 +1226,26 @@ export const codexService = {
     }
   },
   async threadGoalSet(params: ThreadGoalSetParams) {
+    const epoch = runtimeEpoch;
     try {
-      const response = await threadGoalSet(params);
+      const response = await readWithDeadline(async (signal) => {
+        const result = await threadGoalSet(params, { signal });
+        if (signal.aborted) throw signal.reason;
+        return result;
+      }, 30_000);
+      if (epoch !== runtimeEpoch) {
+        throw new Error(
+          "连接目标已切换，目标设置结果未确认，请先核对原连接的目标状态。",
+        );
+      }
       return response;
     } catch (error: unknown) {
       console.error("[CodexService] threadGoalSet error:", error);
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        throw new Error(
+          "目标设置结果未确认，请先核对目标状态；不会自动重发。",
+        );
+      }
       throw error;
     }
   },

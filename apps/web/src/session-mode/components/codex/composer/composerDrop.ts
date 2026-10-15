@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { DragEvent } from "react";
 import { toast } from "sonner";
 import { composerDrafts } from "./v2/drafts";
+import { readWithDeadline } from "@session/services/sessionReadQueue";
 
 function containsFiles(transfer: DataTransfer) {
   return (
@@ -33,7 +34,10 @@ export function useComposerFileDrop(
           try {
             if (file.size > 10 * 1024 * 1024)
               throw new Error("文件不能超过 10 MB");
-            const bytes = await file.arrayBuffer();
+            const bytes = await readWithDeadline(
+              () => file.arrayBuffer(),
+              15_000,
+            );
             let text: string;
             try {
               text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -52,7 +56,7 @@ export function useComposerFileDrop(
             };
           } catch (error) {
             toast.error(
-              `${file.name || "文件"}：${error instanceof Error ? error.message : "读取失败"}`,
+              `${file.name || "文件"}：${error instanceof DOMException && error.name === "TimeoutError" ? "读取超时，请重新选择文件" : error instanceof Error ? error.message : "读取失败"}`,
             );
             return null;
           }

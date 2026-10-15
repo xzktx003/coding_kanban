@@ -179,11 +179,16 @@ export async function gitReverseFiles(cwd: string, filePaths: string[], staged: 
   });
 }
 
-export async function gitCreateWorktree(cwd: string, worktreeKey: string) {
-  return await postJson<GitCreateWorktreeResponse>('/api/git/create-worktree', {
-    cwd,
-    worktreeKey,
-  });
+export async function gitCreateWorktree(
+  cwd: string,
+  worktreeKey: string,
+  options?: { signal?: AbortSignal },
+) {
+  return await postJsonWithOptions<GitCreateWorktreeResponse>(
+    '/api/git/create-worktree',
+    { cwd, worktreeKey },
+    options,
+  );
 }
 
 export async function gitRemoveWorktree(cwd: string, worktreeKey: string): Promise<void> {

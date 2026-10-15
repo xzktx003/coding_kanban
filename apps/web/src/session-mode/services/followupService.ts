@@ -230,14 +230,48 @@ export const followupService = {
         new CustomEvent("session-message-submitted", { detail: { threadId } }),
       );
     try {
-      const result = accept(
-        threadId,
-        await postJsonWithOptions<FollowupThread>(
-          "/followups/submit",
-          { ...data, id },
-          { suppressToast: true },
-        ),
-      );
+      let result: FollowupThread;
+      try {
+        // A completed native turn does not guarantee its HTTP acknowledgement
+        // arrived. Bound the wait before accepting, so a late POST stays inert.
+        result = accept(
+          threadId,
+          await readWithDeadline(
+            (signal) =>
+              postJsonWithOptions<FollowupThread>(
+                "/followups/submit",
+                { ...data, id },
+                { suppressToast: true, signal },
+              ),
+            15_000,
+          ),
+        );
+      } catch (error) {
+        if (!(error instanceof DOMException) || error.name !== "TimeoutError")
+          throw error;
+        const unconfirmed = () =>
+          new Error(
+            "消息提交确认超时，草稿已保留；请先检查队列中的送达状态，再决定是否重试。",
+          );
+        try {
+          // Include waiting for a read worker in the budget. Never resend a
+          // mutation to discover whether the original submission was accepted.
+          result = await readWithDeadline(
+            (signal) => followupService.load(threadId, { signal }),
+            5000,
+          );
+        } catch {
+          throw unconfirmed();
+        }
+        const receipt = result.items.find((message) => message.id === id);
+        if (
+          !receipt ||
+          !["queued", "sending", "sent", "failed", "uncertain"].includes(
+            receipt.status,
+          )
+        )
+          throw unconfirmed();
+      }
       const item = result.items.find((m) => m.id === id);
       if (!item) throw new Error("消息提交回执不完整");
       if (item.status === "failed" || item.status === "uncertain")

@@ -2,15 +2,26 @@ import { expect, test, type Page } from "@playwright/test";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
 
 async function switchThread(page: Page, id: string) {
+  // seedSessionUx creates history, not followed tabs. Use the normal follow and
+  // select actions so shared-tab restoration cannot overwrite the input target.
   await page.evaluate(async (id) => {
-    const path = "/src/session-mode/components/codex/stores/index.ts";
-    const { useCodexStore } = await import(
+    const path = "/src/session-mode/stores/useAgentCenterStore.ts";
+    const { useAgentCenterStore } = await import(
       performance
         .getEntriesByType("resource")
         .findLast((e) => new URL(e.name).pathname === path)?.name ?? path
     );
-    useCodexStore.setState({ currentThreadId: id });
+    useAgentCenterStore.getState().addAgentCard({
+      kind: "codex",
+      id,
+      cwd: "/fixture/项目/very-long-project-path-for-ui-regression",
+      preview: `中文会话 ${id.slice("ux-".length)}`,
+    });
   }, id);
+  const tab = page.locator(`[role=tab][data-tab-key="codex:${id}"]`);
+  await tab.click({ position: { x: 24, y: 10 } });
+  await page.keyboard.press("Escape");
+  await expect(tab).toHaveAttribute("aria-selected", "true");
 }
 for (const width of [1440, 390])
   for (const theme of ["dark", "light"]) {
@@ -44,6 +55,7 @@ for (const width of [1440, 390])
         .first()
         .waitFor();
       await seedSessionUx(page, 2);
+      await switchThread(page, "ux-0");
       await page.evaluate(async (theme) => {
         const path = "/src/session-mode/stores/settings/useThemeStore.ts";
         const { useThemeStore } = await import(
@@ -139,9 +151,11 @@ for (const width of [1440, 390])
         expect((await frame.boundingBox())!.height).toBe(before!.height);
       await switchThread(page, "ux-1");
       await expect(composer.locator(".session-context-chip")).toHaveCount(0);
+      await expect(editor).toHaveText("");
       release();
       await expect.poll(() => uploadCount).toBe(1);
       await switchThread(page, "ux-0");
+      await expect(editor).toHaveText("正文草稿保持原样");
       await expect(composer.locator('[data-state="error"]')).toBeVisible();
       await page.screenshot({
         path: info.outputPath(`drop-${width}-${theme}-retry-preview.png`),
@@ -165,7 +179,9 @@ for (const width of [1440, 390])
       await composer
         .getByRole("button", { name: "预览 drop.png，上传失败", exact: true })
         .click();
-      await page.getByRole("button", { name: "再次尝试上传", exact: true }).click();
+      await page
+        .getByRole("button", { name: "再次尝试上传", exact: true })
+        .click();
       await page.getByRole("button", { name: "关闭面板", exact: true }).click();
       await expect(composer.locator('[data-state="ready"]')).toBeVisible();
       expect(uploadCount).toBe(2);
@@ -182,6 +198,7 @@ for (const width of [1440, 390])
         .first()
         .waitFor();
       await seedSessionUx(page, 2);
+      await switchThread(page, "ux-0");
       await expect(editor).toHaveText("正文草稿保持原样");
       await expect(
         composer.getByRole("button", { name: /查看上下文 drop.md/ }),
@@ -203,9 +220,15 @@ for (const width of [1440, 390])
       await expect(
         composer.getByRole("button", { name: "预览 drop.png", exact: true }),
       ).toBeVisible();
-      await composer
-        .getByRole("button", { name: "发送", exact: true })
-        .click();
+      await expect(
+        page.locator('[role=tab][data-tab-key="codex:ux-0"]'),
+      ).toHaveAttribute("aria-selected", "true");
+      const send = composer.getByRole("button", {
+        name: "发送消息",
+        exact: true,
+      });
+      await expect(send).toBeEnabled();
+      await send.click();
       await expect
         .poll(
           () => fixture.calls.filter((c) => c.path.endsWith("/submit")).length,
@@ -215,6 +238,7 @@ for (const width of [1440, 390])
         c.path.endsWith("/submit"),
       )!.body;
       expect(submitted.threadId).toBe("ux-0");
+      expect(submitted.text).toBe("正文草稿保持原样");
       expect(submitted.images).toEqual(["/fixture/drop.png"]);
       expect(submitted.contexts).toEqual([
         expect.objectContaining({

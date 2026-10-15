@@ -14,7 +14,24 @@ export interface SubagentNode {
   createdInTurn?: string;
   objective?: string;
   revision: number;
+  /** Native identity/capability observations, independent of execution status events. */
+  metadataRevision?: number;
   unavailable?: boolean;
+}
+/** Missing legacy metadata is unknown; only a native non-agent source confirms a root. */
+export function isKnownRootThread(thread: SubagentThread | undefined | null) {
+  if (!thread || subagentParent(thread)) return false;
+  const source = thread.source;
+  if (typeof source === "string")
+    return ["cli", "vscode", "exec", "appServer"].includes(source);
+  return (
+    source !== null &&
+    typeof source === "object" &&
+    "custom" in source &&
+    typeof source.custom === "string" &&
+    !("subAgent" in source) &&
+    !("subagent" in source)
+  );
 }
 export function descendants(nodes: Record<string, SubagentNode>, root: string) {
   return Object.values(nodes).filter((n) => {
@@ -48,26 +65,44 @@ export function reconcileNodes(
   nodes: Record<string, SubagentNode>,
   threads: SubagentThread[],
   baseline: number,
+  observationRevision = baseline,
 ) {
   const next = { ...nodes };
   for (const raw of threads) {
     const thread = normalizeSubagentThread(raw);
-    const parent = subagentParent(thread);
-    if (!parent) continue;
     const old = nodes[thread.id];
+    const staleMetadata =
+      !!old && (old.metadataRevision ?? old.revision) > baseline;
+    if (isKnownRootThread(thread)) {
+      if (!staleMetadata) delete next[thread.id];
+      continue;
+    }
+    const parent = subagentParent(thread) ?? old?.parentId;
+    if (!parent) continue;
     next[thread.id] = {
       ...old,
       thread: {
         ...old?.thread,
         ...thread,
+        canAcceptDirectInput: thread.canAcceptDirectInput ?? null,
+        ...(staleMetadata
+          ? {
+              parentThreadId: old.thread.parentThreadId,
+              source: old.thread.source,
+              canAcceptDirectInput: old.thread.canAcceptDirectInput,
+            }
+          : {}),
         ...(old && old.revision > baseline
           ? { status: old.thread.status, turns: old.thread.turns }
           : {}),
       },
-      parentId: parent,
-      verified: true,
-      unavailable: false,
-      revision: old?.revision ?? baseline,
+      parentId: staleMetadata ? old.parentId : parent,
+      verified: staleMetadata ? old.verified : true,
+      unavailable: staleMetadata ? old.unavailable : false,
+      revision: Math.max(old?.revision ?? 0, observationRevision),
+      metadataRevision: staleMetadata
+        ? (old.metadataRevision ?? old.revision)
+        : observationRevision,
     };
   }
   return next;

@@ -1,7 +1,15 @@
 import type { ImageAttachment } from "../components/common/useImageAttachments";
 import type { ImageDrawing } from "../components/codex/composer/v2/drawing";
+import { readWithDeadline } from "./sessionReadQueue";
 
 const DATABASE = "kanban.session.attachments";
+function storageDeadline<T>(work: (signal: AbortSignal) => Promise<T>) {
+  return readWithDeadline(work, 10_000).catch((error: unknown) => {
+    if (error instanceof DOMException && error.name === "TimeoutError")
+      throw new Error("附件草稿存储超时，请重试");
+    throw error;
+  });
+}
 type StoredFile = {
   bytes: ArrayBuffer;
   name: string;
@@ -15,11 +23,12 @@ type StoredAttachment = Omit<ImageAttachment, "file" | "drawing"> & {
   drawing?: StoredDrawing;
 };
 const byteReads = new WeakMap<File, Promise<ArrayBuffer>>();
-function fileBytes(file: File): Promise<ArrayBuffer> {
+function fileBytes(file: File, signal: AbortSignal): Promise<ArrayBuffer> {
+  if (signal.aborted) return Promise.reject(signal.reason);
   const cached = byteReads.get(file);
-  if (cached) return cached;
   const pending =
-    typeof file.arrayBuffer === "function"
+    cached ??
+    (typeof file.arrayBuffer === "function"
       ? file.arrayBuffer()
       : new Promise<ArrayBuffer>((resolve, reject) => {
           const reader = new FileReader();
@@ -28,14 +37,26 @@ function fileBytes(file: File): Promise<ArrayBuffer> {
             reject(reader.error ?? new Error("无法读取附件字节"));
           reader.onabort = () => reject(new Error("附件读取已中断"));
           reader.readAsArrayBuffer(file);
-        });
+        }));
   byteReads.set(file, pending);
-  void pending.catch(() => byteReads.delete(file));
+  // A stalled OS-backed File must be readable again on explicit retry. Do not
+  // let an old failure erase a newer cached read of the same file.
+  const forget = () => {
+    if (byteReads.get(file) === pending) byteReads.delete(file);
+  };
+  signal.addEventListener("abort", forget, { once: true });
+  void pending.then(
+    () => signal.removeEventListener("abort", forget),
+    () => {
+      signal.removeEventListener("abort", forget);
+      forget();
+    },
+  );
   return pending;
 }
-async function storeFile(file: File): Promise<StoredFile> {
+async function storeFile(file: File, signal: AbortSignal): Promise<StoredFile> {
   return {
-    bytes: await fileBytes(file),
+    bytes: await fileBytes(file, signal),
     name: file.name,
     type: file.type,
     lastModified: file.lastModified,
@@ -54,12 +75,15 @@ function restoreFile(data: StoredFile): File {
     lastModified: data.lastModified,
   });
 }
-async function storeDrawing(drawing: ImageDrawing): Promise<StoredDrawing> {
+async function storeDrawing(
+  drawing: ImageDrawing,
+  signal: AbortSignal,
+): Promise<StoredDrawing> {
   const { originalFile, ...document } = drawing;
   return {
     ...document,
     ...(originalFile
-      ? { originalFileData: await storeFile(originalFile) }
+      ? { originalFileData: await storeFile(originalFile, signal) }
       : {}),
   };
 }
@@ -72,31 +96,89 @@ function restoreDrawing(drawing: StoredDrawing): ImageDrawing {
       : {}),
   };
 }
-function open(): Promise<IDBDatabase> {
+function open(signal: AbortSignal): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
     if (!globalThis.indexedDB) {
       reject(new Error("浏览器不支持附件草稿存储"));
       return;
     }
     const request = indexedDB.open(DATABASE, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore("drafts");
-    request.onerror = () => reject(request.error);
-    request.onblocked = () => reject(new Error("附件草稿数据库被占用"));
-    request.onsuccess = () => resolve(request.result);
+    let settled = false;
+    const finish = (error?: unknown, database?: IDBDatabase) => {
+      if (settled) {
+        // IDB open requests cannot be cancelled. Release a late connection
+        // instead of letting the expired operation continue or block upgrades.
+        database?.close();
+        return;
+      }
+      settled = true;
+      signal.removeEventListener("abort", cancel);
+      if (error !== undefined) reject(error);
+      else resolve(database!);
+    };
+    const cancel = () => finish(signal.reason);
+    signal.addEventListener("abort", cancel, { once: true });
+    request.onupgradeneeded = () => {
+      if (settled || signal.aborted) request.transaction?.abort();
+      else request.result.createObjectStore("drafts");
+    };
+    request.onerror = () =>
+      finish(request.error ?? new Error("附件草稿数据库无法打开"));
+    request.onblocked = () => finish(new Error("附件草稿数据库被占用"));
+    request.onsuccess = () => finish(undefined, request.result);
   });
 }
 async function transaction<T>(
   mode: IDBTransactionMode,
   work: (store: IDBObjectStore) => IDBRequest<T>,
+  signal: AbortSignal,
 ): Promise<T> {
-  const db = await open();
+  const db = await open(signal);
   try {
     return await new Promise<T>((resolve, reject) => {
+      if (signal.aborted) {
+        reject(signal.reason);
+        return;
+      }
       const tx = db.transaction("drafts", mode);
-      const request = work(tx.objectStore("drafts"));
-      tx.oncomplete = () => resolve(request.result);
-      tx.onerror = () => reject(tx.error ?? request.error);
-      tx.onabort = () => reject(tx.error ?? new Error("附件草稿存储已中断"));
+      let settled = false;
+      let request: IDBRequest<T>;
+      const finish = (error?: unknown, value?: T) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", cancel);
+        if (error !== undefined) reject(error);
+        else resolve(value as T);
+      };
+      const cancel = () => {
+        // A timeout must not leave an old write alive to overwrite a retry.
+        try {
+          tx.abort();
+        } catch {}
+        finish(signal.reason);
+      };
+      signal.addEventListener("abort", cancel, { once: true });
+      tx.oncomplete = () => finish(undefined, request.result);
+      tx.onerror = () =>
+        finish(tx.error ?? request.error ?? new Error("附件草稿存储失败"));
+      tx.onabort = () =>
+        finish(
+          signal.aborted
+            ? signal.reason
+            : (tx.error ?? new Error("附件草稿存储已中断")),
+        );
+      try {
+        request = work(tx.objectStore("drafts"));
+      } catch (error) {
+        try {
+          tx.abort();
+        } catch {}
+        finish(error);
+      }
     });
   } finally {
     db.close();
@@ -105,41 +187,53 @@ async function transaction<T>(
 export async function loadAttachmentDraft(
   owner: string,
 ): Promise<ImageAttachment[]> {
-  const items = await transaction("readonly", (store) => store.get(owner));
-  if (!Array.isArray(items)) return [];
-  return items.map((item: StoredAttachment) => {
-    const { fileData, drawing, ...attachment } = item;
-    return {
-      ...attachment,
-      ...(fileData ? { file: restoreFile(fileData) } : {}),
-      ...(drawing ? { drawing: restoreDrawing(drawing) } : {}),
-    };
+  return storageDeadline(async (signal) => {
+    const items = await transaction(
+      "readonly",
+      (store) => store.get(owner),
+      signal,
+    );
+    if (!Array.isArray(items)) return [];
+    return items.map((item: StoredAttachment) => {
+      const { fileData, drawing, ...attachment } = item;
+      return {
+        ...attachment,
+        ...(fileData ? { file: restoreFile(fileData) } : {}),
+        ...(drawing ? { drawing: restoreDrawing(drawing) } : {}),
+      };
+    });
   });
 }
 export async function saveAttachmentDraft(
   owner: string,
   items: ImageAttachment[],
 ): Promise<void> {
-  // WebKit photo-picker File objects can fail while IndexedDB prepares backing
-  // Blob data. Persist actual bytes before upload, not the OS-backed File object.
-  // Reconstruct Files on load so retries preserve name/MIME/content exactly.
-  const stored: StoredAttachment[] = await Promise.all(
-    items.map(async ({ preview: _preview, file, drawing, ...item }) => ({
-      ...item,
-      preview: "",
-      ...(file
-        ? {
-            fileData: await storeFile(file),
-          }
-        : {}),
-      ...(drawing
-        ? {
-            drawing: await storeDrawing(drawing),
-          }
-        : {}),
-    })),
-  );
-  if (stored.length)
-    await transaction("readwrite", (store) => store.put(stored, owner));
-  else await transaction("readwrite", (store) => store.delete(owner));
+  return storageDeadline(async (signal) => {
+    // WebKit photo-picker File objects can fail while IndexedDB prepares backing
+    // Blob data. Persist actual bytes before upload, not the OS-backed File object.
+    // Reconstruct Files on load so retries preserve name/MIME/content exactly.
+    const stored: StoredAttachment[] = await Promise.all(
+      items.map(async ({ preview: _preview, file, drawing, ...item }) => ({
+        ...item,
+        preview: "",
+        ...(file
+          ? {
+              fileData: await storeFile(file, signal),
+            }
+          : {}),
+        ...(drawing
+          ? {
+              drawing: await storeDrawing(drawing, signal),
+            }
+          : {}),
+      })),
+    );
+    if (stored.length)
+      await transaction(
+        "readwrite",
+        (store) => store.put(stored, owner),
+        signal,
+      );
+    else await transaction("readwrite", (store) => store.delete(owner), signal);
+  });
 }

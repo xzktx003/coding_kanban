@@ -6,7 +6,7 @@ import {
   type TauriFileEntry,
 } from './shared';
 
-export async function readTextFile(filePath: string, options?: { suppressToast?: boolean }) {
+export async function readTextFile(filePath: string, options?: { suppressToast?: boolean; signal?: AbortSignal }) {
   return await postJsonWithOptions<string>('/api/filesystem/read-text-file', { filePath }, options);
 }
 

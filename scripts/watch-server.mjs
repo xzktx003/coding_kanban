@@ -120,11 +120,18 @@ async function main() {
   let child;
   let stopping = false;
   let timer;
+  let recoveryTimer;
+  let request;
+  let crashAttempts = 0;
+  const expectedExits = new WeakSet();
+  const recoveryScheduled = new WeakSet();
+  const gatewayStartedAt = new WeakMap();
   const watchers = [];
   const prepareDependencies = createDependencyPreparation({ root });
   async function stopChild() {
     if (!child || child.exitCode !== null || child.signalCode !== null) return;
     const current = child;
+    expectedExits.add(current);
     await new Promise((resolveStop) => {
       const timeout = setTimeout(() => current.kill("SIGKILL"), 5000);
       current.once("exit", () => {
@@ -134,7 +141,34 @@ async function main() {
       current.kill("SIGTERM");
     });
   }
-  const request = createRestartQueue({
+  function scheduleRetry(reason) {
+    if (stopping) return;
+    const delayMs = Math.min(1_000 * 2 ** crashAttempts, 30_000);
+    crashAttempts += 1;
+    console.error(
+      `[server-watch] ${reason}; restarting in ${delayMs}ms (attempt ${crashAttempts}).`,
+    );
+    clearTimeout(recoveryTimer);
+    recoveryTimer = setTimeout(() => {
+      recoveryTimer = undefined;
+      if (!stopping) void request();
+    }, delayMs);
+    recoveryTimer.unref?.();
+  }
+  function scheduleRecovery(current, reason) {
+    if (
+      stopping ||
+      current !== child ||
+      expectedExits.has(current) ||
+      recoveryScheduled.has(current)
+    )
+      return;
+    recoveryScheduled.add(current);
+    const startedAt = gatewayStartedAt.get(current);
+    if (startedAt && Date.now() - startedAt >= 60_000) crashAttempts = 0;
+    scheduleRetry(`Gateway exited unexpectedly (${reason})`);
+  }
+  const restartQueue = createRestartQueue({
     prepare: async () => {
       await prepareDependencies();
       // Static gateway imports can cache shared before index.ts checks its
@@ -149,6 +183,10 @@ async function main() {
     },
     restart: async () => {
       if (stopping) return;
+      // A source rebuild may finish before a crash-recovery timer fires.
+      // Its successful replacement satisfies that recovery request too.
+      clearTimeout(recoveryTimer);
+      recoveryTimer = undefined;
       await stopChild();
       if (stopping) return;
       // Run tsx in this process rather than through a shell/CLI child tree.
@@ -157,22 +195,39 @@ async function main() {
         env: process.env,
         stdio: "inherit",
       });
-      child.on("error", (error) => console.error("[server-watch]", error));
-      child.on("exit", (code, signal) => {
-        if (code && !stopping)
-          console.error(
-            `[server-watch] Gateway exited (${code ?? signal}); waiting for the next source change.`,
-          );
+      const gateway = child;
+      gatewayStartedAt.set(gateway, Date.now());
+      gateway.on("error", (error) => {
+        console.error(`[server-watch] Gateway spawn error: ${error.message}`);
+        scheduleRecovery(gateway, `spawn error: ${error.message}`);
+      });
+      gateway.on("exit", (code, signal) => {
+        const reason = signal
+          ? `signal ${signal}`
+          : `code ${code ?? "unknown"}`;
+        scheduleRecovery(gateway, reason);
       });
     },
-    onError: (error) =>
+    onError: (error) => {
+      const live =
+        child?.pid && child.exitCode === null && child.signalCode === null;
       console.error(
-        "[server-watch] Preparation failed; current gateway retained. Fix dependencies or the shared build and save a watched file to retry.",
+        live
+          ? "[server-watch] Preparation failed; current gateway retained. Fix dependencies or the shared build and save a watched file to retry."
+          : "[server-watch] Preparation failed; gateway is unavailable. Recovery will retry automatically.",
         error.message,
-      ),
+      );
+      if (!live) scheduleRetry("Gateway recovery preparation failed");
+    },
   });
+  request = () => {
+    clearTimeout(recoveryTimer);
+    recoveryTimer = undefined;
+    return restartQueue();
+  };
   const changed = () => {
     clearTimeout(timer);
+    crashAttempts = 0;
     timer = setTimeout(() => {
       if (!stopping) void request();
     }, 500);
@@ -201,6 +256,8 @@ async function main() {
     process.once(signal, async () => {
       stopping = true;
       clearTimeout(timer);
+      clearTimeout(recoveryTimer);
+      recoveryTimer = undefined;
       watchers.forEach((watcher) => watcher.close());
       await stopChild();
       process.exit(0);

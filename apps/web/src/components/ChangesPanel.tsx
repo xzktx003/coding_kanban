@@ -350,6 +350,19 @@ export function getRevertHunkConfirmation(
   return `还原“${file.path}”中的这一处改动（${hunkHeader}）？同一文件的其他改动会保留。此操作无法撤销。`;
 }
 
+export function CheckoutDiffTruncationNotice({
+  truncated,
+}: {
+  truncated: boolean;
+}) {
+  if (!truncated) return null;
+  return (
+    <small className="changes-warning" role="status">
+      工作区变更超过预览上限，只显示部分 Diff；文件总数为完整统计，行数统计仅覆盖已显示部分。
+    </small>
+  );
+}
+
 export function ChangesPanel({
   session,
   compact = false,
@@ -500,6 +513,11 @@ export function ChangesPanel({
               <span>{response.changedFiles} 个文件</span><em>+{response.addedLines}</em><i>-{response.deletedLines}</i>
             </div>
             {scope === "task" && taskDiff?.warning && <small className="changes-warning">{taskDiff.warning}</small>}
+            {scope === "checkout" && (
+              <CheckoutDiffTruncationNotice
+                truncated={checkoutDiff?.truncated === true}
+              />
+            )}
           </div>
 
           <div className="changes-body">

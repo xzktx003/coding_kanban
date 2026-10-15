@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { webcrypto } from "node:crypto";
 const api = vi.hoisted(() => ({
   getJsonWithOptions: vi.fn(),
@@ -14,6 +14,8 @@ import {
 } from "./followupService";
 import { useWorkspaceStore } from "../stores/useWorkspaceStore";
 import { useConfigStore, useCodexStore } from "../components/codex/stores";
+import { useCodexDeliveryStore } from "../stores/useCodexDeliveryStore";
+import { enqueueSessionRead } from "./sessionReadQueue";
 import {
   changeThreadModel,
   hydrateThreadModel,
@@ -24,12 +26,14 @@ beforeEach(() => {
   localStorage.clear();
   useThreadModelStore.setState({ threads: {} });
   useFollowupStore.setState({ threads: {}, errors: {} });
+  useCodexDeliveryStore.setState({ entries: {} });
   useCodexStore.setState({
     turnTimingMap: {},
     threadStatusMap: {},
   });
   vi.stubGlobal("crypto", webcrypto);
 });
+afterEach(() => vi.useRealTimers());
 it("reuses the same request identity after reload and separates new drafts, targets and attachments", async () => {
   const data = {
     threadId: "a",
@@ -298,7 +302,7 @@ it.each(["queue", "steer"] as const)(
           collaborationMode: expect.objectContaining({ mode: "plan" }),
         }),
       }),
-      { suppressToast: true },
+      { suppressToast: true, signal: expect.any(AbortSignal) },
     );
   },
 );
@@ -349,4 +353,190 @@ it("keeps an unchanged same-revision queue snapshot stable while accepting real 
   });
   await followupService.load("a");
   expect(useFollowupStore.getState()).toBe(accepted);
+});
+
+function preparePendingSubmission() {
+  vi.useFakeTimers();
+  // Keep hashing synchronous so fake timer boundaries only measure transport waits.
+  vi.stubGlobal("crypto", {
+    getRandomValues: webcrypto.getRandomValues.bind(webcrypto),
+  });
+  let resolvePost!: (value: unknown) => void;
+  api.postJsonWithOptions.mockImplementation(
+    () => new Promise((resolve) => (resolvePost = resolve)),
+  );
+  const outcome: { settled: boolean; value?: unknown; error?: Error } = {
+    settled: false,
+  };
+  const submit = () =>
+    followupService.submit(
+      "codex:a",
+      9,
+      "a",
+      "next",
+      [],
+      "queue",
+      undefined,
+      {},
+    );
+  const completion = submit().then(
+    (value) => Object.assign(outcome, { settled: true, value }),
+    (error) => Object.assign(outcome, { settled: true, error }),
+  );
+  const receipt = (status: string, revision = 2) => ({
+    revision,
+    paused: null,
+    items: [
+      {
+        ...api.postJsonWithOptions.mock.calls[0][1],
+        status,
+        turnId: "completed-turn",
+      },
+    ],
+  });
+  return {
+    outcome,
+    completion,
+    submit,
+    receipt,
+    resolvePost: (value: unknown) => resolvePost(value),
+  };
+}
+
+it.each(["queued", "sending", "sent"])(
+  "settles a hanging submission from one confirmed %s receipt after 15 seconds",
+  async (status) => {
+    const pending = preparePendingSubmission();
+    api.getJsonWithOptions.mockImplementation(async () =>
+      pending.receipt(status),
+    );
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(pending.outcome.settled).toBe(false);
+    expect(api.getJsonWithOptions).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(pending.outcome.settled).toBe(true);
+    expect(pending.outcome.error).toBeUndefined();
+    expect(pending.outcome.value).toEqual(pending.receipt(status));
+    expect(api.getJsonWithOptions).toHaveBeenCalledOnce();
+    expect(api.postJsonWithOptions).toHaveBeenCalledOnce();
+    expect(api.postJsonWithOptions.mock.calls[0][2].signal.aborted).toBe(true);
+  },
+);
+
+it.each(["failed", "uncertain"])(
+  "keeps a confirmed %s receipt as an error after the submission deadline",
+  async (status) => {
+    const pending = preparePendingSubmission();
+    api.getJsonWithOptions.mockImplementation(async () =>
+      pending.receipt(status),
+    );
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(pending.outcome.settled).toBe(true);
+    expect(pending.outcome.error?.message).toContain("内容已保留");
+    expect(
+      Object.values(useCodexDeliveryStore.getState().entries)[0].status,
+    ).toBe(status);
+    expect(api.postJsonWithOptions).toHaveBeenCalledOnce();
+  },
+);
+
+it("only reconciles a timed-out submission, preserving immediate transport failures", async () => {
+  const failure = new Error("connection reset");
+  api.postJsonWithOptions.mockRejectedValueOnce(failure);
+  await expect(
+    followupService.submit(
+      "codex:a",
+      9,
+      "a",
+      "next",
+      [],
+      "queue",
+      undefined,
+      {},
+    ),
+  ).rejects.toBe(failure);
+  expect(api.getJsonWithOptions).not.toHaveBeenCalled();
+});
+
+it("reports an unsuccessful receipt lookup without automatically resubmitting", async () => {
+  const pending = preparePendingSubmission();
+  api.getJsonWithOptions.mockRejectedValueOnce(new Error("queue unavailable"));
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(pending.outcome.settled).toBe(true);
+  expect(pending.outcome.error?.message).toMatch(
+    /消息提交确认超时.*草稿.*队列/,
+  );
+  expect(api.postJsonWithOptions).toHaveBeenCalledOnce();
+  expect(api.getJsonWithOptions).toHaveBeenCalledOnce();
+});
+
+it("bounds an unresponsive receipt lookup and preserves the submission ID for an explicit retry", async () => {
+  const pending = preparePendingSubmission();
+  api.getJsonWithOptions.mockImplementation(() => new Promise(() => {}));
+  await vi.advanceTimersByTimeAsync(19_999);
+  expect(pending.outcome.settled).toBe(false);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(pending.outcome.settled).toBe(true);
+  expect(pending.outcome.error?.message).toMatch(
+    /消息提交确认超时.*草稿.*队列/,
+  );
+  expect(
+    Object.values(useCodexDeliveryStore.getState().entries)[0].status,
+  ).toBe("uncertain");
+  const originalId = api.postJsonWithOptions.mock.calls[0][1].id;
+  api.postJsonWithOptions.mockImplementation(async (_path, data) => ({
+    revision: 3,
+    paused: null,
+    items: [{ ...data, status: "sent" }],
+  }));
+  await pending.submit();
+  expect(api.postJsonWithOptions).toHaveBeenCalledTimes(2);
+  expect(api.postJsonWithOptions.mock.calls[1][1].id).toBe(originalId);
+});
+
+it("includes time waiting for a read worker in the five-second receipt budget", async () => {
+  const releases: Array<() => void> = [];
+  const blockers = Array.from({ length: 4 }, (_, index) =>
+    enqueueSessionRead(
+      "recent",
+      `deadline-blocker:${index}`,
+      () => new Promise<void>((resolve) => releases.push(resolve)),
+    ),
+  );
+  try {
+    const pending = preparePendingSubmission();
+    api.getJsonWithOptions.mockImplementation(async () =>
+      pending.receipt("sent"),
+    );
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(pending.outcome.settled).toBe(true);
+    expect(pending.outcome.error?.message).toContain("消息提交确认超时");
+    expect(api.getJsonWithOptions).not.toHaveBeenCalled();
+  } finally {
+    releases.forEach((release) => release());
+    await Promise.all(blockers);
+    await vi.advanceTimersByTimeAsync(0);
+  }
+});
+
+it("rejects missing receipts and ignores a late POST instead of overwriting newer queue state", async () => {
+  const pending = preparePendingSubmission();
+  api.getJsonWithOptions.mockResolvedValue({
+    revision: 2,
+    paused: null,
+    items: [],
+  });
+  await vi.advanceTimersByTimeAsync(15_000);
+  expect(pending.outcome.settled).toBe(true);
+  expect(pending.outcome.error?.message).toContain("消息提交确认超时");
+  const newer = pending.receipt("sent", 3);
+  api.getJsonWithOptions.mockResolvedValue(newer);
+  await followupService.load("a");
+  const accepted = useFollowupStore.getState();
+  // Even an implausibly high revision must not be accepted by an expired POST.
+  pending.resolvePost(pending.receipt("failed", 99));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(useFollowupStore.getState()).toBe(accepted);
+  expect(useFollowupStore.getState().threads.a).toBe(newer);
+  expect(api.postJsonWithOptions).toHaveBeenCalledOnce();
 });

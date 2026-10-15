@@ -123,7 +123,7 @@ test("real watcher builds shared before gateway imports and preserves the live g
     );
     await writeFile(
       join(root, "bin/pnpm"),
-      '#!/bin/sh\nif [ "$1" = install ]; then\n  if [ -f install-fails ]; then echo INSTALL_FAILED; exit 1; fi\n  echo INSTALLED\nelse\n  if [ -f build-fails ]; then echo BUILD_FAILED; exit 1; fi\n  cp packages/shared/src/index.ts packages/shared/dist/index.js\n  echo BUILT_SHARED\nfi\n',
+      '#!/bin/sh\nif [ "$1" = install ]; then\n  if [ -f install-fails ]; then echo INSTALL_FAILED; exit 1; fi\n  echo INSTALLED\nelse\n  if [ -f build-fails ]; then echo BUILD_FAILED; exit 1; fi\n  if [ -f build-waits ]; then echo BUILD_WAITING; while [ -f build-waits ]; do sleep 0.05; done; fi\n  cp packages/shared/src/index.ts packages/shared/dist/index.js\n  echo BUILT_SHARED\nfi\n',
       { mode: 0o755 },
     );
     independentRuntime = spawn(
@@ -208,10 +208,42 @@ test("real watcher builds shared before gateway imports and preserves the live g
     assert.throws(() => process.kill(original, 0), /ESRCH/);
     const lastPid = pids()[1];
     process.kill(independentRuntime.pid, 0);
+    process.kill(lastPid, "SIGKILL");
+    await waitFor(() => pids().length === 3);
+    assert.match(output, /Gateway exited unexpectedly.*SIGKILL/);
+    const recoveredPid = pids()[2];
+    process.kill(independentRuntime.pid, 0);
+    // A temporary build failure during crash recovery must not leave the
+    // gateway down until somebody edits source. These markers aren't watched.
+    await writeFile(join(root, "build-fails"), "");
+    process.kill(recoveredPid, "SIGKILL");
+    await waitFor(() => output.match(/Preparation failed/g)?.length === 3);
+    process.kill(independentRuntime.pid, 0);
+    await rm(join(root, "build-fails"));
+    await waitFor(() => pids().length === 4);
+    const retriedPid = pids()[3];
+    process.kill(independentRuntime.pid, 0);
+    // A crash during a successful source rebuild must not leave a recovery
+    // timer which later replaces the newly started, healthy gateway again.
+    await writeFile(join(root, "build-waits"), "");
+    await writeFile(join(root, "packages/shared/src/index.ts"), "export const value = 4;\n");
+    await waitFor(() => output.includes("BUILD_WAITING"));
+    process.kill(retriedPid, "SIGKILL");
+    await waitFor(() => output.match(/Gateway exited unexpectedly/g)?.length === 3);
+    await rm(join(root, "build-waits"));
+    await waitFor(() => pids().length === 5);
+    const rebuiltPid = pids()[4];
+    await new Promise((resolve) => setTimeout(resolve, 1400));
+    assert.equal(pids().length, 5, "obsolete recovery timer restarted the healthy gateway");
+    process.kill(rebuiltPid, 0);
+    process.kill(independentRuntime.pid, 0);
     const exited = new Promise((resolve) => watcher.once("exit", resolve));
     watcher.kill("SIGTERM");
     await exited;
     assert.throws(() => process.kill(lastPid, 0), /ESRCH/);
+    assert.throws(() => process.kill(recoveredPid, 0), /ESRCH/);
+    assert.throws(() => process.kill(retriedPid, 0), /ESRCH/);
+    assert.throws(() => process.kill(rebuiltPid, 0), /ESRCH/);
   } finally {
     if (independentRuntime) independentRuntime.kill("SIGTERM");
     if (watcher && watcher.exitCode === null && watcher.signalCode === null) {

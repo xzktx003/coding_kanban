@@ -4,6 +4,7 @@ import { mentionDrafts } from "@session/features/subagents/mentions";
 import { pluginInputDrafts } from "@session/features/plugins/pluginInputs";
 import type { NativeInputMention } from "@agent-orchestrator/shared";
 import { useSubagentStore } from "@session/features/subagents/store";
+import { isKnownRootThread } from "@session/features/subagents/model";
 import { composeContextText } from "@agent-orchestrator/shared";
 import {
   composerDrafts,
@@ -203,11 +204,13 @@ export function Composer({
     s.threads.find((t) => t.id === currentThreadId),
   );
   const hostCwd = nativeChild?.cwd ?? cwd;
-  const directInputBlocked = child
-    ? child.thread.canAcceptDirectInput !== true
-    : !!nativeChild &&
-      !!subagentParent(nativeChild) &&
-      nativeChild.canAcceptDirectInput !== true;
+  const directInputBlocked =
+    !isKnownRootThread(nativeChild) &&
+    (child
+      ? child.thread.canAcceptDirectInput !== true
+      : !!nativeChild &&
+        !!subagentParent(nativeChild) &&
+        nativeChild.canAcceptDirectInput !== true);
   const fileDrop = useComposerFileDrop(owner, {
     addImages: attachments.addFiles,
     disabled: directInputBlocked || !!contextStorageError,
@@ -497,37 +500,39 @@ export function Composer({
     ? "上下文保存失败，打开状态面板重试"
     : attachments.storageError
       ? "附件草稿保存失败，打开状态面板重试"
-      : failedImage
-        ? "图片上传失败，点击缩略图重试"
-        : pendingFiles[owner]
-          ? "正在读取文件快照…"
-          : uploading
-            ? `正在上传 ${uploading} 张图片…`
-            : pendingQuestions.length
-              ? "正在等待你的回答"
-              : queued.some(
-                    (m) => m.status === "failed" || m.status === "uncertain",
-                  )
-                ? "队列有消息需要处理"
-                : queueSnapshot.error
-                  ? "队列连接暂不可用，正在重试"
-                  : queued.length || queueSnapshot.state.paused
-                    ? `待发送 ${queued.length} 条${queueSnapshot.state.paused ? " · 已暂停" : ""}`
-                    : modelEntry?.notice && !modelEntry.notice.dismissed
-                      ? `模型已切换：${modelEntry.notice.from} → ${modelEntry.notice.to}`
-                      : collaborationMode === "plan"
-                        ? "规划模式"
-                        : goalEnabled
-                          ? "目标草稿"
-                          : threadGoal
-                            ? goalStatusLabel(threadGoal.status)
-                            : running
-                              ? hasContent
-                                ? preferences.mode === "queue"
-                                  ? "本轮结束后发送"
-                                  : "发送将引导当前任务"
-                                : "运行中"
-                              : "";
+      : !attachments.hydrated
+        ? "正在恢复附件草稿…"
+        : failedImage
+          ? "图片上传失败，点击缩略图重试"
+          : pendingFiles[owner] || fileDrop.pending
+            ? "正在读取文件快照…"
+            : uploading
+              ? `正在上传 ${uploading} 张图片…`
+              : pendingQuestions.length
+                ? "正在等待你的回答"
+                : queued.some(
+                      (m) => m.status === "failed" || m.status === "uncertain",
+                    )
+                  ? "队列有消息需要处理"
+                  : queueSnapshot.error
+                    ? "队列连接暂不可用，正在重试"
+                    : queued.length || queueSnapshot.state.paused
+                      ? `待发送 ${queued.length} 条${queueSnapshot.state.paused ? " · 已暂停" : ""}`
+                      : modelEntry?.notice && !modelEntry.notice.dismissed
+                        ? `模型已切换：${modelEntry.notice.from} → ${modelEntry.notice.to}`
+                        : collaborationMode === "plan"
+                          ? "规划模式"
+                          : goalEnabled
+                            ? "目标草稿"
+                            : threadGoal
+                              ? goalStatusLabel(threadGoal.status)
+                              : running
+                                ? hasContent
+                                  ? preferences.mode === "queue"
+                                    ? "本轮结束后发送"
+                                    : "发送将引导当前任务"
+                                  : "运行中"
+                                : "";
   return (
     <div className="session-codex-composer session-compact-composer session-native-composer">
       <div
@@ -754,7 +759,11 @@ export function Composer({
                           composerDrafts.setExpanded(owner, true);
                         }}
                       >
-                        <NativeComposerIcon name="expand" width={16} height={16} />
+                        <NativeComposerIcon
+                          name="expand"
+                          width={16}
+                          height={16}
+                        />
                         展开编辑
                       </Button>
                       <Button
