@@ -248,6 +248,7 @@ export function useImageAttachments(owner: string) {
   }
   return {
     attachments,
+    hydrated,
     storageError,
     retryStorage: () =>
       ensureAttachmentDraft(owner)

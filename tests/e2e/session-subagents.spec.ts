@@ -7,20 +7,35 @@ async function openInspection(page: Page, list = true) {
   const summary = page.locator(".session-subagent-summary");
   const expand = summary.getByRole("button", { name: /子智能体 · 已开启/ });
   if (await expand.isVisible()) {
-    if (await expand.getAttribute("aria-expanded") !== "true") await expand.click();
+    if ((await expand.getAttribute("aria-expanded")) !== "true")
+      await expand.click();
     await summary.locator(":scope > button").first().click();
   } else {
-    const process = page.getByRole("button", { name: /^工作过程$|^用时/ }).first();
+    const process = page
+      .getByRole("button", { name: /^工作过程$|^用时/ })
+      .first();
     await process.click();
-    const created = page.getByRole("button", { name: /已创建.*个智能体/ }).first();
-    if (await created.getAttribute("aria-expanded") !== "true") await created.click();
-    await page.locator(".codex-activity-body").getByRole("button", { name: "Atlas", exact: true }).click();
+    const created = page
+      .getByRole("button", { name: /已创建.*个智能体/ })
+      .first();
+    if ((await created.getAttribute("aria-expanded")) !== "true")
+      await created.click();
+    await page
+      .locator(".codex-activity-body")
+      .getByRole("button", { name: "Atlas", exact: true })
+      .click();
   }
-  if (list) await page.getByRole("button", { name: "返回子代理列表", exact: true }).click();
+  if (list)
+    await page
+      .getByRole("button", { name: "返回子代理列表", exact: true })
+      .click();
 }
 async function closeInspection(page: Page) {
   const panel = page.locator(".session-subagent-panel");
-  const back = panel.getByRole("button", { name: "返回子代理列表", exact: true });
+  const back = panel.getByRole("button", {
+    name: "返回子代理列表",
+    exact: true,
+  });
   if (await back.isVisible()) await back.click();
   await panel.getByRole("button").first().focus();
   await page.keyboard.press("Escape");
@@ -28,19 +43,33 @@ async function closeInspection(page: Page) {
 }
 async function setup(
   page: Page,
-  options: { oldRound?: boolean; approval?: boolean } = {},
+  options: {
+    oldRound?: boolean;
+    approval?: boolean;
+    poisonedRoot?: boolean;
+  } = {},
 ) {
   const fixture = await installSessionUxFixture(page, 2),
     calls: any[] = [];
   const errorEvents: Array<{ text: string; at: number; kind: string }> = [],
     navigationAborts: number[] = [];
   const expectedMetadata404 = new Set<string>();
-  const metadataResponses: Array<{ threadId: string; status: number; at: number; path: string }> = [];
-  page.on("response", response => {
+  const metadataResponses: Array<{
+    threadId: string;
+    status: number;
+    at: number;
+    path: string;
+  }> = [];
+  page.on("response", (response) => {
     const path = new URL(response.url()).pathname;
     if (!path.endsWith("/thread/metadata") || response.status() !== 404) return;
     const body = response.request().postDataJSON();
-    metadataResponses.push({ threadId: body.threadId, status: response.status(), at: Date.now(), path });
+    metadataResponses.push({
+      threadId: body.threadId,
+      status: response.status(),
+      at: Date.now(),
+      path,
+    });
   });
   const pendingReads = new Set<import("@playwright/test").Request>();
   page.on("request", (r) => {
@@ -58,12 +87,21 @@ async function setup(
       .filter(
         (e) =>
           !(
-            e.kind === "console" && e.text.includes(
+            e.kind === "console" &&
+            e.text.includes(
               "[CodexService] threadResume error: TypeError: Failed to fetch",
-            ) && navigationAborts.some((at) => Math.abs(at - e.at) < 100)
-          ) && !(
-            e.kind === "console" && e.text === "Failed to load resource: the server responded with a status of 404 (Not Found)" &&
-            metadataResponses.some(response => expectedMetadata404.has(response.threadId) && Math.abs(response.at - e.at) < 100)
+            ) &&
+            navigationAborts.some((at) => Math.abs(at - e.at) < 100)
+          ) &&
+          !(
+            e.kind === "console" &&
+            e.text ===
+              "Failed to load resource: the server responded with a status of 404 (Not Found)" &&
+            metadataResponses.some(
+              (response) =>
+                expectedMetadata404.has(response.threadId) &&
+                Math.abs(response.at - e.at) < 100,
+            )
           ),
       )
       .map((e) => e.text);
@@ -76,9 +114,43 @@ async function setup(
       !m.text().startsWith("[vite]") &&
       !m.text().includes("AbortError")
     )
-      errorEvents.push({ text: m.text().slice(0, 1500), at: Date.now(), kind: "console" });
+      errorEvents.push({
+        text: m.text().slice(0, 1500),
+        at: Date.now(),
+        kind: "console",
+      });
   });
   const now = Math.floor(Date.now() / 1000);
+  if (options.poisonedRoot) {
+    Object.assign(fixture.threads[0], {
+      source: "cli",
+      parentThreadId: null,
+      canAcceptDirectInput: true,
+    });
+    await page.addInitScript(() => {
+      const key = `kanban.session.subagent-families:${location.origin}`;
+      // Seed once: reload must exercise the repaired persisted state.
+      if (localStorage.getItem(key)) return;
+      localStorage.setItem(
+        key,
+        JSON.stringify({
+          version: 1,
+          state: {
+            nodes: {
+              "ux-0": {
+                thread: { id: "ux-0", canAcceptDirectInput: false },
+                parentId: "child-atlas",
+                verified: false,
+                revision: 1,
+              },
+            },
+            selection: {},
+            panelRoot: null,
+          },
+        }),
+      );
+    });
+  }
   const children: any[] = [
     {
       id: "child-atlas",
@@ -268,8 +340,12 @@ async function setup(
     console.log(errors());
     throw e;
   });
-  await page.locator('[role=tab][data-tab-key="codex:ux-0"] .session-identity-title').click();
-  await expect(page.locator('[role=tab][data-tab-key="codex:ux-0"]')).toHaveAttribute("aria-selected", "true");
+  await page
+    .locator('[role=tab][data-tab-key="codex:ux-0"] .session-identity-title')
+    .click();
+  await expect(
+    page.locator('[role=tab][data-tab-key="codex:ux-0"]'),
+  ).toHaveAttribute("aria-selected", "true");
   await openInspection(page);
   (page as any).sessionOptFixture = {
     calls,
@@ -278,7 +354,9 @@ async function setup(
     },
     navigationAborts,
     metadataResponses,
-    get expectedMetadataThreadIds() { return [...expectedMetadata404]; },
+    get expectedMetadataThreadIds() {
+      return [...expectedMetadata404];
+    },
   };
   return {
     fixture,
@@ -325,6 +403,51 @@ test.afterEach(async ({ page }, info) => {
     contentType: "application/json",
   });
 });
+test("native root recovers from a persisted false child restriction and stays sendable after reload", async ({
+  page,
+}) => {
+  const f = await setup(page, { poisonedRoot: true });
+  await closeInspection(page);
+  await f.editor.fill("主会话新的草稿");
+  const warning = page.getByText(
+    "当前子线程由主 Agent 调度，不能直接发送消息。",
+    { exact: true },
+  );
+  await expect(warning).toHaveCount(0);
+  const send = page.getByRole("button", { name: "发送消息", exact: true });
+  await expect(send).toBeEnabled();
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const cached = JSON.parse(
+          localStorage.getItem(
+            `kanban.session.subagent-families:${location.origin}`,
+          ) ?? "{}",
+        );
+        return !!cached.state?.nodes?.["ux-0"];
+      }),
+    )
+    .toBe(false);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(f.editor).toHaveText("主会话新的草稿");
+  await expect(warning).toHaveCount(0);
+  await expect(send).toBeEnabled();
+  await send.click();
+  await expect
+    .poll(
+      () =>
+        f.fixture.calls.filter((c) => c.path.endsWith("/followups/submit"))
+          .length,
+    )
+    .toBe(1);
+  expect(
+    f.fixture.calls.find((c) => c.path.endsWith("/followups/submit"))!.body,
+  ).toMatchObject({
+    threadId: "ux-0",
+    text: "主会话新的草稿",
+  });
+  expect(f.errors).toEqual([]);
+});
 test("child inspection preserves parent input and project; native V2 child is read-only", async ({
   page,
 }) => {
@@ -360,16 +483,14 @@ test("child inspection preserves parent input and project; native V2 child is re
           events: c.events,
         };
       });
-      await test
-        .info()
-        .attach("subagent-first-open-state", {
-          body: JSON.stringify(
-            { stores, calls: f.calls, errors: f.errors },
-            null,
-            2,
-          ),
-          contentType: "application/json",
-        });
+      await test.info().attach("subagent-first-open-state", {
+        body: JSON.stringify(
+          { stores, calls: f.calls, errors: f.errors },
+          null,
+          2,
+        ),
+        contentType: "application/json",
+      });
       throw error;
     });
   await expect(page.getByText("由主 Agent 调度 · 子线程只读")).toHaveCount(0);
@@ -403,16 +524,14 @@ test("interactive child draft and image restore after refresh without changing t
     exact: true,
   });
   await childDraft.fill("子草稿输入一半");
-  await page
-    .locator(".session-subagent-input input[type=file]")
-    .setInputFiles({
-      name: "draft.png",
-      mimeType: "image/png",
-      buffer: Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jF5cAAAAASUVORK5CYII=",
-        "base64",
-      ),
-    });
+  await page.locator(".session-subagent-input input[type=file]").setInputFiles({
+    name: "draft.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jF5cAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  });
   await expect(page.locator(".session-subagent-input")).toContainText("ready");
   await closeInspection(page);
   await openInspection(page, false);
@@ -452,16 +571,14 @@ test("interactive child draft and image restore after refresh without changing t
             .map((k) => [k, localStorage.getItem(k)]),
         };
       });
-      await test
-        .info()
-        .attach("subagent-reload-state", {
-          body: JSON.stringify(
-            { stores, calls: f.calls, errors: f.errors },
-            null,
-            2,
-          ),
-          contentType: "application/json",
-        });
+      await test.info().attach("subagent-reload-state", {
+        body: JSON.stringify(
+          { stores, calls: f.calls, errors: f.errors },
+          null,
+          2,
+        ),
+        contentType: "application/json",
+      });
       throw error;
     });
   await expect(page.locator(".session-subagent-input")).toContainText(
@@ -540,35 +657,58 @@ test("active and done sections list every descendant without a round filter", as
   expect(f.calls.filter((c) => c.path.endsWith("/stop"))).toEqual([]);
   expect(f.errors).toEqual([]);
 });
-test("a finished family leaves the composer summary hidden and shows the empty panel", async ({ page, baseURL }) => {
+test("a finished family leaves the composer summary hidden and shows the empty panel", async ({
+  page,
+  baseURL,
+}) => {
   const stream = await liveStream(page, baseURL!);
   try {
-  const f = await setup(page);
-  await closeInspection(page);
-  const refresh = () => page.evaluate(async () => {
-    const path = "/src/session-mode/features/subagents/service.ts";
-    const service = await import(performance.getEntriesByType("resource").findLast(entry => new URL(entry.name).pathname === path)?.name ?? path);
-    await service.subagentService.refresh("ux-0");
-  });
-  // Settle initial discovery before changing the authoritative fixture snapshot.
-  await refresh();
-  await expect.poll(() => stream.connections()).toBeGreaterThan(0);
-  let seq = 1;
-  for (const child of f.children) {
-    const previous = child.turns.at(-1);
-    const turn = { ...previous, status: "completed", startedAt: previous.startedAt ?? 1, completedAt: 2 };
-    Object.assign(child, { status: { type: "idle" }, turns: [turn] });
-    stream.emit(seq++, { method: "turn/completed", params: { threadId: child.id, turn } });
+    const f = await setup(page);
+    await closeInspection(page);
+    const refresh = () =>
+      page.evaluate(async () => {
+        const path = "/src/session-mode/features/subagents/service.ts";
+        const service = await import(
+          performance
+            .getEntriesByType("resource")
+            .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+            path
+        );
+        await service.subagentService.refresh("ux-0");
+      });
+    // Settle initial discovery before changing the authoritative fixture snapshot.
+    await refresh();
+    await expect.poll(() => stream.connections()).toBeGreaterThan(0);
+    let seq = 1;
+    for (const child of f.children) {
+      const previous = child.turns.at(-1);
+      const turn = {
+        ...previous,
+        status: "completed",
+        startedAt: previous.startedAt ?? 1,
+        completedAt: 2,
+      };
+      Object.assign(child, { status: { type: "idle" }, turns: [turn] });
+      stream.emit(seq++, {
+        method: "turn/completed",
+        params: { threadId: child.id, turn },
+      });
+    }
+    await refresh();
+    await expect(
+      page.getByRole("button", { name: /子智能体 · 已开启/ }),
+    ).toHaveCount(0);
+    await openInspection(page);
+    const panel = page.locator(".session-subagent-panel");
+    await expect(panel.getByText("已开启 · 0", { exact: true })).toBeVisible();
+    await expect(panel.getByText("没有已开启的子代理")).toBeVisible();
+    await expect(
+      panel.getByRole("heading", { name: "完成 · 3", exact: true }),
+    ).toBeVisible();
+    expect(f.errors).toEqual([]);
+  } finally {
+    await stream.close();
   }
-  await refresh();
-  await expect(page.getByRole("button", { name: /子智能体 · 已开启/ })).toHaveCount(0);
-  await openInspection(page);
-  const panel = page.locator(".session-subagent-panel");
-  await expect(panel.getByText("已开启 · 0", { exact: true })).toBeVisible();
-  await expect(panel.getByText("没有已开启的子代理")).toBeVisible();
-  await expect(panel.getByRole("heading", { name: "完成 · 3", exact: true })).toBeVisible();
-  expect(f.errors).toEqual([]);
-  } finally { await stream.close(); }
 });
 test("incomplete discovery retains unavailable identities and avoids claiming completion", async ({
   page,
@@ -588,21 +728,69 @@ test("incomplete discovery retains unavailable identities and avoids claiming co
     "待确认",
   );
   await expect(
+    page.getByRole("heading", { name: "已开启 · 待确认", exact: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const path = "/src/session-mode/features/subagents/store.ts";
+        const { useSubagentStore } = await import(
+          performance
+            .getEntriesByType("resource")
+            .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+            path
+        );
+        const node = useSubagentStore.getState().nodes["child-atlas"];
+        return (
+          node && {
+            id: node.thread.id,
+            parentId: node.parentId,
+            unavailable: node.unavailable,
+            canAcceptDirectInput: node.thread.canAcceptDirectInput,
+          }
+        );
+      }),
+    )
+    .toEqual({
+      id: "child-atlas",
+      parentId: "ux-0",
+      unavailable: true,
+      canAcceptDirectInput: null,
+    });
+  await expect(
     page.getByText("此子智能体在当前分支上已不可用。", { exact: false }),
   ).toBeVisible();
   await expect(page.getByRole("heading", { name: /已开启 · 0/ })).toHaveCount(
     0,
   );
   expect(f.errors).toEqual([]);
-  expect(f.metadataResponses.filter(response => response.threadId === "child-atlas" && response.status === 404).length).toBeGreaterThan(0);
-  expect(f.fixture.calls.filter(call => /thread\/(resume|start)|turn\/(start|interrupt)/.test(call.path))).toEqual([]);
-  writeFileSync(test.info().outputPath("expected-metadata-404.json"), JSON.stringify({
-    expectedThreadIds: [...f.expectedMetadata404],
-    responses: f.metadataResponses,
-    observedErrors: f.errorEvents,
-    unexpectedErrors: f.errors,
-    mutationCalls: f.fixture.calls.filter(call => /thread\/(resume|start)|turn\/(start|interrupt)/.test(call.path)),
-  }, null, 2));
+  expect(
+    f.metadataResponses.filter(
+      (response) =>
+        response.threadId === "child-atlas" && response.status === 404,
+    ).length,
+  ).toBeGreaterThan(0);
+  expect(
+    f.fixture.calls.filter((call) =>
+      /thread\/(resume|start)|turn\/(start|interrupt)/.test(call.path),
+    ),
+  ).toEqual([]);
+  writeFileSync(
+    test.info().outputPath("expected-metadata-404.json"),
+    JSON.stringify(
+      {
+        expectedThreadIds: [...f.expectedMetadata404],
+        responses: f.metadataResponses,
+        observedErrors: f.errorEvents,
+        unexpectedErrors: f.errors,
+        mutationCalls: f.fixture.calls.filter((call) =>
+          /thread\/(resume|start)|turn\/(start|interrupt)/.test(call.path),
+        ),
+      },
+      null,
+      2,
+    ),
+  );
 });
 test("nested descendants stay in the flat list and detail selection survives parent tab switching", async ({
   page,
@@ -786,7 +974,9 @@ test("background batch stop confirms only this round and rejects a stale confirm
   const f = await setup(page, { oldRound: true });
   await expect(page.locator(".session-subagent-panel")).toBeVisible();
   await openComposerStatus(page);
-  await page.locator(".session-background-agents button[aria-expanded]").click();
+  await page
+    .locator(".session-background-agents button[aria-expanded]")
+    .click();
   await page.getByRole("button", { name: "全部停止", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "停止本轮子智能体" });
   await expect(dialog).toContainText("Atlas");
@@ -823,7 +1013,9 @@ test("an old batch-stop confirmation stays invalid after the scope returns", asy
   const f = await setup(page, { oldRound: true });
   await expect(page.locator(".session-subagent-panel")).toBeVisible();
   await openComposerStatus(page);
-  await page.locator(".session-background-agents button[aria-expanded]").click();
+  await page
+    .locator(".session-background-agents button[aria-expanded]")
+    .click();
   await page.getByRole("button", { name: "全部停止", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "停止本轮子智能体" });
   await expect(dialog).toContainText("Atlas");

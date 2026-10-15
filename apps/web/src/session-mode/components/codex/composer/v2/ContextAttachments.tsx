@@ -12,10 +12,24 @@ import type {
 import { composerDrafts, useComposerDraft } from "./drafts";
 import { ComposerSheet } from "./ComposerSheet";
 import { offerUndo } from "./UndoNotice";
+import { readWithDeadline } from "@session/services/sessionReadQueue";
+
+async function readContextFile(path: string) {
+  try {
+    return await readWithDeadline(
+      (signal) => readTextFile(path, { suppressToast: true, signal }),
+      15_000,
+    );
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError")
+      throw new Error("读取文件超时，请重新选择文件");
+    throw error;
+  }
+}
 
 export async function addFileContexts(owner: string, paths: string[]) {
   for (const path of paths) {
-    const text = await readTextFile(path, { suppressToast: true });
+    const text = await readContextFile(path);
     if (typeof text !== "string" || text.includes("\0"))
       throw new Error("请选择文本文件，图片请通过图片入口添加");
     if (text.length > 180_000)
@@ -60,7 +74,7 @@ export function ContextAttachments({
     if (!c.path) return;
     setChecking(true);
     try {
-      const all = await readTextFile(c.path, { suppressToast: true });
+      const all = await readContextFile(c.path);
       const text = c.range
         ? all
             .split(/\r?\n/)
@@ -252,7 +266,10 @@ export function ContextAttachments({
                 <section key={item.id}>
                   <img
                     className="session-context-image"
-                    src={item.preview || (item.path ? fileSrc(item.path) : undefined)}
+                    src={
+                      item.preview ||
+                      (item.path ? fileSrc(item.path) : undefined)
+                    }
                     alt={item.name}
                   />
                   {item.error && <p role="alert">{item.error}</p>}

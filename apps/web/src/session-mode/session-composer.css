@@ -52,7 +52,7 @@
   font-size: 15px;
   line-height: 1.6;
 }
-.session-mode .session-composer-editor [contenteditable] + div {
+.session-mode .session-composer-editor .session-composer-placeholder {
   font-size: 15px;
   line-height: 1.6;
 }

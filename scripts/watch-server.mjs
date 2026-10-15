@@ -284,8 +284,21 @@ async function main() {
       current.kill("SIGTERM");
     });
   }
+  const prepareDependencies = createDependencyPreparation({ root });
   const request = createRestartQueue({
-    prepare: createDependencyPreparation({ root }),
+    prepare: async () => {
+      await prepareDependencies();
+      // Static imports may cache shared before index.ts checks its build.
+      console.log("[server-watch] Building shared before gateway replacement…");
+      await command(
+        "pnpm",
+        ["--filter", "@agent-orchestrator/shared", "build"],
+        {
+          cwd: root,
+          env: process.env,
+        },
+      );
+    },
     restart: async () => {
       if (stopping) return;
       recovery.cancel();
@@ -303,19 +316,29 @@ async function main() {
         },
       );
       child = current;
-      current.on("error", (error) => console.error("[server-watch]", error));
+      current.on("error", (error) => {
+        console.error("[server-watch] Gateway spawn error:", error.message);
+      });
       current.on("exit", (code, signal) => {
         if (stopping || child !== current) return;
         child = undefined;
-        console.error(`[server-watch] Gateway exited (${signal ?? code}).`);
+        console.error(
+          `[server-watch] Gateway exited unexpectedly (${signal ?? code}).`,
+        );
         recovery.exited(startedAt);
       });
     },
-    onError: (error) =>
+    onError: (error) => {
+      const live =
+        child?.pid && child.exitCode === null && child.signalCode === null;
       console.error(
-        "[server-watch] Preparation failed; current gateway retained. Fix dependencies and save a watched file to retry.",
+        live
+          ? "[server-watch] Preparation failed; current gateway retained. Fix dependencies or the shared build and save a watched file to retry."
+          : "[server-watch] Preparation failed; gateway is unavailable. Recovery will retry within the bounded recovery budget.",
         error.message,
-      ),
+      );
+      if (!live && !stopping) recovery.exited(Date.now());
+    },
   });
   const recovery = createGatewayCrashRecovery({
     restart: () => request(),

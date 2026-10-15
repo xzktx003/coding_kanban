@@ -198,9 +198,15 @@ for (const kind of ["codex", "cc"] as const)
     await input.fill("A 图片草稿");
     const height = await page.locator(".session-compact-frame").boundingBox();
     await page
-      .getByRole("button", { name: "附加文件", exact: true })
+      .getByRole("button", {
+        name: kind === "codex" ? "附加文件" : "添加附件与上下文",
+        exact: true,
+      })
       .tap();
-    const upload = page.getByRole("button", { name: "附加照片或视频", exact: true });
+    const upload = page.getByRole("button", {
+      name: kind === "codex" ? "附加照片或视频" : "上传图片",
+      exact: true,
+    });
     await expect(upload).toBeInViewport();
     await expect
       .poll(async () => (await upload.boundingBox())!.height)
@@ -242,8 +248,7 @@ for (const kind of ["codex", "cc"] as const)
       .getByRole("button", { name: /预览 retry.png|预览图片 retry.png/ })
       .tap();
     await page
-      .getByRole("button", { name: /重试上传|重试/ })
-      .last()
+      .getByRole("button", { name: "再次尝试上传", exact: true })
       .tap();
     await expect(
       page.locator(

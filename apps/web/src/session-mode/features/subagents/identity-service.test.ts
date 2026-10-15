@@ -122,19 +122,22 @@ it.each(["inspect", "verify", "snapshot"])(
         ? { threads: [child], complete: true, errors: [], checkedAt: 1 }
         : { thread: child },
     );
-    const result = await pending;
-    if (result) expect(result.canAcceptDirectInput).toBe(false);
+    if (operation === "verify") await expect(pending).rejects.toThrow(/已更新/);
+    else {
+      const result = await pending;
+      if (result) expect(result.canAcceptDirectInput).toBe(false);
+    }
     expect(codexThreadInputState("child").blocked).toBe(true);
   },
 );
 
-it("late child verification returns the current revoked capability rather than the stale permitted response", async () => {
+it("late child verification rejects a revoked capability rather than returning a stale grant", async () => {
   const read = deferred();
   mock.post.mockReturnValue(read.promise);
   const pending = subagentService.verify("root", "child");
   confirmSubagentMetadata([{ ...child, canAcceptDirectInput: false }]);
   read.resolve({ thread: child });
-  expect((await pending).canAcceptDirectInput).toBe(false);
+  await expect(pending).rejects.toThrow(/已更新/);
 });
 it("runtime reset rejects the old response without restoring a node or permission", async () => {
   const read = deferred();

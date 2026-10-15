@@ -71,8 +71,12 @@ async function liveStream(page: Page, baseURL: string) {
   await page.addInitScript(
     ({ origin }) => {
       const Native = window.EventSource;
-      const frames: unknown[] = [], sources: EventSource[] = [];
-      Object.assign(window, {snapshotFrames:frames, snapshotSources:sources});
+      const frames: unknown[] = [],
+        sources: EventSource[] = [];
+      Object.assign(window, {
+        snapshotFrames: frames,
+        snapshotSources: sources,
+      });
       window.EventSource = class extends Native {
         constructor(url: string | URL, options?: EventSourceInit) {
           const parsed = new URL(String(url), location.href);
@@ -83,10 +87,14 @@ async function liveStream(page: Page, baseURL: string) {
             options,
           );
           sources.push(this);
-          this.addEventListener("message", event => {
-            const envelope=JSON.parse(event.data);
-            frames.push({seq:envelope.seq,event:envelope.event,method:envelope.payload?.method});
-            if(frames.length>20)frames.shift();
+          this.addEventListener("message", (event) => {
+            const envelope = JSON.parse(event.data);
+            frames.push({
+              seq: envelope.seq,
+              event: envelope.event,
+              method: envelope.payload?.method,
+            });
+            if (frames.length > 20) frames.shift();
           });
         }
       };
@@ -174,18 +182,37 @@ test("a lower runtime snapshot resets the stream cursor without refreshing the p
         },
       },
     });
-    await expect(
-      page.getByText("新运行实例的实时回复", { exact: true }),
-    ).toBeVisible({ timeout: 2500 }).catch(async error => {
-      const state = await page.evaluate(async () => {
-        const path="/src/session-mode/components/codex/stores/index.ts";
-        const {useCodexStore}=await import(performance.getEntriesByType("resource").findLast(e=>new URL(e.name).pathname===path)?.name??path);
-        const s=useCodexStore.getState(),w=window as any;
-        return {frames:w.snapshotFrames,sources:w.snapshotSources.map((s:any)=>s.readyState),thread:s.currentThreadId,events:s.events["ux-0"],timing:s.turnTimingMap["ux-0"],loading:s.historyLoadingMap["ux-0"]};
+    await expect(page.getByText("新运行实例的实时回复", { exact: true }))
+      .toBeVisible({ timeout: 2500 })
+      .catch(async (error) => {
+        const state = await page.evaluate(async () => {
+          const path = "/src/session-mode/components/codex/stores/index.ts";
+          const { useCodexStore } = await import(
+            performance
+              .getEntriesByType("resource")
+              .findLast((e) => new URL(e.name).pathname === path)?.name ?? path
+          );
+          const s = useCodexStore.getState(),
+            w = window as any;
+          return {
+            frames: w.snapshotFrames,
+            sources: w.snapshotSources.map((s: any) => s.readyState),
+            thread: s.currentThreadId,
+            events: s.events["ux-0"],
+            timing: s.turnTimingMap["ux-0"],
+            loading: s.historyLoadingMap["ux-0"],
+          };
+        });
+        await writeFile(
+          info.outputPath("snapshot-failure.json"),
+          JSON.stringify(
+            { state, cursors: stream.cursors(), calls: fixture.calls },
+            null,
+            2,
+          ),
+        );
+        throw error;
       });
-      await writeFile(info.outputPath("snapshot-failure.json"),JSON.stringify({state,cursors:stream.cursors(),calls:fixture.calls},null,2));
-      throw error;
-    });
     await expect(editor).toHaveText("序号重置后保留的草稿");
     expect(await page.evaluate(() => performance.timeOrigin)).toBe(
       documentStartedAt,
@@ -407,7 +434,11 @@ test("real SSE sequence gap repairs transcript and a failed read offers read-onl
       page.locator(".codex-native-history-notice").getByRole("alert"),
     ).toBeVisible({ timeout: 15000 });
     const beforeRetry = reads;
-    await page.getByRole("alert").getByRole("button", { name: "重试", exact: true }).click();
+    await page
+      .locator(".codex-native-history-notice")
+      .getByRole("alert")
+      .getByRole("button", { name: "重试", exact: true })
+      .click();
     await expect.poll(() => reads).toBeGreaterThan(beforeRetry);
     fail = false;
     fixture.threads[0].status = { type: "idle" };

@@ -179,3 +179,40 @@ it("does not restore an obsolete hover after switching away and back to a draft"
   rerender({ owner: "a" });
   expect(result.current.active).toBe(false);
 });
+
+it("a stuck local file read releases pending and ignores late bytes without blocking the next drop", async () => {
+  vi.useFakeTimers();
+  try {
+    let release!: (value: ArrayBuffer) => void;
+    const file = {
+      name: "stuck.md",
+      size: 4,
+      type: "",
+      arrayBuffer: () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          release = resolve;
+        }),
+    } as File;
+    const { result } = renderHook(() =>
+      useComposerFileDrop("a", { addImages: vi.fn(), disabled: false }),
+    );
+    act(() => result.current.onDrop(event([file]) as never));
+    expect(result.current.pending).toBe(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_001);
+    });
+    expect(result.current.pending).toBe(false);
+    expect(toast.error).toHaveBeenCalledWith(
+      expect.stringContaining("读取超时"),
+    );
+    await act(async () =>
+      result.current.onDrop(event([textFile("next.md", "next")]) as never),
+    );
+    await act(async () => release(new TextEncoder().encode("late").buffer));
+    expect(composerDrafts.read("a").contexts.map((c) => c.name)).toEqual([
+      "next.md",
+    ]);
+  } finally {
+    vi.useRealTimers();
+  }
+});

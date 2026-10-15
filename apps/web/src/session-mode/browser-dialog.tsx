@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { useState } from "react";
 import { BrowserProjects } from "./features/ProjectSelector";
 import { useWorkspaceStore } from "./stores/useWorkspaceStore";
+import { readWithDeadline } from "./services/sessionReadQueue";
 import {
   Dialog,
   DialogContent,
@@ -42,20 +43,49 @@ function showDialog(
 
 export async function uploadBrowserFile(file: File): Promise<string> {
   if (file.size > 10 * 1024 * 1024) throw new Error("附件大小不能超过 10 MB");
-  const data = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("无法读取附件"));
-    reader.onload = () => resolve(String(reader.result).split(",")[1]);
-    reader.readAsDataURL(file);
-  });
-  const response = await fetch("/api/session/files/upload", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: file.name, data }),
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.error ?? "附件上传失败");
-  return result.path;
+  try {
+    return await readWithDeadline(async (signal) => {
+      const data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        let settled = false;
+        const finish = (error?: unknown, value?: string) => {
+          if (settled) return;
+          settled = true;
+          signal.removeEventListener("abort", cancel);
+          reader.onload = reader.onerror = reader.onabort = null;
+          if (error !== undefined) reject(error);
+          else resolve(value!);
+        };
+        const cancel = () => {
+          finish(signal.reason);
+          reader.abort();
+        };
+        signal.addEventListener("abort", cancel, { once: true });
+        reader.onerror = () => finish(new Error("无法读取附件"));
+        reader.onabort = () => finish(new Error("附件读取已中断，请重试"));
+        reader.onload = () =>
+          finish(undefined, String(reader.result).split(",")[1]);
+        try {
+          reader.readAsDataURL(file);
+        } catch (error) {
+          finish(error);
+        }
+      });
+      const response = await fetch("/api/session/files/upload", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: file.name, data }),
+        signal,
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "附件上传失败");
+      return result.path;
+    }, 30_000);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError")
+      throw new Error("附件上传超时，原文件已保留，请重试或移除附件");
+    throw error;
+  }
 }
 
 /** Open synchronously in the user gesture; uploading belongs to the captured draft. */

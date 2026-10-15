@@ -48,6 +48,107 @@ async function selectFirst(page: Page) {
   await page.keyboard.press("Escape");
   await expect(tab).toHaveAttribute("aria-selected", "true");
 }
+
+test("a stuck attachment database explains the disabled send and retry preserves the text", async ({
+  page,
+}) => {
+  test.setTimeout(45000);
+  const fixture = await installSessionUxFixture(page, 2);
+  await page.addInitScript(() => {
+    const open = IDBFactory.prototype.open;
+    (window as any).stallAttachmentDatabase = true;
+    IDBFactory.prototype.open = function (...args) {
+      if (
+        args[0] === "kanban.session.attachments" &&
+        (window as any).stallAttachmentDatabase
+      )
+        return {} as IDBOpenDBRequest;
+      return open.apply(this, args);
+    };
+  });
+  await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
+  await editor(page).waitFor();
+  await seedSessionUx(page, 2);
+  await selectFirst(page);
+  await editor(page).fill("附件恢复期间保留的文字");
+  const send = page.getByRole("button", { name: "发送消息", exact: true });
+  await expect(send).toBeDisabled();
+  await expect(
+    page.getByText("正在恢复附件草稿…", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("附件草稿保存失败，打开状态面板重试", { exact: true }),
+  ).toBeVisible({ timeout: 13000 });
+  await expect(editor(page)).toHaveText("附件恢复期间保留的文字");
+  await page.evaluate(() => {
+    (window as any).stallAttachmentDatabase = false;
+  });
+  await page.getByRole("button", { name: "附加文件", exact: true }).click();
+  await page
+    .getByRole("button", { name: "输入状态与消息队列", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "重试保存附件草稿", exact: true })
+    .click();
+  await page.getByRole("button", { name: "关闭面板", exact: true }).click();
+  await expect(send).toBeEnabled();
+  await send.click();
+  await expect
+    .poll(
+      () =>
+        fixture.calls.filter((c) => c.path.endsWith("/followups/submit"))
+          .length,
+    )
+    .toBe(1);
+  expect(
+    fixture.calls.find((c) => c.path.endsWith("/followups/submit"))!.body,
+  ).toMatchObject({ threadId: "ux-0", text: "附件恢复期间保留的文字" });
+});
+
+test("a stuck local file drop explains its wait and cannot append late content after recovery", async ({
+  page,
+}) => {
+  test.setTimeout(45000);
+  await installSessionUxFixture(page, 2);
+  await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
+  await editor(page).waitFor();
+  await seedSessionUx(page, 2);
+  await selectFirst(page);
+  await editor(page).fill("文件读取失败也保留草稿");
+  const send = page.getByRole("button", { name: "发送消息", exact: true });
+  await expect(send).toBeEnabled();
+  await editor(page).evaluate((element) => {
+    const file = new File(["late"], "stuck.md", { type: "text/markdown" });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: () =>
+        new Promise((resolve) => {
+          (window as any).releaseDroppedFile = resolve;
+        }),
+    });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    element.dispatchEvent(
+      new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: transfer,
+      }),
+    );
+  });
+  await expect(send).toBeDisabled();
+  await expect(
+    page.getByText("正在读取文件快照…", { exact: true }),
+  ).toBeVisible();
+  await expect(send).toBeEnabled({ timeout: 18000 });
+  await expect(
+    page.getByText("stuck.md：读取超时，请重新选择文件", { exact: true }),
+  ).toBeVisible();
+  await page.evaluate(() =>
+    (window as any).releaseDroppedFile(new TextEncoder().encode("late").buffer),
+  );
+  await expect(editor(page)).toHaveText("文件读取失败也保留草稿");
+  await expect(page.locator(".session-context-chip")).toHaveCount(0);
+});
 async function push(page: Page, events: any[]) {
   await page.evaluate(async (events) => {
     const url =
@@ -63,6 +164,68 @@ async function push(page: Page, events: any[]) {
       useCodexStore.getState().addEvent(e.params.threadId, e);
   }, events);
 }
+
+test("a completed turn with a lost submit response releases send after receipt recovery and preserves the next draft", async ({
+  page,
+}) => {
+  test.setTimeout(60000);
+  const fixture = await installSessionUxFixture(page, 2);
+  const submissions: any[] = [];
+  const receipt = { revision: 0, paused: null, items: [] as any[] };
+  await page.route("**/api/session/followups?*", (route) =>
+    route.fulfill({ json: receipt }),
+  );
+  await page.route("**/api/session/followups/submit", async (route) => {
+    const submitted = route.request().postDataJSON();
+    submissions.push(submitted);
+    receipt.items.push({
+      ...submitted,
+      status: "sent",
+      turnId: `receipt-turn-${submissions.length}`,
+      createdAt: Date.now(),
+      fingerprint: "fixture",
+    });
+    receipt.revision++;
+    // The server accepted the message, but its POST response never reaches the
+    // browser. A successful GET receipt must release the original sending lock.
+    if (submissions.length > 1) await route.fulfill({ json: receipt });
+  });
+  await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
+  await editor(page).waitFor();
+  await seedSessionUx(page, 2);
+  await selectFirst(page);
+  const send = page.getByRole("button", { name: "发送消息", exact: true });
+  await editor(page).fill("第一轮已送达但回包丢失");
+  await send.click();
+  await expect.poll(() => submissions.length).toBe(1);
+  const turn = {
+    id: "receipt-turn-1",
+    status: "completed",
+    items: [],
+    startedAt: 1,
+    durationMs: 1,
+    error: null,
+  };
+  (fixture.threads[0].turns as any[]).push(turn);
+  await push(page, [
+    {
+      method: "turn/started",
+      params: { threadId: "ux-0", turn: { ...turn, status: "inProgress" } },
+    },
+    { method: "turn/completed", params: { threadId: "ux-0", turn } },
+  ]);
+  await editor(page).fill("完成后输入的下一条消息");
+  await expect(send).toBeEnabled({ timeout: 22000 });
+  await expect(editor(page)).toHaveText("完成后输入的下一条消息");
+  expect(submissions).toHaveLength(1);
+  await send.click();
+  await expect.poll(() => submissions.length).toBe(2);
+  expect(submissions[1].text).toBe("完成后输入的下一条消息");
+  expect(submissions[1].threadId).toBe("ux-0");
+  expect(submissions[1].id).not.toBe(submissions[0].id);
+  await expect(editor(page)).toHaveText("");
+});
+
 for (const width of [375, 1440])
   test(`Codex send stays visible through slow ACK, delayed/repeated events and refresh (${width}px)`, async ({
     page,

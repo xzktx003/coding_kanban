@@ -24,6 +24,8 @@
 
 仅 `collabAgentToolCall.tool === spawnAgent`、`subAgentActivity.kind === started` 创建事件与原生父元数据提供家族关系证据；send/resume/wait/close/interacted 等通信接收者不创建或改写父子关系。started/completed 共用 item ID 更新，不重复渲染。执行状态共用 `codexRuntimeState`，家族不维护第二套执行状态机。较晚快照不能回退其发起后已观察的实时状态；不可用节点保留名称与选择并撤销输入能力，状态显示待确认。通信项的模型/推理参数也不覆盖接收者的原生设置。
 
+原生元数据明确来源为普通主会话（`cli`、`vscode`、`exec`、`appServer` 或 `custom`）且没有父标识时，覆盖旧缓存的子线程推断，并删除持久化中的伪子节点。主输入同步采用这一判断，避免错误缓存锁住发送；真正的父标识始终优先，来源缺失或 `unknown` 不视为主会话证据。恢复仅订阅身份元数据，不新增历史轮询，相同根 ID 不触发正文重扫或家族订阅通知。
+
 聊天呈现与观察索引分开：按 26.51002.51308 原包规则，`collabAgentToolCall.tool === wait` 不生成可见聊天行；事件、轮次、接收者和状态仍完整用于家族观察。其他协作调用默认折叠，子活动使用原名称格式和状态文案，展开／查看保持只读观察入口。截图故障及回归见 [恢复修复记录](designs/session-render-alignment/render-recovery-progress.md)。
 
 已关注家族按主会话计入全局运行/待处理汇总，多个子 Agent 不增加多个“运行会话”。请求按 thread/request/turn/item/实例标记去重。主轮结束、子任务仍运行时单独提示。子完成不逐个弹桌面通知；后台待处理事项按主会话合并通知，保留实际发起者。
@@ -50,6 +52,22 @@ Node 网关新增 `/api/session/subagents/snapshot`、`verify`、`roles`、`stop
 
 TypeScript 运行层启动 smoke：`pnpm session:build` 后运行 `python3 scripts/session-subagent-acceptance.py --smoke`，使用独立目录，不启动原生 Agent、不请求模型。完整 `--questions` / `--approvals` 验收仍须主线程发起。
 
+### 主会话身份误判修复验收（2026-10-15）
+
+浏览器用例 `native root recovers from a persisted false child restriction and stays sendable after reload` 先复现主输入显示“当前子线程由主 Agent 调度，不能直接发送消息”，修复后验证自动清除错误缓存、刷新保留草稿、下一条消息只发送到原主会话。新增身份／缓存单测先有 10 项失败，子 Agent 单测修复后 63/63；连同提交、后台状态与审批回归共 99/99，前端类型检查与生产构建通过。浏览器通过新身份回归、真正子线程的只读／允许输入／审批、消息投递与草稿隔离。新身份回归的写请求由隔离 fixture 接收，没有向用户真实 Agent 发送测试任务。
+
+局域网 HTTPS 开发入口 `https://10.30.0.22:8484`，绑定 `0.0.0.0`。`session-idle-memory` 的原生 EventSource 自动回收／完成／只读恢复用例通过；自然 GC 约 96 秒采样，JS heap 依次为 167,101,948／61,917,984／134,393,328 bytes，renderer RSS 为 495,218,688／301,326,336／608,063,488 bytes，未强制 GC 或刷新。仅验证回收与恢复边界，未运行 30 分钟 soak，不据此声称长期 RSS 稳定；本次没有修改传输投影或历史读取策略。测试环境的 Conda OpenSSL 默认配置路径失效，使用 `OPENSSL_CONF=/etc/ssl/openssl.cnf` 后原生 SSE 夹具正常启动。
+
+整组旧浏览器用例另暴露测试维护问题：已完成家族用例缺少 fixture、会访问真实页面，已改为完整隔离；发现不完整时活动行按当前 UI 隐藏，改为检查缓存身份、撤销输入权限及“待确认”提示，二者复测通过。仍有 3 项既有 UI 用例未通过：主输入角色引用按钮 1 项、后台批量停止入口 2 项，均等待当前 HEAD 未挂载的旧入口；本次未恢复这些入口，也未删除或跳过断言。身份发送修复不代表整套子 Agent UI 验收全部通过。
+
+### 身份与连接新鲜度防回归（2026-10-15）
+
+- 原生身份／直接输入许可使用独立 `metadataRevision`，不与执行状态事件混淆；原生返回缺少 `canAcceptDirectInput` 时将旧许可撤回为未知。真实子线程仍须明确 `true` 才开放输入。
+- discovery／verify 在请求开始捕获版本。晚到快照不能覆盖更新的身份或许可，旧 verify 也不能向调用方返回过期授权；每次接受的元数据都推进版本。若并发新快照的已验证、可用节点仍属原家族，且父、来源和许可均未改变，则返回最新节点，不写入旧回包，避免正常重开详情被版本比较误拒绝。执行状态事件不阻止之后的有效身份核实。
+- 配对主机、端口或凭证变化时，先清除旧线程身份，再派发一次已有 `session-runtime-restarted` 事件，复用运行状态复位与 SSE 重连。凭证仅在内存比较，不进入持久化键或日志；子 Agent 缓存仍按 origin 隔离，旧主会话列表不得删除新连接的子节点。
+- snapshot／verify／roles 只读请求有 15 秒取消期限，超时释放进行中的请求，后续允许重试；停止操作不自动重试。会话列表的旧成功和失败响应均核对运行实例版本，不能覆盖新连接列表。
+- 回归覆盖稀疏权限、交错 snapshot／verify、状态与身份版本分离、同名主机更换端口／凭证、超时与晚到结果，以及旧列表成功／失败回包。未统一 Codex 线程详情与子 Agent 缓存的所有读取时间线；跨来源权限仍须遵循原生明确授权，不能用无条件放开发送掩盖未知身份。
+
 ## 后台汇总批量停止的范围确认（2026-10-11）
 
 安全审查发现后台汇总把所有后代都标为 current，且直接发送停止请求。现复用 inParentTurn / selectStopTargets，只有已核实且本轮创建的目标参与；旧轮和未知创建轮次不默认包含。确认框明确显示数量和名单，取消不发送。确认前再次核对根会话、父轮次、各子轮次、运行 epoch、账号工作区和连接范围；变化后撤销本次确认，重复点击只发送一次。参数仅保存捕获的 threadId/turnId，不保存任务正文。
@@ -69,3 +87,16 @@ TypeScript 运行层启动 smoke：`pnpm session:build` 后运行 `python3 scrip
 v1 缓存仅迁移待核实线索，不恢复权限；剔除已确认 main 的伪边、自环与环。轻量身份不持有 turns/preview/status，节点不保留工具正文。疑似子身份的核对合并并发请求，5 秒 deadline、一次 1.5 秒重试，取消/失活停止请求与重试。只读 metadata 不 resume、不发消息；错误保留草稿并提供“重新核对”。
 
 同值 live metadata 也推进内部每线程观测标记，迟到旧请求不能恢复已撤销的能力，或将新确认节点误标不可用；观测标记不进入 UI state。相同业务快照保持引用且零通知，无关线程更新不作废目标读取。重连/运行实例变化撤销旧标记和权限，历史不推进 live 权限。来源对照、反例与验收见 [方案](designs/session-subagent-identity-release-plan-20261014.md) 和 [结果](designs/session-subagent-identity-release-acceptance-20261014.md)。
+
+
+### 发送与恢复加固最终验收（2026-10-15）
+
+- `pnpm check` 通过（shared、会话运行层、后端、前端类型检查及构建）；相关前端 35 文件／273 项、后端 66 项、启动脚本 120 项通过，`git diff --check` 通过。构建保留原有大 chunk 提示。
+- 隔离浏览器分批复验共 55 项不同用例通过：发送 7、子 Agent 13、拖放 4、手机输入／附件 4、背景同步 7、历史恢复 2、状态恢复 6、原生 SSE 传输 2、空闲正文回收 1、正文内存预算 9。原始整组曾有 10 项失败：9 项涉及旧 UI 名称、夹具输入目标或重试按钮定位，另 1 项为并发身份核实误拒绝；修复后分别复验通过，不能把原始批次记为全绿。并发身份核实相关 3 项另各重复 3 次通过。
+- 仍排除上文记录的 3 项旧 UI 入口用例，未删除断言；默认 30 分钟 soak 跳过。内存／传输原始量及长期观察限制见 `session-memory-contract.md` 本日记录。
+- 主要产物在被忽略的 `.dev-runtime/send-reliability-final/`、`send-drop-recheck/`、`send-recovery-recheck/`、`subagent-reopen-green/` 与 `send-reliability-memory/`。全部模型提交、上传、审批写入均由隔离夹具处理，未向真实 Agent 投递测试任务。
+
+
+### 2026-10-15 手动合并后的身份顺序约定
+
+合并只读核对与发送恢复时，已完成的 verify/metadata 读取即使字段不变也更新内部观测顺序，阻止更早发起的 discovery 回退能力；相同业务快照仍不通知 UI。不可用结论更新元数据 revision，不能被迟到的 verify 复活。verify 遇到更新且不同的父身份、来源、能力或不可用状态时明确拒绝，字段一致时复用当前节点及执行状态；普通 inspect 只返回当前有效身份，不返回旧授权。裁剪元数据不会凭空补造 source。两侧原有回归保留，过期 verify 从“返回撤销能力”收紧为“拒绝旧核实”，不开放旧权限。

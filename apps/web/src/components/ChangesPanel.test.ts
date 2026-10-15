@@ -7,6 +7,7 @@ import type { AgentSessionRecord, DiffFileChange } from "@agent-orchestrator/sha
 
 import {
   ChangesPanel,
+  CheckoutDiffTruncationNotice,
   CompactChangesFilePicker,
   FullscreenDiffView,
   getRevertHunkConfirmation,
@@ -31,6 +32,21 @@ test("ChangesPanel presents task and checkout as separate top-level scopes", () 
   assert.match(
     html,
     /aria-selected="true" class="active"[^>]*role="tab"[^>]*>\s*当前工作区/,
+  );
+});
+
+test("checkout diff truncation explains that only part of the changes is shown", () => {
+  const html = renderToStaticMarkup(
+    createElement(CheckoutDiffTruncationNotice, { truncated: true }),
+  );
+  assert.match(html, /role="status"/);
+  assert.match(html, /只显示部分 Diff/);
+  assert.match(html, /行数统计仅覆盖已显示部分/);
+  assert.equal(
+    renderToStaticMarkup(
+      createElement(CheckoutDiffTruncationNotice, { truncated: false }),
+    ),
+    "",
   );
 });
 

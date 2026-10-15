@@ -119,8 +119,7 @@
 .session-mode
   .session-codex-composer.session-native-composer
   .session-composer-editor
-  [contenteditable]
-  + div {
+  .session-composer-placeholder {
   font-family: var(--codex-chat-font, inherit);
   font-size: var(--codex-chat-size, 13px);
   line-height: var(--native-composer-input-line);
@@ -129,8 +128,7 @@
 .session-mode
   .session-codex-composer.session-native-composer
   .session-composer-editor
-  [contenteditable]
-  + div {
+  .session-composer-placeholder {
   color: inherit;
   opacity: 0.5;
 }
@@ -939,8 +937,7 @@
   .session-mode
     .session-codex-composer.session-native-composer
     .session-composer-editor
-    [contenteditable]
-    + div {
+    .session-composer-placeholder {
     font-size: 16px;
     min-height: 0;
   }
@@ -1063,4 +1060,25 @@
     width: 44px;
     min-width: 44px;
   }
+}
+
+/* Selection tools need real space inside the scrollable editor, including the
+   otherwise fixed-height mobile composer. */
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-compact-frame:has(.session-format-toolbar) {
+  height: auto;
+  max-height: none;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-compact-body:has(.session-format-toolbar) {
+  height: auto;
+  flex: 0 0 auto;
+}
+.session-mode
+  .session-codex-composer.session-native-composer
+  .session-composer-editor:has(.session-format-toolbar) {
+  height: auto;
+  flex: 1 1 auto;
 }

@@ -70,7 +70,7 @@ export const useSubagentStore = create<State>()(
             const node = nodes[id];
             if (
               node &&
-              node.revision <= baseline &&
+              (node.metadataRevision ?? 0) <= baseline &&
               (nativeObservationFences.get(id) ?? 0) <=
                 (observationFence ?? captureSubagentMetadataFence()) &&
               (!node.unavailable || node.thread.canAcceptDirectInput !== null)
@@ -80,6 +80,8 @@ export const useSubagentStore = create<State>()(
                 [id]: {
                   ...node,
                   unavailable: true,
+                  metadataRevision: s.revision + 1,
+                  revision: s.revision + 1,
                   thread: { ...node.thread, canAcceptDirectInput: null },
                 },
               };
@@ -177,7 +179,7 @@ function restoreCandidateNodes(cached: Record<string, SubagentNode>) {
       evidence: "legacy",
       unavailable: true,
       revision: 0,
-      metadataRevision: undefined,
+      metadataRevision: 0,
     };
   }
   return nodes;
@@ -248,6 +250,18 @@ function metadataChanges(
         : state.revision,
   };
 }
+export function hasNewerSubagentMetadata(
+  id: string,
+  baseline: number,
+  observationFence: number,
+) {
+  const state = useSubagentStore.getState();
+  return (
+    (state.nodes[id]?.metadataRevision ?? 0) > baseline ||
+    (state.identities[id]?.revision ?? -1) > baseline ||
+    (nativeObservationFences.get(id) ?? 0) > observationFence
+  );
+}
 export function confirmSubagentMetadata(
   threads: SubagentThread[],
   baseline = useSubagentStore.getState().revision,
@@ -262,7 +276,16 @@ export function confirmSubagentMetadata(
     observationFence = captureSubagentMetadataFence();
   }
   useSubagentStore.setState((state) => {
-    const next = metadataChanges(state, threads, baseline, observationFence);
+    const accepted = threads.filter(
+      (thread) =>
+        typeof thread?.id === "string" &&
+        !hasNewerSubagentMetadata(thread.id, baseline, observationFence!),
+    );
+    const next = metadataChanges(state, accepted, baseline, observationFence);
+    // A completed verify/read is a newer observation even when values match.
+    // Keep this order outside UI state so old discovery cannot overwrite it.
+    for (const thread of accepted)
+      nativeObservationFences.set(thread.id, ++metadataObservationClock);
     return next.nodes === state.nodes && next.identities === state.identities
       ? state
       : next;

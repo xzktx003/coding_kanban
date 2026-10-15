@@ -52,6 +52,43 @@ test("GitChangesService returns tracked modifications and untracked file diffs",
   }
 });
 
+test("GitChangesService bounds aggregate checkout diff output", async () => {
+  const root = mkdtempSync(join(tmpdir(), "git-changes-budget-"));
+  try {
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    execFileSync("git", ["config", "user.email", "test@example.com"], {
+      cwd: root,
+    });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: root });
+    writeFileSync(join(root, "tracked.txt"), "initial\n");
+    execFileSync("git", ["add", "tracked.txt"], { cwd: root });
+    execFileSync("git", ["commit", "-qm", "initial"], { cwd: root });
+
+    const largeFileContents = `${"x".repeat(900_000)}\n`;
+    for (let index = 0; index < 20; index += 1) {
+      writeFileSync(
+        join(root, `large-${String(index).padStart(2, "0")}.txt`),
+        largeFileContents,
+      );
+    }
+
+    const result = await new GitChangesService().read(root);
+
+    assert.equal(result.available, true);
+    assert.equal(result.changedFiles, 20);
+    assert.equal(result.truncated, true);
+    assert.ok(result.files.length < result.changedFiles);
+    assert.ok(
+      result.files.reduce(
+        (total, file) => total + Buffer.byteLength(file.patch, "utf8"),
+        0,
+      ) <= 16 * 1024 * 1024,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("GitChangesService rejects a missing working directory without running Git", async () => {
   const result = await new GitChangesService().read(undefined);
   assert.equal(result.available, false);

@@ -35,7 +35,7 @@ export function boundedSubagentThread(raw: SubagentThread): SubagentThread {
   const source =
     typeof thread.source === "string"
       ? clipped(thread.source, 512)
-      : kind === "child"
+      : kind === "child" && thread.source && typeof thread.source === "object"
         ? { subAgent: {} }
         : kind === "main" && thread.source && typeof thread.source === "object"
           ? {
@@ -93,6 +93,21 @@ export function validParentEdge(
   }
   return true;
 }
+/** Missing legacy metadata is unknown; only a native non-agent source confirms a root. */
+export function isKnownRootThread(thread: SubagentThread | undefined | null) {
+  if (!thread || subagentParent(thread)) return false;
+  const source = thread.source;
+  if (typeof source === "string")
+    return ["cli", "vscode", "exec", "appServer"].includes(source);
+  return (
+    source !== null &&
+    typeof source === "object" &&
+    "custom" in source &&
+    typeof source.custom === "string" &&
+    !("subAgent" in source) &&
+    !("subagent" in source)
+  );
+}
 export function descendants(nodes: Record<string, SubagentNode>, root: string) {
   return Object.values(nodes).filter((n) => {
     const seen = new Set<string>();
@@ -125,6 +140,7 @@ export function reconcileNodes(
   nodes: Record<string, SubagentNode>,
   threads: SubagentThread[],
   baseline: number,
+  observationRevision = baseline,
 ) {
   let next = nodes;
   for (const raw of threads) {
@@ -139,13 +155,14 @@ export function reconcileNodes(
       }
       continue;
     }
-    const parent = subagentParent(thread);
+    const parent = subagentParent(thread) ?? old?.parentId;
     if (!parent || !validParentEdge(next, thread.id, parent)) continue;
     const candidate: SubagentNode = {
       ...old,
       thread: {
         ...old?.thread,
         ...thread,
+        canAcceptDirectInput: thread.canAcceptDirectInput ?? null,
         ...(old && old.revision > baseline
           ? { status: old.thread.status, turns: old.thread.turns }
           : {}),
@@ -161,7 +178,8 @@ export function reconcileNodes(
       verified: true,
       unavailable: newerMetadata && old ? old.unavailable : false,
       evidence: "native",
-      metadataRevision: newerMetadata && old ? old.metadataRevision : baseline,
+      metadataRevision:
+        newerMetadata && old ? old.metadataRevision : observationRevision,
       revision: old?.revision ?? baseline,
     };
     if (

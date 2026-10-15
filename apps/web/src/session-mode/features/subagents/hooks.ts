@@ -15,7 +15,12 @@ import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
 import { openEventStream } from "@session/lib/eventStream";
 import { isSessionModeActive } from "@session/session-dom";
 import { usePairingStore } from "@session/stores/usePairingStore";
-import { childState, descendants, inParentTurn } from "./model";
+import {
+  childState,
+  descendants,
+  inParentTurn,
+  isKnownRootThread,
+} from "./model";
 import { observeSubagentHistory, useSubagentStore } from "./store";
 import { subagentService, resetSubagentRuntime } from "./service";
 import { subagentScope, subagentStorageKey } from "./scope";
@@ -117,21 +122,29 @@ export function useSubagentFamily(root: string | null) {
 }
 /** Passive observation follows the existing cards; it never opens a writer or adds a card. */
 export function useSubagentFamilySync() {
-  const host = usePairingStore((s) => s.selectedHost),
-    scope = subagentScope();
+  const connection = usePairingStore(
+    useShallow((s) => {
+      const desktop = s.desktops.find((d) => d.host === s.selectedHost);
+      return [s.selectedHost, desktop?.port, desktop?.token] as const;
+    }),
+  );
+  const previousConnection = useRef(connection);
+  const scope = subagentScope();
   const notified = useRef(new Set<string>());
   const nodes = useSubagentStore((s) => s.nodes);
+  const nativeRootIds = useCodexStore(
+    useShallow((s) =>
+      s.threads
+        .filter(isKnownRootThread)
+        .map((thread) => thread.id)
+        .sort(),
+    ),
+  );
   const approvals = useApprovalStore((s) => s.pendingApprovals),
     questions = useRequestUserInputStore((s) => s.pendingRequests),
     permissions = usePermissionsStore((s) => s.pendingRequests),
     elicitations = useElicitationStore((s) => s.pendingRequests);
   useEffect(() => {
-    if (useSubagentStore.getState().scope !== scope) {
-      // Rehydrate before writing anything under the new host's storage key.
-      useSubagentStore.persist.setOptions({ name: subagentStorageKey() });
-      void useSubagentStore.persist.rehydrate();
-    }
-    notified.current.clear();
     const reset = () => {
       notified.current.clear();
       resetSubagentRuntime();
@@ -141,7 +154,37 @@ export function useSubagentFamilySync() {
       resetSubagentRuntime();
       window.removeEventListener("session-runtime-restarted", reset);
     };
-  }, [scope, host]);
+  }, []);
+  useEffect(() => {
+    if (previousConnection.current !== connection) {
+      previousConnection.current = connection;
+      // Clear old identity before the shared reset invalidates reads and SSE.
+      useCodexStore.setState({ threads: [], threadListNextCursor: null });
+      window.dispatchEvent(new Event("session-runtime-restarted"));
+    }
+    if (useSubagentStore.getState().scope !== scope) {
+      // Rehydrate before writing anything under the new host's storage key.
+      useSubagentStore.persist.setOptions({ name: subagentStorageKey() });
+      void useSubagentStore.persist.rehydrate();
+    }
+    notified.current.clear();
+  }, [scope, connection]);
+  useEffect(() => {
+    // The connection effect may have cleared the previous host's metadata.
+    const currentRoots = useCodexStore
+      .getState()
+      .threads.filter(isKnownRootThread)
+      .map((thread) => thread.id);
+    if (!currentRoots.some((id) => useSubagentStore.getState().nodes[id]))
+      return;
+    useSubagentStore.setState((s) => {
+      const staleIds = currentRoots.filter((id) => s.nodes[id]);
+      if (!staleIds.length) return s;
+      const next = { ...s.nodes };
+      for (const id of staleIds) delete next[id];
+      return { nodes: next, revision: s.revision + 1 };
+    });
+  }, [nativeRootIds, nodes, connection]);
   const cards = useAgentCenterStore((s) => s.cards);
   const roots = cards
     .filter((c) => c.kind === "codex")
@@ -242,5 +285,5 @@ export function useSubagentFamilySync() {
       window.removeEventListener("focus", wake);
       document.removeEventListener("visibilitychange", wake);
     };
-  }, [roots, scope]);
+  }, [roots, scope, connection]);
 }
