@@ -26,7 +26,10 @@ const blocks = new Set([
 ]);
 export function nativeMessageClipboard(
   root: HTMLElement,
-  options: { kind?: "user" | "assistant" } = {},
+  options: {
+    kind?: "user" | "assistant";
+    includeCollapsedContent?: boolean;
+  } = {},
 ): { text: string; html: string } | null {
   const doc = root.ownerDocument;
   const fragment = doc.createDocumentFragment();
@@ -67,8 +70,10 @@ export function nativeMessageClipboard(
     }
     if (!(node instanceof Element)) return;
     if (
+      (node.getAttribute("aria-hidden") === "true" &&
+        !(options.includeCollapsedContent && node.hasAttribute("inert"))) ||
       node.matches(
-        '.sr-only, [aria-hidden="true"], [data-markdown-copy="exclude"], img[alt=""], script, style, noscript',
+        '.sr-only, [data-markdown-copy="exclude"], img[alt=""], script, style, noscript',
       )
     )
       return;

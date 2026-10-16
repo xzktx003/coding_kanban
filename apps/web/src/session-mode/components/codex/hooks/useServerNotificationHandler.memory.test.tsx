@@ -17,6 +17,7 @@ import {
   materializeStreamingTextPreview,
   STREAMING_TEXT_LIMIT,
 } from "@session/services/codexTranscriptMemoryBudget";
+import { installGoalCompletionAutoClear } from "@session/services/goalCompletionAutoClear";
 
 vi.mock("@session/services/apiAdapt", () => ({
   allowSleep: vi.fn().mockResolvedValue(undefined),
@@ -41,6 +42,7 @@ beforeEach(() => {
     commandDurationMap: {},
     tokenUsageMap: {},
     goalMap: {},
+    completedGoalMap: {},
   });
   useRequestUserInputStore.setState({
     pendingRequests: [],
@@ -319,4 +321,55 @@ it("expires pending questions for an unobserved completed turn without retaining
   expect(useRequestUserInputStore.getState().pendingRequests).toHaveLength(0);
   expect(useCodexStore.getState().events).toEqual({});
   expect(allowSleep).toHaveBeenCalledWith("unopened");
+});
+
+it("retains completed goal lifecycle metadata for a known unobserved history without storing transcript bodies", () => {
+  useCodexStore.setState({ threads: [{ id: "history", turns: [] } as never] });
+  const goal = {
+    threadId: "history", objective: "Ship", status: "complete" as const,
+    tokenBudget: null, tokensUsed: 12, timeUsedSeconds: 61, createdAt: 1, updatedAt: 100,
+  };
+  const h = handler();
+  act(() => {
+    h.current({ method: "thread/goal/updated", params: { threadId: "history", turnId: null, goal } });
+    h.current({ method: "thread/goal/cleared", params: { threadId: "history" } });
+  });
+  expect(useCodexStore.getState().completedGoalMap.history).toEqual(goal);
+  expect(useCodexStore.getState().goalMap.history).toBeUndefined();
+  expect(useCodexStore.getState().events).toEqual({});
+});
+
+it("ignores completion for an unknown global thread", () => {
+  const h = handler();
+  act(() => h.current({
+    method: "thread/goal/updated", params: { threadId: "unknown", turnId: null, goal: {
+      threadId: "unknown", objective: "Ship", status: "complete",
+      tokenBudget: null, tokensUsed: 12, timeUsedSeconds: 61, createdAt: 1, updatedAt: 100,
+    } },
+  }));
+  expect(useCodexStore.getState().completedGoalMap).toEqual({});
+  expect(useCodexStore.getState().goalMap).toEqual({});
+});
+
+it("triggers the owner-only completion coordinator after native goal and idle lifecycle metadata", () => {
+  const observe = vi.fn().mockResolvedValue(undefined), reset = vi.fn();
+  const stop = installGoalCompletionAutoClear({ observe, reset });
+  useCodexStore.setState({ threads: [{ id: "history", turns: [] } as never] });
+  const h = handler();
+  try {
+    act(() => h.current({ method: "thread/goal/updated", params: {
+      threadId: "history", turnId: null, goal: {
+        threadId: "history", objective: "Ship", status: "complete", tokenBudget: null,
+        tokensUsed: 12, timeUsedSeconds: 61, createdAt: 1, updatedAt: 100,
+      },
+    } }));
+    expect(observe).toHaveBeenCalledWith("history");
+    observe.mockClear();
+    act(() => h.current({ method: "thread/status/changed", params: { threadId: "history", status: { type: "idle" } } }));
+    expect(useCodexStore.getState().threadStatusMap.history?.type).toBe("idle");
+    expect(observe).toHaveBeenCalledExactlyOnceWith("history");
+    act(() => h.current({ method: "account/updated", params: { authMode: "chatgpt", planType: null } } as never));
+    expect(reset).toHaveBeenCalledTimes(1);
+    expect(useCodexStore.getState().events).toEqual({});
+  } finally { stop(); }
 });

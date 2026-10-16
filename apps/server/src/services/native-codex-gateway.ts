@@ -33,6 +33,7 @@ export interface NativeCodexSendRequest {
   mentions: Array<{ name: string; path: string }>;
 }
 export interface NativeCodexRuntime {
+  refreshScope?:NativeRefreshScope;
   upstream: URL;
   projectDir: string;
   runtimeRoot?: string;
@@ -42,6 +43,7 @@ export interface NativeCodexRuntime {
   brokerPort?: number;
   brokerAuthFile?: string;
 }
+export interface NativeRefreshScope {domain:string;generation:string;pid:number;startTicks:string}
 export interface NativeCodexConfiguration {
   upstreamUrl?: string;
   runtimeRecord?: string;
@@ -504,10 +506,16 @@ export class NativeCodexGateway {
         resolve(record.runtimeRoot) === record.runtimeRoot &&
         !/[\u0000-\u001f\u007f]/.test(record.runtimeRoot)
           ? record.runtimeRoot : undefined;
+      const candidate=record.refreshConnection as Partial<NativeRefreshScope>|undefined;
+      const refreshScope=candidate&&typeof candidate==="object"&&!Array.isArray(candidate)&&
+        typeof candidate.domain==="string"&&UUID.test(candidate.domain)&&typeof candidate.generation==="string"&&UUID.test(candidate.generation)&&
+        Number.isSafeInteger(candidate.pid)&&(candidate.pid as number)>1&&typeof candidate.startTicks==="string"&&/^(?:0|[1-9][0-9]{0,19})$/.test(candidate.startTicks)
+        ?{domain:candidate.domain,generation:candidate.generation,pid:candidate.pid as number,startTicks:candidate.startTicks}:undefined;
       return {
         upstream,
         projectDir,
         ...(runtimeRoot ? { runtimeRoot } : {}),
+        ...(refreshScope?{refreshScope}:{}),
         fixtures: fixtures(record.threads),
         ...(extensionVersion ? { extensionVersion } : {}),
         ...(windows ? { newChatWindowIds: windows } : {}),

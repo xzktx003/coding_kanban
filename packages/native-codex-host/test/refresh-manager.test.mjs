@@ -67,6 +67,7 @@ async function fixture(t) {
   };
   const service = {
     record: { domain, generation, cliSha256: sha },
+    async confirmAuthorization() {},
     readRss: async () => rss,
     async connect(options) {
       observer = options.onLifecycle;
@@ -127,57 +128,162 @@ const nativeAccount = (accountId) => ({
   },
 });
 
+test("a new manager cannot adopt loaded contexts when the original native authority is revoked", async (t) => {
+  const { createRefreshManager } =
+      await import("../refresh-prototype/lifecycle-manager.mjs"),
+    f = await fixture(t);
+  f.threads.set(randomUUID(), { status: "idle", loaded: true });
+  f.service.confirmAuthorization = async () => {
+    throw Error("original native authority revoked");
+  };
+  await assert.rejects(
+    createRefreshManager({
+      service: f.service,
+      resourceMonitor: f.resourceMonitor,
+      memoryBudgetBytes: 1000,
+    }),
+    /authority/,
+  );
+  assert.equal(
+    f.requests.some((r) => r.method.startsWith("thread/")),
+    false,
+  );
+  assert.equal(f.closed(), 1);
+});
+
 test("opening an already retained visible target protects it before resource-pressure trimming", async (t) => {
-  const { createRefreshManager } = await import("../refresh-prototype/lifecycle-manager.mjs");
-  const f=await fixture(t), id=randomUUID();
-  f.threads.set(id,{status:"idle",loaded:true});
-  const manager=await createRefreshManager({service:f.service,resourceMonitor:f.resourceMonitor,memoryBudgetBytes:1000});
-  t.after(()=>manager.close());
-  f.requests.length=0;
+  const { createRefreshManager } =
+    await import("../refresh-prototype/lifecycle-manager.mjs");
+  const f = await fixture(t),
+    id = randomUUID();
+  f.threads.set(id, { status: "idle", loaded: true });
+  const manager = await createRefreshManager({
+    service: f.service,
+    resourceMonitor: f.resourceMonitor,
+    memoryBudgetBytes: 1000,
+  });
+  t.after(() => manager.close());
+  f.requests.length = 0;
   f.setRss(2000);
-  await manager.open(f.key(id),{consumerId:randomUUID()});
-  assert.equal(f.requests.some(r=>r.method==="thread/unsubscribe"),false);
-  assert.equal(f.requests.filter(r=>r.method==="thread/resume").length,1);
-  assert.equal(f.threads.get(id).loaded,true);
-  assert.equal(manager.snapshot().warmAdmission,false);
+  await manager.open(f.key(id), { consumerId: randomUUID() });
+  assert.equal(
+    f.requests.some((r) => r.method === "thread/unsubscribe"),
+    false,
+  );
+  assert.equal(
+    f.requests.filter((r) => r.method === "thread/resume").length,
+    1,
+  );
+  assert.equal(f.threads.get(id).loaded, true);
+  assert.equal(manager.snapshot().warmAdmission, false);
 });
 
-test("visibility intent vetoes an already queued eviction while native metadata is in flight",async t=>{
-  const {createRefreshManager}=await import("../refresh-prototype/lifecycle-manager.mjs");
-  const f=await fixture(t),id=randomUUID();f.threads.set(id,{status:"idle",loaded:true});
-  const manager=await createRefreshManager({service:f.service,resourceMonitor:f.resourceMonitor,memoryBudgetBytes:1000});t.after(()=>manager.close());
-  let release,entered;const held=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);
-  const request=f.client.request.bind(f.client);let blocked=false;
-  f.client.request=async(method,...args)=>{if(method==="thread/read"&&!blocked){blocked=true;entered();await held}return request(method,...args)};
-  f.requests.length=0;f.setRss(2000);const trimming=manager.disconnect(randomUUID());await started;
-  const opening=manager.open(f.key(id),{consumerId:randomUUID()});release();await trimming;await opening;
-  assert.equal(f.requests.some(r=>r.method==="thread/unsubscribe"),false);
-  assert.equal(manager.snapshot().entries[0].visibleConsumers,1);
+test("visibility intent vetoes an already queued eviction while native metadata is in flight", async (t) => {
+  const { createRefreshManager } =
+    await import("../refresh-prototype/lifecycle-manager.mjs");
+  const f = await fixture(t),
+    id = randomUUID();
+  f.threads.set(id, { status: "idle", loaded: true });
+  const manager = await createRefreshManager({
+    service: f.service,
+    resourceMonitor: f.resourceMonitor,
+    memoryBudgetBytes: 1000,
+  });
+  t.after(() => manager.close());
+  let release, entered;
+  const held = new Promise((resolve) => (release = resolve)),
+    started = new Promise((resolve) => (entered = resolve));
+  const request = f.client.request.bind(f.client);
+  let blocked = false;
+  f.client.request = async (method, ...args) => {
+    if (method === "thread/read" && !blocked) {
+      blocked = true;
+      entered();
+      await held;
+    }
+    return request(method, ...args);
+  };
+  f.requests.length = 0;
+  f.setRss(2000);
+  const trimming = manager.disconnect(randomUUID());
+  await started;
+  const opening = manager.open(f.key(id), { consumerId: randomUUID() });
+  release();
+  await trimming;
+  await opening;
+  assert.equal(
+    f.requests.some((r) => r.method === "thread/unsubscribe"),
+    false,
+  );
+  assert.equal(manager.snapshot().entries[0].visibleConsumers, 1);
 });
 
-test("manager invalidation notifies every bounded observer once and observers cannot prevent revocation",async t=>{
-  const {createRefreshManager}=await import("../refresh-prototype/lifecycle-manager.mjs");
-  const f=await fixture(t),manager=await createRefreshManager({service:f.service,resourceMonitor:f.resourceMonitor,memoryBudgetBytes:1000});t.after(()=>manager.close());
-  let notified=0,removed=0;
-  manager.onInvalidated(()=>{throw Error("observer failure")});
-  manager.onInvalidated(()=>notified++);
-  const dispose=manager.onInvalidated(()=>removed++);dispose();
-  f.emitMetadata("account/updated");assert.equal(manager.snapshot().ready,false);assert.equal(notified,1);assert.equal(removed,0);
-  await manager.close();assert.equal(notified,1);
+test("manager invalidation notifies every bounded observer once and observers cannot prevent revocation", async (t) => {
+  const { createRefreshManager } =
+    await import("../refresh-prototype/lifecycle-manager.mjs");
+  const f = await fixture(t),
+    manager = await createRefreshManager({
+      service: f.service,
+      resourceMonitor: f.resourceMonitor,
+      memoryBudgetBytes: 1000,
+    });
+  t.after(() => manager.close());
+  let notified = 0,
+    removed = 0;
+  manager.onInvalidated(() => {
+    throw Error("observer failure");
+  });
+  manager.onInvalidated(() => notified++);
+  const dispose = manager.onInvalidated(() => removed++);
+  dispose();
+  f.emitMetadata("account/updated");
+  assert.equal(manager.snapshot().ready, false);
+  assert.equal(notified, 1);
+  assert.equal(removed, 0);
+  await manager.close();
+  assert.equal(notified, 1);
 });
 
-test("resolves visibility scope only from bounded exact native metadata without resume or body retention", async(t)=>{
-  const { createRefreshManager }=await import("../refresh-prototype/lifecycle-manager.mjs");
-  const f=await fixture(t), id=randomUUID();
-  f.threads.set(id,{status:"idle",loaded:false});
-  const manager=await createRefreshManager({service:f.service,resourceMonitor:f.resourceMonitor,memoryBudgetBytes:1000});
-  t.after(()=>manager.close());
-  f.requests.length=0;
-  assert.deepEqual(await manager.scopeForThread(id),f.key(id));
-  assert.deepEqual(f.requests,[{method:"thread/read",params:{threadId:id,includeTurns:false}}]);
-  await assert.rejects(manager.scopeForThread("invalid"),/UUID/);
-  assert.equal(f.threads.get(id).loaded,false);
-  assert.equal(manager.snapshot().entries.length,0);
+test("an invalidation observer may close the manager without recursively notifying itself", async (t) => {
+  const { createRefreshManager } =
+    await import("../refresh-prototype/lifecycle-manager.mjs");
+  const f = await fixture(t),
+    manager = await createRefreshManager({
+      service: f.service,
+      resourceMonitor: f.resourceMonitor,
+      memoryBudgetBytes: 1000,
+    });
+  t.after(() => manager.close());
+  let count = 0;
+  manager.onInvalidated(() => {
+    count++;
+    void manager.close();
+  });
+  f.emitMetadata("account/updated");
+  await manager.close();
+  assert.equal(count, 1);
+});
+
+test("resolves visibility scope only from bounded exact native metadata without resume or body retention", async (t) => {
+  const { createRefreshManager } =
+    await import("../refresh-prototype/lifecycle-manager.mjs");
+  const f = await fixture(t),
+    id = randomUUID();
+  f.threads.set(id, { status: "idle", loaded: false });
+  const manager = await createRefreshManager({
+    service: f.service,
+    resourceMonitor: f.resourceMonitor,
+    memoryBudgetBytes: 1000,
+  });
+  t.after(() => manager.close());
+  f.requests.length = 0;
+  assert.deepEqual(await manager.scopeForThread(id), f.key(id));
+  assert.deepEqual(f.requests, [
+    { method: "thread/read", params: { threadId: id, includeTurns: false } },
+  ]);
+  await assert.rejects(manager.scopeForThread("invalid"), /UUID/);
+  assert.equal(f.threads.get(id).loaded, false);
+  assert.equal(manager.snapshot().entries.length, 0);
 });
 test("initial native account snapshot is bound before any thread RPC, while subsequent account updates still revoke it", async (t) => {
   const { createRefreshManager } =
@@ -281,6 +387,133 @@ test("authenticated binding without its initial native notice times out without 
     false,
   );
   assert.equal(f.closed(), 1);
+});
+test("a second native account notice during initial binding revokes even if account values are unchanged", async (t) => {
+  const { createRefreshManager } =
+      await import("../refresh-prototype/lifecycle-manager.mjs"),
+    f = await fixture(t),
+    connect = f.service.connect;
+  f.setAccountRead(() => nativeAccount("workspace-a"));
+  f.service.connect = async (options) => {
+    const c = await connect(options);
+    f.emitMetadata("account/updated");
+    f.emitMetadata("account/updated");
+    return c;
+  };
+  const created = createRefreshManager({
+    service: f.service,
+    resourceMonitor: f.resourceMonitor,
+    memoryBudgetBytes: 1000,
+  });
+  t.after(async () => {
+    try {
+      await (await created).close();
+    } catch {}
+  });
+  await assert.rejects(created, /generation unavailable|authorization/);
+  assert.equal(
+    f.requests.some((value) => value.method.startsWith("thread/")),
+    false,
+  );
+});
+test("unrelated turn lifecycle during the second account read does not revoke an unchanged native authority", async (t) => {
+  const { createRefreshManager } =
+      await import("../refresh-prototype/lifecycle-manager.mjs"),
+    f = await fixture(t);
+  let reads = 0;
+  f.setAccountRead(() => {
+    if (++reads === 2) f.emitMetadata("turn/completed");
+    return { account: null, requiresOpenaiAuth: false };
+  });
+  const manager = await createRefreshManager({
+    service: f.service,
+    resourceMonitor: f.resourceMonitor,
+    memoryBudgetBytes: 1000,
+  });
+  t.after(() => manager.close());
+  assert.equal(manager.snapshot().ready, true);
+  const binding = manager.authorization();
+  assert.deepEqual(Object.keys(binding).sort(), ["fingerprint", "kind"]);
+  assert.match(binding.fingerprint, /^[a-f0-9]{64}$/);
+  f.emitMetadata("account/updated");
+  assert.throws(() => manager.authorization(), /unavailable/);
+});
+test("a transient incomplete resource tree is resampled before admission, while repeated incompleteness remains unavailable", async (t) => {
+  const { createRefreshManager } =
+    await import("../refresh-prototype/lifecycle-manager.mjs");
+  {
+    const f = await fixture(t),
+      read = f.resourceMonitor.read.bind(f.resourceMonitor);
+    let attempts = 0;
+    f.resourceMonitor.read = async () => {
+      if (++attempts === 1)
+        throw Object.assign(
+          Error("resource measurement unavailable: changed"),
+          { code: "REFRESH_RESOURCES_UNAVAILABLE" },
+        );
+      return read();
+    };
+    const manager = await createRefreshManager({
+      service: f.service,
+      resourceMonitor: f.resourceMonitor,
+      memoryBudgetBytes: 1000,
+    });
+    t.after(() => manager.close());
+    assert.equal(manager.snapshot().ready, true);
+    assert.equal(manager.snapshot().resources.available, true);
+    assert.equal(attempts, 2);
+  }
+  {
+    const f = await fixture(t);
+    let attempts = 0;
+    f.resourceMonitor.read = async () => {
+      attempts++;
+      throw Object.assign(Error("resource measurement unavailable: changed"), {
+        code: "REFRESH_RESOURCES_UNAVAILABLE",
+      });
+    };
+    const manager = await createRefreshManager({
+      service: f.service,
+      resourceMonitor: f.resourceMonitor,
+      memoryBudgetBytes: 1000,
+    });
+    t.after(() => manager.close());
+    assert.equal(manager.snapshot().ready, true);
+    assert.equal(manager.snapshot().resources.available, false);
+    assert.equal(manager.snapshot().warmAdmission, false);
+    assert.equal(attempts, 3);
+    assert.equal(f.closed(), 0);
+    assert.equal(
+      f.requests.some(
+        (value) =>
+          value.method === "thread/resume" ||
+          value.method === "thread/unsubscribe",
+      ),
+      false,
+    );
+  }
+});
+test("authorization revocation between resource samples cancels admission before another measurement", async (t) => {
+  const { createRefreshManager } =
+      await import("../refresh-prototype/lifecycle-manager.mjs"),
+    f = await fixture(t);
+  let attempts = 0;
+  f.resourceMonitor.read = async () => {
+    attempts++;
+    queueMicrotask(() => f.emitMetadata("account/updated"));
+    throw Object.assign(Error("resource changed"), {
+      code: "REFRESH_RESOURCES_UNAVAILABLE",
+    });
+  };
+  await assert.rejects(
+    createRefreshManager({
+      service: f.service,
+      resourceMonitor: f.resourceMonitor,
+      memoryBudgetBytes: 1000,
+    }),
+    /generation unavailable|authorization/,
+  );
+  assert.equal(attempts, 1);
 });
 test("an account boundary without a thread ID invalidates warm admission without unsubscribing or stopping native tasks", async (t) => {
   const { createRefreshManager } =

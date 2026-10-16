@@ -294,7 +294,7 @@ function SideChat({
               >
                 ＋
               </Button>
-              <AccessModePopover compact />
+              <AccessModePopover compact threadId={id} />
             </div>
             <div className="session-compact-meta">
               <span>侧边聊天是临时聊天，关闭应用后会消失。</span>

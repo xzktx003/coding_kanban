@@ -406,7 +406,8 @@
   color: var(--muted-foreground);
 }
 @container compact-composer (max-width: 840px) {
-  .session-mode:not(:has(.session-native-composer)) .session-composer-utilities {
+  .session-mode:not(:has(.session-native-composer))
+    .session-composer-utilities {
     position: absolute;
     right: 0;
     bottom: calc(100% + 6px);
@@ -589,4 +590,71 @@
   .session-mode .session-compact-composer .session-model-trigger {
     min-width: 72px;
   }
+}
+
+/* Side panels are narrow containers even on desktop. Reserve a real footer
+   below the controls so help, live notices and identity rechecks never overlap. */
+.session-mode
+  .session-side-chat
+  form.session-compact-composer
+  > .session-compact-frame {
+  height: auto;
+  max-height: none;
+}
+.session-mode
+  .session-side-chat
+  form.session-compact-composer
+  > .session-compact-frame
+  > .session-compact-body {
+  height: 62px;
+  min-height: 62px;
+  flex: 0 0 62px;
+}
+.session-mode
+  .session-side-chat
+  form.session-compact-composer
+  > .session-compact-frame
+  > .session-composer-toolbar {
+  height: auto;
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.session-mode
+  .session-side-chat
+  form.session-compact-composer
+  > .session-compact-frame
+  > .session-composer-toolbar
+  > .session-compact-meta {
+  position: static;
+  inset: auto;
+  height: auto;
+  margin: 0;
+  order: 1;
+  flex: 0 0 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  overflow: visible;
+  font-size: 11px;
+  line-height: 16px;
+}
+.session-mode .session-side-chat .session-compact-meta > span:first-child {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-mode .session-side-chat .session-compact-meta .session-compact-status {
+  width: 100%;
+  max-width: 100%;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-side-chat .session-compact-status > button {
+  min-width: 44px;
+  min-height: 44px;
+  margin-inline-start: 4px;
+  white-space: nowrap;
 }

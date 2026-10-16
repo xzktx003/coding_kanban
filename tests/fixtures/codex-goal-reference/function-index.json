@@ -1,0 +1,138 @@
+[
+  {
+    "function": "oFi",
+    "file": "app-initial-41ab338a184f.js",
+    "offset": 5212698,
+    "length": 8717,
+    "sha256": "036f84b0260d6011b714a42565935dd8cc916fbf79b57efdf4ec3ed07906243e",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/oFi.js"
+  },
+  {
+    "function": "rFi",
+    "file": "app-initial-41ab338a184f.js",
+    "offset": 5210991,
+    "length": 1648,
+    "sha256": "e62615df1e29c07b6af0b35cb91f16a79000c13e075de853ae734a85175adbb9",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/rFi.js"
+  },
+  {
+    "function": "lFi",
+    "file": "app-initial-41ab338a184f.js",
+    "offset": 5221590,
+    "length": 379,
+    "sha256": "e1359083ba32ac642f2f90766ea8be583e96f604dad24e50bc0f2cd2de059b81",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/lFi.js"
+  },
+  {
+    "function": "uFi",
+    "file": "app-initial-41ab338a184f.js",
+    "offset": 5221969,
+    "length": 498,
+    "sha256": "fd152473b4d7d1f97ed6cb1bf85bba54a7b23a4655404461f18c7514ae142185",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/uFi.js"
+  },
+  {
+    "function": "dFi",
+    "file": "app-initial-41ab338a184f.js",
+    "offset": 5222467,
+    "length": 1035,
+    "sha256": "d53b1cb1eb330ebac300cee84b20fd27810ebe764b00100a26a58201d19d4fde",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/dFi.js"
+  },
+  {
+    "function": "_Ci",
+    "file": "app-initial-41ab338a184f.js",
+    "offset": 4918691,
+    "length": 529,
+    "sha256": "94d962926bae3d7d0080016b7f9f980f9f6c76d16264bfe3c23944a86f4e4e07",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/_Ci.js"
+  },
+  {
+    "function": "bCi",
+    "file": "app-initial-41ab338a184f.js",
+    "offset": 4919548,
+    "length": 96,
+    "sha256": "707d93f51ac00ff94dff924c2f752cfd0936a167a36a006609f8417f0ee71cbd",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/bCi.js"
+  },
+  {
+    "function": "N0t",
+    "file": "app-initial-41ab338a184f.js",
+    "offset": 1164268,
+    "length": 455,
+    "sha256": "26ee2dd5b85587e663ea1a8817e720d1e0c23c25545764977942bdaaaaeada67",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/N0t.js"
+  },
+  {
+    "function": "P0t",
+    "file": "app-initial-41ab338a184f.js",
+    "offset": 1164723,
+    "length": 432,
+    "sha256": "d81b0a6424afb7415fa03ece89397c470af19b6b05abf18cdc3d94b64c1e000d",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/P0t.js"
+  },
+  {
+    "function": "F0t",
+    "file": "app-initial-41ab338a184f.js",
+    "offset": 1165155,
+    "length": 385,
+    "sha256": "2f514a5c0b1c6c7c1aeb37abaf5f95adbc15fb5dcb9e739454c29f545872d34a",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/F0t.js"
+  },
+  {
+    "function": "U0t",
+    "file": "app-initial-41ab338a184f.js",
+    "offset": 1168586,
+    "length": 177,
+    "sha256": "21f041ba1d1df11f2e6d9a1e738e255ae2a04bfa15e6ae900eb5b54332403321",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/U0t.js"
+  },
+  {
+    "function": "z0t",
+    "file": "app-initial-41ab338a184f.js",
+    "offset": 1166039,
+    "length": 2064,
+    "sha256": "35ab967775511eddd5b88a899e0242af59487ebd2b6fc37413ba508739098743",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/z0t.js"
+  },
+  {
+    "function": "gPi",
+    "file": "app-initial-41ab338a184f.js",
+    "offset": 5197001,
+    "length": 2176,
+    "sha256": "d3e6e5a30a04ea2469f7dedb145ec82f56788f271750df9bcea978ad5e1e10be",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/gPi.js"
+  },
+  {
+    "function": "_Pi",
+    "file": "app-initial-41ab338a184f.js",
+    "offset": 5199177,
+    "length": 2554,
+    "sha256": "e5b7b6daa2dc441eefa6a8abef031c070e25dabf564469a16f4038a1ae563354",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/_Pi.js"
+  },
+  {
+    "function": "Rbn",
+    "file": "app-initial-c4ebaa710049.js",
+    "offset": 4522133,
+    "length": 680,
+    "sha256": "46bff917eb7ba05d0bb7019225314940c870dee9b57f303439ee78b9cbfa1be5",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/Rbn.js"
+  },
+  {
+    "function": "zbn",
+    "file": "app-initial-c4ebaa710049.js",
+    "offset": 4522813,
+    "length": 334,
+    "sha256": "fec5957a61ece6ed188255515c1eeee84bca4ca7ac9d02389ee4f1a70cf26cae",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/zbn.js"
+  },
+  {
+    "function": "CTn",
+    "file": "app-initial-c4ebaa710049.js",
+    "offset": 4714897,
+    "length": 139,
+    "sha256": "22f5cff0897ce0a7842316d57aed4b32193163ead4d8d8ae03a0c1c69d3f55e0",
+    "extract": ".dev-runtime/goal-parity-20261016/reference/CTn.js"
+  }
+]

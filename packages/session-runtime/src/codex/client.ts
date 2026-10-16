@@ -161,7 +161,7 @@ export class CodexService {
   }
   readonly raw: Rpc = async (method, params, options) =>
     (await this.ready()).request(method, params, options);
-  readonly call: Rpc = (method, params) => this.ownership.call(method, params);
+  readonly call: Rpc = (method, params, options) => this.ownership.call(method, params, options);
   readHistory(id: string): Promise<Json> {
     return readHistory(this.raw, id);
   }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Search, List, Download, MessagesSquare } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -21,6 +21,7 @@ import { Button } from "../../ui/button";
 import { NativeComposerIcon } from "./NativeComposerIcon";
 import { threadWorkflowActions } from "@session/features/thread-workflows/actions";
 import { lastAssistantCodeBlock } from "@session/features/thread-workflows/lastCodeBlock";
+import { writeNativeMarkdownClipboard } from "../presentation/nativeMarkdownClipboard";
 import { useCodexStore } from "../stores/useCodexStore";
 import { useConfigStore } from "../stores/useConfigStore";
 import { useSessionAttentionStore } from "@session/stores/useSessionAttentionStore";
@@ -61,6 +62,31 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../../ui/dropdown-menu";
+
+type ConversationCopyScope = { current: object | null };
+function observeConversationCopy(
+  write: Promise<void>,
+  scope: ConversationCopyScope,
+  owner: object,
+  success: string,
+  failure: string,
+) {
+  // Pending clipboard callbacks must not retain this menu's render or source text.
+  void write.then(
+    () => { if (scope.current === owner) toast.success(success); },
+    () => { if (scope.current === owner) toast.error(failure); },
+  );
+}
+function copyConversationText(
+  text: string,
+  scope: ConversationCopyScope,
+  success: string,
+  failure: string,
+) {
+  if (scope.current)
+    observeConversationCopy(writeNativeMarkdownClipboard(text), scope, scope.current, success, failure);
+}
+
 function applyExpandedList(kind: Extract<FormatKind, "ol" | "ul" | "check">) {
   const field = document.querySelector(
     ".session-composer-sheet.is-full .session-rich-draft textarea[data-draft-start], .session-composer-sheet.is-full .session-rich-draft textarea[data-draft-selection]",
@@ -108,6 +134,11 @@ export function ConversationMenu({
   onOpen?: () => void;
   onRename?: () => void;
 }) {
+  const copyScope = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    copyScope.current = {};
+    return () => { copyScope.current = null; };
+  }, [threadId, draftOwner]);
   const [busy, setBusy] = useState(false);
   const [fileSearch, setFileSearch] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
@@ -697,10 +728,7 @@ export function ConversationMenu({
               toast.message("当前聊天没有代码块");
               return;
             }
-            void navigator.clipboard.writeText(text).then(
-              () => toast.success("已复制最后一个代码块"),
-              () => toast.error("未能复制代码块"),
-            );
+            copyConversationText(text, copyScope, "已复制最后一个代码块", "未能复制代码块");
           }}
         >
           复制最后一个代码块
@@ -716,10 +744,7 @@ export function ConversationMenu({
               toast.message("当前聊天没有工作目录");
               return;
             }
-            void navigator.clipboard.writeText(cwd).then(
-              () => toast.success("已复制工作目录"),
-              () => toast.error("未能复制工作目录"),
-            );
+            copyConversationText(cwd, copyScope, "已复制工作目录", "未能复制工作目录");
           }}
         >
           复制工作目录
@@ -764,10 +789,7 @@ export function ConversationMenu({
               toast.message("当前聊天没有磁盘路径");
               return;
             }
-            void navigator.clipboard.writeText(path).then(
-              () => toast.success("已复制对话路径"),
-              () => toast.error("未能复制对话路径"),
-            );
+            copyConversationText(path, copyScope, "已复制对话路径", "未能复制对话路径");
           }}
         >
           复制对话路径
@@ -1015,10 +1037,7 @@ export function ConversationMenu({
         <DropdownMenuItem
           onSelect={() => {
             const link = window.location.href;
-            void navigator.clipboard.writeText(link).then(
-              () => toast.success("已复制页面链接"),
-              () => toast.error("未能复制页面链接"),
-            );
+            copyConversationText(link, copyScope, "已复制页面链接", "未能复制页面链接");
           }}
         >
           复制页面链接

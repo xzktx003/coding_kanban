@@ -4,7 +4,7 @@ import type { Readable } from "node:stream";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import WebSocket, { WebSocketServer, type RawData } from "ws";
 import { NativeCodexGateway } from "../services/native-codex-gateway.js";
-import {registerNativeCodexVisibility,type NativeVisibilityController} from "./native-codex-visibility.js";
+import {registerNativeCodexVisibility,visibilityScopeMatches,type NativeVisibilityController} from "./native-codex-visibility.js";
 
 const DEFAULT_PREFIX = "/native-codex";
 export const NATIVE_CODEX_MAX_MESSAGE_BYTES = 8 * 1024 * 1024;
@@ -434,7 +434,7 @@ export async function registerNativeCodexRoutes(
   app.get(`${API_PREFIX}/status`, async (_request, reply) => {
     reply.header("cache-control", "no-store");
     const nativeStatus=await gateway.status();
-    const status=options.visibility?{...nativeStatus,refreshVisibility:{available:options.visibility.snapshot().available}}:nativeStatus;
+    const status=options.visibility?{...nativeStatus,refreshVisibility:{available:options.visibility.snapshot().available&&visibilityScopeMatches((await gateway.runtime())?.refreshScope,options.visibility.serviceScope)}}:nativeStatus;
     return status.iframeUrl?.startsWith(`${DEFAULT_PREFIX}/`) ? { ...status, iframeUrl:PREFIX+status.iframeUrl.slice(DEFAULT_PREFIX.length) } : status;
   });
   app.post(

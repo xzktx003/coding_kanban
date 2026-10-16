@@ -12,7 +12,8 @@ import {
   PlayCircle,
   XCircle,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { writeNativeMarkdownClipboard } from "@session/components/codex/presentation/nativeMarkdownClipboard";
 import type { ServerNotification } from "@session/bindings";
 import type { Model } from "@session/bindings/v2";
 import { Badge } from "@session/components/ui/badge";
@@ -166,6 +167,20 @@ function StatusIcon({ status }: { status: RunStatus }) {
   return null;
 }
 
+type RunCopyScope = { current: object | null };
+function observeRunIdCopy(write: Promise<void>, scope: RunCopyScope, owner: object, label: string) {
+  const feedback = (copied: boolean) => {
+    if (scope.current !== owner) return;
+    toast(copied
+      ? { title: `${label} copied` }
+      : { title: `Failed to copy ${label}`, variant: "destructive" });
+  };
+  void write.then(() => feedback(true), () => feedback(false));
+}
+function copyRunId(id: string, scope: RunCopyScope, label: string) {
+  if (scope.current) observeRunIdCopy(writeNativeMarkdownClipboard(id), scope, scope.current, label);
+}
+
 function RunRow({
   run,
   agent,
@@ -175,6 +190,11 @@ function RunRow({
   agent: AutomationTask["agent"];
   onOpenRun: (run: RunMeta) => Promise<void>;
 }) {
+  const copyScope = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    copyScope.current = {};
+    return () => { copyScope.current = null; };
+  }, [run.threadId, run.taskId, agent]);
   const events = useRunEvents(run.threadId);
   const activeTurnId = agent === "codex" ? findActiveTurnId(events) : null;
   const storedStatus = normalizeStoredStatus(run.status);
@@ -205,6 +225,7 @@ function RunRow({
       role="button"
       tabIndex={0}
       onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           void onOpenRun(run);
@@ -236,8 +257,7 @@ function RunRow({
           className="h-6 px-2 text-[10px]"
           onClick={(event) => {
             event.stopPropagation();
-            void navigator.clipboard.writeText(run.threadId);
-            toast({ title: `${idLabel} copied` });
+            copyRunId(run.threadId, copyScope, idLabel);
           }}
         >
           <Copy className="mr-1 h-3 w-3" />

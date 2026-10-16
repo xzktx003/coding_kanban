@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useTranscriptState } from "../thread/rowState";
 import type { FileUpdateChange } from "@session/bindings/v2";
 import { useCodexContentOwner } from "../presentation/ownerContext";
@@ -12,6 +12,7 @@ import { getFilename } from "@session/utils/getFilename";
 import type { DiffViewerInput } from "./fileChangeLogic";
 import { isTranscriptMetadataOnly } from "../presentation/transcriptMetadata";
 import { TranscriptDetailsNotice } from "./TranscriptDetailsNotice";
+import { useNativeCopyFeedback } from "../presentation/useNativeCopyFeedback";
 import "@session/features/git/review-native.css";
 
 type IndividualFileChangesProps = {
@@ -46,23 +47,11 @@ function ChatFileDiffCard({
   viewer: DiffViewerInput;
   onOpenLine?: (location: { side: "old" | "new"; line: number }) => void;
 }) {
-  const [copied, setCopied] = useState(false);
-  const [copyError, setCopyError] = useState<string | null>(null);
-  const request = useRef(0);
-  const copy = async () => {
-    const current = ++request.current;
-    setCopyError(null);
-    try {
-      await navigator.clipboard.writeText(diff);
-      if (current !== request.current) return;
-      setCopied(true);
-      window.setTimeout(() => {
-        if (current === request.current) setCopied(false);
-      }, 1500);
-    } catch {
-      if (current === request.current) setCopyError("复制失败，请允许剪贴板访问后重试。");
-    }
-  };
+  const { i18n } = useTranslation();
+  const { copied, copyPending, copy } = useNativeCopyFeedback([path, diff], {
+    feedbackMs: 1500,
+    language: i18n?.language ?? "zh",
+  });
   const fileName = getFilename(path);
   return (
     <div className="codex-chat-file-diff">
@@ -88,16 +77,13 @@ function ChatFileDiffCard({
           aria-label="Copy"
           title={copied ? "Copied!" : "Copy"}
           disabled={copied}
-          onClick={() => void copy()}
+          aria-busy={copyPending || undefined}
+          aria-disabled={copyPending || undefined}
+          onClick={() => copy(diff)}
         >
           <NativeCommandCopy width="16" height="16" />
         </button>
       </header>
-      {copyError && (
-        <p role="alert" className="codex-review-selection-summary">
-          {copyError}
-        </p>
-      )}
       <div className="codex-chat-file-diff-body">
         <DiffViewer
           native
@@ -207,6 +193,7 @@ export const IndividualFileChanges = ({
             </div>
             {isExpanded && !metadataOnly && (
               <ChatFileDiffCard
+                key={JSON.stringify([owner.threadId, owner.cwd, change.path])}
                 path={change.path}
                 addedCount={addedCount}
                 removedCount={removedCount}

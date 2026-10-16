@@ -1,0 +1,445 @@
+.session-mode {
+  --session-goal-radius-scale: 1;
+}
+@supports (corner-shape: superellipse(1.5)) {
+  .session-mode {
+    --session-goal-radius-scale: 1.25;
+  }
+  .session-mode
+    :is(
+      .session-goal-action,
+      .session-goal-dialog,
+      .session-goal-dialog-icon,
+      .session-goal-dialog textarea,
+      .session-goal-dialog-footer button,
+      .session-goal-confirm-objective
+    ) {
+    corner-shape: superellipse(1.5);
+  }
+}
+.session-mode .session-thread-goal {
+  min-width: 0;
+  overflow: clip;
+  border: 1px solid var(--codex-border, var(--border));
+  border-bottom: 0;
+  border-radius: calc(1rem * var(--session-goal-radius-scale))
+    calc(1rem * var(--session-goal-radius-scale)) 0 0;
+  color: var(--codex-text, var(--foreground));
+  background: var(--codex-secondary, var(--background));
+  font-family: var(--codex-chat-font, system-ui, sans-serif);
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+}
+.session-mode .session-goal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 10px;
+  font-size: 13px;
+  line-height: 19.5px;
+}
+.session-mode .session-native-composer .session-thread-goal .session-goal-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: start;
+  color: inherit;
+  cursor: pointer;
+}
+.session-mode .session-goal-leading {
+  display: flex;
+  align-items: center;
+  flex: 0 0 14px;
+  height: 16px;
+  color: color-mix(
+    in srgb,
+    var(--codex-muted, var(--muted-foreground)) 70%,
+    transparent
+  );
+}
+.session-mode .session-goal-leading svg {
+  width: 14px;
+  height: 14px;
+}
+.session-mode .session-goal-summary {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  padding-block: 4px;
+  line-height: 20px;
+  color: var(--codex-muted, var(--muted-foreground));
+}
+.session-mode .session-goal-status {
+  flex-shrink: 0;
+  color: var(--codex-text, var(--foreground));
+}
+.session-mode .session-goal-objective {
+  min-width: 0;
+  margin-inline-start: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-mode .session-goal-counter {
+  flex-shrink: 0;
+  margin-inline-start: 6px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.session-mode .session-goal-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+}
+.session-mode
+  .session-native-composer
+  .session-thread-goal
+  .session-goal-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: calc(0.625rem * var(--session-goal-radius-scale));
+  color: var(--codex-muted, var(--muted-foreground));
+  background: transparent;
+  cursor: pointer;
+}
+.session-mode .session-goal-action > svg {
+  width: 14px;
+  height: 14px;
+}
+.session-mode .session-goal-action:hover {
+  background: var(
+    --vscode-list-hoverBackground,
+    color-mix(in srgb, var(--codex-text, var(--foreground)) 8%, transparent)
+  );
+}
+.session-mode :is(.session-goal-action, .session-goal-open):focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, var(--ring));
+  outline-offset: -2px;
+}
+.session-mode :is(.session-goal-action, .session-goal-open):disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.session-mode .session-goal-dialog-overlay {
+  background: color-mix(
+    in oklab,
+    var(--vscode-editor-background, var(--background)) 80%,
+    transparent
+  );
+}
+.session-mode .session-goal-dialog {
+  --codex-text: var(--vscode-foreground, #3b3b3b);
+  --codex-muted: var(--vscode-descriptionForeground, #717171);
+  --codex-secondary: var(--vscode-sideBar-background, #f5f5f3);
+  width: 420px;
+  max-width: 92vw;
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow-y: auto;
+  border: 0;
+  border-radius: calc(1.25rem * var(--session-goal-radius-scale));
+  color: var(--codex-text);
+  background: color-mix(in srgb, var(--codex-secondary) 90%, transparent);
+  backdrop-filter: blur(24px);
+  box-shadow:
+    0 0 0 0.5px color-mix(in oklab, var(--codex-text) 8%, transparent),
+    0 4px 8px -2px #0000001a;
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+  font-size: 13px;
+  line-height: 20px;
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+}
+.session-mode .session-goal-dialog-body {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 12px;
+  padding: 20px;
+}
+:is(.session-mode.dark, .dark .session-mode) .session-goal-dialog {
+  --codex-text: var(--vscode-foreground, #ccc);
+  --codex-muted: var(--vscode-descriptionForeground, #858585);
+  --codex-secondary: var(--vscode-sideBar-background, #282a23);
+}
+.session-mode .session-goal-dialog-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.session-mode .session-goal-dialog-header[data-has-icon] {
+  gap: 12px;
+}
+.session-mode .session-goal-dialog-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 8px;
+  border-radius: calc(0.75rem * var(--session-goal-radius-scale));
+  background: color-mix(in srgb, var(--codex-text) 5%, transparent);
+}
+.session-mode .session-goal-dialog-icon > svg {
+  width: 20px;
+  height: 20px;
+}
+.session-mode .session-goal-dialog-close {
+  position: absolute;
+  right: 16px;
+  top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: color-mix(in srgb, var(--codex-text) 80%, transparent);
+  font-size: 22px;
+  cursor: pointer;
+}
+.session-mode .session-goal-dialog-close:hover {
+  background: color-mix(in srgb, var(--codex-text) 8%, transparent);
+}
+.session-mode .session-goal-dialog-close > svg {
+  width: 16px;
+  height: 16px;
+}
+.session-mode .session-goal-dialog-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 28px;
+}
+.session-mode .session-goal-dialog-header p {
+  margin: 0;
+  color: var(--codex-muted);
+  font-size: 14px;
+  line-height: 21px;
+}
+.session-mode .session-goal-dialog form {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.session-mode .session-goal-dialog textarea {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-height: 96px;
+  max-height: 55dvh;
+  padding: 8px 10px;
+  resize: vertical;
+  border: 1px solid color-mix(in srgb, var(--codex-text) 12%, transparent);
+  border-radius: calc(0.5rem * var(--session-goal-radius-scale));
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 17.1429px;
+}
+.session-mode .session-goal-dialog textarea:focus {
+  outline-style: none;
+  border-color: var(--vscode-focusBorder, currentColor);
+}
+.session-mode .session-goal-dialog textarea:disabled {
+  cursor: not-allowed;
+  color: var(
+    --app-color-text-secondary,
+    color-mix(in srgb, var(--codex-text) 65%, transparent)
+  );
+  background: color-mix(in oklab, var(--codex-text) 5%, transparent);
+}
+.session-mode .session-goal-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  gap: 12px;
+}
+.session-mode .session-goal-dialog-footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: calc(0.625rem * var(--session-goal-radius-scale));
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 400;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.session-mode .session-goal-dialog-footer .session-goal-primary {
+  border-color: var(
+    --app-color-border,
+    color-mix(in oklab, var(--codex-text) 8%, transparent)
+  );
+  background: var(--codex-text);
+  color: var(--codex-secondary);
+}
+.session-mode .session-goal-secondary {
+  background: color-mix(in srgb, var(--codex-text) 5%, transparent);
+  color: var(--codex-text);
+}
+.session-mode .session-goal-dialog-footer button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.session-mode
+  :is(.session-goal-dialog-footer button, .session-goal-dialog-close):focus {
+  outline-style: none;
+  outline-offset: 0;
+}
+.session-mode
+  :is(
+    .session-goal-dialog-footer button,
+    .session-goal-dialog-close
+  ):focus-visible {
+  /* Match the native ring stack, including its zero-width offset layer. */
+  box-shadow:
+    0 0 #0000,
+    0 0 #0000,
+    0 0 0 0 #fff,
+    0 0 0 2px var(--vscode-focusBorder, currentColor),
+    0 0 #0000;
+}
+.session-mode .session-goal-confirm-objective {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  padding: 8px 12px;
+  border-radius: calc(0.625rem * var(--session-goal-radius-scale));
+  color: var(--codex-text);
+  background: color-mix(in srgb, var(--codex-secondary) 92%, transparent);
+  font-size: 12px;
+  line-height: 17.1429px;
+  white-space: normal;
+}
+.session-mode .session-goal-error {
+  margin: 0;
+  color: var(--codex-muted);
+  font-size: 12px;
+}
+.session-mode .session-goal-spinner {
+  animation: native-composer-spin 1s linear infinite;
+}
+.session-mode .session-goal-draft {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--codex-muted, var(--muted-foreground));
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+.session-mode .session-goal-draft svg {
+  width: 16px;
+  height: 16px;
+}
+.session-mode .session-goal-draft-symbol {
+  display: flex;
+  flex-shrink: 0;
+}
+.session-mode .session-goal-draft-symbol > :last-child {
+  display: none;
+}
+.session-mode
+  .session-goal-draft:hover
+  .session-goal-draft-symbol
+  > :first-child {
+  display: none;
+}
+.session-mode
+  .session-goal-draft:hover
+  .session-goal-draft-symbol
+  > :last-child {
+  display: block;
+}
+.session-mode
+  .session-native-composer
+  .session-compact-frame[data-has-thread-goal] {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+@media (hover: hover) {
+  .session-mode
+    .session-goal-primary:not(:disabled):not([aria-disabled="true"]):hover {
+    background: color-mix(in oklab, var(--codex-text) 80%, transparent);
+  }
+  .session-mode
+    .session-goal-secondary:not(:disabled):not([aria-disabled="true"]):hover {
+    background: color-mix(in oklab, var(--codex-text) 10%, transparent);
+  }
+}
+@media (forced-colors: active) {
+  .session-mode .session-goal-dialog-footer button:focus {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+  }
+}
+@media (pointer: coarse) {
+  .session-mode .session-goal-row {
+    min-height: 48px;
+    padding-inline: 8px;
+    gap: 4px;
+  }
+  .session-mode
+    .session-native-composer
+    .session-thread-goal
+    .session-goal-action {
+    width: 44px;
+    height: 44px;
+  }
+  .session-mode .session-goal-actions {
+    gap: 0;
+  }
+  .session-mode
+    .session-native-composer
+    .session-thread-goal
+    .session-goal-open {
+    min-height: 44px;
+    gap: 6px;
+  }
+  .session-mode .session-goal-dialog-footer button {
+    min-height: 44px;
+  }
+  .session-mode .session-goal-draft {
+    min-height: 44px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .session-mode .session-goal-spinner {
+    animation: none;
+  }
+}

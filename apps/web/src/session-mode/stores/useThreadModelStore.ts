@@ -42,6 +42,10 @@ export interface ThreadModelEntry extends ThreadModelSettings {
   pending: boolean;
   pendingFields?: Array<keyof ThreadModelSettings>;
   observed?: Omit<ThreadModelSettings, "providerModels">;
+  /** Accepted normalized settings accumulated by field, including values held
+   * behind a pending choice. Undefined marks legacy entries with unknown provenance.
+   * This cache never grants thread input/writer rights or stores response bodies. */
+  nativeSettings?: NativeSettings;
   notice?: ModelChangeNotice;
   /** Local transcript line. Not a protocol event and not part of the chat cache. */
   personalityNotice?: PersonalityNotice | null;
@@ -60,6 +64,54 @@ const UNKNOWN: ThreadModelSettings = {
   collaborationMode: "default",
   personality: null,
 };
+type NativeSettings = Partial<Omit<ThreadModelSettings, "providerModels">>;
+const SANDBOX_FIELDS = [
+  "sandbox",
+  "sandboxPolicy",
+  "webSearchRequest",
+] as const;
+const REVIEWER_FIELDS = ["approvalsReviewer", "autoReviewCapability"] as const;
+const MODEL_FIELDS = ["model", "modelProvider", "reasoningEffort"] as const;
+function replaceSettingsGroup(
+  target: NativeSettings,
+  source: NativeSettings,
+  fields: readonly (keyof NativeSettings)[],
+) {
+  for (const key of fields) delete target[key];
+  Object.assign(
+    target,
+    Object.fromEntries(
+      fields
+        .filter((key) => Object.hasOwn(source, key))
+        .map((key) => [key, source[key]]),
+    ),
+  );
+}
+function sameNativeSettings(
+  left: NativeSettings | undefined,
+  right: NativeSettings | undefined,
+) {
+  if (left === undefined || right === undefined) return left === right;
+  return (
+    Object.keys(left).length === Object.keys(right).length &&
+    Object.entries(left).every(
+      ([key, value]) =>
+        Object.hasOwn(right, key) &&
+        JSON.stringify(value) ===
+          JSON.stringify(right[key as keyof NativeSettings]),
+    )
+  );
+}
+function mergeNativeSettings(
+  previous: NativeSettings | undefined,
+  incoming: NativeSettings,
+): NativeSettings {
+  const next = { ...previous, ...incoming };
+  // Incomplete sandbox metadata must not inherit an older complete policy.
+  if (SANDBOX_FIELDS.some((key) => Object.hasOwn(incoming, key)))
+    replaceSettingsGroup(next, incoming, SANDBOX_FIELDS);
+  return next;
+}
 const EDITABLE_FIELDS = [
   "model",
   "modelProvider",
@@ -136,6 +188,7 @@ export function changeThreadModel(
         [threadId]: {
           ...old,
           ...next,
+          nativeSettings: old ? old.nativeSettings : {},
           providerModels: {
             ...before.providerModels,
             ...patch.providerModels,
@@ -185,7 +238,7 @@ export function hydrateThreadModel(
     collaborationMode?: CollaborationMode | "default" | "plan";
     personality?: Personality | null;
   },
-  options: { revision?: number; notify?: boolean } = {},
+  options: { revision?: number; notify?: boolean; initialOnly?: boolean } = {},
 ) {
   if (!value.model) return;
   useThreadModelStore.setState((s) => {
@@ -257,6 +310,78 @@ export function hydrateThreadModel(
           : value.reasoningEffort,
       ...normalized,
     };
+    // Track explicitly supplied fields, not provider/effort inferred by observed.
+    // Legacy entries stay opaque even after a later sparse snapshot.
+    const incoming: NativeSettings = {
+      model: value.model!,
+      ...(value.modelProvider !== undefined
+        ? { modelProvider: value.modelProvider }
+        : {}),
+      ...(value.reasoningEffort !== undefined
+        ? { reasoningEffort: value.reasoningEffort }
+        : {}),
+      ...normalized,
+    };
+    const nativeSettings =
+      old && old.nativeSettings === undefined
+        ? undefined
+        : mergeNativeSettings(old?.nativeSettings, incoming);
+    const sameNative = sameNativeSettings(old?.nativeSettings, nativeSettings);
+    if (options.initialOnly && old) {
+      if (old.nativeSettings === undefined) return s;
+      // A fork ACK seeds missing settings; already accepted values are newer.
+      const canonical: NativeSettings = { ...incoming, ...old.nativeSettings };
+      for (const group of [SANDBOX_FIELDS, REVIEWER_FIELDS])
+        if (group.some((key) => Object.hasOwn(old.nativeSettings!, key)))
+          replaceSettingsGroup(canonical, old.nativeSettings, group);
+      const protectedFields = new Set<keyof ThreadModelSettings>(
+        old.pendingFields ?? (old.pending ? MODEL_FIELDS : []),
+      );
+      for (const group of [MODEL_FIELDS, SANDBOX_FIELDS, REVIEWER_FIELDS])
+        if (group.some((key) => protectedFields.has(key)))
+          for (const key of group) protectedFields.add(key);
+      // policy:null explicitly clears the old policy, even if a later sparse
+      // model snapshot has already cleared pending with an empty field list.
+      if (
+        old.sandboxPolicy === null ||
+        (SANDBOX_FIELDS.some((key) =>
+          Object.hasOwn(old.nativeSettings!, key),
+        ) &&
+          !old.nativeSettings.sandboxPolicy)
+      )
+        for (const key of SANDBOX_FIELDS) protectedFields.add(key);
+      const projected = Object.fromEntries(
+        Object.entries(canonical).filter(
+          ([key]) => !protectedFields.has(key as keyof NativeSettings),
+        ),
+      ) as NativeSettings;
+      const sameProjection = Object.entries(projected).every(
+        ([key, v]) =>
+          JSON.stringify(old[key as keyof ThreadModelEntry]) ===
+          JSON.stringify(v),
+      );
+      if (sameProjection && sameNativeSettings(old.nativeSettings, canonical))
+        return s;
+      const model = projected.model ?? old.model;
+      const provider = projected.modelProvider ?? old.modelProvider;
+      return {
+        threads: {
+          ...s.threads,
+          [threadId]: {
+            ...old,
+            ...projected,
+            nativeSettings: canonical,
+            revision: old.revision + 1,
+            providerModels:
+              projected.model !== undefined ||
+              projected.modelProvider !== undefined
+                ? { ...old.providerModels, [provider]: model }
+                : old.providerModels,
+            // The fork receipt must not acknowledge pending choices or alter notices.
+          },
+        },
+      };
+    }
     const matches =
       old?.model === observed.model &&
       old.modelProvider === observed.modelProvider &&
@@ -278,12 +403,17 @@ export function hydrateThreadModel(
           JSON.stringify(value),
       );
     if (old?.pending && !matches)
-      return sameObserved
+      return sameObserved && sameNative
         ? s
         : {
             threads: {
               ...s.threads,
-              [threadId]: { ...old, observed, revision: old.revision + 1 },
+              [threadId]: {
+                ...old,
+                observed,
+                nativeSettings,
+                revision: old.revision + 1,
+              },
             },
           };
     if (
@@ -291,7 +421,8 @@ export function hydrateThreadModel(
       !old.pending &&
       matches &&
       old.reasoningEffort === observed.reasoningEffort &&
-      sameObserved
+      sameObserved &&
+      sameNative
     )
       return s;
     const changed =
@@ -315,6 +446,7 @@ export function hydrateThreadModel(
           ...old,
           ...observed,
           observed,
+          nativeSettings,
           revision,
           pending: false,
           pendingFields: [],

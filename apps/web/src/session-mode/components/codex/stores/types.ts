@@ -84,6 +84,10 @@ export interface EventsSlice {
   tokenUsageMap: Record<string, ThreadTokenUsage>;
   /** Per-thread goal from thread/goal/updated */
   goalMap: Record<string, ThreadGoal>;
+  /** Last completed goal survives thread/goal/cleared for its assistant action badge. */
+  completedGoalMap: Record<string, ThreadGoal>;
+  /** Explicit runtime/account observations invalidate the visible small-goal read. */
+  goalScopeVersion: number;
   /** Whether the goal-tracking button is shown in the composer toolbar. */
   goalEnabled: boolean;
 

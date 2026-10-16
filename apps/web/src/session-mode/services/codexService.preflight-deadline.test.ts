@@ -31,6 +31,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.resetAllMocks();
   vi.spyOn(console, "error").mockImplementation(() => {});
+  resetCodexRuntimeState();
   useThreadModelStore.setState({ threads: {} });
   useWorkspaceStore.setState({ cwd: "/project" });
   useCodexStore.setState({
@@ -148,7 +149,18 @@ it("keeps a successful worktree creation and deferred activation compatible", as
 it("activates a successful new thread and returns a confirmed goal response", async () => {
   await codexService.threadStart();
   expect(useCodexStore.getState().currentThreadId).toBe("created");
-  const response = { goal: { objective: "next" } };
+  const response = {
+    goal: {
+      threadId: "created",
+      objective: "next",
+      status: "active",
+      tokenBudget: null,
+      tokensUsed: 0,
+      timeUsedSeconds: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    },
+  };
   api.threadGoalSet.mockResolvedValue(response);
   expect(
     await codexService.threadGoalSet({

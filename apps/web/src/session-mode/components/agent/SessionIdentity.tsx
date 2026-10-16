@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Copy, Folder, LocateFixed } from "lucide-react";
 import { SessionAgentBadge } from "../common/SessionAgentBadge";
 import {
@@ -14,6 +14,30 @@ import {
   type AgentCenterCard,
 } from "../../stores/useAgentCenterStore";
 import { sessionProject } from "../../utils/sessionProject";
+import { writeNativeMarkdownClipboard } from "../codex/presentation/nativeMarkdownClipboard";
+
+type ProjectCopyState = { scope: object | null; pending: boolean };
+
+// A pending permission prompt keeps only this small controller and an empty
+// scope token; no project/card, React setters, or detached menu is captured.
+function observeProjectCopy(
+  write: Promise<void>,
+  state: ProjectCopyState,
+  scope: object,
+) {
+  void write
+    .then(undefined, () => {
+      if (state.scope !== scope) return;
+      toast({
+        title: "复制失败",
+        description: "请从项目详情中选择并复制完整路径。",
+        variant: "destructive",
+      });
+    })
+    .finally(() => {
+      state.pending = false;
+    });
+}
 
 export function useSessionProject(
   card: Pick<AgentCenterCard, "cwd" | "worktreePath">,
@@ -48,6 +72,14 @@ export function SessionProjectLabel({
   draggableTab?: boolean;
 }) {
   const project = useSessionProject(card);
+  const copyScope = useMemo(() => ({}), [card, project.path]);
+  const copyState = useRef<ProjectCopyState>({ scope: null, pending: false }).current;
+  useLayoutEffect(() => {
+    copyState.scope = copyScope;
+    return () => {
+      copyState.scope = null;
+    };
+  }, [copyState, copyScope]);
   const revealOnClose = useRef(false);
   const [open, setOpen] = useState(false);
   return (
@@ -118,15 +150,13 @@ export function SessionProjectLabel({
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => {
-                  void Promise.resolve()
-                    .then(() => navigator.clipboard.writeText(project.path!))
-                    .catch(() =>
-                      toast({
-                        title: "复制失败",
-                        description: "请从项目详情中选择并复制完整路径。",
-                        variant: "destructive",
-                      }),
-                    );
+                  if (copyState.scope !== copyScope || copyState.pending) return;
+                  copyState.pending = true;
+                  observeProjectCopy(
+                    writeNativeMarkdownClipboard(project.path!),
+                    copyState,
+                    copyScope,
+                  );
                 }}
               >
                 <Copy size={14} />

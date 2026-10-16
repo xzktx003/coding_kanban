@@ -7,7 +7,12 @@ vi.mock("@session/hooks/runtime", () => ({
   isTauri: () => false,
 }));
 
-import { threadGoalSet, threadStart } from "./codex";
+import {
+  threadGoalClear,
+  threadGoalGet,
+  threadGoalSet,
+  threadStart,
+} from "./codex";
 import { gitCreateWorktree } from "./git";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -25,6 +30,18 @@ it.each([
     path: "/api/codex/thread/goal/set",
     body: goal,
     run: (signal?: AbortSignal) => threadGoalSet(goal, { signal }),
+  },
+  {
+    path: "/api/codex/thread/goal/get",
+    body: { threadId: "selected" },
+    run: (signal?: AbortSignal) =>
+      threadGoalGet({ threadId: "selected" }, { signal }),
+  },
+  {
+    path: "/api/codex/thread/goal/clear",
+    body: { threadId: "selected" },
+    run: (signal?: AbortSignal) =>
+      threadGoalClear({ threadId: "selected" }, { signal }),
   },
   {
     path: "/api/git/create-worktree",

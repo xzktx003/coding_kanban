@@ -40,6 +40,37 @@ async function snapshot(page: Page) {
     };
   });
 }
+async function recoverySnapshot(page: Page, threadId: string) {
+  return page.evaluate(async (threadId) => {
+    const mounted = (path: string) =>
+      performance
+        .getEntriesByType("resource")
+        .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+      path;
+    const { useCodexStore } = await import(
+      mounted("/src/session-mode/components/codex/stores/index.ts")
+    );
+    const { useSessionSyncStore } = await import(
+      mounted("/src/session-mode/stores/useSessionSyncStore.ts")
+    );
+    const state = useCodexStore.getState();
+    const sync = useSessionSyncStore.getState();
+    return {
+      selected: state.currentThreadId,
+      loaded: state.historyLoadedMap[threadId] === true,
+      error: state.historyErrorMap[threadId] ?? null,
+      checking: sync.checking[threadId] === true,
+      recovery: sync.recovering[threadId] ?? null,
+      connection: sync.connection,
+      historyNotice:
+        document.querySelector(".codex-native-history-notice [role=alert]")
+          ?.textContent ?? null,
+      recoveryNotice:
+        document.querySelector(".session-sync-notice[data-session-recovery]")
+          ?.textContent ?? null,
+    };
+  }, threadId);
+}
 async function setup(
   page: Page,
   baseURL: string,
@@ -152,6 +183,7 @@ for (const width of [390, 1440])
       const target = fixture.threads[19] as any;
       target.status = { type: "active", activeFlags: [] };
       target.turns[0].status = "inProgress";
+      let releaseReconnect: (() => void) | undefined;
       try {
         await page.goto("/?mode=session");
         await expect(page.locator(".session-tab")).toHaveCount(20);
@@ -243,13 +275,14 @@ for (const width of [390, 1440])
           .first();
         const beforeNotice = await viewport.boundingBox();
         let failedRead = false;
+        let targetReads = 0;
         await page.route(
           (url) => url.pathname.endsWith("/api/codex/thread/turns/list"),
           (route) => {
-            if (
-              !failedRead &&
-              route.request().postDataJSON().threadId === target.id
-            ) {
+            const targetRead =
+              route.request().postDataJSON().threadId === target.id;
+            if (targetRead) targetReads++;
+            if (!failedRead && targetRead) {
               failedRead = true;
               return route.fulfill({
                 status: 503,
@@ -266,10 +299,78 @@ for (const width of [390, 1440])
             ),
           target.id,
         );
+        // History failures use the native warning and its own retry. The
+        // generic recovery overlay must not cover that specific action.
+        const historyNotice = page.locator(
+          ".codex-native-history-notice [role=alert]",
+        );
+        await expect(historyNotice).toBeVisible({ timeout: 8000 });
+        expect(failedRead).toBe(true);
+        await expect(historyNotice).toHaveAttribute(
+          "title",
+          "isolated readonly outage",
+        );
+        const failedRecovery = await recoverySnapshot(page, target.id);
+        expect(failedRecovery).toMatchObject({
+          selected: target.id,
+          loaded: true,
+          error: "isolated readonly outage",
+          recovery: "retrying",
+          recoveryNotice: null,
+        });
+        expect(await viewport.boundingBox()).toEqual(beforeNotice);
+        mkdirSync(evidence, { recursive: true });
+        writeFileSync(
+          `${evidence}/history-error-${width}-${theme}.json`,
+          JSON.stringify(
+            { failedRead, targetReads, ...failedRecovery },
+            null,
+            2,
+          ),
+        );
+        await page.screenshot({
+          path: `${evidence}/history-error-${width}-${theme}.png`,
+        });
+        const failedReads = targetReads;
+        await historyNotice
+          .getByRole("button", { name: "重试", exact: true })
+          .click();
+        await expect.poll(() => targetReads).toBeGreaterThan(failedReads);
+        await expect(historyNotice).toHaveCount(0);
+        await expect
+          .poll(async () => (await recoverySnapshot(page, target.id)).error)
+          .toBeNull();
+        expect(await viewport.boundingBox()).toEqual(beforeNotice);
+
+        // Exercise the unchanged overlay geometry with a real HTTP EventSource
+        // disconnect. Hold only its reconnect request until explicit retry has
+        // been checked; all readonly history calls still reach the fixture.
+        const reconnect = new Promise<void>((resolve) => {
+          releaseReconnect = resolve;
+        });
+        let reconnectAttempts = 0;
+        await page.route(
+          (url) => url.pathname === "/events",
+          async (route) => {
+            reconnectAttempts++;
+            await reconnect;
+            await route.continue();
+          },
+        );
+        stream.disconnect();
         const notice = page.locator(
           ".session-sync-notice[data-session-recovery]",
         );
         await expect(notice).toBeVisible({ timeout: 8000 });
+        await expect.poll(() => reconnectAttempts).toBeGreaterThan(0);
+        const disconnectedRecovery = await recoverySnapshot(page, target.id);
+        expect(disconnectedRecovery).toMatchObject({
+          selected: target.id,
+          loaded: true,
+          error: null,
+          connection: "reconnecting",
+          historyNotice: null,
+        });
         const appearance = await notice.evaluate((el) => ({
           position: getComputedStyle(el).position,
           background: getComputedStyle(el).backgroundColor,
@@ -285,7 +386,10 @@ for (const width of [390, 1440])
         await page.screenshot({
           path: `${evidence}/notice-${width}-${theme}.png`,
         });
+        const beforeRetry = targetReads;
         await notice.getByRole("button", { name: "重试", exact: true }).click();
+        await expect.poll(() => targetReads).toBeGreaterThan(beforeRetry);
+        releaseReconnect!();
         await expect(notice).toHaveCount(0);
         expect(await viewport.boundingBox()).toEqual(beforeNotice);
         expect(errors).toEqual([]);
@@ -305,6 +409,11 @@ for (const width of [390, 1440])
               catchupMs,
               switchMs,
               errors,
+              failedRead,
+              failedRecovery,
+              disconnectedRecovery,
+              targetReads,
+              reconnectAttempts,
               recentReads: fixture.calls.filter((c) =>
                 c.path.endsWith("/turns/list"),
               ).length,
@@ -314,6 +423,7 @@ for (const width of [390, 1440])
           ),
         );
       } finally {
+        releaseReconnect?.();
         await page.close();
         await stream.close();
       }

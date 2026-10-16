@@ -17,6 +17,7 @@ import {
   Fragment,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -65,6 +66,19 @@ import { useAgentCenterStore, useLayoutStore } from "@session/stores";
 import { usePinStore } from "@session/stores/usePinStore";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { formatThreadAge } from "@session/utils/formatThreadAge";
+import { writeNativeMarkdownClipboard } from "../presentation/nativeMarkdownClipboard";
+
+type ThreadCopyScope = { current: object | null };
+function observeThreadIdCopy(write: Promise<void>, scope: ThreadCopyScope, owner: object) {
+  const failure = () => {
+    if (scope.current === owner)
+      toast({ description: "Failed to copy thread ID", variant: "destructive" });
+  };
+  void write.then(undefined, failure);
+}
+function copyThreadId(id: string, scope: ThreadCopyScope) {
+  if (scope.current) observeThreadIdCopy(writeNativeMarkdownClipboard(id), scope, scope.current);
+}
 
 interface ThreadListProps {
   cwd: string;
@@ -87,6 +101,11 @@ const EMPTY_LIST: ThreadListResponse = {
 const PAGE_SIZE = 3;
 
 export function ThreadList({ cwd }: ThreadListProps) {
+  const copyScope = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    copyScope.current = {};
+    return () => { copyScope.current = null; };
+  }, [cwd]);
   const childNodes = useSubagentStore(s => s.nodes);
   const names = useSessionNameStore((s) => s.names);
   const { cwd: workspaceCwd, setCwd } = useWorkspaceStore();
@@ -480,7 +499,7 @@ export function ThreadList({ cwd }: ThreadListProps) {
         {
           label: "Copy Id",
           separatorBefore: true,
-          onSelect: () => void navigator.clipboard.writeText(thread.id),
+          onSelect: () => copyThreadId(thread.id, copyScope),
         },
       ];
     },

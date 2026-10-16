@@ -308,6 +308,19 @@
   flex: 1;
   min-width: 0;
 }
+.session-mode .session-queue-pause-reason > span,
+.session-mode .session-queue-pause-reason > small,
+.session-mode .session-queue-confirm-reason {
+  display: block;
+}
+.session-mode .session-queue-pause-reason > small {
+  margin-top: 3px;
+  font-size: inherit;
+  line-height: 1.5;
+}
+.session-mode .session-queue-confirm-reason {
+  margin-top: 8px;
+}
 .session-mode .session-queue-status button {
   flex-shrink: 0;
   font-size: 12px;

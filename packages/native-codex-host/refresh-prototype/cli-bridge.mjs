@@ -234,12 +234,14 @@ export function connectStdio({
   signal,
   onProtocol,
   beforeReady,
+  beforeSend,
 }) {
   if (
     !Number.isSafeInteger(connectTimeoutMs) ||
     connectTimeoutMs < 1 ||
     connectTimeoutMs > 60000 ||
-    (beforeReady !== undefined && typeof beforeReady !== "function")
+    (beforeReady !== undefined && typeof beforeReady !== "function") ||
+    (beforeSend !== undefined && typeof beforeSend !== "function")
   )
     throw Error("bounded native admission check required");
   const ws = new WebSocket(`ws+unix://${socketPath}:/`, {
@@ -334,14 +336,43 @@ export function connectStdio({
     });
     if (ws.bufferedAmount + line.length > MAX_PENDING_BYTES)
       throw new Error("JSONL pending limit exceeded");
+    if (finishing || settled)
+      throw Error("Native connection closed before send");
+    let checked;
+    try {
+      checked = beforeSend?.({
+        id: diagnosticId(value.id),
+        method:
+          typeof value.method === "string"
+            ? diagnosticText(value.method)
+            : null,
+      });
+    } catch (error) {
+      // The owned NativeClient has rejected this exact pending request. Nothing
+      // was sent; preserve other requests and this connection's subscriptions.
+      if (error?.code === "NATIVE_NOT_SENT") return;
+      throw error;
+    }
+    if (checked !== undefined) {
+      if (typeof checked?.then === "function")
+        void Promise.resolve(checked).catch(() => {});
+      throw Error("Native send guard must finish synchronously");
+    }
+    if (finishing || settled)
+      throw Error("Native connection closed before send");
     ws.send(text, (error) => {
       if (error) fail(error);
-      else if (ws.bufferedAmount < MAX_PENDING_BYTES / 2 && !finishing)
+      else if (
+        ws.bufferedAmount < MAX_PENDING_BYTES / 2 &&
+        !finishing &&
+        !settled
+      )
         input.resume();
     });
     if (ws.bufferedAmount >= MAX_PENDING_BYTES / 2) input.pause();
   };
   const data = (chunk) => {
+    if (finishing || settled) return;
     try {
       const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       pending = Buffer.concat([pending, bytes]);
@@ -476,6 +507,8 @@ export async function runBridge({
   signal,
   onProtocol,
   scope,
+  controlRoot,
+  controlScope,
 }) {
   const mode = validateLaunchArguments(argv);
   if (scope !== undefined) scope = validateNativeScope(scope);
@@ -487,17 +520,70 @@ export async function runBridge({
     beforeReady = () => verifyPrivateServiceIdentity({ metadata, scope });
     await beforeReady();
   }
-  if (mode === "version") {
-    output.write(`codex-cli ${CLI_VERSION}\n`);
-    return;
+  let guard, control, primaryError;
+  try {
+    if (controlRoot !== undefined || controlScope !== undefined) {
+      if (!scope || typeof controlRoot !== "string")
+        throw Error("explicit native and control scopes required");
+      const { createBridgeAuthorization, validateControlScope } =
+        await import("./bridge-authorization.mjs");
+      controlScope = validateControlScope(controlScope);
+      const { attachRefreshControlService } =
+        await import("./control-service.mjs");
+      const attached = await attachRefreshControlService({
+        runtimeRoot: controlRoot,
+        metadata,
+        scope,
+      });
+      if (
+        ["generation", "pid", "startTicks"].some(
+          (key) => attached.record[key] !== controlScope[key],
+        )
+      )
+        throw Error("refresh control identity changed");
+      control = await attached.connect();
+      const { attachPrivateService } = await import("./private-service.mjs");
+      const service = await attachPrivateService({
+        metadata,
+        domain: scope.domain,
+      });
+      guard = await createBridgeAuthorization({ service, control, signal });
+      guard.assertCurrent();
+    }
+    if (mode === "version") {
+      output.write(`codex-cli ${CLI_VERSION}\n`);
+      return;
+    }
+    const connection = connectStdio({
+      socketPath: metadata.socketPath,
+      input,
+      output,
+      signal: guard
+        ? signal
+          ? AbortSignal.any([signal, guard.signal])
+          : guard.signal
+        : signal,
+      onProtocol,
+      beforeReady: async () => {
+        await beforeReady?.();
+        guard?.assertCurrent();
+      },
+      beforeSend: guard ? () => guard.assertCurrent() : undefined,
+    });
+    await connection.done;
+    if (!signal?.aborted) guard?.assertCurrent();
+  } catch (error) {
+    if (signal?.aborted) return;
+    primaryError = error;
+    throw error;
+  } finally {
+    const cleanup = await Promise.allSettled([
+      guard?.close(),
+      control?.close(),
+    ]);
+    if (!primaryError) {
+      const failed = cleanup.find((item) => item.status === "rejected");
+      if (failed) throw failed.reason;
+    }
   }
-  const connection = connectStdio({
-    socketPath: metadata.socketPath,
-    input,
-    output,
-    signal,
-    onProtocol,
-    beforeReady,
-  });
-  await connection.done;
 }

@@ -1,10 +1,12 @@
 import { openWorkspaceFileReference } from "@session/services/openWorkspaceFileReference";
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { CodexImage } from "./CodexImage";
 import { useCodexContentOwner } from "./ownerContext";
 import { parseFileReference } from "./fileReference";
 import { nativeMediaUrl } from "./nativeMedia";
 import { nativeToolJson } from "./nativeToolSemantics";
+import { writeNativeMarkdownClipboard } from "./nativeMarkdownClipboard";
+import { notifyNativeClipboardError } from "@session/features/native-notifications/nativeClipboardError";
 import "../items/tool-native.css";
 import { useTranslation } from "react-i18next";
 const object = (value: unknown): Record<string, unknown> =>
@@ -37,6 +39,17 @@ function openResourceFile(
   void openWorkspaceFileReference(file, cwd);
 }
 
+type ResourceCopyScope = { current: object | null };
+function observeResourceCopy(write: Promise<void>, scope: ResourceCopyScope, owner: object, language: string) {
+  void write.then(undefined, () => {
+    if (scope.current === owner) notifyNativeClipboardError(language);
+  });
+}
+function copyResourceUri(uri: string, scope: ResourceCopyScope, language: string) {
+  if (scope.current)
+    observeResourceCopy(writeNativeMarkdownClipboard(uri), scope, scope.current, language);
+}
+
 function ResourceOpenMenu({
   uri,
   file,
@@ -46,6 +59,13 @@ function ResourceOpenMenu({
   file: ReturnType<typeof parseFileReference>;
   cwd: string | null | undefined;
 }) {
+  const { threadId } = useCodexContentOwner();
+  const { i18n } = useTranslation("thread");
+  const copyScope = useRef<object | null>(null);
+  useLayoutEffect(() => {
+    copyScope.current = {};
+    return () => { copyScope.current = null; };
+  }, [threadId, uri, cwd]);
   const [open, setOpen] = useState(false);
   const [place, setPlace] = useState<{ top: number; left: number } | null>(null);
   const external = /^https?:\/\//i.test(uri);
@@ -98,7 +118,7 @@ function ResourceOpenMenu({
             type="button"
             role="menuitem"
             onClick={() => {
-              void navigator.clipboard.writeText(uri);
+              copyResourceUri(uri, copyScope, i18n?.language ?? "zh");
               close();
             }}
           >

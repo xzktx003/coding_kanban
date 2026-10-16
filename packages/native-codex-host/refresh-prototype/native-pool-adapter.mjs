@@ -260,7 +260,14 @@ export function createNativePoolAdapter({
     readRss,
     probe,
     retain,
-    async unsubscribe(key, {beforeSend} = {}) {
+    async confirmReleased(key) {
+      validate(key);
+      const checkpoint = client.revision;
+      if (!Number.isSafeInteger(checkpoint) || checkpoint < 0) return false;
+      const absent = !(await loaded(key.threadId));
+      return absent && checkpoint === client.revision;
+    },
+    async unsubscribe(key, { beforeSend } = {}) {
       if (beforeSend !== undefined && typeof beforeSend !== "function")
         throw Error("native unsubscribe write guard required");
       const checkpoint = client.revision;
@@ -276,12 +283,13 @@ export function createNativePoolAdapter({
           { threadId: key.threadId },
           {
             beforeSend() {
-              beforeSend?.();
+              const checked = beforeSend?.();
               if (checkpoint !== client.revision)
                 throw Object.assign(
                   new Error("Native lifecycle changed before unsubscribe"),
                   { code: "NATIVE_NOT_SENT" },
                 );
+              return checked;
             },
           },
         );

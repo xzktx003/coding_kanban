@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import {
   Tooltip,
   TooltipContent,
@@ -16,9 +16,14 @@ export function ComposerTooltip({
   popupOpen?: boolean;
   children: ReactElement;
 }) {
+  const [open, setOpen] = useState(false);
   return (
     <TooltipProvider>
-      <Tooltip delayDuration={200} open={popupOpen ? false : undefined}>
+      <Tooltip
+        delayDuration={200}
+        open={!popupOpen && open}
+        onOpenChange={setOpen}
+      >
         <TooltipTrigger asChild>{children}</TooltipTrigger>
         <TooltipContent
           className="session-native-composer-tooltip"

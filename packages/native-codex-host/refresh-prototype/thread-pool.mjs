@@ -150,8 +150,17 @@ export function createThreadPool({
           // no interrupt, archive, shutdown or client disconnection is allowed.
           const result = await adapter.unsubscribe(candidate.key, {
             beforeSend() {
-              if (!valid || candidate.revision !== revision || !evictable(candidate))
-                throw Object.assign(new Error("Pool consumer or state changed before unsubscribe"), {code:"NATIVE_NOT_SENT"});
+              if (
+                !valid ||
+                candidate.revision !== revision ||
+                !evictable(candidate)
+              )
+                throw Object.assign(
+                  new Error(
+                    "Pool consumer or state changed before unsubscribe",
+                  ),
+                  { code: "NATIVE_NOT_SENT" },
+                );
             },
           });
           if (result?.protected === true && result.retained === true) {
@@ -170,8 +179,32 @@ export function createThreadPool({
           if (valid && candidate.revision === revision && evictable(candidate))
             entries.delete(candidate.key.threadId);
           else {
-            candidate.error = "subscription-recovery-required";
-            recoveryRequired = true;
+            // Native emits thread/closed for this successful unsubscribe too.
+            // Reconfirm actual absence after that event, fencing both native
+            // revision (adapter) and consumers/state (pool). Unknown receipts
+            // never reach this branch and are never retried or cleared here.
+            const confirmedRevision = candidate.revision;
+            const mayConfirm =
+              valid &&
+              candidate.consumers.size === 0 &&
+              candidate.pendingRequests === 0 &&
+              ["idle", "unknown"].includes(candidate.status) &&
+              typeof adapter.confirmReleased === "function";
+            const confirmed =
+              mayConfirm && (await adapter.confirmReleased(candidate.key));
+            if (
+              confirmed === true &&
+              valid &&
+              entries.get(candidate.key.threadId) === candidate &&
+              candidate.revision === confirmedRevision &&
+              candidate.consumers.size === 0 &&
+              candidate.pendingRequests === 0
+            )
+              entries.delete(candidate.key.threadId);
+            else {
+              candidate.error = "subscription-recovery-required";
+              recoveryRequired = true;
+            }
           }
         } catch {
           // No automatic replay of a mutation whose receipt is unknown.

@@ -26,12 +26,12 @@ vi.mock("@session/hooks/useThreadModelSettings", () => ({
   }),
 }));
 it("keeps the active native planning mode visible in the compact permission trigger", () => {
-  render(<AccessModePopover compact />);
+  render(<AccessModePopover compact threadId="owner" />);
   expect(screen.getByRole("button", { name: "执行权限：plan" })).toBeDefined();
 });
 it("uses real default permissions and does not enable native auto approval without an authoritative capability", async () => {
   native.mode = "default";
-  render(<AccessModePopover compact />);
+  render(<AccessModePopover compact threadId="owner" />);
   fireEvent.keyDown(screen.getByRole("button", { name: /执行权限/ }), {
     key: "ArrowDown",
   });

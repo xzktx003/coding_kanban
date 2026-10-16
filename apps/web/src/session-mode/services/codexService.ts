@@ -1,4 +1,16 @@
 import { MutationNotStartedError } from "./MutationNotStartedError";
+import { createThreadGoalState } from "./threadGoalState";
+import {
+  createGoalCompletionAutoClear,
+  installGoalCompletionAutoClear,
+  notifyGoalCompletionAutoClear,
+} from "./goalCompletionAutoClear";
+import {
+  threadGoalClearCompleted,
+  type ThreadGoalClearCompletedParams,
+} from "./apiAdapt/goalCompletion";
+import { threadAccess } from "./apiAdapt/codex";
+import { clearGoalAnnouncements } from "@session/features/goals/goalTranscript";
 import { nativeThreadSettings } from "./nativeThreadSettings";
 import {
   codexRuntimeState,
@@ -21,6 +33,7 @@ import type {
   Thread,
   ThreadForkParams,
   ThreadGoalClearParams,
+  ThreadGoalGetParams,
   ThreadGoalSetParams,
   ThreadListParams,
   ThreadResumeParams,
@@ -67,6 +80,7 @@ import {
   threadCompactStart,
   threadFork,
   threadGoalClear,
+  threadGoalGet,
   threadGoalSet,
   threadRead,
   threadRollback,
@@ -74,6 +88,22 @@ import {
   turnStart,
   turnSteer,
 } from "./apiAdapt";
+
+const unknownGoalMutations: Set<string> = import.meta.hot?.data?.unknownGoalMutations ?? new Set();
+const goalState = createThreadGoalState({
+  read: (threadId, options) =>
+    threadGoalGet({ threadId }, { ...options, suppressToast: true }),
+  set: (params, options) => threadGoalSet(params, options),
+  clear: (params, options) => threadGoalClear(params, options),
+  clearCompleted: (params, options) => threadGoalClearCompleted(params, options),
+  current: (threadId) => useCodexStore.getState().goalMap[threadId],
+  apply: (threadId, goal) => {
+    if (goal) useCodexStore.getState().setGoal(threadId, goal);
+    else useCodexStore.getState().clearGoal(threadId);
+    if (goal?.status === "complete")
+      queueMicrotask(() => void notifyGoalCompletionAutoClear(threadId));
+  },
+}, unknownGoalMutations);
 
 const sandboxModeToPolicy = (
   mode: SandboxMode,
@@ -286,6 +316,68 @@ const pendingThreadRollbacks = new Map<
   { boundary: string; promise: Promise<Thread> }
 >();
 let runtimeEpoch = 0;
+let goalCompletionRuntimeEpoch: number = import.meta.hot?.data?.goalCompletionRuntimeEpoch ?? 0;
+const goalCompletionAttempts: Map<string, number> = import.meta.hot?.data?.goalCompletionAttempts ?? new Map();
+let goalCompletionAuthorityKnown: boolean = import.meta.hot?.data?.goalCompletionAuthorityKnown ?? useCodexStore.getState().hasAccount !== null;
+const goalCompletionAutoClear = createGoalCompletionAutoClear({
+  current: threadId => useCodexStore.getState().goalMap[threadId],
+  scope: () => {
+    const state = useCodexStore.getState();
+    return JSON.stringify([goalCompletionRuntimeEpoch, state.accountNamespace, state.hasAccount, state.account?.type]);
+  },
+  canAttempt: threadId => {
+    const state = useCodexStore.getState();
+    const status = state.threadStatusMap[threadId] ?? state.threads.find(thread => thread.id === threadId)?.status;
+    return goalCompletionAuthorityKnown && status?.type === "idle" && !codexRuntimeState(state, threadId).running && !goalState.isMutating(threadId) && !goalState.isOutcomeUnknown(threadId);
+  },
+  // Read the raw ownership response so a missing/invalid generation cannot be
+  // normalized to an apparently authoritative zero by a UI status adapter.
+  access: (threadId, signal) => readWithDeadline(
+    accessSignal => threadAccess(threadId, false, accessSignal), 4000, signal,
+  ),
+  clear: params => goalState.clearCompleted(params),
+}, goalCompletionAttempts);
+
+function resetThreadGoalScope(clearViews = true) {
+  goalState.reset();
+  goalCompletionAutoClear.reset();
+  clearGoalAnnouncements();
+  if (clearViews)
+    useCodexStore.setState(state => ({ goalMap: {}, completedGoalMap: {}, goalScopeVersion: state.goalScopeVersion + 1 }));
+}
+const stopGoalCompletionAutoClear = installGoalCompletionAutoClear({
+  observe: threadId => goalCompletionAutoClear.observe(threadId),
+  reset: () => {
+    // A same-valued notification revokes pending authority, but says nothing
+    // about whether the last read-only goal belongs to a different account.
+    goalCompletionAuthorityKnown = false;
+    goalState.cancel();
+    goalCompletionAutoClear.cancel();
+    clearGoalAnnouncements();
+  },
+  confirm: () => {
+    goalCompletionAuthorityKnown = useCodexStore.getState().hasAccount !== null;
+    if (goalCompletionAuthorityKnown)
+      useCodexStore.setState(state => ({ goalScopeVersion: state.goalScopeVersion + 1 }));
+  },
+});
+const stopGoalAccountScope = useCodexStore.subscribe((state, previous) => {
+  if (state.accountNamespace !== previous.accountNamespace ||
+      state.hasAccount !== previous.hasAccount || state.account?.type !== previous.account?.type) {
+    goalCompletionAuthorityKnown = state.hasAccount !== null;
+    resetThreadGoalScope();
+  }
+});
+if (import.meta.hot) import.meta.hot.dispose(data => {
+  data.goalCompletionRuntimeEpoch = goalCompletionRuntimeEpoch;
+  data.goalCompletionAttempts = goalCompletionAttempts;
+  data.goalCompletionAuthorityKnown = goalCompletionAuthorityKnown;
+  data.unknownGoalMutations = unknownGoalMutations;
+  stopGoalCompletionAutoClear();
+  stopGoalAccountScope();
+  goalCompletionAutoClear.cancel();
+  goalState.cancel();
+});
 const pendingThreadResumes = new Map<string, Promise<void>>();
 const resumeVersions = new Map<string, symbol>();
 const historyControllers = new Map<string, AbortController>();
@@ -365,6 +457,9 @@ function readInitialThreadMetadata(threadId: string) {
 /** Invalidate responses from the previous runtime without touching drafts or history. */
 export function resetCodexRuntimeState() {
   runtimeEpoch++;
+  goalCompletionRuntimeEpoch++;
+  goalCompletionAuthorityKnown = false;
+  resetThreadGoalScope(false);
   pendingThreadResumes.clear();
   resumeVersions.clear();
   for (const controller of historyControllers.values()) controller.abort();
@@ -389,6 +484,9 @@ export function resetCodexRuntimeState() {
     historyLoadingMap: {},
     historyErrorMap: {},
     retryNoticeMap: {},
+    goalMap: {},
+    completedGoalMap: {},
+    goalScopeVersion: state.goalScopeVersion + 1,
   }));
 }
 
@@ -607,6 +705,9 @@ export const codexService = {
       afterTurnId?: string;
     },
   ) {
+    // Recovery follows existing event-driven history reads; it never adds a
+    // transcript poll or acquires a native execution instance.
+    if (!options?.cursor) void goalState.read(threadId).catch(() => undefined);
     const precedingRead = !overrides
       ? pendingThreadResumes.get(threadId)
       : undefined;
@@ -1226,28 +1327,20 @@ export const codexService = {
     }
   },
   async threadGoalSet(params: ThreadGoalSetParams) {
-    const epoch = runtimeEpoch;
     try {
-      const response = await readWithDeadline(async (signal) => {
-        const result = await threadGoalSet(params, { signal });
-        if (signal.aborted) throw signal.reason;
-        return result;
-      }, 30_000);
-      if (epoch !== runtimeEpoch) {
-        throw new Error(
-          "连接目标已切换，目标设置结果未确认，请先核对原连接的目标状态。",
-        );
-      }
-      return response;
+      return await goalState.set(params);
     } catch (error: unknown) {
       console.error("[CodexService] threadGoalSet error:", error);
-      if (error instanceof DOMException && error.name === "TimeoutError") {
-        throw new Error(
-          "目标设置结果未确认，请先核对目标状态；不会自动重发。",
-        );
-      }
       throw error;
     }
+  },
+  /** Before objective materialization; a canonical read never resumes this submit. */
+  assertThreadGoalReady(threadId: string) { goalState.assertReady(threadId); },
+  async threadGoalGet(params: ThreadGoalGetParams) {
+    return goalState.read(params.threadId);
+  },
+  async threadGoalClearCompleted(params: ThreadGoalClearCompletedParams) {
+    return goalState.clearCompleted(params);
   },
   async threadCompact(threadId: string) {
     try {
@@ -1259,8 +1352,7 @@ export const codexService = {
   },
   async threadGoalClear(params: ThreadGoalClearParams) {
     try {
-      const response = await threadGoalClear(params);
-      return response;
+      return await goalState.clear(params);
     } catch (error: unknown) {
       console.error("[CodexService] threadGoalClear error:", error);
       throw error;

@@ -9,6 +9,27 @@ const proof = {
   cliVersion: "0.162.0-alpha.17.2",
   cliSha256: "73b73b048546993298234a295de01ef2424e7a8b29def9d0ecb1ca7cb77500d4",
 };
+
+for (const mode of ["absent", "changed", "unknown-revision"])
+  test(`native absence proof rejects stale or unknown revisions (${mode})`, async () => {
+    const client = {
+      revision: mode === "unknown-revision" ? undefined : 0,
+      async request(method) {
+        assert.equal(method, "thread/loaded/list");
+        if (mode === "changed") client.revision++;
+        return { data: [], nextCursor: null };
+      },
+    };
+    const adapter = createNativePoolAdapter({
+      ...proof,
+      domain,
+      generation,
+      client,
+      readRss: async () => 100,
+      canonicalize: async (p) => p,
+    });
+    assert.equal(await adapter.confirmReleased(key), mode === "absent");
+  });
 function fixture(handler, resources = {}) {
   const requests = [];
   const adapter = createNativePoolAdapter({
@@ -78,15 +99,33 @@ test("native retention validates actual cwd and resumes without model, reasoning
 test("the pool consumer guard reaches the actual native unsubscribe write", async () => {
   let sent = false;
   const f = fixture((method) => {
-    if (method === "thread/read") return {thread:{id:threadId,cwd:key.cwd,source:"vscode",status:{type:"idle"}}};
-    if (method === "thread/loaded/list") return {data:[threadId],nextCursor:null};
-    if (method === "thread/unsubscribe") {sent=true;return {status:"unsubscribed"};}
+    if (method === "thread/read")
+      return {
+        thread: {
+          id: threadId,
+          cwd: key.cwd,
+          source: "vscode",
+          status: { type: "idle" },
+        },
+      };
+    if (method === "thread/loaded/list")
+      return { data: [threadId], nextCursor: null };
+    if (method === "thread/unsubscribe") {
+      sent = true;
+      return { status: "unsubscribed" };
+    }
     throw Error("unexpected native operation");
   });
-  const result = await f.adapter.unsubscribe(key,{beforeSend(){throw Object.assign(Error("consumer became visible"),{code:"NATIVE_NOT_SENT"});}});
-  assert.equal(sent,false);
-  assert.equal(result.protected,true);
-  assert.equal(result.retained,true);
+  const result = await f.adapter.unsubscribe(key, {
+    beforeSend() {
+      throw Object.assign(Error("consumer became visible"), {
+        code: "NATIVE_NOT_SENT",
+      });
+    },
+  });
+  assert.equal(sent, false);
+  assert.equal(result.protected, true);
+  assert.equal(result.retained, true);
 });
 test("rechecks active and approval flags without unsubscribing protected native contexts", async () => {
   const f = fixture(() => ({

@@ -270,3 +270,91 @@ UI 复验后补 `snapshot-inaccessible-red.log`：外层文档 getter 持续抛�
 正常复验的 browser.close 已完成；第一次异常退出由 Playwright 父进程退出清理处理。`browser-cleanup-evidence.json` 另按本夹具唯一 TLS SPKI 参数只读检查，没有对应 Chrome 进程；该参数检查仅作补充，不伪称完整浏览器后代身份清单，不触碰其他浏览器。`cleanup.json` 按最新 PID/start ticks 和运行根归属清理 **10 个自有进程，全部退出、无强制 kill**；native 物理 socket 由所有者移除，私有 HOME/登录副本/TLS 与整个临时目录删除，三条临时 LAN 端口不再可用。`formal-safety-final.json` 确认正式 Session/native launcher/native host 的 PID/start ticks 保持为 2712539/55361120、2718477/83117363、2729812/83119682。只读 `pnpm session:status` 返回 ready、仍为原运行实例，磁盘构建与运行产物不同；正式 HTTPS **https://10.30.0.24:8484/?mode=codex** HTTP 200。健康与源码构建不作为正式二进制切换或两秒通过证明。
 
 本批未降低任何门槛，仍处于持续实施：两秒与真实大消息兼容失败；自动控制/可见租约、跨桥接持久授权绑定、持久客户端源分配与全部宿主资源准入、并发审批/旧设置反例及其他官方操作、长历史/180 次矩阵/30 分钟长测未闭合。后续应推进这些缺口，不再重复同类小批发送当作最终验收，也不能因物理手机缺失而暂停。候选默认仍未启用。
+
+## 可见页面保护通道、原生回收竞争与 Vite 实际代理
+
+本批证据目录 `.dev-runtime/codex-refresh-20261015-visibility-control/`。新增元数据专用 `visibility-leases.mjs`、同源 WS 路由和前端客户端，按显式 profile 接入；架构、协议和限制见 [可见页面保护连接](refresh-visibility-control.md)。默认入口没有注册该控制器，不创建保护连接。登记只包含当前真实宿主实例、递增序号和可见 thread UUID，真实 cwd 由服务端只读核对。连接固定到 manager 与宿主记录的 domain/generation/PID/start ticks，前后两次验证及 companion 实例检查不允许回退另一服务；旧宿主缺少新字段时保留原路径，不因补字段重启。
+
+浏览器仅在 sessionStorage 保留本标签一个令牌；实际 reload 才能恢复它，新标签复制 opener 存储仍新建独立租约。连接/更新有界等待、三次连接尝试、服务端 8 KiB 消息与队列、每 profile 最多 64 个连接/租约/待处理操作；不能将这些局部限制当作最终全服务资源预算。pagehide 保留最后可见集合进入断连宽限，模式切换和后台隐藏释放自己的可见消费者，保持连接时没有租约 TTL，断连到期只释放可见保护。账号失效关闭自己的保护连接，不停止 native 或其他客户端。
+
+先红后绿还修复三处实际行为缺口：已验证的可见目标在排队前同步固定，并在真正 unsubscribe 写入前再核对消费者/池与 native 版本，避免异步回收抢先卸载；已知成功取消订阅产生的真实 `thread/closed` 事件曾让池停在 12 项，现在仅在成功回执后取得新原生卸载证明、且两次版本/消费者仍一致才移除，未知回执继续保留且不重发；清理失败后不得继续累积消费者组，失效观察也先清空再调用，避免关闭回调递归触发 2684 次。对应 `visibility-fence-red.log`、`adapter-consumer-write-red.log`、`closed-event-red.log`、`absence-revision-red.log`、`cleanup-bounds-red.log`、`invalidation-reentry-red.log`、`host-scope-ack-red.log` 等失败记录均保留。
+
+固定版本真实 native 的服务测试新增独立连接关闭超过一秒 native 卸载宽限后的重连保护、11→10 容量、可见项排除、释放后 LRU 以及精确 UUID/cwd/历史的 cold resume。本地受控 provider 共 13 次调用，原运行轮次只调用一次，未写正式历史。最初空 thread 尚无 rollout 的测试夹具假设错误，以及后续已持久化场景真实复现的 `12 != 10` 均保留，未将前者伪称产品 bug。最终宿主/适配器 **237/237、无跳过**（`host-closed-final.log`）；服务端当前两文件 **42/42**（`server-route-final.log`）。这些真实 native 测试与下述平台浏览器测试分别记录，不能拼接成未执行的官方 UI 整端证明。
+
+新浏览器脚本 `tests/e2e/codex-refresh-visibility-browser.mjs` 使用原客户端源码、实际 Vite 和现有代理配置、真实 HTTPS/WS；前端绑定 0.0.0.0，本批临时局域网地址 `https://10.30.0.24:5173`。原 `/api` 代理没有启用 WS，因此专用路由使用现有原生 WS 前缀 `/native-codex/clients/<UUID>/kanban-visibility`，不修改通用代理。平台夹具只编译一次诊断客户端，显式 `watch:null`，不验证 HMR 或性能。第一次默认 watcher 实际遇到主机 inotify/EMFILE 限制，失败日志与仅删除自有临时 TLS 目录的清理记录保留；未修改主机限制、关闭别人的 watcher 或把它称为应用整组通过。
+
+刷新测试的最初脚本在 Vite 代理只发头、不发正文时尚未提交新 document，旧连接自然仍在；等待中的 reload Promise 提前拒绝还导致清理记录遗漏。改为先提交新 document 的非脚本前缀，再保持脚本未发送，真实观察旧页面卸载；Promise 即刻处理拒绝、各清理阶段独立记录并始终落盘结果。旧失败 `browser-vite-frozen.log`、`browser-vite-reload/result.json` 及自有目录清理证明保留，没有把测试脚本问题算作产品修复或通过。
+
+最终 `browser-vite-final/result.json` **passed=true、4 项通过、三页页面错误 0**：新标签存储复制仍保持两条独立连接，两个桌面加一手机同时保护，硬刷新空档保留三个消费者并复用原租约，手机 tap 隐藏/恢复只增减自身消费者。Chromium **145.0.7632.6**；iPhone 16 模拟实际 screen/viewport/visualViewport 均 **393×852**、DPR **3**、maxTouchPoints **1**、粗指针、无 hover，iOS/Safari UA 只是配置。该夹具明确 `platformOnly=true, officialNativeUi=false, nativeService=false, measuresRecoveryPerformance=false`，不包含官方聊天 renderer、模型发送、系统键盘、iOS WebKit 或两秒测量。正常清理的未释放消费者为 **0**，浏览器/两个监听器关闭，临时 TLS 删除，地址不作为长期入口。
+
+本批实现了显式注册的页面保护通道，但独立持久管理/桥接控制进程、自动 profile/持久源分配、全桥接授权绑定及全部宿主资源准入仍待完成。官方两秒失败与未知大消息兼容问题保持红灯；完整官方多端审批/设置反例/操作、长历史、180 次矩阵与 30 分钟长测仍未验收。最终源码检查及负向浏览器结果另接后文，目标继续实施，不能据本批功能定向通过启用候选路径。
+
+本批最终源码前端 **136/136，21 文件**（`web-route-final.log`），最新服务端 **42/42**、原生 **237/237 无跳过**；`pnpm check` **exit 0**（`check-final.log`），既有大 chunk 提示保留。`git diff --check` 通过，`.env` 仍被忽略、`.env.example` 可提交，未提交或推送。格式化仅使用 web 工作区已有工具并限定任务文件，保留其他并行修改。
+
+实际 Vite 负向 `browser-vite-negative/result.json` 在编译副本去掉 reload 判别，按预期以 `cloned new tab must keep both protection connections` 失败、exit 1；它是验证反例能抓住缺陷，不能算作功能通过。正负两组各自清理均为 `unreleasedConsumers=0, privateTlsRemoved=true`，正向四项及零页面错误保持。无模型输入或正式 native 连接。
+
+`formal-safety-final.json` 与只读 `session-status-final.log` 再确认正式 HTTPS **https://10.30.0.24:8484/?mode=codex** 和后端健康均 HTTP 200，正式 Session/native launcher/native host 的 PID/start ticks 保持 **2712539/55361120、2718477/83117363、2729812/83119682**。正式 Session 仍 ready、磁盘产物与运行产物不同，没有因编译或本批隔离验收激活新运行层或停止 Agent。正式候选仍未启用，两秒及完整验收仍未通过；下一批推进独立持久控制进程和剩余官方关键路径。
+
+## 独立持久管理进程与真实退出保护
+
+本批证据目录 `.dev-runtime/codex-refresh-20261015-control-process/`，架构与显式 owner API 见 [独立管理进程](refresh-control-process.md)。新增 `control-service/worker/channel/peer.mjs`，让既有 manager、资源监测器、10 项池与页面租约由独立 detached Node 进程持有。网关经单独的私有 Unix JSONL 通道登记页面；控制进程从每次内部 `assertCurrent` 反向调用网关的真实宿主核对，不把一次握手当作后续操作授权。通道只接受保护元数据，不转发 native RPC、用户提交、审批或中断；CLI 包装器仍走既有路径，完整官方桥接授权绑定没有冒充完成。
+
+启动只接入已验证 native，使用新 `0700` 目录、`0600` 配置/能力记录、固定 PID/start ticks/native scope、socket inode/dev 和随机控制代次；就绪记录完整写入并同步后原子发布，不覆盖旧文件。重用显式 attach，现有/过期状态或启动超时均保留记录，不隐式新建 native、替换进程或接管默认 CLI socket。控制进程只继承环境允许名单、使用私有 HOME；测试完全没有复制登录数据或正式历史。消息/待写/部分帧上限 8192 bytes，严格 UTF-8；每 peer 待决/处理请求最多 64，全进程同时登记最多 64，固定 profile/网关连接各最多 32，保留最近 256 个来电 ID。未知回执不重发。公共 socket 是私有 bind socket 的硬链接，关闭只按 inode/dev 删除仍属自己的公共 endpoint；替换文件实际保留的用例通过。
+
+真实 `refresh-control-service.test.mjs` 使用固定未修改 CLI、私有 HOME 和 loopback 受控 provider。创建管理进程的父进程退出后，独立控制仍由新网关连接附着；原运行 turn 和已完成空闲上下文跨超过 native 一秒宽限的断连保留。清空全部页面可见消费者后，空闲上下文仍出现在真实 `thread/loaded/list`，证明由池持有；随后仅显式关闭自己的控制进程，空闲上下文按原生宽限卸载，运行 turn 仍 active，并由原接受 turn ID 完成一次。该夹具共 **两次本地模型调用，running 一次、idle 一次**；正式服务未写入测试任务。最终记录 `idle-native-final.log`、`service-cleanup-final.log` 均 **2/2，无跳过**。旧的初始单运行场景只有一次调用，保留但不替代最终空闲场景。
+
+开发期间捕获并修复三项红灯：`observer-rollback-red.log` 在多 profile 初始化达到观察器预算后遗留 **2** 个观察器，现在失败回滚已创建控制器；`replaced-callback-red.log` 证明一个页面回调抛错导致其他页面 `available=false`，现在异常局限于该页面。第一次 `control-green-final.log` 实际为 **9/10**，失败来自活跃 PID 的短命工作线程 children 在读取期间退出（ENOENT），该失败完整保留。`identity-task-red.log` 对自有模块测试副本只替换文件系统导入，确定性注入 task 消失；PID 捕获改为双读 stat 与 UID/proc inode/start ticks/非 zombie 核对，完整 RSS 测量仍枚举全部 task 并因同一注入缺测而失败，未减小统计范围或放宽阈值。修复后 `identity-control-green.log` **19/19**，后续还有回调反例及最终整组。
+
+最终宿主与适配器 **249/249、无跳过**（`native-full.log`，`--test-concurrency=4`，明确提供固定 `NATIVE_CODEX_REFRESH_CLI`）；后补夹具清理只改测试，重新跑真实服务 **2/2**（`service-cleanup-final.log`）。服务端 **43/43**（`server-control.log`），新增实际 profile 路由经真实私有通道执行 verify，native generation 改变后返回 unavailable 且不清空旧保护。控制器的检查超时会关闭自己的通道，不重试或迟到创建消费者。生产前端源码本批未变；上批 136 项没有冒称重新运行，当前 `pnpm check` **exit 0**（`check-final.log`）重新完成 shared、运行层、前后端类型与生产构建，保留既有 chunk 提示。
+
+浏览器 `browser-control/result.json` 经实际 Vite/HTTPS/WSS → 网关 → 私有通道，**4/4、页面错误 0、passed=true**：新标签复制存储仍独立、两桌面加手机共同保护、真实刷新脚本空档复用租约、手机 tap 只改变自身消费者。手机实际 screen/viewport/visualViewport 均 **393×852**、DPR **3**、maxTouchPoints **1**、粗指针、无 hover；Chromium **145.0.7632.6**，iOS/Safari UA 只是模拟。临时 LAN 地址 **https://10.30.0.24:5173**（HTTPS，端口 5173，前端绑定 0.0.0.0），测试结束已关闭。`browser-control-negative/result.json` 仅对编译副本去掉 reload 判别，预期在第一项失败、exit 1；正负两组清理均 `unreleasedConsumers=0, privateTlsRemoved=true`。
+
+平台结果显式 `throughPrivateControl=true, managerInSeparateProcess=false, nativeService=false, officialNativeUi=false, measuresRecoveryPerformance=false`：平台 manager 仍是同进程夹具，不能与另一项真实 detached/native 测试拼接为尚未执行的官方整端证明。没有以该功能检查替代两秒、真实 iOS/系统键盘或 180 次性能批次。
+
+`git diff --check` 通过，`.env` 忽略、`.env.example` 可提交，没有提交/推送。`formal-safety-final.json` 和 `session-status-final.log` 重新只读核对：正式 HTTPS **https://10.30.0.24:8484/?mode=codex** 与后端健康均 HTTP 200，受保护 Session/native launcher/native host 的 **2712539/55361120、2718477/83117363、2729812/83119682** 保持；Session ready，磁盘与运行产物仍不同，没有激活新运行层或停止正式 Agent。本批四种新测试目录前缀的残留数均为零；这是测试目录检查及各用例关闭断言，不伪称全主机进程扫描。
+
+独立持久管理组件已实现，目标继续 active。剩余完整官方 CLI 授权、自动 profile/持久来源/全部宿主根与监听器准入、实际大消息兼容、官方多端审批/旧设置/其他操作、长历史、两秒/180 次矩阵/30 分钟验收仍未完成；正式入口不启用候选。下一批优先推进完整桥接授权与剩余官方关键路径，不用物理手机缺失或本批组件通过缩小最终目标。
+
+## 显式桥接账号绑定、逐条写入保护与真实撤销
+
+本批证据目录 `.dev-runtime/codex-refresh-20261015-bridge-authority/`，实现与限制见 [桥接授权](refresh-bridge-authorization.md)。新增可选 `--refresh-control-root`，仅由 launcher 命令行显式提供，并依赖已有 refresh service 参数；不创建或替换 native/control 服务。新生成 wrapper 固定 native 与 control 双重 generation/PID/start ticks，私有能力令牌不嵌入 wrapper。控制代次变化即使 native 仍存活，也拒绝旧身份，包括 `--version` 不输出成功文本。普通旧宿主不因此重启或隐式升级，自动纳入所有 profile 仍未完成。
+
+每个受控 wrapper 经私有控制通道读取 manager 摘要，并用独立初始化的原生只读账号观察连接核对两次 `account/read(refreshToken:false)`，须与前后 manager 摘要一致才开放官方连接。原官方 initialize、opaque ID 和数据保持，观察连接只读账号，不读取 thread/正文或发送用户操作。账号边界、控制连接/原生观察连接丢失撤销 grant；每条真正 `ws.send` 前同步核对，包括同输入块的后续 JSONL。Promise guard 不授权，失效后不再恢复 stdin，未知提交不重发。显式 owner SIGTERM 是正常客户端收尾，不被误报成授权失败，不发送 native shutdown/turn interrupt。
+
+`manager-initial-red.log` 两个实际反例转绿：初始绑定期间第二次同值账号通知原来被继续当作初始通知；无关 turn 完成却改变统一 revision 导致误撤销。共享账号 tracker 现在只接受一次初始通知，账号边界与任务版本分开；任务版本仍保护回收写入。`control-send-red.log`、`async-guard-red.log`、`bridge-auth-red.log`、`control-flag-red.log` 分别记录实际写入缺少检查、异步 guard 被忽略、绑定组件/flag 缺失，后续定向通过。
+
+最初 `owner-stop-red.log` 在保护登记阶段出现泛化 unavailable，未到目标停止分支；`owner-stop-diagnostic.log` 在 worker readiness 前失败，两者缺少足够根因信息，保留且不计为 owner 停止反例或已修复根因。增加私有固定诊断后，`owner-stop-classified.log` 真正到达目标并复现 **owner 退出码 1 != 0**，修复后通过。`startup-diagnostic-red.log`、`resource-code-red.log` 先红后绿：启动只保留 state/stage/code/category，私有 RPC 只保留许可资源错误码及操作名，不复制异常文本；恶意配置标记未出现在记录。此前未分类样本不能由后来通过推定已经归因。
+
+在补充运行中撤销时，`native-active-logout-final.log` 另捕获 fixture 在首轮完成/落盘前读取历史的 **-32601 / list_turns is not supported yet**。改为先等待精确 turn ID 的原生完成通知，再核对该持久历史；没有重发模型调用或放松完成断言。`native-completion-notice-final.log` **3/3 无跳过**，随后最新源码整组见下。
+
+真实测试使用固定 CLI、全新无登录 HOME、loopback 受控 provider，直接运行生成的 CLI wrapper。两个原生客户端都用请求 ID **7**，分别返回 running/idle 的正确 thread；关闭第一个后另一个仍可只读请求。控制退出关闭原受控 CLI，原 turn 保持 active；新控制进程通过显式新目录接入，新 wrapper 仍拒绝旧控制身份。正常 owner SIGTERM 客户端 exit 0，不影响另一个连接。真实 `account/logout` 在无认证 provider 下仍产生账号边界，受控旧 CLI 失败退出；原 turn 在此后仍 active，释放夹具后以原接受 ID 完成一次。该批模型总调用 **2 次（running/idle 各 1）**，没有正式登录副本或正式历史写入。这不是实际 ChatGPT token 注销/刷新或组织切换验收。
+
+新增活动操作内的资源完整复测：仅对明确 `REFRESH_RESOURCES_UNAVAILABLE` 最多完整读三次、间隔 25 ms；持续缺测仍 `resources.available=false, warmAdmission=false`，保留活动观察，账号在间隙撤销会阻止下一次测量。原进程/task 全量范围、代次、五秒新鲜度及 RSS/数量上限保持，没有背景轮询或 native RPC 重试。`resource-resample-red.log` 记录瞬时缺测后不再取得完整样本的反例。第一次 `resource-resample-green.log` 的新增测试误把“停止保温”写成“整个 manager 必须失败”；按原 pool 的既有失败保护修正新用例，明确断言 ready 观察保持但不可保温，没有删除旧保护或放宽阈值。
+
+最终宿主/适配器 **263/263、无跳过**（`native-resample-final.log`，明确固定 `NATIVE_CODEX_REFRESH_CLI`，并发 4），包括真实运行中账号撤销、owner 停止、旧控制代次、绑定中取消及资源复测。本批较早的 `native-full.log` **261/261** 也保留，不能替代后补用例。服务端 **43/43**（`server-final.log`）。浏览器 `browser-platform/result.json` 经实际 Vite/HTTPS/WSS/私有通道 **4/4、零页面错误、passed=true**，iPhone 16 模拟为实际 393×852、DPR 3、触点 1、粗指针且无 hover，Chromium **145.0.7632.6**；测试临时 LAN HTTPS **https://10.30.0.24:5173**，绑定 0.0.0.0，结束后关闭，清理 `unreleasedConsumers=0, privateTlsRemoved=true`。明确 `officialNativeUi=false, nativeService=false, managerInSeparateProcess=false, measuresRecoveryPerformance=false`，不与另一项真实 native CLI 测试拼接成官方 UI/两秒证明。
+
+**下一项必补：**新 manager 重新附着同一个 native 时，仍缺少该 native 代次的持久初始账号锚和撤销记录；目前连接期 tracker 的不可恢复失效，不足以证明跨 manager 重建不会把新账号带入旧 loaded contexts。此项继续列为正式启用前的缺口，下一批优先在 native 所有者记录上绑定初始授权并验证撤销后不能重新接入旧代次。自动 profile/持久来源/完整宿主资源准入、真实 ChatGPT/OAuth、原生大消息、官方多端审批/设置/其他操作、长历史、两秒/180 次矩阵/30 分钟长测仍在原目标中。正式候选仍未启用，最终构建及正式状态另接后文。
+
+最后增加诊断额外字段反例 `diagnostic-extra-red.log`：父进程与 worker 均按严格固定字段/枚举复制，未知字段或错误类别被拒绝，避免把未来附加错误负载复制进 owner 报错。最新全组 **264/264、无跳过**（`native-diagnostic-final.log`）；`pnpm check` **exit 0**（`check-final.log`），前后端生产构建与类型检查通过，保留既有大 chunk 提示。前端产品源码本批未改，上批 136 项没有冒称本批重新运行；平台 4 项与服务端 43 项仍按各自证据范围记录。`git diff --check` 通过，`.env` 忽略、`.env.example` 可提交，没有提交或推送。
+
+`formal-safety-final.json` 与只读 `session-status-final.log` 核对正式入口 **https://10.30.0.24:8484/?mode=codex**（HTTPS，端口 8484）及后端健康均 HTTP 200。正式 Session/native launcher/native host 的 **PID/start ticks 为 2712539/55361120、2718477/83117363、2729812/83119682**，保持不变；Session ready，磁盘与运行产物不同，未激活新运行层或停止 Agent。本批五种独立控制测试目录前缀残留均为零，正常浏览器清理未释放消费者为零、临时 TLS 删除；目录检查不伪称全主机进程审计。native 初始授权持久锚及前述完整关卡仍未完成，目标继续 active，不宣布最终验收通过。
+
+## Native 初始授权锚、持续观察与跨管理器撤销
+
+本批证据目录 `.dev-runtime/codex-refresh-20261015-authority-anchor/`，协议与启动边界见 [持久授权锚](refresh-native-authority.md)。新 `startPrivateService` 在 ready 前启动独立 detached 授权观察进程，实际 initialize 后读取两次原生账号并确认初始通知，原子发布私有初始账号摘要/native scope/观察进程身份。观察器跨创建者和 manager 退出保留，不读取 thread/正文或发用户操作。`service.json` 固定观察器代次/PID/start ticks；缺少锚的旧候选记录不静默补写，不通过重建观察器采用旧上下文。
+
+每个新服务客户端保持独立授权连接，实际账号须匹配原始锚；新 manager 和桥接在 thread 操作前再次确认原始摘要。账号边界即使摘要相同也持久撤销，观察连接/进程失联则拒绝接入。原始记录不改绑。服务资源监测器自动加入 detached authority 根，完整计入 RSS/进程/task 预算；其他宿主的自动注册仍待完成。
+
+`anchor-red.log` 保留模块缺失的四个失败用例；`adoption-red.log` 保留新 manager/bridge 未确认原始锚与漏计观察器 RSS 的三项实际失败。`native-wire-red.log` 确认 NativeClient 没有将生命周期 guard 传给 transport 时，撤销后仍发送；传到真正 ws.send 后转绿。`consumer-revoke-red.log` 又实际复现客户端撤销文件写入失败后其他授权连接存活，现由已握手 revoke 通知独立观察器关闭全部自有通道，写盘失败仍拒绝后续接入。`bridge-anchor-write-red.log` 复现官方 guard 未同步核对锚，现增加原客户端 `assertAuthorizationCurrent`，不再只等异步连接关闭。所有未知回执仍不重放，既有 8 KiB 控制通道及 native 消息/背压预算保持。
+
+真实固定 CLI 和未修改 VSIX 使用全新无登录 HOME、loopback provider。创建者退出后授权观察进程与 native 保留；显式替换 control/manager 不重建初始锚。实际同值 provider 的 account/logout 后，旧受控 CLI、新服务客户端与新 manager 均拒绝授权；独立自有诊断 oracle 发起这次无登录夹具的 logout，此后只读核对原任务状态和历史，原 accepted turn 此后仍 active，释放模型后以原 ID 完成一次，模型共两次调用（running/idle 各一次）。另在服务用例结束时按自有 PID/start ticks 精确 SIGKILL 授权观察器，确认没有撤销文件仍无法新接入，native 保持存活且原轮次历史可读。这不等于真实 ChatGPT token/OAuth/组织切换或官方 GUI 已验收。
+
+本批未改前端产品源码，未将上一批 Vite/HTTPS/WSS/iPhone 16 的四项平台通过冒称为本批新增官方 UI 证明；用户确认的 393×852/DPR 3/触控模拟继续有效。原两秒失败样本、原生超限大消息、自动 profile/持久来源/全部宿主资源准入、完整官方多端审批/设置/其他操作、长历史、180 次矩阵和 30 分钟长测仍保留为待完成项。正式候选默认未启用。最终整组/构建与正式运行安全证据接后文。
+
+后续复核又发现单请求回收 guard 仍在输入队列入口执行。`request-write-red.log` 复现 lifetime guard 阶段出现新可见消费者后，旧单请求检查已经通过、unsubscribe 仍被发送。现在按原请求 ID 将请求 guard 保留到真正 ws.send 前，已超时/不再 pending 的请求不迟到发送。明确未发送的 veto 以 NATIVE_NOT_SENT 拒绝该请求并保持连接及其他订阅；`request-veto-connection-red.log` 先复现直接关闭连接会让后续 account/read 失败，修复后 `request-veto-green.log` 通过。首次 `request-write-green.log` 是实现迭代中把无 ID 的 initialized 通知误查为 pending 请求，导致两项通知等待超时；已修复，失败保留，不把它写成旧产品根因或成功结果。所有大小/背压阈值、未知回执不重放和原生任务保护保持。
+
+`native-request-final.log` 整组 **274/275**，旧 client 授权测试要求保留原 veto 原因，而新增代码统一文本丢掉该原因；现保留至多 256 字符的原自有 guard 原因并增加明确未发送错误码，没有删除或放宽旧断言。`lifetime-veto-code-red.log` 又验证生命周期 guard 不能误用同名 veto 码保留连接，账号生命周期检查失败统一关闭 transport，只有单请求检查可取消当前未发送请求。兼容性定向日志 `guard-compatibility-green.log` 与最终整组另接后文，之前 274 项绿灯不替代这些后补检查。
+
+最终 `native-compatible-final.log` **275/275、无跳过**，显式固定匹配 CLI、并发 4；包含真实原生创建者退出、同值账号撤销、新 manager 拒绝、原 turn 完成一次、观察进程 SIGKILL 后拒绝新接入、实际请求写入 veto 与连接保留。`guard-compatibility-green.log` **26/26**；`pnpm check` **exit 0**（`check-final.log`），保留既有大 chunk 提示。后补改动仅为该 MJS 协议层，最新整组已覆盖；前端/服务端产品源码本批未改，未冒称重跑此前 136/43 项。任务文件使用现有 web Prettier，`git diff --check` 通过，`.env` 忽略、`.env.example` 可提交，未提交或推送。
+
+`formal-safety-final.json` 在最终原生整组结束后再次核对：正式 LAN **https://10.30.0.24:8484/?mode=codex**（HTTPS，端口 8484）与后端健康均 HTTP 200；正式 Session/native launcher/native host 的 PID/start ticks 保持 **2712539/55361120、2718477/83117363、2729812/83119682**。`session-status-final.log` 仍 ready、运行产物与磁盘不同，未切换运行层或停止正式 Agent。四种本批测试目录前缀残留为零；测试自身按精确所有者身份清理 native/observer/control，此目录检查不代表全主机进程审计。持久授权锚的隔离实现和本批验收完成，前述完整官方 UI、性能与长测关卡仍未通过，目标继续 active，候选未启用。

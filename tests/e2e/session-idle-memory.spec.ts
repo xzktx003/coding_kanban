@@ -1,7 +1,32 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { expect, test, type CDPSession, type Page } from "@playwright/test";
+import { sampleRendererRss } from "../../scripts/session-renderer-memory.mjs";
 import { installSessionUxFixture } from "./session-ux-fixture";
 import { liveStream } from "./session-sse-fixture";
+
+type RendererMemory = {
+  rendererRssBytes?: number;
+  rendererProcesses: Array<{
+    pid: number;
+    startTicks: string;
+    rssBytes: number;
+  }>;
+};
+type RssSamplingError = { phase: string; error: string };
+
+function rendererMemory(
+  processes: Array<{ id: number; type: string }>,
+  errors: RssSamplingError[],
+  phase: string,
+): RendererMemory {
+  if (process.platform !== "linux") return { rendererProcesses: [] };
+  try {
+    return sampleRendererRss(processes);
+  } catch (error) {
+    errors.push({ phase, error: String(error) });
+    throw error;
+  }
+}
 
 async function setup(page: Page, baseURL: string) {
   const fixture = await installSessionUxFixture(page, 3);
@@ -181,25 +206,22 @@ test("invisible transcripts expire automatically while native completions and re
   const browserCdp = await context.browser()!.newBrowserCDPSession();
   const started = Date.now(),
     observations: unknown[] = [];
+  const rssSamplingErrors: RssSamplingError[] = [];
   const observe = async (phase: string) => {
     const heap = await cdp.send("Runtime.getHeapUsage");
     const processes = await browserCdp.send("SystemInfo.getProcessInfo");
-    const rendererRssBytes =
-      process.platform === "linux"
-        ? processes.processInfo
-            .filter((p) => p.type === "renderer")
-            .reduce((sum, p) => {
-              const status = readFileSync(`/proc/${p.id}/status`, "utf8");
-              return (
-                sum + Number(status.match(/VmRSS:\s+(\d+)/)?.[1] ?? 0) * 1024
-              );
-            }, 0)
-        : null;
+    const memory = rendererMemory(
+      processes.processInfo,
+      rssSamplingErrors,
+      phase,
+    );
     observations.push({
       phase,
       seconds: (Date.now() - started) / 1000,
       heapBytes: heap.usedSize,
-      rendererRssBytes,
+      ...memory,
+      rendererRssBytes: memory.rendererRssBytes ?? null,
+      rendererRssScope: "all-browser-renderers",
       snapshot: await snapshot(page),
     });
   };
@@ -293,6 +315,7 @@ test("invisible transcripts expire automatically while native completions and re
             "Natural heap samples and all renderer RSS in this isolated browser; no forced GC or reload",
           observations,
           errors,
+          rssSamplingErrors,
         },
         null,
         2,
@@ -327,9 +350,12 @@ test("long-running native events keep dormant bodies empty with natural garbage 
     listeners: number;
     reactMeasures: number;
     rendererRssBytes?: number;
+    rendererProcesses: RendererMemory["rendererProcesses"];
+    rendererRssScope: string;
     audioContexts: ReturnType<typeof audio>;
   }> = [];
   const errors: string[] = [];
+  const rssSamplingErrors: RssSamplingError[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
   let sequence = 0,
     cycle = 0;
@@ -388,22 +414,11 @@ test("long-running native events keep dormant bodies empty with natural garbage 
           }).length,
       );
       const processes = await browserCdp.send("SystemInfo.getProcessInfo");
-      let rendererRssBytes: number | undefined;
-      if (process.platform === "linux") {
-        const renderers = processes.processInfo.filter(
-          (p) => p.type === "renderer",
-        );
-        try {
-          rendererRssBytes = renderers.reduce((total, p) => {
-            const status = readFileSync(`/proc/${p.id}/status`, "utf8");
-            return (
-              total + Number(status.match(/VmRSS:\s+(\d+)/)?.[1] ?? 0) * 1024
-            );
-          }, 0);
-        } catch {
-          /* RSS sampling is optional on platforms without readable procfs. */
-        }
-      }
+      const memory = rendererMemory(
+        processes.processInfo,
+        rssSamplingErrors,
+        `cycle:${cycle}`,
+      );
       expect(reactMeasures).toBe(0);
       expect(audio().active).toBeLessThanOrEqual(1);
       expect(audio().peakActive).toBeLessThanOrEqual(1);
@@ -414,7 +429,8 @@ test("long-running native events keep dormant bodies empty with natural garbage 
         nodes: dom.nodes,
         listeners: dom.jsEventListeners,
         reactMeasures,
-        rendererRssBytes,
+        ...memory,
+        rendererRssScope: "all-browser-renderers",
         audioContexts: audio(),
       });
       if (cycle % 40 >= 16 && cycle % 40 < 20 && Date.now() - start > 90_000) {
@@ -456,7 +472,13 @@ test("long-running native events keep dormant bodies empty with natural garbage 
     expect(audio().created).toBe(1);
     await expect.poll(() => audio().active, { timeout: 35_000 }).toBe(0);
   } finally {
-    const evidence = JSON.stringify({minutes:soakMinutes,cycles:cycle,samples,errors});
+    const evidence = JSON.stringify({
+      minutes: soakMinutes,
+      cycles: cycle,
+      samples,
+      errors,
+      rssSamplingErrors,
+    });
     writeFileSync(testInfo.outputPath("natural-gc-soak.json"), evidence);
     await testInfo.attach("natural-gc-soak.json", {
       body: evidence,

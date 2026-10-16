@@ -256,7 +256,7 @@ async function setup(page: Page, active = true) {
     settingsUrl: () => settingsUrl,
     storeUrl: () => storeUrl,
     close: async () => {
-      await page.unroute("**/api/session/followups**");
+      await page.unroute("**/api/session/followups**").catch(() => {});
       await app.close();
       await rm(root, { recursive: true, force: true });
     },
@@ -273,7 +273,7 @@ test("running messages queue, edit and reorder, survive reload, and can steer wi
       .locator(".session-agent-view [contenteditable=true]")
       .first();
     await editor.fill("first queued");
-    await page.getByRole("button", { name: "排队消息", exact: true }).click();
+    await page.getByRole("button", { name: "发送消息", exact: true }).click();
     await expect(page.locator(".session-followup-queue li")).toHaveCount(1);
     expect(f.calls).toHaveLength(0);
     await editor.fill("second queued");
@@ -283,7 +283,7 @@ test("running messages queue, edit and reorder, survive reload, and can steer wi
       .click();
     await expect(page.locator(".session-followup-queue li")).toHaveCount(2);
     await page
-      .getByRole("button", { name: "排队消息 2 的更多操作", exact: true })
+      .getByRole("button", { name: "排队消息操作 2", exact: true })
       .click();
     await page
       .getByRole("menuitem", { name: "上移消息 2", exact: true })
@@ -294,7 +294,7 @@ test("running messages queue, edit and reorder, survive reload, and can steer wi
     await page
       .locator(".session-followup-queue li")
       .first()
-      .getByRole("button", { name: "排队消息 1 的更多操作", exact: true })
+      .getByRole("button", { name: "排队消息操作 1", exact: true })
       .click();
     await page.getByRole("menuitem", { name: "编辑消息", exact: true }).click();
     await page

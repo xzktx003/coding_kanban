@@ -35,6 +35,7 @@ import {
   useMentionItems,
 } from "./mentions";
 import { RecordSkillDialog } from "./RecordSkillDialog";
+import { notifyNativeFilePickerError } from "@session/features/native-notifications/nativeFilePickerError";
 
 interface SelectFilesMenuItemProps {
   onFilesSelected?: (paths: string[]) => void;
@@ -47,6 +48,7 @@ export function SelectFilesMenuItem({
   onAfterSelect,
   className,
 }: SelectFilesMenuItemProps) {
+  const { i18n } = useTranslation();
   const handleSelectFiles = async () => {
     try {
       const selected = await open({
@@ -61,8 +63,8 @@ export function SelectFilesMenuItem({
       const paths = Array.isArray(selected) ? selected : [selected];
       onFilesSelected?.(paths);
       onAfterSelect?.();
-    } catch (error) {
-      console.error("Failed to select files:", error);
+    } catch {
+      notifyNativeFilePickerError(i18n?.language ?? "zh");
     }
   };
 
@@ -148,6 +150,7 @@ export interface ComposerMenuProps {
   onImagesSelected?: (paths: string[]) => void;
   onFilesSelected?: (paths: string[]) => void;
   onInsertMention?: (text: string, mention?: NativeInputMention) => void;
+  onGoal?: () => void;
   actions?: (close: () => void) => ReactNode;
 }
 
@@ -157,13 +160,14 @@ export function ComposerMenu({
   onImagesSelected,
   onFilesSelected,
   onInsertMention,
+  onGoal,
   actions,
 }: ComposerMenuProps) {
   const threadId = useCodexStore((state) => state.currentThreadId);
   const { webSearchRequest, setWebSearch } = useThreadModelSettings(threadId);
   const { enabled: goalEnabled, setEnabled: setGoalEnabled } =
     useGoalDraft(owner);
-  const { t } = useTranslation("composer");
+  const { t, i18n } = useTranslation("composer");
   const [openState, setOpenState] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);
   const { items } = useMentionItems();
@@ -190,8 +194,8 @@ export function ComposerMenu({
           );
         setOpenState(false);
       }
-    } catch (error) {
-      console.error("Failed to select image:", error);
+    } catch {
+      notifyNativeFilePickerError(i18n?.language ?? "zh");
     }
   };
   useEffect(() => {
@@ -204,11 +208,7 @@ export function ComposerMenu({
 
   return (
     <Popover open={openState} onOpenChange={setOpenState}>
-      <ComposerTooltip
-        label="附加文件"
-        shortcut="@"
-        popupOpen={openState}
-      >
+      <ComposerTooltip label="附加文件" shortcut="@" popupOpen={openState}>
         <PopoverTrigger asChild>
           <Button
             type="button"
@@ -287,7 +287,8 @@ export function ComposerMenu({
               goalEnabled && "bg-blue-50 text-blue-700",
             )}
             onClick={() => {
-              setGoalEnabled(!goalEnabled);
+              if (onGoal) onGoal();
+              else setGoalEnabled(true);
               setOpenState(false);
             }}
           >

@@ -14,6 +14,7 @@ import {
   getThreadModelSettings,
   hydrateThreadModel,
 } from "../stores/useThreadModelStore";
+import { nativeThreadSettings } from "./nativeThreadSettings";
 const pending = new Map<string, Promise<string>>();
 export function createSideChat(
   parentId: string,
@@ -29,14 +30,19 @@ export function createSideChat(
     if (!thread?.id || thread.id === parentId)
       throw new Error("服务未返回独立的侧边会话");
     const events = convertThreadHistoryToEvents(thread);
-    hydrateThreadModel(thread.id, {
-      model: response.model || parentModel.model,
-      modelProvider: response.modelProvider ?? parentModel.modelProvider,
-      reasoningEffort:
-        response.reasoningEffort === undefined
-          ? parentModel.reasoningEffort
-          : response.reasoningEffort,
-    });
+    hydrateThreadModel(
+      thread.id,
+      {
+        ...nativeThreadSettings(response),
+        model: response.model || parentModel.model,
+        modelProvider: response.modelProvider ?? parentModel.modelProvider,
+        reasoningEffort:
+          response.reasoningEffort === undefined
+            ? parentModel.reasoningEffort
+            : response.reasoningEffort,
+      },
+      { initialOnly: true },
+    );
     useCodexStore.setState((s) => ({
       threads: [
         lightweightThreadForStore(thread),
@@ -88,15 +94,13 @@ export async function runConversationReview(
     throw new Error("服务未返回审查会话");
   const id = result.reviewThreadId;
   if (capturedCwd)
-    useSavedTurnReviewStore
-      .getState()
-      .captureReviewScope({
-        requestThreadId: threadId,
-        reviewThreadId: id,
-        turnId: result.turn.id,
-        cwd: capturedCwd,
-        target: capturedTarget,
-      });
+    useSavedTurnReviewStore.getState().captureReviewScope({
+      requestThreadId: threadId,
+      reviewThreadId: id,
+      turnId: result.turn.id,
+      cwd: capturedCwd,
+      target: capturedTarget,
+    });
   const beforeTiming = s.turnTimingMap[id];
   useCodexStore.setState((s) => {
     if (

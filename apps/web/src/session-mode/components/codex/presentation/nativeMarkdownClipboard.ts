@@ -11,17 +11,15 @@ export async function writeNativeMarkdownClipboard(
     typeof ClipboardItem !== "undefined" &&
     clipboard?.write
   ) {
-    await clipboard.write([
+    return clipboard.write([
       new ClipboardItem({
         "text/plain": new Blob([text], { type: "text/plain" }),
         "text/html": new Blob([html], { type: "text/html" }),
       }),
     ]);
-    return;
   }
   if (clipboard?.writeText) {
-    await clipboard.writeText(text);
-    return;
+    return clipboard.writeText(text);
   }
   // The legacy copy must run within the original user gesture. Reuse the
   // application's textarea fallback, adding sanitized rich data and restoring

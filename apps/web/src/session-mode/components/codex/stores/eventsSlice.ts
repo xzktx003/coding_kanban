@@ -8,6 +8,11 @@ import type { StateCreator } from "zustand";
 import type { ServerNotification } from "@session/bindings";
 import type { ThreadGoal, ThreadTokenUsage } from "@session/bindings/v2";
 import {
+  isThreadGoalForThread,
+  sameThreadGoal,
+  threadGoalVersions,
+} from "@session/services/threadGoalState";
+import {
   appendStreamingTextPreview,
   createStreamingTextPreview,
   copyTranscriptText,
@@ -20,6 +25,24 @@ import {
 import { recordTranscriptTraffic } from "@session/services/sessionMemoryPressure";
 import { appendTranscriptEvent, type DeltaEvent } from "./eventUtils";
 import type { CodexStore, EventsSlice, TurnTiming } from "./types";
+
+function observeGoal(state: CodexStore, threadId: string, goal: ThreadGoal) {
+  const previousCompletion = state.completedGoalMap[threadId];
+  const completion = goal.status === "complete" ? goal : undefined;
+  const sameGoal = sameThreadGoal(state.goalMap[threadId], goal);
+  const sameCompletion = sameThreadGoal(previousCompletion, completion);
+  if (sameGoal && sameCompletion) return state;
+  let completedGoalMap = state.completedGoalMap;
+  if (!sameCompletion) {
+    completedGoalMap = { ...completedGoalMap };
+    if (completion) completedGoalMap[threadId] = completion;
+    else delete completedGoalMap[threadId];
+  }
+  return {
+    goalMap: sameGoal ? state.goalMap : { ...state.goalMap, [threadId]: goal },
+    completedGoalMap,
+  };
+}
 
 function appendTextSegments(
   segments: string[],
@@ -66,12 +89,33 @@ export const createEventsSlice: StateCreator<
   retryNoticeMap: {},
   tokenUsageMap: {},
   goalMap: {},
+  completedGoalMap: {},
+  goalScopeVersion: 0,
   goalEnabled: false,
 
   addEvent: (threadId: string, event: ServerNotification) => {
     const visibleEvent = withoutToolTranscriptEvent(event);
     if (!visibleEvent) return;
     event = visibleEvent;
+    // Goal state is lifecycle metadata, never a retained transcript body. The
+    // revision still advances for identical observations so older reads lose.
+    if (event.method === "thread/goal/updated") {
+      const goal = event.params.goal;
+      if (!isThreadGoalForThread(goal, threadId)) return;
+      threadGoalVersions.touch(threadId);
+      set((state: CodexStore) => observeGoal(state, threadId, goal));
+      return;
+    }
+    if (event.method === "thread/goal/cleared") {
+      threadGoalVersions.touch(threadId);
+      set((state: CodexStore) => {
+        if (!state.goalMap[threadId]) return state;
+        const goalMap = { ...state.goalMap };
+        delete goalMap[threadId];
+        return { goalMap };
+      });
+      return;
+    }
     set((state: CodexStore) => {
       const existingEvents = state.events[threadId] || [];
       let filteredEvents = existingEvents;
@@ -321,15 +365,6 @@ export const createEventsSlice: StateCreator<
         }
       }
 
-      let goalMap = state.goalMap;
-      if (event.method === "thread/goal/updated") {
-        goalMap = { ...goalMap, [threadId]: event.params.goal };
-      } else if (event.method === "thread/goal/cleared") {
-        const newGoalMap = { ...goalMap };
-        delete newGoalMap[threadId];
-        goalMap = newGoalMap;
-      }
-
       if (
         !eventsChanged &&
         streamingAgentMessages === state.streamingAgentMessages &&
@@ -338,8 +373,7 @@ export const createEventsSlice: StateCreator<
         currentTurnId === state.currentTurnId &&
         commandStatusMap === state.commandStatusMap &&
         commandDurationMap === state.commandDurationMap &&
-        retryNoticeMap === state.retryNoticeMap &&
-        goalMap === state.goalMap
+        retryNoticeMap === state.retryNoticeMap
       )
         return state;
       return {
@@ -353,7 +387,6 @@ export const createEventsSlice: StateCreator<
         commandStatusMap,
         commandDurationMap,
         retryNoticeMap,
-        goalMap,
       };
     });
   },
@@ -459,16 +492,15 @@ export const createEventsSlice: StateCreator<
   },
 
   setGoal: (threadId: string, goal: ThreadGoal) => {
-    set((state: CodexStore) => ({
-      goalMap: {
-        ...state.goalMap,
-        [threadId]: goal,
-      },
-    }));
+    if (!isThreadGoalForThread(goal, threadId)) return;
+    threadGoalVersions.touch(threadId);
+    set((state: CodexStore) => observeGoal(state, threadId, goal));
   },
 
   clearGoal: (threadId: string) => {
+    threadGoalVersions.touch(threadId);
     set((state: CodexStore) => {
+      if (!state.goalMap[threadId]) return state;
       const newGoalMap = { ...state.goalMap };
       delete newGoalMap[threadId];
       return { goalMap: newGoalMap };

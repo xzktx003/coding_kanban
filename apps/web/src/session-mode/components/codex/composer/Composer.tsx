@@ -1,4 +1,5 @@
 import { sessionDraftSubmissions } from "@session/features/subagents/submissions";
+import { v4 as randomUUID } from "uuid";
 import { mentionDrafts } from "@session/features/subagents/mentions";
 import { AgentMentionPicker } from "@session/features/subagents/AgentMentionPicker";
 import { BackgroundAgentSummary } from "@session/features/subagents/BackgroundAgentSummary";
@@ -42,6 +43,23 @@ import { NativeComposerIcon } from "./NativeComposerIcon";
 import { NativeModelSelector } from "./NativeModelSelector";
 import { NativeAgentSettings } from "./NativeAgentSettings";
 import { goalDrafts, useGoalDraft } from "./goalDrafts";
+import {
+  GoalConfirmation,
+  ThreadGoalCard,
+} from "@session/features/goals/ThreadGoalCard";
+import { GoalIcon } from "@session/features/goals/GoalIcon";
+import {
+  goalStrings,
+  goalTextFromPrompt,
+} from "@session/features/goals/goalPresentation";
+import {
+  materializeGoalDraft,
+  isGoalSubmissionUncertain,
+} from "@session/features/goals/goalMaterialization";
+import { appendGoalAnnouncement } from "@session/features/goals/goalTranscript";
+import { cleanupRejectedGoal } from "@session/features/goals/goalCleanup";
+import { threadGoalVersions } from "@session/services/threadGoalState";
+import { useTranslation } from "react-i18next";
 import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
 import { CloudTasksPanel } from "@session/features/codex-host/CloudTasksPanel";
 import { CodexHostPanel } from "@session/features/codex-host/CodexHostPanel";
@@ -58,10 +76,7 @@ import {
 import { useShallow } from "zustand/react/shallow";
 import { toast } from "sonner";
 import {
-  Pause,
-  Play,
   Square,
-  Target,
   X,
   ListPlus,
   CornerDownRight,
@@ -108,30 +123,19 @@ interface ComposerProps {
   onAfterSend?: (threadId: string, text: string) => void;
 }
 
-// Compact status label per goal status, mirroring
-// codex-rs/tui/src/bottom_pane/footer.rs::goal_status_indicator_line.
-function goalStatusLabel(status: ThreadGoal["status"]): string {
-  switch (status) {
-    case "active":
-      return "Pursuing goal";
-    case "paused":
-      return "Goal paused";
-    case "blocked":
-      return "Goal blocked";
-    case "usageLimited":
-      return "Goal hit usage limits";
-    case "budgetLimited":
-      return "Goal unmet";
-    case "complete":
-      return "Goal achieved";
-  }
-}
-
 export function Composer({
   overrideSend,
   onAfterSend,
   targetLabel,
 }: ComposerProps) {
+  const { i18n } = useTranslation();
+  const goalLabels = goalStrings(i18n.language);
+  const [goalReplacement, setGoalReplacement] = useState<{
+    owner: string;
+    goal: ThreadGoal;
+    objective: string;
+    submit: () => Promise<void>;
+  } | null>(null);
   const preferences = useFollowupSettingsStore();
   const [reviewOpen, setReviewOpen] = useState(false);
   const [detailsOwner, setDetailsOwner] = useState<string | null>(null);
@@ -180,6 +184,7 @@ export function Composer({
     setHostOwner(null);
     setCloudOwner(null);
     setModelOwner(null);
+    setGoalReplacement(null);
   }, [owner]);
   const appendFileLinks = useCallback(
     (paths: string[]) => {
@@ -236,7 +241,7 @@ export function Composer({
       event.preventDefault();
       event.stopPropagation();
       composerDrafts.add(owner, {
-        id: crypto.randomUUID(),
+        id: randomUUID(),
         kind: "paste",
         name: "粘贴的文本",
         text,
@@ -258,9 +263,8 @@ export function Composer({
       await followupService.stop(currentThreadId, currentTurnId);
     },
   );
-  // Actual goal state for the current thread, driven by thread/goal/updated
-  // (mirrors codex-rs/tui's GoalStatusIndicator, which is derived purely
-  // from ThreadGoal.status rather than a local UI toggle).
+  // Native snapshots and ordered notifications own the saved goal; draft mode
+  // only controls the next submission, never its status or budget.
   const threadGoal = useThreadGoal();
   const hasContextUsage = useCodexStore(
     (s) =>
@@ -302,12 +306,22 @@ export function Composer({
     submitMode.current = null;
     const parameters = followupParameters(currentThreadId ?? "");
     const submittedGoal = goalDrafts.read(owner);
+    const goalCheckpoint = threadGoalVersions.capture(currentThreadId ?? "");
     let goalClearingOwner = owner;
-    const text = inputValue.trim();
+    const goalCommand = goalTextFromPrompt(inputValue);
+    const creatingGoal = submittedGoal.enabled || goalCommand !== null;
+    const text = goalCommand ?? inputValue.trim();
     const submittedContexts = richDraft.contexts;
     const submittedMentions = mentionDrafts.read(owner);
     const submittedPluginMentions = pluginInputDrafts.read(owner, text);
     const completeText = composeContextText(text, submittedContexts);
+    if (goalCommand === "" && !submittedContexts.length && !images.length) {
+      setCollaborationMode("default");
+      setGoalEnabled(true);
+      setInputValue("");
+      editorRef.current?.focus();
+      return;
+    }
     if (
       blocked ||
       sendingRef.current.has(owner) ||
@@ -343,116 +357,215 @@ export function Composer({
       else sendingRef.current.delete(key);
       setSendingOwners((previous) => ({ ...previous, [key]: value }));
     };
-    markSending(owner, true);
-    try {
-      if (running && requestedMode !== "queue" && !currentTurnId)
-        throw new Error("正在同步当前任务，请稍后引导或停止");
-      if (running && submittedGoal.enabled)
-        throw new Error("当前任务运行中，请先取消目标草稿再发送追加消息");
-      if (overrideSend) {
-        overrideSend(completeText);
-        clearSubmitted();
-        return;
-      }
-      let targetThreadId = currentThreadId;
-      if (!targetThreadId) {
-        const thread = await codexService.threadStart({
-          shouldActivate: () => activeDraftOwner() === owner,
-        });
-        targetThreadId = thread.id;
-        parameters.cwd = thread.cwd ?? cwd;
-        submittedOwner = sessionDraftKey("codex", thread.id);
-        markSending(submittedOwner, true);
-        useSessionDraftStore.getState().move(owner, submittedOwner);
-        if (goalDrafts.move(owner, submittedOwner))
-          goalClearingOwner = submittedOwner;
-        composerDrafts.move(owner, submittedOwner);
-        mentionDrafts.move(owner, submittedOwner);
-        pluginInputDrafts.move(owner, submittedOwner);
-        // Follow the newly created identity before moving attachments, so a storage failure
-        // leaves a visible retry destination instead of creating a second session.
-        useSessionNameStore.getState().initializeName("codex", thread.id, text);
-        addAgentCard(
-          {
-            kind: "codex",
-            id: thread.id,
-            preview: text,
-            worktreePath: thread.cwd?.includes("/.codexia/worktrees/")
-              ? thread.cwd
-              : undefined,
-            cwd: thread.cwd ?? cwd,
-          },
-          {
-            activate:
-              activeDraftOwner() === owner ||
-              activeDraftOwner() === submittedOwner,
-          },
-        );
-        await moveImageDraft(owner, submittedOwner);
-      }
-      if (submittedGoal.enabled) {
-        await codexService.threadGoalSet({
-          threadId: targetThreadId,
-          objective: completeText,
-        });
-        goalDrafts.complete(goalClearingOwner, submittedGoal);
-        clearSubmitted();
-        return;
-      }
-      // Continuing an existing session never replaces its name with this message.
-      if (activeDraftOwner() === submittedOwner)
-        setCurrentAgentCardId(targetThreadId, "codex");
-      const accepted = await followupService.submit(
-        submittedOwner,
-        snapshot.revision,
-        targetThreadId,
-        text,
-        images,
-        running ? requestedMode : "queue",
-        running ? (currentTurnId ?? undefined) : undefined,
-        parameters,
-        submittedContexts,
-        [...submittedMentions, ...submittedPluginMentions],
-      );
-      onAfterSend?.(targetThreadId, text);
-      setDeliveryNotice({
-        owner: submittedOwner,
-        text:
-          running && requestedMode === "steer"
-            ? "引导已提交"
-            : running && requestedMode === "replace"
-              ? "正在停止，结束后发送新请求"
-              : accepted.paused
-                ? "消息已入队，队列暂停中"
-                : "消息已接收，将按顺序发送",
-      });
+    const finishGoalDraft = () => {
+      goalDrafts.complete(goalClearingOwner, submittedGoal);
       clearSubmitted();
       attachments.clear(submittedIds);
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "发送失败，输入已保留，请重试",
-      );
-    } finally {
-      markSending(owner, false);
-      if (submittedOwner !== owner) markSending(submittedOwner, false);
-    }
-  };
-
-  // Toggle the goal between active and paused, matching the TUI's `/goal pause`
-  // and `/goal resume` commands (see codex-rs/tui/src/chatwidget/goal_menu.rs).
-  const handleToggleGoalPause = async () => {
-    if (!currentThreadId || !threadGoal) {
+    };
+    const submitCaptured = async () => {
+      if (sendingRef.current.has(owner)) return;
+      markSending(owner, true);
+      let materialized: Awaited<
+        ReturnType<typeof materializeGoalDraft>
+      > | null = null;
+      let goalRequestStarted = false;
+      let firstGoalTurnAccepted = false;
+      try {
+        if (
+          !creatingGoal &&
+          running &&
+          requestedMode !== "queue" &&
+          !currentTurnId
+        )
+          throw new Error("正在同步当前任务，请稍后引导或停止");
+        if (overrideSend) {
+          overrideSend(completeText);
+          clearSubmitted();
+          return;
+        }
+        if (creatingGoal) {
+          if (currentThreadId)
+            codexService.assertThreadGoalReady(currentThreadId);
+          materialized = await materializeGoalDraft({
+            objective: composeContextText(
+              text,
+              submittedContexts.filter((context) => context.kind !== "paste"),
+            ),
+            pastedTexts: submittedContexts
+              .filter((context) => context.kind === "paste")
+              .map((context) => context.text),
+            images: [...images],
+            mentions: [...submittedMentions, ...submittedPluginMentions],
+          });
+          if (!threadGoalVersions.sameRuntime(goalCheckpoint))
+            throw new Error("连接目标已切换，请核对目标草稿后重试");
+        }
+        let targetThreadId = currentThreadId;
+        const newGoalThread = !targetThreadId && creatingGoal;
+        if (!targetThreadId) {
+          const thread = await codexService.threadStart({
+            shouldActivate: () => activeDraftOwner() === owner,
+          });
+          targetThreadId = thread.id;
+          parameters.cwd = thread.cwd ?? cwd;
+          submittedOwner = sessionDraftKey("codex", thread.id);
+          markSending(submittedOwner, true);
+          useSessionDraftStore.getState().move(owner, submittedOwner);
+          if (goalDrafts.move(owner, submittedOwner))
+            goalClearingOwner = submittedOwner;
+          composerDrafts.move(owner, submittedOwner);
+          mentionDrafts.move(owner, submittedOwner);
+          pluginInputDrafts.move(owner, submittedOwner);
+          // Follow the newly created identity before moving attachments, so a storage failure
+          // leaves a visible retry destination instead of creating a second session.
+          useSessionNameStore
+            .getState()
+            .initializeName("codex", thread.id, text);
+          addAgentCard(
+            {
+              kind: "codex",
+              id: thread.id,
+              preview: text,
+              worktreePath: thread.cwd?.includes("/.codexia/worktrees/")
+                ? thread.cwd
+                : undefined,
+              cwd: thread.cwd ?? cwd,
+            },
+            {
+              activate:
+                activeDraftOwner() === owner ||
+                activeDraftOwner() === submittedOwner,
+            },
+          );
+          await moveImageDraft(owner, submittedOwner);
+        }
+        if (materialized) {
+          if (!threadGoalVersions.sameRuntime(goalCheckpoint))
+            throw new Error("连接目标已切换，请核对目标草稿后重试");
+          if (currentThreadId) {
+            const currentGoal =
+              useCodexStore.getState().goalMap[currentThreadId];
+            if (
+              currentGoal?.objective !== threadGoal?.objective ||
+              currentGoal?.status !== threadGoal?.status ||
+              currentGoal?.createdAt !== threadGoal?.createdAt
+            )
+              throw new Error("目标状态已更新，请核对后再替换");
+          }
+          goalRequestStarted = true;
+          if (newGoalThread) {
+            // The native first submission is a /goal turn. Only its accepted
+            // receipt enables the saved goal; existing chats only need GoalSet.
+            await codexService.turnStart(
+              targetThreadId,
+              `/goal ${materialized.objective}`,
+              [],
+              randomUUID(),
+              undefined,
+              parameters,
+            );
+            firstGoalTurnAccepted = true;
+            // The first /goal message is already accepted even if the later
+            // metadata write fails. Clear only that captured draft and keep files.
+            finishGoalDraft();
+          }
+          if (!threadGoalVersions.sameRuntime(goalCheckpoint))
+            throw new Error("连接目标已切换，请核对原连接的目标状态");
+          const receipt = await codexService.threadGoalSet({
+            threadId: targetThreadId,
+            objective: materialized.objective,
+            status: "active",
+          });
+          if (!newGoalThread && receipt.goal) {
+            const state = useCodexStore.getState();
+            appendGoalAnnouncement({
+              threadId: targetThreadId,
+              goal: receipt.goal,
+              source: "existing-thread-goal-set",
+              afterTurnId:
+                state.turnTimingMap[targetThreadId]?.turnId ??
+                state.threads
+                  .find((thread) => thread.id === targetThreadId)
+                  ?.turns.at(-1)?.id ??
+                null,
+            });
+          }
+          materialized = null;
+          if (!firstGoalTurnAccepted) finishGoalDraft();
+          return;
+        }
+        // Continuing an existing session never replaces its name with this message.
+        if (activeDraftOwner() === submittedOwner)
+          setCurrentAgentCardId(targetThreadId, "codex");
+        const accepted = await followupService.submit(
+          submittedOwner,
+          snapshot.revision,
+          targetThreadId,
+          text,
+          images,
+          running ? requestedMode : "queue",
+          running ? (currentTurnId ?? undefined) : undefined,
+          parameters,
+          submittedContexts,
+          [...submittedMentions, ...submittedPluginMentions],
+        );
+        onAfterSend?.(targetThreadId, text);
+        setDeliveryNotice({
+          owner: submittedOwner,
+          text:
+            running && requestedMode === "steer"
+              ? "引导已提交"
+              : running && requestedMode === "replace"
+                ? "正在停止，结束后发送新请求"
+                : accepted.paused
+                  ? "消息已入队，队列暂停中"
+                  : "消息已接收，将按顺序发送",
+        });
+        clearSubmitted();
+        attachments.clear(submittedIds);
+      } catch (error) {
+        if (
+          materialized &&
+          !firstGoalTurnAccepted &&
+          (!goalRequestStarted || !isGoalSubmissionUncertain(error))
+        )
+          await cleanupRejectedGoal(materialized, goalLabels);
+        if (creatingGoal)
+          toast.error(
+            goalRequestStarted
+              ? goalLabels.setError
+              : goalLabels.materializeError,
+            {
+              description: error instanceof Error ? error.message : undefined,
+            },
+          );
+        else
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : "发送失败，输入已保留，请重试",
+          );
+      } finally {
+        markSending(owner, false);
+        if (submittedOwner !== owner) markSending(submittedOwner, false);
+      }
+    };
+    if (
+      creatingGoal &&
+      threadGoal &&
+      (threadGoal.objective !== completeText ||
+        images.length ||
+        submittedContexts.some((context) => context.kind === "paste"))
+    ) {
+      setGoalReplacement({
+        owner,
+        goal: threadGoal,
+        objective: completeText,
+        submit: submitCaptured,
+      });
       return;
     }
-    const nextStatus = threadGoal.status === "active" ? "paused" : "active";
-    try {
-      await codexService.threadGoalSet({
-        threadId: currentThreadId,
-        status: nextStatus,
-      });
-    } catch (error) {
-      console.error("Failed to update goal status:", error);
-    }
+    await submitCaptured();
   };
 
   // Append a `$mention` (optionally followed by a starter prompt) from the plus
@@ -463,22 +576,6 @@ export function Composer({
     const separator = !inputValue || /\s$/.test(inputValue) ? "" : " ";
     setInputValue(`${inputValue}${separator}${text} `);
     editorRef.current?.focus();
-  };
-
-  // Clear the goal server-side. Local goalMap state is updated via the
-  // thread/goal/cleared notification once the server confirms, so we don't
-  // optimistically mutate the store here (avoids it being resurrected by a
-  // late thread/goal/updated event).
-  const handleClearGoal = async () => {
-    setGoalEnabled(false);
-    if (!currentThreadId) {
-      return;
-    }
-    try {
-      await codexService.threadGoalClear({ threadId: currentThreadId });
-    } catch (error) {
-      console.error("Failed to clear goal:", error);
-    }
   };
 
   const queued = queueSnapshot.state.items.filter(
@@ -528,7 +625,7 @@ export function Composer({
                               : goalEnabled
                                 ? "目标草稿"
                                 : threadGoal
-                                  ? goalStatusLabel(threadGoal.status)
+                                  ? goalLabels.status[threadGoal.status]
                                   : running
                                     ? hasContent
                                       ? preferences.mode === "queue"
@@ -588,6 +685,30 @@ export function Composer({
         </p>
       )}
       <SideChatPanel />
+      {goalReplacement?.owner === owner && (
+        <GoalConfirmation
+          kind="replace"
+          goal={goalReplacement.goal}
+          objective={goalReplacement.objective}
+          onCancel={() => setGoalReplacement(null)}
+          onConfirm={() => {
+            const replacement = goalReplacement;
+            setGoalReplacement(null);
+            const current =
+              useCodexStore.getState().goalMap[replacement.goal.threadId];
+            if (
+              !current ||
+              current.objective !== replacement.goal.objective ||
+              current.status !== replacement.goal.status ||
+              current.createdAt !== replacement.goal.createdAt
+            ) {
+              toast.error("目标状态已更新，请核对后再替换");
+              return;
+            }
+            void replacement.submit();
+          }}
+        />
+      )}
       {reviewOpen && (
         <ReviewDialog
           threadId={currentThreadId}
@@ -618,6 +739,15 @@ export function Composer({
           onOpenDialog={setSlashDialog}
         />
 
+        {threadGoal && (
+          <ThreadGoalCard
+            key={threadGoal.threadId}
+            goal={threadGoal}
+            disabled={!!accessBlock || threadInput.blocked || sending}
+            blockedReason={accessBlock ?? threadInput.reason ?? undefined}
+          />
+        )}
+
         <div
           data-composer-suggestion-anchor
           data-composer-layout="multiline"
@@ -626,6 +756,7 @@ export function Composer({
           data-composer-surface-variant="default"
           data-file-drop-active={fileDrop.active || undefined}
           className="session-composer-surface session-compact-frame"
+          data-has-thread-goal={!!threadGoal || undefined}
         >
           {fileDrop.active && (
             <div className="session-composer-drop-hint" role="status">
@@ -667,6 +798,11 @@ export function Composer({
                   onImagesSelected={attachments.addPaths}
                   onFilesSelected={appendFileLinks}
                   onInsertMention={handleInsertMention}
+                  onGoal={() => {
+                    setCollaborationMode("default");
+                    setGoalEnabled(true);
+                    editorRef.current?.focus();
+                  }}
                   actions={(close) => (
                     <>
                       <Button
@@ -869,10 +1005,28 @@ export function Composer({
                     </>
                   )}
                 />
-                <AccessModePopover compact />
+                {goalEnabled ? (
+                  <button
+                    type="button"
+                    className="session-goal-draft"
+                    aria-label={goalLabels.cancelDraft}
+                    onClick={() => setGoalEnabled(false)}
+                  >
+                    <span className="session-goal-draft-symbol">
+                      <GoalIcon name="draft-target" />
+                      <GoalIcon name="draft-circle-xmark" />
+                    </span>
+                    <span>{goalLabels.draft}</span>
+                  </button>
+                ) : (
+                  <AccessModePopover compact threadId={currentThreadId} />
+                )}
               </div>
               <div className="session-composer-actions flex items-center gap-2">
-                <NativeModelSelector threadId={currentThreadId} />
+                <NativeModelSelector
+                  threadId={currentThreadId}
+                  draftOwner={owner}
+                />
                 <span className="session-native-dictation">
                   <NativeComposerIcon name="microphone" />
                   <DictationButton
@@ -982,76 +1136,6 @@ export function Composer({
             </div>
           )}
 
-          {threadGoal && (
-            <div className="flex items-center gap-1.5 px-3 pb-1 text-xs text-muted-foreground">
-              <Target className="h-3 w-3 shrink-0" />
-              <span className="truncate">
-                {goalStatusLabel(threadGoal.status)}
-              </span>
-              {threadGoal.status !== "complete" && (
-                <span className="truncate text-muted-foreground/70">
-                  · {threadGoal.objective}
-                </span>
-              )}
-            </div>
-          )}
-
-          {(goalEnabled || threadGoal) && (
-            <div className="session-composer-goal-tools">
-              {/* Draft mode: entering a new goal, not yet set on the thread. */}
-              {goalEnabled && !threadGoal && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setGoalEnabled(false)}
-                  aria-label="取消目标草稿"
-                  title="取消目标草稿"
-                  className="group relative h-8 px-2 text-muted-foreground"
-                >
-                  <span>目标草稿</span>
-                  <X className="h-3 w-3" />
-                </Button>
-              )}
-              {/* A goal is actually set on the thread: allow pause/resume and clear
-                    based on its real status, matching /goal pause|resume|clear in the TUI. */}
-              {threadGoal && (
-                <>
-                  {(threadGoal.status === "active" ||
-                    threadGoal.status === "paused") && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={handleToggleGoalPause}
-                      title={
-                        threadGoal.status === "active"
-                          ? "Pause goal"
-                          : "Resume goal"
-                      }
-                      className="ml-1 h-8 w-8 text-blue-600 hover:bg-blue-50"
-                    >
-                      {threadGoal.status === "active" ? (
-                        <Pause className="h-4 w-4" />
-                      ) : (
-                        <Play className="h-4 w-4" />
-                      )}
-                    </Button>
-                  )}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleClearGoal}
-                    title="Clear goal"
-                    className="h-8 w-8 text-blue-600 hover:bg-blue-50"
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </>
-              )}
-            </div>
-          )}
           {running && hasContent && (
             <p className="session-composer-hint">
               {preferences.mode === "queue"
@@ -1140,8 +1224,11 @@ export function Composer({
           returnFocus={() => editorRef.current?.focus()}
           footer={
             <>
-              <AccessModePopover compact />
-              <NativeModelSelector threadId={currentThreadId} />
+              <AccessModePopover compact threadId={currentThreadId} />
+              <NativeModelSelector
+                threadId={currentThreadId}
+                draftOwner={owner}
+              />
               {running && (
                 <NativeSubmitButton
                   type="button"

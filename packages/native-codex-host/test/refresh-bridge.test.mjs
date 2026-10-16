@@ -139,7 +139,7 @@ async function fixture(t) {
     });
     return { input, output, lines, connection };
   };
-  return { server, wss, messages, client };
+  return { server, wss, messages, client, socketPath };
 }
 async function until(predicate) {
   for (let i = 0; i < 100; i++) {
@@ -148,6 +148,76 @@ async function until(predicate) {
   }
   assert.fail("protocol observation timed out");
 }
+
+test("native client lifetime authority guards the actual transport including initialized and subsequent writes", async (t) => {
+  const { createNativeClient } =
+    await import("../refresh-prototype/native-client.mjs");
+  const f = await fixture(t);
+  let checks = 0,
+    valid = true;
+  const client = createNativeClient({
+    socketPath: f.socketPath,
+    timeoutMs: 1000,
+    beforeSend() {
+      checks++;
+      if (!valid)
+        throw Object.assign(Error("authority revoked"), {
+          code: "NATIVE_NOT_SENT",
+        });
+    },
+  });
+  t.after(() => client.close());
+  await client.ready;
+  await until(() => f.messages.some((m) => m.method === "initialized"));
+  valid = false;
+  await assert.rejects(
+    client.request("turn/start", { input: "never forwarded" }),
+    { code: "NATIVE_CONNECTION_LOST" },
+  );
+  assert.equal(checks, 3);
+  assert.deepEqual(
+    f.messages.map((m) => m.method),
+    ["initialize", "initialized"],
+  );
+});
+test("a per-request eviction guard rechecks after the transport's lifetime guard at the actual write", async (t) => {
+  const { createNativeClient } =
+      await import("../refresh-prototype/native-client.mjs"),
+    f = await fixture(t);
+  let armed = false,
+    visible = false;
+  const client = createNativeClient({
+    socketPath: f.socketPath,
+    beforeSend() {
+      if (armed) visible = true;
+    },
+  });
+  t.after(() => client.close());
+  await client.ready;
+  await until(() => f.messages.some((m) => m.method === "initialized"));
+  armed = true;
+  await assert.rejects(
+    client.request(
+      "thread/unsubscribe",
+      { threadId: "not-forwarded" },
+      {
+        beforeSend() {
+          if (visible) throw Error("consumer became visible");
+        },
+      },
+    ),
+  );
+  assert.equal(
+    f.messages.some((m) => m.method === "thread/unsubscribe"),
+    false,
+  );
+  armed = false;
+  assert.equal(
+    (await client.request("account/read", { refreshToken: false })).received
+      .refreshToken,
+    false,
+  );
+});
 
 test("fragmented UTF8 JSONL and reused IDs on separate connections retain their exact owner", async (t) => {
   const { client, messages } = await fixture(t);
@@ -203,6 +273,51 @@ test("native authority is rechecked after transport open before any pending init
     assert.equal(a.lines[0].result.received.owner, "A");
   } finally {
     release();
+    a.connection.close();
+    await a.connection.done.catch(() => {});
+  }
+});
+test("authority is rechecked at every actual wire send including multiple JSONL messages in one chunk", async (t) => {
+  const { client, messages } = await fixture(t);
+  let valid = true,
+    checks = 0;
+  const a = client({
+    beforeSend() {
+      checks++;
+      if (!valid) throw Error("authorization revoked");
+    },
+    onProtocol(event) {
+      if (event.direction === "request" && event.method === "turn/start")
+        valid = false;
+    },
+  });
+  await a.connection.ready;
+  a.input.write(
+    '{"id":1,"method":"initialize"}\n{"id":2,"method":"turn/start","params":{"input":"never sent"}}\n',
+  );
+  await assert.rejects(a.connection.done, /authorization revoked/);
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(checks, 2);
+  assert.deepEqual(
+    messages.map((value) => value.method),
+    ["initialize"],
+  );
+});
+test("a pending asynchronous send guard cannot authorize a native write", async (t) => {
+  const { client, messages } = await fixture(t);
+  const a = client({ beforeSend: () => Promise.resolve() });
+  let result;
+  a.connection.done.then(
+    () => (result = "closed"),
+    () => (result = "failed"),
+  );
+  try {
+    await a.connection.ready;
+    a.input.write('{"id":1,"method":"initialize"}\n');
+    await until(() => result || messages.length > 0);
+    assert.equal(result, "failed");
+    assert.equal(messages.length, 0);
+  } finally {
     a.connection.close();
     await a.connection.done.catch(() => {});
   }

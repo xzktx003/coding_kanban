@@ -13,6 +13,7 @@ import { NativeReviewFindings } from "@session/features/git/NativeReviewFindings
 import { useCodexContentOwner } from "../presentation/ownerContext";
 import { useSavedTurnReviewStore } from "@session/stores/useSavedTurnReviewStore";
 import { STREAMING_TEXT_PREVIEW_MARKER } from "@session/services/codexTranscriptMemoryBudget";
+import { GoalCompletionBadge } from "@session/features/goals/GoalCompletionBadge";
 import "@session/features/thread-workflows/native-message.css";
 
 type AgentMessageItemProps = {
@@ -146,6 +147,7 @@ export const AgentMessageItem = memo(function AgentMessageItem({
             contentRef={contentRef}
           />
           {hookRuns?.length ? <NativeHookStats runs={hookRuns} /> : null}
+          <GoalCompletionBadge threadId={threadId} turnId={turnId} itemId={itemId} />
           <NativeMemoryCitations citation={memoryCitation} />
           <MessageReferenceActions
             text={text}

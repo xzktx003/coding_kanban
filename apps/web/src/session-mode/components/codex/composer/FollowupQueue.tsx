@@ -38,6 +38,36 @@ import {
   DialogFooter,
 } from "../../ui/dialog";
 import { fileSrc } from "@session/hooks/runtime";
+import {
+  codexSendBlockReason,
+  refreshCodexAccess,
+  useCodexAccessStore,
+} from "@session/stores/useCodexAccessStore";
+
+function unresolvedReason(items: FollowupMessage[]) {
+  if (items.some((m) => m.status === "uncertain"))
+    return "请先核对消息是否送达，再确认重试或移除记录。";
+  if (items.some((m) => m.status === "failed"))
+    return "请先重试或移除失败消息，再继续队列。";
+}
+
+function queueAccessReason(
+  entry:
+    | ReturnType<typeof useCodexAccessStore.getState>["entries"][string]
+    | undefined,
+) {
+  if (!codexSendBlockReason(entry)) return undefined;
+  switch (entry?.access?.state) {
+    case "external":
+      return "会话被其他客户端占用，消息已保留；释放后可重试原消息。";
+    case "releasing":
+      return "会话正在释放，消息已保留；释放完成后可重试。";
+    case "acquiring":
+      return "正在恢复会话，消息已保留；请稍后重试。";
+    default:
+      return "执行占用状态尚未确认，消息已保留；请先重新核对。";
+  }
+}
 
 type QueueProps = {
   threadId: string | null;
@@ -61,13 +91,20 @@ export function FollowupQueueContent({
   compactShelf?: boolean;
 }) {
   const { state, error } = snapshot;
+  const access = useCodexAccessStore((s) =>
+    threadId ? s.entries[threadId] : undefined,
+  );
+  const accessBlock = queueAccessReason(access);
+  const unresolved = unresolvedReason(state.items);
+  const resumeBlock = unresolved || accessBlock;
   const [busy, setBusy] = useState(false),
     [expanded, setExpanded] = useState(false),
     [editing, setEditing] = useState<string | null>(null),
     [text, setText] = useState(""),
     [confirm, setConfirm] = useState<FollowupAction | null>(null);
   const editRef = useRef<HTMLTextAreaElement>(null),
-    focusEditAfterClose = useRef(false);
+    focusEditAfterClose = useRef(false),
+    changing = useRef(false);
   useEffect(() => {
     if (editing) {
       const frame = requestAnimationFrame(() => editRef.current?.focus());
@@ -78,14 +115,24 @@ export function FollowupQueueContent({
     (m) => m.status !== "sent" && m.status !== "cancelled",
   );
   const change = async (action: FollowupAction) => {
-    if (!threadId || busy) return;
+    if (!threadId || changing.current) return;
+    const sends = ["resume", "retry", "steer"].includes(action.type);
+    if (sends && accessBlock) return;
+    if (action.type === "resume" && unresolved) return;
+    changing.current = true;
     setBusy(true);
     try {
-      const result = await followupService.change(
-        threadId,
-        state.revision,
-        action,
-      );
+      let revision = state.revision;
+      if (action.type === "resume") {
+        const latest = await followupService.load(threadId);
+        if (unresolvedReason(latest.items)) return;
+        revision = latest.revision;
+      }
+      // Read metadata immediately before an action that can dispatch work. A
+      // release only enables the user's retry; it never resends automatically.
+      if (sends && queueAccessReason(await refreshCodexAccess(threadId)))
+        return;
+      const result = await followupService.change(threadId, revision, action);
       if (
         (action.type === "delete" || action.type === "edit") &&
         result.undo &&
@@ -108,8 +155,9 @@ export function FollowupQueueContent({
       setEditing(null);
       setConfirm(null);
     } catch (e) {
-      toast.error(String(e));
+      toast.error(e instanceof Error ? e.message : String(e));
     } finally {
+      changing.current = false;
       setBusy(false);
     }
   };
@@ -182,7 +230,7 @@ export function FollowupQueueContent({
                 size="sm"
                 variant="ghost"
                 aria-label="立即引导"
-                disabled={busy}
+                disabled={busy || !!accessBlock}
                 onClick={() =>
                   void change({
                     type: "steer",
@@ -234,6 +282,7 @@ export function FollowupQueueContent({
               >
                 {(m.status === "failed" || m.status === "uncertain") && (
                   <DropdownMenuItem
+                    disabled={busy || !!accessBlock}
                     aria-label="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
                     title="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
                     onSelect={() =>
@@ -299,6 +348,8 @@ export function FollowupQueueContent({
                 )}
                 {state.paused && (
                   <DropdownMenuItem
+                    disabled={busy || !!resumeBlock}
+                    title={resumeBlock}
                     onSelect={() => void change({ type: "resume" })}
                   >
                     <Play />
@@ -383,7 +434,8 @@ export function FollowupQueueContent({
                   type="button"
                   size="sm"
                   variant="ghost"
-                  disabled={busy}
+                  disabled={busy || !!accessBlock}
+                  title={accessBlock}
                   onClick={() =>
                     m.status === "uncertain"
                       ? setConfirm({
@@ -411,17 +463,40 @@ export function FollowupQueueContent({
       {state.paused && (
         <div className="session-queue-status" role="status">
           <Pause size={14} />
-          <span>由于你中断了当前响应，队列已暂停</span>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={busy}
-            onClick={() => void change({ type: "resume" })}
-          >
-            <Play size={14} />
-            继续
-          </Button>
+          <span className="session-queue-pause-reason">
+            <span>
+              {state.paused === "interrupted"
+                ? "由于你中断了当前响应，队列已暂停"
+                : state.paused}
+            </span>
+            {(accessBlock || unresolved) && (
+              <small>{accessBlock || unresolved}</small>
+            )}
+          </span>
+          {unresolved ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => setExpanded(true)}
+            >
+              {state.items.some((m) => m.status === "uncertain")
+                ? "核对送达状态"
+                : "处理失败消息"}
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={busy || !!resumeBlock}
+              title={resumeBlock}
+              onClick={() => void change({ type: "resume" })}
+            >
+              <Play size={14} />
+              继续
+            </Button>
+          )}
         </div>
       )}
       {(inlineDetails || !expanded) && items.length > 0 && queueList}
@@ -435,6 +510,11 @@ export function FollowupQueueContent({
           }}
         >
           <section className="session-followup-queue session-queue-detail">
+            {(accessBlock || unresolved) && (
+              <p className="session-queue-status" role="status">
+                {accessBlock || unresolved}
+              </p>
+            )}
             {queueList}
           </section>
         </ComposerSheet>
@@ -482,6 +562,11 @@ export function FollowupQueueContent({
             {confirm?.type === "clear"
               ? "移除所有尚未发送的消息，当前任务继续运行。"
               : "请先查看对话，确认消息是否已经被接收。重复发送可能再次执行同一任务。"}
+            {confirm?.type === "retry" && accessBlock && (
+              <span className="session-queue-confirm-reason">
+                {accessBlock}
+              </span>
+            )}
           </DialogDescription>
           <DialogFooter>
             <Button
@@ -494,7 +579,7 @@ export function FollowupQueueContent({
             </Button>
             <Button
               type="button"
-              disabled={busy}
+              disabled={busy || (confirm?.type === "retry" && !!accessBlock)}
               onClick={() => confirm && void change(confirm)}
             >
               {confirm?.type === "retry" ? "确认未送达并重试" : "确认移除"}

@@ -1,5 +1,7 @@
 # 启动、编译与更新
 
+刷新隔离候选的 `startPrivateService` 会在发布 ready 前启动独立账号观察进程并保存初始授权锚，随后 manager 可重建而不改绑旧 native。观察器退出、锚缺失或账号撤销均拒绝新接入，不自动重建观察器、不停止原任务；该观察进程自动纳入资源测量。旧候选目录不得静默补写，默认开发入口仍不启用刷新候选。见 [持久授权启动边界](designs/codex-mode-audit-20261014/refresh-native-authority.md)。
+
 推荐入口是仓库根目录的 `pnpm dev:restart`（等价于 `./scripts/restart-dev.sh`）。它先完成构建，再重启本仓库前后端，最后分别检查 Node 网关、前端和会话运行层。启动成功后使用输出的 `Open` 局域网地址；例如 HTTPS `https://10.30.0.22:8484/?mode=session`，实际主机、端口及协议以 `.env` 和输出为准。
 
 ## 首次安装
@@ -118,6 +120,8 @@ TypeScript 运行层的文件监听遇到 EMFILE/ENOSPC 时，使用 500 ms 的�
 `scripts/watch-server.mjs` 对 EMFILE/ENOSPC 使用整组元数据轮询降级，避免 Node recursive 监听部分注册后漏掉源码保存。每条路径快照最多 4096 项，不读取正文或追随符号链接，默认 1 秒扫描且不重叠，退出时关闭定时器。权限和其他错误不冒充配额耗尽。降级不改变依赖准备、失败保留旧网关、保存重试及独立运行层复用规则；覆盖真实子进程启动与模拟晚到配额错误的测试在 `scripts/watch-server.test.mjs`。现有 watcher 进程不会因脚本更新自行重启。
 
 原生刷新候选路径的显式隔离启动：新宿主的 `--refresh-service-config` 和 `--refresh-domain` 仅接入已验证的私有服务；检查发生在登录副本导入和扩展安装前，失败不重启服务。可选 `--reconnection-grace-seconds` 为 1–300 秒（该显式模式默认 60），不是 thread TTL。独立客户端路由由服务端按 UUID 注册，`/?mode=codex&nativeClient=<UUID>` 只选择已注册宿主；关注集合共用，布局、原生状态目录和连接分别隔离。默认 `pnpm dev`、正式运行服务和已有 Agent 不因这些参数改变。完整参数及当前红灯见 [组件说明](../packages/native-codex-host/refresh-prototype/README.md#explicit-private-host-and-client-routing) 和 [持续验收](designs/codex-mode-audit-20261014/refresh-recovery-progress-20261015.md)。
+
+已有独立控制进程时，可显式增加 `--refresh-control-root` 固定控制与 native 双重身份，绑定每个新 CLI 的只读账号观察并在实际写入前核对。控制进程及账号变化只关闭自己的旧连接，owner 显式退出不停止 native；参数仅从 launcher 命令行读取。真实 ChatGPT/官方 GUI 和完整性能关卡仍未通过，详见 [桥接授权](designs/codex-mode-audit-20261014/refresh-bridge-authorization.md)。
 
 生成的隔离 CLI 包装器每次执行都重查固定服务域、代次、PID 和 Linux start ticks，连接打开后、initialize 转发前再次核对；失效不附着新实例。保温管理器启动在线程操作前核对两次原生只读账号/工作区身份及初始通知，等待有界（默认 15 秒）。这些步骤失败只关闭自己的连接，不重启服务或停止任务。手机验收按用户确认使用 iPhone 16 尺寸模拟，参数、浏览器引擎和系统键盘边界记入原始结果。
 

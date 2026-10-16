@@ -31,6 +31,9 @@ import {
 import { TranscriptDetailVisibility } from "../hooks/transcriptDetailVisibility";
 import type { CommandDetailItem } from "./commandDetail";
 import { useCommandDetail } from "./useCommandDetail";
+import { NativeMessageCopied } from "@session/features/thread-workflows/NativeMessageIcons";
+import { useNativeCopyFeedback } from "../presentation/useNativeCopyFeedback";
+import { NativeMarkdownTooltip } from "../presentation/NativeMarkdownTooltip";
 
 type ShellCommandProps = Omit<Partial<CommandActionSource>, "commandItemId"> & {
   command: string;
@@ -40,35 +43,34 @@ type ShellCommandProps = Omit<Partial<CommandActionSource>, "commandItemId"> & {
 };
 
 function CommandCopy({ text, label }: { text: string; label: string }) {
-  const { t } = useTranslation("thread");
-  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useLayoutEffect(() => () => clearTimeout(timer.current), []);
+  const { t, i18n } = useTranslation("thread");
+  const { copied, copyPending, copy } = useNativeCopyFeedback([text], {
+    feedbackMs: 2000,
+    language: i18n?.language ?? "zh",
+  });
+  const copyLabel = copied ? t("command.copied") : label;
   return (
-    <button
-      type="button"
-      className="codex-command-copy"
-      aria-label={state === "copied" ? t("command.copied") : label}
-      title={label}
-      disabled={!text}
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(text);
-          setState("copied");
-        } catch {
-          setState("failed");
+    <NativeMarkdownTooltip label={copyLabel}>
+      <button
+        type="button"
+        className="codex-command-copy"
+        aria-label={copyLabel}
+        title={copyLabel}
+        disabled={!text}
+        aria-busy={copyPending || undefined}
+        aria-disabled={copyPending || undefined}
+        onClick={
+          copied
+            ? undefined
+            : (event) => {
+                event.stopPropagation();
+                if (text) copy(text);
+              }
         }
-        clearTimeout(timer.current);
-        timer.current = setTimeout(() => setState("idle"), 1500);
-      }}
-    >
-      {state === "copied" ? <NativeCommandSuccess /> : <NativeCommandCopy />}
-      {state === "failed" && (
-        <span role="status" className="codex-command-copy-error">
-          {t("command.copyFailed")}
-        </span>
-      )}
-    </button>
+      >
+        {copied ? <NativeMessageCopied /> : <NativeCommandCopy />}
+      </button>
+    </NativeMarkdownTooltip>
   );
 }
 

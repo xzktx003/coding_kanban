@@ -485,6 +485,17 @@ export function registerSessionModeRoutes(
         : setTimeout(() => controller.abort(), 120_000);
       const abort = () => controller.abort();
       request.raw.on("aborted", abort);
+      const pendingGoalMutation = request.method === "POST" && [
+        "/api/codex/thread/goal/set",
+        "/api/codex/thread/goal/clear",
+        "/api/codex/thread/goal/clear-completed",
+      ].includes(pathname);
+      const goalReplyClosed = () => {
+        if (!reply.raw.writableFinished) controller.abort();
+      };
+      // Goal preflight may still be waiting before upstream response headers.
+      // Browser cancellation must reach that wait before it can write to native.
+      if (pendingGoalMutation) reply.raw.once("close", goalReplyClosed);
       try {
         const response = await fetchUpstream(`${origin}${upstreamSuffix}`, {
           method: request.method,
@@ -568,6 +579,7 @@ export function registerSessionModeRoutes(
       } finally {
         clearTimeout(timeout);
         request.raw.off("aborted", abort);
+        if (pendingGoalMutation) reply.raw.off("close", goalReplyClosed);
       }
     },
   });

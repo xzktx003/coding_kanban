@@ -1,6 +1,6 @@
 import { Check, Copy } from 'lucide-react';
-import { useState } from 'react';
 import { Button } from '@session/components/ui/button';
+import { useNativeCopyFeedback } from '../codex/presentation/useNativeCopyFeedback';
 
 type CopyButtonProps = {
   text: string;
@@ -8,20 +8,16 @@ type CopyButtonProps = {
 };
 
 export const CopyButton = ({ text, className }: CopyButtonProps) => {
-  const [copied, setCopied] = useState(false);
+  const { copied, copyPending, copy } = useNativeCopyFeedback([text], {
+    feedbackMs: 2000,
+  });
 
-  const handleCopy = async (e: React.MouseEvent<HTMLButtonElement>) => {
+  const handleCopy = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (!text.length) return;
     // Blur immediately so the button doesn't hold focus and keep the parent
     // group in a hover-like visible state after the mouse leaves.
     (e.currentTarget as HTMLButtonElement).blur();
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
-    }
+    copy(text);
   };
 
   return (
@@ -29,7 +25,8 @@ export const CopyButton = ({ text, className }: CopyButtonProps) => {
       variant="ghost"
       size="icon"
       onClick={handleCopy}
-      disabled={!text.length}
+      disabled={!text.length || copyPending || copied}
+      aria-busy={copyPending || undefined}
       aria-label={copied ? 'Copied' : 'Copy'}
       className={className ?? 'h-6 w-6 text-muted-foreground'}
     >

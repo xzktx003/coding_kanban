@@ -297,8 +297,10 @@ test("mobile viewport, soft keyboard and full editor keep strength and controls 
       await expect(page.locator(".session-model-effort").first()).toBeVisible();
     }
     await page.setViewportSize({ width: 844, height: 390 });
+    await expect(page.getByRole("button", { name: "停止生成", exact: true })).toBeVisible();
+    await expect(page.locator(".session-native-composer-status")).toHaveText("本轮结束后发送");
     const landscapeSend = (await page
-      .getByRole("button", { name: "排队消息", exact: true })
+      .getByRole("button", { name: "发送消息", exact: true })
       .boundingBox())!;
     expect(landscapeSend.y + landscapeSend.height).toBeLessThanOrEqual(390);
     await page.setViewportSize({ width: 390, height: 844 });

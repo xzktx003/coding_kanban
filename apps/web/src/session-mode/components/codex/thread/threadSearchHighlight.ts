@@ -1,3 +1,5 @@
+import { revealUserMessageContent } from "@session/features/thread-workflows/userMessageDisclosure";
+
 /** Select visible message text without replacing Markdown nodes or including action labels. */
 export function findTranscriptMatchRange(
   root: Element,
@@ -10,6 +12,7 @@ export function findTranscriptMatchRange(
     ".codex-assistant-content, .codex-user-bubble",
   );
   if (!body) return null;
+  revealUserMessageContent(body);
   const nodes: Text[] = [],
     walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {

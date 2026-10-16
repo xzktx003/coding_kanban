@@ -28,9 +28,12 @@ export function createNativeClient({
   onLifecycle,
   signal,
   beforeReady,
+  beforeSend,
 }) {
   if (typeof name !== "string" || !/^[a-z0-9_]{1,64}$/.test(name))
     throw new Error("invalid native client name");
+  if (beforeSend !== undefined && typeof beforeSend !== "function")
+    throw Error("synchronous native lifetime guard required");
   if (
     !Number.isSafeInteger(timeoutMs) ||
     timeoutMs < 1 ||
@@ -50,6 +53,47 @@ export function createNativeClient({
     output,
     signal,
     beforeReady,
+    beforeSend(message) {
+      const check = (guard) => {
+        const result = guard?.();
+        if (result !== undefined) {
+          if (typeof result?.then === "function")
+            void Promise.resolve(result).catch(() => {});
+          throw Error("Native send guard must finish synchronously");
+        }
+      };
+      try {
+        check(beforeSend);
+      } catch {
+        // A lifetime failure always closes the transport, even if a caller
+        // accidentally reused the per-request veto code.
+        throw Error("Native lifetime authorization unavailable");
+      }
+      if (message.method && message.id !== null && message.id !== undefined) {
+        const waiter = pending.get(message.id);
+        if (!waiter)
+          throw Object.assign(
+            Error("Native request no longer pending; no late send"),
+            { code: "NATIVE_NOT_SENT" },
+          );
+        try {
+          check(waiter.beforeSend);
+        } catch (error) {
+          pending.delete(message.id);
+          clearTimeout(waiter.timer);
+          const veto = Object.assign(
+            Error(
+              typeof error?.message === "string"
+                ? copyText(error.message, 256)
+                : "Native request vetoed before send",
+            ),
+            { code: "NATIVE_NOT_SENT" },
+          );
+          waiter.reject(veto);
+          throw veto;
+        }
+      }
+    },
   });
   let sequence = 0;
   let revision = 0;
@@ -152,6 +196,8 @@ export function createNativeClient({
       throw new Error("invalid native method");
     if (pending.size >= maxPending)
       throw new Error("Native pending request limit exceeded");
+    if (beforeSend !== undefined && typeof beforeSend !== "function")
+      throw Error("synchronous native request guard required");
     return new Promise((resolve, reject) => {
       const id = ++sequence;
       const timer = setTimeout(() => {
@@ -164,9 +210,8 @@ export function createNativeClient({
         );
       }, timeoutMs);
       timer.unref();
-      pending.set(id, { resolve, reject, timer });
+      pending.set(id, { resolve, reject, timer, beforeSend });
       try {
-        beforeSend?.();
         write({ id, method, params });
       } catch (error) {
         clearTimeout(timer);

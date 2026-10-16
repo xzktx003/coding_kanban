@@ -203,3 +203,9 @@ test('short browser reconnection grace requires an explicit scoped persistent na
   const args=buildHostArgs(configured);assert.equal(args[args.indexOf('--reconnection-grace-time')+1],'60');
   assert.equal(buildHostArgs(validateOptions(options())).includes('--reconnection-grace-time'),false);
 });
+test('persistent bridge authorization control requires an explicit native service and absolute control root',()=>{
+  assert.throws(()=>validateOptions({...options(),refreshControlRoot:'/private/control'}),/refresh service/);
+  for(const root of ['relative','/private/control\n'])assert.throws(()=>validateOptions({...options(),refreshServiceConfig:'/private/bridge.json',refreshDomain:id,refreshControlRoot:root}),/refreshControlRoot/);
+  const configured=validateOptions({...options(),refreshServiceConfig:'/private/bridge.json',refreshDomain:id,refreshControlRoot:'/private/control'});
+  assert.equal(configured.refreshControlRoot,'/private/control');
+});

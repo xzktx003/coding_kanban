@@ -46,6 +46,7 @@ import {
 import { useRequestUserInputStore } from "../stores/useRequestUserInputStore";
 import { hydrateThreadModel } from "@session/stores/useThreadModelStore";
 import { isDeltaEvent, type DeltaEvent } from "../stores/eventUtils";
+import { notifyGoalCompletionAutoClear, resetGoalCompletionScope } from "@session/services/goalCompletionAutoClear";
 
 export type BeepMode = "never" | "unfocused" | "always";
 
@@ -219,6 +220,7 @@ export function useServerNotificationHandler(
         flushPendingDeltas(threadId);
 
       if (method === "account/updated") {
+        resetGoalCompletionScope();
         void syncAccountState(true);
       }
 
@@ -269,6 +271,16 @@ export function useServerNotificationHandler(
           useCodexStore
             .getState()
             .threads.some((thread) => thread.id === threadId);
+        if (method === "thread/goal/updated" || method === "thread/goal/cleared") {
+          // Completion is small lifecycle metadata. A known read-only history
+          // keeps its badge even when its transcript is no longer observed.
+          if (known) {
+            useCodexStore.getState().addEvent(threadId, payload);
+            if (method === "thread/goal/updated" && payload.params.goal.status === "complete")
+              void notifyGoalCompletionAutoClear(threadId);
+          }
+          return;
+        }
         if (method === "thread/settings/updated" && known) {
           const settings = payload.params.threadSettings;
           hydrateThreadModel(threadId, nativeThreadSettings(settings), {
@@ -371,7 +383,18 @@ export function useServerNotificationHandler(
 
         // Lifecycle cleanup also runs after a task leaves display membership.
         // Only observed tasks retain transcript bodies and derived execution state.
-        if (!observed) return;
+        if (!observed) {
+          if (known && method === "thread/status/changed" && payload.params.status.type === "idle" &&
+              useCodexStore.getState().goalMap[threadId]?.status === "complete") {
+            // Retain only the small idle authority input for an already known
+            // completed goal; never reattach a dormant transcript to clear it.
+            useCodexStore.setState(state => state.threadStatusMap[threadId]?.type === "idle" ? state : {
+              threadStatusMap: { ...state.threadStatusMap, [threadId]: payload.params.status },
+            });
+            void notifyGoalCompletionAutoClear(threadId);
+          }
+          return;
+        }
         const displayPayload = withoutToolTranscriptEvent(payload);
         if (!displayPayload) return;
         if (isDeltaEvent(displayPayload)) {
@@ -380,6 +403,9 @@ export function useServerNotificationHandler(
         }
         const previousEvents = useCodexStore.getState().events[threadId] ?? [];
         useCodexStore.getState().addEvent(threadId, displayPayload);
+        if (method === "turn/completed" ||
+            (method === "thread/status/changed" && payload.params.status.type === "idle"))
+          void notifyGoalCompletionAutoClear(threadId);
         revealNewQuestion(displayPayload, previousEvents);
       }
     },

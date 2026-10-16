@@ -8,6 +8,7 @@ import {
 } from "@session/components/codex/stores";
 import { buildUrl, isDesktopTauri } from "@session/hooks/runtime";
 import { getAccountWithParams } from "@session/services";
+import { confirmGoalCompletionAccountScope } from "@session/services/goalCompletionAutoClear";
 import { useLayoutStore } from "@session/stores";
 import { useSettingsStore } from "@session/stores/settings";
 import { useServerNotificationHandler } from "./useServerNotificationHandler";
@@ -61,9 +62,20 @@ export function useCodexEvents(enabled = true) {
       )
         return;
       const namespace = response.workspaceRouting?.chatgptAccountId;
-      useCodexStore.getState().setAccount(response.account,
-        account?.type === "chatgpt" && typeof namespace === "string" && namespace.length > 0 && namespace.length <= 512
-          ? namespace : null);
+      useCodexStore
+        .getState()
+        .setAccount(
+          response.account,
+          account?.type === "chatgpt" &&
+            typeof namespace === "string" &&
+            namespace.length > 0 &&
+            namespace.length <= 512
+            ? namespace
+            : null,
+        );
+      // This explicit success signal also covers equal account values. A
+      // failed/stale read must not restore a revoked Goal mutation authority.
+      confirmGoalCompletionAccountScope();
     } catch (error) {
       // A failed observation says nothing about authentication. Keep initial
       // unknown or the last authoritative account instead of inventing logout.
@@ -82,12 +94,16 @@ export function useCodexEvents(enabled = true) {
       accountRead.current.epoch++;
       accountRead.current.generation++;
     };
-    window.addEventListener("session-runtime-restarted", invalidate);
+    const restart = () => {
+      invalidate();
+      void syncAccountState(false);
+    };
+    window.addEventListener("session-runtime-restarted", restart);
     syncAccountState(false).catch(console.error);
     return () => {
       accountRead.current.active = false;
       invalidate();
-      window.removeEventListener("session-runtime-restarted", invalidate);
+      window.removeEventListener("session-runtime-restarted", restart);
     };
   }, [enabled, syncAccountState]);
 

@@ -14,16 +14,13 @@ import {
   remoteStop,
 } from '@session/services/apiAdapt/remote';
 import { usePairingStore } from '@session/stores/usePairingStore';
+import { useNativeCopyFeedback } from '../codex/presentation/useNativeCopyFeedback';
 
 function CopyField({ label, value, mask }: { label: string; value: string; mask?: boolean }) {
-  const [copied, setCopied] = useState(false);
+  const { copied, copyPending, copy } = useNativeCopyFeedback([value], {
+    feedbackMs: 1500,
+  });
   const [revealed, setRevealed] = useState(false);
-
-  async function copy() {
-    await navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
 
   const shown = mask && !revealed ? '•'.repeat(Math.min(value.length, 32)) : value;
 
@@ -37,7 +34,7 @@ function CopyField({ label, value, mask }: { label: string; value: string; mask?
             {revealed ? 'Hide' : 'Show'}
           </Button>
         )}
-        <Button variant="ghost" size="sm" aria-label="复制地址" onClick={() => { void copy().catch(() => setCopied(false)); }}>
+        <Button variant="ghost" size="sm" aria-label={copied ? '已复制地址' : '复制地址'} aria-busy={copyPending || undefined} disabled={copyPending || copied} onClick={() => copy(value)}>
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
         </Button>
       </div>

@@ -4,8 +4,13 @@ import {
 } from "../../packages/shared/src/session-tabs";
 import { applyProjectAction } from "../../packages/shared/src/session-projects";
 import type { Page } from "@playwright/test";
+import type { ThreadForkResponse } from "../../apps/web/src/session-mode/bindings/v2";
 
-export async function installSessionUxFixture(page: Page, count = 40) {
+export async function installSessionUxFixture(
+  page: Page,
+  count = 40,
+  options: { forkSettings?: Partial<Omit<ThreadForkResponse, "thread">> } = {},
+) {
   // Vite loads more than 250 modules. Retain their actual HMR URLs so test-side
   // imports use the mounted stores instead of creating a second module instance.
   await page.addInitScript(() => {
@@ -222,7 +227,12 @@ export async function installSessionUxFixture(page: Page, count = 40) {
       thread.cwd = parent?.cwd ?? thread.cwd;
       thread.turns = parent?.turns ?? [];
       threads.unshift(thread);
-      json = { thread, model: "fixture-model", modelProvider: "openai" };
+      json = {
+        model: "fixture-model",
+        modelProvider: "openai",
+        ...options.forkSettings,
+        thread,
+      };
     } else if (path.endsWith("/thread/start")) {
       const thread = makeThread("ux-created", "新的中文任务");
       threads.unshift(thread);

@@ -25,7 +25,7 @@ export function NativeReviewFileDiff({ owner, path, findings = [], feedbackKey, 
     appendDraft(sessionDraftKey("codex", owner.threadId), `\n关于保存轮次 ${owner.turnId} 的 ${file}:${comment.selection.start}-${comment.selection.end}（${comment.selection.side === "old" ? "旧文件" : "新文件"}）：\n${comment.body}\n${fence}\n${comment.selection.content}\n${fence}\n`);
     useSavedTurnReviewStore.getState().markAddedToDraft(key, comment.id);
   };
-  return <DiffViewer {...props} native presentation="review" selection={selection} onSelectLines={setSelection} renderAnnotation={location => {
+  return <DiffViewer {...props} copyScope={JSON.stringify([key, owner.threadId, owner.turnId, owner.cwd, path])} native presentation="review" selection={selection} onSelectLines={setSelection} renderAnnotation={location => {
     const atLine = comments.filter(comment => comment.selection.side === location.side && comment.selection.end === location.line);
     const lineFindings = findings.filter(finding => finding.side === location.side && finding.end === location.line);
     const selected = selection?.side === location.side && selection.end === location.line;

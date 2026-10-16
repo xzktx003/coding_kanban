@@ -18,6 +18,7 @@ export async function setup(
     app = Fastify();
   const fixture = await installSessionUxFixture(page, 2);
   const calls: Array<{ method: string; params: any }> = [];
+  let failure: Error | undefined;
   let storeUrl = "",
     settingsUrl = "";
   page.on("request", (r) => {
@@ -79,6 +80,7 @@ export async function setup(
         ),
       call: async (method, params) => {
         calls.push({ method, params });
+        if (failure) throw failure;
         if (method === "turn/start") {
           const turn = {
             id: "run-" + params.clientUserMessageId,
@@ -112,16 +114,27 @@ export async function setup(
   const addr = app.server.address();
   if (!addr || typeof addr === "string") throw Error("address");
   const origin = `http://127.0.0.1:${addr.port}`;
+  let closing = false;
+  const proxyRequests = new Set<Promise<void>>();
   await page.route("**/api/session/followups**", async (route) => {
-    const req = route.request();
-    const response = await page.request.fetch(
-      origin + new URL(req.url()).pathname + new URL(req.url()).search,
-      {
-        method: req.method(),
-        ...(req.method() === "POST" ? { data: req.postDataJSON() } : {}),
-      },
-    );
-    await route.fulfill({ response });
+    if (closing) return route.abort().catch(() => {});
+    const task = (async () => {
+      const req = route.request();
+      const response = await page.request.fetch(
+        origin + new URL(req.url()).pathname + new URL(req.url()).search,
+        {
+          method: req.method(),
+          ...(req.method() === "POST" ? { data: req.postDataJSON() } : {}),
+        },
+      );
+      await route.fulfill({ response });
+    })();
+    proxyRequests.add(task);
+    try {
+      await task;
+    } finally {
+      proxyRequests.delete(task);
+    }
   });
   let cards = fixture.threads.map((t) => ({
     kind: "codex" as const,
@@ -254,6 +267,9 @@ export async function setup(
   };
   return {
     queue,
+    fail: (error?: Error) => {
+      failure = error;
+    },
     calls,
     fixture,
     errors,
@@ -262,6 +278,12 @@ export async function setup(
     settingsUrl: () => settingsUrl,
     storeUrl: () => storeUrl,
     close: async () => {
+      // Drain read-only polls before closing their private HTTP server. Keep
+      // routes installed until the page has stopped, so teardown cannot fall
+      // through to the real gateway or race an in-flight fixture request.
+      closing = true;
+      await Promise.allSettled([...proxyRequests]);
+      await page.goto("about:blank").catch(() => {});
       await page.unroute("**/api/session/followups**").catch(() => {});
       await app.close();
       await rm(root, { recursive: true, force: true });

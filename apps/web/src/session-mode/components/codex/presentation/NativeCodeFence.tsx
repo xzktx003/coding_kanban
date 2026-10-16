@@ -121,6 +121,8 @@ export function NativeCodeFence({
     <div
       className="codex-native-code-fence"
       data-streamdown="code-block"
+      data-markdown-copy="code-block"
+      data-markdown-copy-text={svgPreview ? code : undefined}
       data-language={language}
     >
       <div

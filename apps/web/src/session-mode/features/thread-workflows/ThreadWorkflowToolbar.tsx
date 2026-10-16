@@ -17,6 +17,7 @@ import { downloadThreadMarkdown } from "./service";
 import { threadWorkflowActions, useThreadWorkflowActions } from "./actions";
 import { useAgentInteractionVisible } from "@session/session-dom";
 import { ThreadEditRecovery } from "./ThreadEditRecovery";
+import { writeNativeMarkdownClipboard } from "@session/components/codex/presentation/nativeMarkdownClipboard";
 import "./thread-workflows.css";
 
 export interface ThreadWorkflowToolbarProps {
@@ -121,7 +122,7 @@ export function ThreadWorkflowToolbar({
       if (request.action === "export")
         downloadThreadMarkdown(markdown, title || threadId);
       else
-        void navigator.clipboard.writeText(markdown).then(
+        void writeNativeMarkdownClipboard(markdown).then(
           () =>
             toast.success(
               label("已复制为 Markdown", "Copied conversation as Markdown"),
@@ -132,23 +133,23 @@ export function ThreadWorkflowToolbar({
             ),
         );
     } else
-      void navigator.clipboard
-        .writeText(makeThreadUrl(window.location.href, request.threadId))
-        .then(
-          () =>
-            toast.success(
-              label(
-                request.action === "copyDeeplink"
-                  ? "已复制深层链接"
-                  : "会话链接已复制",
-                "Conversation link copied",
-              ),
+      void writeNativeMarkdownClipboard(
+        makeThreadUrl(window.location.href, request.threadId),
+      ).then(
+        () =>
+          toast.success(
+            label(
+              request.action === "copyDeeplink"
+                ? "已复制深层链接"
+                : "会话链接已复制",
+              "Conversation link copied",
             ),
-          () =>
-            toast.error(
-              label("未能复制会话链接", "Could not copy conversation link"),
-            ),
-        );
+          ),
+        () =>
+          toast.error(
+            label("未能复制会话链接", "Could not copy conversation link"),
+          ),
+      );
   }, [request, rows, title, threadId, historyComplete, interactionVisible]);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => {

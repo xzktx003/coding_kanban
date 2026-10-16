@@ -132,3 +132,30 @@ React原生时间戳因果诊断没有闭合标准RSS红灯：在独立Node进�
 独立浏览器自动回收与只读重显约 96.5 秒：JS heap 为 93,977,620 → 62,124,452 → 235,419,324 bytes，renderer RSS 为 432,459,776 → 295,903,232 → 561,545,216 bytes；没有强制 GC／刷新，草稿、审批与完成回复保留，页面错误为空。该短测只证明回收和恢复边界，不证明长期 RSS 稳定，未重跑默认跳过的 30 分钟 soak，之前标准长测红灯仍保留。
 
 证据位于被忽略的 `.dev-runtime/send-reliability-final/`（`session-network-memory-metrics.json`、`idle-memory-observations.json`）和 `.dev-runtime/send-reliability-memory/`，局域网 HTTPS 前端为 `https://10.30.0.22:8484`、绑定 `0.0.0.0`；隔离 fixture 接收全部测试写入，没有向真实 Agent 发送测试任务。
+
+## Goal 对齐后的冻结长测（2026-10-16）
+
+标准 Playwright / 原生 EventSource 负载持续 1802.806 秒、862 次自然采样，**仍未通过**：renderer RSS 低点 336.9102 → 515.6406 MiB，增长 178.7305 MiB，超过原 128 MiB 门槛。JS 堆低点增长 6.4837 MiB，峰值 heap/RSS 为 236.6881/691.6445 MiB，React measure 留存为零，页面错误为空。失败发生在最终音频空闲断言之前；采样仅观察连续任务创建一个上下文，不计最后空闲归零通过。没有强制 GC、刷新、放宽门槛或停止 Agent。
+
+前端为独立绑定 `0.0.0.0` 的 **HTTP `http://10.30.0.24:5173/`**，结束后已验证自有 PID/start ticks/目录并关闭。加载副本 2820 个文件的哈希前后不变；该冻结版本早于本轮消息折叠、菜单焦点及复制资源修复，不作为全部最终 UI 源码的长测。完整 JSON、日志与哈希核对分别在忽略目录 `.dev-runtime/session-polish-round2-20261016/soak-browser/**/natural-gc-soak.json`、`soak-browser.log`、`soak-manifest-verification.json`，摘要为 `soak-result-summary.json`。此前标准长测红灯继续保留，短时堆释放用例不覆盖此长期 RSS 问题。
+
+随后只执行一次独立归因诊断：冻结副本、私有缓存和固定冻结 shared 解析，四个私有多进程浏览器分别对比产品／解析丢弃 sink 与持续／短时附着 CDP。监听为 **HTTP `http://10.30.0.24:37237/`**、绑定 `0.0.0.0`，业务接口均为自有 fixture；未接正式网关。自有 browser-tree VmRSS 总和达到 2585.1602 MiB，超过事先固定的 2560 MiB 安全预算，即停止负载并清理；总墙钟 77.081 秒，仅活动 18.032 秒／10 cycles／10 次 OS 采样，未到 90 秒预热、native dump 或安静尾段。四个 renderer 在这段短窗内身份恒定，不能据此外推标准 30 分钟的进程数，更不能作泄漏或观察器根因结论。
+
+该次 `completed:false`，不重跑、不提高预算，也不替代上述 +178.7305 MiB 红灯。两个产品页还有 fixture 的 Vite WebSocket-close 错误；关闭前一条历史响应未完成 sink 镜像，亦不能宣称完整流量／条件相同。自有浏览器均退出后，Node 的 fixture/stdin 句柄仍在，按持有的 PID/start ticks 精确 SIGTERM 收尾；最终登记自有 PID 为零、监听已关闭。摘要与原始证据为 `.dev-runtime/session-polish-round2-20261016/rss-audit/once-result-summary.json`、`run-zb7_4dam/`。冻结 2819 个非 env 文件前后哈希相同，唯一 env 未读取；正式服务、产品实现和标准门槛未变。
+
+后续只读复算确认原低点算术正确，但采样 RSS 是浏览器所有 renderer 合计，heap 仅为 page target；未记录逐 PID/start ticks／数量，VmRSS 缺字段按零处理，无法事后排除进程组合或部分缺测。实际 862 条均为正数，没有证据把原红灯判为采集错误；也不能将合计 RSS 直接命名为单进程净留存。两个原窗口 RSS median 为 540.48→523.64 MiB，低尾抬升并不代表分布一致平移；这不是替代门槛或通过证据。原始复算与有界反例在 `rss-audit/readonly-next-candidate/`。
+
+同次审查发现无搜索时仍注册全文 MutationObserver 的无效工作，1280／390px 真实浏览器均先复现受控正文变化多 4 次回调。现在仅选中带 query 的结果且现有聊天可见性允许时注册，关闭／隐藏清理，返回恢复；两例已转绿，原有 Range／RAF cleanup 保持，不改变 SSE、历史或正文回收规则。[该批验收](designs/session-render-alignment/search-highlight-lifecycle-20261016.md) 单独记录源码与恢复／审批／自然回收检查；回调减少不是长期 RSS 收益证据，30 分钟红灯继续保留。
+
+随后修正测试采样：Linux 缺失 VmRSS、空 renderer、procfs 读取失败或 PID 身份变化必须使测量失败，不得补零或吞错；每条记录包含所有 renderer 的 PID/start ticks／RSS。读取 RSS 前后再次核对 start ticks，但该数据仍是浏览器 renderer 合计，不是单 page 的 private/PSS 内存。十项单测先对旧算法 9 红／1 绿，再全部转绿；97.055 秒自然回收／恢复浏览器通过，三次采样同一进程身份、无缺测。原阈值、负载、自然 GC 与默认长测跳过规则保持，旧数据不能追溯修补，+178.7305 MiB 标准长测红灯不变，详见 [采样身份验收](designs/session-render-alignment/renderer-rss-metering-20261016.md)。
+
+## 当前源码的一次标准长测通过（2026-10-16）
+
+搜索观察生命周期修正及 RSS 采样身份补齐后，在同一隔离 **HTTP `http://10.30.0.24:48865/`**（绑定 `0.0.0.0`）运行原标准 Playwright／原生 EventSource 长测。持续负载 1802.920 秒、862 cycles／862 样本，命令退出 0、1 项通过，总用时 30.6 分钟；原工作负载、90–300 秒／最后 180 秒窗口、heap 64/256 MiB、RSS 128/768 MiB 门槛、自然 GC 和音频断言保持。
+
+RSS 低点 469.8320→496.0898 MiB，增长 26.2578 MiB；heap 低点 55.2915→59.6986 MiB，增长 4.4072 MiB。RSS／heap 峰值分别 676.9258／238.7538 MiB，页面和采样错误为空，React measure 留存为零。全部样本为一个 renderer PID 808587／start ticks 102195697，逐进程之和与合计均相等。连续任务只创建一个音频上下文、峰值活跃为一；测试到达并通过最终自然空闲归零断言，不把循环内 active=1 的样本误写成尾部观测值。
+
+这是一轮当前源码的通过记录，不是独立因果对照或长期问题根治。相比旧红灯，前窗口 RSS 低点本身由 336.91 升为 469.83 MiB，差值减少不能直接算作搜索观察器或复制修复的收益；源码和 GC 时序也不同。旧 +178.7305 MiB 红灯、缺少逐进程身份的边界及中止的四浏览器诊断全部保留，不追加重复运行挑选绿色结果。
+
+`round9-soak-source-manifest.json`／`round9-soak-source-verification.json` 核对 2834 源码、14 份 E2E、2 份采样脚本和 72 份 shared 产物前后不变；本批没有构建、HMR 修改、强制 GC、刷新或停止正式 Agent。完整 JSON 为 `.dev-runtime/session-polish-round2-20261016/round9-soak-browser/session-idle-memory-long-r-12e42--natural-garbage-collection/natural-gc-soak.json`，摘要 `round9-soak-result-summary.json`，日志 `round9-soak-browser.log`。只读正式服务核对的 PID/start ticks 仍为 2712539／55361120，健康接口 HTTP 200；没有替换运行进程。
+

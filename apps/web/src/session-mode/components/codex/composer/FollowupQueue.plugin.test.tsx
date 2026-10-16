@@ -10,24 +10,25 @@ const message = {
   id: "q1",
   text: "稍后处理",
   images: [],
-  status: "failed" as const,
-  error: "SESSION_OWNED_ELSEWHERE",
+  status: "queued" as const,
 };
 
-it("uses the plugin continue and retry labels above the composer", () => {
+it("uses the plugin continue label for an interrupted queue without unresolved messages", () => {
   render(
     <FollowupQueueContent
       threadId="owner"
       turnId="turn"
-      snapshot={{
-        state: {
-          revision: 1,
-          paused: "interrupted",
-          items: [message],
-          undo: null,
-        },
-        error: "offline",
-      } as never}
+      snapshot={
+        {
+          state: {
+            revision: 1,
+            paused: "interrupted",
+            items: [message],
+            undo: null,
+          },
+          error: "offline",
+        } as never
+      }
     />,
   );
   expect(screen.getByRole("button", { name: "继续" })).toBeTruthy();
@@ -38,5 +39,5 @@ it("uses the plugin continue and retry labels above the composer", () => {
   fireEvent.click(screen.getByRole("button", { name: "排队消息操作 1" }));
   expect(screen.queryByRole("menuitem", { name: "暂停队列" })).toBeNull();
   expect(screen.queryByRole("menuitem", { name: "清空队列" })).toBeNull();
-  expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
 });

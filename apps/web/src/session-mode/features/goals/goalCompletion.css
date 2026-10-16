@@ -1,0 +1,25 @@
+.session-mode .codex-goal-achieved {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  margin-inline-start: 6px;
+  font-size: 11px;
+  line-height: 20px;
+  color: var(--vscode-descriptionForeground, var(--muted-foreground));
+}
+.session-mode .codex-goal-achieved-separator {
+  height: 12px;
+  border-inline-start: 1px solid
+    var(
+      --app-color-border,
+      color-mix(
+        in oklab,
+        var(--vscode-foreground, var(--foreground)) 8%,
+        transparent
+      )
+    );
+}
+.session-mode .codex-goal-achieved > svg {
+  flex-shrink: 0;
+}

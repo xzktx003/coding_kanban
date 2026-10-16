@@ -205,6 +205,9 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     run: () => {
       const threadId = useCodexStore.getState().currentThreadId;
       const cwd = useWorkspaceStore.getState().cwd;
+      if (threadId)
+        changeThreadModel(threadId, { collaborationMode: "default" });
+      else useConfigStore.getState().setCollaborationMode("default");
       goalDrafts.set(sessionDraftKey("codex", threadId, cwd), true);
     },
   },

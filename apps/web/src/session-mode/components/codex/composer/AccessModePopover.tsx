@@ -1,7 +1,5 @@
-import { useShallow } from "zustand/react/shallow";
 import { ListChecks } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useCodexStore } from "@session/components/codex/stores";
 import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
 import { Button } from "@session/components/ui/button";
 import {
@@ -16,9 +14,14 @@ import { NativeComposerIcon } from "./NativeComposerIcon";
 import { ComposerTooltip } from "./ComposerTooltip";
 
 /** Main PermissionsModeDropdown semantics; auto review needs an authoritative native capability. */
-export function AccessModePopover({ compact = false }: { compact?: boolean }) {
+export function AccessModePopover({
+  compact = false,
+  threadId,
+}: {
+  compact?: boolean;
+  threadId: string | null;
+}) {
   const { t } = useTranslation("composer");
-  const threadId = useCodexStore((s) => s.currentThreadId);
   const {
     sandbox,
     sandboxPolicy,
@@ -30,9 +33,6 @@ export function AccessModePopover({ compact = false }: { compact?: boolean }) {
     setCollaborationMode,
     setApprovalsReviewer,
   } = useThreadModelSettings(threadId);
-  const { triggerInputFocus } = useCodexStore(
-    useShallow((s) => ({ triggerInputFocus: s.triggerInputFocus })),
-  );
   const isNarrow = useComposerToolbarNarrow();
   const { ask, confirmation } = useSessionActionConfirmation();
   const full = sandbox === "danger-full-access";
@@ -55,7 +55,8 @@ export function AccessModePopover({ compact = false }: { compact?: boolean }) {
               : "请求批准";
   const finish = () => {
     setCollaborationMode("default");
-    triggerInputFocus();
+    // Keep the menu primitive's own trigger restoration. A side conversation
+    // must not dispatch a focus request to the shared main composer.
   };
   const rows = [
     {
@@ -209,7 +210,6 @@ export function AccessModePopover({ compact = false }: { compact?: boolean }) {
                 setCollaborationMode(
                   collaborationMode === "plan" ? "default" : "plan",
                 );
-                triggerInputFocus();
               }}
             >
               <ListChecks size={16} />

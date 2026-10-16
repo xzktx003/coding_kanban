@@ -1,6 +1,6 @@
 import { save } from "@session/browser-dialog";
-import { Check, Copy, Download } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Download } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CodexMarkdown as Markdown } from "../presentation/CodexMarkdown";
 import { Button } from "@session/components/ui/button";
@@ -10,7 +10,12 @@ import { openPlanWindow } from "@session/features/thread-workflows/planWindow";
 import { planSidePanel } from "@session/features/thread-workflows/planSidePanel";
 import { useThemeContext } from "@session/contexts/ThemeContext";
 import { useCodexContentOwner } from "../presentation/ownerContext";
-import { NativePlanOpenWindow } from "@session/features/thread-workflows/NativeMessageIcons";
+import {
+  NativePlanOpenWindow,
+  NativeMessageCopy,
+  NativeMessageCopied,
+} from "@session/features/thread-workflows/NativeMessageIcons";
+import { useNativeCopyFeedback } from "../presentation/useNativeCopyFeedback";
 import { toast } from "sonner";
 import { NativeChevronDown } from "../presentation/NativeIcons";
 import "@session/features/thread-workflows/native-message.css";
@@ -32,29 +37,12 @@ export const PlanContentItem = ({
   const theme = useThemeContext();
   const owner = useCodexContentOwner(threadId);
   const [collapsed, setCollapsed] = useState(true);
-  const [copied, setCopied] = useState(false);
-  const copyTimeoutRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    return () => {
-      if (copyTimeoutRef.current) {
-        window.clearTimeout(copyTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  const handleCopy = async () => {
-    if (!text.length) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      if (copyTimeoutRef.current) {
-        window.clearTimeout(copyTimeoutRef.current);
-      }
-      copyTimeoutRef.current = window.setTimeout(() => setCopied(false), 1400);
-    } catch (error) {
-      console.error("Failed to copy plan text:", error);
-    }
+  const { copied, copyPending, copy } = useNativeCopyFeedback(
+    [text, threadId, turnId, running],
+    { feedbackMs: 2000, language: i18n?.language ?? "zh" },
+  );
+  const handleCopy = () => {
+    if (text.length && !running) copy(text);
   };
 
   const handleDownload = async () => {
@@ -158,15 +146,24 @@ export const PlanContentItem = ({
             <Button
               variant="ghost"
               size="icon-xs"
-              onClick={() => void handleCopy()}
+              onClick={
+                copied
+                  ? undefined
+                  : (event) => {
+                      event.stopPropagation();
+                      void handleCopy();
+                    }
+              }
+              aria-busy={copyPending || undefined}
+              aria-disabled={copyPending || undefined}
               disabled={!text.length || running}
               aria-label={copied ? t("plan.copied") : t("plan.copy")}
               title={copied ? t("plan.copied") : t("plan.copy")}
             >
               {copied ? (
-                <Check className="h-3.5 w-3.5 text-green-500" />
+                <NativeMessageCopied className="h-3.5 w-3.5" />
               ) : (
-                <Copy className="h-3.5 w-3.5" />
+                <NativeMessageCopy className="h-3.5 w-3.5" />
               )}
             </Button>
             <Button

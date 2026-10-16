@@ -14,7 +14,10 @@ import { useThemeStore } from "@session/stores/settings/useThemeStore";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { applyWorkbenchTheme, nativeCodexTheme } from "./workbench-theme";
 import type { NativeContentState } from "./native-content";
-import {startNativeVisibilityClient,type NativeVisibilityState} from "./native-visibility";
+import {
+  startNativeVisibilityClient,
+  type NativeVisibilityState,
+} from "./native-visibility";
 import { isNativeWindowReady } from "./native-window-readiness";
 import { mountNativeSurface } from "./native-surface";
 import {
@@ -82,7 +85,7 @@ type NativeStatus = {
   available: boolean;
   resumeAvailable?: boolean;
   sendAvailable?: boolean;
-  refreshVisibility?: {available:boolean};
+  refreshVisibility?: { available: boolean };
   reason?: string;
   iframeUrl?: string;
   extensionVersion?: string;
@@ -905,25 +908,53 @@ export default function CodexWorkbench({
   );
   const nativeFrames = codexNativeFrames(paneBoxes);
   const visibleWindowKeys = nativeFrames.map((item) => item.id).join("|");
-  const visibilityClient=useRef<ReturnType<typeof startNativeVisibilityClient>|null>(null);
-  const [visibilityState,setVisibilityState]=useState<NativeVisibilityState>("inactive");
-  const visibleThreadIds=windowState.windows.filter(item=>nativeFrames.some(frame=>frame.id===item.id))
-    .map(item=>item.threadId??(item.kind==="thread"?item.id:null))
-    .filter((id):id is string=>typeof id==="string"&&UUID.test(id));
-  const visibleThreadKey=[...new Set(visibleThreadIds)].sort().join("|");
-  const visibilityLatest=useRef({threadIds:visibleThreadIds,active});
-  visibilityLatest.current={threadIds:visibleThreadKey?visibleThreadKey.split("|"):[],active};
-  useEffect(()=>{
-    if(!clientScope.profileId||!hostInstanceId||!status?.refreshVisibility)return;
-    if(status.refreshVisibility.available!==true){setVisibilityState("unavailable");return}
-    const client=startNativeVisibilityClient({profileId:clientScope.profileId,instanceId:hostInstanceId,onState:setVisibilityState});
-    visibilityClient.current=client;
-    client.setVisible(visibilityLatest.current.threadIds,visibilityLatest.current.active);
-    return ()=>{if(visibilityClient.current===client)visibilityClient.current=null;client.stop()};
-  },[clientScope.profileId,hostInstanceId,status?.refreshVisibility?.available]);
-  useEffect(()=>{
-    visibilityClient.current?.setVisible(visibilityLatest.current.threadIds,visibilityLatest.current.active);
-  },[visibleThreadKey,active]);
+  const visibilityClient = useRef<ReturnType<
+    typeof startNativeVisibilityClient
+  > | null>(null);
+  const [visibilityState, setVisibilityState] =
+    useState<NativeVisibilityState>("inactive");
+  const visibleThreadIds = windowState.windows
+    .filter((item) => nativeFrames.some((frame) => frame.id === item.id))
+    .map((item) => item.threadId ?? (item.kind === "thread" ? item.id : null))
+    .filter((id): id is string => typeof id === "string" && UUID.test(id));
+  const visibleThreadKey = [...new Set(visibleThreadIds)].sort().join("|");
+  const visibilityLatest = useRef({ threadIds: visibleThreadIds, active });
+  visibilityLatest.current = {
+    threadIds: visibleThreadKey ? visibleThreadKey.split("|") : [],
+    active,
+  };
+  useEffect(() => {
+    if (!clientScope.profileId || !hostInstanceId || !status?.refreshVisibility)
+      return;
+    if (status.refreshVisibility.available !== true) {
+      setVisibilityState("unavailable");
+      return;
+    }
+    const client = startNativeVisibilityClient({
+      profileId: clientScope.profileId,
+      instanceId: hostInstanceId,
+      onState: setVisibilityState,
+    });
+    visibilityClient.current = client;
+    client.setVisible(
+      visibilityLatest.current.threadIds,
+      visibilityLatest.current.active,
+    );
+    return () => {
+      if (visibilityClient.current === client) visibilityClient.current = null;
+      client.stop();
+    };
+  }, [
+    clientScope.profileId,
+    hostInstanceId,
+    status?.refreshVisibility?.available,
+  ]);
+  useEffect(() => {
+    visibilityClient.current?.setVisible(
+      visibilityLatest.current.threadIds,
+      visibilityLatest.current.active,
+    );
+  }, [visibleThreadKey, active]);
   const layoutRef = useRef({
     frames: nativeFrames,
     interactiveId: null as string | null,
@@ -2500,9 +2531,17 @@ export default function CodexWorkbench({
                 connectionError ??
                 "官方插件独立运行。输入与审批由当前原生窗口处理。"}
             </p>
-            {status?.refreshVisibility&&<p data-codex-visibility-state={visibilityState}>
-              {visibilityState==="unavailable"?"后台保温暂不可用，重新打开页面可能需要重新加载。":visibilityState==="protected"?"当前可见会话已登记保温保护。":visibilityState==="connecting"?"正在连接后台保温服务。":"当前页面没有需要保温保护的可见会话。"}
-            </p>}
+            {status?.refreshVisibility && (
+              <p data-codex-visibility-state={visibilityState}>
+                {visibilityState === "unavailable"
+                  ? "后台保温暂不可用，重新打开页面可能需要重新加载。"
+                  : visibilityState === "protected"
+                    ? "当前可见会话已登记保温保护。"
+                    : visibilityState === "connecting"
+                      ? "正在连接后台保温服务。"
+                      : "当前页面没有需要保温保护的可见会话。"}
+              </p>
+            )}
             <button type="button" onClick={retryConnection}>
               重试连接
             </button>

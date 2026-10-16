@@ -317,15 +317,19 @@ test("touch controls, agent label, owner states and narrow desktop pane stay wit
         page.locator(".session-native-composer-status").first(),
       ).toHaveText("规划模式");
       await fixedHeight(page, initial);
+      const goalDraft = page.getByRole("button", { name: "明确目标", exact: true });
+      await expect(goalDraft).toBeVisible();
       await openComposerStatus(page);
       await expect(
         page.getByRole("button", { name: "取消规划模式", exact: true }),
       ).toBeVisible();
-      await expect(
-        page.getByRole("button", { name: "取消目标草稿", exact: true }),
-      ).toBeVisible();
       await fixedHeight(page, initial);
       await page.getByRole("button", { name: "关闭面板", exact: true }).click();
+      await expect(goalDraft).toBeVisible();
+      await goalDraft.click();
+      await expect(goalDraft).toHaveCount(0);
+      await expect(editor(page)).toHaveText("运行中的草稿");
+      await fixedHeight(page, initial);
       await page.evaluate(async () => {
         const path = "/src/session-mode/components/codex/composer/v2/drafts.ts";
         const { useComposerDraftStore } = await import(

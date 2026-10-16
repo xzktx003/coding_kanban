@@ -1,13 +1,12 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { notifyNativeClipboardError } from "../native-notifications/nativeClipboardError";
 import {
   NativeMessageCopy as CopyIcon,
   NativeMessageCopied,
 } from "./NativeMessageIcons";
 import { NativeMarkdownTooltip } from "../../components/codex/presentation/NativeMarkdownTooltip";
 import { cleanMarkdown } from "./model";
-import { writeNativeMarkdownClipboard } from "../../components/codex/presentation/nativeMarkdownClipboard";
+import { useNativeCopyFeedback } from "../../components/codex/presentation/useNativeCopyFeedback";
 import { nativeMessageClipboard } from "../../components/codex/presentation/nativeMessageClipboard";
 export function NativeMessageCopy({
   text,
@@ -20,18 +19,13 @@ export function NativeMessageCopy({
 }) {
   const { i18n } = useTranslation();
   const zh = i18n?.language?.startsWith("zh") ?? true;
-  const [copied, setCopied] = useState(false);
-  const [copyPending, setCopyPending] = useState(false);
-  const pending = useRef(false);
-  const timer = useRef<number | null>(null);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-      if (timer.current !== null) window.clearTimeout(timer.current);
-    };
-  }, []);
+  const { copied, copyPending, copy } = useNativeCopyFeedback(
+    [text, kind, contentRef],
+    {
+      feedbackMs: kind === "assistant" ? 2000 : 1500,
+      language: i18n?.language ?? "zh",
+    },
+  );
   const label = copied
     ? zh
       ? "已复制"
@@ -53,37 +47,21 @@ export function NativeMessageCopy({
         aria-busy={(kind === "assistant" && copyPending) || undefined}
         aria-disabled={(kind === "assistant" && copyPending) || undefined}
         onClick={() => {
-          if (pending.current || copied) return;
-          pending.current = true;
-          if (kind === "assistant") setCopyPending(true);
+          if (copyPending || copied) return;
           const body = contentRef?.current;
           const rendered = body
             ? nativeMessageClipboard(
                 body.querySelector<HTMLElement>(".codex-markdown") ?? body,
-                { kind },
+                { kind, includeCollapsedContent: kind === "user" },
               )
             : null;
-          void writeNativeMarkdownClipboard(
+          copy(
             kind === "assistant"
               ? cleanMarkdown(text, i18n?.language ?? "zh")
               : (rendered?.text ?? cleanMarkdown(text, i18n?.language ?? "zh")),
+            true,
             rendered?.html,
-          )
-            .then(
-              () => {
-                if (!mounted.current) return;
-                setCopied(true);
-                timer.current = window.setTimeout(
-                  () => setCopied(false),
-                  kind === "assistant" ? 2000 : 1500,
-                );
-              },
-              () => notifyNativeClipboardError(i18n?.language ?? "zh"),
-            )
-            .finally(() => {
-              pending.current = false;
-              if (mounted.current) setCopyPending(false);
-            });
+          );
         }}
       >
         {copied ? (

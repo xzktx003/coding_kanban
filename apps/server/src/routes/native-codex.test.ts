@@ -1597,3 +1597,19 @@ test("profile scopes accept exact local UUIDs only before registering native rou
     const app=Fastify();try{await assert.rejects(registerNativeCodexRoutes(app,{profileId}),/profile/);}finally{await app.close();}
   }
 });
+
+test("native refresh scope is read from the owned host record without exposing it or enabling default page protection",async()=>{
+  const f=await setup();
+  try{
+    const original=JSON.parse(await readFile(f.record,"utf8"));
+    const scope={domain:"019aabcd-1234-7890-abcd-000000000001",generation:"019aabcd-1234-7890-abcd-000000000002",pid:123,startTicks:"456"};
+    await writeFile(f.record,JSON.stringify({...original,refreshConnection:scope}));
+    assert.deepEqual((await f.gateway.runtime())?.refreshScope,scope);
+    const status=(await f.app.inject("/api/native-codex/status")).json();
+    assert.equal(Object.hasOwn(status,"refreshVisibility"),false);assert.equal(JSON.stringify(status).includes("startTicks"),false);
+    for(const patch of [{pid:"123"},{startTicks:456},{generation:"unknown"},{domain:[]}] ){
+      await writeFile(f.record,JSON.stringify({...original,refreshConnection:{...scope,...patch}}));
+      assert.equal((await f.gateway.runtime())?.refreshScope,undefined);
+    }
+  }finally{await f.close()}
+});

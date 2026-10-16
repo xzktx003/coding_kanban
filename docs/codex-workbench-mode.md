@@ -124,6 +124,8 @@ Codex 模式项目导航复用会话模式的项目索引，并通过会话服�
 
 ## 刷新恢复的隔离进度（2026-10-15）
 
+显式 profile 新增可见页面保护连接，按当前宿主实例和完整 native 运行身份登记，只上报可见 thread UUID，目录由原生元数据确定。硬刷新断连保留短暂保护，新标签独立，隐藏释放自身消费者；真实 native 11→10、可见保护与冷恢复已有回归，自有通道的 iPhone 16 浏览器平台检查也已通过。独立持久管理进程现可显式接入已有 native，网关关闭不清空中央租约/池；默认入口仍未启用，完整 CLI 授权、自动 profile/资源注册及官方 UI/两秒验收尚未完成。见 [可见保护设计](designs/codex-mode-audit-20261014/refresh-visibility-control.md)及[独立管理进程](designs/codex-mode-audit-20261014/refresh-control-process.md)。
+
 原生首次发送的 thread 发现、启动列竞争与引导遮挡已补充行为回归；Codex 外壳的布局、启动 thread 映射、项目和侧栏宽度使用标签内视图快照，设备存储仅作为新标签初始模板。关注成员同步沿用原契约。该变化不接管官方 composer 的草稿。
 
 `packages/native-codex-host/refresh-prototype` 的私有常驻进程、版本门控独立连接、原生资源探测与 LRU 已有真实原生测试。它们没有接入默认 launcher、网关或正式宿主；已有安装的 companion 也不会随源码测试被替换。创建管理进程退出不结束 native turn；旧代次/PID、已有记录和端点均拒绝隐式接管。配置、组件 API 及测试见 [组件说明](../packages/native-codex-host/refresh-prototype/README.md)。

@@ -1,3 +1,29 @@
+- 2026-10-16：当前增强lCa/uca菜单为63.5*spacing（254px），没有modelPickerTriggerConfig的OR fallback仍是w-56（224px），不能凭旧触发器oracle给当前分支背书。入场为320ms+30ms/.98 scale，默认system减动为animation:none；旧全局0.01ms不等于完全忽略减动。Playwright顶层test.use reducedMotion未实际设置媒体时不能计反例；显式emulateMedia并核对matchMedia，测真实animation对象，不能为inactive longhand覆盖全局基线。背景变量缺失的原probe不作背景oracle，显式on/off产品设置另验。
+
+- 2026-10-16：网页复制入口须检查真实 copy 载荷，不能只断言临时 textarea 或 execCommand=true。当前可达13处复用native writer，模态项目菜单在390/1440实测曾粘贴出旧URL；事件明确载荷后同页原生Ctrl+V得到完整路径，短ID另有真实copy-event单测。普通会话五项及两尺寸组件均通过，未消费/Tauri另外三处不计支持，详见仓库clipboard-http-actions验收。
+
+- 2026-10-16：待办复制回执须同时核对ID集合与原文；同ID编辑正文也会使旧回执失效，单纯重排不改变原完成语义。pending observer不保存正文，来源换代/卸载撤销回调；失败不能标记完成。运行行Copy ID的Enter/Space不得冒泡打开详情，父行只处理自己持有的事件，保留父行键盘导航。两类反例均先红后绿。
+
+- 2026-10-16：嵌套模型菜单退出动画会与外层 Sheet 卸载交错，真实 Escape→立即浏览器 Back 可使弹层均消失而 body pointer-events 仍为 none。仅本菜单关闭时直接卸载，保留其它真实 Dialog 的锁；每次打开另有轻量身份，旧 FocusScope cleanup 不可清掉重开后的 DOM 引用。5 项新增单测与6项新增浏览器包含真实 Back／390px／另一锁／两种焦点交错，最终42单测和12浏览器通过；明确取消本菜单150ms关闭动画，不改依赖/全局body，不将shouldReduceMotion:true夹具当普通动画一致性证明。
+
+- 2026-10-16：原版用户消息正文/ellipsis为1.625，disclosure是兄弟按钮并继承1.5，不可一律套正文行高。先前19.5px算法mock不能作原版正文行高证据；真实原CSS+provider的v/gt/Ft九组确认13px正文21.125/按钮19.5，15px正文24.375/按钮22.5。按钮纯样式修正两宽度先红后绿，四组字体几何与32项浏览器组合通过；原始provider/CSS不完整失败须保留并区分夹具边界。
+
+- 2026-10-16：模型菜单须区分键盘与pointer切换。原版强度是可导航menuitem，左右改值、普通上下/Home/End导航，Enter确认关闭且不提交草稿；键盘进高级视图选择checked enabled模型，pointer保持容器。关闭350ms后才重置，快速重开取消旧timer，thread/draftOwner代次保护null线程与ABA。37单测和六路径浏览器通过；切owner时须区分setState发起时刻与DOM完成。退出动画中direct store切owner的body pointer锁已由真实Back入口另批修复，不把其记作纯夹具错误。
+
+- 2026-10-16：仅清 mounted 标记不能释放 pending async copy 所捕获的 source 和 React render 闭包。真实 V8 反例确认命令／卡片／Diff／Plan／用户及助手复制在卸载后各留约262KB，未点击对照回收。复制反馈改为模块级回调、空版本 token、cleanup 清空 controller 中的 setters，现代 clipboard 分支直接返回 Promise；真实 pending write/writeText/ClipboardItem 不保存参数，两组各六种 marker 卸载后全零。不能用变更对象字段形状或测试 spy 自身保存参数伪造释放结论；external string 的 self_size 不是正文长度，不可据此排除，需实际长度核对。短时显式GC不替代自然长测。
+
+- 2026-10-16：用户消息折叠须从原生实际阈值推导：超过 20 行才折叠，19 行加省略，跨代码块按原边界扩展；完整正文保留，整条复制与搜索 reveal 不能只看可见片段。隐藏/卸载恢复自身 inert/aria-hidden 并取消观察器，预先存在的 inert 保持。SVG 预览通过 copy-text 保留源码，普通代码不重复放入 attribute；红绿灯与独立迟到 observer 反例已记录。
+
+- 2026-10-16：模型菜单 Escape 由原版 hCa wrapper 指向 composer，不能只看 lCa/Radix 默认 trigger。捕获原输入框、线程和草稿 owner，关闭时核对页面与实际可见性；普通指针关闭不改焦点规则。回到主输入和展开输入均有三尺寸验收，关闭释放捕获 DOM。
+
+- 2026-10-16：命令／聊天 Diff 复制也必须走 LAN HTTP 适配，不能只给 Markdown／Plan 修复。保留原始 ANSI 与完整 patch，单次在途、来源对象换代和卸载释放共同防止迟到成功／错误或计时器存活；命令复制原控件是 NKi，默认两秒且 pending 保留原图标与 aria，不用执行成功的 12px 勾替代 17 viewBox 的复制成功图标。实际原组件及 HTTP copy event 均有回归。
+
+- 2026-10-16：Goal 原生遮罩使用编辑区底色80%，不能沿用通用黑50%；原函数链、两版本相同CSS和DOM像素一致后再修改。对照须真实切Session主题，仅改html可能仍保留.dark/color-scheme。textarea原本两边均resize-y，不以截图猜测改掉行为。遮罩加强回归先红后绿，仅Goal指定专属样式。
+
+- 2026-10-16：Plan 复制使用当前官方单次 pending/2000ms/可见错误与原生图标，保留原 Markdown（含未处理引用标记）；HTTP fallback 和旧 owner 回执有回归。文件选择器或上传失败不能仅 console.error；官方 title-only 错误明确可见，取消保持安静，不自动重试或修改另一草稿。真实 11MiB 和 HTTP503 已隔离复验。
+
+- 2026-10-16：Goal Portal 表单必须阻止 submit 向公共输入传播，编辑目标不能发送未提交的普通草稿。Goal 写入以完整目标／createdAt／修订／运行和账号范围隔离；未知回执先小 GET，核对前不得重发。账号同值通知只取消旧动作并保留只读卡片，真实账号变化恢复同 UUID 元数据。首轮接受后的附件不得按 GoalSet 失败清理；完成自动 clear 等精确 turn 完成、已有 owner 和真正 stdin 前 guard，不宣称原生跨进程 CAS。红绿灯、原组件矩阵与私有 native 证据见 docs/session-goals.md 和对应验收记录。
+
 - 2026-10-15：原生 snapshot 必须重新核对当前 iframe 文档；读取失败同时撤销 ready、thread 和缓存快照，同一 UUID 恢复后重新发布。禁止继续返回已导航掉的文档状态；三个反例先红后绿；无法访问 frame 时同时断开旧文档观察，迟到事件不得恢复就绪。
 
 - 2026-10-15：原生连接超限后 close 应只清理自身，不重复抛出既有传输失败；closed/待决 RPC 仍拒绝，未知提交不重发。验收 finally 保证保存清理状态。2 MiB 上限保持，错误诊断只保留有界根方法头/长度，不复制消息正文；真实大消息兼容问题尚未解决。
@@ -1238,3 +1264,40 @@
 - 2026-10-15（当前工作与远程发送恢复合并）：保留共享包预构建、读取 deadline、监听配额降级及三次崩溃恢复预算；修复 verify 同值完成未阻止更早 discovery、不可用状态被迟到核实恢复及裁剪时补造 source 的合并交互。未知送达继续禁止重复提交，失败队列状态与已接收的聊天回显分开；定向回归覆盖两侧约定。
 
 - 2026-10-15（合并后子 Agent 浏览器夹具身份）：通用 thread/read 夹具会为未知子 ID 构造普通主线程，原生 main 纠正逻辑因此删除真实测试子节点；子 Agent 夹具现对精确 child 返回自己的只读历史与实际 subAgent 来源，禁止借用主线程响应。保留身份修复、父草稿、审批目标和只读边界断言。
+
+- 2026-10-15（占用会话的失败队列误显中断、点继续再次报错）：暂停文案曾写死为中断，继续入口未检查 failed／uncertain，重试也未核对当前写入占用。现展示真实暂停原因，以“处理失败消息／核对送达状态”引导恢复，禁用无效继续与占用期间的重试；执行前只读核对占用，恢复继续前刷新队列。释放仅恢复显式操作，不自动重发；失败消息、原始附件与配置保留，移除仍可操作，未知送达重试仍需确认。补充前端红绿灯、后端拒绝不改状态与浏览器手机／桌面验收，详见 `docs/designs/session-render-alignment/queue-recovery-acceptance-20261015.md`。
+
+- 2026-10-15（队列浏览器验收偶发 socket hang up）：夹具关闭时未等待另一标签的在途队列查询，私有 HTTP 服务先退出，导致原断言完成后测试仍失败。现停止接收新的夹具请求、等待已有请求结束，保留路由直到页面停止后再关闭服务；不吞掉正常请求错误，不让测试请求回落到真实网关。队列排序／引导旧用例同步使用现有发送与菜单名称，保留原顺序、内容、刷新和精确轮次断言。
+- 2026-10-15：可见意图必须同步进入已验证池项，并传到真实 unsubscribe 的 beforeSend；只检查原生 revision 会漏掉页面重新可见。成功回收产生的 thread/closed 可导致自身观察版本变化；仅在已知成功回执后，按新原生缺席证明与消费者/观察版本再核对后移除。未知回执继续保留。真实原生 11→10、可见保护、冷恢复回归通过。
+
+- 2026-10-15：可见租约清理失败后禁止继续增加消费者；失效观察通知前清空集合，避免回调 close 重入。新标签可复制 sessionStorage，不能据此接管 opener 的可见租约；只有真实 reload 使用保存的凭据，页面代次、来源、实例及完整 native 身份继续核对。
+
+- 2026-10-15：PID/start ticks 捕获不能依赖短命工作线程的 children 文件；真实并发验收曾因该线程退出而 ENOENT。身份改为双读进程 stat 和 UID/proc inode 核对，完整资源扫描仍遍历全部 task，缺测不放行。确定性 task 消失反例与真实 detached/native 回归通过。
+
+- 2026-10-15：独立控制通道多 profile 初始化失败要释放已注册观察器；一个页面替换回调抛错不得关闭其他页面的共享 owner 连接。对应观察器泄留与 availability 红灯转绿；网关经私有通道逐次执行实际宿主 verify，控制进程退出只释放自身订阅，不能作为 native shutdown。
+
+- 2026-10-15：初始账号绑定只消费一次原生 account/updated，第二次同值也撤销；无关 turn 不得改变账号版本。桥接每条实际 JSONL 写入需同步 grant 检查，Promise guard 不放行，控制/原生观察失联不可重发。owner 显式退出正常关闭自身连接；真实无登录 provider 的账号撤销和控制退出后，原 turn 仍 active 并最终只完成一次。
+
+- 2026-10-15：私有诊断只允许固定错误码/操作与启动阶段枚举，不保留原配置/异常文本。新建 thread 首轮完成前不读持久历史，先等精确原生完成通知，避免 list_turns 尚不可用。新 manager 重新附着旧 native 的持久初始账号锚仍未实现，不能把连接期撤销通过当作跨重建授权隔离完成。
+- 2026-10-15（native 授权锚跨 manager 重建）：仅连接期 tracker 会漏掉 manager 离线时的账号边界。新私有服务 ready 前建立不可改写初始摘要与独立观察进程；新 manager/bridge 确认原始锚，撤销/观察失联拒绝新接入，原任务保持。观察进程自动计入 RSS；真实无登录 provider 撤销与自有观察器 SIGKILL 均有隔离回归，未替代 ChatGPT/官方 UI 验收。
+
+- 2026-10-15（撤销写盘失败与实际写入缺口）：客户端撤销写盘失败不能只关自身连接；已握手 revoke 使观察进程关闭所有授权通道，即使无法落盘也不再接入。NativeClient/官方 bridge 真正 ws.send 前同步核对锚和撤销文件，不能仅等异步连接关闭。确定性红绿灯保留，不停止 native 或重放未知提交。
+
+- 2026-10-15（原生单请求回收 guard 排队后失效）：guard 原来只在输入队列入口检查，页面在实际发送前重新可见会漏过。现在按原请求 ID 在实际 ws.send 前核对消费者/原生版本/pending，明确未发送的 veto 返回 NATIVE_NOT_SENT 并保留连接和其他订阅；超时请求不迟到发送，不重放。排队可见变化及 veto 后继续请求的红绿灯保留。
+- 2026-10-16：CodexThread 搜索高亮不能在无选中query、搜索面板关闭或会话/聊天页不可见时仍监听全文mutation并排空高亮RAF。1280/390实际浏览器两红确认受控DOM变化各多4次回调；局部guard后无效观察为0，正常搜索仍1、正文变化高亮正确、返回模式恢复、草稿不丢。原cleanup保持，不称无界observer或Range泄漏；旧RSS低点+178.73MiB仍红，聚合renderer/PID身份和VmRSS缺测口径另记，不能以减少回调推断长期收益。
+
+- 2026-10-16：RSS验收采样不能把VmRSS缺字段或空renderer集合补零，也不能吞掉Linux procfs异常后跳过RSS门禁。新增共享采样器先验证不重复正PID，stat/start ticks→status PID与kB RSS→stat/start ticks，同次身份变化明确失败；逐进程和合计都写盘。旧算法10项中9红，新算法10绿，实际自然回收/只读恢复97.055秒同一PID/ticks、无采样或页面错误。128/768MiB门槛、负载、自然GC与默认30分钟跳过不改；旧+178.7305MiB红灯及原数据缺身份边界保留，不宣称回溯修好。
+
+- 2026-10-16：搜索观察器与RSS采样身份修正后的当前源码一次标准30分钟长测通过（1802.920秒/862样本，RSS低点+26.2578MiB、heap+4.4072MiB，原128/768与64/256门槛、最终音频自然空闲均过；单renderer PID808587/ticks102195697，无采样/页面错误）。源码/测试/脚本/shared哈希稳定。前窗口RSS低点由旧批336.91升为469.83MiB，不能将差值下降归因到修复，旧+178.7305MiB红灯和四浏览器中止诊断仍保留；不以单次绿宣布根治。
+
+- 2026-10-16：Goal圆角不能只复制支持superellipse时放大的px；按原选择器给dialog/textarea/tile/footer/objective/action使用形状及1/1.25基础半径，card顶部与close仍round。补原primary边框、hover、零offset焦点ring与真实pending禁用textarea。14条旧Goal回归、正式Chromium4/Firefox4及web构建通过；Firefox实际CSS.supports=false。初始214条差异与关闭按钮名称/unwatch测试接线红灯保留，后者不计产品bug；2834产品源/72shared稳定，晚于标准长测，不能复用旧哈希称又跑过30分钟。保存中close可聚焦状态仍另验。
+
+- 2026-10-16：Goal保存中close不能disabled；原Cu允许Tab聚焦／点击，由受控onOpenChange拒绝退出。本地移除disabled但onclick同步busy guard必须保留，否则会绕过Root保护；关闭按钮使用原焦点ring，forced-colors底栏回退不扩大。两新增单测及六条真实交互／样式红灯后，10单测、web类型／构建、冻结Chromium18例和另批Firefox4例全过无跳过；两主题两尺寸均点击close／Escape／outside保留同dialog ID、草稿与一次保存。2834源／18 E2E／3基础设施／72shared与各例24输入／7 HTTP资产稳定，组件夹具边界及旧长测哈希限制保持。
+
+- 2026-10-16：侧边 fork 不改变主 currentThreadId，AccessModePopover 禁止自行读取全局主目标；主／展开／侧边调用者必须显式传 threadId，null 只表示新会话默认。菜单正常收起／Escape 按原 Core 链回自身 trigger，不发全局 triggerInputFocus。13 单测、web 类型／构建、双宽浏览器 2 例及 Goal／输入区 16 例过；全量 2835 源／19 E2E／3 infra／72 shared 稳定。真实主 Composer 按 thread key 卸载会取消未确认请求，不能把独立组件 rerender 或原版全局 Ht 存活当作生产串写证据；确认／取消后必回编辑器的初始假设已撤回。无真实 native 权限写入，首批测试入口／HMR 接线失败另档保留，底栏文字重叠另修。
+
+- 2026-10-16：SideChat form 自身是 compact-composer container，桌面也会命中 ≤480；meta 的 absolute bottom:4px/14px 与 124px frame 的 62px body+44px controls 重叠。只在 .session-side-chat 的直接 form/frame/toolbar 恢复 meta 正常流全行，frame自动增高；保留完整状态／alert／核对按钮，禁止隐藏或缩小触控。双宽几何 -12px→+4px；body62、buttons≥44，long notice/alert无裁剪，主frame指标不变。侧边2与主／展开6例、web类型／构建过，2835源／21E2E／3infra／72shared稳定。元数据夹具必须按pathname匹配view=chat；当前Goal清除chip在composer、发送label为发送消息，旧测试接线失败保留不计产品红灯。
+
+- 2026-10-16：createSideChat 的直接 fork adapter 路径必须消费 nativeThreadSettings 的已支持返回字段，不能仅保留三个模型字段或等待未来通知。迟到初始 ACK 用累计规范化值保守补齐，保护 pending、sandbox/reviewer 组、显式 null 与 legacy 未知来源；不能从默认值猜已见字段，也不能合成 observed 快照。9 个稳定产品红灯转绿，最终 11 文件／81 单测、web 类型／构建、18 浏览器无跳过；2836 源／22 测试夹具／3 infra／72 shared 稳定。真实 HTTP/SSE 全排序、跨客户端 CAS、命名 profile 等更广支持未据此宣称通过；无实际权限写入或正式运行产物激活。
+
+- 2026-10-16：NativeModelSelector 不得把已知模型的 0／1 项 supportedReasoningEfforts 当作未知而扩成通用五项；只有未找到 OpenAI 模型或自定义提供商才保留既有 generic fallback。已知少于两项复用 advanced，不在打开时改设置。原版规则看最终 power selections，跨模型 ≥3 项预设是例外；无真实账号目录发生率或完整 hCa 初焦点声明。实际 useModels 缓存链与 API 读夹具 2 红／5 对照后 7 绿，四文件 49 单测与 web 类型／构建通过，8 浏览器 pending，见 [数量修复](../../docs/designs/session-render-alignment/model-menu-effort-cardinality-20261016.md)。

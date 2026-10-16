@@ -24,6 +24,7 @@ import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
 import { getErrorMessage } from "@session/utils/errorUtils";
 import { EditRollbackConfirmDialog } from "./EditRollbackConfirmDialog";
 import { NativeInlineUserEditor } from "@session/features/thread-workflows/NativeInlineUserEditor";
+import { NativeUserMessageContent } from "./NativeUserMessageContent";
 import { readDraft } from "@session/stores/useSessionDraftStore";
 import {
   mutationKey,
@@ -109,11 +110,16 @@ export const UserMessageItem = ({
               </div>
             )}
             {text.length > 0 && (
-              <Markdown
-                className="min-w-0 max-w-full"
-                value={text}
-                imagesAsLinks
-              />
+              <NativeUserMessageContent
+                text={text}
+                identity={JSON.stringify([threadId, turnId, itemId])}
+              >
+                <Markdown
+                  className="min-w-0 max-w-full"
+                  value={text}
+                  imagesAsLinks
+                />
+              </NativeUserMessageContent>
             )}
           </div>
         )}

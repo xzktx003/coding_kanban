@@ -26,12 +26,21 @@ export function registerCodexRoutes(
   service: CodexService,
 ): void {
   registerItemDetailChannel(app, service.options);
-  const post = (path: string, handler: (body: Json) => Promise<Json>) =>
+  const post = (path: string, handler: (body: Json, signal?: AbortSignal) => Promise<Json>) =>
     app.post("/api/codex/" + path, async (request, reply) => {
-      const result = sanitizeCodexHistory(
-        await handler(bodyObject(request.body)),
-      );
-      return reply.type("application/json").send(JSON.stringify(result));
+      const controller = ["thread/goal/set", "thread/goal/clear", "thread/goal/clear-completed"].includes(path) ? new AbortController() : undefined;
+      const aborted = () => controller?.abort();
+      if (controller) {
+        request.raw.once("aborted", aborted);
+        reply.raw.once("close", aborted);
+      }
+      try {
+        const result = sanitizeCodexHistory(await handler(bodyObject(request.body), controller?.signal));
+        return reply.type("application/json").send(JSON.stringify(result));
+      } finally {
+        request.raw.removeListener("aborted", aborted);
+        reply.raw.removeListener("close", aborted);
+      }
     });
   post("mcp/reload", (body) => {
     if(Object.keys(object(body)).length)throw new HttpError(400,"MCP refresh takes no parameters");
@@ -101,12 +110,12 @@ export function registerCodexRoutes(
     "feedback/upload": "feedback/upload",
   });
   for (const [path, method] of Object.entries(methods))
-    post(path, (body) =>
+    post(path, (body, signal) =>
       method === "skills/config/write"
         ? getTomlStore(
             join(codexHome(service.options.env ?? process.env), "config.toml"),
           ).exclusive(() => service.call(method, body))
-        : service.call(method, body),
+        : service.call(method, body, signal ? { signal } : undefined),
     );
   app.get("/api/codex/model/list", () => service.raw("model/list", {}));
   app.get("/api/codex/account/rate-limits", () =>
@@ -118,6 +127,7 @@ export function registerCodexRoutes(
   post("thread/metadata", (body) =>
     service.raw("thread/read", { threadId: thread(body), includeTurns: false }),
   );
+  post("thread/goal/clear-completed", (body, signal) => service.ownership.clearCompletedGoal(body, { signal }));
   post("thread/access", (body) =>
     object(body).release === true
       ? service.ownership.release(thread(body))

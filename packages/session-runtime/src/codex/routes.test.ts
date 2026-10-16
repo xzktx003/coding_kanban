@@ -248,3 +248,50 @@ test("MCP refresh forwards only the fixed native RPC and rejects arbitrary param
   assert.equal((await app.inject({method:"POST",url:"/api/codex/mcp/reload",payload:{path:"/other",command:"anything"}})).statusCode,400);assert.equal(calls.length,1);
  }finally{await app.close();await service.close();}
 });
+
+test("completed Goal clear has its own owner-only route and validates the full captured goal", async t => {
+  const app = Fastify(), service = new CodexService({ hub: new EventHub(), instance: "goal-clear-route", sweepIntervalMs: 0 });
+  let mutations = 0;
+  Object.assign(service, { call: async () => { mutations++; throw new Error("Must not acquire"); }, raw: async () => { mutations++; throw new Error("Must not start native"); } });
+  registerCodexRoutes(app, service);
+  t.after(async () => { await app.close(); await service.close(); });
+  const payload = { threadId: "t", expectedAccessGeneration: 0, expectedGoal: { threadId: "t", objective: "completed", status: "complete", tokenBudget: null, tokensUsed: 2, timeUsedSeconds: 1, createdAt: 100, updatedAt: 101 } };
+  const send = (body: object) => app.inject({ method: "POST", url: "/api/codex/thread/goal/clear-completed", payload: body });
+  const response = await send(payload);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { cleared: false, reason: "notOwned" });
+  for (const malformed of [{ ...payload, expectedAccessGeneration: -1 }, { ...payload, expectedAccessGeneration: 0.5 }, { ...payload, expectedGoal: { ...payload.expectedGoal, objective: undefined } }, { ...payload, expectedGoal: { ...payload.expectedGoal, status: "active" } }, { ...payload, expectedGoal: { ...payload.expectedGoal, threadId: "other" } }, { ...payload, expectedGoal: { ...payload.expectedGoal, futureField: true } }, { ...payload, ifGoalUnchanged: payload.expectedGoal }, { ...payload, threadId: "\u0000invalid" }]) {
+    assert.equal((await send(malformed)).statusCode, 400);
+  }
+  assert.equal(mutations, 0);
+});
+
+for (const path of ["set", "clear", "clear-completed"]) test(`an aborted Goal ${path} HTTP request reaches its preflight cancellation signal before any response`, async t => {
+  const app = Fastify(), service = new CodexService({ hub: new EventHub(), instance: "goal-abort-route", sweepIntervalMs: 0 });
+  let entered!: (signal: AbortSignal | undefined) => void;
+  const pending = new Promise<AbortSignal | undefined>(resolve => { entered = resolve; });
+  let cancelled!: () => void;
+  const cancellation = new Promise<void>(resolve => { cancelled = resolve; });
+  const waitForCancellation = async (options?: { signal?: AbortSignal }) => {
+    entered(options?.signal);
+    if (!options?.signal) return {};
+    await new Promise<void>(resolve => options.signal!.addEventListener("abort", () => { cancelled(); resolve(); }, { once: true }));
+    return {};
+  };
+  Object.assign(service, { call: async (_method: string, _params: Json, options?: { signal?: AbortSignal }) => waitForCancellation(options) });
+  Object.assign(service.ownership, { clearCompletedGoal: async (_params: Json, options?: { signal?: AbortSignal }) => waitForCancellation(options) });
+  registerCodexRoutes(app, service);
+  const origin = await app.listen({ host: "127.0.0.1", port: 0 });
+  t.after(async () => { await app.close(); await service.close(); });
+  const controller = new AbortController();
+  const request = fetch(origin + "/api/codex/thread/goal/" + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId: "t", status: "active" }), signal: controller.signal }).catch(() => undefined);
+  const signal = await pending;
+  controller.abort();
+  await request;
+  assert.ok(signal);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([cancellation, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Goal preflight cancellation did not reach runtime")), 1000); })]);
+  } finally { clearTimeout(timer); }
+  assert.equal(signal.aborted, true);
+});

@@ -5,7 +5,7 @@ import { createThreadPool } from "./thread-pool.mjs";
 import { createNativePoolAdapter } from "./native-pool-adapter.mjs";
 import {
   isAuthorizationBoundary,
-  nativeAuthorizationIdentity,
+  createNativeAuthorizationTracker,
 } from "./authorization-boundary.mjs";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const lifecycle = (method) =>
@@ -22,6 +22,8 @@ export async function createRefreshManager({
 }) {
   if (typeof resourceMonitor?.read !== "function")
     throw Error("explicit owned process resource monitor required");
+  if (typeof service?.confirmAuthorization !== "function")
+    throw Error("original native authority confirmation required");
   if (
     !Number.isSafeInteger(authorizationTimeoutMs) ||
     authorizationTimeoutMs < 1 ||
@@ -45,10 +47,7 @@ export async function createRefreshManager({
     closePromise,
     unavailableReason = null,
     resourceMeasurement = null;
-  let initialAuthorization = true,
-    initialAccountObserved = false,
-    authorizationBound = false,
-    resolveAccountNotice;
+  let authorizationBound = false;
   const assertValid = () => {
     if (!valid) throw Error("native manager generation unavailable");
   };
@@ -57,19 +56,31 @@ export async function createRefreshManager({
     ready = false;
     unavailableReason ??= reason;
     authorizationBound = false;
-    resolveAccountNotice?.();
     refresh.clear();
     pool?.invalidate();
-    for (const listener of invalidationListeners) {
-      try { listener(unavailableReason); } catch { /* Observers cannot undo revocation. */ }
-    }
+    const listeners = [...invalidationListeners];
     invalidationListeners.clear();
+    for (const listener of listeners) {
+      try {
+        listener(unavailableReason);
+      } catch {
+        /* Observers cannot undo revocation. */
+      }
+    }
   };
   const closeOwnConnection = () => {
     if (!nativeClient) return Promise.resolve();
     closePromise ??= Promise.resolve().then(() => nativeClient.close());
     return closePromise;
   };
+  const authority = createNativeAuthorizationTracker({
+    domain,
+    generation,
+    onInvalidated() {
+      invalidate("authorization-changed");
+      void closeOwnConnection().catch(() => {});
+    },
+  });
   let queued = 0;
   const serial = (work) => {
     if (queued >= 64)
@@ -150,19 +161,8 @@ export async function createRefreshManager({
       });
   };
   const onLifecycle = (event) => {
-    if (valid && initialAuthorization && event.method === "account/updated") {
-      // The pinned native sends an initial workspace-routing snapshot to each
-      // new connection. No thread RPC is allowed until actual account/read
-      // identities agree across this notice. Login/OAuth changes still revoke.
-      initialAccountObserved = true;
-      resolveAccountNotice?.();
-      return;
-    }
     if (valid && isAuthorizationBoundary(event.method)) {
-      // These notifications have no thread ID. They revoke this manager's
-      // warm-readiness claim; never unsubscribe or stop the native tasks.
-      invalidate("authorization-changed");
-      void closeOwnConnection().catch(() => {});
+      authority.observe(event);
       return;
     }
     if (
@@ -199,53 +199,18 @@ export async function createRefreshManager({
           ...options,
           beforeSend() {
             assertValid();
-            options.beforeSend?.();
+            return options.beforeSend?.();
           },
         });
       },
       closed: nativeClient.closed,
       close: closeOwnConnection,
     };
-    const firstAuthorization = nativeAuthorizationIdentity(
-      await client.request("account/read", { refreshToken: false }),
-      { domain, generation },
-    );
+    await authority.bind(client, { timeoutMs: authorizationTimeoutMs });
     assertValid();
-    if (firstAuthorization.kind === "chatgpt" && !initialAccountObserved) {
-      let timer;
-      try {
-        await Promise.race([
-          new Promise((resolve) => {
-            resolveAccountNotice = resolve;
-          }),
-          new Promise((_, reject) => {
-            timer = setTimeout(
-              () =>
-                reject(
-                  Error("initial native authorization notice unavailable"),
-                ),
-              authorizationTimeoutMs,
-            );
-          }),
-        ]);
-      } finally {
-        clearTimeout(timer);
-        resolveAccountNotice = undefined;
-      }
-    }
+    await service.confirmAuthorization(authority.binding());
     assertValid();
-    const authorizationRevision = client.revision;
-    const confirmedAuthorization = nativeAuthorizationIdentity(
-      await client.request("account/read", { refreshToken: false }),
-      { domain, generation },
-    );
-    assertValid();
-    if (
-      authorizationRevision !== client.revision ||
-      firstAuthorization.fingerprint !== confirmedAuthorization.fingerprint
-    )
-      throw Error("native authorization changed during initial binding");
-    initialAuthorization = false;
+    authority.assertValid();
     authorizationBound = true;
     adapter = createNativePoolAdapter({
       client,
@@ -256,7 +221,24 @@ export async function createRefreshManager({
       async readRss() {
         resourceMeasurement = null;
         assertValid();
-        const value = await resourceMonitor.read();
+        let value;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          assertValid();
+          try {
+            value = await resourceMonitor.read();
+            break;
+          } catch (error) {
+            assertValid();
+            if (
+              error?.code !== "REFRESH_RESOURCES_UNAVAILABLE" ||
+              attempt === 2
+            )
+              throw error;
+            // Recheck the complete owned tree after transient task churn.
+            // Nothing is admitted from an incomplete sample; no native RPC is replayed.
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          }
+        }
         assertValid();
         if (
           value?.domain !== domain ||
@@ -357,6 +339,18 @@ export async function createRefreshManager({
     throw error;
   }
   const manager = {
+    authorization() {
+      assertValid();
+      if (!ready || !authorizationBound)
+        throw Error("native authorization binding unavailable");
+      return authority.binding();
+    },
+    serviceScope: Object.freeze({
+      domain,
+      generation,
+      pid: service.record.pid,
+      startTicks: service.record.startTicks,
+    }),
     onInvalidated(listener) {
       if (typeof listener !== "function" || invalidationListeners.size >= 64)
         throw Error("bounded manager invalidation observer required");
@@ -365,17 +359,25 @@ export async function createRefreshManager({
       return () => invalidationListeners.delete(listener);
     },
     scopeForThread(threadId) {
-      if (typeof threadId !== "string" || !UUID.test(threadId)) return Promise.reject(Error("exact thread UUID required"));
+      if (typeof threadId !== "string" || !UUID.test(threadId))
+        return Promise.reject(Error("exact thread UUID required"));
       return serial(async () => {
-        const value = (await client.request("thread/read", {threadId,includeTurns:false}))?.thread;
-        if (value?.id !== threadId || typeof value.cwd !== "string" || value.cwd.length > 4096 ||
-          !isAbsolute(value.cwd) || /[\x00-\x1f\x7f]/.test(value.cwd))
+        const value = (
+          await client.request("thread/read", { threadId, includeTurns: false })
+        )?.thread;
+        if (
+          value?.id !== threadId ||
+          typeof value.cwd !== "string" ||
+          value.cwd.length > 4096 ||
+          !isAbsolute(value.cwd) ||
+          /[\x00-\x1f\x7f]/.test(value.cwd)
+        )
           throw Error("native thread metadata scope unavailable");
         const cwd = await realpath(value.cwd);
         assertValid();
         if (known.has(threadId) && known.get(threadId).cwd !== cwd)
           throw Error("native thread cwd changed");
-        return Object.freeze({domain,generation,threadId,cwd});
+        return Object.freeze({ domain, generation, threadId, cwd });
       });
     },
     open(key, { consumerId, warmOnly = false } = {}) {
@@ -400,16 +402,25 @@ export async function createRefreshManager({
       // Announce an already verified visible consumer synchronously. A trim
       // may already be waiting on native I/O; its actual write must see this.
       if (!warmOnly) {
-        if (!UUID.test(consumerId)) return Promise.reject(Error("exact visible consumer UUID required"));
-        if (!valid || queued >= 64) return Promise.reject(Error("native manager unavailable or pending operation limit exceeded"));
+        if (!UUID.test(consumerId))
+          return Promise.reject(Error("exact visible consumer UUID required"));
+        if (!valid || queued >= 64)
+          return Promise.reject(
+            Error(
+              "native manager unavailable or pending operation limit exceeded",
+            ),
+          );
         if (!consumers.has(consumerId) && consumers.size >= 256)
-          return Promise.reject(Error("native manager consumer budget exceeded"));
+          return Promise.reject(
+            Error("native manager consumer budget exceeded"),
+          );
         const previous = known.get(key.threadId);
-        if (previous && previous.cwd !== key.cwd) return Promise.reject(Error("native thread cwd changed"));
+        if (previous && previous.cwd !== key.cwd)
+          return Promise.reject(Error("native thread cwd changed"));
         if (previous && current(key.threadId)) {
-          pool.setVisible(key.threadId,consumerId,true);
-          let ids=consumers.get(consumerId);
-          if (!ids) consumers.set(consumerId,ids=new Set());
+          pool.setVisible(key.threadId, consumerId, true);
+          let ids = consumers.get(consumerId);
+          if (!ids) consumers.set(consumerId, (ids = new Set()));
           ids.add(key.threadId);
         }
       }

@@ -1,7 +1,7 @@
 import { nativeDiffLines } from "./nativeDiffLines";
 import { NativeDiffContent } from "./NativeDiffContent";
 import { ChevronDown, ChevronRight, Copy } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { NativeDiffSelection } from "./nativeDiffSelection";
 import { Button } from "@session/components/ui/button";
 import { cn } from "@session/lib/utils";
@@ -10,6 +10,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { NativeReviewChevron, NativeReviewEllipsis, NativeReviewFileIcon } from "./git/NativeReviewIcons";
 import { NativeCommandCopy } from "@session/components/codex/presentation/NativeCommandIcons";
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@session/components/ui/context-menu";
+import { useNativeCopyFeedback } from "@session/components/codex/presentation/useNativeCopyFeedback";
 
 interface DiffViewerProps {
   original?: string;
@@ -20,6 +21,7 @@ interface DiffViewerProps {
   /** Bump to force-reset the collapsed state back to `isCollapsed` (e.g. "collapse/expand all"). */
   resetKey?: number;
   className?: string;
+  copyScope?: string;
   native?: boolean;
   split?: boolean;
   onOpenFile?: () => void;
@@ -65,6 +67,7 @@ export function DiffViewer({
   isCollapsed = true,
   resetKey,
   className,
+  copyScope,
   native = false,
   split = false,
   onOpenFile,
@@ -81,22 +84,12 @@ export function DiffViewer({
   const review = native && presentation === "review";
   const preview = native && presentation === "preview";
   const [viewMode, setViewMode] = useState<"old" | "new" | "diff">("diff");
-  const [copied, setCopied] = useState(false);
-  const [copyError, setCopyError] = useState<string | null>(null);
-  const copyRequest = useRef(0);
+  const { copied, copyError, copyPending, copy: copyText } = useNativeCopyFeedback(
+    [original, current, unifiedDiff, displayPath, viewMode, copyScope],
+    { feedbackMs: 1500, inlineError: true },
+  );
   const [collapsed, setCollapsed] = useState(isCollapsed);
   const [localWrap, setLocalWrap] = useState(wrap);
-  const copyTimeoutRef = useRef<number | null>(null);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: resetKey is a trigger dependency, used for its identity change alone
-  useEffect(() => {
-    return () => {
-      copyRequest.current++;
-      if (copyTimeoutRef.current) {
-        window.clearTimeout(copyTimeoutRef.current);
-      }
-    };
-  }, []);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: resetKey is a trigger dependency, used for its identity change alone
   useEffect(() => {
@@ -165,9 +158,7 @@ export function DiffViewer({
     [diffLines, normalizedUnified],
   );
 
-  const handleCopy = async () => {
-    const request = ++copyRequest.current;
-    setCopyError(null);
+  const handleCopy = () => {
     const text =
       viewMode === "diff"
         ? normalizedUnified ||
@@ -181,15 +172,7 @@ export function DiffViewer({
         : viewMode === "old"
           ? left
           : right;
-    try {
-      await navigator.clipboard.writeText(text);
-      if (request !== copyRequest.current) return;
-      setCopied(true);
-      if (copyTimeoutRef.current) window.clearTimeout(copyTimeoutRef.current);
-      copyTimeoutRef.current = window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      if (request === copyRequest.current) { setCopied(false); setCopyError("复制失败，请允许剪贴板访问后重试。"); }
-    }
+    copyText(text);
   };
 
   const fileName = displayPath ? getFilename(displayPath) : "diff";
@@ -205,10 +188,10 @@ export function DiffViewer({
         className,
       )}
     >
-      {copyError && <p role="alert" className="codex-review-selection-summary">{copyError}</p>}
+      {copyError && <p role="alert" className="codex-review-selection-summary">复制失败，请允许剪贴板访问后重试。</p>}
       {preview && <header className="codex-hover-diff-header">
         <div className="codex-hover-diff-label">{onOpenFile ? <button type="button" title={displayPath} aria-label={`打开 ${displayPath ?? fileName}`} onClick={onOpenFile}>{fileName}</button> : <span title={displayPath}>{fileName}</span>}<span className="codex-change-added">+{addedCount}</span><span className="codex-change-removed">−{removedCount}</span></div>
-        <button type="button" className="codex-hover-diff-copy" aria-label="Copy" title={copied ? "Copied!" : "Copy"} onClick={handleCopy} disabled={copied}><NativeCommandCopy width="16" height="16"/></button>
+        <button type="button" className="codex-hover-diff-copy" aria-label="Copy" title={copied ? "Copied!" : "Copy"} onClick={handleCopy} disabled={copied} aria-busy={copyPending || undefined} aria-disabled={copyPending || undefined}><NativeCommandCopy width="16" height="16"/></button>
         <DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label="预览文件操作" className="codex-hover-diff-menu"><NativeReviewEllipsis/></button></DropdownMenuTrigger><DropdownMenuContent className="codex-review-menu" align="end"><DropdownMenuItem onSelect={handleCopy}>复制补丁</DropdownMenuItem>{VIEW_MODES.map(mode => <DropdownMenuItem key={mode} onSelect={() => setViewMode(mode)}>{mode === "old" ? "查看旧文件片段" : mode === "new" ? "查看新文件片段" : "查看差异"}</DropdownMenuItem>)}<DropdownMenuItem onSelect={() => setCollapsed(value => !value)}>{collapsed ? "展开文件" : "折叠文件"}</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
       </header>}
       {review && <header className="codex-review-file-header">
@@ -219,7 +202,7 @@ export function DiffViewer({
         <span className="codex-review-file-stats"><span className="codex-change-added">+{addedCount}</span><span className="codex-change-removed">−{removedCount}</span></span>
         <DropdownMenu><DropdownMenuTrigger asChild><button type="button" aria-label="文件操作" className="codex-review-file-menu"><NativeReviewEllipsis/></button></DropdownMenuTrigger><DropdownMenuContent className="codex-review-menu" align="end">
           <DropdownMenuItem onSelect={handleCopy}>复制补丁</DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => { if (displayPath) void navigator.clipboard.writeText(displayPath); }}>复制路径</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => { if (displayPath) void copyText(displayPath, false); }}>复制路径</DropdownMenuItem>
           {onOpenFile && <DropdownMenuItem onSelect={onOpenFile}>在编辑器中打开</DropdownMenuItem>}
           <DropdownMenuItem onSelect={() => setCollapsed(value => !value)}>{collapsed ? "展开文件" : "折叠文件"}</DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setLocalWrap(value => !value)}>{localWrap ? "关闭自动换行" : "自动换行"}</DropdownMenuItem>
@@ -277,6 +260,8 @@ export function DiffViewer({
                 className="h-6 px-2 gap-1"
                 onClick={handleCopy}
                 disabled={copied}
+                aria-busy={copyPending || undefined}
+                aria-disabled={copyPending || undefined}
                 type="button"
               >
                 <Copy className="h-3 w-3" />
@@ -316,8 +301,11 @@ export function DiffViewer({
           type="button"
           className="codex-inline-diff-copy"
           aria-label="Copy"
-          title="Copy"
+          title={copied ? "Copied!" : "Copy"}
           onClick={handleCopy}
+          disabled={copied}
+          aria-busy={copyPending || undefined}
+          aria-disabled={copyPending || undefined}
         >
           <Copy size={14} />
         </button>

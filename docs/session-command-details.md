@@ -16,6 +16,8 @@ reader 使用有界增量 JSON token 选择器，非目标大正文不进入浏�
 
 详情是只读原生快照，不改变聊天中的实时运行状态、审批、输入目标或草稿。原生仍在运行或未持久保存输出时会明确提示；不得把 null 输出解释为真实空输出。命令复制沿用既有 shell 包装规范化并保留完整正文，输出复制保留原始 ANSI 字符。输出大小没有新增截断上限，因此显式展开巨大项仍可能产生较大的浏览器绘制分配。
 
+复制同时适配 HTTPS 与局域网 HTTP，使用原生两秒成功反馈与失败通知，同一控件只保留一个在途请求。收起后，即使浏览器剪贴板 Promise 长时间不返回，应用的回执闭包也不得继续持有正文或已卸载 React 视图；永久 `session-command-clipboard.spec.ts` 通过真实 V8 快照核对该边界。此短时显式 GC 验收与自然 GC 的长期 RSS 门槛分开记录，见 [后续对照](designs/session-render-alignment/session-polish-acceptance-20261016.md)。
+
 最小验收：`ShellCommand.detail.test.tsx`、`CommandActionItem.details.test.tsx`、既有命令/活动组/可见性测试，运行层 `item-detail*.test.ts`，网关 `session-item-detail*.test.ts` 和 `session-mode.test.ts`，以及 `tests/e2e/session-command-details.spec.ts`。后者检查两个实际活动组调用链、四种动作、显式单次读取、ANSI、手机布局与手动重试；不是源码字符串扫描。真实原生持久化快照验收需另用隔离 HOME/CLI/data 和原生 reader，记录完整复制、无关正文裁剪、取消退出、JS 堆、backing storage 与 renderer RSS；合成持久化记录不冒充命令执行测试。
 
 浏览器回归使用局域网 HTTPS 地址，并设置 `PLAYWRIGHT_SKIP_WEBSERVER=1`、`PLAYWRIGHT_BASE_URL` 和 `PLAYWRIGHT_FRONTEND_PROTOCOL=https`。必须同时运行 [会话内存防回归约定](session-memory-contract.md) 中的真实 HTTP/EventSource、idle、恢复、审批与消息回归，保留原断言和预算。验收记录另见 [本次报告](designs/session-render-alignment/command-details-acceptance-20261014.md)。

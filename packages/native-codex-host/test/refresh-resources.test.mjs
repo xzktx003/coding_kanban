@@ -2,6 +2,30 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 
+test("capturing a live process identity does not require an unrelated exiting task's children; resource accounting still fails closed", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(
+    new URL("../refresh-prototype/resources.mjs", import.meta.url),
+    "utf8",
+  );
+  const io = `import * as fs from 'node:fs/promises';export const stat=fs.stat,readdir=fs.readdir;export async function readFile(path,...args){if(String(path).includes('/task/'))throw Object.assign(Error('exiting task'),{code:'ENOENT'});return fs.readFile(path,...args);}`;
+  const ioUrl =
+    "data:text/javascript;base64," + Buffer.from(io).toString("base64");
+  assert.equal(source.split('from "node:fs/promises"').length, 2);
+  const instrumented = source.replace(
+    'from "node:fs/promises"',
+    `from ${JSON.stringify(ioUrl)}`,
+  );
+  const module = await import(
+    "data:text/javascript;base64," +
+      Buffer.from(instrumented).toString("base64")
+  );
+  const identity = await module.captureProcessIdentity(process.pid);
+  assert.equal(identity.pid, process.pid);
+  assert.match(identity.startTicks, /^[1-9][0-9]*$/);
+  await assert.rejects(module.inspectLinuxProcess(process.pid), /exiting task/);
+});
+
 async function fixture() {
   const { createRefreshResourceMonitor } =
     await import("../refresh-prototype/resources.mjs");
@@ -70,6 +94,28 @@ test("resource admission measures native, code-server and their children once, w
   assert.equal(value.complete, true);
   assert.equal(JSON.stringify(value).includes("cmdline"), false);
   assert.equal(monitor.snapshot().available, true);
+});
+test("the detached native authorization observer is automatically included without a caller root", async () => {
+  const f = await fixture();
+  f.service.record.authority = {
+    generation: randomUUID(),
+    pid: 30,
+    startTicks: "300",
+  };
+  f.nodes.set(30, f.node(30, 1, 500));
+  const monitor = f.monitor(),
+    value = await monitor.read();
+  assert.equal(value.rssBytes, 1500);
+  assert.equal(value.processCount, 5);
+  assert.deepEqual(
+    value.roots.map((r) => r.kind),
+    ["native", "authority", "host"],
+  );
+  f.service.record.authority = {
+    ...f.service.record.authority,
+    generation: randomUUID(),
+  };
+  await assert.rejects(monitor.read(), /identity changed/);
 });
 
 test("reparented observed descendants stay in the budget until their exact process exits; PID reuse is not adopted", async () => {

@@ -140,6 +140,11 @@ test("restarts preserve queues and ambiguous delivery never automatically repeat
     assert.equal(f.calls.length, 1);
     const s = await again.get("a");
     await assert.rejects(
+      again.change("a", s.revision, { type: "resume" }),
+      /请先处理失败或送达不明的消息/,
+    );
+    assert.deepEqual(await again.get("a"), s);
+    await assert.rejects(
       again.change("a", s.revision, { type: "retry", id: "one" }),
     );
   } finally {
@@ -427,7 +432,13 @@ test("external writer conflict preserves submission identity and attachments; ex
   await q.tick();
   const failed = await q.get("a");
   assert.equal(failed.items[0].status, "failed");
+  assert.equal(failed.paused, "消息发送失败");
   assert.deepEqual(failed.items[0].images, message.images);
+  await assert.rejects(
+    q.change("a", failed.revision, { type: "resume" }),
+    /请先处理失败或送达不明的消息/,
+  );
+  assert.deepEqual(await q.get("a"), failed);
   await q.tick();
   assert.equal(f.calls.length, 1);
   f.fail();

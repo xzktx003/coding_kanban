@@ -5,6 +5,10 @@ import { ShellCommand } from "./ShellCommand";
 import { useCodexStore } from "../stores/useCodexStore";
 import { RowStateContext } from "../thread/rowState";
 import * as terminal from "../presentation/nativeCommand";
+const clipboardError = vi.hoisted(() => vi.fn());
+vi.mock("@session/features/native-notifications/nativeClipboardError", () => ({
+  notifyNativeClipboardError: clipboardError,
+}));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, values?: Record<string, unknown>) =>
@@ -172,9 +176,7 @@ it("reports a clipboard rejection without claiming the command was copied", asyn
   );
   fireEvent.click(screen.getByRole("button", { name: /copy-test/ }));
   fireEvent.click(screen.getByRole("button", { name: "command.copyCommand" }));
-  await waitFor(() =>
-    expect(screen.getByRole("status").textContent).toBe("command.copyFailed"),
-  );
+  await waitFor(() => expect(clipboardError).toHaveBeenCalledWith("zh"));
   expect(screen.queryByRole("button", { name: "command.copied" })).toBeNull();
 });
 

@@ -23,6 +23,7 @@ it("shows the native context hint after 200ms with its keyboard equivalent", asy
 });
 
 it("removes the hint while its attached popup is open", () => {
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
   const { rerender } = render(
     <ComposerTooltip label="附加文件">
       <button type="button">附加文件</button>
@@ -36,4 +37,10 @@ it("removes the hint while its attached popup is open", () => {
     </ComposerTooltip>,
   );
   expect(screen.queryByRole("tooltip", { hidden: true })).toBeNull();
+  expect(
+    warning.mock.calls.filter(([message]) =>
+      String(message).includes("uncontrolled"),
+    ),
+  ).toEqual([]);
+  warning.mockRestore();
 });

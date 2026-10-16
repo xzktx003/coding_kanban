@@ -42,6 +42,10 @@ export function validateOptions(input) {
     result.brokerPort = Number(input.brokerPort);
   }
   if (input.connectionProfileHome != null) result.connectionProfileHome = absolute(input.connectionProfileHome, 'connectionProfileHome');
+  if(input.refreshControlRoot!=null){
+    if(input.refreshServiceConfig==null)throw new Error('refresh control requires an explicit refresh service');
+    result.refreshControlRoot=absolute(input.refreshControlRoot,'refreshControlRoot');
+  }
   if (input.refreshServiceConfig != null || input.refreshDomain != null) {
     if (input.refreshServiceConfig == null) throw new Error('refresh service config required');
     result.refreshServiceConfig = absolute(input.refreshServiceConfig, 'refreshServiceConfig');

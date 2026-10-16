@@ -4,12 +4,14 @@ import { HistoryBudget, type HistoryBudgetLimits } from "../core/history-budget.
 import { sanitizeCodexHistory } from "./projection.js";
 import { KeyedSerial } from "../core/serial.js";
 import { isObject, object, type Json, type JsonObject } from "../core/json.js";
+import { clearCompletedGoalParams, sameGoal, threadGoal, type CompletedGoalResult, type GoalClearReason, type ThreadGoal } from "./goal-state.js";
 
-export type Rpc = (method: string, params: Json, options?: { beforeSend?: () => void }) => Promise<Json>;
+export type Rpc = (method: string, params: Json, options?: { beforeSend?: () => void; timeoutMs?: number; signal?: AbortSignal }) => Promise<Json>;
 type AccessState = "readonly" | "acquiring" | "owned" | "releasing" | "external" | "unknown";
 interface Entry {
   state: AccessState; reason: string; generation: number;
   uncertain: boolean; awaitingFirstTurn: boolean; releasingSince?: number;
+  firstTurnAck?: { epoch: number; generation: number };
 }
 interface ReleaseCheckpoint { epoch: number; revision: number; generation: number; queueRevision: number; topologyRevision: number; }
 interface Family { members: Set<string>; metadata: Map<string, JsonObject>; loaded: Set<string>; }
@@ -51,6 +53,9 @@ export class Ownership {
   private queueRevision = 0;
   private topologyRevision = 0;
   private threadRevisions = new Map<string, number>();
+  private goalRevisions = new Map<string, number>();
+  private goals = new Map<string, ThreadGoal | null>();
+  private activeTurns = new Map<string, string>();
   private queueSequence = 0n;
   private queue?: { when: number; busy: boolean; ids: Set<string> };
   private pending = new Map<string, string>();
@@ -58,14 +63,18 @@ export class Ownership {
   private pause: (milliseconds: number) => Promise<void>;
   private releaseTimeout: number;
   private releaseIdleDescendants: boolean;
+  private completedGoalWait: number;
+  private goalMetadataWait: number;
 
-  constructor(private readonly raw: Rpc, options: { now?: () => number; pause?: (milliseconds: number) => Promise<void>; releaseTimeoutMs?: number; releaseIdleDescendants?: boolean } = {}) {
+  constructor(private readonly raw: Rpc, options: { now?: () => number; pause?: (milliseconds: number) => Promise<void>; releaseTimeoutMs?: number; releaseIdleDescendants?: boolean; completedGoalWaitMs?: number; goalMetadataWaitMs?: number } = {}) {
     this.now = options.now ?? (() => performance.now());
     this.pause = options.pause ?? sleep;
     this.releaseTimeout = options.releaseTimeoutMs ?? 8000;
     // Production enables this only after the real initialize handshake matches
     // a native version whose parent-only subscription lifecycle was verified.
     this.releaseIdleDescendants = options.releaseIdleDescendants === true;
+    this.completedGoalWait = options.completedGoalWaitMs ?? 5000;
+    this.goalMetadataWait = options.goalMetadataWaitMs ?? 5000;
   }
 
   setIdleDescendantRelease(supported: boolean): void {
@@ -117,6 +126,15 @@ export class Ownership {
     const thread = object(body.thread);
     const id = typeof body.threadId === "string" ? body.threadId : typeof thread.id === "string" ? thread.id : undefined;
     if (id) this.touch(id);
+    if (id && method === "turn/started" && typeof object(body.turn).id === "string") this.activeTurns.set(id, object(body.turn).id as string);
+    if (id && method === "turn/completed" && this.activeTurns.get(id) === object(body.turn).id) this.activeTurns.delete(id);
+    if (id && ["thread/closed", "thread/deleted"].includes(method)) this.activeTurns.delete(id);
+    if (id && (method === "thread/goal/updated" || method === "thread/goal/cleared")) {
+      this.goalRevisions.set(id, (this.goalRevisions.get(id) ?? 0) + 1);
+      const goal = method === "thread/goal/cleared" ? null : threadGoal(body.goal, id);
+      if (goal === undefined) this.goals.delete(id);
+      else this.goals.set(id, goal);
+    }
     if (method === "thread/started") {
       const parent = parentThread(thread);
       if (parent) this.touch(parent);
@@ -125,6 +143,7 @@ export class Ownership {
   }
   invalidate(): void {
     this.epoch++; this.revision++; this.pending.clear(); this.queue = undefined; this.threadRevisions.clear();
+    this.goalRevisions.clear(); this.goals.clear(); this.activeTurns.clear();
     this.releaseIdleDescendants = false;
     for (const entry of this.entries.values()) { entry.state = "unknown"; entry.reason = "运行连接已断开，执行状态待确认"; entry.uncertain = true; }
   }
@@ -135,7 +154,83 @@ export class Ownership {
     return;
   }
 
-  async call(method: string, params: Json): Promise<Json> {
+  /**
+   * Official-style local compare-and-clear, using only the writer we already
+   * own. Native clear has no CAS: another process can still change the goal
+   * between its get and clear. Never send a fictitious ifGoalUnchanged field.
+   */
+  async clearCompletedGoal(value: unknown, options: { signal?: AbortSignal } = {}): Promise<CompletedGoalResult> {
+    const { threadId: id, expectedGoal, expectedAccessGeneration } = clearCompletedGoalParams(value);
+    const epoch = this.epoch, until = this.now() + this.completedGoalWait;
+    const cancelled = () => { if (options.signal?.aborted) throw new Error("NOT_SENT: 目标清理已取消"); };
+    return this.locks.run(id, async () => {
+      cancelled();
+      const entry = this.entries.get(id);
+      const skipped = (reason: GoalClearReason): CompletedGoalResult => ({ cleared: false, reason });
+      const ownerReason = (): GoalClearReason | undefined => {
+        if (this.epoch !== epoch) return "generationChanged";
+        if (!entry || entry.state !== "owned" || entry.uncertain) return "notOwned";
+        if (entry.generation !== expectedAccessGeneration) return "generationChanged";
+        if (entry.awaitingFirstTurn || this.hold(id)) return "busy";
+        return;
+      };
+      const initial = ownerReason(); if (initial) return skipped(initial);
+      const read: Rpc = (method, params) => this.raw(method, params, { timeoutMs: Math.max(1, until - this.now()), signal: options.signal });
+      if (!(await loadedIds(read)).has(id)) return skipped("notOwned");
+      let revision = this.threadRevisions.get(id) ?? 0;
+      while (true) {
+        cancelled();
+        const reason = ownerReason(); if (reason) return skipped(reason);
+        if (this.now() >= until) return skipped("busy");
+        revision = this.threadRevisions.get(id) ?? 0;
+        let metadata: JsonObject;
+        try { metadata = await this.inputMetadata(id, epoch, read); }
+        catch { return skipped(ownerReason() ?? "unsupported"); }
+        const changed = ownerReason(); if (changed) return skipped(changed);
+        // A completion event can arrive before its final turn has drained. Only
+        // read metadata while waiting; never start/resume a turn or read history.
+        if (object(metadata.status).type === "idle" && !this.activeTurns.has(id) && revision === (this.threadRevisions.get(id) ?? 0)) break;
+        await this.pause(Math.min(100, Math.max(0, until - this.now())));
+      }
+      if (!(await loadedIds(read)).has(id)) return skipped("notOwned");
+      const reason = ownerReason(); if (reason) return skipped(reason);
+      const goalRevision = this.goalRevisions.get(id) ?? 0;
+      const response = object(await read("thread/goal/get", { threadId: id }));
+      if (goalRevision !== (this.goalRevisions.get(id) ?? 0)) return skipped("goalChanged");
+      const current = threadGoal(response.goal, id);
+      if (!current) return skipped(response.goal === null ? "goalChanged" : "unsupported");
+      if (!sameGoal(current, expectedGoal)) return skipped("goalChanged");
+      this.goals.set(id, current);
+      let dispatchedGeneration: number | undefined;
+      try {
+        const ack = object(await this.raw("thread/goal/clear", { threadId: id }, { signal: options.signal, beforeSend: () => {
+          cancelled();
+          let guard = ownerReason();
+          if (!guard && ((this.goalRevisions.get(id) ?? 0) !== goalRevision || !sameGoal(this.goals.get(id), expectedGoal))) guard = "goalChanged";
+          if (!guard && (revision !== (this.threadRevisions.get(id) ?? 0) || this.activeTurns.has(id) || this.now() >= until)) guard = "busy";
+          if (guard) throw new Error(`NOT_SENT: GOAL_CLEAR_SKIPPED:${guard}`);
+          dispatchedGeneration = ++entry!.generation;
+          this.touch(id);
+        } }));
+        if (this.epoch !== epoch || entry!.generation !== dispatchedGeneration || typeof ack.cleared !== "boolean")
+          throw new Error("DELIVERY_UNKNOWN: completed goal clear acknowledgement is no longer valid");
+        if (ack.cleared && (this.goalRevisions.get(id) ?? 0) === goalRevision) {
+          this.goals.set(id, null); this.goalRevisions.set(id, goalRevision + 1);
+        }
+        return { cleared: ack.cleared };
+      } catch (error) {
+        const notSent = /^NOT_SENT: GOAL_CLEAR_SKIPPED:(notOwned|generationChanged|goalChanged|busy|unsupported)$/.exec(message(error));
+        if (notSent) return skipped(notSent[1] as GoalClearReason);
+        if (this.epoch === epoch && entry) {
+          if (writerConflict(error)) { entry.state = "external"; entry.reason = "其他客户端正在使用，可查看历史"; }
+          else if (message(error).startsWith("DELIVERY_UNKNOWN")) { entry.uncertain = true; entry.state = "unknown"; entry.reason = "目标清理回执丢失，保留完成状态等待核对"; }
+        }
+        throw error;
+      }
+    });
+  }
+
+  async call(method: string, params: Json, options?: { signal?: AbortSignal }): Promise<Json> {
     const id = typeof object(params).threadId === "string" ? object(params).threadId as string : undefined;
     if (method === "thread/unsubscribe") {
       if (!id) throw new Error("threadId required");
@@ -147,6 +242,7 @@ export class Ownership {
       if (["thread/start", "thread/fork"].includes(method) && typeof created === "string") {
         await this.locks.run(created, async () => {
           const entry = this.entry(created); entry.state = "owned"; entry.awaitingFirstTurn = method === "thread/start";
+          entry.firstTurnAck = undefined;
           this.touch(created);
           const parent = parentThread(object(object(result).thread));
           if (parent) this.touch(parent);
@@ -155,31 +251,37 @@ export class Ownership {
       return result;
     }
     const inputEpoch = directInput.has(method) ? this.epoch : undefined;
-    if (inputEpoch !== undefined) await this.inputMetadata(id, inputEpoch);
+    const goalMutation = method === "thread/goal/set" || method === "thread/goal/clear";
+    const goalSignal = goalMutation ? options?.signal : undefined;
+    const goalRead: Rpc = (method, params) => this.raw(method, params, { signal: goalSignal });
+    if (inputEpoch !== undefined) await (method === "thread/goal/set" ? this.goalInputMetadata(id, inputEpoch, goalSignal) : this.inputMetadata(id, inputEpoch, goalMutation ? goalRead : this.raw));
     return this.locks.run(id, async () => {
+      if (goalSignal?.aborted) throw new Error("SESSION_ACQUIRE_FAILED: 尚未发送，目标设置已取消");
       if (inputEpoch !== undefined && this.epoch !== inputEpoch)
         throw new Error("SESSION_ACQUIRE_FAILED: 尚未发送，运行实例已改变，请重新核对会话");
       const entry = this.entry(id);
       if (entry.state === "releasing") {
         const until = this.now() + this.releaseTimeout;
-        while (await this.isLoadedForAcquire(id)) {
+        while (await this.isLoadedForAcquire(id, goalSignal)) {
           if (this.now() >= until) throw new Error("SESSION_RELEASE_PENDING: 会话仍在释放，请稍后重试；消息尚未发送");
           await this.pause(100);
         }
         entry.state = "readonly"; entry.releasingSince = undefined;
       }
-      const loaded = method === "thread/resume" || await this.isLoadedForAcquire(id);
+      const loaded = method === "thread/resume" || await this.isLoadedForAcquire(id, goalSignal);
       // A permission read before the keyed lock can be stale while waiting for
       // another operation or for native unload. Re-read metadata, not history,
       // after those waits and before acquiring or dispatching any direct input.
-      const metadata = inputEpoch === undefined ? undefined : await this.inputMetadata(id, inputEpoch);
+      const metadata = inputEpoch === undefined ? undefined : await (method === "thread/goal/set" ? this.goalInputMetadata(id, inputEpoch, goalSignal) : this.inputMetadata(id, inputEpoch, goalMutation ? goalRead : this.raw));
       entry.generation++;
       this.touch(id);
       if (metadata) { const parent = parentThread(metadata); if (parent) this.touch(parent); }
       if (!loaded) {
         entry.state = "acquiring";
         try {
-          await this.raw("thread/resume", { threadId: id, config: { "features.default_mode_request_user_input": true } });
+          await this.raw("thread/resume", { threadId: id, config: { "features.default_mode_request_user_input": true } }, goalMutation ? { signal: goalSignal, beforeSend: () => {
+            if (goalSignal?.aborted || this.epoch !== inputEpoch) throw new Error("NOT_SENT: 目标操作已取消或运行实例已改变，未恢复线程");
+          } } : undefined);
           entry.state = "owned"; entry.reason = "";
         } catch (error) {
           entry.state = writerConflict(error) ? "external" : "unknown";
@@ -190,12 +292,18 @@ export class Ownership {
       if (inputEpoch !== undefined && this.epoch !== inputEpoch)
         throw new Error("SESSION_ACQUIRE_FAILED: 尚未发送，运行实例已改变，请重新核对会话");
       try {
-        const result = await this.raw(method, params);
+        const result = await this.raw(method, params, goalMutation ? { signal: goalSignal, beforeSend: () => {
+          if (goalSignal?.aborted) throw new Error("NOT_SENT: 目标操作已取消");
+          if (this.epoch !== inputEpoch) throw new Error("NOT_SENT: 目标操作的运行实例已改变");
+        } } : undefined);
         if (inputEpoch !== undefined && this.epoch !== inputEpoch)
           throw new Error("DELIVERY_UNKNOWN: 运行实例已改变，原操作回执已失效");
         entry.state = "owned"; entry.reason = "";
         if (method === "turn/start" || method === "review/start") entry.uncertain = false;
-        if (method === "turn/start") entry.awaitingFirstTurn = false;
+        if (method === "turn/start") {
+          if (entry.awaitingFirstTurn) entry.firstTurnAck = { epoch: this.epoch, generation: entry.generation };
+          entry.awaitingFirstTurn = false;
+        }
         const review = object(result).reviewThreadId;
         if (method === "review/start" && typeof review === "string" && review !== id) { this.entry(review).state = "owned"; this.touch(review); }
         return result;
@@ -207,10 +315,36 @@ export class Ownership {
     });
   }
 
-  private async inputMetadata(id: string, epoch: number): Promise<JsonObject> {
+  private async goalInputMetadata(id: string, epoch: number, signal?: AbortSignal): Promise<JsonObject> {
+    const entry = this.entries.get(id), proof = entry?.firstTurnAck;
+    const valid = () => !!entry && !!proof && entry.firstTurnAck === proof && this.epoch === epoch && proof.epoch === epoch &&
+      entry.state === "owned" && !entry.uncertain && !entry.awaitingFirstTurn && entry.generation === proof.generation;
+    if (signal?.aborted) throw new Error("SESSION_ACQUIRE_FAILED: 尚未发送，目标设置已取消");
+    if (!valid()) return this.inputMetadata(id, epoch, (method, params) => this.raw(method, params, { signal }));
+    const until = this.now() + this.goalMetadataWait;
+    const read: Rpc = (method, params) => this.raw(method, params, { timeoutMs: Math.max(1, until - this.now()), signal });
+    while (true) {
+      if (signal?.aborted) throw new Error("SESSION_ACQUIRE_FAILED: 尚未发送，目标设置已取消");
+      if (!valid()) throw new Error("SESSION_ACQUIRE_FAILED: 尚未发送，首轮输入归属或运行实例已改变");
+      if (this.now() >= until) throw new Error("SESSION_ACQUIRE_FAILED: 尚未发送，新会话元数据仍未就绪，请稍后重试目标设置");
+      try {
+        const metadata = await this.inputMetadata(id, epoch, read);
+        if (!valid()) throw new Error("SESSION_ACQUIRE_FAILED: 尚未发送，首轮输入归属或运行实例已改变");
+        return metadata;
+      } catch (error) {
+        // The bundled native CLI can acknowledge the first turn before its new
+        // rollout metadata has materialized. Only this exact, same-path error
+        // permits another read. No turn or Goal mutation is ever retried.
+        if (!/^SESSION_ACQUIRE_FAILED: 尚未发送，无法确认输入权限：failed to read thread: thread-store internal error: failed to read session metadata (.+\.jsonl): rollout at \1 is empty$/.test(message(error))) throw error;
+        await this.pause(Math.min(100, Math.max(0, until - this.now())));
+      }
+    }
+  }
+
+  private async inputMetadata(id: string, epoch: number, read: Rpc = this.raw): Promise<JsonObject> {
     if (this.epoch !== epoch) throw new Error("SESSION_ACQUIRE_FAILED: 尚未发送，运行实例已改变，请重新核对会话");
     let metadata: Json;
-    try { metadata = await this.raw("thread/read", { threadId: id, includeTurns: false }); }
+    try { metadata = await read("thread/read", { threadId: id, includeTurns: false }); }
     catch (error) { throw new Error(`SESSION_ACQUIRE_FAILED: 尚未发送，无法确认输入权限：${message(error)}`); }
     if (this.epoch !== epoch) throw new Error("SESSION_ACQUIRE_FAILED: 尚未发送，运行实例已改变，请重新核对会话");
     const thread = object(object(metadata).thread);
@@ -222,8 +356,8 @@ export class Ownership {
     return thread;
   }
 
-  private async isLoadedForAcquire(id: string): Promise<boolean> {
-    try { return (await loadedIds(this.raw)).has(id); }
+  private async isLoadedForAcquire(id: string, signal?: AbortSignal): Promise<boolean> {
+    try { return (await loadedIds(signal ? (method, params) => this.raw(method, params, { signal }) : this.raw)).has(id); }
     catch (error) { throw new Error(`SESSION_ACQUIRE_FAILED: 尚未发送，无法确认执行实例：${message(error)}`); }
   }
 

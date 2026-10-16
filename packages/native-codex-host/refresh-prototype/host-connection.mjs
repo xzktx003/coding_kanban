@@ -50,14 +50,36 @@ export async function prepareRefreshHost(
     pid: service.record.pid,
     startTicks: service.record.startTicks,
   };
-  const code = `#!${process.execPath}\nimport {runBridge} from ${JSON.stringify(module)};\nconst controller=new AbortController();\nprocess.on('SIGTERM',()=>controller.abort());process.on('SIGINT',()=>controller.abort());\nrunBridge({configPath:${JSON.stringify(options.refreshServiceConfig)},scope:${JSON.stringify(scope)},argv:process.argv.slice(2),signal:controller.signal}).catch(error=>{process.stderr.write(error.message+'\\n');process.exitCode=1;});\n`;
+  let controlScope;
+  if (options.refreshControlRoot) {
+    const { attachRefreshControlService } =
+      await import("./control-service.mjs");
+    const attached = await attachRefreshControlService({
+      runtimeRoot: options.refreshControlRoot,
+      metadata,
+      scope,
+    });
+    controlScope = {
+      generation: attached.record.generation,
+      pid: attached.record.pid,
+      startTicks: attached.record.startTicks,
+    };
+    assertRunning();
+  }
+  const controlFields = controlScope
+    ? `,controlRoot:${JSON.stringify(options.refreshControlRoot)},controlScope:${JSON.stringify(controlScope)}`
+    : "";
+  const code = `#!${process.execPath}\nimport {runBridge} from ${JSON.stringify(module)};\nconst controller=new AbortController();\nprocess.on('SIGTERM',()=>controller.abort());process.on('SIGINT',()=>controller.abort());\nrunBridge({configPath:${JSON.stringify(options.refreshServiceConfig)},scope:${JSON.stringify(scope)}${controlFields},argv:process.argv.slice(2),signal:controller.signal}).catch(error=>{process.stderr.write(error.message+'\\n');process.exitCode=1;});\n`;
   assertRunning();
   await writeFile(executable, code, { mode: 0o700, flag: "wx" });
   return {
     executable,
-    domain: service.record.domain,
-    generation: service.record.generation,
-    pid: service.record.pid,
+    ...scope,
     reconnectionGraceSeconds: options.reconnectionGraceSeconds,
+    ...(controlScope
+      ? {
+          control: { runtimeRoot: options.refreshControlRoot, ...controlScope },
+        }
+      : {}),
   };
 }

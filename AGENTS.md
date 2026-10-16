@@ -15,10 +15,15 @@
 - `pnpm e2e`：浏览器测试；会话模式联调使用独立 `.env`、端口和 `SESSION_DATA_HOME`，详情见 `docs/session-mode-architecture.md`。
 - 原生 Codex 实验宿主与只读适配器位于 `packages/native-codex-host`、`packages/native-codex-adapter`，不随 `pnpm dev` 启动。专项验收：`node --test packages/native-codex-host/test/*.test.mjs packages/native-codex-adapter/test/*.test.mjs`；启动参数与真实浏览器边界见各包 README 和 `docs/designs/session-render-alignment/native-prototype-acceptance.md`。不得连接默认 CLI IPC、未经用户明确授权复制登录数据或因实验部署重启正式 Agent；已授权连接复用仅走私有 `--connection-profile-home` 路径。
 - 刷新恢复的 `refresh-prototype` 为隔离组件，默认启动不启用；包含私有常驻进程、原生客户端/订阅适配器、事件管理器与默认 10 项 LRU。真实协议复验显式提供 `NATIVE_CODEX_REFRESH_CLI` 后运行 `test/refresh-native.test.mjs`、`test/refresh-lifecycle-native.test.mjs`、`test/refresh-service.test.mjs`（均在 `packages/native-codex-host` 下）；未提供时跳过，不能计为已验收。真实 11→10 回收与运行/审批保护不替代正式桥接、多端草稿、长测或两秒验收，完整启用仍未实现。进度与历史红灯见 `docs/designs/codex-mode-audit-20261014/refresh-recovery-progress-20261015.md` 和同目录 `refresh-recovery-stage0.md`。
-- 刷新原型可在全新隔离宿主显式使用 `--refresh-service-config` / `--refresh-domain` 接入已验证私有服务；`--reconnection-grace-seconds` 仅控制该宿主断连宽限期（1–300 秒，默认 60）。profile 网关必须由服务端固定注册，`nativeClient=<UUID>` 不得接受端口/目录或回退到另一宿主；关注集合保持共享，布局、启动映射、iframe 缓存和旧实例身份按 profile 隔离。自动 profile 管理、控制通道/租约及正式启用仍未完成，见 [原型启动契约](packages/native-codex-host/refresh-prototype/README.md#explicit-private-host-and-client-routing)。
+- 刷新原型可在全新隔离宿主显式使用 `--refresh-service-config` / `--refresh-domain` 接入已验证私有服务；`--reconnection-grace-seconds` 仅控制该宿主断连宽限期（1–300 秒，默认 60）。profile 网关必须由服务端固定注册，`nativeClient=<UUID>` 不得接受端口/目录或回退到另一宿主；关注集合保持共享，布局、启动映射、iframe 缓存和旧实例身份按 profile 隔离。自动 profile 管理与正式启用仍未完成；独立管理进程和显式页面租约见下文，原型接入见 [原型启动契约](packages/native-codex-host/refresh-prototype/README.md#explicit-private-host-and-client-routing)。
 - 默认 code-server profile 的浏览器全局存储按源共享，服务端目录/路径隔离不能证明原生草稿独立。`refresh-prototype/origin-listener.mjs` 仅为显式自有前端监听器原型，保留 HTTP/2、原始请求/升级 handler 和 WS 预算；持久源分配与资源准入未完成，不自动启用或复用不同客户端的源。保温管理器先通过只读原生账号/工作区核对建立初始绑定，之后账号变化使其失效，只关闭自身连接、不停止 native 任务；所有官方桥接的完整授权控制仍待实现。生成的 CLI 包装器每次启动及连接打开后均须重查固定服务域/代次/PID/start ticks，准入有界、可取消，旧身份不得回退到新实例。手机关卡按用户确认采用 iPhone 16 尺寸模拟，具体参数与边界见刷新计划。见原型 README 与持续进度。
 
 - 隔离刷新管理器 `createRefreshManager` 要求显式 `resourceMonitor`：用自有进程创建时持有的 PID/start ticks 列齐 native、宿主、管理器及网关根；不得把同 UID 或 HTTP 提供的 PID 当成所有权。资源缺测、过期或超预算暂停新增空闲保温，不停止任务；自动全宿主注册、预算定标与最终恢复验收仍待完成，见 `packages/native-codex-host/refresh-prototype/README.md`。
+
+- 显式 profile 可注册自有可见页面租约；网关必须核对实际实例及宿主记录中的完整 native domain/generation/PID/start ticks，缺失或变化不得登记到其他服务。浏览器仅上报可见 thread UUID，目录取自原生元数据；硬刷新保留短暂断连保护，新标签不能复用 opener 复制的租约。断连宽限不是保温池 TTL；默认入口不启用，自动 profile/源分配及最终验收仍未完成。协议与测试见 `docs/designs/codex-mode-audit-20261014/refresh-visibility-control.md`。
+- `refresh-prototype/control-service.mjs` 可由本地所有者显式启动/附着独立持久管理进程；只接入已有且身份匹配的私有 native，不启动或重启 native。网关经独立私有 Unix 元数据通道注册页面，实际宿主核对仍通过反向 verify 执行；关闭网关不清空中央租约/保温池，控制进程退出只释放自身订阅。现有/过期目录记录不得自动覆盖恢复，PID 身份读取与完整 task/RSS 统计须保持各自契约。自动宿主资源注册与最终验收仍待完成，见 `docs/designs/codex-mode-audit-20261014/refresh-control-process.md`。
+- 新私有刷新服务须在 ready 前建立原始 native 授权锚与独立账号观察进程；记录不可改绑，manager 重建也须确认原始锚。账号同值通知仍撤销，观察进程失联/缺失锚拒绝接入，不隐式补写、重建或停止 native。撤销写盘失败仍关闭自有授权通道；真正写入前同步核对锚，观察进程自动计入资源预算。协议、真实无登录 provider 验收及 ChatGPT/UI 未验边界见 `docs/designs/codex-mode-audit-20261014/refresh-native-authority.md`。
+- 新隔离宿主可在已有 refresh service 参数上增加 `--refresh-control-root`，将每个生成 CLI 固定到控制与 native 双重运行身份，分别初始化只读账号观察连接并与 manager 摘要核对。初始账号通知仅允许一次，同值第二次也撤销；无关 turn 不改变账号版本。每条实际 JSONL 写入前的 guard 必须同步，未知回执不重发，显式 owner 关闭不停止 native。该参数未自动覆盖存量客户端；真实 ChatGPT/OAuth/官方 GUI、资源和两秒完整关卡仍待验收，见 `docs/designs/codex-mode-audit-20261014/refresh-bridge-authorization.md`。
 
 ## 任务完成前的最低要求
 
@@ -147,6 +152,12 @@
 - 关注集合与正文可见消费者必须分开：不可见正文在 60 秒宽限期后可回收，休眠中的事件/历史/设备缓存不得重新持有正文；重显只读恢复，后台任务状态与回执确认必须独立于正文挂载。修改该机制须运行 `session-idle-memory` 及恢复/审批回归。
 - 完成提示音必须复用单个音频上下文，每声结束断开节点，空闲关闭；音频时钟挂起须有墙钟清理。不得改回每轮创建 AudioContext 或仅 stop 不 close；这类原生分配不计入 JS 堆。
 - 按约定运行相关单测与原生 HTTP/EventSource 浏览器回归，记录传输量和内存测量边界；修改限制须提供等效或更好的实测证据，不能删除保护断言或单纯放宽阈值。纯文档修改只需核对路径、命令和记录一致性。
+
+### 会话 Goal
+
+- Goal 的入口、六种状态、附件、首轮与后续设置、完成标记遵循 [Goal 规则](docs/session-goals.md)。已有线程只设置目标，不额外发送普通 turn；新线程首轮接受后不能因 GoalSet 失败重发首轮或删除已引用附件。Portal 表单必须阻止 submit 向公共 composer 传播。
+- 只读恢复不 acquire/resume。未知写入回执先核对小 Goal 元数据，未确认前禁止重发；同值通知也推进修订以挡住旧回执。完成自动清理只走已有 owner／generation／精确目标的条件通道，原生不支持跨客户端 CAS，不得把本地 guard 描述为原子保证。账号事件的取消和有效只读账号确认分别处理，不用对象引用推断授权。
+- 官方原组件对照用 `scripts/codex-goal-reference-server.mjs`，必须绑定 `0.0.0.0`，实际 HTTP LAN URL 由启动输出取得；缺少 `CODEX_GOAL_REFERENCE_URL` 的跳过不计验收。原生协议在全新私有目录和 loopback provider 中单独验收，不读登录、不连接正式 IPC、不切换活跃运行层。证据与命令见 [本轮验收](docs/designs/session-render-alignment/goal-parity-acceptance-20261016.md)。
 
 ### 独立 Codex 模式
 

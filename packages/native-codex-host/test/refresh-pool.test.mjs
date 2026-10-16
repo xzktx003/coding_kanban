@@ -15,27 +15,98 @@ const thread = (number, status = "idle") => ({
 });
 
 test("a visible consumer arriving at the native write boundary prevents unsubscribe without claiming an unknown receipt", async () => {
-  let pool, sent = 0;
+  let pool,
+    sent = 0;
   const value = thread(1);
-  pool = createThreadPool({ domain, generation, idleLimit: 0, memoryBudgetBytes: 1000,
-    adapter: { idleOnlyUnsubscribe: true, readRss: async () => 100,
+  pool = createThreadPool({
+    domain,
+    generation,
+    idleLimit: 0,
+    memoryBudgetBytes: 1000,
+    adapter: {
+      idleOnlyUnsubscribe: true,
+      readRss: async () => 100,
       probe: async () => value,
       async unsubscribe(_key, options) {
         pool.setVisible(value.threadId, id(99), true);
-        try { options?.beforeSend?.(); }
-        catch(error) {
-          if(error.code === "NATIVE_NOT_SENT") return {protected:true,retained:true,state:value};
+        try {
+          options?.beforeSend?.();
+        } catch (error) {
+          if (error.code === "NATIVE_NOT_SENT")
+            return { protected: true, retained: true, state: value };
           throw error;
         }
-        sent++; return {released:true};
-      }
-    }
+        sent++;
+        return { released: true };
+      },
+    },
   });
   pool.observe(value);
   await pool.trim();
   assert.equal(sent, 0);
   assert.equal(pool.snapshot().entries[0].error, null);
   assert.equal(pool.snapshot().entries.length, 1);
+});
+
+test("a known unsubscribe receipt may reconcile its own closed event only after a fresh native absence proof", async () => {
+  let pool,
+    confirmed = 0;
+  const value = thread(1);
+  pool = createThreadPool({
+    domain,
+    generation,
+    idleLimit: 0,
+    memoryBudgetBytes: 1000,
+    adapter: {
+      idleOnlyUnsubscribe: true,
+      readRss: async () => 100,
+      probe: async () => value,
+      unsubscribe: async () => {
+        pool.observe({ ...value, status: "unknown" });
+        return { released: true };
+      },
+      confirmReleased: async () => {
+        confirmed++;
+        return true;
+      },
+    },
+  });
+  pool.observe(value);
+  await pool.trim();
+  assert.equal(confirmed, 1);
+  assert.equal(pool.snapshot().entries.length, 0);
+});
+
+test("a consumer arriving during absence confirmation preserves recovery instead of deleting its record", async () => {
+  let pool;
+  const value = thread(1);
+  pool = createThreadPool({
+    domain,
+    generation,
+    idleLimit: 0,
+    memoryBudgetBytes: 1000,
+    adapter: {
+      idleOnlyUnsubscribe: true,
+      readRss: async () => 100,
+      probe: async () => value,
+      unsubscribe: async () => {
+        pool.observe({ ...value, status: "unknown" });
+        return { released: true };
+      },
+      confirmReleased: async () => {
+        pool.setVisible(value.threadId, id(99), true);
+        return true;
+      },
+    },
+  });
+  pool.observe(value);
+  await pool.trim();
+  assert.equal(pool.snapshot().entries.length, 1);
+  assert.equal(pool.snapshot().entries[0].visibleConsumers, 1);
+  assert.equal(
+    pool.snapshot().entries[0].error,
+    "subscription-recovery-required",
+  );
 });
 function fixture(options = {}) {
   const states = new Map();

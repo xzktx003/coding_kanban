@@ -65,3 +65,7 @@ After a browser reload, code-server can retain the previous extension host and i
 A first send in a new custom editor saves a real local thread but changes its internal route, not its original new-document URI. Reload can return that new resource to its composer; the original history entry opens the saved conversation. Do not equate a new-document reload with deletion of a saved thread or claim automatic window/thread recovery without testing the local resource. See `docs/codex-workbench-mode.md` for LAN acceptance and remaining limits.
 
 刷新恢复候选路径仅支持显式隔离接入：`--refresh-service-config` 与 `--refresh-domain` 绑定已经验证的私有服务，`--reconnection-grace-seconds` 配置该宿主断连宽限期（1–300 秒，显式接入默认 60 秒）。普通启动不启用。独立 profile 网关须由服务端固定注册，浏览器以 `nativeClient=<UUID>` 选择；此参数不能指定端口或目录，也不会创建或接管宿主。参数、安全约束和未完成验收见 [隔离组件说明](refresh-prototype/README.md#explicit-private-host-and-client-routing)。
+
+新隔离宿主可再提供 `--refresh-control-root`，将 CLI 包装器固定到已运行独立管理进程，并通过独立原生只读账号观察和实际写入 guard 约束授权。该参数从命令行显式传入，不创建控制/native 服务；旧代次或未确认身份失败，不覆盖已有宿主。真实 ChatGPT/完整 GUI 与两秒关卡仍待验收，见 [桥接授权](../../docs/designs/codex-mode-audit-20261014/refresh-bridge-authorization.md)。
+
+新私有 native 服务在 ready 前建立独立账号观察进程和不可改绑的初始授权锚。manager/bridge 重建不能重新绑定旧上下文；观察进程失联或账号撤销拒绝新接入，旧候选记录不静默补写，不停止 native。观察进程自动计入资源预算，实际发送同步复核撤销标记。见 [持久授权锚](../../docs/designs/codex-mode-audit-20261014/refresh-native-authority.md)。

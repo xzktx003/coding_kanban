@@ -688,17 +688,25 @@ export async function threadGoalSet(
   );
 }
 
-export async function threadGoalGet(params: ThreadGoalGetParams) {
-  return await postJson<ThreadGoalGetResponse>(
+export async function threadGoalGet(
+  params: ThreadGoalGetParams,
+  options?: { signal?: AbortSignal; suppressToast?: boolean },
+) {
+  return await postJsonWithOptions<ThreadGoalGetResponse>(
     "/api/codex/thread/goal/get",
     params,
+    options,
   );
 }
 
-export async function threadGoalClear(params: ThreadGoalClearParams) {
-  return await postJson<ThreadGoalClearResponse>(
+export async function threadGoalClear(
+  params: ThreadGoalClearParams,
+  options?: { signal?: AbortSignal },
+) {
+  return await postJsonWithOptions<ThreadGoalClearResponse>(
     "/api/codex/thread/goal/clear",
     params,
+    options,
   );
 }
 

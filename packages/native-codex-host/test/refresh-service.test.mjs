@@ -115,6 +115,18 @@ test(
         } catch (error) {
           if (error.code !== "ENOENT") throw error;
         }
+        await wait(async () => {
+          try {
+            const s = await readFile(
+              `/proc/${service.record.authority.pid}/stat`,
+              "utf8",
+            );
+            return s.split(") ").at(-1).startsWith("Z ");
+          } catch (error) {
+            if (error.code === "ENOENT") return true;
+            throw error;
+          }
+        }, "Owned authorization observer exits after native");
       }
       await model.close();
       await rm(root, { recursive: true, force: true });
@@ -172,6 +184,7 @@ test(
     const created = JSON.parse(output);
     service = await attachPrivateService({ metadata, domain: options.domain });
     assert.equal(service.record.generation, created.generation);
+    assert.deepEqual(service.record.authority, created.authority);
     assert.ok((await service.readRss()) > 0);
     await assert.rejects(
       attachPrivateService({ metadata, domain: randomUUID() }),
@@ -276,6 +289,12 @@ test(
     assert.equal(manager.snapshot().resources.available, true);
     assert.ok(manager.snapshot().resources.processCount >= 2);
     assert.ok(
+      (await resourceMonitor.read()).roots.some(
+        (root) =>
+          root.kind === "authority" && root.pid === created.authority.pid,
+      ),
+    );
+    assert.ok(
       manager.snapshot().resources.rssBytes > (await recovered.readRss()),
     );
     assert.equal(
@@ -309,47 +328,172 @@ test(
         .status,
       "idle",
     );
-    await t.test("real native keeps a page lease across disconnect and evicts only idle invisible LRU contexts",async()=>{
-      const {createVisibleLeaseController}=await import("../refresh-prototype/visibility-leases.mjs");
-      const controller=createVisibleLeaseController({manager,profileId:randomUUID(),leaseGraceMs:3000});
-      try{
-        const input={origin:"https://native-visibility.invalid",instanceId:randomUUID()};
-        const hooks={assertCurrent:async()=>{assert.ok((await recovered.readRss())>0)}};
-        const page=await controller.attach(input,hooks);
-        await page.update({sequence:1,threadIds:[threadId]});
-        await b.request("thread/unsubscribe",{threadId});
-        page.disconnect();await pause(1300);
-        const reconnected=await controller.attach({...input,...page.identity},hooks);
-        await reconnected.update({sequence:1,threadIds:[threadId]});
-        const keys=[];
-        for(let index=0;index<11;index++){
-          const value=await b.request("thread/start",{cwd:options.cwd,approvalPolicy:"never",sandbox:"read-only"});
-          await b.request("turn/start",{threadId:value.thread.id,input:[{type:"text",text:"REFRESH_IDLE",text_elements:[]}]});
-          await wait(async()=>(await b.request("thread/read",{threadId:value.thread.id,includeTurns:false})).thread.status.type==="idle","persisted visibility fixture turn");
-          const key=await manager.scopeForThread(value.thread.id);keys.push(key);
-          await manager.open(key,{warmOnly:true});
-          await b.request("thread/unsubscribe",{threadId:key.threadId});
+    await t.test(
+      "real native keeps a page lease across disconnect and evicts only idle invisible LRU contexts",
+      async () => {
+        const { createVisibleLeaseController } =
+          await import("../refresh-prototype/visibility-leases.mjs");
+        const controller = createVisibleLeaseController({
+          manager,
+          profileId: randomUUID(),
+          leaseGraceMs: 3000,
+        });
+        try {
+          const input = {
+            origin: "https://native-visibility.invalid",
+            instanceId: randomUUID(),
+          };
+          const hooks = {
+            assertCurrent: async () => {
+              assert.ok((await recovered.readRss()) > 0);
+            },
+          };
+          const page = await controller.attach(input, hooks);
+          await page.update({ sequence: 1, threadIds: [threadId] });
+          await b.request("thread/unsubscribe", { threadId });
+          page.disconnect();
+          await pause(1300);
+          const reconnected = await controller.attach(
+            { ...input, ...page.identity },
+            hooks,
+          );
+          await reconnected.update({ sequence: 1, threadIds: [threadId] });
+          const keys = [];
+          for (let index = 0; index < 11; index++) {
+            const value = await b.request("thread/start", {
+              cwd: options.cwd,
+              approvalPolicy: "never",
+              sandbox: "read-only",
+            });
+            await b.request("turn/start", {
+              threadId: value.thread.id,
+              input: [
+                { type: "text", text: "REFRESH_IDLE", text_elements: [] },
+              ],
+            });
+            await wait(
+              async () =>
+                (
+                  await b.request("thread/read", {
+                    threadId: value.thread.id,
+                    includeTurns: false,
+                  })
+                ).thread.status.type === "idle",
+              "persisted visibility fixture turn",
+            );
+            const key = await manager.scopeForThread(value.thread.id);
+            keys.push(key);
+            await manager.open(key, { warmOnly: true });
+            await b.request("thread/unsubscribe", { threadId: key.threadId });
+          }
+          await manager.settle();
+          const loaded = (await b.request("thread/loaded/list", {})).data;
+          assert.ok(loaded.includes(threadId));
+          assert.equal(
+            manager.snapshot().entries.find((e) => e.threadId === threadId)
+              .visibleConsumers,
+            1,
+          );
+          assert.equal(
+            manager.snapshot().entries.length,
+            10,
+            JSON.stringify(
+              manager
+                .snapshot()
+                .entries.map(
+                  ({ threadId, status, error, visibleConsumers }) => ({
+                    threadId,
+                    status,
+                    error,
+                    visibleConsumers,
+                  }),
+                ),
+            ),
+          );
+          await reconnected.update({ sequence: 2, threadIds: [] });
+          const next = await b.request("thread/start", {
+            cwd: options.cwd,
+            approvalPolicy: "never",
+            sandbox: "read-only",
+          });
+          await b.request("turn/start", {
+            threadId: next.thread.id,
+            input: [{ type: "text", text: "REFRESH_IDLE", text_elements: [] }],
+          });
+          await wait(
+            async () =>
+              (
+                await b.request("thread/read", {
+                  threadId: next.thread.id,
+                  includeTurns: false,
+                })
+              ).thread.status.type === "idle",
+            "persisted final visibility turn",
+          );
+          await manager.open(await manager.scopeForThread(next.thread.id), {
+            warmOnly: true,
+          });
+          await wait(
+            async () =>
+              !(await b.request("thread/loaded/list", {})).data.includes(
+                threadId,
+              ),
+            "invisible LRU released",
+          );
+          const restored = await b.request("thread/resume", {
+            threadId,
+            excludeTurns: true,
+          });
+          assert.equal(restored.thread.id, threadId);
+          assert.equal(restored.cwd, options.cwd);
+          assert.equal(
+            (await b.request("thread/read", { threadId, includeTurns: true }))
+              .thread.turns.length,
+            1,
+          );
+          assert.equal(
+            model.calls.filter((call) => call.mode === "running").length,
+            1,
+          );
+          assert.equal(model.calls.length, 13);
+        } finally {
+          assert.equal((await controller.close()).unreleasedConsumers, 0);
         }
-        await manager.settle();
-        const loaded=(await b.request("thread/loaded/list",{})).data;
-        assert.ok(loaded.includes(threadId));
-        assert.equal(manager.snapshot().entries.find(e=>e.threadId===threadId).visibleConsumers,1);
-        assert.equal(manager.snapshot().entries.length,10,JSON.stringify(manager.snapshot().entries.map(({threadId,status,error,visibleConsumers})=>({threadId,status,error,visibleConsumers}))));
-        await reconnected.update({sequence:2,threadIds:[]});
-        const next=await b.request("thread/start",{cwd:options.cwd,approvalPolicy:"never",sandbox:"read-only"});
-        await b.request("turn/start",{threadId:next.thread.id,input:[{type:"text",text:"REFRESH_IDLE",text_elements:[]}]});
-        await wait(async()=>(await b.request("thread/read",{threadId:next.thread.id,includeTurns:false})).thread.status.type==="idle","persisted final visibility turn");
-        await manager.open(await manager.scopeForThread(next.thread.id),{warmOnly:true});
-        await wait(async()=>!(await b.request("thread/loaded/list",{})).data.includes(threadId),"invisible LRU released");
-        const restored=await b.request("thread/resume",{threadId,excludeTurns:true});
-        assert.equal(restored.thread.id,threadId);assert.equal(restored.cwd,options.cwd);
-        assert.equal((await b.request("thread/read",{threadId,includeTurns:true})).thread.turns.length,1);
-        assert.equal(model.calls.filter(call=>call.mode==="running").length,1);
-        assert.equal(model.calls.length,13);
-      }finally{assert.equal((await controller.close()).unreleasedConsumers,0)}
-    });
+      },
+    );
     await manager.close();
     assert.equal((await recovered.readRss()) > 0, true);
+    const { createNativeClient } =
+      await import("../refresh-prototype/native-client.mjs");
+    const oracle = createNativeClient({
+      socketPath: metadata.socketPath,
+      name: "acceptance_authority_loss_oracle",
+    });
+    clients.push(oracle);
+    await oracle.ready;
+    const authorityIdentity = await captureProcessIdentity(
+      created.authority.pid,
+    );
+    assert.equal(authorityIdentity.startTicks, created.authority.startTicks);
+    process.kill(created.authority.pid, "SIGKILL");
+    await wait(async () => {
+      try {
+        await captureProcessIdentity(created.authority.pid);
+        return false;
+      } catch {
+        return true;
+      }
+    }, "Owned authority observer abrupt exit");
+    await assert.rejects(recovered.connect());
+    await assert.rejects(readFile(join(root, "manager/authority-revoked")), {
+      code: "ENOENT",
+    });
+    assert.equal(
+      (await oracle.request("thread/read", { threadId, includeTurns: true }))
+        .thread.turns.length,
+      1,
+    );
+    assert.ok((await recovered.readRss()) > 0);
     await b.close();
     process.kill(service.record.pid, "SIGTERM");
     await wait(async () => {

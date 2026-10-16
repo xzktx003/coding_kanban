@@ -10,6 +10,7 @@ import {
 import { isAbsolute, resolve, dirname, join, relative, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
   validateBridgeMetadata,
   verifyNativeArtifacts,
@@ -17,6 +18,12 @@ import {
 } from "./cli-bridge.mjs";
 import { createNativeClient } from "./native-client.mjs";
 import { validateNativeScope } from "./native-scope.mjs";
+import { createNativeAuthorizationTracker } from "./authorization-boundary.mjs";
+import {
+  connectNativeAuthority,
+  readNativeAuthority,
+  validateAuthorityIdentity,
+} from "./native-authority.mjs";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const delay = (ms) => new Promise((done) => setTimeout(done, ms));
@@ -112,7 +119,28 @@ async function verifyProcess(record, metadata, domain) {
     record.startTicks !== (await processIdentity(record.pid))
   )
     throw Error("native service generation unavailable");
-  const args = (await readFile(`/proc/${record.pid}/cmdline`))
+  await verifyPrivateNativeEndpoint({
+    metadata,
+    scope: validateNativeScope({
+      domain: record.domain,
+      generation: record.generation,
+      pid: record.pid,
+      startTicks: record.startTicks,
+    }),
+  });
+}
+/** Startup observer checks the exact native endpoint before a ready record exists. */
+export async function verifyPrivateNativeEndpoint({ metadata, scope }) {
+  validateBridgeMetadata(metadata);
+  scope = validateNativeScope(scope);
+  await privateDirectory(metadata.runtimeRoot);
+  if (
+    dirname(metadata.socketPath) !== metadata.runtimeRoot ||
+    (await processIdentity(scope.pid)) !== scope.startTicks ||
+    (await lstat(`/proc/${scope.pid}`)).uid !== process.getuid?.()
+  )
+    throw Error("native service generation unavailable");
+  const args = (await readFile(`/proc/${scope.pid}/cmdline`))
     .toString()
     .split("\0")
     .filter(Boolean);
@@ -130,8 +158,24 @@ function descriptor(record, metadata) {
     pid: record.pid,
     startTicks: record.startTicks,
   });
+  const authority = validateAuthorityIdentity(record.authority);
+  const connectAnchor = () =>
+    connectNativeAuthority({
+      runtimeRoot: metadata.runtimeRoot,
+      scope,
+      authority,
+    });
   return {
-    record: Object.freeze({ ...record }),
+    record: Object.freeze({ ...record, authority }),
+    async confirmAuthorization(binding) {
+      await verifyPrivateServiceIdentity({ metadata, scope });
+      const anchor = await connectAnchor();
+      try {
+        anchor.assertBinding(binding);
+      } finally {
+        await anchor.close();
+      }
+    },
     async readRss() {
       await verifyPrivateServiceIdentity({ metadata, scope });
       const rss = (await readFile(`/proc/${record.pid}/status`, "utf8")).match(
@@ -142,17 +186,67 @@ function descriptor(record, metadata) {
     },
     async connect(options = {}) {
       await verifyPrivateServiceIdentity({ metadata, scope });
-      const client = createNativeClient({
-        ...options,
-        socketPath: metadata.socketPath,
-        beforeReady: () => verifyPrivateServiceIdentity({ metadata, scope }),
+      const anchor = await connectAnchor();
+      let client,
+        observing = false;
+      const tracker = createNativeAuthorizationTracker({
+        ...scope,
+        onInvalidated() {
+          if (observing) anchor.revoke();
+          void client?.close().catch(() => {});
+        },
       });
       try {
+        client = createNativeClient({
+          ...options,
+          socketPath: metadata.socketPath,
+          async beforeReady() {
+            await verifyPrivateServiceIdentity({ metadata, scope });
+            anchor.assertCurrent();
+          },
+          beforeSend() {
+            anchor.assertCurrent();
+            tracker.assertValid();
+            return options.beforeSend?.();
+          },
+          onLifecycle(event) {
+            observing = true;
+            try {
+              tracker.observe(event);
+            } finally {
+              observing = false;
+            }
+            options.onLifecycle?.(event);
+          },
+        });
+        anchor.closed.then(() => client.close()).catch(() => {});
+        client.closed
+          .then(
+            () => anchor.close(),
+            () => anchor.close(),
+          )
+          .catch(() => {});
         await client.ready;
+        const binding = await tracker.bind(client, {
+          timeoutMs: options.timeoutMs ?? 15000,
+        });
+        try {
+          anchor.assertBinding(binding);
+        } catch (error) {
+          anchor.revoke();
+          throw error;
+        }
         await verifyPrivateServiceIdentity({ metadata, scope });
+        anchor.assertCurrent();
+        tracker.assertValid();
+        client.assertAuthorizationCurrent = () => {
+          anchor.assertCurrent();
+          tracker.binding();
+        };
         return client;
       } catch (error) {
-        await client.close().catch(() => {});
+        await client?.close().catch(() => {});
+        await anchor.close();
         throw error;
       }
     },
@@ -217,7 +311,12 @@ export async function startPrivateService(options) {
       );
     throw error;
   }
-  let child, exited, spawnError;
+  let child,
+    exited,
+    spawnError,
+    authorityChild,
+    authorityExited,
+    authorityError;
   try {
     await file.writeFile(
       JSON.stringify({ version: 1, domain, generation, state: "starting" }),
@@ -228,6 +327,19 @@ export async function startPrivateService(options) {
       throw Error("existing private endpoint requires explicit recovery");
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
+    }
+    for (const name of [
+      "authority-config.json",
+      "authority.json",
+      "authority.sock",
+      "authority-revoked",
+    ]) {
+      try {
+        await lstat(join(metadata.runtimeRoot, name));
+        throw Error("existing native authority requires explicit recovery");
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
     }
     await verifyNativeArtifacts(metadata);
     const paths = {
@@ -300,15 +412,67 @@ export async function startPrivateService(options) {
         await delay(25);
       }
     }
-    const probe = createNativeClient({
-      socketPath: metadata.socketPath,
-      name: "kanban_refresh_service_probe",
+    const scope = validateNativeScope({
+      domain,
+      generation,
+      pid: child.pid,
+      startTicks: await processIdentity(child.pid),
     });
+    const authorityConfig = join(metadata.runtimeRoot, "authority-config.json");
+    const config = await open(authorityConfig, "wx", 0o600);
     try {
-      await probe.ready;
+      await config.writeFile(JSON.stringify({ version: 1, metadata, scope }));
+      await config.sync();
     } finally {
-      await probe.close();
+      await config.close();
     }
+    authorityChild = spawn(
+      process.execPath,
+      [
+        fileURLToPath(new URL("./authority-worker.mjs", import.meta.url)),
+        "--config",
+        authorityConfig,
+      ],
+      { cwd, env, stdio: "ignore", detached: true },
+    );
+    authorityChild.once("error", (error) => {
+      authorityError = error;
+    });
+    authorityExited = new Promise((done) => authorityChild.once("exit", done));
+    const authorityDeadline = performance.now() + 20000;
+    let originalAuthority;
+    while (true) {
+      if (
+        authorityError ||
+        authorityChild.exitCode !== null ||
+        authorityChild.signalCode !== null
+      )
+        throw Error("private native authority failed before readiness");
+      try {
+        originalAuthority = await readNativeAuthority({
+          runtimeRoot: metadata.runtimeRoot,
+          scope,
+        });
+        break;
+      } catch {
+        if (performance.now() >= authorityDeadline)
+          throw Error("private native authority readiness timed out");
+        await delay(25);
+      }
+    }
+    if (originalAuthority.pid !== authorityChild.pid)
+      throw Error("private native authority ownership mismatch");
+    const authority = validateAuthorityIdentity({
+      generation: originalAuthority.generation,
+      pid: originalAuthority.pid,
+      startTicks: originalAuthority.startTicks,
+    });
+    const anchor = await connectNativeAuthority({
+      runtimeRoot: metadata.runtimeRoot,
+      scope,
+      authority,
+    });
+    await anchor.close();
     const record = {
       version: 1,
       state: "ready",
@@ -318,6 +482,7 @@ export async function startPrivateService(options) {
       startTicks: await processIdentity(child.pid),
       socketPath: metadata.socketPath,
       cliSha256: metadata.cliSha256,
+      authority,
     };
     await file.truncate(0);
     await file.write(JSON.stringify(record), 0, "utf8");
@@ -325,9 +490,25 @@ export async function startPrivateService(options) {
     await file.close();
     file = null;
     child.unref();
+    authorityChild.unref();
     return descriptor(record, metadata);
   } catch (error) {
     // Startup has not published a ready service; only our newly spawned child is eligible.
+    if (
+      authorityChild?.pid &&
+      authorityChild.exitCode === null &&
+      authorityChild.signalCode === null
+    ) {
+      authorityChild.kill("SIGTERM");
+      await Promise.race([authorityExited, delay(1000)]);
+      if (
+        authorityChild.exitCode === null &&
+        authorityChild.signalCode === null
+      ) {
+        authorityChild.kill("SIGKILL");
+        await authorityExited;
+      }
+    }
     if (child?.pid && child.exitCode === null && child.signalCode === null) {
       child.kill("SIGTERM");
       await Promise.race([exited, delay(1000)]);

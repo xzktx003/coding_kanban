@@ -1,6 +1,7 @@
 import { useThreadWorkflowStore, mutationKey } from "./delivery";
 import type { WorkflowMessage } from "./model";
 import { toast } from "sonner";
+import { writeNativeMarkdownClipboard } from "@session/components/codex/presentation/nativeMarkdownClipboard";
 /** A rollback or newer user turn can remove the original native editable row.
  * Keep that dedicated edit buffer reachable without moving it into the detached draft. */
 export function ThreadEditRecovery({
@@ -38,7 +39,7 @@ export function ThreadEditRecovery({
             <button
               type="button"
               onClick={() =>
-                void navigator.clipboard.writeText(buffer.text).then(
+                void writeNativeMarkdownClipboard(buffer.text).then(
                   () => toast.success("编辑内容已复制"),
                   () => toast.error("未能复制编辑内容"),
                 )

@@ -54,14 +54,33 @@ export async function inspectLinuxProcess(pid) {
 
 /** Capture immediately from an owner's spawned child; this does not establish ownership. */
 export async function captureProcessIdentity(pid) {
-  const info = await inspectLinuxProcess(pid);
+  if (!pidValid(pid)) throw Error("resource process PID invalid");
+  const root = `/proc/${pid}`;
+  const beforeInfo = await stat(root);
+  const before = (await readFile(`${root}/stat`, "utf8"))
+    .split(") ")
+    .at(-1)
+    .trim()
+    .split(/\s+/);
+  const after = (await readFile(`${root}/stat`, "utf8"))
+    .split(") ")
+    .at(-1)
+    .trim()
+    .split(/\s+/);
+  const afterInfo = await stat(root);
   if (
-    info.uid !== process.getuid?.() ||
-    !ticksValid(info.startTicks) ||
-    info.state === "Z"
+    beforeInfo.uid !== process.getuid?.() ||
+    afterInfo.uid !== beforeInfo.uid ||
+    afterInfo.ino !== beforeInfo.ino ||
+    !ticksValid(before[19]) ||
+    after[19] !== before[19] ||
+    before[0] === "Z" ||
+    after[0] === "Z"
   )
     throw Error("owned resource process identity unavailable");
-  return Object.freeze({ pid, startTicks: info.startTicks });
+  // Task membership may change while a live process's identity is stable.
+  // Complete resource measurements still enumerate every task and fail closed.
+  return Object.freeze({ pid, startTicks: after[19] });
 }
 
 export function createRefreshResourceMonitor({
@@ -93,8 +112,27 @@ export function createRefreshResourceMonitor({
   )
     throw Error("resource scan budget invalid");
   const { domain, generation, pid, startTicks } = record;
+  const authority = record.authority ? { ...record.authority } : null;
+  if (
+    authority &&
+    (Object.keys(authority).sort().join(",") !== "generation,pid,startTicks" ||
+      !UUID.test(authority.generation) ||
+      !pidValid(authority.pid) ||
+      !ticksValid(authority.startTicks))
+  )
+    throw Error("resource native authority identity required");
   const owned = [
     { id: "native", kind: "native", pid, startTicks },
+    ...(authority
+      ? [
+          {
+            id: "authority",
+            kind: "authority",
+            pid: authority.pid,
+            startTicks: authority.startTicks,
+          },
+        ]
+      : []),
     ...roots.map((root) => {
       if (
         !root ||
@@ -125,7 +163,12 @@ export function createRefreshResourceMonitor({
       current.domain !== domain ||
       current.generation !== generation ||
       current.pid !== pid ||
-      current.startTicks !== startTicks
+      current.startTicks !== startTicks ||
+      (authority
+        ? ["generation", "pid", "startTicks"].some(
+            (key) => current.authority?.[key] !== authority[key],
+          )
+        : current.authority != null)
     ) {
       valid = false;
       last = null;

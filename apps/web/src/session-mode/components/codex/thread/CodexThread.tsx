@@ -88,6 +88,15 @@ import { measureTranscriptRow } from "./measureTranscriptRow";
 import { isTranscriptScrollKey } from "./transcriptScrollKeys";
 import { prepareThreadSearchMatch } from "./prepareThreadSearchMatch";
 import {
+  GoalCompletionScope,
+  GoalCompletionFallback,
+  useGoalCompletionTarget,
+} from "@session/features/goals/GoalCompletionBadge";
+import { goalCompletionFallbackSlot } from "@session/features/goals/goalCompletionSlots";
+import { useGoalAnnouncements } from "@session/features/goals/goalTranscript";
+import { projectGoalTranscriptSlots } from "@session/features/goals/goalTranscriptProjection";
+import { GoalTranscriptAnnouncements } from "@session/features/goals/GoalTranscriptAnnouncements";
+import {
   findTranscriptMatchRange,
   setTranscriptSearchHighlight,
 } from "./threadSearchHighlight";
@@ -201,6 +210,8 @@ const CodexTranscript = memo(function CodexTranscript({
   );
   const historyError = useCodexStore((s) => s.historyErrorMap[activeThreadId]);
   const events = useCodexStore((s) => s.events[activeThreadId] ?? EMPTY_EVENTS);
+  const goalAnnouncements = useGoalAnnouncements(activeThreadId);
+  const completionTarget = useGoalCompletionTarget(activeThreadId);
   const closedRecordCount = useMemo(
     () => countClosedThreadRecords(events, activeThreadId),
     [events, activeThreadId],
@@ -388,6 +399,26 @@ const CodexTranscript = memo(function CodexTranscript({
     messages: workflow.messages,
     rows,
   };
+  const goalSlots = useMemo(
+    () =>
+      projectGoalTranscriptSlots(
+        activeThreadId,
+        rows,
+        goalAnnouncements,
+        events,
+      ),
+    [activeThreadId, rows, goalAnnouncements, events],
+  );
+  const completionSlot = useMemo(
+    () =>
+      goalCompletionFallbackSlot(
+        activeThreadId,
+        completionTarget,
+        rows,
+        events,
+      ),
+    [activeThreadId, completionTarget, rows, events],
+  );
   const userScrolling = useRef(false);
   const disclosure = useRef(
     saved.current?.disclosure ?? new Map<string, Map<string, unknown>>(),
@@ -397,19 +428,23 @@ const CodexTranscript = memo(function CodexTranscript({
   const [isAtBottom, setAtBottom] = useState(pinned.current);
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const newest = useRef<string | undefined>(undefined);
+  const lastGoalAnnouncementKey = goalAnnouncements.at(-1)?.key;
   useEffect(() => {
     const last = rows.at(-1);
     // Keep only identities/revisions here, never a serialized message or tool
     // result. Live output is outside retained rows and needs its own revision.
-    const signature = streamingMessage
+    const nativeSignature = streamingMessage
       ? `live-${streamingMessage.turnId}-${streamingMessage.itemId}-${streamingMessage.length}`
       : last?.activity
         ? `${last.key}:${last.activity.revision}`
         : last?.key;
+    const signature = lastGoalAnnouncementKey
+      ? `${nativeSignature ?? ""}:${lastGoalAnnouncementKey}`
+      : nativeSignature;
     if (newest.current && signature !== newest.current && !pinned.current)
       setHasNewMessages(true);
     newest.current = signature;
-  }, [rows, streamingMessage]);
+  }, [rows, streamingMessage, lastGoalAnnouncementKey]);
   const viewport = useCallback(
     () =>
       rootRef.current?.querySelector<HTMLDivElement>(
@@ -699,7 +734,16 @@ const CodexTranscript = memo(function CodexTranscript({
   ]);
   useEffect(() => {
     const owner = rootRef.current;
-    if (!owner) return;
+    // Only a selected, visible search match needs live DOM reconciliation.
+    // Previous effect cleanup releases its range/observer before this guard;
+    // ordinary streaming and hidden modes must not schedule empty highlights.
+    if (
+      !owner ||
+      !interactionVisible ||
+      searchPanel !== "search" ||
+      !navigation?.query
+    )
+      return;
     let remove = () => {},
       frame = 0;
     const update = () => {
@@ -732,7 +776,7 @@ const CodexTranscript = memo(function CodexTranscript({
       cancelAnimationFrame(frame);
       remove();
     };
-  }, [navigation, searchPanel, activeThreadId]);
+  }, [navigation, searchPanel, activeThreadId, interactionVisible]);
   useLayoutEffect(() => {
     if (pinned.current || userScrolling.current || !reading.current?.anchor)
       return;
@@ -1065,6 +1109,16 @@ const CodexTranscript = memo(function CodexTranscript({
                 {earlierError && <span role="status">加载失败，可重试</span>}
               </div>
             )}
+            <GoalTranscriptAnnouncements
+              announcements={goalSlots.before}
+              placement="before"
+            />
+            {completionSlot?.afterRow === null && completionTarget && (
+              <GoalCompletionFallback
+                threadId={activeThreadId}
+                turnId={completionTarget.turnId}
+              />
+            )}
             <div
               style={{
                 height: totalSize,
@@ -1107,6 +1161,18 @@ const CodexTranscript = memo(function CodexTranscript({
                         }
                         hookRuns={rowHooks(rows[item.index])}
                       />
+                      <GoalTranscriptAnnouncements
+                        announcements={goalSlots.afterRow.get(
+                          rows[item.index].key,
+                        )}
+                      />
+                      {completionSlot?.afterRow === rows[item.index].key &&
+                        completionTarget && (
+                          <GoalCompletionFallback
+                            threadId={activeThreadId}
+                            turnId={completionTarget.turnId}
+                          />
+                        )}
                     </RowStateContext.Provider>
                   </div>
                 );
@@ -1167,7 +1233,11 @@ const CodexTranscript = memo(function CodexTranscript({
         threadId={activeThreadId}
         count={closedRecordCount}
       />
-      <CodexAccessNotice key={`access:${activeThreadId}`} threadId={activeThreadId} suppressStatus={Boolean(historyError)} />
+      <CodexAccessNotice
+        key={`access:${activeThreadId}`}
+        threadId={activeThreadId}
+        suppressStatus={Boolean(historyError)}
+      />
       {!isAtBottom && (
         <ScrollToBottomButton
           onClick={jumpToBottom}
@@ -1197,18 +1267,22 @@ export const CodexThread = memo(function CodexThread({
       >
         <TranscriptDetailVisibility.Provider value={visible}>
           <CodexContentOwner.Provider value={activeThreadId ?? null}>
-          {renderTranscript ? (
-            <CodexTranscript
-              key={activeThreadId ?? ""}
-              activeThreadId={activeThreadId ?? ""}
-              fillHeight={fillHeight}
-              inspection={inspection}
-            />
-          ) : (
-            <div className="flex-1 min-h-0" data-transcript-sleeping />
-          )}
-        </CodexContentOwner.Provider>
-          </TranscriptDetailVisibility.Provider>
+            {renderTranscript ? (
+              <GoalCompletionScope
+                key={activeThreadId ?? ""}
+                threadId={activeThreadId ?? ""}
+              >
+                <CodexTranscript
+                  activeThreadId={activeThreadId ?? ""}
+                  fillHeight={fillHeight}
+                  inspection={inspection}
+                />
+              </GoalCompletionScope>
+            ) : (
+              <div className="flex-1 min-h-0" data-transcript-sleeping />
+            )}
+          </CodexContentOwner.Provider>
+        </TranscriptDetailVisibility.Provider>
       </div>
     </TranscriptInspectionContext.Provider>
   );
