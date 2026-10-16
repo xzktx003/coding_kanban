@@ -160,6 +160,48 @@ it("keeps intentionally hidden completed sleep out of padded rows", () => {
   ]);
   expect(events).toEqual(original);
 });
+it("hides moderation metadata without removing replies, warnings or failed turns", () => {
+  const metadata: ServerNotification = {
+    method: "turn/moderationMetadata",
+    params: {
+      threadId: "owner-A",
+      turnId: "turn-A",
+      metadata: { status: "ok" },
+    },
+  };
+  const warning: ServerNotification = {
+    method: "guardianWarning",
+    params: { threadId: "owner-A", message: "Needs attention" },
+  };
+  const failed: ServerNotification = {
+    method: "turn/completed",
+    params: {
+      threadId: "owner-A",
+      turn: {
+        id: "turn-A",
+        status: "failed",
+        items: [],
+        itemsView: "full",
+        startedAt: null,
+        completedAt: null,
+        durationMs: null,
+        error: {
+          message: "Task failed",
+          codexErrorInfo: null,
+          additionalDetails: null,
+        },
+      },
+    },
+  };
+  const events = [reply("turn/moderationMetadata"), metadata, warning, failed];
+  const original = structuredClone(events);
+  expect(buildThreadRows([metadata])).toEqual([]);
+  const rows = buildThreadRows(events);
+  expect(
+    rows.map((row) => row.item.kind === "event" && row.item.event),
+  ).toEqual([events[0], warning, failed]);
+  expect(events).toEqual(original);
+});
 it("does not allocate duplicate padded rows for an empty hook prompt lifecycle", () => {
   const hook = {
     id: "hook",

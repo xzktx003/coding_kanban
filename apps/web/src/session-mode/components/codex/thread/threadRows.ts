@@ -30,6 +30,7 @@ const hiddenMethods = new Set([
   "item/fileChange/outputDelta",
   "item/reasoning/textDelta",
   "turn/started",
+  "turn/moderationMetadata",
   "mcpServer/startupStatus/updated",
   "hook/started",
   "hook/completed",

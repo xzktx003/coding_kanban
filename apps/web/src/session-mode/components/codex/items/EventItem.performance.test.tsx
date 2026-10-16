@@ -5,6 +5,21 @@ import { EventItem } from "./EventItem";
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
+it("does not render a moderation metadata disclosure from existing history", () => {
+  const { container } = render(
+    <EventItem
+      event={{
+        method: "turn/moderationMetadata",
+        params: {
+          threadId: "owner",
+          turnId: "turn",
+          metadata: { status: "ok" },
+        },
+      }}
+    />,
+  );
+  expect(container.innerHTML).toBe("");
+});
 it("does not serialize a collapsed protocol payload until the user expands it", () => {
   const toJSON = vi.fn(() => ({ result: "tool details" }));
   const { container } = render(

@@ -1,3 +1,5 @@
+- 2026-10-16：`turn/moderationMetadata` 是原生轮次审核元数据，聊天 `threadRows` 和 `EventItem` 都须按精确方法隐藏，避免通用 JSON 提示和空白占位。只过滤展示，不按正文内容或 `turn/` 前缀过滤；正常回复、警告、失败和审批及底层事件保持。两项回归先红后绿，不变更传输和内存回收机制。
+
 - 2026-10-16：当前增强lCa/uca菜单为63.5*spacing（254px），没有modelPickerTriggerConfig的OR fallback仍是w-56（224px），不能凭旧触发器oracle给当前分支背书。入场为320ms+30ms/.98 scale，默认system减动为animation:none；旧全局0.01ms不等于完全忽略减动。Playwright顶层test.use reducedMotion未实际设置媒体时不能计反例；显式emulateMedia并核对matchMedia，测真实animation对象，不能为inactive longhand覆盖全局基线。背景变量缺失的原probe不作背景oracle，显式on/off产品设置另验。
 
 - 2026-10-16：网页复制入口须检查真实 copy 载荷，不能只断言临时 textarea 或 execCommand=true。当前可达13处复用native writer，模态项目菜单在390/1440实测曾粘贴出旧URL；事件明确载荷后同页原生Ctrl+V得到完整路径，短ID另有真实copy-event单测。普通会话五项及两尺寸组件均通过，未消费/Tauri另外三处不计支持，详见仓库clipboard-http-actions验收。

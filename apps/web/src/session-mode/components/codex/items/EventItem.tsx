@@ -437,6 +437,7 @@ const EventItemBody = ({
     case "rawResponseItem/completed":
     case "item/commandExecution/outputDelta":
     case "turn/started":
+    case "turn/moderationMetadata":
     case "mcpServer/startupStatus/updated":
     case "hook/started":
     case "hook/completed":
