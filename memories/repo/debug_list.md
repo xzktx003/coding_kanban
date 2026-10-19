@@ -1309,3 +1309,8 @@
 - 2026-10-16：createSideChat 的直接 fork adapter 路径必须消费 nativeThreadSettings 的已支持返回字段，不能仅保留三个模型字段或等待未来通知。迟到初始 ACK 用累计规范化值保守补齐，保护 pending、sandbox/reviewer 组、显式 null 与 legacy 未知来源；不能从默认值猜已见字段，也不能合成 observed 快照。9 个稳定产品红灯转绿，最终 11 文件／81 单测、web 类型／构建、18 浏览器无跳过；2836 源／22 测试夹具／3 infra／72 shared 稳定。真实 HTTP/SSE 全排序、跨客户端 CAS、命名 profile 等更广支持未据此宣称通过；无实际权限写入或正式运行产物激活。
 
 - 2026-10-16：NativeModelSelector 不得把已知模型的 0／1 项 supportedReasoningEfforts 当作未知而扩成通用五项；只有未找到 OpenAI 模型或自定义提供商才保留既有 generic fallback。已知少于两项复用 advanced，不在打开时改设置。原版规则看最终 power selections，跨模型 ≥3 项预设是例外；无真实账号目录发生率或完整 hCa 初焦点声明。实际 useModels 缓存链与 API 读夹具 2 红／5 对照后 7 绿，四文件 49 单测与 web 类型／构建通过，8 浏览器 pending，见 [数量修复](../../docs/designs/session-render-alignment/model-menu-effort-cardinality-20261016.md)。
+- 2026-10-20：会话输入不能逐键序列化全部文字草稿；300×5,000字符旧集合实际单写3,040,880 bytes，按owner分片后29键总2,302B/max108B。保留v1只读备份、清空/移动墓碑，目的地先保存；部分保存失败须推进每个成功owner基线，否则A重试无关owner会回滚B较新的文本。动作型文件树/附件入口只订阅动作，100节点四键无关读取从2,000降为0。三页不同owner交错输入刷新保留；同owner后写覆盖，不承诺协作合并或迁移跨页exactly-once。详见docs/session-input-responsiveness.md，短时输入改善不替代RSS长测。
+
+- 2026-10-20：Zustand persist即使set返回原state仍写设备缓存；tabs/projects十秒每类十次相同setItem。不同页面本地选择不同，只比较当前global storage仍会互相写回，必须在无变化同步入口跳过persist set；真实动作/确认继续落盘，adapter字节去重仅作第二层。不删除共享关注同步，也不把消除原生写入说成消除了所有索引遍历和序列化。
+
+- 2026-10-20：输入性能绿灯不能覆盖长期RSS：最终标准自然GC30分钟/862采样仍红，heap低点+5.6413MiB、RSS低点320.8086→502.0703MiB（+181.2617MiB＞128MiB），同一renderer身份、errors[]、无缺测。失败后峰值/音频空闲断言未执行；原阈值不变，源指纹稳定，见docs/session-input-responsiveness.md及session-memory-contract.md。

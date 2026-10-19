@@ -12,6 +12,8 @@
 
 ## 后续修改必须保持的边界
 
+2026-10-20 输入补充：文字草稿必须按 owner 保存实际变化，不能恢复每键序列化完整草稿集合；动作型文件树／附件消费者不得订阅输入全文。关注集合／项目相同快照既不能通知 UI，也不应反复写设备缓存，尤其不能用空闲轮询覆盖另一页的本地选择。保留逐会话版本、同步落盘、旧备份／墓碑与失败重试边界；验收入口见 [输入响应](session-input-responsiveness.md)。这些 CPU／存储修复不替代 renderer RSS 长测。
+
 2026-10-14 命令详情补充：聊天投影仍不发送任何命令输出。四类命令只有显式展开才经固定精确项通道读取；完整命令、输出、ANSI 派生节点和复制闭包局限于可卸载子组件，关闭/隐藏立即释放，不依赖聊天 60 秒宽限期。返回保留展开状态但不自动重读，取消须另外证明自有 native reader 实际退出。网关使用同一只读 reader 支持已运行旧会话服务，禁止因此重启 Agent。实现与测量边界见 [命令详情](session-command-details.md)。
 
 | 边界 | 必须保持 | 会重新引入问题的做法 |
@@ -159,3 +161,8 @@ RSS 低点 469.8320→496.0898 MiB，增长 26.2578 MiB；heap 低点 55.2915→
 
 `round9-soak-source-manifest.json`／`round9-soak-source-verification.json` 核对 2834 源码、14 份 E2E、2 份采样脚本和 72 份 shared 产物前后不变；本批没有构建、HMR 修改、强制 GC、刷新或停止正式 Agent。完整 JSON 为 `.dev-runtime/session-polish-round2-20261016/round9-soak-browser/session-idle-memory-long-r-12e42--natural-garbage-collection/natural-gc-soak.json`，摘要 `round9-soak-result-summary.json`，日志 `round9-soak-browser.log`。只读正式服务核对的 PID/start ticks 仍为 2712539／55361120，健康接口 HTTP 200；没有替换运行进程。
 
+## 输入响应修复后的标准长测（2026-10-20）
+
+本轮修复逐键全量草稿保存、动作型消费者全量输入订阅、无变化共享同步仍落盘；详见[输入响应验收](session-input-responsiveness.md)。原标准 Playwright／自然 GC 三十分钟负载仍为红灯：1801.968 秒、862 次采样，heap 低点增长 5.6413 MiB，renderer RSS 低点 320.8086→502.0703 MiB（+181.2617 MiB＞128 MiB）；峰值 heap/RSS 为 212.2511/673.2422 MiB。采样始终同一 PID/start ticks、无缺测或页面错误、React measure 为零，DOM/监听器低点增加 7/15。没有证据据此宣布原生增长根因或完全稳定。
+
+失败在 RSS 低点断言，后续峰值及最后音频空闲归零断言未执行，不计通过；连续负载只观察一个上下文。未改变原工作负载、门槛或采样器，无强制 GC／刷新／停止 Agent。1,837 个生产源的冻结指纹前后相同；首轮因补齐跨页空闲互写修复而取消，不计完整长测。完整 JSON 与日志在忽略目录 `.dev-runtime/session-input-20261020/final-soak/`、`final-soak.log`，摘要 `final-soak-summary.json`。三页十分钟输入回归已通过，不能替代此三十分钟 RSS 红灯；更早红灯和对照继续保留。

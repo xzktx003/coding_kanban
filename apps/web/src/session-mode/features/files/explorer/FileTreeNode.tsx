@@ -60,7 +60,7 @@ export function FileTreeNode({
   const { selectedFilePath, setSelectedFilePath } = useEditorStore();
   const { addProject } = useWorkspaceStore();
   const { setRightPanelOpen, setActiveRightPanelTab } = useLayoutStore();
-  const { appendInputValue } = useInputStore();
+  const appendInputValue = useInputStore((state) => state.appendInputValue);
   const shouldUseSvgFileIcon = isTauri();
 
   const isDir = node.kind === "dir";

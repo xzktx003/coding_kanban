@@ -17,7 +17,9 @@ vi.mock("@session/stores", () => ({
     setRightPanelOpen: vi.fn(),
     setActiveRightPanelTab: vi.fn(),
   }),
-  useInputStore: () => ({ appendInputValue: input.append }),
+  useInputStore: (
+    selector: (state: { appendInputValue: typeof input.append }) => unknown,
+  ) => selector({ appendInputValue: input.append }),
 }));
 test("file row supports Space and ignores Enter from nested actions", () => {
   const toggle = vi.fn();

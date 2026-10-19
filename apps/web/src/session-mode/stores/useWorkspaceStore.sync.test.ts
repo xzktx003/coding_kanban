@@ -1,5 +1,6 @@
-import { beforeEach, expect, it } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { useWorkspaceStore } from "./useWorkspaceStore";
+import { startSessionProjectsSync } from "../services/sessionProjectsSync";
 beforeEach(() => {
   localStorage.clear();
   useWorkspaceStore.setState({
@@ -70,5 +71,58 @@ it("unchanged polling snapshots do not notify UI subscribers", () => {
     expect(useWorkspaceStore.getState()).toBe(baseline);
   } finally {
     stop();
+  }
+});
+
+it("idle project polling does not rewrite browser storage", async () => {
+  vi.useFakeTimers();
+  const snapshot = { initialized: true, revision: 1, projects: ["/a"] };
+  useWorkspaceStore.getState().acceptSharedProjects(snapshot);
+  const fetcher = vi.fn(
+    async () => new Response(JSON.stringify({ ...snapshot, sequence: 0 })),
+  );
+  const stop = startSessionProjectsSync(fetcher as typeof fetch);
+  const writes = vi.spyOn(Storage.prototype, "setItem");
+  try {
+    await vi.advanceTimersByTimeAsync(1);
+    writes.mockClear();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(5);
+    expect(writes).not.toHaveBeenCalled();
+  } finally {
+    stop();
+    writes.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
+it("idle project polling preserves another page's different workspace cache", async () => {
+  vi.useFakeTimers();
+  const snapshot = { initialized: true, revision: 1, projects: ["/a", "/b"] };
+  useWorkspaceStore.getState().acceptSharedProjects(snapshot);
+  const fetcher = vi.fn(
+    async () => new Response(JSON.stringify({ ...snapshot, sequence: 0 })),
+  );
+  const stop = startSessionProjectsSync(fetcher as typeof fetch);
+  const writes = vi.spyOn(Storage.prototype, "setItem");
+  try {
+    await vi.advanceTimersByTimeAsync(1);
+    const otherPageCache = JSON.parse(
+      localStorage.getItem("kanban.session.workspace")!,
+    );
+    otherPageCache.state.cwd = "/b";
+    otherPageCache.state.projectSort = "name_desc";
+    const saved = JSON.stringify(otherPageCache);
+    localStorage.setItem("kanban.session.workspace", saved);
+    writes.mockClear();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(5);
+    expect(writes).not.toHaveBeenCalled();
+    expect(localStorage.getItem("kanban.session.workspace")).toBe(saved);
+    expect(useWorkspaceStore.getState().cwd).toBe("/a");
+  } finally {
+    stop();
+    writes.mockRestore();
+    vi.useRealTimers();
   }
 });

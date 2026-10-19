@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { createDeduplicatedJSONStorage } from "../lib/deduplicatedStorage";
 import { v4 as uuid } from "uuid";
 import {
   applyProjectAction,
@@ -113,6 +114,16 @@ function enqueue(state: WorkspaceStore, actions: ProjectAction[]) {
     ],
   };
 }
+function updateSharedProjects(
+  update: (state: WorkspaceStore) => WorkspaceStore | Partial<WorkspaceStore>,
+) {
+  const state = useWorkspaceStore.getState();
+  const next = update(state);
+  // Keep no-op polls outside persist when another page's directory or sorting
+  // differs from this page's local state.
+  if (next !== state) useWorkspaceStore.setState(next);
+}
+
 export const useWorkspaceStore = create<WorkspaceStore>()(
   persist(
     (set, get) => ({
@@ -122,7 +133,7 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
       projectsInitialized: false,
       projectSyncError: null,
       refreshProjectOperations: () =>
-        set((state) => {
+        updateSharedProjects((state) => {
           const pending = [
             ...state.pendingProjectOperations.filter((op) => !op.id),
             ...readProjectOperations(),
@@ -145,7 +156,7 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
         const fresh = snapshot.revision >= (latest?.revision ?? 0);
         if (fresh) observeProjectSnapshot(snapshot);
         acknowledgeProjectOperations(ids);
-        set((state) => {
+        updateSharedProjects((state) => {
           const pending = [
             ...state.pendingProjectOperations.filter(
               (op) => !op.id && op.seq > sequence,
@@ -277,6 +288,7 @@ export const useWorkspaceStore = create<WorkspaceStore>()(
     }),
     {
       name: "kanban.session.workspace",
+      storage: createDeduplicatedJSONStorage(),
       version: 1,
       partialize: (state) => ({
         projects: state.projects,

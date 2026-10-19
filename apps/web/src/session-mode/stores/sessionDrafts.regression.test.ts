@@ -57,9 +57,14 @@ test("drafts survive hydration and session IDs are isolated across agents and ne
     sessionDraftKey("codex", null, "/b"),
   ];
   keys.forEach((key, i) => store.setText(key, `draft ${i}`));
-  const persisted = localStorage.getItem("kanban.session.text-drafts")!;
+  const persisted = Object.fromEntries(
+    Object.keys(localStorage)
+      .filter((key) => key.startsWith("kanban.session.text-drafts"))
+      .map((key) => [key, localStorage.getItem(key)!]),
+  );
   useSessionDraftStore.setState({ drafts: {} });
-  localStorage.setItem("kanban.session.text-drafts", persisted);
+  for (const [key, value] of Object.entries(persisted))
+    localStorage.setItem(key, value);
   await useSessionDraftStore.persist.rehydrate();
   expect(keys.map((key) => readDraft(key).text)).toEqual([
     "draft 0",

@@ -1,6 +1,7 @@
 import { v4 as randomUUID } from "uuid";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { createDeduplicatedJSONStorage } from "../lib/deduplicatedStorage";
 import {
   acknowledgeTabOperations,
   latestTabRevision,
@@ -111,6 +112,18 @@ function enqueue(state: AgentCenterState, action: SessionTabAction) {
   };
 }
 
+function updateSharedTabs(
+  update: (
+    state: AgentCenterState,
+  ) => AgentCenterState | Partial<AgentCenterState>,
+) {
+  const state = useAgentCenterStore.getState();
+  const next = update(state);
+  // Persist writes even for identical state. An idle poll must not replace
+  // another page's different local selection cache.
+  if (next !== state) useAgentCenterStore.setState(next);
+}
+
 export const useAgentCenterStore = create<AgentCenterState>()(
   persist(
     (set) => ({
@@ -122,7 +135,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
       sharedTabsInitialized: false,
       tabSyncError: null,
       refreshTabOperations: () =>
-        set((state) => {
+        updateSharedTabs((state) => {
           const pending = [
             ...state.pendingTabOperations.filter((op) => !op.id),
             ...readTabOperations(),
@@ -147,7 +160,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
       ) => {
         const fresh = snapshot.revision >= latestTabRevision();
         if (fresh) observeTabSnapshot(snapshot);
-        set((state) => {
+        updateSharedTabs((state) => {
           acknowledgeTabOperations(acknowledgedIds);
           const pending = [
             ...state.pendingTabOperations.filter(
@@ -352,6 +365,7 @@ export const useAgentCenterStore = create<AgentCenterState>()(
     }),
     {
       name: "kanban.session.agent-center-store",
+      storage: createDeduplicatedJSONStorage(),
       version: 5,
       migrate: (
         persistedState: unknown,

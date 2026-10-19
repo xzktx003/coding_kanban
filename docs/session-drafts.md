@@ -11,9 +11,13 @@
 
 ## 状态与存储
 
-`useSessionDraftStore` 是文字草稿唯一来源，localStorage 的 `kanban.session.text-drafts` 保存草稿与迁移标记。键由 Agent、ACP preset、session ID 组成；没有 ID 时用项目目录组成新聊天键。每次文字修改更新 revision，迟到提交只清理捕获的版本。
+`useSessionDraftStore` 是文字草稿唯一来源。2026-10-20 起，新文字按 owner 同步保存到 localStorage 的 `kanban.session.text-drafts.entry.<encodeURIComponent(owner)>`，迁移标记保存到 `.meta`；原 `kanban.session.text-drafts` v1 全量记录保持只读备份。加载时分片覆盖旧记录，`null` 墓碑遮蔽已移动的旧来源，空文字遮蔽已清空的旧草稿。键由 Agent、ACP preset、session ID 组成；没有 ID 时用项目目录组成新聊天键。每次文字修改更新 revision，迟到提交只清理捕获的版本。
+
+每次按键只序列化实际修改的 owner，不重写所有历史草稿；仍同步保存本次修改，不依赖延迟队列、关闭页面事件或强制刷新。移动先保存目的地再遮蔽来源；读取损坏时不写回，保存失败保留内存和旧记录并提示，重试只处理未保存项。已成功项须推进基线，否则部分保存失败后的重试可能回滚另一页面的新文字。不同页面修改不同 owner 不再覆盖彼此的整份集合；同一 owner 同时编辑仍是后写覆盖，不承诺并发合并或旧输入迁移的跨页 exactly-once。显式清空 persist 存储才删除旧备份及分片。
 
 `useInputStore` / `useCCInputStore` 保留文件、技能、任务入口的兼容 API，由应用挂载后绑定当前目标，避免模块循环依赖。Composer 使用显式 owner，异步回调不在返回时重新查找输入目标。Codex 编辑器随 owner 重建，以隔离撤销历史。
+
+只使用插入动作的文件树节点和附件按钮按动作 selector 订阅，不订阅输入全文；动作在点击时解析当前目标。输入性能红绿灯、实际存储写量与测量边界见 [输入响应验收](session-input-responsiveness.md)。
 
 `useImageAttachments` 用 IndexedDB 数据库 `kanban.session.attachments`、`drafts` object store 保存附件 ID、名称、文件字节、上传路径及状态。新记录先读取实际字节，以 ArrayBuffer 和文件名称/MIME/修改时间保存，避免 WebKit 相册文件直接写入 IndexedDB 失败；恢复时重建 File，兼容已有 File/路径记录。上传前先提交文件；上传中断后恢复为可重试错误。blob URL 只供当前页面预览，恢复时重新生成，不能作为持久身份。已上传文件继续使用原服务端上传目录与校验，不更改 Rust 协议。
 

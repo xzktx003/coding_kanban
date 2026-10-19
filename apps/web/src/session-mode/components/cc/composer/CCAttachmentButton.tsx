@@ -23,7 +23,7 @@ export function CCAttachmentButton({
   onFilesSelected,
 }: CCAttachmentButtonProps) {
   const [openState, setOpen] = useState(false);
-  const { appendFileLinks } = useInputStore();
+  const appendFileLinks = useInputStore((state) => state.appendFileLinks);
 
   const handleSelectFiles = (paths: string[]) => {
     try {

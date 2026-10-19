@@ -1,6 +1,7 @@
-import { beforeEach, expect, it } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { useAgentCenterStore, selectedAgentCard } from "./useAgentCenterStore";
 import { readTabOperations } from "../services/sessionTabJournal";
+import { startSessionTabsSync } from "../services/sessionTabsSync";
 const a = { kind: "codex" as const, id: "a", cwd: "/a" };
 const b = { kind: "cc" as const, id: "b", cwd: "/b" };
 beforeEach(() => {
@@ -141,5 +142,61 @@ it("unchanged polling snapshots do not notify UI subscribers", () => {
     expect(useAgentCenterStore.getState()).toBe(baseline);
   } finally {
     stop();
+  }
+});
+
+it("idle tab polling does not rewrite browser storage", async () => {
+  vi.useFakeTimers();
+  const snapshot = { initialized: true, revision: 1, cards: [a] };
+  useAgentCenterStore.getState().acceptSharedTabs(snapshot);
+  const fetcher = vi.fn(
+    async () => new Response(JSON.stringify({ ...snapshot, sequence: 0 })),
+  );
+  const stop = startSessionTabsSync(fetcher as typeof fetch);
+  const writes = vi.spyOn(Storage.prototype, "setItem");
+  try {
+    await vi.advanceTimersByTimeAsync(1);
+    writes.mockClear();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(5);
+    expect(writes).not.toHaveBeenCalled();
+  } finally {
+    stop();
+    writes.mockRestore();
+    vi.useRealTimers();
+  }
+});
+
+it("idle tab polling preserves another page's different selection cache", async () => {
+  vi.useFakeTimers();
+  const snapshot = { initialized: true, revision: 1, cards: [a, b] };
+  useAgentCenterStore.getState().acceptSharedTabs(snapshot);
+  useAgentCenterStore.getState().setCurrentAgentCardId("a", "codex");
+  const fetcher = vi.fn(
+    async () => new Response(JSON.stringify({ ...snapshot, sequence: 0 })),
+  );
+  const stop = startSessionTabsSync(fetcher as typeof fetch);
+  const writes = vi.spyOn(Storage.prototype, "setItem");
+  try {
+    await vi.advanceTimersByTimeAsync(1);
+    const otherPageCache = JSON.parse(
+      localStorage.getItem("kanban.session.agent-center-store")!,
+    );
+    otherPageCache.state.currentAgentCardId = "b";
+    otherPageCache.state.currentAgentCardKind = "cc";
+    const saved = JSON.stringify(otherPageCache);
+    localStorage.setItem("kanban.session.agent-center-store", saved);
+    writes.mockClear();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(5);
+    expect(writes).not.toHaveBeenCalled();
+    expect(localStorage.getItem("kanban.session.agent-center-store")).toBe(
+      saved,
+    );
+    expect(useAgentCenterStore.getState().currentAgentCardId).toBe("a");
+  } finally {
+    stop();
+    writes.mockRestore();
+    vi.useRealTimers();
   }
 });

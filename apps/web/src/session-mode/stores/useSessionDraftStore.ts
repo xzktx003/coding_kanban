@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { create } from "zustand";
-import { createJSONStorage, persist } from "zustand/middleware";
+import { persist } from "zustand/middleware";
 import { toast } from "sonner";
+import { createSessionTextDraftStorage } from "@session/services/sessionTextDraftStorage";
 
 export type DraftKind = "codex" | "cc" | "acp";
 export const sessionDraftKey = (
@@ -32,20 +33,16 @@ interface DraftStore {
 export const readDraft = (owner: string) =>
   useSessionDraftStore.getState().drafts[owner] ?? EMPTY;
 let warned = false;
-const storage = createJSONStorage(() => ({
-  getItem: (name: string) => localStorage.getItem(name),
-  removeItem: (name: string) => localStorage.removeItem(name),
-  setItem: (name: string, value: string) => {
-    try {
-      localStorage.setItem(name, value);
-      warned = false;
-    } catch {
-      if (!warned)
-        toast.error("草稿未能保存到浏览器，请保留当前页面并检查存储空间");
-      warned = true;
-    }
+const storage = createSessionTextDraftStorage(
+  () => {
+    if (!warned)
+      toast.error("草稿未能保存到浏览器，请保留当前页面并检查存储空间");
+    warned = true;
   },
-}));
+  () => {
+    warned = false;
+  },
+);
 export const useSessionDraftStore = create<DraftStore>()(
   persist(
     (set, get) => ({
