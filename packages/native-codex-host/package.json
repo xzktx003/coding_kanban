@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "start": "node launcher.mjs"
+    "start": "node launcher.mjs",
+    "service": "node service.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

@@ -71,6 +71,16 @@ pnpm session:status
 - 默认 TS 入口由 Node 启动，无需执行权限；`SESSION_RUNTIME_BIN` 是独立可执行程序兼容接口，不能直接填入没有启动器的 JavaScript 文件。
 - 会话数据：保持 `SESSION_DATA_HOME` 一致以恢复项目和关注记录；独立联调必须使用独立目录、端口和 CLI 配置目录。
 
+### Codex 模式的独立常驻宿主
+
+`pnpm dev` / `pnpm dev:restart` 不启动官方 Codex 宿主。若 `/api/native-codex/status` 返回 `available:false`、原因“Codex 宿主暂未配置”，先检查网关实际加载的 `NATIVE_CODEX_UPSTREAM_URL` 和 `NATIVE_CODEX_RUNTIME_RECORD`，再检查对应独立宿主；会话模式可用不代表 Codex 宿主存在。
+
+使用维护入口 `pnpm --filter @agent-orchestrator/native-codex-host service --config /absolute/private-service.json`，由显式配置的服务管理器保持运行。配置为 owned `0600` JSON，填写本机 code-server、未修改官方 `.vsix`、Codex CLI、两个独立端口、短 owned `0700` 运行目录和固定记录路径。服务每次分配新目录，仅在本次 launcher 身份匹配且 HTTP 健康后原子发布固定记录；启动失败保留旧记录，不接管已有监听器。参数及授权模式见 [宿主说明](../packages/native-codex-host/README.md#managed-native-host)。
+
+网关 `.env` 将 upstream 指向配置的 loopback HTTP 端口，runtime record 指向固定记录文件，再通过现有 watcher 加载网关配置。正式浏览器仍从同源局域网 HTTPS 入口访问，例如 `https://10.30.0.22:8484/?mode=codex`；端口和路径必须按部署填写。账号和历史仅在用户明确授权后配置 `sharedCodexHome`，只复用连接则使用互斥的 `connectionProfileHome`。本机配置、用户服务和运行文件不提交 Git。
+
+验收顺序：服务进程与 `/healthz` → `/api/native-codex/status` → 实际浏览器中的官方界面 → 原生输入框鼠标点击和未发送草稿输入。首次使用须完成官方引导；仅 HTTP 200 不能证明原生编辑器已激活。`sendAvailable` 指兼容性受限的旧公共输入桥，当前 Codex 模式使用各窗口的官方输入框。常驻服务不启用实验刷新原型，也不替换正在运行的会话服务或 Agent。
+
 需要分开启动时，先运行 `pnpm dev:prepare`，再在两个终端分别运行 `pnpm --filter server run dev:app` 和 `pnpm --filter web run dev:app`。前台方式不释放占用端口，也不执行重启脚本的证书准备；局域网会话必须使用 HTTPS 推荐入口；前台 HTTP 调试请在本机通过 localhost 访问。Ctrl+C 停止前台前后端不会自动停止独立会话服务。
 
 ## 故障定位与验收

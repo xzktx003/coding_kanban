@@ -69,3 +69,22 @@ A first send in a new custom editor saves a real local thread but changes its in
 新隔离宿主可再提供 `--refresh-control-root`，将 CLI 包装器固定到已运行独立管理进程，并通过独立原生只读账号观察和实际写入 guard 约束授权。该参数从命令行显式传入，不创建控制/native 服务；旧代次或未确认身份失败，不覆盖已有宿主。真实 ChatGPT/完整 GUI 与两秒关卡仍待验收，见 [桥接授权](../../docs/designs/codex-mode-audit-20261014/refresh-bridge-authorization.md)。
 
 新私有 native 服务在 ready 前建立独立账号观察进程和不可改绑的初始授权锚。manager/bridge 重建不能重新绑定旧上下文；观察进程失联或账号撤销拒绝新接入，旧候选记录不静默补写，不停止 native。观察进程自动计入资源预算，实际发送同步复核撤销标记。见 [持久授权锚](../../docs/designs/codex-mode-audit-20261014/refresh-native-authority.md)。
+
+
+## Managed native host
+
+The maintained service entrypoint is `service.mjs`. Run it under an explicit service manager rather than keeping the launcher in an interactive terminal:
+
+```sh
+pnpm --filter @agent-orchestrator/native-codex-host service --config /absolute/private-service.json
+```
+
+The selected JSON must be an owned regular `0600` file. Required fields are `codeServer`, `officialVsix`, `codexCli`, `port`, `brokerPort`, `runtimeBase`, and `record`. Supply absolute machine-specific paths and two distinct unused integer ports. The official archive must have a `.vsix` filename for code-server's installer; an unchanged cached extension archive may be copied to such a name. `runtimeBase` must be an owned `0700` short directory suitable for native Unix socket paths; the fixed `record` parent must already exist and be owned by the same user. Select either `passwordFile` or explicit `unsafeNoAuth: true`. The service always binds the host to loopback HTTP behind the app's existing same-origin gateway.
+
+No account reuse is inferred. Add `sharedCodexHome` only after explicit authorization to reuse that account and history; alternatively use `connectionProfileHome` for an authorized connection copy without history. Both remain mutually exclusive. Without either field, the new host uses an isolated logged-out Codex home. Other `NATIVE_CODEX_*` variables cannot silently add a login import, refresh prototype, certificate, or directory to the selected configuration.
+
+Each service invocation creates a fresh private runtime and invokes the existing launcher with `--auto-open-new-chats`. It waits for the matching launch record and `/healthz`, then atomically publishes a real `0600` file at the fixed `record` path. Failed preparation leaves the previous record intact. This readiness establishes the HTTP host only; official extension activation and visible native input still require browser acceptance. SIGINT/SIGTERM are forwarded only to this invocation's launcher, and the service waits for that child to exit. It does not discover, signal, or take over unrelated processes.
+
+Configure the app's ignored `.env` with `NATIVE_CODEX_UPSTREAM_URL=http://127.0.0.1:<configured port>` and `NATIVE_CODEX_RUNTIME_RECORD=<fixed record path>`, then reload the existing Node gateway. A user service may use `Restart=on-failure`, a bounded restart rate, `UMask=0077`, and `WantedBy=default.target`; the service entrypoint safely allocates new runtime directories on each retry. Machine-specific unit/configuration files and all runtime artifacts stay outside Git. Do not reuse this service to restart an existing native Agent or enable the experimental refresh path.
+
+Regression: `node --test packages/native-codex-host/test/service.test.mjs` covers fresh restarts, health gating, preserving the previous record, stopped startup, unrelated listener survival, explicit authorization modes and private input limits.

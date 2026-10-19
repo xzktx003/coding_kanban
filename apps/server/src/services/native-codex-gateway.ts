@@ -605,7 +605,10 @@ export class NativeCodexGateway {
               size += chunk.length;
               if (size <= MAX_BROKER_AUTH_BYTES)
                 responseBody += chunk.toString("utf8");
-              else response.destroy();
+              else {
+                finish({ resumeAvailable: false, sendAvailable: false });
+                response.destroy();
+              }
             });
             response.on("end", () => {
               if (response.statusCode !== 200 || size > MAX_BROKER_AUTH_BYTES) {
@@ -633,6 +636,13 @@ export class NativeCodexGateway {
               }
             });
             response.on("error", () =>
+              finish({ resumeAvailable: false, sendAvailable: false }),
+            );
+            // destroy() without an error can emit only aborted/close, never end.
+            response.once("aborted", () =>
+              finish({ resumeAvailable: false, sendAvailable: false }),
+            );
+            response.once("close", () =>
               finish({ resumeAvailable: false, sendAvailable: false }),
             );
           },
@@ -751,7 +761,14 @@ export class NativeCodexGateway {
         const outbound = request({ hostname: "127.0.0.1", port: auth.port as number, path: "/status", method: "GET", timeout: 1500,
           headers: { authorization: `Bearer ${auth.token}` } }, (response) => {
           let body = ""; let size = 0;
-          response.on("data", (chunk: Buffer) => { size += chunk.length; if (size <= MAX_RECORD_BYTES) body += chunk.toString("utf8"); else response.destroy(); });
+          response.on("data", (chunk: Buffer) => {
+            size += chunk.length;
+            if (size <= MAX_RECORD_BYTES) body += chunk.toString("utf8");
+            else {
+              finish(false);
+              response.destroy();
+            }
+          });
           response.on("end", () => {
             if (response.statusCode !== 200 || size > MAX_RECORD_BYTES) return finish(false);
             try { const result = JSON.parse(body) as { instanceBroker?: { enabled?: unknown; instanceId?: unknown } };
@@ -759,6 +776,8 @@ export class NativeCodexGateway {
             } catch { finish(false); }
           });
           response.on("error", () => finish(false));
+          response.once("aborted", () => finish(false));
+          response.once("close", () => finish(false));
         });
         outbound.on("timeout", () => outbound.destroy());
         outbound.on("error", () => finish(false));
@@ -821,7 +840,10 @@ export class NativeCodexGateway {
               size += chunk.length;
               if (size <= MAX_BROKER_AUTH_BYTES)
                 responseBody += chunk.toString("utf8");
-              else response.destroy();
+              else {
+                resolveResult({ status: 502 });
+                response.destroy();
+              }
             });
             response.on("end", () => {
               if (size > MAX_BROKER_AUTH_BYTES) {
@@ -856,6 +878,8 @@ export class NativeCodexGateway {
               }
             });
             response.on("error", () => resolveResult({ status: 502 }));
+            response.once("aborted", () => resolveResult({ status: 502 }));
+            response.once("close", () => resolveResult({ status: 502 }));
           },
         );
         outbound.on("timeout", () => outbound.destroy());
@@ -910,7 +934,10 @@ export class NativeCodexGateway {
               size += chunk.length;
               if (size <= MAX_BROKER_AUTH_BYTES)
                 responseBody += chunk.toString("utf8");
-              else response.destroy();
+              else {
+                resolveStatus({ status: 503 });
+                response.destroy();
+              }
             });
             response.on("end", () => {
               if (response.statusCode !== 200 || size > MAX_BROKER_AUTH_BYTES) {
@@ -937,6 +964,8 @@ export class NativeCodexGateway {
               }
             });
             response.on("error", () => resolveStatus({ status: 503 }));
+            response.once("aborted", () => resolveStatus({ status: 503 }));
+            response.once("close", () => resolveStatus({ status: 503 }));
           },
         );
         outbound.on("timeout", () => { resolveStatus({ status: 504 }); outbound.destroy(); });
