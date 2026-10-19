@@ -16,7 +16,8 @@
     "session:test": "node scripts/build-session-runtime.mjs test",
     "session:clippy": "node scripts/build-session-runtime.mjs clippy",
     "dev:prepare": "node scripts/prepare-dev.mjs",
-    "session:status": "node scripts/session-runtime-status.mjs"
+    "session:status": "node scripts/session-runtime-status.mjs",
+    "codex:status": "node scripts/native-codex-status.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0",

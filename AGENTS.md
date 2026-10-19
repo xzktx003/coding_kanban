@@ -6,6 +6,7 @@
 - 后端 `dev:app` 使用 `scripts/watch-server.mjs`：清单/锁文件变化先安装锁定依赖，再热更新网关；失败保留旧网关，保存源码/清单可重试。网关异常退出按 1/2/4 秒最多恢复三次；计划替换和关闭不触发重试，独立运行层仍复用。边界与回归见 `docs/startup.md`。
 - `pnpm dev:prepare`：编译 shared 与默认 TypeScript 运行层；`SESSION_MODE_ENABLED=0` 跳过运行层，显式 `SESSION_RUNTIME_BIN` 只校验已有可执行文件。`pnpm dev` 与 `pnpm dev:restart` 自动执行准备。
 - `pnpm session:status`：检查会话服务和运行产物；编译不替换已有运行进程或停止 Agent，详细流程见 `docs/startup.md`。
+- `pnpm codex:status`：读取启动环境，只读核对 Codex 宿主、网关、私有 broker 及已部署 companion 内容；区分旧代码、不可达、等待浏览器激活和 broker 就绪，不启动、停止或发送任务，broker 就绪不代表模型对话已验证。见 `docs/codex-workbench-mode.md`。
 - 命令详情网关使用运行包的独立只读库；后端 `build` 会编译该依赖，但不会替换活跃运行进程。关闭会话模式时不加载详情库；自定义运行服务没有默认库产物时保留网关和旧服务，通过既有只读接口明确返回支持状态。见 `docs/session-command-details.md`。
 - `pnpm dev:restart`：先检查两个端口的归属并完成编译，再按 `.env` 启动/恢复前后端；前端绑定 `0.0.0.0`。会话运行服务绑定 loopback，随后端热更新复用。
 - `pnpm check`：共享包、TS 运行层、后端和前端类型检查及生产构建；`pnpm session:check`：TS 运行层检查。

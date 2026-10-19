@@ -1,3 +1,5 @@
+- 2026-10-19：Codex 宿主端口和官方扩展激活不代表工作台可用。旧 companion 与新源码都标 `0.1.0`，但旧部署缺实例标记／私有 broker／窗口控制，外层一直连接；须检查四个打包文件内容并用全新私有目录部署，不能原地覆盖或停止正式 Agent。网关 watcher 继承的 NATIVE_CODEX_* 会覆盖后来编辑的 .env，需核对并安全重载启动环境；只热更新源码不够。`pnpm codex:status` 还须核对网关项目和启动窗口身份，broker-ready 不等于真实对话。此次 18 项相关检查及隔离项目原生真实回复通过，见 docs/designs/codex-connection-check-20261019.md。
+
 - 2026-10-16：`turn/moderationMetadata` 是原生轮次审核元数据，聊天 `threadRows` 和 `EventItem` 都须按精确方法隐藏，避免通用 JSON 提示和空白占位。只过滤展示，不按正文内容或 `turn/` 前缀过滤；正常回复、警告、失败和审批及底层事件保持。两项回归先红后绿，不变更传输和内存回收机制。
 
 - 2026-10-16：当前增强lCa/uca菜单为63.5*spacing（254px），没有modelPickerTriggerConfig的OR fallback仍是w-56（224px），不能凭旧触发器oracle给当前分支背书。入场为320ms+30ms/.98 scale，默认system减动为animation:none；旧全局0.01ms不等于完全忽略减动。Playwright顶层test.use reducedMotion未实际设置媒体时不能计反例；显式emulateMedia并核对matchMedia，测真实animation对象，不能为inactive longhand覆盖全局基线。背景变量缺失的原probe不作背景oracle，显式on/off产品设置另验。

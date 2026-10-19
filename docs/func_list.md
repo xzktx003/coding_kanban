@@ -1,5 +1,7 @@
 # Coding Kanban 功能清单
 
+- Codex 模式连接检查：`pnpm codex:status` 复用 `.env` 启动配置，以只读 GET 核对宿主、网关和私有 broker；将已安装自有 companion 的四个打包文件与仓库按内容比较（忽略安装器 manifest 元数据），发现同版本旧代码。明确区分旧代码、不可达、等待浏览器激活和 broker 就绪，不把 HTTP 200 当作登录或对话成功，不启动、停止或发送任务。回归：`scripts/native-codex-status.test.mjs`。
+
 - Codex 模式提供显式常驻宿主入口：私有配置指定本机程序、端口及授权范围；每次启动分配新隔离目录，匹配当前 launcher 并通过健康检查后原子发布固定网关记录。服务管理器负责重启，普通开发启动保持显式启用边界；不接管已有 Agent、默认 CLI IPC 或实验刷新服务。部署与真实原生输入验收见 [Codex 工作台](codex-workbench-mode.md#常驻宿主恢复2026-10-19)。
 
 - 会话模式 Codex 用户消息和助手回复下方常驻显示本机时区日期与时间（`YYYY-MM-DD HH:mm:ss`），悬停查看时区。原生消息时间优先；历史缺少逐条时间时明确显示“轮次开始／轮次结束”，流式回复显示本轮开始时间，缺失或无效时间不显示。不增加轮询或正文缓存。回归：`MessageTimestamp.test.tsx`。

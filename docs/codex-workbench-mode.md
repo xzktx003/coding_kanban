@@ -34,6 +34,14 @@ Surface 只把父容器仍在视口内的官方 webview 作为窗口，并按屏
 
 ## 开发与部署
 
+### 连接检查与 10.30.0.28 部署修复（2026-10-19）
+
+先运行 `pnpm codex:status`。命令复用启动环境，仅核对文件和发送 GET，不启动、停止或发送任务。它比较当前仓库和已安装自有 companion 的四个打包文件内容，忽略安装器添加的 manifest 元数据；即使两边版本号都是 `0.1.0`，也能报告 `stale`。宿主不可达为 `unreachable`，网关仍指向其他项目或启动窗口为 `gateway-mismatch`，插件／私有 broker 未就绪为 `host-ready-awaiting-browser`，激活完成为 `broker-ready`。后者不证明账号、模型请求、浏览器当前窗口或历史恢复成功。公共 `sendAvailable=false` 是旧公共输入桥的版本门控结果，独立 Codex 模式使用官方 composer，不依赖此桥。
+
+本机此前 `.env` 仍指向 10 月 13 日的旧安装。它没有当前前端需要的 `Kanban host <UUID>` 标记、私有实例 broker 和窗口控制接口，导致插件内部已打开而外层一直显示“正在连接”。另一个部署边界是 watcher 已继承的 `NATIVE_CODEX_*` 环境优先于 `.env`：只改文件、触发普通源码热更新，并不能激活这两项新配置。须按当前进程归属安全重载网关启动环境，保留独立会话运行层和 Agent。
+
+此次在全新私有目录部署当前 companion，官方 VSIX 保持不修改，复用已授权的连接副本，不导入历史；新宿主只监听 loopback，由用户级 `coding-kanban-native-codex-20261019.service` 管理。旧宿主与正式 Agent 保留。当前局域网入口为 **HTTPS https://10.30.0.28:8484/?mode=codex，端口 8484**；新浏览器须在官方面板完成 Next 引导。该临时用户服务不保证机器重启后恢复，旧运行记录也不代表服务在线。诊断、真实对话与刷新验收边界见 [本次记录](designs/codex-connection-check-20261019.md)。
+
 在被忽略的 `.env` 配置 `NATIVE_CODEX_UPSTREAM_URL` 和 `NATIVE_CODEX_RUNTIME_RECORD`；前者必须是明确的 loopback HTTP 地址，端口匹配运行记录，后者为启动器生成的记录。不可从请求参数选择主机或文件路径。上游、broker 端口和各运行目录全部由启动参数配置。
 
 开发入口继续使用 `pnpm dev` / `pnpm dev:restart`。正式应用中选择 Codex 或打开 `?mode=codex`，不向用户提供裸 IDE 作为入口。当前联调地址：**HTTPS https://10.30.0.24:8484/?mode=codex，端口 8484**；地址属于本机部署记录，不是源码默认值。用户已要求关闭站点密码，此部署显式使用启动器的无认证选项。已有会话运行服务及 Agent 不因原生宿主启动或网关热更新而停止。
@@ -146,6 +154,8 @@ Codex 模式项目导航复用会话模式的项目索引，并通过会话服�
 原生内容观察在 portal 的 UUID 与当前历史请求精确相符时直接更新临时身份，不依赖外层 workbench 的另一次 DOM 变化。portal 已就绪后保留最多 64 层直接父链的 childList 观察，支持整体替换；不观察兄弟聊天正文的子树、属性或字符流。原有 30 秒占用观察独立保留，不能用其掩盖之后的结构恢复；暂停、文档更换和异常时释放所有观察及父链引用。此规则只观察官方 DOM，不替换输入、通道或 native API。
 
 ## 常驻宿主恢复（2026-10-19）
+
+本节为 `10.30.0.22` 的部署记录；`10.30.0.28` 的旧 companion 问题与连接副本验收见上文，两个主机的运行记录、授权方式和 PID 不可互用。
 
 本机故障现场的 `/api/native-codex/status` 返回 `available:false`、原因“Codex 宿主暂未配置”；网关 `.env` 缺少 upstream 和 runtime record，且没有对应宿主或用户服务。先前其他主机的临时实验记录不能作为当前部署。此处为本机连接失败的已确认原因，与会话模式运行层是否健康无关。
 
