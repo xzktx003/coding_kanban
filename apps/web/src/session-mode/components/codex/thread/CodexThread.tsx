@@ -29,6 +29,7 @@ import type { ServerNotification } from "@session/bindings";
 import { useCodexStore } from "@session/components/codex/stores";
 import { ScrollArea } from "@session/components/ui/scroll-area";
 import { EventItem } from "../items";
+import { MessageTimestamp } from "../items/MessageTimestamp";
 import { AgentMessageItem } from "../items/AgentMessageItem";
 import { ApprovalItem } from "../items/ApprovalItem";
 import { CommandActionSummaryItem } from "../items/CommandActionSummaryItem";
@@ -184,6 +185,10 @@ const ThreadMessage = memo(
       before.row.context?.rollbackTurns === after.row.context?.rollbackTurns &&
       before.row.context?.renderTermination ===
         after.row.context?.renderTermination &&
+      before.row.context?.messageTimestamp?.ms ===
+        after.row.context?.messageTimestamp?.ms &&
+      before.row.context?.messageTimestamp?.label ===
+        after.row.context?.messageTimestamp?.label &&
       before.row.context?.events === after.row.context?.events
     );
   },
@@ -1194,6 +1199,11 @@ const CodexTranscript = memo(function CodexTranscript({
                   streamingCurrent={streamingMessage.current}
                   streamingPreview={streamingMessage.preview}
                 />
+                {turnTiming?.turnId === streamingMessage.turnId && (
+                  <MessageTimestamp
+                    fallback={{ ms: turnTiming.startedAtMs, label: "轮次开始" }}
+                  />
+                )}
               </div>
             )}
             <div className="space-y-2">

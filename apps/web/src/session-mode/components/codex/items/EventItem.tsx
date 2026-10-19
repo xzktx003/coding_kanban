@@ -1,3 +1,4 @@
+import { MessageTimestamp } from "./MessageTimestamp";
 import { SubagentEvent } from "@session/features/subagents/SubagentEvent";
 import { useMemo } from "react";
 import {
@@ -111,12 +112,36 @@ type EventItemProps = {
 
 export const EventItem = (props: EventItemProps) => {
   const params = props.event.params as { threadId?: unknown };
+  const event = props.event;
+  const user =
+    event.method === "item/started" && event.params.item.type === "userMessage";
+  const assistant =
+    event.method === "item/completed" &&
+    event.params.item.type === "agentMessage" &&
+    !!event.params.item.text.trim();
+  const timestamp = user
+    ? event.params.startedAtMs
+    : assistant
+      ? event.params.completedAtMs
+      : undefined;
+  const body = (
+    <>
+      <EventItemBody {...props} />
+      {(user || assistant) && (
+        <MessageTimestamp
+          ms={timestamp}
+          fallback={props.context?.messageTimestamp}
+          alignEnd={user}
+        />
+      )}
+    </>
+  );
   return typeof params.threadId === "string" ? (
     <CodexContentOwner.Provider value={params.threadId}>
-      <EventItemBody {...props} />
+      {body}
     </CodexContentOwner.Provider>
   ) : (
-    <EventItemBody {...props} />
+    body
   );
 };
 

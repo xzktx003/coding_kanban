@@ -16,6 +16,7 @@ export type AggregatedFileChange = {
 };
 
 export type RenderEventContext = {
+  messageTimestamp?: { ms: number; label: string };
   renderTermination?: "completed" | "interrupted" | "failed" | "inProgress";
   rollbackTurns?: number;
   events?: ServerNotification[];

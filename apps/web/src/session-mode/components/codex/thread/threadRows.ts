@@ -66,6 +66,18 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
     )
       laterTurns.add(id);
   }
+  const turnTimes = new Map<
+    string,
+    { startedAt: number | null; completedAt: number | null }
+  >();
+  for (const event of events) {
+    if (event.method === "turn/started" || event.method === "turn/completed") {
+      turnTimes.set(
+        JSON.stringify([event.params.threadId, event.params.turn.id]),
+        event.params.turn,
+      );
+    }
+  }
   const turns = new Map<string, ServerNotification[]>();
   const localIndices = new Map<number, number>();
   const turnsWithChanges = new Set<string>();
@@ -212,6 +224,27 @@ export function buildThreadRows(events: ServerNotification[]): ThreadRow[] {
         events: turns.get(turn.id),
         eventIndex: localIndices.get(index),
       };
+    }
+    if (
+      (event.method === "item/started" &&
+        event.params.item.type === "userMessage") ||
+      (event.method === "item/completed" &&
+        event.params.item.type === "agentMessage")
+    ) {
+      const timing = turnTimes.get(
+        JSON.stringify([event.params.threadId, event.params.turnId]),
+      );
+      const user = event.params.item.type === "userMessage";
+      const seconds = user ? timing?.startedAt : timing?.completedAt;
+      if (typeof seconds === "number" && seconds > 0) {
+        context = {
+          ...context,
+          messageTimestamp: {
+            ms: seconds * 1000,
+            label: user ? "轮次开始" : "轮次结束",
+          },
+        };
+      }
     }
     const userKey = userMessageKey(event);
     const itemId =
