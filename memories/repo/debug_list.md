@@ -1316,3 +1316,5 @@
 - 2026-10-20：输入性能绿灯不能覆盖长期RSS：最终标准自然GC30分钟/862采样仍红，heap低点+5.6413MiB、RSS低点320.8086→502.0703MiB（+181.2617MiB＞128MiB），同一renderer身份、errors[]、无缺测。失败后峰值/音频空闲断言未执行；原阈值不变，源指纹稳定，见docs/session-input-responsiveness.md及session-memory-contract.md。
 
 - 2026-10-20：会话周期性跳动来自正常布局内增删子 Agent 摘要／连接提示，不必然是 SSE 重连或内存问题。15 秒快照失败→恢复曾使聊天高度改变 45px（1440／390 浏览器红灯）。子 Agent 入口固定在 Composer 工具栏，未知显示 ?，只读检查列表；异步错误提示不得改变正文 viewport 尺寸。文件树刷新不得卸载原树，失败保留快照，换项目必须清旧项目。保留 session-layout-stability、scroll-smoothness、render-recovery、subagents 和 useFileTree 回归；不移除内存防回归保护，不把此次几何绿灯当成长期 RSS 绿灯。
+
+- 2026-10-20：FilesPanel 文件树／预览改为可拖动分栏（树20%～65%，默认35%）。比例只存一个本机数值，单面板／手机布局不可覆盖；预览不能随树隐藏而重新挂载，避免丢编辑器状态。保持 session-files-split、FilesPanel.usability 与 files-draft-safety 回归。

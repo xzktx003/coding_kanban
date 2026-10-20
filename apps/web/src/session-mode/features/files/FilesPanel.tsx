@@ -10,6 +10,22 @@ import { useEditorStore, useWorkspaceStore } from "@session/stores";
 import { getFilename } from "@session/utils/getFilename";
 import { FileTree, FileViewer } from "./explorer";
 import type { FileNode } from "./explorer/types";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@session/components/ui/resizable";
+
+const TREE_SIZE_KEY = "kanban.session.files-tree-size";
+function readTreeSize() {
+  try {
+    const value = Number(localStorage.getItem(TREE_SIZE_KEY));
+    if (Number.isFinite(value) && value >= 20 && value <= 65) return value;
+  } catch {
+    /* Storage can be unavailable; resizing still works in this tab. */
+  }
+  return 35;
+}
 
 export default function FilesPanel() {
   const { openFiles, activeFile, closeFile, setActiveFile } = useEditorStore();
@@ -50,6 +66,19 @@ export default function FilesPanel() {
   };
   const isMobile = useIsMobile();
   const [isFileTreeVisible, setIsFileTreeVisible] = useState(!isMobile);
+
+  const [initialTreeSize] = useState(readTreeSize);
+  const treeSize = useRef(initialTreeSize);
+  const rememberLayout = (sizes: number[]) => {
+    // A hidden tree/mobile layout has just one panel: never replace the saved split.
+    if (sizes.length !== 2 || sizes[1] === treeSize.current) return;
+    treeSize.current = sizes[1];
+    try {
+      localStorage.setItem(TREE_SIZE_KEY, String(sizes[1]));
+    } catch {
+      /* Optional preference. */
+    }
+  };
 
   const fileTabsRef = useRef<HTMLDivElement>(null);
   const treeToggleRef = useRef<HTMLButtonElement>(null);
@@ -234,61 +263,79 @@ export default function FilesPanel() {
       />
       {/* Content area */}
       <div className="relative flex flex-1 min-h-0 overflow-hidden w-full">
-        {/* FileViewer */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-          {openFiles
-            .filter((path) => visitedFiles.current.has(path))
-            .map((path) => (
-              <div
-                key={path}
-                className="h-full min-h-0 min-w-0"
-                hidden={activeFile !== path}
-                inert={activeFile !== path}
-              >
-                <Suspense
-                  fallback={
-                    <div
-                      role="status"
-                      className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground"
-                    >
-                      正在加载文件…
-                    </div>
-                  }
-                >
-                  <FileViewer filePath={path} />
-                </Suspense>
-              </div>
-            ))}
-          {!activeFile && (
-            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-              选择文件以查看内容
-            </div>
-          )}
-        </div>
-
-        {/* FileTree — desktop inline, right side */}
-        {isFileTreeVisible && !isMobile && cwd && (
-          <div
-            className={`h-full shrink-0 border-l border-border bg-sidebar/20 overflow-hidden ${
-              activeFile ? "w-60 min-w-60" : "flex-1"
-            }`}
+        <ResizablePanelGroup direction="horizontal" onLayout={rememberLayout}>
+          {/* Keep this panel mounted when the tree is hidden or becomes a mobile overlay. */}
+          <ResizablePanel
+            id="file-preview"
+            order={1}
+            defaultSize={100 - treeSize.current}
+            minSize={35}
+            className="flex min-h-0 min-w-0 flex-col overflow-hidden"
           >
-            <FileTree
-              folder={cwd}
-              onFileSelect={handleFileSelect}
-              onNodeSelect={selectNode}
-              selectedPath={operationTarget?.path}
-              onFileAction={(action, node) =>
-                setFileAction({
-                  type: action,
-                  root: cwd,
-                  path: node.path,
-                  isDir: node.kind === "dir",
-                })
-              }
-            />
-          </div>
-        )}
+            {openFiles
+              .filter((path) => visitedFiles.current.has(path))
+              .map((path) => (
+                <div
+                  key={path}
+                  className="h-full min-h-0 min-w-0"
+                  hidden={activeFile !== path}
+                  inert={activeFile !== path}
+                >
+                  <Suspense
+                    fallback={
+                      <div
+                        role="status"
+                        className="flex h-full items-center justify-center p-6 text-sm text-muted-foreground"
+                      >
+                        正在加载文件…
+                      </div>
+                    }
+                  >
+                    <FileViewer filePath={path} />
+                  </Suspense>
+                </div>
+              ))}
+            {!activeFile && (
+              <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                选择文件以查看内容
+              </div>
+            )}
+          </ResizablePanel>
+
+          {/* FileTree — desktop inline, right side */}
+          {isFileTreeVisible && !isMobile && cwd && (
+            <>
+              <ResizableHandle
+                aria-label="调整文件树与预览宽度"
+                withHandle
+                className="shrink-0 hover:bg-primary/50"
+              />
+              <ResizablePanel
+                id="file-tree"
+                order={2}
+                defaultSize={treeSize.current}
+                minSize={20}
+                maxSize={65}
+                className="h-full min-w-0 bg-sidebar/20 overflow-hidden"
+              >
+                <FileTree
+                  folder={cwd}
+                  onFileSelect={handleFileSelect}
+                  onNodeSelect={selectNode}
+                  selectedPath={operationTarget?.path}
+                  onFileAction={(action, node) =>
+                    setFileAction({
+                      type: action,
+                      root: cwd,
+                      path: node.path,
+                      isDir: node.kind === "dir",
+                    })
+                  }
+                />
+              </ResizablePanel>
+            </>
+          )}
+        </ResizablePanelGroup>
 
         {/* FileTree — mobile overlay from right */}
         {isFileTreeVisible && isMobile && cwd && (

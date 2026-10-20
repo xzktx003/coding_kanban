@@ -13,6 +13,7 @@ vi.mock("@session/stores", async () => ({
   useWorkspaceStore: () => ({ cwd: "/fixture" }),
 }));
 beforeEach(() => {
+  localStorage.removeItem("kanban.session.files-tree-size");
   useEditorStore.getState().resetFiles();
 });
 test("file selection and close are separate native keyboard buttons", () => {
@@ -54,3 +55,38 @@ test("closing the last focused file returns focus to the file tree control", asy
     ),
   );
 });
+
+test("desktop file tree has a keyboard reachable divider and toggling preserves the viewer", () => {
+  useEditorStore.getState().openFile("/fixture/preview.ts");
+  render(<FilesPanel />);
+  const viewer = screen.getByText("文件内容");
+  const divider = screen.getByRole("separator", {
+    name: "调整文件树与预览宽度",
+  });
+  expect(divider.getAttribute("tabindex")).toBe("0");
+  fireEvent.click(screen.getByRole("button", { name: "隐藏文件树" }));
+  expect(
+    screen.queryByRole("separator", { name: "调整文件树与预览宽度" }),
+  ).toBeNull();
+  expect(screen.getByText("文件内容")).toBe(viewer);
+  fireEvent.click(screen.getByRole("button", { name: "显示文件树" }));
+  expect(
+    screen.getByRole("separator", { name: "调整文件树与预览宽度" }),
+  ).toBeTruthy();
+  expect(screen.getByText("文件内容")).toBe(viewer);
+});
+
+for (const [stored, expected] of [
+  ["60", "40"],
+  ["broken", "65"],
+  ["1000", "65"],
+]) {
+  test(`restores only a valid file tree width (${stored})`, () => {
+    localStorage.setItem("kanban.session.files-tree-size", stored);
+    const { container } = render(<FilesPanel />);
+    const preview = container.querySelector<HTMLElement>(
+      '[data-panel-id="file-preview"]',
+    );
+    expect(Number(preview?.style.flexGrow)).toBe(Number(expected));
+  });
+}
