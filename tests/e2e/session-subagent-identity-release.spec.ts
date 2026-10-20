@@ -22,6 +22,7 @@ type SignalCancellation = {
   url: string;
   method: string;
   reason: string;
+  reasonMessage?: string;
   stack: string;
 };
 type NavigationCancellation = {
@@ -40,9 +41,12 @@ type ClassifiedCancellation = RequestFailure & {
 function isReadOnlyRequest(url: string, method: string) {
   const path = new URL(url).pathname;
   return (
-    (method === "GET" && path === "/api/session/health") ||
+    (method === "GET" &&
+      (path === "/api/session/health" ||
+        (path === "/api/session/api/events" &&
+          new URL(url).searchParams.get("view") === "chat"))) ||
     (method === "POST" &&
-      /^\/api\/session\/(?:api\/codex\/(?:thread\/(?:read|turns\/list|metadata|list)|config\/read)|subagents\/snapshot)$/.test(
+      /^\/api\/session\/(?:api\/codex\/(?:thread\/(?:read|turns\/list|metadata|list|goal\/get)|config\/read)|subagents\/snapshot)$/.test(
         path,
       ))
   );
@@ -56,13 +60,30 @@ function isKnownCleanup(
     failure.error !== "net::ERR_ABORTED" ||
     failure.url !== cancellation.url ||
     failure.method !== cancellation.method ||
-    cancellation.reason !== "AbortError" ||
     !failure.readRequestId ||
     failure.readRequestId !== cancellation.readRequestId ||
     failure.at < cancellation.at ||
     failure.at - cancellation.at >= 1000
   )
     return false;
+  // Account/runtime confirmation intentionally revokes in-flight Goal reads.
+  // Require the actual signal identity and reset stack; network errors remain failures.
+  if (
+    failure.method === "POST" &&
+    failure.path === "/api/session/api/codex/thread/goal/get"
+  )
+    return (
+      cancellation.reason === "Error" &&
+      cancellation.reasonMessage ===
+        "连接目标已切换，目标状态结果未确认，请先核对原连接的目标状态。" &&
+      /Object\.cancel [^\n]*\/services\/threadGoalState\.ts/.test(
+        cancellation.stack,
+      ) &&
+      /Object\.reset [^\n]*\/services\/threadGoalState\.ts/.test(
+        cancellation.stack,
+      )
+    );
+  if (cancellation.reason !== "AbortError") return false;
   if (failure.method === "GET" && failure.path === "/api/session/health")
     return /\/session-mode\/(?:SessionWorkbench\.tsx|features\/native-mcp-auth\/service\.ts)/.test(
       cancellation.stack,
@@ -161,9 +182,12 @@ async function setup(
       const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
       const path = new URL(url).pathname;
       const readOnly =
-        (method === "GET" && path === "/api/session/health") ||
+        (method === "GET" &&
+          (path === "/api/session/health" ||
+            (path === "/api/session/api/events" &&
+              new URL(url).searchParams.get("view") === "chat"))) ||
         (method === "POST" &&
-          /^\/api\/session\/(?:api\/codex\/(?:thread\/(?:read|turns\/list|metadata|list)|config\/read)|subagents\/snapshot)$/.test(
+          /^\/api\/session\/(?:api\/codex\/(?:thread\/(?:read|turns\/list|metadata|list|goal\/get)|config\/read)|subagents\/snapshot)$/.test(
             path,
           ));
       if (!readOnly || signal?.aborted) return fetch.call(this, input, init);
@@ -179,6 +203,7 @@ async function setup(
             url,
             method,
             reason: signal?.reason?.name ?? String(signal?.reason),
+            reasonMessage: signal?.reason?.message,
             stack: new Error("Observed fetch signal cancellation").stack
               ?.split("\n")
               .slice(0, 5)
@@ -606,8 +631,8 @@ test("same-value live restriction rejects an older readonly permission response 
   try {
     const f = await setup(page, { activeChildren: true });
     await f.editor.fill("旧权限响应不得改变主会话草稿");
-    await page.getByRole("button", { name: /子智能体 · 已开启/ }).click();
-    await page.getByRole("button", { name: "Restricted", exact: true }).click();
+    await page.getByRole("button", { name: /子智能体 ·/ }).click();
+    await page.locator('[data-subagent-id="identity-child-0"]').click();
     await expect(
       page.getByRole("textbox", { name: "发送给 Restricted", exact: true }),
     ).toHaveCount(0);
@@ -792,8 +817,8 @@ test("native child false and unknown permissions stay restricted while true is i
 }) => {
   const f = await setup(page, { activeChildren: true });
   await f.editor.fill("检查子线程也保留主草稿");
-  await page.getByRole("button", { name: /子智能体 · 已开启/ }).click();
-  await page.getByRole("button", { name: "Restricted", exact: true }).click();
+  await page.getByRole("button", { name: /子智能体 ·/ }).click();
+  await page.locator('[data-subagent-id="identity-child-0"]').click();
   await page
     .getByRole("button", { name: "返回子代理列表", exact: true })
     .click();
@@ -912,8 +937,8 @@ for (const width of [1440, 375])
       page.getByRole("button", { name: "发送消息", exact: true }),
     ).toBeEnabled();
     await expect(
-      page.getByRole("button", { name: /子智能体 · 已开启/ }),
-    ).toHaveCount(0);
+      page.getByRole("button", { name: "子智能体 · 0", exact: true }),
+    ).toBeVisible();
     await composerAction(page, "当前会话的更多操作");
     await page
       .getByRole("menuitem", { name: "查看执行状态", exact: true })
@@ -954,3 +979,42 @@ for (const width of [1440, 375])
     expect(f.errors).toEqual([]);
     expect(f.networkFailures).toEqual([]);
   });
+
+test("Goal cleanup classification requires its exact request, reset reason and stack", () => {
+  const failure: RequestFailure = {
+    at: 1050,
+    readRequestId: "document:9",
+    url: "https://fixture.invalid/api/session/api/codex/thread/goal/get",
+    path: "/api/session/api/codex/thread/goal/get",
+    method: "POST",
+    error: "net::ERR_ABORTED",
+  };
+  const cancellation: SignalCancellation = {
+    at: 1000,
+    readRequestId: "document:9",
+    url: failure.url,
+    method: "POST",
+    reason: "Error",
+    reasonMessage:
+      "连接目标已切换，目标状态结果未确认，请先核对原连接的目标状态。",
+    stack:
+      "at Object.cancel (https://fixture.invalid/src/session-mode/services/threadGoalState.ts:194:20)\nat Object.reset (https://fixture.invalid/src/session-mode/services/threadGoalState.ts:188:13)",
+  };
+  expect(isKnownCleanup(failure, cancellation)).toBe(true);
+  for (const changed of [
+    { readRequestId: "different-request" },
+    { reasonMessage: "network unavailable" },
+    { reason: "TimeoutError" },
+    { stack: "at Object.cancel (other.ts:1:1)" },
+    { at: -1000 },
+  ])
+    expect(isKnownCleanup(failure, { ...cancellation, ...changed })).toBe(
+      false,
+    );
+  expect(
+    isKnownCleanup(
+      { ...failure, error: "net::ERR_CONNECTION_RESET" },
+      cancellation,
+    ),
+  ).toBe(false);
+});

@@ -286,19 +286,56 @@
   }
 }
 
-.session-outage {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  font-size: 12px;
-  background: #8d69242e;
-  color: #e6c88d;
+/* Transient connection feedback must never resize the transcript viewport. */
+.session-mode .session-notices-anchor {
+  position: relative;
+  flex: 0 0 0;
+  min-height: 0;
+  z-index: 30;
+  pointer-events: none;
 }
-.session-outage button {
+.session-mode .session-notices {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(380px, calc(100% - 24px));
+  max-height: min(240px, 35dvh);
+  overflow-y: auto;
+  pointer-events: none;
+}
+.session-mode .session-outage {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12px;
+  box-shadow: 0 3px 12px #0000001a;
+  pointer-events: auto;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-outage-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.session-mode .session-outage-details {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: 6px;
+}
+.session-mode .session-outage button {
   text-decoration: underline;
   cursor: pointer;
+}
+.session-mode .session-outage button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 .session-ready[data-state="offline"] > span {
   background: #daaf70;

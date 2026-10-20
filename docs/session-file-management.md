@@ -10,6 +10,12 @@
 - 单文件直接下载，目录打包为 ZIP。内容由浏览器原生下载处理，前端不通过 `response.blob()` 缓存整份文件或 ZIP；下载失败不会覆盖当前编辑页面。
 - 复制路径复用终端模式剪贴板工具，支持 HTTPS 剪贴板和 HTTP 局域网／权限拒绝时的兼容路径。项目根目录的相对路径为 `.`；失败显示可重试错误。
 
+## 文件树后台刷新
+
+同一项目的新建、删除和手动刷新保留已挂载的文件树、滚动容器、焦点及展开目录，读取完成后原位更新。初次加载和切换项目才使用整区加载提示；切换项目立即清除旧项目可操作的文件行。根目录或已展开目录读取失败保留最近一次成功快照，在树底部显示可重试错误，不压缩树高度。旧快照不代表文件仍存在，后端仍校验每次文件操作。
+
+回归：`features/files/explorer/useFileTree.test.tsx` 覆盖 create/remove、展开目录失败、重试、scrollTop/焦点及换项目隔离；浏览器布局入口见 [会话布局稳定性](session-layout-stability.md)。
+
 ## 接口与资源边界
 
 复用项目限定的 `workspace-files` 服务及注册根目录验证，不使用终端的任意路径接口替代权限校验。新增 `POST /api/session/workspace-files/download-info` 返回验证后的 `{path, filename}`；前端随后通过 `GET /api/session/workspace-files/download?root=...&path=...` 触发浏览器下载。原 POST 下载和图片预览保留。配对设备沿用现有 URL token 机制，下载接口仍验证根目录及路径。

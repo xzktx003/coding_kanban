@@ -5,11 +5,10 @@ import { liveStream } from "./session-sse-fixture";
 import { writeFileSync } from "node:fs";
 async function openInspection(page: Page, list = true) {
   const summary = page.locator(".session-subagent-summary");
-  const expand = summary.getByRole("button", { name: /子智能体 · 已开启/ });
-  if (await expand.isVisible()) {
-    if ((await expand.getAttribute("aria-expanded")) !== "true")
-      await expand.click();
-    await summary.locator(":scope > button").first().click();
+  if (await summary.isVisible()) {
+    await summary.click();
+    if (!list) await page.locator("[data-subagent-id]").first().click();
+    return;
   } else {
     const process = page
       .getByRole("button", { name: /^工作过程$|^用时/ })
@@ -672,7 +671,7 @@ test("active and done sections list every descendant without a round filter", as
   expect(f.calls.filter((c) => c.path.endsWith("/stop"))).toEqual([]);
   expect(f.errors).toEqual([]);
 });
-test("a finished family leaves the composer summary hidden and shows the empty panel", async ({
+test("a finished family keeps the compact zero count and shows the empty panel", async ({
   page,
   baseURL,
 }) => {
@@ -711,8 +710,8 @@ test("a finished family leaves the composer summary hidden and shows the empty p
     }
     await refresh();
     await expect(
-      page.getByRole("button", { name: /子智能体 · 已开启/ }),
-    ).toHaveCount(0);
+      page.getByRole("button", { name: "子智能体 · 0", exact: true }),
+    ).toBeVisible();
     await openInspection(page);
     const panel = page.locator(".session-subagent-panel");
     await expect(panel.getByText("已开启 · 0", { exact: true })).toBeVisible();
@@ -772,6 +771,9 @@ test("incomplete discovery retains unavailable identities and avoids claiming co
       unavailable: true,
       canAcceptDirectInput: null,
     });
+  // The toolbar now opens the list directly; enter the exact child to exercise
+  // the native metadata 404 rather than relying on a side effect of expansion.
+  await page.locator('[data-subagent-id="child-atlas"]').click();
   await expect(
     page.getByText("此子智能体在当前分支上已不可用。", { exact: false }),
   ).toBeVisible();
@@ -779,12 +781,15 @@ test("incomplete discovery retains unavailable identities and avoids claiming co
     0,
   );
   expect(f.errors).toEqual([]);
-  expect(
-    f.metadataResponses.filter(
-      (response) =>
-        response.threadId === "child-atlas" && response.status === 404,
-    ).length,
-  ).toBeGreaterThan(0);
+  await expect
+    .poll(
+      () =>
+        f.metadataResponses.filter(
+          (response) =>
+            response.threadId === "child-atlas" && response.status === 404,
+        ).length,
+    )
+    .toBeGreaterThan(0);
   expect(
     f.fixture.calls.filter((call) =>
       /thread\/(resume|start)|turn\/(start|interrupt)/.test(call.path),

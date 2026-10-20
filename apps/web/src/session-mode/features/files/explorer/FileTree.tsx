@@ -75,7 +75,7 @@ export function FileTree({
     );
   }
 
-  if (loading) {
+  if (loading && !root) {
     return (
       <div className="flex h-full flex-col">
         {header}
@@ -86,7 +86,7 @@ export function FileTree({
     );
   }
 
-  if (error) {
+  if (error && !root) {
     return (
       <div className="flex h-full flex-col">
         {header}
@@ -110,10 +110,11 @@ export function FileTree({
   const visibleNodes = displayRoot?.children ?? [];
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
       {header}
       <div
         ref={treeContainerRef}
+        aria-busy={loading}
         className="min-h-0 flex-1 overflow-x-auto overflow-y-auto px-2 py-1"
       >
         {!displayRoot ? (
@@ -161,6 +162,22 @@ export function FileTree({
           </>
         )}
       </div>
+      {error && (
+        <div
+          role="alert"
+          className="absolute inset-x-2 bottom-2 flex items-center gap-2 rounded border border-destructive/30 bg-background p-2 text-sm text-destructive shadow-sm"
+        >
+          <p className="min-w-0 flex-1 break-words">{error}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={() => setRefreshKey((key: number) => key + 1)}
+          >
+            重新加载文件树
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

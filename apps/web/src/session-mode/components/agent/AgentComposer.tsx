@@ -7,7 +7,6 @@ import { useEffect } from "react";
 import { AcpComposer } from "@session/components/acp/AcpComposer";
 import { Composer as CCComposer } from "@session/components/cc/composer";
 import { Composer as CodexComposer } from "@session/components/codex/composer";
-import { SubagentSummary } from "@session/features/subagents/SubagentSummary";
 import { useAgentCenterStore } from "@session/stores";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
@@ -57,12 +56,6 @@ export function AgentComposer() {
   )
     ? nativeTarget.column
     : null;
-  const subagentRoot =
-    card?.kind === "codex"
-      ? card.id
-      : effectiveAgent === "codex"
-        ? currentThreadId
-        : null;
   const senderId = effectiveAgent === "cc" ? ccSessionId : currentThreadId;
   const targetId = card?.id ?? senderId;
   const mismatchedTarget = !acpActive && !!card && senderId !== card.id;
@@ -123,7 +116,6 @@ export function AgentComposer() {
   );
   return (
     <div className="flex flex-col session-composer-target-container">
-      {subagentRoot ? <SubagentSummary root={subagentRoot} /> : null}
       {/* Input area */}
       <div className="shrink-0">
         {acpActive ? (

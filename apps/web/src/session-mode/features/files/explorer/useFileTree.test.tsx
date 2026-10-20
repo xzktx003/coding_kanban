@@ -1,6 +1,15 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { useFileTree } from "./useFileTree";
+import { FileTree } from "./FileTree";
+import type { FileNode } from "./types";
 
 const api = vi.hoisted(() => ({
   canonicalizePath: vi.fn(async (path: string) => path),
@@ -153,4 +162,135 @@ test("sibling paths with a shared prefix do not refresh the tree", async () => {
       "changed",
     ]),
   );
+});
+
+vi.mock("./FileTreeNode", () => ({
+  FileTreeNode: function Row({
+    node,
+    activeExpanded,
+    onToggle,
+    onLoadChildren,
+    onFileSelect,
+  }: {
+    node: FileNode;
+    activeExpanded: Set<string>;
+    onToggle: (path: string) => void;
+    onLoadChildren: (node: FileNode) => void;
+    onFileSelect?: (path: string) => void;
+  }) {
+    return (
+      <div>
+        <button
+          onClick={() => {
+            if (node.kind === "dir") {
+              onToggle(node.path);
+              onLoadChildren(node);
+            } else onFileSelect?.(node.path);
+          }}
+        >
+          {node.name}
+        </button>
+        {activeExpanded.has(node.path) &&
+          node.children?.map((child) => (
+            <Row
+              key={child.path}
+              node={child}
+              activeExpanded={activeExpanded}
+              onToggle={onToggle}
+              onLoadChildren={onLoadChildren}
+              onFileSelect={onFileSelect}
+            />
+          ))}
+      </div>
+    );
+  },
+}));
+
+const rootEntries = [{ name: "src", path: "/project/src", is_dir: true }];
+const childEntries = [
+  { name: "keep.ts", path: "/project/src/keep.ts", is_dir: false },
+];
+
+async function expandedTree() {
+  queueEntries("/project", [rootEntries]);
+  queueEntries("/project/src", [childEntries]);
+  const select = vi.fn();
+  const view = render(<FileTree folder="/project" onFileSelect={select} />);
+  fireEvent.click(await screen.findByRole("button", { name: "src" }));
+  const row = await screen.findByRole("button", { name: "keep.ts" });
+  const viewport =
+    view.container.querySelector<HTMLElement>(".overflow-y-auto")!;
+  viewport.scrollTop = 120;
+  row.focus();
+  return { view, viewport, row, select };
+}
+
+test.each(["create", "remove"])(
+  "%s refresh keeps the same tree, scroll, focus and expanded directories",
+  async (kind) => {
+    const { view, viewport, row } = await expandedTree();
+    let resolve!: (entries: unknown[]) => void;
+    api.readDirectory.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    act(() => watchState.onChange?.({ path: "/project/new.ts", kind }));
+    await waitFor(() => expect(resolve).toBeTypeOf("function"));
+    expect(view.container.contains(row)).toBe(true);
+    expect(view.container.querySelector(".overflow-y-auto")).toBe(viewport);
+    expect(document.activeElement).toBe(row);
+    expect(viewport.scrollTop).toBe(120);
+    await act(async () => resolve(rootEntries));
+    await waitFor(() =>
+      expect(api.readDirectory).toHaveBeenLastCalledWith("/project/src"),
+    );
+    expect(screen.getByRole("button", { name: "keep.ts" })).toBe(row);
+    expect(document.activeElement).toBe(row);
+    expect(viewport.scrollTop).toBe(120);
+  },
+);
+
+test.each(["root", "expanded directory"])(
+  "failed %s background refresh retains usable files and supports retry",
+  async (failure) => {
+    const { view, viewport, row, select } = await expandedTree();
+    if (failure === "expanded directory")
+      api.readDirectory.mockResolvedValueOnce(rootEntries);
+    api.readDirectory.mockRejectedValueOnce(new Error("refresh unavailable"));
+    act(() =>
+      watchState.onChange?.({ path: "/project/new.ts", kind: "create" }),
+    );
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "refresh unavailable",
+    );
+    expect(view.container.contains(row)).toBe(true);
+    expect(document.activeElement).toBe(row);
+    expect(viewport.scrollTop).toBe(120);
+    fireEvent.click(row);
+    expect(select).toHaveBeenCalledWith("/project/src/keep.ts");
+    fireEvent.click(screen.getByRole("button", { name: "重新加载文件树" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(screen.getByRole("button", { name: "keep.ts" })).toBe(row);
+  },
+);
+
+test("switching project hides old files while the new tree is pending or fails", async () => {
+  const { view, row } = await expandedTree();
+  let reject!: (error: Error) => void;
+  api.readDirectory.mockImplementationOnce(
+    () =>
+      new Promise((_done, fail) => {
+        reject = fail;
+      }),
+  );
+  view.rerender(<FileTree folder="/other" />);
+  expect(view.container.contains(row)).toBe(false);
+  await waitFor(() => expect(reject).toBeTypeOf("function"));
+  await act(async () => reject(new Error("new project unavailable")));
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "new project unavailable",
+  );
+  expect(screen.queryByRole("button", { name: "keep.ts" })).toBeNull();
 });

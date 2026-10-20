@@ -39,7 +39,7 @@ for (const width of [375, 1440]) {
       await expect(page.getByText(/等待子任务/)).toHaveCount(0);
       await page.screenshot({ path: info.outputPath("history-failed.png"), fullPage: true });
       const notice = page.locator(".session-native-composer-status");
-      const summary = page.locator(".session-composer-target-container > .session-subagent-summary");
+      const summary = page.locator(".session-composer-toolbar .session-subagent-summary");
       await expect(notice).toBeVisible();
       await expect(summary).toBeVisible();
       {

@@ -14,7 +14,13 @@ import { startSessionTranscriptRetention } from "./services/sessionTranscriptRet
 import { useCodexStore } from "./components/codex/stores";
 import { useCCStore } from "./stores/cc";
 import { useAttentionStorageSync } from "./hooks/useSessionReadReceipt";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { MessageSquare, RefreshCw } from "lucide-react";
 import App from "./App";
 import "./session-theme.css";
@@ -29,6 +35,34 @@ import { useComposerViewport } from "./components/codex/composer/v2/useComposerV
 
 import { SessionTopNavigation } from "./components/layout/SessionTopNavigation";
 import type { WorkbenchMode } from "../lib/workbench-mode";
+
+function SessionNotice({
+  title,
+  role,
+  children,
+}: {
+  title: string;
+  role: "alert" | "status";
+  children: ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  return (
+    <div className="session-outage" role={role}>
+      <div className="session-outage-heading">
+        <strong>{title}</strong>
+        <button
+          type="button"
+          aria-label={`${expanded ? "收起" : "展开"}${title}`}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? "收起" : "详情"}
+        </button>
+      </div>
+      {expanded && <div className="session-outage-details">{children}</div>}
+    </div>
+  );
+}
 
 function SessionWorkbenchContent({
   onModeChange,
@@ -217,20 +251,23 @@ function SessionWorkbenchContent({
         onModeChange={onModeChange}
         active={active}
       />
-      {(loaded || hasCachedTranscript) && status === "offline" && (
-        <div className="session-outage" role="alert">
-          <span>会话服务连接中断，正在自动重连。草稿已保留。</span>
-          {connectionError && <span>{connectionError}</span>}
-          <button onClick={retry}>立即重试</button>
+      <div className="session-notices-anchor">
+        <div className="session-notices">
+          {(loaded || hasCachedTranscript) && status === "offline" && (
+            <SessionNotice title="会话服务连接中断" role="alert">
+              <span>正在自动重连。草稿已保留。</span>
+              {connectionError && <span>{connectionError}</span>}
+              <button onClick={retry}>立即重试</button>
+            </SessionNotice>
+          )}
+          {(tabsSyncError || projectsSyncError) && (
+            <SessionNotice title="同步待重试" role="status">
+              <span>修改已保存在本机，连接恢复后自动同步。</span>
+              <button onClick={retry}>立即同步</button>
+            </SessionNotice>
+          )}
         </div>
-      )}
-      {(tabsSyncError || projectsSyncError) && (
-        <div className="session-outage" role="status">
-          <span>同步待重试</span>
-          <span>修改已保存在本机，连接恢复后自动同步。</span>
-          <button onClick={retry}>立即同步</button>
-        </div>
-      )}
+      </div>
       <div className="session-content">
         <App />
       </div>

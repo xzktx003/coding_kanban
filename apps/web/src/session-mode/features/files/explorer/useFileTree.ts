@@ -99,6 +99,14 @@ export function useFileTree(folder: string): UseFileTreeReturn {
 
   if (folder !== prevFolderRef.current) {
     prevFolderRef.current = folder;
+    // Discard the previous project's actionable rows before committing this render.
+    // Only refreshes of the same folder may keep the last successful tree.
+    setRoot(null);
+    setExpanded(new Set());
+    setLoadingNodes(new Set());
+    setError(null);
+    setLoading(Boolean(folder));
+    rootPathRef.current = null;
     setFolderTrigger((prev) => prev + 1);
   }
 
@@ -183,14 +191,10 @@ export function useFileTree(folder: string): UseFileTreeReturn {
               nextExpanded.delete(dirPath);
               continue;
             }
-            try {
-              if (!isActive) return;
-              const dirChildren = await listDir(dirPath);
-              if (!isActive) return;
-              nextRoot = updateChildren(nextRoot, dirPath, dirChildren);
-            } catch {
-              nextExpanded.delete(dirPath);
-            }
+            if (!isActive) return;
+            const dirChildren = await listDir(dirPath);
+            if (!isActive) return;
+            nextRoot = updateChildren(nextRoot, dirPath, dirChildren);
           }
         }
 
@@ -206,8 +210,8 @@ export function useFileTree(folder: string): UseFileTreeReturn {
               ? err.message
               : String(err) || "Failed to read folder.",
           );
-          setRoot(null);
-          rootPathRef.current = null;
+          // Keep a usable same-folder snapshot on transient refresh failures.
+          // A folder change already cleared it before the request started.
         }
       } finally {
         if (isActive) setLoading(false);

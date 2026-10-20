@@ -267,7 +267,11 @@
   white-space: nowrap;
   font-size: var(--codex-chat-size, 13px);
   line-height: 1.5;
-  color: color-mix(in oklab, var(--codex-text, var(--foreground)) 60%, transparent);
+  color: color-mix(
+    in oklab,
+    var(--codex-text, var(--foreground)) 60%,
+    transparent
+  );
   text-align: start;
 }
 .session-mode button.codex-native-subagent-activity {
@@ -279,14 +283,35 @@
 .session-mode button.codex-native-subagent-activity:focus-visible {
   outline: 2px solid var(--ring);
 }
-.session-mode .session-subagent-summary {
-  border-top: 1px solid var(--border);
-  font-size: 12px;
-}
-.session-mode .session-subagent-summary-row {
+.session-mode
+  .session-native-composer
+  .session-composer-toolbar
+  .session-subagent-summary {
   display: flex;
-  justify-content: space-between;
-  gap: 4px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 28px;
+  min-height: 0;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 20px;
+  white-space: nowrap;
+  text-align: center;
+}
+.session-mode .session-subagent-summary:is(:hover, :focus-visible) {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.session-mode .session-subagent-summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
 }
 .session-mode .session-agent-mentions {
   position: relative;
@@ -341,13 +366,4 @@
 }
 .session-mode .session-agent-mentions > button {
   min-width: 44px;
-}
-
-/* The existing inspector entry owns layout space. Composer notices must not
-   float across that entry when both observers have discovered descendants. */
-.session-mode
-  .session-composer-target-container:has(> .session-subagent-summary)
-  .session-composer-floating {
-  position: relative;
-  inset: auto;
 }

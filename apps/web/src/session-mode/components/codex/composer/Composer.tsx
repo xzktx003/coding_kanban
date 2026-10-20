@@ -1,3 +1,4 @@
+import { SubagentSummary } from "@session/features/subagents/SubagentSummary";
 import { sessionDraftSubmissions } from "@session/features/subagents/submissions";
 import { v4 as randomUUID } from "uuid";
 import { mentionDrafts } from "@session/features/subagents/mentions";
@@ -1021,6 +1022,7 @@ export function Composer({
                 ) : (
                   <AccessModePopover compact threadId={currentThreadId} />
                 )}
+                <SubagentSummary root={currentThreadId} />
               </div>
               <div className="session-composer-actions flex items-center gap-2">
                 <NativeModelSelector

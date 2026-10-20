@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { UsersRound } from "lucide-react";
 import { useSubagentFamily } from "./hooks";
 import { openSubagents } from "./service";
 import type { ChildState } from "./model";
@@ -12,36 +12,22 @@ const DONE: ReadonlySet<ChildState> = new Set([
 
 export function SubagentSummary({ root }: { root: string | null }) {
   const { rows, family } = useSubagentFamily(root);
-  const [expanded, setExpanded] = useState(false);
-  if (!root || (!rows.length && !family)) return null;
+  if (!root) return null;
   const active = rows.filter((row) => !DONE.has(row.state));
   const uncertain =
     !family?.complete || rows.some((row) => row.state === "unknown");
-  if (!uncertain && active.length === 0) return null;
+  // Keep a stable, compact entry in the existing composer toolbar. A failed read
+  // means unknown status, not evidence that a child was started.
   return (
-    <div className="session-subagent-summary" role="region" aria-label="子智能体">
-      <div className="session-subagent-summary-row">
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded(!expanded)}
-        >
-          {expanded ? "▾" : "▸"} 子智能体 ·{" "}
-          {uncertain ? "已开启 · 待确认" : `已开启 · ${active.length}`}
-        </button>
-      </div>
-      {expanded &&
-        active.slice(0, 4).map((row) => (
-          <button
-            type="button"
-            key={row.node.thread.id}
-            onClick={() => openSubagents(root, row.node.thread.id)}
-          >
-            {row.node.thread.agentNickname ??
-              row.node.thread.name ??
-              row.node.thread.id.slice(0, 8)}
-          </button>
-        ))}
-    </div>
+    <button
+      type="button"
+      className="session-subagent-summary"
+      aria-label={`子智能体 · ${uncertain ? "待确认" : active.length}`}
+      title={`查看子智能体 · ${uncertain ? "状态待确认" : `${active.length} 个活动中`}`}
+      onClick={() => openSubagents(root, null)}
+    >
+      <UsersRound size={14} aria-hidden="true" />
+      <span aria-hidden="true">{uncertain ? "?" : active.length}</span>
+    </button>
   );
 }

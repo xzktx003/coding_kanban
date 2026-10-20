@@ -9,6 +9,7 @@ for (const width of [1366, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await installSessionUxFixture(page, 0);
     const reads: string[] = [];
+    let refreshBarrier: Promise<void> | null = null;
     await page.route("**/api/session/api/filesystem/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
       const body =
@@ -19,6 +20,7 @@ for (const width of [1366, 390]) {
         await route.fulfill({ json: body.path });
       } else if (path.endsWith("/read-directory")) {
         reads.push(body.path);
+        if (body.path === "/fixture" && refreshBarrier) await refreshBarrier;
         const name =
           body.path === "/fixture"
             ? "src"
@@ -91,6 +93,18 @@ for (const width of [1366, 390]) {
     ).toBeVisible();
     expect(reads.filter((path) => path === "/fixture/src")).toHaveLength(1);
     expect(reads.filter((path) => path === "/fixture/src/lib")).toHaveLength(1);
+    const file = page.getByRole("button", {
+      name: "文件 index.ts",
+      exact: true,
+    });
+    await file.focus();
+    const retainedFile = await file.elementHandle();
+    const before = await file.boundingBox();
+    const rootReadsBefore = reads.filter((path) => path === "/fixture").length;
+    let releaseRefresh!: () => void;
+    refreshBarrier = new Promise<void>((resolve) => {
+      releaseRefresh = resolve;
+    });
     await page.evaluate(() => {
       window.dispatchEvent(
         new CustomEvent("fs_change", {
@@ -98,6 +112,18 @@ for (const width of [1366, 390]) {
         }),
       );
     });
+    await expect
+      .poll(() => reads.filter((path) => path === "/fixture").length)
+      .toBe(rootReadsBefore + 1);
+    await expect(file).toBeVisible();
+    expect(
+      await retainedFile!.evaluate(
+        (el) => el.isConnected && document.activeElement === el,
+      ),
+    ).toBe(true);
+    expect(await file.boundingBox()).toEqual(before);
+    releaseRefresh();
+    refreshBarrier = null;
     await expect
       .poll(() => reads.filter((path) => path === "/fixture/src/lib").length)
       .toBe(2);
