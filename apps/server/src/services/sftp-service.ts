@@ -747,7 +747,7 @@ export class SftpService {
     try {
       return await callback(client);
     } catch (error) {
-      this.disposeConnection(target);
+      this.disposeConnection(target, client);
       throw error;
     }
   }
@@ -773,37 +773,46 @@ export class SftpService {
       idleTimer: null,
       ready: Promise.resolve(),
     } satisfies PooledConnection;
+    this.connections.set(connectionKey, connection);
 
     connection.ready = new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error("SFTP connection timed out"));
+        fail(new Error("SFTP connection timed out"));
       }, 30_000);
+      const fail = (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+        this.disposeConnection(target, client);
+      };
 
       client
         .once("ready", () => {
           clearTimeout(timeout);
           resolve();
         })
-        .once("error", (error) => {
-          clearTimeout(timeout);
-          reject(error);
-        })
+        // Agent/auth callbacks can emit again after failure or close. Keep an
+        // error listener for this client's entire lifetime, including ready.
+        .on("error", fail)
         .once("close", () => {
-          this.disposeConnection(target);
-        })
-        .connect({
+          fail(new Error("SFTP connection closed"));
+        });
+
+      try {
+        client.connect({
           host: target.host,
           port: target.port ?? 22,
           username: target.username,
           ...resolveSftpAuthenticationOptions(target),
         });
+      } catch (error) {
+        fail(error);
+      }
     });
-    this.connections.set(connectionKey, connection);
 
     try {
       await connection.ready;
     } catch (error) {
-      this.connections.delete(connectionKey);
+      this.disposeConnection(target, client);
       throw error;
     }
 
@@ -821,6 +830,9 @@ export class SftpService {
           });
         }),
     );
+    // Absolute paths do not await this lookup. Observe its rejection here but
+    // retain the original promise so callers resolving "~" receive the error.
+    void connection.homePath.catch(() => {});
     this.touchConnection(target);
     return connection;
   }
@@ -836,7 +848,7 @@ export class SftpService {
     }
 
     connection.idleTimer = setTimeout(() => {
-      this.disposeConnection(target);
+      this.disposeConnection(target, connection.client);
     }, this.idleTimeoutMs);
     // unref(): the pooled SFTP idle-timeout must not keep the Node event
     // loop alive independently of the Fastify server. Otherwise a single
@@ -845,10 +857,10 @@ export class SftpService {
     connection.idleTimer.unref();
   }
 
-  private disposeConnection(target: SshTarget): void {
+  private disposeConnection(target: SshTarget, expectedClient: Client): void {
     const connectionKey = createConnectionKey(target);
     const connection = this.connections.get(connectionKey);
-    if (!connection) {
+    if (!connection || connection.client !== expectedClient) {
       return;
     }
 
@@ -856,7 +868,8 @@ export class SftpService {
       clearTimeout(connection.idleTimer);
     }
 
-    connection.client.end();
+    // Remove first: end() can synchronously emit close/error on this client.
     this.connections.delete(connectionKey);
+    connection.client.end();
   }
 }

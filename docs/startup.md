@@ -91,6 +91,12 @@ pnpm session:status
 4. 前端可打开但会话不可用：运行 `pnpm session:status`，检查输出中的运行层日志及 `.dev-runtime/server.log`；不要把 `/api/health` 成功当作会话验收。若接口提示“会话服务尚未启动”，还须核对网关进程实际继承的 `SESSION_MODE_ENABLED`；启动环境中的 `0` 会禁用会话，即使 `.env` 没有这一项。需要会话模式时，在本机 `.env` 显式设置 `SESSION_MODE_ENABLED=1`，再执行 `pnpm dev:restart`。
 5. 在同网段设备打开输出的 `Open` 地址，确认页面加载和会话连接；服务器本机的 HTTP 检查不能代替其他设备连通性检查。
 
+### 所有终端同时重连后很快恢复
+
+先看 `.dev-runtime/server.log`：`Gateway exited unexpectedly` 之前的异常栈和退出码说明真实崩溃；仅出现 `Building shared before gateway replacement` 也可能是源码保存后的计划热更新，不能一律认作自动崩溃。核对监听端口进程的 PID 变化，避免把单个终端断线误判为后端重启。
+
+2026-10-21 的四次现场为 `ssh2.Client` 的未处理认证失败。SFTP 连接必须持续监听错误，并按 Client 身份释放自身，不能用一次性错误监听或全局吞错处理；认证失败仍向相应请求报告，不应让其他终端断开。源码红绿灯、实际 Node 子进程回归和范围见 [后端退出记录](backend-restart-ssh-errors.md)。
+
 ### 终端一直显示“服务已更新，等待恢复 tmux 会话”
 
 这是网关从持久快照加载卡片后的待恢复状态，不代表 tmux 窗口已经消失。检查 `POST /api/agent-sessions/restore-managed` 是否完成，再检查 `tmux list-sessions` 能否在几秒内返回。只确认 `/api/health` 正常不足以验收终端恢复。
