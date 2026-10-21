@@ -7,6 +7,17 @@ import {
   type SubagentStopResult,
 } from "@agent-orchestrator/shared";
 type Call = (method: string, params: Record<string, unknown>) => Promise<any>;
+
+function rejectsMetadataItemsView(error: unknown) {
+  const message = String(error);
+  return (
+    /unknown variant\s+[`'\"]?notLoaded\b/i.test(message) ||
+    (/\bitemsView\b/i.test(message) &&
+      /unsupported|not supported|unknown field|unrecognized field/i.test(
+        message,
+      ))
+  );
+}
 export class CodexSubagents {
   private reads = new Map<string, Promise<SubagentThread>>();
   constructor(private call: Call) {}
@@ -155,12 +166,24 @@ export class CodexSubagents {
         while (activeIndex < active.length) {
           const thread = active[activeIndex++];
           try {
-            const page = await this.call("thread/turns/list", {
+            const params = {
               threadId: thread.id,
               limit: 1,
               sortDirection: "desc",
-              itemsView: "full",
-            });
+              itemsView: "notLoaded",
+            };
+            let page;
+            try {
+              page = await this.call("thread/turns/list", params);
+            } catch (error) {
+              // Older native versions may reject the metadata-only view. A
+              // transport/identity failure is not a capability negotiation.
+              if (!rejectsMetadataItemsView(error)) throw error;
+              page = await this.call("thread/turns/list", {
+                ...params,
+                itemsView: "full",
+              });
+            }
             if (!Array.isArray(page.data)) throw new Error("运行轮次尚未确认");
             thread.turns = page.data;
           } catch (e) {

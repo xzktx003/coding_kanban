@@ -9,6 +9,61 @@ const thread = (id: string, parentThreadId: string | null = null) => ({
   turns: [],
   canAcceptDirectInput: false,
 });
+test("passive active-turn discovery requests metadata without native items", async () => {
+  const requests: Record<string, unknown>[] = [];
+  const service = new CodexSubagents(async (method, params) => {
+    if (method === "thread/list")
+      return {
+        data: [{ ...thread("child", "root"), status: { type: "active" } }],
+        nextCursor: null,
+      };
+    assert.equal(method, "thread/turns/list");
+    requests.push(params);
+    return { data: [{ id: "current", status: "inProgress", startedAt: 123 }] };
+  });
+  const result = await service.discover("root", []);
+  assert.equal(result.complete, true);
+  assert.deepEqual(
+    requests.map((p) => p.itemsView),
+    ["notLoaded"],
+  );
+  assert.deepEqual(result.threads[0].turns, [
+    { id: "current", status: "inProgress", startedAt: 123 },
+  ]);
+});
+test("only an explicit unsupported metadata view falls back to full turn reads", async () => {
+  for (const failure of [
+    "unknown variant `notLoaded`, expected `full`",
+    "itemsView not supported",
+    "timeout",
+    "HTTP 503",
+    "invalid threadId",
+    "notLoaded thread state could not be read",
+  ]) {
+    const requests: Record<string, unknown>[] = [];
+    const unsupported =
+      failure.startsWith("unknown variant") ||
+      failure === "itemsView not supported";
+    const service = new CodexSubagents(async (method, params) => {
+      if (method === "thread/list")
+        return {
+          data: [{ ...thread("child", "root"), status: { type: "active" } }],
+          nextCursor: null,
+        };
+      requests.push(params);
+      if (params.itemsView !== "full" || !unsupported) throw new Error(failure);
+      return { data: [{ id: "current", status: "inProgress", items: [] }] };
+    });
+    const result = await service.discover("root", []);
+    assert.deepEqual(
+      requests.map((p) => p.itemsView),
+      unsupported ? ["notLoaded", "full"] : ["notLoaded"],
+      failure,
+    );
+    assert.equal(result.complete, unsupported, failure);
+    if (!unsupported) assert.match(result.errors[0], new RegExp(failure));
+  }
+});
 test("discovers paginated nested children, deduplicates and excludes ordinary forks", async () => {
   const calls: any[] = [];
   const service = new CodexSubagents(async (method, params) => {

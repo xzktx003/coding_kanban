@@ -34,14 +34,18 @@ export function nextRecentViewedCard(
 ): AgentCenterCard | null {
   const cards = useAgentCenterStore.getState().cards;
   const start = Math.max(0, viewed.indexOf(currentId ?? ""));
-  for (const id of viewed.slice(start + (viewed[start] === currentId ? 1 : 0))) {
+  for (const id of viewed.slice(
+    start + (viewed[start] === currentId ? 1 : 0),
+  )) {
     const card = cards.find((item) => item.id === id);
     if (card && card.id !== currentId) return card;
   }
   return null;
 }
 
-useAgentCenterStore.subscribe((state, previous) => {
+const stopRemembering = useAgentCenterStore.subscribe((state, previous) => {
   if (state.currentAgentCardId !== previous.currentAgentCardId)
     rememberViewedChat(state.currentAgentCardId);
 });
+
+if (import.meta.hot) import.meta.hot.dispose(stopRemembering);

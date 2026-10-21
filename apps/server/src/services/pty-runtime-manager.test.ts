@@ -520,6 +520,57 @@ test("launch keeps English input working when tmux normalizes periods in the req
   }
 });
 
+test("tmux readiness survives rename before the first input and rejects unrelated clients", async () => {
+  const registry = new AgentSessionRegistry();
+  const runtimeManager = new PtyRuntimeManager(registry);
+  const originalName = `pty-rename-ready-${Date.now()}`;
+  const renamedName = `pty-renamed-ready-${Date.now()}`;
+  const marker = `RENAME_READY_${Date.now()}`;
+  const session = runtimeManager.launch({
+    workspaceId: "default",
+    displayName: originalName,
+    agentKind: "shell",
+    command: `tmux new-session -s '${originalName}' "printf '${marker}\\n'; exec sh"`,
+    tmuxSessionName: originalName,
+  });
+
+  try {
+    // Observe output without asking the manager to cache readiness first.
+    await waitForOutputMatch(registry, session.id, new RegExp(marker));
+    execFileSync(TMUX_BINARY, [
+      "rename-session",
+      "-t",
+      originalName,
+      renamedName,
+    ]);
+    assert.deepEqual(
+      await Promise.all([
+        runtimeManager.waitForTmuxClientReady(session.id),
+        runtimeManager.waitForTmuxClientReady(session.id),
+      ]),
+      [true, true],
+    );
+    assert.equal(runtimeManager.isTmuxClientReady(session.id), true);
+
+    // An attached client elsewhere must not make a different PTY ready.
+    const unattached = runtimeManager.launch({
+      workspaceId: "default",
+      displayName: "not-a-tmux-client",
+      agentKind: "shell",
+      command: "sleep 30",
+      tmuxSessionName: renamedName,
+    });
+    assert.equal(
+      await runtimeManager.waitForTmuxClientReady(unattached.id),
+      false,
+    );
+  } finally {
+    runtimeManager.dispose();
+    killTmuxSession(originalName);
+    killTmuxSession(renamedName);
+  }
+});
+
 test("dispose kills every active PTY so backend reloads cannot orphan tmux clients", () => {
   const registry = new AgentSessionRegistry();
   const runtimeManager = new PtyRuntimeManager(registry);

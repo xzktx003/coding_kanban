@@ -219,6 +219,7 @@ test("invisible transcripts expire automatically while native completions and re
       phase,
       seconds: (Date.now() - started) / 1000,
       heapBytes: heap.usedSize,
+      backingStorageBytes: heap.backingStorageSize,
       ...memory,
       rendererRssBytes: memory.rendererRssBytes ?? null,
       rendererRssScope: "all-browser-renderers",
@@ -345,6 +346,7 @@ test("long-running native events keep dormant bodies empty with natural garbage 
   const samples: Array<{
     seconds: number;
     heapBytes: number;
+    backingStorageBytes: number;
     documents: number;
     nodes: number;
     listeners: number;
@@ -425,6 +427,7 @@ test("long-running native events keep dormant bodies empty with natural garbage 
       samples.push({
         seconds: (Date.now() - start) / 1000,
         heapBytes: heap.usedSize,
+        backingStorageBytes: heap.backingStorageSize,
         documents: dom.documents,
         nodes: dom.nodes,
         listeners: dom.jsEventListeners,

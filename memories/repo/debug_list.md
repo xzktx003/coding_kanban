@@ -1,5 +1,7 @@
 - 2026-10-19：Codex 宿主端口和官方扩展激活不代表工作台可用。旧 companion 与新源码都标 `0.1.0`，但旧部署缺实例标记／私有 broker／窗口控制，外层一直连接；须检查四个打包文件内容并用全新私有目录部署，不能原地覆盖或停止正式 Agent。网关 watcher 继承的 NATIVE_CODEX_* 会覆盖后来编辑的 .env，需核对并安全重载启动环境；只热更新源码不够。`pnpm codex:status` 还须核对网关项目和启动窗口身份，broker-ready 不等于真实对话。此次 18 项相关检查及隔离项目原生真实回复通过，见 docs/designs/codex-connection-check-20261019.md。
 
+- 2026-10-21（终端重命名后单屏滚轮失效）：`agenteams` 从 `local_shell_tmux` 改名后，PTY 就绪探测仍按启动时旧名称查询 tmux 客户端；鼠标事件虽然到达网关，却因探测失败被丢弃。改为枚举已附着客户端并精确匹配当前 PTY 的 PID，保留 handle 身份核对、并发探测复用和超时，不依赖可变名称。新增首次输入前非前缀重命名、其他客户端不得误判就绪的单测，以及真实浏览器单屏滚轮进入 copy-mode／滚动历史回归，均先红后绿。相关后端 79 项、浏览器 3 项及后端类型检查通过。防回归：不可恢复按启动名称判断就绪；测试改名不能仅追加后缀，tmux 的前缀匹配会掩盖缺陷。
+
 - 2026-10-16：`turn/moderationMetadata` 是原生轮次审核元数据，聊天 `threadRows` 和 `EventItem` 都须按精确方法隐藏，避免通用 JSON 提示和空白占位。只过滤展示，不按正文内容或 `turn/` 前缀过滤；正常回复、警告、失败和审批及底层事件保持。两项回归先红后绿，不变更传输和内存回收机制。
 
 - 2026-10-16：当前增强lCa/uca菜单为63.5*spacing（254px），没有modelPickerTriggerConfig的OR fallback仍是w-56（224px），不能凭旧触发器oracle给当前分支背书。入场为320ms+30ms/.98 scale，默认system减动为animation:none；旧全局0.01ms不等于完全忽略减动。Playwright顶层test.use reducedMotion未实际设置媒体时不能计反例；显式emulateMedia并核对matchMedia，测真实animation对象，不能为inactive longhand覆盖全局基线。背景变量缺失的原probe不作背景oracle，显式on/off产品设置另验。
@@ -1318,3 +1320,13 @@
 - 2026-10-20：会话周期性跳动来自正常布局内增删子 Agent 摘要／连接提示，不必然是 SSE 重连或内存问题。15 秒快照失败→恢复曾使聊天高度改变 45px（1440／390 浏览器红灯）。子 Agent 入口固定在 Composer 工具栏，未知显示 ?，只读检查列表；异步错误提示不得改变正文 viewport 尺寸。文件树刷新不得卸载原树，失败保留快照，换项目必须清旧项目。保留 session-layout-stability、scroll-smoothness、render-recovery、subagents 和 useFileTree 回归；不移除内存防回归保护，不把此次几何绿灯当成长期 RSS 绿灯。
 
 - 2026-10-20：FilesPanel 文件树／预览改为可拖动分栏（树20%～65%，默认35%）。比例只存一个本机数值，单面板／手机布局不可覆盖；预览不能随树隐藏而重新挂载，避免丢编辑器状态。保持 session-files-split、FilesPanel.usability 与 files-draft-safety 回归。
+- 2026-10-20：子 Agent snapshot/verify 是独立网关路由，不能依赖通用 view=chat 或前端 boundedSubagentThread。可见会话每15秒被动查家族，原 full 轮次和旧 metadata→read 回退透传大工具正文；发送前白名单投影保留 parent/source分类/权限/cwd/当前turn，移除 items/prompt/未知大字段。discover优先notLoaded，明确能力不支持才full，停止路径不改。真实HTTP→原生fetch自然五轮+verify，上游25,168,574B→浏览器2,627B；heap/RSS分别记录，短probe不是长期RSS通过证据。保留session-subagent-network-memory及身份/审批/恢复回归，详见docs/session-subagent-memory.md。
+- 2026-10-20：sessionCacheState热替换后的旧ES模块Map可能仍持有恢复正文，当前版本预算不能触达旧Map；dispose必须clear两个恢复Map，并取消recentView/i18n旧模块store订阅。五次真实HMR同载荷，backingStorage增长20,985,320B→17,820B，renderer RSS增长25.199→5.484MiB；旧Map仍存在但entries为0。4MiB直接Map fixture+显式GC只证明旧正文解除引用，非普通缓存预算或自然GC长测。该模块无运行时依赖，普通组件/CSS更新不自动触发；不能泛化成所有GB现场根因。保留session-hmr-retention回归及docs/session-hmr-memory.md边界。
+
+- 2026-10-20：React development measure 的 properties 必须在原生序列化之前裁剪；旧 guard 立即 clearMeasures 仍产生延迟回收的原生垃圾，JS used/backing 与 measure 条数不能替代 RSS。原生3000×64KiB自然同载荷，旧+210.023MiB／仅去props+9.727MiB，末尾显式GC两组约94MiB（仅诊断）。保留普通应用measure/mark、生产API、React轨道/耗时与原输入对象；不是清空全部性能API。补session-react-performance-memory与单测，标准自然30min仍须独立核对，见docs/session-react-performance-memory.md。
+
+- 2026-10-20：React properties前置裁剪有独立native对照收益，但最终2930源冻结标准30min仍红（863轮，heap低点+5.4506MiB、backing+0.1733MiB、RSS327.9961→481.0664MiB/+153.0703）。必须保留此失败，不能用13秒合成原生绿灯、每分钟日志或初始RSS高值代替完整样本验收；RSS峰值/音频最终空闲断言在失败后未执行，剩余来源仍需归因。见docs/session-react-performance-memory.md。
+
+- 2026-10-20：子智能体检查面板必须有鼠标／触摸可用的关闭入口，不能只靠内部 Esc。SubagentPanel 列表、详情与无主会话提示提供关闭按钮，SubagentSummary 对当前 root 按 panelRoot 切换开关及 aria-expanded；关闭只复用 closeSubagents 并恢复入口焦点，不停止 Agent、清理主草稿或改变主输入。session-subagents 的 1440／390px 浏览器回归覆盖关闭列表／详情、重复开关、Esc 和主会话保留；原实现四项均失败，不能再用只测返回列表／Esc 代替点击关闭验收。桌面常驻工具栏绝对定位还会遮挡右上关闭控件，子面板须按现有 --session-dock-height 避让，fallback 主区已避让时不重复；不得用 force click 或提高 z-index 掩盖遮挡。
+
+- 2026-10-20：独立 Codex 宿主 broker-ready 仅证明控制链路，不能代表登录有效。connection-profile-home 的私有 auth 副本过期、refresh token reused 时，浏览器会停官方登录页；本机主登录可仍有效。同账号与 owned0600/无链接/并发变化校验后，仅更新此前授权的副本，真实浏览器首次进入及刷新后输入恢复，未发送任务或重启 Agent。副本非共享文件，此恢复不等于自动续期；不可通过后台静默复制或共享整个 CODEX_HOME 掩盖。见 docs/designs/codex-login-copy-recovery-20261020.md。

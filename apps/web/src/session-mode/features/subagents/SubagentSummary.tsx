@@ -1,6 +1,7 @@
 import { UsersRound } from "lucide-react";
 import { useSubagentFamily } from "./hooks";
-import { openSubagents } from "./service";
+import { closeSubagents, openSubagents } from "./service";
+import { useSubagentStore } from "./store";
 import type { ChildState } from "./model";
 import "./subagents.css";
 
@@ -12,6 +13,7 @@ const DONE: ReadonlySet<ChildState> = new Set([
 
 export function SubagentSummary({ root }: { root: string | null }) {
   const { rows, family } = useSubagentFamily(root);
+  const open = useSubagentStore((s) => !!root && s.panelRoot === root);
   if (!root) return null;
   const active = rows.filter((row) => !DONE.has(row.state));
   const uncertain =
@@ -22,9 +24,15 @@ export function SubagentSummary({ root }: { root: string | null }) {
     <button
       type="button"
       className="session-subagent-summary"
+      data-subagent-root={root}
+      aria-expanded={open}
       aria-label={`子智能体 · ${uncertain ? "待确认" : active.length}`}
-      title={`查看子智能体 · ${uncertain ? "状态待确认" : `${active.length} 个活动中`}`}
-      onClick={() => openSubagents(root, null)}
+      title={
+        open
+          ? "收起子智能体"
+          : `查看子智能体 · ${uncertain ? "状态待确认" : `${active.length} 个活动中`}`
+      }
+      onClick={() => (open ? closeSubagents() : openSubagents(root, null))}
     >
       <UsersRound size={14} aria-hidden="true" />
       <span aria-hidden="true">{uncertain ? "?" : active.length}</span>

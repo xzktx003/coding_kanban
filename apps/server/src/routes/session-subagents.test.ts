@@ -3,6 +3,147 @@ import assert from "node:assert/strict";
 import Fastify from "fastify";
 import { registerSessionSubagentRoutes } from "./session-subagents.js";
 import { registerSessionFollowupRoutes } from "./session-followups.js";
+
+test("passive child snapshots and identity verification never transmit native item bodies", async () => {
+  const app = Fastify();
+  const calls: string[] = [];
+  const body = "private-tool-output:" + "x".repeat(4 * 1024 * 1024);
+  const child = {
+    id: "child",
+    source: {
+      subAgent: {
+        thread_spawn: {
+          parent_thread_id: "root",
+          agent_nickname: "Scout",
+          agent_role: "reviewer",
+          prompt: body,
+        },
+      },
+    },
+    canAcceptDirectInput: true,
+    cwd: "/workspace/project",
+    historyMode: "native",
+    status: { type: "active", activeFlags: ["waitingOnApproval"] },
+    preview: body,
+    unknownFutureBody: body,
+  };
+  const turn = {
+    id: "current",
+    status: "inProgress",
+    startedAt: 123,
+    items: [
+      { id: "command", type: "commandExecution", aggregatedOutput: body },
+    ],
+  };
+  registerSessionSubagentRoutes(app, {
+    origin: () => "http://fixture.invalid",
+    fetch: async (url) => {
+      const method = String(url).split("/api/codex/")[1];
+      calls.push(method);
+      if (method === "thread/list")
+        return Response.json({ data: [child], nextCursor: null });
+      if (method === "thread/turns/list")
+        return Response.json({ data: [turn], nextCursor: null });
+      // Compatibility runtimes may return full history from thread/read.
+      if (method === "thread/metadata")
+        return Response.json({}, { status: 404 });
+      if (method === "thread/read")
+        return Response.json({ thread: { ...child, turns: [turn] } });
+      throw new Error(`Unexpected request: ${method}`);
+    },
+    stop: async () => {
+      throw new Error("Passive reads cannot stop tasks");
+    },
+  });
+  try {
+    for (const endpoint of ["snapshot", "snapshot", "verify"]) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/session/subagents/${endpoint}`,
+        payload: { rootId: "root", threadId: "child" },
+      });
+      assert.equal(response.statusCode, 200);
+      assert.ok(
+        Buffer.byteLength(response.body) < 16 * 1024,
+        `${endpoint} sent ${Buffer.byteLength(response.body)} bytes`,
+      );
+      const result = response.json();
+      const projected = result.threads[0];
+      assert.equal(projected.parentThreadId, "root");
+      assert.equal(projected.agentNickname, "Scout");
+      assert.equal(projected.agentRole, "reviewer");
+      assert.equal(projected.canAcceptDirectInput, true);
+      assert.equal(projected.cwd, child.cwd);
+      assert.equal(projected.historyMode, "native");
+      assert.deepEqual(projected.status, child.status);
+      assert.deepEqual(projected.turns, [
+        { id: "current", status: "inProgress", startedAt: 123 },
+      ]);
+      assert.equal(projected.unknownFutureBody, undefined);
+      assert.ok(projected.preview.length <= 1024);
+      assert.equal(projected.source.subAgent.thread_spawn, undefined);
+      if (endpoint === "snapshot") {
+        assert.equal(result.complete, true);
+        assert.deepEqual(result.errors, []);
+      } else assert.deepEqual(result.thread, projected);
+    }
+    assert.ok(
+      calls.every((method) =>
+        [
+          "thread/list",
+          "thread/metadata",
+          "thread/read",
+          "thread/turns/list",
+        ].includes(method),
+      ),
+    );
+  } finally {
+    await app.close();
+  }
+});
+test("metadata projection preserves denied or unknown permissions and incomplete discovery", async () => {
+  const app = Fastify();
+  const children = [false, null, undefined].map((permission, index) => ({
+    id: `child-${index}`,
+    parentThreadId: "root",
+    source: { subAgent: {} },
+    canAcceptDirectInput: permission,
+    status: { type: "idle" },
+  }));
+  registerSessionSubagentRoutes(app, {
+    origin: () => "http://fixture.invalid",
+    fetch: async (url) =>
+      String(url).endsWith("thread/list")
+        ? Response.json({ data: children, nextCursor: null })
+        : Response.json({ error: "unavailable" }, { status: 503 }),
+    stop: async () => {
+      throw new Error("Passive reads cannot stop tasks");
+    },
+  });
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/session/subagents/snapshot",
+      payload: { rootId: "root", observedIds: ["missing-child"] },
+    });
+    assert.equal(response.statusCode, 200);
+    const result = response.json();
+    assert.deepEqual(
+      result.threads.map((thread: any) => thread.canAcceptDirectInput),
+      [false, null, undefined],
+    );
+    assert.equal(
+      Object.hasOwn(result.threads[2], "canAcceptDirectInput"),
+      false,
+    );
+    assert.equal(result.complete, false);
+    assert.deepEqual(result.unavailableIds, ["missing-child"]);
+    assert.equal(result.errors.length, 1);
+    assert.match(result.errors[0], /missing-child/);
+  } finally {
+    await app.close();
+  }
+});
 test("validates identities and stop ranges before any upstream request", async () => {
   const app = Fastify();
   let calls = 0;

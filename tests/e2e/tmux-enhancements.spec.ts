@@ -1049,8 +1049,8 @@ test("browser: 多屏非输入终端也可以用鼠标滚轮浏览自己的历�
     await card.dblclick();
 
     await page
-    .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
-    .click();
+      .locator('[data-testid^="focus-page-tab-"][aria-pressed="true"]')
+      .click();
     await page.getByRole("menuitemradio", { name: /左右双屏/ }).click();
 
     const secondPane = page.locator(
@@ -1250,6 +1250,86 @@ test("browser: tmux 缩略图不会把真实终端缩回小尺寸", async ({
       );
     }
     killTmuxSession(sessionName);
+  }
+});
+
+test("browser: renamed tmux terminal wheel scrolls history in single-pane view", async ({
+  page,
+  request,
+}) => {
+  const sessionName = `e2e-wheel-rename-${Date.now()}`;
+  const renamedName = `e2e-renamed-wheel-${Date.now()}`;
+  let sessionId: string | undefined;
+
+  try {
+    runTmux([
+      "new-session",
+      "-d",
+      "-s",
+      sessionName,
+      "-c",
+      process.cwd(),
+      "node ./scripts/mock-terminal-agent.mjs scroll",
+    ]);
+    const launched = await request.post(backendPath("/api/agent-launch/pty"), {
+      data: {
+        workspaceId: "default",
+        displayName: sessionName,
+        agentKind: "shell",
+        command: `tmux attach -t '${sessionName}'`,
+        workingDirectory: process.cwd(),
+        tmuxSessionName: sessionName,
+      },
+    });
+    expect(launched.ok()).toBeTruthy();
+    const session = await launched.json();
+    sessionId = session.id;
+    await expect
+      .poll(() =>
+        runTmux([
+          "list-clients",
+          "-t",
+          sessionName,
+          "-F",
+          "#{client_pid}",
+        ]).split("\n"),
+      )
+      .toContain(String(session.transportRef.processId));
+
+    // Rename before opening the terminal, so no stdin has cached readiness.
+    const renamed = await request.patch(
+      backendPath(`/api/agent-sessions/${sessionId}`),
+      {
+        data: { displayName: renamedName },
+      },
+    );
+    expect(renamed.ok()).toBeTruthy();
+    await page.goto("/?mode=terminal");
+    const card = page.locator(".grid-card", {
+      has: page.locator(".grid-card-name", { hasText: renamedName }),
+    });
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await card.dblclick();
+    const screen = page.locator(".focus-main .terminal-view .xterm-screen");
+    await expect(screen).toBeVisible();
+    const box = await screen.boundingBox();
+    expect(box).not.toBeNull();
+    const paneState = (format: string) =>
+      runTmux(["display-message", "-p", "-t", renamedName, format]);
+    expect(paneState("#{pane_in_mode}")).toBe("0");
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.wheel(0, -300);
+    await expect.poll(() => paneState("#{pane_in_mode}")).toBe("1");
+    await page.mouse.wheel(0, -300);
+    await expect
+      .poll(() => Number(paneState("#{scroll_position}")))
+      .toBeGreaterThan(0);
+  } finally {
+    if (sessionId) {
+      await request.delete(backendPath(`/api/agent-sessions/${sessionId}`));
+    }
+    killTmuxSession(sessionName);
+    killTmuxSession(renamedName);
   }
 });
 

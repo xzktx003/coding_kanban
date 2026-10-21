@@ -273,14 +273,16 @@ for (const { width, healthFailure } of [
     await page.setViewportSize({ width, height: 900 });
     const { fixture, stream } = await setup(page, baseURL!);
     let failHealth = false;
+    let failedHealthReads = 0;
     if (healthFailure)
-      await page.route("**/api/session/health", (route) =>
-        route.fulfill(
+      await page.route("**/api/session/health", (route) => {
+        if (failHealth) failedHealthReads++;
+        return route.fulfill(
           failHealth
             ? { status: 503, json: { error: "health probe unavailable" } }
             : { json: { status: "ok" } },
-        ),
-      );
+        );
+      });
     let submissions = 0;
     let receipt: any = { revision: 0, paused: null, items: [] };
     await page.route(
@@ -341,9 +343,17 @@ for (const { width, healthFailure } of [
       if (healthFailure) {
         await expect(editor).toBeVisible();
         failHealth = true;
+        // The outage notice now separates its heading from collapsible details.
+        // Check the same failure facts rather than the former combined text node.
+        const outage = page.getByRole("alert").filter({
+          hasText: "会话服务连接中断",
+        });
+        await expect(outage).toBeVisible({ timeout: 22000 });
+        expect(failedHealthReads).toBeGreaterThanOrEqual(5);
         await expect(
-          page.getByText("会话服务连接中断，正在自动重连。草稿已保留。"),
-        ).toBeVisible({ timeout: 22000 });
+          outage.getByText("正在自动重连。草稿已保留。"),
+        ).toBeVisible();
+        await expect(outage.getByText("服务返回 HTTP 503")).toBeVisible();
       }
       await editor.fill("只投递一次，等待真实流恢复");
       await page.getByRole("button", { name: "发送消息", exact: true }).click();

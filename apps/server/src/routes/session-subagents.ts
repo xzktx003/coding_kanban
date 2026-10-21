@@ -1,6 +1,62 @@
 import type { FastifyInstance } from "fastify";
 import { CodexSubagents } from "../services/codex-subagents.js";
-import type { SubagentStopTarget } from "@agent-orchestrator/shared";
+import {
+  classifySubagentThread,
+  normalizeSubagentThread,
+  subagentParent,
+  type SubagentStopTarget,
+  type SubagentThread,
+} from "@agent-orchestrator/shared";
+
+/** Passive family polling needs identity and lifecycle metadata, never history. */
+function browserThreadMetadata(raw: SubagentThread): SubagentThread {
+  const thread = normalizeSubagentThread(raw);
+  const text = (value: string | null | undefined, limit: number) =>
+    typeof value === "string"
+      ? value.slice(0, limit).split("").join("")
+      : value;
+  const parent = subagentParent(thread);
+  const kind = classifySubagentThread(thread);
+  const source =
+    typeof thread.source === "string"
+      ? text(thread.source, 512)
+      : kind === "child" && thread.source && typeof thread.source === "object"
+        ? { subAgent: {} }
+        : kind === "main" && thread.source && typeof thread.source === "object"
+          ? { custom: text((thread.source as { custom?: string }).custom, 512) }
+          : undefined;
+  return {
+    id: thread.id,
+    ...(source === undefined ? {} : { source }),
+    ...(parent
+      ? { parentThreadId: parent }
+      : thread.parentThreadId === null
+        ? { parentThreadId: null }
+        : {}),
+    sessionId: thread.sessionId,
+    agentNickname: text(thread.agentNickname, 160),
+    agentRole: text(thread.agentRole, 160),
+    name: text(thread.name, 512),
+    preview: text(thread.preview, 1024) ?? undefined,
+    model: text(thread.model, 512),
+    reasoningEffort: text(thread.reasoningEffort, 160),
+    // Paths and IDs are authoritative routing identities; do not truncate them.
+    cwd: thread.cwd,
+    createdAt: thread.createdAt,
+    updatedAt: thread.updatedAt,
+    canAcceptDirectInput: thread.canAcceptDirectInput,
+    historyMode: thread.historyMode,
+    status: thread.status && {
+      type: thread.status.type,
+      ...(thread.status.activeFlags
+        ? { activeFlags: thread.status.activeFlags }
+        : {}),
+    },
+    turns: thread.turns
+      ?.slice(-1)
+      .map(({ id, status, startedAt }) => ({ id, status, startedAt })),
+  };
+}
 const id = (value: unknown): string => {
   if (
     typeof value !== "string" ||
@@ -50,7 +106,13 @@ export function registerSessionSubagentRoutes(
         throw Object.assign(new Error("子任务补查范围过大"), {
           statusCode: 400,
         });
-      return service.discover(root, observed.map(id));
+      const snapshot = await service.discover(root, observed.map(id));
+      // This route is outside the generic view=chat proxy. Reduce before JSON
+      // serialization, including old runtime metadata/read fallbacks.
+      return {
+        ...snapshot,
+        threads: snapshot.threads.map(browserThreadMetadata),
+      };
     },
   );
   app.post<{ Body: { rootId: unknown; threadId: unknown } }>(
@@ -62,7 +124,10 @@ export function registerSessionSubagentRoutes(
         id(request.body?.threadId),
         (node) => threads.push(node),
       );
-      return { thread, threads };
+      return {
+        thread: browserThreadMetadata(thread),
+        threads: threads.map(browserThreadMetadata),
+      };
     },
   );
   app.post<{ Body: { rootId: unknown; targets: unknown } }>(

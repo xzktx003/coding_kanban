@@ -631,6 +631,69 @@ test("role mentions retain native identity in a parent submission; the panel doe
   ).toEqual([{ name: "reviewer", path: "subagent://reviewer" }]);
   expect(f.errors).toEqual([]);
 });
+for (const width of [1440, 390]) {
+  test(`child inspector closes from list and detail at ${width}px`, async ({
+    page,
+  }, info) => {
+    await page.setViewportSize({ width, height: 844 });
+    const f = await setup(page);
+    const panel = page.locator(".session-subagent-panel");
+    const summary = page.locator(".session-subagent-summary");
+    await f.editor.fill("关闭面板后保留主会话草稿");
+    await page.screenshot({ path: info.outputPath("list-close.png") });
+    await panel
+      .getByRole("button", { name: "关闭子智能体", exact: true })
+      .click({ timeout: 3000 });
+    await expect(panel).toHaveCount(0);
+    await expect(summary).toBeFocused();
+    await expect(summary).toHaveAttribute("aria-expanded", "false");
+
+    await summary.click();
+    await page.locator('[data-subagent-id="child-iris"]').click();
+    await expect(
+      panel.getByRole("button", { name: "返回子代理列表", exact: true }),
+    ).toBeVisible();
+    await page.screenshot({ path: info.outputPath("detail-close.png") });
+    await panel
+      .getByRole("button", { name: "关闭子智能体", exact: true })
+      .click();
+    await expect(panel).toHaveCount(0);
+    await expect(summary).toBeFocused();
+    await expect(f.editor).toHaveText("关闭面板后保留主会话草稿");
+    await expect(
+      page.locator('[role=tab][data-tab-key="codex:ux-0"]'),
+    ).toHaveAttribute("aria-selected", "true");
+    expect(f.calls.filter((call) => call.path.endsWith("/stop"))).toEqual([]);
+    expect(
+      f.fixture.calls.filter((call) =>
+        /thread\/resume|turn\/start|turn\/interrupt/.test(call.path),
+      ),
+    ).toEqual([]);
+    expect(f.errors).toEqual([]);
+  });
+
+  test(`child inspector entry toggles closed and Escape still works at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: 844 });
+    const f = await setup(page);
+    const panel = page.locator(".session-subagent-panel");
+    const summary = page.locator(".session-subagent-summary");
+    await summary.click();
+    await expect(panel).toHaveCount(0, { timeout: 3000 });
+    await expect(summary).toHaveAttribute("aria-expanded", "false");
+    await summary.click();
+    await expect(panel).toBeVisible();
+    await expect(summary).toHaveAttribute("aria-expanded", "true");
+    await page.locator('[data-subagent-id="child-iris"]').click();
+    await summary.click();
+    await expect(panel).toHaveCount(0);
+    await summary.click();
+    await closeInspection(page);
+    expect(f.errors).toEqual([]);
+  });
+}
+
 test("mobile child panel returns using the same entry and preserves input", async ({
   page,
 }) => {

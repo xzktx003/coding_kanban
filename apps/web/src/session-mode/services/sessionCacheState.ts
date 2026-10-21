@@ -6,6 +6,18 @@ export const cachedTranscriptBaselines = new Map<
   ServerNotification[]
 >();
 export const cachedTranscriptTimings = new Map<string, TurnTiming>();
+let disposed = false;
+export const isTranscriptCacheDisposed = () => disposed;
+
+// Vite can retain replaced module namespaces. Release their disposable bodies
+// explicitly; the replacement's caches and device history remain untouched.
+if (import.meta.hot)
+  import.meta.hot.dispose(() => {
+    disposed = true;
+    cachedTranscriptBaselines.clear();
+    cachedTranscriptTimings.clear();
+  });
+
 export function cacheInvalidatedAt(key: string) {
   try {
     return Number(

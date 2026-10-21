@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { X } from "lucide-react";
 import { useCodexStore } from "@session/components/codex/stores";
 import { CodexThread } from "@session/components/codex/thread/CodexThread";
 import { ApprovalItem } from "@session/components/codex/items/ApprovalItem";
@@ -103,6 +104,26 @@ export function SubagentPanel() {
   const [verifiedSelection, setVerifiedSelection] = useState("");
   const [clock, setClock] = useState(Date.now());
   const backRef = useRef<HTMLButtonElement>(null);
+  const closePanel = () => {
+    closeSubagents();
+    const entry = root
+      ? document.querySelector<HTMLButtonElement>(
+          `.session-subagent-summary[data-subagent-root="${CSS.escape(root)}"]`,
+        )
+      : null;
+    if (entry) entry.focus();
+    else useCodexStore.getState().triggerInputFocus();
+  };
+  const closeButton = (
+    <button
+      type="button"
+      aria-label="关闭子智能体"
+      title="关闭子智能体"
+      onClick={closePanel}
+    >
+      <X size={16} aria-hidden="true" />
+    </button>
+  );
   const row = data.rows.find((r) => r.node.thread.id === selected);
   const select = (id: string | null) => {
     if (root)
@@ -159,6 +180,10 @@ export function SubagentPanel() {
   if (!root || !isCodex)
     return (
       <div className="session-subagent-panel">
+        <header className="session-subagent-detail-bar">
+          <h2>子智能体</h2>
+          {closeButton}
+        </header>
         <p>请选择一个 Codex 主会话查看子智能体。</p>
       </div>
     );
@@ -262,10 +287,7 @@ export function SubagentPanel() {
         if (e.key === "Escape") {
           e.stopPropagation();
           if (selected) returnList();
-          else {
-            closeSubagents();
-            useCodexStore.getState().triggerInputFocus();
-          }
+          else closePanel();
         }
       }}
     >
@@ -286,6 +308,7 @@ export function SubagentPanel() {
             />
             <h2>{row ? displayName(row) : selected.slice(0, 8)}</h2>
             {modelLine ? <small>{modelLine}</small> : null}
+            {closeButton}
           </header>
           {error ? (
             <p role="alert" className="session-subagent-notice">
@@ -350,6 +373,7 @@ export function SubagentPanel() {
         <div className="session-subagent-list">
           <header className="session-subagent-detail-bar">
             <h2>子智能体</h2>
+            {closeButton}
           </header>
           <div className="session-subagent-sheet">
             {(!data.family?.complete || data.family?.error) && (

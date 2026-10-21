@@ -38,7 +38,7 @@ if (!i18n.isInitialized) {
 }
 
 // Keep the active i18next language in sync with the persisted locale store.
-useLocaleStore.subscribe((state) => {
+const stopLocaleSync = useLocaleStore.subscribe((state) => {
   let newLocale: AppLocale;
   if (state.locale === 'auto') {
     newLocale = detectLocale();
@@ -49,6 +49,8 @@ useLocaleStore.subscribe((state) => {
     void i18n.changeLanguage(newLocale);
   }
 });
+
+if (import.meta.hot) import.meta.hot.dispose(stopLocaleSync);
 
 export { i18n };
 

@@ -7,6 +7,14 @@
   border-left: 1px solid var(--border);
   background: var(--background);
 }
+/* The desktop tool dock overlays the top right. Its fallback layout already
+   offsets the whole main pane; otherwise reserve its height for this inspector. */
+.session-mode
+  [data-tool-dock="true"]:not([data-tool-dock-fallback="true"])
+  .session-subagent-dock {
+  box-sizing: border-box;
+  padding-top: var(--session-dock-height);
+}
 .session-mode .session-subagent-panel {
   display: flex;
   flex-direction: column;

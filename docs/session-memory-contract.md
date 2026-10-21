@@ -12,6 +12,12 @@
 
 ## 后续修改必须保持的边界
 
+2026-10-20 React 诊断补充：仅清空时间线仍会先序列化大 props，产生 JS 堆未充分反映的原生分配；开发模式明确 React 的 `devtools.properties` 必须在原生 `measure` 调用之前剥离，保留计时／轨道及普通应用 API，不修改 React 复用参数。原生对照、适用边界和完整页面验收见 [React 性能记录](session-react-performance-memory.md)。
+
+2026-10-20 子 Agent 补充：独立 `subagents/snapshot`／`verify` 不经过通用聊天代理，必须自行在网关序列化前裁剪；不得把 `boundedSubagentThread` 的前端过滤当作传输保护。活跃轮次优先只读 `itemsView: notLoaded`，明确不支持时才回退；旧运行层返回完整 items 仍必须在浏览器前剥离。保留父子身份、权限和当前轮次，回归及证据见 [空闲轮询正文透传修复](session-subagent-memory.md)。此修复不自动关闭已有长期 RSS 红灯。
+
+2026-10-20 热更新补充：替换 `sessionCacheState` 时必须释放旧模块的恢复正文／时间 Map，模块级 store 订阅也必须 dispose。旧 ES 模块可继续存在，不能只检查当前 Map 或 `Runtime.getHeapUsage.usedSize`；外部字符串还应核对 `backingStorageSize` 与 renderer RSS。该路径有明确触发条件，不等于任意组件更新都会泄漏；物理留存回归与范围见 [HMR 释放](session-hmr-memory.md)。
+
 2026-10-20 输入补充：文字草稿必须按 owner 保存实际变化，不能恢复每键序列化完整草稿集合；动作型文件树／附件消费者不得订阅输入全文。关注集合／项目相同快照既不能通知 UI，也不应反复写设备缓存，尤其不能用空闲轮询覆盖另一页的本地选择。保留逐会话版本、同步落盘、旧备份／墓碑与失败重试边界；验收入口见 [输入响应](session-input-responsiveness.md)。这些 CPU／存储修复不替代 renderer RSS 长测。
 
 2026-10-14 命令详情补充：聊天投影仍不发送任何命令输出。四类命令只有显式展开才经固定精确项通道读取；完整命令、输出、ANSI 派生节点和复制闭包局限于可卸载子组件，关闭/隐藏立即释放，不依赖聊天 60 秒宽限期。返回保留展开状态但不自动重读，取消须另外证明自有 native reader 实际退出。网关使用同一只读 reader 支持已运行旧会话服务，禁止因此重启 Agent。实现与测量边界见 [命令详情](session-command-details.md)。
@@ -26,7 +32,7 @@
 | 完成恢复 | `active → idle/systemError` 即使旧 timing 仍为 `inProgress` 也要补读；读取中发生完成须合并排队一次后续读取；轻量快照持续 idle 与本地 inProgress 矛盾时，按轮次去重补读一次 | 为减少请求漏掉最终回复、未读状态或外部客户端保存的历史；读取中完成被直接忽略 |
 | 不可见正文生命周期 | 以实际可见的聊天正文组件计数；最后一个使用者离开 60 秒后释放可恢复正文、流式缓冲及派生视图缓存（5 秒扫描，繁忙浏览器可能延迟）；运行状态、审批、草稿及未读独立保留，重显只读恢复最近页 | 把“仍在关注列表”等同于一直需要正文；回收后让后台 delta/历史读取重新填满；恢复时沿用已释放的旧分页起点漏掉回复 |
 | 空闲同步 | 相同项目/标签快照返回原 Zustand 状态，不通知订阅者；真实变化、操作确认与错误恢复仍正常发布 | 每两秒生成新根状态，即使字段相同也通知整片 Markdown、卡片和导航重渲染 |
-| 开发性能时间线 | React 开发性能记录的原生时间线留存也须释放；开发专用、明确识别 React 的记录，普通应用 measure/mark 保留；同时测 renderer RSS | 只测 JS 堆；长期保留含组件属性的 React User Timing 记录；清空所有应用计时或生产 API |
+| 开发性能时间线 | React 大属性在原生 measure 序列化之前剥离，时间线留存也须释放；开发专用、明确识别 React 的记录，普通应用 measure/mark 保留；同时测 renderer RSS | 只测 JS 堆；先序列化完整 React 属性再清空、长期保留 React User Timing 记录；清空所有应用计时或生产 API |
 | 完成提示音 | 单个活跃/关闭中的 AudioContext；每声结束断开节点，连续任务复用上下文，空闲 30 秒关闭；音频时间冻结时有墙钟释放兜底，HMR 释放旧实例 | 每次完成 new AudioContext 却只调用 oscillator.stop；仅测 JS 堆而忽略原生音频资源；自动播放阻止后无限积累挂起上下文 |
 | 前端留存与渲染 | 活动助手正文使用有界稳定分段，完成后再渲染最终 Markdown；显示缓存与线程元数据不重复持有工具正文；截断预览断开大字符串引用 | 每 token 复制历史数组、拼接全文或重跑 Markdown；用短 `slice` 的字符数证明原始大字符串已释放；移除预算和退出观察范围的清理 |
 
@@ -39,11 +45,13 @@
 | 修改位置 | 必查测试 |
 | --- | --- |
 | `apps/server/src/routes/session-mode.ts` | 同目录 `session-mode.test.ts`；`tests/e2e/session-network-memory.spec.mts`（真实 HTTP → 网关 → 浏览器原生 EventSource） |
+| `apps/server/src/routes/session-subagents.ts`、`services/codex-subagents.ts` | 对应两个 `.test.ts`；`tests/e2e/session-subagent-network-memory.spec.mts`（真实 HTTP、15 秒自然空闲轮询、旧运行层巨量正文）；`session-subagents.spec.ts` |
 | `apps/web/src/session-mode/lib/eventStream.ts`、`services/apiAdapt/codex.ts` | `lib/eventStream.test.ts`、`services/apiAdapt/codex.history-page.test.ts`、`services/apiAdapt/codex-ownership.test.ts`、`components/codex/thread/CodexAccessNotice.test.tsx` |
 | `services/followedSessionHistorySync.ts`、`services/followedSessionStatusSync.ts`（位于 session-mode） | 对应两个 `.test.ts`；`tests/e2e/session-background-sync.spec.ts`、`session-restoration.spec.ts`、`session-state-recovery.spec.ts` |
 | `services/codexTranscriptActivity.ts`、`sessionTranscriptRetention.ts`、`components/codex/hooks/useTranscriptVisibility.ts`（位于 session-mode） | 对应单测；`tests/e2e/session-idle-memory.spec.ts`；发送回执、审批和恢复回归 |
+| `services/sessionCacheState.ts`、`sessionTranscriptCache.ts`、模块级最近访问／语言订阅（位于 session-mode） | `sessionTranscriptCache.hmr.test.ts`；`tests/e2e/session-hmr-retention.spec.mts`（真实 HMR、旧正文物理释放）；`session-idle-memory` 与恢复回归；旧代迟到读取不得重填已释放缓存 |
 | `stores/useAgentCenterStore.ts`、`stores/useWorkspaceStore.ts`（位于 session-mode） | 对应两个 `.sync.test.ts`，尤其 `unchanged polling snapshots do not notify UI subscribers` |
-| `apps/web/src/main.tsx`、`lib/react-performance-retention.ts` | `lib/react-performance-retention.test.ts`（纳入 `pnpm --filter web test:terminal`）；30 分钟 `session-idle-memory.spec.ts` 同时核对 React measure / RSS |
+| `apps/web/src/main.tsx`、`lib/react-performance-retention.ts` | `lib/react-performance-retention.test.ts`（纳入 `pnpm --filter web test:terminal`）；`session-react-performance-memory.spec.mts` 原生序列化前裁剪与 RSS 对照；30 分钟 `session-idle-memory.spec.ts` 同时核对 React measure / RSS |
 | `utils/beep.ts`（位于 session-mode） | `utils/beep.test.ts`；`tests/e2e/session-idle-memory.spec.ts` 原生 WebAudio 上下文空闲归零 / 连续任务只创建一个；30 分钟同时观察 JS 堆与 renderer RSS |
 | `services/codexTranscriptVisibility.ts`、`codexTranscriptMemoryBudget.ts`、`components/codex/stores`（位于 session-mode） | 对应单测；`tests/e2e/session-codex-stream-memory.spec.ts`、`session-transcript-memory.spec.ts`、`session-memory-governor.spec.ts` |
 
@@ -166,3 +174,15 @@ RSS 低点 469.8320→496.0898 MiB，增长 26.2578 MiB；heap 低点 55.2915→
 本轮修复逐键全量草稿保存、动作型消费者全量输入订阅、无变化共享同步仍落盘；详见[输入响应验收](session-input-responsiveness.md)。原标准 Playwright／自然 GC 三十分钟负载仍为红灯：1801.968 秒、862 次采样，heap 低点增长 5.6413 MiB，renderer RSS 低点 320.8086→502.0703 MiB（+181.2617 MiB＞128 MiB）；峰值 heap/RSS 为 212.2511/673.2422 MiB。采样始终同一 PID/start ticks、无缺测或页面错误、React measure 为零，DOM/监听器低点增加 7/15。没有证据据此宣布原生增长根因或完全稳定。
 
 失败在 RSS 低点断言，后续峰值及最后音频空闲归零断言未执行，不计通过；连续负载只观察一个上下文。未改变原工作负载、门槛或采样器，无强制 GC／刷新／停止 Agent。1,837 个生产源的冻结指纹前后相同；首轮因补齐跨页空闲互写修复而取消，不计完整长测。完整 JSON 与日志在忽略目录 `.dev-runtime/session-input-20261020/final-soak/`、`final-soak.log`，摘要 `final-soak-summary.json`。三页十分钟输入回归已通过，不能替代此三十分钟 RSS 红灯；更早红灯和对照继续保留。
+
+## 空闲大包／HMR 排查中的标准长测（2026-10-20）
+
+独立子 Agent 路由裁剪后，原标准自然 GC 30 分钟测试仍失败：1801.149 秒、861 轮，heap 低点 54.2825→59.4814 MiB（+5.1989），renderer RSS 低点 336.9883→481.8711 MiB（+144.8828＞128 MiB）。峰值 heap/RSS 为 176.0709/592.9336 MiB；同一 renderer PID 2949235／start ticks 150742832，无页面或采样错误。失败在 RSS 低点断言，后续峰值及最终音频空闲归零断言未执行，不能计作通过。
+
+本轮未改标准负载或门槛，不强制 GC、刷新或停止 Agent。运行先于 HMR 修复启动，fixture 阻断热更新，但期间四份 HMR 相关源码变更，因此不是全部最终源码的冻结验收；指纹差异与范围另存 `soak-source-scope.json`。完整指标与日志位于忽略目录 `.dev-runtime/session-idle-regression-20261020/soak/`、`soak.log`、`soak-summary.json`。此红灯保留，后续仅在找到新的可验证路径后重测，不能重复执行挑选绿色结果。
+
+## React 属性原生序列化修复后的标准长测（2026-10-20）
+
+后续对照区分了调试网络缓存、HTTP 夹具、原生 SSE 和 GC 堆容量，结果与候选方案范围见 [原生内存归因](session-native-memory-attribution.md)。负结果也必须保留，不能把显式 GC 后下降算作自然回收达标。
+
+[原生属性专项](session-react-performance-memory.md) 证明先裁剪再 measure 可阻止大块原生序列化分配，但最终冻结源码的标准 30 分钟仍失败：1802.013 秒、863 轮，heap 低点 +5.4506 MiB、backing storage +0.1733 MiB、RSS 低点 327.9961→481.0664 MiB（+153.0703＞128）；峰值 RSS 627.7461 MiB。2,930 文件指纹前后相同，同一 renderer 身份、错误为空。没有调整负载／门槛或强制 GC／刷新；失败后的 RSS 峰值和音频最终空闲归零断言未执行。专项因果成立不代表完整页面剩余增长已解释，原红灯继续保留，完整指标及路径见该文档。

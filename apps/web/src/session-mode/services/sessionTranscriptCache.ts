@@ -17,6 +17,7 @@ import {
   cachedTranscriptBaselines,
   cachedTranscriptTimings,
   cacheInvalidatedAt,
+  isTranscriptCacheDisposed,
 } from "./sessionCacheState";
 
 export interface ReadingPosition {
@@ -388,6 +389,7 @@ export function startSessionTranscriptCache() {
     if (dirty.size && !timer) timer = setTimeout(flush, 500);
   }
   async function restore() {
+    if (stopped || isTranscriptCacheDisposed()) return;
     for (const card of openedSessions()) {
       if (card.kind === "codex" && isCodexTranscriptDormant(card.id)) continue;
       const key = `${card.kind}:${card.id}`;
@@ -398,8 +400,10 @@ export function startSessionTranscriptCache() {
           ? useCodexStore.getState().events[card.id]
           : useCCStore.getState().sessionMessagesMap[card.id];
       const cached = await readTranscriptCache(key);
+      // Cache disposal can precede React's effect cleanup during hot replacement.
+      // A late IndexedDB result must not repopulate the retired module's maps.
+      if (stopped || isTranscriptCacheDisposed()) return;
       if (
-        stopped ||
         (card.kind === "codex" && isCodexTranscriptDormant(card.id)) ||
         !cached ||
         !openedSessions().some((c) => c.kind === card.kind && c.id === card.id)

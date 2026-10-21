@@ -822,11 +822,7 @@ export class PtyRuntimeManager {
     }
 
     if (!handle.localTmuxClientReadyWait) {
-      const wait = this.waitForLocalTmuxClient(
-        agentSessionId,
-        handle,
-        handle.localTmuxSessionName,
-      );
+      const wait = this.waitForLocalTmuxClient(agentSessionId, handle);
       handle.localTmuxClientReadyWait = wait;
       void wait.finally(() => {
         if (this.handles.get(agentSessionId) === handle) {
@@ -1235,7 +1231,6 @@ export class PtyRuntimeManager {
   private async waitForLocalTmuxClient(
     agentSessionId: string,
     handle: PtyHandle,
-    tmuxSessionName: string,
   ): Promise<boolean> {
     const deadline = Date.now() + TMUX_CLIENT_READY_TIMEOUT_MS;
 
@@ -1243,12 +1238,7 @@ export class PtyRuntimeManager {
       Date.now() < deadline &&
       this.handles.get(agentSessionId) === handle
     ) {
-      if (
-        await this.isLocalTmuxClientAttached(
-          tmuxSessionName,
-          handle.ptyProcess.pid,
-        )
-      ) {
+      if (await this.isLocalTmuxClientAttached(handle.ptyProcess.pid)) {
         handle.localTmuxClientReady = true;
         return true;
       }
@@ -1260,13 +1250,15 @@ export class PtyRuntimeManager {
   }
 
   private async isLocalTmuxClientAttached(
-    tmuxSessionName: string,
     ptyProcessId: number,
   ): Promise<boolean> {
     try {
+      // Session names can change before the first input/readiness probe.
+      // Match this handle's exact client PID across attached sessions; a stale
+      // launch name must not silently disable mouse or prefix input.
       const { stdout } = await execFileAsync(
         resolveTmuxBinary(),
-        ["list-clients", "-t", tmuxSessionName, "-F", "#{client_pid}"],
+        ["list-clients", "-F", "#{client_pid}"],
         {
           encoding: "utf8",
           env: buildPtyEnv(),
