@@ -1,4 +1,18 @@
 /* Default shell uses the Codex editor palette. Optional accents stay separate. */
+.session-mode select {
+  color-scheme: light;
+}
+
+.session-mode.dark select {
+  color-scheme: dark;
+}
+
+.session-mode select option,
+.session-mode select optgroup {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+}
+
 .session-mode.dark.accent-default {
   --background: #20211d;
   --foreground: #cccccc;

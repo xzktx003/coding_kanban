@@ -1332,3 +1332,4 @@
 - 2026-10-20：子智能体检查面板必须有鼠标／触摸可用的关闭入口，不能只靠内部 Esc。SubagentPanel 列表、详情与无主会话提示提供关闭按钮，SubagentSummary 对当前 root 按 panelRoot 切换开关及 aria-expanded；关闭只复用 closeSubagents 并恢复入口焦点，不停止 Agent、清理主草稿或改变主输入。session-subagents 的 1440／390px 浏览器回归覆盖关闭列表／详情、重复开关、Esc 和主会话保留；原实现四项均失败，不能再用只测返回列表／Esc 代替点击关闭验收。桌面常驻工具栏绝对定位还会遮挡右上关闭控件，子面板须按现有 --session-dock-height 避让，fallback 主区已避让时不重复；不得用 force click 或提高 z-index 掩盖遮挡。
 
 - 2026-10-20：独立 Codex 宿主 broker-ready 仅证明控制链路，不能代表登录有效。connection-profile-home 的私有 auth 副本过期、refresh token reused 时，浏览器会停官方登录页；本机主登录可仍有效。同账号与 owned0600/无链接/并发变化校验后，仅更新此前授权的副本，真实浏览器首次进入及刷新后输入恢复，未发送任务或重启 Agent。副本非共享文件，此恢复不等于自动续期；不可通过后台静默复制或共享整个 CODEX_HOME 掩盖。见 docs/designs/codex-login-copy-recovery-20261020.md。
+- 2026-10-22：原生 select 展开白底浅字，原因是闭合控件背景不等于原生 popup 背景，且未声明 color-scheme。终端 select 固定 dark 并成对设置 option／optgroup 的不透明背景和文字；会话模式在 .session-mode 内按 light／dark 与 popover tokens 覆盖，勿把会话浅色菜单强制改成深色。六组 Chromium 系统／页面主题回归通过，包含对比度、主题切换和选择保持；无 Agent 连接。

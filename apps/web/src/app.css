@@ -59,6 +59,17 @@ input {
   font: inherit;
 }
 
+/* Native popups do not reliably inherit the closed control's background. */
+select {
+  color-scheme: dark;
+}
+
+select option,
+select optgroup {
+  background-color: #1b1d22;
+  color: #f4f1ea;
+}
+
 @keyframes ui-fade-in {
   from {
     opacity: 0;
