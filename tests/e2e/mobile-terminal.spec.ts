@@ -622,6 +622,66 @@ test.describe("Mobile Terminal", () => {
     await expect(nav).toBeVisible();
   });
 
+  for (const resizeLayout of [false, true]) {
+    test(`portrait layout: keyboard dismissal restores focused composer (${resizeLayout ? "layout" : "visual"} viewport)`, async ({
+      page,
+    }, testInfo) => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await openCurrentSession(page);
+      const input = page.locator(".mobile-agent-composer-input");
+      const nav = page.getByRole("navigation", { name: "手机端主导航" });
+      const originalHeight = await input.evaluate(
+        (element) => element.getBoundingClientRect().height,
+      );
+      await page
+        .locator(".mobile-terminal-controls")
+        .screenshot({ path: testInfo.outputPath("before-keyboard.png") });
+      await input.fill("保留这段草稿，不发送");
+      for (let cycle = 0; cycle < 2; cycle++) {
+        if (resizeLayout) {
+          await page.setViewportSize({ width: 390, height: 400 });
+        } else {
+          await page.evaluate(() => {
+            Object.defineProperty(window.visualViewport, "height", {
+              configurable: true,
+              get: () => 400,
+            });
+            window.visualViewport?.dispatchEvent(new Event("resize"));
+          });
+        }
+        await expect(nav).toBeHidden();
+        await expect
+          .poll(() =>
+            input.evaluate((element) => element.getBoundingClientRect().height),
+          )
+          .toBeLessThan(originalHeight);
+        // The phone's dismiss-keyboard button does not blur the textarea.
+        if (resizeLayout) {
+          await page.setViewportSize({ width: 390, height: 844 });
+        } else {
+          await page.evaluate(() => {
+            delete (window.visualViewport as { height?: number }).height;
+            window.visualViewport?.dispatchEvent(new Event("resize"));
+          });
+        }
+        await page
+          .locator(".mobile-terminal-controls")
+          .screenshot({ path: testInfo.outputPath("after-keyboard.png") });
+        await expect(input).toBeFocused();
+        await expect(input).toHaveValue("保留这段草稿，不发送");
+        await expect
+          .poll(() =>
+            input.evaluate((element) => element.getBoundingClientRect().height),
+          )
+          .toBe(originalHeight);
+        await expect(nav).toBeVisible();
+      }
+      await page
+        .locator(".mobile-terminal-controls")
+        .screenshot({ path: testInfo.outputPath("after-keyboard.png") });
+    });
+  }
+
   test("portrait layout: live terminal and bottom nav stay visible", async ({
     page,
   }) => {

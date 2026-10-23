@@ -543,6 +543,39 @@ export function MobileWorkbenchPage({
       const height = hidden ? 0 : Math.ceil(nav.getBoundingClientRect().height);
       page.style.setProperty("--mobile-nav-clearance", `${height}px`);
     };
+    const viewport = window.visualViewport;
+    let viewportWidth = window.innerWidth;
+    let fullHeight = window.innerHeight;
+    const syncKeyboardLayout = () => {
+      if (!(page instanceof HTMLElement)) return;
+      const height = Math.min(
+        window.innerHeight,
+        viewport?.height ?? window.innerHeight,
+      );
+      // Keep the expanded height across keyboard animations, including browsers
+      // that resize both viewports. Width changes reset the orientation baseline.
+      if (window.innerWidth !== viewportWidth) {
+        viewportWidth = window.innerWidth;
+        fullHeight = window.innerHeight;
+      }
+      if (!viewport || Math.abs(viewport.scale - 1) < 0.01) {
+        fullHeight = Math.max(fullHeight, height);
+      }
+      const composerFocused =
+        page.querySelector(".mobile-agent-composer-input:focus") !== null;
+      page.toggleAttribute(
+        "data-keyboard-open",
+        composerFocused &&
+          (!viewport || Math.abs(viewport.scale - 1) < 0.01) &&
+          fullHeight - height > 120,
+      );
+      syncNavClearance();
+    };
+    syncKeyboardLayout();
+    page?.addEventListener("focusin", syncKeyboardLayout);
+    page?.addEventListener("focusout", syncKeyboardLayout);
+    window.addEventListener("resize", syncKeyboardLayout);
+    viewport?.addEventListener("resize", syncKeyboardLayout);
     syncNavClearance();
     const observer =
       typeof ResizeObserver === "undefined" || !(nav instanceof HTMLElement)
@@ -551,9 +584,14 @@ export function MobileWorkbenchPage({
     if (nav instanceof HTMLElement) observer?.observe(nav);
     window.addEventListener("resize", syncNavClearance);
     return () => {
+      page?.removeEventListener("focusin", syncKeyboardLayout);
+      page?.removeEventListener("focusout", syncKeyboardLayout);
+      window.removeEventListener("resize", syncKeyboardLayout);
+      viewport?.removeEventListener("resize", syncKeyboardLayout);
       observer?.disconnect();
       window.removeEventListener("resize", syncNavClearance);
       if (page instanceof HTMLElement) {
+        page.removeAttribute("data-keyboard-open");
         page.style.removeProperty("--mobile-nav-clearance");
       }
       document.documentElement.classList.remove("mobile-terminal-route");

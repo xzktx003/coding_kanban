@@ -343,15 +343,15 @@ describe("MobileWorkbenchPage", () => {
     );
     assert.match(
       css,
-      /\.mobile-workbench-page:has\(\.mobile-agent-composer-input:focus\)\s+\.mobile-workbench-content--session\s*{[^}]*padding-bottom:\s*0;/s,
+      /\.mobile-workbench-page\[data-keyboard-open\]\s+\.mobile-workbench-content--session\s*{[^}]*padding-bottom:\s*0;/s,
     );
     assert.match(
       css,
-      /\.mobile-workbench-page:has\(\.mobile-agent-composer-input:focus\)\s+\.mobile-primary-nav\s*{[^}]*display:\s*none;/s,
+      /\.mobile-workbench-page\[data-keyboard-open\]\s+\.mobile-primary-nav\s*{[^}]*display:\s*none;/s,
     );
     assert.match(
       css,
-      /\.mobile-workbench-page:has\(\.mobile-agent-composer-input:focus\)\s+\.mobile-agent-composer\s*{[^}]*padding-bottom:\s*8px;/s,
+      /\.mobile-workbench-page\[data-keyboard-open\]\s+\.mobile-agent-composer\s*{[^}]*padding-bottom:\s*8px;/s,
     );
   });
 

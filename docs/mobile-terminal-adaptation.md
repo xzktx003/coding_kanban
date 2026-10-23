@@ -256,3 +256,10 @@ Coding Kanban 当前以桌面浏览器为主要使用场景，核心交互依赖
 `MobileWorkbenchPage` 只在 stdin API 成功后为捕获的会话递增 `scrollToBottomRequest`。对应 `TerminalView` 解除历史位置锁，并在后续输出写入和视口 resize 后继续跟随底部；用户重新滚动或触摸浏览时取消跟随。异步返回属于其他会话时不移动当前终端，失败保持草稿和现有位置。
 
 回归：`tests/e2e/mobile-terminal.spec.ts` 的 touch composer delivery 以 390×844 触摸视口模拟键盘聚焦/失焦高度变化，使用独立 PTY/tmux 核对实际 UTF-8 字节、发送/粘贴提交键差异、历史位置恢复与再次浏览保护。局域网验收入口为本机配置的 HTTPS 地址和端口（本次 `https://10.30.0.22:8484`）。
+
+
+## 2026-10-23：软键盘收起后的输入框恢复
+
+手机的关闭输入法按钮不一定触发 textarea blur，因此不得用输入框 `:focus` 直接决定紧凑尺寸或隐藏主导航。`MobileWorkbenchPage` 在焦点及 viewport resize 时维护页面局部 `data-keyboard-open`：可视高度相对展开基线下降超过 120px 且 composer 有焦点时启用紧凑布局，恢复高度后立即解除；横竖屏宽度改变重置基线，页面缩放不按键盘处理。事件监听随页面卸载移除，不轮询、不改草稿、不强制 blur。
+
+回归位于 `tests/e2e/mobile-terminal.spec.ts` 的 `keyboard dismissal restores`：分别模拟仅 visualViewport 高度下降和 window/visualViewport 同时下降，连续两次开合，关闭后仍保持输入焦点，断言原始输入框高度、草稿和底部导航恢复。修复前两项均为 36px != 91.5625px，修复后通过；同组另覆盖键盘打开时输入框/发送按钮可见和横屏布局。截图仅核对布局，浏览器模拟不覆盖所有实体手机输入法及动画时序。

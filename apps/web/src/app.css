@@ -1278,7 +1278,7 @@ select optgroup {
   padding-bottom: var(--mobile-nav-clearance, 88px);
 }
 
-.mobile-workbench-page:has(.mobile-agent-composer-input:focus)
+.mobile-workbench-page[data-keyboard-open]
   .mobile-changes-overlay {
   padding-bottom: 0;
 }
@@ -4716,17 +4716,17 @@ select optgroup {
   min-width: 0;
 }
 
-.mobile-workbench-page:has(.mobile-agent-composer-input:focus)
+.mobile-workbench-page[data-keyboard-open]
   .mobile-workbench-content--session {
   padding-bottom: 0;
 }
 
-.mobile-workbench-page:has(.mobile-agent-composer-input:focus)
+.mobile-workbench-page[data-keyboard-open]
   .mobile-primary-nav {
   display: none;
 }
 
-.mobile-workbench-page:has(.mobile-agent-composer-input:focus)
+.mobile-workbench-page[data-keyboard-open]
   .mobile-agent-composer {
   padding-bottom: 8px;
 }
@@ -6610,40 +6610,40 @@ select optgroup {
   }
 }
 
-/* A focused composer means the soft keyboard is covering the layout viewport.
-   Tighten the same fixed bars so the live terminal keeps a readable slice. */
-.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-workbench-content--session {
+/* Compact only while the focused composer loses viewport space to the keyboard.
+   Dismissing the keyboard can retain focus; restore the normal bars in that case. */
+.mobile-workbench-page[data-keyboard-open] .mobile-workbench-content--session {
   padding: 4px 8px 0;
 }
 
-.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-session-switcher {
+.mobile-workbench-page[data-keyboard-open] .mobile-session-switcher {
   gap: 4px;
 }
 
-.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-session-picker-trigger,
-.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-transcript-btn {
+.mobile-workbench-page[data-keyboard-open] .mobile-session-picker-trigger,
+.mobile-workbench-page[data-keyboard-open] .mobile-transcript-btn {
   min-height: 32px;
   height: 32px;
 }
 
-.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-terminal-surface {
+.mobile-workbench-page[data-keyboard-open] .mobile-terminal-surface {
   flex: 1 1 96px;
   min-height: 96px;
   padding: 4px;
 }
 
-.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-terminal-toolbar,
-.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-agent-composer {
+.mobile-workbench-page[data-keyboard-open] .mobile-terminal-toolbar,
+.mobile-workbench-page[data-keyboard-open] .mobile-agent-composer {
   padding-top: 4px;
   padding-bottom: 4px;
 }
 
-.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-terminal-key,
-.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-agent-composer-btn {
+.mobile-workbench-page[data-keyboard-open] .mobile-terminal-key,
+.mobile-workbench-page[data-keyboard-open] .mobile-agent-composer-btn {
   min-height: 32px;
 }
 
-.mobile-workbench-page:has(.mobile-agent-composer-input:focus) .mobile-agent-composer-input {
+.mobile-workbench-page[data-keyboard-open] .mobile-agent-composer-input {
   min-height: 36px;
   max-height: 36px;
 }
