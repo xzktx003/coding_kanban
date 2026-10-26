@@ -98,3 +98,5 @@ export function registerLocalItemDetailChannel(
     "/api/session/api/codex/thread/item-detail",
   );
 }
+
+export { registerChatHistoryChannel, registerLocalChatHistoryChannel } from "./chat-history-channel.js";

@@ -91,6 +91,499 @@ async function prepare(
   return { fixture, errors, viewport };
 }
 
+async function waitForStoredReadingAnchor(
+  viewport: import("@playwright/test").Locator,
+) {
+  await expect
+    .poll(() =>
+      viewport.evaluate(async (element) => {
+        // A quiet timer can be restarted by late native scroll delivery. Confirm
+        // the saved native row and real geometry, rather than waiting a fixed time.
+        for (let frame = 0; frame < 4; frame++) {
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => resolve()),
+          );
+          const position = JSON.parse(
+            localStorage.getItem("kanban.session.read-position.codex:ux-0") ??
+              "null",
+          );
+          if (
+            !position ||
+            position.atBottom !== false ||
+            position.format !== "row"
+          )
+            return false;
+          const row = [
+            ...element.querySelectorAll<HTMLElement>("[data-codex-row]"),
+          ].find((row) => row.dataset.codexRow === position.anchor);
+          if (
+            !row ||
+            Math.abs(element.scrollTop - position.scrollTop) > 1 ||
+            Math.abs(
+              row.getBoundingClientRect().top -
+                element.getBoundingClientRect().top +
+                position.offset,
+            ) > 1
+          )
+            return false;
+        }
+        return true;
+      }),
+    )
+    .toBe(true);
+}
+
+for (const width of [1440, 390]) {
+  test(`latest-following keeps only its visible tail and restores a reading buffer at ${width}px`, async ({
+    page,
+  }, info) => {
+    const { fixture, errors, viewport } = await prepare(page);
+    await page.setViewportSize({ width, height: 1000 });
+    await expect(page.getByText("阅读消息 399", { exact: true })).toBeVisible();
+    const sample = () =>
+      viewport.evaluate(async (element) => {
+        await new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        );
+        const area = element.getBoundingClientRect();
+        const rows = [
+          ...element.querySelectorAll<HTMLElement>("[data-codex-row]"),
+        ].map((row) => {
+          const rect = row.getBoundingClientRect();
+          return {
+            index: Number(row.dataset.index),
+            top: rect.top,
+            bottom: rect.bottom,
+          };
+        });
+        return {
+          above: rows.filter((row) => row.bottom <= area.top).length,
+          visible: rows.filter(
+            (row) => row.top < area.bottom && row.bottom > area.top,
+          ).length,
+          scrollTop: element.scrollTop,
+          distance:
+            element.scrollHeight - element.scrollTop - element.clientHeight,
+          rows,
+        };
+      });
+    await expect.poll(async () => (await sample()).above).toBe(0);
+    // Layout can move a following viewport without any user input. It must
+    // regain latest while keeping the reader buffer closed.
+    await viewport.evaluate((element) => {
+      element.scrollTop -= 40;
+    });
+    await expect
+      .poll(async () => (await sample()).distance)
+      .toBeLessThanOrEqual(1);
+    await expect.poll(async () => (await sample()).above).toBe(0);
+    await expect(
+      page.getByRole("button", { name: "Scroll to bottom", exact: true }),
+    ).toHaveCount(0);
+    const latest = await sample();
+    expect(latest.visible).toBeGreaterThan(0);
+    const area = (await viewport.boundingBox())!;
+    await page.mouse.move(area.x + area.width / 2, area.y + area.height / 2);
+    await page.mouse.wheel(0, -2);
+    await expect(
+      page.getByRole("button", { name: "Scroll to bottom", exact: true }),
+    ).toContainText("回到最新");
+    await expect.poll(async () => (await sample()).above).toBeGreaterThan(0);
+    const reading = await sample();
+    expect(reading.scrollTop).toBeLessThan(latest.scrollTop);
+    await page
+      .getByRole("button", { name: "Scroll to bottom", exact: true })
+      .click();
+    await expect.poll(async () => (await sample()).above).toBe(0);
+    await expect(page.getByText("阅读消息 399", { exact: true })).toBeVisible();
+    await expect(
+      page.locator(".session-codex-composer [contenteditable=true]").first(),
+    ).toHaveText("平滑滚动的会话草稿");
+    expect(
+      fixture.calls.filter((call) =>
+        /\/turn\/(start|interrupt)$|\/thread\/resume$/.test(call.path),
+      ),
+    ).toEqual([]);
+    expect(errors).toEqual([]);
+    expect(
+      await page.evaluate(
+        () => (window as any).__resizeObserverReceipts.errors,
+      ),
+    ).toEqual([]);
+    await writeFile(
+      info.outputPath("latest-window.json"),
+      JSON.stringify({ latest, reading }, null, 2),
+    );
+    await saveResizeDiagnostics(page, info);
+  });
+}
+
+test("a direct upward history jump is not overwritten by newly measured reader rows", async ({
+  page,
+}, info) => {
+  const { fixture, errors, viewport } = await prepare(page);
+  await viewport.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent("wheel", { deltaY: -1000 }));
+    element.scrollTop = 0;
+  });
+  await expect(page.getByText("阅读消息 0", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Scroll to bottom", exact: true }),
+  ).toContainText("回到最新");
+  expect(
+    await viewport.evaluate((element) => element.scrollTop),
+  ).toBeLessThanOrEqual(1);
+  await expect(
+    page.locator(".session-codex-composer [contenteditable=true]").first(),
+  ).toHaveText("平滑滚动的会话草稿");
+  expect(
+    fixture.calls.filter((call) =>
+      /\/turn\/(start|interrupt)$|\/thread\/resume$/.test(call.path),
+    ),
+  ).toEqual([]);
+  expect(errors).toEqual([]);
+  expect(
+    await page.evaluate(() => (window as any).__resizeObserverReceipts.errors),
+  ).toEqual([]);
+  await saveResizeDiagnostics(page, info);
+});
+
+test("a preceding history region does not leave a gap in the latest visible rows", async ({
+  page,
+}, info) => {
+  const { fixture, errors, viewport } = await prepare(page);
+  await page.addStyleTag({
+    content: ".session-earlier-history { min-height: 320px; }",
+  });
+  await page.evaluate(async () => {
+    const path = "/src/session-mode/stores/useSessionSyncStore.ts";
+    const { useSessionSyncStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+        path
+    );
+    useSessionSyncStore.setState({
+      cursors: { "ux-0": "fixture-earlier-cursor" },
+    });
+  });
+  await expect(
+    page.getByRole("button", { name: "加载更早消息", exact: true }),
+  ).toBeAttached();
+  const sample = () =>
+    viewport.evaluate(async (element) => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      const area = element.getBoundingClientRect();
+      const rows = [
+        ...element.querySelectorAll<HTMLElement>("[data-codex-row]"),
+      ].map((row) => {
+        const rect = row.getBoundingClientRect();
+        return {
+          index: Number(row.dataset.index),
+          top: rect.top,
+          bottom: rect.bottom,
+        };
+      });
+      return {
+        topGap: Math.max(0, rows[0].top - area.top),
+        bottomDistance:
+          element.scrollHeight - element.scrollTop - element.clientHeight,
+        rows,
+      };
+    });
+  await expect
+    .poll(async () => (await sample()).bottomDistance)
+    .toBeLessThanOrEqual(1);
+  const initial = await sample();
+  await writeFile(
+    info.outputPath("preceding-history-initial.json"),
+    JSON.stringify(initial, null, 2),
+  );
+  expect(initial.topGap).toBeLessThanOrEqual(1);
+  await page.addStyleTag({
+    content: ".session-earlier-history { min-height: 640px; }",
+  });
+  await expect.poll(async () => (await sample()).topGap).toBeLessThanOrEqual(1);
+  await expect(page.getByText("阅读消息 399", { exact: true })).toBeVisible();
+  expect(
+    fixture.calls.filter((call) =>
+      /\/turn\/(start|interrupt)$|\/thread\/resume$/.test(call.path),
+    ),
+  ).toEqual([]);
+  expect(errors).toEqual([]);
+  expect(
+    await page.evaluate(() => (window as any).__resizeObserverReceipts.errors),
+  ).toEqual([]);
+  await saveResizeDiagnostics(page, info);
+});
+
+test("a preceding history region can grow and shrink without moving a detached reading anchor", async ({
+  page,
+}, info) => {
+  const { fixture, errors, viewport } = await prepare(page);
+  await page.addStyleTag({
+    content: ".session-earlier-history { min-height: 320px; }",
+  });
+  await page.evaluate(async () => {
+    const path = "/src/session-mode/stores/useSessionSyncStore.ts";
+    const { useSessionSyncStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+        path
+    );
+    useSessionSyncStore.setState({
+      cursors: { "ux-0": "fixture-earlier-cursor" },
+    });
+  });
+  await expect(
+    page.getByRole("button", { name: "加载更早消息", exact: true }),
+  ).toBeAttached();
+  await viewport.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent("wheel", { deltaY: -1000 }));
+    element.scrollTop = 8000;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await expect(
+    page.getByRole("button", { name: "Scroll to bottom", exact: true }),
+  ).toBeVisible();
+  await waitForStoredReadingAnchor(viewport);
+  const anchor = await viewport.evaluate((element) => {
+    const top = element.getBoundingClientRect().top;
+    const row = [
+      ...element.querySelectorAll<HTMLElement>("[data-codex-row]"),
+    ].find((row) => row.getBoundingClientRect().bottom > top)!;
+    return {
+      key: row.dataset.codexRow!,
+      offset: row.getBoundingClientRect().top - top,
+    };
+  });
+  const drift = () =>
+    viewport.evaluate((element, anchor) => {
+      const row = element.querySelector(`[data-codex-row="${anchor.key}"]`);
+      if (!row) return Number.MAX_SAFE_INTEGER;
+      return Math.abs(
+        row.getBoundingClientRect().top -
+          element.getBoundingClientRect().top -
+          anchor.offset,
+      );
+    }, anchor);
+  for (const height of [640, 80]) {
+    await page.addStyleTag({
+      content: `.session-earlier-history { min-height: ${height}px; }`,
+    });
+    await expect.poll(drift).toBeLessThanOrEqual(2);
+  }
+  await expect(
+    page.locator(".session-codex-composer [contenteditable=true]").first(),
+  ).toHaveText("平滑滚动的会话草稿");
+  expect(
+    fixture.calls.filter((call) =>
+      /\/turn\/(start|interrupt)$|\/thread\/resume$/.test(call.path),
+    ),
+  ).toEqual([]);
+  expect(errors).toEqual([]);
+  expect(
+    await page.evaluate(() => (window as any).__resizeObserverReceipts.errors),
+  ).toEqual([]);
+  await saveResizeDiagnostics(page, info);
+});
+
+test("padding-only transcript origin changes preserve a detached reader through growth and shrink", async ({
+  page,
+}, info) => {
+  const { fixture, errors, viewport } = await prepare(page);
+  await viewport.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent("wheel", { deltaY: -1000 }));
+    element.scrollTop = 8000;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await expect(
+    page.getByRole("button", { name: "Scroll to bottom", exact: true }),
+  ).toBeVisible();
+  await waitForStoredReadingAnchor(viewport);
+  const anchor = await viewport.evaluate((element) => {
+    const top = element.getBoundingClientRect().top;
+    const row = [
+      ...element.querySelectorAll<HTMLElement>("[data-codex-row]"),
+    ].find((row) => row.getBoundingClientRect().bottom > top)!;
+    return {
+      key: row.dataset.codexRow!,
+      offset: row.getBoundingClientRect().top - top,
+    };
+  });
+  const observations: unknown[] = [];
+  for (const padding of [96, 8]) {
+    const input = await viewport.evaluate((element, padding) => {
+      const surface = element.querySelector<HTMLElement>(".thread-surface")!;
+      const contentHeight = () => {
+        const style = getComputedStyle(surface);
+        return (
+          surface.getBoundingClientRect().height -
+          parseFloat(style.paddingTop) -
+          parseFloat(style.paddingBottom) -
+          parseFloat(style.borderTopWidth) -
+          parseFloat(style.borderBottomWidth)
+        );
+      };
+      const before = contentHeight();
+      surface.style.paddingTop = `${padding}px`;
+      return {
+        padding,
+        beforeContentHeight: before,
+        afterContentHeight: contentHeight(),
+      };
+    }, padding);
+    observations.push(input);
+    expect(
+      Math.abs(input.afterContentHeight - input.beforeContentHeight),
+      "input changes padding without changing the observed content box",
+    ).toBeLessThanOrEqual(1);
+    await expect
+      .poll(() =>
+        viewport.evaluate((element, anchor) => {
+          const row = element.querySelector<HTMLElement>(
+            `[data-codex-row="${anchor.key}"]`,
+          );
+          return row
+            ? Math.abs(
+                row.getBoundingClientRect().top -
+                  element.getBoundingClientRect().top -
+                  anchor.offset,
+              )
+            : Number.MAX_SAFE_INTEGER;
+        }, anchor),
+      )
+      .toBeLessThanOrEqual(2);
+  }
+  await writeFile(
+    info.outputPath("padding-origin-inputs.json"),
+    JSON.stringify({ anchor, observations }, null, 2),
+  );
+  await expect(
+    page.locator(".session-codex-composer [contenteditable=true]").first(),
+  ).toHaveText("平滑滚动的会话草稿");
+  expect(
+    fixture.calls.filter((call) =>
+      /\/turn\/(start|interrupt)$|\/thread\/resume$/.test(call.path),
+    ),
+  ).toEqual([]);
+  expect(errors).toEqual([]);
+  expect(
+    await page.evaluate(() => (window as any).__resizeObserverReceipts.errors),
+  ).toEqual([]);
+  await saveResizeDiagnostics(page, info);
+});
+
+test("two earlier message resizes preserve a nonzero reading anchor and its draft", async ({
+  page,
+}, info) => {
+  const { fixture, errors, viewport } = await prepare(page);
+  await viewport.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent("wheel", { deltaY: -1000 }));
+    element.scrollTop = 8000;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  await expect(
+    page.getByRole("button", { name: "Scroll to bottom", exact: true }),
+  ).toBeVisible();
+  await waitForStoredReadingAnchor(viewport);
+  const anchor = await viewport.evaluate((element) => {
+    const top = element.getBoundingClientRect().top;
+    const rows = [...element.querySelectorAll<HTMLElement>("[data-codex-row]")];
+    const visible = rows.find(
+      (row) => row.getBoundingClientRect().bottom > top,
+    )!;
+    const earlier = rows
+      .filter((row) => row.getBoundingClientRect().bottom <= top)
+      .slice(-2)
+      .map((row) => {
+        const identity = /^event-smooth-turn-(\d+)-smooth-item-\1$/.exec(
+          row.dataset.codexRow ?? "",
+        );
+        if (!identity)
+          throw new Error("Expected an earlier native fixture message");
+        return {
+          key: row.dataset.codexRow!,
+          index: Number(identity[1]),
+          height: row.getBoundingClientRect().height,
+        };
+      });
+    if (!visible || earlier.length !== 2)
+      throw new Error("Need a visible anchor and two mounted earlier rows");
+    return {
+      key: visible.dataset.codexRow!,
+      offset: visible.getBoundingClientRect().top - top,
+      scrollTop: element.scrollTop,
+      earlier,
+    };
+  });
+  expect(anchor.scrollTop).toBeGreaterThan(0);
+  const offset = () =>
+    viewport.evaluate((element, anchor) => {
+      const row = element.querySelector(`[data-codex-row="${anchor.key}"]`);
+      if (!row) throw new Error("The reading anchor was removed");
+      return (
+        row.getBoundingClientRect().top - element.getBoundingClientRect().top
+      );
+    }, anchor);
+  for (const grow of [true, false]) {
+    await viewport.evaluate(
+      (element, { earlier, grow }) => {
+        const store = (window as any).__smoothStore;
+        for (const { index } of earlier)
+          store.getState().addEvent("ux-0", {
+            method: "item/completed",
+            params: {
+              threadId: "ux-0",
+              turnId: `smooth-turn-${index}`,
+              item: {
+                id: `smooth-item-${index}`,
+                type: "agentMessage",
+                phase: "final_answer",
+                text: `阅读消息 ${index}\n\n正文内容各自保持。${grow ? "\n\n" + Array.from({ length: 8 }, (_, line) => `同批增高正文第 ${line} 段。`).join("\n\n") : ""}`,
+              },
+            },
+          });
+      },
+      { earlier: anchor.earlier, grow },
+    );
+    for (const earlier of anchor.earlier) {
+      const height = () =>
+        viewport
+          .locator(`[data-codex-row="${earlier.key}"]`)
+          .evaluate((row) => row.getBoundingClientRect().height);
+      if (grow) await expect.poll(height).toBeGreaterThan(earlier.height + 100);
+      else await expect.poll(height).toBe(earlier.height);
+    }
+    await expect
+      .poll(async () => Math.abs((await offset()) - anchor.offset))
+      .toBeLessThanOrEqual(2);
+  }
+  await expect(
+    page.getByRole("button", { name: "Scroll to bottom", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".session-codex-composer [contenteditable=true]").first(),
+  ).toHaveText("平滑滚动的会话草稿");
+  expect(
+    fixture.calls.filter((call) =>
+      /\/turn\/(start|interrupt)$|\/thread\/resume$/.test(call.path),
+    ),
+  ).toEqual([]);
+  expect(errors).toEqual([]);
+  expect(
+    await page.evaluate(() => (window as any).__resizeObserverReceipts.errors),
+  ).toEqual([]);
+  await writeFile(
+    info.outputPath("two-earlier-row-resizes.json"),
+    JSON.stringify({ anchor, finalOffset: await offset() }, null, 2),
+  );
+  await saveResizeDiagnostics(page, info);
+});
+
 test("small upward trackpad increments keep the reader detached during live updates", async ({
   page,
 }, info) => {
@@ -180,6 +673,225 @@ test("small upward trackpad increments keep the reader detached during live upda
   ).toEqual([]);
   await saveResizeDiagnostics(page, info);
 });
+
+for (const input of ["wheel", "End"] as const) {
+  test(`a positive ${input} action returns a detached reader to latest and follows new text`, async ({
+    page,
+  }, info) => {
+    const { fixture, errors, viewport } = await prepare(page);
+    const box = (await viewport.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, -240);
+    await expect
+      .poll(() =>
+        viewport.evaluate(
+          (el) => el.scrollHeight - el.clientHeight - el.scrollTop,
+        ),
+      )
+      .toBeGreaterThan(20);
+    await expect(
+      page.getByRole("button", { name: "Scroll to bottom", exact: true }),
+    ).toBeVisible();
+    if (input === "wheel") await page.mouse.wheel(0, 1200);
+    else {
+      await viewport.evaluate((el) => {
+        (el as HTMLElement).tabIndex = 0;
+      });
+      await viewport.focus();
+      await page.keyboard.press("End");
+    }
+    await expect
+      .poll(() =>
+        viewport.evaluate(
+          (el) => el.scrollHeight - el.clientHeight - el.scrollTop,
+        ),
+      )
+      .toBeLessThanOrEqual(1);
+    await expect(
+      page.getByRole("button", { name: "Scroll to bottom", exact: true }),
+    ).toHaveCount(0);
+    await page.evaluate(
+      (input) =>
+        (window as any).__smoothDelta({
+          method: "item/agentMessage/delta",
+          params: {
+            threadId: "ux-0",
+            turnId: "return-follow-turn",
+            itemId: "return-follow-item",
+            delta: `${input} 返回后继续跟随。`,
+          },
+        }),
+      input,
+    );
+    await expect(
+      page.locator("[data-codex-live-message] [data-codex-streaming-text]"),
+    ).toContainText(`${input} 返回后继续跟随。`);
+    await expect(
+      page.locator("[data-codex-live-message] [data-codex-streaming-text]"),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        viewport.evaluate(
+          (el) => el.scrollHeight - el.clientHeight - el.scrollTop,
+        ),
+      )
+      .toBeLessThanOrEqual(1);
+    await expect(
+      page.locator(".session-codex-composer [contenteditable=true]").first(),
+    ).toHaveText("平滑滚动的会话草稿");
+    expect(
+      fixture.calls.filter((call) =>
+        /\/turn\/(start|interrupt)$|\/thread\/resume$/.test(call.path),
+      ),
+    ).toEqual([]);
+    expect(errors).toEqual([]);
+    expect(
+      await page.evaluate(
+        () => (window as any).__resizeObserverReceipts.errors,
+      ),
+    ).toEqual([]);
+    await saveResizeDiagnostics(page, info);
+  });
+}
+
+for (const input of ["wheel", "Shift+Space"] as const) {
+  test(`a one-pixel first ${input} upward step stays detached while the wheel continues`, async ({
+    page,
+  }, info) => {
+    const { fixture, errors, viewport } = await prepare(page);
+    await viewport.evaluate(async (element, input) => {
+      element.dispatchEvent(
+        input === "wheel"
+          ? new WheelEvent("wheel", { deltaY: -240 })
+          : new KeyboardEvent("keydown", {
+              key: " ",
+              shiftKey: true,
+              bubbles: true,
+            }),
+      );
+      element.scrollTop = element.scrollHeight - element.clientHeight - 1;
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+    }, input);
+    await expect(
+      page.getByRole("button", { name: "Scroll to bottom", exact: true }),
+    ).toBeVisible();
+    const box = (await viewport.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, -240);
+    await expect
+      .poll(() =>
+        viewport.evaluate(
+          (el) => el.scrollHeight - el.clientHeight - el.scrollTop,
+        ),
+      )
+      .toBeGreaterThan(20);
+    await expect(
+      page.getByRole("button", { name: "Scroll to bottom", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.locator(".session-codex-composer [contenteditable=true]").first(),
+    ).toHaveText("平滑滚动的会话草稿");
+    expect(
+      fixture.calls.filter((call) =>
+        /\/turn\/(start|interrupt)$|\/thread\/resume$/.test(call.path),
+      ),
+    ).toEqual([]);
+    expect(errors).toEqual([]);
+    expect(
+      await page.evaluate(
+        () => (window as any).__resizeObserverReceipts.errors,
+      ),
+    ).toEqual([]);
+    await saveResizeDiagnostics(page, info);
+  });
+}
+for (const input of ["wheel", "End", "touch reversal"] as const) {
+  test(`a positive ${input} at the physical bottom restores following without another scroll event`, async ({
+    page,
+  }, info) => {
+    const { fixture, errors, viewport } = await prepare(page);
+    await viewport.evaluate((element) => {
+      // A negative direction without a representable scrollTop displacement.
+      element.dispatchEvent(
+        new WheelEvent("wheel", { deltaY: -Number.EPSILON }),
+      );
+    });
+    await expect(
+      page.getByRole("button", { name: "Scroll to bottom", exact: true }),
+    ).toBeVisible();
+    expect(
+      await viewport.evaluate(
+        (el) => el.scrollHeight - el.clientHeight - el.scrollTop,
+      ),
+    ).toBeLessThanOrEqual(1);
+    const box = (await viewport.boundingBox())!;
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    if (input === "wheel") await page.mouse.wheel(0, 120);
+    else if (input === "End") {
+      await viewport.evaluate((el) => {
+        (el as HTMLElement).tabIndex = 0;
+      });
+      await viewport.focus();
+      await page.keyboard.press("End");
+    } else {
+      await viewport.evaluate((element) => {
+        const touch = (type: string, y: number) =>
+          element.dispatchEvent(
+            Object.assign(new Event(type), {
+              touches: [{ clientX: 100, clientY: y }],
+            }),
+          );
+        touch("touchstart", 100);
+        touch("touchmove", 114);
+        touch("touchmove", 110);
+        element.dispatchEvent(
+          Object.assign(new Event("touchend"), { touches: [] }),
+        );
+      });
+    }
+    await expect(
+      page.getByRole("button", { name: "Scroll to bottom", exact: true }),
+    ).toHaveCount(0);
+    await page.evaluate(() =>
+      (window as any).__smoothDelta({
+        method: "item/agentMessage/delta",
+        params: {
+          threadId: "ux-0",
+          turnId: "physical-return-turn",
+          itemId: "physical-return-item",
+          delta: "物理底部恢复后的新增正文。",
+        },
+      }),
+    );
+    await expect(
+      page.locator("[data-codex-live-message] [data-codex-streaming-text]"),
+    ).toBeVisible();
+    await expect
+      .poll(() =>
+        viewport.evaluate(
+          (el) => el.scrollHeight - el.clientHeight - el.scrollTop,
+        ),
+      )
+      .toBeLessThanOrEqual(1);
+    await expect(
+      page.locator(".session-codex-composer [contenteditable=true]").first(),
+    ).toHaveText("平滑滚动的会话草稿");
+    expect(
+      fixture.calls.filter((call) =>
+        /\/turn\/(start|interrupt)$|\/thread\/resume$/.test(call.path),
+      ),
+    ).toEqual([]);
+    expect(errors).toEqual([]);
+    expect(
+      await page.evaluate(
+        () => (window as any).__resizeObserverReceipts.errors,
+      ),
+    ).toEqual([]);
+    await saveResizeDiagnostics(page, info);
+  });
+}
 
 test("a positive wheel at latest keeps before-paint following when the reply grows", async ({
   page,

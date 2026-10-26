@@ -1179,3 +1179,44 @@
   height: auto;
   flex: 1 1 auto;
 }
+
+/* Separate Default control; all existing native model menu rules stay shared. */
+.session-mode .session-native-model-menu .session-native-model-default-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  text-align: left;
+}
+.session-mode .session-native-model-menu .session-native-model-default-title {
+  font: inherit;
+}
+.session-mode .session-native-model-menu .session-native-model-default-description {
+  color: var(--codex-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* E8 ordinary open-purpose content; the separate Power caption is unchanged. */
+.session-mode .session-native-model-trigger-content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.session-mode .session-native-model-trigger-measurement {
+  position: fixed;
+  visibility: hidden;
+  pointer-events: none;
+  width: max-content;
+  white-space: nowrap;
+}
+.session-mode .session-native-model-trigger-placeholder {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

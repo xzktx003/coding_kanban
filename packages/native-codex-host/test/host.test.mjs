@@ -5,7 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { createServer as createHttpServer } from 'node:http';
+import { connect } from 'node:net';
 import { validateOptions, validateDirectories, createSharedCodexHomeView, buildHostArgs, OwnedProcesses, assertPortAvailable, buildChildEnv, readPasswordFile, assertFreshOutput } from '../host.mjs';
 import companion from '../companion/control.cjs';
 const id = '019aabcd-1234-7890-abcd-0123456789ab';
@@ -77,6 +79,44 @@ test('host arguments isolate settings and bind LAN, never shell interpolate', ()
   const lanArgs = buildHostArgs(validateOptions({ ...options(), bindHost: '0.0.0.0' }));
   assert.ok(lanArgs.includes('0.0.0.0:34567'));
 });
+test('a fresh refresh host delegates editor restoration to the owned visible-pane recovery while ordinary hosts keep platform defaults',async()=>{
+  const {buildHostSettings}=await import('../host.mjs');
+  const ordinary=validateOptions(options());
+  const normal=buildHostSettings(ordinary);
+  assert.equal(Object.hasOwn(normal,'workbench.editor.restoreEditors'),false);
+  assert.equal(Object.hasOwn(normal,'chatgpt.cliExecutable'),false);
+  const refresh=validateOptions({...options(),refreshServiceConfig:'/isolated/service.json',refreshDomain:id});
+  const settings=buildHostSettings(refresh,{executable:'/isolated/refresh-client-cli.mjs'});
+  assert.equal(settings['workbench.editor.restoreEditors'],false);
+  assert.equal(settings['chatgpt.cliExecutable'],'/isolated/refresh-client-cli.mjs');
+  assert.equal(settings['chatgpt.openOnStartup'],false);
+  assert.equal(settings['workbench.startupEditor'],'none');
+  assert.equal(Object.hasOwn(ordinary,'workbench.editor.restoreEditors'),false);
+  assert.throws(()=>buildHostSettings(refresh),/verified refresh/);
+  assert.throws(()=>buildHostSettings(ordinary,{executable:'/isolated/refresh-client-cli.mjs'}),/explicit refresh/);
+  assert.throws(()=>buildHostSettings(refresh,{executable:'/isolated/unsafe\ncommand'}),/absolute path/);
+});
+test('visible-window startup is explicit, bound to controlled refresh, and mutually exclusive with automatic or fixture opening',async()=>{
+  const {buildHostStartup}=await import('../host.mjs');
+  const refresh={...options(),refreshServiceConfig:'/isolated/service.json',refreshControlRoot:'/isolated/control'};
+  const startup=buildHostStartup(refresh,{restoreVisibleWindows:true});
+  assert.equal(startup.panelMode,'visible-windows');
+  assert.equal(startup.autoOpenNewChats,false);
+  assert.equal(startup.autoOpenFixtures,false);
+  assert.equal(startup.restoreVisibleWindows,true);
+  assert.equal(startup.newChatWindowIds.length,1);
+  assert.match(startup.newChatWindowIds[0],/^[0-9a-f-]{36}$/);
+  for(const value of [options(),{...refresh,refreshControlRoot:undefined},{...refresh,refreshServiceConfig:undefined}])
+    assert.throws(()=>buildHostStartup(value,{restoreVisibleWindows:true}),/controlled refresh/);
+  for(const flags of [{autoOpenNewChats:true},{autoOpenFixtures:true},{createThreads:true}])
+    assert.throws(()=>buildHostStartup(refresh,{...flags,restoreVisibleWindows:true}),/mutually exclusive/);
+  assert.throws(()=>buildHostStartup({...refresh,threadsFile:'/isolated/threads.json'},{restoreVisibleWindows:true}),/mutually exclusive/);
+  assert.throws(()=>buildHostStartup(refresh,{restoreVisibleWindows:'true'}),/boolean/);
+  const automatic=buildHostStartup(options(),{autoOpenNewChats:true});
+  assert.equal(automatic.autoOpenNewChats,true);assert.equal(automatic.panelMode,'new-chats');
+  assert.equal(automatic.restoreVisibleWindows,false);
+  assert.throws(()=>buildHostStartup(options(),{}),/explicit/);
+});
 test('occupied port rejects and does not terminate listener', async () => {
   const net = await import('node:net');
   const server = net.createServer(); await new Promise(r => server.listen(0, '0.0.0.0', r));
@@ -110,6 +150,60 @@ test('child environment isolates modern and legacy IPC and omits inherited crede
   assert.equal(env.TMPDIR, '/isolated/tmp'); assert.equal(env.TMP, env.TMPDIR); assert.equal(env.TEMP, env.TMPDIR);
   assert.equal(env.NODE_OPTIONS, `--require=${JSON.stringify(fileURLToPath(new URL('../companion/preload.cjs', import.meta.url)))}`);
   assert.equal(env.OPENAI_API_KEY, undefined); assert.equal(env.PASSWORD, undefined); assert.equal(env.CODEX_API_KEY, undefined);
+});
+test('child environment preserves an explicit Node proxy choice without enabling it by default', () => {
+  const configured = validateOptions(options());
+  for (const value of ['0', '1']) {
+    const env = buildChildEnv(configured, { NODE_USE_ENV_PROXY: value, NODE_OPTIONS: '--require=/untrusted.cjs' });
+    assert.equal(env.NODE_USE_ENV_PROXY, value);
+    assert.ok(!env.NODE_OPTIONS.includes('/untrusted.cjs'));
+  }
+  for (const value of [undefined, '', 'true', '1 --require=/untrusted.cjs']) {
+    assert.equal(buildChildEnv(configured, { NODE_USE_ENV_PROXY: value }).NODE_USE_ENV_PROXY, undefined);
+  }
+});
+test('explicit proxy choice reaches the isolated child fetch through an owned loopback proxy', {
+  skip: !process.allowedNodeEnvironmentFlags.has('--use-env-proxy'),
+}, async () => {
+  let proxyRequests = 0;
+  const target = createHttpServer((_request, response) => response.end('owned-proxy-ok'));
+  const proxy = createHttpServer((_request, response) => response.writeHead(400).end());
+  const sockets = new Set();
+  for (const server of [target, proxy]) server.on('connection', socket => {
+    sockets.add(socket); socket.once('close', () => sockets.delete(socket));
+  });
+  proxy.on('connect', (request, socket, head) => {
+    if (request.url !== 'native-host-proxy.invalid:80') return socket.destroy();
+    proxyRequests++;
+    const upstream = connect(target.address().port, '127.0.0.1', () => {
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      if (head.length) upstream.write(head);
+      socket.pipe(upstream); upstream.pipe(socket);
+    });
+    sockets.add(upstream); upstream.once('close', () => sockets.delete(upstream));
+    socket.on('error', () => upstream.destroy()); upstream.on('error', () => socket.destroy());
+    socket.once('close', () => upstream.destroy());
+  });
+  try {
+    await new Promise(resolve => target.listen(0, '127.0.0.1', resolve));
+    await new Promise(resolve => proxy.listen(0, '127.0.0.1', resolve));
+    const proxyUrl = `http://127.0.0.1:${proxy.address().port}`;
+    const env = buildChildEnv(validateOptions(options()), {
+      NODE_USE_ENV_PROXY: '1', HTTP_PROXY: proxyUrl, HTTPS_PROXY: proxyUrl, NO_PROXY: 'localhost,127.0.0.1',
+    });
+    const expression = `fetch('http://native-host-proxy.invalid/', {signal: AbortSignal.timeout(3000)})
+      .then(async response => process.stdout.write(await response.text()))
+      .catch(() => { process.stderr.write('owned proxy fetch failed'); process.exitCode = 1; });`;
+    const child = spawn(process.execPath, ['-e', expression], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '', error = '';
+    child.stdout.on('data', chunk => { output += chunk; });
+    child.stderr.on('data', chunk => { error += chunk; });
+    const code = await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
+    assert.equal(code, 0, error); assert.equal(output, 'owned-proxy-ok'); assert.equal(proxyRequests, 1);
+  } finally {
+    for (const socket of sockets) socket.destroy();
+    await Promise.all([target, proxy].map(server => new Promise(resolve => server.close(resolve))));
+  }
 });
 test('child environment loads the provider hook only in extension-host Node processes', () => {
   const env = buildChildEnv(validateOptions(options()), { PATH: '/bin', NODE_OPTIONS: '--require=/tmp/untrusted.cjs' });

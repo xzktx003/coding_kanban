@@ -58,13 +58,25 @@ export async function createRefreshModelFixture() {
     send({ type: "response.created", response: { id } });
     if (mode === "running") {
       let release;
-      await new Promise((resolve) => {
-        release = resolve;
-        held.add(release);
-        response.once("close", release);
-      });
-      held.delete(release);
-      response.off("close", release);
+      // Comments alone do not yield an SSE event to the native idle timer.
+      // Keep the held response alive without inventing assistant text or turns.
+      const progress = setInterval(() => {
+        if (!response.destroyed && !response.writableNeedDrain)
+          send({ type: "response.in_progress", response: { id } });
+      }, 1000);
+      progress.unref();
+      try {
+        await new Promise((resolve) => {
+          release = resolve;
+          held.add(release);
+          response.once("close", release);
+        });
+      } finally {
+        clearInterval(progress);
+        held.delete(release);
+        response.off("close", release);
+      }
+      if (response.destroyed) return;
     }
     const item =
       mode === "approval" && !afterTool

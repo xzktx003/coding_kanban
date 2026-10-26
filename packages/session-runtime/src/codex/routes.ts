@@ -28,7 +28,7 @@ export function registerCodexRoutes(
   registerItemDetailChannel(app, service.options);
   const post = (path: string, handler: (body: Json, signal?: AbortSignal) => Promise<Json>) =>
     app.post("/api/codex/" + path, async (request, reply) => {
-      const controller = ["thread/goal/set", "thread/goal/clear", "thread/goal/clear-completed"].includes(path) ? new AbortController() : undefined;
+      const controller = ["thread/goal/set", "thread/goal/clear", "thread/goal/clear-completed", "feedback/preflight"].includes(path) ? new AbortController() : undefined;
       const aborted = () => controller?.abort();
       if (controller) {
         request.raw.once("aborted", aborted);
@@ -62,6 +62,7 @@ export function registerCodexRoutes(
     const value = previewBody(body, ["href", "contextToken"]);
     return service.githubPreviews.read(value.href, value.contextToken);
   });
+  post("feedback/preflight", (body, signal) => service.feedbackPreflight.read(body, signal));
   for (const path of [
     "thread/start",
     "thread/resume",
@@ -145,7 +146,7 @@ export function registerCodexRoutes(
   );
   post("config/requirements/read", (body) =>
     readonly(
-      () => readRequirements(body, service.raw),
+      () => readRequirements(body, service.raw, service.options.instance),
       ["configRequirements/read"],
     ),
   );

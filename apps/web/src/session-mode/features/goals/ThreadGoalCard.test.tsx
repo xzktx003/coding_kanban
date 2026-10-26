@@ -288,3 +288,90 @@ it("reports rejected-attachment cleanup failures with a retry bound to those fil
   expect(cleanup).toHaveBeenCalledTimes(2);
   expect(api.set).toHaveBeenCalledTimes(1);
 });
+
+// Real component/Tooltip DOM control; jsdom does not establish animated exit paint.
+it("preserves the real Goal edit button and state while its popup hides and restores its hint", async () => {
+  const beforeMap = useCodexStore.getState().goalMap;
+  const beforeGoal = beforeMap[goal.threadId];
+  const expectedGoal = { ...goal };
+  expect(beforeGoal).toBe(goal);
+  let goalMapPublications = 0;
+  const unsubscribe = useCodexStore.subscribe((next, previous) => {
+    if (next.goalMap !== previous.goalMap) goalMapPublications += 1;
+  });
+  const network = vi.spyOn(globalThis, "fetch").mockRejectedValue(
+    new Error("Unexpected network request in the isolated Goal tooltip control"),
+  );
+  let unmount: (() => void) | undefined;
+  try {
+    const view = mount();
+    unmount = view.unmount;
+    const card = view.container.querySelector<HTMLElement>(".session-thread-goal");
+    if (!card) throw Error("Expected the actual mounted Goal card");
+    const edit = within(card).getByRole("button", { name: "编辑目标" });
+    const objectiveText = card.querySelector(".session-goal-objective")?.textContent;
+    const counterText = card.querySelector(".session-goal-counter")?.textContent;
+    const hintLabels = () => [...document.querySelectorAll<HTMLElement>(
+      '.session-native-composer-tooltip[data-slot="tooltip-content"] > .session-native-composer-tooltip-label',
+    )];
+    const protect = () => {
+      expect(edit.isConnected).toBe(true);
+      expect(card.querySelector('button[aria-label="编辑目标"]')).toBe(edit);
+      expect(edit.getAttribute("aria-label")).toBe("编辑目标");
+      expect(edit.getAttribute("type")).toBe("button");
+      expect(card.getAttribute("data-goal-thread")).toBe(goal.threadId);
+      expect(card.getAttribute("data-goal-status")).toBe(goal.status);
+      expect(card.querySelector(".session-goal-objective")?.textContent).toBe(objectiveText);
+      expect(card.querySelector(".session-goal-counter")?.textContent).toBe(counterText);
+      expect(useCodexStore.getState().goalMap).toBe(beforeMap);
+      expect(useCodexStore.getState().goalMap[goal.threadId]).toBe(beforeGoal);
+      expect(useCodexStore.getState().goalMap[goal.threadId]).toEqual(expectedGoal);
+      expect(goal.objective).toBe("可验收的原目标");
+      expect(goal.tokenBudget).toBe(10000);
+      expect(goalMapPublications).toBe(0);
+      expect(api.set).not.toHaveBeenCalled();
+      expect(api.clear).not.toHaveBeenCalled();
+      expect(api.materialize).not.toHaveBeenCalled();
+      expect(api.uncertain).not.toHaveBeenCalled();
+      expect(api.error).not.toHaveBeenCalled();
+      expect(network).not.toHaveBeenCalled();
+    };
+
+    act(() => edit.focus());
+    expect(document.activeElement).toBe(edit);
+    expect(hintLabels()).toHaveLength(1);
+    expect(hintLabels()[0]?.textContent).toBe("编辑目标");
+    protect();
+    expect(api.read).not.toHaveBeenCalled();
+
+    await act(async () => fireEvent.click(edit));
+    const dialog = screen.getByRole("dialog");
+    const editor = within(dialog).getByRole("textbox", { name: "目标" }) as HTMLTextAreaElement;
+    expect(editor.value).toBe(goal.objective);
+    expect(hintLabels()).toHaveLength(0);
+    protect();
+    expect(api.read).toHaveBeenCalledTimes(1);
+    expect(api.read.mock.calls[0]?.[0]).toBe(goal.objective);
+
+    fireEvent.change(editor, { target: { value: "本地未提交的目标草稿" } });
+    expect(editor.value).toBe("本地未提交的目标草稿");
+    protect();
+    expect(hintLabels()).toHaveLength(0);
+    await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "取消" })));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(editor.isConnected).toBe(false);
+    protect();
+
+    act(() => edit.blur());
+    act(() => edit.focus());
+    expect(document.activeElement).toBe(edit);
+    expect(hintLabels()).toHaveLength(1);
+    expect(hintLabels()[0]?.textContent).toBe("编辑目标");
+    protect();
+    expect(api.read).toHaveBeenCalledTimes(1);
+  } finally {
+    unsubscribe();
+    unmount?.();
+    network.mockRestore();
+  }
+});

@@ -1,16 +1,26 @@
 import { expect, test, type Page } from "@playwright/test";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
+import { openComposerStatus } from "./session-composer-actions";
 
 async function setup(page: Page, behavior: string) {
   const fixture = await installSessionUxFixture(page, 1);
   await page.goto("/?mode=session");
   await page.locator(".session-mode [contenteditable=true]").first().waitFor();
   await seedSessionUx(page, 1);
+  await page.evaluate(async (cwd) => {
+    const path = "/src/session-mode/lib/agentNav.ts";
+    const { navigateToAgentSession } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+        path
+    );
+    navigateToAgentSession({ agent: "codex", threadId: "ux-0", cwd });
+  }, fixture.threads[0].cwd);
   const composer = page.locator(".session-codex-composer").first();
+  await expect(composer).toHaveAttribute("data-owner-thread", "ux-0");
   const editor = composer.locator("[contenteditable=true]").first();
-  await composer
-    .getByRole("button", { name: "输入状态与消息队列", exact: true })
-    .click();
+  await openComposerStatus(page);
   await page
     .getByRole("group", { name: "Enter 发送设置" })
     .getByRole("radio", { name: behavior, exact: true })

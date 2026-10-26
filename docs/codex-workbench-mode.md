@@ -1,20 +1,14 @@
 # Codex 工作台模式
 
-伴随扩展实例标记早于 VS Code 完成原编辑器布局恢复，因此该标记不直接开放打开/聚焦操作。surface 读取原生 `code/didStartWorkbench` 时间点，并监听 PerformanceObserver mark 事件；完成后才发布实例身份，隐藏时停止观察。缺失原生完成标记时保留未就绪状态，不猜测已经恢复；普通性能 API 和记录保持。此屏障计入普通刷新耗时，不能排除后声称两秒达标。
-
-原生打开回执按精确 URI 的当前 tab 组回报列号，不能把 `vscode.openWith` 之前预留的空组列号当成最终位置；恢复时该空组可能已被 VS Code 移除。已有未选中的新聊天聚焦原组，重复身份拒绝操作。此回执只用于定位，不能替代 composer、目标及原生焦点就绪验收。
-
 应用提供会话、终端和独立 Codex 三种模式。Codex 模式使用与会话模式相同的自由分屏：窗口组可左右或上下嵌套，拖标签到边缘分屏，拖分隔线调整比例。每个窗格只显示当前标签对应的原生窗口，每个窗口保留官方插件自己的输入框。手机只显示当前窗口组，并用窗口组菜单切换。原生适配位于 `apps/web/src/codex-mode`，不替换会话模式的 renderer、草稿或 Agent 状态。顶栏的三个模式按钮直接切换；`?mode=codex` 可以直接进入，本设备保存选择，三个工作区访问后保留挂载状态。
 
 ## 实现边界
-
-普通刷新与再次进入的 [恢复计划](designs/codex-mode-audit-20261014/refresh-recovery-plan.md) 已执行阶段 0：增加独立、版本/哈希门控的私有连接原型，通过真实匹配 CLI 和原版插件验证连接；页面性能关卡失败，正式入口仍保持现有路径。后台进程保留不等于官方本地页面已恢复，不宣称 10 项 LRU、独立草稿或 2 秒操作已支持。原型与未完成项见 [阶段 0 验收](designs/codex-mode-audit-20261014/refresh-recovery-stage0.md)。
 
 按官方插件逐项跟踪的功能范围、证据和未闭合项见 [Codex 插件对照清单](codex-plugin-parity.md)。只有隔离真实浏览器操作、截图和对应回归都完成后，矩阵状态才可标为已验收。
 
 未修改的官方 VSIX 由 `packages/native-codex-host` 的独立 code-server 宿主运行。自有伴随扩展默认不自动打开面板。`--auto-open-fixtures` 打开两个隔离 fixture；`--auto-open-new-chats` 启动时只打开一份原生新聊天，更多聊天由 `+ 新聊天` 追加。后者与 fixture 启动参数互斥。已有两份启动窗口的旧运行记录仍可恢复。新聊天采用白名单窗口 UUID 的 query URI，避免原插件固定新建 URI 被编辑器去重；输入与发送仍交给原插件。原版插件和伴随扩展单独安装，后续升级官方插件需要重新核对命令、DOM 与协议契约。
 
-Node 网关只从本机环境配置读取上游和 owned0600 运行记录。`GET /api/native-codex/status` 返回可用状态、版本、界面 URL、fixture 标识和不含凭证的 `resumeAvailable`；只有上游与原生伴随扩展 broker 都就绪时才开放 Resume。私有 broker 凭证不进入浏览器。`/native-codex/` 提供同源 HTTP/WebSocket 代理，校验浏览器 Origin 与实际 Host。只有版本哈希路径 `GET /native-codex/stable-<40位十六进制>/static/` 下白名单脚本、样式、字体、图片及 WASM，在 HTTP 200 且 MIME 匹配时可补一年 immutable；拒绝目录穿越、非预期 query、Set-Cookie、按认证变化的 Vary，并保留上游 private/no-store/no-cache。HTML、错误页、接口、WebSocket 和未哈希路径不加入该静态缓存。浏览器只在 sessionStorage 记住上一次校验通过的同源 iframe 路径，状态返回前即可挂载；地址变化会替换，加载失败或服务不可用会丢掉缓存。原生路由使用独立方向限制：浏览器发来的单消息及待发队列各 8 MiB，宿主返回的单消息及浏览器待发缓冲各 2 MiB（上游连接完成后，待发达到 256 KiB 即暂停继续接收；握手期间队列也有 8 MiB 上限），保留终端既有接收限制。此上游无子协议需求，因此带子协议的握手明确拒绝。HTTPS Vite 转发保留 Host 并传递协议。
+Node 网关只从本机环境配置读取上游和 owned0600 运行记录。`GET /api/native-codex/status` 返回可用状态、版本、界面 URL、fixture 标识和不含凭证的 `resumeAvailable`；只有上游与原生伴随扩展 broker 都就绪时才开放 Resume。私有 broker 凭证不进入浏览器。`/native-codex/` 提供同源 HTTP/WebSocket 代理，校验浏览器 Origin 与实际 Host。只有带内容哈希的 `GET /native-codex/stable-<40位十六进制>/static/` 在上游没有长缓存时加一年 immutable；HTML、接口、WebSocket 和未哈希路径保持不缓存。浏览器只在 sessionStorage 记住上一次校验通过的同源 iframe 路径，状态返回前即可挂载；地址变化会替换，加载失败或服务不可用会丢掉缓存。原生路由使用独立方向限制：浏览器发来的单消息及待发队列各 8 MiB，宿主返回的单消息及浏览器待发缓冲各 2 MiB（上游连接完成后，待发达到 256 KiB 即暂停继续接收；握手期间队列也有 8 MiB 上限），保留终端既有接收限制。此上游无子协议需求，因此带子协议的握手明确拒绝。HTTPS Vite 转发保留 Host 并传递协议。
 
 Codex 左侧项目栏复用会话模式的视觉结构：搜索、可折叠项目和项目下的会话行。它只读取 Codex 自己的项目和 thread 列表；展开、搜索和打开都留在 Codex 模式，不写入会话模式的项目、当前线程或关注标签。删除、归档、重命名和移除项目不在这个侧栏提供。顶栏的太阳/月亮读写会话模式同一份 `kanban.session.theme-storage`。`.session-mode` 与 `.codex-mode` 同时切换 `light`/`dark`，外壳使用同一套默认色板。原生编辑器通过伴随扩展只接受 `light` 或 `dark`，分别设置 `Default Light Modern` 与 `Default Dark Modern`；官方 VSIX 不修改。宿主尚未连接时外壳先变，连接后补发一次。
 

@@ -286,7 +286,7 @@ for (const width of [1440, 390]) {
       await (await open())
         .getByRole("menuitemradio", { name: /完全访问权限/ })
         .click();
-      const dialog = page.getByRole("dialog", { name: "开启完全访问权限？" });
+      const dialog = page.getByRole("dialog", { name: "要开启完整访问权限吗？" });
       await expect(dialog).toBeVisible();
       await dialog.getByRole("button", { name: "取消", exact: true }).click();
       await expect(dialog).toHaveCount(0);
@@ -297,7 +297,7 @@ for (const width of [1440, 390]) {
         .getByRole("menuitemradio", { name: /完全访问权限/ })
         .click();
       await dialog
-        .getByRole("button", { name: "开启完全访问权限", exact: true })
+        .getByRole("button", { name: "确认", exact: true })
         .click();
       await expect(dialog).toHaveCount(0);
       expect((await check("full-access-confirmed")).side?.sandbox).toBe(

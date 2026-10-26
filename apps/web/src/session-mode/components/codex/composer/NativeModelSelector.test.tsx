@@ -29,6 +29,10 @@ vi.mock("@session/hooks/useThreadModelSettings", () => ({
     reasoningEffort: calls.effortValue,
     setModel: calls.model,
     setReasoningEffort: calls.effort,
+    setModelSelection: ({ model, reasoningEffort }: { model: string; reasoningEffort: string; serviceTier?: string | null }) => {
+      if (model !== "model-one") calls.model(model);
+      if (reasoningEffort !== calls.effortValue) calls.effort(reasoningEffort);
+    },
   }),
 }));
 vi.mock("../hooks/useModels", () => ({
@@ -122,19 +126,26 @@ it("uses the actual native 28px thumb minus 1px endpoint inset for ticks and inp
   ]);
 });
 
-it.each(["high", "xhigh", "ultra"])(
-  "uses native explicit-model accent and only supported ultra maximum metadata (%s)",
-  async (effort) => {
+it.each([
+  { raw: "high", display: "高", accent: "true" },
+  { raw: "xhigh", display: "极高", accent: "true" },
+  { raw: "ultra", display: "中", accent: "true" },
+])(
+  "uses the app ordinary display policy without rewriting raw $raw",
+  async ({ raw, display, accent }) => {
     calls.options = ["low", "medium", "high", "xhigh", "ultra"];
-    calls.effortValue = effort;
+    calls.effortValue = raw;
     render(<NativeModelSelector threadId="original" />);
     fireEvent.keyDown(screen.getByRole("button", { name: /^模型：/ }), {
       key: "ArrowDown",
     });
     await screen.findByRole("menuitem", { name: "强度" });
     const label = document.querySelector(".session-native-power-effort")!;
-    expect(label.getAttribute("data-accent")).toBe("true");
-    expect(label.getAttribute("data-maximum")).toBe(String(effort === "ultra"));
+    expect(label.textContent).toBe(display);
+    expect(label.getAttribute("data-accent")).toBe(accent);
+    expect(label.getAttribute("data-maximum")).toBe("false");
+    expect(document.querySelectorAll(".session-native-power-dot")).toHaveLength(4);
+    expect(calls.effortValue).toBe(raw);
   },
 );
 

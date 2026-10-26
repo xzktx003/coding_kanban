@@ -1,3 +1,7 @@
+import {
+  mergeNativePermissionMetadata,
+  type NativePermissionMetadata,
+} from "@session/services/nativeThreadPermissionMetadata";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type {
@@ -38,6 +42,8 @@ export interface PersonalityNotice {
   personality: Personality;
 }
 export interface ThreadModelEntry extends ThreadModelSettings {
+  /** Volatile per-field last observations, never a current permission/source lease. */
+  readonly nativePermissionMetadata?: NativePermissionMetadata;
   revision: number;
   pending: boolean;
   pendingFields?: Array<keyof ThreadModelSettings>;
@@ -125,19 +131,73 @@ const EDITABLE_FIELDS = [
   "collaborationMode",
   "personality",
 ] as const;
-export const useThreadModelStore = create<{
-  threads: Record<string, ThreadModelEntry>;
-}>()(
+type ThreadModelState = { threads: Record<string, ThreadModelEntry> };
+
+function withoutNativePermissionMetadata<T extends object>(entry: T): T {
+  if (
+    !entry ||
+    typeof entry !== "object" ||
+    !Object.hasOwn(entry, "nativePermissionMetadata")
+  )
+    return entry;
+  const clean = { ...entry } as Record<string, unknown>;
+  delete clean.nativePermissionMetadata;
+  return clean as T;
+}
+
+function withoutThreadPermissionMetadata(
+  threads: Record<string, ThreadModelEntry>,
+): Record<string, ThreadModelEntry> {
+  if (!threads || typeof threads !== "object" || Array.isArray(threads))
+    return threads;
+  let clean: Record<string, ThreadModelEntry> | undefined;
+  for (const [id, entry] of Object.entries(threads)) {
+    const next = withoutNativePermissionMetadata(entry);
+    if (next !== entry) {
+      clean ??= { ...threads };
+      clean[id] = next;
+    }
+  }
+  return clean ?? threads;
+}
+
+function withoutPersistedPermissionMetadata(saved: unknown): unknown {
+  if (
+    !saved ||
+    typeof saved !== "object" ||
+    Array.isArray(saved) ||
+    !Object.hasOwn(saved, "threads")
+  )
+    return saved;
+  const threads = (saved as { threads?: unknown }).threads;
+  if (!threads || typeof threads !== "object" || Array.isArray(threads))
+    return saved;
+  const clean = withoutThreadPermissionMetadata(
+    threads as Record<string, ThreadModelEntry>,
+  );
+  return clean === threads ? saved : { ...saved, threads: clean };
+}
+
+export const useThreadModelStore = create<ThreadModelState>()(
   persist(() => ({ threads: {} }), {
     name: "kanban.session.codex-thread-models",
     version: 2,
+    partialize: (state) => ({
+      ...state,
+      threads: withoutThreadPermissionMetadata(state.threads),
+    }),
+    // Same-version persisted data skips migrate, so reads must strip it too.
+    merge: (saved, current) => ({
+      ...current,
+      ...(withoutPersistedPermissionMetadata(saved) as Partial<ThreadModelState>),
+    }),
     migrate: (saved) => {
       const state = saved as { threads?: Record<string, ThreadModelEntry> };
       return {
         threads: Object.fromEntries(
           Object.entries(state.threads ?? {}).map(([id, entry]) => [
             id,
-            { ...UNKNOWN, ...entry },
+            { ...UNKNOWN, ...withoutNativePermissionMetadata(entry) },
           ]),
         ),
       };
@@ -152,11 +212,13 @@ export function getThreadModelSettings(
   if (threadId)
     return {
       ...UNKNOWN,
-      ...useThreadModelStore.getState().threads[threadId],
+      ...withoutNativePermissionMetadata(
+        useThreadModelStore.getState().threads[threadId],
+      ),
     } as Required<ThreadModelSettings>;
   return {
     ...UNKNOWN,
-    ...useConfigStore.getState(),
+    ...withoutNativePermissionMetadata(useConfigStore.getState()),
   } as Required<ThreadModelSettings>;
 }
 
@@ -226,6 +288,7 @@ export function changeThreadModel(
 export function hydrateThreadModel(
   threadId: string,
   value: {
+    readonly nativePermissionMetadata?: NativePermissionMetadata;
     model?: string;
     modelProvider?: string;
     reasoningEffort?: ReasoningEffort | null;
@@ -249,6 +312,30 @@ export function hydrateThreadModel(
       options.revision !== (old?.revision ?? 0)
     )
       return s;
+    const nativePermissionMetadata = mergeNativePermissionMetadata(
+      old?.nativePermissionMetadata,
+      Object.hasOwn(value, "nativePermissionMetadata")
+        ? value.nativePermissionMetadata
+        : undefined,
+      options.initialOnly,
+    );
+    // Preserve the original settings branch, including pending/ack decisions.
+    // A metadata-only change copies only this entry and advances its existing fence.
+    const retainPermissionMetadata = (next: ThreadModelState): ThreadModelState => {
+      if (nativePermissionMetadata === old?.nativePermissionMetadata) return next;
+      const entry = next.threads[threadId];
+      return {
+        ...next,
+        threads: {
+          ...next.threads,
+          [threadId]: {
+            ...entry,
+            nativePermissionMetadata,
+            revision: next === s ? (old?.revision ?? 0) + 1 : entry.revision,
+          },
+        },
+      };
+    };
     const nativePolicy =
       value.sandboxPolicy ??
       (typeof value.sandbox === "object" ? value.sandbox : undefined);
@@ -328,7 +415,7 @@ export function hydrateThreadModel(
         : mergeNativeSettings(old?.nativeSettings, incoming);
     const sameNative = sameNativeSettings(old?.nativeSettings, nativeSettings);
     if (options.initialOnly && old) {
-      if (old.nativeSettings === undefined) return s;
+      if (old.nativeSettings === undefined) return retainPermissionMetadata(s);
       // A fork ACK seeds missing settings; already accepted values are newer.
       const canonical: NativeSettings = { ...incoming, ...old.nativeSettings };
       for (const group of [SANDBOX_FIELDS, REVIEWER_FIELDS])
@@ -361,10 +448,10 @@ export function hydrateThreadModel(
           JSON.stringify(v),
       );
       if (sameProjection && sameNativeSettings(old.nativeSettings, canonical))
-        return s;
+        return retainPermissionMetadata(s);
       const model = projected.model ?? old.model;
       const provider = projected.modelProvider ?? old.modelProvider;
-      return {
+      return retainPermissionMetadata({
         threads: {
           ...s.threads,
           [threadId]: {
@@ -380,7 +467,7 @@ export function hydrateThreadModel(
             // The fork receipt must not acknowledge pending choices or alter notices.
           },
         },
-      };
+      });
     }
     const matches =
       old?.model === observed.model &&
@@ -404,8 +491,8 @@ export function hydrateThreadModel(
       );
     if (old?.pending && !matches)
       return sameObserved && sameNative
-        ? s
-        : {
+        ? retainPermissionMetadata(s)
+        : retainPermissionMetadata({
             threads: {
               ...s.threads,
               [threadId]: {
@@ -415,7 +502,7 @@ export function hydrateThreadModel(
                 revision: old.revision + 1,
               },
             },
-          };
+          });
     if (
       old &&
       !old.pending &&
@@ -424,13 +511,13 @@ export function hydrateThreadModel(
       sameObserved &&
       sameNative
     )
-      return s;
+      return retainPermissionMetadata(s);
     const changed =
       old &&
       (old.model !== observed.model ||
         old.modelProvider !== observed.modelProvider);
     const revision = (old?.revision ?? 0) + 1;
-    return {
+    return retainPermissionMetadata({
       threads: {
         ...s.threads,
         [threadId]: {
@@ -468,7 +555,7 @@ export function hydrateThreadModel(
             : {}),
         },
       },
-    };
+    });
   });
 }
 

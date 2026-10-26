@@ -776,6 +776,8 @@ it("opens the remaining plugin command-menu surfaces", async () => {
   expect(useLayoutStore.getState().view).toBe("settings");
   await choose("反馈");
   expect(feedback).toHaveBeenCalled();
+  expect(feedback.mock.calls.at(-1)?.[0]).toBeInstanceOf(CustomEvent);
+  expect(feedback.mock.calls.at(-1)?.[0].detail).toEqual({ threadId: "original-owner", draftOwner: sessionDraftKey("codex", "original-owner") });
   window.removeEventListener("session-open-projects", opened);
   window.removeEventListener("codex-open-feedback", feedback);
   back.mockRestore();
@@ -1491,6 +1493,19 @@ it("can background-submit a new chat only from its captured draft owner", async 
   expect(clicked).toHaveBeenCalledOnce();
 });
 
+it("keeps the explicit captured new-draft owner in its feedback event", async () => {
+  const feedback = vi.fn();
+  const capturedOwner = sessionDraftKey("codex", null, "/fixture/captured-menu-project");
+  window.addEventListener("codex-open-feedback", feedback);
+  try {
+    render(<ConversationMenu threadId={null} title="当前会话" draftOwner={capturedOwner} />);
+    fireEvent.keyDown(screen.getByRole("button", { name: "当前会话的更多操作" }), { key: "ArrowDown" });
+    fireEvent.click(screen.getByRole("menuitem", { name: "反馈" }));
+    expect(feedback).toHaveBeenCalledTimes(1);
+    expect(feedback.mock.calls[0][0].detail).toEqual({ threadId: null, draftOwner: capturedOwner });
+  } finally { window.removeEventListener("codex-open-feedback", feedback); }
+});
+
 it("cycles the catalog speed for the open thread", async () => {
   useModelCacheStore.setState({
     openAiModels: [
@@ -1555,8 +1570,7 @@ it("reports that host cycling stays on this machine", async () => {
 });
 
 it("raises the open thread reasoning effort within the catalog", async () => {
-  useModelCacheStore.setState({
-    openAiModels: [
+  const models = [
       {
         id: "original-model",
         model: "original-model",
@@ -1566,7 +1580,11 @@ it("raises the open thread reasoning effort within the catalog", async () => {
           { reasoningEffort: "high" },
         ],
       } as never,
-    ],
+    ];
+  useModelCacheStore.setState({
+    openAiModels: models,
+    modelSnapshot: models,
+    modelStatus: "success",
   });
   useThreadModelStore.setState({
     threads: { "original-owner": { reasoningEffort: "medium" } as never },
@@ -1579,6 +1597,64 @@ it("raises the open thread reasoning effort within the catalog", async () => {
   expect(
     useThreadModelStore.getState().threads["original-owner"]?.reasoningEffort,
   ).toBe("high");
+});
+
+it("raises through selectable efforts without selecting persistent or rewriting the raw model cache", async () => {
+  const raw = [
+    { reasoningEffort: "low" },
+    { reasoningEffort: "persistent" },
+    { reasoningEffort: "medium" },
+  ];
+  const catalog = {
+    id: "original-model",
+    model: "original-model",
+    supportedReasoningEfforts: raw,
+  };
+  const models = [catalog as never];
+  useModelCacheStore.setState({ openAiModels: models, modelSnapshot: models, modelStatus: "success" });
+  useThreadModelStore.setState({
+    threads: { "original-owner": { reasoningEffort: "low" } as never },
+  });
+  render(<ConversationMenu threadId="original-owner" title="当前会话" />);
+  fireEvent.keyDown(screen.getByRole("button", { name: "当前会话的更多操作" }), {
+    key: "ArrowDown",
+  });
+  fireEvent.click(screen.getByRole("menuitem", { name: "提高推理强度" }));
+
+  expect.soft(
+    useThreadModelStore.getState().threads["original-owner"]?.reasoningEffort,
+  ).toBe("medium");
+  expect.soft(useModelCacheStore.getState().openAiModels[0]).toBe(catalog);
+  expect.soft(useModelCacheStore.getState().openAiModels[0].supportedReasoningEfforts).toBe(raw);
+  expect.soft(raw.map((option) => option.reasoningEffort)).toEqual([
+    "low",
+    "persistent",
+    "medium",
+  ]);
+});
+
+it("does not switch or write persistent when it is the only raw catalog effort", async () => {
+  const raw = [{ reasoningEffort: "persistent" }];
+  const catalog = {
+    id: "original-model",
+    model: "original-model",
+    supportedReasoningEfforts: raw,
+  };
+  const before = { reasoningEffort: "low" } as never;
+  const models = [catalog as never];
+  useModelCacheStore.setState({ openAiModels: models, modelSnapshot: models, modelStatus: "success" });
+  useThreadModelStore.setState({ threads: { "original-owner": before } });
+  render(<ConversationMenu threadId="original-owner" title="当前会话" />);
+  fireEvent.keyDown(screen.getByRole("button", { name: "当前会话的更多操作" }), {
+    key: "ArrowDown",
+  });
+  fireEvent.click(screen.getByRole("menuitem", { name: "提高推理强度" }));
+
+  expect(useThreadModelStore.getState().threads["original-owner"]).toBe(before);
+  expect(toast.message).toHaveBeenLastCalledWith("当前模型没有可切换的推理强度");
+  expect(useModelCacheStore.getState().openAiModels[0]).toBe(catalog);
+  expect(catalog.supportedReasoningEfforts).toBe(raw);
+  expect(raw.map((option) => option.reasoningEffort)).toEqual(["persistent"]);
 });
 
 it("opens the shipped terminal panel", async () => {

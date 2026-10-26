@@ -22,12 +22,13 @@ import { SessionCodexFeishuNotifier } from "../services/session-codex-feishu-not
 import type { FeishuCompletionSenderLike } from "../services/agent-completion-feishu-notifier.js";
 import { resolve } from "node:path";
 import { Readable } from "node:stream";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import WebSocket from "ws";
 
 interface SessionModeRouteOptions {
   loadDetailChannel?: () => Promise<{
     registerLocalItemDetailChannel: (app: FastifyInstance, dataDir: string) => void;
+    registerLocalChatHistoryChannel?: (app: FastifyInstance, dataDir: string, fallback: (request: FastifyRequest, reply: FastifyReply) => unknown) => void;
   }>;
   origin?: string;
   attachmentRoot?: string;
@@ -207,6 +208,38 @@ export function registerSessionModeRoutes(
         return;
       }
       channel.registerLocalItemDetailChannel(detailScope, resolve(options.attachmentRoot!, "..", ".codexia"));
+      channel.registerLocalChatHistoryChannel?.(detailScope, resolve(options.attachmentRoot!, "..", ".codexia"), async (request, reply) => {
+        if (!origin) return reply.code(503).send({ error: "会话服务尚未启动" });
+        // Only the explicit chat projection uses the independent bounded reader.
+        // Full/raw consumers retain the existing runtime protocol and response.
+        const suffix = request.raw.url!.slice("/api/session".length);
+        const controller = new AbortController();
+        const abort = () => { if (!reply.raw.writableFinished) controller.abort(); };
+        request.raw.once("aborted", abort);
+        reply.raw.once("close", abort);
+        try {
+          const response = await fetchUpstream(`${origin}${suffix}`, {
+            method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify(request.body ?? {}), redirect: "manual",
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120_000)]),
+          });
+          reply.code(response.status).header("x-content-type-options", "nosniff");
+          for (const key of ["content-type", "cache-control"]) {
+            const value = response.headers.get(key);
+            if (value) reply.header(key, value);
+          }
+          if (!response.body) {
+            request.raw.off("aborted", abort); reply.raw.off("close", abort);
+            return reply.send();
+          }
+          const body = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
+          body.once("close", () => { request.raw.off("aborted", abort); reply.raw.off("close", abort); });
+          return reply.send(body);
+        } catch {
+          request.raw.off("aborted", abort); reply.raw.off("close", abort);
+          return reply.code(503).send({ error: "会话服务连接失败，请重试连接。" });
+        }
+      });
     });
   } else {
     registerSessionItemDetail(app, () => origin, fetchUpstream);

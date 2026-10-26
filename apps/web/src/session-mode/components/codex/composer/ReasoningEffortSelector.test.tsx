@@ -164,3 +164,53 @@ it("initializing the new-chat model also preserves a supported reasoning prefere
     reasoningEffort: "high",
   });
 });
+
+it("skips a wire-supported persistent effort in the actual panel without changing another thread, defaults or raw catalog", () => {
+  const target = model("target", ["low", "persistent", "medium"], "medium");
+  const raw = target.supportedReasoningEfforts;
+  catalog.models = [target];
+  hydrateThreadModel("a", { model: "target", reasoningEffort: "low" });
+  hydrateThreadModel("b", { model: "other", reasoningEffort: "persistent" });
+  const beforeB = useThreadModelStore.getState().threads.b;
+  const beforeDefaults = useConfigStore.getState();
+  render(<ModelReasonSelector mode="panel" threadId="a" />);
+
+  fireEvent.keyDown(screen.getByRole("slider", { name: "推理强度" }), {
+    key: "ArrowRight",
+  });
+
+  expect.soft(useThreadModelStore.getState().threads.a.reasoningEffort).toBe("medium");
+  expect.soft(useThreadModelStore.getState().threads.b).toBe(beforeB);
+  expect.soft(useConfigStore.getState()).toBe(beforeDefaults);
+  expect.soft(catalog.models[0]).toBe(target);
+  expect.soft(target.supportedReasoningEfforts).toBe(raw);
+  expect.soft(raw.map((option) => option.reasoningEffort)).toEqual([
+    "low",
+    "persistent",
+    "medium",
+  ]);
+});
+
+it("displays medium for a configured persistent effort without rewriting it on panel mount", () => {
+  const target = model("target", ["low", "persistent", "medium"], "medium");
+  const raw = target.supportedReasoningEfforts;
+  catalog.models = [target];
+  hydrateThreadModel("a", { model: "target", reasoningEffort: "persistent" });
+  const before = useThreadModelStore.getState().threads.a;
+  const defaults = useConfigStore.getState();
+  render(<ModelReasonSelector mode="panel" threadId="a" />);
+
+  const slider = screen.getByRole("slider", { name: "推理强度" });
+  expect.soft(slider.getAttribute("aria-valuetext")).toBe("medium");
+  expect.soft(slider.getAttribute("aria-valuemax")).toBe("1");
+  expect(useThreadModelStore.getState().threads.a).toBe(before);
+  expect(useConfigStore.getState()).toBe(defaults);
+  expect(target.supportedReasoningEfforts).toBe(raw);
+  expect(raw.map((option) => option.reasoningEffort)).toEqual([
+    "low",
+    "persistent",
+    "medium",
+  ]);
+  fireEvent.keyDown(slider, { key: "ArrowLeft" });
+  expect(useThreadModelStore.getState().threads.a.reasoningEffort).toBe("low");
+});

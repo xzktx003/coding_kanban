@@ -465,6 +465,80 @@ test(
       refreshControlRoot: options.runtimeRoot,
       reconnectionGraceSeconds: 60,
     });
+    // Every invocation still pins both artifacts. A single startup must not
+    // hash the same large CLI/VSIX again while attaching that verified config.
+    const fs = (await import("node:fs")).default;
+    const { syncBuiltinESMExports } = await import("node:module");
+    const { runBridge: versionBridge } =
+      await import("../refresh-prototype/cli-bridge.mjs");
+    const artifactReads = new Map([
+      [metadata.cliPath, 0],
+      [metadata.officialVsix, 0],
+    ]);
+    const originalReadStream = fs.createReadStream;
+    fs.createReadStream = function (file, ...args) {
+      if (artifactReads.has(file))
+        artifactReads.set(file, artifactReads.get(file) + 1);
+      return originalReadStream.call(this, file, ...args);
+    };
+    syncBuiltinESMExports();
+    const versionOutput = new PassThrough();
+    let pinnedVersion = "";
+    versionOutput.on("data", (bytes) => (pinnedVersion += bytes));
+    try {
+      for (let invocation = 1; invocation <= 2; invocation++) {
+        await versionBridge({
+          configPath: bridgeConfig,
+          scope,
+          controlRoot: options.runtimeRoot,
+          controlScope: {
+            generation: control.record.generation,
+            pid: control.record.pid,
+            startTicks: control.record.startTicks,
+          },
+          argv: ["--version"],
+          input: new PassThrough(),
+          output: versionOutput,
+        });
+        assert.deepEqual(
+          [...artifactReads.values()],
+          [invocation, invocation],
+          "one full CLI and VSIX verification per invocation, without duplicate scans or cross-startup caching",
+        );
+      }
+    } finally {
+      fs.createReadStream = originalReadStream;
+      syncBuiltinESMExports();
+    }
+    assert.equal(pinnedVersion, `codex-cli ${proof.cliVersion}\n`.repeat(2));
+    const changedConfig = join(root, "native/changed-artifact.json");
+    const changedArtifact = join(root, "changed.vsix");
+    await writeFile(changedArtifact, "not the pinned official VSIX", {
+      mode: 0o600,
+    });
+    await writeFile(
+      changedConfig,
+      JSON.stringify({ ...metadata, officialVsix: changedArtifact }),
+      { mode: 0o600 },
+    );
+    const changedOutput = new PassThrough();
+    let changedBytes = 0;
+    changedOutput.on("data", (bytes) => (changedBytes += bytes.length));
+    await assert.rejects(
+      versionBridge({
+        configPath: changedConfig,
+        scope,
+        argv: ["--version"],
+        input: new PassThrough(),
+        output: changedOutput,
+      }),
+      /binary version\/hash mismatch/,
+    );
+    assert.equal(
+      changedBytes,
+      0,
+      "a previously successful startup cannot authorize changed artifacts",
+    );
     assert.equal(bridge.control.generation, control.record.generation);
     const wrapper = await readFile(bridge.executable, "utf8");
     assert.equal(wrapper.includes(control.record.token), false);

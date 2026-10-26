@@ -38,6 +38,9 @@ test('extension-host preload captures the official custom editor provider before
   assert.equal(typeof receipt.dispose, 'function');
   assert.equal(api.window.registerCustomEditorProvider, originalRegister);
   assert.equal(moduleLoader._load, originalLoad);
+  assert.equal(state.apiPatchRetainedCount, 0);
+  state.restore();
+  assert.equal(state.apiPatchRetainedCount, 0);
 });
 
 test('extension-host preload passes unrelated editor registrations through without capturing them', () => {
@@ -55,4 +58,23 @@ test('extension-host preload passes unrelated editor registrations through witho
   state.restore();
   assert.equal(api.window.registerCustomEditorProvider, originalRegister);
   assert.equal(moduleLoader._load, originalLoad);
+  assert.equal(state.apiPatchRetainedCount, 0);
+});
+
+test('restoration preserves a later foreign API hook and counts only our directly installed hook', () => {
+  const api={window:{registerCustomEditorProvider(){}}};
+  const moduleLoader={_load:()=>api};
+  const state=installNativeCodexProviderCapture(moduleLoader,{});moduleLoader._load('vscode');
+  const foreign=()=>{};api.window.registerCustomEditorProvider=foreign;
+  state.restore();state.restore();
+  assert.equal(api.window.registerCustomEditorProvider,foreign);assert.equal(state.apiPatchRetainedCount,0);
+});
+
+test('a blocked restoration cannot falsely report that its API hook was removed', () => {
+  const api={window:{registerCustomEditorProvider(){}}};
+  const moduleLoader={_load:()=>api};
+  const state=installNativeCodexProviderCapture(moduleLoader,{});moduleLoader._load('vscode');
+  const wrapped=api.window.registerCustomEditorProvider;
+  Object.defineProperty(api.window,'registerCustomEditorProvider',{value:wrapped,writable:false,configurable:false});
+  state.restore();assert.equal(api.window.registerCustomEditorProvider,wrapped);assert.equal(state.apiPatchRetainedCount,1);
 });

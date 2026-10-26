@@ -1613,3 +1613,39 @@ test("native refresh scope is read from the owned host record without exposing i
     }
   }finally{await f.close()}
 });
+
+test("visible-window startup requires the complete private host record and cannot use legacy restore", async () => {
+  const f = await setup();
+  const windowId = "019aabcd-1234-7890-abcd-000000000003";
+  try {
+    const original = JSON.parse(await readFile(f.record, "utf8"));
+    const refreshConnection = {
+      domain: "019aabcd-1234-7890-abcd-000000000001",
+      generation: "019aabcd-1234-7890-abcd-000000000002",
+      pid: 123, startTicks: "456",
+      control: { runtimeRoot: "/private/control", generation: "019aabcd-1234-7890-abcd-000000000004", pid: 124, startTicks: "457" },
+    };
+    const record = { ...original, runtimeRoot: "/private/host", panelMode: "visible-windows", newChatWindowIds: [windowId], refreshConnection, brokerPort: 34567, brokerAuthFile: "/private/broker.json" };
+    await writeFile(f.record, JSON.stringify(record));
+    const runtime = await f.gateway.runtime();
+    assert.equal(runtime?.restoreVisibleWindows, true);
+    assert.deepEqual(runtime?.newChatWindowIds, [windowId]);
+    const status = (await f.app.inject("/api/native-codex/status")).json();
+    assert.equal(status.restoreVisibleWindows, true);
+    assert.equal(JSON.stringify(status).includes("startTicks"), false);
+    assert.equal(await f.gateway.restoreNewChatThread({ windowId, threadId: windowId, column: 1 }), 503);
+    for (const patch of [
+      { refreshConnection: undefined },
+      { refreshConnection: { ...refreshConnection, control: undefined } },
+      { refreshConnection: { ...refreshConnection, control: { ...refreshConnection.control, pid: "124" } } },
+      { refreshConnection: { ...refreshConnection, control: { ...refreshConnection.control, runtimeRoot: "/private/../control" } } },
+      { runtimeRoot: undefined },
+      { newChatWindowIds: [] },
+      { brokerPort: undefined },
+      { brokerAuthFile: undefined },
+    ]) {
+      await writeFile(f.record, JSON.stringify({ ...record, ...patch }));
+      assert.equal(await f.gateway.runtime(), null, JSON.stringify(patch));
+    }
+  } finally { await f.close(); }
+});

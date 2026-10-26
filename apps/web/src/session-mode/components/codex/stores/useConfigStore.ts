@@ -13,6 +13,13 @@ export type { Personality } from "@session/bindings/Personality";
 export type ModeKind = "default" | "plan";
 export type ThreadCwdMode = "local" | "worktree";
 
+/** Explicit local model/effort intent; this does not authorize or send a native request. */
+export interface ModelSelection {
+  model: string;
+  reasoningEffort: ReasoningEffort;
+  serviceTier?: string | null;
+}
+
 export interface ConfigStore {
   sandbox: SandboxMode;
   approvalPolicy: AskForApproval;
@@ -28,6 +35,7 @@ export interface ConfigStore {
   collaborationMode: ModeKind;
   threadCwdMode: ThreadCwdMode;
   setModel: (model: string) => void;
+  setModelSelection: (selection: ModelSelection) => void;
   setModelProvider: (provider: Provider) => void;
   setAccessMode: (sandbox: SandboxMode) => void;
   setApprovalsReviewer: (reviewer: ApprovalsReviewer) => void;
@@ -82,6 +90,25 @@ export const useConfigStore = create<ConfigStore>()(
             [state.modelProvider]: model,
           },
         }));
+      },
+
+      setModelSelection: ({ model, reasoningEffort, serviceTier }) => {
+        set((state) => {
+          if (
+            state.model === model &&
+            state.reasoningEffort === reasoningEffort &&
+            (serviceTier === undefined || state.serviceTier === serviceTier)
+          ) return state;
+          return {
+            model,
+            reasoningEffort,
+            ...(serviceTier === undefined ? {} : { serviceTier }),
+            providerModels: {
+              ...state.providerModels,
+              [state.modelProvider]: model,
+            },
+          };
+        });
       },
 
       setModelProvider: (modelProvider: Provider) => {

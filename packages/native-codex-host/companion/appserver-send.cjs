@@ -4,6 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const SUPPORTED_OFFICIAL_VERSION = '26.51002.51308';
+const SUPPORTED_OFFICIAL_VERSIONS = Object.freeze([SUPPORTED_OFFICIAL_VERSION, '26.51007.21434']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX_TEXT = 200_000;
 const MAX_BODY_BYTES = 1024 * 1024;
@@ -103,7 +104,7 @@ function writeReceiptFile(file, receipts) {
 }
 
 function createNativeAppServerSender({ provider, officialVersion, vscode, receiptFile, timeoutMs = 20_000, now = Date.now }) {
-  if (officialVersion !== SUPPORTED_OFFICIAL_VERSION) return { available: false, reason: 'official Codex version is not supported', dispose() {} };
+  if (!SUPPORTED_OFFICIAL_VERSIONS.includes(officialVersion)) return { available: false, reason: 'official Codex version is not supported', dispose() {} };
   const connection = provider?.codexMcpConnection;
   if (!connection || typeof connection.registerProvider !== 'function' || typeof connection.sendRequest !== 'function')
     return { available: false, reason: 'official Codex app-server bridge is unavailable', dispose() {} };
@@ -180,4 +181,4 @@ function createNativeAppServerSender({ provider, officialVersion, vscode, receip
   return sender;
 }
 
-module.exports = { SUPPORTED_OFFICIAL_VERSION, MAX_BODY_BYTES, validateSend, createNativeAppServerSender };
+module.exports = { SUPPORTED_OFFICIAL_VERSION, SUPPORTED_OFFICIAL_VERSIONS, MAX_BODY_BYTES, validateSend, createNativeAppServerSender };

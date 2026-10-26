@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Search, List, Download, MessagesSquare } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -24,6 +24,7 @@ import { lastAssistantCodeBlock } from "@session/features/thread-workflows/lastC
 import { writeNativeMarkdownClipboard } from "../presentation/nativeMarkdownClipboard";
 import { useCodexStore } from "../stores/useCodexStore";
 import { useConfigStore } from "../stores/useConfigStore";
+import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { useSessionAttentionStore } from "@session/stores/useSessionAttentionStore";
 import { useSessionNameStore } from "@session/stores/useSessionNameStore";
 import {
@@ -33,9 +34,19 @@ import {
 import { cycleServiceTier } from "./cycleServiceTier";
 import { stepReasoningEffort } from "./cycleReasoningEffort";
 import { nativeReasoningLabel } from "./nativeReasoningLabel";
+import {
+  NATIVE_UNKNOWN_REASONING_OPTIONS,
+  nativeReasoningCommand,
+  nativeReasoningOptions,
+} from "./nativeReasoningOptions";
 import { formatDraftRange, type FormatKind } from "./editor/formatSelection";
 import { useModelCacheStore } from "../hooks/useModels";
+import { getOrdinaryNativePickerModels } from "./ordinaryNativePickerModels";
 import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
+import { activeDraftOwner } from "@session/stores/useInputStore";
+import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
+import { useAcpStore } from "@session/stores/useAcpStore";
+import { isAgentInteractionVisible, sessionPortalContainer } from "@session/session-dom";
 import { gitCommit, gitPush } from "@session/services/apiAdapt/git";
 import { GitCommitDialog } from "@session/features/git/GitCommitDialog";
 import {
@@ -122,6 +133,7 @@ function applyExpandedList(kind: Extract<FormatKind, "ol" | "ul" | "check">) {
 export function ConversationMenu({
   threadId,
   draftOwner,
+  composerRef,
   title,
   variant = "icon",
   onOpen,
@@ -129,6 +141,7 @@ export function ConversationMenu({
 }: {
   threadId: string | null;
   draftOwner?: string;
+  composerRef?: RefObject<HTMLElement | null>;
   title: string;
   variant?: "icon" | "item";
   onOpen?: () => void;
@@ -155,16 +168,70 @@ export function ConversationMenu({
   const [notes, setNotes] = useState("");
   const [, setHistoryTick] = useState(0);
   const menuCardId = useRef<string | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const modelStatus = useModelCacheStore((state) => state.modelStatus);
+  const {
+    model,
+    modelProvider,
+    serviceTier,
+    setServiceTier,
+    reasoningEffort,
+    setReasoningEffort,
+    setModelSelection,
+    collaborationMode,
+    setCollaborationMode,
+  } = useThreadModelSettings(threadId);
   const bumpHistory = () => setHistoryTick((tick) => tick + 1);
+  const nativeProvider = modelProvider === "openai";
+  const reasoningPending = nativeProvider && modelStatus === "pending";
+  const isCurrentReasoningOwner = () => {
+    if (!isAgentInteractionVisible()) return false;
+    // Standalone primitives retain their explicit target; workbench commands
+    // additionally require the currently visible Codex input owner.
+    const root = sessionPortalContainer();
+    if (!root) return composerRef === undefined;
+    // A nested Popover portals this trigger out of its Composer. The explicit
+    // origin remains authoritative; an empty or detached ref cannot fall back.
+    const origin =
+      composerRef === undefined ? triggerRef.current : composerRef.current;
+    const scope = origin?.closest<HTMLElement>(".session-codex-composer");
+    const owner =
+      draftOwner ??
+      sessionDraftKey("codex", threadId, useWorkspaceStore.getState().cwd);
+    // Radix marks the background aria-hidden while this menu is open. Only
+    // actual hidden/inert ownership revokes the still-visible portal command.
+    if (
+      !origin?.isConnected ||
+      !scope?.isConnected ||
+      scope.closest("[hidden], [inert]")
+    ) {
+      return false;
+    }
+    if (scope.closest(".session-mode") !== root) return false;
+    return (
+      useCodexStore.getState().currentThreadId === threadId &&
+      useAgentSettingsStore.getState().selectedAgent === "codex" &&
+      !useAcpStore.getState().active &&
+      activeDraftOwner() === owner &&
+      scope.dataset.draftOwner === owner
+    );
+  };
   const shiftReasoning = (direction: 1 | -1, wrap: boolean) => {
-    const catalog = useModelCacheStore
-      .getState()
-      .openAiModels.find((item) => item.id === model || item.model === model);
-    const options =
-      catalog?.supportedReasoningEfforts.map((option) => option.reasoningEffort) ??
-      [];
-    const next = stepReasoningEffort(options, reasoningEffort, direction, wrap);
-    if (!next || next === reasoningEffort) {
+    if (reasoningPending || !model || !isCurrentReasoningOwner()) return;
+    const rawModels = useModelCacheStore.getState().openAiModels;
+    const models = nativeProvider ? getOrdinaryNativePickerModels(rawModels) : rawModels;
+    const catalog = models.find(
+      (item) => item.model === model || (!nativeProvider && item.id === model),
+    );
+    const options = catalog
+      ? nativeReasoningOptions(catalog)
+      : nativeProvider
+        ? NATIVE_UNKNOWN_REASONING_OPTIONS
+        : [];
+    const next = nativeProvider
+      ? nativeReasoningCommand(options, reasoningEffort, direction, wrap)
+      : stepReasoningEffort([...options], reasoningEffort, direction, wrap);
+    if (!next || (!nativeProvider && next === reasoningEffort)) {
       toast.message(
         options.length < 2
           ? "当前模型没有可切换的推理强度"
@@ -174,18 +241,13 @@ export function ConversationMenu({
       );
       return;
     }
-    setReasoningEffort(next);
+    if (nativeProvider) {
+      setModelSelection({ model, reasoningEffort: next });
+    } else {
+      setReasoningEffort(next);
+    }
     toast.message(`推理强度已设为${nativeReasoningLabel(next)}`);
   };
-  const {
-    model,
-    serviceTier,
-    setServiceTier,
-    reasoningEffort,
-    setReasoningEffort,
-    collaborationMode,
-    setCollaborationMode,
-  } = useThreadModelSettings(threadId);
   useEffect(() => {
     const openShortcuts = () => setShortcutsOpen(true);
     const onKey = (event: KeyboardEvent) => {
@@ -219,6 +281,7 @@ export function ConversationMenu({
       <DropdownMenuTrigger asChild>
         {variant === "item" ? (
           <Button
+            ref={triggerRef}
             type="button"
             variant="ghost"
             className="justify-start"
@@ -230,6 +293,7 @@ export function ConversationMenu({
           </Button>
         ) : (
           <Button
+            ref={triggerRef}
             type="button"
             variant="ghost"
             size="icon"
@@ -530,16 +594,19 @@ export function ConversationMenu({
           切换本地/工作树
         </DropdownMenuItem>
         <DropdownMenuItem
+          disabled={reasoningPending}
           onSelect={() => shiftReasoning(1, false)}
         >
           提高推理强度
         </DropdownMenuItem>
         <DropdownMenuItem
+          disabled={reasoningPending}
           onSelect={() => shiftReasoning(-1, false)}
         >
           降低推理强度
         </DropdownMenuItem>
         <DropdownMenuItem
+          disabled={reasoningPending}
           onSelect={() => shiftReasoning(1, true)}
         >
           循环切换推理强度
@@ -1472,7 +1539,9 @@ export function ConversationMenu({
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => {
-            window.dispatchEvent(new Event("codex-open-feedback"));
+            window.dispatchEvent(new CustomEvent("codex-open-feedback", {
+              detail: { threadId, draftOwner: draftOwner ?? sessionDraftKey("codex", threadId, useWorkspaceStore.getState().cwd) },
+            }));
           }}
         >
           反馈

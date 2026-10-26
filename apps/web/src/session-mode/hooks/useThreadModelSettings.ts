@@ -4,6 +4,7 @@ import type { SandboxMode, ApprovalsReviewer } from "@session/bindings/v2";
 import {
   useConfigStore,
   SANDBOX_APPROVAL_MAP,
+  type ModelSelection,
 } from "@session/components/codex/stores/useConfigStore";
 import {
   changeThreadModel,
@@ -19,6 +20,17 @@ export function useThreadModelSettings(threadId: string | null) {
     (model: string) => {
       if (threadId) changeThreadModel(threadId, { model });
       else useConfigStore.getState().setModel(model);
+    },
+    [threadId],
+  );
+  const setModelSelection = useCallback(
+    ({ model, reasoningEffort, serviceTier }: ModelSelection) => {
+      if (threadId) changeThreadModel(threadId, {
+        model,
+        reasoningEffort,
+        ...(serviceTier === undefined ? {} : { serviceTier }),
+      });
+      else useConfigStore.getState().setModelSelection({ model, reasoningEffort, serviceTier });
     },
     [threadId],
   );
@@ -107,6 +119,7 @@ export function useThreadModelSettings(threadId: string | null) {
   return {
     ...settings,
     setModel,
+    setModelSelection,
     setModelProvider,
     setReasoningEffort,
     setServiceTier,

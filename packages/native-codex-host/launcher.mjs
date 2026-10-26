@@ -3,27 +3,25 @@ import { mkdir, writeFile, readFile, open, stat, chmod } from 'node:fs/promises'
 import { join, dirname, isAbsolute } from 'node:path';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { networkInterfaces } from 'node:os';
-import { validateOptions, validateDirectories, createSharedCodexHomeView, buildHostArgs, buildChildEnv, assertPortAvailable, OwnedProcesses, readPasswordFile, assertFreshOutput } from './host.mjs';
+import { validateOptions, validateDirectories, createSharedCodexHomeView, buildHostArgs, buildChildEnv, assertPortAvailable, OwnedProcesses, readPasswordFile, assertFreshOutput, buildHostStartup, buildHostSettings, getHostWorkspace, validateRefreshWorkspace } from './host.mjs';
 import { createFixtureThreads } from './fixtures.mjs';
 import { buildCompanionVsix } from './vsix.mjs';
 import { importConnectionProfile } from './connection-profile.mjs';
 const args = process.argv.slice(2); const input = {};
-const fields = { 'runtime-root': 'runtimeRoot', 'code-server': 'codeServer', 'official-vsix': 'officialVsix', 'codex-cli': 'codexCli', port: 'port', 'broker-port': 'brokerPort', 'bind-host': 'bindHost', 'user-data-dir': 'userDataDir', 'extensions-dir': 'extensionsDir', 'project-dir': 'projectDir', 'codex-home': 'codexHome', 'shared-codex-home': 'sharedCodexHome', 'process-home': 'processHome', cert: 'cert', 'cert-key': 'certKey', record: 'record', 'threads-file': 'threadsFile', 'password-file': 'passwordFile', 'connection-profile-home': 'connectionProfileHome', 'refresh-service-config': 'refreshServiceConfig', 'refresh-domain': 'refreshDomain', 'refresh-control-root': 'refreshControlRoot', 'reconnection-grace-seconds': 'reconnectionGraceSeconds' };
-let createThreads = false; let autoOpenFixtures = false; let autoOpenNewChats = false;
+const fields = { 'runtime-root': 'runtimeRoot', 'code-server': 'codeServer', 'official-vsix': 'officialVsix', 'codex-cli': 'codexCli', port: 'port', 'broker-port': 'brokerPort', 'bind-host': 'bindHost', 'user-data-dir': 'userDataDir', 'extensions-dir': 'extensionsDir', 'project-dir': 'projectDir', 'codex-home': 'codexHome', 'shared-codex-home': 'sharedCodexHome', 'process-home': 'processHome', cert: 'cert', 'cert-key': 'certKey', record: 'record', 'threads-file': 'threadsFile', 'password-file': 'passwordFile', 'connection-profile-home': 'connectionProfileHome', 'refresh-service-config': 'refreshServiceConfig', 'refresh-domain': 'refreshDomain', 'refresh-control-root': 'refreshControlRoot', 'reconnection-grace-seconds': 'reconnectionGraceSeconds', 'refresh-workspace-dir': 'refreshWorkspaceDir' };
+let createThreads = false; let autoOpenFixtures = false; let autoOpenNewChats = false; let restoreVisibleWindows = false;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--create-threads') { createThreads = true; continue; }
   if (args[i] === '--auto-open-fixtures') { autoOpenFixtures = true; continue; }
   if (args[i] === '--auto-open-new-chats') { autoOpenNewChats = true; continue; }
+  if (args[i] === '--restore-visible-windows') { restoreVisibleWindows = true; continue; }
   if (args[i] === '--unsafe-no-auth') { input.unsafeNoAuth = true; continue; }
   const field = fields[args[i].replace(/^--/, '')];
   if (!args[i].startsWith('--') || !field || !args[i + 1] || args[i + 1].startsWith('--')) throw new Error('unknown or missing launcher argument');
   input[field] = args[++i];
 }
 for (const [key, field] of Object.entries(fields)) input[field] ??= process.env[`NATIVE_CODEX_${key.toUpperCase().replaceAll('-', '_')}`];
-if (input.sharedCodexHome && input.connectionProfileHome) throw new Error('shared Codex home and copied connection profile are mutually exclusive');
-if (input.sharedCodexHome && (autoOpenFixtures || createThreads || input.threadsFile)) throw new Error('shared Codex home cannot be combined with fixture threads');
-if (autoOpenNewChats && (autoOpenFixtures || createThreads || input.threadsFile)) throw new Error('new-chat and fixture startup options are mutually exclusive');
-if (!input.sharedCodexHome && !autoOpenNewChats && !autoOpenFixtures && !createThreads && !input.threadsFile) throw new Error('isolated Codex host requires fixture threads or explicit new-chat startup');
+const startup = buildHostStartup(input, { createThreads, autoOpenFixtures, autoOpenNewChats, restoreVisibleWindows });
 const options = validateOptions(input);
 if (!options.brokerPort) throw new Error('explicit broker-port required');
 if (!options.record || !isAbsolute(options.record)) throw new Error('explicit absolute ignored record path required');
@@ -35,7 +33,7 @@ async function run(command, argv, logPath) {
   const log = await open(logPath, 'a', 0o600);
   try {
     owned.assertRunning();
-    const child = owned.add(spawn(command, argv, { env: buildChildEnv(options), cwd: options.projectDir, stdio: ['ignore', log.fd, log.fd] }));
+    const child = owned.add(spawn(command, argv, { env: buildChildEnv(options), cwd: getHostWorkspace(options), stdio: ['ignore', log.fd, log.fd] }));
     await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', code => code === 0 ? resolve() : reject(new Error('isolated extension install failed; see install.log'))); });
     owned.assertRunning();
   } finally { await log.close(); }
@@ -68,8 +66,8 @@ try {
   if (autoOpenFixtures) control.validateFixturePanels(threads.slice(0, 2));
   const authFile = join(options.runtimeRoot, 'companion-auth.json');
   owned.assertRunning();
-  const newChatWindowIds = autoOpenNewChats ? [randomUUID()] : undefined;
-  await writeFile(authFile, JSON.stringify({ port: options.brokerPort, token: randomBytes(32).toString('hex'), threads, autoOpenFixtures, autoOpenNewChats, ...(newChatWindowIds ? { newChatWindowIds } : {}) }), { mode: 0o600, flag: 'wx' }); await chmod(authFile, 0o600);
+  const { newChatWindowIds } = startup;
+  await writeFile(authFile, JSON.stringify({ port: options.brokerPort, token: randomBytes(32).toString('hex'), threads, ...startup }), { mode: 0o600, flag: 'wx' }); await chmod(authFile, 0o600);
   await writeFile(join(options.runtimeRoot, 'threads.json'), JSON.stringify(fixture, null, 2), { mode: 0o600, flag: 'wx' });
   const installArgs = ['--config', join(options.runtimeRoot, 'code-server.yaml'), '--user-data-dir', options.userDataDir, '--extensions-dir', options.extensionsDir,
     '--install-extension', options.officialVsix, '--force'];
@@ -81,22 +79,24 @@ try {
   const companionArgs = [...installArgs]; companionArgs[companionArgs.indexOf('--install-extension') + 1] = companionVsix;
   await run(options.codeServer, companionArgs, join(options.runtimeRoot, 'install.log'));
   await mkdir(join(options.userDataDir, 'User'), { recursive: true });
-  await writeFile(join(options.userDataDir, 'User', 'settings.json'), JSON.stringify({ 'chatgpt.openOnStartup': false, 'extensions.autoUpdate': false, 'extensions.autoCheckUpdates': false, 'workbench.startupEditor': 'none', 'workbench.colorTheme': 'Default Dark Modern', ...(refreshConnection ? { 'chatgpt.cliExecutable': refreshConnection.executable } : {}) }, null, 2), { mode: 0o600 });
+  await writeFile(join(options.userDataDir, 'User', 'settings.json'), JSON.stringify(buildHostSettings(options, refreshConnection), null, 2), { mode: 0o600 });
   const hostLog = await open(join(options.runtimeRoot, 'host.log'), 'a', 0o600);
   owned.assertRunning();
-  const child = owned.add(spawn(options.codeServer, buildHostArgs(options), { env: buildChildEnv(options), cwd: options.projectDir, stdio: ['ignore', hostLog.fd, hostLog.fd] }));
+  await validateRefreshWorkspace(options);
+  owned.assertRunning();
+  const child = owned.add(spawn(options.codeServer, buildHostArgs(options), { env: buildChildEnv(options), cwd: getHostWorkspace(options), stdio: ['ignore', hostLog.fd, hostLog.fd] }));
   const hostCompletion = new Promise(resolve => child.once('exit', code => { process.exitCode = stopping ? 0 : (code ?? 1); resolve(); }));
   child.once('error', error => { console.error(error.message); stop(); process.exitCode = 1; });
   const lanAddresses = Object.values(networkInterfaces()).flat().filter(item => item && item.family === 'IPv4' && !item.internal).map(item => item.address);
   const hostUrls = options.bindHost === '0.0.0.0' ? lanAddresses.map(address => `${options.cert ? 'https' : 'http'}://${address}:${options.port}`) : [`${options.cert ? 'https' : 'http'}://127.0.0.1:${options.port}`];
   const record = { startedAt: new Date().toISOString(), launcherPid: process.pid, hostPid: child.pid, port: options.port, brokerPort: options.brokerPort,
     protocol: options.cert ? 'https' : 'http', authentication: password === null ? 'none' : 'password', lanUrls: hostUrls,
-    runtimeRoot: options.runtimeRoot, userDataDir: options.userDataDir, extensionsDir: options.extensionsDir, projectDir: options.projectDir,
+    runtimeRoot: options.runtimeRoot, userDataDir: options.userDataDir, extensionsDir: options.extensionsDir, projectDir: getHostWorkspace(options),
     codexHome: options.codexHome, processHome: options.processHome, tempDir: join(options.runtimeRoot, 'tmp'), ipcSocket: join(options.codexHome, 'ipc', 'ipc.sock'),
     ...(options.sharedCodexHome ? { sharedCodexHome: options.sharedCodexHome } : {}),
     ...(refreshConnection ? { refreshConnection } : {}),
     brokerAuthFile: authFile, threads: fixture.threads, fixtureAppServerPid: fixture.appServerPid, fixtureAppServerStopped: createThreads,
-    officialVsix: options.officialVsix, officialVsixSha256: createHash('sha256').update(await readFile(options.officialVsix)).digest('hex'), connectionProfile, panelMode: autoOpenNewChats ? 'new-chats' : autoOpenFixtures ? 'fixtures' : options.sharedCodexHome ? 'resume-on-demand' : 'fixtures', ...(newChatWindowIds ? { newChatWindowIds } : {}) };
+    officialVsix: options.officialVsix, officialVsixSha256: createHash('sha256').update(await readFile(options.officialVsix)).digest('hex'), connectionProfile, panelMode: startup.panelMode, ...(newChatWindowIds ? { newChatWindowIds } : {}) };
   await mkdir(dirname(options.record), { recursive: true });
   owned.assertRunning();
   await writeFile(options.record, JSON.stringify(record, null, 2), { mode: 0o600, flag: 'wx' });

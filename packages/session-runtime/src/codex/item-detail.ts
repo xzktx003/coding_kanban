@@ -9,7 +9,7 @@ import { HttpError } from "../core/json.js";
 import { DetailSelector, type DetailRequest } from "./item-detail-selector.js";
 
 // Process-wide admission: neither a service instance nor an HTTP connection owns a second slot.
-let occupied = false;
+const occupied = new Set<"detail" | "chat">();
 const fail = (status: number, code: string) => new HttpError(status, code);
 export const DETAIL_LIMITS = Object.freeze({
   inputBytes: 4096,
@@ -43,9 +43,32 @@ export async function readItemDetail(
   wanted: DetailRequest,
   signal: AbortSignal,
 ): Promise<DetailRead> {
+  return readNativeProjection(options, {
+    channel: "detail",
+    method: "thread/read",
+    params: { threadId: wanted.threadId, includeTurns: true },
+    selector: (initialized, ready) => new DetailSelector(wanted, initialized, ready),
+  }, signal);
+}
+
+/** Internal fixed read plans only: HTTP clients never supply methods or launch arguments. */
+export async function readNativeProjection(
+  options: Pick<CodexOptions, "env" | "resolveEnv" | "launch">,
+  plan: {
+    channel: "detail" | "chat";
+    method: "thread/read" | "thread/turns/list";
+    params: unknown;
+    selector: (initialized: () => void, ready: () => void) => {
+      consume(token: Token): Buffer[];
+      readonly done: boolean;
+      end(): void;
+    };
+  },
+  signal: AbortSignal,
+): Promise<DetailRead> {
   if (signal.aborted) throw fail(502, "DETAIL_CANCELLED");
-  if (occupied) throw fail(429, "DETAIL_BUSY");
-  occupied = true;
+  if (occupied.has(plan.channel)) throw fail(429, "DETAIL_BUSY");
+  occupied.add(plan.channel);
   const body = new PassThrough({ highWaterMark: DETAIL_LIMITS.byteQueue });
   body.on("error", () => {}); // Consumers can attach after a pre-header failure.
   const metrics: DetailMetrics = {
@@ -185,16 +208,11 @@ export async function readItemDetail(
         () => abort(fail(504, "DETAIL_TIMEOUT")),
         DETAIL_LIMITS.initializeMs,
       );
-      const selector = new DetailSelector(
-        wanted,
+      const selector = plan.selector(
         () => {
           clearTimeout(initTimer);
           send("initialized");
-          send(
-            "thread/read",
-            { threadId: wanted.threadId, includeTurns: true },
-            2,
-          );
+          send(plan.method, plan.params, 2);
         },
         resolveReady,
       );
@@ -239,7 +257,7 @@ export async function readItemDetail(
       send(
         "initialize",
         {
-          clientInfo: { name: "kanban_detail_reader", version: "1" },
+          clientInfo: { name: plan.channel === "detail" ? "kanban_detail_reader" : "kanban_chat_reader", version: "1" },
           capabilities: { experimentalApi: true },
         },
         1,
@@ -301,7 +319,7 @@ export async function readItemDetail(
         child.stdout.destroy();
         child.stderr.destroy();
       }
-      occupied = false;
+      occupied.delete(plan.channel);
     }
   })();
   try {

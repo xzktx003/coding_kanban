@@ -13,6 +13,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
   validateBridgeMetadata,
+  verifyBridgeConfig,
   verifyNativeArtifacts,
   verifyControlSocket,
 } from "./cli-bridge.mjs";
@@ -280,6 +281,18 @@ export async function attachPrivateService({ metadata, domain }) {
   const record = await readRecord(metadata);
   await verifyProcess(record, metadata, domain);
   return descriptor(record, metadata);
+}
+
+/** One fresh config verification and attachment, never a cross-startup cache. */
+export async function attachPrivateServiceFromConfig({ configPath, scope }) {
+  scope = validateNativeScope(scope);
+  const metadata = await verifyBridgeConfig(configPath);
+  // Reject a changed record before consulting any PID supplied by that record.
+  // This private path is reached only after this call's full config/hash check;
+  // there is no public "verified" flag or retained verification proof.
+  const record = await verifyPrivateServiceIdentity({ metadata, scope });
+  const service = descriptor(record, metadata);
+  return { metadata, service };
 }
 
 /** Explicitly create a private native process which survives browser/manager exit. */

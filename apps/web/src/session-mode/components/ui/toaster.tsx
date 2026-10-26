@@ -1,8 +1,11 @@
 import { Toaster as SonnerToaster } from "sonner"
+import { useThemeContext } from "@session/contexts/ThemeContext"
 
 export function Toaster() {
+  const { resolvedTheme } = useThemeContext()
   return (
     <SonnerToaster
+      theme={resolvedTheme}
       richColors
       closeButton
       position="top-right"

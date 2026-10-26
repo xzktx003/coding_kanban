@@ -323,14 +323,15 @@ function treeFromWindowIds(ids: string[], split: boolean, activeId: string | nul
   return { tree, activeGroupId: groups.find((group) => group.selected === activeId)?.id ?? groups.at(-1)!.id };
 }
 
-function readSplitNode(value: unknown, allowed: Set<string>, seen: Set<string>): CodexSplitNode | null {
+function readSplitNode(value: unknown, allowed: Set<string>, seen: Set<string>, convertedIds: ReadonlyMap<string, string>): CodexSplitNode | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const node = value as Record<string, unknown>;
   if (node.type === "group") {
     if (typeof node.id !== "string" || node.id.length > 80 || !Array.isArray(node.keys)) return null;
-    const keys = node.keys.filter((key): key is string => typeof key === "string" && allowed.has(key) && !seen.has(key));
-    for (const key of keys) seen.add(key);
-    const selected = typeof node.selected === "string" && keys.includes(node.selected) ? node.selected : (keys[0] ?? null);
+    const keys = node.keys.map((key) => typeof key === "string" ? convertedIds.get(key) ?? key : null)
+      .filter((key): key is string => typeof key === "string" && allowed.has(key) && !seen.has(key) && Boolean(seen.add(key)));
+    const requested = typeof node.selected === "string" ? convertedIds.get(node.selected) ?? node.selected : null;
+    const selected = requested && keys.includes(requested) ? requested : (keys[0] ?? null);
     return {
       type: "group", id: node.id, keys, selected,
       ...(!keys.length && node.keepEmpty === true ? { keepEmpty: true as const } : {}),
@@ -338,8 +339,8 @@ function readSplitNode(value: unknown, allowed: Set<string>, seen: Set<string>):
   }
   if (node.type !== "split" || (node.direction !== "horizontal" && node.direction !== "vertical") ||
     typeof node.id !== "string" || typeof node.ratio !== "number") return null;
-  const first = readSplitNode(node.first, allowed, seen);
-  const second = readSplitNode(node.second, allowed, seen);
+  const first = readSplitNode(node.first, allowed, seen, convertedIds);
+  const second = readSplitNode(node.second, allowed, seen, convertedIds);
   if (!first || !second) return null;
   return {
     type: "split", id: node.id, direction: node.direction,
@@ -368,13 +369,16 @@ export function readCodexWindows(
     const seen = new Set<string>(sameHost ? [] : fallback.windows.map((item) => item.id));
     const windows: CodexWindow[] = sameHost ? [] : [...fallback.windows];
     const convertedIds = new Map<string, string>();
+    const originalIds = new Set<string>();
     for (const item of value.windows) {
       if (!item || typeof item !== "object" || Array.isArray(item)) return fallback;
       const row = item as Record<string, unknown>;
+      if (typeof row.id === "string" && originalIds.has(row.id)) return fallback;
       const window = persistedWindow(row, seen, sameHost, initialWindowId);
       if (window === "invalid") return fallback;
+      originalIds.add(row.id as string);
+      if (row.kind === "new" && typeof row.id === "string" && typeof row.threadId === "string" && UUID.test(row.threadId)) convertedIds.set(row.id, row.threadId);
       if (window === "skip") continue;
-      if (row.kind === "new" && typeof row.id === "string" && window.id !== row.id) convertedIds.set(row.id, window.id);
       seen.add(window.id);
       windows.push(window);
     }
@@ -382,7 +386,7 @@ export function readCodexWindows(
     const activeId = requestedActive && windows.some((window) => window.id === requestedActive)
       ? requestedActive : windows.at(-1)?.id ?? null;
     const allowed = new Set(windows.map((window) => window.id));
-    let tree = version === 2 && sameHost ? readSplitNode(value.tree, allowed, new Set()) : null;
+    let tree = version === 2 && sameHost ? readSplitNode(value.tree, allowed, new Set(), convertedIds) : null;
     if (version === 2 && sameHost && !tree) return { ...fallback, windows };
     if (!tree) {
       const placed = treeFromWindowIds(windows.map((window) => window.id), sameHost && value.layout === "split", activeId);

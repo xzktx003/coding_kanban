@@ -25,6 +25,7 @@ import {
   useState,
 } from "react";
 import { useVirtualizer, type VirtualItem } from "@tanstack/react-virtual";
+import { flushSync } from "react-dom";
 import type { ServerNotification } from "@session/bindings";
 import { useCodexStore } from "@session/components/codex/stores";
 import { ScrollArea } from "@session/components/ui/scroll-area";
@@ -85,9 +86,13 @@ import { useThreadLinkStore } from "@session/features/thread-workflows/threadLin
 import { findTurnRowIndex } from "./turnNavigation";
 import { projectTurnWork, type TranscriptWorkRow } from "./turnWork";
 import { TurnWorkHeader } from "./TurnWorkHeader";
-import { measureTranscriptRow } from "./measureTranscriptRow";
+import {
+  measureTranscriptRow,
+  shouldAdjustTranscriptRow,
+} from "./measureTranscriptRow";
 import { isTranscriptScrollKey } from "./transcriptScrollKeys";
 import { prepareThreadSearchMatch } from "./prepareThreadSearchMatch";
+import { captureTranscriptReadingPosition } from "./transcriptReadingPosition";
 import {
   GoalCompletionScope,
   GoalCompletionFallback,
@@ -109,6 +114,8 @@ interface CodexThreadProps {
   fillHeight?: boolean;
 }
 const EMPTY_EVENTS: ServerNotification[] = [];
+// Only a starting estimate; every mounted row still measures its real height.
+const TRANSCRIPT_ESTIMATED_ROW_HEIGHT = 280;
 const positions = new Map<
   string,
   {
@@ -358,10 +365,13 @@ const CodexTranscript = memo(function CodexTranscript({
   const latestRef = useRef<HTMLDivElement>(null);
   useSessionReadReceipt("codex", activeThreadId, latestRef);
   const contentRef = useRef<HTMLDivElement>(null);
+  const rowListRef = useRef<HTMLDivElement>(null);
+  const [rowScrollMargin, setRowScrollMargin] = useState(0);
   const saved = useRef(positions.get(activeThreadId));
-  const reading = useRef<ReadingPosition | undefined>(
+  const [initialReading] = useState(() =>
     getReadingPosition(`codex:${activeThreadId}`),
   );
+  const reading = useRef<ReadingPosition | undefined>(initialReading);
   const [openedWork, setOpenedWork] = useState(
     () => saved.current?.openedWork ?? new Set<string>(),
   );
@@ -429,8 +439,13 @@ const CodexTranscript = memo(function CodexTranscript({
     saved.current?.disclosure ?? new Map<string, Map<string, unknown>>(),
   );
   const pinned = useRef(reading.current?.atBottom ?? true);
+  const readingAway = useRef(!pinned.current);
   const restoringAnchor = useRef(!pinned.current && !!reading.current?.anchor);
   const [isAtBottom, setAtBottom] = useState(pinned.current);
+  const [readerBufferEnabled, setReaderBufferEnabled] = useState(
+    !pinned.current,
+  );
+  const readerBufferEnabledRef = useRef(!pinned.current);
   const [hasNewMessages, setHasNewMessages] = useState(false);
   const newest = useRef<string | undefined>(undefined);
   const lastGoalAnnouncementKey = goalAnnouncements.at(-1)?.key;
@@ -458,10 +473,48 @@ const CodexTranscript = memo(function CodexTranscript({
     [],
   );
   const getItemKey = useCallback((index: number) => rows[index].key, [rows]);
+  const updateRowScrollMargin = useCallback(() => {
+    const element = viewport();
+    const list = rowListRef.current;
+    if (!element || !list) return;
+    setRowScrollMargin(
+      Math.max(
+        0,
+        list.getBoundingClientRect().top -
+          element.getBoundingClientRect().top +
+          element.scrollTop,
+      ),
+    );
+  }, [viewport]);
+  // Padding and earlier-history/Goal content precede the virtual rows. Use
+  // their actual origin so the range includes every physically visible row.
+  useLayoutEffect(updateRowScrollMargin, [
+    updateRowScrollMargin,
+    earlierCursor,
+    earlierLoading,
+    earlierError,
+    goalSlots.before,
+    completionTarget,
+    completionSlot?.afterRow,
+  ]);
+  useLayoutEffect(() => {
+    const element = viewport();
+    const content = contentRef.current;
+    if (!element || !content) return;
+    const observer = new ResizeObserver(updateRowScrollMargin);
+    observer.observe(element);
+    observer.observe(content, { box: "border-box" });
+    return () => observer.disconnect();
+  }, [viewport, updateRowScrollMargin]);
+  const measuredRowNodes = useRef(new WeakSet<Element>());
+  const rowMeasurement = useRef<{
+    key: VirtualItem["key"] | undefined;
+    firstDomMeasurement: boolean;
+  } | null>(null);
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: viewport,
-    estimateSize: () => 160,
+    estimateSize: () => TRANSCRIPT_ESTIMATED_ROW_HEIGHT,
     observeElementRect: (instance, callback) => {
       if (!instance.scrollElement) return;
       let frame = 0;
@@ -484,23 +537,29 @@ const CodexTranscript = memo(function CodexTranscript({
     },
     // A new row needs its real height before paint; observer delivery keeps using
     // the supplied border box without requesting another layout.
-    measureElement: (element, entry, instance) =>
-      measureTranscriptRow(
-        element,
-        entry,
-        instance.measurementsCache[Number(element.getAttribute("data-index"))]
-          ?.size,
-      ),
+    measureElement: (element, entry, instance) => {
+      const previous =
+        instance.measurementsCache[Number(element.getAttribute("data-index"))];
+      rowMeasurement.current = {
+        key: previous?.key,
+        firstDomMeasurement: !entry && !measuredRowNodes.current.has(element),
+      };
+      measuredRowNodes.current.add(element);
+      return measureTranscriptRow(element, entry, previous?.size);
+    },
     initialMeasurementsCache:
       saved.current?.width === window.innerWidth
         ? saved.current.measurements
         : [],
     getItemKey,
-    overscan: 2,
+    scrollMargin: rowScrollMargin,
+    // First let a reader's actual scroll reach the virtualizer. Mounting its
+    // buffer during wheel delivery can compensate against the old tail offset.
+    overscan: readerBufferEnabled ? 2 : 0,
     initialRect: { width: 768, height: 600 },
     initialOffset: () =>
       pinned.current
-        ? Math.max(0, rows.length * 160 - 600)
+        ? Math.max(0, rows.length * TRANSCRIPT_ESTIMATED_ROW_HEIGHT - 600)
         : (reading.current?.scrollTop ?? 0),
   });
   useEffect(() => {
@@ -520,13 +579,30 @@ const CodexTranscript = memo(function CodexTranscript({
   }, [activityRows, rows, virtualizer]);
   // Compensate rows entirely above the reader. Growing the partly visible row
   // itself must keep its top fixed, rather than jumping by its added height.
-  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) =>
-    !pinned.current && item.end <= (virtualizer.scrollOffset ?? 0);
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, delta) => {
+    // The core calls this synchronously after measureElement. A new DOM row's
+    // estimate can overlap the reader even when its actual short box is above.
+    // Existing DOM rows keep the old-end rule so partial rows keep their top.
+    const measurement = rowMeasurement.current;
+    rowMeasurement.current = null;
+    return (
+      !pinned.current &&
+      shouldAdjustTranscriptRow(
+        item.end,
+        delta,
+        virtualizer.scrollOffset ?? 0,
+        measurement?.key === item.key && measurement.firstDomMeasurement,
+      )
+    );
+  };
   const jumpToBottom = useCallback(() => {
     pinned.current = true;
+    readingAway.current = false;
     restoringAnchor.current = false;
     userScrolling.current = false;
     setAtBottom(true);
+    readerBufferEnabledRef.current = false;
+    setReaderBufferEnabled(false);
     setHasNewMessages(false);
     const element = viewport();
     // WebKit binds scrollTop to a signed integer: huge sentinel values can wrap
@@ -571,6 +647,7 @@ const CodexTranscript = memo(function CodexTranscript({
           (row) => row.dataset.codexRow === key,
         );
       pinned.current = false;
+      readingAway.current = true;
       userScrolling.current = false;
       restoringAnchor.current = true;
       setAtBottom(false);
@@ -615,13 +692,15 @@ const CodexTranscript = memo(function CodexTranscript({
         current.rows.find((row) => row.work?.processKeys.has(anchor.rowId));
       if (index < 0 && !foldedWork) return;
       pinned.current = false;
+      readingAway.current = true;
       userScrolling.current = false;
       restoringAnchor.current = true;
       setAtBottom(false);
       const offset =
         index < 0
           ? (viewport()?.scrollTop ?? 0)
-          : (virtualizer.measurementsCache[index]?.start ?? index * 160);
+          : (virtualizer.measurementsCache[index]?.start ??
+            index * TRANSCRIPT_ESTIMATED_ROW_HEIGHT);
       reading.current = {
         atBottom: false,
         anchor: anchor.rowId,
@@ -707,10 +786,13 @@ const CodexTranscript = memo(function CodexTranscript({
       const index = findTurnRowIndex(rows, activeThreadId, linkedTurn.turnId);
       if (index < 0) return;
       pinned.current = false;
+      readingAway.current = true;
       userScrolling.current = false;
       restoringAnchor.current = true;
       setAtBottom(false);
-      const offset = virtualizer.measurementsCache[index]?.start ?? index * 160;
+      const offset =
+        virtualizer.measurementsCache[index]?.start ??
+        index * TRANSCRIPT_ESTIMATED_ROW_HEIGHT;
       reading.current = {
         atBottom: false,
         anchor: rows[index].key,
@@ -856,6 +938,7 @@ const CodexTranscript = memo(function CodexTranscript({
     earlierError,
     activeThreadId,
     navigation,
+    rowScrollMargin,
   ]);
   useEffect(() => {
     if (!pinned.current) return;
@@ -881,96 +964,181 @@ const CodexTranscript = memo(function CodexTranscript({
           saveReadingPosition(`codex:${activeThreadId}`, reading.current);
         return;
       }
-      const top = element.getBoundingClientRect().top;
-      const node = [
-        ...element.querySelectorAll<HTMLElement>("[data-codex-row]"),
-      ].find(
-        (row) =>
-          row.getBoundingClientRect().bottom > top &&
-          row.getBoundingClientRect().top < top + element.clientHeight,
+      const position = captureTranscriptReadingPosition(
+        element,
+        pinned.current,
+        reading.current,
       );
-      if (!node) return;
-      reading.current = {
-        atBottom: pinned.current,
-        anchor: node?.dataset.codexRow ?? reading.current?.anchor,
-        offset: node
-          ? top - node.getBoundingClientRect().top
-          : (reading.current?.offset ?? 0),
-        scrollTop: element.scrollTop,
-        format: "row",
-      };
+      if (!position) return;
+      reading.current = position;
       if (persist)
         saveReadingPosition(`codex:${activeThreadId}`, reading.current);
     };
     let touchStart: { x: number; y: number } | null = null;
-    const onScroll = () => {
-      if (element.clientHeight === 0) return;
-      if (restoringAnchor.current) return;
-      // Layout/measurement scroll events must not cancel following the latest message.
-      if (pinned.current && !userScrolling.current) {
-        // Mobile focus/keyboard and virtual-list layout can move the viewport.
-        // A tap is not permission to abandon following the latest reply.
+    let touchLastY = 0;
+    let touchScrolling = false;
+    const enableReaderBuffer = () => {
+      if (!pinned.current && !readerBufferEnabledRef.current) {
+        const top = element.getBoundingClientRect().top;
+        const bottom = top + element.clientHeight;
+        let readerOffset = 0;
+        const reader =
+          userScrolling.current && !restoringAnchor.current
+            ? [
+                ...element.querySelectorAll<HTMLElement>("[data-codex-row]"),
+              ].find((row) => {
+                const rect = row.getBoundingClientRect();
+                if (rect.bottom <= top || rect.top >= bottom) return false;
+                readerOffset = rect.top - top;
+                return true;
+              })
+            : undefined;
+        const readerKey = reader?.dataset.codexRow;
+        // The virtualizer's earlier listener has consumed the actual offset.
+        // Finish this one buffer transition before saving or leaving the reader.
+        readerBufferEnabledRef.current = true;
+        flushSync(() => setReaderBufferEnabled(true));
         if (
-          element.scrollHeight - element.scrollTop - element.clientHeight >
-          4
+          reader?.isConnected &&
+          reader.dataset.codexRow === readerKey &&
+          element.contains(reader) &&
+          viewport() === element
         ) {
-          cancelAnimationFrame(followFrame);
-          followFrame = requestAnimationFrame(() => {
-            if (pinned.current && !userScrolling.current) jumpToBottom();
-          });
+          // First mounts can clamp a library size adjustment at the old range.
+          // Preserve the user's already-scrolled point, correcting only its residue.
+          element.scrollTop +=
+            reader.getBoundingClientRect().top -
+            element.getBoundingClientRect().top -
+            readerOffset;
         }
+      }
+    };
+    const onScroll = () => {
+      if (
+        pinned.current &&
+        !userScrolling.current &&
+        !restoringAnchor.current
+      ) {
+        // Native layout/selection can dispatch scroll while React is committing.
+        // Check the resulting range in the existing follow frame, after those
+        // writes; real reader input still takes the synchronous path below.
+        cancelAnimationFrame(followFrame);
+        followFrame = requestAnimationFrame(() => {
+          if (
+            pinned.current &&
+            !userScrolling.current &&
+            !restoringAnchor.current &&
+            element.clientHeight > 0 &&
+            element.scrollHeight - element.scrollTop - element.clientHeight > 4
+          )
+            jumpToBottom();
+        });
         return;
       }
+      if (element.clientHeight === 0) return;
+      const distance =
+        element.scrollHeight - element.scrollTop - element.clientHeight;
+      // The first native wheel frame can move only one pixel. Do not mount
+      // rows (and issue size-compensation scrollTo) before that gesture moves.
+      if (!readingAway.current || distance > 1) enableReaderBuffer();
+      if (restoringAnchor.current) return;
       const atBottom =
+        !readingAway.current &&
         element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
       pinned.current = atBottom;
       if (atBottom) userScrolling.current = false;
       setAtBottom(atBottom);
+      if (atBottom) {
+        readerBufferEnabledRef.current = false;
+        setReaderBufferEnabled(false);
+      }
       remember(false);
       cancelAnimationFrame(rememberFrame);
       rememberFrame = requestAnimationFrame(() => remember(false));
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
+        // A completed one-pixel gesture still receives its reading buffer.
+        // Preserve the live reading point before ending the user-scroll phase.
+        enableReaderBuffer();
         remember();
         userScrolling.current = false;
       }, 150);
     };
-    const markUserScroll = () => {
+    const markUserScroll = (away = false) => {
+      // A new gesture supersedes the previous quiet completion. Its first
+      // native scroll must arrive before that completion can mount more rows.
+      clearTimeout(saveTimer);
+      readingAway.current = away;
       userScrolling.current = true;
       restoringAnchor.current = false;
     };
     const detachFromBottom = () => {
+      if (!pinned.current) return;
       pinned.current = false;
       setAtBottom(false);
     };
     const onWheel = (event: WheelEvent) => {
       if (event.deltaY === 0) return;
-      markUserScroll();
+      const readyReader =
+        !pinned.current &&
+        !restoringAnchor.current &&
+        reading.current?.atBottom === false &&
+        reading.current.scrollTop === element.scrollTop &&
+        virtualizer.scrollOffset === element.scrollTop;
+      markUserScroll(event.deltaY < 0);
+      // A previous native scroll has already established this reading point.
+      // Finish its buffer before the next wheel's default movement begins.
+      // First detachment still waits for the native offset in onScroll.
+      if (readyReader) enableReaderBuffer();
       // Release before the browser's scroll event so live updates cannot steal
       // even a small upward trackpad movement in the same frame.
       if (event.deltaY < 0) detachFromBottom();
+      else if (
+        element.scrollHeight - element.scrollTop - element.clientHeight <=
+        1
+      )
+        jumpToBottom();
     };
     const onTouchStart = (event: TouchEvent) => {
       const touch = event.touches[0];
       touchStart = touch ? { x: touch.clientX, y: touch.clientY } : null;
+      touchLastY = touch?.clientY ?? 0;
+      touchScrolling = false;
     };
     const onTouchMove = (event: TouchEvent) => {
       const touch = event.touches[0];
       if (!touch || !touchStart) return;
       const dy = Math.abs(touch.clientY - touchStart.y);
-      if (dy > 8 && dy > Math.abs(touch.clientX - touchStart.x)) {
-        markUserScroll();
-        if (touch.clientY > touchStart.y) detachFromBottom();
+      if (dy > 8 && dy > Math.abs(touch.clientX - touchStart.x))
+        touchScrolling = true;
+      const direction = touch.clientY - touchLastY;
+      touchLastY = touch.clientY;
+      if (touchScrolling && direction !== 0) {
+        markUserScroll(direction > 0);
+        if (direction > 0) detachFromBottom();
+        else if (
+          element.scrollHeight - element.scrollTop - element.clientHeight <=
+          1
+        )
+          jumpToBottom();
       }
     };
     const onTouchEnd = () => {
       touchStart = null;
+      touchScrolling = false;
     };
     const onKey = (event: KeyboardEvent) => {
       if (isTranscriptScrollKey(event)) {
-        markUserScroll();
-        if (["ArrowUp", "PageUp", "Home"].includes(event.key))
-          detachFromBottom();
+        const away =
+          ["ArrowUp", "PageUp", "Home"].includes(event.key) ||
+          (event.key === " " && event.shiftKey);
+        markUserScroll(away);
+        if (away) detachFromBottom();
+        else if (
+          element.scrollHeight - element.scrollTop - element.clientHeight <=
+          1
+        )
+          jumpToBottom();
       }
     };
     const onPointer = (event: PointerEvent) => {
@@ -1125,6 +1293,7 @@ const CodexTranscript = memo(function CodexTranscript({
               />
             )}
             <div
+              ref={rowListRef}
               style={{
                 height: totalSize,
                 position: "relative",
@@ -1148,7 +1317,7 @@ const CodexTranscript = memo(function CodexTranscript({
                       top: 0,
                       left: 0,
                       width: "100%",
-                      transform: `translateY(${item.start}px)`,
+                      transform: `translateY(${item.start - rowScrollMargin}px)`,
                       paddingBottom: 16,
                     }}
                   >

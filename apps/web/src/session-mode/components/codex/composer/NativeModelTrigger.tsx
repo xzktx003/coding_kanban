@@ -5,39 +5,135 @@ import { Button } from "@session/components/ui/button";
 import { NativeComposerIcon } from "./NativeComposerIcon";
 import { ComposerTooltip } from "./ComposerTooltip";
 import { useModels } from "../hooks/useModels";
+import { useOrdinaryNativePickerModels } from "./ordinaryNativePickerModels";
 import { nativeReasoningLabel } from "./nativeReasoningLabel";
+import { canonicalNativeModel } from "./nativeModelIdentity";
+import {
+  NATIVE_UNKNOWN_REASONING_OPTIONS,
+  nativeDisplayReasoningEffort,
+  nativeReasoningOptions,
+} from "./nativeReasoningOptions";
 
-/** Catalog label, with the full raw model identity retained for accessibility. */
+type NativeModelTriggerProps = React.ComponentProps<typeof Button> & {
+  pickerOpen?: boolean;
+  pickerSimple?: boolean;
+  pickerOpenLabel?: string;
+  completionTooltipHeld?: boolean;
+  minimumContentWidth?: number;
+  preferredContentWidth?: number;
+};
+
+/** Closed/advanced keep raw identity; ordinary simple-open exposes its purpose. */
 export const NativeModelTrigger = forwardRef<
   HTMLButtonElement,
-  React.ComponentProps<typeof Button>
->(function NativeModelTrigger(props, ref) {
+  NativeModelTriggerProps
+>(function NativeModelTrigger({
+  pickerOpen = false,
+  pickerSimple = false,
+  pickerOpenLabel,
+  completionTooltipHeld = false,
+  minimumContentWidth,
+  preferredContentWidth,
+  ...props
+}, ref) {
   const threadId = useCodexStore((s) => s.currentThreadId);
   const { model, modelProvider, reasoningEffort } =
     useThreadModelSettings(threadId);
-  const { providerItems } = useModels();
+  const { providerItems, openAiModels, modelStatus } = useModels();
+  const pickerModels = useOrdinaryNativePickerModels(openAiModels, modelProvider === "openai");
+  const catalog =
+    modelProvider === "openai"
+      ? canonicalNativeModel(pickerModels, model)
+      : undefined;
+  const isUnknownOpenAiModel =
+    modelProvider === "openai" &&
+    Boolean(model) &&
+    !catalog &&
+    (modelStatus === "success" || modelStatus === "error");
+  const modelPending =
+    modelProvider === "openai" && Boolean(model) && modelStatus === "pending";
+  const options = catalog
+    ? nativeReasoningOptions(catalog)
+    : isUnknownOpenAiModel
+      ? NATIVE_UNKNOWN_REASONING_OPTIONS
+      : null;
+  const displayedEffort =
+    options &&
+    (reasoningEffort ||
+      isUnknownOpenAiModel ||
+      (threadId !== null && reasoningEffort === null))
+      ? nativeDisplayReasoningEffort(reasoningEffort, options)
+      : reasoningEffort;
   const label =
-    providerItems(modelProvider).find((item) => item.id === model)?.label ??
+    (modelProvider === "openai"
+      ? catalog?.displayName || catalog?.model
+      : providerItems(modelProvider).find((item) => item.id === model)?.label) ??
     model ??
     "选择模型";
-  const effort = reasoningEffort || "默认";
+  const effort = displayedEffort || "默认";
+  const enhancedTrigger =
+    pickerOpenLabel !== undefined && modelProvider === "openai" &&
+    !modelPending && modelStatus !== "error";
+  const showPurpose = enhancedTrigger && pickerOpen && pickerSimple;
+  const triggerProps: React.ComponentProps<typeof Button> = {
+    "aria-label": modelPending
+      ? "Loading model…"
+      : `模型：${model || "选择模型"}，${effort}`,
+    ...props,
+  };
+  if (showPurpose) {
+    triggerProps["aria-label"] = undefined;
+    triggerProps["aria-labelledby"] = undefined;
+  }
+  const selection = (
+    <>
+      <span className="session-native-model-label session-model-name">
+        {modelPending ? "Loading model…" : isUnknownOpenAiModel ? "自定义" : label}
+      </span>
+      {!modelPending && (
+        <span className="session-native-model-effort session-model-effort">
+          {nativeReasoningLabel(displayedEffort)}
+        </span>
+      )}
+    </>
+  );
   return (
-    <ComposerTooltip label={`${label} · ${effort}`}>
+    <ComposerTooltip
+      label={enhancedTrigger ? pickerOpenLabel : `${label} · ${effort}`}
+      popupOpen={enhancedTrigger && (pickerOpen || completionTooltipHeld)}
+    >
       <Button
         ref={ref}
         type="button"
         variant="ghost"
         size="sm"
         className="session-model-trigger session-native-model-trigger"
-        aria-label={`模型：${model || "选择模型"}，${effort}`}
-        {...props}
+        {...triggerProps}
+        disabled={modelPending || props.disabled}
+        aria-busy={modelPending || undefined}
       >
-        <span className="session-native-model-label session-model-name">
-          {label}
-        </span>
-        <span className="session-native-model-effort session-model-effort">
-          {nativeReasoningLabel(reasoningEffort)}
-        </span>
+        {enhancedTrigger ? (
+          <span
+            className="session-native-model-trigger-content"
+            style={pickerOpen && preferredContentWidth !== undefined
+              ? { width: preferredContentWidth }
+              : pickerOpen && minimumContentWidth !== undefined
+                ? { minWidth: minimumContentWidth }
+                : undefined}
+          >
+            <span
+              className="session-native-model-trigger-measurement"
+              aria-hidden="true"
+            >
+              {pickerOpenLabel}
+            </span>
+            {showPurpose ? (
+              <span className="session-native-model-trigger-placeholder">
+                {pickerOpenLabel}
+              </span>
+            ) : selection}
+          </span>
+        ) : selection}
         <NativeComposerIcon name="chevron" />
       </Button>
     </ComposerTooltip>

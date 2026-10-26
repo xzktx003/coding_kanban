@@ -358,3 +358,174 @@ UI 复验后补 `snapshot-inaccessible-red.log`：外层文档 getter 持续抛�
 最终 `native-compatible-final.log` **275/275、无跳过**，显式固定匹配 CLI、并发 4；包含真实原生创建者退出、同值账号撤销、新 manager 拒绝、原 turn 完成一次、观察进程 SIGKILL 后拒绝新接入、实际请求写入 veto 与连接保留。`guard-compatibility-green.log` **26/26**；`pnpm check` **exit 0**（`check-final.log`），保留既有大 chunk 提示。后补改动仅为该 MJS 协议层，最新整组已覆盖；前端/服务端产品源码本批未改，未冒称重跑此前 136/43 项。任务文件使用现有 web Prettier，`git diff --check` 通过，`.env` 忽略、`.env.example` 可提交，未提交或推送。
 
 `formal-safety-final.json` 在最终原生整组结束后再次核对：正式 LAN **https://10.30.0.24:8484/?mode=codex**（HTTPS，端口 8484）与后端健康均 HTTP 200；正式 Session/native launcher/native host 的 PID/start ticks 保持 **2712539/55361120、2718477/83117363、2729812/83119682**。`session-status-final.log` 仍 ready、运行产物与磁盘不同，未切换运行层或停止正式 Agent。四种本批测试目录前缀残留为零；测试自身按精确所有者身份清理 native/observer/control，此目录检查不代表全主机进程审计。持久授权锚的隔离实现和本批验收完成，前述完整官方 UI、性能与长测关卡仍未通过，目标继续 active，候选未启用。
+
+
+## VS Code 旧编辑器自动还原与三端严格元数据（2026-10-16）
+
+实现与原始对照见 [编辑器恢复](refresh-editor-restore-20261016.md)。新显式 refresh 宿主经 buildHostSettings 关闭 workbench.editor.restoreEditors；普通宿主不设置，活跃宿主不改配置。真实 tabGroups 复现单窗格刷新多出后台历史编辑器的 2 != 1 红灯，严格三端最终为 9/9、当前三个实例各一个正确新聊天、页面错误零，没有用网页隐藏代替原生计数。新增夹具路径红绿灯修复合法单 profile 共根时取证遗漏，外部/别名/非私有路径仍拒绝。证据在 .dev-runtime/codex-refresh-20261016-editor-restore/。
+
+固定 CLI 的宿主/适配器整组 278/278、无跳过，pnpm check 退出 0。iPhone 16 模拟参数仍为 Chromium 145.0.7632.6、393x852、DPR 3、触控 1，系统键盘与硬件剪贴板未实测。原创建者退出后 native/授权锚身份保持，但重入时 thread 曾 notLoaded，不冒充跨离线热保留。私有 thread 最后只读核对只有原来一轮 completed，未误发草稿；本轮和原夹具的已知自有进程全部退出，私有连接副本和 TLS 根已删除。
+
+A/B/A/B 的编辑器还原阶段从约 2.6 秒到约 0.1 秒，完整正确 composer 仍为 10.58–14.61 秒；没有接受回执，不计两秒通过。该设置不改变 auto-open-new-chats 的显式首开语义，与可见窗格恢复的完整组合下一批继续实现。正式 LAN https://10.30.0.24:8484/?mode=codex（HTTPS，端口 8484）及后端健康 HTTP 200，受保护三组 PID/start ticks 保持 2712539/55361120、2718477/83117363、2729812/83119682；session:status 仍 ready、运行与磁盘产物不同，未停止 Agent 或启用候选。完整授权/自动 profile 与来源/资源准入、大消息、官方多端操作、长历史、180 次两秒矩阵和 30 分钟长测继续待完成，目标 active。
+
+
+## 显式可见启动、未关注恢复与首次发送目标修复（2026-10-16）
+
+完整协议、红灯与所有迭代失败见 [可见启动验收](refresh-visible-startup-20261016.md)，证据目录 .dev-runtime/codex-refresh-20261016-visible-startup/。新增 --restore-visible-windows，仅用于已具备 service/domain/control 的全新受控宿主，与自动首开/fixture 互斥。私有配置和记录由真实 launcher 生成，不再手工关闭 companion 首开或覆盖 settings；原 auto-open-new-chats 及旧固定列 /restore 保持。
+
+全新无登录 HOME、原 VSIX/匹配 CLI、独立 native 授权锚/control、实际网关可见通道及 Vite HTTPS/WSS 已连通。两桌面+iPhone 16 模拟的初始默认新聊天 9/9，以及历史后新开 9/9，当前每个原生实例仅一个精确目标、页面错误零；这 18 项是草稿功能步骤，不是发送或性能矩阵。手机仍为 Chromium 145.0.7632.6、393x852、DPR 3、触控 1；系统输入法和硬件剪贴板未实测，初始草稿截图的 Loading model 没有计为可发送。
+
+真实历史分支先复现：共享关注早于慢宿主返回空快照，把本设备当前历史删掉，原生 tabGroups 为空且没有打开请求。补延迟宿主的稳定单测先红后绿，合并现保留本地各组选中目标，不自动重新关注或打开后台正文。随后真实首次发送又捕获窗口列表转换 new→thread，但分屏树没有转换而选择旧历史；重复 thread 提前恢复还会漏别名。两项确定性失败后，树 keys/selected 同步转换并去重，保留分组与比例。
+
+最终 first-send-selection-fixed/result.json 三步骤全部通过：官方 Send 点击一次，精确私有 thread 01a14395-437f-78a2-a53d-d260ebe7726d / turn 01a14395-495b-7732-b04f-c8ef90f6d077 完成一次，普通刷新后相同原生 composer/历史、本地所选 thread 和原 turn 均确认，无重复轮次。此前对象 undefined 字段、原生末尾换行的测试接线失败及真正选错目标的红灯全部保留，未以脚本退出码泛化根因。发送测试前只对该私有 native 用真实 config/value/write 选择原生目录默认模型，仍走无登录 loopback provider、没有调用外部模型；未改官方 feature flag 或替换 native/授权代次。
+
+最后 native-final.json 确认私有项目四个 thread 各只有一轮 completed：seed、文本断言失败、目标恢复失败、最终成功分别独立；已知完成后才开始新独立用例，不重发未知提交。model-calls-final.json 实际是 7 次 idle Responses 调用，不把模型请求数等同于用户 turn 数，也不凭当前元数据猜测额外调用用途。按持有的 PID/start ticks 完成清理，cleanup-final.json 自有活进程零、错误零、私有根/TLS 已删除。临时 HTTPS https://10.30.0.24:5173（端口 5173、0.0.0.0）已关闭。
+
+最终固定 CLI 的 native/adapter 整组 **282/282、无跳过**（native-final.log），前端 Codex 全目录 **22 文件/142 项**（web-final.log），native 网关 **44/44**（server-green.log），pnpm check **退出 0**（check-final.log），保留既有大 chunk 提示。sent-selection-green.log 的 17 项是此前定向回归，不与全目录数量相加；全仓 pnpm test 未据此声称重新全绿。git diff --check、任务新文件格式及 E2E 语法检查完成，.env 忽略、.env.example 可提交；无提交或推送，保留并发 Session/Goal/model-menu/feedback 工作。
+
+只读正式安全核对 formal-safety-final.json：HTTPS https://10.30.0.24:8484/?mode=codex（端口 8484）和后端/Session 健康 HTTP 200，三组 PID/start ticks 仍为 2712539/55361120、2718477/83117363、2729812/83119682。session:status 仍 ready、运行产物与磁盘不同，没有切换运行层、迁移或停止正式 Agent；网关源码修改可能沿既有 watcher 热更新，不据此声称整个网关进程从未变化。
+
+本批明确修复实际启动及恢复目标，**完整计划继续 active，候选未启用**。原普通刷新到正确 composer 仍约 10 秒的失败保留；本批没有接受回执的两秒计时，更没有完成 180 次矩阵。完整官方多端并发发送/审批/中断/附件/提问、旧设置反例、ChatGPT/OAuth、自动 profile/持久来源/全部宿主资源准入、大消息、长历史、其他尺寸和 30 分钟自然 RSS 长测仍在原目标范围内。下一批从真实受控模型的官方 UI 运行/审批与性能关键路径继续，不以物理手机缺失阻塞或降低门槛。
+
+
+本批后补损坏状态反例 duplicate-new-id-red.log 复现相同原始 new UUID 指向两个 thread 未拒绝；新增 originalIds 校验后，完整 Codex 前端最新为 **22 文件/143 项**（web-postreview.log），pnpm check 最新 **退出 0**（check-postreview.log）。合法重复 thread 去重、分屏转换及原生首发的有效状态路径保持；没有据此重跑原生 UI 挑选样本。宿主/适配器 282 项与网关 44 项对应源码未再变化，仍按此前各自日志记录；新增 MJS/组件测试文件格式和 diff 检查通过。最后只读正式状态接最终 JSON；目标与未完成关卡保持。
+
+最终构建后 formal-safety-postreview.json 再确认三组正式身份全部相同、三项健康均 200；session-status-postreview.log 仍 ready 且运行/磁盘产物不同。两批私有根清理记录均无自有活进程残留，正式候选继续关闭。
+
+
+## 真实三端审批、运行恢复与完整接受计时（2026-10-16）
+
+详细协议和保留红灯见 [生命周期验收](refresh-official-lifecycle-20261016.md)，证据 .dev-runtime/codex-refresh-20261016-ui-lifecycle/。全新无登录 HOME、未修改 VSIX/匹配 CLI、独立 authority/control、真实可见页面和实际生成的可见启动宿主，三端使用不同 HTTPS 源；iPhone 16 模拟仍为 Chromium 145.0.7632.6、393×852、DPR 3、触点 1，不冒称 iOS 实机。临时 LAN HTTPS https://10.30.0.24:5173、0.0.0.0 已清理。
+
+实际审批页无 composer，外壳误推断为官方引导；approval-guide-red.log 复现后，现只对明确原生 onboarding 状态显示提示，审批界面保持官方控件。73 项定向测试通过；生产观察器、正文、MessagePort、历史和协议预算保持。首次 green 的文案断言错误另存，未通过修改产品文本掩盖。
+
+approval-three/result.json 8/8：同一真实 requestId 0/原 thread/turn/item 跨刷新，三端 UI 点击后命令实际只执行一次，原轮次完成一次且三端同步。running-three/result.json 8/8：原 active turn 跨手机刷新，关闭 A 后超过私有宿主 10 秒宽限仍运行，释放自有模型后同一 turn 完成一次，B/手机同步。创建连接保留，本项没有点击 Stop，不代替最后订阅退出、中断/继续或 manager 单独保温。
+
+send-three 首轮是真实红灯：A/B 各接受一次，C 留在手机草稿、原生出现数零，原因尚未复现定位。新独立标记的 send-three-traced/result.json 5/5，三端独立消息各一次合入一个 completed turn，记录真实手机触控和 desktop click；不重发原 C，不把一次通过写成已修复并发稳定性。最初静默模型 running 在 UI 开始前 SSE idle timeout 的失败保留，后续另创建新 turn，未提高超时或冒充刷新保护成功。
+
+refresh-receipts/result.json 三端草稿 9/9，但普通刷新到正确原生接受为 **15291.30、16281.10、14789.90 ms**，全部两秒红灯，另保留 17 项 ERR_ABORTED 请求。首次分段 workbench 自身约 1.302 秒启动，webview 文档在总约 5.533 秒建立，250 条资源、26.67 MB encoded/decoded 与 3.502 秒 long task；transferSize=0 不证明 HTTP 缓存命中，也不是实际网络字节。私有官方日志 EMFILE watch/ResizeObserver 告警原因未定，不能判资源通过。下一步继续扩展/Webview 关键路径和并发竞态，不修改 VSIX/feature flag/MessagePort 或预算。
+
+最终 native-final.log **282/282、无跳过**，明确固定 CLI；前端 web-typed-final.log **22 文件/143 项**。首次 pnpm check 暴露测试回调手写类型漏 onboarding，已复用实际 NativeSurfaceOptions 类型；最终 check-typed-final.log **exit 0**，保留既有大 chunk 提示。全仓测试未据此声称重跑；本批没有新网关生产代码，不泛称重验此前网关 44 项。任务文件格式、E2E 语法、git diff --check 通过，.env 忽略、.env.example 可提交，无提交/推送，保留并发其他工作。
+
+最终私有项目 4 个 thread、9 个终态轮次（8 completed、原 running 1 failed），原未提交 C 仍未出现在历史。模型 Responses 共 12 次，不等同轮次数。cleanup-final.json 记录 12 个已知自有进程退出、零清理错误，私有根及 TLS 删除；相对 argv/停止中 RSS 的清理脚本失败保留，后续只读身份/退出状态核对通过后才删除，没有改变产品资源读取语义或信号其他进程。
+
+构建后的 formal-safety-final.json（2026-10-16T08:09:38Z）确认正式 Session/native launcher/native host 仍为 **2712539/55361120、2718477/83117363、2729812/83119682**。正式 **HTTPS https://10.30.0.24:8484/?mode=codex**（端口 8484）、后端/Session 健康均 200；session-status-final.log 仍 ready、磁盘与运行产物不同，未切换运行层或停止正式 Agent。网页源码可能沿既有热更新生效，不宣称正式页面、网关 PID 或所有浏览器状态从未变化。
+
+**完整目标继续 active，候选未启用**。并发红灯、两秒/180 次三状态矩阵、官方中断/继续/附件/提问、旧设置、ChatGPT/OAuth、自动 profile/持久来源/全部宿主资源准入、大消息、长历史和自然 RSS 长测仍在原范围内，不因缺少物理手机停止或降低要求。
+
+
+## 受控桥接的重复原包验证与实际启动分段（2026-10-16）
+
+本批有明确代码和根因进展，完整目标仍 active，见 [原包校验与时间线](refresh-artifact-verification-20261016.md)。证据 .dev-runtime/codex-refresh-20261016-startup-profile/。runBridge 配置验证后再走 metadata 附着，会把固定 CLI/VSIX 再完整读一遍，冗余约 664.5 MB；单遍实测 0.66–0.76 秒。现从私有配置完整验证后按完整固定 scope 附着，同次只验一次，每次新启动仍完整重验，不给公开跳过开关或跨启动缓存，原账号/控制/实际写入 guard 保持。
+
+redundant-verification-red.log 真正复现 CLI/VSIX 各扫描 2 != 1（3 绿/1 红）；最初定向 green 7/7。随后完整 native-final.log 抓到首版按 domain 先访问变更 PID 才拒绝固定 scope，报 ENOENT 而非原 generation/scope；该次 280/281，未进入其后嵌套用例，不写成 282 项。已修正为先比较全部固定身份，native-scope-final.log 最终 **282/282、无跳过**；scope-missing-pid-final.log 又确认后补必定不存在 PID 的反例，**3/3、无跳过**。同进程连续两次启动每文件各读两次、换私有伪 VSIX 后拒绝且输出零，也在整组内。没有放宽旧断言。
+
+真实官方日志 native-launch→initialize 从 1672/1595/1588 ms 到 794/751/771 ms；只认这段对照，不泛称整页已减少相同时间。两轮真实页面 CPU 采样都经官方 Send 接受并完成，修复后带 Profiler 的两次总计时 11866.90/12332.50 ms，不能作为最终性能样本。采样器最初丢了内建 idle/program 分类，重采后才记录；只读 window message 未在官方 document.write 后取得 RPC 时刻，该项证据无效。不把 program 直接当编译、不把各 frame long-task 相加；官方 EMFILE watch 告警仍未解决。
+
+最终 scope 代码的 three-final/result.json 走实际开发 Vite HTTPS/WSS、两桌面与 iPhone 16 尺寸模拟，未开 CPU Profiler、未模拟 API：草稿恢复 **9/9**，三个精确原生接受及 completed 轮次均确认。普通刷新到接受为 **14284.10、14469.10、14037.70 ms**，全部两秒失败；17 项 ERR_ABORTED 请求完整保留，总 passed=false，未运行或冒称 180 次三状态矩阵。手机 Chromium 145.0.7632.6、393×852、DPR 3、触点 1，Safari UA 仅为模拟；三端不同 HTTPS 源，原 seed 连接保留，不代替 manager 单独保温或最后订阅退出。
+
+首次 check-final.log 被并发新增模型菜单测试的可选 fixture 字段 TS2322 阻断；仅捕获局部常量并缩窄，未改生产模型行为、七个原用例及期望，model-fixture-type-green.log 7/7。最终 check-typed-final.log **pnpm check exit 0**，保留大 chunk 提示。本批前端产品、网关和会话正文未改，不声称重跑此前前端143或网关44整组；MJS格式、语法、diff与忽略规则另按实际命令核对，无提交/推送。
+
+native-final.json 核对私有项目恰 3 个 thread、10 个终态 turn：idle 8 completed、running 1 completed、夹具审批由精确 cleanup interrupt 结束 1 interrupted。最后三端各自受控标记在对应接受 turn 中恰一次。中断仅清理本批无登录假审批，不计作官方 UI Stop 验收或正式任务操作。model-calls-final.json 为 11 次 Responses（idle 9、running 1、approval 1），不等同用户轮次或推断额外调用用途。cleanup-final.json：12 个已知自有进程退出，零错误，/tmp/ck-ui-life-s8KY72 与 TLS 删除；临时 HTTPS https://10.30.0.24:5173（0.0.0.0、端口5173）关闭。
+
+最终 formal-safety-final.json（2026-10-16T08:36:28Z）：正式 Session/native launcher/native host 仍为 **2712539/55361120、2718477/83117363、2729812/83119682**。正式 **HTTPS https://10.30.0.24:8484/?mode=codex**（端口8484）及后端/Session健康均200；session-status-final.log 仍 ready，磁盘与运行产物不同，未切换运行层或停止正式 Agent。已知所有者核对不等于整机审计，也不声称所有网页或网关PID未变化。
+
+两秒、完整官方并发稳定性/中断/继续/附件/提问、旧设置反例、ChatGPT/OAuth、自动profile/持久源/全部宿主资源准入、大消息/长历史/180次矩阵和自然RSS长测仍在原目标内。下一步继续根据真实启动关键路径推进，候选未启用；不因手机为模拟而停工，也不把局部启动段优化替代最终目标。
+
+## 官方初始化分段、代理开关与首次公告准备（2026-10-16）
+
+完整根因、红灯和样本见 [初始化与代理核对](refresh-initialization-proxy-20261016.md)。两批证据分别为 .dev-runtime/codex-refresh-20261016-rpc-timeline/ 和 .dev-runtime/codex-refresh-20261016-proxy-profile/，下文简称 timeline/proxy。均是全新无登录 HOME、未修改 VSIX/匹配 CLI、真实独立 native/authority/control、生成桥接、可见启动及 Vite HTTPS/WSS，模型仅为自有无认证 loopback fixture。正式候选继续关闭。
+
+明确修复 buildChildEnv 丢弃 NODE_USE_ENV_PROXY 的配置问题：只保留明确 0/1，未设置保持未设置，不默认开启、不硬编码代理地址，也不继承任意 NODE_OPTIONS。timeline/proxy-env-red.log 原 26 项通过、新 2 项失败，green 28/28；实际子进程通过自有 loopback 代理请求 .invalid 目标，不靠对象快照代替真实路由。自有 code-server Node 为 v24.21.0，支持范围按实际版本，不能泛化至 Node 20/22 的所有版本。proxy/proxy-environment.json 按持有身份确认三个自有宿主进程收到明确 1，未保存环境地址或凭证。此修复没有启用正式代理或变更正式运行进程。
+
+真实 onProtocol 元数据发现附件登记 fs/readFile 约 1–2 ms、返回不存在文件，后续请求前的几秒间隔不能归因于它。官方 HTTP 由宿主 fetch 转发，浏览器网络数组为空不代表没有请求。只读观察原 SDK 状态及已有初始化 Promise，不调用初始化/flag API或改变状态；timeline/sdk-details 两次 source=Network、success=true，duration 2934/2647 ms，navigation→原生接受 13016.20/11085.10 ms；proxy/sdk-details 为 1802/1522 ms、11387.20/10050.40 ms。样本少、不同宿主/缓存且带采样，不构成严格整页 A/B；非空 error 字段和 7/17 项 requestfailed 原样保留，不推断为已超时或全部成功。
+
+新增固定官方 Webview 性能标记，仍限 32 项，增加总数/截断，不保存 detail或任意名字，不清性能时间线；timeline/webview-marks-red.log 5绿/2红，green 7/7。临时手工 regex 漏 .html 的空 preframe 结果作废；重采后真实 content/started→workerReady 仅约 7.5/10 ms，不能把几秒等待归为 Service Worker。空项目/Git 项目的四次精确发送诊断也未消除等待，不能据此作因果结论。
+
+proxy/three-final 首轮在第二桌面被官方 GPT-6.1 Sol 公告遮住，第一端草稿步骤通过、没有发送尝试和接受回执，失败截图保留。仅在冷初始化增加已知原标题/保留当前模型按钮的真实点击，未知/隐藏/重复/关闭失败均不跳过，initial-prompt-red.log 5绿/4红、green **9/9、无跳过**；普通刷新计时没有该处理。三端重验 three-after-initial-prompt/result.json 首次准备第二桌面和手机各点击原按钮一次，草稿 **9/9**、正确接受/完成 **3/3**，原标记各一次；**14096.90/13229.80/13850.60 ms** 全部两秒失败，17项 ERR_ABORTED保留，总 passed=false。页面错误零不替代这些失败。手机仍为 Chromium145.0.7632.6、393×852、DPR3、触点1，真实触控及659/430/852视口缩放通过，iframe/父节点身份保持；不冒称 iOS/WebKit/系统键盘或完整尺寸矩阵。
+
+最终固定 CLI 的宿主/适配器整组 proxy/native-final.log 为 **295/295、无跳过**；timeline/native-final.log 的286项是增加首次公告测试前的中间整组，不与最终相加。生产前端、网关及会话正文未改，不据此声称重跑此前前端143或网关44整组。
+
+两批 private native-final.json 分别为3线程/11终态轮次、3线程/8终态轮次；idle为9/6 completed，running各1 completed，人工审批各由精确清理interrupt结束。模型Responses分别14次（12idle/1running/1approval）、9次（7/1/1），不等同用户轮次数。创建连接保留，不计 manager 单独保温、最后订阅退出或官方UI中断验收。两份cleanup-final.json均确认12个已知自有进程退出、零错误，私有根 /tmp/ck-ui-life-N7I2uQ 与 /tmp/ck-ui-life-xdDiLP/TLS删除。临时LAN **HTTPS https://10.30.0.24:5173**（0.0.0.0、端口5173）已关闭，没有停止正式Agent。
+
+完整目标继续 active，最终两秒/180次三状态矩阵、原并发红灯、官方中断/继续/附件/提问、旧设置、ChatGPT/OAuth、自动profile/持久源/全部宿主资源准入、大消息/长历史和自然RSS长测仍在原范围内。本批未放宽协议或资源预算、未修改官方包/feature flag/缓存策略，也不把局部SDK差值当作部署依据。
+
+最终 proxy/check-final.log **pnpm check exit 0**，保留既有大chunk提示。任务MJS格式/语法、git diff --check和文档相对路径核对通过；.env忽略、.env.example可提交，无提交/推送，保留并发Session/Goal/model-menu/feedback工作。proxy/formal-safety-final.json（2026-10-16T09:10:46.093Z）确认正式Session/native launcher/native host仍为 **2712539/55361120、2718477/83117363、2729812/83119682**。正式 **HTTPS https://10.30.0.24:8484/?mode=codex**（端口8484）和后端/Session健康均200；session-status-final.log仍ready、运行与磁盘产物不同，未切换运行层或停止正式Agent，也不宣称所有网页或网关PID从未变化。
+
+## 实际 extensionHost fork、精确版本门控与钩子释放计数（2026-10-16）
+
+完整根因、反例和证据见 [预加载 fork 验收](refresh-preload-fork-20261016.md)。本批定位到 code-server 清除 NODE_OPTIONS 后派生 extensionHost，导致原生界面可发送但自有 companion 未捕获 provider。现只在自有 code-server 父入口，对完整实例配置、固定 bootstrap/type/ESM 入口匹配的 fork 注入自有 preload；其它子进程、原参数/环境及返回值保持。原 VSIX、code-server 文件与原生 MessagePort 未修改。RED 为1绿/2红，初组33/33，后补范围反例4/4。
+
+真实捕获后又发现26.51007.21434被旧发送版本门控拒绝；新增此精确版本，未知版本仍只读，先红后绿52/52。实际钩子已恢复但直接保留计数未减少，另以红灯复现并修复，包含外来钩子及只读属性反例，8/8。最终固定CLI的native-restored-final.log **304/304、无跳过**；中间299/302不相加。
+
+证据目录 .dev-runtime/codex-refresh-20261016-fork-preload-final/。actual-provider及actual-provider-restored均4/4：未修改官方VSIX/匹配CLI的真实页面与私有精确桥接，各自接受并完成独立新标记一次；后批两个新实例捕获/可发送为真、保留计数0/0。该项不代替Session公共composer/队列全流程。three-fixed三端初次/刷新实例核对6/6、草稿9/9、正确接受/完成3/3，**13529.90/13301.90/13478.40ms**全部两秒失败，17项ERR_ABORTED保留，总passed=false。iPhone16仍为Chromium145.0.7632.6、393×852、DPR3、触点1模拟，不冒称物理iOS/WebKit；触控与659/430/852缩放通过，iframe父节点保持。
+
+原资源观察显示workbench.js原始Brotli缓存、官方hashed JS由Service Worker响应且有ETag。不能以合成200或encodedBodySize推断完整重传，下一步核对原worker条件验证/304及实际WS字节。自有CPU诊断的缺测、端口占用、V8拒绝及runner误判均保留；缺provider状态的descriptor-run已明确改判失败并保存原始文件及SHA256，未追溯重采计时。
+
+首次pnpm check被并发toast测试7处TS2769阻断，读取时当前文件已由并发工作修正，本批未改toast；正确Session/jsdom配置定向3/3，最终check-current-final.log **pnpm check exit 0**。任务格式/语法/相对链接、diff及.env忽略规则通过，无提交/推送。三批私有夹具各12个已知自有进程退出、零错误、根/TLS删除，临时5173关闭；详情保留各批轮次/模型调用及清理中断边界。
+
+formal-safety-final.json（2026-10-16T10:17:35.840Z）确认正式Session/native launcher/native host仍为 **2712539/55361120、2718477/83117363、2729812/83119682**。正式 **HTTPS https://10.30.0.24:8484/?mode=codex**（端口8484）、后端/Session健康均200；Session仍ready且磁盘/运行产物不同，未切换运行层或停止正式Agent。
+
+完整目标继续active，候选关闭。两秒/180次矩阵、原并发红灯、manager单独保温、官方中断/继续/附件/提问、旧设置、ChatGPT/OAuth、自动profile/持久源/全部宿主资源准入、大消息/长历史及自然RSS长测仍须完成；不因本批桥接可用或模拟手机而缩减范围。
+
+
+## 原缓存命中、SDK共享状态与显式profile传输压缩（2026-10-16）
+
+完整只读证据、红灯及边界见 [缓存与传输核对](refresh-websocket-transport-20261016.md)。service-worker-cache/observation 两次普通刷新对观察的11份官方JS均携带ETag、原worker返回304，不改原缓存；大包另查到官方SDK共享状态约6.73MB及扩展manifest元数据约1.305MB，不删除/裁剪。原通道与网关socket字节独立统计，不能把合成200/encodedBodySize当完整重传。
+
+新增仅服务端固定profile可选的webSocketCompression，默认关闭、不接受HTTP开关。浏览器链路双向no-context-takeover/window bits10，回环不重复压缩；解压后8MiB、上游2MiB及队列预算保持。首版私有压缩有重连和错误cwd，整项失败、不重发已接受标记；关闭回环重复协商的新独立夹具两次正确cwd/接受/完成通过，但不把相关性说成目录错误的唯一因果。两组完整刷新连接TCP出站从30376944/26294690到11759810/10099160 bytes，约减少61%，只证明该跳字节差异。时延12149.20/10757.70ms仍红，原并发/旧端设置问题未宣称修复。
+
+证据 .dev-runtime/codex-refresh-20261016-ws-compression-final/ 使用实际源码与显式选项，原VSIX/匹配CLI、无登录HOME/loopback provider，实际Vite LAN HTTPS/WSS。three-final 三端草稿9/9、初次/刷新原实例捕获及可发送6/6、直接保留数全0、精确接受/完成3/3，**13306.40/14064.50/13668.10ms**全部两秒失败，15项ERR_ABORTED保留，总passed=false。iPhone16模拟Chromium145.0.7632.6、393×852、DPR3、触点1；触控和659/430/852缩放及iframe父节点保持通过，无首次公告点击。截图仍有刚提交文字/忙碌图标，原生回执不代替前端清稿/结束等待断言，更不是完整交互闭环通过。
+
+compression-red原0/4；最初测试夹具缺运行记录字段导致1011，中间失败保留；补全后3绿/1红为loopback仍协商。最终gateway-typed-final.log **48/48、无跳过**，涵盖原网关/页面租约和4项新测试。首次pnpm check暴露本批assert.rejects直接接Fastify.thenable的TS2769，修成async回调保留拒绝断言，check-typed-final.log **exit0**；未把旧宿主304项冒充此次重跑。未改官方文件、SDK flags、DOM或MessagePort，未提高预算。
+
+诊断protocol-metadata的非协议JSON连接误判由review文件/SHA256保留原结果并改判false；message-shape触发32连接观察上限仍失败，未扩容。首个私有TS副本在ESM包外导出失败，web未就绪、无发送；最终runner插入表达式未匹配也在执行前拒绝。详见独立文档，不将采样器问题或后续通过覆盖原始红灯。
+
+四个ready夹具各12个已知自有进程退出、零错误、根/TLS删除；未ready模块失败夹具7个。原资源9终态轮含running的SSE超时failed，不计运行保护；首版压缩4轮、关闭回环5轮、最终源码6轮终态。最终源码idle4 completed/running1 completed/假审批1 cleanup interrupted，Responses6次，不等同其它批次或UI中断证明；seed保留，不计manager单独保温。临时0.0.0.0绑定的HTTPS5173及最终 **https://10.30.0.24:5174**（HTTPS、端口5174）均已关闭。
+
+formal-safety-final.json（2026-10-16T10:46:57.482Z）确认正式Session/native launcher/native host仍为 **2712539/55361120、2718477/83117363、2729812/83119682**，正式 **HTTPS https://10.30.0.24:8484/?mode=codex**（端口8484）及后端/Session健康200。Session仍ready、磁盘/运行产物不同，正式profile未传压缩参数，未切换运行层或停止正式Agent。无提交/推送，保留并发工作。
+
+完整目标继续active、阶段0仍红、候选关闭。下一步须按真实初始化/回执渲染分段继续定位，不能把传输减少当最终恢复通过；两秒180次三状态、原并发红灯、manager独立保温/11→10与冷恢复、官方交互、旧设置、ChatGPT/OAuth、自动profile/持久源/全部资源准入、大消息/长历史及自然RSS长测均仍在原范围。
+
+
+## 原生完成后的页面收尾与三独立宿主（2026-10-16）
+
+新增有界只读页面收尾断言：精确 native turn 完成后，还须正确唯一 thread/editor、草稿清空、无 busy/Stop/Queue、有 Send。既不清稿也不重发；超时只保存最后一份固定控制字段，冻结 evaluate 也受总截止时间限制。两个浏览器入口的三 profile 映射不再全部取首项，核对精确 index、唯一 UUID/startupId、不交叠的私有根；默认单宿主诊断仍可显式使用。实现、红绿灯和完整证据见 [本次对照](refresh-client-settlement-20261016.md)。
+
+`.dev-runtime/codex-refresh-20261016-ui-receipt/` 单手机 cold/warm 真实发送约20104.80/11555.00 ms，完成后页面另需414/502 ms清稿空闲。共享宿主 concurrent-1 未提交，草稿保留；concurrent-2 三输入原生各一次且完成，但官方页面15秒仍等待，整体红。三个 turn/start 经同一原扩展 CLI 连接，回执早于完成，不能归为迟到原生回执。原启动分段 warm runtime_resume 仅约31.4 ms，总 app5888.8 ms，完整接受仍更慢。首次 helper 实际接入的 Locator.ownerFrame 错误在接受一个标记后失败，保留原结果，不重发；修正短暂 ElementHandle 并释放。
+
+`.dev-runtime/codex-refresh-20261016-private-clients/` 使用三台真正独立 code-server/HOME/CODEX_HOME/TMPDIR/用户数据/扩展IPC和三浏览器源，共享同一私有 native/control。诊断网关子类用固定普通 folder URL 打开已核对的公共私有工作区，未接管原生消息；不是正式共享工作区启动契约/自动profile完成。concurrent-1 三个 completed turn、各标记一次，桌面收尾而手机15秒仍Stop，红；后续新独立 concurrent-2 一个completed turn含三独立输入、三端收尾、5步零错，绿。两组实际均三次手势、各自独立标记，失败不重发；后一组不覆盖前一组及原手机漏发红灯。
+
+实际源码 three-final：草稿9/9、三端精确接受/completed/标记各一次、页面收尾3/3；普通刷新至接受 **11886.70/13905.70/12378.10 ms**，全部两秒失败，18项ERR_ABORTED保留、总passed=false。iPhone16模拟仍Chromium145.0.7632.6、393×852、DPR3、触点1，真实tap和659/430/852重排通过；非物理iOS/WebKit/系统键盘与剪贴板。前一夹具无显式模型操作却由6.1sol/low变5.5/medium的反例仍未解释；新夹具model保持6.1sol不能替代设置竞态验收。
+
+测试红灯/绿灯分别保留 settlement、profile、strict-observation、thread-identity 日志；新增收尾8项和profile4项涵盖错目标、隐藏/未清稿/等待、缺测、冻结、UUID coercion、重叠目录与超时不留正文。固定CLI整组314项无跳过，pnpm check退出0并保留既有大chunk提示；最终精确源码整组日志为 native-identity-final.log。任务MJS格式/语法、diff与链接按实际命令核对，无提交/推送，保留并发Session/Goal/model/feedback改动。
+
+共享宿主最终7终态轮次，三宿主10轮，均含长期无SSE数据的running failed及仅人工审批cleanup interrupt，不能计作运行保护/原UI停止通过；Responses10/12次不等于用户轮次。三宿主浏览器关闭后的单次20自有进程RSS合计2886287360 bytes不是30分钟长测或预算定标。清理按持有PID/start ticks完成：12/20自有进程退出、零错误、私有根及TLS删除；临时LAN HTTPS https://10.30.0.24:5173、https://10.30.0.24:5174（各前端0.0.0.0）关闭。
+
+2026-10-16T11:27:03.769Z正式Session/native launcher/native host仍 **2712539/55361120、2718477/83117363、2729812/83119682**；正式 **HTTPS https://10.30.0.24:8484/?mode=codex**（端口8484）及后端/Session健康200，session:status仍ready、磁盘/运行产物不同。未切换运行层、未停止正式Agent；不声称所有网页或网关PID没变化。阶段0继续红，候选关闭；完整计划、两秒/180样本/自然内存及所有未完成关卡继续执行。
+
+
+## 显式公共工作目录与标准网关三宿主（2026-10-16）
+
+自有宿主新增 `--refresh-workspace-dir`，只允许完整service/domain/control和可见窗格启动；保留原私有空projectDir，公共项目必须已有、规范、所有者正确、无符号链接/控制字符、非world-writable且不与本profile私有运行/控制/连接/登录目录交叠。支持本仓库实际0775项目，不创建/清空/改权限。实际启动cwd、folder与record统一，标准NativeCodexGateway无需诊断覆写。它补齐手动独立宿主同项目启动，不是自动profile或资源注册完成。新增5项先红后绿，含0775误拒绝及连接副本交叠反例；最终宿主定向33/33，详见 [工作目录与并发诊断](refresh-shared-workspace-20261016.md)。
+
+前置 `.dev-runtime/codex-refresh-20261016-client-state/` 三组新并发标记，前两组原生完成但页面等待，第三组收尾通过。精确15秒失败状态为正确唯一可见空输入、busy=false但Send0/Stop1/Queue0；完成事件已到三客户端，不能判简单丢事件。只读内部状态诊断两次自身选frame错误，第三次达到4000fiber/6000对象上限仍未取得可验证会话状态，明确缺测、不加预算、不用于性能，未进入产品代码。保留红灯，不认定占位模型为已证实根因。
+
+全新 `.dev-runtime/codex-refresh-20261016-shared-workspace/` 使用实际新launcher参数及标准网关，无runtime子类；三份真实运行记录核对公共项目和独立私有目录。公共夹具0700，0775兼容为最终单测证据。真实两桌面+iPhone16模拟草稿 **9/9**、接受/completed/精确标记各一次 **3/3**、页面收尾 **3/3**；普通刷新接受 **13569.60/13442.20/13658.20 ms**，全部两秒红、15项ERR_ABORTED保留、总passed=false。页面收尾另195/162/81ms，393×852/DPR3/触点1、Chromium145.0.7632.6，真实tap和659/430/852重排通过，非物理iOS/WebKit/系统输入与剪贴板验收。
+
+最终native-final.log **319/319、无跳过**；pnpm check **退出0**、原大chunk提示保留。任务新测试格式、host/launcher语法、源码diff和文档链接核对，无提交/推送，保留并发工作。前置/最终仅3私有thread，各9/6终态turn；running长期无SSE数据failed均不计运行保护，仅人工审批精确cleanup interrupt。Responses11/6次不等于轮数。每批20自有进程退出、零错误、私有根及TLS删除；临时LAN **HTTPS https://10.30.0.24:5173**（0.0.0.0，端口5173）均关闭。
+
+2026-10-16T11:49:13.717Z正式Session/native launcher/native host仍 **2712539/55361120、2718477/83117363、2729812/83119682**；正式 **HTTPS https://10.30.0.24:8484/?mode=codex**（端口8484）及后端/Session健康200，Session仍ready、磁盘/运行产物不同。未切换或停止正式Agent。阶段0仍红，候选关闭；并发/两秒、设置、manager单独保温、容量/冷恢复、180矩阵、自然内存、长历史、大包、完整交互和自动profile/源/资源等全部未完成关卡继续，范围不缩小。
+
+
+## 运行流夹具、真实Stop/继续与三端审批（2026-10-16）
+
+修复隔离运行provider长期沉默导致native SSE超时的夹具问题：每秒固定response.in_progress、背压跳过、release/断开清理，无正文或新turn。真实短期限先红后绿保持同一turn跨3个idle期限运行，并只完成一次；释放脚本不再写死旧audit路径，严格核对本批脚本与PID/start ticks。首轮错误的rendezvous isSocket检查、准备阶段4关注项残留、composer尚未生成/空换行等实际红灯均保留，详见 [完整证据](refresh-running-stream-20261016.md)。
+
+新中断测试进一步发现Send-only断言不覆盖官方Resume：必须先确认精确native interrupted才允许唯一Resume；completed仍要求Send，busy/Stop/Queue/缺测/保留草稿约束不放宽。原普通completed后Stop=1并发反例不改判。10项收尾单测通过；最终固定CLI宿主/适配器 **324/324、无跳过**（native-resume-final.log），322为中间结果不相加；pnpm check exit0。
+
+证据 `.dev-runtime/codex-refresh-20261016-running-keepalive/`，实际公共工作目录契约/标准网关、三独立原生宿主、无登录HOME/loopback provider。严格运行中刷新与关闭一端超过宽限 **10/10**，同一turn完成、两端Send。原生手机模拟Stop→三端Resume→桌面单次继续 **12/12**，继续完成后三端Send。三端审批刷新/同时Allow once **8/8**，私有命令恰执行一次、原请求三端解决；审批脚本未核对composer收尾或两秒，保持边界。收尾毫秒数均从native完成后另计，不是navigation性能。iPhone16仍393×852/DPR3/touch1、Chromium145.0.7632.6，非物理iOS/WebKit。
+
+4个私有thread/7终态turn，无failed或cleanup中断；两轮interrupted均是真实官方Stop。Responses8次为2idle/4running/2approval，不等同用户轮数。单次20进程RSS不是自然长测。清理20自有进程、零错误，私有根/TLS删除，临时LAN HTTPS https://10.30.0.24:5173（0.0.0.0、端口5173）关闭。
+
+2026-10-16T12:19:49.781Z，正式Session/native launcher/native host仍 **2712539/55361120、2718477/83117363、2729812/83119682**；正式HTTPS https://10.30.0.24:8484/?mode=codex（端口8484）及后端/Session健康200，Session ready、磁盘/运行产物不同。未切换或停止正式Agent，无提交/推送。完整目标继续active，阶段0仍红、候选关闭；并发Stop、两秒/180样本、设置、manager独立保温/容量冷恢复、自动profile/源/全部资源准入、大包/长历史与30分钟自然RSS等剩余范围保持。

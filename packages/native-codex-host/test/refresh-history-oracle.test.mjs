@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { expectedRefreshHistory } from '../../../tests/e2e/codex-refresh-history.mjs';
+test('the controlled loopback provider idle token is accepted without admitting arbitrary output',()=>{
+  const own={id:'own',cwd:'/tmp/private-model',turns:[{id:'one',status:'completed',items:[{type:'agentMessage',text:'REFRESH_IDLE_DONE'}]}]};
+  assert.equal(expectedRefreshHistory(own,{threadId:own.id,cwd:own.cwd}).token,'REFRESH_IDLE_DONE');
+  for(const text of ['REFRESH_RUNNING_DONE','arbitrary reply','REFRESH_IDLE_DONE extra'])assert.throws(()=>expectedRefreshHistory({...own,turns:[{...own.turns[0],items:[{type:'agentMessage',text}]}]},{threadId:own.id,cwd:own.cwd}));
+});
 const threadId = '019aabcd-1234-7890-abcd-0123456789ab', cwd = '/tmp/ck-private/project';
 const completed = (id, text) => ({id, status: 'completed', items: [{type: 'agentMessage', text}]});
 test('history evidence follows the exact latest completed native reply instead of requiring an evicted first turn', () => {

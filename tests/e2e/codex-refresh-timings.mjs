@@ -141,13 +141,14 @@ export function readRefreshTimingSnapshot() {
         row[key] = numeric(entry[key]);
       return row;
     });
-  const marks = performance
+  const matchingMarks = performance
     .getEntriesByType("mark")
     .filter((entry) =>
-      /^code\/(?:willStartWorkbench|didStartWorkbench|willRestoreEditors|didRestoreEditors|willLoadWorkbenchMain|didLoadWorkbenchMain)$/.test(
+      /^(?:code\/(?:willStartWorkbench|didStartWorkbench|willRestoreEditors|didRestoreEditors|willLoadWorkbenchMain|didLoadWorkbenchMain)|webview\/webviewElement\/(?:set-content|mounted|init\/set-src|webview-ready)|webview\/index\.html\/(?:scriptStart|signalingReady|content\/(?:started|workerReady|innerFrameLoaded|wroteInnerContent)))$/.test(
         entry.name,
       ),
-    )
+    );
+  const marks = matchingMarks
     .slice(0, 32)
     .map((entry) => ({ name: entry.name, at: numeric(entry.startTime) }));
   const state = window.__kanbanRefreshTiming;
@@ -164,6 +165,8 @@ export function readRefreshTimingSnapshot() {
     observedMs: numeric(performance.now()),
     navigation,
     marks,
+    markCount: matchingMarks.length,
+    marksTruncated: matchingMarks.length > 32,
     resourceCount: allResources.length,
     resourcesTruncated: allResources.length > 512,
     resourceTimingBufferFull: state?.resourceBufferFull ?? null,

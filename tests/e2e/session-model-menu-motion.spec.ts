@@ -50,7 +50,9 @@ for (const width of [1280, 390]) {
               box = element.getBoundingClientRect();
             const animation = element
               .getAnimations()
-              .find((a) => a instanceof CSSAnimation);
+              .find((a) => a instanceof CSSAnimation) as
+              | (CSSAnimation & { effect: KeyframeEffect | null })
+              | undefined;
             return {
               width: box.width,
               height: box.height,

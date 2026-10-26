@@ -40,6 +40,11 @@ vi.mock("@session/hooks/useThreadModelSettings", () => ({
     serviceTier: null,
     setModel: settings.setModel,
     setReasoningEffort: settings.setEffort,
+    setModelSelection: ({ model, reasoningEffort, serviceTier }: { model: string; reasoningEffort: string; serviceTier?: string | null }) => {
+      if (model !== settings.model) settings.setModel(model);
+      if (reasoningEffort !== settings.effort) settings.setEffort(reasoningEffort);
+      if (serviceTier !== undefined && serviceTier !== null) settings.setTier(serviceTier);
+    },
     setServiceTier: settings.setTier,
   }),
 }));
@@ -112,6 +117,9 @@ async function receiveModels(models: Model[]) {
         className="session-codex-composer"
         data-draft-owner="codex:cardinality-thread"
       >
+        <div className="session-rich-draft">
+          <textarea aria-label="基数夹具草稿" />
+        </div>
         <NativeModelSelector
           threadId="cardinality-thread"
           draftOwner="codex:cardinality-thread"
@@ -119,6 +127,8 @@ async function receiveModels(models: Model[]) {
       </section>
     </div>,
   );
+  const editor = screen.getByRole("textbox", { name: "基数夹具草稿" });
+  vi.spyOn(editor, "getClientRects").mockReturnValue({ length: 1 } as DOMRectList);
   await waitFor(() => expect(useModelCacheStore.getState().loaded).toBe(true));
   expect(useModelCacheStore.getState().error).toBeNull();
   expect(api.listModels).toHaveBeenCalledTimes(1);
@@ -132,7 +142,9 @@ async function openMenu() {
   fireEvent.keyDown(screen.getByRole("button", { name: /^模型：/ }), {
     key: "ArrowDown",
   });
-  return await screen.findByRole("menu");
+  const menu = await screen.findByRole("menu");
+  vi.spyOn(menu, "getClientRects").mockReturnValue({ length: 1 } as DOMRectList);
+  return menu;
 }
 
 const knownLimited = [
@@ -203,7 +215,7 @@ it("keeps the known two-effort model simple and changes only within advertised c
   expect(settings.setModel).not.toHaveBeenCalled();
 });
 
-it("preserves the generic fallback for an unknown OpenAI model after a successful empty catalog read", async () => {
+it("uses the native six-effort fallback for an unknown OpenAI model after a successful empty catalog read", async () => {
   settings.model = "typed-unknown-model";
   await receiveModels([]);
   const menu = await openMenu();
@@ -212,7 +224,7 @@ it("preserves the generic fallback for an unknown OpenAI model after a successfu
       .querySelector("[data-model-picker-view]")
       ?.getAttribute("data-model-picker-view"),
   ).toBe("simple");
-  expect(menu.querySelectorAll(".session-native-power-dot")).toHaveLength(5);
+  expect(menu.querySelectorAll(".session-native-power-dot")).toHaveLength(6);
   fireEvent.keyDown(screen.getByRole("menuitem", { name: "强度" }), {
     key: "ArrowRight",
   });

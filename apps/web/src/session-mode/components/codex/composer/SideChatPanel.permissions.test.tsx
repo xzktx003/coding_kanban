@@ -196,7 +196,7 @@ it("keeps cancellation inert and applies explicit full-access confirmation only 
   await openPermissions();
   fireEvent.click(screen.getByRole("menuitemradio", { name: /完全访问权限/ }));
   const first = await screen.findByRole("dialog", {
-    name: "开启完全访问权限？",
+    name: "要开启完整访问权限吗？",
   });
   fireEvent.click(within(first).getByRole("button", { name: "取消" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -205,10 +205,10 @@ it("keeps cancellation inert and applies explicit full-access confirmation only 
   await openPermissions();
   fireEvent.click(screen.getByRole("menuitemradio", { name: /完全访问权限/ }));
   const second = await screen.findByRole("dialog", {
-    name: "开启完全访问权限？",
+    name: "要开启完整访问权限吗？",
   });
   fireEvent.click(
-    within(second).getByRole("button", { name: "开启完全访问权限" }),
+    within(second).getByRole("button", { name: "确认" }),
   );
   await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
   expect(getThreadModelSettings("side").sandbox).toBe("danger-full-access");
@@ -224,7 +224,7 @@ it("keeps a closed side confirmation from applying to its former thread", async 
   );
   await openPermissions();
   fireEvent.click(screen.getByRole("menuitemradio", { name: /完全访问权限/ }));
-  await screen.findByRole("dialog", { name: "开启完全访问权限？" });
+  await screen.findByRole("dialog", { name: "要开启完整访问权限吗？" });
   act(() => useSideChatStore.setState({ chat: null }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(useThreadModelStore.getState().threads.side).toEqual(sideBefore);

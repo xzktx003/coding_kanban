@@ -221,6 +221,9 @@ test(
         { generation: randomUUID() },
         { domain: randomUUID() },
         { pid: created.pid + 1 },
+        // Deterministically absent on Linux: reject the changed scope before
+        // attempting a procfs read, regardless of host PID reuse/wraparound.
+        { pid: Number.MAX_SAFE_INTEGER },
         { startTicks: String(BigInt(created.startTicks) + 1n) },
       ]) {
         await writeFile(

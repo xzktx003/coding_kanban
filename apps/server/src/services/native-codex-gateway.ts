@@ -13,6 +13,7 @@ const MAX_BROKER_AUTH_BYTES = 4096;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const MAX_SEND_BODY_BYTES = 1024 * 1024;
 export interface NativeCodexStatus {
+  restoreVisibleWindows?: boolean;
   available: boolean;
   resumeAvailable: boolean;
   sendAvailable: boolean;
@@ -33,6 +34,7 @@ export interface NativeCodexSendRequest {
   mentions: Array<{ name: string; path: string }>;
 }
 export interface NativeCodexRuntime {
+  restoreVisibleWindows?: boolean;
   refreshScope?:NativeRefreshScope;
   upstream: URL;
   projectDir: string;
@@ -192,7 +194,7 @@ function newChatWindowIds(
 ): string[] | undefined {
   const value = record.newChatWindowIds;
   if (
-    record.panelMode !== "new-chats" ||
+    (record.panelMode !== "new-chats" && record.panelMode !== "visible-windows") ||
     !Array.isArray(value) ||
     value.length < 1 ||
     value.length > 2 ||
@@ -511,9 +513,22 @@ export class NativeCodexGateway {
         typeof candidate.domain==="string"&&UUID.test(candidate.domain)&&typeof candidate.generation==="string"&&UUID.test(candidate.generation)&&
         Number.isSafeInteger(candidate.pid)&&(candidate.pid as number)>1&&typeof candidate.startTicks==="string"&&/^(?:0|[1-9][0-9]{0,19})$/.test(candidate.startTicks)
         ?{domain:candidate.domain,generation:candidate.generation,pid:candidate.pid as number,startTicks:candidate.startTicks}:undefined;
+      const restoreVisibleWindows = record.panelMode === "visible-windows";
+      const control = (record.refreshConnection as { control?: Partial<NativeRefreshScope> & { runtimeRoot?: unknown } } | undefined)?.control;
+      if (restoreVisibleWindows && (
+        !refreshScope || !runtimeRoot || !windows || !brokerPort || !brokerAuthFile ||
+        !control || typeof control !== "object" || Array.isArray(control) ||
+        typeof control.generation !== "string" || !UUID.test(control.generation) ||
+        !Number.isSafeInteger(control.pid) || (control.pid as number) <= 1 ||
+        typeof control.startTicks !== "string" || !/^(?:0|[1-9][0-9]{0,19})$/.test(control.startTicks) ||
+        typeof control.runtimeRoot !== "string" || control.runtimeRoot.length > 4096 ||
+        !isAbsolute(control.runtimeRoot) || resolve(control.runtimeRoot) !== control.runtimeRoot ||
+        /[\u0000-\u001f\u007f]/.test(control.runtimeRoot)
+      )) return null;
       return {
         upstream,
         projectDir,
+        ...(restoreVisibleWindows ? { restoreVisibleWindows: true } : {}),
         ...(runtimeRoot ? { runtimeRoot } : {}),
         ...(refreshScope?{refreshScope}:{}),
         fixtures: fixtures(record.threads),
@@ -553,6 +568,7 @@ export class NativeCodexGateway {
         ? { extensionVersion: runtime.extensionVersion }
         : {}),
       fixtures: runtime.fixtures,
+      ...(runtime.restoreVisibleWindows ? { restoreVisibleWindows: true } : {}),
       ...(runtime.newChatWindowIds
         ? { newChatWindowIds: runtime.newChatWindowIds }
         : {}),
@@ -660,7 +676,7 @@ export class NativeCodexGateway {
 
   async restoreNewChatThread(value: unknown): Promise<number> {
     const runtime = await this.runtime();
-    if (!runtime?.newChatWindowIds || !runtime.brokerPort || !runtime.brokerAuthFile)
+    if (!runtime?.newChatWindowIds || runtime.restoreVisibleWindows || !runtime.brokerPort || !runtime.brokerAuthFile)
       return 503;
     let body: ReturnType<typeof validateNativeCodexWindowRestore>;
     let instanceId: string | undefined;

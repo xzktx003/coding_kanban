@@ -2,12 +2,23 @@
 
 ## 构建、测试与开发命令
 
+- 全新受控宿主可显式添加 `--refresh-workspace-dir`，要求可见窗格模式及 service/domain/control 三项齐全。它为各独立 profile 选择同一已存在、规范、当前用户拥有且非 world-writable 的工作目录，允许0775项目；不得与本 profile 私有运行/控制/连接或登录目录交叠。原 `--project-dir` 仍须私有新空目录；公共目录不创建、不清空、不改权限，启动前重查。标准网关读取真实运行记录，不再依赖诊断子类改写；不等于自动profile或最终刷新验收。见 `docs/designs/codex-mode-audit-20261014/refresh-shared-workspace-20261016.md`。
+
+- 刷新验收须在精确 native turn 完成后额外核对官方 composer 清稿、正确唯一目标及 busy/Stop/Queue 结束，不能把 completed 当作页面空闲。`codex-refresh-fixture.mjs` 只接受一个共享诊断 profile 或三个精确独立 profile，禁止无条件取首项作为三宿主证据。独立宿主仍有并发页面等待反例，两秒未通过；只读有界断言、模拟参数及清理见 `docs/designs/codex-mode-audit-20261014/refresh-client-settlement-20261016.md`。
+
+- 原生网关仅能由服务端为固定profile显式注册 `webSocketCompression: true`，默认关闭，不接受HTTP参数开关。浏览器链路使用无跨消息字典的受限窗口压缩；回环上游不重复压缩，客户端解压后8MiB、上游2MiB及队列预算保持。原Service Worker的304和SDK共享状态传输须分开观察，不能据合成200判断脚本完整重传。该实验不能代替资源/两秒验收或正式启用，见 `docs/designs/codex-mode-audit-20261014/refresh-websocket-transport-20261016.md`。
+
+- code-server 创建 extensionHost 前会清除 NODE_OPTIONS。新宿主的自有父进程启动 shim 只对固定 bootstrap、唯一 extensionHost type、固定 ESM 入口及同一 companion 配置的 fork，在 execArgv 加入固定 preload；其他子进程透传，原参数不改。provider 观察仍只在 extensionHost，捕获后恢复，直接保留钩子计数须归零；恢复被阻挡不能伪报零。发送适配精确门控 26.51002.51308/26.51007.21434，未知版本不探测 provider，不能仅凭单测认定新原包兼容。见 `docs/designs/codex-mode-audit-20261014/refresh-preload-fork-20261016.md`。
+
+- 原生宿主只保留明确的 `NODE_USE_ENV_PROXY=0/1`，不因代理地址存在就启用，不继承任意 `NODE_OPTIONS`；实际支持依赖 code-server 自带 Node 版本。官方 SDK 初始化不改 feature flag、网络请求或缓存策略，分段证据与代理红绿灯见 `docs/designs/codex-mode-audit-20261014/refresh-initialization-proxy-20261016.md`。
+
 - `pnpm install --frozen-lockfile`；Node.js 要求 `^20.19.0 || >=22.12.0`。默认会话运行层使用 TypeScript/Node；PTY、SQLite 无预编译包时需要本机编译工具。语音在 Codex 已登录时使用其转写，否则使用外部 whisper.cpp CLI。
 - 后端 `dev:app` 使用 `scripts/watch-server.mjs`：清单/锁文件变化先安装锁定依赖，再热更新网关；失败保留旧网关，保存源码/清单可重试。网关异常退出按 1/2/4 秒最多恢复三次；计划替换和关闭不触发重试，独立运行层仍复用。边界与回归见 `docs/startup.md`。
 - `pnpm dev:prepare`：编译 shared 与默认 TypeScript 运行层；`SESSION_MODE_ENABLED=0` 跳过运行层，显式 `SESSION_RUNTIME_BIN` 只校验已有可执行文件。`pnpm dev` 与 `pnpm dev:restart` 自动执行准备。
 - `pnpm session:status`：检查会话服务和运行产物；编译不替换已有运行进程或停止 Agent，详细流程见 `docs/startup.md`。
 - `pnpm codex:status`：读取启动环境，只读核对 Codex 宿主、网关、私有 broker 及已部署 companion 内容；区分旧代码、不可达、等待浏览器激活和 broker 就绪，不启动、停止或发送任务，broker 就绪不代表模型对话已验证。见 `docs/codex-workbench-mode.md`。
 - 命令详情网关使用运行包的独立只读库；后端 `build` 会编译该依赖，但不会替换活跃运行进程。关闭会话模式时不加载详情库；自定义运行服务没有默认库产物时保留网关和旧服务，通过既有只读接口明确返回支持状态。见 `docs/session-command-details.md`。
+- `thread/turns/list?view=chat` 使用同包独立只读通道，原生只允许 initialize／initialized／thread/turns/list；每页保留原生游标，不 resume/acquire、不重试发送。工具正文在接收时丢弃，密集工具按投影字节有界留存；共享 RPC 的 32 MiB、聊天 16 MiB 和既有流式预算不得放宽。旧运行层继续复用，完整读取仍走原协议。故障恢复及最低验证见 `docs/session-codex-connection-recovery.md`。
 - `pnpm dev:restart`：先检查两个端口的归属并完成编译，再按 `.env` 启动/恢复前后端；前端绑定 `0.0.0.0`。会话运行服务绑定 loopback，随后端热更新复用。
 - `pnpm check`：共享包、TS 运行层、后端和前端类型检查及生产构建；`pnpm session:check`：TS 运行层检查。
 - `pnpm test`：终端单测、迁移的会话 Vitest 单测及脚本测试；后端测试并发限制为 4，避免共享主机上的 tmux 测试争用。
@@ -22,12 +33,19 @@
 
 - 隔离刷新管理器 `createRefreshManager` 要求显式 `resourceMonitor`：用自有进程创建时持有的 PID/start ticks 列齐 native、宿主、管理器及网关根；不得把同 UID 或 HTTP 提供的 PID 当成所有权。资源缺测、过期或超预算暂停新增空闲保温，不停止任务；自动全宿主注册、预算定标与最终恢复验收仍待完成，见 `packages/native-codex-host/refresh-prototype/README.md`。
 
+- 官方待审批页可能没有 composer，只有原生明确 onboarding 才显示引导提示。`tests/e2e/codex-refresh-{approval,running,concurrent-send}-acceptance.mjs` 仅接受显式自有无登录 loopback 夹具及全新输出目录，不回退正式宿主；三端手势完成不等于协议写出或两秒通过。首次并发手机未提交的红灯、创建连接保留及实际计时边界见 `docs/designs/codex-mode-audit-20261014/refresh-official-lifecycle-20261016.md`。
+
+- 受控 CLI 从配置附着时，每次启动仍完整校验固定 CLI/VSIX，比较完整 scope 后才访问记录中的 PID；同次调用不重复扫描，不提供跨启动缓存或公开验证跳过开关。账号/控制代次/实际写入 guard 保持，见 `docs/designs/codex-mode-audit-20261014/refresh-artifact-verification-20261016.md`。
+
 - 显式 profile 可注册自有可见页面租约；网关必须核对实际实例及宿主记录中的完整 native domain/generation/PID/start ticks，缺失或变化不得登记到其他服务。浏览器仅上报可见 thread UUID，目录取自原生元数据；硬刷新保留短暂断连保护，新标签不能复用 opener 复制的租约。断连宽限不是保温池 TTL；默认入口不启用，自动 profile/源分配及最终验收仍未完成。协议与测试见 `docs/designs/codex-mode-audit-20261014/refresh-visibility-control.md`。
 - `refresh-prototype/control-service.mjs` 可由本地所有者显式启动/附着独立持久管理进程；只接入已有且身份匹配的私有 native，不启动或重启 native。网关经独立私有 Unix 元数据通道注册页面，实际宿主核对仍通过反向 verify 执行；关闭网关不清空中央租约/保温池，控制进程退出只释放自身订阅。现有/过期目录记录不得自动覆盖恢复，PID 身份读取与完整 task/RSS 统计须保持各自契约。自动宿主资源注册与最终验收仍待完成，见 `docs/designs/codex-mode-audit-20261014/refresh-control-process.md`。
 - 新私有刷新服务须在 ready 前建立原始 native 授权锚与独立账号观察进程；记录不可改绑，manager 重建也须确认原始锚。账号同值通知仍撤销，观察进程失联/缺失锚拒绝接入，不隐式补写、重建或停止 native。撤销写盘失败仍关闭自有授权通道；真正写入前同步核对锚，观察进程自动计入资源预算。协议、真实无登录 provider 验收及 ChatGPT/UI 未验边界见 `docs/designs/codex-mode-audit-20261014/refresh-native-authority.md`。
 - 新隔离宿主可在已有 refresh service 参数上增加 `--refresh-control-root`，将每个生成 CLI 固定到控制与 native 双重运行身份，分别初始化只读账号观察连接并与 manager 摘要核对。初始账号通知仅允许一次，同值第二次也撤销；无关 turn 不改变账号版本。每条实际 JSONL 写入前的 guard 必须同步，未知回执不重发，显式 owner 关闭不停止 native。该参数未自动覆盖存量客户端；真实 ChatGPT/OAuth/官方 GUI、资源和两秒完整关卡仍待验收，见 `docs/designs/codex-mode-audit-20261014/refresh-bridge-authorization.md`。
 
 ## 任务完成前的最低要求
+
+- 新显式刷新宿主的 settings 由 `buildHostSettings` 生成，关闭 VS Code 的旧编辑器自动还原，窗口目标仍走既有网页恢复和身份/焦点确认；普通及已存活宿主不因此改变。原生新聊天回归增加 `NATIVE_CODEX_REFRESH_VISIBLE_ONLY_EVIDENCE=1`，须核对每页当前实例的 tabGroups 只有正确显示目标，不能仅凭网页隐藏判定。`--auto-open-new-chats` 的首次打开语义不变，完整组合/性能仍需验收，见 `docs/designs/codex-mode-audit-20261014/refresh-editor-restore-20261016.md`。
+- 新宿主可显式用 `--restore-visible-windows` 替代自动首开，要求 refresh service/domain/control 三项，并与自动新聊天及 fixture 启动互斥。伴随扩展不预开默认编辑器，由网页当前可见目标经精确实例与 UUID 请求；初始新聊天也请求打开。旧自动首开及其固定列 `/restore` 语义保持。缺少受控宿主记录不能回退为普通模式，未自动启用存量实例；协议、红绿灯和真实 UI 边界见 `docs/designs/codex-mode-audit-20261014/refresh-visible-startup-20261016.md`。
 
 ## 编码风格与命名约定
 
@@ -144,6 +162,10 @@
 - 普通输入只有原生明确 `canAcceptDirectInput === true` 才开放；审批按实际 thread/request/turn/item/实例标记回复，中断权限独立。批量停止须显式确认范围与轮次，默认本轮不包含旧轮或未知创建轮次。
 - 协议、恢复规则和原生隔离验收脚本见 `docs/session-subagents.md`；两份原生测试版本的问题由主线程发起，不绕过限制。启用新运行产物仍遵守活跃 Agent 安全窗口。
 - 协作通信不得作为父子创建证据；身份与普通输入权限复用原生 metadata，同值新确认也须阻止迟到旧权限恢复。idle 后代释放仅按真实 initialize 精确版本门控，且只取消父订阅，已有子 Agent 仍由原运行实例控制；不得扩展为隐式整家族接管。兼容关卡：`python3 scripts/session-subagent-release-acceptance.py --codex /absolute/path/to/codex --output-dir /private/acceptance/output`，结果与边界见 `docs/designs/session-subagent-identity-release-acceptance-20261014.md`。
+
+### 反馈入口与权限预检
+
+- 反馈正常入口通过 `features/native-feedback/preflightWorkflow.tsx` 捕获可见输入宿主，并在打开与提交前调用只读 `/api/codex/feedback/preflight`。运行层从同一 native 连接读取精确会话 cwd、effective config、requirements 和必要账号权限，不得用公开配置投影、套餐或邮箱推导组织策略，也不得为预检 acquire/resume writer。观察只在工作流存续时保留元数据，撤销不停止已发送上传；旧运行服务缺端点时明确提示无法核实，不隐式重启 Agent。协议、原包证据和验收边界见 [反馈入口与预检](docs/designs/session-render-alignment/feedback-entry-preflight-20261016.md)。
 
 ### 会话内存防回归（用户已确认有效）
 

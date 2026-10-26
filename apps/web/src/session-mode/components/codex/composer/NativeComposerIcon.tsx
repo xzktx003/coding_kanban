@@ -97,6 +97,10 @@ const icons = {
     viewBox: "0 0 17 17",
   },
 } as const;
+const iconMarkupByBody = new Map<string, { __html: string }>(
+  Object.values(icons).map(({ body }) => [body, { __html: body }] as const),
+);
+
 export function NativeComposerIcon({
   name,
   ...props
@@ -111,7 +115,7 @@ export function NativeComposerIcon({
       aria-hidden="true"
       data-native-icon={icon.name}
       {...props}
-      dangerouslySetInnerHTML={{ __html: icon.body }}
+      dangerouslySetInnerHTML={iconMarkupByBody.get(icon.body)}
     />
   );
 }

@@ -10,6 +10,12 @@ import {
   captureRefreshPageTimings,
 } from "./codex-refresh-timings.mjs";
 import { expectedRefreshHistory } from "./codex-refresh-history.mjs";
+import { focusInitialOriginalComposer } from "./codex-refresh-initial-prompt.mjs";
+import { waitForOriginalComposerSettlement } from "./codex-refresh-ui-settlement.mjs";
+import {
+  selectRefreshClientProfile,
+  verifyRefreshProfileRoot,
+} from "./codex-refresh-fixture.mjs";
 
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 async function privateJson(file) {
@@ -46,19 +52,25 @@ assert.ok(
   fixture.root.startsWith("/tmp/ck-") &&
     fixture.project.startsWith(fixture.root + "/"),
 );
+selectRefreshClientProfile(fixture, 0);
+for (const profile of fixture.profiles)
+  await verifyRefreshProfileRoot(fixture.root, profile.root);
 if (endpoint) assert.ok(/^ws:\/\/127\.0\.0\.1:\d+\/.+/.test(endpoint.endpoint));
 await mkdir(output, { mode: 0o700 });
 const result = {
   physicalDevice: false,
   device: "iPhone 16 size simulation",
   fixtureApiRouting: false,
+  independentHostProfiles: fixture.profiles.length === 3,
   url: fixture.url,
   origins: fixture.urls,
   threadId: fixture.threadId,
   steps: [],
   receipts: [],
+  uiSettlements: [],
   timings: [],
   historyEvidence: [],
+  initializationActions: [],
   errors: [],
   passed: false,
 };
@@ -216,8 +228,8 @@ try {
   contexts.push(desktopContext, mobileContext);
   for (const context of contexts)
     await context.addInitScript(installRefreshTimingObserver);
-  const profile = fixture.profiles[0];
   for (let index = 0; index < 3; index++) {
+    const profile = selectRefreshClientProfile(fixture, index);
     const page = await (index === 2 ? mobileContext : desktopContext).newPage();
     pages.push(page);
     observe(page, index);
@@ -261,6 +273,23 @@ try {
       fixture.urls[index] + "/?mode=codex&nativeClient=" + profile.id,
     );
     const editor = await composer(page);
+    const handle = await editor.elementHandle();
+    assert.ok(handle);
+    const nativeFrame = await handle.ownerFrame();
+    await handle.dispose();
+    assert.ok(nativeFrame);
+    const focusInitial = async () => {
+      const handled = await focusInitialOriginalComposer({
+        editor,
+        frame: nativeFrame,
+        mobile: index === 2,
+      });
+      if (handled)
+        result.initializationActions.push({
+          index,
+          action: "keep-current-model",
+        });
+    };
     result.timings.push({
       index,
       phase: "initial-composer",
@@ -287,13 +316,13 @@ try {
           { once: true },
         ),
       );
-      await editor.tap();
+      await focusInitial();
       await wait(
         () => editor.evaluate((el) => el.dataset.acceptanceTouched === "true"),
         "Native composer did not receive touch",
       );
       result.nativeComposerTouch = true;
-    } else await editor.click();
+    } else await focusInitial();
     await editor.fill(drafts[index]);
     await pause(500);
     const text = await editor.innerText();
@@ -423,6 +452,30 @@ try {
       60000,
     );
     await readHistoryEvidence(accepted.turnId);
+    const editorHandle = await editor.elementHandle();
+    assert.ok(
+      editorHandle,
+      "Original composer element disappeared after completion",
+    );
+    let nativeFrame;
+    try {
+      nativeFrame = await editorHandle.ownerFrame();
+    } finally {
+      await editorHandle.dispose();
+    }
+    assert.ok(
+      nativeFrame,
+      "Original composer frame disappeared after completion",
+    );
+    result.uiSettlements.push({
+      index,
+      turnId: accepted.turnId,
+      ...(await waitForOriginalComposerSettlement({
+        frame: nativeFrame,
+        threadId: fixture.threadId,
+      })),
+    });
+    await save();
     await page.screenshot({ path: join(output, `accepted-${index}.png`) });
   }
   result.draftsPassed =
@@ -430,13 +483,26 @@ try {
   result.performancePassed =
     result.receipts.length === 3 &&
     result.receipts.every((receipt) => receipt.withinTwoSeconds);
+  result.uiSettlementPassed = result.uiSettlements.length === 3;
   result.finalMatrixComplete = false; // This diagnostic run is not the 180-sample, three-state matrix.
   result.passed =
     result.draftsPassed &&
     result.performancePassed &&
+    result.uiSettlementPassed &&
     result.errors.length === 0;
 } catch (failure) {
-  error({ kind: "assertion", message: failure.message.slice(0, 1000) });
+  error({
+    kind: "assertion",
+    message: failure.message.slice(0, 1000),
+    ...(failure.code === "ORIGINAL_COMPOSER_NOT_SETTLED"
+      ? {
+          code: failure.code,
+          observation: failure.observation,
+          samples: failure.samples,
+          elapsedMs: failure.elapsedMs,
+        }
+      : {}),
+  });
   for (let index = 0; index < pages.length; index++)
     result.timings.push({
       index,
@@ -462,6 +528,7 @@ console.log(
     passed: result.passed,
     draftsPassed: result.draftsPassed,
     performancePassed: result.performancePassed,
+    uiSettlementPassed: result.uiSettlementPassed,
     errors: result.errors.length,
   }),
 );

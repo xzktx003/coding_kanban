@@ -12,6 +12,7 @@ import { useLayoutStore } from "@session/stores/useLayoutStore";
 const state = vi.hoisted(() => ({
   thread: "first" as string | null,
   effortValue: "high",
+  selectedEffortCount: 3,
   effort: vi.fn(),
   model: vi.fn(),
   serviceTier: vi.fn(),
@@ -33,6 +34,11 @@ vi.mock("@session/hooks/useThreadModelSettings", () => ({
     serviceTier: null,
     setModel: state.model,
     setReasoningEffort: state.effort,
+    setModelSelection: ({ model, reasoningEffort, serviceTier }: { model: string; reasoningEffort: string; serviceTier?: string | null }) => {
+      if (model !== "selected-model") state.model(model);
+      if (reasoningEffort !== state.effortValue) state.effort(reasoningEffort);
+      if (serviceTier !== undefined && serviceTier !== null) state.serviceTier(serviceTier);
+    },
     setServiceTier: state.serviceTier,
   }),
 }));
@@ -48,11 +54,13 @@ vi.mock("../hooks/useModels", () => ({
     openAiModels: ["first-model", "selected-model"].map((id) => ({
       id,
       model: id,
-      displayName: id,
+      displayName: id === "first-model" ? "首个模型" : "当前模型",
       defaultReasoningEffort: "medium",
-      supportedReasoningEfforts: ["low", "medium", "high"].map(
-        (reasoningEffort) => ({ reasoningEffort }),
-      ),
+      supportedReasoningEfforts: (id === "selected-model" &&
+      state.selectedEffortCount === 1
+        ? ["medium"]
+        : ["low", "medium", "high"]
+      ).map((reasoningEffort) => ({ reasoningEffort })),
       serviceTiers: [{ id: "fast", name: "Fast", description: "快速" }],
     })),
   }),
@@ -61,6 +69,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   state.thread = "first";
   state.effortValue = "high";
+  state.selectedEffortCount = 3;
   useLayoutStore.setState({ view: "agent" });
 });
 afterEach(() => vi.useRealTimers());
@@ -125,7 +134,8 @@ function mount(
 }
 async function open(trigger: HTMLElement) {
   fireEvent.keyDown(trigger, { key: "ArrowDown" });
-  await screen.findByRole("menu");
+  const menu = await screen.findByRole("menu");
+  vi.spyOn(menu, "getClientRects").mockReturnValue({ length: 1 } as DOMRectList);
   const caption = screen.getByRole("menuitem", {
     name: "选择模型",
   });
@@ -138,6 +148,80 @@ async function advanced(trigger: HTMLElement, keyboard = false) {
   else fireEvent.click(caption);
   return screen.findByRole("menuitemradio", { name: "当前模型" });
 }
+
+it.each(
+  [false, true].flatMap((expanded) =>
+    (["Enter", "ArrowDown", "pointer"] as const).map((opening) => ({
+      expanded,
+      opening,
+    })),
+  ),
+)(
+  "native initial focus expanded=$expanded opening=$opening preserves the original entry destination",
+  async ({ expanded, opening }) => {
+    const { editor, trigger } = mount(expanded);
+    // Unit setup only. Do not use open(): it explicitly focuses the caption and
+    // would mask initial focus chosen by the real Radix primitive/effects.
+    trigger.focus();
+    if (opening === "pointer") {
+      fireEvent.pointerDown(trigger, {
+        button: 0,
+        ctrlKey: false,
+        pointerType: "mouse",
+      });
+    } else {
+      fireEvent.keyDown(trigger, { key: opening, code: opening });
+    }
+    const menu = await screen.findByRole("menu");
+    const caption = screen.getByRole("menuitem", { name: "选择模型" });
+    await act(async () => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    });
+    expect(
+      editor instanceof HTMLTextAreaElement ? editor.value : editor.textContent,
+    ).toBe("保留原草稿");
+    expect(state.model).not.toHaveBeenCalled();
+    expect(state.effort).not.toHaveBeenCalled();
+    expect(state.serviceTier).not.toHaveBeenCalled();
+    expect(state.submit).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(opening === "pointer" ? menu : caption);
+  },
+);
+
+it.each([false, true])(
+  "native initial focus expanded=%s natural advanced Enter starts on the first unchecked model",
+  async (expanded) => {
+    state.selectedEffortCount = 1;
+    state.effortValue = "medium";
+    const { editor, trigger } = mount(expanded);
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter", code: "Enter" });
+    const first = await screen.findByRole("menuitemradio", {
+      name: "首个模型",
+    });
+    const checked = screen.getByRole("menuitemradio", { name: "当前模型" });
+    await act(async () => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    });
+    expect(first.getAttribute("aria-checked")).toBe("false");
+    expect(checked.getAttribute("aria-checked")).toBe("true");
+    expect(document.querySelector("[data-reasoning-slider]")).toBeNull();
+    expect(state.model).not.toHaveBeenCalled();
+    expect(state.effort).not.toHaveBeenCalled();
+    expect(state.serviceTier).not.toHaveBeenCalled();
+    expect(state.submit).not.toHaveBeenCalled();
+    expect(
+      editor instanceof HTMLTextAreaElement ? editor.value : editor.textContent,
+    ).toBe("保留原草稿");
+    expect(document.activeElement).toBe(first);
+  },
+);
 
 it.each([false, true])(
   "navigates the actual %s expanded power menu with arrows and Tab without changing effort",

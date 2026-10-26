@@ -4,6 +4,8 @@
 
 后续同日补齐了实际浏览器→私有 HTTP 网关→当前 TS 运行层→匹配原生 CLI 的 Goal 闭环：真实点击暂停／继续、原生完成、一次完成清理、GET null 与卡片消失通过。没有 mock Goal 回应；私有无登录 fake-provider、单进程浏览器、idle owner 竞争未执行 clear 的分支与原跨客户端 CAS 红灯各自记录，见 [后续验收](session-polish-acceptance-20261016.md#浏览器到真实原生-goal-闭环)。这关闭此前 UI 和协议只有分开证据的缺口，不能代替认证宿主或正式运行产物启用。
 
+**2026-10-17 接线纠正：**此前 `app.ts`（SHA256 `02fd8e6a1bd934efc627d253d2511c0b72b46f220650e2d05c0ece799a76dd7d`）缺少既有 Goal 附件路由注册，但没有历史注册提交或其它证据支持“并行删除／待用户回复”的归因。R29 经两项真实 materialize 503 红灯后补 import 和本地注册，已验证同一真实 app 的 materialize/read/cleanup 及运行中网关 HTTP 往返，见 [当前接线验收](goal-attachment-registration-20261017.md)。本页历史原生、GUI、CAS 和测试计数保持各自原范围，不将此次本地接线扩大成正式 runtime 激活或整个目标完成。
+
 ## 对照来源
 
 | 来源            | 本轮身份及作用                                                                                      |
@@ -126,3 +128,13 @@ python3 scripts/session-goal-native-acceptance.py \
 | Rbn  | 4522133           | [4522535, 4523215)             | [4559626, 4560306)       |
 
 完整逐项映射与独立复算位于忽略证据目录 `.dev-runtime/session-polish-round2-20261016/menus/goal-current-closure-review/function-index-offset-corrections.json`。当前正式 `session-goal-control-style-source.ts` 已使用正确的 oFi／gPi UTF-16 区间；该索引不作为运行时截取输入，不改变既有组件、样式或验收结果。本次仅核对源码和已保存证据，没有重跑浏览器、单测、构建、长测或原生协议。
+
+
+## R29：附件接线后续实际验收（2026-10-17）
+
+既有模块测试已经包含真实 buildServer 上传/物化及重建 app 的手工注册读取/清理；新增用例补的是同一个生产构造 app 的完整三路由。合格503红灯、16项回归、运行中 HTTP 和状态边界见 [R29记录](goal-attachment-registration-20261017.md)，不改写本页历史 native/GUI/CAS 结果。
+
+
+## 2026-10-18：长历史阅读与输入焦点（R30）
+
+原1500条历史性能从WebKit846.0／Chromium742.0ms收敛至完整原用例422.0／454.7ms，500ms门槛及真实正文、历史／草稿恢复断言未改。局部选择订阅、真实行原点／首测补偿、阅读意图及下一帧原生焦点分别保留隔离和清理。最终两引擎各23阅读、15输入／草稿、4真实Lexical控制通过；原10000／30基准、内存27PASS+1默认长测SKIP、Goal11和原组件4组、非模态2、相关44文件246项、Node3及后置pnpm check通过。指定13份E2E strict通过；旧20份扩大检查失败与早期WebKit刷新诊断未归因边界保留。正式runtime未激活，见[完整验收](history-switch-performance-20261018.md)。

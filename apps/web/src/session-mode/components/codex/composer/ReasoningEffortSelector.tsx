@@ -1,6 +1,10 @@
 import type { ReasoningEffort } from "@session/bindings";
 import type { Model } from "@session/bindings/v2";
 import { EffortSlider } from "@session/components/common/EffortSlider";
+import {
+  nativeDisplayReasoningEffort,
+  nativeReasoningOptions,
+} from "./nativeReasoningOptions";
 
 export const GENERIC_REASONING_OPTIONS: ReasoningEffort[] = [
   "none",
@@ -52,15 +56,18 @@ export function ReasoningEffortSelector({
 }: ReasoningEffortSelectorProps) {
   const options =
     provider === "openai"
-      ? (openAiModel?.supportedReasoningEfforts.map((o) => o.reasoningEffort) ??
-        [])
+      ? nativeReasoningOptions(openAiModel)
       : GENERIC_REASONING_OPTIONS;
+  const displayedEffort =
+    provider === "openai" && openAiModel
+      ? nativeDisplayReasoningEffort(value, options)
+      : value;
 
   return (
     <EffortSlider
       label="推理强度"
       options={options}
-      value={value}
+      value={displayedEffort}
       onChange={onChange}
       disabled={disabled}
     />

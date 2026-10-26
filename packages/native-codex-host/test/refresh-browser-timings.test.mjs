@@ -24,6 +24,56 @@ function snapshot(resources = [], marks = []) {
   });
 }
 
+test("native Webview handshake phases retain only fixed original names and timestamps", () => {
+  const names = [
+    "webview/webviewElement/set-content",
+    "webview/webviewElement/mounted",
+    "webview/webviewElement/init/set-src",
+    "webview/webviewElement/webview-ready",
+    "webview/index.html/scriptStart",
+    "webview/index.html/signalingReady",
+    "webview/index.html/content/started",
+    "webview/index.html/content/workerReady",
+    "webview/index.html/content/innerFrameLoaded",
+    "webview/index.html/content/wroteInnerContent",
+  ];
+  const result = snapshot(
+    [],
+    [
+      ...names.map((name, index) => ({
+        name,
+        startTime: index,
+        detail: { id: "private-secret", payload: "secret" },
+      })),
+      { name: "webview/index.html/content/secret", startTime: 50 },
+      {
+        name: "webview/webviewElement/webview-ready?token=secret",
+        startTime: 51,
+      },
+    ],
+  );
+  assert.deepEqual(
+    Array.from(result.marks, (mark) => mark.name),
+    names,
+  );
+  assert.equal(result.markCount, names.length);
+  assert.equal(result.marksTruncated, false);
+  assert.equal(JSON.stringify(result).includes("secret"), false);
+});
+
+test("native phase truncation remains explicit without increasing the mark budget", () => {
+  const result = snapshot(
+    [],
+    Array.from({ length: 40 }, (_, startTime) => ({
+      name: "webview/index.html/content/workerReady",
+      startTime,
+    })),
+  );
+  assert.equal(result.markCount, 40);
+  assert.equal(result.marks.length, 32);
+  assert.equal(result.marksTruncated, true);
+});
+
 test("refresh timings retain only static asset names and numeric timing, never credentials or query values", () => {
   const result = snapshot([
     {

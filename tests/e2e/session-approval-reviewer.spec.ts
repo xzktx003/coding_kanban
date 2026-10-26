@@ -73,7 +73,14 @@ test("approval-for-me reaches the queued native turn without expanding permissio
       .locator(".session-composer-editor [contenteditable=true]")
       .first();
     await editor.fill("自动审查参数回归");
-    await page.getByRole("button", { name: "排队消息", exact: true }).click();
+    const composer = page.locator(
+      '.session-agent-view .session-codex-composer[data-owner-thread="ux-0"]',
+    );
+    await expect(composer).toHaveCount(1);
+    await expect(
+      page.getByRole("status", { name: "本轮结束后发送", exact: true }),
+    ).toBeVisible();
+    await composer.getByRole("button", { name: "发送消息", exact: true }).click();
     await expect
       .poll(async () => (await f.queue.get("ux-0")).items.length)
       .toBe(1);

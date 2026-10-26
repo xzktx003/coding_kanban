@@ -44,6 +44,23 @@ const diagnosticId = (value) =>
       ? value
       : undefined;
 
+// Fixed identity fields only: never pass a params/result object to observers.
+function diagnosticTurn(value) {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+  const result = {};
+  const threadId = value.params?.threadId ?? value.result?.thread?.id;
+  const turnId =
+    value.params?.turnId ?? value.params?.turn?.id ?? value.result?.turn?.id;
+  const status = value.params?.turn?.status ?? value.result?.turn?.status;
+  if (typeof threadId === "string" && uuid.test(threadId))
+    result.threadId = diagnosticText(threadId);
+  if (typeof turnId === "string" && uuid.test(turnId))
+    result.turnId = diagnosticText(turnId);
+  if (["inProgress", "completed", "interrupted", "failed"].includes(status))
+    result.turnStatus = status;
+  return result;
+}
+
 // Diagnostic only: inspect a bounded header already buffered by pinned ws.
 // Missing/changed library internals leave attribution unknown; they never
 // change framing, limits, backpressure or protocol decisions.
@@ -333,6 +350,7 @@ export function connectStdio({
         typeof value.method === "string" ? diagnosticText(value.method) : null,
       id: diagnosticId(value.id),
       bytes: line.length,
+      ...diagnosticTurn(value),
     });
     if (ws.bufferedAmount + line.length > MAX_PENDING_BYTES)
       throw new Error("JSONL pending limit exceeded");
@@ -462,6 +480,7 @@ export function connectStdio({
         id: diagnosticId(value.id),
         errorCode: diagnosticId(value.error?.code),
         bytes: bytes.length,
+        ...diagnosticTurn(value),
       });
       if (output.writableLength + bytes.length + 1 > MAX_PENDING_BYTES)
         throw new Error("Native output pending limit exceeded");
@@ -512,7 +531,15 @@ export async function runBridge({
 }) {
   const mode = validateLaunchArguments(argv);
   if (scope !== undefined) scope = validateNativeScope(scope);
-  const metadata = await verifyBridgeConfig(configPath);
+  let metadata, service;
+  if (scope) {
+    const { attachPrivateServiceFromConfig } =
+      await import("./private-service.mjs");
+    ({ metadata, service } = await attachPrivateServiceFromConfig({
+      configPath,
+      scope,
+    }));
+  } else metadata = await verifyBridgeConfig(configPath);
   let beforeReady;
   if (scope) {
     const { verifyPrivateServiceIdentity } =
@@ -542,11 +569,6 @@ export async function runBridge({
       )
         throw Error("refresh control identity changed");
       control = await attached.connect();
-      const { attachPrivateService } = await import("./private-service.mjs");
-      const service = await attachPrivateService({
-        metadata,
-        domain: scope.domain,
-      });
       guard = await createBridgeAuthorization({ service, control, signal });
       guard.assertCurrent();
     }

@@ -509,6 +509,90 @@ test("protocol measurements contain bounded identifiers and counts without retai
   await a.connection.done;
 });
 
+test("protocol diagnostics correlate exact turn identities without exposing payloads or changing the wire", async (t) => {
+  const { client, wss } = await fixture(t);
+  const observations = [];
+  const a = client({ onProtocol: (e) => observations.push(e) });
+  await a.connection.ready;
+  const threadId = "019aabcd-1234-7890-abcd-0123456789ab";
+  const turnId = "019aabcd-1234-7890-abcd-0123456789ac";
+  const request = {
+    id: 1,
+    method: "turn/start",
+    params: { threadId, input: [{ text: "PRIVATE_INPUT" }] },
+  };
+  a.input.write(JSON.stringify(request) + "\n");
+  await until(() => a.lines.length === 1);
+  const reply = {
+    id: 2,
+    result: {
+      turn: {
+        id: turnId,
+        status: "inProgress",
+        items: [{ text: "PRIVATE_OUTPUT" }],
+      },
+    },
+  };
+  const completed = {
+    method: "turn/completed",
+    params: {
+      threadId,
+      turn: {
+        id: turnId,
+        status: "completed",
+        items: [{ text: "PRIVATE_OUTPUT" }],
+      },
+    },
+  };
+  [...wss.clients][0].send(JSON.stringify(reply));
+  [...wss.clients][0].send(JSON.stringify(completed));
+  await until(() => a.lines.length === 3);
+  assert.deepEqual(a.lines[1], reply);
+  assert.deepEqual(a.lines[2], completed);
+  assert.equal(observations[0].threadId, threadId);
+  assert.equal(observations[2].turnId, turnId);
+  assert.equal(observations[3].turnId, turnId);
+  assert.equal(observations[3].threadId, threadId);
+  assert.equal(observations[2].turnStatus, "inProgress");
+  assert.equal(observations[3].turnStatus, "completed");
+  assert.doesNotMatch(
+    JSON.stringify(observations),
+    /PRIVATE_INPUT|PRIVATE_OUTPUT|items|params|result/,
+  );
+  a.input.end();
+  await a.connection.done;
+});
+
+test("diagnostic turn identities reject coercion, oversized strings and unknown status values", async (t) => {
+  const { client, wss } = await fixture(t);
+  const observations = [];
+  const a = client({ onProtocol: (e) => observations.push(e) });
+  await a.connection.ready;
+  for (const [turnId, status] of [
+    [["019aabcd-1234-7890-abcd-0123456789ac"], "completed"],
+    ["x".repeat(100000), "PRIVATE_STATUS"],
+    [42, "completed"],
+  ])
+    [...wss.clients][0].send(
+      JSON.stringify({
+        method: "turn/completed",
+        params: {
+          threadId: ["019aabcd-1234-7890-abcd-0123456789ab"],
+          turn: { id: turnId, status },
+        },
+      }),
+    );
+  await until(() => a.lines.length === 3);
+  for (const event of observations) {
+    assert.equal(event.threadId, undefined);
+    assert.equal(event.turnId, undefined);
+  }
+  assert.equal(observations[1].turnStatus, undefined);
+  assert.ok(JSON.stringify(observations).length < 2048);
+  a.input.end();
+  await a.connection.done;
+});
+
 test("artifact validation runs before native execution and does not require an already listening service", async (t) => {
   const { verifyNativeArtifacts } =
     await import("../refresh-prototype/cli-bridge.mjs");

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ListChecks } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
@@ -8,7 +9,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@session/components/ui/dropdown-menu";
-import { useSessionActionConfirmation } from "@session/components/common/useSessionActionConfirmation";
+import { useNativeFullAccessConfirmation } from "./NativeFullAccessConfirmation";
 import { useComposerToolbarNarrow } from "./ComposerToolbarContext";
 import { NativeComposerIcon } from "./NativeComposerIcon";
 import { ComposerTooltip } from "./ComposerTooltip";
@@ -34,7 +35,8 @@ export function AccessModePopover({
     setApprovalsReviewer,
   } = useThreadModelSettings(threadId);
   const isNarrow = useComposerToolbarNarrow();
-  const { ask, confirmation } = useSessionActionConfirmation();
+  const { ask, confirmation, open: fullAccessOpen } = useNativeFullAccessConfirmation();
+  const [menuOpen, setMenuOpen] = useState(false);
   const full = sandbox === "danger-full-access";
   const auto = approvalsReviewer !== "user";
   const readOnly = sandbox === "read-only";
@@ -93,15 +95,7 @@ export function AccessModePopover({
       active: full && !auto,
       disabled: false,
       choose: async () => {
-        if (
-          !(await ask({
-            title: "开启完全访问权限？",
-            description:
-              "Codex 将能够运行命令、使用互联网，并在这台电脑上的任何位置创建和编辑文件，无需逐次请求你的许可。",
-            confirmLabel: "开启完全访问权限",
-          }))
-        )
-          return;
+        if (!(await ask())) return;
         setAccessMode("danger-full-access");
         setApprovalsReviewer("user");
         finish();
@@ -110,8 +104,8 @@ export function AccessModePopover({
   ];
   return (
     <>
-      <DropdownMenu>
-        <ComposerTooltip label="更改权限">
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+        <ComposerTooltip label="更改权限" popupOpen={menuOpen || fullAccessOpen}>
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"

@@ -26,7 +26,7 @@ export function expectedRefreshHistory(thread, { threadId, cwd, turnId } = {}) {
     .at(-1)?.text;
   if (
     typeof reply !== "string" ||
-    !/^REFRESH_(?:PROFILE_SEED|IPHONE_ACCEPTED_[0-2])$/.test(reply)
+    !/^REFRESH_(?:PROFILE_SEED|IPHONE_ACCEPTED_[0-2]|IDLE_DONE)$/.test(reply)
   )
     throw new Error("Controlled native reply token required");
   return Object.freeze({

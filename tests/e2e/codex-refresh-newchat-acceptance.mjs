@@ -6,6 +6,7 @@ import { chromium } from "../../node_modules/playwright/index.mjs";
 import { iphone16Context, mobileEnvironment } from "./codex-refresh-mobile.mjs";
 import { expectedRefreshHistory } from "./codex-refresh-history.mjs";
 import { attachPrivateService } from "../../packages/native-codex-host/refresh-prototype/private-service.mjs";
+import { verifyRefreshProfileRoot } from "./codex-refresh-fixture.mjs";
 
 const file = process.env.NATIVE_CODEX_REFRESH_BROWSER_MANIFEST;
 const output = process.env.NATIVE_CODEX_REFRESH_BROWSER_OUTPUT;
@@ -27,6 +28,17 @@ assert.ok(
   singleClientDiagnostic === undefined || singleClientDiagnostic === "1",
 );
 const clientCount = singleClientDiagnostic === "1" ? 1 : 3;
+const visibleOnlyEvidence =
+  process.env.NATIVE_CODEX_REFRESH_VISIBLE_ONLY_EVIDENCE;
+assert.ok(visibleOnlyEvidence === undefined || visibleOnlyEvidence === "1");
+const initialNew = process.env.NATIVE_CODEX_REFRESH_INITIAL_NEW;
+assert.ok(initialNew === undefined || initialNew === "1");
+if (initialNew === "1")
+  assert.equal(
+    fixture.managedStartup,
+    true,
+    "explicit managed startup fixture required",
+  );
 assert.equal(new Set(fixture.urls.map((url) => new URL(url).origin)).size, 3);
 assert.ok(
   fixture.root.startsWith("/tmp/ck-") &&
@@ -40,6 +52,8 @@ const result = {
   fixtureApiRouting: false,
   clientCount,
   diagnosticOnly: clientCount !== 3,
+  requiresVisibleOnlyEvidence: visibleOnlyEvidence === "1",
+  initialNew: initialNew === "1",
   steps: [],
   errors: [],
   nativeOperations: [],
@@ -56,12 +70,7 @@ async function captureNativeGroups() {
   const snapshots = [];
   const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
   for (const profile of fixture.profiles.slice(0, 3)) {
-    const root = resolve(profile.root);
-    assert.equal(
-      resolve(fixture.root, root.slice(fixture.root.length + 1)),
-      root,
-    );
-    assert.ok(root.startsWith(resolve(fixture.root) + "/"));
+    const root = await verifyRefreshProfileRoot(fixture.root, profile.root);
     const registries = (await readdir(root)).filter((name) =>
       /^companion-session-[0-9a-f-]{36}\.json$/.test(name),
     );
@@ -163,6 +172,12 @@ async function captureStartup(page, index, phase) {
         timeOrigin: performance.timeOrigin,
         observedMs: performance.now(),
         groupCount: document.querySelectorAll(".editor-group-container").length,
+        instanceId:
+          Array.from(
+            document.querySelectorAll(".statusbar-item"),
+            (item) =>
+              item.textContent?.match(/Kanban host ([0-9a-f-]{36})/)?.[1],
+          ).find(Boolean) ?? null,
         marks: performance
           .getEntriesByType("mark")
           .filter((entry) =>
@@ -344,56 +359,65 @@ try {
         });
     });
     page.on("crash", () => result.errors.push({ index, kind: "crash" }));
-    await page.addInitScript(
-      ({ profile, threadId, cwd }) => {
-        if (
-          window !== window.top ||
-          sessionStorage.getItem("newchat-fixture-seeded")
-        )
-          return;
-        const data = JSON.stringify({
-          version: 2,
-          hostKey: profile.startupId,
-          activeId: threadId,
-          activeGroupId: "saved",
-          tree: {
-            type: "group",
-            id: "saved",
-            keys: [threadId],
-            selected: threadId,
-          },
-          windows: [
-            {
-              id: threadId,
-              kind: "thread",
-              threadId,
-              cwd,
-              title: "Private shared native thread",
+    if (initialNew !== "1")
+      await page.addInitScript(
+        ({ profile, threadId, cwd }) => {
+          if (
+            window !== window.top ||
+            sessionStorage.getItem("newchat-fixture-seeded")
+          )
+            return;
+          const data = JSON.stringify({
+            version: 2,
+            hostKey: profile.startupId,
+            activeId: threadId,
+            activeGroupId: "saved",
+            tree: {
+              type: "group",
+              id: "saved",
+              keys: [threadId],
+              selected: threadId,
             },
-          ],
-        });
-        sessionStorage.setItem(
-          "kanban.codex.tab-view.v1:kanban.codex.multiwindow.v2:" + profile.id,
-          JSON.stringify(data),
-        );
-        sessionStorage.setItem("newchat-fixture-seeded", "1");
-      },
-      { profile, threadId: fixture.threadId, cwd: fixture.project },
-    );
+            windows: [
+              {
+                id: threadId,
+                kind: "thread",
+                threadId,
+                cwd,
+                title: "Private shared native thread",
+              },
+            ],
+          });
+          sessionStorage.setItem(
+            "kanban.codex.tab-view.v1:kanban.codex.multiwindow.v2:" +
+              profile.id,
+            JSON.stringify(data),
+          );
+          sessionStorage.setItem("newchat-fixture-seeded", "1");
+        },
+        { profile, threadId: fixture.threadId, cwd: fixture.project },
+      );
     result.stage = "navigate-" + index;
     await save();
     await page.goto(
       fixture.urls[index] + "/?mode=codex&nativeClient=" + profile.id,
     );
-    await composer(page, "thread");
-    result.stage = "new-chat-" + index;
-    await save();
-    const newChat = page.getByRole("button", { name: "+ 新聊天", exact: true });
-    if (index === 2) await newChat.tap();
-    else await newChat.click();
+    if (initialNew !== "1") {
+      await composer(page, "thread");
+      result.stage = "new-chat-" + index;
+      await save();
+      const newChat = page.getByRole("button", {
+        name: "+ 新聊天",
+        exact: true,
+      });
+      if (index === 2) await newChat.tap();
+      else await newChat.click();
+    }
     const editor = await composer(page, "new"),
       identity = await selected(page);
     assert.equal(identity?.kind, "new");
+    if (initialNew === "1")
+      assert.equal(identity.id, "new:" + profile.startupId);
     identities.push(identity);
     if (index === 0) {
       result.stage = "engine-composition";
@@ -470,7 +494,7 @@ try {
   }
   assert.equal(
     new Set(identities.map((identity) => identity.id)).size,
-    clientCount,
+    initialNew === "1" ? 1 : clientCount,
   );
   for (let index = 0; index < clientCount; index++) {
     const pass =
@@ -578,9 +602,58 @@ try {
 } finally {
   for (let index = 0; index < pages.length; index++)
     await captureStartup(pages[index], index, "final");
-  await captureNativeGroups().catch(() => {
-    result.nativeTabSnapshotUnavailable = true;
-  });
+  try {
+    await captureNativeGroups();
+    if (result.requiresVisibleOnlyEvidence) {
+      result.visibleOnlyEvidence = [];
+      for (let index = 0; index < pages.length; index++) {
+        const final = result.startupSnapshots.findLast(
+          (s) => s.index === index && s.phase === "final",
+        );
+        const typed = result.steps.find(
+          (s) => s.index === index && s.step === "type",
+        );
+        assert.ok(
+          final?.instanceId && typed?.identity?.id?.startsWith("new:"),
+          "exact current native host and new-chat identity required",
+        );
+        const native = result.nativeTabSnapshots.find(
+          (s) => s.instanceId === final.instanceId,
+        );
+        assert.ok(
+          native && !native.unavailable,
+          "current native group evidence required",
+        );
+        const tabs = native.groups.flatMap((group) => group.nativeTabs);
+        const expected = typed.identity.id.slice(4);
+        result.visibleOnlyEvidence.push({
+          index,
+          instanceId: final.instanceId,
+          expectedWindowId: expected,
+          nativeTabs: tabs,
+        });
+        assert.equal(
+          tabs.length,
+          1,
+          "refresh must open only the displayed native chat",
+        );
+        assert.equal(tabs[0].kind, "new");
+        assert.equal(tabs[0].targetId, expected);
+      }
+    }
+  } catch (error) {
+    result.nativeTabSnapshotUnavailable = !Array.isArray(
+      result.nativeTabSnapshots,
+    );
+    result.nativeTabEvidenceFailed = true;
+    if (result.requiresVisibleOnlyEvidence) {
+      result.passed = false;
+      result.errors.push({
+        kind: "native-groups",
+        message: error.message.slice(0, 500),
+      });
+    }
+  }
   for (const context of contexts) await context.close().catch(() => {});
   await browser.close();
   await save();

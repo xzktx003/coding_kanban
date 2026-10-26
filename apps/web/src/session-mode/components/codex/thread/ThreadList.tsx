@@ -3,7 +3,10 @@ import { useSubagentStore } from "@session/features/subagents/store";
 import { SessionRowMenu } from "../../common/SessionRowMenu";
 import { SessionRowTitle } from "../../common/SessionRowTitle";
 import { SessionLoadMore } from "../../common/SessionLoadMore";
-import { DropdownMenuItem, DropdownMenuSeparator } from "../../ui/dropdown-menu";
+import {
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "../../ui/dropdown-menu";
 import { SessionAgentBadge } from "../../common/SessionAgentBadge";
 import { SessionStatus, UnreadDot } from "../../common/SessionStatus";
 import { useSessionNameStore } from "../../../stores/useSessionNameStore";
@@ -12,9 +15,10 @@ import { useShallow } from "zustand/react/shallow";
 import { listen } from "@tauri-apps/api/event";
 import type { LucideIcon } from "lucide-react";
 import { Archive, FolderX, GitFork, Loader2, Pin, PinOff } from "lucide-react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import {
   Fragment,
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -69,15 +73,23 @@ import { formatThreadAge } from "@session/utils/formatThreadAge";
 import { writeNativeMarkdownClipboard } from "../presentation/nativeMarkdownClipboard";
 
 type ThreadCopyScope = { current: object | null };
-function observeThreadIdCopy(write: Promise<void>, scope: ThreadCopyScope, owner: object) {
+function observeThreadIdCopy(
+  write: Promise<void>,
+  scope: ThreadCopyScope,
+  owner: object,
+) {
   const failure = () => {
     if (scope.current === owner)
-      toast({ description: "Failed to copy thread ID", variant: "destructive" });
+      toast({
+        description: "Failed to copy thread ID",
+        variant: "destructive",
+      });
   };
   void write.then(undefined, failure);
 }
 function copyThreadId(id: string, scope: ThreadCopyScope) {
-  if (scope.current) observeThreadIdCopy(writeNativeMarkdownClipboard(id), scope, scope.current);
+  if (scope.current)
+    observeThreadIdCopy(writeNativeMarkdownClipboard(id), scope, scope.current);
 }
 
 interface ThreadListProps {
@@ -100,28 +112,38 @@ const EMPTY_LIST: ThreadListResponse = {
 
 const PAGE_SIZE = 3;
 
-export function ThreadList({ cwd }: ThreadListProps) {
+function ThreadSelection({
+  threadId,
+  children,
+}: {
+  threadId: string;
+  children: (selected: boolean) => ReactNode;
+}) {
+  const selected = useCodexStore((state) => state.currentThreadId === threadId);
+  return children(selected);
+}
+
+export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
   const copyScope = useRef<object | null>(null);
   useLayoutEffect(() => {
     copyScope.current = {};
-    return () => { copyScope.current = null; };
+    return () => {
+      copyScope.current = null;
+    };
   }, [cwd]);
-  const childNodes = useSubagentStore(s => s.nodes);
+  const childNodes = useSubagentStore((s) => s.nodes);
   const names = useSessionNameStore((s) => s.names);
-  const { cwd: workspaceCwd, setCwd } = useWorkspaceStore();
-  const { setView } = useLayoutStore();
-  const { addAgentCard, setCurrentAgentCardId } = useAgentCenterStore();
-  const {
-    currentThreadId,
-    threadStatusMap,
-    threads: storeThreads,
-  } = useCodexStore(
-    useShallow((s) => ({
-      currentThreadId: s.currentThreadId,
-      threadStatusMap: s.threadStatusMap,
-      threads: s.threads,
+  const { cwd: workspaceCwd, setCwd } = useWorkspaceStore(
+    useShallow((state) => ({ cwd: state.cwd, setCwd: state.setCwd })),
+  );
+  const setView = useLayoutStore((state) => state.setView);
+  const { addAgentCard, setCurrentAgentCardId } = useAgentCenterStore(
+    useShallow((state) => ({
+      addAgentCard: state.addAgentCard,
+      setCurrentAgentCardId: state.setCurrentAgentCardId,
     })),
   );
+  const storeThreads = useCodexStore((state) => state.threads);
   const { sortKey } = useThreadListStore();
   const pinnedIds = usePinStore((s) => s.pinned);
   const togglePin = usePinStore((s) => s.togglePin);
@@ -138,6 +160,10 @@ export function ThreadList({ cwd }: ThreadListProps) {
   const renamePendingRef = useRef(false);
   const [refreshCounter, setRefreshCounter] = useState(0);
   const [pendingDelete, setPendingDelete] = useState<Thread | null>(null);
+  const pendingDeleteIsCurrent = useCodexStore(
+    (state) =>
+      pendingDelete !== null && state.currentThreadId === pendingDelete.id,
+  );
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deletingRef = useRef(false);
@@ -157,7 +183,11 @@ export function ThreadList({ cwd }: ThreadListProps) {
     const seen = new Set(response.data.map((t) => t.id));
     const live = storeThreads.filter(
       (t) =>
-        !childNodes[t.id] && !subagentParent(t) && t.cwd === cwd && t.modelProvider === modelProvider && !seen.has(t.id),
+        !childNodes[t.id] &&
+        !subagentParent(t) &&
+        t.cwd === cwd &&
+        t.modelProvider === modelProvider &&
+        !seen.has(t.id),
     );
     if (live.length === 0) return response.data;
     const key = sortKey === "created_at" ? "createdAt" : "updatedAt";
@@ -219,7 +249,9 @@ export function ThreadList({ cwd }: ThreadListProps) {
     const newIds = storeThreads
       .filter(
         (t) =>
-          !childNodes[t.id] && !subagentParent(t) && t.cwd === cwd &&
+          !childNodes[t.id] &&
+          !subagentParent(t) &&
+          t.cwd === cwd &&
           !localIds.has(t.id) &&
           !seenStoreIdsRef.current.has(t.id),
       )
@@ -268,11 +300,11 @@ export function ThreadList({ cwd }: ThreadListProps) {
 
   const handleSelectThread = useCallback(
     async (threadId: string) => {
-      if (threadId === currentThreadId) return;
+      if (threadId === useCodexStore.getState().currentThreadId) return;
       if (cwd !== workspaceCwd) setCwd(cwd);
       await codexService.setCurrentThread(threadId);
     },
-    [currentThreadId, cwd, workspaceCwd, setCwd],
+    [cwd, workspaceCwd, setCwd],
   );
 
   const handleOpenThread = useCallback(
@@ -342,12 +374,12 @@ export function ThreadList({ cwd }: ThreadListProps) {
         setDeleteError(err instanceof Error ? err.message : String(err));
         throw err;
       }
-      if (currentThreadId === threadId) {
+      if (useCodexStore.getState().currentThreadId === threadId) {
         await codexService.setCurrentThread(null);
       }
       refresh();
     },
-    [currentThreadId, refresh, removeFromNavigation],
+    [refresh, removeFromNavigation],
   );
 
   const handleLoadMore = useCallback(async () => {
@@ -536,77 +568,100 @@ export function ThreadList({ cwd }: ThreadListProps) {
           </div>
         )}
         {threads.map((thread) => (
-          <ContextMenu key={thread.id}>
-            <ContextMenuTrigger asChild>
-              <div
-                onClick={() => {
-                  if (longPressFiredRef.current) {
-                    longPressFiredRef.current = false;
-                    return;
-                  }
-                  void handleOpenThread(thread.id, thread.preview);
-                }}
-                onPointerDown={(e) => startLongPress(e, thread.id)}
-                onPointerUp={cancelLongPress}
-                onPointerMove={cancelLongPress}
-                onPointerCancel={cancelLongPress}
-                role="button"
-                tabIndex={0}
-                aria-current={
-                  currentThreadId === thread.id ? "true" : undefined
-                }
-                onKeyDown={(event) => {
-                  if (
-                    event.target === event.currentTarget &&
-                    (event.key === "Enter" || event.key === " ")
-                  ) {
-                    event.preventDefault();
-                    void handleOpenThread(thread.id, thread.preview);
-                  }
-                }}
-                className={`session-nav-row group/session-row grid grid-cols-[1fr_auto] items-center gap-2 w-full text-left p-2 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-pan-y select-none [-webkit-user-select:none] [-webkit-touch-callout:none] ${
-                  currentThreadId === thread.id
-                    ? "bg-accent"
-                    : "hover:bg-accent/50"
-                } ${
-                  pressedThreadId === thread.id
-                    ? "scale-[0.97] bg-accent/60 ring-1 ring-ring/60"
-                    : "scale-100"
-                }`}
-              >
-                <div className="session-nav-title">
-                  <SessionAgentBadge kind="codex" />
-                  <SessionRowTitle title={names[`codex:${thread.id}`] ?? thread.name ?? (thread.preview || "New chat")} detail={`Codex · ${formatThreadAge(thread.createdAt)}`} />
-                  <SessionStatus kind="codex" id={thread.id} compact />
-                </div>
-                <div className="session-nav-meta">
-                  <span className="session-nav-age">{formatThreadAge(thread.createdAt)}</span>
-                  <SessionRowMenu>
-                    {threadActions(thread).map(action => <Fragment key={action.label}>
-                      {action.separatorBefore && <DropdownMenuSeparator />}
-                      <DropdownMenuItem variant={action.destructive ? "destructive" : "default"} onSelect={action.onSelect}>
-                        {action.icon && <action.icon className="size-3.5" />}{action.label}
-                      </DropdownMenuItem>
-                    </Fragment>)}
-                  </SessionRowMenu>
-                </div>
-              </div>
-            </ContextMenuTrigger>
-            <ContextMenuContent className="w-44">
-              {threadActions(thread).map((action) => (
-                <Fragment key={action.label}>
-                  {action.separatorBefore && <ContextMenuSeparator />}
-                  <ContextMenuItem
-                    variant={action.destructive ? "destructive" : "default"}
-                    onSelect={action.onSelect}
+          <ThreadSelection key={thread.id} threadId={thread.id}>
+            {(selected) => (
+              <ContextMenu>
+                <ContextMenuTrigger asChild>
+                  <div
+                    onClick={() => {
+                      if (longPressFiredRef.current) {
+                        longPressFiredRef.current = false;
+                        return;
+                      }
+                      void handleOpenThread(thread.id, thread.preview);
+                    }}
+                    onPointerDown={(e) => startLongPress(e, thread.id)}
+                    onPointerUp={cancelLongPress}
+                    onPointerMove={cancelLongPress}
+                    onPointerCancel={cancelLongPress}
+                    role="button"
+                    tabIndex={0}
+                    aria-current={selected ? "true" : undefined}
+                    onKeyDown={(event) => {
+                      if (
+                        event.target === event.currentTarget &&
+                        (event.key === "Enter" || event.key === " ")
+                      ) {
+                        event.preventDefault();
+                        void handleOpenThread(thread.id, thread.preview);
+                      }
+                    }}
+                    className={`session-nav-row group/session-row grid grid-cols-[1fr_auto] items-center gap-2 w-full text-left p-2 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring touch-pan-y select-none [-webkit-user-select:none] [-webkit-touch-callout:none] ${
+                      selected ? "bg-accent" : "hover:bg-accent/50"
+                    } ${
+                      pressedThreadId === thread.id
+                        ? "scale-[0.97] bg-accent/60 ring-1 ring-ring/60"
+                        : "scale-100"
+                    }`}
                   >
-                    {action.icon && <action.icon className="mr-2 h-4 w-4" />}
-                    {action.label}
-                  </ContextMenuItem>
-                </Fragment>
-              ))}
-            </ContextMenuContent>
-          </ContextMenu>
+                    <div className="session-nav-title">
+                      <SessionAgentBadge kind="codex" />
+                      <SessionRowTitle
+                        title={
+                          names[`codex:${thread.id}`] ??
+                          thread.name ??
+                          (thread.preview || "New chat")
+                        }
+                        detail={`Codex · ${formatThreadAge(thread.createdAt)}`}
+                      />
+                      <SessionStatus kind="codex" id={thread.id} compact />
+                    </div>
+                    <div className="session-nav-meta">
+                      <span className="session-nav-age">
+                        {formatThreadAge(thread.createdAt)}
+                      </span>
+                      <SessionRowMenu>
+                        {threadActions(thread).map((action) => (
+                          <Fragment key={action.label}>
+                            {action.separatorBefore && (
+                              <DropdownMenuSeparator />
+                            )}
+                            <DropdownMenuItem
+                              variant={
+                                action.destructive ? "destructive" : "default"
+                              }
+                              onSelect={action.onSelect}
+                            >
+                              {action.icon && (
+                                <action.icon className="size-3.5" />
+                              )}
+                              {action.label}
+                            </DropdownMenuItem>
+                          </Fragment>
+                        ))}
+                      </SessionRowMenu>
+                    </div>
+                  </div>
+                </ContextMenuTrigger>
+                <ContextMenuContent className="w-44">
+                  {threadActions(thread).map((action) => (
+                    <Fragment key={action.label}>
+                      {action.separatorBefore && <ContextMenuSeparator />}
+                      <ContextMenuItem
+                        variant={action.destructive ? "destructive" : "default"}
+                        onSelect={action.onSelect}
+                      >
+                        {action.icon && (
+                          <action.icon className="mr-2 h-4 w-4" />
+                        )}
+                        {action.label}
+                      </ContextMenuItem>
+                    </Fragment>
+                  ))}
+                </ContextMenuContent>
+              </ContextMenu>
+            )}
+          </ThreadSelection>
         ))}
         {!loading && !loadError && threads.length === 0 && (
           <div className="text-xs p-2 text-sidebar-foreground/50">
@@ -623,7 +678,11 @@ export function ThreadList({ cwd }: ThreadListProps) {
         </div>
       )}
       {nextCursor && (
-        <SessionLoadMore loading={isLoadingMore} error={Boolean(pageError)} onClick={handleLoadMore} />
+        <SessionLoadMore
+          loading={isLoadingMore}
+          error={Boolean(pageError)}
+          onClick={handleLoadMore}
+        />
       )}
       <AlertDialog
         open={!!pendingDelete}
@@ -642,9 +701,7 @@ export function ThreadList({ cwd }: ThreadListProps) {
                   pendingDelete.preview)
                 : ""}
               ”的历史记录，此操作无法撤销。
-              {pendingDelete?.id === currentThreadId
-                ? "当前会话视图也会关闭。"
-                : ""}
+              {pendingDeleteIsCurrent ? "当前会话视图也会关闭。" : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteError && (
@@ -690,4 +747,4 @@ export function ThreadList({ cwd }: ThreadListProps) {
       />
     </div>
   );
-}
+});

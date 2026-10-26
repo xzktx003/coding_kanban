@@ -38,7 +38,11 @@ vi.mock("../mentions", () => ({
 vi.mock("./MentionTypeaheadPlugin", () => ({
   MentionTypeaheadPlugin: () => null,
 }));
-vi.mock("../composerFocus", () => ({ shouldAutoFocusComposer: () => false }));
+// These caret/IME tests deliberately keep automatic focus disabled.
+vi.mock("../composerFocus", () => ({
+  shouldAutoFocusComposer: () => false,
+  scheduleComposerAutoFocus: () => () => {},
+}));
 
 beforeEach(() => {
   if (!Range.prototype.getBoundingClientRect)

@@ -83,6 +83,7 @@ import "@session/session-theme.css";
 
 type NativeStatus = {
   available: boolean;
+  restoreVisibleWindows?: boolean;
   resumeAvailable?: boolean;
   sendAvailable?: boolean;
   refreshVisibility?: { available: boolean };
@@ -853,6 +854,11 @@ export default function CodexWorkbench({
         (item) => sharedWindows.find((shared) => shared.id === item.id) ?? item,
       );
       const sharedIds = new Set(sharedWindows.map((item) => item.id));
+      // A shared follow snapshot does not own this tab's visible layout. A slow
+      // host must still restore its selected history even if it is unfollowed.
+      const displayedIds = new Set(codexSplitGroups(current.tree).flatMap(
+        (group) => group.selected ? [group.selected] : [],
+      ));
       const openingIds = pendingOpenThreads.current;
       const detachedId = sharedState.detached?.id;
       // A shared snapshot can settle between a local open and its add receipt.
@@ -873,6 +879,7 @@ export default function CodexWorkbench({
           (item) =>
             item.kind !== "thread" ||
             sharedIds.has(item.id) ||
+            displayedIds.has(item.id) ||
             pendingAdds.has(item.id) ||
             item.state === "error" ||
             item.id === detachedId ||
@@ -1069,7 +1076,7 @@ export default function CodexWorkbench({
         void requestOpenThread(item.id);
       } else if (
         item.kind === "new" &&
-        item.id !== `new:${firstWindowId}` &&
+        (item.id !== `new:${firstWindowId}` || status?.restoreVisibleWindows === true) &&
         !restoredNewWindowIds.current.has(item.id)
       ) {
         restoredNewWindowIds.current.add(item.id);
@@ -1084,6 +1091,7 @@ export default function CodexWorkbench({
     windowState.activeId,
     visibleWindowKeys,
     firstWindowId,
+    status?.restoreVisibleWindows,
   ]);
   useEffect(() => {
     if (!active || !hostInstanceId || !blockedWindowIds.size) {

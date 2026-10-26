@@ -41,12 +41,39 @@ export async function readConfig(params: Json, request: Rpc): Promise<JsonObject
     ...(typeof object(raw.config.desktop).mcp_startup_authentication === "boolean" ? {desktop:{mcp_startup_authentication:object(raw.config.desktop).mcp_startup_authentication}} : {}),
   } };
 }
-export async function readRequirements(params: Json, request: Rpc): Promise<JsonObject> {
+type AutoReviewProjectionSource = "native-null" | "auto-review-absent" | "auto-review-null" |
+  "required-models-absent" | "required-models-null" | "required-models-list" | "invalid";
+function projectAutoReview(requirements: JsonObject): {
+  value: Json; source: AutoReviewProjectionSource; status: "known" | "unavailable";
+} {
+  if (!Object.hasOwn(requirements, "autoReview")) return { value: null, source: "auto-review-absent", status: "known" };
+  const autoReview = requirements.autoReview;
+  if (autoReview === null) return { value: null, source: "auto-review-null", status: "known" };
+  const invalid = { value: null, source: "invalid", status: "unavailable" } as const;
+  if (!isObject(autoReview)) return invalid;
+  if (!Object.hasOwn(autoReview, "requiredOnModels")) return { value: { requiredOnModels: null }, source: "required-models-absent", status: "known" };
+  const models = autoReview.requiredOnModels;
+  if (models === null) return { value: { requiredOnModels: null }, source: "required-models-null", status: "known" };
+  // Local projection budgets: an invalid or oversized list stays unknown in full.
+  if (!Array.isArray(models) || models.length > 256) return invalid;
+  let bytes = 0;
+  for (const model of models) {
+    if (typeof model !== "string" || !model || /[\x00-\x1f\x7f]/.test(model)) return invalid;
+    const length = Buffer.byteLength(model);
+    if (length > 512 || (bytes += length) > 65536) return invalid;
+  }
+  return { value: { requiredOnModels: [...models] }, source: "required-models-list", status: "known" };
+}
+export async function readRequirements(params: Json, request: Rpc, runtimeInstance: string | null = null): Promise<JsonObject> {
   empty(params);
   const raw = object(await request("configRequirements/read", null));
-  if (raw.requirements === null) return { requirements: null };
+  const projection = (status: "known" | "unavailable", autoReviewSource: AutoReviewProjectionSource) => ({
+    version: 1, source: "configRequirements/read", scope: "runtime-global", runtimeInstance, status, autoReviewSource,
+  });
+  if (raw.requirements === null) return { requirements: null, projection: projection("known", "native-null") };
   if (!isObject(raw.requirements)) throw new Error("Invalid native requirements");
   const requirements = raw.requirements;
+  const autoReview = projectAutoReview(requirements);
   const array = (key: string, project: (value: Json) => Json) => Array.isArray(requirements[key]) ? requirements[key].map(project).filter(v => v !== null) : null;
   return { requirements: {
     allowedApprovalPolicies: array("allowedApprovalPolicies", approval),
@@ -55,7 +82,8 @@ export async function readRequirements(params: Json, request: Rpc): Promise<Json
     allowedPermissionProfiles: isObject(requirements.allowedPermissionProfiles) ? Object.fromEntries(
       Object.entries(requirements.allowedPermissionProfiles).filter(([key, value]) => permission(key) !== null && typeof value === "boolean")) : null,
     defaultPermissions: permission(requirements.defaultPermissions),
-  } };
+    autoReview: autoReview.value,
+  }, projection: projection(autoReview.status, autoReview.source) };
 }
 
 export async function searchOccurrences(params: Json, request: Rpc): Promise<Json> {

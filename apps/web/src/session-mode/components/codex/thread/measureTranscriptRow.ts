@@ -11,3 +11,14 @@ export function measureTranscriptRow(
   const height = element.getBoundingClientRect().height;
   return height > 0 ? height : previousSize;
 }
+
+/** A newly mounted row has no previous visible height to preserve. */
+export function shouldAdjustTranscriptRow(
+  previousEnd: number,
+  delta: number,
+  scrollOffset: number,
+  firstDomMeasurement: boolean,
+) {
+  const end = previousEnd + (firstDomMeasurement ? delta : 0);
+  return end <= scrollOffset;
+}

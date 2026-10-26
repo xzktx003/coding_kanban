@@ -4,6 +4,30 @@
 
 产品前端为 **HTTP `http://10.30.0.24:48865/`**，绑定 `0.0.0.0`，浏览器测试拦截全部普通 API 写入。原组件只读对照为 **HTTP `http://10.30.0.24:37575/native-goal.html`**。同网段物理设备尚未验证。日志、截图与具体函数副本保存在忽略目录 `.dev-runtime/session-polish-round2-20261016/`，不能把组件夹具解释为完整认证扩展宿主。
 
+当前 [模型命令、读取状态与菜单回退](model-commands-state-parity-20261016.md) 的16文件308单测、web类型和最新全仓构建通过；真实92浏览器首批60／32、次批88／4均保留，第三批完整92项通过、零重试、12.2分钟，2945项输入前后无漂移；独立终审核对68,658项离线证据，四条可变计数收据限制另存并由后续专项补红绿。侧边操作夹具采用普通键盘导航，未改产品遮挡；旧R19原reader和断言不变，两批各5项诊断及最终批均未复现null，原三项失败与一次上下文消失的根因仍未闭合。正式运行产物未切换。
+
+随后 [状态描述与普通提示主题](model-status-theme-parity-20261016.md) 经真实红灯修复：Power可见中／高与live标准／深度分开，未知状态用自定义，普通Sonner接入已有resolvedTheme。21文件327单测、相关E2E类型与全仓构建通过；浏览器首批20／2、次批0／2保留，最后仅两项以真实键盘主题操作和动画结束采样通过，22个不同场景分批验收。2951项输入前后不变，四份计数快照专项转绿，四张实际截图已查看，独立终审14,326项离线证据核对无未解释失败。通知原右上指针遮挡保持记录；未宣称全会话模式完成。
+
+随后 [普通Power滚轮](model-power-wheel-parity-20261016.md) 补齐主／展开OpenAI滑条：30阈值、160ms间隔、逐事件一档与余量依原函数，边界不重复记recent，稳定监听及提交快照阻止旧owner／旧lease动作。原27单测7红20绿→同字节27全绿，追加生命周期及helper后相关23文件363项通过；真实1440主输入／390展开两浏览器先红后绿，web类型与生产构建通过。正式helper与精确原函数22场景216项比较一致，2962项执行输入稳定，四张最终截图已查看。完整原hCa跨档写入仍未放开，物理设备、缩放、长期RSS及正式运行层保持独立边界；独立终审分别287项应用链与891项最终离线核对无未解释失败，2962／63／7预检与四张实际截图均核，32份产物封存。
+
+随后 [普通模型身份](model-canonical-identity-parity-20261016.md) 将主／展开OpenAI菜单的当前匹配、行值及目标effort／tier统一到目录model，通用loader、Side／custom及旧alias不迁移。新12单测10红／2对照→12绿，真实六例完整红→同字节六绿；旧两条相反名称契约与一行不一致keyboard mock均保留实际失败后窄改，最终24文件375项通过，web类型／生产构建通过。完整102浏览器首批101通过／1桌面主题导航失败保留；原附件Popover实际卸载前提补齐后两宽2项通过，102个不同场景分批验收，零项执行的标题筛选错误单列。上述最终各批2971项输入前后稳定，原64步及同节点通知／owner／草稿／IO保护不放宽；正式运行层、真实目录／alias、完整原GUI和长期RSS边界保持。
+
+随后 [普通完全访问确认框](full-access-confirmation-parity-20261016.md) 已接入原文／能力与图标、风险和固定帮助地址；菜单／弹窗打开时抑制Tooltip，使主输入Escape关闭回归通过。相关27文件388单测、真实主／展开八例加侧边两例整批10通过，web/E2E类型和生产构建通过，2980输入稳定。原版四个独立正交观察各自通过。随后局部修正字体合成、unitless行高、垂直对齐和主题遮罩；最终388单测／10浏览器／构建再次通过，2981输入稳定，八场景1096几何与样式比较通过。初次比较误选Sheet外层遮罩的8失败保留并仅纠正读取对象，不放宽阈值。原GUI／非中文布局／原生能力与正式运行层仍单列。
+
+随后 [普通当前模型行重选](model-current-row-reselection-parity-20261016.md) 保留rawnull强度与saved tier，不因重选而增加revision／pending。新6加原12先3红15绿后同18全绿，相关28文件394项通过；主／真实展开×1440/390四例完整红→同字节四绿，原模型身份六例另批通过，不合称单批10。web／E2E类型及生产构建退出0，每次2988／2989输入稳定，四张最终图实际查看。recent插入流程保留但rawnull载荷变化单列；正式运行层、真实目录／权限策略、presets／Default／FI与整个Goal仍各有边界。
+
+跨模型预设前置 [自动审查要求投影](model-auto-review-requirements-projection-20261016.md) 在既有单次只读RPC保留完整有界列表及版本／实例来源，原五项权限字段保留。新37用例先29目标红／8控制绿，再与原14用例单批51全绿，运行层／网关／web类型均退出0；七次命令各自2994输入稳定。仅backend＋兼容DTO，无新consumer／cache／UI预设／账号读取；未重跑生产构建或UI浏览器，正式PID2712539保留且磁盘产物未激活。联合pair动作与完整生产准入继续单列。
+
+后续 [联合本地选择动作](model-joint-selection-action-20261016.md) 在默认配置及thread hook增加一次pair提交，tier省略保留／null清除，保持其它线程、草稿、权限及native快照。新17例先15接口可用性断言红／2既有控制绿，再同字节17全绿；相关33文件428例单批通过，包含该17例。web推广前／后类型退出0，六条命令各自2998输入稳定。只新增内部接口，未把缺失接口红灯称为原有UI缺陷；预设／Default／FI、UI消费者、真实能力及原生ACK/CAS仍待各自验收。
+
+后续 [内置预设纯派生](model-built-in-presets-pure-20261016.md) 完成固定primary／secondary、广告pair和TX回退。原15与extra4分别实际通过；本地V2先0测试夹具URL失败，未计RED，修正定位器后V3实际19接口断言红／3控制绿→同22全绿，相关8文件71例通过。512组合与真实原函数的29,696项比较全部一致，比较数单列；九条命令各自3002／3003输入稳定。新增纯模块无生产UI接线，不把合成eligible或ultra当实际准入；准确hAt6默认链与runtime/account/scope消费继续单列。
+
+此前隔离分项：[反馈正常入口与两次权限预检](feedback-entry-preflight-20261016.md) 已通过前端161项、运行层56＋既有协议14项与跨端类型／构建。最终30项（26浏览器＋4 HTTP）单批全通过、2.7分钟，无跳过／自动重试；首批27通过／3手机导航前提失败完整保留，经普通标题／Escape操作修正后全部30重跑，两批仍为30个不同场景。反馈54实际依赖逐例无漂移；完整2963记录中并行Codex模式两项变化单列，未回滚、未扩大为整工作区冻结。真实账号／正式运行层启用和整体对齐继续按独立门禁判断。
+
+此前分项：[成功未知模型的可见名称](model-menu-unknown-label-20261016.md) 在真实目录链取得3红／10对照后，同一13例转绿；相关119项与会话菜单consumer80项分两批通过，web类型／构建通过。新16浏览器与旧unknown18／行选择20共54例单批全部通过（5.0分钟），2945条输入复核稳定。本批只改两个可见名称，不以保留的aria／tooltip／高级额外行差异冒充完整一致。
+
+上一项：[模型行选择后的视图与焦点](model-menu-selection-view-20261016.md) 经真实红灯修复，最终10文件184单测及web类型／构建通过；首批42浏览器为38通过／4触发器事件断言失败，视图与焦点均正确，初焦点16／指针锁6全过。精确纠正一处事件断言后，新20实际全部通过（2.0分钟）；两批覆盖42个不同场景，新20全部重跑、其中16个此前已通过；2943输入复核稳定，首批4个失败保留。原完整hCa新隔离候选实际取得simple→advanced→simple和选行后三时点首项焦点，首次打开超时仍单独保留。此前 [成功未知模型六档](model-menu-unknown-efforts-20261016.md) 的168单测、最终42浏览器、15043项独立证据检查与 [persistent过滤](model-menu-effort-filter-20261016.md)、[初焦点对照](model-menu-initial-focus-parity-20261016.md) 分别保留，不将不同批次混称单次全量。早期 RSS 红灯和后续标准长测按各自时间与冻结范围记录。2026-10-17 R29 已通过真实 buildServer 红绿与当前网关 HTTP 验收补齐 Goal 附件注册；此前“并行删除／待用户回复”没有来源证据，不能继续作为阻塞。历史前端 API fixture 不替代此次接线证据，详见 [Goal 附件接线修复](goal-attachment-registration-20261017.md)。正式运行层仍未激活新产物。
+
 ## 命令与聊天 Diff 复制
 
 本地 `ShellCommand.CommandCopy` 原先直接使用 Clipboard API，HTTP LAN 不可用；等待时重复点击会重复写入，成功只持续 1500ms，错误为自定义浮动文本。当前原包 `user-message-attachments` 的 `cn` 分别将命令和未改写输出传给 `pe`，`pe` 是 `app-initial-fee819fe4f22.js` 的 `Sh/NKi`，其 `onCopy` 使用 `yk`。仓库与实装 `user-message-attachments` 在资源文件名归一化后全文一致，`NKi` 已有逐字核对。
@@ -118,3 +142,85 @@ SVG／折叠／普通代码释放均有先红后绿记录；`messages/message-gr
 侧边底栏仅用限定 CSS 恢复正常流，旧布局侵入控件区 12px 的双宽几何红灯已转绿；帮助／长状态／身份告警与核对按钮均有独立空间，44px 触控和 62px 输入区保留，主 frame 的布局指标不变。侧边 2 例、修正旧入口后的主／展开回归 6 例、web 类型／构建通过，零跳过。初批遗漏 view=chat 的元数据路由，以及主／展开回归 4 过 2 个旧入口失败均单独保留。2835 源／21 E2E／3 基础设施／72 shared 最终冻结核对无漂移，详见 [侧边底栏](side-chat-footer-layout-20261016.md)。
 
 继续核对发现侧边 fork 只消费三个模型字段，丢弃响应已有的策略、审批和服务等级；下一次拟提交参数因而采用默认值。现复用既有 normalizer，并用按字段累计的本地设置缓存保守处理迟到初始 ACK，保护 pending、显式清空、不完整策略组与未知来源 legacy entry；不增加读写调用，不证明跨客户端 CAS 或所有 HTTP／SSE 到达顺序。稳定初始 16 项为 9 红 7 绿，另保留首次夹具失败；最终 11 文件／81 单测、web 类型／构建，以及同一冻结源码 18 浏览器均通过，零跳过。两尺寸实际侧边保留完整策略／fast，主会话、默认值、两边草稿和焦点不变，底栏三阶段也无回归。2836 源码、22 测试／夹具、3 基础设施、72 shared 产物和逐例 20 输入哈希无漂移，详见 [fork 设置与回执](side-chat-fork-settings-20261016.md)。未写真实 native 权限、未激活正式运行产物；原版完整 hCa 初焦点仍未验，此前长测也不改写为本批结果。
+
+
+R28d1（2026-10-17本地日期）只新增模型自动审查要求的纯解码和F_t/G_t数据查询，不接UI/HTTP/store或权限。真实48接口availability红＋3旧控制→同51绿，相关5文件99例通过（含新51），web前后noEmit退出0；另11×35=385次原函数有效域比较全部一致。七命令3008／3009输入与HEAD稳定，producer/raw helper/既有菜单和设置不变。差分V1的pnpm工作目录接线错误在任何执行前发现，freshV2只改两行并实际执行一次，旧包保留。合法null仅为数据predicate false，不能当未知清除或reviewer授权；正式PID仍安全复用、磁盘产物未激活。见 [数据合同与完整验收](model-auto-review-requirements-decoder-20261017.md)。
+
+2026-10-17 自有picker偏好状态：新增独立Zustand persist store，仅保存FI意图与enabled efforts，默认准确hAt六项，不读取官方偏好，也没有菜单／模型／权限消费者。真实13接口availability红＋1旧控制→同14绿，相关4文件89项与web前后noEmit通过；六命令3013／3014输入稳定，原源码不改。数值异版本与缺失／字符串version的实际middleware语义分别验证；同值setter不通知，但不保证零storage写入。正式PID2712539与未激活磁盘产物保持，未跑新UI或长测。见 [偏好状态验收](model-picker-preferences-state-20261017.md)。
+
+2026-10-17 强度广告纯投影：新增nativePickerEffortProjection，按原九值识别、显式偏好Set＋persistent与独立includeUltra过滤广告；所有模型及其它字段保持，known-empty不变unknown。真实13接口availability红＋3旧控制→同16绿，4文件59项相关回归包含16，前后web noEmit与只读status通过；六命令3018／3019输入稳定。尚无菜单／Trigger／命令／滚轮消费者，也不证明Copilot资格、原实验flag或native权限。见 [投影行为与验收](model-picker-effort-projection-20261017.md)。
+
+2026-10-17 不同模型行继承修复：原hCa传给lCa的是bt显示fallback而非raw或菜单TX。Selector现用bt匹配目标广告，并在helper的undefined会保留不同raw时显式写入；same-current／generic／Side／custom／tier／owner流程不改。真实4新unit红＋6原控制→同10绿；8新browser红＋4原控制→同12绿，两反例×两表面×1440/390。25文件386项、前后web/E2Etypes、生产build与readonlystatus通过，12命令3026输入稳定，4最终图已查看。见 [切换强度完整记录](model-changed-row-display-effort-20261017.md)。
+
+
+2026-10-17 R28e3：普通主／展开、关闭Trigger与三命令共用自有偏好投影，保持raw、未知六档、owner、wheel及R27／R29规则。旧实现7组件行为红＋12控制绿，接入后同19全绿；28文件425项、新4和原12浏览器通过，web／E2E类型通过。浏览器V2四次驱动失败不计合格产品RED，V3同4先行为红后绿、清理通过；详见 [共同消费者记录](model-picker-consumers-20261017.md)。显示兼容策略显式ultra=false，不是官方flag或auth证明；FI／Default／preset／共享动作授权、native激活和完整Goal继续。
+
+2026-10-17 R28e4：新增纯展示组合，ke默认与vt预设分开，精确bt匹配，FI保存意图与有效模式分开，null仅返回首开建议。真实14新API可用性RED＋2旧C控制→同16GREEN，2文件38项相关回归及前后web noEmit通过；五条命令3040/3041输入稳定，仅增加模块与测试。无UI、FI写入、Default/preset或Lti/Pti接入，不将availability RED称作旧UI错误；详见 [展示派生记录](model-picker-presentation-20261017.md)。
+
+2026-10-17 R28e5：沿既有响应／通知保留逐字段只读 profile/roots 上次观察，独立区分缺失、null、[]、invalid；重复保持引用，变化只推进一次既有revision，保留原pending/ACK。写出及两版恢复均剥离，getter/turn不携带。真实18行为断言红＋3控制→同21全绿，13文件156及前后类型通过，内存／恢复8文件27通过1默认长测跳过；不代表实时权限或完整共享动作。见 [字段观察与验收](model-thread-permission-observations-20261017.md)。
+
+
+### R28e6：模型联合本地意图（2026-10-17）
+
+普通模型行、Power和三强度命令复用B联合本地pair，保留R29/current-row零写、row-only tier与空effort nullable旧适配。新17实际8红9控制→同17绿，34文件495与新8浏览器红→绿；旧68保留51/17夹具失败，精准guard后同34命令全绿，内存27绿1默认长测跳过，构建／只读状态通过。首次68结果仍51/17，不能把原34控制与纠正后34命令称单批68绿；V2隔离probe证明storage init清理风险，不补认原丢失frame。LAN HTTP `http://10.30.0.24:48865/`，18条runner内部输入与HEAD稳定；自然GC三点同时留heap/RSS、默认长测未执行。详见[完整验收](model-picker-joint-consumers-20261017.md)。
+
+
+### R28e7：Default与物理强度选项（2026-10-17）
+
+普通OpenAI主输入与实际展开编辑器已接通Default／FI和物理model+effort强度条，保留当前行零设置写、R29显示继承及B联合本地意图。最终同V9新43绿、新8浏览器真红→绿、相关38文件576绿；单批原76控制全绿，内存27绿1默认长测跳过，构建和只读状态通过。首轮类型／Sheet／键盘观察与575/1失败均保留，精确夹具修正有旧产品完整对照；完整资格与权限动作、打开Trigger文案仍另验。新43包含25个实际RED、10个控制PASS、8个旧接口缺失下SKIP；576包含43和原495，不累加重叠组。原137布局控制与最后单例完整93分别在精确旧产品通过；恢复同V3后576绿。新8均有实际SSE清理；原76中的焦点16例不扩称同类SSE证据。LAN HTTP `http://10.30.0.24:48865/`，自然GC同时记录heap/RSS，不称长期稳定。详见[完整验收](model-picker-default-ui-20261017.md)。
+
+
+### R28e8：打开Trigger呈现（2026-10-17）
+
+同V6旧E7八例328纯target RED→V3同8GREEN69.0733s，related39文件589含new13／149；V3原focus16PASS属于完整100子集，恢复后完整100PASS853.8359s、68ownSSE真连接闭合，另32例无ownSSE，console100Vite＋2warm500＋8directory503而非零。旧V2的89／5failed／6timeout及20cleanupErrors、V3故障批66／1timeout／33failed和业务未达限制保留，内存27PASS1默认长测SKIP／build/status已结束但不证明长期RSS，最终放行见外置收据，见[完整记录](model-picker-open-trigger-20261017.md)。
+
+
+### 2026-10-17：R28e9a 实际RED/GREEN
+
+旧产品同V6完整8例实际48soft失败：每例2文案条件+1正opacity退出条件各双断言，硬守护和清理全部到达；不是单label纯RED。明确扩大至两个产品并重新联合独审后，先做Goal旧产品11PASS控制，再应用精确补丁。最终42文件618PASS、同字节/同ID专项8/8GREEN（88.3976s）、完整原38+Goal7共45/45PASS（289.3101s），均worker1/retry0。实际45例保留原33个60s与12个30s超时，未新增放宽。
+
+专项8+偏好/滚轮6共14条实际自有SSE连接全部关闭；focus/unknown32及Goal7无此ownSSE，不计入。专项8条Vite及原38控制的38条Vite+2条warm500均已分类，Goal7不补造统一console记录。8张closed/4张open截图已看。唯一build78.9816s、status0.7782s均exit0，正式2712539/start55361120未变、新磁盘未激活。LAN HTTP `http://10.30.0.24:48865/`，实体设备未直接测试。
+
+早期驱动、V4类型、V5零opacity观测及reader错误原样保留，不能改称产品RED；E8内存27PASS+1长测SKIP仅历史，本轮未重测。详见[本轮证据及外置放行口径](model-picker-trigger-tooltip-purpose-20261017.md)。Dca/普通指针离开与整个Goal仍未完成。
+
+
+## R28e9b 最终执行结果（2026-10-17）
+
+- 单测45文件667/667PASS；web类型26.7706s。原严格E2E及新增专项严格检查通过。
+- completion原8例99.0228s、完整原53例370.2184s、协调新2例18.8234s均PASS，worker1/retry0，发现ID顺序一致。实际超时30例30秒、33例60秒，原阈值未变。
+- 24条自有SSE各接收/finish/close/EOF一次且零活动连接；56份统一JSON里仅Vite56与显式warm500两条，Goal7无相同聚合口径。协调实际源码快照各51条（固定数组50加helper）；手机一帧仍有已结束退出动画对象，原隐藏/ARIA硬断言已通过，不称所有DOM节点都消失。
+- 全阶段51条命令互不重叠，保留18条失败；最终唯一构建76.1132s、只读状态0.8375s均exit0。正式runtime PID2712539/start55361120未变，新磁盘产物未激活。
+- Root查看最终16张图；390px长模型Sheet页脚遮住权限文字仍未修复，下一项补矩形/命中验收。完整Dca/ct/c、官方GUI、实体设备、长期RSS与逐帧原子性未宣称完成。
+
+前端 HTTP `http://10.30.0.24:48865/`、参考 HTTP `http://10.30.0.24:37575/native-goal.html` 均绑定0.0.0.0且200。[普通强度完成后的提示生命周期](model-picker-completion-tooltip-lifecycle-20261017.md) 记录完整红绿灯和原始证据；阶段放行另见外置E9b release receipt，整体Goal仍进行中。
+
+
+## R28e10：手机展开页脚验收
+
+- 旧CSS19实际13PASS/6合格晚期几何RED，253.326291s；精确同19全PASS，241.033691s，314状态/7529目标由116失败转0。320/390长模型旧相交118×44和61.75×44px，新布局均留6px间隔、五点命中通过，不能用无页面overflow代替命中。
+- 原四份spec的26控制全PASS，252.128685s；两批当前GREEN是45不同场景，旧19复跑不新增场景。原26有334状态/56条completion目标，原阈值和超时未改；10实际命令无重叠，唯一exit1是旧CSS合格红灯。
+- 新19严格SSE各19；原24实际accepted24/finish23/close24/ownerEOF24、零活动资源，Side2无同一helper且各有一次fixture fork。43条已知Vite WS console保留；不声称全45零POST、零console或客户端消费EOF。完整raw/runtime保护位于final-main，finally仅诊断和晚期清理检查。
+- 类型、唯一后置构建72.360628s与只读状态0.919364s均exit0；最后4493输入各自bookends稳定。Root实看10新图/2旧图；无新memory长测/实体手机/官方移动GUI或runtime激活。最终冻结/独审/放行依外置收据；[完整证据](model-picker-sheet-footer-responsive-20261017.md)记录准备期错误和后续ct/c边界。
+
+
+## R28e11：普通提示离开验收
+
+- 旧16单测10行为RED/6PASS；精确三处产品差分后相关46文件683/683PASS，79.167312s，含新16不重复累计；web类型检查27.016487s通过。
+- V1浏览器14实际FAIL为6合格行为RED/8祖先观察器失败，不能拼批。V2只修完整祖先观察，旧14在163.376807s全部到晚期硬保护；182状态/280目标中224失败。新同14在135.150868s全PASS、280目标0失败、28真实轨迹、434完整祖先收据，SSE accepted/finish/close/ownerEOF各14、cleanup0。
+- 原七spec的54控制全PASS，530.582886s、retry0；原超时45×30s/8×90s/1×60s不改。47JSON/660状态，45自有SSE四项各45；Side2正向fixture fork/权限写、Goal7直接断言不生成JSON，不能宣称全68零POST/console。保留新14例的14条、原控制的45条Vite诊断，47控制JSON unexpected0不外推Goal7。
+- 当前GREEN为68不同场景，四实际浏览器批次共96次执行；16命令含discovery与三次历史exit1，未将发现数算通过。唯一后置build74.582513s、status0.944057s均通过，正式runtime2712539/start55361120未变、磁盘未激活。Root实看5图，无实体设备/官方GUI/长RSS或ct/fullDca完结声明。最终冻结/独审/放行依外置收据；见[本轮验收边界](composer-tooltip-ordinary-leave-20261017.md)。
+
+
+## E12：非模态菜单验收（2026-10-17）
+
+新增主输入／真实 Sheet 两例完成四次可信首 down、30 条状态和 26 条行为比较；每例 14 行直至 final-main 执行硬保护，finally 仅为诊断。原始混合 OLD2、单 Sheet 容量诊断及完整 V3 红绿分别保留，47 文件 695 单测已含新 12；76 项兼容浏览器单批全过，连同核心两例为 78 个当前不同场景；后置构建、类型及状态均通过，实际运行身份未切换，详情见[完整分项记录](model-picker-nonmodal-20261017.md)，不叠加历史执行充当不同场景。
+
+
+## R29：Goal 附件同 app 与运行中 HTTP（2026-10-17）
+
+两个后端文件13项先11PASS/2行为RED，三文件16项后全过；新 read/cleanup 在旧实现未到达，不补记通过。运行中 HTTP4251-codepoint/14059-byte Unicode 的物化、读取、清理均200，原三个进程身份保持、正式runtime磁盘产物未激活；详见 [分项证据](goal-attachment-registration-20261017.md)，E12的695单测/78浏览器不叠加到本批。
+
+
+## 2026-10-18：长历史阅读与输入焦点（R30）
+
+原1500条历史性能从WebKit846.0／Chromium742.0ms收敛至完整原用例422.0／454.7ms，500ms门槛及真实正文、历史／草稿恢复断言未改。局部选择订阅、真实行原点／首测补偿、阅读意图及下一帧原生焦点分别保留隔离和清理。最终两引擎各23阅读、15输入／草稿、4真实Lexical控制通过；原10000／30基准、内存27PASS+1默认长测SKIP、Goal11和原组件4组、非模态2、相关44文件246项、Node3及后置pnpm check通过。指定13份E2E strict通过；旧20份扩大检查失败与早期WebKit刷新诊断未归因边界保留。正式runtime未激活，见[完整验收](history-switch-performance-20261018.md)。

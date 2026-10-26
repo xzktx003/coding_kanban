@@ -138,10 +138,14 @@ for (const width of [1440, 390]) {
         }
         await expect(editor).toHaveText("请保留我的草稿");
       }
+      let tabsUnavailable = true;
+      await page.route("**/api/session/tabs", (route) =>
+        tabsUnavailable
+          ? route.fulfill({ status: 503, json: { error: "isolated sync failure" } })
+          : route.fallback(),
+      );
       await page.evaluate(() =>
-        (window as any).__tabs.setState({
-          tabSyncError: "isolated sync failure",
-        }),
+        window.dispatchEvent(new Event("session-connection-retry")),
       );
       await expect(page.getByText("同步待重试", { exact: true })).toBeVisible();
       expect(await geometry()).toEqual(before);
@@ -159,9 +163,8 @@ for (const width of [1440, 390]) {
       const input = (await editor.boundingBox())!;
       expect(notice.y + notice.height).toBeLessThan(input.y);
       await page.screenshot({ path: info.outputPath("sync-notice.png") });
-      await page.evaluate(() =>
-        (window as any).__tabs.setState({ tabSyncError: null }),
-      );
+      tabsUnavailable = false;
+      await page.getByRole("button", { name: "立即同步", exact: true }).click();
       await expect(page.getByText("同步待重试", { exact: true })).toHaveCount(
         0,
       );

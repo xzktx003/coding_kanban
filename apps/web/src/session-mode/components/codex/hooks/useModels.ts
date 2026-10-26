@@ -26,6 +26,8 @@ type ModelCacheStore = {
   loaded: boolean;
   loading: boolean;
   error: string | null;
+  modelStatus: "pending" | "success" | "error";
+  modelSnapshot: Model[] | null;
   load: () => Promise<void>;
   refreshProviders: () => Promise<void>;
 };
@@ -39,6 +41,8 @@ export const useModelCacheStore = create<ModelCacheStore>()((set, get) => ({
   loaded: false,
   loading: false,
   error: null,
+  modelStatus: "pending",
+  modelSnapshot: null,
 
   refreshProviders: async () => {
     try {
@@ -53,18 +57,42 @@ export const useModelCacheStore = create<ModelCacheStore>()((set, get) => ({
 
   load: async () => {
     if (get().loaded || get().loading) return;
-    set({ loading: true, error: null });
+    const current = get();
+    set({
+      loading: true,
+      error: null,
+      modelStatus:
+        current.modelSnapshot === current.openAiModels
+          ? current.modelStatus
+          : "pending",
+    });
+    // model/list has its own settled state. Ancillary provider/preset reads do
+    // not postpone an accepted catalog or turn its success into a model error.
+    const modelRead = listModels().then(
+      (response) => {
+        if (response && Array.isArray(response.data))
+          set({
+            openAiModels: response.data,
+            modelSnapshot: response.data,
+            modelStatus: "success",
+          });
+        else set({ modelStatus: "error" });
+        return response;
+      },
+      (error) => {
+        set({ modelStatus: "error" });
+        throw error;
+      },
+    );
     const [models, providers, other, presets] = await Promise.allSettled([
-      listModels(),
+      modelRead,
       listConfigProviders(),
       listOtherModels(),
       listProviderPresets(),
     ]);
     const update: Partial<ModelCacheStore> = {};
     const errors: string[] = [];
-    if (models.status === "fulfilled" && Array.isArray(models.value.data))
-      update.openAiModels = models.value.data;
-    else
+    if (models.status !== "fulfilled" || !Array.isArray(models.value?.data))
       errors.push(
         models.status === "rejected"
           ? String(
@@ -130,7 +158,10 @@ export function useModels() {
   const otherModels = useModelCacheStore((s) => s.otherModels);
   const load = useModelCacheStore((s) => s.load);
   const loading = useModelCacheStore((s) => s.loading);
+  const loaded = useModelCacheStore((s) => s.loaded);
   const error = useModelCacheStore((s) => s.error);
+  const modelStatus = useModelCacheStore((s) => s.modelStatus);
+  const modelSnapshot = useModelCacheStore((s) => s.modelSnapshot);
   const configProviders = useModelCacheStore((s) => s.configProviders);
   const refreshProviders = useModelCacheStore((s) => s.refreshProviders);
   const presets = useModelCacheStore((s) => s.presets);
@@ -194,7 +225,10 @@ export function useModels() {
 
   return {
     loading,
+    loaded,
     error,
+    modelStatus,
+    hasModelSnapshot: modelSnapshot === openAiModels,
     reload: async () => {
       useModelCacheStore.setState({ loaded: false });
       await load();

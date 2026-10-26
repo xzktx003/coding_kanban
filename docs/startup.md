@@ -1,5 +1,9 @@
 # 启动、编译与更新
 
+全新受控可见窗格宿主可增加 `--refresh-workspace-dir`，为不同私有profile选择同一已有项目。要求service/domain/control齐全，项目路径规范、用户拥有、无符号链接且非world-writable；允许0775开发目录。原 `--project-dir` 仍是本profile内的新私有空目录；公共目录不得与私有运行/控制/连接/登录目录交叠，启动前重查，不创建、不清空、不改项目权限。该参数不启动/切换服务，也不自动注册profile，见 [公共工作目录](designs/codex-mode-audit-20261014/refresh-shared-workspace-20261016.md)。
+
+刷新传输实验不由 `pnpm dev` 自动开启：只有服务端固定profile注册可显式选择 `webSocketCompression: true`，无需也不提供HTTP/浏览器开关。它只改变浏览器WS压缩协商，回环不重复压缩，解压后大小和队列预算保持；正式启用仍待完整验收，见 [缓存与传输核对](designs/codex-mode-audit-20261014/refresh-websocket-transport-20261016.md)。
+
 刷新隔离候选的 `startPrivateService` 会在发布 ready 前启动独立账号观察进程并保存初始授权锚，随后 manager 可重建而不改绑旧 native。观察器退出、锚缺失或账号撤销均拒绝新接入，不自动重建观察器、不停止原任务；该观察进程自动纳入资源测量。旧候选目录不得静默补写，默认开发入口仍不启用刷新候选。见 [持久授权启动边界](designs/codex-mode-audit-20261014/refresh-native-authority.md)。
 
 推荐入口是仓库根目录的 `pnpm dev:restart`（等价于 `./scripts/restart-dev.sh`）。它先完成构建，再重启本仓库前后端，最后分别检查 Node 网关、前端和会话运行层。启动成功后使用输出的 `Open` 局域网地址；例如 HTTPS `https://10.30.0.22:8484/?mode=session`，实际主机、端口及协议以 `.env` 和输出为准。
@@ -137,7 +141,13 @@ TypeScript 运行层的文件监听遇到 EMFILE/ENOSPC 时，使用 500 ms 的�
 
 原生刷新候选路径的显式隔离启动：新宿主的 `--refresh-service-config` 和 `--refresh-domain` 仅接入已验证的私有服务；检查发生在登录副本导入和扩展安装前，失败不重启服务。可选 `--reconnection-grace-seconds` 为 1–300 秒（该显式模式默认 60），不是 thread TTL。独立客户端路由由服务端按 UUID 注册，`/?mode=codex&nativeClient=<UUID>` 只选择已注册宿主；关注集合共用，布局、原生状态目录和连接分别隔离。默认 `pnpm dev`、正式运行服务和已有 Agent 不因这些参数改变。完整参数及当前红灯见 [组件说明](../packages/native-codex-host/refresh-prototype/README.md#explicit-private-host-and-client-routing) 和 [持续验收](designs/codex-mode-audit-20261014/refresh-recovery-progress-20261015.md)。
 
-已有独立控制进程时，可显式增加 `--refresh-control-root` 固定控制与 native 双重身份，绑定每个新 CLI 的只读账号观察并在实际写入前核对。控制进程及账号变化只关闭自己的旧连接，owner 显式退出不停止 native；参数仅从 launcher 命令行读取。真实 ChatGPT/官方 GUI 和完整性能关卡仍未通过，详见 [桥接授权](designs/codex-mode-audit-20261014/refresh-bridge-authorization.md)。
+原生宿主沿用显式代理地址，并只保留 `NODE_USE_ENV_PROXY=0/1`，未设置时不启用；任意继承的 NODE_OPTIONS 仍被自有 provider preload 替代。实际代理支持取决于 code-server 自带 Node 版本，本轮为 v24.21.0。首次模型公告由原按钮完成准备，不能通过改 feature flag 跳过；完整刷新计时仍包含出现的遮罩等待，见 [初始化核对](designs/codex-mode-audit-20261014/refresh-initialization-proxy-20261016.md)。
+
+code-server 在创建 extensionHost 前清除 NODE_OPTIONS。新宿主派生内部 code-server 路径标记，自有父进程 shim 仅对固定 bootstrap/type/ESM/companion scope 的 fork 加入固定 execArgv preload；其它子进程和未知包布局不扩大注入。该机制不迁移存量宿主或改其参数；26.51007.21434 的精确 provider/发送兼容性及钩子恢复见 [实际 fork 验收](designs/codex-mode-audit-20261014/refresh-preload-fork-20261016.md)。
+
+已有独立控制进程时，可显式增加 `--refresh-control-root` 固定控制与 native 双重身份，绑定每个新 CLI 的只读账号观察并在实际写入前核对。控制进程及账号变化只关闭自己的旧连接，owner 显式退出不停止 native；参数由 launcher 命令行或对应显式 `NATIVE_CODEX_*` 环境配置读取，不由 HTTP 传入。真实 ChatGPT/官方 GUI 和完整性能关卡仍未通过，详见 [桥接授权](designs/codex-mode-audit-20261014/refresh-bridge-authorization.md)。
+
+全新受控宿主可用 `--restore-visible-windows` 替代 `--auto-open-new-chats`，将初始及恢复目标交给网页当前可见窗格；它要求上述 service/domain/control 三项，与自动首开和 fixture 启动互斥。VS Code 旧编辑器列表自动恢复也由新宿主配置关闭。缺失受控记录拒绝接入该模式，不隐式迁移存量实例；实际开发入口、三端草稿与剩余两秒关卡见 [可见启动验收](designs/codex-mode-audit-20261014/refresh-visible-startup-20261016.md)。
 
 生成的隔离 CLI 包装器每次执行都重查固定服务域、代次、PID 和 Linux start ticks，连接打开后、initialize 转发前再次核对；失效不附着新实例。保温管理器启动在线程操作前核对两次原生只读账号/工作区身份及初始通知，等待有界（默认 15 秒）。这些步骤失败只关闭自己的连接，不重启服务或停止任务。手机验收按用户确认使用 iPhone 16 尺寸模拟，参数、浏览器引擎和系统键盘边界记入原始结果。
 

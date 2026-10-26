@@ -112,7 +112,7 @@ import {
   ComposerEditor,
   type ComposerEditorHandle,
 } from "./editor/ComposerEditor";
-import { shouldAutoFocusComposer } from "./composerFocus";
+import { scheduleComposerAutoFocus } from "./composerFocus";
 import { useComposerFileDrop } from "./composerDrop";
 import { SlashCommandDialogs } from "./SlashCommandDialogs";
 import { SlashCommandPopover } from "./SlashCommandsSelector";
@@ -284,10 +284,17 @@ export function Composer({
   // Desktop keeps the previous refocus behaviour. On touch devices, changing
   // tabs must not summon the soft keyboard; the user can focus the editor by
   // tapping it explicitly.
-  useEffect(() => {
-    if (!shouldAutoFocusComposer()) return;
-    editorRef.current?.focus();
-  }, [currentThreadId, inputFocusTrigger]);
+  useEffect(
+    () =>
+      scheduleComposerAutoFocus(
+        () =>
+          wrapperRef.current?.querySelector<HTMLElement>(
+            '[contenteditable="true"]',
+          ) ?? null,
+        () => editorRef.current?.focus(),
+      ),
+    [currentThreadId, inputFocusTrigger],
+  );
 
   const handleEditorSubmit = useCallback((intent?: "default" | "opposite") => {
     const mode = useFollowupSettingsStore.getState().mode;
@@ -922,6 +929,7 @@ export function Composer({
                       <ConversationMenu
                         threadId={currentThreadId}
                         draftOwner={owner}
+                        composerRef={formRef}
                         title="当前会话"
                         variant="item"
                       />
@@ -1328,6 +1336,9 @@ export function Composer({
       <SlashCommandDialogs
         open={slashDialog}
         onClose={() => setSlashDialog(null)}
+        threadId={currentThreadId}
+        cwd={cwd}
+        draftOwner={owner}
       />
     </div>
   );

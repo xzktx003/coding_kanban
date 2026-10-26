@@ -34,7 +34,7 @@ import { MentionChipNode } from "./MentionChipNode";
 import { MentionTypeaheadPlugin } from "./MentionTypeaheadPlugin";
 import { FormatToolbar } from "./FormatToolbar";
 import { $setEditorFromString } from "./useExternalValueSync";
-import { shouldAutoFocusComposer } from "../composerFocus";
+import { scheduleComposerAutoFocus } from "../composerFocus";
 
 export interface ComposerEditorHandle {
   focus: () => void;
@@ -204,10 +204,14 @@ function ExternalValuePlugin({
   );
 
   // Focus on mount, matching the previous textarea behaviour.
-  useEffect(() => {
-    if (!shouldAutoFocusComposer()) return;
-    editor.focus();
-  }, [editor]);
+  useEffect(
+    () =>
+      scheduleComposerAutoFocus(
+        () => editor.getRootElement(),
+        () => editor.focus(),
+      ),
+    [editor],
+  );
 
   useEffect(() => {
     const root = editor.getRootElement();

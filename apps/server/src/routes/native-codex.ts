@@ -287,6 +287,7 @@ function proxyWebSocket(
   gateway: NativeCodexGateway,
   active: Set<WebSocket>,
   prefix = DEFAULT_PREFIX,
+  browserCompression = false,
 ): void {
   active.add(client);
   let upstream: WebSocket | undefined;
@@ -364,6 +365,7 @@ function proxyWebSocket(
         headers: headers(request, true, prefix),
         handshakeTimeout: 5000,
         maxPayload: NATIVE_CODEX_MAX_UPSTREAM_MESSAGE_BYTES,
+        perMessageDeflate: !browserCompression,
       });
       upstream.on("open", pump);
       upstream.on("message", (data: RawData, binary: boolean) => {
@@ -401,9 +403,11 @@ function proxyWebSocket(
 
 export async function registerNativeCodexRoutes(
   app: FastifyInstance,
-  options: { gateway?: NativeCodexGateway; profileId?: string; visibility?: NativeVisibilityController },
+  options: { gateway?: NativeCodexGateway; profileId?: string; visibility?: NativeVisibilityController; webSocketCompression?: boolean },
 ): Promise<void> {
   if (options.profileId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(options.profileId)) throw new Error("exact native profile UUID required");
+  if (options.webSocketCompression !== undefined && typeof options.webSocketCompression !== "boolean") throw new Error("native compression must be a boolean");
+  if (options.webSocketCompression && !options.profileId) throw new Error("native compression requires an explicit profile");
   if(options.visibility&&(!options.profileId||options.visibility.profileId!==options.profileId))throw Error("visibility requires its exact registered profile");
   const PREFIX = options.profileId ? `${DEFAULT_PREFIX}/clients/${options.profileId}` : DEFAULT_PREFIX;
   const API_PREFIX = options.profileId ? `/api/native-codex/clients/${options.profileId}` : "/api/native-codex";
@@ -415,7 +419,13 @@ export async function registerNativeCodexRoutes(
   const nativeWss = new WebSocketServer({
     noServer: true,
     maxPayload: NATIVE_CODEX_MAX_MESSAGE_BYTES,
-    perMessageDeflate: false,
+    perMessageDeflate: options.webSocketCompression === true ? {
+      serverNoContextTakeover: true,
+      clientNoContextTakeover: true,
+      serverMaxWindowBits: 10,
+      clientMaxWindowBits: 10,
+      concurrencyLimit: 4,
+    } : false,
   });
   const upgradeHeads = new WeakMap<IncomingMessage, Buffer>();
   const captureUpgradeHead = (
@@ -669,7 +679,7 @@ export async function registerNativeCodexRoutes(
           request.raw,
           request.raw.socket,
           head,
-          (client) => proxyWebSocket(client, request, gateway, active, PREFIX),
+          (client) => proxyWebSocket(client, request, gateway, active, PREFIX, options.webSocketCompression === true),
         );
       };
     });

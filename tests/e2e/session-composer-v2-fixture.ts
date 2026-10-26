@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import Fastify from "fastify";
+import type { ThreadStatus } from "../../apps/web/src/session-mode/bindings/v2";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -251,7 +252,7 @@ export async function setup(
       async ({ url, event }) => {
         const { useCodexStore } = await import(url);
         useCodexStore.getState().addEvent("ux-0", event);
-        useCodexStore.setState((s) => ({
+        useCodexStore.setState((s: { threadStatusMap: Record<string, ThreadStatus> }) => ({
           threadStatusMap: {
             ...s.threadStatusMap,
             "ux-0": {

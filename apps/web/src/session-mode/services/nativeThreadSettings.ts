@@ -1,3 +1,4 @@
+import { projectNativePermissionMetadata } from "./nativeThreadPermissionMetadata";
 import type { hydrateThreadModel } from "@session/stores/useThreadModelStore";
 type Settings = Parameters<typeof hydrateThreadModel>[1];
 const record = (value: unknown): Record<string, unknown> => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -5,7 +6,9 @@ const record = (value: unknown): Record<string, unknown> => value && typeof valu
 export function nativeThreadSettings(value: unknown, fallback?: unknown): Settings {
   const defined = (input: unknown) => Object.fromEntries(Object.entries(record(input)).filter(([, v]) => v !== undefined));
   const native = { ...defined(fallback), ...defined(value) };
+  const nativePermissionMetadata = projectNativePermissionMetadata(value);
   return {
+    ...(nativePermissionMetadata ? { nativePermissionMetadata } : {}),
     ...(typeof native.model === "string" && native.model ? { model: native.model } : {}),
     ...(typeof native.modelProvider === "string" && native.modelProvider ? { modelProvider: native.modelProvider } : {}),
     ...("reasoningEffort" in native ? { reasoningEffort: native.reasoningEffort as Settings["reasoningEffort"] } : "effort" in native ? { reasoningEffort: native.effort as Settings["reasoningEffort"] } : {}),

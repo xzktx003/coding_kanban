@@ -1,0 +1,209 @@
+/* Ordinary extension Ht/Ut: captured geometry and semantic palette mappings. */
+.session-mode .session-native-full-access-confirmation {
+  --codex-text: var(--vscode-foreground, var(--foreground));
+  --codex-muted: var(--vscode-descriptionForeground, var(--muted-foreground));
+  --codex-border: var(--app-color-border, color-mix(in oklab, var(--codex-text) 8%, transparent));
+  --full-access-terminal-background: #4d4d4d;
+  --full-access-internet-background: #cdf3ff;
+  --full-access-internet-foreground: #41cef9;
+  display: flex;
+  flex-direction: column;
+  width: 520px;
+  max-width: 92vw;
+  max-height: 92dvh;
+  gap: 0;
+  overflow-y: auto;
+  padding: 20px;
+  border: 0;
+  border-radius: 20px;
+  color: var(--codex-text, var(--foreground));
+  background: color-mix(in oklab, var(--vscode-dropdown-background, var(--popover)) 90%, transparent);
+  box-shadow: 0 0 0 0.5px var(--codex-border), 0 4px 8px -2px rgb(0 0 0 / 10%);
+  backdrop-filter: blur(24px);
+  font-family: var(--vscode-font-family, system-ui, sans-serif);
+  font-synthesis-weight: none;
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: normal;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.session-mode.dark .session-native-full-access-confirmation {
+  --full-access-terminal-background: #bebebe;
+  --full-access-internet-background: #2b393e;
+  --full-access-internet-foreground: #43d0fb;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-section {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-section + .full-access-section {
+  margin-top: 12px;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: inherit;
+  font-size: 16px;
+  line-height: 28px;
+  font-weight: 600;
+  text-align: start;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-title-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-description,
+.session-mode .session-native-full-access-confirmation .full-access-risk {
+  margin: 0;
+  color: var(--codex-muted, var(--muted-foreground));
+  font-size: inherit;
+  line-height: inherit;
+  text-wrap: pretty;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-capabilities {
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--codex-text, var(--foreground)) 5%, transparent);
+  padding: 12px 16px;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-capability {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-block: 8px;
+  border-bottom: 1px solid color-mix(in oklab, var(--codex-border) 70%, transparent);
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-capability:first-child {
+  padding-top: 0;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-capability:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-capability-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-capability-copy {
+  min-width: 0;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-capability-title {
+  font-size: 12px;
+  line-height: calc(1.25 / 0.875);
+  font-weight: 600;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-capability-description {
+  color: var(--codex-muted, var(--muted-foreground));
+  font-size: 11px;
+  line-height: calc(1 / 0.75);
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-learn-more {
+  display: inline-block;
+  vertical-align: middle;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground, var(--primary));
+  font: inherit;
+  cursor: pointer;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-learn-more:hover {
+  text-decoration: underline;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-footer {
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-footer button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 8px 20px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 400;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-cancel {
+  color: inherit;
+  background: color-mix(in oklab, var(--codex-text, var(--foreground)) 5%, transparent);
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-confirm {
+  color: var(--vscode-charts-red, var(--destructive));
+  background: color-mix(in oklab, var(--vscode-charts-red, var(--destructive)) 10%, transparent);
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-cancel:hover {
+  background: color-mix(in oklab, var(--codex-text, var(--foreground)) 10%, transparent);
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-confirm:hover {
+  background: color-mix(in oklab, var(--vscode-charts-red, var(--destructive)) 20%, transparent);
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-confirm-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.session-mode .session-native-full-access-confirmation button:focus-visible {
+  outline: 2px solid var(--ring, var(--primary));
+  outline-offset: 2px;
+}
+
+@supports (corner-shape: superellipse(1.5)) {
+  .session-mode .session-native-full-access-confirmation {
+    border-radius: 25px;
+    corner-shape: superellipse(1.5);
+  }
+
+  .session-mode .session-native-full-access-confirmation .full-access-capabilities {
+    border-radius: 20px;
+    corner-shape: superellipse(1.5);
+  }
+}
+
+
+/* The extension dims with its editor surface, preserving the chosen theme. */
+.session-mode .session-native-full-access-overlay {
+  background: color-mix(in oklab, var(--vscode-editor-background, var(--background)) 80%, transparent);
+}

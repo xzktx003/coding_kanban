@@ -1,9 +1,16 @@
+import { Buffer } from "node:buffer";
 import { expect, test } from "@playwright/test";
 import { installSessionUxFixture, seedSessionUx } from "./session-ux-fixture";
 import {
   installResizeDiagnostics,
   saveResizeDiagnostics,
 } from "./resize-observer-diagnostics";
+
+// Fixed raster dimensions avoid engine-specific SVG natural-size reporting.
+const LATE_IMAGE_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAALQAAAIcCAIAAADQfxPPAAAE4ElEQVR4nO3SMQ0AIADAMKQTbGAWA+yGo0kF7NiYe8HVeF7At8xBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfJHCRzkMxBMgfpAPakrs0UApEVAAAAAElFTkSuQmCC",
+  "base64",
+);
 
 for (const width of [1440, 390])
   test.describe(`late content in ${width}px multi-project grid`, () => {
@@ -24,13 +31,13 @@ for (const width of [1440, 390])
       let release!: () => void;
       let imageRequested = false;
       await page.route(
-        "https://fixture.invalid/late-reading.svg",
+        "https://fixture.invalid/late-reading.png",
         async (route) => {
           imageRequested = true;
           await new Promise<void>((resolve) => (release = resolve));
           await route.fulfill({
-            contentType: "image/svg+xml",
-            body: '<svg xmlns="http://www.w3.org/2000/svg" width="180" height="540"><rect width="180" height="540" fill="#809b82"/></svg>',
+            contentType: "image/png",
+            body: LATE_IMAGE_PNG,
           });
         },
       );
@@ -146,34 +153,47 @@ for (const width of [1440, 390])
           key: visible.dataset.codexRow!,
           offset: visible.getBoundingClientRect().top - top,
           earlierKey: earlier.dataset.codexRow!,
-          earlierIndex: Number(earlier.dataset.index),
+          earlierVirtualIndex: Number(earlier.dataset.index),
           height: earlier.getBoundingClientRect().height,
         };
       });
       const earlier = surfaces
         .first()
         .locator(`[data-codex-row="${anchor.earlierKey}"]`);
-      await page.evaluate(async (index) => {
+      await page.evaluate(async ({ earlierKey }) => {
         const path = "/src/session-mode/components/codex/stores/index.ts";
         const { useCodexStore } = await import(
           performance
             .getEntriesByType("resource")
             .findLast((e) => new URL(e.name).pathname === path)?.name ?? path
         );
+        // A recent-history window rebases virtual positions. Preserve the
+        // exact source event's native IDs when updating its visible row.
+        const matches = (useCodexStore.getState().events["ux-0"] ?? []).filter(
+          (event: any) =>
+            event.method === "item/completed" &&
+            `event-${event.params?.turnId}-${event.params?.item?.id}` ===
+              earlierKey,
+        );
+        if (matches.length !== 1)
+          throw new Error("Earlier native message identity is not unique");
+        const original = matches[0];
+        if (
+          original.params.threadId !== "ux-0" ||
+          original.params.item.type !== "agentMessage"
+        )
+          throw new Error("Earlier native message owner/type mismatch");
         useCodexStore.getState().addEvent("ux-0", {
-          method: "item/completed",
+          ...original,
           params: {
-            threadId: "ux-0",
-            turnId: `resize-turn-${index}`,
+            ...original.params,
             item: {
-              id: `resize-message-${index}`,
-              type: "agentMessage",
-              phase: "final_answer",
-              text: `ux-0 阅读消息 ${index}\n\n\x60\x60\x60typescript\n${Array.from({ length: 24 }, (_, i) => `const value${i} = ${i};`).join("\n")}\n\x60\x60\x60\n\n![延迟图片](https://fixture.invalid/late-reading.svg)`,
+              ...original.params.item,
+              text: `${original.params.item.text}\n\n\x60\x60\x60typescript\n${Array.from({ length: 24 }, (_, i) => `const value${i} = ${i};`).join("\n")}\n\x60\x60\x60\n\n![延迟图片](https://fixture.invalid/late-reading.png)`,
             },
           },
         });
-      }, anchor.earlierIndex);
+      }, anchor);
       await expect.poll(() => imageRequested).toBe(true);
       await earlier.locator(".hljs-keyword").first().waitFor();
       await expect

@@ -16,6 +16,7 @@ import { Ownership, readHistory, type Rpc } from "./ownership.js";
 import { boundedText, rollback } from "./protocol.js";
 import { GithubPreviewService } from "./github-preview.js";
 import { SlackPreviewService } from "./slack-preview.js";
+import { FeedbackPreflightService, type FeedbackPreflightOptions } from "./feedback-preflight.js";
 
 export interface CodexOptions {
   hub: EventHub;
@@ -24,6 +25,7 @@ export interface CodexOptions {
   launch?: { command: string; args: string[] };
   sweepIntervalMs?: number;
   resolveEnv?: () => Promise<NodeJS.ProcessEnv>;
+  feedbackPreflight?: FeedbackPreflightOptions;
 }
 const requests: Record<string, { event: string; kind: string }> = {
   "item/commandExecution/requestApproval": {
@@ -66,6 +68,7 @@ export class CodexService {
   readonly accountOperations = new KeyedSerial();
   private starting?: Promise<StdioRpc>;
   private transport?: StdioRpc;
+  private readonly transports = new Set<StdioRpc>();
   private closed = false;
   private sweep?: ReturnType<typeof setInterval>;
   private sweeping = false;
@@ -73,6 +76,18 @@ export class CodexService {
   private rollbacks = new Map<string, { key: string; work: Promise<Json> }>();
   private previews?: SlackPreviewService;
   private githubPreview?: GithubPreviewService;
+  private feedbackPolicy?: FeedbackPreflightService;
+  get feedbackPreflight(): FeedbackPreflightService {
+    return this.feedbackPolicy ??= new FeedbackPreflightService(
+      (method, params, options) => this.raw(method, params, options),
+      this.options.instance,
+      {
+        ...this.options.feedbackPreflight,
+        baseURL: this.options.feedbackPreflight?.baseURL ??
+          (this.options.env ?? process.env).SESSION_CODEX_FEEDBACK_API_BASE_URL,
+      },
+    );
+  }
   get githubPreviews(): GithubPreviewService {
     return this.githubPreview ??= new GithubPreviewService((method, params) => this.raw(method, params), this.options.instance);
   }
@@ -97,12 +112,23 @@ export class CodexService {
     const rpc = new StdioRpc({
       ...launch,
       env,
-      onRequest: (request) => this.onRequest(request),
-      onNotification: (notification) => this.onNotification(notification),
+      onRequest: (request) => {
+        if (this.transport === rpc && rpc.available) return this.onRequest(request);
+      },
+      onNotification: (notification) => {
+        if (this.transport === rpc && rpc.available) this.onNotification(notification);
+      },
       onDiagnostic: (text) =>
         this.options.hub.publish("codex:stderr", { message: text }),
       onExit: () => {
+        if (this.transport !== rpc) return;
+        this.transport = undefined;
+        this.starting = undefined;
+        clearInterval(this.sweep);
+        this.sweep = undefined;
+        this.sweeping = false;
         this.mcpOAuthThreadId=false;
+        this.feedbackPolicy?.invalidate();
         this.previews?.invalidate();
         this.githubPreview?.invalidate();
         this.pending.clear();
@@ -111,6 +137,10 @@ export class CodexService {
         this.options.hub.publish("codex:disconnected", {});
       },
     });
+    // A broken pipe is not proof that the native task process exited. Retain
+    // ownership until exit or explicit service shutdown; reconnect never kills it.
+    this.transports.add(rpc);
+    rpc.child.once("close", () => this.transports.delete(rpc));
     this.transport = rpc;
     try {
       const response = await rpc.request("initialize", {
@@ -141,7 +171,7 @@ export class CodexService {
               await this.ownership.sweep(id);
             }
           })().finally(() => {
-            this.sweeping = false;
+            if (this.transport === rpc) this.sweeping = false;
           });
         }, interval);
         this.sweep.unref();
@@ -156,7 +186,27 @@ export class CodexService {
   private ready(): Promise<StdioRpc> {
     if (this.closed)
       return Promise.reject(new Error("NOT_SENT: Codex service closed"));
-    this.starting ??= this.connect();
+    // Also tolerate a retained failed transport (including a live legacy
+    // runtime). Never retry the failed RPC; only a subsequent call reconnects.
+    if (this.transport && !this.transport.available) {
+      this.transport = undefined;
+      this.starting = undefined;
+      clearInterval(this.sweep);
+      this.sweep = undefined;
+      this.sweeping = false;
+      this.pending.clear();
+      this.ownership.invalidate();
+      this.options.hub.invalidatePending("codex");
+    }
+    if (!this.starting) {
+      const starting = this.connect();
+      this.starting = starting;
+      // Discovery/initialize can fail before onExit owns a transport. Clear only
+      // this attempt; its late rejection must not discard a newer connection.
+      void starting.catch(() => {
+        if (this.starting === starting) this.starting = undefined;
+      });
+    }
     return this.starting;
   }
   readonly raw: Rpc = async (method, params, options) =>
@@ -197,6 +247,7 @@ export class CodexService {
     notification = sanitized;
     const method = String(notification.method),
       params = object(notification.params);
+    this.feedbackPolicy?.observe(method);
     this.previews?.observe(method, params);
     this.githubPreview?.observe(method, params);
     this.ownership.observe(method, params);
@@ -306,10 +357,11 @@ export class CodexService {
   }
 
   async close(): Promise<void> {
+    this.feedbackPolicy?.close();
     await this.previews?.close();
     await this.githubPreview?.close();
     this.closed = true;
     clearInterval(this.sweep);
-    await this.transport?.close();
+    await Promise.all([...this.transports].map(transport => transport.close()));
   }
 }

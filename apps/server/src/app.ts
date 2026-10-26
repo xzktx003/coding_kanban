@@ -3,6 +3,7 @@ import { registerWorkbenchVsCodeWebRoutes } from "./routes/workbench-vscode-web.
 import { registerSessionPreviewRoutes } from "./routes/session-preview.js";
 import type { SessionCodexFeishuReplyService } from "./services/session-codex-feishu-reply-service.js";
 import { registerSessionModeRoutes } from "./routes/session-mode.js";
+import { registerSessionGoalAttachmentRoutes } from "./routes/session-goal-attachments.js";
 import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import Fastify from "fastify";
@@ -565,6 +566,9 @@ export function buildServer(options: BuildServerOptions = {}): {
 
   app.register(websocket);
   app.register(async function sessionModeGateway(instance) {
+    registerSessionGoalAttachmentRoutes(instance, {
+      attachmentRoot: options.sessionAttachmentRoot,
+    });
     registerSessionPreviewRoutes(instance);
     registerCodexWebsitePreviewRoutes(instance);
     registerWorkbenchVsCodeWebRoutes(instance, vsCodeWebManager);
