@@ -113,3 +113,22 @@ body:has(.workbench-shell) {
     margin-left: auto;
   }
 }
+
+.workbench-error-details {
+  box-sizing: border-box;
+  width: min(640px, calc(100% - 32px));
+  padding: 12px;
+  border: 1px solid #ffffff26;
+  border-radius: 6px;
+}
+.workbench-error-details summary {
+  cursor: pointer;
+}
+.workbench-error-details pre {
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  user-select: text;
+}

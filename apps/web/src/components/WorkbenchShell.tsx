@@ -21,22 +21,45 @@ const TerminalApp = lazy(() => import("../App"));
 const SessionApp = lazy(() => import("../session-mode/SessionWorkbench"));
 const CodexApp = lazy(() => import("../codex-mode/CodexWorkbench"));
 
-class WorkbenchBoundary extends Component<
-  { children: ReactNode; modeName: string; onTerminal: () => void },
-  { failed: boolean }
+export class WorkbenchBoundary extends Component<
+  {
+    children: ReactNode;
+    modeName: string;
+    onTerminal: () => void;
+    reloadPage?: () => void;
+  },
+  { failed: boolean; errorMessage: string }
 > {
-  state = { failed: false };
-  static getDerivedStateFromError() {
-    return { failed: true };
+  state = { failed: false, errorMessage: "" };
+  static getDerivedStateFromError(error: unknown) {
+    // Retain only a small diagnostic, never an Error/stack or component payload.
+    const message =
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "未知界面错误";
+    return { failed: true, errorMessage: message.slice(0, 1000) };
   }
   render() {
     if (this.state.failed)
       return (
         <div className="workbench-state" role="alert">
           <h2>{this.props.modeName}界面加载失败</h2>
-          <p>终端模式仍然可用。</p>
+          <p>可以重新加载本页，或切换到终端模式。</p>
+          <details className="workbench-error-details">
+            <summary>错误详情</summary>
+            <pre>{this.state.errorMessage}</pre>
+          </details>
           <button onClick={this.props.onTerminal}>切换到终端模式</button>
-          <button onClick={() => this.setState({ failed: false })}>
+          <button
+            onClick={() => {
+              // React.lazy caches import rejection; clearing boundary state cannot
+              // recover an outdated/failed module. Reload only on this explicit click.
+              if (this.props.reloadPage) this.props.reloadPage();
+              else window.location.reload();
+            }}
+          >
             重新加载界面
           </button>
         </div>
