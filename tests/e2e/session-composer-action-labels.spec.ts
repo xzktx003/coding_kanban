@@ -22,8 +22,17 @@ for (const width of [1440, 390])
       ).toBeVisible();
       await expect(main).toHaveCount(0);
       await editor.fill("保留这份草稿，不发送任务");
+      await expect(
+        page.locator(".session-codex-composer .session-composer-stop"),
+      ).toHaveCount(0);
       await expect(main).toHaveAccessibleName("加入队列");
       await expect(main).toHaveAttribute("title", "加入队列");
+      await page.getByRole("button", { name: "附加文件", exact: true }).click();
+      await expect(
+        page.getByRole("button", { name: "停止生成", exact: true }),
+      ).toBeVisible();
+      await page.keyboard.press("Escape");
+      await expect(page.locator(".session-composer-menu")).toBeHidden();
       await composerAction(page, "展开编辑");
       await expect(
         page.locator(".session-expanded-submit"),
@@ -57,3 +66,46 @@ for (const width of [1440, 390])
       await fixture.close();
     }
   });
+
+test("running draft keeps Queue/Steer primary and leaves Stop keyboard reachable in composer actions", async ({
+  page,
+}) => {
+  const fixture = await setup(page, false);
+  try {
+    await fixture.event("turn/started", "stop-menu-turn", "inProgress");
+    const editor = page
+      .locator(".session-composer-editor [contenteditable=true]")
+      .first();
+    await editor.fill("保留草稿，只执行明确的 Stop");
+    await expect(page.locator(".session-composer-send")).toHaveAccessibleName(
+      "加入队列",
+    );
+    await expect(
+      page.locator(".session-codex-composer .session-composer-stop"),
+    ).toHaveCount(0);
+
+    await page.getByRole("button", { name: "附加文件", exact: true }).click();
+    const stop = page
+      .locator(".session-composer-menu")
+      .getByRole("button", { name: "停止生成", exact: true });
+    await expect(stop).toBeVisible();
+    await stop.focus();
+    await page.keyboard.press("Enter");
+
+    await expect
+      .poll(() =>
+        fixture.calls.filter((call) => call.method === "turn/interrupt").length,
+      )
+      .toBe(1);
+    expect(
+      fixture.calls.filter((call) => call.method === "turn/start"),
+    ).toEqual([]);
+    expect(
+      fixture.calls.filter((call) => call.method === "turn/interrupt"),
+    ).toHaveLength(1);
+    await expect(editor).toHaveText("保留草稿，只执行明确的 Stop");
+    expect(fixture.errors).toEqual([]);
+  } finally {
+    await fixture.close();
+  }
+});

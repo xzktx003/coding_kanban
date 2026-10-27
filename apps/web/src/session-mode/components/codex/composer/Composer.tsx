@@ -1037,6 +1037,20 @@ export function Composer({
                                 type="button"
                                 variant="ghost"
                                 className="justify-start"
+                                aria-label={stopping ? "正在停止" : "停止生成"}
+                                disabled={stopping}
+                                onClick={() => {
+                                  close();
+                                  void requestStop();
+                                }}
+                              >
+                                <NativeComposerIcon name="stop" />
+                                {stopping ? "正在停止…" : "停止生成"}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                className="justify-start"
                                 disabled={sending || blocked || !currentTurnId}
                                 onClick={() => {
                                   submitMode.current =
@@ -1117,7 +1131,7 @@ export function Composer({
                     }}
                   />
                 </span>
-                {running && (
+                {running && !hasContent && (
                   <NativeSubmitButton
                     type="button"
                     aria-label={stopping ? "正在停止" : "停止生成"}

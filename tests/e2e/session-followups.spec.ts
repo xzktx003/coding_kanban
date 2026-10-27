@@ -342,9 +342,7 @@ test("stop-and-send waits for completion and pauses older queued work until expl
     await editor.press("Enter");
     await expect(page.locator(".session-followup-queue li")).toHaveCount(1);
     await editor.fill("replacement task");
-    await page
-      .getByRole("button", { name: "添加附件与上下文", exact: true })
-      .click();
+    await page.getByRole("button", { name: "附加文件", exact: true }).click();
     await page
       .getByRole("button", { name: "停止并发送新请求", exact: true })
       .click();
@@ -368,7 +366,7 @@ test("stop-and-send waits for completion and pauses older queued work until expl
     );
     await f.queue.tick();
     expect(f.calls.length).toBe(2);
-    await page.getByRole("button", { name: "继续队列", exact: true }).click();
+    await page.getByRole("button", { name: "继续", exact: true }).click();
     await expect
       .poll(async () => (await f.queue.get("ux-0")).paused)
       .toBeNull();
@@ -390,6 +388,7 @@ test("side chat and detached review preserve main selection and draft on desktop
       .locator(".session-agent-view [contenteditable=true]")
       .first();
     await main.fill("main unsent draft");
+    await page.getByRole("button", { name: "附加文件", exact: true }).click();
     await page
       .getByRole("button", { name: "当前会话的更多操作", exact: true })
       .click();
@@ -414,11 +413,9 @@ test("side chat and detached review preserve main selection and draft on desktop
     await f.queue.tick();
     expect(f.calls.at(-1)?.params.threadId).toBe("side-thread");
     await page
-      .getByRole("button", { name: "关闭侧边聊天", exact: true })
+      .getByRole("button", { name: "返回主会话", exact: true })
       .click();
-    await page
-      .getByRole("button", { name: "添加附件与上下文", exact: true })
-      .click();
+    await page.getByRole("button", { name: "附加文件", exact: true }).click();
     await page.getByRole("button", { name: "代码审查", exact: true }).click();
     await page
       .getByRole("combobox", { name: "审查方式", exact: true })
@@ -437,7 +434,7 @@ test("side chat and detached review preserve main selection and draft on desktop
     );
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(
-      page.getByRole("button", { name: "关闭侧边聊天", exact: true }),
+      page.getByRole("button", { name: "返回主会话", exact: true }),
     ).toBeVisible();
     expect(
       await page.evaluate(
@@ -475,7 +472,7 @@ test("a lost submission response keeps the draft and retries the same message on
     await editor.fill("keep on lost response");
     await editor.press("Enter");
     await expect(
-      page.getByRole("button", { name: "排队消息", exact: true }),
+      page.getByRole("button", { name: "加入队列", exact: true }),
     ).toBeEnabled();
     await expect(editor).toHaveText("keep on lost response");
     await editor.press("Enter");
@@ -504,9 +501,7 @@ test("configured modifier Enter and inline custom review preserve the draft", as
     await editor.fill("draft before review");
     await editor.press("Enter");
     expect((await f.queue.get("ux-0")).items).toHaveLength(0);
-    await page
-      .getByRole("button", { name: "添加附件与上下文", exact: true })
-      .click();
+    await page.getByRole("button", { name: "附加文件", exact: true }).click();
     await page.getByRole("button", { name: "代码审查", exact: true }).click();
     await page
       .getByRole("combobox", { name: "审查方式" })
@@ -550,9 +545,7 @@ test("approved composer keeps running-empty controls quiet and places infrequent
     await expect(
       page.getByRole("button", { name: "排队消息", exact: true }),
     ).toHaveCount(0);
-    await page
-      .getByRole("button", { name: "添加附件与上下文", exact: true })
-      .click();
+    await page.getByRole("button", { name: "附加文件", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "代码审查", exact: true }),
     ).toBeVisible();
@@ -562,16 +555,21 @@ test("approved composer keeps running-empty controls quiet and places infrequent
       .first();
     await editor.fill("补充一个约束");
     await expect(
-      page.getByRole("button", { name: "排队消息", exact: true }),
+      page.getByRole("button", { name: "加入队列", exact: true }),
     ).toBeVisible();
     await expect(
       page.getByRole("button", { name: "停止并发送新请求", exact: true }),
     ).toHaveCount(0);
-    await page
-      .getByRole("button", { name: "添加附件与上下文", exact: true })
-      .click();
     await expect(
-      page.getByRole("button", { name: "停止并发送新请求", exact: true }),
+      page.locator(".session-codex-composer .session-composer-stop"),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "附加文件", exact: true }).click();
+    const menu = page.locator(".session-composer-menu");
+    await expect(
+      menu.getByRole("button", { name: "停止生成", exact: true }),
+    ).toBeVisible();
+    await expect(
+      menu.getByRole("button", { name: "停止并发送新请求", exact: true }),
     ).toBeVisible();
     expect(f.calls).toHaveLength(0);
     await page.keyboard.press("Escape");
@@ -621,7 +619,7 @@ test("composer matches the approved layout at desktop, narrow and phone widths",
       await expect(toolbar).toBeVisible();
       await expect(
         page.locator(".session-codex-composer .session-model-effort"),
-      ).toContainText("High");
+      ).toContainText("高");
       await expect(
         page.locator(".session-codex-composer .session-model-effort"),
       ).toBeVisible();
@@ -640,9 +638,15 @@ test("composer matches the approved layout at desktop, narrow and phone widths",
           () => document.documentElement.scrollWidth <= innerWidth + 1,
         ),
       ).toBe(true);
-      await expect(
-        page.locator(".session-codex-composer .session-access-trigger span"),
-      ).toBeVisible();
+      const accessButton = page.getByRole("button", {
+        name: "执行权限：权限待确认",
+        exact: true,
+      });
+      await expect(accessButton).toBeVisible();
+      await expect(accessButton).toHaveAttribute(
+        "aria-label",
+        "执行权限：权限待确认",
+      );
       if (width === 375)
         await expect
           .poll(() =>
@@ -690,7 +694,7 @@ test("composer matches the approved layout at desktop, narrow and phone widths",
         animations: "disabled",
       });
       await page
-        .getByRole("button", { name: "排队消息 1 的更多操作", exact: true })
+        .getByRole("button", { name: "排队消息操作 1", exact: true })
         .click();
       const menu = page.getByRole("menu");
       await expect(menu).toBeVisible();
@@ -705,7 +709,7 @@ test("composer matches the approved layout at desktop, narrow and phone widths",
       await page.keyboard.press("Escape");
       await expect(
         page.getByRole("button", {
-          name: "排队消息 1 的更多操作",
+          name: "排队消息操作 1",
           exact: true,
         }),
       ).toBeFocused();
@@ -716,7 +720,7 @@ test("composer matches the approved layout at desktop, narrow and phone widths",
   }
 });
 
-test("queue menus edit in place, pause, reorder and clear without consuming the main draft", async ({
+test("queue menus edit, reorder and remove messages without consuming the main draft", async ({
   page,
 }) => {
   const f = await setup(page);
@@ -731,38 +735,45 @@ test("queue menus edit in place, pause, reorder and clear without consuming the 
     }
     await editor.fill("keep my main draft");
     await page
-      .getByRole("button", { name: "排队消息 1 的更多操作", exact: true })
+      .getByRole("button", { name: "排队消息操作 1", exact: true })
       .click();
     await page.getByRole("menuitem", { name: "编辑消息", exact: true }).click();
     const edit = page.getByRole("textbox", { name: "编辑排队消息" });
     await expect(edit).toBeFocused();
     await edit.fill("edited without sending");
     await edit.press("Control+Enter");
-    await expect(page.locator(".session-followup-text")).toHaveText(
-      "edited without sending",
-    );
+    await expect(
+      page.getByRole("group", {
+        name: "预览排队消息 1：edited without sending",
+      }),
+    ).toBeVisible();
     await expect(editor).toHaveText("keep my main draft");
     await page
-      .getByRole("button", { name: "排队消息 1 的更多操作", exact: true })
+      .getByRole("button", { name: "排队消息操作 2", exact: true })
       .click();
-    await page.getByRole("menuitem", { name: "暂停队列", exact: true }).click();
-    await expect(
-      page.getByRole("button", { name: "继续队列", exact: true }),
-    ).toBeVisible();
+    await page.getByRole("menuitem", { name: "上移消息 2", exact: true }).click();
+    await expect
+      .poll(async () =>
+        (await f.queue.get("ux-0")).items
+          .filter((item) => item.status === "queued")
+          .map((item) => item.text),
+      )
+      .toEqual(["second task", "edited without sending"]);
     await page
-      .getByRole("button", { name: "排队消息 1 的更多操作", exact: true })
+      .getByRole("button", { name: "排队消息操作 1", exact: true })
       .click();
-    await page.getByRole("menuitem", { name: "清空队列", exact: true }).click();
-    await expect(page.getByRole("dialog")).toContainText("当前任务继续运行");
-    await page.getByRole("button", { name: "取消", exact: true }).click();
-    expect(
-      (await f.queue.get("ux-0")).items.filter((m) => m.status === "queued"),
-    ).toHaveLength(2);
+    await page.getByRole("menuitem", { name: "删除消息", exact: true }).click();
+    await expect
+      .poll(async () =>
+        (await f.queue.get("ux-0")).items
+          .filter((item) => item.status === "queued")
+          .map((item) => item.text),
+      )
+      .toEqual(["edited without sending"]);
     await page
-      .getByRole("button", { name: "排队消息 1 的更多操作", exact: true })
+      .getByRole("button", { name: "排队消息操作 1", exact: true })
       .click();
-    await page.getByRole("menuitem", { name: "清空队列", exact: true }).click();
-    await page.getByRole("button", { name: "确认移除", exact: true }).click();
+    await page.getByRole("menuitem", { name: "删除消息", exact: true }).click();
     await expect(page.locator(".session-queue-shelf")).toHaveCount(0);
     await expect(editor).toHaveText("keep my main draft");
     expect(f.calls).toHaveLength(0);
@@ -805,9 +816,9 @@ test("phone preserves image attachments, permission visibility and queued messag
       page.locator(".session-codex-composer .session-context-chip[data-state]"),
     ).toHaveCount(1);
     await expect(
-      page.getByRole("button", { name: "排队消息", exact: true }),
+      page.getByRole("button", { name: "加入队列", exact: true }),
     ).toBeEnabled();
-    await page.getByRole("button", { name: "排队消息", exact: true }).click();
+    await page.getByRole("button", { name: "加入队列", exact: true }).click();
     await expect
       .poll(async () => (await f.queue.get("ux-0")).items[0]?.images)
       .toEqual(["/fixture/preview.png"]);
@@ -818,13 +829,13 @@ test("phone preserves image attachments, permission visibility and queued messag
       page.locator(".session-codex-composer .session-context-chip[data-state]"),
     ).toHaveCount(0);
     await page
-      .getByRole("button", { name: "排队消息 1 的更多操作", exact: true })
+      .getByRole("button", { name: "排队消息操作 1", exact: true })
       .click();
     await expect(
       page.getByRole("menuitem", { name: "删除消息", exact: true }),
     ).toBeVisible();
     await page
-      .getByRole("menuitem", { name: "复制到侧边聊天", exact: true })
+      .getByRole("menuitem", { name: "在侧边聊天中打开", exact: true })
       .click();
     await expect(
       page.getByRole("region", { name: "侧边聊天", exact: true }),
@@ -836,9 +847,10 @@ test("phone preserves image attachments, permission visibility and queued messag
     });
     expect((await f.queue.get("ux-0")).items[0].status).toBe("queued");
     await page
-      .getByRole("button", { name: "关闭侧边聊天", exact: true })
+      .getByRole("button", { name: "返回主会话", exact: true })
       .click();
-    await expect(editor).toBeFocused();
+    await expect(editor).toBeVisible();
+    await expect(editor).not.toBeFocused();
     expect(f.errors).toEqual([]);
   } finally {
     await f.close();
@@ -856,7 +868,22 @@ test("idle composer and planning mode preserve explicit permissions and never su
       useConfigStore.setState({
         model: "gpt-6-astra",
         reasoningEffort: "high",
+        collaborationMode: "plan",
+      });
+      const { changeThreadModel } = await import(
+        performance
+          .getEntriesByType("resource")
+          .findLast(
+            (entry) =>
+              new URL(entry.name).pathname ===
+              "/src/session-mode/stores/useThreadModelStore.ts",
+          )?.name ?? "/src/session-mode/stores/useThreadModelStore.ts"
+      );
+      changeThreadModel("ux-0", {
         sandbox: "danger-full-access",
+        sandboxPolicy: null,
+        approvalPolicy: "never",
+        approvalsReviewer: "user",
         collaborationMode: "plan",
       });
     }, f.storeUrl());
@@ -870,7 +897,7 @@ test("idle composer and planning mode preserve explicit permissions and never su
       page.getByRole("button", { name: "停止生成", exact: true }),
     ).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "执行权限：完全访问", exact: true }),
+      page.getByRole("button", { name: "执行权限：计划", exact: true }),
     ).toBeVisible();
     await openComposerStatus(page);
     await expect(
@@ -882,6 +909,9 @@ test("idle composer and planning mode preserve explicit permissions and never su
       .click();
     await page.getByRole("button", { name: "关闭面板", exact: true }).click();
     await expect(editor).toHaveText("保留未提交的问题");
+    await expect(
+      page.getByRole("button", { name: "执行权限：完全访问", exact: true }),
+    ).toBeVisible();
     expect((await f.queue.get("ux-0")).items).toHaveLength(0);
     await page.screenshot({
       path: testInfo.outputPath("idle-phone.png"),
@@ -889,7 +919,8 @@ test("idle composer and planning mode preserve explicit permissions and never su
       animations: "disabled",
     });
     await page.getByRole("button", { name: /^模型：/ }).click();
-    await expect(page.getByRole("slider", { name: "推理强度" })).toBeVisible();
+    await expect(page.getByRole("menu", { name: "选择强度" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: "强度" })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(editor).toHaveText("保留未提交的问题");
     expect(f.calls).toHaveLength(0);

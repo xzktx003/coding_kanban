@@ -9,7 +9,17 @@ test("an active turn keeps Stop available and offers an explicit queued send for
   const f = await setup(page);
   try {
     await editor(page).fill("本轮结束后处理这条消息");
-    await expect(page.getByRole("button", { name: "停止生成", exact: true })).toBeVisible();
+    await expect(
+      page.locator(".session-codex-composer .session-composer-stop"),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "附加文件", exact: true }).click();
+    await expect(
+      page
+        .locator(".session-composer-menu")
+        .getByRole("button", { name: "停止生成", exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".session-composer-menu")).toBeHidden();
     const send = page
       .locator('.session-agent-view .session-native-composer[data-owner-thread="ux-0"]')
       .getByRole("button", { name: "加入队列", exact: true });

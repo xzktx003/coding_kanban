@@ -174,10 +174,23 @@ for (const kind of ["codex", "cc", "acp"]) {
     fail = false;
     if (kind === "codex") await editor.pressSequentially("保留草稿");
     else await editor.fill("保留草稿");
-    await stop.click();
-    await expect(
-      page.getByRole("button", { name: "正在停止", exact: true }),
-    ).toBeDisabled();
+    if (kind === "codex") {
+      await expect(editor).toHaveText("保留草稿");
+      await page.getByRole("button", { name: "附加文件", exact: true }).click();
+      const menu = page.locator(".session-composer-menu");
+      await menu.getByRole("button", { name: "停止生成", exact: true }).click();
+      await page.getByRole("button", { name: "附加文件", exact: true }).click();
+      await expect(
+        page
+          .locator(".session-composer-menu")
+          .getByRole("button", { name: "正在停止", exact: true }),
+      ).toBeDisabled();
+    } else {
+      await stop.click();
+      await expect(
+        page.getByRole("button", { name: "正在停止", exact: true }),
+      ).toBeDisabled();
+    }
     expect(calls).toHaveLength(2);
     release();
     await page.evaluate(

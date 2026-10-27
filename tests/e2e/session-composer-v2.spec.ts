@@ -297,7 +297,17 @@ test("mobile viewport, soft keyboard and full editor keep strength and controls 
       await expect(page.locator(".session-model-effort").first()).toBeVisible();
     }
     await page.setViewportSize({ width: 844, height: 390 });
-    await expect(page.getByRole("button", { name: "停止生成", exact: true })).toBeVisible();
+    await expect(
+      page.locator(".session-codex-composer .session-composer-stop"),
+    ).toHaveCount(0);
+    await page.getByRole("button", { name: "附加文件", exact: true }).click();
+    await expect(
+      page
+        .locator(".session-composer-menu")
+        .getByRole("button", { name: "停止生成", exact: true }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".session-composer-menu")).toBeHidden();
     await expect(page.locator(".session-native-composer-status")).toHaveText("本轮结束后发送");
     const landscapeSend = (await page
       .locator('.session-agent-view .session-native-composer[data-owner-thread="ux-0"]')

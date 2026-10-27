@@ -50,3 +50,11 @@
 上述主按钮名称差异已修复：主输入与展开编辑复用同一个 `submitLabel`，按实际running及queue/steer设置显示“加入队列”“引导当前任务”，空闲仍为“发送消息”；主按钮title同步。显式Stop入口、发送/停止状态机与回执保护未改变。
 
 `tests/e2e/session-composer-action-labels.spec.ts` 两个尺寸先红后绿（`labels-red.log`／`labels-green.log`），覆盖空闲、运行空草稿、queue、steer、展开/返回及完成回到空闲，原草稿保持，任务调用/pageerror均零。既有4个E2E文件7处running+queue按钮选择器改为精确“加入队列”并限定主composer owner，保留原行为/发送参数/几何断言；idle与SideChat/子Agent选择器不改，最终联合回归另记。原主控件布局和全部模式菜单的未闭合范围仍保留。
+
+## 运行且有草稿时的单主动作与 Stop 入口（2026-10-27）
+
+按批准范围保留显式停止，同时让主输入遵循原组件单一主动作：运行且有正文时，主按钮只显示 Queue/Steer；Stop 放入现有“附加文件”菜单，可用键盘焦点和 Enter 触发；菜单 Stop 正在处理时显示“正在停止”。运行但空草稿仍使用主 Stop。展开编辑是项目专有的全屏编辑器，仍保留直接 Stop。没有新增隐式中断、发送或任务恢复。
+
+当前源码在 `apps/web/src/session-mode/components/codex/composer/Composer.tsx`。红灯来自 `tests/e2e/session-composer-action-labels.spec.ts`：运行且有正文时旧版仍渲染独立 Stop；实现后该用例通过，并在 1440/390 两种宽度覆盖 queue/steer、菜单键盘 Stop 与唯一 `turn/interrupt`。`session-composer-compact.spec.ts`、手机软键盘/展开编辑 `session-composer-v2.spec.ts`、Codex/CC/ACP 空草稿 Stop 与失败恢复 `session-stop.spec.ts`、队列菜单 `session-followups.spec.ts` 的相关用例通过；Stop 失败保留草稿，停止中不重复操作。
+
+`session-codex-compact-controls.spec.ts` 的 360px 桌面/手机浅色/深色矩阵现为 4/4 通过，包含 Queue/Steer 主动作、菜单 Stop 和触控尺寸；完整主/展开 composer、更多状态与主题验收仍未关闭，附件两项精确像素差也仍待解释。`session-followups.spec.ts` 全部 12 项通过，覆盖 1440/900/375 宽度、队列编辑/重排/逐条移除、草稿保留、停止、权限和计划模式。

@@ -15,6 +15,8 @@ test("chat history bypasses an unavailable Agent transport while raw requests pr
     await rm(root, { recursive: true, force: true });
   });
   const calls: string[] = [];
+  const historyCalls = () =>
+    calls.filter((url) => url.includes("/api/codex/thread/turns/list"));
   const source = `require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const q=JSON.parse(line);if(q.method==='initialize')console.log(JSON.stringify({id:q.id,result:{}}));else if(q.method==='thread/turns/list')console.log(JSON.stringify({id:q.id,result:{data:[],nextCursor:'preserved'}}));else if(q.method!=='initialized')process.exit(99);}).on('close',()=>process.exit(0));`;
   registerSessionModeRoutes(app, {
     origin: "http://127.0.0.1:12345",
@@ -51,7 +53,7 @@ test("chat history bypasses an unavailable Agent transport while raw requests pr
   });
   assert.equal(chat.statusCode, 200, chat.body);
   assert.equal(chat.json().nextCursor, "preserved");
-  assert.deepEqual(calls, []);
+  assert.deepEqual(historyCalls(), []);
   const raw = await app.inject({
     method: "POST",
     url: "/api/session/api/codex/thread/turns/list?view=full",
@@ -59,7 +61,7 @@ test("chat history bypasses an unavailable Agent transport while raw requests pr
   });
   assert.equal(raw.statusCode, 500);
   assert.match(raw.body, /RPC transport unavailable/);
-  assert.deepEqual(calls, [
+  assert.deepEqual(historyCalls(), [
     "http://127.0.0.1:12345/api/codex/thread/turns/list?view=full",
   ]);
 });

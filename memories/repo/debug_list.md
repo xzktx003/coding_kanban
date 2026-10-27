@@ -1348,3 +1348,4 @@
 - 旧轮次“已中断”与后续新轮次回答并不矛盾：原生只读历史确认 13:40:57 开始的轮次在 13:43:28 中断，14:17:01 的另一轮独立完成。运行层启动时间接近旧轮次结束，但不能据此认定刷新触发中断。刷新浏览器回归确认没有 interrupt/start/resume，UI 明确标为“该轮已中断”。
 - 会话模式闲时预载此前导入时会注册语言、运行代次、BroadcastChannel、wake-lock 和 Mermaid 全局监听。现将监听挂到活动会话生命周期，图表按需加载，App 与 composer 独立预载。生产隔离浏览器单窗口 30 次与三窗口并发 30 个样本通过；移动／桌面并发 composer p95 分别为 1.591/1.529 秒，三窗口实际输入通过。详见 `docs/designs/session-mode-parity-and-startup-speed-audit-20261027.md`。
 - 独立 Plan 页面在延迟初始化 i18n 后仍直接克隆全局实例，造成有效快照打开时报错。现仅在有效 Plan 页面初始化并等待语言实例，失败时显示显式错误；有效与无效快照组件测试通过。
+- Codex 主输入运行且有草稿时曾并列显示 Stop 与 Queue/Steer，偏离原 composer 的单一主动作。现 Queue/Steer 作为主按钮，Stop 放入“附加文件”菜单且可键盘调用；空草稿 inline Stop、展开编辑 Stop 均保留，停止中状态可见。1440/390、360px 桌面/手机浅色/深色矩阵 4/4 与停止失败/草稿回归通过；见 `docs/designs/session-render-alignment/composer-input-controls-audit-20261027.md`。

@@ -20,7 +20,29 @@
 
 刷新中断回归确认：原生历史中 13:40:57 开始的轮次在 13:43:28 以 interrupted 结束；14:17:01 后续另一轮正常完成。运行层 PID 954963 的启动时间为 13:43:39，但时间接近只构成相关性，不能证明进程切换导致该轮中断。刷新只读读取历史，UI 改为“该轮已中断”并说明状态属于单轮；浏览器回归通过。
 
-最终验证：`pnpm check` 通过；`pnpm test` 全量通过（593 个 Web 测试文件／3668 项、370 项 session-runtime、152 项脚本测试，以及其他递归包）。
+上一轮实现基线验证：`pnpm check` 通过；递归单测包含 593 个 Web 测试文件／3668 项、370 项 session-runtime 和 152 项脚本测试。本工作区差异后的复验见文末。
+
+## 当前主工作区改动后的生产加载复验（2026-10-27）
+
+用户将可接受门槛确认为导航与可编辑 composer 均在 **2 秒内**可用，手机多窗口也需保持流畅。合并当前 Codex composer 主动作改动后，重新执行 `pnpm --filter web build`，构建通过（49.22 秒，8304 个模块）；保留已有 dynamic/static import 重叠和大 chunk 警告。随后在临时生产预览 `http://10.30.0.24:8877`（绑定 `0.0.0.0`）运行 Chromium 加载关卡，完成后停止该临时预览；正式 LAN Vite/网关没有重启。
+
+运行命令：
+
+```sh
+SESSION_STARTUP_RUNS=30 SESSION_STARTUP_MULTI_WINDOW_RUNS=10 \
+PLAYWRIGHT_SKIP_WEBSERVER=1 PLAYWRIGHT_FRONTEND_PROTOCOL=http \
+PLAYWRIGHT_BASE_URL=http://10.30.0.24:8877 \
+pnpm exec playwright test tests/e2e/session-startup-performance.spec.ts
+```
+
+| 场景 | 样本 | 导航 p95 | 可编辑 composer p95 | 最大值 |
+| --- | ---: | ---: | ---: | ---: |
+| 单窗口，393×852 | 30 | 0.490 秒 | 1.300 秒 | 1.328 秒 |
+| 单窗口，1440×900 | 30 | 0.476 秒 | 1.295 秒 | 1.297 秒 |
+| 三窗口并发，393×852 | 30（10 批 × 3） | — | 1.560 秒 | 1.570 秒 |
+| 三窗口并发，1440×900 | 30（10 批 × 3） | — | 1.529 秒 | 1.581 秒 |
+
+三窗口保持打开时分别在手机与桌面 composer 实际输入均通过；所有冷进入/并发样本均未调用 `turn/start`、`turn/interrupt`、`thread/start`、`thread/resume` 或 `thread/unsubscribe`。这里的“窗口”是同一 Chromium context 的三个独立页面，健康、项目、标签及历史 API 使用隔离 fixture；不代表三个原生宿主、真实后端数据量或实体 iPhone/WebKit。原始测试输出汇总见 `.dev-runtime/session-startup-active-goal-20261027/current-run/summary.json`。
 
 ## 实施前权威基线
 
@@ -64,3 +86,9 @@
 - 用户最终确认以 2 秒为可接受上限；单窗口和三窗口样本均按桌面／手机尺寸分别报告，不混合平均值。
 - 本次使用 Chromium 生产 preview。尚未实测物理 iPhone/WebKit，也未在正式 LAN 服务后端和真实数据量下测得 composer p95；不能把合成夹具数据描述为物理设备或原生宿主验收。
 - Codex 插件 26.51007.21434 的空白／错误／审批等逐态视觉 parity、跨设备草稿与队列一致性压力矩阵仍需另行验收；本轮只覆盖首屏加载、三窗口渲染压力和实际输入可用性。
+
+## 当前工作区提交前验证（2026-10-27）
+
+`pnpm check` 通过，包含 shared、session-runtime、server 类型构建与 web 生产构建（8304 模块、47.44 秒）；仅保留已有 dynamic/static import 重叠和大 chunk 警告。全量测试复验中 Web 593 个文件／3668 项与 session-runtime 370 项通过；server 并发回归中发现 `session-chat-history` 测试把 FollowupQueue 的健康/占用后台请求也当成聊天历史请求，已将断言限定到历史接口 URL，随后 `pnpm --filter server test` 946 项通过、1 项按条件跳过。`node --test scripts/*.test.mjs` 152 项通过。首个聚合 `pnpm test` 因该断言失败提前退出，因此改动后的完整覆盖由各包复验结果合并记录，不记为聚合命令通过。
+
+相关浏览器验收：`session-followups.spec.ts` 12/12、360px 桌面/手机浅色/深色控件矩阵 4/4、冷进入与三窗口并发性能用例 6/6 通过。性能结果和夹具边界见本页上方当前生产加载复验。

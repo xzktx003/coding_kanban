@@ -164,6 +164,7 @@ for (const touch of [false, true])
             reasoningOutputTokens: 0,
           });
           useCodexStore.setState({
+            currentThreadId: "ux-0",
             tokenUsageMap: {
               "ux-0": {
                 total: breakdown(1_000_000),
@@ -178,10 +179,13 @@ for (const touch of [false, true])
             },
           });
         });
-        const capacity = composer.getByRole("button", {
+        const capacity = page.getByRole("button", {
           name: "上下文用量：25%",
           exact: true,
         });
+        await composer
+          .getByRole("button", { name: "附加文件", exact: true })
+          .click();
         await expect(capacity).toBeVisible();
         await controlsAreReachable(composer, info, "idle");
         expect(
@@ -190,13 +194,19 @@ for (const touch of [false, true])
             .last()
             .getAttribute("stroke-dashoffset"),
         ).toBe("75");
-        const iconBox = (await capacity.locator("svg").boundingBox())!;
-        expect(iconBox.width).toBe(12);
-        expect(iconBox.height).toBe(12);
-        if (touch)
-          expect((await capacity.boundingBox())!.height).toBeGreaterThanOrEqual(
-            44,
-          );
+        const iconSize = await capacity.locator("svg").evaluate((svg) => ({
+          width: Number.parseFloat(getComputedStyle(svg).width),
+          height: Number.parseFloat(getComputedStyle(svg).height),
+        }));
+        expect(iconSize.width).toBe(12);
+        expect(iconSize.height).toBe(12);
+        if (touch) {
+          const targetSize = await capacity.evaluate((button) => ({
+            width: Number.parseFloat(getComputedStyle(button).width),
+            height: Number.parseFloat(getComputedStyle(button).height),
+          }));
+          expect(targetSize).toEqual({ width: 44, height: 44 });
+        }
         await capacity.click();
         const tooltip = page.getByRole("tooltip");
         await expect(tooltip).toContainText("背景信息窗口：");
@@ -231,6 +241,10 @@ for (const touch of [false, true])
           fullPage: true,
         });
         await page.keyboard.press("Escape");
+        await expect(tooltip).toBeHidden();
+        const composerMenu = page.locator(".session-composer-menu");
+        if (await composerMenu.isVisible()) await page.keyboard.press("Escape");
+        await expect(composerMenu).toBeHidden();
         for (const [trigger, menu] of [
           [
             composer.getByRole("button", { name: /^模型：/ }),
@@ -241,10 +255,7 @@ for (const touch of [false, true])
             page.locator(".session-native-permission-menu"),
           ],
           [
-            composer.getByRole("button", {
-              name: "添加附件与上下文",
-              exact: true,
-            }),
+            composer.getByRole("button", { name: "附加文件", exact: true }),
             page.locator(".session-composer-menu"),
           ],
         ] as const) {
@@ -282,12 +293,20 @@ for (const touch of [false, true])
             threadStatusMap: { "ux-0": { type: "active", activeFlags: [] } },
           });
         });
+        await expect(composer.locator(".session-composer-stop")).toHaveCount(0);
         await expect(
-          composer.getByRole("button", { name: "停止生成", exact: true }),
+          composer.getByRole("button", { name: "加入队列", exact: true }),
         ).toBeVisible();
+        await composer
+          .getByRole("button", { name: "附加文件", exact: true })
+          .click();
         await expect(
-          composer.getByRole("button", { name: "排队消息", exact: true }),
+          page
+            .locator(".session-composer-menu")
+            .getByRole("button", { name: "停止生成", exact: true }),
         ).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(page.locator(".session-composer-menu")).toBeHidden();
         await controlsAreReachable(composer, info, "running-long-model");
         expect((await frame.boundingBox())!.height).toBe(originalHeight);
         await page.screenshot({
@@ -313,7 +332,7 @@ for (const touch of [false, true])
             theme,
             touch,
             frame: await frame.boundingBox(),
-            iconBox,
+            iconSize,
           }),
           contentType: "application/json",
         });

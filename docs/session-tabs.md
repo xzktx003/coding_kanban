@@ -62,6 +62,10 @@ pnpm check
 
 验收结果：相关前端 23 项、后端 8 项、浏览器 3 项通过；`pnpm check` 通过。正式局域网接口已返回初始化后的共享集合；未手动重启会话运行层，未提交 Git。
 
+### 独立设备存储上下文复验（2026-10-27）
+
+使用两个独立 Playwright `BrowserContext` 复验电脑与手机尺寸下的共享关注集合/项目与本地选中、布局、阅读位置隔离。`tests/e2e/session-tabs-sync.spec.ts` 通过 1/1（17.8 秒）；新增长期回归 `tests/e2e/session-projects-cross-context.spec.ts` 通过 1/1（14.6 秒），覆盖共享项目增量、本地 cwd 保留、手机离线新增与联网合并。两个用例都经临时 Fastify 持久库处理对应 API，其余 API/WS 使用隔离 fixture；没有调用 turn/start、interrupt、resume 或删除会话。手机为 390×844 触控尺寸模拟，不代表实体设备后台节流或实际无线网络切换；报告与逐项边界见 `docs/designs/session-render-alignment/current-goal-audit-20261027.md`。
+
 ### 手机自由分屏导航
 
 手机保留本设备的桌面分屏树，但仅显示当前窗口组；组选择器合并进该组标签栏，不额外占一行。原桌面会话工具栏在手机自由分屏中隐藏，布局、会话/项目与右侧工具通过“会话工具”菜单访问。标签选中后提供操作菜单，关闭仍只取消关注，不停止后台任务。窄屏输入工具行保持单行，发送目标提示保留。
