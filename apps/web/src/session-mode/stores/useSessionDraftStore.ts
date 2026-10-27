@@ -2,7 +2,14 @@ import { useEffect } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { toast } from "sonner";
-import { createSessionTextDraftStorage } from "@session/services/sessionTextDraftStorage";
+import { newSessionEditId } from "@session/services/sessionEditIdentity";
+import { v4 as randomUUID } from "uuid";
+import {
+  createSessionTextDraftStorage,
+  sameTextDraft,
+  type TextDraft,
+} from "@session/services/sessionTextDraftStorage";
+export type { TextDraft } from "@session/services/sessionTextDraftStorage";
 
 export type DraftKind = "codex" | "cc" | "acp";
 export const sessionDraftKey = (
@@ -17,10 +24,6 @@ export const sessionDraftKey = (
     id ? "session" : "new",
     id ?? cwd ?? "",
   ]);
-export interface TextDraft {
-  text: string;
-  revision: number;
-}
 const EMPTY: TextDraft = { text: "", revision: 0 };
 interface DraftStore {
   drafts: Record<string, TextDraft>;
@@ -56,17 +59,23 @@ export const useSessionDraftStore = create<DraftStore>()(
             : {
                 drafts: {
                   ...s.drafts,
-                  [owner]: { text, revision: old.revision + 1 },
+                  [owner]: {
+                    text,
+                    revision: old.revision + 1,
+                    writeId: newSessionEditId(),
+                  },
                 },
               };
         }),
       clearSubmitted: (owner, snapshot) => {
         const current = readDraft(owner);
-        if (
-          current.revision === snapshot.revision &&
-          current.text === snapshot.text
-        )
-          get().setText(owner, "");
+        if (!sameTextDraft(current, snapshot)) return;
+        const next = storage.clearSubmitted(
+          "kanban.session.text-drafts",
+          owner,
+          snapshot,
+        );
+        if (next) set((s) => ({ drafts: { ...s.drafts, [owner]: next } }));
       },
       move: (from, to) => {
         if (from === to) return;
@@ -80,6 +89,7 @@ export const useSessionDraftStore = create<DraftStore>()(
               ? {
                   text: [target.text, source.text].filter(Boolean).join("\n"),
                   revision: Math.max(target.revision, source.revision) + 1,
+                  writeId: newSessionEditId(),
                 }
               : source,
           };
@@ -108,6 +118,9 @@ export const useSessionDraftStore = create<DraftStore>()(
                       [owner]: {
                         text: old.text ? `${old.text}\n${text}` : text,
                         revision: old.revision + 1,
+                        // Importing an old shared input is not evidence of a
+                        // new user edit or permission to resend unknown input.
+                        writeId: randomUUID(),
                       },
                     },
                   }

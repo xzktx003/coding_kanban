@@ -1,3 +1,4 @@
+import { HistoryReadScopeChangedError } from "./HistoryReadScopeChangedError";
 import {
   useCodexDeliveryStore,
   deliveredClientIds,
@@ -134,6 +135,7 @@ export function startFollowedSessionHistorySync() {
           background: true,
           recent: true,
           signal: controller.signal,
+          reportScopeChanges: true,
         })
         .then(
           () => {
@@ -166,8 +168,18 @@ export function startFollowedSessionHistorySync() {
               setSessionRecovery(id);
             }
           },
-          () => {
+          (error: unknown) => {
             if (!stopped && wanted.has(id)) {
+              if (error instanceof HistoryReadScopeChangedError) {
+                // A scope event invalidated this read, so it produced no usable
+                // snapshot. Keep the wanted revision pending and let finally
+                // re-enter the same bounded queue once in the current scope.
+                retryAt.delete(id);
+                attempts.delete(id);
+                retryRequested.delete(id);
+                setSessionRecovery(id);
+                return;
+              }
               if (retryRequested.delete(id)) {
                 retryAt.delete(id);
                 attempts.delete(id);

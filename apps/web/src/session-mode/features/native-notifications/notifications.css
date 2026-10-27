@@ -4,6 +4,9 @@
   inset: 0;
   z-index: 60;
   font: 16px/24px var(--vscode-font-family, system-ui);
+  font-synthesis-weight: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   color: var(--foreground);
 }
 .session-mode .codex-native-toast-area:not(:has([data-sonner-toast])) {

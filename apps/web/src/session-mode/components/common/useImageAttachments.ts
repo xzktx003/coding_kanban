@@ -1,4 +1,4 @@
-import { v4 as randomUUID } from "uuid";
+import { newSessionEditId } from "@session/services/sessionEditIdentity";
 import { useEffect } from "react";
 import { create } from "zustand";
 import { toast } from "sonner";
@@ -7,6 +7,7 @@ import type { ImageDrawing } from "../codex/composer/v2/drawing";
 import { uploadBrowserFile } from "@session/browser-dialog";
 import {
   loadAttachmentDraft,
+  moveAttachmentDraft,
   saveAttachmentDraft,
 } from "@session/services/sessionAttachmentStorage";
 
@@ -28,6 +29,83 @@ export const useAttachmentDraftStore = create<{
 }>(() => ({ drafts: {}, hydrated: {}, errors: {} }));
 const loads = new Map<string, Promise<void>>();
 const writes = new Map<string, Promise<void>>();
+// A page owns only the changes since its own successful save, never the whole
+// collection another page may have changed in the meantime.
+const savedDrafts = new Map<string, ImageAttachment[]>();
+type PendingMove = {
+  from: string;
+  to: string;
+  items: ImageAttachment[];
+  prepare?: boolean;
+  promise?: Promise<void>;
+};
+const pendingMoves = new Map<string, PendingMove>();
+function discardRemoved(owner: string, ids: string[]) {
+  if (!ids.length) return;
+  // Keep only membership as the baseline for stale queued saves. Retaining file
+  // bytes or drawing originals here would outlive the removed preview.
+  savedDrafts.set(
+    owner,
+    (savedDrafts.get(owner) ?? EMPTY).map((item) =>
+      ids.includes(item.id)
+        ? { id: item.id, name: item.name, preview: "", status: item.status }
+        : item,
+    ),
+  );
+  useAttachmentDraftStore.setState((s) => ({
+    drafts: {
+      ...s.drafts,
+      [owner]: (s.drafts[owner] ?? EMPTY).filter((item) => {
+        if (!ids.includes(item.id)) return true;
+        release(item);
+        return false;
+      }),
+    },
+  }));
+}
+function finishMove(move: PendingMove): Promise<void> {
+  if (move.promise) return move.promise;
+  move.promise = (async () => {
+    if (move.prepare) {
+      const previous = savedDrafts.get(move.from) ?? EMPTY;
+      const additions = move.items.filter(
+        (item) => !previous.some((old) => old.id === item.id),
+      );
+      await saveAttachmentDraft(move.from, additions, []);
+      savedDrafts.set(move.from, [...previous, ...additions]);
+      move.prepare = false;
+    }
+    return moveAttachmentDraft(
+      move.from,
+      move.to,
+      move.items.map((item) => item.id),
+    );
+  })()
+    .then((result) => {
+      savedDrafts.set(
+        move.from,
+        (savedDrafts.get(move.from) ?? EMPTY).filter(
+          (item) => !move.items.some((moved) => moved.id === item.id),
+        ),
+      );
+      savedDrafts.set(move.to, [
+        ...(savedDrafts.get(move.to) ?? EMPTY),
+        ...move.items.filter(
+          (item) =>
+            !(savedDrafts.get(move.to) ?? EMPTY).some(
+              (old) => old.id === item.id,
+            ),
+        ),
+      ]);
+      discardRemoved(move.to, result.discardedIds);
+      pendingMoves.delete(move.from);
+      pendingMoves.delete(move.to);
+    })
+    .finally(() => {
+      move.promise = undefined;
+    });
+  return move.promise;
+}
 function report(owner: string, error: unknown) {
   const message = error instanceof Error ? error.message : "浏览器存储失败";
   if (!useAttachmentDraftStore.getState().errors[owner])
@@ -41,7 +119,15 @@ function persist(owner: string) {
   const pending = (writes.get(owner) ?? Promise.resolve())
     .catch(() => {})
     .then(async () => {
-      await saveAttachmentDraft(owner, items);
+      const move = pendingMoves.get(owner);
+      if (move) await finishMove(move);
+      const result = await saveAttachmentDraft(
+        owner,
+        items,
+        savedDrafts.get(owner) ?? EMPTY,
+      );
+      savedDrafts.set(owner, items);
+      discardRemoved(owner, result?.discardedIds ?? []);
       useAttachmentDraftStore.setState((s) => ({
         errors: { ...s.errors, [owner]: undefined },
       }));
@@ -69,6 +155,7 @@ export function ensureAttachmentDraft(owner: string): Promise<void> {
           ? { status: "error" as const, error: "上传已中断，点击重试" }
           : {}),
       }));
+      savedDrafts.set(owner, restored);
       useAttachmentDraftStore.setState((s) => {
         const current = s.drafts[owner] ?? EMPTY;
         const ids = new Set(current.map((item) => item.id));
@@ -128,6 +215,23 @@ function release(item: ImageAttachment) {
 export async function moveImageDraft(from: string, to: string) {
   if (from === to) return;
   await Promise.all([ensureAttachmentDraft(from), ensureAttachmentDraft(to)]);
+  // Fence both per-page writers before moving. New saves queue behind this
+  // transaction, while async upload callbacks follow their existing ID in memory.
+  const source = useAttachmentDraftStore.getState().drafts[from] ?? EMPTY;
+  const prior = Promise.all([
+    flushAttachmentDraft(from),
+    flushAttachmentDraft(to),
+  ]);
+  const move: PendingMove = { from, to, items: source };
+  // Register after the earlier saves settle: they must not try to move before
+  // their source bytes have been committed.
+  const moving = prior.then(() => {
+    pendingMoves.set(from, move);
+    pendingMoves.set(to, move);
+    return finishMove(move);
+  });
+  writes.set(from, moving);
+  writes.set(to, moving);
   useAttachmentDraftStore.setState((s) => {
     const source = s.drafts[from] ?? EMPTY,
       target = s.drafts[to] ?? EMPTY;
@@ -140,7 +244,17 @@ export async function moveImageDraft(from: string, to: string) {
       },
     };
   });
-  await Promise.all([persist(from), persist(to)]);
+  try {
+    await moving;
+  } catch (error) {
+    // The transaction retained the source. Preserve the visible files and block
+    // sending until an explicit save retries the destination.
+    if (!pendingMoves.has(from)) move.prepare = true;
+    pendingMoves.set(from, move);
+    pendingMoves.set(to, move);
+    report(to, error);
+    throw error;
+  }
 }
 
 export function useImageAttachments(owner: string) {
@@ -181,7 +295,7 @@ export function useImageAttachments(owner: string) {
   }
   function addFiles(files: File[], drawing?: ImageDrawing, replaceId?: string) {
     const items: ImageAttachment[] = files.map((file) => ({
-      id: randomUUID(),
+      id: newSessionEditId(),
       name: file.name || "剪贴板图片",
       file,
       preview:
@@ -310,7 +424,7 @@ export function useImageAttachments(owner: string) {
       update(owner, (items) => [
         ...items,
         ...paths.map((path) => ({
-          id: randomUUID(),
+          id: newSessionEditId(),
           name: path.split("/").at(-1) ?? "图片",
           path,
           preview: "",

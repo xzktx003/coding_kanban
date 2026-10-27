@@ -3,6 +3,12 @@ import {
   gitBranchInfo,
   type GitBranchInfoResponse,
 } from "@session/services/apiAdapt/git";
+import { toast } from "sonner";
+import {
+  OwnerFormSummary,
+  useConversationFormField,
+  useConversationOwnerForm,
+} from "./conversationOwnerFormContext";
 import { ComposerSheet } from "./v2/ComposerSheet";
 
 /** GitHub compare page for the current branch. Branch slashes stay as path segments. */
@@ -40,6 +46,15 @@ export function MergePullRequestSheet({
   cwd: string;
   onClose: () => void;
 }) {
+  const owner = useConversationOwnerForm();
+  const guardLink = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    try {
+      owner?.assertCurrent();
+    } catch (error) {
+      event.preventDefault();
+      toast.error(String(error));
+    }
+  };
   const [info, setInfo] = useState<GitBranchInfoResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -66,6 +81,7 @@ export function MergePullRequestSheet({
       description="打开 Pull Request 合并选项"
       onClose={onClose}
     >
+      <OwnerFormSummary />
       {error && <p role="alert">{error}</p>}
       {!error && !info && <p role="status">正在读取分支…</p>}
       {info && !ready && <p role="status">当前目录没有 GitHub 远程仓库</p>}
@@ -75,7 +91,12 @@ export function MergePullRequestSheet({
             {info.owner}/{info.repo} · {info.branch}
           </p>
           <p>本机没有 GitHub CLI。合并在 GitHub 上完成。</p>
-          <a href={githubMergeOptionsUrl(info)} target="_blank" rel="noreferrer">
+          <a
+            onClick={guardLink}
+            href={githubMergeOptionsUrl(info)}
+            target="_blank"
+            rel="noreferrer"
+          >
             在 GitHub 上打开合并选项
           </a>
         </>
@@ -91,6 +112,15 @@ export function OpenPullRequestSheet({
   cwd: string;
   onClose: () => void;
 }) {
+  const owner = useConversationOwnerForm();
+  const guardLink = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    try {
+      owner?.assertCurrent();
+    } catch (error) {
+      event.preventDefault();
+      toast.error(String(error));
+    }
+  };
   const [info, setInfo] = useState<GitBranchInfoResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -117,6 +147,7 @@ export function OpenPullRequestSheet({
       description="打开与当前聊天关联的 Pull Request"
       onClose={onClose}
     >
+      <OwnerFormSummary />
       {error && <p role="alert">{error}</p>}
       {!error && !info && <p role="status">正在读取分支…</p>}
       {info && !ready && <p role="status">当前目录没有 GitHub 远程仓库</p>}
@@ -125,8 +156,15 @@ export function OpenPullRequestSheet({
           <p>
             {info.owner}/{info.repo} · {info.branch}
           </p>
-          <p>当前聊天没有绑定的 Pull Request 编号。这里打开当前分支的拉取请求。</p>
-          <a href={githubBranchPullsUrl(info)} target="_blank" rel="noreferrer">
+          <p>
+            当前聊天没有绑定的 Pull Request 编号。这里打开当前分支的拉取请求。
+          </p>
+          <a
+            onClick={guardLink}
+            href={githubBranchPullsUrl(info)}
+            target="_blank"
+            rel="noreferrer"
+          >
             在 GitHub 上打开 PR
           </a>
         </>
@@ -144,17 +182,26 @@ export function PullRequestSheet({
   draft: boolean;
   onClose: () => void;
 }) {
+  const owner = useConversationOwnerForm();
+  const guardLink = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    try {
+      owner?.assertCurrent();
+    } catch (error) {
+      event.preventDefault();
+      toast.error(String(error));
+    }
+  };
   const [info, setInfo] = useState<GitBranchInfoResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
+  const [title, setTitle, initializeTitle] = useConversationFormField("title");
+  const [body, setBody] = useConversationFormField("body");
   useEffect(() => {
     let active = true;
     void gitBranchInfo(cwd)
       .then((next) => {
         if (!active) return;
         setInfo(next);
-        setTitle(next.branch);
+        initializeTitle(next.branch);
         setError(null);
       })
       .catch((failure: unknown) => {
@@ -175,32 +222,43 @@ export function PullRequestSheet({
       }
       onClose={onClose}
     >
+      <OwnerFormSummary />
       {error && <p role="alert">{error}</p>}
       {!error && !info && <p role="status">正在读取分支…</p>}
       {info && !ready && <p role="status">当前目录没有 GitHub 远程仓库</p>}
       {ready && info && (
-        <>
-          <p>
+        <section className="session-pr-form">
+          <p className="session-pr-form-context">
             {info.owner}/{info.repo} · {info.branch}
           </p>
-          <input
-            aria-label="PR 标题"
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-          />
-          <textarea
-            aria-label="PR 描述"
-            value={body}
-            onChange={(event) => setBody(event.target.value)}
-          />
+          <label className="session-pr-form-field">
+            <span>标题</span>
+            <input
+              aria-label="PR 标题"
+              placeholder="请输入 PR 标题"
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+            />
+          </label>
+          <label className="session-pr-form-field">
+            <span>描述</span>
+            <textarea
+              aria-label="PR 描述"
+              placeholder="补充变更背景、实现内容和验证结果"
+              value={body}
+              onChange={(event) => setBody(event.target.value)}
+            />
+          </label>
           <a
+            className="session-pr-form-submit"
+            onClick={guardLink}
             href={githubCompareUrl(info, title, body)}
             target="_blank"
             rel="noreferrer"
           >
             {draft ? "在 GitHub 上创建草稿 PR" : "在 GitHub 上创建 PR"}
           </a>
-        </>
+        </section>
       )}
     </ComposerSheet>
   );

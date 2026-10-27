@@ -227,6 +227,10 @@ test("invisible transcripts expire automatically while native completions and re
     });
   };
   try {
+    // Absence before the initial read is not evidence of idle-body reclamation.
+    // Prove both background transcripts were populated before timing expiry.
+    for (const id of ["ux-1", "ux-2"])
+      await expect.poll(async () => (await snapshot(page)).counts[id]).toBeGreaterThan(0);
     await observe("visible-and-background");
     // Real clock and the normally mounted retention service, without calling its release function.
     await expect

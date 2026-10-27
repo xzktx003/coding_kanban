@@ -1,0 +1,121 @@
+.session-mode .session-queue-rich-preview {
+  flex: 1;
+  min-width: 0;
+  align-self: center;
+  text-align: start;
+  user-select: text;
+}
+.session-mode .session-queue-preview-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  max-height: 20px;
+  min-width: 0;
+  overflow: hidden;
+}
+.session-mode .session-queue-rich-preview .codex-markdown {
+  --markdown-line-height: 20px;
+  color: var(--codex-text);
+  font-size: 13px;
+  line-height: 20px;
+}
+.session-mode .session-queue-rich-preview .codex-markdown :is(p, blockquote) {
+  padding-block: 0;
+  padding-inline-start: 0;
+  margin: 0;
+  line-height: 20px;
+}
+.session-mode .session-queue-rich-preview .codex-markdown p + p {
+  margin-top: 20px;
+}
+.session-mode .session-queue-rich-preview:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, var(--ring));
+  outline-offset: -2px;
+}
+.session-mode .session-queue-prompt-preview {
+  display: flex;
+  flex-direction: column;
+  width: 432px;
+  max-width: min(432px, calc(100vw - 32px));
+  max-height: calc(100dvh - 16px);
+  padding: 20px;
+  margin: 1px;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  overflow: hidden;
+  border: 0.5px solid color-mix(in oklab, var(--codex-text) 12%, transparent);
+  border-radius: 25px;
+  background: var(--codex-surface, var(--codex-bg));
+  color: var(--codex-text);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 5%);
+  font: 400 12px/1.428571 var(--vscode-font-family, system-ui);
+  white-space: normal;
+  user-select: text;
+  animation: none;
+}
+.session-mode .session-queue-prompt-body {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.session-mode .session-queue-drag-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.session-mode .session-queue-drag-handle[draggable="true"] {
+  cursor: grab;
+}
+.session-mode .session-queue-drag-handle[draggable="true"]:active {
+  cursor: grabbing;
+}
+/* The native focus/tooltip anchor is the 20px text line, not a 28px button. */
+.session-mode
+  .session-composer-rail
+  .session-queue-preview.session-queue-rich-preview {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+}
+
+.session-mode .session-queue-rich-preview strong {
+  font-weight: 600;
+}
+@supports (corner-shape: superellipse(1.5)) {
+  .session-mode .session-queue-prompt-preview {
+    corner-shape: superellipse(1.5);
+  }
+}
+
+.session-mode .session-queue-preview-without-image {
+  display: contents;
+}
+.session-mode .session-queue-preview-with-image {
+  color: var(--codex-muted);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  flex: 1;
+  min-width: 0;
+  padding-block: 4px;
+  overflow: hidden;
+}
+.session-mode .session-queue-preview-image-content {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 6px;
+}
+.session-mode .session-queue-image-preview {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border: 1px solid color-mix(in oklab, var(--codex-text) 12%, transparent);
+  border-radius: 4px;
+  object-fit: cover;
+}

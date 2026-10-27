@@ -1,6 +1,55 @@
+- 2026-10-27（队列附件像素对照加载条件不等价）：原夹具 native 用 data URL、本地用网络 URL；现从实际 fileSrc 解析同一 URL并核对响应 MIME、字节和 hash，data/network 保留独立控制。来源守卫红转绿，共享预览/排序 14 项通过；两主题像素矩阵仍红，此记录不是产品像素修复完成。见 [加载条件与剩余像素差](designs/session-render-alignment/queue-image-paint-20261027.md)。
+
+- 2026-10-27（模型菜单缺少恢复默认与触控额外聚焦）：原插件 explicit model 菜单具有 Reset，本地缺项；手机触控切换菜单视图后本地 RAF 又强制聚焦菜单。补齐原生推荐模型/强度重置，保留速度、草稿和 owner，触控切换不额外聚焦；Reset 提示显示时 Escape 同时关闭提示与菜单并回到原输入框；原组件与本地两尺寸对照、模型/触控红绿灯见 [模型菜单修复](designs/session-render-alignment/model-menu-reset-touch-20261027.md)。
+
+- 2026-10-27（模型提示入口和无形notice遮挡升级）：原任意settings通知被误当成官方power/recent入口，普通radio也弹提醒；旧持久栏互斥还让未展示notice挡住退休/升级横幅。现按明确操作发通知，保留精确线程/轮次/可见性，升级横幅独立。真实原组件操作、本地红绿及正式gate/ack未闭合边界见 [入口验证](designs/session-render-alignment/model-change-notice-behavior-20261027.md)。
+
+- 2026-10-27（同一通知提交改号后延迟关闭失效）：其他页面更新独立设置组后，模型通知的乐观数字id会在IDB合并提交时改变。关闭入口原先即便UUID相同仍被旧数字id拒绝；现有唯一身份时按身份认领，旧格式保留数字围栏，不关闭后来的新通知。此为真实IDB复现的API边界，当前同步UI调用未证明会触发；一项先红后绿，69项相关单测、11项实际浏览器存储回归通过，见[本轮关闭边界](designs/session-render-alignment/notice-identity-dismiss-20261027.md)。
+
+- 2026-10-27（多页丢失未发送的模型/权限选择）：旧线程设置整map写回使另一页change甚至只读hydrate覆盖其他thread；同页数字revision还会碰撞。现按thread在IDB事务应用实际字段意图，独立组合并、同组冲突保留并显式重试，读/ACK绑定捕获身份，旧备份只读迁移且权限观察不落盘。51项核心/原store单测、10项真实双页、4项HMR/HTTP及完整composer双尺寸保存恢复通过，最终联合边界见[第四批验收](designs/session-render-alignment/session-parity-batch-r4-20261027.md)。
+- 2026-10-27（新账号队列读取复用旧账号请求）：只在回执后核对scope不足以防止新读取命中旧scope的同thread去重Promise。状态读取键现包含捕获的scope，旧结果不accept也不写当前错误状态；两个账号同thread的受控反例先红后绿，相关37项回归通过。没有增加并发、轮询或重发。
+
+- 2026-10-27（多页输入偏好互相覆盖）：`mode`、`enterBehavior`、`reviewDelivery` 原来整对象持久化，另一页只改一个字段也会把旧字段写回。现按实际选择逐字段保存，旧备份只读，页面事件只读最新值；保存失败保留本页选择并可在输入设置里显式重试，HMR释放旧监听并交接未保存选择。10项单测和4项真实浏览器回归通过，见[偏好多页验收](designs/session-render-alignment/followup-preferences-multitab-20261027.md)。
+
+- 2026-10-27（队列图片摘要与无用原图请求）：折叠行隐藏了整个图片区却仍请求全部原图，无文本时摘要混淆图片/选区/粘贴。现仅显示/请求首图，按捕获类型生成预览，详情保留完整原图和正文；功能与未闭合像素检查见 [队列预览](designs/session-render-alignment/queue-preview-parity-20261027.md)。
+
+- 2026-10-27（运行中主输入按钮仍标为发送消息）：主按钮aria/title写死，展开编辑却按queue/steer显示实际动作。现复用同一标签，空闲/运行/完成状态同步，停止和发送状态机不变；1440/390真实DOM先红后绿，见 [控件对照与修复](designs/session-render-alignment/composer-input-controls-audit-20261027.md)。
+
+- 2026-10-27（队列拖动入口、状态门控与退出监听残留）：原HTML5拖放允许单条/混合状态操作且缺少官方六点手柄。现按原包PointerSensor 6px阈值、精确thread/revision/ID排序；失焦、隐藏与卸载释放自有sensor，修复真实浏览器pointerup微任务提前清理导致正常drop丢失。原包未启用KeyboardSensor，保留项目菜单键盘移动；红绿与范围见 [排序验收](designs/session-render-alignment/queue-sorting-20261027.md)。
+
+- 2026-10-27（文件/引用/绘图跨页覆盖与迟到清理丢稿）：旧全量localStorage快照互写，id+text清理漏保护元数据变化。改用每owner IDB事务、内部修订和精确条件清理，保留Undo、quota失败及已提交move后的新编辑；HMR交接当前草稿与旧回调，绘图导出不清新笔画。另修复等待保存期间新会话误用新项目/模型，点击时捕获完整创建配置。红绿与边界见 [上下文协议](designs/session-render-alignment/context-draft-storage-20261027.md) 和 [双页验收](designs/session-render-alignment/contexts-multitab-20261027.md)。
+
+- 2026-10-27（队列预览与复制/键盘/拖动）：旧正文点击只开配置、整行drag吞掉选文，嵌套链接Enter和预览Tab被拦截，向下拖动目标索引错误。现对齐官方只读原文与单行富文本，动作入口保持；absolute Portal处理实际Session祖先，真实字形和superellipse修正后深浅完整PNG字节相同。13文件65单测和12浏览器通过，未覆盖的原生拖动/附件状态仍列明，见 [队列预览](designs/session-render-alignment/queue-preview-parity-20261027.md)。
+
+- 2026-10-27（模型切换提示混入输入栏附着条）：旧提示把官方聊天分隔行与模型选择toast合并为常驻卡片。现复用原通知通道，仅对当前可交互会话的新选择显示一次，历史恢复/隐藏页/重复输入宿主不回播，关闭不改模型。27项单测、3项浏览器通过；对照夹具宿主修正后深浅×900/390四组PNG字节相同，真实flag与完整模型菜单门控仍未验，见 [模型提示验收](designs/session-render-alignment/model-change-notice-20261027.md)。
+
+- 2026-10-27（长历史占槽导致送达核对超时）：队列状态与四个 recent 历史共用名额，长历史未结束时五秒回执读取甚至无法发出。现从既有预算保留一个状态名额，recent/history/status 为 3/2/1，总数六；尚未派发的历史取消立即释放 job 和去重键，同目标可重新读取。排队取消与活跃取消后立即重开的反例均先红后绿、77 项单测及真实浏览器准入/取消通过，不重发未知提交，见 [送达核对验收](designs/session-render-alignment/receipt-read-admission-20261027.md)。
+
 - 2026-10-26（在线更新被本地改动阻塞与合并回归）：当前分支落后上游时，本地未提交文件与远程重叠，更新器正确以 `local-changes` 拒绝覆盖。备份后在隔离副本合并；修复本地原生 Codex 代码中丢失的 profile 路由、私有刷新身份、标签隔离、焦点/打开回执代次和启动等待，恢复相应回归断言。补齐显式压缩和可见窗口启动从 launcher、宿主记录到网页的实际接线，缺失受控记录拒绝回退。前端补充直接使用的 `@types/node` 依赖，消除全新安装的 TS2688。布局浏览器测试改用真实 503/恢复响应，避免手工写入错误被后台正常同步清除而误报。验证、现场资源争用和原生实验边界见 [合并验收](designs/update-merge-20261026.md)。
 
+- 2026-10-27（队列图标同名刷新替换SVG后代）：新增rail图标每次render创建新的dangerouslySetInnerHTML对象，真实浏览器同名刷新每次替换3个path。改为固定4项markup缓存，4红1控制→5绿；同名/改class零childList，换图标仍更新。本次父按钮焦点原本保持，不归因为已观察失焦；见 [同主题验收补充](designs/session-render-alignment/composer-rail-theme-20261027.md)。
+
+- 2026-10-27（跨页提交误去重与未知回执重复入队风险）：旧提交ID只用本页revision/正文，独立同文编辑可能共用ID；整份提交映射互写还会丢失旧ID。新编辑使用明确版本身份和确定性提交ID，按键独立保存，对象键排序与实际POST一致；旧UUID/v2精确绑定保留，无法证明的旧记录不猜新ID。实际后端校验/磁盘队列的10项浏览器及相关回归通过，见 [提交身份验收](designs/session-render-alignment/submission-multiclient-safety-20261027.md)。
+- 2026-10-27（附着条内容与Goal退出）：同主题原组件对照确认文件变更主区域/操作分区、队列完整展示/24px操作、Goal位置存在差异，已对齐共同组件；Goal退出时的Portal编辑器和迟到正文加载另有两项真实红灯，现立即关闭并只取消自有读取，已发保存不取消。42项单测、4项同主题及2项集成通过，见 [主题与交互对照](designs/session-render-alignment/composer-rail-theme-20261027.md)。
+
+- 2026-10-27（隐藏会话仍快速读取队列）：useFollowups 的既有计时器未随浏览器隐藏、模式/次级页切换暂停，同线程多个控件还会重复轮询。现按 thread 共用观察器，可见性/在线状态恢复才继续前台读取；保留已发共享回执读取和后台元数据同步。6红1控制→7绿，相关47单测及双页/模式2浏览器通过，见 [队列观察验收](designs/session-render-alignment/queue-visibility-20261027.md)。
+
+- 2026-10-27（多页草稿被旧回执覆盖）：同浏览器 A 页发送或创建会话等待期间，B 页新增文字/图片，A 的旧内存快照可能清掉 B 的保存结果。文字改用独立编辑身份和版本清理/移动标记，释放精确正文；附件按成功基线在 IndexedDB 事务中合并 ID/字段，移动双 owner 原子提交。红绿灯和浏览器证据见 [文字](designs/session-render-alignment/text-draft-multitab-safety-20261027.md)／[附件](designs/session-render-alignment/attachment-multitab-safety-20261027.md)。
+- 2026-10-27（桌面 composer 上方条目悬浮错位）：桌面沿用手机 floating stack，导致变更/队列与输入框边框分离。按官方 26.51007.21434 实际调用改为 attached rail，保留手机适配；退出条目立即 inert，Portal 菜单同步关闭。原组件两宽度几何对照及回归见 [验收](designs/session-render-alignment/composer-attached-rail-20261027.md)。
+
 # Coding Kanban Bug 修复记录
+
+- 2026-10-27（最新完成的助手消息操作条被 hover 隐藏）：消息行没有携带原生 `isMostRecentTurn` 与唯一 `assistantItem` 目标，导致最后一轮复制/分支按钮在桌面离开 hover 后隐藏。现按已固定的26.51007原包轮次及split分组挑选唯一行，只向该行传常显标记；不回退到旧轮，不给所有助手行加按钮，工具尾项/新未加载轮/流式/inspection与未知身份保持既有门控。原包+本地5浏览器、35单测、前端类型检查通过，见[对照与验收](designs/session-render-alignment/latest-assistant-actions-20261027.md)。
+- 2026-10-27（ConversationMenu跨会话改变表单目标并串用文字）：二级页菜单常驻使归档/删除确认随当前thread漂移、笔记/分支/提交/PR正文会写进B的项目；主Composer卸载还丢A未提交文本。现打开时冻结thread/project/title/draftOwner与读写scope，以有界本页表单草稿按owner恢复并显示目标；迟到回执不清除新修订，不淘汰脏项，刷新时明确警告。隔离夹具下12项真实桌面/手机浏览器、114单测和web类型检查通过，正式归档/删除/Git/PR写入数为0。暂存不跨硬刷新；真实HMR关卡进行中，见[owner审计和验收](designs/session-render-alignment/conversation-menu-owner-audit-20261027.md)。
+- 2026-10-27（菜单切换对话框后body指针锁残留）：父菜单退出动画仍挂载时，模态对话框可能同时释放外部指针锁；两层卸载后body仍为`pointerEvents:none`，后续真实菜单/触控被拦截。现仅当Session内对话框已打开时即时卸载背后的closed菜单层；普通菜单关闭动画保留，不直接写body style。真实菜单→对话框→后续指针先红后绿，owner最终12项浏览器另覆盖390全tap，见[层生命周期验收](designs/session-render-alignment/session-menu-layer-lifecycle-20261027.md)。
+
+- 2026-10-27（隐藏Settings收到快捷键后返回时迟到弹窗）：次级页常驻菜单的全局监听仍修改本地打开状态，Dialog隐藏不等于拒绝请求。现按Session可见性注销监听，并在事件回调同步检查hidden／inert，忽略隐藏期间的新请求；已打开表单与草稿保留。两项单测及真实模式返回先红后绿，87项相关单测、两主题／两尺寸4项新浏览器通过，见 [可见性验收](designs/session-render-alignment/hidden-shortcut-visibility-20261027.md)。
+
+- 2026-10-27（旧式会话链接刷新回到终端）：`useUrlParamThread` 消费 launcher 参数时清空全部 query，连 `mode=session` 一并删除；新浏览器没有已保存模式时，刷新便回到终端。现仅清除已消费的会话／项目参数，保留模式、其他查询参数、hash 与 history state；不改变目标选择或启动任务。单测两条先红后绿，另覆盖纯项目链接；桌面／手机隔离浏览器及正式 `REF_xh3_accu` 刷新恢复通过，见 [历史读取复验](session-codex-connection-recovery.md#2026-10-27截图复验与链接刷新修复)。
+
+- 2026-10-26（会话“无法加载消息”、历史队列持续 429）：`REF_xh3_accu` 最近页实际耗时约 6.2 秒，超过前端旧 5 秒 recent 截止；HTTPS/HTTP2 取消 POST 后代理未关闭后台读取，且已取消的排队请求继续占准入名额，造成重试拥塞。代理现在只为聊天历史／命令详情转发取消；取消的排队项立即移除，活跃 reader 仍待自有进程退出才放行下一项。recent 截止对齐后台既有 120 秒有界读取及清理，不扩大并发、正文或 RPC 预算、不重发任务。三条失败用例先红后绿，详情见 [历史读取取消与队列修复](session-codex-connection-recovery.md#2026-10-26补充历史读取取消与队列拥塞)。
+
+- 2026-10-26（Codex 窗口并发打开 409 与启动失败误提示引导）：同一宿主中的历史恢复和 `/focus` 会并发修改全局活动编辑器，另一请求抢焦点后精确核对失败；现在把焦点操作及其核对与新建编辑器组提交放入同一串行通道，独立新编辑器的加载仍可并行。原生静态 renderer 超时文档按固定标题/结构识别并归属对应窗口；只有明确观察到 onboarding 才提示官方引导，不再由“没有 composer”推断。并发与错误文档用例先红后绿，原生 iframe、父节点、MessagePort 及活跃 Agent 不变。现场旧 companion 和资源不足、部署边界见 [本次诊断](designs/codex-window-startup-fix-20261026.md)。
 
 - 2026-10-26（所有项目显示“会话加载失败”）：原生历史回复超过 32 MiB 后共享 RPC 退出，`CodexService` 仍缓存已失效的初始化 Promise，后续列表一直返回 `NOT_SENT`。现清理失效连接／失败初始化，合并并发重连并隔离旧连接回调，不重发未知回执请求。另将显式聊天历史页接入独立只读原生通道，流式丢弃工具正文、逐项投影并有界保存密集工具元数据，保留消息、身份、游标及原内存限制；大历史不再击穿 Agent 连接。40 MiB／密集记录红绿灯、真实旧会话及九项目浏览器复测通过，现场运行层和终端未重启。详见 [连接与大历史恢复](session-codex-connection-recovery.md)。
 
@@ -2099,3 +2148,27 @@
 - 2026-10-20（子线程浏览器夹具误报网络失败）：旧夹具未观察后加入的 Goal 只读请求，账号／运行边界初始化主动取消会被报作网络故障；补充同请求 ID、精确取消原因、调用栈与时间匹配，反例验证真实失败仍报错。直接打开检查列表后，metadata 404 用例显式进入指定子线程，不再依赖旧摘要展开的副作用；产品协议不变。
 
 - 2026-10-20（文件树与预览之间宽度固定）：FilesPanel 原先使用固定宽度和静态边框，长文件名与文件正文无法自行分配空间。复用现有 Resizable 组件，加入可访问的拖动分界线和有界本机比例记忆；预览面板始终保持挂载，隐藏树／手机布局不覆盖桌面比例。红灯先证明分界线缺失，修后覆盖拖动、键盘、刷新、边界与草稿保留。
+- 2026-10-27（原生 Codex 多连接资源争用）：正式宿主的每个官方 app-server 随主机 152 个 CPU 创建约 152 条 Tokio 工作线程，多浏览器连接测试使同服务线程数和 RSS 明显上涨，并与官方扩展 `EMFILE` 告警同现。新建的自有宿主按可用 CPU 将默认线程数上限设为 8，可由私有配置显式选择 1–32；继承环境不能放大。隔离原包无登录初始化三轮显示默认约 168 条总线程、设 8 后约 24 条，初始化耗时未显示稳定改善；现有正式宿主未重启，页面性能和 `EMFILE` 根因仍需单独验收。
+- 2026-10-27（Codex 长会话输入与切换时重复扫描全文）：原生内容观察器每次检查 writer lock 都读取整个聊天根节点 `textContent`，长记录会重复拼接正文。改为从原生 Retry 按钮向上检查局部通知，最多八层／64 个短文本节点；保留锁定与解除识别。会读取全文即失败的回归先红后绿，原生 surface 44 项通过；真实长历史与桌面／手机耗时仍需测量。
+- 2026-10-27（Codex 当前标签重复聚焦）：点击已选中且健康的原生标签也会使 `focusRetry` 自增，撤销精确焦点回执并再发 `/focus`，使原本可输入的窗口短暂锁住；等待中反复点击还会排队增加请求。选中目标和组未变且无焦点错误时现保持原状态，明确焦点失败仍允许重试。原生精确回执和迟到保护保留，重复点击失败用例先红后绿，Codex focus 8 项通过。
+- 2026-10-27（Codex 浏览器切换夹具与真实宿主启动契约不一致）：模拟宿主没有 `code/didStartWorkbench` 标记，适配器正确拒绝认领，但旧浏览器回归一直等被禁用的历史按钮。夹具补原生启动标记，并为切换终端模式提供完整空会话响应和隔离 WebSocket，避免读取正式会话流。原用例先红后绿，扩展桌面／iPhone 16 尺寸各 30 次标签、6 次模式往返；固定构建上的该文件 11 项全绿，计时仅代表模拟宿主。
+- 2026-10-27（Codex 首次进入串行等待）：宿主状态请求返回后才开始 Service Worker 预检，使两个独立检查时间相加。现在进入时并行启动预检，仍等宿主可用与预检成功后挂载 iframe；证书失败不挂载。状态请求悬挂时预检尚未开始的单测先红后绿，焦点文件 9/9、受控浏览器证书边界 1/1 通过；真实冷启动节省量仍须单独测量。
+
+- 2026-10-27（展开编辑插代码块重复正文）：旧按钮把草稿在围栏前后各拼一次，重复内容还会持久化。现按光标/选区插入独立代码块，保留前后正文、CRLF 和围栏内容；已有代码块内新增同级块，中文组合输入期间忽略操作。桌面 1440/手机 390 真实红灯后，13 项相关单测和 2 项返回/刷新浏览器回归通过，见 [插入语义与证据](designs/session-render-alignment/expanded-code-insertion-20261027.md)。
+
+- 2026-10-27（切换账号后迟到响应污染当前会话）：创建/发送只核对运行 epoch，分叉和历史读取缺少完整账号代次防护，同 thread 新读取还可能复用旧账号 pending。现在在元数据、正文和写回执入库前核对本页 operation scope；账号同值通知、ABA 和运行切换均撤销，历史合并键及清理保持精确版本，旧侧边会话 finally 不删除新 pending。真实失败用例和消费者/Goal 边界见 [专项证据](designs/session-render-alignment/thread-settings-consumers-scope-20261027.md)。
+- 2026-10-27（冻结发送配置被新偏好补值）：rollback 时未选 personality，冻结参数省略该字段；等待期间改为 friendly 后，turnStart 把当前值补入旧配置。显式 override 现视为完整捕获域，遗漏项由原生继承，普通发送仍使用当前线程的已持久化捕获；人格污染断言先红后绿，含 rollback 的 113 项相关单测与 3 项 Goal 浏览器验证通过，见 [消费者冻结参数](designs/session-render-alignment/thread-settings-consumers-scope-20261027.md#冻结参数的额外反例与最终局部批次)。
+- 2026-10-27（账号初始化后部分关注历史永久空白）：scope 防护抛弃旧读取后却返回成功，关注调度器误把未载入的 revision 标为 done，20 个标签只恢复 17 个。现明确返回 scope 失效的只读结果，保留待恢复 revision 并重入原有界队列一次，不添加轮询或扩大预算；两个实际调度器集成红灯转绿，67 项单测及原 8 项浏览器回归通过，见 [关注历史恢复补充](designs/session-render-alignment/thread-settings-consumers-scope-20261027.md#全量回归补充被撤销的初始历史不能伪装成功)。
+- 2026-10-27（深链接历史恢复抛未处理取消异常）：内部 scope 失效错误从公共 loadThreadHistory 传到 void/React 导航，虽然正文恢复仍触发 pageerror。现共享原始读取 promise，按消费者分别包装：普通 UI 仅静默 scope 取消，关注调度器仍收到 typed 信号重新排队，真正读取错误不吞；两种合并顺序与导航共3红转绿，88单测通过，正式LAN桌面/手机9次历史200且无pageerror或任务写。见 [公共取消契约](designs/session-render-alignment/thread-settings-consumers-scope-20261027.md#正式深链接补充内部恢复信号与公共取消契约分离)。
+
+- 2026-10-27（未知会话权限默认值覆盖原生配置）：followup 把 UNKNOWN 的 `never/danger-full-access` 始终转为发送参数，direct turnStart 的 model gate 又丢掉无 model 的明确权限。现按字段持久化 native/local 来源，事务内保留同值明确选择、跨页捕获和稀疏 ACK；未确认字段省略，权限菜单显示待确认。不可表达的 network-only 修改保稿且不开始提交，Goal-only 与已完成 rollback 的冻结重试保持独立。真实 queue/Ownership 六来源红绿、194 项局部单测及两尺寸实际 UI 证据见 [权限来源与边界](designs/session-render-alignment/thread-permission-provenance-20261027.md)。
+- 同次权限来源复核还修正审批人未知被默认 user 显示成“请求批准”：即使已有完整沙箱和审批策略，缺 approvalsReviewer 也显示待确认、不选权限行；真实 DOM 先红后绿，后续完整 native user/auto 与明确本机选择保留，见同一专项记录。
+
+- 2026-10-27（上传取消测试的计时竞态）：用例令上传在 50ms 后自动成功，忙碌 worker 上尚未点击取消按钮就已结束，完整回归出现找不到按钮的红灯。夹具改为明确保持上传等待直到 AbortSignal 取消，并新增实际 signal.aborted 及操作结束断言；6 项专项通过。产品上传逻辑未修改，失败与通过日志保留在 `.dev-runtime/session-parity-batch-r5-20261027/`。
+
+- 2026-10-27（冷启动慢会话链接被首次账号确认撤销后无法打开）：URL历史先于初始账号确认发出，回包被scope保护拒绝。现保留入口导航意图，在原15秒只读期限内等首次实际确认，再捕获scope并发出唯一读取；后续账号变化仍拒绝，等待超时或新链接替换立即清理。等待期间换会话只缓存原历史、不关注或抢焦点。永久单测与真实HTTP浏览器先红后绿，见 [链接首次确认](designs/session-render-alignment/thread-link-account-ready-20261027.md)。
+
+- 2026-10-27（手机会话动作完成后父附加层遮挡正文导航）：ConversationMenu位于会随Popover卸载的actions内，动作后父层还在。现稳定挂载本体，仅将自有trigger放入父槽位；实际动作关闭父层而独立确认表单继续保留，不抢新面板焦点，Escape逐层关闭。手机/桌面6项浏览器及相关单测通过，见 [菜单生命周期](designs/session-render-alignment/composer-parent-menu-lifecycle-20261027.md)。
+- 2026-10-27（PR 创建表单在窄屏挤压且字段无标签）：390px 和 1440px 原页面的标题框都只有24px高，描述区很短。改为带可见标签的纵向字段、44px标题框、128px描述区和移动端整行提交入口；真实浏览器几何断言覆盖390/1440、重叠与横向溢出，owner隔离与链接门控保持。见 [第六批验收](designs/session-render-alignment/session-parity-batch-r6-20261027.md#后续补充pr-表单窄屏排版2026-10-27)。
+- 2026-10-27（Playwright 隔离服务探活协议不匹配）：E2E曾用`WEB_HTTPS`推断协议，但Vite仅在`VITE_DEV_HTTPS=1`时启用HTTPS；绑定`0.0.0.0`时探活也误用该地址。现在协议跟随Vite配置，服务仍绑定请求地址，探活使用回环地址。隔离数据与端口下owner表单14项浏览器通过。
+- 2026-10-27（Git worktree 并发测试错误假设调用顺序）：`createWorktree`在串行队列前异步规范化仓库路径，并不保证Promise结果与调用顺序一致。测试现在验证一个请求创建、另一个复用同一路径，并从实际创建结果核对环境文件；session-runtime 362项全量测试通过。

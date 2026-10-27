@@ -474,6 +474,7 @@ export function mountNativeSurface(
           boundId.startsWith("new:") ||
           !onReady ||
           lastStates.get(frame)?.onboarding === true ||
+          lastStates.get(frame)?.startupError !== undefined ||
           lastStates.get(frame)?.conversationId === boundId
         )
           contentIdentities.set(frame, boundId);
@@ -502,7 +503,7 @@ export function mountNativeSurface(
             )?.[0];
             if (
               !windowId &&
-              state.conversationId === requested &&
+              (state.conversationId === requested || state.startupError) &&
               requested &&
               !requested.startsWith("new:")
             ) {
@@ -514,7 +515,7 @@ export function mountNativeSurface(
                 contentIdentities.set(frame, state.conversationId);
               else {
                 const requested =
-                  state.onboarding &&
+                  (state.onboarding || state.startupError) &&
                   Array.from(dynamicBindings).find(
                     ([, boundColumn]) =>
                       boundColumn ===

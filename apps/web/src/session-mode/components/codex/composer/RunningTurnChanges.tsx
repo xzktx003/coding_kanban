@@ -4,6 +4,7 @@ import { useTurnControl } from "../hooks/useTurnControl";
 import { useCodexContentOwner } from "../presentation/ownerContext";
 import { aggregateTurnChangesFromContext } from "../items/fileChangeLogic";
 import { useOpenReviewTab } from "../items/fileChangeUtils";
+import { ComposerRailItem } from "./ComposerRail";
 export function RunningTurnChanges({ threadId }: { threadId: string | null }) {
   const { running, turnId } = useTurnControl(threadId ?? undefined);
   const { cwd } = useCodexContentOwner(threadId ?? undefined);
@@ -43,20 +44,37 @@ export function RunningTurnChanges({ threadId }: { threadId: string | null }) {
       ? { threadId, turnId, cwd, changes, batches: [] }
       : undefined,
   );
-  if (!running || !changes.length) return null;
   const added = changes.reduce((sum, c) => sum + c.addedCount, 0),
     removed = changes.reduce((sum, c) => sum + c.removedCount, 0);
   return (
-    <button
-      type="button"
-      className="codex-running-changes"
-      onClick={() => open()}
-      aria-label={`${changes.length} 个文件已更改，查看变更`}
-    >
-      <span>{changes.length} 个文件已更改</span>
-      <span className="codex-change-added">+{added}</span>
-      <span className="codex-change-removed">−{removed}</span>
-      <span className="codex-running-changes-review">查看变更</span>
-    </button>
+    <ComposerRailItem visible={running && changes.length > 0}>
+      <div className="codex-running-changes">
+        <button
+          type="button"
+          className="codex-running-changes-target"
+          onClick={() => open()}
+          aria-label={`${changes.length} 个文件已更改，查看变更`}
+        >
+          <span className="codex-running-changes-summary">
+            <span className="codex-running-changes-title">
+              {changes.length} 个文件已更改
+            </span>
+            <span className="codex-running-changes-meta">
+              <span className="codex-running-changes-counts">
+                <span className="codex-change-added">+{added}</span>
+                <span className="codex-change-removed">-{removed}</span>
+              </span>
+            </span>
+          </span>
+        </button>
+        <button
+          type="button"
+          className="codex-running-changes-review"
+          onClick={() => open()}
+        >
+          查看变更
+        </button>
+      </div>
+    </ComposerRailItem>
   );
 }

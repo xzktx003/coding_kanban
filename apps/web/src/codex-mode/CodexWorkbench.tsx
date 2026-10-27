@@ -150,6 +150,7 @@ function CodexSplitWorkspace({
   activeId,
   readyWindowIds,
   composerWindowIds,
+  onboardingWindowIds,
   blockedWindowIds,
   focusError,
   preview,
@@ -168,6 +169,7 @@ function CodexSplitWorkspace({
   activeId: string | null;
   readyWindowIds: Set<string>;
   composerWindowIds: Set<string>;
+  onboardingWindowIds: Set<string>;
   blockedWindowIds: Set<string>;
   focusError: string | null;
   preview: CodexDropTarget | null;
@@ -192,6 +194,7 @@ function CodexSplitWorkspace({
         activeId={activeId}
         readyWindowIds={readyWindowIds}
         composerWindowIds={composerWindowIds}
+        onboardingWindowIds={onboardingWindowIds}
         blockedWindowIds={blockedWindowIds}
         focusError={focusError}
         preview={preview?.groupId === node.id ? preview : null}
@@ -226,6 +229,7 @@ function CodexSplitWorkspace({
           activeId={activeId}
           readyWindowIds={readyWindowIds}
           composerWindowIds={composerWindowIds}
+          onboardingWindowIds={onboardingWindowIds}
           blockedWindowIds={blockedWindowIds}
           focusError={focusError}
           preview={preview}
@@ -253,6 +257,7 @@ function CodexSplitWorkspace({
           activeId={activeId}
           readyWindowIds={readyWindowIds}
           composerWindowIds={composerWindowIds}
+          onboardingWindowIds={onboardingWindowIds}
           blockedWindowIds={blockedWindowIds}
           focusError={focusError}
           preview={preview}
@@ -277,6 +282,7 @@ function CodexGroupPane({
   activeId,
   readyWindowIds,
   composerWindowIds,
+  onboardingWindowIds,
   blockedWindowIds,
   focusError,
   preview,
@@ -294,6 +300,7 @@ function CodexGroupPane({
   activeId: string | null;
   readyWindowIds: Set<string>;
   composerWindowIds: Set<string>;
+  onboardingWindowIds: Set<string>;
   blockedWindowIds: Set<string>;
   focusError: string | null;
   preview: CodexDropTarget | null;
@@ -316,7 +323,7 @@ function CodexGroupPane({
   const needsOfficialGuide = Boolean(
     shown &&
     item &&
-    !composerWindowIds.has(item.id) &&
+    onboardingWindowIds.has(item.id) &&
     !blockedWindowIds.has(item.id),
   );
   return (
@@ -555,6 +562,9 @@ export default function CodexWorkbench({
   const [composerWindowIds, setComposerWindowIds] = useState<Set<string>>(
     new Set(),
   );
+  const [onboardingWindowIds, setOnboardingWindowIds] = useState<Set<string>>(
+    new Set(),
+  );
   const [blockedWindowIds, setBlockedWindowIds] = useState<Set<string>>(
     new Set(),
   );
@@ -696,6 +706,9 @@ export default function CodexWorkbench({
   const surface = useRef<ReturnType<typeof mountNativeSurface> | null>(null);
   const surfaceVersion = useRef(0);
   const activeRef = useRef(active);
+  const workerProbe = useRef<ReturnType<
+    typeof probeVsCodeWebServiceWorker
+  > | null>(null);
   const projectRequest = useRef(0);
   const projectIndexLoaded = useRef(false);
   const restoreAttempts = useRef(new Set<string>());
@@ -713,23 +726,31 @@ export default function CodexWorkbench({
   windowStateRef.current = windowState;
   const firstWindowId = status?.newChatWindowIds?.[0] ?? "native-default";
   useEffect(() => {
+    if (!active) return;
+    // The probe and host status do not depend on each other. Start both on
+    // entry, but keep the host gated until the probe succeeds.
+    workerProbe.current = probeVsCodeWebServiceWorker({ force: retry > 0 });
+  }, [active, retry]);
+  useEffect(() => {
     if (!active || !status?.available) return;
     let cancelled = false;
-    void probeVsCodeWebServiceWorker({ force: retry > 0 }).then((result) => {
-      if (cancelled) return;
-      if (result.state === "ready") {
-        setWorkerReady(true);
-        setWorkerError(null);
-      } else
-        setWorkerError({
-          title:
-            result.reason === "certificate"
-              ? "浏览器尚未信任 HTTPS 证书"
-              : "原生聊天无法启动",
-          detail: result.detail.slice(0, 500),
-          certificate: result.reason === "certificate",
-        });
-    });
+    void (workerProbe.current ?? probeVsCodeWebServiceWorker()).then(
+      (result) => {
+        if (cancelled) return;
+        if (result.state === "ready") {
+          setWorkerReady(true);
+          setWorkerError(null);
+        } else
+          setWorkerError({
+            title:
+              result.reason === "certificate"
+                ? "浏览器尚未信任 HTTPS 证书"
+                : "原生聊天无法启动",
+            detail: result.detail.slice(0, 500),
+            certificate: result.reason === "certificate",
+          });
+      },
+    );
     return () => {
       cancelled = true;
     };
@@ -856,9 +877,11 @@ export default function CodexWorkbench({
       const sharedIds = new Set(sharedWindows.map((item) => item.id));
       // A shared follow snapshot does not own this tab's visible layout. A slow
       // host must still restore its selected history even if it is unfollowed.
-      const displayedIds = new Set(codexSplitGroups(current.tree).flatMap(
-        (group) => group.selected ? [group.selected] : [],
-      ));
+      const displayedIds = new Set(
+        codexSplitGroups(current.tree).flatMap((group) =>
+          group.selected ? [group.selected] : [],
+        ),
+      );
       const openingIds = pendingOpenThreads.current;
       const detachedId = sharedState.detached?.id;
       // A shared snapshot can settle between a local open and its add receipt.
@@ -1076,7 +1099,8 @@ export default function CodexWorkbench({
         void requestOpenThread(item.id);
       } else if (
         item.kind === "new" &&
-        (item.id !== `new:${firstWindowId}` || status?.restoreVisibleWindows === true) &&
+        (item.id !== `new:${firstWindowId}` ||
+          status?.restoreVisibleWindows === true) &&
         !restoredNewWindowIds.current.has(item.id)
       ) {
         restoredNewWindowIds.current.add(item.id);
@@ -1603,6 +1627,18 @@ export default function CodexWorkbench({
   const selectWindow = (id: string) => {
     if (draggedClick.current === id) {
       draggedClick.current = null;
+      return;
+    }
+    const current = windowStateRef.current;
+    const selectedGroup = codexSplitGroups(current.tree).find(
+      (group) => group.id === current.activeGroupId,
+    );
+    if (
+      current.activeId === id &&
+      selectedGroup?.selected === id &&
+      !focusError
+    ) {
+      setMobilePane("native");
       return;
     }
     setWindowState((current) => focusCodexWindow(current, id));
@@ -2151,6 +2187,7 @@ export default function CodexWorkbench({
                     readyWindowIdsRef.current.clear();
                     setReadyWindowIds(new Set());
                     setComposerWindowIds(new Set());
+                    setOnboardingWindowIds(new Set());
                     setBlockedWindowIds(new Set());
                     restoredThreadIds.current.clear();
                     restoredNewWindowIds.current.clear();
@@ -2254,6 +2291,17 @@ export default function CodexWorkbench({
                               windowId,
                               state,
                             );
+                            setOnboardingWindowIds((current) => {
+                              const guide =
+                                state.onboarding === true &&
+                                !state.startupError;
+                              if (current.has(windowId) === guide)
+                                return current;
+                              const next = new Set(current);
+                              if (guide) next.add(windowId);
+                              else next.delete(windowId);
+                              return next;
+                            });
                             setBlockedWindowIds((current) => {
                               const blocked = state.blockedByOtherApp === true;
                               if (current.has(windowId) === blocked)
@@ -2273,6 +2321,20 @@ export default function CodexWorkbench({
                               return next;
                             });
                             if (!rendered) {
+                              if (state.startupError)
+                                setWindowState((current) => ({
+                                  ...current,
+                                  windows: current.windows.map((item) =>
+                                    item.id === windowId
+                                      ? {
+                                          ...item,
+                                          state: "error",
+                                          error:
+                                            "原生 Codex 界面启动超时，请重试打开；若持续失败，请检查宿主状态",
+                                        }
+                                      : item,
+                                  ),
+                                }));
                               if (readyWindowIdsRef.current.delete(windowId))
                                 setReadyWindowIds(
                                   new Set(readyWindowIdsRef.current),
@@ -2447,6 +2509,7 @@ export default function CodexWorkbench({
                 activeId={windowState.activeId}
                 readyWindowIds={readyWindowIds}
                 composerWindowIds={composerWindowIds}
+                onboardingWindowIds={onboardingWindowIds}
                 blockedWindowIds={blockedWindowIds}
                 focusError={focusError}
                 preview={dropPreview}

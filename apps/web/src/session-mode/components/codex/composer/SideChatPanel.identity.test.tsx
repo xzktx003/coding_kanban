@@ -47,6 +47,15 @@ vi.mock("@session/services/codexService", () => ({
   codexService: { loadThreadHistory: vi.fn() },
 }));
 import { SideChatPanel } from "./SideChatPanel";
+import { useComposerDraftStore } from "./v2/drafts";
+
+const restoredContexts = () =>
+  waitFor(() =>
+    expect(
+      useComposerDraftStore.getState().status[sessionDraftKey("codex", "side")]
+        ?.phase,
+    ).toBe("ready"),
+  );
 beforeEach(() => {
   submit.mockReset().mockResolvedValue({ items: [] });
   useSubagentStore.setState({
@@ -72,6 +81,7 @@ it.each([false, true])(
       { id: "side", parentThreadId: "root", canAcceptDirectInput },
     ]);
     render(<SideChatPanel />);
+    await restoredContexts();
     const button = screen.getByRole("button", { name: "发送侧边消息" });
     expect(button.hasAttribute("disabled")).toBe(!canAcceptDirectInput);
     fireEvent.click(button);
@@ -101,6 +111,7 @@ it("a main source permits a side input even when a legacy observation mentions t
     threads: [{ id: "side", source: "vscode", parentThreadId: null }] as any,
   });
   render(<SideChatPanel />);
+  await restoredContexts();
   fireEvent.click(screen.getByRole("button", { name: "发送侧边消息" }));
   await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
   expect(useSubagentStore.getState().nodes.side).toBeUndefined();

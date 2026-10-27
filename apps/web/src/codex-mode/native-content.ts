@@ -7,9 +7,39 @@ export type NativeContentState = {
   userInteracted: boolean;
   blockedByOtherApp?: boolean;
   onboarding?: boolean;
+  startupError?: "renderer-timeout";
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function hasNativeWriterLock(root: HTMLElement | null): boolean {
+  if (!root) return false;
+  for (const button of root.querySelectorAll("button")) {
+    if (button.textContent?.trim() !== "Retry") continue;
+    for (
+      let scope = button.parentElement, depth = 0;
+      scope && scope !== root && depth < 8;
+      scope = scope.parentElement, depth++
+    ) {
+      // Inspect only a bounded local notice. Flattening the whole transcript
+      // for every composer event can allocate megabytes of text.
+      const walker = scope.ownerDocument.createTreeWalker(scope, 4);
+      let copy = "";
+      let visited = 0;
+      while (walker.nextNode() && visited++ < 64 && copy.length < 2048) {
+        const value = walker.currentNode.nodeValue ?? "";
+        if (value.length > 256) continue;
+        copy += value;
+        if (
+          copy.includes("This is open in another app") &&
+          copy.includes("Close it there to continue here.")
+        )
+          return true;
+      }
+    }
+  }
+  return false;
+}
 
 export function observeNativeContent(
   frame: HTMLIFrameElement,
@@ -122,6 +152,15 @@ export function observeNativeContent(
     root: HTMLElement | null,
     rendered: boolean,
   ) => {
+    // The pinned official timeout replaces React with a static document. Do
+    // not inspect transcript text or global toasts belonging to other windows.
+    const startupError =
+      !root &&
+      app?.title === "Codex could not start" &&
+      app.body?.querySelector("h1")?.textContent?.trim() ===
+        "Codex could not start" &&
+      app.body?.querySelector("p")?.textContent?.trim() ===
+        "The extension could not start its user interface.";
     const portal =
       root?.querySelector<HTMLElement>("[data-above-composer-portal]") ?? null;
     if (portal !== conversationPortal) {
@@ -176,13 +215,7 @@ export function observeNativeContent(
         "[data-composer-attachment-pill], [data-appshot-attachment], [data-attachment-thumbnail-source]",
       ),
     );
-    const blockedByOtherApp = Boolean(
-      root?.textContent?.includes("This is open in another app") &&
-      root?.textContent?.includes("Close it there to continue here.") &&
-      Array.from(root.querySelectorAll("button")).some(
-        (button) => button.textContent?.trim() === "Retry",
-      ),
-    );
+    const blockedByOtherApp = hasNativeWriterLock(root);
     const hasComposer = Boolean(composer) && !blockedByOtherApp;
     // This pinned native onboarding has Back/Next controls and no thread or
     // composer. Expose its own controls without accepting an unrelated chat.
@@ -205,6 +238,7 @@ export function observeNativeContent(
       userInteracted,
       blockedByOtherApp,
       ...(onboarding ? { onboarding: true } : {}),
+      ...(startupError ? { startupError: "renderer-timeout" as const } : {}),
     };
     lastValue = state;
     const key = JSON.stringify(state);

@@ -16,6 +16,8 @@ import {
 } from "@session/stores/useSessionDraftStore";
 import {
   getThreadModelSettings,
+  hydrateThreadModel,
+  flushThreadModelSettings,
   useThreadModelStore,
   type ThreadModelEntry,
 } from "@session/stores/useThreadModelStore";
@@ -86,7 +88,7 @@ function entry(model: string): ThreadModelEntry {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
   useCodexStore.setState({
     currentThreadId: "main",
@@ -96,9 +98,6 @@ beforeEach(() => {
     ] as any,
     events: { main: [], side: [] },
     inputFocusTrigger: 0,
-  });
-  useThreadModelStore.setState({
-    threads: { main: entry("main-model"), side: entry("side-model") },
   });
   useConfigStore.setState({
     sandbox: "workspace-write",
@@ -116,6 +115,21 @@ beforeEach(() => {
   useSideChatStore.setState({
     chat: { id: "side", parentId: "main", title: "侧边聊天", images: [] },
   });
+  // Seed through the real intent/IDB path: mounting the selector now restores
+  // the durable row, so a bare in-memory setState is not a persisted fixture.
+  for (const id of ["main", "side"]) {
+    const settings = entry(`${id}-model`);
+    hydrateThreadModel(id, {
+      model: settings.model,
+      modelProvider: settings.modelProvider,
+      reasoningEffort: settings.reasoningEffort,
+      sandbox: settings.sandbox,
+      approvalPolicy: settings.approvalPolicy,
+      approvalsReviewer: settings.approvalsReviewer,
+      collaborationMode: settings.collaborationMode,
+    });
+  }
+  await Promise.all([flushThreadModelSettings("main"), flushThreadModelSettings("side")]);
 });
 
 function mount() {

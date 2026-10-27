@@ -10,9 +10,17 @@ test("an active turn keeps Stop available and offers an explicit queued send for
   try {
     await editor(page).fill("本轮结束后处理这条消息");
     await expect(page.getByRole("button", { name: "停止生成", exact: true })).toBeVisible();
-    const send = page.getByRole("button", { name: "发送消息", exact: true });
+    const send = page
+      .locator('.session-agent-view .session-native-composer[data-owner-thread="ux-0"]')
+      .getByRole("button", { name: "加入队列", exact: true });
     await expect(send).toBeEnabled();
+    const accepted = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === "/api/session/followups/submit" &&
+      response.request().method() === "POST" &&
+      response.request().postDataJSON()?.threadId === "ux-0",
+    );
     await send.click();
+    expect((await accepted).ok()).toBe(true);
     const state = await (await page.request.get(f.origin + "/api/session/followups?threadId=ux-0")).json();
     expect(state.items).toHaveLength(1);
     expect(state.items[0]).toMatchObject({ threadId: "ux-0", mode: "queue", text: "本轮结束后处理这条消息", status: "queued" });
@@ -330,20 +338,41 @@ test("touch controls, agent label, owner states and narrow desktop pane stay wit
       await expect(goalDraft).toHaveCount(0);
       await expect(editor(page)).toHaveText("运行中的草稿");
       await fixedHeight(page, initial);
-      await page.evaluate(async () => {
-        const path = "/src/session-mode/components/codex/composer/v2/drafts.ts";
-        const { useComposerDraftStore } = await import(
-          performance
-            .getEntriesByType("resource")
+      const quotaFailure = await page.evaluate(async () => {
+        const load = (path: string) => import(
+          performance.getEntriesByType("resource")
             .findLast((e) => new URL(e.name).pathname === path)?.name ?? path
         );
-        useComposerDraftStore.setState({ error: "测试磁盘空间不足" });
+        const { composerDrafts } = await load("/src/session-mode/components/codex/composer/v2/drafts.ts");
+        const { CONTEXT_DATABASE } = await load("/src/session-mode/components/codex/composer/v2/draftStorage.ts");
+        const owner = document.querySelector(".session-native-composer")!.getAttribute("data-draft-owner")!;
+        await composerDrafts.ensure(owner);
+        await composerDrafts.flush(owner);
+        const original = IDBObjectStore.prototype.put;
+        let injected = 0;
+        IDBObjectStore.prototype.put = function(value, key) {
+          if (this.transaction.db.name === CONTEXT_DATABASE && key === owner) {
+            injected++;
+            throw new DOMException("测试磁盘空间不足", "QuotaExceededError");
+          }
+          return original.call(this, value, key);
+        };
+        // Keep the fault active until this isolated browser context closes.
+        try {
+          await composerDrafts.flush(owner);
+          return { injected, rejected: false };
+        } catch {
+          return { injected, rejected: true };
+        }
       });
+      expect(quotaFailure).toEqual({ injected: 1, rejected: true });
       await expect(
         page.locator(".session-native-composer-status[role=alert]"),
       ).toContainText("上下文保存失败");
       await expect(
-        page.getByRole("button", { name: "发送消息", exact: true }),
+        page
+          .locator('.session-agent-view .session-native-composer[data-owner-thread="ux-0"]')
+          .getByRole("button", { name: "加入队列", exact: true }),
       ).toBeDisabled();
       await fixedHeight(page, initial);
       await openComposerStatus(page);
@@ -362,7 +391,8 @@ test("touch controls, agent label, owner states and narrow desktop pane stay wit
       expect(pane.width).toBeLessThanOrEqual(360);
       expect(pane.height).toBe(124);
       const send = (await page
-        .getByRole("button", { name: "发送消息", exact: true })
+        .locator('.session-agent-view .session-native-composer[data-owner-thread="ux-0"]')
+        .getByRole("button", { name: "加入队列", exact: true })
         .boundingBox())!;
       expect(send.x + send.width).toBeLessThanOrEqual(pane.x + pane.width);
       await page.screenshot({
@@ -568,7 +598,10 @@ test("visual acceptance captures both themes, left thumbnails, direct utilities 
         },
       });
     });
-    await page.getByRole("button", { name: "发送消息", exact: true }).click();
+    await page
+      .locator('.session-agent-view .session-native-composer[data-owner-thread="ux-0"]')
+      .getByRole("button", { name: "加入队列", exact: true })
+      .click();
     await expect(
       page.getByRole("button", { name: "立即引导", exact: true }),
     ).toBeVisible();
@@ -582,16 +615,16 @@ test("visual acceptance captures both themes, left thumbnails, direct utilities 
     await fixedHeight(page, before);
     expect(
       (await page
-        .locator(".session-composer-floating .session-queue-shelf")
+        .locator(".session-composer-rail .session-queue-shelf")
         .boundingBox())!.height,
     ).toBeLessThanOrEqual(56);
     expect(
       await page
-        .locator(".session-composer-floating .session-queue-shelf")
+        .locator(".session-composer-rail-item").filter({ has: page.locator(".session-queue-shelf") })
         .evaluate((el) => getComputedStyle(el).backgroundColor),
     ).toContain("0.78");
     const floating = (await page
-      .locator(".session-composer-floating")
+      .locator(".session-composer-rail")
       .first()
       .boundingBox())!;
     const frame = (await page
@@ -602,10 +635,14 @@ test("visual acceptance captures both themes, left thumbnails, direct utilities 
     await editor(page).fill("这一轮的补充仍可继续输入");
     await setModelNotice(page);
     await fixedHeight(page, before);
-    await expect(page.locator(".session-followup-images img")).toHaveJSProperty(
+    await page.getByRole("button", { name: "查看发送配置与上下文", exact: true }).click();
+    const details = page.getByRole("dialog", { name: "待发送消息 · 1", exact: true });
+    await expect(details.locator(".session-followup-images img")).toHaveJSProperty(
       "naturalWidth",
       240,
     );
+    await details.getByRole("button", { name: "关闭面板", exact: true }).click();
+    await fixedHeight(page, before);
     const path =
       ".dev-runtime/compact-composer-review/visual-floating-queue.png";
     await page.screenshot({ path });

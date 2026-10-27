@@ -1,11 +1,9 @@
-import {
-  act,
-  fireEvent,
-  render,
-  renderHook,
-  screen,
-} from "@testing-library/react";
-import { beforeEach, expect, it } from "vitest";
+import { act, render, renderHook, screen } from "@testing-library/react";
+import { beforeEach, expect, it, vi } from "vitest";
+const notices = vi.hoisted(() => ({ info: vi.fn() }));
+vi.mock("@session/features/native-notifications/service", () => ({
+  nativeNotifications: notices,
+}));
 import { AgentModelTrigger } from "./AgentModelTrigger";
 import { ModelChangeNotice } from "../codex/composer/ModelChangeNotice";
 import { useCodexStore, useConfigStore } from "../codex/stores";
@@ -18,6 +16,7 @@ import {
 } from "../../stores/useThreadModelStore";
 
 beforeEach(() => {
+  notices.info.mockClear();
   useThreadModelStore.setState({ threads: {} });
   useAgentSettingsStore.setState({ selectedAgent: "codex" });
   useAcpStore.setState({ active: false });
@@ -66,27 +65,14 @@ it("late callbacks keep the thread identity captured by their model selector", (
   expect(result.current.model).toBe("gpt-6-sol");
   expect(useThreadModelStore.getState().threads.a.model).toBe("gpt-6-luna");
 });
-it("shows one dismissible per-thread switch notice without sending a message or interrupting a task", () => {
+it("keeps ordinary settings callbacks silent across thread switching and read-only restoration", () => {
   const { result } = renderHook(() => useThreadModelSettings("a"));
   const { rerender } = render(<ModelChangeNotice threadId="a" />);
-  expect(screen.queryByRole("status")).toBeNull();
   act(() => result.current.setModel("gpt-6-luna"));
-  expect(screen.getByRole("status").textContent).toContain("gpt-6-astra");
-  expect(screen.getByRole("status").textContent).toContain("gpt-6-luna");
-  expect(screen.getByRole("status").textContent).toContain(
-    "模型已从 gpt-6-astra 更改为 gpt-6-luna。",
-  );
-  expect(screen.getByRole("status").textContent).toContain("在对话中途更改模型会降低性能");
-  expect(screen.getByRole("status").textContent?.match(/降低性能/g)).toHaveLength(1);
-  expect(screen.getByRole("status").textContent).not.toContain("当前模型是");
   rerender(<ModelChangeNotice threadId="b" />);
-  expect(screen.queryByRole("status")).toBeNull();
   rerender(<ModelChangeNotice threadId="a" />);
-  fireEvent.click(screen.getByRole("button", { name: "关闭模型切换提示" }));
-  expect(screen.queryByRole("status")).toBeNull();
   act(() => result.current.setModel("gpt-6-sol"));
-  expect(screen.getByRole("status").textContent).toContain("gpt-6-luna");
-  expect(screen.getByRole("status").textContent).toContain("gpt-6-sol");
+  expect(useThreadModelStore.getState().threads.b.model).toBe("gpt-6-sol");
   act(() =>
     hydrateThreadModel(
       "a",
@@ -94,7 +80,5 @@ it("shows one dismissible per-thread switch notice without sending a message or 
       { notify: true },
     ),
   );
-  expect(screen.getByRole("status").textContent).toContain(
-    "在对话中途更改模型会降低性能",
-  );
+  expect(notices.info).not.toHaveBeenCalled();
 });

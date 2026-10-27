@@ -37,6 +37,7 @@ export function projectWorkflowRows(
 ) {
   const messages: WorkflowMessage[] = [];
   const turns = new Map<string, WorkflowTurn>();
+  const completedTurns = new Set<string>();
   for (const event of events) {
     if (!("threadId" in event.params) || event.params.threadId !== threadId)
       continue;
@@ -48,12 +49,14 @@ export function projectWorkflowRows(
           : null;
     if (!turnId) continue;
     const previous = turns.get(turnId);
-    if (event.method === "turn/completed")
+    if (event.method === "turn/completed") {
+      if (event.params.turn.status === "completed") completedTurns.add(turnId);
+      else completedTurns.delete(turnId);
       turns.set(turnId, {
         id: turnId,
         completed: event.params.turn.status !== "inProgress",
       });
-    else if (!previous) turns.set(turnId, { id: turnId, completed: false });
+    } else if (!previous) turns.set(turnId, { id: turnId, completed: false });
   }
   for (const row of rows) {
     if (row.item.kind !== "event") continue;
@@ -115,11 +118,98 @@ export function projectWorkflowRows(
       });
     }
   }
+  const latestTurnId = [...turns.keys()].at(-1);
+  // The native turn renderer chooses a terminal assistant item, not the last
+  // completed answer in any turn. Keep first-seen item order through late ACKs.
+  // This temporary index contains identities/status only, never tool bodies.
+  const items = new Map<
+    string,
+    { id: string; type: string; completed: boolean; phase?: string | null }
+  >();
+  for (const event of events) {
+    if (
+      (event.method !== "item/started" && event.method !== "item/completed") ||
+      event.params.threadId !== threadId ||
+      event.params.turnId !== latestTurnId
+    )
+      continue;
+    const item = event.params.item;
+    // Plans have their own document surface, outside native assistant grouping.
+    if (item.type === "plan") continue;
+    items.set(item.id, {
+      id: item.id,
+      type: item.type,
+      completed: event.method === "item/completed",
+      ...(item.type === "agentMessage" ? { phase: item.phase } : {}),
+    });
+  }
+  const ordered = [...items.values()];
+  let index = ordered.length - 1;
+  const trailing = ordered[index]?.type !== "agentMessage";
+  if (trailing) {
+    while (index >= 0) {
+      const item = ordered[index];
+      if (
+        item.completed &&
+        (item.type === "reasoning" ||
+          (completedTurns.has(latestTurnId!) &&
+            (item.type === "commandExecution" ||
+              item.type === "dynamicToolCall")))
+      )
+        index--;
+      else break;
+    }
+  }
+  const candidate = ordered[index];
+  const answer =
+    candidate?.type === "agentMessage" &&
+    (!trailing || candidate.phase === "final_answer")
+      ? candidate
+      : undefined;
+  let latestAssistantRowId: string | undefined;
+  if (
+    answer?.completed &&
+    (answer.phase != null ||
+      (answer.phase == null && completedTurns.has(latestTurnId!)))
+  ) {
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index];
+      if (
+        message.turnId === latestTurnId &&
+        message.itemId === answer.id &&
+        message.role === "assistant" &&
+        message.completed &&
+        message.text.trim()
+      ) {
+        latestAssistantRowId = message.rowId;
+        break;
+      }
+    }
+  }
   return {
+    latestTurnId,
+    latestAssistantRowId,
     messages,
     turns: [...turns.values()],
     lastUserRowId: [...messages]
       .reverse()
       .find((message) => message.role === "user")?.rowId,
   };
+}
+
+/** No fallback to old completed history when a known newer/not-loaded turn is
+ * absent from this bounded projection. Known older timing snapshots are harmless. */
+export function latestAssistantActionRow(
+  projection: ReturnType<typeof projectWorkflowRows>,
+  observedTurnIds: readonly (string | null | undefined)[] = [],
+  latestIdentityUnknown = false,
+): string | undefined {
+  if (
+    latestIdentityUnknown ||
+    observedTurnIds.some(
+      (id) => id && !projection.turns.some((turn) => turn.id === id),
+    )
+  )
+    return undefined;
+  return projection.latestAssistantRowId;
 }

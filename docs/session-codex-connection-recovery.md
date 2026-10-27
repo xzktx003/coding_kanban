@@ -44,3 +44,46 @@ PLAYWRIGHT_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=<已运行的LAN地址> pnpm exe
 ```
 
 正文自动回收／只读恢复与真实 HTTP/EventSource 裁剪三项通过；三十分钟长测默认跳过，不能计为通过，本次不关闭既有长期 renderer RSS 红灯。现场只读检查和临时诊断材料位于忽略目录 `.dev-runtime/codex-reconnect-20261026/`，不包含提交凭证。
+
+## 2026-10-26补充：历史读取取消与队列拥塞
+
+会话模式 `REF_xh3_accu` 显示“无法加载消息”。现场请求直接返回 `429 CHAT_HISTORY_BUSY`；单独读取其最近 10 轮成功，输出 1,206,139 bytes／512 项、用时 6.191 秒，历史没有据此丢失。前端 recent 截止只有 5 秒，后台却是单 reader 加 16 个排队项、120 秒总等待期限，客户端会提前超时并触发已有恢复重试。
+
+真实 Vite HTTP/2 HTTPS 回归进一步复现：POST 请求体已发送完毕后取消 HTTP/2 stream，后台连接仍存活；同场 HTTP/1 用例正常。HTTP/2 取消事件之后还会出现 response `finish`，不能仅依赖随后 `close` 时的 `writableFinished`。开发代理现同时观察 request `aborted` 和 response `close`，正常 finish 后清理监听；严格限定 POST 聊天 `turns/list?view=chat` 与显式 `item-detail`，不将此行为扩展到发送／审批等写请求。原有 Host、Origin、HTTPS 转发和 WebSocket 设置保持。
+
+队列原先用不可移除的 Promise 链；16 个等待者取消后仍占据名额，下一条请求直接 429。现改为可移除的有界 FIFO：取消排队项立即拒绝并清理引用，不启动原生进程；活跃项仍等待 `reading.finished`，确认自有进程退出才开始下一项。关闭网关取消全部自有读请求；无 Agent resume、acquire、interrupt 或重启。上限仍为一个 reader 加 16 个排队请求。
+
+前端 recent 截止改为 125 秒，覆盖后台既有 120 秒期限和最多两次各 2 秒的进程清理；普通完整历史保留 15 秒，用户取消仍立即生效。客户端并发、分页游标、请求页大小、16 MiB 投影、32 MiB 共享 RPC、工具正文裁剪和正文空闲回收均未放宽，没有增加历史轮询。
+
+验证：HTTP/2 取消、取消队列释放准入、6.2 秒有效读取分别先红后绿；真实 HTTP/1/HTTP2 及写请求排除 3 项、前端读取／同步 54 项、原生读取／取消／背压 16 项、网关相关 17 项、开发代理配置 9 项通过，`pnpm check` 通过。约定的八组浏览器保护共 27 项通过、1 项长测默认跳过，覆盖原生 SSE 大正文裁剪、自动休眠与恢复、缺失完成回复、审批/流式状态恢复和正文预算；这不代表长期 renderer RSS 红灯已解决。
+
+证据及日志位于忽略目录 `.dev-runtime/history-load-fix-20261026/`；前端入口保持 **HTTPS https://10.30.0.24:8484，端口 8484**。网关加载更新的独立只读库，原 Session 运行层 PID 2712539 保留。
+
+正式浏览器通过真实接口打开 `REF_xh3_accu`，1600×1000 桌面及 393×852 手机尺寸均显示历史最终回复和待回答问题，没有“无法加载消息”提示或横向溢出；目标及同批历史接口全部 200、页面异常 0、任务写入请求 0。截图为该目录 `desktop.png`／`mobile.png`，结果 `browser-result.json`。初次浏览器探测碰到测试证书策略切换导致的 `ERR_CERT_VERIFIER_CHANGED`，另一次通过动态导入 store 检查就绪的探测超时但实际正文已显示；这两次不计通过。最终探测仅核对真实 DOM／网络，使用固定本机证书公钥白名单，保留失败日志，没有修改站点证书或放宽产品安全设置。
+
+再次现场复验的材料位于 `.dev-runtime/history-load-recheck-20261027/`：同一正式地址的目标会话在两种尺寸均显示回复及问题，5 条历史读取全部 200，页面异常和任务写入均为 0。首次冷启动测试浏览器再次遇到 `ERR_CERT_VERIFIER_CHANGED`，不计通过；浏览器完成同源初始化后重新导航的独立检查通过，未改站点证书、产品代码或服务。`pnpm codex:status` 同时确认已切换宿主、网关及 broker 可用，不据此代替模型对话验收。
+
+本次截图问题收尾复验材料位于 `.dev-runtime/history-load-current-20261027/`：正式 HTTPS 入口的 `REF_xh3_accu` 在 1600×1000 和 393×852 均显示历史回复及待回答问题，5 条历史请求全部 200，加载错误提示、页面异常、任务写入请求和横向溢出均为零。当前源码专项回归 46 项通过（历史服务 33、代理配置 9、取消队列 1、真实 HTTP/1 与 HTTP/2 代理 3）。首次前端测试误用默认 Vitest 配置并混入 Node 测试，失败日志保留；分别使用仓库 Session 配置和 `tsx --test` 后通过，未为此修改产品代码。原 Session 运行层 PID 2712539 保留，未以重启 Agent 完成验收。
+
+联合改造后的最终正式复验保存在 `.dev-runtime/history-load-final-20261027/`：仍使用上述 LAN HTTPS 地址，两种尺寸均显示目标会话的最终回复及待回答问题，5 条历史请求全部 200，加载错误提示、pageerror、任务写入和横向溢出均为零。原始日志保留初始化时的一条资源 404 及页面切换取消的请求，不把这些记录描述为“所有网络请求无异常”。当前会话全量单测 548 文件／3303 项及 `pnpm check` 通过；前端监听 `0.0.0.0:8484`，独立 Session 运行层 PID 2712539 继续保留。
+
+
+第三批UI改造后的正式只读复验见 `.dev-runtime/session-real-read-r3-20261027/`：REF_xh3_accu在1600×1000及393×852均显示历史回复和待回答问题，6条历史请求全部200，加载错误提示、pageerror、任务写入及横向溢出为零。日志保留资源404及页面取消请求。最终553文件3348项会话单测、构建通过，3270输入前后未变；原Session运行层PID2712539保持。
+
+
+第四批设置/账号范围修复后的最终正式复验位于 `.dev-runtime/session-real-read-scope-contract-20261027/`：上述LAN HTTPS入口的目标会话在1600×1000及393×852均显示回复和待回答问题，9条历史请求200，pageerror/任务写入/加载提示/溢出均为零。一次内部scope取消信号泄漏为未处理异常的失败记录保留在 `session-real-read-r4-20261027/`；修复消费者独立处理契约后复验通过，不能覆盖失败日志或删除异常断言。原Session进程PID2712539未替换，完整联合结果见[第四批](designs/session-render-alignment/session-parity-batch-r4-20261027.md)。
+
+截图问题再次核对（2026-10-27）：`.dev-runtime/history-screenshot-recheck-20261027-080557/` 保存当前正式 LAN 页面复验。1600×1000 和 393×852 均显示目标回复及待回答问题，9 条历史请求全部 200，加载提示、页面异常、任务写入和横向溢出均为零。当前源码专项 47 项通过（历史服务 34、代理配置 9、取消队列 1、HTTP/1 与 HTTP/2 代理 3）；代理配置首次误用 Vitest 的运行器失败日志保留，改用其 Node test 运行器后通过。浏览器保留导航取消请求日志，未重启 Session 运行层 PID 2712539；Codex 状态同时确认宿主、网关和 broker 可用。
+
+
+## 2026-10-27截图复验与链接刷新修复
+
+当前现场的消息读取修复仍有效：正式 HTTPS LAN 入口 `https://10.30.0.24:8484`，目标 `REF_xh3_accu` 在1600×1000和393×852均显示历史回复及待回答问题，未出现加载错误提示。原有前端recent有界期限、HTTP/2取消传播、可移除FIFO和16 MiB聊天投影／32 MiB RPC预算保持。
+
+本次额外执行真实刷新发现独立缺陷：旧式 `?mode=session&agent=codex&thread=…&cwd=…` 入口消费导航参数时，会把全部query删除；无保存模式的新浏览器刷新后回到终端。旧实现的真实浏览器失败及两个永久单测红灯保存在 `.dev-runtime/history-screenshot-live-20261027-095347/`。这不是历史内容丢失，也不能把终端页面的控制台告警归为历史接口错误。
+
+`useUrlParamThread` 现在只清除确实消费的 `addProject` 和有效agent导航参数，保留工作模式、无关参数（含重复值）、hash及已有history state；纯项目链接不会顺带清除未消费的agent/cwd。Codex与Claude入口、disabled到enabled以及重复渲染不重复导航均有断言。目标选择、发送、writer权限和历史裁剪不变。
+
+修复后的正式证据为上述目录的 `accepted/browser-result.json`、`desktop.png`、`mobile.png`、`mobile-refreshed.png`：桌面、手机与手机刷新均显示目标回复和问题，6条已完成历史请求全部200，加载提示／pageerror／任务写入／横向溢出均为零。原始日志保留刷新卸载时取消的请求，不声称全部网络无异常。独立夹具的永久浏览器测试 `tests/e2e/session-launcher-link-refresh.spec.ts` 在1600px及393px均通过，API与WebSocket全部隔离；不向正式任务提交测试输入。
+
+最小回归包括历史服务34项、代理配置9项、取消队列1项、真实HTTP/1与HTTP/2代理3项，以及URL导航／标签恢复／会话链接相关单测；前端类型检查通过。Session运行层PID2712539保持，未重启Agent。本次没有重跑30分钟RSS关卡，也不改变其既有红灯结论。

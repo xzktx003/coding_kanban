@@ -1,4 +1,10 @@
 import { useState } from "react";
+import { toast } from "sonner";
+import {
+  OwnerFormSummary,
+  useConversationFormField,
+  useConversationOwnerForm,
+} from "@session/components/codex/composer/conversationOwnerFormContext";
 import { Button } from "@session/components/ui/button";
 import {
   Dialog,
@@ -21,16 +27,28 @@ export function GitCommitDialog({
   onClose,
   onConfirm,
 }: GitCommitDialogProps) {
-  const [commitMessage, setCommitMessage] = useState("");
+  const [commitMessage, setCommitMessage] =
+    useConversationFormField("commitMessage");
+  const owner = useConversationOwnerForm();
   const [loading, setLoading] = useState(false);
 
   const handleConfirm = async () => {
-    if (!commitMessage.trim()) return;
+    if (!commitMessage.trim() || loading || owner?.pending) return;
     setLoading(true);
     try {
-      await onConfirm(commitMessage);
-      setCommitMessage("");
-      onClose();
+      if (owner)
+        await owner.run(
+          () => onConfirm(commitMessage),
+          () => {
+            toast.message(`已提交：${commitMessage}`);
+            onClose();
+          },
+        );
+      else {
+        await onConfirm(commitMessage);
+        setCommitMessage("");
+        onClose();
+      }
     } catch {
     } finally {
       setLoading(false);
@@ -46,6 +64,7 @@ export function GitCommitDialog({
             填写提交说明，将当前已暂存的更改提交到本地仓库。
           </DialogDescription>
         </DialogHeader>
+        <OwnerFormSummary />
         <div className="py-4">
           <Textarea
             value={commitMessage}
@@ -54,7 +73,7 @@ export function GitCommitDialog({
             aria-label="Git 提交说明"
             autoFocus
             className="min-h-[100px] bg-muted/20 border-border"
-            disabled={loading}
+            disabled={loading || owner?.pending}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
@@ -64,12 +83,16 @@ export function GitCommitDialog({
           />
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={loading}>
+          <Button
+            variant="outline"
+            onClick={onClose}
+            disabled={loading || owner?.pending}
+          >
             取消
           </Button>
           <Button
             onClick={handleConfirm}
-            disabled={loading || !commitMessage.trim()}
+            disabled={loading || owner?.pending || !commitMessage.trim()}
           >
             {loading ? "正在提交…" : "提交更改"}
           </Button>

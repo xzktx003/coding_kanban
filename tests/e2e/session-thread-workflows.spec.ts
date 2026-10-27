@@ -123,7 +123,21 @@ async function configure(page: Page, turns: any[], theme: string) {
   );
 }
 async function menu(page: Page, label: string) {
-  await page.getByRole("button", { name: "当前会话的更多操作" }).click();
+  const composer = page.locator(".session-codex-composer:visible");
+  await expect(composer).toHaveAttribute(
+    "data-draft-owner",
+    JSON.stringify(["codex", "", "session", sourceId]),
+  );
+  // Conversation actions are an item inside the actual attachment/tool menu.
+  // Reuse an already-open parent layer; clicking its trigger would close it.
+  const conversation = page.getByRole("button", {
+    name: "当前会话的更多操作",
+    exact: true,
+  });
+  if (!(await conversation.isVisible())) {
+    await composer.getByRole("button", { name: "附加文件", exact: true }).click();
+  }
+  await conversation.click();
   await page.getByRole("menuitem", { name: label, exact: true }).click();
 }
 for (const width of [1440, 390])
@@ -669,7 +683,7 @@ for (const width of [1440, 390])
           "true",
         );
         await codeFence
-          .getByRole("button", { name: "复制", exact: true })
+          .getByRole("button", { name: "复制代码", exact: true })
           .click();
         await expect
           .poll(async () =>
@@ -788,6 +802,13 @@ for (const width of [1440, 390])
           const root = document.querySelector("#root > .session-mode")!;
           return {
             rootBottom: root.getBoundingClientRect().bottom + scrollY,
+            rootScrollHeight: root.scrollHeight,
+            rootClientHeight: root.clientHeight,
+            rootRectHeight: root.getBoundingClientRect().height,
+            bodyBottom: document.body.getBoundingClientRect().bottom + scrollY,
+            bodyScrollHeight: document.body.scrollHeight,
+            paneBottom: document.querySelector(".codex-plan-window")!.getBoundingClientRect().bottom + scrollY,
+            documentRectBottom: document.documentElement.getBoundingClientRect().bottom + scrollY,
             documentHeight: document.documentElement.scrollHeight,
             rootBackground: getComputedStyle(root).backgroundColor,
             bodyBackground: getComputedStyle(document.body).backgroundColor,
@@ -796,7 +817,11 @@ for (const width of [1440, 390])
             ).backgroundColor,
           };
         });
-        expect(canvas.rootBottom).toBeGreaterThanOrEqual(canvas.documentHeight);
+        await info.attach("canvas-geometry", { body: JSON.stringify(canvas, null, 2), contentType: "application/json" });
+        // DOMRect retains fractional layout units; scroll/client sizes are integers.
+        // Compare like coordinate systems without introducing pixel tolerance.
+        expect(canvas.rootBottom).toBeGreaterThanOrEqual(canvas.documentRectBottom);
+        expect(canvas.rootClientHeight).toBeGreaterThanOrEqual(canvas.documentHeight);
         expect(canvas.rootBackground).not.toBe("rgba(0, 0, 0, 0)");
         expect(canvas.bodyBackground).not.toBe("rgba(0, 0, 0, 0)");
         expect(canvas.bodyBackground).toBe(canvas.paneBackground);
@@ -930,6 +955,214 @@ test("copied conversation URL reads native history, opens a followed tab and rea
     await context.close();
   }
 });
+
+async function coldLinkState(page: Page) {
+  return page.evaluate(async () => {
+    const module = (path: string) =>
+      import(
+        performance
+          .getEntriesByType("resource")
+          .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+          path
+      );
+    const [
+      { useCodexStore },
+      { useThreadLinkStore },
+      { useAgentCenterStore },
+      { readDraft, sessionDraftKey },
+    ] = await Promise.all([
+      module("/src/session-mode/components/codex/stores/useCodexStore.ts"),
+      module("/src/session-mode/features/thread-workflows/threadLinkStore.ts"),
+      module("/src/session-mode/stores/useAgentCenterStore.ts"),
+      module("/src/session-mode/stores/useSessionDraftStore.ts"),
+    ]);
+    const codex = useCodexStore.getState();
+    return {
+      hasAccount: codex.hasAccount,
+      current: codex.currentThreadId,
+      loading: useThreadLinkStore.getState().loading,
+      error: useThreadLinkStore.getState().error,
+      retained: useThreadLinkStore.getState().retainedThreadId,
+      cached:
+        codex.threads.find((thread: any) => thread.id === "ux-0")?.turns
+          .length ?? 0,
+      cards: useAgentCenterStore.getState().cards.map((card: any) => card.id),
+      otherDraft: readDraft(sessionDraftKey("codex", "ux-1")).text,
+    };
+  });
+}
+for (const switchOwner of [false, true]) {
+  test(`cold URL waits for the first account observation (${switchOwner ? "changed owner" : "unchanged owner"})`, async ({
+    page,
+  }, info) => {
+    test.setTimeout(60000);
+    const fixture = await installSessionUxFixture(page, 2);
+    const requestEvidence: any[] = [];
+    const network = await page.context().newCDPSession(page);
+    await network.send("Network.enable");
+    network.on("Network.requestWillBeSent", (event) => {
+      if (
+        new URL(event.request.url).pathname.endsWith("/thread/read") &&
+        JSON.parse(event.request.postData ?? "{}").threadId === "ux-0"
+      )
+        requestEvidence.push({
+          url: event.request.url,
+          body: event.request.postData,
+          initiator: event.initiator,
+        });
+    });
+    fixture.threads[0].turns = history(2);
+    const held = fixture.holdRead("ux-0");
+    let releaseAccount!: () => void;
+    const accountReady = new Promise<void>((resolve) => {
+      releaseAccount = resolve;
+    });
+    let accountRequests = 0;
+    await page.route("**/api/session/api/codex/account/get", async (route) => {
+      accountRequests++;
+      await accountReady;
+      await route.fallback();
+    });
+    const reads = () =>
+      fixture.calls.filter(
+        (call) =>
+          call.path.endsWith("/thread/read") && call.body?.threadId === "ux-0",
+      );
+    try {
+      await page.goto("/?mode=session&thread=ux-0&turn=turn-0", {
+        waitUntil: "domcontentloaded",
+      });
+      await expect.poll(() => accountRequests).toBeGreaterThan(0);
+      await expect(page.locator(".session-mode:visible")).toBeVisible();
+      await expect
+        .poll(async () => {
+          const state = await coldLinkState(page);
+          return { loading: state.loading, hasAccount: state.hasAccount };
+        })
+        .toEqual({ loading: true, hasAccount: null });
+      expect(
+        reads(),
+        "No history request may precede the first account observation",
+      ).toHaveLength(0);
+      if (switchOwner) {
+        await page.evaluate(async () => {
+          const module = (path: string) =>
+            import(
+              performance
+                .getEntriesByType("resource")
+                .findLast((entry) => new URL(entry.name).pathname === path)
+                ?.name ?? path
+            );
+          const [
+            { useCodexStore },
+            { useAgentCenterStore },
+            { useWorkspaceStore },
+            { useAgentSettingsStore },
+            { useSessionDraftStore, sessionDraftKey },
+          ] = await Promise.all([
+            module(
+              "/src/session-mode/components/codex/stores/useCodexStore.ts",
+            ),
+            module("/src/session-mode/stores/useAgentCenterStore.ts"),
+            module("/src/session-mode/stores/useWorkspaceStore.ts"),
+            module("/src/session-mode/stores/useAgentSettingsStore.ts"),
+            module("/src/session-mode/stores/useSessionDraftStore.ts"),
+          ]);
+          useCodexStore.setState({ currentThreadId: "ux-1" });
+          useAgentSettingsStore.setState({ selectedAgent: "codex" });
+          useAgentCenterStore.getState().addAgentCard(
+            {
+              kind: "codex",
+              id: "ux-1",
+              cwd: "/fixture/new-owner",
+              preview: "Chosen while account is pending",
+            },
+            { activate: true },
+          );
+          useWorkspaceStore.setState({ cwd: "/fixture/new-owner" });
+          useSessionDraftStore
+            .getState()
+            .setText(
+              sessionDraftKey("codex", "ux-1"),
+              "Cold URL must preserve this draft",
+            );
+        });
+      }
+      releaseAccount();
+      await expect.poll(() => held.seen()).toBe(true);
+      expect((await coldLinkState(page)).hasAccount).toBe(true);
+      expect(reads()).toHaveLength(1);
+      held.release();
+      await expect
+        .poll(async () => (await coldLinkState(page)).loading)
+        .toBe(false);
+      const state = await coldLinkState(page);
+      expect(state.cached).toBe(2);
+      if (switchOwner) {
+        expect(state).toMatchObject({
+          current: "ux-1",
+          retained: "ux-0",
+          otherDraft: "Cold URL must preserve this draft",
+        });
+        expect(state.cards).not.toContain("ux-0");
+        await expect(
+          page.getByText(
+            "输入目标在读取链接期间已改变；历史已缓存，未自动加入关注或切换会话。",
+            { exact: true },
+          ),
+        ).toBeVisible();
+        await expect(
+          page
+            .locator(".session-codex-composer:visible [contenteditable=true]")
+            .first(),
+        ).toContainText("Cold URL must preserve this draft");
+      } else {
+        expect(state).toMatchObject({ current: "ux-0", error: null });
+        expect(state.cards).toContain("ux-0");
+        await expect(
+          page.locator('.codex-native-user[data-owner-turn="turn-0"]'),
+        ).toBeVisible();
+      }
+      // Selecting a transcript also fetches missing model metadata once. It is
+      // a distinct existing reader, not a second URL open or a body retry.
+      const expectedReads = switchOwner ? 1 : 2;
+      await expect.poll(() => reads().length).toBe(expectedReads);
+      const frames = (request: any) =>
+        request.initiator.stack?.callFrames ?? [];
+      const fromLink = requestEvidence.filter((request) =>
+        frames(request).some((frame: any) =>
+          new URL(frame.url).pathname.endsWith("/threadLinkService.ts"),
+        ),
+      );
+      const fromMetadata = requestEvidence.filter((request) =>
+        frames(request).some(
+          (frame: any) => frame.functionName === "readInitialThreadMetadata",
+        ),
+      );
+      expect(fromLink).toHaveLength(1);
+      expect(fromMetadata).toHaveLength(switchOwner ? 0 : 1);
+      expect(requestEvidence).toHaveLength(expectedReads);
+      await info.attach("cold-link-request-initiators", {
+        body: JSON.stringify(requestEvidence, null, 2),
+        contentType: "application/json",
+      });
+      expect(
+        fixture.calls.filter((call) =>
+          /\/(?:thread\/(?:resume|start|fork|rollback|revert)|turn\/(?:start|steer)|followups\/submit)$/.test(
+            call.path,
+          ),
+        ),
+      ).toEqual([]);
+      await page.screenshot({
+        path: info.outputPath("cold-url-account-settled.png"),
+        fullPage: true,
+      });
+    } finally {
+      releaseAccount();
+      held.release();
+    }
+  });
+}
 
 test("a late URL history result cannot add interest or steal a newly chosen owner", async ({
   browser,

@@ -1,3 +1,21 @@
+- 已有会话的模型/权限等设置按线程事务保存，跨页独立修改合并、同组冲突明确提示并可重试；发送保留点击时捕获配置，旧账号/运行实例回执不污染当前会话，见[设置持久化与边界](designs/session-render-alignment/thread-settings-persistence-20261027.md)。
+
+- 排队/引导、Enter与审查方式三个本机偏好逐字段保存，多页修改不同字段互不覆盖；失败保留当前选择并提供重试，见[偏好多页验收](designs/session-render-alignment/followup-preferences-multitab-20261027.md)。
+
+- 桌面队列折叠显示首张24px图片及原生粘贴/选区摘要，只请求首图；完整详情保留全部原图与捕获原文。功能已验，附件精确像素剩余边界见 [第三批验收](designs/session-render-alignment/session-parity-batch-r3-20261027.md)。
+
+- Codex 待发送队列使用原生指针排序与六点悬停手柄；单条或含非queued消息时不提供排序。手势绑定原会话、修订与条目，切换/隐藏/取消时释放自身监听，不向另一队列写入；键盘移动仍通过项目菜单，见 [排序行为与原组件证据](designs/session-render-alignment/queue-sorting-20261027.md)。
+
+- Codex 文件、引用与绘图草稿按会话事务合并本设备多页修改，恢复/保存/失败状态明确；撤销、迟到回执、移入新会话失败、异步绘图导出及热更新保留原owner和新编辑。新会话始终沿用点击时捕获的项目与创建设置；[协议与边界](designs/session-render-alignment/context-draft-storage-20261027.md)。
+
+- 桌面待发送队列提供原生单行富文本与非模态只读全文预览，可选择复制、用键盘进入/退出；配置和上下文仍从更多菜单访问，手机保留完整详情入口。拖动限定图标且按原目标索引排序；[实际原组件对照](designs/session-render-alignment/queue-preview-parity-20261027.md)。
+
+- Codex 性能提醒只从明确的强度/最近模型操作产生，普通模型radio和只读恢复静默；使用独立临时通知，保留线程、轮次和可见性保护。升级横幅独立展示；正式SDK门控和回执时点的未闭合范围见 [实际入口对照](designs/session-render-alignment/model-change-notice-behavior-20261027.md)。
+
+- 多网页客户端共享同一 Session 服务时，原生审批以精确 thread/turn/item/request/token 认领，一次回复后同步移除；真实原包 CLI、两个独立浏览器 context 的并发和 SSE 断线恢复验收见 [双客户端审批](designs/session-render-alignment/native-dual-client-approval-20261027.md)。该记录不代表跨原生 writer 的原子审批。
+
+- 多窗口历史读取期间，队列状态和送达核对使用保留的一个读取名额；最近历史三个、完整历史两个，总并发仍为六。发送超时后只读确认、不自动重发，详情见 [送达核对](designs/session-render-alignment/receipt-read-admission-20261027.md)。
+
 # Coding Kanban 功能清单
 
 - Codex 显式聊天历史分页由网关的独立只读原生通道读取，工具正文在接收时裁剪，密集工具元数据按投影字节有界留存；不会因大历史页中断共享 Agent 连接。未知回执不重发，失效连接由后续独立请求恢复；预算、旧运行层兼容及验收见 [连接恢复](session-codex-connection-recovery.md)。
@@ -7,6 +25,8 @@
 - Codex 模式连接检查：`pnpm codex:status` 复用 `.env` 启动配置，以只读 GET 核对宿主、网关和私有 broker；将已安装自有 companion 的四个打包文件与仓库按内容比较（忽略安装器 manifest 元数据），发现同版本旧代码。明确区分旧代码、不可达、等待浏览器激活和 broker 就绪，不把 HTTP 200 当作登录或对话成功，不启动、停止或发送任务。回归：`scripts/native-codex-status.test.mjs`。
 
 - Codex 模式提供显式常驻宿主入口：私有配置指定本机程序、端口及授权范围；每次启动分配新隔离目录，匹配当前 launcher 并通过健康检查后原子发布固定网关记录。服务管理器负责重启，普通开发启动保持显式启用边界；不接管已有 Agent、默认 CLI IPC 或实验刷新服务。部署与真实原生输入验收见 [Codex 工作台](codex-workbench-mode.md#常驻宿主恢复2026-10-19)。
+- 原生 Codex 宿主及显式刷新常驻服务对各自的 app-server 设置有界 Tokio 工作线程数：默认取可用 CPU 与 8 的较小值，私有 service JSON、launcher 参数或 `startPrivateService` 选项可显式选择 1–32；继承环境不能覆盖，运行记录标出实际选择。减少多浏览器连接的线程争用，不隐式重启现有宿主；验证见 [启动提速计划](designs/codex-startup-speed-plan-20261027.md)。
+- Codex 首次进入时并行读取宿主状态与浏览器 Service Worker 预检；只有宿主可用且预检通过才挂载原生 iframe，证书失败仍先提示。已进入后的模式往返保留 iframe 和原生草稿，重复点击当前健康标签不增加焦点请求；验证见 [启动提速计划](designs/codex-startup-speed-plan-20261027.md)。
 
 - 会话模式 Codex 用户消息和助手回复下方常驻显示本机时区日期与时间（`YYYY-MM-DD HH:mm:ss`），悬停查看时区。原生消息时间优先；历史缺少逐条时间时明确显示“轮次开始／轮次结束”，流式回复显示本轮开始时间，缺失或无效时间不显示。不增加轮询或正文缓存。回归：`MessageTimestamp.test.tsx`。
 
@@ -390,7 +410,7 @@
 - 文件截断预览只读，可显式加载全文编辑；多文件草稿跨辅助面板保持，保存错误可见。
 - 工具树跨页面与断点保持挂载；隐藏编辑器不响应保存快捷键，关闭弹窗恢复打开控件的焦点。
 
-- 隐藏会话模式释放 Radix 模态锁与全局焦点/事件，保留上层打开状态与草稿；辅助页面隐藏聊天树时输入建议和快捷键暂停。
+- 隐藏会话模式释放 Radix 模态锁与全局焦点/事件，保留上层打开状态与草稿；辅助页面隐藏聊天树时输入建议和快捷键暂停。Settings等次级页的快捷键入口也随整个会话模式隐藏而暂停，隐藏期间的新请求不会在返回后补弹面板；已打开面板保留。菜单转开归档等对话框时立即释放背后的退出动画层，连续指针操作保持可用。
 - ACP 当前使用单会话展示，保留内置 Agent 的多窗口卡片与布局偏好；项目列表与置顶行支持键盘、焦点及手机操作。
 - 模型主面板支持已知模型搜索及手动输入模型 ID，部分列表读取失败可重试；计价编辑支持标准模态键盘与局部宽表阅读。
 - 插件、定时任务、用量和设置提供区分错误/空态的反馈，手机控件重排，项目入口仅保留当前仓库 GitHub；设置、关于和待办页移除上游社区、作者及广告推广，工具页保留插件、技能与连接器功能，不再加载上游远程推荐。
@@ -495,6 +515,7 @@
 
 - 工具活动按原生连续区间聚合，运行标题、思考与完成摘要分开；折叠、输出阅读位置和手机触控入口保留。
 - 原生模型菜单与 Enter 设置、逐题请求和 elicitation、消息搜索/导航/导出、指定轮 fork 与最后用户消息编辑已分项实现和验收；整体验收仍在推进。
+- 最新完成助手回复在最近原生轮次中显示复制/分支操作；旧回复继续hover或键盘聚焦时显示。会话菜单内归档/删除/笔记/Git表单捕获原打开会话与项目，跨主Composer卸载在本页恢复，账号或运行scope变化时不把回执写给当前新会话。
 - Codex 公共输入和展开编辑支持桌面拖入图片与本机 UTF-8 文本/代码快照，按原会话保存、不自动发送；图片仍支持失败重试和刷新恢复，混合附件优先显示图片与删除入口。附件字节使用可移植 IndexedDB 记录，兼容 WebKit 相册文件。范围与限制见 [草稿规则](session-drafts.md#codex-桌面拖放附件)。
 - Diff 区分保存的轮次、当前 Git hunk 与只读 review 目标，注释/findings 保留原文件与行号。
 - VS Code 编辑器桥使用版本、nonce、工作区及原会话身份；配置和私有凭证留服务端。真实选区、文件定位、CodeLens 与可选 LSP 正在联调。
@@ -559,3 +580,11 @@
 - 会话布局稳定性：子智能体状态固定在输入工具栏，连接／同步错误可收起且不挤压聊天；文件树同项目后台刷新保留阅读、焦点和展开状态，切换项目清旧文件。见 [布局稳定性](session-layout-stability.md)。
 
 - 会话文件树分栏：文件树与预览之间支持左右拖动及键盘调宽，本设备记住比例，隐藏或刷新后恢复；预览保留挂载，手机沿用抽屉。见 [文件管理](session-file-management.md#调整文件树与预览宽度)。
+
+- 会话 composer 附着条对齐官方 26.51007.21434 的桌面几何和退出交互，手机保留悬浮适配；同浏览器多页文字/附件保护迟到提交清理及新会话移动，详见 [附着条](designs/session-render-alignment/composer-attached-rail-20261027.md)、[文字](designs/session-render-alignment/text-draft-multitab-safety-20261027.md)、[附件](designs/session-render-alignment/attachment-multitab-safety-20261027.md)。
+
+- 会话多页队列观察在隐藏/模式切换/离线时停止前台快速轮询，同thread控件共用观察器，保留后台元数据与已发回执核对；提交身份区分同文独立编辑与同一草稿重试，旧记录无法核实则保留草稿。见 [可见性](designs/session-render-alignment/queue-visibility-20261027.md)、[提交身份](designs/session-render-alignment/submission-multiclient-safety-20261027.md)、[双页长历史联合恢复](designs/session-render-alignment/multi-client-recovery-20261027.md)。
+
+- 会话模型菜单：显式模型模式提供原生「恢复默认」入口，恢复推荐模型与强度，保留速度和草稿；手机触控切换菜单视图不额外聚焦，键盘导航与 Escape 回原输入框保持。见 [菜单来源与验收](designs/session-render-alignment/model-menu-reset-touch-20261027.md)。
+
+- 会话动作子菜单执行后关闭父附加层，保留独立弹窗/表单及原草稿；手机可直接操作打开的导航，Escape逐层返回。见 [父菜单生命周期](designs/session-render-alignment/composer-parent-menu-lifecycle-20261027.md)。

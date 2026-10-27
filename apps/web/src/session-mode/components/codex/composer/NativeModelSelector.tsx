@@ -1,3 +1,4 @@
+import { commitModelSelectionWithNotice } from "./ModelChangeNotice";
 import {
   useCallback,
   useEffect,
@@ -34,6 +35,7 @@ import {
   nextEffortForNativeRecord,
 } from "./nativeModelIdentity";
 import { NativeComposerIcon } from "./NativeComposerIcon";
+import { ComposerTooltip } from "./ComposerTooltip";
 import {
   GENERIC_REASONING_OPTIONS,
   nextReasoningEffort,
@@ -145,6 +147,7 @@ export function NativeModelSelector({
   const layerIdentity = openedLayer.current;
   const suppressCloseFocus = useRef(false);
   const keyboardViewFocus = useRef(false);
+  const viewPointerType = useRef<string | null>(null);
   const viewReset = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
@@ -176,6 +179,7 @@ export function NativeModelSelector({
       openedLayer.current = null;
       skipCompletionTriggerBlur.current = false;
       keyboardViewFocus.current = false;
+      viewPointerType.current = null;
       suppressCloseFocus.current = true;
     };
   }, [scopeIdentity]);
@@ -353,6 +357,8 @@ export function NativeModelSelector({
     if (!open) return;
     const focusKeyboardView = keyboardViewFocus.current;
     keyboardViewFocus.current = false;
+    const pointerType = viewPointerType.current;
+    viewPointerType.current = null;
     const captured = openedComposer.current;
     const frame = requestAnimationFrame(() => {
       if (
@@ -375,9 +381,10 @@ export function NativeModelSelector({
           '[role^="menuitem"]:not([data-disabled]):not([aria-disabled="true"]):not([data-interactive="false"])',
         );
         (checked ?? first)?.focus({ preventScroll: !showAdvanced });
-      } else {
-        // Initial opens and pointer view changes retain the verified container
-        // focus. Keyboard changes target the checked row or first simple item.
+      } else if (pointerType !== "touch") {
+        // Native touch view changes let the outgoing item lose focus naturally.
+        // Do not add a later focus move after that gesture. Initial opens and
+        // mouse navigation retain the container; keyboard changes target rows.
         contentRef.current?.focus({ preventScroll: true });
       }
     });
@@ -487,6 +494,27 @@ export function NativeModelSelector({
     }
     setAdvanced(false);
   };
+  const resetToDefault = () => {
+    if (
+      !isNativeModelProvider || modelPending || modelSelectionDisabled ||
+      !isCurrentNativeAction(false)
+    ) return;
+    const choice = pickerPresentation?.defaultChoice;
+    if (!choice) return;
+    // hCa Ln restores the recommended pair without a power-commit notice or
+    // changing speed. The advanced selected Default radio remains a no-op.
+    useNativeModelPickerPreferencesStore.getState().setSelectionMode("default");
+    settings.setModelSelection({
+      model: choice.model,
+      reasoningEffort: choice.reasoningEffort,
+    });
+    if (keyboardViewFocus.current) {
+      keyboardViewFocus.current = false;
+      contentRef.current?.querySelector<HTMLElement>(
+        ".session-native-power-caption",
+      )?.focus({ preventScroll: true });
+    }
+  };
   const selectEffort = (index: number) => {
     if (modelPending) return;
     if (isNativeModelProvider && !isCurrentNativeAction()) return;
@@ -495,10 +523,10 @@ export function NativeModelSelector({
         Math.max(0, Math.min(physicalPowerChoices.length - 1, index))
       ];
       if (!choice) return;
-      settings.setModelSelection({
+      commitModelSelectionWithNotice(threadId, "power", () => settings.setModelSelection({
         model: choice.model,
         reasoningEffort: choice.reasoningEffort,
-      });
+      }));
       setRecentTick((tick) => tick + 1);
       rememberRecentModel({
         model: choice.model,
@@ -652,9 +680,11 @@ export function NativeModelSelector({
   }, [releasePowerWheel]);
   const applyRecent = (item: (typeof recent)[number]) => {
     if (modelPending || modelSelectionDisabled) return;
-    settings.setModel(item.model);
-    if (item.reasoningEffort) settings.setReasoningEffort(item.reasoningEffort);
-    settings.setServiceTier?.(item.serviceTier);
+    commitModelSelectionWithNotice(threadId, "recent", () => {
+      settings.setModel(item.model);
+      if (item.reasoningEffort) settings.setReasoningEffort(item.reasoningEffort);
+      settings.setServiceTier?.(item.serviceTier);
+    });
     setRecentOpen(false);
     changeOpen(false);
   };
@@ -669,6 +699,7 @@ export function NativeModelSelector({
     );
   };
   function changeOpen(value: boolean) {
+    viewPointerType.current = null;
     if (value && modelPending) return;
     clearTimeout(viewReset.current);
     viewReset.current = undefined;
@@ -805,11 +836,25 @@ export function NativeModelSelector({
           side="top"
           collisionPadding={8}
           sideOffset={4}
-          onPointerDownCapture={() => {
+          onPointerDownCapture={(event) => {
             keyboardViewFocus.current = false;
+            viewPointerType.current = event.pointerType;
           }}
           onKeyDownCapture={(event) => {
             const target = event.target;
+            if (
+              event.key === "Escape" && target instanceof HTMLElement &&
+              target.closest(".session-native-model-reset") &&
+              isCurrentNativeAction(false)
+            ) {
+              // The original Reset tooltip is part of this menu's Escape
+              // dismissal. Radix otherwise dismisses only its top tooltip layer.
+              event.preventDefault();
+              event.stopPropagation();
+              returnComposer.current = openedComposer.current;
+              changeOpen(false);
+              return;
+            }
             if (
               !(target instanceof HTMLElement) ||
               !["Tab", "ArrowDown", "ArrowUp", "Home", "End"].includes(
@@ -1074,6 +1119,26 @@ export function NativeModelSelector({
                   </span>
                 </DropdownMenuItem>
                 <NativeServiceTierControl model={model} threadId={threadId} />
+                {isNativeModelProvider && effectiveSelectionMode === "model" &&
+                  pickerPresentation?.defaultChoice && (
+                  <ComposerTooltip label="恢复默认">
+                  <DropdownMenuItem
+                    className="session-native-model-reset"
+                    aria-label="恢复默认"
+                    disabled={modelPending || modelSelectionDisabled}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ")
+                        keyboardViewFocus.current = true;
+                    }}
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      resetToDefault();
+                    }}
+                  >
+                    <span><NativeComposerIcon name="reset" width={16} height={16} /></span>
+                  </DropdownMenuItem>
+                  </ComposerTooltip>
+                )}
               </div>
               <div
                 ref={capturePowerSlider}

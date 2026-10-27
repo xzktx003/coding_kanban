@@ -1,5 +1,11 @@
 import { v4 as randomUUID } from "uuid";
-import { useEffect, useRef, useState, type PointerEvent, type CSSProperties } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent,
+  type CSSProperties,
+} from "react";
 import {
   Hand,
   MousePointer2,
@@ -17,11 +23,7 @@ import {
   Slash,
 } from "lucide-react";
 import { toast } from "sonner";
-import {
-  onCanvasPrompt,
-  onDrawingTool,
-  type DrawingTool,
-} from "./drawingTool";
+import { onCanvasPrompt, onDrawingTool, type DrawingTool } from "./drawingTool";
 import { appendDraft } from "@session/stores/useSessionDraftStore";
 import type {
   ImageAttachment,
@@ -29,7 +31,12 @@ import type {
 } from "@session/components/common/useImageAttachments";
 import { fileSrc } from "@session/hooks/runtime";
 import { ComposerSheet } from "./ComposerSheet";
-import { composerDrafts } from "./drafts";
+import {
+  composerDrafts,
+  useComposerDraft,
+  useComposerDraftStatus,
+} from "./drafts";
+import { sameValue } from "./draftStorage";
 import {
   arrowHead,
   ellipseGeometry,
@@ -103,6 +110,9 @@ export function DrawingEditor({
   onClose: () => void;
 }) {
   const key = item?.id ?? "sketch";
+  const persistedDraft = useComposerDraft(owner);
+  const contextStatus = useComposerDraftStatus(owner);
+  const edited = useRef(false);
   const [doc, setDoc] = useState<DrawingDocument>(
     () =>
       composerDrafts.read(owner).drawings[key] ??
@@ -142,10 +152,32 @@ export function DrawingEditor({
     } | null>(null);
   const undoRef = useRef<DrawingMark[]>([]);
   const commit = (next: DrawingDocument) => {
-    docRef.current = next;
-    setDoc(next);
-    composerDrafts.drawing(owner, key, next);
+    try {
+      const merged = composerDrafts.drawing(owner, key, next, docRef.current);
+      edited.current = true;
+      docRef.current = merged;
+      setDoc(merged);
+    } catch (error) {
+      setError(String(error));
+    }
   };
+  const restoredDrawing = persistedDraft.drawings[key];
+  useEffect(() => {
+    if (!restoredDrawing || activeRef.current) return;
+    // A late hydrate may add other-page marks but must not replace a local edit.
+    const local = docRef.current;
+    if (
+      !edited.current ||
+      local.marks.every((mark) =>
+        restoredDrawing.marks.some(
+          (saved) => saved.id === mark.id && sameValue(saved, mark),
+        ),
+      )
+    ) {
+      docRef.current = restoredDrawing;
+      setDoc(restoredDrawing);
+    }
+  }, [restoredDrawing, contextStatus.phase]);
   const pointer = useRef<{ x: number; y: number } | null>(null);
   const openCanvasPrompt = (client: { x: number; y: number } | null) => {
     const host = svg.current?.parentElement;
@@ -172,7 +204,12 @@ export function DrawingEditor({
       (target.isContentEditable ||
         !!target.closest("input, textarea, select, [contenteditable='true']"));
     const onKey = (event: KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey || typing(event.target))
+      if (
+        event.metaKey ||
+        event.ctrlKey ||
+        event.altKey ||
+        typing(event.target)
+      )
         return;
       if (event.key === "/" || event.key === "?") {
         event.preventDefault();
@@ -210,9 +247,14 @@ export function DrawingEditor({
     if (url) {
       setSource(url);
       void loadDrawingImage(url)
-        .then((image) => {
+        .then(async (image) => {
+          await composerDrafts.ensure(owner);
           if (stopped) return;
-          if (!composerDrafts.read(owner).drawings[key] && !item?.drawing) {
+          if (
+            !edited.current &&
+            !composerDrafts.read(owner).drawings[key] &&
+            !item?.drawing
+          ) {
             const scale = Math.min(
               1,
               2048 / Math.max(image.width, image.height),
@@ -275,7 +317,8 @@ export function DrawingEditor({
       };
       return;
     }
-    if (pointers.current.size > 1 || tool === "hand" || tool === "select") return;
+    if (pointers.current.size > 1 || tool === "hand" || tool === "select")
+      return;
     if (tool === "text" || tool === "comment") {
       setPending(point(e));
       setLabel("");
@@ -395,6 +438,14 @@ export function DrawingEditor({
     setError(null);
     try {
       const snapshot = structuredClone(docRef.current);
+      const capturedDrawing = composerDrafts.captureDrawing(owner, key);
+      await composerDrafts.flush(owner);
+      const currentDrawing = composerDrafts.captureDrawing(owner, key);
+      if (
+        capturedDrawing?.revision !== currentDrawing?.revision ||
+        (currentDrawing && !sameValue(currentDrawing.value, snapshot))
+      )
+        throw new Error("绘图在保存期间已更新，请核对画布后重新附加");
       const file = await drawingToFile(snapshot, source);
       if (file.size > 10 * 1024 * 1024)
         throw new Error("标注图超过 10 MB，请减少内容后重试");
@@ -411,7 +462,8 @@ export function DrawingEditor({
         },
         item?.id,
       );
-      composerDrafts.clearDrawing(owner, key);
+      if (capturedDrawing)
+        composerDrafts.clearDrawing(owner, key, capturedDrawing);
       if (mounted.current) {
         toast.success("已附加到草稿，尚未发送");
         onClose();
@@ -450,6 +502,49 @@ export function DrawingEditor({
       }
     >
       {error && <p role="alert">{error}</p>}
+      {(contextStatus.phase === "hydrating" ||
+        contextStatus.phase === "saving") && (
+        <p role="status">
+          {contextStatus.phase === "hydrating"
+            ? "正在恢复绘图草稿…"
+            : "正在保存绘图草稿…"}
+        </p>
+      )}
+      {contextStatus.error && (
+        <div role="alert" className="session-context-warning">
+          <p>{contextStatus.error}</p>
+          <button
+            type="button"
+            onClick={() =>
+              void composerDrafts
+                .retryStorage()
+                .catch((error) => setError(String(error)))
+            }
+          >
+            重试保存
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              void composerDrafts
+                .restoreSavedDrawing(owner, key)
+                .then(() => {
+                  edited.current = false;
+                  const restored =
+                    composerDrafts.read(owner).drawings[key] ??
+                    item?.drawing?.document ??
+                    blankDrawing();
+                  docRef.current = restored;
+                  setDoc(restored);
+                  setError(null);
+                })
+                .catch((error) => setError(String(error)))
+            }
+          >
+            舍弃本页未保存笔画
+          </button>
+        </div>
+      )}
       <div
         className="session-drawing-tools"
         role="toolbar"
@@ -554,134 +649,141 @@ export function DrawingEditor({
         </button>
       </div>
       <div className="session-drawing-stage">
-      <svg
-        ref={svg}
-        className="session-drawing-canvas"
-        onPointerMoveCapture={(event) => {
-          pointer.current = { x: event.clientX, y: event.clientY };
-        }}
-        viewBox={`0 0 ${doc.width} ${doc.height}`}
-        preserveAspectRatio="none"
-        style={{ aspectRatio: `${doc.width}/${doc.height}`, "--drawing-ratio":doc.width/doc.height } as CSSProperties}
-        aria-label="绘图画布"
-        role="img"
-        onPointerDown={down}
-        onPointerMove={move}
-        onPointerUp={up}
-        onPointerCancel={(e) => {
-          pointers.current.delete(e.pointerId);
-          activeRef.current = null;
-          setActive(null);
-          gesture.current = null;
-        }}
-      >
-        <defs>
-          <clipPath id={`drawing-${key}`}>
-            <rect width={doc.width} height={doc.height} />
-          </clipPath>
-        </defs>
-        <g transform={`translate(${view.x} ${view.y}) scale(${view.zoom})`}>
-          <rect width={doc.width} height={doc.height} fill="white" />
-          {source && (
-            <image
-              href={source}
-              width={doc.width}
-              height={doc.height}
-              preserveAspectRatio="none"
-            />
-          )}
-          <g clipPath={`url(#drawing-${key})`}>
-            {marks.map((m, markIndex) => {
-              const a = m.points[0],
-                b = m.points.at(-1)!;
-              const common = {
-                stroke: m.color,
-                strokeWidth: m.width,
-                fill: "none",
-                strokeLinecap: "round" as const,
-                strokeLinejoin: "round" as const,
-              };
-              return (
-                <g key={m.id}>
-                  {m.kind === "rect" ? (
-                    <rect
-                      x={Math.min(a.x, b.x)}
-                      y={Math.min(a.y, b.y)}
-                      width={Math.abs(b.x - a.x)}
-                      height={Math.abs(b.y - a.y)}
-                      {...common}
-                    />
-                  ) : m.kind === "ellipse" ? (
-                    <ellipse {...ellipseGeometry(a, b)} {...common} />
-                  ) : m.kind === "text" || m.kind === "comment" ? (
-                    <DrawingText
-                      mark={m}
-                      document={doc}
-                      number={
-                        marks
-                          .slice(0, markIndex + 1)
-                          .filter((mark) => mark.kind === "comment").length
-                      }
-                    />
-                  ) : (
-                    <>
-                      <polyline
-                        points={m.points.map((p) => `${p.x},${p.y}`).join(" ")}
+        <svg
+          ref={svg}
+          className="session-drawing-canvas"
+          onPointerMoveCapture={(event) => {
+            pointer.current = { x: event.clientX, y: event.clientY };
+          }}
+          viewBox={`0 0 ${doc.width} ${doc.height}`}
+          preserveAspectRatio="none"
+          style={
+            {
+              aspectRatio: `${doc.width}/${doc.height}`,
+              "--drawing-ratio": doc.width / doc.height,
+            } as CSSProperties
+          }
+          aria-label="绘图画布"
+          role="img"
+          onPointerDown={down}
+          onPointerMove={move}
+          onPointerUp={up}
+          onPointerCancel={(e) => {
+            pointers.current.delete(e.pointerId);
+            activeRef.current = null;
+            setActive(null);
+            gesture.current = null;
+          }}
+        >
+          <defs>
+            <clipPath id={`drawing-${key}`}>
+              <rect width={doc.width} height={doc.height} />
+            </clipPath>
+          </defs>
+          <g transform={`translate(${view.x} ${view.y}) scale(${view.zoom})`}>
+            <rect width={doc.width} height={doc.height} fill="white" />
+            {source && (
+              <image
+                href={source}
+                width={doc.width}
+                height={doc.height}
+                preserveAspectRatio="none"
+              />
+            )}
+            <g clipPath={`url(#drawing-${key})`}>
+              {marks.map((m, markIndex) => {
+                const a = m.points[0],
+                  b = m.points.at(-1)!;
+                const common = {
+                  stroke: m.color,
+                  strokeWidth: m.width,
+                  fill: "none",
+                  strokeLinecap: "round" as const,
+                  strokeLinejoin: "round" as const,
+                };
+                return (
+                  <g key={m.id}>
+                    {m.kind === "rect" ? (
+                      <rect
+                        x={Math.min(a.x, b.x)}
+                        y={Math.min(a.y, b.y)}
+                        width={Math.abs(b.x - a.x)}
+                        height={Math.abs(b.y - a.y)}
                         {...common}
                       />
-                      {m.kind === "arrow" && (
+                    ) : m.kind === "ellipse" ? (
+                      <ellipse {...ellipseGeometry(a, b)} {...common} />
+                    ) : m.kind === "text" || m.kind === "comment" ? (
+                      <DrawingText
+                        mark={m}
+                        document={doc}
+                        number={
+                          marks
+                            .slice(0, markIndex + 1)
+                            .filter((mark) => mark.kind === "comment").length
+                        }
+                      />
+                    ) : (
+                      <>
                         <polyline
-                          points={[
-                            arrowHead(a, b, m.width)[0],
-                            b,
-                            arrowHead(a, b, m.width)[1],
-                          ]
+                          points={m.points
                             .map((p) => `${p.x},${p.y}`)
                             .join(" ")}
                           {...common}
                         />
-                      )}
-                    </>
-                  )}
-                </g>
-              );
-            })}
+                        {m.kind === "arrow" && (
+                          <polyline
+                            points={[
+                              arrowHead(a, b, m.width)[0],
+                              b,
+                              arrowHead(a, b, m.width)[1],
+                            ]
+                              .map((p) => `${p.x},${p.y}`)
+                              .join(" ")}
+                            {...common}
+                          />
+                        )}
+                      </>
+                    )}
+                  </g>
+                );
+              })}
+            </g>
           </g>
-        </g>
-      </svg>
-      {canvasPrompt && (
-        <form
-          className="session-canvas-prompt"
-          style={{ left: canvasPrompt.x, top: canvasPrompt.y }}
-          role="dialog"
-          aria-label="画布：询问 ChatGPT"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const text = canvasPrompt.text.trim();
-            if (!text) return;
-            appendDraft(owner, text);
-            setCanvasPrompt(null);
-            toast.message("已把画布提示加入输入");
-          }}
-        >
-          <p>在指针位置打开画布提示</p>
-          <textarea
-            autoFocus
-            aria-label="画布提示"
-            placeholder="询问 ChatGPT…"
-            value={canvasPrompt.text}
-            onChange={(event) =>
-              setCanvasPrompt((current) =>
-                current ? { ...current, text: event.target.value } : current,
-              )
-            }
-          />
-          <button type="submit">添加到输入</button>
-          <button type="button" onClick={() => setCanvasPrompt(null)}>
-            取消
-          </button>
-        </form>
-      )}
+        </svg>
+        {canvasPrompt && (
+          <form
+            className="session-canvas-prompt"
+            style={{ left: canvasPrompt.x, top: canvasPrompt.y }}
+            role="dialog"
+            aria-label="画布：询问 ChatGPT"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const text = canvasPrompt.text.trim();
+              if (!text) return;
+              appendDraft(owner, text);
+              setCanvasPrompt(null);
+              toast.message("已把画布提示加入输入");
+            }}
+          >
+            <p>在指针位置打开画布提示</p>
+            <textarea
+              autoFocus
+              aria-label="画布提示"
+              placeholder="询问 ChatGPT…"
+              value={canvasPrompt.text}
+              onChange={(event) =>
+                setCanvasPrompt((current) =>
+                  current ? { ...current, text: event.target.value } : current,
+                )
+              }
+            />
+            <button type="submit">添加到输入</button>
+            <button type="button" onClick={() => setCanvasPrompt(null)}>
+              取消
+            </button>
+          </form>
+        )}
       </div>
       {pending && (
         <div className="session-drawing-comment">

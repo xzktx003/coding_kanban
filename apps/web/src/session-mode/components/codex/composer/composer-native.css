@@ -751,6 +751,34 @@
   align-items: center;
   justify-content: center;
 }
+.session-mode .session-native-model-menu .session-native-model-reset {
+  position: absolute;
+  inset-inline-end: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 32px;
+  min-height: 32px;
+  margin: 0;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--codex-muted);
+  background: transparent;
+}
+.session-mode .session-native-model-reset > span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-inline: auto;
+  border-radius: 7px;
+}
+.session-mode .session-native-model-reset:not([data-disabled]):is(:hover, :focus) > span {
+  background: color-mix(in srgb, var(--codex-text) 7%, transparent);
+}
 .session-mode .session-native-service-tier {
   position: absolute;
   inset-inline-start: 0;

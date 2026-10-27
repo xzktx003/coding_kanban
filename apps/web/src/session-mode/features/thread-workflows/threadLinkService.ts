@@ -8,10 +8,11 @@ import { useLayoutStore } from "@session/stores/useLayoutStore";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { threadRead } from "@session/services/apiAdapt/codex";
 import { readWithDeadline } from "@session/services/sessionReadQueue";
+import { captureCodexOperationScope, isCodexOperationScopeCurrent } from "@session/services/codexOperationScope";
 import { useSessionNavigationGuard } from "@session/services/sessionNavigationGuard";
 import {
   hydrateThreadModel,
-  useThreadModelStore,
+  captureThreadModelRead,
 } from "@session/stores/useThreadModelStore";
 import { nativeThreadSettings } from "@session/services/nativeThreadSettings";
 import { isSessionInteractionVisible } from "@session/session-dom";
@@ -62,21 +63,54 @@ function validateThread(thread: Thread, chosen: ThreadLinkTarget) {
   if (chosen.turnId && !thread.turns.some((turn) => turn.id === chosen.turnId))
     throw new Error("会话链接所指轮次不可用，未跳到其他轮次。");
 }
+/** Initial account confirmation belongs to the existing read deadline. This
+ * observes current state only; it never refreshes credentials or starts a task. */
+function waitForInitialAccount(requestId: number, signal: AbortSignal): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      unsubscribeAccount();
+      unsubscribeLink();
+      signal.removeEventListener("abort", abort);
+    };
+    const finish = (ready: boolean) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(ready);
+    };
+    const abort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(new Error("账号确认尚未完成，会话链接读取已取消，请重试。"));
+    };
+    const check = () => {
+      if (useThreadLinkStore.getState().requestId !== requestId) finish(false);
+      else if (useCodexStore.getState().hasAccount !== null) finish(true);
+    };
+    const unsubscribeAccount = useCodexStore.subscribe(check);
+    const unsubscribeLink = useThreadLinkStore.subscribe(check);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    else check();
+  });
+}
 /** Opening a link reads history only. Ownership is acquired later solely by explicit execution operations. */
 export async function openThreadLink(
   chosen: ThreadLinkTarget,
   selectTab: (card: AgentCenterCard) => void | Promise<void>,
 ): Promise<boolean> {
+  let scope = captureCodexOperationScope();
   const source = Object.freeze({ ...chosen });
   if (
     !boundedId(source.threadId) ||
     (source.turnId !== undefined && !boundedId(source.turnId))
   )
     throw new Error("会话链接无效。");
-  const intent = selection(),
-    baseline = useCodexStore.getState().events[source.threadId] ?? [];
-  const modelRevision =
-    useThreadModelStore.getState().threads[source.threadId]?.revision ?? 0;
+  const intent = selection();
+  let baseline = useCodexStore.getState().events[source.threadId] ?? [];
+  let modelReadToken = captureThreadModelRead(source.threadId);
   const requestId = useThreadLinkStore.getState().requestId + 1;
   useThreadLinkStore.setState({
     requestId,
@@ -86,20 +120,33 @@ export async function openThreadLink(
   });
   try {
     const response = await readWithDeadline(
-      (signal) =>
-        threadRead(
+      async (signal) => {
+        if (scope.hasAccount === null) {
+          if (!(await waitForInitialAccount(requestId, signal))) return null;
+          // The first successful account observation invalidates the initial
+          // unknown scope. Capture only before sending, never after a response.
+          // Keep the original navigation intent even if the user moved meanwhile.
+          scope = captureCodexOperationScope();
+          baseline = useCodexStore.getState().events[source.threadId] ?? [];
+          modelReadToken = captureThreadModelRead(source.threadId);
+        }
+        return threadRead(
           { threadId: source.threadId },
           { signal, suppressToast: true },
-        ),
+        );
+      },
       15_000,
     );
+    if (!response) return false;
+    if (!isCodexOperationScopeCurrent(scope))
+      throw new Error("连接目标已切换，旧会话链接读取已忽略。");
     validateThread(response.thread, source);
     if (useThreadLinkStore.getState().requestId !== requestId) return false;
     hydrateThreadModel(
       source.threadId,
       nativeThreadSettings(response, response.thread),
       {
-        revision: modelRevision,
+        readToken: modelReadToken,
         notify: !!useCodexStore.getState().historyLoadedMap[source.threadId],
       },
     );
@@ -157,7 +204,7 @@ export async function openThreadLink(
         unsubscribe();
         if (
           useThreadLinkStore.getState().requestId !== requestId ||
-          selection() !== commitIntent
+          selection() !== commitIntent || !isCodexOperationScopeCurrent(scope)
         ) {
           if (useThreadLinkStore.getState().requestId === requestId)
             useThreadLinkStore.setState({

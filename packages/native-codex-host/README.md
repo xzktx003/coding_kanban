@@ -10,6 +10,8 @@ Run tests with `node --test packages/native-codex-host/test/*.test.mjs` or the p
 
 Child processes retain explicitly configured proxy addresses and `NODE_USE_ENV_PROXY=0` or `1`; an unset switch stays unset. Node proxy support depends on the code-server Node version (the isolated acceptance uses v24.21.0), and inherited `NODE_OPTIONS` remains excluded in favor of the owned provider preload. No proxy address is supplied by the host. See [the proxy and initialization audit](../../docs/designs/codex-mode-audit-20261014/refresh-initialization-proxy-20261016.md).
 
+The isolated host caps the official app-server's Tokio worker pool to the smaller of 8 and the host's available CPU count. An explicit launcher `--app-server-worker-threads N` (or `NATIVE_CODEX_APP_SERVER_WORKER_THREADS`) and private service JSON `appServerWorkerThreads` accept integers 1–32. The selected value is passed as `TOKIO_WORKER_THREADS` only to this host's child environment; inherited values do not override it. The runtime record reports the selected count. This limits resource growth when several browser clients connect; it does not claim a faster official Webview or change an already running host.
+
 Create a fresh owned `0700` short runtime directory, for example with Node `mkdtemp(join(tmpdir(), 'ck-native-'))`. Unix native IPC path limits are validated before launch. Provide every machine path and port through arguments or corresponding `NATIVE_CODEX_*` environment variables:
 
 ```sh
@@ -88,6 +90,8 @@ pnpm --filter @agent-orchestrator/native-codex-host service --config /absolute/p
 ```
 
 The selected JSON must be an owned regular `0600` file. Required fields are `codeServer`, `officialVsix`, `codexCli`, `port`, `brokerPort`, `runtimeBase`, and `record`. Supply absolute machine-specific paths and two distinct unused integer ports. The official archive must have a `.vsix` filename for code-server's installer; an unchanged cached extension archive may be copied to such a name. `runtimeBase` must be an owned `0700` short directory suitable for native Unix socket paths; the fixed `record` parent must already exist and be owned by the same user. Select either `passwordFile` or explicit `unsafeNoAuth: true`. The service always binds the host to loopback HTTP behind the app's existing same-origin gateway.
+
+`appServerWorkerThreads` is optional in that private JSON. Use it only after measuring the target host; values outside 1–32 are rejected before launch.
 
 No account reuse is inferred. Add `sharedCodexHome` only after explicit authorization to reuse that account and history; alternatively use `connectionProfileHome` for an authorized connection copy without history. Both remain mutually exclusive. Without either field, the new host uses an isolated logged-out Codex home. Other `NATIVE_CODEX_*` variables cannot silently add a login import, refresh prototype, certificate, or directory to the selected configuration.
 

@@ -1335,3 +1335,6 @@
 
 - 2026-10-20：独立 Codex 宿主 broker-ready 仅证明控制链路，不能代表登录有效。connection-profile-home 的私有 auth 副本过期、refresh token reused 时，浏览器会停官方登录页；本机主登录可仍有效。同账号与 owned0600/无链接/并发变化校验后，仅更新此前授权的副本，真实浏览器首次进入及刷新后输入恢复，未发送任务或重启 Agent。副本非共享文件，此恢复不等于自动续期；不可通过后台静默复制或共享整个 CODEX_HOME 掩盖。见 docs/designs/codex-login-copy-recovery-20261020.md。
 - 2026-10-22：原生 select 展开白底浅字，原因是闭合控件背景不等于原生 popup 背景，且未声明 color-scheme。终端 select 固定 dark 并成对设置 option／optgroup 的不透明背景和文字；会话模式在 .session-mode 内按 light／dark 与 popover tokens 覆盖，勿把会话浅色菜单强制改成深色。六组 Chromium 系统／页面主题回归通过，包含对比度、主题切换和选择保持；无 Agent 连接。
+- 2026-10-27：PR 创建表单在手机和桌面窄容器中没有可见字段标签，标题输入仅24px高。已改用纵向标签字段、44px标题输入、128px描述区和移动整行链接按钮；390px与1440px浏览器检查标签间距、控件尺寸与横向溢出，同时保留原owner scope和不自动访问GitHub的边界。
+- 2026-10-27：Playwright E2E 协议推断曾用 WEB_HTTPS，而 Vite 实际用 VITE_DEV_HTTPS；0.0.0.0 绑定地址也不适合作为 readiness URL。协议判断改为跟随 Vite，绑定保持原值，0.0.0.0 探活转到 127.0.0.1；隔离 owner-form 14 项通过。
+- 2026-10-27：Git worktree 并发测试把两个异步调用的返回顺序误当作串行队列入队顺序。测试改为检查同路径恰有一次创建和一次复用，并从新建结果检查复制文件；session-runtime 全量362项通过。

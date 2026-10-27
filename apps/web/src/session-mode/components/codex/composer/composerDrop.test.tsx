@@ -1,7 +1,9 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { IDBFactory } from "fake-indexeddb";
 import { toast } from "sonner";
 import { composerDrafts, useComposerDraftStore } from "./v2/drafts";
+import { contextDraftStorage } from "./v2/draftStorage";
 import { useComposerFileDrop } from "./composerDrop";
 
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
@@ -21,9 +23,18 @@ const event = (
   dataTransfer: { files, types, items: [], dropEffect: "none" },
 });
 beforeEach(() => {
-  useComposerDraftStore.setState({ drafts: {}, error: null });
+  vi.stubGlobal("indexedDB", new IDBFactory());
+  useComposerDraftStore.setState({ drafts: {}, status: {}, error: null });
   localStorage.clear();
   vi.clearAllMocks();
+});
+afterEach(async () => {
+  await Promise.allSettled(
+    Object.keys(useComposerDraftStore.getState().drafts).map((owner) =>
+      composerDrafts.flush(owner),
+    ),
+  );
+  vi.unstubAllGlobals();
 });
 it("leaves text and session-tab drags native", () => {
   const { result } = renderHook(() =>
@@ -58,9 +69,13 @@ it("splits image uploads from persistent text snapshots without changing body te
     text: "print('你好')\n",
   });
   expect(composerDrafts.read("a").contexts[0].path).toBeUndefined();
-  expect(localStorage.getItem("kanban.session.composer-v2")).toContain(
+  await waitFor(() =>
+    expect(useComposerDraftStore.getState().status.a?.phase).toBe("ready"),
+  );
+  expect((await contextDraftStorage.load("a")).contexts[0].value.name).toBe(
     "main.py",
   );
+  expect(localStorage.getItem("kanban.session.composer-v2")).toBeNull();
   expect(e.preventDefault).toHaveBeenCalledOnce();
   expect(e.stopPropagation).toHaveBeenCalledOnce();
 });
@@ -181,7 +196,8 @@ it("does not restore an obsolete hover after switching away and back to a draft"
 });
 
 it("a stuck local file read releases pending and ignores late bytes without blocking the next drop", async () => {
-  vi.useFakeTimers();
+  // Advance the file deadline without suspending IndexedDB's task delivery.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   try {
     let release!: (value: ArrayBuffer) => void;
     const file = {

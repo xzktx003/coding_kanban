@@ -45,8 +45,18 @@ function validateNativeFocus(body) {
   const uri = body.kind === 'new' ? newChatUri(body.targetId, [body.targetId]) : threadUri(body.targetId, [body.targetId]);
   return { kind: body.kind, targetId: body.targetId, uri };
 }
+const nativeEditorMutations = new WeakMap();
+function serializeNativeEditorMutation(vscode, action) {
+  const previous = nativeEditorMutations.get(vscode) ?? Promise.resolve();
+  const pending = previous.catch(() => {}).then(action);
+  nativeEditorMutations.set(vscode, pending.then(() => {}, () => {}));
+  return pending;
+}
 async function focusNativeWindow(vscode, body) {
   const target = validateNativeFocus(body);
+  return serializeNativeEditorMutation(vscode, () => focusNativeTarget(vscode, target));
+}
+async function focusNativeTarget(vscode, target) {
   const existing = findNativeTab(vscode, target.uri);
   if (!existing) { const error = new Error('native target is not open in this host'); error.statusCode = 409; throw error; }
   if (existing.tab.isActive && existing.group === vscode.window.tabGroups.activeTabGroup)
@@ -60,12 +70,10 @@ async function focusNativeWindow(vscode, body) {
   }
   return { focused: true, column: active.viewColumn };
 }
-const nativeGroupStarts = new WeakMap();
 async function openInFreshNativeGroup(vscode, uri) {
-  const previous = nativeGroupStarts.get(vscode) ?? Promise.resolve();
   // Only group creation and command submission are serialized. A slow native
   // editor may keep opening while other independent editors acquire groups.
-  const started = previous.catch(() => {}).then(async () => {
+  const started = serializeNativeEditorMutation(vscode, async () => {
     const oldGroups = new Set(vscode.window.tabGroups.all);
     const oldActive = vscode.window.tabGroups.activeTabGroup;
     await vscode.commands.executeCommand('workbench.action.newGroupRight');
@@ -76,7 +84,6 @@ async function openInFreshNativeGroup(vscode, uri) {
       { viewColumn: group.viewColumn, preview: false, preserveFocus: false });
     return { opening };
   });
-  nativeGroupStarts.set(vscode, started.then(() => {}, () => {}));
   const { opening } = await started;
   await opening;
   // Opening can reuse a restored editor and remove the freshly reserved empty

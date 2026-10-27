@@ -63,6 +63,9 @@ test("drafts survive hydration and session IDs are isolated across agents and ne
       .map((key) => [key, localStorage.getItem(key)!]),
   );
   useSessionDraftStore.setState({ drafts: {} });
+  // Restore the complete prior browser snapshot, including absence of any
+  // acknowledgement/removal markers created by the reset above.
+  localStorage.clear();
   for (const [key, value] of Object.entries(persisted))
     localStorage.setItem(key, value);
   await useSessionDraftStore.persist.rehydrate();
@@ -72,6 +75,28 @@ test("drafts survive hydration and session IDs are isolated across agents and ne
     "draft 2",
     "draft 3",
   ]);
+});
+
+test("late first-thread creation does not remove a newer new-chat draft from another page", async () => {
+  const from = sessionDraftKey("codex", null, "/project");
+  const to = sessionDraftKey("codex", "created-thread");
+  const store = useSessionDraftStore.getState();
+  store.setText(from, "A initial message");
+  const snapshot = readDraft(from);
+  const key = `kanban.session.text-drafts.entry.${encodeURIComponent(from)}`;
+  localStorage.setItem(
+    key,
+    JSON.stringify({
+      text: "B new chat draft",
+      revision: 2,
+      writeId: "page-b-new-chat",
+    }),
+  );
+  store.move(from, to);
+  store.clearSubmitted(to, snapshot);
+  await useSessionDraftStore.persist.rehydrate();
+  expect(readDraft(from).text).toBe("B new chat draft");
+  expect(readDraft(to).text).toBe("");
 });
 
 test("a late success clears only the captured revision of the originating session", () => {
@@ -116,4 +141,37 @@ test("legacy text migrates exactly once and retains its original backup", () => 
   expect(readDraft("first").text).toBe("legacy unfinished");
   expect(readDraft("second").text).toBe("");
   expect(localStorage.getItem("kanban.session.input-storage")).toBe(legacy);
+});
+
+test("a late success cannot overwrite another page's newer draft before storage events arrive", async () => {
+  const owner = sessionDraftKey("codex", "draft-a");
+  const store = useSessionDraftStore.getState();
+  store.setText(owner, "submitted by A");
+  const snapshot = readDraft(owner);
+  const key = `kanban.session.text-drafts.entry.${encodeURIComponent(owner)}`;
+  const otherPage = {
+    text: "new input in B",
+    revision: snapshot.revision + 1,
+    writeId: "page-b-edit",
+  };
+  localStorage.setItem(key, JSON.stringify(otherPage));
+  store.clearSubmitted(owner, snapshot);
+  expect(JSON.parse(localStorage.getItem(key)!)).toEqual(otherPage);
+  await useSessionDraftStore.persist.rehydrate();
+  expect(readDraft(owner).text).toBe("new input in B");
+});
+
+test("equal local revision and text from another page still represent a different edit", async () => {
+  const owner = sessionDraftKey("codex", "draft-a");
+  const store = useSessionDraftStore.getState();
+  store.setText(owner, "same words");
+  const snapshot = readDraft(owner);
+  const key = `kanban.session.text-drafts.entry.${encodeURIComponent(owner)}`;
+  localStorage.setItem(
+    key,
+    JSON.stringify({ ...snapshot, writeId: "another-page-edit" }),
+  );
+  store.clearSubmitted(owner, snapshot);
+  await useSessionDraftStore.persist.rehydrate();
+  expect(readDraft(owner).text).toBe("same words");
 });

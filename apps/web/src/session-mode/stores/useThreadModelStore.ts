@@ -1,9 +1,22 @@
+import { PERMISSION_FIELDS, permissionSourcesFor, type ThreadPermissionSources } from "../services/threadPermissionProjection";
 import {
   mergeNativePermissionMetadata,
   type NativePermissionMetadata,
 } from "@session/services/nativeThreadPermissionMetadata";
-import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { create, type StoreApi, type UseBoundStore } from "zustand";
+import {
+  createThreadModelPersistence,
+  THREAD_MODEL_LEGACY_KEY,
+  sameThreadModelValue,
+  ThreadModelPersistenceError,
+  type ThreadModelReadToken,
+  type ThreadModelStorageStatus,
+  type SettingsIntent,
+} from "./threadModelPersistence";
+export type {
+  ThreadModelReadToken,
+  ThreadModelStorageStatus,
+} from "./threadModelPersistence";
 import type {
   ReasoningEffort,
   CollaborationMode,
@@ -18,6 +31,8 @@ import type {
 import { useConfigStore } from "@session/components/codex/stores/useConfigStore";
 
 export interface ThreadModelSettings {
+  /** Durable setting provenance; never grants native operation authority. */
+  permissionSources?: ThreadPermissionSources;
   model: string;
   modelProvider: string;
   reasoningEffort: ReasoningEffort | null;
@@ -34,6 +49,7 @@ export interface ThreadModelSettings {
 }
 export interface ModelChangeNotice {
   id: number;
+  identity?: string;
   from: string;
   to: string;
   dismissed: boolean;
@@ -57,11 +73,13 @@ export interface ThreadModelEntry extends ThreadModelSettings {
   personalityNotice?: PersonalityNotice | null;
 }
 const UNKNOWN: ThreadModelSettings = {
+  permissionSources: {},
   model: "",
   modelProvider: "openai",
   reasoningEffort: null,
   providerModels: {},
   serviceTier: null,
+  sandboxPolicy: undefined,
   sandbox: "danger-full-access",
   approvalPolicy: "never",
   approvalsReviewer: "user",
@@ -131,7 +149,10 @@ const EDITABLE_FIELDS = [
   "collaborationMode",
   "personality",
 ] as const;
-type ThreadModelState = { threads: Record<string, ThreadModelEntry> };
+type ThreadModelState = {
+  threads: Record<string, ThreadModelEntry>;
+  storage?: Record<string, ThreadModelStorageStatus>;
+};
 
 function withoutNativePermissionMetadata<T extends object>(entry: T): T {
   if (
@@ -178,33 +199,6 @@ function withoutPersistedPermissionMetadata(saved: unknown): unknown {
   return clean === threads ? saved : { ...saved, threads: clean };
 }
 
-export const useThreadModelStore = create<ThreadModelState>()(
-  persist(() => ({ threads: {} }), {
-    name: "kanban.session.codex-thread-models",
-    version: 2,
-    partialize: (state) => ({
-      ...state,
-      threads: withoutThreadPermissionMetadata(state.threads),
-    }),
-    // Same-version persisted data skips migrate, so reads must strip it too.
-    merge: (saved, current) => ({
-      ...current,
-      ...(withoutPersistedPermissionMetadata(saved) as Partial<ThreadModelState>),
-    }),
-    migrate: (saved) => {
-      const state = saved as { threads?: Record<string, ThreadModelEntry> };
-      return {
-        threads: Object.fromEntries(
-          Object.entries(state.threads ?? {}).map(([id, entry]) => [
-            id,
-            { ...UNKNOWN, ...withoutNativePermissionMetadata(entry) },
-          ]),
-        ),
-      };
-    },
-  }),
-);
-
 /** Global choices are defaults for a new chat, never overrides for an existing one. */
 export function getThreadModelSettings(
   threadId: string | null,
@@ -215,21 +209,35 @@ export function getThreadModelSettings(
       ...withoutNativePermissionMetadata(
         useThreadModelStore.getState().threads[threadId],
       ),
+      permissionSources: permissionSourcesFor(useThreadModelStore.getState().threads[threadId]),
     } as Required<ThreadModelSettings>;
   return {
     ...UNKNOWN,
     ...withoutNativePermissionMetadata(useConfigStore.getState()),
+    permissionSources: Object.fromEntries(PERMISSION_FIELDS.map(key => [key, "local"])),
   } as Required<ThreadModelSettings>;
 }
 
-export function changeThreadModel(
+function reduceChangeThreadModel(
+  state: ThreadModelState,
   threadId: string,
   patch: Partial<ThreadModelSettings>,
 ) {
-  useThreadModelStore.setState((s) => {
+  return ((s: ThreadModelState) => {
     const old = s.threads[threadId];
     const before = { ...UNKNOWN, ...old };
-    const next = { ...before, ...patch };
+    const sources = permissionSourcesFor(old);
+    // Every replay rebases the requested network change on this transaction's
+    // actual policy, not the caller's possibly stale copied policy object.
+    if (patch.webSearchRequest !== undefined && !Object.hasOwn(patch, "sandboxPolicy") && sources.sandboxPolicy && before.sandboxPolicy && "networkAccess" in before.sandboxPolicy) {
+      patch = { ...patch, sandboxPolicy: before.sandboxPolicy.type === "externalSandbox"
+        ? { ...before.sandboxPolicy, networkAccess: patch.webSearchRequest ? "enabled" : "restricted" }
+        : { ...before.sandboxPolicy, networkAccess: patch.webSearchRequest } };
+    }
+    const permissionSources = { ...sources };
+    for (const key of PERMISSION_FIELDS)
+      if (Object.hasOwn(patch, key) && patch[key] !== undefined) permissionSources[key] = "local";
+    const next = { ...before, ...patch, permissionSources };
     const changedModel =
       next.model !== before.model ||
       next.modelProvider !== before.modelProvider;
@@ -238,7 +246,9 @@ export function changeThreadModel(
         ? { personality: patch.personality }
         : old?.personalityNotice;
     const changedFields = EDITABLE_FIELDS.filter(
-      (key) => JSON.stringify(next[key]) !== JSON.stringify(before[key]),
+      (key) => JSON.stringify(next[key]) !== JSON.stringify(before[key]) ||
+        (Object.hasOwn(patch, key) && PERMISSION_FIELDS.includes(key as typeof PERMISSION_FIELDS[number]) &&
+          sources[key as typeof PERMISSION_FIELDS[number]] !== "local"),
     );
     if (!changedFields.length) return s;
     const revision = (old?.revision ?? 0) + 1;
@@ -281,11 +291,12 @@ export function changeThreadModel(
         },
       },
     };
-  });
+  })(state);
 }
 
 /** Native responses/events belong to the specified thread, including background resumes. */
-export function hydrateThreadModel(
+function reduceHydrateThreadModel(
+  state: ThreadModelState,
   threadId: string,
   value: {
     readonly nativePermissionMetadata?: NativePermissionMetadata;
@@ -303,8 +314,8 @@ export function hydrateThreadModel(
   },
   options: { revision?: number; notify?: boolean; initialOnly?: boolean } = {},
 ) {
-  if (!value.model) return;
-  useThreadModelStore.setState((s) => {
+  if (!value.model) return state;
+  return ((s: ThreadModelState) => {
     const old = s.threads[threadId];
     // An HTTP history snapshot started before the user's selection cannot undo it.
     if (
@@ -321,16 +332,42 @@ export function hydrateThreadModel(
     );
     // Preserve the original settings branch, including pending/ack decisions.
     // A metadata-only change copies only this entry and advances its existing fence.
-    const retainPermissionMetadata = (next: ThreadModelState): ThreadModelState => {
-      if (nativePermissionMetadata === old?.nativePermissionMetadata) return next;
+    const retainPermissionMetadata = (
+      next: ThreadModelState,
+      applied: NativeSettings = incoming,
+    ): ThreadModelState => {
+      // Provenance follows fields actually applied to this settings projection.
+      // Pending observations may update nativeSettings without changing any
+      // selected permission; a fork seed may apply canonical fields newer than
+      // its own incoming payload.
       const entry = next.threads[threadId];
+      if (!entry) return next;
+      const sources = permissionSourcesFor(old);
+      const permissionSources = { ...sources };
+      const acceptPermissionObservation = !(options.initialOnly && old && old.nativeSettings === undefined);
+      const sandboxPending = old?.pending && SANDBOX_FIELDS.some(key => old.pendingFields?.includes(key));
+      if (acceptPermissionObservation && !sandboxPending && !(options.initialOnly && SANDBOX_FIELDS.some(key => sources[key])) && SANDBOX_FIELDS.some(key => Object.hasOwn(applied, key))) {
+        for (const key of SANDBOX_FIELDS) delete permissionSources[key];
+      }
+      for (const key of PERMISSION_FIELDS) {
+        if (!acceptPermissionObservation) continue;
+        if (!Object.hasOwn(applied, key) || applied[key] === undefined) continue;
+        if (options.initialOnly && sources[key]) continue;
+        if (JSON.stringify(entry[key]) === JSON.stringify(applied[key]))
+          // A confirmed field now comes from this native observation. Do not
+          // attach an old local-mode origin to a later different native mode.
+          permissionSources[key] = "native";
+      }
+      if (nativePermissionMetadata === old?.nativePermissionMetadata &&
+          sameThreadModelValue(permissionSourcesFor(entry), permissionSources)) return next;
       return {
         ...next,
         threads: {
           ...next.threads,
           [threadId]: {
             ...entry,
-            nativePermissionMetadata,
+            ...(nativePermissionMetadata !== undefined ? { nativePermissionMetadata } : {}),
+            permissionSources,
             revision: next === s ? (old?.revision ?? 0) + 1 : entry.revision,
           },
         },
@@ -448,7 +485,7 @@ export function hydrateThreadModel(
           JSON.stringify(v),
       );
       if (sameProjection && sameNativeSettings(old.nativeSettings, canonical))
-        return retainPermissionMetadata(s);
+        return retainPermissionMetadata(s, projected);
       const model = projected.model ?? old.model;
       const provider = projected.modelProvider ?? old.modelProvider;
       return retainPermissionMetadata({
@@ -467,7 +504,7 @@ export function hydrateThreadModel(
             // The fork receipt must not acknowledge pending choices or alter notices.
           },
         },
-      });
+      }, projected);
     }
     const matches =
       old?.model === observed.model &&
@@ -491,7 +528,7 @@ export function hydrateThreadModel(
       );
     if (old?.pending && !matches)
       return sameObserved && sameNative
-        ? retainPermissionMetadata(s)
+        ? retainPermissionMetadata(s, {})
         : retainPermissionMetadata({
             threads: {
               ...s.threads,
@@ -502,7 +539,7 @@ export function hydrateThreadModel(
                 revision: old.revision + 1,
               },
             },
-          });
+          }, {});
     if (
       old &&
       !old.pending &&
@@ -556,11 +593,15 @@ export function hydrateThreadModel(
         },
       },
     });
-  });
+  })(state);
 }
 
-export function dismissModelNotice(threadId: string, noticeId: number) {
-  useThreadModelStore.setState((s) => {
+function reduceDismissModelNotice(
+  state: ThreadModelState,
+  threadId: string,
+  noticeId: number,
+) {
+  return ((s: ThreadModelState) => {
     const old = s.threads[threadId];
     if (!old?.notice || old.notice.id !== noticeId) return s;
     return {
@@ -572,5 +613,434 @@ export function dismissModelNotice(threadId: string, noticeId: number) {
         },
       },
     };
-  });
+  })(state);
 }
+
+export type ThreadModelNativeValue = Parameters<
+  typeof reduceHydrateThreadModel
+>[2];
+export type ThreadModelHydrateOptions = {
+  revision?: number;
+  notify?: boolean;
+  initialOnly?: boolean;
+  readToken?: ThreadModelReadToken;
+};
+export type ThreadModelSelectionCapture = {
+  threadId: string;
+  settings: Readonly<Required<ThreadModelSettings>>;
+  token: ThreadModelReadToken;
+};
+type IntentPayload =
+  | { kind: "edit"; patch: Partial<ThreadModelSettings> }
+  | {
+      kind: "observe" | "ack";
+      value: ThreadModelNativeValue;
+      options: ThreadModelHydrateOptions;
+    }
+  | { kind: "dismiss"; noticeId: number; identity?: string };
+const groups: Record<string, readonly string[]> = {
+  model: MODEL_FIELDS,
+  sandbox: SANDBOX_FIELDS,
+  reviewer: REVIEWER_FIELDS,
+  approval: ["approvalPolicy"],
+  speed: ["serviceTier"],
+  collaboration: ["collaborationMode"],
+  personality: ["personality"],
+};
+function affectedGroups(patch: object): string[] {
+  return Object.entries(groups)
+    .filter(([, fields]) => fields.some((key) => Object.hasOwn(patch, key)))
+    .map(([key]) => key);
+}
+function cleanEntry(entry: ThreadModelEntry): ThreadModelEntry {
+  if (
+    !entry ||
+    typeof entry !== "object" ||
+    Array.isArray(entry) ||
+    (entry.model !== undefined && typeof entry.model !== "string") ||
+    (entry.modelProvider !== undefined &&
+      typeof entry.modelProvider !== "string")
+  )
+    throw new ThreadModelPersistenceError(
+      "会话设置缓存格式无效，已保留原始备份。",
+    );
+  if (
+    (entry.permissionSources !== undefined && (!entry.permissionSources || typeof entry.permissionSources !== "object" || Array.isArray(entry.permissionSources) ||
+      Object.entries(entry.permissionSources).some(([key, source]) => !PERMISSION_FIELDS.includes(key as typeof PERMISSION_FIELDS[number]) || (source !== "local" && source !== "native")))) ||
+    (entry.revision !== undefined &&
+      (!Number.isSafeInteger(entry.revision) || entry.revision < 0)) ||
+    (entry.pending !== undefined && typeof entry.pending !== "boolean") ||
+    (entry.pendingFields !== undefined &&
+      (!Array.isArray(entry.pendingFields) ||
+        entry.pendingFields.some(
+          (key) =>
+            !EDITABLE_FIELDS.includes(key as (typeof EDITABLE_FIELDS)[number]),
+        ))) ||
+    (entry.providerModels !== undefined &&
+      (!entry.providerModels ||
+        typeof entry.providerModels !== "object" ||
+        Array.isArray(entry.providerModels) ||
+        Object.values(entry.providerModels).some(
+          (value) => typeof value !== "string",
+        )))
+  )
+    throw new ThreadModelPersistenceError(
+      "会话设置缓存字段损坏，已保留原始内容。",
+    );
+  return structuredClone(
+    withoutNativePermissionMetadata({
+      ...UNKNOWN,
+      ...entry,
+      permissionSources: permissionSourcesFor(entry),
+      revision: entry.revision ?? 0,
+      pending: entry.pending ?? false,
+    }),
+  );
+}
+function legacyEntries(): Record<string, ThreadModelEntry> {
+  const raw = localStorage.getItem(THREAD_MODEL_LEGACY_KEY);
+  if (!raw) return {};
+  let saved: {
+    state?: { threads?: Record<string, ThreadModelEntry> };
+    version?: number;
+  };
+  try {
+    saved = JSON.parse(raw);
+  } catch {
+    throw new ThreadModelPersistenceError(
+      "旧会话设置备份无法解析，原始内容未修改。",
+    );
+  }
+  const entries = saved.state?.threads;
+  if (
+    !entries ||
+    typeof entries !== "object" ||
+    Array.isArray(entries) ||
+    (saved.version ?? 0) > 2
+  )
+    throw new ThreadModelPersistenceError(
+      "旧会话设置备份格式不受支持，原始内容未修改。",
+    );
+  return entries;
+}
+function reduceIntent(
+  entry: ThreadModelEntry | undefined,
+  intent: SettingsIntent<IntentPayload>,
+): ThreadModelEntry | undefined {
+  const state: ThreadModelState = { threads: entry ? { target: entry } : {} };
+  const payload = intent.payload;
+  let result: ThreadModelState;
+  if (payload.kind === "edit")
+    result = reduceChangeThreadModel(state, "target", payload.patch);
+  else if (payload.kind === "dismiss") {
+    if (
+      payload.identity !== undefined &&
+      entry?.notice?.identity !== payload.identity
+    )
+      return entry;
+    result = reduceDismissModelNotice(
+      state,
+      "target",
+      payload.identity ? entry!.notice!.id : payload.noticeId,
+    );
+  } else {
+    // readToken is checked against the transactional row. Numeric revision is
+    // only the legacy local fence and cannot compare revisions across pages.
+    result = reduceHydrateThreadModel(state, "target", payload.value, {
+      ...payload.options,
+      revision: undefined,
+    });
+  }
+  const next = result.threads.target;
+  if (next === entry) return entry;
+  if (
+    next?.notice &&
+    next.notice !== entry?.notice &&
+    payload.kind !== "dismiss"
+  )
+    return { ...next, notice: { ...next.notice, identity: intent.id } };
+  return next;
+}
+
+/** Also used by isolated multi-page contract tests; no environment fallback. */
+export function createThreadModelController(
+  options: {
+    databaseName?: string;
+    indexedDB?: IDBFactory;
+    legacy?: () => Record<string, ThreadModelEntry>;
+    connectEvents?: boolean;
+    timeoutMs?: number;
+  } = {},
+  previous?: {
+    store: UseBoundStore<StoreApi<ThreadModelState>>;
+    persistence: ReturnType<
+      typeof createThreadModelPersistence<ThreadModelEntry, IntentPayload>
+    >;
+  },
+) {
+  const store =
+    previous?.store ??
+    create<ThreadModelState>(() => ({ threads: {}, storage: {} }));
+  const persistence = createThreadModelPersistence<
+    ThreadModelEntry,
+    IntentPayload
+  >(
+    {
+      ...options,
+      legacy: options.legacy ?? legacyEntries,
+      clean: cleanEntry,
+      reduce: reduceIntent,
+      get: (id) => store.getState().threads[id],
+      apply(id, entry) {
+        const old = store.getState().threads[id];
+        const next = entry && {
+          ...entry,
+          ...(entry.nativePermissionMetadata === undefined &&
+          old?.nativePermissionMetadata !== undefined
+            ? { nativePermissionMetadata: old.nativePermissionMetadata }
+            : {}),
+        };
+        if (sameThreadModelValue(old, next)) return;
+        store.setState((s) => ({ threads: { ...s.threads, [id]: next! } }));
+      },
+      status(id, status) {
+        const old = store.getState().storage?.[id];
+        if (old?.status === status.status && old?.error === status.error)
+          return;
+        store.setState((s) => ({ storage: { ...s.storage, [id]: status } }));
+      },
+    },
+    previous?.persistence.handoff,
+  );
+  const settingsFrom = (value: ThreadModelEntry | undefined) => {
+    const entry = { ...UNKNOWN, ...value, permissionSources: permissionSourcesFor(value) };
+    return Object.fromEntries(
+      Object.keys(UNKNOWN).map((key) => [
+        key,
+        entry[key as keyof ThreadModelSettings],
+      ]),
+    ) as Required<ThreadModelSettings>;
+  };
+  const settings = (id: string) => settingsFrom(store.getState().threads[id]);
+  function change(id: string, patch: Partial<ThreadModelSettings>) {
+    const before = store.getState();
+    const after = reduceChangeThreadModel(before, id, patch);
+    if (after === before) return;
+    const baseline = { ...UNKNOWN, ...before.threads[id] };
+    const changed = Object.fromEntries(
+      EDITABLE_FIELDS.filter(
+        (key) => Object.hasOwn(patch, key) && (
+          JSON.stringify(baseline[key]) !==
+          JSON.stringify(after.threads[id][key]) ||
+          (PERMISSION_FIELDS.includes(key as typeof PERMISSION_FIELDS[number]) &&
+            permissionSourcesFor(before.threads[id])[key as typeof PERMISSION_FIELDS[number]] !== "local")),
+      ).map((key) => [key, after.threads[id][key]]),
+    ) as Partial<ThreadModelSettings>;
+    if (patch.providerModels && affectedGroups(changed).includes("model"))
+      changed.providerModels = patch.providerModels;
+    persistence.enqueue(id, {
+      kind: "edit",
+      groups: affectedGroups(changed),
+      payload: { kind: "edit", patch: structuredClone(changed) },
+    });
+  }
+  function hydrate(
+    id: string,
+    value: ThreadModelNativeValue,
+    options: ThreadModelHydrateOptions = {},
+    kind: "observe" | "ack" = "observe",
+  ) {
+    if (!value.model) return;
+    if (
+      options.revision !== undefined &&
+      options.revision !== (store.getState().threads[id]?.revision ?? 0)
+    )
+      return;
+    persistence.enqueue(id, {
+      kind,
+      groups: affectedGroups(value),
+      payload: {
+        kind,
+        value: structuredClone(value),
+        options: structuredClone(options),
+      },
+      readToken: options.readToken,
+    });
+  }
+  function capture(id: string): ThreadModelSelectionCapture {
+    const value = structuredClone(settings(id));
+    // Values may contain nested sandbox policy/provider maps; freeze recursively.
+    const freeze = (v: object) => {
+      for (const x of Object.values(v))
+        if (x && typeof x === "object") freeze(x);
+      Object.freeze(v);
+    };
+    freeze(value);
+    const captured = {
+      threadId: id,
+      settings: value,
+      token: persistence.token(id),
+    };
+    const receipt = {
+      saved: false,
+      promise: Promise.resolve(),
+      error: undefined as unknown,
+    };
+    receipt.promise = persistence
+      .captureBarrier(id, (entry) =>
+        sameThreadModelValue(value, settingsFrom(entry)),
+      )
+      .then(
+        () => {
+          receipt.saved = true;
+        },
+        (error) => {
+          receipt.error = error;
+          throw error;
+        },
+      );
+    void receipt.promise.catch(() => {});
+    persistence.handoff.captures.set(captured, receipt);
+    return captured;
+  }
+  async function flush(id: string, captured?: ThreadModelSelectionCapture) {
+    if (!captured) {
+      await persistence.flush(id);
+      return;
+    }
+    if (captured.threadId !== id)
+      throw new ThreadModelPersistenceError(
+        "会话目标已改变，请重新发送。",
+        "changed",
+      );
+    const receipt = persistence.handoff.captures.get(captured);
+    if (!receipt)
+      throw new ThreadModelPersistenceError(
+        "会话设置捕获已失效，请重新发送。",
+        "changed",
+      );
+    await receipt.promise;
+    assertCurrent(captured);
+  }
+  function assertCurrent(captured: ThreadModelSelectionCapture) {
+    const current = persistence.token(captured.threadId);
+    const receipt = persistence.handoff.captures.get(captured);
+    if (
+      !receipt?.saved ||
+      captured.settings.permissionSources === undefined ||
+      receipt.error ||
+      captured.token.scope !== current.scope ||
+      captured.token.epoch !== current.epoch
+    )
+      throw new ThreadModelPersistenceError(
+        "捕获的会话设置尚未保存或运行实例已改变，请重新发送。",
+        "changed",
+      );
+  }
+  const api = {
+    store,
+    persistence,
+    change,
+    hydrate,
+    capture,
+    flush,
+    assertCurrent,
+    dismiss(id: string, noticeId: number, identity?: string) {
+      const old = store.getState().threads[id]?.notice;
+      if (
+        !old ||
+        old.dismissed ||
+        // A transaction can renumber this notice after another page changed an
+        // independent group. Its UUID still identifies the captured notice.
+        (identity !== undefined ? old.identity !== identity : old.id !== noticeId)
+      )
+        return;
+      persistence.enqueue(id, {
+        kind: "dismiss",
+        groups: [],
+        payload: {
+          kind: "dismiss",
+          noticeId,
+          identity: identity ?? old.identity,
+        },
+      });
+    },
+    setScope(scope: string | null) {
+      persistence.setScope(scope);
+      store.setState((s) => {
+        const threads = withoutThreadPermissionMetadata(s.threads);
+        return threads === s.threads ? s : { threads };
+      });
+    },
+  };
+  persistence.handoff.controller = api;
+  return api;
+}
+const previous = import.meta.hot?.data?.threadModelController as
+  | ReturnType<typeof createThreadModelController>
+  | undefined;
+const controller = createThreadModelController({}, previous);
+export const useThreadModelStore = Object.assign(controller.store, {
+  // Compatibility for explicit cache reload callers. Persistence is now IDB;
+  // this never resumes the old full-map localStorage writer.
+  persist: {
+    rehydrate: async () => {
+      const ids = new Set([
+        ...Object.keys(controller.store.getState().threads),
+        ...controller.persistence.knownIds(),
+        ...Object.keys(legacyEntries()),
+      ]);
+      for (const id of ids) await controller.persistence.ensure(id, true);
+    },
+  },
+});
+const currentController = () =>
+  (controller.persistence.handoff.controller as
+    | ReturnType<typeof createThreadModelController>
+    | undefined) ?? controller;
+export const ensureThreadModelSettings = (id: string) =>
+  currentController().persistence.ensure(id);
+export const flushThreadModelSettings = (
+  id: string,
+  capture?: ThreadModelSelectionCapture,
+) => currentController().flush(id, capture);
+export const retryThreadModelSettings = (id: string) =>
+  currentController().persistence.retry(id);
+export const captureThreadModelRead = (id: string) =>
+  currentController().persistence.token(id);
+export const captureThreadModelSelection = (id: string) =>
+  currentController().capture(id);
+export const assertThreadModelSelectionCurrent = (
+  capture: ThreadModelSelectionCapture,
+) => currentController().assertCurrent(capture);
+export const setThreadModelRuntimeScope = (scope: string | null) =>
+  currentController().setScope(scope);
+export const changeThreadModel = (
+  id: string,
+  patch: Partial<ThreadModelSettings>,
+) => currentController().change(id, patch);
+export const hydrateThreadModel = (
+  id: string,
+  value: ThreadModelNativeValue,
+  options: ThreadModelHydrateOptions = {},
+) => currentController().hydrate(id, value, options);
+export const ackThreadModelSettings = (
+  id: string,
+  value: ThreadModelNativeValue,
+  readToken: ThreadModelReadToken,
+) => currentController().hydrate(id, value, { readToken }, "ack");
+export const dismissModelNotice = (
+  id: string,
+  noticeId: number,
+  identity?: string,
+) => currentController().dismiss(id, noticeId, identity);
+/** Tests explicitly reset their own database; production never calls this. */
+export async function resetThreadModelPersistenceForTests() {
+  await controller.persistence.reset();
+  controller.store.setState({ threads: {}, storage: {} });
+}
+if (import.meta.hot)
+  import.meta.hot.dispose((data) => {
+    controller.persistence.suspend();
+    data.threadModelController = controller;
+  });

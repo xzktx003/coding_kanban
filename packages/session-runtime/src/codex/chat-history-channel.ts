@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { CodexOptions } from "./client.js";
 import { HttpError } from "../core/json.js";
 import { ChatHistorySelector, chatHistoryRequest } from "./chat-history.js";
-import { readNativeProjection } from "./item-detail.js";
+import { readNativeProjection, type DetailRead } from "./item-detail.js";
 import { resolveCodexEnv } from "./providers.js";
 
 type Fallback = (request: FastifyRequest, reply: FastifyReply) => unknown;
@@ -13,8 +13,21 @@ export function registerChatHistoryChannel(
   fallback?: Fallback,
 ) {
   const reads = new Map<AbortController, Promise<unknown>>();
-  let tail = Promise.resolve();
+  const queue: Array<{ run: () => Promise<void> }> = [];
+  let active = false;
+  let closing = false;
+  const pump = () => {
+    if (active || closing) return;
+    const job = queue.shift();
+    if (!job) return;
+    active = true;
+    void job.run().finally(() => {
+      active = false;
+      pump();
+    });
+  };
   app.addHook("preClose", async () => {
+    closing = true;
     for (const controller of reads.keys()) controller.abort();
     await Promise.allSettled(reads.values());
   });
@@ -43,31 +56,58 @@ export function registerChatHistoryChannel(
     const timer = setTimeout(() => controller.abort(), 120_000);
     request.raw.once("aborted", abort);
     reply.raw.once("close", abort);
-    const started = tail.then(() =>
-      readNativeProjection(
-        options,
-        {
-          channel: "chat",
-          method: "thread/turns/list",
-          params,
-          selector: (initialized, ready) =>
-            new ChatHistorySelector(initialized, ready),
-        },
-        controller.signal,
-      ),
-    );
-    const settled = started.then(
-      (reading) => reading.finished,
-      () => {},
-    );
-    tail = settled;
+    let resolveStarted!: (value: DetailRead) => void;
+    let rejectStarted!: (error: unknown) => void;
+    let finish!: () => void;
+    const started = new Promise<DetailRead>((resolve, reject) => {
+      resolveStarted = resolve;
+      rejectStarted = reject;
+    });
+    const settled = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const job = {
+      run: async () => {
+        try {
+          const reading = await readNativeProjection(
+            options,
+            {
+              channel: "chat",
+              method: "thread/turns/list",
+              params,
+              selector: (initialized, ready) =>
+                new ChatHistorySelector(initialized, ready),
+            },
+            controller.signal,
+          );
+          resolveStarted(reading);
+          // Admission stays occupied until the owned native process has exited.
+          await reading.finished;
+        } catch (error) {
+          rejectStarted(error);
+        } finally {
+          finish();
+        }
+      },
+    };
+    const cancelQueued = () => {
+      const index = queue.indexOf(job);
+      if (index < 0) return; // Active readers own their cancellation/cleanup.
+      queue.splice(index, 1);
+      rejectStarted(new HttpError(502, "CHAT_HISTORY_CANCELLED"));
+      finish();
+    };
+    controller.signal.addEventListener("abort", cancelQueued, { once: true });
     reads.set(controller, settled);
-    void settled.finally(() => {
+    void settled.then(() => {
       clearTimeout(timer);
       reads.delete(controller);
+      controller.signal.removeEventListener("abort", cancelQueued);
       request.raw.off("aborted", abort);
       reply.raw.off("close", abort);
     });
+    queue.push(job);
+    pump();
     reply
       .header("cache-control", "no-store")
       .header("x-content-type-options", "nosniff");

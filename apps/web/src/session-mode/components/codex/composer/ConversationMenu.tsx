@@ -1,11 +1,17 @@
-import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  type RefObject,
+  createContext,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import { Search, List, Download, MessagesSquare } from "lucide-react";
 import { toast } from "sonner";
-import {
-  archiveThread,
-  deleteThread,
-  threadAccess,
-} from "@session/services/apiAdapt/codex";
+import { threadAccess } from "@session/services/apiAdapt/codex";
 import { codexService } from "@session/services/codexService";
 import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
 import { takeClosedTab } from "@session/stores/closedSessionTabs";
@@ -46,17 +52,13 @@ import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
 import { activeDraftOwner } from "@session/stores/useInputStore";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
 import { useAcpStore } from "@session/stores/useAcpStore";
-import { isAgentInteractionVisible, sessionPortalContainer } from "@session/session-dom";
-import { gitCommit, gitPush } from "@session/services/apiAdapt/git";
-import { GitCommitDialog } from "@session/features/git/GitCommitDialog";
 import {
-  MergePullRequestSheet,
-  OpenPullRequestSheet,
-  PullRequestSheet,
-} from "./PullRequestSheet";
-import { CreateBranchSheet } from "./CreateBranchSheet";
+  isAgentInteractionVisible,
+  isSessionInteractionVisible,
+  sessionPortalContainer,
+  useSessionInteractionVisible,
+} from "@session/session-dom";
 import { SearchChatsSheet } from "./SearchChatsSheet";
-import { FileSearchSheet } from "./FileSearchSheet";
 import { KeyboardShortcutsSheet } from "./KeyboardShortcutsSheet";
 import { requestCanvasPrompt, requestDrawingTool } from "./v2/drawingTool";
 import {
@@ -66,13 +68,38 @@ import {
   redoAppAction,
   undoAppAction,
 } from "./appActionHistory";
-import { ComposerSheet } from "./v2/ComposerSheet";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuItem as PrimitiveMenuItem,
   DropdownMenuTrigger,
 } from "../../ui/dropdown-menu";
+
+import { ConversationOwnerForms } from "./ConversationOwnerForms";
+import {
+  captureConversationForm,
+  type ConversationFormKind,
+  type ConversationOwnerForm,
+} from "./conversationOwnerFormContext";
+
+const SelectedActionContext = createContext<(() => void) | undefined>(
+  undefined,
+);
+function DropdownMenuItem({
+  onSelect,
+  ...props
+}: ComponentProps<typeof PrimitiveMenuItem>) {
+  const complete = useContext(SelectedActionContext);
+  return (
+    <PrimitiveMenuItem
+      {...props}
+      onSelect={(event) => {
+        onSelect?.(event);
+        if (!event.defaultPrevented) complete?.();
+      }}
+    />
+  );
+}
 
 type ConversationCopyScope = { current: object | null };
 function observeConversationCopy(
@@ -84,8 +111,12 @@ function observeConversationCopy(
 ) {
   // Pending clipboard callbacks must not retain this menu's render or source text.
   void write.then(
-    () => { if (scope.current === owner) toast.success(success); },
-    () => { if (scope.current === owner) toast.error(failure); },
+    () => {
+      if (scope.current === owner) toast.success(success);
+    },
+    () => {
+      if (scope.current === owner) toast.error(failure);
+    },
   );
 }
 function copyConversationText(
@@ -95,7 +126,13 @@ function copyConversationText(
   failure: string,
 ) {
   if (scope.current)
-    observeConversationCopy(writeNativeMarkdownClipboard(text), scope, scope.current, success, failure);
+    observeConversationCopy(
+      writeNativeMarkdownClipboard(text),
+      scope,
+      scope.current,
+      success,
+      failure,
+    );
 }
 
 function applyExpandedList(kind: Extract<FormatKind, "ol" | "ul" | "check">) {
@@ -138,6 +175,9 @@ export function ConversationMenu({
   variant = "icon",
   onOpen,
   onRename,
+  triggerContainer,
+  onActionSelected,
+  parentMenuId,
 }: {
   threadId: string | null;
   draftOwner?: string;
@@ -146,26 +186,28 @@ export function ConversationMenu({
   variant?: "icon" | "item";
   onOpen?: () => void;
   onRename?: () => void;
+  triggerContainer?: HTMLElement | null;
+  onActionSelected?: () => void;
+  parentMenuId?: string;
 }) {
+  const sessionVisible = useSessionInteractionVisible();
   const copyScope = useRef<object | null>(null);
   useLayoutEffect(() => {
     copyScope.current = {};
-    return () => { copyScope.current = null; };
+    return () => {
+      copyScope.current = null;
+    };
   }, [threadId, draftOwner]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  useLayoutEffect(() => {
+    if (triggerContainer === null) setMenuOpen(false);
+  }, [triggerContainer]);
   const [busy, setBusy] = useState(false);
-  const [fileSearch, setFileSearch] = useState(false);
-  const [archiveOpen, setArchiveOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [notesOpen, setNotesOpen] = useState(false);
-  const [commitOpen, setCommitOpen] = useState(false);
-  const [commitForm, setCommitForm] = useState(false);
-  const [pullRequest, setPullRequest] = useState<null | { draft: boolean }>(null);
-  const [branchOpen, setBranchOpen] = useState(false);
-  const [mergeOpen, setMergeOpen] = useState(false);
-  const [openPullRequest, setOpenPullRequest] = useState(false);
+  const [ownerForm, setOwnerForm] = useState<ConversationOwnerForm | null>(
+    null,
+  );
   const [searchChats, setSearchChats] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [notes, setNotes] = useState("");
   const [, setHistoryTick] = useState(0);
   const menuCardId = useRef<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -219,7 +261,9 @@ export function ConversationMenu({
   const shiftReasoning = (direction: 1 | -1, wrap: boolean) => {
     if (reasoningPending || !model || !isCurrentReasoningOwner()) return;
     const rawModels = useModelCacheStore.getState().openAiModels;
-    const models = nativeProvider ? getOrdinaryNativePickerModels(rawModels) : rawModels;
+    const models = nativeProvider
+      ? getOrdinaryNativePickerModels(rawModels)
+      : rawModels;
     const catalog = models.find(
       (item) => item.model === model || (!nativeProvider && item.id === model),
     );
@@ -249,35 +293,65 @@ export function ConversationMenu({
     toast.message(`推理强度已设为${nativeReasoningLabel(next)}`);
   };
   useEffect(() => {
-    const openShortcuts = () => setShortcutsOpen(true);
+    // A persistent owner keeps its forms alive after the parent closes; it does
+    // not gain new global shortcut ownership while its entry is absent.
+    if (triggerContainer === null || !sessionVisible) return;
+    const openShortcuts = () => {
+      if (isSessionInteractionVisible()) setShortcutsOpen(true);
+    };
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "/" || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey)
+      // Check the actual root before observer/effect cleanup can run.
+      if (!isSessionInteractionVisible()) return;
+      if (
+        event.key !== "/" ||
+        !(event.metaKey || event.ctrlKey) ||
+        event.altKey ||
+        event.shiftKey
+      )
         return;
       const target = event.target;
-      if (target instanceof HTMLElement && target.closest(".session-mode") === null) return;
+      if (
+        target instanceof HTMLElement &&
+        target.closest(".session-mode") === null
+      )
+        return;
       event.preventDefault();
       setShortcutsOpen(true);
     };
     window.addEventListener("codex-open-keyboard-shortcuts", openShortcuts);
     window.addEventListener("keydown", onKey);
     return () => {
-      window.removeEventListener("codex-open-keyboard-shortcuts", openShortcuts);
+      window.removeEventListener(
+        "codex-open-keyboard-shortcuts",
+        openShortcuts,
+      );
       window.removeEventListener("keydown", onKey);
     };
-  }, []);
+  }, [triggerContainer, sessionVisible]);
   const cwd = useCodexStore((state) =>
     threadId
       ? state.threads.find((thread) => thread.id === threadId)?.cwd
       : undefined,
   );
-  return (
-    <>
-    <DropdownMenu
-      onOpenChange={(next) => {
-        if (next)
-          menuCardId.current = useAgentCenterStore.getState().currentAgentCardId;
-      }}
-    >
+  const openOwnerForm = (kind: ConversationFormKind) => {
+    if (!threadId) return;
+    const thread = useCodexStore
+      .getState()
+      .threads.find((item) => item.id === threadId);
+    try {
+      setOwnerForm(
+        captureConversationForm(kind, {
+          threadId,
+          cwd,
+          title: thread?.name || thread?.preview || title,
+          draftOwner: draftOwner ?? sessionDraftKey("codex", threadId),
+        }),
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+    }
+  };
+  const trigger = (
       <DropdownMenuTrigger asChild>
         {variant === "item" ? (
           <Button
@@ -304,7 +378,25 @@ export function ConversationMenu({
           </Button>
         )}
       </DropdownMenuTrigger>
+  );
+  return (
+    <SelectedActionContext.Provider value={onActionSelected}>
+      <DropdownMenu
+        open={menuOpen}
+        onOpenChange={(next) => {
+          setMenuOpen(next);
+          if (next)
+            menuCardId.current =
+              useAgentCenterStore.getState().currentAgentCardId;
+        }}
+      >
+        {triggerContainer === undefined
+          ? trigger
+          : triggerContainer
+            ? createPortal(trigger, triggerContainer)
+            : null}
       <DropdownMenuContent
+          data-composer-parent-menu={parentMenuId}
         className="session-composer-menu"
         align="end"
         side="top"
@@ -322,7 +414,7 @@ export function ConversationMenu({
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!cwd}
-          onSelect={() => setFileSearch(true)}
+            onSelect={() => openOwnerForm("fileSearch")}
         >
           <Search size={16} />
           搜索文件
@@ -335,13 +427,13 @@ export function ConversationMenu({
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!threadId || busy}
-          onSelect={() => setArchiveOpen(true)}
+            onSelect={() => openOwnerForm("archive")}
         >
           归档聊天
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!threadId || busy}
-          onSelect={() => setDeleteOpen(true)}
+            onSelect={() => openOwnerForm("delete")}
         >
           删除聊天
         </DropdownMenuItem>
@@ -375,7 +467,8 @@ export function ConversationMenu({
           onSelect={() => {
             const layout = useLayoutStore.getState();
             const visible =
-              layout.isRightPanelOpen && layout.activeRightPanelTab === "diff";
+                layout.isRightPanelOpen &&
+                layout.activeRightPanelTab === "diff";
             const previousOpen = layout.isRightPanelOpen;
             const previousTab = layout.activeRightPanelTab;
             if (visible) layout.setRightPanelOpen(false);
@@ -415,7 +508,7 @@ export function ConversationMenu({
             const created = layout.terminals.length === 0;
             if (created) layout.addTerminal();
             const createdTab = created
-              ? useLayoutStore.getState().terminals.at(-1) ?? null
+                ? (useLayoutStore.getState().terminals.at(-1) ?? null)
               : null;
             layout.setActiveRightPanelTab("terminal");
             layout.setRightPanelOpen(true);
@@ -513,13 +606,15 @@ export function ConversationMenu({
         </DropdownMenuItem>
         <DropdownMenuItem
           disabled={!threadId}
-          onSelect={() => setNotesOpen(true)}
+            onSelect={() => openOwnerForm("notes")}
         >
           会议：记笔记
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => {
-            const composer = document.querySelector(".session-codex-composer");
+              const composer = document.querySelector(
+                ".session-codex-composer",
+              );
             if (!composer) {
               toast.message("当前输入不能添加照片");
               return;
@@ -532,11 +627,22 @@ export function ConversationMenu({
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => {
-            const composer = Array.from(document.querySelectorAll<HTMLElement>(".session-codex-composer"))
-              .find(element => !element.closest("[hidden]") && (threadId
+              const composer = Array.from(
+                document.querySelectorAll<HTMLElement>(
+                  ".session-codex-composer",
+                ),
+              ).find(
+                (element) =>
+                  !element.closest("[hidden]") &&
+                  (threadId
                 ? element.dataset.ownerThread === threadId
-                : Boolean(draftOwner) && !element.dataset.ownerThread && element.dataset.draftOwner === draftOwner));
-            const button = composer?.querySelector<HTMLButtonElement>('button[aria-label="发送消息"]');
+                    : Boolean(draftOwner) &&
+                      !element.dataset.ownerThread &&
+                      element.dataset.draftOwner === draftOwner),
+              );
+              const button = composer?.querySelector<HTMLButtonElement>(
+                'button[aria-label="发送消息"]',
+              );
             if (!button || button.disabled) {
               toast.message("当前输入没有可发送的消息");
               return;
@@ -554,11 +660,19 @@ export function ConversationMenu({
               ?.textContent?.trim();
             const models = useModelCacheStore.getState().openAiModels;
             const catalog =
-              models.find((item) => item.id === model || item.model === model) ??
               models.find(
-                (item) => item.displayName === shown || item.model === shown || item.id === shown,
+                  (item) => item.id === model || item.model === model,
+                ) ??
+                models.find(
+                  (item) =>
+                    item.displayName === shown ||
+                    item.model === shown ||
+                    item.id === shown,
               );
-            const next = cycleServiceTier(catalog?.serviceTiers ?? [], serviceTier);
+              const next = cycleServiceTier(
+                catalog?.serviceTiers ?? [],
+                serviceTier,
+              );
             if (!next) {
               toast.message("当前模型没有可切换的速度");
               return;
@@ -574,7 +688,9 @@ export function ConversationMenu({
           onSelect={() => {
             const next = collaborationMode === "plan" ? "default" : "plan";
             setCollaborationMode(next);
-            toast.message(next === "plan" ? "已开启规划模式" : "已关闭规划模式");
+              toast.message(
+                next === "plan" ? "已开启规划模式" : "已关闭规划模式",
+              );
           }}
         >
           切换规划模式
@@ -624,7 +740,7 @@ export function ConversationMenu({
               toast.message("当前聊天没有工作目录");
               return;
             }
-            setCommitOpen(true);
+              openOwnerForm("commitOptions");
           }}
         >
           提交或推送
@@ -635,7 +751,7 @@ export function ConversationMenu({
               toast.message("当前聊天没有工作目录");
               return;
             }
-            setPullRequest({ draft: false });
+              openOwnerForm("pullRequest");
           }}
         >
           创建 PR
@@ -646,7 +762,7 @@ export function ConversationMenu({
               toast.message("当前聊天没有工作目录");
               return;
             }
-            setPullRequest({ draft: true });
+              openOwnerForm("draftPullRequest");
           }}
         >
           创建草稿 PR
@@ -657,7 +773,7 @@ export function ConversationMenu({
               toast.message("当前聊天没有工作目录");
               return;
             }
-            setBranchOpen(true);
+              openOwnerForm("branch");
           }}
         >
           创建分支
@@ -668,7 +784,7 @@ export function ConversationMenu({
               toast.message("当前聊天没有工作目录");
               return;
             }
-            setMergeOpen(true);
+              openOwnerForm("merge");
           }}
         >
           合并 PR
@@ -679,7 +795,7 @@ export function ConversationMenu({
               toast.message("当前聊天没有工作目录");
               return;
             }
-            setOpenPullRequest(true);
+              openOwnerForm("openPullRequest");
           }}
         >
           在 GitHub 上打开 PR
@@ -696,7 +812,9 @@ export function ConversationMenu({
             const layout = useLayoutStore.getState();
             layout.setRightPanelOpen(true);
             layout.setActiveRightPanelTab("files");
-            toast.message(next ? "已显示 Git 追溯信息" : "已隐藏 Git 追溯信息");
+              toast.message(
+                next ? "已显示 Git 追溯信息" : "已隐藏 Git 追溯信息",
+              );
           }}
         >
           切换 Git 追溯信息
@@ -722,7 +840,9 @@ export function ConversationMenu({
               toast.message("没有可重新打开的标签页");
               return;
             }
-            useAgentCenterStore.getState().addAgentCard(card, { activate: true });
+              useAgentCenterStore
+                .getState()
+                .addAgentCard(card, { activate: true });
             void sessionTabSelect(card);
             bumpHistory();
             toast.message("已重新打开标签页");
@@ -771,7 +891,8 @@ export function ConversationMenu({
         <DropdownMenuItem
           disabled={!threadId}
           onSelect={() =>
-            threadId && threadWorkflowActions.request(threadId, "copyMarkdown")
+              threadId &&
+              threadWorkflowActions.request(threadId, "copyMarkdown")
           }
         >
           复制为 Markdown
@@ -779,7 +900,8 @@ export function ConversationMenu({
         <DropdownMenuItem
           disabled={!threadId}
           onSelect={() =>
-            threadId && threadWorkflowActions.request(threadId, "copyDeeplink")
+              threadId &&
+              threadWorkflowActions.request(threadId, "copyDeeplink")
           }
         >
           复制深层链接
@@ -795,7 +917,12 @@ export function ConversationMenu({
               toast.message("当前聊天没有代码块");
               return;
             }
-            copyConversationText(text, copyScope, "已复制最后一个代码块", "未能复制代码块");
+              copyConversationText(
+                text,
+                copyScope,
+                "已复制最后一个代码块",
+                "未能复制代码块",
+              );
           }}
         >
           复制最后一个代码块
@@ -811,7 +938,12 @@ export function ConversationMenu({
               toast.message("当前聊天没有工作目录");
               return;
             }
-            copyConversationText(cwd, copyScope, "已复制工作目录", "未能复制工作目录");
+              copyConversationText(
+                cwd,
+                copyScope,
+                "已复制工作目录",
+                "未能复制工作目录",
+              );
           }}
         >
           复制工作目录
@@ -823,7 +955,9 @@ export function ConversationMenu({
             const marked = useSessionAttentionStore
               .getState()
               .markUnread("codex", threadId);
-            toast.message(marked ? "已标记为未读" : "当前聊天没有可标记的回复");
+              toast.message(
+                marked ? "已标记为未读" : "当前聊天没有可标记的回复",
+              );
           }}
         >
           标记为未读
@@ -856,7 +990,12 @@ export function ConversationMenu({
               toast.message("当前聊天没有磁盘路径");
               return;
             }
-            copyConversationText(path, copyScope, "已复制对话路径", "未能复制对话路径");
+              copyConversationText(
+                path,
+                copyScope,
+                "已复制对话路径",
+                "未能复制对话路径",
+              );
           }}
         >
           复制对话路径
@@ -892,11 +1031,15 @@ export function ConversationMenu({
               .threadFork(threadId)
               .then((forked) => {
                 const title = "分叉聊天";
-                useSessionNameStore.getState().setName("codex", forked.id, title);
+                  useSessionNameStore
+                    .getState()
+                    .setName("codex", forked.id, title);
                 useCodexStore.setState((state) => ({
                   threads: [
                     { ...forked, name: title, preview: title },
-                    ...state.threads.filter((thread) => thread.id !== forked.id),
+                      ...state.threads.filter(
+                        (thread) => thread.id !== forked.id,
+                      ),
                   ],
                 }));
                 const center = useAgentCenterStore.getState();
@@ -935,7 +1078,8 @@ export function ConversationMenu({
             const layout = useLayoutStore.getState();
             const next = !layout.isSidebarOpen;
             layout.setSidebarOpen(next);
-            if (next) window.dispatchEvent(new Event("session-open-projects"));
+              if (next)
+                window.dispatchEvent(new Event("session-open-projects"));
             toast.message(next ? "已开启活动视图" : "已关闭活动视图");
           }}
         >
@@ -944,14 +1088,18 @@ export function ConversationMenu({
         <DropdownMenuItem
           onSelect={() => {
             const trigger = document.activeElement;
-            const focusMain = () => useCodexStore.getState().triggerInputFocus();
+              const focusMain = () =>
+                useCodexStore.getState().triggerInputFocus();
             if (trigger instanceof HTMLElement) {
               const observer = new MutationObserver(() => {
                 if (document.activeElement !== trigger) return;
                 observer.disconnect();
                 focusMain();
               });
-              observer.observe(trigger, { attributes: true, attributeFilter: ["data-state"] });
+                observer.observe(trigger, {
+                  attributes: true,
+                  attributeFilter: ["data-state"],
+                });
               window.setTimeout(() => {
                 observer.disconnect();
                 focusMain();
@@ -970,7 +1118,8 @@ export function ConversationMenu({
               return;
             }
             const trigger = document.activeElement;
-            const focusSide = () => useSideChatStore.getState().requestFocus();
+              const focusSide = () =>
+                useSideChatStore.getState().requestFocus();
             if (trigger instanceof HTMLElement) {
               const observer = new MutationObserver(() => {
                 if (document.activeElement !== trigger) return;
@@ -1104,7 +1253,12 @@ export function ConversationMenu({
         <DropdownMenuItem
           onSelect={() => {
             const link = window.location.href;
-            copyConversationText(link, copyScope, "已复制页面链接", "未能复制页面链接");
+              copyConversationText(
+                link,
+                copyScope,
+                "已复制页面链接",
+                "未能复制页面链接",
+              );
           }}
         >
           复制页面链接
@@ -1119,7 +1273,10 @@ export function ConversationMenu({
               const control = document.querySelector(
                 ".session-composer-sheet.is-full .session-rich-tools button",
               );
-              if (!(editor instanceof HTMLElement) || !(control instanceof HTMLElement)) {
+                if (
+                  !(editor instanceof HTMLElement) ||
+                  !(control instanceof HTMLElement)
+                ) {
                 toast.message("当前没有打开的页面编辑器");
                 return;
               }
@@ -1182,13 +1339,16 @@ export function ConversationMenu({
         <DropdownMenuItem
           onSelect={() => {
             window.setTimeout(() => {
-              const currentId = useAgentCenterStore.getState().currentAgentCardId;
+                const currentId =
+                  useAgentCenterStore.getState().currentAgentCardId;
               const card = adjacentFollowedCard(-1, currentId);
               if (!card) {
                 toast.message("没有上一个聊天");
                 return;
               }
-              useAgentCenterStore.getState().setCurrentAgentCardId(card.id, card.kind);
+                useAgentCenterStore
+                  .getState()
+                  .setCurrentAgentCardId(card.id, card.kind);
               void sessionTabSelect(card);
               toast.message("已切换到上一个聊天");
             }, 50);
@@ -1199,13 +1359,16 @@ export function ConversationMenu({
         <DropdownMenuItem
           onSelect={() => {
             window.setTimeout(() => {
-              const currentId = useAgentCenterStore.getState().currentAgentCardId;
+                const currentId =
+                  useAgentCenterStore.getState().currentAgentCardId;
               const card = adjacentFollowedCard(1, currentId);
               if (!card) {
                 toast.message("没有下一个聊天");
                 return;
               }
-              useAgentCenterStore.getState().setCurrentAgentCardId(card.id, card.kind);
+                useAgentCenterStore
+                  .getState()
+                  .setCurrentAgentCardId(card.id, card.kind);
               void sessionTabSelect(card);
               toast.message("已切换到下一个聊天");
             }, 50);
@@ -1221,7 +1384,9 @@ export function ConversationMenu({
                 toast.message("没有最近查看的聊天");
                 return;
               }
-              useAgentCenterStore.getState().setCurrentAgentCardId(card.id, card.kind);
+                useAgentCenterStore
+                  .getState()
+                  .setCurrentAgentCardId(card.id, card.kind);
               void sessionTabSelect(card);
               toast.message("已切换到下一个最近查看的聊天");
             }, 50);
@@ -1358,7 +1523,9 @@ export function ConversationMenu({
               .getState()
               .cards.filter((card) => card.kind === "codex")
               .map((card) => card.id);
-            const cleared = useSessionAttentionStore.getState().markFollowedRead(ids);
+              const cleared = useSessionAttentionStore
+                .getState()
+                .markFollowedRead(ids);
             toast.message(
               cleared > 0 ? "已全部标为已读" : "当前没有未读的关注聊天",
             );
@@ -1408,7 +1575,9 @@ export function ConversationMenu({
         <DropdownMenuItem
           onSelect={() => {
             const layout = useLayoutStore.getState();
-            const open = layout.isRightPanelOpen && layout.activeRightPanelTab === "files";
+              const open =
+                layout.isRightPanelOpen &&
+                layout.activeRightPanelTab === "files";
             if (open) layout.setRightPanelOpen(false);
             else {
               layout.setActiveRightPanelTab("files");
@@ -1422,7 +1591,9 @@ export function ConversationMenu({
         <DropdownMenuItem
           onSelect={() => {
             const layout = useLayoutStore.getState();
-            const open = layout.isRightPanelOpen && layout.activeRightPanelTab === "terminal";
+              const open =
+                layout.isRightPanelOpen &&
+                layout.activeRightPanelTab === "terminal";
             if (open) layout.setRightPanelOpen(false);
             else {
               layout.setActiveRightPanelTab("terminal");
@@ -1539,9 +1710,20 @@ export function ConversationMenu({
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => {
-            window.dispatchEvent(new CustomEvent("codex-open-feedback", {
-              detail: { threadId, draftOwner: draftOwner ?? sessionDraftKey("codex", threadId, useWorkspaceStore.getState().cwd) },
-            }));
+              window.dispatchEvent(
+                new CustomEvent("codex-open-feedback", {
+                  detail: {
+                    threadId,
+                    draftOwner:
+                      draftOwner ??
+                      sessionDraftKey(
+                        "codex",
+                        threadId,
+                        useWorkspaceStore.getState().cwd,
+                      ),
+                  },
+                }),
+              );
           }}
         >
           反馈
@@ -1561,7 +1743,10 @@ export function ConversationMenu({
                   acquiring: "正在恢复执行实例",
                   unknown: "执行状态尚未确认",
                 }[access.state];
-                toast.message(label, access.reason ? { description: access.reason } : undefined);
+                  toast.message(
+                    label,
+                    access.reason ? { description: access.reason } : undefined,
+                  );
               })
               .catch((error) => toast.error(String(error)))
               .finally(() => setBusy(false));
@@ -1580,7 +1765,10 @@ export function ConversationMenu({
                   access.state === "readonly"
                     ? "本项目已释放执行权"
                     : access.reason || "正在检查释放条件",
-                  { description: "仅释放当前会话；已有子 Agent 仍由原运行实例控制。" },
+                    {
+                      description:
+                        "仅释放当前会话；已有子 Agent 仍由原运行实例控制。",
+                    },
                 );
                 window.dispatchEvent(new Event("codex-access-changed"));
               })
@@ -1592,176 +1780,27 @@ export function ConversationMenu({
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-    {fileSearch && cwd && (
-      <FileSearchSheet cwd={cwd} onClose={() => setFileSearch(false)} />
-    )}
     {shortcutsOpen && (
       <KeyboardShortcutsSheet onClose={() => setShortcutsOpen(false)} />
     )}
-    {commitOpen && cwd && (
-      <ComposerSheet
-        title="提交或推送"
-        description="打开提交或推送选项"
-        onClose={() => setCommitOpen(false)}
-      >
-        <p>选择提交已暂存的更改，或把当前分支推送到远程仓库。</p>
-        <button
-          type="button"
-          onClick={() => {
-            setCommitOpen(false);
-            setCommitForm(true);
-          }}
-        >
-          提交更改
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            const root = cwd;
-            setCommitOpen(false);
-            void gitPush(root)
-              .then(() => toast.message("已推送到远程仓库"))
-              .catch((error: unknown) => toast.error(String(error)));
-          }}
-        >
-          推送到远程仓库
-        </button>
-      </ComposerSheet>
+      {searchChats && (
+        <SearchChatsSheet onClose={() => setSearchChats(false)} />
     )}
-    {pullRequest && cwd && (
-      <PullRequestSheet
-        cwd={cwd}
-        draft={pullRequest.draft}
-        onClose={() => setPullRequest(null)}
+      {ownerForm && (
+        <ConversationOwnerForms
+          form={ownerForm}
+          onClose={() =>
+            setOwnerForm((current) =>
+              current?.target.id === ownerForm.target.id ? null : current,
+            )
+          }
+          onChange={(next) =>
+            setOwnerForm((current) =>
+              current?.target.id === ownerForm.target.id ? next : current,
+            )
+          }
       />
     )}
-    {searchChats && <SearchChatsSheet onClose={() => setSearchChats(false)} />}
-    {branchOpen && cwd && (
-      <CreateBranchSheet cwd={cwd} onClose={() => setBranchOpen(false)} />
-    )}
-    {mergeOpen && cwd && (
-      <MergePullRequestSheet cwd={cwd} onClose={() => setMergeOpen(false)} />
-    )}
-    {openPullRequest && cwd && (
-      <OpenPullRequestSheet
-        cwd={cwd}
-        onClose={() => setOpenPullRequest(false)}
-      />
-    )}
-    <GitCommitDialog
-      isOpen={commitForm}
-      onClose={() => setCommitForm(false)}
-      onConfirm={async (message) => {
-        if (!cwd) return;
-        await gitCommit(cwd, message);
-        toast.message(`已提交：${message}`);
-      }}
-    />
-    {archiveOpen && threadId && (
-      <ComposerSheet
-        title="归档聊天"
-        description="归档当前聊天"
-        onClose={() => setArchiveOpen(false)}
-      >
-        <p>将归档当前聊天，并从关注列表移出。Agent 不会被停止。</p>
-        <button type="button" disabled={busy} onClick={() => setArchiveOpen(false)}>
-          返回
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            const id = threadId;
-            setBusy(true);
-            void archiveThread(id)
-              .then(() => {
-                useAgentCenterStore.getState().removeCard({ kind: "codex", id });
-                useCodexStore.setState((state) => ({
-                  threads: state.threads.filter((thread) => thread.id !== id),
-                }));
-                toast.message("已归档聊天");
-                setArchiveOpen(false);
-              })
-              .catch((error: unknown) => toast.error(String(error)))
-              .finally(() => setBusy(false));
-          }}
-        >
-          确认归档
-        </button>
-      </ComposerSheet>
-    )}
-    {notesOpen && threadId && (
-      <ComposerSheet
-        title="会议：记笔记"
-        description="在此设备上使用 Meetings 开始记笔记"
-        onClose={() => setNotesOpen(false)}
-      >
-        <p>本机没有 Codex Meetings。笔记会追加到当前输入，不会自动开始会议。</p>
-        <textarea
-          aria-label="会议笔记"
-          value={notes}
-          onChange={(event) => setNotes(event.target.value)}
-        />
-        <button type="button" onClick={() => setNotesOpen(false)}>
-          取消
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            const text = notes.trim();
-            if (!text) {
-              toast.message("先写下会议笔记");
-              return;
-            }
-            const owner = sessionDraftKey("codex", threadId);
-            const current = useSessionDraftStore.getState().drafts[owner]?.text ?? "";
-            useSessionDraftStore
-              .getState()
-              .setText(owner, current ? `${current}\n${text}` : text);
-            setNotes("");
-            setNotesOpen(false);
-            toast.message("已记入当前输入");
-          }}
-        >
-          记入当前输入
-        </button>
-      </ComposerSheet>
-    )}
-    {deleteOpen && threadId && (
-      <ComposerSheet
-        title="要删除任务？"
-        description="确认是否要删除当前聊天"
-        onClose={() => setDeleteOpen(false)}
-      >
-        <p>这将永久删除该任务及其子智能体任务。此操作无法撤销。</p>
-        <button type="button" disabled={busy} onClick={() => setDeleteOpen(false)}>
-          取消
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            const id = threadId;
-            setBusy(true);
-            void deleteThread(id)
-              .then(async () => {
-                useAgentCenterStore.getState().removeCard({ kind: "codex", id });
-                useCodexStore.setState((state) => ({
-                  threads: state.threads.filter((thread) => thread.id !== id),
-                }));
-                if (useCodexStore.getState().currentThreadId === id)
-                  await codexService.setCurrentThread(null);
-                toast.message("任务已删除");
-                setDeleteOpen(false);
-              })
-              .catch(() => toast.error("无法删除任务。请重试。"))
-              .finally(() => setBusy(false));
-          }}
-        >
-          删除
-        </button>
-      </ComposerSheet>
-    )}
-    </>
+    </SelectedActionContext.Provider>
   );
 }

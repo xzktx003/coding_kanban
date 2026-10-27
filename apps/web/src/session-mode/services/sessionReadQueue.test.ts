@@ -2,6 +2,29 @@ import { afterEach, expect, it, vi } from "vitest";
 import { enqueueSessionRead, readWithDeadline } from "./sessionReadQueue";
 
 afterEach(() => vi.useRealTimers());
+it("reserves one receipt slot while preserving the six-read total budget", async () => {
+  const started = { recent: 0, history: 0, status: 0 };
+  const releases: Array<() => void> = [];
+  let finishing = false;
+  const jobs = (["recent", "history", "status"] as const).flatMap((lane) =>
+    Array.from({ length: 5 }, (_, index) =>
+      enqueueSessionRead(lane, `budget:${lane}:${index}`, () => {
+        started[lane]++;
+        return finishing
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => releases.push(resolve));
+      }),
+    ),
+  );
+  try {
+    expect(started).toEqual({ recent: 3, history: 2, status: 1 });
+    expect(releases).toHaveLength(6);
+  } finally {
+    finishing = true;
+    releases.forEach((release) => release());
+    await Promise.all(jobs);
+  }
+});
 it("slow complete histories cannot occupy recent-message workers", async () => {
   const release: Array<() => void> = [];
   const slow = ["a", "b"].map((key) =>

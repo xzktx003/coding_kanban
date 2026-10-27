@@ -149,6 +149,28 @@ it("keeps the selected history loading after command acknowledgement and rejects
   act(() => report?.(threadId, { ...state, conversationId: threadId }));
   expect(screen.queryByText("正在加载原生 Codex…")).toBeNull();
   expect(screen.getByText("当前会话可输入")).toBeTruthy();
+  act(() =>
+    report?.(threadId, {
+      ...state,
+      conversationId: threadId,
+      hasComposer: false,
+    }),
+  );
+  expect(screen.queryByText("请在原生界面中完成官方引导")).toBeNull();
+  act(() =>
+    report?.(threadId, {
+      ...state,
+      ready: false,
+      hasComposer: false,
+      startupError: "renderer-timeout",
+    }),
+  );
+  expect(
+    screen.getByText(
+      "原生 Codex 界面启动超时，请重试打开；若持续失败，请检查宿主状态",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText("请在原生界面中完成官方引导")).toBeNull();
 });
 async function markVisibleHostReady() {
   const frame = (await screen.findByTitle(
@@ -566,6 +588,7 @@ it("waits for the selected native editor group before enabling its input", async
           composerEmpty: boolean;
           userInteracted: boolean;
           blockedByOtherApp?: boolean;
+          onboarding?: boolean;
         },
       ) => void)
     | undefined;
@@ -596,6 +619,7 @@ it("waits for the selected native editor group before enabling its input", async
       composerEmpty: false,
       userInteracted: false,
       blockedByOtherApp: false,
+      onboarding: true,
     }),
   );
   await waitFor(() =>
@@ -653,6 +677,7 @@ it("waits for the selected native editor group before enabling its input", async
       composerEmpty: true,
       userInteracted: false,
       blockedByOtherApp: false,
+      onboarding: true,
     }),
   );
   expect(screen.queryByText("已就绪")).toBeNull();
@@ -1054,7 +1079,7 @@ it("returns a native card to loading when its webview loses rendered content", a
       userInteracted: false,
     }),
   );
-  expect(screen.getByText("请在原生界面中完成官方引导")).toBeTruthy();
+  expect(screen.queryByText("请在原生界面中完成官方引导")).toBeNull();
   expect(screen.queryByText("正在加载原生 Codex…")).toBeNull();
   act(() =>
     report?.(`new:${firstWindowId}`, {

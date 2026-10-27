@@ -1,4 +1,4 @@
-import { v4 as randomUUID } from "uuid";
+import { newSessionEditId } from "@session/services/sessionEditIdentity";
 import { useState } from "react";
 import { FileText, Image, Quote, X, Pencil, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
@@ -35,7 +35,7 @@ export async function addFileContexts(owner: string, paths: string[]) {
     if (text.length > 180_000)
       throw new Error("文件过长，请在文件编辑器中选择需要的片段后引用");
     composerDrafts.add(owner, {
-      id: randomUUID(),
+      id: newSessionEditId(),
       kind: "file",
       name: path.split("/").pop() ?? path,
       path,
@@ -137,7 +137,7 @@ export function ContextAttachments({
             onClick={() => {
               const next = {
                 ...c,
-                id: randomUUID(),
+                id: newSessionEditId(),
                 text: changed[c.id],
               };
               composerDrafts.replace(owner, c.id, next);

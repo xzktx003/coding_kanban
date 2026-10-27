@@ -8,6 +8,10 @@ import {
 import { afterEach, expect, it, vi } from "vitest";
 import * as surface from "./native-surface";
 import { CODEX_MULTIWINDOW_KEY } from "./codex-multiwindow-state";
+import {
+  probeVsCodeWebServiceWorker,
+  type VsCodeServiceWorkerProbeResult,
+} from "../lib/vscode-service-worker";
 vi.mock("../lib/vscode-service-worker", () => ({
   probeVsCodeWebServiceWorker: vi.fn(async () => ({ state: "ready" })),
 }));
@@ -27,6 +31,50 @@ afterEach(() => {
   localStorage.clear();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+});
+it("starts the service-worker preflight while native status is still pending", async () => {
+  const probe = vi.mocked(probeVsCodeWebServiceWorker);
+  probe.mockClear();
+  let finishProbe:
+    | ((value: VsCodeServiceWorkerProbeResult) => void)
+    | undefined;
+  probe.mockImplementationOnce(
+    () =>
+      new Promise<VsCodeServiceWorkerProbeResult>((resolve) => {
+        finishProbe = resolve;
+      }),
+  );
+  let finishStatus: ((value: Response) => void) | undefined;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((path: RequestInfo | URL) => {
+      if (path === "/api/native-codex/status")
+        return new Promise<Response>((resolve) => {
+          finishStatus = resolve;
+        });
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ projects: [] }),
+      } as Response);
+    }),
+  );
+  render(<CodexWorkbench active onModeChange={vi.fn()} />);
+  await waitFor(() => expect(finishStatus).toBeTypeOf("function"));
+  expect(probe).toHaveBeenCalledTimes(1);
+  expect(screen.queryByTitle("原生 Codex 会话窗口")).toBeNull();
+  await act(async () =>
+    finishStatus?.({
+      ok: true,
+      json: async () => ({
+        available: true,
+        iframeUrl: "/native-codex/",
+        newChatWindowIds: [startup],
+      }),
+    } as Response),
+  );
+  expect(screen.queryByTitle("原生 Codex 会话窗口")).toBeNull();
+  await act(async () => finishProbe?.({ state: "ready" }));
+  await screen.findByTitle("原生 Codex 会话窗口");
 });
 async function mount() {
   const ids = [`new:${startup}`, `new:${second}`];
@@ -118,6 +166,43 @@ it("keeps native pointer input closed until the exact host focus acknowledgement
   const f = await mount();
   expect(f.layout.mock.lastCall?.[0].interactiveId).toBeNull();
   await f.resolve(0);
+  await waitFor(() =>
+    expect(f.layout.mock.lastCall?.[0].interactiveId).toBe(f.ids[0]),
+  );
+});
+it("does not lock or refocus an already selected healthy native window", async () => {
+  const f = await mount();
+  await f.resolve(0);
+  await waitFor(() =>
+    expect(f.layout.mock.lastCall?.[0].interactiveId).toBe(f.ids[0]),
+  );
+  fireEvent.click(screen.getByRole("tab", { name: "First native chat" }));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(f.requests.length).toBe(1);
+  expect(f.layout.mock.lastCall?.[0].interactiveId).toBe(f.ids[0]);
+});
+it("does not queue duplicate focus while the selected native window is waiting", async () => {
+  const f = await mount();
+  fireEvent.click(screen.getByRole("tab", { name: "First native chat" }));
+  fireEvent.click(screen.getByRole("tab", { name: "First native chat" }));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(f.requests.length).toBe(1);
+  await f.resolve(0);
+  await waitFor(() =>
+    expect(f.layout.mock.lastCall?.[0].interactiveId).toBe(f.ids[0]),
+  );
+});
+it("allows the selected tab to retry after an exact native focus rejection", async () => {
+  const f = await mount();
+  await f.resolve(0, false);
+  await screen.findByText("原生 Codex 没有确认输入窗口");
+  fireEvent.click(screen.getByRole("tab", { name: "First native chat" }));
+  await waitFor(() => expect(f.requests.length).toBe(2));
+  await f.resolve(1);
   await waitFor(() =>
     expect(f.layout.mock.lastCall?.[0].interactiveId).toBe(f.ids[0]),
   );

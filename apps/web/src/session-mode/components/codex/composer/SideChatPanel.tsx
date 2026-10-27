@@ -1,9 +1,9 @@
-import { v4 as randomUUID } from "uuid";
+import { newSessionEditId } from "@session/services/sessionEditIdentity";
 import { composeContextText } from "@agent-orchestrator/shared";
 import {
   composerDrafts,
   useComposerDraft,
-  useComposerDraftStore,
+  useComposerDraftStatus,
 } from "./v2/drafts";
 import { ContextAttachments } from "./v2/ContextAttachments";
 import { DrawingEditor } from "./v2/DrawingEditor";
@@ -37,7 +37,6 @@ import { ModelChangeNotice } from "./ModelChangeNotice";
 import { ComposerSheet } from "./v2/ComposerSheet";
 import { useFollowups } from "@session/hooks/useFollowups";
 import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
-import { useThreadModelStore } from "@session/stores/useThreadModelStore";
 import { ModelReasonSelector } from "./ModelReasonSelector";
 import { AccessModePopover } from "./AccessModePopover";
 import { PlanSidePanel } from "@session/features/thread-workflows/PlanSidePanel";
@@ -55,10 +54,11 @@ function SideChat({
     draft = useImageAttachments(owner),
     initialized = useRef(false);
   const contextDraft = useComposerDraft(owner);
-  const storageError = useComposerDraftStore((s) => s.error);
+  const contextStatus = useComposerDraftStatus(owner);
+  const storageError = contextStatus.error;
+  const contextBusy = contextStatus.phase === "hydrating" || contextStatus.phase === "saving";
   const queueSnapshot = useFollowups(id);
   const model = useThreadModelSettings(id);
-  const notice = useThreadModelStore((s) => s.threads[id]?.notice);
   const queued = queueSnapshot.state.items.filter(
     (m) => m.status !== "sent" && m.status !== "cancelled",
   );
@@ -112,10 +112,12 @@ function SideChat({
       threadInput.blocked ||
       draft.blocked ||
       !!storageError ||
+      contextBusy ||
       !hasContent
     )
       return;
-    const contexts = contextDraft.contexts;
+    const capturedContexts = composerDrafts.capture(owner);
+    const contexts = capturedContexts.contexts;
     if (composeContextText(inputValue, contexts).length > 200_000) {
       toast.error("正文与上下文合计不能超过 200,000 字符");
       return;
@@ -125,6 +127,10 @@ function SideChat({
     busy.current = true;
     setSending(true);
     try {
+      await composerDrafts.flush(owner);
+      const currentDraft = readDraft(owner);
+      if (currentDraft.revision !== snapshot.revision || currentDraft.writeId !== snapshot.writeId || currentDraft.text !== snapshot.text || !composerDrafts.matches(owner,capturedContexts))
+        throw new Error("草稿在保存期间已变化，请核对后再发送");
       const mode = running
         ? opposite
           ? settings.mode === "queue"
@@ -135,7 +141,12 @@ function SideChat({
       if (mode === "steer" && !turnId) throw new Error("正在同步当前任务");
       await followupService.submit(
         owner,
-        snapshot.revision,
+        {
+          revision: snapshot.revision,
+          writeId: snapshot.writeId,
+          attachmentIds: ids,
+          contextIds: contexts.map((context) => context.id),
+        },
         id,
         inputValue.trim(),
         draft.paths,
@@ -146,7 +157,7 @@ function SideChat({
       );
       useSessionDraftStore.getState().clearSubmitted(owner, snapshot);
       draft.clear(ids);
-      composerDrafts.clearSubmitted(owner, contexts);
+      composerDrafts.clearSubmitted(owner, contexts, capturedContexts.versions);
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -211,7 +222,7 @@ function SideChat({
             e.preventDefault();
             e.stopPropagation();
             composerDrafts.add(owner, {
-              id: randomUUID(),
+              id: newSessionEditId(),
               kind: "paste",
               name: "粘贴的文本",
               text,
@@ -314,6 +325,8 @@ function SideChat({
                     ? threadInput.reason
                     : storageError
                       ? "上下文保存失败，打开状态面板重试"
+                      : contextBusy
+                        ? contextStatus.phase === "hydrating" ? "正在恢复上下文草稿…" : "正在保存上下文草稿…"
                       : draft.storageError
                         ? "附件草稿保存失败，打开状态面板重试"
                         : draft.attachments.some((a) => a.status === "error")
@@ -322,8 +335,6 @@ function SideChat({
                             ? "正在上传图片…"
                             : queued.length || queueSnapshot.state.paused
                               ? `待发送 ${queued.length} 条${queueSnapshot.state.paused ? " · 已暂停" : ""}`
-                              : notice && !notice.dismissed
-                                ? `模型已从 ${notice.from} 更改为 ${notice.to}。`
                                 : running
                                   ? "运行中"
                                   : ""}
@@ -385,6 +396,7 @@ function SideChat({
                     threadInput.blocked ||
                     draft.blocked ||
                     !!storageError ||
+      contextBusy ||
                     !hasContent
                   }
                 >
@@ -444,7 +456,7 @@ function SideChat({
           {storageError && (
             <p role="alert">
               {storageError}
-              <button type="button" onClick={composerDrafts.retryStorage}>
+              <button type="button" onClick={() => void composerDrafts.retryStorage().catch((error) => toast.error(String(error)))}>
                 重试保存上下文
               </button>
             </p>

@@ -1,3 +1,4 @@
+import { newSessionEditId } from "@session/services/sessionEditIdentity";
 import { create } from "zustand";
 import { v4 as uuid } from "uuid";
 import type {
@@ -89,7 +90,7 @@ export function addBrowserEditorContext(
 ) {
   const context = validateContext(owner, value);
   composerDrafts.add(owner.draftOwner, {
-    id: uuid(),
+    id: newSessionEditId(),
     kind: "file",
     name: context.path.split("/").pop() ?? context.path,
     path: context.path,

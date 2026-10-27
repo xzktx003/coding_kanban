@@ -1,5 +1,10 @@
-import { v4 as randomUUID } from "uuid";
-import { hash as sha256 } from "fast-sha256";
+import { threadPermissionParameters } from "./threadPermissionProjection";
+import {
+  stableSubmissionId,
+  canonicalSubmissionData,
+  type SubmissionEdit,
+} from "./sessionSubmissionIdentity";
+export { stableSubmissionId } from "./sessionSubmissionIdentity";
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { enqueueSessionRead, readWithDeadline } from "./sessionReadQueue";
 import { create } from "zustand";
@@ -21,12 +26,18 @@ import type {
 import { useCodexStore } from "../components/codex/stores";
 import { assertCodexSendAccess } from "../stores/useCodexAccessStore";
 import { MutationNotStartedError } from "./MutationNotStartedError";
+import { captureCodexOperationScope, isCodexOperationScopeCurrent } from "./codexOperationScope";
 import {
   assertCodexThreadInput,
   codexThreadInputState,
 } from "@session/features/subagents/inputIdentity";
 import { subagentService } from "@session/features/subagents/service";
-import { getThreadModelSettings } from "../stores/useThreadModelStore";
+import {
+  getThreadModelSettings,
+  captureThreadModelSelection,
+  assertThreadModelSelectionCurrent,
+  flushThreadModelSettings,
+} from "../stores/useThreadModelStore";
 import {
   getJsonWithOptions,
   postJsonWithOptions,
@@ -101,8 +112,11 @@ function accept(id: string, data: FollowupThread) {
   });
   return data;
 }
-export function followupParameters(threadId: string): Record<string, unknown> {
-  const c = getThreadModelSettings(threadId || null),
+export function followupParameters(
+  threadId: string,
+  settings = getThreadModelSettings(threadId || null),
+): Record<string, unknown> {
+  const c = settings,
     thread = useCodexStore.getState().threads.find((t) => t.id === threadId);
   const { model, reasoningEffort, serviceTier } = c;
   return {
@@ -113,21 +127,7 @@ export function followupParameters(threadId: string): Record<string, unknown> {
     effort: reasoningEffort ?? null,
     serviceTier: serviceTier ?? null,
     ...(c.personality ? { personality: c.personality } : {}),
-    approvalPolicy: structuredClone(c.approvalPolicy),
-    approvalsReviewer: c.approvalsReviewer,
-    sandboxPolicy: c.sandboxPolicy
-      ? structuredClone(c.sandboxPolicy)
-      : c.sandbox === "read-only"
-        ? { type: "readOnly", networkAccess: c.webSearchRequest }
-        : c.sandbox === "workspace-write"
-          ? {
-              type: "workspaceWrite",
-              writableRoots: [],
-              networkAccess: c.webSearchRequest,
-              excludeTmpdirEnvVar: false,
-              excludeSlashTmp: false,
-            }
-          : { type: "dangerFullAccess" },
+    ...threadPermissionParameters(c),
     ...(model
       ? {
           collaborationMode: {
@@ -145,53 +145,19 @@ export function followupParameters(threadId: string): Record<string, unknown> {
 /** A lost HTTP response must reuse the same submission identity, including after refresh. */
 export async function submissionId(
   owner: string,
-  revision: number,
+  revision: SubmissionEdit,
   data: Omit<FollowupSubmit, "id">,
 ) {
   return stableSubmissionId(owner, revision, data);
 }
-export async function stableSubmissionId(
-  owner: string,
-  revision: number,
-  data: unknown,
-) {
-  const bytes = new TextEncoder().encode(
-    JSON.stringify({ owner, revision, data }),
-  );
-  // Web Crypto digest is restricted to secure contexts. Keep the identical key
-  // on LAN HTTP so retries and protocol changes cannot create another submission.
-  const digest = globalThis.crypto?.subtle
-    ? await globalThis.crypto.subtle.digest("SHA-256", bytes)
-    : sha256(bytes);
-  const key = Array.from(new Uint8Array(digest), (b) =>
-    b.toString(16).padStart(2, "0"),
-  ).join("");
-  let saved: Record<string, string>;
-  try {
-    saved = JSON.parse(
-      localStorage.getItem("kanban.session.followup-submissions") ?? "{}",
-    );
-  } catch {
-    throw new Error("无法读取消息提交记录，请保留草稿并检查浏览器存储");
-  }
-  if (saved[key]) return saved[key];
-  const id = randomUUID();
-  saved[key] = id;
-  const keys = Object.keys(saved);
-  for (const old of keys.slice(0, Math.max(0, keys.length - 1000)))
-    delete saved[old];
-  localStorage.setItem(
-    "kanban.session.followup-submissions",
-    JSON.stringify(saved),
-  );
-  return id;
-}
 export const followupService = {
   async load(id: string, options?: { signal?: AbortSignal }) {
+    const scope = captureCodexOperationScope();
     try {
-      return accept(
-        id,
-        await enqueueSessionRead("recent", `queue:${id}`, () =>
+      const data = await enqueueSessionRead(
+        "status",
+        `queue:${JSON.stringify(scope)}:${id}`,
+        () =>
           readWithDeadline(
             (signal) =>
               getJsonWithOptions<FollowupThread>(
@@ -201,18 +167,21 @@ export const followupService = {
             5000,
             options?.signal,
           ),
-        ),
       );
+      if (!isCodexOperationScopeCurrent(scope))
+        throw new Error("连接目标已切换，旧队列读取已忽略");
+      return accept(id, data);
     } catch (e) {
-      useFollowupStore.setState((s) => ({
-        errors: { ...s.errors, [id]: String(e) },
-      }));
+      if (isCodexOperationScopeCurrent(scope))
+        useFollowupStore.setState((s) => ({
+          errors: { ...s.errors, [id]: String(e) },
+        }));
       throw e;
     }
   },
   async submit(
     owner: string,
-    revision: number,
+    revision: SubmissionEdit,
     threadId: string,
     text: string,
     images: string[],
@@ -221,7 +190,22 @@ export const followupService = {
     parameters?: Record<string, unknown>,
     contexts?: ComposerContext[],
     mentions?: AgentMention[],
+    settingsCapture?: ReturnType<typeof captureThreadModelSelection>,
   ) {
+    const operationScope = captureCodexOperationScope();
+    // Explicit child-native/retry parameters are already captured by their owner.
+    // Only ordinary preference-based submissions participate in this local gate.
+    const captured = settingsCapture ??
+      (parameters === undefined ? captureThreadModelSelection(threadId) : undefined);
+    const capturedParameters = structuredClone(parameters ??
+      followupParameters(threadId, captured!.settings));
+    if (captured) {
+      try {
+        await flushThreadModelSettings(threadId, captured);
+      } catch (error) {
+        throw new MutationNotStartedError(error instanceof Error ? error.message : String(error));
+      }
+    }
     const input = codexThreadInputState(threadId);
     if (input.kind === "child" || input.needsVerification)
       await subagentService.inspectIdentity(threadId);
@@ -235,12 +219,17 @@ export const followupService = {
       text,
       images: [...images],
       mode,
-      parameters: parameters ?? followupParameters(threadId),
+      parameters: capturedParameters,
       ...(expectedTurnId ? { expectedTurnId } : {}),
       ...(contexts?.length ? { contexts: structuredClone(contexts) } : {}),
       ...(mentions?.length ? { mentions: structuredClone(mentions) } : {}),
     };
     const id = await submissionId(owner, revision, data);
+    // The server fingerprints the actual request. Canonical IDs must also send
+    // canonical object order, while old retry IDs keep their original payload.
+    const submittedData = id.startsWith("draft3_")
+      ? canonicalSubmissionData(data)
+      : data;
     if (
       Object.values(useCodexDeliveryStore.getState().entries).some(
         (e) => e.threadId === threadId && e.status === "uncertain",
@@ -252,7 +241,18 @@ export const followupService = {
       throw new MutationNotStartedError(uncertainDeliveryReason);
     await assertCodexSendAccess(threadId);
     assertCodexThreadInput(threadId);
-    beginDeliveryEcho({ ...data, id });
+    if (captured) {
+      try {
+        assertThreadModelSelectionCurrent(captured);
+      } catch (error) {
+        throw new MutationNotStartedError(error instanceof Error ? error.message : String(error));
+      }
+    }
+    if (!isCodexOperationScopeCurrent(operationScope))
+      throw new MutationNotStartedError("连接目标已切换，消息尚未发送，草稿已保留");
+    beginDeliveryEcho({ ...submittedData, id });
+    const echoKey = JSON.stringify([threadId, id]);
+    const submittedEcho = useCodexDeliveryStore.getState().entries[echoKey];
     if (useCodexStore.getState().currentThreadId === threadId)
       window.dispatchEvent(
         new CustomEvent("session-message-submitted", { detail: { threadId } }),
@@ -262,19 +262,21 @@ export const followupService = {
       try {
         // A completed native turn does not guarantee its HTTP acknowledgement
         // arrived. Bound the wait before accepting, so a late POST stays inert.
-        result = accept(
-          threadId,
-          await readWithDeadline(
+        const response = await readWithDeadline(
             (signal) =>
               postJsonWithOptions<FollowupThread>(
                 "/followups/submit",
-                { ...data, id },
+                { ...submittedData, id },
                 { suppressToast: true, signal },
               ),
             15_000,
-          ),
-        );
+          );
+        if (!isCodexOperationScopeCurrent(operationScope))
+          throw new Error("连接目标已切换，请核对原会话中的送达结果；草稿已保留");
+        result = accept(threadId, response);
       } catch (error) {
+        if (!isCodexOperationScopeCurrent(operationScope))
+          throw new Error("连接目标已切换，请核对原会话中的送达结果；草稿已保留");
         if (!(error instanceof DOMException) || error.name !== "TimeoutError")
           throw error;
         const unconfirmed = () =>
@@ -308,7 +310,9 @@ export const followupService = {
         );
       return result;
     } catch (error) {
-      failDeliveryEcho(threadId, id, isExplicitRequestRejection(error));
+      if (isCodexOperationScopeCurrent(operationScope) ||
+          useCodexDeliveryStore.getState().entries[echoKey] === submittedEcho)
+        failDeliveryEcho(threadId, id, isCodexOperationScopeCurrent(operationScope) && isExplicitRequestRejection(error));
       throw error;
     }
   },

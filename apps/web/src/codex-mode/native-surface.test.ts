@@ -1023,6 +1023,42 @@ it("pauses content readiness observation when hidden and catches up without poll
   expect(ready).toHaveLength(final);
 });
 
+it("reports the official renderer failure document for the bound target without claiming onboarding", () => {
+  const { frame, app } = nativeContentFixture();
+  const threadId = "019aabcd-1234-7890-abcd-0123456789ab";
+  const report = vi.fn();
+  const surface = mountNativeSurface(
+    document,
+    () => {},
+    () => {},
+    { onWindowState: report },
+  );
+  dispose = () => surface.dispose();
+  surface.start();
+  surface.bindWindowAtColumn!(threadId, 1);
+  app.title = "Codex could not start";
+  app.body.innerHTML =
+    "<h1>Codex could not start</h1><p>The extension could not start its user interface.</p>";
+  frame
+    .contentDocument!.querySelector("iframe")!
+    .dispatchEvent(new Event("load"));
+  expect(report).toHaveBeenLastCalledWith(
+    threadId,
+    expect.objectContaining({
+      ready: false,
+      hasComposer: false,
+      startupError: "renderer-timeout",
+    }),
+  );
+  app.title = "ChatGPT";
+  app.body.innerHTML = `<div id="root"><div data-above-composer-portal data-above-composer-conversation-id="${threadId}"></div><textarea></textarea></div>`;
+  frame.contentDocument!
+    .querySelector("iframe")!
+    .dispatchEvent(new Event("load"));
+  expect(report).toHaveBeenLastCalledWith(threadId, expect.objectContaining({ ready: true, hasComposer: true }));
+  expect(report.mock.lastCall?.[1].startupError).toBeUndefined();
+});
+
 it("keeps official onboarding clickable in a requested history window without accepting a blank composer", () => {
   const { frame, app } = nativeContentFixture();
   const root = app.getElementById("root")!;
@@ -1250,7 +1286,7 @@ it("observes an official writer lock that appears after the composer and clears 
   });
   const notice = document.createElement("div");
   notice.innerHTML =
-    "<strong>This is open in another app</strong><span>Close it there to continue here.</span><button>Retry</button>";
+    "<strong>This is open <em>in another app</em></strong><span>Close it there <em>to continue here.</em></span><button>Retry</button>";
   root.append(notice);
   await new Promise((resolve) => setTimeout(resolve, 60));
   expect(states.at(-1)).toMatchObject({
@@ -1262,6 +1298,32 @@ it("observes an official writer lock that appears after the composer and clears 
   expect(states.at(-1)).toMatchObject({
     blockedByOtherApp: false,
     hasComposer: true,
+  });
+  tracker.dispose();
+});
+
+it("detects the writer lock without reading the entire conversation text on every check", async () => {
+  const { frame, app } = nativeContentFixture();
+  const root = app.getElementById("root")!;
+  root.innerHTML =
+    '<button>Chat</button><div data-above-composer-portal="true"></div><div contenteditable="true"></div>';
+  Object.defineProperty(root, "textContent", {
+    configurable: true,
+    get() {
+      throw new Error("unbounded conversation text read");
+    },
+  });
+  const tracker = observeNativeContent(frame, () => {});
+  tracker.start();
+  expect(tracker.snapshot()?.hasComposer).toBe(true);
+  const notice = document.createElement("div");
+  notice.innerHTML =
+    "<strong>This is open in another app</strong><span>Close it there to continue here.</span><button>Retry</button>";
+  root.append(notice);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  expect(tracker.snapshot()).toMatchObject({
+    blockedByOtherApp: true,
+    hasComposer: false,
   });
   tracker.dispose();
 });

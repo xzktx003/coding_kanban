@@ -8,7 +8,7 @@ import { createFixtureThreads } from './fixtures.mjs';
 import { buildCompanionVsix } from './vsix.mjs';
 import { importConnectionProfile } from './connection-profile.mjs';
 const args = process.argv.slice(2); const input = {};
-const fields = { 'runtime-root': 'runtimeRoot', 'code-server': 'codeServer', 'official-vsix': 'officialVsix', 'codex-cli': 'codexCli', port: 'port', 'broker-port': 'brokerPort', 'bind-host': 'bindHost', 'user-data-dir': 'userDataDir', 'extensions-dir': 'extensionsDir', 'project-dir': 'projectDir', 'codex-home': 'codexHome', 'shared-codex-home': 'sharedCodexHome', 'process-home': 'processHome', cert: 'cert', 'cert-key': 'certKey', record: 'record', 'threads-file': 'threadsFile', 'password-file': 'passwordFile', 'connection-profile-home': 'connectionProfileHome', 'refresh-service-config': 'refreshServiceConfig', 'refresh-domain': 'refreshDomain', 'refresh-control-root': 'refreshControlRoot', 'reconnection-grace-seconds': 'reconnectionGraceSeconds', 'refresh-workspace-dir': 'refreshWorkspaceDir' };
+const fields = { 'runtime-root': 'runtimeRoot', 'code-server': 'codeServer', 'official-vsix': 'officialVsix', 'codex-cli': 'codexCli', port: 'port', 'broker-port': 'brokerPort', 'bind-host': 'bindHost', 'user-data-dir': 'userDataDir', 'extensions-dir': 'extensionsDir', 'project-dir': 'projectDir', 'codex-home': 'codexHome', 'shared-codex-home': 'sharedCodexHome', 'process-home': 'processHome', cert: 'cert', 'cert-key': 'certKey', record: 'record', 'threads-file': 'threadsFile', 'password-file': 'passwordFile', 'connection-profile-home': 'connectionProfileHome', 'refresh-service-config': 'refreshServiceConfig', 'refresh-domain': 'refreshDomain', 'refresh-control-root': 'refreshControlRoot', 'reconnection-grace-seconds': 'reconnectionGraceSeconds', 'refresh-workspace-dir': 'refreshWorkspaceDir', 'app-server-worker-threads': 'appServerWorkerThreads' };
 let createThreads = false; let autoOpenFixtures = false; let autoOpenNewChats = false; let restoreVisibleWindows = false;
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--create-threads') { createThreads = true; continue; }
@@ -96,7 +96,8 @@ try {
     ...(options.sharedCodexHome ? { sharedCodexHome: options.sharedCodexHome } : {}),
     ...(refreshConnection ? { refreshConnection } : {}),
     brokerAuthFile: authFile, threads: fixture.threads, fixtureAppServerPid: fixture.appServerPid, fixtureAppServerStopped: createThreads,
-    officialVsix: options.officialVsix, officialVsixSha256: createHash('sha256').update(await readFile(options.officialVsix)).digest('hex'), connectionProfile, panelMode: startup.panelMode, ...(newChatWindowIds ? { newChatWindowIds } : {}) };
+    officialVsix: options.officialVsix, officialVsixSha256: createHash('sha256').update(await readFile(options.officialVsix)).digest('hex'), connectionProfile, panelMode: startup.panelMode,
+    appServerWorkerThreads: options.appServerWorkerThreads, ...(newChatWindowIds ? { newChatWindowIds } : {}) };
   await mkdir(dirname(options.record), { recursive: true });
   owned.assertRunning();
   await writeFile(options.record, JSON.stringify(record, null, 2), { mode: 0o600, flag: 'wx' });

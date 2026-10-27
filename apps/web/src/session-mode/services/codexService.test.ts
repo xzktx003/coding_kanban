@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("./apiAdapt", () => api);
 import { cancelCodexHistoryRead, codexService } from "./codexService";
+import { enqueueSessionRead } from "./sessionReadQueue";
 import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 import { useConfigStore } from "../components/codex/stores/useConfigStore";
 import { useCodexStore } from "../components/codex/stores/useCodexStore";
@@ -47,6 +48,92 @@ beforeEach(() => {
     connection: "connected",
   });
 });
+it("settles a cancelled history before admission and lets the same target queue a fresh read", async () => {
+  const releases: Array<() => void> = [];
+  let releasing = false;
+  const blockers = Array.from({ length: 4 }, (_, index) =>
+    enqueueSessionRead("recent", `cancel-admission:${index}`, () =>
+      releasing
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => releases.push(resolve)),
+    ),
+  );
+  const id = "cancel-before-admission";
+  let cancelledSettled = false;
+  const old = codexService
+    .loadThreadHistory(id, undefined, { recent: true })
+    .finally(() => {
+      cancelledSettled = true;
+    });
+  // loadThreadHistory intentionally resolves a cancelled obsolete selection.
+  const outcome = old.catch(() => {});
+  try {
+    cancelCodexHistoryRead(id);
+    await vi.waitFor(() => expect(cancelledSettled).toBe(true), {
+      timeout: 100,
+    });
+    expect(api.threadRead).not.toHaveBeenCalled();
+    api.threadRead.mockResolvedValueOnce({ thread: { id, turns: [] } });
+    const fresh = codexService.loadThreadHistory(id, undefined, {
+      recent: true,
+    });
+    releasing = true;
+    releases.forEach((release) => release());
+    await Promise.all([...blockers, fresh]);
+    expect(api.threadRead).toHaveBeenCalledOnce();
+    expect(useCodexStore.getState().historyLoadedMap[id]).toBe(true);
+  } finally {
+    releasing = true;
+    releases.forEach((release) => release());
+    await Promise.all([...blockers, outcome]);
+  }
+});
+it("allows a queued recent history page to finish beyond the former five-second deadline", async () => {
+  vi.useFakeTimers();
+  const id = "slow-independent-history";
+  api.threadRead.mockImplementationOnce(
+    () =>
+      new Promise((resolve) =>
+        setTimeout(
+          () =>
+            resolve({
+              thread: {
+                id,
+                turns: [
+                  {
+                    id: "turn",
+                    status: "completed",
+                    items: [
+                      {
+                        type: "agentMessage",
+                        id: "answer",
+                        text: "late final answer",
+                      },
+                    ],
+                  },
+                ],
+              },
+            }),
+          6200,
+        ),
+      ),
+  );
+  try {
+    const result = codexService
+      .loadThreadHistory(id, undefined, { recent: true })
+      .then(
+        () => "loaded",
+        () => "failed",
+      );
+    await vi.advanceTimersByTimeAsync(6200);
+    expect(await result).toBe("loaded");
+    expect(useCodexStore.getState().historyErrorMap[id]).toBeUndefined();
+    expect(useCodexStore.getState().historyLoadedMap[id]).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 it("keeps dormant background reads metadata-only and restores a fresh recent page when viewed again", async () => {
   const id = "evicted-read";
   useCodexStore.setState({
@@ -404,8 +491,10 @@ it("routes explicit native auto review while preserving owner sandbox policy", a
   expect(api.turnStart.mock.calls.at(-1)?.[0]).toMatchObject({
     approvalPolicy: "on-request",
     approvalsReviewer: "auto_review",
-    sandboxPolicy: { type: "workspaceWrite" },
   });
+  // A mode-only creation receipt does not describe native writable roots.
+  // Omitting the policy preserves that new thread's actual configuration.
+  expect(api.turnStart.mock.calls.at(-1)?.[0]).not.toHaveProperty("sandboxPolicy");
 });
 it("keeps explicit user review for read-only and danger-full-access modes", async () => {
   useConfigStore.setState({
@@ -776,6 +865,7 @@ it("a delayed start response cannot revive a turn already completed by streaming
     threads: [],
   });
   const pending = codexService.turnStart("a", "hello");
+  await vi.waitFor(() => expect(api.turnStart).toHaveBeenCalled());
   useCodexStore.setState({
     turnTimingMap: {
       a: {

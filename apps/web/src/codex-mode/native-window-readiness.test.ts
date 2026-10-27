@@ -9,6 +9,7 @@ const rendered = {
   userInteracted: false,
 };
 it("does not accept a blank or different thread as the requested history", () => {
+  expect(isNativeWindowReady(`new:${id}`, { ...rendered, startupError: "renderer-timeout" })).toBe(false);
   expect(isNativeWindowReady(id, rendered)).toBe(false);
   expect(
     isNativeWindowReady(id, {
@@ -21,9 +22,24 @@ it("does not accept a blank or different thread as the requested history", () =>
   );
 });
 it("keeps native onboarding visible without claiming an input composer exists", () => {
-  expect(isNativeWindowReady(id, { ...rendered, hasComposer: false, onboarding: true })).toBe(true);
-  expect(isNativeWindowReady(id, { ...rendered, onboarding: true })).toBe(false);
-  expect(isNativeWindowReady(id, { ...rendered, hasComposer: false, onboarding: true, conversationId: id.replace(/3$/, "4") })).toBe(false);
+  expect(
+    isNativeWindowReady(id, {
+      ...rendered,
+      hasComposer: false,
+      onboarding: true,
+    }),
+  ).toBe(true);
+  expect(isNativeWindowReady(id, { ...rendered, onboarding: true })).toBe(
+    false,
+  );
+  expect(
+    isNativeWindowReady(id, {
+      ...rendered,
+      hasComposer: false,
+      onboarding: true,
+      conversationId: id.replace(/3$/, "4"),
+    }),
+  ).toBe(false);
   expect(
     isNativeWindowReady(`new:${id}`, { ...rendered, hasComposer: false }),
   ).toBe(true);

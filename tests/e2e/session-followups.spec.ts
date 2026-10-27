@@ -273,14 +273,15 @@ test("running messages queue, edit and reorder, survive reload, and can steer wi
       .locator(".session-agent-view [contenteditable=true]")
       .first();
     await editor.fill("first queued");
-    await page.getByRole("button", { name: "发送消息", exact: true }).click();
+    await page
+      .locator('.session-agent-view .session-native-composer[data-owner-thread="ux-0"]')
+      .getByRole("button", { name: "加入队列", exact: true })
+      .click();
     await expect(page.locator(".session-followup-queue li")).toHaveCount(1);
     expect(f.calls).toHaveLength(0);
     await editor.fill("second queued");
     await editor.press("Enter");
-    await page
-      .getByRole("button", { name: "还有 1 条待发送", exact: true })
-      .click();
+    // Desktop renders both rows directly; the collapsed-count entry is mobile-only.
     await expect(page.locator(".session-followup-queue li")).toHaveCount(2);
     await page
       .getByRole("button", { name: "排队消息操作 2", exact: true })

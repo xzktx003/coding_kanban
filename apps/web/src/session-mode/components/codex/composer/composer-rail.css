@@ -1,0 +1,365 @@
+/* Codex 26.51007.21434 z8i/R8i attached, above placement. See the evidence note. */
+@property --session-queue-top-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --session-queue-bottom-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@keyframes session-queue-edge-fade {
+  0%,
+  1% {
+    --session-queue-top-fade: 0px;
+    --session-queue-bottom-fade: 1rem;
+  }
+  99%,
+  100% {
+    --session-queue-top-fade: 1rem;
+    --session-queue-bottom-fade: 0px;
+  }
+}
+.session-mode .session-composer-rail {
+  --composer-rail-radius: 1rem;
+  --composer-rail-tuck: 4px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin-inline: 13px;
+  overflow: clip;
+  padding-bottom: var(--composer-rail-radius);
+  margin-bottom: calc(
+    -1 * (var(--composer-rail-radius) + var(--composer-rail-tuck))
+  );
+  border-color: color-mix(
+    in oklab,
+    var(--codex-border, var(--border)) 80%,
+    transparent
+  );
+  border-start-start-radius: var(--composer-rail-radius);
+  border-start-end-radius: var(--composer-rail-radius);
+}
+@supports (corner-shape: superellipse(1.5)) {
+  .session-mode .session-composer-rail {
+    --composer-rail-radius: 1.25rem;
+    corner-shape: superellipse(1.5);
+  }
+}
+.session-mode .session-composer-rail:not(:has([data-composer-rail-item])) {
+  display: none;
+}
+.session-mode .session-composer-rail::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  border: 1px solid;
+  border-bottom: 0;
+  border-color: inherit;
+  border-radius: inherit;
+  corner-shape: inherit;
+  clip-path: inset(0 0 var(--composer-rail-radius));
+}
+.session-mode .session-composer-rail-item {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  overflow: clip;
+  border-top: 1px solid
+    color-mix(in oklab, var(--codex-border, var(--border)) 80%, transparent);
+  border-inline: 1px solid transparent;
+  color: var(--codex-text, var(--foreground));
+  background: var(--codex-secondary, var(--background));
+}
+.session-mode .session-composer-rail-item:first-child {
+  border-top-color: transparent;
+}
+.session-mode .session-composer-rail-item:last-child {
+  padding-bottom: var(--composer-rail-tuck);
+}
+.session-mode .session-composer-rail-item[data-composer-rail-item="exiting"] {
+  pointer-events: none;
+}
+.session-mode .session-composer-rail-item-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: clip;
+}
+.session-mode .session-composer-rail-item-content {
+  min-width: 0;
+  flex-shrink: 0;
+}
+.session-mode .session-composer-rail .session-followup-queue,
+.session-mode .session-composer-rail .session-model-change-notice,
+.session-mode .session-composer-rail .codex-running-changes,
+.session-mode .session-composer-rail .session-async-notice {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+.session-mode .session-composer-rail .session-thread-goal {
+  border: 0;
+  border-radius: 0;
+}
+.session-mode
+  .session-native-composer
+  .session-composer-rail
+  .session-thread-goal
+  .session-goal-open {
+  color: var(--codex-muted);
+}
+.session-mode
+  .session-native-composer
+  .session-composer-rail
+  .session-thread-goal
+  .session-goal-action {
+  border: 1px solid transparent;
+  font-size: 11px;
+  line-height: 16px;
+  gap: 4px;
+}
+.session-mode .session-queue-main,
+.session-mode .session-queue-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.session-mode .session-queue-main {
+  flex: 1;
+}
+.session-mode .session-queue-actions {
+  flex-shrink: 0;
+}
+.session-mode .session-composer-rail .session-rail-icon {
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+}
+.session-mode .session-composer-rail .codex-running-changes {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 0;
+  padding: 2px 10px;
+  background: transparent;
+  color: var(--codex-muted);
+  font-size: 13px;
+}
+.session-mode .session-composer-rail .codex-running-changes-target {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0;
+  gap: 8px;
+  border: 0;
+  border-radius: 0;
+  color: var(--codex-muted);
+  background: transparent;
+  text-align: start;
+  font: inherit;
+  line-height: 19.5px;
+  cursor: pointer;
+}
+.session-mode .session-composer-rail .codex-running-changes-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  padding-block: 4px;
+  line-height: 20px;
+  overflow: hidden;
+}
+.session-mode .session-composer-rail .codex-running-changes-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.session-mode .session-composer-rail .codex-running-changes-counts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "cv01" on, "cv02" on;
+}
+.session-mode .session-composer-rail .codex-running-changes-meta {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.session-mode .session-composer-rail .codex-running-changes-review {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  height: 24px;
+  min-height: 24px;
+  padding: 2px 8px;
+  margin: 0;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--codex-muted);
+  font-size: 12px;
+  line-height: 18px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.session-mode
+  .session-composer-rail
+  .codex-running-changes
+  button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.session-mode .session-composer-rail .codex-running-changes-review:hover,
+.session-mode .session-composer-rail .session-queue-actions button:hover {
+  background: color-mix(in srgb, var(--codex-text) 8%, transparent);
+}
+@media (min-width: 768px) {
+  .session-mode .session-composer-rail .session-followup-queue {
+    background: transparent;
+  }
+  .session-mode .session-composer-rail .session-queue-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    max-height: 30dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: auto;
+    scrollbar-width: none;
+    padding: 0;
+    margin: 0;
+    mask-image: linear-gradient(
+      to bottom in oklch,
+      oklch(60% 0 0 / 0),
+      oklch(85% 0 0) var(--session-queue-top-fade)
+        calc(100% - var(--session-queue-bottom-fade)),
+      oklch(60% 0 0 / 0)
+    );
+  }
+  .session-mode .session-composer-rail .session-queue-list > li {
+    flex-shrink: 0;
+    padding: 0;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+  .session-mode .session-composer-rail .session-queue-row {
+    min-height: 32px;
+    padding: 2px 10px;
+    gap: 8px;
+  }
+  .session-mode .session-composer-rail .session-queue-main {
+    gap: 8px;
+    min-height: 28px;
+  }
+  .session-mode .session-composer-rail .session-queue-symbol {
+    margin: 0;
+    color: color-mix(in srgb, var(--codex-muted) 70%, transparent);
+  }
+  .session-mode .session-composer-rail .session-queue-preview {
+    display: block;
+    height: 28px;
+    min-height: 28px;
+    padding: 4px 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    text-align: start;
+    font: inherit;
+    font-size: 13px;
+    line-height: 20px;
+    color: var(--codex-text);
+  }
+  .session-mode .session-composer-rail .session-queue-actions button {
+    height: 24px;
+    min-height: 24px;
+    padding: 2px 8px;
+    border: 1px solid transparent;
+    border-radius: 9999px;
+    gap: 4px;
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--codex-muted);
+  }
+  .session-mode
+    .session-composer-rail
+    .session-queue-actions
+    button[data-size="icon"] {
+    width: 24px;
+    padding: 0;
+    border-radius: 12.5px;
+    font-size: 11px;
+    line-height: 16px;
+  }
+}
+@supports (animation-timeline: scroll(self y)) {
+  @media (min-width: 768px) {
+    .session-mode .session-composer-rail .session-queue-list {
+      animation: session-queue-edge-fade linear both;
+      animation-timeline: scroll(self y);
+    }
+  }
+}
+.session-mode .session-composer-rail .session-followup-images {
+  display: none;
+}
+.session-mode .session-composer-rail .session-queue-expand {
+  min-height: 28px;
+  height: 28px;
+  padding: 2px 8px;
+  font-size: 11px;
+  margin: 0;
+}
+
+/* The approved phone layout keeps the bounded floating shelf above the fixed
+   composer. Desktop and narrow desktop panes use the attached in-flow rail. */
+@media (max-width: 767px) {
+  .session-mode .session-composer-rail {
+    position: absolute;
+    inset-inline: 0;
+    bottom: 100%;
+    z-index: 20;
+    max-height: min(160px, 25dvh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    gap: 4px;
+    padding: 0;
+    margin: 0;
+    border-radius: 0;
+  }
+  .session-mode .session-composer-rail::after {
+    content: none;
+  }
+  .session-mode .session-composer-rail-item {
+    flex-shrink: 0;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0;
+    background: color-mix(in oklab, var(--background) 78%, transparent);
+    backdrop-filter: blur(3px);
+  }
+  .session-mode .session-composer-rail .codex-running-changes-target,
+  .session-mode .session-composer-rail .codex-running-changes-review {
+    min-height: 44px;
+    height: auto;
+  }
+}

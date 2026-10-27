@@ -84,6 +84,7 @@ it("re-sends a captured edit input including remote images and skill context wit
     input,
   );
   input[1].url = "https://fixture.invalid/changed.png";
+  await vi.waitFor(() => expect(api.turnStart).toHaveBeenCalled());
   expect(api.turnStart.mock.calls[0][0].input).toEqual([
     { type: "text", text: "edited", text_elements: [] },
     { type: "image", url: "https://fixture.invalid/original.png" },

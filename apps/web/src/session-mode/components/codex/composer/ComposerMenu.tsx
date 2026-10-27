@@ -12,7 +12,7 @@ import {
   PlusIcon,
   Target,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ScreenshotPopover } from "@session/components/codex/composer/ScreenshotPopover";
 import { useCodexStore } from "@session/components/codex/stores";
@@ -151,7 +151,12 @@ export interface ComposerMenuProps {
   onFilesSelected?: (paths: string[]) => void;
   onInsertMention?: (text: string, mention?: NativeInputMention) => void;
   onGoal?: () => void;
-  actions?: (close: () => void) => ReactNode;
+  actions?: (close: () => void, persistentMenuTrigger: ReactNode) => ReactNode;
+  persistentMenu?: (props: {
+    triggerContainer: HTMLElement | null;
+    close: () => void;
+    parentMenuId: string;
+  }) => ReactNode;
 }
 
 export function ComposerMenu({
@@ -162,6 +167,7 @@ export function ComposerMenu({
   onInsertMention,
   onGoal,
   actions,
+  persistentMenu,
 }: ComposerMenuProps) {
   const threadId = useCodexStore((state) => state.currentThreadId);
   const { webSearchRequest, setWebSearch } = useThreadModelSettings(threadId);
@@ -170,6 +176,14 @@ export function ComposerMenu({
   const { t, i18n } = useTranslation("composer");
   const [openState, setOpenState] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);
+  const [persistentTarget, setPersistentTarget] =
+    useState<HTMLDivElement | null>(null);
+  const parentMenuId = useId();
+  const actionClosed = useRef(false);
+  const closeForAction = () => {
+    actionClosed.current = true;
+    setOpenState(false);
+  };
   const { items } = useMentionItems();
   const mentionItems = mentionsWithIcon(items);
 
@@ -207,7 +221,13 @@ export function ComposerMenu({
   });
 
   return (
-    <Popover open={openState} onOpenChange={setOpenState}>
+    <Popover
+      open={openState}
+      onOpenChange={(next) => {
+        if (next) actionClosed.current = false;
+        setOpenState(next);
+      }}
+    >
       <ComposerTooltip label="附加文件" shortcut="@" popupOpen={openState}>
         <PopoverTrigger asChild>
           <Button
@@ -225,6 +245,19 @@ export function ComposerMenu({
         side="top"
         collisionPadding={12}
         align="start"
+        onInteractOutside={(event) => {
+          const target = event.detail.originalEvent.target;
+          if (
+            target instanceof Element &&
+            target
+              .closest("[data-composer-parent-menu]")
+              ?.getAttribute("data-composer-parent-menu") === parentMenuId
+          )
+            event.preventDefault();
+        }}
+        onCloseAutoFocus={(event) => {
+          if (actionClosed.current) event.preventDefault();
+        }}
       >
         <div className="flex flex-col gap-1">
           <Button
@@ -236,7 +269,12 @@ export function ComposerMenu({
             <ImageIcon className="w-4 h-4" />
             <span>附加照片或视频</span>
           </Button>
-          {actions?.(() => setOpenState(false))}
+          {actions?.(
+            () => setOpenState(false),
+            persistentMenu ? (
+              <div className="contents" ref={setPersistentTarget} />
+            ) : null,
+          )}
           <Button
             type="button"
             variant="ghost"
@@ -312,6 +350,11 @@ export function ComposerMenu({
           )}
         </div>
       </PopoverContent>
+      {persistentMenu?.({
+        triggerContainer: persistentTarget,
+        close: closeForAction,
+        parentMenuId,
+      })}
       {recordOpen && <RecordSkillDialog onClose={() => setRecordOpen(false)} />}
     </Popover>
   );

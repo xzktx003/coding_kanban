@@ -1,3 +1,4 @@
+import { captureCodexOperationScope, isCodexOperationScopeCurrent, type CodexOperationScope } from "./codexOperationScope";
 import { lightweightThreadForStore } from "./codexTranscriptVisibility";
 import { codexRuntimeState } from "@session/utils/codexRuntimeState";
 import { postJsonWithOptions } from "./apiAdapt/shared";
@@ -15,17 +16,20 @@ import {
   hydrateThreadModel,
 } from "../stores/useThreadModelStore";
 import { nativeThreadSettings } from "./nativeThreadSettings";
-const pending = new Map<string, Promise<string>>();
+const pending = new Map<string, { scope: CodexOperationScope; task: Promise<string> }>();
 export function createSideChat(
   parentId: string,
   text = "",
   images: string[] = [],
 ): Promise<string> {
   const existing = pending.get(parentId);
-  if (existing) return existing;
+  if (existing && isCodexOperationScopeCurrent(existing.scope)) return existing.task;
+  const scope = captureCodexOperationScope();
   const task = (async () => {
-    const parentModel = getThreadModelSettings(parentId);
+    const parentModel = structuredClone(getThreadModelSettings(parentId));
     const response = await threadFork({ threadId: parentId });
+    if (!isCodexOperationScopeCurrent(scope))
+      throw new Error("连接或账号已变化，侧边会话结果未确认，请核对原连接，勿重复创建。");
     const { thread } = response;
     if (!thread?.id || thread.id === parentId)
       throw new Error("服务未返回独立的侧边会话");
@@ -67,8 +71,10 @@ export function createSideChat(
     });
     return thread.id;
   })();
-  pending.set(parentId, task);
-  void task.finally(() => pending.delete(parentId)).catch(() => {});
+  pending.set(parentId, { scope, task });
+  void task.finally(() => {
+    if (pending.get(parentId)?.task === task) pending.delete(parentId);
+  }).catch(() => {});
   return task;
 }
 export async function runConversationReview(

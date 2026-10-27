@@ -112,6 +112,12 @@ type Coordinator = ReturnType<typeof createGoalCompletionAutoClear>;
 let installed:
   | { observe: Coordinator["observe"]; reset(): void; confirm?(): void }
   | undefined;
+const scopeResetListeners = new Set<() => void>();
+/** Account notifications revoke readers even before the Goal coordinator mounts. */
+export function subscribeGoalCompletionScopeReset(listener: () => void) {
+  scopeResetListeners.add(listener);
+  return () => { scopeResetListeners.delete(listener); };
+}
 export function installGoalCompletionAutoClear(
   next: NonNullable<typeof installed>,
 ) {
@@ -124,6 +130,7 @@ export function notifyGoalCompletionAutoClear(threadId: string): Promise<void> {
   return installed?.observe(threadId) ?? Promise.resolve();
 }
 export function resetGoalCompletionScope() {
+  for (const listener of scopeResetListeners) listener();
   installed?.reset();
 }
 /** Only a valid current account read may re-establish the account authority. */

@@ -1,4 +1,5 @@
-import { useCallback } from "react";
+import { threadPermissionsKnown } from "../services/threadPermissionProjection";
+import { useCallback, useEffect } from "react";
 import type { ReasoningEffort, Personality } from "@session/bindings";
 import type { SandboxMode, ApprovalsReviewer } from "@session/bindings/v2";
 import {
@@ -10,10 +11,19 @@ import {
   changeThreadModel,
   getThreadModelSettings,
   useThreadModelStore,
+  ensureThreadModelSettings,
+  retryThreadModelSettings,
 } from "../stores/useThreadModelStore";
 
 export function useThreadModelSettings(threadId: string | null) {
   useThreadModelStore((s) => (threadId ? s.threads[threadId] : undefined));
+  const storage = useThreadModelStore((s) => threadId ? s.storage?.[threadId] : undefined);
+  useEffect(() => {
+    if (threadId) void ensureThreadModelSettings(threadId).catch(() => {});
+  }, [threadId]);
+  const retrySettings = useCallback(async () => {
+    if (threadId) await retryThreadModelSettings(threadId);
+  }, [threadId]);
   useConfigStore();
   const settings = getThreadModelSettings(threadId);
   const setModel = useCallback(
@@ -66,6 +76,7 @@ export function useThreadModelSettings(threadId: string | null) {
         changeThreadModel(threadId, {
           sandbox,
           sandboxPolicy: null,
+          webSearchRequest: getThreadModelSettings(threadId).permissionSources?.webSearchRequest ? getThreadModelSettings(threadId).webSearchRequest : false,
           approvalPolicy: SANDBOX_APPROVAL_MAP[sandbox],
         });
       else useConfigStore.getState().setAccessMode(sandbox);
@@ -96,28 +107,19 @@ export function useThreadModelSettings(threadId: string | null) {
   const setWebSearch = useCallback(
     (webSearchRequest: boolean) => {
       if (threadId) {
-        const policy = getThreadModelSettings(threadId).sandboxPolicy;
-        const sandboxPolicy =
-          policy && "networkAccess" in policy
-            ? policy.type === "externalSandbox"
-              ? {
-                  ...policy,
-                  networkAccess: webSearchRequest
-                    ? ("enabled" as const)
-                    : ("restricted" as const),
-                }
-              : { ...policy, networkAccess: webSearchRequest }
-            : policy;
-        changeThreadModel(threadId, {
-          webSearchRequest,
-          ...(sandboxPolicy ? { sandboxPolicy } : {}),
-        });
+        // Rebase policy/network inside the settings transaction. Copying this
+        // page's current policy would race another page's canonical metadata.
+        changeThreadModel(threadId, { webSearchRequest });
       } else useConfigStore.getState().setWebSearch(webSearchRequest);
     },
     [threadId],
   );
   return {
     ...settings,
+    permissionsKnown: threadPermissionsKnown(settings),
+    settingsStorage: storage,
+    settingsLoading: !!threadId && (!storage || storage.status === "loading"),
+    retrySettings,
     setModel,
     setModelSelection,
     setModelProvider,

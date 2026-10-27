@@ -73,7 +73,7 @@ it.each([400, 403, 409, 422])(
     await expect(
       followupService.submit(
         "codex:a",
-        1,
+        { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000001" },
         "a",
         "rejected",
         ["/draft.png"],
@@ -96,7 +96,7 @@ it("keeps uncertain delivery after a generic 500 or missing acknowledgement", as
   await expect(
     followupService.submit(
       "codex:a",
-      1,
+      { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000001" },
       "a",
       "unknown",
       [],
@@ -121,7 +121,7 @@ it("retains accepted delivery when a rejection arrives after its sent receipt", 
   await expect(
     followupService.submit(
       "codex:a",
-      1,
+      { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000001" },
       "a",
       "accepted",
       [],
@@ -148,7 +148,7 @@ it("rejects known external ownership before creating an echo or submitting the q
   await expect(
     followupService.submit(
       "codex:a",
-      1,
+      { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000001" },
       "a",
       "not sent",
       ["/image.png"],
@@ -165,7 +165,7 @@ it("does not resubmit any draft while the same thread has an unresolved delivery
   await expect(
     followupService.submit(
       "codex:a",
-      1,
+      { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000001" },
       "a",
       "first",
       [],
@@ -182,7 +182,7 @@ it("does not resubmit any draft while the same thread has an unresolved delivery
   await expect(
     followupService.submit(
       "codex:a",
-      2,
+      { revision: 2, writeId: "edit3_00000000-0000-4000-8000-000000000002" },
       "a",
       "new draft",
       [],
@@ -205,14 +205,38 @@ it("reuses the same request identity after reload and separates new drafts, targ
     parameters: {},
     mode: "queue" as const,
   };
-  const first = await submissionId("owner", 1, data);
-  expect(await submissionId("owner", 1, data)).toBe(first);
-  expect(await submissionId("owner", 2, data)).not.toBe(first);
-  expect(await submissionId("owner", 1, { ...data, threadId: "b" })).not.toBe(
-    first,
+  const first = await submissionId(
+    "owner",
+    { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000001" },
+    data,
   );
   expect(
-    await submissionId("owner", 1, { ...data, images: ["/image.png"] }),
+    await submissionId(
+      "owner",
+      { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000001" },
+      data,
+    ),
+  ).toBe(first);
+  expect(
+    await submissionId(
+      "owner",
+      { revision: 2, writeId: "edit3_00000000-0000-4000-8000-000000000002" },
+      data,
+    ),
+  ).not.toBe(first);
+  expect(
+    await submissionId(
+      "owner",
+      { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000001" },
+      { ...data, threadId: "b" },
+    ),
+  ).not.toBe(first);
+  expect(
+    await submissionId(
+      "owner",
+      { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000001" },
+      { ...data, images: ["/image.png"] },
+    ),
   ).not.toBe(first);
 });
 it("preserves the SHA-256 submission identity on nonsecure LAN HTTP and after switching to HTTPS", async () => {
@@ -223,18 +247,40 @@ it("preserves the SHA-256 submission identity on nonsecure LAN HTTP and after sw
     parameters: {},
     mode: "queue" as const,
   };
-  const first = await submissionId("owner", 7, data);
+  const first = await submissionId(
+    "owner",
+    { revision: 7, writeId: "edit3_00000000-0000-4000-8000-000000000007" },
+    data,
+  );
   const saved = localStorage.getItem("kanban.session.followup-submissions");
   vi.stubGlobal("crypto", {
     getRandomValues: webcrypto.getRandomValues.bind(webcrypto),
   });
-  expect(await submissionId("owner", 7, data)).toBe(first);
+  expect(
+    await submissionId(
+      "owner",
+      { revision: 7, writeId: "edit3_00000000-0000-4000-8000-000000000007" },
+      data,
+    ),
+  ).toBe(first);
   expect(localStorage.getItem("kanban.session.followup-submissions")).toBe(
     saved,
   );
-  expect(await submissionId("owner", 8, data)).not.toBe(first);
+  expect(
+    await submissionId(
+      "owner",
+      { revision: 8, writeId: "edit3_00000000-0000-4000-8000-000000000008" },
+      data,
+    ),
+  ).not.toBe(first);
   vi.stubGlobal("crypto", webcrypto);
-  expect(await submissionId("owner", 7, data)).toBe(first);
+  expect(
+    await submissionId(
+      "owner",
+      { revision: 7, writeId: "edit3_00000000-0000-4000-8000-000000000007" },
+      data,
+    ),
+  ).toBe(first);
 });
 it("captures the target directory, model, permissions and plan mode at enqueue time", () => {
   useCodexStore.setState({ threads: [{ id: "a", cwd: "/target" } as any] });
@@ -244,7 +290,7 @@ it("captures the target directory, model, permissions and plan mode at enqueue t
     sandbox: "read-only",
     approvalPolicy: "untrusted",
   });
-  hydrateThreadModel("a", { model: "chosen", reasoningEffort: "medium" });
+  hydrateThreadModel("a", { model: "chosen", reasoningEffort: "medium", approvalPolicy: "untrusted", approvalsReviewer: "user", sandboxPolicy: { type: "readOnly", networkAccess: false } });
   const p = followupParameters("a");
   changeThreadModel("a", { model: "changed-for-a", reasoningEffort: "high" });
   useConfigStore.setState({ model: "changed", collaborationMode: "default" });
@@ -436,7 +482,7 @@ it.each(["queue", "steer"] as const)(
     }));
     const operation = followupService.submit(
       "codex:a",
-      7,
+      { revision: 7, writeId: "edit3_00000000-0000-4000-8000-000000000007" },
       "a",
       "captured",
       [],
@@ -534,7 +580,7 @@ function preparePendingSubmission() {
   const submit = () =>
     followupService.submit(
       "codex:a",
-      9,
+      { revision: 9, writeId: "edit3_00000000-0000-4000-8000-000000000009" },
       "a",
       "next",
       [],
@@ -610,7 +656,7 @@ it("only reconciles a timed-out submission, preserving immediate transport failu
   await expect(
     followupService.submit(
       "codex:a",
-      9,
+      { revision: 9, writeId: "edit3_00000000-0000-4000-8000-000000000009" },
       "a",
       "next",
       [],
@@ -656,14 +702,20 @@ it("bounds an unresponsive receipt lookup and preserves the submission ID while 
   await expect(pending.submit()).rejects.toThrow(/送达结果待确认/);
   expect(api.postJsonWithOptions).toHaveBeenCalledOnce();
   const { id: _id, ...data } = api.postJsonWithOptions.mock.calls[0][1];
-  expect(await submissionId("codex:a", 9, data)).toBe(originalId);
+  expect(
+    await submissionId(
+      "codex:a",
+      { revision: 9, writeId: "edit3_00000000-0000-4000-8000-000000000009" },
+      data,
+    ),
+  ).toBe(originalId);
 });
 
 it("includes time waiting for a read worker in the five-second receipt budget", async () => {
   const releases: Array<() => void> = [];
-  const blockers = Array.from({ length: 4 }, (_, index) =>
+  const blockers = Array.from({ length: 1 }, (_, index) =>
     enqueueSessionRead(
-      "recent",
+      "status",
       `deadline-blocker:${index}`,
       () => new Promise<void>((resolve) => releases.push(resolve)),
     ),
@@ -678,6 +730,35 @@ it("includes time waiting for a read worker in the five-second receipt budget", 
     expect(pending.outcome.error?.message).toContain("消息提交确认超时");
     expect(api.getJsonWithOptions).not.toHaveBeenCalled();
   } finally {
+    releases.forEach((release) => release());
+    await Promise.all(blockers);
+    await vi.advanceTimersByTimeAsync(0);
+  }
+});
+
+it("can confirm delivery while every transcript read worker is occupied", async () => {
+  const releases: Array<() => void> = [];
+  let finished = false;
+  const blockers = Array.from({ length: 4 }, (_, index) =>
+    enqueueSessionRead("recent", `receipt-history:${index}`, () =>
+      finished
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => releases.push(resolve)),
+    ),
+  );
+  try {
+    const pending = preparePendingSubmission();
+    api.getJsonWithOptions.mockImplementation(async () =>
+      pending.receipt("sent"),
+    );
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(pending.outcome.settled).toBe(true);
+    expect(pending.outcome.error).toBeUndefined();
+    expect(pending.outcome.value).toEqual(pending.receipt("sent"));
+    expect(api.getJsonWithOptions).toHaveBeenCalledOnce();
+    expect(api.postJsonWithOptions).toHaveBeenCalledOnce();
+  } finally {
+    finished = true;
     releases.forEach((release) => release());
     await Promise.all(blockers);
     await vi.advanceTimersByTimeAsync(0);
@@ -704,4 +785,21 @@ it("rejects missing receipts and ignores a late POST instead of overwriting newe
   expect(useFollowupStore.getState()).toBe(accepted);
   expect(useFollowupStore.getState().threads.a).toBe(newer);
   expect(api.postJsonWithOptions).toHaveBeenCalledOnce();
+});
+
+it("a new account queue read never reuses the previous account's pending read", async () => {
+  let finishOld!: (value: unknown) => void;
+  api.getJsonWithOptions.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve; }));
+  api.getJsonWithOptions.mockResolvedValueOnce({ revision: 2, paused: null, items: [] });
+  useCodexStore.setState({ accountNamespace: "queue-old-scope" });
+  const old = followupService.load("scope-read");
+  const rejected = expect(old).rejects.toThrow("连接目标已切换");
+  await vi.waitFor(() => expect(api.getJsonWithOptions).toHaveBeenCalledTimes(1));
+  useCodexStore.setState({ accountNamespace: "queue-new-scope" });
+  const current = followupService.load("scope-read");
+  finishOld({ revision: 99, paused: null, items: [] });
+  await rejected;
+  await expect(current).resolves.toMatchObject({ revision: 2 });
+  expect(api.getJsonWithOptions).toHaveBeenCalledTimes(2);
+  expect(useFollowupStore.getState().threads["scope-read"].revision).toBe(2);
 });

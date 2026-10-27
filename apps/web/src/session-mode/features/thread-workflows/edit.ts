@@ -64,9 +64,7 @@ export async function editLastUserMessage(
     ...structuredClone(originalInputs).filter((item) => item.type !== "text"),
   ];
   let afterLastTurnId: string | null;
-  let config = structuredClone(
-    followupParameters(source.threadId),
-  ) as EditConfig;
+  let config: EditConfig;
   if (rollbackRecord?.status === "completed") {
     const saved = rollbackRecord.result as {
       afterLastTurnId: string | null;
@@ -75,6 +73,9 @@ export async function editLastUserMessage(
     afterLastTurnId = saved.afterLastTurnId;
     config = saved.config;
   } else {
+    // A completed rollback already owns its frozen configuration. Only a new
+    // rollback may consult today's settings, before any destructive mutation.
+    config = structuredClone(followupParameters(source.threadId)) as EditConfig;
     const read = await threadRead(
       { threadId: source.threadId },
       { suppressToast: true },

@@ -5,6 +5,13 @@ export function isNativeWindowReady(
   id: string,
   state: NativeContentState,
 ): boolean {
-  return state.ready && (id.startsWith("new:") || state.conversationId === id ||
-    (state.onboarding === true && !state.hasComposer && !state.conversationId));
+  return (
+    state.ready &&
+    !state.startupError &&
+    (id.startsWith("new:") ||
+      state.conversationId === id ||
+      (state.onboarding === true &&
+        !state.hasComposer &&
+        !state.conversationId))
+  );
 }

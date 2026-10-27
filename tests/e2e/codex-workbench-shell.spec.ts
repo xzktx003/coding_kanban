@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
 
 // Controlled native boundaries test our shell; live official-plugin tests are separate.
 const instance = '019aabcd-1234-7890-abcd-000000000001';
@@ -9,6 +10,22 @@ async function fixture(page: Page, certificateFailure = false) {
   // This is a controlled native boundary. Chromium's ignoreHTTPSErrors does
   // not permit service-worker registration against the LAN's test certificate.
   // Model the probe explicitly; the separate failure case still exercises TLS UI.
+  // Terminal mode must not subscribe to the live server when this synthetic
+  // fixture switches modes; it only needs its local navigation shell.
+  await page.addInitScript(() => {
+    class InertSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+      readyState = InertSocket.CONNECTING;
+      addEventListener() {}
+      removeEventListener() {}
+      send() {}
+      close() { this.readyState = InertSocket.CLOSED; }
+    }
+    Object.defineProperty(window, 'WebSocket', { configurable: true, value: InertSocket });
+  });
   await page.addInitScript(failed => {
     Object.defineProperty(navigator.serviceWorker, 'register', { configurable: true, value: async () => {
       if (failed) throw new DOMException('An SSL certificate error occurred when fetching the script.', 'SecurityError');
@@ -24,6 +41,7 @@ async function fixture(page: Page, certificateFailure = false) {
     const body = route.request().postDataJSON();
     let value: unknown = {};
     if (pathname === '/api/native-codex/status') value = { available: true, resumeAvailable: true, iframeUrl: '/native-codex/?folder=%2Ftmp%2Falpha', newChatWindowIds: [startup], extensionVersion: 'fixture' };
+    else if (pathname === '/api/agent-sessions') value = { items: [], activeAgentSessionId: null, updatedAt: new Date(0).toISOString() };
     else if (pathname === '/api/session/projects') value = { projects: ['/tmp/alpha', '/tmp/beta'] };
     else if (pathname.endsWith('/codex/thread/list')) value = { data: [{ id: thread, cwd: body.cwd, name: body.cwd === '/tmp/beta' ? 'Beta 搜索目标' : 'Alpha 历史', preview: '隔离示例', updatedAt: Date.now() / 1000, ephemeral: false, parentThreadId: null }], nextCursor: null };
     else if (pathname === '/api/native-codex/tabs') {
@@ -46,7 +64,7 @@ async function fixture(page: Page, certificateFailure = false) {
     const url = new URL(route.request().url());
     if (!url.pathname.startsWith('/native-codex/')) { await route.fallback(); return; }
     let html: string;
-    if (url.pathname === '/native-codex/') html = `<!doctype html><div class="statusbar-item">Kanban host ${instance}</div><iframe class="webview ready" src="${nativePath}?extensionId=openai.chatgpt"></iframe>`;
+    if (url.pathname === '/native-codex/') html = `<!doctype html><script>performance.mark('code/didStartWorkbench')</script><div class="statusbar-item">Kanban host ${instance}</div><iframe class="webview ready" src="${nativePath}?extensionId=openai.chatgpt"></iframe>`;
     else if (url.pathname === nativePath) html = `<!doctype html><iframe id="active-frame" src="/native-codex/app?thread=${url.searchParams.get('thread') ?? ''}"></iframe>`;
     else html = `<!doctype html><style>body{font:14px system-ui;margin:0;background:#1f1f1f;color:#ddd}#root{padding:16px}textarea{width:95%;height:80px}button{padding:8px}</style><div id="root"><p>${url.searchParams.get('thread') ? '历史已打开' : '新聊天已打开'}</p><div data-above-composer-portal data-above-composer-conversation-id="${url.searchParams.get('thread') ?? ''}"></div><textarea aria-label="原生草稿"></textarea><button>原生操作</button></div>`;
     await route.fulfill({ contentType: 'text/html', body: html });
@@ -81,6 +99,79 @@ test('single startup window, real mouse tabs, keyboard navigation and retry pres
   expect(requests.filter(p => p === '/api/native-codex/tabs').length - count).toBeLessThanOrEqual(1);
   await page.screenshot({ path: test.info().outputPath('desktop.png') });
 });
+
+for (const device of [
+  { name: 'desktop', width: 1440, height: 900, touch: false, dpr: 1 },
+  { name: 'iPhone 16 size', width: 393, height: 852, touch: true, dpr: 3 },
+]) {
+  test.describe(`warm Codex switching on ${device.name}`, () => {
+    test.use({
+      viewport: { width: device.width, height: device.height },
+      deviceScaleFactor: device.dpr,
+      isMobile: device.touch,
+      hasTouch: device.touch,
+    });
+    test('keeps the exact native input and iframe through repeated tabs and modes', async ({ page }) => {
+      test.setTimeout(120_000);
+      await fixture(page);
+      await page.goto('/?mode=codex');
+      const first = page.getByRole('tab', { name: '新聊天', exact: true });
+      await expect(first).toHaveAttribute('aria-selected', 'true');
+      const frame = await page.locator('.codex-mode-frame').elementHandle();
+      const outer = page.frames().find(f => f.url().includes('/native-codex/?'))!;
+      const firstNative = outer.locator('iframe.webview:not([src*="thread="])');
+      await expect(firstNative).toHaveAttribute('data-kanban-native-interactive', 'true');
+      const draft = page.frames().find(f => f.url().endsWith('/native-codex/app?thread='))!;
+      await draft.getByRole('textbox', { name: '原生草稿' }).fill('保留原生草稿');
+      if (device.touch)
+        await page.getByRole('button', { name: '项目会话', exact: true }).click();
+      await page.getByRole('button', { name: 'Resume Alpha 历史' }).click();
+      const second = page.getByRole('tab', { name: 'Alpha 历史', exact: true });
+      const secondNative = outer.locator('iframe.webview[src*="thread="]');
+      await expect(secondNative).toHaveAttribute('data-kanban-native-interactive', 'true');
+      const history = page.frames().find(f => f.url().endsWith(`/native-codex/app?thread=${thread}`))!;
+      await expect(history.getByText('历史已打开')).toBeVisible();
+      const windowSamples: number[] = [];
+      for (let index = 0; index < 30; index++) {
+        const target = index % 2 === 0 ? first : second;
+        const native = index % 2 === 0 ? firstNative : secondNative;
+        const started = await page.evaluate(() => performance.now());
+        await target.click();
+        await expect(target).toHaveAttribute('aria-selected', 'true');
+        await expect(native).toHaveAttribute('data-kanban-native-interactive', 'true');
+        windowSamples.push((await page.evaluate(() => performance.now())) - started);
+      }
+      await expect(draft.getByRole('textbox', { name: '原生草稿' })).toHaveValue('保留原生草稿');
+      const modeSamples: number[] = [];
+      for (let index = 0; index < 6; index++) {
+        await page.locator('.codex-mode:not([hidden]) .mode-switch-terminal').click();
+        await expect(page.locator('.workbench-shell')).toHaveAttribute('data-mode', 'terminal');
+        const started = await page.evaluate(() => performance.now());
+        await page.locator('.workbench-terminal:not([hidden]) .mode-switch-codex').click();
+        await expect(page.locator('.workbench-shell')).toHaveAttribute('data-mode', 'codex');
+        await expect(secondNative).toHaveAttribute('data-kanban-native-interactive', 'true');
+        modeSamples.push((await page.evaluate(() => performance.now())) - started);
+      }
+      expect(await frame!.evaluate(el => el.isConnected && el === document.querySelector('.codex-mode-frame'))).toBe(true);
+      const summary = (samples: number[]) => {
+        const sorted = [...samples].sort((a, b) => a - b);
+        return {
+          count: sorted.length,
+          p50Ms: sorted[Math.ceil(sorted.length * 0.5) - 1],
+          p95Ms: sorted[Math.ceil(sorted.length * 0.95) - 1],
+          maxMs: sorted.at(-1),
+        };
+      };
+      await writeFile(test.info().outputPath('controlled-warm-switch-timing.json'), JSON.stringify({
+        device: device.name,
+        simulatedOfficialHost: true,
+        acceptanceReceiptMeasured: false,
+        windows: summary(windowSamples),
+        modes: summary(modeSamples),
+      }, null, 2));
+    });
+  });
+}
 
 for (const width of [390, 720, 1024, 1440, 1920]) {
   test(`complete independent themes and responsive navigation at ${width}px`, async ({ page }) => {

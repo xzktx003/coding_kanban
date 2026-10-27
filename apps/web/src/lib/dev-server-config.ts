@@ -1,3 +1,35 @@
+import type { ProxyOptions } from "vite";
+
+// Forward abandonment even after the POST body completed. HTTP/2 resets can
+// emit finish before response.close, so observe request.aborted as well.
+const cancelAbandonedRead: NonNullable<ProxyOptions["configure"]> = (proxy) => {
+  proxy.on("proxyReq", (outgoing, request, response) => {
+    const url = new URL(request.url ?? "/", "http://localhost");
+    if (
+      request.method !== "POST" ||
+      !(
+        url.pathname === "/api/session/api/codex/thread/item-detail" ||
+        (url.pathname === "/api/session/api/codex/thread/turns/list" &&
+          url.searchParams.get("view") === "chat")
+      )
+    )
+      return;
+    const cleanup = () => {
+      request.off("aborted", cancel);
+      response.off("close", cancel);
+      response.off("finish", cleanup);
+    };
+    const cancel = () => {
+      cleanup();
+      if (!response.writableFinished) outgoing.destroy();
+    };
+    response.once("close", cancel);
+    response.once("finish", cleanup);
+    request.once("aborted", cancel);
+    if (response.destroyed) cancel();
+  });
+};
+
 export type WebDevConfig = {
   webPort: number;
   serverPort: number;
@@ -76,7 +108,12 @@ export function resolveWebDevProxies(
   config: Pick<WebDevConfig, "apiTarget" | "wsTarget">,
 ) {
   return {
-    "/api": { target: config.apiTarget, changeOrigin: false, xfwd: true },
+    "/api": {
+      target: config.apiTarget,
+      changeOrigin: false,
+      xfwd: true,
+      configure: cancelAbandonedRead,
+    },
     "/vscode": { target: config.apiTarget, changeOrigin: false, ws: true },
     "/native-codex": {
       target: config.apiTarget,

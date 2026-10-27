@@ -10,7 +10,7 @@ vi.mock("./apiAdapt", () => api);
 import { codexService, resetCodexRuntimeState } from "./codexService";
 import { useCodexStore, useConfigStore } from "../components/codex/stores";
 import { useWorkspaceStore } from "../stores/useWorkspaceStore";
-import { useThreadModelStore } from "../stores/useThreadModelStore";
+import { useThreadModelStore, flushThreadModelSettings } from "../stores/useThreadModelStore";
 
 const created = {
   thread: { id: "created", cwd: "/project", preview: "", turns: [] },
@@ -53,7 +53,13 @@ beforeEach(() => {
   api.gitCreateWorktree.mockResolvedValue({ worktree_path: "/worktree" });
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Settle this case's real IDB hydration before discarding its fake scheduler.
+  const settingsSettled = Promise.all(
+    Object.keys(useThreadModelStore.getState().threads).map(id => flushThreadModelSettings(id)),
+  );
+  await vi.runOnlyPendingTimersAsync();
+  await settingsSettled;
   vi.clearAllTimers();
   vi.useRealTimers();
   vi.restoreAllMocks();

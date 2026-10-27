@@ -25,6 +25,7 @@ export function AccessModePopover({
   const { t } = useTranslation("composer");
   const {
     sandbox,
+    permissionsKnown,
     sandboxPolicy,
     approvalPolicy,
     approvalsReviewer,
@@ -37,16 +38,18 @@ export function AccessModePopover({
   const isNarrow = useComposerToolbarNarrow();
   const { ask, confirmation, open: fullAccessOpen } = useNativeFullAccessConfirmation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const full = sandbox === "danger-full-access";
-  const auto = approvalsReviewer !== "user";
-  const readOnly = sandbox === "read-only";
+  const full = permissionsKnown && sandbox === "danger-full-access";
+  const auto = permissionsKnown && approvalsReviewer !== "user";
+  const readOnly = permissionsKnown && sandbox === "read-only";
   const custom =
-    sandboxPolicy?.type === "externalSandbox" ||
-    typeof approvalPolicy === "object";
+    permissionsKnown && (sandboxPolicy?.type === "externalSandbox" ||
+    typeof approvalPolicy === "object");
   const label =
     collaborationMode === "plan"
       ? t("plan")
-      : auto
+      : !permissionsKnown
+        ? "权限待确认"
+        : auto
         ? "帮我批准"
         : full
           ? "完全访问"
@@ -65,7 +68,7 @@ export function AccessModePopover({
       key: "default",
       label: "请求批准",
       description: "编辑外部文件和使用互联网时始终询问",
-      active: !full && !auto && !readOnly && !custom,
+      active: !!permissionsKnown && !full && !auto && !readOnly && !custom,
       disabled: false,
       choose: () => {
         setAccessMode("workspace-write");

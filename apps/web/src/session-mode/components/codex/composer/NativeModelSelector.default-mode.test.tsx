@@ -218,6 +218,37 @@ it("selected Default keeps pair/raw null/tier and does not jump to a different T
     expect(menu.querySelector('[data-model-picker-view="simple"]')).not.toBeNull(); status(menu, 4, 3);
   } finally { watched.stop(); }
 });
+it("explicit Reset restores the recommended pair and leaves speed and drafts intact", async () => {
+  const s = await mount({ mode: "model" }), menu = await open(s), watched = watch();
+  try {
+    const reset = within(menu).getByRole("menuitem", { name: "恢复默认" });
+    fireEvent.click(reset);
+    protect(s, true);
+    expect(entry()).toMatchObject({ model: TERRA, reasoningEffort: "low", serviceTier: "fast", pending: true });
+    expect(prefs().selectionMode).toBe("default");
+    expect(recentModelConfigs()).toEqual(s.before.recent);
+    expect(watched.entries).toHaveLength(1);
+    expect(watched.entries[0].mode).toBe("default");
+    expect(menu.isConnected).toBe(true);
+    expect(menu.querySelector('[data-model-picker-view="simple"]')).not.toBeNull();
+    expect(within(menu).queryByRole("menuitem", { name: "恢复默认" })).toBeNull();
+  } finally { watched.stop(); }
+});
+it("default presentation has no explicit-model Reset action", async () => {
+  const s = await mount({ mode: "default" }), menu = await open(s);
+  expect(within(menu).queryByRole("menuitem", { name: "恢复默认" })).toBeNull();
+  protect(s);
+});
+it("Reset cannot edit a composer whose captured owner has changed", async () => {
+  const s = await mount({ mode: "model" }), menu = await open(s);
+  const reset = within(menu).getByRole("menuitem", { name: "恢复默认" });
+  screen.getByTestId("e7-host").dataset.draftOwner = "another-owner";
+  fireEvent.click(reset);
+  expect(entry()).toBe(s.before.a);
+  expect(prefs().selectionMode).toBe("model");
+  expect(recentModelConfigs()).toEqual(s.before.recent);
+  expect(s.submit).not.toHaveBeenCalled();
+});
 it.each([{ expanded: false }, { expanded: true }])("current row from Default writes only FI and keeps complete A entry / expanded=$expanded", async ({ expanded }) => {
   const s = await mount({ expanded, raw: null, mode: "default" }), menu = await open(s);
   const openedAccent = menu.querySelector(".session-native-power-effort")?.getAttribute("data-accent") ?? null;

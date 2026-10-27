@@ -5,6 +5,13 @@
   --session-failed: oklch(78% 0.14 22);
   --session-quiet: oklch(74% 0.012 250);
 }
+/* A selected menu can hand off to a dialog in the same commit. Dispose its
+   closed layer before the dialog can close, rather than retain a stale modal
+   pointer lock for the menu's exit animation behind the dialog. */
+.session-mode:has([data-slot="dialog-content"][data-state="open"])
+  [data-slot="dropdown-menu-content"][data-state="closed"] {
+  animation: none;
+}
 .session-mode .session-status {
   --status-color: var(--session-quiet);
   color: var(--status-color);

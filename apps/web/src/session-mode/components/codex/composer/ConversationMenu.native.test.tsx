@@ -22,6 +22,7 @@ import {
 import { resetAppActionHistory } from "./appActionHistory";
 import { rememberClosedTab, resetClosedTabs } from "@session/stores/closedSessionTabs";
 import { ConversationMenu } from "./ConversationMenu";
+
 import * as sessionTabs from "@session/stores/sessionTabSelect";
 import { resetViewedChats } from "./recentView";
 import { toast } from "sonner";
@@ -1203,7 +1204,7 @@ it("archives the open thread only after confirmation", async () => {
   });
   fireEvent.click(await screen.findByRole("menuitem", { name: "归档聊天" }));
   const dialog = await screen.findByRole("dialog", { name: "归档聊天" });
-  expect(dialog.textContent).toContain("将归档当前聊天，并从关注列表移出。Agent 不会被停止。");
+  expect(dialog.textContent).toContain("将归档此聊天，并从关注列表移出。Agent 不会被停止。");
   expect(archiveThread).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "确认归档" }));
   await waitFor(() => expect(archiveThread).toHaveBeenCalledWith("original-owner"));
@@ -1673,4 +1674,89 @@ it("opens the shipped terminal panel", async () => {
   expect(layout.isRightPanelOpen).toBe(true);
   expect(layout.activeRightPanelTab).toBe("terminal");
   expect(layout.terminals).toHaveLength(1);
+});
+
+it.each(["custom", "keyboard"])(
+  "ignores %s shortcut requests while the secondary Session page is hidden",
+  async (kind) => {
+    const previousView = useLayoutStore.getState().view;
+    useLayoutStore.setState({ view: "settings" });
+    try {
+      const mounted = render(
+        <div className="session-mode">
+          <ConversationMenu threadId="original-owner" title="当前会话" />
+        </div>,
+      );
+      const root =
+        mounted.container.querySelector<HTMLElement>(".session-mode")!;
+      const trigger = root.querySelector<HTMLElement>("button")!;
+      let key: KeyboardEvent | undefined;
+      act(() => {
+        root.hidden = true;
+        root.setAttribute("inert", "");
+        // Dispatch in the same turn as hiding: passive listener cleanup has not run.
+        if (kind === "custom")
+          window.dispatchEvent(new Event("codex-open-keyboard-shortcuts"));
+        else {
+          key = new KeyboardEvent("keydown", {
+            key: "/",
+            ctrlKey: true,
+            bubbles: true,
+            cancelable: true,
+          });
+          trigger.dispatchEvent(key);
+        }
+      });
+      expect(key?.defaultPrevented ?? false).toBe(false);
+      act(() => {
+        root.hidden = false;
+        root.removeAttribute("inert");
+      });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.queryByRole("dialog", { name: "键盘快捷方式" })).toBeNull();
+      act(() =>
+        window.dispatchEvent(new Event("codex-open-keyboard-shortcuts")),
+      );
+      expect(
+        await screen.findByRole("dialog", { name: "键盘快捷方式" }),
+      ).toBeTruthy();
+    } finally {
+      useLayoutStore.setState({ view: previousView });
+    }
+  },
+);
+
+it("preserves an already opened shortcut sheet across Session visibility changes", async () => {
+  const previousView = useLayoutStore.getState().view;
+  useLayoutStore.setState({ view: "settings" });
+  try {
+    const mounted = render(
+      <div className="session-mode">
+        <ConversationMenu threadId="original-owner" title="当前会话" />
+      </div>,
+    );
+    const root = mounted.container.querySelector<HTMLElement>(".session-mode")!;
+    act(() => window.dispatchEvent(new Event("codex-open-keyboard-shortcuts")));
+    expect(
+      await screen.findByRole("dialog", { name: "键盘快捷方式" }),
+    ).toBeTruthy();
+    act(() => {
+      root.hidden = true;
+      root.setAttribute("inert", "");
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    act(() => {
+      root.hidden = false;
+      root.removeAttribute("inert");
+    });
+    expect(
+      await screen.findByRole("dialog", { name: "键盘快捷方式" }),
+    ).toBeTruthy();
+  } finally {
+    useLayoutStore.setState({ view: previousView });
+  }
 });

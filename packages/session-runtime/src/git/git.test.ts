@@ -110,12 +110,16 @@ test("worktree operations are serialized and preserve target index with unusual 
     service.createWorktree(cwd, "agent"),
     service.createWorktree(cwd, "agent"),
   ]);
+  // Async repository canonicalization happens before queue admission, so call order is not the result order.
   assert.deepEqual(
-    created.map((x) => x.existed),
+    created.map((x) => x.existed).sort((a, b) => Number(a) - Number(b)),
     [false, true],
   );
-  const wt = created[0]!.worktree_path;
-  assert.deepEqual(created[0]!.copied_env_files, [".env"]);
+  assert.equal(created[0]!.worktree_path, created[1]!.worktree_path);
+  const firstCreation = created.find((entry) => !entry.existed);
+  assert.ok(firstCreation);
+  const wt = firstCreation.worktree_path;
+  assert.deepEqual(firstCreation.copied_env_files, [".env"]);
   await rm(join(wt, ".env")); // copied, unignored env remains a genuine untracked change
   assert.equal(
     (await service.hasWorktreeChanges(cwd, "agent")).has_changes,

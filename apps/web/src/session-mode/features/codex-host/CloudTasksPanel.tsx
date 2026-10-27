@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { v4 as uuid } from "uuid";
@@ -12,7 +12,7 @@ import type {
 } from "@agent-orchestrator/shared";
 import { Button } from "@session/components/ui/button";
 import { readDraft } from "@session/stores/useSessionDraftStore";
-import { composerDrafts } from "@session/components/codex/composer/v2/drafts";
+import { composerDrafts, useComposerDraft, useComposerDraftStatus } from "@session/components/codex/composer/v2/drafts";
 import { authHeaders } from "@session/hooks/runtime";
 type Draft = {
   prompt: string;
@@ -96,6 +96,10 @@ async function api<T>(
 }
 /** Server credentials never enter this component, its device draft, or URLs. */
 export function CloudTasksPanel({ owner }: { owner: CodexHostOwner }) {
+  useComposerDraft(owner.draftOwner);
+  const contextStatus = useComposerDraftStatus(owner.draftOwner);
+  const latestOwner = useRef(owner);
+  latestOwner.current = owner;
   // A late canonical directory alias must not move a device draft to a new key.
   const key = JSON.stringify([owner.draftOwner, owner.agentId ?? ""]),
     draft = drafts((state) => state.sessions[key]);
@@ -132,7 +136,7 @@ export function CloudTasksPanel({ owner }: { owner: CodexHostOwner }) {
   }
   const capability = state.capability,
     available = !!capability?.available,
-    disabled = state.busy || !available;
+    disabled = state.busy || !available || contextStatus.phase !== "ready";
   const selectedTask = state.tasks.find(
     (item) => (item.id ?? item.task?.id) === draft?.taskId,
   );
@@ -145,10 +149,17 @@ export function CloudTasksPanel({ owner }: { owner: CodexHostOwner }) {
   async function createTask() {
     const capturedDraft = draft ?? drafts.getState().sessions[key];
     if (!capturedDraft || !capability?.identity) return;
+    const capturedContexts = composerDrafts.capture(owner.draftOwner);
+    const capturedOwner = JSON.stringify(owner);
     const prompt = composeContextText(
       capturedDraft.prompt,
-      composerDrafts.read(owner.draftOwner).contexts,
+      capturedContexts.contexts,
     );
+    try {
+      await composerDrafts.flush(owner.draftOwner);
+      if (JSON.stringify(latestOwner.current) !== capturedOwner || drafts.getState().sessions[key] !== capturedDraft || !composerDrafts.matches(owner.draftOwner,capturedContexts))
+        throw new Error("云任务输入在保存期间已变化，请核对内容后重新确认");
+    } catch(error) { update(key,{error:String(error)}); return; }
     const destination = capturedDraft.taskId
       ? `续聊任务 ${capturedDraft.taskId}，轮次 ${capturedDraft.turnId}`
       : capturedDraft.environmentId
@@ -198,6 +209,12 @@ export function CloudTasksPanel({ owner }: { owner: CodexHostOwner }) {
       </p>
       {capability?.recovery && (
         <p className="text-xs text-muted-foreground">{capability.recovery}</p>
+      )}
+      {contextStatus.phase !== "ready" && (
+        <p role={contextStatus.error ? "alert" : "status"}>
+          {contextStatus.error ?? (contextStatus.phase === "hydrating" ? "正在恢复上下文草稿…" : "正在保存上下文草稿…")}
+          {contextStatus.error && <button type="button" onClick={() => void composerDrafts.retryStorage().catch((error) => update(key,{error:String(error)}))}>重试保存上下文</button>}
+        </p>
       )}
       <div className="flex flex-wrap gap-2">
         <Button

@@ -1,3 +1,6 @@
+import { threadPermissionParameters } from "./threadPermissionProjection";
+import { HistoryReadScopeChangedError } from "./HistoryReadScopeChangedError";
+import { captureCodexOperationScope, isCodexOperationScopeCurrent, invalidateCodexOperationScope, type CodexOperationScope } from "./codexOperationScope";
 import { MutationNotStartedError } from "./MutationNotStartedError";
 import { createThreadGoalState } from "./threadGoalState";
 import {
@@ -28,8 +31,6 @@ import {
 } from "./codexTranscriptVisibility";
 import { clearAsyncQuestions } from "../features/async-questions/store";
 import type {
-  SandboxMode,
-  SandboxPolicy,
   Thread,
   ThreadForkParams,
   ThreadGoalClearParams,
@@ -69,8 +70,11 @@ import {
 import { clearTrimmedHistoryAnchor } from "./sessionTranscriptBudget";
 import {
   getThreadModelSettings,
+  captureThreadModelRead,
+  captureThreadModelSelection,
+  flushThreadModelSettings,
+  setThreadModelRuntimeScope,
   hydrateThreadModel,
-  useThreadModelStore,
 } from "@session/stores/useThreadModelStore";
 import {
   threadStart as apiThreadStart,
@@ -104,26 +108,6 @@ const goalState = createThreadGoalState({
       queueMicrotask(() => void notifyGoalCompletionAutoClear(threadId));
   },
 }, unknownGoalMutations);
-
-const sandboxModeToPolicy = (
-  mode: SandboxMode,
-  networkAccess: boolean,
-): SandboxPolicy => {
-  switch (mode) {
-    case "read-only":
-      return { type: "readOnly", networkAccess };
-    case "workspace-write":
-      return {
-        type: "workspaceWrite",
-        writableRoots: [],
-        networkAccess,
-        excludeTmpdirEnvVar: false,
-        excludeSlashTmp: false,
-      };
-    case "danger-full-access":
-      return { type: "dangerFullAccess" };
-  }
-};
 
 const resolveThreadCwd = (threadId: string): string | null => {
   const { threads } = useCodexStore.getState();
@@ -316,6 +300,29 @@ const pendingThreadRollbacks = new Map<
   { boundary: string; promise: Promise<Thread> }
 >();
 let runtimeEpoch = 0;
+function invalidateThreadSettingsScope() {
+  invalidateCodexOperationScope();
+  setThreadModelRuntimeScope(String(captureCodexOperationScope().revision));
+}
+/** Capture a new chat's destination and configuration before local async preparation. */
+function captureThreadStart() {
+  const {
+    model, modelProvider, approvalPolicy, approvalsReviewer, sandbox,
+    reasoningEffort, serviceTier, collaborationMode, webSearchRequest,
+    threadCwdMode,
+  } = useConfigStore.getState();
+  return {
+    epoch: runtimeEpoch,
+    scope: captureCodexOperationScope(),
+    cwd: useWorkspaceStore.getState().cwd,
+    config: structuredClone({
+      model, modelProvider, approvalPolicy, approvalsReviewer, sandbox,
+      reasoningEffort, serviceTier, collaborationMode, webSearchRequest,
+      threadCwdMode,
+    }),
+    agentsConfig: structuredClone(buildAgentsConfigFragment()),
+  };
+}
 let goalCompletionRuntimeEpoch: number = import.meta.hot?.data?.goalCompletionRuntimeEpoch ?? 0;
 const goalCompletionAttempts: Map<string, number> = import.meta.hot?.data?.goalCompletionAttempts ?? new Map();
 let goalCompletionAuthorityKnown: boolean = import.meta.hot?.data?.goalCompletionAuthorityKnown ?? useCodexStore.getState().hasAccount !== null;
@@ -351,6 +358,7 @@ const stopGoalCompletionAutoClear = installGoalCompletionAutoClear({
     // A same-valued notification revokes pending authority, but says nothing
     // about whether the last read-only goal belongs to a different account.
     goalCompletionAuthorityKnown = false;
+    invalidateThreadSettingsScope();
     goalState.cancel();
     goalCompletionAutoClear.cancel();
     clearGoalAnnouncements();
@@ -365,10 +373,12 @@ const stopGoalAccountScope = useCodexStore.subscribe((state, previous) => {
   if (state.accountNamespace !== previous.accountNamespace ||
       state.hasAccount !== previous.hasAccount || state.account?.type !== previous.account?.type) {
     goalCompletionAuthorityKnown = state.hasAccount !== null;
+    invalidateThreadSettingsScope();
     resetThreadGoalScope();
   }
 });
 if (import.meta.hot) import.meta.hot.dispose(data => {
+  invalidateCodexOperationScope();
   data.goalCompletionRuntimeEpoch = goalCompletionRuntimeEpoch;
   data.goalCompletionAttempts = goalCompletionAttempts;
   data.goalCompletionAuthorityKnown = goalCompletionAuthorityKnown;
@@ -378,10 +388,21 @@ if (import.meta.hot) import.meta.hot.dispose(data => {
   goalCompletionAutoClear.cancel();
   goalState.cancel();
 });
-const pendingThreadResumes = new Map<string, Promise<void>>();
+const pendingThreadResumes = new Map<string, { promise: Promise<void>; scope: CodexOperationScope }>();
+// The shared promise always reports a discarded snapshot. Each consumer wraps
+// it separately: UI navigation keeps its silent-cancellation contract, while
+// the followed-history scheduler must not count cancellation as a completed read.
+async function consumeHistoryRead(promise: Promise<void>, reportScopeChanges = false) {
+  try {
+    await promise;
+  } catch (error) {
+    if (!reportScopeChanges && error instanceof HistoryReadScopeChangedError) return;
+    throw error;
+  }
+}
 const resumeVersions = new Map<string, symbol>();
 const historyControllers = new Map<string, AbortController>();
-const metadataReads = new Set<string>();
+const metadataReads = new Map<string, CodexOperationScope>();
 
 export function cancelCodexHistoryRead(threadId: string) {
   resumeVersions.delete(threadId);
@@ -406,21 +427,23 @@ export function cancelCodexHistoryRead(threadId: string) {
 }
 
 function readInitialThreadMetadata(threadId: string) {
-  if (getThreadModelSettings(threadId).model || metadataReads.has(threadId))
+  const existingScope = metadataReads.get(threadId);
+  if (getThreadModelSettings(threadId).model || (existingScope && isCodexOperationScopeCurrent(existingScope)))
     return;
-  metadataReads.add(threadId);
+  const scope = captureCodexOperationScope();
+  metadataReads.set(threadId, scope);
   const epoch = runtimeEpoch,
-    revision = useThreadModelStore.getState().threads[threadId]?.revision ?? 0;
+    readToken = captureThreadModelRead(threadId);
   // The runtime's metadata read currently includes full turns. Read it once in
   // the separate history lane; it must never delay recent messages or show a loader.
-  void enqueueSessionRead("history", `metadata:${epoch}:${threadId}`, () =>
+  void enqueueSessionRead("history", `metadata:${epoch}:${scope.revision}:${threadId}`, () =>
     readWithDeadline(
       (signal) => threadRead({ threadId }, { signal, suppressToast: true }),
       15000,
     ),
   )
     .then((response) => {
-      if (runtimeEpoch !== epoch) return;
+      if (runtimeEpoch !== epoch || !isCodexOperationScopeCurrent(scope)) return;
       const settings = response.thread as Thread & {
         model?: string;
         reasoningEffort?: ReturnType<
@@ -428,7 +451,7 @@ function readInitialThreadMetadata(threadId: string) {
         >["reasoningEffort"];
       };
       hydrateThreadModel(threadId, nativeThreadSettings(response, settings), {
-        revision,
+        readToken,
       });
       useCodexStore.setState((s) => {
         const existing = s.threads.find((t) => t.id === threadId);
@@ -451,12 +474,13 @@ function readInitialThreadMetadata(threadId: string) {
       });
     })
     .catch(() => {
-      metadataReads.delete(threadId);
+      if (metadataReads.get(threadId) === scope) metadataReads.delete(threadId);
     });
 }
 /** Invalidate responses from the previous runtime without touching drafts or history. */
 export function resetCodexRuntimeState() {
   runtimeEpoch++;
+  invalidateThreadSettingsScope();
   goalCompletionRuntimeEpoch++;
   goalCompletionAuthorityKnown = false;
   resetThreadGoalScope(false);
@@ -583,10 +607,17 @@ export const codexService = {
       throw error;
     }
   },
-  async threadStart(options?: { shouldActivate?: () => boolean }) {
+  captureThreadStart,
+  async threadStart(options?: {
+    shouldActivate?: () => boolean;
+    captured?: ReturnType<typeof captureThreadStart>;
+  }) {
     const set = useCodexStore.setState;
-    const epoch = runtimeEpoch;
+    const captured = options?.captured ?? captureThreadStart();
+    const epoch = captured.epoch;
     try {
+      if (epoch !== runtimeEpoch || !isCodexOperationScopeCurrent(captured.scope))
+        throw new Error("连接目标已切换，尚未创建会话；草稿已保留，请核对原连接后重试。");
       const {
         model,
         modelProvider,
@@ -598,8 +629,8 @@ export const codexService = {
         collaborationMode,
         webSearchRequest,
         threadCwdMode,
-      } = useConfigStore.getState();
-      const { cwd } = useWorkspaceStore.getState();
+      } = captured.config;
+      const { cwd } = captured;
       let threadCwd = cwd;
       if (threadCwdMode === "worktree" && cwd) {
         const prepared = await readWithDeadline(async (signal) => {
@@ -609,7 +640,7 @@ export const codexService = {
           if (signal.aborted) throw signal.reason;
           return result;
         }, 60_000);
-        if (epoch !== runtimeEpoch) {
+        if (epoch !== runtimeEpoch || !isCodexOperationScopeCurrent(captured.scope)) {
           throw new Error(
             "连接目标已切换，创建结果未确认，请先核对原连接的会话列表及工作区状态。",
           );
@@ -636,7 +667,7 @@ export const codexService = {
           web_search_request: webSearchRequest,
           view_image_tool: true,
           // Inject user-configured multi-agent limits.
-          ...buildAgentsConfigFragment(),
+          ...captured.agentsConfig,
         },
       };
       const response = await readWithDeadline(async (signal) => {
@@ -645,7 +676,7 @@ export const codexService = {
         if (signal.aborted) throw signal.reason;
         return result;
       }, 30_000);
-      if (epoch !== runtimeEpoch) {
+      if (epoch !== runtimeEpoch || !isCodexOperationScopeCurrent(captured.scope)) {
         throw new Error(
           "连接目标已切换，创建结果未确认，请先核对原连接的会话列表及工作区状态。",
         );
@@ -703,19 +734,26 @@ export const codexService = {
       /** Seeking a search hit must not move the contiguous older-history boundary. */
       preserveEarlierCursor?: boolean;
       afterTurnId?: string;
+      /** Internal scheduler only: a revoked snapshot must leave its revision pending. */
+      reportScopeChanges?: boolean;
     },
   ) {
+    const scope = captureCodexOperationScope();
     // Recovery follows existing event-driven history reads; it never adds a
     // transcript poll or acquires a native execution instance.
     if (!options?.cursor) void goalState.read(threadId).catch(() => undefined);
     const precedingRead = !overrides
       ? pendingThreadResumes.get(threadId)
       : undefined;
-    if (precedingRead) {
-      if (!options?.cursor) return precedingRead;
+    if (precedingRead && isCodexOperationScopeCurrent(precedingRead.scope)) {
+      if (!options?.cursor) return consumeHistoryRead(precedingRead.promise, options?.reportScopeChanges);
       // An opaque target cursor is a different page. Let the bounded current
       // read settle, then request that page rather than reusing its response.
-      await precedingRead.catch(() => undefined);
+      await precedingRead.promise.catch(() => undefined);
+      if (!isCodexOperationScopeCurrent(scope)) {
+        if (options?.reportScopeChanges) throw new HistoryReadScopeChangedError();
+        return;
+      }
       if (options?.signal?.aborted)
         throw (
           options.signal.reason ?? new DOMException("Aborted", "AbortError")
@@ -750,11 +788,10 @@ export const codexService = {
     setSessionChecking(threadId, true);
     const pending = (async () => {
       const baseline = useCodexStore.getState();
-      const modelRevision =
-        useThreadModelStore.getState().threads[threadId]?.revision ?? 0;
+      const modelReadToken = captureThreadModelRead(threadId);
       const response = await enqueueSessionRead(
         options?.recent ? "recent" : "history",
-        `${runtimeEpoch}:${threadId}`,
+        `${runtimeEpoch}:${scope.revision}:${threadId}`,
         () =>
           readWithDeadline(
             (signal) =>
@@ -780,10 +817,15 @@ export const codexService = {
                 },
                 { suppressToast: options?.background, signal },
               ),
-            options?.recent ? 5000 : 15000,
+            // Recent pages use the serialized independent reader: its existing
+            // 120s queue/read deadline plus up to 4s owned-process cleanup.
+            // A 5s client cutoff abandoned valid pages and fed retry congestion.
+            options?.recent ? 125_000 : 15_000,
             controller.signal,
           ),
+        controller.signal,
       );
+      if (!isCodexOperationScopeCurrent(scope)) throw new HistoryReadScopeChangedError();
       if (resumeVersions.get(threadId) !== version) return;
       const page = "historyPage" in response ? response.historyPage : undefined;
       const existingThread = useCodexStore
@@ -811,7 +853,7 @@ export const codexService = {
         >["reasoningEffort"];
       };
       hydrateThreadModel(threadId, nativeThreadSettings(response, settings), {
-        revision: modelRevision,
+        readToken: modelReadToken,
         notify: !!baseline.historyLoadedMap[threadId],
       });
       const itemPage = page && "itemPage" in page && page.itemPage;
@@ -915,10 +957,14 @@ export const codexService = {
       acknowledgeCodexTranscriptRestore(threadId);
       if (page) readInitialThreadMetadata(threadId);
     })();
-    if (!overrides) pendingThreadResumes.set(threadId, pending);
+    if (!overrides) pendingThreadResumes.set(threadId, { promise: pending, scope });
     try {
       await pending;
     } catch (error: unknown) {
+      if (!isCodexOperationScopeCurrent(scope)) {
+        if (options?.reportScopeChanges) throw new HistoryReadScopeChangedError();
+        return;
+      }
       if (resumeVersions.get(threadId) !== version) return;
       if (resumeVersions.get(threadId) === version)
         useCodexStore.setState((state) => ({
@@ -947,7 +993,7 @@ export const codexService = {
         );
         setSessionChecking(threadId, false);
       }
-      if (pendingThreadResumes.get(threadId) === pending)
+      if (pendingThreadResumes.get(threadId)?.promise === pending)
         pendingThreadResumes.delete(threadId);
     }
   },
@@ -1008,6 +1054,7 @@ export const codexService = {
         "不能从尚未结束的轮次创建包含该轮的分支。",
       );
     const set = useCodexStore.setState;
+    const scope = captureCodexOperationScope();
     try {
       const params: ThreadForkParams = {
         threadId,
@@ -1016,6 +1063,8 @@ export const codexService = {
         deferGoalContinuation: true,
       };
       const response = await threadFork(params);
+      if (!isCodexOperationScopeCurrent(scope))
+        throw new Error("连接或账号已变化，分支结果未确认，请核对原连接，勿重复创建分支。");
       hydrateThreadModel(
         response.thread.id,
         nativeThreadSettings(response, response.thread),
@@ -1133,6 +1182,7 @@ export const codexService = {
   ) {
     const set = useCodexStore.setState;
     const epoch = runtimeEpoch;
+    const scope = captureCodexOperationScope();
     const timingAtRequest = useCodexStore.getState().turnTimingMap[threadId];
     try {
       const userInputs = structuredClone(
@@ -1163,33 +1213,28 @@ export const codexService = {
           )
         : {};
 
-      const {
-        model,
-        reasoningEffort,
-        serviceTier,
-        approvalPolicy,
-        approvalsReviewer,
-        sandbox,
-        sandboxPolicy,
-        webSearchRequest,
-        collaborationMode,
-        personality,
-      } = getThreadModelSettings(threadId);
-
-      const response = await turnStart({
-        threadId,
-        ...(clientUserMessageId ? { clientUserMessageId } : {}),
-        input: userInputs,
+      const settingsCapture = configOverride ? undefined : captureThreadModelSelection(threadId);
+      if (settingsCapture) {
+        try {
+          await flushThreadModelSettings(threadId, settingsCapture);
+        } catch (error) {
+          throw new MutationNotStartedError(String(error));
+        }
+        if (epoch !== runtimeEpoch || !isCodexOperationScopeCurrent(scope))
+          throw new MutationNotStartedError("连接目标已切换，请核对会话设置后再发送");
+      }
+      // An explicit override is a complete, previously captured snapshot (Goal
+      // first turn / rollback retry), not a partial merge with today's UI defaults.
+      // Omitted settings, including cwd, remain omitted so native inheritance wins.
+      let parameters = capturedConfig;
+      if (settingsCapture) {
+        const {
+          model, reasoningEffort, serviceTier, collaborationMode, personality,
+        } = settingsCapture.settings;
+        parameters = {
         cwd: resolveThreadCwd(threadId),
-        ...(model
-          ? {
-              approvalPolicy,
-              approvalsReviewer,
-              sandboxPolicy:
-                sandboxPolicy ?? sandboxModeToPolicy(sandbox, webSearchRequest),
-              serviceTier,
-            }
-          : {}),
+        ...threadPermissionParameters(settingsCapture.settings),
+        ...(model ? { serviceTier } : {}),
         model: model || null,
         effort: reasoningEffort ?? null,
         ...(personality ? { personality } : {}),
@@ -1207,10 +1252,18 @@ export const codexService = {
               },
             }
           : {}),
-        ...capturedConfig,
+        };
+      }
+      if (epoch !== runtimeEpoch || !isCodexOperationScopeCurrent(scope))
+        throw new MutationNotStartedError("连接或账号已变化，请核对会话后再发送");
+      const response = await turnStart({
+        threadId,
+        ...(clientUserMessageId ? { clientUserMessageId } : {}),
+        input: userInputs,
+        ...parameters,
       });
 
-      if (epoch !== runtimeEpoch)
+      if (epoch !== runtimeEpoch || !isCodexOperationScopeCurrent(scope))
         throw new Error("会话服务已重启，请核对消息结果");
       const preview = getThreadPreviewFromInput(userInputs);
       set((state) => {

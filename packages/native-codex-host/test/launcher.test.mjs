@@ -46,6 +46,21 @@ if (!process.argv.includes('--install-extension')) writeFileSync(join(process.en
   } finally { await rm(data.base, { recursive: true, force: true }); }
 });
 
+test('launcher passes the selected native worker limit into its owned host and record', async () => {
+  const code = `import { writeFileSync } from 'node:fs'; import { join } from 'node:path';
+if (!process.argv.includes('--install-extension'))
+  writeFileSync(join(process.env.HOME, 'workers'), process.env.TOKIO_WORKER_THREADS);
+process.exit(0);`;
+  const data = await fixture(code);
+  try {
+    const result = await run([...data.args, '--unsafe-no-auth', '--app-server-worker-threads', '4']);
+    assert.equal(result.code, 0, result.output);
+    assert.equal(await readFile(join(data.root, 'h', 'workers'), 'utf8'), '4');
+    const record = JSON.parse(await readFile(join(data.base, 'record.json'), 'utf8'));
+    assert.equal(record.appServerWorkerThreads, 4);
+  } finally { await rm(data.base, { recursive: true, force: true }); }
+});
+
 for (const enabled of [false, true]) test(`launcher captures explicit fixture auto-open flag as private boolean ${enabled}`, async () => {
   const data = await fixture('process.exit(0);');
   const ids = ['019aabcd-1234-7890-abcd-0123456789ab', '019aabcd-1234-7890-abcd-0123456789ac'];

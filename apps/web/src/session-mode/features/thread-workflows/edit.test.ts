@@ -212,3 +212,24 @@ it("a newer edit buffer revision survives a delayed successful send even when it
     "Detached draft",
   );
 });
+it("reuses a completed rollback's frozen config despite a later unrepresentable permission choice", async () => {
+  const { MutationNotStartedError } = await import("@session/services/MutationNotStartedError");
+  const { flushThreadModelSettings } = await import("@session/stores/useThreadModelStore");
+  mocks.start.mockRejectedValueOnce(new MutationNotStartedError("explicitly not sent"));
+  await expect(editLastUserMessage(source, "edited", inputs as never)).rejects.toThrow("explicitly not sent");
+  const captured = structuredClone(mocks.start.mock.calls[0][5]);
+  changeThreadModel("owner", { webSearchRequest: true }); await flushThreadModelSettings("owner");
+  await expect(editLastUserMessage(source, "edited", inputs as never)).resolves.toBe("replacement");
+  expect(mocks.rollback).toHaveBeenCalledTimes(1);
+  expect(mocks.start).toHaveBeenCalledTimes(2);
+  expect(mocks.start.mock.calls[1][5]).toEqual(captured);
+  expect(readDraft(sessionDraftKey("codex", "owner")).text).toBe("Detached draft");
+});
+it("an unrepresentable initial permission choice blocks rollback and preserves the inline edit", async () => {
+  changeThreadModel("owner", { webSearchRequest: true });
+  useThreadWorkflowStore.getState().setInlineEdit(source, "edited");
+  const original = useThreadWorkflowStore.getState().inlineEdits;
+  await expect(editLastUserMessage(source, "edited", inputs as never)).rejects.toThrow(/权限/);
+  expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.rollback).not.toHaveBeenCalled(); expect(mocks.start).not.toHaveBeenCalled();
+  expect(useThreadWorkflowStore.getState().inlineEdits).toBe(original);
+});

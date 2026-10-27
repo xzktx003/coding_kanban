@@ -19,6 +19,7 @@ import {
 } from "@session/services/sessionNavigationGuard";
 let unregister: (() => void) | undefined;
 afterEach(() => {
+  vi.useRealTimers();
   unregister?.();
   unregister = undefined;
   useSessionNavigationGuard.setState({ pending: null });
@@ -64,6 +65,9 @@ beforeEach(() => {
     error: null,
   });
   useCodexStore.setState({
+    hasAccount: false,
+    account: null,
+    accountNamespace: null,
     currentThreadId: "original",
     threads: [],
     events: {},
@@ -84,6 +88,62 @@ beforeEach(() => {
   useSessionDraftStore
     .getState()
     .setText(sessionDraftKey("codex", "original"), "Original unsent draft");
+});
+it.each([false, true])("waits for the first account confirmation without replacing the original navigation intent (new owner=%s)", async (changedOwner) => {
+  useCodexStore.setState({ hasAccount: null });
+  const activate = vi.fn();
+  const pending = openThreadLink({ threadId: "target", turnId: "chosen" }, activate);
+  expect(useThreadLinkStore.getState().loading).toBe(true);
+  expect(mocks.read).not.toHaveBeenCalled();
+  if (changedOwner) {
+    useCodexStore.setState({ currentThreadId: "newer" });
+    useWorkspaceStore.setState({ cwd: "/newer" });
+  }
+  useCodexStore.getState().setAccount({ type: "apiKey" });
+  expect(await pending).toBe(!changedOwner);
+  expect(mocks.read).toHaveBeenCalledTimes(1);
+  expect(useCodexStore.getState().historyLoadedMap.target).toBe(true);
+  if (changedOwner) {
+    expect(activate).not.toHaveBeenCalled();
+    expect(useAgentCenterStore.getState().cards).toHaveLength(0);
+    expect(useCodexStore.getState().currentThreadId).toBe("newer");
+    expect(useThreadLinkStore.getState().retainedThreadId).toBe("target");
+  } else expect(activate).toHaveBeenCalledTimes(1);
+});
+it("a superseded account wait cannot issue a later history request or modify the newer link", async () => {
+  useCodexStore.setState({ hasAccount: null });
+  const activate = vi.fn();
+  const pending = openThreadLink({ threadId: "target" }, activate);
+  useThreadLinkStore.setState({ requestId: 2, loading: true, error: "newer link" });
+  expect(await pending).toBe(false);
+  useCodexStore.getState().setAccount(null);
+  await Promise.resolve();
+  expect(mocks.read).not.toHaveBeenCalled();
+  expect(activate).not.toHaveBeenCalled();
+  expect(useThreadLinkStore.getState()).toMatchObject({ requestId: 2, loading: true, error: "newer link" });
+});
+it("an unconfirmed account uses the existing bounded read deadline and does not read after timeout", async () => {
+  vi.useFakeTimers();
+  useCodexStore.setState({ hasAccount: null });
+  const pending = openThreadLink({ threadId: "target" }, vi.fn());
+  const rejected = expect(pending).rejects.toThrow();
+  await vi.advanceTimersByTimeAsync(15_001);
+  await rejected;
+  expect(useThreadLinkStore.getState().loading).toBe(false);
+  useCodexStore.getState().setAccount(null);
+  await Promise.resolve();
+  expect(mocks.read).not.toHaveBeenCalled();
+});
+it("still rejects account changes after a known-account history request starts", async () => {
+  let finish!: (value: unknown) => void;
+  mocks.read.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  const activate = vi.fn();
+  const pending = openThreadLink({ threadId: "target" }, activate);
+  useCodexStore.getState().setAccount({ type: "apiKey" });
+  finish({ thread });
+  await expect(pending).rejects.toThrow(/连接目标/);
+  expect(useCodexStore.getState().historyLoadedMap.target).not.toBe(true);
+  expect(activate).not.toHaveBeenCalled();
 });
 it("hydrates only the verified native owner's settings and preserves newer owner revisions through a delayed read", async () => {
   const native = {

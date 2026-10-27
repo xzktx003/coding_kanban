@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { IDBFactory } from "fake-indexeddb";
 import { FileViewer } from "./FileViewer";
 import { useCodexStore } from "@session/components/codex/stores";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
@@ -43,6 +44,7 @@ vi.mock("../editor/CodeEditor", () => ({
 }));
 const owner = sessionDraftKey("codex", "owner");
 beforeEach(() => {
+  vi.stubGlobal("indexedDB", new IDBFactory());
   useAgentSettingsStore.setState({ selectedAgent: "codex" });
   useCodexStore.setState({
     currentThreadId: "owner",
@@ -55,9 +57,17 @@ beforeEach(() => {
   useVsCodePanelStore.setState({ aliases: {} });
   useEditorStore.setState({ roots: { "/owner/source.ts": "/owner" } });
   useFileDocumentStore.setState({ documents: {} });
-  useComposerDraftStore.setState({ drafts: {}, error: null });
+  useComposerDraftStore.setState({ drafts: {}, status: {}, error: null });
   useSessionDraftStore.setState({ drafts: {} });
   useSessionDraftStore.getState().setText(owner, "Detached original draft");
+});
+afterEach(async () => {
+  await Promise.allSettled(
+    Object.keys(useComposerDraftStore.getState().drafts).map((key) =>
+      composerDrafts.flush(key),
+    ),
+  );
+  vi.unstubAllGlobals();
 });
 it("adds the original file selection through the validated owner and retains detached text", async () => {
   render(<FileViewer filePath="/owner/source.ts" />);

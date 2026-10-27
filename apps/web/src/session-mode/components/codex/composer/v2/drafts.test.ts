@@ -1,14 +1,31 @@
-import { beforeEach, expect, it, vi } from "vitest";
-import { composerDrafts, useComposerDraftStore } from "./drafts";
-beforeEach(() => {
+import { beforeEach, afterEach, expect, it, vi } from "vitest";
+import { IDBFactory, IDBObjectStore } from "fake-indexeddb";
+let draftModule: typeof import("./drafts");
+let storage: typeof import("./draftStorage");
+beforeEach(async () => {
   localStorage.clear();
-  useComposerDraftStore.setState({ drafts: {}, error: null });
+  vi.stubGlobal("indexedDB", new IDBFactory());
+  vi.resetModules();
+  draftModule = await import("./drafts");
+  storage = await import("./draftStorage");
 });
-it("keeps the in-memory context when persistence fails and explicitly retries", () => {
+afterEach(async () => {
+  vi.restoreAllMocks();
+  const { composerDrafts, useComposerDraftStore } = draftModule;
+  await Promise.allSettled(
+    Object.keys(useComposerDraftStore.getState().drafts).map((owner) =>
+      composerDrafts.flush(owner),
+    ),
+  );
+  draftModule.takeContextDraftHandoff().releaseListener();
+  vi.unstubAllGlobals();
+});
+it("keeps the in-memory context when persistence fails and explicitly retries", async () => {
+  const { composerDrafts, useComposerDraftStore } = draftModule;
   const write = vi
-    .spyOn(Storage.prototype, "setItem")
+    .spyOn(IDBObjectStore.prototype, "put")
     .mockImplementation(() => {
-      throw new Error("quota");
+      throw new DOMException("quota", "QuotaExceededError");
     });
   composerDrafts.add("a", {
     id: "saved",
@@ -16,24 +33,26 @@ it("keeps the in-memory context when persistence fails and explicitly retries", 
     name: "logs",
     text: "do not lose",
   });
+  await expect(composerDrafts.flush("a")).rejects.toThrow("quota");
   expect(useComposerDraftStore.getState().error).toContain("未保存");
   expect(composerDrafts.read("a").contexts[0].text).toBe("do not lose");
   write.mockRestore();
-  composerDrafts.retryStorage();
+  await composerDrafts.retryStorage();
   expect(useComposerDraftStore.getState().error).toBeNull();
   expect(
-    JSON.parse(localStorage.getItem("kanban.session.composer-v2")!).a
-      .contexts[0].text,
+    (await storage.contextDraftStorage.load("a")).contexts[0].value.text,
   ).toBe("do not lose");
+  expect(localStorage.getItem(storage.LEGACY_CONTEXT_KEY)).toBeNull();
 });
-it("clears only submitted contexts and isolates a later draft in another session", () => {
+it("clears only submitted contexts and isolates a later draft in another session", async () => {
+  const { composerDrafts } = draftModule;
   composerDrafts.add("a", {
     id: "old",
     kind: "paste",
     name: "日志",
     text: "original",
   });
-  const sent = composerDrafts.read("a").contexts;
+  const sent = composerDrafts.capture("a");
   composerDrafts.add("a", {
     id: "new",
     kind: "quote",
@@ -46,11 +65,21 @@ it("clears only submitted contexts and isolates a later draft in another session
     name: "其他",
     text: "other session",
   });
-  composerDrafts.clearSubmitted("a", sent);
+  composerDrafts.clearSubmitted("a", sent.contexts, sent.versions);
   expect(composerDrafts.read("a").contexts.map((x) => x.id)).toEqual(["new"]);
   expect(composerDrafts.read("b").contexts[0].text).toBe("other session");
+  await Promise.all([composerDrafts.flush("a"), composerDrafts.flush("b")]);
+  expect(
+    (await storage.contextDraftStorage.load("a")).contexts.map(
+      (x) => x.value.id,
+    ),
+  ).toEqual(["new"]);
+  expect(
+    (await storage.contextDraftStorage.load("b")).contexts[0].value.text,
+  ).toBe("other session");
 });
-it("moves new-session context and drawing drafts without erasing an existing destination", () => {
+it("moves new-session context and drawing drafts without erasing an existing destination", async () => {
+  const { composerDrafts } = draftModule;
   composerDrafts.add("new", {
     id: "source",
     kind: "file",
@@ -64,14 +93,23 @@ it("moves new-session context and drawing drafts without erasing an existing des
     name: "t",
     text: "existing",
   });
-  composerDrafts.move("new", "thread");
+  await composerDrafts.move("new", "thread");
   expect(composerDrafts.read("thread").contexts.map((x) => x.id)).toEqual([
     "target",
     "source",
   ]);
   expect(composerDrafts.read("new").contexts).toHaveLength(0);
+  expect(
+    (await storage.contextDraftStorage.load("thread")).contexts.map(
+      (x) => x.value.id,
+    ),
+  ).toEqual(["target", "source"]);
+  expect((await storage.contextDraftStorage.load("new")).contexts).toHaveLength(
+    0,
+  );
 });
-it("undo restores a removed context only to its original owner and position", () => {
+it("undo restores a removed context only to its original owner and position", async () => {
+  const { composerDrafts } = draftModule;
   composerDrafts.add("a", {
     id: "one",
     kind: "paste",
@@ -85,14 +123,14 @@ it("undo restores a removed context only to its original owner and position", ()
     text: "two",
   });
   const undo = composerDrafts.remove("a", "one");
-  undo();
-  undo();
+  await undo();
+  await undo();
   expect(composerDrafts.read("a").contexts.map((x) => x.id)).toEqual([
     "one",
     "two",
   ]);
   expect(composerDrafts.read("b").contexts).toHaveLength(0);
-  expect(
-    JSON.parse(localStorage.getItem("kanban.session.composer-v2")!).a.contexts,
-  ).toHaveLength(2);
+  expect((await storage.contextDraftStorage.load("a")).contexts).toHaveLength(
+    2,
+  );
 });

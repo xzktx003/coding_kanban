@@ -58,7 +58,10 @@ import {
   requestSessionHistorySync,
   useSessionSyncStore,
 } from "@session/stores/useSessionSyncStore";
-import { projectWorkflowRows } from "./projectWorkflowRows";
+import {
+  projectWorkflowRows,
+  latestAssistantActionRow,
+} from "./projectWorkflowRows";
 import {
   ThreadWorkflowToolbar,
   ThreadUserNavigationRail,
@@ -135,12 +138,14 @@ const ThreadMessage = memo(
   function ThreadMessage({
     row,
     nativeEditUser = false,
+    alwaysShowAssistantActions = false,
     hookRuns,
     onToggleWork,
     retryNotice,
   }: {
     row: TranscriptWorkRow;
     nativeEditUser?: boolean;
+    alwaysShowAssistantActions?: boolean;
     hookRuns?: readonly HookRunSummary[];
     onToggleWork?: (key: string) => void;
     retryNotice?: string;
@@ -168,6 +173,7 @@ const ThreadMessage = memo(
         event={item.event}
         context={row.context}
         nativeEditUser={nativeEditUser}
+        alwaysShowAssistantActions={alwaysShowAssistantActions}
         hookRuns={hookRuns}
       />
     );
@@ -181,6 +187,8 @@ const ThreadMessage = memo(
     if (before.row.work || after.row.work)
       return before.row.work === after.row.work;
     if (before.nativeEditUser !== after.nativeEditUser) return false;
+    if (before.alwaysShowAssistantActions !== after.alwaysShowAssistantActions)
+      return false;
     if (before.hookRuns !== after.hookRuns) return false;
     if (before.row === after.row) return true;
     if (before.row.activity || after.row.activity)
@@ -315,6 +323,21 @@ const CodexTranscript = memo(function CodexTranscript({
   );
   const linkedTurn = useThreadLinkStore((state) => state.target);
   const interactionVisible = useAgentInteractionVisible();
+  // Subscribe to one primitive native identity, never the snapshot's turns/items.
+  const snapshotLastTurnId = useCodexStore(
+    (state) =>
+      state.threads
+        .find((thread) => thread.id === activeThreadId)
+        ?.turns?.at(-1)?.id,
+  );
+  const persistentAssistantRowId =
+    !inspection && interactionVisible && !streamingMessage
+      ? latestAssistantActionRow(
+          workflow,
+          [runtime.turnId, turnTiming?.turnId, snapshotLastTurnId],
+          runtime.running && !runtime.turnId,
+        )
+      : undefined;
   const inputThreadId = useCodexStore((state) => state.currentThreadId);
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
@@ -1332,6 +1355,9 @@ const CodexTranscript = memo(function CodexTranscript({
                         }
                         nativeEditUser={
                           rows[item.index].key === workflow.lastUserRowId
+                        }
+                        alwaysShowAssistantActions={
+                          rows[item.index].key === persistentAssistantRowId
                         }
                         hookRuns={rowHooks(rows[item.index])}
                       />

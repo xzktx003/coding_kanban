@@ -123,16 +123,14 @@ test("workspace upload events only run for the current root and can be cancelled
   let capturedSignal: AbortSignal | null = null;
   vi.mocked(uploadWorkspaceFile).mockImplementation(
     (_root, _path, _file, _version, options) =>
-      new Promise<{ path: string; version: string }>((resolve, reject) => {
+      new Promise<{ path: string; version: string }>((_resolve, reject) => {
         capturedSignal = options?.signal ?? null;
         capturedSignal?.addEventListener("abort", () => {
           const error = new DOMException("cancelled", "AbortError");
           reject(error);
         });
-        setTimeout(
-          () => resolve({ path: "/repo/src/upload.txt", version: "v1" }),
-          50,
-        );
+        // This case exercises cancellation while the upload is pending. A
+        // wall-clock completion races the DOM update on a busy test worker.
       }),
   );
   render(
@@ -159,8 +157,10 @@ test("workspace upload events only run for the current root and can be cancelled
   );
   await waitFor(() => expect(capturedSignal).toBeTruthy());
 
-  fireEvent.click(screen.getByRole("button", { name: "取消上传" }));
+  fireEvent.click(await screen.findByRole("button", { name: "取消上传" }));
+  expect(vi.mocked(uploadWorkspaceFile).mock.calls[0][4]?.signal?.aborted).toBe(true);
 
+  await waitFor(() => expect(screen.queryByRole("button", { name: "取消上传" })).toBeNull());
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   expect(uploadWorkspaceFile).toHaveBeenCalledWith(
     "/repo",

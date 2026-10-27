@@ -2,7 +2,12 @@ import { useFollowupSettingsStore } from "@session/stores/useFollowupSettingsSto
 
 /** The three enabled main-editor variants in VSIX 26.51002.51308. */
 export function ComposerEnterSettings() {
-  const { enterBehavior, setEnterBehavior } = useFollowupSettingsStore();
+  const {
+    enterBehavior,
+    setEnterBehavior,
+    persistenceError,
+    retryPersistence,
+  } = useFollowupSettingsStore();
   return (
     <fieldset
       className="session-native-enter-settings"
@@ -27,6 +32,16 @@ export function ComposerEnterSettings() {
         </label>
       ))}
       <p>运行中 Ctrl/⌘ Shift Enter 临时切换排队与引导。</p>
+      {persistenceError && (
+        <div role="alert">
+          <p>
+            {persistenceError}。当前页面继续使用所选偏好；关闭前请重试保存。
+          </p>
+          <button type="button" onClick={retryPersistence}>
+            重试保存偏好
+          </button>
+        </div>
+      )}
     </fieldset>
   );
 }

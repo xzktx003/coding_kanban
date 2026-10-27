@@ -14,6 +14,7 @@ const directoryNames = {
 const configKeys = new Set([
   'codeServer', 'officialVsix', 'codexCli', 'port', 'brokerPort', 'runtimeBase', 'record',
   'unsafeNoAuth', 'passwordFile', 'sharedCodexHome', 'connectionProfileHome',
+  'appServerWorkerThreads',
 ]);
 
 function absolute(value, name) {
@@ -143,6 +144,7 @@ export async function runNativeCodexService(input, {
     ...(options.passwordFile ? { 'password-file': options.passwordFile } : {}),
     ...(options.sharedCodexHome ? { 'shared-codex-home': options.sharedCodexHome } : {}),
     ...(options.connectionProfileHome ? { 'connection-profile-home': options.connectionProfileHome } : {}),
+    'app-server-worker-threads': options.appServerWorkerThreads,
   };
   const args = [absolute(launcher, 'launcher'), ...Object.entries(fields).flatMap(([key, value]) => [`--${key}`, String(value)]),
     '--auto-open-new-chats', ...(options.unsafeNoAuth === true ? ['--unsafe-no-auth'] : [])];

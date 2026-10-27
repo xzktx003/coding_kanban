@@ -300,7 +300,8 @@ test("mobile viewport, soft keyboard and full editor keep strength and controls 
     await expect(page.getByRole("button", { name: "停止生成", exact: true })).toBeVisible();
     await expect(page.locator(".session-native-composer-status")).toHaveText("本轮结束后发送");
     const landscapeSend = (await page
-      .getByRole("button", { name: "发送消息", exact: true })
+      .locator('.session-agent-view .session-native-composer[data-owner-thread="ux-0"]')
+      .getByRole("button", { name: "加入队列", exact: true })
       .boundingBox())!;
     expect(landscapeSend.y + landscapeSend.height).toBeLessThanOrEqual(390);
     await page.setViewportSize({ width: 390, height: 844 });

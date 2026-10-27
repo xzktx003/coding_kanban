@@ -19,12 +19,13 @@ const testPath = [
 const skipWebServer = process.env.PLAYWRIGHT_SKIP_WEBSERVER === '1';
 const reuseExistingServer = process.env.PLAYWRIGHT_REUSE_EXISTING_SERVER === '1';
 const frontendHost = process.env.PLAYWRIGHT_FRONTEND_HOST ?? '127.0.0.1';
+// 0.0.0.0 is a bind target, not a routable readiness-check destination.
+const frontendReadyHost =
+  frontendHost === '0.0.0.0' ? '127.0.0.1' : frontendHost;
 const frontendPort = process.env.PLAYWRIGHT_FRONTEND_PORT ?? webPort;
 const frontendProtocol =
   process.env.PLAYWRIGHT_FRONTEND_PROTOCOL ??
-  (process.env.WEB_HTTPS === '1' || process.env.VITE_DEV_HTTPS === '1'
-    ? 'https'
-    : 'http');
+  (process.env.VITE_DEV_HTTPS === '1' ? 'https' : 'http');
 
 if (frontendProtocol !== 'http' && frontendProtocol !== 'https') {
   throw new Error(
@@ -69,7 +70,7 @@ export default defineConfig({
             WEB_BACKEND_PORT:
               process.env.WEB_BACKEND_PORT?.trim() || String(serverPort),
           },
-          url: `${frontendProtocol}://${frontendHost}:${frontendPort}`,
+          url: `${frontendProtocol}://${frontendReadyHost}:${frontendPort}`,
           ignoreHTTPSErrors: frontendProtocol === 'https',
           reuseExistingServer,
           timeout: 60_000,

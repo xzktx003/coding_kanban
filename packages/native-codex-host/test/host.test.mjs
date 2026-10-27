@@ -151,6 +151,17 @@ test('child environment isolates modern and legacy IPC and omits inherited crede
   assert.equal(env.NODE_OPTIONS, `--require=${JSON.stringify(fileURLToPath(new URL('../companion/preload.cjs', import.meta.url)))}`);
   assert.equal(env.OPENAI_API_KEY, undefined); assert.equal(env.PASSWORD, undefined); assert.equal(env.CODEX_API_KEY, undefined);
 });
+test('native app-server worker count is bounded and cannot inherit host oversubscription', () => {
+  const automatic = validateOptions(options());
+  assert.ok(automatic.appServerWorkerThreads >= 1 && automatic.appServerWorkerThreads <= 8);
+  assert.equal(buildChildEnv(automatic, { TOKIO_WORKER_THREADS: '200' }).TOKIO_WORKER_THREADS,
+    String(automatic.appServerWorkerThreads));
+  const explicit = validateOptions({ ...options(), appServerWorkerThreads: 4 });
+  assert.equal(explicit.appServerWorkerThreads, 4);
+  assert.equal(buildChildEnv(explicit, { TOKIO_WORKER_THREADS: '200' }).TOKIO_WORKER_THREADS, '4');
+  for (const value of [0, 33, '08', '4;exit', '-1', 2.5, null])
+    assert.throws(() => validateOptions({ ...options(), appServerWorkerThreads: value }), /worker threads/);
+});
 test('child environment preserves an explicit Node proxy choice without enabling it by default', () => {
   const configured = validateOptions(options());
   for (const value of ['0', '1']) {

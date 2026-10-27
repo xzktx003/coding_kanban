@@ -1,6 +1,7 @@
 import { SubagentSummary } from "@session/features/subagents/SubagentSummary";
 import { sessionDraftSubmissions } from "@session/features/subagents/submissions";
 import { v4 as randomUUID } from "uuid";
+import { newSessionEditId } from "@session/services/sessionEditIdentity";
 import { mentionDrafts } from "@session/features/subagents/mentions";
 import { AgentMentionPicker } from "@session/features/subagents/AgentMentionPicker";
 import { BackgroundAgentSummary } from "@session/features/subagents/BackgroundAgentSummary";
@@ -11,7 +12,7 @@ import { composeContextText } from "@agent-orchestrator/shared";
 import {
   composerDrafts,
   useComposerDraft,
-  useComposerDraftStore,
+  useComposerDraftStatus,
 } from "./v2/drafts";
 import { ContextAttachments, addFileContexts } from "./v2/ContextAttachments";
 import { ComposerSheet } from "./v2/ComposerSheet";
@@ -28,12 +29,12 @@ import {
 import { useCodexSendBlockReason } from "@session/hooks/useCodexSendBlockReason";
 import { createSideChat } from "@session/services/conversationActions";
 import { useFollowupSettingsStore } from "@session/stores/useFollowupSettingsStore";
-import { FollowupQueueContent } from "./FollowupQueue";
+import { FollowupQueueContent, hasVisibleFollowupQueue } from "./FollowupQueue";
+import { ComposerRail, ComposerRailItem } from "./ComposerRail";
 import { useFollowups } from "@session/hooks/useFollowups";
 import { ModelChangeNotice } from "./ModelChangeNotice";
 import { ConversationMenu } from "./ConversationMenu";
 
-import { useThreadModelStore } from "@session/stores/useThreadModelStore";
 import { useQuestions } from "@session/features/async-questions/useQuestions";
 import { useAsyncQuestionStore } from "@session/features/async-questions/store";
 import { SideChatPanel } from "./SideChatPanel";
@@ -62,6 +63,10 @@ import { cleanupRejectedGoal } from "@session/features/goals/goalCleanup";
 import { threadGoalVersions } from "@session/services/threadGoalState";
 import { useTranslation } from "react-i18next";
 import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
+import {
+  captureThreadModelSelection,
+  flushThreadModelSettings,
+} from "@session/stores/useThreadModelStore";
 import { CloudTasksPanel } from "@session/features/codex-host/CloudTasksPanel";
 import { CodexHostPanel } from "@session/features/codex-host/CodexHostPanel";
 import "./composer-native.css";
@@ -157,7 +162,7 @@ export function Composer({
   const owner = sessionDraftKey("codex", currentThreadId, cwd);
   const { enabled: goalEnabled, setEnabled: setGoalEnabled } =
     useGoalDraft(owner);
-  const { collaborationMode, setCollaborationMode } =
+  const { collaborationMode, setCollaborationMode, settingsStorage, settingsLoading, retrySettings } =
     useThreadModelSettings(currentThreadId);
   useEffect(() => {
     if (activeDraftOwner() === owner)
@@ -169,7 +174,10 @@ export function Composer({
     [owner, inputValue],
   );
   const richDraft = useComposerDraft(owner);
-  const contextStorageError = useComposerDraftStore((s) => s.error);
+  const contextStatus = useComposerDraftStatus(owner);
+  const contextStorageError = contextStatus.error;
+  const contextBusy =
+    contextStatus.phase === "hydrating" || contextStatus.phase === "saving";
   const [pendingFiles, setPendingFiles] = useState<Record<string, number>>({});
   const [drawing, setDrawing] = useState<{ owner: string; id: string } | null>(
     null,
@@ -219,11 +227,20 @@ export function Composer({
     currentThreadId,
     queueSnapshot.state.items.some((item) => item.status === "uncertain"),
   );
+  const settingsError = settingsStorage?.error ?? (
+    settingsStorage?.status === "conflict" ? "其他页面已更新会话设置，请核对后重试" :
+    settingsStorage?.status === "error" ? "无法保存会话设置" : undefined
+  );
+  // An existing Goal only writes Goal metadata; model preferences are unrelated.
+  const existingGoalOnly = !!currentThreadId && (goalEnabled || goalTextFromPrompt(inputValue) !== null);
+  const settingsBlocked = settingsLoading || settingsStorage?.status === "error" || settingsStorage?.status === "conflict";
   const blocked =
+    (settingsBlocked && !existingGoalOnly) ||
     !!accessBlock ||
     directInputBlocked ||
     attachments.blocked ||
     !!contextStorageError ||
+    contextBusy ||
     !!pendingFiles[owner] ||
     fileDrop.pending;
   const hasContent = !!(
@@ -242,7 +259,7 @@ export function Composer({
       event.preventDefault();
       event.stopPropagation();
       composerDrafts.add(owner, {
-        id: randomUUID(),
+        id: newSessionEditId(),
         kind: "paste",
         name: "粘贴的文本",
         text,
@@ -255,6 +272,11 @@ export function Composer({
   const sendingRef = useRef(sessionDraftSubmissions);
   const sending = sendingOwners[owner] ?? false;
   const { running, turnId: currentTurnId } = useTurnControl();
+  const submitLabel = running
+    ? preferences.mode === "queue"
+      ? "加入队列"
+      : "引导当前任务"
+    : "发送消息";
   const { stopping, requestStop } = useStopAction(
     currentThreadId ? `${currentThreadId}:${currentTurnId ?? "active"}` : null,
     running,
@@ -312,14 +334,28 @@ export function Composer({
         ? "replace"
         : (submitMode.current ?? preferences.mode);
     submitMode.current = null;
-    const parameters = followupParameters(currentThreadId ?? "");
+    const capturedThreadStart = currentThreadId
+      ? undefined
+      : codexService.captureThreadStart();
     const submittedGoal = goalDrafts.read(owner);
     const goalCheckpoint = threadGoalVersions.capture(currentThreadId ?? "");
     let goalClearingOwner = owner;
     const goalCommand = goalTextFromPrompt(inputValue);
     const creatingGoal = submittedGoal.enabled || goalCommand !== null;
+    const settingsCapture = currentThreadId && !creatingGoal ? captureThreadModelSelection(currentThreadId) : undefined;
+    let parameters: Record<string, unknown> = {};
+    try {
+      // Existing GoalSet changes only metadata. Unrelated unsent permission
+      // preferences must not couple it to a normal turn's parameter projection.
+      if (!(currentThreadId && creatingGoal))
+        parameters = followupParameters(currentThreadId ?? "", settingsCapture?.settings);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "会话权限尚未确认，草稿已保留");
+      return;
+    }
     const text = goalCommand ?? inputValue.trim();
-    const submittedContexts = richDraft.contexts;
+    const capturedContexts = composerDrafts.capture(owner);
+    const submittedContexts = capturedContexts.contexts;
     const submittedMentions = mentionDrafts.read(owner);
     const submittedPluginMentions = pluginInputDrafts.read(owner, text);
     const completeText = composeContextText(text, submittedContexts);
@@ -355,7 +391,11 @@ export function Composer({
         current.revision === snapshot.revision &&
         current.text === snapshot.text;
       useSessionDraftStore.getState().clearSubmitted(submittedOwner, snapshot);
-      composerDrafts.clearSubmitted(submittedOwner, submittedContexts);
+      composerDrafts.clearSubmitted(
+        submittedOwner,
+        submittedContexts,
+        capturedContexts.versions,
+      );
       mentionDrafts.clear(submittedOwner, submittedMentions);
       pluginInputDrafts.clear(submittedOwner, submittedPluginMentions);
       if (unchanged) composerDrafts.setExpanded(submittedOwner, false);
@@ -379,6 +419,17 @@ export function Composer({
       let goalRequestStarted = false;
       let firstGoalTurnAccepted = false;
       try {
+        if (settingsCapture)
+          await flushThreadModelSettings(settingsCapture.threadId, settingsCapture);
+        await composerDrafts.flush(owner);
+        const currentDraft = readDraft(owner);
+        if (
+          currentDraft.revision !== snapshot.revision ||
+          currentDraft.writeId !== snapshot.writeId ||
+          currentDraft.text !== snapshot.text ||
+          !composerDrafts.matches(owner, capturedContexts)
+        )
+          throw new Error("草稿在保存期间已变化，请核对当前内容后再发送");
         if (
           !creatingGoal &&
           running &&
@@ -412,6 +463,7 @@ export function Composer({
         const newGoalThread = !targetThreadId && creatingGoal;
         if (!targetThreadId) {
           const thread = await codexService.threadStart({
+            captured: capturedThreadStart,
             shouldActivate: () => activeDraftOwner() === owner,
           });
           targetThreadId = thread.id;
@@ -421,10 +473,9 @@ export function Composer({
           useSessionDraftStore.getState().move(owner, submittedOwner);
           if (goalDrafts.move(owner, submittedOwner))
             goalClearingOwner = submittedOwner;
-          composerDrafts.move(owner, submittedOwner);
           mentionDrafts.move(owner, submittedOwner);
           pluginInputDrafts.move(owner, submittedOwner);
-          // Follow the newly created identity before moving attachments, so a storage failure
+          // Follow the newly created identity before moving persisted drafts, so a storage failure
           // leaves a visible retry destination instead of creating a second session.
           useSessionNameStore
             .getState()
@@ -445,6 +496,7 @@ export function Composer({
                 activeDraftOwner() === submittedOwner,
             },
           );
+          await composerDrafts.move(owner, submittedOwner);
           await moveImageDraft(owner, submittedOwner);
         }
         if (materialized) {
@@ -507,7 +559,12 @@ export function Composer({
           setCurrentAgentCardId(targetThreadId, "codex");
         const accepted = await followupService.submit(
           submittedOwner,
-          snapshot.revision,
+          {
+            revision: snapshot.revision,
+            writeId: snapshot.writeId,
+            attachmentIds: submittedIds,
+            contextIds: submittedContexts.map((context) => context.id),
+          },
           targetThreadId,
           text,
           images,
@@ -516,6 +573,7 @@ export function Composer({
           parameters,
           submittedContexts,
           [...submittedMentions, ...submittedPluginMentions],
+          settingsCapture,
         );
         onAfterSend?.(targetThreadId, text);
         setDeliveryNotice({
@@ -589,9 +647,6 @@ export function Composer({
   const queued = queueSnapshot.state.items.filter(
     (m) => m.status !== "sent" && m.status !== "cancelled",
   );
-  const modelEntry = useThreadModelStore((s) =>
-    currentThreadId ? s.threads[currentThreadId] : undefined,
-  );
   const { questions, pending: pendingQuestions } = useQuestions(
     currentThreadId ?? "",
   );
@@ -603,31 +658,37 @@ export function Composer({
     ? accessBlock
     : threadInput.reason
       ? threadInput.reason
+      : settingsError
+        ? "会话设置保存失败，打开状态面板重试"
+        : settingsLoading
+          ? "正在恢复会话设置…"
       : contextStorageError
         ? "上下文保存失败，打开状态面板重试"
-        : attachments.storageError
-          ? "附件草稿保存失败，打开状态面板重试"
-          : !attachments.hydrated
-            ? "正在恢复附件草稿…"
-            : failedImage
-              ? "图片上传失败，点击缩略图重试"
-              : pendingFiles[owner] || fileDrop.pending
-                ? "正在读取文件快照…"
-                : uploading
-                  ? `正在上传 ${uploading} 张图片…`
-                  : pendingQuestions.length
-                    ? "正在等待你的回答"
-                    : queued.some(
-                          (m) =>
-                            m.status === "failed" || m.status === "uncertain",
-                        )
-                      ? "队列有消息需要处理"
-                      : queueSnapshot.error
-                        ? "队列连接暂不可用，正在重试"
-                        : queued.length || queueSnapshot.state.paused
-                          ? `待发送 ${queued.length} 条${queueSnapshot.state.paused ? " · 已暂停" : ""}`
-                          : modelEntry?.notice && !modelEntry.notice.dismissed
-                            ? `模型已从 ${modelEntry.notice.from} 更改为 ${modelEntry.notice.to}。`
+        : contextBusy
+          ? contextStatus.phase === "hydrating"
+            ? "正在恢复上下文草稿…"
+            : "正在保存上下文草稿…"
+          : attachments.storageError
+            ? "附件草稿保存失败，打开状态面板重试"
+            : !attachments.hydrated
+              ? "正在恢复附件草稿…"
+              : failedImage
+                ? "图片上传失败，点击缩略图重试"
+                : pendingFiles[owner] || fileDrop.pending
+                  ? "正在读取文件快照…"
+                  : uploading
+                    ? `正在上传 ${uploading} 张图片…`
+                    : pendingQuestions.length
+                      ? "正在等待你的回答"
+                      : queued.some(
+                            (m) =>
+                              m.status === "failed" || m.status === "uncertain",
+                          )
+                        ? "队列有消息需要处理"
+                        : queueSnapshot.error
+                          ? "队列连接暂不可用，正在重试"
+                          : queued.length || queueSnapshot.state.paused
+                            ? `待发送 ${queued.length} 条${queueSnapshot.state.paused ? " · 已暂停" : ""}`
                             : collaborationMode === "plan"
                               ? "规划模式"
                               : goalEnabled
@@ -647,12 +708,10 @@ export function Composer({
       data-owner-thread={currentThreadId ?? undefined}
       data-draft-owner={owner}
     >
-      <div
-        className="session-composer-floating"
-        aria-label="会话提示与待发送消息"
-      >
+      {currentThreadId && <ModelChangeNotice threadId={currentThreadId} />}
+      <ComposerRail key={owner}>
         <RunningTurnChanges threadId={currentThreadId} />
-        {pendingQuestions.length > 0 && (
+        <ComposerRailItem visible={pendingQuestions.length > 0}>
           <button
             type="button"
             className="session-async-notice"
@@ -668,25 +727,38 @@ export function Composer({
           >
             <span>正在等待你的回答</span>
           </button>
-        )}
+        </ComposerRailItem>
 
-        {currentThreadId && <ModelChangeNotice threadId={currentThreadId} />}
-        <FollowupQueueContent
-          compactShelf
-          snapshot={queueSnapshot}
-          key={currentThreadId ?? "new"}
-          threadId={currentThreadId}
-          turnId={currentTurnId}
-          onSideChat={(message) => {
-            if (currentThreadId)
-              void createSideChat(
-                currentThreadId,
-                composeContextText(message.text, message.contexts),
-                message.images,
-              ).catch((e) => toast.error(String(e)));
-          }}
-        />
-      </div>
+        <ComposerRailItem
+          visible={hasVisibleFollowupQueue(currentThreadId, queueSnapshot)}
+        >
+          <FollowupQueueContent
+            compactShelf
+            snapshot={queueSnapshot}
+            key={currentThreadId ?? "new"}
+            threadId={currentThreadId}
+            turnId={currentTurnId}
+            onSideChat={(message) => {
+              if (currentThreadId)
+                void createSideChat(
+                  currentThreadId,
+                  composeContextText(message.text, message.contexts),
+                  message.images,
+                ).catch((e) => toast.error(String(e)));
+            }}
+          />
+        </ComposerRailItem>
+        <ComposerRailItem visible={!!threadGoal}>
+          {threadGoal && (
+            <ThreadGoalCard
+              key={threadGoal.threadId}
+              goal={threadGoal}
+              disabled={!!accessBlock || threadInput.blocked || sending}
+              blockedReason={accessBlock ?? threadInput.reason ?? undefined}
+            />
+          )}
+        </ComposerRailItem>
+      </ComposerRail>
       {deliveryNotice?.owner === owner && (
         <p role="status" className="sr-only">
           {deliveryNotice.text}
@@ -747,15 +819,6 @@ export function Composer({
           onOpenDialog={setSlashDialog}
         />
 
-        {threadGoal && (
-          <ThreadGoalCard
-            key={threadGoal.threadId}
-            goal={threadGoal}
-            disabled={!!accessBlock || threadInput.blocked || sending}
-            blockedReason={accessBlock ?? threadInput.reason ?? undefined}
-          />
-        )}
-
         <div
           data-composer-suggestion-anchor
           data-composer-layout="multiline"
@@ -764,7 +827,6 @@ export function Composer({
           data-composer-surface-variant="default"
           data-file-drop-active={fileDrop.active || undefined}
           className="session-composer-surface session-compact-frame"
-          data-has-thread-goal={!!threadGoal || undefined}
         >
           {fileDrop.active && (
             <div className="session-composer-drop-hint" role="status">
@@ -811,7 +873,19 @@ export function Composer({
                     setGoalEnabled(true);
                     editorRef.current?.focus();
                   }}
-                  actions={(close) => (
+                  persistentMenu={({ triggerContainer, close, parentMenuId }) => (
+                    <ConversationMenu
+                      threadId={currentThreadId}
+                      draftOwner={owner}
+                      composerRef={formRef}
+                      title="当前会话"
+                      variant="item"
+                      triggerContainer={triggerContainer}
+                      onActionSelected={close}
+                      parentMenuId={parentMenuId}
+                    />
+                  )}
+                  actions={(close, conversationTrigger) => (
                     <>
                       <Button
                         type="button"
@@ -926,13 +1000,7 @@ export function Composer({
                         <ListPlus size={16} />
                         输入状态与消息队列
                       </Button>
-                      <ConversationMenu
-                        threadId={currentThreadId}
-                        draftOwner={owner}
-                        composerRef={formRef}
-                        title="当前会话"
-                        variant="item"
-                      />
+                      {conversationTrigger}
                       <AgentMentionPicker
                         root={currentThreadId}
                         owner={owner}
@@ -1066,8 +1134,8 @@ export function Composer({
                 )}
                 {(!running || hasContent) && (
                   <NativeSubmitButton
-                    aria-label="发送消息"
-                    title="发送消息"
+                    aria-label={submitLabel}
+                    title={submitLabel}
                     type="submit"
                     loading={sending}
                     disabled={sending || blocked || !hasContent}
@@ -1086,7 +1154,7 @@ export function Composer({
         <span
           className="session-native-composer-status"
           role={
-            contextStorageError || attachments.storageError || failedImage
+            settingsError || contextStorageError || attachments.storageError || failedImage
               ? "alert"
               : "status"
           }
@@ -1114,6 +1182,14 @@ export function Composer({
           }}
         >
           <ComposerEnterSettings />
+          {settingsError && (
+            <p role="alert">
+              会话设置保存失败：{settingsError}
+              <button type="button" onClick={() => void retrySettings().catch((error) => toast.error(String(error)))}>
+                重试保存会话设置
+              </button>
+            </p>
+          )}
           {attachments.storageError && (
             <p role="alert">
               附件草稿保存失败：{attachments.storageError}
@@ -1125,7 +1201,14 @@ export function Composer({
           {contextStorageError && (
             <p role="alert" className="session-context-warning">
               {contextStorageError}
-              <button type="button" onClick={composerDrafts.retryStorage}>
+              <button
+                type="button"
+                onClick={() =>
+                  void composerDrafts
+                    .retryStorage()
+                    .catch((error) => toast.error(String(error)))
+                }
+              >
                 重试保存上下文
               </button>
             </p>
@@ -1257,20 +1340,10 @@ export function Composer({
                 className="session-v2-primary session-expanded-submit"
                 disabled={sending || blocked || !hasContent}
                 loading={sending}
-                aria-label={
-                  running
-                    ? preferences.mode === "queue"
-                      ? "加入队列"
-                      : "引导当前任务"
-                    : "发送消息"
-                }
+                aria-label={submitLabel}
                 onClick={() => formRef.current?.requestSubmit()}
               >
-                {running
-                  ? preferences.mode === "queue"
-                    ? "加入队列"
-                    : "引导当前任务"
-                  : "发送消息"}
+                {submitLabel}
               </NativeSubmitButton>
             </>
           }

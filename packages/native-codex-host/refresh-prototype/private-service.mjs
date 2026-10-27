@@ -11,6 +11,7 @@ import { isAbsolute, resolve, dirname, join, relative, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { resolveAppServerWorkerThreads } from "../worker-budget.mjs";
 import {
   validateBridgeMetadata,
   verifyBridgeConfig,
@@ -304,8 +305,10 @@ export async function startPrivateService(options) {
     codexHome,
     cwd,
     unloadDelaySeconds = 1,
+    appServerWorkerThreads,
     environment = {},
   } = options;
+  const workerThreads = resolveAppServerWorkerThreads(appServerWorkerThreads);
   await validateScope(options);
   if (
     !Number.isSafeInteger(unloadDelaySeconds) ||
@@ -394,6 +397,7 @@ export async function startPrivateService(options) {
       XDG_CACHE_HOME: paths.cache,
       DO_NOT_TRACK: "1",
       OTEL_SDK_DISABLED: "true",
+      TOKIO_WORKER_THREADS: String(workerThreads),
     });
     child = spawn(
       metadata.cliPath,
@@ -495,6 +499,7 @@ export async function startPrivateService(options) {
       startTicks: await processIdentity(child.pid),
       socketPath: metadata.socketPath,
       cliSha256: metadata.cliSha256,
+      appServerWorkerThreads: workerThreads,
       authority,
     };
     await file.truncate(0);

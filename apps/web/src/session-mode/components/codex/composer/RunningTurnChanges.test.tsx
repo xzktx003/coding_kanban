@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, expect, it } from "vitest";
 import { RunningTurnChanges } from "./RunningTurnChanges";
 import { useCodexStore } from "../stores/useCodexStore";
@@ -27,7 +33,7 @@ beforeEach(() => {
     },
   });
 });
-it("running file count and changes open the same owner's saved diff above the detached composer", () => {
+it("running file count opens the owner's diff and becomes inert while its rail item exits", async () => {
   const { container } = render(<RunningTurnChanges threadId="a" />);
   fireEvent.click(screen.getByRole("button", { name: /1 个文件已更改/ }));
   expect(useSavedTurnReviewStore.getState().target).toMatchObject({
@@ -36,6 +42,13 @@ it("running file count and changes open the same owner's saved diff above the de
     cwd: "/a",
     batches: [],
     changes: [{ diff, addedCount: 2, removedCount: 1 }],
+  });
+  useSavedTurnReviewStore.getState().close();
+  fireEvent.click(screen.getByRole("button", { name: /^查看变更$/ }));
+  expect(useSavedTurnReviewStore.getState().target).toMatchObject({
+    threadId: "a",
+    turnId: "turn",
+    changes: [{ diff }],
   });
   act(() =>
     useCodexStore.setState({
@@ -49,7 +62,12 @@ it("running file count and changes open the same owner's saved diff above the de
       },
     }),
   );
-  expect(container.childElementCount).toBe(0);
+  expect(
+    container
+      .querySelector("[data-composer-rail-item=exiting]")
+      ?.hasAttribute("inert"),
+  ).toBe(true);
+  await waitFor(() => expect(container.childElementCount).toBe(0));
 });
 it("a foreign turn diff never appears as current running changes", () => {
   useCodexStore.setState({

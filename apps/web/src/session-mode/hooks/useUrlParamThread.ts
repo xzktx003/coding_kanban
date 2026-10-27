@@ -53,9 +53,14 @@ export function useUrlParamThread(enabled: boolean): void {
 
     processed = true;
 
-    const cleanUrl =
-      window.location.origin + window.location.pathname + window.location.hash;
-    window.history.replaceState({}, "", cleanUrl);
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete("addProject");
+    if (hasAgentNav) {
+      for (const key of ["agent", "cwd", "thread", "session"])
+        cleanUrl.searchParams.delete(key);
+    }
+    // Keep the workbench mode and unrelated routing state across refreshes.
+    window.history.replaceState(window.history.state, "", cleanUrl.href);
 
     const { addProject } = useWorkspaceStore.getState();
     for (const p of projectsToAdd) addProject(p);

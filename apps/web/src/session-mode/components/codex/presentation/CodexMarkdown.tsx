@@ -159,6 +159,7 @@ export function CodexMarkdown({
   className = "",
   inline = false,
   imagesAsLinks = false,
+  headingAsText = false,
 }: {
   value: string;
   threadId?: string;
@@ -167,6 +168,8 @@ export function CodexMarkdown({
   inline?: boolean;
   /** Native user text presents image syntax as links; attachments stay separate. */
   imagesAsLinks?: boolean;
+  /** The native queued-message preview flattens headings to inline text. */
+  headingAsText?: boolean;
 }) {
   const owner = useCodexContentOwner(threadId);
   const { cwd } = owner;
@@ -230,6 +233,16 @@ export function CodexMarkdown({
   );
   const components = useMemo<Components>(
     () => ({
+      ...(headingAsText
+        ? Object.fromEntries(
+            ["h1", "h2", "h3", "h4", "h5", "h6"].map((name) => [
+              name,
+              ({ children }: { children?: ReactNode }) => (
+                <span>{children}</span>
+              ),
+            ]),
+          )
+        : {}),
       img: ({ src, alt, ...props }) => {
         const original = (props as Record<string, unknown>)[
           "data-native-image-source"
@@ -416,7 +429,7 @@ export function CodexMarkdown({
         );
       },
     }),
-    [cwd, owner.threadId],
+    [cwd, owner.threadId, headingAsText],
   );
   return (
     <div className={`codex-markdown ${inline ? "is-inline" : ""} ${className}`}>

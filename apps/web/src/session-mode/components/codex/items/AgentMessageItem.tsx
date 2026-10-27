@@ -13,6 +13,7 @@ import { NativeReviewFindings } from "@session/features/git/NativeReviewFindings
 import { useCodexContentOwner } from "../presentation/ownerContext";
 import { useSavedTurnReviewStore } from "@session/stores/useSavedTurnReviewStore";
 import { STREAMING_TEXT_PREVIEW_MARKER } from "@session/services/codexTranscriptMemoryBudget";
+import { useTranscriptInspection } from "../thread/inspection";
 import { GoalCompletionBadge } from "@session/features/goals/GoalCompletionBadge";
 import "@session/features/thread-workflows/native-message.css";
 
@@ -22,6 +23,7 @@ type AgentMessageItemProps = {
   itemId?: string;
   turnId?: string;
   streaming?: boolean;
+  alwaysShowActions?: boolean;
   phase?: string | null;
   hookRuns?: readonly HookRunSummary[];
   memoryCitation?: MemoryCitation | null;
@@ -40,6 +42,7 @@ export const AgentMessageItem = memo(function AgentMessageItem({
   itemId,
   turnId,
   streaming = false,
+  alwaysShowActions = false,
   phase,
   hookRuns,
   memoryCitation,
@@ -49,6 +52,7 @@ export const AgentMessageItem = memo(function AgentMessageItem({
 }: AgentMessageItemProps) {
   const contentRef = useRef<HTMLDivElement>(null);
   const isWindowFocused = useWindowFocus();
+  const inspection = useTranscriptInspection();
   const owner = useCodexContentOwner(threadId);
   // Keep live segments separate: review directives and Markdown are parsed only
   // after completion, without joining the bounded streaming buffer every token.
@@ -135,11 +139,17 @@ export const AgentMessageItem = memo(function AgentMessageItem({
         <div
           className={`session-message-actions codex-message-native-actions ${
             isWindowFocused
-              ? "invisible group-hover:visible group-focus-within:visible"
+              ? alwaysShowActions && !inspection
+                ? "visible"
+                : "invisible group-hover:visible group-focus-within:visible"
               : "invisible"
           }`}
         >
-          <NativeMessageCopy text={text} kind="assistant" contentRef={contentRef} />
+          <NativeMessageCopy
+            text={text}
+            kind="assistant"
+            contentRef={contentRef}
+          />
           <NativeMessageFork
             threadId={threadId}
             turnId={turnId}
@@ -147,7 +157,11 @@ export const AgentMessageItem = memo(function AgentMessageItem({
             contentRef={contentRef}
           />
           {hookRuns?.length ? <NativeHookStats runs={hookRuns} /> : null}
-          <GoalCompletionBadge threadId={threadId} turnId={turnId} itemId={itemId} />
+          <GoalCompletionBadge
+            threadId={threadId}
+            turnId={turnId}
+            itemId={itemId}
+          />
           <NativeMemoryCitations citation={memoryCitation} />
           <MessageReferenceActions
             text={text}

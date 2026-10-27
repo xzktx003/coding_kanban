@@ -410,7 +410,7 @@ describe("side-fork effective native settings", () => {
     },
   );
 
-  it("does not restore a deliberately null policy even after sparse metadata cleared its empty pending fields", async () => {
+  it("does not restore a deliberately null policy and preserves its explicit same-value intent after sparse metadata", async () => {
     const result = response({
       approvalPolicy: "on-request",
       approvalsReviewer: "user",
@@ -428,8 +428,8 @@ describe("side-fork effective native settings", () => {
     native({ model: result.model });
     const afterSparse = useThreadModelStore.getState().threads[CHILD];
     await accept();
-    expect(pendingFields).toEqual([]);
-    expect(afterSparse.pending).toBe(false);
+    expect(pendingFields).toEqual(["sandbox", "approvalPolicy"]);
+    expect(afterSparse.pending).toBe(true);
     expect(getThreadModelSettings(CHILD).sandboxPolicy).toBeNull();
     expect(submit().sandboxPolicy).toEqual({
       type: "workspaceWrite",

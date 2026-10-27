@@ -80,7 +80,7 @@ test("approval-for-me reaches the queued native turn without expanding permissio
     await expect(
       page.getByRole("status", { name: "本轮结束后发送", exact: true }),
     ).toBeVisible();
-    await composer.getByRole("button", { name: "发送消息", exact: true }).click();
+    await composer.getByRole("button", { name: "加入队列", exact: true }).click();
     await expect
       .poll(async () => (await f.queue.get("ux-0")).items.length)
       .toBe(1);

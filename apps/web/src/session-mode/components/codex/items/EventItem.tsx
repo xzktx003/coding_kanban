@@ -107,6 +107,7 @@ type EventItemProps = {
   event: ServerNotification;
   context?: RenderEventContext;
   nativeEditUser?: boolean;
+  alwaysShowAssistantActions?: boolean;
   hookRuns?: readonly HookRunSummary[];
 };
 
@@ -149,6 +150,7 @@ const EventItemBody = ({
   event,
   context,
   nativeEditUser = false,
+  alwaysShowAssistantActions = false,
   hookRuns,
 }: EventItemProps) => {
   const { t } = useTranslation("thread");
@@ -313,6 +315,7 @@ const EventItemBody = ({
           return item.text.trim() ? (
             <AgentMessageItem
               text={item.text}
+              alwaysShowActions={alwaysShowAssistantActions}
               itemId={item.id}
               threadId={event.params.threadId}
               turnId={event.params.turnId}

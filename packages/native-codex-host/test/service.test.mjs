@@ -116,6 +116,9 @@ test('service config requires an owned private regular JSON file and explicit au
 
 test('service publishes only after its own fresh record and HTTP health are ready', async () => {
   const data = await fixture('waiting');
+  data.config.appServerWorkerThreads = 4;
+  await writeFile(data.configFile, JSON.stringify(data.config), { mode: 0o600 });
+  assert.equal((await readServiceConfig(data.configFile)).appServerWorkerThreads, 4);
   const oldRecord = '{"previous":"preserved until ready"}';
   await writeFile(data.config.record, oldRecord, { mode: 0o600 });
   const running = start(data, { env: { ...process.env, NATIVE_CODEX_SHARED_CODEX_HOME: '/must/not/import', NATIVE_CODEX_CERT: '/must/not/use' } });
@@ -137,6 +140,7 @@ test('service publishes only after its own fresh record and HTTP health are read
     assert.equal(captured.args[captured.args.indexOf('--bind-host') + 1], '127.0.0.1');
     assert.equal(captured.args.includes('--shared-codex-home'), false);
     assert.equal(captured.args.includes('--connection-profile-home'), false);
+    assert.equal(captured.args[captured.args.indexOf('--app-server-worker-threads') + 1], '4');
     for (const flag of ['user-data-dir', 'extensions-dir', 'project-dir', 'codex-home', 'process-home']) {
       const path = captured.args[captured.args.indexOf('--' + flag) + 1];
       assert.ok(path.startsWith(ownRecord.runtimeRoot + '/'));

@@ -168,6 +168,77 @@
   color: var(--muted-foreground);
   overflow-wrap: anywhere;
 }
+.session-mode .session-pr-form {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+}
+.session-mode .session-pr-form-context {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-pr-form-field {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.session-mode .session-pr-form-field input,
+.session-mode .session-pr-form-field textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  line-height: 1.5;
+}
+.session-mode .session-pr-form-field input {
+  min-height: 44px;
+}
+.session-mode .session-pr-form-field textarea {
+  min-height: 128px;
+  resize: vertical;
+}
+.session-mode .session-pr-form-field input::placeholder,
+.session-mode .session-pr-form-field textarea::placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.75;
+}
+.session-mode .session-pr-form-submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: center;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-pr-form-submit:focus-visible,
+.session-mode .session-pr-form-field input:focus-visible,
+.session-mode .session-pr-form-field textarea:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
 .session-mode .session-context-preview,
 .session-mode .session-followup-snapshot pre {
   background: var(--muted);
@@ -778,6 +849,9 @@
   }
   .session-mode .session-composer-sheet .session-queue-edit textarea {
     min-height: 100px;
+  }
+  .session-mode .session-pr-form-submit {
+    width: 100%;
   }
 }
 @media (max-height: 500px) and (pointer: coarse) {

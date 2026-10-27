@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 const proof = {
   officialVersion: "26.51007.21434",
@@ -48,6 +48,14 @@ test("private service rejects unsafe paths and existing records before spawning 
   await assert.rejects(
     startPrivateService({ ...options, domain: "default-cli" }),
     /domain/,
+  );
+  await assert.rejects(
+    startPrivateService({ ...options, appServerWorkerThreads: 200 }),
+    /worker threads/,
+  );
+  await assert.rejects(
+    (await import("node:fs/promises")).lstat(join(root, "manager/service.json")),
+    { code: "ENOENT" },
   );
   await writeFile(metadata.socketPath, "unrelated endpoint", { mode: 0o600 });
   await assert.rejects(
@@ -184,6 +192,13 @@ test(
     const created = JSON.parse(output);
     service = await attachPrivateService({ metadata, domain: options.domain });
     assert.equal(service.record.generation, created.generation);
+    assert.equal(created.appServerWorkerThreads, Math.max(1, Math.min(8, availableParallelism())));
+    const workerNames = await Promise.all(
+      (await (await import("node:fs/promises")).readdir(`/proc/${created.pid}/task`)).map(async (tid) =>
+        (await readFile(`/proc/${created.pid}/task/${tid}/comm`, "utf8")).trim(),
+      ),
+    );
+    assert.ok(workerNames.filter((name) => name === "tokio-rt-worker").length <= 16);
     assert.deepEqual(service.record.authority, created.authority);
     assert.ok((await service.readRss()) > 0);
     await assert.rejects(

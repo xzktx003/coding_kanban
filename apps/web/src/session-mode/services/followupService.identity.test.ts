@@ -53,7 +53,7 @@ beforeEach(() => {
 const submit = (id = "child") =>
   followupService.submit(
     `codex:${id}`,
-    1,
+    { revision: 1, writeId: "edit3_00000000-0000-4000-8000-000000000001" },
     id,
     "captured draft",
     [],

@@ -150,7 +150,7 @@ it("keeps uploaded path-only metadata and drawings across the portable format", 
     status: "ready",
     drawing,
   });
-  await saveAttachmentDraft(owner, []);
+  await saveAttachmentDraft(owner, [], await loadAttachmentDraft(owner));
   expect(await loadAttachmentDraft(owner)).toEqual([]);
 });
 

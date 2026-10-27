@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import type { ThreadGoal } from "@session/bindings/v2";
 import { useCodexStore } from "@session/components/codex/stores";
 import { ComposerTooltip } from "@session/components/codex/composer/ComposerTooltip";
+import { useComposerRailPresent } from "@session/components/codex/composer/ComposerRail";
 import { NativeComposerIcon } from "@session/components/codex/composer/NativeComposerIcon";
 import {
   Dialog,
@@ -200,7 +201,11 @@ export function ThreadGoalCard({
 }) {
   const { i18n } = useTranslation();
   const labels = goalStrings(i18n.language);
-  const visible = useSessionInteractionVisible();
+  const railPresent = useComposerRailPresent();
+  const railPresentRef = useRef(railPresent);
+  railPresentRef.current = railPresent;
+  const interactionVisible = useSessionInteractionVisible();
+  const visible = interactionVisible && railPresent;
   const [now, setNow] = useState(Date.now);
   const [pending, setPending] = useState<
     "status" | "clear" | "load" | "save" | null
@@ -214,6 +219,20 @@ export function ThreadGoalCard({
     createdAt: number;
   } | null>(null);
   const nextStatus = goalNextStatus(goal.status);
+  useEffect(() => {
+    if (railPresent) return;
+    // A portaled editor does not inherit the exiting rail item's DOM inert.
+    // Cancel only our objective read; an already submitted save keeps its
+    // existing receipt and cleanup lifecycle.
+    const controller = load.current;
+    load.current = null;
+    controller?.abort();
+    if (controller) {
+      lock.current = false;
+      setPending((current) => (current === "load" ? null : current));
+    }
+    setEditor(null);
+  }, [railPresent]);
   useEffect(() => {
     if (goal.status !== "active" || !visible) return;
     setNow(Date.now());
@@ -261,7 +280,7 @@ export function ThreadGoalCard({
     }
   };
   const openEditor = async () => {
-    if (lock.current) return;
+    if (lock.current || !railPresentRef.current) return;
     lock.current = true;
     setPending("load");
     const controller = new AbortController();
@@ -279,7 +298,7 @@ export function ThreadGoalCard({
         load.current = null;
         lock.current = false;
         setPending(null);
-        if (!controller.signal.aborted)
+        if (!controller.signal.aborted && railPresentRef.current)
           setEditor({
             draft: objective,
             saved: objective,
@@ -406,7 +425,7 @@ export function ThreadGoalCard({
           </div>
         </div>
       </div>
-      {editor && (
+      {railPresent && editor && (
         <GoalDialog
           title={labels.edit}
           onClose={() => setEditor(null)}

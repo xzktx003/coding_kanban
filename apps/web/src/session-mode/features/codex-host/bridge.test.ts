@@ -1,4 +1,5 @@
-import { beforeEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { IDBFactory } from "fake-indexeddb";
 import {
   EditorHostBridge,
   addBrowserEditorContext,
@@ -9,7 +10,18 @@ import {
   useComposerDraftStore,
 } from "@session/components/codex/composer/v2/drafts";
 const owner = { cwd: "/project", threadId: "thread-a", draftOwner: "draft-a" };
-beforeEach(() => useComposerDraftStore.setState({ drafts: {}, error: null }));
+beforeEach(() => {
+  vi.stubGlobal("indexedDB", new IDBFactory());
+  useComposerDraftStore.setState({ drafts: {}, status: {}, error: null });
+});
+afterEach(async () => {
+  await Promise.allSettled(
+    Object.keys(useComposerDraftStore.getState().drafts).map((key) =>
+      composerDrafts.flush(key),
+    ),
+  );
+  vi.unstubAllGlobals();
+});
 test("the mounted iframe source, origin, version, nonce and captured owner are all mandatory", () => {
   const source = { postMessage: vi.fn() } as unknown as Window;
   const frame = { contentWindow: source } as HTMLIFrameElement;

@@ -1,0 +1,44 @@
+.session-mode .session-queue-drag-handle {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  height: 16px;
+  padding-inline-start: 10px;
+  margin-inline-start: -10px;
+  cursor: grab;
+}
+.session-mode .session-queue-drag-handle:active {
+  cursor: grabbing;
+}
+.session-mode .session-queue-grip {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: color-mix(in oklab, var(--codex-muted) 70%, transparent);
+  opacity: 0;
+  transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.session-mode .session-queue-row:hover .session-queue-grip,
+.session-mode [data-queue-dragging="true"] .session-queue-grip {
+  opacity: 1;
+}
+.session-mode [data-queue-dragging="true"] .session-queue-row {
+  opacity: 0.6;
+}
+
+/* Approved phone adaptation: details retain a touch-sized drag target; text
+   and the rest of the scroll surface keep their normal selection/panning. */
+@media (max-width: 767px) {
+  .session-mode .session-queue-drag-handle {
+    min-width: 44px;
+    height: 44px;
+    touch-action: none;
+  }
+  .session-mode .session-queue-grip {
+    opacity: 1;
+  }
+}

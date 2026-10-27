@@ -116,6 +116,7 @@ it("two editor views share a submission lock and late acceptance preserves newer
       }),
   );
   useSessionDraftStore.getState().setText(owner, "captured");
+  const capturedWriteId = readDraft(owner).writeId;
   render(
     <>
       <SubagentInput root="root" id="child" name="One" />
@@ -129,7 +130,7 @@ it("two editor views share a submission lock and late acceptance preserves newer
   await act(async () => resolve({ items: [{ status: "queued" }] }));
   expect(mock.submit.mock.calls[0].slice(0, 4)).toEqual([
     owner,
-    1,
+    { revision: 1, writeId: capturedWriteId, attachmentIds: [] },
     "child",
     "captured",
   ]);

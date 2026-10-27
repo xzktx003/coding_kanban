@@ -57,6 +57,7 @@
 - 会话／终端模式切换共用 `apps/web/src/components/WorkbenchModeSwitch.tsx`；项目列表入口共用会话模式的 `ProjectNavigationButton`，样式、焦点与响应式约定见 `docs/workbench-ui-polish.md`。
 - 会话模式的标签、网格、列表共用 `useAgentCenterStore.cards` 关注集合；切换和关闭通过 `useSessionTabActions` 同步输入目标与项目。关闭标签只移出关注集合，不得中断 Agent 或清理 worktree；交互与恢复规则见 `docs/session-tabs.md`。
 - 公共输入区的文字和附件以 Agent/session 隔离并在本设备持久保存；异步发送、上传、回滚使用捕获的原会话与提交版本，不得在返回时修改另一个会话的草稿。会话名称与聊天预览独立，规则与验收见 `docs/session-drafts.md`。
+- 线程模型/权限偏好通过 `useThreadModelStore` 的实际意图及每thread IDB事务保存，禁止恢复整map回写；`nativePermissionMetadata` 始终只在内存。发送等待点击时的保存前缀，后续模型选择不能替换已捕获参数；显式冻结配置不得补入当前UI字段。账号/运行scope失效的只读结果不能记成历史同步成功，按原有有界队列恢复。全局排队/Enter/审查偏好与线程设置分开，规则及多页/HMR/Goal验收见 `docs/session-model-selection.md` 和 `docs/designs/session-render-alignment/thread-settings-persistence-20261027.md`。
 
 ## 后端约定
 

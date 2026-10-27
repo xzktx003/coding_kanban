@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { searchFiles } from "@session/services/apiAdapt/filesystem";
 import { useEditorStore } from "@session/stores/useEditorStore";
 import { useLayoutStore } from "@session/stores";
+import { OwnerFormSummary } from "./conversationOwnerFormContext";
 import { ComposerSheet } from "./v2/ComposerSheet";
 
 export function FileSearchSheet({
@@ -19,24 +20,31 @@ export function FileSearchSheet({
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
-    const timer = setTimeout(() => {
-      void searchFiles({
-        root: cwd,
-        query,
-        excludeFolders: [],
-        maxResults: 20,
-      })
-        .then((entries) => {
-          if (!active) return;
-          setResults(entries.map((entry) => ({ name: entry.name, path: entry.path })));
-          setError(null);
+    const timer = setTimeout(
+      () => {
+        void searchFiles({
+          root: cwd,
+          query,
+          excludeFolders: [],
+          maxResults: 20,
         })
-        .catch((failure: unknown) => {
-          if (!active) return;
-          setResults([]);
-          setError(failure instanceof Error ? failure.message : String(failure));
-        });
-    }, query ? 150 : 0);
+          .then((entries) => {
+            if (!active) return;
+            setResults(
+              entries.map((entry) => ({ name: entry.name, path: entry.path })),
+            );
+            setError(null);
+          })
+          .catch((failure: unknown) => {
+            if (!active) return;
+            setResults([]);
+            setError(
+              failure instanceof Error ? failure.message : String(failure),
+            );
+          });
+      },
+      query ? 150 : 0,
+    );
     return () => {
       active = false;
       clearTimeout(timer);
@@ -44,6 +52,7 @@ export function FileSearchSheet({
   }, [cwd, query]);
   return (
     <ComposerSheet title="搜索文件" description="搜索文件…" onClose={onClose}>
+      <OwnerFormSummary />
       <input
         className="session-command-search"
         aria-label="搜索文件"

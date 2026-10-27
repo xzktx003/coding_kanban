@@ -12,11 +12,14 @@ test("dev proxy preserves browser Host for same-origin host bridge requests", ()
     WEB_BACKEND_HOST: "configured-backend",
     WEB_BACKEND_PORT: "45678",
   });
-  assert.deepEqual(resolveWebDevProxies(config), {
+  const proxies = resolveWebDevProxies(config);
+  assert.equal(typeof proxies["/api"].configure, "function");
+  assert.deepEqual(proxies, {
     "/api": {
       target: "http://configured-backend:45678",
       changeOrigin: false,
       xfwd: true,
+      configure: proxies["/api"].configure,
     },
     "/vscode": {
       target: "http://configured-backend:45678",

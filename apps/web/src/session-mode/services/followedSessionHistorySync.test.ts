@@ -82,12 +82,22 @@ it("loads all followed histories even with partial events, without selecting the
     [
       "a",
       undefined,
-      { background: true, recent: true, signal: expect.any(AbortSignal) },
+      {
+        background: true,
+        recent: true,
+        signal: expect.any(AbortSignal),
+        reportScopeChanges: true,
+      },
     ],
     [
       "b",
       undefined,
-      { background: true, recent: true, signal: expect.any(AbortSignal) },
+      {
+        background: true,
+        recent: true,
+        signal: expect.any(AbortSignal),
+        reportScopeChanges: true,
+      },
     ],
   ]);
   expect(useCodexStore.getState().currentThreadId).toBe("a");

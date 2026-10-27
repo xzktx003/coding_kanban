@@ -1,4 +1,14 @@
+import {
+  QueueReorderList,
+  QueueSortableItem,
+  QueueDragHandle,
+} from "./QueueReorder";
 import { offerUndo } from "./v2/UndoNotice";
+import { useComposerRailPresent } from "./ComposerRail";
+import { ComposerRailIcon } from "./ComposerRailIcon";
+import { queuePreviewText } from "./queuePreviewText";
+import { QueueMessagePreview } from "./QueueMessagePreview";
+import { useIsMobile } from "@session/hooks/use-mobile";
 import { ComposerSheet } from "./v2/ComposerSheet";
 import { FollowupSnapshot } from "./v2/FollowupSnapshot";
 import { useEffect, useRef, useState } from "react";
@@ -74,6 +84,19 @@ type QueueProps = {
   turnId: string | null;
   onSideChat?: (message: FollowupMessage) => void;
 };
+export function hasVisibleFollowupQueue(
+  threadId: string | null,
+  snapshot: ReturnType<typeof useFollowups>,
+) {
+  return (
+    !!threadId &&
+    (snapshot.state.items.some(
+      (m) => m.status !== "sent" && m.status !== "cancelled",
+    ) ||
+      !!snapshot.state.paused ||
+      !!snapshot.error)
+  );
+}
 export function FollowupQueue(props: QueueProps) {
   const snapshot = useFollowups(props.threadId);
   return <FollowupQueueContent {...props} snapshot={snapshot} />;
@@ -90,7 +113,9 @@ export function FollowupQueueContent({
   inlineDetails?: boolean;
   compactShelf?: boolean;
 }) {
-  const { state, error } = snapshot;
+  const railPresent = useComposerRailPresent();
+  const mobile = useIsMobile();
+  const { state } = snapshot;
   const access = useCodexAccessStore((s) =>
     threadId ? s.entries[threadId] : undefined,
   );
@@ -115,7 +140,7 @@ export function FollowupQueueContent({
     (m) => m.status !== "sent" && m.status !== "cancelled",
   );
   const change = async (action: FollowupAction) => {
-    if (!threadId || changing.current) return;
+    if (!threadId || changing.current || !railPresent) return;
     const sends = ["resume", "retry", "steer"].includes(action.type);
     if (sends && accessBlock) return;
     if (action.type === "resume" && unresolved) return;
@@ -165,199 +190,242 @@ export function FollowupQueueContent({
     m.status === "uncertain"
       ? setConfirm({ type: "delete", id: m.id })
       : void change({ type: "delete", id: m.id });
+  const canReorder =
+    !busy &&
+    !editing &&
+    railPresent &&
+    !snapshot.error &&
+    items.length > 1 &&
+    items.every((message) => message.status === "queued");
   const move = (index: number, offset: number) => {
+    if (!canReorder || index + offset < 0 || index + offset >= items.length)
+      return;
     const ids = items.map((m) => m.id);
     [ids[index], ids[index + offset]] = [ids[index + offset], ids[index]];
     void change({ type: "reorder", ids });
   };
-  if (!threadId || (!items.length && !state.paused && !error)) return null;
-  const visible = expanded || inlineDetails ? items : items.slice(0, 1);
+  if (!threadId || !hasVisibleFollowupQueue(threadId, snapshot)) return null;
+  const visible =
+    expanded || inlineDetails || (compactShelf && !mobile)
+      ? items
+      : items.slice(0, 1);
   const queueList = (
-    <ol className="session-queue-list">
+    <QueueReorderList
+      identity={JSON.stringify([threadId, state.revision])}
+      ids={visible.map((message) => message.id)}
+      enabled={canReorder && visible.length > 1}
+      onReorder={(ids) => void change({ type: "reorder", ids })}
+    >
       {visible.map((m, index) => (
-        <li
-          key={m.id}
-          data-followup-id={m.id}
-          data-status={m.status}
-          draggable={!busy && !editing && m.status === "queued"}
-          onDragStart={(e) =>
-            e.dataTransfer.setData("application/x-followup", m.id)
-          }
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            const from = e.dataTransfer.getData("application/x-followup"),
-              ids = items.map((x) => x.id);
-            if (!ids.includes(from) || from === m.id) return;
-            ids.splice(ids.indexOf(from), 1);
-            ids.splice(ids.indexOf(m.id), 0, from);
-            void change({ type: "reorder", ids });
-          }}
-        >
+        <QueueSortableItem key={m.id} id={m.id} status={m.status}>
           <div className="session-queue-row">
-            <ListOrdered
-              className="session-queue-symbol"
-              size={16}
-              aria-hidden="true"
-            />
-            {compactShelf && !expanded && !inlineDetails ? (
-              <button
-                type="button"
-                className="session-followup-text session-queue-preview"
-                title={m.text || "图片消息"}
-                aria-label={
-                  items.length > 1
-                    ? `还有 ${items.length - 1} 条待发送`
-                    : "查看发送配置与上下文"
-                }
-                onClick={() => setExpanded(true)}
-              >
-                {m.text || "图片消息"}
-              </button>
-            ) : (
-              <p className="session-followup-text" title={m.text || "图片消息"}>
-                {m.text || "图片消息"}
-              </p>
-            )}
-            {!!m.images.length && (
-              <span className="session-queue-attachment-count">
-                图片 {m.images.length}
-              </span>
-            )}
-            {m.status === "queued" && turnId && (
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                aria-label="立即引导"
-                disabled={busy || !!accessBlock}
-                onClick={() =>
-                  void change({
-                    type: "steer",
-                    id: m.id,
-                    expectedTurnId: turnId,
-                  })
-                }
-              >
-                <CornerDownRight size={15} />
-                引导
-              </Button>
-            )}
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="session-queue-delete"
-              aria-label="删除排队的消息"
-              title="删除排队的消息"
-              disabled={busy || m.status === "sending"}
-              onClick={() => remove(m)}
-            >
-              <Trash2 size={15} />
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            <div className="session-queue-main">
+              <QueueDragHandle position={index + 1}>
+                {compactShelf ? (
+                  <ComposerRailIcon
+                    name="queue"
+                    className="session-queue-symbol"
+                  />
+                ) : (
+                  <ListOrdered
+                    className="session-queue-symbol"
+                    size={16}
+                    aria-hidden="true"
+                  />
+                )}
+              </QueueDragHandle>
+              {compactShelf && !mobile && !expanded && !inlineDetails ? (
+                <QueueMessagePreview
+                  text={m.text}
+                  imagePath={m.images[0]}
+                  summary={queuePreviewText(m)}
+                  position={index + 1}
+                  threadId={threadId}
+                  disabled={!!editing}
+                />
+              ) : compactShelf && !expanded && !inlineDetails ? (
+                <button
+                  type="button"
+                  className="session-followup-text session-queue-preview"
+                  title={queuePreviewText(m)}
+                  aria-label={
+                    items.length > 1 && mobile
+                      ? `还有 ${items.length - 1} 条待发送`
+                      : items.length > 1
+                        ? `查看排队消息 ${index + 1} 的发送配置与上下文`
+                        : "查看发送配置与上下文"
+                  }
+                  onClick={() => setExpanded(true)}
+                >
+                  {queuePreviewText(m)}
+                </button>
+              ) : (
+                <p
+                  className="session-followup-text"
+                  title={queuePreviewText(m)}
+                >
+                  {queuePreviewText(m)}
+                </p>
+              )}
+              {!!m.images.length &&
+                !(compactShelf && !mobile && !expanded && !inlineDetails) && (
+                  <span className="session-queue-attachment-count">
+                    图片 {m.images.length}
+                  </span>
+                )}
+            </div>
+            <div className="session-queue-actions">
+              {m.status === "queued" && turnId && (
                 <Button
                   type="button"
-                  size="icon"
+                  size="sm"
                   variant="ghost"
-                  aria-label={`排队消息操作 ${index + 1}`}
-                  disabled={busy}
-                >
-                  <MoreHorizontal size={18} />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                className="session-composer-menu session-queue-menu"
-                align="end"
-                side="top"
-                collisionPadding={12}
-                onCloseAutoFocus={(e) => {
-                  if (focusEditAfterClose.current) {
-                    e.preventDefault();
-                    focusEditAfterClose.current = false;
-                    requestAnimationFrame(() => editRef.current?.focus());
+                  aria-label="立即引导"
+                  disabled={busy || !!accessBlock}
+                  onClick={() =>
+                    void change({
+                      type: "steer",
+                      id: m.id,
+                      expectedTurnId: turnId,
+                    })
                   }
-                }}
+                >
+                  {compactShelf ? (
+                    <ComposerRailIcon name="steer" />
+                  ) : (
+                    <CornerDownRight size={15} />
+                  )}
+                  引导
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="session-queue-delete"
+                aria-label="删除排队的消息"
+                title="删除排队的消息"
+                disabled={busy || m.status === "sending"}
+                onClick={() => remove(m)}
               >
-                {(m.status === "failed" || m.status === "uncertain") && (
-                  <DropdownMenuItem
-                    disabled={busy || !!accessBlock}
-                    aria-label="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
-                    title="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
-                    onSelect={() =>
-                      m.status === "uncertain"
-                        ? setConfirm({
-                            type: "retry",
-                            id: m.id,
-                            confirmUncertain: true,
-                          })
-                        : void change({ type: "retry", id: m.id })
-                    }
+                {compactShelf ? (
+                  <ComposerRailIcon name="delete" />
+                ) : (
+                  <Trash2 size={15} />
+                )}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    aria-label={`排队消息操作 ${index + 1}`}
+                    disabled={busy}
                   >
-                    重试
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem
-                  disabled={m.status === "sending" || m.status === "uncertain"}
-                  onSelect={() => {
-                    focusEditAfterClose.current = true;
-                    setEditing(m.id);
-                    setText(m.text);
-                  }}
-                >
-                  <Pencil />
-                  编辑消息
-                </DropdownMenuItem>
-                {!inlineDetails && (
-                  <DropdownMenuItem onSelect={() => setExpanded(true)}>
-                    查看发送配置与上下文
-                  </DropdownMenuItem>
-                )}
-                {onSideChat && (
-                  <DropdownMenuItem onSelect={() => onSideChat(m)}>
-                    <Plus />
-                    在侧边聊天中打开
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem
-                  disabled={m.status === "sending"}
-                  onSelect={() => remove(m)}
-                >
-                  <Trash2 />
-                  删除消息
-                </DropdownMenuItem>
-                {items.length > 1 && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      disabled={index === 0}
-                      onSelect={() => move(index, -1)}
-                    >
-                      <ArrowUp />
-                      上移消息 {index + 1}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      disabled={index === items.length - 1}
-                      onSelect={() => move(index, 1)}
-                    >
-                      <ArrowDown />
-                      下移消息 {index + 1}
-                    </DropdownMenuItem>
-                  </>
-                )}
-                {state.paused && (
-                  <DropdownMenuItem
-                    disabled={busy || !!resumeBlock}
-                    title={resumeBlock}
-                    onSelect={() => void change({ type: "resume" })}
+                    {compactShelf ? (
+                      <ComposerRailIcon name="more" />
+                    ) : (
+                      <MoreHorizontal size={18} />
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                {railPresent && (
+                  <DropdownMenuContent
+                    className="session-composer-menu session-queue-menu"
+                    align="end"
+                    side="top"
+                    collisionPadding={12}
+                    onCloseAutoFocus={(e) => {
+                      if (focusEditAfterClose.current) {
+                        e.preventDefault();
+                        focusEditAfterClose.current = false;
+                        requestAnimationFrame(() => editRef.current?.focus());
+                      }
+                    }}
                   >
-                    <Play />
-                    继续
-                  </DropdownMenuItem>
+                    {(m.status === "failed" || m.status === "uncertain") && (
+                      <DropdownMenuItem
+                        disabled={busy || !!accessBlock}
+                        aria-label="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
+                        title="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
+                        onSelect={() =>
+                          m.status === "uncertain"
+                            ? setConfirm({
+                                type: "retry",
+                                id: m.id,
+                                confirmUncertain: true,
+                              })
+                            : void change({ type: "retry", id: m.id })
+                        }
+                      >
+                        重试
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem
+                      disabled={
+                        m.status === "sending" || m.status === "uncertain"
+                      }
+                      onSelect={() => {
+                        focusEditAfterClose.current = true;
+                        setEditing(m.id);
+                        setText(m.text);
+                      }}
+                    >
+                      <Pencil />
+                      编辑消息
+                    </DropdownMenuItem>
+                    {!inlineDetails && (
+                      <DropdownMenuItem onSelect={() => setExpanded(true)}>
+                        查看发送配置与上下文
+                      </DropdownMenuItem>
+                    )}
+                    {onSideChat && (
+                      <DropdownMenuItem onSelect={() => onSideChat(m)}>
+                        <Plus />
+                        在侧边聊天中打开
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem
+                      disabled={m.status === "sending"}
+                      onSelect={() => remove(m)}
+                    >
+                      <Trash2 />
+                      删除消息
+                    </DropdownMenuItem>
+                    {items.length > 1 && (
+                      <>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          disabled={!canReorder || index === 0}
+                          onSelect={() => move(index, -1)}
+                        >
+                          <ArrowUp />
+                          上移消息 {index + 1}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={!canReorder || index === items.length - 1}
+                          onSelect={() => move(index, 1)}
+                        >
+                          <ArrowDown />
+                          下移消息 {index + 1}
+                        </DropdownMenuItem>
+                      </>
+                    )}
+                    {state.paused && (
+                      <DropdownMenuItem
+                        disabled={busy || !!resumeBlock}
+                        title={resumeBlock}
+                        onSelect={() => void change({ type: "resume" })}
+                      >
+                        <Play />
+                        继续
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
                 )}
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </DropdownMenu>
+            </div>
           </div>
           {(expanded || inlineDetails) && <FollowupSnapshot message={m} />}
           {editing === m.id && (
@@ -405,20 +473,21 @@ export function FollowupQueueContent({
               </div>
             </div>
           )}
-          {!!m.images.length && (
-            <div className="session-followup-images">
-              {m.images.map((path, i) => (
-                <a
-                  key={path + i}
-                  href={fileSrc(path)}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <img src={fileSrc(path)} alt={`排队附件 ${i + 1}`} />
-                </a>
-              ))}
-            </div>
-          )}
+          {!!m.images.length &&
+            (!compactShelf || expanded || inlineDetails) && (
+              <div className="session-followup-images">
+                {m.images.map((path, i) => (
+                  <a
+                    key={path + i}
+                    href={fileSrc(path)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <img src={fileSrc(path)} alt={`排队附件 ${i + 1}`} />
+                  </a>
+                ))}
+              </div>
+            )}
           {m.status !== "queued" && (
             <div className="session-queue-status" role="status">
               <span>
@@ -451,9 +520,9 @@ export function FollowupQueueContent({
               )}
             </div>
           )}
-        </li>
+        </QueueSortableItem>
       ))}
-    </ol>
+    </QueueReorderList>
   );
   return (
     <section
@@ -500,7 +569,7 @@ export function FollowupQueueContent({
         </div>
       )}
       {(inlineDetails || !expanded) && items.length > 0 && queueList}
-      {expanded && !inlineDetails && (
+      {railPresent && expanded && !inlineDetails && (
         <ComposerSheet
           title={`待发送消息 · ${items.length}`}
           description="按顺序发送；配置来自入队时的快照。"
@@ -545,7 +614,7 @@ export function FollowupQueueContent({
         </button>
       )}
       <Dialog
-        open={confirm !== null}
+        open={railPresent && confirm !== null}
         onOpenChange={(open) => {
           if (!open && !busy) setConfirm(null);
         }}

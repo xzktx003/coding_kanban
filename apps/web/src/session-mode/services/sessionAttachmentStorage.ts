@@ -207,33 +207,161 @@ export async function loadAttachmentDraft(
 export async function saveAttachmentDraft(
   owner: string,
   items: ImageAttachment[],
-): Promise<void> {
+  previous: ImageAttachment[] = [],
+): Promise<{ discardedIds: string[] }> {
   return storageDeadline(async (signal) => {
+    const before = new Map(previous.map((item) => [item.id, item]));
+    const nextIds = new Set(items.map((item) => item.id));
+    const removed = new Set(
+      previous.filter((item) => !nextIds.has(item.id)).map((item) => item.id),
+    );
     // WebKit photo-picker File objects can fail while IndexedDB prepares backing
     // Blob data. Persist actual bytes before upload, not the OS-backed File object.
     // Reconstruct Files on load so retries preserve name/MIME/content exactly.
     const stored: StoredAttachment[] = await Promise.all(
-      items.map(async ({ preview: _preview, file, drawing, ...item }) => ({
-        ...item,
-        preview: "",
-        ...(file
-          ? {
-              fileData: await storeFile(file, signal),
-            }
-          : {}),
-        ...(drawing
-          ? {
-              drawing: await storeDrawing(drawing, signal),
-            }
-          : {}),
-      })),
+      items
+        .filter((item) => item !== before.get(item.id))
+        .map(async ({ preview: _preview, file, drawing, ...item }) => ({
+          ...item,
+          preview: "",
+          ...(file
+            ? {
+                fileData: await storeFile(file, signal),
+              }
+            : {}),
+          ...(drawing
+            ? {
+                drawing: await storeDrawing(drawing, signal),
+              }
+            : {}),
+        })),
     );
-    if (stored.length)
-      await transaction(
-        "readwrite",
-        (store) => store.put(stored, owner),
-        signal,
-      );
-    else await transaction("readwrite", (store) => store.delete(owner), signal);
+    const discardedIds: string[] = [];
+    await editDrafts(
+      [owner],
+      (drafts) => {
+        const current = drafts.get(owner)!;
+        const existingIds = new Set(current.map((item) => item.id));
+        const changes = new Map(stored.map((item) => [item.id, item]));
+        // An update is never an insertion: another page may already have removed
+        // this ID while its upload or submitted-message acknowledgement was pending.
+        for (const item of items)
+          if (before.has(item.id) && !existingIds.has(item.id))
+            discardedIds.push(item.id);
+        const originals = new Map(items.map((item) => [item.id, item]));
+        const merged = current
+          .filter((item) => !removed.has(item.id))
+          .map((item) => {
+            const change = changes.get(item.id),
+              old = before.get(item.id),
+              next = originals.get(item.id);
+            if (!change || !old || !next) return item;
+            const result = { ...item } as unknown as Record<string, unknown>;
+            // A late upload changes path/status, not the name or drawing another
+            // page may have edited. Merge only fields this page actually changed.
+            for (const field of new Set([
+              ...Object.keys(old),
+              ...Object.keys(next),
+            ])) {
+              if (
+                field === "id" ||
+                field === "preview" ||
+                old[field as keyof ImageAttachment] ===
+                  next[field as keyof ImageAttachment]
+              )
+                continue;
+              const storedField = field === "file" ? "fileData" : field;
+              const value = (change as unknown as Record<string, unknown>)[
+                storedField
+              ];
+              if (value === undefined) delete result[storedField];
+              else result[storedField] = value;
+              if (field === "file") delete result.file;
+            }
+            return result as unknown as StoredAttachment;
+          });
+        for (const item of stored)
+          if (!before.has(item.id) && !existingIds.has(item.id))
+            merged.push(item);
+        drafts.set(owner, merged);
+      },
+      signal,
+    );
+    return { discardedIds };
   });
+}
+
+/** Read and write all affected owners in one IDB transaction. Byte reads happen before entry. */
+async function editDrafts(
+  owners: string[],
+  update: (drafts: Map<string, StoredAttachment[]>) => void,
+  signal: AbortSignal,
+) {
+  let failure: unknown;
+  await transaction(
+    "readwrite",
+    (store) => {
+      const drafts = new Map<string, StoredAttachment[]>();
+      const requests = owners.map((owner) => {
+        const request = store.get(owner);
+        request.onsuccess = () => {
+          try {
+            if (request.result !== undefined && !Array.isArray(request.result))
+              throw new Error("附件草稿损坏，请保留浏览器数据后恢复");
+            drafts.set(owner, request.result ?? []);
+            if (drafts.size !== owners.length) return;
+            update(drafts);
+            for (const [key, items] of drafts) {
+              if (items.length) store.put(items, key);
+              else store.delete(key);
+            }
+          } catch (error) {
+            failure = error;
+            store.transaction.abort();
+          }
+        };
+        return request;
+      });
+      return requests[0];
+    },
+    signal,
+  ).catch((error) => {
+    throw failure ?? error;
+  });
+}
+
+/** Move only captured IDs; unread additions stay at their original owner. Commit both owners atomically. */
+export async function moveAttachmentDraft(
+  from: string,
+  to: string,
+  ids: string[],
+) {
+  if (from === to) return { discardedIds: [] as string[] };
+  const discardedIds: string[] = [];
+  await storageDeadline((signal) =>
+    editDrafts(
+      [from, to],
+      (drafts) => {
+        const wanted = new Set(ids),
+          source = drafts.get(from)!,
+          target = drafts.get(to)!;
+        const existing = new Set(target.map((item) => item.id));
+        for (const id of ids)
+          if (!existing.has(id) && !source.some((item) => item.id === id))
+            discardedIds.push(id);
+        drafts.set(to, [
+          ...target,
+          ...source.filter(
+            (item) => wanted.has(item.id) && !existing.has(item.id),
+          ),
+        ]);
+        drafts.set(
+          from,
+          source.filter((item) => !wanted.has(item.id)),
+        );
+      },
+      signal,
+    ),
+  );
+  return { discardedIds };
 }

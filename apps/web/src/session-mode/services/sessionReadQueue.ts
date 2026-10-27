@@ -1,34 +1,59 @@
-type Lane = "recent" | "history";
+type Lane = "recent" | "history" | "status";
 type Job = {
   key: string;
   run: () => Promise<unknown>;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
+  dispose?: () => void;
 };
 const lanes: Record<Lane, { active: number; limit: number; jobs: Job[] }> = {
-  recent: { active: 0, limit: 4, jobs: [] },
+  // Reserve one of the former four recent-read slots for lightweight queue
+  // receipts. A valid 120s history read must not consume their entire 5s budget.
+  // Total admission remains six, with no additional transcript concurrency.
+  recent: { active: 0, limit: 3, jobs: [] },
   history: { active: 0, limit: 2, jobs: [] },
+  status: { active: 0, limit: 1, jobs: [] },
 };
-const pending = new Map<string, Promise<unknown>>();
+const pending = new Map<string, { promise: Promise<unknown>; job: Job }>();
 
 /** All transcript readers, including mounted grids, share the same limits. */
 export function enqueueSessionRead<T>(
   lane: Lane,
   key: string,
   run: () => Promise<T>,
+  signal?: AbortSignal,
 ): Promise<T> {
+  if (signal?.aborted) return Promise.reject(signal.reason);
   const identity = `${lane}:${key}`;
   const existing = pending.get(identity);
-  if (existing) return existing as Promise<T>;
+  if (existing) return existing.promise as Promise<T>;
+  let job!: Job;
   const promise = new Promise<T>((resolve, reject) => {
-    lanes[lane].jobs.push({
+    job = {
       key: identity,
       run,
       resolve: resolve as Job["resolve"],
       reject,
-    });
+    };
+    lanes[lane].jobs.push(job);
   });
-  pending.set(identity, promise);
+  pending.set(identity, { promise, job });
+  if (signal) {
+    const cancel = () => {
+      // A fresh read must never join an already cancelled operation, including
+      // before the active operation's rejection reaches its finally callback.
+      if (pending.get(identity)?.job === job) pending.delete(identity);
+      const index = lanes[lane].jobs.indexOf(job);
+      if (index < 0) return; // Started reads retain their own deadline/abort handling.
+      lanes[lane].jobs.splice(index, 1);
+      job.dispose?.();
+      job.reject(
+        signal.reason ?? new DOMException("Read cancelled", "AbortError"),
+      );
+    };
+    job.dispose = () => signal.removeEventListener("abort", cancel);
+    signal.addEventListener("abort", cancel, { once: true });
+  }
   pump(lane);
   return promise;
 }
@@ -46,7 +71,8 @@ function pump(lane: Lane) {
     Promise.resolve(result)
       .then(job.resolve, job.reject)
       .finally(() => {
-        pending.delete(job.key);
+        job.dispose?.();
+        if (pending.get(job.key)?.job === job) pending.delete(job.key);
         state.active--;
         pump(lane);
       });

@@ -73,7 +73,11 @@ export function SubagentInput({
       // are not evidence that this new submission failed.
       await followupService.submit(
         owner,
-        snapshot.revision,
+        {
+          revision: snapshot.revision,
+          writeId: snapshot.writeId,
+          attachmentIds: ids,
+        },
         id,
         snapshot.text,
         images,

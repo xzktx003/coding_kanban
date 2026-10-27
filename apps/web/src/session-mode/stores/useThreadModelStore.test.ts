@@ -5,6 +5,7 @@ import {
   getThreadModelSettings,
   hydrateThreadModel,
   useThreadModelStore,
+  flushThreadModelSettings,
 } from "./useThreadModelStore";
 import { useConfigStore } from "../components/codex/stores/useConfigStore";
 beforeEach(() => {
@@ -46,9 +47,12 @@ it("keeps model, provider and effort local to one thread and preserves new-chat 
 });
 it("persists per-thread choices and pending notices across browser reload", async () => {
   changeThreadModel("a", { model: "luna" });
-  const saved = localStorage.getItem("kanban.session.codex-thread-models")!;
+  await Promise.all([
+    flushThreadModelSettings("a"),
+    flushThreadModelSettings("b"),
+  ]);
+  expect(localStorage.getItem("kanban.session.codex-thread-models")).toBeNull();
   useThreadModelStore.setState({ threads: {} });
-  localStorage.setItem("kanban.session.codex-thread-models", saved);
   await useThreadModelStore.persist.rehydrate();
   expect(getThreadModelSettings("a").model).toBe("luna");
   expect(getThreadModelSettings("b").model).toBe("sol");
@@ -153,9 +157,12 @@ it("isolates service tier, permission and plan choices, and restores them withou
     collaborationMode: "plan",
   });
   expect(getThreadModelSettings("b")).toEqual(originalB);
-  const saved = localStorage.getItem("kanban.session.codex-thread-models")!;
+  await Promise.all([
+    flushThreadModelSettings("a"),
+    flushThreadModelSettings("b"),
+  ]);
+  expect(localStorage.getItem("kanban.session.codex-thread-models")).toBeNull();
   useThreadModelStore.setState({ threads: {} });
-  localStorage.setItem("kanban.session.codex-thread-models", saved);
   await useThreadModelStore.persist.rehydrate();
   expect(getThreadModelSettings("a")).toMatchObject({
     serviceTier: "fast",

@@ -3,6 +3,7 @@ import { isAbsolute, resolve, relative, sep, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
+import { resolveAppServerWorkerThreads } from './worker-budget.mjs';
 const privateDirectoryKeys = ['userDataDir', 'extensionsDir', 'projectDir', 'codexHome', 'processHome'];
 export function buildHostStartup(input, flags = {}) {
   const selected = { createThreads: false, autoOpenFixtures: false, autoOpenNewChats: false, restoreVisibleWindows: false, ...flags };
@@ -37,6 +38,7 @@ export function validateOptions(input) {
   result.port = Number(input.port);
   result.bindHost = input.bindHost ?? '127.0.0.1';
   if (!['127.0.0.1', '0.0.0.0'].includes(result.bindHost)) throw new Error('bindHost must be 127.0.0.1 or 0.0.0.0');
+  result.appServerWorkerThreads = resolveAppServerWorkerThreads(input.appServerWorkerThreads);
   if (input.unsafeNoAuth === true && input.passwordFile) throw new Error('passwordFile and unsafeNoAuth are mutually exclusive');
   if (input.unsafeNoAuth !== true) result.passwordFile = absolute(input.passwordFile, 'passwordFile');
   for (const key of privateDirectoryKeys) if (!within(result.runtimeRoot, result[key])) throw new Error(key + ' must be inside runtimeRoot');
@@ -209,6 +211,8 @@ export function buildChildEnv(options, inherited = process.env) {
   if (inherited.NODE_USE_ENV_PROXY === '0' || inherited.NODE_USE_ENV_PROXY === '1') env.NODE_USE_ENV_PROXY = inherited.NODE_USE_ENV_PROXY;
   const extensionHostPreload = fileURLToPath(new URL('./companion/preload.cjs', import.meta.url));
   return { ...env, ...options.connectionEnvironment, HOME: options.processHome, CODEX_HOME: options.codexHome, TMPDIR: join(options.runtimeRoot, 'tmp'), TMP: join(options.runtimeRoot, 'tmp'), TEMP: join(options.runtimeRoot, 'tmp'),
+    // The official CLI otherwise creates a Tokio worker for nearly every host CPU.
+    TOKIO_WORKER_THREADS: String(options.appServerWorkerThreads),
     XDG_CONFIG_HOME: join(options.processHome, '.config'), XDG_DATA_HOME: join(options.processHome, '.local', 'share'), XDG_CACHE_HOME: join(options.processHome, '.cache'),
     NODE_OPTIONS: `--require=${JSON.stringify(extensionHostPreload)}`,
     NATIVE_CODEX_COMPANION_CONFIG: join(options.runtimeRoot, 'companion-auth.json'),

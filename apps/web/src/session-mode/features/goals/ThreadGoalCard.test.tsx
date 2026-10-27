@@ -28,6 +28,10 @@ vi.mock("react-i18next", () => ({
 import { GoalDialog, ThreadGoalCard } from "./ThreadGoalCard";
 import { useCodexStore } from "@session/components/codex/stores";
 import { threadGoalVersions } from "@session/services/threadGoalState";
+import {
+  ComposerRail,
+  ComposerRailItem,
+} from "@session/components/codex/composer/ComposerRail";
 const goal: ThreadGoal = {
   threadId: "goal-a",
   objective: "可验收的原目标",
@@ -54,6 +58,82 @@ beforeEach(() => {
   api.clear.mockResolvedValue({ cleared: true });
   api.uncertain.mockReturnValue(true);
   useCodexStore.setState({ goalMap: { [goal.threadId]: goal } });
+});
+
+function RailGoal() {
+  const current = useCodexStore((s) => s.goalMap[goal.threadId]);
+  return (
+    <div className="session-mode">
+      <ComposerRail>
+        <ComposerRailItem visible={!!current}>
+          {current && <ThreadGoalCard goal={current} />}
+        </ComposerRailItem>
+      </ComposerRail>
+    </div>
+  );
+}
+
+it("closes an open Goal portal immediately when the goal is externally cleared during rail exit", async () => {
+  render(<RailGoal />);
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: /进行中的目标|受阻的目标|可验收的原目标/,
+    }),
+  );
+  await screen.findByRole("dialog");
+  act(() => useCodexStore.setState({ goalMap: {} }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(api.set).not.toHaveBeenCalled();
+  expect(api.clear).not.toHaveBeenCalled();
+});
+
+it("aborts only the pending objective read on rail exit and ignores its late result", async () => {
+  let finish!: (value: string) => void;
+  api.read.mockImplementation(
+    () =>
+      new Promise<string>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<RailGoal />);
+  fireEvent.click(screen.getByRole("button", { name: /可验收的原目标/ }));
+  const signal = api.read.mock.calls[0][1] as AbortSignal;
+  act(() => useCodexStore.setState({ goalMap: {} }));
+  expect(signal.aborted).toBe(true);
+  await act(async () => finish("迟到的目标正文"));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  act(() => useCodexStore.setState({ goalMap: { [goal.threadId]: goal } }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(api.set).not.toHaveBeenCalled();
+});
+
+it("hides the exiting editor without canceling or resending an already submitted save", async () => {
+  let finish!: (value: { goal: ThreadGoal }) => void;
+  api.set.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<RailGoal />);
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "编辑目标" })),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "目标" }), {
+    target: { value: "已经提交的目标修改" },
+  });
+  await act(async () =>
+    fireEvent.click(screen.getByRole("button", { name: "保存" })),
+  );
+  expect(api.set).toHaveBeenCalledTimes(1);
+  act(() => useCodexStore.setState({ goalMap: {} }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await act(async () =>
+    finish({ goal: { ...goal, objective: "已经提交的目标修改" } }),
+  );
+  expect(api.set).toHaveBeenCalledTimes(1);
+  expect(api.clear).not.toHaveBeenCalled();
+  expect(api.error).not.toHaveBeenCalled();
 });
 
 // Original Cu keeps Main.I3n's close enabled while its controlled onOpenChange
@@ -299,21 +379,33 @@ it("preserves the real Goal edit button and state while its popup hides and rest
   const unsubscribe = useCodexStore.subscribe((next, previous) => {
     if (next.goalMap !== previous.goalMap) goalMapPublications += 1;
   });
-  const network = vi.spyOn(globalThis, "fetch").mockRejectedValue(
-    new Error("Unexpected network request in the isolated Goal tooltip control"),
-  );
+  const network = vi
+    .spyOn(globalThis, "fetch")
+    .mockRejectedValue(
+      new Error(
+        "Unexpected network request in the isolated Goal tooltip control",
+      ),
+    );
   let unmount: (() => void) | undefined;
   try {
     const view = mount();
     unmount = view.unmount;
-    const card = view.container.querySelector<HTMLElement>(".session-thread-goal");
+    const card = view.container.querySelector<HTMLElement>(
+      ".session-thread-goal",
+    );
     if (!card) throw Error("Expected the actual mounted Goal card");
     const edit = within(card).getByRole("button", { name: "编辑目标" });
-    const objectiveText = card.querySelector(".session-goal-objective")?.textContent;
-    const counterText = card.querySelector(".session-goal-counter")?.textContent;
-    const hintLabels = () => [...document.querySelectorAll<HTMLElement>(
-      '.session-native-composer-tooltip[data-slot="tooltip-content"] > .session-native-composer-tooltip-label',
-    )];
+    const objectiveText = card.querySelector(
+      ".session-goal-objective",
+    )?.textContent;
+    const counterText = card.querySelector(
+      ".session-goal-counter",
+    )?.textContent;
+    const hintLabels = () => [
+      ...document.querySelectorAll<HTMLElement>(
+        '.session-native-composer-tooltip[data-slot="tooltip-content"] > .session-native-composer-tooltip-label',
+      ),
+    ];
     const protect = () => {
       expect(edit.isConnected).toBe(true);
       expect(card.querySelector('button[aria-label="编辑目标"]')).toBe(edit);
@@ -321,11 +413,17 @@ it("preserves the real Goal edit button and state while its popup hides and rest
       expect(edit.getAttribute("type")).toBe("button");
       expect(card.getAttribute("data-goal-thread")).toBe(goal.threadId);
       expect(card.getAttribute("data-goal-status")).toBe(goal.status);
-      expect(card.querySelector(".session-goal-objective")?.textContent).toBe(objectiveText);
-      expect(card.querySelector(".session-goal-counter")?.textContent).toBe(counterText);
+      expect(card.querySelector(".session-goal-objective")?.textContent).toBe(
+        objectiveText,
+      );
+      expect(card.querySelector(".session-goal-counter")?.textContent).toBe(
+        counterText,
+      );
       expect(useCodexStore.getState().goalMap).toBe(beforeMap);
       expect(useCodexStore.getState().goalMap[goal.threadId]).toBe(beforeGoal);
-      expect(useCodexStore.getState().goalMap[goal.threadId]).toEqual(expectedGoal);
+      expect(useCodexStore.getState().goalMap[goal.threadId]).toEqual(
+        expectedGoal,
+      );
       expect(goal.objective).toBe("可验收的原目标");
       expect(goal.tokenBudget).toBe(10000);
       expect(goalMapPublications).toBe(0);
@@ -346,7 +444,9 @@ it("preserves the real Goal edit button and state while its popup hides and rest
 
     await act(async () => fireEvent.click(edit));
     const dialog = screen.getByRole("dialog");
-    const editor = within(dialog).getByRole("textbox", { name: "目标" }) as HTMLTextAreaElement;
+    const editor = within(dialog).getByRole("textbox", {
+      name: "目标",
+    }) as HTMLTextAreaElement;
     expect(editor.value).toBe(goal.objective);
     expect(hintLabels()).toHaveLength(0);
     protect();
@@ -357,7 +457,9 @@ it("preserves the real Goal edit button and state while its popup hides and rest
     expect(editor.value).toBe("本地未提交的目标草稿");
     protect();
     expect(hintLabels()).toHaveLength(0);
-    await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "取消" })));
+    await act(async () =>
+      fireEvent.click(within(dialog).getByRole("button", { name: "取消" })),
+    );
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(editor.isConnected).toBe(false);
     protect();

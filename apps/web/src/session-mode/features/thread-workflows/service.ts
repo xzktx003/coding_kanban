@@ -1,4 +1,4 @@
-import { v4 as randomUUID } from "uuid";
+import { newSessionEditId } from "@session/services/sessionEditIdentity";
 import { codexService } from "@session/services/codexService";
 import { useCodexStore } from "@session/components/codex/stores";
 import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
@@ -28,7 +28,7 @@ export function forkAtTurn(
         throw new Error("服务未返回独立的分支会话，请检查结果后继续。");
       if (selection?.trim())
         composerDrafts.add(sessionDraftKey("codex", thread.id), {
-          id: randomUUID(),
+          id: newSessionEditId(),
           kind: "quote",
           name: "来自分支源轮次的选区",
           text: selection,

@@ -42,6 +42,7 @@ import {
 } from "@session/services/followupService";
 import { useCodexStore } from "../stores";
 import { resetCodexAccessCache } from "@session/stores/useCodexAccessStore";
+import { newSessionEditId } from "@session/services/sessionEditIdentity";
 const message = {
   id: "request",
   threadId: "a",
@@ -136,19 +137,22 @@ it("removes a rejected queued/sending message from the transcript and never revi
   render(<CodexDeliveryEchoes threadId="a" events={[]} />);
   expect(screen.queryByText("hello")).toBeNull();
 });
-it.each(["sent", "uncertain"])("cannot retract a %s receipt with a native turn when a negative snapshot arrives", (status) => {
-  beginDeliveryEcho(message);
-  reconcileDeliveryEchoes("a", receipt(status));
-  for (const negative of ["failed", "cancelled"]) {
-    reconcileDeliveryEchoes("a", {
-      ...receipt(negative),
-      items: [{ ...receipt(negative).items[0], turnId: undefined }],
-    });
-    expect(Object.values(useCodexDeliveryStore.getState().entries)).toMatchObject(
-      [{ status, turnId: "turn" }],
-    );
-  }
-});
+it.each(["sent", "uncertain"])(
+  "cannot retract a %s receipt with a native turn when a negative snapshot arrives",
+  (status) => {
+    beginDeliveryEcho(message);
+    reconcileDeliveryEchoes("a", receipt(status));
+    for (const negative of ["failed", "cancelled"]) {
+      reconcileDeliveryEchoes("a", {
+        ...receipt(negative),
+        items: [{ ...receipt(negative).items[0], turnId: undefined }],
+      });
+      expect(
+        Object.values(useCodexDeliveryStore.getState().entries),
+      ).toMatchObject([{ status, turnId: "turn" }]);
+    }
+  },
+);
 it("preserves delivery echo identity when the receipt has not changed", () => {
   beginDeliveryEcho(message);
   reconcileDeliveryEchoes("a", receipt("queued"));
@@ -190,7 +194,16 @@ it("shows submission before HTTP returns and retains content on a lost response"
   );
   render(<CodexDeliveryEchoes threadId="a" events={[]} />);
   const pending = followupService
-    .submit("owner", 1, "a", "hello", [], "queue", undefined, {})
+    .submit(
+      "owner",
+      { revision: 1, writeId: newSessionEditId() },
+      "a",
+      "hello",
+      [],
+      "queue",
+      undefined,
+      {},
+    )
     .catch((e) => e);
   await vi.waitFor(() => expect(api.postJsonWithOptions).toHaveBeenCalled());
   expect(screen.getByText("正在提交")).toBeTruthy();
@@ -212,7 +225,7 @@ it("an event before the HTTP response cannot be reinserted by that response", as
   const view = render(<CodexDeliveryEchoes threadId="a" events={[]} />);
   const pending = followupService.submit(
     "owner",
-    1,
+    { revision: 1, writeId: newSessionEditId() },
     "a",
     "hello",
     [],
