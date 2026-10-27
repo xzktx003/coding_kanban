@@ -1,4 +1,5 @@
 import { resolveSessionDataHome } from "./services/session-data-home.js";
+import { createSessionThreadLookup } from "./services/session-codex-completion-check.js";
 import { SessionRuntimeManager } from "./services/session-runtime-manager.js";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,7 +75,10 @@ async function main(): Promise<void> {
   }
   const { app } = buildServer({
     sessionRuntimeOrigin,
-    ensureSessionRuntime: () => sessionRuntime.start(),
+    ensureSessionRuntime: async () => {
+      sessionRuntimeOrigin = await sessionRuntime.start();
+      return sessionRuntimeOrigin;
+    },
     sessionAttachmentRoot: resolve(
       resolveSessionDataHome(repositoryRoot, process.env.SESSION_DATA_HOME),
       "uploads",
@@ -100,6 +104,10 @@ async function main(): Promise<void> {
       ? { feishuReplyAllowedUserId: process.env.FEISHU_NOTIFY_USER_ID.trim() }
       : {}),
     feishuCompletionSender: new ScriptFeishuCompletionSender({
+      isSessionThread: createSessionThreadLookup({
+        origin: () => sessionRuntimeOrigin,
+        fetch: globalThis.fetch,
+      }),
       scriptPath: resolve(repositoryRoot, "scripts/codex-feishu-notify.mjs"),
       fallbackWorkingDirectory: repositoryRoot,
       deliveryHistory: feishuReplyBindingStore,

@@ -22,6 +22,10 @@ interface SessionCodexFeishuNotifierOptions {
     ): void;
   };
   readThread(id: string, turnId?: string): Promise<any>;
+  beforeSend?: (target: {
+    threadId: string;
+    turnId: string;
+  }) => Promise<"ready" | "wait" | "superseded">;
   logError?: (error: unknown, event?: FeishuCompletionEvent) => void;
   retryIntervalMs?: number;
 }
@@ -51,7 +55,6 @@ interface PersistedSessionCodexFeishuNotifierState {
 
 const STATE_VERSION = 1;
 const DEFAULT_RETRY_INTERVAL_MS = 30_000;
-const FALLBACK_SUMMARY = "任务已完成。";
 const MAX_COMPLETED_KEYS = 1000;
 
 class CompletionNotReadyError extends Error {}
@@ -210,6 +213,7 @@ export class SessionCodexFeishuNotifier {
   readonly #deliveryRecorder: SessionCodexFeishuNotifierOptions["deliveryRecorder"];
   readonly #sender: FeishuCompletionSenderLike;
   readonly #readThread: (id: string, turnId?: string) => Promise<any>;
+  readonly #beforeSend: SessionCodexFeishuNotifierOptions["beforeSend"];
   readonly #logError: (error: unknown, event?: FeishuCompletionEvent) => void;
   readonly #retryIntervalMs: number;
   #state: PersistedSessionCodexFeishuNotifierState = emptyState();
@@ -218,6 +222,9 @@ export class SessionCodexFeishuNotifier {
   #serial: Promise<unknown> = Promise.resolve();
   #timer: ReturnType<typeof setTimeout> | undefined;
   #sending: Promise<void> | undefined;
+  #attempt:
+    | { threadId: string; turnId: string; cancelled: boolean }
+    | undefined;
   #closed = false;
 
   constructor(options: SessionCodexFeishuNotifierOptions) {
@@ -226,6 +233,7 @@ export class SessionCodexFeishuNotifier {
     this.#sender = options.sender;
     this.#deliveryRecorder = options.deliveryRecorder;
     this.#readThread = options.readThread;
+    this.#beforeSend = options.beforeSend;
     this.#logError = options.logError ?? (() => {});
     this.#retryIntervalMs =
       options.retryIntervalMs ?? DEFAULT_RETRY_INTERVAL_MS;
@@ -240,10 +248,24 @@ export class SessionCodexFeishuNotifier {
   }
 
   async observe(instance: string, event: RuntimeEvent): Promise<void> {
+    const parsed = this.#turnFromEvent(event);
+    if (!parsed) return;
+    if (
+      event.payload.method === "turn/started" &&
+      !(
+        this.#state.instance === instance &&
+        this.#state.cursor !== undefined &&
+        event.seq <= this.#state.cursor
+      ) &&
+      this.#attempt?.threadId === parsed.threadId &&
+      this.#attempt.turnId !== parsed.turnId
+    ) {
+      // Invalidate synchronously: an event can arrive after the sender captured
+      // its serial barrier, before that barrier's continuation or disk commit.
+      this.#attempt.cancelled = true;
+    }
     await this.#run(async () => {
       if (this.#broken || this.#closed) return;
-      const parsed = this.#completionFromEvent(event);
-      if (!parsed) return;
       const { key, threadId, turnId, eventTurn } = parsed;
       const next = structuredClone(this.#state);
       if (next.instance !== instance) {
@@ -252,6 +274,19 @@ export class SessionCodexFeishuNotifier {
       }
       if (next.cursor !== undefined && event.seq <= next.cursor) return;
       next.cursor = event.seq;
+      if (event.payload.method === "turn/started") {
+        // A new turn supersedes any undelivered answer from an earlier turn.
+        // Reuse the durable pending set/cursor instead of retaining a thread map.
+        for (const pending of Object.values(next.pending)) {
+          if (pending.threadId === threadId && pending.turnId !== turnId) {
+            delete next.pending[pending.key];
+            next.skipped[pending.key] = true;
+          }
+        }
+        compactCompletedKeys(next);
+        await this.#commit(next);
+        return;
+      }
       if (next.sent[key] || next.skipped[key] || next.pending[key]) {
         await this.#commit(next);
         return;
@@ -325,7 +360,7 @@ export class SessionCodexFeishuNotifier {
     this.#state = next;
   }
 
-  #completionFromEvent(event: RuntimeEvent): {
+  #turnFromEvent(event: RuntimeEvent): {
     key: string;
     threadId: string;
     turnId: string;
@@ -334,7 +369,7 @@ export class SessionCodexFeishuNotifier {
     if (
       !Number.isSafeInteger(event.seq) ||
       event.event !== "codex:notification" ||
-      event.payload?.method !== "turn/completed"
+      !["turn/completed", "turn/started"].includes(event.payload?.method)
     ) {
       return null;
     }
@@ -343,7 +378,12 @@ export class SessionCodexFeishuNotifier {
       typeof params?.threadId === "string" ? params.threadId : "";
     const eventTurn = params?.turn;
     const turnId = typeof eventTurn?.id === "string" ? eventTurn.id : "";
-    if (!threadId || !turnId || turnStatus(eventTurn) !== "completed") {
+    if (
+      !threadId ||
+      !turnId ||
+      (event.payload.method === "turn/completed" &&
+        turnStatus(eventTurn) !== "completed")
+    ) {
       return null;
     }
     return {
@@ -377,10 +417,25 @@ export class SessionCodexFeishuNotifier {
     if (status !== "completed") {
       throw new CompletionNotReadyError("target turn is not completed yet");
     }
+    const threadState = turnStatus(thread);
+    if (threadState !== undefined && threadState !== "idle") {
+      throw new CompletionNotReadyError("target thread is not idle yet");
+    }
     const summary =
       finalAnswerFromTurn(historyTurn) ??
-      finalAnswerFromTurn(pending.eventTurn) ??
-      FALLBACK_SUMMARY;
+      finalAnswerFromTurn(pending.eventTurn);
+    if (!summary) {
+      if (
+        !Array.isArray(historyTurn.items) ||
+        (historyTurn.itemsView !== undefined &&
+          historyTurn.itemsView !== "full")
+      ) {
+        throw new CompletionNotReadyError(
+          "target turn output is not visible yet",
+        );
+      }
+      return null;
+    }
     return {
       sessionId: `session-codex:${pending.threadId}`,
       sessionModeThreadId: pending.threadId,
@@ -401,6 +456,7 @@ export class SessionCodexFeishuNotifier {
       .catch((error) => this.#logError(error))
       .finally(() => {
         this.#sending = undefined;
+        this.#attempt = undefined;
         if (
           !this.#closed &&
           !this.#broken &&
@@ -420,6 +476,7 @@ export class SessionCodexFeishuNotifier {
       await this.#serial;
       const snapshot = Object.values(this.#state.pending);
       if (!snapshot.length) return;
+      const snapshotKeys = new Set(snapshot.map((pending) => pending.key));
       let progressed = false;
       for (const pending of snapshot) {
         if (this.#closed || this.#broken) return;
@@ -430,8 +487,29 @@ export class SessionCodexFeishuNotifier {
           progressed = true;
           continue;
         }
+        const attempt = {
+          threadId: pending.threadId,
+          turnId: pending.turnId,
+          cancelled: false,
+        };
+        this.#attempt = attempt;
         let event: FeishuCompletionEvent | null;
         try {
+          const readiness = this.#beforeSend
+            ? await this.#beforeSend({
+                threadId: pending.threadId,
+                turnId: pending.turnId,
+              })
+            : "ready";
+          await this.#serial;
+          if (this.#closed || this.#broken) return;
+          if (attempt.cancelled || !this.#state.pending[pending.key]) continue;
+          if (readiness === "superseded") {
+            await this.#markSkipped(pending.key);
+            progressed = true;
+            continue;
+          }
+          if (readiness !== "ready") continue;
           event = await this.#buildFeishuEvent(pending);
         } catch (error) {
           if (!(error instanceof CompletionNotReadyError)) {
@@ -439,18 +517,44 @@ export class SessionCodexFeishuNotifier {
           }
           continue;
         }
+        await this.#serial;
         if (this.#closed || this.#broken) return;
+        if (attempt.cancelled || !this.#state.pending[pending.key]) continue;
         if (!event) {
           await this.#markSkipped(pending.key);
           progressed = true;
           continue;
         }
+        let readiness: "ready" | "wait" | "superseded";
+        try {
+          readiness = this.#beforeSend
+            ? await this.#beforeSend({
+                threadId: pending.threadId,
+                turnId: pending.turnId,
+              })
+            : "ready";
+        } catch (error) {
+          this.#logError(error, event);
+          continue;
+        }
+        // A started event can arrive while history/the delivery gate is reading.
+        // Finish its durable invalidation before considering the actual send.
+        await this.#serial;
+        if (this.#closed || this.#broken) return;
+        if (attempt.cancelled || !this.#state.pending[pending.key]) continue;
+        if (readiness === "superseded") {
+          await this.#markSkipped(pending.key);
+          progressed = true;
+          continue;
+        }
+        if (readiness !== "ready") continue;
         const freshSettings = this.#settings.get();
         if (!freshSettings.configured || !freshSettings.enabled) {
           await this.#markSkipped(pending.key);
           progressed = true;
           continue;
         }
+        if (attempt.cancelled) continue;
         try {
           const delivery = await this.#sender.send(event);
           if (this.#closed || this.#broken) return;
@@ -463,7 +567,11 @@ export class SessionCodexFeishuNotifier {
         await this.#markSent(pending.key);
         progressed = true;
       }
-      if (!progressed) return;
+      if (
+        !progressed &&
+        Object.keys(this.#state.pending).every((key) => snapshotKeys.has(key))
+      )
+        return;
     }
   }
 

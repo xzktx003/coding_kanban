@@ -800,6 +800,7 @@ interface CodexCompletionDeliveryHistory {
 
 export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike {
   readonly #deliveryHistory?: CodexCompletionDeliveryHistory;
+  readonly #isSessionThread?: (threadId: string) => Promise<boolean>;
   readonly #inFlight = new Map<string, Promise<FeishuCompletionDelivery>>();
   // Keep only receipts, never the completed task's potentially large body.
   readonly #delivered = new Map<
@@ -824,9 +825,11 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
     quickRepliesAvailable?: () => boolean;
     fileReferences?: Pick<FeishuCompletionFileReferenceService, "prepare">;
     deliveryHistory?: CodexCompletionDeliveryHistory;
+    isSessionThread?: (threadId: string) => Promise<boolean>;
   }) {
     this.#nodeBinary = options.nodeBinary ?? process.execPath;
     this.#deliveryHistory = options.deliveryHistory;
+    this.#isSessionThread = options.isSessionThread;
     this.#scriptPath = options.scriptPath;
     this.#fallbackWorkingDirectory = options.fallbackWorkingDirectory;
     this.#runCommand = options.runCommand ?? runScriptCommand;
@@ -838,6 +841,17 @@ export class ScriptFeishuCompletionSender implements FeishuCompletionSenderLike 
 
   async send(event: FeishuCompletionEvent): Promise<FeishuCompletionDelivery> {
     const threadId = this.#codexThreadId(event);
+    if (
+      !event.sessionModeThreadId &&
+      threadId &&
+      !isClaudeAgentKind(event.agentKind) &&
+      this.#isSessionThread &&
+      (await this.#isSessionThread(threadId))
+    ) {
+      // The session notifier owns completion readiness for this native thread.
+      // Do not cache an empty receipt: its eventual native notification must send.
+      return { messages: [] };
+    }
     if (!threadId || !event.completionId) {
       return this.#sendNotification(event);
     }

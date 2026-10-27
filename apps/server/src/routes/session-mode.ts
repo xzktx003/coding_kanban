@@ -19,6 +19,7 @@ import { saveSessionAttachment } from "../services/session-attachments.js";
 import { SessionCodexFeishuReplyService } from "../services/session-codex-feishu-reply-service.js";
 import type { FeishuReplyBindingStore } from "../services/feishu-reply-binding-store.js";
 import { SessionCodexFeishuNotifier } from "../services/session-codex-feishu-notifier.js";
+import { createSessionCodexCompletionCheck } from "../services/session-codex-completion-check.js";
 import type { FeishuCompletionSenderLike } from "../services/agent-completion-feishu-notifier.js";
 import { resolve } from "node:path";
 import { Readable } from "node:stream";
@@ -283,6 +284,11 @@ export function registerSessionModeRoutes(
   const completionNotifier = options.completionNotifications
     ? new SessionCodexFeishuNotifier({
         ...options.completionNotifications,
+        beforeSend: createSessionCodexCompletionCheck({
+          origin: () => origin,
+          fetch: fetchUpstream,
+          queue: (threadId) => followups.inspect(threadId),
+        }),
         deliveryRecorder: options.completionNotifications.bindings
           ? {
               record: (event, delivery) =>

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CodexFollowups, type FollowupRuntime } from "./codex-followups.js";
@@ -767,4 +767,72 @@ test("completion reconciliation is bounded and pending messages take priority ov
   await q.tick();assert.equal(reads.length,3);
   assert.equal((await q.get("a")).awaitingTurnId,undefined);
   assert.equal((await q.get("b")).awaitingTurnId,undefined);
+});
+
+test("inspect does not create passive queue entries, expose mutable state or emit runtime writes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "followup-inspect-"));
+  try {
+    const f = fixture(),
+      holds: unknown[] = [],
+      file = join(root, "queue.json");
+    f.runtime.syncHolds = async (value) => {
+      holds.push(value);
+    };
+    const q = new CodexFollowups(f.runtime, file);
+    const passive = await q.inspect("notification-only");
+    passive.items.push({ status: "queued" } as any);
+    assert.equal((await q.inspect("notification-only")).items.length, 0);
+    assert.deepEqual(holds, []);
+    assert.deepEqual(f.calls, []);
+
+    await q.submit(input("owned", "a"));
+    const saved = JSON.parse(await readFile(file, "utf8"));
+    assert.deepEqual(Object.keys(saved.threads), ["a"]);
+    const restored = new CodexFollowups(f.runtime, file);
+    const before = holds.length;
+    const snapshot = await restored.inspect("a");
+    snapshot.items[0].parameters.model = "mutated-snapshot";
+    assert.equal(
+      (await restored.inspect("a")).items[0].parameters.model,
+      "chosen",
+    );
+    assert.equal(holds.length, before);
+    assert.deepEqual(f.calls, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("inspect serializes behind admitted queue changes without synchronizing holds itself", async () => {
+  const f = fixture(),
+    holds: unknown[] = [];
+  let release!: () => void, entered!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const admitted = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  f.runtime.syncHolds = async (value) => {
+    holds.push(value);
+    if (holds.length === 1) {
+      entered();
+      await waiting;
+    }
+  };
+  const q = new CodexFollowups(f.runtime);
+  const change = q.submit(input());
+  await admitted;
+  let inspected = false;
+  const inspection = q.inspect("a").then((value) => {
+    inspected = true;
+    return value;
+  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(inspected, false);
+  release();
+  await change;
+  assert.equal((await inspection).items[0].id, "one");
+  assert.equal(holds.length, 2);
+  assert.deepEqual(f.calls, []);
 });
