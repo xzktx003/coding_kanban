@@ -8,6 +8,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { sessionCssScope } from "../../scripts/session-css-scope.mjs";
 import { resolveWebDevCacheDir } from "../../scripts/vite-dev-cache.mjs";
+import { viteDocumentContinuity } from "../../scripts/vite-document-continuity.mjs";
 
 import {
   resolveHttpsFallbackRedirectLocation,
@@ -192,6 +193,7 @@ export default defineConfig(({ command, mode }) => {
     plugins: [
       react(),
       tailwindcss(),
+      viteDocumentContinuity(),
       vscodeWebviewHttpsSupportPlugin(httpsCaCertificate),
       httpFallbackPlugin(),
     ],

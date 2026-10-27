@@ -87,6 +87,54 @@ test("idle loaded descendants allow only the parent subscription to release, wit
   assert.deepEqual(f.unsubscribed(), ["root"]);
 });
 
+for (const target of ["root", "child"]) {
+  test(`an unfinished ${target} turn fences idle metadata until its exact completion`, async () => {
+    const f = familyFixture();
+    if (target === "child") f.child("child");
+    f.owner.observe("turn/started", { threadId: target, turn: { id: "running" } });
+    // Reconnection/status snapshots can lag the authoritative turn lifecycle.
+    await f.owner.release("root");
+    assert.deepEqual(f.unsubscribed(), []);
+    f.owner.observe("turn/completed", { threadId: target, turn: { id: "older", status: "completed" } });
+    await f.owner.release("root");
+    assert.deepEqual(f.unsubscribed(), []);
+    f.owner.observe("turn/completed", { threadId: target, turn: { id: "running", status: "completed" } });
+    await f.owner.release("root");
+    assert.deepEqual(f.unsubscribed(), ["root"]);
+  });
+}
+
+test("an accepted running turn is held before its start notification arrives", async () => {
+  const f = fixture();
+  const owner = new Ownership(async (method, params) => {
+    const result = await f.raw(method, params);
+    return method === "turn/start" ? { turn: { id: "accepted", status: "inProgress" } } : result;
+  });
+  owner.queueUpdate(1n, false, []);
+  await owner.call("turn/start", { threadId: "t" });
+  await owner.release("t");
+  assert.ok(!f.calls.some(call => call.method === "thread/unsubscribe"));
+  owner.observe("turn/completed", { threadId: "t", turn: { id: "accepted", status: "completed" } });
+  await owner.release("t");
+  assert.equal(f.calls.filter(call => call.method === "thread/unsubscribe").length, 1);
+});
+
+test("a delayed start acknowledgement cannot resurrect an already completed turn", async () => {
+  const f = fixture();
+  let owner: Ownership;
+  owner = new Ownership(async (method, params) => {
+    const result = await f.raw(method, params);
+    if (method !== "turn/start") return result;
+    owner.observe("turn/started", { threadId: "t", turn: { id: "accepted" } });
+    owner.observe("turn/completed", { threadId: "t", turn: { id: "accepted", status: "completed" } });
+    return { turn: { id: "accepted", status: "inProgress" } };
+  });
+  owner.queueUpdate(1n, false, []);
+  await owner.call("turn/start", { threadId: "t" });
+  await owner.release("t");
+  assert.equal(f.calls.filter(call => call.method === "thread/unsubscribe").length, 1);
+});
+
 test("an unloaded intermediate is read without acquisition and its active grandchild protects the root", async () => {
   const f = familyFixture(); f.child("intermediate"); f.child("grandchild", "intermediate", "active");
   f.loaded.delete("intermediate");

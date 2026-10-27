@@ -19,6 +19,11 @@ readline.createInterface({input:process.stdin}).on('line', line => {
   if (m.method === 'request') { send({method:'notice',params:{ready:true}}); send({id:'server-1',method:'ask',params:{threadId:'t'}}); send({id:m.id,result:{}}); }
   if (m.method === 'exit') process.exit(7);
   if (m.method === 'huge') process.stdout.write('x'.repeat(1024));
+  if (m.method === 'oversized-reply') {
+    const text = JSON.stringify({id:m.id,result:{text:'x'.repeat(2048)}})+'\n';
+    for (let i=0;i<text.length;i+=41) process.stdout.write(text.slice(i,i+41));
+    send({method:'turn/completed',params:{threadId:'busy',turn:{id:'running',status:'completed'}}});
+  }
   if (m.method === 'invalid') { process.stdout.write('not-json\n'); send({id:m.id,result:true}); }
   if (m.method === 'late') setTimeout(() => send({id:m.id,result:'late'}), 100);
   if (m.id === 'server-1' && m.result) send({method:'answered',params:m.result});
@@ -128,7 +133,7 @@ test("process death rejects every pending request and does not spawn a replaceme
   assert.equal(rpc.pendingCount, 0);
 });
 
-test("malformed lines are bounded diagnostics; an oversized incomplete frame terminates the owned transport", async (t) => {
+test("malformed lines are bounded diagnostics; an unknown oversized frame quarantines transport without stopping its process", async (t) => {
   const diagnostics: string[] = [];
   const rpc = new StdioRpc({
     command: process.execPath,
@@ -142,6 +147,25 @@ test("malformed lines are bounded diagnostics; an oversized incomplete frame ter
   assert.equal(await rpc.request("invalid", {}), true);
   assert.equal(diagnostics.length, 1);
   await assert.rejects(rpc.request("huge", {}), /DELIVERY_UNKNOWN.*frame/i);
+  assert.equal(rpc.pendingCount, 0);
+  assert.equal(rpc.available, false);
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(rpc.child.exitCode, null);
+  assert.equal(rpc.child.signalCode, null);
+});
+
+test("an oversized response is rejected without losing the next turn completion or other requests", async t => {
+  const notifications: unknown[] = [];
+  const rpc = new StdioRpc({ command: process.execPath, args: ["-e", childSource], maxFrameBytes: 256,
+    onNotification: event => notifications.push(event) });
+  t.after(() => rpc.close());
+  const pid = rpc.child.pid;
+  await assert.rejects(rpc.request("oversized-reply", {}), /frame exceeded.*native process retained/);
+  assert.deepEqual(await rpc.request("echo", { value: "after oversized history" }), { value: "after oversized history" });
+  assert.equal(rpc.available, true);
+  assert.equal(rpc.child.pid, pid);
+  assert.equal(rpc.child.exitCode, null);
+  assert.deepEqual(notifications, [{ method: "turn/completed", params: { threadId: "busy", turn: { id: "running", status: "completed" } } }]);
   assert.equal(rpc.pendingCount, 0);
 });
 

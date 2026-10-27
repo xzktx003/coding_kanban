@@ -16,6 +16,40 @@ body:has(.workbench-shell) {
   gap: 16px;
   color: #f4f1ea;
 }
+.workbench-update-notice {
+  position: fixed;
+  z-index: 100;
+  top: max(12px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - 24px);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid var(--border, #697464);
+  border-radius: 8px;
+  background: var(--popover, #282a23);
+  color: var(--popover-foreground, #eee);
+  font: 13px/1.5 system-ui, sans-serif;
+  box-shadow: 0 4px 16px #0003;
+}
+.workbench-update-notice button {
+  flex: none;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid var(--primary, #63a8f8);
+  background: transparent;
+  color: var(--primary, #a6ceff);
+  cursor: pointer;
+}
+.workbench-update-notice button:focus-visible {
+  outline: 2px solid #a6ceff;
+  outline-offset: 2px;
+}
 .workbench-brand {
   display: flex;
   align-items: center;

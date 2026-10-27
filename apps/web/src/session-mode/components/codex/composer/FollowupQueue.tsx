@@ -534,8 +534,9 @@ export function FollowupQueueContent({
           <Pause size={14} />
           <span className="session-queue-pause-reason">
             <span>
-              {state.paused === "interrupted"
-                ? "由于你中断了当前响应，队列已暂停"
+              {state.paused === "interrupted" ||
+              state.paused === "由于你中断了当前响应，队列已暂停"
+                ? "当前响应已中断，队列已暂停"
                 : state.paused}
             </span>
             {(accessBlock || unresolved) && (

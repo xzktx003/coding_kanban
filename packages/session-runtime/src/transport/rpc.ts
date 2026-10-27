@@ -46,6 +46,8 @@ export class StdioRpc {
   private queuedBytes = 0;
   private fragments: Buffer[] = [];
   private fragmentBytes = 0;
+  private framePrefix: Buffer = Buffer.alloc(0);
+  private discardingReply = false;
   private stderrTail = "";
   private readonly maxFrameBytes: number;
   private readonly exited: Promise<void>;
@@ -116,6 +118,15 @@ export class StdioRpc {
     return !this.failure;
   }
 
+  async waitForExit(milliseconds: number): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([this.exited, new Promise<void>(resolve => {
+        timer = setTimeout(resolve, milliseconds);
+      })]);
+    } finally { clearTimeout(timer); }
+  }
+
   private diagnostic(message: string): void {
     try {
       this.options.onDiagnostic?.(message.slice(0, 8192));
@@ -129,6 +140,8 @@ export class StdioRpc {
     this.failure = error;
     this.fragments = [];
     this.fragmentBytes = 0;
+    this.framePrefix = Buffer.alloc(0);
+    this.discardingReply = false;
     this.stderrTail = "";
     for (const pending of this.pending.values()) {
       pending.cleanup();
@@ -149,10 +162,31 @@ export class StdioRpc {
       const newline = chunk.indexOf(10, start);
       const end = newline < 0 ? chunk.length : newline;
       const part = chunk.subarray(start, end);
+      if (this.discardingReply) {
+        if (newline < 0) return;
+        this.discardingReply = false;
+        start = newline + 1;
+        continue;
+      }
+      if (this.framePrefix.length < 1024)
+        this.framePrefix = Buffer.concat([this.framePrefix, part.subarray(0, 1024 - this.framePrefix.length)]);
       this.fragmentBytes += part.length;
       if (this.fragmentBytes > this.maxFrameBytes) {
+        // Native responses put their id before result/error. Reject that one
+        // response and drain to its newline without retaining the body. Killing
+        // this process would also abort unrelated turns using the same writer.
+        if (this.rejectOversizedReply()) {
+          this.fragments = [];
+          this.fragmentBytes = 0;
+          this.framePrefix = Buffer.alloc(0);
+          this.discardingReply = newline < 0;
+          if (newline < 0) return;
+          start = newline + 1;
+          continue;
+        }
+        // Unknown envelopes cannot be skipped safely: stop protocol use, retain
+        // the executing process, and require an explicit recovery decision.
         this.fail(new Error("DELIVERY_UNKNOWN: RPC frame exceeded byte limit"));
-        this.child.kill("SIGTERM");
         return;
       }
       // Copy partial views: short tail slices must not retain previous huge buffers.
@@ -163,9 +197,25 @@ export class StdioRpc {
       );
       this.fragments = [];
       this.fragmentBytes = 0;
+      this.framePrefix = Buffer.alloc(0);
       if (line.trim()) this.message(line);
       start = newline + 1;
     }
+  }
+
+  private rejectOversizedReply(): boolean {
+    const match = /^\s*\{\s*(?:"jsonrpc"\s*:\s*"2\.0"\s*,\s*)?"id"\s*:\s*("(?:[^"\\]|\\.)*"|-?\d+)\s*,\s*"(?:result|error)"\s*:/.exec(this.framePrefix.toString("utf8"));
+    if (!match) return false;
+    let id: unknown;
+    try { id = JSON.parse(match[1]); } catch { return false; }
+    if (typeof id !== "string" && !Number.isSafeInteger(id)) return false;
+    const key = JSON.stringify(id);
+    const pending = this.pending.get(key);
+    this.pending.delete(key);
+    pending?.cleanup();
+    pending?.reject(new Error("DELIVERY_UNKNOWN: RPC frame exceeded byte limit; response rejected, native process retained"));
+    this.diagnostic("RPC response exceeded byte limit; rejected without stopping the native process");
+    return true;
   }
 
   private message(line: string): void {

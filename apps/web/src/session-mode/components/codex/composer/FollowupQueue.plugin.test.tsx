@@ -35,7 +35,7 @@ it("uses the plugin continue label for an interrupted queue without unresolved m
   expect(screen.queryByRole("button", { name: "继续队列" })).toBeNull();
   expect(screen.queryByRole("button", { name: "重新连接并发送" })).toBeNull();
   expect(screen.queryByText("队列连接暂不可用，正在重试。")).toBeNull();
-  expect(screen.getByText("由于你中断了当前响应，队列已暂停")).toBeTruthy();
+  expect(screen.getByText("当前响应已中断，队列已暂停")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "排队消息操作 1" }));
   expect(screen.queryByRole("menuitem", { name: "暂停队列" })).toBeNull();
   expect(screen.queryByRole("menuitem", { name: "清空队列" })).toBeNull();

@@ -13,6 +13,7 @@ import { StdioRpc, type ServerRequest } from "../transport/rpc.js";
 import { sanitizeCodexNotification } from "./projection.js";
 import { discoverCodex } from "./executable.js";
 import { Ownership, readHistory, type Rpc } from "./ownership.js";
+import { readLegacyHistory } from "./legacy-history.js";
 import { boundedText, rollback } from "./protocol.js";
 import { GithubPreviewService } from "./github-preview.js";
 import { SlackPreviewService } from "./slack-preview.js";
@@ -120,7 +121,7 @@ export class CodexService {
       },
       onDiagnostic: (text) =>
         this.options.hub.publish("codex:stderr", { message: text }),
-      onExit: () => {
+      onExit: (error) => {
         if (this.transport !== rpc) return;
         this.transport = undefined;
         this.starting = undefined;
@@ -134,7 +135,11 @@ export class CodexService {
         this.pending.clear();
         this.ownership.invalidate();
         this.options.hub.invalidatePending("codex");
-        this.options.hub.publish("codex:disconnected", {});
+        this.options.hub.publish("codex:disconnected", {
+          reason: /frame exceeded/.test(error.message) ? "frame_limit" :
+            /process exited/.test(error.message) ? "process_exit" : "transport_error",
+          nativeProcessAlive: rpc.child.exitCode === null && rpc.child.signalCode === null,
+        });
       },
     });
     // A broken pipe is not proof that the native task process exited. Retain
@@ -183,9 +188,15 @@ export class CodexService {
     }
   }
 
-  private ready(): Promise<StdioRpc> {
+  private async ready(): Promise<StdioRpc> {
     if (this.closed)
       return Promise.reject(new Error("NOT_SENT: Codex service closed"));
+    // stdout end can precede the exit/close events by a scheduling turn. Wait
+    // briefly for that evidence without signalling an actually living process.
+    const failed = [...this.transports].filter(rpc => !rpc.available);
+    await Promise.all(failed.map(rpc => rpc.waitForExit(100)));
+    if (failed.some(rpc => rpc.child.exitCode === null && rpc.child.signalCode === null))
+      return Promise.reject(new Error("NOT_SENT: 原生传输不可用，但执行进程仍存活；已保留任务，请核实后恢复连接"));
     // Also tolerate a retained failed transport (including a live legacy
     // runtime). Never retry the failed RPC; only a subsequent call reconnects.
     if (this.transport && !this.transport.available) {
@@ -213,7 +224,11 @@ export class CodexService {
     (await this.ready()).request(method, params, options);
   readonly call: Rpc = (method, params, options) => this.ownership.call(method, params, options);
   readHistory(id: string): Promise<Json> {
-    return readHistory(this.raw, id);
+    // Full legacy transcripts can exceed the shared 32 MiB frame and kill the
+    // live app-server. Paginated reads stay here; the legacy body is isolated.
+    return readHistory(this.raw, id, {}, (threadId) =>
+      readLegacyHistory(this.raw, this.options, threadId),
+    );
   }
 
   private async onRequest(request: ServerRequest): Promise<void> {

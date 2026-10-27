@@ -1,3 +1,5 @@
+- 2026-10-27：旧版 legacy `thread/read` 正文走共享 app-server，超出 32 MiB 时会结束共享进程，存在连带中断其它轮次的路径。两次现场 `turn_aborted(reason=interrupted)` 没有明确停止请求，但原生日志没有逐回包因果记录，不能据此证明每次都由超限触发。现 legacy 正文用独立只读进程；已识别的超限回包只拒绝当前读取，未知超限帧隔离传输并保留活进程。用户授权重启后最新运行层已激活，目标 paginated 历史只读复验成功。
+
 - 2026-10-21：全终端偶发重连的本次现场为四次 ssh2 Client 未处理认证错误，Node 退出1后 watcher 正常恢复，不是 watcher 随机替换。SftpService 必须用持久 error 监听覆盖失败／close 后迟到回调；超时／同步 connect 错误／关闭也清理自身。旧 Client 的 close、旧操作失败和 idle 回调不得按目标键直接释放新连接；先删 Map 再 end 防同步重入。后台 homePath rejection 要观察但保留原 Promise 错误给 ~ 使用者。首六项红绿，九项新生命周期回归／文件服务共73项和 pnpm check 通过；不改认证、不加全局异常吞错、不重启 Agent，详见 docs/backend-restart-ssh-errors.md。
 
 - 2026-10-23（手机终端收起输入法后输入框仍缩小）：紧凑布局原先仅判断 textarea 的 `:focus`，手机关闭软键盘后焦点仍在，导致输入框维持 36px、底部导航持续隐藏。现按可视高度相对展开基线的下降量设置页面局部 `data-keyboard-open`，兼容仅 visualViewport 缩小和两种 viewport 同时缩小；宽度变化重置方向基线、缩放不判作键盘，卸载清理监听。收起键盘即恢复原始输入框和导航，保留焦点与草稿。两种模式连续两次开合的浏览器用例先红后绿，另有横屏和按钮可见性回归；测试模拟键盘几何，不代表已覆盖所有真机输入法动画。
@@ -1338,3 +1340,8 @@
 - 2026-10-27：PR 创建表单在手机和桌面窄容器中没有可见字段标签，标题输入仅24px高。已改用纵向标签字段、44px标题输入、128px描述区和移动整行链接按钮；390px与1440px浏览器检查标签间距、控件尺寸与横向溢出，同时保留原owner scope和不自动访问GitHub的边界。
 - 2026-10-27：Playwright E2E 协议推断曾用 WEB_HTTPS，而 Vite 实际用 VITE_DEV_HTTPS；0.0.0.0 绑定地址也不适合作为 readiness URL。协议判断改为跟随 Vite，绑定保持原值，0.0.0.0 探活转到 127.0.0.1；隔离 owner-form 14 项通过。
 - 2026-10-27：Git worktree 并发测试把两个异步调用的返回顺序误当作串行队列入队顺序。测试改为检查同路径恰有一次创建和一次复用，并从新建结果检查复制文件；session-runtime 全量362项通过。
+
+# 2026-10-27 意外中断释放保护
+
+- `Ownership.activeTurns` 原未参与主／子 Agent 的释放条件，idle 薄元数据可放行父订阅回收。现按精确轮次保留并在实际写入 guard 复核，回执不能复活已完成轮次。外部／未知 interrupted 与用户明确停止分开归因，旧暂停字符串中性呈现，不自动重发。服务已按用户授权切换到当前构建。
+- 手机开发页面断连后的 Vite reload、MCP 认证模块循环 Fast Refresh 均已浏览器复现；拆分组件，HMR 原连接重连，漏接／不兼容更新提示显式刷新。共享 RPC 超限回复只拒绝并逐块丢弃该正文，不 SIGTERM 活跃进程；未知帧隔离传输且禁止自动替代仍存活的 writer。当前实现与验证边界见 `docs/session-interruption-safety.md`。

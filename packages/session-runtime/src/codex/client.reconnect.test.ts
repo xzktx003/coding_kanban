@@ -24,6 +24,9 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
  if(m.method==='fixture/oversized'){
   send({id:m.id,result:{text:'x'.repeat(33*1024*1024)}});return;
  }
+ if(m.method==='fixture/unknown-oversized'){
+  process.stdout.write('x'.repeat(33*1024*1024));return;
+ }
  send({id:m.id,result:{data:[],pid:process.pid}});
 });`;
 
@@ -100,10 +103,10 @@ test("environment discovery failure can recover without restarting the runtime",
   assert.equal(attempts, 2);
 });
 
-test("an oversized native reply cannot permanently poison the cached connection, including legacy exit handling", async (t) => {
+test("an oversized native reply rejects only that read and preserves the executing process", async (t) => {
   const { service, hub, records } = await fixture(t);
   service.options.resolveEnv = async () => process.env;
-  await service.raw("model/list", {});
+  const original = object(await service.raw("model/list", {})).pid;
   const old = (
     service as unknown as { transport: { options: { onExit: () => void } } }
   ).transport;
@@ -121,6 +124,7 @@ test("an oversized native reply cannot permanently poison the cached connection,
     Array.from({ length: 8 }, () => service.raw("thread/list", {})),
   );
   assert.equal(new Set(replies.map((reply) => object(reply).pid)).size, 1);
+  assert.equal(object(replies[0]).pid, original);
   assert.equal(
     (await records()).filter((call) => call.method === "fixture/oversized")
       .length,
@@ -128,8 +132,19 @@ test("an oversized native reply cannot permanently poison the cached connection,
   );
   assert.equal(
     (await records()).filter((call) => call.method === "initialize").length,
-    2,
+    1,
   );
+});
+
+test("an unknown oversized frame preserves its living process and cannot start a replacement", async t => {
+  const { service, hub, records } = await fixture(t);
+  await service.raw("model/list", {});
+  await assert.rejects(service.raw("fixture/unknown-oversized", {}), /frame exceeded/);
+  await assert.rejects(service.raw("model/list", {}), /NOT_SENT.*执行进程仍存活/);
+  assert.equal((await records()).filter(call => call.method === "initialize").length, 1);
+  const events = hub.subscribe({ since: 0 });
+  assert.ok(events.backlog.some(event => event.event === "codex:disconnected" && event.payload.reason === "frame_limit" && event.payload.nativeProcessAlive === true));
+  events.close();
 });
 
 test("late callbacks from the old native process cannot invalidate or approve work on its replacement", async (t) => {

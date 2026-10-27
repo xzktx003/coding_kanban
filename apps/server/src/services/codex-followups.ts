@@ -516,6 +516,7 @@ export class CodexFollowups {
       const thread = this.state[id];
       if (!thread) return;
       await this.transaction(() => {
+        const requestedStop = thread.stopTurnId === p.turn.id;
         if (
           thread.review &&
           [thread.review.turnId, thread.review.executionTurnId].includes(
@@ -542,7 +543,9 @@ export class CodexFollowups {
           thread.paused =
             p.turn.status === "failed"
               ? "上一轮执行失败，请检查后继续"
-              : "由于你中断了当前响应，队列已暂停";
+              : requestedStop
+                ? "由于你中断了当前响应，队列已暂停"
+                : "当前响应已中断，队列已暂停；中断来源尚未确认，请检查后继续";
         thread.revision++;
       });
     });
@@ -596,7 +599,7 @@ export class CodexFollowups {
       if (failed || interrupted)
         thread.paused = failed
           ? "上一轮执行失败，请检查后继续"
-          : "由于你中断了当前响应，队列已暂停";
+          : "当前响应已中断，队列已暂停；中断来源尚未确认，请检查后继续";
       else if (thread.paused === "重新连接后等待任务完成确认")
         thread.paused = null;
       thread.revision++;

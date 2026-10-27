@@ -89,6 +89,15 @@ it.each([
   expect(screen.getByText(reason)).toBeTruthy();
   expect(screen.queryByText("由于你中断了当前响应，队列已暂停")).toBeNull();
 });
+it.each(["interrupted", "由于你中断了当前响应，队列已暂停"])(
+  "shows legacy interruption %s without inventing a user stop or resending",
+  (reason) => {
+    mount([], reason);
+    expect(screen.getByText("当前响应已中断，队列已暂停")).toBeTruthy();
+    expect(screen.queryByText(/由于你中断/)).toBeNull();
+    expect(followupService.change).not.toHaveBeenCalled();
+  },
+);
 it("routes a failed message to its recovery actions and disables menu resume", async () => {
   mount();
   expect(screen.getByText("消息发送失败")).toBeTruthy();

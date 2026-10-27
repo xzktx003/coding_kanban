@@ -7,7 +7,7 @@ import { i18n } from "@session/lib/i18n";
 import { nativeNotifications } from "../native-notifications/service";
 import { McpReauthentication } from "./controller";
 import { mcpAuthLabels } from "./messages";
-import { showMcpPrompt } from "./NativeMcpAuthentication";
+import { showMcpPrompt } from "./prompt";
 const dismissals = new Map<string, object>();
 const accountKey = () => {
   const { account, accountNamespace } = useCodexStore.getState();

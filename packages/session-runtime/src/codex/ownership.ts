@@ -153,6 +153,12 @@ export class Ownership {
     if ([...this.pending.values()].includes(id)) return "等待审批或回答";
     return;
   }
+  private releaseHold(id: string): string | undefined {
+    // Release must not trust an idle snapshot ahead of exact turn completion.
+    // Goal cleanup has its own bounded wait for that completion and must retain it.
+    if (this.activeTurns.has(id)) return "轮次尚未结束，保留执行实例";
+    return this.hold(id);
+  }
 
   /**
    * Official-style local compare-and-clear, using only the writer we already
@@ -292,6 +298,7 @@ export class Ownership {
       if (inputEpoch !== undefined && this.epoch !== inputEpoch)
         throw new Error("SESSION_ACQUIRE_FAILED: 尚未发送，运行实例已改变，请重新核对会话");
       try {
+        const dispatchRevision = this.threadRevisions.get(id) ?? 0;
         const result = await this.raw(method, params, goalMutation ? { signal: goalSignal, beforeSend: () => {
           if (goalSignal?.aborted) throw new Error("NOT_SENT: 目标操作已取消");
           if (this.epoch !== inputEpoch) throw new Error("NOT_SENT: 目标操作的运行实例已改变");
@@ -303,6 +310,12 @@ export class Ownership {
         if (method === "turn/start") {
           if (entry.awaitingFirstTurn) entry.firstTurnAck = { epoch: this.epoch, generation: entry.generation };
           entry.awaitingFirstTurn = false;
+          const turn = object(object(result).turn);
+          // Cover the acknowledgement/start-notification gap, but never revive
+          // a turn whose newer completion already arrived before this reply.
+          if (typeof turn.id === "string" && turn.status === "inProgress" &&
+              dispatchRevision === (this.threadRevisions.get(id) ?? 0))
+            this.activeTurns.set(id, turn.id);
         }
         const review = object(result).reviewThreadId;
         if (method === "review/start" && typeof review === "string" && review !== id) { this.entry(review).state = "owned"; this.touch(review); }
@@ -394,7 +407,7 @@ export class Ownership {
     entry.state = "owned";
     if (entry.awaitingFirstTurn) { entry.reason = "新会话尚未接受首条消息，保留执行实例"; return; }
     if (entry.uncertain) { entry.reason = "操作送达结果待确认"; return; }
-    const hold = this.hold(id); if (hold) { entry.reason = hold; return; }
+    const hold = this.releaseHold(id); if (hold) { entry.reason = hold; return; }
     const root = object(object(await this.raw("thread/read", { threadId: id, includeTurns: false })).thread);
     if (root.id !== id) throw new Error("线程身份未确认");
     // AgentControl owns native child lifetimes. Never send unsubscribe to a
@@ -425,7 +438,7 @@ export class Ownership {
         // This runs at the real stdin write boundary, after queued writes and
         // native request handlers have had an opportunity to change the family.
         if (this.changed(checkpoint, entry, latest.members) || [...latest.members].some(member =>
-          this.hold(member) || this.entries.get(member)?.uncertain || this.entries.get(member)?.awaitingFirstTurn ||
+          this.releaseHold(member) || this.entries.get(member)?.uncertain || this.entries.get(member)?.awaitingFirstTurn ||
           (member !== id && this.locks.busy(member)))) {
           throw new Error("NOT_SENT: 释放条件已改变，未发送取消订阅");
         }
@@ -497,7 +510,7 @@ export class Ownership {
       if (entry?.awaitingFirstTurn) return prefix + "新会话尚未接受首条消息，保留执行实例";
       if (entry?.uncertain) return prefix + "操作送达结果待确认";
       if (id !== root && this.locks.busy(id)) return prefix + "执行操作尚未结束，保留执行实例";
-      const hold = this.hold(id); if (hold) return prefix + hold;
+      const hold = this.releaseHold(id); if (hold) return prefix + hold;
       const status = String(object(family.metadata.get(id)!.status).type);
       if (!family.loaded.has(id)) {
         if (!["notLoaded", "idle", "systemError"].includes(status)) return prefix + "执行状态尚未确认，保留执行实例";
@@ -517,16 +530,26 @@ export class Ownership {
 }
 
 /** Read-only history loading is deliberately outside execution ownership. */
-export async function readHistory(raw: Rpc, id: string, limits: Partial<HistoryBudgetLimits> = {}): Promise<Json> {
+export async function readHistory(
+  raw: Rpc,
+  id: string,
+  limits: Partial<HistoryBudgetLimits> = {},
+  legacy?: (id: string) => Promise<Json>,
+): Promise<Json> {
   const budget = new HistoryBudget(limits);
   const result = object(await raw("thread/read", { threadId: id, includeTurns: false }));
   budget.add(result);
   const thread = object(result.thread);
   if (thread.historyMode !== "paginated") {
-    budget.beginPage();
-    const history = await raw("thread/read", { threadId: id, includeTurns: true });
-    budget.add(history);
-    return sanitizeCodexHistory(history);
+    if (!legacy) {
+      budget.beginPage();
+      const history = await raw("thread/read", { threadId: id, includeTurns: true });
+      budget.add(history);
+      return sanitizeCodexHistory(history);
+    }
+    // The shared pipe dies when one native frame exceeds 32 MiB. Tests without
+    // an isolated reader keep the original direct read.
+    return legacy(id);
   }
   const turns: Json[] = [], seen = new Set<string>(); let cursor: Json = null;
   while (true) {

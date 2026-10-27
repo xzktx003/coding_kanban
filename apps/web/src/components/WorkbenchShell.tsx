@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { WorkbenchModeSwitch } from "./WorkbenchModeSwitch";
+import { WorkbenchUpdateNotice } from "./WorkbenchUpdateNotice";
 import {
   readWorkbenchMode,
   WORKBENCH_MODE_KEY,
@@ -116,6 +117,7 @@ export function WorkbenchShell() {
   }
   return (
     <div className="workbench-shell" data-mode={mode}>
+      <WorkbenchUpdateNotice />
       <div
         className="workbench-terminal"
         hidden={mode !== "terminal"}

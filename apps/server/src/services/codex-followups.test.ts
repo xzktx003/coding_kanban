@@ -44,6 +44,20 @@ function fixture() {
     },
   };
 }
+test("a native interruption without an exact stop request never blames the user or resends", async () => {
+  const f = fixture(), q = new CodexFollowups(f.runtime);
+  f.states.a = "idle";
+  await q.submit(input());
+  await q.tick();
+  await q.submit(input("next"));
+  await q.observe({ method: "turn/completed", params: { threadId: "a", turn: { id: "turn-one", status: "interrupted" } } });
+  const state = await q.get("a");
+  assert.match(state.paused!, /当前响应已中断/);
+  assert.doesNotMatch(state.paused!, /你中断/);
+  f.states.a = "idle";
+  await q.tick();
+  assert.deepEqual(f.calls.map(c => c.method), ["turn/start"]);
+});
 test("queues per thread, dispatches one per completed turn, keeps parameter snapshots and deduplicates retries", async () => {
   const f = fixture(),
     q = new CodexFollowups(f.runtime);
@@ -544,7 +558,7 @@ for (const status of ["failed", "interrupted"])
     assert.equal(
       (await q.get("a")).paused,
       status === "interrupted"
-        ? "由于你中断了当前响应，队列已暂停"
+        ? "当前响应已中断，队列已暂停；中断来源尚未确认，请检查后继续"
         : "上一轮执行失败，请检查后继续",
     );
     assert.equal((await q.get("a")).awaitingTurnId, undefined);

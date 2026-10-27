@@ -76,6 +76,14 @@ PLAYWRIGHT_SKIP_WEBSERVER=1 PLAYWRIGHT_BASE_URL=<已运行的LAN地址> pnpm exe
 截图问题再次核对（2026-10-27）：`.dev-runtime/history-screenshot-recheck-20261027-080557/` 保存当前正式 LAN 页面复验。1600×1000 和 393×852 均显示目标回复及待回答问题，9 条历史请求全部 200，加载提示、页面异常、任务写入和横向溢出均为零。当前源码专项 47 项通过（历史服务 34、代理配置 9、取消队列 1、HTTP/1 与 HTTP/2 代理 3）；代理配置首次误用 Vitest 的运行器失败日志保留，改用其 Node test 运行器后通过。浏览器保留导航取消请求日志，未重启 Session 运行层 PID 2712539；Codex 状态同时确认宿主、网关和 broker 可用。
 
 
+## 2026-10-27：完整历史不再占用共享 Agent 管道
+
+旧版 legacy `thread/read` 正文走共享 stdio；单帧超过 32 MiB 时旧实现会结束整个 app-server，可能连带中断同一进程上的其它执行轮次。页面刷新或队列核对若触发这种超限读取，就会走到这条危险路径。现场确有 `turn_aborted(reason=interrupted)` 且未见对应的 `turn/interrupt`，但日志没有把具体超限回包与两次中断逐一关联，因此不能断言每次都由它造成。
+
+`CodexService.readHistory` 仍先用共享连接读取不含正文的元数据。分页历史保持原协议；legacy 正文改由 `readLegacyHistory` 启动独立只读进程解析。字符串按 parser chunk 累加，并在单值超过预算时立即中止，避免先构造超限正文；超过既有历史预算时只拒绝这一次读取，不调用 interrupt，也不替换共享 Agent 进程。
+
+初次实现完成时，正式运行层仍为旧构建；之后用户明确授权服务重启，`pnpm dev:restart` 已激活当前构建。重启后只读复验 `REF_xh3_accu` 返回 200，历史为 paginated，100 turns／2,915 items，响应 11,611,853 bytes，末轮 completed。此复验不扩大 16 MiB 聊天页、32 MiB RPC 与历史预算，也不表示任意超预算 legacy 正文可显示。
+
 ## 2026-10-27截图复验与链接刷新修复
 
 当前现场的消息读取修复仍有效：正式 HTTPS LAN 入口 `https://10.30.0.24:8484`，目标 `REF_xh3_accu` 在1600×1000和393×852均显示历史回复及待回答问题，未出现加载错误提示。原有前端recent有界期限、HTTP/2取消传播、可移除FIFO和16 MiB聊天投影／32 MiB RPC预算保持。

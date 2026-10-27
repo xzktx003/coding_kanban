@@ -18,7 +18,7 @@ vi.mock("@session/lib/eventStream", () => ({
     return mocks.stop;
   },
 }));
-vi.mock("./NativeMcpAuthentication", () => ({
+vi.mock("./prompt", () => ({
   showMcpPrompt: (name: string, reconnect: any, dismiss: any, remove: any) => {
     const prompt = { name, reconnect, dismiss, close: vi.fn(() => remove()) };
     mocks.prompts.push(prompt);

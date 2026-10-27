@@ -9,7 +9,7 @@ import { HttpError } from "../core/json.js";
 import { DetailSelector, type DetailRequest } from "./item-detail-selector.js";
 
 // Process-wide admission: neither a service instance nor an HTTP connection owns a second slot.
-const occupied = new Set<"detail" | "chat">();
+const occupied = new Set<"detail" | "chat" | "legacy">();
 const fail = (status: number, code: string) => new HttpError(status, code);
 export const DETAIL_LIMITS = Object.freeze({
   inputBytes: 4096,
@@ -55,7 +55,7 @@ export async function readItemDetail(
 export async function readNativeProjection(
   options: Pick<CodexOptions, "env" | "resolveEnv" | "launch">,
   plan: {
-    channel: "detail" | "chat";
+    channel: "detail" | "chat" | "legacy";
     method: "thread/read" | "thread/turns/list";
     params: unknown;
     selector: (initialized: () => void, ready: () => void) => {
@@ -257,7 +257,7 @@ export async function readNativeProjection(
       send(
         "initialize",
         {
-          clientInfo: { name: plan.channel === "detail" ? "kanban_detail_reader" : "kanban_chat_reader", version: "1" },
+          clientInfo: { name: plan.channel === "detail" ? "kanban_detail_reader" : plan.channel === "legacy" ? "kanban_legacy_history_reader" : "kanban_chat_reader", version: "1" },
           capabilities: { experimentalApi: true },
         },
         1,
