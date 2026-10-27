@@ -5,13 +5,7 @@ import { useCCStore } from "@session/stores/cc";
 import { useAcpStore } from "@session/stores/useAcpStore";
 import { useAgentCenterStore } from "@session/stores/useAgentCenterStore";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
-import { AgentCard } from "./AgentCard";
-import { AgentComposer } from "./AgentComposer";
-import { SubagentPanel } from "@session/features/subagents/SubagentPanel";
 import { useSubagentStore } from "@session/features/subagents/store";
-import { AgentViewHeader } from "./AgentViewHeader";
-import { SessionGroups } from "./SessionGroups";
-import { SessionWelcome } from "@session/SessionWelcome";
 import {
   useRestoreSessionTabs,
   useSessionTabActions,
@@ -26,6 +20,34 @@ const CCSession = lazy(
   () => import("@session/components/cc/session/CCSession"),
 );
 const AcpSession = lazy(() => import("@session/components/acp/AcpSession"));
+const AgentComposer = lazy(() =>
+  import("./AgentComposer").then((module) => ({
+    default: module.AgentComposer,
+  })),
+);
+const AgentCard = lazy(() =>
+  import("./AgentCard").then((module) => ({ default: module.AgentCard })),
+);
+const AgentViewHeader = lazy(() =>
+  import("./AgentViewHeader").then((module) => ({
+    default: module.AgentViewHeader,
+  })),
+);
+const SessionGroups = lazy(() =>
+  import("./SessionGroups").then((module) => ({
+    default: module.SessionGroups,
+  })),
+);
+const SessionWelcome = lazy(() =>
+  import("@session/SessionWelcome").then((module) => ({
+    default: module.SessionWelcome,
+  })),
+);
+const SubagentPanel = lazy(() =>
+  import("@session/features/subagents/SubagentPanel").then((module) => ({
+    default: module.SubagentPanel,
+  })),
+);
 
 /** Renders the transcript for whichever agent drives the chat pane. */
 function AgentSession() {
@@ -68,7 +90,9 @@ export default function AgentView() {
   );
   const subagentDock = subagentOpen ? (
     <aside className="session-subagent-dock" aria-label="子智能体">
-      <SubagentPanel />
+      <Suspense fallback={null}>
+        <SubagentPanel />
+      </Suspense>
     </aside>
   ) : null;
   const noActiveSession = acpActive
@@ -79,16 +103,24 @@ export default function AgentView() {
 
   return (
     <div className="session-agent-view flex flex-col min-h-0 h-full">
-      {acpActive && <AgentViewHeader />}
+      {acpActive && (
+        <Suspense fallback={null}>
+          <AgentViewHeader />
+        </Suspense>
+      )}
       {!acpActive && cardsViewMode === "solo" ? (
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
           <div className="flex flex-1 min-h-0 overflow-hidden">
-            <SessionGroups />
+            <Suspense fallback={null}>
+              <SessionGroups />
+            </Suspense>
             {subagentDock}
           </div>
           <div className="shrink-0 flex justify-center border-t">
             <div className="session-composer-width w-full">
-              <AgentComposer />
+              <Suspense fallback={null}>
+                <AgentComposer />
+              </Suspense>
             </div>
           </div>
         </div>
@@ -98,56 +130,60 @@ export default function AgentView() {
         cardsViewMode !== "solo" ? (
         <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
           <div className="flex flex-1 min-h-0 overflow-hidden">
-          <div className="flex-1 min-h-0 overflow-y-auto p-2">
-            {cardsViewMode === "grid" && (
-              // flex-wrap (not CSS grid) so each card's manually-resized width/height
-              // (see useCardResize) can take effect independently, Ghostty-pane style.
-              // Cards without a saved width fall back to flex-basis so they still tile
-              // responsively like the old grid.
-              <div className="flex flex-wrap gap-2 items-start">
-                {cards.map((card) => (
-                  <AgentCard
-                    key={`${card.kind}-${card.id}`}
-                    card={card}
-                    isSelected={
-                      currentAgentCardId === card.id &&
-                      (!currentAgentCardKind ||
-                        currentAgentCardKind === card.kind)
-                    }
-                    onRemove={() => void closeTab(card)}
-                  />
-                ))}
-              </div>
-            )}
+            <Suspense fallback={null}>
+              <div className="flex-1 min-h-0 overflow-y-auto p-2">
+                {cardsViewMode === "grid" && (
+                  // flex-wrap (not CSS grid) so each card's manually-resized width/height
+                  // (see useCardResize) can take effect independently, Ghostty-pane style.
+                  // Cards without a saved width fall back to flex-basis so they still tile
+                  // responsively like the old grid.
+                  <div className="flex flex-wrap gap-2 items-start">
+                    {cards.map((card) => (
+                      <AgentCard
+                        key={`${card.kind}-${card.id}`}
+                        card={card}
+                        isSelected={
+                          currentAgentCardId === card.id &&
+                          (!currentAgentCardKind ||
+                            currentAgentCardKind === card.kind)
+                        }
+                        onRemove={() => void closeTab(card)}
+                      />
+                    ))}
+                  </div>
+                )}
 
-            {cardsViewMode === "list" && (
-              <div className="flex flex-col gap-1">
-                {cards.map((card) => (
-                  <AgentCard
-                    key={`${card.kind}-${card.id}`}
-                    card={card}
-                    isSelected={
-                      currentAgentCardId === card.id &&
-                      (!currentAgentCardKind ||
-                        currentAgentCardKind === card.kind)
-                    }
-                    onRemove={() => void closeTab(card)}
-                    hideBody={
-                      currentAgentCardId !== card.id ||
-                      (!!currentAgentCardKind &&
-                        currentAgentCardKind !== card.kind)
-                    }
-                  />
-                ))}
+                {cardsViewMode === "list" && (
+                  <div className="flex flex-col gap-1">
+                    {cards.map((card) => (
+                      <AgentCard
+                        key={`${card.kind}-${card.id}`}
+                        card={card}
+                        isSelected={
+                          currentAgentCardId === card.id &&
+                          (!currentAgentCardKind ||
+                            currentAgentCardKind === card.kind)
+                        }
+                        onRemove={() => void closeTab(card)}
+                        hideBody={
+                          currentAgentCardId !== card.id ||
+                          (!!currentAgentCardKind &&
+                            currentAgentCardKind !== card.kind)
+                        }
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          {subagentDock}
+          </Suspense>
+            {subagentDock}
           </div>
 
           <div className="shrink-0 flex justify-center border-t">
             <div className="session-composer-width w-full">
-              <AgentComposer />
+              <Suspense fallback={null}>
+                <AgentComposer />
+              </Suspense>
             </div>
           </div>
         </div>
@@ -155,8 +191,12 @@ export default function AgentView() {
         <div className="flex flex-row flex-1 min-h-0 overflow-hidden">
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden items-center justify-center">
             <div className="session-composer-width flex flex-col gap-4 w-full">
-              <AgentComposer />
-              <SessionWelcome />
+              <Suspense fallback={null}>
+                <AgentComposer />
+              </Suspense>
+              <Suspense fallback={null}>
+                <SessionWelcome />
+              </Suspense>
             </div>
           </div>
         </div>
@@ -174,7 +214,9 @@ export default function AgentView() {
 
           <div className="shrink-0 flex justify-center">
             <div className="session-composer-width w-full">
-              <AgentComposer />
+              <Suspense fallback={null}>
+                <AgentComposer />
+              </Suspense>
             </div>
           </div>
         </div>

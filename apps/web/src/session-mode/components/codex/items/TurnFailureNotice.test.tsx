@@ -140,3 +140,17 @@ it("does not duplicate a failure already rendered for the same turn", () => {
   );
   expect(container.querySelectorAll("[role=alert]")).toHaveLength(0);
 });
+
+it("labels an interrupted completion as that turn's persisted status", () => {
+  const completion: any = {
+    method: "turn/completed",
+    params: {
+      threadId: "a",
+      turn: { id: "interrupted", status: "interrupted", items: [] },
+    },
+  };
+  render(<EventItem event={completion} />);
+  expect(screen.getByLabelText("该轮已中断").getAttribute("title")).toBe(
+    "仅表示本轮的历史结束状态；刷新只读取历史，后续回答会显示为新的轮次。",
+  );
+});

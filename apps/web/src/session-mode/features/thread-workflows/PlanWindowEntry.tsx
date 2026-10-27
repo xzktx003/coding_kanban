@@ -17,7 +17,7 @@ import {
   type ThemeContextType,
 } from "@session/contexts/ThemeContext";
 import { SessionPortalDocumentProvider } from "@session/session-dom";
-import { i18n } from "@session/lib/i18n";
+import { i18n, initializeSessionI18n } from "@session/lib/i18n";
 import { NativeMessageCopy } from "./NativeMessageCopy";
 import { downloadThreadMarkdown } from "./service";
 import { planWindowChannel, readPlanWindowSnapshot } from "./planSnapshot";
@@ -38,6 +38,10 @@ export function PlanWindowEntry() {
       };
     }
   });
+  const [localeReady, setLocaleReady] = useState(
+    () => !loaded.snapshot || i18n.isInitialized,
+  );
+  const [localeError, setLocaleError] = useState<string | null>(null);
   const content = useRef<HTMLElement>(null);
   useLayoutEffect(() => {
     // This entry owns a separate document, including its resize and overscroll canvas.
@@ -106,9 +110,31 @@ export function PlanWindowEntry() {
       bridge.close();
     };
   }, [loaded]);
+  useEffect(() => {
+    if (!loaded.snapshot || i18n.isInitialized) {
+      setLocaleReady(true);
+      return;
+    }
+    let active = true;
+    void initializeSessionI18n().then(
+      () => {
+        if (active) setLocaleReady(true);
+      },
+      (error: unknown) => {
+        if (active)
+          setLocaleError(error instanceof Error ? error.message : String(error));
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [loaded.snapshot]);
   const locale = useMemo(
-    () => i18n.cloneInstance({ lng: loaded.snapshot?.language ?? "en" }),
-    [loaded.snapshot?.language],
+    () =>
+      loaded.snapshot && localeReady
+        ? i18n.cloneInstance({ lng: loaded.snapshot.language })
+        : null,
+    [loaded.snapshot?.language, localeReady],
   );
   if (!loaded.snapshot)
     return (
@@ -117,6 +143,25 @@ export function PlanWindowEntry() {
         <button type="button" onClick={() => window.close()}>
           关闭
         </button>
+      </main>
+    );
+  if (localeError)
+    return (
+      <main className="session-mode codex-plan-window-error" role="alert">
+        计划界面语言资源加载失败：{localeError}
+        <button type="button" onClick={() => window.location.reload()}>
+          重新加载
+        </button>
+      </main>
+    );
+  if (!locale)
+    return (
+      <main
+        className="session-mode codex-plan-window-loading"
+        role="status"
+        aria-busy="true"
+      >
+        正在加载计划…
       </main>
     );
   const snapshot = loaded.snapshot;

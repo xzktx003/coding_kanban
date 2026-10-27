@@ -2,6 +2,8 @@
 const conversations = new Set<string>();
 let lock: WakeLockSentinel | null = null;
 let pending: Promise<void> | null = null;
+let visibilityClients = 0;
+let visibilityListenerActive = false;
 async function acquire() {
   if (
     !conversations.size ||
@@ -30,12 +32,39 @@ async function acquire() {
   })();
   return pending;
 }
-if (typeof document !== "undefined")
-  document.addEventListener("visibilitychange", () => {
-    void acquire();
-  });
+const onVisibilityChange = () => {
+  void acquire();
+};
+function attachVisibilityListener() {
+  if (visibilityListenerActive || typeof document === "undefined") return;
+  visibilityListenerActive = true;
+  document.addEventListener("visibilitychange", onVisibilityChange);
+}
+function detachVisibilityListenerIfIdle() {
+  if (
+    !visibilityListenerActive ||
+    visibilityClients > 0 ||
+    conversations.size > 0 ||
+    typeof document === "undefined"
+  )
+    return;
+  visibilityListenerActive = false;
+  document.removeEventListener("visibilitychange", onVisibilityChange);
+}
+export function startBrowserSleepVisibilitySync() {
+  visibilityClients++;
+  attachVisibilityListener();
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    visibilityClients = Math.max(0, visibilityClients - 1);
+    detachVisibilityListenerIfIdle();
+  };
+}
 export async function preventBrowserSleep(id = "session") {
   conversations.add(id);
+  attachVisibilityListener();
   await acquire();
 }
 export async function allowBrowserSleep(id?: string | null) {
@@ -46,4 +75,5 @@ export async function allowBrowserSleep(id?: string | null) {
     lock = null;
     await previous.release();
   }
+  detachVisibilityListenerIfIdle();
 }

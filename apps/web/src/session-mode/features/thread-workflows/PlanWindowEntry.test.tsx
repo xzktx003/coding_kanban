@@ -44,7 +44,7 @@ beforeEach(() => {
     },
   );
 });
-it("uses frozen source ownership and sends only an explicit file-location request without initializing or mutating an Agent", () => {
+it("uses frozen source ownership and sends only an explicit file-location request without initializing or mutating an Agent", async () => {
   const id = savePlanWindowSnapshot({
     text: "# Plan",
     threadId: "original",
@@ -66,6 +66,7 @@ it("uses frozen source ownership and sends only an explicit file-location reques
   document.body.style.backgroundColor = "rgb(1, 2, 3)";
   document.body.style.colorScheme = "light";
   const view = render(<PlanWindowEntry />);
+  await screen.findByTestId("captured-markdown");
   expect(document.body.style.margin).toBe("0px");
   expect(document.body.style.backgroundColor).toBe("rgb(32, 33, 29)");
   expect(document.body.style.colorScheme).toBe("dark");

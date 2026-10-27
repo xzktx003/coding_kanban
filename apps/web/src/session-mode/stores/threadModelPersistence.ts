@@ -145,6 +145,7 @@ export function createThreadModelPersistence<E, P>(
   shared.captures ??= new WeakMap();
   let disposed = false;
   let channel: BroadcastChannel | undefined;
+  let eventsConnected = false;
   const { rows, queues, running, loading, failures, nativeTransactions } =
     shared;
   const status = (id: string, next: ThreadModelStorageStatus) =>
@@ -607,10 +608,12 @@ export function createThreadModelPersistence<E, P>(
   function connect() {
     if (
       disposed ||
+      eventsConnected ||
       shared.options.connectEvents === false ||
       typeof window === "undefined"
     )
       return;
+    eventsConnected = true;
     if (typeof BroadcastChannel !== "undefined") {
       channel = new BroadcastChannel(name);
       channel.onmessage = ({ data }) => {
@@ -631,6 +634,8 @@ export function createThreadModelPersistence<E, P>(
     if (document.visibilityState === "visible") refresh();
   }
   function suspend() {
+    if (!eventsConnected) return;
+    eventsConnected = false;
     channel?.close();
     channel = undefined;
     if (typeof window !== "undefined") {
@@ -640,7 +645,6 @@ export function createThreadModelPersistence<E, P>(
   }
   shared.publish = (id) =>
     channel?.postMessage({ type: "changed", threadId: id });
-  connect();
   return {
     ensure,
     flush,

@@ -1,28 +1,23 @@
-import { requestTimeout } from "./lib/requestTimeout";
-import { ThemeProvider } from "./contexts/ThemeContext";
-import { OfflineWorkspace } from "./components/common/OfflineWorkspace";
-import { useWorkspaceStore } from "./stores/useWorkspaceStore";
-import { useAgentCenterStore } from "./stores/useAgentCenterStore";
-import { startSessionProjectsSync } from "./services/sessionProjectsSync";
-import { startSessionTabsSync } from "./services/sessionTabsSync";
-import { startFollowedSessionStatusSync } from "./services/followedSessionStatusSync";
-import { startFollowedSessionHistorySync } from "./services/followedSessionHistorySync";
-import { startSessionTranscriptCache } from "./services/sessionTranscriptCache";
-import { startFollowedSessionAuxSync } from "./services/followedSessionAuxSync";
-import { startSessionMemoryGovernor } from "./services/sessionMemoryGovernor";
-import { startSessionTranscriptRetention } from "./services/sessionTranscriptRetention";
-import { useCodexStore } from "./components/codex/stores";
-import { useCCStore } from "./stores/cc";
-import { useAttentionStorageSync } from "./hooks/useSessionReadReceipt";
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useRef,
   useState,
   type ReactNode,
 } from "react";
-import { MessageSquare, RefreshCw } from "lucide-react";
-import App from "./App";
+import { MessageSquare } from "lucide-react";
+import { requestTimeout } from "./lib/requestTimeout";
+import { ThemeProvider } from "./contexts/ThemeContext";
+import { OfflineWorkspace } from "./components/common/OfflineWorkspace";
+import { useCCStore } from "./stores/cc/ccStore";
+import { useAgentCenterStore } from "./stores/useAgentCenterStore";
+import { useWorkspaceStore } from "./stores/useWorkspaceStore";
+import { useCodexStore } from "./components/codex/stores/useCodexStore";
+import { SessionTopNavigation } from "./components/layout/SessionTopNavigation";
+import type { WorkbenchMode } from "../lib/workbench-mode";
+import { loadSessionApp, preloadSessionApp } from "./sessionWorkbenchLoader";
 import "./session-theme.css";
 import "./session-interactions.css";
 import "./session-split-drag.css";
@@ -31,10 +26,11 @@ import "./session-composer-v2.css";
 import "./session-navigation.css";
 import "./session-selection.css";
 import "./session-composer-compact.css";
-import { useComposerViewport } from "./components/codex/composer/v2/useComposerViewport";
 
-import { SessionTopNavigation } from "./components/layout/SessionTopNavigation";
-import type { WorkbenchMode } from "../lib/workbench-mode";
+const SessionAppBody = lazy(loadSessionApp);
+const SessionWorkbenchEffects = lazy(() => import("./SessionWorkbenchEffects"));
+
+type ConnectionStatus = "checking" | "ready" | "offline";
 
 function SessionNotice({
   title,
@@ -68,76 +64,107 @@ function SessionWorkbenchContent({
   onModeChange,
   active = true,
 }: { onModeChange?: (mode: WorkbenchMode) => void; active?: boolean } = {}) {
-  useComposerViewport();
-  useAttentionStorageSync();
-  useEffect(() => startSessionTranscriptCache(), []);
-  useEffect(() => startSessionTranscriptRetention(), []);
-  useEffect(() => startSessionMemoryGovernor(), []);
-  useEffect(() => {
-    const tabs = startSessionTabsSync(),
-      projects = startSessionProjectsSync();
-    return () => {
-      tabs();
-      projects();
-    };
-  }, []);
-  const [status, setStatus] = useState<"checking" | "ready" | "offline">(
-    "checking",
-  );
+  const [status, setStatus] = useState<ConnectionStatus>("checking");
   const [loaded, setLoaded] = useState(false);
-  useEffect(() => {
-    // Health is only a probe, not the lifetime of an established session.
-    // A failed probe must not remove the workers needed to recover lost events;
-    // the read-only workers own their deadlines, retries and visibility gates.
-    if (!loaded) return;
-    const statuses = startFollowedSessionStatusSync();
-    const histories = startFollowedSessionHistorySync();
-    const auxiliary = startFollowedSessionAuxSync();
-    return () => {
-      statuses();
-      histories();
-      auxiliary();
-    };
-  }, [loaded]);
-  const instance = useRef<string | null>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const instance = useRef<string | null>(null);
   const hasProjects = useWorkspaceStore(
-    (s) =>
-      s.projectsInitialized ||
-      s.pendingProjectOperations.length > 0 ||
-      s.projects.length > 0,
+    (state) =>
+      state.projectsInitialized ||
+      state.pendingProjectOperations.length > 0 ||
+      state.projects.length > 0,
   );
   const hasTabs = useAgentCenterStore(
-    (s) =>
-      s.sharedTabsInitialized ||
-      s.pendingTabOperations.length > 0 ||
-      s.cards.length > 0,
+    (state) =>
+      state.sharedTabsInitialized ||
+      state.pendingTabOperations.length > 0 ||
+      state.cards.length > 0,
   );
-  const tabsSyncError = useAgentCenterStore((s) => s.tabSyncError);
-  const cachedCodex = useCodexStore((s) =>
-    Object.keys(s.events).some((id) => !!s.historyLoadedMap[id]),
+  const tabsSyncError = useAgentCenterStore((state) => state.tabSyncError);
+  const projectsSyncError = useWorkspaceStore(
+    (state) => state.projectSyncError,
   );
-  const cachedClaude = useCCStore((s) =>
-    Object.values(s.sessionMessagesMap).some((messages) => messages.length > 0),
+  const hasCachedCodex = useCodexStore((state) =>
+    Object.keys(state.events).some((id) => !!state.historyLoadedMap[id]),
   );
-  const hasCachedTranscript = cachedCodex || cachedClaude;
-  const projectsSyncError = useWorkspaceStore((s) => s.projectSyncError);
-  const [attempt, setAttempt] = useState(0);
+  const hasCachedClaude = useCCStore((state) =>
+    Object.values(state.sessionMessagesMap).some(
+      (messages) => messages.length > 0,
+    ),
+  );
+  const hasCachedTranscript = hasCachedCodex || hasCachedClaude;
   const retry = useCallback(() => {
     window.dispatchEvent(new Event("session-connection-retry"));
     setAttempt((value) => value + 1);
   }, []);
+
+  // Load the active application and visible conversation while the bounded
+  // health probe runs. The idle workbench preload never evaluates these
+  // modules or starts their browser listeners.
   useEffect(() => {
-    const wake = () => {
-      if (document.visibilityState !== "hidden") retry();
-    };
-    window.addEventListener("online", wake);
-    document.addEventListener("visibilitychange", wake);
+    preloadSessionApp();
+  }, []);
+
+  // These services own the active session lifecycle. Importing this module
+  // during idle preloading must not start history/SSE work.
+  useEffect(() => {
+    let disposed = false;
+    let stops: Array<() => void> = [];
+    void Promise.all([
+      import("./services/sessionTranscriptCache"),
+      import("./services/sessionTranscriptRetention"),
+      import("./services/sessionMemoryGovernor"),
+      import("./services/sessionTabsSync"),
+      import("./services/sessionProjectsSync"),
+    ])
+      .then(([cache, retention, memory, tabs, projects]) => {
+        if (disposed) return;
+        stops = [
+          cache.startSessionTranscriptCache(),
+          retention.startSessionTranscriptRetention(),
+          memory.startSessionMemoryGovernor(),
+          tabs.startSessionTabsSync(),
+          projects.startSessionProjectsSync(),
+        ];
+      })
+      .catch((error: unknown) => {
+        if (!disposed)
+          console.error("Unable to start session background services", error);
+      });
     return () => {
-      window.removeEventListener("online", wake);
-      document.removeEventListener("visibilitychange", wake);
+      disposed = true;
+      stops.forEach((stop) => stop());
     };
-  }, [retry]);
+  }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    let disposed = false;
+    let stops: Array<() => void> = [];
+    void Promise.all([
+      import("./services/followedSessionStatusSync"),
+      import("./services/followedSessionHistorySync"),
+      import("./services/followedSessionAuxSync"),
+    ])
+      .then(([statusSync, historySync, auxSync]) => {
+        if (disposed) return;
+        stops = [
+          statusSync.startFollowedSessionStatusSync(),
+          historySync.startFollowedSessionHistorySync(),
+          auxSync.startFollowedSessionAuxSync(),
+        ];
+      })
+      .catch((error: unknown) => {
+        if (!disposed)
+          console.error("Unable to start session history recovery", error);
+      });
+    return () => {
+      disposed = true;
+      stops.forEach((stop) => stop());
+    };
+  }, [loaded]);
+
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
@@ -192,60 +219,24 @@ function SessionWorkbenchContent({
       clearTimeout(timer);
     };
   }, [attempt]);
-  if (
-    !loaded &&
-    !hasCachedTranscript &&
-    status !== "ready" &&
-    (hasProjects || hasTabs)
-  )
-    return (
-      <div className="session-workbench">
-        <SessionTopNavigation
-          status={status}
-          onModeChange={onModeChange}
-          active={active}
-        />
-        <div className="flex-1 min-h-0">
-          <OfflineWorkspace retry={retry} />
-        </div>
-      </div>
-    );
-  if (!loaded && !hasCachedTranscript && status !== "ready")
-    return (
-      <div className="session-workbench">
-        <SessionTopNavigation
-          status={status}
-          onModeChange={onModeChange}
-          active={active}
-        />
-        <div
-          className="session-connection-state"
-          role={status === "offline" ? "alert" : "status"}
-        >
-          <div className="session-connection-icon">
-            <MessageSquare size={26} />
-          </div>
-          <h1>
-            {status === "checking"
-              ? "正在连接会话工作台"
-              : "会话服务暂时不可用"}
-          </h1>
-          <p>
-            {status === "checking"
-              ? "准备项目、历史记录和 Agent 连接…"
-              : "请重试连接；终端模式可以继续使用。"}
-          </p>
-          {status === "offline" && (
-            <button onClick={retry}>
-              <RefreshCw size={15} />
-              重试连接
-            </button>
-          )}
-        </div>
-      </div>
-    );
+
+  useEffect(() => {
+    const wake = () => {
+      if (document.visibilityState !== "hidden") retry();
+    };
+    window.addEventListener("online", wake);
+    document.addEventListener("visibilitychange", wake);
+    return () => {
+      window.removeEventListener("online", wake);
+      document.removeEventListener("visibilitychange", wake);
+    };
+  }, [retry]);
+
   return (
     <div className="session-workbench">
+      <Suspense fallback={null}>
+        <SessionWorkbenchEffects />
+      </Suspense>
       <SessionTopNavigation
         status={status}
         onModeChange={onModeChange}
@@ -269,7 +260,43 @@ function SessionWorkbenchContent({
         </div>
       </div>
       <div className="session-content">
-        <App />
+        {!loaded && !hasCachedTranscript && status !== "ready" ? (
+          status === "offline" && (hasProjects || hasTabs) ? (
+            <OfflineWorkspace retry={retry} />
+          ) : (
+            <div
+              className="session-connection-state"
+              role={status === "offline" ? "alert" : "status"}
+            >
+              <div className="session-connection-icon" aria-hidden="true">
+                <MessageSquare size={26} />
+              </div>
+              <h1>
+                {status === "checking"
+                  ? "正在连接会话工作台"
+                  : "会话服务暂时不可用"}
+              </h1>
+              <p>
+                {status === "checking"
+                  ? "准备项目、历史记录和 Agent 连接…"
+                  : "请重试连接；终端模式可以继续使用。"}
+              </p>
+              {status === "offline" && (
+                <button onClick={retry}>重试连接</button>
+              )}
+            </div>
+          )
+        ) : (
+          <Suspense
+            fallback={
+              <div className="session-app-loading" role="status">
+                正在准备会话内容…
+              </div>
+            }
+          >
+            <SessionAppBody />
+          </Suspense>
+        )}
       </div>
     </div>
   );

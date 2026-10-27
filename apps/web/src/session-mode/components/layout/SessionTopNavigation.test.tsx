@@ -11,27 +11,33 @@ beforeEach(() => {
   useLayoutStore.setState({ view: "agent" });
   useAgentCenterStore.setState({ cards: [], sharedTabsInitialized: true });
 });
-it("combines brand, primary page navigation and followed status in one row", () => {
+it("combines brand, primary page navigation and followed status in one row", async () => {
   render(<SessionTopNavigation status="ready" onModeChange={vi.fn()} />);
   const nav = screen.getByRole("navigation", { name: "会话工作台导航" });
   expect(nav.querySelectorAll("img")).toHaveLength(1);
   expect(nav.querySelector("img")?.getAttribute("alt")).toBe("Houmo");
   expect(screen.queryByText("Coding Kanban")).toBeNull();
-  expect(screen.getByRole("button", { name: "关注 0" })).toBeTruthy();
+  expect(
+    await screen.findByRole("button", { name: "关注 0" }, { timeout: 5000 }),
+  ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "定时任务" }));
   expect(useLayoutStore.getState().view).toBe("automations");
   fireEvent.click(screen.getByRole("button", { name: "聊天" }));
   expect(useLayoutStore.getState().view).toBe("agent");
 });
-it("announces reconnection instead of claiming no pending requests", () => {
+it("announces reconnection instead of claiming no pending requests", async () => {
   render(<SessionTopNavigation status="offline" />);
-  expect(screen.getByRole("button", { name: "正在重连" })).toBeTruthy();
+  expect(
+    await screen.findByRole("button", { name: "正在重连" }, { timeout: 5000 }),
+  ).toBeTruthy();
   expect(screen.queryByRole("button", { name: "关注 0" })).toBeNull();
 });
-it("reports unsynchronized followed state separately from an empty set", () => {
+it("reports unsynchronized followed state separately from an empty set", async () => {
   useAgentCenterStore.setState({ sharedTabsInitialized: false });
   render(<SessionTopNavigation status="ready" />);
-  expect(screen.getByRole("button", { name: "状态待同步" })).toBeTruthy();
+  expect(
+    await screen.findByRole("button", { name: "状态待同步" }, { timeout: 5000 }),
+  ).toBeTruthy();
 });
 
 it("toggles the persisted session theme in one click without changing navigation", async () => {

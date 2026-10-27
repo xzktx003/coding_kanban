@@ -1034,6 +1034,22 @@ export const dismissModelNotice = (
   noticeId: number,
   identity?: string,
 ) => currentController().dismiss(id, noticeId, identity);
+
+let persistenceEventClients = 0;
+/** Attach cross-tab refresh listeners while the session workbench is mounted. */
+export function startThreadModelPersistenceEvents() {
+  persistenceEventClients++;
+  if (persistenceEventClients === 1)
+    currentController().persistence.resume();
+  let stopped = false;
+  return () => {
+    if (stopped) return;
+    stopped = true;
+    persistenceEventClients = Math.max(0, persistenceEventClients - 1);
+    if (persistenceEventClients === 0)
+      currentController().persistence.suspend();
+  };
+}
 /** Tests explicitly reset their own database; production never calls this. */
 export async function resetThreadModelPersistenceForTests() {
   await controller.persistence.reset();
@@ -1042,5 +1058,6 @@ export async function resetThreadModelPersistenceForTests() {
 if (import.meta.hot)
   import.meta.hot.dispose((data) => {
     controller.persistence.suspend();
+    persistenceEventClients = 0;
     data.threadModelController = controller;
   });

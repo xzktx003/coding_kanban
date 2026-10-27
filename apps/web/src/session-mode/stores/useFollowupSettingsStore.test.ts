@@ -2,10 +2,12 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const legacy = "kanban.session.followup-settings";
 const key = (field: string) => `${legacy}.v1.${field}`;
 let listeners: Array<[string, EventListenerOrEventListenerObject]>;
+let stopSync: Array<() => void>;
 beforeEach(() => {
   localStorage.clear();
   vi.resetModules();
   listeners = [];
+  stopSync = [];
   const add = window.addEventListener.bind(window);
   vi.spyOn(window, "addEventListener").mockImplementation(
     (type, listener, options) => {
@@ -16,12 +18,16 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  stopSync.forEach((stop) => stop());
   for (const [type, listener] of listeners)
     window.removeEventListener(type, listener);
   vi.restoreAllMocks();
 });
 const load = async () =>
-  (await import("./useFollowupSettingsStore")).useFollowupSettingsStore;
+  await import("./useFollowupSettingsStore").then((module) => {
+    stopSync.push(module.startFollowupSettingsSync());
+    return module.useFollowupSettingsStore;
+  });
 it("independent stale stores write only their changed field", async () => {
   const a = await load();
   vi.resetModules();

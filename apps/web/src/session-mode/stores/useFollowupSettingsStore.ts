@@ -44,6 +44,7 @@ const route: Handoff = inherited ?? { pending: {}, errors: {} };
 const pending = route.pending;
 const errors = route.errors;
 let disposed = false;
+let syncUsers = 0;
 
 function read(field: Field): Preferences[Field] | undefined {
   try {
@@ -155,14 +156,29 @@ function storageChanged(event: StorageEvent) {
     refresh();
   }
 }
-if (typeof window !== "undefined") {
-  window.addEventListener("storage", storageChanged);
-  window.addEventListener("focus", refresh);
+function detachSync() {
+  if (typeof window === "undefined") return;
+  syncUsers = 0;
+  window.removeEventListener("storage", storageChanged);
+  window.removeEventListener("focus", refresh);
+}
+export function startFollowupSettingsSync() {
+  if (disposed || typeof window === "undefined") return () => {};
+  if (syncUsers++ === 0) {
+    window.addEventListener("storage", storageChanged);
+    window.addEventListener("focus", refresh);
+  }
+  let stopped = false;
+  return () => {
+    if (stopped || !syncUsers) return;
+    stopped = true;
+    syncUsers--;
+    if (!syncUsers) detachSync();
+  };
 }
 import.meta.hot?.dispose((data) => {
   disposed = true;
   route.successor = undefined;
-  window.removeEventListener("storage", storageChanged);
-  window.removeEventListener("focus", refresh);
+  detachSync();
   data.followupPreferences = route;
 });

@@ -20,6 +20,22 @@ afterEach(async () => {
   draftModule.takeContextDraftHandoff().releaseListener();
   vi.unstubAllGlobals();
 });
+it("warns about unsaved composer context only while the session lifecycle is active", () => {
+  const stop = draftModule.startComposerDraftUnloadGuard();
+  draftModule.composerDrafts.add("a", {
+    id: "unsaved",
+    kind: "paste",
+    name: "草稿",
+    text: "保留",
+  });
+  const active = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(active);
+  expect(active.defaultPrevented).toBe(true);
+  stop();
+  const inactive = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(inactive);
+  expect(inactive.defaultPrevented).toBe(false);
+});
 it("keeps the in-memory context when persistence fails and explicitly retries", async () => {
   const { composerDrafts, useComposerDraftStore } = draftModule;
   const write = vi

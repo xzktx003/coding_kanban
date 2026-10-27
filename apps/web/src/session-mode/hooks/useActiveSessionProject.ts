@@ -1,5 +1,5 @@
-import { useCodexStore } from "../components/codex/stores";
-import { useCCStore } from "../stores/cc";
+import { useCodexStore } from "../components/codex/stores/useCodexStore";
+import { useCCStore } from "../stores/cc/ccStore";
 import {
   selectedAgentCard,
   useAgentCenterStore,

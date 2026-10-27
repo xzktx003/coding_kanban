@@ -3,12 +3,10 @@ import { LayoutGrid, List, Square } from "lucide-react";
 import { useActiveSessionProject } from "../../hooks/useActiveSessionProject";
 import { useWorkspaceStore } from "../../stores/useWorkspaceStore";
 import { useVsCodePanelStore } from "../../stores/useVsCodePanelStore";
-import { NewAgentButton } from "../common/NewAgentButton";
-import { GitActions } from "../../features/git";
 import { SessionThemeToggle } from "../common/SessionThemeToggle";
 import { VsCodeIcon } from "@session/features/vscode/VsCodeIcon";
 import { openVsCodePanel } from "@session/stores/useVsCodePanelStore";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useIsMobile } from "@session/hooks/use-mobile";
 import {
   MoreHorizontal,
@@ -36,15 +34,36 @@ import {
   type AgentCardsViewMode,
 } from "../../stores/useAgentCenterStore";
 import { useAcpStore } from "../../stores/useAcpStore";
-import {
-  FollowedSessionsMenu,
-  RunningSessionsSummary,
-} from "../agent/FollowedSessionsMenu";
 import type { SessionConnectionState } from "../../hooks/useFollowedSessionStates";
-import { DataImportDialog } from "../../DataImportDialog";
 import type { WorkbenchMode } from "../../../lib/workbench-mode";
 import { WorkbenchModeSwitch } from "../../../components/WorkbenchModeSwitch";
 import { SessionRemoteUpdateNotice } from "./SessionRemoteUpdateNotice";
+
+const NewAgentButton = lazy(() =>
+  import("../common/NewAgentButton").then((module) => ({
+    default: module.NewAgentButton,
+  })),
+);
+const GitActions = lazy(() =>
+  import("../../features/git").then((module) => ({
+    default: module.GitActions,
+  })),
+);
+const FollowedSessionsMenu = lazy(() =>
+  import("../agent/FollowedSessionsMenu").then((module) => ({
+    default: module.FollowedSessionsMenu,
+  })),
+);
+const RunningSessionsSummary = lazy(() =>
+  import("../agent/FollowedSessionsMenu").then((module) => ({
+    default: module.RunningSessionsSummary,
+  })),
+);
+const DataImportDialog = lazy(() =>
+  import("../../DataImportDialog").then((module) => ({
+    default: module.DataImportDialog,
+  })),
+);
 
 const secondary = [
   { view: "plugins", label: "工具与技能", Icon: Plug },
@@ -78,6 +97,7 @@ export function SessionTopNavigation({
         className="session-top-nav"
         aria-label="会话工作台导航"
         data-connection-state={status}
+        data-navigation-ready="true"
       >
         <ProjectNavigationButton global />
         <span className="session-brand-mark" title="后摩智能">
@@ -91,7 +111,15 @@ export function SessionTopNavigation({
           }}
         />
         <span className="session-navigation-divider" aria-hidden="true" />
-        <button type="button" className="session-top-chat" aria-current={layout.view === "agent" ? "page" : undefined} aria-pressed={layout.view === "agent"} onClick={() => setView("agent")}>聊天</button>
+        <button
+          type="button"
+          className="session-top-chat"
+          aria-current={layout.view === "agent" ? "page" : undefined}
+          aria-pressed={layout.view === "agent"}
+          onClick={() => setView("agent")}
+        >
+          聊天
+        </button>
         <button
           type="button"
           className="session-top-schedule"
@@ -118,8 +146,10 @@ export function SessionTopNavigation({
           active={active}
           onOpenUpdate={() => onModeChange?.("terminal")}
         />
-        <RunningSessionsSummary status={status} />
-        <FollowedSessionsMenu summary status={status} />
+        <Suspense fallback={null}>
+          <RunningSessionsSummary status={status} />
+          <FollowedSessionsMenu summary status={status} />
+        </Suspense>
         {layout.view === "agent" && (
           <>
             <span
@@ -150,12 +180,16 @@ export function SessionTopNavigation({
             </span>
             {(acp || cardsViewMode !== "solo") && (
               <span className="session-global-new">
-                <NewAgentButton />
+                <Suspense fallback={null}>
+                  <NewAgentButton />
+                </Suspense>
               </span>
             )}
             {project.path && (
               <span className="session-global-git">
-                <GitActions key={project.path} path={project.path} />
+                <Suspense fallback={null}>
+                  <GitActions key={project.path} path={project.path} />
+                </Suspense>
               </span>
             )}
           </>
@@ -236,29 +270,30 @@ export function SessionTopNavigation({
                 VS Code 已固定：{pinned}
               </DropdownMenuLabel>
             )}
-            {(mobile || layout.view !== "agent") && (
-              [
-                ["files", "文件浏览器", FolderOpen],
-                ["vscode", "VS Code", VsCodeIcon],
-                ["terminal", "终端", SquareTerminal],
-              ] as const
-            ).map(([tab, label, Icon]) => (
-              <DropdownMenuItem
-                key={tab}
-                disabled={!project.path && !(tab === "vscode" && pinned)}
-                onSelect={() => {
-                  prepareProject();
-                  if (tab === "vscode") openVsCodePanel();
-                  else {
-                    layout.setActiveRightPanelTab(tab);
-                    layout.setRightPanelOpen(true);
-                  }
-                }}
-              >
-                <Icon size={15} />
-                {label}
-              </DropdownMenuItem>
-            ))}
+            {(mobile || layout.view !== "agent") &&
+              (
+                [
+                  ["files", "文件浏览器", FolderOpen],
+                  ["vscode", "VS Code", VsCodeIcon],
+                  ["terminal", "终端", SquareTerminal],
+                ] as const
+              ).map(([tab, label, Icon]) => (
+                <DropdownMenuItem
+                  key={tab}
+                  disabled={!project.path && !(tab === "vscode" && pinned)}
+                  onSelect={() => {
+                    prepareProject();
+                    if (tab === "vscode") openVsCodePanel();
+                    else {
+                      layout.setActiveRightPanelTab(tab);
+                      layout.setRightPanelOpen(true);
+                    }
+                  }}
+                >
+                  <Icon size={15} />
+                  {label}
+                </DropdownMenuItem>
+              ))}
             <DropdownMenuItem
               disabled={!project.path}
               onSelect={() => {
@@ -271,7 +306,9 @@ export function SessionTopNavigation({
             </DropdownMenuItem>
             {project.path && (
               <div className="session-menu-git">
-                <GitActions key={project.path} path={project.path} />
+                <Suspense fallback={null}>
+                  <GitActions key={project.path} path={project.path} />
+                </Suspense>
                 <span>Git 操作 · {project.label}</span>
               </div>
             )}
@@ -293,11 +330,13 @@ export function SessionTopNavigation({
           </DropdownMenuContent>
         </DropdownMenu>
       </nav>
-      <DataImportDialog
-        open={importOpen}
-        onOpenChange={setImportOpen}
-        hideTrigger
-      />
+      <Suspense fallback={null}>
+        <DataImportDialog
+          open={importOpen}
+          onOpenChange={setImportOpen}
+          hideTrigger
+        />
+      </Suspense>
     </>
   );
 }

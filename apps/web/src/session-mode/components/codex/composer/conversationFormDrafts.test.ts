@@ -1,12 +1,18 @@
-import { beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   changeConversationForm,
   releaseEmptyConversationForm,
   reserveConversationForm,
   resetConversationFormDraftsForTests,
+  startConversationFormUnloadGuard,
   useConversationFormDrafts,
 } from "./conversationFormDrafts";
-beforeEach(resetConversationFormDraftsForTests);
+let stopGuard: () => void;
+beforeEach(() => {
+  resetConversationFormDraftsForTests();
+  stopGuard = startConversationFormUnloadGuard();
+});
+afterEach(() => stopGuard());
 it("retains all dirty owners at capacity and explicitly rejects a new owner instead of evicting", () => {
   for (let i = 0; i < 64; i++)
     changeConversationForm("owner-" + i, "notes", "unsaved-" + i);

@@ -7,8 +7,11 @@ import {
   Children,
   createContext,
   isValidElement,
+  useEffect,
   useContext,
   useMemo,
+  useState,
+  type ComponentType,
   type ReactNode,
 } from "react";
 import { openWorkspaceFileReference } from "@session/services/openWorkspaceFileReference";
@@ -21,7 +24,6 @@ import {
 } from "streamdown";
 import { codexCode as code } from "./codexCode";
 import { createMathPlugin } from "@streamdown/math";
-import { nativeMermaid as mermaid } from "./nativeMermaidLayout";
 import { VisualizationContent } from "@session/features/visualizations/VisualizationContent";
 import { openVsCodePanel } from "@session/stores/useVsCodePanelStore";
 import { editorHostFor } from "@session/features/codex-host/bridge";
@@ -41,8 +43,6 @@ import { NativeMarkdownTooltip } from "./NativeMarkdownTooltip";
 import { nativeHotlineLink } from "./nativeHotlineLink";
 import { nativeSlackUrl } from "./nativeSlackPreview";
 import { NativeSlackPreview } from "./NativeSlackPreview";
-import { useThemeContext } from "@session/contexts/ThemeContext";
-import { nativeMermaidConfig } from "./nativeMermaidTheme";
 import {
   NativeMarkdownSource,
   NativeMarkdownTable,
@@ -110,28 +110,28 @@ function originalApprovedHref(raw: unknown, approved: string | undefined) {
     return approved;
   }
 }
+type MermaidFenceRenderer = ComponentType<{
+  source: string;
+  streaming: boolean;
+}>;
 function NativeMermaidFence({ source }: { source: string }) {
   const streaming = useContext(MarkdownStreaming);
-  const { resolvedTheme } = useThemeContext();
-  const config = useMemo(
-    () => nativeMermaidConfig(resolvedTheme, source),
-    [resolvedTheme, source],
-  );
-  return (
-    <Streamdown
-      plugins={{ code, math, mermaid }}
-      mermaid={{ config }}
-      controls={{
-        mermaid: {
-          copy: true,
-          download: true,
-          fullscreen: false,
-          panZoom: true,
-        },
-      }}
-      mode={streaming ? "streaming" : "static"}
-      isAnimating={streaming}
-    >{`\`\`\`mermaid\n${source}\n\`\`\``}</Streamdown>
+  const [Renderer, setRenderer] = useState<MermaidFenceRenderer | null>(null);
+  useEffect(() => {
+    let active = true;
+    void import("./NativeMermaidFence")
+      .then(({ default: renderer }) => {
+        if (active) setRenderer(() => renderer);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, []);
+  return Renderer ? (
+    <Renderer source={source} streaming={streaming} />
+  ) : (
+    <NativeCodeFence code={source} language="mermaid" />
   );
 }
 function containsImage(node: unknown): boolean {
@@ -442,7 +442,7 @@ export function CodexMarkdown({
               <Streamdown
                 components={components}
                 allowedTags={nativeCitationTags}
-                plugins={{ code, math, mermaid }}
+                plugins={{ code, math }}
                 remarkPlugins={[
                   ...Object.values(defaultRemarkPlugins),
                   remarkNativeFileCitations(nativeMathMarkdown(text)),

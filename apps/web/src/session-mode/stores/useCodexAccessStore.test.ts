@@ -7,6 +7,7 @@ import {
   codexSendBlockReason,
   refreshCodexAccess,
   resetCodexAccessCache,
+  startCodexAccessRuntimeSync,
   useCodexAccessStore,
 } from "./useCodexAccessStore";
 beforeEach(() => {
@@ -114,4 +115,16 @@ it("discards a pre-restart access response without overwriting a fresh generatio
   resolve({ state: "external", reason: "old runtime", generation: 1 });
   await stale;
   expect(useCodexAccessStore.getState().entries.a.access?.state).toBe("owned");
+});
+it("listens for runtime replacement only while the session lifecycle is active", () => {
+  const stop = startCodexAccessRuntimeSync();
+  useCodexAccessStore.setState({ entries: { a: { unsupported: true } } });
+  window.dispatchEvent(new Event("session-runtime-restarted"));
+  expect(useCodexAccessStore.getState().entries).toEqual({});
+  stop();
+  useCodexAccessStore.setState({ entries: { a: { unsupported: true } } });
+  window.dispatchEvent(new Event("session-runtime-restarted"));
+  expect(useCodexAccessStore.getState().entries).toEqual({
+    a: { unsupported: true },
+  });
 });

@@ -4,6 +4,8 @@ import { type AppLocale, localeLabels, localeResources } from '@session/locales'
 import { useLocaleStore } from '@session/stores/settings/useLocaleStore';
 
 const fallbackLocale: AppLocale = 'en';
+let initialization: Promise<unknown> | undefined;
+let stopLocaleSync: (() => void) | undefined;
 
 // Helper to detect locale from navigator
 const detectLocale = (): AppLocale => {
@@ -23,34 +25,37 @@ const getInitialLocale = (): AppLocale | 'auto' => {
   return stored;
 };
 
-const initialLocaleValue = getInitialLocale();
-const initialLocale = initialLocaleValue === 'auto' ? detectLocale() : initialLocaleValue;
+/** Initialize locale state only when the session application is actually mounted. */
+export function initializeSessionI18n() {
+  if (!i18n.isInitialized && !initialization) {
+    const initialLocaleValue = getInitialLocale();
+    const initialLocale =
+      initialLocaleValue === 'auto' ? detectLocale() : initialLocaleValue;
+    initialization = i18n.use(initReactI18next).init({
+      resources: localeResources,
+      lng: initialLocale,
+      fallbackLng: fallbackLocale,
+      interpolation: {
+        escapeValue: false,
+      },
+    });
+  }
 
-if (!i18n.isInitialized) {
-  void i18n.use(initReactI18next).init({
-    resources: localeResources,
-    lng: initialLocale,
-    fallbackLng: fallbackLocale,
-    interpolation: {
-      escapeValue: false,
-    },
+  // Keep the active i18next language in sync with the persisted locale store.
+  stopLocaleSync ??= useLocaleStore.subscribe((state) => {
+    const newLocale =
+      state.locale === 'auto' ? detectLocale() : state.locale;
+    if (i18n.language !== newLocale) void i18n.changeLanguage(newLocale);
   });
+  return initialization ?? Promise.resolve();
 }
 
-// Keep the active i18next language in sync with the persisted locale store.
-const stopLocaleSync = useLocaleStore.subscribe((state) => {
-  let newLocale: AppLocale;
-  if (state.locale === 'auto') {
-    newLocale = detectLocale();
-  } else {
-    newLocale = state.locale;
-  }
-  if (i18n.language !== newLocale) {
-    void i18n.changeLanguage(newLocale);
-  }
-});
-
-if (import.meta.hot) import.meta.hot.dispose(stopLocaleSync);
+if (import.meta.hot)
+  import.meta.hot.dispose(() => {
+    stopLocaleSync?.();
+    stopLocaleSync = undefined;
+    initialization = undefined;
+  });
 
 export { i18n };
 

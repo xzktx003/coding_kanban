@@ -395,7 +395,15 @@ const EventItemBody = ({
 
       return (
         <div className="space-y-2">
-          {interrupted && <Badge variant="destructive">已中断</Badge>}
+          {interrupted && (
+            <Badge
+              variant="destructive"
+              aria-label="该轮已中断"
+              title="仅表示本轮的历史结束状态；刷新只读取历史，后续回答会显示为新的轮次。"
+            >
+              该轮已中断
+            </Badge>
+          )}
           {failed && (
             <TurnFailureNotice
               message={event.params.turn.error?.message}

@@ -631,6 +631,25 @@ const beforeUnload = (event: BeforeUnloadEvent) => {
   event.preventDefault();
   event.returnValue = "";
 };
+let beforeUnloadUsers = 0;
+function stopComposerDraftUnloadGuard() {
+  if (typeof window === "undefined") return;
+  beforeUnloadUsers = 0;
+  window.removeEventListener("beforeunload", beforeUnload);
+}
+export function startComposerDraftUnloadGuard() {
+  if (typeof window === "undefined") return () => {};
+  if (beforeUnloadUsers++ === 0)
+    window.addEventListener("beforeunload", beforeUnload);
+  let stopped = false;
+  return () => {
+    if (stopped || !beforeUnloadUsers) return;
+    stopped = true;
+    beforeUnloadUsers--;
+    if (!beforeUnloadUsers)
+      window.removeEventListener("beforeunload", beforeUnload);
+  };
+}
 export function takeContextDraftHandoff(): ContextDraftHandoff {
   const owners = new Set([
     // Transfer the currently loaded clean baselines too. A still-mounted old
@@ -665,8 +684,7 @@ export function takeContextDraftHandoff(): ContextDraftHandoff {
       clears: [...(pendingClears.get(owner)?.values() ?? [])],
     })),
     moves: pendingMoves,
-    releaseListener: () =>
-      window.removeEventListener("beforeunload", beforeUnload),
+    releaseListener: stopComposerDraftUnloadGuard,
     route: (generationRoute = { waiting: [] }),
   };
   disposed = true;
@@ -734,8 +752,6 @@ export function restoreContextDraftHandoff(handoff: ContextDraftHandoff) {
     for (const run of handoff.route.waiting.splice(0)) run();
   }
 }
-if (typeof window !== "undefined")
-  window.addEventListener("beforeunload", beforeUnload);
 if (import.meta.hot?.data) {
   const handoff = import.meta.hot.data.contextDraftHandoff as
     | ContextDraftHandoff

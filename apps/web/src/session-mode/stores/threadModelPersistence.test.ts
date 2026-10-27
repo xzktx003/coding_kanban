@@ -25,6 +25,20 @@ function client(legacy: () => Record<string, ThreadModelEntry> = () => ({})) {
   clients.push(c);
   return c;
 }
+it("attaches cross-tab refresh listeners only during its explicit lifecycle", async () => {
+  const add = vi.spyOn(window, "addEventListener");
+  const remove = vi.spyOn(window, "removeEventListener");
+  const c = createThreadModelController({
+    indexedDB,
+    databaseName: "settings-event-lifecycle-test",
+  });
+  clients.push(c);
+  expect(add).not.toHaveBeenCalledWith("focus", expect.any(Function));
+  c.persistence.resume();
+  expect(add).toHaveBeenCalledWith("focus", expect.any(Function));
+  c.persistence.suspend();
+  expect(remove).toHaveBeenCalledWith("focus", expect.any(Function));
+});
 async function seed(c: ReturnType<typeof client>, id = "a") {
   await c.persistence.ensure(id);
   c.hydrate(id, {

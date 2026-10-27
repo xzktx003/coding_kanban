@@ -131,13 +131,16 @@ export function resetCodexAccessCache() {
   checked.clear();
   useCodexAccessStore.setState({ entries: {} });
 }
-if (typeof window !== "undefined")
+export function startCodexAccessRuntimeSync() {
+  if (typeof window === "undefined") return () => {};
   window.addEventListener("session-runtime-restarted", resetCodexAccessCache);
-if (import.meta.hot)
-  import.meta.hot.dispose(() => {
-    resetCodexAccessCache();
+  return () =>
     window.removeEventListener(
       "session-runtime-restarted",
       resetCodexAccessCache,
     );
+}
+if (import.meta.hot)
+  import.meta.hot.dispose(() => {
+    resetCodexAccessCache();
   });

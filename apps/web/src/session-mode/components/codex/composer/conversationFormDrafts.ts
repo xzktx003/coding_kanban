@@ -114,12 +114,26 @@ const beforeUnload = (event: BeforeUnloadEvent) => {
     event.returnValue = "";
   }
 };
-if (typeof window !== "undefined")
-  window.addEventListener("beforeunload", beforeUnload);
+let unloadGuardUsers = 0;
+export function startConversationFormUnloadGuard() {
+  if (typeof window === "undefined") return () => {};
+  if (unloadGuardUsers++ === 0)
+    window.addEventListener("beforeunload", beforeUnload);
+  let stopped = false;
+  return () => {
+    if (stopped || !unloadGuardUsers) return;
+    stopped = true;
+    unloadGuardUsers--;
+    if (!unloadGuardUsers)
+      window.removeEventListener("beforeunload", beforeUnload);
+  };
+}
 if (import.meta.hot)
   import.meta.hot.dispose((data) => {
     data.conversationFormDrafts = useConversationFormDrafts;
     data.conversationFormReferences = references;
-    if (typeof window !== "undefined")
+    if (typeof window !== "undefined") {
       window.removeEventListener("beforeunload", beforeUnload);
+      unloadGuardUsers = 0;
+    }
   });

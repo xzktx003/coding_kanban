@@ -33,7 +33,7 @@ import { useAppDeepLink } from "@session/hooks/useAppDeepLink";
 import { useDoubleShiftCapture } from "@session/hooks/useDoubleShiftCapture";
 import { useUrlParamThread } from "@session/hooks/useUrlParamThread";
 import { hasActiveWork } from "@session/lib/hasActiveWork";
-import { i18n } from "@session/lib/i18n";
+import { i18n, initializeSessionI18n } from "@session/lib/i18n";
 import {
   initSettingsSync,
   loadRemoteSettings,
@@ -182,6 +182,7 @@ function AppEntry() {
 }
 
 export default function App() {
+  void initializeSessionI18n();
   const isAboutWindow = window.location.pathname === "/about";
   const isUsageWindow = window.location.pathname === "/usage";
 

@@ -10,6 +10,11 @@ import {
 import { WorkbenchModeSwitch } from "./WorkbenchModeSwitch";
 import { WorkbenchUpdateNotice } from "./WorkbenchUpdateNotice";
 import {
+  loadSessionWorkbench,
+  preloadSessionApp,
+  preloadSessionWorkbench,
+} from "../session-mode/sessionWorkbenchLoader";
+import {
   readWorkbenchMode,
   WORKBENCH_MODE_KEY,
   workbenchModeUrl,
@@ -18,7 +23,7 @@ import {
 import "../workbench.css";
 
 const TerminalApp = lazy(() => import("../App"));
-const SessionApp = lazy(() => import("../session-mode/SessionWorkbench"));
+const SessionApp = lazy(loadSessionWorkbench);
 const CodexApp = lazy(() => import("../codex-mode/CodexWorkbench"));
 
 class WorkbenchBoundary extends Component<
@@ -90,6 +95,42 @@ export function WorkbenchShell() {
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, []);
+  useEffect(() => {
+    if (mode === "session") {
+      void preloadSessionApp();
+      return;
+    }
+    if (sessionVisited) return;
+    let canceled = false;
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (
+        callback: () => void,
+        options?: { timeout: number },
+      ) => number;
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    const preload = () => {
+      if (canceled) return;
+      preloadSessionWorkbench();
+      void loadSessionWorkbench()
+        .then(() => {
+          if (!canceled) void preloadSessionApp();
+        })
+        .catch(() => undefined);
+    };
+    if (typeof idleWindow.requestIdleCallback === "function") {
+      const idle = idleWindow.requestIdleCallback(preload, { timeout: 1200 });
+      return () => {
+        canceled = true;
+        idleWindow.cancelIdleCallback?.(idle);
+      };
+    }
+    const timer = window.setTimeout(preload, 500);
+    return () => {
+      canceled = true;
+      window.clearTimeout(timer);
+    };
+  }, [mode, sessionVisited]);
   function select(next: WorkbenchMode) {
     restoreModeFocus.current =
       next !== mode &&

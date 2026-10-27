@@ -4,6 +4,19 @@ import { CodexMarkdown } from "./CodexMarkdown";
 vi.mock("@session/contexts/ThemeContext", () => ({
   useThemeContext: () => ({ resolvedTheme: "dark" }),
 }));
+vi.mock("./NativeMermaidFence", () => ({
+  default: ({
+    source,
+    streaming,
+  }: {
+    source: string;
+    streaming: boolean;
+  }) => (
+    <div data-testid="native-mermaid-renderer" data-streaming={streaming}>
+      {source}
+    </div>
+  ),
+}));
 afterEach(() => vi.restoreAllMocks());
 
 it("retains a reader's wrap choice when a streaming fence completes", async () => {
@@ -33,4 +46,16 @@ it("copies the selected table rather than preceding Markdown or another table", 
   expect(writeText).toHaveBeenCalledWith(
     "| Second | Value |\n| --- | --- |\n| B | two |",
   );
+});
+
+it("loads the native diagram renderer for Mermaid fences and preserves streaming", async () => {
+  render(
+    <CodexMarkdown
+      value={"```mermaid\ngraph TD\n  A --> B\n```"}
+      streaming
+    />,
+  );
+  const renderer = await screen.findByTestId("native-mermaid-renderer");
+  expect(renderer.textContent).toContain("graph TD");
+  expect(renderer.getAttribute("data-streaming")).toBe("true");
 });

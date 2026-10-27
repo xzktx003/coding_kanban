@@ -1,10 +1,19 @@
-import { expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import {
   captureCodexOperationScope,
   isCodexOperationScopeCurrent,
+  startCodexOperationScopeSync,
 } from "./codexOperationScope";
 import { useCodexStore } from "../components/codex/stores/useCodexStore";
 import { resetGoalCompletionScope } from "./goalCompletionAutoClear";
+let stop: (() => void) | undefined;
+beforeEach(() => {
+  stop = startCodexOperationScopeSync();
+});
+afterEach(() => {
+  stop?.();
+  stop = undefined;
+});
 it("revokes a same-valued account notification without a codexService coordinator", () => {
   const scope = captureCodexOperationScope();
   resetGoalCompletionScope();
