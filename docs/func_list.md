@@ -590,3 +590,5 @@
 - 会话模型菜单：显式模型模式提供原生「恢复默认」入口，恢复推荐模型与强度，保留速度和草稿；手机触控切换菜单视图不额外聚焦，键盘导航与 Escape 回原输入框保持。见 [菜单来源与验收](designs/session-render-alignment/model-menu-reset-touch-20261027.md)。
 
 - 会话动作子菜单执行后关闭父附加层，保留独立弹窗/表单及原草稿；手机可直接操作打开的导航，Escape逐层返回。见 [父菜单生命周期](designs/session-render-alignment/composer-parent-menu-lifecycle-20261027.md)。
+
+- 会话运行状态权威核对：当前执行实例提供有界只读 activity，独立聊天历史仅重建正文；修正同一轮被误标 interrupted 造成的标签转圈／立即引导缺失。排队保留原语义，不自动中断或改为引导。见 [执行状态](session-execution-state.md)。

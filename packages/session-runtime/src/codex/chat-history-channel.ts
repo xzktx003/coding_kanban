@@ -1,16 +1,80 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { CodexOptions } from "./client.js";
 import { HttpError } from "../core/json.js";
-import { ChatHistorySelector, chatHistoryRequest } from "./chat-history.js";
+import {
+  ChatHistorySelector,
+  chatHistoryRequest,
+  type CurrentChatTurn,
+} from "./chat-history.js";
 import { readNativeProjection, type DetailRead } from "./item-detail.js";
 import { resolveCodexEnv } from "./providers.js";
 
 type Fallback = (request: FastifyRequest, reply: FastifyReply) => unknown;
+export type ReadCurrentChatTurn = (
+  threadId: string,
+  signal: AbortSignal,
+) => Promise<CurrentChatTurn | null>;
+
+async function currentExecution(
+  read: ReadCurrentChatTurn | undefined,
+  threadId: string,
+  signal: AbortSignal,
+) {
+  signal.throwIfAborted();
+  if (!read) return null;
+  let abort!: () => void;
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(new HttpError(502, "CHAT_HISTORY_CANCELLED"));
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try {
+    const requested = Promise.resolve().then(() => {
+      signal.throwIfAborted();
+      return read(threadId, signal);
+    });
+    const current = await Promise.race([requested, cancelled]);
+    signal.throwIfAborted();
+    if (current === null) return null;
+    if (
+      !current ||
+      typeof current.id !== "string" ||
+      !current.id ||
+      current.id.length > 512 ||
+      !["inProgress", "completed", "interrupted", "failed"].includes(
+        current.status,
+      ) ||
+      [current.startedAt, current.completedAt, current.durationMs].some(
+        (value) =>
+          value !== undefined &&
+          value !== null &&
+          (typeof value !== "number" || !Number.isFinite(value) || value < 0),
+      )
+    )
+      throw new HttpError(502, "CHAT_HISTORY_INVALID_EXECUTION_STATE");
+    // Copy only bounded execution metadata, never retain an accidental item body.
+    return {
+      id: current.id,
+      status: current.status,
+      ...(current.startedAt === undefined
+        ? {}
+        : { startedAt: current.startedAt }),
+      ...(current.completedAt === undefined
+        ? {}
+        : { completedAt: current.completedAt }),
+      ...(current.durationMs === undefined
+        ? {}
+        : { durationMs: current.durationMs }),
+    };
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+}
 export function registerChatHistoryChannel(
   app: FastifyInstance,
   options: Pick<CodexOptions, "env" | "resolveEnv" | "launch">,
   path = "/api/codex/thread/turns/list",
   fallback?: Fallback,
+  readCurrentTurn?: ReadCurrentChatTurn,
 ) {
   const reads = new Map<AbortController, Promise<unknown>>();
   const queue: Array<{ run: () => Promise<void> }> = [];
@@ -39,6 +103,14 @@ export function registerChatHistoryChannel(
     }
     if (url.searchParams.size !== 1)
       return reply.code(400).send({ error: "CHAT_HISTORY_INVALID_VIEW" });
+    if (
+      request.body &&
+      typeof request.body === "object" &&
+      (request.body as { itemsView?: unknown }).itemsView === "notLoaded"
+    ) {
+      if (fallback) return fallback(request, reply);
+      return reply.code(400).send({ error: "CHAT_HISTORY_INVALID_REQUEST" });
+    }
     let params;
     try {
       params = chatHistoryRequest(request.body);
@@ -69,6 +141,11 @@ export function registerChatHistoryChannel(
     const job = {
       run: async () => {
         try {
+          const currentTurn = await currentExecution(
+            readCurrentTurn,
+            params.threadId,
+            controller.signal,
+          );
           const reading = await readNativeProjection(
             options,
             {
@@ -76,7 +153,7 @@ export function registerChatHistoryChannel(
               method: "thread/turns/list",
               params,
               selector: (initialized, ready) =>
-                new ChatHistorySelector(initialized, ready),
+                new ChatHistorySelector(initialized, ready, currentTurn),
             },
             controller.signal,
           );
@@ -129,13 +206,23 @@ export function registerChatHistoryChannel(
 export function registerLocalChatHistoryChannel(
   app: FastifyInstance,
   dataDir: string,
-  fallback: Fallback,
+  fallback?: Fallback,
+  readCurrentTurnOrEnv?: ReadCurrentChatTurn | NodeJS.ProcessEnv,
   env: NodeJS.ProcessEnv = process.env,
 ) {
+  const readCurrentTurn =
+    typeof readCurrentTurnOrEnv === "function"
+      ? readCurrentTurnOrEnv
+      : undefined;
+  const runtimeEnv =
+    typeof readCurrentTurnOrEnv === "function"
+      ? env
+      : (readCurrentTurnOrEnv ?? env);
   registerChatHistoryChannel(
     app,
-    { env, resolveEnv: () => resolveCodexEnv(dataDir, env) },
+    { env: runtimeEnv, resolveEnv: () => resolveCodexEnv(dataDir, runtimeEnv) },
     "/api/session/api/codex/thread/turns/list",
     fallback,
+    readCurrentTurn,
   );
 }

@@ -1,5 +1,7 @@
 - 2026-10-27（历史读取超限可能连带中断共享 Agent）：旧版 legacy `thread/read` 正文走共享 stdio，超过 32 MiB 会结束 app-server，存在波及其它执行轮次的路径；现场有 `turn_aborted(reason=interrupted)` 且无明确 interrupt 请求，但原日志没有逐回包因果记录，不能把每次中断都归因到超限。legacy 正文现用独立只读进程；可识别的超限 RPC 回复逐块丢弃并仅拒绝该次读取，未知帧隔离传输但保留活进程。用户授权重启后，当前运行层已加载新构建；`REF_xh3_accu` 实际只读历史返回 200。
 
+- 2026-10-27（运行中标签不转圈、排队消息缺少引导）：当前运行层确认 inProgress，但独立只读聊天 reader 把同一轮重建为 interrupted，view=chat 的 notLoaded 查询还被拒绝；旧终态保护使转圈和精确引导一起消失。现小型 activity 端点从执行实例核对身份／状态／时间，并按精确轮次修正独立历史执行字段；前端有界恢复真实 timing，保留迟到事件、scope、关注集合和正文回收保护。queue 不自动改为 steer，完整规则与验收见 [执行状态权威来源](session-execution-state.md)。
+
 - 2026-10-27（会话仍在工作却发送飞书完成提醒）：旧判断只认某一轮 completed，commentary／空输出也兜底为“任务已完成”，历史失败重试和终端同源观察可能抢发。现发送前核对最新轮次、idle、无待发／不确定队列及 Goal；仅发送最终回复，新轮次取消旧候选、重启后淘汰已过时重试。当前运行层已加载线程的终端候选让渡给会话通知器，不污染共享回执；新增无副作用队列 inspect，保持事件流异步和元数据检查。隔离红绿灯覆盖状态、恢复、异步竞态及跨来源缓存；不向真实任务／飞书发送测试，完整规则与原子性边界见 [通知约定](session-codex-feishu-notifications.md)。
 
 - 2026-10-27（队列附件像素对照加载条件不等价）：原夹具 native 用 data URL、本地用网络 URL；现从实际 fileSrc 解析同一 URL并核对响应 MIME、字节和 hash，data/network 保留独立控制。来源守卫红转绿，共享预览/排序 14 项通过；两主题像素矩阵仍红，此记录不是产品像素修复完成。见 [加载条件与剩余像素差](designs/session-render-alignment/queue-image-paint-20261027.md)。

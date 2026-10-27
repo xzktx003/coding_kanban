@@ -28,6 +28,14 @@ const idle = { type: "idle" as const };
 let stop: (() => void) | undefined;
 const response = (data: unknown[], nextCursor: string | null = null) =>
   new Response(JSON.stringify({ data, nextCursor }));
+// Existing status-only cases supply no native turn metadata. Keep their status
+// query assertions separate from the active-turn recovery cases below.
+const statusesOnly =
+  (fetcher: typeof fetch): typeof fetch =>
+  (url, init) =>
+    String(url).includes("/codex/activity")
+      ? Promise.resolve(response([]))
+      : fetcher(url, init);
 beforeEach(() => {
   vi.useFakeTimers();
   stream.close.mockClear();
@@ -70,7 +78,7 @@ it("restores all followed statuses across projects and pages without changing na
       ),
     )
     .mockResolvedValueOnce(response([{ id: "b", status: active }]));
-  stop = startFollowedSessionStatusSync(fetcher);
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
   await vi.advanceTimersByTimeAsync(1);
   expect(useCodexStore.getState().threadStatusMap).toEqual({
     a: idle,
@@ -104,7 +112,7 @@ it("recovers missing pending-question snapshots without resending answers", asyn
       { id: "b", status: idle },
     ]),
   );
-  stop = startFollowedSessionStatusSync(fetcher);
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
   await vi.advanceTimersByTimeAsync(600);
   expect(stream.repair).toHaveBeenCalledOnce();
   await vi.advanceTimersByTimeAsync(10000);
@@ -120,7 +128,7 @@ it("does not reconnect if the actual pending request arrives during the reconcil
       { id: "b", status: idle },
     ]),
   );
-  stop = startFollowedSessionStatusSync(fetcher);
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
   await vi.advanceTimersByTimeAsync(1);
   useRequestUserInputStore.setState({
     pendingRequests: [{ threadId: "a", requestId: 7, turnId: "t" } as any],
@@ -134,7 +142,7 @@ it("synchronizes membership restored after startup and ignores metadata-only upd
   const fetcher = vi
     .fn()
     .mockImplementation(async () => response([{ id: "b", status: active }]));
-  stop = startFollowedSessionStatusSync(fetcher);
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
   await vi.advanceTimersByTimeAsync(1);
   expect(fetcher).not.toHaveBeenCalled();
   useAgentCenterStore.setState({ cards: [{ kind: "codex", id: "b" }] });
@@ -154,7 +162,7 @@ it("refreshes on SSE reconnect and foreground recovery", async () => {
       { id: "b", status: active },
     ]),
   );
-  stop = startFollowedSessionStatusSync(fetcher);
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
   await vi.advanceTimersByTimeAsync(1);
   stream.onOpen?.();
   await vi.advanceTimersByTimeAsync(1);
@@ -174,7 +182,7 @@ it("does not overwrite a newer streamed status with a delayed snapshot", async (
         resolve = r;
       }),
   );
-  stop = startFollowedSessionStatusSync(fetcher);
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
   await vi.advanceTimersByTimeAsync(1);
   useCodexStore.getState().addEvent("b", {
     method: "thread/status/changed",
@@ -204,7 +212,7 @@ it("retries a failed query without clearing known statuses", async () => {
         { id: "b", status: active },
       ]),
     );
-  stop = startFollowedSessionStatusSync(fetcher);
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
   await vi.advanceTimersByTimeAsync(1);
   expect(useCodexStore.getState().threadStatusMap.a).toEqual(active);
   await vi.advanceTimersByTimeAsync(5000);
@@ -221,7 +229,7 @@ it("checks archived history for missing followed threads and stops once all are 
     .mockResolvedValueOnce(
       response([{ id: "b", status: { type: "notLoaded" } }], "unused"),
     );
-  stop = startFollowedSessionStatusSync(fetcher);
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
   await vi.advanceTimersByTimeAsync(1);
   expect(useCodexStore.getState().threadStatusMap.b).toEqual({
     type: "notLoaded",
@@ -238,7 +246,7 @@ it("aborts on cleanup and rejects late updates and reconnect callbacks", async (
         resolve = r;
       }),
   );
-  stop = startFollowedSessionStatusSync(fetcher);
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
   await vi.advanceTimersByTimeAsync(1);
   stop();
   expect(fetcher.mock.calls[0][1].signal.aborted).toBe(true);
@@ -272,7 +280,7 @@ it("ignores removed tabs in a delayed response and queues newly followed tabs wi
         { id: "c", status: active },
       ]),
     );
-  stop = startFollowedSessionStatusSync(fetcher);
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
   await vi.advanceTimersByTimeAsync(1);
   useAgentCenterStore.setState({
     cards: [
@@ -299,7 +307,7 @@ it("ignores removed tabs in a delayed response and queues newly followed tabs wi
 it("does not query or invent Codex status for a Claude-only tab collection", async () => {
   useAgentCenterStore.setState({ cards: [{ kind: "cc", id: "a" }] });
   const fetcher = vi.fn();
-  stop = startFollowedSessionStatusSync(fetcher);
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
   await vi.advanceTimersByTimeAsync(1);
   expect(fetcher).not.toHaveBeenCalled();
   expect(useCodexStore.getState().threadStatusMap).toEqual({});
@@ -311,7 +319,7 @@ it("rejects malformed status and repeated pagination cursors without an infinite
     .mockImplementation(async () =>
       response([{ id: "a", status: { type: "active" } }], "same"),
     );
-  stop = startFollowedSessionStatusSync(fetcher);
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
   await vi.advanceTimersByTimeAsync(1);
   expect(fetcher).toHaveBeenCalledTimes(2);
   expect(useCodexStore.getState().threadStatusMap).toEqual({});
@@ -333,7 +341,7 @@ it("rechecks a snapshot invalidated only by a turn event instead of leaving stat
         { id: "b", status: idle },
       ]),
     );
-  stop = startFollowedSessionStatusSync(fetcher);
+  stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
   await vi.advanceTimersByTimeAsync(1);
   useCodexStore.getState().addEvent("a", {
     method: "turn/started",
@@ -386,7 +394,7 @@ it("announces idle external history changes from thread-list timestamps without 
       ]),
     );
   try {
-    stop = startFollowedSessionStatusSync(fetcher);
+    stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
     await vi.advanceTimersByTimeAsync(1);
     expect(reconcile).not.toHaveBeenCalled();
 
@@ -415,7 +423,7 @@ it("does not announce active progress timestamp changes as history reconciles", 
       response([{ id: "a", status: active, updatedAt: 11 }]),
     );
   try {
-    stop = startFollowedSessionStatusSync(fetcher);
+    stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
     await vi.advanceTimersByTimeAsync(1);
     useCodexStore.setState({
       turnTimingMap: {
@@ -458,7 +466,7 @@ it.each([idle, { type: "systemError" as const }])(
     );
     const baseline = useCodexStore.getState();
     try {
-      stop = startFollowedSessionStatusSync(fetcher);
+      stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
       await vi.advanceTimersByTimeAsync(1);
       expect(reconcile).toHaveBeenCalledOnce();
       expect(reconcile.mock.calls[0][0]).toMatchObject({ detail: "a" });
@@ -511,7 +519,7 @@ it("does not use an unchanged idle snapshot to repair a newer streamed turn", as
   const reconcile = vi.fn();
   window.addEventListener("session-history-reconcile", reconcile);
   try {
-    stop = startFollowedSessionStatusSync(fetcher);
+    stop = startFollowedSessionStatusSync(statusesOnly(fetcher));
     await vi.advanceTimersByTimeAsync(1);
     useCodexStore.setState({
       turnTimingMap: {
@@ -558,4 +566,257 @@ it("does not treat unloaded metadata as a turn completion", async () => {
   } finally {
     window.removeEventListener("session-history-reconcile", reconcile);
   }
+});
+
+const oldInterrupted = {
+  turnId: "old",
+  status: "interrupted" as const,
+  startedAtMs: 10_000,
+  durationMs: 100,
+};
+const nextActiveTurn = { id: "next", status: "inProgress", startedAt: 20 };
+const activityResponse = (turn: unknown) =>
+  new Response(JSON.stringify({ threadId: "a", status: active, turn }));
+function recoveryFixture(turn: unknown = nextActiveTurn) {
+  useAgentCenterStore.setState({ cards: [{ kind: "codex", id: "a" }] });
+  useCodexStore.setState({
+    currentTurnId: null,
+    threadStatusMap: { a: active },
+    turnTimingMap: { a: oldInterrupted },
+  });
+  const fetcher = vi.fn(async (url: RequestInfo | URL) =>
+    String(url).includes("/codex/activity")
+      ? activityResponse(turn)
+      : response([{ id: "a", status: active }]),
+  );
+  return fetcher;
+}
+it("recovers the exact new active turn after a missed start without retaining history or changing selection", async () => {
+  const fetcher = recoveryFixture();
+  stop = startFollowedSessionStatusSync(fetcher);
+  await vi.advanceTimersByTimeAsync(1);
+  const state = useCodexStore.getState();
+  expect(state.turnTimingMap.a).toEqual({
+    turnId: "next",
+    status: "inProgress",
+    startedAtMs: 20_000,
+    durationMs: null,
+  });
+  expect(state.currentTurnId).toBe("next");
+  expect(state.currentThreadId).toBe("a");
+  expect(state.events).toEqual({});
+  expect(state.threads).toEqual([]);
+  const probe = fetcher.mock.calls.find(([url]) =>
+    String(url).includes("/codex/activity"),
+  );
+  expect(probe?.[0]).toBe("/codex/activity");
+  expect(JSON.parse((probe as any)[1].body)).toEqual({
+    threadId: "a",
+  });
+});
+it("recovers missing timing once while identical active status polls do not notify subscribers again", async () => {
+  const fetcher = recoveryFixture();
+  useCodexStore.setState({ turnTimingMap: {} });
+  const changes = vi.fn();
+  const unsubscribe = useCodexStore.subscribe(changes);
+  try {
+    stop = startFollowedSessionStatusSync(fetcher);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(useCodexStore.getState().currentTurnId).toBe("next");
+    expect(changes).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(16_000);
+    expect(
+      fetcher.mock.calls.filter(([url]) =>
+        String(url).includes("/codex/activity"),
+      ),
+    ).toHaveLength(1);
+    expect(changes).toHaveBeenCalledOnce();
+  } finally {
+    unsubscribe();
+  }
+});
+it.each([
+  { id: "next", status: "completed", startedAt: 20 },
+  { id: "next", status: "inProgress" },
+  { id: "next", status: "inProgress", startedAt: -1 },
+  { id: "next", status: "inProgress", startedAt: Number.NaN },
+  { id: "next", status: "inProgress", startedAt: 1e308 },
+  { id: "older", status: "inProgress", startedAt: 5 },
+  { id: "", status: "inProgress", startedAt: 20 },
+  { id: "next", threadId: "other", status: "inProgress", startedAt: 20 },
+])(
+  "does not revive a terminal turn or accept malformed/older latest metadata: %j",
+  async (turn) => {
+    const fetcher = recoveryFixture(turn);
+    stop = startFollowedSessionStatusSync(fetcher);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(useCodexStore.getState().turnTimingMap.a).toBe(oldInterrupted);
+    expect(useCodexStore.getState().currentTurnId).toBeNull();
+  },
+);
+it("a delayed active-turn probe cannot overwrite a newer streamed turn or status", async () => {
+  const fetcher = recoveryFixture();
+  let resolve!: (response: Response) => void;
+  fetcher.mockImplementation(async (url) =>
+    String(url).includes("/codex/activity")
+      ? new Promise<Response>((r) => {
+          resolve = r;
+        })
+      : response([{ id: "a", status: active }]),
+  );
+  stop = startFollowedSessionStatusSync(fetcher);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(resolve).toBeTypeOf("function");
+  useCodexStore.getState().addEvent("a", {
+    method: "turn/started",
+    params: {
+      threadId: "a",
+      turn: {
+        id: "streamed",
+        status: "inProgress",
+        startedAt: 30,
+        items: [],
+      },
+    },
+  } as any);
+  resolve(activityResponse(nextActiveTurn));
+  await vi.advanceTimersByTimeAsync(1);
+  expect(useCodexStore.getState().turnTimingMap.a.turnId).toBe("streamed");
+  expect(useCodexStore.getState().currentTurnId).toBe("streamed");
+});
+it.each(["unfollow", "stop", "scope"])(
+  "ignores the delayed active-turn result after %s",
+  async (mode) => {
+    const fetcher = recoveryFixture();
+    let resolve!: (response: Response) => void;
+    fetcher.mockImplementation(async (url) =>
+      String(url).includes("/codex/activity")
+        ? new Promise<Response>((r) => {
+            resolve = r;
+          })
+        : response([{ id: "a", status: active }]),
+    );
+    stop = startFollowedSessionStatusSync(fetcher);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(resolve).toBeTypeOf("function");
+    if (mode === "unfollow") useAgentCenterStore.setState({ cards: [] });
+    if (mode === "stop") stop();
+    if (mode === "scope")
+      useCodexStore.setState({ accountNamespace: "different-account" });
+    resolve(activityResponse(nextActiveTurn));
+    await vi.advanceTimersByTimeAsync(1);
+    expect(useCodexStore.getState().turnTimingMap.a).toBe(oldInterrupted);
+    expect(useCodexStore.getState().currentTurnId).toBeNull();
+  },
+);
+it("unchanged idle metadata never probes active turn history", async () => {
+  const fetcher = recoveryFixture();
+  fetcher.mockImplementation(async () => response([{ id: "a", status: idle }]));
+  stop = startFollowedSessionStatusSync(fetcher);
+  await vi.advanceTimersByTimeAsync(65_000);
+  expect(
+    fetcher.mock.calls.every(
+      ([url]) => String(url) === "/api/codex/thread/list",
+    ),
+  ).toBe(true);
+});
+
+it("same-value streamed status confirmation invalidates a late active-turn probe", async () => {
+  const fetcher = recoveryFixture();
+  let resolve!: (response: Response) => void;
+  fetcher.mockImplementation(async (url) =>
+    String(url).includes("/codex/activity")
+      ? new Promise<Response>((r) => {
+          resolve = r;
+        })
+      : response([{ id: "a", status: active }]),
+  );
+  stop = startFollowedSessionStatusSync(fetcher);
+  await vi.advanceTimersByTimeAsync(1);
+  useCodexStore.getState().addEvent("a", {
+    method: "thread/status/changed",
+    params: { threadId: "a", status: { type: "active", activeFlags: [] } },
+  });
+  resolve(activityResponse(nextActiveTurn));
+  await vi.advanceTimersByTimeAsync(1);
+  expect(useCodexStore.getState().turnTimingMap.a).toBe(oldInterrupted);
+});
+it("background recovery never borrows or changes the selected thread's current turn", async () => {
+  const fetcher = recoveryFixture();
+  useCodexStore.setState({
+    currentThreadId: "other",
+    currentTurnId: "other-turn",
+  });
+  stop = startFollowedSessionStatusSync(fetcher);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(useCodexStore.getState().turnTimingMap.a.turnId).toBe("next");
+  expect(useCodexStore.getState().currentThreadId).toBe("other");
+  expect(useCodexStore.getState().currentTurnId).toBe("other-turn");
+});
+it("a failed metadata probe leaves controls safe and retries on the existing active watchdog", async () => {
+  const fetcher = recoveryFixture();
+  let probes = 0;
+  fetcher.mockImplementation(async (url) => {
+    if (!String(url).includes("/codex/activity"))
+      return response([{ id: "a", status: active }]);
+    if (++probes === 1) throw new Error("temporary metadata outage");
+    return activityResponse(nextActiveTurn);
+  });
+  stop = startFollowedSessionStatusSync(fetcher);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(useCodexStore.getState().turnTimingMap.a).toBe(oldInterrupted);
+  await vi.advanceTimersByTimeAsync(6_000);
+  expect(probes).toBe(2);
+  expect(useCodexStore.getState().turnTimingMap.a.turnId).toBe("next");
+});
+
+it("repairs the same live turn falsely reconstructed as interrupted by an independent history reader", async () => {
+  const fetcher = recoveryFixture({
+    id: "old",
+    status: "inProgress",
+    startedAt: 10,
+  });
+  stop = startFollowedSessionStatusSync(fetcher);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(useCodexStore.getState().turnTimingMap.a).toEqual({
+    turnId: "old",
+    status: "inProgress",
+    startedAtMs: 10000,
+    durationMs: null,
+  });
+  expect(useCodexStore.getState().currentTurnId).toBe("old");
+});
+it.each(["completed", "failed"] as const)(
+  "does not revive an actual %s timing from a same-ID snapshot",
+  async (terminal) => {
+    const fetcher = recoveryFixture({
+      id: "old",
+      status: "inProgress",
+      startedAt: 10,
+    });
+    useCodexStore.setState({
+      turnTimingMap: { a: { ...oldInterrupted, status: terminal } },
+    });
+    stop = startFollowedSessionStatusSync(fetcher);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(useCodexStore.getState().turnTimingMap.a.status).toBe(terminal);
+    expect(useCodexStore.getState().currentTurnId).toBeNull();
+  },
+);
+it("does not treat cached history as live authority when activity identity or status mismatches", async () => {
+  const fetcher = recoveryFixture({
+    id: "old",
+    status: "inProgress",
+    startedAt: 10,
+  });
+  fetcher.mockImplementation(async (url) =>
+    String(url).includes("/codex/activity")
+      ? new Response(
+          JSON.stringify({ threadId: "a", status: idle, turn: nextActiveTurn }),
+        )
+      : response([{ id: "a", status: active }]),
+  );
+  stop = startFollowedSessionStatusSync(fetcher);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(useCodexStore.getState().turnTimingMap.a).toBe(oldInterrupted);
 });

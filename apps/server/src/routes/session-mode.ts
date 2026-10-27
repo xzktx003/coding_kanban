@@ -20,6 +20,7 @@ import { SessionCodexFeishuReplyService } from "../services/session-codex-feishu
 import type { FeishuReplyBindingStore } from "../services/feishu-reply-binding-store.js";
 import { SessionCodexFeishuNotifier } from "../services/session-codex-feishu-notifier.js";
 import { createSessionCodexCompletionCheck } from "../services/session-codex-completion-check.js";
+import { registerSessionCodexActivityRoutes, readSessionCodexActivity } from "./session-codex-activity.js";
 import type { FeishuCompletionSenderLike } from "../services/agent-completion-feishu-notifier.js";
 import { resolve } from "node:path";
 import { Readable } from "node:stream";
@@ -29,7 +30,7 @@ import WebSocket from "ws";
 interface SessionModeRouteOptions {
   loadDetailChannel?: () => Promise<{
     registerLocalItemDetailChannel: (app: FastifyInstance, dataDir: string) => void;
-    registerLocalChatHistoryChannel?: (app: FastifyInstance, dataDir: string, fallback: (request: FastifyRequest, reply: FastifyReply) => unknown) => void;
+    registerLocalChatHistoryChannel?: (app: FastifyInstance, dataDir: string, fallback: (request: FastifyRequest, reply: FastifyReply) => unknown, readCurrentTurn?: (threadId: string, signal: AbortSignal) => Promise<Awaited<ReturnType<typeof readSessionCodexActivity>>["turn"]>) => void;
   }>;
   origin?: string;
   attachmentRoot?: string;
@@ -196,6 +197,7 @@ export function registerSessionModeRoutes(
   });
   let origin = options.origin ? validateOrigin(options.origin).origin : null;
   const fetchUpstream = options.fetch ?? globalThis.fetch;
+  registerSessionCodexActivityRoutes(app, { origin: () => origin, fetch: fetchUpstream });
   if (options.attachmentRoot && process.env.SESSION_MODE_ENABLED !== "0") {
     app.register(async (detailScope) => {
       let channel;
@@ -211,6 +213,19 @@ export function registerSessionModeRoutes(
       channel.registerLocalItemDetailChannel(detailScope, resolve(options.attachmentRoot!, "..", ".codexia"));
       channel.registerLocalChatHistoryChannel?.(detailScope, resolve(options.attachmentRoot!, "..", ".codexia"), async (request, reply) => {
         if (!origin) return reply.code(503).send({ error: "会话服务尚未启动" });
+        const body = request.body as Record<string, unknown> | undefined;
+        if (new URL(request.raw.url!, "http://localhost").searchParams.get("view") === "chat" && body?.itemsView === "notLoaded") {
+          if (typeof body.threadId !== "string" || body.limit !== 1 || body.cursor != null ||
+              (body.sortDirection !== undefined && body.sortDirection !== "desc") ||
+              Object.keys(body).some(key => !["threadId", "limit", "cursor", "sortDirection", "itemsView"].includes(key)))
+            return reply.code(400).send({ error: "CHAT_HISTORY_INVALID_REQUEST" });
+          try {
+            const activity = await readSessionCodexActivity(origin, fetchUpstream, body.threadId);
+            return reply.header("cache-control", "no-store").send({ data: activity.turn ? [activity.turn] : [], nextCursor: null });
+          } catch {
+            return reply.code(503).send({ error: "会话执行状态暂不可用" });
+          }
+        }
         // Only the explicit chat projection uses the independent bounded reader.
         // Full/raw consumers retain the existing runtime protocol and response.
         const suffix = request.raw.url!.slice("/api/session".length);
@@ -240,6 +255,9 @@ export function registerSessionModeRoutes(
           request.raw.off("aborted", abort); reply.raw.off("close", abort);
           return reply.code(503).send({ error: "会话服务连接失败，请重试连接。" });
         }
+      }, async (threadId, signal) => {
+        if (!origin) throw new Error("会话服务尚未连接");
+        return (await readSessionCodexActivity(origin, fetchUpstream, threadId, signal)).turn;
       });
     });
   } else {
