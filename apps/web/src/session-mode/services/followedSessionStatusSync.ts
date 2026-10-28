@@ -11,6 +11,11 @@ import { authHeaders, buildUrl } from "../hooks/runtime";
 import { openEventStream, reconcileEventStream } from "../lib/eventStream";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
 import { openedCodexIds } from "./openedSessions";
+import { acceptTurnStart } from "../utils/codexRuntimeState";
+import {
+  captureCodexOperationScope,
+  isCodexOperationScopeCurrent,
+} from "./codexOperationScope";
 
 function followedIds() {
   return new Set(openedCodexIds());
@@ -86,6 +91,7 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
     controller = new AbortController();
     const deadline = requestTimeout(controller.signal, 15_000);
     const signal = deadline.signal;
+    const scope = captureCodexOperationScope();
     // Snapshot references let streamed status/turn changes win over a late response.
     const baseline = useCodexStore.getState();
     let failed = false;
@@ -120,7 +126,8 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
             (page.nextCursor != null && typeof page.nextCursor !== "string")
           )
             throw new Error("Invalid thread list");
-          if (stopped || signal.aborted) return;
+          if (stopped || signal.aborted || !isCodexOperationScopeCurrent(scope))
+            return;
           const currentMembers = followedIds();
           for (const id of remaining)
             if (!currentMembers.has(id)) remaining.delete(id);
@@ -138,6 +145,7 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
               updatedThreads.set(thread.id, thread.updatedAt);
           }
           const reconcile = new Set<string>();
+          const recoverActive = new Set<string>();
           useCodexStore.setState((state) => {
             const threadStatusMap = { ...state.threadStatusMap };
             let changed = false;
@@ -151,6 +159,8 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
                 continue;
               }
               const timing = baseline.turnTimingMap[id];
+              if (status.type === "active" && timing?.status !== "inProgress")
+                recoverActive.add(id);
               // A short turn can start and finish between metadata snapshots.
               // Recent history may observe it running while status stays idle.
               // Repair that authoritative completion boundary once per turn,
@@ -194,6 +204,91 @@ export function startFollowedSessionStatusSync(fetcher: typeof fetch = fetch) {
             window.dispatchEvent(
               new CustomEvent("session-history-reconcile", { detail: id }),
             );
+          for (const id of recoverActive) {
+            if (
+              stopped ||
+              signal.aborted ||
+              !isCodexOperationScopeCurrent(scope)
+            )
+              return;
+            const snapshot = useCodexStore.getState();
+            const status = snapshot.threadStatusMap[id];
+            const timing = snapshot.turnTimingMap[id];
+            if (
+              !followedIds().has(id) ||
+              status?.type !== "active" ||
+              timing !== baseline.turnTimingMap[id] ||
+              timing?.status === "inProgress"
+            )
+              continue;
+            try {
+              // Ask the executing instance, not the independent history reader:
+              // the latter may reconstruct a live turn as interrupted. An exact
+              // live-owner proof can repair that interruption, never status alone.
+              const response = await fetcher(buildUrl("/codex/activity"), {
+                method: "POST",
+                cache: "no-store",
+                headers: {
+                  "Content-Type": "application/json",
+                  ...authHeaders(),
+                },
+                body: JSON.stringify({
+                  threadId: id,
+                }),
+                signal,
+              });
+              if (!response.ok) continue;
+              const page = await response.json();
+              const turn = page?.turn;
+              if (
+                !turn ||
+                typeof turn.id !== "string" ||
+                !turn.id.trim() ||
+                turn.status !== "inProgress" ||
+                typeof turn.startedAt !== "number" ||
+                !Number.isFinite(turn.startedAt) ||
+                turn.startedAt < 0 ||
+                !Number.isFinite(turn.startedAt * 1000) ||
+                page.threadId !== id ||
+                page.status?.type !== "active" ||
+                (turn.threadId !== undefined && turn.threadId !== id) ||
+                (!acceptTurnStart(timing, turn) &&
+                  !(
+                    timing?.turnId === turn.id &&
+                    timing.status === "interrupted"
+                  ))
+              )
+                continue;
+              useCodexStore.setState((state) => {
+                if (
+                  stopped ||
+                  signal.aborted ||
+                  !isCodexOperationScopeCurrent(scope) ||
+                  !followedIds().has(id) ||
+                  state.threadStatusMap[id] !== status ||
+                  state.turnTimingMap[id] !== timing
+                )
+                  return state;
+                return {
+                  turnTimingMap: {
+                    ...state.turnTimingMap,
+                    [id]: {
+                      turnId: turn.id,
+                      startedAtMs: turn.startedAt * 1000,
+                      durationMs: null,
+                      status: "inProgress",
+                    },
+                  },
+                  ...(state.currentThreadId === id
+                    ? { currentTurnId: turn.id }
+                    : {}),
+                };
+              });
+            } catch {
+              // Unknown identity leaves steering disabled. The existing active
+              // status watchdog can retry this bounded metadata read later.
+            }
+          }
           cursor = page.nextCursor ?? null;
           if (cursor && cursors.has(cursor))
             throw new Error("Repeated thread list cursor");

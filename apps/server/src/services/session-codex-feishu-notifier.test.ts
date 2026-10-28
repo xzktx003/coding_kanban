@@ -56,6 +56,23 @@ function deferred<T = void>() {
   return { promise, resolve, reject };
 }
 
+async function waitForSignal(promise: Promise<void>) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("async stage was not reached")),
+          1000,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function waitFor(check: () => boolean | Promise<boolean>) {
   const end = Date.now() + 1000;
   while (!(await check())) {
@@ -64,7 +81,16 @@ async function waitFor(check: () => boolean | Promise<boolean>) {
   }
 }
 
-function fixture(options: { enabled?: boolean; file?: string } = {}) {
+function fixture(
+  options: {
+    enabled?: boolean;
+    file?: string;
+    beforeSend?: (target: {
+      threadId: string;
+      turnId: string;
+    }) => Promise<"ready" | "wait" | "superseded">;
+  } = {},
+) {
   let enabled = options.enabled ?? true;
   const sent: FeishuCompletionEvent[] = [];
   const reads: Array<{ id: string; turnId?: string }> = [];
@@ -74,6 +100,7 @@ function fixture(options: { enabled?: boolean; file?: string } = {}) {
   };
   const notifier = new SessionCodexFeishuNotifier({
     file: options.file,
+    beforeSend: options.beforeSend,
     retryIntervalMs: 20,
     settings: {
       get: () => ({ configured: true, enabled }),
@@ -327,7 +354,7 @@ test("cursor is isolated by runtime instance", async () => {
   }
 });
 
-test("falls back to a clear completion summary when the target turn has no assistant output", async () => {
+test("does not invent task completion when the completed turn has no assistant output", async () => {
   const f = fixture();
   f.setReadThread(async () => ({
     thread: thread({
@@ -338,7 +365,7 @@ test("falls back to a clear completion summary when the target turn has no assis
   await f.notifier.observe("runtime-one", completion(1));
   await f.notifier.drain();
 
-  assert.equal(f.sent[0]?.summary, "任务已完成。");
+  assert.equal(f.sent.length, 0);
   await f.notifier.close();
 });
 
@@ -427,7 +454,7 @@ test("does not treat phased commentary as a final answer fallback", async () => 
   await f.notifier.observe("runtime-one", completion(1));
   await f.notifier.drain();
 
-  assert.equal(f.sent[0]?.summary, "任务已完成。");
+  assert.equal(f.sent.length, 0);
   await f.notifier.close();
 });
 
@@ -644,6 +671,298 @@ test("binding persistence failure keeps a delivered notification pending for ret
       delivered[0].sessionModeThreadId,
       delivered.at(-1).sessionModeThreadId,
     );
+  } finally {
+    await notifier.close();
+  }
+});
+
+test("an explicitly active thread keeps a completed turn pending until idle", async () => {
+  const f = fixture();
+  let active = true;
+  f.setReadThread(async () => ({
+    thread: thread({ status: { type: active ? "active" : "idle" } }),
+  }));
+  try {
+    await f.notifier.observe("runtime", completion(1));
+    await f.notifier.drain();
+    assert.equal(f.sent.length, 0);
+    active = false;
+    await f.notifier.drain();
+    assert.equal(f.sent.length, 1);
+  } finally {
+    await f.notifier.close();
+  }
+});
+
+test("legacy assistant output without phase remains a compatible final answer", async () => {
+  const f = fixture();
+  f.setReadThread(async () => ({
+    thread: thread({
+      turns: [
+        {
+          id: "turn-one",
+          status: "completed",
+          items: [{ type: "agentMessage", text: "旧版最终回答" }],
+        },
+      ],
+    }),
+  }));
+  try {
+    await f.notifier.observe("runtime", completion(1));
+    await f.notifier.drain();
+    assert.equal(f.sent[0]?.summary, "旧版最终回答");
+  } finally {
+    await f.notifier.close();
+  }
+});
+
+test("the delivery gate keeps pending durable while waiting and sends only after ready", async () => {
+  const root = await mkdtemp(join(tmpdir(), "session-feishu-gate-"));
+  const file = join(root, "notifier.json");
+  let ready = false;
+  const targets: unknown[] = [];
+  const f = fixture({
+    file,
+    beforeSend: async (target) => {
+      targets.push(target);
+      return ready ? "ready" : "wait";
+    },
+  });
+  try {
+    await f.notifier.observe("runtime", completion(1));
+    await f.notifier.drain();
+    assert.equal(f.sent.length, 0);
+    assert.deepEqual(
+      Object.keys(JSON.parse(await readFile(file, "utf8")).pending),
+      ["thread-one:turn-one"],
+    );
+    assert.deepEqual(targets, [{ threadId: "thread-one", turnId: "turn-one" }]);
+    ready = true;
+    await f.notifier.drain();
+    assert.equal(f.sent.length, 1);
+    assert.equal(targets.length, 3);
+  } finally {
+    await f.notifier.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a superseded delivery gate durably skips an old completion without retrying", async () => {
+  const root = await mkdtemp(join(tmpdir(), "session-feishu-superseded-"));
+  const file = join(root, "notifier.json");
+  let checks = 0;
+  const f = fixture({
+    file,
+    beforeSend: async () => {
+      checks++;
+      return "superseded";
+    },
+  });
+  try {
+    let reads = 0;
+    f.setReadThread(async () => {
+      reads++;
+      throw new Error("old history unavailable");
+    });
+    await f.notifier.observe("runtime", completion(1));
+    await f.notifier.drain();
+    await f.notifier.drain();
+    assert.equal(f.sent.length, 0);
+    assert.equal(reads, 0);
+    assert.equal(checks, 1);
+    const persisted = JSON.parse(await readFile(file, "utf8"));
+    assert.deepEqual(persisted.pending, {});
+    assert.equal(persisted.skipped["thread-one:turn-one"], true);
+  } finally {
+    await f.notifier.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+for (const delayed of ["history", "gate"] as const) {
+  test(`a newer turn start invalidates a completion during delayed ${delayed} and fences replay`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "session-feishu-start-race-"));
+    const file = join(root, "notifier.json");
+    const started = deferred();
+    const release = deferred();
+    const f = fixture({
+      file,
+      beforeSend: async () => {
+        if (delayed === "gate") {
+          started.resolve();
+          await release.promise;
+        }
+        return "ready";
+      },
+    });
+    if (delayed === "history")
+      f.setReadThread(async () => {
+        started.resolve();
+        await release.promise;
+        return { thread: thread() };
+      });
+    try {
+      await f.notifier.observe("runtime", completion(1));
+      await waitForSignal(started.promise);
+      await f.notifier.observe("runtime", {
+        seq: 2,
+        event: "codex:notification",
+        payload: {
+          method: "turn/started",
+          params: {
+            threadId: "thread-one",
+            turn: { id: "turn-two", status: "inProgress" },
+          },
+        },
+      });
+      release.resolve();
+      await f.notifier.drain();
+      await f.notifier.observe("runtime", completion(1));
+      await f.notifier.drain();
+      assert.equal(f.sent.length, 0);
+      const persisted = JSON.parse(await readFile(file, "utf8"));
+      assert.equal(persisted.cursor, 2);
+      assert.deepEqual(persisted.pending, {});
+      assert.equal(persisted.skipped["thread-one:turn-one"], true);
+    } finally {
+      release.resolve();
+      await f.notifier.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("closing or disabling while the delivery gate waits prevents a late send", async () => {
+  for (const change of ["close", "disable"] as const) {
+    const started = deferred();
+    const release = deferred();
+    const f = fixture({
+      beforeSend: async () => {
+        started.resolve();
+        await release.promise;
+        return "ready";
+      },
+    });
+    try {
+      await f.notifier.observe("runtime", completion(1));
+      await waitForSignal(started.promise);
+      if (change === "close") await f.notifier.close();
+      else f.setEnabled(false);
+      release.resolve();
+      await f.notifier.drain();
+      assert.equal(f.sent.length, 0, change);
+    } finally {
+      release.resolve();
+      await f.notifier.close();
+    }
+  }
+});
+
+test("a failed send must pass fresh delivery gates on every retry", async () => {
+  let ready = true;
+  let checks = 0;
+  let sends = 0;
+  const notifier = new SessionCodexFeishuNotifier({
+    settings: { get: () => ({ configured: true, enabled: true }) },
+    beforeSend: async () => {
+      checks++;
+      return ready ? "ready" : "wait";
+    },
+    sender: {
+      send: async () => {
+        sends++;
+        if (sends === 1) {
+          ready = false;
+          throw new Error("delivery failed");
+        }
+      },
+    },
+    readThread: async () => ({ thread: thread() }),
+  });
+  try {
+    await notifier.observe("runtime", completion(1));
+    await notifier.drain();
+    assert.equal(sends, 1);
+    assert.equal(checks, 2);
+    await notifier.drain();
+    assert.equal(sends, 1);
+    assert.equal(checks, 3);
+    ready = true;
+    await notifier.drain();
+    assert.equal(sends, 2);
+    assert.equal(checks, 5);
+  } finally {
+    await notifier.close();
+  }
+});
+
+for (const metadataOnly of ["items-missing", "items-not-loaded"] as const) {
+  test(`completed history with ${metadataOnly} waits for final output instead of skipping`, async () => {
+    const f = fixture();
+    let complete = false;
+    f.setReadThread(async () => ({
+      thread: thread({
+        turns: [
+          {
+            id: "turn-one",
+            status: "completed",
+            ...(complete
+              ? { items: [finalItem("完整回答")] }
+              : metadataOnly === "items-missing"
+                ? {}
+                : { items: [], itemsView: "notLoaded" }),
+          },
+        ],
+      }),
+    }));
+    try {
+      await f.notifier.observe("runtime", completion(1));
+      await f.notifier.drain();
+      assert.equal(f.sent.length, 0);
+      complete = true;
+      await f.notifier.drain();
+      assert.equal(f.sent[0]?.summary, "完整回答");
+    } finally {
+      await f.notifier.close();
+    }
+  });
+}
+
+test("a started event queued after the serial barrier still cancels the pending send", async () => {
+  let checks = 0;
+  let observed: Promise<void> | undefined;
+  const sent: FeishuCompletionEvent[] = [];
+  const notifier = new SessionCodexFeishuNotifier({
+    settings: { get: () => ({ configured: true, enabled: true }) },
+    beforeSend: async () => {
+      if (++checks === 2) {
+        queueMicrotask(() =>
+          queueMicrotask(() => {
+            observed = notifier.observe("runtime", {
+              seq: 2,
+              event: "codex:notification",
+              payload: {
+                method: "turn/started",
+                params: { threadId: "thread-one", turn: { id: "turn-two" } },
+              },
+            });
+          }),
+        );
+      }
+      return "ready";
+    },
+    sender: {
+      send: async (event) => {
+        sent.push(event);
+      },
+    },
+    readThread: async () => ({ thread: thread() }),
+  });
+  try {
+    await notifier.observe("runtime", completion(1));
+    await notifier.drain();
+    await observed;
+    assert.equal(sent.length, 0);
   } finally {
     await notifier.close();
   }

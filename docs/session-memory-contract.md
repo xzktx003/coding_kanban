@@ -207,3 +207,10 @@ RSS 低点 469.8320→496.0898 MiB，增长 26.2578 MiB；heap 低点 55.2915→
 自动回收用例补充了“先确认两个后台线程各有正文”的前置断言，防止初始化漏读被误算成已经回收。最终0.021秒时三线程各16项；68.383秒时后台正文自然释放；100.250秒只读重显恢复目标18项，草稿、审批和新完成回复保留。JS heap为77,777,220→58,139,712→110,434,828 bytes；renderer RSS为432,979,968→308,146,176→405,331,968 bytes。RSS为该自有浏览器全部renderer合计，heap为页面target；无采样错误、pageerror或任务写入，没有强制GC/刷新参与该自然回收用例。
 
 证据在 `.dev-runtime/session-parity-batch-20261027-r4/browser-accepted/`。这证明指定短时回收/恢复和传输边界；默认跳过的30分钟用例不计通过，既有长期RSS红灯仍保留。原首轮“counts=4”失败发生在后台正文从未初始加载、0.041秒即误越过回收等待的条件下，不是已休眠正文复活的证据；完整失败及修复见[第四批验收](designs/session-render-alignment/session-parity-batch-r4-20261027.md)。
+
+
+### 2026-10-27 执行状态与独立历史分离
+
+独立 chat reader 能重建正文，不代表它知道另一实例中活跃轮次的状态；不得用它推断的 interrupted 覆盖执行实例的 inProgress。网关通过有界只读活动快照仅修正精确匹配轮次的执行字段；前端状态冲突时只读取 `/api/session/codex/activity`，不恢复完整历史轮询或保留工具正文。此读取不得 resume/acquire 或重发排队消息，详细边界与回归见 [执行状态权威来源](session-execution-state.md)。
+
+涉及这条链路须验证 activity 网关、status/history sync、useTurnControl、chat-history selector/channel，以及真实 HTTP/EventSource、不可见正文回收、恢复和审批；不得放宽原限额。

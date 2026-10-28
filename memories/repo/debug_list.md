@@ -1,6 +1,12 @@
 - 2026-10-28：完整访问权限下把推理强度推到 ultra 原本没有任何提示。官方 `Lti` 在提交 model/effort 前判 `!b || t !== "ultra" || s.reasoningEffort === "ultra"`，否则等 `Pti` 对话框，确认前不写入。注意两条路不同：原生触发器确实隐藏 ultra（`includeUltra: false` 写死在唯一生产调用点），但设置面板的 `ReasoningEffortSelector` 走 `nativeReasoningOptions`，其允许集合含 ultra，所以面板可达——排查类似「某档位到不了」的问题时先区分这两条路。官方是三出口，boolean 承载不了；门必须放在能拿到 sandbox 的那一层。权限未确认时不发问（未确认既不等于 full access 也不等于安全）。fallback 固定取权限菜单自己能产生的模式，否则刷新会拼出菜单外组合。教训：门的「过度触发」反向探针查出了测试本身的缺陷——一条用例声称覆盖 `current === "ultra"` arm，实际在第一个 arm 就返回，因为滑块永不发出与当前值相同的档位；只验证绿灯不会暴露这种用例。
 
+- 2026-10-28（会话界面加载失败后重试无效）：工作台错误边界原先只清除 failed 标记，React.lazy 缓存的模块拒绝仍被复用，点击「重新加载界面」可能立即再次失败。现仅在用户显式点击时重新加载当前文档，不清理本地草稿、不调用任务控制；失败页展示最多1000字符的纯文本错误详情，便于核对实际根因。单测先红后绿；手机／桌面浏览器模拟首次模块503后恢复，核对未自动刷新、存储保留且无 start/resume/steer/interrupt。现场报告的最初异常尚未取得具体错误，不能把该恢复缺陷视为已确认的现场根因。
+
 - 2026-10-27：旧版 legacy `thread/read` 正文走共享 app-server，超出 32 MiB 时会结束共享进程，存在连带中断其它轮次的路径。两次现场 `turn_aborted(reason=interrupted)` 没有明确停止请求，但原生日志没有逐回包因果记录，不能据此证明每次都由超限触发。现 legacy 正文用独立只读进程；已识别的超限回包只拒绝当前读取，未知超限帧隔离传输并保留活进程。用户授权重启后最新运行层已激活，目标 paginated 历史只读复验成功。
+
+- 2026-10-27（运行中标签不转圈、排队消息缺少引导）：当前运行层确认 inProgress，但独立只读聊天 reader 把同一轮重建为 interrupted，view=chat 的 notLoaded 查询还被拒绝；旧终态保护使转圈和精确引导一起消失。现小型 activity 端点从执行实例核对身份／状态／时间，并按精确轮次修正独立历史执行字段；前端有界恢复真实 timing，保留迟到事件、scope、关注集合和正文回收保护。queue 不自动改为 steer，完整规则与验收见 [执行状态权威来源](../../docs/session-execution-state.md)。
+
+- 2026-10-27（会话仍在工作却发送飞书完成提醒）：旧判断只认某一轮 completed，commentary／空输出也兜底为“任务已完成”，历史失败重试和终端同源观察可能抢发。现发送前核对最新轮次、idle、无待发／不确定队列及 Goal；仅发送最终回复，新轮次取消旧候选、重启后淘汰已过时重试。当前运行层已加载线程的终端候选让渡给会话通知器，不污染共享回执；新增无副作用队列 inspect，保持事件流异步和元数据检查。隔离红绿灯覆盖状态、恢复、异步竞态及跨来源缓存；不向真实任务／飞书发送测试，完整规则与原子性边界见 [通知约定](../../docs/session-codex-feishu-notifications.md)。
 
 - 2026-10-21：全终端偶发重连的本次现场为四次 ssh2 Client 未处理认证错误，Node 退出1后 watcher 正常恢复，不是 watcher 随机替换。SftpService 必须用持久 error 监听覆盖失败／close 后迟到回调；超时／同步 connect 错误／关闭也清理自身。旧 Client 的 close、旧操作失败和 idle 回调不得按目标键直接释放新连接；先删 Map 再 end 防同步重入。后台 homePath rejection 要观察但保留原 Promise 错误给 ~ 使用者。首六项红绿，九项新生命周期回归／文件服务共73项和 pnpm check 通过；不改认证、不加全局异常吞错、不重启 Agent，详见 docs/backend-restart-ssh-errors.md。
 

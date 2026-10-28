@@ -3,6 +3,13 @@ import type { Token } from "stream-json/parser.js";
 import { HttpError, isObject } from "../core/json.js";
 
 export const CHAT_HISTORY_BYTES = 16 * 1024 * 1024;
+export interface CurrentChatTurn {
+  id: string;
+  status: "inProgress" | "completed" | "interrupted" | "failed";
+  startedAt?: number | null;
+  completedAt?: number | null;
+  durationMs?: number | null;
+}
 const bad = () => new HttpError(502, "CHAT_HISTORY_PROTOCOL_ERROR");
 const limit = () => new HttpError(413, "CHAT_HISTORY_LIMIT_EXCEEDED");
 export function chatHistoryRequest(body: unknown) {
@@ -118,6 +125,7 @@ export class ChatHistorySelector {
   constructor(
     private readonly onInitialized: () => void,
     private readonly onReady: () => void,
+    private readonly currentTurn?: CurrentChatTurn | null,
   ) {}
   get done() {
     return this.complete;
@@ -285,6 +293,25 @@ export class ChatHistorySelector {
             (page.nextCursor != null && typeof page.nextCursor !== "string")
           )
             throw bad();
+          // An independent reader can reconstruct another instance's live turn
+          // as interrupted. Only its owner's exact execution snapshot can amend
+          // this page; never substitute items, other turns or nested identities.
+          const current = this.currentTurn;
+          if (current)
+            for (const turn of page.data) {
+              if (!isObject(turn) || turn.id !== current.id) continue;
+              turn.status = current.status;
+              for (const key of [
+                "startedAt",
+                "completedAt",
+                "durationMs",
+              ] as const)
+                if (current[key] !== undefined) turn[key] = current[key];
+              if (current.status === "inProgress") {
+                turn.completedAt = null;
+                turn.durationMs = null;
+              }
+            }
           const bounded = encodePage(page);
           const output = Buffer.from(
             JSON.stringify(

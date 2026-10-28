@@ -605,6 +605,12 @@ export function registerSessionFollowupRoutes(
             continue;
           if (sequence !== undefined && event.seq > sequence + 1)
             await queue.recover("连接期间有任务事件缺失，请检查后继续队列");
+          // Enqueue the receipt ahead of the notifier's serialized inspect,
+          // without blocking the event stream on queue/runtime I/O.
+          if (event.event === "codex:notification")
+            void queue.observe(event.payload).catch((error) =>
+              app.log.error({ err: error }, "Follow-up event failed"),
+            );
           try {
             await options.completionNotifier?.observe(instance!, event);
           } catch (error) {
@@ -616,12 +622,6 @@ export function registerSessionFollowupRoutes(
             );
           }
           sequence = event.seq;
-          if (event.event === "codex:notification")
-            void queue
-              .observe(event.payload)
-              .catch((error) =>
-                app.log.error({ err: error }, "Follow-up event failed"),
-              );
         }
         if (buffer.length > 8 * 1024 * 1024) throw new Error("Event too large");
       }

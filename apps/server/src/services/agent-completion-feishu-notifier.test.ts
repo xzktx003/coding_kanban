@@ -2139,3 +2139,101 @@ test("real native completion events and terminal rollout observations produce on
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+function sessionAwareSender(
+  isSessionThread: (threadId: string) => Promise<boolean>,
+) {
+  let sends = 0;
+  let receiptLookups = 0;
+  const sender = new ScriptFeishuCompletionSender({
+    scriptPath: "/workspace/notify.mjs",
+    fallbackWorkingDirectory: "/workspace",
+    isSessionThread,
+    deliveryHistory: {
+      findCodexCompletionDelivery: () => {
+        receiptLookups++;
+        return undefined;
+      },
+    },
+    runCommand: async () => {
+      sends++;
+      return {
+        stdout: JSON.stringify({
+          status: "sent",
+          messages: [
+            { messageId: "om_session_authority", chatId: "oc_private" },
+          ],
+        }),
+      };
+    },
+  });
+  return { sender, sends: () => sends, receiptLookups: () => receiptLookups };
+}
+
+test("terminal observations defer session-owned completions without poisoning native receipt caches", async () => {
+  const checked: string[] = [];
+  const f = sessionAwareSender(async (id) => {
+    checked.push(id);
+    return true;
+  });
+  assert.deepEqual(await f.sender.send(terminalCompletion), { messages: [] });
+  assert.equal(f.sends(), 0);
+  assert.equal(f.receiptLookups(), 0);
+  const delivered = await f.sender.send(sharedCompletion);
+  assert.equal(delivered.messages[0]?.messageId, "om_session_authority");
+  assert.equal(f.sends(), 1);
+  assert.deepEqual(await f.sender.send(sharedCompletion), delivered);
+  assert.equal(f.sends(), 1);
+  // Ownership must also be checked before returning any existing shared receipt.
+  assert.deepEqual(await f.sender.send(terminalCompletion), { messages: [] });
+  assert.equal(f.receiptLookups(), 2);
+  assert.deepEqual(checked, ["native-thread-123", "native-thread-123"]);
+});
+
+test("ordinary terminal-only Codex completions retain normal delivery and deduplication", async () => {
+  let checks = 0;
+  const f = sessionAwareSender(async () => {
+    checks++;
+    return false;
+  });
+  const delivery = await f.sender.send(terminalCompletion);
+  assert.equal(delivery.messages.length, 1);
+  assert.deepEqual(await f.sender.send(terminalCompletion), delivery);
+  assert.equal(f.sends(), 1);
+  assert.equal(checks, 2);
+});
+
+test("session ownership lookup errors reject terminal sends without script or cache writes", async () => {
+  let fail = true;
+  const f = sessionAwareSender(async () => {
+    if (fail) throw new Error("session ownership unavailable");
+    return false;
+  });
+  await assert.rejects(
+    f.sender.send(terminalCompletion),
+    /session ownership unavailable/,
+  );
+  assert.equal(f.sends(), 0);
+  assert.equal(f.receiptLookups(), 0);
+  fail = false;
+  assert.equal((await f.sender.send(terminalCompletion)).messages.length, 1);
+  assert.equal(f.sends(), 1);
+});
+
+test("native session and Claude events bypass terminal session ownership lookup", async () => {
+  let checks = 0;
+  const f = sessionAwareSender(async () => {
+    checks++;
+    throw new Error("must not look up");
+  });
+  await f.sender.send(sharedCompletion);
+  await f.sender.send({
+    ...terminalCompletion,
+    agentKind: "claude",
+    transcriptAgentKind: "claude",
+    transcriptSessionId: "claude-thread",
+    codexThreadId: undefined,
+  });
+  assert.equal(checks, 0);
+  assert.equal(f.sends(), 2);
+});

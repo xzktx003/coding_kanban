@@ -216,6 +216,15 @@ export class CodexFollowups {
   get(id: string) {
     return this.run(async () => this.snapshot(id));
   }
+  /** Passive notification checks must not register threads or write runtime holds. */
+  inspect(id: string) {
+    const task = this.serial.then(async () => {
+      await this.load();
+      return structuredClone(this.state[id] ?? emptyFollowupThread());
+    });
+    this.serial = task.catch(() => {});
+    return task;
+  }
   submit(value: FollowupSubmit): Promise<FollowupThread> {
     return this.run(async () => {
       const data = structuredClone(value),

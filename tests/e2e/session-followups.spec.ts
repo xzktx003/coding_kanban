@@ -1,4 +1,4 @@
-import { openComposerStatus } from "./session-composer-actions";
+import { openComposerStatus, composerAction } from "./session-composer-actions";
 import { test, expect, type Page } from "@playwright/test";
 import Fastify from "fastify";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -274,7 +274,9 @@ test("running messages queue, edit and reorder, survive reload, and can steer wi
       .first();
     await editor.fill("first queued");
     await page
-      .locator('.session-agent-view .session-native-composer[data-owner-thread="ux-0"]')
+      .locator(
+        '.session-agent-view .session-native-composer[data-owner-thread="ux-0"]',
+      )
       .getByRole("button", { name: "加入队列", exact: true })
       .click();
     await expect(page.locator(".session-followup-queue li")).toHaveCount(1);
@@ -342,10 +344,7 @@ test("stop-and-send waits for completion and pauses older queued work until expl
     await editor.press("Enter");
     await expect(page.locator(".session-followup-queue li")).toHaveCount(1);
     await editor.fill("replacement task");
-    await page.getByRole("button", { name: "附加文件", exact: true }).click();
-    await page
-      .getByRole("button", { name: "停止并发送新请求", exact: true })
-      .click();
+    await composerAction(page, "停止并发送新请求");
     await expect.poll(() => f.calls.length).toBe(1);
     expect(f.calls[0].method).toBe("turn/interrupt");
     await f.queue.tick();
@@ -366,7 +365,10 @@ test("stop-and-send waits for completion and pauses older queued work until expl
     );
     await f.queue.tick();
     expect(f.calls.length).toBe(2);
-    await page.getByRole("button", { name: "继续", exact: true }).click();
+    await page
+      .locator(".session-followup-queue")
+      .getByRole("button", { name: "继续", exact: true })
+      .click();
     await expect
       .poll(async () => (await f.queue.get("ux-0")).paused)
       .toBeNull();
@@ -970,6 +972,142 @@ for (const reload of [false, true]) {
       await f.queue.tick();
       expect(f.calls.map((c) => c.method)).toEqual(["turn/start"]);
       expect(f.calls[0].params.input[0].text).toBe("报错后继续验证");
+      expect(f.errors).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+}
+
+for (const sameTurn of [false, true]) {
+  test(`live activity repairs ${sameTurn ? "the same falsely interrupted" : "a missed Goal"} turn and restores spinner and exact queued steer`, async ({
+    page,
+  }, info) => {
+    test.setTimeout(30000);
+    const f = await setup(page, false);
+    try {
+      await expect
+        .poll(() =>
+          page.evaluate(async (url) => {
+            const { useCodexStore } = await import(url);
+            return useCodexStore.getState().historyLoadedMap["ux-0"];
+          }, f.storeUrl()),
+        )
+        .toBe(true);
+      const turn = {
+        id: sameTurn ? "old-interrupted" : "goal-continuation",
+        status: "inProgress",
+        startedAt: Math.floor(Date.now() / 1000),
+        items: [],
+        durationMs: null,
+        error: null,
+      };
+      Object.assign(f.fixture.threads[0], {
+        status: { type: "active", activeFlags: [] },
+        turns: [turn],
+      });
+      // Keep the body snapshot stale: only the metadata-only latest-turn read can
+      // repair the missed start. A fallback full-history hydration must not mask it.
+      const stale = {
+        ...turn,
+        id: "old-interrupted",
+        status: "interrupted",
+        startedAt: 1,
+      };
+      await page.route(
+        "**/api/session/api/codex/thread/turns/list*",
+        (route) => {
+          const body = route.request().postDataJSON();
+          return route.fulfill({
+            json: {
+              data:
+                body?.limit === 1 && body?.itemsView === "notLoaded"
+                  ? [{ ...turn, items: undefined }]
+                  : [stale],
+              nextCursor: null,
+            },
+          });
+        },
+      );
+      await page.route("**/api/session/api/codex/thread/read*", (route) =>
+        route.fulfill({
+          json: { thread: { ...f.fixture.threads[0], turns: [stale] } },
+        }),
+      );
+      await page.route("**/api/session/api/codex/thread/metadata*", (route) =>
+        route.fulfill({
+          json: {
+            thread: {
+              ...f.fixture.threads[0],
+              turns: undefined,
+              historyMode: "paginated",
+            },
+          },
+        }),
+      );
+      await page.route("**/api/session/codex/activity", (route) =>
+        route.fulfill({
+          json: {
+            threadId: "ux-0",
+            status: { type: "active", activeFlags: [] },
+            turn: { ...turn, items: undefined },
+          },
+        }),
+      );
+      // The gateway knows the actual new turn; the browser missed turn/started.
+      await f.queue.observe({
+        method: "turn/started",
+        params: { threadId: "ux-0", turn },
+      });
+      await page.evaluate(async (url) => {
+        const { useCodexStore } = await import(url);
+        useCodexStore.setState((s) => ({
+          threadStatusMap: {
+            ...s.threadStatusMap,
+            "ux-0": { type: "active", activeFlags: [] },
+          },
+          turnTimingMap: {
+            ...s.turnTimingMap,
+            "ux-0": {
+              turnId: "old-interrupted",
+              status: "interrupted",
+              startedAtMs: 1,
+              durationMs: 1,
+            },
+          },
+          currentTurnId: null,
+        }));
+      }, f.storeUrl());
+      const requests: any[] = [];
+      page.on("request", (req) => {
+        if (new URL(req.url()).pathname.endsWith("/codex/activity"))
+          requests.push({
+            query: new URL(req.url()).search,
+            body: req.postDataJSON(),
+          });
+      });
+      const editor = page
+        .locator(".session-agent-view [contenteditable=true]")
+        .first();
+      await editor.fill("追加精度要求，先保留为排队消息");
+      await editor.press("Enter");
+      await expect(page.locator(".session-followup-queue li")).toHaveCount(1);
+      expect(f.calls).toEqual([]);
+      const tab = page.locator('.session-tabs [role="tab"]').first();
+      await expect(tab.getByLabel("运行中")).toBeVisible({ timeout: 12000 });
+      await expect(
+        page.getByRole("button", { name: "立即引导", exact: true }),
+      ).toBeVisible();
+      expect(requests.some((r) => r.body.threadId === "ux-0")).toBe(true);
+      expect(f.calls).toEqual([]);
+      await page.screenshot({ path: info.outputPath("recovered-running.png") });
+      await page.getByRole("button", { name: "立即引导", exact: true }).click();
+      await expect.poll(() => f.calls.length).toBe(1);
+      expect(f.calls[0].method).toBe("turn/steer");
+      expect(f.calls[0].params.expectedTurnId).toBe(turn.id);
+      expect(f.calls[0].params.input[0].text).toBe(
+        "追加精度要求，先保留为排队消息",
+      );
       expect(f.errors).toEqual([]);
     } finally {
       await f.close();
