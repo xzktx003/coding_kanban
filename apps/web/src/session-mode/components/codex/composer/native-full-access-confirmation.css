@@ -207,3 +207,19 @@
 .session-mode .session-native-full-access-overlay {
   background: color-mix(in oklab, var(--vscode-editor-background, var(--background)) 80%, transparent);
 }
+
+/* Pti's `continueWithRestrictedPermissions`: primary, and disabled when no
+   more restricted permission mode is available. */
+.session-mode .session-native-full-access-confirmation .full-access-continue {
+  color: var(--primary-foreground, var(--background));
+  background: var(--primary, var(--codex-text, var(--foreground)));
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-continue:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--primary, var(--foreground)) 85%, transparent);
+}
+
+.session-mode .session-native-full-access-confirmation .full-access-continue:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}

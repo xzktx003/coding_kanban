@@ -32,7 +32,7 @@ export function chatHistoryRequest(body: unknown) {
     (body.sortDirection !== undefined &&
       !["asc", "desc"].includes(String(body.sortDirection))) ||
     (body.itemsView !== undefined &&
-      !["full", "summary"].includes(String(body.itemsView)))
+      !["full", "summary", "notLoaded"].includes(String(body.itemsView)))
   )
     throw new HttpError(400, "CHAT_HISTORY_INVALID_REQUEST");
   return {

@@ -74,6 +74,9 @@ for (const dark of [false, true])
       test.skip(!reference, "Official read-only reference URL required");
       await mkdir(output, { recursive: true });
       const key = `${dark ? "dark" : "light"}-${coexist ? "coexist" : "base"}`;
+      const queueMessages = coexist
+        ? Array.from({ length: 12 }, (_, i) => `检查第 ${i + 1} 条排队消息`)
+        : messages;
       const errors: string[] = [];
       page.on("pageerror", (e) => errors.push(e.message));
       const fixture = await installSessionUxFixture(page);
@@ -93,7 +96,7 @@ for (const dark of [false, true])
           json: {
             revision: 1,
             paused: null,
-            items: messages.map((text, i) => ({
+            items: queueMessages.map((text, i) => ({
               id: `q${i}`,
               threadId: "ux-0",
               text,
@@ -108,6 +111,7 @@ for (const dark of [false, true])
         }),
       );
       await page.setViewportSize({ width: 1440, height: 1100 });
+      await page.emulateMedia({ reducedMotion: "reduce" });
       await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
       await page.locator(".session-native-composer").waitFor();
       const dependencies = await page.evaluate(() => ({
@@ -139,7 +143,10 @@ for (const dark of [false, true])
           "session-composer-compact.css",
         ])
           await import(`/src/session-mode/${file}`);
-        const { i18n } = await import("/src/session-mode/lib/i18n.ts");
+        const { i18n, initializeSessionI18n } = await import(
+          "/src/session-mode/lib/i18n.ts"
+        );
+        await initializeSessionI18n();
         await i18n.changeLanguage("zh");
         const { TooltipProvider } =
           await import("/src/session-mode/components/ui/tooltip.tsx");
@@ -228,6 +235,7 @@ for (const dark of [false, true])
       const native = await context.newPage();
       native.on("pageerror", (e) => errors.push(`native: ${e.message}`));
       await native.setViewportSize({ width: 1440, height: 1100 });
+      await native.emulateMedia({ reducedMotion: "reduce" });
       await native.goto(reference!);
       await native.waitForFunction(() => (window as any).nativeLoaded);
       await theme(native, dark);
@@ -290,7 +298,7 @@ for (const dark of [false, true])
             ),
           );
         },
-        { diff, messages, goal, coexist },
+        { diff, messages: queueMessages, goal, coexist },
       );
       await expect(native.locator("[data-composer-rail-item]")).toHaveCount(
         coexist ? 3 : 2,
@@ -341,12 +349,14 @@ for (const dark of [false, true])
           .locator("xpath=ancestor::*[@data-composer-rail-item][1]")
           .screenshot({
             path: resolve(output, `${key}-${width}-queue-local.png`),
+            animations: "allow",
           });
         await native
           .locator("[data-composer-rail-item]")
           .nth(1)
           .screenshot({
             path: resolve(output, `${key}-${width}-queue-native.png`),
+            animations: "allow",
           });
         const capture = (selector: string) => {
           const host = document.querySelector(selector)!;
@@ -375,6 +385,45 @@ for (const dark of [false, true])
           const items = Array.from(
             rail.querySelectorAll("[data-composer-rail-item]"),
           );
+          const queue =
+            host.querySelector(".session-followup-queue") ??
+            host.querySelector(".vertical-scroll-fade-mask");
+          const queueLayers = [];
+          for (
+            let element = queue as HTMLElement | null;
+            element && element !== host;
+            element = element.parentElement
+          ) {
+            const style = getComputedStyle(element);
+            queueLayers.push({
+              tag: element.tagName,
+              className: element.className,
+              opacity: style.opacity,
+              background: style.backgroundColor,
+              maskImage: style.maskImage,
+              filter: style.filter,
+              backdropFilter: style.backdropFilter,
+              animationName: style.animationName,
+            });
+          }
+          const queueContents = Array.from(queue?.querySelectorAll("*") ?? []).map(
+            (element) => {
+              const style = getComputedStyle(element);
+              return {
+                tag: element.tagName,
+                className: (element as HTMLElement).className,
+                opacity: style.opacity,
+                background: style.backgroundColor,
+                backgroundImage: style.backgroundImage,
+                maskImage: style.maskImage,
+                webkitMaskImage: style.getPropertyValue("-webkit-mask-image"),
+                webkitMask: style.getPropertyValue("-webkit-mask"),
+                filter: style.filter,
+                transform: style.transform,
+                animationName: style.animationName,
+              };
+            },
+          );
           return {
             dpr: devicePixelRatio,
             tokens: (window as any).railHostTokens,
@@ -398,6 +447,8 @@ for (const dark of [false, true])
               children: Array.from(el.children).map(metrics),
             })),
             queueRows: host.querySelectorAll(".session-queue-row").length,
+            queueLayers,
+            queueContents,
             html: rail.outerHTML,
             goal: host.querySelector(".session-thread-goal")
               ? metrics(host.querySelector(".session-thread-goal")!)
@@ -406,7 +457,126 @@ for (const dark of [false, true])
         };
         const actual = await page.evaluate(capture, ".session-native-composer");
         const expected = await native.evaluate(capture, "#root");
-        samples.push({ width, actual, expected });
+        const readQueueScroll = async (
+          target: Page,
+          root: string,
+          fadeProperty: string,
+        ) =>
+          target.evaluate(
+            ({ root, fadeProperty }) => {
+              const element = document.querySelector(root) as HTMLElement;
+              const style = getComputedStyle(element);
+              return {
+                tagName: element.tagName,
+                overflowY: style.overflowY,
+                scrollHeight: element.scrollHeight,
+                clientHeight: element.clientHeight,
+                hasOverflow: element.scrollHeight > element.clientHeight,
+                dataOverflowing: element.getAttribute("data-overflowing"),
+                maskImage: style.maskImage,
+                webkitMaskImage: style.getPropertyValue("-webkit-mask-image"),
+                animationName: style.animationName,
+                animationTimeline: style.animationTimeline,
+                topFade: style
+                  .getPropertyValue(
+                    fadeProperty === "--bottom-fade"
+                      ? "--top-fade"
+                      : "--session-queue-top-fade",
+                  )
+                  .trim(),
+                bottomFade: style.getPropertyValue(fadeProperty).trim(),
+              };
+            },
+            { root, fadeProperty },
+          );
+        const actualQueueScroll = await readQueueScroll(
+          page,
+          ".session-followup-queue .session-queue-list",
+          "--session-queue-bottom-fade",
+        );
+        const expectedQueueScroll = await readQueueScroll(
+          native,
+          ".vertical-scroll-fade-mask",
+          "--bottom-fade",
+        );
+        expect(actualQueueScroll.tagName).toBe(expectedQueueScroll.tagName);
+        expect(actualQueueScroll.hasOverflow).toBe(expectedQueueScroll.hasOverflow);
+        expect(actualQueueScroll.hasOverflow).toBe(coexist);
+        expect(actualQueueScroll.dataOverflowing).toBe(
+          coexist ? "true" : null,
+        );
+        expect(actualQueueScroll.maskImage).toBe(
+          coexist ? expectedQueueScroll.maskImage : "none",
+        );
+        if (coexist) {
+          expect(actualQueueScroll.topFade).toBe(expectedQueueScroll.topFade);
+          expect(actualQueueScroll.bottomFade).toBe(
+            expectedQueueScroll.bottomFade,
+          );
+        } else {
+          expect(actualQueueScroll.topFade).toBe("0px");
+          expect(actualQueueScroll.bottomFade).toBe("0px");
+        }
+        const setQueueScrollPosition = async (
+          target: Page,
+          root: string,
+          atBottom: boolean,
+        ) =>
+          target.evaluate(
+            async ({ root, atBottom }) => {
+              const element = document.querySelector(root) as HTMLElement;
+              element.scrollTop = atBottom
+                ? element.scrollHeight - element.clientHeight
+                : 0;
+              await new Promise<void>((resolve) =>
+                requestAnimationFrame(() => resolve()),
+              );
+              await new Promise<void>((resolve) =>
+                requestAnimationFrame(() => resolve()),
+              );
+            },
+            { root, atBottom },
+          );
+        if (coexist) {
+          for (const atBottom of [false, true]) {
+            await Promise.all([
+              setQueueScrollPosition(
+                page,
+                ".session-followup-queue .session-queue-list",
+                atBottom,
+              ),
+              setQueueScrollPosition(
+                native,
+                ".vertical-scroll-fade-mask",
+                atBottom,
+              ),
+            ]);
+            const actualOverflow = await readQueueScroll(
+              page,
+              ".session-followup-queue .session-queue-list",
+              "--session-queue-bottom-fade",
+            );
+            const expectedOverflow = await readQueueScroll(
+              native,
+              ".vertical-scroll-fade-mask",
+              "--bottom-fade",
+            );
+            expect(actualOverflow.hasOverflow).toBe(true);
+            expect(actualOverflow.dataOverflowing).toBe("true");
+            expect(actualOverflow.maskImage).toBe(expectedOverflow.maskImage);
+            expect(actualOverflow.topFade).toBe(expectedOverflow.topFade);
+            expect(actualOverflow.bottomFade).toBe(expectedOverflow.bottomFade);
+          }
+        }
+        samples.push({
+          width,
+          actual,
+          expected,
+          queueScroll: {
+            actual: actualQueueScroll,
+            expected: expectedQueueScroll,
+          },
+        });
       }
       await writeFile(
         resolve(output, `${key}.json`),
@@ -476,7 +646,7 @@ for (const dark of [false, true])
           expected.items[0].box.background,
         );
         const actualQueue = actual.items.find((item: any) =>
-          item.box.text.includes(messages[0]),
+          item.box.text.includes(queueMessages[0]),
         );
         expect(actualQueue.box.height).toBe(expected.items[1].box.height);
         expect(actualQueue.box.background).toBe(
@@ -484,10 +654,10 @@ for (const dark of [false, true])
         );
         expect(
           actualQueue.buttons
-            .filter((button: any) => !messages.includes(button.text))
+            .filter((button: any) => !queueMessages.includes(button.text))
             .map(painted),
         ).toEqual(expected.items[1].buttons.map(painted));
-        expect(actual.queueRows).toBe(messages.length);
+        expect(actual.queueRows).toBe(queueMessages.length);
         if (coexist) {
           expect(actual.items.at(-1).box.height).toBe(
             expected.items.at(-1).box.height,
@@ -540,11 +710,15 @@ for (const dark of [false, true])
         await expect(page.locator(".session-goal-dialog")).toBeVisible();
         await page.keyboard.press("Escape");
         await expect(editor).toHaveText("保留未发送草稿");
-        await local.getByRole("button", { name: "还有 1 条待发送" }).click();
+        await local
+          .getByRole("button", {
+            name: `还有 ${queueMessages.length - 1} 条待发送`,
+          })
+          .click();
         await expect(
           page
             .locator(".session-composer-sheet")
-            .getByText(messages[1], { exact: true }),
+            .getByText(queueMessages[1], { exact: true }),
         ).toBeVisible();
         await page.getByRole("button", { name: "关闭面板" }).click();
         await expect(editor).toHaveText("保留未发送草稿");

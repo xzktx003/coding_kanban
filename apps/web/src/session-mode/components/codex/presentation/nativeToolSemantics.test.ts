@@ -411,3 +411,73 @@ it("honors actual native dynamic registry presentation flags without accepting i
     }),
   ).toMatchObject({ summaryOnly: true });
 });
+/**
+ * Codex 26.51007.21434 `mcp-tool-call-approval-24a4df1ebe1a.js` exports the
+ * predicate
+ *
+ *   e => e.result?.type === `error` &&
+ *        e.result.error === `MCP tool call requires approval, but approval policy is never`
+ *
+ * and `agent-activity-item-c6d00fb68b13.js` uses it as the grouping decision:
+ *
+ *   case `mcp-tool-call`:
+ *     return $(mr(e), nn(e) || un({item:e, mcpServerStatuses:r})
+ *       ? `standalone` : `groupable`);
+ *
+ * So an MCP call the agent could not run because `approvals: never` blocks it
+ * is pulled out of the collapsed activity group and shown on its own row — the
+ * user has to see that the run stalled on a policy they can change, not find it
+ * folded into "used 3 tools".
+ *
+ * The message is real upstream text, not VSIX-only: `@openai/codex` 0.164.0's
+ * `codex-linux-x64` binary carries it verbatim next to `mcp_tool_call_approval`.
+ * Our runtime surfaces it as `item.error.message` (binding `McpToolCallError`
+ * is `{ message: string }`), where the extension reads `result.error`, so the
+ * predicate matches on our own shape.
+ */
+it("pulls an approval-blocked MCP call out of the activity group", () => {
+  const blocked = tool({
+    status: "failed",
+    error: {
+      message: "MCP tool call requires approval, but approval policy is never",
+    },
+  });
+  expect(nativeToolActivityMetadata(blocked).grouping).toBe("standalone");
+  // Every other MCP failure stays grouped: only the policy block is promoted.
+  expect(
+    nativeToolActivityMetadata(
+      tool({ status: "failed", error: { message: "connection refused" } }),
+    ).grouping,
+  ).toBe("groupable");
+  expect(nativeToolActivityMetadata(tool()).grouping).toBe("groupable");
+});
+/**
+ * Codex 26.51007.21434 picks a page-tool label from a three-state table, and
+ * the third state exists because the label is reused in two grammatical
+ * positions (`mcp-tool-activity-label-f3c34b9a3514.js`):
+ *
+ *   function ht({tool:e,toolArguments:t,completed:n,isLeadingSummaryPart:r=!0}){
+ *     … return i==null?null:n?r?i.completed:i.completedFollowing:i.active }
+ *
+ * `isLeadingSummaryPart` defaults to true: a leading part gets the capitalized
+ * standalone form ("Read artifact"), while a part following another activity in
+ * the same summary gets the lowercase continuation ("read artifact"). Only
+ * `pageToolActivity` carries `completedFollowing` — `mcpToolActivity` has just
+ * `active`/`completed`, so the distinction applies to the Pages tools alone.
+ *
+ * Six page tools are outside `nativePageCodexToolNames` and so resolve through
+ * the `pageToolActivity.*` key lookup rather than a registered descriptor;
+ * those are the ones that can lose the continuation form.
+ */
+it("uses the continuation form for a page tool that follows another activity", () => {
+  const artifact = tool({ server: "pages", tool: "read_artifact" });
+  expect(nativeMcpToolLabel(artifact, "en", true)).toBe("Read artifact");
+  expect(nativeMcpToolLabel(artifact, "en", true, false)).toBe("read artifact");
+  // Still the active form while running, in either position.
+  expect(nativeMcpToolLabel(artifact, "en", false, false)).toBe(
+    "Connecting artifact",
+  );
+  const space = tool({ server: "codex_apps", tool: "pages_get_space" });
+  expect(nativeMcpToolLabel(space, "en", true)).toBe("Read space");
+  expect(nativeMcpToolLabel(space, "en", true, false)).toBe("read space");
+});

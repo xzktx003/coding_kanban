@@ -1,5 +1,5 @@
 import type { SVGProps } from "react";
-/** Original activity header SVGs, VSIX 26.51002.51308 i_. */
+/** Original activity header SVGs, VSIX 26.51002.51308 (asset bytes re-verified unchanged in 26.51007.21434) i_. */
 export function NativePatchIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg

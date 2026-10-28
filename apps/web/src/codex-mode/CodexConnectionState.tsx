@@ -1,5 +1,6 @@
 import { LoaderCircle, CircleAlert, Check } from "lucide-react";
 import { useEffect, useState } from "react";
+import { VSCODE_HTTPS_CA_DOWNLOAD_PATH } from "../lib/vscode-service-worker";
 
 export function CodexConnectionState({
   available,
@@ -73,9 +74,31 @@ export function CodexConnectionState({
           </ol>
         )}
         {error && (
-          <button type="button" onClick={onRetry}>
-            重新检查连接
-          </button>
+          <div className="codex-connection-actions">
+            <button type="button" onClick={onRetry}>
+              重新检查连接
+            </button>
+            {certificate && (
+              <a
+                className="codex-certificate-download"
+                download="coding-kanban-dev-ca.crt"
+                href={VSCODE_HTTPS_CA_DOWNLOAD_PATH}
+              >
+                下载 CA 证书
+              </a>
+            )}
+          </div>
+        )}
+        {certificate && (
+          <ol className="codex-certificate-steps">
+            <li>下载 Coding Kanban 开发 CA 证书。</li>
+            <li>
+              在手机系统设置中安装并信任该证书（Android：设置 → 安全 →
+              加密与凭据 → 安装证书；iOS：设置 → 通用 → VPN 与设备管理 →
+              安装描述文件，再到“证书信任设置”中启用完全信任）。
+            </li>
+            <li>返回此处点击“重新检查连接”。</li>
+          </ol>
         )}
         {detail && (
           <details className="codex-connection-details">

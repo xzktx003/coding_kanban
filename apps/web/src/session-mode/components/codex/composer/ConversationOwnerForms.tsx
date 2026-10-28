@@ -22,6 +22,10 @@ import {
   type ConversationOwnerForm,
 } from "./conversationOwnerFormContext";
 import { useConversationFormDrafts } from "./conversationFormDrafts";
+import {
+  archiveUndoNotice,
+  captureArchivedThread,
+} from "./archiveThreadUndo";
 export function ConversationOwnerForms({
   form,
   onClose,
@@ -63,6 +67,10 @@ function OwnerFormContent({
             ? deleteThread(target.threadId)
             : archiveThread(target.threadId),
         () => {
+          // Snapshot before removal so an undo restores the same row in place.
+          const snapshot = remove
+            ? null
+            : captureArchivedThread(target.threadId);
           useAgentCenterStore
             .getState()
             .removeCard({ kind: "codex", id: target.threadId });
@@ -74,7 +82,14 @@ function OwnerFormContent({
             useCodexStore.getState().currentThreadId === target.threadId
           )
             void codexService.setCurrentThread(null);
-          toast.message(remove ? "任务已删除" : "已归档聊天");
+          // Deleting is permanent on the official side too, so only the archive
+          // notice carries an undo entry.
+          if (remove) toast.message("任务已删除");
+          else
+            toast.message(
+              "已归档聊天",
+              archiveUndoNotice(target.threadId, snapshot!),
+            );
           close();
         },
       )

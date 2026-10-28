@@ -1,9 +1,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "./styles/prism.css";
-@import "./styles/streaming.css";
 @import "./styles/git-diff.css";
 @import "./codex-presentation.css";
+@import "./claude-presentation.css";
 @import "katex/dist/katex.min.css";
 
 @source "../../node_modules/streamdown/dist/*.js";

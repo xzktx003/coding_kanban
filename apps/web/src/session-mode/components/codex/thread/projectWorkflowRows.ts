@@ -36,6 +36,13 @@ export function projectWorkflowRows(
   events: ServerNotification[],
 ) {
   const messages: WorkflowMessage[] = [];
+  /**
+   * Every retained row's turn, message rows included. The prompt rail marks a
+   * turn current while any of its rows is on screen, matching how the shipped
+   * webview observes `[data-turn-key]` containers rather than prompt bubbles,
+   * so a turn read through its command or file-change rows still counts.
+   */
+  const turnIdByRowId = new Map<string, string>();
   const turns = new Map<string, WorkflowTurn>();
   const completedTurns = new Set<string>();
   for (const event of events) {
@@ -59,6 +66,24 @@ export function projectWorkflowRows(
     } else if (!previous) turns.set(turnId, { id: turnId, completed: false });
   }
   for (const row of rows) {
+    // A grouped command row carries no event of its own, so its turn comes from
+    // the commands inside it. `deriveRenderItems` flushes the buffer on every
+    // `item/started` and on `turn/completed`, so a group cannot straddle turns
+    // in practice — but it is cheap to read that from the sources instead of
+    // trusting it, and a group that ever did straddle one is left unmapped
+    // rather than attributed to a turn it only partly belongs to.
+    if (row.item.kind === "cmdGroup") {
+      const owners = new Set(
+        row.item.actionSources.map(
+          (source) => `${source.threadId}\u0000${source.turnId}`,
+        ),
+      );
+      const [only] = [...owners];
+      if (owners.size !== 1 || !only) continue;
+      const [owner, turn] = only.split("\u0000");
+      if (owner === threadId && turn) turnIdByRowId.set(row.key, turn);
+      continue;
+    }
     if (row.item.kind !== "event") continue;
     const event = row.item.event;
     if (
@@ -69,6 +94,7 @@ export function projectWorkflowRows(
     )
       continue;
     const base = { rowId: row.key, turnId: event.params.turnId };
+    turnIdByRowId.set(row.key, event.params.turnId);
     if (event.method === "item/started" || event.method === "item/completed") {
       const item = event.params.item;
       const completed = event.method === "item/completed";
@@ -190,6 +216,7 @@ export function projectWorkflowRows(
     latestTurnId,
     latestAssistantRowId,
     messages,
+    turnIdByRowId,
     turns: [...turns.values()],
     lastUserRowId: [...messages]
       .reverse()

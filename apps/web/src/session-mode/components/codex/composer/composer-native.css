@@ -1,4 +1,5 @@
-/* Main enabled ComposerLayout (15oep), VSIX 26.51002.51308. Mobile keeps the
+/* Main enabled ComposerLayout (15oep), VSIX 26.51002.51308 (symbol re-verified
+   present in 26.51007.21434). Mobile keeps the
    reviewed detached 124px input and explicit 44px touch targets. */
 .session-mode .session-native-submit-button {
   position: relative;
@@ -776,7 +777,9 @@
   margin-inline: auto;
   border-radius: 7px;
 }
-.session-mode .session-native-model-reset:not([data-disabled]):is(:hover, :focus) > span {
+.session-mode
+  .session-native-model-reset:not([data-disabled]):is(:hover, :focus)
+  > span {
   background: color-mix(in srgb, var(--codex-text) 7%, transparent);
 }
 .session-mode .session-native-service-tier {
@@ -1218,7 +1221,9 @@
 .session-mode .session-native-model-menu .session-native-model-default-title {
   font: inherit;
 }
-.session-mode .session-native-model-menu .session-native-model-default-description {
+.session-mode
+  .session-native-model-menu
+  .session-native-model-default-description {
   color: var(--codex-muted);
   font-size: 11px;
   line-height: 1.4;

@@ -1,6 +1,7 @@
 import type { MermaidOptions } from "streamdown";
 
-// Original VSIX 26.51002.51308 image-c74e0d7f2cfe.js V()/be()/je(),
+// Original VSIX 26.51002.51308 image-c74e0d7f2cfe.js V()/be()/je() (the image
+// module is rehashed per build; values re-verified against 26.51007.21434),
 // resolved with visualization-theme-bedd32a367a0.js under the two approved
 // Codex host palettes. This is Markdown's local SVG configuration; the shared
 // Streamdown plugin and Claude renderer keep their own configuration.

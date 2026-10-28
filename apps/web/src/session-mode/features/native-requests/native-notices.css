@@ -1,4 +1,5 @@
-/* Enabled 26.51002.51308 mOi/mG default verticalIcon and Lw stream error. */
+/* Enabled 26.51002.51308 mOi/mG default verticalIcon and Lw stream error
+   (symbols re-verified present in 26.51007.21434). */
 .session-mode :is(.codex-native-error-card, .codex-native-retry) {
   --codex-notice-text: var(--vscode-foreground, #3b3b3b);
   --codex-notice-muted: var(--vscode-descriptionForeground, #717171);

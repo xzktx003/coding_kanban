@@ -10,18 +10,12 @@ import {
   DropdownMenuTrigger,
 } from "@session/components/ui/dropdown-menu";
 import { useNativeFullAccessConfirmation } from "./NativeFullAccessConfirmation";
-import { useComposerToolbarNarrow } from "./ComposerToolbarContext";
+import { ComposerFooterLabel } from "./ComposerToolbarContext";
 import { NativeComposerIcon } from "./NativeComposerIcon";
 import { ComposerTooltip } from "./ComposerTooltip";
 
 /** Main PermissionsModeDropdown semantics; auto review needs an authoritative native capability. */
-export function AccessModePopover({
-  compact = false,
-  threadId,
-}: {
-  compact?: boolean;
-  threadId: string | null;
-}) {
+export function AccessModePopover({ threadId }: { threadId: string | null }) {
   const { t } = useTranslation("composer");
   const {
     sandbox,
@@ -35,29 +29,33 @@ export function AccessModePopover({
     setCollaborationMode,
     setApprovalsReviewer,
   } = useThreadModelSettings(threadId);
-  const isNarrow = useComposerToolbarNarrow();
-  const { ask, confirmation, open: fullAccessOpen } = useNativeFullAccessConfirmation();
+  const {
+    ask,
+    confirmation,
+    open: fullAccessOpen,
+  } = useNativeFullAccessConfirmation();
   const [menuOpen, setMenuOpen] = useState(false);
   const full = permissionsKnown && sandbox === "danger-full-access";
   const auto = permissionsKnown && approvalsReviewer !== "user";
   const readOnly = permissionsKnown && sandbox === "read-only";
   const custom =
-    permissionsKnown && (sandboxPolicy?.type === "externalSandbox" ||
-    typeof approvalPolicy === "object");
+    permissionsKnown &&
+    (sandboxPolicy?.type === "externalSandbox" ||
+      typeof approvalPolicy === "object");
   const label =
     collaborationMode === "plan"
       ? t("plan")
       : !permissionsKnown
         ? "权限待确认"
         : auto
-        ? "帮我批准"
-        : full
-          ? "完全访问"
-          : readOnly
-            ? "只读"
-            : custom
-              ? "自定义"
-              : "请求批准";
+          ? "帮我批准"
+          : full
+            ? "完全访问"
+            : readOnly
+              ? "只读"
+              : custom
+                ? "自定义"
+                : "请求批准";
   const finish = () => {
     setCollaborationMode("default");
     // Keep the menu primitive's own trigger restoration. A side conversation
@@ -108,7 +106,10 @@ export function AccessModePopover({
   return (
     <>
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-        <ComposerTooltip label="更改权限" popupOpen={menuOpen || fullAccessOpen}>
+        <ComposerTooltip
+          label="更改权限"
+          popupOpen={menuOpen || fullAccessOpen}
+        >
           <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
@@ -126,9 +127,17 @@ export function AccessModePopover({
                   }
                 />
               )}
-              {(compact || !isNarrow) && (
-                <span className="text-xs">{label}</span>
-              )}
+              {/*
+               * Official gives the permissions trigger `collapse: "xs"` on its
+               * unflagged path (`permissions-mode-dropdown-6fd05cb80d75.js`
+               * @25656, the `an` trigger that `tn` renders), so
+               * the text goes only once the footer is <=300px. The icon and
+               * `aria-label` stay at every width: this menu can grant full disk
+               * and network access, so it must never become an unlabelled button.
+               */}
+              <ComposerFooterLabel collapse="xs" className="text-xs">
+                {label}
+              </ComposerFooterLabel>
               <NativeComposerIcon name="chevron" />
             </Button>
           </DropdownMenuTrigger>

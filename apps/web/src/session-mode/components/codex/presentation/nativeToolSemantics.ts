@@ -209,6 +209,23 @@ export function nativeMcpSourcesSummaryLabel(
     language,
   );
 }
+/**
+ * The original's `mcp-tool-call-approval` module exports exactly this check,
+ * matching `result.error` against the message verbatim. Our runtime surfaces
+ * the same upstream text as `item.error.message` (`McpToolCallError` is
+ * `{ message: string }`), so the comparison moves to that field; the string is
+ * real upstream output, carried verbatim by `@openai/codex` 0.164.0's
+ * `codex-linux-x64` binary beside `mcp_tool_call_approval`.
+ */
+const MCP_APPROVAL_POLICY_NEVER =
+  "MCP tool call requires approval, but approval policy is never";
+function nativeMcpApprovalBlocked(item: ToolRecord): boolean {
+  return (
+    text(record(item.error).message).trim() === MCP_APPROVAL_POLICY_NEVER ||
+    text(record(item.result).error).trim() === MCP_APPROVAL_POLICY_NEVER
+  );
+}
+
 /** The original excludes disabled MCP Apps from standalone widget rendering. */
 export function nativeToolActivityMetadata(value: unknown): {
   grouping: "hidden" | "standalone" | "groupable";
@@ -231,7 +248,10 @@ export function nativeToolActivityMetadata(value: unknown): {
       };
     case "mcpToolCall":
       return {
-        grouping: "groupable",
+        // An MCP call the agent could not run because `approvals: never` blocks
+        // it leaves the group: the user has to see the run stalled on a policy
+        // they can change, not find it folded into "used 3 tools".
+        grouping: nativeMcpApprovalBlocked(item) ? "standalone" : "groupable",
         summaryKey: `${item.server}:${item.tool}`,
       };
     case "dynamicToolCall":
@@ -627,6 +647,13 @@ export function nativeMcpToolLabel(
     .toLowerCase()
     .replace(/[_-]mcp[_-]server$/i, "");
   const state = completed ? "completed" : "active";
+  /**
+   * Native `ht` reads `completed ? (leading ? completed : completedFollowing)
+   * : active`. Only the Pages table carries that third state — `mcpToolActivity`
+   * is `active`/`completed` alone — so the continuation form is selected on the
+   * page key, and the shared `state` above stays as the MCP table defines it.
+   */
+  const pageState = completed && !leadingSummary ? "completedFollowing" : state;
   const registered = nativeMcpActivityDescriptor(
     {
       id: text(app.connectorId) || `connector_${connector}`,
@@ -660,7 +687,7 @@ export function nativeMcpToolLabel(
     item.server === "pages" ||
     key.startsWith("pages_")
       ? descriptor(
-          `localConversation.pageToolActivity.${key.replace(/^pages_/, "")}.${state}`,
+          `localConversation.pageToolActivity.${key.replace(/^pages_/, "")}.${pageState}`,
           language,
         )
       : undefined);

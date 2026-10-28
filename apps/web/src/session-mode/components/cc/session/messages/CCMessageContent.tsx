@@ -9,9 +9,16 @@ interface Props {
   index?: number;
   isToolBlock: (b: { type: string }) => boolean;
   inlineErrors?: Record<string, ToolResultBlock>;
+  /** Every tool result for this message, keyed by tool_use_id. */
+  toolResults?: Record<string, ToolResultBlock>;
 }
 
-export function CCMessageContent({ msg, isToolBlock, inlineErrors }: Props) {
+export function CCMessageContent({
+  msg,
+  isToolBlock,
+  inlineErrors,
+  toolResults,
+}: Props) {
   const { messages } = useCCStore();
 
   const resolveToolName = (toolUseId: string): string | undefined => {
@@ -31,7 +38,12 @@ export function CCMessageContent({ msg, isToolBlock, inlineErrors }: Props) {
   // inlineErrors !== undefined means the next user message with tool_results has arrived.
   const isCompleted = inlineErrors !== undefined;
 
-  const renderItems = buildRenderItems(msg.message.content, isToolBlock, inlineErrors);
+  const renderItems = buildRenderItems(
+    msg.message.content,
+    isToolBlock,
+    inlineErrors,
+    toolResults,
+  );
 
   return (
     <div className="flex flex-col">
@@ -54,6 +66,11 @@ export function CCMessageContent({ msg, isToolBlock, inlineErrors }: Props) {
               block={item.block}
               index={item.blockIndex}
               inlineError={item.inlineError}
+              result={
+                item.block.type === 'tool_use'
+                  ? (toolResults?.[item.block.id] ?? null)
+                  : null
+              }
               toolName={
                 item.block.type === 'tool_use'
                   ? item.block.name

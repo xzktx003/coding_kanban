@@ -100,7 +100,7 @@ async function setup(page: Page, kind: "codex" | "cc" = "codex") {
   const input = page.locator(
     kind === "codex"
       ? ".session-agent-view [contenteditable=true]"
-      : ".session-agent-view textarea:visible",
+      : ".session-agent-view .claude-message-input:visible",
   );
   await expect(input).toBeVisible();
   return { fixture, input };
@@ -239,7 +239,7 @@ for (const kind of ["codex", "cc"] as const)
     await input.fill("B 的独立草稿");
     await release();
     if (kind === "codex") await expect(input).toHaveText("B 的独立草稿");
-    else await expect(input).toHaveValue("B 的独立草稿");
+    else await expect(input).toHaveText("B 的独立草稿");
     await switchTab(page, kind, "ux-0");
     await expectNoInputFocus(page);
     await expect(attachments).toHaveCount(2);

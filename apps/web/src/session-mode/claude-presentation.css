@@ -1,0 +1,582 @@
+/**
+ * Claude renderer tokens, aligned with the official Claude Code VS Code
+ * extension 2.1.311 (webview/index.css references 258 `--vscode-*` vars).
+ *
+ * Mirrors the pattern established by codex-presentation.css: follow the host
+ * variable when one exists, fall back to our own value in the browser. The
+ * `--claude-*` namespace is deliberately parallel to `--codex-*` and must not
+ * reference or override it — each agent aligns to its own plugin.
+ *
+ * Reference: docs/designs/claude-render-alignment/theme-token-mapping-20261027.md
+ */
+
+.session-mode :is(.claude-presentation, .claude-approval, .claude-composer) {
+  /* Surfaces */
+  --claude-surface: var(--vscode-editor-background, #fff);
+  --claude-secondary-surface: var(--vscode-sideBar-background, #f5f5f3);
+  --claude-code-bg: var(--vscode-textCodeBlock-background, #f3f3f1);
+  --claude-hover-bg: var(--vscode-editorHoverWidget-background, #fff);
+  --claude-widget-bg: var(--vscode-editorWidget-background, #f8f8f6);
+
+  /* Text */
+  --claude-text: var(--vscode-foreground, #3b3b3b);
+  --claude-secondary-text: var(--vscode-descriptionForeground, #6b6b6b);
+  --claude-disabled: var(--vscode-disabledForeground, #a0a0a0);
+  --claude-error: var(--vscode-errorForeground, #c74e39);
+  --claude-ghost: var(--vscode-editorGhostText-foreground, #a8a8a8);
+  --claude-hover-text: var(--vscode-editorHoverWidget-foreground, #3b3b3b);
+  --claude-line-number: var(--vscode-editorLineNumber-foreground, #9a9a9a);
+
+  /* Links */
+  --claude-link: var(--vscode-textLink-foreground, #2f6fd0);
+  --claude-link-active: var(--vscode-textLink-activeForeground, #1f58ad);
+  --claude-code-link: var(--vscode-editorLink-activeForeground, #1f58ad);
+
+  /* Borders and focus */
+  --claude-border: var(--vscode-widget-border, #e0e0dd);
+  --claude-hover-border: var(--vscode-editorHoverWidget-border, #d4d4d1);
+  --claude-focus: var(--vscode-focusBorder, #2f6fd0);
+  --claude-widget-shadow: var(--vscode-widget-shadow, #0000001a);
+  --claude-scroll-shadow: var(--vscode-scrollbar-shadow, #0000001a);
+
+  /* Buttons */
+  --claude-button-bg: var(--vscode-button-background, #3b3b3b);
+  --claude-button-text: var(--vscode-button-foreground, #fff);
+  --claude-button-hover-bg: var(--vscode-button-hoverBackground, #4a4a4a);
+  --claude-button-border: var(--vscode-button-border, transparent);
+  --claude-toolbar-hover: var(--vscode-toolbar-hoverBackground, #0000000d);
+
+  /*
+   * Typography. The official bundle references --vscode-chat-font-size 63
+   * times, so the whole transcript's rhythm hangs off it; the fallback is
+   * asserted in tests to stop spacing from drifting in the browser.
+   */
+  --claude-chat-font: var(
+    --vscode-chat-font-family,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    system-ui,
+    sans-serif
+  );
+  --claude-chat-size: var(--vscode-chat-font-size, 13px);
+  --claude-code-font: var(
+    --vscode-editor-font-family,
+    ui-monospace,
+    SFMono-Regular,
+    "SF Mono",
+    Menlo,
+    Consolas,
+    monospace
+  );
+
+  /* Diff: line / text / gutter are three distinct semantics, never merged. */
+  --claude-diff-border: var(--vscode-diffEditor-border, #e0e0dd);
+  --claude-diff-inserted-line: var(
+    --vscode-diffEditor-insertedLineBackground,
+    #e6ffec
+  );
+  --claude-diff-removed-line: var(
+    --vscode-diffEditor-removedLineBackground,
+    #ffebe9
+  );
+  --claude-diff-inserted-text: var(
+    --vscode-diffEditor-insertedTextBackground,
+    #abf2bc66
+  );
+  --claude-diff-removed-text: var(
+    --vscode-diffEditor-removedTextBackground,
+    #ff818266
+  );
+  --claude-diff-inserted-gutter: var(
+    --vscode-diffEditorGutter-insertedLineBackground,
+    #ccffd8
+  );
+  --claude-diff-removed-gutter: var(
+    --vscode-diffEditorGutter-removedLineBackground,
+    #ffd7d5
+  );
+  --claude-diff-moved-border: var(--vscode-diffEditor-move-border, #8b8b8b55);
+  --claude-diff-unchanged-bg: var(
+    --vscode-diffEditor-unchangedRegionBackground,
+    #f6f6f4
+  );
+  --claude-diff-unchanged-text: var(
+    --vscode-diffEditor-unchangedRegionForeground,
+    #6b6b6b
+  );
+  --claude-diff-diagonal-fill: var(--vscode-diffEditor-diagonalFill, #e0e0dd80);
+
+  /* ANSI palette for Bash output rendered as static HTML, not an xterm. */
+  --claude-ansi-black: var(--vscode-terminal-ansiBlack, #3b3b3b);
+  --claude-ansi-red: var(--vscode-terminal-ansiRed, #cd3131);
+  --claude-ansi-green: var(--vscode-terminal-ansiGreen, #107c10);
+  --claude-ansi-yellow: var(--vscode-terminal-ansiYellow, #949800);
+  --claude-ansi-blue: var(--vscode-terminal-ansiBlue, #0451a5);
+  --claude-ansi-magenta: var(--vscode-terminal-ansiMagenta, #bc05bc);
+  --claude-ansi-cyan: var(--vscode-terminal-ansiCyan, #0598bc);
+  --claude-ansi-white: var(--vscode-terminal-ansiWhite, #d4d4d4);
+  --claude-ansi-bright-black: var(--vscode-terminal-ansiBrightBlack, #666);
+
+  /* Timeline dots (index.css literals). */
+  --claude-dot-success: #74c991;
+  --claude-dot-failure: #c74e39;
+  --claude-dot-warning: #e1c08d;
+}
+
+.session-mode.dark
+  :is(.claude-presentation, .claude-approval, .claude-composer),
+.session-mode[data-theme="dark"]
+  :is(.claude-presentation, .claude-approval, .claude-composer) {
+  --claude-surface: var(--vscode-editor-background, #20211d);
+  --claude-secondary-surface: var(--vscode-sideBar-background, #282a23);
+  --claude-code-bg: var(--vscode-textCodeBlock-background, #2b2d26);
+  --claude-hover-bg: var(--vscode-editorHoverWidget-background, #2b2d26);
+  --claude-widget-bg: var(--vscode-editorWidget-background, #282a23);
+
+  --claude-text: var(--vscode-foreground, #ccc);
+  --claude-secondary-text: var(--vscode-descriptionForeground, #9d9d96);
+  --claude-disabled: var(--vscode-disabledForeground, #6b6b66);
+  --claude-error: var(--vscode-errorForeground, #f48771);
+  --claude-ghost: var(--vscode-editorGhostText-foreground, #6b6b66);
+  --claude-hover-text: var(--vscode-editorHoverWidget-foreground, #ccc);
+  --claude-line-number: var(--vscode-editorLineNumber-foreground, #6b6b66);
+
+  --claude-link: var(--vscode-textLink-foreground, #6cb6ff);
+  --claude-link-active: var(--vscode-textLink-activeForeground, #8cc8ff);
+  --claude-code-link: var(--vscode-editorLink-activeForeground, #8cc8ff);
+
+  --claude-border: var(--vscode-widget-border, #42443a);
+  --claude-hover-border: var(--vscode-editorHoverWidget-border, #42443a);
+  --claude-focus: var(--vscode-focusBorder, #6cb6ff);
+  --claude-widget-shadow: var(--vscode-widget-shadow, #00000066);
+  --claude-scroll-shadow: var(--vscode-scrollbar-shadow, #00000066);
+
+  --claude-button-bg: var(--vscode-button-background, #ededeb);
+  --claude-button-text: var(--vscode-button-foreground, #20211d);
+  --claude-button-hover-bg: var(--vscode-button-hoverBackground, #d8d8d4);
+  --claude-button-border: var(--vscode-button-border, transparent);
+  --claude-toolbar-hover: var(--vscode-toolbar-hoverBackground, #ffffff14);
+
+  --claude-diff-border: var(--vscode-diffEditor-border, #42443a);
+  --claude-diff-inserted-line: var(
+    --vscode-diffEditor-insertedLineBackground,
+    #2ea04326
+  );
+  --claude-diff-removed-line: var(
+    --vscode-diffEditor-removedLineBackground,
+    #f8514926
+  );
+  --claude-diff-inserted-text: var(
+    --vscode-diffEditor-insertedTextBackground,
+    #2ea04340
+  );
+  --claude-diff-removed-text: var(
+    --vscode-diffEditor-removedTextBackground,
+    #f8514940
+  );
+  --claude-diff-inserted-gutter: var(
+    --vscode-diffEditorGutter-insertedLineBackground,
+    #2ea04333
+  );
+  --claude-diff-removed-gutter: var(
+    --vscode-diffEditorGutter-removedLineBackground,
+    #f8514933
+  );
+  --claude-diff-moved-border: var(--vscode-diffEditor-move-border, #8b8b8b55);
+  --claude-diff-unchanged-bg: var(
+    --vscode-diffEditor-unchangedRegionBackground,
+    #26271f
+  );
+  --claude-diff-unchanged-text: var(
+    --vscode-diffEditor-unchangedRegionForeground,
+    #9d9d96
+  );
+  --claude-diff-diagonal-fill: var(--vscode-diffEditor-diagonalFill, #42443a80);
+
+  --claude-ansi-black: var(--vscode-terminal-ansiBlack, #20211d);
+  --claude-ansi-red: var(--vscode-terminal-ansiRed, #f48771);
+  --claude-ansi-green: var(--vscode-terminal-ansiGreen, #89d185);
+  --claude-ansi-yellow: var(--vscode-terminal-ansiYellow, #e1c08d);
+  --claude-ansi-blue: var(--vscode-terminal-ansiBlue, #6cb6ff);
+  --claude-ansi-magenta: var(--vscode-terminal-ansiMagenta, #d6a0d6);
+  --claude-ansi-cyan: var(--vscode-terminal-ansiCyan, #76d4e8);
+  --claude-ansi-white: var(--vscode-terminal-ansiWhite, #e5e5e5);
+  --claude-ansi-bright-black: var(--vscode-terminal-ansiBrightBlack, #8b8b85);
+}
+
+/* ------------------------------------------------------------------ cards */
+
+.session-mode .claude-presentation {
+  font-family: var(--claude-chat-font);
+  font-size: var(--claude-chat-size);
+  color: var(--claude-text);
+}
+
+.session-mode .claude-tool-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-mode .claude-tool-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 0;
+  min-width: 0;
+}
+
+.session-mode .claude-tool-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.session-mode .claude-tool-name-text {
+  color: var(--claude-text);
+  font-weight: 500;
+}
+
+.session-mode .claude-tool-name-text-secondary {
+  color: var(--claude-secondary-text);
+}
+
+.session-mode .claude-tool-name-text-secondary a,
+.session-mode .claude-tool-name-text-secondary a:visited {
+  color: var(--claude-link);
+  text-decoration: none;
+}
+
+.session-mode .claude-tool-name-text-secondary a:hover {
+  color: var(--claude-link-active);
+  text-decoration: underline;
+}
+
+/* Bash uses the plaintext variant for its description. */
+.session-mode .claude-tool-name-text-secondary-plaintext {
+  color: var(--claude-secondary-text);
+  white-space: pre-wrap;
+}
+
+.session-mode .claude-tool-body {
+  margin-top: 2px;
+  min-width: 0;
+}
+
+.session-mode .claude-tool-body-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 8px;
+  row-gap: 2px;
+  align-items: start;
+}
+
+.session-mode .claude-tool-body-row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.session-mode .claude-tool-body-row-label {
+  color: var(--claude-secondary-text);
+  font-family: var(--claude-code-font);
+  font-size: 0.85em;
+  user-select: none;
+}
+
+.session-mode .claude-tool-body-row-content {
+  min-width: 0;
+  max-height: 200px;
+  overflow: hidden;
+  background: var(--claude-code-bg);
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+
+.session-mode .claude-tool-body-row-content:focus-visible {
+  outline: 1px solid var(--claude-focus);
+  outline-offset: 1px;
+}
+
+.session-mode .claude-tool-body-row-content-unclipped {
+  max-height: none;
+  overflow: visible;
+}
+
+.session-mode .claude-tool-body-row-content pre {
+  margin: 0;
+  font-family: var(--claude-code-font);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.session-mode .claude-tool-body-plain-text {
+  color: var(--claude-secondary-text);
+  margin-top: 2px;
+}
+
+.session-mode .claude-tab-link {
+  color: var(--claude-link);
+  margin-left: 4px;
+  text-decoration: none;
+}
+
+/* --------------------------------------------------------- secondary line */
+
+.session-mode .claude-secondary-line {
+  color: var(--claude-secondary-text);
+  display: flex;
+  min-width: 0;
+}
+
+.session-mode .claude-secondary-line[role="button"] {
+  cursor: pointer;
+}
+
+.session-mode .claude-secondary-line[role="button"]:hover {
+  color: var(--claude-text);
+}
+
+.session-mode .claude-secondary-line-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------ todos */
+
+.session-mode .claude-todo-list-container {
+  margin-top: 2px;
+}
+
+.session-mode .claude-todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.session-mode .claude-todo-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.session-mode .claude-todo-item input[type="checkbox"] {
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--claude-dot-success);
+}
+
+.session-mode .claude-todo-completed .claude-todo-content {
+  color: var(--claude-secondary-text);
+  text-decoration: line-through;
+}
+
+.session-mode .claude-todo-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* --------------------------------------------------------------- thinking */
+
+.session-mode .claude-thinking {
+  min-width: 0;
+}
+
+.session-mode .claude-thinking-summary {
+  color: var(--claude-secondary-text);
+  font-style: italic;
+  opacity: 0.8;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  list-style: none;
+}
+
+.session-mode .claude-thinking-summary::-webkit-details-marker {
+  display: none;
+}
+
+.session-mode .claude-thinking[open] .claude-thinking-summary,
+.session-mode .claude-thinking-summary:hover {
+  opacity: 1;
+}
+
+/* Nothing to expand: the line must not look or behave clickable. */
+.session-mode .claude-thinking-static {
+  cursor: default;
+}
+
+.session-mode .claude-thinking-static:hover {
+  opacity: 0.8;
+}
+
+.session-mode .claude-thinking-content {
+  color: var(--claude-secondary-text);
+  margin-top: 4px;
+  min-width: 0;
+}
+
+.session-mode .claude-thinking-token-count,
+.session-mode .claude-thinking-redacted-note {
+  color: var(--claude-disabled);
+}
+
+.session-mode .claude-thinking-toggle {
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.session-mode .claude-thinking-toggle-open {
+  transform: rotate(90deg);
+}
+
+.session-mode .claude-narration-summary {
+  color: var(--claude-secondary-text);
+  min-width: 0;
+}
+
+.session-mode .claude-narration-hint {
+  color: var(--claude-disabled);
+}
+
+/* -------------------------------------------------------- timeline + spinner */
+
+.session-mode .claude-dot-success {
+  --claude-dot: var(--claude-dot-success);
+}
+.session-mode .claude-dot-failure {
+  --claude-dot: var(--claude-dot-failure);
+}
+.session-mode .claude-dot-warning {
+  --claude-dot: var(--claude-dot-warning);
+}
+.session-mode .claude-dot-progress {
+  --claude-dot: var(--claude-dot-success);
+  animation: claude-dot-blink 1s steps(2, start) infinite;
+}
+
+@keyframes claude-dot-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-mode .claude-dot-progress {
+    animation: none;
+  }
+  .session-mode .claude-thinking-toggle {
+    transition: none;
+  }
+}
+
+.session-mode .claude-spinner-default {
+  color: var(--claude-secondary-text);
+}
+.session-mode .claude-spinner-accent,
+.session-mode .claude-spinner-accept {
+  color: var(--claude-text);
+}
+.session-mode .claude-spinner-plan {
+  color: var(--claude-focus);
+}
+.session-mode .claude-spinner-danger {
+  color: var(--claude-error);
+}
+
+/* --------------------------------------------------------------- composer */
+
+/*
+ * The two-layer input. The real contenteditable paints its text transparent
+ * and keeps only the caret; the mirror sitting exactly on top renders the
+ * highlighted copy. Both layers must share identical box metrics or the caret
+ * drifts away from the glyphs the user sees.
+ */
+.session-mode .claude-message-input-container {
+  position: relative;
+  display: flex;
+  min-width: 0;
+}
+
+.session-mode .claude-message-input,
+.session-mode .claude-mention-mirror {
+  /* Shared metrics — keep these two blocks in lockstep. */
+  padding: 10px 36px 10px 14px;
+  font-family: var(--claude-chat-font);
+  font-size: var(--claude-chat-size);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-height: 60px;
+  max-height: 192px;
+}
+
+.session-mode .claude-message-input {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  outline: none;
+  background: transparent;
+  /* Text is painted by the mirror; only the caret shows through here. */
+  color: #0000;
+  caret-color: var(--claude-text);
+}
+
+.session-mode .claude-message-input:empty:before {
+  content: attr(data-placeholder);
+  color: var(--claude-disabled);
+  pointer-events: none;
+}
+
+.session-mode .claude-mention-mirror {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  color: var(--claude-text);
+}
+
+.session-mode .claude-mention-chip {
+  display: inline;
+  background-color: var(--claude-code-bg);
+  border-radius: 3px;
+}
+
+/* The focus ring marks the risky permission modes, as the official one does. */
+.session-mode .claude-composer:focus-within {
+  outline: 1px solid var(--claude-focus);
+  outline-offset: -1px;
+}
+.session-mode .claude-composer-accept:focus-within {
+  outline-color: var(--claude-text);
+}
+.session-mode .claude-composer-plan:focus-within {
+  outline-color: var(--claude-focus);
+}
+.session-mode .claude-composer-danger:focus-within {
+  outline-color: var(--claude-error);
+}
+
+.session-mode .claude-tool-full-text {
+  margin: 0;
+  max-height: 60vh;
+  overflow: auto;
+  font-family: var(--claude-code-font);
+  font-size: 0.9em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -39,9 +39,9 @@ class WorkbenchBoundary extends Component<
       return (
         <div className="workbench-state" role="alert">
           <h2>{this.props.modeName}界面加载失败</h2>
-          <p>终端模式仍然可用。</p>
+          <p>终端模式仍然可用。重新加载界面会刷新当前页面。</p>
           <button onClick={this.props.onTerminal}>切换到终端模式</button>
-          <button onClick={() => this.setState({ failed: false })}>
+          <button onClick={() => window.location.reload()}>
             重新加载界面
           </button>
         </div>

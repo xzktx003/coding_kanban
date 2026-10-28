@@ -15,6 +15,10 @@ import {
 
 import type { AgentCompletionNotificationPermission } from "../lib/agent-completion-notifications";
 import { sendAgentInput } from "../lib/api";
+import {
+  groupSessions,
+  type SessionGroupState,
+} from "../lib/session-groups";
 import { buildTerminalPreviewLines } from "../lib/terminal-preview";
 import { AgentTranscriptDialog } from "./AgentTranscriptDialog";
 import { ChangesPanel } from "./ChangesPanel";
@@ -28,6 +32,7 @@ interface MobileWorkbenchPageProps {
   activeSessionId: string | null;
   isLoading: boolean;
   sessions: AgentSessionRecord[];
+  sessionGroups?: SessionGroupState;
   terminalFontSize?: number;
   useLightweightTerminalPreview?: boolean;
   agentCompletionNotificationsEnabled?: boolean;
@@ -343,6 +348,7 @@ interface MobileSessionSwitcherProps {
   onToggle: () => void;
   open: boolean;
   sessions: AgentSessionRecord[];
+  sessionGroups?: SessionGroupState;
 }
 
 export function MobileSessionSwitcher({
@@ -355,8 +361,16 @@ export function MobileSessionSwitcher({
   onToggle,
   open,
   sessions,
+  sessionGroups = { groups: [], assignments: {}, collapsedGroupIds: [] },
 }: MobileSessionSwitcherProps) {
   const menuOpen = open && Boolean(activeSession);
+  const groupedSessions = useMemo(
+    () =>
+      sessionGroups.groups.length > 0
+        ? groupSessions(sessions, sessionGroups)
+        : [{ id: "__all__", name: "全部会话", sessions }],
+    [sessionGroups, sessions],
+  );
 
   return (
     <div
@@ -413,20 +427,28 @@ export function MobileSessionSwitcher({
           id="mobile-session-picker-list"
           role="listbox"
         >
-          {sessions.map((session) => (
-            <button
-              aria-selected={session.id === activeSession?.id}
-              key={session.id}
-              onClick={() => onSelectSession(session)}
-              role="option"
-              type="button"
-            >
-              <span>{session.displayName}</span>
-              <small>
-                {stateLabels[session.interactionState] ??
-                  session.interactionState}
-              </small>
-            </button>
+          {groupedSessions.map((group) => (
+            <div className="mobile-session-picker-group" key={group.id}>
+              <div className="mobile-session-picker-group-header">
+                <span>{group.name}</span>
+                <small>{group.sessions.length}</small>
+              </div>
+              {group.sessions.map((session) => (
+                <button
+                  aria-selected={session.id === activeSession?.id}
+                  key={session.id}
+                  onClick={() => onSelectSession(session)}
+                  role="option"
+                  type="button"
+                >
+                  <span>{session.displayName}</span>
+                  <small>
+                    {stateLabels[session.interactionState] ??
+                      session.interactionState}
+                  </small>
+                </button>
+              ))}
+            </div>
           ))}
         </div>
       )}
@@ -439,6 +461,7 @@ export function MobileWorkbenchPage({
   activeSessionId,
   isLoading,
   sessions,
+  sessionGroups = { groups: [], assignments: {}, collapsedGroupIds: [] },
   terminalFontSize,
   useLightweightTerminalPreview = true,
   agentCompletionNotificationsEnabled = false,
@@ -878,6 +901,7 @@ export function MobileWorkbenchPage({
                   onToggle={() => setSessionPickerOpen((current) => !current)}
                   open={sessionPickerOpen}
                   sessions={sessionPickerSortedSessions}
+                  sessionGroups={sessionGroups}
                 />
                 <section className="mobile-terminal-surface">
                   <div className="mobile-terminal-frame">

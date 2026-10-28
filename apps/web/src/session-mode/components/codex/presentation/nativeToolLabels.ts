@@ -1,4 +1,6 @@
 /** Exact descriptor text from openai.chatgpt 26.51002.51308 mcp-tool-activity-label and zh-CN assets.
+ * Key coverage re-verified against 26.51007.21434: all 267 `mcpToolActivity` keys and all 28
+ * `pageToolActivity` keys (x3 states) present, set difference empty in both directions.
  * Runtime adapters select only descriptors for the actual connector/tool and native state. */
 export const nativeToolLabels: Record<string, readonly [string, string]> = {
   "localConversation.pageToolActivity.connect_spaces_artifact.active": [

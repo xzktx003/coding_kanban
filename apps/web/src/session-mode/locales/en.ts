@@ -276,7 +276,8 @@ export const en = {
       ended: "Task ended",
       arguments: "Arguments",
     },
-    // Original toolSummaryForCmd and activity captions, VSIX 26.51002.51308.
+    // Original toolSummaryForCmd and activity captions, VSIX 26.51002.51308
+    // (strings re-verified unchanged in 26.51007.21434 locale bundles).
     // Native mixed activity header captions.
     activityGroup: {
       toolsLeading_one: "Called a tool",
@@ -487,7 +488,18 @@ export const en = {
       description:
         "This removes this turn and all later conversation history and restores this message to the composer. Code files are not reverted, and the message is not sent automatically. Continue?",
     },
+    userMessageNavigation: {
+      ariaLabel: "User messages",
+      jumpAriaLabel: "Jump to user message {{position}}",
+      loadingPreview: "Loading preview",
+      previewUnavailable: "Preview unavailable",
+      noContent: "(No content)",
+      moreOutputs: "+{{count}}",
+    },
     userMessage: {
+      attachment: "User attachment",
+      attachmentFailed: "Image failed to load",
+      attachmentFailedShort: "Failed",
       edit: "Edit message",
       editFailed: "Failed to edit message",
     },

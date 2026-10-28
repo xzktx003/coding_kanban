@@ -1,4 +1,5 @@
-/** Literal zh-CN messages from enabled main VSIX 26.51002.51308 N8. */
+/** Literal zh-CN messages from enabled main VSIX 26.51002.51308 N8; strings and
+ * the xhigh/ultra tiers re-verified present in 26.51007.21434. */
 export function nativeReasoningLabel(effort: string | null | undefined) {
   return (
     (

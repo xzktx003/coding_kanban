@@ -131,16 +131,13 @@ import {
   wrapRemoteInteractiveCommand,
 } from "./lib/session-matching";
 import {
-  addSessionGroup,
-  assignSessionToGroup,
-  deleteSessionGroup,
+  getSessionGroupCollapseKey,
   getSessionGroupKeys,
+  isSessionGroupCollapsed,
   loadSessionGroups,
-  renameSessionGroup,
-  saveSessionGroups,
-  toggleSessionGroupCollapsed,
   type SessionGroupState,
 } from "./lib/session-groups";
+import { startSessionGroupsSync, type GroupAction } from "./lib/session-groups-sync";
 import { isVsCodeAvailable } from "./lib/side-panel-availability";
 import {
   loadTerminalPreviewLightweightMode,
@@ -379,6 +376,8 @@ export default function App({
   const [layoutState, setLayoutState] = useState<LayoutState>(loadLayoutState);
   const [sessionGroups, setSessionGroups] =
     useState<SessionGroupState>(loadSessionGroups);
+  const [sessionGroupsSyncError, setSessionGroupsSyncError] = useState<string | null>(null);
+  const sessionGroupsSyncRef = useRef<ReturnType<typeof startSessionGroupsSync> | null>(null);
   const [sshHosts, setSshHosts] = useState<SshHostPreset[]>([]);
   const [discoveryState, setDiscoveryState] = useState<{
     open: boolean;
@@ -683,8 +682,17 @@ export default function App({
   }, []);
 
   useEffect(() => {
-    saveSessionGroups(sessionGroups);
-  }, [sessionGroups]);
+    const sync = startSessionGroupsSync(setSessionGroups, setSessionGroupsSyncError);
+    sessionGroupsSyncRef.current = sync;
+    return () => {
+      sessionGroupsSyncRef.current = null;
+      sync.stop();
+    };
+  }, []);
+  const dispatchSessionGroup = useCallback((action: GroupAction) => {
+    if (sessionGroupsSyncRef.current) sessionGroupsSyncRef.current.dispatch(action);
+    else setSessionGroupsSyncError("会话分组同步尚未就绪，请重试");
+  }, []);
 
   useEffect(() => {
     saveSidePanelSessionStates(fileBrowserSessionStates);
@@ -1082,14 +1090,12 @@ export default function App({
 
   const handleLaunched = useCallback(
     (session: AgentSessionRecord, groupId: string | null) => {
-      setSessionGroups((current) =>
-        assignSessionToGroup(current, getSessionGroupKeys(session), groupId),
-      );
+      dispatchSessionGroup({ type: "assign", sessionKeys: getSessionGroupKeys(session), groupId });
       listAgentSessions()
         .then(setSnapshot)
         .catch(() => {});
     },
-    [],
+    [dispatchSessionGroup],
   );
 
   const handleDeleteSession = useCallback(async (id: string) => {
@@ -1229,22 +1235,10 @@ export default function App({
         globalThis.crypto?.randomUUID?.() ??
         `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const groupId = `group-${randomId}`;
-      setSessionGroups((current) => {
-        let next = addSessionGroup(current, { id: groupId, name });
-        const session = sessionId
-          ? rawSessionsRef.current.find((item) => item.id === sessionId)
-          : undefined;
-        if (session) {
-          next = assignSessionToGroup(
-            next,
-            getSessionGroupKeys(session),
-            groupId,
-          );
-        }
-        return next;
-      });
+      const session = sessionId ? rawSessionsRef.current.find((item) => item.id === sessionId) : undefined;
+      dispatchSessionGroup({ type: "add", group: { id: groupId, name }, ...(session ? { sessionKeys: getSessionGroupKeys(session) } : {}) });
     },
-    [sessionGroups.groups],
+    [sessionGroups.groups, dispatchSessionGroup],
   );
 
   const handleRenameSessionGroup = useCallback(
@@ -1273,9 +1267,9 @@ export default function App({
         return;
       }
 
-      setSessionGroups((current) => renameSessionGroup(current, groupId, name));
+      dispatchSessionGroup({ type: "rename", groupId, name });
     },
-    [sessionGroups.groups],
+    [sessionGroups.groups, dispatchSessionGroup],
   );
 
   const handleDeleteSessionGroup = useCallback(
@@ -1288,9 +1282,9 @@ export default function App({
         return;
       }
 
-      setSessionGroups((current) => deleteSessionGroup(current, groupId));
+      dispatchSessionGroup({ type: "remove", groupId });
     },
-    [sessionGroups.groups],
+    [sessionGroups.groups, dispatchSessionGroup],
   );
 
   const handleMoveSessionToGroup = useCallback(
@@ -1300,20 +1294,17 @@ export default function App({
       );
       if (!session) return;
 
-      setSessionGroups((current) =>
-        assignSessionToGroup(current, getSessionGroupKeys(session), groupId),
-      );
+      dispatchSessionGroup({ type: "assign", sessionKeys: getSessionGroupKeys(session), groupId });
     },
-    [],
+    [dispatchSessionGroup],
   );
 
   const handleToggleSessionGroup = useCallback(
     (groupId: string, scope?: string) => {
-      setSessionGroups((current) =>
-        toggleSessionGroupCollapsed(current, groupId, scope),
-      );
+      const current = sessionGroupsSyncRef.current?.getState() ?? sessionGroups;
+      dispatchSessionGroup({ type: "setCollapsed", key: getSessionGroupCollapseKey(groupId, scope), collapsed: !isSessionGroupCollapsed(current, groupId, scope) });
     },
-    [],
+    [dispatchSessionGroup, sessionGroups],
   );
 
   const focusedSession: AgentSessionRecord | undefined = focusedId
@@ -1746,11 +1737,14 @@ export default function App({
 
   if (isMobileWorkbenchLocation(window.location)) {
     return (
+      <>
+      {sessionGroupsSyncError && <div className="session-group-sync-error" role="status">{sessionGroupsSyncError}</div>}
       <MobileWorkbenchPage
         showBrand={!embedded}
         activeSessionId={mobileActiveSessionId}
         isLoading={isLoading}
         sessions={sessions}
+        sessionGroups={sessionGroups}
         terminalFontSize={terminalFontSize}
         useLightweightTerminalPreview={useLightweightTerminalPreview}
         agentCompletionNotificationsEnabled={
@@ -1765,6 +1759,7 @@ export default function App({
           handleToggleAgentCompletionNotifications
         }
       />
+      </>
     );
   }
 
@@ -1785,6 +1780,7 @@ export default function App({
   );
   return (
     <main className={`app-shell-v2 layout-${layoutMode}`}>
+      {sessionGroupsSyncError && <div className="session-group-sync-error" role="status">{sessionGroupsSyncError}</div>}
       {!updateIndicatorInToolbar && updateNotification}
       <TopBar
         navigation={navigation}

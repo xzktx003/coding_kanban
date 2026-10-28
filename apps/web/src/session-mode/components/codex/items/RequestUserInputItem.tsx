@@ -44,6 +44,12 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
   const lock = useRef(false);
   const advance = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [error, setError] = useState(false);
+  // `deliverRpc` records its terminal phase and only then re-throws, so the
+  // store can commit `uncertain` a render before this item's own `finally`
+  // clears `submitting`. Treating the recorded phase as authoritative keeps the
+  // busy label and the delivery notice in one commit, so the retry control is
+  // never still labelled "submitting" while a retryable warning is on screen.
+  const busy = delivery ? delivery.phase === "submitting" : submitting;
   const disabled =
     submitting ||
     delivery?.phase === "submitting" ||
@@ -444,8 +450,8 @@ function QuestionForm({ request }: { request: RequestUserInputRequest }) {
                 disabled={!allAnswered || disabled}
                 onClick={() => void submit()}
               >
-                {submitting && <LoaderCircle className="size-4 animate-spin" />}
-                {t(submitting ? "userInput.submitting" : "userInput.submit")}
+                {busy && <LoaderCircle className="size-4 animate-spin" />}
+                {t(busy ? "userInput.submitting" : "userInput.submit")}
               </Button>
             ) : (
               <Button

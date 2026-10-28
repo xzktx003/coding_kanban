@@ -245,15 +245,16 @@
     scrollbar-width: none;
     padding: 0;
     margin: 0;
-    mask-image: linear-gradient(
-      to bottom in oklch,
-      oklch(60% 0 0 / 0),
-      oklch(85% 0 0) var(--session-queue-top-fade)
-        calc(100% - var(--session-queue-bottom-fade)),
-      oklch(60% 0 0 / 0)
-    );
+    mask-image: none;
   }
-  .session-mode .session-composer-rail .session-queue-list > li {
+  .session-mode .session-composer-rail .session-queue-items {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    flex-shrink: 0;
+  }
+  .session-mode .session-composer-rail .session-queue-items > li {
     flex-shrink: 0;
     padding: 0;
     margin: 0;
@@ -312,7 +313,16 @@
 }
 @supports (animation-timeline: scroll(self y)) {
   @media (min-width: 768px) {
-    .session-mode .session-composer-rail .session-queue-list {
+    .session-mode
+      .session-composer-rail
+      .session-queue-list[data-overflowing="true"] {
+      mask-image: linear-gradient(
+        to bottom in oklch,
+        oklch(60% 0 0 / 0),
+        oklch(85% 0 0) var(--session-queue-top-fade)
+          calc(100% - var(--session-queue-bottom-fade)),
+        oklch(60% 0 0 / 0)
+      );
       animation: session-queue-edge-fade linear both;
       animation-timeline: scroll(self y);
     }

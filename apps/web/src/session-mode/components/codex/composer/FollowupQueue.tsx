@@ -24,6 +24,7 @@ import {
   Pencil,
   Play,
   Plus,
+  TriangleAlert,
   Trash2,
 } from "lucide-react";
 import type {
@@ -31,6 +32,7 @@ import type {
   FollowupMessage,
 } from "@agent-orchestrator/shared";
 import { useFollowups } from "@session/hooks/useFollowups";
+import { useFollowupSettingsStore } from "@session/stores/useFollowupSettingsStore";
 import { followupService } from "@session/services/followupService";
 import { Button } from "../../ui/button";
 import {
@@ -48,6 +50,7 @@ import {
   DialogFooter,
 } from "../../ui/dialog";
 import { fileSrc } from "@session/hooks/runtime";
+import { shouldSubmitOnEnter } from "./imeSubmitKey";
 import {
   codexSendBlockReason,
   refreshCodexAccess,
@@ -120,6 +123,10 @@ export function FollowupQueueContent({
     threadId ? s.entries[threadId] : undefined,
   );
   const accessBlock = queueAccessReason(access);
+  // Official rows end their menu with a queueing toggle, so the default
+  // follow-up behaviour is reachable from the queue itself, not only settings.
+  const queueingOn = useFollowupSettingsStore((s) => s.mode) === "queue";
+  const setFollowupMode = useFollowupSettingsStore((s) => s.setMode);
   const unresolved = unresolvedReason(state.items);
   const resumeBlock = unresolved || accessBlock;
   const [busy, setBusy] = useState(false),
@@ -197,6 +204,46 @@ export function FollowupQueueContent({
     !snapshot.error &&
     items.length > 1 &&
     items.every((message) => message.status === "queued");
+  const queueStatus = state.paused ? (
+    <div className="session-queue-status" role="status">
+      <Pause size={14} />
+      <span className="session-queue-pause-reason">
+        <span>
+          {state.paused === "interrupted" ||
+          state.paused === "由于你中断了当前响应，队列已暂停"
+            ? "当前响应已中断，队列已暂停"
+            : state.paused}
+        </span>
+        {(accessBlock || unresolved) && (
+          <small>{accessBlock || unresolved}</small>
+        )}
+      </span>
+      {unresolved ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          onClick={() => setExpanded(true)}
+        >
+          {state.items.some((m) => m.status === "uncertain")
+            ? "核对送达状态"
+            : "处理失败消息"}
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          disabled={busy || !!resumeBlock}
+          title={resumeBlock}
+          onClick={() => void change({ type: "resume" })}
+        >
+          <Play size={14} />
+          继续
+        </Button>
+      )}
+    </div>
+  ) : null;
   const move = (index: number, offset: number) => {
     if (!canReorder || index + offset < 0 || index + offset >= items.length)
       return;
@@ -215,6 +262,7 @@ export function FollowupQueueContent({
       ids={visible.map((message) => message.id)}
       enabled={canReorder && visible.length > 1}
       onReorder={(ids) => void change({ type: "reorder", ids })}
+      header={queueStatus}
     >
       {visible.map((m, index) => (
         <QueueSortableItem key={m.id} id={m.id} status={m.status}>
@@ -234,6 +282,34 @@ export function FollowupQueueContent({
                   />
                 )}
               </QueueDragHandle>
+              {(m.status === "failed" || m.status === "uncertain") && (
+                <button
+                  type="button"
+                  className="session-queue-warning"
+                  aria-label={
+                    m.status === "uncertain"
+                      ? "无法确认消息是否已送达。请先查看对话，再删除这条已保存的消息。"
+                      : "这条排队中的消息未能发送"
+                  }
+                  aria-description={
+                    m.status === "uncertain"
+                      ? undefined
+                      : "重试、编辑或删除该消息以继续发送排队的消息"
+                  }
+                  title={
+                    m.status === "uncertain"
+                      ? "无法确认消息是否已送达。请先查看对话，再删除这条已保存的消息。"
+                      : "这条排队中的消息未能发送\n重试、编辑或删除该消息以继续发送排队的消息"
+                  }
+                  onClick={() => setExpanded(true)}
+                >
+                  <TriangleAlert
+                    data-queue-warning-icon=""
+                    size={12}
+                    aria-hidden="true"
+                  />
+                </button>
+              )}
               {compactShelf && !mobile && !expanded && !inlineDetails ? (
                 <QueueMessagePreview
                   text={m.text}
@@ -281,6 +357,8 @@ export function FollowupQueueContent({
                   size="sm"
                   variant="ghost"
                   aria-label="立即引导"
+                  aria-description="提交，但不中断模型运行"
+                  title="提交，但不中断模型运行"
                   disabled={busy || !!accessBlock}
                   onClick={() =>
                     void change({
@@ -422,6 +500,16 @@ export function FollowupQueueContent({
                         继续
                       </DropdownMenuItem>
                     )}
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="session-queue-mode-toggle"
+                      onSelect={() =>
+                        setFollowupMode(queueingOn ? "steer" : "queue")
+                      }
+                    >
+                      <ListOrdered />
+                      {queueingOn ? "关闭排队" : "启用队列模式"}
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 )}
               </DropdownMenu>
@@ -442,8 +530,11 @@ export function FollowupQueueContent({
                   }
                   if (
                     (e.ctrlKey || e.metaKey) &&
-                    e.key === "Enter" &&
-                    !e.nativeEvent.isComposing
+                    shouldSubmitOnEnter({
+                      key: e.key,
+                      isComposing: e.nativeEvent.isComposing,
+                      keyCode: e.keyCode,
+                    })
                   ) {
                     e.preventDefault();
                     void change({ type: "edit", id: m.id, text });
@@ -504,7 +595,11 @@ export function FollowupQueueContent({
                   size="sm"
                   variant="ghost"
                   disabled={busy || !!accessBlock}
-                  title={accessBlock}
+                  aria-description="尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
+                  title={
+                    accessBlock ||
+                    "尝试重新发送这条排队中的消息。如果重试一直失败，可编辑或删除它"
+                  }
                   onClick={() =>
                     m.status === "uncertain"
                       ? setConfirm({
@@ -529,47 +624,9 @@ export function FollowupQueueContent({
       className={`session-followup-queue ${inlineDetails ? "session-queue-detail" : "session-queue-shelf"}`}
       aria-label="消息队列"
     >
-      {state.paused && (
-        <div className="session-queue-status" role="status">
-          <Pause size={14} />
-          <span className="session-queue-pause-reason">
-            <span>
-              {state.paused === "interrupted" ||
-              state.paused === "由于你中断了当前响应，队列已暂停"
-                ? "当前响应已中断，队列已暂停"
-                : state.paused}
-            </span>
-            {(accessBlock || unresolved) && (
-              <small>{accessBlock || unresolved}</small>
-            )}
-          </span>
-          {unresolved ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => setExpanded(true)}
-            >
-              {state.items.some((m) => m.status === "uncertain")
-                ? "核对送达状态"
-                : "处理失败消息"}
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              disabled={busy || !!resumeBlock}
-              title={resumeBlock}
-              onClick={() => void change({ type: "resume" })}
-            >
-              <Play size={14} />
-              继续
-            </Button>
-          )}
-        </div>
-      )}
-      {(inlineDetails || !expanded) && items.length > 0 && queueList}
+      {(inlineDetails || !expanded) &&
+        (items.length > 0 || state.paused) &&
+        queueList}
       {railPresent && expanded && !inlineDetails && (
         <ComposerSheet
           title={`待发送消息 · ${items.length}`}

@@ -29,6 +29,11 @@ export type ImageSource =
 export type ContentBlock =
   | { type: "text"; text: string }
   | { type: "thinking"; thinking: string; signature: string }
+  /**
+   * Thinking the API elided for safety. It carries no readable text, so it is
+   * rendered as an explicit elision rather than dropped silently.
+   */
+  | { type: "redacted_thinking"; data?: string }
   | ToolUseBlock
   | ToolResultBlock
   | { type: "image"; source: ImageSource };

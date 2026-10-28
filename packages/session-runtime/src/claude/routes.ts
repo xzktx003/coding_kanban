@@ -47,6 +47,41 @@ export function registerClaudeRoutes(app: FastifyInstance, s: ClaudeService) {
   empty("set-permission-mode", (p) =>
     s.setPermissionMode(id(p), stringField(p, "mode")),
   );
+  app.post("/api/cc/rewind-files", (req) => {
+    const p = bodyObject(req.body);
+    const dryRun = p.dry_run ?? p.dryRun;
+    if (dryRun !== undefined && typeof dryRun !== "boolean")
+      throw new HttpError(400, "Invalid dry_run");
+    return s.rewindFiles(
+      id(p),
+      alias(p, "user_message_id", "userMessageId"),
+      dryRun === true,
+    );
+  });
+  app.post("/api/cc/fork-session", (req) => {
+    const p = bodyObject(req.body);
+    const slice = p.up_to_message_id ?? p.upToMessageId;
+    if (slice !== undefined && typeof slice !== "string")
+      throw new HttpError(400, "Invalid up_to_message_id");
+    if (p.title !== undefined && typeof p.title !== "string")
+      throw new HttpError(400, "Invalid title");
+    return s.forkSession(id(p), {
+      ...(slice === undefined ? {} : { upToMessageId: slice }),
+      ...(p.title === undefined ? {} : { title: p.title as string }),
+      ...(p.working_dir === undefined && p.workingDir === undefined
+        ? {}
+        : { cwd: cwd(p) }),
+    });
+  });
+  empty("rename-session", (p) => {
+    if (typeof p.title !== "string") throw new HttpError(400, "Invalid title");
+    const dir = p.working_dir ?? p.workingDir;
+    return s.renameSession(
+      id(p),
+      p.title,
+      dir === undefined ? undefined : cwd(p),
+    );
+  });
   app.get("/api/cc/installed-skills", () => s.config.skills());
   app.get("/api/cc/slash-commands", (req) => {
     const q = req.query as Record<string, string>;

@@ -693,6 +693,37 @@
   border-radius: 5px;
   background: var(--background);
 }
+.codex-connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.codex-connection-actions button,
+.codex-connection-actions a {
+  min-height: 34px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: none;
+  cursor: pointer;
+}
+.codex-connection-actions a:hover,
+.codex-connection-actions button:hover {
+  border-color: var(--ring);
+}
+.codex-certificate-steps {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding-left: 20px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.6;
+}
 .codex-connection-details {
   margin-top: 20px;
   padding-top: 14px;

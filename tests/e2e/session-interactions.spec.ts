@@ -302,7 +302,10 @@ for (const kind of ["codex", "cc", "acp"])
       .locator(
         kind === "codex"
           ? ".session-mode [contenteditable=true]"
-          : ".session-mode textarea",
+          : kind === "cc"
+            ? ".session-mode .claude-message-input"
+            : // ACP still renders a real textarea.
+              ".session-mode textarea",
       )
       .first();
     await editor.fill("请分析这张图片");

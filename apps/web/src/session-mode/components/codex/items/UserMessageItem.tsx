@@ -87,16 +87,26 @@ export const UserMessageItem = ({
         ) : (
           <div
             ref={copyContentRef}
+            // The rail's post-jump flash looks for this marker, the same one the
+            // shipped webview puts on its bubble; the editor branch has no bubble
+            // there either, so the marker stays on the rendered message only.
+            data-user-message-bubble="true"
             className="codex-user-bubble box-border flex w-fit min-w-0 self-end flex-col gap-2 break-words"
           >
             {(images.length > 0 || localImages.length > 0) && (
               <div className="flex flex-wrap gap-2">
+                {/*
+                 * The shipped webview hands one `alt` to every attachment in the
+                 * list — its map index only feeds React keys and the prev/next
+                 * callbacks — so each thumbnail reads as the same localized
+                 * "user attachment", never a fabricated "Uploaded N".
+                 */}
                 {images.map((src, index) => (
                   <CodexImage
                     // biome-ignore lint/suspicious/noArrayIndexKey: the same image may be attached twice, so src is not unique
                     key={`remote-${index}`}
                     src={src}
-                    alt={`Uploaded ${index + 1}`}
+                    alt={t("userMessage.attachment")}
                   />
                 ))}
                 {localImages.map((src, index) => (
@@ -104,7 +114,7 @@ export const UserMessageItem = ({
                     // biome-ignore lint/suspicious/noArrayIndexKey: the same image may be attached twice, so src is not unique
                     key={`local-${index}`}
                     src={src}
-                    alt={`Uploaded ${index + 1}`}
+                    alt={t("userMessage.attachment")}
                   />
                 ))}
               </div>

@@ -450,13 +450,16 @@ test("paginated history preserves full turns and model metadata, handles empty n
   const raw: Rpc = async (method, params): Promise<Json> => {
     calls.push(method);
     if (method === "thread/read") return { thread: { id: "t", historyMode: "paginated", model: "model", turns: [] } };
-    return object(params).cursor === null ? { data: [{ id: "a", items: [{ type: "userMessage" }] }], nextCursor: "next" }
-      : { data: [{ id: "b", items: [] }], nextCursor: null };
+    if (method === "thread/items/list")
+      return { data: object(params).turnId === "a" ? [{ turnId: "a", item: { type: "userMessage" } }] : [], nextCursor: null };
+    return object(params).cursor === null ? { data: [{ id: "a" }], nextCursor: "next" }
+      : { data: [{ id: "b" }], nextCursor: null };
   };
   const thread = object(object(await readHistory(raw, "t")).thread);
   assert.equal(thread.model, "model");
   assert.deepEqual((thread.turns as JsonObject[]).map(t => t.id), ["a", "b"]);
-  assert.deepEqual(calls, ["thread/read", "thread/turns/list", "thread/turns/list"]);
+  assert.deepEqual((thread.turns as JsonObject[]).map(t => t.items), [[{ type: "userMessage" }], []]);
+  assert.deepEqual(calls, ["thread/read", "thread/turns/list", "thread/items/list", "thread/turns/list", "thread/items/list"]);
   await assert.rejects(readHistory(async (method, params) => method === "thread/read" ? raw(method, params)
     : { data: [], nextCursor: "loop" }, "t"), /repeated.*cursor/i);
   const empty = await readHistory(async (method, params) => {

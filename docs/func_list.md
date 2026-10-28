@@ -2,6 +2,9 @@
 
 - 排队/引导、Enter与审查方式三个本机偏好逐字段保存，多页修改不同字段互不覆盖；失败保留当前选择并提供重试，见[偏好多页验收](designs/session-render-alignment/followup-preferences-multitab-20261027.md)。
 
+- 新聊天默认（模型/权限/推理强度等12项）与当前 Agent/指令类型偏好同样逐字段保存，多页只改自己选的字段；权限成对写入不产生菜单外组合，损坏字段回落默认，旧整map备份只读不回写。另一页的选择在挂载期间即时生效，见[设备偏好多页验收](designs/session-render-alignment/device-preferences-multitab-20261028.md)。
+- 在完整访问权限下把推理强度提到 ultra 会先按插件语义发问，确认前不写入任何设置：三个出口分别是继续使用完整访问权限（保持权限不变）、继续（先降到请求批准再应用）、取消（已保存的强度原样不动）；权限未确认时不发问，降低强度或已是 ultra 时不发问。原生触发器仍然隐藏 ultra，本门只覆盖可达的设置面板，见[Ultra 与完整访问确认门](designs/session-render-alignment/ultra-full-access-gate-20261028.md)。
+
 - 桌面队列折叠显示首张24px图片及原生粘贴/选区摘要，只请求首图；完整详情保留全部原图与捕获原文。功能已验，附件精确像素剩余边界见 [第三批验收](designs/session-render-alignment/session-parity-batch-r3-20261027.md)。
 
 - Codex 待发送队列使用原生指针排序与六点悬停手柄；单条或含非queued消息时不提供排序。手势绑定原会话、修订与条目，切换/隐藏/取消时释放自身监听，不向另一队列写入；键盘移动仍通过项目菜单，见 [排序行为与原组件证据](designs/session-render-alignment/queue-sorting-20261027.md)。
@@ -9,6 +12,8 @@
 - Codex 文件、引用与绘图草稿按会话事务合并本设备多页修改，恢复/保存/失败状态明确；撤销、迟到回执、移入新会话失败、异步绘图导出及热更新保留原owner和新编辑。新会话始终沿用点击时捕获的项目与创建设置；[协议与边界](designs/session-render-alignment/context-draft-storage-20261027.md)。
 
 - 桌面待发送队列提供原生单行富文本与非模态只读全文预览，可选择复制、用键盘进入/退出；配置和上下文仍从更多菜单访问，手机保留完整详情入口。拖动限定图标且按原目标索引排序；[实际原组件对照](designs/session-render-alignment/queue-preview-parity-20261027.md)。
+
+- 排队行补齐原包三处悬浮说明与行内队列开关：失败/送达待确认行显示警告图标，悬浮按原包分支给出单段「未能确认送达」或「未能发送」+ 次级补救说明；引导按钮说明「提交，但不中断模型运行」；行内重试按钮带重试与改用编辑/删除的补救说明；行内菜单末尾可直接开关默认排队行为。文案取原生 zh-CN 包原文，警告色映射 `--vscode-editorWarning-foreground`。菜单触发器保留序号后缀以区分多行。
 
 - Codex 性能提醒只从明确的强度/最近模型操作产生，普通模型radio和只读恢复静默；使用独立临时通知，保留线程、轮次和可见性保护。升级横幅独立展示；正式SDK门控和回执时点的未闭合范围见 [实际入口对照](designs/session-render-alignment/model-change-notice-behavior-20261027.md)。
 
@@ -18,9 +23,15 @@
 
 # Coding Kanban 功能清单
 
+- 安卓客户端（`apps/android`，React Native / Expo SDK 57）通过局域网访问同一后端：可配置服务器地址（`http://<局域网IP>:3000`），无需鉴权；包含连接配置页、终端模式四页（看板 / 活动 / 当前会话 / 项目文件）、内嵌 WebView + xterm.js 的真实终端（RN 持有 WebSocket，桥接输入/缩放/重连/回放）、会话模式对话（线程列表、聊天、SSE 事件流与中断）、文件浏览与文本/图片预览。构建产物为本地 Android APK，见 [安卓客户端](android-client.md)。
+
 - 局域网开发页面断开 Vite 热更新连接时保留当前文档并重连；不兼容更新、漏接更新或服务代次变化仅提示用户显式刷新，草稿与真实任务不会因该客户端发出停止／重发。MCP 认证启动与通知组件拆分，避免循环热更新反复整页刷新。仅 serve 启用，生产构建不注入适配；验收边界见 [手机刷新与中断](session-interruption-safety.md#手机刷新继续排查2026-10-27)。
 
 - Codex 显式聊天历史分页由网关的独立只读原生通道读取，工具正文在接收时裁剪，密集工具元数据按投影字节有界留存；不会因大历史页中断共享 Agent 连接。未知回执不重发，失效连接由后续独立请求恢复；预算、旧运行层兼容及验收见 [连接恢复](session-codex-connection-recovery.md)。
+- `thread/read` 的历史聚合对齐官方插件：先按 `itemsView: "notLoaded"` 取轮次壳，再逐轮用 `thread/items/list` 按 `sortDirection: "asc"` 取正文。单个原生回复触碰共享 stdio 帧上限（我们的 `RPC frame exceeded byte limit` 或原生的 `decoded message length too large`）时自动折半重试到最小 1 条，不再因为一个超大轮次让整个会话在所有设备上都读不出来。逐轮正文按 `turnId` 校验归属、拒绝重复游标；显式允许降级时标记 `historyStatus: "incomplete"` 并给出续读游标，未显式允许时仍维持原有严格预算拒绝。规则与验收见 [连接恢复](session-codex-connection-recovery.md)。
+- `pnpm dev:restart` 在前端就绪后按需替换本仓库自有的会话运行层：仅在确认 PID 归属且构建指纹过期时替换，先记录将被结束的活跃轮次再 SIGTERM，超时才升级 SIGKILL；运行层已是当前构建、不可达、PID 无法确认或会话列表读不出来时一律跳过，不会误杀其它工作树或仓库的进程。
+- 会话模式输入法安全提交：分支名称与自定义 model id 输入框的回车提交对齐官方 composer，`isComposing` 或 `keyCode === 229` 期间不提交，Shift+Enter 续行不提交，避免中文/日文/韩文候选词回车直接创建并检出分支或写入半成品 model id。
+- 会话模式阅读历史时向上滚动到距顶 240px 内会自动只读加载更早消息，并保留当前阅读锚点；贴底跟随实时输出、正在加载或上一次分页失败时不自动触发，失败由可见的重试控件负责恢复。分页游标或内存回收恢复锚点任一可用即显示“加载更早消息”入口，因此内存释放旧轮次后仍有返回更早历史的入口。自动加载不会中断、恢复或接管任何 Agent 轮次。
 
 - 会话输入按实际修改的会话独立同步保存文字，不逐键重写全部历史草稿；旧格式保持可恢复，多个页面编辑不同会话互不覆盖整份草稿集合。文件树和附件按钮只订阅插入动作，输入不重渲染所有文件行。关注／项目无变化同步跳过设备缓存写入，正常操作和确认继续保存。回归与测量边界见 [输入响应验收](session-input-responsiveness.md)。
 
@@ -251,6 +262,8 @@
 - 本机 tmux 卡片缺少 pane 绑定时，只有该 tmux session 与已登记卡片一一对应、且只有一个合法 pane，才补齐 pane ID 并同步真实 Agent 命令。身份仍未确定时不把终端预览当成飞书任务完成正文；完成通知等待可验证的结构化记录。已明确绑定的普通 Shell 会话继续使用现有终端完成边沿。
 - 文件/VS Code 侧面板的拖动宽度只在 pointer release 时提交到 `file-browser-ui-state`；中间帧直接更新面板 DOM，刷新后仍恢复最后一次完成的宽度。
 - 会话分组配置保存在 `coding-kanban-session-groups-v1`：主页看板与聚焦视图“其他会话”侧栏共享分组名称和卡片归属，刷新页面后保持。
+- 终端看板分组通过 `/api/session-groups` 按操作同步：电脑和手机共享分组名称、归属及折叠状态，当前会话选择留在本机；操作先持久化本机并在确认后移除，离线重连可恢复。旧版本整份快照写入在新协议启用后被拒绝。范围和验收见 [终端看板分组同步](session-terminal-groups-sync.md)。
+- 手机端当前会话切换列表在存在用户分组时按用户分组分区展示，组名、顺序与电脑端一致，未指定归属的会话进入“未分组”；没有用户分组时继续按“可继续 → 执行中 → 其它状态”分组。
 - 新建会话窗口支持选择“未分组”或已有会话分组；会话创建成功后立即按稳定会话标识写入所选分组，创建失败不会产生分组归属。
 - 每个会话分组（包括自动生成的“未分组”）都可折叠或展开；主页四个状态栏分别保存各自的分组折叠状态，同一分组在一个状态栏收起不会联动其他状态栏。聚焦侧栏继续独立保存自己的折叠状态，所有状态均与分组配置一起持久化。
 - 用户分组标题按稳定分组标识分配琥珀、青绿、天蓝或珊瑚分类色，并使用更大的粗体标题、整行浅色背景和同色数量徽标增强定位；主看板与聚焦侧栏保持同一色调，“未分组”固定使用中性色，识别不只依赖颜色。
@@ -385,7 +398,7 @@
 - 聊天布局继承导航下方的实际可用高度；长对话独立滚动，输入框和最新消息在桌面、手机及横屏中保持可见。
 - 输入建议：`/` 命令与 `$` 技能/插件菜单共用主题面板，按视口自动选择弹出方向，支持方向键、Enter、Esc 和窄屏布局；技能名支持连字符，Claude 命令选择保持输入焦点。
 - Codex：结构化流式对话、历史检索/分页、归档/删除/重命名、恢复/分叉/回滚/压缩、计划/Goal、排队/引导/中断、工具/审批/问题输入/权限、模型/提供商/推理配置、账号登录与切换。
-- Claude Code：原生 SDK 会话、历史与消息、工具结果、权限与用户问题、模型/effort/MCP/技能配置；浏览器 SSE 监听就绪握手，后台失败终结加载状态。
+- Claude Code：原生 SDK 会话、历史与消息、工具结果、权限与用户问题、模型/effort/MCP/技能配置；浏览器 SSE 监听就绪握手，后台失败终结加载状态。聊天区按官方 Claude Code VS Code 2.1.311 渲染：23 个工具卡各自的 header/body 规则（Read/Skill/ReadCoalesced/AgentOutputTool 仅标题行、ToolSearch 整卡隐藏、Agent 不回显子 Agent 输出、MCP 服务名人类化、未知工具保留原名并回落原始 IN/OUT）、`IN`/`OUT` 栅格、超过 250 字符或 3 行才可点开全文（含嵌套按钮不穿透、键盘 Enter/Space、长按不连发）、thinking 折叠与空态静态行、`--claude-*` 主题 token 按 `--vscode-*` 映射并保留浏览器回退。文件类工具点击文件名按行区间揭示到文件面板；`enableFileCheckpointing` 会话可经 `POST /api/cc/rewind-files` 按用户消息回滚文件（支持 dryRun，UUID 严格校验，CLI 拒绝与 link-safety 跳过原样上报）。逐项取证与偏离记录见 [Claude 渲染对齐](designs/claude-render-alignment/plan-20261027.md)。
 - ACP：预设/自定义 Agent、安装、认证、会话恢复、模式/模型/推理设置、请求权限、工具与文件事件；Keke 固定参考版本并在应用目录安装。
 - ACP 生命周期保护：运行任务的新会话、恢复与账号切换显式确认；取消失败保留上下文，无隐式重启。历史切换跨项目串行、异步结果归属原连接；审批按会话排队，设置串行并以最后确认值回滚，应用中禁止发送。当前记录删除先创建替代会话，运行任务须先显式停止。输入显示实际 ACP 会话名。行为与性能证据见 [本次优化](session-mode-optimization.md)。
 - Bots：身份与角色、模型/提供商、授权工具与 MCP、持久记忆、会话历史、通知、固定/归档、协作授权、例行任务。
@@ -531,7 +544,7 @@
 完整范围与分阶段证据见 [实施记录](designs/session-render-alignment/implementation.md)，不能将分项通过理解为全部完成。
 
 - Codex 工具标签复用 12 个实际原包连接器家族的参数 schema、上下文/预览/结果计数与 1,108 个本地化描述；完成轮 Hook 公开统计、图片编辑归原草稿、第一方工具目标只读导航保持原 owner，缺少真实能力时明确不可用。原包 1,956 差分输入与专项测试已通过，最终逐状态门禁见 tools-progress.md。
-- Codex Markdown 围栏、表格、标题、列表、公式及字体合成采用实际插件规则；Mermaid 使用私有 ELK 布局、原生深浅主题和隔离中文测量，保留复制、缩放、重置与 SVG 下载。Claude 的原渲染器、主题与普通 Mermaid 代码展示保持原样。原包几何/字体对照、同页并发和移动触控验收见 [视觉验收](designs/session-render-alignment/visual-acceptance.md)。
+- Codex Markdown 围栏、表格、标题、列表、公式及字体合成采用实际插件规则；Mermaid 使用私有 ELK 布局、原生深浅主题和隔离中文测量，保留复制、缩放、重置与 SVG 下载。Claude 侧已另按官方 Claude 插件对齐渲染与主题（见上），普通 Mermaid 代码展示保持原样。原包几何/字体对照、同页并发和移动触控验收见 [视觉验收](designs/session-render-alignment/visual-acceptance.md)。
 - 完成工具汇总采用真实 namespace、descriptor 与成功/失败身份，名称与首项/后续项文案来自原包；未知工具仍有诊断，目标能力不能因展示模板存在而扩大。最新合并测试与外部接口限制见 [实施与验收记录](designs/session-render-alignment/implementation.md)。
 
 - Codex 当前上下文用量使用最后一次响应的上下文 token 与模型容量；累计消耗不冒充上下文。未知容量隐藏百分比，桌面可悬浮、手机可点击原生单色圆形指示查看说明；切会话按各自用量更新。手机图片预览与 44px 删除入口分别可达，96×62px 图片不改变输入区固定高度。
@@ -590,3 +603,58 @@
 - 会话模型菜单：显式模型模式提供原生「恢复默认」入口，恢复推荐模型与强度，保留速度和草稿；手机触控切换菜单视图不额外聚焦，键盘导航与 Escape 回原输入框保持。见 [菜单来源与验收](designs/session-render-alignment/model-menu-reset-touch-20261027.md)。
 
 - 会话动作子菜单执行后关闭父附加层，保留独立弹窗/表单及原草稿；手机可直接操作打开的导航，Escape逐层返回。见 [父菜单生命周期](designs/session-render-alignment/composer-parent-menu-lifecycle-20261027.md)。
+
+- 会话模式用户消息导航 rail 对齐官方 26.51007.21434：满四条用户消息才出现，26px 标记置于 30px 外框内，滚动容器自带边缘渐隐（`--edge-fade-distance:2.5rem`）与 `overscroll-contain`，并以 `data-neighbor-distance` 发布邻近衰减，使触屏设备与鼠标获得同样的聚焦落差；`aria-current` 仍由可见轮次决定，不随指针移动。跳转后复刻官方 reveal 闪烁：`[data-user-message-bubble]` 气泡（无气泡时回落附件 pill）以 `cubic-bezier(0.23, 1, 0.32, 1)` 跑 1400ms，前 35% 保持 14% 文字混色高亮再衰减回静息底色；`prefers-reduced-motion` 下时长归零。官方记录文稿一次性渲染可同步闪烁，我们是虚拟列表，故按帧等待行挂载（上限 10 帧）后再闪，且终点落在 `--codex-secondary` 而非官方 5% 混色——后者等于官方自身的静息底色，照抄会让动画停在气泡从未有过的颜色上。来源与验收见 [导航 rail](designs/session-render-alignment/thread-workflows-progress.md)。
+
+- 会话模式计划步骤对齐官方 26.51007.21434 行结构：序号是字形右侧的独立 `{index}.` 文本（与字形同处 `flex flex-shrink-0 items-start gap-0.5`），不再画进字形内部；三种状态共用同一 `size-4` 字形盒，状态只由字形表达，步骤文字仅在完成态加删除线，不再按状态改色改字重（原包完成态用 `text-tertiary` 而非绿色，我们据此把 `emerald-500`/`blue-600` 换成主题 token，使其跟随宿主 VS Code 主题）。行 `key` 改用下标：`TurnPlanStep` 只有 `{ step, status }`、没有身份字段，按文本取 key 会让同文步骤整行消失并错位复用状态，详见 [debug_list](debug_list.md)。
+
+- 会话模式 MCP 工具调用分组对齐官方 26.51007.21434：被 `approvals: never` 策略拦下的调用（上游错误文案 `MCP tool call requires approval, but approval policy is never`，已在 `@openai/codex` 0.164.0 原生二进制中逐字核对）提升为独立行而非折叠进活动组，让用户看见本轮卡在一条自己能改的策略上；其余 MCP 失败与成功调用仍可折叠。原包读 `result.error`，本仓绑定为 `item.error.message`，判定同时匹配两处。见 [debug_list](debug_list.md)。
+- 用户图片附件加载失败时渲染 64px 非交互危险色提示块（对齐原版 `size-16` + `text-danger`），
+  缩放入口与弹窗随字节一同消失；换 `src` 自动重试。红绿灯：`CodexImage.failed.test.tsx`。
+
+- 会话 composer 底栏标签按官方 26.51007.21434 的分级折叠：官方以底栏自身的 inline size 为容器（`_ComposerLayoutFooter_boifs_2[data-composer-footer-responsive]` 声明 `container: composer-footer/inline-size`），由 `vHi` 输出 `data-composer-footer-collapse`，在 `width<=300px` 隐藏 `xs`、`width<=440px` 隐藏 `sm`/`secondary`。因此权限标签取 `xs`（`permissions-mode-dropdown-6fd05cb80d75.js` @25656，未开 `permissionRefresh` 时 `tn` 渲染的 `an` 触发器），思考强度取 `sm`（`app-initial-fee819fe4f22.js` @5298263），模型名取 `none` 永不折叠——窄底栏才不会退化成一排无标签图标。阈值用 JS 测量而非照搬容器查询：jsdom 完全不求值 `@container`，纯 CSS 版本既测不到也会在规则被删后静默失效；侧边栏在任何视口下都是窄容器，JS 测量才能和手机一样折叠。未测量（隐藏标签页首帧宽度为 0）按宽处理，否则用户还没打开的 composer 就已经没有标签。图标与 `aria-label` 在所有宽度保留：权限菜单可授予全盘与网络访问，不能变成无名按钮。原先本仓只有单一 420px 布尔阈值，且所有生产调用点都传 `compact`，等于权限标签从不折叠、强度标签在任何宽度都不折叠，该死代码 prop 已移除。红绿灯：`ComposerFooterLabel.collapse.test.tsx`、`ComposerFooterLabel.controls.test.tsx`。
+- 用户图片附件无障碍名改用本地化 `thread.userMessage.attachment`（四语料取自官方 bundle），
+  所有附件共用同一标签、不再编号，对齐原版。红绿灯：`UserMessageItem.attachmentLabel.test.tsx`。
+- 会话模式提示词导航栏新增官方悬停预览卡：200ms 去抖后打开（已看过的行再次进入立即打开），
+  卡内显示提示词标签与同一轮助手回复（`line-clamp-3`），并区分加载骨架、`预览不可用`、`（无内容）`
+  三种态；卡片 portal 到 `.session-mode` 以躲开导航栏自身的 `overflow-y: auto` 与渐隐 `mask`。
+  红绿灯：`ThreadWorkflowToolbar.railPreview.test.tsx`、`railPreviewPosition.test.ts`。
+- 提示词导航栏拖动擦洗补齐视觉反馈：按住上下拖动时，指针所在行的标记条展开到满宽，
+  左右各三行按 `0.76924 / 0.53848 / 0.38464` 递减（即官方
+  `scaleX(.2308 + .7692 * var(--marker-progress))` 在 progress `1 / .7 / .4 / .2` 的取值），
+  拖动期间取消 `transform` 过渡以贴合手指。此前指针捕获与 `data-scrubbing` /
+  `data-scrub-target` / `data-neighbor-distance` 三个属性都已写出，但样式表未消费，
+  拖动完全没有反馈。这几条属性规则是拖动唯一的渲染来源：栏对 `<nav>` 调
+  `setPointerCapture`，捕获期间没有任何一行命中 `:hover`（Chromium 实测
+  `findIndex(matches(":hover")) === -1`），与指针是否支持 hover 无关。
+  同时按官方把 hover 衰减包进 `@media (hover: hover)` 并加 `:not([data-scrubbing])`
+  （松手瞬间 `:hover` 会回到结束行，需避免与属性衰减形成两个中心），
+  `:focus-visible` 留在守卫外以保证键盘可遍历；每级衰减同时提供兄弟选择器与
+  `data-neighbor-distance` 两份规则，与官方一致（兄弟选择器跨不过将来可能的分块边界）。
+  松手后衰减中心保持在拖动结束的那一行：捕获使途经各行收不到 `pointerEnter`，
+  `hovered` 冻结在按下行，故 `onPointerUp` 先把拖动最后一行交给 `hovered` 再清
+  `scrubTarget`；`onPointerCancel` 则清空，不把焦点留在被手势接管前碰到的行。
+  红绿灯：`ThreadWorkflowToolbar.rail.test.tsx`（scrub 衰减、拖动取消过渡、hover 守卫与规则配对、松手后中心保持）。
+
+### 提示词导航栏当前位置跟随滚动
+
+- 右侧提示词导航栏的当前位置标记随滚动实时更新，不再依赖点击跳转。
+- 视口内同时出现多个轮次时，全部标记为当前（对齐官方的集合语义），而非只亮一个。
+- 轮次按整个轮次范围判定：读者滚过提示词、正在看该轮次的命令或文件改动时，这一轮仍显示为当前。
+
+### Pages 工具标签区分独立与延续位置
+
+- 活动摘要中首个 Pages 工具使用独立形式（"Read artifact"），后续项使用延续形式（"read artifact"），对齐官方 `isLeadingSummaryPart` 语义。
+
+### 工具详情展开（我们特有）
+
+- 原生 26.51007.21434 的 transcript 工具行没有展开/收起输出的入口：两份 locale 包中
+  `localConversation.*` 下匹配 output/expand/collapse/details 的键只有 `planSummary`、
+  `reviewComments`、`summaryPanelExpandableList`，工具与命令命名空间下都没有。webview 里唯一
+  的动画折叠 `_AnimatedDisclosure_16dt5_16`（原生 `<details>` + `::details-content` +
+  `interpolate-size`）属于 WebMCP 工具目录页，包裹的是工具的 description 和 inputSchema。
+- 因此这是我们自有功能，行为由我们定义：折叠时 body 同时加 `hidden` 与 `inert`（只有 `inert`
+  才能把可聚焦子节点移出 Tab 顺序）；展开状态存在 transcript 级 Map 中，虚拟行滚出视口卸载后
+  再滚回来不会丢失；没有 body 的行不提供开关。
+- 红绿灯：`NativeToolDisclosure.test.tsx`（4 条，含删除 `inert` 与改回组件本地 state 两种变异
+  均能被捕获的验证）。

@@ -38,6 +38,16 @@ test.describe("Mobile workspace", () => {
         body: JSON.stringify(snapshot),
       });
     });
+    await page.route("**/api/session-groups", (route) =>
+      route.fulfill({ json: {
+        initialized: true,
+        revision: 1,
+        sequence: 0,
+        groups: [{ id: "group-mobile", name: "测试分组" }],
+        assignments: { "session:mobile-alpha": "group-mobile" },
+        collapsedGroupIds: [],
+      } }),
+    );
     await page.routeWebSocket("**/ws/agent-sessions", (websocket) => {
       websocket.send(JSON.stringify({ type: "snapshot", payload: snapshot }));
     });
@@ -59,6 +69,20 @@ test.describe("Mobile workspace", () => {
         page.getByRole("listbox", { name: "选择终端会话" }),
       ).toHaveCount(1);
       await expect(page.getByRole("option")).toHaveCount(2);
+      for (const option of await page.getByRole("option").all()) {
+        expect((await option.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+        await expect(option).toHaveCSS("display", "flex");
+      }
+      await expect(page.getByRole("option", { selected: true })).toHaveCSS(
+        "background-color",
+        "rgba(246, 178, 107, 0.12)",
+      );
+      if (attempt === 0) {
+        await page.keyboard.press("Tab");
+        await page.getByRole("option").first().focus();
+        await expect(page.getByRole("option").first()).toBeFocused();
+        await expect(page.getByRole("option").first()).toHaveCSS("outline-style", "solid");
+      }
       await page.keyboard.press("Escape");
       await expect(
         page.getByRole("listbox", { name: "选择终端会话" }),

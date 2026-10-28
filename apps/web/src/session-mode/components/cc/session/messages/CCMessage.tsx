@@ -6,6 +6,8 @@ import type { CCMessage as CCMessageType, ToolResultBlock } from '../../types/me
 import { isToolResultBlock } from '../../types/messages';
 import type { PermissionDecision } from '../../types/permission';
 import { CCMessageContent } from './CCMessageContent';
+import { MessageTimestamp } from '../../presentation/Spinner';
+import { showsMessageActions } from '../../presentation/stream';
 import { PermissionRequestCard } from './PermissionRequestCard';
 import { RateLimitCard } from './RateLimitCard';
 import { ResultCard } from './ResultCard';
@@ -17,11 +19,18 @@ interface CCMessageProps {
   message: CCMessageType;
   index: number;
   inlineErrors?: Record<string, ToolResultBlock>;
+  /** Every tool result for this message, keyed by tool_use_id. */
+  toolResults?: Record<string, ToolResultBlock>;
 }
 
 const isToolBlock = (b: { type: string }) => b.type === 'tool_use' || b.type === 'tool_result';
 
-export function CCMessage({ message: msg, index: idx, inlineErrors }: CCMessageProps) {
+export function CCMessage({
+  message: msg,
+  index: idx,
+  inlineErrors,
+  toolResults,
+}: CCMessageProps) {
   const { showPermissionCards } = useCCSettingsStore();
   const { updateMessage } = useCCStore();
 
@@ -42,9 +51,23 @@ export function CCMessage({ message: msg, index: idx, inlineErrors }: CCMessageP
         .map((b) => b.text)
         .join('\n');
       return (
-        <div className="group flex items-start gap-1">
-          {assistantText && (
-            <div className="invisible group-hover:visible flex flex-col gap-0.5 shrink-0 pt-0.5">
+        <div
+          className="group flex items-start gap-1 claude-presentation"
+          data-testid="assistant-message"
+          role="article"
+        >
+          {showsMessageActions({
+            type: 'assistant',
+            hasText: !!assistantText,
+            isPartial: msg.message.content.some(
+              (b) => (b as { isPartial?: boolean }).isPartial === true,
+            ),
+            parentToolUseId: msg.parent_tool_use_id,
+          }) && (
+            <div
+              className="invisible group-hover:visible flex flex-col gap-0.5 shrink-0 pt-0.5 claude-assistant-actions"
+              data-message-actions
+            >
               <CopyButton text={assistantText} className="h-4 w-4 text-muted-foreground" />
               <AddToTodo text={assistantText} className="h-4 w-4 text-muted-foreground" />
             </div>
@@ -55,6 +78,7 @@ export function CCMessage({ message: msg, index: idx, inlineErrors }: CCMessageP
               index={idx}
               isToolBlock={isToolBlock}
               inlineErrors={inlineErrors}
+              toolResults={toolResults}
             />
           </div>
         </div>

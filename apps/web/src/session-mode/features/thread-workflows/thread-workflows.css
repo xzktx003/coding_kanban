@@ -130,6 +130,32 @@
 .session-mode .codex-thread-user-navigation p {
   padding: 8px;
 }
+/*
+ * The fade is scroll-driven in the shipped rail, so both ends have to be
+ * registered lengths for the animation to interpolate them at all.
+ */
+@property --session-rail-top-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --session-rail-bottom-fade {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0;
+}
+@keyframes session-rail-edge-fade {
+  0%,
+  1% {
+    --session-rail-top-fade: 0;
+    --session-rail-bottom-fade: var(--edge-fade-distance, 1rem);
+  }
+  99%,
+  to {
+    --session-rail-top-fade: var(--edge-fade-distance, 1rem);
+    --session-rail-bottom-fade: 0;
+  }
+}
 .session-mode .codex-thread-user-rail {
   position: absolute;
   inset-inline-start: 12px;
@@ -139,8 +165,26 @@
   display: flex;
   flex-direction: column;
   max-height: min(70vh, 640px);
-  overflow: auto;
+  overflow-y: auto;
+  /* Scrubbing the rail to either end must never drag the transcript behind it. */
+  overscroll-behavior: contain;
   scrollbar-width: none;
+  -ms-overflow-style: none;
+  --edge-fade-distance: 2.5rem;
+  mask: linear-gradient(
+    to bottom in oklch,
+    oklch(60% 0 0 / 0),
+    oklch(85% 0 0) var(--session-rail-top-fade)
+      calc(100% - var(--session-rail-bottom-fade)),
+    oklch(60% 0 0 / 0)
+  );
+  animation-name: session-rail-edge-fade;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+  animation-timeline: scroll(self y);
+}
+.session-mode .codex-thread-user-rail::-webkit-scrollbar {
+  display: none;
 }
 .session-mode .codex-thread-user-rail button {
   display: flex;
@@ -154,6 +198,14 @@
   background: none;
   cursor: pointer;
   outline: none;
+}
+/* The shipped rail wraps the 26px marker in a 30px row box. */
+.session-mode .codex-thread-user-rail .codex-user-rail-marker-slot {
+  display: flex;
+  width: 30px;
+  height: 2px;
+  flex: none;
+  align-items: center;
 }
 .session-mode .codex-thread-user-rail .codex-user-rail-marker {
   display: flex;
@@ -169,7 +221,10 @@
   background: currentColor;
   transform: scaleX(0.2308);
   transform-origin: 0;
-  transition: transform 0.16s;
+  /* Longhands, matching the shipped rule: the scrub rules below override the
+     duration alone, and a shorthand here would reset the property list with it. */
+  transition-property: transform;
+  transition-duration: 0.16s;
 }
 .session-mode
   .codex-thread-user-rail
@@ -178,58 +233,168 @@
   color: var(--vscode-foreground, var(--foreground));
   opacity: 0.6;
 }
+/* Keyboard focus is device-independent, so it stays outside the hover guard. */
 .session-mode
   .codex-thread-user-rail
-  button:is(:hover, :focus-visible)
+  button:focus-visible
   .codex-user-rail-marker {
   color: var(--vscode-foreground, var(--foreground));
   opacity: 1;
 }
 .session-mode
   .codex-thread-user-rail
-  button:is(:hover, :focus-visible)
+  button:focus-visible
+  .codex-user-rail-marker-line {
+  transform: scaleX(1);
+}
+/*
+ * Hover falloff is guarded the way the shipped rail guards it
+ * (`@media (hover:hover)` around every hover rule in
+ * `floating-navigation-rail-layout-17bd6c59412b.css`). The guard is belt and
+ * braces for us — the coarse-pointer block near the end of this file hides the
+ * rail outright, so a hover-incapable pointer never reaches these rows — but it
+ * keeps the rule set honest for any pointer that reports no hover while the
+ * rail is still displayed, where a tap would otherwise leave `:hover` stuck on
+ * a row the reader has already scrolled past.
+ *
+ * `:not([data-scrubbing])` is the load-bearing half, and it is not theoretical.
+ * Capture on the `<nav>` suppresses `:hover` mid-drag, but it comes back the
+ * instant capture releases — on the row under the pointer, which is the row the
+ * drag ended on, not the row it started from. Without this guard the released
+ * state briefly carries two centers: `:hover` on the end row and the attribute
+ * taper on whichever row `focused` names. It mirrors the shipped
+ * `:not(:has([data-scrub-target]))`.
+ */
+@media (hover: hover) {
+  .session-mode
+    .codex-thread-user-rail:not([data-scrubbing])
+    button:hover
+    .codex-user-rail-marker {
+    color: var(--vscode-foreground, var(--foreground));
+    opacity: 1;
+  }
+  .session-mode
+    .codex-thread-user-rail:not([data-scrubbing])
+    button:hover
+    .codex-user-rail-marker-line {
+    transform: scaleX(1);
+  }
+  .session-mode
+    .codex-thread-user-rail:not([data-scrubbing])
+    button:has(+ button:hover)
+    .codex-user-rail-marker-line,
+  .session-mode
+    .codex-thread-user-rail:not([data-scrubbing])
+    button:hover
+    + button
+    .codex-user-rail-marker-line {
+    transform: scaleX(0.76924);
+  }
+  .session-mode
+    .codex-thread-user-rail:not([data-scrubbing]):hover
+    .codex-user-rail-marker[data-neighbor-distance="1"]
+    .codex-user-rail-marker-line {
+    transform: scaleX(0.76924);
+  }
+  .session-mode
+    .codex-thread-user-rail:not([data-scrubbing])
+    button:has(+ button + button:hover)
+    .codex-user-rail-marker-line,
+  .session-mode
+    .codex-thread-user-rail:not([data-scrubbing])
+    button:hover
+    + button
+    + button
+    .codex-user-rail-marker-line {
+    transform: scaleX(0.53848);
+  }
+  .session-mode
+    .codex-thread-user-rail:not([data-scrubbing]):hover
+    .codex-user-rail-marker[data-neighbor-distance="2"]
+    .codex-user-rail-marker-line {
+    transform: scaleX(0.53848);
+  }
+  .session-mode
+    .codex-thread-user-rail:not([data-scrubbing])
+    button:has(+ button + button + button:hover)
+    .codex-user-rail-marker-line,
+  .session-mode
+    .codex-thread-user-rail:not([data-scrubbing])
+    button:hover
+    + button
+    + button
+    + button
+    .codex-user-rail-marker-line {
+    transform: scaleX(0.38464);
+  }
+  .session-mode
+    .codex-thread-user-rail:not([data-scrubbing]):hover
+    .codex-user-rail-marker[data-neighbor-distance="3"]
+    .codex-user-rail-marker-line {
+    transform: scaleX(0.38464);
+  }
+}
+/*
+ * Dragging the rail (pointer capture in `ThreadUserNavigationRail`) publishes
+ * `data-scrubbing` on the list, `data-scrub-target` on the row under the
+ * pointer and `data-neighbor-distance` on rows within three of it.
+ *
+ * These rules are not a touch fallback for the hover rules above — they are the
+ * only thing that renders a drag at all. The rail calls `setPointerCapture` on
+ * its `<nav>` (`event.currentTarget`), and the Pointer Events spec retargets
+ * every subsequent event to the capturing element, so no row matches `:hover`
+ * for the duration of the drag. Measured in Chromium against these exact
+ * selectors: pressing row 0 and dragging to row 3 leaves
+ * `buttons.findIndex(b => b.matches(":hover")) === -1`, with the taper coming
+ * entirely from the attribute rules below. Delete them and dragging the rail
+ * produces no visual feedback on any device, pointer capability regardless.
+ *
+ * Shipped equivalents in Codex 26.51007.21434
+ * (`floating-navigation-rail-layout-17bd6c59412b.css`) set
+ * `--marker-progress` to .7/.4/.2 for distances 1/2/3 and 1 for the target,
+ * with width `scaleX(.2308 + .7692 * var(--marker-progress))`; the widths below
+ * are that expression evaluated, the same four the hover rules produce.
+ */
+.session-mode
+  .codex-thread-user-rail[data-scrubbing]
+  button[data-scrub-target]
+  .codex-user-rail-marker {
+  color: var(--vscode-foreground, var(--foreground));
+  opacity: 1;
+}
+.session-mode
+  .codex-thread-user-rail[data-scrubbing]
+  button[data-scrub-target]
   .codex-user-rail-marker-line {
   transform: scaleX(1);
 }
 .session-mode
-  .codex-thread-user-rail
-  button:has(+ button:hover)
-  .codex-user-rail-marker-line,
-.session-mode
-  .codex-thread-user-rail
-  button:hover
-  + button
+  .codex-thread-user-rail[data-scrubbing]
+  .codex-user-rail-marker[data-neighbor-distance="1"]
   .codex-user-rail-marker-line {
   transform: scaleX(0.76924);
 }
 .session-mode
-  .codex-thread-user-rail
-  button:has(+ button + button:hover)
-  .codex-user-rail-marker-line,
-.session-mode
-  .codex-thread-user-rail
-  button:hover
-  + button
-  + button
+  .codex-thread-user-rail[data-scrubbing]
+  .codex-user-rail-marker[data-neighbor-distance="2"]
   .codex-user-rail-marker-line {
   transform: scaleX(0.53848);
 }
 .session-mode
-  .codex-thread-user-rail
-  button:has(+ button + button + button:hover)
-  .codex-user-rail-marker-line,
-.session-mode
-  .codex-thread-user-rail
-  button:hover
-  + button
-  + button
-  + button
+  .codex-thread-user-rail[data-scrubbing]
+  .codex-user-rail-marker[data-neighbor-distance="3"]
   .codex-user-rail-marker-line {
   transform: scaleX(0.38464);
 }
+/* During a drag the marker has to sit under the finger, not ease toward it. */
+.session-mode
+  .codex-thread-user-rail[data-scrubbing]
+  .codex-user-rail-marker-line {
+  transition-duration: 0s;
+}
 @media (prefers-reduced-motion: reduce) {
   .session-mode .codex-thread-user-rail .codex-user-rail-marker-line {
-    transition: none;
+    transition-duration: 0s;
   }
 }
 @media (pointer: coarse), (hover: none) {
@@ -279,4 +444,56 @@
   .session-mode .codex-thread-edit-recovery button {
     min-height: 44px;
   }
+}
+
+/*
+ * Codex 26.51007.21434 gives the rail's hover card its surface in
+ * `floating-navigation-rail-layout-a282796ba9fb.js`, not in the tooltip chrome
+ * (the `floating-navigation-rail` variant is deliberately bare —
+ * `w-fit text-sm whitespace-normal break-words z-20 flex flex-col`, skipping the
+ * ring and shadow that `rich` tooltips get):
+ *
+ *   w-80 max-w-[calc(100vw-1rem)] rounded-xl bg-surface-elevated-secondary p-2
+ *   text-sm leading-5 text-default shadow-xl-spread ring-[0.5px] ring-border
+ *
+ * `w-80` is the same 320px as its `tooltipMaxWidth: min(20rem, …)`, so width and
+ * cap agree; `railPreviewPosition` carries both plus the `calc(100vw - 1rem)`
+ * clamp. `--popover` is our theme-switched elevated surface and
+ * `--codex-description` our muted body token, so one rule covers both themes.
+ *
+ * `position`/`top`/`left` arrive inline from the measured anchor: the card is
+ * portalled to `.session-mode` because the rail is `overflow-y: auto` under a
+ * fade `mask`, either of which would clip a nested card.
+ */
+.session-mode .codex-user-rail-preview {
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 320px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--popover, var(--background));
+  color: var(--popover-foreground, var(--foreground));
+  font-size: 13px;
+  line-height: 20px;
+  white-space: normal;
+  overflow-wrap: break-word;
+  box-shadow:
+    0 0 0 0.5px var(--border),
+    0 10px 30px -10px rgb(0 0 0 / 35%);
+  /*
+   * Official sets `interactive: ze` where `ze = c != null` and `c` is the rail's
+   * `onBookmarkChange` prop, so the card only accepts the pointer once bookmark
+   * controls are wired into it. We have not ported bookmarking, so our card
+   * holds no controls and stays transparent to the pointer — the same state the
+   * plugin is in when that handler is absent. This also keeps the card from
+   * stealing hover from the marker it is anchored to.
+   */
+  pointer-events: none;
+}
+
+/* `text-codex-description` on the reply body; the label keeps `text-default`. */
+.session-mode .codex-user-rail-preview-response {
+  color: var(--codex-description, var(--muted-foreground));
 }

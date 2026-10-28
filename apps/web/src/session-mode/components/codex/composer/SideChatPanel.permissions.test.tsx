@@ -249,7 +249,7 @@ it("uses explicit null for a new draft's defaults even while another thread is s
   const mainBefore = structuredClone(
     useThreadModelStore.getState().threads.main,
   );
-  render(<AccessModePopover compact threadId={null} />);
+  render(<AccessModePopover threadId={null} />);
   fireEvent.keyDown(screen.getByRole("button", { name: /^执行权限：/ }), {
     key: "ArrowDown",
   });

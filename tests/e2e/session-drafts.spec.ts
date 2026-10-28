@@ -201,7 +201,9 @@ test("Claude sessions keep separate text and images across switches and reload; 
         .addAgentCard({ kind: "cc", id, cwd, preview: `Claude ${id}` });
     useAgentCenterStore.getState().setCurrentAgentCardId("ux-0", "cc");
   });
-  const input = page.locator(".session-agent-view textarea:visible");
+  const input = page.locator(
+    ".session-agent-view .claude-message-input:visible",
+  );
   const a = page.locator('[role=tab][data-tab-key="cc:ux-0"]');
   const b = page.locator('[role=tab][data-tab-key="cc:ux-1"]');
   await input.fill("Claude A unfinished");
@@ -212,34 +214,36 @@ test("Claude sessions keep separate text and images across switches and reload; 
     ),
   ).toHaveCount(1);
   await b.click();
-  await expect(input).toHaveValue("");
+  await expect
+    .poll(() => input.evaluate((node) => node.textContent))
+    .toBe("");
   await expect(
     page.locator(".session-context-chip.is-image, .session-attachment"),
   ).toHaveCount(0);
   await input.fill("Claude B unfinished");
   await a.click();
-  await expect(input).toHaveValue("Claude A unfinished");
+  await expect(input).toHaveText("Claude A unfinished");
   await input.press("Enter");
   await expect.poll(() => !!finish).toBe(true);
   await b.click();
   await finish!();
-  await expect(input).toHaveValue("Claude B unfinished");
+  await expect(input).toHaveText("Claude B unfinished");
   await a.click();
-  await expect(input).toHaveValue("Claude A unfinished");
+  await expect(input).toHaveText("Claude A unfinished");
   await expect(
     page.locator(
       ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
     ),
   ).toHaveCount(1);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await expect(input).toHaveValue("Claude A unfinished");
+  await expect(input).toHaveText("Claude A unfinished");
   await expect(
     page.locator(
       ".session-context-chip.is-image[data-state=ready], .session-attachment[data-state=ready]",
     ),
   ).toHaveCount(1);
   await b.click();
-  await expect(input).toHaveValue("Claude B unfinished");
+  await expect(input).toHaveText("Claude B unfinished");
   await a.click();
   await input.fill("");
   finish = undefined;

@@ -4,6 +4,7 @@ import { useThreadModelSettings } from "@session/hooks/useThreadModelSettings";
 import { Button } from "@session/components/ui/button";
 import { NativeComposerIcon } from "./NativeComposerIcon";
 import { ComposerTooltip } from "./ComposerTooltip";
+import { ComposerFooterLabel } from "./ComposerToolbarContext";
 import { useModels } from "../hooks/useModels";
 import { useOrdinaryNativePickerModels } from "./ordinaryNativePickerModels";
 import { nativeReasoningLabel } from "./nativeReasoningLabel";
@@ -27,20 +28,26 @@ type NativeModelTriggerProps = React.ComponentProps<typeof Button> & {
 export const NativeModelTrigger = forwardRef<
   HTMLButtonElement,
   NativeModelTriggerProps
->(function NativeModelTrigger({
-  pickerOpen = false,
-  pickerSimple = false,
-  pickerOpenLabel,
-  completionTooltipHeld = false,
-  minimumContentWidth,
-  preferredContentWidth,
-  ...props
-}, ref) {
+>(function NativeModelTrigger(
+  {
+    pickerOpen = false,
+    pickerSimple = false,
+    pickerOpenLabel,
+    completionTooltipHeld = false,
+    minimumContentWidth,
+    preferredContentWidth,
+    ...props
+  },
+  ref,
+) {
   const threadId = useCodexStore((s) => s.currentThreadId);
   const { model, modelProvider, reasoningEffort } =
     useThreadModelSettings(threadId);
   const { providerItems, openAiModels, modelStatus } = useModels();
-  const pickerModels = useOrdinaryNativePickerModels(openAiModels, modelProvider === "openai");
+  const pickerModels = useOrdinaryNativePickerModels(
+    openAiModels,
+    modelProvider === "openai",
+  );
   const catalog =
     modelProvider === "openai"
       ? canonicalNativeModel(pickerModels, model)
@@ -67,13 +74,16 @@ export const NativeModelTrigger = forwardRef<
   const label =
     (modelProvider === "openai"
       ? catalog?.displayName || catalog?.model
-      : providerItems(modelProvider).find((item) => item.id === model)?.label) ??
+      : providerItems(modelProvider).find((item) => item.id === model)
+          ?.label) ??
     model ??
     "选择模型";
   const effort = displayedEffort || "默认";
   const enhancedTrigger =
-    pickerOpenLabel !== undefined && modelProvider === "openai" &&
-    !modelPending && modelStatus !== "error";
+    pickerOpenLabel !== undefined &&
+    modelProvider === "openai" &&
+    !modelPending &&
+    modelStatus !== "error";
   const showPurpose = enhancedTrigger && pickerOpen && pickerSimple;
   const triggerProps: React.ComponentProps<typeof Button> = {
     "aria-label": modelPending
@@ -85,15 +95,34 @@ export const NativeModelTrigger = forwardRef<
     triggerProps["aria-label"] = undefined;
     triggerProps["aria-labelledby"] = undefined;
   }
+  /*
+   * Official nests the two labels at different tiers: the effort text is a
+   * `collapse: "sm"` label inside the model trigger's selected value, and the
+   * model name around it is `collapse: "none"`
+   * (`app-initial-fee819fe4f22.js` @5298263). So a narrowing footer drops the
+   * effort first and keeps the model name at every width — the reader can
+   * always see which model is about to answer. Both keep their text in the
+   * button's `aria-label` regardless.
+   */
   const selection = (
     <>
-      <span className="session-native-model-label session-model-name">
-        {modelPending ? "Loading model…" : isUnknownOpenAiModel ? "自定义" : label}
-      </span>
+      <ComposerFooterLabel
+        collapse="none"
+        className="session-native-model-label session-model-name"
+      >
+        {modelPending
+          ? "Loading model…"
+          : isUnknownOpenAiModel
+            ? "自定义"
+            : label}
+      </ComposerFooterLabel>
       {!modelPending && (
-        <span className="session-native-model-effort session-model-effort">
+        <ComposerFooterLabel
+          collapse="sm"
+          className="session-native-model-effort session-model-effort"
+        >
           {nativeReasoningLabel(displayedEffort)}
-        </span>
+        </ComposerFooterLabel>
       )}
     </>
   );
@@ -115,11 +144,13 @@ export const NativeModelTrigger = forwardRef<
         {enhancedTrigger ? (
           <span
             className="session-native-model-trigger-content"
-            style={pickerOpen && preferredContentWidth !== undefined
-              ? { width: preferredContentWidth }
-              : pickerOpen && minimumContentWidth !== undefined
-                ? { minWidth: minimumContentWidth }
-                : undefined}
+            style={
+              pickerOpen && preferredContentWidth !== undefined
+                ? { width: preferredContentWidth }
+                : pickerOpen && minimumContentWidth !== undefined
+                  ? { minWidth: minimumContentWidth }
+                  : undefined
+            }
           >
             <span
               className="session-native-model-trigger-measurement"
@@ -131,9 +162,13 @@ export const NativeModelTrigger = forwardRef<
               <span className="session-native-model-trigger-placeholder">
                 {pickerOpenLabel}
               </span>
-            ) : selection}
+            ) : (
+              selection
+            )}
           </span>
-        ) : selection}
+        ) : (
+          selection
+        )}
         <NativeComposerIcon name="chevron" />
       </Button>
     </ComposerTooltip>

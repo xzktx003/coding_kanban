@@ -6,6 +6,15 @@ interface CCSettingsState {
   toggleThinking: () => void;
   showPermissionCards: boolean;
   toggleShowPermissionCards: () => void;
+  /**
+   * `claudeCode.useCtrlEnterToSend`. When on, only Ctrl/Cmd+Enter submits and
+   * a bare Enter inserts a newline.
+   */
+  useCtrlEnterToSend: boolean;
+  toggleUseCtrlEnterToSend: () => void;
+  /** `claudeCode.showMessageTimestamps`, default on as in the extension. */
+  showMessageTimestamps: boolean;
+  toggleShowMessageTimestamps: () => void;
 }
 
 export const useCCSettingsStore = create<CCSettingsState>()(
@@ -16,6 +25,14 @@ export const useCCSettingsStore = create<CCSettingsState>()(
       showPermissionCards: false,
       toggleShowPermissionCards: () =>
         set((state) => ({ showPermissionCards: !state.showPermissionCards })),
+      useCtrlEnterToSend: false,
+      toggleUseCtrlEnterToSend: () =>
+        set((state) => ({ useCtrlEnterToSend: !state.useCtrlEnterToSend })),
+      showMessageTimestamps: true,
+      toggleShowMessageTimestamps: () =>
+        set((state) => ({
+          showMessageTimestamps: !state.showMessageTimestamps,
+        })),
     }),
     {
       name: 'kanban.session.cc-settings',

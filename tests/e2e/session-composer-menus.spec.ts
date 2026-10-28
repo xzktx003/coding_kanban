@@ -204,11 +204,15 @@ test("Claude slash menu keeps the editor focused while selecting a command", asy
     });
   });
   await page.setViewportSize({ width: 375, height: 667 });
-  const editor = page.locator(".session-mode textarea").first();
+  const editor = page.locator(".session-mode .claude-message-input").first();
   await editor.fill("/");
   const menu = page.locator("[data-composer-suggestions]");
   await expect(menu).toBeVisible();
   await menu.getByRole("option", { name: "/help", exact: true }).click();
-  await expect(editor).toHaveValue("/help ");
+  // Exact textContent, not toHaveText: the trailing space is the official
+  // behavior and toHaveText would normalize it away.
+  await expect
+    .poll(() => editor.evaluate((node) => node.textContent))
+    .toBe("/help ");
   await expect(editor).toBeFocused();
 });

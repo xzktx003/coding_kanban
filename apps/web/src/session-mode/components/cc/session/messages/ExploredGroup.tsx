@@ -3,13 +3,15 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@session/components/ui/badge';
 import type { ToolResultBlock, ToolUseBlock } from '../../types/messages';
-import { GlobTool, GrepTool, ReadTool } from './tool-use';
+import { ToolCardView } from '../../presentation/cards';
+import { useCardContext } from '../../presentation/CardContext';
 
 const MAX_VISIBLE_LOADING = 5;
 
 interface ExploredItem {
   block: ToolUseBlock;
   inlineError?: ToolResultBlock | null;
+  result?: ToolResultBlock | null;
 }
 
 interface Props {
@@ -17,41 +19,19 @@ interface Props {
   isCompleted: boolean;
 }
 
-function ItemRow({ block, inlineError }: ExploredItem) {
-  const [showError, setShowError] = useState(false);
-  const err = inlineError ?? null;
-
-  if (block.name === 'Read') {
-    return (
-      <ReadTool
+function ItemRow({ block, inlineError, result }: ExploredItem) {
+  const context = useCardContext();
+  // Read/Grep/Glob fold into this group, so the aligned cards must render
+  // here too — otherwise the exploration rows keep the legacy look.
+  return (
+    <div className="claude-presentation">
+      <ToolCardView
         block={block}
-        inlineError={err}
-        showError={showError}
-        onToggleError={() => setShowError((p) => !p)}
+        result={result ?? inlineError ?? undefined}
+        context={context}
       />
-    );
-  }
-  if (block.name === 'Grep') {
-    return (
-      <GrepTool
-        block={block}
-        inlineError={err}
-        showError={showError}
-        onToggleError={() => setShowError((p) => !p)}
-      />
-    );
-  }
-  if (block.name === 'Glob') {
-    return (
-      <GlobTool
-        block={block}
-        inlineError={err}
-        showError={showError}
-        onToggleError={() => setShowError((p) => !p)}
-      />
-    );
-  }
-  return null;
+    </div>
+  );
 }
 
 export function ExploredGroup({ items, isCompleted }: Props) {
@@ -82,7 +62,11 @@ export function ExploredGroup({ items, isCompleted }: Props) {
                 transition={{ duration: 0.2, ease: 'easeOut' }}
                 className="overflow-hidden"
               >
-                <ItemRow block={item.block} inlineError={item.inlineError} />
+                <ItemRow
+                  block={item.block}
+                  inlineError={item.inlineError}
+                  result={item.result}
+                />
               </motion.div>
             );
           })}
@@ -129,7 +113,12 @@ export function ExploredGroup({ items, isCompleted }: Props) {
                 className="overflow-hidden mt-0.5 pl-4"
               >
                 {items.map((item) => (
-                  <ItemRow key={item.block.id} block={item.block} inlineError={item.inlineError} />
+                  <ItemRow
+                    key={item.block.id}
+                    block={item.block}
+                    inlineError={item.inlineError}
+                    result={item.result}
+                  />
                 ))}
               </motion.div>
             )}

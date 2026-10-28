@@ -117,7 +117,10 @@ test("long Codex, Claude and ACP chats keep navigation, latest message and compo
         .locator(
           kind === "codex"
             ? ".session-mode [contenteditable=true]"
-            : ".session-mode textarea",
+            : kind === "cc"
+              ? ".session-mode .claude-message-input"
+              : // ACP still renders a real textarea.
+                ".session-mode textarea",
         )
         .first();
       await expect(editor).toBeVisible();
@@ -133,7 +136,7 @@ test("long Codex, Claude and ACP chats keep navigation, latest message and compo
           .getBoundingClientRect();
         const editor = document
           .querySelector(
-            ".session-mode [contenteditable=true], .session-mode textarea",
+            ".session-mode [contenteditable=true], .session-mode .claude-message-input",
           )!
           .getBoundingClientRect();
         return {

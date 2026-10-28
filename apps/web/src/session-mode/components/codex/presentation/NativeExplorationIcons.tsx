@@ -1,5 +1,5 @@
 import type { SVGProps } from "react";
-/** Original read/search/list assets: openai.chatgpt 26.51002.51308, sites-end-resource i_. */
+/** Original read/search/list assets: openai.chatgpt 26.51002.51308 (asset bytes re-verified unchanged in 26.51007.21434), sites-end-resource i_. */
 export function NativeReadIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg

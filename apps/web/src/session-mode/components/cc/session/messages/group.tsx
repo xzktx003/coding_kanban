@@ -135,7 +135,11 @@ export type RenderItem =
     }
   | {
       kind: 'explored';
-      items: Array<{ block: ToolUseBlock; inlineError: ToolResultBlock | null }>;
+      items: Array<{
+        block: ToolUseBlock;
+        inlineError: ToolResultBlock | null;
+        result?: ToolResultBlock | null;
+      }>;
       mt: string;
       isLocallyCompleted: boolean;
     };
@@ -143,7 +147,8 @@ export type RenderItem =
 export function buildRenderItems(
   blocks: ContentBlock[],
   isToolBlock: (b: { type: string }) => boolean,
-  inlineErrors?: Record<string, ToolResultBlock>
+  inlineErrors?: Record<string, ToolResultBlock>,
+  toolResults?: Record<string, ToolResultBlock>
 ): RenderItem[] {
   const result: RenderItem[] = [];
   let i = 0;
@@ -156,14 +161,22 @@ export function buildRenderItems(
 
     if (block.type === 'tool_use' && SILENT_TOOLS.has(block.name)) {
       // Collect consecutive SILENT_TOOL tool_use blocks into one ExploredGroup.
-      const groupItems: Array<{ block: ToolUseBlock; inlineError: ToolResultBlock | null }> = [];
+      const groupItems: Array<{
+        block: ToolUseBlock;
+        inlineError: ToolResultBlock | null;
+        result?: ToolResultBlock | null;
+      }> = [];
       while (
         i < blocks.length &&
         blocks[i].type === 'tool_use' &&
         SILENT_TOOLS.has((blocks[i] as ToolUseBlock).name)
       ) {
         const b = blocks[i] as ToolUseBlock;
-        groupItems.push({ block: b, inlineError: inlineErrors?.[b.id] ?? null });
+        groupItems.push({
+          block: b,
+          inlineError: inlineErrors?.[b.id] ?? null,
+          result: toolResults?.[b.id] ?? null,
+        });
         i++;
       }
       // If any block follows the group in this message, exploration phase is over.

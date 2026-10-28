@@ -15,7 +15,7 @@ const input = (page: Page, kind: "codex" | "cc") =>
   page.locator(
     kind === "codex"
       ? ".session-agent-view .session-codex-composer [contenteditable=true]:visible"
-      : ".session-agent-view textarea:visible",
+      : ".session-agent-view .claude-message-input:visible",
   );
 const tab = (page: Page, kind: "codex" | "cc") =>
   page.locator(
@@ -217,7 +217,8 @@ for (const profile of [
           (window as any).__mixedInputFocus.phase = `passive-${kind}`;
         }, kind);
         await select(kind);
-        if (kind === "cc") await expect(input(page, kind)).toHaveValue(text.cc);
+        if (kind === "cc")
+          await expect(input(page, kind)).toHaveText(text.cc);
         else await expect(input(page, kind)).toHaveText(text.codex);
         await expect(images(page)).toHaveCount(1);
         await expect(

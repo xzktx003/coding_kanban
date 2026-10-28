@@ -1,6 +1,6 @@
 import { useFollowupSettingsStore } from "@session/stores/useFollowupSettingsStore";
 
-/** The three enabled main-editor variants in VSIX 26.51002.51308. */
+/** The three enabled main-editor variants in VSIX 26.51002.51308 (asset bytes re-verified unchanged in 26.51007.21434). */
 export function ComposerEnterSettings() {
   const {
     enterBehavior,

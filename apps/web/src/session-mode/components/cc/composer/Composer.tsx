@@ -23,6 +23,15 @@ import {
   useSessionTextDraft,
 } from "@session/stores/useSessionDraftStore";
 import { useCCStore } from "@session/stores/cc";
+import {
+  ComposerInput,
+  type ComposerInputHandle,
+} from "@session/components/cc/presentation/ComposerInput";
+import {
+  modeRingClass,
+  placeholderText,
+} from "@session/components/cc/presentation/composer";
+import { useCCSettingsStore } from "@session/stores/settings";
 import { CCAttachmentButton } from "./CCAttachmentButton";
 import { CCSkillsPopover } from "./CCSkillsPopover";
 import { CCSlashCommandPopover } from "./CCSlashCommandPopover";
@@ -61,7 +70,14 @@ export function Composer({
   const { setCurrentAgentCardId } = useAgentCenterStore();
   const { handleNewSession, ensureSessionForSend } = useCCSessionManager();
 
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const inputHandle = useRef<ComposerInputHandle | null>(null);
+  const { useCtrlEnterToSend } = useCCSettingsStore();
+  const permissionMode = useCCStore((state) => state.options.permissionMode);
+  // Chips are painted from tokens this composer inserted, so text that merely
+  // looks like a mention stays plain.
+  const insertedMentions = useRef<Set<string>>(new Set()).current;
+  const isMac =
+    typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform ?? "");
   const isComposing = useRef(false);
   const attachments = useImageAttachments(owner);
   const images = attachments.paths;
@@ -76,7 +92,7 @@ export function Composer({
   useEffect(() => {
     const handleFocusRequest = () => {
       requestAnimationFrame(() => {
-        textareaRef.current?.focus();
+        inputHandle.current?.focus();
       });
     };
     window.addEventListener(CC_INPUT_FOCUS_EVENT, handleFocusRequest);
@@ -181,22 +197,6 @@ export function Composer({
     }
   }, [isLoading, input, handleSendMessage]);
 
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        if (
-          isComposing.current ||
-          (e.nativeEvent as KeyboardEvent & { isComposing?: boolean })
-            .isComposing
-        ) {
-          return;
-        }
-        e.preventDefault();
-        handleSend();
-      }
-    },
-    [handleSend],
-  );
 
   return (
     <>
@@ -205,25 +205,22 @@ export function Composer({
           <div
             ref={wrapperRef}
             onPasteCapture={attachments.onPaste}
-            className="session-composer-surface session-compact-frame"
+            className={`session-composer-surface session-compact-frame claude-composer ${modeRingClass(permissionMode)}`}
+            data-permission-mode={permissionMode}
           >
             <div className="session-compact-body">
-              <textarea
-                ref={textareaRef}
+              <ComposerInput
+                ref={inputHandle}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                onCompositionStart={() => {
-                  isComposing.current = true;
-                }}
-                onCompositionEnd={() => {
-                  setTimeout(() => {
-                    isComposing.current = false;
-                  }, 50);
-                }}
-                placeholder="Ask Claude to do anything..."
-                rows={1}
-                className="w-full resize-none overflow-y-auto bg-transparent px-3 pt-3 pb-11 text-base md:text-sm outline-none placeholder:text-muted-foreground min-h-16 max-h-48"
+                onChange={setInput}
+                onSubmit={handleSend}
+                useCtrlEnterToSend={useCtrlEnterToSend}
+                insertedMentions={insertedMentions}
+                placeholder={placeholderText({
+                  busy: isLoading,
+                  isMac,
+                  focused: true,
+                })}
               />
               <ImageAttachmentStrip key={owner} compact draft={attachments} />
             </div>
@@ -304,21 +301,21 @@ export function Composer({
       <CCSlashCommandPopover
         input={input}
         setInput={setInput}
-        editorRef={textareaRef}
+        editorRef={inputHandle}
         triggerElement={triggerEl}
       />
 
       <CCSkillsPopover
         input={input}
         setInput={setInput}
-        editorRef={textareaRef}
+        editorRef={inputHandle}
         triggerElement={triggerEl}
       />
 
       <FileMentionPopover
         input={input}
         setInput={setInput}
-        editorRef={textareaRef}
+        editorRef={inputHandle}
         triggerElement={triggerEl}
       />
     </>

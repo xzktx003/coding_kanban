@@ -1,5 +1,7 @@
 # Coding Kanban Project Overview
 
+新增安卓客户端（`apps/android`）：React Native / Expo SDK 57，通过局域网访问同一后端，与桌面工作台共用 `@agent-orchestrator/shared` 类型与既有 `/api/*` 接口。终端模式复用 Web 的移动端四页信息架构并提供真实 xterm.js 终端，会话模式接入 `/api/codex/thread/*` 与 `/api/events` SSE。客户端仅使用局域网地址连接、无账号体系，构建为本地 Android APK，详见 [安卓客户端](android-client.md)。
+
 会话运行层自有实现已迁移至 TypeScript，采用独立 Node 进程继续维护 Agent 生命周期。迁移实现位于 `packages/session-runtime/src`，目前 208 个接口及各领域服务已接入 TS，默认新启动使用 TS；已存活的旧运行服务继续复用，正式切换与完整验收分别记录。完整范围、208 个接口的审计和最终切换条件见 [TypeScript 迁移](session-typescript-migration.md)。
 
 Codex 聊天正文、输入区、命令与工具、请求、文件 review 和消息工作流按本地 VS Code 插件的实际启用组件适配。字体、段落间距、代码/表格/公式/Mermaid、原生图标与菜单分别有原包对照；手机保留紧凑固定输入高度、左侧附件/删除、触控热区和安全区。公共输入区与会话窗口分离、悬浮 Diff、多项目/关注标签/自由分屏、后台同步与持久草稿保持现有边界，Claude 沿用原 renderer。最新全量检查、桌面/手机两主题整页截图和外部能力限制见 [实施与验收记录](designs/session-render-alignment/implementation.md)；运行层构建与正式激活、原生未实现的历史搜索及实际云接口验收分别记录，不宣称全页面零像素差异。
@@ -112,7 +114,7 @@ Coding Kanban 是一个面向 CLI Coding Agent 的本地/内网工作台。它�
 - 手机端页面标题区对应显示“手机端 Coding Kanban”，并提供“电脑端 Coding Kanban”切换入口和 Agent 完成通知开关。
 - `扫描` 菜单收纳扫描 tmux 和扫描会话；`设置` 面板以侧栏分类收纳“工具 / 资源调节 / 飞书通知”。工具包含操作提示和当前浏览器完成通知，资源调节包含完整记录缓存、VS Code 省内存/保持状态、释放 VS Code 缓存和资源诊断，飞书通知分别控制所有已登记看板任务的后端完成提醒与私聊回复续跑。顶栏总会话数只在桌面宽度展示，900px 及以下隐藏该统计以给“电脑端 / 手机端 Coding Kanban”切换标题留出空间，连接异常提示不受影响。
 - 顶栏可折叠；折叠状态保存在 `localStorage` 的 `agent-console-layout`。
-- 会话分组配置保存在 `localStorage` 的 `coding-kanban-session-groups-v1`，两处桌面看板视图共享，当前不做跨浏览器同步；分组颜色按配置顺序稳定分配，前 12 个使用醒目分类色，更多分组继续生成不同的高对比 HSL 色值；assignment 同时保存稳定会话和安全运行身份别名，以便重启后恢复归属。
+- 终端看板会话分组使用服务端共享状态和本机操作记录，电脑、手机及同源多页可同步分组名称、归属和折叠状态；当前会话选择留在设备本地。分组颜色按配置顺序稳定分配，前 12 个使用醒目分类色，更多分组继续生成不同的高对比 HSL 色值；assignment 同时保存稳定会话和安全运行身份别名，以便重启后恢复归属。操作确认、离线重试及旧客户端边界见 [分组同步](session-terminal-groups-sync.md)。
 - 设置的“资源调节”分类提供完整记录缓存按钮：节省内存时最多保留 90 条已加载消息，保留更多时最多保留 300 条；两种模式都不会让看板卡片或聚焦侧栏挂载真实终端。
 - 设置的“资源调节”分类提供 `资源诊断` 面板，打开时每秒刷新浏览器侧资源指标与后端诊断：xterm/终端视图数量、终端 WebSocket 数、会话快照吞吐、终端实时流吞吐、终端历史缓冲裁剪状态、VS Code iframe 当前/隐藏数量、主线程长任务、VS Code 代理 HTTP/WS 吞吐和 Chromium JS heap；面板会给出当前压力源判读，用于区分卡片区域意外挂载的 xterm、多终端 WebSocket、快照频率、活跃终端输出、终端 replay 裁剪、隐藏 VS Code iframe、code-server 代理流量和真实 retained-object 泄漏。
 - 设置的“工具”分类中的“操作提示”弹出以下提示：

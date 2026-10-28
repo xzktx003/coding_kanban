@@ -58,7 +58,7 @@
 
 `useFollowupSettingsStore` 的 mode、enterBehavior、reviewDelivery 是全局本机偏好，不是 thread-owned 配置。诊断确实观察到 A 将 mode 改为 steer、B 将 enterBehavior 改为 cmdAlways 后，A 刷新得到 queue/cmdAlways：B 的旧 mode 随整对象写回。
 
-该问题单列为较低优先级的同源多页偏好保存体验，不与线程 pending/ACK 协议合并。`useConfigStore` 是新聊天默认，`useAgentSettingsStore` 是当前 Agent/指令类型偏好；本轮仅审阅这两个 store，没有实证双页反例，不能按 grep 宣告业务故障。不同设备/profile 各自保存偏好是正常边界，不要求共享草稿或设置。
+该问题单列为较低优先级的同源多页偏好保存体验，不与线程 pending/ACK 协议合并。`useConfigStore` 是新聊天默认，`useAgentSettingsStore` 是当前 Agent/指令类型偏好；本轮仅审阅这两个 store，没有实证双页反例，不能按 grep 宣告业务故障。**2026-10-28 补记**：这两个 store 后来各自拿到了实证反例并修复——`useConfigStore` 的 `sandbox`/`approvalPolicy` 回退会让新聊天权限比用户当时的选择更宽，`useAgentSettingsStore` 的 `instructionType` 回退会让 `AgentsMdView` 的保存落到错误文件。两者已改为逐字段保存，见[设备偏好多页验收](device-preferences-multitab-20261028.md)。本行当时的判断（不按 grep 宣告故障）仍然成立：反例是先写失败用例看到真实红灯才确立的。不同设备/profile 各自保存偏好是正常边界，不要求共享草稿或设置。
 
 初始只读阶段没有修改产品或写入“已修复”清单。后续专项仍未测实体手机、性能、原生跨设备并发改设置或所有权限策略，不能把本机设置持久化验收泛化到这些范围。
 

@@ -67,7 +67,7 @@ function PermissionOwnerHarness({ mode, onSubmit, onSheetClose }: {
           <form>
             <textarea data-r26-editor="main" aria-label="R26 主输入草稿" value={inputValue} onChange={(event) => setInputValue(event.currentTarget.value)} />
             <ComposerToolbarProvider>
-              <AccessModePopover compact threadId={A} />
+              <AccessModePopover threadId={A} />
             </ComposerToolbarProvider>
           </form>
         </section>
@@ -77,7 +77,7 @@ function PermissionOwnerHarness({ mode, onSubmit, onSheetClose }: {
             title="展开编辑"
             description="返回会保留正文、上下文与代码；发送方式沿用当前设置。"
             onClose={() => { onSheetClose(); setExpanded(false); }}
-            footer={<AccessModePopover compact threadId={A} />}
+            footer={<AccessModePopover threadId={A} />}
           >
             <div data-draft-owner={OWNER_A}>
               <textarea data-r26-editor="expanded" aria-label="R26 展开输入草稿" value={inputValue} onChange={(event) => setInputValue(event.currentTarget.value)} />

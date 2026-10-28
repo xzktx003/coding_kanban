@@ -138,7 +138,12 @@ for (const kind of ["codex", "cc", "acp"]) {
     const editor =
       kind === "codex"
         ? page.locator(".session-mode [contenteditable=true]").first()
-        : page.locator(".session-mode textarea:visible").first();
+        : kind === "cc"
+          ? page
+              .locator(".session-mode .claude-message-input:visible")
+              .first()
+          : // ACP still renders a real textarea.
+            page.locator(".session-mode textarea:visible").first();
     if (kind === "acp")
       await expect(page.locator(".session-target-agent")).toContainText(
         "test-agent",
@@ -227,7 +232,7 @@ for (const kind of ["codex", "cc", "acp"]) {
       page.getByRole("button", { name: "发送消息", exact: true }),
     ).toBeVisible();
     if (kind === "codex") await expect(editor).toContainText("保留草稿");
-    else await expect(editor).toHaveValue("保留草稿");
+    else await expect(editor).toHaveText("保留草稿");
     if (kind === "codex") {
       await editor.press("ControlOrMeta+A");
       await editor.press("Backspace");

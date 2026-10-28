@@ -1,6 +1,6 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { classifySubagentThread, subagentParent, type SubagentThread } from "@agent-orchestrator/shared";
-import { HistoryBudget, type HistoryBudgetLimits } from "../core/history-budget.js";
+import { HistoryBudget, HistoryBudgetExceeded, type HistoryBudgetLimits } from "../core/history-budget.js";
 import { sanitizeCodexHistory } from "./projection.js";
 import { KeyedSerial } from "../core/serial.js";
 import { isObject, object, type Json, type JsonObject } from "../core/json.js";
@@ -529,14 +529,98 @@ export class Ownership {
   }
 }
 
+/** A native reply that did not fit its decoder frame; the same cursor is safe to retry smaller. */
+function oversizedFrame(error: unknown): boolean {
+  const text = message(error);
+  return (
+    text.includes("RPC frame exceeded byte limit") ||
+    text.includes("decoded message length too large")
+  );
+}
+
+/** One turn's item bodies, in transcript order, bounded by the caller's remaining allowance. */
+async function readTurnItems(
+  raw: Rpc,
+  budget: HistoryBudget,
+  threadId: string,
+  turnId: string,
+  allowance: number,
+): Promise<Json[]> {
+  const items: Json[] = [], seen = new Set<string>();
+  let cursor: Json = null;
+  let limit = Math.min(100, Math.max(1, allowance));
+  while (items.length < allowance) {
+    budget.beginPage();
+    const read = await readPageWithinFrame(
+      raw,
+      "thread/items/list",
+      { threadId, turnId, cursor, sortDirection: "asc" },
+      Math.min(limit, allowance - items.length),
+    );
+    if ("early" in read) break;
+    const { page } = read;
+    limit = read.limit;
+    budget.add(page);
+    if (!Array.isArray(page.data))
+      throw new Error("items/list response missing data");
+    for (const entry of page.data) {
+      const row = object(entry);
+      // A row from another turn would silently corrupt this transcript.
+      if (row.turnId !== undefined && row.turnId !== turnId)
+        throw new Error("items/list returned a foreign turn");
+      items.push(row.item ?? entry);
+    }
+    cursor = page.nextCursor;
+    if (cursor === null) break;
+    if (typeof cursor !== "string") throw new Error("Invalid items/list cursor");
+    if (seen.has(cursor)) throw new Error("Repeated items/list cursor");
+    seen.add(cursor);
+  }
+  return items;
+}
+
+/** Request one page, halving `limit` while the native reply cannot be decoded. */
+async function readPageWithinFrame(
+  raw: Rpc,
+  method: string,
+  params: JsonObject,
+  limit: number,
+  onFirstFailure?: (error: unknown) => Json | undefined,
+): Promise<{ page: JsonObject; limit: number } | { early: Json }> {
+  let current = limit;
+  for (;;) {
+    try {
+      return {
+        page: object(await raw(method, { ...params, limit: current })),
+        limit: current,
+      };
+    } catch (error) {
+      const early = onFirstFailure?.(error);
+      if (early !== undefined) return { early };
+      if (current > 1 && oversizedFrame(error)) {
+        current = Math.max(1, Math.floor(current / 2));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 /** Read-only history loading is deliberately outside execution ownership. */
 export async function readHistory(
   raw: Rpc,
   id: string,
-  limits: Partial<HistoryBudgetLimits> = {},
+  limits: Partial<HistoryBudgetLimits> & {
+    allowPartial?: boolean;
+    turnLimit?: number;
+    itemBudget?: number;
+    maxItemsPerTurn?: number;
+  } = {},
   legacy?: (id: string) => Promise<Json>,
 ): Promise<Json> {
-  const budget = new HistoryBudget(limits);
+  const { allowPartial, turnLimit, itemBudget, maxItemsPerTurn, ...budgetLimits } = limits;
+  const partial = allowPartial === true;
+  const budget = new HistoryBudget(budgetLimits, { partial });
   const result = object(await raw("thread/read", { threadId: id, includeTurns: false }));
   budget.add(result);
   const thread = object(result.thread);
@@ -551,20 +635,82 @@ export async function readHistory(
     // an isolated reader keep the original direct read.
     return legacy(id);
   }
-  const turns: Json[] = [], seen = new Set<string>(); let cursor: Json = null;
-  while (true) {
-    budget.beginPage();
+  // Shells first, bodies separately: the official plugin never lets one page
+  // carry whole item bodies, which is what pushes a reply past the frame cap.
+  const pageTurns = Math.max(1, turnLimit ?? 100);
+  const perTurnItems = Math.max(1, maxItemsPerTurn ?? 98);
+  // This endpoint aggregates a whole thread, so the item allowance covers a
+  // full page of turns; the byte/entry budget remains the real ceiling.
+  let remainingItems = Math.max(1, itemBudget ?? pageTurns * perTurnItems);
+  const turns: Json[] = [], seen = new Set<string>();
+  let cursor: Json = null;
+  let limit = pageTurns;
+  let incomplete: string | undefined;
+  let resumeCursor: Json = null;
+  let lastTurnId: string | undefined;
+  reading: for (;;) {
     let page: JsonObject;
-    try { page = object(await raw("thread/turns/list", { threadId: id, cursor, limit: 100, sortDirection: "asc", itemsView: "full" })); }
-    catch (error) {
-      if (!turns.length && cursor === null && message(error).includes("not materialized yet") && message(error).includes("before first user message")) {
-        thread.turns = []; return result;
+    try {
+      budget.beginPage();
+      const read = await readPageWithinFrame(
+        raw,
+        "thread/turns/list",
+        { threadId: id, cursor, sortDirection: "asc", itemsView: "notLoaded" },
+        limit,
+        (error) =>
+          !turns.length &&
+          cursor === null &&
+          message(error).includes("not materialized yet") &&
+          message(error).includes("before first user message")
+            ? null
+            : undefined,
+      );
+      if ("early" in read) {
+        thread.turns = [];
+        return result;
+      }
+      page = read.page;
+      limit = read.limit;
+      budget.add(page);
+    } catch (error) {
+      if (partial && error instanceof HistoryBudgetExceeded) {
+        incomplete = "budget";
+        resumeCursor = cursor;
+        break;
       }
       throw error;
     }
-    budget.add(page);
     if (!Array.isArray(page.data)) throw new Error("turns/list response missing data");
-    for (const turn of sanitizeCodexHistory(page.data)) turns.push(turn);
+    for (const shell of page.data) {
+      const turn = object(shell);
+      if (typeof turn.id !== "string" || !turn.id)
+        throw new Error("turns/list response missing turn id");
+      let items: Json[];
+      try {
+        items = await readTurnItems(raw, budget, id, turn.id, Math.min(perTurnItems, remainingItems));
+      } catch (error) {
+        if (partial && error instanceof HistoryBudgetExceeded) {
+          incomplete = "budget";
+          resumeCursor = cursor;
+          break reading;
+        }
+        throw error;
+      }
+      remainingItems -= items.length;
+      turns.push(
+        sanitizeCodexHistory({
+          ...turn,
+          items,
+          itemsView: items.length < perTurnItems ? "full" : "summary",
+        } as Json),
+      );
+      lastTurnId = turn.id;
+      if (remainingItems <= 0) {
+        incomplete = "items";
+        resumeCursor = page.nextCursor ?? null;
+        break reading;
+      }
+    }
     cursor = page.nextCursor;
     if (cursor === null) break;
     if (typeof cursor !== "string") throw new Error("Invalid turns/list cursor");
@@ -572,6 +718,14 @@ export async function readHistory(
     seen.add(cursor);
   }
   if (!isObject(result.thread)) throw new Error("Invalid thread response");
+  if (incomplete) {
+    result.thread.historyStatus = "incomplete";
+    result.thread.historyIncompleteReason = incomplete;
+    // A page cursor alone cannot express stopping mid-page, so name the last
+    // turn actually read. Callers resume after it rather than guessing.
+    result.thread.turnsNextCursor = resumeCursor;
+    result.thread.turnsResumeAfterTurnId = lastTurnId ?? null;
+  }
   result.thread.turns = turns;
   return sanitizeCodexHistory(result);
 }

@@ -24,6 +24,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type ReactNode,
@@ -74,16 +75,21 @@ export function QueueReorderList({
   ids,
   enabled,
   onReorder,
+  header,
   children,
 }: {
   identity: string;
   ids: string[];
   enabled: boolean;
   onReorder: (ids: string[]) => void;
+  header?: ReactNode;
   children: ReactNode;
 }) {
   const visible = useAgentInteractionVisible();
   const allowed = enabled && visible;
+  const hasHeader = !!header;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollable, setScrollable] = useState(false);
   const sensorCancel = useRef<(() => void) | null>(null);
   const registerCancel = useCallback((cancel: () => void) => {
     sensorCancel.current = cancel;
@@ -124,6 +130,34 @@ export function QueueReorderList({
     };
   }, [allowed]);
   const signature = JSON.stringify(ids);
+  useLayoutEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const update = () => {
+      // The surrounding rail animates its height on entry. Compare against
+      // this list's own cap so that animation does not briefly fade a queue
+      // that fits in its final layout.
+      const maxHeight = Number.parseFloat(getComputedStyle(element).maxHeight);
+      const scrollport = Number.isFinite(maxHeight)
+        ? maxHeight
+        : element.clientHeight;
+      const next = element.scrollHeight > scrollport + 1;
+      setScrollable((current) => (current === next ? current : next));
+    };
+    update();
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(element);
+    const items = element.querySelector(".session-queue-items");
+    if (items) observer?.observe(items);
+    const status = element.querySelector(".session-queue-status");
+    if (status) observer?.observe(status);
+    window.addEventListener("resize", update);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [hasHeader, identity, ids.length]);
   useEffect(() => {
     if (gesture.current) {
       gesture.current = null;
@@ -151,45 +185,56 @@ export function QueueReorderList({
       onReorder(arrayMove(captured.ids, from, to));
   };
   return (
-    <Enabled.Provider value={allowed}>
-      <DndContext
-        key={generation}
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        modifiers={modifiers}
-        onDragEnd={end}
-        onDragAbort={() => {
-          gesture.current = null;
-        }}
-        onDragCancel={() => {
-          gesture.current = null;
-        }}
-        accessibility={{
-          screenReaderInstructions: {
-            draggable:
-              "拖动手柄调整顺序；键盘用户可在消息菜单中选择上移或下移。",
-          },
-        }}
-      >
-        <SortableContext items={ids} strategy={verticalListSortingStrategy}>
-          <ol
-            className="session-queue-list"
-            onPointerDownCapture={(event) => {
-              if (
-                allowed &&
-                event.isPrimary &&
-                event.button === 0 &&
-                (event.target as Element).closest(".session-queue-drag-handle")
-              ) {
-                gesture.current = { identity, ids: [...ids] };
-              }
-            }}
-          >
-            {children}
-          </ol>
-        </SortableContext>
-      </DndContext>
-    </Enabled.Provider>
+    <div
+      ref={scrollRef}
+      className="session-queue-list"
+      data-overflowing={scrollable ? "true" : undefined}
+    >
+      {header}
+      <Enabled.Provider value={allowed}>
+        <DndContext
+          key={generation}
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={modifiers}
+          onDragEnd={end}
+          onDragAbort={() => {
+            gesture.current = null;
+          }}
+          onDragCancel={() => {
+            gesture.current = null;
+          }}
+          accessibility={{
+            screenReaderInstructions: {
+              draggable:
+                "拖动手柄调整顺序；键盘用户可在消息菜单中选择上移或下移。",
+            },
+          }}
+        >
+          <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+            {ids.length > 0 ? (
+              <ol
+                className="session-queue-items"
+                onPointerDownCapture={(event) => {
+                  if (
+                    allowed &&
+                    event.isPrimary &&
+                    event.button === 0 &&
+                    (event.target as Element).closest(
+                      ".session-queue-drag-handle",
+                    )
+                  ) {
+                    gesture.current = { identity, ids: [...ids] };
+                  }
+                }}
+              >
+                {children}
+              </ol>
+            ) : null}
+          </SortableContext>
+        </DndContext>
+      </Enabled.Provider>
+    </div>
   );
 }
 

@@ -138,7 +138,10 @@ for (const kind of ["codex", "cc", "acp"] as const) {
       .locator(
         kind === "codex"
           ? ".session-mode [contenteditable=true]"
-          : ".session-mode textarea",
+          : kind === "cc"
+            ? ".session-mode .claude-message-input"
+            : // ACP still renders a real textarea.
+              ".session-mode textarea",
       )
       .first();
     await editor.fill("Draft must stay intact");
@@ -185,7 +188,7 @@ for (const kind of ["codex", "cc", "acp"] as const) {
     );
     if (kind === "codex")
       await expect(editor).toHaveText("Draft must stay intact");
-    else await expect(editor).toHaveValue("Draft must stay intact");
+    else await expect(editor).toHaveText("Draft must stay intact");
     await page.getByRole("button", { name: "终端", exact: true }).click();
     await expect(page.locator(".workbench-terminal .focus-view")).toBeVisible();
     // Exercise the retained view's input forwarding without touching a real PTY.

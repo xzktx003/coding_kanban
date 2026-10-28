@@ -2,6 +2,8 @@ import { useAttentionStorageSync } from "./hooks/useSessionReadReceipt";
 import { useComposerViewport } from "./components/codex/composer/v2/useComposerViewport";
 import { startCodexAccessRuntimeSync } from "./stores/useCodexAccessStore";
 import { startFollowupSettingsSync } from "./stores/useFollowupSettingsStore";
+import { startAgentSettingsSync } from "./stores/useAgentSettingsStore";
+import { startConfigStoreSync } from "./components/codex/stores/useConfigStore";
 import { startConversationFormUnloadGuard } from "./components/codex/composer/conversationFormDrafts";
 import { startComposerDraftUnloadGuard } from "./components/codex/composer/v2/drafts";
 import { startCodexOperationScopeSync } from "./services/codexOperationScope";
@@ -16,6 +18,8 @@ export default function SessionWorkbenchEffects() {
     const stops = [
       startCodexAccessRuntimeSync(),
       startFollowupSettingsSync(),
+      startAgentSettingsSync(),
+      startConfigStoreSync(),
       startConversationFormUnloadGuard(),
       startComposerDraftUnloadGuard(),
       startCodexOperationScopeSync(),

@@ -237,7 +237,8 @@ export const ja = {
       ended: "タスク終了",
       arguments: "引数",
     },
-    // Original toolSummaryForCmd and activity captions, VSIX 26.51002.51308.
+    // Original toolSummaryForCmd and activity captions, VSIX 26.51002.51308
+    // (strings re-verified unchanged in 26.51007.21434 locale bundles).
     // Native mixed activity header captions.
     activityGroup: {
       toolsLeading_one: "ツールを呼び出しました",
@@ -438,7 +439,18 @@ export const ja = {
       description:
         "このターン以降の会話履歴を取り消し、メッセージを入力欄に戻します。コードファイルは復元されず、メッセージも自動送信されません。続行しますか？",
     },
+    userMessageNavigation: {
+      ariaLabel: "ユーザーメッセージ",
+      jumpAriaLabel: "ユーザーメッセージ {{position}} に移動",
+      loadingPreview: "プレビューを読み込み中",
+      previewUnavailable: "プレビューを利用できません",
+      noContent: "（内容なし）",
+      moreOutputs: "他 {{count}} 件",
+    },
     userMessage: {
+      attachment: "ユーザーの添付画像",
+      attachmentFailed: "画像を読み込めませんでした",
+      attachmentFailedShort: "失敗",
       edit: "メッセージを編集",
       editFailed: "メッセージの編集に失敗しました",
     },

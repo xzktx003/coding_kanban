@@ -278,7 +278,8 @@ export const zh = {
       ended: "任务已结束",
       arguments: "参数",
     },
-    // Original toolSummaryForCmd and activity captions, VSIX 26.51002.51308.
+    // Original toolSummaryForCmd and activity captions, VSIX 26.51002.51308
+    // (strings re-verified unchanged in 26.51007.21434 locale bundles).
     // Native mixed activity header captions.
     activityGroup: {
       toolsLeading_one: "调用了一个工具",
@@ -483,7 +484,18 @@ export const zh = {
       description:
         "将撤回本轮及之后的对话历史，并把这条消息放回输入框。代码文件不会恢复，也不会自动重新发送消息。是否继续？",
     },
+    userMessageNavigation: {
+      ariaLabel: "用户消息",
+      jumpAriaLabel: "跳转到用户消息 {{position}}",
+      loadingPreview: "正在加载预览",
+      previewUnavailable: "预览不可用",
+      noContent: "（无内容）",
+      moreOutputs: "+{{count}}",
+    },
     userMessage: {
+      attachment: "用户附件",
+      attachmentFailed: "图片加载失败",
+      attachmentFailedShort: "失败",
       edit: "编辑消息",
       editFailed: "编辑消息失败",
     },

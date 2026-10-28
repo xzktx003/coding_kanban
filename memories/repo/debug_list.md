@@ -1,3 +1,5 @@
+- 2026-10-28：完整访问权限下把推理强度推到 ultra 原本没有任何提示。官方 `Lti` 在提交 model/effort 前判 `!b || t !== "ultra" || s.reasoningEffort === "ultra"`，否则等 `Pti` 对话框，确认前不写入。注意两条路不同：原生触发器确实隐藏 ultra（`includeUltra: false` 写死在唯一生产调用点），但设置面板的 `ReasoningEffortSelector` 走 `nativeReasoningOptions`，其允许集合含 ultra，所以面板可达——排查类似「某档位到不了」的问题时先区分这两条路。官方是三出口，boolean 承载不了；门必须放在能拿到 sandbox 的那一层。权限未确认时不发问（未确认既不等于 full access 也不等于安全）。fallback 固定取权限菜单自己能产生的模式，否则刷新会拼出菜单外组合。教训：门的「过度触发」反向探针查出了测试本身的缺陷——一条用例声称覆盖 `current === "ultra"` arm，实际在第一个 arm 就返回，因为滑块永不发出与当前值相同的档位；只验证绿灯不会暴露这种用例。
+
 - 2026-10-27：旧版 legacy `thread/read` 正文走共享 app-server，超出 32 MiB 时会结束共享进程，存在连带中断其它轮次的路径。两次现场 `turn_aborted(reason=interrupted)` 没有明确停止请求，但原生日志没有逐回包因果记录，不能据此证明每次都由超限触发。现 legacy 正文用独立只读进程；已识别的超限回包只拒绝当前读取，未知超限帧隔离传输并保留活进程。用户授权重启后最新运行层已激活，目标 paginated 历史只读复验成功。
 
 - 2026-10-21：全终端偶发重连的本次现场为四次 ssh2 Client 未处理认证错误，Node 退出1后 watcher 正常恢复，不是 watcher 随机替换。SftpService 必须用持久 error 监听覆盖失败／close 后迟到回调；超时／同步 connect 错误／关闭也清理自身。旧 Client 的 close、旧操作失败和 idle 回调不得按目标键直接释放新连接；先删 Map 再 end 防同步重入。后台 homePath rejection 要观察但保留原 Promise 错误给 ~ 使用者。首六项红绿，九项新生命周期回归／文件服务共73项和 pnpm check 通过；不改认证、不加全局异常吞错、不重启 Agent，详见 docs/backend-restart-ssh-errors.md。
@@ -1349,3 +1351,261 @@
 - 会话模式闲时预载此前导入时会注册语言、运行代次、BroadcastChannel、wake-lock 和 Mermaid 全局监听。现将监听挂到活动会话生命周期，图表按需加载，App 与 composer 独立预载。生产隔离浏览器单窗口 30 次与三窗口并发 30 个样本通过；移动／桌面并发 composer p95 分别为 1.591/1.529 秒，三窗口实际输入通过。详见 `docs/designs/session-mode-parity-and-startup-speed-audit-20261027.md`。
 - 独立 Plan 页面在延迟初始化 i18n 后仍直接克隆全局实例，造成有效快照打开时报错。现仅在有效 Plan 页面初始化并等待语言实例，失败时显示显式错误；有效与无效快照组件测试通过。
 - Codex 主输入运行且有草稿时曾并列显示 Stop 与 Queue/Steer，偏离原 composer 的单一主动作。现 Queue/Steer 作为主按钮，Stop 放入“附加文件”菜单且可键盘调用；空草稿 inline Stop、展开编辑 Stop 均保留，停止中状态可见。1440/390、360px 桌面/手机浅色/深色矩阵 4/4 与停止失败/草稿回归通过；见 `docs/designs/session-render-alignment/composer-input-controls-audit-20261027.md`。
+- 2026-10-27（更早消息点击被静默丢弃）：后台历史读取进行时旧逻辑直接返回。分页点击应立即进入加载状态，等待同线程读取并重新读取当前游标/恢复锚点后再只读加载；scope 变化不得沿用旧请求。并发测试先红后绿，不推断全部现场故障相同。
+- 短队列滚动渐隐修复：原滚动/mask 在 `ol` 上，官方放在包含队列与暂停提示的外层 div；短队列在 rail 进入布局期间会误淡化。现将滚动容器移到外层，并按内容是否超过自身 max-height 启用 mask；桌面浅深两主题短/长队列、滚动顶部/底部 4/4 浏览器对照及 52 队列单测通过，`pnpm check` 通过。附件/预览四项原生逐像素 E2E 红灯仍保留。
+- 浏览器网络变化可使 composer 动态模块加载失败；原错误页按钮仅重置 React 边界，无法清除浏览器的失败模块记录。现只在用户明确点击重试时刷新页面，手机/桌面隔离浏览器确认草稿恢复且没有任务写操作；断网时两秒就绪和自动恢复仍未证明。
+- 手机会话选择器增加分组容器后，旧直接子按钮 CSS 未匹配，选项高度降至 24px。调整为组内按钮后恢复 44px 触控与选中/焦点样式；390px 浏览器先红后绿。
+- 终端看板分组同步原型使用整份快照，初始化竞态及多设备并发会覆盖修改。现按本机持久操作、服务端串行合并和精确回执同步，拒绝升级后的旧快照写入；隔离多上下文/同源多页、离线刷新与重连见 `docs/session-terminal-groups-sync.md`。
+- 会话分组仅存 `localStorage`，且 `MobileWorkbenchPage` 未接收 `sessionGroups`，故电脑分组在手机不可见。修复为服务端 `/api/session-groups`（durable-json，缺存储 503）+ 挂载拉取/空则上推，手机切换列表按用户分组分区。注意：分组同步请求必须在 `request()` 显式拒绝非法结构，早期实现把畸形 body 规范化为空分组，等于远端清空用户分组。
+- 2026-10-27（会话模式更早消息点击与滚动均无响应）：根因是会话模式根本没有到顶自动分页触发（viewport 的全部滚动监听都不调用 `loadEarlierHistory`），叠加按钮仅在 `cursors[threadId]` 有值时渲染——内存回收场景只有 `trimmedHistoryAnchors`、游标为 null，入口整体消失。修复用纯判定 `shouldLoadEarlierOnScroll` + `hasEarlierHistory`（见 `src/session-mode/components/codex/thread/earlierHistoryScroll.ts`），接入点必须在 `restoringAnchor.current` 的提前返回之后，否则虚拟列表的尺寸补偿 `scrollTo` 会连锁触发分页；`loadEarlierHistory` 在任何 await 前同步置 `earlierLoading`，所以多帧滚动不会堆叠请求。注意：`CodexThread` 在所有现有测试里都被 mock 掉，这类接线无法在 jsdom 里断言，只能靠守卫顺序审读或 Playwright。
+- 会话模式 transcript 的浏览器级验收不要再从零搭 harness：`tests/e2e/session-scroll-smoothness.spec.ts` 的 `prepare()` 已经挂好真实 `CodexThread`（400 条消息、关注卡片、solo 视图、虚拟列表与 ScrollArea viewport 定位），`session-ux-fixture` 的 `fixture.calls` 记录每个请求、`thread/turns/list` 按 `cursor`/`limit` 真实分页，直接 `useSessionSyncStore.setState({cursors})` 就能造出"还有更早历史"的状态。jsdom 侧则相反：所有单测都把 `CodexThread` mock 成 `() => null`，接线类改动只能靠这个 e2e 文件验证。
+- 会话模式任何"回车即提交"的输入框都必须用 `src/session-mode/components/codex/composer/imeSubmitKey.ts` 的 `shouldSubmitOnEnter`，不要只判断 `key === "Enter"`：中日韩输入法用回车确认候选词，官方 Codex composer（`composer-c565d1cde525.js`）同时守卫 `nativeEvent.isComposing` 和 `keyCode === 229` 两个信号，缺任一都会在候选词阶段误提交。已发现并修复 `CreateBranchSheet.tsx`（会真的创建并检出 Git 分支）与 `ModelReasonSelector.tsx`；`FollowupQueue.tsx:484` 有 isComposing 但缺 keyCode 229 兜底，仍待对齐。
+- 逆向 Codex VS Code 插件 webview 时注意：`third_party/openai.chatgpt-26.51007.21434-linux-x64/extension/webview` 有 539MB/14762 个 JS，`analyze_javascript_application` 只接受目录或 .asar 且整树分析不现实；而且**不发布 .map**，CSS 类名也全是 hash（grep `composer`/`queue` 类名拿不到对应规则）。可行路径是按 chunk 文件名直接定位（如 `above-composer-fixed-content-surface-*.js`、`composer-*.js`），minified JSX 里的 Tailwind 类名仍可读，能提取官方几何与事件守卫。
+- 续上条（同日后续）：`FollowupQueue.tsx` 的队列编辑提交也已接入 `shouldSubmitOnEnter`，三个调用点现在都传 `keyCode`，所以上一条说它仍待对齐已不成立。
+- 逆向官方 Claude Code VS Code 插件时，别照 Codex 那套经验走：`~/.vscode-server/extensions/anthropic.claude-code-*/webview/index.js` 只有 6MB 单文件（Codex 是 539MB/14762 个 chunk），`wakaru --unpack=inspect --provenance` 能完整反编译成 1506 个可读模块，工具卡渲染是 class-based（基类 `z4` 在 `entry/chunk_z4.js`，dispatch 在 `entry/chunk_a_0.js` 的 `Oz`，23 个 `extends z4`）。CSS 类名不是 hash，`index.css` 可直接 grep 到 `.toolBodyRow`/`.thinkingToggle`/`.permissionRequestContainer`。注意 `.diff-review-*` 不是官方自写的，是 Monaco accessible diff viewer 自带结构（`fZ0_2.js` 就是 Monaco 模块）。
+- 判断 `@anthropic-ai/claude-agent-sdk` 有没有某能力，必须 grep **SDK 方法名**而不是 webview 的内部协议名：官方 webview 发 `rewind_code`/`fork_conversation`/`rename_tab`，这些在 SDK 里命中 0，容易误判成"要自建 CLI 直连通道"；实际 SDK 0.3.296 已有 `Query.rewindFiles()`（需创建会话时传 `enableFileCheckpointing`）、`forkSession`、`renameSession`、`listSessions`、`tagSession`，且 0.3.296 与 0.3.311 的 `Query` 接口方法集完全一致。另：`Query.request()` 运行时存在但不在 71 个已声明 subtype 里，`ui_render`（Claude Code Mods 的声明式 UI 协议）属未声明私有用法；无 mod 时官方 `tree` 为 null 并回落手写渲染，所以不接 mods 不影响"像不像官方"。
+- `cc/session/messages/inlineErrors.ts` 只收集 `is_error` 的 tool_result。任何依赖**成功**结果的渲染（卡片自带摘要、行数/行差统计）都拿不到数据，用 `messages/toolResults.ts` 的 `buildToolResultsMap`；下发有两条路径，`CCMessageContent` 的单块路径和 `ExploredGroup` 的折叠路径都要传，`ItemRow` 容易漏。Read/Grep/Glob 会被 `group.tsx` 的 `SILENT_TOOLS` 折进默认收起的 ExploredGroup，写浏览器断言时要先点开"Explored"，且交错的 Bash/Edit 会产生多个组（locator 严格模式会因歧义报错）。
+- 给会话模式写 Claude 转录的 Playwright 用例：只 `useCCStore.setState` 不够，`SessionGroups` 按 `useAgentCenterStore.cards` 挂载，必须 `addAgentCard({kind:"cc", id: <同一个 sessionId>}, {activate:true})`，否则页面停在"开始一个会话"欢迎页。从 `performance` 资源缓存取已挂载模块 URL 的写法在 Vite HMR 后会失效（`Failed to fetch dynamically imported module ...?t=...`），要 try/catch 回退裸路径；另外测试中途改源码会触发 HMR 打断正在跑的用例，表现为失败点每轮漂移——这不是测试不稳定，停止编辑后连跑两轮即可确认。
+- 对齐官方用户消息导航 rail 时有两个反直觉之处，照直觉写会错：邻近衰减的基准是**指针位置**（原包 `_e=r.findIndex(he)`、`he=x??te`，即 `scrubbed ?? hovered`）而不是活跃轮次，所以没有指针悬停时索引为 -1、所有行都不带距离；而 `aria-current` 来自 IntersectionObserver 的可见集合（`g.has(t.id)`），与 hover 完全独立——把 hover 写进 `aria-current` 会让悬停抢走当前轮次标记。另外衰减必须以 `data-neighbor-distance` 属性发布而非只靠 hover 兄弟选择器，否则触屏设备没有任何落差。jsdom 无法求值 `animation-timeline: scroll(self y)`，边缘渐隐只能用真实 Chromium 探针核对（顶部 `0/40px`、底部 `40px/0`）。
+- 会话模式的浮层组件必须读 `useSessionPortalDocument()` 再传给 `sessionPortalContainer(ownerDocument ?? undefined)`，`dialog.tsx` 是正确范本。`dropdown-menu.tsx` 与 `popover.tsx` 原先裸调 `sessionPortalContainer()`，在独立 Plan 窗口里会把浮层投到开启者的文档；同时它们的 `if (!interactionVisible) return null` 会让开启者隐藏时连带清空 Plan 窗口自己的浮层，所以该守卫要加 `&& !ownerDocument`。`tooltip.tsx:73` 仍是裸调，未修。注意：这个修复**不是** `session-thread-workflows.spec.ts:717` 表格菜单失败的原因，那条在修复前后都失败。
+- 续上条：`tooltip.tsx` 的裸调已修，上一条说它未修已不成立。更重要的教训是变异测试暴露的覆盖缺口——「浮层投对文档」的用例只能杀掉容器变异体，三处 `if (!interactionVisible/visible) return null` 加 `&& !ownerDocument` 的守卫改动在补齐用例前全部存活。要证明这类守卫，必须把开启者的 `.session-mode` 置为 `hidden`（工作台切终端模式的真实状态）再断言独立窗口的浮层仍在。另注意 jsdom 里 `document.implementation.createHTMLDocument()` 的 `defaultView` 为 null，`fireEvent` 会报 "window object is not available"，只能用 `open` 受控属性渲染，不能在合成文档里模拟指针开合；而 Radix 菜单触发器开合靠 `pointerdown`，`node.click()` 不会打开菜单（这会让探针假阴性）。
+
+## 逆向官方常量时，必须顺着导出映射解析到字面值
+
+- 2026-10-28，移植 rail 跳转后的 reveal 闪烁（`features/thread-workflows/userMessageReveal.ts`）。
+- 产物里动画时长写作 `duration:t?0:I`，`I` 来自 `import{…xIt as I}from"./app-initial-41ab338a184f.js"`，需在该 chunk 的导出映射里查到 `PRt as xIt`、再找到 `PRt=1400`。我先前凭同文件里显眼的 `jt=150` 记下"150ms"，但 `jt` 是悬停预览延迟，与闪烁无关——教训是压缩产物里的常量别就近取值，要跟到字面定义。
+- 另一类陷阱：官方终点 `color-mix(in srgb, var(--color-text) 5%, transparent)` 看着是"淡色高亮"，实际等于它自己气泡的静息底色，即"衰减回原样"。我们气泡静息在 `--codex-secondary`，照抄这段会让动画停在气泡从未有过的颜色上。移植带颜色的动画时，先确认端点在原树里相对什么背景、是不是就等于静息值。
+- 虚拟列表差异：官方记录文稿一次性渲染，`scrollIntoView` 后可同步闪烁；我们 `scrollToIndex` 当帧目标行可能未挂载，需按帧轮询（命中即停 + 上限帧数）。
+- 可测性：该轮询最初内联在 `CodexThread.tsx`（1550 行），但全仓没有任何用例挂载 `CodexThread`，内联等于无法验证。确认"有没有用例能挂载这个组件"再决定逻辑放哪，比写完再补测试便宜。
+- jsdom 没有 `Element.animate`（`typeof …animate === "undefined"`），这正是官方写 `?.animate?.()` 的原因；用例需自己 `Object.defineProperty` 注入 spy，且必须保留一条"无动画宿主不抛错"的断言。
+
+## 追加长文档时，`cat >> file <<'EOF'` 里的 EOF 必须换标记
+
+- **事故**：往 `docs/debug_list.md` 追加一条 bug 记录时用了 `cat >> docs/debug_list.md <<'EOF'`，
+  而记录正文里恰好出现了行首 `EOF`（来自引用的测试输出片段），heredoc 提前终止后
+  shell 把剩余正文当成命令执行，文件从 2221 行被截成 34 行，本会话所有未提交的记录丢失。
+- **恢复**：`git show HEAD:docs/debug_list.md` 只能拿回已提交的 2188 行；本会话新增的 6 节
+  是从 `~/.claude/projects/<proj>/<session>.jsonl` 里把历史 tool_use 的 heredoc 正文
+  用正则 `<<\s*'?(\w+)'?\n(.*?)\n\1` 抽回来重建的。纯追加能这样救，**就地改写的编辑救不回来**
+  （本次 150ms→1400ms 那条更正就得手工重做）。
+- **教训**：
+  1. 追加多行中文记录一律用不可能出现在正文里的独特标记，例如 `<<'REC_EOF_7f3a'`。
+  2. 动到已有长文档前先 `cp file /tmp/file.bak`，和改源码时一样。
+  3. 追加后立刻 `wc -l` 对比预期行数，不要只看 `tail`——`tail` 在被截断的文件上同样显示正常。
+
+## `@keyframes` 名是文档级的，`.session-mode` 前缀管不到它
+
+- 两种模式的样式表加载进同一个文档，所以 `app.css` 的 `pulse`/`spin`/`breathe-running`
+  和 session-mode 的动画共用一个命名空间。选择器能作用域化，`@keyframes` 不能：同名即
+  静默互相覆盖，而且症状通常出现在**另一个**模式里，排查方向会被带偏。
+- 2026-10-28 发现 `session-mode/styles/streaming.css` 三个类全仓零引用，却仍被
+  `App.css` `@import`，把无前缀的 `blink`、`slideIn` 注入共享文档。删表 + 去 import，
+  并加 `session-keyframe-scope.test.ts` 两条长期红绿灯：每个 keyframe 必须带所属前缀；
+  每张被 import 的样式表至少有一个类被非测试源码用到（顺带防死表堆积）。
+- 新增动画一律写成 `session-`/`codex-`/`claude-`/`native-`/`feedback-` 前缀。
+
+## 判定"原包有、我们没有"之前，先把我们自己的条件分支读完
+
+- 2026-10-28 排队列表：官方容器类名含 `vertical-scroll-fade-mask`，我们规则末尾是
+  `mask-image: none`，看着像缺了滚动淡出。实际上 `composer-rail.css` 里
+  `@supports (animation-timeline: scroll(self y))` 内的 ≥768px 规则又原样加回了官方的
+  oklch 渐变，只是额外限定 `[data-overflowing="true"]`——`none` 是基线值，不是结论。
+- 这和之前 8% 边框的误判是同一个形状：**凭一个 utility class 名反推缺失**。先 grep 自己
+  仓库里相关的 `@supports` / `@media` / `[data-*]` 分支和 `evidence.md` 令牌档位，再下判断。
+- 配套经验：移植颜色别自己编回退值。`text-warning` → `--color-text-warning`，extension
+  窗口下落到 `--vscode-editorWarning-foreground`；独立浏览器回退要用原包自己的
+  `--orange-500: #e25507`（我第一版凭印象写 `#f54a00`，是错的，grep 产物才拿到真值）。
+
+## jsdom 下 Radix 菜单用 `.click()` 打不开，要 `keyDown` ArrowDown
+
+- `FollowupQueue.tooltips.test.tsx` 最初用 `trigger.click()`，菜单项永不出现。Radix 的
+  `DropdownMenuTrigger` 走指针/键盘事件，裸 `click()` 不触发。仓库既有用例
+  （`FollowupQueue.recovery.test.tsx`）早就用
+  `fireEvent.keyDown(trigger, { key: "ArrowDown" })`——写新用例前先看同目录兄弟怎么开菜单。
+- 另外：菜单项若写入持久化偏好（这次是 `useFollowupSettingsStore` 的 `mode`），
+  `beforeEach` 必须重置，否则用例顺序会互相污染。
+
+## 列表 key 不能取自内容字段
+
+`TurnPlan` 按 `key={p.step}` 渲染计划行，而 `TurnPlanStep` 只有
+`{ step, status }`、**没有任何身份字段**。两步同文时 key 相撞，React 把两行折叠，
+状态更新还会落到错误的行上。原包同一处用的就是数组下标。
+
+**教训**：给列表选 key 前先看类型定义有没有真正的身份字段（id/uuid/序号+时间戳）。
+没有身份字段时，下标是唯一正确的选择，"按内容取 key 更稳定"是错的——内容可重复，
+而且内容变化时还会导致整行重建。写成 `key={index}` 时务必补一行注释说明类型里没有
+身份字段，否则后来者会把它"优化"回按内容取 key。
+
+**连带教训**：状态不要同时用颜色和结构双重编码。原包计划行的完成态是
+`text-tertiary` 而不是绿色，状态完全由字形承载，文本只加删除线。我们原先又改色又改
+字重还硬编码 `emerald-500`/`blue-600`，既偏离原包又不跟随宿主 VS Code 主题。
+
+## 原包"小模块"往往藏的是行为而非样式
+
+`mcp-tool-call-approval-24a4df1ebe1a.js` 整个只有 2.6KB、一个 className，按体积看像
+样式边角料。实际它导出的是**分组决策判定**：被 `approvals: never` 拦下的 MCP 调用提升
+为独立行，不折叠进活动组。我们原先无条件 `groupable`，等于把"卡在可改策略上"这件事藏进
+折叠组。
+
+**教训**：扫描原包时不要按 bundle 体积或 className 数量判断重要性。小模块优先看它
+**导出什么**、**谁 import 它、用在什么位置**（这里是 `agent-activity-item` 的
+`switch(e.type)` 分组分支）。className 多的大 bundle 常是厂商词条表（
+`mcp-tool-activity-label` 的 921 个 id 全是 github/linear/notion 等 connector 专属标签，
+无通用分支，不该照搬），反而没有行为可移植。
+
+**连带教训**：移植字符串判定前，先确认它是上游真实输出还是 VSIX 内部产物。本例扫
+`@openai/codex` 0.164.0 的 `codex-linux-x64` 二进制确认该文案逐字存在，才敢让判定依赖它。
+同时注意字段形状可能不同（原包 `result.error` vs 本仓 `item.error.message`），
+以本仓真实形状为主、兼容原包形状，不要假设未来只有一种。
+
+## 组件声明了 onError 不等于失败态存在
+`CodexImage` 有 `onError?: () => void`，7 个调用点全没传，内部也没有失败分支——
+失败态在代码里是零。排查"某状态有没有实现"时，看的是渲染分支，不是 props 签名。
+
+## 原版的尺寸差异经常是语义而非装饰
+Codex 附件：已加载 / 解析中都是 `size-20`，唯独加载失败是 `size-16`。
+照抄配色却照搬尺寸时要先问一句"这个尺寸是不是在表达状态"。
+
+## 文案要从官方 locale bundle 逐字取，不要自己翻译
+`user-message-attachments` 的三个附件文案在 `zh-CN-*.js` / `ja-JP-*.js` / `fr-FR-*.js`
+里都能原文取到，英文取组件内 `defaultMessage`。自己译会引入原版没有的措辞。
+
+## session-mode 的 i18n 只在应用挂载时初始化
+`initializeSessionI18n()` 不在测试里跑，所以单测中 `t("a.b")` 回显 key 本身。
+要断言真实文案就按仓库既有写法 `createInstance()` + `I18nextProvider`，
+并加载**真实**语料（`resources: { zh }`），别用 fixture——fixture 会和语料库各自漂移。
+
+- jsdom 不实现 overflow 裁剪与 mask：组件渲染进 `overflow-y: auto`/带 mask 的容器里，
+  单测全绿也不代表浏览器里看得见。悬浮层要么 portal 出去，要么在测试里结构化断言
+  "卡片不是滚动容器的后代"，不能只断言它存在。
+- 官方的 tooltip variant 常常是空壳：`floating-navigation-rail` 只给
+  `w-fit text-sm whitespace-normal break-words z-20 flex flex-col`，真正的圆角/底色/ring
+  在内容组件（`floating-navigation-rail-layout-*.js`）里。照抄 variant 会得到一个透明卡。
+- 布尔 prop 照抄前先解引用：`interactive: ze` 的 `ze = c != null`，`c` 是 `onBookmarkChange`。
+  没移植书签就等于原版缺该回调时的同一状态，可以保留非交互——但要写明依据，别当默认值。
+- 组件从硬编码文案改成 i18n 时，先搜既有套件里的 `react-i18next` mock：只返回 `i18n`
+  不返回 `t` 的 mock 会直接 `TypeError`，而这类套件通常测几何不测文案，补 mock 即可。
+
+## 逆向官方状态标记时，先确认它是单值还是集合
+
+提示词导航栏的 `aria-current` 来自 `g.has(t.id)`——`g` 是集合，不是单个 id。把它当单值移植，视口里同时出现两个短轮次时就只会亮一个。同理，官方观察的是 `[data-turn-key]` 轮次容器而不是提示词气泡，这决定了「滚过提示词后该轮是否仍算当前」。**教训**：移植状态标记前，先读清三件事——值是单个还是集合、观察对象是哪一层 DOM、以及边界内缩（这里是 `rootMargin: -16px`）。三者任一读错，行为差异都只在特定滚动位置才显现，单测很容易放过。
+
+## 虚拟化列表不要再挂 IntersectionObserver
+
+官方用 IntersectionObserver 推导可见轮次，是因为它的会话记录不是虚拟化的。我们的行偏移（`start`/`end`）本身就携带可见性，再挂 observer 只会与 virtualizer 竞争、慢一帧。**教训**：移植「可见性驱动」的交互时，先问我们这边是否已有更权威的几何来源；在渲染期读 `getVirtualItems()` 比异步回调更贴合滚动。另：视口高度为 0（首次布局前）必须单独处理，否则 `end > top && start < bottom` 会让每一行都与零高度条带相交。
+
+## 测试夹具报错要先对照既有夹具，别改实现
+
+`projectWorkflowRows.turnByRow.test.ts` 初版两个失败（`commandActions` 未定义、`events is not iterable`）都是夹具写错：`groupThreadActivities(rows, events, runtime)` 的 events 是**第二个**参数，命令项必须带 `commandActions`。同目录 `projectWorkflowRows.test.ts` 早已有正确的 `item()` 工厂。**教训**：新测试首次报错时，先判断是实现红还是夹具红——同目录既有测试就是最可靠的夹具范本，照抄比推断签名快得多。
+
+## 「对齐官方」的待办，先验证前提存在
+
+- 一条待办写着「官方用 ResizeObserver 测高做工具展开动画，我们要对齐」，照着找了很久都找不到
+  owning module。实际官方 transcript 没有工具展开这个功能：locale 包里工具/命令命名空间下零
+  output/expand/collapse 文案键；唯一的动画折叠属于 WebMCP 工具目录页，且用的是原生
+  `<details>` + `interpolate-size`，不需要 JS 测高。
+- 教训：对「官方有 X，我们要对齐 X」这类待办，先用低成本的否证手段确认 X 存在——查文案键比查
+  实现代码快得多，没有入口文案基本就没有这个入口。找不到 owning module 时，要怀疑前提，而不是
+  继续换关键词找。
+- 按模块名猜测很容易踩坑：`disclosure-state-*.js` 实际是广告主披露；`_ActivityBacking_9q659_2`
+  看着像活动行样式，但同哈希段其余规则属于 avatar-overlay，是跨模块哈希碰撞。确认归属要看
+  keyframes 名、相邻规则和 JS 侧使用点，不能只看类名语义。
+- 结论是「这是我们自有功能」时，正确的收尾不是关掉待办，而是补上它缺失的测试：自有功能没有
+  上游可参照，契约只剩我们自己定的那部分，更需要测试钉住。
+
+## 对照官方 CSS 数值时，先把 token 解析到底再判定分叉
+
+- 官方几乎不写字面值，全走 token，而且常常多层：rail 的横向内缩是
+  `--home-composer-inline-inset: calc(var(--spacing) * 3.25)`，`--spacing` 4px，才等于我们写死的
+  13px；半径是 `--radius-2xl-base (1rem) × --corner-radius-scale`。只比字面值会把一致误判成分叉。
+- 更隐蔽的一类：同一个 `@supports` 块里，组件规则只改 `corner-shape`，但同块的 `:root` 同时把
+  `--codex-corner-radius-scale` 提到 1.25 并重算全部 `--radius-*`。只看组件那条规则会得出
+  「官方没放大半径」的错误结论。判定前要把同一 `@supports` 内的 `:root` 一起看。
+- 同名 token 可能被局部覆盖：`--radius-2xl: calc(var(--spacing) * 5.5)` 是用户消息气泡
+  `._bubble_11evq_1` 的局部值，不是全局值。取值要带选择器上下文，不能 `grep -o` 完就用。
+- 缓动曲线不要只对一个 token：官方同时有 `--cubic-enter (.19,1,.22,1)` 和
+  `--ease-enter-snappy (.23,1,.32,1)`，参数不同但都是官方的。我们的值对不上某一个 token，
+  不等于不是官方值——先在全量资产里搜这组参数，确认它是否有自己的 token 名和使用场景。
+- 官方有 browser/chrome/electron/extension 四种 `data-codex-window-type`，部分规则只对 browser
+  退化。我们要对齐的是 VS Code webview，即 `extension`，不要照着 browser 分支去改。
+
+## 属性写出去了不等于样式读进来
+
+`ThreadUserNavigationRail` 的 scrub 把 `data-scrubbing` / `data-scrub-target` /
+`data-neighbor-distance` 全写对了，但样式表一条都没读，于是拖动毫无视觉反馈。属性照常
+输出，不报错、不告警，测试如果只断言属性也照样全绿。
+
+对照官方时，确认「属性被写出」只是一半；另一半是 `grep` 样式表确认有人消费它。反过来
+也成立：看到一个我们已经在写的 `data-*`，先查有没有对应的 CSS 规则，再判断功能是否真
+的完整。
+
+## jsdom 不展开 transition 简写，会让「取消过渡」这类断言假阳性
+
+`transition: transform 0.16s` 在 jsdom 里读 `getComputedStyle(...).transitionDuration`
+得到 `"0s"`（长写 `transition-duration: .16s` 才读到 `"0.16s"`）。所以「拖动时过渡为 0s」
+这条断言在完全没有 scrub 规则的情况下也会通过 —— 测的是 jsdom 的缺陷。
+
+凡是要断言某个 longhand 计算值，先确认它不是由简写声明的；必要时把实现改成长写（官方
+通常本来就是长写，因为要单独覆盖其中一个属性）。
+
+同类坑：`window.matchMedia("(hover:hover)").matches === false`，`@media (hover:hover)`
+内的规则在 jsdom 里一律不生效，计算值无法区分「正确加了守卫」和「规则被删了」。这类
+只能断言 CSS 源文本，仓库里 `session-keyframe-scope.test.ts` 有先例。
+
+## indexOf + toBeLessThan 是会被变异穿过去的断言
+
+`expect(css.indexOf(sel)).toBeLessThan(guardStart)` 在 `sel` 被删除时返回 `-1`，而 `-1`
+天然小于任何正偏移，断言通过。写位置关系断言时必须同时断言存在：先
+`toBeGreaterThan(-1)` 再比位置。
+
+同一轮还踩到：用 `indexOf("button:focus-visible")` 这种裸选择器片段做断言，会被同文件
+里另一条恰好含这段文本的规则（会话栏的焦点描边）掩盖掉删除。断言要锚到规则本身
+（带上后续的类名和 `{`），不要只锚伪类。
+
+这两个坑都是靠「新测试第一次就通过 → 故意改坏实现看是否变红」发现的。变异验证不是形
+式，它正是用来抓这种断言本身写错的情况。
+
+## 官方的「冗余」规则往往是在兜另一个机制的底
+
+官方会话栏每条兄弟选择器衰减规则都配一条 `data-neighbor-distance` 规则，看着重复，实际
+是因为行被分成 64 一组的 `[content-visibility:auto]` 块，兄弟选择器在块边界会断掉。
+
+看到官方有两套写法实现同一效果时，先找「哪个机制会让其中一套失效」，再决定要不要只抄
+一套。只抄兄弟选择器，在扁平列表上看不出问题，一旦将来分块就会静默断掉。
+
+## 性能手段不要当成视觉差异照抄
+
+官方的 64 行分块是为了 `content-visibility` 跳过离屏布局，视觉上与不分块完全相同。我们
+曾给每个 `button` 直接加 `content-visibility: auto`，全套测试通过 —— 但官方是作用在块
+上，用在很小的元素上反而可能让容器记账开销超过收益。
+
+忠实移植需要改 DOM 结构，会打断 hover 的兄弟选择器并影响现存测试。实测我们 1000 行在
+jsdom 渲染 172ms，没有性能依据，于是保留扁平列表并把分叉写进 `docs/debug_list.md`。
+判断要不要抄一个官方结构时，先弄清它解决的是视觉问题还是性能问题，后者要有自己的实测
+依据再动。
+
+## setPointerCapture 会让 :hover 整体消失，不只是「钉住」
+
+`setPointerCapture` 的目标元素决定 `:hover` 去哪：调在被按的 `button` 上，`:hover` 钉在
+那个 button；调在祖先 `<nav>` 上（我们和官方的写法，因为 `onPointerDown` 用的是
+`event.currentTarget`），**拖动期间没有任何子元素命中 `:hover`**。Chromium 实测
+`buttons.findIndex(b => b.matches(":hover")) === -1`。
+
+两条后果：
+
+1. 任何「拖动时的视觉反馈」都不能依赖 `:hover` 派生的选择器，必须由 JS 写出的属性驱动。
+   以为「hover 管桌面、属性管触屏」是错的 —— 拖动期间桌面也没有 hover。
+2. 拖动经过的元素收不到 `pointerEnter`，所以组件里任何由 `pointerEnter` 维护的状态（如
+   `hovered`）会冻结在按下那一刻。如果释放逻辑是 `focused = dragTarget ?? hovered`，松手
+   瞬间就会弹回起始元素，而浏览器此时把 `:hover` 放在结束元素上，出现两个中心。释放时
+   要把拖动的最后目标交给那个状态；而 `pointerCancel` 相反，应清空。
+
+写这类反馈时，先在真实浏览器里打印 `matches(":hover")`，不要从 CSS 规则存在与否推断它
+会在拖动期间生效。
+
+## 写错的理由要显式改正，不能只补新结论
+
+上一轮给 scrub 规则写的理由是「触屏兜底」。实测发现粗指针下这条栏 `display:none`，理由
+整个不成立。错的理由比没有理由更危险：后人照着「触屏才需要」去删，会在桌面上删掉唯一
+的拖动反馈。修正时直接改掉原段落，再追加实测依据，而不是在后面叠一条新结论让两种说法
+并存。

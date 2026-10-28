@@ -102,7 +102,7 @@ test("ACP text and image drafts survive secondary pages while hidden composer me
       .locator(
         kind === "codex"
           ? ".session-mode [contenteditable=true]:visible"
-          : ".session-mode textarea:visible",
+          : ".session-mode .claude-message-input:visible",
       )
       .first();
     await editor.click();

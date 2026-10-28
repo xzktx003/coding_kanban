@@ -999,19 +999,26 @@ export const codexService = {
   },
   async loadEarlierHistory(threadId: string) {
     const state = useSessionSyncStore.getState();
-    const cursor = state.cursors[threadId];
-    const trimmedAnchor = state.trimmedHistoryAnchors[threadId];
     if (
-      (!trimmedAnchor && !cursor) ||
-      state.earlierLoading[threadId] ||
-      pendingThreadResumes.has(threadId)
+      (!state.trimmedHistoryAnchors[threadId] && !state.cursors[threadId]) ||
+      state.earlierLoading[threadId]
     )
       return;
+    const scope = captureCodexOperationScope();
     useSessionSyncStore.setState((s) => ({
       earlierLoading: { ...s.earlierLoading, [threadId]: true },
       earlierErrors: { ...s.earlierErrors, [threadId]: "" },
     }));
     try {
+      const precedingRead = pendingThreadResumes.get(threadId);
+      if (precedingRead && isCodexOperationScopeCurrent(precedingRead.scope))
+        await precedingRead.promise.catch(() => undefined);
+      if (!isCodexOperationScopeCurrent(scope)) return;
+      // A concurrent read can change the recovery anchor or page boundary.
+      const latest = useSessionSyncStore.getState();
+      const cursor = latest.cursors[threadId];
+      const trimmedAnchor = latest.trimmedHistoryAnchors[threadId];
+      if (!trimmedAnchor && !cursor) return;
       await codexService.loadThreadHistory(threadId, undefined, {
         background: true,
         recent: true,

@@ -50,3 +50,13 @@ third_party/
 
 # Local one-off browser diagnostics; keep regression specs versioned.
 /tests/e2e/*.tmp.spec.ts
+.pnpm-store/
+
+# Android client build artifacts and local toolchain (generated, not committed)
+apps/android/.toolchain/
+apps/android/android/
+apps/android/dist-export/
+apps/android/.expo/
+
+# Local package-manager caches (machine specific)
+.npm-cache-lark/

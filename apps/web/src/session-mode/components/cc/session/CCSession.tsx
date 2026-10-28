@@ -20,6 +20,9 @@ import {
 import { CCScrollControls } from "./CCScrollControls";
 import { buildMessageGroups, CCExploredMessageGroup } from "./messages/group";
 import { buildInlineErrorsMap } from "./messages/inlineErrors";
+import { buildToolResultsMap } from "./messages/toolResults";
+import { ClaudeCardProvider } from "../presentation/CardContext";
+import { Spinner } from "../presentation/Spinner";
 
 interface CCSessionProps {
   /** When provided, renders in embedded (grid-card) mode for this specific session. */
@@ -55,6 +58,8 @@ export default function CCSession({
     setSessionLoading,
   } = useCCStore();
   const { cwd } = useWorkspaceStore();
+  // Drives the spinner glyph color, as data-permission-mode does officially.
+  const permissionMode = options.permissionMode;
 
   // In embedded mode use per-session data; otherwise use the global active-session data.
   const messages = sessionId
@@ -186,6 +191,13 @@ export default function CCSession({
     [messages],
   );
 
+  // The aligned cards summarize their own result, so they need successful
+  // results too — inlineErrorsMap carries only failures.
+  const toolResultsMap = useMemo(
+    () => buildToolResultsMap(messages),
+    [messages],
+  );
+
   const messageGroups = useMemo(() => buildMessageGroups(messages), [messages]);
 
   const pendingPermissionIdx = useMemo(() => {
@@ -218,6 +230,7 @@ export default function CCSession({
   useCCPermissionListener({ sessionId, disabled: disableListener });
 
   return (
+    <ClaudeCardProvider cwd={cwd}>
     <div className="flex flex-col h-full min-h-0 w-full max-w-4xl mx-auto">
       {/* Scrollable content area */}
       <div className="flex-1 min-h-0 overflow-hidden relative">
@@ -264,16 +277,17 @@ export default function CCSession({
                     message={messages[group.msgIdx]}
                     index={group.msgIdx}
                     inlineErrors={inlineErrorsMap[group.msgIdx]}
+                    toolResults={toolResultsMap[group.msgIdx]}
                   />
                 )}
               </div>
             ))}
 
             <div ref={latestRef} data-session-latest style={{ height: 1 }} />
-            {/* Loading indicator */}
+            {/* Running indicator: the official glyph cycle and verb. */}
             {isLoading && (
-              <div className="text-xs text-muted-foreground animate-pulse">
-                Thinking
+              <div className="claude-presentation">
+                <Spinner permissionMode={permissionMode} />
               </div>
             )}
           </div>
@@ -291,5 +305,6 @@ export default function CCSession({
         />
       )}
     </div>
+    </ClaudeCardProvider>
   );
 }

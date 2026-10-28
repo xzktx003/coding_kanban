@@ -5,6 +5,7 @@ import {
   replaceAtTrigger,
   useComposerPopover,
 } from "@session/components/common/useComposerPopover";
+import type { ComposerEditorRef } from "@session/components/common/useComposerPopover";
 import { TerminalSquare } from "lucide-react";
 import { ComposerSuggestionPanel } from "@session/components/codex/composer/ComposerSuggestionPanel";
 import {
@@ -19,7 +20,7 @@ import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 interface CCSlashCommandPopoverProps {
   input: string;
   setInput: (v: string) => void;
-  editorRef: React.RefObject<HTMLTextAreaElement | null>;
+  editorRef: ComposerEditorRef;
   triggerElement: HTMLElement | null;
 }
 

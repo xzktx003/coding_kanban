@@ -37,6 +37,12 @@ import { useModelSettingsStore } from "@session/stores/settings";
 import { useAgentSettingsStore } from "@session/stores/useAgentSettingsStore";
 import { useModels } from "../hooks/useModels";
 import { EnvKeysDialog } from "./EnvKeysDialog";
+import { shouldSubmitOnEnter } from "./imeSubmitKey";
+import { useNativeUltraFullAccessConfirmation } from "./NativeUltraFullAccessConfirmation";
+import {
+  needsUltraFullAccessConfirmation,
+  ULTRA_FALLBACK_SANDBOX,
+} from "./ultraFullAccessGate";
 import {
   nextReasoningEffort,
   ReasoningEffortSelector,
@@ -562,7 +568,16 @@ function BaseModelSelector({
                       onKeyDown={(e) => {
                         // cmdk owns Enter/arrows for the list; keep them local here.
                         e.stopPropagation();
-                        if (e.key === "Enter") handleAddTyped();
+                        // A model id typed through an input method must not be
+                        // added by the Enter that accepts its candidate.
+                        if (
+                          shouldSubmitOnEnter({
+                            key: e.key,
+                            isComposing: e.nativeEvent.isComposing,
+                            keyCode: e.keyCode,
+                          })
+                        )
+                          handleAddTyped();
                       }}
                     />
                     <Button
@@ -630,7 +645,46 @@ export function ModelReasonSelector({
     setModelProvider,
     reasoningEffort,
     setReasoningEffort,
+    sandbox,
+    permissionsKnown,
+    setAccessMode,
   } = useThreadModelSettings(currentThreadId);
+
+  // Original Lti awaits Pti before applying ultra while full access is on. The
+  // sandbox lives here rather than in BaseModelSelector, which has no
+  // permission state of its own, so the gate wraps the effort setter.
+  const { ask: askUltra, confirmation: ultraConfirmation } =
+    useNativeUltraFullAccessConfirmation(ULTRA_FALLBACK_SANDBOX);
+  const applyReasoningEffort = useCallback(
+    (nextEffort: ReasoningEffort) => {
+      if (
+        !needsUltraFullAccessConfirmation({
+          nextEffort,
+          currentEffort: reasoningEffort,
+          sandbox,
+          permissionsKnown,
+        })
+      ) {
+        setReasoningEffort(nextEffort);
+        return;
+      }
+      void askUltra().then((choice) => {
+        // Dismissing applies nothing, leaving the saved effort as it was.
+        if (choice === "dismiss") return;
+        // Official onContinueWithFallback sets the mode, then applies.
+        if (choice === "fallback") setAccessMode(ULTRA_FALLBACK_SANDBOX);
+        setReasoningEffort(nextEffort);
+      });
+    },
+    [
+      reasoningEffort,
+      sandbox,
+      permissionsKnown,
+      askUltra,
+      setAccessMode,
+      setReasoningEffort,
+    ],
+  );
 
   useEffect(() => {
     if (
@@ -684,29 +738,35 @@ export function ModelReasonSelector({
 
   if (mode === "panel") {
     return (
+      <>
+        <BaseModelSelector
+          provider={modelProvider}
+          onProviderChange={onProviderChange}
+          value={providerModels[modelProvider] ?? ""}
+          onValueChange={setModel}
+          reasoningEffort={reasoningEffort ?? undefined}
+          onReasoningEffortChange={applyReasoningEffort}
+          onClose={onClose ?? triggerInputFocus}
+          mode="panel"
+        />
+        {ultraConfirmation}
+      </>
+    );
+  }
+
+  return (
+    <>
       <BaseModelSelector
         provider={modelProvider}
         onProviderChange={onProviderChange}
         value={providerModels[modelProvider] ?? ""}
         onValueChange={setModel}
         reasoningEffort={reasoningEffort ?? undefined}
-        onReasoningEffortChange={setReasoningEffort}
+        onReasoningEffortChange={applyReasoningEffort}
         onClose={onClose ?? triggerInputFocus}
-        mode="panel"
       />
-    );
-  }
-
-  return (
-    <BaseModelSelector
-      provider={modelProvider}
-      onProviderChange={onProviderChange}
-      value={providerModels[modelProvider] ?? ""}
-      onValueChange={setModel}
-      reasoningEffort={reasoningEffort ?? undefined}
-      onReasoningEffortChange={setReasoningEffort}
-      onClose={onClose ?? triggerInputFocus}
-    />
+      {ultraConfirmation}
+    </>
   );
 }
 

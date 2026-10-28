@@ -1,3 +1,4 @@
+import type { ComposerEditorRef } from "@session/components/common/useComposerPopover";
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   applyEditorReplacement,
@@ -12,7 +13,7 @@ import { ccGetInstalledSkills } from '@session/services';
 interface CCSkillsPopoverProps {
   input: string;
   setInput: (v: string) => void;
-  editorRef: React.RefObject<HTMLTextAreaElement | null>;
+  editorRef: ComposerEditorRef;
   triggerElement: HTMLElement | null;
 }
 

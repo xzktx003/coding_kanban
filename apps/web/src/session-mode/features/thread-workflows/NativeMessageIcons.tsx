@@ -18,7 +18,7 @@ export function NativeMessageCopied(props: SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
-/** Copy/edit SVG paths from enabled openai.chatgpt 26.51002.51308 user-message Ft (app-initial-e98b9eaef8e3). */
+/** Copy/edit SVG paths from enabled openai.chatgpt 26.51002.51308 (asset bytes re-verified unchanged in 26.51007.21434) user-message Ft (app-initial-e98b9eaef8e3). */
 export function NativeMessageCopy(props: SVGProps<SVGSVGElement>) {
   return (
     <svg

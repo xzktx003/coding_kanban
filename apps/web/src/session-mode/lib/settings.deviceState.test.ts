@@ -40,9 +40,12 @@ it("changing device settings persists locally without rewriting the shared setti
   expect(
     JSON.parse(localStorage.getItem("kanban.session.workspace")!).state.cwd,
   ).toBe("/phone");
+  // One key per field: a second page changing the instruction scope cannot
+  // revert this Agent choice through a stale whole-map write.
   expect(
-    JSON.parse(localStorage.getItem("kanban.session.agent-settings")!).state
-      .selectedAgent,
+    JSON.parse(
+      localStorage.getItem("kanban.session.agent-settings.v2.selectedAgent")!,
+    ),
   ).toBe("cc");
   stop();
 });

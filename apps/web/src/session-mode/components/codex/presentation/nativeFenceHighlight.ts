@@ -1,4 +1,5 @@
-// The primary Markdown CodeSurface in openai.chatgpt 26.51002.51308 uses
+// The primary Markdown CodeSurface in openai.chatgpt 26.51002.51308 (still
+// present in 26.51007.21434) uses
 // highlight.js 11.11.1, not the Shiki themes used by the native diff viewer.
 const nativeLanguages = [
   "arduino",

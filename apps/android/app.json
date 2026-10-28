@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "Coding Kanban",
+    "slug": "coding-kanban",
+    "version": "0.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "scheme": "codingkanban",
+    "android": {
+      "package": "ai.houmo.codingkanban",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#12151c"
+      },
+      "permissions": [],
+      "versionCode": 1
+    },
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "apiBaseUrl": ""
+    }
+  }
+}

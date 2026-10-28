@@ -1,23 +1,14 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import { Streamdown } from "streamdown";
 import { VisualizationContent } from "@session/features/visualizations/VisualizationContent";
-import { Badge } from "@session/components/ui/badge";
 import { Button } from "@session/components/ui/button";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useCCSettingsStore } from "@session/stores/settings";
 import type { ContentBlock, ToolResultBlock } from "../../types/messages";
-import { NO_RAW_INPUT_TOOLS } from ".";
-import {
-  AskUserQuestionTool,
-  BashTool,
-  EditTool,
-  GlobTool,
-  GrepTool,
-  ReadTool,
-  TodoWriteTool,
-  WriteTool,
-} from "./tool-use";
-import { safeStringify } from "./utils";
+import { ToolCardView } from "../../presentation/cards";
+import { ThinkingBlock } from "../../presentation/ThinkingBlock";
+import type { ToolCardContext } from "../../presentation/ToolCard";
+import { useCardContext } from "../../presentation/CardContext";
 
 const SILENT_RESULT_TOOLS = ["Read", "Glob", "Grep"];
 
@@ -26,6 +17,9 @@ interface Props {
   index: number;
   toolName?: string;
   inlineError?: ToolResultBlock | null;
+  /** The result for this tool call, when it has arrived. */
+  result?: ToolResultBlock | null;
+  context?: ToolCardContext;
 }
 
 function stripErrorTags(s: string) {
@@ -34,16 +28,26 @@ function stripErrorTags(s: string) {
     .replace(/\s*<\/tool_use_error>$/, "");
 }
 
-export function CCMessageBlock({ block, index, toolName, inlineError }: Props) {
+export function CCMessageBlock({
+  block,
+  index,
+  toolName,
+  inlineError,
+  result,
+  context,
+}: Props) {
   const blockKey = `block-${index}`;
-  const [showError, setShowError] = useState(false);
   const [showWriteResult, setShowWriteResult] = useState(false);
   const { enabledThinking } = useCCSettingsStore();
+  // Falls back to the provider so every card gets the host capabilities even
+  // when a caller does not thread them explicitly.
+  const providedContext = useCardContext();
+  const cardContext = context ?? providedContext;
 
   switch (block.type) {
     case "text":
       return (
-        <div key={blockKey} className="text-sm">
+        <div key={blockKey} className="text-sm claude-presentation">
           <VisualizationContent
             text={block.text}
             renderMarkdown={(value) => <Streamdown>{value}</Streamdown>}
@@ -54,93 +58,34 @@ export function CCMessageBlock({ block, index, toolName, inlineError }: Props) {
     case "thinking":
       if (!enabledThinking) return null;
       return (
-        <div
-          key={blockKey}
-          className="rounded-md border-l-2 border-amber-400/50 pl-3 py-1 max-w-full overflow-hidden"
-        >
-          <div className="text-xs text-amber-700 dark:text-amber-300 whitespace-pre-wrap break-words italic opacity-75">
-            {block.thinking}
-          </div>
+        <div key={blockKey} className="claude-presentation">
+          <ThinkingBlock thinking={block.thinking} />
         </div>
       );
 
-    case "tool_use": {
-      const errorProps = {
-        inlineError,
-        showError,
-        onToggleError: () => setShowError((p) => !p),
-      };
-      const toolComponent = (() => {
-        switch (block.name) {
-          case "Read":
-            return <ReadTool block={block} {...errorProps} />;
-          case "Edit":
-            return <EditTool block={block} {...errorProps} />;
-          case "Write":
-            return <WriteTool block={block} {...errorProps} />;
-          case "Bash":
-            return <BashTool block={block} {...errorProps} />;
-          case "Glob":
-            return <GlobTool block={block} {...errorProps} />;
-          case "Grep":
-            return <GrepTool block={block} {...errorProps} />;
-          case "TodoWrite":
-            return <TodoWriteTool block={block} {...errorProps} />;
-          case "AskUserQuestion":
-            return <AskUserQuestionTool block={block} {...errorProps} />;
-          default:
-            return (
-              <div>
-                <Badge>{block.name}</Badge>
-                <pre>{safeStringify(block.input)}</pre>
-              </div>
-            );
-        }
-      })();
-
+    // The official webview has no branch for this block type and falls
+    // through to "Unsupported content type: redacted_thinking". That is a
+    // dead path rather than intent, so we render it as a safely elided
+    // thinking block instead. Documented divergence — see
+    // docs/designs/claude-render-alignment/message-stream-contract-20261027.md
+    case "redacted_thinking":
+      if (!enabledThinking) return null;
       return (
-        <div key={blockKey} className="overflow-auto">
-          {toolComponent ?? (
-            <>
-              <div className="flex items-center flex-wrap gap-0.5">
-                <Badge
-                  variant="secondary"
-                  className="text-[10px] h-4 bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 border-none"
-                >
-                  {block.name}
-                </Badge>
-                {inlineError && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setShowError((p) => !p)}
-                    className="h-4 w-4 text-red-500 hover:text-red-600"
-                  >
-                    {showError ? (
-                      <ChevronDown className="h-3 w-3" />
-                    ) : (
-                      <ChevronRight className="h-3 w-3" />
-                    )}
-                  </Button>
-                )}
-              </div>
-              {!NO_RAW_INPUT_TOOLS.includes(block.name) && (
-                <pre className="mt-2 text-xs overflow-auto bg-background/50 rounded-md p-3 max-h-60 break-all whitespace-pre-wrap font-mono">
-                  <code>{JSON.stringify(block.input, null, 2)}</code>
-                </pre>
-              )}
-              {inlineError && showError && (
-                <div className="mt-1 text-xs whitespace-pre-wrap break-words text-red-600 dark:text-red-400 border-t border-red-500/20 pt-1">
-                  {typeof inlineError.content === "string"
-                    ? stripErrorTags(inlineError.content)
-                    : JSON.stringify(inlineError.content)}
-                </div>
-              )}
-            </>
-          )}
+        <div key={blockKey} className="claude-presentation">
+          <ThinkingBlock redacted />
         </div>
       );
-    }
+
+    case "tool_use":
+      return (
+        <div key={blockKey} className="claude-presentation">
+          <ToolCardView
+            block={block}
+            result={result ?? inlineError ?? undefined}
+            context={cardContext}
+          />
+        </div>
+      );
 
     case "tool_result": {
       const isString = typeof block.content === "string";
@@ -151,6 +96,7 @@ export function CCMessageBlock({ block, index, toolName, inlineError }: Props) {
         (isString && (content as string).trim().length === 0)
       )
         return null;
+      // Cards that summarize their own result must not also dump it here.
       if (
         (toolName && SILENT_RESULT_TOOLS.includes(toolName)) ||
         (!toolName &&
@@ -169,7 +115,7 @@ export function CCMessageBlock({ block, index, toolName, inlineError }: Props) {
       return (
         <div
           key={blockKey}
-          className={`rounded-lg border p-3 max-w-full overflow-hidden ${block.is_error ? "border-red-500/20 bg-red-500/5" : "border-emerald-500/20 bg-emerald-500/5"}`}
+          className={`claude-presentation rounded-lg border p-3 max-w-full overflow-hidden ${block.is_error ? "border-red-500/20 bg-red-500/5" : "border-emerald-500/20 bg-emerald-500/5"}`}
         >
           {isWriteTool && (
             <div className="flex justify-end mb-2">
@@ -208,7 +154,7 @@ export function CCMessageBlock({ block, index, toolName, inlineError }: Props) {
       return (
         <div
           key={blockKey}
-          className="rounded-lg border border-border bg-muted/30 p-3 max-w-full overflow-hidden"
+          className="claude-presentation rounded-lg border border-border bg-muted/30 p-3 max-w-full overflow-hidden"
         >
           <pre className="text-xs overflow-auto break-all whitespace-pre-wrap font-mono">
             <code>{JSON.stringify(block, null, 2)}</code>

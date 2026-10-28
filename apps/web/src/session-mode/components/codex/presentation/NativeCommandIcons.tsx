@@ -1,5 +1,5 @@
 import type { SVGProps } from "react";
-/** Original execution assets, openai.chatgpt 26.51002.51308. */
+/** Original execution assets, openai.chatgpt 26.51002.51308 (asset bytes re-verified unchanged in 26.51007.21434). */
 export function NativeCommandTerminal(props: SVGProps<SVGSVGElement>) {
   return (
     <svg

@@ -1,6 +1,7 @@
 import {
   sessionPortalContainer,
   useSessionInteractionVisible,
+  useSessionPortalDocument,
 } from "@session/session-dom";
 import * as React from "react";
 import { Tooltip as TooltipPrimitive } from "radix-ui";
@@ -44,6 +45,9 @@ function TooltipContent({
   hideArrow?: boolean;
   interactive?: boolean;
 }) {
+  // A tooltip opened inside the independent plan window belongs to that
+  // window's own root, and the opener's hidden state must not blank it.
+  const ownerDocument = useSessionPortalDocument();
   const visible = useSessionInteractionVisible();
   const attach = React.useCallback(
     (node: HTMLDivElement | null) => {
@@ -67,10 +71,12 @@ function TooltipContent({
     },
     [ref, interactive],
   );
-  if (!visible) return null;
+  if (!visible && !ownerDocument) return null;
 
   return (
-    <TooltipPrimitive.Portal container={sessionPortalContainer()}>
+    <TooltipPrimitive.Portal
+      container={sessionPortalContainer(ownerDocument ?? undefined)}
+    >
       <TooltipPrimitive.Content
         ref={attach}
         data-slot="tooltip-content"

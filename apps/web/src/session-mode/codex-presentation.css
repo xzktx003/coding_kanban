@@ -1,4 +1,8 @@
-/* Presentation values traced to openai.chatgpt 26.51002.51308 extension CSS.
+/* Presentation values traced to openai.chatgpt 26.51002.51308 extension CSS and
+   re-verified against 26.51007.21434 (app-initial-aad627bd9dff.css). That build
+   ships no fixed palette for the extension window: all 493 tokens under
+   :root[data-codex-window-type=extension] pass through to the host VS Code theme,
+   which is what the --codex-* tokens below mirror.
    Only Codex surfaces use these tokens. Shell layout and Claude retain their styles. */
 .session-mode
   :is(
@@ -726,6 +730,45 @@
   max-width: 100%;
   max-height: 192px;
   object-fit: contain;
+}
+/*
+ * Codex 26.51007.21434 `user-message-attachments-e8e099c7e282.js` renders an
+ * attachment whose bytes failed to load as a plain, non-interactive tile:
+ *
+ *   flex size-16 items-center justify-center rounded-lg px-1 text-center
+ *   text-[10px] leading-3 border border-text-danger/20
+ *   bg-background-danger-surface/20 text-danger
+ *
+ * `size-16` is 64px against `size-20` (80px) for the loaded and still-resolving
+ * branches, so the smaller box is itself part of the signal. Official resolves
+ * `.text-danger` through `--color-text-danger` to `--vscode-errorForeground`;
+ * `--destructive` carries the per-theme fallback, so one rule covers both.
+ * The 20% border and surface mixes follow `native-full-access-confirmation.css`.
+ */
+.session-mode .codex-image-failed {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 64px;
+  height: 64px;
+  padding-inline: 4px;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 12px;
+  text-align: center;
+  color: var(--vscode-errorForeground, var(--destructive));
+  border: 1px solid
+    color-mix(
+      in oklab,
+      var(--vscode-errorForeground, var(--destructive)) 20%,
+      transparent
+    );
+  background: color-mix(
+    in oklab,
+    var(--vscode-errorForeground, var(--destructive)) 20%,
+    transparent
+  );
 }
 .session-mode .codex-tool-content audio {
   width: min(100%, 360px);
@@ -1495,9 +1538,39 @@
   ) !important;
 }
 
-.session-mode .codex-exploration-output { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 4px; border: 0; border-radius: 5px; background: transparent; color: inherit; cursor: pointer; }
-.session-mode .codex-exploration-output:hover { background: color-mix(in srgb, var(--codex-text) 8%, transparent); color: var(--codex-text); }
-.session-mode .codex-exploration-output:focus-visible { outline: 2px solid var(--codex-link); outline-offset: -2px; }
-.session-mode .codex-exploration-output svg { width: 14px; height: 14px; transform: rotate(0deg); }
-.session-mode .codex-exploration-output svg[data-expanded=true] { transform: rotate(90deg); }
-@media (pointer: coarse) { .session-mode .codex-exploration-output { min-width: 44px; min-height: 44px; } }
+.session-mode .codex-exploration-output {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.session-mode .codex-exploration-output:hover {
+  background: color-mix(in srgb, var(--codex-text) 8%, transparent);
+  color: var(--codex-text);
+}
+.session-mode .codex-exploration-output:focus-visible {
+  outline: 2px solid var(--codex-link);
+  outline-offset: -2px;
+}
+.session-mode .codex-exploration-output svg {
+  width: 14px;
+  height: 14px;
+  transform: rotate(0deg);
+}
+.session-mode .codex-exploration-output svg[data-expanded="true"] {
+  transform: rotate(90deg);
+}
+@media (pointer: coarse) {
+  .session-mode .codex-exploration-output {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

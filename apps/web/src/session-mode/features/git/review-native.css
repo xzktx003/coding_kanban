@@ -88,7 +88,7 @@
 }
 .session-mode .codex-hunk-actions { display: flex; flex-shrink: 0; gap: 4px; font-family: var(--codex-chat-font, system-ui); }
 .session-mode .codex-diff-hunk-annotation { position: relative; height: 0; }
-.session-mode .codex-diff-hunk-annotation .codex-hunk-actions { position: absolute; top: -34px; right: 2px; z-index: 20; padding: 2px; border-radius: 999px; background: color-mix(in srgb,var(--codex-secondary) 90%,transparent); box-shadow: 0 1px 2px #0002; outline: 1px solid color-mix(in srgb,var(--codex-border) 60%,transparent); opacity: 0; pointer-events: none; transition: opacity 120ms; }
+.session-mode .codex-diff-hunk-annotation .codex-hunk-actions { position: absolute; top: -34px; right: 2px; z-index: 20; padding: 2px; border-radius: 999px; background: color-mix(in srgb,var(--codex-secondary) 90%,transparent); box-shadow: 0 1px 2px #0002; outline: 1px solid color-mix(in srgb,var(--codex-border) 60%,transparent); opacity: 0; pointer-events: none; transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1); }
 .session-mode .codex-workspace-hunk-review:is(:hover,:focus-within) .codex-hunk-actions { opacity: 1; pointer-events: auto; }
 .session-mode .codex-hunk-confirm { padding: 8px 12px; font-size: 13px; border: 1px solid var(--codex-border); border-radius: 8px; }
 .session-mode .codex-hunk-confirm p { margin-bottom: 8px; overflow-wrap: anywhere; }

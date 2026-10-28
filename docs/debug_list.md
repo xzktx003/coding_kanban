@@ -1,3 +1,11 @@
+- 2026-10-28（完整访问权限下可静默把推理强度推到 ultra）：官方 `Lti`（app-initial-fee819fe4f22.js @3221724）在提交 model/effort 前判 `!b || t !== "ultra" || s.reasoningEffort === "ultra"`，否则先等 `Pti` 对话框「Use Ultra with Full access?」，确认前什么都不写；我们这边没有这道门。表面上存在矛盾——既有分级断言说 ultra 是隐藏的——核对后确认两条路不同：`ordinaryNativePickerModels.ts:20` 唯一生产调用点写死 `includeUltra: false`，所以原生触发器确实隐藏 ultra；但「模型与提供商设置」面板的 `ReasoningEffortSelector` 走 `nativeReasoningOptions`，其 `PICKER_REASONING_EFFORTS` 含 `ultra`，于是面板可达。补 `ultraFullAccessGate.ts` 判定与 `NativeUltraFullAccessConfirmation.tsx`，按官方三出口返回 `full-access`/`fallback`/`dismiss`（boolean 承载不了三出口），门放在 `ModelReasonSelector` 而非 `BaseModelSelector`（后者没有任何权限状态）。两处有意偏离：权限未确认时不发问（未确认不等于 full access，也不等于安全）；官方 fallback 读存储偏好，我们没有该偏好，固定为权限菜单默认行能产生的 `workspace-write`，经 `SANDBOX_APPROVAL_MAP` 成对写 `on-request`，避免刷新拼出菜单外组合。先红后绿 4 失败/2 通过（四条均 `Unable to find role="dialog"`）；两个方向都反向验证：判定恒假则四条门用例失败，判定恒真则否定对照失败。**过度触发探针查出我自己测试的缺陷**：原「already ultra」用例按 ArrowLeft，`nextEffort` 是 `high`，在第一个 arm 就返回，从未触及它声称覆盖的 arm，故改名为实际断言内容（滑块永远不发出与当前值相同的档位），并在 `ultraFullAccessGate.test.ts` 直接补那个 arm。新增 12 项通过，ultra 隐藏断言仍通过，composer 子树 101 文件 911 项通过，类型检查维持既有 12 项 `CodexMarkdown.tsx`。全部为 jsdom 单测，未做真实浏览器对话框复验，`canContinue === false` 分支因 fallback 是常量而运行时不可达，不宣称验过，见[Ultra 与完整访问确认门](designs/session-render-alignment/ultra-full-access-gate-20261028.md)。
+
+- 2026-10-28（多页丢失新聊天权限默认与指令类型选择）：`useConfigStore`、`useAgentSettingsStore` 仍用 zustand `persist`，其 `api.setState` 包装使**任意**setter 整map写回单一 key；同机另一页只改一个字段，就把它没碰过的字段连带写成旧值。可见后果有两处：A 页把新聊天收紧到 `read-only`/`untrusted` 后刷新拿回 `danger-full-access`/`never`（比用户当时的选择更宽）；`instructionType` 被回退会让 `AgentsMdView` 从 `$cwd/AGENTS.md` 改指 `~/.codex/AGENTS.md`，而标题栏仍显示另一页选的路径，保存落到错误文件。根因在 zustand 5.0.11 源码确认，不是按 grep 推断。改为逐字段 key（`.v3.`/`.v2.` 前缀），权限对 `sandbox`+`approvalPolicy` 仍一次写入以免拼出菜单外组合，旧整map只读回退不写回，损坏字段回落默认，写失败字段不被跨页 refresh 覆盖；第三份同实现提取到 `lib/perFieldStorage.ts`。另修复 `startAgentSettingsSync` 写好但没挂到 `SessionWorkbenchEffects`，导致另一页的改动要刷新才可见。三处先红后绿（配置 6 失败/5 通过、Agent 5 失败/3 通过、接线 1 失败/2 通过），子树 285 项、会话全量 629 文件 3991 项通过。本轮只有 jsdom 单测，未做真实双页浏览器复验，见[设备偏好多页验收](designs/session-render-alignment/device-preferences-multitab-20261028.md)。
+
+- 2026-10-28（安卓客户端在受限/只读 HOME 环境下构建失败）：`pnpm install`、Gradle wrapper、AGP 分别尝试写入 `~/.pnpm`、`~/.gradle`、`~/.android` 而报 ENOENT / read-only；NDK 首次安装还会留下空目录（缺 `source.properties`）触发 `[CXX1101] NDK ... did not have a source.properties file`。解决：为 pnpm、Gradle、Android 用户目录分别重定向到工作区可写路径（`--store-dir .pnpm-store`、`GRADLE_USER_HOME=apps/android/.toolchain/gradle-home`、`ANDROID_USER_HOME=apps/android/.toolchain/android-user-home`），删除空 NDK 目录后重装 `ndk;27.1.12297006`，再于 `apps/android/android/` 执行 `assembleDebug`。产物 `apps/android/dist/coding-kanban-debug.apk`（约 158 MB）。
+
+- 2026-10-28（某个会话在所有设备都读不出历史，表现为“跨端状态不同步”）：先核对 `/api/session/tabs` 与各端 `kanban.session.tab-snapshot.*`，三端与服务端 revision 完全一致，排除标签同步；再逐线程探测发现 `thread/read?view=chat` 对 `01a14097` 稳定 502，日志累计 64 次。实际根因有两层：该线程含单轮约 8.8 MB、整体 13.5 MB 的历史，(1) 分页聚合固定 `limit: 100` 请求 `thread/turns/list`，单页原生回包在共享 stdio 上超过 32 MiB 帧上限被拒；(2) 即使逐页成功，`readHistory` 的累计 `maxEntries=100000` 预算也会在 `/thread/read` 聚合路径上超限。修复为超限时按同一游标把页大小折半重试（100→50→25，最小 1），页数与字节预算不变、不重启原生进程。**更正**：初判只写了帧上限，经隔离通道探针验证还有 entry 预算这一层，`/thread/read` 整体聚合对该线程仍会 413/502；前端真实路径走 `turns/list?view=chat` 的 `recent` 分页，已完整返回 7 轮、13.5 MB。先红后绿 1 项，codex 全量 224 项测试与运行层类型检查通过。用户授权后已重启前后端并在无活跃轮次（100 线程全 `notLoaded`）的安全窗口替换运行层；浏览器复验三个线程 200、标签快照推进到 `revision 360`、页面无同步或超限报错。
+
 - 2026-10-27（历史读取超限可能连带中断共享 Agent）：旧版 legacy `thread/read` 正文走共享 stdio，超过 32 MiB 会结束 app-server，存在波及其它执行轮次的路径；现场有 `turn_aborted(reason=interrupted)` 且无明确 interrupt 请求，但原日志没有逐回包因果记录，不能把每次中断都归因到超限。legacy 正文现用独立只读进程；可识别的超限 RPC 回复逐块丢弃并仅拒绝该次读取，未知帧隔离传输但保留活进程。用户授权重启后，当前运行层已加载新构建；`REF_xh3_accu` 实际只读历史返回 200。
 
 - 2026-10-27（队列附件像素对照加载条件不等价）：原夹具 native 用 data URL、本地用网络 URL；现从实际 fileSrc 解析同一 URL并核对响应 MIME、字节和 hash，data/network 保留独立控制。来源守卫红转绿，共享预览/排序 14 项通过；两主题像素矩阵仍红，此记录不是产品像素修复完成。见 [加载条件与剩余像素差](designs/session-render-alignment/queue-image-paint-20261027.md)。
@@ -2186,3 +2194,882 @@
 - 2026-10-27（刷新后旧轮次显示中断、稍后又出现回答）：原生只读历史显示旧轮次在 13:43:28 以 interrupted 结束，随后 14:17:01 开始的另一轮正常完成；刷新没有生成 interrupt/start/resume 请求。运行层进程启动时间接近旧轮次结束，但证据不能证明因果。状态标签改为“该轮已中断”并说明它只描述该轮的历史结局；刷新回归确认两轮各自保留、没有重复任务操作。
 - 2026-10-27（会话模式首屏慢且预载会提前启动全局服务）：App 导入图含语言订阅、跨标签 BroadcastChannel、运行代次监听、wake-lock 和 Mermaid 全页监听，完整 AgentView 也会连带非首屏模块。改为显式生命周期启动、图表按需导入，空闲预载 App 与 composer，并懒加载会话列表／卡片／子面板。单窗口 30 次冷启动和三窗口并发各 30 个样本的 composer p95 均低于 2 秒；三窗口同时输入回归通过。见 [会话模式启动验收](designs/session-mode-parity-and-startup-speed-audit-20261027.md)。
 - 2026-10-27（Codex 主输入运行时 Stop 与 Queue/Steer 同时占据主动作区）：原组件运行且有草稿时只呈现一个主动作，产品却并列显示 Stop 与提交按钮。现在 Queue/Steer 保留为主动作，Stop 放入“附加文件”菜单并可键盘触发；空草稿仍直接 Stop，展开编辑仍保留 Stop，停止处理中显示明确状态。1440/390 两尺寸、队列/停止失败/草稿保留回归及当前生产构建通过；360px 桌面/手机浅色/深色控件矩阵 4/4 通过。见 [输入控件对照](designs/session-render-alignment/composer-input-controls-audit-20261027.md)。
+
+
+### 导航 rail 跳转后缺少官方的 reveal 闪烁
+
+- 2026-10-28（跳转落点无视觉提示）：rail 跳转只调 `virtualizer.scrollToIndex()`，用户在长记录里跳转后无法确认落在哪一行；官方 `thread-user-message-navigation-rail-5c89c24e73d1.js` 在 `scrollIntoView` 之后紧跟一次 `animate()` 闪烁。本轮按产物复刻：目标为 `[data-user-message-bubble]`（纯附件消息回落 `[data-composer-attachment-pill]`），关键帧 `14% → 14% @offset .35 → 静息`，缓动 `cubic-bezier(0.23, 1, 0.32, 1)`，时长 1400ms、`prefers-reduced-motion` 下归零。
+- 两处必须偏离官方、不能照抄的地方：① 时长常量在产物里是 `duration:t?0:I`，`I` 需经 `app-initial-41ab338a184f.js` 的导出映射（`PRt as xIt`）解析为 **1400**；我先前的记录误记为 150ms，那其实是同文件里悬停预览的 `jt`，两者无关。② 官方终点是 `color-mix(in srgb, var(--color-text) 5%, transparent)`，而那正等于它自己气泡的静息底色；我们的气泡静息在 `--codex-secondary`，照抄会让动画停在气泡从未有过的颜色上、释放动画时出现跳色，故终点改用 `--codex-secondary`，峰值仍是 14% 文字混色（`--codex-text` 即我们对应 `--color-text` 的令牌）。
+- 另一处结构性差异：官方记录文稿一次性渲染，可同步闪烁；我们是虚拟列表，`scrollToIndex` 当帧目标行可能尚未挂载，故抽出 `flashRowWhenMounted()` 按帧轮询（命中即停、上限 10 帧，避免折叠行或已卸载行无限自旋）。该逻辑最初写在 `CodexThread.tsx` 内联，但全仓没有任何用例挂载 `CodexThread`（1550 行），内联即等于无法验证，因此移入 `userMessageReveal.ts`。
+- 先红后绿：`userMessageReveal.test.ts` 首轮红在模块缺失（`Failed to resolve import "./userMessageReveal"`），`flashRowWhenMounted` 一节红在 `flashRowWhenMounted is not a function`；`UserMessageItem.reveal.test.tsx` 红在气泡缺少官方标记（`expected null not to be null`），我们树里原先没有 `data-user-message-bubble`，不补标记闪烁将匹配不到任何元素。9 个变异体全部被杀：时长改 300、hold offset 改 0.5、终点照抄 5% 混色、忽略 reduced motion、去掉附件回落、去掉 `?.animate?.` 守卫（jsdom 无 `Element.animate`，裸调会在跳转中途抛错）、不重试、无上限轮询、命中后不提前返回。
+- 验证：`thread-workflows` + `codex/items` + `codex/thread` 共 99 文件/559 测试通过，`tsc --noEmit` 为 0。
+
+### 送达警告与提交按钮分属两次提交，导致「提交回答」短暂失名
+
+- **现象**：`RequestUserInputItem.test.tsx` 的「ambiguous network failure」用例只在整套
+  suite 并发下偶发失败，单文件连跑 8 次全绿。失败点是 `await screen.findByRole("alert")`
+  之后那一行**同步**的 `getByRole("button", { name: "提交回答" })`，报 `getElementError`
+  （找不到元素），不是超时。
+- **定位**：用 `MutationObserver` 抓取点击提交后的每一次 DOM 提交，拿到决定性证据——存在一个
+  `{ alert: true, submit: "userInput.submitting" }` 的中间帧。即警告已经渲染，而按钮还停在
+  提交中的文案上。
+- **根因**：`rpcLifecycle.deliverRpc` 在自己的 `catch` 里先 `record('uncertain', …)` 再
+  `throw`；`RpcDeliveryNotice` 读的是 store 的 `phase`，而按钮文案读的是组件本地的
+  `submitting`，后者要等 `respondToRequest` 的 `finally { setSubmitting(false) }` 才清除。
+  两者来源不同，于是警告先落一次提交、按钮文案后落一次提交，中间这一帧按钮叫
+  `userInput.submitting`。`findByRole` 每 50ms 轮询，并发压力下正好能观察到这一帧。
+  这不是测试抖动，是真实的两帧撕裂：用户在警告刚出现的瞬间点重试，点到的是仍处于提交中的按钮。
+- **修复**：按钮的忙碌态改为以 store 记录的阶段为准（`delivery ? delivery.phase === "submitting"
+  : submitting`），只驱动文案与 spinner；`disabled` 保留本地 `submitting` 作为纵深防御，
+  因为它覆盖的窗口比 store 阶段更宽。警告与重试文案由此落在同一次提交。
+- **红绿灯**：先补「shows the retry label in the same commit as the delivery warning」
+  复现撕裂（RED 实测输出 `{ alert: true, submit: "userInput.submitting" }`），修复后转绿。
+  首轮变异测试发现 `busy = false` 能存活（没有任何断言覆盖「提交中」本身），故追加
+  「marks the submit control busy while the answer is in flight」补上该缺口。
+  最终杀掉 M1（busy 退回本地态）、M2（文案退回本地态）、M3（永不忙碌）、M4（恒定忙碌）。
+  `disabled` 去掉 `submitting` 属等价变异：`deliverRpc` 在 await 之前就同步写入了
+  `submitting` 阶段，store 阶段已覆盖同一窗口，故不为杀它而扭曲断言。
+- **排查过程中证伪的假设**（避免后人重走）：
+  - 不是 i18n 缺键：`submitting` 在 zh/en/fr/ja 四个 locale 都存在；探针里出现的裸键
+    `userInput.submitting` 只是我自己 mock 表不全的产物。
+  - 不是 `generation` 跨文件泄漏：`vitest.session.config.ts` 未设 `isolate`，默认按文件隔离模块。
+  - 不是 RTL 树泄漏：`test/setup.ts` 已显式 `afterEach(cleanup)`（因为 `globals: false`）。
+  - 不是 `select()` 的 180ms 自动前进定时器：「跳过此题」直接调 `updateDraft`，不走 `select()`。
+  - 不是提交按钮被 `(!options.length || text.trim())` 条件卸载：q2 的 `options` 为 `null`，该门恒通。
+
+### 逐项核对：虚拟化与 content-visibility 两项“疑似缺失”实为已对齐/有意不移植
+
+本轮按 `docs/designs/session-render-alignment/current-goal-audit-20261027.md` 的 P0.1
+逐状态清单往下核，先核“流式/命令”两列用到的转录容器层，结论是两条看起来明显的差异都
+不是缺口，记录下来以免后续重复返工。
+
+**(1) `[content-visibility:auto]` 不是缺口。**
+原包 `local-conversation-turn-fedd6e6b26d3.js` 偏移 18840 的 `bo()` 里，
+`flex flex-col gap-0 [contain-intrinsic-size:auto_240px] [content-visibility:auto]
+[&:has([data-mcp-app-expanded='true'])]:[content-visibility:visible]`
+只出现在 `e.length<=1` 这条**单块 turn** 的提前返回分支；多块 turn 走的是纯
+`flex flex-col`。关键证据在 `virtualized-turn-list-186c9183acb9.js`：它给每个挂载的
+turn 包了 `[&_[data-virtualized-turn-content]]:[content-visibility:visible]`，
+也就是**在虚拟列表内部把 content-visibility 显式关掉**。所以 `auto` 只是非虚拟化
+回退路径的优化，虚拟化路径上原包自己也不用。我们只挂可见行，等价于原包的虚拟化路径，
+因此不该移植；真移植上去反而会让 `measureElement` 读不到内容高度，破坏行测量。
+
+**(2) 虚拟化常量已经逐个相等。**
+原包 `overscanCount`（`je`）= 2，默认估算高度（`F`）= 280；我们
+`CodexThread.tsx:596` `overscan: 2`、`CodexThread.tsx:129`
+`TRANSCRIPT_ESTIMATED_ROW_HEIGHT = 280`，数值一致。原包布局函数 `oe()` 的结构
+（按 key 的测量高度表、绝对定位 top、gapBefore、bottomOffsets、总高）与我们
+TanStack Virtual 的 measurements 模型同构。
+
+**(3) 设备像素吸附：有意不移植，且附带推翻一个猜想。**
+原包 `oe()` 对每行高度和每个 gap 做 `Math.round(m*i)/i`，`i = pixelScale *
+(devicePixelRatio ?? 1)`，其中 `pixelScale` 是 webview 缩放 context（默认 1，见
+`app-initial-fee819fe4f22.js` 的 `CT()`/`createContext(1)`）；我们没有 webview
+缩放，等效 scale 就是 `devicePixelRatio`。我们 `measureTranscriptRow` 返回原始小数
+高度，确实与原包不同，但：
+
+- 吸附位置不同。原包是在**布局计算**里吸附派生的 offset/总高，并不改存储的测量值；
+  我第一版实现错在测量时吸附，直接把既有两条断言（`120.25`、`640.5`）打红，
+  已回滚（`measureTranscriptRow.ts`/`.test.ts` 回到基线 7/7）。
+- **我的“1px 接缝”假设被自己的模型推翻**：相邻行的 top 偏移就是前一行的 bottom
+  （同一个累加器），共享边只会栅格化到同一个位置。按 dpr=1.25、40 行随机小数高度
+  模拟，原始小数与吸附后的错边数都是 **0**。
+- TanStack 默认 `measureElement` 本来就 `Math.round(blockSize)` 并用整数
+  `offsetHeight`；我们覆写它是为了“绘制前拿到真实高度且不二次强制布局、保住阅读锚点”
+  （见 `docs/designs/session-render-alignment/implementation.md:261`），与亚像素精度无关。
+
+结论：吸附对我们这套累加一致的绝对定位布局没有可观测收益，列为**有意不移植**，
+而不是待办缺口。累计漂移（800 行约 4.2px）只是两种约定的差，不是任一约定内部的误差。
+
+**本条未改产品代码**，故无红绿灯；上述红灯尝试已回滚，相关测试维持 7/7。
+
+### 逐项核对：Diff／颜色令牌一列，确认“8% 边框偏差”是我判断错误
+
+继续 P0.1 逐状态核对，这次核 Diff 一列和它依赖的颜色令牌层，两条结论都是**无需改动**，
+但第二条是我自己先下错了结论，记下来避免再犯。
+
+**(1) 原包在 extension 窗口里没有自己的固定配色。**
+`app-initial-aad627bd9dff.css` 中 `:root[data-codex-window-type=extension]` 这一组规则
+共 493 个令牌，整套颜色都是宿主 VS Code 主题的透传：
+`--color-surface-tertiary: var(--vscode-editor-background)`、
+`--color-surface-secondary: var(--vscode-sideBar-background)`、
+`--color-text: var(--vscode-foreground)`、`--color-surface: var(--color-surface-tertiary)`。
+我们 `codex-presentation.css` 的 `--codex-surface/--codex-secondary/--codex-text/--codex-muted/
+--codex-link/--codex-added/--codex-removed` 逐个映射到**同一批** `--vscode-*` 变量（另带
+独立浏览器下的回退值），这一层已经对齐。含义上也因此明确：“颜色严格一致”的目标是
+令牌映射一致，不是某个固定色值一致——原包长什么色取决于宿主主题。
+
+**(2) 我误判了 8% 边框，实际是我把两个原包令牌搞混了。**
+我先按 `.border-subtle` 推出原包边框应为
+`color-mix(in oklab, var(--vscode-foreground) 5%, transparent)`（该值确实存在，由
+`@supports (color:color-mix(in lab, red, red))` 下的 extension 规则给出），据此算出我们
+8% 比原包深 5–6/255，准备改。核对仓库既有证据后推翻：
+`docs/designs/session-render-alignment/evidence.md:53` 明确记录原包有**三档**边框
+——`foreground mix 8%、heavy 12%、light 5%`；`--codex-border` 对应的是默认档
+`--color-border`（mix 8%），`border-subtle` 才是 light 5%。更关键的是
+`docs/debug_list.md:1971`（2026-10-11）已经记过一次**反向**的真实 bug：当时 rich 顶线/
+hero 底线错用了 8% 外环，而那两处本该是 5% 的 border-subtle，按原 token 修正后整行像素差
+消失。也就是说两档都真实存在、各有归属，8% 不是偏差。
+
+附带确认一个纯数学点：`color-mix(... C p%, transparent)` 的第二个端点预乘颜色为 0，
+所以结果恒为「颜色 C、alpha = p」，`in srgb` 与 `in oklab` 在这个写法下完全等价；
+两档之间唯一的实际差别是 alpha，不是插值空间。
+
+**本条未改产品代码**；`codex/thread` 34 文件/186 测试维持通过。
+教训：移植颜色前先查 `evidence.md` 的令牌档位表和 `debug_list.md` 的历史反向记录，
+别只凭一个 utility class 名反推“应该是哪档”。
+
+## 2026-10-28 会话模式 Diff 悬浮动作淡入曲线与原包不一致
+
+**现象**：Diff hunk 悬浮操作条出现/消失比原包快，手感偏"硬"。
+
+**根因**：`features/git/review-native.css` 的 `.codex-hunk-actions` 写成
+`transition: opacity 120ms;`，缺省 easing 即 `ease`。原包 26.51007.21434 的 Tailwind v4
+令牌为 `--default-transition-duration: .15s` + `--default-transition-timing-function:
+cubic-bezier(.4, 0, .2, 1)`，两项都不同。
+
+**修复**：改为 `transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1)`。先写
+`reviewNativeDiffOverlay.test.ts`（1 红 1 绿——几何本来就精确，只有淡入漂移），再转绿。
+该测试同时钉住 `top: -34px` / `right: 2px`（`--spacing: .25rem` 下的 `-top-8.5`、
+`right-0.5`），避免后续整理时几何被顺手改掉而计时断言仍然通过。
+
+**验证**：`features/git` 8 文件 / 17 测试通过。
+
+## 2026-10-28 会话模式死样式表向共享文档泄漏全局 keyframes
+
+**现象**：无可见报错，属潜伏缺陷。`session-mode/styles/streaming.css` 的三个类
+（`streaming-message`、`streaming-cursor`、`streaming-line-enter`）全仓零引用，但该表
+仍被 `App.css` `@import`，因而把两个无前缀的全局动画 `blink`、`slideIn` 注入文档。
+
+**根因**：`@keyframes` 名称是文档级的，无法用选择器限定作用域——`.session-mode` 前缀对它
+无效。终端模式的 `app.css` 同在一个文档里定义了同样通用的 `pulse`、`spin`、
+`breathe-running`，任一侧再新增同名动画即会静默相互覆盖，且症状出现在另一个模式里。
+
+**修复**：`git rm` 该样式表并移除 `App.css` 的 `@import`。新增
+`session-keyframe-scope.test.ts` 两条长期红绿灯：一条要求 session-mode 下每个
+`@keyframes` 都带所属前缀（`session-`/`codex-`/`claude-`/`native-`/`feedback-`），
+一条要求每张被 `@import` 的样式表至少有一个类被非测试源码用到，防止死表再次堆积。
+
+**验证**：`session-keyframe-scope.test.ts` 2/2 通过。
+
+## 2026-10-28 会话模式排队行缺少原包的三处悬浮说明与队列开关
+
+**现象**：排队消息行发送失败或送达待确认时，只有一行纯文字状态；原包在行内还有一个
+警告图标和悬浮解释，主操作按钮也有说明，且行内菜单可直接切换默认跟进行为。
+
+**根因**：`FollowupQueue.tsx` 完全没有引入 Tooltip，失败态信息只落在
+`.session-queue-status`（`role="status"`）里，而且只在 `m.status !== "queued"` 时渲染。
+对照原包 `queued-message-list-172645190dd2.js`，缺四项：
+1. 失败/未确认行的警告图标 + 顶部悬浮（`tooltipClassName:"max-w-80"`，
+   `text-center whitespace-normal leading-snug`）。文案按 uncertain 标志二选一：单段
+   `deliveryUnconfirmed`，或 `pausedTooltip` + 一段 `opacity-65` 的 `pausedTooltipRemedy`。
+2. 引导按钮缺 `sendNowTooltip`（提交，但不中断模型运行）。
+3. 行内重试按钮缺 `retryTooltip` + `retryTooltipRemedy`（此前该文案只挂在菜单项上）。
+4. 行内菜单末尾缺 `turnOn`/`turnOff` 队列开关（我们只在设置页与输入区下拉里提供）。
+
+**修复**：补齐四项，文案取官方 `zh-CN-b05cfd55c534.js` 原文而非自译。警告图标映射到
+`--vscode-editorWarning-foreground`（原包 extension 窗口下 `text-warning` 的归属），
+回退值用原包 `--orange-500: #e25507`；并加规则让它退出队列行 32px 按钮盒，对齐原包
+`mt-0.5 inline-flex shrink-0` 的裸 span 几何。菜单触发器保留我们的 `排队消息操作 <n>`
+序号后缀：一次会渲染多行，每行需要可区分的可访问名，原包单一 `more` 标签做不到，这是
+有意差异而非漂移。
+
+**同时核销一处疑似偏差**：`.session-queue-list` 的 `mask-image: none` 不是缺失滚动淡出，
+而是基线值——`@supports (animation-timeline: scroll(self y))` 内 ≥768px 又原样加回了官方
+oklch 渐变，只是额外限定 `[data-overflowing="true"]`；原包无条件应用。同一套淡出，作用域
+更保守，判定为对齐。
+
+**验证**：新增 `FollowupQueue.tooltips.test.tsx` 5 条（先全红后全绿）；composer 全量
+97 文件 / 888 测试通过；改样式后复跑 queue 相关 7 文件 / 44 测试通过。
+
+## 2026-10-28 审批态核对：原包自动审核劝导弹窗判定为有意不移植
+
+**核对结论**：`localConversation.automaticApprovalReview.*` 全部 18 条文案（标题五态、
+摘要四态、动作摘要七种、`需要明确授权` 两档、`批准`/`正在批准…`）与我们现有实现对齐；
+唯一缺口是 `approvalRequest.autoReviewNudge.*` 这一组（`想减少审批提示吗？` /
+`帮我批准` / `保留手动审批` / `未能启用自动审核，请重试`）。
+
+**不移植的依据**（读 `auto-review-approval-nudge-27ba2a0e3ff2.js` 与
+`app-initial-fee819fe4f22.js` 的触发链得出）：
+1. 它由服务端实验开关 `994057110` 的 `isEligible` 控制，另需 `agentMode === "auto"`、
+   `isGuardianModeAvailable`、未设 `auto-review-approval-nudge-dismissed-v1`，并累计
+   ≥ `manual_approval_threshold`（默认 3）次手动批准才出现。这是远端配置的 A/B 上推位，
+   不是基线交互。
+2. 点「帮我批准」执行的是
+   `updateThreadPermissions(t, { approvalsReviewer: "guardian_subagent" })` +
+   `setPreferredNonFullAccessMode("guardian-approvals")`，即把该会话的审批权升级给
+   ChatGPT 账号侧的 guardian 子 Agent。本仓 CLAUDE.md 要求权限类变更必须在 UI 上显式
+   呈现、不得隐式触发；由系统在用户批准三次后主动弹窗劝导升级，与这条纪律冲突。
+3. 同一目的地我们已有**显式**入口：`AccessModePopover` 的 `帮我批准` 行，且额外要求
+   运行层确认 `autoReviewCapability` 后才可选，否则置灰并说明「运行服务尚未确认自动审批
+   审查能力」。能力未确认时不提供该选项，比原包多一层保护。
+
+**未改代码**；此条为核对记录，供后续 sweep 不再重复判为缺口。
+
+## 2026-10-28 提问态核对：原包 elicitation 缺口均为宿主侧页面，非内联面板偏差
+
+**核对对象**：`mcp-server-elicitation-request-panel-e33ce8d0cf13.js`（14879 b）、
+`ecosystem-mcp-elicitation-7c0ce8e0efa3.js`、`elicitation-events-fa74fa2e78e4.js`，
+以及 zh 包中 `elicitation.page.*` 10 条与 `composer.browserWebsiteAccess.*` 8 条。
+
+**结论：无需移植**，理由分两类。
+1. `elicitation.page.*`（`正在连接到你的请求…`、`回复已提交`、`请求已拒绝`、
+   `请求已取消`、`此请求已不可用，可能已得到回复或已取消。`、`再次检查`、`重试`、
+   `无法提交您的回复`、`您可以关闭此页面，并在对话中查看结果`、`继续处理你的请求`）
+   是原包**独立浏览器页面**的状态文案——注意「可以关闭此页面」这句，说明它是脱离会话流
+   的宿主页。我们的提问面板内联在会话流里，没有"另开页面再回到对话"这一步，这组状态没有
+   对应位置。三个 MCP 动作 `accept`/`decline`/`cancel` 我们已全部实现
+   （`ElicitationItem.tsx:186/482/990/1003`）。
+2. `composer.browserWebsiteAccess.*`（`允许 ChatGPT 访问 {origin}？`、`允许此网站`、
+   `允许所有网站`、`此设置会增加你数据的风险。`）是 ChatGPT 账号侧 connector 的浏览器
+   来源授权，属账号生态功能，不在本仓会话模式边界内。
+
+**反向确认我们更全**：本仓 `thread.elicitation.*` 另有完整 JSON-Schema 校验 14 条
+（pattern/uniqueItems/minimum/maxLength/minItems…）、多题进度、跳过与恢复、文件上传
+路径校验；`thread.userInput.*` 另有 17 条。原包该面板只用到 6 个 class，无这些分支。
+
+**未改代码**；此条为核对记录。
+
+## 会话模式计划步骤：重复步骤文案会整行消失（含官方行结构对齐）
+
+**现象**：`TurnPlan` 渲染的计划里，只要两步的文字完全相同，列表就会少渲染一行；
+后续状态更新还可能落到错误的那一行（已完成的删除线跑到另一条上）。
+
+**根因**：行 `key` 取自步骤文本（`key={p.step}`）。`TurnPlanStep` 只有
+`{ step, status }` 两个字段，**没有任何身份字段**，所以同文步骤的 key 相撞，
+React 把两行折叠成一行，并在状态变化时按错误的身份复用节点。官方同一处用的是
+数组下标（`sites-end-resource-733bd1c6da06.js` 行尾 `},t))`），在没有稳定 id 时
+下标才是唯一可用的 key。
+
+**修复**：`key={index}`，并补注释说明"没有身份字段，下标是此处唯一稳定 key"，
+避免后来者再"优化"成按内容取 key。红灯用例 `TurnPlan.native.test.tsx`
+以 `读取配置 / 运行测试 / 读取配置` 三步复现，修复前 `[data-plan-step]` 只有 0 行
+（`expected +0 to be 3`），修复后为 3 行。
+
+**同时对齐官方行结构**（同一文件，顺手消除的表现层偏差，非本 bug 根因）：
+
+| 位置 | 原包 26.51007.21434 | 我们（修复前） |
+| --- | --- | --- |
+| 行容器 | `flex items-start gap-2` | 同 |
+| 序号 | 字形右侧独立文本 `{index}.`，与字形同处 `flex flex-shrink-0 items-start gap-0.5` | 序号画在字形**内部**，外加 `w-6` 列 |
+| 字形盒 | 每个状态同一个 `flex size-4 shrink-0 items-center justify-center overflow-hidden` | `w-5 h-5` + 每状态各自结构 |
+| 完成态颜色 | `text-tertiary`（**不是绿色**） | `text-emerald-500` |
+| 进行态颜色 | 同一字形盒，无主色 | `text-blue-600` + `font-semibold` |
+| 步骤文字 | 单个 `text-size-chat flex-1 leading-4`，**仅**完成态加 `line-through` | `text-[13px]` + 三档状态分别改色改字重 + `pb-5` 行距 |
+
+硬编码 `emerald-500`/`blue-600` 违反本轮对齐确立的"颜色必须走主题 token"规则：
+这两个值不随宿主 VS Code 主题变化，而原包该处靠字形本身而非颜色表达状态。现改为
+`text-muted-foreground` 字形 + 纯 `line-through` 文本，状态仅由字形承载。
+
+**验收**：`TurnPlan.native.test.tsx` 4/4（先红后绿）；`codex/items/` 全量
+45 文件 / 293 用例通过；`tsc --noEmit` 对改动文件无报错。
+
+## 计划状态词汇缺口核对（三条，均非照搬）
+
+**1. `codex.todoPlan.pillProgress` = `第 {stepNumber} / {stepCount} 步`**
+
+逐一扫描原包所有 `*.js`：含该 key 的文件**只有 locale 目录（am/ar/bs-BA/ca-ES/…）**，
+没有任何代码 bundle 引用它（`grep -la pillProgress` 命中全是语言包；过滤含 `jsx` 的
+代码 bundle 后为空）。这是原包里**已翻译但当前版本未接线**的字符串——26.51007.21434
+的计划行只渲染 `stepIndexPrefix`。我们没有"进度 pill"这个承载面，照搬会造出原包此版本
+并不显示的 UI。**不接。**
+
+**2. `composer.planModeIndicator.tooltipText` = `创建计划`（label `计划`）**
+
+原包是 composer footer 的 ghost 指示器（`app-initial-fee819fe4f22.js` 的 `owa`）：
+
+```js
+jsx(FT,{tooltipContent:/* 创建计划 */,align:`center`,sideOffset:4,children:
+  jsxs(mw,{"aria-label":/* 计划 */,className:`group flex items-center gap-1 text-tertiary`,
+    size:`composer`,color:`ghostActive`,
+    onClick:()=>{setSelectedMode(hasDefaultMode?`default`:null)},
+    children:[ jsx(uw,{className:`shrink-0 group-hover:hidden`,asset:jl}),
+               jsx(uw,{className:`hidden shrink-0 group-hover:block`,asset:of}),
+               jsx(TA.FooterLabel,{width:`narrow`,children:/* 计划 */}) ]})})
+```
+
+渲染门是 `d=c.mode===`plan``，点击动作是切回默认模式——**与我们
+`Composer.tsx:1231` 的 `collaborationMode === "plan"` 门和 `setCollaborationMode("default")`
+动作完全一致**；差的只是文案（我们"规划模式"/`取消规划模式`，原包"计划"/`创建计划`）
+和 hover 时第二个图标替换第一个。
+
+文案我们**保留现状**：三个 e2e spec 把它当锚点
+（`session-followups.spec.ts:904/908`、`session-codex-dialog-controls.spec.ts:1381`、
+`session-composer-compact.spec.ts:336/342`），且 `ConversationMenu.tsx:692` 的
+"已开启/已关闭规划模式" toast 与它同族。为对齐两个字而改 4 个文件 + 3 个 spec 锚点，
+收益不足且会把现成绿灯打红。更要紧的是原包 tooltip `创建计划` 描述的是**进入**计划模式，
+而该指示器只在**已在**计划模式时出现、点击是**退出**——我们的"取消规划模式"把动作说得
+更准。**记录为有意保留，不是漏移。**
+
+**3. `codex.userMessage.implementPlan` = `是的，执行此计划`**
+
+这条**不是按钮文案，是用户消息气泡的显示替换**：
+`user-message-1d0c590c48c7.js` 里 `Ge=st(Be)`（Be 为消息原文）成立时，
+气泡用该文案替代原文（`B=Ge?formatMessage({id:'codex.userMessage.implementPlan'}):Be`），
+导航 rail 的 tooltip 同样替换。它服务的是原包的 **implement-plan 审批面板**
+（`pending-request-item-panel-3505ee668ee5.js`）：
+`implementPlanRequest.prompt` = `Implement this plan?`，选项
+`implementPlanRequest.option.implement` = `Yes, implement this plan`，
+失败 toast `implementPlanRequest.dismissError`。
+
+该面板的数据来源是**协议级 thread item**（`app-initial-41ab338a184f.js`）：
+
+```js
+function SLt(e){for(let t=e.items.length-1;t>=0;--t){let n=e.items[t];
+  if(n!=null&&n.type===`planImplementation`)
+    return n.isCompleted?null:{type:`implementPlan`,id:Jle(n.turnId),
+      turnId:n.turnId,planContent:n.planContent}}return null}
+```
+
+本仓 `bindings/v2/ThreadItem.ts` 的 18 个 variant 里**没有 `planImplementation`**
+（agentMessage/collabAgentToolCall/commandExecution/contextCompaction/dynamicToolCall/
+enteredReviewMode/exitedReviewMode/fileChange/hookPrompt/imageGeneration/imageView/
+mcpToolCall/**plan**/reasoning/sleep/subAgentActivity/userMessage/webSearch），
+`packages/session-runtime` 也零命中。**我们的运行层协议不产生这个 item**，面板没有数据
+可渲染，气泡替换也没有触发条件。这不是 UI 偏差，是上游协议能力差；要补必须先让运行层
+支持 `planImplementation`，属独立协议工作项而非本轮 UI 对齐范围。**不接，登记为协议缺口。**
+
+**未改代码**；此条为核对记录。
+
+## 会话模式 MCP 状态：审批策略拦截的调用被折叠进活动组
+
+**现象**：`approvals: never` 下 MCP 工具调用被策略拦下时，这条失败和其它工具调用一起
+折叠进"使用了 N 个工具"的活动组，用户看不到本轮其实是卡在一条自己能改的策略上。
+
+**原包行为**：`mcp-tool-call-approval-24a4df1ebe1a.js` 导出一个专门的判定
+
+```js
+e=>e.result?.type===`error` &&
+   e.result.error===`MCP tool call requires approval, but approval policy is never`
+```
+
+`agent-activity-item-c6d00fb68b13.js` 把它直接用作分组决策：
+
+```js
+case `mcp-tool-call`:
+  return $(mr(e), nn(e)||un({item:e,mcpServerStatuses:r}) ? `standalone` : `groupable`);
+```
+
+即：**被审批策略拦下的 MCP 调用提升为独立行**，其余 MCP 调用才可折叠。
+
+**我们的实现**：`nativeToolSemantics.ts` 的 `mcpToolCall` 分支无条件返回
+`grouping: "groupable"`，没有这条提升。
+
+**该文案是真实上游输出，不是 VSIX 专有**：扫描本机 `@openai/codex` 0.164.0 的
+`codex-linux-x64` 原生二进制，该字符串与 `mcp_tool_call_approval`、
+`MCP tool call cancelled before approval`、`Codex delegates require approval policy
+`never`` 等并列存在，逐字一致。所以我们的运行层会原样透出它。
+
+**字段差异**：原包读 `result.error`，而本仓 `McpToolCallError` 绑定是
+`{ message: string }`、挂在 `item.error`。判定因此同时匹配两处（`item.error.message`
+与 `item.result.error`），以我们的真实形状为主、保留原包形状作兼容，不去假设运行层未来
+一定只用一种。
+
+**修复**：新增 `nativeMcpApprovalBlocked`，`mcpToolCall` 分支按它在 `standalone` 与
+`groupable` 间二选一。红灯先行：新用例断言被拦调用为 `standalone`，同时断言
+**其它 MCP 失败（如 `connection refused`）与成功调用仍为 `groupable`**——只提升策略拦截，
+不把所有失败都拉出组外。
+
+**验收**：`nativeToolSemantics.test.ts` 15/15（新用例先红后绿）；
+`codex/presentation/` + `codex/thread/` 78 文件 / 395 用例通过；`tsc` 对改动文件无报错。
+
+**同状态核对、未接的两项**：
+
+1. `mcp-tool-activity-label-f3c34b9a3514.js` 的 921 个 id 全是**按厂商逐工具**的人话标签
+   （github 218、linear 146、googleDrive 121、slack 78、sites 72、gmail 70、notion 62、
+   vercel 48、figma 48、googleCalendar 32、wallet 4、browser 2），没有通用兜底分支。
+   这些是 ChatGPT 托管 connector 的专属词条，不在本仓会话模式边界内。
+2. 同模块的 `x()` 展开组件对 `running` 与已结束状态**各保留一份展开标志**
+   （`E=l===`running``，`O=D&&(E?!_:y)`），并用 ResizeObserver 测高做 height 动画。
+   我们的 `NativeToolDisclosure` 用单一 `useTranscriptState` 持久化展开态、
+   `hidden`+`inert` 切换。差异记录在案，但它改的是跨行持久化语义（我们的展开态按行持久、
+   原包按运行阶段分叉），属独立的展开态设计项，不在本条修复范围内。
+
+## 会话模式：用户附件加载失败没有任何状态（2026-10-28）
+
+**现象**：用户消息里的图片附件如果字节加载不出来（源失效、本地文件被删、data URL 损坏），
+界面上留下的是一个**可点击的空按钮**——`img` 渲染失败后只剩浏览器的碎图占位，外层
+`codex-image-preview` 按钮依旧存在，点下去打开一个同样空白的放大弹窗。用户看不出
+"这张图没了"，只会以为是渲染 bug。
+
+**根因**：`CodexImage` 本身声明了 `onError?: () => void`，但 7 个调用点**全都没有传**，
+组件内部也没有任何失败分支，所以这个失败态在代码里根本不存在。
+
+**原版行为**（`26.51007.21434` `user-message-attachments-e8e099c7e282.js`）：
+
+```js
+if (_e) {                                  // _e = le.length>0 && ue（有 src 且加载出错）
+  return jsx(`div`, {
+    className: `flex size-16 items-center justify-center rounded-lg
+                border border-text-danger/20 bg-background-danger-surface/20
+                px-1 text-center text-[10px] leading-3 text-danger`,
+    role: `img`, "aria-label": B,          // B = userImageAttachmentFailed
+    children: e })                         // e = userImageAttachmentFailedShort
+}
+```
+
+三个关键点，缺一个就不是原版行为：
+
+| 维度 | 原版 | 说明 |
+| --- | --- | --- |
+| 元素 | `div`，非 `button` | 字节没了就没有"放大"这回事，缩放入口连同弹窗一起消失 |
+| 尺寸 | `size-16`（64px） | 已加载和占位分支都是 `size-20`（80px），**更小本身就是信号** |
+| 配色 | `text-danger` + 20% 边框/底色 | 走 `--color-text-danger` → `--vscode-errorForeground` |
+
+**修复**：`CodexImage` 新增 `failed` 状态与 `.codex-image-failed` 样式；`onError` 继续
+向调用方上报（`CodexMarkdownImage` 依赖它显示自己的"重试"）。另外加 `useEffect(() =>
+setFailed(false), [src])`——换了 `src` 就是一次新的尝试，旧失败不该挡住新字节。
+
+**红绿灯**：`presentation/CodexImage.failed.test.tsx`（3 条，先红 2/3）。
+
+## 会话模式：图片附件标签写死英文 `Uploaded N`（2026-10-28）
+
+**现象**：中文界面下，用户消息的图片附件无障碍名读作 `Uploaded 1`、`Uploaded 2`。
+
+**根因**：`UserMessageItem` 把 `alt={\`Uploaded ${index + 1}\`}` 直接写死在两个 map 里，
+既没过 i18n，又凭空造了一个编号。
+
+**原版行为**：标签是 `alt ?? formatMessage(userImageAttachment)`，而列表外层把**同一个**
+`alt` 发给每一个缩略图——map 的下标只用于 React key 和上/下一张回调：
+
+```js
+(e, t) => jsx(En, { src: e, alt: a, availableImageCount: n.length,
+                    open: c === t,
+                    onPreviousImage: t === 0 ? void 0 : () => l(t - 1),
+                    onNextImage: t === n.length - 1 ? void 0 : () => l(t + 1) }, t)
+```
+
+也就是说**原版从不给附件编号**，所有附件读同一个本地化名字。
+
+**修复**：四个语料库各补 `thread.userMessage.attachment` / `.attachmentFailed` /
+`.attachmentFailedShort`，取值逐字取自官方 locale bundle，不自己翻译：
+
+| 语言 | attachment | attachmentFailed | 短文案 | 来源 |
+| --- | --- | --- | --- | --- |
+| zh | 用户附件 | 图片加载失败 | 失败 | `zh-CN-b05cfd55c534.js` |
+| en | User attachment | Image failed to load | Failed | 组件内 `defaultMessage` |
+| ja | ユーザーの添付画像 | 画像を読み込めませんでした | 失敗 | `ja-JP-cccb9b32b90a.js` |
+| fr | Pièce jointe utilisateur | Impossible de charger l'image | Échec | `fr-FR-c8896d04a499.js` |
+
+**红绿灯**：`items/UserMessageItem.attachmentLabel.test.tsx`（2 条，先红 2/2），
+用 `createInstance()` 加载**真实** zh 语料，避免 fixture 与语料库各自漂移。
+
+**未移植（原版有、我们没有，已判定越界）**：
+- `size-20` 的"解析中"占位（`border border-strong` + `icon-xs`）——我们的 `src` 在渲染前
+  已就绪，没有这个中间态。
+- `userAppshotAttachment`（应用快照附件）——对应 macOS 应用截图附件类型，协议里没有。
+- `portable-attachment-thumbnail-fdc6df242b0d.js`：Worker + OffscreenCanvas 给 PDF/表格
+  附件生成缩略图（40MB 上限、15s 超时、并发 16）。这是输入栏的**能力**而非渲染状态，
+  且我们不支持这些附件类型。
+
+## P0.1 逐状态参考汇总（2026-10-28 收口）
+
+针对 `26.51007.21434` 把每个状态的原版参考逐项核过一遍，结论如下。
+"已修"列只统计**本轮由参考比对直接触发**的改动。
+
+| 状态 | 原版参考 bundle | 已修 | 判定越界 / 协议缺口 |
+| --- | --- | --- | --- |
+| Rail | `thread-rail-*` | 已有证据与实现 | 悬停预览（`jt=150` 去抖 + 17 个 `thread.userMessageNavigation.*` 键 + 异步加载/不可用态）、书签点、层级缩进、IntersectionObserver 细化 `aria-current` |
+| 流式 | `app-initial-*` | — | — |
+| 命令 | `user-message-attachments-*`（`codex.shell.*`） | — | — |
+| Diff | `app-initial-*` | — | — |
+| 审批 | `mcp-tool-call-approval-*` | MCP `approvals: never` 被挡的调用改为 `standalone`，不再折进"使用了 N 个工具" | 原版把展开态拆成 running/settled 两个标记并用 ResizeObserver 量高做动画；我们是每行一个持久化标记（设计项，非 bug） |
+| 提问 | `app-initial-*` | — | — |
+| 计划 | `sites-end-resource-733bd1c6da06.js` | 步骤行结构对齐（`N.` 文本前缀 + 单一 `line-through`）；顺带修掉 `key={p.step}` 的重复 key 真 bug | 三个词汇差异全部有证据后判定不移植：其一在官方构建里根本没接线，其二要改 4 个源文件 + 3 个 e2e 锚点换一个未必更准的措辞，其三依赖协议里没有的 `planImplementation` |
+| MCP | `agent-activity-item-*` | 同"审批"行 | 921 个 `mcpToolActivity.*` 文案均为按厂商定制，不可通用移植 |
+| 附件 | `user-message-attachments-*` | 加载失败态（64px 非交互危险块）；标签改本地化、去掉臆造编号 | `size-20` 解析中占位、`userAppshotAttachment`、`portable-attachment-thumbnail-*`（Worker 缩略图能力） |
+| 队列 | `app-initial-*` | — | — |
+
+**本轮通过参考比对发现的三个真实缺陷**（均非纯样式）：
+1. 计划步骤按内容字段做 key → 同名步骤塌行、状态错配。
+2. MCP 被审批策略挡住的调用被折叠 → 用户看不到"卡在一个自己能改的策略上"。
+3. 图片附件失败后留下一个可点的空按钮 → 看起来像渲染 bug。
+
+**验收**：`codex/items` 46 文件 / 295 测试、`codex/presentation` 45 文件 / 212 测试全绿；
+`tsc --noEmit` 对本轮改动文件无报错（`CodexMarkdown.tsx` 的 `@types/react` 重复副本报错
+为既有问题，该文件 git 工作区干净、本轮未触碰）。
+
+## 提示词导航栏悬停预览：卡片被自身滚动容器裁掉
+
+**现象**：导航栏只用原生 `title` 显示消息文本，与官方的结构化悬停卡不一致；而把卡片直接渲染在
+marker 按钮里之后，卡片会被导航栏自己裁掉——`.codex-thread-user-rail` 是
+`position: absolute; overflow-y: auto` 且带渐隐 `mask`，横向被滚动盒裁剪、纵向被 mask 淡出。
+
+**关键点**：jsdom 不实现 overflow 裁剪，所以嵌套渲染的 5 个单测全绿也证明不了可见性。
+官方 `thread-user-message-navigation-rail-5c89c24e73d1.js` 正是用 portal 绕开这一点：
+
+```js
+jsx(Re, { align:`center`, delayOpen:!0, interactive:ze, portalContainer:s,
+  positioningElement:Be, side:`right`, sideOffset:0,
+  tooltipMaxWidth:`min(20rem, calc(100vw - 16px))`,
+  variant:`floating-navigation-rail`, … })
+```
+
+**修复**：新增纯函数 `railPreviewPosition`（`side: right` → `left = anchor.right`、
+`align: center` → `top = 中点 + translateY(-50%)`、`min(20rem, 视口 - 16px)` 上限、贴边回拉），
+由 `ThreadUserRailPreviewPortal` 测量 anchor 并 `createPortal` 到 `.session-mode`，
+随 scroll/resize/visualViewport 重算。卡面样式取自官方
+`floating-navigation-rail-layout-a282796ba9fb.js`（`w-80 max-w-[calc(100vw-1rem)] rounded-xl
+bg-surface-elevated-secondary p-2 text-sm leading-5 shadow-xl-spread ring-[0.5px] ring-border`）——
+注意 `floating-navigation-rail` 这个 tooltip variant 本身是**无壳**的
+（`w-fit text-sm whitespace-normal break-words z-20 flex flex-col`），壳在内容组件上。
+
+**两处自查纠正**：
+- `unavailable` 判定一开始是臆造的；读 `projectWorkflowRows.ts` 后改为
+  `reply.completed === true && 文本为空`（`completed` 来自 `item/completed`），有协议依据。
+- `pointer-events: none` 保留有据：官方 `interactive: ze` 的 `ze = c != null`，`c` 即
+  `onBookmarkChange`；书签未移植，卡内无控件，与原版缺该回调时同态。
+
+**连带修掉**：导航栏改用 i18n 后，既有 `ThreadWorkflowToolbar.rail.test.tsx` 的
+`react-i18next` mock 缺 `t` 导致 `TypeError: t is not a function`（4 条几何用例红）。
+补全 mock 并把唯一一处按可访问名查 marker 的选择器换成该套件其余三处已在用的
+`[data-thread-user-message-navigation-item-id]`，断言数量与邻近距离期望未变。
+
+**验收**：`features/thread-workflows` 23 文件 / 101 测试全绿；`railPreviewPosition` 4/4、
+`railPreview` 8/8；prettier 通过；`tsc --noEmit` 仅剩既有的 `CodexMarkdown.tsx` 报错。
+
+## 提示词导航栏：滚动时不更新“当前所在轮次”
+
+**现象**：滚动会话记录时，右侧提示词导航栏的当前位置标记不动。只有点击某个标记跳转之后，那一个标记才会亮起；此后继续滚动，标记仍停在被点击的那个位置，不反映读者实际看到的内容。
+
+**根因**：标记由 `navigation?.turnId` 驱动，而该值只在显式点击导航时写入，滚动不会更新它。官方 webview 的来源完全不同——它在会话记录容器上挂 IntersectionObserver，观察的是轮次容器而不是提示词气泡：
+
+```js
+const Mt = `[data-turn-key]`;            // 观察对象是整个轮次
+new IntersectionObserver(…, { root: e, rootMargin: `-${At}px 0px 0px 0px` })   // At = 16
+"aria-current": g.has(t.id) ? "true" : void 0                                  // g 是集合
+```
+
+两处差异都是语义性的：`g` 是**集合**，视口里同时出现两个短轮次时两个标记都亮；观察 `[data-turn-key]` 意味着读者滚过提示词、正在看该轮次的命令与差异时，这一轮依然算“当前”——恰好是导航栏最有用的长轮次场景。
+
+**修复**：
+
+- 导航栏入参从 `activeTurnId?: string` 改为 `activeTurnIds?: ReadonlySet<string>`，`aria-current` 按集合成员判定。
+- 新增纯函数 `visibleTurns.ts`，由行偏移推导可见轮次集合。我们的会话记录是虚拟化的，行自身的 `start`/`end` 已经携带这一信息，再挂一个 observer 只会与 virtualizer 竞争；因此在渲染期读取 `getVirtualItems()`，标记跟随滚动而不是慢一帧。顶部保留官方同样的 16px 内缩；视口高度为 0（首次布局前）时返回空集，否则每一行都会与零高度条带相交，挂载瞬间整条导航栏会全亮。
+- `projectWorkflowRows` 新增 `turnIdByRowId`，覆盖**所有**保留行而不只是有文本的消息行，对应官方观察轮次容器的语义。分组命令行（`cmdGroup`）本身没有事件，其轮次取自组内命令来源；`deriveRenderItems` 在每个 `item/started` 与 `turn/completed` 都会 flush，组实际上不会跨轮次，但这里仍从来源读取而非信任该前提，真跨轮次的组留空不映射，避免归属到只占一半的轮次。
+
+**验证**：`projectWorkflowRows.turnByRow.test.ts` 2/2、`visibleTurns.test.ts` 5/5、`ThreadWorkflowToolbar.rail.test.tsx` 5/5（含新增“视口内每个轮次都标记，而不只是一个”）；`components/codex/thread` 35 文件 188 测试全绿，`features/thread-workflows` 24 文件 107 测试全绿；`tsc --noEmit` 仅剩既有的 `CodexMarkdown.tsx` 重复 `@types/react` 报错。
+
+## Pages 工具标签：跟随位置用错了大写独立形式
+
+**现象**：一次活动摘要里出现多个 Pages 工具时，后续项显示 "Read artifact"（大写独立形式），而官方显示 "read artifact"（小写延续形式）。中文语料两种形式相同，所以只在英文界面可见。
+
+**根因**：官方标签表对 Pages 工具是三态的，第三态的存在就是为了这两种语法位置（`mcp-tool-activity-label-f3c34b9a3514.js`）：
+
+```js
+function ht({tool:e,toolArguments:t,completed:n,isLeadingSummaryPart:r=!0}){
+  … return i==null?null:n?r?i.completed:i.completedFollowing:i.active }
+```
+
+我们的 `nativeMcpToolLabel` 已经把 `leadingSummary` 一路传进来，注册描述符分支也正确使用了它，但 `pageToolActivity.*` 兜底查表复用了只有 `completed`/`active` 两态的共享 `state`，于是 `completedFollowing` 永远取不到。受影响的是 6 个不在 `nativePageCodexToolNames` 里、只能走兜底查表的键：`comment_add`、`connect_spaces_artifact`、`get_space`、`read_artifact`、`read_page_reference`、`read_page_transcript`。
+
+**修复**：兜底查表改用独立的 `pageState`（`completed && !leadingSummary ? "completedFollowing" : state`）。共享 `state` 保持原样——`mcpToolActivity` 只有 `active`/`completed` 两态（已核对：266 个键 × 2 态，无 `completedFollowing`），给它加第三态只会查空。
+
+**顺带核对**：官方 `mcpToolActivity` 全部 267 个键我们已 100% 移植（`comm -23` 差集为 0）；`pageToolActivity` 28 个键三态齐全（官方 1820 = 28 键 × 65 语言包）。
+
+**验证**：`nativeToolSemantics.test.ts` 16/16（含新增“跟随另一个活动时使用延续形式”，先红：`expected 'Read artifact' to be 'read artifact'`）；`presentation` 45 文件 213 测试全绿，`items` 46 文件 295 测试全绿。
+
+## 逆向来源注释停留在旧 VSIX 版本（51002），未对新版本复核
+
+**现象**：22 个 session-mode 源文件的来源注释只写 `VSIX 26.51002.51308`，而当前基线已是 `26.51007.21434`。注释本身不影响运行，但它是后续对照的唯一线索——读者无法判断这些资产是“已对新版复核”还是“从未复核过”。
+
+**复核结果（全部通过，无内容漂移）**：
+
+- 图标：10 个 `*Icons.tsx` / 图标组件中提取出 38 条 `d="M…"` 路径，逐条在 51007 的 `*.js` / `*.svg` 中按字节全文匹配，命中 38、缺失 0。
+- MCP 标签表：`mcpToolActivity` 官方 267 个键我们全部具备（双向差集为 0），状态分布逐态一致（266 × `active`/`completed` + 各 With* 变体）；`pageToolActivity` 28 个键三态齐全（官方 1820 = 28 × 65 语言包）。
+- 推理档位：`无/极低/轻度/中/高/极高/Max/Ultra/持续/默认` 在 51007 的 `zh-CN-b05cfd55c534.js` 中均可取到；新档位 `xhigh`(573)、`ultra`(1585) 也在。
+- 活动摘要文案：`调用了一个工具`、`编辑了多个文件`、`运行了命令`、`已读取文件`、`读取文件`、`已搜索网页`、`正在思考` 七条在 51007 zh 包中均命中。
+- 路径与技能规则：`.codex`、`.agents`、`skills`、`SKILL.md`、`_import`、`.system`、`plugins` 全部存在；来源符号 `vxt`(39)、`bxt`(52) 仍可解析。
+- 其余来源符号：`approvalRequestCard`(65 文件)、`mOi`(3)、`CodeSurface`(1)、`ComposerLayout`(1)、`mcp-tool-activity-label`(23)、`z8i`(10)、`R8i`(5) 均在 51007 中解析成功。
+
+**处理**：注释改为「原始版本 + 已在 26.51007.21434 复核未变」的写法，而不是直接改成 51007 假装是从新版抓取的——抓取版本与复核版本是两件事，混写会让下次对照失去起点。`nativeMermaidTheme.ts` 额外注明 `image-*.js` 的哈希每次构建都变，不能当作稳定坐标。
+
+**未覆盖**：本次只复核了可按字节/键名比对的资产（图标路径、文案、键集、符号存在性）。布局数值与动效时序没有逐项复核，仍以既有红绿灯测试为准。
+
+## 工具详情展开：按「待对齐官方」排查，实际官方没有这个东西
+
+- 现象：待办里长期挂着一条「MCP 工具展开状态需对齐官方：官方拆分 running/settled 两个标记，并用
+  ResizeObserver 测高做动画，我们只用 `useTranscriptState` 存一个标记」。
+- 排查：先按模块名找，`disclosure-state-97c61e11945f.js` 名字最像，读完发现是广告主披露
+  （advertiser_id/version + `/gizmos/business-agents/disclosures/viewed`），与工具行无关。
+  再按行为找：`grep -l ResizeObserver` 命中 154 个文件，范围太大；缩到 `scrollHeight` 且文件名
+  含 activity/tool/turn 后，`chatgpt-conversation-turn-content` 里的 `scrollHeight` 是滚动定位，
+  `local-conversation-thread` 的 `onSetCollapsed` 是轮次级折叠。
+  `agent-activity-item-c6d00fb68b13.js` 里 `details`/`aria-expanded`/`maxHeight`/`ResizeObserver`
+  全是 0 次命中——它只做分类和标签，不产出 DOM。
+- 根因：这条待办的前提本身是错的。全仓只有一个带动画的折叠类 `_AnimatedDisclosure_16dt5_16`
+  （`page-acfae9c0ba3a.css` 唯一使用 `::details-content` 的地方），其 keyframes 叫
+  `_webMcpToolArrival_` / `_webMcpStickyClipWindow_`，JS 侧在 `page-a94f32712a1a.js` 中包裹
+  `e.description` 和 `e.inputSchema` 两个 `<details>`——是 WebMCP 工具目录页，不是 transcript。
+  官方的实现方式也不是测高 + ResizeObserver，而是原生 `<details>` + `interpolate-size:
+  allow-keywords`，根本不需要 JS 测量。
+  更直接的证据：两份 locale 包里工具/命令命名空间下没有任何 output/expand/collapse 文案键，
+  搜 `查看命令输出` 与 `command output` 均 0 命中——官方压根没有这个入口。
+- 处理：不做「对齐」，改为明确标注为我们自有功能，并补上它缺失的红绿灯
+  （`NativeToolDisclosure.test.tsx`，此前该组件零测试）。
+- 注意一个容易误判的点：`grep` 曾命中 `_ActivityBacking_9q659_2` / `_ActivityText_9q659_2`，
+  看着像活动行的样式，但同哈希段 `_9q659_` 下其余规则都是 avatar-overlay 的 `_Material_` /
+  `_MessageCorners_`，是跨模块哈希碰撞，不能据此认定归属。
+- 顺带核对：`RowStateContext` 的 provider 在 `CodexThread.tsx:1402` 按 `rows[item.index].key`
+  逐行建 Map，所以 `NativeToolDisclosure` 用常量键 `"native-tool-expanded"` 是对的，一行一份；
+  `ShellCommand` / `NativeActivityGroup` / `CommandActionSummaryItem` 之所以要带 identity 后缀，
+  是因为它们在同一行内渲染多个折叠块。两种写法都不是 bug。
+
+## 输入栏小凸起（composer rail）：补齐此前未逐项核对的布局数值
+
+- 背景：之前只验证了 `superellipse(1.5)` 存在和符号可解析，把「布局数值与动画时长未逐项对照
+  51007」记为明确缺口。这次逐项核完，结论是数值全部对齐，但走的路径和官方不同，记录下来以免
+  下次误判成 bug。
+- `margin-inline: 13px`：官方写的是 `._rail_1hrlq_1{margin-inline:var(--home-composer-inline-inset)}`，
+  而 `--home-composer-inline-inset: calc(var(--spacing) * 3.25)`，`--spacing` 为 4px，
+  即 4 × 3.25 = 13px，与我们的字面值一致。
+- `--composer-rail-radius: 1rem`：官方用 `var(--radius-2xl)`，
+  `--radius-2xl: calc(var(--radius-2xl-base) * var(--corner-radius-scale))`，
+  `--radius-2xl-base: 1rem`，默认 scale 为 1，即 16px = 1rem，一致。
+  注意 `--radius-2xl: calc(var(--spacing) * 5.5)`（22px）那条是 `user-message-*.css` 里
+  `._bubble_11evq_1` 的局部覆盖，属于用户消息气泡，不要错当成 rail 的值。
+- `superellipse` 分支下的 `1.25rem`：官方 `@supports (corner-shape:superellipse(1.5))` 里
+  `._attached_1hrlq_36` 只设 `corner-shape`，不改半径——看起来像我们多加了一次放大。但同一个
+  `@supports` 在 `app-initial-aad627bd9dff.css` 的 `:root` 上同时设了
+  `--codex-corner-radius-scale: 1.25`，并把全部 `--radius-*` 接到该 scale 上，
+  所以官方的 rail 半径在该分支实际是 16px × 1.25 = 20px = 1.25rem，与我们一致。
+  官方是全局 scale，我们是单文件字面值，数值相同、机制不同。
+- 一个看着像分叉、实际不是的点：该 `@supports` 内紧跟着
+  `:root[data-codex-window-type=browser]{--codex-corner-radius-scale:1;--codex-corner-shape:round}`,
+  即官方在 browser 窗口类型下退回 16px + round。我们是浏览器应用且从不设置该属性，初看是分叉。
+  但官方共有 browser/chrome/electron/extension 四种窗口类型，只有 browser 退回；
+  我们要对齐的 VS Code webview 是 `extension`，保持 `superellipse(1.5)` + 1.25 scale，
+  与我们当前渲染一致。因此不改，也不要据此把 9 个用到 superellipse 的样式文件改平。
+- `--composer-rail-tuck`：官方基础值是 `0px`，仅在 `:has(>[data-composer-rail-item])` 时变为
+  `var(--spacing)`（4px）；我们直接写死 4px。等价，因为我们在
+  `:not(:has([data-composer-rail-item]))` 时整条 rail 就是 `display: none`，空态下 tuck 不参与布局。
+- `--composer-rail-overlap`：官方有、我们没有。也等价，因为官方的 overlap 规则是
+  `[data-composer-rail-overlap]:not([data-composer-rail-contained])`，而 `ComposerRail.tsx`
+  渲染的每个 item 都带 `data-composer-rail-contained=""`，官方自己也会把这类 item 排除在
+  overlap 之外，没有可命中的元素。
+
+## 输入栏小凸起：动画时长与缓动曲线逐项核对
+
+- `RailItem` 的 `duration: 0.15`：对应官方 `--transition-duration-basic: .15s`，一致。
+- `ease: [0.23, 1, 0.32, 1]`：第一眼像分叉，因为 rail 所属的 `--ease-enter` 解析到
+  `--cubic-enter: cubic-bezier(.19, 1, .22, 1)`，参数不同。但 `cubic-bezier(.23, 1, .32, 1)`
+  本身是官方曲线，定义为 `--ease-enter-snappy`（另有
+  `--model-picker-power-slider-motion-easing` 复用同一组参数），官方用在
+  `._chip_1xojl_1[data-animate-entrance]`、`._EditorEntry_1qftj_1` 的入场和 `._details_9q5lu_2`
+  上，属于「小元素入场」语义，与 rail item 入场场景相符，因此不改。
+  我们在 `userMessageReveal.test.ts` 里已逐字引用过官方同一曲线，可交叉印证不是我们自己编的值。
+- 结论：之前记作缺口的「布局数值与动画时长未逐项对照 51007」现已核完，无需改动。
+  官方缓动 token 速查：`--transition-duration-basic .15s` / `-relaxed .3s`、
+  `--cubic-enter (.19,1,.22,1)` / `--cubic-exit (.8,0,.4,1)` / `--cubic-move (.65,0,.35,1)` /
+  `--ease-enter-snappy (.23,1,.32,1)`。下次对照直接查这张表，不要只比字面值就判定分叉。
+
+## 会话栏（prompt rail）：拖动擦洗没有任何视觉反馈
+
+现象：按住会话栏上下拖动（scrub），标记条宽度完全不变，看不出当前停在哪一条。
+
+根因：`ThreadUserNavigationRail` 的指针捕获逻辑是完整的 —— 它正确地在列表上写
+`data-scrubbing`、在指针下那一行写 `data-scrub-target`、在三行范围内写
+`data-neighbor-distance`，并且 `elementFromPoint` 跟手、`skipClick` 抑制拖动尾随的
+click。但 `thread-workflows.css` 从头到尾没有读过这三个属性中的任何一个，所以这套
+状态只存在于 DOM 里，没有一条样式消费它。属性照常输出，视觉完全静默，这种分叉不会
+报错，只能靠逐条比对发现。
+
+官方 `floating-navigation-rail-layout-17bd6c59412b.css` 三者都有样式：
+
+- `[data-scrubbing] ._Marker_[data-neighbor-distance="1"|"2"|"3"]` 把
+  `--marker-progress` 设为 `.7 / .4 / .2`；
+- `:is(button:focus-visible, button[data-scrub-target]) ._Marker_` 设为 `1`；
+- `[data-scrubbing] :is(._MarkerLine_, ._BookmarkDot_) { transition-duration: 0s }`。
+
+宽度公式 `scaleX(.2308 + .7692 * var(--marker-progress))` 代入这四个 progress，正好得到
+我们 hover 规则里已有的 `1 / 0.76924 / 0.53848 / 0.38464`，所以补 scrub 不需要新数值，
+只需要让同样的四个宽度也能由属性触发。最后那条 `transition-duration: 0s` 同样重要：
+拖动时标记必须贴着手指，`.16s` 的缓动会让整条栏追在指针后面。
+
+修复：
+
+1. 补 scrub 规则（`[data-scrubbing]` + `[data-scrub-target]` + `[data-neighbor-distance]`），
+   复用上述四个宽度；拖动期间 `transition-duration: 0s`。
+2. 把标记条的 `transition: transform 0.16s` 简写改成 `transition-property` /
+   `transition-duration` 长写。简写在 jsdom 里不会展开成 `transitionDuration`，
+   `getComputedStyle(...).transitionDuration` 读到的是 `"0s"`，于是「拖动时为 0s」
+   这条断言在没有任何 scrub 规则时也会通过 —— 测试测的是 jsdom 的缺陷而不是我们的
+   CSS。换长写后静止态读到 `0.16s`，断言才真正成立。官方本身也是长写。
+3. hover 规则整体包进 `@media (hover: hover)`，并加 `:not([data-scrubbing])`；
+   `:focus-visible` 留在守卫之外。
+4. 每一级衰减同时写「兄弟选择器」和「属性选择器」两份，与官方一致。
+
+### 为什么 hover 要加守卫，以及为什么守卫只能用源码断言
+
+官方对每条 hover 规则都包了 `@media (hover:hover)`，并用
+`:not(:has([data-scrub-target]))` 在拖动期间让 hover 失效。两半的分量不一样：
+
+`@media (hover:hover)` 对我们其实是双保险。本文件末尾的 `@media (pointer: coarse),
+(hover: none)` 里本来就有 `.codex-thread-user-rail { display: none }`（来自
+2026-10-10 的 961bf322，早于本次改动），粗指针根本看不到这条栏。守卫留着是为了让规则
+集本身自洽：如果将来某种报告「无 hover」的指针仍然显示会话栏，点一下留下的 `:hover`
+就会把高亮钉死在用户早已滑走的那一行。
+
+`:not([data-scrubbing])` 才是真正承重的那一半，而且不是理论问题：捕获在拖动期间压住了
+`:hover`，但松手瞬间它立刻回来 —— 回到指针底下那一行，也就是拖动结束的那一行，不是
+起始那一行。没有这个守卫，松手后的一瞬间会同时存在两个中心：`:hover` 在结束行、属性
+衰减在 `focused` 指向的行。
+
+但 jsdom 里 `window.matchMedia("(hover:hover)").matches === false`，守卫内的规则一律不
+生效，计算值无法区分「正确加了守卫」和「规则被删了」。所以这一条只能断言样式表源文
+本。仓库里 `session-keyframe-scope.test.ts` 已有读 CSS 源码断言的先例，沿用同一做法。
+
+`:focus-visible` 必须留在守卫外面：键盘焦点在任何设备上都存在，把它关进 hover 能力
+守卫里，等于让触屏设备上的会话栏无法用键盘遍历。
+
+### 两份衰减规则不是冗余
+
+官方每条兄弟选择器规则都配了一条 `data-neighbor-distance` 规则，一开始看像重复，原因
+在于官方把行分成 64 一组的 `[content-visibility:auto]` 块
+（`thread-user-message-navigation-rail-5c89c24e73d1.js` 里 `Y=64`）。兄弟选择器只能跨越
+同一父节点下的兄弟，在块边界上 `button:hover + button` 什么都匹配不到，这时属性规则
+才是让衰减连续的那一份。`data-neighbor-distance` 就是为此存在的，不是装饰。
+
+我们目前是扁平列表，只有兄弟选择器真正起作用；两份都留着，是为了将来真的需要分块时
+衰减不会断。注意属性那份并不是「给触屏兜底」—— 触屏看不到这条栏，而且拖动期间连桌面
+都没有 `:hover`（见下一节），属性规则是拖动唯一的渲染来源。
+
+### 刻意保留的分叉：不做分块
+
+官方分块是渲染性能手段，不是视觉差异：每个块声明自己的高度
+`calc(var(--spacing) * <rows> * 2.5)` 配合 `[content-visibility:auto]`，让浏览器跳过没在
+画的块的布局。实测我们 1000 行在 jsdom 里渲染 172ms，而 jsdom 的 DOM 操作远慢于浏览器；
+我们每个标记只有 3 个静态 span，官方的标记还要承载 bookmark / hierarchy / audio 三套状态，
+成本不是一个量级。
+
+一度试过给每个 `button` 直接加 `content-visibility: auto` —— 全套测试仍然通过，但这是
+误用：官方作用在 64 行的块上，Chrome 的建议也是不要用在很小的元素上，容器记账的开销
+可能超过省下的布局。要忠实移植就得在 TSX 里加块结构，而那会改动四个现存测试依赖的
+DOM，并让 hover 的兄弟选择器在块边界断掉。因此保留扁平列表，把这个分叉记在这里，
+而不是为了一个没有实测依据的收益去改一个正在正常工作的结构。
+
+### 顺带核完的两项
+
+- `NAVIGATION_RAIL_FALLOFF_ROWS = 3`：官方 `neighborDistance:_e>=0&&r<=3?r:void 0`，
+  连 `>= 0` 的守卫都一致，确认无误。
+- `Y=64`：如上，是分块阈值，视觉上与不分块的列表没有区别。
+
+### 不在本次范围内的官方特性
+
+`data-hierarchy-level`（按嵌套层级收窄标记）、`._BookmarkDot_`、
+`--navigation-rail-audio-level` 三者都绑定我们没有的功能（语音输入、轮次层级、书签）。
+书签这一项 `thread-workflows.css` 里原本就有注释说明「未移植 bookmarking」。为不存在的
+数据写样式没有意义，这三项属于合理的范围外。
+
+红绿灯测试：`apps/web/src/session-mode/features/thread-workflows/ThreadWorkflowToolbar.rail.test.tsx`
+新增 3 条（scrub 衰减、拖动期间取消过渡、hover 守卫 + 两份衰减规则配对），全部按先红后绿
+并逐条做了变异验证 —— 每个变异只打掉对应的一条。
+
+## 既存阻塞（不是本次改动引入）：`pnpm check` 因 @types/react 双版本失败
+
+`pnpm check` 退出码 2，12 条 `error TS2322` 全部集中在
+`apps/web/src/session-mode/components/codex/presentation/CodexMarkdown.tsx`
+（261/268/275/322/341/350/353/356… 行），报
+`ReactI18NextChildren` 不能赋给 `DetailedHTMLProps<HTMLAttributes<...>>`。
+
+该文件在 git 中是干净的，本次会话从未碰过它。根因在依赖解析层：workspace 里同时存在
+两份 `@types/react` ——
+
+- `apps/web` 解析到 `@types/react@19.2.14`；
+- `zustand@5.0.11` 的 peer 解析到 `@types/react@19.1.17`（同组还有 `react-native@0.86.3`、
+  `@types/react-file-icon@1.0.5`）。
+
+`react-i18next` 的 `ReactI18NextChildren` 引用其中一份的 `ReactNode`，JSX 内建元素的
+props 来自另一份，两者结构上不兼容，于是只有经过 `react-i18next` 全局 JSX 增强的那个
+文件报错。
+
+本次改动对此无贡献：带着本次全部改动跑 `npx tsc -p tsconfig.json --noEmit`，报错文件
+集合仍然只有 `CodexMarkdown.tsx`，仍是 12 条。
+
+没有在本次一并修：修它要改 workspace 的依赖解析（统一 `@types/react`，或给 `zustand`
+加 peer 覆盖），影响范围是整个仓库的类型解析，与本次「会话模式 UI 对齐」无关，属于应当
+单独评估、单独验证的改动。先记录在此，保持可见。
+
+### 修正：scrub 规则不是「触屏兜底」，拖动期间桌面也没有 hover
+
+上面一版的理由写错了，这里按浏览器实测改正，因为错的理由会把后人引到错的删改上。
+
+原来的说法是「hover 规则覆盖桌面，scrub 规则覆盖触屏」。两半都不成立：
+
+- 触屏那半不成立：粗指针下 `.codex-thread-user-rail { display: none }`，这条栏在触屏上
+  根本不显示。Chromium + `devices["Pixel 7"]` 实测 `rail display=none`，整条栏无从测量。
+- 桌面那半更要紧：栏在 `onPointerDown` 里对 `event.currentTarget` 调
+  `setPointerCapture`，而 `currentTarget` 是 `<nav>`，不是被按的 `button`。按 Pointer
+  Events 规范，捕获会把后续事件全部重定向到捕获元素，于是**拖动期间没有任何一行命中
+  `:hover`**。拿本仓库真实的 CSS 和同一套指针逻辑在 Chromium 里跑，按住第 0 行拖到第
+  3 行，`buttons.findIndex(b => b.matches(":hover"))` 返回 `-1`，而宽度是完整的
+  `0.38464 / 0.53848 / 0.76924 / 1 / 0.76924 / 0.53848 / 0.38464 / 0.2308`。
+
+也就是说：scrub 的那几条属性规则是拖动唯一的渲染来源，删掉之后任何设备上拖动会话栏都
+不会有视觉反馈，与指针能力无关。这比原来写的理由强得多，但方向完全不同。
+
+顺带把捕获和 hover 的关系实测清楚了，同一夹具对比两种写法：
+
+- 不调 `setPointerCapture`：按住第 0 行拖到第 3 行，`:hover` 跟着指针落在第 3 行；
+- 在 `button` 上调 `setPointerCapture`：`:hover` 被钉在第 0 行（捕获元素）；
+- 在 `nav` 上调（我们和官方的写法）：没有任何 `button` 命中 `:hover`。
+
+### 顺带发现并修掉的真 bug：松手后衰减中心回弹到起始行
+
+实测拖动松手后，整条栏的衰减仍然停在完整的锥形上，而且中心对不上指针。根因在
+`ThreadWorkflowToolbar.tsx`：
+
+```
+const focused = scrubTarget ?? hovered;
+```
+
+捕获把 move 全部重定向到 `<nav>`，所以拖动经过的那些行**从来没有收到
+`onPointerEnter`**，`hovered` 一直冻结在按下时那一行。`onPointerUp` 里只清了
+`scrubTarget`，`focused` 就立刻退回这个冻结值 —— 衰减中心弹回起始行，而浏览器此刻把
+`:hover` 放在结束行，于是出现两个中心。
+
+修复是在清 `scrubTarget` 之前把拖动的最后一行交给 `hovered`：
+
+```
+setHovered(scrubbing.current.itemId);
+scrubbing.current = null;
+setScrubTarget(null);
+```
+
+`onPointerCancel` 反过来要清成 `null`：被浏览器接管的手势（滚动等）松手后指针不在任何
+有意义的位置上，不该把焦点留在最后碰到的那一行。
+
+红绿灯：`ThreadWorkflowToolbar.rail.test.tsx` 新增「leaves the taper centered where the
+drag ended, not where it began」。先红（松手后实际得到 `["0","1","2","3",null,...]`，
+中心回到第 0 行），改完转绿；变异验证把 `setHovered(scrubbing.current.itemId)` 注释掉
+后只有这一条失败。浏览器复核：松手前 `:hover` 为 `-1`、松手后落在第 3 行，而衰减本来
+就以第 3 行为中心，两者一致，不再闪一下双中心。
+
+## composer 底栏标签在窄宽度下从不折叠
+
+现象：把会话 composer 收窄到手机宽度或放进侧边栏，底栏仍然挤着「权限 + 完整模型名 +
+思考强度」三段文字，按钮互相压缩甚至溢出；官方同宽度下权限文字和思考强度会依次消失，
+只留图标和模型名。
+
+根因两处。其一，本仓只有一个 420px 的布尔阈值 `useComposerToolbarNarrow()`，而官方是
+按控件分级的：`vHi` 输出 `data-composer-footer-collapse`，底栏自身声明
+`container: composer-footer/inline-size`，`width<=300px` 隐藏 `xs`、`width<=440px`
+隐藏 `sm`/`secondary`。其二，`AccessModePopover` 的标签门是 `compact || !isNarrow`，
+而全部生产调用点（`Composer.tsx:1113`、`1334`、`SideChatPanel.tsx:308`）都传了
+`compact`，所以那个阈值在真实界面里是死代码，权限标签从不折叠；思考强度标签则根本没有
+接任何阈值，只在 `@container compact-composer` 里改了字号。
+
+修法：在 `ComposerToolbarContext.tsx` 里实现分级折叠（`COLLAPSE_THRESHOLD` +
+`useComposerFooterCollapsed` + `ComposerFooterLabel`），权限标签接 `xs`、思考强度接
+`sm`、模型名接 `none`，并删掉已无作用的 `compact` prop（14 处调用点）。
+
+两个判断值得记下来。阈值用 JS 测量而不是照搬 `@container`：jsdom 完全不求值容器查询
+（用一个 200px 容器配 `max-width:300px` 规则验证过，`display` 仍算成 `flex`），纯 CSS
+版本既写不出红绿灯，规则被删也不会有任何测试变红。未测量宽度按「宽」处理：隐藏标签页里
+的底栏首帧报 0，若据此折叠，用户还没打开的 composer 就已经掉了标签，而且要等到下一次
+resize 才回来。
+
+红绿灯：`ComposerFooterLabel.collapse.test.tsx`（7 条，容器归属与 300/440 边界）、
+`ComposerFooterLabel.controls.test.tsx`（4 条，两个真实控件的分级 + 折叠后仍可操作且
+保留 `aria-label`）。先红：权限标签在 300px 实得「权限待确认」、强度标签在 440px 实得
+「极高」。改完 composer 全量 99 文件 899 条通过。

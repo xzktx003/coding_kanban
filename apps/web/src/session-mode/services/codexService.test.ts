@@ -276,6 +276,47 @@ it("targeted cursor hydration preserves the contiguous pagination boundary until
   expect(useSessionSyncStore.getState().cursors[id]).toBeNull();
 });
 
+it("queues an earlier-history click while a background read is pending", async () => {
+  const id = "earlier-click-inflight";
+  let finish!: (value: unknown) => void;
+  api.threadRead.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  api.threadRead.mockResolvedValueOnce({
+    thread: { id, turns: [] },
+    historyPage: { earlier: true, nextCursor: null },
+  });
+  useCodexStore.setState({
+    threads: [],
+    currentThreadId: id,
+    events: { [id]: [] },
+    historyLoadedMap: { [id]: true },
+    turnTimingMap: {},
+    threadStatusMap: {},
+  });
+  useSessionSyncStore.setState({ cursors: { [id]: "before-50" } });
+  const recent = codexService.loadThreadHistory(id, undefined, {
+    background: true,
+    recent: true,
+  });
+  const earlier = codexService.loadEarlierHistory(id);
+  expect(useSessionSyncStore.getState().earlierLoading[id]).toBe(true);
+  finish({
+    thread: { id, turns: [] },
+    historyPage: { earlier: false, nextCursor: "before-50" },
+  });
+  await Promise.all([recent, earlier]);
+  expect(api.threadRead).toHaveBeenCalledWith(
+    { threadId: id, recent: true, cursor: "before-50" },
+    expect.anything(),
+  );
+  expect(useSessionSyncStore.getState().cursors[id]).toBeNull();
+  expect(useSessionSyncStore.getState().earlierLoading[id]).toBe(false);
+});
+
 it("a targeted cursor read waits for a running recent check instead of reusing its different page", async () => {
   const id = "cursor-inflight";
   let finish!: (value: unknown) => void;

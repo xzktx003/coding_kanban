@@ -231,7 +231,9 @@ it("copies clipped link text and original code while keeping attachments outside
   intersect(link, 0);
   expect(link.hasAttribute("inert")).toBe(true);
   expect(
-    clipped.contains(screen.getByRole("img", { name: "Uploaded 1" })),
+    clipped.contains(
+      screen.getByRole("img", { name: "userMessage.attachment" }),
+    ),
   ).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "复制消息" }));
   await waitFor(() => expect(clipboard.write).toHaveBeenCalledTimes(1));

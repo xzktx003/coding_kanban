@@ -15,19 +15,32 @@ export const DEFAULT_HISTORY_BUDGET: Readonly<HistoryBudgetLimits> =
     maxDepth: 128,
   });
 
+/** Thrown where a caller opted into keeping the prefix it already read. */
+export class HistoryBudgetExceeded extends Error {
+  constructor(readonly dimension: string) {
+    super(`HISTORY_LIMIT_EXCEEDED: ${dimension}`);
+  }
+}
+
 /** Per-request bounded accumulation. No transcript or large serialized copy is retained. */
 export class HistoryBudget {
   readonly limits: HistoryBudgetLimits;
   private pages = 0;
   private entries = 0;
   private bytes = 0;
-  constructor(limits: Partial<HistoryBudgetLimits> = {}) {
+  private readonly partial: boolean;
+  constructor(
+    limits: Partial<HistoryBudgetLimits> = {},
+    options: { partial?: boolean } = {},
+  ) {
     this.limits = { ...DEFAULT_HISTORY_BUDGET, ...limits };
+    this.partial = options.partial === true;
     for (const [name, value] of Object.entries(this.limits))
       if (!Number.isSafeInteger(value) || value < 1)
         throw new Error(`Invalid history budget ${name}`);
   }
   private exceeded(dimension: string): never {
+    if (this.partial) throw new HistoryBudgetExceeded(dimension);
     throw new HttpError(
       413,
       `HISTORY_LIMIT_EXCEEDED: ${dimension}; 完整历史超出安全读取预算，请使用 /api/codex/thread/turns/list 或 /api/codex/thread/items/list 分页读取。`,

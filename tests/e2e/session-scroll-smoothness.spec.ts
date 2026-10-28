@@ -1744,3 +1744,57 @@ test("a real turn lifecycle preserves process reading and a restored expanded he
   });
   await saveResizeDiagnostics(page, info);
 });
+
+test("scrolling up to the top pages in earlier history without a click", async ({
+  page,
+}, info) => {
+  const { fixture, errors, viewport } = await prepare(page);
+  // Only a server page cursor is available here, which is the ordinary case for
+  // a thread whose older turns were never read.
+  await page.evaluate(async () => {
+    const path = "/src/session-mode/stores/useSessionSyncStore.ts";
+    const { useSessionSyncStore } = await import(
+      performance
+        .getEntriesByType("resource")
+        .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+        path
+    );
+    useSessionSyncStore.setState({ cursors: { "ux-0": "0" } });
+  });
+  await expect(
+    page.getByRole("button", { name: "加载更早消息", exact: true }),
+  ).toBeAttached();
+
+  const pagedReads = () =>
+    fixture.calls.filter(
+      (call) =>
+        call.path.endsWith("/thread/turns/list") && call.body?.cursor === "0",
+    );
+  // Reading the newest rows must not page on its own.
+  expect(pagedReads()).toEqual([]);
+
+  await viewport.evaluate((element) => {
+    element.dispatchEvent(new WheelEvent("wheel", { deltaY: -1000 }));
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event("scroll"));
+  });
+
+  // The wheel alone reaches older turns: no press of the inline control.
+  await expect.poll(() => pagedReads().length).toBeGreaterThanOrEqual(1);
+  await expect(page.getByText("阅读消息 0", { exact: true })).toBeVisible();
+  // Paging is not a turn action, and the composer draft survives it.
+  expect(
+    fixture.calls.filter((call) =>
+      /\/turn\/(start|interrupt)$|\/thread\/(resume|rollback)$/.test(call.path),
+    ),
+  ).toEqual([]);
+  await expect(
+    page.locator(".session-codex-composer [contenteditable=true]").first(),
+  ).toHaveText("平滑滚动的会话草稿");
+  expect(errors).toEqual([]);
+  await writeFile(
+    info.outputPath("wheel-earlier-history.json"),
+    JSON.stringify({ pagedReads: pagedReads().length }, null, 2),
+  );
+  await saveResizeDiagnostics(page, info);
+});

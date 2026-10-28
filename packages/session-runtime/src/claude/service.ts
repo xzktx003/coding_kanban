@@ -3,6 +3,8 @@ import { readFile, stat } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import {
   query,
+  forkSession,
+  renameSession,
   type Options,
   type Query,
   type SDKUserMessage,
@@ -79,12 +81,21 @@ interface Pending {
   resolve: (decision: string) => void;
   cleanup: () => void;
 }
+/**
+ * Session-file operations. These act on the session JSONL rather than a live
+ * Query, so they also work for sessions that are not currently connected.
+ */
+export interface ClaudeSessionOps {
+  forkSession: typeof forkSession;
+  renameSession: typeof renameSession;
+}
 export interface ClaudeServiceOptions {
   hub: EventHub;
   dataHome: string;
   env?: NodeJS.ProcessEnv;
   queryFactory?: typeof query;
   fetcher?: typeof fetch;
+  sessionOps?: Partial<ClaudeSessionOps>;
 }
 const MODES = new Set([
   "default",
@@ -213,6 +224,7 @@ export class ClaudeService {
         "disallowedTools",
         "mcpServers",
         "resume",
+        "enableFileCheckpointing",
       ] as const)
         if (p[key] !== undefined && p[key] !== null)
           (options as unknown as JsonObject)[key] = p[key];
@@ -528,6 +540,77 @@ export class ClaudeService {
       );
     session.mode = mode;
   }
+  /**
+   * Rewinds tracked files to their state at a user message. Requires the
+   * session to have been created with `enableFileCheckpointing`, since the
+   * CLI has no backups to restore from otherwise.
+   */
+  async rewindFiles(id: string, userMessageId: string, dryRun = false) {
+    const session = this.get(id);
+    if (session.options.enableFileCheckpointing !== true)
+      throw new HttpError(
+        409,
+        "File checkpointing is not enabled for this Claude session",
+      );
+    validateMessageId(userMessageId);
+    await this.ensure(session);
+    const query = session.query as
+      | {
+          rewindFiles?: (
+            messageId: string,
+            options?: { dryRun?: boolean },
+          ) => Promise<unknown>;
+        }
+      | undefined;
+    if (!query?.rewindFiles)
+      throw new HttpError(
+        501,
+        "This Claude CLI does not support rewinding files",
+      );
+    return query.rewindFiles(userMessageId, { dryRun });
+  }
+  private get sessionOps(): ClaudeSessionOps {
+    return {
+      forkSession: this.options.sessionOps?.forkSession ?? forkSession,
+      renameSession: this.options.sessionOps?.renameSession ?? renameSession,
+    };
+  }
+  /** Validates a user-supplied session title and returns it trimmed. */
+  private title(value: unknown) {
+    if (typeof value !== "string") throw new HttpError(400, "Invalid title");
+    const trimmed = value.trim();
+    if (!trimmed || trimmed.length > 128 || trimmed.includes("\0"))
+      throw new HttpError(400, "Invalid title");
+    return trimmed;
+  }
+  /**
+   * Branches a session into a new one, optionally slicing the transcript at a
+   * message. Reads the session file, so the session need not be connected.
+   */
+  async forkSession(
+    id: string,
+    params: { upToMessageId?: string; title?: string; cwd?: string } = {},
+  ) {
+    validateSessionId(id);
+    const options: {
+      dir?: string;
+      upToMessageId?: string;
+      title?: string;
+    } = {};
+    if (params.cwd !== undefined) options.dir = absolutePath(params.cwd);
+    if (params.upToMessageId !== undefined)
+      options.upToMessageId = validateMessageId(params.upToMessageId);
+    if (params.title !== undefined) options.title = this.title(params.title);
+    return this.sessionOps.forkSession(id, options);
+  }
+  /** Renames a session by appending a custom-title entry to its JSONL. */
+  async renameSession(id: string, title: string, cwd?: string) {
+    validateSessionId(id);
+    const name = this.title(title);
+    await this.sessionOps.renameSession(id, name, {
+      ...(cwd === undefined ? {} : { dir: absolutePath(cwd) }),
+    });
+  }
   async interrupt(id: string) {
     const session = this.get(id);
     this.cancelPermissions(session);
@@ -597,6 +680,14 @@ export class ClaudeService {
   }
 }
 
+/** A user-message UUID, stricter than the session-id charset check. */
+function validateMessageId(id: string) {
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+  )
+    throw new HttpError(400, "Invalid user message id");
+  return id;
+}
 function validateOptions(options: JsonObject) {
   for (const key of ["model", "effort", "fallbackModel", "settings", "resume"])
     if (
@@ -641,5 +732,11 @@ function validateOptions(options: JsonObject) {
     typeof options.continueConversation !== "boolean"
   )
     throw new HttpError(400, "Invalid continueConversation");
+  if (
+    options.enableFileCheckpointing !== undefined &&
+    options.enableFileCheckpointing !== null &&
+    typeof options.enableFileCheckpointing !== "boolean"
+  )
+    throw new HttpError(400, "Invalid enableFileCheckpointing");
   if (typeof options.resume === "string") validateSessionId(options.resume);
 }

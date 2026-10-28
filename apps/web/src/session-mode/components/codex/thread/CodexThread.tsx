@@ -1,6 +1,10 @@
 import { CodexSystemRecords } from "./CodexSystemRecords";
 import { TranscriptDetailVisibility } from "../hooks/transcriptDetailVisibility";
 import { countClosedThreadRecords } from "./closedThreadRecords";
+import {
+  hasEarlierHistory,
+  shouldLoadEarlierOnScroll,
+} from "./earlierHistoryScroll";
 import { pruneRowState } from "./pruneRowState";
 import { useTranscriptVisibility } from "../hooks/useTranscriptVisibility";
 import {
@@ -66,10 +70,15 @@ import {
   ThreadWorkflowToolbar,
   ThreadUserNavigationRail,
 } from "@session/features/thread-workflows/ThreadWorkflowToolbar";
+import { visibleTurnIds } from "@session/features/thread-workflows/visibleTurns";
 import type {
   WorkflowAnchor,
   ThreadSearchMatch,
 } from "@session/features/thread-workflows/model";
+import {
+  flashRowWhenMounted,
+  prefersReducedMotion,
+} from "@session/features/thread-workflows/userMessageReveal";
 import {
   projectNativeHookRuns,
   projectNativeCompletedHookTurns,
@@ -228,6 +237,13 @@ const CodexTranscript = memo(function CodexTranscript({
   const earlierError = useSessionSyncStore(
     (s) => s.earlierErrors[activeThreadId],
   );
+  const earlierTrimmedAnchor = useSessionSyncStore(
+    (s) => s.trimmedHistoryAnchors[activeThreadId],
+  );
+  const earlierAvailable = hasEarlierHistory({
+    cursor: earlierCursor,
+    trimmedAnchor: earlierTrimmedAnchor,
+  });
   const historyError = useCodexStore((s) => s.historyErrorMap[activeThreadId]);
   const events = useCodexStore((s) => s.events[activeThreadId] ?? EMPTY_EVENTS);
   const goalAnnouncements = useGoalAnnouncements(activeThreadId);
@@ -513,7 +529,7 @@ const CodexTranscript = memo(function CodexTranscript({
   // their actual origin so the range includes every physically visible row.
   useLayoutEffect(updateRowScrollMargin, [
     updateRowScrollMargin,
-    earlierCursor,
+    earlierAvailable,
     earlierLoading,
     earlierError,
     goalSlots.before,
@@ -600,6 +616,25 @@ const CodexTranscript = memo(function CodexTranscript({
       visibleKeys,
     );
   }, [activityRows, rows, virtualizer]);
+  /**
+   * Turns on screen right now, which the prompt rail marks `aria-current`. The
+   * shipped webview keeps an IntersectionObserver over the transcript for this;
+   * our rows are virtualized, so their own offsets already carry it and a
+   * second observer would only race the virtualizer. Read during render like
+   * `getVirtualItems()` elsewhere here, so the markers move with the scroll
+   * rather than a frame behind it.
+   */
+  const visibleTurns = visibleTurnIds(
+    virtualizer.getVirtualItems().map((item) => ({
+      start: item.start,
+      end: item.end,
+      turnId: workflow.turnIdByRowId.get(rows[item.index]?.key ?? ""),
+    })),
+    {
+      scrollOffset: virtualizer.scrollOffset ?? 0,
+      height: virtualizer.scrollRect?.height ?? 0,
+    },
+  );
   // Compensate rows entirely above the reader. Growing the partly visible row
   // itself must keep its top fixed, rather than jumping by its added height.
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, delta) => {
@@ -696,6 +731,20 @@ const CodexTranscript = memo(function CodexTranscript({
     },
     [viewport],
   );
+  /** The rail's post-jump flash, ported from the shipped webview's own reveal. */
+  const flashNavigatedRow = useCallback(
+    (rowId: string) =>
+      flashRowWhenMounted({
+        findRow: () =>
+          viewport()?.querySelector(
+            `[data-codex-row="${CSS.escape(rowId)}"]`,
+          ) ?? null,
+        reducedMotion: prefersReducedMotion(
+          rootRef.current?.ownerDocument.defaultView,
+        ),
+      }),
+    [viewport],
+  );
   const navigateToMessage = useCallback(
     (anchor: WorkflowAnchor) => {
       const current = latestWorkflow.current;
@@ -733,14 +782,25 @@ const CodexTranscript = memo(function CodexTranscript({
       };
       saveReadingPosition(`codex:${activeThreadId}`, reading.current);
       if (foldedWork) {
+        // No flash here on purpose: the rail only targets `role === "user"` rows
+        // and `turnWork` never folds a `userMessage`, so this branch is reached
+        // by search matches inside a collapsed work group, which have no bubble.
         setOpenedWork((current) => new Set([...current, foldedWork.key]));
         setNavigation({ ...anchor });
         return;
       }
       virtualizer.scrollToIndex(index, { align: "start" });
       setNavigation({ ...anchor });
+      flashNavigatedRow(anchor.rowId);
     },
-    [rows, workflow.messages, virtualizer, activeThreadId, viewport],
+    [
+      rows,
+      workflow.messages,
+      virtualizer,
+      activeThreadId,
+      viewport,
+      flashNavigatedRow,
+    ],
   );
   const prepareSearchMatch = useCallback(
     (match: ThreadSearchMatch) => {
@@ -956,7 +1016,7 @@ const CodexTranscript = memo(function CodexTranscript({
     totalSize,
     viewport,
     virtualizer,
-    earlierCursor,
+    earlierAvailable,
     earlierLoading,
     earlierError,
     activeThreadId,
@@ -1078,6 +1138,21 @@ const CodexTranscript = memo(function CodexTranscript({
       remember(false);
       cancelAnimationFrame(rememberFrame);
       rememberFrame = requestAnimationFrame(() => remember(false));
+      // Reading upward pages in older turns before the top becomes a dead end.
+      // The reading anchor was just saved above, so the restoration effect
+      // keeps this viewport still when the older rows prepend.
+      const paging = useSessionSyncStore.getState();
+      if (
+        shouldLoadEarlierOnScroll({
+          scrollTop: element.scrollTop,
+          pinnedToBottom: pinned.current,
+          cursor: paging.cursors[activeThreadId],
+          trimmedAnchor: paging.trimmedHistoryAnchors[activeThreadId],
+          loading: paging.earlierLoading[activeThreadId],
+          error: paging.earlierErrors[activeThreadId],
+        })
+      )
+        void codexService.loadEarlierHistory(activeThreadId);
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
         // A completed one-pixel gesture still receives its reading buffer.
@@ -1275,7 +1350,7 @@ const CodexTranscript = memo(function CodexTranscript({
         title={title ?? undefined}
         running={runtime.running}
         inspection={inspection}
-        historyComplete={!earlierCursor}
+        historyComplete={!earlierAvailable}
         onLoadEarlier={() => codexService.loadEarlierHistory(activeThreadId)}
         onNavigate={navigateToMessage}
         onPrepareMatch={prepareSearchMatch}
@@ -1283,7 +1358,7 @@ const CodexTranscript = memo(function CodexTranscript({
       <ThreadUserNavigationRail
         rows={workflow.messages}
         onNavigate={navigateToMessage}
-        activeTurnId={navigation?.turnId}
+        activeTurnIds={visibleTurns}
       />
       <div className="flex-1 min-h-0 overflow-hidden">
         <ScrollArea ref={rootRef} className="h-full px-4 pb-4">
@@ -1291,7 +1366,7 @@ const CodexTranscript = memo(function CodexTranscript({
             ref={contentRef}
             className="codex-transcript-surface thread-surface mx-auto py-4"
           >
-            {earlierCursor && (
+            {earlierAvailable && (
               <div className="session-earlier-history">
                 <button
                   type="button"

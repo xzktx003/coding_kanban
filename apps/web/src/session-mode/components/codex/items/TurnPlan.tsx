@@ -1,63 +1,69 @@
-import { CircleCheck, LoaderCircle } from 'lucide-react';
-import type { TurnPlanStep } from '@session/bindings/v2';
-import { cn } from '@session/lib/utils';
+import { Check, Circle, LoaderCircle } from "lucide-react";
+import type { TurnPlanStep } from "@session/bindings/v2";
+import { cn } from "@session/lib/utils";
 
 interface TurnPlanProps {
   plan: TurnPlanStep[];
   explanation: string | null;
 }
 
+/**
+ * Codex 26.51007.21434 (`sites-end-resource-733bd1c6da06.js`) builds a plan step
+ * as `flex items-start gap-2` over two columns: a `flex flex-shrink-0
+ * items-start gap-0.5` pair of status glyph plus an `{index}.` text prefix, then
+ * `text-size-chat flex-1 leading-4` for the step itself. Each glyph sits in the
+ * same `flex size-4 shrink-0 items-center justify-center overflow-hidden` box,
+ * and status is carried by the glyph alone: the only text change is
+ * `line-through` on a completed step, with no recolouring or weight shift.
+ */
+function PlanStepGlyph({ status }: { status: TurnPlanStep["status"] }) {
+  return (
+    <div className="flex size-4 shrink-0 items-center justify-center overflow-hidden text-muted-foreground">
+      {status === "completed" ? (
+        <Check className="size-3.5 shrink-0" aria-hidden="true" />
+      ) : status === "inProgress" ? (
+        <LoaderCircle
+          className="size-3.5 shrink-0 animate-spin"
+          aria-hidden="true"
+        />
+      ) : (
+        <Circle className="size-3 shrink-0 opacity-60" aria-hidden="true" />
+      )}
+    </div>
+  );
+}
+
 export function TurnPlan({ plan, explanation }: TurnPlanProps) {
   return (
-    <div className="flex flex-col p-3 rounded-lg border border-border bg-card/50">
+    <div className="bg-card/50 border-border flex flex-col rounded-lg border p-3">
       {explanation && (
-        <div className="text-sm text-foreground/80 font-medium mb-4 px-1">{explanation}</div>
+        <div className="text-foreground/80 mb-4 px-1 text-sm font-medium">
+          {explanation}
+        </div>
       )}
-      <div className="flex flex-col">
+      <div className="flex flex-col gap-1.5">
         {plan.map((p, index) => (
-          <div key={p.step} className="flex items-start gap-2">
-            {/* Status Icon Column */}
-            <div className="flex flex-col items-center flex-shrink-0 w-6 py-0.5">
-              <div className="relative w-5 h-5 flex items-center justify-center">
-                {p.status === 'completed' ? (
-                  <CircleCheck className="w-5 h-5 text-emerald-500" />
-                ) : p.status === 'inProgress' ? (
-                  <div className="relative w-5 h-5 flex items-center justify-center">
-                    <LoaderCircle
-                      className="absolute inset-0 w-5 h-5 text-blue-600 animate-spin"
-                      strokeWidth={2.5}
-                    />
-                    <span className="text-[11px] font-bold text-blue-600 z-10">{index + 1}</span>
-                  </div>
-                ) : (
-                  <div className="w-5 h-5 rounded-full border border-muted-foreground/40 flex items-center justify-center bg-muted/10">
-                    <span className="text-[11px] font-bold text-muted-foreground/60">
-                      {index + 1}
-                    </span>
-                  </div>
-                )}
-              </div>
+          // `TurnPlanStep` has no identity field and two steps may share text,
+          // so the index is the only stable key available here.
+          <div key={index} data-plan-step="" className="flex items-start gap-2">
+            <div className="flex flex-shrink-0 items-start gap-0.5">
+              <PlanStepGlyph status={p.status} />
+              <span
+                data-plan-step-index=""
+                className="text-[13px] leading-4 tabular-nums"
+              >
+                {index + 1}.
+              </span>
             </div>
-
-            {/* Text Content Column */}
-            <div
+            <span
+              data-plan-step-label=""
               className={cn(
-                'flex-1 transition-all duration-300',
-                index < plan.length - 1 ? 'pb-5' : 'pb-1'
+                "flex-1 text-[13px] leading-4",
+                p.status === "completed" && "line-through",
               )}
             >
-              <h4
-                className={cn(
-                  'text-[13px] font-medium leading-snug pt-0.5',
-                  p.status === 'completed' &&
-                    'text-muted-foreground line-through decoration-muted-foreground/30',
-                  p.status === 'inProgress' && 'text-foreground font-semibold',
-                  p.status === 'pending' && 'text-muted-foreground/80'
-                )}
-              >
-                {p.step}
-              </h4>
-            </div>
+              {p.step}
+            </span>
           </div>
         ))}
       </div>

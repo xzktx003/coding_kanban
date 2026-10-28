@@ -2,6 +2,7 @@ import {
   sessionPortalContainer,
   useSessionInteractionVisible,
   isSessionInteractionVisible,
+  useSessionPortalDocument,
 } from "@session/session-dom";
 import * as React from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
@@ -27,15 +28,20 @@ function PopoverContent({
   onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content>) {
+  // A layer opened inside the independent plan window belongs to that window's
+  // own root, and the opener's hidden state must not blank it.
+  const ownerDocument = useSessionPortalDocument();
   const interactionVisible = useSessionInteractionVisible();
-  if (!interactionVisible) return null;
+  if (!interactionVisible && !ownerDocument) return null;
 
   return (
-    <PopoverPrimitive.Portal container={sessionPortalContainer()}>
+    <PopoverPrimitive.Portal
+      container={sessionPortalContainer(ownerDocument ?? undefined)}
+    >
       <PopoverPrimitive.Content
         data-slot="popover-content"
         onCloseAutoFocus={(event) => {
-          if (!isSessionInteractionVisible()) {
+          if (!ownerDocument && !isSessionInteractionVisible()) {
             event.preventDefault();
             return;
           }

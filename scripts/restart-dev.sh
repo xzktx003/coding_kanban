@@ -535,6 +535,14 @@ main() {
   # Re-extract URLs after parallel wait (subshell can't export)
   wait_for_frontend_urls "$WEB_LOG" 5
 
+  # A reused runtime keeps serving the previous build, so replace it here and
+  # let the next request start the new one.
+  node "${ROOT_DIR}/scripts/session-runtime-replace.mjs" || log 'Session runtime replacement skipped; see the message above.'
+  if [[ "${SESSION_MODE_ENABLED:-1}" != '0' ]]; then
+    # Only /api/session/health starts the runtime; /api/health is terminal-only.
+    wait_for_http 'session runtime' "${SERVER_URL}/api/session/health" 200 || true
+  fi
+
   # Check the structured runtime separately: gateway health alone is insufficient.
   local session_result=0
   node "${ROOT_DIR}/scripts/session-runtime-status.mjs" || session_result=$?

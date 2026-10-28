@@ -1,4 +1,5 @@
-/* openai.chatgpt 26.51002.51308 request-panel/Jn/Qr/jn and approvalRequestCard.
+/* openai.chatgpt 26.51002.51308 request-panel/Jn/Qr/jn and approvalRequestCard
+   (symbols re-verified present in 26.51007.21434).
  * Host colors follow the existing Codex presentation tokens. Mobile targets
  * intentionally keep the project's 44px accessibility boundary. */
 .session-mode .codex-elicitation__image-picker {
@@ -295,7 +296,9 @@
   color: var(--codex-removed, #c74e39);
   font-weight: 500;
 }
-.session-mode .codex-elicitation__tool { font-weight: 600; }
+.session-mode .codex-elicitation__tool {
+  font-weight: 600;
+}
 .session-mode .codex-elicitation__title {
   font-size: 13px;
   font-weight: 500;

@@ -97,6 +97,60 @@ describe("MobileWorkbenchPage", () => {
     );
   });
 
+  it("groups sessions in the mobile picker when custom groups exist", () => {
+    const sessions = [
+      {
+        id: "backend",
+        workspaceId: "default",
+        sourceType: "local" as const,
+        agentKind: "codex",
+        displayName: "Backend Agent",
+        connectionState: "online" as const,
+        interactionState: "idle" as const,
+      },
+      {
+        id: "frontend",
+        workspaceId: "default",
+        sourceType: "local" as const,
+        agentKind: "codex",
+        displayName: "Frontend Agent",
+        connectionState: "online" as const,
+        interactionState: "idle" as const,
+      },
+    ];
+
+    const markup = renderToStaticMarkup(
+      createElement(MobileSessionSwitcher, {
+        activeSession: sessions[0],
+        open: true,
+        sessions,
+        sessionGroups: {
+          groups: [
+            { id: "group-backend", name: "后端" },
+            { id: "group-frontend", name: "前端" },
+          ],
+          assignments: {
+            "session:backend": "group-backend",
+            "session:frontend": "group-frontend",
+          },
+          collapsedGroupIds: [],
+        },
+        onOpenChanges: () => {},
+        onOpenFiles: () => {},
+        onOpenTranscript: () => {},
+        onSelectSession: () => {},
+        onToggle: () => {},
+      }),
+    );
+
+    assert.match(markup, /mobile-session-picker-group/);
+    assert.match(markup, /后端/);
+    assert.match(markup, /前端/);
+    assert.match(markup, /Backend Agent/);
+    assert.match(markup, /Frontend Agent/);
+    assert.equal((markup.match(/role="option"/g) ?? []).length, 2);
+  });
+
   it("presents mobile board sessions as compact terminal cards", () => {
     const markup = renderToStaticMarkup(
       createElement(MobileSessionCard, {

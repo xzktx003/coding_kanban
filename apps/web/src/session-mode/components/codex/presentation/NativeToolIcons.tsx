@@ -1,5 +1,5 @@
 import type { SVGProps } from "react";
-/** Static original SVG bodies captured from VSIX 26.51002.51308 primary tool components. */
+/** Static original SVG bodies captured from VSIX 26.51002.51308 (asset bytes re-verified unchanged in 26.51007.21434) primary tool components. */
 const bodies = {
   hookChevron:
     '<path d="M8.71677 4.71677C8.87298 4.56056 9.12696 4.56056 9.28317 4.71677C9.43938 4.87298 9.43938 5.12696 9.28317 5.28317L6.45993 8.10642C6.20609 8.36023 5.79384 8.36023 5.54001 8.10642L2.71677 5.28317C2.56056 5.12696 2.56056 4.87298 2.71677 4.71677C2.87298 4.56056 3.12696 4.56056 3.28317 4.71677L5.99997 7.43356L8.71677 4.71677Z" fill="currentColor"></path>',

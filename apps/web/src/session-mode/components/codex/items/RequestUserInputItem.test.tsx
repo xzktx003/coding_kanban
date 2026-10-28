@@ -131,9 +131,12 @@ it("supports custom answers and explicit skips; confirmed rejection retains the 
   useRequestUserInputStore.getState().addRequest(request("rpc"));
   render(<RequestUserInputItem currentThreadId="a" />);
   fireEvent.click(screen.getByRole("radio", { name: "自行填写" }));
-  fireEvent.change(screen.getByPlaceholderText("否，并告诉 ChatGPT 应该如何做得不同"), {
-    target: { value: "散步" },
-  });
+  fireEvent.change(
+    screen.getByPlaceholderText("否，并告诉 ChatGPT 应该如何做得不同"),
+    {
+      target: { value: "散步" },
+    },
+  );
   fireEvent.click(screen.getByRole("button", { name: "下一步" }));
   fireEvent.click(screen.getByRole("button", { name: "跳过此题" }));
   expect(api.respond).not.toHaveBeenCalled();
@@ -178,6 +181,77 @@ it("an ambiguous network failure keeps answers and does not blindly repeat the R
   fireEvent.click(screen.getByRole("button", { name: "提交回答" }));
   await waitFor(() => expect(api.respond).toHaveBeenCalledTimes(1));
   expect(useRequestUserInputStore.getState().pendingRequests).toHaveLength(1);
+});
+/**
+ * While the RPC is in flight the submit control must say so: the label switches
+ * to the submitting string and the control is disabled, which is what stops a
+ * second send of the same answers. Without this the previous test would also
+ * pass on a build that simply never shows a busy state at all.
+ */
+it("marks the submit control busy while the answer is in flight", async () => {
+  let release: (() => void) | undefined;
+  api.respond.mockImplementationOnce(
+    () =>
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+  );
+  useRequestUserInputStore.getState().addRequest(request("busy"));
+  render(<RequestUserInputItem currentThreadId="a" />);
+  fireEvent.click(screen.getByRole("button", { name: "跳过此题" }));
+  fireEvent.click(screen.getByRole("button", { name: "跳过此题" }));
+  fireEvent.click(screen.getByRole("button", { name: "提交回答" }));
+  const busy = await screen.findByRole("button", {
+    name: "userInput.submitting",
+  });
+  expect((busy as HTMLButtonElement).disabled).toBe(true);
+  // A click while busy must not reach the wire a second time.
+  fireEvent.click(busy);
+  expect(api.respond).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    release?.();
+  });
+});
+/**
+ * `deliverRpc` records the `uncertain` phase inside its own catch and only then
+ * re-throws, so the delivery notice can commit its `role="alert"` one React
+ * commit before the item's own `finally { setSubmitting(false) }` lands. In that
+ * gap the retry button still reads the submitting label, so anything that waits
+ * for the alert and then reaches for the retry control sees a stale name. A user
+ * who clicks the instant the warning appears hits a button that is still
+ * mid-submit; the two must become visible together.
+ */
+it("shows the retry label in the same commit as the delivery warning", async () => {
+  api.respond.mockRejectedValueOnce(new Error("offline"));
+  useRequestUserInputStore.getState().addRequest(request("uncertain"));
+  const view = render(<RequestUserInputItem currentThreadId="a" />);
+  fireEvent.click(screen.getByRole("button", { name: "跳过此题" }));
+  fireEvent.click(screen.getByRole("button", { name: "跳过此题" }));
+  const split: { submit: string | null; alert: boolean }[] = [];
+  const record = () =>
+    split.push({
+      submit:
+        [...view.container.querySelectorAll("button")]
+          .map((button) => button.textContent ?? "")
+          .find((label) => /提交|submitting/.test(label)) ?? null,
+      alert: Boolean(view.container.querySelector('[role="alert"]')),
+    });
+  const observer = new MutationObserver(record);
+  observer.observe(view.container, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+  });
+  fireEvent.click(screen.getByRole("button", { name: "提交回答" }));
+  record();
+  await screen.findByRole("alert");
+  await waitFor(() => expect(api.respond).toHaveBeenCalledTimes(1));
+  observer.disconnect();
+  // No commit may advertise a retryable warning while the control is still busy.
+  expect(
+    split.filter((frame) => frame.alert && frame.submit !== "提交回答"),
+  ).toEqual([]);
 });
 it("masks secret text and does not put answers into browser persistent storage", () => {
   const secret = request(1);

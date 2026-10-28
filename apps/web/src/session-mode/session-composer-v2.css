@@ -658,7 +658,7 @@
 .session-mode .session-queue-detail .session-queue-row {
   flex-wrap: wrap;
 }
-.session-mode .session-queue-detail .session-queue-list > li {
+.session-mode .session-queue-detail .session-queue-items > li {
   padding-block: 10px;
   border-bottom: 1px solid var(--border);
 }

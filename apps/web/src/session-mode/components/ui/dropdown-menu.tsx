@@ -2,6 +2,8 @@ import {
   sessionPortalContainer,
   useSessionInteractionVisible,
   isSessionInteractionVisible,
+  useSessionPortalDocument,
+  releaseUnusedPointerFence,
 } from "@session/session-dom";
 import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
@@ -18,9 +20,12 @@ function DropdownMenu({
 function DropdownMenuPortal({
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Portal>) {
+  // A menu opened inside the independent plan window belongs to that window's
+  // own root; portalling it back into the opener leaves the popup with no menu.
+  const ownerDocument = useSessionPortalDocument();
   return (
     <DropdownMenuPrimitive.Portal
-      container={sessionPortalContainer()}
+      container={sessionPortalContainer(ownerDocument ?? undefined)}
       data-slot="dropdown-menu-portal"
       {...props}
     />
@@ -44,15 +49,26 @@ function DropdownMenuContent({
   onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+  const ownerDocument = useSessionPortalDocument();
   const interactionVisible = useSessionInteractionVisible();
-  if (!interactionVisible) return null;
+  // Radix's own fence cleanup can lose a race when one menu hands over to a
+  // sibling in the same document, so release it once no menu is left open.
+  React.useEffect(
+    () => () => releaseUnusedPointerFence(ownerDocument ?? undefined),
+    [ownerDocument],
+  );
+  // The owner window has its own visibility; the opener's hidden state must not
+  // blank a menu that window is showing.
+  if (!interactionVisible && !ownerDocument) return null;
 
   return (
-    <DropdownMenuPrimitive.Portal container={sessionPortalContainer()}>
+    <DropdownMenuPrimitive.Portal
+      container={sessionPortalContainer(ownerDocument ?? undefined)}
+    >
       <DropdownMenuPrimitive.Content
         data-slot="dropdown-menu-content"
         onCloseAutoFocus={(event) => {
-          if (!isSessionInteractionVisible()) {
+          if (!ownerDocument && !isSessionInteractionVisible()) {
             event.preventDefault();
             return;
           }

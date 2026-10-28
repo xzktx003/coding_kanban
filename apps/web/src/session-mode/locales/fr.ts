@@ -251,7 +251,8 @@ export const fr = {
       ended: "Tâche terminée",
       arguments: "Arguments",
     },
-    // Original toolSummaryForCmd and activity captions, VSIX 26.51002.51308.
+    // Original toolSummaryForCmd and activity captions, VSIX 26.51002.51308
+    // (strings re-verified unchanged in 26.51007.21434 locale bundles).
     // Native mixed activity header captions.
     activityGroup: {
       toolsLeading_one: "A appelé un outil",
@@ -459,7 +460,18 @@ export const fr = {
       description:
         "Ce tour et les suivants seront retirés de la conversation et le message sera remis dans la zone de saisie. Les fichiers ne seront pas restaurés et le message ne sera pas envoyé automatiquement. Continuer ?",
     },
+    userMessageNavigation: {
+      ariaLabel: "Messages d’utilisateurs",
+      jumpAriaLabel: "Aller au message utilisateur {{position}}",
+      loadingPreview: "Chargement de l’aperçu",
+      previewUnavailable: "Aperçu indisponible",
+      noContent: "(Aucun contenu)",
+      moreOutputs: "+{{count}}",
+    },
     userMessage: {
+      attachment: "Pièce jointe utilisateur",
+      attachmentFailed: "Impossible de charger l’image",
+      attachmentFailedShort: "Échec",
       edit: "Modifier le message",
       editFailed: "Échec de la modification du message",
     },

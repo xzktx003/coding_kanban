@@ -1110,7 +1110,7 @@ export function Composer({
                     <span>{goalLabels.draft}</span>
                   </button>
                 ) : (
-                  <AccessModePopover compact threadId={currentThreadId} />
+                  <AccessModePopover threadId={currentThreadId} />
                 )}
                 <SubagentSummary root={currentThreadId} />
               </div>
@@ -1331,7 +1331,7 @@ export function Composer({
           returnFocus={() => editorRef.current?.focus()}
           footer={
             <>
-              <AccessModePopover compact threadId={currentThreadId} />
+              <AccessModePopover threadId={currentThreadId} />
               <NativeModelSelector
                 threadId={currentThreadId}
                 draftOwner={owner}

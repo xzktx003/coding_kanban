@@ -1,6 +1,6 @@
 import type { SVGProps } from "react";
 /** Exact static assets selected by native GS/JS for ordinary file references.
- * Source: openai.chatgpt 26.51002.51308 app-initial-e98 assets and f7 GS registry.
+ * Source: openai.chatgpt 26.51002.51308 (asset bytes re-verified unchanged in 26.51007.21434) app-initial-e98 assets and f7 GS registry.
  */
 const icons = {
   code: {

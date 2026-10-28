@@ -245,6 +245,14 @@
   padding: 0;
   list-style: none;
 }
+.session-mode .session-queue-items {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 .session-mode .session-queue-shelf li {
   border: 0;
   border-bottom: 1px solid var(--border);
@@ -267,6 +275,31 @@
   color: var(--muted-foreground);
   flex-shrink: 0;
   margin: 0 6px;
+}
+/* Codex 26.51007.21434 queued-message-list: the failure glyph is a bare
+   `mt-0.5 inline-flex shrink-0` wrapper around `icon-2xs text-warning`, so it
+   must opt out of the 32px row-button box the queue applies to real actions.
+   `text-warning` resolves to --vscode-editorWarning-foreground in the
+   extension window; the fallback is the official --orange-500 (#e25507)
+   used by its standalone light/dark branch. */
+.session-mode .session-queue-row button.session-queue-warning {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+  margin-inline: 0 2px;
+  width: auto;
+  min-width: 0;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--vscode-editorWarning-foreground, #e25507);
+  cursor: help;
+}
+.session-mode .session-queue-row button.session-queue-warning:hover {
+  color: var(--vscode-editorWarning-foreground, #e25507);
 }
 .session-mode .session-queue-shelf .session-followup-text {
   flex: 1;
@@ -622,13 +655,32 @@
   font-size: 12px;
   min-width: 0;
 }
-.session-mode .session-model-change-notice > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.session-mode .session-model-change-notice strong { color: var(--foreground); font-weight: 500; }
-.session-mode .session-model-change-notice small { display: block; font-size: 11px; }
-.session-mode .session-model-change-notice button { flex-shrink: 0; width: 32px; height: 32px; }
+.session-mode .session-model-change-notice > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.session-mode .session-model-change-notice strong {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.session-mode .session-model-change-notice small {
+  display: block;
+  font-size: 11px;
+}
+.session-mode .session-model-change-notice button {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+}
 @media (pointer: coarse), (max-width: 767px) {
-  .session-mode .session-model-change-notice { margin-inline: 8px; }
-  .session-mode .session-model-change-notice button { width: 44px; height: 44px; }
+  .session-mode .session-model-change-notice {
+    margin-inline: 8px;
+  }
+  .session-mode .session-model-change-notice button {
+    width: 44px;
+    height: 44px;
+  }
 }
 .session-mode .session-personality-notice {
   margin: 8px 12px 0;

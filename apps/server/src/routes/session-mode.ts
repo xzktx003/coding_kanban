@@ -11,6 +11,7 @@ import { registerSessionGitReviewRoutes } from "./session-git-review.js";
 import { registerSessionGuardianDenialRoutes } from "./session-codex-guardian.js";
 import { registerCodexHostRoutes } from "./session-codex-host.js";
 import { registerCodexCloudRoutes } from "./session-codex-cloud.js";
+import { registerSessionGroupsRoutes } from "./session-groups.js";
 import { createCodexHostOwnerResolver } from "../services/codex-host-owner.js";
 import { projectCodexPriorConversation } from "../services/codex-cloud-history.js";
 import { CodexHostCompanionCredential, prepareCodexHostCompanion } from "../services/codex-host-companion.js";
@@ -183,6 +184,11 @@ export function registerSessionModeRoutes(
   registerSessionTabsRoutes(app, {
     file: options.attachmentRoot
       ? resolve(options.attachmentRoot, "..", "followed-sessions.json")
+      : undefined,
+  });
+  registerSessionGroupsRoutes(app, {
+    file: options.attachmentRoot
+      ? resolve(options.attachmentRoot, "..", "session-groups.json")
       : undefined,
   });
   const sharedProjects = registerSessionProjectsRoutes(app, {

@@ -78,3 +78,11 @@ pnpm exec playwright test tests/e2e/session-rail-theme.spec.ts \
 按主线程允许的最小范围，新增 `ComposerRailIcon.native.test.tsx`，旧实现 **4 项红灯、1 项控制通过**；随后只在 `ComposerRailIcon.tsx` 为 4 个静态 SVG body 缓存 `{ __html }`，改为传递稳定引用。单测 **5/5 通过**；相同真实浏览器 probe 的三种同名更新均为 **0 childList、全部 path 引用保持**，更换 name 仍发生一次预期 childList 更新。父按钮焦点在修复前后都正常保持，本项证据不支持“此前按钮失焦”的额外结论。
 
 缓存仅包含 4 个静态图标，不保存用户内容。产物固定在 `.dev-runtime/session-rail-icon-audit-20261027/`：`unit-red.log`、`unit-green.log`、`probe.mts`、`probe-red.log`、`probe-green.log`、`result-red.json`、`result-green.json`；JSON 同时记录实际源码 SHA-256 和逐次节点/MutationObserver 结果。该轮未扩大其他产品实现或重启服务。
+
+## 短队列滚动遮罩复核
+
+后续阅读原始 `QueuedMessageList` DOM 后，确认官方 `vertical-scroll-fade-mask` 是外层 `div`：它统一承担 `max-height:30dvh`、`overflow-y:auto`、暂停提示和消息列表；本地此前把滚动/mask 放在 `<ol>` 上。浏览器红灯实测原包 scroll owner 为 `DIV`、本地为 `OL`，且不溢出的两行本地队列仍有 scroll-driven mask。
+
+现在 `QueueReorderList` 由外层 `div.session-queue-list` 管理滚动与暂停状态，内部 `<ol class="session-queue-items">` 保持列表语义和可拖排序。遮罩只在列表内容超过自己的 max-height 时启用；这样忽略 composer rail 进入时暂时较小的父级高度，避免短队列首帧被误判为溢出。内容尺寸通过 `ResizeObserver` 和 viewport resize 重新核对。
+
+扩展真实原包 rail 回归后，light/dark、短队列/12 行溢出、640/360 容器共 4 项通过；短队列不启用遮罩，长队列滚动顶部/底部的渐隐值与原组件一致。`QueueReorder` / `FollowupQueue` 52 项单测通过，`pnpm check` 通过。附件/预览全 PNG 对照仍有 4 个已记录像素红灯；本次没有放宽阈值，也没有声称整块 composer 像素相同。浏览器产物在 `.dev-runtime/session-rail-theme-20261027/final-queue-pairs/`。

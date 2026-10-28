@@ -6,6 +6,7 @@ import {
   useConversationFormField,
   useConversationOwnerForm,
 } from "./conversationOwnerFormContext";
+import { shouldSubmitOnEnter } from "./imeSubmitKey";
 import { ComposerSheet } from "./v2/ComposerSheet";
 
 export function CreateBranchSheet({
@@ -63,7 +64,15 @@ export function CreateBranchSheet({
           setError(null);
         }}
         onKeyDown={(event) => {
-          if (event.key === "Enter") {
+          // Creating and checking out a branch must not fire on the Enter that
+          // accepts an input-method candidate for the branch name.
+          if (
+            shouldSubmitOnEnter({
+              key: event.key,
+              isComposing: event.nativeEvent.isComposing,
+              keyCode: event.keyCode,
+            })
+          ) {
             event.preventDefault();
             void create();
           }
