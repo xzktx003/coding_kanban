@@ -1,0 +1,27 @@
+{
+  "name": "harness-kanban",
+  "version": "0.1.0",
+  "description": "Connect an existing Coding Kanban workbench to DeepSeek Harness",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": ["index.js", "client.js", "cordis.patch.yml", "tls-proxy.mjs", "README.md"],
+  "dsh": {
+    "client": {
+      "inject": ["@deepseek-ai/dsh-client-ui-layout"],
+      "platform": "web",
+      "immediately": true
+    },
+    "bundle": { "patch": "./cordis.patch.yml" }
+  },
+  "engines": { "dsh": "0.2.1-rc.4", "node": ">=24" },
+  "scripts": {
+    "check": "node --check index.js && node --check client.js && node --check tls-proxy.mjs",
+    "test": "node --test test/*.test.mjs"
+  }
+}

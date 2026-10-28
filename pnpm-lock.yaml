@@ -512,6 +512,8 @@ importers:
 
   packages/codex-host-bridge: {}
 
+  packages/harness-kanban: {}
+
   packages/native-codex-adapter: {}
 
   packages/native-codex-host:

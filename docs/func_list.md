@@ -1,3 +1,5 @@
+- 新增独立 `harness-kanban` 页面插件：复用现有 Kanban 服务，在 DeepSeek Harness RC.4 内加载完整工作台；经典侧栏与独立入口兼容 DS Bot，切换时保留同一个 iframe／草稿。提供当前浏览器连接设置和可选 HTTPS 转发入口，不新增 Kanban 实例，不修改既有业务源码；首版不包含 Agent 工具、公网和手机接入。验证及边界见 [实施记录](designs/deepseek-harness-kanban-plugin-implementation.md)。
+
 - 已有会话的模型/权限等设置按线程事务保存，跨页独立修改合并、同组冲突明确提示并可重试；发送保留点击时捕获配置，旧账号/运行实例回执不污染当前会话，见[设置持久化与边界](designs/session-render-alignment/thread-settings-persistence-20261027.md)。
 
 - 排队/引导、Enter与审查方式三个本机偏好逐字段保存，多页修改不同字段互不覆盖；失败保留当前选择并提供重试，见[偏好多页验收](designs/session-render-alignment/followup-preferences-multitab-20261027.md)。

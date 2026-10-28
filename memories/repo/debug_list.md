@@ -1,3 +1,9 @@
+- 2026-10-28（Harness 临时入口与原默认端口不一致）：按用户要求将默认入口统一回 3080，使用官方原生 HTTPS 参数，停用临时 3443。两次空闲检查后切换，同一服务会话 ID 保留、220 项插件中稳定条目保留（两个匿名运行 ID 正常重建）；同步私有登录链接和自动维护 HTTPS／CA 配置，原生 3080 浏览器与维护回归通过。
+
+- 2026-10-28（新 Harness HTTPS 入口提示 authentication required）：原 HTTP 与新 HTTPS authority 使用独立认证 Cookie，先前使用说明先列普通地址，导致首次进入收到正常的 401。已将完整私有登录链接放到首次访问步骤，验证完整链接 200、自动移除登录参数并保存 Secure Cookie，随后普通地址 200；未放宽认证或重启服务。
+
+- 2026-10-28（Harness 包装入口在 DS Bot 整页模式不可见）：仅注册原侧栏时，DS Bot 隐藏官方导航，首版入口无法访问。新增由官方 overlay 生命周期持有的插件自有 portal 与独立入口，原侧栏入口保留；iframe 不移动、不重建，不修改 DS Bot 模式或源码。受控浏览器覆盖独立入口、返回保活及经典导航，见 `docs/designs/deepseek-harness-kanban-plugin-implementation.md`。
+
 - 2026-10-28：`@types/react` 重复导致 `apps/web` 构建失败。新安卓客户端钉 `@types/react@~19.1.10`（19.1.17），`apps/web` 用 `^19.1.13`（19.2.14），pnpm 虚拟仓留下两份；JSX 内建元素 `ref` 类型来自 19.1.17、`React.Ref` 解析到 19.2.14，报 TS2322 `VoidOrUndefinedOnly`（Two different types）。把 android 对齐 `^19.1.13` 并按 lock 重新提升统一到 19.2.14 后 `pnpm check` 转绿。防回归：工作区里保持单一 `@types/react` 版本，避免 `jsx-runtime` 与业务代码解析到不同副本。
 - 2026-10-28：完整访问权限下把推理强度推到 ultra 原本没有任何提示。官方 `Lti` 在提交 model/effort 前判 `!b || t !== "ultra" || s.reasoningEffort === "ultra"`，否则等 `Pti` 对话框，确认前不写入。注意两条路不同：原生触发器确实隐藏 ultra（`includeUltra: false` 写死在唯一生产调用点），但设置面板的 `ReasoningEffortSelector` 走 `nativeReasoningOptions`，其允许集合含 ultra，所以面板可达——排查类似「某档位到不了」的问题时先区分这两条路。官方是三出口，boolean 承载不了；门必须放在能拿到 sandbox 的那一层。权限未确认时不发问（未确认既不等于 full access 也不等于安全）。fallback 固定取权限菜单自己能产生的模式，否则刷新会拼出菜单外组合。教训：门的「过度触发」反向探针查出了测试本身的缺陷——一条用例声称覆盖 `current === "ultra"` arm，实际在第一个 arm 就返回，因为滑块永不发出与当前值相同的档位；只验证绿灯不会暴露这种用例。
 

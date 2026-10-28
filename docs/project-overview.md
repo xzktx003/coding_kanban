@@ -1,5 +1,9 @@
 # Coding Kanban Project Overview
 
+DeepSeek Harness 接入采用独立 `packages/harness-kanban` 页面插件，复用当前 Kanban 服务、数据和运行层，不修改 Harness 或 Kanban 既有业务源码。首版提供持久 iframe、连接设置、DS Bot 整页界面的独立入口，以及可选的固定上游 HTTPS 入口；尚未接入 Agent 控制工具或公网／手机代理。真实浏览器验证、原生能力未验范围及卸载方式见 [实施记录](designs/deepseek-harness-kanban-plugin-implementation.md)。
+
+本机 Harness 按用户约定默认使用官方原生 HTTPS 3080，临时 3443 转发入口已停用；Kanban 仍使用原有地址。首次访问使用本机私有完整登录链接。
+
 新增安卓客户端（`apps/android`）：React Native / Expo SDK 57，通过局域网访问同一后端，与桌面工作台共用 `@agent-orchestrator/shared` 类型与既有 `/api/*` 接口。终端模式复用 Web 的移动端四页信息架构并提供真实 xterm.js 终端，会话模式接入 `/api/codex/thread/*` 与 `/api/events` SSE。客户端仅使用局域网地址连接、无账号体系，构建为本地 Android APK，详见 [安卓客户端](android-client.md)。
 
 会话运行层自有实现已迁移至 TypeScript，采用独立 Node 进程继续维护 Agent 生命周期。迁移实现位于 `packages/session-runtime/src`，目前 208 个接口及各领域服务已接入 TS，默认新启动使用 TS；已存活的旧运行服务继续复用，正式切换与完整验收分别记录。完整范围、208 个接口的审计和最终切换条件见 [TypeScript 迁移](session-typescript-migration.md)。

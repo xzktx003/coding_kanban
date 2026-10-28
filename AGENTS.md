@@ -2,6 +2,9 @@
 
 ## 构建、测试与开发命令
 
+- Harness 页面包装位于独立 `packages/harness-kanban`，只连接已有 Kanban，不随 `pnpm dev` 新启实例。专项检查 `pnpm --filter harness-kanban run check`、`pnpm --filter harness-kanban test`；浏览器验收须显式提供已有 Harness／Kanban 地址和私有启动日志，命令与 TLS／DS Bot 边界见包 README 及 `docs/designs/deepseek-harness-kanban-plugin-implementation.md`。安装走官方 bundle 管理接口，切勿为插件热加载重启活跃 Harness／Agent。
+- 用户约定本机 Harness Web 默认使用 **3080（HTTPS）**，不要因 Kanban 包装另换默认端口；临时 3443 已停用。证书、登录链接与启动参数保存在私有部署配置；端口／协议变更须在确认无运行轮次和后台任务的窗口执行，并同步维护检查与私有登录链接。
+
 - 全新受控宿主可显式添加 `--refresh-workspace-dir`，要求可见窗格模式及 service/domain/control 三项齐全。它为各独立 profile 选择同一已存在、规范、当前用户拥有且非 world-writable 的工作目录，允许0775项目；不得与本 profile 私有运行/控制/连接或登录目录交叠。原 `--project-dir` 仍须私有新空目录；公共目录不创建、不清空、不改权限，启动前重查。标准网关读取真实运行记录，不再依赖诊断子类改写；不等于自动profile或最终刷新验收。见 `docs/designs/codex-mode-audit-20261014/refresh-shared-workspace-20261016.md`。
 
 - 刷新验收须在精确 native turn 完成后额外核对官方 composer 清稿、正确唯一目标及 busy/Stop/Queue 结束，不能把 completed 当作页面空闲。`codex-refresh-fixture.mjs` 只接受一个共享诊断 profile 或三个精确独立 profile，禁止无条件取首项作为三宿主证据。独立宿主仍有并发页面等待反例，两秒未通过；只读有界断言、模拟参数及清理见 `docs/designs/codex-mode-audit-20261014/refresh-client-settlement-20261016.md`。
