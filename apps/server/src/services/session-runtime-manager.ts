@@ -277,7 +277,7 @@ export class SessionRuntimeManager {
   }
 }
 
-/** Hash the complete emitted JS tree so status notices changes outside main.js. */
+/** Hash the emitted JS the runtime can load so status notices changes outside main.js. */
 export function runtimeBuildFingerprint(dist: string): string {
   const hash = createHash("sha256");
   const visit = (directory: string, prefix: string) => {
@@ -287,7 +287,13 @@ export function runtimeBuildFingerprint(dist: string): string {
       const path = resolve(directory, entry.name),
         name = `${prefix}${entry.name}`;
       if (entry.isDirectory()) visit(path, `${name}/`);
-      else if (entry.isFile() && entry.name.endsWith(".js"))
+      // Compiled tests never load at runtime, so hashing them would report a
+      // stale runtime after `session:test` and skip a genuinely needed replace.
+      else if (
+        entry.isFile() &&
+        entry.name.endsWith(".js") &&
+        !entry.name.endsWith(".test.js")
+      )
         hash.update(name).update("\0").update(readFileSync(path)).update("\0");
     }
   };

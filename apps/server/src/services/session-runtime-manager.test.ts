@@ -211,6 +211,9 @@ test("build fingerprint changes for any emitted JS module but ignores sourcemaps
     const first = runtimeBuildFingerprint(root);
     writeFileSync(join(root, "main.js.map"), "map");
     assert.equal(runtimeBuildFingerprint(root), first);
+    // `session:test` emits these next to the modules; they never load at runtime.
+    writeFileSync(join(root, "nested/service.test.js"), "spec");
+    assert.equal(runtimeBuildFingerprint(root), first);
     writeFileSync(join(root, "nested/service.js"), "second");
     assert.notEqual(runtimeBuildFingerprint(root), first);
   } finally {
