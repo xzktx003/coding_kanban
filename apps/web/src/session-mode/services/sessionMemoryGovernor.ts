@@ -83,9 +83,12 @@ export function releaseSessionMemory(options: { pressure?: boolean } = {}) {
   entries.forEach(([id, transcript]) => {
     const timing = state.turnTimingMap[id];
     // Paging a long history to its start is the feature being protected, so the
-    // thread on screen keeps everything it paged back. Background threads carry
-    // the original budget, which is what the shared ceiling is for.
-    const reading = id === state.currentThreadId;
+    // thread on screen keeps what it paged back. The allowance follows the
+    // pinned reading window rather than the selection alone: an unread
+    // transcript that merely happens to be selected must stay inside the
+    // display budget, which is what the admission path depends on.
+    const reading =
+      id === state.currentThreadId && !!readingWindows.get(id)?.size;
     const maxBytes = reading
       ? READING_THREAD_BYTES
       : globalPressure

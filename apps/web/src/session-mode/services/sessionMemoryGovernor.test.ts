@@ -3,6 +3,7 @@ import { useApprovalStore } from "../components/codex/stores";
 import { useCodexStore } from "../components/codex/stores";
 import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 import { cachedTranscriptBaselines } from "./sessionCacheState";
+import { memoryHistoryWindows } from "./sessionMemoryHistory";
 import {
   releaseSessionMemory,
   startSessionMemoryGovernor,
@@ -27,6 +28,9 @@ beforeEach(() => {
   });
   useSessionSyncStore.setState({ cursors: {}, earlierLoading: {} });
   cachedTranscriptBaselines.clear();
+  // Pinned reading windows now decide the reading allowance, so leaving one
+  // behind would hand the next case an allowance it never asked for.
+  memoryHistoryWindows.clear();
 });
 afterEach(() => vi.useRealTimers());
 it("releases already retained old turns to a low watermark and restores history access", () => {

@@ -104,6 +104,9 @@ it("the thread being read keeps paging past the former 3000-event ceiling", () =
   // whole history is the feature; this thread's budget must follow the reader.
   const history = page("history", 120, 60);
   useCodexStore.setState({ events: { active: history.events } });
+  // The allowance follows the reader, so it has to be a thread the reader
+  // actually paged back, not merely the selected one.
+  pinMemoryHistoryPage("active", history.turnIds);
 
   releaseSessionMemory();
 
@@ -118,6 +121,8 @@ it("background threads stay bounded so one reader cannot grow every transcript",
   useCodexStore.setState({
     events: { active: foreground.events, other: background.events },
   });
+  pinMemoryHistoryPage("active", foreground.turnIds);
+  pinMemoryHistoryPage("other", background.turnIds);
 
   releaseSessionMemory();
 
