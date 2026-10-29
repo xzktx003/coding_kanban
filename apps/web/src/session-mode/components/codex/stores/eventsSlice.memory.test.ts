@@ -337,3 +337,123 @@ it("keeps a partial answer once when a turn ends without its item snapshot", () 
     "visible partial reply",
   );
 });
+
+it("keeps token and status metadata out of the transcript while preserving status authority", () => {
+  const id = "metadata-only";
+  const reply = {
+    method: "item/completed",
+    params: {
+      threadId: id,
+      turnId: "turn",
+      item: {
+        id: "reply",
+        type: "agentMessage",
+        text: "existing answer",
+      },
+    },
+  } as any;
+  useCodexStore.setState({
+    events: { [id]: [reply] },
+    threadStatusMap: {},
+    tokenUsageMap: {},
+    retryNoticeMap: {},
+  });
+  const events = useCodexStore.getState().events;
+  let publications = 0,
+    transcriptPublications = 0;
+  const stop = useCodexStore.subscribe((next, previous) => {
+    publications++;
+    if (next.events !== previous.events) transcriptPublications++;
+  });
+  const usage = {
+    totalTokens: 10,
+    inputTokens: 7,
+    cachedInputTokens: 2,
+    cacheWriteInputTokens: 0,
+    outputTokens: 3,
+    reasoningOutputTokens: 1,
+  };
+  try {
+    for (let i = 0; i < 40; i++) {
+      useCodexStore.getState().addEvent(id, {
+        method: "thread/tokenUsage/updated",
+        params: {
+          threadId: id,
+          turnId: "turn",
+          tokenUsage: {
+            total: { ...usage },
+            last: { ...usage },
+            modelContextWindow: 1000,
+          },
+        },
+      });
+      useCodexStore.getState().addEvent(id, {
+        method: "thread/status/changed",
+        params: {
+          threadId: id,
+          status: { type: "active", activeFlags: [] },
+        },
+      });
+    }
+    expect(transcriptPublications).toBe(0);
+    // Token usage publishes once; each native status still fences stale reads.
+    expect(publications).toBe(41);
+    expect(useCodexStore.getState().events).toBe(events);
+    expect(useCodexStore.getState().tokenUsageMap[id].total.totalTokens).toBe(
+      10,
+    );
+    expect(useCodexStore.getState().threadStatusMap[id]).toEqual({
+      type: "active",
+      activeFlags: [],
+    });
+  } finally {
+    stop();
+  }
+});
+
+it("accepts changed token usage and status flags without changing transcript identity", () => {
+  const id = "metadata-changes";
+  useCodexStore.setState({
+    events: {},
+    tokenUsageMap: {},
+    threadStatusMap: {},
+    retryNoticeMap: {},
+  });
+  const events = useCodexStore.getState().events;
+  const usage = {
+    totalTokens: 10,
+    inputTokens: 7,
+    cachedInputTokens: 2,
+    cacheWriteInputTokens: 0,
+    outputTokens: 3,
+    reasoningOutputTokens: 1,
+  };
+  const a = {
+    total: { ...usage },
+    last: { ...usage },
+    modelContextWindow: 1000,
+  };
+  useCodexStore.getState().setTokenUsage(id, a);
+  const unchanged = useCodexStore.getState();
+  useCodexStore
+    .getState()
+    .setTokenUsage(id, { ...a, total: { ...usage }, last: { ...usage } });
+  expect(useCodexStore.getState()).toBe(unchanged);
+  useCodexStore
+    .getState()
+    .setTokenUsage(id, { ...a, last: { ...usage, outputTokens: 4 } });
+  expect(useCodexStore.getState().tokenUsageMap[id].last.outputTokens).toBe(4);
+  for (const status of [
+    { type: "active", activeFlags: [] },
+    { type: "active", activeFlags: ["waitingOnApproval"] },
+    { type: "idle" },
+  ] as const)
+    useCodexStore
+      .getState()
+      .addEvent(id, {
+        method: "thread/status/changed",
+        params: { threadId: id, status },
+      } as any);
+  expect(useCodexStore.getState().threadStatusMap[id].type).toBe("idle");
+  expect(useCodexStore.getState().events).toBe(events);
+});

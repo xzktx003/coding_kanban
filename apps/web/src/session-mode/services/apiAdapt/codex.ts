@@ -4,6 +4,7 @@ import {
   MEMORY_HISTORY_RESTART_CURSOR,
   MEMORY_ITEM_CURSOR,
   pinMemoryHistoryPage,
+  captureMemoryHistoryIntent,
 } from "../sessionMemoryHistory";
 import type { RpcIdentity } from "@session/components/codex/stores/rpcLifecycle";
 import { isDesktopTauri } from "@session/hooks/runtime";
@@ -124,6 +125,9 @@ export async function threadRead(
       };
     }
 > {
+  const readingIntent = params.recent && params.cursor
+    ? captureMemoryHistoryIntent(params.threadId)
+    : undefined;
   if (params.recent && params.cursor?.startsWith(MEMORY_ITEM_CURSOR)) {
     const recovery = JSON.parse(
       decodeURIComponent(params.cursor.slice(MEMORY_ITEM_CURSOR.length)),
@@ -173,7 +177,7 @@ export async function threadRead(
           older = next.data;
           nextCursor = next.nextCursor;
         }
-        pinMemoryHistoryPage(params.threadId, [recovery.turnId]);
+        pinMemoryHistoryPage(params.threadId, [recovery.turnId], readingIntent);
         return {
           thread: {
             id: params.threadId,
@@ -301,6 +305,7 @@ export async function threadRead(
         pinMemoryHistoryPage(
           params.threadId,
           older.map((turn) => turn.id),
+          readingIntent,
         );
         return {
           thread: {
@@ -386,6 +391,7 @@ export async function threadRead(
         pinMemoryHistoryPage(
           params.threadId,
           turns.map((turn) => turn.id),
+          readingIntent,
         );
       return {
         thread: {

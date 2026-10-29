@@ -49,10 +49,17 @@ async function prepare(page: import("@playwright/test").Page) {
         isSidebarOpen: false,
         isRightPanelOpen: false,
       });
-      useAgentCenterStore.getState().addAgentCard(
-        { kind: "codex", id: "ux-0", cwd: "/fixture/项目", preview: "分页验收" },
-        { activate: true },
-      );
+      useAgentCenterStore
+        .getState()
+        .addAgentCard(
+          {
+            kind: "codex",
+            id: "ux-0",
+            cwd: "/fixture/项目",
+            preview: "分页验收",
+          },
+          { activate: true },
+        );
       useAgentCenterStore.setState({ cardsViewMode: "solo" });
       useCodexStore.setState({
         events: { "ux-0": events },
@@ -143,7 +150,9 @@ test("clicking the recovery-anchor entry actually reads older turns and clears t
     trimmedHistoryAnchors: { "ux-0": "page-turn-0" },
   });
   const entry = page.locator(".session-earlier-history");
-  await entry.getByRole("button", { name: "加载更早消息", exact: true }).click();
+  await entry
+    .getByRole("button", { name: "加载更早消息", exact: true })
+    .click();
   await expect.poll(async () => (await readPaging(page)).loading).toBe(false);
   const paging = await readPaging(page);
   expect(paging.error).toBe("");
@@ -174,7 +183,9 @@ test("a failed earlier page shows its reason and a retry recovers the pagination
     });
   });
   const entry = page.locator(".session-earlier-history");
-  await entry.getByRole("button", { name: "加载更早消息", exact: true }).click();
+  await entry
+    .getByRole("button", { name: "加载更早消息", exact: true })
+    .click();
   // The reason is visible instead of a bare "加载失败，可重试".
   await expect(entry.getByRole("status")).toHaveText(/^加载失败：.+/);
   const retry = entry.getByRole("button", {
@@ -187,6 +198,94 @@ test("a failed earlier page shows its reason and a retry recovers the pagination
   await retry.click();
   await expect.poll(async () => (await readPaging(page)).error).toBe("");
   await expect(entry.getByRole("status")).toHaveCount(0);
+  expect(noWrites(fixture)).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
+test("scrolling back to latest releases old-history protection even when reading-position storage fails", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const { fixture, errors, viewport } = await prepare(page);
+  (fixture.threads[0] as any).turns = Array.from(
+    { length: 12 },
+    (_, index) => ({
+      id: `older-turn-${index}`,
+      status: "completed",
+      startedAt: index + 1,
+      durationMs: 1,
+      error: null,
+      items: [
+        {
+          type: "agentMessage",
+          id: `older-item-${index}`,
+          text: `Recovered old message ${index}`,
+          phase: "final_answer",
+          memoryCitation: null,
+        },
+      ],
+    }),
+  );
+  await page.evaluate(() => {
+    const key = "kanban.session.read-position.codex:ux-0";
+    localStorage.setItem(
+      key,
+      JSON.stringify({ atBottom: true, scrollTop: 0, offset: 0 }),
+    );
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (name, value) {
+      if (name === key)
+        throw new DOMException(
+          "fixture storage unavailable",
+          "QuotaExceededError",
+        );
+      original.call(this, name, value);
+    };
+  });
+  await viewport.hover();
+  await page.mouse.wheel(0, -100_000);
+  await expect
+    .poll(() => viewport.evaluate((element) => element.scrollTop))
+    .toBeLessThan(240);
+  await setPaging(page, {
+    cursors: { "ux-0": "0" },
+    trimmedHistoryAnchors: {},
+  });
+  await page
+    .locator(".session-earlier-history")
+    .getByRole("button", { name: "加载更早消息", exact: true })
+    .click();
+  const pinCount = () =>
+    page.evaluate(async () => {
+      const path = "/src/session-mode/services/sessionMemoryHistory.ts";
+      const module = await import(
+        performance
+          .getEntriesByType("resource")
+          .findLast((entry) => new URL(entry.name).pathname === path)?.name ??
+          path
+      );
+      return module.memoryHistoryWindows.get("ux-0")?.size ?? 0;
+    });
+  await expect.poll(pinCount).toBeGreaterThan(0);
+  expect(
+    await page.evaluate(
+      () =>
+        JSON.parse(
+          localStorage.getItem("kanban.session.read-position.codex:ux-0")!,
+        ).atBottom,
+    ),
+  ).toBe(true);
+  await viewport.hover();
+  await page.mouse.wheel(0, 100_000);
+  await expect
+    .poll(() =>
+      viewport.evaluate(
+        (element) =>
+          element.scrollHeight - element.clientHeight - element.scrollTop,
+      ),
+    )
+    .toBeLessThanOrEqual(4);
+  await expect.poll(pinCount).toBe(0);
   expect(noWrites(fixture)).toEqual([]);
   expect(errors).toEqual([]);
 });

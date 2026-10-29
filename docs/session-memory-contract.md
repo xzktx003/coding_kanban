@@ -237,3 +237,9 @@ Codex store 热更新须立即注册并复用同一个 store，更新 actions �
 代码块已知语言超过16Ki字符或自动检测超过4Ki字符须完整安全纯文本呈现，不在主线程执行语法检测或扩张大量span；不得丢源码/复制内容。rAF待处理队列须保持128项/1MiB估算准入，32项小批和4ms帧预算；生命周期先处理已接收文本、休眠释放，不能丢审批/完成或把无界积累搬到store。不可缩小身份立即处理、治理前单批瞬态及阅读窗口额度须明确，不宣称整个标签页RSS硬封顶。
 
 修改这些路径须跑对应store/hook/handler/highlight红绿单测及`session-render-work-budget`、`session-stream-backpressure`，再核对原HTTP/EventSource、空闲回收/恢复和审批提问组。实测与范围见[渲染工作预算](session-render-work-budget.md)，原长期RSS红灯保留。
+
+## 2026-10-29：阅读保护必须随用户返回最新而结束
+
+主动读取旧页仍保留原阅读额度；实际滚动或明确返回最新须结束该次阅读 pin，且不能依赖 localStorage 写成功。阅读请求须在首个 await 前捕获有界身份，结束、清理或淘汰后迟到页不得重新 pin；同一阅读期间并发页仍可累积。正常自动 follow-bottom 和恢复锚点不能误清正在读取的页面。回收在既有治理流程执行，不在 scroll/ResizeObserver 内同步反复发布。
+
+隐藏 token/status 只更新专属元数据，不进入正文；相同原生 status 的权威确认仍须使旧查询失效。长用户导航节点须有界并保留真实键盘/鼠标和焦点语义，不能删除历史数据伪装优化。修改运行阅读身份/预算/游标、菜单/导航、元数据状态红绿单测及真实滚轮分页、空闲回收、恢复、审批浏览器组；证据与十分钟仍红的时延边界见 [交互复验](session-interaction-jitter.md)。

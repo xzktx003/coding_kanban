@@ -70,3 +70,7 @@ PLAYWRIGHT_SKIP_WEBSERVER=1 PLAYWRIGHT_FRONTEND_PROTOCOL=https \
 ```
 
 涉及 store 的变更还运行既有 stream-memory、transcript-memory、memory-governor、idle-memory 和消息回执浏览器回归。长测使用真实时钟、自然回收、原采样器和原门槛，同时记录 JS 堆、逐 renderer PID/start ticks/RSS、DOM／监听器及音频上下文；不能只用短时按键测试推断长期内存已根治。
+
+## 2026-10-29 持续输出期间的间歇停顿
+
+本轮继续定位菜单逐键派生、长提示词导航、统计事件正文发布和阅读保护残留。实际修复、十分钟按键/点击证据与仍未通过的整步500ms门槛见 [交互复验](session-interaction-jitter.md)。此结果不撤销上文三十分钟RSS红灯，也不代表原现场持续卡死已完整复现。

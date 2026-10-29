@@ -1,3 +1,4 @@
+import { clearMemoryHistoryWindow } from "@session/services/sessionMemoryHistory";
 import { CodexSystemRecords } from "./CodexSystemRecords";
 import { TranscriptDetailVisibility } from "../hooks/transcriptDetailVisibility";
 import { countClosedThreadRecords } from "./closedThreadRecords";
@@ -673,6 +674,11 @@ const CodexTranscript = memo(function CodexTranscript({
     pendingEarlierAnchor.current = fresh.anchor;
   }, [viewport, activeThreadId]);
   const jumpToBottom = useCallback(() => {
+    // Automatic follow-bottom frames also call here; only ending an actual
+    // reading-away interval may release recovered pages. Let the existing
+    // governor reclaim later, outside scroll/ResizeObserver callbacks.
+    if (!pinned.current || readingAway.current)
+      clearMemoryHistoryWindow(activeThreadId);
     pinned.current = true;
     readingAway.current = false;
     restoringAnchor.current = false;
@@ -690,7 +696,7 @@ const CodexTranscript = memo(function CodexTranscript({
         0,
         element.scrollHeight - element.clientHeight,
       );
-  }, [viewport]);
+  }, [viewport, activeThreadId]);
 
   useEffect(() => {
     const locate = (event: Event) => {
@@ -1167,6 +1173,10 @@ const CodexTranscript = memo(function CodexTranscript({
       const atBottom =
         !readingAway.current &&
         element.scrollHeight - element.scrollTop - element.clientHeight <= 1;
+      // Wheel return must also end protection when device storage is full or
+      // disabled. Anchor-restoration scrolls have already returned above.
+      if (atBottom && !pinned.current)
+        clearMemoryHistoryWindow(activeThreadId);
       pinned.current = atBottom;
       if (atBottom) userScrolling.current = false;
       setAtBottom(atBottom);

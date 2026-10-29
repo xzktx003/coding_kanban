@@ -30,6 +30,9 @@ type HookEvent = Extract<
 >;
 
 const ignoredTranscriptMethods = new Set<ServerNotification["method"]>([
+  // Already hidden by threadRows: lifecycle/statistics live in dedicated maps.
+  "thread/tokenUsage/updated",
+  "thread/status/changed",
   "rawResponseItem/completed",
   "item/commandExecution/outputDelta",
   "item/fileChange/outputDelta",

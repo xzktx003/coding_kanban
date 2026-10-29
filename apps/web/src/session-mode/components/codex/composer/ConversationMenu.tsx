@@ -2,6 +2,7 @@ import {
   type ComponentProps,
   type RefObject,
   createContext,
+  memo,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -167,7 +168,7 @@ function applyExpandedList(kind: Extract<FormatKind, "ol" | "ul" | "check">) {
   toast.message(kind === "check" ? "已切换核对清单" : `已设置为${name}列表`);
 }
 
-export function ConversationMenu({
+export const ConversationMenu = memo(function ConversationMenu({
   threadId,
   draftOwner,
   composerRef,
@@ -1803,4 +1804,4 @@ export function ConversationMenu({
     )}
     </SelectedActionContext.Provider>
   );
-}
+});

@@ -2,8 +2,16 @@ import { beforeEach, expect, it } from "vitest";
 import { useCodexStore } from "../components/codex/stores";
 import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 import { cachedTranscriptBaselines } from "./sessionCacheState";
+import { saveReadingPosition } from "./sessionTranscriptCache";
+import { pruneObservedCodexTranscriptBudget } from "./sessionTranscriptBudget";
+import {
+  estimateTranscriptBytes,
+  CODEX_TRANSCRIPT_MAX_BYTES,
+} from "./codexTranscriptMemoryBudget";
 import { releaseSessionMemory } from "./sessionMemoryGovernor";
 import {
+  captureMemoryHistoryIntent,
+  clearMemoryHistoryWindows,
   memoryHistoryWindows,
   pinMemoryHistoryPage,
 } from "./sessionMemoryHistory";
@@ -26,7 +34,9 @@ function page(prefix: string, turns: number, perTurn: number) {
     const turnId = `${prefix}-turn-${t}`;
     turnIds.push(turnId);
     for (let i = 0; i < perTurn; i++)
-      events.push(message(turnId, `${turnId}-item-${i}`, `${prefix} ${t}/${i}`));
+      events.push(
+        message(turnId, `${turnId}-item-${i}`, `${prefix} ${t}/${i}`),
+      );
   }
   return { events, turnIds };
 }
@@ -148,4 +158,84 @@ it("a pinned page survives real heap pressure while unprotected history is recla
   const retained = new Set(events);
   // 2000 protected events exceed the 1500/750 pressure ceiling on their own.
   for (const event of recovered.events) expect(retained.has(event)).toBe(true);
+});
+
+it("ends a paged history allowance on returning to latest before live replies accumulate", () => {
+  const id = "active";
+  saveReadingPosition(`codex:${id}`, {
+    atBottom: false,
+    offset: 0,
+    scrollTop: 10,
+  });
+  pinMemoryHistoryPage(id, ["old-page"]);
+  saveReadingPosition(`codex:${id}`, {
+    atBottom: true,
+    offset: 0,
+    scrollTop: 100,
+  });
+  const store = useCodexStore.getState();
+  for (let turn = 0; turn < 40; turn++) {
+    const turnId = `live-${turn}`;
+    for (let item = 0; item < 25; item++)
+      store.addEvent(
+        id,
+        message(turnId, `${turnId}-${item}`, "x".repeat(8192)),
+      );
+  }
+  expect(
+    estimateTranscriptBytes(useCodexStore.getState().events[id]),
+  ).toBeGreaterThan(CODEX_TRANSCRIPT_MAX_BYTES);
+  releaseSessionMemory({ pressure: true });
+  pruneObservedCodexTranscriptBudget(id);
+  expect(
+    estimateTranscriptBytes(useCodexStore.getState().events[id]),
+  ).toBeLessThanOrEqual(CODEX_TRANSCRIPT_MAX_BYTES);
+  expect(memoryHistoryWindows.has(id)).toBe(false);
+  expect(useSessionSyncStore.getState().cursors[id]).toMatch(/^kanban-memory-/);
+});
+
+it("does not end a recovered page allowance on default latest or continuing old-page anchor saves", () => {
+  const id = "reading-position-guard";
+  localStorage.removeItem(`kanban.session.read-position.codex:${id}`);
+  pinMemoryHistoryPage(id, ["page-one"]);
+  saveReadingPosition(`codex:${id}`, {
+    atBottom: true,
+    offset: 0,
+    scrollTop: 0,
+  });
+  expect(memoryHistoryWindows.get(id)?.has("page-one")).toBe(true);
+  saveReadingPosition(`codex:${id}`, {
+    atBottom: true,
+    offset: 0,
+    scrollTop: 20,
+  });
+  expect(memoryHistoryWindows.has(id)).toBe(true);
+  saveReadingPosition(`codex:${id}`, {
+    atBottom: false,
+    anchor: "older",
+    offset: 2,
+    scrollTop: 100,
+  });
+  pinMemoryHistoryPage(id, ["page-two"]);
+  saveReadingPosition(`codex:${id}`, {
+    atBottom: false,
+    anchor: "older",
+    offset: 2,
+    scrollTop: 200,
+  });
+  expect([...memoryHistoryWindows.get(id)!]).toEqual(["page-one", "page-two"]);
+});
+
+it("invalidates captures on bounded intent eviction and governor lifetime cleanup", () => {
+  clearMemoryHistoryWindows();
+  const old = captureMemoryHistoryIntent("evicted");
+  for (let i = 0; i < 50; i++) captureMemoryHistoryIntent(`other-${i}`);
+  pinMemoryHistoryPage("evicted", ["stale"], old);
+  expect(memoryHistoryWindows.has("evicted")).toBe(false);
+  const fresh = captureMemoryHistoryIntent("evicted");
+  pinMemoryHistoryPage("evicted", ["fresh"], fresh);
+  expect(memoryHistoryWindows.get("evicted")?.has("fresh")).toBe(true);
+  clearMemoryHistoryWindows();
+  pinMemoryHistoryPage("evicted", ["stale-again"], fresh);
+  expect(memoryHistoryWindows.has("evicted")).toBe(false);
 });

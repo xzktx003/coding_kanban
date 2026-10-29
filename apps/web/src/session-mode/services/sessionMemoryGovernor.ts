@@ -10,6 +10,8 @@ import {
 } from "./codexTranscriptMemoryBudget";
 
 import {
+  clearMemoryHistoryWindow,
+  clearMemoryHistoryWindows,
   MEMORY_HISTORY_RESTART_CURSOR,
   transcriptBudgetRecoveryCursor,
   memoryHistoryWindows as readingWindows,
@@ -207,7 +209,7 @@ export function releaseSessionMemory(options: { pressure?: boolean } = {}) {
       commandDurationMap,
     });
   for (const id of readingWindows.keys())
-    if (!events[id]) readingWindows.delete(id);
+    if (!events[id]) clearMemoryHistoryWindow(id);
   return {
     beforeBytes,
     afterBytes: Object.values(events).reduce(
@@ -242,6 +244,6 @@ export function startSessionMemoryGovernor() {
     if (pending) clearTimeout(pending);
     clearInterval(interval);
     document.removeEventListener("visibilitychange", visibility);
-    readingWindows.clear();
+    clearMemoryHistoryWindows();
   };
 }

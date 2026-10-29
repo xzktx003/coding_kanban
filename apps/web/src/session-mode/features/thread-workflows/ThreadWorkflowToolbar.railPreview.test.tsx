@@ -257,3 +257,30 @@ it("waits the official 200ms open delay, not 150ms", async () => {
   });
   expect(preview()).toBeTruthy();
 });
+
+it("keeps an open preview current while assistant-only workflow rows change", async () => {
+  const locale = createInstance();
+  await locale.init({ lng: "zh", resources: { zh } });
+  const presentation = (answer: string) => (
+    <I18nextProvider i18n={locale}>
+      <div className="session-mode">
+        <ThreadUserNavigationRail
+          rows={rows.map((message) => ({
+            ...message,
+            text: message.itemId === "item-1" ? answer : message.text,
+          }))}
+          onNavigate={vi.fn()}
+        />
+      </div>
+    </I18nextProvider>
+  );
+  const view = render(presentation("first live answer"));
+  fireEvent.pointerEnter(markers()[0]);
+  await act(async () => {
+    vi.advanceTimersByTime(HOVER_DEBOUNCE_MS);
+  });
+  expect(preview()!.textContent).toContain("first live answer");
+  view.rerender(presentation("updated live answer"));
+  expect(preview()!.textContent).toContain("updated live answer");
+  expect(preview()!.textContent).not.toContain("first live answer");
+});

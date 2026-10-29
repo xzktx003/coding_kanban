@@ -1,6 +1,14 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { CSSProperties } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { Search, ChevronDown, ChevronUp, X } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
@@ -641,12 +649,21 @@ function ThreadUserRailPreviewPortal({
 }) {
   const [style, setStyle] = useState<CSSProperties>();
   useLayoutEffect(() => {
-    const anchor = document.querySelector<HTMLElement>(
-      `[data-thread-user-message-navigation-item-id="${CSS.escape(anchorItemId)}"]`,
-    );
-    if (!anchor) return;
+    const findAnchor = () =>
+      document.querySelector<HTMLElement>(
+        `[data-thread-user-message-navigation-item-id="${CSS.escape(anchorItemId)}"]`,
+      );
+    const initialAnchor = findAnchor();
+    if (!initialAnchor) return;
     let frame = 0;
     const update = () => {
+      // A long rail can recycle this marker while its preview is open. Never
+      // position a card against a detached node retained by an old closure.
+      const anchor = findAnchor();
+      if (!anchor) {
+        setStyle(undefined);
+        return;
+      }
       const viewport = window.visualViewport;
       setStyle(
         railPreviewPosition(anchor.getBoundingClientRect(), {
@@ -663,7 +680,7 @@ function ThreadUserRailPreviewPortal({
     };
     update();
     const observer = new ResizeObserver(schedule);
-    observer.observe(anchor);
+    observer.observe(initialAnchor);
     window.addEventListener("resize", schedule);
     document.addEventListener("scroll", schedule, true);
     window.visualViewport?.addEventListener("resize", schedule);
@@ -685,7 +702,113 @@ function ThreadUserRailPreviewPortal({
   );
 }
 
-export function ThreadUserNavigationRail({
+function sameTurnIds(
+  previous?: ReadonlySet<string>,
+  next?: ReadonlySet<string>,
+) {
+  if ((previous?.size ?? 0) !== (next?.size ?? 0)) return false;
+  for (const id of previous ?? []) if (!next?.has(id)) return false;
+  return true;
+}
+
+const RAIL_WINDOW_THRESHOLD = 128;
+const RAIL_MARKER_HEIGHT = 10;
+const RAIL_MAX_VIEWPORT_HEIGHT = 640;
+const RAIL_OVERSCAN = 8;
+
+type RailMarkerProps = {
+  indices?: readonly number[];
+  windowed: boolean;
+  users: readonly WorkflowMessage[];
+  focusIndex: number;
+  scrubTarget: string | null;
+  activeTurnIds?: ReadonlySet<string>;
+  onHighlight: (id: string) => void;
+  onClose: () => void;
+  onNavigate: (row: WorkflowMessage, keyboard: boolean) => void;
+};
+function ThreadUserRailMarkersImpl({
+  indices,
+  windowed,
+  users,
+  focusIndex,
+  scrubTarget,
+  activeTurnIds,
+  onHighlight,
+  onClose,
+  onNavigate,
+}: RailMarkerProps) {
+  const { t } = useTranslation("thread");
+  return (
+    <>
+      {(indices ?? users.map((_, index) => index)).map((index) => {
+        const row = users[index]!;
+        const distance = Math.abs(index - focusIndex);
+        return (
+          <button
+            type="button"
+            key={row.rowId}
+            style={
+              windowed
+                ? { position: "absolute", top: index * RAIL_MARKER_HEIGHT }
+                : undefined
+            }
+            data-thread-user-message-navigation-index={index}
+            aria-posinset={windowed ? index + 1 : undefined}
+            aria-setsize={windowed ? users.length : undefined}
+            // The plugin labels markers by position alone and puts the
+            // message text in the hover card; a native `title` would race the
+            // card and show a second, unstyled copy of the same text.
+            aria-label={t("userMessageNavigation.jumpAriaLabel", {
+              position: index + 1,
+            })}
+            aria-current={activeTurnIds?.has(row.turnId) ? "true" : undefined}
+            data-thread-user-message-navigation-item-id={row.itemId}
+            data-scrub-target={row.itemId === scrubTarget ? "true" : undefined}
+            onPointerEnter={() => {
+              onHighlight(row.itemId);
+            }}
+            onPointerLeave={onClose}
+            onFocus={() => {
+              onHighlight(row.itemId);
+            }}
+            onBlur={onClose}
+            onClick={(event) => onNavigate(row, event.detail === 0)}
+          >
+            {/* The shipped rail wraps a 26px marker in a 30px row box. */}
+            <span className="codex-user-rail-marker-slot">
+              <span
+                className="codex-user-rail-marker"
+                data-neighbor-distance={
+                  focusIndex >= 0 && distance <= NAVIGATION_RAIL_FALLOFF_ROWS
+                    ? distance
+                    : undefined
+                }
+              >
+                <span className="codex-user-rail-marker-line" />
+              </span>
+            </span>
+          </button>
+        );
+      })}
+    </>
+  );
+}
+const ThreadUserRailMarkers = memo(
+  ThreadUserRailMarkersImpl,
+  (before, after) =>
+    before.indices === after.indices &&
+    before.windowed === after.windowed &&
+    before.users === after.users &&
+    before.focusIndex === after.focusIndex &&
+    before.scrubTarget === after.scrubTarget &&
+    sameTurnIds(before.activeTurnIds, after.activeTurnIds) &&
+    before.onHighlight === after.onHighlight &&
+    before.onClose === after.onClose &&
+    before.onNavigate === after.onNavigate,
+);
+
+function ThreadUserNavigationRailImpl({
   rows,
   onNavigate,
   activeTurnIds,
@@ -701,7 +824,104 @@ export function ThreadUserNavigationRail({
   activeTurnIds?: ReadonlySet<string>;
 }) {
   const { t } = useTranslation("thread");
-  const users = rows.filter((row) => row.role === "user");
+  const previousUsers = useRef<readonly WorkflowMessage[]>([]);
+  const users = useMemo(() => {
+    const next = rows.filter((row) => row.role === "user");
+    const previous = previousUsers.current;
+    if (
+      next.length === previous.length &&
+      next.every((row, index) => {
+        const old = previous[index]!;
+        return (
+          row.rowId === old.rowId &&
+          row.itemId === old.itemId &&
+          row.turnId === old.turnId &&
+          row.text === old.text &&
+          row.completed === old.completed &&
+          row.phase === old.phase
+        );
+      })
+    )
+      return previous;
+    previousUsers.current = next;
+    return next;
+  }, [rows]);
+  const railElement = useRef<HTMLElement | null>(null);
+  const windowed = users.length > RAIL_WINDOW_THRESHOLD;
+  const [windowRange, setWindowRange] = useState({ start: 0, end: 80 });
+  const [focusedRowId, setFocusedRowId] = useState<string | null>(null);
+  // Retention/prepend can move an existing focused prompt to a new index.
+  // Derive it during render, so its DOM node remains pinned in this commit.
+  const focusedMarker =
+    focusedRowId === null
+      ? null
+      : users.findIndex((row) => row.rowId === focusedRowId);
+  const updateWindow = useCallback(() => {
+    const element = railElement.current;
+    if (!element || !windowed) return;
+    const height = Math.min(
+      element.clientHeight || RAIL_MAX_VIEWPORT_HEIGHT,
+      RAIL_MAX_VIEWPORT_HEIGHT,
+    );
+    const start = Math.max(
+      0,
+      Math.floor(element.scrollTop / RAIL_MARKER_HEIGHT) - RAIL_OVERSCAN,
+    );
+    const end =
+      Math.ceil((element.scrollTop + height) / RAIL_MARKER_HEIGHT) +
+      RAIL_OVERSCAN;
+    setWindowRange((previous) =>
+      previous.start === start && previous.end === end
+        ? previous
+        : { start, end },
+    );
+  }, [windowed]);
+  useLayoutEffect(() => {
+    if (!windowed || !railElement.current) return;
+    updateWindow();
+    const observer = new ResizeObserver(updateWindow);
+    observer.observe(railElement.current);
+    return () => observer.disconnect();
+  }, [windowed, updateWindow]);
+  const markerIndices = useMemo(() => {
+    if (!windowed) return undefined;
+    const indices = new Set([0, users.length - 1]);
+    for (
+      let index = windowRange.start;
+      index < Math.min(users.length, windowRange.end);
+      index++
+    )
+      indices.add(index);
+    if (
+      focusedMarker !== null &&
+      focusedMarker >= 0 &&
+      focusedMarker < users.length
+    )
+      indices.add(focusedMarker);
+    return [...indices].sort((a, b) => a - b);
+  }, [windowed, users.length, windowRange, focusedMarker]);
+  const focusMarker = (index: number) => {
+    const element = railElement.current;
+    if (!element) return;
+    const height = element.clientHeight || RAIL_MAX_VIEWPORT_HEIGHT;
+    const top = index * RAIL_MARKER_HEIGHT;
+    if (top < element.scrollTop) element.scrollTop = top;
+    else if (top + RAIL_MARKER_HEIGHT > element.scrollTop + height)
+      element.scrollTop = top + RAIL_MARKER_HEIGHT - height;
+    flushSync(() => {
+      setFocusedRowId(users[index]!.rowId);
+      updateWindow();
+    });
+    element
+      .querySelector<HTMLElement>(
+        `[data-thread-user-message-navigation-index="${index}"]`,
+      )
+      ?.focus({ preventScroll: true });
+  };
+  const onNavigateRef = useRef(onNavigate);
+  useLayoutEffect(() => {
+    onNavigateRef.current = onNavigate;
+  }, [onNavigate]);
   const scrubbing = useRef<{ pointerId: number; itemId: string } | null>(null);
   const skipClick = useRef(false);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -719,7 +939,7 @@ export function ThreadUserNavigationRail({
     },
     [],
   );
-  const openPreview = (itemId: string) => {
+  const openPreview = useCallback((itemId: string) => {
     if (previewTimer.current?.itemId === itemId) return;
     if (previewTimer.current) {
       window.clearTimeout(previewTimer.current.handle);
@@ -735,14 +955,32 @@ export function ThreadUserNavigationRail({
       setPreviewItemId(itemId);
     }, NAVIGATION_RAIL_PREVIEW_DEBOUNCE_MS);
     previewTimer.current = { itemId, handle };
-  };
-  const closePreview = () => {
+  }, []);
+  const closePreview = useCallback(() => {
     if (previewTimer.current) {
       window.clearTimeout(previewTimer.current.handle);
       previewTimer.current = null;
     }
     setPreviewItemId(null);
-  };
+  }, []);
+  const highlightMarker = useCallback(
+    (itemId: string) => {
+      setHovered(itemId);
+      openPreview(itemId);
+    },
+    [openPreview],
+  );
+  const navigateFromMarker = useCallback(
+    (row: WorkflowMessage, keyboard: boolean) => {
+      if (skipClick.current && !keyboard) {
+        skipClick.current = false;
+        return;
+      }
+      skipClick.current = false;
+      onNavigateRef.current(row);
+    },
+    [],
+  );
   /**
    * The reply the rail previews beside a prompt: the first assistant row of the
    * same turn. Rows arrive in transcript order, so a turn still streaming has a
@@ -764,6 +1002,9 @@ export function ThreadUserNavigationRail({
   };
   // The shipped rail measures proximity from the row under the pointer
   // (scrubbed first, else hovered), never from the active turn.
+  const previewRow = previewItemId
+    ? users.find((row) => row.itemId === previewItemId)
+    : undefined;
   const focused = scrubTarget ?? hovered;
   const focusIndex = users.findIndex((row) => row.itemId === focused);
   // Below four prompts the rail is noise next to the transcript, so the
@@ -771,6 +1012,46 @@ export function ThreadUserNavigationRail({
   if (users.length < NAVIGATION_RAIL_MINIMUM_ROWS) return null;
   return (
     <nav
+      ref={railElement}
+      onScroll={windowed ? updateWindow : undefined}
+      onFocusCapture={
+        windowed
+          ? (event) => {
+              const index = (event.target as HTMLElement).closest<HTMLElement>(
+                "[data-thread-user-message-navigation-index]",
+              )?.dataset.threadUserMessageNavigationIndex;
+              if (index !== undefined)
+                setFocusedRowId(users[Number(index)]?.rowId ?? null);
+            }
+          : undefined
+      }
+      onBlurCapture={
+        windowed
+          ? (event) => {
+              if (
+                !event.currentTarget.contains(
+                  event.relatedTarget as Node | null,
+                )
+              )
+                setFocusedRowId(null);
+            }
+          : undefined
+      }
+      onKeyDown={
+        windowed
+          ? (event) => {
+              if (event.key !== "Tab") return;
+              const value = (event.target as HTMLElement).closest<HTMLElement>(
+                "[data-thread-user-message-navigation-index]",
+              )?.dataset.threadUserMessageNavigationIndex;
+              if (value === undefined) return;
+              const next = Number(value) + (event.shiftKey ? -1 : 1);
+              if (next < 0 || next >= users.length) return;
+              event.preventDefault();
+              focusMarker(next);
+            }
+          : undefined
+      }
       className="codex-thread-user-rail"
       aria-label={t("userMessageNavigation.ariaLabel")}
       data-thread-user-message-navigation-rail-list
@@ -782,7 +1063,8 @@ export function ThreadUserNavigationRail({
         );
         const itemId = button?.dataset.threadUserMessageNavigationItemId;
         if (!itemId) return;
-        event.currentTarget.setPointerCapture?.(event.pointerId);
+        // A tap must retain its button as the native click target. Capture only
+        // after crossing to another marker, when this becomes a scrub gesture.
         scrubbing.current = { pointerId: event.pointerId, itemId };
         setScrubTarget(itemId);
         skipClick.current = false;
@@ -800,6 +1082,7 @@ export function ThreadUserNavigationRail({
             item.itemId === button?.dataset.threadUserMessageNavigationItemId,
         );
         if (row && row.itemId !== drag.itemId) {
+          event.currentTarget.setPointerCapture?.(event.pointerId);
           drag.itemId = row.itemId;
           setScrubTarget(row.itemId);
           skipClick.current = true;
@@ -825,68 +1108,60 @@ export function ThreadUserNavigationRail({
         setScrubTarget(null);
         setHovered(null);
       }}
-      onPointerLeave={() => {
+      onPointerLeave={(event) => {
+        const drag = scrubbing.current;
+        if (drag && !event.currentTarget.hasPointerCapture?.(drag.pointerId)) {
+          scrubbing.current = null;
+          setScrubTarget(null);
+        }
         setHovered(null);
         closePreview();
       }}
       data-scrubbing={scrubTarget != null ? "true" : undefined}
     >
-      {users.map((row, index) => {
-        const distance = Math.abs(index - focusIndex);
-        return (
-          <button
-            type="button"
-            key={row.rowId}
-            // The plugin labels markers by position alone and puts the
-            // message text in the hover card; a native `title` would race the
-            // card and show a second, unstyled copy of the same text.
-            aria-label={t("userMessageNavigation.jumpAriaLabel", {
-              position: index + 1,
-            })}
-            aria-current={activeTurnIds?.has(row.turnId) ? "true" : undefined}
-            data-thread-user-message-navigation-item-id={row.itemId}
-            data-scrub-target={row.itemId === scrubTarget ? "true" : undefined}
-            onPointerEnter={() => {
-              setHovered(row.itemId);
-              openPreview(row.itemId);
-            }}
-            onPointerLeave={() => closePreview()}
-            onFocus={() => {
-              setHovered(row.itemId);
-              openPreview(row.itemId);
-            }}
-            onBlur={() => closePreview()}
-            onClick={() => {
-              if (skipClick.current) {
-                skipClick.current = false;
-                return;
+      <div
+        style={
+          windowed
+            ? {
+                position: "relative",
+                height: users.length * RAIL_MARKER_HEIGHT,
+                width: 36,
+                flex: "none",
               }
-              onNavigate(row);
-            }}
-          >
-            {/* The shipped rail wraps a 26px marker in a 30px row box. */}
-            <span className="codex-user-rail-marker-slot">
-              <span
-                className="codex-user-rail-marker"
-                data-neighbor-distance={
-                  focusIndex >= 0 && distance <= NAVIGATION_RAIL_FALLOFF_ROWS
-                    ? distance
-                    : undefined
-                }
-              >
-                <span className="codex-user-rail-marker-line" />
-              </span>
-            </span>
-            {previewItemId === row.itemId && (
-              <ThreadUserRailPreviewPortal
-                anchorItemId={row.itemId}
-                label={row.text}
-                {...previewFor(row)}
-              />
-            )}
-          </button>
-        );
-      })}
+            : { display: "contents" }
+        }
+      >
+        <ThreadUserRailMarkers
+          indices={markerIndices}
+          windowed={windowed}
+          users={users}
+          focusIndex={focusIndex}
+          scrubTarget={scrubTarget}
+          activeTurnIds={activeTurnIds}
+          onHighlight={highlightMarker}
+          onClose={closePreview}
+          onNavigate={navigateFromMarker}
+        />{" "}
+      </div>
+
+      {previewRow && (
+        <ThreadUserRailPreviewPortal
+          anchorItemId={previewRow.itemId}
+          label={previewRow.text}
+          {...previewFor(previewRow)}
+        />
+      )}
     </nav>
   );
 }
+
+export const ThreadUserNavigationRail = memo(
+  ThreadUserNavigationRailImpl,
+  (before, after) => {
+    if (before.rows !== after.rows || before.onNavigate !== after.onNavigate)
+      return false;
+    // The virtualized parent computes a fresh Set on each streamed render. Its
+    // members, rather than object identity, determine the rail's current markers.
+    return sameTurnIds(before.activeTurnIds, after.activeTurnIds);
+  },
+);

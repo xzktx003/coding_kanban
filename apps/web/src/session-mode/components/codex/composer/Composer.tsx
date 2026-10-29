@@ -110,7 +110,7 @@ import {
 import { useSessionNameStore } from "@session/stores/useSessionNameStore";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { AccessModePopover } from "./AccessModePopover";
-import { ComposerMenu } from "./ComposerMenu";
+import { ComposerMenu, type ComposerMenuProps } from "./ComposerMenu";
 import { ComposerToolbarProvider } from "./ComposerToolbarContext";
 import { DictationButton } from "./DictationButton";
 import {
@@ -302,6 +302,23 @@ export function Composer({
   });
   const wrapperRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const renderConversationMenu = useCallback<
+    NonNullable<ComposerMenuProps["persistentMenu"]>
+  >(
+    ({ triggerContainer, close, parentMenuId }) => (
+      <ConversationMenu
+        threadId={currentThreadId}
+        draftOwner={owner}
+        composerRef={formRef}
+        title="当前会话"
+        variant="item"
+        triggerContainer={triggerContainer}
+        onActionSelected={close}
+        parentMenuId={parentMenuId}
+      />
+    ),
+    [currentThreadId, owner],
+  );
 
   // Desktop keeps the previous refocus behaviour. On touch devices, changing
   // tabs must not summon the soft keyboard; the user can focus the editor by
@@ -873,18 +890,7 @@ export function Composer({
                     setGoalEnabled(true);
                     editorRef.current?.focus();
                   }}
-                  persistentMenu={({ triggerContainer, close, parentMenuId }) => (
-                    <ConversationMenu
-                      threadId={currentThreadId}
-                      draftOwner={owner}
-                      composerRef={formRef}
-                      title="当前会话"
-                      variant="item"
-                      triggerContainer={triggerContainer}
-                      onActionSelected={close}
-                      parentMenuId={parentMenuId}
-                    />
-                  )}
+                  persistentMenu={renderConversationMenu}
                   actions={(close, conversationTrigger) => (
                     <>
                       <Button
