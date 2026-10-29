@@ -1,3 +1,5 @@
+- 会话持续输出保护：待渲染增量按128项/1MiB准入、小批让出主线程；普通消息不持久化空审查投影，导航只随语义状态/提问变化更新。代码块超过16Ki字符（已知语言）或4Ki字符（自动检测）保留完整纯文本与复制，避免大块语法高亮阻塞；见[渲染工作预算](session-render-work-budget.md)。
+
 - 新增独立 `harness-kanban` 页面插件：复用现有 Kanban 服务，在 DeepSeek Harness RC.4 内加载完整工作台；经典侧栏与独立入口兼容 DS Bot，切换时保留同一个 iframe／草稿。提供当前浏览器连接设置和可选 HTTPS 转发入口，不新增 Kanban 实例，不修改既有业务源码；首版不包含 Agent 工具、公网和手机接入。验证及边界见 [实施记录](designs/deepseek-harness-kanban-plugin-implementation.md)。
 
 - 已有会话的模型/权限等设置按线程事务保存，跨页独立修改合并、同组冲突明确提示并可重试；发送保留点击时捕获配置，旧账号/运行实例回执不污染当前会话，见[设置持久化与边界](designs/session-render-alignment/thread-settings-persistence-20261027.md)。

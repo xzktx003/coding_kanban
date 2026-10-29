@@ -9,6 +9,8 @@ import {
   useRequestUserInputStore,
   useElicitationStore,
 } from "../components/codex/stores";
+import { encodeReplies, questionId } from "../features/async-questions/model";
+import { useAsyncQuestionStore } from "../features/async-questions/store";
 import { useCCStore } from "../stores/cc";
 import { useSessionAttentionStore } from "../stores/useSessionAttentionStore";
 import { useSubagentStore } from "../features/subagents/store";
@@ -96,6 +98,7 @@ it("does not rerender or retain snapshots for unrelated Codex event threads", ()
   expect(result.current.questionCount).toBe(1);
 });
 beforeEach(() => {
+  useAsyncQuestionStore.setState({ sessions: {} });
   useSubagentStore.setState({ nodes: {}, families: {} });
   useAgentCenterStore.setState({
     cards: [
@@ -267,4 +270,115 @@ it("updates unread and Claude permission state without opening or adding session
     "pending",
   );
   expect(useAgentCenterStore.getState().cards).toHaveLength(3);
+});
+it("does not rerender for followed transcript-only updates without semantic changes", () => {
+  let renders = 0;
+  const { result } = renderHook(() => {
+    renders++;
+    return useFollowedSessionStates("ready");
+  });
+  const initial = JSON.stringify(result.current);
+  for (let i = 0; i < 100; i++)
+    act(() =>
+      useCodexStore.setState((state) => ({
+        events: {
+          ...state.events,
+          a: [
+            {
+              method: "item/completed",
+              params: {
+                threadId: "a",
+                turnId: "turn",
+                item: { type: "agentMessage", id: "plain", text: String(i) },
+              },
+            } as any,
+          ],
+        },
+      })),
+    );
+  expect(JSON.stringify(result.current)).toBe(initial);
+  expect(renders).toBe(1);
+});
+
+it("updates the semantic question count for native reply receipts", () => {
+  const { result } = renderHook(() => useFollowedSessionStates("ready"));
+  act(() =>
+    useCodexStore.getState().addEvent("a", {
+      method: "item/completed",
+      params: {
+        threadId: "a",
+        turnId: "turn",
+        item: {
+          type: "agentMessage",
+          id: "question",
+          text: "Continue?",
+          questions: [{ title: "Continue?" }],
+        },
+      },
+    } as any),
+  );
+  expect(result.current.questionCount).toBe(1);
+  act(() =>
+    useCodexStore.getState().addEvent("a", {
+      method: "item/completed",
+      params: {
+        threadId: "a",
+        turnId: "turn",
+        item: {
+          type: "userMessage",
+          id: "reply",
+          content: [
+            {
+              type: "text",
+              text: encodeReplies([
+                {
+                  questionItemId: questionId("question", 0),
+                  question: "Continue?",
+                  answer: "yes",
+                },
+              ]),
+            },
+          ],
+        },
+      },
+    } as any),
+  );
+  expect(result.current.questionCount).toBe(0);
+  expect(result.current.counts.running).toBe(1);
+});
+it("preserves confirmed and skipped question semantics independently of transcript updates", () => {
+  act(() =>
+    useCodexStore.getState().addEvent("a", {
+      method: "item/completed",
+      params: {
+        threadId: "a",
+        turnId: "turn",
+        item: {
+          type: "agentMessage",
+          id: "question",
+          text: "Continue?",
+          questions: [{ title: "Continue?" }],
+        },
+      },
+    } as any),
+  );
+  const { result } = renderHook(() => useFollowedSessionStates("ready"));
+  const id = questionId("question", 0);
+  expect(result.current.questionCount).toBe(1);
+  act(() =>
+    useAsyncQuestionStore
+      .getState()
+      .patch("a", { confirmed: { [id]: { answer: "yes", turnId: "turn" } } }),
+  );
+  expect(result.current.questionCount).toBe(0);
+  act(() => useAsyncQuestionStore.getState().patch("a", { confirmed: {} }));
+  expect(result.current.questionCount).toBe(1);
+  act(() =>
+    useAsyncQuestionStore
+      .getState()
+      .patch("a", {
+        drafts: { [id]: { text: "", skipped: true, turnId: "turn" } },
+      }),
+  );
+  expect(result.current.questionCount).toBe(0);
 });

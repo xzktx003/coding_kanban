@@ -63,6 +63,24 @@ const aliases: Record<string, string> = {
   recharts: "typescript",
   vue: "xml",
 };
+// Highlighting is decoration: a transcript byte budget does not bound regex
+// work across every grammar or the number of generated DOM nodes. Keep large
+// fences as one escaped text node, preserving their complete source and copy.
+const MAX_NAMED_FENCE_CHARS = 16 * 1024;
+const MAX_AUTODETECT_FENCE_CHARS = 4 * 1024;
+const escapeCode = (code: string) =>
+  code.replace(
+    /[&<>"']/g,
+    (char) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#x27;",
+      })[char]!,
+  );
+
 let highlighter:
   | Promise<(typeof import("highlight.js"))["default"]>
   | undefined;
@@ -73,6 +91,11 @@ export const nativeFenceHighlight = {
     { code, language }: { code: string; language: string },
     callback: (html: string) => void,
   ): string | null {
+    // Check before key serialization, language loading, regexes or caching.
+    const limit = language.trim()
+      ? MAX_NAMED_FENCE_CHARS
+      : MAX_AUTODETECT_FENCE_CHARS;
+    if (code.length > limit) return escapeCode(code);
     const key = JSON.stringify([language, code]);
     const cached = cache.get(key);
     if (cached !== undefined) return cached;
@@ -115,13 +138,7 @@ export const nativeFenceHighlight = {
         }
         callback(result.value);
       },
-      () =>
-        callback(
-          code
-            .replaceAll("&", "&amp;")
-            .replaceAll("<", "&lt;")
-            .replaceAll(">", "&gt;"),
-        ),
+      () => callback(escapeCode(code)),
     );
     return null;
   },

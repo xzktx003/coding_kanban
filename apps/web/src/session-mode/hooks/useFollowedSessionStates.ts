@@ -10,6 +10,7 @@ import {
 } from "../features/async-questions/model";
 import {
   EMPTY_SESSION,
+  type QuestionSession,
   pendingQuestions,
   useAsyncQuestionStore,
   withConfirmed,
@@ -50,6 +51,19 @@ export const SESSION_STATE_LABELS: Record<FollowedSessionState, string> = {
 };
 const EMPTY_EVENTS: readonly ServerNotification[] = [];
 
+function pendingAsyncQuestionCount(
+  events: readonly ServerNotification[],
+  threadId: string,
+  knownTurnId: string | null | undefined,
+  session: QuestionSession,
+) {
+  return pendingQuestions(
+    withConfirmed(collectQuestions(events, threadId), session),
+    session,
+    latestQuestionTurn(events, threadId, knownTurnId),
+  ).length;
+}
+
 /** Read existing state only: following/navigation must never create an Agent. */
 export function followedSessionRows(
   connection: SessionConnectionState = "ready",
@@ -75,7 +89,9 @@ export function followedSessionRows(
     ),
   ];
   const codex = useCodexStore.getState();
-  const codexEvents = followedCodexIds.map((id) => codex.events[id] ?? EMPTY_EVENTS);
+  const codexEvents = followedCodexIds.map(
+    (id) => codex.events[id] ?? EMPTY_EVENTS,
+  );
   const codexStatuses = followedCodexIds.map((id) => codex.threadStatusMap[id]);
   const codexTiming = followedCodexIds.map((id) => codex.turnTimingMap[id]);
   const codexThreads = followedCodexIds.map(
@@ -161,19 +177,11 @@ export function followedSessionRows(
           state = "failed";
         else if (unread) state = "unread";
         else if (finished) state = "completed";
-        else if (messages || Object.hasOwn(cc.sessionLoadingMap, card.id)) state = "idle";
+        else if (messages || Object.hasOwn(cc.sessionLoadingMap, card.id))
+          state = "idle";
       }
     }
     const session = questionSessions[card.id] ?? EMPTY_SESSION;
-    const latestTurnId = latestQuestionTurn(
-      eventById.get(card.id) ?? EMPTY_EVENTS,
-      card.id,
-      timingById[card.id]?.turnId ??
-        (codexCurrent.currentThreadId === card.id
-          ? codexCurrent.currentTurnId
-          : null) ??
-        threads.find((t) => t.id === card.id)?.turns?.at(-1)?.id,
-    );
     const familyIds = new Set([
       card.id,
       ...descendants(subagents, card.id).map((n) => n.thread.id),
@@ -187,14 +195,16 @@ export function followedSessionRows(
     ].reduce((count, r) => count + r.questions.length, 0);
     const questionCount =
       connection === "ready" && card.kind === "codex"
-        ? pendingQuestions(
-            withConfirmed(
-              collectQuestions(eventById.get(card.id) ?? EMPTY_EVENTS, card.id),
-              session,
-            ),
+        ? pendingAsyncQuestionCount(
+            eventById.get(card.id) ?? EMPTY_EVENTS,
+            card.id,
+            timingById[card.id]?.turnId ??
+              (codexCurrent.currentThreadId === card.id
+                ? codexCurrent.currentTurnId
+                : null) ??
+              threads.find((t) => t.id === card.id)?.turns?.at(-1)?.id,
             session,
-            latestTurnId,
-          ).length + nativeQuestions
+          ) + nativeQuestions
         : 0;
     return { card, state, questions: questionCount };
   });
@@ -239,26 +249,57 @@ export function useFollowedSessionStates(
     ),
   ];
   useAgentCenterStore((s) => s.sharedTabsInitialized);
-  useCCStore(useShallow((s) => ({
-    loading: s.sessionLoadingMap,
-    messages: s.sessionMessagesMap,
-  })));
+  useCCStore(
+    useShallow((s) => ({
+      loading: s.sessionLoadingMap,
+      messages: s.sessionMessagesMap,
+    })),
+  );
   useSessionAttentionStore((s) => s.receipts);
-  useAsyncQuestionStore((s) => s.sessions);
+  const questionSessions = useAsyncQuestionStore((s) => s.sessions);
   useApprovalStore((s) => s.pendingApprovals);
   usePermissionsStore((s) => s.pendingRequests);
   useRequestUserInputStore((s) => s.pendingRequests);
   useElicitationStore((s) => s.pendingRequests);
   useSubagentStore((s) => s.families);
-  useCodexStore(useShallow((s) => followedCodexIds.map((id) => s.events[id] ?? EMPTY_EVENTS)));
-  useCodexStore(useShallow((s) => followedCodexIds.map((id) => s.threadStatusMap[id])));
-  useCodexStore(useShallow((s) => followedCodexIds.map((id) => s.turnTimingMap[id])));
-  useCodexStore(useShallow((s) =>
-    followedCodexIds.map((id) => s.threads.find((thread) => thread.id === id) ?? null),
-  ));
-  useCodexStore(useShallow((s) => ({
-    currentThreadId: s.currentThreadId,
-    currentTurnId: s.currentTurnId,
-  })));
+  // Transcript deltas do not change navigation state. Subscribe only to the
+  // root sessions' question counts; child requests use their metadata stores.
+  // A primitive array also prevents selectors from retaining transcript bodies.
+  useCodexStore(
+    useShallow((s) =>
+      cards
+        .filter((card) => card.kind === "codex")
+        .map((card) =>
+          pendingAsyncQuestionCount(
+            s.events[card.id] ?? EMPTY_EVENTS,
+            card.id,
+            s.turnTimingMap[card.id]?.turnId ??
+              (s.currentThreadId === card.id ? s.currentTurnId : null) ??
+              s.threads.find((thread) => thread.id === card.id)?.turns?.at(-1)
+                ?.id,
+            questionSessions[card.id] ?? EMPTY_SESSION,
+          ),
+        ),
+    ),
+  );
+  useCodexStore(
+    useShallow((s) => followedCodexIds.map((id) => s.threadStatusMap[id])),
+  );
+  useCodexStore(
+    useShallow((s) => followedCodexIds.map((id) => s.turnTimingMap[id])),
+  );
+  useCodexStore(
+    useShallow((s) =>
+      followedCodexIds.map(
+        (id) => s.threads.find((thread) => thread.id === id) ?? null,
+      ),
+    ),
+  );
+  useCodexStore(
+    useShallow((s) => ({
+      currentThreadId: s.currentThreadId,
+      currentTurnId: s.currentTurnId,
+    })),
+  );
   return followedSessionRows(connection);
 }

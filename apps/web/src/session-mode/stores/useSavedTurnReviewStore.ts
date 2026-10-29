@@ -20,6 +20,26 @@ export interface SavedTurnReview {
   selectedPath?: string;
   source?: { type: "git-review"; scope: CapturedReviewScope; snapshot: GitReviewSnapshot };
 }
+/** Remove only the empty derived projections written by older versions. */
+function compactEmptyFindingItems<T>(value: T): T {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  let compacted: Record<string, unknown> | undefined;
+  for (const [owner, items] of Object.entries(value)) {
+    if (!items || typeof items !== "object" || Array.isArray(items)) continue;
+    let retained: Record<string, unknown> | undefined;
+    for (const [itemId, findings] of Object.entries(items)) {
+      if (!Array.isArray(findings) || findings.length !== 0) continue;
+      if (!retained) retained = { ...items } as Record<string, unknown>;
+      delete retained[itemId];
+    }
+    if (!retained) continue;
+    if (!compacted) compacted = { ...(value as Record<string, unknown>) };
+    if (Object.keys(retained).length === 0) delete compacted[owner];
+    else compacted[owner] = retained;
+  }
+  return (compacted ?? value) as T;
+}
+
 export const useSavedTurnReviewStore = create<{
   target: SavedTurnReview | null;
   open: (target: SavedTurnReview, path?: string) => void;
@@ -33,17 +53,28 @@ export const useSavedTurnReviewStore = create<{
   saveComment: (owner: string, path: string, selection: NativeDiffSelection) => void;
   removeComment: (owner: string, id: string) => void;
   markAddedToDraft: (owner: string, id: string) => void;
-}>()(persist((set) => ({
+}>()(persist((set, get) => ({
   target: null,
   feedback: {},
   reviewScopes: {},
   findingItems: {},
   captureReviewScope: (scope) => set(state => ({ reviewScopes: { ...state.reviewScopes, [reviewOwnerKey({ threadId: scope.reviewThreadId, turnId: scope.turnId, cwd: scope.cwd })]: structuredClone(scope) } })),
-  projectFindings: ({ itemId, findings, ...owner }) => set(state => {
-    const key = reviewOwnerKey(owner), before = state.findingItems[key]?.[itemId];
-    if (JSON.stringify(before) === JSON.stringify(findings)) return state;
-    return { findingItems: { ...state.findingItems, [key]: { ...state.findingItems[key], [itemId]: structuredClone(findings) } } };
-  }),
+  projectFindings: ({ itemId, findings, ...owner }) => {
+    const key = reviewOwnerKey(owner);
+    const state = get();
+    const before = state.findingItems[key]?.[itemId];
+    // Persist writes even when its set callback returns the unchanged state.
+    // Ordinary assistant messages and virtualized remounts must exit before set.
+    if (!before && findings.length === 0) return;
+    if (findings.length > 0 && JSON.stringify(before) === JSON.stringify(findings)) return;
+    const items = { ...state.findingItems[key] };
+    if (findings.length === 0) delete items[itemId];
+    else items[itemId] = structuredClone(findings);
+    const findingItems = { ...state.findingItems };
+    if (Object.keys(items).length === 0) delete findingItems[key];
+    else findingItems[key] = items;
+    set({ findingItems });
+  },
   open: (target, selectedPath) =>
     set({ target: structuredClone({ ...target, selectedPath }) }),
   close: () => set({ target: null }),
@@ -66,4 +97,9 @@ export const useSavedTurnReviewStore = create<{
     const feedback = state.feedback[owner]; if (!feedback) return state;
     return { feedback: { ...state.feedback, [owner]: { ...feedback, comments: feedback.comments.map((comment) => comment.id === id ? { ...comment, addedToDraft: true } : comment) } } };
   }),
-}), { name: "kanban.session.review-comments", version: 1, partialize: (state) => ({ feedback: state.feedback, reviewScopes: state.reviewScopes, findingItems: state.findingItems }) }));
+}), { name: "kanban.session.review-comments", version: 1, merge: (persisted, current) => {
+  const merged = { ...current, ...(persisted as Partial<typeof current>) };
+  // Hydration must not persist once per old empty entry. Keep user data intact;
+  // the next ordinary change writes the compact projection once.
+  return { ...merged, findingItems: compactEmptyFindingItems(merged.findingItems) };
+}, partialize: (state) => ({ feedback: state.feedback, reviewScopes: state.reviewScopes, findingItems: state.findingItems }) }));

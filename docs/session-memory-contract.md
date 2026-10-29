@@ -228,3 +228,12 @@ RSS 低点 469.8320→496.0898 MiB，增长 26.2578 MiB；heap 低点 55.2915→
 正文、事件顺序与引用均未变化时，compactor 必须返回原数组，governor 不得因新包装重复发布同内容；不可缩小的合法附件不能引发250ms自反馈循环。测试须覆盖真实压力分支中无输入的状态发布次数，不能靠放宽预算。
 
 Codex store 热更新须立即注册并复用同一个 store，更新 actions 而保留现有数据/订阅，不在模块作用域保存旧 state 快照；清空恢复缓存 Map 不能替代此保证。修改须运行 `useCodexStore.hmr.test.ts`、budget/governor 单测、`session-memory-feedback-loop.spec.ts` 与真实 Vite `session-store-hmr.spec.mts`，及原恢复/审批/空闲回收组。因果红绿、测量范围及原长期RSS未达标边界见[回收与HMR记录](session-memory-feedback-loop.md)。
+
+
+## 2026-10-29：主线程工作与入站等待也必须有界
+
+8MiB正文预算不能替代消息处理、渲染节点和同步持久化的预算。普通助手消息的空review投影、相同finding不得调用persist set；旧空派生记录恢复时一次过滤，不删除用户评论/草稿或非空finding。导航只订阅语义问题数量，不恢复所有正文数组引用订阅，审批/回执/未读/执行及子Agent元数据独立保留。
+
+代码块已知语言超过16Ki字符或自动检测超过4Ki字符须完整安全纯文本呈现，不在主线程执行语法检测或扩张大量span；不得丢源码/复制内容。rAF待处理队列须保持128项/1MiB估算准入，32项小批和4ms帧预算；生命周期先处理已接收文本、休眠释放，不能丢审批/完成或把无界积累搬到store。不可缩小身份立即处理、治理前单批瞬态及阅读窗口额度须明确，不宣称整个标签页RSS硬封顶。
+
+修改这些路径须跑对应store/hook/handler/highlight红绿单测及`session-render-work-budget`、`session-stream-backpressure`，再核对原HTTP/EventSource、空闲回收/恢复和审批提问组。实测与范围见[渲染工作预算](session-render-work-budget.md)，原长期RSS红灯保留。
