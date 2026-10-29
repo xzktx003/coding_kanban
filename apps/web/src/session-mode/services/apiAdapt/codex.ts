@@ -192,21 +192,39 @@ export async function threadRead(
           historyPage: {
             earlier: true,
             itemPage: true,
-            nextCursor: nextCursor
-              ? MEMORY_ITEM_CURSOR +
-                encodeURIComponent(
-                  JSON.stringify({
-                    turnId: recovery.turnId,
-                    cursor: nextCursor,
-                  }),
-                )
-              : MEMORY_HISTORY_RESTART_CURSOR +
-                encodeURIComponent(recovery.turnId),
+            // A native cursor already excludes everything it paged over, so it
+            // alone advances. Re-sending beforeItemId would search for an
+            // anchor the cursor has consumed and fail the whole read.
+            nextCursor:
+              nextCursor && older.length
+                ? MEMORY_ITEM_CURSOR +
+                  encodeURIComponent(
+                    JSON.stringify({
+                      turnId: recovery.turnId,
+                      cursor: nextCursor,
+                    }),
+                  )
+                : MEMORY_HISTORY_RESTART_CURSOR +
+                  encodeURIComponent(recovery.turnId),
           },
         };
       }
+      // A vanished anchor is not a read failure: a latched error banner also
+      // disables the upward scroll trigger, leaving the reader unable to page.
+      // Degrade to whole-turn recovery, which needs no item anchor.
       if (!page.nextCursor || seen.has(page.nextCursor))
-        throw new Error("Released tool history could not be located");
+        return {
+          thread: {
+            id: params.threadId,
+            turns: [],
+          } as unknown as ThreadReadResponse["thread"],
+          historyPage: {
+            earlier: true,
+            nextCursor:
+              MEMORY_HISTORY_RESTART_CURSOR +
+              encodeURIComponent(recovery.turnId),
+          },
+        };
       seen.add(page.nextCursor);
       cursor = page.nextCursor;
     }

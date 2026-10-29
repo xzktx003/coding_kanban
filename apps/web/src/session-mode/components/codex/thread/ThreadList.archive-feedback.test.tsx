@@ -9,6 +9,10 @@ import { ThreadList } from "./ThreadList";
  * 聊天归档未成功. Our row action reported an untranslated English string, and
  * reported nothing at all on success, so an archive from the rail was silent.
  *
+ * The menu item label itself stays English ("Archive"), matching the rest of the
+ * row menu and the labels already pinned by ThreadList.usability.test.tsx and the
+ * e2e specs; only the user-facing notices are localized here.
+ *
  * Success copy and the undo entry are the same ones the composer archive sheet
  * uses, so both entry points behave alike; see archiveThreadUndo.ts for why the
  * undo rides on the notice rather than on a global keyboard command.
@@ -70,7 +74,7 @@ async function archiveFromRow() {
     clientX: 10,
     clientY: 10,
   });
-  fireEvent.click(await screen.findByText("归档", { exact: true }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }));
   return toast as unknown as {
     success: ReturnType<typeof vi.fn>;
     error: ReturnType<typeof vi.fn>;

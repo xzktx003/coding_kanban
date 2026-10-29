@@ -18,16 +18,28 @@ const MB = 1024 * 1024;
 const THREAD_HIGH_BYTES = CODEX_TRANSCRIPT_MAX_BYTES;
 const GLOBAL_HIGH_BYTES = 32 * MB;
 const GLOBAL_LOW_BYTES = 16 * MB;
-function heapUnderPressure() {
+// Paging a long history end to end is the feature, so the thread being read
+// gets a much larger allowance than the background ones. Real heap pressure
+// still overrides both, and other threads keep the original budget.
+const READING_THREAD_EVENTS = 120000;
+const READING_THREAD_BYTES = 256 * MB;
+// Relative to this device's own limit. A fixed 256MB cap reported pressure at
+// ~21% heap use on a 4GB limit, so every tick fought the reader for bytes the
+// transcripts did not even hold.
+const HEAP_ELEVATED = 0.55;
+const HEAP_HIGH = 0.7;
+function heapFraction() {
   const memory = (
     performance as Performance & {
       memory?: { usedJSHeapSize: number; jsHeapSizeLimit: number };
     }
   ).memory;
-  return (
-    !!memory &&
-    memory.usedJSHeapSize > Math.min(256 * MB, memory.jsHeapSizeLimit * 0.7)
-  );
+  return memory && memory.jsHeapSizeLimit > 0
+    ? memory.usedJSHeapSize / memory.jsHeapSizeLimit
+    : 0;
+}
+function heapUnderPressure() {
+  return heapFraction() > HEAP_HIGH;
 }
 
 /** Drop browser-owned display data. Native history, drafts and pending RPCs are untouched. */
@@ -38,9 +50,30 @@ export function releaseSessionMemory(options: { pressure?: boolean } = {}) {
   const beforeBytes = sizes.reduce((sum, size) => sum + size, 0);
   const pressure =
     options.pressure ?? (heapUnderPressure() || hasTranscriptTrafficPressure());
-  const globalPressure = beforeBytes > GLOBAL_HIGH_BYTES || pressure;
+  // The thread being read is excluded from the shared total: a deliberately
+  // paged-back history would otherwise trip the global ceiling by itself and
+  // cancel its own allowance.
+  const backgroundBytes = entries.reduce(
+    (sum, [id], index) =>
+      id === state.currentThreadId ? sum : sum + sizes[index],
+    0,
+  );
+  const globalPressure = backgroundBytes > GLOBAL_HIGH_BYTES || pressure;
+  // A single threshold leaves background threads at the full allowance until it
+  // trips and then at the tightest one, which oscillates around the boundary.
+  const elevated = !pressure && heapFraction() > HEAP_ELEVATED;
+  const backgroundBudget = pressure
+    ? 4 * MB
+    : elevated
+      ? 6 * MB
+      : THREAD_HIGH_BYTES;
+  const backgroundEvents = pressure
+    ? 1500
+    : elevated
+      ? Math.round(CODEX_TRANSCRIPT_MAX_EVENTS * 0.75)
+      : CODEX_TRANSCRIPT_MAX_EVENTS;
   const perThread = Math.min(
-    pressure ? 4 * MB : THREAD_HIGH_BYTES,
+    backgroundBudget,
     GLOBAL_LOW_BYTES / Math.max(1, entries.length),
   );
   let events = state.events;
@@ -49,16 +82,25 @@ export function releaseSessionMemory(options: { pressure?: boolean } = {}) {
   const changedIds: string[] = [];
   entries.forEach(([id, transcript]) => {
     const timing = state.turnTimingMap[id];
+    // Paging a long history to its start is the feature being protected, so the
+    // thread on screen keeps everything it paged back. Background threads carry
+    // the original budget, which is what the shared ceiling is for.
+    const reading = id === state.currentThreadId;
+    const maxBytes = reading
+      ? READING_THREAD_BYTES
+      : globalPressure
+        ? perThread
+        : backgroundBudget;
     const compacted = compactCodexTranscript(transcript, {
-      maxBytes: globalPressure ? perThread : THREAD_HIGH_BYTES,
-      targetBytes: globalPressure ? perThread * 0.5 : THREAD_HIGH_BYTES * 0.5,
-      maxEvents: pressure ? 1500 : CODEX_TRANSCRIPT_MAX_EVENTS,
-      targetEvents: pressure ? 750 : 1500,
+      maxBytes,
+      targetBytes: maxBytes * 0.5,
+      maxEvents: reading ? READING_THREAD_EVENTS : backgroundEvents,
+      targetEvents: reading ? READING_THREAD_EVENTS / 2 : backgroundEvents / 2,
       activeTurnId: timing?.status === "inProgress" ? timing.turnId : undefined,
+      // The viewed thread keeps its just-recovered page even under pressure:
+      // trimming it back makes "load earlier" a no-op the reader cannot escape.
       protectedTurnIds:
-        pressure || (globalPressure && id !== state.currentThreadId)
-          ? undefined
-          : readingWindows.get(id),
+        id === state.currentThreadId ? readingWindows.get(id) : undefined,
     });
     if (
       compacted.events === transcript ||

@@ -755,9 +755,11 @@ export const codexService = {
       ? pendingThreadResumes.get(threadId)
       : undefined;
     if (precedingRead && isCodexOperationScopeCurrent(precedingRead.scope)) {
-      if (!options?.cursor) return consumeHistoryRead(precedingRead.promise, options?.reportScopeChanges);
-      // An opaque target cursor is a different page. Let the bounded current
-      // read settle, then request that page rather than reusing its response.
+      if (!options?.cursor && !options?.afterTurnId)
+        return consumeHistoryRead(precedingRead.promise, options?.reportScopeChanges);
+      // An opaque cursor or a recovery anchor is a different page. Let the
+      // bounded current read settle, then request that page rather than
+      // reusing its response, which would silently drop the paging request.
       await precedingRead.promise.catch(() => undefined);
       if (!isCodexOperationScopeCurrent(scope)) {
         if (options?.reportScopeChanges) throw new HistoryReadScopeChangedError();
@@ -1063,8 +1065,18 @@ export const codexService = {
             : {}),
       });
     } catch (error) {
+      // A revoked snapshot or a cancelled read is not a paging failure: the
+      // latched banner would also disable the upward scroll trigger for good.
+      if (
+        error instanceof HistoryReadScopeChangedError ||
+        (error instanceof DOMException && error.name === "AbortError")
+      )
+        return;
       useSessionSyncStore.setState((s) => ({
-        earlierErrors: { ...s.earlierErrors, [threadId]: String(error) },
+        earlierErrors: {
+          ...s.earlierErrors,
+          [threadId]: error instanceof Error ? error.message : String(error),
+        },
       }));
     } finally {
       useSessionSyncStore.setState((s) => ({

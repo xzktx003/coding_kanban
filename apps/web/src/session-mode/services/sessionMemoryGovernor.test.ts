@@ -33,10 +33,13 @@ it("releases already retained old turns to a low watermark and restores history 
   const events = Array.from({ length: 80 }, (_, i) =>
     message(`turn-${i}`, `${i}:` + "x".repeat(80_000)),
   );
+  // A background thread: the thread being read now keeps a larger allowance so
+  // paging a long history back is not undone by the byte budget.
   useCodexStore.setState({
-    events: { active: events },
+    events: { background: events },
+    currentThreadId: "other",
     turnTimingMap: {
-      active: {
+      background: {
         turnId: "turn-79",
         status: "inProgress",
         startedAtMs: 1,
@@ -44,18 +47,64 @@ it("releases already retained old turns to a low watermark and restores history 
       },
     },
   });
-  useSessionSyncStore.setState({ cursors: { active: null } });
-  cachedTranscriptBaselines.set("active", events);
+  useSessionSyncStore.setState({ cursors: { background: null } });
+  cachedTranscriptBaselines.set("background", events);
   const result = releaseSessionMemory();
-  const retained = useCodexStore.getState().events.active;
+  const retained = useCodexStore.getState().events.background;
   expect(retained.length).toBeLessThan(40);
   expect(retained.at(-1)).toEqual(events.at(-1));
   expect(result.afterBytes).toBeLessThan(result.beforeBytes / 2);
-  expect(cachedTranscriptBaselines.has("active")).toBe(false);
-  expect(useSessionSyncStore.getState().cursors.active).toBeTruthy();
-  expect(useCodexStore.getState().turnTimingMap.active.status).toBe(
+  expect(cachedTranscriptBaselines.has("background")).toBe(false);
+  expect(useSessionSyncStore.getState().cursors.background).toBeTruthy();
+  expect(useCodexStore.getState().turnTimingMap.background.status).toBe(
     "inProgress",
   );
+});
+function withHeap(fraction: number, run: () => void) {
+  const perf = performance as Performance & { memory?: unknown };
+  const had = Object.prototype.hasOwnProperty.call(perf, "memory");
+  const previous = perf.memory;
+  Object.defineProperty(perf, "memory", {
+    value: { usedJSHeapSize: 4_000_000_000 * fraction, jsHeapSizeLimit: 4e9 },
+    configurable: true,
+  });
+  try {
+    run();
+  } finally {
+    if (had)
+      Object.defineProperty(perf, "memory", {
+        value: previous,
+        configurable: true,
+      });
+    else delete (perf as { memory?: unknown }).memory;
+  }
+}
+// Few, very large turns so the retained amount is decided by the byte budget
+// rather than by the event-count budget.
+function bytesAtHeap(fraction: number) {
+  const events = Array.from({ length: 24 }, (_, i) =>
+    message(`turn-${i}`, `${i}:` + "x".repeat(600_000)),
+  );
+  useCodexStore.setState({
+    events: { background: events },
+    currentThreadId: "other",
+    turnTimingMap: {},
+  });
+  useSessionSyncStore.setState({ cursors: { background: null } });
+  let after = 0;
+  withHeap(fraction, () => {
+    after = releaseSessionMemory().afterBytes;
+  });
+  return after;
+}
+it("steps the background byte allowance down by heap level instead of one cliff", () => {
+  const calm = bytesAtHeap(0.2);
+  const elevated = bytesAtHeap(0.6);
+  const high = bytesAtHeap(0.8);
+  // One threshold means an elevated heap still gets the full allowance and then
+  // drops straight to the tightest tier, which oscillates at the boundary.
+  expect(elevated).toBeLessThan(calm);
+  expect(high).toBeLessThan(elevated);
 });
 it("enforces a shared budget across many open transcripts", () => {
   useCodexStore.setState({
@@ -96,14 +145,17 @@ it("also releases on a timer without new messages and removes all listeners on t
   const events = Array.from({ length: 80 }, (_, i) =>
     message(`turn-${i}`, "x".repeat(80_000)),
   );
-  useCodexStore.setState({ events: { active: events } });
+  useCodexStore.setState({
+    events: { background: events },
+    currentThreadId: "other",
+  });
   vi.advanceTimersByTime(5000);
-  expect(useCodexStore.getState().events.active.length).toBeLessThan(40);
+  expect(useCodexStore.getState().events.background.length).toBeLessThan(40);
   stop();
   expect(vi.getTimerCount()).toBe(0);
-  useCodexStore.setState({ events: { active: events } });
+  useCodexStore.setState({ events: { background: events } });
   vi.advanceTimersByTime(10_000);
-  expect(useCodexStore.getState().events.active).toBe(events);
+  expect(useCodexStore.getState().events.background).toBe(events);
 });
 it("uses a smaller low-water budget under browser heap pressure without touching approvals", () => {
   const approvals = [
@@ -113,12 +165,16 @@ it("uses a smaller low-water budget under browser heap pressure without touching
   const events = Array.from({ length: 35 }, (_, i) =>
     message(`turn-${i}`, `${i}:` + "x".repeat(80000)),
   );
-  useCodexStore.setState({ events: { active: events } });
+  // Scoped to a background thread: the thread on screen is deliberately
+  // unlimited so paging a long history to its start cannot be undone.
+  useCodexStore.setState({
+    events: { background: events },
+    currentThreadId: "other",
+  });
   releaseSessionMemory();
-  expect(useCodexStore.getState().events.active).toBe(events);
+  expect(useCodexStore.getState().events.background).toBe(events);
   const result = releaseSessionMemory({ pressure: true });
   expect(result.afterBytes).toBeLessThan(2 * 1024 * 1024);
-  expect(useCodexStore.getState().currentThreadId).toBe("active");
   expect(useApprovalStore.getState().pendingApprovals).toBe(approvals);
 });
 it("shrinks display history on high ingress even when the browser heap sample stays low", async () => {
@@ -127,15 +183,45 @@ it("shrinks display history on high ingress even when the browser heap sample st
   vi.setSystemTime(Date.now() + 60000);
   useCodexStore.setState({
     events: {
-      active: Array.from({ length: 35 }, (_, i) =>
+      background: Array.from({ length: 35 }, (_, i) =>
         message(`burst-${i}`, "x".repeat(80000)),
       ),
     },
+    currentThreadId: "other",
   });
   recordTranscriptTraffic(16 * 1024 * 1024);
   const result = releaseSessionMemory();
   expect(result.afterBytes).toBeLessThan(2 * 1024 * 1024);
-  expect(useCodexStore.getState().currentThreadId).toBe("active");
+});
+
+it("keeps a just-recovered history page under heap pressure so paging can make progress", async () => {
+  const { pinMemoryHistoryPage, memoryHistoryWindows } = await import(
+    "./sessionMemoryHistory"
+  );
+  memoryHistoryWindows.clear();
+  // Matches the observed browser case: a recovery page restores far more events
+  // than the pressure ceiling allows, spread over realistically sized turns.
+  const recovered = Array.from({ length: 26 }, (_, t) =>
+    Array.from({ length: 100 }, (_, i) =>
+      message(`recovered-${t}`, `older ${t}/${i}`),
+    ),
+  ).flat();
+  const latest = Array.from({ length: 4 }, (_, i) =>
+    message("latest", `newest ${i}`),
+  );
+  const events = [...recovered, ...latest];
+  useCodexStore.setState({ events: { active: events } });
+  pinMemoryHistoryPage("active", [
+    ...new Set(recovered.map((event) => event.params.turnId)),
+  ]);
+
+  releaseSessionMemory({ pressure: true });
+
+  const retained = new Set(useCodexStore.getState().events.active);
+  // Dropping the pinned window makes the click a no-op: the page lands and is
+  // immediately trimmed back, so the transcript never grows.
+  for (const event of recovered) expect(retained.has(event)).toBe(true);
+  expect(useCodexStore.getState().events.active.at(-1)).toEqual(events.at(-1));
 });
 
 it("keeps the display budget while an earlier page is in flight without cancelling its read or approvals", () => {

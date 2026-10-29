@@ -61,6 +61,36 @@ it("clears an initial history failure after automatic read-only retry", async ()
   await vi.advanceTimersByTimeAsync(60000);
   expect(mock.resume).toHaveBeenCalledTimes(2);
 });
+it("reads the newly selected session before the background queue drains", async () => {
+  // Observed in the browser: switching sessions took ~14s because four
+  // background reads already held every slot, so the session the user is
+  // waiting for was issued only after they finished one by one.
+  const pending: Array<() => void> = [];
+  mock.resume.mockImplementation(
+    () => new Promise<void>((resolve) => pending.push(resolve)),
+  );
+  useAgentCenterStore.setState({
+    cards: ["bg1", "bg2", "bg3", "bg4", "bg5", "target"].map((id) => ({
+      kind: "codex" as const,
+      id,
+    })),
+    currentAgentCardId: "bg1",
+    currentAgentCardKind: "codex",
+  });
+  stop = startFollowedSessionHistorySync();
+  await vi.advanceTimersByTimeAsync(1);
+  // Every slot is now held by a background read that has not settled.
+  const beforeSwitch = mock.resume.mock.calls.map((c) => c[0]);
+  expect(beforeSwitch).not.toContain("target");
+
+  useAgentCenterStore.setState({ currentAgentCardId: "target" });
+  useCodexStore.setState({ currentThreadId: "target" });
+  await vi.advanceTimersByTimeAsync(1);
+
+  expect(mock.resume.mock.calls.map((c) => c[0])).toContain("target");
+  pending.forEach((resolve) => resolve());
+});
+
 it("clears failed initial recovery on teardown without leaving a stale notice", async () => {
   mock.resume.mockRejectedValue(new Error("offline"));
   stop = startFollowedSessionHistorySync();

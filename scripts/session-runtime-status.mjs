@@ -136,6 +136,7 @@ if (
   }
 }
 
+// Keep in step with runtimeBuildFingerprint in session-runtime-manager.ts.
 export function runtimeBuildFingerprint(dist) {
   const hash = createHash("sha256");
   const visit = (directory, prefix) => {
@@ -145,7 +146,13 @@ export function runtimeBuildFingerprint(dist) {
       const path = resolve(directory, entry.name),
         name = `${prefix}${entry.name}`;
       if (entry.isDirectory()) visit(path, `${name}/`);
-      else if (entry.isFile() && entry.name.endsWith(".js"))
+      // Compiled tests never load at runtime, so hashing them would report a
+      // stale runtime after `session:test` and skip a genuinely needed replace.
+      else if (
+        entry.isFile() &&
+        entry.name.endsWith(".js") &&
+        !entry.name.endsWith(".test.js")
+      )
         hash.update(name).update("\0").update(readFileSync(path)).update("\0");
     }
   };

@@ -70,6 +70,10 @@ import { useAgentCenterStore, useLayoutStore } from "@session/stores";
 import { usePinStore } from "@session/stores/usePinStore";
 import { useWorkspaceStore } from "@session/stores/useWorkspaceStore";
 import { formatThreadAge } from "@session/utils/formatThreadAge";
+import {
+  archiveUndoNotice,
+  captureArchivedThread,
+} from "../composer/archiveThreadUndo";
 import { writeNativeMarkdownClipboard } from "../presentation/nativeMarkdownClipboard";
 
 type ThreadCopyScope = { current: object | null };
@@ -319,13 +323,20 @@ export const ThreadList = memo(function ThreadList({ cwd }: ThreadListProps) {
 
   const handleArchive = useCallback(
     async (threadId: string) => {
+      // Snapshot before removal so the undo restores this row in place, matching
+      // the composer archive sheet rather than re-adding it at the end.
+      const snapshot = captureArchivedThread(threadId);
       try {
         await archiveThread(threadId);
         removeFromNavigation(threadId);
       } catch (err) {
-        toast.error("Failed to archive thread", { description: String(err) });
+        // Official `threadActions.archiveThread.archiveThreadError` zh copy.
+        toast.error("聊天归档未成功", { description: String(err) });
         return;
       }
+      // Same notice and undo entry the composer archive sheet emits, so both
+      // entry points confirm the write and stay undoable for the same window.
+      toast.message("已归档聊天", archiveUndoNotice(threadId, snapshot));
       refresh();
     },
     [refresh, removeFromNavigation],

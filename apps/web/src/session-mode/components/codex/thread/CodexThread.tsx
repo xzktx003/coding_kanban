@@ -480,6 +480,7 @@ const CodexTranscript = memo(function CodexTranscript({
   const pinned = useRef(reading.current?.atBottom ?? true);
   const readingAway = useRef(!pinned.current);
   const restoringAnchor = useRef(!pinned.current && !!reading.current?.anchor);
+  const pendingEarlierAnchor = useRef<string | undefined>(undefined);
   const [isAtBottom, setAtBottom] = useState(pinned.current);
   const [readerBufferEnabled, setReaderBufferEnabled] = useState(
     !pinned.current,
@@ -653,10 +654,29 @@ const CodexTranscript = memo(function CodexTranscript({
       )
     );
   };
+  // At the very top the saved anchor can already be virtualized away, and the
+  // restore effect can then neither find its row nor measure it, so a prepended
+  // page silently takes over the viewport. Re-anchor to a mounted row first.
+  const anchorBeforeEarlierLoad = useCallback(() => {
+    const element = viewport();
+    if (!element || pinned.current) return;
+    const fresh = captureTranscriptReadingPosition(
+      element,
+      false,
+      reading.current,
+    );
+    if (!fresh?.anchor) return;
+    reading.current = fresh;
+    saveReadingPosition(`codex:${activeThreadId}`, fresh);
+    // A wheel gesture is still "scrolling" when the page arrives, which would
+    // otherwise make the restore effect decline to hold this anchor.
+    pendingEarlierAnchor.current = fresh.anchor;
+  }, [viewport, activeThreadId]);
   const jumpToBottom = useCallback(() => {
     pinned.current = true;
     readingAway.current = false;
     restoringAnchor.current = false;
+    pendingEarlierAnchor.current = undefined;
     userScrolling.current = false;
     setAtBottom(true);
     readerBufferEnabledRef.current = false;
@@ -948,12 +968,21 @@ const CodexTranscript = memo(function CodexTranscript({
     };
   }, [navigation, searchPanel, activeThreadId, interactionVisible]);
   useLayoutEffect(() => {
-    if (pinned.current || userScrolling.current || !reading.current?.anchor)
+    // A page requested from a wheel gesture must still be held in place, so the
+    // anchor captured for it outranks the in-progress user-scroll flag.
+    const holding =
+      !!pendingEarlierAnchor.current &&
+      pendingEarlierAnchor.current === reading.current?.anchor;
+    if (
+      pinned.current ||
+      (userScrolling.current && !holding) ||
+      !reading.current?.anchor
+    )
       return;
     const index = rows.findIndex((row) => row.key === reading.current?.anchor);
     const element = viewport();
     if (index < 0 || !element) {
-      if (rows.length && earlierCursor && !earlierLoading && !earlierError)
+      if (rows.length && earlierAvailable && !earlierLoading && !earlierError)
         void codexService.loadEarlierHistory(activeThreadId);
       return;
     }
@@ -965,7 +994,7 @@ const CodexTranscript = memo(function CodexTranscript({
     const align = () => {
       if (
         pinned.current ||
-        userScrolling.current ||
+        (userScrolling.current && !holding) ||
         reading.current?.anchor !== anchor
       )
         return;
@@ -994,19 +1023,29 @@ const CodexTranscript = memo(function CodexTranscript({
           scrollTop: element.scrollTop,
         };
         frame = requestAnimationFrame(() => {
-          if (userScrolling.current || reading.current?.anchor !== anchor)
+          if (
+            (userScrolling.current && !holding) ||
+            reading.current?.anchor !== anchor
+          )
             return;
+          if (pendingEarlierAnchor.current === anchor)
+            pendingEarlierAnchor.current = undefined;
           restoringAnchor.current = false;
           if (reading.current)
             saveReadingPosition(`codex:${activeThreadId}`, reading.current);
         });
-      } else if (measurement && attempts++ < 4) {
+        // Prepending a large page remeasures rows for many frames, so a short
+        // fixed retry can expire before the anchor row is ever mounted.
+      } else if (measurement && attempts++ < (holding ? 60 : 4)) {
         restoringAnchor.current = true;
         element.scrollTop = Math.max(
           0,
           measurement.start + reading.current.offset,
         );
         frame = requestAnimationFrame(align);
+      } else if (holding) {
+        pendingEarlierAnchor.current = undefined;
+        restoringAnchor.current = false;
       }
     };
     align();
@@ -1151,8 +1190,10 @@ const CodexTranscript = memo(function CodexTranscript({
           loading: paging.earlierLoading[activeThreadId],
           error: paging.earlierErrors[activeThreadId],
         })
-      )
+      ) {
+        anchorBeforeEarlierLoad();
         void codexService.loadEarlierHistory(activeThreadId);
+      }
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
         // A completed one-pixel gesture still receives its reading buffer.
@@ -1371,13 +1412,22 @@ const CodexTranscript = memo(function CodexTranscript({
                 <button
                   type="button"
                   disabled={earlierLoading}
-                  onClick={() =>
-                    void codexService.loadEarlierHistory(activeThreadId)
-                  }
+                  onClick={() => {
+                    anchorBeforeEarlierLoad();
+                    void codexService.loadEarlierHistory(activeThreadId);
+                  }}
                 >
-                  {earlierLoading ? "正在加载更早消息…" : "加载更早消息"}
+                  {earlierLoading
+                    ? "正在加载更早消息…"
+                    : earlierError
+                      ? "重试加载更早消息"
+                      : "加载更早消息"}
                 </button>
-                {earlierError && <span role="status">加载失败，可重试</span>}
+                {earlierError && (
+                  <span role="status" title={earlierError}>
+                    加载失败：{earlierError}
+                  </span>
+                )}
               </div>
             )}
             <GoalTranscriptAnnouncements

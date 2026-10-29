@@ -18,6 +18,13 @@ type ToastFn = {
   success: (title: React.ReactNode, options?: Omit<Toast, "title">) => string | number
   error: (title: React.ReactNode, options?: Omit<Toast, "title">) => string | number
   warning: (title: React.ReactNode, options?: Omit<Toast, "title">) => string | number
+  message: (
+    title: React.ReactNode,
+    options?: Omit<Toast, "title"> & {
+      duration?: number
+      action?: { label: string; onClick: () => void }
+    },
+  ) => string | number
 }
 
 // Track the most recent toast id to avoid showing duplicate toasts rapidly.
@@ -60,6 +67,26 @@ const toast = Object.assign(createToast, {
     const id = `${title}|${description}`;
     lastToastId = id
     return sonnerToast.warning(title, { description, position: DEFAULT_TOAST_POSITION })
+  },
+  // Forwards `id`, `duration` and `action` so an undoable notice keeps its own
+  // identity and window instead of being deduplicated against unrelated toasts.
+  message: (
+    title: React.ReactNode,
+    options: Omit<Toast, "title"> & {
+      duration?: number
+      action?: { label: string; onClick: () => void }
+    } = {},
+  ) => {
+    const { description, id, duration, action } = options
+    const toastId = sonnerToast.message(title, {
+      description,
+      id,
+      duration,
+      action,
+      position: DEFAULT_TOAST_POSITION,
+    })
+    lastToastId = toastId
+    return toastId
   },
 }) as ToastFn
 

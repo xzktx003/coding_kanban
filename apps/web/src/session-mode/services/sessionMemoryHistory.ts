@@ -3,9 +3,21 @@ import type { CodexTranscriptBudgetResult } from "./codexTranscriptMemoryBudget"
 /** Local browser cursors are translated to passive native pagination, never sent as native cursors. */
 export const MEMORY_HISTORY_RESTART_CURSOR = "kanban-memory-reload:";
 export const memoryHistoryWindows = new Map<string, Set<string>>();
+/** Bounded so a long reading session cannot pin history without limit. */
+export const MEMORY_HISTORY_WINDOW_TURNS = 400;
 export function pinMemoryHistoryPage(id: string, turnIds: string[]) {
+  // Successive pages accumulate: replacing the window made each click evict
+  // what the previous click recovered, so paging never made progress.
+  const existing = memoryHistoryWindows.get(id);
+  const merged = new Set(existing ?? []);
+  for (const turnId of turnIds) {
+    merged.delete(turnId);
+    merged.add(turnId);
+  }
+  while (merged.size > MEMORY_HISTORY_WINDOW_TURNS)
+    merged.delete(merged.keys().next().value!);
   memoryHistoryWindows.delete(id);
-  memoryHistoryWindows.set(id, new Set(turnIds));
+  memoryHistoryWindows.set(id, merged);
   if (memoryHistoryWindows.size > 50)
     memoryHistoryWindows.delete(memoryHistoryWindows.keys().next().value!);
 }

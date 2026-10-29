@@ -121,7 +121,13 @@ export function startFollowedSessionHistorySync() {
         nextRetry = Math.min(nextRetry, delay);
         continue;
       }
-      if (loading.size >= 4) continue;
+      // The selected session is what the reader is waiting for, so it may use
+      // one slot beyond the background limit instead of queueing behind reads
+      // that are already in flight.
+      // The selected session is what the reader is waiting for, so it may use
+      // one slot beyond the background limit instead of queueing behind reads
+      // that are already in flight.
+      if (loading.size >= 4 && !(id === selected && loading.size < 5)) continue;
       loading.add(id);
       const controller = new AbortController();
       controllers.set(id, controller);
@@ -217,7 +223,10 @@ export function startFollowedSessionHistorySync() {
   const unsubscribe = useAgentCenterStore.subscribe((state, previous) => {
     if (
       state.cards !== previous.cards ||
-      state.detachedCard !== previous.detachedCard
+      state.detachedCard !== previous.detachedCard ||
+      // Selecting a session must re-run the queue: its read is prioritised and
+      // may take the extra slot, rather than waiting for background reads.
+      state.currentAgentCardId !== previous.currentAgentCardId
     )
       enqueue();
   });
