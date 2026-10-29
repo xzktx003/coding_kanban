@@ -535,7 +535,9 @@ it("routes explicit native auto review while preserving owner sandbox policy", a
   });
   // A mode-only creation receipt does not describe native writable roots.
   // Omitting the policy preserves that new thread's actual configuration.
-  expect(api.turnStart.mock.calls.at(-1)?.[0]).not.toHaveProperty("sandboxPolicy");
+  expect(api.turnStart.mock.calls.at(-1)?.[0]).not.toHaveProperty(
+    "sandboxPolicy",
+  );
 });
 it("keeps explicit user review for read-only and danger-full-access modes", async () => {
   useConfigStore.setState({
@@ -1315,4 +1317,98 @@ it("keeps historical subagent discovery and bounded metadata without retaining o
     tool.prompt,
   );
   expect(JSON.stringify(useCodexStore.getState().events[id])).toContain("Done");
+});
+
+it("bounds cold history before the first store notification and retains a passive recovery cursor", async () => {
+  const id = "cold-large-display";
+  const { estimateTranscriptBytes } =
+    await import("./codexTranscriptMemoryBudget");
+  useCodexStore.setState({
+    currentThreadId: id,
+    events: {},
+    threads: [],
+    historyLoadedMap: {},
+    turnTimingMap: {},
+    threadStatusMap: {},
+  });
+  const text = "display history ".repeat(14000);
+  const turns = Array.from({ length: 50 }, (_, index) => ({
+    id: `large-turn-${index}`,
+    status: "completed",
+    startedAt: index + 1,
+    completedAt: index + 2,
+    durationMs: 1,
+    error: null,
+    items: [
+      {
+        id: `large-answer-${index}`,
+        type: "agentMessage",
+        phase: "final_answer",
+        text,
+      },
+    ],
+  }));
+  api.threadRead.mockResolvedValueOnce({
+    thread: { id, turns },
+    historyPage: { nextCursor: "native-older", earlier: false },
+  });
+  const publishedSizes: number[] = [];
+  const stop = useCodexStore.subscribe((state) => {
+    if (state.events[id])
+      publishedSizes.push(estimateTranscriptBytes(state.events[id]));
+  });
+  try {
+    await codexService.loadThreadHistory(id, undefined, { recent: true });
+    expect(publishedSizes.length).toBeGreaterThan(0);
+    expect(Math.max(...publishedSizes)).toBeLessThanOrEqual(8 * 1024 * 1024);
+    expect(useCodexStore.getState().turnTimingMap[id].turnId).toBe(
+      "large-turn-49",
+    );
+    expect(useSessionSyncStore.getState().cursors[id]).toMatch(
+      /^kanban-memory-reload:/,
+    );
+    expect(api.turnStart).not.toHaveBeenCalled();
+  } finally {
+    stop();
+  }
+});
+
+it("rejects unshrinkable oversized display metadata before publishing it", async () => {
+  const id = "cold-oversized-attachment";
+  useCodexStore.setState({
+    currentThreadId: id,
+    events: {},
+    threads: [],
+    historyLoadedMap: {},
+    turnTimingMap: {},
+    threadStatusMap: {},
+  });
+  api.threadRead.mockResolvedValueOnce({
+    thread: {
+      id,
+      turns: [
+        {
+          id: "attachment-turn",
+          status: "completed",
+          startedAt: 1,
+          items: [
+            {
+              id: "attachment-user",
+              type: "userMessage",
+              content: [
+                {
+                  type: "image",
+                  url: "data:image/png;base64," + "x".repeat(5 * 1024 * 1024),
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  });
+  await expect(codexService.loadThreadHistory(id)).rejects.toThrow(/8 MiB/);
+  expect(useCodexStore.getState().events[id]).toBeUndefined();
+  expect(useCodexStore.getState().historyLoadedMap[id]).toBeUndefined();
+  expect(api.turnStart).not.toHaveBeenCalled();
 });

@@ -5,15 +5,17 @@ import { hasTranscriptTrafficPressure } from "./sessionMemoryPressure";
 import {
   compactCodexTranscript,
   estimateTranscriptBytes,
+  CODEX_TRANSCRIPT_MAX_BYTES,
+  CODEX_TRANSCRIPT_MAX_EVENTS,
 } from "./codexTranscriptMemoryBudget";
 
 import {
   MEMORY_HISTORY_RESTART_CURSOR,
-  MEMORY_ITEM_CURSOR,
+  transcriptBudgetRecoveryCursor,
   memoryHistoryWindows as readingWindows,
 } from "./sessionMemoryHistory";
 const MB = 1024 * 1024;
-const THREAD_HIGH_BYTES = 8 * MB;
+const THREAD_HIGH_BYTES = CODEX_TRANSCRIPT_MAX_BYTES;
 const GLOBAL_HIGH_BYTES = 32 * MB;
 const GLOBAL_LOW_BYTES = 16 * MB;
 function heapUnderPressure() {
@@ -46,12 +48,11 @@ export function releaseSessionMemory(options: { pressure?: boolean } = {}) {
   const recoveryCursors: Record<string, string> = {};
   const changedIds: string[] = [];
   entries.forEach(([id, transcript]) => {
-    if (useSessionSyncStore.getState().earlierLoading[id]) return;
     const timing = state.turnTimingMap[id];
     const compacted = compactCodexTranscript(transcript, {
       maxBytes: globalPressure ? perThread : THREAD_HIGH_BYTES,
       targetBytes: globalPressure ? perThread * 0.5 : THREAD_HIGH_BYTES * 0.5,
-      maxEvents: pressure ? 1500 : 3000,
+      maxEvents: pressure ? 1500 : CODEX_TRANSCRIPT_MAX_EVENTS,
       targetEvents: pressure ? 750 : 1500,
       activeTurnId: timing?.status === "inProgress" ? timing.turnId : undefined,
       protectedTurnIds:
@@ -59,42 +60,20 @@ export function releaseSessionMemory(options: { pressure?: boolean } = {}) {
           ? undefined
           : readingWindows.get(id),
     });
-    if (compacted.events === transcript) return;
+    if (
+      compacted.events === transcript ||
+      (compacted.events.length === transcript.length &&
+        compacted.events.every((event, index) => event === transcript[index]))
+    )
+      return;
     if (events === state.events) events = { ...events };
     events[id] = compacted.events;
     changedIds.push(id);
     cachedTranscriptBaselines.delete(id);
-    if (
-      compacted.sameTurnTrimmedEventCount &&
-      compacted.truncatedTurnIds.length
-    ) {
-      const turnId = compacted.truncatedTurnIds[0];
-      const first = compacted.events.find(
-        (event) =>
-          (event.method === "item/started" ||
-            event.method === "item/completed") &&
-          event.params.turnId === turnId &&
-          !["userMessage", "collabAgentToolCall", "subAgentActivity"].includes(
-            event.params.item.type,
-          ),
-      );
-      if (
-        first &&
-        (first.method === "item/started" || first.method === "item/completed")
-      ) {
-        trimmedIds.push(id);
-        recoveryCursors[id] =
-          MEMORY_ITEM_CURSOR +
-          encodeURIComponent(
-            JSON.stringify({ turnId, beforeItemId: first.params.item.id }),
-          );
-      }
-    }
-    if (compacted.evicted && !recoveryCursors[id]) {
+    const cursor = transcriptBudgetRecoveryCursor(compacted);
+    if (cursor) {
       trimmedIds.push(id);
-      recoveryCursors[id] =
-        MEMORY_HISTORY_RESTART_CURSOR +
-        encodeURIComponent(compacted.oldestTurnId ?? "");
+      recoveryCursors[id] = cursor;
     }
   });
   // Older display retention can leave a trim anchor without a native cursor.

@@ -773,3 +773,197 @@ it.each(["", "中文😄e\u0301", "head\ud800middle\udc00tail", "a\u0000b"])(
     expect(copyTranscriptText(text)).toBe(text);
   },
 );
+
+it("bounds a protected user message before it can exceed the default thread budget", () => {
+  const source = user("live", "x".repeat(5 * 1024 * 1024));
+  const result = compactCodexTranscript([source], {
+    maxBytes: 8 * 1024 * 1024,
+    maxEvents: 3000,
+    activeTurnId: "live",
+  });
+  expect(result.estimatedBytes).toBeLessThanOrEqual(8 * 1024 * 1024);
+  const item = (result.events[0] as any).params.item;
+  expect(item.id).toBe("live-user");
+  expect(item.content[0].text.length).toBeLessThanOrEqual(256 * 1024);
+  expect(item.content[0].text).toContain("中间内容因会话内存限制已省略");
+  expect((source as any).params.item.content[0].text.length).toBe(
+    5 * 1024 * 1024,
+  );
+});
+
+it("shares the user display budget across text parts and leaves attachment identities intact", () => {
+  const source = user("live");
+  const attachments = [
+    { type: "image", url: "https://fixture/image.png", detail: "high" },
+    { type: "localImage", path: "/fixture/local.png" },
+    { type: "audio", url: "https://fixture/audio.wav" },
+    { type: "skill", name: "skill", path: "/fixture/skill" },
+    { type: "mention", name: "file", path: "/fixture/file" },
+  ];
+  const content = Array.from({ length: 4 }, (_, index) => ({
+    type: "text",
+    text: `${index}:` + "x".repeat(300 * 1024),
+    text_elements: [],
+  }));
+  (source as any).params.item.content = [...content, ...attachments];
+  const compacted = compactCodexEventPayload(source) as any;
+  const textLength = compacted.params.item.content
+    .filter((part: any) => part.type === "text")
+    .reduce((sum: number, part: any) => sum + part.text.length, 0);
+  expect(textLength).toBeLessThanOrEqual(256 * 1024);
+  attachments.forEach((attachment, index) =>
+    expect(compacted.params.item.content[content.length + index]).toBe(
+      attachment,
+    ),
+  );
+});
+
+it("remaps retained UTF-8 text elements while discarding ranges crossing omitted text", () => {
+  const head = "头🌈";
+  const tail = "尾🚀";
+  const text = head + "x".repeat(400 * 1024) + tail;
+  const utf8 = new TextEncoder();
+  const headBytes = utf8.encode(head).length;
+  const sourceBytes = utf8.encode(text).length;
+  const tailBytes = utf8.encode(tail).length;
+  const elements = [
+    { byteRange: { start: 0, end: headBytes }, placeholder: "head" },
+    {
+      byteRange: { start: headBytes + 220000, end: headBytes + 220010 },
+      placeholder: "omitted",
+    },
+    { byteRange: { start: 0, end: sourceBytes }, placeholder: "crossing" },
+    {
+      byteRange: { start: sourceBytes - tailBytes, end: sourceBytes },
+      placeholder: "tail",
+    },
+  ];
+  const source = user("live", text) as any;
+  source.params.item.content[0].text_elements = elements;
+  const result = compactCodexEventPayload(source) as any;
+  const part = result.params.item.content[0];
+  expect(part.text_elements.map((element: any) => element.placeholder)).toEqual(
+    ["head", "tail"],
+  );
+  const encoded = utf8.encode(part.text);
+  const decode = (element: any) =>
+    new TextDecoder().decode(
+      encoded.subarray(element.byteRange.start, element.byteRange.end),
+    );
+  expect(decode(part.text_elements[0])).toBe(head);
+  expect(decode(part.text_elements[1])).toBe(tail);
+  expect(source.params.item.content[0].text_elements).toBe(elements);
+});
+
+it("reduces display text in multiple protected active user groups without removing their identities", () => {
+  const users = Array.from({ length: 24 }, (_, index) => {
+    const event = user("live", `${index}:` + "x".repeat(256 * 1024)) as any;
+    event.params.item.id = `user-${index}`;
+    return event;
+  });
+  const result = compactCodexTranscript(
+    [...users, agent("live", "latest reply")],
+    {
+      maxBytes: 8 * 1024 * 1024,
+      maxEvents: 3000,
+      activeTurnId: "live",
+    },
+  );
+  expect(result.estimatedBytes).toBeLessThanOrEqual(8 * 1024 * 1024);
+  expect(result.events.map((event) => (event.params as any).item.id)).toEqual([
+    ...users.map((event) => event.params.item.id),
+    "live-agent",
+  ]);
+  expect((result.events.at(-1) as any).params.item.text).toBe("latest reply");
+});
+
+it("reduces protected reading-window bodies while keeping every turn and user identity", () => {
+  const ids = Array.from({ length: 40 }, (_, index) => `pinned-${index}`);
+  const events = ids.flatMap((id) => [
+    user(id, "u".repeat(128 * 1024)),
+    agent(id, "a".repeat(128 * 1024)),
+  ]);
+  const result = compactCodexTranscript(events, {
+    maxBytes: 8 * 1024 * 1024,
+    maxEvents: 3000,
+    activeTurnId: ids.at(-1),
+    protectedTurnIds: new Set(ids),
+  });
+  expect(result.estimatedBytes).toBeLessThanOrEqual(8 * 1024 * 1024);
+  expect(result.events.length).toBe(events.length);
+  expect(result.events.map((event) => (event.params as any).item.id)).toEqual(
+    events.map((event) => (event.params as any).item.id),
+  );
+});
+
+it("reports unshrinkable attachment metadata above budget without corrupting its URL", () => {
+  const source = user("live") as any;
+  const image = {
+    type: "image",
+    url: "data:image/png;base64," + "a".repeat(5 * 1024 * 1024),
+    detail: "high",
+  };
+  source.params.item.content = [image];
+  const result = compactCodexTranscript([source], {
+    maxBytes: 8 * 1024 * 1024,
+    maxEvents: 3000,
+    activeTurnId: "live",
+  });
+  expect(result.estimatedBytes).toBeGreaterThan(8 * 1024 * 1024);
+  expect((result.events[0] as any).params.item.content[0]).toBe(image);
+});
+
+it("does not cut a surrogate pair at either user preview boundary", () => {
+  for (const prefix of ["", "a"]) {
+    const source = user("live", prefix + "😀".repeat(200 * 1024));
+    const result = compactCodexEventPayload(source) as any;
+    const text = result.params.item.content[0].text as string;
+    expect(text.length).toBeLessThanOrEqual(256 * 1024);
+    expect(
+      Array.from(text).some(
+        (character) =>
+          character.length === 1 &&
+          character.charCodeAt(0) >= 0xd800 &&
+          character.charCodeAt(0) <= 0xdfff,
+      ),
+    ).toBe(false);
+  }
+});
+
+it("bounds user display text nested in a turn-start snapshot without dropping native metadata", () => {
+  const source = turnStarted("live") as any;
+  source.params.turn.items = [
+    (user("live", "x".repeat(5 * 1024 * 1024)) as any).params.item,
+  ];
+  const result = compactCodexEventPayload(source) as any;
+  expect(result.params.turn.id).toBe("live");
+  expect(result.params.turn.status).toBe("inProgress");
+  expect(result.params.turn.items[0].id).toBe("live-user");
+  expect(
+    result.params.turn.items[0].content[0].text.length,
+  ).toBeLessThanOrEqual(256 * 1024);
+  expect(source.params.turn.items[0].content[0].text.length).toBe(
+    5 * 1024 * 1024,
+  );
+});
+
+it("returns the original transcript when an over-budget protected attachment cannot be compacted", () => {
+  const source = user("live") as any;
+  source.params.item.content = [
+    {
+      type: "image",
+      url: "data:image/png;base64," + "x".repeat(3 * 1024 * 1024),
+    },
+  ];
+  const events = [source];
+  const result = compactCodexTranscript(events, {
+    maxBytes: 4 * 1024 * 1024,
+    targetBytes: 2 * 1024 * 1024,
+    maxEvents: 1500,
+    activeTurnId: "live",
+  });
+  expect(result.estimatedBytes).toBeGreaterThan(4 * 1024 * 1024);
+  expect(result.trimmed).toBe(false);
+  expect(result.events[0]).toBe(source);
+  expect(result.events).toBe(events);
+});

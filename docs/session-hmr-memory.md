@@ -38,3 +38,8 @@ PLAYWRIGHT_SKIP_WEBSERVER=1 pnpm exec playwright test tests/e2e/session-hmr-rete
 ```
 
 原无 HMR 的长期 RSS 红灯仍独立保留；本次生命周期修复不自动将其改判为通过。首次长测先于这组 HMR 修改启动，其页面禁用热更新；不得将其称为全部最终源码的冻结长测。后续 React 原生属性序列化的独立修复与最终冻结验收见 [性能记录内存](session-react-performance-memory.md)。
+
+
+## 2026-10-29：store 留存是另一条独立路径
+
+本页原先清理旧恢复 Map，不会清除旧 `useCodexStore` 实例中的 events。真实 Vite 三次依赖更新已复现每代保留2MiB旧正文；现通过 HMR data 立即复用唯一 store、重绑新版动作，避免旧命名空间继续持有不同正文。五次更新及真实 React 订阅回归通过，完整红绿数据、手动刷新旧标签页的原因与范围见[本轮记录](session-memory-feedback-loop.md)。本页既有缓存 dispose 与异步旧代 guard 仍须保留。

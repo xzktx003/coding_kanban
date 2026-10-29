@@ -137,3 +137,74 @@ it("shrinks display history on high ingress even when the browser heap sample st
   expect(result.afterBytes).toBeLessThan(2 * 1024 * 1024);
   expect(useCodexStore.getState().currentThreadId).toBe("active");
 });
+
+it("keeps the display budget while an earlier page is in flight without cancelling its read or approvals", () => {
+  const { pendingApprovals } = useApprovalStore.getState();
+  const events = Array.from({ length: 80 }, (_, index) =>
+    message(`loading-${index}`, "x".repeat(80000)),
+  );
+  useCodexStore.setState({ events: { active: events } });
+  useSessionSyncStore.setState({
+    earlierLoading: { active: true },
+    cursors: { active: "native-pending-page" },
+  });
+  const result = releaseSessionMemory();
+  expect(result.afterBytes).toBeLessThanOrEqual(8 * 1024 * 1024);
+  expect(useSessionSyncStore.getState().earlierLoading.active).toBe(true);
+  expect(useSessionSyncStore.getState().cursors.active).toMatch(
+    /^kanban-memory-reload:/,
+  );
+  expect(useApprovalStore.getState().pendingApprovals).toBe(pendingApprovals);
+});
+
+it("does not self-trigger repeated publications for an unchanged protected attachment under heap pressure", () => {
+  vi.useFakeTimers();
+  const previousMemory = Object.getOwnPropertyDescriptor(performance, "memory");
+  Object.defineProperty(performance, "memory", {
+    configurable: true,
+    value: {
+      usedJSHeapSize: 300 * 1024 * 1024,
+      jsHeapSizeLimit: 2 * 1024 * 1024 * 1024,
+    },
+  });
+  const source = {
+    method: "item/completed",
+    params: {
+      threadId: "active",
+      turnId: "live",
+      item: {
+        type: "userMessage",
+        id: "user-with-image",
+        clientId: null,
+        content: [
+          {
+            type: "image",
+            url: "data:image/png;base64," + "x".repeat(3 * 1024 * 1024),
+          },
+        ],
+      },
+    },
+  } as any;
+  const transcript = [source];
+  useCodexStore.setState({ events: { active: transcript } });
+  let publications = 0;
+  const unsubscribe = useCodexStore.subscribe((state, previous) => {
+    if (state.events !== previous.events) publications++;
+  });
+  const stop = startSessionMemoryGovernor();
+  try {
+    // No new native or user input. The initial pressure pass must not enqueue
+    // its own 250ms retry by publishing an identical array wrapper.
+    vi.advanceTimersByTime(2100);
+    expect(publications).toBe(0);
+    expect(useCodexStore.getState().events.active).toBe(transcript);
+    expect(useCodexStore.getState().events.active[0]).toBe(source);
+    expect(vi.getTimerCount()).toBe(1); // existing 5-second watchdog only
+  } finally {
+    stop();
+    unsubscribe();
+    if (previousMemory)
+      Object.defineProperty(performance, "memory", previousMemory);
+    else delete (performance as Performance & { memory?: unknown }).memory;
+  }
+});

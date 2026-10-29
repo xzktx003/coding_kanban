@@ -1,3 +1,12 @@
+import {
+  compactCodexTranscript,
+  CODEX_TRANSCRIPT_MAX_BYTES,
+  CODEX_TRANSCRIPT_MAX_EVENTS,
+} from "./codexTranscriptMemoryBudget";
+import {
+  memoryHistoryWindows,
+  transcriptBudgetRecoveryCursor,
+} from "./sessionMemoryHistory";
 import { threadPermissionParameters } from "./threadPermissionProjection";
 import { HistoryReadScopeChangedError } from "./HistoryReadScopeChangedError";
 import { captureCodexOperationScope, isCodexOperationScopeCurrent, invalidateCodexOperationScope, type CodexOperationScope } from "./codexOperationScope";
@@ -870,7 +879,7 @@ export const codexService = {
         baseline.events[threadId] ??
         cachedTranscriptBaselines.get(threadId) ??
         [];
-      const reconciledEvents = page
+      const mergedEvents = page
         ? mergeHistoryPage(
             historicalEvents,
             beforeEvents,
@@ -884,21 +893,46 @@ export const codexService = {
             beforeEvents,
             current.events[threadId] ?? [],
           );
+      // Bound the first publication, not only a later governor pass. A cold
+      // transcript can otherwise reach Markdown/DOM before the 250ms timer.
+      const bounded = compactCodexTranscript(mergedEvents, {
+        maxBytes: CODEX_TRANSCRIPT_MAX_BYTES,
+        targetBytes: CODEX_TRANSCRIPT_MAX_BYTES / 2,
+        maxEvents: CODEX_TRANSCRIPT_MAX_EVENTS,
+        targetEvents: CODEX_TRANSCRIPT_MAX_EVENTS / 2,
+        activeTurnId:
+          current.turnTimingMap[threadId]?.status === "inProgress"
+            ? current.turnTimingMap[threadId].turnId
+            : undefined,
+        protectedTurnIds: memoryHistoryWindows.get(threadId),
+      });
+      if (bounded.estimatedBytes > CODEX_TRANSCRIPT_MAX_BYTES)
+        throw new Error(
+          "会话显示数据超过 8 MiB，已阻止加载以保护页面；请分批查看历史或移除过大的内联附件后重试。",
+        );
+      const reconciledEvents = bounded.events;
+      const recoveryCursor = transcriptBudgetRecoveryCursor(bounded);
       // A response belongs to its thread even if the user has since selected another.
       const restored = syncThreadToStore(threadId, thread, reconciledEvents, {
         activate: !options?.background && current.currentThreadId === threadId,
       });
       useSessionSyncStore.setState((s) =>
-        options?.preserveEarlierCursor ||
-        (page &&
-          !restoringEvicted &&
-          baseline.historyLoadedMap[threadId] &&
-          !("truncated" in page && page.truncated) &&
-          !options?.cursor &&
-          !options?.afterTurnId &&
-          s.cursors[threadId] !== undefined)
+        !recoveryCursor &&
+        (options?.preserveEarlierCursor ||
+          (page &&
+            !restoringEvicted &&
+            baseline.historyLoadedMap[threadId] &&
+            !("truncated" in page && page.truncated) &&
+            !options?.cursor &&
+            !options?.afterTurnId &&
+            s.cursors[threadId] !== undefined))
           ? s
-          : { cursors: { ...s.cursors, [threadId]: page?.nextCursor ?? null } },
+          : {
+              cursors: {
+                ...s.cursors,
+                [threadId]: recoveryCursor ?? page?.nextCursor ?? null,
+              },
+            },
       );
       if (options?.afterTurnId && page) clearTrimmedHistoryAnchor(threadId);
       const unchanged =

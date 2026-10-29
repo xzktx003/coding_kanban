@@ -570,3 +570,187 @@ it("persists native hook bigint counters without losing the final reply or preci
   expect(cached?.events).toContainEqual(visibleReply);
   expect(cached?.bytes).toBeLessThanOrEqual(2 * 1024 * 1024);
 });
+
+it("bounds legacy device records before first restore publishes a baseline or store", async () => {
+  const id = "legacy-over-budget";
+  const savedAt = Date.now();
+  const events = Array.from({ length: 80 }, (_, index) => ({
+    method: "item/completed",
+    params: {
+      threadId: id,
+      turnId: `turn-${index}`,
+      item: {
+        type: "agentMessage",
+        id: `reply-${index}`,
+        text: "visible text ".repeat(6000),
+      },
+    },
+  }));
+  events.push({
+    method: "turn/completed",
+    params: {
+      threadId: id,
+      turn: {
+        id: "turn-79",
+        status: "completed",
+        startedAt: 123,
+        durationMs: 456,
+        items: [],
+      },
+    },
+  } as any);
+  const record = {
+    key: `codex:${id}`,
+    savedAt,
+    cursor: "older-native-page",
+    events,
+    bytes: 1,
+    thread: { id, turns: [], status: { type: "idle" } },
+  };
+  expect(
+    new TextEncoder().encode(JSON.stringify(record)).byteLength,
+  ).toBeGreaterThan(2 * 1024 * 1024);
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.open("kanban.session.transcripts.v1", 2);
+    request.onupgradeneeded = () => {
+      for (const name of ["transcripts", "budget"])
+        if (!request.result.objectStoreNames.contains(name))
+          request.result.createObjectStore(name, { keyPath: "key" });
+    };
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction("transcripts", "readwrite");
+      tx.objectStore("transcripts").put(record);
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => {
+        db.close();
+        reject(tx.error);
+      };
+    };
+  });
+  const cached = await readTranscriptCache(record.key);
+  expect(cached).toMatchObject({
+    key: record.key,
+    savedAt,
+  });
+  expect(cached?.cursor).toMatch(/^kanban-memory-(?:reload|items):/);
+  expect(cached?.cursor).not.toBe(record.cursor);
+  expect(
+    new TextEncoder().encode(JSON.stringify(cached)).byteLength,
+  ).toBeLessThanOrEqual(2 * 1024 * 1024);
+  expect(cached?.events?.at(-1)).toEqual(events.at(-1));
+  const { cachedTranscriptBaselines, cachedTranscriptTimings } =
+    await import("./sessionCacheState");
+  const { useSessionSyncStore } = await import("../stores/useSessionSyncStore");
+  useAgentCenterStore.setState({
+    cards: [{ kind: "codex", id, cwd: "/repo" }],
+    detachedCard: null,
+  });
+  useCodexStore.setState({ events: {}, historyLoadedMap: {} });
+  const published: number[] = [];
+  const unsubscribe = useCodexStore.subscribe((state) => {
+    if (state.events[id])
+      published.push(
+        new TextEncoder().encode(JSON.stringify(state.events[id])).byteLength,
+      );
+  });
+  const stop = startSessionTranscriptCache();
+  try {
+    await vi.waitFor(() =>
+      expect(useCodexStore.getState().historyLoadedMap[id]).toBe(true),
+    );
+    expect(published.length).toBeGreaterThan(0);
+    expect(Math.max(...published)).toBeLessThanOrEqual(2 * 1024 * 1024);
+    expect(cachedTranscriptBaselines.get(id)).toBe(
+      useCodexStore.getState().events[id],
+    );
+    expect(cachedTranscriptTimings.get(id)).toMatchObject({
+      turnId: "turn-79",
+      status: "completed",
+      startedAtMs: 123000,
+      durationMs: 456,
+    });
+    expect(useSessionSyncStore.getState().cursors[id]).toBe(cached?.cursor);
+  } finally {
+    unsubscribe();
+    stop();
+    cachedTranscriptBaselines.delete(id);
+    cachedTranscriptTimings.delete(id);
+    useAgentCenterStore.setState({ cards: [] });
+  }
+});
+
+it("replaces a stale native cursor when writing a shorter cached history window", async () => {
+  const id = "write-trim-cursor";
+  const events = Array.from({ length: 80 }, (_, index) => ({
+    method: "item/completed",
+    params: {
+      threadId: id,
+      turnId: `trim-turn-${index}`,
+      item: {
+        type: "agentMessage",
+        id: `trim-reply-${index}`,
+        text: "visible text ".repeat(6000),
+      },
+    },
+  })) as ServerNotification[];
+  await writeTranscriptCache({
+    key: `codex:${id}`,
+    savedAt: Date.now(),
+    events,
+    cursor: "before-original-turn-0",
+  });
+  const cached = await readTranscriptCache(`codex:${id}`);
+  expect(cached?.events?.length).toBeGreaterThan(0);
+  expect(cached!.events!.length).toBeLessThan(events.length);
+  expect(cached?.cursor).toMatch(/^kanban-memory-(?:reload|items):/);
+  const first = cached!.events![0] as any;
+  const cursor = cached!.cursor!;
+  if (cursor.startsWith("kanban-memory-reload:"))
+    expect(
+      decodeURIComponent(cursor.slice("kanban-memory-reload:".length)),
+    ).toBe(first.params.turnId);
+  else
+    expect(
+      JSON.parse(
+        decodeURIComponent(cursor.slice("kanban-memory-items:".length)),
+      ),
+    ).toMatchObject({
+      turnId: first.params.turnId,
+      beforeItemId: first.params.item.id,
+    });
+});
+
+it("retains a same-turn item recovery anchor when the cache event window drops a prefix", async () => {
+  const id = "same-turn-cache-window";
+  const events = Array.from({ length: 900 }, (_, index) => ({
+    method: "item/completed",
+    params: {
+      threadId: id,
+      turnId: "one-turn",
+      item: {
+        type: "agentMessage",
+        id: `one-item-${index}`,
+        text: `reply ${index}`,
+      },
+    },
+  })) as ServerNotification[];
+  await writeTranscriptCache({
+    key: `codex:${id}`,
+    savedAt: Date.now(),
+    events,
+    cursor: "before-original-turn",
+  });
+  const cached = await readTranscriptCache(`codex:${id}`);
+  expect(cached?.events).toHaveLength(600);
+  expect(cached?.cursor).toMatch(/^kanban-memory-items:/);
+  expect(
+    JSON.parse(
+      decodeURIComponent(cached!.cursor!.slice("kanban-memory-items:".length)),
+    ),
+  ).toEqual({ turnId: "one-turn", beforeItemId: "one-item-300" });
+});

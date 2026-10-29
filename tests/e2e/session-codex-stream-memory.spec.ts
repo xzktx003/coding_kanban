@@ -337,6 +337,7 @@ test("renders live Codex text outside transcript history until final markdown ar
 for (const kind of [
   "commandExecution",
   "agentMessage",
+  "userMessage",
   "mcpToolCall",
   "streamingPreview",
 ] as const) {
@@ -345,7 +346,12 @@ for (const kind of [
   }) => {
     await installSessionUxFixture(page, 1);
     await page.goto("/?mode=session", { waitUntil: "domcontentloaded" });
-    await expect(page.locator(".session-mode")).toBeVisible();
+    // The shell is visible before lazy Session/Composer modules finish loading.
+    // Measuring that bootstrap as retained tool output makes the 4 MiB physical
+    // ownership assertion race unrelated application allocations.
+    await expect(
+      page.locator('.session-mode [contenteditable="true"]').first(),
+    ).toBeVisible();
     await page.evaluate(async () => {
       const budget =
         await import("/src/session-mode/services/codexTranscriptMemoryBudget.ts");
@@ -375,15 +381,21 @@ for (const kind of [
               }
             : kind === "agentMessage"
               ? { text: output }
-              : {
-                  server: "fixture",
-                  tool: "read",
-                  status: "completed",
-                  arguments: {},
-                  result: { content: [{ type: "text", text: output }] },
-                  error: null,
-                  durationMs: 1,
-                };
+              : kind === "userMessage"
+                ? {
+                    content: [
+                      { type: "text", text: output, text_elements: [] },
+                    ],
+                  }
+                : {
+                    server: "fixture",
+                    tool: "read",
+                    status: "completed",
+                    arguments: {},
+                    result: { content: [{ type: "text", text: output }] },
+                    error: null,
+                    durationMs: 1,
+                  };
         w.__boundedToolOutputs.push(
           kind === "streamingPreview"
             ? w.__createMemoryPreview(output)
@@ -414,6 +426,15 @@ for (const kind of [
               (typeof item.aggregatedOutput === "string"
                 ? item.aggregatedOutput.length
                 : 0)
+            );
+          if (kind === "userMessage")
+            return (
+              total +
+              item.content.reduce(
+                (length: number, input: any) =>
+                  length + (input.type === "text" ? input.text.length : 0),
+                0,
+              )
             );
           if (kind === "mcpToolCall")
             return (

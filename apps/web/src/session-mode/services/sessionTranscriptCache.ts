@@ -10,6 +10,11 @@ import { useSessionSyncStore } from "../stores/useSessionSyncStore";
 import { useAgentCenterStore } from "../stores/useAgentCenterStore";
 import { openedSessions } from "./openedSessions";
 import {
+  MEMORY_HISTORY_RESTART_CURSOR,
+  MEMORY_ITEM_CURSOR,
+  transcriptBudgetRecoveryCursor,
+} from "./sessionMemoryHistory";
+import {
   compactCodexTranscript,
   estimateTranscriptBytes,
 } from "./codexTranscriptMemoryBudget";
@@ -93,23 +98,18 @@ export async function readTranscriptCache(
       cached.savedAt > cacheInvalidatedAt(key) &&
       (Array.isArray(cached.events) || Array.isArray(cached.messages))
     ) {
-      if (cached.events)
-        return {
-          ...cached,
-          ...(cached.thread
-            ? {
-                thread: {
-                  ...cached.thread,
-                  turns: [],
-                  status: { type: "notLoaded" as const },
-                },
-              }
-            : {}),
-          events: withoutToolTranscriptEvents(cached.events).filter(
-            (event) => !isIgnoredTranscriptEvent(event),
-          ),
-        };
-      return cached;
+      // Old clients may have persisted records above today's budget. Bound the
+      // actual payload before publishing it to restoration baselines or stores;
+      // neither the on-disk byte counter nor a later governor is authoritative.
+      const limit = cacheRecordLimit();
+      const record = buildCacheRecord(cached, limit);
+      if (!record) return;
+      const serialized = JSON.stringify(record, (_key, value) =>
+        typeof value === "bigint" ? value.toString() : value,
+      );
+      record.bytes = textEncoder.encode(serialized).byteLength;
+      if (record.bytes > limit) return;
+      return record;
     }
   } catch {
     /* Cache failure never blocks a live conversation. */
@@ -205,16 +205,55 @@ function stripTurnItemBodies(events: ServerNotification[]) {
   );
 }
 
+/** A shortened cache must recover the gap before its retained window, not
+ * continue an opaque cursor belonging to the larger source window. The item
+ * anchor also covers a prefix trimmed from within a single native turn. */
+function cacheWindowRecoveryCursor(events: ServerNotification[] | undefined) {
+  if (!events?.length) return;
+  const firstItem = events.find(
+    (event) =>
+      (event.method === "item/started" || event.method === "item/completed") &&
+      !["userMessage", "collabAgentToolCall", "subAgentActivity"].includes(
+        event.params.item.type,
+      ),
+  );
+  if (
+    firstItem &&
+    (firstItem.method === "item/started" ||
+      firstItem.method === "item/completed")
+  )
+    return (
+      MEMORY_ITEM_CURSOR +
+      encodeURIComponent(
+        JSON.stringify({
+          turnId: firstItem.params.turnId,
+          beforeItemId: firstItem.params.item.id,
+        }),
+      )
+    );
+  const firstTurn = events
+    .map((event) =>
+      "turnId" in event.params
+        ? event.params.turnId
+        : "turn" in event.params
+          ? event.params.turn.id
+          : undefined,
+    )
+    .find((id): id is string => typeof id === "string");
+  return MEMORY_HISTORY_RESTART_CURSOR + encodeURIComponent(firstTurn ?? "");
+}
+
 function boundedEvents(
   events: ServerNotification[] | undefined,
   limit: number,
-): ServerNotification[] | undefined {
+): { events: ServerNotification[]; recoveryCursor?: string } | undefined {
   if (!events) return;
-  const window = stripTurnItemBodies(
+  const visible = stripTurnItemBodies(
     withoutToolTranscriptEvents(events).filter(
       (event) => !isIgnoredTranscriptEvent(event),
     ),
-  ).slice(-CACHE_RECORD_EVENT_LIMIT);
+  );
+  const window = visible.slice(-CACHE_RECORD_EVENT_LIMIT);
   const estimatedLimit = Math.max(
     0,
     Math.floor(limit * CACHE_RECORD_ESTIMATE_RATIO),
@@ -227,8 +266,16 @@ function boundedEvents(
     activeTurnId: null,
     toolTextLimit: CACHE_RECORD_TOOL_TEXT_LIMIT,
     maxActiveToolGroups: CACHE_RECORD_ACTIVE_TOOL_GROUPS,
-  }).events;
-  return compacted.length ? compacted : undefined;
+  });
+  if (!compacted.events.length) return;
+  return {
+    events: compacted.events,
+    recoveryCursor:
+      transcriptBudgetRecoveryCursor(compacted) ??
+      (window.length < visible.length
+        ? cacheWindowRecoveryCursor(compacted.events)
+        : undefined),
+  };
 }
 
 function boundedMessages(
@@ -260,12 +307,15 @@ function buildCacheRecord(source: TranscriptCache, limit: number) {
         }
       : {}),
   };
-  let events = boundedEvents(source.events, limit);
+  const bounded = boundedEvents(source.events, limit);
+  let events = bounded?.events;
+  let cursor = bounded?.recoveryCursor ?? source.cursor;
   let messages = boundedMessages(source.messages, limit);
   const candidate = (): TranscriptCache => ({
     ...base,
     ...(events?.length ? { events } : { events: undefined }),
     ...(messages?.length ? { messages } : { messages: undefined }),
+    ...(cursor === undefined ? {} : { cursor }),
   });
   let record = candidate();
   while (
@@ -274,6 +324,7 @@ function buildCacheRecord(source: TranscriptCache, limit: number) {
   ) {
     if ((events?.length ?? 0) >= (messages?.length ?? 0)) {
       events = events?.slice(Math.max(1, Math.floor(events.length / 4)));
+      cursor = cacheWindowRecoveryCursor(events) ?? cursor;
     } else {
       messages = messages?.slice(Math.max(1, Math.floor(messages.length / 4)));
     }

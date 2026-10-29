@@ -214,3 +214,17 @@ RSS 低点 469.8320→496.0898 MiB，增长 26.2578 MiB；heap 低点 55.2915→
 独立 chat reader 能重建正文，不代表它知道另一实例中活跃轮次的状态；不得用它推断的 interrupted 覆盖执行实例的 inProgress。网关通过有界只读活动快照仅修正精确匹配轮次的执行字段；前端状态冲突时只读取 `/api/session/codex/activity`，不恢复完整历史轮询或保留工具正文。此读取不得 resume/acquire 或重发排队消息，详细边界与回归见 [执行状态权威来源](session-execution-state.md)。
 
 涉及这条链路须验证 activity 网关、status/history sync、useTurnControl、chat-history selector/channel，以及真实 HTTP/EventSource、不可见正文回收、恢复和审批；不得放宽原限额。
+
+
+## 2026-10-29：首次显示恢复必须先执行预算
+
+8MiB默认值仍在；禁止把异步回收器当成历史或设备缓存的准入限制。`codexService.loadThreadHistory`首次store发布前执行同一显示预算；不可缩小的合法附件/元数据明确拒绝本次恢复，不能先渲染再等定时器。用户全部text输入共享有界头尾预览，UTF-8元素区间须保持正确，非文本附件保持合法。`earlierLoading`不得免除预算。
+
+旧IDB读入须重新应用原单条2MiB/总30MiB分摊限制，不相信bytes字段；baseline不能重新持有未裁正文。淘汰、600条前缀窗口和最终缩窗都必须更新item/turn恢复游标，防止旧opaque cursor跳过回收区间。修改须运行`codexService`、budget、governor、cache/HMR单测，以及`session-cold-memory-budget`和本文件原网络、空闲回收、恢复/提问浏览器组。复现数据、物理留存夹具就绪修正及未闭合的现场/长期RSS边界见[本轮记录](session-memory-admission.md)。
+
+
+## 2026-10-29：回收幂等与 store 热更新身份
+
+正文、事件顺序与引用均未变化时，compactor 必须返回原数组，governor 不得因新包装重复发布同内容；不可缩小的合法附件不能引发250ms自反馈循环。测试须覆盖真实压力分支中无输入的状态发布次数，不能靠放宽预算。
+
+Codex store 热更新须立即注册并复用同一个 store，更新 actions 而保留现有数据/订阅，不在模块作用域保存旧 state 快照；清空恢复缓存 Map 不能替代此保证。修改须运行 `useCodexStore.hmr.test.ts`、budget/governor 单测、`session-memory-feedback-loop.spec.ts` 与真实 Vite `session-store-hmr.spec.mts`，及原恢复/审批/空闲回收组。因果红绿、测量范围及原长期RSS未达标边界见[回收与HMR记录](session-memory-feedback-loop.md)。

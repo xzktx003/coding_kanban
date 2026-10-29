@@ -1,5 +1,6 @@
 import type { ServerNotification } from "@session/bindings";
 import type { ThreadItem } from "@session/bindings/v2/ThreadItem";
+import type { UserInput } from "@session/bindings/v2/UserInput";
 import { projectCodexChatValue } from "@agent-orchestrator/shared";
 import { withoutToolTranscriptEvent } from "./codexTranscriptVisibility";
 
@@ -10,6 +11,8 @@ const TRUNCATION_MARKER = "\n...[truncated ";
 const DISPLAY_PREVIEW_MARKER = "\n\n...[中间内容因会话内存限制已省略]...\n\n";
 const DEFAULT_TOOL_TEXT_LIMIT = 64 * 1024;
 const DEFAULT_STREAM_TEXT_LIMIT = 256 * 1024;
+export const CODEX_TRANSCRIPT_MAX_BYTES = 8 * 1024 * 1024;
+export const CODEX_TRANSCRIPT_MAX_EVENTS = 3000;
 export const STREAMING_TEXT_LIMIT = DEFAULT_STREAM_TEXT_LIMIT;
 export const STREAMING_TEXT_PREVIEW_MARKER = DISPLAY_PREVIEW_MARKER;
 export const STREAMING_TEXT_SEGMENT_CHARS = 8 * 1024;
@@ -211,6 +214,101 @@ const truncateDisplayText = (text: string, limit: number): string => {
   );
 };
 
+// User text has native UTF-8 element offsets. A display preview must not leave
+// elements pointing into the omitted middle, or reinterpret a byte as UTF-16.
+function utf8Length(text: string, end = text.length): number {
+  let bytes = 0;
+  for (let index = 0; index < end; index++) {
+    const code = text.charCodeAt(index);
+    if (code < 0x80) bytes++;
+    else if (code < 0x800) bytes += 2;
+    else if (
+      code >= 0xd800 &&
+      code <= 0xdbff &&
+      index + 1 < end &&
+      text.charCodeAt(index + 1) >= 0xdc00 &&
+      text.charCodeAt(index + 1) <= 0xdfff
+    ) {
+      bytes += 4;
+      index++;
+    } else bytes += 3;
+  }
+  return bytes;
+}
+
+function compactUserText(
+  input: Extract<UserInput, { type: "text" }>,
+  limit: number,
+) {
+  if (input.text.length <= limit) return input;
+  const available = Math.max(0, limit - DISPLAY_PREVIEW_MARKER.length);
+  let headEnd = Math.floor(available * 0.75);
+  let tailStart = input.text.length - (available - headEnd);
+  const splitsPair = (index: number) =>
+    index > 0 &&
+    index < input.text.length &&
+    input.text.charCodeAt(index - 1) >= 0xd800 &&
+    input.text.charCodeAt(index - 1) <= 0xdbff &&
+    input.text.charCodeAt(index) >= 0xdc00 &&
+    input.text.charCodeAt(index) <= 0xdfff;
+  if (splitsPair(headEnd)) headEnd--;
+  if (splitsPair(tailStart)) tailStart++;
+  if (limit <= DISPLAY_PREVIEW_MARKER.length)
+    return {
+      ...input,
+      text: copyTranscriptText(DISPLAY_PREVIEW_MARKER.slice(0, limit)),
+      text_elements: [],
+    };
+  const headBytes = utf8Length(input.text, headEnd);
+  const tailStartBytes = utf8Length(input.text, tailStart);
+  const totalBytes = tailStartBytes + utf8Length(input.text.slice(tailStart));
+  const shiftedTailStart = headBytes + utf8Length(DISPLAY_PREVIEW_MARKER);
+  const text_elements = (input.text_elements ?? []).flatMap((element) => {
+    const { start, end } = element.byteRange;
+    if (
+      !Number.isSafeInteger(start) ||
+      !Number.isSafeInteger(end) ||
+      start < 0 ||
+      end < start ||
+      end > totalBytes
+    )
+      return [];
+    if (end <= headBytes) return [element];
+    if (start < tailStartBytes) return [];
+    return [
+      {
+        ...element,
+        byteRange: {
+          start: shiftedTailStart + start - tailStartBytes,
+          end: shiftedTailStart + end - tailStartBytes,
+        },
+      },
+    ];
+  });
+  return {
+    ...input,
+    text: copyTranscriptText(
+      `${input.text.slice(0, headEnd)}${DISPLAY_PREVIEW_MARKER}${input.text.slice(tailStart)}`,
+    ),
+    text_elements,
+  };
+}
+
+function compactUserContent(content: UserInput[], limit: number): UserInput[] {
+  const texts = content.filter((input) => input.type === "text");
+  if (texts.reduce((sum, input) => sum + input.text.length, 0) <= limit)
+    return content;
+  let remaining = limit;
+  let count = texts.length;
+  return content.map((input) => {
+    if (input.type !== "text") return input;
+    const next = compactUserText(input, Math.floor(remaining / count));
+    remaining -= next.text.length;
+    count--;
+    return next;
+  });
+}
+
 type MutableRecord = Record<string, unknown>;
 type ItemGroup = {
   turnId: string;
@@ -277,16 +375,23 @@ const compactDiffChange = <T extends MutableRecord>(
 const compactItem = (
   item: ThreadItem,
   limit: number,
+  displayTextLimit = DEFAULT_STREAM_TEXT_LIMIT,
 ): [ThreadItem, boolean] => {
+  if (item?.type === "userMessage") {
+    const content = compactUserContent(item.content, displayTextLimit);
+    return content === item.content
+      ? [item, false]
+      : [{ ...item, content }, true];
+  }
   if (item?.type === "agentMessage" || item?.type === "plan") {
-    const text = truncateDisplayText(item.text, DEFAULT_STREAM_TEXT_LIMIT);
+    const text = truncateDisplayText(item.text, displayTextLimit);
     return text === item.text ? [item, false] : [{ ...item, text }, true];
   }
   if (item?.type === "reasoning") {
     let changed = false;
     const compactParts = (parts: string[]) =>
       parts.map((part) => {
-        const text = truncateDisplayText(part, DEFAULT_STREAM_TEXT_LIMIT);
+        const text = truncateDisplayText(part, displayTextLimit);
         changed ||= text !== part;
         return text;
       });
@@ -361,12 +466,17 @@ const compactItem = (
 const compactVisibleEvent = (
   event: ServerNotification,
   limit: number,
+  displayTextLimit = DEFAULT_STREAM_TEXT_LIMIT,
 ): [ServerNotification, boolean] => {
   if (
     (event.method === "item/started" || event.method === "item/completed") &&
     "item" in event.params
   ) {
-    const [item, changed] = compactItem(event.params.item, limit);
+    const [item, changed] = compactItem(
+      event.params.item,
+      limit,
+      displayTextLimit,
+    );
     return changed
       ? [
           { ...event, params: { ...event.params, item } } as ServerNotification,
@@ -374,10 +484,10 @@ const compactVisibleEvent = (
         ]
       : [event, false];
   }
-  if (event.method === "turn/completed") {
+  if (event.method === "turn/completed" || event.method === "turn/started") {
     let changed = false;
     const items = event.params.turn.items.map((item) => {
-      const [next, compacted] = compactItem(item, limit);
+      const [next, compacted] = compactItem(item, limit, displayTextLimit);
       changed ||= compacted;
       return next;
     });
@@ -414,10 +524,7 @@ const compactVisibleEvent = (
     event.method === "item/reasoning/summaryTextDelta" ||
     event.method === "item/reasoning/textDelta"
   ) {
-    const delta = truncateDisplayText(
-      event.params.delta,
-      DEFAULT_STREAM_TEXT_LIMIT,
-    );
+    const delta = truncateDisplayText(event.params.delta, displayTextLimit);
     return delta === event.params.delta
       ? [event, false]
       : [
@@ -446,6 +553,7 @@ const compactVisibleEvent = (
 const compactEvent = (
   event: ServerNotification,
   limit: number,
+  displayTextLimit = DEFAULT_STREAM_TEXT_LIMIT,
 ): [ServerNotification, boolean] => {
   const projected = withoutToolTranscriptEvent(event);
   if (projected === null) {
@@ -456,12 +564,20 @@ const compactEvent = (
       cursor.method === "item/completed" ||
       cursor.method === "turn/completed"
     ) {
-      const [next, changed] = compactVisibleEvent(cursor, limit);
+      const [next, changed] = compactVisibleEvent(
+        cursor,
+        limit,
+        displayTextLimit,
+      );
       return [next, changed || cursor !== event];
     }
     return [cursor, cursor !== event];
   }
-  const [next, changed] = compactVisibleEvent(projected, limit);
+  const [next, changed] = compactVisibleEvent(
+    projected,
+    limit,
+    displayTextLimit,
+  );
   return [next, changed || projected !== event];
 };
 
@@ -636,6 +752,7 @@ export function compactCodexTranscript(
 ): CodexTranscriptBudgetResult {
   const toolTextLimit = options.toolTextLimit ?? DEFAULT_TOOL_TEXT_LIMIT;
   let compactedPayloadCount = 0;
+  const compactedPayloads = new WeakSet<object>();
   let hiddenEventCount = 0;
   const visible = input.filter((event) => {
     const keep = !isHiddenTranscriptEvent(event);
@@ -644,7 +761,10 @@ export function compactCodexTranscript(
   });
   const compacted = visible.map((event) => {
     const [next, changed] = compactEvent(event, toolTextLimit);
-    if (changed) compactedPayloadCount += 1;
+    if (changed) {
+      compactedPayloadCount += 1;
+      compactedPayloads.add(next);
+    }
     return next;
   });
   const maxBytes = Math.max(0, options.maxBytes);
@@ -717,6 +837,36 @@ export function compactCodexTranscript(
   );
   events = sameTurn.events;
   bytes = estimateTranscriptBytes(events);
+  // Protected users, native identities and the current reading window must not
+  // become a bypass for display bodies. Reduce only their text previews; never
+  // remove approvals, item/turn identities or alter image/attachment references.
+  // Metadata alone can still exceed the budget. Callers must reject admission
+  // when estimatedBytes remains over maxBytes rather than publish then reclaim.
+  let displayTextLimit = DEFAULT_STREAM_TEXT_LIMIT;
+  while (bytes > maxBytes && displayTextLimit > 256) {
+    displayTextLimit = Math.max(256, Math.floor(displayTextLimit / 2));
+    events = events.map((event) => {
+      const [next, changed] = compactVisibleEvent(
+        event,
+        toolTextLimit,
+        displayTextLimit,
+      );
+      if (changed) {
+        if (!compactedPayloads.has(event)) compactedPayloadCount++;
+        compactedPayloads.add(next);
+      }
+      return next;
+    });
+    bytes = estimateTranscriptBytes(events);
+  }
+  // An unshrinkable protected payload may remain over budget. Returning only a
+  // fresh wrapper would falsely announce a body change and make the governor
+  // schedule itself forever, although every native event is still identical.
+  if (
+    events.length === input.length &&
+    events.every((event, index) => event === input[index])
+  )
+    events = input;
   return budgetResult(
     events,
     input.length,
