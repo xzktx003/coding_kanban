@@ -1,6 +1,6 @@
 # 多会话方案实施与严格验收
 
-日期：2026-10-29—30。[开发方案](../session-mode-multisession-development-plan-20261029.md)已批准并实施。最新源码的多窗口性能关卡通过。用户已明确决定“先提交已验证修复，内存问题单独跟踪”；M39三十分钟内存验收仍运行，不再阻塞本次提交，不代表内存关卡通过。当前正在整理本地提交，未推送。
+日期：2026-10-29—30。[开发方案](../session-mode-multisession-development-plan-20261029.md)已批准并实施。最新源码的多窗口性能关卡通过。用户已明确决定“先提交已验证修复，内存问题单独跟踪”；代码已先作为 `118748b8` 本地提交，未推送。随后独立M39三十分钟复验通过；该结果单独记录，保留全部旧红灯，不表述为长期问题根治。
 
 日常入口为 **HTTPS LAN `https://10.30.0.24:8484/?mode=session`**，后端为 **HTTP LAN `http://10.30.0.24:8282`**。隔离验收不向正式线程重复发送探测消息，也不停止、重启或升级共享官方 daemon。
 
@@ -23,7 +23,7 @@ Codex/Claude复用既有关注集合；ACP沿用精确native owner登记、只�
 
 ## 最新冻结源码
 
-最新验收源为 **HTTPS LAN `https://10.30.0.24:38519`**，记录 `.dev-runtime/root-native-memory-20261030/app-body-final-freeze/frontend.json`。2890份Web、89份shared、9个导出及12项配置均经root独立逐文件核对。HTTPS/H2、真实HMR保留，watcher关闭，无API代理或夹具注入。
+最新验收源为 **HTTPS LAN `https://10.30.0.24:38519`**，记录 `.dev-runtime/root-native-memory-20261030/app-body-final-freeze/frontend.json`。2890份Web、89份shared、9个导出及12项配置均经root独立逐文件核对。HTTPS/H2、真实HMR保留，watcher关闭，无API代理或夹具注入。 验收结束后，仅这批自有临时冻结监听已按创建记录核对PID身份后关闭；快照和原始证据保留，日常8484/8282服务及共享官方daemon继续运行。
 
 - Web manifest：`09dcff463bfcdc528dbcd3a85a2be3db584a1eb8aac7f6a490e831bdff711214`。
 - shared manifest：`2482eb777c1313b7d83beb1eec5e51a12f30e02520e01021368d09bdf82cd493`。
@@ -64,7 +64,7 @@ Codex/Claude复用既有关注集合；ACP沿用精确native owner登记、只�
 
 用户在本轮明确决定“先提交已验证修复，内存问题单独跟踪”。这只放行本次已验证修复的提交，保留原内存标准及全部红灯，未将M39改成通过。
 
-最新源码唯一一次原标准三十分钟M39已在23:01启动，输出 `.dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/`，当前仍运行，尚无验收结论。保持≥850周期、90–300秒/最后180秒窗口、heap64/256MiB、RSS128/768MiB门槛，自然GC、完整Network回调和4MiB/1MiB观察缓存预算；不修改源码、强制GC、刷新、清缓存或并行运行其它浏览器负载。
+最新源码唯一一次原标准三十分钟M39在代码提交后完成，通过1801.970秒/886周期。RSS低点增长24.296875MiB、峰值457.734375MiB；heap低点增长6.391022MiB、峰值154.785999MiB。最终UI/唯一输入目标、草稿、审批、最新回复、未读、HMR、音频自然空闲归零、前后源码及自有资源清理均到达通过，runner退出0。输出 `.dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/`，root独立逐样本复算另存 `root-independent-audit.json`。保持≥850周期、90–300秒/最后180秒窗口、heap64/256MiB、RSS128/768MiB门槛，自然GC、完整Network回调和4MiB/1MiB观察缓存预算；未修改源码、强制GC、刷新、清缓存或并行运行其它浏览器负载。完成标记前proxy错误零断言通过；Browser.close后的最终原始共享数组保留一条 `Error: aborted`，按驱动无中间await的控制流归为完成/清理阶段推断，不将最终数组写为零。
 
 38517/C1E4原标准885周期/1800.284秒的RSS低点增长134.910MiB，仍为RED；RSS断言阻断的内部末态UI/audio/source断言不计通过。38518的原M54单次90样本p95=2013.4ms RED也保留，未对同版重复挑绿。38518的M39仅准备过，因新App修复而superseded，不能算一次长测或失败。
 
@@ -74,4 +74,4 @@ Codex/Claude复用既有关注集合；ACP沿用精确native owner登记、只�
 
 共享官方daemon的实际版本为0.163.0；原PID/startTicks和binary身份已只读复核保持。CLI链接/配置所指其它版本不能代替实际运行身份。`daemonIdentity`为固定Unix端点文件身份摘要，不是SO_PEERCRED。自有运行层维护与现有服务兼容规则见[维护记录](runtime-replacement.md)。
 
-按用户最新决定，已验证修复统一作本地提交，M39独立跟踪，不等待其结算作为提交前提。提交前核对证据、忽略规则和索引内容；没有推送授权。私有部署配置、日志、证书、凭证和工作区无关的三个下载HTML不纳入提交；所有旧红灯及未覆盖边界保持可见。
+按用户最新决定，已验证修复统一作本地代码提交 `118748b8`，没有推送。该次提交未等待M39；其后独立结果及原问题边界由[内存跟踪](memory-followup.md)记录。一次通过只适用于所列负载与窗口，不保证任意时长/浏览器稳定。私有部署配置、日志、证书、凭证和工作区无关的三个下载HTML不纳入提交；所有旧红灯及未覆盖边界保持可见。

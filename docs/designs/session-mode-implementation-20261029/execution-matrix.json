@@ -462,7 +462,7 @@
       "kind": "history-page-equality-bug-fix-and-targeted-regression",
       "result": "Root found and fixed native-hook BigInt comparison failure in sessionHistoryPages; unchanged large replies are no longer copied twice, and sameJsonValue now checks sparse-array length. Persisted red/green sequence: 2 red, then 7 files/102 pass; helper sparse-array correction red then helper5/5 pass. Source SHA sessionHistoryPages.ts fe4ca9e8ea13876bd45abe2d20de6e45686f3137dfdd2e46f1c617806b8b72e3; session-list-stability.ts 787721ed9a462d616edbdbfd808430337b1c8da50e4e7fa523b27b973a1676c6. This functional bug fix is not evidence for the M39 RSS cause.",
       "record": ".dev-runtime/root-native-memory-20261030/history-compare-red.log; .dev-runtime/root-native-memory-20261030/history-compare-green.log; .dev-runtime/root-native-memory-20261030/history-comparator-sparse-red-correct-command.log; .dev-runtime/root-native-memory-20261030/history-comparator-sparse-green.log; source files apps/web/src/session-mode/services/sessionHistoryPages.ts and apps/web/src/lib/session-list-stability.ts.",
-      "boundary": "The fix is included in current 38517 freeze (Web manifest c1e4c965a8b536d5aea66cd3ce26c11d7e62bb61051e14d6b625448a8e0322b4, shared 2482eb777c1313b7d83beb1eec5e51a12f30e02520e01021368d09bdf82cd493, config 42347b92089e15f2e2ff514392fb2d7727cba5c4612607c8215687ec6680a8a0). It does not explain either historical M39 RSS RED. Current-source browser proofs are layer-qualified; private hook proof does not claim official daemon hook parity."
+      "boundary": "The fix was included in the then-current 38517 freeze (Web manifest c1e4c965a8b536d5aea66cd3ce26c11d7e62bb61051e14d6b625448a8e0322b4, shared 2482eb777c1313b7d83beb1eec5e51a12f30e02520e01021368d09bdf82cd493, config 42347b92089e15f2e2ff514392fb2d7727cba5c4612607c8215687ec6680a8a0). It does not explain either historical M39 RSS RED. Current-source browser proofs are layer-qualified; private hook proof does not claim official daemon hook parity."
     },
     "m08-38517-final-3x": {
       "kind": "historical-38517-m08-exact-three-sample-browser-pass",
@@ -504,7 +504,7 @@
       "kind": "current-source-strict-30m-rss-threshold-red",
       "result": "38517 original strict run completed at 2026-10-30T13:04Z after885 cycles/1800.284s. RSS low-rise141463552B =134.91015625MiB, exceeding134217728B (128MiB) by7245824B. Heap low-rise8253160B, heap peak231971968B, RSS peak589332480B. First/last windows103/89 samples. `errors=[]`, one proxy close/aborted error, all cleanup true. HMR observation: one stable connection,60 pings,all active during measurement,zero active after cleanup. RSS assertion preempted formal HMR,stream/network,taskWrites,final UI,audio and source-after assertions; do not count them as passed. Root-owned post-run source-hash audit has passed independently; it is not driver acceptance.",
       "record": ".dev-runtime/root-native-memory-20261030/history-compare-final-strict-thirty/native-http-memory/capped.json; .dev-runtime/root-native-memory-20261030/history-compare-final-strict-thirty/startup.json; source-before `.dev-runtime/root-native-memory-20261030/history-compare-final-strict-thirty/native-http-memory/sources-before.json`",
-      "boundary": "Current 38517 source attempt is RED. Independent post-run identity/hash audit passed but does not replace source-after assertion skipped by the driver and does not change formalAcceptance. HMR counters show a live stable connection but are not the skipped formal HMR assertion. No further same-version M39 run is planned. Preserve both earlier 38445 RSS REDs and 38444 source-specific pass.",
+      "boundary": "Historical 38517 source attempt is RED. Independent post-run identity/hash audit passed but does not replace source-after assertion skipped by the driver and does not change formalAcceptance. HMR counters show a live stable connection but are not the skipped formal HMR assertion. No further same-version M39 run is planned. Preserve both earlier 38445 RSS REDs and 38444 source-specific pass.",
       "completedAtUtc": "2026-10-30T13:04:00Z"
     },
     "m54-38517-native-http-90-running": {
@@ -594,7 +594,7 @@
         "shared": "2482eb777c1313b7d83beb1eec5e51a12f30e02520e01021368d09bdf82cd493",
         "configuration": "0ce68d193ced11878bf6968edf16a02cc0a2e93efe0f202421c7874b937a9cad"
       },
-      "boundary": "Source identity only; M39 is in progress, not complete."
+      "boundary": "Source identity only; M39 start and completed strict result are recorded separately in m39-38519-strict-run-started and m39-38519-strict-run-passed."
     },
     "m54-38519-native-http-90-passed": {
       "kind": "current-source-m54-native-http-90-passed",
@@ -622,10 +622,16 @@
       "boundary": "Single instrumented cold run changed served bytes for five modules. Timing is consistent with React Suspense fallback throttling but does not identify which descendant suspended or prove the exact scheduler lane. The M54 38519 pass does not prove 300ms behavior is fully removed or attribute a single-factor benefit."
     },
     "m39-38519-strict-run-started": {
-      "kind": "current-source-m39-run-started-no-result-yet",
+      "kind": "historical-source-m39-run-start-record",
       "result": "One original strict 30-minute run started2026-10-30T15:01:09.108Z on38519. Original strict helper `09089465a83b76b4b5cc2d5197a912cef490a3754dc480f295cce7bc1d0015db`, HMR proxy `84aeeb1e76b45228dd8ac63e94a36d9726dab2f9b7f02df9add0a1f2e3afda2a`; original 4MiB aggregate/1MiB per-resource network cache and unchanged thresholds. First cycle0 sample (RSS323014656/heap90020060) is progress only, not result.",
       "record": ".dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/run-start.json; .dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/startup.json; .dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/runner.log; .dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/native-http-memory/sources-before.json",
-      "boundary": "Run is active and no capped/final result exists yet. Keep prior38517 RED and thresholds unchanged."
+      "boundary": "This immutable start record is superseded by m39-38519-strict-run-passed. The exact38519 run completed successfully; prior38517 RED and original thresholds remain separately preserved."
+    },
+    "m39-38519-strict-run-passed": {
+      "kind": "current-source-original-strict-m39-pass",
+      "result": "38519 strict run completed=true/formalAcceptance=true; 886 cycles/1801.97s. Heap low-rise6701472B, heap peak162304884B; RSS low-rise25477120B=24.296875MiB, RSS peak479969280B; first/last103/90 samples. Original thresholds unchanged. `errors=[]`; taskWrites=[]; sequence28352 count/last, no gaps/duplicates; final UI/approval/draft/latest reply/unread correct; one AudioContext, zero active after27.937s; HMR connected with60 pings, zero closes in live phase; source-after hashes match; all owned cleanup true. Raw `proxyErrors` contains one Error:aborted appended during awaited Browser.close after completed=true; driver’s live-phase proxy assertion0 passed. Wrapper exit0, no timeout or owned leftovers.",
+      "record": ".dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/native-http-memory/capped.json; .dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/run-closure.json; .dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/run-start.json; .dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/runner.log; .dev-runtime/root-native-memory-20261030/app-body-final-freeze/frontend.json; .dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/root-independent-audit.json",
+      "boundary": "One complete30-minute pass on exact38519 source only. Not a24-hour stability guarantee or root-cause proof. Do not erase prior-source REDs. Raw teardown abort is retained; never describe final proxyErrors as0."
     }
   },
   "features": [
@@ -9618,7 +9624,7 @@
         "session-list-usability-38517"
       ],
       "baselineTestEntries": "`session-background-sync.spec.ts:433`、`session-reading-resize.spec.ts:22`；运行层专项测试",
-      "remaining": "Current 38517 history browser regression passed4/4 and private-hook UI proof1/1; current list desktop/phone proof1/1. Private hook uses a fixture (`official_daemon=false`) and proves current converter/merge/render only; it does not establish official native-hook parity. Earlier official0.163 10+1 native cursor integration is separately preserved on its prior source; no real account/external model claim."
+      "remaining": "At the 38517 checkpoint, the history browser regression passed4/4 and private-hook UI proof1/1; the list desktop/phone proof passed1/1. Private hook uses a fixture (`official_daemon=false`) and proves current converter/merge/render only; it does not establish official native-hook parity. Earlier official0.163 10+1 native cursor integration is separately preserved on its prior source; no real account/external model claim."
     },
     {
       "id": "M35",
@@ -9683,7 +9689,7 @@
       "disposition": "本期必测",
       "batch": "B/G/H",
       "acceptance": "按当前预热/回收/性能合同复验，保留传输/堆/RSS/正确正文证据",
-      "status": "pending-current-source-revalidation",
+      "status": "passed-applicable-scenario",
       "evidenceIds": [
         "performance-and-recovery",
         "strict-guarded-30m-red",
@@ -9697,10 +9703,11 @@
         "m39-38517-strict-run-started",
         "m39-38517-current-source-red",
         "m39-38518-not-started",
-        "m39-38519-strict-run-started"
+        "m39-38519-strict-run-started",
+        "m39-38519-strict-run-passed"
       ],
       "baselineTestEntries": "`session-idle-memory.spec.ts:341`、`session-network-memory.spec.mts`、`session-react-performance-memory.spec.mts`",
-      "remaining": "38519 strict M39 is currently running, started2026-10-30T15:01:09.108Z with original helper/proxy, thresholds, 4MiB/1MiB Network cache and natural GC unchanged. No terminal result yet. Initial cycle0 sample is not a conclusion. Previous38517 RED (885 cycles/1800.284s, RSS141,463,552B/134.91015625MiB>128MiB) and earlier38445 REDs/38444 pass remain source-qualified; do not combine or overwrite."
+      "remaining": "Exact38519 source original strict M39 PASS after886 cycles/1801.97s, formalAcceptance=true. Heap low-rise6,701,472B/peak162,304,884B; RSS low-rise25,477,120B=24.296875MiB/peak479,969,280B; first/last103/90 samples. Sequence28352 with no gaps/duplicates, taskWrites0, errors[], final owner/reply/draft/approval/unread, audio idle, HMR connected/60 pings, source-after match and cleanup passed. Raw proxyErrors preserves one `Error: aborted` added during awaited Browser.close after completed=true; the driver live-phase zero-proxy assertion passed. Root independent audit `.dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/root-independent-audit.json` completed and independently recalculated the metrics. It confirms the live proxy zero assertion and raw teardown-abort phase boundary; attributing the abort to cleanup is an inference from synchronous driver control flow because callback timing was not directly sampled. This is one specified30-minute pass, not a24h guarantee or root-cause proof. Prior38445/38517 REDs and38444 pass remain unchanged."
     },
     {
       "id": "M40",
@@ -9947,7 +9954,7 @@
     "meaning": "The feature-level finalIntegration value is a pointer to the portfolio acceptance state. It is not a claim that every feature branch, original UI state, native path or external service has been individually exercised. Keep each row status, evidence level, named verification branches and remaining coverage boundary unchanged."
   },
   "portfolioAcceptance": {
-    "state": "accepted-with-known-issue",
+    "state": "accepted-with-evidence-boundaries",
     "scopeSha256": "db8c95e76320f1ce9f2e02b57ad2b4d044ba249aeae9bac9b3f113aaf7ba34e9",
     "source": {
       "finalFunctionalOrigin": "https://10.30.0.24:38519",
@@ -9992,9 +9999,9 @@
         "origin": "https://10.30.0.24:38518",
         "webManifestSha256": "91d159010e4cc1c1717757993ccd14659dfe2618f2ce2b9c3cbc445dfd6c442a",
         "sharedManifestSha256": "2482eb777c1313b7d83beb1eec5e51a12f30e02520e01021368d09bdf82cd493",
-        "configurationManifestSha256": "f174ac02109680cef5c4a6032864d7864ff6bb96e5e5c5a4d4a1f",
+        "configurationManifestSha256": "f174ac02109680cef5c4a6032864d7864ff6bb96e5d94da8e837a4d8469ae39d",
         "freezeRecord": ".dev-runtime/root-native-memory-20261030/allocation-final-freeze/frontend.json",
-        "note": "M54 RED preserved, M08/idle/HMR short runs passed on this prior source; not silently transferred to38519."
+        "note": "38518 App allocation freeze; its M54 RED remains source-qualified historical evidence."
       }
     },
     "evidenceLevels": {
@@ -10006,8 +10013,8 @@
     "scenarioLedger": {
       "scenarioCount": 55,
       "dynamicSubset": 47,
-      "passedApplicableScenario": 7,
-      "pendingCurrentSourceRevalidation": 1,
+      "passedApplicableScenario": 8,
+      "pendingCurrentSourceRevalidation": 0,
       "authoritativeMatrix": "scenarios",
       "failedCurrentSourceRed": 0,
       "priorFailedAttempts": 3,
@@ -10042,7 +10049,7 @@
         "summary": "38519 check exit0; production build46.22s."
       },
       "M39": {
-        "state": "running-current-source-validation",
+        "state": "passed-applicable-scenario",
         "priorCompletedAttempts": [
           {
             "state": "red",
@@ -10078,7 +10085,7 @@
           }
         ],
         "allocationDiagnosticPriorFreezeEvidenceId": "m39-allocation-attribution-22m-diagnostic",
-        "note": "38519 strict M39 is running; no terminal result exists. Prior38445/38517 REDs remain source-qualified historical evidence and are not a 38519 result.",
+        "note": "38519 original strict M39 passed after the user-authorized code commit. The commit decision occurred while this run was still in progress. This single 30-minute pass does not prove 24-hour stability or a unique memory cause; keep long-term observation separate.",
         "postRunHashAudit": {
           "source": "38517 previous source",
           "historical": true,
@@ -10086,48 +10093,213 @@
           "record": ".dev-runtime/root-native-memory-20261030/history-compare-final-strict-thirty/postrun-source-audit.json",
           "boundary": "Prior-source independent hash audit only; it does not cover current38519 or replace the driver source-after assertion."
         },
-        "completedCurrentAttempt": null,
-        "nextDiagnostic": {
-          "state": "running",
-          "name": "M39 strict 30-minute on38519",
-          "startedAtUtc": "2026-10-30T15:01:09.108Z",
-          "gateEffect": "required acceptance; wait for terminal output",
-          "thresholdsUnchanged": true
-        },
-        "currentAttempt": {
-          "state": "running",
+        "completedCurrentAttempt": {
+          "state": "passed",
           "source": "38519",
           "sourceManifestSha256": "09dcff463bfcdc528dbcd3a85a2be3db584a1eb8aac7f6a490e831bdff711214",
           "startedAtUtc": "2026-10-30T15:01:09.108Z",
-          "evidenceId": "m39-38519-strict-run-started",
+          "completedAtUtc": "2026-10-30T15:31:49.083Z",
+          "evidenceId": "m39-38519-strict-run-passed",
+          "cycles": 886,
+          "durationSeconds": 1801.97,
+          "formalAcceptance": true,
           "thresholds": {
             "heapLowRiseBytes": 67108864,
             "heapPeakBytes": 268435456,
             "rssLowRiseBytes": 134217728,
             "rssPeakBytes": 805306368
           },
-          "helperShas": {
-            "command": [
-              "pnpm",
-              "exec",
-              "playwright",
-              "test",
-              "--config=playwright.config.ts",
-              "tests/e2e/session-native-http-memory.spec.mts",
-              "--output=/data01/home/huxing/vibe_codings/coding_kanban/.dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/pw-output"
+          "measured": {
+            "heapLowRiseBytes": 6701472,
+            "heapPeakBytes": 162304884,
+            "rssLowRiseBytes": 25477120,
+            "rssLowRiseMiB": 24.296875,
+            "rssPeakBytes": 479969280,
+            "firstWindowSamples": 103,
+            "lastWindowSamples": 90
+          },
+          "quality": {
+            "errors": [],
+            "proxyErrors": [
+              "Error: aborted"
             ],
-            "helper": "09089465a83b76b4b5cc2d5197a912cef490a3754dc480f295cce7bc1d0015db",
-            "hmrProxy": "84aeeb1e76b45228dd8ac63e94a36d9726dab2f9b7f02df9add0a1f2e3afda2a",
-            "spec": "0a330fced96cd5c523a3610270ca6edf2f191f7398d0a0e5d48248c0d7ab6cba"
+            "proxyAssertionAtLivePhase": "0 before browser close; the raw shared array gained one close/aborted during awaited Browser.close after completed=true. Preserve final raw proxyErrors=[Error: aborted].",
+            "taskWrites": [],
+            "streamSequence": {
+              "last": 28352,
+              "count": 28352,
+              "gaps": 0,
+              "duplicates": 0,
+              "jsonBytes": 179485698
+            },
+            "finalUi": {
+              "key": "ux-1",
+              "selected": "true",
+              "latestReplyPresent": true,
+              "latestReplyIntersectsViewport": true,
+              "composerOwner": "ux-1",
+              "visibleComposerOwners": [
+                "ux-1"
+              ],
+              "editableComposers": 1,
+              "draft": "keep my unsent draft",
+              "approval": true,
+              "latestCompletion": true,
+              "appSequence": {
+                "last": 28352,
+                "count": 28352,
+                "gaps": 0,
+                "duplicates": 0,
+                "unexpected": 0
+              }
+            },
+            "audioIdle": {
+              "seconds": 27.937,
+              "created": 1,
+              "active": 0,
+              "peakActive": 1
+            },
+            "actualHmr": {
+              "attempts": 1,
+              "connected": 1,
+              "closed": 0,
+              "frames": {
+                "connected": 1,
+                "ping": 60,
+                "pong": 0,
+                "update": 0,
+                "custom": 0,
+                "error": 0,
+                "other": 0
+              },
+              "active": 1,
+              "upstreamActive": 1,
+              "rawActive": 1
+            },
+            "sourceAfterMatchesBefore": true,
+            "cleanup": {
+              "capturedRendererCount": 1,
+              "remainingOwnedRenderers": [],
+              "ownedBrowserExited": true,
+              "ownedProfileRemoved": true,
+              "ownedHttpClosed": true,
+              "ownedSseClosed": true
+            },
+            "runnerExitCode": 0,
+            "runnerTimedOut": false
           },
-          "workload": "original loop >=850 cycles, 30 minutes, original 90-300s/last-180s windows, natural GC, Network all callbacks with fixed 4MiB total/1MiB per-resource cache, unchanged audio/UI/task-write/hash assertions",
-          "firstSampleNonresult": {
-            "cycle": 0,
-            "rssBytes": 323014656,
-            "heapBytes": 90020060,
-            "note": "Initial sample only, not an acceptance conclusion."
+          "boundary": "Pass applies to this exact38519 source and this 30-minute workload. The raw final proxyErrors array contains one owned upstream close abort emitted during awaited browser cleanup after completed=true; live assertion was zero and the test formalAcceptance flag is true. Do not report final raw proxyErrors as zero. No code/test/browser rerun."
+        },
+        "nextDiagnostic": {
+          "state": "nonblocking-long-term-followup",
+          "name": "Long-term session-memory stability observation",
+          "gateEffect": "none for this completed strict M39 acceptance",
+          "boundary": "30-minute pass does not establish24-hour behavior or root-cause closure."
+        },
+        "currentAttempt": {
+          "state": "passed",
+          "source": "38519",
+          "sourceManifestSha256": "09dcff463bfcdc528dbcd3a85a2be3db584a1eb8aac7f6a490e831bdff711214",
+          "startedAtUtc": "2026-10-30T15:01:09.108Z",
+          "completedAtUtc": "2026-10-30T15:31:49.083Z",
+          "evidenceId": "m39-38519-strict-run-passed",
+          "cycles": 886,
+          "durationSeconds": 1801.97,
+          "formalAcceptance": true,
+          "thresholds": {
+            "heapLowRiseBytes": 67108864,
+            "heapPeakBytes": 268435456,
+            "rssLowRiseBytes": 134217728,
+            "rssPeakBytes": 805306368
           },
-          "note": "Active strict run; no capped/final result. Cycle0 first sample is progress only."
+          "measured": {
+            "heapLowRiseBytes": 6701472,
+            "heapPeakBytes": 162304884,
+            "rssLowRiseBytes": 25477120,
+            "rssLowRiseMiB": 24.296875,
+            "rssPeakBytes": 479969280,
+            "firstWindowSamples": 103,
+            "lastWindowSamples": 90
+          },
+          "quality": {
+            "errors": [],
+            "proxyErrors": [
+              "Error: aborted"
+            ],
+            "proxyAssertionAtLivePhase": "0 before browser close; the raw shared array gained one close/aborted during awaited Browser.close after completed=true. Preserve final raw proxyErrors=[Error: aborted].",
+            "taskWrites": [],
+            "streamSequence": {
+              "last": 28352,
+              "count": 28352,
+              "gaps": 0,
+              "duplicates": 0,
+              "jsonBytes": 179485698
+            },
+            "finalUi": {
+              "key": "ux-1",
+              "selected": "true",
+              "latestReplyPresent": true,
+              "latestReplyIntersectsViewport": true,
+              "composerOwner": "ux-1",
+              "visibleComposerOwners": [
+                "ux-1"
+              ],
+              "editableComposers": 1,
+              "draft": "keep my unsent draft",
+              "approval": true,
+              "latestCompletion": true,
+              "appSequence": {
+                "last": 28352,
+                "count": 28352,
+                "gaps": 0,
+                "duplicates": 0,
+                "unexpected": 0
+              }
+            },
+            "audioIdle": {
+              "seconds": 27.937,
+              "created": 1,
+              "active": 0,
+              "peakActive": 1
+            },
+            "actualHmr": {
+              "attempts": 1,
+              "connected": 1,
+              "closed": 0,
+              "frames": {
+                "connected": 1,
+                "ping": 60,
+                "pong": 0,
+                "update": 0,
+                "custom": 0,
+                "error": 0,
+                "other": 0
+              },
+              "active": 1,
+              "upstreamActive": 1,
+              "rawActive": 1
+            },
+            "sourceAfterMatchesBefore": true,
+            "cleanup": {
+              "capturedRendererCount": 1,
+              "remainingOwnedRenderers": [],
+              "ownedBrowserExited": true,
+              "ownedProfileRemoved": true,
+              "ownedHttpClosed": true,
+              "ownedSseClosed": true
+            },
+            "runnerExitCode": 0,
+            "runnerTimedOut": false,
+            "proxyPhaseClarification": "Driver asserted proxyErrors.length===0 before Browser.close and passed. `completed=true` was set before awaited Browser.close; that teardown appended one Error:aborted into the same raw array. Preserve the final raw proxyErrors entry; do not state final proxyErrors=0.",
+            "independentAudit": "Root independent audit `.dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/root-independent-audit.json` independently recalculated the same thresholds and formalAcceptance=true. It confirms the live proxy zero assertion passed and one Error:aborted was appended after completed=true during Browser.close; the initial blanket final-array-empty precheck was rejected without changing source or result.",
+            "independentAuditRecord": ".dev-runtime/root-native-memory-20261030/app-body-final-strict-thirty/root-independent-audit.json"
+          },
+          "boundary": "Pass applies to this exact38519 source and this 30-minute workload. The raw final proxyErrors array contains one owned upstream close abort emitted during awaited browser cleanup after completed=true; live assertion was zero and the test formalAcceptance flag is true. Do not report final raw proxyErrors as zero. No code/test/browser rerun."
+        },
+        "boundary": "PASS applies to this exact38519 source and one specified30-minute natural-GC workload. It is not a24-hour stability guarantee or unique-cause proof. Final raw proxyErrors retains one teardown abort after formal completion; the live-phase proxy assertion passed. Independent audit confirmed this phase boundary.",
+        "longTermFollowup": {
+          "state": "nonblocking-followup",
+          "summary": "Continue longer-term memory observation independently; this single30-minute pass is not a24-hour guarantee and does not identify a unique RSS cause."
         }
       },
       "finalWeb": {
@@ -10190,50 +10362,49 @@
       "Formal LAN v7 raw report remains passed=false; separate adjudication qualifies completed/read-only flow only.",
       "Real OAuth, external online services, original-component reference comparisons and physical-device behavior remain unverified unless separately evidenced.",
       "12 approved exclusions remain excluded.",
-      "Current freeze is 38517. M08/M34 browser layers and M54 nativeHTTP90 applicable case passed. M34 private hook proof is fixture-only, official_daemon=false, and not native-hook parity.",
-      "Current 38517 M39 strict run is RSS RED: 885 cycles/1800.284s; RSS low-rise141463552B (134.91015625MiB)>128MiB. Formal HMR/network/taskWrites/final UI/audio/source-after assertions were preempted; cleanup passed. Independent hash audit passed but is not the driver source-after assertion. No same-version rerun is planned.",
-      "Two 38445 M39 RSS RED attempts, 38444 strict pass, 38445 M54 p95 and 38445 warm-pressure are historical/source-specific.",
-      "Current 38517 warm-pressure supplementary three-case run passed; its prior zero-sample TLS setup failure is retained separately. The 10-minute Network Inspector attribution is diagnostic-only and cannot close M39."
+      "Current functional freeze is 38519. M08/M34 browser and native/UI layers, M39 strict 30-minute run, M54 nativeHTTP90 and supplementary warm-pressure have their own layer-qualified evidence. M34 private-hook proof is fixture-only, official_daemon=false, and not native-hook parity.",
+      "38517 M39 strict attempt is historical RSS RED: 885 cycles/1800.284s; RSS low-rise141463552B (134.91015625MiB)>128MiB. The RSS assertion preempted formal HMR/network/taskWrites/final UI/audio/source-after assertions; cleanup passed. Independent hash audit passed but is not the skipped driver source-after assertion.",
+      "Two 38445 M39 RSS RED attempts and 38444 strict pass remain historical/source-specific. The 38518 M54 RED and its prior-source M08 evidence remain unchanged.",
+      "38519 strict M39 passed its original 30-minute thresholds. The raw final proxyErrors array retains one teardown abort appended after completed=true during awaited Browser.close; the live-phase proxy assertion passed. The root audit confirms the phase boundary; callback timing itself was not sampled. This is not a24-hour guarantee or unique-cause proof."
     ],
-    "requiredGateResults": [
-      {
-        "id": "M39-current-38519-strict-30m",
-        "state": "running",
-        "evidenceId": "m39-38519-strict-run-started",
-        "startedAtUtc": "2026-10-30T15:01:09.108Z",
-        "summary": "Original strict M39 is running on exact38519 source with unchanged helper/proxy, thresholds, 4MiB/1MiB body cache and natural GC. No terminal result; first cycle0 sample is progress only. Prior-source REDs remain immutable.",
-        "closeWhen": "Wait for this run to finish and record raw thresholds, final UI/audio/network/source assertions and cleanup. Do not infer from first sample.",
-        "blocksThisUserAuthorizedCommit": false,
-        "releaseDisposition": "User explicitly authorized committing verified fixes while memory issue is tracked separately; this run remains required for memory acceptance."
-      }
-    ],
-    "scopeExplanation": "M08, M34 and M54 current applicable scenarios pass on 38517 with layer-qualified evidence. M39 current 38517 strict run is RSS RED. Earlier 38445 M39 REDs, M54 performance and warm-pressure remain historical/source-specific.",
+    "requiredGateResults": [],
+    "scopeExplanation": "Current accepted source is 38519: M08/M34/M39/M54 applicable scenario evidence is layer-qualified and passed; warm-pressure also passed. All required portfolio gates are closed. Prior-source REDs and passes remain immutable/source-specific. Feature evidence layers do not imply every branch was tested natively.",
     "optionalGateResults": [
       {
         "id": "warm-pressure-current-38517",
         "state": "passed-supplementary-not-required",
         "evidenceId": "warm-pressure-history-current-38517-passed",
         "setupFailureEvidenceId": "warm-pressure-history-setup-red-zero-samples",
-        "summary": "Current 38517 three-case warm/pressure pass; first zero-sample TLS setup failure retained. Supplementary, not M39/M54 substitute."
+        "summary": "38517-source three-case warm/pressure pass; first zero-sample TLS setup failure retained. Supplementary, not M39/M54 substitute."
       },
       {
         "id": "M39-network-inspector-allocation-attribution-10m",
-        "state": "preparing-diagnostic-not-acceptance",
-        "summary": "Separate ten-minute Network Inspector allocation attribution is being prepared. It cannot close or alter the M39 RSS RED."
+        "state": "completed-diagnostic-not-acceptance",
+        "summary": "A separate 22-minute same-source allocation diagnostic completed (648 cycles/1320.816s, formalAcceptance=false). Blink heap committed rose24.8MiB while allocated objects fell6.8MiB; NetworkResourcesData rose2MiB. No stack/root cause was proven. See `.dev-runtime/root-native-memory-20261030/memory-allocation-diagnostic/analysis/strict-22m-early-late-comparison.md` and `runs/strict-22m/native-http-memory/capped.json`. It does not alter M39 acceptance."
       }
     ],
     "releaseDisposition": {
-      "state": "accepted-with-known-issue",
+      "state": "verified-fixes-committed-before-independent-memory-pass",
       "userDecision": "先提交已验证修复，内存问题单独跟踪",
       "decisionDate": "2026-10-30",
-      "releaseScope": "允许提交已验证修复；只以已记录的check、targeted tests、source audit和适用场景证据证明各自范围。",
-      "deferredIssue": {
-        "id": "M39-current-38519-strict-30m",
-        "tracking": "独立内存问题跟踪，strict M39仍在原门槛下运行",
-        "blocksThisAuthorizedCommit": false,
-        "doesNotMean": "M39通过、内存问题解决、全量验收全绿或所有native分支通过。"
+      "codeCommit": "118748b849abbb741804242adc2ffce7ac5ff180",
+      "commitScope": "917 files; local commit only, no push.",
+      "memoryAtCommit": "M39 was running and separately tracked when the user authorized the verified-fixes commit.",
+      "postCommitMemoryAcceptance": {
+        "state": "passed-applicable-scenario",
+        "evidenceId": "m39-38519-strict-run-passed",
+        "completedAtUtc": "2026-10-30T15:31:49.083Z"
       },
-      "preserveEvidence": "M39运行状态、所有prior RED/PASS和历史源码身份保持不变。"
-    }
+      "interpretation": "The subsequent M39 pass does not retroactively mean it had passed at commit time. Current portfolio is accepted with evidence boundaries; not all feature branches/native states are claimed."
+    },
+    "completedRequiredGateResults": [
+      {
+        "id": "M39-current-38519-strict-30m",
+        "state": "passed-applicable-scenario",
+        "evidenceId": "m39-38519-strict-run-passed",
+        "completedAtUtc": "2026-10-30T15:31:49.083Z",
+        "summary": "Original thresholds passed on exact38519 source:886 cycles/1801.97s, formalAcceptance=true. Root independent audit confirmed metrics and phase boundary. Raw final proxyErrors includes one upstream abort appended during awaited Browser.close after completed=true; live-phase proxy assertion0 passed."
+      }
+    ]
   }
 }
